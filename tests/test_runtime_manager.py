@@ -522,6 +522,64 @@ def test_run_forever_refreshes_manager_started_at(monkeypatch):
     assert saved_states[0]["runtimeManager"]["sourceSignature"] == "sig-current"
 
 
+def test_run_forever_recovers_processing_queue_after_startup_reconcile(monkeypatch):
+    class StopLoop(Exception):
+        pass
+
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    state_store = {
+        "runtimeState": "stopping",
+        "managerPid": 7711,
+        "daemonRunning": True,
+        "startedAt": "2026-06-04T09:03:15+00:00",
+        "command": {
+            "activeCommandId": "cmd-old-close",
+            "activeType": "close_workbench",
+            "requestedBy": "web_ui",
+            "stopManager": True,
+        },
+        "workbench": {
+            "desiredState": "closed",
+            "observedState": "open",
+            "phase": "closing",
+        },
+    }
+    recovered_states: list[dict] = []
+
+    monkeypatch.setattr(daemon, "ensure_runtime_manager_dirs", lambda: None)
+    monkeypatch.setattr(daemon, "save_pid", lambda pid: None)
+    monkeypatch.setattr(daemon, "load_state", lambda: json.loads(json.dumps(state_store)))
+    monkeypatch.setattr(daemon, "now_iso", lambda: "2026-06-04T09:20:24+00:00")
+    monkeypatch.setattr(daemon, "observe_workbench", lambda: {"observedState": "closed"})
+    monkeypatch.setattr(daemon, "build_evolution_summary", lambda: {"self": {}, "supervised": {}})
+    monkeypatch.setattr(daemon, "_process_source_signature", lambda: "sig-current")
+
+    def fake_save_state(state):
+        state_store.clear()
+        state_store.update(json.loads(json.dumps(state)))
+        return state
+
+    def fake_recover_processing_queue():
+        recovered_states.append(json.loads(json.dumps(state_store)))
+
+    monkeypatch.setattr(daemon, "save_state", fake_save_state)
+    monkeypatch.setattr(daemon, "recover_processing_queue", fake_recover_processing_queue)
+    monkeypatch.setattr(daemon, "claim_next_command", lambda: (_ for _ in ()).throw(StopLoop()))
+    monkeypatch.setattr(daemon, "clear_pid", lambda pid: None)
+
+    with pytest.raises(StopLoop):
+        runtime_daemon.run_forever()
+
+    assert recovered_states
+    recovered = recovered_states[0]
+    assert recovered["runtimeState"] == "running"
+    assert recovered["managerPid"] == runtime_daemon._pid
+    assert recovered["daemonRunning"] is True
+    assert recovered["workbench"]["desiredState"] == "closed"
+    assert recovered["workbench"]["observedState"] == "closed"
+    assert recovered["workbench"]["phase"] == "closing"
+
+
 def test_daemon_unexpected_exit_marks_manager_not_running(monkeypatch):
     saved_states: list[dict] = []
 
@@ -1445,6 +1503,102 @@ def test_submit_command_does_not_join_headless_open_when_browser_is_requested(tm
     queued = sorted(path.name for path in inbox_dir.glob("*.json"))
     assert command["commandId"] != "cmd-headless-open"
     assert queued == ["cmd-headless-open.json", f"{command['commandId']}.json"]
+
+
+def test_close_workbench_supersedes_pending_open_workbench(tmp_path, monkeypatch):
+    inbox_dir = tmp_path / "inbox"
+    processing_dir = tmp_path / "processing"
+    results_dir = tmp_path / "results"
+    events_path = tmp_path / "events.jsonl"
+    for path in (inbox_dir, processing_dir, results_dir):
+        path.mkdir(parents=True)
+    (inbox_dir / "cmd-pending-open.json").write_text(
+        json.dumps(
+            {
+                "commandId": "cmd-pending-open",
+                "type": "open_workbench",
+                "requestedBy": "launcher_ps",
+                "args": {"reason": "launcher_start"},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(command_queue, "INBOX_DIR", inbox_dir)
+    monkeypatch.setattr(command_queue, "PROCESSING_DIR", processing_dir)
+    monkeypatch.setattr(command_queue, "RESULTS_DIR", results_dir)
+    monkeypatch.setattr(command_queue, "EVENTS_PATH", events_path)
+    monkeypatch.setattr(command_queue, "ensure_runtime_manager_dirs", lambda: None)
+    monkeypatch.setattr(command_queue, "load_pid", lambda: 0)
+    monkeypatch.setattr(command_queue, "_process_is_alive", lambda pid: False)
+    monkeypatch.setattr(command_queue, "load_state", lambda: {"stateVersion": 61})
+
+    close_command = command_queue.submit_command(
+        "close_workbench",
+        args={"reason": "web_close_button", "stopManager": True},
+        requested_by="web_ui",
+    )
+
+    assert sorted(path.name for path in inbox_dir.glob("*.json")) == [f"{close_command['commandId']}.json"]
+    superseded_result = json.loads((results_dir / "cmd-pending-open.json").read_text(encoding="utf-8"))
+    assert superseded_result["ok"] is False
+    assert superseded_result["completed"] is True
+    assert superseded_result["errorType"] == "SupersededByCloseWorkbench"
+    assert superseded_result["supersededByCommandId"] == close_command["commandId"]
+    assert superseded_result["stateVersion"] == 61
+    events = [json.loads(line) for line in events_path.read_text(encoding="utf-8").splitlines()]
+    supersede_event = next(event for event in events if event["type"] == "command_queue.pending_open_superseded_by_close")
+    queued_event = next(event for event in events if event["type"] == "command_queue.command_queued")
+    assert supersede_event["payload"]["commandId"] == close_command["commandId"]
+    assert supersede_event["payload"]["commands"] == [
+        {"commandId": "cmd-pending-open", "type": "open_workbench", "status": "superseded"}
+    ]
+    assert queued_event["payload"]["supersededPendingCommands"] == supersede_event["payload"]["commands"]
+
+
+def test_close_workbench_supersedes_pending_restart_workbench(tmp_path, monkeypatch):
+    inbox_dir = tmp_path / "inbox"
+    processing_dir = tmp_path / "processing"
+    results_dir = tmp_path / "results"
+    events_path = tmp_path / "events.jsonl"
+    for path in (inbox_dir, processing_dir, results_dir):
+        path.mkdir(parents=True)
+    (inbox_dir / "cmd-pending-restart.json").write_text(
+        json.dumps(
+            {
+                "commandId": "cmd-pending-restart",
+                "type": "restart_workbench",
+                "requestedBy": "web_ui",
+                "args": {"reason": "launcher_restart"},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(command_queue, "INBOX_DIR", inbox_dir)
+    monkeypatch.setattr(command_queue, "PROCESSING_DIR", processing_dir)
+    monkeypatch.setattr(command_queue, "RESULTS_DIR", results_dir)
+    monkeypatch.setattr(command_queue, "EVENTS_PATH", events_path)
+    monkeypatch.setattr(command_queue, "ensure_runtime_manager_dirs", lambda: None)
+    monkeypatch.setattr(command_queue, "load_pid", lambda: 0)
+    monkeypatch.setattr(command_queue, "_process_is_alive", lambda pid: False)
+    monkeypatch.setattr(command_queue, "load_state", lambda: {"stateVersion": 62})
+
+    close_command = command_queue.submit_command(
+        "close_workbench",
+        args={"reason": "web_close_button", "stopManager": True},
+        requested_by="web_ui",
+    )
+
+    assert sorted(path.name for path in inbox_dir.glob("*.json")) == [f"{close_command['commandId']}.json"]
+    superseded_result = json.loads((results_dir / "cmd-pending-restart.json").read_text(encoding="utf-8"))
+    assert superseded_result["ok"] is False
+    assert superseded_result["completed"] is True
+    assert superseded_result["errorType"] == "SupersededByCloseWorkbench"
+    assert superseded_result["supersededByCommandId"] == close_command["commandId"]
+    assert superseded_result["stateVersion"] == 62
+    event_types = [json.loads(line)["type"] for line in events_path.read_text(encoding="utf-8").splitlines()]
+    assert "command_queue.pending_open_superseded_by_close" in event_types
 
 
 def test_reject_pending_commands_for_shutdown_removes_stale_open_from_inbox(tmp_path, monkeypatch):

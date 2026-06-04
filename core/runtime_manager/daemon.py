@@ -1034,7 +1034,6 @@ class RuntimeManagerDaemon:
 
     def run_forever(self) -> None:
         ensure_runtime_manager_dirs()
-        recover_processing_queue()
         save_pid(self._pid)
 
         state = load_state()
@@ -1047,6 +1046,7 @@ class RuntimeManagerDaemon:
         state["startedAt"] = now_iso()
         state = self._reconcile_observation(state)
         save_state(state)
+        recover_processing_queue()
 
         try:
             while True:
