@@ -392,6 +392,7 @@ class PromptManager:
                 "name": result.name,
                 "length": len(result.content or ""),
                 "cache_break": result.cache_break,
+                "cache_prefix": result.cache_prefix,
                 "required": result.required,
                 "is_empty": result.is_empty,
             }
@@ -751,6 +752,7 @@ class PromptManager:
         omitted_names = [section.name for section in all_sections if section.name not in selected_names]
         omitted_heavy = [name for name in omitted_names if name in self._HEAVY_SECTIONS]
         dynamic_names = [result.name for result in build_result.section_results if result.cache_break and not result.is_empty]
+        cache_prefix_names = [result.name for result in build_result.section_results if result.cache_prefix and not result.is_empty]
         inclusion_reasons = {
             name: reason
             for name in rendered_names
@@ -765,6 +767,7 @@ class PromptManager:
             "omitted_sections": omitted_names,
             "omitted_heavy_sections": omitted_heavy,
             "dynamic_sections": dynamic_names,
+            "cache_prefix_sections": cache_prefix_names,
             "optional_inclusion_reasons": inclusion_reasons,
             "content_length": len(to_string(build_result.prompt)),
         }
