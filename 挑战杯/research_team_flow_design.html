@@ -360,7 +360,7 @@
                 </div>
 <div class="service-row">
                   <b>team_workflows API</b>
-                  <span>已落地：/api/teams/{team_id}/workflow-orchestration、candidates/source、candidates、candidates/validation、candidate-graph、transfers、decide。</span>
+                  <span>已落地：/api/teams/{team_id}/workflow-orchestration、candidates/source、candidates/{candidate_id}/source-extraction、candidates、candidates/validation、candidate-graph、transfers、decide。</span>
                 </div>
 <div class="service-row">
                   <b>local_research_worker_model</b>
@@ -376,11 +376,11 @@
                 </div>
 <div class="service-row">
                   <b>source_parser</b>
-                  <span>待接入本地脚本/模块，PDF/资料解析与页码锚点。</span>
+                  <span>已接入后端/API：本地 PDF source_manifest 可计算 sha256、抽取 pageAnchors/excerpt 并回写 CandidateStore；缺文件、非 PDF、解析器不可用或无文本时记录 failed extraction。</span>
                 </div>
 <div class="service-row">
                   <b>candidate_validator</b>
-                  <span>已落地 source_manifest/PDF 字段校验、paper_note citation anchor 校验、neuro_mechanism 证据/术语风险校验、mechanism_mapping fact/inference/overAnalogyRisk 校验、algorithm_hypothesis experimentPlan 校验、candidate_graph 边界校验和 CandidateStore 校验报告。</span>
+                  <span>已落地 source_manifest/PDF 字段校验、sourceExtraction 失败校验、paper_note citation anchor 校验、neuro_mechanism 证据/术语风险校验、mechanism_mapping fact/inference/overAnalogyRisk 校验、algorithm_hypothesis experimentPlan 校验、candidate_graph 边界校验和 CandidateStore 校验报告。</span>
                 </div>
 <div class="service-row">
                   <b>candidate_graph_builder</b>
@@ -753,14 +753,14 @@
 <div class="blueprint-row">
               <b>M1</b>
               <strong>候选数据基座</strong>
-              <span>已新增 CandidateStore 列表查询、校验报告、source_manifest/PDF 最小字段校验；PDF 缺路径、sha256 或 allowedForAnalysis=true 会进入 source_needs_confirmation。</span>
-              <span>能登记 PDF source_manifest，按 candidateType/currentState/qualityStatus 查询候选，并查看 invalid/error/warning 统计；仍不写正式 Team Knowledge/RAG/知识图谱。</span>
+              <span>已新增 CandidateStore 列表查询、校验报告、source_manifest/PDF 最小字段校验和本地 PDF source-extraction API；PDF 缺路径、sha256、allowedForAnalysis=true 或抽取失败会进入 source_needs_confirmation。</span>
+              <span>能登记 PDF source_manifest，按 candidateType/currentState/qualityStatus 查询候选，抽取 sha256/pageAnchors/excerpt，并查看 invalid/error/warning 统计；仍不写正式 Team Knowledge/RAG/知识图谱。</span>
             </div>
 <div class="blueprint-row">
               <b>M2</b>
               <strong>paper_note 与 PDF 锚点</strong>
-              <span>已新增 paper_note 输出契约与 Citation Anchor 校验：paper_note_draft 必须含 keyFindings、methods、limitations、citations；每条 keyFinding 必须有 sourceRef 和 page/citation/evidenceRef。PDF 页码摘录脚本仍待接。</span>
-              <span>合格本地模型输出进入 paper_note_draft；缺 citation/page anchor 时进入 paper_note_needs_revision，不能自然推进到 mechanism_candidate。</span>
+              <span>已新增 paper_note 输出契约与 Citation Anchor 校验：paper_note_draft 必须含 keyFindings、methods、limitations、citations；每条 keyFinding 必须有 sourceRef 和 page/citation/evidenceRef。本地 PDF 页码锚点可由 source-extraction 提供。</span>
+              <span>合格本地模型输出进入 paper_note_draft；缺 citation/page anchor 时进入 paper_note_needs_revision，不能自然推进到 mechanism_candidate；自动从 excerpt 生成 paper_note 的端到端链路仍待接。</span>
             </div>
 <div class="blueprint-row">
               <b>M3</b>
@@ -804,8 +804,8 @@
         <div class="agent-row">
         <b>01</b>
         <strong>Source Intake Agent</strong>
-        <span>可复用 research_broad / 待绑定挑战杯资料登记职责</span>
-        <span>本地资料登记 / source_manifest 写入 / 文件路径/页码/来源可信度记录 / 可选 research_knowledge_query_tool 查重</span>
+        <span>可复用 research_broad / source-extraction 后端已接入</span>
+        <span>本地资料登记 / source_manifest 写入 / 文件路径/页码/来源可信度记录 / 本地 PDF sha256/pageAnchors/excerpt 抽取 / 可选 research_knowledge_query_tool 查重</span>
         <span>确认资料允许分析、来源可信度和是否纳入本轮。</span>
       </div>
 <div class="agent-row">
@@ -881,7 +881,7 @@
 <div class="feature-row">
         <strong>PDF/资料解析</strong>
         <span>读取本地 PDF、页码锚点、摘录范围和 sourceFiles 绑定</span>
-        <b class="status-pill">待接入</b>
+        <b class="status-pill">已接入后端/API</b>
       </div>
 <div class="feature-row">
         <strong>科研知识只读查询</strong>
@@ -971,9 +971,9 @@
       </div>
 <div class="alignment-row">
         <strong>PDF/本地资料解析</strong>
-        <span>当前知识 ingestion 工具要求传入已有 excerpt/source_ref，不负责解析 PDF</span>
-        <b class="status-pill">待接入</b>
-        <span>01-02 需要补 PDF 解析、页码锚点和 source_manifest 管理。</span>
+        <span>Team Workflow 已新增 source-extraction API；知识 ingestion 工具仍要求传入已有 excerpt/source_ref，不负责解析 PDF</span>
+        <b class="status-pill">部分接入</b>
+        <span>01 已能把本地 PDF 解析成 sourceExtraction.pageAnchors/excerpt；02 自动 paper_note 生成链路仍待接。</span>
       </div>
 <div class="alignment-row">
         <strong>候选 schema 与工作区</strong>
@@ -1247,6 +1247,11 @@
             </div>
 <div class="blueprint-row compact">
               <b>POST</b>
+              <strong>/api/teams/{team_id}/workflow-orchestration/candidates/{candidate_id}/source-extraction</strong>
+              <span>对本地 PDF source_manifest 计算 sha256、抽取 pageAnchors/excerpt，并回写候选校验状态；失败时停在 source_needs_confirmation。</span>
+            </div>
+<div class="blueprint-row compact">
+              <b>POST</b>
               <strong>/api/teams/{team_id}/workflow-orchestration/transfers</strong>
               <span>功能 Agent 提交流程转移请求。</span>
             </div>
@@ -1334,8 +1339,8 @@
           <a class="node-card" href="research_flow_pages/01-source-workspace.html">
                 <span class="num">01</span>
                 <h3>资料进入工作区</h3>
-                <p>建立稳定证据源，不把未确认信息混入候选知识链。</p>
-                <div class="tag-row"><span class="tag done">已规划</span><span class="tag">Source Intake Agent</span></div>
+                <p>建立稳定证据源，并把本地 PDF 转成可引用的页码锚点。</p>
+                <div class="tag-row"><span class="tag done">source-extraction 已落地</span><span class="tag">Source Intake Agent</span></div>
               </a>
 <a class="node-card" href="research_flow_pages/02-paper-note.html">
                 <span class="num">02</span>

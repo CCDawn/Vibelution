@@ -178,6 +178,51 @@ def test_team_workflow_routes_list_and_validate_candidate_store(tmp_path, monkey
     assert validation_response.json()["summary"]["errorCount"] >= 2
 
 
+def test_team_workflow_routes_extract_candidate_source_pages(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    client = _client()
+    source_path = tmp_path / "sources" / "neuro.pdf"
+    source_path.parent.mkdir(parents=True)
+    source_path.write_bytes(b"%PDF-1.4\nfake local pdf bytes\n")
+
+    def fake_extract(path, *, page_scope, max_pages, max_chars_per_page):
+        assert path == source_path
+        assert page_scope == "2"
+        return [{"type": "pdf_page", "id": "neuro-p2", "label": "p. 2", "page": 2, "text": "Route extracted page text."}]
+
+    monkeypatch.setattr(team_workflow_orchestration_service, "_extract_pdf_page_anchors", fake_extract)
+    team = client.post("/api/teams", json={"name": "挑战杯科研团队"}).json()
+    candidate = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/candidates/source",
+        json={
+            "title": "Local PDF",
+            "sourcePath": str(source_path),
+            "sourceKind": "pdf",
+            "allowedForAnalysis": False,
+            "createdByAgent": "Source Intake Agent",
+        },
+    ).json()["candidate"]
+
+    response = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/candidates/{candidate['candidateId']}/source-extraction",
+        json={
+            "createdByAgent": "Source Extraction Agent",
+            "allowedForAnalysis": True,
+            "pageScope": "2",
+            "maxPages": 1,
+            "maxCharsPerPage": 400,
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["validation"]["valid"] is True
+    assert payload["candidate"]["currentState"] == "source_registered"
+    assert payload["sourceExtraction"]["status"] == "extracted"
+    assert payload["sourceExtraction"]["pageAnchors"][0]["page"] == 2
+    assert payload["workflow"]["candidateStore"]["candidateCount"] == 1
+
+
 def test_team_workflow_routes_reject_paper_note_without_citation_anchor(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     client = _client()

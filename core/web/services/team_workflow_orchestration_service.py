@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import threading
@@ -38,6 +39,11 @@ LOCAL_RESEARCH_MODEL_ROLE = "Local Research Worker Model"
 LOCAL_RESEARCH_CONTEXT_WINDOW = 32_000
 LOCAL_RESEARCH_EVIDENCE_TOKEN_TARGET = "18k-22k"
 LOCAL_RESEARCH_INVOKE_PROFILE_ID = "__challenge_cup_local_research_model"
+SOURCE_EXTRACTION_DEFAULT_MAX_PAGES = 24
+SOURCE_EXTRACTION_HARD_MAX_PAGES = 64
+SOURCE_EXTRACTION_DEFAULT_MAX_CHARS_PER_PAGE = 1800
+SOURCE_EXTRACTION_HARD_MAX_CHARS_PER_PAGE = 6000
+SOURCE_EXTRACTION_EXCERPT_MAX_CHARS = 12000
 LOCAL_RESEARCH_OUTPUT_FIELDS = (
     "candidateType",
     "sourceRefs",
@@ -133,6 +139,15 @@ _WORKFLOW_LOCK = threading.RLock()
 
 class TeamWorkflowOrchestrationError(ValueError):
     """Raised when a Team workflow orchestration request is invalid."""
+
+
+class SourceExtractionError(ValueError):
+    """Raised when local source extraction cannot produce page anchors."""
+
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code = code
+        self.message = message
 
 
 def utc_now_iso() -> str:
@@ -255,6 +270,128 @@ def register_candidate_source(team_id: str, payload: dict[str, Any]) -> dict[str
     )
     return {
         "candidate": candidate,
+        "validation": validation,
+        "workflow": _workflow_to_api(normalized_team_id, workflow, candidate_store),
+    }
+
+
+def extract_candidate_source_pages(team_id: str, candidate_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
+    normalized_candidate_id = _normalize_required_id(candidate_id, "Candidate id is required.")
+    team_service.get_team(normalized_team_id)
+    payload = payload if isinstance(payload, dict) else {}
+    created_by_agent = _trim_text(payload.get("createdByAgent"), max_length=160) or "Source Extraction Agent"
+    max_pages = _normalize_int(payload.get("maxPages"), default=SOURCE_EXTRACTION_DEFAULT_MAX_PAGES, minimum=1, maximum=SOURCE_EXTRACTION_HARD_MAX_PAGES)
+    max_chars_per_page = _normalize_int(
+        payload.get("maxCharsPerPage"),
+        default=SOURCE_EXTRACTION_DEFAULT_MAX_CHARS_PER_PAGE,
+        minimum=200,
+        maximum=SOURCE_EXTRACTION_HARD_MAX_CHARS_PER_PAGE,
+    )
+    page_scope_override = _trim_text(payload.get("pageScope"), max_length=160)
+    allowed_override = _normalize_optional_bool(payload.get("allowedForAnalysis")) if "allowedForAnalysis" in payload else None
+    now = utc_now_iso()
+    with _WORKFLOW_LOCK:
+        workflow = _load_or_create_workflow(normalized_team_id)
+        candidate_store = _load_candidate_store(normalized_team_id)
+        candidate = _find_candidate(candidate_store, normalized_candidate_id)
+        if candidate is None:
+            raise TeamWorkflowOrchestrationError("Candidate not found.")
+        if str(candidate.get("candidateType") or "") != "source_manifest":
+            raise TeamWorkflowOrchestrationError("Source extraction only supports source_manifest candidates.")
+        metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {}
+        source_path = _source_manifest_path(candidate)
+        if not source_path:
+            raise TeamWorkflowOrchestrationError("Source manifest does not include a local sourcePath.")
+        if page_scope_override:
+            candidate["pageScope"] = page_scope_override
+            metadata["pageScope"] = page_scope_override
+        if allowed_override is not None:
+            candidate["allowedForAnalysis"] = allowed_override
+            metadata["allowedForAnalysis"] = allowed_override
+        try:
+            resolved_source_path = _resolve_source_path(source_path)
+            sha256 = _sha256_file(resolved_source_path)
+            page_anchors = _extract_pdf_page_anchors(
+                resolved_source_path,
+                page_scope=page_scope_override or _trim_text(candidate.get("pageScope") or metadata.get("pageScope"), max_length=160),
+                max_pages=max_pages,
+                max_chars_per_page=max_chars_per_page,
+            )
+            if not page_anchors:
+                raise SourceExtractionError("empty_extraction", "PDF extraction produced no page text.")
+            page_scope = _page_scope_from_anchors(page_anchors)
+            extraction = {
+                "status": "extracted",
+                "sourceKind": "pdf",
+                "sourcePath": str(resolved_source_path),
+                "sha256": sha256,
+                "pageScope": page_scope,
+                "pageAnchors": page_anchors,
+                "excerpt": _excerpt_from_page_anchors(page_anchors, max_chars=SOURCE_EXTRACTION_EXCERPT_MAX_CHARS),
+                "extractor": "pypdf",
+                "extractedByAgent": created_by_agent,
+                "extractedAt": now,
+                "limits": {
+                    "maxPages": max_pages,
+                    "maxCharsPerPage": max_chars_per_page,
+                },
+            }
+            candidate["sha256"] = sha256
+            candidate["pageScope"] = page_scope
+            candidate["sourceKind"] = _trim_text(candidate.get("sourceKind"), max_length=80) or "pdf"
+            metadata["sha256"] = sha256
+            metadata["pageScope"] = page_scope
+            metadata["sourceExtraction"] = extraction
+        except SourceExtractionError as exc:
+            extraction = {
+                "status": "failed",
+                "sourcePath": source_path,
+                "errorCode": exc.code,
+                "message": exc.message,
+                "extractedByAgent": created_by_agent,
+                "extractedAt": now,
+                "limits": {
+                    "maxPages": max_pages,
+                    "maxCharsPerPage": max_chars_per_page,
+                },
+            }
+            metadata["sourceExtraction"] = extraction
+        candidate["metadata"] = metadata
+        validation = validate_candidate_record(candidate)
+        candidate["validation"] = validation
+        if validation["valid"]:
+            candidate["currentState"] = "source_registered"
+            candidate["qualityStatus"] = "source_manifest_ready"
+        else:
+            candidate["currentState"] = "source_needs_confirmation"
+            candidate["qualityStatus"] = "source_manifest_invalid"
+        candidate["updatedAt"] = now
+        candidate_store["updatedAt"] = now
+        _write_json(_candidate_store_path(normalized_team_id), candidate_store)
+        workflow["updatedAt"] = now
+        workflow["activeWorkflowItems"] = _upsert_active_item(
+            workflow.get("activeWorkflowItems"),
+            candidate_id=normalized_candidate_id,
+            current_node=str(candidate.get("currentWorkflowNode") or "knowledge_collection"),
+            status=str(candidate.get("currentState") or ""),
+            transfer_id=str(candidate.get("pendingTransferId") or ""),
+        )
+        _write_json(_workflow_path(normalized_team_id), workflow)
+    _record_workflow_event(
+        "candidate.source_extracted",
+        normalized_team_id,
+        fields={
+            "workflowId": workflow["workflowId"],
+            "candidateId": normalized_candidate_id,
+            "status": str(extraction.get("status") or ""),
+            "pageAnchorCount": len(extraction.get("pageAnchors") or []) if isinstance(extraction.get("pageAnchors"), list) else 0,
+            "errorCode": str(extraction.get("errorCode") or ""),
+        },
+    )
+    return {
+        "candidate": candidate,
+        "sourceExtraction": extraction,
         "validation": validation,
         "workflow": _workflow_to_api(normalized_team_id, workflow, candidate_store),
     }
@@ -1331,6 +1468,144 @@ def _candidate_graph_edge(source_id: str, target_id: str, relation: str) -> dict
     }
 
 
+def _source_manifest_path(candidate: dict[str, Any]) -> str:
+    source_path = _trim_text(candidate.get("sourcePath"), max_length=2000)
+    metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {}
+    metadata_path = _trim_text(metadata.get("path") or metadata.get("sourcePath"), max_length=2000)
+    return source_path or metadata_path
+
+
+def _resolve_source_path(source_path: str) -> Path:
+    path = Path(source_path)
+    if not path.is_absolute():
+        path = _project_root() / path
+    try:
+        resolved = path.resolve(strict=True)
+    except (OSError, RuntimeError) as exc:
+        raise SourceExtractionError("missing_file", "Local source file was not found.") from exc
+    if not resolved.is_file():
+        raise SourceExtractionError("missing_file", "Local source path is not a file.")
+    if resolved.suffix.lower() != ".pdf":
+        raise SourceExtractionError("unsupported_source_kind", "Only local PDF extraction is supported in this slice.")
+    return resolved
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    try:
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+    except OSError as exc:
+        raise SourceExtractionError("read_failed", "Local source file could not be read.") from exc
+    return digest.hexdigest()
+
+
+def _extract_pdf_page_anchors(
+    path: Path,
+    *,
+    page_scope: str,
+    max_pages: int,
+    max_chars_per_page: int,
+) -> list[dict[str, Any]]:
+    try:
+        from pypdf import PdfReader  # type: ignore
+    except Exception as exc:
+        raise SourceExtractionError("pdf_extractor_unavailable", "pypdf is not installed, so PDF text extraction is unavailable.") from exc
+    try:
+        reader = PdfReader(str(path))
+        pages = list(reader.pages)
+    except Exception as exc:
+        raise SourceExtractionError("pdf_open_failed", "PDF could not be opened for text extraction.") from exc
+    page_numbers = _page_numbers_from_scope(page_scope, total_pages=len(pages), max_pages=max_pages)
+    anchors: list[dict[str, Any]] = []
+    source_token = _safe_token(path.stem, default="pdf", max_length=80)
+    for page_number in page_numbers:
+        try:
+            text = pages[page_number - 1].extract_text() or ""
+        except Exception:
+            text = ""
+        normalized_text = _compact_text(text, max_length=max_chars_per_page)
+        if not normalized_text:
+            continue
+        anchors.append(
+            {
+                "type": "pdf_page",
+                "id": f"{source_token}-p{page_number}",
+                "label": f"p. {page_number}",
+                "page": page_number,
+                "text": normalized_text,
+            }
+        )
+    return anchors
+
+
+def _page_numbers_from_scope(page_scope: str, *, total_pages: int, max_pages: int) -> list[int]:
+    if total_pages <= 0 or max_pages <= 0:
+        return []
+    normalized_scope = _trim_text(page_scope, max_length=160)
+    if not normalized_scope:
+        return list(range(1, min(total_pages, max_pages) + 1))
+    page_numbers: list[int] = []
+    for part in re.split(r"[,;，；\s]+", normalized_scope):
+        token = part.strip()
+        if not token:
+            continue
+        range_match = re.fullmatch(r"(\d+)\s*[-~]\s*(\d+)", token)
+        if range_match:
+            start = int(range_match.group(1))
+            end = int(range_match.group(2))
+            if start > end:
+                start, end = end, start
+            page_numbers.extend(range(start, end + 1))
+        elif token.isdigit():
+            page_numbers.append(int(token))
+    normalized: list[int] = []
+    for number in page_numbers:
+        if 1 <= number <= total_pages and number not in normalized:
+            normalized.append(number)
+        if len(normalized) >= max_pages:
+            break
+    return normalized or list(range(1, min(total_pages, max_pages) + 1))
+
+
+def _page_scope_from_anchors(page_anchors: list[dict[str, Any]]) -> str:
+    pages = [int(anchor.get("page") or 0) for anchor in page_anchors if isinstance(anchor, dict) and int(anchor.get("page") or 0) > 0]
+    if not pages:
+        return ""
+    pages = sorted(set(pages))
+    ranges: list[str] = []
+    start = pages[0]
+    previous = pages[0]
+    for page in pages[1:]:
+        if page == previous + 1:
+            previous = page
+            continue
+        ranges.append(str(start) if start == previous else f"{start}-{previous}")
+        start = previous = page
+    ranges.append(str(start) if start == previous else f"{start}-{previous}")
+    return ",".join(ranges)
+
+
+def _excerpt_from_page_anchors(page_anchors: list[dict[str, Any]], *, max_chars: int) -> str:
+    chunks: list[str] = []
+    for anchor in page_anchors:
+        if not isinstance(anchor, dict):
+            continue
+        page = int(anchor.get("page") or 0)
+        text = _compact_text(anchor.get("text"), max_length=max_chars)
+        if page and text:
+            chunks.append(f"[p. {page}]\n{text}")
+    return _trim_text("\n\n".join(chunks), max_length=max_chars)
+
+
+def _compact_text(value: Any, *, max_length: int) -> str:
+    text = str(value or "").replace("\x00", " ")
+    text = re.sub(r"[ \t\r\f\v]+", " ", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()[:max_length]
+
+
 def _normalize_id_values(value: Any) -> list[str]:
     if not isinstance(value, list):
         return []
@@ -1369,6 +1644,13 @@ def _validate_source_manifest(candidate: dict[str, Any]) -> list[dict[str, str]]
             issues.append({"severity": "error", "code": "analysis_not_allowed", "message": "PDF source_manifest requires allowedForAnalysis=true."})
         if not page_scope:
             issues.append({"severity": "warning", "code": "missing_page_scope", "message": "PDF source_manifest should include pageScope for later citation anchors."})
+        extraction = metadata.get("sourceExtraction") if isinstance(metadata.get("sourceExtraction"), dict) else {}
+        if extraction:
+            extraction_status = _trim_text(extraction.get("status"), max_length=80)
+            if extraction_status == "failed":
+                issues.append({"severity": "error", "code": "source_extraction_failed", "message": "PDF source_manifest extraction failed and needs confirmation before screening."})
+            elif extraction_status == "extracted" and not isinstance(extraction.get("pageAnchors"), list):
+                issues.append({"severity": "error", "code": "missing_page_anchors", "message": "PDF source_manifest extraction must include pageAnchors."})
     return issues
 
 
@@ -2002,6 +2284,14 @@ def _normalize_optional_bool(value: Any) -> bool | None:
     if text in {"false", "0", "no", "n", "denied"}:
         return False
     return None
+
+
+def _normalize_int(value: Any, *, default: int, minimum: int, maximum: int) -> int:
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        number = default
+    return max(minimum, min(maximum, number))
 
 
 def _default_workflow(team_id: str, *, workflow_kind: str, owner_agent_id: str) -> dict[str, Any]:
