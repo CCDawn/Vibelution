@@ -6,6 +6,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 
 from config import Settings
+from core.llm.agent_runtime import config_for_agent_llm_model
 from core.orchestration.response_processor import ResponseProcessor
 from core.llm.client import LLMClient, llm_cancel_context
 from core.llm.errors import classify_exception
@@ -382,6 +383,107 @@ def test_llamacpp_qwen_thinking_blocks_assistant_prefill_before_provider():
     assert exc_info.value.category == "payload_protocol_error"
     assert exc_info.value.details["protocol"] == "llamacpp_qwen_thinking"
     assert exc_info.value.details["payloadValidationResult"] == "blocked_before_provider"
+
+
+def test_gu_yunshu_qwen_thinking_replay_blocks_prefill_from_model_library_route():
+    config = make_config(
+        **{
+            "llm.providers.houmo_local.kind": "llamacpp",
+            "llm.providers.houmo_local.requires_api_key": False,
+            "llm.providers.houmo_local.base_url": "http://192.168.20.30:8081/v1",
+            "llm.profiles.primary.provider_id": "houmo_local",
+            "llm.profiles.primary.model": "placeholder",
+        }
+    )
+    provider_id = config.llm.get_profile("primary").provider_id
+    config.llm.model_library["houmo_qwen35_9b_agent"] = {
+        "provider_id": provider_id,
+        "model": "HiModel_xh2_qwen3.5_9b_256_256k_b1_1chip_2cores_v1.3.0_20260429.gguf",
+        "protocol": "llamacpp_qwen_thinking",
+        "transport": "chat_completions",
+        "contract": "tool_chat",
+        "thinking_type": "adaptive",
+        "capabilities": {
+            "streaming": True,
+            "tools": True,
+            "thinking": True,
+            "reasoningRoundtrip": False,
+        },
+        "compat": {
+            "requiresStringContent": True,
+            "strictMessageKeys": True,
+            "allowAssistantPrefill": False,
+            "reasoningRoundtrip": False,
+            "thinkingFormat": "qwen",
+            "toolChoiceMode": "omit",
+            "streamUsageOptions": False,
+        },
+    }
+    runtime_config = config_for_agent_llm_model(
+        config,
+        model_id="houmo_qwen35_9b_agent",
+    )
+    provider_called = False
+
+    def backend(payload):
+        nonlocal provider_called
+        provider_called = True
+        return payload
+
+    client = LLMClient(config=runtime_config, backend=backend)
+
+    with pytest.raises(LLMError) as exc_info:
+        client.invoke(
+            [
+                {"role": "user", "content": "今天是星期几"},
+                {"role": "assistant", "content": "今天是"},
+            ]
+        )
+
+    assert provider_called is False
+    assert exc_info.value.category == "payload_protocol_error"
+    assert exc_info.value.details["protocol"] == "llamacpp_qwen_thinking"
+    assert exc_info.value.details["protocolSource"] == "explicit_model"
+    assert exc_info.value.details["thinkingRequested"] is True
+    assert exc_info.value.details["assistantPrefillDetected"] is True
+    assert exc_info.value.details["payloadValidationResult"] == "blocked_before_provider"
+
+
+def test_gu_yunshu_qwen_thinking_replay_sends_user_final_without_prefill():
+    config = make_config(
+        **{
+            "llm.providers.houmo_local.kind": "llamacpp",
+            "llm.providers.houmo_local.requires_api_key": False,
+            "llm.providers.houmo_local.base_url": "http://192.168.20.30:8081/v1",
+            "llm.profiles.primary.provider_id": "houmo_local",
+            "llm.profiles.primary.model": "placeholder",
+        }
+    )
+    provider_id = config.llm.get_profile("primary").provider_id
+    config.llm.model_library["houmo_qwen35_9b_agent"] = {
+        "provider_id": provider_id,
+        "model": "HiModel_xh2_qwen3.5_9b_256_256k_b1_1chip_2cores_v1.3.0_20260429.gguf",
+        "protocol": "llamacpp_qwen_thinking",
+        "transport": "chat_completions",
+        "contract": "tool_chat",
+        "thinking_type": "adaptive",
+        "compat": {"toolChoiceMode": "omit"},
+    }
+
+    runtime_config = config_for_agent_llm_model(
+        config,
+        model_id="houmo_qwen35_9b_agent",
+    )
+    client = LLMClient(config=runtime_config, backend=lambda payload: payload)
+
+    payload = client._build_payload([{"role": "user", "content": "今天是星期几"}])
+
+    assert payload["enable_thinking"] is True
+    assert payload["messages"][-1]["role"] == "user"
+    assert all("reasoning_content" not in item for item in payload["messages"])
+    assert "tool_choice" not in payload
+    assert client.protocol_route.source == "explicit_model"
+    assert client._last_payload_protocol_summary["assistantPrefillDetected"] is False
 
 
 def test_responses_transport_routes_openai_compatible_model_through_responses_bridge():
