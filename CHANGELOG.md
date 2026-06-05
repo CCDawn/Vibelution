@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.23 - 2026-06-05
+
+- Fixed Chat/Coding session deletion so deleting an Agent direct session clears the Agent's `directSessionId` instead of creating a replacement direct session that makes the conversation appear restored.
+- Kept the Agent active in Agent Center after its direct conversation is deleted, while removing the deleted session from the chat index.
+- Changed last-session deletion fallback to create a plain empty "新会话" conversation without Agent binding.
+
 ## 0.10.22 - 2026-06-05
 
 - Added a unified Model Library test control: choose one saved model and run a text connection test from that single button.
