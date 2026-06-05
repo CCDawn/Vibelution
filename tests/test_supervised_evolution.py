@@ -39,6 +39,7 @@ def _fake_result(status: str, reason: str, worktree_name: str) -> HarnessResult:
         tracked_dirty=False,
         untracked_files=[],
         command=["python", "agent.py"],
+        returncode=0 if status == "success" else 1,
         timeout_seconds=60,
         restarts_observed=0,
         normalized_restarts_observed=0,
