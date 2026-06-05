@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.25 - 2026-06-05
+
+- Added the Challenge Cup steward-pack ingestion approval gate API, approving pending steward packs into formal Team Knowledge or rejecting them back to revision.
+- Recorded `officialSyncRecord` evidence on steward candidates, including proposal, batch, KnowledgeItem, reviewer, RAG, and graph status boundaries.
+- Updated the Challenge Cup flow HTML and technical plan to mark M5 approval-gate behavior as landed while leaving rating migration and fine-grained graph edges for later.
+
 ## 0.10.24 - 2026-06-05
 
 - Added the Challenge Cup steward-pack knowledge-ingestion API, submitting valid `steward_pack_draft` candidates to Team Knowledge as a `SourceArtifact` plus pending `RefinementProposal`, with optional pending rating suggestion.
