@@ -193,6 +193,8 @@ def config_for_agent_llm_model(
                 for key in (
                     "transport",
                     "contract",
+                    "protocol",
+                    "compat",
                     "reasoning_state_field",
                     "strict_compatibility",
                     "temperature",

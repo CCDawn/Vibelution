@@ -117,6 +117,34 @@ def test_llm_capabilities_expose_provider_runtime_features():
     assert client.capabilities.supports_responses_transport is True
 
 
+def test_llm_client_resolves_protocol_from_model_library_entry():
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "openai_compatible",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://example.test/v1",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "plain-looking-model",
+            "llm.profiles.primary.contract": "basic_chat",
+        }
+    )
+    profile = config.llm.get_profile("primary")
+    config.llm.model_library = {
+        "declared-qwen-route": {
+            "provider_id": profile.provider_id,
+            "model": "plain-looking-model",
+            "protocol": "qwen_openai_compat",
+            "compat": {"toolChoiceMode": "omit"},
+        }
+    }
+
+    client = LLMClient(config=config, backend=lambda payload: payload)
+
+    assert client.protocol_route.protocol.value == "qwen_openai_compat"
+    assert client.protocol_route.source == "explicit_model"
+    assert client.protocol_route.compat.tool_choice_mode == "omit"
+
+
 def test_openai_compatible_payload_converts_runtime_system_messages_after_first_to_user():
     config = make_config(
         **{
