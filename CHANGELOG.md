@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.28 - 2026-06-05
+
+- Expanded `officialResearchGraph` into the read-only Memory Graph when requested, adding formal research reference nodes and `official_*` edges while preserving the default high-level graph.
+- Updated the Memory page to request `include=officialResearchGraph`, so formal Challenge Cup research trace edges are visible in the graph canvas without exposing full knowledge bodies.
+- Updated the Challenge Cup flow HTML and technical plan to mark Memory Graph canvas expansion as landed.
+
 ## 0.10.27 - 2026-06-05
 
 - Added official Challenge Cup research graph trace syncing on steward-pack approval, storing `officialResearchGraph` on the formal KnowledgeItem and `officialSyncRecord`.

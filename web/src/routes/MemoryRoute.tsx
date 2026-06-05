@@ -1675,7 +1675,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
 
   const memoryKnowledgeGraphQuery = useQuery({
     queryKey: queryKeys.memoryKnowledgeGraph(),
-    queryFn: () => fetchJson<MemoryKnowledgeGraphPayload>("/api/memory/knowledge-graph"),
+    queryFn: () => fetchJson<MemoryKnowledgeGraphPayload>("/api/memory/knowledge-graph?include=officialResearchGraph"),
     refetchInterval: resolvePollingInterval(pageVisible, 60_000),
     refetchIntervalInBackground: false,
     enabled: forcedView === "graph",
