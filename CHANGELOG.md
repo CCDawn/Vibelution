@@ -1,10 +1,19 @@
 # Changelog
 
+## 0.10.24 - 2026-06-05
+
+- Fixed Agent Center runtime status so current direct-session cards ignore stale run snapshots from old direct sessions, while preserving those runs as historical diagnostics.
+- Surfaced unresolved Agent dialogue model references as blocking health issues and showed the raw model ID in Agent Center instead of a misleading `-`.
+- Kept Agent reset replacement direct sessions synchronized back to AgentDirectory so Agent Center and the Chat/Coding session list stay aligned.
+
 ## 0.10.23 - 2026-06-05
 
 - Added the Challenge Cup `steward_pack_draft` CandidateStore gate for knowledge-governance ingestion drafts, requiring traceable candidate IDs, target domain, source trace, proposal payload, rating suggestion, risk summary, and `approvalRequired=true`.
 - Blocked ingestion drafts that try to write official Team Knowledge, RAG, or graph state before the approval gate.
 - Updated the Challenge Cup research-flow HTML and technical plan to show M5 steward pack behavior and remaining official-ingestion work.
+- Fixed Chat/Coding session deletion so deleting an Agent direct session clears the Agent's `directSessionId` instead of creating a replacement direct session that makes the conversation appear restored.
+- Kept the Agent active in Agent Center after its direct conversation is deleted, while removing the deleted session from the chat index.
+- Changed last-session deletion fallback to create a plain empty "新会话" conversation without Agent binding.
 
 ## 0.10.22 - 2026-06-05
 

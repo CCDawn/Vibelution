@@ -318,6 +318,7 @@ class SelfEvolvingAgent:
         """初始化 Agent 实例"""
         self.config = config or get_config()
         self.runtime_agent_binding = _runtime_agent_binding_from_env()
+        self._runtime_agent_llm_resolution = None
         self._apply_runtime_agent_profile_binding()
         self._apply_runtime_agent_llm_slot_binding()
         self.name = self.config.agent.name
@@ -480,15 +481,35 @@ class SelfEvolvingAgent:
     def _apply_runtime_agent_llm_slot_binding(self) -> None:
         agent_id = str(self.runtime_agent_binding.get("agentId") or "").strip()
         llm_slot = str(self.runtime_agent_binding.get("llmSlot") or "").strip()
-        if not agent_id or not llm_slot:
+        profile_id = str(self.runtime_agent_binding.get("profileId") or "").strip()
+        if not agent_id:
             return
+        if not llm_slot and profile_id and profile_id != "primary":
+            return
+        requested_slot = llm_slot or "dialogue"
         try:
             from core.web.services import agent_directory_service
 
             agent = agent_directory_service.get_agent(agent_id, include_archived=False)
+            if not llm_slot:
+                bindings = agent.get("llmBindings") if isinstance(agent, dict) else {}
+                dialogue_binding = bindings.get("dialogue") if isinstance(bindings, dict) else None
+                if not isinstance(dialogue_binding, dict) or not str(dialogue_binding.get("modelId") or "").strip():
+                    _record_agent_scene_event(
+                        "startup",
+                        "agent.runtime_llm_dialogue_binding_skipped",
+                        message="运行时 Agent 未声明 dialogue LLM 绑定，保留当前 primary profile。",
+                        fields={
+                            "agentId": agent_id,
+                            "requestedLlmSlot": requested_slot,
+                            "supervisedRole": self.runtime_agent_binding.get("supervisedRole", ""),
+                            "agentWorkspacePath": self.runtime_agent_binding.get("workspacePath", ""),
+                        },
+                    )
+                    return
             resolved = resolve_agent_llm(
                 agent,
-                llm_slot,
+                requested_slot,
                 config=self.config,
                 fallback_to_dialogue=False,
             )
@@ -496,12 +517,13 @@ class SelfEvolvingAgent:
             _record_agent_scene_event(
                 "startup",
                 "agent.runtime_llm_slot_binding_failed",
-                message="运行时 Agent LLM slot 绑定解析失败，已阻止启动以避免回退到错误模型。",
+                message="运行时 Agent LLM 绑定解析失败，已阻止启动以避免回退到错误模型。",
                 level="error",
                 outcome="failed",
                 fields={
                     "agentId": agent_id,
-                    "requestedLlmSlot": llm_slot,
+                    "requestedLlmSlot": requested_slot,
+                    "explicitLlmSlot": bool(llm_slot),
                     "errorType": type(exc).__name__,
                     "errorPreview": str(exc)[:300],
                     "supervisedRole": self.runtime_agent_binding.get("supervisedRole", ""),
@@ -511,15 +533,17 @@ class SelfEvolvingAgent:
             if isinstance(exc, AgentLlmResolutionError):
                 raise
             raise AgentLlmResolutionError(
-                f"Runtime Agent LLM slot binding failed for {agent_id}:{llm_slot}: {exc}"
+                f"Runtime Agent LLM slot binding failed for {agent_id}:{requested_slot}: {exc}"
             ) from exc
         self.config = resolved.config or self.config
+        self._runtime_agent_llm_resolution = resolved
         _record_agent_scene_event(
             "startup",
             "agent.runtime_llm_slot_bound",
-            message="运行时 Agent LLM slot 已映射为本次 primary profile。",
+            message="运行时 Agent LLM 已映射为本次 primary profile。",
             fields={
                 **resolved.log_fields(),
+                "explicitLlmSlot": bool(llm_slot),
                 "supervisedRole": self.runtime_agent_binding.get("supervisedRole", ""),
                 "agentWorkspacePath": self.runtime_agent_binding.get("workspacePath", ""),
             },
@@ -2189,7 +2213,14 @@ class SelfEvolvingAgent:
                         details=error_details,
                     )
 
-                    if isinstance(e, LLMError):
+                    if (
+                        isinstance(e, LLMError)
+                        and not (
+                            attempt < MAX_CONSECUTIVE_FAILURES
+                            and (recovery.disable_tools or recovery.disable_streaming)
+                            and not recovery.stop_current_turn
+                        )
+                    ):
                         return None
 
                     if recovery.request_context_compression:

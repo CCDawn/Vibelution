@@ -29,6 +29,7 @@ class ResolvedProtocolRoute:
     def log_summary(self) -> dict[str, Any]:
         return {
             "protocol": self.protocol.value,
+            "selectedProtocol": self.protocol.value,
             "protocolSource": self.source,
             "modelId": self.model_id,
             "providerId": self.provider_id,

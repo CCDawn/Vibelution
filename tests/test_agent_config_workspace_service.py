@@ -689,6 +689,57 @@ def test_agent_config_workspace_surfaces_runtime_status_from_run_snapshots(tmp_p
     assert payload["summary"]["blockedAgentCount"] == 1
 
 
+def test_agent_config_workspace_ignores_stale_runtime_snapshots_for_current_direct_session(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
+    agent = agent_directory_service.create_agent_instance(display_name="换绑 Agent")
+    original_session_id = agent["directSessionId"]
+    replacement_session_id = "session-current-direct"
+
+    context_engine.record_agent_turn_result(
+        agent["agentId"],
+        original_session_id,
+        {
+            "runId": "turn-old-session",
+            "status": "completed",
+            "summary": "old direct session result",
+            "updatedAt": "2026-05-28T10:00:00Z",
+        },
+    )
+    agent_directory_service.update_agent_instance(agent["agentId"], direct_session_id=replacement_session_id)
+
+    payload = agent_config_workspace_service.get_agent_config_workspace()
+    current = next(item for item in payload["agents"] if item["agentId"] == agent["agentId"])
+
+    assert current["directSessionId"] == replacement_session_id
+    assert current["runtimeStatus"]["state"] == "idle"
+    assert current["runtimeStatus"]["reason"] == "no_current_direct_session_runs"
+    assert current["runtimeStatus"]["sessionId"] == replacement_session_id
+    assert current["runtimeStatus"]["runId"] == ""
+    assert current["runtimeStatus"]["latestHistoricalSessionId"] == original_session_id
+    assert current["runtimeStatus"]["staleRuntimeRunCount"] == 1
+
+
+def test_agent_config_workspace_reports_unresolved_model_reference(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
+    agent = agent_directory_service.create_agent_instance(
+        display_name="坏模型 Agent",
+        llm_bindings={"dialogue": {"modelId": "missing-model-id"}},
+        primary_mode="chat",
+    )
+
+    payload = agent_config_workspace_service.get_agent_config_workspace()
+    current = next(item for item in payload["agents"] if item["agentId"] == agent["agentId"])
+    issues = payload["health"]["byAgent"][agent["agentId"]]
+
+    assert current["dialogueModel"] is None
+    assert current["llmBindingModels"]["dialogue"] is None
+    assert current["llmBindings"]["dialogue"]["modelId"] == "missing-model-id"
+    assert any(item["code"] == "unresolved_model_reference_dialogue" for item in issues)
+    assert payload["health"]["counts"]["blocking"] >= 1
+
+
 def test_agent_create_api_adds_direct_agent_with_safe_defaults(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
