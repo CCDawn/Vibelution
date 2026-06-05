@@ -1110,12 +1110,9 @@ def _missing_required_llm_profiles(public_config: dict) -> list[str]:
     if not isinstance(profiles, dict):
         return []
     missing: list[str] = []
-    for profile_id, profile in profiles.items():
-        if not isinstance(profile, dict):
-            missing.append(str(profile_id))
-            continue
-        if _selected_model_option(public_config, profile) is None:
-            missing.append(str(profile_id))
+    primary = profiles.get("primary")
+    if not isinstance(primary, dict) or _selected_model_option(public_config, primary) is None:
+        missing.append("primary")
     return missing
 
 

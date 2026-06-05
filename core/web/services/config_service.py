@@ -493,18 +493,44 @@ def _missing_required_llm_profiles(public_config: dict[str, Any]) -> list[str]:
     if not isinstance(profiles, dict):
         return []
     missing: list[str] = []
+    primary = profiles.get("primary")
+    if not isinstance(primary, dict) or _selected_model_option(public_config, primary) is None:
+        missing.append("primary")
+    return missing
+
+
+def _optional_unconfigured_llm_profiles(public_config: dict[str, Any]) -> list[str]:
+    llm = public_config.get("llm", {})
+    profiles = llm.get("profiles", {}) if isinstance(llm, dict) else {}
+    if not isinstance(profiles, dict):
+        return []
+    missing: list[str] = []
     for profile_id, profile in profiles.items():
-        if not isinstance(profile, dict):
-            missing.append(str(profile_id))
+        normalized_id = str(profile_id)
+        if normalized_id == "primary":
             continue
-        if _selected_model_option(public_config, profile) is None:
-            missing.append(str(profile_id))
+        if not isinstance(profile, dict) or _selected_model_option(public_config, profile) is None:
+            missing.append(normalized_id)
     return missing
 
 
 def _validate_required_llm_profiles(public_config: dict[str, Any], lang: str) -> None:
     missing = _missing_required_llm_profiles(public_config)
     if not missing:
+        optional_missing = _optional_unconfigured_llm_profiles(public_config)
+        if optional_missing:
+            _record_config_scene_event(
+                "validate",
+                "config.llm_profiles.optional_missing_allowed",
+                message="Optional legacy LLM profiles are unconfigured but no longer block config apply.",
+                outcome="allowed",
+                fields={
+                    "profileCount": len(optional_missing),
+                    "profileIds": optional_missing[:20],
+                    "primaryRequired": True,
+                },
+                lifecycle=True,
+            )
         return
     profiles = public_config.get("llm", {}).get("profiles", {}) if isinstance(public_config.get("llm", {}), dict) else {}
     display_names = " / ".join(
