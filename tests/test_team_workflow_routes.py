@@ -582,10 +582,20 @@ def test_team_workflow_routes_review_steward_pack_knowledge_ingestion(tmp_path, 
         f"/api/knowledge-bases/{knowledge_base['knowledgeBaseId']}/items",
         params={"agentId": steward["agentId"]},
     )
+    rating_suggestions_response = client.get(
+        f"/api/knowledge-bases/{knowledge_base['knowledgeBaseId']}/rating-suggestions",
+        params={"agentId": steward["agentId"]},
+    )
 
     assert response.status_code == 200, response.text
     payload = response.json()
     official_record = payload["candidate"]["metadata"]["officialSyncRecord"]
+    rating_migration = payload["knowledgeIngestion"]["officialSyncRecord"]["ratingSuggestionMigration"]
+    migrated_target = next(
+        item
+        for item in rating_suggestions_response.json()["suggestions"]
+        if item["suggestionId"] == rating_migration["targetSuggestionId"]
+    )
     assert payload["candidate"]["currentState"] == "official_synced"
     assert payload["candidate"]["qualityStatus"] == "approved"
     assert payload["knowledgeIngestion"]["review"]["proposal"]["status"] == "applied"
@@ -593,6 +603,9 @@ def test_team_workflow_routes_review_steward_pack_knowledge_ingestion(tmp_path, 
     assert official_record["writesOfficialKnowledge"] is True
     assert official_record["writesOfficialRag"] is False
     assert official_record["writesOfficialGraph"] is False
+    assert rating_migration["status"] == "migrated"
+    assert migrated_target["targetType"] == "knowledge_item"
+    assert migrated_target["status"] == "pending"
     assert items_response.json()["summary"]["itemCount"] == 1
 
 
