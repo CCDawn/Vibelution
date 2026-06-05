@@ -41,6 +41,7 @@ import traceback
 import json
 import glob as glob_module
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, List
 from contextlib import contextmanager
@@ -318,6 +319,121 @@ def _rewrite_default_python_command(command: str) -> str:
     return f"{prefix}{quoted_python}{suffix}{rest}"
 
 
+@dataclass(frozen=True)
+class ShellCommandRoute:
+    """Structured shell routing decision used before subprocess execution."""
+
+    route: str
+    final_command: str
+    reason: str
+    command: str
+    error: str = ""
+
+    @property
+    def blocked(self) -> bool:
+        return bool(self.error)
+
+
+def _git_bash_candidates() -> list[str]:
+    return [
+        "C:\\Program Files\\Git\\bin\\bash.exe",
+        "C:\\Program Files (x86)\\Git\\bin\\bash.exe",
+        os.path.expanduser("~\\AppData\\Local\\Programs\\Git\\bin\\bash.exe"),
+    ]
+
+
+def _find_git_bash() -> str:
+    for candidate in _git_bash_candidates():
+        if os.path.exists(candidate):
+            return candidate
+    return ""
+
+
+def classify_shell_command(command: str) -> ShellCommandRoute:
+    """Classify a command into the shell route used by execute_shell_command."""
+
+    rewritten_command = _rewrite_default_python_command(command)
+    stripped_command = rewritten_command.strip()
+
+    if IS_WINDOWS:
+        if stripped_command.lower() == "pwd":
+            return ShellCommandRoute(
+                route="powershell",
+                final_command='powershell -NoProfile -ExecutionPolicy Bypass -Command "(Get-Location).Path"',
+                reason="windows_pwd_alias",
+                command=rewritten_command,
+            )
+        if _is_explicit_bash_invocation(stripped_command):
+            return ShellCommandRoute(
+                route="bash",
+                final_command=stripped_command,
+                reason="explicit_bash_invocation",
+                command=rewritten_command,
+            )
+        if _is_linux_command(rewritten_command):
+            bash_path = _find_git_bash()
+            if not bash_path:
+                return ShellCommandRoute(
+                    route="blocked",
+                    final_command="",
+                    reason="git_bash_missing",
+                    command=rewritten_command,
+                    error=(
+                        f"[跨平台警告] 在 Windows 上检测到 Linux 命令 '{rewritten_command}'，"
+                        "但未找到 Git Bash。请安装 Git 或使用 Windows 原生命令。"
+                    ),
+                )
+            return ShellCommandRoute(
+                route="git_bash",
+                final_command=f'"{bash_path}" -c {json.dumps(rewritten_command)}',
+                reason="linux_command_on_windows",
+                command=rewritten_command,
+            )
+        if _has_unix_shell_markers(stripped_command):
+            return ShellCommandRoute(
+                route="blocked",
+                final_command="",
+                reason="unix_shell_marker_on_windows",
+                command=rewritten_command,
+                error=(
+                    f"[跨平台警告] 在 Windows 上检测到 Unix shell 片段: {stripped_command}\n"
+                    "请改用 PowerShell/Windows 等价命令，并用有界输出；"
+                    "或显式以 `bash -c \"...\"` 包裹整段命令交给 bash 解释。"
+                ),
+            )
+        if _is_powershell_command(rewritten_command):
+            return ShellCommandRoute(
+                route="powershell",
+                final_command=f'powershell -NoProfile -ExecutionPolicy Bypass -Command {json.dumps(rewritten_command)}',
+                reason="powershell_cmdlet",
+                command=rewritten_command,
+            )
+        return ShellCommandRoute(
+            route="cmd",
+            final_command=f"cmd /c {rewritten_command}",
+            reason="windows_default_cmd",
+            command=rewritten_command,
+        )
+
+    if _is_windows_command(rewritten_command):
+        return ShellCommandRoute(
+            route="blocked",
+            final_command="",
+            reason="windows_command_on_unix",
+            command=rewritten_command,
+            error=(
+                f"[跨平台警告] 在 {CURRENT_SYSTEM} 上检测到 Windows 特有命令 '{rewritten_command}'。"
+                f"请使用等效的 Unix 命令（如用 'ls' 替代 'dir'，用 'rm' 替代 'del'）。"
+            ),
+        )
+    return ShellCommandRoute(
+        route="bash",
+        final_command=f'/bin/bash -c {json.dumps(rewritten_command)}',
+        reason="unix_default_bash",
+        command=rewritten_command,
+    )
+
+
 @contextmanager
 def workspace_root_override(workspace_root: str | Path):
     """Temporarily route relative workspace file writes to a session workspace."""
@@ -577,59 +693,10 @@ def execute_shell_command(
     # -------------------------------------------------------------------------
     # 跨平台命令适配
     # -------------------------------------------------------------------------
-    command = _rewrite_default_python_command(command)
-    final_command = command.strip()
-
-    if IS_WINDOWS:
-        stripped_command = command.strip()
-        if stripped_command.lower() == "pwd":
-            final_command = 'powershell -NoProfile -ExecutionPolicy Bypass -Command "(Get-Location).Path"'
-        # P0-A: 调用者显式以 bash -c 包装，整段委托给 bash，绕过 marker 拦截
-        elif _is_explicit_bash_invocation(stripped_command):
-            final_command = stripped_command
-        # Windows 上执行 Linux 特有命令 → 尝试用 Git Bash 包装
-        # P0-B: 这一支放到 marker 检查之前，避免合法的 Unix 命令因含
-        # "| head" / "grep -n" 等子串被误杀
-        elif _is_linux_command(command):
-            git_bash_paths = [
-                "C:\\Program Files\\Git\\bin\\bash.exe",
-                "C:\\Program Files (x86)\\Git\\bin\\bash.exe",
-                os.path.expanduser("~\\AppData\\Local\\Programs\\Git\\bin\\bash.exe"),
-            ]
-            bash_path = None
-            for p in git_bash_paths:
-                if os.path.exists(p):
-                    bash_path = p
-                    break
-            if bash_path:
-                final_command = f'"{bash_path}" -c {json.dumps(command)}'
-            else:
-                return (
-                    f"[跨平台警告] 在 Windows 上检测到 Linux 命令 '{command}'，"
-                    "但未找到 Git Bash。请安装 Git 或使用 Windows 原生命令。"
-                )
-        # 裸命令（无 bash 包装、无 Linux 头命令）若含 Unix shell 片段 → 拦截
-        elif _has_unix_shell_markers(stripped_command):
-            return (
-                f"[跨平台警告] 在 Windows 上检测到 Unix shell 片段: {stripped_command}\n"
-                "请改用 PowerShell/Windows 等价命令，并用有界输出；"
-                "或显式以 `bash -c \"...\"` 包裹整段命令交给 bash 解释。"
-            )
-        # PowerShell cmdlet → powershell.exe
-        elif _is_powershell_command(command):
-            final_command = f'powershell -NoProfile -ExecutionPolicy Bypass -Command {json.dumps(command)}'
-        # Windows cmd 原生命令 → cmd.exe
-        else:
-            final_command = f'cmd /c {command}'
-    else:
-        # Unix 上执行 Windows 特有命令 → 拒绝执行
-        if _is_windows_command(command):
-            return (
-                f"[跨平台警告] 在 {CURRENT_SYSTEM} 上检测到 Windows 特有命令 '{command}'。"
-                f"请使用等效的 Unix 命令（如用 'ls' 替代 'dir'，用 'rm' 替代 'del'）。"
-            )
-        # Unix 统一用 /bin/bash 执行
-        final_command = f'/bin/bash -c {json.dumps(command)}'
+    route = classify_shell_command(command)
+    if route.blocked:
+        return route.error
+    final_command = route.final_command
 
     try:
         system_encoding = locale.getpreferredencoding(False) or 'utf-8'
@@ -1721,6 +1788,8 @@ check_syntax = check_python_syntax
 # 导出所有主要函数
 __all__ = [
     # 命令执行
+    'ShellCommandRoute',
+    'classify_shell_command',
     'execute_shell_command',
     'execute_cli_command',
     'run_cmd',
