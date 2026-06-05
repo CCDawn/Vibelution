@@ -36,6 +36,7 @@ export const queryKeys = {
   memoryOverview: () => ["memory", "overview"] as const,
   memoryUsageContract: () => ["memory", "usage-contract"] as const,
   memoryKnowledgeGraph: () => ["memory", "knowledge-graph"] as const,
+  memoryKnowledgeGraphNodeDetail: (nodeId: string) => ["memory", "knowledge-graph", "node-detail", nodeId] as const,
   knowledgeDashboardSnapshot: (agentId = "") => ["knowledge", "dashboard-snapshot", agentId] as const,
   knowledgeOverview: () => ["knowledge", "overview"] as const,
   knowledgeStewardOverview: () => ["knowledge", "steward", "overview"] as const,

@@ -1253,6 +1253,29 @@
   -webkit-line-clamp: 2;
 }
 
+.graphKnowledgeContent {
+  max-height: 150px;
+  margin: 2px 0 0;
+  padding: 7px;
+  overflow: auto;
+  border: 1px solid color-mix(in srgb, var(--border-soft) 68%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--surface-panel-muted) 72%, transparent);
+  color: var(--fg-secondary);
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  line-height: 1.42;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.graphKnowledgeItem em {
+  color: var(--accent-warm);
+  font-size: 0.66rem;
+  font-style: normal;
+  font-weight: 760;
+}
+
 .detailMeta {
   display: grid;
   gap: 5px;

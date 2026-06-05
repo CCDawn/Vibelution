@@ -112,10 +112,15 @@ export type MemoryKnowledgeGraphNode = {
     type: string;
     title: string;
     summary: string;
+    content?: string;
+    contentTruncated?: boolean;
+    knowledgeItemId?: string;
     knowledgeBaseId?: string;
     knowledgeBaseName?: string;
     ownerType?: string;
     ownerId?: string;
+    teamId?: string;
+    agentId?: string;
     status?: string;
     tags?: string[];
     createdAt?: string;
@@ -164,6 +169,29 @@ export type MemoryKnowledgeGraphPayload = {
     canEditGraph: boolean;
     canApplyKnowledge: boolean;
   };
+};
+
+export type MemoryKnowledgeGraphNodeDetailPayload = {
+  schemaVersion: number;
+  mode: "read_only_project_memory_graph_node_detail" | string;
+  nodeId: string;
+  agentId: string;
+  nodeType: string;
+  label: string;
+  summary: string;
+  contentItems: MemoryKnowledgeGraphNode["contentItems"];
+  summaryCounts: {
+    contentItemCount: number;
+    truncatedContentItemCount: number;
+  };
+  operatingBoundary: {
+    readOnly: boolean;
+    honorsKnowledgeAcl: boolean;
+    fullContentIncluded: boolean;
+    canEditGraph: boolean;
+    canApplyKnowledge: boolean;
+  };
+  elapsedMs: number;
 };
 
 export type MemoryUsageContractDomain = {

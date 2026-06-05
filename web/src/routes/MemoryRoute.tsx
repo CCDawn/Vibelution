@@ -45,6 +45,7 @@ import {
   MemoryItem,
   MemoryKnowledgeGraphEdge,
   MemoryKnowledgeGraphNode,
+  MemoryKnowledgeGraphNodeDetailPayload,
   MemoryKnowledgeGraphPayload,
   MemoryMutationResponse,
   MemoryOverview,
@@ -362,6 +363,8 @@ type Copy = {
   graphDirectChildren: string;
   graphNoChildren: string;
   graphNodeKnowledge: string;
+  graphKnowledgeLoading: string;
+  graphKnowledgeTruncated: string;
   graphNoKnowledge: string;
 };
 
@@ -744,6 +747,8 @@ const COPY: Record<"zh" | "en", Copy> = {
     graphDirectChildren: "直接子成员",
     graphNoChildren: "当前节点没有直接子成员。",
     graphNodeKnowledge: "节点知识",
+    graphKnowledgeLoading: "正在读取节点知识正文...",
+    graphKnowledgeTruncated: "正文已截断",
     graphNoKnowledge: "当前节点没有可见知识条目。",
   },
   en: {
@@ -1033,6 +1038,8 @@ const COPY: Record<"zh" | "en", Copy> = {
     graphDirectChildren: "Direct children",
     graphNoChildren: "This node has no direct children.",
     graphNodeKnowledge: "Node knowledge",
+    graphKnowledgeLoading: "Loading node knowledge content...",
+    graphKnowledgeTruncated: "Content truncated",
     graphNoKnowledge: "This node has no visible knowledge items.",
   },
 };
@@ -1680,6 +1687,15 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     refetchIntervalInBackground: false,
     enabled: forcedView === "graph",
   });
+  const memoryKnowledgeGraphNodeDetailQuery = useQuery({
+    queryKey: queryKeys.memoryKnowledgeGraphNodeDetail(selectedGraphNodeId),
+    queryFn: () =>
+      fetchJson<MemoryKnowledgeGraphNodeDetailPayload>(
+        `/api/memory/knowledge-graph/node-detail?nodeId=${encodeURIComponent(selectedGraphNodeId)}`,
+      ),
+    refetchInterval: false,
+    enabled: forcedView === "graph" && Boolean(selectedGraphNodeId),
+  });
 
   const memoryMutation = useMutation({
     mutationFn: async (draft: EditDraft) => {
@@ -2098,6 +2114,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     [graphPayload?.edges, graphVisibleNodeIds],
   );
   const selectedGraphNode = selectedGraphNodeId ? filteredGraphNodes.find((node) => node.id === selectedGraphNodeId) ?? null : null;
+  const selectedGraphDetailItems = memoryKnowledgeGraphNodeDetailQuery.data?.contentItems ?? selectedGraphNode?.contentItems ?? [];
   const graphNodeById = useMemo(() => new Map((graphPayload?.nodes ?? []).map((node) => [node.id, node])), [graphPayload?.nodes]);
   const selectedGraphRelations = useMemo(() => {
     if (!selectedGraphNode) {
@@ -2453,6 +2470,9 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeIngestionAdapters() });
     if (activeKnowledgeBaseForItems) {
       void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeItems(activeKnowledgeBaseForItems) });
+    }
+    if (selectedGraphNodeId) {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.memoryKnowledgeGraphNodeDetail(selectedGraphNodeId) });
     }
   };
 
@@ -4681,19 +4701,26 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
               <section className={styles.graphKnowledgePanel}>
                 <div className={styles.graphRelationHeader}>
                   <p className={styles.panelEyebrow}>{copy.graphNodeKnowledge}</p>
-                  <strong>{selectedGraphNode.contentItems?.length ?? 0}</strong>
+                  <strong>{selectedGraphDetailItems.length}</strong>
                 </div>
-                {!selectedGraphNode.contentItems?.length ? (
+                {memoryKnowledgeGraphNodeDetailQuery.isFetching ? (
+                  <p className={styles.graphRelationEmpty}>{copy.graphKnowledgeLoading}</p>
+                ) : null}
+                {!selectedGraphDetailItems.length && !memoryKnowledgeGraphNodeDetailQuery.isFetching ? (
                   <p className={styles.graphRelationEmpty}>{copy.graphNoKnowledge}</p>
                 ) : (
                   <div className={styles.graphKnowledgeList}>
-                    {selectedGraphNode.contentItems.map((item) => (
+                    {selectedGraphDetailItems.map((item) => (
                       <article key={`${item.type}:${item.id}`} className={styles.graphKnowledgeItem}>
                         <div>
                           <strong>{item.title}</strong>
                           <small>{item.knowledgeBaseName || item.type}</small>
                         </div>
                         {item.summary ? <p>{item.summary}</p> : null}
+                        {item.content ? (
+                          <pre className={styles.graphKnowledgeContent}>{item.content}</pre>
+                        ) : null}
+                        {item.contentTruncated ? <em>{copy.graphKnowledgeTruncated}</em> : null}
                         <span>{item.status || "-"} · {formatTimestamp(String(item.updatedAt || item.createdAt || ""), lang)}</span>
                       </article>
                     ))}
