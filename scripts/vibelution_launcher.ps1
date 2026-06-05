@@ -1891,12 +1891,14 @@ function Test-LauncherRestartActiveWorkBlocked {
             -Fields @{ active_work_count = $count; status_url = $statusUrl }
         return $true
     } catch {
+        $message = "有进行中的任务，无法重启 Vibelution。请等待任务完成或先停止任务。"
+        Write-Note $message
         Write-LauncherControlLog `
-            -Event "launcher.restart.active_work_probe_failed" `
-            -Message "Launcher restart active-work probe failed; allowing recovery restart." `
+            -Event "launcher.restart.blocked_active_work_probe_failed" `
+            -Message "Launcher restart active-work probe failed while backend was healthy; blocking restart conservatively." `
             -Level "warning" `
             -Fields @{ status_url = $statusUrl; error = $_.Exception.Message }
-        return $false
+        return $true
     }
 }
 
