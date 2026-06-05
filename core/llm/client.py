@@ -275,6 +275,7 @@ def _llm_retry_event_fields(
             "messageRoles",
             "messageRoleCounts",
             "protocol",
+            "selectedProtocol",
             "protocolSource",
             "protocolWarnings",
             "reasoningRoundtripEnabled",
