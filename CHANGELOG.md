@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.26 - 2026-06-05
+
+- Migrated approved Challenge Cup steward-pack proposal rating suggestions into formal KnowledgeItem pending rating reviews without auto-applying the score.
+- Recorded `ratingSuggestionMigration` in `officialSyncRecord` and `knowledgeIngestion` metadata so approval, skipped, and failed migration outcomes are traceable.
+- Updated the Challenge Cup flow HTML and technical plan to mark M5 rating suggestion migration as landed while keeping fine-grained formal graph edges for later.
+
 ## 0.10.25 - 2026-06-05
 
 - Added the Challenge Cup steward-pack ingestion approval gate API, approving pending steward packs into formal Team Knowledge or rejecting them back to revision.

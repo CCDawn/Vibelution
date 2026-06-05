@@ -990,8 +990,23 @@ def test_steward_pack_approval_gate_applies_pending_ingestion_to_formal_knowledg
         knowledge_base["knowledgeBaseId"],
         agent_id=steward["agentId"],
     )
+    rating_suggestions = team_knowledge_service.list_rating_suggestions(
+        knowledge_base["knowledgeBaseId"],
+        agent_id=steward["agentId"],
+    )
 
     official_record = response["candidate"]["metadata"]["officialSyncRecord"]
+    rating_migration = official_record["ratingSuggestionMigration"]
+    migrated_source = next(
+        item
+        for item in rating_suggestions["suggestions"]
+        if item["suggestionId"] == rating_migration["sourceSuggestionId"]
+    )
+    migrated_target = next(
+        item
+        for item in rating_suggestions["suggestions"]
+        if item["suggestionId"] == rating_migration["targetSuggestionId"]
+    )
     assert response["candidate"]["currentState"] == "official_synced"
     assert response["candidate"]["qualityStatus"] == "approved"
     assert response["knowledgeIngestion"]["review"]["proposal"]["status"] == "applied"
@@ -1002,6 +1017,15 @@ def test_steward_pack_approval_gate_applies_pending_ingestion_to_formal_knowledg
     assert official_record["writesOfficialGraph"] is False
     assert official_record["ragStatus"] == "queryable_via_reviewed_team_knowledge"
     assert official_record["graphStatus"] == "visible_via_memory_knowledge_graph"
+    assert rating_migration["status"] == "migrated"
+    assert rating_migration["targetType"] == "knowledge_item"
+    assert rating_migration["knowledgeItemId"] == response["knowledgeIngestion"]["review"]["item"]["knowledgeItemId"]
+    assert migrated_source["targetType"] == "proposal"
+    assert migrated_source["status"] == "applied"
+    assert migrated_target["targetType"] == "knowledge_item"
+    assert migrated_target["knowledgeItemId"] == rating_migration["knowledgeItemId"]
+    assert migrated_target["importanceLevel"] == "high"
+    assert migrated_target["status"] == "pending"
     assert knowledge_items["summary"]["itemCount"] == 1
 
 
@@ -1061,6 +1085,10 @@ def test_steward_pack_approval_gate_rejects_pending_ingestion_without_formal_wri
         knowledge_base["knowledgeBaseId"],
         agent_id=steward["agentId"],
     )
+    rating_suggestions = team_knowledge_service.list_rating_suggestions(
+        knowledge_base["knowledgeBaseId"],
+        agent_id=steward["agentId"],
+    )
 
     official_record = response["candidate"]["metadata"]["officialSyncRecord"]
     assert response["candidate"]["currentState"] == "steward_needs_revision"
@@ -1070,6 +1098,9 @@ def test_steward_pack_approval_gate_rejects_pending_ingestion_without_formal_wri
     assert official_record["writesOfficialKnowledge"] is False
     assert official_record["ragStatus"] == "not_synced"
     assert official_record["graphStatus"] == "not_synced"
+    assert official_record["ratingSuggestionMigration"]["status"] == "skipped"
+    assert official_record["ratingSuggestionMigration"]["reason"] == "decision_not_approved"
+    assert all(item["targetType"] != "knowledge_item" for item in rating_suggestions["suggestions"])
     assert knowledge_items["summary"]["itemCount"] == 0
 
 

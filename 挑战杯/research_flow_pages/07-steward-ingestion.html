@@ -54,16 +54,18 @@
             <article class="plan-card"><h2>处理动作</h2><ul><li>校验 candidateIds、targetDomain、sourceTrace、riskSummary、proposalPayload、ratingSuggestion。</li>
 <li>强制 approvalRequired=true，禁止 officialSync、applyNow 或 writeOfficialGraph 等立即正式写入意图。</li>
 <li>合格草稿先进入 steward_pack_draft；提交待审队列后进入 steward_pending_knowledge_review。</li>
-<li>Ingestion Approval Gate 批准后进入 official_synced；拒绝后回到 steward_needs_revision。</li></ul></article>
+<li>Ingestion Approval Gate 批准后进入 official_synced；拒绝后回到 steward_needs_revision。</li>
+<li>审批通过且创建正式 KnowledgeItem 后，将 proposal 级 pending ratingSuggestion 迁移为 KnowledgeItem 级 pending ratingSuggestion。</li></ul></article>
             <article class="plan-card"><h2>输出物</h2><ul><li>steward_pack_draft 候选</li>
 <li>SourceArtifact</li>
 <li>pending RefinementProposal</li>
-<li>pending ratingSuggestion</li>
+<li>proposal ratingSuggestion</li>
+<li>KnowledgeItem ratingSuggestion</li>
 <li>official_sync_record</li></ul></article>
             <article class="plan-card"><h2>风险</h2><ul><li>绕过审批门禁</li>
 <li>目标知识域错误</li>
 <li>把 ingestion pack 草稿误当正式入库记录</li></ul></article>
-            <article class="plan-card "><h2>未决事项</h2><ul><li>下一步是否把 pending ratingSuggestion 自动转成 KnowledgeItem rating review。</li></ul></article>
+            <article class="plan-card "><h2>未决事项</h2><ul><li>正式图谱是否需要单独生成 supports/maps_to/inspires 细粒度边。</li></ul></article>
           </div>
         </section>
 
@@ -74,7 +76,7 @@
           </div>
           <div class="status-grid">
             <div class="status-item"><b>候选状态</b><span>M5 审批门禁已落地</span></div>
-            <div class="status-item"><b>记忆平台</b><span>待审阶段不创建正式 KnowledgeItem；审批通过后复用 Team Knowledge review/apply 创建正式 KnowledgeItem。</span></div>
+            <div class="status-item"><b>记忆平台</b><span>待审阶段不创建正式 KnowledgeItem；审批通过后复用 Team Knowledge review/apply 创建正式 KnowledgeItem，并把评分建议承接到正式 KnowledgeItem 的待审评级队列。</span></div>
             <div class="status-item"><b>图谱同步</b><span>审批通过后正式 KnowledgeItem 可经 Memory Graph 视图展示；本轮不另写挑战杯专用正式图谱边文件。</span></div>
           </div>
         </section>
@@ -90,11 +92,11 @@
         <div class="status-item"><b>功能岗位</b><span>Knowledge Steward Agent / agent-knowledge-steward</span></div>
         <div class="status-item"><b>Agent 状态</b><span>后端草稿包门禁、Team Knowledge 待审入库桥和审批门禁已接入</span></div>
         <div class="status-item"><b>进入条件</b><span>review_record 或候选图谱已给出可追溯 candidateIds，且具备目标知识域。</span></div>
-        <div class="status-item"><b>退出条件</b><span>合格草稿提交后进入 steward_pending_knowledge_review；批准后进入 official_synced 并记录 officialSyncRecord，拒绝后进入 steward_needs_revision。</span></div>
+        <div class="status-item"><b>退出条件</b><span>合格草稿提交后进入 steward_pending_knowledge_review；批准后进入 official_synced、记录 officialSyncRecord，并创建 KnowledgeItem 级 pending ratingSuggestion；拒绝后进入 steward_needs_revision。</span></div>
         <div class="status-item"><b>审核门禁</b><span>必须经 Knowledge Steward Agent / Ingestion Approval Gate 确认，不能由科研执行 Agent 或本地模型直接入库。</span></div>
       </div>
       <div class="plan-grid">
-        <article class="plan-card"><h2>本步操作</h2><p class="hint">生成带 sourceTrace、riskSummary、proposalPayload、ratingSuggestion、approvalRequired=true 的 CandidateStore 草稿包，并可提交到指定 knowledgeBaseId 的待审入库队列；审批门禁复用 Team Knowledge review/apply。</p></article>
+        <article class="plan-card"><h2>本步操作</h2><p class="hint">生成带 sourceTrace、riskSummary、proposalPayload、ratingSuggestion、approvalRequired=true 的 CandidateStore 草稿包，并可提交到指定 knowledgeBaseId 的待审入库队列；审批门禁复用 Team Knowledge review/apply 与 rating suggestion review/create。</p></article>
         <article class="plan-card"><h2>本地研究模型用法</h2><p class="hint">本地 9B 模型只能生成 steward_pack_draft 草稿，正式建议仍由 Knowledge Steward Agent 检查；禁止在输出中请求正式写入。</p></article>
         <article class="plan-card"><h2>所需功能</h2><ul><li>sourceTrace 校验</li>
 <li>proposalPayload</li>
@@ -102,6 +104,7 @@
 <li>approvalRequired=true</li>
 <li>SourceArtifact</li>
 <li>pending RefinementProposal</li>
+<li>KnowledgeItem rating suggestion migration</li>
 <li>officialSyncRecord</li>
 <li>official write 禁止项</li></ul></article>
         <article class="plan-card"><h2>工具/平台能力</h2><ul><li>knowledge_governance_tasks_tool</li>
@@ -110,7 +113,7 @@
 <li>knowledge_proposal_tool</li>
 <li>knowledge_ingestion_tool</li>
 <li>knowledge_rating_suggestion_tool</li></ul></article>
-        <article class="plan-card"><h2>功能缺口</h2><p class="hint">待补 pending ratingSuggestion 到正式 KnowledgeItem rating 的自动承接，以及更细的正式图谱边生成规则。</p></article>
+        <article class="plan-card"><h2>功能缺口</h2><p class="hint">pending ratingSuggestion 到正式 KnowledgeItem rating review 的承接已接入；更细的正式图谱边生成规则仍待补。</p></article>
         <article class="plan-card"><h2>失败回退</h2><p class="hint">缺必填治理字段、approvalRequired 非 true，或包含 officialSync/applyNow/writeOfficialGraph 时返回 steward_needs_revision。</p></article>
       </div>
     </section>

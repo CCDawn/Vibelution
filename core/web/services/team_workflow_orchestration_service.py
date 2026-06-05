@@ -953,6 +953,22 @@ def review_steward_pack_knowledge_ingestion(team_id: str, candidate_id: str, pay
     knowledge_item_ids = [str(item.get("knowledgeItemId") or "")] if item else []
     knowledge_item_ids = [item_id for item_id in knowledge_item_ids if item_id]
     batch_id = str((batch or {}).get("batchId") or "")
+    if decision == "approved":
+        rating_migration = _migrate_steward_pack_rating_suggestion(
+            knowledge_base_id,
+            source_suggestion_id=str(ingestion.get("ratingSuggestionId") or ""),
+            knowledge_item_id=knowledge_item_ids[0] if knowledge_item_ids else "",
+            reviewed_by_agent_id=reviewed_by_agent_id,
+            resolution_note=resolution_note,
+        )
+    else:
+        rating_migration = {
+            "status": "skipped",
+            "reason": "decision_not_approved",
+            "sourceSuggestionId": str(ingestion.get("ratingSuggestionId") or ""),
+            "targetSuggestionId": "",
+            "knowledgeItemId": "",
+        }
     next_state = "official_synced" if decision == "approved" else "steward_needs_revision"
     quality_status = "approved" if decision == "approved" else "rejected_by_gate"
     official_record = {
@@ -963,6 +979,7 @@ def review_steward_pack_knowledge_ingestion(team_id: str, candidate_id: str, pay
         "batchId": batch_id,
         "knowledgeItemIds": knowledge_item_ids,
         "ratingSuggestionId": str(ingestion.get("ratingSuggestionId") or ""),
+        "ratingSuggestionMigration": rating_migration,
         "reviewedByAgentId": reviewed_by_agent_id,
         "reviewedAt": now,
         "resolutionNote": resolution_note,
@@ -989,6 +1006,7 @@ def review_steward_pack_knowledge_ingestion(team_id: str, candidate_id: str, pay
                 "proposalStatus": str(proposal.get("status") or ""),
                 "batchId": batch_id,
                 "knowledgeItemIds": knowledge_item_ids,
+                "ratingSuggestionMigration": rating_migration,
                 "reviewedByAgentId": reviewed_by_agent_id,
                 "reviewedAt": now,
                 "resolutionNote": resolution_note,
@@ -1025,6 +1043,7 @@ def review_steward_pack_knowledge_ingestion(team_id: str, candidate_id: str, pay
             "proposalId": proposal_id,
             "decision": decision,
             "knowledgeItemCount": len(knowledge_item_ids),
+            "ratingSuggestionMigrationStatus": str(rating_migration.get("status") or ""),
         },
     )
     return {
@@ -1626,6 +1645,110 @@ def _steward_pack_rating_suggestion_payload(
         "stability": stability,
         "review_priority": review_priority,
         "marking_reason": reason,
+    }
+
+
+def _migrate_steward_pack_rating_suggestion(
+    knowledge_base_id: str,
+    *,
+    source_suggestion_id: str,
+    knowledge_item_id: str,
+    reviewed_by_agent_id: str,
+    resolution_note: str,
+) -> dict[str, Any]:
+    normalized_source_id = _trim_text(source_suggestion_id, max_length=160)
+    normalized_item_id = _trim_text(knowledge_item_id, max_length=160)
+    if not normalized_source_id:
+        return {
+            "status": "skipped",
+            "reason": "missing_source_rating_suggestion",
+            "sourceSuggestionId": "",
+            "targetSuggestionId": "",
+            "knowledgeItemId": normalized_item_id,
+        }
+    if not normalized_item_id:
+        return {
+            "status": "skipped",
+            "reason": "missing_knowledge_item",
+            "sourceSuggestionId": normalized_source_id,
+            "targetSuggestionId": "",
+            "knowledgeItemId": "",
+        }
+    try:
+        suggestions_response = team_knowledge_service.list_rating_suggestions(
+            knowledge_base_id,
+            agent_id=reviewed_by_agent_id,
+        )
+    except (team_knowledge_service.TeamKnowledgeError, team_knowledge_service.TeamKnowledgeNotFoundError) as exc:
+        return {
+            "status": "failed",
+            "reason": "source_lookup_failed",
+            "error": str(exc),
+            "sourceSuggestionId": normalized_source_id,
+            "targetSuggestionId": "",
+            "knowledgeItemId": normalized_item_id,
+        }
+    source_suggestion = next(
+        (
+            item
+            for item in suggestions_response.get("suggestions", [])
+            if str(item.get("suggestionId") or "") == normalized_source_id
+        ),
+        None,
+    )
+    if not isinstance(source_suggestion, dict):
+        return {
+            "status": "skipped",
+            "reason": "source_not_found",
+            "sourceSuggestionId": normalized_source_id,
+            "targetSuggestionId": "",
+            "knowledgeItemId": normalized_item_id,
+        }
+    if str(source_suggestion.get("status") or "") != "pending":
+        return {
+            "status": "skipped",
+            "reason": "source_not_pending",
+            "sourceSuggestionId": normalized_source_id,
+            "sourceStatus": str(source_suggestion.get("status") or ""),
+            "targetSuggestionId": "",
+            "knowledgeItemId": normalized_item_id,
+        }
+    try:
+        source_review = team_knowledge_service.review_rating_suggestion(
+            knowledge_base_id,
+            normalized_source_id,
+            status="applied",
+            reviewed_by_agent_id=reviewed_by_agent_id,
+            resolution_note=resolution_note or "Migrated from steward pack proposal rating suggestion.",
+        )
+        target_suggestion = team_knowledge_service.create_rating_suggestion(
+            knowledge_base_id,
+            suggested_by_agent_id=str(source_suggestion.get("suggestedByAgentId") or reviewed_by_agent_id),
+            target_type="knowledge_item",
+            knowledge_item_id=normalized_item_id,
+            importance_level=str(source_suggestion.get("importanceLevel") or "medium"),
+            confidence=float(source_suggestion.get("confidence") if source_suggestion.get("confidence") is not None else 0.7),
+            stability=str(source_suggestion.get("stability") or "evolving"),
+            review_priority=str(source_suggestion.get("reviewPriority") or "elevated"),
+            marking_reason=str(source_suggestion.get("markingReason") or ""),
+        )
+    except (TypeError, ValueError, team_knowledge_service.TeamKnowledgeError, team_knowledge_service.TeamKnowledgeNotFoundError) as exc:
+        return {
+            "status": "failed",
+            "reason": "target_creation_failed",
+            "error": str(exc),
+            "sourceSuggestionId": normalized_source_id,
+            "targetSuggestionId": "",
+            "knowledgeItemId": normalized_item_id,
+        }
+    return {
+        "status": "migrated",
+        "sourceSuggestionId": normalized_source_id,
+        "sourceStatus": str((source_review.get("suggestion") or {}).get("status") or ""),
+        "targetSuggestionId": str(target_suggestion.get("suggestionId") or ""),
+        "targetStatus": str(target_suggestion.get("status") or ""),
+        "targetType": str(target_suggestion.get("targetType") or ""),
+        "knowledgeItemId": normalized_item_id,
     }
 
 
