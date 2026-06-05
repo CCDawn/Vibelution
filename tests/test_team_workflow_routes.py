@@ -416,6 +416,44 @@ def test_team_workflow_routes_record_review_prefilter(tmp_path, monkeypatch):
     assert response.json()["candidate"]["currentState"] == "review_prefiltered"
 
 
+def test_team_workflow_routes_record_steward_pack_draft(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    client = _client()
+    team = client.post("/api/teams", json={"name": "挑战杯科研团队"}).json()
+
+    response = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/local-research-model/outputs",
+        json={
+            "taskType": "steward_pack_draft",
+            "title": "Steward ingestion pack draft",
+            "createdByAgent": "Knowledge Steward Agent",
+            "output": {
+                "candidateType": "review_record",
+                "sourceRefs": [{"type": "paper", "id": "paper-1", "label": "Paper 1"}],
+                "evidenceRefs": [{"type": "review", "id": "review-1", "label": "Review 1"}],
+                "claims": [{"claim": "Candidate is ready for governance.", "sourceRef": "paper-1"}],
+                "candidateIds": ["hypothesis-1", "review-1"],
+                "targetDomain": "challenge_cup_neuro_algorithm",
+                "sourceTrace": {"sourceIds": ["paper-1"], "reviewRecordIds": ["review-1"]},
+                "riskSummary": "Evidence is traceable; official ingestion still requires approval.",
+                "proposalPayload": {"proposalType": "refinement_proposal", "summary": "Governed research candidate."},
+                "ratingSuggestion": {"rating": "reviewable", "reason": "Needs approval."},
+                "approvalRequired": True,
+                "uncertainty": [],
+                "riskFlags": ["approval_required"],
+                "confidence": 0.62,
+                "nextAction": "send_to_ingestion_approval_gate",
+                "requiresReview": True,
+            },
+        },
+    )
+
+    assert response.status_code == 201, response.text
+    assert response.json()["validation"]["valid"] is True
+    assert response.json()["candidate"]["currentWorkflowNode"] == "steward_ingestion"
+    assert response.json()["candidate"]["currentState"] == "steward_pack_draft"
+
+
 def test_team_workflow_route_invokes_local_research_model(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
 

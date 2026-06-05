@@ -115,7 +115,16 @@ LOCAL_RESEARCH_TASKS = {
         "workflowNode": "steward_ingestion",
         "targetCandidateType": "review_record",
         "purpose": "生成 proposal/ingestion pack 草稿，供 Knowledge Steward Agent 复核。",
-        "requiredOutput": (*LOCAL_RESEARCH_OUTPUT_FIELDS, "targetDomain", "riskSummary", "ratingSuggestion"),
+        "requiredOutput": (
+            *LOCAL_RESEARCH_OUTPUT_FIELDS,
+            "candidateIds",
+            "targetDomain",
+            "sourceTrace",
+            "riskSummary",
+            "proposalPayload",
+            "ratingSuggestion",
+            "approvalRequired",
+        ),
     },
 }
 _SAFE_ID_FRAGMENT = re.compile(r"[^A-Za-z0-9_.-]+")
@@ -816,6 +825,8 @@ def validate_local_research_model_output(task_type: str, output: dict[str, Any])
         issues.extend(_validate_algorithm_hypothesis_output(output))
     if normalized_task_type == "review_prefilter":
         issues.extend(_validate_review_prefilter_output(output))
+    if normalized_task_type == "steward_pack_draft":
+        issues.extend(_validate_steward_pack_output(output))
     return {
         "schemaVersion": SCHEMA_VERSION,
         "taskType": normalized_task_type,
@@ -915,6 +926,8 @@ def _local_research_output_state(task_type: str, valid: bool) -> str:
         return "hypothesis_candidate" if valid else "hypothesis_needs_revision"
     if task_type == "review_prefilter":
         return "review_prefiltered" if valid else "review_needs_revision"
+    if task_type == "steward_pack_draft":
+        return "steward_pack_draft" if valid else "steward_needs_revision"
     return "local_model_draft_ready" if valid else "local_model_draft_needs_revision"
 
 
@@ -1237,7 +1250,31 @@ def _validate_review_record_candidate(candidate: dict[str, Any]) -> list[dict[st
     if output:
         if "decision" in output:
             issues.append({"severity": "error", "code": "final_decision_not_allowed", "message": "review_record prefilter must not include final decision."})
-        issues.extend(_validate_review_prefilter_output(output))
+        task_type = str(metadata.get("taskType") or "")
+        if task_type == "steward_pack_draft":
+            issues.extend(_validate_steward_pack_output(output))
+        else:
+            issues.extend(_validate_review_prefilter_output(output))
+    return issues
+
+
+def _validate_steward_pack_output(output: dict[str, Any]) -> list[dict[str, str]]:
+    issues: list[dict[str, str]] = []
+    if not _has_any_list_value(output.get("candidateIds")):
+        issues.append({"severity": "error", "code": "missing_steward_candidate_ids", "message": "steward_pack requires candidateIds."})
+    for field, code in (
+        ("targetDomain", "missing_target_domain"),
+        ("sourceTrace", "missing_source_trace"),
+        ("riskSummary", "missing_risk_summary"),
+        ("proposalPayload", "missing_proposal_payload"),
+        ("ratingSuggestion", "missing_rating_suggestion"),
+    ):
+        if not _has_value(output.get(field)):
+            issues.append({"severity": "error", "code": code, "message": f"steward_pack requires {field}."})
+    if output.get("approvalRequired") is not True:
+        issues.append({"severity": "error", "code": "approval_required_not_true", "message": "steward_pack must set approvalRequired=true."})
+    if _has_value(output.get("officialSync")) or output.get("applyNow") is True or output.get("writeOfficialGraph") is True:
+        issues.append({"severity": "error", "code": "official_write_not_allowed", "message": "steward_pack draft must not request immediate official write or graph sync."})
     return issues
 
 
