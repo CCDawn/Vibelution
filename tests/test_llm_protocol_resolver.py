@@ -25,6 +25,7 @@ def test_explicit_profile_protocol_wins():
 
     assert route.protocol == ModelProtocol.QWEN_OPENAI_COMPAT
     assert route.source == "explicit_model"
+    assert route.log_summary()["selectedProtocol"] == "qwen_openai_compat"
 
 
 def test_provider_api_selects_responses_protocol():

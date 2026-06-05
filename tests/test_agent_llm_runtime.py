@@ -32,7 +32,7 @@ def _config_with_agent_models():
             "model": "vision-capable",
             "streaming": True,
             "tool_calling_mode": "auto",
-            "supports_image_input": True,
+            "capabilities": {"imageInput": True},
         },
     }
     return config
@@ -57,6 +57,29 @@ def test_resolve_agent_llm_maps_slot_model_to_runtime_primary_profile():
     assert resolved.config.llm.profiles["primary"].model == "vision-capable"
     assert resolved.capabilities.supports_image_input is True
     assert resolved.capabilities.supports_tool_calling is True
+    assert resolved.resolved_spec.provider_details["capability_source"] == "model_library.capabilities"
+    assert resolved.log_fields()["supportsImageInput"] is True
+
+
+def test_resolve_agent_llm_preserves_model_library_protocol_and_compat():
+    config = _config_with_agent_models()
+    config.llm.model_library["vision-model"]["protocol"] = "llamacpp_qwen_thinking"
+    config.llm.model_library["vision-model"]["compat"] = {
+        "allowAssistantPrefill": False,
+        "reasoningRoundtrip": False,
+        "toolChoiceMode": "omit",
+    }
+    agent = {
+        "agentId": "agent-a",
+        "llmBindings": {"vision": {"modelId": "vision-model"}},
+    }
+
+    resolved = resolve_agent_llm(agent, "vision", config=config)
+    profile = resolved.config.llm.profiles["primary"]
+
+    assert profile.protocol == "llamacpp_qwen_thinking"
+    assert profile.compat["allowAssistantPrefill"] is False
+    assert profile.compat["toolChoiceMode"] == "omit"
 
 
 def test_resolve_agent_llm_falls_back_to_dialogue_when_optional_slot_missing():

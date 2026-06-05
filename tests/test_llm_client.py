@@ -6,6 +6,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 
 from config import Settings
+from core.llm.agent_runtime import config_for_agent_llm_model
 from core.orchestration.response_processor import ResponseProcessor
 from core.llm.client import LLMClient, llm_cancel_context
 from core.llm.errors import classify_exception
@@ -115,6 +116,102 @@ def test_llm_capabilities_expose_provider_runtime_features():
     assert client.capabilities.supports_stream_usage is True
     assert client.capabilities.supports_explicit_tool_choice is True
     assert client.capabilities.supports_responses_transport is True
+
+
+def test_llm_capabilities_apply_model_library_declared_capabilities():
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "openai_compatible",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://example.test/v1",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "declared-capability-model",
+        }
+    )
+    profile = config.llm.get_profile("primary")
+    config.llm.model_library = {
+        "declared-capability-model": {
+            "provider_id": profile.provider_id,
+            "model": profile.model,
+            "capabilities": {
+                "imageInput": True,
+                "promptCache": True,
+                "reasoningRoundtrip": True,
+                "streamUsageOptions": False,
+            },
+        }
+    }
+
+    client = LLMClient(config=config, backend=lambda payload: payload)
+
+    assert client.capabilities.supports_image_input is True
+    assert client.capabilities.supports_prompt_cache is True
+    assert client.capabilities.supports_reasoning_roundtrip is True
+    assert client.capabilities.supports_stream_usage is False
+    assert client.resolved_spec.provider_details["capability_source"] == "model_library.capabilities"
+    assert "imageInput" in client.resolved_spec.provider_details["declared_capability_fields"]
+
+
+def test_model_library_declared_capabilities_do_not_override_disabled_runtime_gates():
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "openai_compatible",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://example.test/v1",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "declared-tool-model",
+            "llm.profiles.primary.streaming": False,
+            "llm.profiles.primary.tool_calling_mode": "disabled",
+        }
+    )
+    profile = config.llm.get_profile("primary")
+    config.llm.model_library = {
+        "declared-tool-model": {
+            "provider_id": profile.provider_id,
+            "model": profile.model,
+            "capabilities": {
+                "streaming": True,
+                "tools": True,
+                "parallelTools": True,
+                "explicitToolChoice": True,
+            },
+        }
+    }
+
+    client = LLMClient(config=config, backend=lambda payload: payload)
+
+    assert client.capabilities.supports_streaming is False
+    assert client.capabilities.supports_tool_calling is False
+    assert client.capabilities.supports_parallel_tool_calls is False
+    assert client.capabilities.supports_explicit_tool_choice is False
+
+
+def test_llm_client_resolves_protocol_from_model_library_entry():
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "openai_compatible",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://example.test/v1",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "plain-looking-model",
+            "llm.profiles.primary.contract": "basic_chat",
+        }
+    )
+    profile = config.llm.get_profile("primary")
+    config.llm.model_library = {
+        "declared-qwen-route": {
+            "provider_id": profile.provider_id,
+            "model": "plain-looking-model",
+            "protocol": "qwen_openai_compat",
+            "compat": {"toolChoiceMode": "omit"},
+        }
+    }
+
+    client = LLMClient(config=config, backend=lambda payload: payload)
+
+    assert client.protocol_route.protocol.value == "qwen_openai_compat"
+    assert client.protocol_route.source == "explicit_model"
+    assert client.protocol_route.compat.tool_choice_mode == "omit"
 
 
 def test_openai_compatible_payload_converts_runtime_system_messages_after_first_to_user():
@@ -286,6 +383,107 @@ def test_llamacpp_qwen_thinking_blocks_assistant_prefill_before_provider():
     assert exc_info.value.category == "payload_protocol_error"
     assert exc_info.value.details["protocol"] == "llamacpp_qwen_thinking"
     assert exc_info.value.details["payloadValidationResult"] == "blocked_before_provider"
+
+
+def test_gu_yunshu_qwen_thinking_replay_blocks_prefill_from_model_library_route():
+    config = make_config(
+        **{
+            "llm.providers.houmo_local.kind": "llamacpp",
+            "llm.providers.houmo_local.requires_api_key": False,
+            "llm.providers.houmo_local.base_url": "http://192.168.20.30:8081/v1",
+            "llm.profiles.primary.provider_id": "houmo_local",
+            "llm.profiles.primary.model": "placeholder",
+        }
+    )
+    provider_id = config.llm.get_profile("primary").provider_id
+    config.llm.model_library["houmo_qwen35_9b_agent"] = {
+        "provider_id": provider_id,
+        "model": "HiModel_xh2_qwen3.5_9b_256_256k_b1_1chip_2cores_v1.3.0_20260429.gguf",
+        "protocol": "llamacpp_qwen_thinking",
+        "transport": "chat_completions",
+        "contract": "tool_chat",
+        "thinking_type": "adaptive",
+        "capabilities": {
+            "streaming": True,
+            "tools": True,
+            "thinking": True,
+            "reasoningRoundtrip": False,
+        },
+        "compat": {
+            "requiresStringContent": True,
+            "strictMessageKeys": True,
+            "allowAssistantPrefill": False,
+            "reasoningRoundtrip": False,
+            "thinkingFormat": "qwen",
+            "toolChoiceMode": "omit",
+            "streamUsageOptions": False,
+        },
+    }
+    runtime_config = config_for_agent_llm_model(
+        config,
+        model_id="houmo_qwen35_9b_agent",
+    )
+    provider_called = False
+
+    def backend(payload):
+        nonlocal provider_called
+        provider_called = True
+        return payload
+
+    client = LLMClient(config=runtime_config, backend=backend)
+
+    with pytest.raises(LLMError) as exc_info:
+        client.invoke(
+            [
+                {"role": "user", "content": "今天是星期几"},
+                {"role": "assistant", "content": "今天是"},
+            ]
+        )
+
+    assert provider_called is False
+    assert exc_info.value.category == "payload_protocol_error"
+    assert exc_info.value.details["protocol"] == "llamacpp_qwen_thinking"
+    assert exc_info.value.details["protocolSource"] == "explicit_model"
+    assert exc_info.value.details["thinkingRequested"] is True
+    assert exc_info.value.details["assistantPrefillDetected"] is True
+    assert exc_info.value.details["payloadValidationResult"] == "blocked_before_provider"
+
+
+def test_gu_yunshu_qwen_thinking_replay_sends_user_final_without_prefill():
+    config = make_config(
+        **{
+            "llm.providers.houmo_local.kind": "llamacpp",
+            "llm.providers.houmo_local.requires_api_key": False,
+            "llm.providers.houmo_local.base_url": "http://192.168.20.30:8081/v1",
+            "llm.profiles.primary.provider_id": "houmo_local",
+            "llm.profiles.primary.model": "placeholder",
+        }
+    )
+    provider_id = config.llm.get_profile("primary").provider_id
+    config.llm.model_library["houmo_qwen35_9b_agent"] = {
+        "provider_id": provider_id,
+        "model": "HiModel_xh2_qwen3.5_9b_256_256k_b1_1chip_2cores_v1.3.0_20260429.gguf",
+        "protocol": "llamacpp_qwen_thinking",
+        "transport": "chat_completions",
+        "contract": "tool_chat",
+        "thinking_type": "adaptive",
+        "compat": {"toolChoiceMode": "omit"},
+    }
+
+    runtime_config = config_for_agent_llm_model(
+        config,
+        model_id="houmo_qwen35_9b_agent",
+    )
+    client = LLMClient(config=runtime_config, backend=lambda payload: payload)
+
+    payload = client._build_payload([{"role": "user", "content": "今天是星期几"}])
+
+    assert payload["enable_thinking"] is True
+    assert payload["messages"][-1]["role"] == "user"
+    assert all("reasoning_content" not in item for item in payload["messages"])
+    assert "tool_choice" not in payload
+    assert client.protocol_route.source == "explicit_model"
+    assert client._last_payload_protocol_summary["assistantPrefillDetected"] is False
 
 
 def test_responses_transport_routes_openai_compatible_model_through_responses_bridge():
@@ -543,6 +741,9 @@ def test_invoke_records_cached_input_token_observation(monkeypatch):
 
     assert message.response_metadata["usage_observation"]["cached_input_tokens"] == 64
     assert message.response_metadata["usage_observation"]["cache_hit_rate"] == pytest.approx(0.64)
+    assert message.response_metadata["llm_protocol"]["protocol"]
+    assert "payloadValidationResult" in message.response_metadata["llm_protocol"]
+    assert isinstance(message.response_metadata["llm_capability_source"], dict)
     success_event = next(item for item in recorded if item[0][1] == "llm.invoke.succeeded")
     assert success_event[1]["fields"]["cachedInputTokens"] == 64
     assert success_event[1]["fields"]["cacheHitRate"] == pytest.approx(0.64)
@@ -667,7 +868,47 @@ def test_invoke_failure_records_category_without_masking_provider_error(monkeypa
     assert 'One of "input"' in str(raised.value)
     assert recorded[-1][1]["message"] == "LLM invoke failed: provider_protocol_error"
     assert recorded[-1][1]["fields"]["errorType"] == "provider_protocol_error"
+    assert recorded[-1][1]["fields"]["protocol"]
+    assert recorded[-1][1]["fields"]["selectedProtocol"] == recorded[-1][1]["fields"]["protocol"]
+    assert recorded[-1][1]["fields"]["protocolSource"]
+    assert recorded[-1][1]["fields"]["payloadValidationResult"] == "passed"
     assert 'One of "input"' in recorded[-1][1]["fields"]["error"]
+
+
+def test_invoke_failure_records_model_library_capability_source(monkeypatch):
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "openai_compatible",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://example.test/v1",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "declared-failure-model",
+        }
+    )
+    profile = config.llm.get_profile("primary")
+    config.llm.model_library = {
+        "declared-failure-model": {
+            "provider_id": profile.provider_id,
+            "model": profile.model,
+            "capabilities": {"imageInput": True},
+        }
+    }
+    recorded = []
+
+    def backend(_payload):
+        raise Exception("provider closed connection")
+
+    monkeypatch.setattr("core.llm.client._record_llm_scene_event", lambda *args, **kwargs: recorded.append((args, kwargs)))
+
+    client = LLMClient(config=config, backend=backend)
+
+    with pytest.raises(LLMError):
+        client.invoke([{"role": "user", "content": "ping"}])
+
+    fields = recorded[-1][1]["fields"]
+    assert fields["modelLibraryId"] == "declared-failure-model"
+    assert fields["capabilitySource"] == "model_library.capabilities"
+    assert fields["declaredCapabilityFields"] == ["imageInput"]
 
 
 def test_invoke_retries_retryable_timeout_up_to_profile_limit(monkeypatch):
@@ -1046,6 +1287,10 @@ def test_stream_retries_without_usage_options_when_provider_rejects_them(monkeyp
     assert "llm.stream.usage_options_downgraded" in event_codes
     success_event = next(item for item in recorded if item[0][1] == "llm.stream.succeeded")
     assert success_event[1]["fields"]["usageObserved"] is False
+    assert success_event[1]["fields"]["protocol"]
+    assert success_event[1]["fields"]["selectedProtocol"] == success_event[1]["fields"]["protocol"]
+    assert success_event[1]["fields"]["payloadValidationResult"] == "passed"
+    assert success_event[1]["fields"]["streamUsageOptionsDowngraded"] is True
 
 
 def test_stream_final_chunk_exposes_usage_observation_for_ui():
@@ -1079,6 +1324,8 @@ def test_stream_final_chunk_exposes_usage_observation_for_ui():
     assert usage_observation["input_tokens"] == 80
     assert usage_observation["cached_input_tokens"] == 40
     assert usage_observation["cache_hit_rate"] == pytest.approx(0.5)
+    assert streamed[0].response_metadata["llm_protocol"]["protocol"]
+    assert streamed[-1].response_metadata["llm_protocol"]["payloadValidationResult"] == "passed"
 
 
 def test_stream_records_started_event_before_first_provider_chunk(monkeypatch):
@@ -1384,6 +1631,9 @@ def test_stream_failure_records_category_without_masking_provider_error(monkeypa
     assert recorded[-1][1]["message"] == "LLM stream failed before iterator: provider_protocol_error"
     assert recorded[-1][1]["fields"]["errorType"] == "provider_protocol_error"
     assert recorded[-1][1]["fields"]["messageRoles"] == ["user"]
+    assert recorded[-1][1]["fields"]["protocol"]
+    assert recorded[-1][1]["fields"]["protocolSource"]
+    assert recorded[-1][1]["fields"]["payloadValidationResult"] == "passed"
     assert 'One of "input"' in recorded[-1][1]["fields"]["error"]
 
 
