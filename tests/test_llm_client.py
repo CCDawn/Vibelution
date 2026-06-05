@@ -869,6 +869,7 @@ def test_invoke_failure_records_category_without_masking_provider_error(monkeypa
     assert recorded[-1][1]["message"] == "LLM invoke failed: provider_protocol_error"
     assert recorded[-1][1]["fields"]["errorType"] == "provider_protocol_error"
     assert recorded[-1][1]["fields"]["protocol"]
+    assert recorded[-1][1]["fields"]["selectedProtocol"] == recorded[-1][1]["fields"]["protocol"]
     assert recorded[-1][1]["fields"]["protocolSource"]
     assert recorded[-1][1]["fields"]["payloadValidationResult"] == "passed"
     assert 'One of "input"' in recorded[-1][1]["fields"]["error"]
@@ -1287,6 +1288,7 @@ def test_stream_retries_without_usage_options_when_provider_rejects_them(monkeyp
     success_event = next(item for item in recorded if item[0][1] == "llm.stream.succeeded")
     assert success_event[1]["fields"]["usageObserved"] is False
     assert success_event[1]["fields"]["protocol"]
+    assert success_event[1]["fields"]["selectedProtocol"] == success_event[1]["fields"]["protocol"]
     assert success_event[1]["fields"]["payloadValidationResult"] == "passed"
     assert success_event[1]["fields"]["streamUsageOptionsDowngraded"] is True
 
