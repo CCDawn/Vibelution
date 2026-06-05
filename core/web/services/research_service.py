@@ -708,7 +708,7 @@ def _ensure_research_agent_instances(agent_config: dict[str, Any]) -> dict[str, 
                 try:
                     session_detail = session_service.create_chat_session(
                         title=label,
-                        profile_id=profile_id,
+                        llm_bindings=session_service.llm_bindings_for_profile_id(profile_id),
                         created_by="research_agent_pool",
                     )
                 except Exception as exc:
@@ -735,10 +735,7 @@ def _ensure_research_agent_instances(agent_config: dict[str, Any]) -> dict[str, 
             if agent_instance_id:
                 try:
                     instance = agent_directory_service.get_agent(agent_instance_id, include_archived=False) or instance
-                    profile_id = str((instance or {}).get("profileId") or profile_id).strip() or "primary"
-                    if str(agent.get("profileId") or "").strip() != profile_id:
-                        agent["profileId"] = profile_id
-                        changed = True
+                    profile_id = str(agent.get("profileId") or profile_id).strip() or "primary"
                     expected_metadata = {
                         "researchAgentKey": key,
                         "researchTemplateId": str(agent.get("templateId") or "").strip(),
@@ -746,8 +743,7 @@ def _ensure_research_agent_instances(agent_config: dict[str, Any]) -> dict[str, 
                     }
                     instance_metadata = dict((instance or {}).get("metadata") or {})
                     needs_instance_update = (
-                        str((instance or {}).get("templateId") or "").strip() != str(agent.get("templateId") or "").strip()
-                        or str((instance or {}).get("profileId") or "").strip() != profile_id
+                        agent_directory_service.agent_dialogue_model_id(instance) != agent_directory_service.agent_dialogue_model_id({"llmBindings": session_service.llm_bindings_for_profile_id(profile_id)})
                         or str((instance or {}).get("primaryMode") or "").strip() != "research"
                         or str((instance or {}).get("roleKey") or "").strip() != f"research_{key}"
                         or str((instance or {}).get("promptTemplateId") or "").strip() != f"prompt-research-{key}"
@@ -758,8 +754,7 @@ def _ensure_research_agent_instances(agent_config: dict[str, Any]) -> dict[str, 
                         agent_directory_service.update_agent_instance(
                             agent_instance_id,
                             display_name=label,
-                            template_id=str(agent.get("templateId") or "").strip(),
-                            profile_id=profile_id,
+                            llm_bindings=session_service.llm_bindings_for_profile_id(profile_id),
                             primary_mode="research",
                             role_key=f"research_{key}",
                             prompt_template_id=f"prompt-research-{key}",
@@ -794,7 +789,6 @@ def _ensure_research_agent_instances(agent_config: dict[str, Any]) -> dict[str, 
                                 session_service.update_chat_session(
                                     direct_session_id,
                                     title=label,
-                                    profile_id=profile_id,
                                 )
                         except Exception:
                             pass
@@ -1202,8 +1196,7 @@ def save_research_agent_binding(
         agent_instance = agent_directory_service.update_agent_instance(
             existing_agent_id,
             display_name=next_label,
-            template_id=selected_template,
-            profile_id=selected_profile_id,
+            llm_bindings=session_service.llm_bindings_for_profile_id(selected_profile_id),
             primary_mode="research",
             role_key=f"research_{normalized}",
             prompt_template_id=prompt_template_id,
@@ -1226,15 +1219,14 @@ def save_research_agent_binding(
         try:
             session_detail = session_service.create_chat_session(
                 title=next_label,
-                profile_id=selected_profile_id,
+                llm_bindings=session_service.llm_bindings_for_profile_id(selected_profile_id),
                 created_by="research_agent_pool",
             )
             created_agent_id = str(session_detail.get("agentId") or "").strip()
             agent_instance = agent_directory_service.update_agent_instance(
                 created_agent_id,
                 display_name=next_label,
-                template_id=selected_template,
-                profile_id=selected_profile_id,
+                llm_bindings=session_service.llm_bindings_for_profile_id(selected_profile_id),
                 primary_mode="research",
                 role_key=f"research_{normalized}",
                 prompt_template_id=prompt_template_id,

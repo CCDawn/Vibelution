@@ -1340,7 +1340,7 @@ def _run_status(record) -> str:
     if record.decision in {"ROLLBACK", "REJECT"} or record.risk_level == "high":
         return "failed"
     if record.decision == "INCONCLUSIVE":
-        return "waiting"
+        return "inconclusive"
     if record.gym_proposal_status in {"proposed", "applied", "observing"}:
         return "waiting"
     return "success"
@@ -1625,6 +1625,7 @@ def _run_state_label(status: str, *, lang: str) -> str:
     mapping = {
         "idle": text_for(lang, zh="暂无运行", en="No run yet"),
         "waiting": text_for(lang, zh="等待治理动作", en="Waiting for governance action"),
+        "inconclusive": text_for(lang, zh="评测完成 · 无结论", en="Run complete · inconclusive"),
         "success": text_for(lang, zh="运行已收口", en="Run closed successfully"),
         "failed": text_for(lang, zh="运行带风险收口", en="Run closed with risk"),
     }

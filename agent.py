@@ -65,8 +65,17 @@ from core.infrastructure.runtime_input import (
 from core.evaluation.chat_dataset_capture import ChatDatasetCaptureService
 from core.evaluation.chat_segmenter import ChatTurnRecord
 from core.chat.chat_result_contract import build_chat_coding_result_contract
+from core.orchestration.output_boundary import sanitize_assistant_visible_text
 
 from core.llm import get_llm_client, discover_model, doctor_llm_profile
+from core.llm.client import llm_cancel_context
+from core.llm.agent_runtime import (
+    AGENT_LLM_SLOT_MENTAL_MODEL,
+    AGENT_LLM_SLOT_SUBAGENT_EXECUTION,
+    AGENT_LLM_SLOT_SUMMARY,
+    AgentLlmResolutionError,
+    resolve_agent_llm,
+)
 from core.llm import LLMError
 
 # 导入工具
@@ -81,6 +90,46 @@ from tools.compression_strategy import (
 )
 from tools.memory_tools import get_current_goal
 from tools.rebirth_tools import handle_restart_request  # noqa: F401
+
+
+def _runtime_context_cache_prefix_text(blocks: List[str]) -> str:
+    normalized: List[str] = []
+    for block in list(blocks or []):
+        text = str(block or "").strip()
+        if text:
+            normalized.append(text)
+    if not normalized:
+        return ""
+    return "\n\n".join(["## Agent Stable Runtime Context", *normalized])
+
+
+def _merge_runtime_context_into_cacheable_system_message(system_message: Any, runtime_context: str) -> Any:
+    text = str(runtime_context or "").strip()
+    if not text:
+        return system_message
+    if not isinstance(system_message, dict):
+        return system_message
+    if str(system_message.get("role") or "").strip().lower() != "system":
+        return system_message
+    content = system_message.get("content")
+    if not isinstance(content, list):
+        return system_message
+    merged_blocks: List[Any] = []
+    merged = False
+    for block in content:
+        if not merged and isinstance(block, dict) and block.get("cache_control"):
+            updated = dict(block)
+            original_text = str(updated.get("text") or "").rstrip()
+            updated["text"] = "\n\n".join(part for part in [original_text, text] if part)
+            merged_blocks.append(updated)
+            merged = True
+        else:
+            merged_blocks.append(block)
+    if not merged:
+        return system_message
+    updated_message = dict(system_message)
+    updated_message["content"] = merged_blocks
+    return updated_message
 from tools.agent_tools import set_subagent_stream_sink  # noqa: F401
 
 # 导入 CLI UI
@@ -110,6 +159,11 @@ from core.orchestration.turn_outcome import TurnOutcomeController
 from core.orchestration.tool_lifecycle import ToolLifecycleBridge
 from core.orchestration.context_engine import build_agent_context
 from core.orchestration.subagent_roles import extract_subagent_primary_goal
+from core.llm.reasoning_extractor import (
+    ThinkTagStreamParser,
+    extract_reasoning_text,
+    strip_think_tag_reasoning,
+)
 from core.infrastructure.mental_model import get_mental_model
 from core.mental_model_flags import is_mental_model_enabled
 
@@ -126,9 +180,49 @@ _INTERNAL_TOOL_PROTOCOL_MARKERS = (
 _TOOL_POLICY_FAILURE_RE = re.compile(
     r"\[工具策略提示\]\s*`[^`]+`\s*不在该 Agent 的可见工具策略中。?",
 )
+_TOOL_SURFACE_GROUPS: Dict[str, str] = {
+    "grep_search_tool": "locate",
+    "glob_tool": "locate",
+    "code_symbol_tool": "inspect",
+    "read_file_tool": "read",
+    "apply_patch_tool": "edit",
+    "apply_diff_edit_tool": "edit",
+    "write_file_tool": "edit",
+    "cli_tool": "execute",
+    "python_lint_tool": "verify",
+    "run_test_for_tool": "verify",
+    "web_search_tool": "web",
+    "web_fetch_tool": "web",
+    "image2_generate_tool": "media",
+    "conversation_log_inspect_tool": "diagnostics",
+    "get_core_context_tool": "memory",
+    "get_current_goal_tool": "memory",
+    "search_memory_tool": "memory",
+    "search_error_archive_tool": "memory",
+    "record_learning_tool": "memory",
+    "compress_context_tool": "memory",
+}
+_CORE_CHAT_TOOL_NAMES = {
+    "grep_search_tool",
+    "code_symbol_tool",
+    "read_file_tool",
+    "cli_tool",
+    "python_lint_tool",
+    "run_test_for_tool",
+    "search_memory_tool",
+    "record_learning_tool",
+}
 
 
-def _record_agent_scene_event(phase: str, event_code: str, *, message: str, fields: Dict[str, Any] | None = None) -> None:
+def _record_agent_scene_event(
+    phase: str,
+    event_code: str,
+    *,
+    message: str,
+    fields: Dict[str, Any] | None = None,
+    level: str = "info",
+    outcome: str = "observed",
+) -> None:
     try:
         from core.web.services.runtime_scene_service import record_runtime_scene_event
 
@@ -137,12 +231,37 @@ def _record_agent_scene_event(phase: str, event_code: str, *, message: str, fiel
             phase,
             event_code,
             message=message,
-            level="info",
-            outcome="observed",
+            level=level,
+            outcome=outcome,
             fields=fields or {},
         )
     except Exception:
         return
+
+
+def _record_agent_tool_surface_event(tool_names: List[str]) -> None:
+    names = [str(name or "").strip() for name in tool_names if str(name or "").strip()]
+    group_counts: Dict[str, int] = {}
+    for name in names:
+        group = _TOOL_SURFACE_GROUPS.get(name, "other")
+        group_counts[group] = group_counts.get(group, 0) + 1
+    _record_agent_scene_event(
+        "tool_surface",
+        "agent.tool_surface.visible",
+        message="Agent visible tool surface prepared.",
+        fields={
+            "toolCount": len(names),
+            "groups": group_counts,
+            "coreChatToolsPresent": sorted(name for name in _CORE_CHAT_TOOL_NAMES if name in set(names)),
+            "restrictedSpecialToolsPresent": sorted(
+                name
+                for name in names
+                if name.startswith("knowledge_")
+                or name.startswith("research_")
+                or name in {"computer_use_task_tool"}
+            ),
+        },
+    )
 
 
 def _context_compression_trigger_source(reason: str) -> str:
@@ -163,6 +282,7 @@ def _runtime_agent_binding_from_env() -> Dict[str, str]:
     key_map = {
         "agentId": "VIBELUTION_AGENT_ID",
         "profileId": "VIBELUTION_AGENT_PROFILE_ID",
+        "llmSlot": "VIBELUTION_AGENT_LLM_SLOT",
         "directSessionId": "VIBELUTION_AGENT_DIRECT_SESSION_ID",
         "workspacePath": "VIBELUTION_AGENT_WORKSPACE_PATH",
         "supervisedRole": "VIBELUTION_SUPERVISED_ROLE",
@@ -199,6 +319,7 @@ class SelfEvolvingAgent:
         self.config = config or get_config()
         self.runtime_agent_binding = _runtime_agent_binding_from_env()
         self._apply_runtime_agent_profile_binding()
+        self._apply_runtime_agent_llm_slot_binding()
         self.name = self.config.agent.name
         self.mode = normalize_agent_mode(mode or getattr(self.config.agent, "default_mode", None))
         self.mode_policy = resolve_mode_policy(self.mode, self.config)
@@ -220,6 +341,7 @@ class SelfEvolvingAgent:
         self._key_tool_map = {
             tool.name: tool for tool in self.key_tools if getattr(tool, "name", "")
         }
+        _record_agent_tool_surface_event(sorted(self.key_tool_maps))
         self._bound_llm_cache: Dict[str, Any] = {}
 
         # 模型动态发现
@@ -286,7 +408,7 @@ class SelfEvolvingAgent:
         # 心智模型（元认知引擎 — 必须在 EventBus 之后初始化）
         self.mental_model = get_mental_model(workspace_root=self.workspace_path)
         # 共享 LLM 给感知层（同一实例，不同提示词）
-        self.mental_model.set_shared_llm(self.llm_with_tools)
+        self.mental_model.set_shared_llm(self._get_llm_for_agent_slot(AGENT_LLM_SLOT_MENTAL_MODEL, disable_tools=True) or self.llm_with_tools)
 
         self._system_prompt_written = False
         self._last_runtime_state_memory = ""
@@ -297,6 +419,7 @@ class SelfEvolvingAgent:
         self._last_llm_error_retryable: bool = False
         self._last_llm_recovery_action: Optional[str] = None
         self._last_llm_error_message: str = ""
+        self._last_llm_error_details: Dict[str, Any] = {}
         self._last_llm_failure_attempts: int = 0
         self._last_llm_failure_max_attempts: int = 0
         self._last_visible_response_text: str = ""
@@ -307,6 +430,7 @@ class SelfEvolvingAgent:
         self._active_turn_messages: Optional[List[Any]] = None
         self._active_turn_goal: str = ""
         self._pending_runtime_context_blocks: List[str] = []
+        self._runtime_context_seeded_by_host: bool = False
         self._single_turn_mode_active: bool = False
         self._last_turn_metadata: Dict[str, Any] = {}
         self._turn_interrupt_checker = None
@@ -348,6 +472,54 @@ class SelfEvolvingAgent:
             fields={
                 "agentId": self.runtime_agent_binding.get("agentId", ""),
                 "agentProfileId": profile_id,
+                "supervisedRole": self.runtime_agent_binding.get("supervisedRole", ""),
+                "agentWorkspacePath": self.runtime_agent_binding.get("workspacePath", ""),
+            },
+        )
+
+    def _apply_runtime_agent_llm_slot_binding(self) -> None:
+        agent_id = str(self.runtime_agent_binding.get("agentId") or "").strip()
+        llm_slot = str(self.runtime_agent_binding.get("llmSlot") or "").strip()
+        if not agent_id or not llm_slot:
+            return
+        try:
+            from core.web.services import agent_directory_service
+
+            agent = agent_directory_service.get_agent(agent_id, include_archived=False)
+            resolved = resolve_agent_llm(
+                agent,
+                llm_slot,
+                config=self.config,
+                fallback_to_dialogue=False,
+            )
+        except Exception as exc:
+            _record_agent_scene_event(
+                "startup",
+                "agent.runtime_llm_slot_binding_failed",
+                message="运行时 Agent LLM slot 绑定解析失败，已阻止启动以避免回退到错误模型。",
+                level="error",
+                outcome="failed",
+                fields={
+                    "agentId": agent_id,
+                    "requestedLlmSlot": llm_slot,
+                    "errorType": type(exc).__name__,
+                    "errorPreview": str(exc)[:300],
+                    "supervisedRole": self.runtime_agent_binding.get("supervisedRole", ""),
+                    "agentWorkspacePath": self.runtime_agent_binding.get("workspacePath", ""),
+                },
+            )
+            if isinstance(exc, AgentLlmResolutionError):
+                raise
+            raise AgentLlmResolutionError(
+                f"Runtime Agent LLM slot binding failed for {agent_id}:{llm_slot}: {exc}"
+            ) from exc
+        self.config = resolved.config or self.config
+        _record_agent_scene_event(
+            "startup",
+            "agent.runtime_llm_slot_bound",
+            message="运行时 Agent LLM slot 已映射为本次 primary profile。",
+            fields={
+                **resolved.log_fields(),
                 "supervisedRole": self.runtime_agent_binding.get("supervisedRole", ""),
                 "agentWorkspacePath": self.runtime_agent_binding.get("workspacePath", ""),
             },
@@ -473,7 +645,32 @@ class SelfEvolvingAgent:
         self._bound_llm_cache["restart_focus"] = rebound
         return rebound
 
-    def _should_stream_llm(self) -> bool:
+    def _get_llm_for_agent_slot(self, slot: str, *, disable_tools: bool = False):
+        agent_id = str((getattr(self, "runtime_agent_binding", {}) or {}).get("agentId") or "").strip()
+        if not agent_id:
+            return None
+        try:
+            from core.web.services import agent_directory_service
+
+            agent = agent_directory_service.get_agent(agent_id, include_archived=False)
+            resolved = resolve_agent_llm(
+                agent,
+                slot,
+                config=getattr(self, "config", None),
+                fallback_to_dialogue=False,
+            )
+            llm = get_llm_client(profile_id=resolved.runtime_profile_id, config=resolved.config)
+            if disable_tools:
+                return llm
+            return llm.bind_tools(self._filter_tools_for_current_agent(self.key_tools))
+        except Exception:
+            return None
+
+    def _should_stream_llm(self, llm_for_turn: Any = None) -> bool:
+        if llm_for_turn is not None:
+            capabilities = getattr(llm_for_turn, "capabilities", None)
+            if capabilities is not None and hasattr(capabilities, "supports_streaming"):
+                return bool(capabilities.supports_streaming)
         config = getattr(self, "config", None)
         if config is None:
             return hasattr(self.llm_with_tools, "stream")
@@ -701,7 +898,10 @@ class SelfEvolvingAgent:
         """初始化 Token 压缩器"""
         self.token_compressor = EnhancedTokenCompressor(
             token_budget=self._effective_max_token_limit,
-            compression_llm=get_llm_client(role="compression", config=self.config),
+            compression_llm=(
+                self._get_llm_for_agent_slot(AGENT_LLM_SLOT_SUMMARY, disable_tools=True)
+                or get_llm_client(role="compression", config=self.config)
+            ),
         )
         try:
             get_ui().note_context_compression_config(
@@ -919,9 +1119,17 @@ class SelfEvolvingAgent:
         self._active_turn_messages.insert(1, SystemMessage(content=text))
         self._active_turn_goal = "__chat_session__"
 
+    def mark_runtime_context_seeded_by_host(self) -> None:
+        """Mark that the embedding host already injected this turn's runtime context."""
+
+        self._runtime_context_seeded_by_host = True
+
     def _seed_runtime_agent_context_for_turn(self, *, run_id: str = "") -> None:
         """Seed ContextEngine output when this process is bound to an AgentInstance."""
 
+        if bool(getattr(self, "_runtime_context_seeded_by_host", False)):
+            self._runtime_context_seeded_by_host = False
+            return
         runtime_binding = getattr(self, "runtime_agent_binding", {}) or {}
         agent_id = str(runtime_binding.get("agentId") or "").strip()
         if not agent_id:
@@ -1073,6 +1281,7 @@ class SelfEvolvingAgent:
             session = get_session_state()
             session.reset_runtime_constraints()
             session.set_active_evolution_txn(None)
+            session.set_runtime_goal_packet(None)
         except Exception:
             pass
         try:
@@ -1197,6 +1406,10 @@ class SelfEvolvingAgent:
         self._last_llm_failure_max_attempts = 0
         self.prompt_manager.update_current_goal(effective_goal)
         runtime_goal_packet = build_runtime_goal_packet(policy, effective_goal)
+        try:
+            get_session_state().set_runtime_goal_packet(runtime_goal_packet)
+        except Exception:
+            pass
         set_goal_packet = getattr(self.prompt_manager, "set_runtime_goal_packet", None)
         if callable(set_goal_packet):
             set_goal_packet(runtime_goal_packet)
@@ -1261,10 +1474,33 @@ class SelfEvolvingAgent:
         )
         pending_runtime_context_blocks = list(getattr(self, "_pending_runtime_context_blocks", []) or [])
         self._pending_runtime_context_blocks = []
+        cache_prefix_runtime_context = _runtime_context_cache_prefix_text(pending_runtime_context_blocks)
         if pending_runtime_context_blocks:
-            insert_at = 1 if messages else 0
-            for block in reversed(pending_runtime_context_blocks):
-                messages.insert(insert_at, SystemMessage(content=block))
+            if messages and cache_prefix_runtime_context:
+                merged_system = _merge_runtime_context_into_cacheable_system_message(
+                    messages[0],
+                    cache_prefix_runtime_context,
+                )
+                if merged_system != messages[0]:
+                    messages[0] = merged_system
+                    _record_agent_scene_event(
+                        "prompt",
+                        "agent.runtime_context_cache_prefix_merged",
+                        message="Agent runtime context merged into cacheable system prefix.",
+                        fields={
+                            "runtimeContextBlockCount": len(pending_runtime_context_blocks),
+                            "runtimeContextChars": len(cache_prefix_runtime_context),
+                            "systemMessageKind": "structured_cache_control",
+                        },
+                    )
+                else:
+                    insert_at = 1 if messages else 0
+                    for block in reversed(pending_runtime_context_blocks):
+                        messages.insert(insert_at, SystemMessage(content=block))
+            else:
+                insert_at = 1 if messages else 0
+                for block in reversed(pending_runtime_context_blocks):
+                    messages.insert(insert_at, SystemMessage(content=block))
         try:
             get_ui().note_context_window(
                 estimate_messages_tokens(messages),
@@ -1311,7 +1547,10 @@ class SelfEvolvingAgent:
                 current_sp = self.prompt_manager.build()
                 current_prompt = to_string(current_sp)
                 if current_prompt != self._cached_system_prompt:
-                    messages[0] = build_system_message(current_sp)
+                    messages[0] = _merge_runtime_context_into_cacheable_system_message(
+                        build_system_message(current_sp),
+                        cache_prefix_runtime_context,
+                    )
                     self._cached_system_prompt = current_prompt
                 try:
                     ui.note_context_window(
@@ -1389,9 +1628,12 @@ class SelfEvolvingAgent:
                         retryable=self._last_llm_error_retryable,
                         consecutive_failures=consecutive_failures,
                         iteration=iteration,
+                        attempts=self._last_llm_failure_attempts,
+                        max_attempts=self._last_llm_failure_max_attempts,
                     )
                     if stop_reason:
                         ui.add_log(stop_reason, "WARN")
+                        llm_error_details = dict(getattr(self, "_last_llm_error_details", {}) or {})
                         self._last_turn_metadata = {
                             **dict(getattr(self, "_last_turn_metadata", {}) or {}),
                             "llm_failure": {
@@ -1399,6 +1641,11 @@ class SelfEvolvingAgent:
                                 "retryable": bool(self._last_llm_error_retryable),
                                 "recovery_action": self._last_llm_recovery_action or "",
                                 "message": self._last_llm_error_message or "",
+                                "exception_type": llm_error_details.get("exception_type", ""),
+                                "exception_message": llm_error_details.get("exception_message", ""),
+                                "provider": llm_error_details.get("provider", ""),
+                                "model": llm_error_details.get("model", ""),
+                                "api_base": llm_error_details.get("api_base", ""),
                                 "consecutive_failures": consecutive_failures,
                                 "attempts": self._last_llm_failure_attempts,
                                 "max_attempts": self._last_llm_failure_max_attempts,
@@ -1406,6 +1653,10 @@ class SelfEvolvingAgent:
                             },
                         }
                         break
+                    self._publish_llm_retry_status(
+                        attempt=max(consecutive_failures, int(self._last_llm_failure_attempts or 0)),
+                        max_attempts=int(self._last_llm_failure_max_attempts or MAX_CONSECUTIVE_FAILURES),
+                    )
                     if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
                         ui.add_log(
                             f"连续失败达到 {MAX_CONSECUTIVE_FAILURES} 次，停止运行。",
@@ -1484,7 +1735,7 @@ class SelfEvolvingAgent:
                 round_state.note_progress()
 
                 # Token 使用统计
-                input_tokens, output_tokens = self._get_response_surface_controller().record_token_usage(
+                token_usage = self._get_response_surface_controller().record_token_usage(
                     response=response,
                     round_state=round_state,
                     current_turn=current_turn,
@@ -1492,6 +1743,18 @@ class SelfEvolvingAgent:
                     raw_content=raw_content,
                     estimate_output_tokens=estimate_tokens_precise,
                 )
+                input_tokens, output_tokens = token_usage
+                token_usage_observed = bool(getattr(token_usage, "observed", False))
+                self._last_turn_metadata = {
+                    **dict(getattr(self, "_last_turn_metadata", {}) or {}),
+                    "llm_usage": {
+                        "source": "provider_usage" if token_usage_observed else "missing",
+                        "input_tokens": int(getattr(token_usage, "input_tokens", input_tokens) or 0) if token_usage_observed else 0,
+                        "output_tokens": int(getattr(token_usage, "output_tokens", output_tokens) or 0) if token_usage_observed else 0,
+                        "total_tokens": int(getattr(token_usage, "total_tokens", (input_tokens + output_tokens)) or 0) if token_usage_observed else 0,
+                        "cached_input_tokens": int(getattr(token_usage, "cached_input_tokens", 0) or 0) if token_usage_observed else 0,
+                    },
+                }
 
                 logger.log_llm_response(
                     raw_content,
@@ -1672,6 +1935,31 @@ class SelfEvolvingAgent:
             return build_chat_user_multimodal_message(content, image_urls)
         return build_chat_user_message(content)
 
+    def _publish_llm_retry_status(self, *, attempt: int, max_attempts: int) -> None:
+        """Surface outer Agent reconnect attempts for live session feedback."""
+
+        category = str(getattr(self, "_last_llm_error_category", "") or "").strip()
+        action = str(getattr(self, "_last_llm_recovery_action", "") or "").strip()
+        if not category and not action:
+            return
+        try:
+            from core.infrastructure.event_bus import EventNames
+
+            get_event_bus().publish(
+                EventNames.LLM_STATUS,
+                {
+                    "status": "retrying",
+                    "attempt": max(0, int(attempt or 0)),
+                    "max_attempts": max(0, int(max_attempts or 0)),
+                    "category": category,
+                    "recovery_action": action,
+                    "source": "agent_outer_reconnect",
+                },
+                source="SelfEvolvingAgent",
+            )
+        except Exception:
+            return
+
     def _invoke_llm(self, messages: list) -> Optional[Any]:
         """调用 LLM（带错误分类、自动重试）"""
         ui = get_ui()
@@ -1679,6 +1967,7 @@ class SelfEvolvingAgent:
         self._last_llm_error_retryable = False
         self._last_llm_recovery_action = None
         self._last_llm_error_message = ""
+        self._last_llm_error_details = {}
         self._last_llm_failure_attempts = 0
         self._last_llm_failure_max_attempts = MAX_CONSECUTIVE_FAILURES
         clean_messages = []
@@ -1694,7 +1983,7 @@ class SelfEvolvingAgent:
             else:
                 clean_messages.append(msg)
 
-        with ui.thinking("?? 思考中..."):
+        with ui.thinking("?? 思考中..."), llm_cancel_context(self._current_turn_stop_reason):
             attempt = 0
             disable_streaming_for_retry = False
             disable_tools_for_retry = False
@@ -1709,26 +1998,55 @@ class SelfEvolvingAgent:
                     )
                     if (
                         not disable_streaming_for_retry
-                        and self._should_stream_llm()
+                        and self._should_stream_llm(llm_for_turn)
                         and hasattr(llm_for_turn, "stream")
                     ):
                         full_chunk = None
                         streamed_text = ""
                         streamed_reasoning = ""
+                        reasoning_seen_by_source: Dict[str, str] = {}
+                        think_tag_parser = ThinkTagStreamParser()
+
+                        def normalize_reasoning_delta(source: str, text: str) -> str:
+                            source_key = str(source or "reasoning").strip() or "reasoning"
+                            current = str(text or "")
+                            if not current:
+                                return ""
+                            previous = reasoning_seen_by_source.get(source_key, "")
+                            if not previous:
+                                reasoning_seen_by_source[source_key] = current
+                                return current
+                            if current == previous:
+                                return ""
+                            if current.startswith(previous):
+                                reasoning_seen_by_source[source_key] = current
+                                return current[len(previous):]
+                            reasoning_seen_by_source[source_key] = previous + current
+                            return current
+
                         for chunk in llm_for_turn.stream(clean_messages):
                             self._raise_if_turn_stop_requested()
                             full_chunk = ResponseProcessor.merge_stream_chunk(full_chunk, chunk)
                             chunk_kwargs = getattr(chunk, "additional_kwargs", None) or {}
-                            chunk_reasoning = str(chunk_kwargs.get("reasoning_content_delta") or "")
+                            chunk_reasoning = ""
+                            reasoning = extract_reasoning_text(
+                                {"additional_kwargs": chunk_kwargs},
+                                ResponseProcessor.coerce_content_text,
+                                include_content_tags=False,
+                            )
+                            if reasoning.text:
+                                chunk_reasoning = normalize_reasoning_delta(reasoning.source, reasoning.text)
                             chunk_text = getattr(chunk, "content", "") or ""
-                            if isinstance(chunk_text, list):
-                                chunk_text = "".join(
-                                    part.get("text", "") if isinstance(part, dict) else str(part)
-                                    for part in chunk_text
-                                )
+                            content_split = think_tag_parser.feed(
+                                chunk_text,
+                                ResponseProcessor.coerce_content_text,
+                            )
+                            if content_split.reasoning_text:
+                                chunk_reasoning += content_split.reasoning_text
+                            chunk_text = content_split.visible_text
                             if chunk_reasoning:
                                 streamed_reasoning += chunk_reasoning
-                                ui.stream_thought(streamed_reasoning, done=False)
+                                ui.stream_thought(chunk_reasoning, done=False)
                             if chunk_text:
                                 streamed_text += str(chunk_text)
                                 stream_response = getattr(ui, "stream_response", None)
@@ -1736,14 +2054,43 @@ class SelfEvolvingAgent:
                                     stream_response(streamed_text, done=False)
                                 elif not streamed_reasoning:
                                     ui.stream_thought(streamed_text, done=False)
+                        flushed_think = think_tag_parser.flush()
+                        if flushed_think.reasoning_text:
+                            streamed_reasoning += flushed_think.reasoning_text
+                            ui.stream_thought(flushed_think.reasoning_text, done=False)
+                        if flushed_think.visible_text:
+                            streamed_text += flushed_think.visible_text
+                            stream_response = getattr(ui, "stream_response", None)
+                            if callable(stream_response):
+                                stream_response(streamed_text, done=False)
+                            elif not streamed_reasoning:
+                                ui.stream_thought(streamed_text, done=False)
                         if full_chunk is not None:
                             final_content = ResponseProcessor.coerce_content_text(
                                 getattr(full_chunk, "content", "")
                             )
+                            final_content = strip_think_tag_reasoning(
+                                final_content,
+                                ResponseProcessor.coerce_content_text,
+                            )
                             if not final_content.strip() and streamed_text.strip():
                                 final_content = streamed_text
                             final_kwargs = dict(getattr(full_chunk, "additional_kwargs", None) or {})
-                            final_kwargs.pop("reasoning_content_delta", None)
+                            final_reasoning = extract_reasoning_text(
+                                {"additional_kwargs": final_kwargs},
+                                ResponseProcessor.coerce_content_text,
+                                include_content_tags=False,
+                            )
+                            if final_reasoning.text.strip() and not streamed_reasoning.strip():
+                                streamed_reasoning = final_reasoning.text
+                            for key in (
+                                "reasoning_content_delta",
+                                "reasoning_delta",
+                                "reasoning",
+                                "thinking",
+                                "thought",
+                            ):
+                                final_kwargs.pop(key, None)
                             if streamed_reasoning.strip():
                                 final_kwargs["reasoning_content"] = streamed_reasoning
                             return AIMessageChunk(
@@ -1815,7 +2162,7 @@ class SelfEvolvingAgent:
                         "provider": getattr(self.config.llm, "provider", ""),
                         "api_base": getattr(self.config.llm, "api_base", ""),
                         "api_timeout": getattr(self.config.llm, "api_timeout", None),
-                        "streaming_enabled": bool(self._should_stream_llm()),
+                        "streaming_enabled": bool(self._should_stream_llm(llm_for_turn if "llm_for_turn" in locals() else None)),
                         "message_count": len(clean_messages),
                     }
                     try:
@@ -1826,6 +2173,7 @@ class SelfEvolvingAgent:
                         )
                     except Exception:
                         error_details["estimated_input_tokens"] = 0
+                    self._last_llm_error_details = dict(error_details)
 
                     _debug_logger.error(
                         f"LLM 调用失败 [{attempt}/{MAX_CONSECUTIVE_FAILURES}] "
@@ -2106,7 +2454,7 @@ class SelfEvolvingAgent:
             latest_delegation = None
             if snapshot.get("delegation_findings"):
                 latest_delegation = snapshot["delegation_findings"][-1]
-            summary = (self._last_visible_response_text or "").strip()
+            summary = sanitize_assistant_visible_text(self._last_visible_response_text)
             error_message = str(getattr(self, "_last_llm_error_message", "") or "").strip()
             parsed_payload: Dict[str, Any] = {}
             if summary.startswith("{") and summary.endswith("}"):

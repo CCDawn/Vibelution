@@ -5,6 +5,8 @@ import os
 import sys
 from pathlib import Path
 
+import pytest
+
 import scripts.evolution_harness as evolution_harness
 from scripts.evolution_harness import (
     build_post_restart_observation,
@@ -13,6 +15,7 @@ from scripts.evolution_harness import (
     build_synthetic_venv,
     classify_tool_event_phase,
     collect_untracked_files,
+    count_meaningful_tool_steps,
     copy_untracked_files,
     create_harness_config,
     DEFAULT_DYNAMIC_REPLANNING_FIXTURE_PROMPT,
@@ -51,6 +54,7 @@ from scripts.evolution_harness import (
     summarize_agent_state_file,
     summarize_latest_matching_file,
     summarize_conversation_file,
+    SupervisedAgentBindingRuntimeError,
     supervised_agent_binding_env,
     run_harness,
     SUPERVISED_FINAL_STATE_MARKER,
@@ -167,6 +171,7 @@ def test_supervised_agent_binding_env_exports_safe_runtime_context_only():
             "directSessionId": "session-baseline",
             "workspacePath": "workspace/agents/agent-supervised-baseline",
             "role": "baseline",
+            "llmSlot": "dialogue",
             "displayName": "监督基线 Agent",
             "apiKey": "should-not-leak",
         }
@@ -178,6 +183,7 @@ def test_supervised_agent_binding_env_exports_safe_runtime_context_only():
         "VIBELUTION_AGENT_DIRECT_SESSION_ID": "session-baseline",
         "VIBELUTION_AGENT_WORKSPACE_PATH": "workspace/agents/agent-supervised-baseline",
         "VIBELUTION_SUPERVISED_ROLE": "baseline",
+        "VIBELUTION_AGENT_LLM_SLOT": "dialogue",
     }
     assert "apiKey" not in "".join(env)
 
@@ -188,10 +194,35 @@ def test_supervised_agent_binding_env_accepts_supervised_role_alias():
             "agentId": "agent-supervised-candidate",
             "profileId": "supervised_candidate",
             "supervisedRole": "candidate",
+            "llmSlot": "dialogue",
         }
     )
 
     assert env["VIBELUTION_SUPERVISED_ROLE"] == "candidate"
+    assert env["VIBELUTION_AGENT_LLM_SLOT"] == "dialogue"
+
+
+def test_supervised_agent_binding_env_requires_explicit_llm_slot():
+    with pytest.raises(SupervisedAgentBindingRuntimeError, match="missing required llmSlot"):
+        supervised_agent_binding_env(
+            {
+                "agentId": "agent-supervised-baseline",
+                "role": "baseline",
+            }
+        )
+
+
+def test_supervised_agent_binding_env_respects_explicit_llm_slot():
+    env = supervised_agent_binding_env(
+        {
+            "agentId": "agent-supervised-reviewer",
+            "profileId": "supervised_reviewer",
+            "role": "reviewer",
+            "llmSlot": "subagentExecution",
+        }
+    )
+
+    assert env["VIBELUTION_AGENT_LLM_SLOT"] == "subagentExecution"
 
 
 def test_create_harness_config_forces_supervised_agent_mode(tmp_path: Path):
@@ -1561,6 +1592,45 @@ def test_infer_result_status_handles_timeout_with_phase():
     assert "read_file_tool" in reason
 
 
+def test_count_meaningful_tool_steps_ignores_git_helper_reads(tmp_path: Path):
+    log_info = tmp_path / "log_info"
+    log_info.mkdir()
+    (log_info / "conversation_case.jsonl").write_text(
+        "\n".join(
+            [
+                '{"type":"tool_call","tool_name":"open_evolution_transaction_tool","status":"success"}',
+                '{"type":"tool_call","tool_name":"get_git_status_tool","status":"success"}',
+                '{"type":"tool_call","tool_name":"cli_tool","status":"success"}',
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    assert count_meaningful_tool_steps(log_info) == 2
+
+
+def test_infer_evolution_summary_extracts_environment_unavailable_from_tool_result():
+    summary = infer_evolution_summary(
+        [
+            {
+                "type": "tool_call",
+                "tool_name": "cli_tool",
+                "status": "success",
+                "tool_args": {"command": "ls /app"},
+                "tool_result": "ls: cannot access '/app/': No such file or directory",
+            }
+        ],
+        [],
+        [],
+        restart_expected=False,
+        restart_reentered=False,
+    )
+
+    assert summary["environment"]["unavailable"] is True
+    assert "/app" in summary["environment"]["evidence"]
+
+
 def test_infer_result_status_requires_complete_safe_modify_probe():
     status, reason = infer_result_status(
         timed_out=False,
@@ -1647,6 +1717,38 @@ def test_infer_result_status_reports_failed_safe_modify_validation_close():
 
     assert status == "failed"
     assert "验证失败" in reason
+    assert "失败状态关账" in reason
+
+
+def test_infer_result_status_reports_clean_terminal_bench_environment_unavailable_close():
+    status, reason = infer_result_status(
+        timed_out=False,
+        restart_expected=False,
+        restart_reentered=False,
+        primary_returncode=0,
+        last_observation={"phase": "session_end"},
+        scenario="transaction",
+        evolution_summary={
+            "validation": {
+                "passed": 0,
+                "failed": 1,
+                "last": {
+                    "tool": "cli_tool",
+                    "passed": False,
+                    "summary": "ls: cannot access '/app/': No such file or directory",
+                },
+            },
+            "transaction": {
+                "opened": True,
+                "closed": True,
+                "status": "failed",
+                "txn_id": "txn_env",
+            },
+        },
+    )
+
+    assert status == "failed"
+    assert "任务环境不可用" in reason
     assert "失败状态关账" in reason
 
 

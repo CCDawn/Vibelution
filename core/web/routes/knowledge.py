@@ -13,10 +13,12 @@ from core.web.services.team_knowledge_service import (
     TeamKnowledgeNotFoundError,
     TeamKnowledgePermissionError,
     create_knowledge_base,
+    create_agent_knowledge_base,
     create_ingestion_package,
     create_rating_suggestion,
     create_refinement_proposal,
     create_source_artifact,
+    get_knowledge_dashboard_snapshot,
     get_knowledge_governance_plan,
     get_knowledge_operations_health,
     get_knowledge_trace,
@@ -30,6 +32,7 @@ from core.web.services.team_knowledge_service import (
     list_knowledge_overview,
     list_rating_suggestions,
     list_team_knowledge_bases,
+    list_agent_knowledge_bases,
     review_rating_suggestions_bulk,
     review_rating_suggestion,
     review_refinement_proposal,
@@ -131,6 +134,21 @@ def knowledge_overview(agentId: str = "") -> dict:
     return list_knowledge_overview(agent_id=agentId)
 
 
+@router.get("/knowledge/dashboard-snapshot")
+def knowledge_dashboard_snapshot(agentId: str = "", recommendationLimit: int = 6, workbenchLimit: int = 8, planLimit: int = 8) -> dict:
+    try:
+        return get_knowledge_dashboard_snapshot(
+            agent_id=agentId,
+            recommendation_limit=recommendationLimit,
+            workbench_limit=workbenchLimit,
+            plan_limit=planLimit,
+        )
+    except TeamKnowledgePermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except TeamKnowledgeError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 @router.get("/knowledge/steward/overview")
 def knowledge_steward_overview() -> dict:
     return get_knowledge_steward_overview()
@@ -181,6 +199,8 @@ def knowledge_search(
     agentId: str = "",
     query: str = "",
     teamId: str = "",
+    ownerType: str = "",
+    ownerId: str = "",
     knowledgeBaseId: str = "",
     tags: list[str] = Query(default=[]),
     sourceType: str = "",
@@ -197,6 +217,8 @@ def knowledge_search(
             agent_id=agentId,
             query=query,
             team_id=teamId,
+            owner_type=ownerType,
+            owner_id=ownerId,
             knowledge_base_id=knowledgeBaseId,
             tags=tags,
             source_type=sourceType,
@@ -221,6 +243,8 @@ def knowledge_rag_retrieve(
     agentId: str = "",
     query: str = "",
     teamId: str = "",
+    ownerType: str = "",
+    ownerId: str = "",
     knowledgeBaseId: str = "",
     tags: list[str] = Query(default=[]),
     retrievalMode: str = "hybrid",
@@ -233,6 +257,8 @@ def knowledge_rag_retrieve(
             agent_id=agentId,
             query=query,
             team_id=teamId,
+            owner_type=ownerType,
+            owner_id=ownerId,
             knowledge_base_id=knowledgeBaseId,
             tags=tags,
             retrieval_mode=retrievalMode,
@@ -288,6 +314,36 @@ def team_knowledge_base_create(team_id: str, payload: KnowledgeBaseCreatePayload
     try:
         return create_knowledge_base(
             team_id,
+            name=payload.name,
+            description=payload.description,
+            actor_agent_id=payload.actorAgentId,
+            acl=payload.acl,
+        )
+    except TeamKnowledgePermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except TeamKnowledgeNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except TeamKnowledgeError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/agents/{agent_id}/knowledge-bases")
+def agent_knowledge_base_list(agent_id: str, actorAgentId: str = "") -> dict:
+    try:
+        return list_agent_knowledge_bases(agent_id, actor_agent_id=actorAgentId)
+    except TeamKnowledgePermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except TeamKnowledgeNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except TeamKnowledgeError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/agents/{agent_id}/knowledge-bases", status_code=status.HTTP_201_CREATED)
+def agent_knowledge_base_create(agent_id: str, payload: KnowledgeBaseCreatePayload) -> dict:
+    try:
+        return create_agent_knowledge_base(
+            agent_id,
             name=payload.name,
             description=payload.description,
             actor_agent_id=payload.actorAgentId,

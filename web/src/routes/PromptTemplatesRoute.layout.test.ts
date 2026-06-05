@@ -33,6 +33,13 @@ describe("PromptTemplatesRoute layout contract", () => {
     expect(routeSource).toContain('/reset`');
   });
 
+  it("keeps save and reset pending state scoped to the active template", () => {
+    expect(routeSource).toContain("if (activeTemplateId === template.promptTemplateId)");
+    expect(routeSource).toContain("saveMutation.variables?.templateId === activeTemplateId");
+    expect(routeSource).toContain("resetMutation.variables === activeTemplateId");
+    expect(routeSource).not.toContain("const busy = saveMutation.isPending || resetMutation.isPending || detailQuery.isFetching");
+  });
+
   it("supports category deep links and the expected workbench panels", () => {
     expect(routeSource).toContain('searchParams.get("category")');
     expect(routeSource).toContain('categoryFilter === "all" ? {} : { category: categoryFilter }');
@@ -42,5 +49,11 @@ describe("PromptTemplatesRoute layout contract", () => {
     expect(routeSource).toContain("styles.editorPanel");
     expect(routeSource).toContain("styles.templateList");
     expect(routeSource).toContain("styles.agentList");
+  });
+
+  it("keeps the prompt content editor as the primary visible area", () => {
+    expect(routeSource).toContain("styles.nameField");
+    expect(routeSource).toContain("styles.contentField");
+    expect(routeSource.indexOf("styles.contentField")).toBeLessThan(routeSource.indexOf("styles.bottomGrid"));
   });
 });

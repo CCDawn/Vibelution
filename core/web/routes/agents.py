@@ -6,11 +6,11 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from core.orchestration.context_engine import list_agent_runs_for_agent
 from core.web.services import agent_directory_service, agent_tool_governance_service, session_service
-from core.web.services.runtime_scene_service import list_runtime_scene_evidence_for_agent
+from core.web.services.runtime_scene_service import list_runtime_scene_evidence_for_agent, record_runtime_scene_event
 from core.web.services.agent_config_workspace_service import get_agent_config_workspace
 from core.web.services.agent_directory_service import (
     AgentDirectoryError,
@@ -18,6 +18,7 @@ from core.web.services.agent_directory_service import (
     AgentMessageNotFoundError,
     AgentNotFoundError,
     archive_agent_instance,
+    consume_all_agent_inbox_messages,
     consume_agent_inbox_message,
     ensure_agent_archive_allowed,
     ensure_agent_purge_allowed,
@@ -70,21 +71,24 @@ router = APIRouter(tags=["agents"])
 
 
 class AgentCreatePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     displayName: str = ""
-    templateId: str = ""
-    profileId: str = ""
+    llmBindings: dict[str, Any] = Field(default_factory=dict)
     primaryMode: str = ""
     roleKey: str = ""
     promptTemplateId: str = ""
+    toolPolicy: dict[str, Any] = Field(default_factory=dict)
     personaProfile: dict[str, Any] = Field(default_factory=dict)
     taskProfile: dict[str, Any] = Field(default_factory=dict)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class AgentUpdatePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     displayName: str | None = None
-    templateId: str | None = None
-    profileId: str | None = None
+    llmBindings: dict[str, Any] | None = None
     primaryMode: str | None = None
     roleKey: str | None = None
     promptTemplateId: str | None = None
@@ -321,26 +325,43 @@ def agent_avatar_upload(agent_id: str, payload: AgentAvatarUploadPayload) -> dic
 @router.post("/agents", status_code=status.HTTP_201_CREATED)
 def agent_create(payload: AgentCreatePayload) -> dict:
     try:
-        profile_id = payload.profileId or payload.templateId or "primary"
+        display_name = payload.displayName.strip()
+        llm_bindings = agent_directory_service.normalize_agent_llm_bindings(payload.llmBindings)
+        persona_profile = payload.personaProfile if isinstance(payload.personaProfile, dict) else {}
+        task_profile = payload.taskProfile if isinstance(payload.taskProfile, dict) else {}
+        tool_policy = payload.toolPolicy if isinstance(payload.toolPolicy, dict) else {}
+        _validate_agent_create_payload(
+            display_name=display_name,
+            llm_bindings=llm_bindings,
+            primary_mode=payload.primaryMode,
+            role_key=payload.roleKey,
+            prompt_template_id=payload.promptTemplateId,
+            persona_profile=persona_profile,
+            task_profile=task_profile,
+            tool_policy=tool_policy,
+        )
+        metadata = dict(payload.metadata or {})
         session = session_service.create_chat_session(
-            title=payload.displayName,
-            profile_id=profile_id,
+            title=display_name,
+            llm_bindings=llm_bindings,
             created_by="api_agents",
         )
         agent_id = str(session.get("agentId") or "").strip()
         agent = get_agent(agent_id) if agent_id else None
         if not agent:
             raise AgentDirectoryError("Agent was not created for the direct session.")
-        if payload.metadata:
-            agent = update_agent_instance(agent_id, metadata=payload.metadata)
-        if payload.personaProfile:
-            agent = update_agent_instance(agent_id, persona_profile=payload.personaProfile)
-        if payload.taskProfile:
-            agent = update_agent_instance(agent_id, task_profile=payload.taskProfile)
-        if payload.templateId or payload.primaryMode or payload.roleKey or payload.promptTemplateId:
+        if metadata:
+            agent = update_agent_instance(agent_id, metadata=metadata)
+        if persona_profile:
+            agent = update_agent_instance(agent_id, persona_profile=persona_profile)
+        if task_profile:
+            agent = update_agent_instance(agent_id, task_profile=task_profile)
+        if tool_policy:
+            agent = update_agent_instance(agent_id, tool_policy=tool_policy)
+        if payload.primaryMode or payload.roleKey or payload.promptTemplateId:
             agent = update_agent_instance(
                 agent_id,
-                template_id=payload.templateId or None,
+                llm_bindings=llm_bindings,
                 primary_mode=payload.primaryMode or None,
                 role_key=payload.roleKey or None,
                 prompt_template_id=payload.promptTemplateId or None,
@@ -350,6 +371,41 @@ def agent_create(payload: AgentCreatePayload) -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except AgentDirectoryError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+def _validate_agent_create_payload(
+    *,
+    display_name: str,
+    llm_bindings: dict[str, Any],
+    primary_mode: str,
+    role_key: str,
+    prompt_template_id: str,
+    persona_profile: dict[str, Any],
+    task_profile: dict[str, Any],
+    tool_policy: dict[str, Any],
+) -> None:
+    missing: list[str] = []
+    normalized_primary_mode = str(primary_mode or "").strip()
+    is_work_session = normalized_primary_mode in {"", "chat"}
+    if not display_name:
+        missing.append("功能名")
+    if not agent_directory_service.agent_dialogue_model_id({"llmBindings": llm_bindings}):
+        missing.append("对话模型")
+    if not normalized_primary_mode:
+        missing.append("使用位置")
+    if not is_work_session and not str(role_key or "").strip():
+        missing.append("角色键")
+    if not str(prompt_template_id or "").strip():
+        missing.append("提示词")
+    if not is_work_session and not agent_directory_service.agent_persona_profile_has_content(persona_profile):
+        missing.append("人物档案")
+    if not is_work_session and not agent_directory_service.agent_task_profile_has_content(task_profile):
+        missing.append("任务档案")
+    allowed_tools = tool_policy.get("allowedTools") if isinstance(tool_policy, dict) else []
+    if not is_work_session and (not isinstance(allowed_tools, list) or not any(str(item or "").strip() for item in allowed_tools)):
+        missing.append("工具包")
+    if missing:
+        raise AgentDirectoryError("Agent 创建信息不完整，请补齐：" + "、".join(missing) + "。")
 
 
 @router.get("/agents/{agent_id}")
@@ -508,6 +564,18 @@ def agent_message_consume(agent_id: str, message_id: str, payload: AgentMessageC
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
+@router.post("/agents/{agent_id}/messages/consume-all")
+def agent_messages_consume_all(agent_id: str, payload: AgentMessageConsumePayload) -> dict:
+    try:
+        return consume_all_agent_inbox_messages(
+            agent_id,
+            consumed_by_session_id=payload.consumedBySessionId,
+            consumed_by_turn_id=payload.consumedByTurnId,
+        )
+    except AgentNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
 @router.patch("/agents/{agent_id}")
 def agent_update(agent_id: str, payload: AgentUpdatePayload) -> dict:
     try:
@@ -527,8 +595,7 @@ def agent_update(agent_id: str, payload: AgentUpdatePayload) -> dict:
         return update_agent_instance(
             agent_id,
             display_name=payload.displayName,
-            template_id=payload.templateId,
-            profile_id=payload.profileId,
+            llm_bindings=payload.llmBindings,
             primary_mode=payload.primaryMode,
             role_key=payload.roleKey,
             prompt_template_id=payload.promptTemplateId,
@@ -578,8 +645,44 @@ def agent_chat_room_membership_update(agent_id: str, payload: AgentChatRoomMembe
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
+def _record_agent_reset_route_event(
+    event_code: str,
+    agent_id: str,
+    payload: AgentResetPayload,
+    *,
+    outcome: str,
+    level: str = "info",
+    error: Exception | None = None,
+) -> None:
+    try:
+        record_runtime_scene_event(
+            "agent_directory",
+            "reset",
+            event_code,
+            message=event_code,
+            level=level,
+            outcome=outcome,
+            fields={
+                "agentId": str(agent_id or "").strip(),
+                "clearRuntimeState": bool(payload.clearRuntimeState),
+                "resetDirectSession": bool(payload.resetDirectSession),
+                "resetPersonaProfile": bool(payload.resetPersonaProfile),
+                "resetTaskProfile": bool(payload.resetTaskProfile),
+                "resetToolPolicy": bool(payload.resetToolPolicy),
+                "resetMemoryPolicy": bool(payload.resetMemoryPolicy),
+                "resetRuntimePolicy": bool(payload.resetRuntimePolicy),
+                "errorType": type(error).__name__ if error is not None else "",
+                "source": "AgentResetAPI",
+            },
+            lifecycle=True,
+        )
+    except Exception:
+        return
+
+
 @router.post("/agents/{agent_id}/reset")
 def agent_reset(agent_id: str, payload: AgentResetPayload) -> dict:
+    _record_agent_reset_route_event("agent.reset.requested", agent_id, payload, outcome="requested")
     try:
         return reset_agent_instance(
             agent_id,
@@ -592,9 +695,14 @@ def agent_reset(agent_id: str, payload: AgentResetPayload) -> dict:
             reset_runtime_policy=payload.resetRuntimePolicy,
         )
     except AgentNotFoundError as exc:
+        _record_agent_reset_route_event("agent.reset.failed", agent_id, payload, outcome="failed", level="warning", error=exc)
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except AgentDirectoryError as exc:
+        _record_agent_reset_route_event("agent.reset.failed", agent_id, payload, outcome="failed", level="warning", error=exc)
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        _record_agent_reset_route_event("agent.reset.failed", agent_id, payload, outcome="failed", level="error", error=exc)
+        raise
 
 
 @router.delete("/agents/{agent_id}")

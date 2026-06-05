@@ -5,7 +5,7 @@ from __future__ import annotations
 import copy
 import json
 import re
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -230,19 +230,28 @@ def remove_agent_from_mode_bindings(agent_id: str) -> dict[str, Any]:
     payload = repair_mode_bindings()
     bindings = list(payload.get("bindings") or [])
     changed_modes: list[str] = []
+    removal_warnings: list[dict[str, str]] = []
     next_bindings: list[dict[str, Any]] = []
     for binding in bindings:
         if not isinstance(binding, dict):
             continue
         record = _normalize_binding(binding)
+        mode = str(record.get("mode") or "").strip()
         changed = False
         exclude_agent_from_reseed = False
         if str(record.get("defaultAgentId") or "").strip() == normalized_agent_id:
             record["defaultAgentId"] = ""
             changed = True
             exclude_agent_from_reseed = True
+            removal_warnings.append({"mode": mode, "field": "defaultAgentId", "agentId": normalized_agent_id})
         for field in ("availableAgentIds", "pool", "excludedAgentIds"):
-            values = [item for item in list(record.get(field) or []) if str(item or "").strip() != normalized_agent_id]
+            if field == "excludedAgentIds":
+                values = [item for item in list(record.get(field) or []) if str(item or "").strip() != normalized_agent_id]
+            else:
+                removed = [item for item in list(record.get(field) or []) if str(item or "").strip() == normalized_agent_id]
+                for _ in removed:
+                    removal_warnings.append({"mode": mode, "field": field, "agentId": normalized_agent_id})
+                values = [item for item in list(record.get(field) or []) if str(item or "").strip() != normalized_agent_id]
             if values != list(record.get(field) or []):
                 record[field] = values
                 changed = True
@@ -254,6 +263,9 @@ def remove_agent_from_mode_bindings(agent_id: str) -> dict[str, Any]:
             if str(value or "").strip() != normalized_agent_id
         }
         if flow_bindings != dict(record.get("flowBindings") or {}):
+            for key, value in dict(record.get("flowBindings") or {}).items():
+                if str(value or "").strip() == normalized_agent_id:
+                    removal_warnings.append({"mode": mode, "field": f"flowBindings.{key}", "agentId": normalized_agent_id})
             record["flowBindings"] = flow_bindings
             changed = True
             exclude_agent_from_reseed = True
@@ -264,6 +276,7 @@ def remove_agent_from_mode_bindings(agent_id: str) -> dict[str, Any]:
             if str(value or "").strip() == normalized_agent_id:
                 slots[key] = ""
                 exclude_agent_from_reseed = True
+                removal_warnings.append({"mode": mode, "field": f"slots.{key}", "agentId": normalized_agent_id})
                 if normalized_key:
                     excluded_slots.add(normalized_key)
             else:
@@ -294,6 +307,10 @@ def remove_agent_from_mode_bindings(agent_id: str) -> dict[str, Any]:
         next_bindings.append(_normalize_binding(record))
     if changed_modes:
         payload["bindings"] = next_bindings
+        payload["repairWarnings"] = [
+            *list(payload.get("repairWarnings") or []),
+            *removal_warnings,
+        ][-50:]
         _save_mode_bindings(payload)
         _record_mode_binding_event(
             "mode_binding.agent_removed",
@@ -351,6 +368,11 @@ def repair_mode_bindings(*, agent_options: list[dict[str, Any]] | None = None) -
         merged["excludedSlots"] = _safe_key_list([*list(existing.get("excludedSlots") or []), *list(record.get("excludedSlots") or [])])
         bindings_by_mode[record["mode"]] = _normalize_binding(merged)
 
+    prior_warnings = [
+        item
+        for item in list(payload.get("repairWarnings") or [])
+        if isinstance(item, dict) and str(item.get("agentId") or "").strip()
+    ]
     seeded = _seed_bindings_from_agents(bindings_by_mode, agents=agents)
     repaired: list[dict[str, Any]] = []
     repair_warnings: list[dict[str, str]] = []
@@ -358,11 +380,17 @@ def repair_mode_bindings(*, agent_options: list[dict[str, Any]] | None = None) -
         next_binding, warnings = _repair_agent_references(binding, active_agent_ids=active_agent_ids)
         repaired.append(next_binding)
         repair_warnings.extend(warnings)
+    if repair_warnings:
+        combined_warnings = [*prior_warnings, *repair_warnings]
+    elif not changed:
+        combined_warnings = prior_warnings
+    else:
+        combined_warnings = repair_warnings
     next_payload = {
         "schemaVersion": MODE_BINDING_VERSION,
         "updatedAt": str(payload.get("updatedAt") or _now()),
         "bindings": sorted(repaired, key=lambda item: str(item.get("mode") or "")),
-        "repairWarnings": repair_warnings[-50:],
+        "repairWarnings": combined_warnings[-50:],
     }
     if payload.get("schemaVersion") != MODE_BINDING_VERSION:
         changed = True
@@ -445,8 +473,8 @@ def _seed_bindings_from_agents(
             if role_key:
                 self_slots[role_key] = agent_id
 
-    chat_ids = [agent_id for mode in ("chat", "general") for agent_id in by_mode.get(mode, [])]
-    _seed_binding(bindings_by_mode, "chat", chat_ids or active_ids)
+    chat_ids = list(by_mode.get("chat", []))
+    _seed_binding(bindings_by_mode, "chat", chat_ids)
     _seed_binding(bindings_by_mode, "research", by_mode.get("research", []))
     _seed_binding(bindings_by_mode, "supervised_evolution", by_mode.get("supervised_evolution", []), slots=supervised_slots)
     _seed_binding(bindings_by_mode, "self_evolution", by_mode.get("self_evolution", []), slots=self_slots)
@@ -531,6 +559,10 @@ def _repair_agent_references(
         if agent_id
     ]
     next_binding["excludedSlots"] = _safe_key_list(next_binding.get("excludedSlots") or [])
+    if warnings:
+        next_binding["excludedAgentIds"] = _dedupe(
+            [*list(next_binding.get("excludedAgentIds") or []), *(item["agentId"] for item in warnings)]
+        )
     if not next_binding["defaultAgentId"] and next_binding["availableAgentIds"]:
         next_binding["defaultAgentId"] = next_binding["availableAgentIds"][0]
     if warnings:
@@ -783,4 +815,4 @@ def _record_mode_binding_event(
 
 
 def _now() -> str:
-    return datetime.now(UTC).isoformat()
+    return datetime.now(timezone.utc).isoformat()

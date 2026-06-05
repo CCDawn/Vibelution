@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass
 from typing import Dict, Any, Optional, List
@@ -20,6 +21,8 @@ from typing import Dict, Any, Optional, List
 
 # 默认截断阈值
 DEFAULT_MAX_CHARS = 4000
+
+BUSINESS_FAILURE_STATUSES = {"fail", "failed", "failure", "error", "errored"}
 
 
 @dataclass
@@ -35,13 +38,59 @@ class ToolResultEnvelope:
     continuation_hint: str = ""
 
 
+def _looks_like_business_failure(payload: Any) -> bool:
+    """判断结构化工具返回值是否表达了业务失败。"""
+    if not isinstance(payload, dict):
+        return False
+
+    ok_value = payload.get("ok")
+    if ok_value is False:
+        return True
+    success_value = payload.get("success")
+    if success_value is False:
+        return True
+
+    status_value = payload.get("status")
+    if isinstance(status_value, str) and status_value.strip().lower() in BUSINESS_FAILURE_STATUSES:
+        return True
+
+    error_value = payload.get("error")
+    if error_value and ok_value is not True and success_value is not True:
+        return True
+
+    return False
+
+
+def infer_tool_business_success(result: Any) -> bool:
+    """从工具返回值推断业务层是否成功。
+
+    工具调用本身可能完成，但返回 JSON 中的 ``ok=false`` / ``status=failed``
+    表示业务动作失败。日志层必须区分这两种状态，避免出现
+    ``RESULT xxx OK`` 掩盖业务失败的误导性记录。
+    """
+    if result is None:
+        return False
+    if isinstance(result, dict):
+        return not _looks_like_business_failure(result)
+    if isinstance(result, str):
+        stripped = result.strip()
+        if stripped.startswith(("[错误]", "[超时]", "[短路]")):
+            return False
+        if stripped.startswith("{"):
+            try:
+                return not _looks_like_business_failure(json.loads(stripped))
+            except Exception:
+                return True
+    return True
+
+
 def _infer_result_kind(tool_name: str = "", result_str: str = "") -> str:
     name = (tool_name or "").lower()
     text = result_str or ""
     if name == "read_file_tool" or text.startswith("[文件]"):
         return "file_read"
     if name == "code_symbol_tool" or text.startswith("[AST]"):
-        return "python_structure"
+        return "code_context_graph"
     if name == "grep_search_tool" or text.startswith("[搜索]"):
         return "search"
     if text.startswith("{") or text.startswith("["):
@@ -65,8 +114,8 @@ def _extract_continuation_hint(result_kind: str, result_str: str) -> str:
                 return line[len("[阅读导航] ") :].strip()
             if line.startswith("[续读] "):
                 return line[len("[续读] ") :].strip()
-    if result_kind == "python_structure":
-        return "优先继续使用 code_symbol_tool 的 outline/entity/definition/references 模式做结构化补读。"
+    if result_kind == "code_context_graph":
+        return "优先继续使用 code_symbol_tool 的 explore/inspect/references/impact/affected_tests 模式做结构化补读。"
     if result_kind == "search":
         return "优先缩小搜索范围，或按命中文件继续读取局部上下文。"
     return ""

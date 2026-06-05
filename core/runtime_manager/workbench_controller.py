@@ -25,7 +25,7 @@ from .constants import (
     PROJECT_ROOT,
     PYTHON_LAUNCHER_SCRIPT_PATH,
 )
-from .process_inventory import list_repo_runtime_processes
+from .process_inventory import list_repo_runtime_processes, managed_browser_process_payload
 
 
 def _is_process_alive_windows(pid: int) -> bool:
@@ -194,15 +194,61 @@ def _pid_is_repo_workbench_backend(pid: int) -> bool:
     return _repo_workbench_backend_kind(pid) == "managed_workbench_backend"
 
 
+def _recover_managed_browser_window_pid(profile_dir: str) -> int:
+    profile = str(profile_dir or "").strip()
+    if not profile:
+        return 0
+    try:
+        payload = managed_browser_process_payload(profile_dir=profile, command_preview_chars=420)
+    except Exception:
+        return 0
+    if not bool(payload.get("supported")):
+        return 0
+    items = payload.get("items")
+    if not isinstance(items, list):
+        return 0
+
+    browser_candidates: list[dict[str, Any]] = []
+    fallback_candidates: list[dict[str, Any]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        pid = int(item.get("pid") or 0)
+        if pid <= 0 or not _is_process_alive(pid):
+            continue
+        process_type = str(item.get("type") or "").strip().lower()
+        command_preview = str(item.get("commandLinePreview") or "")
+        if process_type == "browser":
+            browser_candidates.append(item)
+        if "--app=" in command_preview or process_type == "browser":
+            fallback_candidates.append(item)
+
+    for candidates in (browser_candidates, fallback_candidates):
+        if candidates:
+            return int(candidates[0].get("pid") or 0)
+    return 0
+
+
 def observe_workbench() -> dict[str, Any]:
     launcher_state = _load_launcher_state()
     url = str(launcher_state.get("url") or DEFAULT_URL).strip() or DEFAULT_URL
     state_backend_pid = int(launcher_state.get("backendPid") or 0)
     backend_launch_pid = int(launcher_state.get("backendLaunchPid") or 0)
-    browser_launch_pid = int(launcher_state.get("browserLaunchPid") or 0)
-    browser_window_pid = int(launcher_state.get("browserWindowPid") or 0)
-    browser_managed = bool(launcher_state.get("browserManaged", True))
     session_role = str(launcher_state.get("sessionRole") or "workbench").strip() or "workbench"
+    if session_role == "launcher_control_surface":
+        browser_launch_pid = int(launcher_state.get("workbenchBrowserLaunchPid") or 0)
+        browser_window_pid = int(launcher_state.get("workbenchBrowserWindowPid") or 0)
+    else:
+        browser_launch_pid = int(launcher_state.get("workbenchBrowserLaunchPid") or launcher_state.get("browserLaunchPid") or 0)
+        browser_window_pid = int(launcher_state.get("workbenchBrowserWindowPid") or launcher_state.get("browserWindowPid") or 0)
+    browser_profile_dir = str(
+        launcher_state.get("workbenchBrowserProfileDir")
+        or launcher_state.get("browserProfileDir")
+        or ""
+    ).strip()
+    browser_managed = bool(launcher_state.get("browserManaged", True))
+    launcher_browser_launch_pid = int(launcher_state.get("launcherBrowserLaunchPid") or 0)
+    launcher_browser_window_pid = int(launcher_state.get("launcherBrowserWindowPid") or 0)
 
     backend_alive = _is_process_alive(state_backend_pid)
     health_probe_url = url if launcher_state else DEFAULT_URL
@@ -211,6 +257,15 @@ def observe_workbench() -> dict[str, Any]:
     port_owner_pid = _listening_pid_for_port(port)
     port_listening = bool(port_owner_pid) or _port_is_listening_socket(port)
     browser_window_alive = _is_process_alive(browser_window_pid)
+    recovered_browser_window_pid = 0
+    browser_window_recovery_source = ""
+    if not browser_window_alive and browser_managed and session_role != "launcher_control_surface":
+        recovered_browser_window_pid = _recover_managed_browser_window_pid(browser_profile_dir)
+        if recovered_browser_window_pid > 0:
+            browser_window_pid = recovered_browser_window_pid
+            browser_window_alive = True
+            browser_window_recovery_source = "managed_profile"
+    launcher_browser_window_alive = _is_process_alive(launcher_browser_window_pid)
     port_owner_kind = _repo_workbench_backend_kind(port_owner_pid) if port_owner_pid > 0 else ""
     port_owner_trusted = bool(
         port_owner_pid > 0
@@ -258,6 +313,12 @@ def observe_workbench() -> dict[str, Any]:
         "backendLaunchPid": backend_launch_pid,
         "browserLaunchPid": browser_launch_pid,
         "browserWindowPid": browser_window_pid,
+        "browserWindowRecoveredPid": recovered_browser_window_pid,
+        "browserWindowRecoverySource": browser_window_recovery_source,
+        "browserProfileDir": browser_profile_dir,
+        "launcherBrowserLaunchPid": launcher_browser_launch_pid,
+        "launcherBrowserWindowPid": launcher_browser_window_pid,
+        "launcherBrowserWindowAlive": launcher_browser_window_alive,
         "browserManaged": browser_managed,
         "url": url,
         "healthUrl": _health_url_for(health_probe_url),

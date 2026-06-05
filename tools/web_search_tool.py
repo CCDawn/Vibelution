@@ -29,44 +29,124 @@ import httpx
 _APP_ID = os.environ.get("AUTOGLM_APP_ID", "")
 _APP_KEY = os.environ.get("AUTOGLM_APP_KEY", "")
 _API_URL = "https://autoglm-api.zhipuai.cn/agentdr/v1/assistant/skills/web-search"
-_TOKEN_URL = "http://127.0.0.1:53699/get_token"
+_DEFAULT_TOKEN_URL = "http://127.0.0.1:53699/get_token"
+_TOKEN_URL = os.environ.get("AUTOGLM_TOKEN_URL", _DEFAULT_TOKEN_URL).strip() or _DEFAULT_TOKEN_URL
 _REQUEST_TIMEOUT = 30.0  # 秒
+_TOKEN_TIMEOUT = 10.0  # 秒
+
+
+class AutoGLMTokenServiceError(RuntimeError):
+    """Structured failure raised when the local AutoGLM token dependency is unavailable."""
+
+    def __init__(self, status: str, message: str, *, token_url: str = _TOKEN_URL, http_status: int | None = None):
+        super().__init__(message)
+        self.status = status
+        self.token_url = token_url
+        self.http_status = http_status
+
+    def to_fields(self) -> dict[str, Any]:
+        fields: dict[str, Any] = {
+            "dependency": "autoglm_token_service",
+            "stage": "token_fetch",
+            "status": self.status,
+            "tokenUrl": self.token_url,
+            "searchApiCalled": False,
+        }
+        if self.http_status is not None:
+            fields["httpStatus"] = self.http_status
+        return fields
 
 
 # ============================================================================
 # Token 获取
 # ============================================================================
 
+def _record_dependency_event(error: AutoGLMTokenServiceError) -> None:
+    """Record token dependency failures without leaking token or full query text."""
+    try:
+        from core.web.services.runtime_scene_service import record_runtime_scene_event
+
+        record_runtime_scene_event(
+            "tool",
+            "web_search",
+            "tool.web_search.dependency_unavailable",
+            message=f"web_search_tool dependency failed: {error.status}",
+            level="warning",
+            outcome="failed",
+            fields=error.to_fields(),
+            lifecycle=True,
+        )
+    except Exception:
+        return
+
+
+def _format_token_service_error(error: AutoGLMTokenServiceError) -> str:
+    fields = error.to_fields()
+    diagnostic = (
+        "\n"
+        f"依赖: {fields['dependency']}\n"
+        f"阶段: {fields['stage']}\n"
+        f"状态: {fields['status']}\n"
+        f"tokenUrl: {fields['tokenUrl']}\n"
+        f"searchApiCalled: {str(fields['searchApiCalled']).lower()}\n"
+        "建议: 请先启动或恢复本地 AutoGLM token 服务；如果端口已变化，设置 AUTOGLM_TOKEN_URL。"
+    )
+    return f"[错误] {error}{diagnostic}"
+
+
+def check_autoglm_token_service() -> dict[str, Any]:
+    """Probe the configured local AutoGLM token service without returning the token."""
+    try:
+        token = _get_bearer_token()
+    except AutoGLMTokenServiceError as error:
+        return {
+            "available": False,
+            **error.to_fields(),
+        }
+    return {
+        "available": True,
+        "dependency": "autoglm_token_service",
+        "stage": "token_fetch",
+        "status": "available",
+        "tokenUrl": _TOKEN_URL,
+        "tokenPresent": bool(token),
+    }
+
+
 def _get_bearer_token() -> str:
     """从本地服务获取 Bearer token"""
     try:
-        with httpx.Client(timeout=10.0) as client:
+        with httpx.Client(timeout=_TOKEN_TIMEOUT) as client:
             response = client.get(_TOKEN_URL)
             response.raise_for_status()
             token = response.text.strip()
     except httpx.ConnectError as e:
-        raise RuntimeError(
+        raise AutoGLMTokenServiceError(
+            "unavailable",
             "本地 AutoGLM token 服务不可用，无法连接 "
             f"{_TOKEN_URL}。这一步发生在调用外网搜索 API 之前，"
             "因此当前不是外网搜索接口失败；请先启动或恢复本地 token 服务。"
         ) from e
     except httpx.TimeoutException as e:
-        raise RuntimeError(
+        raise AutoGLMTokenServiceError(
+            "timeout",
             "本地 AutoGLM token 服务响应超时，无法获取 token。"
             f"请检查 {_TOKEN_URL} 是否卡住或负载过高。"
         ) from e
     except httpx.HTTPStatusError as e:
-        raise RuntimeError(
+        raise AutoGLMTokenServiceError(
+            "http_error",
             "本地 AutoGLM token 服务返回错误状态："
-            f"HTTP {e.response.status_code} {e.response.text[:200]}"
+            f"HTTP {e.response.status_code} {e.response.text[:200]}",
+            http_status=e.response.status_code,
         ) from e
     except httpx.RequestError as e:
-        raise RuntimeError(f"本地 AutoGLM token 服务请求失败: {e}") from e
+        raise AutoGLMTokenServiceError("request_error", f"本地 AutoGLM token 服务请求失败: {e}") from e
     except Exception as e:
-        raise RuntimeError(f"无法从本地服务获取 token: {type(e).__name__}: {e}") from e
+        raise AutoGLMTokenServiceError("unknown_error", f"无法从本地服务获取 token: {type(e).__name__}: {e}") from e
 
     if not token:
-        raise RuntimeError("获取到的 token 为空")
+        raise AutoGLMTokenServiceError("empty_token", "获取到的 token 为空")
 
     if not token.lower().startswith("bearer "):
         token = f"Bearer {token}"
@@ -159,8 +239,9 @@ def web_search(query: str, max_results: int = 10) -> str:
     # 1. 获取 token
     try:
         token = _get_bearer_token()
-    except RuntimeError as e:
-        return f"[错误] {e}"
+    except AutoGLMTokenServiceError as e:
+        _record_dependency_event(e)
+        return _format_token_service_error(e)
 
     # 2. 构建请求
     headers, payload = _build_headers(token, query.strip())

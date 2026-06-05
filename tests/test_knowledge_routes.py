@@ -121,6 +121,68 @@ def test_knowledge_overview_returns_visible_team_knowledge(tmp_path, monkeypatch
     assert payload["knowledgeBases"][0]["knowledgeBaseId"] == base["knowledgeBaseId"]
 
 
+def test_agent_knowledge_routes_create_private_formal_base_and_rag(tmp_path, monkeypatch):
+    client, _team, _lead, member, outsider = _setup(tmp_path, monkeypatch)
+
+    base_response = client.post(
+        f"/api/agents/{member['agentId']}/knowledge-bases",
+        json={"name": "Agent Route KB", "actorAgentId": member["agentId"]},
+    )
+    assert base_response.status_code == 201
+    base = base_response.json()
+    assert base["ownerType"] == "agent"
+    assert base["ownerId"] == member["agentId"]
+
+    proposal = client.post(
+        f"/api/knowledge-bases/{base['knowledgeBaseId']}/refinement-proposals",
+        json={
+            "proposedByAgentId": member["agentId"],
+            "title": "Agent route private RAG",
+            "content": "Agent route private formal knowledge should be retrievable only by the owning Agent.",
+            "tags": ["agent-private", "rag"],
+        },
+    ).json()
+    applied = client.patch(
+        f"/api/knowledge-bases/{base['knowledgeBaseId']}/refinement-proposals/{proposal['proposalId']}/review",
+        json={"status": "approved", "reviewedByAgentId": member["agentId"]},
+    ).json()
+
+    list_response = client.get(
+        f"/api/agents/{member['agentId']}/knowledge-bases",
+        params={"actorAgentId": member["agentId"]},
+    )
+    rag_response = client.get(
+        "/api/knowledge/rag/retrieve",
+        params={
+            "agentId": member["agentId"],
+            "query": "private formal retrievable",
+            "ownerType": "agent",
+            "ownerId": member["agentId"],
+            "retrievalMode": "semantic",
+        },
+    )
+    blocked_response = client.get(
+        "/api/knowledge/rag/retrieve",
+        params={
+            "agentId": outsider["agentId"],
+            "query": "private formal retrievable",
+            "ownerType": "agent",
+            "ownerId": member["agentId"],
+            "retrievalMode": "semantic",
+        },
+    )
+
+    assert list_response.status_code == 200
+    assert list_response.json()["summary"]["knowledgeBaseCount"] == 1
+    assert rag_response.status_code == 200
+    context = rag_response.json()["contexts"][0]
+    assert context["source"]["ownerType"] == "agent"
+    assert context["source"]["ownerId"] == member["agentId"]
+    assert context["source"]["knowledgeItemId"] == applied["item"]["knowledgeItemId"]
+    assert blocked_response.status_code == 200
+    assert blocked_response.json()["summary"]["contextCount"] == 0
+
+
 def test_knowledge_search_permission_audit_and_rating_suggestion_routes(tmp_path, monkeypatch):
     client, team, lead, member, _outsider = _setup(tmp_path, monkeypatch)
     base = client.post(
@@ -473,6 +535,51 @@ def test_knowledge_steward_workbench_groups_next_actions(tmp_path, monkeypatch):
         for item in stage["items"]
     )
     assert payload["acceptanceChecklist"][1]["id"] == "proposal_reviewed"
+
+
+def test_knowledge_dashboard_snapshot_combines_memory_dashboard_state(tmp_path, monkeypatch):
+    client, team, lead, member, _outsider = _setup(tmp_path, monkeypatch)
+    base = client.post(
+        f"/api/teams/{team['teamId']}/knowledge-bases",
+        json={"name": "Dashboard Snapshot KB", "actorAgentId": lead["agentId"]},
+    ).json()
+    source = client.post(
+        f"/api/knowledge-bases/{base['knowledgeBaseId']}/source-artifacts",
+        json={
+            "sourceType": "manual_user_entry",
+            "sourceRef": {"note": "snapshot source"},
+            "title": "Snapshot source",
+            "actorAgentId": member["agentId"],
+        },
+    ).json()
+    proposal = client.post(
+        f"/api/knowledge-bases/{base['knowledgeBaseId']}/refinement-proposals",
+        json={
+            "proposedByAgentId": member["agentId"],
+            "title": "Snapshot proposal",
+            "content": "Dashboard snapshot should gather read-only governance state.",
+        },
+    ).json()
+
+    response = client.get(
+        "/api/knowledge/dashboard-snapshot",
+        params={"agentId": lead["agentId"], "recommendationLimit": 6, "workbenchLimit": 8, "planLimit": 8},
+    )
+    items_response = client.get(f"/api/knowledge-bases/{base['knowledgeBaseId']}/items", params={"agentId": member["agentId"]})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["schemaVersion"] == 1
+    assert payload["agentId"] == lead["agentId"]
+    assert payload["overview"]["summary"]["knowledgeBaseCount"] == 1
+    assert payload["steward"]["steward"]["agentId"] == agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID
+    assert any(item["targetId"] == proposal["proposalId"] for item in payload["recommendations"]["recommendations"])
+    assert any(action["targetId"] == proposal["proposalId"] for action in payload["workbench"]["nextActions"])
+    assert payload["operationsHealth"]["summary"]["orphanSourceCount"] == 1
+    assert any(finding["findingType"] == "orphan_sources" for finding in payload["operationsHealth"]["findings"])
+    assert any(action["targetId"] == source["sourceArtifactId"] or action["targetId"] == proposal["proposalId"] for action in payload["governancePlan"]["actions"])
+    assert payload["governancePlan"]["operatingBoundary"]["canDirectlyApplyKnowledge"] is False
+    assert items_response.json()["summary"]["itemCount"] == 0
 
 
 def test_knowledge_operations_health_and_governance_plan_routes_are_read_only(tmp_path, monkeypatch):

@@ -64,6 +64,13 @@ export default defineConfig({
     __VIBELUTION_BUILD_ID__: JSON.stringify(buildStamp),
   },
   plugins: [react()],
+  test: {
+    environment: "node",
+    include: ["src/**/*.test.ts", "src/**/*.test.tsx", "*.test.ts"],
+  },
+  esbuild: {
+    jsx: "automatic",
+  },
   server: {
     host: "127.0.0.1",
     port: frontendPort,
@@ -71,4 +78,4 @@ export default defineConfig({
       "/api": `http://127.0.0.1:${backendPort}`,
     },
   },
-});
+} as Parameters<typeof defineConfig>[0]);

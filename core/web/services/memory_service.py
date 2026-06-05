@@ -85,6 +85,7 @@ def get_memory_usage_contract() -> dict[str, Any]:
         "projectRoot": str(root),
         "principles": [
             "Agent private memory stays agent-scoped and is not mixed into Team knowledge files.",
+            "Agent formal knowledge is Agent-owned, permissioned, source-backed, and RAG-readable by explicit owner scope.",
             "Team knowledge is Team-scoped, permissioned, source-backed, and tool-readable by default.",
             "Evidence is not knowledge; proposals are not formal knowledge; formal knowledge requires reviewer confirmation.",
             "Evolution systems may register runtime evidence and proposals, but must not directly apply formal knowledge.",
@@ -102,6 +103,18 @@ def get_memory_usage_contract() -> dict[str, Any]:
                 "canCreateFormalKnowledge": False,
                 "promptDefault": "agent_runtime_dependent",
                 "boundary": "Private identity, working notes, and agent-local continuity do not become Team knowledge automatically.",
+            },
+            {
+                "domainId": "agent_formal_knowledge",
+                "label": "Agent formal knowledge base",
+                "owner": "Agent",
+                "storage": "workspace/agents/{agentId}/knowledge",
+                "readsThrough": ["knowledge_rag_retrieve_tool", "/api/knowledge/search", "/api/knowledge/rag/retrieve"],
+                "writesThrough": ["SourceArtifact", "RefinementProposal", "owner review/apply", "rating suggestion review"],
+                "canRegisterSource": True,
+                "canCreateFormalKnowledge": True,
+                "promptDefault": "not_in_prompt",
+                "boundary": "Agent-owned formal knowledge is private to the owning Agent by default; other Agents require explicit grants or future owner-aware policy.",
             },
             {
                 "domainId": "team_knowledge",

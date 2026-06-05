@@ -14,7 +14,16 @@ import {
   sendTeamProjectBusMessage,
 } from "../api/projectAgentBus";
 import { queryKeys } from "../api/queryKeys";
-import { AgentConfigWorkspace, ChatRoomDetail, Team, TeamCanvasNode, TeamListPayload, TeamOrganizationCanvas } from "../api/types";
+import {
+  AgentConfigWorkspace,
+  ChatRoomDetail,
+  Team,
+  TeamCanvasNode,
+  TeamListPayload,
+  TeamOrganizationCanvas,
+  TeamTemplateInstantiatePayload,
+  TeamTemplateListPayload,
+} from "../api/types";
 import { useAppI18n } from "../i18n/useAppI18n";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { agentDisplayInfo } from "./agentDisplay";
@@ -307,7 +316,9 @@ export function TeamsRoute() {
   const pageVisible = usePageVisibility();
   const [selectedTeamId, setSelectedTeamId] = useState("");
   const [selectedNodeId, setSelectedNodeId] = useState("");
+  const [selectedTemplateId, setSelectedTemplateId] = useState("");
   const [teamDraft, setTeamDraft] = useState<TeamDraft>({ name: "", purpose: "" });
+  const [createTeamError, setCreateTeamError] = useState("");
   const [nodeDraft, setNodeDraft] = useState<NodeDraft>({ label: "", role: "", purpose: "", agentId: "" });
   const [teamMessage, setTeamMessage] = useState("");
   const [teamInterrupt, setTeamInterrupt] = useState(false);
@@ -317,12 +328,17 @@ export function TeamsRoute() {
   const [canvasFrameSize, setCanvasFrameSize] = useState<CanvasFrameSize>({ width: CANVAS_VIEWPORT_WIDTH, height: CANVAS_VIEWPORT_HEIGHT });
   const [lockedCanvasViewportStyle, setLockedCanvasViewportStyle] = useState<CanvasViewportStyle | null>(null);
   const canvasFrameRef = useRef<HTMLDivElement | null>(null);
+  const teamNameInputRef = useRef<HTMLInputElement | null>(null);
   const dragStateRef = useRef<NodeDragState | null>(null);
   const dragFrameRef = useRef(0);
 
   const teamsQuery = useQuery({
     queryKey: queryKeys.teams(),
     queryFn: () => fetchJson<TeamListPayload>("/api/teams"),
+  });
+  const teamTemplatesQuery = useQuery({
+    queryKey: queryKeys.teamTemplates(),
+    queryFn: () => fetchJson<TeamTemplateListPayload>("/api/team-templates"),
   });
   const workspaceQuery = useQuery({
     queryKey: queryKeys.agentConfigWorkspace(),
@@ -338,6 +354,11 @@ export function TeamsRoute() {
     [workspaceQuery.data],
   );
   const teams = teamsQuery.data?.teams ?? [];
+  const teamTemplates = useMemo(() => teamTemplatesQuery.data?.templates ?? [], [teamTemplatesQuery.data?.templates]);
+  const selectedTemplate = useMemo(
+    () => teamTemplates.find((template) => template.templateId === selectedTemplateId) ?? teamTemplates[0] ?? null,
+    [selectedTemplateId, teamTemplates],
+  );
   const agentTeamMembership = useMemo(() => {
     const membership = new Map<string, { teamId: string; teamName: string }>();
     teams.forEach((team) => {
@@ -353,7 +374,9 @@ export function TeamsRoute() {
     return membership;
   }, [teams]);
   const requestedTeamId = searchParams.get("team") ?? "";
-  const effectiveTeamId = selectedTeamId || teams[0]?.teamId || "";
+  const requestedAgentId = searchParams.get("agent") ?? "";
+  const requestedAgentTeamId = requestedAgentId ? agentTeamMembership.get(requestedAgentId)?.teamId ?? "" : "";
+  const effectiveTeamId = selectedTeamId || requestedTeamId || requestedAgentTeamId || teams[0]?.teamId || "";
   const teamDetailQuery = useQuery({
     queryKey: queryKeys.team(effectiveTeamId),
     queryFn: () => fetchJson<Team>(`/api/teams/${encodeURIComponent(effectiveTeamId)}`),
@@ -408,14 +431,30 @@ export function TeamsRoute() {
   );
 
   useEffect(() => {
+    if (!teamTemplates.length) {
+      if (selectedTemplateId) {
+        setSelectedTemplateId("");
+      }
+      return;
+    }
+    if (!selectedTemplateId || !teamTemplates.some((template) => template.templateId === selectedTemplateId)) {
+      setSelectedTemplateId(teamTemplates[0].templateId);
+    }
+  }, [selectedTemplateId, teamTemplates]);
+
+  useEffect(() => {
     if (requestedTeamId && teams.some((team) => team.teamId === requestedTeamId)) {
       setSelectedTeamId(requestedTeamId);
+      return;
+    }
+    if (requestedAgentTeamId && teams.some((team) => team.teamId === requestedAgentTeamId)) {
+      setSelectedTeamId(requestedAgentTeamId);
       return;
     }
     if (!selectedTeamId && teams[0]) {
       setSelectedTeamId(teams[0].teamId);
     }
-  }, [requestedTeamId, selectedTeamId, teams]);
+  }, [requestedAgentTeamId, requestedTeamId, selectedTeamId, teams]);
 
   useEffect(() => {
     if (selectedNode) {
@@ -473,7 +512,35 @@ export function TeamsRoute() {
       setSelectedTeamId(team.teamId);
       setSearchParams({ team: team.teamId });
       setTeamDraft({ name: "", purpose: "" });
+      setCreateTeamError("");
       void chatWorkspaceCache.afterTeamChanged(team.teamId);
+    },
+    onError: (error) => {
+      setCreateTeamError(error instanceof Error ? error.message : String(error));
+    },
+  });
+
+  const instantiateTeamTemplateMutation = useMutation({
+    mutationFn: (templateId: string) =>
+      fetchJson<TeamTemplateInstantiatePayload>(`/api/team-templates/${encodeURIComponent(templateId)}/instantiate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      }),
+    onSuccess: (payload) => {
+      const team = payload.team;
+      setSelectedTeamId(team.teamId);
+      setSearchParams({ team: team.teamId });
+      setSelectedNodeId("");
+      setCreateTeamError("");
+      queryClient.setQueryData(queryKeys.team(team.teamId), team);
+      void chatWorkspaceCache.afterTeamChanged(team.teamId);
+      if (team.linkedChatRoom?.roomId) {
+        void chatWorkspaceCache.afterTeamRoomMembershipChanged(team.teamId, team.linkedChatRoom.roomId);
+      }
+    },
+    onError: (error) => {
+      setCreateTeamError(error instanceof Error ? error.message : String(error));
     },
   });
 
@@ -482,11 +549,11 @@ export function TeamsRoute() {
       fetchJson<Team>(`/api/teams/${encodeURIComponent(teamId)}`, {
         method: "DELETE",
       }),
-    onSuccess: () => {
+    onSuccess: (_team, teamId) => {
       setSelectedTeamId("");
       setSelectedNodeId("");
       setSearchParams({});
-      void chatWorkspaceCache.afterTeamChanged();
+      void chatWorkspaceCache.afterTeamChanged(teamId);
     },
   });
 
@@ -497,28 +564,30 @@ export function TeamsRoute() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(nextCanvas),
       }),
-    onSuccess: () => {
-      void chatWorkspaceCache.afterTeamChanged(selectedTeamId || undefined);
+    onSuccess: (_canvas, variables) => {
+      void chatWorkspaceCache.afterTeamChanged(variables.teamId);
     },
   });
 
   const sendTeamMessageMutation = useMutation({
     mutationFn: (payload: { teamId: string; content: string; interruptMode: string }) =>
       sendTeamProjectBusMessage(payload),
-    onSuccess: () => {
-      setTeamMessage("");
-      void chatWorkspaceCache.afterTeamChanged(selectedTeamId || undefined);
+    onSuccess: (_payload, variables) => {
+      if (variables.teamId === selectedTeamId) {
+        setTeamMessage("");
+      }
+      void chatWorkspaceCache.afterTeamChanged(variables.teamId);
     },
   });
 
   const revokeTeamMessageMutation = useMutation({
-    mutationFn: (eventId: string) =>
+    mutationFn: (payload: { teamId: string; eventId: string }) =>
       revokeProjectAgentBusMessage({
-        eventId,
+        eventId: payload.eventId,
         reason: "Revoked from Agent Center team broadcast history.",
       }),
-    onSuccess: () => {
-      void chatWorkspaceCache.afterTeamChanged(selectedTeamId || undefined);
+    onSuccess: (_payload, variables) => {
+      void chatWorkspaceCache.afterTeamChanged(variables.teamId);
     },
   });
 
@@ -559,8 +628,11 @@ export function TeamsRoute() {
     },
   });
 
+  const canvasSavePendingForTeam = (teamId: string | undefined | null) =>
+    saveCanvasMutation.isPending && Boolean(teamId) && saveCanvasMutation.variables?.teamId === teamId;
+
   function saveCanvas(nextCanvas: TeamOrganizationCanvas | null) {
-    if (!nextCanvas || saveCanvasMutation.isPending) {
+    if (!nextCanvas || canvasSavePendingForTeam(nextCanvas.teamId)) {
       return;
     }
     saveCanvasMutation.mutate(nextCanvas);
@@ -681,7 +753,7 @@ export function TeamsRoute() {
   }
 
   function startNodeDrag(event: ReactPointerEvent<HTMLButtonElement>, node: TeamCanvasNode) {
-    if (!canvas || saveCanvasMutation.isPending) {
+    if (!canvas || canvasSavePendingForTeam(canvas.teamId)) {
       return;
     }
     event.preventDefault();
@@ -762,7 +834,25 @@ export function TeamsRoute() {
   }
 
   const validation = canvas?.validation;
-  const saveLabel = saveCanvasMutation.isPending ? (lang === "zh" ? "保存中" : "Saving") : saveCanvasMutation.isSuccess ? (lang === "zh" ? "已保存" : "Saved") : "";
+  const selectedTeamSaveCanvasPending = canvasSavePendingForTeam(selectedTeam?.teamId);
+  const selectedTeamSaveCanvasSuccess = saveCanvasMutation.isSuccess && saveCanvasMutation.variables?.teamId === selectedTeam?.teamId;
+  const selectedTeamSyncPending = syncTeamChatRoomMutation.isPending && syncTeamChatRoomMutation.variables === selectedTeam?.teamId;
+  const selectedTeamArchivePending = archiveTeamMutation.isPending && archiveTeamMutation.variables === selectedTeam?.teamId;
+  const selectedTeamStartRoundPending = startTeamRoundMutation.isPending && startTeamRoundMutation.variables?.teamId === selectedTeam?.teamId;
+  const selectedTeamStartRoundResult =
+    startTeamRoundMutation.variables?.teamId === selectedTeam?.teamId ? startTeamRoundMutation.data : undefined;
+  const selectedTeamStartRoundError =
+    startTeamRoundMutation.variables?.teamId === selectedTeam?.teamId && startTeamRoundMutation.error instanceof Error
+      ? startTeamRoundMutation.error
+      : null;
+  const selectedTeamMessagePending = sendTeamMessageMutation.isPending && sendTeamMessageMutation.variables?.teamId === selectedTeam?.teamId;
+  const selectedTeamMessageResult =
+    sendTeamMessageMutation.variables?.teamId === selectedTeam?.teamId ? sendTeamMessageMutation.data : undefined;
+  const selectedTeamMessageError =
+    sendTeamMessageMutation.variables?.teamId === selectedTeam?.teamId && sendTeamMessageMutation.error instanceof Error
+      ? sendTeamMessageMutation.error
+      : null;
+  const saveLabel = selectedTeamSaveCanvasPending ? (lang === "zh" ? "保存中" : "Saving") : selectedTeamSaveCanvasSuccess ? (lang === "zh" ? "已保存" : "Saved") : "";
   const activeTeamMemberCount = selectedTeam?.members.filter((member) => member.agentStatus === "active").length ?? 0;
   const conversationProjection = selectedTeam?.conversation ?? null;
   const linkedRoomDetail = linkedChatRoomQuery.data ?? null;
@@ -805,24 +895,90 @@ export function TeamsRoute() {
             className={styles.createForm}
             onSubmit={(event) => {
               event.preventDefault();
-              createTeamMutation.mutate(teamDraft);
+              const name = teamDraft.name.trim();
+              if (!name) {
+                setCreateTeamError(lang === "zh" ? "先填写团队名称，再创建团队。" : "Enter a team name before creating a Team.");
+                teamNameInputRef.current?.focus();
+                return;
+              }
+              setCreateTeamError("");
+              createTeamMutation.mutate({ ...teamDraft, name });
             }}
           >
             <input
+              ref={teamNameInputRef}
               value={teamDraft.name}
-              onChange={(event) => setTeamDraft((current) => ({ ...current, name: event.target.value }))}
+              onChange={(event) => {
+                setTeamDraft((current) => ({ ...current, name: event.target.value }));
+                if (createTeamError) {
+                  setCreateTeamError("");
+                }
+              }}
               placeholder={lang === "zh" ? "新团队名称" : "New team name"}
+              aria-invalid={Boolean(createTeamError && !teamDraft.name.trim())}
+              aria-describedby="team-create-feedback"
             />
             <input
               value={teamDraft.purpose}
               onChange={(event) => setTeamDraft((current) => ({ ...current, purpose: event.target.value }))}
               placeholder={lang === "zh" ? "团队目的" : "Team purpose"}
             />
-            <button type="submit" disabled={!teamDraft.name.trim() || createTeamMutation.isPending}>
+            <button type="submit" disabled={createTeamMutation.isPending}>
               <Plus size={14} />
-              {lang === "zh" ? "创建" : "Create"}
+              {createTeamMutation.isPending ? (lang === "zh" ? "创建中" : "Creating") : lang === "zh" ? "创建" : "Create"}
             </button>
+            <p id="team-create-feedback" className={createTeamError ? styles.formError : styles.formHint}>
+              {createTeamError || (lang === "zh" ? "填写团队名称后即可创建；成员可稍后在画布中绑定。" : "Enter a team name to create it; members can be bound later on the canvas.")}
+            </p>
           </form>
+          <section className={styles.templatePanel}>
+            <div className={styles.templatePanelHeader}>
+              <strong>{lang === "zh" ? "从模板创建" : "Create from template"}</strong>
+              <span>{teamTemplatesQuery.data?.summary.templateCount ?? 0}</span>
+            </div>
+            {teamTemplatesQuery.isPending ? (
+              <div className={styles.templateEmpty}>{lang === "zh" ? "正在读取团队模板..." : "Loading team templates..."}</div>
+            ) : selectedTemplate ? (
+              <div className={styles.templatePicker}>
+                <select
+                  className={styles.templateSelect}
+                  value={selectedTemplate.templateId}
+                  onChange={(event) => setSelectedTemplateId(event.target.value)}
+                  aria-label={lang === "zh" ? "选择团队模板" : "Select team template"}
+                >
+                  {teamTemplates.map((template) => (
+                    <option key={template.templateId} value={template.templateId}>
+                      {template.name} · {template.roleCount} agents
+                    </option>
+                  ))}
+                </select>
+                <div className={styles.templatePreview}>
+                  <div className={styles.templatePreviewHeader}>
+                    <strong>{selectedTemplate.name}</strong>
+                    <span>{selectedTemplate.roleCount} agents</span>
+                  </div>
+                  <p>{selectedTemplate.purpose || selectedTemplate.description}</p>
+                  <div className={styles.templateMeta}>
+                    <span>{selectedTemplate.chatRoom.mode}</span>
+                    <span>{selectedTemplate.chatRoom.purpose}</span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className={styles.templateCreateButton}
+                  disabled={instantiateTeamTemplateMutation.isPending}
+                  onClick={() => instantiateTeamTemplateMutation.mutate(selectedTemplate.templateId)}
+                >
+                  <Bot size={14} />
+                  {instantiateTeamTemplateMutation.isPending
+                    ? (lang === "zh" ? "创建中" : "Creating")
+                    : (lang === "zh" ? "创建 Demo 团队" : "Create demo team")}
+                </button>
+              </div>
+            ) : (
+              <div className={styles.templateEmpty}>{lang === "zh" ? "暂无团队模板。" : "No team templates."}</div>
+            )}
+          </section>
           <div className={styles.teamList}>
             {teams.map((team) => (
               <button
@@ -897,10 +1053,10 @@ export function TeamsRoute() {
                 <button
                   type="button"
                   onClick={() => selectedTeam?.teamId && syncTeamChatRoomMutation.mutate(selectedTeam.teamId)}
-                  disabled={!selectedTeam || activeTeamMemberCount === 0 || syncTeamChatRoomMutation.isPending}
+                  disabled={!selectedTeam || activeTeamMemberCount === 0 || selectedTeamSyncPending}
                 >
                   <Link2 size={14} />
-                  {syncTeamChatRoomMutation.isPending
+                  {selectedTeamSyncPending
                     ? (lang === "zh" ? "同步中" : "Syncing")
                     : (lang === "zh" ? "同步群聊" : "Sync room")}
                 </button>
@@ -913,7 +1069,7 @@ export function TeamsRoute() {
                 type="button"
                 className={styles.dangerButton}
                 onClick={() => selectedTeam?.teamId && archiveTeamMutation.mutate(selectedTeam.teamId)}
-                disabled={!selectedTeam || archiveTeamMutation.isPending}
+                disabled={!selectedTeam || selectedTeamArchivePending}
               >
                 <Archive size={14} />
                 {lang === "zh" ? "归档" : "Archive"}
@@ -980,8 +1136,9 @@ export function TeamsRoute() {
             <strong>{lang === "zh" ? "节点绑定" : "Node binding"}</strong>
             {validation && !validation.valid ? <AlertTriangle size={16} /> : <Link2 size={16} />}
           </div>
-          {selectedNode ? (
-            <div className={styles.inspectorBody}>
+          <div className={styles.inspectorBody}>
+            {selectedNode ? (
+              <section className={styles.nodeBindingSection}>
               <label>
                 <span>{lang === "zh" ? "节点名称" : "Node label"}</span>
                 <input value={nodeDraft.label} onChange={(event) => setNodeDraft((current) => ({ ...current, label: event.target.value }))} />
@@ -1014,7 +1171,7 @@ export function TeamsRoute() {
                 <textarea value={nodeDraft.purpose} onChange={(event) => setNodeDraft((current) => ({ ...current, purpose: event.target.value }))} />
               </label>
               <div className={styles.actionRow}>
-                <button type="button" onClick={applyNodeDraft} disabled={!canvas || saveCanvasMutation.isPending}>
+                <button type="button" onClick={applyNodeDraft} disabled={!canvas || selectedTeamSaveCanvasPending}>
                   <Save size={14} />
                   {lang === "zh" ? "保存节点" : "Save node"}
                 </button>
@@ -1022,7 +1179,7 @@ export function TeamsRoute() {
                   <Link2 size={14} />
                   {lang === "zh" ? "接入主干" : "Connect"}
                 </button>
-                <button type="button" onClick={unbindSelectedNode} disabled={!canvas || !selectedNode?.agentId || saveCanvasMutation.isPending}>
+                <button type="button" onClick={unbindSelectedNode} disabled={!canvas || !selectedNode?.agentId || selectedTeamSaveCanvasPending}>
                   <Unlink size={14} />
                   {lang === "zh" ? "解绑节点" : "Unbind"}
                 </button>
@@ -1030,7 +1187,7 @@ export function TeamsRoute() {
                   type="button"
                   className={styles.dangerButton}
                   onClick={deleteSelectedNode}
-                  disabled={!canvas || !selectedNode || canvas.nodes.length <= 1 || saveCanvasMutation.isPending}
+                  disabled={!canvas || !selectedNode || canvas.nodes.length <= 1 || selectedTeamSaveCanvasPending}
                 >
                   <Trash2 size={14} />
                   {lang === "zh" ? "删除节点" : "Delete"}
@@ -1048,6 +1205,16 @@ export function TeamsRoute() {
                   <span>{lang === "zh" ? "画布校验通过" : "Canvas validation passed"}</span>
                 )}
               </div>
+              </section>
+            ) : (
+              <section className={`${styles.nodeBindingSection} ${styles.nodeBindingPlaceholder}`} aria-busy={teamDetailQuery.isPending || workspaceQuery.isPending}>
+                <div className={styles.empty}>
+                  {teamDetailQuery.isPending || workspaceQuery.isPending
+                    ? (lang === "zh" ? "正在读取团队节点..." : "Loading team nodes...")
+                    : (lang === "zh" ? "创建或选择一个团队节点。" : "Create or select a team node.")}
+                </div>
+              </section>
+            )}
               <form
                 className={styles.teamTaskForm}
                 onSubmit={(event) => {
@@ -1081,24 +1248,24 @@ export function TeamsRoute() {
                 />
                 <button
                   type="submit"
-                  disabled={!canStartTeamRound || startTeamRoundMutation.isPending}
+                  disabled={!canStartTeamRound || selectedTeamStartRoundPending}
                 >
                   <Play size={14} />
-                  {startTeamRoundMutation.isPending
+                  {selectedTeamStartRoundPending
                     ? (lang === "zh" ? "启动中" : "Starting")
                     : (lang === "zh" ? "启动团队讨论" : "Start team round")}
                 </button>
-                {startTeamRoundMutation.data ? (
+                {selectedTeamStartRoundResult ? (
                   <div className={styles.messageResult}>
-                    <strong>{startTeamRoundMutation.data.rounds.length}</strong>
+                    <strong>{selectedTeamStartRoundResult.rounds.length}</strong>
                     <span>{lang === "zh" ? "轮讨论已写入关联群聊" : "rounds now recorded in the linked room"}</span>
-                    <Link to={`/chat?room=${encodeURIComponent(startTeamRoundMutation.data.roomId)}`}>
+                    <Link to={`/chat?room=${encodeURIComponent(selectedTeamStartRoundResult.roomId)}`}>
                       {lang === "zh" ? "打开群聊" : "Open room"}
                     </Link>
                   </div>
                 ) : null}
-                {startTeamRoundMutation.error instanceof Error ? (
-                  <div className={styles.messageError}>{startTeamRoundMutation.error.message}</div>
+                {selectedTeamStartRoundError ? (
+                  <div className={styles.messageError}>{selectedTeamStartRoundError.message}</div>
                 ) : null}
                 <section className={styles.teamRoundPanel}>
                   <div className={styles.sectionTitle}>
@@ -1164,19 +1331,19 @@ export function TeamsRoute() {
                 </label>
                 <button
                   type="submit"
-                  disabled={!selectedTeam || !teamMessage.trim() || activeTeamMemberCount === 0 || sendTeamMessageMutation.isPending}
+                  disabled={!selectedTeam || !teamMessage.trim() || activeTeamMemberCount === 0 || selectedTeamMessagePending}
                 >
                   <Send size={14} />
                   {lang === "zh" ? "发送给团队" : "Send to team"}
                 </button>
-                {sendTeamMessageMutation.data ? (
+                {selectedTeamMessageResult ? (
                   <div className={styles.messageResult}>
-                    <strong>{sendTeamMessageMutation.data.deliveries.length}</strong>
+                    <strong>{selectedTeamMessageResult.deliveries.length}</strong>
                     <span>{lang === "zh" ? "条投递已进入项目总群" : "deliveries recorded in project bus"}</span>
                   </div>
                 ) : null}
-                {sendTeamMessageMutation.error instanceof Error ? (
-                  <div className={styles.messageError}>{sendTeamMessageMutation.error.message}</div>
+                {selectedTeamMessageError ? (
+                  <div className={styles.messageError}>{selectedTeamMessageError.message}</div>
                 ) : null}
               </form>
               <section className={styles.teamHistoryPanel}>
@@ -1190,6 +1357,9 @@ export function TeamsRoute() {
                   <div className={styles.teamHistoryList}>
                     {teamBusEvents.map((event) => {
                       const revoked = isProjectAgentBusEventRevoked(event);
+                      const revokePending =
+                        revokeTeamMessageMutation.isPending
+                        && revokeTeamMessageMutation.variables?.eventId === event.eventId;
                       return (
                         <article key={event.eventId} className={revoked ? `${styles.teamHistoryItem} ${styles.teamHistoryItemRevoked}` : styles.teamHistoryItem}>
                           <div className={styles.teamHistoryHeader}>
@@ -1213,10 +1383,10 @@ export function TeamsRoute() {
                             <button
                               type="button"
                               className={styles.revokeButton}
-                              disabled={revokeTeamMessageMutation.isPending}
-                              onClick={() => revokeTeamMessageMutation.mutate(event.eventId)}
+                              disabled={revokePending}
+                              onClick={() => selectedTeam?.teamId && revokeTeamMessageMutation.mutate({ teamId: selectedTeam.teamId, eventId: event.eventId })}
                             >
-                              {revokeTeamMessageMutation.isPending ? (lang === "zh" ? "撤回中" : "Revoking") : (lang === "zh" ? "撤回" : "Revoke")}
+                              {revokePending ? (lang === "zh" ? "撤回中" : "Revoking") : (lang === "zh" ? "撤回" : "Revoke")}
                             </button>
                           ) : null}
                         </article>
@@ -1231,9 +1401,6 @@ export function TeamsRoute() {
                 ) : null}
               </section>
             </div>
-          ) : (
-            <div className={styles.empty}>{lang === "zh" ? "创建或选择一个团队节点。" : "Create or select a team node."}</div>
-          )}
         </aside>
       </div>
     </section>

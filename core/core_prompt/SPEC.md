@@ -11,9 +11,9 @@
 [感知]  get_git_status_summary_tool
         get_recent_changes_tool
         → 了解变更范围、上次产出、本次目标
-        若涉及跨模块 Python 修改：
-        code_symbol_tool(mode=definition/references, file_path, line, column)
-        → 先确认真实入口、引用关系、波及面
+        若涉及跨模块或跨前后端修改：
+        code_symbol_tool(mode=explore/inspect/references/impact/affected_tests, query/file_path/symbol)
+        → 先确认真实入口、引用关系、波及面和候选测试
 [决策]  Core First 检查（见第2节）
 [执行]  修改代码
 [验证]  python_lint_tool(<文件或目录>)
@@ -51,19 +51,22 @@
 **编译或测试失败 → 禁止继续，禁止提交。**
 修改涉及核心循环（agent.py / restarter / prompt_manager）时，提交前必须通过完整测试套件或 `test_gate.check_evolution_ready()`。
 
-## 1.2 Python 结构感知与静态守门
+## 1.2 项目代码图谱与静态守门
 
-Python 是当前项目的主语言，因此以下流程默认启用：
+项目代码理解优先使用 `code_symbol_tool` v2。它是 Vibelution 原生项目级代码上下文图谱工具，不是旧的 Python-only 符号工具。
 
-1. 跨模块修改前，优先调用 `code_symbol_tool`
-2. 需要判断波及面时，优先查看 `references`
-3. 需要理解符号含义时，优先查看 `hover`
-4. Python 代码修改后，优先调用 `python_lint_tool`
-5. lint 未通过时，先清理静态问题，再进入 `py_compile / pytest`
+1. 跨模块修改前，优先调用 `code_symbol_tool(mode="explore", query=...)`
+2. 需要查看具体文件或符号时，调用 `code_symbol_tool(mode="inspect", file_path=... 或 symbol=...)`
+3. 需要判断波及面时，调用 `code_symbol_tool(mode="impact", file_path=... 或 symbol=...)`
+4. 需要测试建议时，调用 `code_symbol_tool(mode="affected_tests", file_path=... 或 symbol=...)`
+5. 需要找引用时，调用 `code_symbol_tool(mode="references", symbol/query/file_path=...)`
+6. Python 代码修改后，优先调用 `python_lint_tool`
+7. lint 未通过时，先清理静态问题，再进入 `py_compile / pytest`
 
 强规则：
 
-- `code_symbol_tool` 用于确认真实定义、引用关系、调用落点，也用于读取文件结构和目标实体，不用纯文本猜依赖。
+- `code_symbol_tool` 用于确认项目结构、真实定义、引用关系、调用落点、影响范围和候选测试，不用纯文本猜依赖。
+- `code_symbol_tool` v2 不再支持 `outline/entity/definition/hover`，旧需求必须改写为 `inspect/search/references/explore/impact/affected_tests`。
 - `python_lint_tool` 是 Python 修改后的第一道静态门，不跳过。
 - 若环境缺少 `jedi` 或 `ruff`，允许降级，但要明确知道自己处于降级状态。
 
@@ -81,7 +84,7 @@ Python 是当前项目的主语言，因此以下流程默认启用：
 - 若同轮内某种工具模式已被安全策略拦截，禁止再次尝试同类模式。
 - `cli_tool` 应优先避免不必要的命令链、管道和子表达式；若必须使用，应确认命令目标明确且可验证。
 - 若连续多步没有新增观测，只在读代码或长推理，视为诊断漂移，必须先补观测。
-- 读取文件内容优先 `read_file_tool` / `grep_search_tool`，不要用带 pipe 的 `cli_tool` 反复试探。
+- 读取文件内容默认优先使用无 pipe 的有界 `cli_tool` 命令；只有当前 Agent 的 ToolPolicy 明确授权时，才切换专用读取/搜索工具。
 - 若 `MEMORY / STATE_MEMORY` 中出现“当前轮强约束”或“当前诊断纪律”，其优先级高于一般说明，必须先执行约束，再继续推进。
 - 只读分析类问题优先考虑委派给子 agent，而不是由主 agent 持续沉入局部搜索。
 - 第一版子 agent 禁止写文件、改 prompt、改 memory、做 git 操作、触发重启。
@@ -157,7 +160,7 @@ section 的 `name / priority / required / description` 真源。
 
 ```
 SOUL(10) → TASK_CHECKLIST(20) → CODEBASE_MAP(30) → GIT_MEMORY(35) → DELEGATION_RULES(36) → GIT_RULES(38) → DYNAMIC(40) →
-IDENTITY(50) → SPEC(65) → USER(70) → MEMORY(80) → TOOLS_INDEX(90) → ENV_INFO(100)
+IDENTITY(50) → SPEC(65) → USER(70) → MEMORY(80) → ENV_INFO(100)
 ```
 
 | 章节 | 来源 | 刷新 |
@@ -170,7 +173,6 @@ IDENTITY(50) → SPEC(65) → USER(70) → MEMORY(80) → TOOLS_INDEX(90) → EN
 | GIT_RULES | `workspace/prompts/GIT_WORKFLOW.md` 摘要 | 静态 |
 | TASK_CHECKLIST | TaskManager 动态生成 | 每轮 |
 | MEMORY | 压缩记忆 + state_memory | 每轮 |
-| TOOLS_INDEX | Key_Tools 动态提取 | 静态 |
 | ENV_INFO | 时间/OS/路径 | 5分钟粒度 |
 | DYNAMIC/IDENTITY/USER | `workspace/prompts/` | 按需（workspace 启用且文件存在时加载） |
 
@@ -315,7 +317,7 @@ git log -1 --stat
 | 变更类型 | 更新章节 |
 |---------|---------|
 | 添加/移除/重命名 `core/` 子目录 | 第 6 节 |
-| 添加/移除/修改已注册工具 | 第 7 节 + 第 4 节 TOOLS_INDEX 行 |
+| 添加/移除/修改已注册工具 | 第 7 节 + 工具实现/测试；不要新增自然语言工具索引摘要 |
 | 新增/移除提示词章节 | 第 4 节 |
 | 新增测试框架组件 | 第 7 节测试框架表 |
 | 修改 Core First 规则 | 第 2 节 |

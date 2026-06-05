@@ -189,6 +189,66 @@ class TestToolMessageFlow:
         assert captured["messages"][0] == system_message
         assert captured["messages"][0]["content"][0]["cache_control"] == {"type": "ephemeral"}
 
+    def test_invoke_llm_exposes_turn_stop_checker_to_llm_client_cancel_context(self, monkeypatch):
+        captured = {}
+
+        class DummyContext:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        class DummyUI:
+            def thinking(self, _label):
+                return DummyContext()
+
+            def add_log(self, *_args, **_kwargs):
+                return None
+
+        class DummyLLM:
+            def invoke(self, _msgs):
+                from core.llm import client as llm_client_module
+
+                captured["cancel_reason"] = llm_client_module._current_llm_cancel_reason()
+                return SimpleNamespace(content="", tool_calls=[])
+
+        monkeypatch.setattr(agent_module, "get_ui", lambda: DummyUI())
+
+        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent.llm_with_tools = DummyLLM()
+        checks = {"count": 0}
+
+        def stop_checker():
+            checks["count"] += 1
+            return "操作者请求停止当前轮。" if checks["count"] >= 3 else ""
+
+        agent._turn_interrupt_checker = stop_checker
+
+        result = agent._invoke_llm([build_chat_user_message("hi")])
+
+        assert result is not None
+        assert captured["cancel_reason"] == "操作者请求停止当前轮。"
+
+    def test_runtime_context_merges_into_cacheable_system_prefix(self):
+        system_message = {
+            "role": "system",
+            "content": [
+                {"type": "text", "text": "stable", "cache_control": {"type": "ephemeral"}},
+                {"type": "text", "text": "dynamic"},
+            ],
+        }
+
+        merged = agent_module._merge_runtime_context_into_cacheable_system_message(
+            system_message,
+            "## Agent Runtime Context\nagent stable facts",
+        )
+
+        assert merged["content"][0]["cache_control"] == {"type": "ephemeral"}
+        assert "stable" in merged["content"][0]["text"]
+        assert "agent stable facts" in merged["content"][0]["text"]
+        assert merged["content"][1]["text"] == "dynamic"
+
     def test_invoke_llm_returns_none_for_exhausted_llmerror(self, monkeypatch):
         calls = {"count": 0}
 
@@ -265,6 +325,28 @@ class TestToolMessageFlow:
         assert agent._last_llm_failure_attempts == 5
         assert agent._last_llm_failure_max_attempts == 5
 
+    def test_publish_llm_retry_status_uses_outer_reconnect_attempts(self, monkeypatch):
+        published = []
+
+        class DummyBus:
+            def publish(self, name, payload, source=None):
+                published.append((name, payload, source))
+
+        monkeypatch.setattr(agent_module, "get_event_bus", lambda: DummyBus())
+        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent._last_llm_error_category = "network_error"
+        agent._last_llm_recovery_action = "retry_with_backoff"
+
+        agent._publish_llm_retry_status(attempt=2, max_attempts=5)
+
+        assert published
+        assert published[0][0] == "llm:status"
+        assert published[0][1]["status"] == "retrying"
+        assert published[0][1]["attempt"] == 2
+        assert published[0][1]["max_attempts"] == 5
+        assert published[0][1]["category"] == "network_error"
+        assert published[0][1]["source"] == "agent_outer_reconnect"
+
     def test_invoke_llm_streams_thought_and_hides_think_tags(self, monkeypatch):
         captured = {"thoughts": []}
 
@@ -312,9 +394,8 @@ class TestToolMessageFlow:
         result = agent._invoke_llm([AIMessage(content="hello")])
 
         assert result is not None
-        assert captured["thoughts"]
-        assert captured["thoughts"][-1][0] == "<think>first second</think>"
-        assert captured["thoughts"][-1][1] is False
+        assert captured["thoughts"] == [("first", False), (" second", False)]
+        assert result.content == ""
 
     def test_invoke_llm_stream_falls_back_to_accumulated_text_when_merged_chunk_is_empty(self, monkeypatch):
         captured = {"thoughts": []}
@@ -430,7 +511,79 @@ class TestToolMessageFlow:
         assert result is not None
         assert result.content == "结论"
         assert result.additional_kwargs["reasoning_content"] == "先看日志"
-        assert captured["thoughts"][-1][0] == "先看日志"
+        assert captured["thoughts"] == [("先看", False), ("日志", False)]
+
+    def test_invoke_llm_stream_normalizes_reasoning_aliases_and_cumulative_snapshots(self, monkeypatch):
+        captured = {"thoughts": [], "responses": []}
+
+        class DummyContext:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        class DummyUI:
+            def thinking(self, _label):
+                return DummyContext()
+
+            def add_log(self, *_args, **_kwargs):
+                return None
+
+            def stream_thought(self, text, done=False):
+                captured["thoughts"].append((text, done))
+
+            def stream_response(self, text, done=False):
+                captured["responses"].append((text, done))
+
+        class DummyChunk:
+            def __init__(self, content="", *, additional_kwargs=None, tool_calls=None, response_metadata=None):
+                self.content = content
+                self.additional_kwargs = additional_kwargs or {}
+                self.tool_calls = tool_calls or []
+                self.response_metadata = response_metadata or {}
+
+            def __add__(self, other):
+                kwargs = dict(self.additional_kwargs)
+                kwargs.update(getattr(other, "additional_kwargs", None) or {})
+                metadata = dict(self.response_metadata)
+                metadata.update(getattr(other, "response_metadata", None) or {})
+                return DummyChunk(
+                    (self.content or "") + (getattr(other, "content", "") or ""),
+                    additional_kwargs=kwargs,
+                    tool_calls=self.tool_calls or getattr(other, "tool_calls", []) or [],
+                    response_metadata=metadata,
+                )
+
+        class DummyLLM:
+            def stream(self, _msgs):
+                yield DummyChunk("", additional_kwargs={"reasoning": "先看"})
+                yield DummyChunk("", additional_kwargs={"reasoning": "先看日志"})
+                yield DummyChunk("", additional_kwargs={"thinking": "再查 UI"})
+                yield DummyChunk("<think>隐藏</think>可见结论")
+
+        monkeypatch.setattr(agent_module, "get_ui", lambda: DummyUI())
+
+        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent.config = SimpleNamespace(
+            llm=SimpleNamespace(
+                get_profile=lambda role="primary": SimpleNamespace(streaming=True)
+            ),
+        )
+        agent.llm_with_tools = DummyLLM()
+
+        result = agent._invoke_llm([AIMessage(content="hello")])
+
+        assert result is not None
+        assert result.content == "可见结论"
+        assert result.additional_kwargs["reasoning_content"] == "先看日志再查 UI隐藏"
+        assert captured["thoughts"] == [
+            ("先看", False),
+            ("日志", False),
+            ("再查 UI", False),
+            ("隐藏", False),
+        ]
+        assert captured["responses"][-1] == ("可见结论", False)
 
     def test_invoke_llm_stream_preserves_final_usage_observation(self, monkeypatch):
         class DummyContext:
@@ -976,6 +1129,41 @@ class TestToolMessageFlow:
         assert output_tokens == 12
         assert captured["tokens"][-1] == ((80, 12), {"cached_input_tokens": 48, "observed": True})
 
+    def test_response_surface_controller_forwards_anthropic_cache_read_tokens(self):
+        captured = {"tokens": []}
+
+        class DummyUI:
+            def note_token_usage(self, *args, **kwargs):
+                captured["tokens"].append((args, kwargs))
+
+        controller = ResponseSurfaceController(
+            estimate_tokens=lambda _messages: 100,
+            ui_getter=lambda: DummyUI(),
+            logger=SimpleNamespace(log_token_usage=lambda *_args, **_kwargs: None),
+            debug_logger=SimpleNamespace(info=lambda *_args, **_kwargs: None),
+            pet_getter=lambda: SimpleNamespace(record_tokens=lambda *_args, **_kwargs: None, trigger_heartbeat=lambda: None),
+            print_tokens=lambda *_args, **_kwargs: None,
+        )
+        round_state = RoundStateController(max_iterations=3)
+        response = SimpleNamespace(
+            usage_metadata={
+                "input_tokens": 120,
+                "output_tokens": 18,
+                "cache_read_input_tokens": 72,
+                "cache_creation_input_tokens": 24,
+            },
+        )
+
+        input_tokens, output_tokens = controller.record_token_usage(
+            response=response,
+            round_state=round_state,
+            current_turn=11,
+        )
+
+        assert input_tokens == 120
+        assert output_tokens == 18
+        assert captured["tokens"][-1] == ((120, 18), {"cached_input_tokens": 72, "observed": True})
+
     def test_response_surface_controller_estimates_tokens_when_usage_is_missing(self):
         captured = {"tokens": []}
         token_logs = []
@@ -994,7 +1182,7 @@ class TestToolMessageFlow:
         )
         round_state = RoundStateController(max_iterations=3)
 
-        input_tokens, output_tokens = controller.record_token_usage(
+        usage = controller.record_token_usage(
             response=SimpleNamespace(),
             round_state=round_state,
             current_turn=10,
@@ -1002,13 +1190,16 @@ class TestToolMessageFlow:
             raw_content="answer",
             estimate_output_tokens=lambda text: len(text) + 5,
         )
+        input_tokens, output_tokens = usage
 
         assert input_tokens == 123
         assert output_tokens == 11
+        assert usage == (123, 11)
+        assert usage.observed is False
         assert round_state.total_input_tokens == 123
         assert round_state.total_output_tokens == 11
         assert token_logs == [(123, 11, 10)]
-        assert captured["tokens"][-1] == ((123, 11), {"cached_input_tokens": 0, "observed": True})
+        assert captured["tokens"][-1] == ((123, 11), {"cached_input_tokens": 0, "observed": False})
 
     def test_execute_tools_parallel_returns_restart_action_and_stops_followups(self):
         messages = []
@@ -1119,7 +1310,7 @@ class TestToolMessageFlow:
         agent.key_tools = [object(), object()]
         agent._last_turn_failed = False
 
-        def fake_think_and_act(user_prompt=None, goal_override=None):
+        def fake_think_and_act(user_prompt=None, goal_override=None, attachments=None, **kwargs):
             events.append(("think", user_prompt))
             events.append(("goal_override", goal_override))
             agent._last_visible_response_text = "完成"
@@ -1202,7 +1393,7 @@ class TestToolMessageFlow:
         agent.key_tools = [object()]
         agent._last_turn_failed = False
 
-        def fake_think_and_act(user_prompt=None, goal_override=None):
+        def fake_think_and_act(user_prompt=None, goal_override=None, attachments=None, **kwargs):
             agent._last_visible_response_text = "已修复并验证。"
             agent._last_response_tool_calls = 3
             agent._recent_tool_records = [
@@ -1269,6 +1460,37 @@ class TestToolMessageFlow:
         assert result["verification_status"] == "passed"
         assert result["no_change"] is False
 
+    def test_host_seeded_runtime_context_skips_agent_runtime_context_reseed(self, monkeypatch):
+        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent.mode_policy = ModePolicy(
+            mode=AgentMode.CHAT,
+            orchestrator_kind="chat",
+            keep_multi_turn_context=True,
+            allow_auto_loop=False,
+            capture_chat_dataset_candidates=False,
+            reset_context_before_turn=False,
+            reset_context_between_cases=False,
+            allow_direct_supervised_payload=False,
+            finish_after_direct_response=False,
+            runtime_input_builder=build_chat_user_message,
+        )
+        agent.runtime_agent_binding = {"agentId": "agent-live", "directSessionId": "session-live"}
+        agent._active_turn_messages = None
+        agent._active_turn_goal = ""
+        seeded_blocks: list[str] = []
+        agent.seed_runtime_context = lambda content: seeded_blocks.append(content)
+        agent.mark_runtime_context_seeded_by_host()
+        monkeypatch.setattr(
+            agent_module,
+            "build_agent_context",
+            lambda *args, **kwargs: SimpleNamespace(context_block="runtime context"),
+        )
+
+        agent._seed_runtime_agent_context_for_turn(run_id="turn-live")
+
+        assert seeded_blocks == []
+        assert agent._runtime_context_seeded_by_host is False
+
     def test_run_single_turn_surfaces_llm_error_when_no_visible_reply(self, monkeypatch):
         agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
         agent.name = "tester"
@@ -1292,7 +1514,7 @@ class TestToolMessageFlow:
         agent.key_tools = [object()]
         agent._last_turn_failed = False
 
-        def fake_think_and_act(user_prompt=None, goal_override=None):
+        def fake_think_and_act(user_prompt=None, goal_override=None, attachments=None, **kwargs):
             agent._last_visible_response_text = ""
             agent._last_response_tool_calls = 0
             agent._recent_tool_records = []
@@ -1343,7 +1565,7 @@ class TestToolMessageFlow:
         agent.key_tools = [object()]
         agent._last_turn_failed = False
 
-        def fake_think_and_act(user_prompt=None, goal_override=None):
+        def fake_think_and_act(user_prompt=None, goal_override=None, attachments=None, **kwargs):
             agent._last_visible_response_text = ""
             agent._last_response_tool_calls = 1
             agent._recent_tool_records = [
@@ -1404,7 +1626,7 @@ class TestToolMessageFlow:
         agent.key_tools = [object()]
         agent._last_turn_failed = False
 
-        def fake_think_and_act(user_prompt=None, goal_override=None):
+        def fake_think_and_act(user_prompt=None, goal_override=None, attachments=None, **kwargs):
             agent._last_visible_response_text = ""
             agent._last_response_tool_calls = 4
             agent._recent_tool_records = [
@@ -1470,7 +1692,7 @@ class TestToolMessageFlow:
         agent.key_tools = [object()]
         agent._last_turn_failed = False
 
-        def fake_think_and_act(user_prompt=None, goal_override=None):
+        def fake_think_and_act(user_prompt=None, goal_override=None, attachments=None, **kwargs):
             agent._last_visible_response_text = ""
             agent._last_response_tool_calls = 0
             agent._recent_tool_records = [
@@ -1525,7 +1747,7 @@ class TestToolMessageFlow:
         agent._last_turn_failed = False
         long_reply = "已完成。" + ("细节说明" * 220)
 
-        def fake_think_and_act(user_prompt=None, goal_override=None):
+        def fake_think_and_act(user_prompt=None, goal_override=None, attachments=None, **kwargs):
             agent._last_visible_response_text = long_reply
             agent._last_response_tool_calls = 0
             agent._recent_tool_records = []
@@ -1628,7 +1850,7 @@ class TestToolMessageFlow:
         )
         monkeypatch.setitem(__import__("sys").modules, "core.infrastructure.workspace_cleaner", cleaner_module)
 
-        def fake_think_and_act(user_prompt=None, goal_override=None):
+        def fake_think_and_act(user_prompt=None, goal_override=None, attachments=None, **kwargs):
             agent._pending_lifecycle_action = "restart"
             return False
 
@@ -2038,6 +2260,7 @@ class TestToolMessageFlow:
         assert captured["env"]["VIBELUTION_LOG_ACTOR"] == "subagent"
         assert captured["env"]["VIBELUTION_LOG_PARENT_TURN"] == "4"
         assert captured["env"]["VIBELUTION_LOG_ACTOR_LABEL"] == "diagnose"
+        assert captured["env"]["VIBELUTION_AGENT_LLM_SLOT"] == "subagentExecution"
 
     def test_extract_structured_result_infers_error_summary_from_raw_output(self):
         payload = spawn_agent_impl.__globals__["_extract_structured_result"](
@@ -2457,6 +2680,232 @@ class TestLocalProviderBootstrap:
         assert captured == {"model": "baseline-model", "profile_id": "primary"}
         assert original_config.llm.profiles["primary"].model == "primary-model"
 
+    def test_agent_optional_llm_slots_drive_summary_and_mental_model_clients(self, monkeypatch):
+        monkeypatch.setenv("VIBELUTION_AGENT_ID", "agent-slot-test")
+        monkeypatch.setattr(agent_module.Key_Tools, "create_llm_facing_tools", lambda: [])
+        monkeypatch.setattr(SelfEvolvingAgent, "_init_model_discovery", lambda self: 16000)
+        monkeypatch.setattr(agent_module, "get_prompt_manager", lambda: MagicMock())
+        monkeypatch.setattr(agent_module, "get_state_manager", lambda: MagicMock())
+        monkeypatch.setattr(agent_module, "get_event_bus", lambda: MagicMock())
+        monkeypatch.setattr(agent_module, "get_tool_executor", lambda: MagicMock())
+        monkeypatch.setattr(agent_module, "get_security_validator", lambda *_args, **_kwargs: MagicMock())
+        monkeypatch.setattr(agent_module, "get_git_memory_service", lambda: MagicMock())
+        mental_model = MagicMock()
+        monkeypatch.setattr(agent_module, "get_mental_model", lambda **_kwargs: mental_model)
+
+        config = Settings(
+            None,
+            **{
+                "llm.providers.default.kind": "local",
+                "llm.providers.default.api_key": "",
+                "llm.providers.default.api_key_env": "",
+                "llm.providers.default.base_url": "http://localhost:11434/v1",
+                "llm.providers.default.compat_mode": "openai",
+                "llm.providers.default.requires_api_key": False,
+                "llm.profiles.primary.provider_id": "default",
+                "llm.profiles.primary.model": "dialogue-model",
+            },
+        ).config
+        config.llm.model_library = {
+            "dialogue-model-id": {"provider_id": "default", "model": "dialogue-model"},
+            "summary-model-id": {
+                "provider_id": "default",
+                "model": "summary-model",
+                "tool_calling_mode": "disabled",
+            },
+            "mental-model-id": {
+                "provider_id": "default",
+                "model": "mental-model",
+                "tool_calling_mode": "disabled",
+            },
+        }
+        agent_record = {
+            "agentId": "agent-slot-test",
+            "llmBindings": {
+                "dialogue": {"modelId": "dialogue-model-id"},
+                "summary": {"modelId": "summary-model-id"},
+                "mentalModel": {"modelId": "mental-model-id"},
+            },
+        }
+
+        directory_module = __import__(
+            "core.web.services.agent_directory_service",
+            fromlist=["agent_directory_service"],
+        )
+        monkeypatch.setattr(directory_module, "get_agent", lambda _agent_id, include_archived=False: agent_record)
+        monkeypatch.setattr(directory_module, "filter_llm_tools_for_current_agent", lambda tools: list(tools or []))
+        created_models = []
+
+        class DummyClient:
+            def __init__(self, config=None, role=None, profile_id=None):
+                self.config = config
+                self.role = role
+                self.profile_id = profile_id or "primary"
+                self.model = config.llm.get_profile(profile_id=self.profile_id).model
+                created_models.append(self.model)
+
+            def bind_tools(self, _tools):
+                return self
+
+        monkeypatch.setattr(
+            agent_module,
+            "get_llm_client",
+            lambda role=None, profile_id=None, config=None: DummyClient(
+                config=config,
+                role=role,
+                profile_id=profile_id,
+            ),
+        )
+
+        agent = SelfEvolvingAgent(config=config)
+
+        mental_model.set_shared_llm.assert_called_once()
+        assert mental_model.set_shared_llm.call_args.args[0].model == "mental-model"
+        assert agent.token_compressor.compression_llm.model == "summary-model"
+        assert "dialogue-model" in created_models
+
+    def test_runtime_agent_llm_slot_binding_maps_subagent_execution_to_primary(self, monkeypatch):
+        monkeypatch.setenv("VIBELUTION_AGENT_ID", "agent-subagent-slot")
+        monkeypatch.setenv("VIBELUTION_AGENT_LLM_SLOT", "subagentExecution")
+        monkeypatch.setattr(agent_module.Key_Tools, "create_llm_facing_tools", lambda: [])
+        monkeypatch.setattr(SelfEvolvingAgent, "_init_model_discovery", lambda self: 16000)
+        monkeypatch.setattr(SelfEvolvingAgent, "_init_token_compressor", lambda self: None)
+        monkeypatch.setattr(agent_module, "get_prompt_manager", lambda: MagicMock())
+        monkeypatch.setattr(agent_module, "get_state_manager", lambda: MagicMock())
+        monkeypatch.setattr(agent_module, "get_event_bus", lambda: MagicMock())
+        monkeypatch.setattr(agent_module, "get_tool_executor", lambda: MagicMock())
+        monkeypatch.setattr(agent_module, "get_security_validator", lambda *_args, **_kwargs: MagicMock())
+        monkeypatch.setattr(agent_module, "get_git_memory_service", lambda: MagicMock())
+        monkeypatch.setattr(agent_module, "get_mental_model", lambda **_kwargs: MagicMock())
+
+        config = Settings(
+            None,
+            **{
+                "llm.providers.default.kind": "local",
+                "llm.providers.default.api_key": "",
+                "llm.providers.default.api_key_env": "",
+                "llm.providers.default.base_url": "http://localhost:11434/v1",
+                "llm.providers.default.compat_mode": "openai",
+                "llm.providers.default.requires_api_key": False,
+                "llm.profiles.primary.provider_id": "default",
+                "llm.profiles.primary.model": "dialogue-model",
+            },
+        ).config
+        config.llm.model_library = {
+            "dialogue-model-id": {"provider_id": "default", "model": "dialogue-model"},
+            "subagent-execution-model-id": {
+                "provider_id": "default",
+                "model": "subagent-execution-model",
+                "tool_calling_mode": "disabled",
+            },
+        }
+        agent_record = {
+            "agentId": "agent-subagent-slot",
+            "llmBindings": {
+                "dialogue": {"modelId": "dialogue-model-id"},
+                "subagentExecution": {"modelId": "subagent-execution-model-id"},
+            },
+        }
+        directory_module = __import__(
+            "core.web.services.agent_directory_service",
+            fromlist=["agent_directory_service"],
+        )
+        monkeypatch.setattr(directory_module, "get_agent", lambda _agent_id, include_archived=False: agent_record)
+        monkeypatch.setattr(directory_module, "filter_llm_tools_for_current_agent", lambda tools: list(tools or []))
+        captured_models = []
+
+        class DummyClient:
+            def __init__(self, config=None, role=None, profile_id=None):
+                selected_profile_id = profile_id or config.llm.get_role_profile_id(role or "primary")
+                self.model = config.llm.get_profile(profile_id=selected_profile_id).model
+                captured_models.append(self.model)
+
+            def bind_tools(self, _tools):
+                return self
+
+        monkeypatch.setattr(
+            agent_module,
+            "get_llm_client",
+            lambda role=None, profile_id=None, config=None: DummyClient(
+                config=config,
+                role=role,
+                profile_id=profile_id,
+            ),
+        )
+
+        agent = SelfEvolvingAgent(config=config)
+
+        assert agent.runtime_agent_binding["llmSlot"] == "subagentExecution"
+        assert agent.config.llm.get_profile(profile_id="primary").model == "subagent-execution-model"
+        assert "subagent-execution-model" in captured_models
+
+    def test_runtime_agent_llm_slot_binding_failure_is_fatal(self, monkeypatch):
+        monkeypatch.setenv("VIBELUTION_AGENT_ID", "agent-bad-slot")
+        monkeypatch.setenv("VIBELUTION_AGENT_LLM_SLOT", "dialogue")
+        config = Settings(
+            None,
+            **{
+                "llm.providers.default.kind": "local",
+                "llm.providers.default.api_key": "",
+                "llm.providers.default.api_key_env": "",
+                "llm.providers.default.base_url": "http://localhost:11434/v1",
+                "llm.providers.default.compat_mode": "openai",
+                "llm.providers.default.requires_api_key": False,
+                "llm.profiles.primary.provider_id": "default",
+                "llm.profiles.primary.model": "primary-model",
+            },
+        ).config
+        directory_module = __import__(
+            "core.web.services.agent_directory_service",
+            fromlist=["agent_directory_service"],
+        )
+        monkeypatch.setattr(
+            directory_module,
+            "get_agent",
+            lambda _agent_id, include_archived=False: {
+                "agentId": "agent-bad-slot",
+                "llmBindings": {"dialogue": {"modelId": "missing-model-id"}},
+            },
+        )
+
+        with pytest.raises(agent_module.AgentLlmResolutionError, match="missing-model-id"):
+            SelfEvolvingAgent(config=config)
+
+    def test_runtime_agent_llm_slot_binding_does_not_fallback_to_dialogue(self, monkeypatch):
+        monkeypatch.setenv("VIBELUTION_AGENT_ID", "agent-missing-subagent-slot")
+        monkeypatch.setenv("VIBELUTION_AGENT_LLM_SLOT", "subagentExecution")
+        config = Settings(
+            None,
+            **{
+                "llm.providers.default.kind": "local",
+                "llm.providers.default.api_key": "",
+                "llm.providers.default.api_key_env": "",
+                "llm.providers.default.base_url": "http://localhost:11434/v1",
+                "llm.providers.default.compat_mode": "openai",
+                "llm.providers.default.requires_api_key": False,
+                "llm.profiles.primary.provider_id": "default",
+                "llm.profiles.primary.model": "primary-model",
+            },
+        ).config
+        config.llm.model_library = {
+            "dialogue-model-id": {"provider_id": "default", "model": "dialogue-model"},
+        }
+        directory_module = __import__(
+            "core.web.services.agent_directory_service",
+            fromlist=["agent_directory_service"],
+        )
+        monkeypatch.setattr(
+            directory_module,
+            "get_agent",
+            lambda _agent_id, include_archived=False: {
+                "agentId": "agent-missing-subagent-slot",
+                "llmBindings": {"dialogue": {"modelId": "dialogue-model-id"}},
+            },
+        )
+
+        with pytest.raises(agent_module.AgentLlmResolutionError, match="subagentExecution LLM binding is required"):
+            SelfEvolvingAgent(config=config)
+
     def test_runtime_agent_binding_seeds_context_engine_packet_for_single_turn(self, monkeypatch):
         monkeypatch.setenv("VIBELUTION_AGENT_ID", "agent-supervised-baseline")
         monkeypatch.setenv("VIBELUTION_AGENT_PROFILE_ID", "primary")
@@ -2521,7 +2970,11 @@ class TestLocalProviderBootstrap:
         )
         agent = SelfEvolvingAgent(config=config.config)
         messages, resumed = TurnOutcomeController.prepare_turn_messages(
-            system_prompt="system",
+            system_prompt=(
+                "static",
+                "<<<SYSTEM_PROMPT_SPLIT>>>",
+                "dynamic",
+            ),
             user_prompt="probe",
             effective_goal="probe",
             active_turn_messages=None,
@@ -2535,14 +2988,20 @@ class TestLocalProviderBootstrap:
         pending = list(agent._pending_runtime_context_blocks)
         assert pending == ["## Agent Runtime Context\nPromptTemplateId: prompt-supervised-baseline"]
 
-        for block in reversed(pending):
-            messages.insert(1, SystemMessage(content=block))
+        cache_prefix_context = agent_module._runtime_context_cache_prefix_text(pending)
+        messages[0] = agent_module._merge_runtime_context_into_cacheable_system_message(
+            messages[0],
+            cache_prefix_context,
+        )
 
         assert resumed is False
-        assert any(
+        assert isinstance(messages[0], dict)
+        assert messages[0]["content"][0]["cache_control"] == {"type": "ephemeral"}
+        assert "prompt-supervised-baseline" in messages[0]["content"][0]["text"]
+        assert not any(
             isinstance(message, SystemMessage)
             and "prompt-supervised-baseline" in str(message.content)
-            for message in messages
+            for message in messages[1:]
         )
 
 
@@ -2561,12 +3020,27 @@ class TestDelegationExposure:
         assert "task_output_tool" not in names
         assert "task_stop_tool" not in names
         assert "update_self_model_tool" not in names
-        assert "record_learning_tool" not in names
+        assert "record_learning_tool" in names
+        assert "search_memory_tool" in names
         assert "apply_patch_tool" in names
         assert "apply_diff_edit_tool" in names
         assert "read_file_tool" in names
+        assert "grep_search_tool" in names
+        assert "glob_tool" in names
+        assert "code_symbol_tool" in names
         assert "plan_update_tool" in names
         assert "run_test_for_tool" in names
+        assert "create_child_session_tool" in names
+        assert "list_child_sessions_tool" in names
+
+    def test_child_session_tool_description_guides_autostart_handoff(self):
+        tools_by_name = {tool.name: tool for tool in create_llm_facing_tools()}
+        description = str(getattr(tools_by_name["create_child_session_tool"], "description", "") or "")
+
+        assert "明显独立" in description
+        assert "直接创建并自动启动" in description
+        assert "handoff 上下文" in description
+        assert "同一 Agent" in description
 
     def test_llm_facing_tool_descriptions_are_capability_contracts(self):
         hard_cognitive_markers = ("必须", "禁止", "禁用", "强制")
@@ -2883,12 +3357,32 @@ class TestRuntimeStateMemoryFlow:
             retryable=True,
             consecutive_failures=2,
             iteration=2,
+            attempts=1,
+            max_attempts=5,
+        ) is None
+        assert controller.should_stop_after_llm_failure(
+            category="network_error",
+            retryable=True,
+            consecutive_failures=5,
+            iteration=5,
+            attempts=1,
+            max_attempts=5,
         )
         assert controller.should_stop_after_llm_failure(
             category="server_error",
             retryable=True,
             consecutive_failures=1,
             iteration=1,
+            attempts=1,
+            max_attempts=5,
+        ) is None
+        assert controller.should_stop_after_llm_failure(
+            category="server_error",
+            retryable=True,
+            consecutive_failures=1,
+            iteration=1,
+            attempts=5,
+            max_attempts=5,
         )
         assert controller.should_stop_after_llm_failure(
             category="auth_error",

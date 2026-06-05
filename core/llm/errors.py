@@ -16,6 +16,8 @@ def classify_exception(exc: Exception) -> LLMError:
 
     if isinstance(exc, LLMError):
         return exc
+    if "payload_protocol_error" in lower:
+        return LLMError("payload_protocol_error", exc_msg or "本地 payload 协议校验失败", retryable=False)
     if exc_type == "KeyboardInterrupt":
         return LLMError("user_interrupt", "用户主动中断", retryable=False)
     if "context_length" in lower or "context length" in lower or "maximum context" in lower or "too many tokens" in lower:

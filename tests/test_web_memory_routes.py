@@ -239,8 +239,15 @@ def test_memory_knowledge_graph_endpoint_returns_read_only_project_structure(tmp
     assert payload["operatingBoundary"]["layoutWorker"] is True
     assert payload["operatingBoundary"]["fullContentIncluded"] is False
     assert payload["summary"]["nodeTypeCounts"]["agent"] >= 1
-    assert payload["summary"]["nodeTypeCounts"]["knowledge_base"] == 1
-    assert payload["summary"]["nodeTypeCounts"]["knowledge_item"] == 1
+    assert payload["summary"]["nodeTypeCounts"].get("knowledge_base", 0) == 0
+    assert payload["summary"]["nodeTypeCounts"].get("knowledge_item", 0) == 0
+    team_node = next(node for node in payload["nodes"] if node["type"] == "team")
+    agent_node = next(node for node in payload["nodes"] if node["type"] == "agent" and node["metadata"]["agentId"] == agent["agentId"])
+    assert team_node["childNodeIds"] == [agent_node["id"]]
+    assert team_node["responsibilityQuestion"]
+    assert agent_node["visual"]["size"] == "leaf"
+    assert team_node["contentItems"][0]["title"] == "Graph API proposal"
+    assert agent_node["contentItems"] == []
     assert "GRAPH API BODY MUST STAY OUT" not in str(payload)
 
 

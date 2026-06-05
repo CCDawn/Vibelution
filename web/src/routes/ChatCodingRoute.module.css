@@ -35,7 +35,7 @@
 }
 
 .leftBlock {
-  padding: 7px 8px;
+  padding: 8px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   background: var(--surface-panel);
@@ -86,8 +86,8 @@
   margin: 4px 0 0;
   color: var(--fg-secondary);
   font-size: 0.74rem;
-  line-height: 1.24;
-  -webkit-line-clamp: 1;
+  line-height: 1.32;
+  -webkit-line-clamp: 3;
 }
 
 .sectionMetaLine {
@@ -102,8 +102,8 @@
   margin: 4px 0 0;
   color: var(--fg-primary);
   font-size: 0.74rem;
-  line-height: 1.24;
-  -webkit-line-clamp: 1;
+  line-height: 1.32;
+  -webkit-line-clamp: 2;
 }
 
 .oneLineValue span {
@@ -255,19 +255,18 @@
 }
 
 .inlineMetaList {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 3px;
   margin-top: 6px;
-  max-height: 32px;
   min-width: 0;
-  overflow: hidden;
 }
 
 .inlineMetaPill {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
+  display: grid;
+  grid-template-columns: minmax(58px, 0.42fr) minmax(0, 1fr);
+  align-items: baseline;
+  gap: 6px;
   max-width: 100%;
   min-width: 0;
   padding: 3px 6px;
@@ -285,18 +284,25 @@
   flex: 0 0 auto;
 }
 
-.inlineMetaPill strong {
+.inlineMetaPill span {
   min-width: 0;
-  color: var(--fg-primary);
-  font-weight: 650;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.inlineMetaPill strong {
+  min-width: 0;
+  color: var(--fg-primary);
+  font-weight: 650;
+  line-height: 1.18;
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+
 .featurePresetBlock {
   display: grid;
-  gap: 5px;
+  gap: 6px;
 }
 
 .featurePresetScope {
@@ -318,7 +324,7 @@
 
 .featureChipRow {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 4px;
   min-width: 0;
 }
@@ -329,8 +335,8 @@
   gap: 5px;
   align-items: center;
   min-width: 0;
-  min-height: 28px;
-  padding: 4px 6px;
+  min-height: 34px;
+  padding: 6px 7px;
   border: 1px solid var(--border-soft);
   border-radius: 7px;
   background: color-mix(in srgb, var(--surface-card) 74%, transparent);
@@ -404,7 +410,7 @@
   font-size: 0.64rem;
   line-height: 1.25;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 1;
+  -webkit-line-clamp: 2;
 }
 
 .featureChip {
@@ -414,10 +420,10 @@
   gap: 4px;
   min-width: 0;
   max-width: 100%;
-  min-height: 21px;
-  padding: 0 5px;
+  min-height: 28px;
+  padding: 3px 6px;
   border: 1px solid var(--border-soft);
-  border-radius: 999px;
+  border-radius: 7px;
   background: color-mix(in srgb, var(--surface-card) 72%, transparent);
   color: var(--fg-secondary);
   cursor: pointer;
@@ -429,11 +435,9 @@
 
 .featureChip strong {
   min-width: 0;
-  overflow: hidden;
+  overflow-wrap: anywhere;
   font-size: 0.66rem;
   font-weight: 650;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .featureChip span {
@@ -522,32 +526,62 @@
 
 .agentIndexHeader {
   display: grid;
-  grid-template-columns: auto 30px minmax(0, 1fr) auto;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
   align-items: center;
   gap: 7px;
   min-height: 44px;
   padding: 7px 8px;
-  border: 0;
   background: transparent;
   color: var(--fg-primary);
-  cursor: pointer;
-  font: inherit;
-  text-align: left;
 }
 
 .agentIndexHeader:hover,
-.agentIndexHeader:focus-visible {
+.agentIndexCard:focus-within .agentIndexHeader {
   background: color-mix(in srgb, var(--surface-panel) 74%, transparent);
+}
+
+.agentIndexExpandButton,
+.agentIndexOpenButton {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+}
+
+.agentIndexExpandButton {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 30px;
+  padding: 0;
+  color: var(--fg-tertiary);
+}
+
+.agentIndexExpandButton:hover,
+.agentIndexExpandButton:focus-visible,
+.agentIndexOpenButton:hover,
+.agentIndexOpenButton:focus-visible {
+  color: var(--fg-primary);
   outline: none;
 }
 
-.agentIndexHeader > svg {
-  color: var(--fg-tertiary);
+.agentIndexExpandButton > svg {
   transition: transform 140ms ease;
 }
 
-.agentIndexHeader[aria-expanded="true"] > svg {
+.agentIndexExpandButton[aria-expanded="true"] > svg {
   transform: rotate(90deg);
+}
+
+.agentIndexOpenButton {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  padding: 0;
+  text-align: left;
 }
 
 .agentIndexAvatar {
@@ -678,7 +712,7 @@
 
 .resourceSplit {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
   gap: 5px;
 }
 
@@ -703,11 +737,48 @@
 
 .resourceMetric strong {
   min-width: 0;
-  overflow: hidden;
   color: var(--fg-primary);
   font-size: 0.76rem;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.2;
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+
+.compressionFactGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
+  gap: 5px;
+  min-width: 0;
+}
+
+.compressionFact {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 5px 6px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 18%, var(--border-soft));
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--surface-card) 64%, transparent);
+}
+
+.compressionFactWide {
+  grid-column: 1 / -1;
+}
+
+.compressionFact span {
+  min-width: 0;
+  color: var(--fg-tertiary);
+  font-size: 0.64rem;
+  line-height: 1.15;
+}
+
+.compressionFact strong {
+  min-width: 0;
+  color: var(--fg-primary);
+  font-size: 0.74rem;
+  line-height: 1.25;
+  overflow-wrap: break-word;
+  word-break: normal;
 }
 
 .companionCompact {
@@ -1324,6 +1395,173 @@
   border-color: var(--border-soft);
 }
 
+.agentSessionTabGroup {
+  display: inline-flex;
+  align-items: stretch;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.agentSessionTab {
+  display: inline-grid;
+  grid-template-columns: auto minmax(92px, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  flex: 0 1 240px;
+  min-width: 156px;
+  max-width: 280px;
+  min-height: 39px;
+  border: 1px solid transparent;
+  border-radius: 7px 7px 0 0;
+  padding: 5px 9px;
+  background: transparent;
+  color: var(--fg-secondary);
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+}
+
+.agentSessionTab:hover {
+  color: var(--fg-primary);
+  border-color: color-mix(in srgb, var(--border-soft) 72%, transparent);
+  background: color-mix(in srgb, var(--surface-panel-strong) 54%, transparent);
+}
+
+.agentSessionTabActive {
+  color: var(--fg-primary);
+  background: var(--surface-panel-strong);
+  border-color: var(--border-soft);
+}
+
+.agentSessionTabRoot {
+  border-left: 3px solid color-mix(in srgb, var(--accent-warm) 56%, transparent);
+  background: color-mix(in srgb, var(--accent-warm) 5%, transparent);
+}
+
+.agentSessionTabChild {
+  border-left: 3px solid color-mix(in srgb, var(--accent-cool) 62%, transparent);
+  background: color-mix(in srgb, var(--accent-cool) 7%, transparent);
+}
+
+.agentSessionTabRoot.agentSessionTabActive {
+  background: color-mix(in srgb, var(--surface-panel-strong) 88%, var(--accent-warm) 12%);
+}
+
+.agentSessionTabChild.agentSessionTabActive {
+  background: color-mix(in srgb, var(--surface-panel-strong) 86%, var(--accent-cool) 14%);
+}
+
+.agentSessionTabRoot .agentSessionTabIcon {
+  color: var(--accent-warm-2);
+  background: color-mix(in srgb, var(--accent-warm) 14%, transparent);
+}
+
+.agentSessionTabChild .agentSessionTabIcon {
+  color: var(--accent-cool-2);
+  background: color-mix(in srgb, var(--accent-cool) 16%, transparent);
+}
+
+.agentSessionTabEditing {
+  grid-template-columns: auto minmax(120px, 1fr) auto;
+  cursor: default;
+}
+
+.agentSessionTabIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  color: var(--accent-cool-2);
+  background: color-mix(in srgb, var(--accent-cool) 12%, transparent);
+}
+
+.agentSessionTabCopy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  text-align: left;
+}
+
+.agentSessionTabKicker {
+  color: var(--fg-tertiary);
+  font-size: 0.62rem;
+  font-weight: 760;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.agentSessionTabTitle {
+  min-width: 0;
+  overflow: hidden;
+  color: inherit;
+  font-size: 0.76rem;
+  font-weight: 760;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agentSessionTabTitleInput {
+  min-width: 0;
+  width: 100%;
+  height: 22px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 34%, var(--border-soft));
+  border-radius: 6px;
+  background: var(--surface-input-strong);
+  color: var(--fg-primary);
+  padding: 0 6px;
+  font: inherit;
+  font-size: 0.76rem;
+  font-weight: 760;
+  line-height: 1;
+}
+
+.agentSessionTabEditActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.agentSessionTabEditButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-card) 90%, transparent);
+  color: var(--fg-tertiary);
+  cursor: pointer;
+}
+
+.agentSessionTabEditButton:hover:not(:disabled),
+.agentSessionTabEditButton:focus-visible:not(:disabled) {
+  color: var(--accent-cool-2);
+  border-color: color-mix(in srgb, var(--accent-cool) 34%, transparent);
+  background: color-mix(in srgb, var(--accent-cool) 12%, transparent);
+}
+
+.agentSessionTabEditButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.46;
+}
+
+.agentSessionTabMeta {
+  min-width: 0;
+  max-width: 96px;
+  overflow: hidden;
+  color: var(--fg-tertiary);
+  font-size: 0.66rem;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .fileTab {
   display: inline-flex;
   align-items: center;
@@ -1581,10 +1819,6 @@
   background: color-mix(in srgb, var(--surface-card) 76%, transparent);
 }
 
-.rightIndexTabsSingle {
-  grid-template-columns: minmax(0, 1fr);
-}
-
 .rightIndexTab {
   display: inline-flex;
   align-items: center;
@@ -1621,6 +1855,140 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.contextCompositionPanel {
+  display: grid;
+  gap: 7px;
+  padding-top: 2px;
+}
+
+.contextCompositionItem {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.contextCompositionHeader {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  color: var(--fg-tertiary);
+  font-size: 0.68rem;
+  line-height: 1;
+}
+
+.contextCompositionHeader span,
+.contextCompositionHeader strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.contextCompositionHeader strong {
+  color: var(--fg-secondary);
+  font-weight: 760;
+}
+
+.contextCompositionBar {
+  display: flex;
+  width: 100%;
+  height: 7px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-panel) 74%, transparent);
+}
+
+.contextCompositionSegment {
+  flex: 0 0 auto;
+  min-width: 4px;
+  height: 100%;
+}
+
+.contextCompositionSegmentExact {
+  min-width: 0;
+}
+
+.contextCompositionLegend {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  min-width: 0;
+  color: var(--fg-tertiary);
+  font-size: 0.62rem;
+  line-height: 1.2;
+}
+
+.contextCompositionLegend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+}
+
+.contextCompositionLegend i {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+}
+
+.contextCompositionSegmentUser {
+  background: #4f8cff;
+}
+
+.contextCompositionSegmentHistory {
+  background: #7a8494;
+}
+
+.contextCompositionSegmentTask {
+  background: #d19a3f;
+}
+
+.contextCompositionSegmentAgent {
+  background: #36a86f;
+}
+
+.contextCompositionSegmentGuidance {
+  background: #c26ad8;
+}
+
+.contextCompositionSegmentSkill {
+  background: #d6655a;
+}
+
+.contextCompositionSegmentAttachments {
+  background: #3fb8c8;
+}
+
+.contextCompositionSegmentCached {
+  background: #31b977;
+}
+
+.contextCompositionSegmentUncached {
+  background: #8c96a6;
+}
+
+.contextCompositionSegmentMissing {
+  background: repeating-linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--fg-tertiary) 42%, transparent) 0,
+    color-mix(in srgb, var(--fg-tertiary) 42%, transparent) 5px,
+    transparent 5px,
+    transparent 9px
+  );
+}
+
+.contextCompositionSegmentUnused {
+  background: color-mix(in srgb, var(--fg-tertiary) 14%, transparent);
+}
+
+.contextCompositionSegmentOther {
+  background: #6f7dd9;
 }
 
 .memberIndexSummary {
@@ -1829,6 +2197,13 @@
   justify-self: start;
   width: 132px;
   max-width: 100%;
+}
+
+.agentOptionMeta {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 4px;
 }
 
 .groupComposerEmpty {
@@ -2067,6 +2442,23 @@
   gap: 5px;
 }
 
+.teamTreeLabelRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 22px;
+  padding: 0 8px 0 42px;
+  color: var(--fg-tertiary);
+  font-size: 0.68rem;
+  font-weight: 720;
+}
+
+.teamTreeLabelRow a {
+  color: var(--accent-cool-2);
+  text-decoration: none;
+}
+
 .teamTreeChildren {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2095,8 +2487,15 @@ button.teamTreeChild {
   cursor: pointer;
 }
 
+button.teamTreeChild,
+a.teamTreeChild {
+  text-decoration: none;
+}
+
 button.teamTreeChild:hover,
-button.teamTreeChild:focus-visible {
+a.teamTreeChild:hover,
+button.teamTreeChild:focus-visible,
+a.teamTreeChild:focus-visible {
   border-color: color-mix(in srgb, var(--accent-cool) 32%, var(--border-soft));
   color: var(--fg-primary);
   outline: none;
@@ -2146,7 +2545,7 @@ button.teamTreeChild:focus-visible {
 }
 
 .directSessionItem {
-  padding-right: 92px;
+  padding-right: 4px;
   box-shadow: none;
 }
 
@@ -2272,6 +2671,12 @@ button.teamTreeChild:focus-visible {
   background: color-mix(in srgb, var(--accent-warm) 12%, transparent);
 }
 
+.conversationKindBadgeChild {
+  color: var(--accent-cool-2);
+  border-color: color-mix(in srgb, var(--accent-cool) 32%, var(--border-soft));
+  background: color-mix(in srgb, var(--accent-cool) 12%, transparent);
+}
+
 .conversationKindBadgeGroup {
   color: var(--accent-cool-2);
   border-color: color-mix(in srgb, var(--accent-cool) 34%, var(--border-soft));
@@ -2325,6 +2730,37 @@ button.teamTreeChild:focus-visible {
   border-color: color-mix(in srgb, var(--fg-tertiary) 28%, var(--border-soft));
   background: color-mix(in srgb, var(--fg-tertiary) 9%, transparent);
   color: var(--fg-secondary);
+}
+
+.agentModelTag {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  max-width: 168px;
+  min-height: 18px;
+  padding: 0 6px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 24%, var(--border-soft));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent-cool) 8%, transparent);
+  color: var(--fg-secondary);
+  font-size: 0.64rem;
+  font-weight: 650;
+  line-height: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agentModelLine {
+  display: block;
+  min-width: 0;
+  color: var(--fg-tertiary);
+  font-size: 0.68rem;
+  font-weight: 600;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .sessionCurrentBadge {
@@ -2425,6 +2861,10 @@ button.teamTreeChild:focus-visible {
   pointer-events: auto;
 }
 
+.directSessionItem:has(.sessionActionStack) {
+  padding-right: 62px;
+}
+
 .sessionIconButton,
 .sessionDeleteButton {
   display: inline-flex;
@@ -2457,6 +2897,66 @@ button.teamTreeChild:focus-visible {
   opacity: 0.45;
 }
 
+.sessionContextMenu {
+  position: fixed;
+  z-index: 60;
+  display: grid;
+  width: 176px;
+  padding: 4px;
+  border: 1px solid color-mix(in srgb, var(--border-strong) 78%, transparent);
+  border-radius: 8px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--surface-card) 96%, white 4%), var(--surface-card));
+  box-shadow: 0 14px 32px color-mix(in srgb, black 26%, transparent);
+}
+
+.sessionContextMenuItem {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg-secondary);
+  font: inherit;
+  font-size: 0.76rem;
+  font-weight: 700;
+  line-height: 1;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sessionContextMenuItem span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sessionContextMenuItem:hover:not(:disabled),
+.sessionContextMenuItem:focus-visible:not(:disabled) {
+  background: color-mix(in srgb, var(--accent-warm) 13%, transparent);
+  color: var(--fg-primary);
+}
+
+.sessionContextMenuDanger {
+  color: color-mix(in srgb, var(--state-error) 82%, var(--fg-secondary));
+}
+
+.sessionContextMenuDanger:hover:not(:disabled),
+.sessionContextMenuDanger:focus-visible:not(:disabled) {
+  background: color-mix(in srgb, var(--state-error) 12%, transparent);
+  color: var(--state-error);
+}
+
+.sessionContextMenuItem:disabled {
+  cursor: not-allowed;
+  opacity: 0.46;
+}
+
 .sessionItemNotice,
 .sessionItemError {
   grid-column: 1 / -1;
@@ -2472,6 +2972,11 @@ button.teamTreeChild:focus-visible {
 
 .sessionItemError {
   color: var(--state-error);
+}
+
+.childTopLevelSessionItem {
+  border-color: color-mix(in srgb, var(--accent-cool) 22%, var(--border-soft));
+  background: color-mix(in srgb, var(--accent-cool) 4%, var(--surface-card));
 }
 
 .groupConversationFrame {
@@ -3081,6 +3586,30 @@ button.teamTreeChild:focus-visible {
   line-height: 1.58;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
+}
+
+.groupBubbleBodyCollapsed {
+  display: -webkit-box;
+  max-height: 7.6em;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 5;
+}
+
+.groupBubbleToggle {
+  justify-self: start;
+  min-height: 24px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent-cool-2);
+  font: inherit;
+  font-size: 0.74rem;
+  font-weight: 760;
+}
+
+.groupBubbleToggle:hover {
+  text-decoration: underline;
 }
 
 .groupBubbleMeta {

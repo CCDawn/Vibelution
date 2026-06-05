@@ -84,6 +84,13 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain("copy.graphVisibleEdges");
     expect(routeSource).toContain("copy.graphClearFocus");
     expect(routeSource).toContain("selectedGraphRelations");
+    expect(routeSource).toContain("selectedGraphChildren");
+    expect(routeSource).toContain("selectGraphNode");
+    expect(routeSource).toContain("copy.graphResponsibilityQuestion");
+    expect(routeSource).toContain("copy.graphDirectChildren");
+    expect(routeSource).toContain("copy.graphNodeKnowledge");
+    expect(routeSource).toContain("styles.graphResponsibilityPanel");
+    expect(routeSource).toContain("styles.graphKnowledgePanel");
     expect(routeSource).toContain("copy.graphRelations");
     expect(routeSource).toContain("copy.graphIncoming");
     expect(routeSource).toContain("copy.graphOutgoing");
@@ -117,6 +124,11 @@ describe("MemoryRoute layout contract", () => {
     expect(graphCanvasSource).toContain("wireframe: true");
     expect(graphCanvasSource).toContain("flatShading: true");
     expect(graphCanvasSource).toContain("pickVisibleLabelIds");
+    expect(graphCanvasSource).toContain("nodeColor");
+    expect(graphCanvasSource).toContain("nodeSize");
+    expect(graphCanvasSource).toContain("graphNodeBadgeQuestion");
+    expect(graphCanvasSource).toContain("node.responsibilityQuestion");
+    expect(graphCanvasSource).toContain("dataset.agentCategory");
     expect(graphCanvasSource).toContain("setPixelRatio(1)");
     expect(graphCanvasSource).toContain("renderInteractionFrame");
     expect(graphCanvasSource).toContain("requestRender");
@@ -142,6 +154,10 @@ describe("MemoryRoute layout contract", () => {
     expect(memoryCssSource).not.toContain("backdrop-filter");
     expect(memoryCssSource).toContain('[data-detail="true"]');
     expect(memoryCssSource).toContain(".graphNodeBadgeType");
+    expect(memoryCssSource).toContain(".graphNodeBadgeQuestion");
+    expect(memoryCssSource).toContain(".graphResponsibilityPanel");
+    expect(memoryCssSource).toContain(".graphKnowledgePanel");
+    expect(memoryCssSource).toContain(".graphKnowledgeItem");
     expect(memoryCssSource).toContain(".graphInteractionHint");
     expect(memoryCssSource).toContain(".graphNodeTypeMark");
     expect(memoryCssSource).toContain(".graphTypeList button");
@@ -150,6 +166,8 @@ describe("MemoryRoute layout contract", () => {
     expect(memoryCssSource).toContain(".graphRelationPanel");
     expect(memoryCssSource).toContain(".graphRelationGroup button");
     expect(memoryCssSource).toContain(".graphRelationEmpty");
+    expect(memoryCssSource).toContain('[data-agent-category="session_agent"]');
+    expect(memoryCssSource).toContain('[data-agent-category="team_member_agent"]');
     expect(memoryCssSource).toContain(".ragPreviewPanel");
     expect(memoryCssSource).toContain(".ragHealthStrip");
     expect(memoryCssSource).toContain('[data-stale="true"]');
@@ -163,11 +181,11 @@ describe("MemoryRoute layout contract", () => {
     expect(routerSource).toContain('<LegacyMemoryRedirect to="/memory/graph" />');
   });
 
-  it("wires the team knowledge platform to scoped overview, source, proposal, review, search, and governance APIs", () => {
+  it("wires the team knowledge platform to a dashboard snapshot plus scoped action APIs", () => {
     expect(routeSource).toContain("queryKeys.memoryUsageContract()");
     expect(routeSource).toContain('fetchJson<MemoryUsageContractPayload>("/api/memory/usage-contract")');
-    expect(routeSource).toContain("queryKeys.knowledgeOverview()");
-    expect(routeSource).toContain('fetchJson<TeamKnowledgeOverview>("/api/knowledge/overview")');
+    expect(routeSource).toContain("queryKeys.knowledgeDashboardSnapshot");
+    expect(routeSource).toContain('fetchJson<KnowledgeDashboardSnapshotPayload>("/api/knowledge/dashboard-snapshot?recommendationLimit=6&workbenchLimit=8&planLimit=8")');
     expect(routeSource).toContain('sourceType: "manual_user_entry"');
     expect(routeSource).toContain("/source-artifacts");
     expect(routeSource).toContain("/refinement-proposals");
@@ -193,11 +211,11 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain("styles.ragPolicyStrip");
     expect(routeSource).toContain("styles.ragContextCard");
     expect(routeSource).toContain("/api/knowledge/governance/tasks");
-    expect(routeSource).toContain("/api/knowledge/operations/health");
-    expect(routeSource).toContain("/api/knowledge/governance/plan");
-    expect(routeSource).toContain("/api/knowledge/steward/overview");
-    expect(routeSource).toContain("/api/knowledge/steward/recommendations");
-    expect(routeSource).toContain("/api/knowledge/steward/workbench");
+    expect(routeSource).toContain("knowledgeDashboardSnapshot?.operationsHealth");
+    expect(routeSource).toContain("knowledgeDashboardSnapshot?.governancePlan");
+    expect(routeSource).toContain("knowledgeDashboardSnapshot?.steward");
+    expect(routeSource).toContain("knowledgeDashboardSnapshot?.recommendations");
+    expect(routeSource).toContain("knowledgeDashboardSnapshot?.workbench");
     expect(routeSource).toContain("/api/knowledge/ingestion-adapters");
     expect(routeSource).toContain("/trace/");
     expect(routeSource).toContain("/rating-suggestions");
@@ -227,15 +245,15 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain("copy.ingestionAdapters");
     expect(routeSource).toContain("copy.traceability");
     expect(routeSource).toContain("copy.knowledgeSteward");
-    expect(routeSource).toContain("knowledgeStewardQuery");
+    expect(routeSource).toContain("knowledgeDashboardSnapshotQuery");
     expect(routeSource).toContain("styles.knowledgeStewardPanel");
     expect(routeSource).toContain("styles.stewardRecommendations");
     expect(routeSource).toContain("styles.stewardWorkbench");
     expect(routeSource).toContain("styles.stewardStageGrid");
-    expect(routeSource).toContain("knowledgeStewardWorkbenchQuery");
-    expect(routeSource).toContain("knowledgeStewardRecommendationsQuery");
-    expect(routeSource).toContain("knowledgeOperationsHealthQuery");
-    expect(routeSource).toContain("knowledgeGovernancePlanQuery");
+    expect(routeSource).toContain("knowledgeDashboardSnapshot?.workbench");
+    expect(routeSource).toContain("knowledgeDashboardSnapshot?.recommendations");
+    expect(routeSource).toContain("knowledgeDashboardSnapshot?.operationsHealth");
+    expect(routeSource).toContain("knowledgeDashboardSnapshot?.governancePlan");
     expect(routeSource).toContain("memoryUsageContractQuery");
     expect(routeSource).toContain("copy.noDirectApply");
     expect(routeSource).toContain("copy.reviewerRequired");

@@ -8,7 +8,7 @@ import re
 import tempfile
 import time
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -20,10 +20,39 @@ WRITE_RETRY_TIMEOUT_SECONDS = 5.0
 READ_RETRY_ATTEMPTS = 5
 READ_RETRY_DELAY_SECONDS = 0.05
 _SAFE_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
+_ACTIVE_WORK_BLOCKING_STATUSES = {
+    "",
+    "active",
+    "queued",
+    "running",
+    "stopping",
+    "started",
+    "in_progress",
+    "pausing",
+    "resuming",
+    "force_stopping",
+}
+_ACTIVE_WORK_NON_BLOCKING_STATUSES = {
+    "cancelled",
+    "closed",
+    "completed",
+    "done",
+    "failed",
+    "failed_provider",
+    "failed_runtime",
+    "idle",
+    "needs_continue",
+    "paused_limit",
+    "ready",
+    "stopped",
+    "stopped_by_user",
+    "stop_failed",
+    "superseded",
+}
 
 
 def _now_iso() -> str:
-    return datetime.now(UTC).isoformat()
+    return datetime.now(timezone.utc).isoformat()
 
 
 def normalize_run_kind(kind: str) -> str:
@@ -124,6 +153,23 @@ def _snapshot_lifecycle_signature(
         str(payload.get("errorType") or "").strip(),
         str(payload.get("error") or "").strip(),
     )
+
+
+def _snapshot_blocks_active_index(payload: dict[str, Any]) -> bool:
+    if str(payload.get("finishedAt") or payload.get("endedAt") or "").strip():
+        return False
+    status = str(
+        payload.get("status")
+        or payload.get("currentPhase")
+        or payload.get("phase")
+        or payload.get("runtimeStatus")
+        or ""
+    ).strip().lower()
+    if status in _ACTIVE_WORK_NON_BLOCKING_STATUSES:
+        return False
+    if status in _ACTIVE_WORK_BLOCKING_STATUSES:
+        return True
+    return bool(status)
 
 
 def _record_work_run_event(
@@ -256,16 +302,20 @@ class WorkRunStore:
             )
             raise ValueError("Invalid work run id.") from exc
         payload = json.loads(json.dumps(snapshot, ensure_ascii=False))
+        requested_active_run_id = str(active_run_id or "").strip()
+        effective_active_run_id = requested_active_run_id
+        if requested_active_run_id == run_id and not _snapshot_blocks_active_index(snapshot):
+            effective_active_run_id = ""
         previous_payload = self.load_snapshot(run_kind, run_id)
         previous_signature = (
-            _snapshot_lifecycle_signature(previous_payload, active_run_id=active_run_id)
+            _snapshot_lifecycle_signature(previous_payload, active_run_id=effective_active_run_id)
             if previous_payload
             else ()
         )
-        current_signature = _snapshot_lifecycle_signature(payload, active_run_id=active_run_id)
+        current_signature = _snapshot_lifecycle_signature(payload, active_run_id=effective_active_run_id)
         self.ensure_kind_dirs(run_kind)
         _atomic_write_json(self.runs_dir(run_kind) / f"{run_id}.json", payload)
-        self.save_run_index(run_kind, active_run_id=active_run_id, latest_run_id=run_id, emit_event=False)
+        self.save_run_index(run_kind, active_run_id=effective_active_run_id, latest_run_id=run_id, emit_event=False)
         status = str(payload.get("status") or "").strip()
         phase = str(payload.get("phase") or payload.get("currentPhase") or "").strip()
         lifecycle_status = status in {
@@ -296,7 +346,8 @@ class WorkRunStore:
             status=status,
             fields={
                 "phase": phase,
-                "activeRunId": str(active_run_id or "").strip(),
+                "activeRunId": effective_active_run_id,
+                "requestedActiveRunId": requested_active_run_id,
                 "runtimeStatus": str(payload.get("runtimeStatus") or "").strip(),
                 "updatedAt": str(payload.get("updatedAt") or "").strip(),
                 "finishedAt": str(payload.get("finishedAt") or "").strip(),

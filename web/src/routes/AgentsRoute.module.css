@@ -2007,6 +2007,63 @@
   line-height: 1.32;
 }
 
+.llmSlotGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  min-width: 0;
+}
+
+.llmSlotField {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 7px;
+  border: 1px solid color-mix(in srgb, var(--border-soft) 88%, transparent);
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--surface-panel) 78%, transparent);
+}
+
+.llmSlotField > span {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.llmSlotField strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-secondary);
+  font-size: 0.76rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.llmSlotField span small {
+  flex: 0 0 auto;
+  padding: 2px 6px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 18%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent-cool) 8%, transparent);
+  color: var(--accent-cool);
+  font-size: 0.66rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.llmSlotField > small {
+  display: -webkit-box;
+  min-height: 32px;
+  overflow: hidden;
+  color: var(--fg-tertiary);
+  font-size: 0.68rem;
+  line-height: 1.32;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
 .checkField {
   display: flex;
   align-items: center;
@@ -2226,6 +2283,7 @@
 
 .field input,
 .field select,
+.llmSlotField select,
 .fieldWide textarea {
   width: 100%;
   min-width: 0;
@@ -2246,6 +2304,10 @@
   padding: 0 8px;
 }
 
+.llmSlotField select {
+  padding: 0 8px;
+}
+
 .fieldWide textarea {
   min-height: 62px;
   resize: vertical;
@@ -2255,6 +2317,7 @@
 
 .field input:focus,
 .field select:focus,
+.llmSlotField select:focus,
 .fieldWide textarea:focus {
   outline: 2px solid color-mix(in srgb, var(--accent-cool) 24%, transparent);
   border-color: color-mix(in srgb, var(--accent-cool) 48%, transparent);

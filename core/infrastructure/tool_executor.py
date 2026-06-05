@@ -342,6 +342,7 @@ class ToolExecutor:
         "agent_message_tool",
         "agent_tool_permission_request_tool",
         "image2_generate_tool",
+        "computer_use_task_tool",
         "update_diagnosis_rules_tool",
         "update_self_model_tool",
         "record_evolution_tool",
@@ -370,6 +371,7 @@ class ToolExecutor:
             "python_lint_tool": 60,
             "spawn_agent_tool": 150,
             "image2_generate_tool": IMAGE2_TOOL_TIMEOUT_SECONDS,
+            "computer_use_task_tool": 180,
         }
         self._retryable_tools = {"grep_search_tool"}
 
@@ -489,18 +491,34 @@ class ToolExecutor:
 
         self._track_tool_decision_alignment(tool_name)
 
-        if tool_name not in self._tool_map:
-            available_tool_names = sorted(self._tool_map)
-            preview_tool_names = available_tool_names[:24]
-            for recovery_tool in ("read_file_tool", "grep_search_tool", "glob_tool", "cli_tool"):
-                if recovery_tool in self._tool_map and recovery_tool not in preview_tool_names:
-                    preview_tool_names.append(recovery_tool)
-            available_tools = ", ".join(preview_tool_names)
-            error_msg = (
-                "[错误] 未知工具：该工具名不在当前工具目录中。"
-                f"当前可用工具包括：{available_tools}。"
-                "请选择功能匹配的工具名，并按该工具的参数 schema 重试。"
+        soft_result = self._check_codex_style_reading_governance(tool_name, tool_args)
+        if soft_result:
+            self._event_bus.publish(EventNames.TOOL_SUCCESS, {
+                "name": tool_name,
+                "args": tool_args,
+                "result": soft_result,
+                "durationMs": int((time.monotonic() - started_at) * 1000),
+                "timeoutSeconds": 0,
+            })
+            self._record_runtime_signals(tool_name, tool_args, soft_result)
+            _record_current_agent_tool_observation(tool_name, "reading_governed", tool_args, soft_result)
+            _record_tool_scene_event(
+                "execute",
+                "tool.reading_governance.soft_redirected",
+                tool_name=tool_name,
+                message="Codex-style reading governance returned a compact redirect.",
+                level="info",
+                outcome="observed",
+                fields={
+                    **_summarize_tool_args(tool_args),
+                    "durationMs": int((time.monotonic() - started_at) * 1000),
+                    "resultPreview": soft_result[:320],
+                },
             )
+            return (soft_result, None)
+
+        if tool_name not in self._tool_map:
+            error_msg = self._unknown_tool_message_for_current_context()
             self._event_bus.publish(EventNames.TOOL_ERROR, {
                 "name": "[unknown_tool]",
                 "error": error_msg,
@@ -533,6 +551,7 @@ class ToolExecutor:
         call_args = dict(tool_args or {})
         # 内部治理哨兵只用于执行权限判断，不能透传给真实工具函数。
         call_args.pop("_internal_delegate", None)
+        call_args.pop("force", None)
         argument_error = _validate_tool_arguments(tool_name, func, call_args)
         if argument_error:
             self._event_bus.publish(EventNames.TOOL_ERROR, {
@@ -845,6 +864,47 @@ class ToolExecutor:
             return None
         return str(getattr(decision, "message", "") or "[工具策略提示] 当前工具调用被该 Agent 的 ToolPolicy 拦截。")
 
+    def _unknown_tool_message_for_current_context(self) -> str:
+        try:
+            from core.web.services.agent_directory_service import (
+                current_agent_runtime,
+                effective_visible_tool_names_for_current_agent,
+            )
+
+            runtime = current_agent_runtime()
+            agent_id = str((runtime or {}).get("agentId") or "").strip()
+            if agent_id:
+                visible_names = [
+                    name
+                    for name in effective_visible_tool_names_for_current_agent()
+                    if name in self._tool_map
+                ][:24]
+                if visible_names:
+                    visible = ", ".join(visible_names)
+                    return (
+                        "[错误] 未知工具：该工具未暴露给当前 Agent。"
+                        f"当前 Agent 可见工具包括：{visible}。"
+                        "请换用可见工具，或让用户调整该 Agent 的 ToolPolicy。"
+                    )
+                return (
+                    "[错误] 未知工具：该工具未暴露给当前 Agent。"
+                    "当前 Agent 没有可见工具。请让用户调整该 Agent 的 ToolPolicy。"
+                )
+        except Exception:
+            pass
+
+        available_tool_names = sorted(self._tool_map)
+        preview_tool_names = available_tool_names[:24]
+        for recovery_tool in ("read_file_tool", "grep_search_tool", "glob_tool", "cli_tool"):
+            if recovery_tool in self._tool_map and recovery_tool not in preview_tool_names:
+                preview_tool_names.append(recovery_tool)
+        available_tools = ", ".join(preview_tool_names)
+        return (
+            "[错误] 未知工具：该工具名不在当前工具目录中。"
+            f"当前可用工具包括：{available_tools}。"
+            "请选择功能匹配的工具名，并按该工具的参数 schema 重试。"
+        )
+
     @staticmethod
     def _check_delegation_policy_block(tool_name: str, tool_args: dict) -> Optional[str]:
         if tool_name != "spawn_agent_tool":
@@ -868,11 +928,83 @@ class ToolExecutor:
 
     @staticmethod
     def _check_evolution_mutation_guard(session, tool_name: str, tool_args: dict) -> Optional[str]:
+        active_txn_id = session.get_active_evolution_txn()
+        if not active_txn_id and not ToolExecutor._runtime_goal_allows_evolution_transaction(session):
+            return None
         governor = get_evolution_governor()
         return governor.check_mutation_allowed(
             tool_name=tool_name,
             tool_args=tool_args or {},
-            active_txn_id=session.get_active_evolution_txn(),
+            active_txn_id=active_txn_id,
+        )
+
+    @staticmethod
+    def _runtime_goal_allows_evolution_transaction(session) -> bool:
+        try:
+            packet = session.get_runtime_goal_packet()
+        except Exception:
+            packet = None
+        if packet is None:
+            return True
+        return bool(getattr(packet, "allow_evolution_transaction", False))
+
+    def _check_codex_style_reading_governance(self, tool_name: str, tool_args: dict) -> Optional[str]:
+        """Return a compact redirect for avoidable rereads on structured read tools."""
+        args = tool_args or {}
+        force_value = args.get("force")
+        if force_value is True or str(force_value or "").strip().lower() in {"1", "true", "yes", "on"}:
+            return None
+        if tool_name == "read_file_tool":
+            return self._govern_read_file_call(args)
+        return None
+
+    @staticmethod
+    def _govern_read_file_call(tool_args: dict) -> Optional[str]:
+        file_path = str((tool_args or {}).get("file_path") or "").strip()
+        if not file_path:
+            return None
+        try:
+            offset = int(_coerce_int((tool_args or {}).get("offset")))
+        except Exception:
+            offset = 0
+        try:
+            max_lines = int(_coerce_int((tool_args or {}).get("max_lines", 80)))
+        except Exception:
+            max_lines = 80
+        session = get_session_state()
+        if max_lines <= 0:
+            session.record_blocker(
+                "read_file_full_file_redirect",
+                f"{file_path} 请求全文件读取。",
+                "先定位再精读；确需全读时传 force=true。",
+                severity="hint",
+            )
+            return (
+                "[阅读治理] 本次没有直接全文件读取，避免把大文件整段塞入上下文。\n"
+                f"[目标] {file_path}\n"
+                "[建议] 先用有界 CLI/已授权定位工具收窄，或改为 read_file_tool(offset=0, max_lines=80)。\n"
+                "[覆盖] 如果用户主动要求全读或需要重新核对完整文件，可带 force=true。"
+            )
+        start_line = max(1, offset + 1)
+        end_line = max(start_line, offset + max_lines)
+        overlaps = session.get_overlapping_read_ranges(file_path, start_line, end_line)
+        if not overlaps:
+            return None
+        overlap_text = ", ".join(
+            f"{int(item.get('start_line', 0))}-{int(item.get('end_line', 0))}"
+            for item in overlaps[:4]
+        )
+        session.record_blocker(
+            "duplicate_read_soft_redirect",
+            f"{file_path} 第 {start_line}-{end_line} 行与已读范围重叠。",
+            "优先使用已有证据、改读邻近未读窗口，或用有界 CLI/已授权定位工具精确定位；主动复核可传 force=true。",
+            severity="hint",
+        )
+        return (
+            "[阅读治理] 该范围本轮已读过，未重复返回正文。\n"
+            f"[目标] {file_path} 第 {start_line}-{end_line} 行\n"
+            f"[已读重叠] {overlap_text}\n"
+            "[建议] 直接使用已有证据，或读取相邻未读窗口；需要重新核对时传 force=true。"
         )
 
     @staticmethod
@@ -1031,22 +1163,20 @@ class ToolExecutor:
                 if tool_name in {"read_file_tool", "python_lint_tool"}:
                     anchor = str((tool_args or {}).get("file_path") or "")
                 elif tool_name == "code_symbol_tool":
-                    anchor = str((tool_args or {}).get("entity_name") or (tool_args or {}).get("symbol") or (tool_args or {}).get("file_path") or "")
+                    anchor = str((tool_args or {}).get("query") or (tool_args or {}).get("symbol") or (tool_args or {}).get("file_path") or "")
                 elif tool_name == "grep_search_tool":
                     anchor = str((tool_args or {}).get("regex_pattern") or "")
                 session.freeze_scope(anchor or session.get_attention_snapshot().get("feedback_loop_target") or "当前诊断锚点")
 
         if tool_name == "read_file_tool":
             self._record_file_read(session, tool_args, result_text, tool_name)
-        elif tool_name == "code_symbol_tool" and str((tool_args or {}).get("mode") or "").lower() == "entity":
+        elif tool_name == "code_symbol_tool" and str((tool_args or {}).get("mode") or "").lower() == "inspect":
             path = str((tool_args or {}).get("file_path") or "")
-            entity = str((tool_args or {}).get("entity_name") or (tool_args or {}).get("symbol") or "")
+            entity = str((tool_args or {}).get("symbol") or (tool_args or {}).get("query") or "")
             if path:
                 session.clear_pending_continuation(path=path)
-            session.record_read_entity(
-                path,
-                entity,
-            )
+            if entity:
+                session.record_read_entity(path, entity)
         elif tool_name == "grep_search_tool":
             query = str((tool_args or {}).get("regex_pattern") or "")
             scope = str((tool_args or {}).get("search_dir") or "")
@@ -1085,11 +1215,11 @@ class ToolExecutor:
     @staticmethod
     def _pattern_hint(pattern: str) -> str:
         if pattern == "cli_tool:command_chain":
-            return "拆成多个独立工具调用 / 分开执行 python 与 pytest / 使用专用读写工具"
+            return "拆成多个独立工具调用 / 分开执行 python 与 pytest / 仅在已授权时使用专用读写工具"
         if pattern == "cli_tool:pipe":
-            return "read_file_tool / grep_search_tool / 无 pipe 的 git 子命令"
+            return "无 pipe 的有界命令 / 无 pipe 的 git 子命令 / 已授权的专用读搜工具"
         if pattern == "cli_tool:subexpression":
-            return "read_file_tool / 专用 Python 工具 / 显式参数传递"
+            return "有界命令 / 专用 Python 工具 / 显式参数传递"
         return ""
 
     @staticmethod

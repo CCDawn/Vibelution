@@ -1,0 +1,1458 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>神经科学启发算法发现科研流程索引</title>
+    <link rel="stylesheet" href="research_flow_pages/flow_pages.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="top">
+        <div class="hero">
+          <div>
+            <div class="kicker">Challenge Cup Research Flow Index</div>
+            <h1>神经科学启发算法发现科研流程索引</h1>
+            <p class="subtitle">每个节点都是独立计划页。点击索引卡进入对应页面，查看当前节点的目标、输入、动作、输出、记忆平台边界和图谱同步规则。</p>
+          </div>
+          <div class="tag-row">
+            <span class="tag done">候选知识审核流</span>
+            <span class="tag">Knowledge Steward Agent · agent-knowledge-steward</span>
+            <span class="tag">Candidate Graph</span>
+            <span class="tag">Team Knowledge</span>
+          </div>
+        </div>
+        <aside class="panel">
+          <div class="label">流程约束</div>
+          <div class="fact-grid">
+            <div class="fact"><b>输入</b><span>第一版只处理用户给定资料，不自动联网扩展。</span></div>
+            <div class="fact"><b>落库</b><span>科研功能 Agent 只产出候选；知识治理 Agent 负责治理建议。</span></div>
+            <div class="fact"><b>图谱</b><span>候选只进候选图谱；ingested 后进入正式图谱。</span></div>
+            <div class="fact"><b>实验</b><span>实验验证闭环先占位，未来接训练 runner。</span></div>
+          </div>
+        </aside>
+      </section>
+
+      <section id="flow-board" class="section">
+        <div class="section-head">
+          <h2>可视化流程图</h2>
+          <p class="hint">节点仅显示名称。默认适配全图，可放大查看细节，按住空白区域拖动画板。</p>
+        </div>
+        <div class="flow-board-shell">
+  <div class="flow-toolbar" aria-label="画板缩放控制">
+    <button type="button" data-zoom-out title="缩小">-</button>
+    <button type="button" data-zoom-in title="放大">+</button>
+    <button type="button" data-zoom-reset title="重置缩放">100%</button>
+    <button type="button" data-zoom-fit title="适配全图">适配全图</button>
+    <span class="zoom-readout" data-zoom-readout>100%</span>
+  </div>
+  <div class="flow-board" data-draggable-board aria-label="可拖动科研流程画板">
+    <div class="flow-stage" data-flow-stage>
+    <div class="flow-graph" data-flow-graph aria-label="科研流程图结构">
+    <svg class="graph-svg" viewBox="0 0 1900 640" preserveAspectRatio="none" aria-hidden="true">
+      <defs>
+        <marker id="arrow-main" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="rgba(49, 95, 125, 0.68)"></path>
+        </marker>
+        <marker id="arrow-draft" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="rgba(185, 129, 34, 0.8)"></path>
+        </marker>
+      </defs>
+      <path marker-end="url(#arrow-main)" d="M 265 150 H 430"></path>
+      <path marker-end="url(#arrow-main)" d="M 650 150 H 815"></path>
+      <path marker-end="url(#arrow-main)" d="M 1035 150 H 1200"></path>
+      <path marker-end="url(#arrow-main)" d="M 1420 150 H 1585"></path>
+      <path marker-end="url(#arrow-main)" d="M 1700 190 V 290 H 1585"></path>
+      <path marker-end="url(#arrow-main)" d="M 1365 320 H 1200"></path>
+      <path marker-end="url(#arrow-main)" d="M 980 320 H 815"></path>
+      <path marker-end="url(#arrow-main)" d="M 595 320 H 430"></path>
+      <path marker-end="url(#arrow-main)" d="M 320 360 V 470 H 430"></path>
+      <path marker-end="url(#arrow-main)" d="M 650 500 H 815"></path>
+      <path marker-end="url(#arrow-main)" d="M 1035 500 H 1200"></path>
+      <path class="dashed" marker-end="url(#arrow-draft)" d="M 1310 540 V 585"></path>
+    </svg>
+    <a class="graph-node done" style="--x:160px; --y:150px;" href="research_flow_pages/01-source-workspace.html">
+    <span class="graph-id">01</span>
+    <h3>资料进入工作区</h3>
+  </a>
+    <a class="graph-node done" style="--x:540px; --y:150px;" href="research_flow_pages/02-paper-note.html">
+    <span class="graph-id">02</span>
+    <h3>生成 paper_note</h3>
+  </a>
+    <a class="graph-node done" style="--x:925px; --y:150px;" href="research_flow_pages/03-neuro-mechanism.html">
+    <span class="graph-id">03</span>
+    <h3>提取 neuro_mechanism</h3>
+  </a>
+    <a class="graph-node draft" style="--x:1310px; --y:150px;" href="research_flow_pages/04-mechanism-mapping.html">
+    <span class="graph-id">04</span>
+    <h3>机制到计算抽象</h3>
+  </a>
+    <a class="graph-node done" style="--x:1700px; --y:150px;" href="research_flow_pages/05-algorithm-hypothesis.html">
+    <span class="graph-id">05</span>
+    <h3>生成 algorithm_hypothesis</h3>
+  </a>
+    <a class="graph-node done" style="--x:1475px; --y:320px;" href="research_flow_pages/06-research-review.html">
+    <span class="graph-id">06</span>
+    <h3>科研审稿</h3>
+  </a>
+    <a class="graph-node done" style="--x:1090px; --y:320px;" href="research_flow_pages/07-steward-ingestion.html">
+    <span class="graph-id">07</span>
+    <h3>知识治理入库</h3>
+  </a>
+    <a class="graph-node done" style="--x:705px; --y:320px;" href="research_flow_pages/08-candidate-graph.html">
+    <span class="graph-id">08</span>
+    <h3>候选图谱预览</h3>
+  </a>
+    <a class="graph-node done" style="--x:320px; --y:320px;" href="research_flow_pages/09-official-graph.html">
+    <span class="graph-id">09</span>
+    <h3>正式知识图谱同步</h3>
+  </a>
+    <a class="graph-node pending" style="--x:540px; --y:500px;" href="research_flow_pages/10-experiment-loop.html">
+    <span class="graph-id">10</span>
+    <h3>实验验证闭环</h3>
+  </a>
+    <a class="graph-node pending" style="--x:925px; --y:500px;" href="research_flow_pages/11-iteration-versioning.html">
+    <span class="graph-id">11</span>
+    <h3>持续迭代与版本化</h3>
+  </a>
+    <a class="graph-node pending" style="--x:1310px; --y:500px;" href="research_flow_pages/12-challenge-cup-delivery.html">
+    <span class="graph-id">12</span>
+    <h3>挑战杯交付计划</h3>
+  </a>
+    <a class="graph-node done maintenance" style="--x:1310px; --y:610px;" href="research_flow_pages/13-flow-html-maintenance.html">
+    <span class="graph-id">13</span>
+    <h3>流程 HTML 维护门禁</h3>
+  </a>
+    </div>
+    </div>
+  </div>
+  </div>
+  <div class="graph-legend">
+    <span class="legend-chip"><span class="legend-line"></span>主流程依赖</span>
+    <span class="legend-chip"><span class="legend-line dashed"></span>维护/迭代回写</span>
+    <span class="legend-chip">可缩放、可拖动，点击节点进入独立计划页</span>
+  </div>
+      </section>
+
+
+    <section class="section">
+      <div class="section-head">
+        <h2>知识搜集与筛选入库 MVP</h2>
+        <p class="hint">只跑通知识搜集、筛选、候选入库、知识治理 Agent 和图谱同步设计；不进入训练实验、算法实现或比赛交付。</p>
+      </div>
+      <div class="mvp-strip">
+        <div class="mvp-step">
+              <b>01</b>
+              <strong>资料登记</strong>
+              <span>source_manifest</span>
+            </div>
+<div class="mvp-step">
+              <b>02</b>
+              <strong>生成笔记</strong>
+              <span>paper_note</span>
+            </div>
+<div class="mvp-step">
+              <b>03</b>
+              <strong>提取机制</strong>
+              <span>neuro_mechanism</span>
+            </div>
+<div class="mvp-step">
+              <b>04</b>
+              <strong>计算映射</strong>
+              <span>mechanism_mapping</span>
+            </div>
+<div class="mvp-step">
+              <b>05</b>
+              <strong>形成假设</strong>
+              <span>algorithm_hypothesis</span>
+            </div>
+<div class="mvp-step">
+              <b>06</b>
+              <strong>科研审稿</strong>
+              <span>review_record</span>
+            </div>
+<div class="mvp-step">
+              <b>07</b>
+              <strong>知识治理</strong>
+              <span>ingestion_pack</span>
+            </div>
+<div class="mvp-step">
+              <b>08</b>
+              <strong>候选图谱</strong>
+              <span>candidate_graph</span>
+            </div>
+<div class="mvp-step">
+              <b>09</b>
+              <strong>正式同步</strong>
+              <span>official_sync</span>
+            </div>
+      </div>
+      <div class="runbook-grid">
+        <div class="runbook-card">
+          <h2>状态流</h2>
+          <div class="state-ladder">
+            <div class="state-row">
+                  <b>source_registered</b>
+                  <strong>资料已登记</strong>
+                  <span>原始资料可追溯，允许进入笔记生成。</span>
+                </div>
+<div class="state-row">
+                  <b>paper_note_draft</b>
+                  <strong>论文笔记候选</strong>
+                  <span>有摘要、发现、方法、局限和来源页码。</span>
+                </div>
+<div class="state-row">
+                  <b>mechanism_candidate</b>
+                  <strong>神经机制候选</strong>
+                  <span>机制和实验现象分开，证据链可追踪。</span>
+                </div>
+<div class="state-row">
+                  <b>mechanism_mapping_candidate</b>
+                  <strong>计算抽象候选</strong>
+                  <span>把机制映射成工程可讨论的计算抽象，并标明类比风险。</span>
+                </div>
+<div class="state-row">
+                  <b>hypothesis_candidate</b>
+                  <strong>算法假设候选</strong>
+                  <span>包含计算抽象、算法设想和 experimentPlan 占位。</span>
+                </div>
+<div class="state-row">
+                  <b>review_ready</b>
+                  <strong>待科研审稿</strong>
+                  <span>候选字段完整，等待风险筛选。</span>
+                </div>
+<div class="state-row">
+                  <b>ready_for_steward</b>
+                  <strong>可交知识治理 Agent</strong>
+                  <span>审稿通过或需要治理建议。</span>
+                </div>
+<div class="state-row">
+                  <b>steward_recommended</b>
+                  <strong>治理建议完成</strong>
+                  <span>知识治理 Agent 生成 proposal、rating 和 ingestion pack。</span>
+                </div>
+<div class="state-row">
+                  <b>candidate_graph_visible</b>
+                  <strong>候选图谱可见</strong>
+                  <span>只进入候选图谱，不能当正式事实。</span>
+                </div>
+<div class="state-row">
+                  <b>official_synced</b>
+                  <strong>正式同步完成</strong>
+                  <span>授权审批门禁通过后进入 Team Knowledge、RAG 和正式图谱。</span>
+                </div>
+          </div>
+        </div>
+        <div class="runbook-card">
+          <h2>产物清单</h2>
+          <div class="artifact-table">
+            <div class="artifact-row">
+                  <code>source_manifest.json</code>
+                  <b>资料索引</b>
+                  <span>记录文件路径、来源类型、可信度、页码范围和允许分析状态。</span>
+                </div>
+<div class="artifact-row">
+                  <code>paper_note_YYYYMMDD_NNN.json</code>
+                  <b>资料笔记</b>
+                  <span>从资料中抽取可审查的论文/资料笔记。</span>
+                </div>
+<div class="artifact-row">
+                  <code>neuro_mechanism_YYYYMMDD_NNN.json</code>
+                  <b>神经机制</b>
+                  <span>把论文事实整理成带证据链的神经机制候选。</span>
+                </div>
+<div class="artifact-row">
+                  <code>algorithm_hypothesis_YYYYMMDD_NNN.json</code>
+                  <b>算法假设</b>
+                  <span>把机制映射为可验证算法假设，必须含 experimentPlan。</span>
+                </div>
+<div class="artifact-row">
+                  <code>review_record_YYYYMMDD_NNN.json</code>
+                  <b>审稿记录</b>
+                  <span>记录通过、退回、拒绝和风险标记。</span>
+                </div>
+<div class="artifact-row">
+                  <code>steward_ingestion_pack_YYYYMMDD_NNN.json</code>
+                  <b>知识治理摄取包</b>
+                  <span>治理建议、评级建议、目标知识域和正式入库申请。</span>
+                </div>
+<div class="artifact-row">
+                  <code>candidate_graph.json</code>
+                  <b>候选图谱预览</b>
+                  <span>展示候选链路、断链和未审节点。</span>
+                </div>
+<div class="artifact-row">
+                  <code>official_sync_record_YYYYMMDD_NNN.json</code>
+                  <b>正式同步记录</b>
+                  <span>记录审批门禁、正式 KnowledgeItem、RAG 和图谱同步状态。</span>
+                </div>
+          </div>
+        </div>
+      </div>
+      </section>
+
+
+    <section class="section">
+      <div class="section-head">
+        <h2>可实施技术蓝图</h2>
+        <p class="hint">复用 Vibelution 现有 Research、Team Knowledge、RAG、Knowledge Steward 和 Memory Graph 能力，把 01-09 做成可运行 MVP。 详细方案见 <a href="technical_implementation_plan.md">technical_implementation_plan.md</a>。</p>
+      </div>
+      <div class="runbook-card" style="margin-bottom: 12px;">
+        <h2>当前团队绑定</h2>
+        <div class="artifact-table">
+          <div class="service-row"><b>团队</b><span>科研团队 / research-team</span></div>
+          <div class="service-row"><b>分类</b><span>科研组织团队 · research_organization</span></div>
+          <div class="service-row"><b>团队群聊</b><span>room-20260529-090009-757107-6a747d62 · research_coordination</span></div>
+          <div class="service-row"><b>流程文件</b><span>workspace/teams/research-team/workflow_orchestration.json</span></div>
+          <div class="service-row"><b>候选仓库</b><span>workspace/teams/research-team/candidate_store/index.json</span></div>
+          <div class="service-row"><b>策略</b><span>挑战杯科研流程直接绑定当前 Vibelution 科研团队，不另建新团队；团队成员仍来自现有科研组织架构。</span></div>
+        </div>
+      </div>
+      <div class="runbook-grid">
+        <div class="runbook-card">
+          <h2>实施架构</h2>
+          <div class="artifact-table">
+            <div class="service-row">
+                  <strong>Team 编排状态机</strong>
+                  <span>已新增 TeamWorkflowOrchestration 后端切片，首期启用 challenge_cup_research。</span>
+                </div>
+<div class="service-row">
+                  <strong>候选资料工作区</strong>
+                  <span>已新增 Team 级 CandidateStore 最小索引，保存正式平台尚不能表达的候选中间态。</span>
+                </div>
+<div class="service-row">
+                  <strong>本地研究工作模型层</strong>
+                  <span>接入 bossAGI-standard / qwen3.5-9b（OpenAI-compatible，32k）作为候选生成和预审模型，不作为最终裁决或正式入库模型。</span>
+                </div>
+<div class="service-row">
+                  <strong>团队沟通复用层</strong>
+                  <span>复用 Team registry、Team canvas、linkedChatRoom、ChatRoom round 和 research_coordination purpose；本轮先落 API，不改前端。</span>
+                </div>
+<div class="service-row">
+                  <strong>研究编排复用层</strong>
+                  <span>复用 research_service、research flow canvas、prompt-research-* 和研究组织治理工具。</span>
+                </div>
+<div class="service-row">
+                  <strong>候选状态机</strong>
+                  <span>新增轻量校验脚本约束 source_registered -&gt; official_synced，不替代现有 runtime 状态系统。</span>
+                </div>
+<div class="service-row">
+                  <strong>记忆平台复用层</strong>
+                  <span>复用 SourceArtifact、RefinementProposal、IngestionPackage、KnowledgeItem、Trace 和 agent-knowledge-steward。</span>
+                </div>
+<div class="service-row">
+                  <strong>图谱展示层</strong>
+                  <span>候选图谱只补 candidate_graph.json；正式图谱复用 /api/memory/knowledge-graph。</span>
+                </div>
+          </div>
+        </div>
+        <div class="runbook-card">
+          <h2>服务边界</h2>
+          <div class="artifact-table">
+            <div class="service-row">
+                  <b>team_workflow_orchestration_service</b>
+                  <span>已落地：Team 级 workflowOrchestration、CandidateStore、transfer request/decision。</span>
+                </div>
+<div class="service-row">
+                  <b>team_workflows API</b>
+                  <span>已落地：/api/teams/{team_id}/workflow-orchestration、candidates/source、candidates、candidates/validation、candidate-graph、transfers、decide。</span>
+                </div>
+<div class="service-row">
+                  <b>local_research_worker_model</b>
+                  <span>已落地任务包构建、32k 上下文预算、统一 LLMClient invoke、JSON 提取/校验和 CandidateStore 草稿记录；解析失败不入库。</span>
+                </div>
+<div class="service-row">
+                  <b>team_communication_binding</b>
+                  <span>复用 Research Organization 通信边、Team linkedChatRoom、round_robin/opportunistic 群聊轮次。</span>
+                </div>
+<div class="service-row">
+                  <b>candidate_store</b>
+                  <span>已落地 Team 级 index、候选列表查询、按类型/状态过滤、validationSummary，并接入 source_manifest、paper_note、neuro_mechanism、mechanism_mapping、algorithm_hypothesis、candidate_graph 最小校验。</span>
+                </div>
+<div class="service-row">
+                  <b>source_parser</b>
+                  <span>待接入本地脚本/模块，PDF/资料解析与页码锚点。</span>
+                </div>
+<div class="service-row">
+                  <b>candidate_validator</b>
+                  <span>已落地 source_manifest/PDF 字段校验、paper_note citation anchor 校验、neuro_mechanism 证据/术语风险校验、mechanism_mapping fact/inference/overAnalogyRisk 校验、algorithm_hypothesis experimentPlan 校验、candidate_graph 边界校验和 CandidateStore 校验报告。</span>
+                </div>
+<div class="service-row">
+                  <b>candidate_graph_builder</b>
+                  <span>已落地后端/API：生成 candidate_graph 候选快照、断链报告、未审节点清单和 candidate_only officialBoundary；前端图谱读取仍待接。</span>
+                </div>
+<div class="service-row">
+                  <b>research_agent_binding</b>
+                  <span>复用 research_service、research flow canvas、prompt-research-* 和研究组织治理工具。</span>
+                </div>
+<div class="service-row">
+                  <b>memory_ingestion_bridge</b>
+                  <span>复用现有 knowledge tools 与 /api/knowledge-bases/*，把摄取包映射到正式知识平台。</span>
+                </div>
+          </div>
+        </div>
+      </div>
+      <div class="agent-matrix" style="margin-top: 12px;">
+        <div class="service-row">
+              <strong>Research Coordination Agent</strong>
+              <span>会议议题、任务拆分、状态汇总、风险升级和跨节点排期。</span>
+            </div>
+<div class="service-row">
+              <strong>Research Organization Agent</strong>
+              <span>团队结构、成员职责、通信边、汇报关系和新增 Agent 提案。</span>
+            </div>
+<div class="service-row">
+              <strong>Capability Governance Agent</strong>
+              <span>工具权限、记忆权限、prompt/template 适配和能力缺口审查。</span>
+            </div>
+      </div>
+      <div class="runbook-grid" style="margin-top: 12px;">
+        <div class="runbook-card">
+          <h2>高效沟通轮次</h2>
+          <div class="artifact-table">
+            <div class="blueprint-row compact">
+                  <b>agenda_brief</b>
+                  <span>新阶段、新资料批次、新实验方向</span>
+                  <span>opportunistic，Research Coordination Agent 优先</span>
+                  <strong>agenda_packet、task_assignment</strong>
+                </div>
+<div class="blueprint-row compact">
+                  <b>status_sync</b>
+                  <span>阶段内例行同步</span>
+                  <span>round_robin</span>
+                  <strong>status_digest、blocker_list</strong>
+                </div>
+<div class="blueprint-row compact">
+                  <b>evidence_closure</b>
+                  <span>证据冲突、引用不足、结论待复核</span>
+                  <span>round_robin</span>
+                  <strong>review_record、decision_request</strong>
+                </div>
+<div class="blueprint-row compact">
+                  <b>decision_gate</b>
+                  <span>准备入库或同步正式图谱</span>
+                  <span>opportunistic，门禁相关 Agent 优先</span>
+                  <strong>ingestion_decision、official_sync_record</strong>
+                </div>
+<div class="blueprint-row compact">
+                  <b>risk_escalation</b>
+                  <span>权限、数据可信度、工具缺口、流程阻塞</span>
+                  <span>opportunistic</span>
+                  <strong>risk_record、proposal 或 rollback_request</strong>
+                </div>
+          </div>
+        </div>
+        <div class="runbook-card">
+          <h2>消息契约</h2>
+          <div class="artifact-table">
+            <div class="service-row">
+                  <strong>task_assignment</strong>
+                  <span>goal、inputRefs、expectedArtifact、acceptance、ownerAgent、deadline、dependency</span>
+                </div>
+<div class="service-row">
+                  <strong>status_report</strong>
+                  <span>currentState、progress、blockers、nextAction、evidenceRefs、needsDecision</span>
+                </div>
+<div class="service-row">
+                  <strong>evidence_request</strong>
+                  <span>claimId、sourceRef、question、urgency、requiredBy</span>
+                </div>
+<div class="service-row">
+                  <strong>decision_record</strong>
+                  <span>decision、optionsRejected、reason、impact、followUp、knowledgeCandidateRefs</span>
+                </div>
+<div class="service-row">
+                  <strong>risk_record</strong>
+                  <span>riskType、severity、affectedNode、evidence、proposedMitigation、escalationTarget</span>
+                </div>
+          </div>
+        </div>
+      </div>
+      <div class="runbook-grid" style="margin-top: 12px;">
+        <div class="runbook-card">
+          <h2>降噪规则</h2>
+          <div class="checklist">
+            <span>普通状态和证据追问优先走定向通信边和收件箱，不默认全员广播。</span>
+<span>每个任务线程只允许一个 ownerAgent 汇总，其他 Agent 回复给 ownerAgent。</span>
+<span>每轮 ChatRoom 结束必须生成 status_digest 或 decision_record，否则不能进入记忆候选。</span>
+<span>重复问题先查 Team Knowledge/RAG、candidate_graph 和上一轮 status_digest。</span>
+<span>超过一轮仍无法解决的 blocker 必须转成 risk_record 并升级。</span>
+          </div>
+        </div>
+        <div class="runbook-card">
+          <h2>效率指标</h2>
+          <div class="artifact-table">
+            <div class="service-row">
+                  <b>decision_round_count</b>
+                  <span>一个节点从提出问题到形成 decision_record 的群聊轮次数。</span>
+                </div>
+<div class="service-row">
+                  <b>unresolved_blocker_age</b>
+                  <span>阻塞项停留在 blocker_list 的时长。</span>
+                </div>
+<div class="service-row">
+                  <b>duplicate_question_count</b>
+                  <span>同一 claim/sourceRef 被重复追问的次数。</span>
+                </div>
+<div class="service-row">
+                  <b>chat_to_memory_conversion_rate</b>
+                  <span>群聊轮次中成功转成 SourceArtifact / RefinementProposal 的比例。</span>
+                </div>
+<div class="service-row">
+                  <b>rejected_due_to_evidence_gap</b>
+                  <span>因证据不足被知识治理或审批门禁退回的数量。</span>
+                </div>
+          </div>
+        </div>
+      </div>
+      <div class="runbook-grid" style="margin-top: 12px;">
+        <div class="runbook-card">
+          <h2>本地研究模型定位</h2>
+          <div class="artifact-table">
+            <div class="service-row"><b>模型</b><span>bossAGI-standard / qwen3.5-9b</span></div>
+            <div class="service-row"><b>角色</b><span>Local Research Worker Model</span></div>
+            <div class="service-row"><b>上下文</b><span>约 32k tokens</span></div>
+            <div class="service-row"><b>边界</b><span>本地 OpenAI-compatible 研究工作模型，模型 ID 为 houmo_qwen35_9b_agent；适合高吞吐候选生成、资料初筛、结构化草稿和预审；不做最终科研裁决，不直接写正式 Team Knowledge/RAG/知识图谱。</span></div>
+            <div class="service-row"><b>服务地址</b><span>http://192.168.20.30:8081/v1</span></div>
+<div class="service-row"><b>模型文件</b><span>HiModel_xh2_qwen3.5_9b_256_256k_b1_1chip_2cores_v1.3.0_20260429.gguf</span></div>
+<div class="service-row"><b>已验证</b><span>GET /v1/models、POST /v1/chat/completions、Vibelution LLMClient probe 和 Team workflow invoke 测试均通过。</span></div>
+<div class="service-row"><b>推理输出</b><span>该后端会大量返回 reasoning_content；科研任务要预留输出预算，并从最终 content/草稿 JSON 做校验，必要时容错检查 reasoning 草稿。</span></div>
+<div class="service-row"><b>图像能力</b><span>不支持图像输入；PDF/图片资料需要先由解析器转成文本和页码锚点。</span></div>
+<div class="service-row"><b>入库边界</b><span>invoke 成功后只写 CandidateStore 草稿；不会写正式 Team Knowledge/RAG/知识图谱，解析失败不入库。</span></div>
+          </div>
+        </div>
+        <div class="runbook-card">
+          <h2>32k 上下文预算</h2>
+          <div class="artifact-table">
+            <div class="blueprint-row compact">
+                  <b>系统指令/输出 schema</b>
+                  <strong>10%-15%</strong>
+                  <span>稳定 JSON、字段定义、禁止事项和证据规则。</span>
+                </div>
+<div class="blueprint-row compact">
+                  <b>当前任务说明</b>
+                  <strong>5%-10%</strong>
+                  <span>节点目标、输入类型、状态和验收条件。</span>
+                </div>
+<div class="blueprint-row compact">
+                  <b>论文片段/evidence</b>
+                  <strong>55%-65%</strong>
+                  <span>建议控制在 18k-22k tokens，保留页码、章节和 sourceRef。</span>
+                </div>
+<div class="blueprint-row compact">
+                  <b>已有候选上下文</b>
+                  <strong>10%-15%</strong>
+                  <span>paper_note、mechanism、hypothesis 等上游候选摘要。</span>
+                </div>
+<div class="blueprint-row compact">
+                  <b>输出预留</b>
+                  <strong>10%-15%</strong>
+                  <span>避免塞满上下文导致 JSON 漂移或后半段注意力下降。</span>
+                </div>
+          </div>
+        </div>
+      </div>
+      <div class="agent-matrix" style="margin-top: 12px;">
+        <div class="service-row">
+              <strong>01 资料进入工作区</strong>
+              <span>标题/摘要/片段初筛，输出 relevanceScore、topicTags、excludeReason。</span>
+            </div>
+<div class="service-row">
+              <strong>02 生成 paper_note</strong>
+              <span>按章节或 chunk 生成 paper_note 草稿，保留 keyFindings、methods、limitations、citations、uncertainty；缺 citation/page anchor 会退回修订。</span>
+            </div>
+<div class="service-row">
+              <strong>03 提取 neuro_mechanism</strong>
+              <span>从 paper_note 和关键片段抽取机制候选，必须区分实验现象、作者解释和项目理解，并标记 evidenceRefs、confidence、riskFlags。</span>
+            </div>
+<div class="service-row">
+              <strong>04 机制到计算抽象</strong>
+              <span>生成多种计算抽象映射，强制区分 neuroMechanismIds、computationalAbstraction、factLayer、inferenceLayer、overAnalogyRisk、engineeringImplication；高类比风险必须标记 over_analogy_risk。</span>
+            </div>
+<div class="service-row">
+              <strong>05 生成 algorithm_hypothesis</strong>
+              <span>生成算法假设草稿，补 baseline、expectedBenefit、expectedComputeCost、experimentPlan。</span>
+            </div>
+<div class="service-row">
+              <strong>06 科研审稿</strong>
+              <span>只做 review prefilter，给 riskFlags 和 requiredChanges，不做最终审稿裁决。</span>
+            </div>
+<div class="service-row">
+              <strong>07 知识治理入库</strong>
+              <span>只生成 proposal/ingestion pack 草稿，不直接调用正式应用或入库动作。</span>
+            </div>
+      </div>
+      <div class="tag-row" style="margin-top: 12px;">
+        <span class="tag">candidateType</span>
+<span class="tag">sourceRefs</span>
+<span class="tag">evidenceRefs</span>
+<span class="tag">claims</span>
+<span class="tag">keyFindings</span>
+<span class="tag">methods</span>
+<span class="tag">limitations</span>
+<span class="tag">citations</span>
+<span class="tag">paperNoteIds</span>
+<span class="tag">description</span>
+<span class="tag">brainSystems</span>
+<span class="tag">cognitiveFunctions</span>
+<span class="tag">experimentalPhenomena</span>
+<span class="tag">authorInterpretation</span>
+<span class="tag">projectInterpretation</span>
+<span class="tag">neuroMechanismIds</span>
+<span class="tag">computationalAbstraction</span>
+<span class="tag">factLayer</span>
+<span class="tag">inferenceLayer</span>
+<span class="tag">overAnalogyRisk</span>
+<span class="tag">engineeringImplication</span>
+<span class="tag">mechanismMappingIds</span>
+<span class="tag">hypothesis</span>
+<span class="tag">baseline</span>
+<span class="tag">expectedBenefit</span>
+<span class="tag">expectedComputeCost</span>
+<span class="tag">experimentPlan</span>
+<span class="tag">candidateIds</span>
+<span class="tag">checklist</span>
+<span class="tag">comments</span>
+<span class="tag">requiredChanges</span>
+<span class="tag">needsDecision</span>
+<span class="tag">uncertainty</span>
+<span class="tag">riskFlags</span>
+<span class="tag">confidence</span>
+<span class="tag">nextAction</span>
+<span class="tag">requiresReview</span>
+      </div>
+      <div class="checklist" style="margin-top: 12px;">
+        <span>不得直接写正式 Team Knowledge、正式 RAG 或正式知识图谱。</span>
+<span>不得替代 Evidence Review Agent、Knowledge Steward Agent 或 Ingestion Approval Gate 的最终裁决。</span>
+<span>没有 sourceRef/page/citation 的结论必须标记 weak_evidence。</span>
+<span>神经术语不确定时必须标记 terminology_uncertain。</span>
+<span>机制到算法的类比必须拆成 factLayer 和 inferenceLayer。</span>
+<span>输出必须是可校验 JSON；自然语言解释只能放入 comments/notes 字段。</span>
+      </div>
+      <div class="agent-matrix" style="margin-top: 12px;">
+        <div class="blueprint-row compact">
+              <b>服务文件</b>
+              <strong>core/web/services/team_workflow_orchestration_service.py</strong>
+              <span>Team 编排、候选登记、转移请求、协调 Agent 裁决和轻量运行事件日志。</span>
+            </div>
+<div class="blueprint-row compact">
+              <b>路由文件</b>
+              <strong>core/web/routes/team_workflows.py</strong>
+              <span>提供工作流查询/确保、候选资料登记、转移提交、转移裁决 API。</span>
+            </div>
+<div class="blueprint-row compact">
+              <b>路由注册</b>
+              <strong>core/web/app.py</strong>
+              <span>新增 team_workflows_router，挂载到 /api。</span>
+            </div>
+<div class="blueprint-row compact">
+              <b>存储位置</b>
+              <strong>workspace/teams/&lt;teamId&gt;/workflow_orchestration.json</strong>
+              <span>保存 Team 编排结构与 activeWorkflowItems。</span>
+            </div>
+<div class="blueprint-row compact">
+              <b>候选索引</b>
+              <strong>workspace/teams/&lt;teamId&gt;/candidate_store/index.json</strong>
+              <span>保存 source_manifest 等候选对象的最小元数据。</span>
+            </div>
+<div class="blueprint-row compact">
+              <b>候选查询</b>
+              <strong>/api/teams/{teamId}/workflow-orchestration/candidates</strong>
+              <span>按 candidateType、currentState、qualityStatus 查询 CandidateStore，并返回 validationSummary。</span>
+            </div>
+<div class="blueprint-row compact">
+              <b>候选校验</b>
+              <strong>/api/teams/{teamId}/workflow-orchestration/candidates/validation</strong>
+              <span>统计 CandidateStore valid/invalid/error/warning，并报告每个候选的结构化校验问题。</span>
+            </div>
+<div class="blueprint-row compact">
+              <b>转移记录</b>
+              <strong>workspace/teams/&lt;teamId&gt;/transfer_records.jsonl</strong>
+              <span>记录 transfer_request 和 decidedByAgent。</span>
+            </div>
+<div class="blueprint-row compact">
+              <b>本地模型 API</b>
+              <strong>/api/teams/{teamId}/workflow-orchestration/local-research-model/*</strong>
+              <span>构建任务包、调用 9B 本地模型、校验并记录 JSON 草稿；不直接写正式知识。</span>
+            </div>
+<div class="blueprint-row compact">
+              <b>paper_note 门禁</b>
+              <strong>CandidateStore paper_note validation</strong>
+              <span>paper_note_draft 必须含 keyFindings/methods/limitations/citations，关键发现缺 sourceRef/page/citation 时进入 paper_note_needs_revision。</span>
+            </div>
+<div class="blueprint-row compact">
+              <b>neuro_mechanism 门禁</b>
+              <strong>CandidateStore neuro_mechanism validation</strong>
+              <span>mechanism_candidate 必须含 paperNoteIds、description、brainSystems/cognitiveFunctions、experimentalPhenomena、解释分层、evidenceRefs 和 confidence；术语不确定未标记 terminology_uncertain 时进入 mechanism_needs_revision。</span>
+            </div>
+<div class="blueprint-row compact">
+              <b>mechanism_mapping 门禁</b>
+              <strong>CandidateStore mechanism_mapping validation</strong>
+              <span>mechanism_mapping_candidate 必须含 neuroMechanismIds、computationalAbstraction、factLayer、inferenceLayer、overAnalogyRisk、engineeringImplication；高类比风险未标记 over_analogy_risk 时进入 mapping_needs_revision。</span>
+            </div>
+<div class="blueprint-row compact">
+              <b>algorithm_hypothesis 门禁</b>
+              <strong>CandidateStore algorithm_hypothesis validation</strong>
+              <span>hypothesis_candidate 必须含 mechanismMappingIds 或 neuroMechanismIds、hypothesis、baseline、expectedBenefit、expectedComputeCost，以及 dataset/metric/baseline/smokePlan 完整的 experimentPlan；否则进入 hypothesis_needs_revision。</span>
+            </div>
+<div class="blueprint-row compact">
+              <b>review_record prefilter</b>
+              <strong>CandidateStore review_record validation</strong>
+              <span>review_prefiltered 必须含 candidateIds、checklist、comments、requiredChanges、needsDecision；输出包含最终 decision 时进入 review_needs_revision。</span>
+            </div>
+<div class="blueprint-row compact">
+              <b>candidate_graph 预览</b>
+              <strong>CandidateStore candidate_graph snapshot</strong>
+              <span>POST candidate-graph 会从当前候选重建 candidate_only 图谱，输出 nodes/edges/missingLinks/unreviewedNodes/officialBoundary；断链时 qualityStatus=broken_links。</span>
+            </div>
+<div class="blueprint-row compact">
+              <b>验证</b>
+              <strong>tests/test_team_workflow_orchestration_service.py + tests/test_team_workflow_routes.py</strong>
+              <span>覆盖主路径、非 ownerAgent 不能写最终状态、本地模型任务包和输出校验。</span>
+            </div>
+      </div>
+      <div class="agent-matrix" style="margin-top: 12px;">
+        <div class="blueprint-row">
+              <b>M0</b>
+              <strong>Team 编排后端切片</strong>
+              <span>已新增 workflow_orchestration.json、candidate_store/index.json、transfer_records.jsonl 和 API。</span>
+              <span>能创建 challenge_cup_research 编排、登记资料候选、提交转移请求，并由 Research Coordination Agent 裁决。</span>
+            </div>
+<div class="blueprint-row">
+              <b>M0.5</b>
+              <strong>本地研究工作模型接线</strong>
+              <span>已新增 Local Research Worker Model 任务包、32k 上下文预算、JSON 输出校验、草稿记录和 invoke API；bossAGI-standard / qwen3.5-9b 通过临时 model_ref profile 调用，解析失败不写 CandidateStore。</span>
+              <span>能为资料初筛、paper_note 草稿、neuro_mechanism 候选、algorithm_hypothesis 草稿和 review prefilter 构建任务包，调用本地模型，并把合格 JSON 草稿写入 CandidateStore。</span>
+            </div>
+<div class="blueprint-row">
+              <b>M1</b>
+              <strong>候选数据基座</strong>
+              <span>已新增 CandidateStore 列表查询、校验报告、source_manifest/PDF 最小字段校验；PDF 缺路径、sha256 或 allowedForAnalysis=true 会进入 source_needs_confirmation。</span>
+              <span>能登记 PDF source_manifest，按 candidateType/currentState/qualityStatus 查询候选，并查看 invalid/error/warning 统计；仍不写正式 Team Knowledge/RAG/知识图谱。</span>
+            </div>
+<div class="blueprint-row">
+              <b>M2</b>
+              <strong>paper_note 与 PDF 锚点</strong>
+              <span>已新增 paper_note 输出契约与 Citation Anchor 校验：paper_note_draft 必须含 keyFindings、methods、limitations、citations；每条 keyFinding 必须有 sourceRef 和 page/citation/evidenceRef。PDF 页码摘录脚本仍待接。</span>
+              <span>合格本地模型输出进入 paper_note_draft；缺 citation/page anchor 时进入 paper_note_needs_revision，不能自然推进到 mechanism_candidate。</span>
+            </div>
+<div class="blueprint-row">
+              <b>M3</b>
+              <strong>机制与算法假设</strong>
+              <span>已新增 neuro_mechanism、mechanism_mapping、algorithm_hypothesis 三段候选门禁；algorithm_hypothesis 必须含 mechanismMappingIds 或 neuroMechanismIds、hypothesis、baseline、expectedBenefit、expectedComputeCost 和含 dataset/metric/baseline/smokePlan 的 experimentPlan。</span>
+              <span>合格机制进入 mechanism_candidate，合格映射进入 mechanism_mapping_candidate，合格算法假设进入 hypothesis_candidate；缺机制证据/术语风险、类比风险未标记或实验计划不完整时分别进入 mechanism_needs_revision / mapping_needs_revision / hypothesis_needs_revision。</span>
+            </div>
+<div class="blueprint-row">
+              <b>M4</b>
+              <strong>证据复核与候选图谱</strong>
+              <span>candidate_graph builder 后端/API 已落地；review_prefilter 已补 review_record 候选门禁，必须含 candidateIds、checklist、comments、requiredChanges、needsDecision，且禁止写最终 decision。</span>
+              <span>candidate_graph_visible 和 review_prefiltered 都只进入 CandidateStore；断链进入 broken_links，带最终 decision 的 prefilter 进入 review_needs_revision，不进入正式知识库/RAG/图谱。</span>
+            </div>
+<div class="blueprint-row">
+              <b>M5</b>
+              <strong>知识治理与正式同步</strong>
+              <span>复用 agent-knowledge-steward、knowledge tools 和 /api/knowledge-bases/*；补 official_sync_record。</span>
+              <span>未通过授权审批门禁不能写 Team Knowledge/RAG/正式图谱。</span>
+            </div>
+      </div>
+      <div class="tag-row">
+        <span class="tag">source_manifest</span>
+<span class="tag">paper_note</span>
+<span class="tag">neuro_mechanism</span>
+<span class="tag">mechanism_mapping</span>
+<span class="tag">algorithm_hypothesis</span>
+<span class="tag">review_record</span>
+<span class="tag">candidate_graph</span>
+<span class="tag">steward_ingestion_pack</span>
+<span class="tag">official_sync_record</span>
+      </div>
+    </section>
+
+
+    <section class="section">
+      <div class="section-head">
+        <h2>功能岗位编排矩阵</h2>
+        <p class="hint">每一步明确功能岗位、需要的能力和审核门禁。这里是规划，不会自动创建或授权 Agent。</p>
+      </div>
+      <div class="agent-matrix">
+        <div class="agent-row">
+        <b>01</b>
+        <strong>Source Intake Agent</strong>
+        <span>可复用 research_broad / 待绑定挑战杯资料登记职责</span>
+        <span>本地资料登记 / source_manifest 写入 / 文件路径/页码/来源可信度记录 / 可选 research_knowledge_query_tool 查重</span>
+        <span>确认资料允许分析、来源可信度和是否纳入本轮。</span>
+      </div>
+<div class="agent-row">
+        <b>02</b>
+        <strong>Paper Note Extraction Agent</strong>
+        <span>可复用 research_broad / 需要资料摘要模板</span>
+        <span>PDF/资料摘录 / paper_note 候选 JSON 生成 / citation anchors / uncertainty 字段</span>
+        <span>必要时确认摘要是否保守、是否遗漏关键章节。</span>
+      </div>
+<div class="agent-row">
+        <b>03</b>
+        <strong>Neuro Mechanism Extraction Agent</strong>
+        <span>需要专门神经机制分析 Agent 或 research_deep 绑定该职责</span>
+        <span>神经机制抽取 / 实验现象/作者解释/项目理解分离 / evidenceRefs / confidence</span>
+        <span>遇到神经术语不确定或证据弱时进入领域复核门禁。</span>
+      </div>
+<div class="agent-row">
+        <b>04</b>
+        <strong>Mechanism Mapping Agent</strong>
+        <span>建议新增专门 Agent；也可先由 Neuro Mechanism Extraction Agent + Algorithm Hypothesis Agent 串联承担</span>
+        <span>机制到计算抽象映射 / fact/inference 分层 / over_analogy 风险标记 / 映射链路 links</span>
+        <span>确认映射没有把类比包装成论文事实。</span>
+      </div>
+<div class="agent-row">
+        <b>05</b>
+        <strong>Algorithm Hypothesis Agent</strong>
+        <span>需要算法假设设计 Agent；可从 research_themes / research_card 扩展</span>
+        <span>algorithm_hypothesis 生成 / baseline/expectedBenefit/cost / experimentPlan 占位 / 可测性约束</span>
+        <span>确认假设是否值得进入审稿，且 experimentPlan 足够可评审。</span>
+      </div>
+<div class="agent-row">
+        <b>06</b>
+        <strong>Evidence Review Agent</strong>
+        <span>review prefilter 后端已接入；最终裁决门禁仍待接</span>
+        <span>证据审查 / 类比风险审查 / 可测性/成本审查 / review_record 生成</span>
+        <span>高争议候选、拒绝重要候选或放行弱证据候选时进入审核门禁确认。</span>
+      </div>
+<div class="agent-row">
+        <b>07</b>
+        <strong>Knowledge Steward Agent / agent-knowledge-steward</strong>
+        <span>固定现有知识管理员 Agent；边界 proposal_and_rating_suggestion_only</span>
+        <span>知识治理任务读取 / knowledge proposal / rating suggestion / ingestion pack / targetDomain 选择</span>
+        <span>知识治理 Agent 只给建议；正式应用 proposal/rating/入库必须等待授权审核。</span>
+      </div>
+<div class="agent-row">
+        <b>08</b>
+        <strong>Candidate Graph Preview Agent</strong>
+        <span>后端/API 已可生成候选图谱快照；前端可视化读取仍待接</span>
+        <span>candidate_graph 候选快照生成 / 候选节点/边预览 payload / 断链报告 / 未审节点清单 / 候选/正式边界标识</span>
+        <span>确认候选图谱只作预览，不作为正式知识证据使用。</span>
+      </div>
+<div class="agent-row">
+        <b>09</b>
+        <strong>Ingestion Approval Gate + Knowledge Platform</strong>
+        <span>授权审批门禁为硬门；平台负责正式 Team Knowledge/RAG/Graph 同步</span>
+        <span>正式审核确认 / 正式 KnowledgeItem 创建/同步 / RAG 索引更新 / official_sync_record / 正式图谱边生成</span>
+        <span>必须通过授权审批门禁批准 ingestion pack。</span>
+      </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <h2>平台功能矩阵</h2>
+        <p class="hint">区分 Vibelution 已有能力、待设计能力和待接入流程的能力，后续实现时按缺口逐项落地。</p>
+      </div>
+      <div class="agent-matrix">
+        <div class="feature-row">
+        <strong>资料与候选存储</strong>
+        <span>source_manifest、knowledge_candidates/index、候选 JSON 命名与状态流</span>
+        <b class="status-pill">需新设计</b>
+      </div>
+<div class="feature-row">
+        <strong>PDF/资料解析</strong>
+        <span>读取本地 PDF、页码锚点、摘录范围和 sourceFiles 绑定</span>
+        <b class="status-pill">待接入</b>
+      </div>
+<div class="feature-row">
+        <strong>科研知识只读查询</strong>
+        <span>research_knowledge_query_tool 用于查历史科研资料、claims、evidence、gaps</span>
+        <b class="status-pill ready">已有能力</b>
+      </div>
+<div class="feature-row">
+        <strong>正式知识查询/RAG</strong>
+        <span>knowledge_query_tool、knowledge_rag_retrieve_tool 只读检索已审核知识</span>
+        <b class="status-pill ready">已有能力</b>
+      </div>
+<div class="feature-row">
+        <strong>知识候选提交</strong>
+        <span>knowledge_proposal_tool / knowledge_ingestion_tool 只提交待审 proposal</span>
+        <b class="status-pill ready">已有能力</b>
+      </div>
+<div class="feature-row">
+        <strong>知识治理工作台</strong>
+        <span>knowledge_governance_tasks_tool、knowledge_steward_workbench_tool、recommendations</span>
+        <b class="status-pill ready">已有能力</b>
+      </div>
+<div class="feature-row">
+        <strong>评级建议</strong>
+        <span>knowledge_rating_suggestion_tool 只提交 reviewable rating suggestion</span>
+        <b class="status-pill ready">已有能力</b>
+      </div>
+<div class="feature-row">
+        <strong>候选图谱预览</strong>
+        <span>candidate_graph.json、断链报告、候选/正式边界显示；现有 Memory Graph 只能承接正式知识结构视图</span>
+        <b class="status-pill">需新设计</b>
+      </div>
+<div class="feature-row">
+        <strong>正式图谱同步</strong>
+        <span>approved_to_ingest 后进入 Team Knowledge/RAG；正式图谱可借 /api/memory/knowledge-graph 展示结构</span>
+        <b class="status-pill partial">可复用+接线</b>
+      </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <h2>项目功能对齐矩阵</h2>
+        <p class="hint">把当前规划和 Vibelution 已有功能逐项对齐，避免把模板、工具、正式知识库和候选工作区混为一谈。</p>
+      </div>
+      <div class="agent-matrix">
+        <div class="alignment-row">
+        <strong>Research Agent 池</strong>
+        <span>prompt-research-broad/deep/review/themes/card 模板存在；research_service 可确保实例</span>
+        <b class="status-pill partial">可复用+需绑定</b>
+        <span>当前 active research pool 是 CEO/组织顾问/能力管家，不是挑战杯执行型功能岗位；需把 Source Intake Agent、Neuro Mechanism Extraction Agent、Evidence Review Agent 等绑定到模板或新建 Agent。</span>
+      </div>
+<div class="alignment-row">
+        <strong>科研组织治理</strong>
+        <span>research_agent_creation_proposal_tool、research_communication_edge_proposal_tool、research_proposal_apply_tool 已存在</span>
+        <b class="status-pill ready">已有能力</b>
+        <span>新增 Mechanism Mapping Agent / Algorithm Hypothesis Agent 等岗位应走 proposal + 用户确认，不直接创建。</span>
+      </div>
+<div class="alignment-row">
+        <strong>知识治理 Agent</strong>
+        <span>agent-knowledge-steward 固定存在；ToolPolicy 含 knowledge proposal/ingestion/governance/rating 工具；边界 proposal_and_rating_suggestion_only</span>
+        <b class="status-pill ready">高度匹配</b>
+        <span>07 节点可直接对齐知识治理 Agent；但该 Agent 不能直接应用正式知识，只能提交建议和待审摄取包。</span>
+      </div>
+<div class="alignment-row">
+        <strong>正式知识平台</strong>
+        <span>knowledge routes 支持 source-artifacts、refinement-proposals、ingestion-packages、review、items、trace、rating suggestions</span>
+        <b class="status-pill ready">已有能力</b>
+        <span>07/09 可以对齐 SourceArtifact -&gt; RefinementProposal -&gt; Review -&gt; KnowledgeItem -&gt; Trace。</span>
+      </div>
+<div class="alignment-row">
+        <strong>正式 RAG</strong>
+        <span>knowledge_rag_retrieve_tool 与 /api/knowledge/rag/retrieve 已存在，且只读正式知识</span>
+        <b class="status-pill ready">已有能力</b>
+        <span>03-06 可用它查正式背景知识；不能用它读取 pending proposal 或候选图谱。</span>
+      </div>
+<div class="alignment-row">
+        <strong>科研知识库</strong>
+        <span>ResearchKnowledgeBase 支持 entries/claims/evidence/gaps，research_knowledge_query_tool 显式授权后可查</span>
+        <b class="status-pill ready">已有能力</b>
+        <span>可用于查重和背景检索；它不是本轮候选 JSON 的落库位置。</span>
+      </div>
+<div class="alignment-row">
+        <strong>记忆知识图谱</strong>
+        <span>/api/memory/knowledge-graph 和 MemoryRoute 知识图谱视图已存在</span>
+        <b class="status-pill partial">部分匹配</b>
+        <span>适合展示正式 Team/Agent/KnowledgeBase/KnowledgeItem 结构；候选图谱 candidate_graph.json 仍需独立设计。</span>
+      </div>
+<div class="alignment-row">
+        <strong>PDF/本地资料解析</strong>
+        <span>当前知识 ingestion 工具要求传入已有 excerpt/source_ref，不负责解析 PDF</span>
+        <b class="status-pill">待接入</b>
+        <span>01-02 需要补 PDF 解析、页码锚点和 source_manifest 管理。</span>
+      </div>
+<div class="alignment-row">
+        <strong>候选 schema 与工作区</strong>
+        <span>paper_note/neuro_mechanism/algorithm_hypothesis/review_record/candidate_graph 尚未作为项目原生 schema 落地</span>
+        <b class="status-pill">需新设计</b>
+        <span>这是把流程跑通前的主要工程缺口。</span>
+      </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <h2>筛选门禁</h2>
+        <p class="hint">每一步都要有通过条件和失败回退，避免候选知识直接污染正式记忆平台。</p>
+      </div>
+      <div class="gate-grid">
+        <article class="gate-card">
+              <h3>资料门</h3>
+              <p><b>通过：</b>资料路径、来源和页码范围存在</p>
+              <p><b>进入：</b>source_registered</p>
+              <p><b>失败：</b>退回补 source_manifest</p>
+            </article>
+<article class="gate-card">
+              <h3>证据门</h3>
+              <p><b>通过：</b>关键发现绑定 paper_note 和页码</p>
+              <p><b>进入：</b>mechanism_candidate</p>
+              <p><b>失败：</b>退回补 citation / page</p>
+            </article>
+<article class="gate-card">
+              <h3>映射门</h3>
+              <p><b>通过：</b>机制映射区分论文事实、项目推断和过度类比风险</p>
+              <p><b>进入：</b>mechanism_mapping_candidate</p>
+              <p><b>失败：</b>退回补 fact / inference 边界</p>
+            </article>
+<article class="gate-card">
+              <h3>假设门</h3>
+              <p><b>通过：</b>算法假设有 baseline、预期收益和 experimentPlan</p>
+              <p><b>进入：</b>review_ready</p>
+              <p><b>失败：</b>退回补实验计划</p>
+            </article>
+<article class="gate-card">
+              <h3>审稿门</h3>
+              <p><b>通过：</b>review.decision 不是 rejected，风险可解释</p>
+              <p><b>进入：</b>ready_for_steward</p>
+              <p><b>失败：</b>退回 revision 或 rejectionArchive</p>
+            </article>
+<article class="gate-card">
+              <h3>治理门</h3>
+              <p><b>通过：</b>知识治理 Agent 只给 proposal/rating，不直接写正式库</p>
+              <p><b>进入：</b>steward_recommended</p>
+              <p><b>失败：</b>退回 steward_needs_revision</p>
+            </article>
+<article class="gate-card">
+              <h3>入库门</h3>
+              <p><b>通过：</b>授权审批门禁确认正式摄取</p>
+              <p><b>进入：</b>official_synced</p>
+              <p><b>失败：</b>停在候选图谱，不进正式图谱</p>
+            </article>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <h2>流程转移与返工</h2>
+        <p class="hint">资料不足、证据不足、假设不可测、图谱断链或入库退回时，流程按转移记录跳到最小上游节点。</p>
+      </div>
+      <div class="runbook-grid">
+        <div class="runbook-card">
+          <h2>转移原则</h2>
+          <div class="checklist">
+            <span>所有非线性跳转都必须产生 transfer_request 或 transfer_record，不能只改 status。</span>
+<span>普通功能 Agent 可以提出 transfer_request，但不能直接写最终流程状态。</span>
+<span>Research Coordination Agent 是唯一流程状态写入者，负责裁决、分配、写入 state/index 并关闭 transfer_record。</span>
+<span>返工优先跳到最小上游节点，不默认回到流程起点。</span>
+<span>涉及新增 Agent、工具权限、记忆权限或通信边变更时，先进入 risk_escalation。</span>
+<span>rejected 不是普通返工状态；只有内部门禁给出 reopenReason，并由 Research Coordination Agent 写入 reopen transfer_record，才能重新进入候选流程。</span>
+<span>流程转移关闭后必须更新 status_digest、候选 index 和必要的候选图谱断链报告。</span>
+          </div>
+        </div>
+        <div class="runbook-card">
+          <h2>记录字段</h2>
+          <div class="tag-row">
+            <span class="tag">fromNode</span>
+<span class="tag">fromState</span>
+<span class="tag">toNode</span>
+<span class="tag">toState</span>
+<span class="tag">reasonCode</span>
+<span class="tag">evidenceRefs</span>
+<span class="tag">requestedByAgent</span>
+<span class="tag">assignedToAgent</span>
+<span class="tag">decidedByAgent</span>
+<span class="tag">acceptance</span>
+          </div>
+        </div>
+      </div>
+      <div class="agent-matrix" style="margin-top: 12px;">
+        <div class="transfer-row">
+              <b>资料不足</b>
+              <span>paper_note_needs_revision / mechanism_needs_revision</span>
+              <strong>01 source_needs_confirmation</strong>
+              <span>Source Intake Agent</span>
+              <span>transfer_request、missing_source_list</span>
+            </div>
+<div class="transfer-row">
+              <b>摘录缺页码或 citation</b>
+              <span>paper_note_needs_revision</span>
+              <strong>02 paper_note_draft</strong>
+              <span>Paper Note Extraction Agent</span>
+              <span>transfer_record、citation_fix_list</span>
+            </div>
+<div class="transfer-row">
+              <b>机制证据弱</b>
+              <span>mechanism_needs_revision</span>
+              <strong>03 mechanism_candidate</strong>
+              <span>Neuro Mechanism Extraction Agent</span>
+              <span>evidence_request、weak_evidence_report</span>
+            </div>
+<div class="transfer-row">
+              <b>机制到算法映射不稳</b>
+              <span>mapping_needs_revision</span>
+              <strong>04 mechanism_mapping_candidate</strong>
+              <span>Mechanism Mapping Agent</span>
+              <span>analogy_risk_note、required_changes</span>
+            </div>
+<div class="transfer-row">
+              <b>算法假设不可测</b>
+              <span>hypothesis_needs_revision</span>
+              <strong>05 hypothesis_candidate</strong>
+              <span>Algorithm Hypothesis Agent</span>
+              <span>experiment_plan_fix</span>
+            </div>
+<div class="transfer-row">
+              <b>审稿要求返工</b>
+              <span>review_ready + needs_revision</span>
+              <strong>最近责任节点</strong>
+              <span>原产出 Agent</span>
+              <span>review_record、requiredChanges</span>
+            </div>
+<div class="transfer-row">
+              <b>图谱断链</b>
+              <span>candidate_graph_visible + broken_links</span>
+              <strong>对应缺失节点状态</strong>
+              <span>Candidate Graph Preview Agent 协调原产出 Agent</span>
+              <span>broken_link_report</span>
+            </div>
+<div class="transfer-row">
+              <b>入库治理退回</b>
+              <span>steward_needs_revision</span>
+              <strong>06 审稿或 07 知识治理</strong>
+              <span>Evidence Review Agent / Knowledge Steward Agent</span>
+              <span>steward_feedback</span>
+            </div>
+<div class="transfer-row">
+              <b>审批门禁拒绝</b>
+              <span>approved_to_ingest + rejected_by_gate</span>
+              <strong>rejection_archive 或 06 审稿</strong>
+              <span>Ingestion Approval Gate 指定</span>
+              <span>ingestion_rejection_reason</span>
+            </div>
+<div class="transfer-row">
+              <b>权限或能力缺口</b>
+              <span>任意状态</span>
+              <strong>risk_escalation</strong>
+              <span>Research Coordination Agent</span>
+              <span>risk_record、proposal</span>
+            </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <h2>Team 编排状态机</h2>
+        <p class="hint">Team 作为信息流控制抽象，已新增通用 workflowOrchestration 后端切片；第一版只给 challenge_cup_research 模板启用。</p>
+      </div>
+      <div class="runbook-grid">
+        <div class="runbook-card">
+          <h2>边界原则</h2>
+          <div class="checklist">
+            <span>Team 负责流：状态编排、转移裁决、Agent 路由、返工派发、沟通模式和消息契约。</span>
+<span>CandidateStore 负责物：资料、笔记、机制、假设、审稿记录和候选图谱。</span>
+<span>workflowOrchestration 做成 Team 通用能力，但第一版只启用 challenge_cup_research。</span>
+<span>Research Coordination Agent 是 ownerAgent 和最终状态写入者。</span>
+<span>编排层只保存 candidateId、artifactRef、currentState 等引用，不保存大段正文。</span>
+          </div>
+        </div>
+        <div class="runbook-card">
+          <h2>核心字段</h2>
+          <div class="artifact-table">
+            <div class="service-row">
+                  <b>workflowId</b>
+                  <span>团队编排流程标识，可被多个候选对象引用。</span>
+                </div>
+<div class="service-row">
+                  <b>workflowKind</b>
+                  <span>模板类型，第一版为 challenge_cup_research。</span>
+                </div>
+<div class="service-row">
+                  <b>ownerAgentId</b>
+                  <span>最终状态写入者，第一版固定 Research Coordination Agent。</span>
+                </div>
+<div class="service-row">
+                  <b>stateMachine</b>
+                  <span>states、transitions、gates 的组合。</span>
+                </div>
+<div class="service-row">
+                  <b>routingPolicy</b>
+                  <span>对接 Research Organization、Agent Bus、ChatRoom 的路由规则。</span>
+                </div>
+<div class="service-row">
+                  <b>transferPolicy</b>
+                  <span>自动转移规则，requiresUserConfirmation=false。</span>
+                </div>
+<div class="service-row">
+                  <b>activeWorkflowItems</b>
+                  <span>当前活跃候选引用，只保存 candidateId/artifactRef/currentState。</span>
+                </div>
+          </div>
+        </div>
+      </div>
+      <div class="agent-matrix" style="margin-top: 12px;">
+        <div class="service-row">
+              <strong>Team registry</strong>
+              <span>增加 workflowOrchestration 引用或配置块。</span>
+            </div>
+<div class="service-row">
+              <strong>Team canvas</strong>
+              <span>继续展示成员、职责、communication/reports_to 边。</span>
+            </div>
+<div class="service-row">
+              <strong>linkedChatRoom</strong>
+              <span>承载 research_coordination 群聊轮次。</span>
+            </div>
+<div class="service-row">
+              <strong>Research Organization</strong>
+              <span>管理组织通信边、权限和能力缺口升级。</span>
+            </div>
+<div class="service-row">
+              <strong>Agent Bus / Inbox</strong>
+              <span>承接 transfer_request、status_report、risk_record 等定向消息。</span>
+            </div>
+<div class="service-row">
+              <strong>CandidateStore</strong>
+              <span>保存候选资料本体和候选图谱。</span>
+            </div>
+<div class="service-row">
+              <strong>Team Knowledge</strong>
+              <span>只接收审核后的正式知识对象。</span>
+            </div>
+      </div>
+      <div class="agent-matrix" style="margin-top: 12px;">
+        <div class="blueprint-row compact">
+              <b>GET</b>
+              <strong>/api/teams/{team_id}/workflow-orchestration</strong>
+              <span>读取或自动初始化 Team 编排视图。</span>
+            </div>
+<div class="blueprint-row compact">
+              <b>PUT</b>
+              <strong>/api/teams/{team_id}/workflow-orchestration</strong>
+              <span>确保 challenge_cup_research 编排与 ownerAgent。</span>
+            </div>
+<div class="blueprint-row compact">
+              <b>POST</b>
+              <strong>/api/teams/{team_id}/workflow-orchestration/candidates/source</strong>
+              <span>登记 source_manifest 候选。</span>
+            </div>
+<div class="blueprint-row compact">
+              <b>POST</b>
+              <strong>/api/teams/{team_id}/workflow-orchestration/transfers</strong>
+              <span>功能 Agent 提交流程转移请求。</span>
+            </div>
+<div class="blueprint-row compact">
+              <b>POST</b>
+              <strong>/api/teams/{team_id}/workflow-orchestration/transfers/{transfer_id}/decide</strong>
+              <span>Research Coordination Agent 裁决并写最终状态。</span>
+            </div>
+<div class="blueprint-row compact">
+              <b>POST</b>
+              <strong>/api/teams/{team_id}/workflow-orchestration/local-research-model/tasks</strong>
+              <span>构建本地研究模型任务包，不直接调用模型。</span>
+            </div>
+<div class="blueprint-row compact">
+              <b>POST</b>
+              <strong>/api/teams/{team_id}/workflow-orchestration/local-research-model/outputs</strong>
+              <span>校验并记录本地研究模型 JSON 草稿。</span>
+            </div>
+<div class="blueprint-row compact">
+              <b>POST</b>
+              <strong>/api/teams/{team_id}/workflow-orchestration/local-research-model/invoke</strong>
+              <span>构建任务包、调用 bossAGI-standard / qwen3.5-9b、解析 JSON 并写入 CandidateStore；解析失败不入库。</span>
+            </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <h2>角色边界</h2>
+        <p class="hint">科研功能 Agent 只产出候选；知识治理 Agent 给治理建议；正式入库必须有审核确认。</p>
+      </div>
+      <div class="role-grid">
+        <article class="role-card">
+              <h3>Source Intake Agent</h3>
+              <p>登记资料，不做正式入库。</p>
+            </article>
+<article class="role-card">
+              <h3>Paper Note Extraction Agent</h3>
+              <p>生成 paper_note，保留页码、引用和不确定性。</p>
+            </article>
+<article class="role-card">
+              <h3>Neuro Mechanism Extraction Agent</h3>
+              <p>提取神经机制，标注证据和不确定性。</p>
+            </article>
+<article class="role-card">
+              <h3>Mechanism Mapping Agent</h3>
+              <p>把机制转成计算抽象，明确类比风险。</p>
+            </article>
+<article class="role-card">
+              <h3>Algorithm Hypothesis Agent</h3>
+              <p>生成算法假设和 experimentPlan 占位。</p>
+            </article>
+<article class="role-card">
+              <h3>Evidence Review Agent</h3>
+              <p>筛选风险，决定通过、退回或拒绝。</p>
+            </article>
+<article class="role-card">
+              <h3>Knowledge Steward Agent / agent-knowledge-steward</h3>
+              <p>生成治理建议、评级建议和摄取包，不绕过审核。</p>
+            </article>
+<article class="role-card">
+              <h3>Ingestion Approval Gate</h3>
+              <p>批准正式入库和正式图谱同步。</p>
+            </article>
+      </div>
+    </section>
+
+
+      <section class="section">
+        <div class="section-head">
+          <h2>节点页面索引</h2>
+          <p class="hint">已规划、半规划、待规划都保留为可点击页面，便于后续逐页补全。</p>
+        </div>
+        <div class="node-grid">
+          <a class="node-card" href="research_flow_pages/01-source-workspace.html">
+                <span class="num">01</span>
+                <h3>资料进入工作区</h3>
+                <p>建立稳定证据源，不把未确认信息混入候选知识链。</p>
+                <div class="tag-row"><span class="tag done">已规划</span><span class="tag">Source Intake Agent</span></div>
+              </a>
+<a class="node-card" href="research_flow_pages/02-paper-note.html">
+                <span class="num">02</span>
+                <h3>生成 paper_note</h3>
+                <p>把资料转成可审查的论文/资料笔记候选。</p>
+                <div class="tag-row"><span class="tag done">已规划</span><span class="tag">Paper Note Extraction Agent</span></div>
+              </a>
+<a class="node-card" href="research_flow_pages/03-neuro-mechanism.html">
+                <span class="num">03</span>
+                <h3>提取 neuro_mechanism</h3>
+                <p>把论文事实整理为神经机制候选，而不是直接跳到算法灵感。</p>
+                <div class="tag-row"><span class="tag done">已规划</span><span class="tag">Neuro Mechanism Extraction Agent</span></div>
+              </a>
+<a class="node-card" href="research_flow_pages/04-mechanism-mapping.html">
+                <span class="num">04</span>
+                <h3>机制到计算抽象</h3>
+                <p>把神经机制转为工程上能讨论的抽象层。</p>
+                <div class="tag-row"><span class="tag draft">半规划</span><span class="tag">Mechanism Mapping Agent</span></div>
+              </a>
+<a class="node-card" href="research_flow_pages/05-algorithm-hypothesis.html">
+                <span class="num">05</span>
+                <h3>生成 algorithm_hypothesis</h3>
+                <p>把机制启发收束为可验证算法假设。</p>
+                <div class="tag-row"><span class="tag done">已规划</span><span class="tag">Algorithm Hypothesis Agent</span></div>
+              </a>
+<a class="node-card" href="research_flow_pages/06-research-review.html">
+                <span class="num">06</span>
+                <h3>科研审稿</h3>
+                <p>在交给记忆平台前先做领域与工程风险过滤。</p>
+                <div class="tag-row"><span class="tag done">prefilter 已落地</span><span class="tag">Evidence Review Agent</span></div>
+              </a>
+<a class="node-card" href="research_flow_pages/07-steward-ingestion.html">
+                <span class="num">07</span>
+                <h3>知识治理入库</h3>
+                <p>现有知识库管理员 Agent 是固定网关，不新增平行管理员。</p>
+                <div class="tag-row"><span class="tag done">已规划</span><span class="tag">Knowledge Steward Agent · agent-knowledge-steward</span></div>
+              </a>
+<a class="node-card" href="research_flow_pages/08-candidate-graph.html">
+                <span class="num">08</span>
+                <h3>候选图谱预览</h3>
+                <p>让团队先看到研究链路，但不污染正式知识图谱。</p>
+                <div class="tag-row"><span class="tag done">后端切片已落地</span><span class="tag">Candidate Graph Preview Agent</span></div>
+              </a>
+<a class="node-card" href="research_flow_pages/09-official-graph.html">
+                <span class="num">09</span>
+                <h3>正式知识图谱同步</h3>
+                <p>只有审核入库后的知识进入正式图谱与 RAG。</p>
+                <div class="tag-row"><span class="tag done">已规划</span><span class="tag">Knowledge Platform</span></div>
+              </a>
+<a class="node-card" href="research_flow_pages/10-experiment-loop.html">
+                <span class="num">10</span>
+                <h3>实验验证闭环</h3>
+                <p>未来把算法假设从方案推进到小规模验证。</p>
+                <div class="tag-row"><span class="tag pending">待规划</span><span class="tag">Experiment Planning Agent / ML Run Service</span></div>
+              </a>
+<a class="node-card" href="research_flow_pages/11-iteration-versioning.html">
+                <span class="num">11</span>
+                <h3>持续迭代与版本化</h3>
+                <p>防止研究假设失控堆积，保留可追溯版本。</p>
+                <div class="tag-row"><span class="tag pending">待规划</span><span class="tag">Iteration Versioning Agent</span></div>
+              </a>
+<a class="node-card" href="research_flow_pages/12-challenge-cup-delivery.html">
+                <span class="num">12</span>
+                <h3>挑战杯交付计划</h3>
+                <p>把研究流程产物转为比赛材料。</p>
+                <div class="tag-row"><span class="tag pending">待规划</span><span class="tag">Challenge Cup Delivery Agent</span></div>
+              </a>
+<a class="node-card" href="research_flow_pages/13-flow-html-maintenance.html">
+                <span class="num">13</span>
+                <h3>流程 HTML 维护门禁</h3>
+                <p>把科研流程 HTML 作为挑战杯开发的可视化索引与长期维护入口。</p>
+                <div class="tag-row"><span class="tag done">已规划</span><span class="tag">Flow Site Maintenance Agent</span></div>
+              </a>
+        </div>
+      </section>
+    </main>
+    <script>
+      (() => {
+        const board = document.querySelector("[data-draggable-board]");
+        const stage = document.querySelector("[data-flow-stage]");
+        const graph = document.querySelector("[data-flow-graph]");
+        const readout = document.querySelector("[data-zoom-readout]");
+        if (!board || !stage || !graph || !readout) return;
+        const naturalWidth = 1900;
+        const naturalHeight = 640;
+        const minZoom = 0.28;
+        const maxZoom = 1.8;
+        let zoom = 1;
+        const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+        const renderZoom = () => {
+          stage.style.width = String(naturalWidth * zoom) + "px";
+          stage.style.height = String(naturalHeight * zoom) + "px";
+          graph.style.setProperty("--zoom", String(zoom));
+          readout.textContent = String(Math.round(zoom * 100)) + "%";
+        };
+        const setZoom = (nextZoom, anchorX = board.clientWidth / 2, anchorY = board.clientHeight / 2) => {
+          const oldZoom = zoom;
+          zoom = clamp(nextZoom, minZoom, maxZoom);
+          const worldX = (board.scrollLeft + anchorX) / oldZoom;
+          const worldY = (board.scrollTop + anchorY) / oldZoom;
+          renderZoom();
+          board.scrollLeft = worldX * zoom - anchorX;
+          board.scrollTop = worldY * zoom - anchorY;
+        };
+        const fitAll = () => {
+          const availableWidth = Math.max(1, board.clientWidth - 28);
+          const availableHeight = Math.max(1, board.clientHeight - 28);
+          setZoom(Math.min(availableWidth / naturalWidth, availableHeight / naturalHeight));
+          board.scrollLeft = 0;
+          board.scrollTop = 0;
+        };
+        document.querySelector("[data-zoom-in]")?.addEventListener("click", () => setZoom(zoom + 0.12));
+        document.querySelector("[data-zoom-out]")?.addEventListener("click", () => setZoom(zoom - 0.12));
+        document.querySelector("[data-zoom-reset]")?.addEventListener("click", () => {
+          setZoom(1);
+          board.scrollLeft = 0;
+          board.scrollTop = 0;
+        });
+        document.querySelector("[data-zoom-fit]")?.addEventListener("click", fitAll);
+        board.addEventListener("wheel", (event) => {
+          if (!event.ctrlKey && !event.metaKey) return;
+          event.preventDefault();
+          const rect = board.getBoundingClientRect();
+          const anchorX = event.clientX - rect.left;
+          const anchorY = event.clientY - rect.top;
+          setZoom(zoom + (event.deltaY < 0 ? 0.08 : -0.08), anchorX, anchorY);
+        }, { passive: false });
+        fitAll();
+        let dragging = false;
+        let startX = 0;
+        let startY = 0;
+        let startLeft = 0;
+        let startTop = 0;
+        board.addEventListener("pointerdown", (event) => {
+          if (event.target.closest("a")) return;
+          dragging = true;
+          startX = event.clientX;
+          startY = event.clientY;
+          startLeft = board.scrollLeft;
+          startTop = board.scrollTop;
+          board.classList.add("dragging");
+          board.setPointerCapture(event.pointerId);
+        });
+        board.addEventListener("pointermove", (event) => {
+          if (!dragging) return;
+          board.scrollLeft = startLeft - (event.clientX - startX);
+          board.scrollTop = startTop - (event.clientY - startY);
+        });
+        const stop = (event) => {
+          if (!dragging) return;
+          dragging = false;
+          board.classList.remove("dragging");
+          if (board.hasPointerCapture(event.pointerId)) {
+            board.releasePointerCapture(event.pointerId);
+          }
+        };
+        board.addEventListener("pointerup", stop);
+        board.addEventListener("pointercancel", stop);
+      })();
+    </script>
+  </body>
+</html>

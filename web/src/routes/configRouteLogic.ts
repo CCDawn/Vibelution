@@ -17,6 +17,11 @@ export type ProviderKindOption = {
   label: string;
 };
 
+export type SelectOption = {
+  value: string;
+  label: string;
+};
+
 export type ConfigEditorSyncStateInput = {
   editorText: string;
   formattedConfigText: string;
@@ -119,8 +124,14 @@ export type ModelCenterInventoryRow = {
   modelId: string;
   label: string;
   providerKind: string;
+  providerApi: string;
   baseUrl: string;
   model: string;
+  configuredProtocol: string;
+  resolvedProtocol: string;
+  protocolSource: string;
+  protocolWarnings: string[];
+  compatSummary: string;
   apiKeyEnv: string;
   apiKeyState: string;
   supportsImageInput: boolean | null;
@@ -135,6 +146,18 @@ export type ModelCenterInventoryRow = {
   editable: boolean;
   deletable: boolean;
 };
+
+export function summarizeModelCompat(value: unknown): string {
+  const compat = asRecord(value);
+  const entries = Object.entries(compat).filter(([, entryValue]) => entryValue !== undefined && entryValue !== null && entryValue !== "");
+  if (!entries.length) {
+    return "";
+  }
+  return entries
+    .slice(0, 4)
+    .map(([key, entryValue]) => `${key}=${String(entryValue)}`)
+    .join(" · ");
+}
 
 export function resolveImageInputCapabilityStatus(input: {
   supportsImageInput?: boolean | null;
@@ -405,7 +428,7 @@ export function presetCategory(preset: ConfigModelPresetOption): ModelPresetGrou
   if (kind === "openai_compatible") {
     return "openai_compatible";
   }
-  if (kind === "local" || kind === "ollama" || baseUrl.includes("localhost") || baseUrl.includes("127.0.0.1")) {
+  if (kind === "local" || kind === "ollama" || kind === "llamacpp" || baseUrl.includes("localhost") || baseUrl.includes("127.0.0.1")) {
     return "local";
   }
   return "official";
@@ -463,7 +486,7 @@ export function defaultModelApiKeyEnv(modelId: string): string {
     .toUpperCase()
     .replace(/[^A-Z0-9]+/g, "_")
     .replace(/^_+|_+$/g, "");
-  return token ? `VIBELUTION_LLM_${token}_API_KEY` : "VIBELUTION_LLM_MODEL_API_KEY";
+  return token ? `VIBELUTION_LLM_MODEL_${token}_API_KEY` : "VIBELUTION_LLM_MODEL_API_KEY";
 }
 
 export function modelLibraryIdFromParts(label: string, model: string): string {
@@ -500,7 +523,48 @@ export const PROVIDER_KIND_OPTIONS: ProviderKindOption[] = [
   { value: "aliyun", label: "DashScope" },
   { value: "siliconflow", label: "SiliconFlow" },
   { value: "local", label: "Local" },
+  { value: "ollama", label: "Ollama" },
+  { value: "llamacpp", label: "llama.cpp" },
 ];
+
+export const MODEL_TRANSPORT_OPTIONS: SelectOption[] = [
+  { value: "chat_completions", label: "chat_completions" },
+  { value: "responses", label: "responses" },
+];
+
+export const MODEL_CONTRACT_OPTIONS: SelectOption[] = [
+  { value: "basic_chat", label: "basic_chat" },
+  { value: "tool_chat", label: "tool_chat" },
+  { value: "reasoning_chat", label: "reasoning_chat" },
+  { value: "responses_agent", label: "responses_agent" },
+];
+
+export const MODEL_TOOL_CALLING_MODE_OPTIONS: SelectOption[] = [
+  { value: "disabled", label: "disabled" },
+  { value: "auto", label: "auto" },
+  { value: "parallel", label: "parallel" },
+];
+
+export const PROVIDER_COMPAT_MODE_OPTIONS: SelectOption[] = [
+  { value: "openai", label: "openai" },
+  { value: "openai_compatible", label: "openai_compatible" },
+  { value: "native", label: "native" },
+];
+
+export function canDiscoverModelsForProvider(provider: Record<string, unknown>): boolean {
+  const kind = getString(provider.kind).trim().toLowerCase();
+  const compatMode = getString(provider.compat_mode).trim().toLowerCase();
+  if (!getString(provider.base_url).trim()) {
+    return false;
+  }
+  if (kind === "anthropic" || kind === "google" || kind === "minimax") {
+    return false;
+  }
+  if (["local", "ollama", "llamacpp", "openai_compatible", "relay", "openai", "deepseek", "xiaomi", "zhipu", "aliyun", "siliconflow", "groq"].includes(kind)) {
+    return true;
+  }
+  return compatMode === "openai" || compatMode === "openai_compatible";
+}
 
 export function applyModelOptionToProfileDraft(
   config: PublicConfigShape,
@@ -644,7 +708,7 @@ export function deriveModelCenterSummary(input: {
       modelId: gitCommitModelId,
       label: input.labels.gitCommitModel,
       groupLabel: input.labels.gitCommitModel,
-      detail: gitCommitProfileId,
+      detail: gitCommitProfile?.label || gitCommitProfileId,
     });
   }
 
@@ -694,12 +758,20 @@ export function deriveModelCenterInventoryRows(
           ? (asRecord(option.details).supports_image_input as boolean)
           : null;
     const capabilityStatus = option.capability_status || getString(asRecord(option.details).capability_status) || "unknown";
+    const configuredProtocol = option.protocol || getString(asRecord(option.details).protocol);
+    const resolvedCompat = Object.keys(asRecord(option.resolved_compat)).length ? option.resolved_compat : option.compat || asRecord(option.details).compat;
     return {
       modelId: option.model_id,
       label: option.label,
       providerKind: option.provider_kind || getString(provider.kind) || "unknown",
+      providerApi: option.resolved_provider_api || option.provider_api || getString(provider.api),
       baseUrl: getString(provider.base_url),
       model: option.model,
+      configuredProtocol,
+      resolvedProtocol: option.resolved_protocol || configuredProtocol || "auto",
+      protocolSource: option.protocol_source || (configuredProtocol ? "explicit_model" : "inferred"),
+      protocolWarnings: Array.isArray(option.protocol_warnings) ? option.protocol_warnings.filter((item): item is string => typeof item === "string") : [],
+      compatSummary: summarizeModelCompat(resolvedCompat),
       apiKeyEnv: option.api_key_env || getString(provider.api_key_env),
       apiKeyState: option.api_key_state,
       supportsImageInput,

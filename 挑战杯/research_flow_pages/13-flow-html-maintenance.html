@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>13 流程 HTML 维护门禁 · 科研流程计划页</title>
+    <link rel="stylesheet" href="flow_pages.css" />
+  </head>
+  <body>
+    <main class="shell page-layout">
+
+    <nav class="nav-rail">
+      <a href="../research_team_flow_design.html"><span class="mini">IDX</span><span>返回总索引</span></a>
+      <a class="" href="01-source-workspace.html"><span class="mini">01</span><span>资料进入工作区</span></a>
+<a class="" href="02-paper-note.html"><span class="mini">02</span><span>生成 paper_note</span></a>
+<a class="" href="03-neuro-mechanism.html"><span class="mini">03</span><span>提取 neuro_mechanism</span></a>
+<a class="" href="04-mechanism-mapping.html"><span class="mini">04</span><span>机制到计算抽象</span></a>
+<a class="" href="05-algorithm-hypothesis.html"><span class="mini">05</span><span>生成 algorithm_hypothesis</span></a>
+<a class="" href="06-research-review.html"><span class="mini">06</span><span>科研审稿</span></a>
+<a class="" href="07-steward-ingestion.html"><span class="mini">07</span><span>知识治理入库</span></a>
+<a class="" href="08-candidate-graph.html"><span class="mini">08</span><span>候选图谱预览</span></a>
+<a class="" href="09-official-graph.html"><span class="mini">09</span><span>正式知识图谱同步</span></a>
+<a class="" href="10-experiment-loop.html"><span class="mini">10</span><span>实验验证闭环</span></a>
+<a class="" href="11-iteration-versioning.html"><span class="mini">11</span><span>持续迭代与版本化</span></a>
+<a class="" href="12-challenge-cup-delivery.html"><span class="mini">12</span><span>挑战杯交付计划</span></a>
+<a class=" active" href="13-flow-html-maintenance.html"><span class="mini">13</span><span>流程 HTML 维护门禁</span></a>
+    </nav>
+
+      <div>
+        <section class="plan-hero">
+          <div class="kicker">Research Flow Node 13</div>
+          <h1>流程 HTML 维护门禁</h1>
+          <p class="subtitle">把科研流程 HTML 作为挑战杯开发的可视化索引与长期维护入口。</p>
+          <div class="tag-row"><span class="tag done">已规划</span><span class="tag">Flow Site Maintenance Agent</span><span class="tag">独立计划页</span></div>
+          <div class="diagram">
+            <div class="flow-cell"><strong>输入</strong><span>AGENTS.md 规则 / 本轮挑战杯改动</span></div>
+            <div class="flow-cell"><strong>动作</strong><span>优先修改 build_research_flow_site.mjs，而不是手工改生成后的页面。</span></div>
+            <div class="flow-cell"><strong>输出</strong><span>更新后的总索引 / 更新后的节点计划页</span></div>
+            <div class="flow-cell"><strong>记忆/图谱</strong><span>不直接写入候选图谱或正式图谱；它约束图谱相关开发变化必须更新对应流程节点。</span></div>
+          </div>
+        </section>
+
+        <section class="section">
+          <div class="section-head">
+            <h2>当前节点规划</h2>
+            <p class="hint">本页只展示 13 节点。通过左侧导航可进入其它节点页。</p>
+          </div>
+          <div class="plan-grid">
+            <article class="plan-card"><h2>目标</h2><p class="hint">确保以后所有挑战杯开发、设计、schema、数据、记忆平台、图谱同步、实验和交付变化，都在同一轮同步进科研流程 HTML。</p></article>
+            <article class="plan-card"><h2>输入</h2><ul><li>AGENTS.md 规则</li>
+<li>本轮挑战杯改动</li>
+<li>build_research_flow_site.mjs</li>
+<li>research_team_flow_design.html</li></ul></article>
+            <article class="plan-card"><h2>处理动作</h2><ul><li>优先修改 build_research_flow_site.mjs，而不是手工改生成后的页面。</li>
+<li>每个新增流程步骤都新增或更新索引节点，并提供对应独立计划页。</li>
+<li>尚未完整规划的步骤必须以占位页显式保留，避免流程断点隐形化。</li>
+<li>结束挑战杯相关任务前，重新生成 HTML 并验证页面链接。</li></ul></article>
+            <article class="plan-card"><h2>输出物</h2><ul><li>更新后的总索引</li>
+<li>更新后的节点计划页</li>
+<li>HTML 链接验证记录</li>
+<li>final 中的 HTML 更新说明</li></ul></article>
+            <article class="plan-card"><h2>风险</h2><ul><li>只改代码不改流程页</li>
+<li>手工改生成页面导致下次覆盖</li>
+<li>新增节点没有独立计划页</li>
+<li>未报告 HTML 是否更新</li></ul></article>
+            <article class="plan-card "><h2>未决事项</h2><ul><li>未来是否把链接验证脚本固化为单独 npm/script 入口。</li></ul></article>
+          </div>
+        </section>
+
+        <section class="section">
+          <div class="section-head">
+            <h2>记忆与图谱边界</h2>
+            <p class="hint">区分候选工作区、知识治理 Agent、正式 Team Knowledge 和正式知识图谱。</p>
+          </div>
+          <div class="status-grid">
+            <div class="status-item"><b>候选状态</b><span>已规划</span></div>
+            <div class="status-item"><b>记忆平台</b><span>这是挑战杯流程维护规则，不等同于正式知识入库；若涉及项目级记忆，还需同步 .docs/project-memory。</span></div>
+            <div class="status-item"><b>图谱同步</b><span>不直接写入候选图谱或正式图谱；它约束图谱相关开发变化必须更新对应流程节点。</span></div>
+          </div>
+        </section>
+
+
+
+        <div class="pager">
+          <a href="12-challenge-cup-delivery.html">上一节点：12 挑战杯交付计划</a>
+          <a href="../research_team_flow_design.html">返回总索引</a>
+        </div>
+      </div>
+    </main>
+  </body>
+</html>

@@ -348,6 +348,37 @@ TOOL_TEST_SUITES: Dict[str, Dict] = {
             {"scenario": "搜索", "prompt": "联网搜索 AI Agent 的最新资料", "expected_tool": "web_search_tool"},
         ],
     },
+    "create_child_session_tool": {
+        "name": "子对话创建工具",
+        "description": "把明显独立的新事项拆到同一 Agent 的子对话中并可自动启动",
+        "params": {
+            "user_request": "子对话要处理的完整用户请求",
+            "task_title": "子对话标题",
+            "split_reason": "拆分原因",
+            "inherited_facts": "需要携带的有效事实",
+            "auto_start": True,
+            "switch_to_child": True,
+        },
+        "scenarios": [
+            {
+                "scenario": "明显独立事项",
+                "prompt": "当前会话在修复缓存命中。用户突然要求：另外帮我单独做一个会话切换卡顿的修复任务，并自动开始。",
+                "expected_tool": "create_child_session_tool",
+            },
+        ],
+    },
+    "list_child_sessions_tool": {
+        "name": "子对话列表工具",
+        "description": "查看当前 root 会话下已有子对话，避免重复拆分并汇报多事项状态",
+        "params": {"parent_session_id": "可选父会话 ID"},
+        "scenarios": [
+            {
+                "scenario": "查看已有子对话",
+                "prompt": "继续处理多事项前，先看看这个主会话下面已经有哪些子对话。",
+                "expected_tool": "list_child_sessions_tool",
+            },
+        ],
+    },
 }
 
 
@@ -373,7 +404,7 @@ def _quick_verify_tool(tool_name: str) -> Dict[str, Any]:
     # 检查 Key_Tools 注册
     if tool_name in key_tools:
         tool = key_tools[tool_name]
-        schema = tool.args_schema.schema() if tool.args_schema else {}
+        schema = _tool_args_schema(tool)
         return {
             "tool": tool_name,
             "registered": True,
@@ -406,7 +437,7 @@ def _list_all_registered_tools() -> Dict[str, Any]:
 
     key_tools = {}
     for t in create_key_tools():
-        schema = t.args_schema.schema() if t.args_schema else {}
+        schema = _tool_args_schema(t)
         key_tools[t.name] = {
             "source": "Key_Tools",
             "description": (t.description or "")[:80],
@@ -425,6 +456,19 @@ def _list_all_registered_tools() -> Dict[str, Any]:
         "executor_tools_count": len(executor_tools),
         "tools": {**key_tools, **executor_tools},
     }
+
+
+def _tool_args_schema(tool: Any) -> Dict[str, Any]:
+    args_schema = getattr(tool, "args_schema", None)
+    if not args_schema:
+        return {}
+    schema_builder = getattr(args_schema, "model_json_schema", None)
+    if callable(schema_builder):
+        return schema_builder()
+    legacy_builder = getattr(args_schema, "schema", None)
+    if callable(legacy_builder):
+        return legacy_builder()
+    return {}
 
 
 # ============================================================================

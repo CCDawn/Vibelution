@@ -16,10 +16,12 @@ describe("createEvolutionWorkspaceCache", () => {
 
     await cache.afterSupervisedWorkspaceChanged();
 
-    expect(invalidateQueries).toHaveBeenCalledTimes(5);
+    expect(invalidateQueries).toHaveBeenCalledTimes(7);
     expect(queryKeysFromCalls()).toEqual([
+      queryKeys.evolutionWorkspaceSnapshot(),
       queryKeys.evolutionWorkbench(),
       queryKeys.evolutionActiveRun(),
+      queryKeys.evolutionLatestRun(),
       queryKeys.evolutionOverview(),
       queryKeys.evolutionRuns(),
       queryKeys.evolutionLibrary(),
@@ -32,9 +34,38 @@ describe("createEvolutionWorkspaceCache", () => {
     await cache.afterWorktreeRunChanged();
 
     expect(queryKeysFromCalls()).toEqual([
+      queryKeys.evolutionWorkspaceSnapshot(),
       queryKeys.evolutionWorktreeActiveRun(),
       queryKeys.evolutionWorktreeRuns(),
       queryKeys.runtimeSummary(),
+    ]);
+  });
+
+  it("refreshes active and latest supervised run snapshots together", async () => {
+    const { cache, queryKeysFromCalls } = makeCache();
+
+    await cache.refreshSupervisedActiveRun();
+
+    expect(queryKeysFromCalls()).toEqual([
+      queryKeys.evolutionWorkspaceSnapshot(),
+      queryKeys.evolutionActiveRun(),
+      queryKeys.evolutionLatestRun(),
+    ]);
+  });
+
+  it("refreshes latest supervised result when a live run reaches a terminal state", async () => {
+    const { cache, queryKeysFromCalls } = makeCache();
+
+    await cache.afterSupervisedRunTerminal();
+
+    expect(queryKeysFromCalls()).toEqual([
+      queryKeys.evolutionWorkspaceSnapshot(),
+      queryKeys.evolutionActiveRun(),
+      queryKeys.evolutionLatestRun(),
+      queryKeys.evolutionOverview(),
+      queryKeys.evolutionRuns(),
+      queryKeys.evolutionLibrary(),
+      queryKeys.evolutionWorkbench(),
     ]);
   });
 
@@ -44,6 +75,7 @@ describe("createEvolutionWorkspaceCache", () => {
     await cache.afterSelfEvolutionChanged();
 
     expect(queryKeysFromCalls()).toEqual([
+      queryKeys.evolutionWorkspaceSnapshot(),
       queryKeys.evolutionSelfOverview(),
       queryKeys.evolutionSelfActiveRun(),
       queryKeys.evolutionSelfLatestRun(),
@@ -53,12 +85,24 @@ describe("createEvolutionWorkspaceCache", () => {
     ]);
   });
 
+  it("refreshes the workspace snapshot with the latest self run", async () => {
+    const { cache, queryKeysFromCalls } = makeCache();
+
+    await cache.refreshSelfLatestRun();
+
+    expect(queryKeysFromCalls()).toEqual([
+      queryKeys.evolutionWorkspaceSnapshot(),
+      queryKeys.evolutionSelfLatestRun(),
+    ]);
+  });
+
   it("extends self-evolution refresh to sessions after handoff", async () => {
     const { cache, queryKeysFromCalls } = makeCache();
 
     await cache.afterSelfHandoff();
 
     expect(queryKeysFromCalls()).toEqual([
+      queryKeys.evolutionWorkspaceSnapshot(),
       queryKeys.evolutionSelfOverview(),
       queryKeys.evolutionSelfActiveRun(),
       queryKeys.evolutionSelfLatestRun(),
@@ -75,6 +119,7 @@ describe("createEvolutionWorkspaceCache", () => {
     await cache.afterProposalChanged("run-a");
 
     expect(queryKeysFromCalls()).toEqual([
+      queryKeys.evolutionWorkspaceSnapshot(),
       queryKeys.evolutionOverview(),
       queryKeys.evolutionRuns(),
       queryKeys.evolutionLibrary(),

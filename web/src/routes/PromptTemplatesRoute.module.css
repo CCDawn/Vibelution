@@ -188,7 +188,8 @@
 }
 
 .editorPanel {
-  grid-template-rows: auto auto minmax(360px, 1fr) auto;
+  grid-template-rows: auto auto auto minmax(260px, 1fr) minmax(112px, auto) auto;
+  align-content: stretch;
   overflow: hidden;
 }
 
@@ -399,12 +400,29 @@
 }
 
 .field textarea {
-  min-height: 100%;
+  min-height: 0;
+  height: 100%;
   resize: none;
   padding: 10px;
   font-family: var(--font-mono);
   font-size: 0.8rem;
   line-height: 1.5;
+}
+
+.nameField {
+  align-self: start;
+}
+
+.contentField {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  align-content: stretch;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.contentField textarea {
+  align-self: stretch;
 }
 
 .contentHeader {
@@ -431,7 +449,17 @@
   align-content: start;
   gap: 8px;
   min-width: 0;
+  min-height: 0;
   padding: 10px;
+}
+
+.detailCard {
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+.detailCard .helperText {
+  max-height: 58px;
+  overflow: auto;
 }
 
 .detailCard h3,

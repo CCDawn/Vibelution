@@ -132,20 +132,62 @@ def _runtime_manager_controls_current_project() -> bool:
         return False
 
 
-def _request_runtime_manager_restart(reason: str) -> Optional[str]:
+def _request_runtime_manager_restart(
+    reason: str,
+    *,
+    session_id: str = "",
+    run_id: str = "",
+    resume_message: str = "",
+) -> Optional[str]:
     """Submit a restart intent to the runtime manager when it is live."""
 
     if not _runtime_manager_controls_current_project():
         return None
+    command_type = "hot_restart_workbench" if session_id else "restart_self_evolution_run"
+    args = (
+        {
+            "reason": reason or "agent_hot_restart",
+            "source": "trigger_self_restart_tool",
+            "allowActiveSessionId": session_id,
+            "allowActiveRunId": run_id,
+            "hotRestart": {
+                "sessionId": session_id,
+                "runId": run_id,
+                "reason": reason or "agent_hot_restart",
+                "resumeMessage": resume_message,
+            },
+        }
+        if session_id
+        else {
+            "reason": reason or "legacy_self_restart",
+            "payload": {"reason": reason or "legacy_self_restart"},
+        }
+    )
     try:
         from core.runtime_manager.command_queue import submit_command, wait_for_result
 
         command = submit_command(
-            "restart_self_evolution_run",
-            args={"reason": reason or "legacy_self_restart", "payload": {"reason": reason or "legacy_self_restart"}},
+            command_type,
+            args=args,
             requested_by="trigger_self_restart_tool",
         )
-        result = wait_for_result(command["commandId"], timeout_seconds=10.0)
+        result = wait_for_result(command["commandId"], timeout_seconds=10.0 if not session_id else 2.0)
+    except TimeoutError:
+        if session_id:
+            return "\n".join(
+                [
+                    "✓ 前后端热重启事务已交给 Runtime Manager",
+                    f"Command: {command['commandId']}",
+                    f"Session: {session_id}",
+                    f"Run: {run_id or '-'}",
+                    f"原因: {reason}",
+                    "",
+                    "状态: Runtime Manager 将继续执行备份、重启、验证、失败现场保存、回滚和会话唤醒。",
+                    "",
+                    "当前轮将结束，请等待热重启完成后系统自动唤醒本会话。",
+                ]
+            )
+        raise
     except Exception as exc:
         debug_logger.error(f"Runtime manager 重启意图提交失败，降级为 legacy restarter: {exc}")
         return None
@@ -154,6 +196,20 @@ def _request_runtime_manager_restart(reason: str) -> Optional[str]:
         return None
     intent = result.get("restartIntent") if isinstance(result.get("restartIntent"), dict) else {}
     intent_id = str(intent.get("intentId") or "").strip()
+    if session_id:
+        if not bool(result.get("ok")):
+            return f"错误: 前后端热重启被拒绝: {result.get('message') or result}"
+        return "\n".join(
+            [
+                "✓ 前后端热重启已完成",
+                f"Command: {command['commandId']}",
+                f"Session: {session_id}",
+                f"Run: {run_id or '-'}",
+                f"原因: {reason}",
+                "",
+                str(result.get("message") or "Runtime Manager 已完成热重启闭环。"),
+            ]
+        )
     return "\n".join(
         [
             "✓ 重启意图已交给 Runtime Manager",
@@ -304,7 +360,15 @@ def spawn_detached_process(command: list, env: Optional[dict] = None) -> Optiona
 # 核心功能函数
 # ============================================================================
 
-def trigger_self_restart_tool(reason: str = "") -> str:
+def trigger_self_restart_tool(
+    reason: str = "",
+    sessionId: str = "",
+    session_id: str = "",
+    runId: str = "",
+    run_id: str = "",
+    resumeMessage: str = "",
+    resume_message: str = "",
+) -> str:
     """
     触发 Agent 自我重启。
     
@@ -419,7 +483,15 @@ def trigger_self_restart_tool(reason: str = "") -> str:
     debug_logger.info(f"脚本路径: {script_path}")
     debug_logger.info(f"重启原因: {reason}")
 
-    manager_result = _request_runtime_manager_restart(reason)
+    normalized_session_id = str(sessionId or session_id or "").strip()
+    normalized_run_id = str(runId or run_id or "").strip()
+    normalized_resume_message = str(resumeMessage or resume_message or "").strip()
+    manager_result = _request_runtime_manager_restart(
+        reason,
+        session_id=normalized_session_id,
+        run_id=normalized_run_id,
+        resume_message=normalized_resume_message,
+    )
     if manager_result:
         debug_logger.info("重启已交由 Runtime Manager 协调")
         return manager_result

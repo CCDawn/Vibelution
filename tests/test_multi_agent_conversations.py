@@ -1,4 +1,6 @@
 import json
+import threading
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -20,6 +22,7 @@ from core.web.services import (
     session_service,
     supervised_agent_service,
 )
+from tools.session_reference_tools import session_reference_context
 
 
 client = TestClient(create_app(), headers={CONTROL_TOKEN_HEADER: get_control_token()})
@@ -95,10 +98,10 @@ def test_create_chat_session_creates_persistent_agent_and_direct_conversation(tm
     detail = session_service.create_chat_session(title="配置 Agent")
 
     assert detail["agentId"]
-    assert detail["agentCode"] == "A001"
     agent = agent_directory_service.get_agent(detail["agentId"])
+    assert detail["agentCode"] == agent["agentCode"]
+    assert agent["agentCode"]
     assert agent["directSessionId"] == detail["id"]
-    assert agent["agentCode"] == "A001"
     assert agent["primaryMode"] == "chat"
     assert agent["promptTemplateId"] == "prompt-chat-default"
     assert agent["workspacePath"].startswith("workspace/agents/")
@@ -110,7 +113,7 @@ def test_create_chat_session_creates_persistent_agent_and_direct_conversation(tm
     assert direct[0]["conversationId"] == detail["id"]
     assert direct[0]["title"] == "配置 Agent"
     assert direct[0]["agentId"] == detail["agentId"]
-    assert direct[0]["agentCode"] == "A001"
+    assert direct[0]["agentCode"] == agent["agentCode"]
     assert direct[0]["agentDisplayName"] == agent["displayName"]
     assert direct[0]["agentDisplayName"] != direct[0]["title"]
     assert direct[0]["agentPrimaryMode"] == "chat"
@@ -156,9 +159,48 @@ def test_session_list_reuses_agent_lookup_for_existing_bound_sessions(tmp_path, 
     monkeypatch.setattr(session_service, "get_agent", fail_get_agent)
 
     sessions = session_service.list_sessions()
+    seeded_sessions = [item for item in sessions if item["id"] in {"session-alpha", "session-beta"}]
 
-    assert {item["id"] for item in sessions} == {"session-alpha", "session-beta"}
-    assert all(item["agentId"] for item in sessions)
+    assert {item["id"] for item in seeded_sessions} == {"session-alpha", "session-beta"}
+    assert all(item["agentId"] for item in seeded_sessions)
+
+
+def test_session_list_hides_bound_session_when_agent_is_missing_without_hydration(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _seed_chat_sessions(tmp_path)
+    session_service.get_session_detail("session-alpha")
+    state = load_chat_state(tmp_path)
+    alpha = next(item for item in state["conversations"] if item["conversation_id"] == "session-alpha")
+    missing_agent_id = alpha["agent_id"]
+    agent_state = agent_directory_service.load_state()
+    agent_state["agents"] = [
+        item for item in agent_state["agents"]
+        if item.get("agentId") != missing_agent_id
+    ]
+    agent_directory_service.save_state(agent_state)
+    recorded_events = []
+
+    def fail_get_agent(agent_id, *args, **kwargs):
+        raise AssertionError(f"session list should not hydrate Agent records: {agent_id}")
+
+    monkeypatch.setattr(session_service, "get_agent", fail_get_agent)
+    monkeypatch.setattr(
+        session_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: recorded_events.append((args, kwargs)) or {"accepted": True},
+    )
+
+    sessions = session_service.list_sessions()
+
+    assert "session-alpha" not in {item["id"] for item in sessions}
+    hidden_events = [
+        event for event in recorded_events
+        if event[0][2] == "session.agent_missing.hidden_from_index"
+    ]
+    assert hidden_events
+    assert hidden_events[-1][1]["fields"]["sessionId"] == "session-alpha"
+    assert hidden_events[-1][1]["fields"]["agentId"] == missing_agent_id
+    assert hidden_events[-1][1]["fields"]["agentStatusCode"] == "missing_agent"
 
 
 def test_session_list_uses_short_snapshot_cache_and_invalidates_on_update(tmp_path, monkeypatch):
@@ -219,22 +261,96 @@ def test_session_list_uses_short_snapshot_cache_and_invalidates_on_update(tmp_pa
     assert [item for item in events if item[0][2] == "session.list.loaded"][-1][1]["fields"]["cacheHit"] is False
 
 
-def test_update_chat_session_skips_noop_profile_binding_write(tmp_path, monkeypatch):
+def test_session_title_update_uses_lightweight_path(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
-    session = session_service.create_chat_session(title="Stable Agent", profile_id="primary")
-    before = load_chat_state(tmp_path)
+    created = session_service.create_chat_session(title="Before Rename")
+
+    def fail_agent_metadata(*args, **kwargs):
+        raise AssertionError("title-only rename should not repair agent metadata")
+
+    monkeypatch.setattr(session_service, "_ensure_conversation_agent_metadata", fail_agent_metadata)
+    detail = session_service.update_chat_session_title(created["id"], "After Rename")
+
+    assert detail["id"] == created["id"]
+    assert detail["title"] == "After Rename"
+    sessions = session_service.list_sessions()
+    assert next(item for item in sessions if item["id"] == created["id"])["title"] == "After Rename"
+
+
+def test_session_list_shares_concurrent_index_build(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    created = session_service.create_chat_session(title="Concurrent Cached Agent")
+    session_service._invalidate_session_list_cache()
+    real_load = session_service._load_conversations
+    build_started = threading.Event()
+    release_build = threading.Event()
+    load_calls = 0
     events = []
-    monkeypatch.setattr(session_service, "record_runtime_scene_event", lambda *args, **kwargs: events.append((args, kwargs)))
+
+    def slow_load(*args, **kwargs):
+        nonlocal load_calls
+        load_calls += 1
+        build_started.set()
+        assert release_build.wait(timeout=3)
+        return real_load(*args, **kwargs)
+
+    monkeypatch.setattr(session_service, "_load_conversations", slow_load)
+    monkeypatch.setattr(
+        session_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: events.append((args, kwargs)) or {"accepted": True},
+    )
+
+    results: list[list[dict]] = []
+    errors: list[BaseException] = []
+
+    def worker():
+        try:
+            results.append(session_service.list_sessions())
+        except BaseException as exc:
+            errors.append(exc)
+
+    first = threading.Thread(target=worker)
+    second = threading.Thread(target=worker)
+    first.start()
+    assert build_started.wait(timeout=3)
+    second.start()
+    time.sleep(0.05)
+    release_build.set()
+    first.join(timeout=3)
+    second.join(timeout=3)
+
+    assert not first.is_alive()
+    assert not second.is_alive()
+    assert not errors
+    assert len(results) == 2
+    assert load_calls == 1
+    assert all(any(item["id"] == created["id"] for item in result) for result in results)
+    loaded_events = [item for item in events if item[0][2] == "session.list.loaded"]
+    assert len(loaded_events) == 2
+    assert sorted(event[1]["fields"]["cacheHit"] for event in loaded_events) == [False, True]
+    assert any(event[1]["fields"]["waitedForInflight"] for event in loaded_events)
+
+
+def test_update_chat_session_skips_noop_agent_binding_write(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    session = session_service.create_chat_session(
+        title="Stable Agent",
+        llm_bindings={"dialogue": {"modelId": "model-primary"}},
+    )
+    before = load_chat_state(tmp_path)
 
     detail = session_service.update_chat_session(
         session["id"],
         title=session["title"],
-        profile_id=session["agentProfileId"],
+        agent_id=session["agentId"],
     )
 
     assert detail["id"] == session["id"]
-    assert load_chat_state(tmp_path) == before
-    assert not [item for item in events if item[0][2] == "session.agent_binding_updated"]
+    after = load_chat_state(tmp_path)
+    assert after["conversations"][0]["agentId"] == before["conversations"][0]["agentId"]
+    assert "agentProfileId" not in after["conversations"][0]
+    assert "agentTemplateId" not in after["conversations"][0]
 
 
 def test_conversation_index_returns_direct_agents_and_group_rooms(tmp_path, monkeypatch):
@@ -329,7 +445,16 @@ def test_create_chat_room_from_agent_ids_rejects_single_agent(tmp_path, monkeypa
 def test_agent_and_conversation_api_create_direct_agent(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
 
-    response = client.post("/api/agents", json={"displayName": "API Agent", "profileId": "primary"})
+    response = client.post(
+        "/api/agents",
+        json={
+            "displayName": "API Agent",
+            "llmBindings": {"dialogue": {"modelId": "model-primary"}},
+            "primaryMode": "chat",
+            "promptTemplateId": "prompt-chat-default",
+            "toolPolicy": {"allowedTools": ["agent_message_tool"]},
+        },
+    )
 
     assert response.status_code == 201, response.text
     agent = response.json()
@@ -381,6 +506,7 @@ def test_agent_directory_index_logging_is_deduplicated_per_agent_session(tmp_pat
     index_events = [
         event for event in recorded_events
         if event[0][2] == "session.agent_directory_index_added"
+        and event[1]["fields"]["agentId"] == agent["agentId"]
     ]
     assert len(index_events) == 1
     assert index_events[0][1]["fields"]["sessionId"] == agent["directSessionId"]
@@ -436,7 +562,7 @@ def test_agent_directory_repairs_legacy_mode_role_and_prompt_fields(tmp_path, mo
 
     repaired = agent_directory_service.get_agent("agent-legacy-research")
 
-    assert repaired["agentCode"] == "A001"
+    assert repaired["agentCode"] == "A002"
     assert repaired["primaryMode"] == "research"
     assert repaired["roleKey"] == "research_broad"
     assert repaired["promptTemplateId"] == "prompt-research-broad"
@@ -478,7 +604,7 @@ def test_agent_directory_direct_session_appears_in_conversation_index_without_ch
     )
     agent = agent_directory_service.create_agent_instance(
         display_name="能力管家 Agent",
-        profile_id="primary",
+        llm_bindings={"dialogue": {"modelId": "model-primary"}},
         primary_mode="research",
         role_key="research_capability_steward",
         prompt_template_id="prompt-research-capability-steward",
@@ -516,7 +642,7 @@ def test_agent_directory_direct_session_can_accept_messages_after_materializatio
     )
     agent = agent_directory_service.create_agent_instance(
         display_name="科研负责人",
-        profile_id="primary",
+        llm_bindings={"dialogue": {"modelId": "model-primary"}},
         primary_mode="research",
         role_key="research_ceo",
         prompt_template_id="prompt-research-ceo",
@@ -551,7 +677,10 @@ def test_agent_directory_resolves_workspace_root_without_nested_workspace(tmp_pa
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", workspace_root)
     monkeypatch.setattr(agent_directory_service, "record_runtime_scene_event", lambda *args, **kwargs: None)
 
-    agent = agent_directory_service.create_agent_instance(display_name="路径修复 Agent", profile_id="primary")
+    agent = agent_directory_service.create_agent_instance(
+        display_name="路径修复 Agent",
+        llm_bindings={"dialogue": {"modelId": "model-primary"}},
+    )
 
     assert agent["workspacePath"].startswith("workspace/agents/")
     assert (tmp_path / agent["workspacePath"] / "memory").exists()
@@ -581,7 +710,10 @@ def test_agent_directory_atomic_write_retries_transient_permission_error(tmp_pat
 
 def test_agents_api_updates_unified_agent_fields(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
-    agent = agent_directory_service.create_agent_instance(display_name="可配置 Agent", profile_id="primary")
+    agent = agent_directory_service.create_agent_instance(
+        display_name="可配置 Agent",
+        llm_bindings={"dialogue": {"modelId": "model-primary"}},
+    )
 
     response = client.patch(
         f"/api/agents/{agent['agentId']}",
@@ -589,7 +721,6 @@ def test_agents_api_updates_unified_agent_fields(tmp_path, monkeypatch):
             "primaryMode": "research",
             "roleKey": "research_review",
             "promptTemplateId": "prompt-research-review",
-            "templateId": "research_evidence_reviewer",
         },
     )
 
@@ -598,14 +729,14 @@ def test_agents_api_updates_unified_agent_fields(tmp_path, monkeypatch):
     assert payload["primaryMode"] == "research"
     assert payload["roleKey"] == "research_review"
     assert payload["promptTemplateId"] == "prompt-research-review"
-    assert payload["templateId"] == "research_evidence_reviewer"
+    assert "templateId" not in payload
 
 
 def test_agents_api_returns_recent_agent_runs(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     agent = agent_directory_service.create_agent_instance(
         display_name="运行记录 Agent",
-        profile_id="primary",
+        llm_bindings={"dialogue": {"modelId": "model-primary"}},
         direct_session_id="session-runs-api",
     )
     from core.orchestration import context_engine
@@ -665,7 +796,7 @@ def test_agent_configuration_api_exposes_prompt_templates_and_mode_bindings(tmp_
 
     slot_agent = agent_directory_service.create_agent_instance(
         display_name="替换执行 Agent",
-        profile_id="primary",
+        llm_bindings={"dialogue": {"modelId": "model-primary"}},
         primary_mode="self_evolution",
         role_key="executor",
         prompt_template_id="prompt-self-executor",
@@ -679,7 +810,7 @@ def test_agent_configuration_api_exposes_prompt_templates_and_mode_bindings(tmp_
 
     pool_agent = agent_directory_service.create_agent_instance(
         display_name="科研池 Agent",
-        profile_id="primary",
+        llm_bindings={"dialogue": {"modelId": "model-primary"}},
         primary_mode="research",
         role_key="research_pool",
         prompt_template_id="prompt-research-broad",
@@ -728,8 +859,7 @@ def test_agents_api_skips_config_agent_sync_when_fixed_roles_are_present(tmp_pat
     for role in supervised_agent_service.SUPERVISED_AGENT_ROLES:
         agent_directory_service.create_agent_instance(
             display_name=role.label,
-            template_id=role.profile_id,
-            profile_id=role.profile_id,
+            llm_bindings={"dialogue": {"modelId": f"model-{role.profile_id.replace('_', '-')}"}},
             primary_mode="supervised_evolution",
             role_key=role.role,
             prompt_template_id=f"prompt-supervised-{role.role}",
@@ -739,8 +869,7 @@ def test_agents_api_skips_config_agent_sync_when_fixed_roles_are_present(tmp_pat
         role_key = role["role"]
         agent_directory_service.create_agent_instance(
             display_name=role["label"],
-            template_id=role["profileId"],
-            profile_id=role["profileId"],
+            llm_bindings={"dialogue": {"modelId": f"model-{str(role['profileId']).replace('_', '-')}"}},
             primary_mode="self_evolution",
             role_key=role_key,
             prompt_template_id=role["promptTemplateId"],
@@ -757,7 +886,8 @@ def test_agents_api_skips_config_agent_sync_when_fixed_roles_are_present(tmp_pat
 
     assert response.status_code == 200, response.text
     payload = response.json()
-    assert len(payload) == 8
+    assert len(payload) == 9
+    assert any(item["agentId"] == "agent-knowledge-steward" for item in payload)
     assert {
         item["roleKey"]
         for item in payload
@@ -780,7 +910,7 @@ def test_chat_room_completion_syncs_group_context_events_to_participant_agents_o
     agent_ids = {item["id"]: item["agentId"] for item in [alpha, beta]}
     outsider = agent_directory_service.create_agent_instance(
         display_name="Outsider",
-        profile_id="primary",
+        llm_bindings={"dialogue": {"modelId": "model-primary"}},
         direct_session_id="session-outsider",
     )
 
@@ -1125,6 +1255,89 @@ def test_agent_message_tool_sends_persistent_message_by_agent_code(tmp_path, mon
     assert pending[0]["sourceAgentCode"] == alpha["agentCode"]
     assert pending[0]["content"] == "Beta，请从架构风险角度审查这轮改造。"
     assert pending[0]["metadata"] == {"priority": "normal"}
+
+
+def test_session_reference_message_persists_reference_and_schedules_query_context(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    alpha = session_service.create_chat_session(title="Alpha Agent")
+    beta = session_service.create_chat_session(title="Beta Agent")
+    state = load_chat_state(tmp_path)
+    for conversation in state["conversations"]:
+        if (conversation.get("id") or conversation.get("conversation_id")) == beta["id"]:
+            conversation["messages"] = [
+                {"role": "user", "content": "Beta 历史目标", "timestamp": "2026-06-05T01:00:00Z"},
+                {"role": "assistant", "content": "Beta 历史结论", "timestamp": "2026-06-05T01:01:00Z"},
+            ]
+    save_chat_state(tmp_path, state)
+    scheduled = []
+    monkeypatch.setattr(session_service, "_submit_scheduled_session_turn", lambda context: scheduled.append(context))
+
+    result = session_service.submit_session_message_lightweight(
+        alpha["id"],
+        "",
+        references=[
+            {
+                "referenceId": f"session:{beta['id']}",
+                "kind": "session",
+                "sessionId": beta["id"],
+                "title": "Beta Agent",
+                "agentId": beta["agentId"],
+                "agentDisplayName": "Beta Agent",
+            }
+        ],
+    )
+
+    assert result["accepted"] is True
+    detail = session_service.get_session_detail(alpha["id"])
+    user_message = [message for message in detail["messages"] if message["role"] == "user"][-1]
+    assert user_message["references"][0]["sessionId"] == beta["id"]
+    assert user_message["metadata"]["sessionReferences"][0]["permissions"]["query"] is True
+    assert scheduled
+    assert "Session References" in scheduled[0]["user_message"]
+    assert scheduled[0]["session_references"][0]["sessionId"] == beta["id"]
+
+
+def test_session_reference_query_tool_only_reads_current_turn_references(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    alpha = session_service.create_chat_session(title="Alpha Agent")
+    beta = session_service.create_chat_session(title="Beta Agent")
+    state = load_chat_state(tmp_path)
+    for conversation in state["conversations"]:
+        if (conversation.get("id") or conversation.get("conversation_id")) == beta["id"]:
+            conversation["messages"] = [
+                {"role": "user", "content": "需要分析缓存命中", "timestamp": "2026-06-05T01:00:00Z"},
+                {"role": "assistant", "content": "缓存命中来自上游 usage。", "timestamp": "2026-06-05T01:01:00Z"},
+            ]
+    save_chat_state(tmp_path, state)
+
+    with session_reference_context([
+        {
+            "referenceId": f"session:{beta['id']}",
+            "kind": "session",
+            "sessionId": beta["id"],
+            "title": "Beta Agent",
+            "agentId": beta["agentId"],
+        }
+    ]):
+        result, action = ToolExecutor().execute(
+            "session_reference_query_tool",
+            {"reference_id": f"session:{beta['id']}", "query": "缓存", "limit": 2},
+        )
+
+    payload = json.loads(result)
+    assert action is None
+    assert payload["status"] == "ok"
+    assert payload["reference"]["sessionId"] == beta["id"]
+    assert payload["returnedMessageCount"] == 2
+    assert "缓存" in payload["messages"][0]["content"]
+
+    blocked_result, _ = ToolExecutor().execute(
+        "session_reference_query_tool",
+        {"session_id": beta["id"]},
+    )
+    blocked_payload = json.loads(blocked_result)
+    assert blocked_payload["status"] == "error"
+    assert blocked_payload["error"] == "session_reference_not_allowed"
 
 
 def test_agent_message_tool_resolves_ui_composite_agent_label(tmp_path, monkeypatch):
@@ -1789,7 +2002,10 @@ def test_chat_room_completion_appends_visible_group_transcript_to_participant_se
 
 def test_tool_policy_blocks_before_tool_execution_and_returns_correctable_error(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
-    agent = agent_directory_service.create_agent_instance(display_name="Restricted", profile_id="primary")
+    agent = agent_directory_service.create_agent_instance(
+        display_name="Restricted",
+        llm_bindings={"dialogue": {"modelId": "model-primary"}},
+    )
     agent_directory_service.update_agent_instance(
         agent["agentId"],
         tool_policy={"blockedTools": ["cli_tool"]},

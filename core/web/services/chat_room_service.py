@@ -9,7 +9,7 @@ import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
@@ -27,6 +27,13 @@ from . import agent_directory_service, session_service
 from .agent_directory_service import active_agent_runtime, evaluate_agent_workspace_write, write_group_context_event
 from .i18n import get_web_language, text_for
 from .runtime_scene_service import record_runtime_scene_event
+from .team_case_orchestrator import (
+    CONSULTATION_INTENTS,
+    build_team_case_state,
+    case_prompt_lines,
+    format_case_state_prompt,
+    select_speakers_for_case,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -34,6 +41,7 @@ RUN_KIND = "chat_room_round"
 RUN_LEASES = [READONLY_CHAT_LEASE]
 DEFAULT_MODE = "round_robin"
 DEFAULT_PURPOSE = "discussion"
+CHAT_ROOM_AGENT_LLM_SLOT = "dialogue"
 _CASUAL_CHAT_TOPIC_RE = re.compile(
     r"^\s*(?:你们好|大家好|你好|您好|hello|hi|hey|嗨|哈喽|在吗|有人吗|辛苦了)[。！!,.，\s]*$",
     re.IGNORECASE,
@@ -53,6 +61,26 @@ CHAT_ROOM_PURPOSES = [
         "id": "meeting",
         "label": "Meeting",
         "description": "Structured meeting notes with decisions, risks, and action items.",
+    },
+    {
+        "id": "medical_triage",
+        "label": "Medical triage",
+        "description": "User-facing medical intake, risk triage, specialist routing, and safe next-step advice.",
+    },
+    {
+        "id": "research_coordination",
+        "label": "Research coordination",
+        "description": "Research organization coordination with role-aware reporting, evidence, and task routing.",
+    },
+    {
+        "id": "self_evolution",
+        "label": "Self evolution",
+        "description": "Self-evolution role coordination across execution, review, and summary responsibilities.",
+    },
+    {
+        "id": "supervised_evolution",
+        "label": "Supervised evolution",
+        "description": "Supervised evolution coordination across baseline, candidate, reviewer, auditor, and judge roles.",
     },
 ]
 RUNNING_ROUND_STATUSES = {"queued", "running", "stopping"}
@@ -185,6 +213,7 @@ def update_chat_room(
     title: str | None = None,
     participant_session_ids: list[str] | None = None,
     participant_contexts_by_agent_id: dict[str, dict[str, Any]] | None = None,
+    allow_empty_participants: bool = False,
     mode: str | None = None,
     purpose: str | None = None,
     config: dict[str, Any] | None = None,
@@ -216,7 +245,7 @@ def update_chat_room(
                 participants,
                 participant_contexts_by_agent_id=participant_contexts_by_agent_id,
             )
-            if not participants:
+            if not participants and not allow_empty_participants:
                 raise ChatRoomValidationError(
                     text_for(lang, zh="至少需要一个可用会话才能更新群聊。", en="At least one session is required.")
                 )
@@ -468,6 +497,7 @@ def create_chat_room(
     participant_session_ids: list[str] | None = None,
     participant_agent_ids: list[str] | None = None,
     participant_contexts_by_agent_id: dict[str, dict[str, Any]] | None = None,
+    allow_empty_participants: bool = False,
     mode: str = DEFAULT_MODE,
     purpose: str = DEFAULT_PURPOSE,
     config: dict[str, Any] | None = None,
@@ -493,7 +523,7 @@ def create_chat_room(
             participants,
             participant_contexts_by_agent_id=participant_contexts_by_agent_id,
         )
-        if not participants:
+        if not participants and not allow_empty_participants:
             raise ChatRoomValidationError(
                 text_for(lang, zh="至少需要一个可用会话才能创建群聊。", en="At least one session is required.")
             )
@@ -574,6 +604,19 @@ def start_chat_room_round(
             history=list(room.get("rounds") or []),
             config=round_config,
         )
+        case_state = build_team_case_state(
+            room=room,
+            topic=normalized_topic,
+            purpose=round_purpose,
+            participants=participants,
+            history=list(room.get("rounds") or []),
+            config=round_config,
+        )
+        speakers = select_speakers_for_case(
+            speakers,
+            participants=participants,
+            case_state=case_state,
+        )
         submit_timings["speakerSelectMs"] = _elapsed_ms(stage_started_at)
         if not speakers:
             raise ChatRoomValidationError(
@@ -595,6 +638,7 @@ def start_chat_room_round(
             "mode": round_mode,
             "purpose": round_purpose,
             "config": round_config,
+            "caseState": case_state,
             "status": "running",
             "speakerOrder": [item["participantId"] for item in speakers],
             "messages": [],
@@ -629,6 +673,12 @@ def start_chat_room_round(
             "mode": round_mode,
             "purpose": round_purpose,
             "participantCount": len(speakers),
+            "caseIntent": case_state.get("intent") or "",
+            "caseNextAction": case_state.get("nextAction") or "",
+            "caseInformationSufficiency": case_state.get("informationSufficiency") or "",
+            "caseUserFacingMode": case_state.get("userFacingMode") or "",
+            "caseDiscussionVisibility": case_state.get("discussionVisibility") or "",
+            "caseMissingFactCount": len(list(case_state.get("missingFacts") or [])),
             **submit_timings,
         },
         outcome="running",
@@ -661,6 +711,12 @@ def start_chat_room_round(
                 "mode": round_mode,
                 "purpose": round_purpose,
                 "participantCount": len(speakers),
+                "caseIntent": case_state.get("intent") or "",
+                "caseNextAction": case_state.get("nextAction") or "",
+                "caseInformationSufficiency": case_state.get("informationSufficiency") or "",
+                "caseUserFacingMode": case_state.get("userFacingMode") or "",
+                "caseDiscussionVisibility": case_state.get("discussionVisibility") or "",
+                "caseMissingFactCount": len(list(case_state.get("missingFacts") or [])),
                 **submit_timings,
             },
             outcome="running",
@@ -858,6 +914,9 @@ def _execute_chat_room_round(
             "topic": normalized_topic,
             "mode": round_mode,
             "purpose": round_purpose,
+            "caseState": dict(round_payload.get("caseState") or {})
+            if isinstance(round_payload.get("caseState"), dict)
+            else {},
             "speakerIndex": index,
         }
         prompt_build_ms = _elapsed_ms(speaker_started_at)
@@ -913,6 +972,11 @@ def _execute_chat_room_round(
                 "speakerIndex": index,
                 "status": message["status"],
                 "purpose": round_purpose,
+                "caseIntent": (round_payload.get("caseState") or {}).get("intent") if isinstance(round_payload.get("caseState"), dict) else "",
+                "caseNextAction": (round_payload.get("caseState") or {}).get("nextAction") if isinstance(round_payload.get("caseState"), dict) else "",
+                "caseInformationSufficiency": (round_payload.get("caseState") or {}).get("informationSufficiency") if isinstance(round_payload.get("caseState"), dict) else "",
+                "caseUserFacingMode": (round_payload.get("caseState") or {}).get("userFacingMode") if isinstance(round_payload.get("caseState"), dict) else "",
+                "caseDiscussionVisibility": (round_payload.get("caseState") or {}).get("discussionVisibility") if isinstance(round_payload.get("caseState"), dict) else "",
                 "contentChars": len(message.get("content") or ""),
                 "errorType": message.get("errorType") or "",
                 "promptBuildMs": prompt_build_ms,
@@ -961,6 +1025,11 @@ def _execute_chat_room_round(
             "messageCount": len(messages),
             "completedCount": completed_count,
             "failedCount": len(messages) - completed_count,
+            "caseIntent": (target_round.get("caseState") or {}).get("intent") if isinstance(target_round.get("caseState"), dict) else "",
+            "caseNextAction": (target_round.get("caseState") or {}).get("nextAction") if isinstance(target_round.get("caseState"), dict) else "",
+            "caseInformationSufficiency": (target_round.get("caseState") or {}).get("informationSufficiency") if isinstance(target_round.get("caseState"), dict) else "",
+            "caseUserFacingMode": (target_round.get("caseState") or {}).get("userFacingMode") if isinstance(target_round.get("caseState"), dict) else "",
+            "caseDiscussionVisibility": (target_round.get("caseState") or {}).get("discussionVisibility") if isinstance(target_round.get("caseState"), dict) else "",
         },
         outcome=final_status,
         level="info" if final_status == "completed" else "error",
@@ -1117,6 +1186,7 @@ def _run_one_speaker(
             "content": "",
             "summary": supervision_decision.reason,
             "timestamp": timestamp,
+            **_case_message_metadata(context),
             "supervision": supervision_payload,
             "timings": {
                 "supervisionPolicyMs": supervision_policy_ms,
@@ -1132,6 +1202,8 @@ def _run_one_speaker(
             content = _result_summary(result) or "No visible response."
         content = _strip_redundant_speaker_prefix(content, participant)
         summary = _strip_redundant_speaker_prefix(_result_summary(result), participant)
+        content = _enforce_case_visible_output_boundary(content, context, participant)
+        summary = _enforce_case_visible_output_boundary(summary, context, participant, record_event=False)
         result_timings = dict(result.get("timings") or {}) if isinstance(result, dict) else {}
         timestamp = utc_now_iso()
         return {
@@ -1145,6 +1217,7 @@ def _run_one_speaker(
             "content": content,
             "summary": summary,
             "timestamp": timestamp,
+            **_case_message_metadata(context),
             "supervision": supervision_payload,
             "timings": {
                 "supervisionPolicyMs": supervision_policy_ms,
@@ -1171,6 +1244,7 @@ def _run_one_speaker(
                 "timestamp": timestamp,
                 "errorType": type(exc).__name__,
                 "error": str(exc),
+                **_case_message_metadata(context),
                 "timings": {
                     "supervisionPolicyMs": supervision_policy_ms,
                     "totalSpeakerMs": total_speaker_ms,
@@ -1189,12 +1263,142 @@ def _run_one_speaker(
             "summary": f"{type(exc).__name__}: {exc}",
             "errorType": type(exc).__name__,
             "timestamp": timestamp,
+            **_case_message_metadata(context),
             "supervision": supervision_payload,
             "timings": {
                 "supervisionPolicyMs": supervision_policy_ms,
                 "totalSpeakerMs": total_speaker_ms,
             },
         }
+
+
+def _case_message_metadata(context: dict[str, Any]) -> dict[str, str]:
+    case_state = context.get("caseState") if isinstance(context.get("caseState"), dict) else {}
+    next_action = str(case_state.get("nextAction") or "").strip()
+    visibility = str(case_state.get("discussionVisibility") or "").strip()
+    user_facing_mode = str(case_state.get("userFacingMode") or "").strip()
+    if next_action == "clarify" or user_facing_mode == "direct_clarification":
+        message_kind = "user_clarification"
+        audience = "user"
+    elif visibility == "collapsed_by_default":
+        message_kind = "team_discussion"
+        audience = "internal"
+    else:
+        message_kind = "team_message"
+        audience = "user"
+    return {
+        "messageKind": message_kind,
+        "audience": audience,
+        "visibility": "collapsed_by_default" if audience == "internal" else "default",
+    }
+
+
+_MATERNAL_CHILD_CLARIFY_PRODUCT_TALK_RE = re.compile(
+    r"(智能问诊记录|妇幼数字健康|产品能力|方案映射|平台联动|Demo|demo|演示|展示|母子健康手册|云上妇幼|专科电子病历)"
+)
+
+
+def _enforce_case_visible_output_boundary(
+    content: str,
+    context: dict[str, Any],
+    participant: dict[str, Any],
+    *,
+    record_event: bool = True,
+) -> str:
+    text = str(content or "").strip()
+    if not text:
+        return ""
+    case_state = context.get("caseState") if isinstance(context.get("caseState"), dict) else {}
+    if str(case_state.get("nextAction") or "").strip() != "clarify":
+        return text
+    if str(case_state.get("intent") or "").strip() != "maternal_child_consultation_demo":
+        return text
+    sanitized, removed_segment_count = _remove_maternal_child_clarify_product_talk(text)
+    if not removed_segment_count:
+        return text
+    if record_event:
+        _record_case_visible_output_boundary_applied(
+            context,
+            participant,
+            before_chars=len(text),
+            after_chars=len(sanitized),
+            removed_segment_count=removed_segment_count,
+        )
+    return sanitized or _maternal_child_clarify_fallback(case_state)
+
+
+def _remove_maternal_child_clarify_product_talk(text: str) -> tuple[str, int]:
+    kept_lines: list[str] = []
+    removed_segment_count = 0
+    for line in str(text or "").splitlines():
+        stripped = line.strip()
+        if not stripped:
+            if kept_lines and kept_lines[-1] != "":
+                kept_lines.append("")
+            continue
+        kept_sentence_parts: list[str] = []
+        removed_in_line = 0
+        for sentence in _split_visible_sentences(stripped):
+            if _MATERNAL_CHILD_CLARIFY_PRODUCT_TALK_RE.search(sentence):
+                removed_in_line += 1
+                continue
+            kept_sentence_parts.append(sentence)
+        if kept_sentence_parts:
+            kept_lines.append("".join(kept_sentence_parts).strip())
+        elif removed_in_line:
+            removed_segment_count += removed_in_line
+        removed_segment_count += removed_in_line if kept_sentence_parts else 0
+    sanitized = "\n".join(kept_lines).strip()
+    sanitized = re.sub(r"\n{3,}", "\n\n", sanitized).strip()
+    return sanitized, removed_segment_count
+
+
+def _split_visible_sentences(text: str) -> list[str]:
+    parts = re.split(r"([^。！？!?；;]+[。！？!?；;]?)", str(text or ""))
+    sentences = [part for part in parts if part and not part.isspace()]
+    return sentences or [str(text or "")]
+
+
+def _maternal_child_clarify_fallback(case_state: dict[str, Any]) -> str:
+    missing = [str(item or "").strip() for item in list(case_state.get("missingFacts") or []) if str(item or "").strip()]
+    if missing:
+        focus = "、".join(missing[:3])
+        return f"孩子夜间哭闹需要先补齐几个关键信息：{focus}。如果出现发热不退、精神很差、呼吸异常、抽搐或持续无法安抚，请及时就医。"
+    return "孩子夜间哭闹需要先补齐年龄、哭闹持续情况和伴随症状。如果出现明显异常或持续无法安抚，请及时就医。"
+
+
+def _record_case_visible_output_boundary_applied(
+    context: dict[str, Any],
+    participant: dict[str, Any],
+    *,
+    before_chars: int,
+    after_chars: int,
+    removed_segment_count: int,
+) -> None:
+    case_state = context.get("caseState") if isinstance(context.get("caseState"), dict) else {}
+    try:
+        record_runtime_scene_event(
+            "chat_room",
+            "case_output_boundary",
+            "chat_room.case_visible_output_boundary.applied",
+            message="Removed product/demo mapping text from a clarify-stage maternal-child consultation response.",
+            level="warning",
+            outcome="sanitized",
+            fields={
+                "roomId": str(context.get("roomId") or "").strip(),
+                "roundId": str(context.get("roundId") or "").strip(),
+                "participantId": str(participant.get("participantId") or "").strip(),
+                "agentId": str(participant.get("agentId") or "").strip(),
+                "sessionId": str(participant.get("sessionId") or "").strip(),
+                "caseIntent": str(case_state.get("intent") or "").strip(),
+                "caseNextAction": str(case_state.get("nextAction") or "").strip(),
+                "beforeChars": max(0, int(before_chars)),
+                "afterChars": max(0, int(after_chars)),
+                "removedSegmentCount": max(0, int(removed_segment_count)),
+            },
+        )
+    except Exception:
+        return
 
 
 def _evaluate_speaker_supervision_policy(participant: dict[str, Any]):
@@ -1278,13 +1482,9 @@ def _run_participant_agent(participant: dict[str, Any], prompt: str, context: di
         write_decision = evaluate_agent_workspace_write(agent_id, agent_workspace, purpose="chat_room_agent_workspace") if agent_id else None
         timings["workspacePolicyMs"] = _elapsed_ms(stage_started_at)
         workspace = agent_workspace if not write_decision or write_decision.allowed else session_workspace
-        agent_profile_id = (
-            str((agent_context.profile_id if agent_context is not None else "") or "").strip()
-            or str(participant.get("agentProfileId") or participant.get("agentTemplateId") or "primary").strip()
-            or "primary"
-        )
         stage_started_at = _perf_counter()
-        agent_config = session_service._session_agent_config_for_profile(agent_profile_id)
+        resolved_agent_llm = _resolve_chat_room_agent_llm(agent)
+        agent_config = resolved_agent_llm.config
         timings["agentConfigMs"] = _elapsed_ms(stage_started_at)
         with active_agent_runtime(
             agent_id,
@@ -1295,6 +1495,19 @@ def _run_participant_agent(participant: dict[str, Any], prompt: str, context: di
             stage_started_at = _perf_counter()
             agent_runtime = session_service.create_chat_agent(workspace_path=workspace, config=agent_config)
             timings["agentCreateMs"] = _elapsed_ms(stage_started_at)
+            _record_room_event(
+                "round",
+                "chat_room.agent_llm.resolved",
+                {"roomId": str(context.get("roomId") or "").strip()},
+                fields={
+                    "roundId": round_id,
+                    "participantId": str(participant.get("participantId") or "").strip(),
+                    "sessionId": session_id,
+                    "agentCreateMs": timings["agentCreateMs"],
+                    "agentConfigMs": timings["agentConfigMs"],
+                    **resolved_agent_llm.log_fields(),
+                },
+            )
             stage_started_at = _perf_counter()
             prepare_agent_turn(
                 agent_runtime,
@@ -1369,7 +1582,11 @@ def _build_participant_prompt(
     recent_session_lines = _format_recent_session_messages(participant.get("recentMessages") or [])
     prior_lines = _format_prior_room_messages(prior_messages)
     purpose = _normalize_purpose(round_payload.get("purpose") or room.get("purpose") or DEFAULT_PURPOSE)
-    purpose_lines = _purpose_prompt_lines(purpose)
+    case_state = round_payload.get("caseState") if isinstance(round_payload.get("caseState"), dict) else {}
+    case_state_lines = format_case_state_prompt(case_state)
+    case_guidance_lines = case_prompt_lines(case_state)
+    effective_purpose = _effective_prompt_purpose(purpose, case_state)
+    purpose_lines = _purpose_prompt_lines(effective_purpose)
     role_view = _participant_role_view(participant)
     team_context_lines = _format_participant_team_context(participant)
     return "\n".join(
@@ -1379,6 +1596,7 @@ def _build_participant_prompt(
             f"当前议题: {round_payload.get('topic') or ''}",
             f"调度模式: {round_payload.get('mode') or DEFAULT_MODE}",
             f"对话目的: {purpose}",
+            f"本轮推进模式: {effective_purpose}",
             f"你的发言视角: {role_view}",
             f"你的界面代号: {participant.get('agentCode') or ''}",
             f"来源会话: {participant.get('sessionId') or ''}",
@@ -1394,6 +1612,12 @@ def _build_participant_prompt(
             "本轮已经出现的群聊发言:",
             prior_lines or "- 你是本轮第一位发言者。",
             "",
+            "本轮用户需求 Case 状态:",
+            case_state_lines or "- 当前群聊未启用 case 编排；按对话目的和岗位职责发言。",
+            "",
+            "Case 推进规则:",
+            *(case_guidance_lines or ["- 围绕用户当前目标推进，不要机械轮流复述岗位职责。"]),
+            "",
             "本轮发言风格:",
             *purpose_lines,
             "",
@@ -1401,6 +1625,14 @@ def _build_participant_prompt(
             "如果你没有新信息，请明确说明你的确认、保留意见或下一步建议。",
         ]
     )
+
+
+def _effective_prompt_purpose(purpose: str, case_state: dict[str, Any]) -> str:
+    if str(case_state.get("nextAction") or "").strip() == "clarify":
+        if str(case_state.get("intent") or "").strip() in CONSULTATION_INTENTS:
+            return "medical_clarification"
+        return "chat"
+    return purpose
 
 
 def _purpose_prompt_lines(purpose: str) -> list[str]:
@@ -1417,6 +1649,40 @@ def _purpose_prompt_lines(purpose: str) -> list[str]:
             "- 按会议协作发言：聚焦议题、决策、风险和下一步行动。",
             "- 可以使用简短项目符号，但每条都要服务于结论、责任或待确认事项。",
             "- 明确指出需要谁确认、后续要做什么，避免闲聊式扩散。",
+        ]
+    if normalized == "medical_triage":
+        return [
+            "- 按协同问诊会诊模式发言：目标是分诊与就医准备，不替代医生面诊、检查、诊断或治疗。",
+            "- 先识别急症红旗信号；如出现胸痛、呼吸困难、意识障碍、大出血、严重过敏、疑似卒中等风险，优先建议立即就医或急救。",
+            "- 信息不足时只提出最少必要追问，优先补齐年龄、性别、主诉、持续时间、伴随症状、既往史、用药和过敏史。",
+            "- 严禁给出确定诊断、处方、剂量、停药/换药指令或保证性结论；只能给风险等级、可能方向、建议科室、观察重点和下一步建议。",
+            "- 如果你不是问诊主持或结果整理岗位，不要直接生成最终答复；只给本岗位的简短结论、风险提示或需要补充的信息。",
+            "- 最终面向用户的合并结果应包含：风险等级、可能方向、建议科室、需补充/观察信息、立即就医条件、下一步建议和免责声明。",
+        ]
+    if purpose == "medical_clarification":
+        return [
+            "- 像真实问诊接话一样自然回应，先接住担忧，再问少量真正影响判断的问题。",
+            "- 用短段落表达，最多 2-3 个问题；不要写标题、表格、编号问卷或信息采集清单。",
+            "- 问题要围绕当前主诉选择，例如夜间哭闹优先问年龄、哭闹持续/能否安抚、是否发热或呕吐腹泻等伴随异常；不要一次性铺开所有病史字段。",
+            "- 提醒急症边界即可，不做诊断、处方、剂量或保证性判断。",
+        ]
+    if normalized == "research_coordination":
+        return [
+            "- 按科研组织协作发言：先回应当前议题，再说明本岗位能推进的研究、证据或组织动作。",
+            "- 区分建议、事实和待确认事项；需要 CEO 或其他角色决策时明确点出。",
+            "- 避免把发言写成泛泛聊天，优先服务科研任务拆解、能力配置、证据流转和下一步协调。",
+        ]
+    if normalized == "self_evolution":
+        return [
+            "- 按自进化系统团队职责发言：executor 说执行进展，reviewer 说质量风险，summarizer 说收口摘要。",
+            "- 聚焦本轮演化目标、验证证据、阻塞点和下一步，不要把系统团队说成普通闲聊群。",
+            "- 不要擅自承诺已部署、已提交或已验证；只报告上下文中真实可见的状态。",
+        ]
+    if normalized == "supervised_evolution":
+        return [
+            "- 按监督进化流程发言：baseline/candidate 提方案，reviewer 评审，auditor 查证据，judge 给裁决倾向。",
+            "- 明确区分候选改动、验证结果、审计风险和裁决依据。",
+            "- 不要越过当前角色直接替其他角色下最终结论，除非上下文要求合并总结。",
         ]
     return [
         "- 按讨论模式发言：回应前文观点，给出一个清晰立场、补充角度、权衡或反对意见。",
@@ -1874,19 +2140,24 @@ def _resolve_participants(session_ids: list[str] | None) -> list[dict[str, Any]]
     summaries = session_service.list_sessions()
     by_id = {str(item.get("id") or "").strip(): item for item in summaries}
     requested = [str(item or "").strip() for item in list(session_ids or []) if str(item or "").strip()]
+    if session_ids is not None:
+        return [_participant_from_session(by_id[session_id]) for session_id in _dedupe_requested_session_ids(requested, by_id)]
     if not requested:
         requested = [str(item.get("id") or "").strip() for item in summaries if str(item.get("id") or "").strip()]
-    participants: list[dict[str, Any]] = []
+    return [_participant_from_session(by_id[session_id]) for session_id in _dedupe_requested_session_ids(requested, by_id)]
+
+
+def _dedupe_requested_session_ids(requested: list[str], by_id: dict[str, dict[str, Any]]) -> list[str]:
+    normalized: list[str] = []
     seen: set[str] = set()
     for session_id in requested:
         if session_id in seen:
             continue
         seen.add(session_id)
-        summary = by_id.get(session_id)
-        if not summary:
+        if session_id not in by_id:
             raise ChatRoomValidationError(f"Unknown chat session: {session_id}")
-        participants.append(_participant_from_session(summary))
-    return participants
+        normalized.append(session_id)
+    return normalized
 
 
 def _apply_participant_contexts(
@@ -1974,6 +2245,23 @@ def _resolve_agent_participant(agent_id: str) -> dict[str, Any]:
     return _resolve_participants([direct_session_id])[0]
 
 
+def _resolve_chat_room_agent_llm(agent: dict[str, Any] | None) -> Any:
+    """Resolve the room speaker runtime LLM from the Agent instance itself."""
+
+    if not isinstance(agent, dict):
+        raise ChatRoomValidationError(
+            text_for(
+                get_web_language(),
+                zh="群聊成员缺少有效 Agent，不能解析运行模型。",
+                en="The room participant has no valid Agent for runtime model resolution.",
+            )
+        )
+    try:
+        return session_service._resolve_session_agent_llm(agent, CHAT_ROOM_AGENT_LLM_SLOT)
+    except session_service.SessionValidationError as exc:
+        raise ChatRoomValidationError(str(exc)) from exc
+
+
 def _participant_matches_agent(participant: dict[str, Any], agent_id: str, direct_session_id: str) -> bool:
     participant_agent_id = str(participant.get("agentId") or "").strip()
     if participant_agent_id and participant_agent_id == agent_id:
@@ -2008,23 +2296,28 @@ def _participant_from_session(
     session_id = str(summary.get("id") or "").strip()
     title = str(summary.get("title") or session_id).strip() or session_id
     detail = (session_service.get_session_detail(session_id) or {}) if include_recent_messages else {}
-    agent_profile_id = str(summary.get("agentProfileId") or detail.get("agentProfileId") or "primary").strip() or "primary"
+    agent_id = str(summary.get("agentId") or detail.get("agentId") or "").strip()
+    agent = agent_directory_service.get_agent(agent_id, include_archived=False) if agent_id else None
+    llm_bindings = agent_directory_service.normalize_agent_llm_bindings((agent or {}).get("llmBindings"))
+    dialogue_model_id = agent_directory_service.agent_dialogue_model_id({"llmBindings": llm_bindings})
     agent_missing = bool(summary.get("agentMissing") or detail.get("agentMissing"))
     agent_status_code = str(summary.get("agentStatusCode") or detail.get("agentStatusCode") or "").strip()
     agent_status_message = str(summary.get("agentStatusMessage") or detail.get("agentStatusMessage") or "").strip()
     return {
         "participantId": f"session-{_safe_fragment(session_id)}",
         "kind": "session_agent",
-        "agentId": str(summary.get("agentId") or detail.get("agentId") or "").strip(),
+        "agentId": agent_id,
         "agentCode": str(summary.get("agentCode") or detail.get("agentCode") or "").strip(),
         "agentAvatarImageUrl": str(summary.get("agentAvatarImageUrl") or detail.get("agentAvatarImageUrl") or "").strip(),
         "directSessionId": session_id,
         "sessionId": session_id,
         "title": title,
         "workspacePath": str(summary.get("workspacePath") or detail.get("workspacePath") or ""),
-        "agentProfileId": agent_profile_id,
-        "agentTemplateId": agent_profile_id,
-        "agentTemplateLabel": str(summary.get("agentTemplateLabel") or detail.get("agentTemplateLabel") or agent_profile_id),
+        "agentProfileId": "",
+        "agentTemplateId": "",
+        "agentTemplateLabel": dialogue_model_id,
+        "dialogueModelId": dialogue_model_id,
+        "llmBindings": llm_bindings,
         "agentMissing": agent_missing,
         "agentStatusCode": agent_status_code,
         "agentStatusMessage": agent_status_message,
@@ -2309,17 +2602,69 @@ def _room_to_api(room: dict[str, Any]) -> dict[str, Any]:
     payload["mode"] = str(payload.get("mode") or DEFAULT_MODE).strip() or DEFAULT_MODE
     payload["purpose"] = _normalize_purpose(payload.get("purpose") or DEFAULT_PURPOSE)
     payload["participants"] = [dict(item) for item in list(room.get("participants") or []) if isinstance(item, dict)]
-    payload["rounds"] = [
-        {
-            **dict(item),
-            "mode": str(dict(item).get("mode") or payload["mode"] or DEFAULT_MODE).strip() or DEFAULT_MODE,
-            "purpose": _normalize_purpose(dict(item).get("purpose") or payload["purpose"] or DEFAULT_PURPOSE),
-        }
-        for item in list(room.get("rounds") or [])
-        if isinstance(item, dict)
-    ]
+    payload["rounds"] = [_round_to_api(item, payload) for item in list(room.get("rounds") or []) if isinstance(item, dict)]
     payload["availableModes"] = list_chat_room_modes()
     payload["availablePurposes"] = list_chat_room_purposes()
+    return payload
+
+
+def _round_to_api(round_payload: dict[str, Any], room_payload: dict[str, Any]) -> dict[str, Any]:
+    payload = dict(round_payload)
+    payload["mode"] = str(payload.get("mode") or room_payload.get("mode") or DEFAULT_MODE).strip() or DEFAULT_MODE
+    payload["purpose"] = _normalize_purpose(payload.get("purpose") or room_payload.get("purpose") or DEFAULT_PURPOSE)
+    case_state = _normalize_case_state_for_api(payload.get("caseState"))
+    if case_state:
+        payload["caseState"] = case_state
+    payload["messages"] = [
+        _message_to_api(message, case_state)
+        for message in list(payload.get("messages") or [])
+        if isinstance(message, dict)
+    ]
+    return payload
+
+
+def _normalize_case_state_for_api(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict) or not value:
+        return {}
+    payload = dict(value)
+    intent = str(payload.get("intent") or "").strip()
+    next_action = str(payload.get("nextAction") or "").strip()
+    if next_action == "ask_user":
+        next_action = "clarify"
+    elif next_action == "delegate":
+        next_action = "discuss"
+    elif not next_action:
+        next_action = "discuss"
+    payload["nextAction"] = next_action
+    missing_facts = list(payload.get("missingFacts") or []) if isinstance(payload.get("missingFacts"), list) else []
+    risk_flags = list(payload.get("riskFlags") or []) if isinstance(payload.get("riskFlags"), list) else []
+    if not str(payload.get("informationSufficiency") or "").strip():
+        if risk_flags:
+            payload["informationSufficiency"] = "urgent_boundary_needed"
+        elif intent in CONSULTATION_INTENTS and len(missing_facts) >= 3:
+            payload["informationSufficiency"] = "insufficient"
+        elif intent in CONSULTATION_INTENTS and missing_facts:
+            payload["informationSufficiency"] = "partially_sufficient"
+        else:
+            payload["informationSufficiency"] = "sufficient"
+    if not str(payload.get("userFacingMode") or "").strip():
+        if next_action == "clarify":
+            payload["userFacingMode"] = "direct_clarification"
+        elif next_action == "synthesize":
+            payload["userFacingMode"] = "final_answer"
+        elif intent in CONSULTATION_INTENTS:
+            payload["userFacingMode"] = "team_discussion_then_advice"
+        else:
+            payload["userFacingMode"] = "team_discussion"
+    if not str(payload.get("discussionVisibility") or "").strip():
+        payload["discussionVisibility"] = "collapsed_by_default" if next_action in {"discuss", "synthesize"} else "user_visible"
+    return payload
+
+
+def _message_to_api(message: dict[str, Any], case_state: dict[str, Any]) -> dict[str, Any]:
+    payload = dict(message)
+    if not str(payload.get("messageKind") or "").strip():
+        payload.update(_case_message_metadata({"caseState": case_state}))
     return payload
 
 
@@ -2332,6 +2677,7 @@ def _room_to_compact_reference(room: dict[str, Any]) -> dict[str, Any]:
         "status": str(room.get("status") or "").strip(),
         "activeRoundId": str(room.get("activeRoundId") or "").strip(),
         "updatedAt": str(room.get("updatedAt") or "").strip(),
+        "config": _safe_config(room.get("config") or {}),
         "participants": [
             {
                 "participantId": str(item.get("participantId") or "").strip(),
@@ -2747,7 +3093,7 @@ def _participant_workspace(session_id: Any, room_id: Any, participant_id: Any) -
 
 
 def _new_id(prefix: str, existing: set[str]) -> str:
-    stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S-%f")
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-%f")
     base = f"{prefix}-{stamp}-{uuid.uuid4().hex[:8]}"
     candidate = base
     suffix = 2

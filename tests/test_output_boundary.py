@@ -34,6 +34,22 @@ def test_strip_llm_protocol_artifacts_keeps_bracket_markers_inside_normal_text()
     assert cleaned == raw
 
 
+def test_strip_llm_protocol_artifacts_removes_litellm_empty_content_placeholder():
+    raw = "[System: Empty message content sanitised to satisfy protocol]"
+
+    cleaned = strip_llm_protocol_artifacts(raw)
+
+    assert cleaned == ""
+
+
+def test_strip_llm_protocol_artifacts_removes_litellm_placeholder_line_only():
+    raw = "已读取文件。\n[System: Empty message content sanitized to satisfy protocol]\n请发送“继续”汇总。"
+
+    cleaned = strip_llm_protocol_artifacts(raw)
+
+    assert cleaned == "已读取文件。\n请发送“继续”汇总。"
+
+
 def test_sanitize_assistant_visible_text_removes_think_and_protocol_markers_together():
     raw = "<think>内部推理</think>\n用户可见回答。\n[outcome=done]\n<state>{}</state>"
 

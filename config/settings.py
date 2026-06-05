@@ -66,6 +66,7 @@ except ImportError:
 DEFAULT_CONFIG_PATH = "config.toml"
 INLINE_PROVIDER_FIELDS = (
     "kind",
+    "api",
     "api_key",
     "api_key_env",
     "base_url",
@@ -79,6 +80,8 @@ PROFILE_REFERENCE_OVERRIDE_FIELDS = (
     "api_key_env",
     "transport",
     "contract",
+    "protocol",
+    "compat",
     "reasoning_state_field",
     "strict_compatibility",
     "temperature",
@@ -89,6 +92,8 @@ PROFILE_REFERENCE_OVERRIDE_FIELDS = (
     "tool_calling_mode",
     "prompt_cache",
     "discovery_enabled",
+    "thinking_type",
+    "thinking_display",
     "supports_image_input",
     "capability_status",
     "capability_source",

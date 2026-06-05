@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import threading
 import time
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -18,15 +19,155 @@ from config import AppConfig, get_config
 from .adapters import get_provider_adapter
 from .discovery import discover_model
 from .errors import classify_exception
+from .payload_builder import PayloadBuildInput, build_llm_payload
+from .payload_validator import payload_protocol_summary
+from .protocol_resolver import resolve_model_protocol
 from .reasoning_extractor import extract_reasoning_text, strip_think_tag_reasoning
 from .streaming import extract_message_tool_calls, extract_text_content
 from .types import LLMCapabilities, LLMError, StreamChunk, UsageStats
+from .usage import read_usage_int as _read_provider_usage_int
+from .usage import usage_stats_from_payload, usage_to_dict
 
 
 _LLM_STATUS_CONTEXT: ContextVar[Dict[str, str]] = ContextVar(
     "vibelution_llm_status_context",
     default={},
 )
+_LLM_CANCEL_CHECKER_CONTEXT: ContextVar[Callable[[], str] | None] = ContextVar(
+    "vibelution_llm_cancel_checker",
+    default=None,
+)
+_LLM_ROUTE_CONCURRENCY_LIMIT = 2
+_LLM_ROUTE_CONCURRENCY_LOCK = threading.Lock()
+_LLM_ROUTE_CONCURRENCY_GATES: Dict[str, threading.BoundedSemaphore] = {}
+
+
+class LLMCancelledError(Exception):
+    """Raised when an active turn requests cancellation before more LLM work."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason or "LLM call cancelled.")
+        self.reason = str(reason or "").strip()
+
+
+def _current_llm_cancel_reason() -> str:
+    checker = _LLM_CANCEL_CHECKER_CONTEXT.get(None)
+    if not callable(checker):
+        return ""
+    try:
+        return str(checker() or "").strip()
+    except Exception:
+        return ""
+
+
+def _raise_if_llm_cancelled() -> None:
+    reason = _current_llm_cancel_reason()
+    if reason:
+        raise LLMCancelledError(reason)
+
+
+def _sleep_with_llm_cancel_check(wait_seconds: float) -> None:
+    deadline = time.time() + max(0.0, float(wait_seconds or 0.0))
+    while True:
+        _raise_if_llm_cancelled()
+        remaining = deadline - time.time()
+        if remaining <= 0:
+            return
+        time.sleep(min(0.1, remaining))
+
+
+def _llm_route_concurrency_key(provider: Any, profile: Any, *, profile_id: str) -> str:
+    provider_kind = str(getattr(provider, "kind", "") or "").strip().lower() or "unknown"
+    base_url = str(getattr(provider, "base_url", "") or "").strip().lower()
+    model = str(getattr(profile, "model", "") or "").strip().lower() or "unknown"
+    return "|".join((provider_kind, base_url, model, str(profile_id or "").strip()))
+
+
+def _llm_route_concurrency_gate(route_key: str) -> threading.BoundedSemaphore:
+    with _LLM_ROUTE_CONCURRENCY_LOCK:
+        gate = _LLM_ROUTE_CONCURRENCY_GATES.get(route_key)
+        if gate is None:
+            gate = threading.BoundedSemaphore(_LLM_ROUTE_CONCURRENCY_LIMIT)
+            _LLM_ROUTE_CONCURRENCY_GATES[route_key] = gate
+        return gate
+
+
+@contextmanager
+def _reserve_llm_route_slot(
+    route_key: str,
+    *,
+    role: str,
+    profile_id: str,
+    provider: str,
+    model: str,
+    phase: str,
+    message_count: int,
+    tool_count: int,
+):
+    gate = _llm_route_concurrency_gate(route_key)
+    wait_started = time.time()
+    acquired_immediately = gate.acquire(blocking=False)
+    if not acquired_immediately:
+        _record_llm_scene_event(
+            "concurrency",
+            "llm.concurrency.waiting",
+            message="LLM route concurrency gate is waiting for a free slot.",
+            outcome="waiting",
+            fields={
+                "role": role,
+                "profileId": profile_id,
+                "provider": provider,
+                "model": model,
+                "phase": phase,
+                "routeKeyHash": _short_hash(route_key),
+                "limit": _LLM_ROUTE_CONCURRENCY_LIMIT,
+                "messageCount": message_count,
+                "toolCount": tool_count,
+            },
+            lifecycle=False,
+        )
+        while not gate.acquire(timeout=0.1):
+            _raise_if_llm_cancelled()
+    wait_ms = int((time.time() - wait_started) * 1000)
+    _publish_llm_status_event(
+        "concurrency_acquired",
+        profileId=profile_id,
+        provider=provider,
+        model=model,
+        phase=phase,
+        waitMs=wait_ms,
+    )
+    if wait_ms > 0:
+        _record_llm_scene_event(
+            "concurrency",
+            "llm.concurrency.acquired",
+            message="LLM route concurrency slot acquired.",
+            outcome="acquired",
+            fields={
+                "role": role,
+                "profileId": profile_id,
+                "provider": provider,
+                "model": model,
+                "phase": phase,
+                "routeKeyHash": _short_hash(route_key),
+                "limit": _LLM_ROUTE_CONCURRENCY_LIMIT,
+                "waitMs": wait_ms,
+                "messageCount": message_count,
+                "toolCount": tool_count,
+            },
+            lifecycle=False,
+        )
+    try:
+        yield wait_ms
+    finally:
+        gate.release()
+        _publish_llm_status_event(
+            "concurrency_released",
+            profileId=profile_id,
+            provider=provider,
+            model=model,
+            phase=phase,
+        )
 
 
 @contextmanager
@@ -70,6 +211,15 @@ def _record_llm_scene_event(
         )
     except Exception:
         return
+
+
+@contextmanager
+def llm_cancel_context(checker: Callable[[], str] | None):
+    token = _LLM_CANCEL_CHECKER_CONTEXT.set(checker if callable(checker) else None)
+    try:
+        yield
+    finally:
+        _LLM_CANCEL_CHECKER_CONTEXT.reset(token)
 
 
 def _publish_llm_status_event(status: str, **fields: Any) -> None:
@@ -182,7 +332,6 @@ def _text_length(value: Any) -> int:
     return len(extract_text_content(value))
 
 
-
 def _content_blocks_have_cache_control(value: Any) -> bool:
     if not isinstance(value, list):
         return False
@@ -202,6 +351,76 @@ def _messages_have_prompt_cache_control(messages: List[Any]) -> bool:
         if _content_blocks_have_cache_control(content):
             return True
     return False
+
+
+def _first_system_content_from_messages(messages: List[Any]) -> Any:
+    for message in list(messages or []):
+        role = ""
+        content: Any = None
+        if isinstance(message, SystemMessage):
+            role = "system"
+            content = getattr(message, "content", None)
+        elif isinstance(message, dict):
+            role = str(message.get("role") or "user").strip().lower() or "user"
+            content = message.get("content")
+        elif isinstance(message, BaseMessage):
+            role = str(getattr(message, "type", "") or "user").strip().lower() or "user"
+            content = getattr(message, "content", None)
+        if role == "system":
+            return content
+    return None
+
+
+def _cache_control_text_shape(content: Any) -> Dict[str, Any]:
+    blocks = content if isinstance(content, list) else []
+    cacheable_parts: List[str] = []
+    dynamic_parts: List[str] = []
+    cache_control_blocks = 0
+    if blocks:
+        for block in blocks:
+            if not isinstance(block, dict):
+                text = extract_text_content(block)
+                if text:
+                    dynamic_parts.append(text)
+                continue
+            text = extract_text_content(block.get("text") if "text" in block else block)
+            if block.get("cache_control"):
+                cache_control_blocks += 1
+                if text:
+                    cacheable_parts.append(text)
+            elif text:
+                dynamic_parts.append(text)
+    elif content is not None:
+        dynamic_parts.append(extract_text_content(content))
+
+    cacheable_text = "\n\n".join(cacheable_parts)
+    dynamic_text = "\n\n".join(dynamic_parts)
+    first_system_text_chars = _text_length(content)
+    cacheable_chars = len(cacheable_text)
+    return {
+        "firstSystemTextChars": first_system_text_chars,
+        "firstSystemBlockCount": len(blocks),
+        "firstSystemCacheControlBlockCount": cache_control_blocks,
+        "firstSystemCacheableTextChars": cacheable_chars,
+        "firstSystemDynamicTextChars": len(dynamic_text),
+        "firstSystemCacheableTextRatio": round(cacheable_chars / first_system_text_chars, 4)
+        if first_system_text_chars > 0
+        else 0.0,
+        "firstSystemCacheableHash": _short_hash(cacheable_text),
+        "firstSystemDynamicHash": _short_hash(dynamic_text),
+    }
+
+
+def _safe_prompt_cache_design_summary(messages: List[Any], *, prompt_cache_mode: str) -> Dict[str, Any]:
+    first_system_content = _first_system_content_from_messages(messages)
+    shape = _cache_control_text_shape(first_system_content)
+    return {
+        "promptCacheDesign": {
+            "mode": str(prompt_cache_mode or "").strip().lower(),
+            "hasCacheControl": bool(_messages_have_prompt_cache_control(messages)),
+            **shape,
+        }
+    }
 
 
 def _strip_cache_control_from_content(value: Any) -> Any:
@@ -228,6 +447,7 @@ def _strip_cache_control_from_messages(messages: List[Dict[str, Any]]) -> List[D
         cleaned["content"] = _strip_cache_control_from_content(cleaned.get("content"))
         cleaned_messages.append(cleaned)
     return cleaned_messages
+
 
 def _safe_payload_shape_summary(payload: Dict[str, Any]) -> Dict[str, Any]:
     messages = payload.get("messages") if isinstance(payload.get("messages"), list) else []
@@ -260,26 +480,7 @@ def _safe_payload_shape_summary(payload: Dict[str, Any]) -> Dict[str, Any]:
                 if block_type in {"image_url", "input_image"} or block.get("image_url") or block.get("imageUrl"):
                     image_block_count += 1
 
-    first_system_blocks = first_system_content if isinstance(first_system_content, list) else []
-    first_system_cacheable_parts: List[str] = []
-    first_system_dynamic_parts: List[str] = []
-    first_system_cache_control_blocks = 0
-    if first_system_blocks:
-        for block in first_system_blocks:
-            if not isinstance(block, dict):
-                text = extract_text_content(block)
-                if text:
-                    first_system_dynamic_parts.append(text)
-                continue
-            text = extract_text_content(block.get("text") if "text" in block else block)
-            if block.get("cache_control"):
-                first_system_cache_control_blocks += 1
-                if text:
-                    first_system_cacheable_parts.append(text)
-            elif text:
-                first_system_dynamic_parts.append(text)
-    elif first_system_content is not None:
-        first_system_dynamic_parts.append(extract_text_content(first_system_content))
+    first_system_shape = _cache_control_text_shape(first_system_content)
 
     tools = payload.get("tools") if isinstance(payload.get("tools"), list) else []
     tool_names: List[str] = []
@@ -291,8 +492,6 @@ def _safe_payload_shape_summary(payload: Dict[str, Any]) -> Dict[str, Any]:
         if name:
             tool_names.append(name)
 
-    cacheable_text = "\n\n".join(first_system_cacheable_parts)
-    dynamic_text = "\n\n".join(first_system_dynamic_parts)
     return {
         "payloadShape": {
             "messageTextCharsByRole": role_text_chars,
@@ -301,13 +500,7 @@ def _safe_payload_shape_summary(payload: Dict[str, Any]) -> Dict[str, Any]:
             "structuredContentMessageCount": structured_content_message_count,
             "imageBlockCount": image_block_count,
             "firstSystemHash": _short_hash(first_system_content),
-            "firstSystemTextChars": _text_length(first_system_content),
-            "firstSystemBlockCount": len(first_system_blocks),
-            "firstSystemCacheControlBlockCount": first_system_cache_control_blocks,
-            "firstSystemCacheableTextChars": len(cacheable_text),
-            "firstSystemDynamicTextChars": len(dynamic_text),
-            "firstSystemCacheableHash": _short_hash(cacheable_text),
-            "firstSystemDynamicHash": _short_hash(dynamic_text),
+            **first_system_shape,
             "toolSchemaHash": _short_hash(tools) if tools else "",
             "toolNameHash": _short_hash(sorted(tool_names)) if tool_names else "",
         }
@@ -331,47 +524,27 @@ def _safe_payload_route_summary(payload: Dict[str, Any], profile: Any, provider:
     }
 
 
+def _safe_payload_thinking_summary(payload: Dict[str, Any]) -> Dict[str, Any]:
+    thinking = payload.get("thinking")
+    if not isinstance(thinking, dict):
+        return {
+            "thinkingRequested": False,
+            "thinkingType": "",
+            "thinkingDisplay": "",
+        }
+    return {
+        "thinkingRequested": True,
+        "thinkingType": str(thinking.get("type") or "").strip(),
+        "thinkingDisplay": str(thinking.get("display") or "").strip(),
+    }
+
+
 def _read_usage_int(container: Any, *keys: str) -> int:
-    if not isinstance(container, dict):
-        return 0
-    for key in keys:
-        value = container.get(key)
-        if value not in (None, ""):
-            try:
-                return max(0, int(value))
-            except (TypeError, ValueError):
-                continue
-    return 0
+    return _read_provider_usage_int(container, *keys)
 
 
 def _usage_to_dict(usage: Any) -> Dict[str, Any]:
-    if isinstance(usage, dict):
-        return usage
-    if usage is None:
-        return {}
-    if hasattr(usage, "model_dump"):
-        try:
-            payload = usage.model_dump()
-            return payload if isinstance(payload, dict) else {}
-        except Exception:
-            return {}
-    payload: Dict[str, Any] = {}
-    for key in (
-        "prompt_tokens",
-        "completion_tokens",
-        "total_tokens",
-        "input_tokens",
-        "output_tokens",
-        "input_token_count",
-        "output_token_count",
-        "cached_tokens",
-        "cached_input_tokens",
-        "prompt_tokens_details",
-        "input_token_details",
-    ):
-        if hasattr(usage, key):
-            payload[key] = getattr(usage, key)
-    return payload
+    return usage_to_dict(usage)
 
 
 def _with_retry_details(llm_error: LLMError, *, attempt: int, max_attempts: int) -> LLMError:
@@ -394,7 +567,17 @@ def _looks_like_stream_usage_options_rejection(exc: Exception, llm_error: LLMErr
     return "stream_options" in text or "stream options" in text or "include_usage" in text
 
 
+def _llm_cancelled_error(reason: str) -> LLMError:
+    return LLMError(
+        "cancelled",
+        reason or "当前 LLM 调用已按停止请求取消。",
+        retryable=False,
+        details={"stop_reason": reason or ""},
+    )
+
+
 def _default_completion_backend(payload: Dict[str, Any]) -> Any:
+    _raise_if_llm_cancelled()
     try:
         from litellm import completion
     except Exception as exc:  # pragma: no cover
@@ -577,6 +760,8 @@ class LLMClient:
         self._backend = backend or _default_completion_backend
         self.adapter = get_provider_adapter(self.provider, self.profile)
         self._resolved_spec = discover_model(self.config, self.profile_id)
+        self.protocol_route = resolve_model_protocol(self.profile, self.provider)
+        self._last_payload_protocol_summary: Dict[str, Any] = {}
 
     @property
     def capabilities(self) -> LLMCapabilities:
@@ -599,113 +784,35 @@ class LLMClient:
         selected_tools = list(self.bound_tools)
         if tools is not None:
             selected_tools = list(tools or [])
-        has_prompt_cache_control = _messages_have_prompt_cache_control(messages)
-        prompt_cache_mode = str(
-            getattr(getattr(self.profile, "prompt_cache", None), "mode", "") or "disabled"
-        ).strip().lower()
-        if has_prompt_cache_control and prompt_cache_mode == "unsupported":
-            raise LLMError(
-                "prompt_cache_unsupported",
-                (
-                    "当前模型配置声明不支持 prompt cache；"
-                    f"profile `{self.profile_id}` provider `{self.provider.kind}` "
-                    f"transport `{getattr(self.profile, 'transport', '') or 'chat_completions'}` "
-                    f"model `{self.profile.model}`。请在模型配置中设置 prompt_cache.mode，"
-                    "或关闭系统提示词缓存强制要求。"
-                ),
-                retryable=False,
-                provider=str(self.provider.kind or ""),
-                model=str(self.profile.model or ""),
-                details={
-                    "profile_id": self.profile_id,
-                    "provider_kind": str(self.provider.kind or ""),
-                    "transport": str(getattr(self.profile, "transport", "") or "chat_completions"),
-                    "model": str(self.profile.model or ""),
-                    "prompt_cache_mode": prompt_cache_mode,
-                },
-            )
-        has_image_content = any(
-            isinstance(item, dict) and _content_blocks_have_image(item.get("content"))
-            for item in messages
+        built = build_llm_payload(
+            PayloadBuildInput(
+                messages=list(messages or []),
+                tools=selected_tools,
+                profile=self.profile,
+                provider=self.provider,
+                adapter=self.adapter,
+                route=self.protocol_route,
+                capabilities=self.capabilities,
+                stream=stream,
+                api_key=self.config.get_api_key_for_profile(profile_id=self.profile_id),
+                profile_id=self.profile_id,
+                config=self.config,
+            ),
+            messages_have_prompt_cache_control=_messages_have_prompt_cache_control,
+            strip_cache_control_from_messages=_strip_cache_control_from_messages,
+            message_to_openai_dict=_message_to_openai_dict,
+            content_blocks_have_image=_content_blocks_have_image,
+            convert_content_blocks_for_transport=_convert_content_blocks_for_transport,
+            tool_to_schema=_tool_to_schema,
         )
-        preserve_cache_control = has_prompt_cache_control and prompt_cache_mode == "explicit_cache_control"
-        preserve_structured_content = (
-            self.adapter.preserves_structured_content
-            or has_image_content
-            or has_prompt_cache_control
-        )
-        normalized_messages = [
-            _message_to_openai_dict(
-                item,
-                preserve_structured_content=preserve_structured_content,
-                preserve_reasoning_content=self.adapter.should_preserve_reasoning_content(),
-            )
-            for item in messages
-        ]
-        if has_prompt_cache_control and not preserve_cache_control:
-            normalized_messages = _strip_cache_control_from_messages(normalized_messages)
-        if has_image_content:
-            transport = str(getattr(self.profile, "transport", "") or "").strip().lower()
-            for item in normalized_messages:
-                item["content"] = _convert_content_blocks_for_transport(item.get("content"), transport=transport)
-        payload = {
-            "model": self.adapter.litellm_model_name(),
-            "messages": self.adapter.messages(normalized_messages),
-            "temperature": self.adapter.payload_temperature(),
-            "max_tokens": self.profile.max_output_tokens,
-            "timeout": self.profile.timeout,
-            "stream": stream,
-            "api_key": self.config.get_api_key_for_profile(profile_id=self.profile_id),
-            "base_url": self.provider.base_url,
-        }
-        prompt_cache = getattr(self.profile, "prompt_cache", None)
-        if prompt_cache_mode == "automatic":
-            prompt_cache_key = str(getattr(prompt_cache, "key", "") or "").strip()
-            prompt_cache_retention = str(getattr(prompt_cache, "retention", "") or "").strip()
-            if prompt_cache_key:
-                payload["prompt_cache_key"] = prompt_cache_key
-            if prompt_cache_retention:
-                payload["prompt_cache_retention"] = prompt_cache_retention
-        if stream and self.adapter.supports_stream_usage_options():
-            payload["stream_options"] = {"include_usage": True}
-        headers = self.provider.extra_headers or {}
-        if headers:
-            payload["extra_headers"] = headers
-        if selected_tools:
-            if not self.capabilities.supports_tool_calling:
-                raise LLMError("capability_error", f"profile `{self.profile_id}` 不支持 tool calling", retryable=False)
-            payload["tools"] = [
-                self.adapter.sanitize_tool_schema(_tool_to_schema(tool))
-                for tool in selected_tools
-            ]
-            if self.adapter.supports_explicit_tool_choice():
-                payload["tool_choice"] = "auto"
-        return payload
+        self._last_payload_protocol_summary = dict(built.summary or payload_protocol_summary(built.payload, self.protocol_route))
+        return built.payload
 
     def _usage_from_response(self, response: Any, latency_ms: int) -> UsageStats:
         usage = getattr(response, "usage", None)
         if usage is None and isinstance(response, dict):
             usage = response.get("usage")
-        usage = _usage_to_dict(usage)
-        prompt_tokens = _read_usage_int(usage, "prompt_tokens", "input_tokens", "input_token_count")
-        completion_tokens = _read_usage_int(usage, "completion_tokens", "output_tokens", "output_token_count")
-        total_tokens = _read_usage_int(usage, "total_tokens") or (prompt_tokens + completion_tokens)
-        prompt_details = usage.get("prompt_tokens_details")
-        input_details = usage.get("input_token_details")
-        cached_tokens = max(
-            _read_usage_int(usage, "cached_tokens", "cached_input_tokens"),
-            _read_usage_int(prompt_details, "cached_tokens", "cached_input_tokens"),
-            _read_usage_int(input_details, "cached_tokens", "cached_input_tokens"),
-        )
-        return UsageStats(
-            input_tokens=prompt_tokens,
-            output_tokens=completion_tokens,
-            total_tokens=total_tokens,
-            cached_input_tokens=min(cached_tokens, prompt_tokens) if prompt_tokens else cached_tokens,
-            provider_raw_usage=usage,
-            estimated_cost=0.0,
-            latency_ms=latency_ms,
-        )
+        return usage_stats_from_payload(usage, latency_ms=latency_ms)
 
     def _choice_message(self, response: Any) -> Dict[str, Any]:
         if isinstance(response, dict):
@@ -736,13 +843,27 @@ class LLMClient:
         message_role_summary = _safe_message_role_summary(payload.get("messages") or messages)
         route_summary = _safe_payload_route_summary(payload, self.profile, self.provider)
         payload_shape_summary = _safe_payload_shape_summary(payload)
+        prompt_cache_design_summary = _safe_prompt_cache_design_summary(
+            messages,
+            prompt_cache_mode=str(getattr(getattr(self.profile, "prompt_cache", None), "mode", "") or "disabled"),
+        )
+        thinking_summary = _safe_payload_thinking_summary(payload)
+        protocol_summary = dict(self._last_payload_protocol_summary or payload_protocol_summary(payload, self.protocol_route))
         response = self._invoke_backend_with_retry(
             payload,
             phase="invoke",
             event_code="llm.invoke.failed",
             message_count=len(messages or []),
             tool_count=len(tools or self.bound_tools or []),
-            metadata={**(metadata or {}), **message_role_summary, **route_summary, **payload_shape_summary},
+            metadata={
+                **(metadata or {}),
+                **message_role_summary,
+                **route_summary,
+                **payload_shape_summary,
+                **prompt_cache_design_summary,
+                **thinking_summary,
+                **protocol_summary,
+            },
         )
         latency_ms = int((time.time() - start) * 1000)
         message = self._choice_message(response)
@@ -769,12 +890,16 @@ class LLMClient:
                 **route_summary,
                 **message_role_summary,
                 **payload_shape_summary,
+                **prompt_cache_design_summary,
+                **thinking_summary,
+                **protocol_summary,
                 "inputTokens": usage.input_tokens,
                 "outputTokens": usage.output_tokens,
                 "totalTokens": usage.total_tokens,
                 "cachedInputTokens": usage.cached_input_tokens,
                 "reasoningSource": reasoning.source,
                 "reasoningChars": len(reasoning_content),
+                "reasoningObserved": bool(reasoning_content.strip()),
                 "cacheHitRate": round(usage.cached_input_tokens / usage.input_tokens, 4)
                 if usage.input_tokens > 0
                 else 0.0,
@@ -823,6 +948,7 @@ class LLMClient:
         }
 
     def _invoke_payload_once(self, payload: Dict[str, Any]) -> Any:
+        _raise_if_llm_cancelled()
         return self._backend(payload)
 
     def _invoke_backend_with_retry(
@@ -837,9 +963,24 @@ class LLMClient:
     ) -> Any:
         max_attempts = _retry_policy_max_attempts(self.profile)
         last_error: LLMError | None = None
+        route_key = _llm_route_concurrency_key(self.provider, self.profile, profile_id=self.profile_id)
         for attempt in range(1, max_attempts + 1):
             try:
-                return self._backend(payload)
+                _raise_if_llm_cancelled()
+                with _reserve_llm_route_slot(
+                    route_key,
+                    role=self.role,
+                    profile_id=self.profile_id,
+                    provider=self.provider.kind,
+                    model=self.profile.model,
+                    phase=phase,
+                    message_count=message_count,
+                    tool_count=tool_count,
+                ):
+                    _raise_if_llm_cancelled()
+                    return self._backend(payload)
+            except LLMCancelledError as exc:
+                raise _llm_cancelled_error(exc.reason) from exc
             except Exception as exc:
                 llm_error = classify_exception(exc)
                 llm_error = _with_retry_details(llm_error, attempt=attempt, max_attempts=max_attempts)
@@ -878,7 +1019,10 @@ class LLMClient:
                     fields={**fields, "nextAttempt": attempt + 1, "waitSeconds": wait_seconds},
                     lifecycle=True,
                 )
-                time.sleep(wait_seconds)
+                try:
+                    _sleep_with_llm_cancel_check(wait_seconds)
+                except LLMCancelledError as cancel_exc:
+                    raise _llm_cancelled_error(cancel_exc.reason) from cancel_exc
         if last_error is not None:
             raise last_error
         raise LLMError("provider_protocol_error", "LLM backend failed before returning a response.", retryable=False)
@@ -1062,7 +1206,10 @@ class LLMClient:
             next_attempt=attempt + 1,
             wait_seconds=wait_seconds,
         )
-        time.sleep(wait_seconds)
+        try:
+            _sleep_with_llm_cancel_check(wait_seconds)
+        except LLMCancelledError as cancel_exc:
+            raise _llm_cancelled_error(cancel_exc.reason) from cancel_exc
         return True
 
     def _stream_attempt(
@@ -1072,14 +1219,27 @@ class LLMClient:
         message_count: int,
         tool_count: int,
     ) -> Tuple[Iterator[StreamChunk], Callable[[], bool]]:
+        _raise_if_llm_cancelled()
         iterator = self._backend(payload)
         emitted = False
 
         def events() -> Iterator[StreamChunk]:
             nonlocal emitted
-            for event in self.adapter.stream_normalizer().events(iterator):
-                emitted = True
-                yield event
+            normalized_iterator = self.adapter.stream_normalizer().events(iterator)
+            try:
+                for event in normalized_iterator:
+                    _raise_if_llm_cancelled()
+                    emitted = True
+                    yield event
+                    _raise_if_llm_cancelled()
+            except LLMCancelledError:
+                close = getattr(normalized_iterator, "close", None)
+                if callable(close):
+                    close()
+                close = getattr(iterator, "close", None)
+                if callable(close):
+                    close()
+                raise
 
         return events(), lambda: emitted
 
@@ -1096,11 +1256,29 @@ class LLMClient:
         message_role_summary = _safe_message_role_summary(payload.get("messages") or messages)
         route_summary = _safe_payload_route_summary(payload, self.profile, self.provider)
         payload_shape_summary = _safe_payload_shape_summary(payload)
-        event_metadata = {**message_role_summary, **route_summary, **payload_shape_summary}
+        prompt_cache_design_summary = _safe_prompt_cache_design_summary(
+            messages,
+            prompt_cache_mode=str(getattr(getattr(self.profile, "prompt_cache", None), "mode", "") or "disabled"),
+        )
+        thinking_summary = _safe_payload_thinking_summary(payload)
+        protocol_summary = dict(self._last_payload_protocol_summary or payload_protocol_summary(payload, self.protocol_route))
+        event_metadata = {
+            **message_role_summary,
+            **route_summary,
+            **payload_shape_summary,
+            **prompt_cache_design_summary,
+            **thinking_summary,
+            **protocol_summary,
+        }
         max_attempts = _retry_policy_max_attempts(self.profile)
         last_error: LLMError | None = None
         stream_usage_options_downgraded = False
+        route_key = _llm_route_concurrency_key(self.provider, self.profile, profile_id=self.profile_id)
         for attempt in range(1, max_attempts + 1):
+            try:
+                _raise_if_llm_cancelled()
+            except LLMCancelledError as exc:
+                raise _llm_cancelled_error(exc.reason) from exc
             start = time.time()
             emitted = False
             chunk_count = 0
@@ -1109,6 +1287,13 @@ class LLMClient:
             reasoning_chars = 0
             reasoning_sources: set[str] = set()
             tool_call_count = 0
+            first_chunk_ms: int | None = None
+            first_text_delta_ms: int | None = None
+            first_reasoning_delta_ms: int | None = None
+            previous_chunk_at: float | None = None
+            max_inter_chunk_ms = 0
+            total_inter_chunk_ms = 0
+            inter_chunk_count = 0
             usage_observation = UsageStats()
             try:
                 _record_llm_scene_event(
@@ -1129,29 +1314,65 @@ class LLMClient:
                     },
                     lifecycle=False,
                 )
-                events, emitted_fn = self._stream_attempt(
-                    payload,
+                with _reserve_llm_route_slot(
+                    route_key,
+                    role=self.role,
+                    profile_id=self.profile_id,
+                    provider=self.provider.kind,
+                    model=self.profile.model,
+                    phase="stream",
                     message_count=message_count,
                     tool_count=tool_count,
-                )
-                for event in events:
-                    emitted = emitted_fn()
-                    chunk_count += 1
-                    if event.type == "text_delta":
-                        text_delta_count += 1
-                    elif event.type == "reasoning_delta":
-                        reasoning_delta_count += 1
-                        reasoning_chars += len(event.text or "")
-                        if isinstance(event.provider_payload, dict):
-                            source = str(event.provider_payload.get("reasoning_source") or "").strip()
-                            if source:
-                                reasoning_sources.add(source)
-                    elif event.type == "tool_call_final":
-                        tool_call_count += len(event.tool_calls or [])
-                    elif event.type == "done" and event.usage is not None:
-                        usage_observation = event.usage
-                    yield event
+                ):
+                    _raise_if_llm_cancelled()
+                    events, emitted_fn = self._stream_attempt(
+                        payload,
+                        message_count=message_count,
+                        tool_count=tool_count,
+                    )
+                    for event in events:
+                        _raise_if_llm_cancelled()
+                        now = time.time()
+                        elapsed_ms = int((now - start) * 1000)
+                        if first_chunk_ms is None:
+                            first_chunk_ms = elapsed_ms
+                        if previous_chunk_at is not None:
+                            inter_chunk_ms = int((now - previous_chunk_at) * 1000)
+                            max_inter_chunk_ms = max(max_inter_chunk_ms, inter_chunk_ms)
+                            total_inter_chunk_ms += inter_chunk_ms
+                            inter_chunk_count += 1
+                        previous_chunk_at = now
+                        emitted = emitted_fn()
+                        chunk_count += 1
+                        if event.type == "text_delta":
+                            text_delta_count += 1
+                            if first_text_delta_ms is None and (event.text or ""):
+                                first_text_delta_ms = elapsed_ms
+                        elif event.type == "reasoning_delta":
+                            reasoning_delta_count += 1
+                            if first_reasoning_delta_ms is None and (event.text or ""):
+                                first_reasoning_delta_ms = elapsed_ms
+                            reasoning_chars += len(event.text or "")
+                            if isinstance(event.provider_payload, dict):
+                                source = str(event.provider_payload.get("reasoning_source") or "").strip()
+                                if source:
+                                    reasoning_sources.add(source)
+                        elif event.type == "tool_call_final":
+                            tool_call_count += len(event.tool_calls or [])
+                        elif event.type == "done" and event.usage is not None:
+                            usage_observation = event.usage
+                        yield event
+                        _raise_if_llm_cancelled()
                 usage_observation.latency_ms = int((time.time() - start) * 1000)
+                usage_observed = (
+                    bool(usage_observation.provider_raw_usage)
+                    and (
+                        usage_observation.input_tokens > 0
+                        or usage_observation.output_tokens > 0
+                        or usage_observation.total_tokens > 0
+                        or usage_observation.cached_input_tokens > 0
+                    )
+                )
                 _record_llm_scene_event(
                     "stream",
                     "llm.stream.succeeded",
@@ -1162,15 +1383,7 @@ class LLMClient:
                         "profileId": self.profile_id,
                         "provider": self.provider.kind,
                         "model": self.profile.model,
-                        "messageCount": message_count,
-                        "toolCount": tool_count,
-                        **event_metadata,
-                        "chunkCount": chunk_count,
-                        "textDeltaCount": text_delta_count,
-                        "reasoningDeltaCount": reasoning_delta_count,
-                        "reasoningChars": reasoning_chars,
-                        "reasoningSources": sorted(reasoning_sources),
-                        "toolCallCount": tool_call_count,
+                        "usageObserved": usage_observed,
                         "inputTokens": usage_observation.input_tokens,
                         "outputTokens": usage_observation.output_tokens,
                         "totalTokens": usage_observation.total_tokens,
@@ -1181,12 +1394,59 @@ class LLMClient:
                         )
                         if usage_observation.input_tokens > 0
                         else 0.0,
-                        "usageObserved": bool(usage_observation.provider_raw_usage),
                         "latencyMs": usage_observation.latency_ms,
+                        "messageCount": message_count,
+                        "toolCount": tool_count,
+                        **event_metadata,
+                        "chunkCount": chunk_count,
+                        "textDeltaCount": text_delta_count,
+                        "reasoningDeltaCount": reasoning_delta_count,
+                        "reasoningChars": reasoning_chars,
+                        "reasoningSources": sorted(reasoning_sources),
+                        "reasoningObserved": reasoning_chars > 0,
+                        "firstChunkMs": first_chunk_ms,
+                        "firstTextDeltaMs": first_text_delta_ms,
+                        "firstReasoningDeltaMs": first_reasoning_delta_ms,
+                        "maxInterChunkMs": max_inter_chunk_ms,
+                        "avgInterChunkMs": int(total_inter_chunk_ms / inter_chunk_count)
+                        if inter_chunk_count > 0
+                        else 0,
+                        "interChunkCount": inter_chunk_count,
+                        "toolCallCount": tool_call_count,
                     },
                     lifecycle=False,
                 )
                 return
+            except LLMCancelledError as exc:
+                llm_error = _llm_cancelled_error(exc.reason)
+                _record_llm_scene_event(
+                    "stream",
+                    "llm.stream.cancelled",
+                    message="LLM stream cancelled by turn stop request.",
+                    level="warning",
+                    outcome="cancelled",
+                    fields=_llm_retry_event_fields(
+                        role=self.role,
+                        profile_id=self.profile_id,
+                        provider=self.provider.kind,
+                        model=self.profile.model,
+                        message_count=message_count,
+                        tool_count=tool_count,
+                        metadata=event_metadata,
+                        attempt=attempt,
+                        max_attempts=max_attempts,
+                        llm_error=llm_error,
+                    ),
+                    lifecycle=True,
+                )
+                _publish_llm_status_event(
+                    "cancelled",
+                    attempt=attempt,
+                    max_attempts=max_attempts,
+                    category=llm_error.category,
+                    retryable=False,
+                )
+                raise llm_error from exc
             except Exception as exc:
                 llm_error = classify_exception(exc)
                 llm_error = _with_retry_details(llm_error, attempt=attempt, max_attempts=max_attempts)
@@ -1226,6 +1486,8 @@ class LLMClient:
                         **message_role_summary,
                         **route_summary,
                         **payload_shape_summary,
+                        **prompt_cache_design_summary,
+                        **_safe_payload_thinking_summary(payload),
                         "streamUsageOptionsDowngraded": True,
                     }
                     stream_usage_options_downgraded = True

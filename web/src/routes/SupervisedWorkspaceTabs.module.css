@@ -1,35 +1,116 @@
-.segmented {
-  display: inline-flex;
-  align-items: center;
+.flowTabs {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(168px, 1fr));
   gap: 6px;
-  padding: 3px;
+  min-width: min(820px, 100%);
+  padding: 4px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   background: var(--surface-panel-muted);
 }
 
-.segmentButton {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 76px;
-  min-height: 30px;
-  padding: 0 11px;
-  border: 0;
-  border-radius: 6px;
+.flowTab {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 7px;
+  min-width: 0;
+  min-height: 58px;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: 7px;
   color: var(--fg-secondary);
   text-decoration: none;
-  font-size: 12px;
-  font-weight: 600;
-  transition: background 140ms ease, color 140ms ease;
+  transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
 }
 
-.segmentButton:hover {
+.flowTab:hover {
   color: var(--fg-primary);
   background: var(--surface-card-hover);
 }
 
-.segmentButtonActive {
-  background: color-mix(in srgb, var(--accent-warm) 16%, transparent);
+.flowTabActive {
+  border-color: color-mix(in srgb, var(--accent-warm) 28%, var(--border-hairline));
+  background: color-mix(in srgb, var(--accent-warm) 13%, transparent);
   color: var(--accent-warm-2);
+}
+
+.stepIndex,
+.stepCount {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.stepIndex {
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--border-soft);
+  color: var(--fg-tertiary);
+  font-size: 0.72rem;
+}
+
+.flowTabActive .stepIndex {
+  border-color: color-mix(in srgb, var(--accent-warm) 38%, var(--border-soft));
+  color: var(--accent-warm-2);
+}
+
+.stepBody {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.stepLabel {
+  overflow: hidden;
+  color: var(--fg-primary);
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stepHint {
+  overflow: hidden;
+  color: var(--fg-tertiary);
+  font-size: 0.68rem;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stepMeta {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+  color: var(--fg-tertiary);
+  font-size: 0.7rem;
+  line-height: 1.2;
+}
+
+.stepMeta span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stepCount {
+  min-width: 24px;
+  height: 22px;
+  padding: 0 7px;
+  border: 1px solid var(--border-soft);
+  background: var(--surface-card-muted);
+  color: var(--fg-secondary);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+@media (max-width: 1120px) {
+  .flowTabs {
+    grid-template-columns: repeat(2, minmax(150px, 1fr));
+    min-width: min(520px, 100%);
+  }
 }

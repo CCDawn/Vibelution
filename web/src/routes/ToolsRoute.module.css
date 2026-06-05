@@ -411,10 +411,61 @@
 .toolList {
   display: grid;
   align-content: start;
-  gap: 6px;
+  gap: 10px;
   min-height: 0;
   overflow: auto;
   padding-right: 4px;
+}
+
+.toolBundleGroup {
+  display: grid;
+  gap: 6px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.toolBundleHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.toolBundleHeader div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.toolBundleHeader strong,
+.toolBundleHeader span,
+.toolBundleHeader small,
+.toolBundleDescription {
+  overflow-wrap: anywhere;
+}
+
+.toolBundleHeader strong {
+  color: var(--fg-primary);
+  font-size: 0.82rem;
+}
+
+.toolBundleHeader span,
+.toolBundleHeader small,
+.toolBundleDescription {
+  margin: 0;
+  color: var(--fg-secondary);
+  font-size: 0.72rem;
+  line-height: 1.3;
+}
+
+.toolBundleHeader small {
+  flex: 0 0 auto;
+  text-align: right;
+}
+
+.toolBundleItems {
+  display: grid;
+  gap: 6px;
 }
 
 .toolButton,
@@ -574,6 +625,10 @@
   background: var(--surface-panel-muted, rgba(21, 24, 27, 0.82));
 }
 
+.metaGridWide {
+  grid-column: span 2;
+}
+
 .notice {
   padding: 9px 10px;
   border: 1px solid color-mix(in srgb, var(--accent-warm) 28%, transparent);
@@ -619,6 +674,7 @@
 .policyPanel,
 .agentPermissionSummaryPanel,
 .toolAgentFitPanel,
+.dependencyHealthPanel,
 .image2ModelPanel {
   display: grid;
   gap: 10px;
@@ -643,6 +699,7 @@
 .testPanel h3,
 .policyPanel h3,
 .toolAgentFitPanel h3,
+.dependencyHealthPanel h3,
 .image2ModelPanel h3 {
   margin: 0;
   font-family: var(--font-display);

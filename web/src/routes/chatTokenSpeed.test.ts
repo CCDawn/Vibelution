@@ -54,6 +54,12 @@ describe("chatTokenSpeed", () => {
     ];
 
     expect(tokenSpeedSampleFromMessages("session-1", messages, "running", 1000)).toBeNull();
+
+    const queuedMessages = [
+      assistantMessage("queued", "当前会话或 Agent 并发槽暂满，本轮已进入队列...\n会在同会话任务结束或 Agent 释放并发槽后继续执行。"),
+    ];
+
+    expect(tokenSpeedSampleFromMessages("session-1", queuedMessages, "queued", 1000)).toBeNull();
   });
 
   it("counts streaming thought and tool arguments when visible content is only progress text", () => {

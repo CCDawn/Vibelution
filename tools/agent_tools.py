@@ -26,6 +26,7 @@ from core.orchestration.subagent_roles import ALLOWED_SUBAGENT_TASK_TYPES
 _MAX_RECURSION_DEPTH = 1
 _SUBAGENT_MARKER = "__VIBELUTION_SUBAGENT_RESULT__"
 _MAX_SCENE_TEXT = 1200
+_SUBAGENT_EXECUTION_LLM_SLOT = "subagentExecution"
 _stream_sink_local = threading.local()
 
 
@@ -152,9 +153,9 @@ def _normalize_context_pack(context_pack: Any) -> str:
 
 
 def _now_iso() -> str:
-    from datetime import UTC, datetime
+    from datetime import datetime, timezone
 
-    return datetime.now(UTC).isoformat()
+    return datetime.now(timezone.utc).isoformat()
 
 
 def _safe_subagent_run_fragment(value: Any, *, fallback: str) -> str:
@@ -795,6 +796,7 @@ def spawn_agent(
     env = os.environ.copy()
     env["VIBELUTION_SUBAGENT_DEPTH"] = str(depth + 1)
     env["VIBELUTION_SUBAGENT_MODE"] = "readonly"
+    env["VIBELUTION_AGENT_LLM_SLOT"] = _SUBAGENT_EXECUTION_LLM_SLOT
     env["PYTHONUNBUFFERED"] = "1"
     try:
         from core.logging.unified_logger import logger as unified_logger
@@ -873,6 +875,7 @@ def spawn_agent(
         fields={
             "timeoutSeconds": max(int(timeout), 1),
             "maxSteps": max_steps,
+            "llmSlot": _SUBAGENT_EXECUTION_LLM_SLOT,
             "hasContextPack": bool(normalized_context_pack),
             "deliverableCount": len(normalized_deliverables),
         },

@@ -9,7 +9,21 @@ def _agent_key(context):
     return f"agent:{agent_id or 'missing'}"
 
 
-def _scheduler(*, running=None, current=None, events=None, queued=None, dequeued=None, event_hook=None):
+def _session_key(context):
+    session_id = str(context.get("session_id") or "").strip()
+    return f"session:{session_id or 'missing'}"
+
+
+def _scheduler(
+    *,
+    running=None,
+    current=None,
+    events=None,
+    queued=None,
+    dequeued=None,
+    event_hook=None,
+    max_active_per_agent=4,
+):
     event_log = events if events is not None else []
     queued_log = queued if queued is not None else []
     dequeued_log = dequeued if dequeued is not None else []
@@ -32,6 +46,8 @@ def _scheduler(*, running=None, current=None, events=None, queued=None, dequeued
 
     return SessionTurnScheduler(
         agent_key_for_context=_agent_key,
+        session_key_for_context=_session_key,
+        max_active_per_agent=max_active_per_agent,
         now=now,
         record_event=record_event,
         mark_queued=lambda context, position: queued_log.append((context.get("turn_id"), position)),
@@ -41,13 +57,13 @@ def _scheduler(*, running=None, current=None, events=None, queued=None, dequeued
     )
 
 
-def test_session_turn_scheduler_serializes_turns_per_agent():
+def test_session_turn_scheduler_serializes_turns_per_session():
     queued = []
     dequeued = []
     submitted = []
     scheduler = _scheduler(queued=queued, dequeued=dequeued)
     active = {"session_id": "session-a", "turn_id": "turn-1", "agent_id": "agent-a"}
-    waiting = {"session_id": "session-b", "turn_id": "turn-2", "agent_id": "agent-a"}
+    waiting = {"session_id": "session-a", "turn_id": "turn-2", "agent_id": "agent-a"}
 
     scheduler.schedule(active, submit=submitted.append, release=lambda context: None)
     scheduler.schedule(waiting, submit=submitted.append, release=lambda context: None)
@@ -61,15 +77,78 @@ def test_session_turn_scheduler_serializes_turns_per_agent():
     assert dequeued == ["turn-2"]
 
 
+def test_session_turn_scheduler_runs_same_agent_different_sessions_concurrently():
+    submitted = []
+    scheduler = _scheduler()
+    first = {"session_id": "session-a", "turn_id": "turn-1", "agent_id": "agent-a"}
+    second = {"session_id": "session-b", "turn_id": "turn-2", "agent_id": "agent-a"}
+
+    scheduler.schedule(first, submit=submitted.append, release=lambda context: None)
+    scheduler.schedule(second, submit=submitted.append, release=lambda context: None)
+
+    assert [item["turn_id"] for item in submitted] == ["turn-1", "turn-2"]
+
+
+def test_session_turn_scheduler_queues_same_agent_when_agent_limit_is_reached():
+    queued = []
+    dequeued = []
+    submitted = []
+    scheduler = _scheduler(queued=queued, dequeued=dequeued, max_active_per_agent=1)
+    active = {"session_id": "session-a", "turn_id": "turn-1", "agent_id": "agent-a"}
+    waiting = {"session_id": "session-b", "turn_id": "turn-2", "agent_id": "agent-a"}
+
+    scheduler.schedule(active, submit=submitted.append, release=lambda context: None)
+    scheduler.schedule(waiting, submit=submitted.append, release=lambda context: None)
+    released = scheduler.release(active)
+
+    assert [item["turn_id"] for item in submitted] == ["turn-1"]
+    assert queued == [("turn-2", 1)]
+    assert released is not None
+    assert released.context["turn_id"] == "turn-2"
+    assert released.context["_scheduler_queue_reason"] == ""
+    assert released.external is False
+    assert dequeued == ["turn-2"]
+
+
+def test_session_turn_scheduler_dequeues_multiple_chat_turns_after_external_finishes():
+    queued = []
+    dequeued = []
+    external_contexts = []
+    scheduler = _scheduler(queued=queued, dequeued=dequeued, max_active_per_agent=2)
+    waiting_chat = {"session_id": "session-b", "turn_id": "turn-2", "agent_id": "agent-a"}
+    later_chat = {"session_id": "session-c", "turn_id": "turn-3", "agent_id": "agent-a"}
+
+    with scheduler.reserve_external(
+        agent_id="agent-a",
+        run_id="round-1",
+        session_id="session-room",
+        owner="chat_room_round",
+        wait_timeout_seconds=0.1,
+        release=external_contexts.append,
+    ):
+        scheduler.schedule(waiting_chat, submit=lambda context: None, release=lambda context: None)
+        scheduler.schedule(later_chat, submit=lambda context: None, release=lambda context: None)
+
+    assert queued == [("turn-2", 1), ("turn-3", 2)]
+    assert len(external_contexts) == 1
+    released = scheduler.release(external_contexts[0])
+
+    assert released is not None
+    assert released.external is False
+    assert released.context["turn_id"] == "turn-2"
+    assert [item["turn_id"] for item in released.additional_contexts] == ["turn-3"]
+    assert dequeued == ["turn-2", "turn-3"]
+
+
 def test_session_turn_scheduler_reports_dropped_stale_turns_even_without_next_turn():
     queued = []
     scheduler = _scheduler(
-        running={"session-b": False},
-        current={("session-b", "turn-2"): False},
+        running={"session-a": True},
+        current={("session-a", "turn-2"): False},
         queued=queued,
     )
     active = {"session_id": "session-a", "turn_id": "turn-1", "agent_id": "agent-a"}
-    stale = {"session_id": "session-b", "turn_id": "turn-2", "agent_id": "agent-a"}
+    stale = {"session_id": "session-a", "turn_id": "turn-2", "agent_id": "agent-a"}
 
     scheduler.schedule(active, submit=lambda context: None, release=lambda context: None)
     scheduler.schedule(stale, submit=lambda context: None, release=lambda context: None)

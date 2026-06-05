@@ -12,6 +12,8 @@ from langchain_core.messages import ToolMessage
 
 from core.infrastructure.workspace_manager import get_workspace
 from core.llm import get_llm_client
+from core.llm.agent_runtime import AgentLlmResolutionError, resolve_agent_llm
+from config.settings import get_config
 from core.web.services import agent_directory_service, agent_mode_binding_service, prompt_template_service
 
 from .agent_templates import normalize_research_agent_config
@@ -127,10 +129,15 @@ class LLMResearchAgentRunner(ResearchAgentRunner):
         collected: list[SearchResult] = []
         attempts: list[dict[str, Any]] = []
         trace: list[dict[str, Any]] = []
-        profile_id = _research_agent_profile_id(profile)
+        resolved_llm = _resolve_research_agent_llm(profile)
+        profile_id = resolved_llm["profileId"]
         _append_trace(
             trace,
-            _trace("agent", f"{profile.get('label') or agent_key} 启动", f"使用 LLM 配置 `{profile_id}`，准备围绕 {len(suggested_queries)} 个建议查询进行工具检索。"),
+            _trace(
+                "agent",
+                f"{profile.get('label') or agent_key} 启动",
+                f"使用 LLM `{resolved_llm['label']}`，准备围绕 {len(suggested_queries)} 个建议查询进行工具检索。",
+            ),
             trace_sink,
         )
         _append_trace(
@@ -158,7 +165,7 @@ class LLMResearchAgentRunner(ResearchAgentRunner):
                 ),
             },
         ]
-        client = get_llm_client(profile_id=profile_id)
+        client = resolved_llm["client"]
         final_payload: dict[str, Any] | None = None
         tool_call_count = 0
         for _turn in range(6):
@@ -206,6 +213,8 @@ class LLMResearchAgentRunner(ResearchAgentRunner):
                 "agentKey": agent_key,
                 "templateId": profile["templateId"],
                 "profileId": profile_id,
+                "llmModelId": resolved_llm.get("modelId", ""),
+                "llmBindingSource": resolved_llm.get("source", ""),
                 "toolCallCount": tool_call_count,
                 "final": final_payload or {},
                 "executionMode": "llm_agent_with_search_tools",
@@ -405,12 +414,17 @@ class LLMResearchAgentRunner(ResearchAgentRunner):
         trace_sink: TraceSink | None = None,
     ) -> tuple[dict[str, Any], list[dict[str, Any]], dict[str, Any]]:
         profile = self._agent_profile(agent_key)
-        profile_id = _research_agent_profile_id(profile)
+        resolved_llm = _resolve_research_agent_llm(profile)
+        profile_id = resolved_llm["profileId"]
         trace: list[dict[str, Any]] = []
-        _append_trace(trace, _trace("agent", f"{profile.get('label') or agent_key} 启动", f"使用 LLM 配置 `{profile_id}`。"), trace_sink)
+        _append_trace(
+            trace,
+            _trace("agent", f"{profile.get('label') or agent_key} 启动", f"使用 LLM `{resolved_llm['label']}`。"),
+            trace_sink,
+        )
         _append_trace(trace, _trace("prompt", "读取阶段提示词", f"载入 `{profile.get('promptFilename') or ''}`，并附加结构化 JSON 输出契约。"), trace_sink)
         _append_trace(trace, _trace("input", "整理阶段输入", _payload_summary(payload)), trace_sink)
-        client = get_llm_client(profile_id=profile_id)
+        client = resolved_llm["client"]
         response = client.invoke(
             [
                 {"role": "system", "content": self._system_prompt(agent_key, contract)},
@@ -424,6 +438,8 @@ class LLMResearchAgentRunner(ResearchAgentRunner):
             "agentKey": agent_key,
             "templateId": profile["templateId"],
             "profileId": profile_id,
+            "llmModelId": resolved_llm.get("modelId", ""),
+            "llmBindingSource": resolved_llm.get("source", ""),
             "executionMode": "llm_agent_structured_json",
             "trace": trace,
         }
@@ -562,18 +578,43 @@ def _research_agent_profile_id(profile: dict[str, Any]) -> str:
     return str(profile.get("profileId") or profile.get("llmConfigId") or "primary").strip() or "primary"
 
 
+def _resolve_research_agent_llm(profile: dict[str, Any]) -> dict[str, Any]:
+    agent = profile.get("agent") if isinstance(profile.get("agent"), dict) else None
+    if isinstance(agent, dict) and agent_directory_service.agent_dialogue_model_id(agent):
+        try:
+            resolved = resolve_agent_llm(agent, "dialogue", config=get_config())
+        except AgentLlmResolutionError as exc:
+            raise ValueError(f"Research Agent LLM binding is invalid: {exc}") from exc
+        return {
+            "client": get_llm_client(profile_id=resolved.runtime_profile_id, config=resolved.config),
+            "profileId": resolved.runtime_profile_id,
+            "modelId": resolved.model_id,
+            "label": resolved.model_id or resolved.model,
+            "source": resolved.source,
+            "resolved": resolved,
+        }
+    profile_id = _research_agent_profile_id(profile)
+    return {
+        "client": get_llm_client(profile_id=profile_id),
+        "profileId": profile_id,
+        "modelId": "",
+        "label": profile_id,
+        "source": "legacy_profile",
+        "resolved": None,
+    }
+
+
 def _profile_from_agent_instance(agent_key: str, agent: dict[str, Any]) -> dict[str, Any]:
     normalized_agent_key = str(agent_key or "").strip()
     metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
     template_id = str(agent.get("templateId") or metadata.get("researchTemplateId") or "").strip()
     prompt_filename = str(metadata.get("researchPromptFilename") or "").strip()
-    profile_id = str(agent.get("profileId") or "").strip()
     return {
         "key": normalized_agent_key or str(metadata.get("researchAgentKey") or "").strip(),
         "label": str(agent.get("displayName") or normalized_agent_key or "").strip(),
         "promptFilename": prompt_filename,
         "templateId": template_id,
-        "profileId": profile_id or "primary",
+        "profileId": str(agent.get("profileId") or "").strip() or "primary",
         "enabled": str(agent.get("status") or "active").strip() != "archived",
         "agentId": str(agent.get("agentId") or "").strip(),
         "agentInstanceId": str(agent.get("agentId") or "").strip(),
@@ -582,6 +623,8 @@ def _profile_from_agent_instance(agent_key: str, agent: dict[str, Any]) -> dict[
         "primaryMode": str(agent.get("primaryMode") or "").strip(),
         "promptTemplateId": str(agent.get("promptTemplateId") or "").strip(),
         "agentDisplayName": str(agent.get("displayName") or "").strip(),
+        "llmBindings": agent_directory_service.normalize_agent_llm_bindings(agent.get("llmBindings")),
+        "agent": agent,
     }
 
 

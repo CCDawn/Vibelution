@@ -31,6 +31,8 @@ const NODE_COLORS: Record<string, number> = {
   project: 0xf2c94c,
   team: 0x6fcf97,
   agent: 0x56ccf2,
+  session_agent: 0x4f7cff,
+  team_member_agent: 0x18b37a,
   agent_private_memory: 0x2d9cdb,
   knowledge_base: 0xbb6bd9,
   knowledge_item: 0xf2994a,
@@ -110,6 +112,31 @@ function tintColor(color: number, tint: number) {
 
 function shadeColor(color: number, shade: number) {
   return new THREE.Color(color).lerp(new THREE.Color(0x020617), shade);
+}
+
+function nodeColor(node: MemoryKnowledgeGraphNode) {
+  const agentCategory = String(node.visual?.agentCategory || node.metadata?.agentCategory || "");
+  if (node.type === "agent" && agentCategory && NODE_COLORS[agentCategory]) {
+    return NODE_COLORS[agentCategory];
+  }
+  return NODE_COLORS[node.type] ?? 0xdfe6e9;
+}
+
+function nodeSize(node: MemoryKnowledgeGraphNode, nodeDegree: number) {
+  const visualSize = String(node.visual?.size || "");
+  if (visualSize === "root") {
+    return 2.05 + Math.min(0.8, Math.sqrt(nodeDegree + 1) * 0.12);
+  }
+  if (visualSize === "group") {
+    return 1.42 + Math.min(0.75, Math.sqrt(nodeDegree + 1) * 0.12);
+  }
+  if (visualSize === "leaf") {
+    return 0.78 + Math.min(0.36, Math.sqrt(nodeDegree + 1) * 0.08);
+  }
+  if (visualSize === "container") {
+    return 1.08 + Math.min(0.5, Math.sqrt(nodeDegree + 1) * 0.1);
+  }
+  return 0.86 + Math.min(0.5, Math.sqrt(nodeDegree + 1) * 0.12);
 }
 
 export function MemoryGraphCanvas({ nodes, edges, selectedNodeId, onSelectNode, fallbackText }: MemoryGraphCanvasProps) {
@@ -273,7 +300,7 @@ export function MemoryGraphCanvas({ nodes, edges, selectedNodeId, onSelectNode, 
     const labelElements = new Map<string, HTMLButtonElement>();
     for (const node of nodes) {
       const nodeDegree = degree.get(node.id) ?? 0;
-      const color = NODE_COLORS[node.type] ?? 0xdfe6e9;
+      const color = nodeColor(node);
       const isStellar = STELLAR_NODE_TYPES.has(node.type);
       const isSatellite = SATELLITE_NODE_TYPES.has(node.type);
       const selected = selectedNodeId === node.id;
@@ -282,11 +309,9 @@ export function MemoryGraphCanvas({ nodes, edges, selectedNodeId, onSelectNode, 
         : isSatellite
           ? createSatelliteBody(color, selected)
           : createPlanetBody(color, selected, nodeDegree);
-      const size = isStellar
-        ? 1.05 + Math.min(1.25, Math.sqrt(nodeDegree + 1) * 0.16)
-        : 0.78 + Math.min(1.55, Math.sqrt(nodeDegree + 1) * 0.2);
+      const size = nodeSize(node, nodeDegree);
       const selectedScale = selected ? 1.16 : 1;
-      body.scale.setScalar((node.type === "project" ? 1.86 : size) * selectedScale);
+      body.scale.setScalar(size * selectedScale);
       const position = positions.get(node.id) ?? new THREE.Vector3();
       body.position.copy(position);
       body.rotation.set(nodeDegree * 0.13, nodeDegree * 0.19, nodeDegree * 0.07);
@@ -311,14 +336,18 @@ export function MemoryGraphCanvas({ nodes, edges, selectedNodeId, onSelectNode, 
         label.dataset.selected = selectedNodeId === node.id ? "true" : "false";
         label.dataset.detail = showDetail ? "true" : "false";
         label.dataset.nodeType = node.type;
+        label.dataset.agentCategory = String(node.visual?.agentCategory || node.metadata?.agentCategory || "");
         const typeMark = document.createElement("span");
         typeMark.className = styles.graphNodeBadgeType;
         typeMark.textContent = NODE_SHORT_LABELS[node.type] ?? node.type.slice(0, 2).toUpperCase();
+        const question = document.createElement("em");
+        question.className = styles.graphNodeBadgeQuestion;
+        question.textContent = trimText(node.responsibilityQuestion || node.summary || node.type, showDetail ? 46 : 34);
         const title = document.createElement("strong");
         title.textContent = trimText(node.label, showDetail ? 32 : 24);
         const summary = document.createElement("small");
         summary.textContent = trimText(node.summary || node.status || node.type, showDetail ? 72 : 40);
-        label.replaceChildren(typeMark, title, ...(showDetail ? [summary] : []));
+        label.replaceChildren(question, typeMark, title, ...(showDetail ? [summary] : []));
         label.title = `${node.label} · ${node.type}`;
         label.setAttribute("aria-label", `${node.label} ${node.type}`);
         label.tabIndex = -1;

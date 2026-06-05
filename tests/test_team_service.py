@@ -29,16 +29,37 @@ def test_create_team_with_active_agent_writes_default_canvas(tmp_path, monkeypat
     )
 
     assert team["teamId"] == "team"
+    assert team["teamKind"] == "custom"
+    assert team["teamCategory"] == "自定义团队"
+    assert team["teamSource"] == "manual"
+    assert team["teamTemplateId"] == ""
     assert team["members"][0]["agentId"] == agent["agentId"]
     assert team["canvas"]["canvasKind"] == team_service.CANVAS_KIND
     assert team["canvas"]["nodes"][0]["agentId"] == agent["agentId"]
     assert team["linkedChatRoomId"]
     assert team["linkedChatRoom"]["participantCount"] == 1
+    assert team["linkedChatRoom"]["purpose"] == "discussion"
     assert team["conversation"]["status"] == "linked"
     assert team["conversation"]["memberAgentIds"] == [agent["agentId"]]
     assert team["conversation"]["roomAgentIds"] == [agent["agentId"]]
     assert chat_room_service.get_chat_room_detail(team["linkedChatRoomId"])["participants"][0]["agentId"] == agent["agentId"]
+    assert chat_room_service.get_chat_room_detail(team["linkedChatRoomId"])["config"]["teamKind"] == "custom"
     assert team_service.list_teams()["summary"]["activeTeamCount"] == 1
+
+
+def test_create_empty_team_still_links_empty_team_chat_room(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+
+    team = team_service.create_team(name="医疗问诊", purpose="进行医学学术")
+
+    assert team["memberCount"] == 0
+    assert team["linkedChatRoomId"]
+    assert team["linkedChatRoom"]["participantCount"] == 0
+    assert team["conversation"]["status"] == "linked"
+    room = chat_room_service.get_chat_room_detail(team["linkedChatRoomId"])
+    assert room["participants"] == []
+    assert room["config"]["source"] == "team"
+    assert room["config"]["teamId"] == team["teamId"]
 
 
 def test_team_chat_room_participants_keep_team_role_context(tmp_path, monkeypatch):
@@ -64,6 +85,29 @@ def test_team_chat_room_participants_keep_team_role_context(tmp_path, monkeypatc
     assert participant["teamResponsibilities"] == ["跟踪关键决策", "提醒执行风险"]
 
 
+def test_team_members_keep_structured_responsibilities(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = agent_directory_service.create_agent_instance(display_name="Alpha", direct_session_id="session-alpha")
+
+    team = team_service.create_team(
+        name="职责团队",
+        members=[
+            {
+                "agentId": agent["agentId"],
+                "role": "主持",
+                "purpose": "短职责",
+                "responsibilities": ["这里放较长的岗位职责，供提示词和展开详情使用。"],
+            }
+        ],
+    )
+
+    assert team["members"][0]["purpose"] == "短职责"
+    assert team["members"][0]["responsibilities"] == ["这里放较长的岗位职责，供提示词和展开详情使用。"]
+    participant = chat_room_service.get_chat_room_detail(team["linkedChatRoomId"])["participants"][0]
+    assert participant["teamMemberPurpose"] == "短职责"
+    assert participant["teamResponsibilities"] == ["这里放较长的岗位职责，供提示词和展开详情使用。"]
+
+
 def test_ensure_research_team_from_organization_uses_stable_team_id(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     alpha = agent_directory_service.create_agent_instance(display_name="Alpha", direct_session_id="session-alpha")
@@ -86,10 +130,15 @@ def test_ensure_research_team_from_organization_uses_stable_team_id(tmp_path, mo
 
     assert first["teamId"] == "research-team"
     assert second["teamId"] == "research-team"
+    assert second["teamKind"] == "research"
+    assert second["teamCategory"] == "科研组织团队"
+    assert second["teamSource"] == "research_organization"
+    assert second["linkedChatRoom"]["purpose"] == "research_coordination"
     assert [team["teamId"] for team in teams] == ["research-team"]
     assert first["linkedChatRoomId"] == second["linkedChatRoomId"]
     assert team_service.list_teams()["summary"]["activeTeamCount"] == 1
     assert len(chat_room_service.list_chat_rooms()) == 1
+    assert chat_room_service.get_chat_room_detail(second["linkedChatRoomId"])["config"]["teamCategory"] == "科研组织团队"
     assert [member["agentId"] for member in second["members"]] == [alpha["agentId"], beta["agentId"]]
     assert {node["agentId"] for node in canvas["nodes"]} == {alpha["agentId"], beta["agentId"]}
     assert {node["id"] for node in canvas["nodes"]} == {alpha["agentId"], beta["agentId"]}
@@ -160,6 +209,29 @@ def test_research_team_sync_reuses_existing_team_chat_room(tmp_path, monkeypatch
     assert {participant["agentId"] for participant in rooms[0]["participants"]} == {alpha["agentId"], beta["agentId"]}
 
 
+def test_team_chat_room_sync_preserves_existing_config_extensions(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = agent_directory_service.create_agent_instance(display_name="Alpha", direct_session_id="session-alpha")
+    team = team_service.create_team(name="Config Team", members=[{"agentId": agent["agentId"], "role": "lead"}])
+    chat_room_service.update_chat_room(
+        team["linkedChatRoomId"],
+        config={
+            "source": "team",
+            "teamId": team["teamId"],
+            "teamName": "Config Team",
+            "teamPurpose": "",
+            "templateDemo": True,
+        },
+    )
+
+    reloaded_team = team_service.get_team(team["teamId"])
+    room = chat_room_service.get_chat_room_detail(reloaded_team["linkedChatRoomId"])
+
+    assert room["config"]["templateDemo"] is True
+    assert room["config"]["source"] == "team"
+    assert room["config"]["teamId"] == team["teamId"]
+
+
 def test_ensure_evolution_system_teams_materializes_mode_roles(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
 
@@ -169,16 +241,152 @@ def test_ensure_evolution_system_teams_materializes_mode_roles(tmp_path, monkeyp
     assert set(teams) == {"self-evolution-team", "supervised-evolution-team"}
     assert teams["self-evolution-team"]["systemTeamKind"] == "self_evolution"
     assert teams["supervised-evolution-team"]["systemTeamKind"] == "supervised_evolution"
+    assert teams["self-evolution-team"]["teamKind"] == "self_evolution"
+    assert teams["self-evolution-team"]["teamCategory"] == "自进化系统团队"
+    assert teams["self-evolution-team"]["teamSource"] == "self_evolution"
+    assert teams["supervised-evolution-team"]["teamKind"] == "supervised_evolution"
+    assert teams["supervised-evolution-team"]["teamCategory"] == "监督进化系统团队"
+    assert teams["supervised-evolution-team"]["teamSource"] == "supervised_evolution"
     assert teams["self-evolution-team"]["memberCount"] == 3
     assert teams["supervised-evolution-team"]["memberCount"] == 5
     assert teams["self-evolution-team"]["linkedChatRoomId"]
     assert teams["supervised-evolution-team"]["linkedChatRoomId"]
     assert len(chat_room_service.list_chat_rooms()) == 2
-    assert team_service.get_team_canvas("self-evolution-team")["canvasKind"] == team_service.CANVAS_KIND
-    assert team_service.get_team_canvas("supervised-evolution-team")["canvasKind"] == team_service.CANVAS_KIND
+    rooms = {room["config"]["teamId"]: room for room in chat_room_service.list_chat_rooms()}
+    assert rooms["self-evolution-team"]["purpose"] == "self_evolution"
+    assert rooms["supervised-evolution-team"]["purpose"] == "supervised_evolution"
+    self_canvas = team_service.get_team_canvas("self-evolution-team")
+    supervised_canvas = team_service.get_team_canvas("supervised-evolution-team")
+    assert self_canvas["canvasKind"] == team_service.CANVAS_KIND
+    assert supervised_canvas["canvasKind"] == team_service.CANVAS_KIND
+    assert [(edge["source"], edge["target"]) for edge in self_canvas["edges"]] == [
+        ("node-1", "node-2"),
+        ("node-2", "node-3"),
+    ]
+    assert [(edge["source"], edge["target"]) for edge in supervised_canvas["edges"]] == [
+        ("node-1", "node-3"),
+        ("node-2", "node-3"),
+        ("node-3", "node-4"),
+        ("node-4", "node-5"),
+    ]
 
 
-def test_compact_team_list_does_not_hydrate_linked_rooms(tmp_path, monkeypatch):
+def test_compact_team_list_repairs_legacy_team_contract_without_full_hydration(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    room = chat_room_service.create_chat_room(
+        title="旧自进化团队群聊",
+        allow_empty_participants=True,
+        purpose="discussion",
+        config={"source": "team", "teamId": "self-evolution-team"},
+    )
+    teams_path = tmp_path / "workspace" / "teams" / "teams.json"
+    teams_path.parent.mkdir(parents=True, exist_ok=True)
+    teams_path.write_text(
+        """
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-06-01T00:00:00+00:00",
+  "teams": [
+    {
+      "teamId": "self-evolution-team",
+      "name": "自进化团队",
+      "description": "由自进化固定角色自动同步的系统团队。",
+      "purpose": "承接自进化执行、评审与总结角色的团队通讯。",
+      "status": "active",
+      "systemTeamKind": "self_evolution",
+      "members": [],
+      "linkedChatRoomId": "%s",
+      "canvasPath": "workspace/teams/self-evolution-team/canvas.json",
+      "createdAt": "2026-06-01T00:00:00+00:00",
+      "updatedAt": "2026-06-01T00:00:00+00:00"
+    }
+  ]
+}
+"""
+        % room["roomId"],
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        chat_room_service,
+        "get_chat_room_detail",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("compact repair should not hydrate linked room detail")),
+    )
+
+    payload = team_service.list_teams_compact()
+
+    team = payload["teams"][0]
+    assert team["teamKind"] == "self_evolution"
+    assert team["teamCategory"] == "自进化系统团队"
+    assert team["teamSource"] == "self_evolution"
+    repaired = team_service._load_index()["teams"][0]
+    assert repaired["teamKind"] == "self_evolution"
+    assert repaired["teamCategory"] == "自进化系统团队"
+    assert repaired["teamSource"] == "self_evolution"
+    assert chat_room_service.get_chat_room_compact(room["roomId"])["purpose"] == "self_evolution"
+
+
+def test_compact_team_list_skips_busy_linked_chat_room_metadata_repair(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    room = chat_room_service.create_chat_room(
+        title="运行中的自进化团队群聊",
+        allow_empty_participants=True,
+        purpose="discussion",
+        config={"source": "team", "teamId": "self-evolution-team"},
+    )
+    teams_path = tmp_path / "workspace" / "teams" / "teams.json"
+    teams_path.parent.mkdir(parents=True, exist_ok=True)
+    teams_path.write_text(
+        """
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-06-01T00:00:00+00:00",
+  "teams": [
+    {
+      "teamId": "self-evolution-team",
+      "name": "自进化团队",
+      "purpose": "承接自进化执行、评审与总结角色的团队通讯。",
+      "status": "active",
+      "systemTeamKind": "self_evolution",
+      "members": [],
+      "linkedChatRoomId": "%s",
+      "canvasPath": "workspace/teams/self-evolution-team/canvas.json",
+      "createdAt": "2026-06-01T00:00:00+00:00",
+      "updatedAt": "2026-06-01T00:00:00+00:00"
+    }
+  ]
+}
+"""
+        % room["roomId"],
+        encoding="utf-8",
+    )
+    recorded_events = []
+    monkeypatch.setattr(
+        team_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: recorded_events.append((args, kwargs)) or {"accepted": True},
+    )
+
+    real_update_chat_room = chat_room_service.update_chat_room
+
+    def fake_update_chat_room(*args, **kwargs):
+        raise chat_room_service.ChatRoomBusyError("Chat room already has an active round.")
+
+    monkeypatch.setattr(chat_room_service, "update_chat_room", fake_update_chat_room)
+
+    payload = team_service.list_teams_compact()
+
+    assert payload["summary"]["activeTeamCount"] == 1
+    assert payload["teams"][0]["teamKind"] == "self_evolution"
+    assert chat_room_service.get_chat_room_compact(room["roomId"])["purpose"] == "discussion"
+    assert any(
+        args[2] == "team.compact_chat_room_sync_skipped_busy"
+        for args, _kwargs in recorded_events
+    )
+
+    monkeypatch.setattr(chat_room_service, "update_chat_room", real_update_chat_room)
+
+
+def test_compact_team_list_uses_compact_linked_room_without_full_hydration(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     agent = agent_directory_service.create_agent_instance(display_name="Alpha", direct_session_id="session-alpha")
     team_service.create_team(name="Compact Team", members=[{"agentId": agent["agentId"], "role": "lead"}])
@@ -191,6 +399,35 @@ def test_compact_team_list_does_not_hydrate_linked_rooms(tmp_path, monkeypatch):
     payload = team_service.list_teams_compact()
 
     assert payload["summary"]["activeTeamCount"] == 1
+    assert payload["teams"][0]["linkedChatRoomId"]
+    assert payload["teams"][0]["linkedChatRoom"]["participantCount"] == 1
+    assert "conversation" not in payload["teams"][0]
+
+
+def test_team_graph_references_skip_linked_room_hydration_and_repair(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = agent_directory_service.create_agent_instance(display_name="Alpha", direct_session_id="session-alpha")
+    team_service.create_team(name="Graph Team", members=[{"agentId": agent["agentId"], "role": "lead"}])
+    monkeypatch.setattr(
+        chat_room_service,
+        "get_chat_room_detail",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("graph references should not hydrate linked room detail")),
+    )
+    monkeypatch.setattr(
+        chat_room_service,
+        "get_chat_room_compact",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("graph references should not hydrate linked room compact")),
+    )
+    monkeypatch.setattr(
+        chat_room_service,
+        "update_chat_room",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("graph references should not repair linked room metadata")),
+    )
+
+    payload = team_service.list_team_graph_references()
+
+    assert payload["summary"]["activeTeamCount"] == 1
+    assert payload["teams"][0]["members"][0]["agentId"] == agent["agentId"]
     assert payload["teams"][0]["linkedChatRoomId"]
     assert "linkedChatRoom" not in payload["teams"][0]
     assert "conversation" not in payload["teams"][0]
@@ -234,6 +471,7 @@ def test_team_canvas_save_syncs_linked_chat_room_members(tmp_path, monkeypatch):
             "agentName": beta["displayName"],
             "role": "reviewer",
             "purpose": "检查输出",
+            "responsibilities": ["保留画布中的结构化职责。"],
         }
     )
 
@@ -244,7 +482,9 @@ def test_team_canvas_save_syncs_linked_chat_room_members(tmp_path, monkeypatch):
     assert updated_canvas["validation"]["valid"] is True
     assert updated_team["linkedChatRoomId"] == linked_room_id
     assert [member["agentId"] for member in updated_team["members"]] == [alpha["agentId"], beta["agentId"]]
+    assert updated_team["members"][1]["responsibilities"] == ["保留画布中的结构化职责。"]
     assert [participant["agentId"] for participant in linked_room["participants"]] == [alpha["agentId"], beta["agentId"]]
+    assert linked_room["participants"][1]["teamResponsibilities"] == ["保留画布中的结构化职责。"]
 
 
 def test_agent_can_only_belong_to_one_active_team(tmp_path, monkeypatch):
@@ -261,9 +501,117 @@ def test_agent_can_only_belong_to_one_active_team(tmp_path, monkeypatch):
     assert conflict_events[-1][1]["fields"]["agentId"] == agent["agentId"]
     assert conflict_events[-1][1]["fields"]["conflictTeamId"] == first["teamId"]
     team_service.archive_team(first["teamId"])
-    second = team_service.create_team(name="Other Team", members=[{"agentId": agent["agentId"], "role": "reviewer"}])
 
-    assert second["members"][0]["agentId"] == agent["agentId"]
+    assert agent_directory_service.get_agent(agent["agentId"], include_archived=True)["status"] == "archived"
+    with pytest.raises(team_service.TeamServiceError, match="not active"):
+        team_service.create_team(name="Other Team", members=[{"agentId": agent["agentId"], "role": "reviewer"}])
+
+
+def test_archive_custom_team_cascades_member_agents(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    events = []
+    monkeypatch.setattr(team_service, "record_runtime_scene_event", lambda *args, **kwargs: events.append((args, kwargs)))
+    alpha = agent_directory_service.create_agent_instance(display_name="Alpha", direct_session_id="session-alpha")
+    beta = agent_directory_service.create_agent_instance(display_name="Beta", direct_session_id="session-beta")
+    team = team_service.create_team(
+        name="Cascade Team",
+        members=[{"agentId": alpha["agentId"], "role": "lead"}, {"agentId": beta["agentId"], "role": "reviewer"}],
+    )
+
+    archived = team_service.archive_team(team["teamId"])
+
+    assert archived["status"] == "archived"
+    assert agent_directory_service.get_agent(alpha["agentId"], include_archived=True)["status"] == "archived"
+    assert agent_directory_service.get_agent(beta["agentId"], include_archived=True)["status"] == "archived"
+    archived_events = [item for item in events if item[0][2] == "team.archived_with_agents"]
+    assert archived_events[-1][1]["fields"]["archivedAgentIds"] == [alpha["agentId"], beta["agentId"]]
+    assert archived_events[-1][1]["fields"]["archivedAgentCount"] == 2
+
+
+def test_archive_team_rejects_protected_member_without_partial_changes(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    protected = agent_directory_service.create_agent_instance(
+        display_name="Protected",
+        direct_session_id="session-protected",
+        metadata={"protected": True},
+    )
+    peer = agent_directory_service.create_agent_instance(display_name="Peer", direct_session_id="session-peer")
+    team = team_service.create_team(
+        name="Protected Team",
+        members=[{"agentId": protected["agentId"], "role": "lead"}, {"agentId": peer["agentId"], "role": "peer"}],
+    )
+
+    with pytest.raises(team_service.TeamServiceError, match="Protected core Agent"):
+        team_service.archive_team(team["teamId"])
+
+    assert team_service.get_team(team["teamId"])["status"] == "active"
+    assert agent_directory_service.get_agent(protected["agentId"])["status"] == "active"
+    assert agent_directory_service.get_agent(peer["agentId"])["status"] == "active"
+
+
+def test_archive_system_team_is_rejected(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team_service.ensure_evolution_system_teams()
+
+    with pytest.raises(team_service.TeamServiceError, match="System Team cannot be archived"):
+        team_service.archive_team("self-evolution-team")
+
+    assert team_service.get_team("self-evolution-team")["status"] == "active"
+
+
+def test_archived_team_list_repairs_active_member_agents(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = agent_directory_service.create_agent_instance(display_name="Legacy", direct_session_id="session-legacy")
+    team = team_service.create_team(name="旧演示团队", members=[{"agentId": agent["agentId"]}])
+
+    state = team_service._load_index()
+    stored = next(item for item in state["teams"] if item["teamId"] == team["teamId"])
+    stored["status"] = "archived"
+    team_service._save_index(state)
+
+    payload = team_service.list_teams(include_archived=True)
+
+    repaired = next(item for item in payload["teams"] if item["teamId"] == team["teamId"])
+    assert repaired["status"] == "archived"
+    assert agent_directory_service.get_agent(agent["agentId"], include_archived=True)["status"] == "archived"
+
+
+def test_archived_team_list_repair_skips_protected_member_agent(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = agent_directory_service.create_agent_instance(
+        display_name="Protected",
+        direct_session_id="session-protected",
+        metadata={"protected": True},
+    )
+    team = team_service.create_team(name="受保护旧团队", members=[{"agentId": agent["agentId"]}])
+    state = team_service._load_index()
+    stored = next(item for item in state["teams"] if item["teamId"] == team["teamId"])
+    stored["status"] = "archived"
+    team_service._save_index(state)
+
+    payload = team_service.list_teams(include_archived=True)
+
+    assert any(item["teamId"] == team["teamId"] for item in payload["teams"])
+    assert agent_directory_service.get_agent(agent["agentId"])["status"] == "active"
+
+
+def test_archived_team_explicit_archive_rejects_protected_member_agent(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = agent_directory_service.create_agent_instance(
+        display_name="Protected",
+        direct_session_id="session-protected",
+        metadata={"protected": True},
+    )
+    team = team_service.create_team(name="受保护旧团队", members=[{"agentId": agent["agentId"]}])
+    state = team_service._load_index()
+    stored = next(item for item in state["teams"] if item["teamId"] == team["teamId"])
+    stored["status"] = "archived"
+    team_service._save_index(state)
+
+    with pytest.raises(team_service.TeamServiceError, match="Protected core Agent cannot be archived"):
+        team_service.archive_team(team["teamId"])
+
+    assert agent_directory_service.get_agent(agent["agentId"])["status"] == "active"
 
 
 def test_team_canvas_rejects_agent_bound_to_another_active_team(tmp_path, monkeypatch):

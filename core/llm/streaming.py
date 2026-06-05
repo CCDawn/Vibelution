@@ -14,6 +14,7 @@ from typing import Any, Dict, Iterable, Iterator, List
 
 from .reasoning_extractor import ThinkTagStreamParser, extract_reasoning_text
 from .types import StreamChunk, ToolCall, UsageStats
+from .usage import usage_stats_from_payload
 
 
 def extract_text_content(content: Any) -> str:
@@ -127,6 +128,7 @@ class LiteLLMStreamNormalizer:
         self._tool_calls = ToolCallAccumulator()
         self._usage: UsageStats | None = None
         self._think_tags = ThinkTagStreamParser()
+        self._reasoning_seen_by_source: Dict[str, str] = {}
 
     def events(self, raw_chunks: Iterable[Any]) -> Iterator[StreamChunk]:
         for raw_chunk in raw_chunks:
@@ -138,7 +140,13 @@ class LiteLLMStreamNormalizer:
                 continue
             reasoning = extract_reasoning_text(delta, extract_text_content, include_content_tags=False)
             if reasoning.text:
-                yield StreamChunk(type="reasoning_delta", text=reasoning.text, provider_payload={**delta, "reasoning_source": reasoning.source})
+                reasoning_delta = self._normalize_reasoning_delta(reasoning.source, reasoning.text)
+                if reasoning_delta:
+                    yield StreamChunk(
+                        type="reasoning_delta",
+                        text=reasoning_delta,
+                        provider_payload={**delta, "reasoning_source": reasoning.source},
+                    )
             content_split = self._think_tags.feed(delta.get("content") or "", extract_text_content)
             if content_split.reasoning_text:
                 yield StreamChunk(
@@ -161,6 +169,24 @@ class LiteLLMStreamNormalizer:
             yield StreamChunk(type="tool_call_final", tool_calls=final_calls)
         yield StreamChunk(type="done", usage=self._usage)
 
+    def _normalize_reasoning_delta(self, source: str, text: str) -> str:
+        """Return a stable delta even when a provider streams cumulative reasoning prefixes."""
+        source_key = str(source or "reasoning").strip() or "reasoning"
+        current = str(text or "")
+        if not current:
+            return ""
+        previous = self._reasoning_seen_by_source.get(source_key, "")
+        if not previous:
+            self._reasoning_seen_by_source[source_key] = current
+            return current
+        if current == previous:
+            return ""
+        if current.startswith(previous):
+            self._reasoning_seen_by_source[source_key] = current
+            return current[len(previous):]
+        self._reasoning_seen_by_source[source_key] = previous + current
+        return current
+
     @staticmethod
     def _extract_delta(raw_chunk: Any) -> Dict[str, Any]:
         chunk = _as_dict(raw_chunk)
@@ -181,26 +207,10 @@ class LiteLLMStreamNormalizer:
         usage = chunk.get("usage") or chunk.get("usage_metadata")
         if usage is None:
             return None
-        usage_dict = _usage_to_dict(usage)
-        if not usage_dict:
+        stats = usage_stats_from_payload(usage)
+        if not stats.provider_raw_usage:
             return None
-        input_tokens = _read_usage_int(usage_dict, "prompt_tokens", "input_tokens", "input_token_count")
-        output_tokens = _read_usage_int(usage_dict, "completion_tokens", "output_tokens", "output_token_count")
-        total_tokens = _read_usage_int(usage_dict, "total_tokens") or (input_tokens + output_tokens)
-        prompt_details = usage_dict.get("prompt_tokens_details")
-        input_details = usage_dict.get("input_token_details")
-        cached_tokens = max(
-            _read_usage_int(usage_dict, "cached_tokens", "cached_input_tokens"),
-            _read_usage_int(prompt_details, "cached_tokens", "cached_input_tokens"),
-            _read_usage_int(input_details, "cached_tokens", "cached_input_tokens"),
-        )
-        return UsageStats(
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            total_tokens=total_tokens,
-            cached_input_tokens=min(cached_tokens, input_tokens) if input_tokens else cached_tokens,
-            provider_raw_usage=usage_dict,
-        )
+        return stats
 
 
 def _as_dict(value: Any) -> Any:
@@ -214,49 +224,6 @@ def _safe_int(value: Any, default: int) -> int:
         return int(value)
     except (TypeError, ValueError):
         return default
-
-
-def _read_usage_int(container: Any, *keys: str) -> int:
-    if not isinstance(container, dict):
-        return 0
-    for key in keys:
-        value = container.get(key)
-        if value not in (None, ""):
-            try:
-                return max(0, int(value))
-            except (TypeError, ValueError):
-                continue
-    return 0
-
-
-def _usage_to_dict(usage: Any) -> Dict[str, Any]:
-    if isinstance(usage, dict):
-        return usage
-    if usage is None:
-        return {}
-    if hasattr(usage, "model_dump"):
-        try:
-            payload = usage.model_dump()
-            return payload if isinstance(payload, dict) else {}
-        except Exception:
-            return {}
-    payload: Dict[str, Any] = {}
-    for key in (
-        "prompt_tokens",
-        "completion_tokens",
-        "total_tokens",
-        "input_tokens",
-        "output_tokens",
-        "input_token_count",
-        "output_token_count",
-        "cached_tokens",
-        "cached_input_tokens",
-        "prompt_tokens_details",
-        "input_token_details",
-    ):
-        if hasattr(usage, key):
-            payload[key] = getattr(usage, key)
-    return payload
 
 
 __all__ = [

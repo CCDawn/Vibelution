@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 import signal
 import subprocess
 import sys
@@ -16,7 +17,13 @@ from typing import Any
 from core.runtime_manager.evolution_store import build_evolution_summary
 from core.web.services import self_evolution_control_service, supervised_control_service
 
-from .command_queue import claim_next_command, complete_command, recover_processing_queue, reject_pending_commands_for_shutdown
+from .command_queue import (
+    claim_next_command,
+    complete_command,
+    defer_processing_command_for_active_work,
+    recover_processing_queue,
+    reject_pending_commands_for_shutdown,
+)
 from .constants import (
     DAEMON_LOOP_INTERVAL_SECONDS,
     DAEMON_STDERR_PATH,
@@ -66,6 +73,8 @@ _OPEN_VERIFICATION_TIMEOUT_SECONDS = 60.0
 _OPEN_VERIFICATION_POLL_INTERVAL_SECONDS = 0.4
 _CLOSE_VERIFICATION_TIMEOUT_SECONDS = 8.0
 _CLOSE_VERIFICATION_POLL_INTERVAL_SECONDS = 0.4
+_DEFERRED_RESTART_ACTIVE_WORK_POLL_SECONDS = 10.0
+_RESTART_BUILD_PREFLIGHT_TIMEOUT_SECONDS = 120.0
 _ACTIVE_WORK_LIFECYCLE_BLOCKED_MESSAGE = "有进行中的任务，无法重启 Vibelution。请等待任务完成或先停止任务。"
 _ACTIVE_WORK_RUNNING_STATUSES = {
     "",
@@ -495,6 +504,16 @@ def _restart_should_preserve_visible_browser(observation: dict[str, Any]) -> boo
     return int(observation.get("browserWindowPid") or 0) > 0
 
 
+def _restart_should_preflight_frontend_build(observation: dict[str, Any], *, args: dict[str, Any]) -> bool:
+    if bool(args.get("skipFrontendBuildPreflight")):
+        return False
+    return (
+        str(observation.get("observedState") or "closed") == "open"
+        and bool(observation.get("backendAlive"))
+        and bool(observation.get("browserWindowAlive"))
+    )
+
+
 def _open_verification_failure_message(observation: dict[str, Any], *, no_browser: bool) -> str:
     backend_ready = _open_backend_ready(observation, launcher_confirmed=True)
     browser_ready = bool(no_browser) or (
@@ -810,6 +829,15 @@ def _creation_flags() -> int:
     return flags
 
 
+def _hidden_startup_info() -> subprocess.STARTUPINFO | None:
+    if os.name != "nt" or not hasattr(subprocess, "STARTUPINFO"):
+        return None
+    startupinfo = subprocess.STARTUPINFO()
+    startupinfo.dwFlags |= int(getattr(subprocess, "STARTF_USESHOWWINDOW", 0))
+    startupinfo.wShowWindow = int(getattr(subprocess, "SW_HIDE", 0))
+    return startupinfo
+
+
 def _select_daemon_python_runtime(python_executable: str) -> dict[str, Any]:
     """Select the Python runtime used for the long-lived daemon process."""
 
@@ -1117,6 +1145,84 @@ def _launcher_error_detail(result: Any, fallback: str) -> str:
     return detail or fallback
 
 
+def _frontend_build_preflight_commands() -> list[tuple[str, list[str]]]:
+    web_dir = PROJECT_ROOT / "web"
+    node_command = shutil.which("node.exe" if os.name == "nt" else "node")
+    if not node_command:
+        node_command = "node.exe" if os.name == "nt" else "node"
+    return [
+        ("tsc -b", [node_command, str(web_dir / "node_modules" / "typescript" / "bin" / "tsc"), "-b"]),
+        ("vite build", [node_command, str(web_dir / "node_modules" / "vite" / "bin" / "vite.js"), "build"]),
+    ]
+
+
+def _preflight_frontend_build_for_restart(command_id: str) -> dict[str, Any]:
+    started_at = now_iso()
+    stdout_parts: list[str] = []
+    stderr_parts: list[str] = []
+    completed_steps: list[str] = []
+    for label, command in _frontend_build_preflight_commands():
+        try:
+            result = subprocess.run(
+                command,
+                cwd=str(PROJECT_ROOT / "web"),
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+                timeout=_RESTART_BUILD_PREFLIGHT_TIMEOUT_SECONDS,
+                creationflags=_creation_flags(),
+                startupinfo=_hidden_startup_info(),
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            payload = {
+                "commandId": command_id,
+                "ok": False,
+                "startedAt": started_at,
+                "step": label,
+                "errorType": type(exc).__name__,
+                "message": str(exc),
+            }
+            _append_event("workbench.restart.build_preflight_failed", payload)
+            raise RuntimeError(
+                f"Restart preflight failed before closing the workbench during {label}: {type(exc).__name__}: {exc}"
+            ) from exc
+        stdout = str(result.stdout or "")
+        stderr = str(result.stderr or "")
+        if stdout:
+            stdout_parts.append(stdout)
+        if stderr:
+            stderr_parts.append(stderr)
+        completed_steps.append(label)
+        if result.returncode != 0:
+            payload = {
+                "commandId": command_id,
+                "ok": False,
+                "returnCode": int(result.returncode),
+                "startedAt": started_at,
+                "step": label,
+                "completedSteps": completed_steps,
+                "stdoutTail": "\n".join(stdout_parts)[-1000:],
+                "stderrTail": "\n".join(stderr_parts)[-1000:],
+            }
+            _append_event("workbench.restart.build_preflight_failed", payload)
+            raise RuntimeError(
+                "Restart preflight failed before closing the workbench.\n"
+                + _launcher_error_detail(result, f"Frontend build preflight failed during {label}.")
+            )
+    payload = {
+        "commandId": command_id,
+        "ok": True,
+        "returnCode": 0,
+        "startedAt": started_at,
+        "completedSteps": completed_steps,
+        "stdoutTail": "\n".join(stdout_parts)[-1000:],
+        "stderrTail": "\n".join(stderr_parts)[-1000:],
+    }
+    _append_event("workbench.restart.build_preflight_succeeded", payload)
+    return payload
+
+
 def _close_active_evolution_runs_for_shutdown() -> list[dict[str, Any]]:
     reason = "Runtime manager is closing the workbench."
     closed: list[dict[str, Any]] = []
@@ -1263,6 +1369,16 @@ class RuntimeManagerDaemon:
                 if command is not None:
                     path, payload = command
                     result = self._handle_command(payload)
+                    if bool(result.get("deferCommandUntilActiveWorkClear")):
+                        defer_processing_command_for_active_work(
+                            path,
+                            payload,
+                            active_work_runs=list(result.get("activeWorkRuns") or []),
+                            delay_seconds=_DEFERRED_RESTART_ACTIVE_WORK_POLL_SECONDS,
+                        )
+                        self._clear_active_command()
+                        time.sleep(DAEMON_LOOP_INTERVAL_SECONDS)
+                        continue
                     if bool(result.get("stopDaemon")):
                         shutdown_cleanup = _prepare_daemon_shutdown()
                         if shutdown_cleanup.get("closedEvolutionRuns"):
@@ -1329,7 +1445,10 @@ class RuntimeManagerDaemon:
 
         try:
             result = handler(command_id=command_id, args=args)
-            _append_event("command.completed", {"commandId": command_id, "type": command_type, "ok": result["ok"]})
+            if bool(result.get("deferCommandUntilActiveWorkClear")):
+                _append_event("command.deferred", {"commandId": command_id, "type": command_type, "reason": "active_work"})
+            else:
+                _append_event("command.completed", {"commandId": command_id, "type": command_type, "ok": result["ok"]})
             return result
         except Exception as exc:
             result = self._finish_command(
@@ -1341,7 +1460,24 @@ class RuntimeManagerDaemon:
                 error_type=type(exc).__name__,
             )
             _append_event("command.failed", {"commandId": command_id, "type": command_type, "message": str(exc)})
-            return result
+        return result
+
+    def _clear_active_command(self) -> None:
+        state = load_state()
+        if not isinstance(state, dict):
+            state = default_state()
+        state.setdefault("command", {}).update(
+            {
+                "activeCommandId": "",
+                "activeType": "",
+                "requestedBy": "",
+                "startedAt": "",
+                "stopManager": False,
+                "noBrowser": False,
+            }
+        )
+        state["lastError"] = {"scope": "", "message": "", "at": ""}
+        save_state(state)
 
     def _finish_command(
         self,
@@ -1439,6 +1575,18 @@ class RuntimeManagerDaemon:
         }
         if allowed_active_work_runs:
             event_payload["allowedActiveWorkRuns"] = allowed_active_work_runs[:8]
+        if bool(args.get("deferredUntilActiveWorkClear")):
+            _append_event(f"workbench.{event_verb}.deferred_active_work_wait", event_payload)
+            return {
+                "commandId": command_id,
+                "accepted": True,
+                "completed": False,
+                "ok": False,
+                "message": _ACTIVE_WORK_LIFECYCLE_BLOCKED_MESSAGE,
+                "deferCommandUntilActiveWorkClear": True,
+                "activeWorkRuns": blocked_active_work_runs,
+                "allowedActiveWorkRuns": allowed_active_work_runs,
+            }
         _append_event(f"workbench.{event_verb}.blocked_active_work", event_payload)
         return self._finish_command(
             command_id,
@@ -1988,6 +2136,9 @@ class RuntimeManagerDaemon:
         state = save_state(self._reconcile_observation(state))
         workbench = state.setdefault("workbench", {})
         effective_no_browser = requested_no_browser
+        build_preflight: dict[str, Any] = {}
+        if _restart_should_preflight_frontend_build(workbench, args=args):
+            build_preflight = _preflight_frontend_build_for_restart(command_id)
         if requested_no_browser and _restart_should_preserve_visible_browser(workbench):
             effective_no_browser = False
             _append_event(
@@ -2079,6 +2230,7 @@ class RuntimeManagerDaemon:
             "residualCleanup": cleanup_result,
             "requestedNoBrowser": requested_no_browser,
             "effectiveNoBrowser": effective_no_browser,
+            "buildPreflight": build_preflight,
         }
 
     def _handle_restart_workbench(self, *, command_id: str, args: dict[str, Any]) -> dict[str, Any]:

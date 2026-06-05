@@ -53,6 +53,9 @@ describe("AgentsRoute layout contract", () => {
 
   it("shows the unified Agent card sections needed by later editing phases", () => {
     expect(routeSource).toContain("copy.model");
+    expect(routeSource).toContain("agentModelLabel");
+    expect(routeSource).toContain("buildAgentModelChoices");
+    expect(routeSource).not.toContain("modelProfileSelectValue");
     expect(routeSource).toContain("copy.prompt");
     expect(routeSource).toContain("promptTemplateDisplayName(agent.promptTemplate, agent.promptTemplateId, lang)");
     expect(routeSource).toContain("promptTemplateDisplayName(selectedAgent.promptTemplate, selectedAgent.promptTemplateId, lang)");
@@ -74,6 +77,89 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("copy.references");
   });
 
+  it("shows LLM names in model selectors instead of role-prefixed profile labels", () => {
+    expect(routeSource).toContain("AgentModelChoice");
+    expect(routeSource).toContain("model.model");
+    expect(routeSource).toContain("model.modelId");
+    expect(routeSource).toContain("function agentModelChoiceAllowed");
+    expect(routeSource).toContain("!text.includes(\"image2\")");
+    expect(routeSource).toContain("buildAgentModelChoices(workspace?.agentModelChoices ?? [])");
+    expect(routeSource).toContain("buildAgentSlotModelChoices(workspace?.agentModelChoices ?? [], slot)");
+    expect(routeSource).toContain("agentLlmSlots(workspace)");
+    expect(routeSource).toContain("workspace?.agentLlmSlots?.length");
+    expect(routeSource).toContain("key: model.modelId");
+    expect(routeSource).toContain("agentModelLabel(agent.dialogueModel)");
+    expect(routeSource).toContain("agentModelChoices.map((model)");
+    expect(routeSource).toContain("value={agentLlmSlotModelId(createDraft.llmBindings, FALLBACK_AGENT_LLM_SLOTS[0])}");
+    expect(routeSource).toContain("value={agentLlmSlotModelId(configDraft.llmBindings, slot)}");
+    expect(routeSource).toContain("styles.llmSlotGrid");
+    expect(routeSource).toContain("llmSlotsHint");
+    expect(routeSource).toContain("按 Agent 自己配置对话、心智模型、摘要、子 Agent 和视觉等 LLM 槽位");
+    expect(routeSource).toContain("设置页只维护模型库资产");
+    expect(routeSource).toContain("title={model.modelLabel || model.modelId}");
+    expect(routeSource).toContain("{model.label}");
+    expect(routeSource).not.toContain("buildModelProfileChoices(workspace?.modelProfiles ?? [])");
+    expect(routeSource).not.toContain("modelProfileChoices.map((profile)");
+    expect(routeSource).not.toContain("value={createDraft.profileId}");
+    expect(routeSource).not.toContain("value={configDraft.profileId}");
+    expect(routeSource).not.toContain("profileByModel");
+    expect(routeSource).not.toContain("profileByLabel");
+    expect(routeSource).not.toContain("choices.has(labelKey)");
+    expect(routeSource).not.toContain("profileIds: [profile.profileId]");
+    expect(routeSource).not.toContain("title={profile.detail || profile.modelId}");
+    expect(routeSource).not.toContain("{agent.modelProfile?.label || agent.profileId || \"-\"}");
+    expect(routeSource).not.toContain("{profile.label || profile.profileId} · {profile.model || profile.providerKind || \"-\"}");
+  });
+
+  it("routes membership guidance to the team surface and not just the config pane", () => {
+    expect(routeSource).toContain("route: agent?.agentId ? `/teams?agent=${encodeURIComponent(agent.agentId)}` : \"/teams\"");
+    expect(routeSource).toContain("void navigate(action.route)");
+    expect(routeSource).toContain("setActivePane(action.pane)");
+    expect(routeSource).toContain("copy.nextSetupMembership");
+  });
+
+  it("keeps tool and runtime completeness strict enough to avoid false positives", () => {
+    expect(routeSource).toContain("function hasToolPolicyConfiguration(agent: AgentConfigWorkspaceAgent | null | undefined)");
+    expect(routeSource).toContain("policy?.blockedTools?.length");
+    expect(routeSource).toContain("function agentHasRuntimeSignal(agent: AgentConfigWorkspaceAgent | null | undefined)");
+    expect(routeSource).toContain("const runtimeState = String(agent?.runtimeStatus?.state || \"\").trim()");
+    expect(routeSource).toContain("runtimeState && runtimeState !== \"idle\"");
+    expect(routeSource).toContain("count((agent) => agent.health.length > 0)");
+    expect(routeSource).toContain("return agent.health.length > 0;");
+  });
+
+  it("defaults new work-session Agents to the backend session tool policy", () => {
+    expect(routeSource).toContain("DEFAULT_SESSION_AGENT_ALLOWED_TOOLS");
+    expect(routeSource).toContain("\"conversation_log_inspect_tool\"");
+    expect(routeSource).toContain("allowedTools: DEFAULT_SESSION_AGENT_ALLOWED_TOOLS.join(\", \")");
+    expect(routeSource).toContain("toolPolicy: workSession ? {} : {");
+  });
+
+  it("uses user-facing Chinese labels instead of internal workspace terms", () => {
+    expect(routeSource).toContain("系统编号");
+    expect(routeSource).toContain("工具能力");
+    expect(routeSource).toContain("记忆设置");
+    expect(routeSource).toContain("工作空间");
+    expect(routeSource).toContain("私人工作区");
+    expect(routeSource).toContain("共享资料区");
+    expect(routeSource).toContain("默认保存位置");
+    expect(routeSource).toContain("使用位置");
+    expect(routeSource).toContain("协作助手");
+    expect(routeSource).toContain("工具能力模板");
+    expect(routeSource).toContain("记忆范围模板");
+    expect(routeSource).not.toContain("后台编号");
+    expect(routeSource).not.toContain("工具权限");
+    expect(routeSource).not.toContain("记忆策略");
+    expect(routeSource).not.toContain("工作领地");
+    expect(routeSource).not.toContain("私有写入根");
+    expect(routeSource).not.toContain("共享读取区");
+    expect(routeSource).not.toContain("默认写入边界");
+    expect(routeSource).not.toContain("模式归属");
+    expect(routeSource).not.toContain("策略注册表待接入");
+    expect(routeSource).not.toContain("记忆边界模板");
+    expect(routeSource).not.toContain("工具权限模板");
+  });
+
   it("edits the minimal Agent card fields through the Agent PATCH endpoint", () => {
     expect(routeSource).toContain("AgentConfigDraft");
     expect(routeSource).toContain("useMutation");
@@ -84,7 +170,7 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("copy.memoryPolicyPickerHint");
     expect(routeSource).toContain("styles.configGuidePanel");
     expect(routeSource).toContain("displayName: payload.draft.displayName");
-    expect(routeSource).toContain("profileId: payload.draft.profileId");
+    expect(routeSource).toContain("llmBindings: normalizeAgentLlmBindings(payload.draft.llmBindings)");
     expect(routeSource).toContain("promptTemplateId: payload.draft.promptTemplateId");
     expect(routeSource).toContain("toolPolicyId: payload.draft.toolPolicyId");
     expect(routeSource).toContain("memoryPolicyId: payload.draft.memoryPolicyId");
@@ -112,6 +198,9 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("AgentPersonaDraft");
     expect(routeSource).toContain("personaProfileFromDraft");
     expect(routeSource).toContain("personaProfile: personaProfileFromDraft(payload.draft)");
+    expect(routeSource).toContain("updatedAgentWorkspaceCache");
+    expect(routeSource).toContain("setPersonaDraft(personaDraftFromAgent(agent))");
+    expect(routeSource).toContain("draftSyncSourceRef.current = draftSyncSourceFromAgent(workspace, agent)");
     expect(routeSource).toContain("copy.personaTitle");
     expect(routeSource).toContain("copy.gender");
     expect(routeSource).toContain("copy.age");
@@ -215,11 +304,14 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("toggleToolPolicyScope(\"writeScopes\", \"shared\"");
     expect(routeSource).toContain("copy.workspaceWriteScopes");
     expect(routeSource).toContain("styles.workspaceScopePanel");
-    expect(routeSource).toContain("groupPolicyToolsByCategory");
+    expect(routeSource).toContain("groupPolicyToolsByBundle");
     expect(routeSource).toContain("visiblePolicyToolGroups");
+    expect(routeSource).toContain("tool.bundleIds");
     expect(routeSource).toContain("toolCategoryLabel");
     expect(routeSource).toContain("toolTierLabel");
     expect(routeSource).toContain("copy.toolCategoryCount");
+    expect(routeSource).toContain("按工具包配置");
+    expect(routeSource).toContain("同一工具只会保存一份授权状态");
     expect(routeSource).toContain("copy.capabilityPreviewTitle");
     expect(routeSource).toContain("capabilityPreview.highRiskAllowed");
     expect(routeSource).toContain("styles.capabilityPreviewPanel");
@@ -231,6 +323,8 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("queryKeys.tools()");
     expect(routeSource).toContain("styles.toolPermissionList");
     expect(routeSource).toContain("styles.segmentedControl");
+    expect(routeSource.indexOf("copy.workspaceWriteScopes")).toBeLessThan(routeSource.indexOf("copy.toolBundlesTitle"));
+    expect(routeSource.indexOf("copy.toolBundlesTitle")).toBeLessThan(routeSource.indexOf("copy.toolSearch"));
     expect(styles.toolBundlePanel).toBeTruthy();
     expect(styles.toolBundleItem).toBeTruthy();
     expect(styles.toolPermissionGroup).toBeTruthy();
@@ -265,9 +359,11 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("readKnowledgeBaseIds: sortedIds(payload.draft.readKnowledgeBaseIds)");
     expect(routeSource).toContain("proposeKnowledgeBaseIds: sortedIds(payload.draft.proposeKnowledgeBaseIds)");
     expect(routeSource).toContain("reviewKnowledgeBaseIds: sortedIds(payload.draft.reviewKnowledgeBaseIds)");
+    expect(routeSource).toContain("rateKnowledgeBaseIds: sortedIds(payload.draft.rateKnowledgeBaseIds)");
     expect(routeSource).toContain("copy.readKnowledgeBaseIds");
     expect(routeSource).toContain("copy.proposeKnowledgeBaseIds");
     expect(routeSource).toContain("copy.reviewKnowledgeBaseIds");
+    expect(routeSource).toContain("copy.rateKnowledgeBaseIds");
     expect(routeSource).toContain("styles.memoryPolicyGrid");
     expect(routeSource).toContain("styles.tagList");
     expect(routeSource).toContain("styles.inlineAdd");
@@ -306,6 +402,38 @@ describe("AgentsRoute layout contract", () => {
     expect(styles.detailTabs).toBeTruthy();
   });
 
+  it("includes work-session Agent setup copy for model instructions and workspace boundaries", () => {
+    expect(routeSource).toContain("function isWorkSessionCreateDraft");
+    expect(routeSource).toContain("const createDraftIsWorkSession = isWorkSessionCreateDraft(createDraft)");
+    expect(routeSource).toContain("const workSession = isWorkSessionCreateDraft(draft)");
+    expect(routeSource).toContain("const sectionOrder = [\"status\", \"boundary\", \"mode\", \"reference\"] as const");
+    expect(routeSource).toContain("copy.managementModelPrompt");
+    expect(routeSource).toContain("copy.managementWorkspace");
+    expect(routeSource).toContain("copy.nextSetupModelPrompt");
+    expect(routeSource).toContain("copy.nextSetupWorkspace");
+    expect(routeSource).toContain("Model / instructions");
+    expect(routeSource).toContain("Check workspace boundary");
+    expect(routeSource).toContain("配置模型与项目指令");
+    expect(routeSource).toContain("检查工作区边界");
+    expect(routeSource).toContain("Work-session Agents");
+    expect(routeSource).toContain("Team role Agents");
+    expect(routeSource).toContain("会话工作 Agent");
+    expect(routeSource).toContain("团队角色 Agent");
+  });
+
+  it("keeps persona, task, and membership configuration out of work-session Agents", () => {
+    expect(routeSource).toContain("selectedAgentRequiresPersona");
+    expect(routeSource).toContain("selectedAgentRequiresTask");
+    expect(routeSource).toContain("selectedAgentRequiresTeamMembership");
+    expect(routeSource).toContain("{selectedAgentRequiresPersona ? (");
+    expect(routeSource).toContain("{selectedAgentRequiresTask ? (");
+    expect(routeSource).toContain("{selectedAgentRequiresTeamMembership ? (");
+    expect(routeSource).toContain("{!createDraftIsWorkSession ? (");
+    expect(routeSource).toContain("const roleKey = workSession ? \"\" : draft.roleKey.trim()");
+    expect(routeSource).toContain("const personaProfile = workSession");
+    expect(routeSource).toContain("const taskProfile = workSession");
+  });
+
   it("adds task-oriented Agent management filters for configuration gaps", () => {
     expect(routeSource).toContain("buildManagementFilterGroups");
     expect(routeSource).toContain("managementFilterMatches");
@@ -325,7 +453,13 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("/messages?status=pending&limit=8");
     expect(routeSource).toContain("/consume");
     expect(routeSource).toContain("consumeMessageMutation");
+    expect(routeSource).toContain("consumeAllMessagesMutation");
+    expect(routeSource).toContain("/messages/consume-all");
+    expect(routeSource).toContain("copy.handleInboxNow");
+    expect(routeSource).toContain("copy.consumeAllMessages");
     expect(routeSource).toContain("copy.inboxTitle");
+    expect(routeSource).toContain("const selectedAgentInboxPendingCount = selectedAgent?.agentInboxPendingCount ?? agentMessagesQuery.data?.length ?? 0");
+    expect(routeSource).toContain("<h3>{copy.inboxTitle}: {selectedAgentInboxPendingCount}</h3>");
     expect(routeSource).toContain("styles.inboxMessageList");
     expect(routeSource).toContain("styles.inboxMessageItem");
   });
@@ -389,6 +523,7 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("window.confirm");
     expect(routeSource).toContain("copy.archiveAgent");
     expect(routeSource).toContain("archivedWorkspaceCache");
+    expect(routeSource).toContain("purgedWorkspaceCache");
     expect(routeSource).toContain("queryClient.setQueryData<AgentConfigWorkspace | undefined>");
     expect(routeSource).toContain("purgeAgentMutation");
     expect(routeSource).toContain("/purge");
@@ -404,6 +539,11 @@ describe("AgentsRoute layout contract", () => {
   it("offers a governed per-Agent debug reset without archive or membership cleanup", () => {
     expect(routeSource).toContain("AgentResetOptions");
     expect(routeSource).toContain("resetAgentMutation");
+    expect(routeSource).toContain("resettingAgentIds");
+    expect(routeSource).toContain("selectedAgentResetPending");
+    expect(routeSource).toContain("new Set(current)");
+    expect(routeSource).toContain("next.add(payload.agentId)");
+    expect(routeSource).toContain("next.delete(payload.agentId)");
     expect(routeSource).toContain("/reset");
     expect(routeSource).toContain("method: \"POST\"");
     expect(routeSource).toContain("copy.resetAgent");
@@ -424,9 +564,27 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("styles.resetOptionField");
     expect(routeSource).toContain("queryKeys.agentRuntimeEvidence(agent.agentId)");
     expect(routeSource).toContain("selectedAgent.status !== \"archived\"");
+    expect(routeSource).toContain("disabled={!canResetAgent || selectedAgentResetPending}");
+    expect(routeSource).toContain("selectedAgentResetPending ? copy.resettingAgent : copy.resetAgent");
+    expect(routeSource).not.toContain("!canResetAgent || resetAgentMutation.isPending");
     expect(styles.resetZone).toBeTruthy();
     expect(styles.resetOptionGrid).toBeTruthy();
     expect(styles.resetOptionField).toBeTruthy();
+  });
+
+  it("keeps per-Agent avatar, governance, and inbox actions scoped to their target object", () => {
+    expect(routeSource).toContain("selectedAgentAvatarUpdatePending");
+    expect(routeSource).toContain("selectedAgentAvatarUploadPending");
+    expect(routeSource).toContain("selectedAgentConsumeAllPending");
+    expect(routeSource).toContain("updateAvatarMutation.variables?.agentId === selectedAgent?.agentId");
+    expect(routeSource).toContain("uploadAvatarMutation.variables?.agentId === selectedAgent?.agentId");
+    expect(routeSource).toContain("(current) => updatedAgentWorkspaceCache(current, agent)");
+    expect(routeSource).toContain("(current) => updatedAgentWorkspaceCache(current, result.agent)");
+    expect(routeSource).toContain("consumeAllMessagesMutation.variables?.agentId === selectedAgent?.agentId");
+    expect(routeSource).toContain("resolveToolGovernanceMutation.variables?.requestId === request.requestId");
+    expect(routeSource).toContain("consumeMessageMutation.variables?.messageId === messageId");
+    expect(routeSource).toContain("queryKeys.agentMessages(variables.agentId, \"pending\")");
+    expect(routeSource).not.toContain("if (selectedAgent?.agentId) {\n        void queryClient.invalidateQueries({ queryKey: queryKeys.agentMessages(selectedAgent.agentId, \"pending\") });");
   });
 
   it("keeps archived Agents out of non-archived filter lists immediately", () => {

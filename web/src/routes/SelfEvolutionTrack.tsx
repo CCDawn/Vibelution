@@ -30,8 +30,10 @@ import {
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { ConversationView } from "../components/conversation/ConversationView";
 import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
+import { TranslationKey } from "../i18n/dictionary";
 import { petAvatarPresetLabel } from "../i18n/petLabels";
 import { useAppI18n } from "../i18n/useAppI18n";
+import { getPetAvatarSymbol } from "./chatCompactPanel";
 import styles from "./SelfEvolutionTrack.module.css";
 
 type SelfEvolutionTrackProps = {
@@ -86,8 +88,59 @@ type ConversationTaskSummary = {
   updatedAt: string;
 };
 
+type SelfEvolutionPetCompanionTone = "idle" | "active" | "paused" | "caution" | "error";
+
+export type SelfEvolutionPetCompanionState = {
+  tone: SelfEvolutionPetCompanionTone;
+  stateKey: TranslationKey;
+  detailKey: TranslationKey;
+};
+
 const WORKTREE_PAGE_SIZE = 10;
 const SELF_SIDEBAR_WIDTH_STORAGE_KEY = "vibelution.self.sidebar.width";
+
+export function deriveSelfEvolutionPetCompanionState({
+  petLoadFailed = false,
+  worktreeIsolationStartError = false,
+  terminateRequested = false,
+  pauseRequested = false,
+  runStatus = "",
+}: {
+  petLoadFailed?: boolean;
+  worktreeIsolationStartError?: boolean;
+  terminateRequested?: boolean;
+  pauseRequested?: boolean;
+  runStatus?: string | null;
+}): SelfEvolutionPetCompanionState {
+  if (petLoadFailed) {
+    return { tone: "error", stateKey: "petSelfCompanionError", detailKey: "petSelfCompanionErrorDetail" };
+  }
+  if (worktreeIsolationStartError) {
+    return { tone: "caution", stateKey: "petSelfCompanionWorktree", detailKey: "petSelfCompanionWorktreeDetail" };
+  }
+  if (terminateRequested) {
+    return { tone: "caution", stateKey: "petSelfCompanionStopping", detailKey: "petSelfCompanionStoppingDetail" };
+  }
+  if (pauseRequested || isPausedRunStatus(runStatus || "")) {
+    return { tone: "paused", stateKey: "petSelfCompanionPaused", detailKey: "petSelfCompanionPausedDetail" };
+  }
+
+  const normalizedStatus = String(runStatus || "").trim().toLowerCase();
+  if (normalizedStatus === "queued") {
+    return { tone: "active", stateKey: "petSelfCompanionQueued", detailKey: "petSelfCompanionQueuedDetail" };
+  }
+  if (normalizedStatus === "running") {
+    return { tone: "active", stateKey: "petSelfCompanionRunning", detailKey: "petSelfCompanionRunningDetail" };
+  }
+  if (["failed", "error", "blocked"].includes(normalizedStatus)) {
+    return { tone: "error", stateKey: "petSelfCompanionRunFailed", detailKey: "petSelfCompanionRunFailedDetail" };
+  }
+  if (["done", "completed", "success"].includes(normalizedStatus)) {
+    return { tone: "idle", stateKey: "petSelfCompanionDone", detailKey: "petSelfCompanionDoneDetail" };
+  }
+
+  return { tone: "idle", stateKey: "petSelfCompanionIdle", detailKey: "petSelfCompanionIdleDetail" };
+}
 
 export function pruneSelectedHistoryTxnIds(selectedTxnIds: string[], visibleTxnIds: string[]) {
   if (selectedTxnIds.length === 0) {
@@ -359,6 +412,13 @@ export function SelfEvolutionTrack({
   const terminateRequested = controlAction === "terminate" || String(latestRun?.status || "").toLowerCase() === "stopping";
   const pauseRequested = controlAction === "pause" || String(latestRun?.runtimeStatus || "").toLowerCase() === "pausing";
   const worktreeIsolationStartError = isWorktreeIsolationStartError(startError);
+  const petCompanionState = deriveSelfEvolutionPetCompanionState({
+    petLoadFailed: petQuery.isError,
+    worktreeIsolationStartError,
+    terminateRequested,
+    pauseRequested,
+    runStatus: latestRun?.status || latestRun?.runtimeStatus || overview?.readiness.state || "",
+  });
   const errorMessage = collectUniqueLines([
     startError,
     startWorktreeError,
@@ -408,6 +468,7 @@ export function SelfEvolutionTrack({
             ? t("petCompanionLowEnergy")
             : t("petCompanionStable");
   const petPresetLabel = petAvatarPresetLabel(t, pet?.avatarPreset);
+  const petAvatarFallback = getPetAvatarSymbol(pet?.avatarPreset, pet?.name);
 
   function disabledReason(state: { enabled: boolean; reason: string } | undefined) {
     if (!state || state.enabled) {
@@ -671,13 +732,13 @@ export function SelfEvolutionTrack({
               </div>
             </section>
 
-            <section className={styles.surface}>
+            <section className={`${styles.petCompanionSurface} ${styles[`petCompanionTone_${petCompanionState.tone}`]}`}>
               <div className={styles.sectionHeader}>
                 <div>
-                  <p className={styles.eyebrow}>{t("petSpace")}</p>
+                  <p className={styles.eyebrow}>{t("petSelfCompanion")}</p>
                   <h3 className={styles.sectionTitle}>{pet?.name ?? t("loadingPetState")}</h3>
                 </div>
-                <span className={styles.secondaryPill}>{t("level")} {pet?.level ?? 0}</span>
+                <span className={styles.statusPill}>{t(petCompanionState.stateKey)}</span>
               </div>
 
               <div className={styles.petAvatarStage}>
@@ -690,8 +751,11 @@ export function SelfEvolutionTrack({
                 <div className={styles.petAvatarBadge}>{petPresetLabel} {t("preset")}</div>
               </div>
 
-              <p className={styles.noticeText}>{pet?.statusLine ?? t("readingCompanionState")}</p>
-              <p className={styles.noticeText}>{petCompanionLine}</p>
+              <div className={styles.petCompanionCopy}>
+                <p>{t(petCompanionState.detailKey)}</p>
+                <span>{pet?.statusLine ?? t("readingCompanionState")}</span>
+                <span>{petCompanionLine}</span>
+              </div>
             </section>
 
             <section className={styles.surface}>
@@ -759,6 +823,7 @@ export function SelfEvolutionTrack({
                 phase={runSemantics?.phase || latestRun?.status || overview.readiness.state}
                 messages={conversationMessages}
                 assistantDisplayName={pet?.name}
+                assistantAvatarFallback={petAvatarFallback}
                 userDisplayName={runtime?.userName}
                 taskSummary={conversationTask.latestSummary}
                 defaultFileContext={conversationTask.changedFiles.at(-1) || conversationTask.readFiles.at(-1) || "workspace"}

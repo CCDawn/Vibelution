@@ -663,7 +663,7 @@ def test_self_evolution_agent_bindings_block_archived_slot_replacement(tmp_path,
     service.ensure_self_evolution_agent_instances()
     replacement = agent_directory_service.create_agent_instance(
         display_name="将被归档的自进化执行 Agent",
-        profile_id="primary",
+        llm_bindings={"dialogue": {"modelId": "model-primary"}},
         primary_mode="self_evolution",
         role_key="executor",
         prompt_template_id="prompt-self-executor",
@@ -718,6 +718,14 @@ def test_self_evolution_turn_uses_executor_context_engine_packet(tmp_path, monke
     monkeypatch.setattr(service, "get_active_supervised_worktree_run", lambda: None)
     monkeypatch.setattr(service, "_capture_preflight_state", lambda run_id: {"runDir": "", "backupDir": "", "manifestPath": "", "baseRev": ""})
     monkeypatch.setattr(service, "_finalize_rollback_manifest", lambda run_id, preflight: None)
+    base_config = session_service.get_config().model_copy(deep=True)
+    base_config.llm.model_library["self-executor-runtime-model"] = {
+        "provider_id": base_config.llm.profiles["primary"].provider_id,
+        "model": "self-executor-runtime",
+        "streaming": False,
+        "tool_calling_mode": "disabled",
+    }
+    monkeypatch.setattr(session_service, "get_config", lambda: base_config)
     prompt_template_service.update_prompt_template(
         "prompt-self-executor",
         name="自进化执行提示词",
@@ -732,6 +740,7 @@ def test_self_evolution_turn_uses_executor_context_engine_packet(tmp_path, monke
             captured["mode"] = str(mode or "")
             captured["workspace_path"] = str(workspace_path or "")
             captured["profile_id"] = config.llm.get_profile(role="primary").profile_id if config else ""
+            captured["primary_model"] = config.llm.get_profile(role="primary").model if config else ""
 
         def seed_runtime_context(self, content):
             captured["runtime_context"] = str(content or "")
@@ -768,6 +777,11 @@ def test_self_evolution_turn_uses_executor_context_engine_packet(tmp_path, monke
     monkeypatch.setattr(service, "run_agent_single_turn", fake_run_agent_single_turn)
     monkeypatch.setattr(service._RUN_EXECUTOR, "submit", lambda fn, context: fn(context))
 
+    bindings = service.self_evolution_agent_bindings()
+    agent_directory_service.update_agent_instance(
+        bindings["executor"]["agentId"],
+        llm_bindings={"dialogue": {"modelId": "self-executor-runtime-model"}},
+    )
     snapshot = service.start_self_evolution_run({"goal": "只读观察"})
     executor = snapshot["agentBindings"]["executor"]
     event_path = tmp_path / executor["workspacePath"] / "events" / "agent_turn_results.jsonl"
@@ -780,6 +794,8 @@ def test_self_evolution_turn_uses_executor_context_engine_packet(tmp_path, monke
     assert snapshot["status"] == "done"
     assert captured["mode"] == "self_evolution"
     assert captured["workspace_path"] == executor["workspacePath"]
+    assert captured["profile_id"] == "primary"
+    assert captured["primary_model"] == "self-executor-runtime"
     assert "Agent Runtime Context" in captured["runtime_context"]
     assert "Agent Prompt Template" in captured["runtime_context"]
     assert "自进化执行 Agent" in captured["runtime_context"]

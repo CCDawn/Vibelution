@@ -79,6 +79,7 @@ class ConfigDraftAddProfilePayload(ConfigDraftPayload):
 
 class ConfigDraftTestPayload(ConfigDraftPayload):
     profileId: str | None = None
+    modelId: str = ""
     capability: str = "text"
 
 
@@ -88,6 +89,8 @@ class ConfigDraftCapabilityPayload(ConfigDraftPayload):
 
 class ConfigDiscoverModelsPayload(ConfigDraftPayload):
     provider: dict[str, Any] = Field(default_factory=dict)
+    modelId: str = ""
+    apiKeyEnv: str = ""
     apiKey: str = ""
 
 
@@ -227,6 +230,7 @@ def config_test_llm(payload: ConfigDraftTestPayload) -> dict:
             payload.publicConfig,
             draft_meta=payload.draftMeta,
             profile_id=payload.profileId,
+            model_id=payload.modelId,
             capability=payload.capability,
         )
     except Exception as exc:  # pragma: no cover - routed below
@@ -253,6 +257,8 @@ def config_discover_models(payload: ConfigDiscoverModelsPayload) -> dict:
             payload.publicConfig,
             draft_meta=payload.draftMeta,
             provider=payload.provider,
+            model_id=payload.modelId,
+            api_key_env=payload.apiKeyEnv,
             api_key=payload.apiKey,
         )
     except Exception as exc:  # pragma: no cover - routed below

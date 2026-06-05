@@ -10,6 +10,7 @@ const statusKeyMap: Record<string, TranslationKey> = {
   running: "status_running",
   failed: "status_failed",
   waiting: "status_waiting",
+  inconclusive: "status_inconclusive",
   done: "status_done",
   success: "status_success",
   queued: "status_queued",

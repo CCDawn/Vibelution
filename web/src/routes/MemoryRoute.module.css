@@ -832,6 +832,7 @@
   position: absolute;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
+  grid-template-rows: auto auto;
   align-items: center;
   column-gap: 5px;
   row-gap: 1px;
@@ -855,7 +856,7 @@
 }
 
 .graphNodeBadge[data-detail="true"] {
-  grid-template-rows: auto auto;
+  grid-template-rows: auto auto auto;
   width: min(210px, max-content);
   max-width: 210px;
   min-height: 34px;
@@ -890,7 +891,20 @@
 }
 
 .graphNodeBadge[data-detail="true"] .graphNodeBadgeType {
-  grid-row: 1 / span 2;
+  grid-row: 2 / span 2;
+}
+
+.graphNodeBadgeQuestion {
+  grid-column: 1 / -1;
+  min-width: 0;
+  overflow: hidden;
+  color: color-mix(in srgb, var(--node-color, var(--accent-cool)) 38%, rgba(226, 232, 240, 0.86));
+  font-size: 0.55rem;
+  font-style: normal;
+  font-weight: 760;
+  line-height: 1.12;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .graphNodeBadge strong,
@@ -1156,6 +1170,89 @@
   line-height: 1.35;
 }
 
+.graphResponsibilityPanel,
+.graphKnowledgePanel {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-panel) 76%, transparent);
+}
+
+.graphResponsibilityPanel span {
+  color: var(--fg-tertiary);
+  font-size: 0.66rem;
+  font-weight: 760;
+  text-transform: uppercase;
+}
+
+.graphResponsibilityPanel strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-primary);
+  font-size: 0.78rem;
+  line-height: 1.28;
+  text-overflow: ellipsis;
+}
+
+.graphKnowledgeList {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  max-height: 220px;
+  overflow: auto;
+}
+
+.graphKnowledgeItem {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 7px;
+  border: 1px solid color-mix(in srgb, var(--border-soft) 72%, transparent);
+  border-radius: 8px;
+  background: var(--surface-card);
+}
+
+.graphKnowledgeItem div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.graphKnowledgeItem strong,
+.graphKnowledgeItem small,
+.graphKnowledgeItem p,
+.graphKnowledgeItem span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.graphKnowledgeItem strong {
+  color: var(--fg-primary);
+  font-size: 0.76rem;
+  white-space: nowrap;
+}
+
+.graphKnowledgeItem small,
+.graphKnowledgeItem span {
+  color: var(--fg-tertiary);
+  font-size: 0.66rem;
+  white-space: nowrap;
+}
+
+.graphKnowledgeItem p {
+  display: -webkit-box;
+  margin: 0;
+  color: var(--fg-secondary);
+  font-size: 0.72rem;
+  line-height: 1.32;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
 .detailMeta {
   display: grid;
   gap: 5px;
@@ -1185,6 +1282,14 @@
 
 [data-node-type="agent"] {
   --node-color: #1594c7;
+}
+
+[data-node-type="agent"][data-agent-category="session_agent"] {
+  --node-color: #4f7cff;
+}
+
+[data-node-type="agent"][data-agent-category="team_member_agent"] {
+  --node-color: #18a878;
 }
 
 [data-node-type="agent_private_memory"] {

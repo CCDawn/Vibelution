@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { pruneSelectedHistoryTxnIds } from "./SelfEvolutionTrack";
+import { deriveSelfEvolutionPetCompanionState, pruneSelectedHistoryTxnIds } from "./SelfEvolutionTrack";
 import selfEvolutionSource from "./SelfEvolutionTrack.tsx?raw";
 
 describe("SelfEvolutionTrack static assets", () => {
@@ -28,6 +28,14 @@ describe("SelfEvolutionTrack static assets", () => {
     expect(selfEvolutionSource).toContain("startSelfWorktreeRun");
     expect(selfEvolutionSource).toContain("onStartWorktreeRun");
   });
+
+  it("keeps the pet companion read-only inside self-evolution", () => {
+    expect(selfEvolutionSource).toContain("deriveSelfEvolutionPetCompanionState");
+    expect(selfEvolutionSource).toContain("petSelfCompanion");
+    expect(selfEvolutionSource).toContain("petCompanionSurface");
+    expect(selfEvolutionSource).toContain('fetchJson<PetSummary>("/api/pet/summary")');
+    expect(selfEvolutionSource).not.toContain("/api/pet/actions");
+  });
 });
 
 describe("self-evolution history selection pruning", () => {
@@ -41,5 +49,35 @@ describe("self-evolution history selection pruning", () => {
     const selected = ["txn-1", "txn-old", "txn-2"];
 
     expect(pruneSelectedHistoryTxnIds(selected, ["txn-1", "txn-2"])).toEqual(["txn-1", "txn-2"]);
+  });
+});
+
+describe("self-evolution pet companion state", () => {
+  it("turns active self-evolution runs into read-only companion copy", () => {
+    expect(deriveSelfEvolutionPetCompanionState({ runStatus: "queued" })).toMatchObject({
+      tone: "active",
+      stateKey: "petSelfCompanionQueued",
+    });
+    expect(deriveSelfEvolutionPetCompanionState({ runStatus: "running" })).toMatchObject({
+      tone: "active",
+      stateKey: "petSelfCompanionRunning",
+    });
+  });
+
+  it("prioritizes safety boundaries over ordinary run status", () => {
+    expect(deriveSelfEvolutionPetCompanionState({
+      runStatus: "running",
+      worktreeIsolationStartError: true,
+    })).toMatchObject({
+      tone: "caution",
+      stateKey: "petSelfCompanionWorktree",
+    });
+    expect(deriveSelfEvolutionPetCompanionState({
+      runStatus: "running",
+      petLoadFailed: true,
+    })).toMatchObject({
+      tone: "error",
+      stateKey: "petSelfCompanionError",
+    });
   });
 });

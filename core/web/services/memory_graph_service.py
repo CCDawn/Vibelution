@@ -16,6 +16,7 @@ SCHEMA_VERSION = 1
 DEFAULT_LIMIT = 800
 MAX_LIMIT = 5000
 BODY_KEYS = {"content", "excerpt", "raw", "prompt", "messages", "transcript"}
+DETAIL_ITEM_LIMIT = 24
 
 
 def get_memory_knowledge_graph(
@@ -36,8 +37,28 @@ def get_memory_knowledge_graph(
     include_set = _include_set(include)
     node_limit = max(1, min(int(limit or DEFAULT_LIMIT), MAX_LIMIT))
     graph = _GraphBuilder(node_limit)
+    detail_cache: dict[str, list[dict[str, Any]]] = {}
 
     project_node_id = "project:vibelution"
+    agents = agent_directory_service.list_agents(include_archived=False)
+    team_member_agent_ids: set[str] = set()
+    teams = [
+        team
+        for team in list(team_service.list_team_graph_references(include_archived=False).get("teams") or [])
+        if isinstance(team, dict) and (not normalized_team_id or str(team.get("teamId") or "") == normalized_team_id)
+    ]
+    for team in teams:
+        for member in list(team.get("members") or []):
+            if isinstance(member, dict):
+                member_agent_id = str(member.get("agentId") or "").strip()
+                if member_agent_id:
+                    team_member_agent_ids.add(member_agent_id)
+    project_child_node_ids = [_node_id("team", str(team.get("teamId") or "").strip()) for team in teams if str(team.get("teamId") or "").strip()]
+    project_child_node_ids.extend(
+        _node_id("agent", str(agent.get("agentId") or "").strip())
+        for agent in agents
+        if str(agent.get("agentId") or "").strip() and str(agent.get("agentId") or "").strip() not in team_member_agent_ids
+    )
     graph.add_node(
         project_node_id,
         "project",
@@ -45,32 +66,28 @@ def get_memory_knowledge_graph(
         summary="项目运行结构、Agent、Team、记忆域和知识库的只读图谱根节点。",
         status="active",
         metadata={"root": _rel(_project_root())},
+        responsibility_question=_responsibility_question("project", {"label": "Vibelution"}),
+        visual={"size": "root"},
+        child_node_ids=project_child_node_ids,
     )
-
-    agents = agent_directory_service.list_agents(include_archived=False)
-    agents_by_id = {str(agent.get("agentId") or "").strip(): agent for agent in agents if str(agent.get("agentId") or "").strip()}
-    teams = [
-        team
-        for team in list(team_service.list_teams_compact(include_archived=False).get("teams") or [])
-        if isinstance(team, dict) and (not normalized_team_id or str(team.get("teamId") or "") == normalized_team_id)
-    ]
 
     visible_team_ids: set[str] = set()
     visible_base_ids: set[str] = set()
     agent_team_ids: set[str] = set()
     for team in teams:
         team_id_value = str(team.get("teamId") or "").strip()
+        team_owner = team_knowledge_service._owner_context("team", team_id_value, team=team)
         if normalized_agent_id and any(
             str(member.get("agentId") or "").strip() == normalized_agent_id
             for member in list(team.get("members") or [])
             if isinstance(member, dict)
         ):
             agent_team_ids.add(team_id_value)
-        for base in team_knowledge_service._knowledge_bases_for_team(team_id_value):
+        for base in team_knowledge_service._knowledge_bases_for_owner(team_owner):
             base_id = str(base.get("knowledgeBaseId") or "").strip()
             if normalized_base_id and base_id != normalized_base_id:
                 continue
-            if team_knowledge_service._can_access(team, base, normalized_agent_id, "read"):
+            if team_knowledge_service._can_access(team_owner, base, normalized_agent_id, "read"):
                 visible_team_ids.add(team_id_value)
                 visible_base_ids.add(base_id)
         if not normalized_agent_id:
@@ -83,6 +100,12 @@ def get_memory_knowledge_graph(
         if not agent_id_value:
             continue
         metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+        agent_category = "team_member_agent" if agent_id_value in team_member_agent_ids else "session_agent"
+        agent_detail = _owner_knowledge_detail(
+            team_knowledge_service._owner_context("agent", agent_id_value, agent=agent),
+            normalized_agent_id,
+            cache=detail_cache,
+        )
         graph.add_node(
             _node_id("agent", agent_id_value),
             "agent",
@@ -98,30 +121,29 @@ def get_memory_knowledge_graph(
                 "roleKey": str(agent.get("roleKey") or ""),
                 "memoryPolicyId": str(agent.get("memoryPolicyId") or ""),
                 "workspacePath": str(agent.get("workspacePath") or ""),
+                "agentCategory": agent_category,
             },
+            responsibility_question=_responsibility_question("agent", agent, agent_category=agent_category),
+            visual={"size": "leaf", "agentCategory": agent_category},
+            content_items=agent_detail,
         )
         graph.add_edge(project_node_id, _node_id("agent", agent_id_value), "project_has_agent")
-        if not normalized_agent_id or normalized_agent_id == agent_id_value:
-            memory_node_id = _node_id("agent_private_memory", agent_id_value)
-            graph.add_node(
-                memory_node_id,
-                "agent_private_memory",
-                f"{str(agent.get('displayName') or agent_id_value)} 私有记忆",
-                summary="Agent 私有记忆域；图谱只展示结构入口，不展开记忆正文。",
-                status="visible" if not normalized_agent_id or normalized_agent_id == agent_id_value else "restricted",
-                metadata={
-                    "agentId": agent_id_value,
-                    "storage": f"workspace/agents/{agent_id_value}/memory",
-                    "fullContentIncluded": False,
-                },
-            )
-            graph.add_edge(_node_id("agent", agent_id_value), memory_node_id, "agent_has_private_memory")
 
     for team in teams:
         team_id_value = str(team.get("teamId") or "").strip()
         if not team_id_value or team_id_value not in visible_team_ids:
             continue
         team_node_id = _node_id("team", team_id_value)
+        child_node_ids = [
+            _node_id("agent", str(member.get("agentId") or "").strip())
+            for member in list(team.get("members") or [])
+            if isinstance(member, dict) and str(member.get("agentId") or "").strip()
+        ]
+        team_detail = _owner_knowledge_detail(
+            team_knowledge_service._owner_context("team", team_id_value, team=team),
+            normalized_agent_id,
+            cache=detail_cache,
+        )
         graph.add_node(
             team_node_id,
             "team",
@@ -136,6 +158,10 @@ def get_memory_knowledge_graph(
                 "linkedChatRoomId": str(team.get("linkedChatRoomId") or ""),
                 "canvasPath": str(team.get("canvasPath") or ""),
             },
+            responsibility_question=_responsibility_question("team", team),
+            visual={"size": "group"},
+            child_node_ids=child_node_ids,
+            content_items=team_detail,
         )
         graph.add_edge(project_node_id, team_node_id, "project_has_team")
         for member in list(team.get("members") or []):
@@ -150,21 +176,6 @@ def get_memory_knowledge_graph(
                 "team_has_agent",
                 label=str(member.get("role") or "member"),
                 metadata={"role": str(member.get("role") or "member"), "agentStatus": str(member.get("agentStatus") or "")},
-            )
-
-        for base in team_knowledge_service._knowledge_bases_for_team(team_id_value):
-            base_id = str(base.get("knowledgeBaseId") or "").strip()
-            if not base_id or base_id not in visible_base_ids:
-                continue
-            if not team_knowledge_service._can_access(team, base, normalized_agent_id, "read"):
-                continue
-            _add_knowledge_base_subgraph(
-                graph,
-                team=team,
-                base=base,
-                team_node_id=team_node_id,
-                agents_by_id=agents_by_id,
-                include_set=include_set,
             )
 
     if "runtime" in include_set or "all" in include_set or not include_set:
@@ -222,6 +233,10 @@ class _GraphBuilder:
         created_at: str = "",
         updated_at: str = "",
         metadata: dict[str, Any] | None = None,
+        responsibility_question: str = "",
+        visual: dict[str, Any] | None = None,
+        child_node_ids: list[str] | None = None,
+        content_items: list[dict[str, Any]] | None = None,
     ) -> None:
         if not node_id or node_id in self.nodes:
             return
@@ -237,6 +252,10 @@ class _GraphBuilder:
             "createdAt": created_at,
             "updatedAt": updated_at,
             "metadata": _sanitize_metadata(metadata or {}),
+            "responsibilityQuestion": _trim(responsibility_question or _responsibility_question(node_type, {"label": label}), 180),
+            "visual": _sanitize_metadata(visual or _default_visual(node_type)),
+            "childNodeIds": _string_list(child_node_ids or [], limit=80),
+            "contentItems": _sanitize_content_items(content_items or [], limit=DETAIL_ITEM_LIMIT),
         }
 
     def add_edge(
@@ -298,204 +317,6 @@ class _GraphBuilder:
                 "canApplyKnowledge": False,
             },
         }
-
-
-def _add_knowledge_base_subgraph(
-    graph: _GraphBuilder,
-    *,
-    team: dict[str, Any],
-    base: dict[str, Any],
-    team_node_id: str,
-    agents_by_id: dict[str, dict[str, Any]],
-    include_set: set[str],
-) -> None:
-    team_id = str(team.get("teamId") or "").strip()
-    base_id = str(base.get("knowledgeBaseId") or "").strip()
-    base_node_id = _node_id("knowledge_base", base_id)
-    stats = team_knowledge_service._knowledge_base_stats(team_id, base_id)
-    graph.add_node(
-        base_node_id,
-        "knowledge_base",
-        str(base.get("name") or base_id),
-        summary=str(base.get("description") or ""),
-        status=str(base.get("status") or "active"),
-        created_at=str(base.get("createdAt") or ""),
-        updated_at=str(base.get("updatedAt") or ""),
-        metadata={
-            "knowledgeBaseId": base_id,
-            "teamId": team_id,
-            "stats": stats,
-            "fullContentIncluded": False,
-        },
-    )
-    graph.add_edge(team_node_id, base_node_id, "team_owns_knowledge_base")
-
-    artifacts = team_knowledge_service._source_artifacts_for_base(team_id, base_id)
-    proposals = [
-        item
-        for item in team_knowledge_service._read_jsonl(team_knowledge_service._proposals_path(team_id))
-        if str(item.get("targetKnowledgeBaseId") or "") == base_id
-    ]
-    batches = [
-        item
-        for item in team_knowledge_service._read_jsonl(team_knowledge_service._batches_path(team_id))
-        if str(item.get("knowledgeBaseId") or "") == base_id
-    ]
-    items = [
-        item
-        for item in team_knowledge_service._read_jsonl(team_knowledge_service._items_path(team_id))
-        if str(item.get("knowledgeBaseId") or "") == base_id
-    ]
-    suggestions = [
-        item
-        for item in team_knowledge_service._read_jsonl(team_knowledge_service._rating_suggestions_path(team_id))
-        if str(item.get("knowledgeBaseId") or "") == base_id
-    ]
-    artifact_nodes = {_node_id("source_artifact", str(item.get("sourceArtifactId") or "")): item for item in artifacts}
-    proposal_nodes = {_node_id("refinement_proposal", str(item.get("proposalId") or "")): item for item in proposals}
-    batch_nodes = {_node_id("knowledge_batch", str(item.get("batchId") or "")): item for item in batches}
-    item_nodes = {_node_id("knowledge_item", str(item.get("knowledgeItemId") or "")): item for item in items}
-
-    for artifact_node_id, artifact in artifact_nodes.items():
-        artifact_id = str(artifact.get("sourceArtifactId") or "")
-        graph.add_node(
-            artifact_node_id,
-            "source_artifact",
-            str(artifact.get("title") or artifact.get("sourceType") or artifact_id),
-            summary=str(artifact.get("summary") or ""),
-            status=str(artifact.get("sourceType") or ""),
-            created_at=str(artifact.get("capturedAt") or ""),
-            updated_at=str(artifact.get("capturedAt") or ""),
-            metadata={
-                "sourceArtifactId": artifact_id,
-                "sourceType": str(artifact.get("sourceType") or ""),
-                "sourceRef": _sanitize_source_ref(artifact.get("sourceRef")),
-                "capturedBy": str(artifact.get("capturedBy") or ""),
-            },
-        )
-        graph.add_edge(base_node_id, artifact_node_id, "knowledge_base_has_source")
-        captured_by = str(artifact.get("capturedBy") or "").strip()
-        if captured_by:
-            graph.add_edge(_node_id("agent", captured_by), artifact_node_id, "agent_authored_source")
-
-    for proposal_node_id, proposal in proposal_nodes.items():
-        proposal_id = str(proposal.get("proposalId") or "")
-        graph.add_node(
-            proposal_node_id,
-            "refinement_proposal",
-            str(proposal.get("title") or proposal_id),
-            summary=str(proposal.get("summary") or ""),
-            status=str(proposal.get("status") or "pending"),
-            created_at=str(proposal.get("createdAt") or ""),
-            updated_at=str(proposal.get("updatedAt") or ""),
-            metadata={
-                "proposalId": proposal_id,
-                "proposedByAgentId": str(proposal.get("proposedByAgentId") or ""),
-                "sourceArtifactIds": _string_list(proposal.get("sourceArtifactIds"), limit=12),
-                "knowledgeItemIds": _string_list(proposal.get("knowledgeItemIds"), limit=12),
-                "fullContentIncluded": False,
-            },
-        )
-        graph.add_edge(base_node_id, proposal_node_id, "knowledge_base_has_proposal")
-        proposed_by = str(proposal.get("proposedByAgentId") or "").strip()
-        if proposed_by:
-            graph.add_edge(_node_id("agent", proposed_by), proposal_node_id, "agent_proposed_refinement")
-        reviewed_by = str(proposal.get("reviewedByAgentId") or "").strip()
-        if reviewed_by:
-            graph.add_edge(_node_id("agent", reviewed_by), proposal_node_id, "agent_reviewed_proposal")
-        for source_id in _string_list(proposal.get("sourceArtifactIds"), limit=80):
-            graph.add_edge(_node_id("source_artifact", source_id), proposal_node_id, "source_supports_proposal")
-
-    for batch_node_id, batch in batch_nodes.items():
-        batch_id = str(batch.get("batchId") or "")
-        graph.add_node(
-            batch_node_id,
-            "knowledge_batch",
-            batch_id,
-            summary="知识提案审核后形成的正式落盘批次。",
-            status=str(batch.get("status") or "applied"),
-            created_at=str(batch.get("appliedAt") or ""),
-            updated_at=str(batch.get("appliedAt") or ""),
-            metadata={
-                "batchId": batch_id,
-                "reviewedByAgentId": str(batch.get("reviewedByAgentId") or ""),
-                "proposalIds": _string_list(batch.get("proposalIds"), limit=12),
-                "sourceArtifactIds": _string_list(batch.get("sourceArtifactIds"), limit=12),
-            },
-        )
-        graph.add_edge(base_node_id, batch_node_id, "knowledge_base_has_batch")
-        reviewed_by = str(batch.get("reviewedByAgentId") or "").strip()
-        if reviewed_by:
-            graph.add_edge(_node_id("agent", reviewed_by), batch_node_id, "agent_reviewed_batch")
-        for proposal_id in _string_list(batch.get("proposalIds"), limit=80):
-            graph.add_edge(_node_id("refinement_proposal", proposal_id), batch_node_id, "proposal_applied_to_batch")
-
-    for item_node_id, item in item_nodes.items():
-        item_id = str(item.get("knowledgeItemId") or "")
-        graph.add_node(
-            item_node_id,
-            "knowledge_item",
-            str(item.get("title") or item_id),
-            summary=str(item.get("summary") or ""),
-            status=str(item.get("importanceLevel") or "medium"),
-            created_at=str(item.get("createdAt") or ""),
-            updated_at=str(item.get("updatedAt") or ""),
-            metadata={
-                "knowledgeItemId": item_id,
-                "importanceLevel": str(item.get("importanceLevel") or ""),
-                "confidence": item.get("confidence"),
-                "stability": str(item.get("stability") or ""),
-                "scope": str(item.get("scope") or ""),
-                "reviewPriority": str(item.get("reviewPriority") or ""),
-                "tags": _string_list(item.get("tags"), limit=20),
-                "fullContentIncluded": False,
-            },
-        )
-        graph.add_edge(base_node_id, item_node_id, "knowledge_base_contains_item")
-        batch_id = str(item.get("batchId") or "").strip()
-        if batch_id:
-            graph.add_edge(_node_id("knowledge_batch", batch_id), item_node_id, "batch_created_item")
-        for source_id in _string_list(item.get("sourceArtifactIds"), limit=80):
-            graph.add_edge(item_node_id, _node_id("source_artifact", source_id), "item_derived_from_source")
-        for tag in _string_list(item.get("tags"), limit=20):
-            tag_node_id = _node_id("tag", tag)
-            graph.add_node(tag_node_id, "tag", tag, summary="知识条目标签/概念节点。", status="active", metadata={"tag": tag})
-            graph.add_edge(item_node_id, tag_node_id, "item_tagged_as_concept")
-        marked_by = str(item.get("markedBy") or "").strip()
-        if marked_by:
-            graph.add_edge(_node_id("agent", marked_by), item_node_id, "agent_marked_rating")
-
-    for suggestion in suggestions:
-        suggestion_id = str(suggestion.get("suggestionId") or "").strip()
-        if not suggestion_id:
-            continue
-        suggestion_node_id = _node_id("rating_suggestion", suggestion_id)
-        graph.add_node(
-            suggestion_node_id,
-            "rating_suggestion",
-            str(suggestion.get("importanceLevel") or suggestion_id),
-            summary=str(suggestion.get("markingReason") or ""),
-            status=str(suggestion.get("status") or "pending"),
-            created_at=str(suggestion.get("createdAt") or ""),
-            updated_at=str(suggestion.get("updatedAt") or ""),
-            metadata={
-                "suggestionId": suggestion_id,
-                "targetType": str(suggestion.get("targetType") or ""),
-                "knowledgeItemId": str(suggestion.get("knowledgeItemId") or ""),
-                "proposalId": str(suggestion.get("proposalId") or ""),
-                "suggestedByAgentId": str(suggestion.get("suggestedByAgentId") or ""),
-            },
-        )
-        graph.add_edge(base_node_id, suggestion_node_id, "knowledge_base_has_rating_suggestion")
-        suggested_by = str(suggestion.get("suggestedByAgentId") or "").strip()
-        if suggested_by:
-            graph.add_edge(_node_id("agent", suggested_by), suggestion_node_id, "agent_suggested_rating")
-        knowledge_item_id = str(suggestion.get("knowledgeItemId") or "").strip()
-        if knowledge_item_id:
-            graph.add_edge(suggestion_node_id, _node_id("knowledge_item", knowledge_item_id), "rating_suggestion_targets_item")
-        proposal_id = str(suggestion.get("proposalId") or "").strip()
-        if proposal_id:
-            graph.add_edge(suggestion_node_id, _node_id("refinement_proposal", proposal_id), "rating_suggestion_targets_proposal")
 
 
 def _add_runtime_scene_nodes(graph: _GraphBuilder, project_node_id: str) -> None:
@@ -580,6 +401,92 @@ def _record_graph_event(payload: dict[str, Any], agent_id: str) -> None:
         )
     except Exception:
         pass
+
+
+def _owner_knowledge_detail(owner: dict[str, Any], actor_agent_id: str, *, cache: dict[str, list[dict[str, Any]]] | None = None) -> list[dict[str, Any]]:
+    cache_key = f"{owner.get('ownerType')}:{owner.get('ownerId')}:{actor_agent_id}"
+    if cache is not None and cache_key in cache:
+        return cache[cache_key]
+    items: list[dict[str, Any]] = []
+    all_items: list[dict[str, Any]] | None = None
+    for base in team_knowledge_service._knowledge_bases_for_owner(owner):
+        if not team_knowledge_service._can_access(owner, base, actor_agent_id, "read"):
+            continue
+        base_id = str(base.get("knowledgeBaseId") or "").strip()
+        if all_items is None:
+            all_items = team_knowledge_service._read_jsonl(team_knowledge_service._items_path_for_owner(owner))
+        for item in all_items:
+            if str(item.get("knowledgeBaseId") or "") == base_id:
+                items.append(_knowledge_item_detail(item, base=base))
+            if len(items) >= DETAIL_ITEM_LIMIT:
+                if cache is not None:
+                    cache[cache_key] = items
+                return items
+    if cache is not None:
+        cache[cache_key] = items
+    return items
+
+
+def _knowledge_item_detail(item: dict[str, Any], *, base: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": str(item.get("knowledgeItemId") or ""),
+        "type": "knowledge_item",
+        "title": _trim(item.get("title") or item.get("knowledgeItemId") or "Knowledge item", 160),
+        "summary": _trim(item.get("summary") or "", 500),
+        "knowledgeBaseId": str(base.get("knowledgeBaseId") or item.get("knowledgeBaseId") or ""),
+        "knowledgeBaseName": str(base.get("name") or ""),
+        "ownerType": str(item.get("ownerType") or base.get("ownerType") or ""),
+        "ownerId": str(item.get("ownerId") or base.get("ownerId") or ""),
+        "status": str(item.get("importanceLevel") or "medium"),
+        "tags": _string_list(item.get("tags"), limit=12),
+        "createdAt": str(item.get("createdAt") or ""),
+        "updatedAt": str(item.get("updatedAt") or item.get("appliedAt") or ""),
+        "fullContentIncluded": False,
+    }
+
+
+def _responsibility_question(node_type: str, value: dict[str, Any], *, agent_category: str = "") -> str:
+    if node_type == "project":
+        return "这个项目级记忆入口负责回答什么全局问题？"
+    if node_type == "team":
+        name = str(value.get("name") or value.get("label") or "这个团队").strip()
+        return f"{name} 负责沉淀和回答什么团队问题？"
+    if node_type == "agent":
+        label = str(value.get("displayName") or value.get("agentCode") or value.get("label") or "这个 Agent").strip()
+        prefix = "会话 Agent" if agent_category == "session_agent" else "团队成员 Agent"
+        return f"{prefix} {label} 负责回答什么问题？"
+    if node_type == "knowledge_base":
+        name = str(value.get("name") or value.get("label") or "这个知识库").strip()
+        return f"{name} 负责保存哪类知识？"
+    if node_type == "agent_private_memory":
+        return "这个 Agent 私有记忆入口负责保存什么个人运行记忆？"
+    if node_type == "runtime_scene":
+        return "这个运行现场负责证明哪次运行发生了什么？"
+    if node_type == "evolution":
+        return "自进化记忆负责回答哪些版本演化问题？"
+    if node_type == "supervision":
+        return "监督进化记忆负责回答哪些评审和晋升问题？"
+    return "这个节点负责回答什么问题？"
+
+
+def _default_visual(node_type: str) -> dict[str, Any]:
+    if node_type == "project":
+        return {"size": "root"}
+    if node_type == "team":
+        return {"size": "group"}
+    if node_type == "knowledge_base":
+        return {"size": "container"}
+    if node_type == "agent":
+        return {"size": "leaf"}
+    return {"size": "support"}
+
+
+def _sanitize_content_items(value: list[dict[str, Any]], *, limit: int) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    for item in value[:limit]:
+        if isinstance(item, dict):
+            items.append(_sanitize_metadata(item))
+    return items
 
 
 def _include_set(value: str) -> set[str]:

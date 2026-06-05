@@ -83,6 +83,47 @@ def test_vector_index_lists_only_reviewed_formal_knowledge(vector_index_env):
     assert vector_index_env["pendingProposal"]["proposalId"] not in str(indexable)
 
 
+def test_vector_index_metadata_includes_agent_owner_partition(tmp_path, monkeypatch):
+    from core.web.services import rag_vector_index_service
+
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(team_knowledge_service, "PROJECT_ROOT", tmp_path)
+    agent = agent_directory_service.create_agent_instance(display_name="Vector Owner Agent")
+    base = team_knowledge_service.create_agent_knowledge_base(
+        agent["agentId"],
+        name="Agent Vector Base",
+        actor_agent_id=agent["agentId"],
+    )
+    proposal = team_knowledge_service.create_refinement_proposal(
+        base["knowledgeBaseId"],
+        source_artifact_ids=[],
+        proposed_by_agent_id=agent["agentId"],
+        title="Agent vector partition",
+        content="Vector metadata should preserve the Agent owner partition.",
+    )
+    reviewed = team_knowledge_service.review_refinement_proposal(
+        base["knowledgeBaseId"],
+        proposal["proposalId"],
+        status="approved",
+        reviewed_by_agent_id=agent["agentId"],
+    )["item"]
+
+    item = rag_vector_index_service.list_indexable_knowledge_items(agent_id=agent["agentId"])[0]
+    record = rag_vector_index_service.write_index_record(item, embedding_provider="test", embedding_model="owner-v1")
+    health = rag_vector_index_service.get_vector_index_health(agent_id=agent["agentId"])
+
+    assert item["knowledgeItemId"] == reviewed["knowledgeItemId"]
+    assert item["ownerType"] == "agent"
+    assert item["ownerId"] == agent["agentId"]
+    assert item["agentId"] == agent["agentId"]
+    assert record["ownerType"] == "agent"
+    assert record["ownerId"] == agent["agentId"]
+    assert health["items"][0]["ownerType"] == "agent"
+    assert health["items"][0]["ownerId"] == agent["agentId"]
+
+
 def test_vector_index_health_counts_empty_index_as_missing(vector_index_env):
     from core.web.services import rag_vector_index_service
 

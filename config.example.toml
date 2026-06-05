@@ -31,272 +31,76 @@ avatar_image_path = ""
 [llm.profiles]
 
 [llm.profiles.primary]
-model = "gpt-5.5"
-api_key_env = "VIBELUTION_LLM_RELAY_OPENAI_GPT_5_5_API_KEY"
-transport = "responses"
-contract = "tool_chat"
-strict_compatibility = false
-temperature = 0.7
-max_output_tokens = 128000
-timeout = 120
-connect_timeout = 20
-streaming = true
-tool_calling_mode = "auto"
-discovery_enabled = true
+label = "主智能体"
+model_ref = "generated_xiaomi_mimo_v2_5_cdff497b2d9b"
 
-[llm.profiles.primary.provider]
-kind = "relay"
-api_key_env = "OPENAI_API_KEY"
-base_url = "https://pixel.try-chatapi.com/v1"
-compat_mode = "openai"
-requires_api_key = true
-context_window = 1000000
+[llm.profiles.primary.overrides]
 
 [llm.profiles.mental_model]
-model = "gpt-5.5"
-api_key_env = "VIBELUTION_LLM_RELAY_OPENAI_GPT_5_5_API_KEY"
-transport = "responses"
-contract = "tool_chat"
-strict_compatibility = false
-temperature = 0.7
-max_output_tokens = 128000
-timeout = 120
-connect_timeout = 20
-streaming = true
-tool_calling_mode = "auto"
-discovery_enabled = true
+label = "心智模型"
+model_ref = "xiaomi_mimo_v2_5_pro_token_plan"
 
-[llm.profiles.mental_model.provider]
-kind = "relay"
-api_key_env = "OPENAI_API_KEY"
-base_url = "https://pixel.try-chatapi.com/v1"
-compat_mode = "openai"
-requires_api_key = true
-context_window = 1000000
+[llm.profiles.mental_model.overrides]
 
 [llm.profiles.subagent_worker]
-model = ""
-api_key_env = "VIBELUTION_LLM_REMOTE_MAIN_MINIMAX_M2_7_API_KEY"
-transport = "chat_completions"
-contract = "reasoning_chat"
-strict_compatibility = false
-reasoning_state_field = "reasoning_content"
-temperature = 1.0
-max_output_tokens = 8192
-timeout = 120
-connect_timeout = 20
-streaming = true
-tool_calling_mode = "auto"
-discovery_enabled = true
+label = "子代理执行"
+model_ref = "xiaomi_mimo_v2_5_pro_token_plan"
 
-[llm.profiles.subagent_worker.provider]
-kind = "minimax"
-api_key_env = "MINIMAX_API_KEY"
-base_url = "https://api.minimaxi.com/v1"
-compat_mode = "openai"
-requires_api_key = true
-context_window = 204800
+[llm.profiles.subagent_worker.overrides]
 
 [llm.profiles.subagent_explorer]
-model = "deepseek-v4-pro"
-transport = "responses"
-contract = "tool_chat"
-strict_compatibility = false
-temperature = 0.7
-max_output_tokens = 384000
-timeout = 120
-connect_timeout = 20
-streaming = true
-tool_calling_mode = "auto"
-discovery_enabled = true
-api_key_env = "VIBELUTION_LLM_DEEPSEEK_V4_PRO_API_KEY"
+label = "子代理探索"
+model_ref = "xiaomi_mimo_v2_5_pro_token_plan"
 
-[llm.profiles.subagent_explorer.provider]
-kind = "deepseek"
-api_key_env = "DEEPSEEK_API_KEY"
-base_url = "https://api.deepseek.com"
-compat_mode = "openai"
-requires_api_key = true
-context_window = 1000000
+[llm.profiles.subagent_explorer.overrides]
 
 [llm.profiles.supervised_baseline]
-model = ""
-api_key_env = "VIBELUTION_LLM_REMOTE_MAIN_MINIMAX_M2_7_API_KEY"
-transport = "chat_completions"
-contract = "reasoning_chat"
-strict_compatibility = false
-reasoning_state_field = "reasoning_content"
-temperature = 1.0
-max_output_tokens = 8192
-timeout = 120
-connect_timeout = 20
-streaming = true
-tool_calling_mode = "auto"
-discovery_enabled = true
+label = "监督基线"
+model_ref = "generated_xiaomi_mimo_v2_5_cdff497b2d9b"
 
-[llm.profiles.supervised_baseline.provider]
-kind = "minimax"
-api_key_env = "MINIMAX_API_KEY"
-base_url = "https://api.minimaxi.com/v1"
-compat_mode = "openai"
-requires_api_key = true
-context_window = 204800
+[llm.profiles.supervised_baseline.overrides]
 
 [llm.profiles.supervised_candidate]
-model = ""
-api_key_env = "VIBELUTION_LLM_REMOTE_MAIN_MINIMAX_M2_7_API_KEY"
-transport = "chat_completions"
-contract = "reasoning_chat"
-strict_compatibility = false
-reasoning_state_field = "reasoning_content"
-temperature = 1.0
-max_output_tokens = 8192
-timeout = 120
-connect_timeout = 20
-streaming = true
-tool_calling_mode = "auto"
-discovery_enabled = true
+label = "监督候选"
+model_ref = "generated_xiaomi_mimo_v2_5_cdff497b2d9b"
 
-[llm.profiles.supervised_candidate.provider]
-kind = "minimax"
-api_key_env = "MINIMAX_API_KEY"
-base_url = "https://api.minimaxi.com/v1"
-compat_mode = "openai"
-requires_api_key = true
-context_window = 204800
+[llm.profiles.supervised_candidate.overrides]
 
 [llm.profiles.research_broad]
-model = "mimo-v2.5-pro"
-api_key_env = "VIBELUTION_LLM_MIMO_V2_5_PRO_MIMO_V2_5_PRO_API_KEY"
-transport = "chat_completions"
-contract = "tool_chat"
-strict_compatibility = false
-temperature = 0.7
-max_output_tokens = 128000
-timeout = 120
-connect_timeout = 20
-streaming = true
-tool_calling_mode = "auto"
-discovery_enabled = true
+label = "科研广搜"
+model_ref = "xiaomi_mimo_v2_5_pro_token_plan"
 
-[llm.profiles.research_broad.provider]
-kind = "xiaomi"
-api_key_env = "MIMO_API_KEY"
-base_url = "https://token-plan-cn.xiaomimimo.com/v1"
-compat_mode = "openai"
-requires_api_key = true
-context_window = 1000000
+[llm.profiles.research_broad.overrides]
 
 [llm.profiles.research_deep]
-model = "mimo-v2.5-pro"
-api_key_env = "VIBELUTION_LLM_MIMO_V2_5_PRO_MIMO_V2_5_PRO_API_KEY"
-transport = "chat_completions"
-contract = "tool_chat"
-strict_compatibility = false
-temperature = 0.7
-max_output_tokens = 128000
-timeout = 120
-connect_timeout = 20
-streaming = true
-tool_calling_mode = "auto"
-discovery_enabled = true
+label = "科研深搜"
+model_ref = "xiaomi_mimo_v2_5_pro_token_plan"
 
-[llm.profiles.research_deep.provider]
-kind = "xiaomi"
-api_key_env = "MIMO_API_KEY"
-base_url = "https://token-plan-cn.xiaomimimo.com/v1"
-compat_mode = "openai"
-requires_api_key = true
-context_window = 1000000
+[llm.profiles.research_deep.overrides]
 
 [llm.profiles.research_review]
-model = "mimo-v2.5-pro"
-api_key_env = "VIBELUTION_LLM_MIMO_V2_5_PRO_MIMO_V2_5_PRO_API_KEY"
-transport = "chat_completions"
-contract = "tool_chat"
-strict_compatibility = false
-temperature = 0.7
-max_output_tokens = 128000
-timeout = 120
-connect_timeout = 20
-streaming = true
-tool_calling_mode = "auto"
-discovery_enabled = true
+label = "科研审查"
+model_ref = "xiaomi_mimo_v2_5_pro_token_plan"
 
-[llm.profiles.research_review.provider]
-kind = "xiaomi"
-api_key_env = "MIMO_API_KEY"
-base_url = "https://token-plan-cn.xiaomimimo.com/v1"
-compat_mode = "openai"
-requires_api_key = true
-context_window = 1000000
+[llm.profiles.research_review.overrides]
 
 [llm.profiles.research_themes]
-model = "mimo-v2.5-pro"
-api_key_env = "VIBELUTION_LLM_MIMO_V2_5_PRO_MIMO_V2_5_PRO_API_KEY"
-transport = "chat_completions"
-contract = "tool_chat"
-strict_compatibility = false
-temperature = 0.7
-max_output_tokens = 128000
-timeout = 120
-connect_timeout = 20
-streaming = true
-tool_calling_mode = "auto"
-discovery_enabled = true
+label = "科研主题生成"
+model_ref = "xiaomi_mimo_v2_5_pro_token_plan"
 
-[llm.profiles.research_themes.provider]
-kind = "xiaomi"
-api_key_env = "MIMO_API_KEY"
-base_url = "https://token-plan-cn.xiaomimimo.com/v1"
-compat_mode = "openai"
-requires_api_key = true
-context_window = 1000000
+[llm.profiles.research_themes.overrides]
 
 [llm.profiles.research_card]
-model = "mimo-v2.5-pro"
-api_key_env = "VIBELUTION_LLM_MIMO_V2_5_PRO_MIMO_V2_5_PRO_API_KEY"
-transport = "chat_completions"
-contract = "tool_chat"
-strict_compatibility = false
-temperature = 0.7
-max_output_tokens = 128000
-timeout = 120
-connect_timeout = 20
-streaming = true
-tool_calling_mode = "auto"
-discovery_enabled = true
+label = "科研主题卡"
+model_ref = "xiaomi_mimo_v2_5_pro_token_plan"
 
-[llm.profiles.research_card.provider]
-kind = "xiaomi"
-api_key_env = "MIMO_API_KEY"
-base_url = "https://token-plan-cn.xiaomimimo.com/v1"
-compat_mode = "openai"
-requires_api_key = true
-context_window = 1000000
+[llm.profiles.research_card.overrides]
 
 [llm.profiles.compression]
-model = ""
-transport = "chat_completions"
-contract = "reasoning_chat"
-reasoning_state_field = "reasoning_content"
-strict_compatibility = false
-temperature = 1.0
-max_output_tokens = 8192
-timeout = 120
-connect_timeout = 20
-streaming = true
-tool_calling_mode = "auto"
-discovery_enabled = true
-api_key_env = "VIBELUTION_LLM_REMOTE_MAIN_MINIMAX_M2_7_API_KEY"
+label = "上下文压缩"
+model_ref = "xiaomi_mimo_v2_5_pro_token_plan"
 
-[llm.profiles.compression.provider]
-kind = "minimax"
-api_key_env = "MINIMAX_API_KEY"
-base_url = "https://api.minimaxi.com/v1"
-compat_mode = "openai"
-requires_api_key = true
-context_window = 204800
+[llm.profiles.compression.overrides]
 
 [llm.discovery]
 enabled = true
@@ -320,6 +124,7 @@ streaming = true
 tool_calling_mode = "auto"
 discovery_enabled = true
 supports_image_input = false
+prompt_cache = { mode = "automatic" }
 capability_status = "unsupported"
 capability_source = "preset"
 
@@ -346,6 +151,7 @@ connect_timeout = 20
 streaming = true
 tool_calling_mode = "auto"
 discovery_enabled = true
+prompt_cache = { mode = "automatic" }
 supports_image_input = false
 capability_status = "unsupported"
 capability_source = "preset"
@@ -381,55 +187,6 @@ compat_mode = "openai"
 requires_api_key = true
 context_window = 1000000
 
-[llm.model_library.xiaomi_mimo_v2_5_multimodal]
-model = "mimo-v2.5"
-label = "小米 MiMo V2.5 多模态"
-api_key_env = "VIBELUTION_LLM_XIAOMI_MIMO_V2_5_MULTIMODAL_API_KEY"
-transport = "chat_completions"
-contract = "tool_chat"
-strict_compatibility = false
-temperature = 0.7
-max_output_tokens = 128000
-timeout = 120
-connect_timeout = 20
-streaming = true
-tool_calling_mode = "auto"
-discovery_enabled = true
-supports_image_input = true
-capability_status = "supported"
-capability_source = "preset"
-
-[llm.model_library.xiaomi_mimo_v2_5_multimodal.provider]
-kind = "xiaomi"
-api_key_env = "MIMO_API_KEY"
-base_url = "https://api.xiaomimimo.com/v1"
-compat_mode = "openai"
-requires_api_key = true
-context_window = 1000000
-
-[llm.model_library.mimo_v2_5_pro_mimo_v2_5_pro]
-model = "mimo-v2.5-pro"
-label = "mimo-v2.5-pro"
-transport = "chat_completions"
-contract = "tool_chat"
-strict_compatibility = false
-temperature = 0.7
-max_output_tokens = 128000
-timeout = 120
-connect_timeout = 20
-streaming = true
-tool_calling_mode = "auto"
-discovery_enabled = true
-api_key_env = "VIBELUTION_LLM_MIMO_V2_5_PRO_MIMO_V2_5_PRO_API_KEY"
-
-[llm.model_library.mimo_v2_5_pro_mimo_v2_5_pro.provider]
-kind = "xiaomi"
-api_key_env = "MIMO_API_KEY"
-base_url = "https://token-plan-cn.xiaomimimo.com/v1"
-compat_mode = "openai"
-requires_api_key = true
-context_window = 1000000
-
 [llm.model_library.relay_openai_gpt_5_5]
 model = "gpt-5.5"
 label = "GPT-5.5 via relay"
@@ -443,7 +200,12 @@ connect_timeout = 20
 streaming = true
 tool_calling_mode = "auto"
 discovery_enabled = true
-api_key_env = "VIBELUTION_LLM_RELAY_OPENAI_GPT_5_5_API_KEY"
+prompt_cache = { mode = "automatic" }
+api_key_env = "VIBELUTION_LLM_MODEL_RELAY_OPENAI_GPT_5_5_API_KEY"
+capability_status = "unknown"
+capability_source = "runtime_probe"
+capability_checked_at = "2026-05-30T07:24:14Z"
+capability_error = "Invalid user message at index 0. Please ensure all user messages are valid OpenAI chat completion messages."
 
 [llm.model_library.relay_openai_gpt_5_5.provider]
 kind = "relay"
@@ -456,7 +218,6 @@ context_window = 1000000
 [llm.model_library.relay_image2]
 model = "image2"
 label = "Image2 via relay"
-api_key_env = "VIBELUTION_LLM_RELAY_IMAGE2_API_KEY"
 transport = "responses"
 contract = "tool_chat"
 strict_compatibility = false
@@ -467,6 +228,11 @@ connect_timeout = 20
 streaming = false
 tool_calling_mode = "disabled"
 discovery_enabled = false
+api_key_env = "VIBELUTION_LLM_MODEL_RELAY_IMAGE2_API_KEY"
+capability_status = "unknown"
+capability_source = "runtime_probe"
+capability_checked_at = "2026-05-30T07:24:12Z"
+capability_error = "provider 额度不足或计费受限"
 
 [llm.model_library.relay_image2.provider]
 kind = "relay"
@@ -476,27 +242,61 @@ compat_mode = "openai"
 requires_api_key = true
 context_window = 128000
 
-[llm.model_library.openai_gpt_image_1_5]
-model = "gpt-image-1.5"
-label = "OpenAI GPT Image 1.5"
-api_key_env = "VIBELUTION_LLM_OPENAI_GPT_IMAGE_1_5_API_KEY"
+[llm.model_library.generated_xiaomi_mimo_v2_5_cdff497b2d9b]
+model = "mimo-v2.5"
+label = "mimo-v2.5"
+api_key_env = "VIBELUTION_LLM_MODEL_GENERATED_XIAOMI_MIMO_V2_5_CDFF497B2D9B_API_KEY"
 transport = "chat_completions"
 contract = "tool_chat"
+strict_compatibility = false
 temperature = 0.7
-max_output_tokens = 4096
-timeout = 300
+max_output_tokens = 128000
+timeout = 120
 connect_timeout = 20
-streaming = false
-tool_calling_mode = "disabled"
-discovery_enabled = false
+streaming = true
+tool_calling_mode = "auto"
+discovery_enabled = true
+prompt_cache = { mode = "automatic" }
+supports_image_input = true
+capability_status = "supported"
+capability_source = "runtime_probe"
+capability_checked_at = "2026-05-31T17:00:47Z"
 
-[llm.model_library.openai_gpt_image_1_5.provider]
-kind = "openai"
-api_key_env = "OPENAI_API_KEY"
-base_url = "https://api.openai.com/v1"
+[llm.model_library.generated_xiaomi_mimo_v2_5_cdff497b2d9b.provider]
+kind = "xiaomi"
+api_key_env = "MIMO_API_KEY"
+base_url = "https://token-plan-cn.xiaomimimo.com/v1"
 compat_mode = "openai"
 requires_api_key = true
-context_window = 128000
+context_window = 1000000
+
+[llm.model_library.houmo_qwen35_9b_agent]
+model = "HiModel_xh2_qwen3.5_9b_256_256k_b1_1chip_2cores_v1.3.0_20260429.gguf"
+label = "bossAGI-standard / qwen3.5-9b"
+transport = "chat_completions"
+contract = "tool_chat"
+strict_compatibility = false
+temperature = 0.7
+max_output_tokens = 4096
+timeout = 120
+connect_timeout = 20
+streaming = true
+tool_calling_mode = "auto"
+discovery_enabled = true
+supports_image_input = false
+capability_status = "supported"
+capability_source = "manual_runtime_verified"
+capability_checked_at = "2026-06-05T13:35:00+08:00"
+api_key_env = "VIBELUTION_LLM_MODEL_HOUMO_QWEN35_9B_AGENT_API_KEY"
+
+[llm.model_library.houmo_qwen35_9b_agent.provider]
+kind = "llamacpp"
+api_key = "not-needed"
+api_key_env = ""
+base_url = "http://192.168.20.30:8081/v1"
+compat_mode = "openai"
+requires_api_key = false
+context_window = 32768
 
 [agent]
 name = "SelfEvolvingAgent"

@@ -68,6 +68,9 @@ describe("AppShell layout contract", () => {
     expect(shellSource).not.toContain('to="/tools"');
     expect(shellSource).toContain("Wrench");
     expect(shellSource).toContain('to="/git"');
+    expect(shellSource).toContain('href="/launcher"');
+    expect(shellSource).toContain('target="_blank"');
+    expect(shellSource).toContain('data-browser-role="workbench"');
     expect(styles.utilityTrigger).toBeTypeOf("string");
     expect(styles.utilityPanel).toBeTypeOf("string");
     expect(styles.utilityClusterOpen).toBeTypeOf("string");
@@ -83,6 +86,14 @@ describe("AppShell layout contract", () => {
     expect(styles.activeWorkDetailItem).toBeTypeOf("string");
   });
 
+  it("uses one shared page instance id and stops periodic memory sampling while hidden", () => {
+    expect(shellSource).toContain("getPageInstanceId");
+    expect(shellSource).toContain("useRef(getPageInstanceId())");
+    expect(shellSource).toContain("if (!frontendVisible) {\n      return;\n    }");
+    expect(shellSource).toContain("window.setInterval(() => emitMemorySample(\"periodic\"), BROWSER_MEMORY_SAMPLE_INTERVAL_MS)");
+    expect(shellSource).toContain("frontendVisible, location.pathname, queryClient");
+  });
+
   it("treats locally completed shutdown as a settled state rather than a failed state", () => {
     expect(shellSource).toContain("shutdownSettled");
     expect(shellSource).toContain("aria-busy={!shutdownSettled}");
@@ -90,7 +101,7 @@ describe("AppShell layout contract", () => {
     expect(shellSource).not.toContain("shutdownFailed");
   });
 
-  it("turns the top refresh icon into a frontend refresh and keeps restart inside the power menu", () => {
+  it("turns the top refresh icon into a frontend refresh and routes lifecycle actions through Launcher", () => {
     expect(shellSource).toContain("RefreshCw");
     expect(shellSource).toContain("refreshFrontendLabel");
     expect(shellSource).toContain("browser.user_action.frontend_refresh_requested");
@@ -98,11 +109,14 @@ describe("AppShell layout contract", () => {
     expect(shellSource).toContain("lifecycleMenuCluster");
     expect(shellSource).toContain("lifecycleMenuPanel");
     expect(shellSource).toContain("lifecycleMenuOpen");
-    expect(shellSource).toContain('"/api/runtime/restart"');
+    expect(shellSource).toContain("restartLauncherBundle");
+    expect(shellSource).toContain("stopLauncherBundle");
+    expect(shellSource).not.toContain('"/api/runtime/restart"');
+    expect(shellSource).not.toContain('"/api/runtime/shutdown"');
     expect(shellSource).toContain("restartWorkbenchLabel");
     expect(shellSource).toContain("beginRestart");
-    expect(shellSource).toContain("restartActiveWorkConfirmMessage");
-    expect(shellSource).toContain("confirmedActiveWork");
+    expect(shellSource).toContain("restartActiveWorkBlockedMessage");
+    expect(shellSource).not.toContain("confirmedActiveWork");
     expect(shellSource).toContain("restart_blocked_active_work");
     expect(shellSource).toContain("requestWorkbenchExitGuard");
     expect(shellSource).toContain('requestWorkbenchExitGuard("restart"');
@@ -115,9 +129,13 @@ describe("AppShell layout contract", () => {
   it("renders a startup progress overlay from loading and lifecycle state", () => {
     expect(shellSource).toContain("deriveStartupLoadingState");
     expect(shellSource).toContain("deriveStartupProgressState");
+    expect(shellSource).toContain("deriveStartupDisconnectedState");
+    expect(shellSource).toContain("startupDisconnectedProgress");
     expect(shellSource).toContain("startupPanel.active");
     expect(shellSource).toContain("startupLoadingShouldBlock");
     expect(shellSource).toContain('startupLoadingProgress.tone === "failed"');
+    expect(shellSource).toContain("runtimeQuery.isError || runtimeQuery.isRefetchError");
+    expect(shellSource).toContain("backendHealthQuery.isError || backendHealthQuery.isRefetchError");
     expect(shellSource).toContain("startupOverlay");
     expect(shellSource).toContain("startupKicker");
 

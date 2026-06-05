@@ -63,6 +63,16 @@ def tools_registry() -> dict:
     return get_tool_registry()
 
 
+@router.get("/tools/web-search/health")
+def tools_web_search_health() -> dict:
+    from tools.web_search_tool import check_autoglm_token_service
+
+    return {
+        "toolId": "web_search_tool",
+        **check_autoglm_token_service(),
+    }
+
+
 @router.get("/tools/image2/models")
 def tools_image2_models() -> dict:
     try:

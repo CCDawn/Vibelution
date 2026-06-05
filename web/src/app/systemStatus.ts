@@ -41,6 +41,11 @@ type StartupLoadingSnapshot = {
   runtimeError: boolean;
   backendError: boolean;
 };
+type StartupDisconnectedSnapshot = {
+  startupActive: boolean;
+  runtimeUnavailable: boolean;
+  backendUnavailable: boolean;
+};
 type ActiveWorkRunSnapshot = Partial<WorkRunSnapshot> & Record<string, unknown>;
 type RuntimeWorkSnapshot = {
   workRuns?: {
@@ -250,6 +255,35 @@ export function deriveStartupLoadingState(
     detail: "",
     stage: "",
     tone: "idle",
+  };
+}
+
+export function deriveStartupDisconnectedState(
+  snapshot: StartupDisconnectedSnapshot | null | undefined,
+  lang: "zh" | "en" = "zh",
+): StartupProgressState {
+  const startupActive = Boolean(snapshot?.startupActive);
+  const runtimeUnavailable = Boolean(snapshot?.runtimeUnavailable);
+  const backendUnavailable = Boolean(snapshot?.backendUnavailable);
+
+  if (!startupActive || (!runtimeUnavailable && !backendUnavailable)) {
+    return {
+      active: false,
+      title: "",
+      detail: "",
+      stage: "",
+      tone: "idle",
+    };
+  }
+
+  return {
+    active: true,
+    title: lang === "en" ? "Workbench is stopped" : "工作台已停止",
+    detail: lang === "en"
+      ? "This window is no longer connected to the Launcher-managed backend. Start the project from Launcher, or close this stale window."
+      : "这个窗口已经断开与 Launcher 托管后端的连接。请回到 Launcher 启动项目，或关闭这个旧窗口。",
+    stage: lang === "en" ? "Disconnected" : "连接已断开",
+    tone: "failed",
   };
 }
 

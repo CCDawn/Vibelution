@@ -4,6 +4,7 @@ from core.web.services import agent_directory_service, research_organization_ser
 from tools.research_organization_tools import (
     research_agent_creation_proposal_tool,
     research_communication_edge_proposal_tool,
+    research_proposal_apply_tool,
 )
 
 
@@ -69,6 +70,43 @@ def test_research_agent_creation_tool_requires_display_name(monkeypatch):
     assert result["error"] == "display_name_required"
 
 
+def test_research_agent_creation_tool_reuses_equivalent_pending_proposal(monkeypatch):
+    monkeypatch.setattr(agent_directory_service, "current_agent_runtime", lambda: {"agentId": "agent-steward"})
+    created_payloads = []
+
+    def fake_create(payload):
+        created_payloads.append(payload)
+        return {
+            "proposal": {
+                "proposalId": "roprop-existing",
+                "status": "pending_user_confirmation",
+                "riskLevel": "high",
+                "requiresUserConfirmation": True,
+            },
+            "reused": len(created_payloads) > 1,
+        }
+
+    monkeypatch.setattr(research_organization_service, "create_research_org_proposal", fake_create)
+    first = json.loads(
+        research_agent_creation_proposal_tool(
+            display_name="记忆库管理员",
+            role="memory_steward",
+            allowed_tools="agent_message_tool",
+        )
+    )
+    second = json.loads(
+        research_agent_creation_proposal_tool(
+            display_name="记忆库管理员",
+            role="memory_steward",
+            allowed_tools="agent_message_tool,web_search_tool",
+        )
+    )
+
+    assert first["status"] == "proposal_created"
+    assert second["status"] == "existing_proposal"
+    assert second["proposalId"] == first["proposalId"]
+
+
 def test_research_communication_edge_tool_creates_reviewable_proposal(monkeypatch):
     proposer = {
         "agentId": "agent-advisor",
@@ -132,3 +170,63 @@ def test_research_communication_edge_tool_requires_agent_runtime(monkeypatch):
     assert result["ok"] is False
     assert result["status"] == "blocked"
     assert result["error"] == "agent_runtime_missing"
+
+
+def test_research_proposal_apply_tool_requires_user_confirmation(monkeypatch):
+    monkeypatch.setattr(agent_directory_service, "current_agent_runtime", lambda: {"agentId": "agent-ceo"})
+
+    result = json.loads(research_proposal_apply_tool("roprop-test", user_confirmed=False))
+
+    assert result["ok"] is False
+    assert result["status"] == "blocked"
+    assert result["error"] == "user_confirmation_required"
+
+
+def test_research_proposal_apply_tool_requires_confirmation_text(monkeypatch):
+    monkeypatch.setattr(agent_directory_service, "current_agent_runtime", lambda: {"agentId": "agent-ceo"})
+
+    result = json.loads(research_proposal_apply_tool("roprop-test", user_confirmed=True))
+
+    assert result["ok"] is False
+    assert result["status"] == "blocked"
+    assert result["error"] == "user_confirmation_required"
+    assert "confirmation_text" in result["requires"]
+
+
+def test_research_proposal_apply_tool_calls_apply_after_user_confirmation(monkeypatch):
+    monkeypatch.setattr(agent_directory_service, "current_agent_runtime", lambda: {"agentId": "agent-ceo"})
+    applied_calls = []
+
+    def fake_apply(proposal_id, *, confirmation=None):
+        applied_calls.append((proposal_id, confirmation))
+        return {
+            "proposal": {"proposalId": proposal_id, "status": "applied"},
+            "results": [
+                {
+                    "actionType": "create_agent",
+                    "status": "applied",
+                    "agentId": "agent-memory",
+                    "displayName": "记忆库管理员",
+                }
+            ],
+        }
+
+    monkeypatch.setattr(research_organization_service, "apply_research_org_proposal", fake_apply)
+
+    result = json.loads(research_proposal_apply_tool("roprop-create", user_confirmed=True, reason="用户确认创建"))
+
+    assert result["ok"] is True
+    assert result["status"] == "applied"
+    assert result["createdAgents"][0]["agentId"]
+    assert result["createdAgents"][0]["displayName"] == "记忆库管理员"
+    assert applied_calls == [
+        (
+            "roprop-create",
+            {
+                "source": "research_proposal_apply_tool",
+                "actorAgentId": "agent-ceo",
+                "text": "用户确认创建",
+                "turnId": "",
+            },
+        )
+    ]

@@ -106,7 +106,7 @@ describe("fetchJson control token", () => {
         headers: new Headers({ "content-type": "application/json" }),
         json: async () => ({
           detail: {
-            code: "active_work_requires_confirmation",
+            code: "active_work_restart_blocked",
             activeWorkRuns: [{ kind: "chat_turn", runId: "turn-live" }],
           },
         }),
@@ -116,7 +116,7 @@ describe("fetchJson control token", () => {
 
     const expectedMessage = JSON.stringify({
       detail: {
-        code: "active_work_requires_confirmation",
+        code: "active_work_restart_blocked",
         activeWorkRuns: [{ kind: "chat_turn", runId: "turn-live" }],
       },
     });

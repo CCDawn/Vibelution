@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>08 候选图谱预览 · 科研流程计划页</title>
+    <link rel="stylesheet" href="flow_pages.css" />
+  </head>
+  <body>
+    <main class="shell page-layout">
+
+    <nav class="nav-rail">
+      <a href="../research_team_flow_design.html"><span class="mini">IDX</span><span>返回总索引</span></a>
+      <a class="" href="01-source-workspace.html"><span class="mini">01</span><span>资料进入工作区</span></a>
+<a class="" href="02-paper-note.html"><span class="mini">02</span><span>生成 paper_note</span></a>
+<a class="" href="03-neuro-mechanism.html"><span class="mini">03</span><span>提取 neuro_mechanism</span></a>
+<a class="" href="04-mechanism-mapping.html"><span class="mini">04</span><span>机制到计算抽象</span></a>
+<a class="" href="05-algorithm-hypothesis.html"><span class="mini">05</span><span>生成 algorithm_hypothesis</span></a>
+<a class="" href="06-research-review.html"><span class="mini">06</span><span>科研审稿</span></a>
+<a class="" href="07-steward-ingestion.html"><span class="mini">07</span><span>知识治理入库</span></a>
+<a class=" active" href="08-candidate-graph.html"><span class="mini">08</span><span>候选图谱预览</span></a>
+<a class="" href="09-official-graph.html"><span class="mini">09</span><span>正式知识图谱同步</span></a>
+<a class="" href="10-experiment-loop.html"><span class="mini">10</span><span>实验验证闭环</span></a>
+<a class="" href="11-iteration-versioning.html"><span class="mini">11</span><span>持续迭代与版本化</span></a>
+<a class="" href="12-challenge-cup-delivery.html"><span class="mini">12</span><span>挑战杯交付计划</span></a>
+<a class="" href="13-flow-html-maintenance.html"><span class="mini">13</span><span>流程 HTML 维护门禁</span></a>
+    </nav>
+
+      <div>
+        <section class="plan-hero">
+          <div class="kicker">Research Flow Node 08</div>
+          <h1>候选图谱预览</h1>
+          <p class="subtitle">让团队先看到研究链路，但不污染正式知识图谱。</p>
+          <div class="tag-row"><span class="tag done">后端切片已落地</span><span class="tag">Candidate Graph Preview Agent</span><span class="tag">独立计划页</span></div>
+          <div class="diagram">
+            <div class="flow-cell"><strong>输入</strong><span>CandidateStore candidates / paperNoteIds / neuroMechanismIds / mechanismMappingIds</span></div>
+            <div class="flow-cell"><strong>动作</strong><span>读取 candidate_only、ready_for_candidate_graph、excluded 状态。</span></div>
+            <div class="flow-cell"><strong>输出</strong><span>candidate_graph 候选快照 / missingLinks 断链报告</span></div>
+            <div class="flow-cell"><strong>记忆/图谱</strong><span>只展示候选图谱；正式图谱同步必须等 ingested。</span></div>
+          </div>
+        </section>
+
+        <section class="section">
+          <div class="section-head">
+            <h2>当前节点规划</h2>
+            <p class="hint">本页只展示 08 节点。通过左侧导航可进入其它节点页。</p>
+          </div>
+          <div class="plan-grid">
+            <article class="plan-card"><h2>目标</h2><p class="hint">可视化候选中的 Paper、Mechanism、Mapping、Hypothesis、Review 链路。</p></article>
+            <article class="plan-card"><h2>输入</h2><ul><li>CandidateStore candidates</li>
+<li>paperNoteIds / neuroMechanismIds / mechanismMappingIds</li>
+<li>候选状态</li></ul></article>
+            <article class="plan-card"><h2>处理动作</h2><ul><li>读取 candidate_only、ready_for_candidate_graph、excluded 状态。</li>
+<li>展示 supports、maps_to、inspires、reviewed_by 等候选边。</li>
+<li>突出缺失链接和断裂证据链。</li></ul></article>
+            <article class="plan-card"><h2>输出物</h2><ul><li>candidate_graph 候选快照</li>
+<li>missingLinks 断链报告</li>
+<li>unreviewedNodes 未审节点清单</li></ul></article>
+            <article class="plan-card"><h2>风险</h2><ul><li>候选图谱被误读为正式知识</li>
+<li>links 指向不存在对象</li></ul></article>
+            <article class="plan-card "><h2>未决事项</h2><ul><li>后续是否导出独立 candidate_graph.json，或直接由前端读取 CandidateStore graph payload。</li></ul></article>
+          </div>
+        </section>
+
+        <section class="section">
+          <div class="section-head">
+            <h2>记忆与图谱边界</h2>
+            <p class="hint">区分候选工作区、知识治理 Agent、正式 Team Knowledge 和正式知识图谱。</p>
+          </div>
+          <div class="status-grid">
+            <div class="status-item"><b>候选状态</b><span>后端切片已落地</span></div>
+            <div class="status-item"><b>记忆平台</b><span>候选图谱只进入 CandidateStore 草稿区，不进入正式 RAG。</span></div>
+            <div class="status-item"><b>图谱同步</b><span>只展示候选图谱；正式图谱同步必须等 ingested。</span></div>
+          </div>
+        </section>
+
+
+    <section class="section">
+      <div class="section-head">
+        <h2>可跑通节点契约</h2>
+        <p class="hint">这一块只覆盖知识搜集、筛选和入库 MVP，不涉及实验训练或交付实现。</p>
+      </div>
+      <div class="status-grid">
+        <div class="status-item"><b>状态</b><span>candidate_graph_visible</span></div>
+        <div class="status-item"><b>功能岗位</b><span>Candidate Graph Preview Agent</span></div>
+        <div class="status-item"><b>Agent 状态</b><span>后端/API 已可生成候选图谱快照；前端可视化读取仍待接</span></div>
+        <div class="status-item"><b>进入条件</b><span>CandidateStore 中存在 paper_note / neuro_mechanism / mechanism_mapping / algorithm_hypothesis 等候选。</span></div>
+        <div class="status-item"><b>退出条件</b><span>candidate_graph 候选快照能列出 nodes、edges、missingLinks、unreviewedNodes 和 officialBoundary。</span></div>
+        <div class="status-item"><b>审核门禁</b><span>确认候选图谱只作预览，不作为正式知识证据使用。</span></div>
+      </div>
+      <div class="plan-grid">
+        <article class="plan-card"><h2>本步操作</h2><p class="hint">从 paperNoteIds、neuroMechanismIds、mechanismMappingIds 重建候选链路。</p></article>
+
+        <article class="plan-card"><h2>所需功能</h2><ul><li>candidate_graph 候选快照生成</li>
+<li>候选节点/边预览 payload</li>
+<li>断链报告</li>
+<li>未审节点清单</li>
+<li>候选/正式边界标识</li></ul></article>
+        <article class="plan-card"><h2>工具/平台能力</h2><ul><li>/api/teams/{teamId}/workflow-orchestration/candidate-graph</li>
+<li>CandidateStore</li>
+<li>图结构渲染能力（待接入前端）</li></ul></article>
+        <article class="plan-card"><h2>功能缺口</h2><p class="hint">图谱页面读取逻辑和独立 candidate_graph.json 导出仍待接。</p></article>
+        <article class="plan-card"><h2>失败回退</h2><p class="hint">候选链接指向不存在对象时输出 missingLinks，并把质量状态标记为 broken_links，不允许进入正式同步。</p></article>
+      </div>
+    </section>
+
+
+        <div class="pager">
+          <a href="07-steward-ingestion.html">上一节点：07 知识治理入库</a>
+          <a href="09-official-graph.html">下一节点：09 正式知识图谱同步</a>
+        </div>
+      </div>
+    </main>
+  </body>
+</html>

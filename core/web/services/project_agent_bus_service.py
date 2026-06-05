@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import re
 import threading
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -31,7 +31,7 @@ class ProjectAgentBusError(ValueError):
 
 
 def utc_now_iso() -> str:
-    return datetime.now(UTC).isoformat()
+    return datetime.now(timezone.utc).isoformat()
 
 
 def list_project_agent_bus_events(*, limit: int = 80) -> dict[str, Any]:
@@ -413,7 +413,7 @@ def _project_root() -> Path:
 
 
 def _new_event_id(prefix: str) -> str:
-    return f"{prefix}-{datetime.now(UTC).strftime('%Y%m%d%H%M%S%f')}"
+    return f"{prefix}-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S%f')}"
 
 
 def _append_jsonl(path: Path, payload: dict[str, Any]) -> None:

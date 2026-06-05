@@ -171,8 +171,14 @@ def request_launcher_restart() -> dict[str, Any]:
         "launcher.bundle.restart.accepted",
         phase="restart",
         message="Launcher project bundle restart delegated to runtime manager.",
-        outcome="accepted",
-        fields={"mode": str(result.get("mode") or "runtime_manager_adapter"), "commandId": str(result.get("commandId") or "")},
+        outcome="queued" if bool(result.get("queued")) else "accepted",
+        fields={
+            "mode": str(result.get("mode") or "runtime_manager_adapter"),
+            "commandId": str(result.get("commandId") or ""),
+            "queued": bool(result.get("queued")),
+            "pendingRestart": bool(result.get("pendingRestart")),
+            "activeWorkCount": int(result.get("activeWorkCount") or 0),
+        },
     )
     return _launcher_command_response("restart", result)
 
@@ -456,7 +462,9 @@ def _control_plane_evidence() -> dict[str, Any]:
     processing_commands = _recent_command_files(PROCESSING_DIR, limit=5)
     recent_results = _recent_result_files(RESULTS_DIR, limit=5)
     recent_events = _recent_runtime_manager_events(EVENTS_PATH, limit=8)
+    recovery = _runtime_manager_recovery_summary(recent_events=recent_events, recent_results=recent_results)
     active_command = state.get("command") if isinstance(state.get("command"), dict) else {}
+    restart_queue = _restart_queue_summary(pending_commands=pending_commands, active_command=active_command)
     return {
         "schemaVersion": 1,
         "state": {
@@ -478,6 +486,8 @@ def _control_plane_evidence() -> dict[str, Any]:
         "events": {
             "recent": recent_events,
         },
+        "recovery": recovery,
+        "restartQueue": restart_queue,
     }
 
 
@@ -548,6 +558,7 @@ def _recent_runtime_manager_events(path: Path, *, limit: int) -> list[dict[str, 
                 "type": str(payload.get("type") or ""),
                 "at": str(payload.get("at") or ""),
                 "commandId": str(event_payload.get("commandId") or ""),
+                "commandType": str(event_payload.get("type") or ""),
                 "ok": bool(event_payload.get("ok")) if "ok" in event_payload else None,
                 "message": _truncate(str(event_payload.get("message") or ""), 180),
             }
@@ -555,6 +566,65 @@ def _recent_runtime_manager_events(path: Path, *, limit: int) -> list[dict[str, 
         if len(events) >= limit:
             break
     return events
+
+
+def _runtime_manager_recovery_summary(
+    *, recent_events: list[dict[str, Any]], recent_results: list[dict[str, Any]]
+) -> dict[str, Any]:
+    recovered = next(
+        (
+            event
+            for event in recent_events
+            if str(event.get("type") or "") == "command_queue.processing_recovered"
+        ),
+        None,
+    )
+    if not recovered:
+        return {
+            "active": False,
+            "commandId": "",
+            "commandType": "",
+            "recoveredAt": "",
+            "resultMessage": "",
+            "resultOk": None,
+            "statusLine": "",
+        }
+    command_id = str(recovered.get("commandId") or "")
+    matching_result = next(
+        (result for result in recent_results if str(result.get("commandId") or "") == command_id),
+        {},
+    )
+    result_message = str(matching_result.get("message") or "")
+    result_ok = bool(matching_result.get("ok")) if matching_result else None
+    return {
+        "active": True,
+        "commandId": command_id,
+        "commandType": str(recovered.get("commandType") or ""),
+        "recoveredAt": str(recovered.get("at") or ""),
+        "resultMessage": result_message,
+        "resultOk": result_ok,
+        "statusLine": _recovery_status_line(command_id=command_id, result_message=result_message, result_ok=result_ok),
+    }
+
+
+def _recovery_status_line(*, command_id: str, result_message: str, result_ok: bool | None) -> str:
+    if result_ok is True:
+        return text_for(
+            get_web_language(),
+            zh=f"已恢复并完成未结束的生命周期命令：{result_message or command_id}",
+            en=f"Recovered and completed an unfinished lifecycle command: {result_message or command_id}",
+        )
+    if result_ok is False:
+        return text_for(
+            get_web_language(),
+            zh=f"已恢复未结束的生命周期命令，但结果需要检查：{result_message or command_id}",
+            en=f"Recovered an unfinished lifecycle command, but the result needs review: {result_message or command_id}",
+        )
+    return text_for(
+        get_web_language(),
+        zh=f"检测到生命周期管理器恢复了未结束命令：{command_id}",
+        en=f"Lifecycle manager recovered an unfinished command: {command_id}",
+    )
 
 
 def _command_summary(command: dict[str, Any]) -> dict[str, Any]:
@@ -568,7 +638,58 @@ def _command_summary(command: dict[str, Any]) -> dict[str, Any]:
         "source": str(args.get("source") or ""),
         "noBrowser": bool(command.get("noBrowser") if "noBrowser" in command else args.get("noBrowser")),
         "stopManager": bool(command.get("stopManager") if "stopManager" in command else args.get("stopManager")),
+        "deferredUntilActiveWorkClear": bool(args.get("deferredUntilActiveWorkClear")),
+        "queuedBecauseActiveWork": bool(args.get("queuedBecauseActiveWork")),
+        "deferUntil": str(args.get("deferUntil") or ""),
+        "activeWorkDeferCount": int(args.get("activeWorkDeferCount") or 0),
+        "lastActiveWorkCount": int(args.get("lastActiveWorkCount") or args.get("queuedActiveWorkCount") or 0),
     }
+
+
+def _restart_queue_summary(
+    *, pending_commands: list[dict[str, Any]], active_command: dict[str, Any] | None
+) -> dict[str, Any]:
+    pending_restarts = [
+        command
+        for command in pending_commands
+        if str(command.get("type") or "") == "restart_workbench"
+        and (bool(command.get("deferredUntilActiveWorkClear")) or bool(command.get("queuedBecauseActiveWork")))
+    ]
+    active_command = active_command if isinstance(active_command, dict) else {}
+    active_type = str(active_command.get("activeType") or active_command.get("type") or "")
+    active_restart = active_type == "restart_workbench"
+    next_command = pending_restarts[0] if pending_restarts else {}
+    active_work_count = int(next_command.get("lastActiveWorkCount") or 0) if next_command else 0
+    pending_count = len(pending_restarts)
+    return {
+        "pending": bool(pending_restarts),
+        "pendingCount": pending_count,
+        "active": active_restart,
+        "commandId": str(next_command.get("commandId") or active_command.get("activeCommandId") or ""),
+        "deferUntil": str(next_command.get("deferUntil") or ""),
+        "activeWorkDeferCount": int(next_command.get("activeWorkDeferCount") or 0) if next_command else 0,
+        "lastActiveWorkCount": active_work_count,
+        "statusLine": _restart_queue_status_line(
+            pending_count=pending_count,
+            active_restart=active_restart,
+            active_work_count=active_work_count,
+        ),
+    }
+
+
+def _restart_queue_status_line(*, pending_count: int, active_restart: bool, active_work_count: int) -> str:
+    lang = get_web_language()
+    if active_restart:
+        return text_for(lang, zh="正在执行已排队的重启。", en="Executing the queued restart.")
+    if pending_count <= 0:
+        return ""
+    if active_work_count > 0:
+        return text_for(
+            lang,
+            zh=f"重启已在等待队列中；当前还有 {active_work_count} 个任务，任务结束后会自动重启。",
+            en=f"Restart is waiting in the queue; {active_work_count} active task(s) remain before automatic restart.",
+        )
+    return text_for(lang, zh="重启已在等待队列中，会在下一轮安全检查后执行。", en="Restart is queued and will run after the next safety check.")
 
 
 def _result_summary(result: dict[str, Any]) -> dict[str, Any]:
@@ -663,6 +784,12 @@ def _launcher_command_response(operation: LauncherOperation, result: dict[str, A
     command_id = str(result.get("commandId") or "").strip()
     if command_id:
         payload["commandId"] = command_id
+    for key in ("queued", "pendingRestart", "activeWorkCount"):
+        if key in result:
+            payload[key] = result[key]
+    active_work_runs = result.get("activeWorkRuns")
+    if isinstance(active_work_runs, list):
+        payload["activeWorkRuns"] = active_work_runs
     for key in ("chatTurns", "chatRoomRounds", "evolutionRuns"):
         value = result.get(key)
         if isinstance(value, list):

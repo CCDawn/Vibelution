@@ -5,6 +5,8 @@ import { readFileSync } from "node:fs";
 import routeSource from "./EvolutionRoute.tsx?raw";
 
 const stylesSource = readFileSync(new URL("./EvolutionRoute.module.css", import.meta.url), "utf-8");
+const worktreeReviewStylesSource = readFileSync(new URL("./SupervisedWorktreeReviewPanel.module.css", import.meta.url), "utf-8");
+const dictionarySource = readFileSync(new URL("../i18n/dictionary.ts", import.meta.url), "utf-8");
 
 describe("EvolutionRoute library user flow contract", () => {
   it("shows self-evolution candidates as local pending details instead of proposal details", () => {
@@ -50,39 +52,16 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("startWorktreeError={startSelfWorktreeRunMutation.error?.message ?? \"\"}");
   });
 
-  it("surfaces self-origin worktree review gates without auto-merging", () => {
-    expect(routeSource).toContain("worktreeRunsQuery");
+  it("keeps candidate worktree review out of the live left rail", () => {
+    expect(routeSource).toContain("startWorktreeRunMutation");
     expect(routeSource).toContain('"/api/evolution/worktree-runs"');
-    expect(routeSource).toContain("isSelfEvolutionWorktreeRun");
-    expect(routeSource).toContain("worktreeReviewGate");
-    expect(routeSource).toContain("highlightedReviewPending");
-    expect(routeSource).toContain("worktreeActionMutation");
-    expect(routeSource).toContain('action: "approve_review"');
-    expect(routeSource).toContain('reviewerNote: t("selfWorktreeReviewNote")');
-    expect(routeSource).toContain("approveSelfWorktreeReview");
-    expect(routeSource).toContain("selfWorktreeReviewHint");
-  });
-
-  it("keeps worktree follow-up actions explicit and separate from review approval", () => {
-    expect(routeSource).toContain("WORKTREE_ACTION_ITEMS");
-    expect(routeSource).toContain('action: "analyze_merge"');
-    expect(routeSource).toContain('action: "preserve"');
-    expect(routeSource).toContain('action: "discard"');
-    expect(routeSource).toContain('action: "merge"');
-    expect(routeSource).toContain("highlightedWorktreeActions.map");
-    expect(routeSource).toContain("triggerWorktreeAction(highlightedWorktreeRun, item.action)");
-    expect(routeSource).toContain("selfWorktreeMergeRequiresReview");
-  });
-
-  it("lets users select a recent worktree run for review actions", () => {
-    expect(routeSource).toContain("selectedWorktreeRunId");
-    expect(routeSource).toContain("setSelectedWorktreeRunId(activeRunId)");
-    expect(routeSource).toContain("setSelectedWorktreeRunId(worktreeRuns[0]?.runId ?? null)");
-    expect(routeSource).toContain("selectedWorktreeRun");
-    expect(routeSource).toContain("worktreeRunPicker");
-    expect(routeSource).toContain("worktreeRuns.slice(0, 4).map");
-    expect(routeSource).toContain("aria-pressed={selected}");
-    expect(routeSource).toContain("onClick={() => setSelectedWorktreeRunId(run.runId)}");
+    expect(routeSource).not.toContain("SupervisedWorktreeReviewPanel");
+    expect(routeSource).not.toContain("worktreeActionMutation");
+    expect(routeSource).not.toContain("triggerWorktreeReviewApproval");
+    expect(routeSource).not.toContain("triggerWorktreeAction");
+    expect(routeSource).not.toContain("selectedWorktreeRunId");
+    expect(routeSource).not.toContain("styles.worktreeRunPicker");
+    expect(routeSource).not.toContain('t("worktreeReviewPanelTitle")');
   });
 
   it("merges supervised datasets and bundles into one source picker", () => {
@@ -101,10 +80,26 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain('normalizedDecision === "INCONCLUSIVE"');
     expect(routeSource).toContain("statusIcon(monitoredRun.status, monitoredRun.decision)");
     expect(routeSource).toContain("monitoredStatusLabel");
+    expect(routeSource).toContain("latestRunStatusLabel");
+    expect(routeSource).toContain("latestSupervisedResult");
     expect(routeSource).toContain('status === "agent_harness_ready"');
     expect(routeSource).toContain('status === "custom_harness_ready"');
     expect(routeSource).toContain("自定义评测");
     expect(routeSource).toContain("非官方 Terminal-Bench 成绩");
+    expect(routeSource).toContain("selectedSourceOfficialWarning");
+    expect(routeSource).toContain('t("sourceOfficialVerifierWarning")');
+    expect(routeSource).toContain("styles.sourceWarningStrip");
+    expect(dictionarySource).toContain("Terminal-Bench 官方 Harbor 判分尚未接入");
+    expect(stylesSource).toContain(".sourceWarningStrip");
+  });
+
+  it("keeps the latest finished supervised run visible when no active run remains", () => {
+    expect(routeSource).toContain("queryKeys.evolutionWorkspaceSnapshot()");
+    expect(routeSource).toContain('"/api/evolution/workspace-snapshot"');
+    expect(routeSource).toContain("latestSupervisedRunSnapshot");
+    expect(routeSource).toContain("?? latestSupervisedRunSnapshot");
+    expect(routeSource).toContain("setLiveActiveRun(latestSupervisedRunSnapshot)");
+    expect(routeSource).toContain("styles.latestSupervisedResult");
   });
 
   it("labels supervised retry as rerunning failed items", () => {
@@ -115,7 +110,49 @@ describe("EvolutionRoute library user flow contract", () => {
   it("keeps the supervised launch panel compact", () => {
     expect(routeSource).toContain("sourceMetaSide");
     expect(routeSource).toContain("数据集会先物化，评测包可直接运行。");
-    expect(routeSource).toContain("worktreeRuns.slice(0, 4).map");
+    expect(routeSource).toContain("startWorktreeRunMutation");
+  });
+
+  it("uses action-oriented supervised section labels instead of internal system terms", () => {
+    expect(dictionarySource).toContain('supervisedControl: "发起评测"');
+    expect(dictionarySource).toContain('launchSupervisedRun: "选择来源并启动"');
+    expect(dictionarySource).toContain('activeSupervisedRun: "现场进度"');
+    expect(dictionarySource).toContain('runList: "结果列表"');
+    expect(dictionarySource).toContain('runDetail: "结果详情"');
+    expect(dictionarySource).toContain('libraryItems: "已记录建议"');
+    expect(dictionarySource).toContain('pendingReview: "待处理建议"');
+    expect(dictionarySource).toContain('workbenchContext: "当前评测入口"');
+  });
+
+  it("keeps the live launch panel focused on starting evaluations", () => {
+    expect(routeSource).toContain("styles.liveLaunchStack");
+    expect(routeSource).toContain("styles.closedLoopLaunchBlock");
+    expect(routeSource).toContain('t("startClosedLoopRun")');
+    expect(routeSource).not.toContain("styles.worktreeReviewSurface");
+    expect(routeSource).not.toContain("worktreeReviewPanelHint");
+    expect(stylesSource).toContain(".liveLaunchStack");
+    expect(stylesSource).toContain(".liveLaunchStack > .launchSurface");
+  });
+
+  it("shows the current supervised run members in the left launch rail", () => {
+    expect(routeSource).toContain("SUPERVISED_MEMBER_ROLES");
+    expect(routeSource).toContain('["baseline", "candidate", "reviewer", "auditor", "judge"]');
+    expect(routeSource).toContain("supervisedRunMembers");
+    expect(routeSource).toContain("monitoredRun?.agentBindings");
+    expect(routeSource).toContain("monitoredRun?.currentAgentBinding?.agentId");
+    expect(routeSource).toContain("styles.supervisedMembersPanel");
+    expect(routeSource).toContain("本轮监督成员");
+    expect(stylesSource).toContain(".supervisedMembersPanel");
+    expect(stylesSource).toContain(".supervisedMemberRowActive");
+  });
+
+  it("explains closed-loop launch and dataset case limits without changing review actions", () => {
+    expect(routeSource).toContain('t("caseLimitHint")');
+    expect(routeSource).toContain("styles.closedLoopLaunchBlock");
+    expect(routeSource).toContain('t("closedLoopLaunchPanelTitle")');
+    expect(routeSource).toContain('t("closedLoopLaunchPanelHint")');
+    expect(dictionarySource).toContain("结果会进入下方候选审核，不会自动合并。");
+    expect(stylesSource).toContain(".closedLoopLaunchBlock");
   });
 
   it("keeps the supervised live console as a dense desktop split before narrow layouts", () => {
@@ -130,10 +167,27 @@ describe("EvolutionRoute library user flow contract", () => {
 
   it("lets the supervised case transcript fill the lower vertical space", () => {
     expect(routeSource).toContain("styles.transcriptSection");
+    expect(routeSource).toContain("styles.caseRawEvidence");
+    expect(routeSource).toContain("currentCaseOutputLabel(monitoredRun)");
     expect(stylesSource).toContain(".transcriptSection");
     expect(stylesSource).toContain("flex: 1 1 0");
-    expect(stylesSource).toContain(".transcriptSection .ioTranscript");
+    expect(stylesSource).toContain("background: transparent");
+    expect(stylesSource).toContain(".caseRawEvidence");
+    expect(stylesSource).toContain("max-height: 30%");
     expect(stylesSource).not.toContain("max-height: 340px");
+  });
+
+  it("keeps supervised launch from reserving space for worktree review in the left rail", () => {
+    const launchStackRule = stylesSource.slice(
+      stylesSource.indexOf(".liveLaunchStack {"),
+      stylesSource.indexOf(".liveResizeHandleLaunch"),
+    );
+
+    expect(launchStackRule).toContain("overflow: auto");
+    expect(stylesSource).toContain(".liveLaunchStack > .launchSurface");
+    expect(stylesSource).toContain("max-height: min(520px, 48vh)");
+    expect(stylesSource).not.toContain(".worktreeReviewSurface");
+    expect(worktreeReviewStylesSource).toContain(".worktreeReviewSurface");
   });
 
   it("renders supervised case transcript as expandable chat-style trace items", () => {
@@ -142,8 +196,19 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("toggleCaseTraceItem");
     expect(routeSource).toContain("renderCaseTraceSection");
     expect(routeSource).toContain("styles.caseTraceTimeline");
+    expect(routeSource).toContain("caseTraceTimelineRef");
+    expect(routeSource).toContain("latestCaseTraceKey");
+    expect(routeSource).toContain("timeline.scrollTop = timeline.scrollHeight");
+    expect(routeSource).toContain("styles.caseTraceStack");
+    expect(routeSource).toContain("styles.caseTraceMessage");
+    expect(routeSource).toContain("styles.caseTraceMeta");
     expect(stylesSource).toContain(".caseTraceTimeline::before");
+    expect(stylesSource).toContain(".caseTraceStack");
+    expect(stylesSource).toContain("justify-content: flex-end");
     expect(stylesSource).toContain(".caseTraceSummary");
+    expect(stylesSource).toContain(".caseTraceMessage");
+    expect(stylesSource).toContain(".caseTraceMeta");
+    expect(stylesSource).toContain("-webkit-line-clamp: 2");
     expect(stylesSource).toContain(".caseTraceStateGrid");
   });
 

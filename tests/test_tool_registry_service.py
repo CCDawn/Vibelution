@@ -18,6 +18,9 @@ def test_tool_registry_lists_builtins_as_protected(tmp_path, monkeypatch):
     assert builtin["llmVisible"] is True
     assert builtin["category"] == "workspace_read"
     assert builtin["categoryLabel"] == "Workspace read"
+    assert "core" in builtin["bundleIds"]
+    assert "research" in builtin["bundleIds"]
+    assert "coding" in builtin["bundleIds"]
     assert builtin["capabilityTags"] == ["search", "codebase", "read_only"]
     assert builtin["permissionTier"] == "low"
     assert builtin["testPolicy"]["mode"] == "blocked"
@@ -35,15 +38,55 @@ def test_tool_registry_lists_builtins_as_protected(tmp_path, monkeypatch):
     assert creation_tool["category"] == "agent_collaboration"
     assert creation_tool["permissionTier"] == "high"
     assert creation_tool["permissionPolicy"]["requiresExplicitAllow"] is True
+    apply_tool = next(item for item in payload["tools"] if item["name"] == "research_proposal_apply_tool")
+    assert apply_tool["category"] == "agent_collaboration"
+    assert apply_tool["permissionTier"] == "high"
+    assert apply_tool["permissionPolicy"]["requiresExplicitAllow"] is True
+    child_tool = next(item for item in payload["tools"] if item["name"] == "create_child_session_tool")
+    assert child_tool["category"] == "agent_collaboration"
+    assert child_tool["permissionTier"] == "high"
+    assert "session_state_write" in child_tool["riskTags"]
+    list_child_tool = next(item for item in payload["tools"] if item["name"] == "list_child_sessions_tool")
+    assert list_child_tool["category"] == "agent_collaboration"
+    assert list_child_tool["permissionTier"] == "medium"
     bundles = {item["bundleId"]: item for item in payload["toolBundles"]}
     assert {"core", "research", "coding", "collaboration"}.issubset(bundles)
     assert "grep_search_tool" in bundles["core"]["toolNames"]
     assert "research_knowledge_query_tool" in bundles["research"]["toolNames"]
     assert "research_agent_creation_proposal_tool" in bundles["collaboration"]["toolNames"]
     assert "research_communication_edge_proposal_tool" in bundles["collaboration"]["toolNames"]
+    assert "research_proposal_apply_tool" in bundles["collaboration"]["toolNames"]
+    assert "create_child_session_tool" in bundles["collaboration"]["toolNames"]
+    assert "list_child_sessions_tool" in bundles["collaboration"]["toolNames"]
     assert bundles["research"]["explicitAllowToolCount"] >= 1
     assert bundles["collaboration"]["explicitAllowToolCount"] >= 1
     assert bundles["coding"]["highRiskToolCount"] >= 1
+    assert bundles["core"]["label"] == "会话 Agent 基础包"
+    assert "conversation_log_inspect_tool" in bundles["core"]["toolNames"]
+    log_tool = next(item for item in payload["tools"] if item["name"] == "conversation_log_inspect_tool")
+    assert log_tool["category"] == "workspace_read"
+    assert log_tool["permissionTier"] == "low"
+    assert log_tool["permissionPolicy"]["requiresExplicitAllow"] is False
+    assert bundles["research"]["label"] == "科研工具包"
+
+
+def test_tool_registry_exposes_tool_bundle_membership_without_duplicating_generated_tools(tmp_path, monkeypatch):
+    monkeypatch.setattr(registry, "GENERATED_TOOLS_PATH", tmp_path / "generated_tools.json")
+
+    created = registry.create_generated_tool(
+        {
+            "name": "custom_probe_tool",
+            "description": "Custom probe tool that is not assigned to a built-in package.",
+            "argsSchema": {"type": "object", "properties": {}},
+        }
+    )
+    payload = registry.get_tool_registry()
+
+    read_file = next(item for item in payload["tools"] if item["name"] == "read_file_tool")
+    generated = next(item for item in payload["tools"] if item["name"] == created["name"])
+
+    assert set(read_file["bundleIds"]).issuperset({"core", "research", "coding"})
+    assert generated["bundleIds"] == []
 
 
 def test_tool_registry_marks_research_knowledge_tool_as_explicit_allow(tmp_path, monkeypatch):
@@ -276,7 +319,10 @@ def test_tool_test_honors_selected_agent_blocked_policy(tmp_path, monkeypatch):
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_directory_service, "record_runtime_scene_event", lambda *args, **kwargs: None)
     monkeypatch.setattr(registry, "_record_registry_event", lambda *args, **kwargs: None)
-    agent = agent_directory_service.create_agent_instance(display_name="Blocked Tool Agent", profile_id="primary")
+    agent = agent_directory_service.create_agent_instance(
+        display_name="Blocked Tool Agent",
+        llm_bindings={"dialogue": {"modelId": "model-primary"}},
+    )
     agent_directory_service.update_agent_instance(
         agent["agentId"],
         tool_policy={"blockedTools": ["get_current_goal_tool"]},
@@ -302,7 +348,10 @@ def test_tool_test_runs_safe_builtin_inside_selected_agent_runtime(tmp_path, mon
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_directory_service, "record_runtime_scene_event", lambda *args, **kwargs: None)
     monkeypatch.setattr(registry, "_record_registry_event", lambda *args, **kwargs: None)
-    agent = agent_directory_service.create_agent_instance(display_name="Allowed Tool Agent", profile_id="primary")
+    agent = agent_directory_service.create_agent_instance(
+        display_name="Allowed Tool Agent",
+        llm_bindings={"dialogue": {"modelId": "model-primary"}},
+    )
     agent_directory_service.update_agent_instance(
         agent["agentId"],
         tool_policy={"allowedTools": ["get_current_goal_tool"]},

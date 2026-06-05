@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>05 生成 algorithm_hypothesis · 科研流程计划页</title>
+    <link rel="stylesheet" href="flow_pages.css" />
+  </head>
+  <body>
+    <main class="shell page-layout">
+
+    <nav class="nav-rail">
+      <a href="../research_team_flow_design.html"><span class="mini">IDX</span><span>返回总索引</span></a>
+      <a class="" href="01-source-workspace.html"><span class="mini">01</span><span>资料进入工作区</span></a>
+<a class="" href="02-paper-note.html"><span class="mini">02</span><span>生成 paper_note</span></a>
+<a class="" href="03-neuro-mechanism.html"><span class="mini">03</span><span>提取 neuro_mechanism</span></a>
+<a class="" href="04-mechanism-mapping.html"><span class="mini">04</span><span>机制到计算抽象</span></a>
+<a class=" active" href="05-algorithm-hypothesis.html"><span class="mini">05</span><span>生成 algorithm_hypothesis</span></a>
+<a class="" href="06-research-review.html"><span class="mini">06</span><span>科研审稿</span></a>
+<a class="" href="07-steward-ingestion.html"><span class="mini">07</span><span>知识治理入库</span></a>
+<a class="" href="08-candidate-graph.html"><span class="mini">08</span><span>候选图谱预览</span></a>
+<a class="" href="09-official-graph.html"><span class="mini">09</span><span>正式知识图谱同步</span></a>
+<a class="" href="10-experiment-loop.html"><span class="mini">10</span><span>实验验证闭环</span></a>
+<a class="" href="11-iteration-versioning.html"><span class="mini">11</span><span>持续迭代与版本化</span></a>
+<a class="" href="12-challenge-cup-delivery.html"><span class="mini">12</span><span>挑战杯交付计划</span></a>
+<a class="" href="13-flow-html-maintenance.html"><span class="mini">13</span><span>流程 HTML 维护门禁</span></a>
+    </nav>
+
+      <div>
+        <section class="plan-hero">
+          <div class="kicker">Research Flow Node 05</div>
+          <h1>生成 algorithm_hypothesis</h1>
+          <p class="subtitle">把机制启发收束为可验证算法假设。</p>
+          <div class="tag-row"><span class="tag done">已规划</span><span class="tag">Algorithm Hypothesis Agent</span><span class="tag">独立计划页</span></div>
+          <div class="diagram">
+            <div class="flow-cell"><strong>输入</strong><span>mechanism_mapping ids / neuro_mechanism ids</span></div>
+            <div class="flow-cell"><strong>动作</strong><span>定义 architectureChange、trainingObjective、optimizationOrInferenceProcess。</span></div>
+            <div class="flow-cell"><strong>输出</strong><span>algorithm_hypothesis_YYYYMMDD_NNN.json / NeuroMechanism inspires AlgorithmHypothesis</span></div>
+            <div class="flow-cell"><strong>记忆/图谱</strong><span>候选图谱边：mechanism_mapping inspires algorithm_hypothesis，占位保留 neuro_mechanism inspires algorithm_hypothesis。</span></div>
+          </div>
+        </section>
+
+        <section class="section">
+          <div class="section-head">
+            <h2>当前节点规划</h2>
+            <p class="hint">本页只展示 05 节点。通过左侧导航可进入其它节点页。</p>
+          </div>
+          <div class="plan-grid">
+            <article class="plan-card"><h2>目标</h2><p class="hint">生成包含 baseline、实验计划、风险和计算成本的算法候选。</p></article>
+            <article class="plan-card"><h2>输入</h2><ul><li>mechanism_mapping ids</li>
+<li>neuro_mechanism ids</li>
+<li>computationalAbstraction</li>
+<li>机制证据链</li></ul></article>
+            <article class="plan-card"><h2>处理动作</h2><ul><li>定义 architectureChange、trainingObjective、optimizationOrInferenceProcess。</li>
+<li>填写 baseline、expectedBenefit、implementationHint 和 expectedComputeCost。</li>
+<li>强制保留 experimentPlan，即使第一版只填占位。</li></ul></article>
+            <article class="plan-card"><h2>输出物</h2><ul><li>algorithm_hypothesis_YYYYMMDD_NNN.json</li>
+<li>NeuroMechanism inspires AlgorithmHypothesis</li></ul></article>
+            <article class="plan-card"><h2>风险</h2><ul><li>无实验计划</li>
+<li>预期收益不可测</li>
+<li>计算成本过高</li></ul></article>
+            <article class="plan-card "><h2>未决事项</h2><ul><li>后续是否接真实训练 runner。</li></ul></article>
+          </div>
+        </section>
+
+        <section class="section">
+          <div class="section-head">
+            <h2>记忆与图谱边界</h2>
+            <p class="hint">区分候选工作区、知识治理 Agent、正式 Team Knowledge 和正式知识图谱。</p>
+          </div>
+          <div class="status-grid">
+            <div class="status-item"><b>候选状态</b><span>已规划</span></div>
+            <div class="status-item"><b>记忆平台</b><span>只进入 CandidateStore 草稿区；缺完整 experimentPlan 的算法假设不得提交科研审稿或知识治理 Agent。</span></div>
+            <div class="status-item"><b>图谱同步</b><span>候选图谱边：mechanism_mapping inspires algorithm_hypothesis，占位保留 neuro_mechanism inspires algorithm_hypothesis。</span></div>
+          </div>
+        </section>
+
+
+    <section class="section">
+      <div class="section-head">
+        <h2>可跑通节点契约</h2>
+        <p class="hint">这一块只覆盖知识搜集、筛选和入库 MVP，不涉及实验训练或交付实现。</p>
+      </div>
+      <div class="status-grid">
+        <div class="status-item"><b>状态</b><span>hypothesis_candidate</span></div>
+        <div class="status-item"><b>功能岗位</b><span>Algorithm Hypothesis Agent</span></div>
+        <div class="status-item"><b>Agent 状态</b><span>需要算法假设设计 Agent；可从 research_themes / research_card 扩展</span></div>
+        <div class="status-item"><b>进入条件</b><span>至少一个机制映射可转成模型结构、训练目标或推理过程变化。</span></div>
+        <div class="status-item"><b>退出条件</b><span>experimentPlan 字段存在；即使未实现，也有 dataset、metric、baseline 和 smokePlan 占位。</span></div>
+        <div class="status-item"><b>审核门禁</b><span>确认假设是否值得进入审稿，且 experimentPlan 足够可评审。</span></div>
+      </div>
+      <div class="plan-grid">
+        <article class="plan-card"><h2>本步操作</h2><p class="hint">生成 algorithm_hypothesis，保留 baseline、expectedBenefit、cost 和 experimentPlan。</p></article>
+        <article class="plan-card"><h2>本地研究模型用法</h2><p class="hint">本地 9B 模型适合生成 algorithm_hypothesis 草稿；缺 baseline 或 experimentPlan 时不能进入审稿。</p></article>
+        <article class="plan-card"><h2>所需功能</h2><ul><li>algorithm_hypothesis 生成</li>
+<li>baseline/expectedBenefit/cost</li>
+<li>experimentPlan 占位</li>
+<li>可测性约束</li></ul></article>
+        <article class="plan-card"><h2>工具/平台能力</h2><ul><li>knowledge_rag_retrieve_tool</li>
+<li>research_knowledge_query_tool</li></ul></article>
+        <article class="plan-card"><h2>功能缺口</h2><p class="hint">algorithm_hypothesis 最小输出契约和 experimentPlan 门禁已接入 CandidateStore；真实训练 runner 和 research card 自动生成仍待接。</p></article>
+        <article class="plan-card"><h2>失败回退</h2><p class="hint">缺上游 mechanism 引用、hypothesis、baseline、expectedBenefit、expectedComputeCost，或 experimentPlan 缺 dataset/metric/baseline/smokePlan 时退回 hypothesis_needs_revision。</p></article>
+      </div>
+    </section>
+
+
+        <div class="pager">
+          <a href="04-mechanism-mapping.html">上一节点：04 机制到计算抽象</a>
+          <a href="06-research-review.html">下一节点：06 科研审稿</a>
+        </div>
+      </div>
+    </main>
+  </body>
+</html>

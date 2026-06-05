@@ -1,5 +1,5 @@
-import json
-from datetime import UTC, datetime, timedelta
+﻿import json
+from datetime import datetime, timedelta, timezone
 
 from core.web.services import runtime_scene_service
 
@@ -147,6 +147,102 @@ def test_runtime_scene_event_writes_standalone_package_index(tmp_path, monkeypat
     ]
 
 
+def test_runtime_scene_event_keeps_diagnostic_only_observations_out_of_first_read_logs(tmp_path, monkeypatch):
+    scene_id = "scene-first-read-noise"
+    scene_dir = tmp_path / "logs" / "runtime_scenes" / f"20260518T120000Z__{scene_id}"
+    scene_dir.mkdir(parents=True, exist_ok=True)
+    (scene_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "runtime_scene_id": scene_id,
+                "started_at": "2026-05-18T12:00:00Z",
+                "status": "running",
+                "trigger": "start",
+                "project_root": str(tmp_path),
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    launcher_state_path = tmp_path / ".runtime" / "launcher" / "state.json"
+    launcher_state_path.parent.mkdir(parents=True, exist_ok=True)
+    launcher_state_path.write_text(
+        json.dumps({"runtimeSceneId": scene_id, "runtimeSceneDir": str(scene_dir)}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(runtime_scene_service, "LAUNCHER_STATE_PATH", launcher_state_path)
+
+    noisy_events = [
+        ("conversation", "session_detail", "session.detail_snapshot.published"),
+        ("conversation", "session_detail", "session.detail_snapshot.throttled"),
+        ("conversation_service", "session_index", "conversation.index.filtered_archived_team_rooms"),
+        ("browser_page", "session_stream", "browser.session_stream.opened"),
+        ("browser_page", "session_stream", "browser.session_stream.closed"),
+        ("agent_directory", "agent", "agent.repaired"),
+        ("agent_directory", "territory", "agent_territory.resolved"),
+        ("runtime_manager", "runtime", "runtime.snapshot.reconciled"),
+    ]
+    for component, phase, event_code in noisy_events:
+        runtime_scene_service.record_runtime_scene_event(
+            component,
+            phase,
+            event_code,
+            message=event_code,
+            outcome="observed",
+            fields={"status": "ok"},
+            lifecycle=True,
+        )
+    runtime_scene_service.record_runtime_scene_event(
+        "conversation",
+        "session_detail",
+        "session.detail_snapshot.published",
+        message="Session detail publish failed.",
+        level="warning",
+        outcome="degraded",
+        fields={"status": "degraded"},
+        lifecycle=True,
+    )
+
+    event_codes_by_file = {
+        path.name: [
+            json.loads(line)["event_code"]
+            for line in path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        for path in sorted((scene_dir / "events").glob("*.jsonl"))
+    }
+    assert event_codes_by_file["conversation.jsonl"].count("session.detail_snapshot.published") == 2
+    assert "conversation.index.filtered_archived_team_rooms" in event_codes_by_file["conversation_service.jsonl"]
+    assert "agent.repaired" in event_codes_by_file["agent_directory.jsonl"]
+    assert "runtime.snapshot.reconciled" in event_codes_by_file["runtime_manager.jsonl"]
+
+    timeline_events = [
+        json.loads(line)
+        for line in (scene_dir / "timeline.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    lifecycle_events = [
+        json.loads(line)
+        for line in (scene_dir / "lifecycle.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    diagnostic_detail_events = [
+        event
+        for event in timeline_events
+        if event["event_code"] == "session.detail_snapshot.published"
+    ]
+    assert len(diagnostic_detail_events) == 1
+    assert diagnostic_detail_events[0]["level"] == "warning"
+    assert "session.detail_snapshot.throttled" not in {event["event_code"] for event in timeline_events}
+    assert "conversation.index.filtered_archived_team_rooms" not in {event["event_code"] for event in timeline_events}
+    assert "browser.session_stream.opened" not in {event["event_code"] for event in timeline_events}
+    assert "agent.repaired" not in {event["event_code"] for event in timeline_events}
+    assert "agent_territory.resolved" not in {event["event_code"] for event in lifecycle_events}
+    assert "runtime.snapshot.reconciled" not in {event["event_code"] for event in lifecycle_events}
+
+
 def test_research_scene_event_writes_dedicated_research_package_section(tmp_path, monkeypatch):
     scene_id = "scene-research-package"
     scene_dir = tmp_path / "logs" / "runtime_scenes" / f"20260518T120000Z__{scene_id}"
@@ -202,7 +298,7 @@ def test_runtime_scene_event_can_target_recent_completed_package_when_allowed(tm
     scene_id = "recent-failed-scene"
     scene_dir = tmp_path / "logs" / "runtime_scenes" / f"20260524T111509Z__{scene_id}"
     scene_dir.mkdir(parents=True, exist_ok=True)
-    ended_at = (datetime.now(UTC) - timedelta(seconds=30)).isoformat()
+    ended_at = (datetime.now(timezone.utc) - timedelta(seconds=30)).isoformat()
     (scene_dir / "manifest.json").write_text(
         json.dumps(
             {
@@ -298,6 +394,99 @@ def test_runtime_scene_list_sorts_by_package_timestamp_when_started_at_missing(t
     assert scenes[0]["packageIndex"]["indexKey"] == (
         f"{_local_index_key_prefix(scenes[0]['startedAt'])}_workbench-run_running"
     )
+
+
+def test_runtime_scene_list_uses_lightweight_package_summary_without_timeline_reads(tmp_path, monkeypatch):
+    scene_id = "lightweight-list-scene"
+    scene_dir = tmp_path / "logs" / "runtime_scenes" / f"20260524T120001Z__{scene_id}"
+    scene_dir.mkdir(parents=True)
+    scene_dir.joinpath("manifest.json").write_text(
+        json.dumps(
+            {
+                "runtime_scene_id": scene_id,
+                "started_at": "2026-05-24T12:00:01Z",
+                "status": "running",
+                "trigger": "internal-start",
+                "project_root": str(tmp_path),
+                "backend": {"health_status": "healthy"},
+                "frontend": {"build_status": "current"},
+                "browser": {"status": "open"},
+                "package": {
+                    "index_schema_version": 2,
+                    "package_id": scene_id,
+                    "display_name": "cached scene",
+                    "index_key": "cached-index",
+                    "search_text": "cached diagnosis text",
+                    "tags": ["runtime-scene", "diagnosis-active-issue"],
+                    "package_index_path": "package_index.json",
+                    "summary_path": "summary.json",
+                    "research_dir": "research",
+                },
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    scene_dir.joinpath("summary.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "package_id": scene_id,
+                "display_name": "cached scene",
+                "index_key": "cached-index",
+                "event_counts": {
+                    "timeline_events": 42,
+                    "raw_logs": 7,
+                    "conversation_logs": 3,
+                    "agent_logs": 5,
+                    "artifacts": 2,
+                    "event_logs": 4,
+                    "research_files": 1,
+                    "errors": 6,
+                    "warnings": 8,
+                },
+                "diagnosis": {
+                    "severity": "error",
+                    "userSummary": "cached diagnosis text",
+                    "agentNextStep": "read cached summary",
+                    "issueState": {
+                        "activeClusterCount": 1,
+                        "policyClusterCount": 0,
+                        "historicalClusterCount": 0,
+                        "controlSignalCount": 0,
+                    },
+                },
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+
+    def fail_heavy_read(*_args, **_kwargs):
+        raise AssertionError("list_runtime_scenes should not read timeline or raw child logs")
+
+    monkeypatch.setattr(runtime_scene_service, "_read_scene_timeline", fail_heavy_read)
+    monkeypatch.setattr(runtime_scene_service, "_list_raw_files", fail_heavy_read)
+    monkeypatch.setattr(runtime_scene_service, "_list_conversation_logs", fail_heavy_read)
+    monkeypatch.setattr(runtime_scene_service, "_list_agent_logs", fail_heavy_read)
+    monkeypatch.setattr(runtime_scene_service, "_list_artifacts", fail_heavy_read)
+    monkeypatch.setattr(runtime_scene_service, "_list_event_logs", fail_heavy_read)
+    monkeypatch.setattr(runtime_scene_service, "_list_research_logs", fail_heavy_read)
+
+    scenes = runtime_scene_service.list_runtime_scenes(limit=1)
+
+    assert scenes[0]["runtimeSceneId"] == scene_id
+    assert scenes[0]["eventCount"] == 42
+    assert scenes[0]["rawLogCount"] == 7
+    assert scenes[0]["conversationCount"] == 3
+    assert scenes[0]["agentLogCount"] == 5
+    assert scenes[0]["artifactCount"] == 2
+    assert scenes[0]["eventLogCount"] == 4
+    assert scenes[0]["researchLogCount"] == 1
+    assert scenes[0]["errorCount"] == 6
+    assert scenes[0]["warningCount"] == 8
+    assert "diagnosis-active-issue" in scenes[0]["packageIndex"]["tags"]
 
 
 def test_runtime_scene_list_prunes_old_packages_to_retention_limit(tmp_path, monkeypatch):
@@ -507,7 +696,7 @@ def test_runtime_scene_static_summary_distinguishes_recovered_issue_from_active_
 
 
 def _write_runtime_scene_for_retention(root, project_root, index: int, *, status: str):
-    started = datetime(2026, 5, 1, 0, 0, tzinfo=UTC) + timedelta(minutes=index)
+    started = datetime(2026, 5, 1, 0, 0, tzinfo=timezone.utc) + timedelta(minutes=index)
     scene_id = f"scene-{index:02d}"
     scene_dir = root / f"{started.strftime('%Y%m%dT%H%M%SZ')}__{scene_id}"
     scene_dir.mkdir(parents=True, exist_ok=True)

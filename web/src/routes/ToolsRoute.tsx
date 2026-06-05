@@ -8,8 +8,10 @@ import { queryKeys } from "../api/queryKeys";
 import {
   AgentInstance,
   GeneratedToolDeleteResponse,
+  ToolDependencyHealth,
   ToolAgentScopeState,
   ToolAgentScopeSummary,
+  ToolBundle,
   ToolImage2ModelConfig,
   ToolPolicy,
   ToolRegistryItem,
@@ -26,6 +28,18 @@ import styles from "./ToolsRoute.module.css";
 
 type ToolFilter = "all" | "built_in" | "generated" | "llm" | "enabled";
 type ToolPolicyMode = "inherited" | "explicit_required" | "allowed" | "blocked" | "excluded";
+type ToolBundleGroup = {
+  bundleId: string;
+  label: string;
+  description: string;
+  tools: ToolRegistryItem[];
+  highRiskToolCount: number;
+  explicitAllowToolCount: number;
+};
+type ScopedToolTestResult = {
+  key: string;
+  result: ToolTestResponse;
+};
 type Translate = (key: TranslationKey) => string;
 
 const FILTERS: ToolFilter[] = ["all", "built_in", "generated", "llm", "enabled"];
@@ -34,6 +48,7 @@ const TOOLS_LEFT_PANEL_BOUNDS = { min: 260, max: 520 };
 const TOOLS_LEFT_PANEL_DEFAULT_WIDTH = 350;
 const MAIN_AGENT_SCOPE_ID = "main_agent";
 const IMAGE2_TOOL_NAME = "image2_generate_tool";
+const WEB_SEARCH_TOOL_NAME = "web_search_tool";
 
 function displaySource(source: string, lang: string) {
   if (source === "built_in") {
@@ -139,6 +154,50 @@ function toolFilterCounts(tools: ToolRegistryItem[]) {
     llm: tools.filter((tool) => tool.llmVisible).length,
     enabled: tools.filter((tool) => tool.source === "generated" && tool.enabled).length,
   } satisfies Record<ToolFilter, number>;
+}
+
+function unbundledToolGroupLabel(lang: string) {
+  return lang === "zh" ? "未归入工具包" : "Unbundled tools";
+}
+
+function toolBundleGroups(tools: ToolRegistryItem[], bundles: ToolBundle[], lang: string): ToolBundleGroup[] {
+  const toolByName = new Map(tools.map((tool) => [tool.name, tool]));
+  const groupedToolNames = new Set<string>();
+  const groups: ToolBundleGroup[] = [];
+  for (const bundle of bundles) {
+    const groupTools = bundle.toolNames.map((toolName) => toolByName.get(toolName)).filter((tool): tool is ToolRegistryItem => Boolean(tool));
+    if (!groupTools.length) {
+      continue;
+    }
+    groupTools.forEach((tool) => groupedToolNames.add(tool.name));
+    groups.push({
+      bundleId: bundle.bundleId,
+      label: bundle.label,
+      description: bundle.description,
+      tools: groupTools,
+      highRiskToolCount: groupTools.filter((tool) => tool.permissionTier === "high").length,
+      explicitAllowToolCount: groupTools.filter((tool) => tool.permissionPolicy?.requiresExplicitAllow).length,
+    });
+  }
+  const unbundledTools = tools.filter((tool) => !groupedToolNames.has(tool.name));
+  if (unbundledTools.length) {
+    groups.push({
+      bundleId: "unbundled",
+      label: unbundledToolGroupLabel(lang),
+      description: lang === "zh" ? "这些工具暂未归入任何工具包，建议先确认用途和风险。" : "Tools not assigned to a package yet. Review purpose and risk before use.",
+      tools: unbundledTools,
+      highRiskToolCount: unbundledTools.filter((tool) => tool.permissionTier === "high").length,
+      explicitAllowToolCount: unbundledTools.filter((tool) => tool.permissionPolicy?.requiresExplicitAllow).length,
+    });
+  }
+  return groups;
+}
+
+function bundleLabelsForTool(tool: ToolRegistryItem, bundles: ToolBundle[], lang: string) {
+  const labels = (tool.bundleIds ?? [])
+    .map((bundleId) => bundles.find((bundle) => bundle.bundleId === bundleId)?.label ?? "")
+    .filter(Boolean);
+  return labels.length ? labels : [unbundledToolGroupLabel(lang)];
 }
 
 function readinessTone(ready: boolean) {
@@ -253,6 +312,10 @@ function agentTestLabel(agent: ToolTestResponse["agent"] | null | undefined, lan
   return code && name ? `${code} · ${name}` : code || name || agentId;
 }
 
+function toolTestKey(toolId: string | null | undefined, agentScopeId: string | null | undefined, agentId: string | null | undefined) {
+  return [toolId ?? "", agentScopeId ?? "", agentId ?? ""].join("::");
+}
+
 function testResultSummaryCards(result: ToolTestResponse, t: Translate) {
   return [
     {
@@ -356,7 +419,7 @@ export function ToolsRoute() {
     tone: "neutral",
     text: "",
   });
-  const [testResult, setTestResult] = useState<ToolTestResponse | null>(null);
+  const [testResult, setTestResult] = useState<ScopedToolTestResult | null>(null);
   const pageVisible = usePageVisibility();
 
   const toolsQuery = useQuery({
@@ -383,9 +446,11 @@ export function ToolsRoute() {
   const refresh = () => {
     void queryClient.invalidateQueries({ queryKey: queryKeys.tools() });
     void queryClient.invalidateQueries({ queryKey: queryKeys.toolImage2Models() });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.toolWebSearchHealth() });
   };
 
   const tools = toolsQuery.data?.tools ?? [];
+  const toolBundles = toolsQuery.data?.toolBundles ?? [];
   const agentScopes = toolsQuery.data?.agentScopes ?? [];
   const activeAgentScope =
     agentScopes.find((scope) => scope.id === activeAgentScopeId) ??
@@ -411,10 +476,24 @@ export function ToolsRoute() {
       if (!query) {
         return true;
       }
-      return `${tool.name} ${tool.description} ${tool.source} ${tool.status}`.toLowerCase().includes(query);
+      return [
+        tool.name,
+        tool.description,
+        tool.source,
+        tool.status,
+        tool.category,
+        tool.categoryLabel,
+        ...(tool.bundleIds ?? []),
+        ...bundleLabelsForTool(tool, toolBundles, lang),
+      ].join(" ").toLowerCase().includes(query);
     });
-  }, [activeAgentScopeId, activeFilter, searchText, tools]);
+  }, [activeAgentScopeId, activeFilter, lang, searchText, toolBundles, tools]);
+  const visibleToolBundleGroups = useMemo(
+    () => toolBundleGroups(visibleTools, toolBundles, lang),
+    [lang, toolBundles, visibleTools],
+  );
   const activeTool = tools.find((tool) => tool.id === activeToolId) ?? visibleTools[0] ?? null;
+  const activeToolBundleLabels = activeTool ? bundleLabelsForTool(activeTool, toolBundles, lang) : [];
   const activeScopeState = activeTool ? scopeStateForTool(activeTool, activeAgentScope.id) : null;
   const activeAgents = useMemo(
     () => (agentsQuery.data ?? []).filter((agent) => agent.status !== "archived"),
@@ -435,10 +514,6 @@ export function ToolsRoute() {
       setActiveToolId(visibleTools[0]?.id ?? null);
     }
   }, [activeToolId, tools, visibleTools]);
-
-  useEffect(() => {
-    setTestResult(null);
-  }, [activeAgentScopeId, activePolicyAgentId, activeToolId]);
 
   useEffect(() => {
     if (!agentScopes.length || agentScopes.some((scope) => scope.id === activeAgentScopeId)) {
@@ -495,7 +570,9 @@ export function ToolsRoute() {
       }),
     onSuccess: (payload) => {
       setNotice({ tone: "success", text: payload.summary });
-      setActiveToolId(null);
+      if (deleteMutation.variables === activeToolId) {
+        setActiveToolId(null);
+      }
       refresh();
     },
     onError: (error) => {
@@ -510,15 +587,18 @@ export function ToolsRoute() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ args: {}, agentScope: payload.agentScopeId, agentId: payload.agentId }),
       }),
-    onSuccess: (payload) => {
-      setTestResult(payload);
+    onSuccess: (payload, variables) => {
+      setTestResult({
+        key: toolTestKey(variables.toolId, variables.agentScopeId, variables.agentId),
+        result: payload,
+      });
       setNotice({
         tone: payload.status === "succeeded" ? "success" : "neutral",
         text: payload.message,
       });
     },
-    onError: (error) => {
-      setTestResult(null);
+    onError: (error, variables) => {
+      setTestResult((current) => (current?.key === toolTestKey(variables.toolId, variables.agentScopeId, variables.agentId) ? null : current));
       setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
     },
   });
@@ -547,9 +627,27 @@ export function ToolsRoute() {
 
   const counts = toolsQuery.data?.counts;
   const activeIsGenerated = activeTool?.source === "generated";
-  const activeCanDelete = Boolean(activeTool?.deleteAllowed) && !deleteMutation.isPending;
+  const activeToolTestKey = toolTestKey(activeTool?.id, activeAgentScope.id, activePolicyAgent?.agentId);
+  const visibleTestResult = testResult?.key === activeToolTestKey ? testResult.result : null;
+  const activeToolEnablePending = enableMutation.isPending && enableMutation.variables?.toolId === activeTool?.id;
+  const activeToolDeletePending = deleteMutation.isPending && deleteMutation.variables === activeTool?.id;
+  const activeToolTestPending = testMutation.isPending && toolTestKey(
+    testMutation.variables?.toolId,
+    testMutation.variables?.agentScopeId,
+    testMutation.variables?.agentId,
+  ) === activeToolTestKey;
+  const activeCanDelete = Boolean(activeTool?.deleteAllowed) && !activeToolDeletePending;
   const activeCanToggle = Boolean(activeIsGenerated && activeTool?.validated && activeTool.status === "validated");
   const activeIsImage2Tool = activeTool?.name === IMAGE2_TOOL_NAME;
+  const activeIsWebSearchTool = activeTool?.name === WEB_SEARCH_TOOL_NAME;
+  const webSearchHealthQuery = useQuery({
+    queryKey: queryKeys.toolWebSearchHealth(),
+    queryFn: () => fetchJson<ToolDependencyHealth>("/api/tools/web-search/health"),
+    enabled: activeIsWebSearchTool,
+    refetchInterval: activeIsWebSearchTool ? resolvePollingInterval(pageVisible, 15_000) : false,
+    refetchIntervalInBackground: false,
+  });
+  const webSearchHealth = webSearchHealthQuery.data;
   const image2ModelConfig = image2ModelsQuery.data;
   const workspaceStyle = useMemo(
     () =>
@@ -707,30 +805,46 @@ export function ToolsRoute() {
             ))}
           </div>
           <div className={styles.toolList}>
-            {visibleTools.map((tool) => {
-              const isActive = tool.id === activeTool?.id;
-              const policyMode = activePolicyAgent ? toolPolicyMode(activePolicy, tool) : "inherited";
-              return (
-                <button
-                  key={`${tool.source}-${tool.id}`}
-                  type="button"
-                  className={isActive ? styles.toolButtonActive : styles.toolButton}
-                  onClick={() => setActiveToolId(tool.id)}
-                >
-                  <span className={`${styles.statusDot} ${styles[`status_${statusTone(tool)}`]}`} />
-                  <span className={styles.toolCopy}>
-                    <strong>{tool.name}</strong>
-                    <span>{tool.description || t("toolsNoDescription")}</span>
-                  </span>
-                  <span className={styles.toolBadges}>
-                    <span className={`${styles.policyStatePill} ${styles[`policy_${policyMode}`]}`}>
-                      {toolPolicyModeLabel(policyMode, lang)}
-                    </span>
-                    <span className={styles.sourcePill}>{displaySource(tool.source, lang)}</span>
-                  </span>
-                </button>
-              );
-            })}
+            {visibleToolBundleGroups.map((group) => (
+              <section key={group.bundleId} className={styles.toolBundleGroup}>
+                <header className={styles.toolBundleHeader}>
+                  <div>
+                    <strong>{group.label}</strong>
+                    <span>{group.tools.length} tools</span>
+                  </div>
+                  <small>
+                    {lang === "zh" ? "高风险" : "High risk"} {group.highRiskToolCount} · {lang === "zh" ? "显式授权" : "Explicit"} {group.explicitAllowToolCount}
+                  </small>
+                </header>
+                {group.description ? <p className={styles.toolBundleDescription}>{group.description}</p> : null}
+                <div className={styles.toolBundleItems}>
+                  {group.tools.map((tool) => {
+                    const isActive = tool.id === activeTool?.id;
+                    const policyMode = activePolicyAgent ? toolPolicyMode(activePolicy, tool) : "inherited";
+                    return (
+                      <button
+                        key={`${group.bundleId}-${tool.source}-${tool.id}`}
+                        type="button"
+                        className={isActive ? styles.toolButtonActive : styles.toolButton}
+                        onClick={() => setActiveToolId(tool.id)}
+                      >
+                        <span className={`${styles.statusDot} ${styles[`status_${statusTone(tool)}`]}`} />
+                        <span className={styles.toolCopy}>
+                          <strong>{tool.name}</strong>
+                          <span>{tool.description || t("toolsNoDescription")}</span>
+                        </span>
+                        <span className={styles.toolBadges}>
+                          <span className={`${styles.policyStatePill} ${styles[`policy_${policyMode}`]}`}>
+                            {toolPolicyModeLabel(policyMode, lang)}
+                          </span>
+                          <span className={styles.sourcePill}>{displaySource(tool.source, lang)}</span>
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
+            ))}
             {!visibleTools.length ? <p className={styles.emptyState}>{t("toolsNoMatches")}</p> : null}
           </div>
         </aside>
@@ -817,6 +931,10 @@ export function ToolsRoute() {
                 <section>
                   <span>{t("toolsDeleteAllowed")}</span>
                   <strong>{activeTool.deleteAllowed ? t("yes") : t("no")}</strong>
+                </section>
+                <section className={styles.metaGridWide}>
+                  <span>{lang === "zh" ? "所属工具包" : "Tool packages"}</span>
+                  <strong>{activeToolBundleLabels.join(" / ")}</strong>
                 </section>
               </div>
               {activeScopeState?.blockReason || activeTool.blockReason || activeTool.validationError ? (
@@ -925,6 +1043,54 @@ export function ToolsRoute() {
                   ) : null}
                 </section>
               ) : null}
+              {activeIsWebSearchTool ? (
+                <section className={styles.dependencyHealthPanel}>
+                  <div className={styles.panelHeader}>
+                    <div>
+                      <p className={styles.panelEyebrow}>
+                        {lang === "zh" ? "外部依赖" : "External dependency"}
+                      </p>
+                      <h3>{lang === "zh" ? "AutoGLM token 服务" : "AutoGLM token service"}</h3>
+                    </div>
+                    <span className={webSearchHealth?.available ? styles.countPill : styles.stateBadge}>
+                      {webSearchHealthQuery.isPending
+                        ? t("loading")
+                        : webSearchHealth?.available
+                          ? lang === "zh" ? "可用" : "available"
+                          : webSearchHealth?.status || (lang === "zh" ? "不可用" : "unavailable")}
+                    </span>
+                  </div>
+                  <div className={styles.policyMeta}>
+                    <span>
+                      dependency: <strong>{webSearchHealth?.dependency || "autoglm_token_service"}</strong>
+                    </span>
+                    <span>
+                      stage: <strong>{webSearchHealth?.stage || "token_fetch"}</strong>
+                    </span>
+                    <span>
+                      tokenUrl: <strong>{webSearchHealth?.tokenUrl || "-"}</strong>
+                    </span>
+                    <span>
+                      searchApiCalled:{" "}
+                      <strong>{webSearchHealth?.searchApiCalled === undefined ? "-" : String(webSearchHealth.searchApiCalled)}</strong>
+                    </span>
+                  </div>
+                  <p>
+                    {webSearchHealth?.available
+                      ? lang === "zh"
+                        ? "搜索工具已能取得本地 token，后续调用才会进入 AutoGLM 搜索 API。"
+                        : "The search tool can obtain a local token, so calls may proceed to the AutoGLM search API."
+                      : lang === "zh"
+                        ? "搜索工具会先依赖这个本地 token 服务；这里不可用时，外网搜索 API 不会被调用。端口变化可用 AUTOGLM_TOKEN_URL 覆盖。"
+                        : "The search tool depends on this local token service first. When it is unavailable, the external search API is not called. Use AUTOGLM_TOKEN_URL if the port changed."}
+                  </p>
+                  {webSearchHealthQuery.isError ? (
+                    <p className={styles.noticeError}>
+                      {webSearchHealthQuery.error instanceof Error ? webSearchHealthQuery.error.message : String(webSearchHealthQuery.error)}
+                    </p>
+                  ) : null}
+                </section>
+              ) : null}
               <section className={styles.policyPanel}>
                 <div className={styles.panelHeader}>
                   <div>
@@ -950,7 +1116,7 @@ export function ToolsRoute() {
                 <button
                   type="button"
                   className={styles.secondaryButton}
-                  disabled={!activeCanToggle || enableMutation.isPending}
+                  disabled={!activeCanToggle || activeToolEnablePending}
                   onClick={() => {
                     if (!activeTool) {
                       return;
@@ -974,12 +1140,12 @@ export function ToolsRoute() {
                   title={activeTool.deleteAllowed ? undefined : activeTool.blockReason || t("toolsBuiltInProtected")}
                 >
                   <Trash2 size={15} />
-                  {deleteMutation.isPending ? t("deletingSelectedLogs") : t("deleteSelected")}
+                  {activeToolDeletePending ? t("deletingSelectedLogs") : t("deleteSelected")}
                 </button>
                 <button
                   type="button"
                   className={styles.secondaryButton}
-                  disabled={!activeTool || !activePolicyAgent || testMutation.isPending}
+                  disabled={!activeTool || !activePolicyAgent || activeToolTestPending}
                   onClick={() => {
                     if (activeTool && activePolicyAgent) {
                       testMutation.mutate({
@@ -991,7 +1157,7 @@ export function ToolsRoute() {
                   }}
                 >
                   <FlaskConical size={15} />
-                  {testMutation.isPending ? t("toolsTesting") : t("toolsTest")}
+                  {activeToolTestPending ? t("toolsTesting") : t("toolsTest")}
                 </button>
               </div>
               {notice.text ? (
@@ -1007,26 +1173,26 @@ export function ToolsRoute() {
                   {notice.text}
                 </p>
               ) : null}
-              {testResult ? (
+              {visibleTestResult ? (
                 <section className={styles.testPanel}>
                   <div className={styles.panelHeader}>
                     <div>
                       <p className={styles.panelEyebrow}>{t("toolsTestResult")}</p>
-                      <h3>{testResult.status}</h3>
+                      <h3>{visibleTestResult.status}</h3>
                     </div>
-                    <span className={styles.countPill}>{agentTestLabel(testResult.agent, lang)}</span>
+                    <span className={styles.countPill}>{agentTestLabel(visibleTestResult.agent, lang)}</span>
                   </div>
-                  <p>{testResult.message}</p>
+                  <p>{visibleTestResult.message}</p>
                   <div className={styles.policyMeta}>
                     <span>
-                      {t("toolsAgentScope")}: <strong>{scopeLabel(testResult.agentScope, lang, t)}</strong>
+                      {t("toolsAgentScope")}: <strong>{scopeLabel(visibleTestResult.agentScope, lang, t)}</strong>
                     </span>
                     <span>
-                      ToolPolicy: <strong>{testResult.agent?.toolPolicyId || "-"}</strong>
+                      ToolPolicy: <strong>{visibleTestResult.agent?.toolPolicyId || "-"}</strong>
                     </span>
                   </div>
                   <div className={styles.resultSummaryGrid}>
-                    {testResultSummaryCards(testResult, t).map((card) => (
+                    {testResultSummaryCards(visibleTestResult, t).map((card) => (
                       <div key={card.key} className={`${styles.resultCard} ${card.ok ? styles.result_ok : styles.result_attention}`}>
                         <span>{card.label}</span>
                         <strong>{card.value}</strong>
@@ -1037,28 +1203,28 @@ export function ToolsRoute() {
                     <div className={styles.panelHeader}>
                       <div>
                         <p className={styles.panelEyebrow}>{t("toolsAgentCompatibility")}</p>
-                        <h3>{testResult.agentCompatibility.status}</h3>
+                        <h3>{visibleTestResult.agentCompatibility.status}</h3>
                       </div>
-                      <span className={testResult.agentCompatibility.callable ? styles.countPill : styles.stateBadge}>
-                        {testResult.agentCompatibility.callable ? t("yes") : t("no")}
+                      <span className={visibleTestResult.agentCompatibility.callable ? styles.countPill : styles.stateBadge}>
+                        {visibleTestResult.agentCompatibility.callable ? t("yes") : t("no")}
                       </span>
                     </div>
-                    <p>{testResult.agentCompatibility.message}</p>
+                    <p>{visibleTestResult.agentCompatibility.message}</p>
                     <div className={styles.policyMeta}>
                       <span>
                         {t("toolsAgentMessageType")}:{" "}
-                        <strong>{testResult.agentCompatibility.messageType || "-"}</strong>
+                        <strong>{visibleTestResult.agentCompatibility.messageType || "-"}</strong>
                       </span>
                       <span>
-                        {t("toolsAgentToolCall")}: <strong>{testResult.agentCompatibility.toolCall.name}</strong>
+                        {t("toolsAgentToolCall")}: <strong>{visibleTestResult.agentCompatibility.toolCall.name}</strong>
                       </span>
                     </div>
-                    <pre>{jsonPreview(testResult.agentCompatibility.argsParsed)}</pre>
+                    <pre>{jsonPreview(visibleTestResult.agentCompatibility.argsParsed)}</pre>
                   </section>
-                  {testResult.resultPreview ? <pre>{testResult.resultPreview}</pre> : null}
+                  {visibleTestResult.resultPreview ? <pre>{visibleTestResult.resultPreview}</pre> : null}
                   <div className={styles.testArgs}>
                     <span>{t("toolsArgsUsed")}</span>
-                    <pre>{jsonPreview(testResult.argsUsed)}</pre>
+                    <pre>{jsonPreview(visibleTestResult.argsUsed)}</pre>
                   </div>
                 </section>
               ) : null}

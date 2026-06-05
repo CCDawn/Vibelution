@@ -6,7 +6,7 @@ import json
 import os
 import tempfile
 import time
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -25,7 +25,7 @@ READ_RETRY_DELAY_SECONDS = 0.05
 
 
 def _now_iso() -> str:
-    return datetime.now(UTC).isoformat()
+    return datetime.now(timezone.utc).isoformat()
 
 
 def ensure_evolution_store_dirs() -> None:

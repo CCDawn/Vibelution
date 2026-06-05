@@ -32,6 +32,7 @@ from core.prompt_manager.sections import (
     create_default_sections,
     make_memory_section,
     make_runtime_goal_section,
+    make_session_child_routing_section,
     make_spec_digest_section,
 )
 from core.prompt_manager.builder import (
@@ -188,6 +189,7 @@ class PromptManager:
         "MEMORY",
         "GIT_MEMORY",
         "RUNTIME_LOG_INDEX",
+        "SESSION_CHILD_ROUTING",
         "LANGUAGE_AWARENESS",
     ]
     _FALLBACK_DEFAULT_SECTIONS = [
@@ -198,6 +200,7 @@ class PromptManager:
         "SPEC_DIGEST",
         "GIT_MEMORY",
         "RUNTIME_LOG_INDEX",
+        "SESSION_CHILD_ROUTING",
         "DELEGATION_RULES",
         "MEMORY",
         "LANGUAGE_AWARENESS",
@@ -216,6 +219,7 @@ class PromptManager:
         "DELEGATION_RULES",
         "CONFIG_AWARENESS",
         "LANGUAGE_AWARENESS",
+        "SESSION_CHILD_ROUTING",
         "GIT_RULES",
         "SPEC_DIGEST",
         "SPEC",
@@ -308,6 +312,7 @@ class PromptManager:
             self._sections[s.name] = s
 
         self._sections["RUNTIME_GOAL"] = make_runtime_goal_section(self._build_context)
+        self._sections["SESSION_CHILD_ROUTING"] = make_session_child_routing_section()
         self._sections["SPEC_DIGEST"] = make_spec_digest_section(self._build_context)
         # MEMORY 章节：compute 引用 self._build_context
         self._sections["MEMORY"] = make_memory_section(self._build_context)
@@ -1087,8 +1092,8 @@ class PromptManager:
             "- 你绝不能继续派发新的 agent；证据不足时直接返回缺口，由主 agent 接管。",
             "- 你只在给定 scope 内行动，不扩散任务。",
             "- 只读模式下不要尝试 `cli_tool`、shell、`git diff`、`pytest`、`head` 等命令链路。",
-            "- 优先使用结构化只读工具：read/search/code_symbol/log/context 类工具。",
-            "- 禁止跳读：若 `read_file_tool` 提示仍有剩余内容，不要默认按 offset 顺序续读；先判断当前目标缺少文本命中、结构信息还是实体上下文，再选择 `grep_search_tool`、`code_symbol_tool` 或 `read_file_tool`。",
+            "- 优先使用当前 ToolPolicy 已授权的结构化只读入口：日志、上下文、搜索、代码图谱或局部读取能力。",
+            "- 禁止跳读：若读取结果提示仍有剩余内容，不要默认按 offset 顺序续读；先判断当前目标缺少文本命中、结构信息还是实体上下文，再选择已授权的搜索、代码图谱或局部读取入口。",
             "- 你负责的工作:",
             f"  - {role_spec.owned_work[0]}",
             f"  - {role_spec.owned_work[1]}",

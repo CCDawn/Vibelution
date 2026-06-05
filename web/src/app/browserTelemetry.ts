@@ -1,4 +1,5 @@
 import { clearControlToken, getControlToken } from "../api/client";
+import { getPageInstanceId } from "./pageInstance";
 
 export type BrowserTelemetryEventInput = {
   phase: string;
@@ -62,13 +63,22 @@ export function collectBrowserPageSnapshot(): Record<string, unknown> {
   const activeNav = document.querySelector<HTMLAnchorElement>("header nav a[aria-current='page']");
   const heading = document.querySelector("h1");
   const main = document.querySelector("main");
+  const shell = document.querySelector<HTMLElement>("[data-browser-role], [data-shell]");
+  const browserRole = shell?.dataset.browserRole || (shell?.dataset.shell === "launcher" ? "launcher_control_surface" : "workbench");
+  const telemetrySurface = port === "5173" || port === "5174"
+    ? "vite_dev"
+    : browserRole === "launcher_control_surface"
+      ? "managed_launcher"
+      : "managed_workbench";
 
   return {
+    pageInstanceId: getPageInstanceId(),
     href: window.location.href,
     origin: window.location.origin,
     hostname: window.location.hostname,
     port,
-    telemetrySurface: port === "5173" || port === "5174" ? "vite_dev" : "managed_workbench",
+    telemetrySurface,
+    browserRole,
     pathname: window.location.pathname,
     search: window.location.search,
     hash: window.location.hash,

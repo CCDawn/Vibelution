@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
 """
-Python 结构感知与静态检查工具。
+代码上下文图谱与 Python 静态检查工具。
 
 目标：
-- 用 Jedi 提供接近语言服务器的定义 / 引用 / 悬浮信息
+- 用 Vibelution 原生项目索引提供 CodeGraph 风格的结构查询
+- 保留 Jedi helper 供内部 Python 光标查询使用
 - 用 Ruff 提供快速、只读的 Python lint 诊断
 - 依赖缺失时结构化降级，而不是直接报异常
 """
@@ -140,125 +141,84 @@ def _reference_results(symbol: str, *, scope: str = "", file_path: str = "", max
 
 def code_symbol_tool(
     mode: str,
+    query: str = "",
     file_path: str = "",
     symbol: str = "",
-    entity_name: str = "",
-    line: int = 0,
-    column: int = 0,
-    scope: str = ".",
     max_results: int = 20,
+    refresh: bool = False,
 ) -> str:
-    """Unified code navigation tool for outlines, entities, definitions, and references."""
+    """Project-wide code context graph tool.
+
+    v2 intentionally replaces the old Python-only outline/entity/definition
+    contract with a project-level graph contract.
+    """
 
     normalized_mode = str(mode or "").strip().lower()
-    target_symbol = str(entity_name or symbol or "").strip()
     try:
         max_results = max(1, min(int(max_results or 20), 100))
     except (TypeError, ValueError):
         max_results = 20
 
-    if normalized_mode == "outline":
-        if not file_path:
-            return json.dumps(
-                {
-                    "status": "error",
-                    "mode": normalized_mode,
-                    "message": "outline 模式需要 file_path。",
-                    "example": {"mode": "outline", "file_path": "core/web/services/session_service.py"},
-                },
-                ensure_ascii=False,
-                indent=2,
-            )
-        from tools.code_analysis_tools import list_file_entities
-
-        return list_file_entities(file_path=file_path, entity_type="all")
-
-    if normalized_mode == "entity":
-        if not file_path or not target_symbol:
-            return json.dumps(
-                {
-                    "status": "error",
-                    "mode": normalized_mode,
-                    "message": "entity 模式需要 file_path 和 symbol 或 entity_name。",
-                    "example": {
-                        "mode": "entity",
-                        "file_path": "core/web/services/session_service.py",
-                        "symbol": "_run_session_continuation_loop",
-                    },
-                },
-                ensure_ascii=False,
-                indent=2,
-            )
-        from tools.code_analysis_tools import get_code_entity
-
-        return get_code_entity(file_path=file_path, entity_name=target_symbol)
-
-    if normalized_mode in {"definition", "references", "hover"}:
-        if file_path and line:
-            return python_symbol_query(
-                file_path=file_path,
-                line=int(line),
-                column=int(column or 0),
-                action=normalized_mode,
-                max_results=max_results,
-            )
-        if not target_symbol:
-            return json.dumps(
-                {
-                    "status": "error",
-                    "mode": normalized_mode,
-                    "message": f"{normalized_mode} 模式需要 symbol，或提供 file_path + line + column。",
-                    "example": {"mode": normalized_mode, "symbol": "ToolExecutor", "scope": "core"},
-                },
-                ensure_ascii=False,
-                indent=2,
-            )
-        if normalized_mode == "hover":
-            return json.dumps(
-                {
-                    "status": "error",
-                    "mode": normalized_mode,
-                    "message": "hover 模式需要 file_path + line + column。",
-                    "example": {
-                        "mode": "hover",
-                        "file_path": "core/infrastructure/tool_executor.py",
-                        "line": 1,
-                        "column": 0,
-                    },
-                },
-                ensure_ascii=False,
-                indent=2,
-            )
-        results = (
-            _definition_results(target_symbol, scope=scope, file_path=file_path, max_results=max_results)
-            if normalized_mode == "definition"
-            else _reference_results(target_symbol, scope=scope, file_path=file_path, max_results=max_results)
-        )
+    deprecated_modes = {"outline", "entity", "definition", "hover"}
+    if normalized_mode in deprecated_modes:
         return json.dumps(
             {
-                "status": "ok",
+                "status": "error",
+                "error": "deprecated_mode",
                 "mode": normalized_mode,
-                "symbol": target_symbol,
-                "scope": scope,
-                "file_path": file_path,
-                "count": len(results),
-                "results": results,
+                "message": "code_symbol_tool v2 不再支持 outline/entity/definition/hover。请使用 inspect/search/references/explore/impact/affected_tests。",
+                "replacement": {
+                    "outline": {"mode": "inspect", "file_path": file_path or "<file_path>"},
+                    "entity": {"mode": "inspect", "symbol": symbol or "<symbol>"},
+                    "definition": {"mode": "search", "query": symbol or query or "<symbol>"},
+                    "hover": {"mode": "inspect", "file_path": file_path or "<file_path>", "symbol": symbol or query or "<symbol>"},
+                }.get(normalized_mode),
+                "supported_modes": ["status", "index", "search", "explore", "inspect", "references", "impact", "affected_tests", "files"],
             },
             ensure_ascii=False,
             indent=2,
         )
 
-    return json.dumps(
-        {
-            "status": "error",
-            "mode": normalized_mode,
-            "message": "不支持的 mode。",
-            "supported_modes": ["outline", "entity", "definition", "references", "hover"],
-            "example": {"mode": "outline", "file_path": "agent.py"},
-        },
-        ensure_ascii=False,
-        indent=2,
+    from core.code_context_graph import code_context_graph_tool as _code_context_graph_tool
+
+    result = _code_context_graph_tool(
+        mode=normalized_mode,
+        query=query,
+        file_path=file_path,
+        symbol=symbol,
+        max_results=max_results,
+        refresh=refresh,
     )
+    _record_code_graph_observation(result)
+    return json.dumps(result, ensure_ascii=False, indent=2)
+
+
+def _record_code_graph_observation(payload: dict[str, Any]) -> None:
+    """Write a compact runtime-scene event for code graph tool calls."""
+    try:
+        from core.web.services.runtime_scene_service import record_runtime_scene_event
+
+        summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
+        fields = {
+            "toolName": "code_symbol_tool",
+            "mode": str(payload.get("mode") or ""),
+            "status": str(payload.get("status") or ""),
+            "resultCount": int(payload.get("count") or summary.get("resultCount") or summary.get("contextCount") or 0),
+            "fileCount": int(summary.get("fileCount") or 0),
+            "symbolCount": int(summary.get("symbolCount") or 0),
+        }
+        record_runtime_scene_event(
+            "code_context_graph",
+            "tool",
+            "code_context_graph.tool_called",
+            message="Code context graph tool called.",
+            level="info" if payload.get("status") == "ok" else "warning",
+            outcome="succeeded" if payload.get("status") == "ok" else "failed",
+            fields=fields,
+            lifecycle=False,
+        )
+    except Exception:
+        return
 
 
 def python_symbol_query(

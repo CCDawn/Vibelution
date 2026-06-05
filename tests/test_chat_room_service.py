@@ -4,6 +4,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 
+from core.chatroom.scheduler import get_scheduler_registry
 from core.ui.chat_state import load_chat_state, save_chat_state
 from core.web.services import agent_directory_service, chat_room_service, session_service
 
@@ -108,6 +109,86 @@ def test_group_speaker_message_uses_completion_time_and_strips_self_prefix(monke
     assert message["summary"] == "收到，夏总。"
 
 
+def test_group_speaker_marks_team_discussion_internal_when_case_discusses():
+    participant = {
+        "participantId": "session-alpha",
+        "agentId": "agent-alpha",
+        "agentCode": "A012",
+        "sessionId": "session-alpha",
+        "title": "组织顾问 Agent",
+    }
+
+    def fake_runner(_participant, _prompt, _context):
+        return {"status": "completed", "raw_output": "建议先形成方案。", "summary": "ok"}
+
+    message = chat_room_service._run_one_speaker(
+        participant,
+        "prompt",
+        {
+            "roundId": "round-alpha",
+            "speakerStartedAtMonotonic": chat_room_service._perf_counter(),
+            "caseState": {
+                "nextAction": "discuss",
+                "userFacingMode": "team_discussion",
+                "discussionVisibility": "collapsed_by_default",
+            },
+        },
+        fake_runner,
+    )
+
+    assert message["messageKind"] == "team_discussion"
+    assert message["audience"] == "internal"
+    assert message["visibility"] == "collapsed_by_default"
+
+
+def test_room_to_api_normalizes_legacy_case_state_and_message_visibility():
+    room = {
+        "roomId": "room-legacy",
+        "title": "旧问诊群",
+        "mode": "round_robin",
+        "purpose": "meeting",
+        "participants": [],
+        "rounds": [
+            {
+                "roundId": "round-legacy",
+                "roomId": "room-legacy",
+                "topic": "孩子晚上经常哭泣是为什么？",
+                "mode": "round_robin",
+                "purpose": "meeting",
+                "caseState": {
+                    "intent": "maternal_child_consultation_demo",
+                    "nextAction": "ask_user",
+                    "missingFacts": ["年龄/月龄", "体温或发热情况", "伴随症状", "既往史/用药/过敏史"],
+                    "riskFlags": [],
+                },
+                "messages": [
+                    {
+                        "messageId": "message-legacy",
+                        "participantId": "host",
+                        "sessionId": "session-host",
+                        "speakerTitle": "方案主持 Agent",
+                        "status": "completed",
+                        "content": "先补充信息。",
+                        "summary": "",
+                        "timestamp": "2026-06-01T00:00:00+00:00",
+                    }
+                ],
+            }
+        ],
+    }
+
+    payload = chat_room_service._room_to_api(room)
+    case_state = payload["rounds"][0]["caseState"]
+    message = payload["rounds"][0]["messages"][0]
+
+    assert case_state["nextAction"] == "clarify"
+    assert case_state["informationSufficiency"] == "insufficient"
+    assert case_state["userFacingMode"] == "direct_clarification"
+    assert case_state["discussionVisibility"] == "user_visible"
+    assert message["messageKind"] == "user_clarification"
+    assert message["audience"] == "user"
+
+
 def test_group_speaker_strips_ui_identity_prefix_and_prompt_uses_role_view():
     participant = {
         "participantId": "session-advisor",
@@ -164,12 +245,220 @@ def test_create_chat_room_defaults_to_existing_sessions(tmp_path, monkeypatch):
     assert room["title"] == "方案群聊"
     assert room["mode"] == "round_robin"
     assert room["purpose"] == "discussion"
-    assert [item["id"] for item in room["availablePurposes"]] == ["chat", "discussion", "meeting"]
+    assert [item["id"] for item in room["availablePurposes"]] == [
+        "chat",
+        "discussion",
+        "meeting",
+        "medical_triage",
+        "research_coordination",
+        "self_evolution",
+        "supervised_evolution",
+    ]
     assert [item["sessionId"] for item in room["participants"]] == [
         "session-alpha",
         "session-beta",
     ]
     assert room["rounds"] == []
+
+
+def test_medical_consultation_mode_prioritizes_host_risk_and_intake():
+    scheduler = get_scheduler_registry().get("medical_consultation_panel")
+
+    speakers = scheduler.select_speakers(
+        [
+            {"participantId": "specialist", "teamRole": "专科顾问", "enabled": True},
+            {"participantId": "intake", "teamRole": "症状采集员", "enabled": True},
+            {"participantId": "host", "teamRole": "问诊主持", "enabled": True},
+            {"participantId": "risk", "teamRole": "风险分诊员", "enabled": True},
+            {"participantId": "summary", "teamRole": "结果整理员", "enabled": True},
+        ],
+        topic="用户说胸口发闷，应该怎么办？",
+        history=[],
+        config={},
+    )
+
+    assert [item["participantId"] for item in speakers] == [
+        "host",
+        "risk",
+        "intake",
+        "specialist",
+        "summary",
+    ]
+
+
+def test_medical_triage_prompt_keeps_safe_user_facing_boundary():
+    participant = {
+        "participantId": "session-host",
+        "agentId": "agent-host",
+        "agentCode": "M001",
+        "sessionId": "session-host",
+        "title": "问诊主持 Agent",
+        "teamName": "医疗问诊团队",
+        "teamRole": "问诊主持",
+        "teamMemberPurpose": "控制问诊节奏并合并团队意见",
+    }
+
+    prompt = chat_room_service._build_participant_prompt(
+        room={"roomId": "room-medical", "title": "医疗问诊团队 群聊", "purpose": "medical_triage"},
+        round_payload={
+            "topic": "用户发热三天，伴随咳嗽",
+            "mode": "medical_consultation_panel",
+            "purpose": "medical_triage",
+        },
+        participant=participant,
+        prior_messages=[],
+    )
+
+    assert "协同问诊会诊模式" in prompt
+    assert "分诊与就医准备" in prompt
+    assert "不替代医生面诊、检查、诊断或治疗" in prompt
+    assert "严禁给出确定诊断、处方、剂量、停药/换药指令或保证性结论" in prompt
+    assert "风险等级、可能方向、建议科室" in prompt
+
+
+def test_team_case_orchestration_keeps_heletech_health_case_in_intake_phase(tmp_path, monkeypatch):
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    sessions = [
+        session_service.create_chat_session(title="方案主持 Agent"),
+        session_service.create_chat_session(title="妇幼业务顾问 Agent"),
+        session_service.create_chat_session(title="病历集成顾问 Agent"),
+        session_service.create_chat_session(title="数据科研顾问 Agent"),
+        session_service.create_chat_session(title="合规交付顾问 Agent"),
+    ]
+    roles = ["方案主持", "妇幼业务顾问", "病历集成顾问", "数据科研顾问", "合规交付顾问"]
+    purposes = ["方案编排", "妇幼流程", "病历集成", "科研数据", "合规交付"]
+    contexts = {
+        session["agentId"]: {
+            "teamId": "demo-2",
+            "teamName": "和乐妇幼数字健康 Demo 团队",
+            "teamPurpose": "演示妇幼数字健康方案协作。",
+            "teamRole": role,
+            "teamMemberPurpose": purpose,
+        }
+        for session, role, purpose in zip(sessions, roles, purposes, strict=True)
+    }
+    room = chat_room_service.create_chat_room(
+        title="和乐妇幼数字健康 Demo 团队",
+        participant_agent_ids=[session["agentId"] for session in sessions],
+        participant_contexts_by_agent_id=contexts,
+        mode="round_robin",
+        purpose="meeting",
+        config={
+            "source": "team_template",
+            "teamId": "demo-2",
+            "teamTemplateId": "heletech-maternal-digital-health-demo",
+            "heletechMaternalDigitalHealthDemo": True,
+        },
+    )
+    captured_prompts = []
+
+    def fake_runner(participant, prompt, context):
+        captured_prompts.append(prompt)
+        return {
+            "status": "completed",
+            "raw_output": f"{participant['teamRole']} 先补齐关键信息。",
+            "summary": "ok",
+        }
+
+    detail = chat_room_service.start_chat_room_round(
+        room["roomId"],
+        "孩子晚上经常哭泣是为什么",
+        agent_runner=fake_runner,
+    )
+
+    latest_round = detail["rounds"][-1]
+    case_state = latest_round["caseState"]
+    assert case_state["intent"] == "maternal_child_consultation_demo"
+    assert case_state["informationSufficiency"] == "insufficient"
+    assert case_state["nextAction"] == "clarify"
+    assert case_state["userFacingMode"] == "direct_clarification"
+    assert "年龄/月龄" in case_state["missingFacts"]
+    assert "伴随症状" in case_state["missingFacts"]
+    assert [
+        message["speakerTitle"].split(" · ", 1)[-1]
+        for message in latest_round["messages"]
+    ] == ["方案主持 Agent"]
+    assert latest_round["messages"][0]["messageKind"] == "user_clarification"
+    assert latest_round["messages"][0]["audience"] == "user"
+    assert len(captured_prompts) == 1
+    assert "本轮用户需求 Case 状态" in captured_prompts[0]
+    assert "下一步动作: clarify" in captured_prompts[0]
+    assert "用户可见模式: direct_clarification" in captured_prompts[0]
+    assert "对话目的: meeting" in captured_prompts[0]
+    assert "本轮推进模式: medical_clarification" in captured_prompts[0]
+    assert "缺失信息:" in captured_prompts[0]
+    assert "面向用户自然澄清，而不是开会讨论如何澄清" in captured_prompts[0]
+    assert "不要把追问写成内部任务分派" in captured_prompts[0]
+    assert "不要写成问卷" in captured_prompts[0]
+    assert "clarify 阶段禁止提" in captured_prompts[0]
+    assert "Demo 映射边界" in captured_prompts[0]
+    assert "Demo 映射原则" not in captured_prompts[0]
+
+
+def test_maternal_child_clarify_output_boundary_removes_product_mapping(monkeypatch):
+    recorded_events = []
+    monkeypatch.setattr(
+        chat_room_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: recorded_events.append((args, kwargs)) or {"accepted": True},
+    )
+    participant = {
+        "participantId": "session-host",
+        "agentId": "agent-host",
+        "agentCode": "A022",
+        "sessionId": "session-host",
+        "title": "方案主持 Agent",
+    }
+
+    def fake_runner(_participant, _prompt, _context):
+        return {
+            "status": "completed",
+            "raw_output": (
+                "孩子夜间哭闹比较常见，先确认孩子多大、哭闹持续多久、有没有发热或呕吐腹泻。\n"
+                "补充这些信息后，我们可以把场景对应到妇幼数字健康的产品能力上，比如母子健康手册、云上妇幼和专科电子病历。"
+            ),
+            "summary": "补齐信息后映射妇幼数字健康产品能力。",
+        }
+
+    message = chat_room_service._run_one_speaker(
+        participant,
+        "prompt",
+        {
+            "roomId": "room-demo",
+            "roundId": "round-demo",
+            "speakerStartedAtMonotonic": chat_room_service._perf_counter(),
+            "caseState": {
+                "intent": "maternal_child_consultation_demo",
+                "nextAction": "clarify",
+                "missingFacts": ["年龄/月龄", "持续时间与频率", "伴随症状"],
+            },
+        },
+        fake_runner,
+    )
+
+    assert message["status"] == "completed"
+    assert message["messageKind"] == "user_clarification"
+    assert "孩子多大" in message["content"]
+    assert "妇幼数字健康" not in message["content"]
+    assert "产品能力" not in message["content"]
+    assert "母子健康手册" not in message["content"]
+    assert "云上妇幼" not in message["content"]
+    assert "专科电子病历" not in message["content"]
+    assert "妇幼数字健康" not in message["summary"]
+    assert any(
+        args[:3]
+        == (
+            "chat_room",
+            "case_output_boundary",
+            "chat_room.case_visible_output_boundary.applied",
+        )
+        and kwargs["fields"]["roomId"] == "room-demo"
+        and kwargs["fields"]["roundId"] == "round-demo"
+        and kwargs["fields"]["removedSegmentCount"] >= 1
+        for args, kwargs in recorded_events
+    )
 
 
 def test_chat_room_purpose_changes_participant_prompt_and_round_payload(tmp_path, monkeypatch):
@@ -743,19 +1032,25 @@ def test_chat_room_advisory_supervision_observes_without_blocking(tmp_path, monk
     )
 
 
-def test_chat_room_participant_runner_reuses_session_workspace_and_agent_profile(tmp_path, monkeypatch):
+def test_chat_room_participant_runner_reuses_session_workspace_and_agent_llm_binding(tmp_path, monkeypatch):
     _seed_chat_sessions(tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
-    state = load_chat_state(tmp_path)
-    state["conversations"][1]["agent_profile_id"] = "subagent_explorer"
-    save_chat_state(tmp_path, state)
     base_config = session_service.get_config().model_copy(deep=True)
-    base_config.llm.profiles["subagent_explorer"] = base_config.llm.profiles["primary"].model_copy(deep=True)
-    base_config.llm.profiles["subagent_explorer"].profile_id = "subagent_explorer"
-    base_config.llm.profiles["subagent_explorer"].model = "explorer-model"
+    base_config.llm.model_library["agent-explorer-model"] = {
+        "provider_id": base_config.llm.profiles["primary"].provider_id,
+        "model": "explorer-model",
+        "streaming": False,
+        "tool_calling_mode": "disabled",
+    }
     monkeypatch.setattr(session_service, "get_config", lambda: base_config)
+    detail = session_service.get_session_detail("session-beta")
+    agent_id = detail["agentId"]
+    agent_directory_service.update_agent_instance(
+        agent_id,
+        llm_bindings={"dialogue": {"modelId": "agent-explorer-model"}},
+    )
     captured = {}
 
     class ProfileAwareAgent:
@@ -785,8 +1080,7 @@ def test_chat_room_participant_runner_reuses_session_workspace_and_agent_profile
 
     detail = chat_room_service.start_chat_room_round(room["roomId"], "按会话配置发言")
 
-    assert detail["participants"][0]["agentProfileId"] == "subagent_explorer"
-    agent_id = detail["participants"][0]["agentId"]
+    assert detail["participants"][0]["agentId"] == agent_id
     event_path = tmp_path / "workspace" / "agents" / agent_id / "events" / "agent_turn_results.jsonl"
     turn_results = [
         json.loads(line)

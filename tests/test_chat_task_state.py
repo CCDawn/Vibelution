@@ -38,6 +38,51 @@ def test_build_chat_coding_result_contract_extracts_structured_fields_from_tool_
     assert contract["no_change"] is False
 
 
+def test_build_chat_coding_result_contract_treats_completed_file_artifact_as_done_without_verify():
+    contract = build_chat_coding_result_contract(
+        {
+            "status": "completed",
+            "summary": "文件已成功创建：workspace/agents/a/outputs/presentation_structure.html\n任务完成：10页HTML演示文稿已生成。",
+            "raw_output": "文件已成功创建：workspace/agents/a/outputs/presentation_structure.html\n任务完成：10页HTML演示文稿已生成。",
+            "tool_call_count": 1,
+            "tool_trace": [
+                {
+                    "name": "write_file_tool",
+                    "args": {"file_path": "workspace/agents/a/outputs/presentation_structure.html"},
+                    "result_preview": "[创建文件] [OK] 成功",
+                },
+            ],
+        }
+    )
+
+    assert contract["changed_files"] == ["workspace/agents/a/outputs/presentation_structure.html"]
+    assert contract["verification_status"] == ""
+    assert contract["outcome"] == "done"
+    assert contract["no_change"] is False
+
+
+def test_build_chat_coding_result_contract_keeps_explicit_progress_even_with_completion_words():
+    contract = build_chat_coding_result_contract(
+        {
+            "status": "completed",
+            "summary": "我已经完成第一项优化，下一步继续收口剩余日志路径。",
+            "raw_output": "我已经完成第一项优化，下一步继续收口剩余日志路径。",
+            "outcome": "progress",
+            "recommended_next_action": "继续收口剩余日志路径。",
+            "tool_trace": [
+                {
+                    "name": "write_file_tool",
+                    "args": {"file_path": "docs/partial.md"},
+                    "result_preview": "[创建文件] [OK] 成功",
+                },
+            ],
+        }
+    )
+
+    assert contract["outcome"] == "progress"
+    assert contract["next_action"] == "继续收口剩余日志路径。"
+
+
 def test_format_chat_reply_adds_structured_coding_summary():
     reply = format_chat_reply(
         {

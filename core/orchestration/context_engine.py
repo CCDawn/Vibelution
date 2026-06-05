@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import json
 import re
+import hashlib
+import threading
 import time
 from dataclasses import asdict, dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +18,9 @@ from core.web.services.runtime_scene_service import record_runtime_scene_event
 
 AGENT_RUN_KIND = agent_run_store.AGENT_RUN_KIND
 SUB_AGENT_RUN_KIND = agent_run_store.SUB_AGENT_RUN_KIND
+_RESEARCH_ORG_CONTEXT_CACHE_TTL_SECONDS = 5.0
+_RESEARCH_ORG_CONTEXT_CACHE_LOCK = threading.Lock()
+_RESEARCH_ORG_CONTEXT_CACHE: dict[tuple[str, int, tuple[tuple[str, int, str], ...]], dict[str, Any]] = {}
 
 
 def _perf_counter() -> float:
@@ -34,7 +39,7 @@ class AgentContextPacket:
     session_id: str = ""
     run_id: str = ""
     workspace_path: str = ""
-    profile_id: str = ""
+    dialogue_model_id: str = ""
     prompt_template_id: str = ""
     role_key: str = ""
     memory_policy: dict[str, Any] = field(default_factory=dict)
@@ -118,11 +123,14 @@ def build_agent_context(agent_id: str, *, session_id: str = "", run_id: str = ""
     research_org_context_block = ""
     if _agent_needs_research_organization_context(agent):
         stage_started_at = _perf_counter()
-        research_org_context_block = _build_research_organization_context_block(
+        research_org_result = _build_research_organization_context_block(
             normalized_agent_id,
             limit=limit,
         )
+        research_org_context_block = research_org_result["contextBlock"]
         timings["researchOrgContextMs"] = _elapsed_ms(stage_started_at)
+        timings["researchOrgContextCacheHit"] = research_org_result["cacheHit"]
+        timings["researchOrgContextCacheAgeMs"] = research_org_result["cacheAgeMs"]
     else:
         timings["researchOrgContextMs"] = 0
         timings["researchOrgContextSkipped"] = True
@@ -177,7 +185,7 @@ def build_agent_context(agent_id: str, *, session_id: str = "", run_id: str = ""
         session_id=str(session_id or "").strip(),
         run_id=str(run_id or "").strip(),
         workspace_path=str(agent.get("workspacePath") or "").strip(),
-        profile_id=str(agent.get("profileId") or "").strip(),
+        dialogue_model_id=agent_directory_service.agent_dialogue_model_id(agent),
         prompt_template_id=prompt_template_id,
         role_key=str(agent.get("roleKey") or "").strip(),
         memory_policy=memory_policy,
@@ -195,12 +203,14 @@ def build_agent_context(agent_id: str, *, session_id: str = "", run_id: str = ""
             "agentCode": packet.agent_code,
             "sessionId": packet.session_id,
             "runId": packet.run_id,
-            "profileId": packet.profile_id,
+            "dialogueModelId": packet.dialogue_model_id,
             "promptTemplateId": packet.prompt_template_id,
             "roleKey": packet.role_key,
             "groupContextEventCount": len(packet.group_context_events),
             "inboxMessageCount": len(packet.inbox_messages),
             "researchOrgContextIncluded": bool(research_org_context_block),
+            "researchOrgContextCacheHit": bool(timings.get("researchOrgContextCacheHit")),
+            "researchOrgContextCacheAgeMs": timings.get("researchOrgContextCacheAgeMs", 0),
             "projectRulesContextIncluded": bool(project_rules_context_block),
             "projectAgentRegistryContextIncluded": bool(project_agent_registry_context_block),
             "source": "ContextEngine",
@@ -209,28 +219,87 @@ def build_agent_context(agent_id: str, *, session_id: str = "", run_id: str = ""
     return packet
 
 
-def _build_research_organization_context_block(agent_id: str, *, limit: int = 6) -> str:
+def _build_research_organization_context_block(agent_id: str, *, limit: int = 6) -> dict[str, Any]:
     """Return the research organization context block, logging service failures at the turn seam."""
 
+    normalized_agent_id = str(agent_id or "").strip()
+    bounded_limit = max(1, int(limit or 1))
     try:
-        from core.web.services import research_organization_service
+        from core.web.services import agent_directory_service, research_organization_service
 
-        return research_organization_service.build_research_organization_context_block(
-            agent_id,
-            limit=limit,
+        project_root = Path(agent_directory_service.PROJECT_ROOT)
+        signature = _research_organization_context_signature(project_root, research_organization_service)
+        cache_key = (normalized_agent_id, bounded_limit, signature)
+        now = _perf_counter()
+        with _RESEARCH_ORG_CONTEXT_CACHE_LOCK:
+            cached = _RESEARCH_ORG_CONTEXT_CACHE.get(cache_key)
+            if cached:
+                age_seconds = now - float(cached.get("createdAt") or 0)
+                if 0 <= age_seconds <= _RESEARCH_ORG_CONTEXT_CACHE_TTL_SECONDS:
+                    return {
+                        "contextBlock": str(cached.get("contextBlock") or ""),
+                        "cacheHit": True,
+                        "cacheAgeMs": max(0, int(round(age_seconds * 1000))),
+                    }
+                _RESEARCH_ORG_CONTEXT_CACHE.pop(cache_key, None)
+
+        context_block = research_organization_service.build_research_organization_context_block(
+            normalized_agent_id,
+            limit=bounded_limit,
         )
+        signature = _research_organization_context_signature(project_root, research_organization_service)
+        cache_key = (normalized_agent_id, bounded_limit, signature)
+        with _RESEARCH_ORG_CONTEXT_CACHE_LOCK:
+            _RESEARCH_ORG_CONTEXT_CACHE[cache_key] = {
+                "createdAt": _perf_counter(),
+                "contextBlock": context_block,
+            }
+        return {
+            "contextBlock": str(context_block or ""),
+            "cacheHit": False,
+            "cacheAgeMs": 0,
+        }
     except Exception as exc:
         _record_context_event(
             "agent_runtime.research_org_context_failed",
             outcome="failed",
             level="warning",
             fields={
-                "agentId": str(agent_id or "").strip(),
+                "agentId": normalized_agent_id,
                 "reason": type(exc).__name__,
                 "source": "ContextEngine",
             },
         )
-        return ""
+        return {
+            "contextBlock": "",
+            "cacheHit": False,
+            "cacheAgeMs": 0,
+        }
+
+
+def _research_organization_context_signature(
+    project_root: Path,
+    research_organization_service: Any,
+) -> tuple[tuple[str, int, str], ...]:
+    watched_paths = [
+        Path(project_root) / "workspace" / "agents" / "agents.json",
+    ]
+    try:
+        workspace = research_organization_service.get_workspace()
+        getter = getattr(workspace, "get_research_organization_path", None)
+        if callable(getter):
+            watched_paths.append(Path(getter()))
+    except Exception:
+        watched_paths.append(Path(project_root) / "workspace" / "research" / "organization_graph.json")
+    return tuple(_file_signature(path) for path in watched_paths)
+
+
+def _file_signature(path: Path) -> tuple[str, int, str]:
+    try:
+        payload = Path(path).read_bytes()
+    except OSError:
+        return (str(path), -1, "")
+    return (str(path), len(payload), hashlib.sha256(payload).hexdigest())
 
 
 def _agent_needs_research_organization_context(agent: dict[str, Any]) -> bool:
@@ -461,10 +530,11 @@ def _build_prompt_template_context_block(
         )
         return ""
     if reason == "empty_template_content":
+        is_default_chat_template = normalized == "prompt-chat-default"
         _record_context_event(
-            "agent_runtime.prompt_template_missing",
-            outcome="missing_prompt_template",
-            level="warning",
+            "agent_runtime.prompt_template_empty_fallback" if is_default_chat_template else "agent_runtime.prompt_template_missing",
+            outcome="empty_prompt_template" if is_default_chat_template else "missing_prompt_template",
+            level="info" if is_default_chat_template else "warning",
             fields={
                 "agentId": agent_id,
                 "sessionId": session_id,
@@ -711,7 +781,7 @@ def _default_project_agent_registry(
 ) -> dict[str, Any]:
     return {
         "schemaVersion": 1,
-        "updatedAt": datetime.now(UTC).isoformat(),
+        "updatedAt": datetime.now(timezone.utc).isoformat(),
         "sourceOfTruth": {
             "identityBinding": "AgentDirectory",
             "territoryDefaults": ".docs/project-memory/agent-registry.json",
@@ -1052,8 +1122,8 @@ def _infer_project_agent_responsibility_lane(agent: dict[str, Any]) -> str:
     primary_mode = str(agent.get("primaryMode") or "").strip()
     role_key = str(agent.get("roleKey") or "").strip()
     prompt_template_id = str(agent.get("promptTemplateId") or "").strip()
-    profile_id = str(agent.get("profileId") or "").strip()
-    haystack = " ".join([primary_mode, role_key, prompt_template_id, profile_id]).lower()
+    llm_bindings = json.dumps(agent.get("llmBindings") or {}, ensure_ascii=False, sort_keys=True)
+    haystack = " ".join([primary_mode, role_key, prompt_template_id, llm_bindings]).lower()
     if "self_evolution" in haystack or "self-evolution" in haystack:
         return "self-evolution-loop"
     if "supervised_evolution" in haystack or "supervised-evolution" in haystack:
@@ -1107,11 +1177,11 @@ def _safe_int(value: Any) -> int:
 
 
 def _now() -> str:
-    return datetime.now(UTC).isoformat()
+    return datetime.now(timezone.utc).isoformat()
 
 
 def _now_compact() -> str:
-    return datetime.now(UTC).strftime("%Y%m%d%H%M%S%f")
+    return datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S%f")
 
 
 def packet_to_dict(packet: AgentContextPacket | SubAgentContextPacket) -> dict[str, Any]:

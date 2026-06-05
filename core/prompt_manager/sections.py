@@ -239,45 +239,6 @@ def make_codebase_map_section() -> SystemPromptSection:
     )
 
 
-def make_tools_index_section(project_root: Path) -> SystemPromptSection:
-    """工具索引 — 只列出当前 Agent 实际可见的 LLM 工具。"""
-
-    def compute() -> Optional[str]:
-        try:
-            from tools.Key_Tools import create_llm_facing_tools
-            from core.web.services.agent_directory_service import filter_llm_tools_for_current_agent
-
-            tools = filter_llm_tools_for_current_agent(create_llm_facing_tools())
-            if not tools:
-                return None
-            lines = [
-                "## 工具索引",
-                f"当前 Agent 共 {len(tools)} 个可直接调用工具：",
-                "",
-                "工具使用原则：工具错误是可观察反馈；参数错误时按返回的必填/可选参数和示例修正后重试；",
-                "工具结果和用户目标不一致时，换用更匹配的工具或收窄参数；只有安全、权限、停止和事务类拦截属于硬边界。",
-                "",
-            ]
-            for t in tools:
-                desc = getattr(t, 'description', '') or ''
-                first_line = desc.strip().split('\n')[0].strip()
-                if first_line:
-                    lines.append(f"- `{t.name}`: {first_line}")
-                else:
-                    lines.append(f"- `{t.name}`")
-            return "\n".join(lines)
-        except Exception:
-            return None
-
-    return SystemPromptSection(
-        name="TOOLS_INDEX",
-        compute=compute,
-        cache_break=True,
-        priority=90,
-        description="当前 Agent 可调用工具索引（按 ToolPolicy 动态生成）",
-    )
-
-
 def make_git_rules_section(project_root: Path) -> SystemPromptSection:
     """Git 提交规则摘要 — 从工作流文档提炼运行时提醒。"""
     workflow_path = project_root / "workspace" / "prompts" / "GIT_WORKFLOW.md"
@@ -321,7 +282,7 @@ def make_env_info_section(project_root: Path) -> SystemPromptSection:
                 "- 命令平台纪律: 当前是 Windows，生成命令前先确认 PowerShell/cmd 兼容性。",
                 "- 不要直接执行 Unix shell 片段：`/dev/null`、`tail/head`、`grep -n/-e`、`xargs`、`$(pwd)`。",
                 "- 需要等价能力时改用 PowerShell：`2>$null`、`Select-Object -First/-Last`、`Select-String`、`Get-Location`。",
-                "- 读文件/搜索优先结构化工具；不要用带 Unix 管道的 `cli_tool` 试探。",
+                "- 读文件/搜索可用 `cli_tool`，但要用 Windows 兼容命令并限制输出。",
             ]
         if os_name in {"Linux", "macOS"}:
             return [
@@ -510,6 +471,30 @@ def make_language_awareness_section() -> SystemPromptSection:
     )
 
 
+def make_session_child_routing_section() -> SystemPromptSection:
+    """会话子任务路由章节 — 指导 Agent 何时拆分子对话。"""
+
+    def compute() -> str:
+        return (
+            "## 会话子对话路由\n"
+            "- 当前会话承载一个主线目标；当用户提出明显独立的新事项、并行事项或会把当前主线搅混的任务时，先把它视为候选子对话。\n"
+            "- 若新事项与当前主线关系不确定，先向用户提出一个简短确认问题；若用户已经确认或意图明显不同，调用 `create_child_session_tool` 创建同一 Agent 的子对话。\n"
+            "- 创建子对话时携带完整 user_request、清晰 task_title、split_reason，以及真正有用的 inherited_facts/relevant_files/relevant_logs/constraints；不要搬运整段无关历史。\n"
+            "- 默认 `auto_start=true`，让子对话创建后自动开始；默认 `switch_to_child=true`，让用户能进入子对话查看独立工作流。\n"
+            "- 子对话只做一层；如果当前已经在子对话中又出现新的独立事项，仍创建到 root 会话下，作为兄弟子对话。\n"
+            "- 不要为普通追问、同一任务的小步骤、测试验证、实现细节或用户明确要求继续当前主线的内容创建子对话。\n"
+            "- 需要汇报多事项状态或避免重复拆分时，先用 `list_child_sessions_tool` 查看当前 root 下已有子对话。\n"
+        )
+
+    return SystemPromptSection(
+        name="SESSION_CHILD_ROUTING",
+        compute=compute,
+        cache_break=True,
+        priority=37,
+        description="多事项识别、子对话创建、上下文交接与一层子对话边界",
+    )
+
+
 def make_spec_digest_section(ctx: BuildContext) -> SystemPromptSection:
     """SPEC 运行时摘要层 — 只保留当前模式最关键的硬纪律。"""
 
@@ -526,6 +511,9 @@ def make_spec_digest_section(ctx: BuildContext) -> SystemPromptSection:
         common = [
             "- 默认中文；代码、命令、路径、协议字段、必要报错可保留原文。",
             "- 同轮同类失败不重复；被拦截的工具模式立即换路。",
+            "- 工具顺序按证据推进：优先用 cli_tool 执行 `rg`/`rg --files` 定位，再读取必要小范围；修改后用 lint/compile/test 验证。",
+            "- cli_tool 是默认本地入口；命令要短、可复现、输出有界，避免无锚点粗读和重复读。",
+            "- 记忆读取可用于查历史决策；record_learning 只在形成可复用经验或踩坑规律时写入。",
         ]
         mode_rules = {
             "orient": [
@@ -535,7 +523,6 @@ def make_spec_digest_section(ctx: BuildContext) -> SystemPromptSection:
             "diagnose": [
                 "- 先复现，再观测，再读代码，最后推理；没有新增观测时停止长推理。",
                 "- 已形成反馈环后优先围绕单一锚点收窄，禁止横向扩散。",
-                "- 读文件优先结构化工具，不要回退到带 pipe 的 cli_tool 试探。",
             ],
             "delegate": [
                 "- 只把边界清晰、阅读量大的问题委派给只读子 agent。",
@@ -621,9 +608,8 @@ def create_default_sections(
     sections.append(make_delegation_rules_section())
     sections.append(make_config_awareness_section())
     sections.append(make_language_awareness_section())
+    sections.append(make_session_child_routing_section())
     sections.append(make_git_rules_section(project_root))
-
-    sections.append(make_tools_index_section(project_root))
 
     # ── 动态章节 ──
 

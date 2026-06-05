@@ -231,7 +231,9 @@ export function PromptTemplatesRoute() {
         }),
       }),
     onSuccess: async (template) => {
-      setEditor(editorFromTemplate(template));
+      if (activeTemplateId === template.promptTemplateId) {
+        setEditor(editorFromTemplate(template));
+      }
       setNotice(copy.saved);
       await queryClient.invalidateQueries({ queryKey: queryKeys.promptTemplates() });
       await queryClient.invalidateQueries({ queryKey: ["prompt-templates", template.promptTemplateId, "detail"] });
@@ -244,13 +246,17 @@ export function PromptTemplatesRoute() {
         headers: { "Content-Type": "application/json" },
       }),
     onSuccess: async (template) => {
-      setEditor(editorFromTemplate(template));
+      if (activeTemplateId === template.promptTemplateId) {
+        setEditor(editorFromTemplate(template));
+      }
       setNotice(copy.resetDone);
       await queryClient.invalidateQueries({ queryKey: queryKeys.promptTemplates() });
       await queryClient.invalidateQueries({ queryKey: ["prompt-templates", template.promptTemplateId, "detail"] });
     },
   });
-  const busy = saveMutation.isPending || resetMutation.isPending || detailQuery.isFetching;
+  const savePending = saveMutation.isPending && saveMutation.variables?.templateId === activeTemplateId;
+  const resetPending = resetMutation.isPending && resetMutation.variables === activeTemplateId;
+  const busy = savePending || resetPending || detailQuery.isFetching;
   const editableTemplate = detailQuery.data ?? activeTemplate;
   const hasDefault = Boolean(editableTemplate?.defaultContent?.trim());
   const categoriesInUse = new Set(templates.map((template) => template.category || "general"));
@@ -389,12 +395,12 @@ export function PromptTemplatesRoute() {
                 </section>
               </div>
 
-              <label className={styles.field}>
+              <label className={`${styles.field} ${styles.nameField}`}>
                 <span>{copy.templates}</span>
                 <input value={editor.name} onChange={(event) => setEditor({ ...editor, name: event.target.value })} />
               </label>
 
-              <label className={styles.field}>
+              <label className={`${styles.field} ${styles.contentField}`}>
                 <span>{copy.content}</span>
                 <textarea value={editor.content} onChange={(event) => setEditor({ ...editor, content: event.target.value })} />
               </label>

@@ -10,9 +10,11 @@ MEDIUM_PERMISSION_TIER = "medium"
 HIGH_PERMISSION_TIER = "high"
 GENERATED_PERMISSION_TIER = "generated"
 EXPLICIT_ALLOW_TOOLS = {
+    "computer_use_task_tool",
     "research_knowledge_query_tool",
     "research_agent_creation_proposal_tool",
     "research_communication_edge_proposal_tool",
+    "research_proposal_apply_tool",
     "knowledge_query_tool",
     "knowledge_rag_retrieve_tool",
     "knowledge_proposal_tool",
@@ -97,7 +99,7 @@ TOOL_CATALOG: dict[str, dict[str, Any]] = {
     },
     "code_symbol_tool": {
         "category": "code_quality",
-        "capabilityTags": ["symbol_index", "code_navigation"],
+        "capabilityTags": ["code_context_graph", "project_index", "code_navigation", "impact_analysis", "affected_tests"],
         "riskTags": [],
         "permissionTier": MEDIUM_PERMISSION_TIER,
     },
@@ -147,6 +149,12 @@ TOOL_CATALOG: dict[str, dict[str, Any]] = {
         "category": "git_evolution",
         "capabilityTags": ["git", "worktree", "read_only"],
         "riskTags": [],
+        "permissionTier": LOW_PERMISSION_TIER,
+    },
+    "conversation_log_inspect_tool": {
+        "category": "workspace_read",
+        "capabilityTags": ["conversation_logs", "diagnostics", "read_only"],
+        "riskTags": ["session_data_access"],
         "permissionTier": LOW_PERMISSION_TIER,
     },
     "open_evolution_transaction_tool": {
@@ -227,6 +235,18 @@ TOOL_CATALOG: dict[str, dict[str, Any]] = {
         "riskTags": ["cross_agent_message", "can_wake_agent"],
         "permissionTier": HIGH_PERMISSION_TIER,
     },
+    "create_child_session_tool": {
+        "category": "agent_collaboration",
+        "capabilityTags": ["child_session", "conversation_split", "task_routing"],
+        "riskTags": ["session_state_write", "can_start_agent"],
+        "permissionTier": HIGH_PERMISSION_TIER,
+    },
+    "list_child_sessions_tool": {
+        "category": "agent_collaboration",
+        "capabilityTags": ["child_session", "conversation_index", "read_only"],
+        "riskTags": ["session_data_access"],
+        "permissionTier": MEDIUM_PERMISSION_TIER,
+    },
     "agent_tool_permission_request_tool": {
         "category": "agent_collaboration",
         "capabilityTags": ["permission_management", "governance"],
@@ -243,6 +263,12 @@ TOOL_CATALOG: dict[str, dict[str, Any]] = {
         "category": "agent_collaboration",
         "capabilityTags": ["communication_edge", "organization_governance", "proposal"],
         "riskTags": ["organization_policy_change", "cross_agent_message"],
+        "permissionTier": HIGH_PERMISSION_TIER,
+    },
+    "research_proposal_apply_tool": {
+        "category": "agent_collaboration",
+        "capabilityTags": ["organization_governance", "proposal_apply", "agent_creation"],
+        "riskTags": ["organization_policy_change", "agent_creation"],
         "permissionTier": HIGH_PERMISSION_TIER,
     },
     "commit_compressed_memory_tool": {
@@ -318,15 +344,21 @@ TOOL_CATALOG: dict[str, dict[str, Any]] = {
         "permissionTier": HIGH_PERMISSION_TIER,
     },
     "trigger_self_restart_tool": {
-        "category": "self_model",
-        "capabilityTags": ["restart", "runtime_control"],
-        "riskTags": ["runtime_restart"],
+        "category": "runtime_control",
+        "capabilityTags": ["hot_restart", "launcher_lifecycle", "runtime_control", "rollback"],
+        "riskTags": ["runtime_restart", "project_rollback", "session_wake"],
         "permissionTier": HIGH_PERMISSION_TIER,
     },
     "image2_generate_tool": {
         "category": "media_research",
         "capabilityTags": ["image_generation", "artifact"],
         "riskTags": ["model_cost", "artifact_write"],
+        "permissionTier": HIGH_PERMISSION_TIER,
+    },
+    "computer_use_task_tool": {
+        "category": "task_runtime",
+        "capabilityTags": ["computer_use", "sandbox_browser", "automation"],
+        "riskTags": ["computer_control", "network_access", "external_automation"],
         "permissionTier": HIGH_PERMISSION_TIER,
     },
     "research_knowledge_query_tool": {
@@ -400,8 +432,8 @@ TOOL_CATALOG: dict[str, dict[str, Any]] = {
 TOOL_BUNDLE_DEFINITIONS: tuple[dict[str, Any], ...] = (
     {
         "bundleId": "core",
-        "label": "Core tools",
-        "description": "Essential low-risk tools for reading workspace context, tracking goals, and inspecting current state.",
+        "label": "会话 Agent 基础包",
+        "description": "适合会话 Agent 默认启用：读取项目上下文、查看任务目标、检查当前状态，风险较低。",
         "category": "core",
         "toolNames": [
             "grep_search_tool",
@@ -412,17 +444,19 @@ TOOL_BUNDLE_DEFINITIONS: tuple[dict[str, Any], ...] = (
             "task_list_tool",
             "get_git_status_summary_tool",
             "get_recent_changes_tool",
+            "conversation_log_inspect_tool",
         ],
         "preferredToolNames": [
             "grep_search_tool",
             "read_file_tool",
+            "conversation_log_inspect_tool",
             "get_core_context_tool",
         ],
     },
     {
         "bundleId": "research",
-        "label": "Research toolkit",
-        "description": "Tools for web research, evidence lookup, research knowledge access, and research-oriented workspace reading.",
+        "label": "科研工具包",
+        "description": "适合科研、资料检索和证据整理：联网搜索、读取科研知识库、登记或治理知识资料。",
         "category": "research",
         "toolNames": [
             "grep_search_tool",
@@ -436,6 +470,8 @@ TOOL_BUNDLE_DEFINITIONS: tuple[dict[str, Any], ...] = (
             "knowledge_proposal_tool",
             "knowledge_ingestion_tool",
             "knowledge_governance_tasks_tool",
+            "knowledge_operations_health_tool",
+            "knowledge_governance_plan_tool",
             "knowledge_steward_recommendations_tool",
             "knowledge_steward_workbench_tool",
             "knowledge_rating_suggestion_tool",
@@ -448,6 +484,8 @@ TOOL_BUNDLE_DEFINITIONS: tuple[dict[str, Any], ...] = (
             "knowledge_query_tool",
             "knowledge_rag_retrieve_tool",
             "knowledge_governance_tasks_tool",
+            "knowledge_operations_health_tool",
+            "knowledge_governance_plan_tool",
             "knowledge_steward_recommendations_tool",
             "knowledge_steward_workbench_tool",
             "knowledge_rating_suggestion_tool",
@@ -455,8 +493,8 @@ TOOL_BUNDLE_DEFINITIONS: tuple[dict[str, Any], ...] = (
     },
     {
         "bundleId": "coding",
-        "label": "Coding toolkit",
-        "description": "Tools for code navigation, editing, linting, testing, and Git state inspection.",
+        "label": "代码修改包",
+        "description": "适合项目开发工作：代码定位、文件修改、静态检查、测试运行和 Git 状态检查。",
         "category": "coding",
         "toolNames": [
             "grep_search_tool",
@@ -480,29 +518,35 @@ TOOL_BUNDLE_DEFINITIONS: tuple[dict[str, Any], ...] = (
     },
     {
         "bundleId": "collaboration",
-        "label": "Collaboration toolkit",
-        "description": "Tools for Agent-to-Agent messaging, delegation, and controlled organization governance requests.",
+        "label": "团队协作工具包",
+        "description": "适合多 Agent 协作：Agent 私聊/广播、派发子 Agent、提出组织结构和沟通关系调整。",
         "category": "collaboration",
         "toolNames": [
             "agent_message_tool",
+            "create_child_session_tool",
+            "list_child_sessions_tool",
             "spawn_agent_tool",
             "agent_tool_permission_request_tool",
             "research_agent_creation_proposal_tool",
             "research_communication_edge_proposal_tool",
+            "research_proposal_apply_tool",
             "get_core_context_tool",
             "task_list_tool",
         ],
         "preferredToolNames": [
             "agent_message_tool",
+            "create_child_session_tool",
+            "list_child_sessions_tool",
             "research_agent_creation_proposal_tool",
             "agent_tool_permission_request_tool",
             "research_communication_edge_proposal_tool",
+            "research_proposal_apply_tool",
         ],
     },
     {
         "bundleId": "memory_context",
-        "label": "Memory and context toolkit",
-        "description": "Tools for reading context, searching memory, compacting context, and recording durable learning.",
+        "label": "记忆平台工具包",
+        "description": "适合管理长期上下文：读取核心上下文、检索记忆、压缩上下文和记录稳定经验。",
         "category": "memory",
         "toolNames": [
             "get_core_context_tool",
@@ -520,8 +564,8 @@ TOOL_BUNDLE_DEFINITIONS: tuple[dict[str, Any], ...] = (
     },
     {
         "bundleId": "media",
-        "label": "Media toolkit",
-        "description": "Tools for generated images and media-oriented research artifacts.",
+        "label": "媒体生成工具包",
+        "description": "适合生成图片和媒体类产物，通常会产生模型调用成本或写入产物。",
         "category": "media",
         "toolNames": [
             "image2_generate_tool",
@@ -532,8 +576,8 @@ TOOL_BUNDLE_DEFINITIONS: tuple[dict[str, Any], ...] = (
     },
     {
         "bundleId": "operations",
-        "label": "Operations toolkit",
-        "description": "High-impact runtime, shell, cleanup, task control, evolution, and self-model mutation tools.",
+        "label": "运维诊断工具包",
+        "description": "高影响工具集合：命令执行、清理、后台任务控制、进化事务和自我模型修改，需谨慎授权。",
         "category": "operations",
         "toolNames": [
             "cli_tool",
@@ -545,6 +589,7 @@ TOOL_BUNDLE_DEFINITIONS: tuple[dict[str, Any], ...] = (
             "task_start_tool",
             "task_output_tool",
             "task_stop_tool",
+            "computer_use_task_tool",
             "plan_update_tool",
             "open_evolution_transaction_tool",
             "close_evolution_transaction_tool",
@@ -556,9 +601,24 @@ TOOL_BUNDLE_DEFINITIONS: tuple[dict[str, Any], ...] = (
         "preferredToolNames": [
             "task_list_tool",
             "task_output_tool",
+            "computer_use_task_tool",
         ],
     },
 )
+
+
+def bundle_ids_for_tool(tool_name: str, *, available_tool_names: set[str] | None = None) -> list[str]:
+    """Return package ids that include a tool without duplicating tool metadata."""
+
+    normalized = str(tool_name or "").strip()
+    if not normalized:
+        return []
+    available = set(available_tool_names or TOOL_CATALOG.keys())
+    result: list[str] = []
+    for bundle in list_tool_bundles(available_tool_names=available):
+        if normalized in bundle["toolNames"]:
+            result.append(str(bundle["bundleId"]))
+    return result
 
 
 def list_tool_bundles(*, available_tool_names: set[str] | None = None) -> list[dict[str, Any]]:

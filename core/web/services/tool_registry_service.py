@@ -9,7 +9,7 @@ import queue
 import re
 import time
 import threading
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -24,7 +24,7 @@ from config.settings import reload_config
 from core.infrastructure.image_model_discovery import resolve_image_model, should_discover_image_model
 from core.infrastructure.llm_utils import parse_tool_args
 from core.orchestration.tool_lifecycle import ToolLifecycleBridge
-from core.web.services.tool_catalog import list_tool_bundles, metadata_for_tool
+from core.web.services.tool_catalog import bundle_ids_for_tool, list_tool_bundles, metadata_for_tool
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -76,6 +76,7 @@ SAFE_BUILTIN_TEST_ARGS: dict[str, dict[str, Any]] = {
     "get_evolution_fitness_tool": {"recent_limit": 3},
     "get_git_status_summary_tool": {"limit": 3},
     "get_recent_changes_tool": {"limit": 3},
+    "conversation_log_inspect_tool": {"limit": 1, "max_events": 200},
     "get_self_model_tool": {},
     "task_list_tool": {},
 }
@@ -85,6 +86,7 @@ SAFE_BUILTIN_TEST_REASONS: dict[str, str] = {
     "get_evolution_fitness_tool": "Reads a short self-evolution fitness summary with a fixed recent_limit.",
     "get_git_status_summary_tool": "Reads a short Git status summary with a fixed limit.",
     "get_recent_changes_tool": "Reads recent Git change summaries with a fixed limit.",
+    "conversation_log_inspect_tool": "Reads a compact summary of recent conversation logs with fixed limits.",
     "get_self_model_tool": "Reads the persisted self model with no caller-supplied arguments.",
     "task_list_tool": "Reads the current task list with no caller-supplied arguments.",
 }
@@ -983,9 +985,11 @@ def _is_tool_failure_result(result_text: str) -> bool:
 def _builtin_tool_items() -> list[dict[str, Any]]:
     from tools.Key_Tools import create_key_tools, create_llm_facing_tools
 
+    built_tools = create_key_tools()
     llm_visible_names = {str(tool.name) for tool in create_llm_facing_tools() if getattr(tool, "name", "")}
+    available_tool_names = {str(getattr(tool, "name", "") or "").strip() for tool in built_tools if getattr(tool, "name", "")}
     items: list[dict[str, Any]] = []
-    for tool in create_key_tools():
+    for tool in built_tools:
         name = str(getattr(tool, "name", "") or "").strip()
         if not name:
             continue
@@ -996,6 +1000,7 @@ def _builtin_tool_items() -> list[dict[str, Any]]:
                 "description": _description_for_tool(tool),
                 "source": "built_in",
                 **metadata_for_tool(name, source="built_in"),
+                "bundleIds": bundle_ids_for_tool(name, available_tool_names=available_tool_names),
                 "status": "active",
                 "enabled": True,
                 "validated": True,
@@ -1037,6 +1042,7 @@ def _generated_tool_item(record: dict[str, Any], *, builtin_names: set[str]) -> 
         "description": str(item.get("description") or "").strip(),
         "source": "generated",
         **metadata_for_tool(name, source="generated"),
+        "bundleIds": [],
         "status": status,
         "enabled": bool(item.get("enabled")) and status == "validated",
         "validated": bool(item.get("validated")) and status == "validated",
@@ -1496,4 +1502,4 @@ def _relative_project_path(path: Path) -> str:
 
 
 def _now() -> str:
-    return datetime.now(UTC).isoformat()
+    return datetime.now(timezone.utc).isoformat()

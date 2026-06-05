@@ -48,6 +48,7 @@ class AgentSessionState:
     last_validation_summary: Optional[str] = None
     last_validation_passed: Optional[bool] = None
     active_evolution_txn_id: Optional[str] = None
+    runtime_goal_packet: Any = None
     blocked_tool_patterns: Dict[str, Dict[str, str]] = field(default_factory=dict)
     recent_blockers: List[Dict[str, str]] = field(default_factory=list)
     recent_validation_results: List[Dict[str, Any]] = field(default_factory=list)
@@ -184,6 +185,16 @@ class AgentSessionState:
         """设置当前会话激活的演化事务。"""
         with self._lock:
             self.active_evolution_txn_id = txn_id
+
+    def set_runtime_goal_packet(self, packet: Any) -> None:
+        """记录当前回合的运行目标包，供工具层判断治理边界。"""
+        with self._lock:
+            self.runtime_goal_packet = packet
+
+    def get_runtime_goal_packet(self) -> Any:
+        """获取当前回合的运行目标包。"""
+        with self._lock:
+            return self.runtime_goal_packet
 
     def reset_runtime_constraints(self):
         """清空当前轮的短期运行时约束。"""

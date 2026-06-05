@@ -58,11 +58,11 @@ _FORBIDDEN_API_KEY_ENV_NAMES = {
     "WINDIR",
 }
 
-_LOCAL_PROVIDER_KINDS = {"local", "ollama"}
+_LOCAL_PROVIDER_KINDS = {"local", "ollama", "llamacpp"}
 _LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
 _REMOTE_PROVIDER_HOSTS = {
     "aliyun": {"dashscope.aliyuncs.com"},
-    "anthropic": {"api.anthropic.com"},
+    "anthropic": {"api.anthropic.com", "www.atpify.cn"},
     "deepseek": {"api.deepseek.com"},
     "google": {"generativelanguage.googleapis.com"},
     "groq": {"api.groq.com"},
@@ -125,6 +125,29 @@ def _is_local_host(host: str) -> bool:
         return False
 
 
+def _is_private_lan_ip(host: str) -> bool:
+    try:
+        address = ipaddress.ip_address(str(host or "").strip().lower().rstrip("."))
+    except ValueError:
+        return False
+    return (
+        address.is_private
+        and not address.is_loopback
+        and not address.is_link_local
+        and not address.is_multicast
+        and not address.is_reserved
+        and not address.is_unspecified
+    )
+
+
+def is_llm_local_network_base_url(base_url: str) -> bool:
+    """Return whether a base URL is a loopback or explicit private-LAN model endpoint."""
+
+    parsed = urlparse(str(base_url or "").strip())
+    host = (parsed.hostname or "").strip().lower().rstrip(".")
+    return _is_local_host(host) or _is_private_lan_ip(host)
+
+
 def _assert_resolved_host_is_public(host: str, port: int, *, context: str) -> None:
     try:
         infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
@@ -183,8 +206,8 @@ def validate_llm_provider_target(provider: Any, *, context: str = "provider", re
         raise ValueError(f"{context}.{label}.base_url must not include params, query, or fragment")
 
     if kind in _LOCAL_PROVIDER_KINDS:
-        if not _is_local_host(host):
-            raise ValueError(f"{context}.{label}.base_url for local providers must target localhost")
+        if not (_is_local_host(host) or _is_private_lan_ip(host)):
+            raise ValueError(f"{context}.{label}.base_url for local providers must target localhost or a private LAN address")
         return
 
     if _is_local_host(host):

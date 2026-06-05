@@ -9,7 +9,8 @@ from __future__ import annotations
 
 import copy
 from typing import TYPE_CHECKING
-from urllib.parse import urlparse
+
+from .llm_security import is_llm_local_network_base_url
 
 if TYPE_CHECKING:
     from .models import AppConfig, ProviderConfig, LLMProfile
@@ -19,8 +20,7 @@ VALID_RUNTIME_PROFILES = {"", "safe_local", "safe_remote", "debug", "ci"}
 
 
 def _is_local_base_url(base_url: str) -> bool:
-    parsed = urlparse(str(base_url or "").strip())
-    return parsed.hostname in {"localhost", "127.0.0.1", "::1"}
+    return is_llm_local_network_base_url(base_url)
 
 
 def _find_local_profile_id(config: "AppConfig") -> str | None:

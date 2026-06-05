@@ -1,4 +1,5 @@
 import json
+from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 
@@ -79,7 +80,32 @@ def _fake_config_workspace():
                 "requiredModelMissing": False,
             },
         ],
-        "modelOptions": [],
+        "modelOptions": [
+            {
+                "model_id": "model-primary",
+                "source": "model",
+                "provider": {"id": "openai"},
+                "provider_kind": "openai",
+                "model": "gpt-test",
+                "label": "GPT Test",
+                "details": {},
+                "api_key_env": "OPENAI_API_KEY",
+                "api_key_configured": True,
+                "api_key_state": "configured",
+            },
+            {
+                "model_id": "model-research",
+                "source": "model",
+                "provider": {"id": "relay"},
+                "provider_kind": "relay",
+                "model": "research-test",
+                "label": "Research Test",
+                "details": {},
+                "api_key_env": "RELAY_API_KEY",
+                "api_key_configured": False,
+                "api_key_state": "missing",
+            },
+        ],
     }
 
 
@@ -90,11 +116,76 @@ def _seed_agent_avatars(root):
         (avatar_dir / filename).write_bytes(b"\x89PNG\r\n\x1a\navatar")
 
 
+def test_agent_registry_repair_migrates_legacy_profile_fields_to_llm_bindings(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
+    fake_llm = SimpleNamespace(
+        get_profile=lambda profile_id=None, role="primary": SimpleNamespace(profile_id=profile_id or "primary"),
+        get_model_library_entry_for_profile=lambda profile: ("model-primary", {}),
+        model_library={"model-primary": {"model": "gpt-test"}},
+    )
+    monkeypatch.setattr("config.settings.get_config", lambda: SimpleNamespace(llm=fake_llm))
+    registry_path = tmp_path / "workspace" / "agents" / "agents.json"
+    registry_path.parent.mkdir(parents=True, exist_ok=True)
+    registry_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "agents": [
+                    {
+                        "agentId": "agent-legacy",
+                        "agentCode": "A014",
+                        "displayName": "旧 Agent",
+                        "kind": "persistent",
+                        "primaryMode": "chat",
+                        "roleKey": "",
+                        "profileId": "primary",
+                        "templateId": "primary",
+                        "promptTemplateId": "prompt-chat-default",
+                        "directSessionId": "session-legacy",
+                        "workspacePath": "workspace/agents/agent-legacy",
+                        "toolPolicyId": "default",
+                        "memoryPolicyId": "memory-agent-legacy",
+                        "createdBy": "legacy",
+                        "status": "active",
+                        "metadata": {},
+                        "createdAt": "2026-06-04T00:00:00+00:00",
+                        "updatedAt": "2026-06-04T00:00:00+00:00",
+                    }
+                ],
+                "toolPolicies": {"default": agent_directory_service.default_tool_policy("default")},
+                "memoryPolicies": {},
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    payload = agent_config_workspace_service.get_agent_config_workspace()
+
+    agent = next(item for item in payload["agents"] if item["agentId"] == "agent-legacy")
+    assert agent["llmBindings"]["dialogue"]["modelId"] == "model-primary"
+    assert "profileId" not in agent
+    assert "templateId" not in agent
+    assert all(
+        item["code"] != "missing_llm_slot_dialogue"
+        for item in payload["health"]["byAgent"].get("agent-legacy", [])
+    )
+    stored = json.loads(registry_path.read_text(encoding="utf-8"))
+    stored_agent = stored["agents"][0]
+    assert stored_agent["llmBindings"]["dialogue"]["modelId"] == "model-primary"
+    assert "profileId" not in stored_agent
+    assert "templateId" not in stored_agent
+    assert stored_agent["metadata"]["llmBindingMigration"]["legacyModelSourceId"] == "primary"
+
+
 def test_agent_config_workspace_lists_agents_once_and_derives_references(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
     chat_agent = session_service.create_chat_session(title="会话 Agent")
-    research_session = session_service.create_chat_session(title="科研 Agent", profile_id="primary")
+    research_session = session_service.create_chat_session(title="科研 Agent")
     research_agent = agent_directory_service.update_agent_instance(
         research_session["agentId"],
         primary_mode="research",
@@ -120,6 +211,11 @@ def test_agent_config_workspace_lists_agents_once_and_derives_references(tmp_pat
     assert len(agent_ids) == len(set(agent_ids))
     assert chat_agent["agentId"] in agent_ids
     assert research_agent["agentId"] in agent_ids
+    agents = {item["agentId"]: item for item in payload["agents"]}
+    assert agents[chat_agent["agentId"]]["agentBoundary"]["type"] == "work_session"
+    assert agents[chat_agent["agentId"]]["agentBoundary"]["directSessionRole"] == "primary_entry"
+    assert agents[research_agent["agentId"]]["agentBoundary"]["type"] == "team_role"
+    assert agents[research_agent["agentId"]]["agentBoundary"]["directSessionRole"] == "recovery_channel"
     research_refs = payload["references"][research_agent["agentId"]]
     assert any(item["kind"] == "mode_pool" and item["mode"] == "research" for item in research_refs)
     assert any(item["kind"] == "flow_binding" and item["field"] == "broad_search" for item in research_refs)
@@ -133,6 +229,13 @@ def test_agent_config_workspace_lists_agents_once_and_derives_references(tmp_pat
     assert groups["active"]["count"] == 3
     assert agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID in groups["active"]["agentIds"]
     assert archived_agent["agentId"] not in groups["active"]["agentIds"]
+    assert groups["work_session"]["section"] == "boundary"
+    assert chat_agent["agentId"] in groups["work_session"]["agentIds"]
+    assert research_agent["agentId"] not in groups["work_session"]["agentIds"]
+    assert groups["team_role"]["section"] == "boundary"
+    assert research_agent["agentId"] in groups["team_role"]["agentIds"]
+    assert groups["service_role"]["section"] == "boundary"
+    assert agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID in groups["service_role"]["agentIds"]
     assert groups["needs_review"]["section"] == "status"
     assert groups["archived"]["section"] == "status"
     assert archived_agent["agentId"] in groups["archived"]["agentIds"]
@@ -143,6 +246,28 @@ def test_agent_config_workspace_lists_agents_once_and_derives_references(tmp_pat
     assert groups["team"]["section"] == "reference"
     assert research_agent["agentId"] in groups["research"]["agentIds"]
     assert research_agent["agentId"] in groups["group_chat"]["agentIds"]
+
+
+def test_work_session_boundary_skips_persona_task_and_team_onboarding_requirements(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
+    session = session_service.create_chat_session(title="开发会话")
+    agent_id = session["agentId"]
+    agent = agent_directory_service.get_agent(agent_id)
+    metadata = dict(agent["metadata"])
+    metadata.pop("personaProfile", None)
+    metadata.pop("taskProfile", None)
+    metadata["onboardingMissing"] = ["personaProfile", "taskProfile"]
+    agent_directory_service.update_agent_instance(agent_id, metadata=metadata)
+
+    payload = agent_config_workspace_service.get_agent_config_workspace()
+    workspace_agent = next(item for item in payload["agents"] if item["agentId"] == agent_id)
+    issue_codes = {item["code"] for item in workspace_agent["health"]}
+
+    assert workspace_agent["agentBoundary"]["type"] == "work_session"
+    assert workspace_agent["agentBoundary"]["requiresPersonaProfile"] == "false"
+    assert workspace_agent["agentBoundary"]["requiresTaskProfile"] == "false"
+    assert "agent_onboarding_incomplete" not in issue_codes
 
 
 def test_agent_directory_assigns_default_avatar_from_workspace_avatars(tmp_path, monkeypatch):
@@ -216,7 +341,7 @@ def test_agent_config_workspace_reports_missing_model_key_and_prompt(tmp_path, m
     monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
     agent = agent_directory_service.create_agent_instance(
         display_name="待处理 Agent",
-        profile_id="research_missing_key",
+        llm_bindings={"dialogue": {"modelId": "model-research"}},
         primary_mode="research",
         role_key="research_deep",
         prompt_template_id="prompt-missing",
@@ -225,9 +350,11 @@ def test_agent_config_workspace_reports_missing_model_key_and_prompt(tmp_path, m
     payload = agent_config_workspace_service.get_agent_config_workspace()
 
     issues = payload["health"]["byAgent"][agent["agentId"]]
-    assert {item["code"] for item in issues} >= {"missing_model_api_key", "missing_prompt_template", "missing_direct_session"}
+    assert {item["code"] for item in issues} >= {"missing_llm_slot_api_key_dialogue", "missing_prompt_template", "missing_direct_session"}
     assert payload["health"]["counts"]["warning"] >= 3
     assert agent["agentId"] in {item for group in payload["groups"] if group["id"] == "needs_review" for item in group["agentIds"]}
+    assert [item["model_id"] for item in payload["modelOptions"]] == ["model-primary", "model-research"]
+    assert [item["modelId"] for item in payload["agentModelChoices"]] == ["model-primary", "model-research"]
 
 
 def test_agent_instance_generates_public_person_name_and_keeps_functional_name(tmp_path, monkeypatch):
@@ -527,8 +654,8 @@ def test_agent_config_workspace_api_route(tmp_path, monkeypatch):
 def test_agent_config_workspace_surfaces_runtime_status_from_run_snapshots(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
-    running_agent = agent_directory_service.create_agent_instance(display_name="运行 Agent", profile_id="primary")
-    failed_agent = agent_directory_service.create_agent_instance(display_name="失败 Agent", profile_id="primary")
+    running_agent = agent_directory_service.create_agent_instance(display_name="运行 Agent")
+    failed_agent = agent_directory_service.create_agent_instance(display_name="失败 Agent")
 
     context_engine.record_agent_turn_result(
         running_agent["agentId"],
@@ -570,10 +697,13 @@ def test_agent_create_api_adds_direct_agent_with_safe_defaults(tmp_path, monkeyp
         "/api/agents",
         json={
             "displayName": "新增研究 Agent",
-            "profileId": "primary",
+            "llmBindings": {"dialogue": {"modelId": "model-primary"}},
             "primaryMode": "research",
             "roleKey": "research_broad",
             "promptTemplateId": "prompt-research-broad",
+            "personaProfile": {"personality": "冷静、细致，优先核对证据。"},
+            "taskProfile": {"mission": "负责复核研究结论。", "taskTypes": ["research_broad"]},
+            "toolPolicy": {"allowedTools": ["agent_message_tool"], "preferredTools": ["agent_message_tool"]},
         },
     )
 
@@ -589,6 +719,154 @@ def test_agent_create_api_adds_direct_agent_with_safe_defaults(tmp_path, monkeyp
     assert agent["directSessionId"]
     workspace = agent_config_workspace_service.get_agent_config_workspace()
     assert agent["agentId"] in {item["agentId"] for item in workspace["agents"]}
+    created = next(item for item in workspace["agents"] if item["agentId"] == agent["agentId"])
+    assert created["metadata"]["creationSpec"]["source"] == "api_agents"
+    assert created["metadata"]["onboardingStatus"] == "complete"
+    assert created["metadata"]["onboardingMissing"] == []
+    assert not any(item["code"] == "agent_onboarding_incomplete" for item in created["health"])
+    assert created["toolPolicy"]["allowedTools"] == ["agent_message_tool"]
+
+
+def test_agent_create_api_allows_work_session_without_persona_task_or_role(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
+
+    response = client.post(
+        "/api/agents",
+        json={
+            "displayName": "项目实现会话",
+            "llmBindings": {"dialogue": {"modelId": "model-primary"}},
+            "primaryMode": "chat",
+            "promptTemplateId": "prompt-chat-default",
+        },
+    )
+
+    assert response.status_code == 201, response.text
+    agent = response.json()
+    assert agent["primaryMode"] == "chat"
+    assert agent["roleKey"] == ""
+    assert not agent_directory_service.agent_persona_profile_has_content(agent["personaProfile"])
+    assert not agent_directory_service.agent_task_profile_has_content(agent["taskProfile"])
+    workspace = agent_config_workspace_service.get_agent_config_workspace()
+    created = next(item for item in workspace["agents"] if item["agentId"] == agent["agentId"])
+    assert created["agentBoundary"]["type"] == "work_session"
+    assert created["agentBoundary"]["requiresPersonaProfile"] == "false"
+    assert created["agentBoundary"]["requiresTaskProfile"] == "false"
+    assert created["toolPolicyId"].startswith("tool-")
+    assert "conversation_log_inspect_tool" in created["toolPolicy"]["allowedTools"]
+    assert "conversation_log_inspect_tool" in created["toolPolicy"]["preferredTools"]
+    assert "cli_tool" in created["toolPolicy"]["allowedTools"]
+    assert "create_child_session_tool" in created["toolPolicy"]["allowedTools"]
+    assert "list_child_sessions_tool" in created["toolPolicy"]["allowedTools"]
+    assert "run_test_for_tool" in created["toolPolicy"]["allowedTools"]
+    assert "web_search_tool" in created["toolPolicy"]["allowedTools"]
+    assert "image2_generate_tool" in created["toolPolicy"]["allowedTools"]
+    assert "search_memory_tool" in created["toolPolicy"]["allowedTools"]
+    assert "record_learning_tool" in created["toolPolicy"]["allowedTools"]
+    assert "read_file_tool" not in created["toolPolicy"]["allowedTools"]
+    assert "grep_search_tool" not in created["toolPolicy"]["allowedTools"]
+    assert "glob_tool" not in created["toolPolicy"]["allowedTools"]
+    assert "code_symbol_tool" not in created["toolPolicy"]["allowedTools"]
+    assert "research_knowledge_query_tool" not in created["toolPolicy"]["allowedTools"]
+    assert "knowledge_proposal_tool" not in created["toolPolicy"]["allowedTools"]
+    assert "research_agent_creation_proposal_tool" not in created["toolPolicy"]["allowedTools"]
+    assert not any(item["code"] == "agent_onboarding_incomplete" for item in created["health"])
+
+
+def test_repair_adds_session_default_tools_to_legacy_work_session_agent(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = agent_directory_service.create_agent_instance(
+        display_name="Legacy Session Agent",
+        llm_bindings={"dialogue": {"modelId": "model-primary"}},
+        primary_mode="chat",
+        prompt_template_id="prompt-chat-default",
+    )
+    state = agent_directory_service.load_state()
+    raw_agent = next(item for item in state["agents"] if item["agentId"] == agent["agentId"])
+    raw_agent["toolPolicyId"] = agent_directory_service.DEFAULT_TOOL_POLICY_ID
+    state["toolPolicies"][agent_directory_service.DEFAULT_TOOL_POLICY_ID] = agent_directory_service.default_tool_policy()
+    agent_directory_service.save_state(state)
+
+    repaired = agent_directory_service.repair_agent_directory()
+    repaired_agent = next(item for item in repaired["agents"] if item["agentId"] == agent["agentId"])
+    policy = repaired["toolPolicies"][repaired_agent["toolPolicyId"]]
+
+    assert repaired_agent["toolPolicyId"].startswith("tool-")
+    assert "conversation_log_inspect_tool" in policy["allowedTools"]
+    assert "conversation_log_inspect_tool" in policy["preferredTools"]
+    assert "cli_tool" in policy["allowedTools"]
+    assert "create_child_session_tool" in policy["allowedTools"]
+    assert "list_child_sessions_tool" in policy["allowedTools"]
+    assert "record_learning_tool" in policy["allowedTools"]
+    assert "read_file_tool" not in policy["allowedTools"]
+    assert "grep_search_tool" not in policy["allowedTools"]
+    assert "glob_tool" not in policy["allowedTools"]
+    assert "code_symbol_tool" not in policy["allowedTools"]
+    assert repaired_agent["metadata"]["onboardingStatus"] == "complete"
+
+
+def test_agent_create_api_rejects_incomplete_onboarding_payload(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
+
+    response = client.post(
+        "/api/agents",
+        json={
+            "displayName": "半成品 Agent",
+            "llmBindings": {"dialogue": {"modelId": "model-primary"}},
+            "primaryMode": "research",
+            "promptTemplateId": "prompt-research-broad",
+        },
+    )
+
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert "Agent 创建信息不完整" in detail
+    assert "角色键" in detail
+    assert "人物档案" in detail
+    assert "任务档案" in detail
+    assert "工具包" in detail
+
+
+def test_agent_create_api_rejects_blank_display_name(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+
+    response = client.post("/api/agents", json={"displayName": "   ", "llmBindings": {"dialogue": {"modelId": "model-primary"}}})
+
+    assert response.status_code == 422
+    assert "功能名" in response.json()["detail"]
+
+
+def test_agent_onboarding_health_clears_after_required_profiles_and_tools(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
+    agent = agent_directory_service.create_agent_instance(
+        display_name="完整 Agent",
+        llm_bindings={"dialogue": {"modelId": "model-primary"}},
+        primary_mode="research",
+        role_key="research_full",
+        prompt_template_id="prompt-research-broad",
+    )
+
+    response = client.patch(
+        f"/api/agents/{agent['agentId']}",
+        json={
+            "personaProfile": {"communicationStyle": "先给结论，再列证据。"},
+            "taskProfile": {"mission": "负责研究复核。", "taskTypes": ["research_review"]},
+            "toolPolicy": {
+                "allowedTools": ["agent_message_tool"],
+                "preferredTools": ["agent_message_tool"],
+                "writeScopes": ["private"],
+            },
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    workspace = agent_config_workspace_service.get_agent_config_workspace()
+    created = next(item for item in workspace["agents"] if item["agentId"] == agent["agentId"])
+    assert created["metadata"]["onboardingStatus"] == "complete"
+    assert created["metadata"]["onboardingMissing"] == []
+    assert not any(item["code"] == "agent_onboarding_incomplete" for item in created["health"])
 
 
 def test_agent_delete_api_archives_and_cleans_bindings_and_rooms(tmp_path, monkeypatch):
@@ -694,7 +972,7 @@ def test_agent_patch_status_archived_uses_safe_archive_cleanup(tmp_path, monkeyp
 
     response = client.patch(
         f"/api/agents/{reviewer['agentId']}",
-        json={"displayName": reviewer["displayName"], "profileId": reviewer["profileId"], "status": "archived"},
+        json={"displayName": reviewer["displayName"], "status": "archived"},
     )
 
     assert response.status_code == 200, response.text
@@ -942,6 +1220,17 @@ def test_agent_purge_api_reports_workspace_delete_failure_without_server_error(t
 
 def test_agent_reset_api_clears_runtime_state_without_removing_bindings_or_memory(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    reset_events = []
+    monkeypatch.setattr(
+        agents_route,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: reset_events.append((args, kwargs)) or {"accepted": True},
+    )
+    monkeypatch.setattr(
+        agent_directory_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: reset_events.append((args, kwargs)) or {"accepted": True},
+    )
     direct_session = session_service.create_chat_session(title="Resettable Agent")
     agent = agent_directory_service.get_agent(direct_session["agentId"])
     peer = agent_directory_service.create_agent_instance(
@@ -998,6 +1287,17 @@ def test_agent_reset_api_clears_runtime_state_without_removing_bindings_or_memor
     assert agent["agentId"] in {participant["agentId"] for participant in room_detail["participants"]}
     team_detail = team_service.get_team(team["teamId"])
     assert agent["agentId"] in [member["agentId"] for member in team_detail["members"]]
+    event_codes = [item[0][2] for item in reset_events]
+    assert event_codes.count("agent.reset.requested") == 1
+    assert event_codes.count("agent.reset.completed") == 1
+    requested_fields = next(item[1]["fields"] for item in reset_events if item[0][2] == "agent.reset.requested")
+    completed_fields = next(item[1]["fields"] for item in reset_events if item[0][2] == "agent.reset.completed")
+    assert requested_fields["agentId"] == agent["agentId"]
+    assert requested_fields["clearRuntimeState"] is True
+    assert requested_fields["resetDirectSession"] is True
+    assert completed_fields["agentId"] == agent["agentId"]
+    assert completed_fields["deletedPathCount"] == len(payload["resetSummary"]["deletedPaths"])
+    assert completed_fields["deletedPathCount"] >= 6
 
 
 def test_agent_reset_api_can_keep_existing_direct_session_when_requested(tmp_path, monkeypatch):
@@ -1063,8 +1363,12 @@ def test_agent_reset_api_can_reset_selected_advanced_profiles_and_policies(tmp_p
     assert payload["agent"]["personaProfile"]["age"] == ""
     assert payload["agent"]["taskProfile"]["mission"] == ""
     assert payload["agent"]["taskProfile"]["taskTypes"] == []
-    assert payload["agent"]["toolPolicyId"] == agent_directory_service.DEFAULT_TOOL_POLICY_ID
-    assert payload["agent"]["toolPolicy"]["allowedTools"] == []
+    assert payload["agent"]["toolPolicyId"].startswith("tool-")
+    assert "conversation_log_inspect_tool" in payload["agent"]["toolPolicy"]["allowedTools"]
+    assert "cli_tool" in payload["agent"]["toolPolicy"]["allowedTools"]
+    assert "create_child_session_tool" in payload["agent"]["toolPolicy"]["allowedTools"]
+    assert "list_child_sessions_tool" in payload["agent"]["toolPolicy"]["allowedTools"]
+    assert "read_file_tool" not in payload["agent"]["toolPolicy"]["allowedTools"]
     assert payload["agent"]["memoryPolicy"]["readSharedGroups"] == []
     assert payload["agent"]["memoryPolicy"]["writeSharedGroups"] == []
     assert payload["agent"]["metadata"]["delegationPolicy"]["allowSubagents"] is False
@@ -1073,6 +1377,12 @@ def test_agent_reset_api_can_reset_selected_advanced_profiles_and_policies(tmp_p
 
 def test_agent_reset_api_rejects_archived_agent(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    reset_events = []
+    monkeypatch.setattr(
+        agents_route,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: reset_events.append((args, kwargs)) or {"accepted": True},
+    )
     agent = session_service.create_chat_session(title="Archived Reset Agent")
     agent_directory_service.archive_agent_instance(agent["agentId"])
 
@@ -1081,6 +1391,45 @@ def test_agent_reset_api_rejects_archived_agent(tmp_path, monkeypatch):
     assert response.status_code == 422
     assert "Archived Agent cannot be reset" in response.json()["detail"]
     assert agent_directory_service.get_agent(agent["agentId"], include_archived=True)["status"] == "archived"
+    event_codes = [item[0][2] for item in reset_events]
+    assert event_codes == ["agent.reset.requested", "agent.reset.failed"]
+    failed_fields = reset_events[-1][1]["fields"]
+    assert failed_fields["agentId"] == agent["agentId"]
+    assert failed_fields["errorType"] == "AgentDirectoryError"
+
+
+def test_agent_inbox_consume_all_api_clears_pending_health_issue(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    target = agent_directory_service.create_agent_instance(display_name="收件 Agent")
+    source = agent_directory_service.create_agent_instance(display_name="来源 Agent")
+    for index in range(3):
+        agent_directory_service.write_agent_inbox_message(
+            target["agentId"],
+            content=f"消息 {index}",
+            source_agent_id=source["agentId"],
+        )
+
+    before = agent_config_workspace_service.get_agent_config_workspace()
+    assert any(
+        item["code"] == "pending_inbox_messages"
+        for item in before["health"]["byAgent"][target["agentId"]]
+    )
+
+    response = client.post(
+        f"/api/agents/{target['agentId']}/messages/consume-all",
+        json={"consumedBySessionId": target["directSessionId"], "consumedByTurnId": "test"},
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["consumedCount"] == 3
+    assert payload["remainingPendingCount"] == 0
+    assert agent_directory_service.count_agent_inbox_messages_for_agent(target["agentId"], status="pending") == 0
+    after = agent_config_workspace_service.get_agent_config_workspace()
+    assert all(
+        item["code"] != "pending_inbox_messages"
+        for item in after["health"]["byAgent"].get(target["agentId"], [])
+    )
 
 
 def test_agent_config_workspace_agent_patch_updates_card_fields(tmp_path, monkeypatch):
@@ -1088,7 +1437,7 @@ def test_agent_config_workspace_agent_patch_updates_card_fields(tmp_path, monkey
     monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
     agent = agent_directory_service.create_agent_instance(
         display_name="旧 Agent",
-        profile_id="primary",
+        llm_bindings={"dialogue": {"modelId": "model-primary"}},
         prompt_template_id="prompt-chat-default",
     )
     workspace = agent_config_workspace_service.get_agent_config_workspace()
@@ -1098,7 +1447,7 @@ def test_agent_config_workspace_agent_patch_updates_card_fields(tmp_path, monkey
         f"/api/agents/{agent['agentId']}",
         json={
             "displayName": "新 Agent",
-            "profileId": "research_missing_key",
+            "llmBindings": {"dialogue": {"modelId": "model-research"}},
             "promptTemplateId": "prompt-research-broad",
             "toolPolicyId": "default",
             "memoryPolicyId": memory_policy_id,
@@ -1109,11 +1458,59 @@ def test_agent_config_workspace_agent_patch_updates_card_fields(tmp_path, monkey
     assert response.status_code == 200, response.text
     payload = response.json()
     assert payload["displayName"] == "新 Agent"
-    assert payload["profileId"] == "research_missing_key"
-    assert payload["templateId"] == "research_missing_key"
+    assert payload["llmBindings"]["dialogue"]["modelId"] == "model-research"
+    assert "profileId" not in payload
     assert payload["promptTemplateId"] == "prompt-research-broad"
     assert payload["toolPolicyId"] == "default"
     assert payload["memoryPolicyId"] == memory_policy_id
+
+
+def test_normalize_tool_policy_dedupes_tool_lists_preserving_order():
+    policy = agent_directory_service.normalize_tool_policy(
+        {
+            "policyId": "tool-test",
+            "allowedTools": ["cli_tool", "rg_tool", "cli_tool", "", "rg_tool"],
+            "preferredTools": ["cli_tool", "cli_tool", "read_file_tool"],
+            "blockedTools": ["danger", "danger"],
+        },
+        "tool-test",
+    )
+
+    assert policy["allowedTools"] == ["cli_tool", "rg_tool"]
+    assert policy["preferredTools"] == ["cli_tool", "read_file_tool"]
+    assert policy["blockedTools"] == ["danger"]
+
+
+def test_agent_api_rejects_legacy_profile_and_template_fields(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+
+    create_response = client.post(
+        "/api/agents",
+        json={
+            "displayName": "旧字段 Agent",
+            "profileId": "primary",
+            "llmBindings": {"dialogue": {"modelId": "model-primary"}},
+            "primaryMode": "chat",
+            "promptTemplateId": "prompt-chat-default",
+            "toolPolicy": {"allowedTools": ["agent_message_tool"]},
+        },
+    )
+
+    assert create_response.status_code == 422
+    assert "profileId" in create_response.text
+
+    agent = agent_directory_service.create_agent_instance(
+        display_name="新字段 Agent",
+        llm_bindings={"dialogue": {"modelId": "model-primary"}},
+        prompt_template_id="prompt-chat-default",
+    )
+    patch_response = client.patch(
+        f"/api/agents/{agent['agentId']}",
+        json={"templateId": "primary", "promptTemplateId": "prompt-chat-default"},
+    )
+
+    assert patch_response.status_code == 422
+    assert "templateId" in patch_response.text
 
 
 def test_agent_patch_rejects_unknown_policy_ids_and_protected_archive(tmp_path, monkeypatch):
@@ -1541,6 +1938,36 @@ def test_agent_patch_runtime_policies_updates_metadata_and_logs(tmp_path, monkey
     )
 
 
+def test_agent_runtime_context_does_not_inject_tool_policy_summary(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = agent_directory_service.create_agent_instance(display_name="能力管家")
+    agent_directory_service.update_agent_instance(
+        agent["agentId"],
+        tool_policy={
+            "allowedTools": [
+                "agent_message_tool",
+                "research_knowledge_query_tool",
+                "read_memory_tool",
+                "get_memory_summary_tool",
+                "read_dynamic_prompt_tool",
+            ],
+            "preferredTools": ["read_memory_tool", "research_knowledge_query_tool"],
+        },
+    )
+
+    context_block = agent_directory_service.build_agent_runtime_context_block(agent["agentId"])
+
+    assert "ToolPolicy:" not in context_block
+    assert "visible=agent_message_tool, research_knowledge_query_tool" not in context_block
+    assert "configuredUnavailableCount=3" not in context_block
+    assert "agent_message_tool" not in context_block
+    assert "research_knowledge_query_tool" not in context_block
+    assert "read_memory_tool" not in context_block
+    assert "get_memory_summary_tool" not in context_block
+    assert "read_dynamic_prompt_tool" not in context_block
+    assert "preferred=research_knowledge_query_tool" not in context_block
+
+
 def test_repair_agent_directory_creates_protected_knowledge_steward_agent(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
 
@@ -1606,8 +2033,8 @@ def test_repair_agent_directory_creates_protected_knowledge_steward_agent(tmp_pa
     context_block = agent_directory_service.build_agent_runtime_context_block(steward["agentId"])
     assert "knowledge_governance" in context_block
     assert "Knowledge bodies are tool-readable only" in context_block
-    assert "ToolPolicy: tool-knowledge-steward" in context_block
-    assert "knowledge_governance_tasks_tool" in context_block
+    assert "ToolPolicy: tool-knowledge-steward" not in context_block
+    assert "knowledge_governance_tasks_tool" not in context_block
     assert "research_proposal_apply_tool" not in context_block
 
 
@@ -1757,7 +2184,6 @@ def test_agent_mode_membership_api_updates_selected_agent_bindings(tmp_path, mon
     monkeypatch.setattr(agents_route, "_ensure_config_agent_instances", lambda: None)
     agent = agent_directory_service.create_agent_instance(
         display_name="模式 Agent",
-        profile_id="primary",
         primary_mode="research",
         role_key="research_broad",
     )

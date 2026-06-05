@@ -97,6 +97,8 @@ def knowledge_query_tool(query: str = "", knowledge_base_id: str = "", limit: in
 def knowledge_rag_retrieve_tool(
     query: str = "",
     knowledge_base_id: str = "",
+    owner_type: str = "",
+    owner_id: str = "",
     retrieval_mode: str = "hybrid",
     provider: str = "local",
     top_k: int = 5,
@@ -126,6 +128,8 @@ def knowledge_rag_retrieve_tool(
         payload = rag_retrieval_service.retrieve_rag_contexts(
             agent_id=agent_id,
             query=trim_lines(str(query or ""), max_lines=4).strip(),
+            owner_type=str(owner_type or "").strip(),
+            owner_id=str(owner_id or "").strip(),
             knowledge_base_id=requested_base_id,
             retrieval_mode=retrieval_mode,
             provider=provider,

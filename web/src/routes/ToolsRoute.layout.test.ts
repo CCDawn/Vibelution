@@ -38,8 +38,29 @@ describe("ToolsRoute layout contract", () => {
     expect(routeSource).toContain("toolFilterCounts");
     expect(routeSource).toContain("filterCounts");
     expect(routeSource).toContain("styles.resultSummaryGrid");
-    expect(routeSource).toContain("testResultSummaryCards(testResult, t)");
+    expect(routeSource).toContain("testResultSummaryCards(visibleTestResult, t)");
     expect(routeSource).toContain("styles.resultCard");
+  });
+
+  it("keeps tool actions and test results scoped to the active tool and Agent", () => {
+    expect(routeSource).toContain("type ScopedToolTestResult");
+    expect(routeSource).toContain("toolTestKey(variables.toolId, variables.agentScopeId, variables.agentId)");
+    expect(routeSource).toContain("const visibleTestResult = testResult?.key === activeToolTestKey ? testResult.result : null");
+    expect(routeSource).toContain("enableMutation.variables?.toolId === activeTool?.id");
+    expect(routeSource).toContain("deleteMutation.variables === activeTool?.id");
+    expect(routeSource).toContain("activeToolTestPending");
+    expect(routeSource).not.toContain("setTestResult(null);\n  }, [activeAgentScopeId, activePolicyAgentId, activeToolId]);");
+  });
+
+  it("groups the tool browser by tool packages instead of a flat tool list", () => {
+    expect(routeSource).toContain("toolsQuery.data?.toolBundles");
+    expect(routeSource).toContain("toolBundleGroups");
+    expect(routeSource).toContain("visibleToolBundleGroups");
+    expect(routeSource).toContain("tool.bundleIds");
+    expect(routeSource).toContain("styles.toolBundleGroup");
+    expect(routeSource).toContain("styles.toolBundleHeader");
+    expect(routeSource).toContain("所属工具包");
+    expect(routeSource).not.toContain("{visibleTools.map((tool)");
   });
 
   it("supports agent-scoped tool lists and test requests", () => {
@@ -104,12 +125,23 @@ describe("ToolsRoute layout contract", () => {
     expect(routeSource).not.toContain("baseUrlInput");
   });
 
+  it("shows web search dependency health only for the selected search tool", () => {
+    expect(routeSource).toContain("WEB_SEARCH_TOOL_NAME = \"web_search_tool\"");
+    expect(routeSource).toContain("activeIsWebSearchTool");
+    expect(routeSource).toContain("fetchJson<ToolDependencyHealth>(\"/api/tools/web-search/health\")");
+    expect(routeSource).toContain("enabled: activeIsWebSearchTool");
+    expect(routeSource).toContain("styles.dependencyHealthPanel");
+    expect(routeSource).toContain("AUTOGLM_TOKEN_URL");
+    expect(routeSource).not.toContain("fetchJson<ToolRegistryPayload>(\"/api/tools/web-search/health\")");
+  });
+
   it("keeps test controls and result panels in normal document flow", () => {
     expect(routeSource).toContain("styles.policyPanel");
     expect(routeSource).toContain("styles.toolAgentFitPanel");
     expect(routeSource).toContain("styles.image2ModelPanel");
     expect(routeSource).toContain("styles.detailActions");
     expect(routeSource.indexOf("styles.detailActions")).toBeGreaterThan(routeSource.indexOf("styles.policyPanel"));
+    expect(routeSource.indexOf("styles.dependencyHealthPanel")).toBeLessThan(routeSource.indexOf("styles.policyPanel"));
     expect(routeSource.indexOf("styles.agentPermissionSummaryPanel")).toBeLessThan(routeSource.indexOf("styles.detailHeader"));
     expect(routeSource.indexOf("styles.agentPermissionSummaryPanel")).toBeGreaterThan(0);
     expect(routeSource.indexOf("styles.testPanel")).toBeGreaterThan(routeSource.indexOf("styles.detailActions"));

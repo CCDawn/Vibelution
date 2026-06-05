@@ -15,6 +15,15 @@ class LLMCapabilities:
     supports_system_messages: bool = True
     supports_json_mode: bool = False
     supports_model_discovery: bool = True
+    supports_image_input: bool = False
+    supports_prompt_cache: bool = False
+    supports_thinking: bool = False
+    supports_reasoning_roundtrip: bool = False
+    supports_explicit_tool_choice: bool = True
+    supports_stream_usage: bool = False
+    supports_strict_json_schema: bool = False
+    supports_responses_transport: bool = False
+    supports_structured_content: bool = False
 
 
 @dataclass

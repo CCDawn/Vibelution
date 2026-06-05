@@ -884,7 +884,7 @@ class TaskAnalyzer:
             command = str(item.get("tool_args", {}).get("command", ""))
             result = str(item.get("tool_result") or "")
             if item.get("tool_name") == "cli_tool" and "|" in command and "[安全拦截]" in result:
-                patterns.append("使用 cli_tool 读取内容时仍携带 pipe，应直接改用 read_file_tool 或 grep_search_tool")
+                patterns.append("使用 cli_tool 读取内容时仍携带 pipe，应改用无管道的有界命令；专用读取/搜索工具只有在当前 Agent 已授权时才使用")
                 break
         return patterns
 
@@ -938,7 +938,7 @@ class TaskAnalyzer:
     ) -> List[str]:
         constraints: List[str] = []
         if repeated_failure_patterns or tool_misuse_patterns:
-            constraints.append("本轮若再次需要读取 diff/文件内容，禁止使用带 pipe 的 cli_tool，优先改用 read_file_tool / grep_search_tool。")
+            constraints.append("本轮若再次需要读取 diff/文件内容，禁止使用带 pipe 的 cli_tool；优先使用无管道的有界命令，只有当前 ToolPolicy 授权时才切换专用读取/搜索工具。")
         if diagnostic_drift_detected:
             constraints.append("测试失败后先打印最小中间值，再继续读代码或推理。")
         if language_drift_detected:

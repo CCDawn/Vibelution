@@ -120,12 +120,22 @@ def test_run_session_turn_injects_session_workspace(tmp_path, monkeypatch):
     assert "## " in readable_log.read_text(encoding="utf-8")
 
 
-def test_run_session_turn_uses_selected_agent_profile(tmp_path, monkeypatch):
+def test_run_session_turn_ignores_legacy_profile_and_uses_agent_binding(tmp_path, monkeypatch):
     _seed_session(tmp_path, "session-live")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    agent = agent_directory_service.create_agent_instance(
+        display_name="统一会话 Agent",
+        llm_bindings={"dialogue": {"modelId": "agent-dialogue-model"}},
+        direct_session_id="session-live",
+        primary_mode="chat",
+        prompt_template_id="prompt-chat-default",
+    )
     state = load_chat_state(tmp_path)
     state["conversations"][0]["agent_profile_id"] = "subagent_explorer"
+    state["conversations"][0]["agent_id"] = agent["agentId"]
+    state["conversations"][0]["agentId"] = agent["agentId"]
     save_chat_state(tmp_path, state)
-    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     captured = {}
 
     class ProfileAwareAgent:
@@ -133,7 +143,6 @@ def test_run_session_turn_uses_selected_agent_profile(tmp_path, monkeypatch):
             captured["workspace_path"] = str(workspace_path or "")
             captured["primary_profile_id"] = config.llm.get_profile(role="primary").profile_id
             captured["primary_model"] = config.llm.get_profile(role="primary").model
-            captured["explorer_model"] = config.llm.get_profile("subagent_explorer").model
 
         def seed_chat_history(self, messages):
             self.messages = list(messages)
@@ -149,6 +158,12 @@ def test_run_session_turn_uses_selected_agent_profile(tmp_path, monkeypatch):
 
     base_config = session_service.get_config()
     base_config = base_config.model_copy(deep=True)
+    base_config.llm.model_library["agent-dialogue-model"] = {
+        "provider_id": base_config.llm.profiles["primary"].provider_id,
+        "model": "agent-dialogue-runtime",
+        "streaming": False,
+        "tool_calling_mode": "disabled",
+    }
     base_config.llm.profiles["subagent_explorer"] = base_config.llm.profiles["primary"].model_copy(deep=True)
     base_config.llm.profiles["subagent_explorer"].profile_id = "subagent_explorer"
     base_config.llm.profiles["subagent_explorer"].model = "explorer-model"
@@ -162,8 +177,8 @@ def test_run_session_turn_uses_selected_agent_profile(tmp_path, monkeypatch):
     agent_id = repaired_state["conversations"][0]["agent_id"]
     assert Path(captured["workspace_path"]) == (tmp_path / "workspace" / "agents" / agent_id).resolve()
     assert captured["primary_profile_id"] == "primary"
-    assert captured["primary_model"] == "explorer-model"
-    assert captured["explorer_model"] == "explorer-model"
+    assert captured["primary_model"] == "agent-dialogue-runtime"
+    assert "agent_profile_id" not in repaired_state["conversations"][0]
 
 
 def test_run_session_turn_prefers_agent_instance_profile_over_legacy_profile(tmp_path, monkeypatch):
@@ -172,7 +187,7 @@ def test_run_session_turn_prefers_agent_instance_profile_over_legacy_profile(tmp
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     agent = agent_directory_service.create_agent_instance(
         display_name="统一会话 Agent",
-        profile_id="subagent_explorer",
+        llm_bindings={"dialogue": {"modelId": "model-subagent-explorer"}},
         direct_session_id="session-live",
         primary_mode="chat",
         prompt_template_id="prompt-chat-default",
@@ -202,9 +217,12 @@ def test_run_session_turn_prefers_agent_instance_profile_over_legacy_profile(tmp
 
     base_config = session_service.get_config().model_copy(deep=True)
     base_config.llm.profiles["primary"].model = "legacy-primary-model"
-    base_config.llm.profiles["subagent_explorer"] = base_config.llm.profiles["primary"].model_copy(deep=True)
-    base_config.llm.profiles["subagent_explorer"].profile_id = "subagent_explorer"
-    base_config.llm.profiles["subagent_explorer"].model = "agent-instance-model"
+    base_config.llm.model_library["model-subagent-explorer"] = {
+        "provider_id": base_config.llm.profiles["primary"].provider_id,
+        "model": "agent-instance-model",
+        "streaming": False,
+        "tool_calling_mode": "disabled",
+    }
     monkeypatch.setattr(session_service, "get_config", lambda: base_config)
     monkeypatch.setattr(session_service, "create_chat_agent", ProfileAwareAgent)
     monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: session_service._run_session_turn(context))
@@ -222,7 +240,7 @@ def test_session_detail_repairs_stale_legacy_profile_from_agent_instance(tmp_pat
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     agent = agent_directory_service.create_agent_instance(
         display_name="统一会话 Agent",
-        profile_id="subagent_explorer",
+        llm_bindings={"dialogue": {"modelId": "model-subagent-explorer"}},
         direct_session_id="session-live",
         primary_mode="chat",
         prompt_template_id="prompt-chat-default",
@@ -245,17 +263,16 @@ def test_session_detail_repairs_stale_legacy_profile_from_agent_instance(tmp_pat
 
     assert detail is not None
     assert detail["agentId"] == agent["agentId"]
-    assert detail["agentProfileId"] == "subagent_explorer"
-    assert sessions[0]["agentProfileId"] == "subagent_explorer"
+    assert "agentProfileId" not in detail
+    assert "agentProfileId" not in sessions[0]
     repaired_state = load_chat_state(tmp_path)
     repaired = repaired_state["conversations"][0]
     assert "agent_profile_id" not in repaired
     assert "agentProfileId" not in repaired
-    repair_events = [event for event in events if event["event_code"] == "session.agent_profile_repaired"]
+    repair_events = [event for event in events if event["event_code"] == "session.agent_legacy_model_fields_repaired"]
     assert repair_events
     assert repair_events[0]["fields"]["source"] == "AgentInstance"
-    assert repair_events[0]["fields"]["previousProfileId"] == "primary"
-    assert repair_events[0]["fields"]["profileId"] == "subagent_explorer"
+    assert repair_events[0]["fields"]["removedFieldNames"] == ["agentProfileId", "agent_profile_id"]
 
 
 def test_run_session_turn_seeds_agent_prompt_template_context(tmp_path, monkeypatch):
@@ -272,7 +289,7 @@ def test_run_session_turn_seeds_agent_prompt_template_context(tmp_path, monkeypa
     )
     agent = agent_directory_service.create_agent_instance(
         display_name="提示词会话 Agent",
-        profile_id="primary",
+        llm_bindings={"dialogue": {"modelId": "model-primary"}},
         direct_session_id="session-live",
         primary_mode="chat",
         prompt_template_id="prompt-chat-custom",
@@ -302,6 +319,14 @@ def test_run_session_turn_seeds_agent_prompt_template_context(tmp_path, monkeypa
                 "tool_trace": [],
             }
 
+    base_config = session_service.get_config().model_copy(deep=True)
+    base_config.llm.model_library["model-primary"] = {
+        "provider_id": base_config.llm.profiles["primary"].provider_id,
+        "model": base_config.llm.profiles["primary"].model,
+        "streaming": False,
+        "tool_calling_mode": "disabled",
+    }
+    monkeypatch.setattr(session_service, "get_config", lambda: base_config)
     monkeypatch.setattr(session_service, "create_chat_agent", PromptAwareAgent)
     monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: session_service._run_session_turn(context))
 

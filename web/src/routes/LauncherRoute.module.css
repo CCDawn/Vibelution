@@ -104,9 +104,9 @@
 
 .summaryStrip {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
-  gap: 6px;
-  padding: 8px 12px 0;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  padding: 10px 12px 0;
 }
 
 .metric,
@@ -118,11 +118,11 @@
 
 .metric {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: minmax(86px, max-content) minmax(0, 1fr);
   align-items: baseline;
-  gap: 7px;
+  gap: 3px 9px;
   min-width: 0;
-  padding: 6px 9px;
+  padding: 9px 11px;
 }
 
 .metric span,
@@ -147,15 +147,26 @@
   white-space: nowrap;
 }
 
-.summaryStrip[data-tone="success"] .metric:first-child {
+.metric small {
+  grid-column: 1 / -1;
+  min-width: 0;
+  color: var(--fg-secondary);
+  font-size: 0.72rem;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.metric[data-tone="success"] {
   border-color: color-mix(in srgb, var(--state-success) 38%, var(--border-soft));
 }
 
-.summaryStrip[data-tone="warning"] .metric:first-child {
+.metric[data-tone="warning"] {
   border-color: color-mix(in srgb, var(--state-warning) 42%, var(--border-soft));
 }
 
-.summaryStrip[data-tone="error"] .metric:first-child {
+.metric[data-tone="error"] {
   border-color: color-mix(in srgb, var(--state-error) 42%, var(--border-soft));
 }
 
@@ -186,7 +197,7 @@
 
 .workspace {
   display: grid;
-  grid-template-columns: minmax(420px, 1.45fr) minmax(300px, 0.9fr) minmax(300px, 0.9fr);
+  grid-template-columns: minmax(0, 1fr);
   grid-auto-rows: auto;
   gap: 6px;
   min-height: 0;
@@ -202,16 +213,11 @@
 }
 
 .matrixPanel {
-  grid-column: 1 / -1;
+  grid-column: auto;
 }
 
-.guardianPanel,
 .diagnosticsPanel {
-  grid-column: 1 / -1;
-}
-
-.activityPanel {
-  min-height: 124px;
+  grid-column: auto;
 }
 
 .panelHeader {
@@ -231,6 +237,52 @@
 .panelHeader strong {
   flex: 0 1 auto;
   text-align: right;
+}
+
+.guardStrip {
+  display: grid;
+  grid-template-columns: minmax(98px, max-content) minmax(140px, max-content) minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+  margin: 8px 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-card) 78%, transparent);
+}
+
+.guardStrip span {
+  color: var(--fg-tertiary);
+  font-size: 0.66rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.guardStrip strong,
+.guardStrip small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.guardStrip strong {
+  color: var(--fg-primary);
+  font-size: 0.82rem;
+}
+
+.guardStrip small {
+  color: var(--fg-secondary);
+  font-size: 0.76rem;
+}
+
+.guardStrip[data-tone="success"] {
+  border-color: color-mix(in srgb, var(--state-success) 34%, var(--border-soft));
+}
+
+.guardStrip[data-tone="warning"] {
+  border-color: color-mix(in srgb, var(--state-warning) 40%, var(--border-soft));
 }
 
 .specGrid,
@@ -279,12 +331,12 @@
 
 .statusHead,
 .statusRow {
-  grid-template-columns: minmax(122px, 0.88fr) minmax(86px, 0.62fr) 72px minmax(140px, 0.95fr) minmax(0, 1.55fr);
+  grid-template-columns: minmax(140px, 0.9fr) minmax(92px, 0.62fr) minmax(160px, 0.95fr) minmax(0, 1.7fr);
 }
 
 .guardianHead,
 .guardianRow {
-  grid-template-columns: minmax(178px, 1fr) minmax(120px, 0.7fr) minmax(142px, 0.78fr) minmax(84px, 0.52fr) minmax(0, 1.7fr);
+  grid-template-columns: minmax(178px, 1fr) minmax(120px, 0.7fr) minmax(84px, 0.52fr) minmax(0, 1.7fr);
 }
 
 .statusHead,
@@ -332,7 +384,8 @@
   color: var(--fg-primary);
 }
 
-.commandLine {
+.commandLine,
+.recoveryLine {
   display: grid;
   grid-template-columns: 88px minmax(0, 1fr);
   gap: 5px 8px;
@@ -344,7 +397,8 @@
   background: color-mix(in srgb, var(--surface-card) 72%, transparent);
 }
 
-.commandLine span {
+.commandLine span,
+.recoveryLine span {
   color: var(--fg-tertiary);
   font-size: 0.66rem;
   letter-spacing: 0.06em;
@@ -352,22 +406,34 @@
 }
 
 .commandLine strong,
-.commandLine small {
+.commandLine small,
+.recoveryLine strong,
+.recoveryLine small {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.commandLine strong {
+.commandLine strong,
+.recoveryLine strong {
   color: var(--fg-primary);
   font-size: 0.78rem;
 }
 
-.commandLine small {
+.commandLine small,
+.recoveryLine small {
   grid-column: 2;
   color: var(--fg-secondary);
   font-size: 0.74rem;
+}
+
+.recoveryLine[data-tone="success"] {
+  border-color: color-mix(in srgb, var(--state-success) 36%, var(--border-soft));
+}
+
+.recoveryLine[data-tone="warning"] {
+  border-color: color-mix(in srgb, var(--state-warning) 42%, var(--border-soft));
 }
 
 .compactList {
@@ -443,6 +509,7 @@
 .diagnosticsPanel {
   display: block;
   min-height: 0;
+  padding: 0;
 }
 
 .diagnosticsPanel summary {
@@ -451,6 +518,7 @@
   justify-content: space-between;
   gap: 10px;
   min-width: 0;
+  padding: 8px 10px;
   color: var(--fg-secondary);
   cursor: pointer;
 }
@@ -466,6 +534,26 @@
   color: var(--fg-primary);
 }
 
+.diagnosticsBody {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  min-width: 0;
+  padding: 0 10px 10px;
+}
+
+.diagnosticSection {
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-card) 65%, transparent);
+}
+
+.diagnosticsGrid {
+  padding: 0 10px 10px;
+}
+
 .spin {
   animation: launcherSpin 900ms linear infinite;
 }
@@ -478,7 +566,7 @@
 
 @media (max-width: 1200px) {
   .summaryStrip {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .workspace {
@@ -512,13 +600,11 @@
 
   .statusHead,
   .statusRow {
-    grid-template-columns: minmax(104px, 0.9fr) minmax(82px, 0.7fr) 64px minmax(0, 1.4fr);
+    grid-template-columns: minmax(118px, 0.9fr) minmax(82px, 0.7fr) minmax(0, 1.4fr);
   }
 
-  .statusHead span:nth-child(4),
-  .statusRow span:nth-child(4),
-  .guardianHead span:nth-child(3),
-  .guardianRow span:nth-child(3) {
+  .statusHead span:nth-child(3),
+  .statusRow span:nth-child(3) {
     display: none;
   }
 
@@ -550,7 +636,9 @@
   .guardianHead,
   .guardianRow,
   .compactItem,
-  .commandLine {
+  .commandLine,
+  .guardStrip,
+  .diagnosticsBody {
     grid-template-columns: minmax(0, 1fr);
   }
 

@@ -100,6 +100,29 @@ export type MemoryKnowledgeGraphNode = {
   createdAt: string;
   updatedAt: string;
   metadata: Record<string, unknown>;
+  responsibilityQuestion: string;
+  visual: {
+    size?: "root" | "group" | "container" | "leaf" | "support" | string;
+    agentCategory?: "session_agent" | "team_member_agent" | string;
+    [key: string]: unknown;
+  };
+  childNodeIds: string[];
+  contentItems: Array<{
+    id: string;
+    type: string;
+    title: string;
+    summary: string;
+    knowledgeBaseId?: string;
+    knowledgeBaseName?: string;
+    ownerType?: string;
+    ownerId?: string;
+    status?: string;
+    tags?: string[];
+    createdAt?: string;
+    updatedAt?: string;
+    fullContentIncluded?: boolean;
+    [key: string]: unknown;
+  }>;
 };
 
 export type MemoryKnowledgeGraphEdge = {
@@ -192,8 +215,12 @@ export type KnowledgeBasePermissions = {
 
 export type TeamKnowledgeBase = {
   knowledgeBaseId: string;
+  ownerType?: "team" | "agent" | "shared" | string;
+  ownerId?: string;
   teamId: string;
   teamName: string;
+  agentId?: string;
+  agentName?: string;
   name: string;
   description: string;
   status: string;
@@ -535,7 +562,10 @@ export type KnowledgeRatingSuggestionBulkReviewResponse = {
 
 export type KnowledgeSearchResult = KnowledgeItem & {
   knowledgeBaseName: string;
+  ownerType?: "team" | "agent" | "shared" | string;
+  ownerId?: string;
   teamName: string;
+  agentName?: string;
   sourceTypes: string[];
   semanticScore: number;
   searchMode: "exact" | "semantic" | "hybrid" | string;
@@ -571,8 +601,12 @@ export type KnowledgeRagContext = {
   provider: string;
   matchReason: string;
   source: {
+    ownerType?: "team" | "agent" | "shared" | string;
+    ownerId?: string;
     teamId: string;
     teamName: string;
+    agentId?: string;
+    agentName?: string;
     knowledgeBaseId: string;
     knowledgeBaseName: string;
     knowledgeItemId: string;
@@ -590,8 +624,12 @@ export type KnowledgeRagCitation = {
   contextId: string;
   rank: number;
   title: string;
+  ownerType?: "team" | "agent" | "shared" | string;
+  ownerId?: string;
   teamId: string;
   teamName: string;
+  agentId?: string;
+  agentName?: string;
   knowledgeBaseId: string;
   knowledgeBaseName: string;
   knowledgeItemId: string;
@@ -635,6 +673,8 @@ export type KnowledgeRagRetrievalPayload = {
   request: {
     queryLength: number;
     teamId: string;
+    ownerType?: string;
+    ownerId?: string;
     knowledgeBaseId: string;
     tags: string[];
     retrievalMode: string;
@@ -807,6 +847,18 @@ export type KnowledgeGovernancePlanPayload = {
     formalKnowledgeRequiresReviewer: boolean;
     planOnly: boolean;
   };
+  updatedAt: string;
+};
+
+export type KnowledgeDashboardSnapshotPayload = {
+  schemaVersion: number;
+  agentId: string;
+  overview: TeamKnowledgeOverview;
+  steward: KnowledgeStewardOverview;
+  recommendations: KnowledgeStewardRecommendationsPayload;
+  workbench: KnowledgeStewardWorkbenchPayload;
+  operationsHealth: KnowledgeOperationsHealthPayload;
+  governancePlan: KnowledgeGovernancePlanPayload;
   updatedAt: string;
 };
 
@@ -1414,6 +1466,7 @@ export type ToolRegistryItem = {
   source: ToolRegistrySource;
   category: string;
   categoryLabel: string;
+  bundleIds: string[];
   capabilityTags: string[];
   riskTags: string[];
   permissionTier: "low" | "medium" | "high" | "generated" | string;
@@ -1464,6 +1517,18 @@ export type ToolRegistryPayload = {
   agentScopes: ToolAgentScopeSummary[];
   toolBundles: ToolBundle[];
   tools: ToolRegistryItem[];
+};
+
+export type ToolDependencyHealth = {
+  toolId: string;
+  available: boolean;
+  dependency: string;
+  stage: string;
+  status: string;
+  tokenUrl?: string;
+  searchApiCalled?: boolean;
+  tokenPresent?: boolean;
+  httpStatus?: number;
 };
 
 export type GeneratedToolDeleteResponse = {
@@ -1624,6 +1689,10 @@ export type RuntimeSummary = {
   mode: string;
   model: string;
   profile: string;
+  modelSource?: string;
+  profileSource?: string;
+  modelId?: string;
+  modelAgentId?: string;
   defaultRoute: string;
   intakeMode: string;
   modeAvailability: ModeAvailability;
@@ -1661,6 +1730,10 @@ export type RuntimeSummary = {
   contextUsage: { used: number; limit: number };
   contextCompression: {
     enabled: boolean;
+    source?: "runtime_state" | string;
+    scope?: "runtime_prompt_estimate" | string;
+    tokenBasis?: "current_context_tokens" | string;
+    limitBasis?: "effective_token_limit" | string;
     currentTokens: number;
     effectiveTokenLimit: number;
     contextWindowLimit: number;
@@ -1738,6 +1811,15 @@ export type RuntimeControlResponse = {
   accepted: boolean;
   mode: string;
   commandId?: string;
+  queued?: boolean;
+  pendingRestart?: boolean;
+  activeWorkCount?: number;
+  activeWorkRuns?: Array<{
+    kind?: string;
+    runId?: string;
+    sessionId?: string;
+    status?: string;
+  }>;
   message: string;
   chatTurns: Array<{
     sessionId: string;
@@ -1848,12 +1930,10 @@ export type SessionSummary = {
   agentDisplayName?: string;
   agentAvatarImagePath?: string;
   agentAvatarImageUrl?: string;
-  agentProfileId?: string;
-  agentTemplateId?: string;
-  agentTemplateLabel?: string;
   agentPrimaryMode?: string;
   agentRoleKey?: string;
   agentPromptTemplateId?: string;
+  dialogueModelId?: string;
   workspacePath?: string;
   agentWorkspacePath?: string;
   agentMissing?: boolean;
@@ -1864,6 +1944,34 @@ export type SessionSummary = {
   lastActive: string;
   updatedAt: string;
   currentPhase: string;
+  sessionKind?: "main" | "child" | string;
+  parentSessionId?: string;
+  rootSessionId?: string;
+  childSessionIds?: string[];
+  activeChildSessionId?: string;
+  childStatus?: string;
+  taskTitle?: string;
+  resultCard?: {
+    status?: string;
+    title?: string;
+    summary?: string;
+    updatedAt?: string;
+    [key: string]: unknown;
+  } | null;
+};
+
+export type SessionChildHandoffContext = {
+  source: string;
+  parentSessionId: string;
+  sourceSessionId?: string;
+  parentMessageId: string;
+  triggeringUserMessage: string;
+  splitReason: string;
+  inheritedFacts: string[];
+  relevantFiles: string[];
+  relevantLogs: string[];
+  constraints: string[];
+  excludedContextSummary: string;
 };
 
 export type ToolPolicy = {
@@ -2131,8 +2239,7 @@ export type AgentInstance = {
   kind: "persistent" | string;
   primaryMode: "chat" | "research" | "self_evolution" | "supervised_evolution" | "general" | string;
   roleKey: string;
-  templateId: string;
-  profileId: string;
+  llmBindings: AgentLlmBindings;
   promptTemplateId: string;
   directSessionId: string;
   workspacePath: string;
@@ -2158,6 +2265,24 @@ export type AgentInstance = {
   groupContextEvents?: GroupContextEvent[];
   agentInboxMessages?: AgentInboxMessage[];
   agentInboxPendingCount?: number;
+};
+
+export type AgentLlmBinding = {
+  modelId: string;
+};
+
+export type AgentLlmBindings = Partial<
+  Record<"dialogue" | "mentalModel" | "summary" | "subagentPlanning" | "subagentExecution" | "vision", AgentLlmBinding>
+>;
+
+export type AgentLlmSlotKey = keyof AgentLlmBindings;
+
+export type AgentLlmSlotDefinition = {
+  slot: AgentLlmSlotKey;
+  label: string;
+  description: string;
+  required: boolean;
+  requiresImageInput: boolean;
 };
 
 export type AgentAvatarOption = {
@@ -2191,7 +2316,6 @@ export type AgentRunSnapshot = {
   displayName: string;
   primaryMode: string;
   roleKey: string;
-  profileId: string;
   promptTemplateId: string;
   toolPolicyId: string;
   memoryPolicyId: string;
@@ -2300,7 +2424,7 @@ export type AgentModeBindingAgentRef = {
   displayName: string;
   primaryMode: string;
   roleKey: string;
-  profileId: string;
+  llmBindings?: AgentLlmBindings;
   promptTemplateId: string;
   status: string;
   directSessionId?: string;
@@ -2382,11 +2506,42 @@ export type AgentConfigHealthIssue = {
   action: string;
 };
 
+export type AgentBoundary = {
+  type: "work_session" | "team_role" | "system_role" | "service_role" | "archived" | string;
+  label: string;
+  ownership: "user" | "team" | "system" | "service" | "archive" | string;
+  directSessionRole: "primary_entry" | "recovery_channel" | "historical_recovery" | "none" | string;
+  reason: string;
+  configurationSurface: "work_session" | "team_role" | "system_role" | "service" | "archive" | string;
+  requiresPersonaProfile: string;
+  requiresTaskProfile: string;
+  requiresTeamMembership: string;
+};
+
 export type AgentConfigWorkspaceAgent = AgentInstance & {
-  modelProfile?: ConfigProfileCard | null;
+  dialogueModel?: AgentModelChoice | null;
+  llmBindingModels?: Partial<Record<keyof AgentLlmBindings, AgentModelChoice | null>>;
   promptTemplate?: PromptTemplate | null;
+  agentBoundary?: AgentBoundary;
   references: AgentConfigReference[];
   health: AgentConfigHealthIssue[];
+};
+
+export type AgentModelChoice = {
+  modelId: string;
+  label: string;
+  model: string;
+  providerKind: string;
+  providerBaseUrl: string;
+  source: string;
+  apiKeyEnv: string;
+  apiKeyConfigured: boolean;
+  apiKeyState: string;
+  requiresApiKey: boolean;
+  missingApiKey: boolean;
+  supportsImageInput?: boolean | null;
+  capabilityStatus: string;
+  capabilitySource: string;
 };
 
 export type AgentToolPolicyOption = {
@@ -2449,7 +2604,8 @@ export type AgentConfigWorkspace = {
   agents: AgentConfigWorkspaceAgent[];
   modeBindings: Record<string, AgentModeBindingItem>;
   promptTemplates: PromptTemplate[];
-  modelProfiles: ConfigProfileCard[];
+  agentLlmSlots: AgentLlmSlotDefinition[];
+  agentModelChoices: AgentModelChoice[];
   modelOptions: ConfigModelOption[];
   toolPolicies: AgentToolPolicyOption[];
   memoryPolicies: AgentMemoryPolicyOption[];
@@ -2497,6 +2653,7 @@ export type TeamMember = {
   agentName: string;
   role: string;
   purpose: string;
+  responsibilities?: string[];
   agentStatus: "active" | "stale" | string;
 };
 
@@ -2512,6 +2669,7 @@ export type TeamCanvasNode = {
   agentName: string;
   role: string;
   purpose: string;
+  responsibilities?: string[];
 };
 
 export type TeamCanvasEdge = {
@@ -2574,6 +2732,10 @@ export type Team = {
   description: string;
   purpose: string;
   status: "active" | "archived" | string;
+  teamKind: "custom" | "research" | "self_evolution" | "supervised_evolution" | "template_demo" | string;
+  teamCategory: string;
+  teamSource: "manual" | "research_organization" | "self_evolution" | "supervised_evolution" | "team_template" | string;
+  teamTemplateId?: string;
   members: TeamMember[];
   memberCount: number;
   linkedChatRoomId?: string;
@@ -2663,25 +2825,13 @@ export type ConversationSummary = {
   workspacePath: string;
   participantCount?: number;
   mode?: string;
-  agentProfileId?: string;
-  agentTemplateLabel?: string;
   agentPrimaryMode?: string;
   agentRoleKey?: string;
   agentPromptTemplateId?: string;
+  dialogueModelId?: string;
   agentMissing?: boolean;
   agentStatusCode?: string;
   agentStatusMessage?: string;
-};
-
-export type SessionAgentTemplate = {
-  templateId: string;
-  profileId: string;
-  label: string;
-  model: string;
-  providerKind: string;
-  apiKeyConfigured: boolean;
-  requiresApiKey: boolean;
-  missingApiKey: boolean;
 };
 
 export type SessionActiveTask = {
@@ -2722,6 +2872,25 @@ export type ToolCall = {
   tracePath?: string;
 };
 
+export type ConversationFeedbackEvent = {
+  sequence: number;
+  kind: "thought" | "mental" | "tool" | "status";
+  status: string;
+  timestamp?: string;
+  name?: string;
+  summary?: string;
+  arguments?: Record<string, unknown>;
+  resultPreview?: string;
+  resultType?: string;
+  resultLength?: number;
+  error?: string;
+  durationMs?: number;
+  durationSeconds?: number;
+  timeoutSeconds?: number;
+  tracePath?: string;
+  relatedThoughtSequence?: number;
+};
+
 export type MentalStateSnapshot = {
   mood: string;
   feeling: string;
@@ -2742,16 +2911,31 @@ export type MentalStateSnapshot = {
   }>;
 };
 
+export type SessionReferenceAttachment = {
+  referenceId?: string;
+  kind: "session" | string;
+  sessionId: string;
+  title?: string;
+  agentId?: string;
+  agentCode?: string;
+  agentDisplayName?: string;
+  summary?: string;
+  createdAt?: string;
+};
+
 export type ConversationMessage = {
   id: string;
   role: "user" | "assistant";
   content: string;
   timestamp: string;
   thought?: string;
+  streamStage?: string;
   mentalSnapshot?: MentalStateSnapshot;
+  feedbackEvents?: ConversationFeedbackEvent[];
   streaming?: boolean;
   toolCalls?: ToolCall[];
   attachments?: ConversationAttachment[];
+  references?: SessionReferenceAttachment[];
   metadata?: Record<string, unknown>;
 };
 
@@ -2791,6 +2975,15 @@ export type SessionDeleteResponse = {
 export type SessionTurnError = {
   message: string;
   errorType: string;
+  reasonCode?: string;
+  reasonSummary?: string;
+  reasonDetail?: string;
+  httpStatus?: number | null;
+  provider?: string;
+  providerHost?: string;
+  providerErrorType?: string;
+  providerErrorMessage?: string;
+  model?: string;
   recoverable: boolean;
   timestamp: string;
   turnId: string;
@@ -2820,6 +3013,48 @@ export type ChatNextStateSignalSummary = {
   summary: string;
 };
 
+export type SessionContextCompositionSegment = {
+  key: string;
+  label: string;
+  chars: number;
+  tokens: number;
+  itemCount: number;
+  status: string;
+  source: string;
+  description: string;
+};
+
+export type SessionContextComposition = {
+  turnId: string;
+  recordedAt: string;
+  source: string;
+  totalChars: number;
+  totalTokens: number;
+  limitTokens: number;
+  limitSource?: string;
+  limitModelId?: string;
+  limitAgentId?: string;
+  segments: SessionContextCompositionSegment[];
+};
+
+export type SessionCacheCompositionSegment = {
+  key: string;
+  label: string;
+  tokens: number;
+  status: string;
+};
+
+export type SessionCacheComposition = {
+  turnId: string;
+  recordedAt: string;
+  source: string;
+  inputTokens: number;
+  cachedInputTokens: number;
+  uncachedInputTokens: number;
+  cacheHitRate: number;
+  segments: SessionCacheCompositionSegment[];
+};
+
 export type SessionDetail = SessionSummary & {
   activeTask?: SessionActiveTask | null;
   defaultFileContext: string;
@@ -2832,6 +3067,9 @@ export type SessionDetail = SessionSummary & {
   contextUsage?: {
     used: number;
     limit: number;
+    limitSource?: string;
+    limitModelId?: string;
+    limitAgentId?: string;
     estimatedTokens: number;
     messageCount: number;
     userMessageCount: number;
@@ -2851,6 +3089,10 @@ export type SessionDetail = SessionSummary & {
     updatedAt: string;
     source: string;
   };
+  llmUsage?: SessionLlmUsage | null;
+  lastContextComposition?: SessionContextComposition | null;
+  lastCacheComposition?: SessionCacheComposition | null;
+  handoffContext?: SessionChildHandoffContext | null;
   lastTurnError?: SessionTurnError | null;
   nextStateSignals?: ChatNextStateSignalSummary[];
   groupContextEvents?: GroupContextEvent[];
@@ -2862,11 +3104,37 @@ export type SessionDetail = SessionSummary & {
   stopReason: string;
 };
 
-export type SessionStreamEvent = {
+export type SessionLlmUsage = {
+  source: "provider_usage" | "missing" | "estimated" | string;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  cachedInputTokens: number;
+  cacheHitRate: number;
+  provider: string;
+  model: string;
+  recordedAt: string;
+};
+
+export type SessionDetailStreamEvent = {
   type: "session_detail";
   sessionId: string;
   detail: SessionDetail;
 };
+
+export type SessionAssistantDeltaStreamEvent = {
+  type: "assistant_delta";
+  sessionId: string;
+  turnId: string;
+  stage: string;
+  content: string;
+  thought: string;
+  feedbackEvents?: ConversationFeedbackEvent[];
+  updatedAt: string;
+  done: boolean;
+};
+
+export type SessionStreamEvent = SessionDetailStreamEvent | SessionAssistantDeltaStreamEvent;
 
 export type SessionChatReviewCandidateResponse = {
   candidateId: string;
@@ -2901,9 +3169,6 @@ export type ChatRoomParticipant = {
   sessionId: string;
   title: string;
   workspacePath?: string;
-  agentProfileId?: string;
-  agentTemplateId?: string;
-  agentTemplateLabel?: string;
   teamId?: string;
   teamName?: string;
   teamPurpose?: string;
@@ -2931,9 +3196,33 @@ export type ChatRoomMessage = {
   status: string;
   content: string;
   summary: string;
+  messageKind?: "user_clarification" | "team_discussion" | "team_message" | string;
+  audience?: "user" | "internal" | string;
+  visibility?: "collapsed_by_default" | "default" | string;
   errorType?: string;
   supervision?: AgentSupervisionDecision;
   timestamp: string;
+};
+
+export type TeamCaseState = {
+  schemaVersion: number;
+  caseId: string;
+  roomId: string;
+  teamId?: string;
+  teamTemplateId?: string;
+  intent: string;
+  userGoal: string;
+  knownFacts: string[];
+  missingFacts: string[];
+  riskFlags: string[];
+  informationSufficiency?: "insufficient" | "partially_sufficient" | "sufficient" | "urgent_boundary_needed" | string;
+  nextAction: "clarify" | "discuss" | "synthesize" | "answer" | string;
+  userFacingMode?: "direct_clarification" | "team_discussion" | "team_discussion_then_advice" | "final_answer" | string;
+  discussionVisibility?: "collapsed_by_default" | "user_visible" | string;
+  assignedRoles: string[];
+  status: string;
+  participantsConsidered?: number;
+  demoMapping?: string;
 };
 
 export type ChatRoomRound = {
@@ -2943,6 +3232,7 @@ export type ChatRoomRound = {
   mode: string;
   purpose: string;
   config: Record<string, unknown>;
+  caseState?: TeamCaseState;
   status: string;
   speakerOrder: string[];
   messages: ChatRoomMessage[];
@@ -3205,6 +3495,24 @@ export type EvolutionActiveRunCaseIo = {
   transcript: EvolutionActiveRunIoEntry[];
 };
 
+export type EvolutionActiveRunAgentBinding = {
+  agentId?: string;
+  agentCode?: string;
+  displayName?: string;
+  primaryMode?: string;
+  roleKey?: string;
+  profileId?: string;
+  promptTemplateId?: string;
+  directSessionId?: string;
+  workspacePath?: string;
+  toolPolicyId?: string;
+  memoryPolicyId?: string;
+  role?: string;
+  roleLabel?: string;
+  dialogueModelId?: string;
+  llmBindings?: Record<string, { modelId?: string }>;
+};
+
 export type EvolutionActiveRun = {
   runId: string;
   status: string;
@@ -3228,6 +3536,7 @@ export type EvolutionActiveRun = {
   currentCaseScenario: string;
   currentCaseMode: string;
   currentCasePrompt: string;
+  currentAgentBinding: EvolutionActiveRunAgentBinding;
   currentCaseIo: EvolutionActiveRunCaseIo | null;
   currentTask: string;
   decision: string;
@@ -3244,6 +3553,7 @@ export type EvolutionActiveRun = {
   stopRequestedAt: string;
   latestMessage: string;
   eventTail: EvolutionActiveRunEvent[];
+  agentBindings: Record<string, EvolutionActiveRunAgentBinding>;
   actionStates: Record<string, EvolutionActionState>;
 };
 
@@ -3534,6 +3844,20 @@ export type EvolutionLibraryEntry = {
 export type EvolutionLibraryPayload = {
   items: EvolutionLibraryEntry[];
   pending: EvolutionLibraryEntry[];
+};
+
+export type EvolutionWorkspaceSnapshot = {
+  overview: EvolutionOverview;
+  runs: EvolutionRun[];
+  library: EvolutionLibraryPayload;
+  workbench: EvolutionWorkbench;
+  activeRun: EvolutionActiveRun | null;
+  latestRun: EvolutionActiveRun | null;
+  worktreeActiveRun: SupervisedWorktreeRun | null;
+  worktreeRuns: SupervisedWorktreeRun[];
+  selfOverview: SelfEvolutionOverview;
+  selfLatestRun: SelfEvolutionActiveRun | null;
+  selfTransactions: SelfEvolutionTransaction[];
 };
 
 export type EvolutionRunActionResponse = {
@@ -3941,9 +4265,17 @@ export type ConfigModelOption = {
   source: string;
   provider: Record<string, unknown>;
   provider_kind: string;
+  provider_api?: string;
   model: string;
   label: string;
   details: Record<string, unknown>;
+  protocol?: string;
+  compat?: Record<string, unknown>;
+  resolved_protocol?: string;
+  protocol_source?: string;
+  protocol_warnings?: string[];
+  resolved_provider_api?: string;
+  resolved_compat?: Record<string, unknown>;
   api_key_env: string;
   api_key_configured: boolean;
   api_key_state: string;
@@ -3990,6 +4322,7 @@ export type ConfigLlmTestResult = {
   ok: boolean;
   message: string;
   profile_id: string;
+  model_id?: string;
   provider_id: string;
   provider_kind: string;
   base_url: string;

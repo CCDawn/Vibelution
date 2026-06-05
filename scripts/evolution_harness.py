@@ -53,6 +53,23 @@ PROVIDER_TRANSPORT_ERROR_MARKERS = (
     "connection reset",
     "connection aborted",
 )
+
+
+class SupervisedAgentBindingRuntimeError(ValueError):
+    """Raised when a supervised Agent binding is incomplete for child execution."""
+
+
+ENVIRONMENT_UNAVAILABLE_MARKERS = (
+    "no such file or directory",
+    "cannot access '/app'",
+    "cannot find path",
+    "path not found",
+    "is not recognized as an internal or external command",
+    "docker: not found",
+    "docker is not recognized",
+    "harbor: not found",
+    "environment_unavailable",
+)
 DEFAULT_TEST_PROMPT = "制定重启任务，然后对重启任务打勾，然后运行 `trigger_self_restart_tool` 重启你自己。"
 DEFAULT_TRANSACTION_PROMPT = (
     "执行一轮非重启演化事务探针："
@@ -207,6 +224,13 @@ def supervised_agent_binding_env(agent_binding: Optional[Dict[str, Any]]) -> Dic
             value = str(agent_binding.get("supervisedRole") or "").strip()
         if value:
             env[env_key] = value
+    if env.get("VIBELUTION_AGENT_ID"):
+        llm_slot = str(agent_binding.get("llmSlot") or "").strip()
+        if not llm_slot:
+            raise SupervisedAgentBindingRuntimeError(
+                f"Supervised Agent binding for {env['VIBELUTION_AGENT_ID']} is missing required llmSlot."
+            )
+        env["VIBELUTION_AGENT_LLM_SLOT"] = llm_slot
     return env
 
 
@@ -1054,6 +1078,21 @@ def build_live_case_io_payload(log_info_dir: Path) -> Dict[str, Any]:
     }
 
 
+def count_meaningful_tool_steps(log_info_dir: Path) -> int:
+    """Count tool calls used for harness-level step-budget enforcement."""
+
+    count = 0
+    for conversation_path in sorted(log_info_dir.glob("conversation_*.jsonl")):
+        for event in read_conversation_events(conversation_path):
+            if event.get("type") != "tool_call":
+                continue
+            tool_name = str(event.get("tool_name") or "").strip()
+            if not tool_name or tool_name.startswith("get_git_"):
+                continue
+            count += 1
+    return count
+
+
 def is_restart_trigger_line(line: str) -> bool:
     markers = (
         "触发自我重启",
@@ -1512,6 +1551,13 @@ def _validation_passed_for_tool(
     ) and "failed" not in lower_result and "失败" not in result_text
 
 
+def _environment_unavailable_evidence(text: str) -> str:
+    lowered = text.lower()
+    if any(marker in lowered for marker in ENVIRONMENT_UNAVAILABLE_MARKERS):
+        return text[:240]
+    return ""
+
+
 def _safe_modify_probe_summary(worktree_path: Path, allowed_dirty_paths: Optional[Iterable[str]] = None) -> Dict[str, Any]:
     """采集安全修改探针的文件证据，只观察 disposable worktree。"""
     probe_path = worktree_path / SAFE_MODIFY_PROBE_PATH
@@ -1598,6 +1644,7 @@ def infer_evolution_summary(
     tool_phase_sequence: List[str] = []
     guarded_tool_count = 0
     restart_guarded_tool_count = 0
+    environment_unavailable_evidence = ""
 
     for event in events:
         if event.get("type") != "tool_call":
@@ -1617,6 +1664,10 @@ def infer_evolution_summary(
         result_text = str(event.get("tool_result") or "")
         result_payload = _tool_result_json(event)
         command_text = str(tool_args.get("command") or tool_args.get("script") or "")
+        if not environment_unavailable_evidence:
+            environment_unavailable_evidence = _environment_unavailable_evidence(
+                f"{command_text}\n{result_text}"
+            )
 
         if tool_name == "task_create_tool" and event.get("status") == "success":
             task_created += 1
@@ -1722,6 +1773,11 @@ def infer_evolution_summary(
         },
         "llm_failure": llm_failure,
     }
+    if environment_unavailable_evidence:
+        summary["environment"] = {
+            "unavailable": True,
+            "evidence": environment_unavailable_evidence,
+        }
     if supervised_markers:
         summary["supervised"] = dict(supervised_markers)
         if "final_state" in supervised_markers:
@@ -1957,6 +2013,13 @@ def infer_result_status(
             if not transaction.get("closed"):
                 return "failed", "事务探针未关账"
             if transaction_status == "failed":
+                environment = evolution_summary.get("environment") if isinstance(evolution_summary, dict) else {}
+                if isinstance(environment, dict) and environment.get("unavailable"):
+                    return "failed", "任务环境不可用，事务探针已按失败状态关账"
+                last_validation = validation.get("last") if isinstance(validation, dict) else {}
+                validation_summary = str((last_validation or {}).get("summary") or "").lower()
+                if _environment_unavailable_evidence(validation_summary):
+                    return "failed", "任务环境不可用，事务探针已按失败状态关账"
                 return "failed", "事务探针以失败状态关账"
             if transaction_status != "success":
                 return "failed", "事务探针状态未知"
@@ -2054,6 +2117,7 @@ def run_harness(
     post_restart_observe_seconds: int,
     keep_worktree: bool,
     scenario: str = "restart",
+    max_steps: Optional[int] = None,
     agent_binding: Optional[Dict[str, Any]] = None,
     progress_callback: Callable[[Dict[str, Any]], None] | None = None,
     cancel_checker: Callable[[], object] | None = None,
@@ -2125,6 +2189,8 @@ def run_harness(
     timed_out = False
     cancelled = False
     cancel_reason = ""
+    step_limit_exceeded = False
+    observed_tool_steps = 0
     restart_observed_at: Optional[float] = None
     post_restart_observation: Dict[str, Any] = {}
     restart_triggered = False
@@ -2214,6 +2280,18 @@ def run_harness(
                     if fingerprint != last_live_case_fingerprint:
                         progress_callback(dict(live_case_payload))
                         last_live_case_fingerprint = fingerprint
+
+            if max_steps is not None and max_steps > 0:
+                observed_tool_steps = count_meaningful_tool_steps(log_info_dir)
+                if observed_tool_steps > max_steps:
+                    step_limit_exceeded = True
+                    terminate_harness_processes(worktree_path)
+                    if process.poll() is None:
+                        try:
+                            process.terminate()
+                        except OSError:
+                            pass
+                    break
 
             if expect_restart and restart_reentered and restart_observed_at is not None:
                 latest_conversation = summarize_latest_matching_file(
@@ -2332,6 +2410,8 @@ def run_harness(
     )
     if cancelled:
         status, reason = "cancelled", cancel_reason or "监督运行已按请求终止。"
+    elif step_limit_exceeded:
+        status, reason = "failed", f"超过最大工具步数限制: {observed_tool_steps}/{max_steps}"
     else:
         status, reason = infer_result_status(
             timed_out=timed_out,
@@ -2418,6 +2498,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--prompt", default=None, help="初始提示词；为空时按 scenario 使用默认探针")
     parser.add_argument("--timeout-seconds", type=int, default=900)
     parser.add_argument("--post-restart-observe-seconds", type=int, default=20)
+    parser.add_argument("--max-steps", type=int, default=0)
     parser.add_argument("--expect-restart", action="store_true")
     parser.add_argument("--keep-worktree", action="store_true")
     return parser.parse_args()
@@ -2440,6 +2521,7 @@ def main() -> int:
         expect_restart=options.expect_restart,
         post_restart_observe_seconds=args.post_restart_observe_seconds,
         keep_worktree=args.keep_worktree,
+        max_steps=args.max_steps or None,
     )
     print(json.dumps(asdict(result), ensure_ascii=False, indent=2))
     return 0 if result.status == "success" else 1

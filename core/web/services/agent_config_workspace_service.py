@@ -3,21 +3,71 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from time import perf_counter
 from typing import Any
 
 from core.orchestration.context_engine import list_agent_runs_for_agent
 
 from . import chat_room_service, config_service
+from .agent_directory_service import agent_persona_profile_has_content
+from .agent_directory_service import agent_task_profile_has_content
+from .agent_directory_service import AGENT_LLM_BINDING_SLOTS
+from .agent_directory_service import agent_dialogue_model_id
 from .agent_directory_service import list_agents
 from .agent_directory_service import list_agent_policy_options
+from .agent_directory_service import normalize_agent_llm_bindings
 from .agent_mode_binding_service import get_mode_bindings_payload, mode_binding_path
 from .prompt_template_service import list_prompt_templates, prompt_template_path
 from .runtime_scene_service import record_runtime_scene_event
 
 
 SCHEMA_VERSION = 1
+AGENT_LLM_SLOT_DEFINITIONS = (
+    {
+        "slot": "dialogue",
+        "label": "对话模型",
+        "description": "处理用户对话、工具规划和主回复生成。",
+        "required": True,
+        "requiresImageInput": False,
+    },
+    {
+        "slot": "mentalModel",
+        "label": "心智模型",
+        "description": "用于心智状态、长期偏好和自我解释相关推理。",
+        "required": False,
+        "requiresImageInput": False,
+    },
+    {
+        "slot": "summary",
+        "label": "摘要模型",
+        "description": "用于会话压缩、运行摘要和交接材料整理。",
+        "required": False,
+        "requiresImageInput": False,
+    },
+    {
+        "slot": "subagentPlanning",
+        "label": "子 Agent 规划",
+        "description": "用于拆解委派任务、确定子 Agent 目标和边界。",
+        "required": False,
+        "requiresImageInput": False,
+    },
+    {
+        "slot": "subagentExecution",
+        "label": "子 Agent 执行",
+        "description": "用于执行被委派的窄任务和返回结构化证据。",
+        "required": False,
+        "requiresImageInput": False,
+    },
+    {
+        "slot": "vision",
+        "label": "视觉理解",
+        "description": "用于图片输入、截图分析和多模态理解。",
+        "required": False,
+        "requiresImageInput": True,
+    },
+)
+AGENT_LLM_SLOT_REFS = {item["slot"]: item for item in AGENT_LLM_SLOT_DEFINITIONS}
 
 
 def get_agent_config_workspace() -> dict[str, Any]:
@@ -50,10 +100,12 @@ def get_agent_config_workspace() -> dict[str, Any]:
         for item in prompt_workspace.get("templates") or []
         if str(item.get("promptTemplateId") or item.get("templateId") or "")
     }
-    profile_refs = {
-        str(item.get("profileId") or ""): item
-        for item in config_workspace.get("profileCards") or []
-        if str(item.get("profileId") or "")
+    model_options = list(config_workspace.get("modelOptions") or [])
+    agent_model_choices = _agent_model_choices(model_options)
+    model_refs = {
+        str(item.get("modelId") or ""): item
+        for item in agent_model_choices
+        if str(item.get("modelId") or "")
     }
 
     references = _timed_stage(
@@ -73,7 +125,7 @@ def get_agent_config_workspace() -> dict[str, Any]:
         lambda: _derive_health(
             agents=agents,
             prompt_refs=prompt_refs,
-            profile_refs=profile_refs,
+            model_refs=model_refs,
             mode_bindings=mode_bindings,
             chat_rooms=chat_rooms,
             teams=teams,
@@ -85,9 +137,14 @@ def get_agent_config_workspace() -> dict[str, Any]:
     enriched_agents = [
         {
             **agent,
-            "modelProfile": profile_refs.get(str(agent.get("profileId") or "")),
+            "dialogueModel": model_refs.get(agent_dialogue_model_id(agent)),
+            "llmBindingModels": _llm_binding_model_refs(agent.get("llmBindings"), model_refs),
             "promptTemplate": prompt_refs.get(str(agent.get("promptTemplateId") or "")),
             "references": references.get(str(agent.get("agentId") or ""), []),
+            "agentBoundary": _derive_agent_boundary(
+                agent,
+                references=references.get(str(agent.get("agentId") or ""), []),
+            ),
             "health": issues_by_agent.get(str(agent.get("agentId") or ""), []),
             "runtimeStatus": runtime_status_by_agent.get(str(agent.get("agentId") or ""), _default_runtime_status(agent)),
         }
@@ -109,7 +166,9 @@ def get_agent_config_workspace() -> dict[str, Any]:
         "agents": enriched_agents,
         "modeBindings": mode_bindings.get("modes") or {},
         "promptTemplates": prompt_workspace.get("templates") or [],
-        "modelProfiles": config_workspace.get("profileCards") or [],
+        "agentLlmSlots": _agent_llm_slots(),
+        "agentModelChoices": agent_model_choices,
+        "modelOptions": config_workspace.get("modelOptions") or [],
         "toolPolicies": policy_options.get("toolPolicies") or [],
         "memoryPolicies": policy_options.get("memoryPolicies") or [],
         "chatRooms": _compact_chat_rooms(chat_rooms),
@@ -239,7 +298,7 @@ def _derive_health(
     *,
     agents: list[dict[str, Any]],
     prompt_refs: dict[str, dict[str, Any]],
-    profile_refs: dict[str, dict[str, Any]],
+    model_refs: dict[str, dict[str, Any]],
     mode_bindings: dict[str, Any],
     chat_rooms: list[dict[str, Any]],
     teams: list[dict[str, Any]],
@@ -252,39 +311,54 @@ def _derive_health(
         if status == "archived":
             continue
 
-        profile_id = str(agent.get("profileId") or "").strip()
-        if not profile_id:
-            issues.append(_agent_issue(agent, "blocking", "missing_profile_id", "Agent 未选择模型模板", "这个 Agent 没有 profileId。"))
-        elif profile_id not in profile_refs:
-            issues.append(
-                _agent_issue(
-                    agent,
-                    "blocking",
-                    "missing_model_profile",
-                    "模型模板不存在",
-                    f"profileId={profile_id} 没有出现在设置页模型配置中。",
-                )
-            )
-        else:
-            profile = profile_refs[profile_id]
-            if bool(profile.get("requiredModelMissing")):
+        bindings = normalize_agent_llm_bindings(agent.get("llmBindings"))
+        for slot in _agent_llm_slots():
+            slot_key = str(slot.get("slot") or "").strip()
+            binding = bindings.get(slot_key) if isinstance(bindings.get(slot_key), dict) else {}
+            model_id = str((binding or {}).get("modelId") or "").strip()
+            slot_label = str(slot.get("label") or slot_key).strip() or slot_key
+            if not model_id:
+                if bool(slot.get("required")):
+                    issues.append(
+                        _agent_issue(
+                            agent,
+                            "blocking",
+                            f"missing_llm_slot_{slot_key}",
+                            f"Agent 未选择{slot_label}",
+                            f"这个 Agent 的 {slot_key} 槽位没有绑定模型库模型。",
+                        )
+                    )
+                continue
+            if model_id not in model_refs:
                 issues.append(
                     _agent_issue(
                         agent,
-                        "blocking",
-                        "missing_model_binding",
-                        "模型模板未绑定可用模型",
-                        f"profileId={profile_id} 没有绑定设置页模型库中的模型。",
+                        "blocking" if bool(slot.get("required")) else "warning",
+                        f"missing_llm_slot_model_ref_{slot_key}",
+                        f"{slot_label}不存在",
+                        f"{slot_key} 槽位引用的模型库键 {model_id} 不存在或已被删除。",
                     )
                 )
-            elif not bool(profile.get("apiKeyConfigured", True)):
+                continue
+            model = model_refs[model_id]
+            if bool(slot.get("requiresImageInput")) and model.get("supportsImageInput") is False:
                 issues.append(
                     _agent_issue(
                         agent,
                         "warning",
-                        "missing_model_api_key",
-                        "模型密钥未就绪",
-                        f"profileId={profile_id} 的模型配置当前没有可用密钥。",
+                        f"llm_slot_model_missing_vision_{slot_key}",
+                        f"{slot_label}不支持图片输入",
+                        f"{slot_key} 槽位绑定的模型 {model_id} 标记为不支持图片输入。",
+                    )
+                )
+            if bool(model.get("requiresApiKey")) and not bool(model.get("apiKeyConfigured")):
+                issues.append(
+                    _agent_issue(
+                        agent,
+                        "warning",
+                        f"missing_llm_slot_api_key_{slot_key}",
+                        f"{slot_label}密钥未就绪",
+                        f"{slot_key} 槽位绑定的模型库键 {model_id} 当前没有可用密钥。",
                     )
                 )
 
@@ -334,6 +408,20 @@ def _derive_health(
             issues.append(_agent_issue(agent, "warning", "missing_tool_policy", "缺少工具权限策略", "toolPolicyId 为空。"))
         if not str(agent.get("memoryPolicyId") or "").strip():
             issues.append(_agent_issue(agent, "warning", "missing_memory_policy", "缺少记忆策略", "memoryPolicyId 为空。"))
+        metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+        boundary = _derive_agent_boundary(agent)
+        onboarding_missing = _onboarding_missing_for_boundary(agent, boundary)
+        if onboarding_missing:
+            missing = _string_list(onboarding_missing)
+            issues.append(
+                _agent_issue(
+                    agent,
+                    "warning",
+                    "agent_onboarding_incomplete",
+                    "Agent 建档未完成",
+                    "还需要补齐：" + "、".join(_creation_field_label(item) for item in missing) + "。",
+                )
+            )
 
         pending_inbox_count = _safe_int(agent.get("agentInboxPendingCount"))
         if pending_inbox_count > 0:
@@ -417,6 +505,10 @@ def _derive_groups(agents: list[dict[str, Any]]) -> list[dict[str, Any]]:
         ("active", "活跃 Agent", "status", "当前可被业务页面引用或调度的 Agent。"),
         ("needs_review", "需要处理", "status", "存在阻塞或警告健康项的活跃 Agent。"),
         ("archived", "已归档", "status", "只保留历史数据、不再进入可用池的 Agent。"),
+        ("work_session", "会话工作 Agent", "boundary", "面向项目开发、调试和实现任务的 Codex-like 会话执行体。"),
+        ("team_role", "团队角色 Agent", "boundary", "拥有人物/任务档案并进入团队、科研或业务组织结构的 Agent。"),
+        ("system_role", "系统角色 Agent", "boundary", "由自进化、监督进化等系统流程固定管理的 Agent。"),
+        ("service_role", "服务维护 Agent", "boundary", "负责知识、工具、记忆或平台维护的非人物团队成员 Agent。"),
         ("chat", "会话模式", "mode", "属于 Chat 运行模式或会话可用池的 Agent。"),
         ("research", "科研模式", "mode", "属于 Research 运行模式或科研池的 Agent。"),
         ("supervised_evolution", "监督进化模式", "mode", "占用监督进化模式引用的 Agent。"),
@@ -456,6 +548,9 @@ def _agent_in_group(agent: dict[str, Any], group_id: str) -> bool:
         return status == "archived"
     if status == "archived":
         return False
+    boundary = agent.get("agentBoundary") if isinstance(agent.get("agentBoundary"), dict) else {}
+    if group_id in {"work_session", "team_role", "system_role", "service_role"}:
+        return str(boundary.get("type") or "").strip() == group_id
     references = list(agent.get("references") or [])
     if group_id == "group_chat":
         return any(item.get("kind") == "chat_room" for item in references)
@@ -466,6 +561,117 @@ def _agent_in_group(agent: dict[str, Any], group_id: str) -> bool:
     if str(agent.get("primaryMode") or "").strip() == group_id:
         return True
     return any(item.get("mode") == group_id for item in references)
+
+
+def _derive_agent_boundary(agent: dict[str, Any], *, references: list[dict[str, Any]] | None = None) -> dict[str, str]:
+    status = str(agent.get("status") or "active").strip()
+    metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+    refs = references if references is not None else list(agent.get("references") or [])
+    ref_kinds = {str(item.get("kind") or "").strip() for item in refs if isinstance(item, dict)}
+    ref_modes = {str(item.get("mode") or "").strip() for item in refs if isinstance(item, dict)}
+    primary_mode = str(agent.get("primaryMode") or "general").strip() or "general"
+    role_key = str(agent.get("roleKey") or "").strip()
+    created_by = str(agent.get("createdBy") or metadata.get("createdBy") or "").strip()
+
+    if status == "archived":
+        return {
+            "type": "archived",
+            "label": "已归档 Agent",
+            "ownership": "archive",
+            "directSessionRole": "historical_recovery",
+            "reason": "agent_archived",
+            "configurationSurface": "archive",
+            "requiresPersonaProfile": "false",
+            "requiresTaskProfile": "false",
+            "requiresTeamMembership": "false",
+        }
+
+    system_markers = (
+        primary_mode in {"self_evolution", "supervised_evolution"}
+        or bool(str(metadata.get("selfEvolutionRole") or "").strip())
+        or bool(str(metadata.get("supervisedRole") or "").strip())
+        or "self_evolution" in ref_modes
+        or "supervised_evolution" in ref_modes
+    )
+    if system_markers:
+        return {
+            "type": "system_role",
+            "label": "系统角色 Agent",
+            "ownership": "system",
+            "directSessionRole": "recovery_channel",
+            "reason": primary_mode if primary_mode in {"self_evolution", "supervised_evolution"} else "system_mode_reference",
+            "configurationSurface": "system_role",
+            "requiresPersonaProfile": "true",
+            "requiresTaskProfile": "true",
+            "requiresTeamMembership": "true",
+        }
+
+    service_markers = (
+        role_key in {"knowledge_steward"}
+        or "steward" in role_key
+        or bool(str(metadata.get("systemRole") or "").strip())
+        or str(metadata.get("protected") or "").lower() == "true"
+    )
+    if service_markers:
+        return {
+            "type": "service_role",
+            "label": "服务维护 Agent",
+            "ownership": "service",
+            "directSessionRole": "recovery_channel" if str(agent.get("directSessionId") or "").strip() else "none",
+            "reason": role_key or "service_metadata",
+            "configurationSurface": "service",
+            "requiresPersonaProfile": "false",
+            "requiresTaskProfile": "true",
+            "requiresTeamMembership": "false",
+        }
+
+    has_team_ref = "team" in ref_kinds
+    research_markers = primary_mode == "research" or "research" in ref_modes or role_key.startswith("research_")
+    if has_team_ref or research_markers:
+        return {
+            "type": "team_role",
+            "label": "团队角色 Agent",
+            "ownership": "team",
+            "directSessionRole": "recovery_channel",
+            "reason": "team_reference" if has_team_ref else "research_mode",
+            "configurationSurface": "team_role",
+            "requiresPersonaProfile": "true",
+            "requiresTaskProfile": "true",
+            "requiresTeamMembership": "true",
+        }
+
+    chat_default = any(
+        isinstance(item, dict)
+        and item.get("kind") == "mode_default"
+        and str(item.get("mode") or "").strip() == "chat"
+        for item in refs
+    )
+    chat_available = primary_mode == "chat" or "chat" in ref_modes
+    created_by_session = created_by in {"user", "api_agents", "session_repair", "session_agent_binding", "session_delete_rebind"}
+    if chat_available and not has_team_ref:
+        return {
+            "type": "work_session",
+            "label": "会话工作 Agent",
+            "ownership": "user",
+            "directSessionRole": "primary_entry" if chat_default or created_by_session else "recovery_channel",
+            "reason": "chat_default" if chat_default else "chat_mode_without_team",
+            "configurationSurface": "work_session",
+            "requiresPersonaProfile": "false",
+            "requiresTaskProfile": "false",
+            "requiresTeamMembership": "false",
+        }
+
+    return {
+        "type": "service_role",
+        "label": "服务维护 Agent",
+        "ownership": "service",
+        "directSessionRole": "recovery_channel" if str(agent.get("directSessionId") or "").strip() else "none",
+        "reason": "unassigned_active_agent",
+        "configurationSurface": "service",
+        "requiresPersonaProfile": "false",
+        "requiresTaskProfile": "true",
+        "requiresTeamMembership": "false",
+    }
 
 
 def _summary(
@@ -695,6 +901,66 @@ def _safe_policy_options() -> dict[str, list[dict[str, Any]]]:
         return {"toolPolicies": [], "memoryPolicies": []}
 
 
+def _agent_llm_slots() -> list[dict[str, Any]]:
+    ordered_slots = []
+    for slot in AGENT_LLM_BINDING_SLOTS:
+        definition = dict(AGENT_LLM_SLOT_REFS.get(slot) or {})
+        if not definition:
+            definition = {
+                "slot": slot,
+                "label": slot,
+                "description": "",
+                "required": False,
+                "requiresImageInput": False,
+            }
+        ordered_slots.append(definition)
+    return ordered_slots
+
+
+def _agent_model_choices(model_options: list[Any]) -> list[dict[str, Any]]:
+    choices: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for option in model_options:
+        if not isinstance(option, dict):
+            continue
+        model_id = str(option.get("model_id") or option.get("modelId") or "").strip()
+        if not model_id or model_id in seen:
+            continue
+        seen.add(model_id)
+        provider = option.get("provider") if isinstance(option.get("provider"), dict) else {}
+        provider_kind = str(option.get("provider_kind") or provider.get("kind") or "").strip()
+        api_key_configured = bool(option.get("api_key_configured", False))
+        requires_api_key = bool(provider.get("requires_api_key", provider_kind != "local"))
+        choice = {
+            "modelId": model_id,
+            "label": str(option.get("label") or option.get("model") or model_id).strip() or model_id,
+            "model": str(option.get("model") or "").strip(),
+            "providerKind": provider_kind,
+            "providerBaseUrl": str(provider.get("base_url") or "").strip(),
+            "source": str(option.get("source") or "").strip(),
+            "apiKeyEnv": str(option.get("api_key_env") or "").strip(),
+            "apiKeyConfigured": api_key_configured,
+            "apiKeyState": str(option.get("api_key_state") or "").strip(),
+            "requiresApiKey": requires_api_key,
+            "missingApiKey": requires_api_key and not api_key_configured,
+            "supportsImageInput": option.get("supports_image_input"),
+            "capabilityStatus": str(option.get("capability_status") or "").strip(),
+            "capabilitySource": str(option.get("capability_source") or "").strip(),
+        }
+        choices.append(choice)
+    choices.sort(key=lambda item: (str(item.get("label") or "").lower(), str(item.get("modelId") or "").lower()))
+    return choices
+
+
+def _llm_binding_model_refs(bindings: Any, model_refs: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any] | None]:
+    normalized = normalize_agent_llm_bindings(bindings)
+    return {
+        slot: model_refs.get(str(binding.get("modelId") or "").strip())
+        for slot, binding in normalized.items()
+        if isinstance(binding, dict)
+    }
+
+
 def _agent_option(agent: dict[str, Any]) -> dict[str, Any]:
     metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
     return {
@@ -703,7 +969,7 @@ def _agent_option(agent: dict[str, Any]) -> dict[str, Any]:
         "displayName": str(agent.get("displayName") or "").strip(),
         "primaryMode": str(agent.get("primaryMode") or "general").strip() or "general",
         "roleKey": str(agent.get("roleKey") or "").strip(),
-        "profileId": str(agent.get("profileId") or "").strip(),
+        "llmBindings": normalize_agent_llm_bindings(agent.get("llmBindings")),
         "promptTemplateId": str(agent.get("promptTemplateId") or "").strip(),
         "directSessionId": str(agent.get("directSessionId") or "").strip(),
         "metadata": dict(metadata),
@@ -738,6 +1004,64 @@ def _issues_by_agent(issues: list[dict[str, Any]]) -> dict[str, list[dict[str, A
         if agent_id:
             grouped[agent_id].append(issue)
     return dict(grouped)
+
+
+def _creation_field_label(field: str) -> str:
+    labels = {
+        "displayName": "功能名",
+        "llmBindings": "对话模型",
+        "primaryMode": "使用位置",
+        "roleKey": "角色键",
+        "promptTemplateId": "提示词",
+        "personaProfile": "人物档案",
+        "taskProfile": "任务档案",
+        "toolPolicy": "工具包",
+        "memoryPolicy": "记忆策略",
+    }
+    return labels.get(field, field)
+
+
+def _onboarding_missing_for_boundary(agent: dict[str, Any], boundary: dict[str, str]) -> list[str]:
+    boundary_type = str(boundary.get("type") or "").strip()
+    if boundary_type == "work_session":
+        return []
+
+    metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+    raw_missing = [
+        str(item).strip()
+        for item in list(metadata.get("onboardingMissing") or [])
+        if str(item).strip()
+    ]
+    skip = {"personaProfile", "taskProfile"}
+    if boundary_type in {"team_role", "system_role"}:
+        skip = set()
+    elif boundary_type == "service_role":
+        skip = {"personaProfile"}
+
+    missing = [item for item in raw_missing if item not in skip]
+    if "personaProfile" not in skip and not agent_persona_profile_has_content(_agent_persona_profile(agent)):
+        missing.append("personaProfile")
+    if "taskProfile" not in skip and not agent_task_profile_has_content(_agent_task_profile(agent)):
+        missing.append("taskProfile")
+    return _string_list(missing)
+
+
+def _agent_persona_profile(agent: dict[str, Any]) -> dict[str, Any]:
+    profile = agent.get("personaProfile")
+    if isinstance(profile, dict):
+        return profile
+    metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+    profile = metadata.get("personaProfile")
+    return profile if isinstance(profile, dict) else {}
+
+
+def _agent_task_profile(agent: dict[str, Any]) -> dict[str, Any]:
+    profile = agent.get("taskProfile")
+    if isinstance(profile, dict):
+        return profile
+    metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+    profile = metadata.get("taskProfile")
+    return profile if isinstance(profile, dict) else {}
 
 
 def _reference(
@@ -858,4 +1182,4 @@ def _record_workspace_error(event_code: str, exc: Exception) -> None:
 
 
 def _now() -> str:
-    return datetime.now(UTC).isoformat()
+    return datetime.now(timezone.utc).isoformat()

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import shutil
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from threading import Lock
 from typing import Any
@@ -109,6 +109,34 @@ ISSUE_IDENTITY_FIELD_KEYS = (
     "sessionId",
     "turnId",
 )
+TIMELINE_DIAGNOSTIC_ONLY_EVENT_CODES = {
+    "agent.repaired",
+    "agent_territory.resolved",
+    "browser.session_stream.closed",
+    "browser.session_stream.effect_started",
+    "browser.session_stream.opened",
+    "browser.session_stream.skipped",
+    "browser.session_stream.snapshot_applied",
+    "conversation.index.filtered_archived_team_rooms",
+    "runtime.snapshot.reconciled",
+    "session.agent_missing.hidden_from_index",
+    "session.detail_snapshot.published",
+    "session.detail_snapshot.throttled",
+    "session.list.loaded",
+}
+TIMELINE_DIAGNOSTIC_ONLY_PHASES = {
+    "agent",
+    "session_detail",
+    "session_index",
+    "session_list",
+    "session_stream",
+}
+TIMELINE_DIAGNOSTIC_ONLY_COMPONENT_PHASES = {
+    ("agent_directory", "agent"),
+    ("agent_directory", "territory"),
+    ("conversation_service", "session_index"),
+    ("runtime_manager", "runtime"),
+}
 BROWSER_TELEMETRY_WRITE_LOCK = Lock()
 BACKEND_API_WRITE_LOCK = Lock()
 RUNTIME_SCENE_PACKAGE_WRITE_LOCK = Lock()
@@ -221,16 +249,10 @@ def list_runtime_scenes(limit: int = 80) -> list[dict]:
         scene_id = _scene_id(scene_dir, manifest)
         if not scene_id:
             continue
-        timeline = _read_scene_timeline(scene_dir)
-        raw_files = _list_raw_files(scene_dir)
-        conversations = _list_conversation_logs(scene_dir)
-        agent_logs = _list_agent_logs(scene_dir)
-        artifacts = _list_artifacts(scene_dir)
-        event_logs = _list_event_logs(scene_dir)
-        research_logs = _list_research_logs(scene_dir)
-        package_index = _runtime_scene_package_index(scene_dir, manifest, scene_id)
-        _sync_runtime_scene_package_sidecars_if_stale(scene_dir, manifest, package_index)
-        severity_summary = _runtime_scene_severity_summary(timeline)
+        summary_payload = _load_scene_json(scene_dir / SUMMARY_PATH)
+        event_counts = summary_payload.get("event_counts") if isinstance(summary_payload.get("event_counts"), dict) else {}
+        package_index = _runtime_scene_lightweight_package_index(scene_dir, manifest, scene_id, summary_payload)
+        _sync_runtime_scene_package_index_if_stale(scene_dir, manifest, package_index)
         scenes.append(
             {
                 "runtimeSceneId": scene_id,
@@ -248,15 +270,15 @@ def list_runtime_scenes(limit: int = 80) -> list[dict]:
                 "backendStatus": str(((manifest.get("backend") or {}) if isinstance(manifest.get("backend"), dict) else {}).get("health_status") or ""),
                 "frontendStatus": str(((manifest.get("frontend") or {}) if isinstance(manifest.get("frontend"), dict) else {}).get("build_status") or ""),
                 "browserStatus": str(((manifest.get("browser") or {}) if isinstance(manifest.get("browser"), dict) else {}).get("status") or ""),
-                "eventCount": len(timeline),
-                "rawLogCount": len(raw_files),
-                "conversationCount": len(conversations),
-                "agentLogCount": len(agent_logs),
-                "artifactCount": len(artifacts),
-                "eventLogCount": len(event_logs),
-                "researchLogCount": len(research_logs),
-                "errorCount": severity_summary["errorCount"],
-                "warningCount": severity_summary["warningCount"],
+                "eventCount": _coerce_int(event_counts.get("timeline_events"), default=0),
+                "rawLogCount": _coerce_int(event_counts.get("raw_logs"), default=0),
+                "conversationCount": _coerce_int(event_counts.get("conversation_logs"), default=0),
+                "agentLogCount": _coerce_int(event_counts.get("agent_logs"), default=0),
+                "artifactCount": _coerce_int(event_counts.get("artifacts"), default=0),
+                "eventLogCount": _coerce_int(event_counts.get("event_logs"), default=0),
+                "researchLogCount": _coerce_int(event_counts.get("research_files"), default=0),
+                "errorCount": _coerce_int(event_counts.get("errors"), default=0),
+                "warningCount": _coerce_int(event_counts.get("warnings"), default=0),
             }
         )
     scenes.sort(
@@ -355,7 +377,7 @@ def list_runtime_scene_evidence_for_agent(
         scene_id = _scene_id(scene_dir, manifest)
         if not scene_id:
             continue
-        package_index = _runtime_scene_package_index(scene_dir, manifest, scene_id)
+        package_index = _runtime_scene_lightweight_package_index(scene_dir, manifest, scene_id)
         for event in reversed(_read_scene_timeline(scene_dir)):
             if not _runtime_scene_event_matches_agent(
                 event,
@@ -507,7 +529,7 @@ def record_browser_telemetry(payload: dict[str, Any]) -> dict[str, Any]:
             "reason": "no_runtime_scene",
         }
 
-    timestamp = datetime.now(UTC).isoformat()
+    timestamp = datetime.now(timezone.utc).isoformat()
     phase = _sanitize_token(payload.get("phase"), default="page")
     event_code = _sanitize_token(payload.get("eventCode"), default="browser.telemetry")
     level = _sanitize_token(payload.get("level"), default="info")
@@ -578,7 +600,7 @@ def record_backend_api_event(payload: dict[str, Any]) -> dict[str, Any]:
             "reason": "no_runtime_scene",
         }
 
-    timestamp = datetime.now(UTC).isoformat()
+    timestamp = datetime.now(timezone.utc).isoformat()
     method = _truncate_text(str(payload.get("method") or "").upper(), 16)
     path = _truncate_text(str(payload.get("path") or ""), 240)
     status_code = _coerce_int(payload.get("status_code"), default=0)
@@ -910,7 +932,7 @@ def _repair_runtime_scene_from_reconciliation_history(scene_dir: Path, manifest:
 def _latest_closed_reconciliation_event(scene_dir: Path) -> dict[str, Any] | None:
     latest: dict[str, Any] | None = None
     latest_timestamp = ""
-    for row in _read_jsonl_file(scene_dir / TIMELINE_PATH):
+    for row in _runtime_scene_reconciliation_history_events(scene_dir):
         event_name = str(row.get("event_code") or "").strip()
         timestamp = str(row.get("ts") or "").strip()
         if not timestamp:
@@ -927,6 +949,20 @@ def _latest_closed_reconciliation_event(scene_dir: Path) -> dict[str, Any] | Non
         latest = {"timestamp": _normalize_event_timestamp(timestamp) or timestamp, "fields": fields}
         latest_timestamp = timestamp
     return latest
+
+
+def _runtime_scene_reconciliation_history_events(scene_dir: Path) -> list[dict[str, Any]]:
+    events = [
+        *_read_jsonl_file(scene_dir / EVENTS_DIR / "runtime_manager.jsonl"),
+        *_read_jsonl_file(scene_dir / TIMELINE_PATH),
+    ]
+    return sorted(
+        events,
+        key=lambda item: (
+            str(item.get("ts") or ""),
+            _coerce_int(item.get("seq"), default=0),
+        ),
+    )
 
 
 def _closed_reconciliation_fields(fields: dict[str, Any]) -> bool:
@@ -1308,6 +1344,40 @@ def _runtime_scene_package_index_payload(scene_dir: Path, package_index: dict[st
     }
 
 
+def _runtime_scene_lightweight_package_index_payload(package_index: dict[str, Any]) -> dict[str, Any]:
+    """Build the package_index sidecar shape without reading timeline/raw logs."""
+
+    return {
+        "schema_version": 2,
+        "package_id": package_index["packageId"],
+        "display_name": package_index["displayName"],
+        "index_key": package_index["indexKey"],
+        "sortable_timestamp": package_index["sortableTimestamp"],
+        "started_at": package_index["startedAt"],
+        "started_at_local": package_index["startedAtLocal"],
+        "started_date": package_index["startedDate"],
+        "started_time": package_index["startedTime"],
+        "ended_at": package_index["endedAt"],
+        "duration_seconds": package_index["durationSeconds"],
+        "search_text": package_index["searchText"],
+        "tags": package_index["tags"],
+        "summary_ref": SUMMARY_PATH,
+        "timeline_path": TIMELINE_PATH,
+        "lifecycle_path": LIFECYCLE_PATH,
+        "raw_dir": "raw",
+        "conversations_dir": CONVERSATIONS_DIR,
+        "agent_dir": AGENT_DIR,
+        "artifacts_dir": ARTIFACTS_DIR,
+        "research_dir": RESEARCH_DIR,
+    }
+
+
+def _save_runtime_scene_lightweight_package_index(scene_dir: Path, package_index: dict[str, Any]) -> None:
+    index_path = scene_dir / PACKAGE_INDEX_PATH
+    payload = _runtime_scene_lightweight_package_index_payload(package_index)
+    index_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
 def _save_runtime_scene_summary(scene_dir: Path, manifest: dict[str, Any], package_index: dict[str, Any]) -> None:
     summary_path = scene_dir / SUMMARY_PATH
     payload = _runtime_scene_summary_payload(scene_dir, manifest, package_index)
@@ -1514,6 +1584,40 @@ def _sync_runtime_scene_package_sidecars_if_stale(
         return
 
 
+def _sync_runtime_scene_package_index_if_stale(
+    scene_dir: Path,
+    manifest: dict[str, Any],
+    package_index: dict[str, Any],
+) -> None:
+    if not _runtime_scene_package_index_sidecar_is_stale(scene_dir, manifest, package_index):
+        return
+    try:
+        _save_runtime_scene_lightweight_package_index(scene_dir, package_index)
+        _update_runtime_scene_manifest_package_index_fields(scene_dir, manifest, package_index)
+    except OSError:
+        return
+
+
+def _runtime_scene_package_index_sidecar_is_stale(
+    scene_dir: Path,
+    manifest: dict[str, Any],
+    package_index: dict[str, Any],
+) -> bool:
+    expected_index = _runtime_scene_sidecar_compare_payload(
+        _runtime_scene_lightweight_package_index_payload(package_index)
+    )
+    actual_index = _runtime_scene_sidecar_compare_payload(
+        _load_scene_json(scene_dir / PACKAGE_INDEX_PATH)
+    )
+    for key, expected_value in expected_index.items():
+        if actual_index.get(key) != expected_value:
+            return True
+
+    package = manifest.get("package") if isinstance(manifest.get("package"), dict) else {}
+    expected_package_values = _runtime_scene_manifest_package_index_values(package_index)
+    return any(package.get(key) != expected_value for key, expected_value in expected_package_values.items())
+
+
 def _runtime_scene_package_sidecars_are_stale(
     scene_dir: Path,
     manifest: dict[str, Any],
@@ -1546,15 +1650,7 @@ def _runtime_scene_package_sidecars_are_stale(
             return True
 
     package = manifest.get("package") if isinstance(manifest.get("package"), dict) else {}
-    expected_package_values = {
-        "index_schema_version": package_index["schemaVersion"],
-        "package_id": package_index["packageId"],
-        "display_name": package_index["displayName"],
-        "index_key": package_index["indexKey"],
-        "summary_path": SUMMARY_PATH,
-        "package_index_path": PACKAGE_INDEX_PATH,
-        "research_dir": RESEARCH_DIR,
-    }
+    expected_package_values = _runtime_scene_manifest_package_index_values(package_index)
     return any(package.get(key) != expected_value for key, expected_value in expected_package_values.items())
 
 
@@ -1566,6 +1662,47 @@ def _runtime_scene_sidecar_compare_payload(payload: dict[str, Any]) -> dict[str,
         stable_snapshot.pop("generated_at", None)
         normalized["snapshot_metadata"] = stable_snapshot
     return normalized
+
+
+def _runtime_scene_manifest_package_index_values(package_index: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "index_schema_version": package_index["schemaVersion"],
+        "package_id": package_index["packageId"],
+        "display_name": package_index["displayName"],
+        "index_key": package_index["indexKey"],
+        "sortable_timestamp": package_index["sortableTimestamp"],
+        "started_at": package_index["startedAt"],
+        "started_at_local": package_index["startedAtLocal"],
+        "started_date": package_index["startedDate"],
+        "started_time": package_index["startedTime"],
+        "ended_at": package_index["endedAt"],
+        "duration_seconds": package_index["durationSeconds"],
+        "search_text": package_index["searchText"],
+        "tags": package_index["tags"],
+        "package_index_path": PACKAGE_INDEX_PATH,
+        "summary_path": SUMMARY_PATH,
+        "timeline_path": TIMELINE_PATH,
+        "lifecycle_path": LIFECYCLE_PATH,
+        "raw_dir": "raw",
+        "conversations_dir": CONVERSATIONS_DIR,
+        "agent_dir": AGENT_DIR,
+        "artifacts_dir": ARTIFACTS_DIR,
+        "research_dir": RESEARCH_DIR,
+    }
+
+
+def _update_runtime_scene_manifest_package_index_fields(
+    scene_dir: Path,
+    manifest: dict[str, Any],
+    package_index: dict[str, Any],
+) -> None:
+    package = manifest.get("package")
+    if not isinstance(package, dict):
+        package = {}
+    package.update({"schema_version": 2, **_runtime_scene_manifest_package_index_values(package_index)})
+    package["updated_at"] = _now_utc()
+    manifest["package"] = package
+    _save_scene_manifest(scene_dir, manifest)
 
 
 def _load_scene_json(path: Path) -> dict[str, Any]:
@@ -1689,6 +1826,71 @@ def _runtime_scene_display_name(scene_dir: Path, manifest: dict, scene_id: str) 
 
 
 def _runtime_scene_package_index(scene_dir: Path, manifest: dict, scene_id: str) -> dict[str, Any]:
+    return _runtime_scene_package_index_from_diagnosis(
+        scene_dir,
+        manifest,
+        scene_id,
+        _runtime_scene_package_diagnosis_for_scene(scene_dir, manifest, scene_id),
+    )
+
+
+def _runtime_scene_lightweight_package_index(
+    scene_dir: Path,
+    manifest: dict,
+    scene_id: str,
+    summary_payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    summary = summary_payload if isinstance(summary_payload, dict) else _load_scene_json(scene_dir / SUMMARY_PATH)
+    package_sidecar = _load_scene_json(scene_dir / PACKAGE_INDEX_PATH)
+    package = manifest.get("package") if isinstance(manifest.get("package"), dict) else {}
+    diagnosis = summary.get("diagnosis") if isinstance(summary.get("diagnosis"), dict) else None
+    if isinstance(diagnosis, dict):
+        return _runtime_scene_package_index_from_diagnosis(scene_dir, manifest, scene_id, diagnosis)
+    return _runtime_scene_base_package_index(
+        scene_dir,
+        manifest,
+        scene_id,
+        cached_package=package_sidecar if package_sidecar else package,
+    )
+
+
+def _runtime_scene_package_index_from_diagnosis(
+    scene_dir: Path,
+    manifest: dict,
+    scene_id: str,
+    diagnosis: dict[str, Any],
+) -> dict[str, Any]:
+    package_index = _runtime_scene_base_package_index(scene_dir, manifest, scene_id)
+    tags = list(package_index["tags"])
+    diagnosis_tags = _runtime_scene_diagnosis_tags(diagnosis)
+    tags = [*tags, *[tag for tag in diagnosis_tags if tag not in tags]]
+    package_index["tags"] = tags
+    issue_state = diagnosis.get("issueState") if isinstance(diagnosis.get("issueState"), dict) else {}
+    primary_cluster = _runtime_scene_primary_issue_cluster(issue_state)
+    first_signal = diagnosis.get("firstSignal") if isinstance(diagnosis.get("firstSignal"), dict) else None
+    package_index["searchText"] = _join_search_text(
+        [
+            package_index["searchText"],
+            _runtime_scene_diagnosis_status(issue_state),
+            _runtime_scene_primary_cause_token(diagnosis, primary_cluster, first_signal),
+            _runtime_scene_primary_cause_label(primary_cluster, first_signal),
+            diagnosis.get("severity"),
+            diagnosis.get("userSummary"),
+            diagnosis.get("agentNextStep"),
+            *tags,
+        ]
+    )
+    return package_index
+
+
+def _runtime_scene_base_package_index(
+    scene_dir: Path,
+    manifest: dict,
+    scene_id: str,
+    *,
+    cached_package: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    cached = cached_package if isinstance(cached_package, dict) else {}
     package = manifest.get("package") if isinstance(manifest.get("package"), dict) else {}
     raw_started_at = str(manifest.get("started_at") or package.get("started_at") or "").strip()
     started = _resolve_scene_started_at(raw_started_at, scene_dir)
@@ -1713,9 +1915,12 @@ def _runtime_scene_package_index(scene_dir: Path, manifest: dict, scene_id: str)
     index_key = _join_index_key_parts([started_date, started_time.replace(":", "-"), trigger_token, status_token])
     duration_seconds = _scene_duration_seconds(started, ended)
     tags = _runtime_scene_index_tags(manifest, trigger_token, status_token)
-    diagnosis = _runtime_scene_package_diagnosis_for_scene(scene_dir, manifest, scene_id)
-    diagnosis_tags = _runtime_scene_diagnosis_tags(diagnosis)
-    tags = [*tags, *[tag for tag in diagnosis_tags if tag not in tags]]
+    cached_tags = cached.get("tags")
+    if isinstance(cached_tags, list):
+        for tag in cached_tags:
+            token = str(tag or "").strip()
+            if token and token not in tags:
+                tags.append(token)
     search_text = _join_search_text(
         [
             display_name,
@@ -1731,19 +1936,7 @@ def _runtime_scene_package_index(scene_dir: Path, manifest: dict, scene_id: str)
             str(manifest.get("status") or ""),
             str(manifest.get("result") or ""),
             str(manifest.get("stop_reason") or ""),
-            _runtime_scene_diagnosis_status(diagnosis.get("issueState") if isinstance(diagnosis.get("issueState"), dict) else {}),
-            _runtime_scene_primary_cause_token(
-                diagnosis,
-                _runtime_scene_primary_issue_cluster(diagnosis.get("issueState") if isinstance(diagnosis.get("issueState"), dict) else {}),
-                diagnosis.get("firstSignal") if isinstance(diagnosis.get("firstSignal"), dict) else None,
-            ),
-            _runtime_scene_primary_cause_label(
-                _runtime_scene_primary_issue_cluster(diagnosis.get("issueState") if isinstance(diagnosis.get("issueState"), dict) else {}),
-                diagnosis.get("firstSignal") if isinstance(diagnosis.get("firstSignal"), dict) else None,
-            ),
-            diagnosis.get("severity"),
-            diagnosis.get("userSummary"),
-            diagnosis.get("agentNextStep"),
+            str(cached.get("search_text") or ""),
             *tags,
         ]
     )
@@ -1893,7 +2086,7 @@ def _parse_datetime(value: str) -> datetime | None:
     except ValueError:
         return None
     if parsed.tzinfo is None:
-        return parsed.replace(tzinfo=UTC)
+        return parsed.replace(tzinfo=timezone.utc)
     return parsed
 
 
@@ -1904,7 +2097,7 @@ def _parse_directory_timestamp_token(value: str) -> datetime | None:
             parsed = datetime.strptime(text, pattern)
         except ValueError:
             continue
-        return parsed.replace(tzinfo=UTC)
+        return parsed.replace(tzinfo=timezone.utc)
     return None
 
 
@@ -3972,6 +4165,12 @@ def _runtime_scene_event_severity(event: dict) -> str:
     fields = event.get("fields") if isinstance(event.get("fields"), dict) else {}
     if _runtime_scene_is_operational_client_error_event(event):
         return "info"
+    if _runtime_scene_is_diagnostic_mirror_event(event):
+        if level in {"error", "fatal", "critical"}:
+            return "error"
+        if level in {"warning", "warn"}:
+            return "warning"
+        return "info"
     field_status = str(fields.get("status") or fields.get("resultStatus") or "").strip().lower()
     field_outcome = str(fields.get("outcome") or "").strip().lower()
     error_markers = (
@@ -4011,6 +4210,27 @@ def _runtime_scene_event_severity(event: dict) -> str:
     return "info"
 
 
+def _runtime_scene_is_diagnostic_mirror_event(event: dict) -> bool:
+    """Events that persisted an observation should not become a second root cause."""
+
+    event_code = str(event.get("eventCode") or event.get("event_code") or "").strip()
+    if event_code != "memory.event_written":
+        return False
+    component = str(event.get("component") or "").strip()
+    if component not in {"agent_memory", "agent_directory", "memory"}:
+        return False
+    outcome = str(event.get("outcome") or "").strip().lower()
+    level = str(event.get("level") or "").strip().lower()
+    fields = event.get("fields") if isinstance(event.get("fields"), dict) else {}
+    has_persistence_error = any(
+        str(fields.get(key) or "").strip()
+        for key in ("writeError", "persistenceError", "storageError", "exceptionType", "exceptionMessage")
+    )
+    if has_persistence_error:
+        return False
+    return level in {"", "debug", "info"} and outcome in {"", "observed", "written", "succeeded", "success"}
+
+
 def _runtime_scene_is_operational_client_error_event(event: dict) -> bool:
     fields = event.get("fields") if isinstance(event.get("fields"), dict) else {}
     if fields.get("operationalClientError") is True:
@@ -4028,7 +4248,7 @@ def _runtime_scene_is_operational_client_error_event(event: dict) -> bool:
 
 def _file_timestamp(path: Path) -> str:
     try:
-        return datetime.fromtimestamp(path.stat().st_mtime, tz=UTC).isoformat()
+        return datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc).isoformat()
     except OSError:
         return ""
 
@@ -4054,7 +4274,7 @@ def _resolve_current_runtime_scene_dir() -> Path | None:
 
 
 def _resolve_recent_completed_runtime_scene_dir(*, max_age_seconds: float = 180.0) -> Path | None:
-    now = datetime.now(UTC)
+    now = datetime.now(timezone.utc)
     for scene_dir in _scene_dirs():
         manifest = _load_scene_manifest(scene_dir)
         if not _runtime_scene_project_matches(manifest):
@@ -4065,7 +4285,7 @@ def _resolve_recent_completed_runtime_scene_dir(*, max_age_seconds: float = 180.
         ended_at = _parse_datetime(str(manifest.get("ended_at") or ""))
         if ended_at is None:
             continue
-        age = max(0.0, (now - ended_at.astimezone(UTC)).total_seconds())
+        age = max(0.0, (now - ended_at.astimezone(timezone.utc)).total_seconds())
         if age <= max_age_seconds:
             return scene_dir
     return None
@@ -4168,16 +4388,41 @@ def _should_promote_scene_event_to_timeline(payload: dict[str, Any]) -> bool:
     fields = payload.get("fields") if isinstance(payload.get("fields"), dict) else {}
     if _is_known_benign_browser_event(payload):
         return False
-    if event_code in {
-        "session.list.loaded",
-        "session.agent_missing.hidden_from_index",
-        "browser.memory.sampled",
-        "browser.process_memory.sampled",
-    }:
-        return level in {"warning", "error", "fatal"}
+    if _runtime_scene_is_diagnostic_only_observation(payload):
+        return _runtime_scene_payload_has_diagnostic_signal(payload)
     if bool(fields.get("controlSignal")) and level in {"", "debug", "info"}:
         return False
     return True
+
+
+def _runtime_scene_is_diagnostic_only_observation(payload: dict[str, Any]) -> bool:
+    event_code = str(payload.get("event_code") or "").strip()
+    component = str(payload.get("component") or "").strip()
+    phase = str(payload.get("phase") or "").strip()
+    if event_code in TIMELINE_DIAGNOSTIC_ONLY_EVENT_CODES:
+        return True
+    if event_code in {"browser.memory.sampled", "browser.process_memory.sampled"}:
+        return True
+    if phase in TIMELINE_DIAGNOSTIC_ONLY_PHASES:
+        return True
+    return (component, phase) in TIMELINE_DIAGNOSTIC_ONLY_COMPONENT_PHASES
+
+
+def _runtime_scene_payload_has_diagnostic_signal(payload: dict[str, Any]) -> bool:
+    event = {
+        "runtimeSceneId": str(payload.get("runtime_scene_id") or ""),
+        "component": str(payload.get("component") or ""),
+        "phase": str(payload.get("phase") or ""),
+        "eventCode": str(payload.get("event_code") or ""),
+        "level": str(payload.get("level") or "info"),
+        "message": str(payload.get("message") or ""),
+        "timestamp": str(payload.get("ts") or ""),
+        "seq": int(payload.get("seq") or 0),
+        "outcome": str(payload.get("outcome") or ""),
+        "fields": payload.get("fields") if isinstance(payload.get("fields"), dict) else {},
+        "rawRefs": payload.get("raw_refs") if isinstance(payload.get("raw_refs"), list) else [],
+    }
+    return _runtime_scene_event_severity(event) in {"warning", "error"}
 
 
 def _is_known_benign_browser_event(payload: dict[str, Any]) -> bool:
@@ -4272,40 +4517,55 @@ def _is_dev_browser_telemetry_surface(fields: dict[str, Any]) -> bool:
     return ":5173" in href or ":5174" in href
 
 
+def _browser_manifest_key_for_telemetry(fields: dict[str, Any]) -> str:
+    role = str(fields.get("browserRole") or "").strip().lower()
+    surface = str(fields.get("telemetrySurface") or "").strip().lower()
+    pathname = str(fields.get("pathname") or "").strip().lower()
+    href = str(fields.get("href") or "").strip().lower()
+    if role in {"launcher", "launcher_control_surface", "control_surface"}:
+        return "launcherBrowser"
+    if surface in {"managed_launcher", "launcher_control_surface"}:
+        return "launcherBrowser"
+    if pathname == "/launcher" or href.endswith("/launcher"):
+        return "launcherBrowser"
+    return "workbenchBrowser"
+
+
+def _browser_manifest_key_for_existing_browser(browser: dict[str, Any]) -> str:
+    role = str(browser.get("browser_role") or browser.get("window_purpose") or "").strip().lower()
+    surface = str(browser.get("telemetry_surface") or "").strip().lower()
+    profile_dir = str(browser.get("profile_dir") or browser.get("profileDir") or "").strip().lower()
+    app_url = str(browser.get("app_url") or browser.get("current_href") or "").strip().lower()
+    pathname = str(browser.get("current_pathname") or "").strip().lower()
+    if role in {"launcher", "launcher_control_surface", "control_surface"}:
+        return "launcherBrowser"
+    if surface in {"managed_launcher", "launcher_control_surface"}:
+        return "launcherBrowser"
+    if "launcher-control-profile" in profile_dir:
+        return "launcherBrowser"
+    if pathname == "/launcher" or app_url.endswith("/launcher"):
+        return "launcherBrowser"
+    return "workbenchBrowser"
+
+
+def _browser_manifest_for_role(manifest: dict[str, Any], browser_key: str) -> dict[str, Any]:
+    browser = manifest.get(browser_key)
+    if isinstance(browser, dict):
+        return dict(browser)
+    legacy_browser = manifest.get("browser")
+    if isinstance(legacy_browser, dict) and _browser_manifest_key_for_existing_browser(legacy_browser) == browser_key:
+        return dict(legacy_browser)
+    return {}
+
+
 def _update_runtime_scene_package_manifest(scene_dir: Path, manifest: dict[str, Any]) -> None:
     package = manifest.get("package")
     if not isinstance(package, dict):
         package = {}
     scene_id = _scene_id(scene_dir, manifest)
     package_index = _runtime_scene_package_index(scene_dir, manifest, scene_id)
-    package.update(
-        {
-            "schema_version": 2,
-            "index_schema_version": package_index["schemaVersion"],
-            "package_id": package_index["packageId"],
-            "display_name": package_index["displayName"],
-            "index_key": package_index["indexKey"],
-            "sortable_timestamp": package_index["sortableTimestamp"],
-            "started_at": package_index["startedAt"],
-            "started_at_local": package_index["startedAtLocal"],
-            "started_date": package_index["startedDate"],
-            "started_time": package_index["startedTime"],
-            "ended_at": package_index["endedAt"],
-            "duration_seconds": package_index["durationSeconds"],
-            "search_text": package_index["searchText"],
-            "tags": package_index["tags"],
-            "package_index_path": PACKAGE_INDEX_PATH,
-            "summary_path": SUMMARY_PATH,
-            "timeline_path": TIMELINE_PATH,
-            "lifecycle_path": LIFECYCLE_PATH,
-            "raw_dir": "raw",
-            "conversations_dir": CONVERSATIONS_DIR,
-            "agent_dir": AGENT_DIR,
-            "artifacts_dir": ARTIFACTS_DIR,
-            "research_dir": RESEARCH_DIR,
-            "updated_at": _now_utc(),
-        }
-    )
+    package.update({"schema_version": 2, **_runtime_scene_manifest_package_index_values(package_index)})
+    package["updated_at"] = _now_utc()
     manifest["package"] = package
     _save_runtime_scene_research_summary(scene_dir)
     _save_runtime_scene_package_index(scene_dir, package_index)
@@ -4335,13 +4595,19 @@ def _update_browser_manifest(
     *,
     indexed: bool = True,
 ) -> None:
-    browser = manifest.get("browser")
-    if not isinstance(browser, dict):
-        browser = {}
+    browser_key = _browser_manifest_key_for_telemetry(fields)
+    browser = _browser_manifest_for_role(manifest, browser_key)
 
     browser["telemetry_path"] = BROWSER_TELEMETRY_RAW_PATH
     browser["last_event_at"] = timestamp
     browser["last_event_indexed"] = bool(indexed)
+    browser["browser_role"] = "launcher_control_surface" if browser_key == "launcherBrowser" else "workbench"
+    surface = fields.get("telemetrySurface")
+    if isinstance(surface, str) and surface.strip():
+        browser["telemetry_surface"] = _truncate_text(surface.strip(), MAX_TELEMETRY_FIELD_TEXT_CHARS)
+    page_instance_id = fields.get("pageInstanceId")
+    if isinstance(page_instance_id, str) and page_instance_id.strip():
+        browser["page_instance_id"] = _truncate_text(page_instance_id.strip(), MAX_TELEMETRY_FIELD_TEXT_CHARS)
 
     field_to_manifest_key = {
         "href": "current_href",
@@ -4435,6 +4701,7 @@ def _update_browser_manifest(
                 MAX_TELEMETRY_FIELD_TEXT_CHARS,
             )
 
+    manifest[browser_key] = browser
     manifest["browser"] = browser
     _save_scene_manifest(scene_dir, manifest)
 
@@ -4447,12 +4714,12 @@ def _update_ignored_browser_telemetry_manifest(
     *,
     reason: str,
 ) -> None:
-    browser = manifest.get("browser")
-    if not isinstance(browser, dict):
-        browser = {}
+    browser_key = _browser_manifest_key_for_telemetry(fields)
+    browser = _browser_manifest_for_role(manifest, browser_key)
     browser["telemetry_path"] = BROWSER_TELEMETRY_RAW_PATH
     browser["last_event_at"] = timestamp
     browser["last_event_indexed"] = False
+    browser["browser_role"] = "launcher_control_surface" if browser_key == "launcherBrowser" else "workbench"
     browser["last_ignored_telemetry_at"] = timestamp
     browser["last_ignored_telemetry_reason"] = _truncate_text(reason, 120)
     ignored_count = _coerce_int(browser.get("ignored_telemetry_count"), default=0)
@@ -4463,6 +4730,7 @@ def _update_ignored_browser_telemetry_manifest(
     surface = fields.get("telemetrySurface")
     if isinstance(surface, str) and surface.strip():
         browser["last_ignored_telemetry_surface"] = _truncate_text(surface.strip(), MAX_TELEMETRY_FIELD_TEXT_CHARS)
+    manifest[browser_key] = browser
     manifest["browser"] = browser
     _save_scene_manifest(scene_dir, manifest)
 
@@ -4532,7 +4800,7 @@ def _camel_to_snake(value: str) -> str:
 
 
 def _now_utc() -> str:
-    return datetime.now(UTC).isoformat()
+    return datetime.now(timezone.utc).isoformat()
 
 
 def _normalize_event_timestamp(value: object) -> str:
@@ -4546,8 +4814,8 @@ def _normalize_event_timestamp(value: object) -> str:
     except ValueError:
         return ""
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=UTC)
-    return parsed.astimezone(UTC).isoformat()
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc).isoformat()
 
 
 def _truncate_text(value: str, limit: int) -> str:
@@ -4630,7 +4898,42 @@ def _normalize_telemetry_value(value: object, *, depth: int) -> Any:
 
 def _is_sensitive_telemetry_key(key: str) -> bool:
     normalized = str(key or "").strip().lower().replace("-", "_")
+    if _is_safe_usage_counter_key(normalized):
+        return False
     return any(keyword in normalized for keyword in SENSITIVE_FIELD_KEYWORDS)
+
+
+def _is_safe_usage_counter_key(normalized_key: str) -> bool:
+    compact = str(normalized_key or "").replace("_", "")
+    return compact in {
+        "inputtokens",
+        "outputtokens",
+        "totaltokens",
+        "cachedinputtokens",
+        "uncachedinputtokens",
+        "prompttokens",
+        "completiontokens",
+        "prompttokencount",
+        "completiontokencount",
+        "inputtokencount",
+        "outputtokencount",
+        "cachedtokens",
+        "maxtokens",
+        "beforetokens",
+        "aftertokens",
+        "savedtokens",
+        "totaltokenusage",
+        "turninputtokens",
+        "turncachedinputtokens",
+        "totalinputtokens",
+        "totalcachedinputtokens",
+        "lastinputtokens",
+        "lastcachedinputtokens",
+        "cacheinputtokens",
+        "cachereadinputtokens",
+        "cachecreationinputtokens",
+        "promptcachehittokens",
+    }
 
 
 def _normalize_raw_refs(value: object) -> list[dict[str, Any]]:

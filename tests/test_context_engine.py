@@ -8,6 +8,8 @@ from core.web.services import agent_directory_service, prompt_template_service, 
 def _use_tmp_project_root(tmp_path, monkeypatch):
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(prompt_template_service, "PROJECT_ROOT", tmp_path)
+    with context_engine._RESEARCH_ORG_CONTEXT_CACHE_LOCK:
+        context_engine._RESEARCH_ORG_CONTEXT_CACHE.clear()
 
 
 class _FakeResearchWorkspace:
@@ -44,7 +46,7 @@ def test_build_chat_agent_context_skips_research_org_context(tmp_path, monkeypat
     )
     agent = agent_directory_service.create_agent_instance(
         display_name="普通会话 Agent",
-        profile_id="primary",
+        llm_bindings={"dialogue": {"modelId": "model-primary"}},
         primary_mode="chat",
         direct_session_id="session-chat",
     )
@@ -69,8 +71,8 @@ def test_build_chat_agent_context_skips_research_org_context(tmp_path, monkeypat
     packet = context_engine.build_agent_context(agent["agentId"], session_id="session-chat", run_id="turn-1")
 
     assert packet.agent_id == agent["agentId"]
-    assert packet.agent_code == "A001"
-    assert packet.profile_id == "primary"
+    assert packet.agent_code == agent["agentCode"]
+    assert packet.dialogue_model_id == "model-primary"
     assert packet.prompt_template_id == "prompt-chat-default"
     assert packet.role_key == ""
     assert packet.workspace_path == agent["workspacePath"]
@@ -87,11 +89,41 @@ def test_build_chat_agent_context_skips_research_org_context(tmp_path, monkeypat
     assert packet.timings["researchOrgContextSkipped"] is True
 
 
+def test_default_chat_empty_prompt_template_logs_info_fallback(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    recorded_events: list[tuple[tuple, dict]] = []
+    monkeypatch.setattr(
+        context_engine,
+        "_record_context_event",
+        lambda *args, **kwargs: recorded_events.append((args, kwargs)),
+    )
+    agent = agent_directory_service.create_agent_instance(
+        display_name="普通会话 Agent",
+        llm_bindings={"dialogue": {"modelId": "model-primary"}},
+        primary_mode="chat",
+        direct_session_id="session-chat",
+    )
+
+    packet = context_engine.build_agent_context(agent["agentId"], session_id="session-chat", run_id="turn-1")
+
+    assert packet.prompt_template_id == "prompt-chat-default"
+    assert any(
+        args[0] == "agent_runtime.prompt_template_empty_fallback"
+        and kwargs["level"] == "info"
+        and kwargs["outcome"] == "empty_prompt_template"
+        for args, kwargs in recorded_events
+    )
+    assert not any(
+        args[0] == "agent_runtime.prompt_template_missing" and kwargs["level"] == "warning"
+        for args, kwargs in recorded_events
+    )
+
+
 def test_build_research_agent_context_still_loads_research_org_context(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     agent = agent_directory_service.create_agent_instance(
         display_name="研究组织 Agent",
-        profile_id="research_broad",
+        llm_bindings={"dialogue": {"modelId": "model-research-broad"}},
         primary_mode="research",
         role_key="research_broad",
         prompt_template_id="prompt-research-broad",
@@ -101,7 +133,12 @@ def test_build_research_agent_context_still_loads_research_org_context(tmp_path,
     monkeypatch.setattr(
         context_engine,
         "_build_research_organization_context_block",
-        lambda agent_id, **kwargs: calls.append(agent_id) or "## Research Organization Context\nMembers: none",
+        lambda agent_id, **kwargs: calls.append(agent_id)
+        or {
+            "contextBlock": "## Research Organization Context\nMembers: none",
+            "cacheHit": False,
+            "cacheAgeMs": 0,
+        },
     )
 
     packet = context_engine.build_agent_context(agent["agentId"], session_id="session-research", run_id="turn-1")
@@ -110,6 +147,101 @@ def test_build_research_agent_context_still_loads_research_org_context(tmp_path,
     assert "Research Organization Context" in packet.context_block
     assert packet.timings["researchOrgContextMs"] >= 0
     assert "researchOrgContextSkipped" not in packet.timings
+
+
+def test_build_research_agent_context_reuses_short_lived_research_org_snapshot(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    workspace = _use_tmp_research_org_workspace(tmp_path, monkeypatch)
+    agent = agent_directory_service.create_agent_instance(
+        display_name="研究缓存 Agent",
+        llm_bindings={"dialogue": {"modelId": "model-research-broad"}},
+        primary_mode="research",
+        role_key="research_broad",
+        prompt_template_id="prompt-research-broad",
+        direct_session_id="session-research-cache",
+    )
+    organization = research_organization_service.get_research_organization()
+    organization["agents"].append(
+        {
+            "nodeId": agent["agentId"],
+            "agentId": agent["agentId"],
+            "role": "research_specialist",
+            "employeeRank": "member",
+            "status": "active",
+        }
+    )
+    workspace.write_research_organization(organization)
+    calls: list[str] = []
+    original_builder = research_organization_service.build_research_organization_context_block
+
+    def counting_builder(agent_id, **kwargs):
+        calls.append(agent_id)
+        return original_builder(agent_id, **kwargs)
+
+    monkeypatch.setattr(research_organization_service, "build_research_organization_context_block", counting_builder)
+
+    first = context_engine.build_agent_context(agent["agentId"], session_id="session-research-cache", run_id="turn-1")
+    second = context_engine.build_agent_context(agent["agentId"], session_id="session-research-cache", run_id="turn-2")
+
+    assert calls == [agent["agentId"]]
+    assert "Research Organization Context" in first.context_block
+    assert "Research Organization Context" in second.context_block
+    assert first.timings["researchOrgContextCacheHit"] is False
+    assert second.timings["researchOrgContextCacheHit"] is True
+    assert second.timings["researchOrgContextCacheAgeMs"] >= 0
+
+
+def test_build_research_agent_context_cache_invalidates_when_research_org_changes(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    workspace = _use_tmp_research_org_workspace(tmp_path, monkeypatch)
+    agent = agent_directory_service.create_agent_instance(
+        display_name="研究缓存失效 Agent",
+        llm_bindings={"dialogue": {"modelId": "model-research-broad"}},
+        primary_mode="research",
+        role_key="research_broad",
+        prompt_template_id="prompt-research-broad",
+        direct_session_id="session-research-cache-invalidate",
+    )
+    organization = research_organization_service.get_research_organization()
+    organization["agents"].append(
+        {
+            "nodeId": agent["agentId"],
+            "agentId": agent["agentId"],
+            "role": "research_specialist",
+            "employeeRank": "member",
+            "status": "active",
+        }
+    )
+    workspace.write_research_organization(organization)
+    calls: list[str] = []
+    original_builder = research_organization_service.build_research_organization_context_block
+
+    def counting_builder(agent_id, **kwargs):
+        calls.append(agent_id)
+        return original_builder(agent_id, **kwargs)
+
+    monkeypatch.setattr(research_organization_service, "build_research_organization_context_block", counting_builder)
+
+    first = context_engine.build_agent_context(
+        agent["agentId"],
+        session_id="session-research-cache-invalidate",
+        run_id="turn-1",
+    )
+    organization["updatedAt"] = "2030-01-01T00:00:00Z"
+    organization["auditEvents"] = [
+        *(organization.get("auditEvents") or []),
+        {"eventType": "test_cache_invalidation", "allowed": True},
+    ]
+    workspace.write_research_organization(organization)
+    second = context_engine.build_agent_context(
+        agent["agentId"],
+        session_id="session-research-cache-invalidate",
+        run_id="turn-2",
+    )
+
+    assert calls == [agent["agentId"], agent["agentId"]]
+    assert first.timings["researchOrgContextCacheHit"] is False
+    assert second.timings["researchOrgContextCacheHit"] is False
 
 
 def test_build_agent_context_includes_project_memory_coordination_rules_from_agents_md(tmp_path, monkeypatch):
@@ -139,7 +271,7 @@ def test_build_agent_context_includes_project_memory_coordination_rules_from_age
     )
     agent = agent_directory_service.create_agent_instance(
         display_name="并行处理 Agent",
-        profile_id="primary",
+        llm_bindings={"dialogue": {"modelId": "model-primary"}},
         primary_mode="chat",
         direct_session_id="session-parallel-memory",
     )
@@ -174,19 +306,19 @@ def test_build_agent_context_includes_project_agent_territory_registry(tmp_path,
     registry_path.parent.mkdir(parents=True, exist_ok=True)
     runtime_agent = agent_directory_service.create_agent_instance(
         display_name="运行主干 Agent",
-        profile_id="primary",
+        llm_bindings={"dialogue": {"modelId": "model-primary"}},
         primary_mode="chat",
         direct_session_id="session-runtime",
     )
     qa_agent = agent_directory_service.create_agent_instance(
         display_name="质量运维 Agent",
-        profile_id="primary",
+        llm_bindings={"dialogue": {"modelId": "model-primary"}},
         primary_mode="chat",
         direct_session_id="session-quality",
     )
     archived_agent = agent_directory_service.create_agent_instance(
         display_name="旧前端 Agent",
-        profile_id="primary",
+        llm_bindings={"dialogue": {"modelId": "model-primary"}},
         primary_mode="chat",
         direct_session_id="session-archived-territory",
     )
@@ -316,13 +448,13 @@ def test_build_agent_context_auto_initializes_project_agent_registry_when_missin
     )
     agent = agent_directory_service.create_agent_instance(
         display_name="孤立会话 Agent",
-        profile_id="primary",
+        llm_bindings={"dialogue": {"modelId": "model-primary"}},
         primary_mode="chat",
         direct_session_id="session-lonely",
     )
     peer = agent_directory_service.create_agent_instance(
         display_name="同项目可推荐 Agent",
-        profile_id="primary",
+        llm_bindings={"dialogue": {"modelId": "model-primary"}},
         primary_mode="research",
         direct_session_id="session-peer",
     )
@@ -375,7 +507,7 @@ def test_build_agent_context_auto_initializes_project_agent_registry_without_mem
     _use_tmp_project_root(tmp_path, monkeypatch)
     agent = agent_directory_service.create_agent_instance(
         display_name="无记忆泳道 Agent",
-        profile_id="primary",
+        llm_bindings={"dialogue": {"modelId": "model-primary"}},
         primary_mode="chat",
         direct_session_id="session-no-lanes",
     )
@@ -399,7 +531,7 @@ def test_build_agent_context_keeps_invalid_project_agent_registry_file(tmp_path,
     registry_path.write_text("{invalid", encoding="utf-8")
     agent = agent_directory_service.create_agent_instance(
         display_name="坏配置兜底 Agent",
-        profile_id="primary",
+        llm_bindings={"dialogue": {"modelId": "model-primary"}},
         primary_mode="chat",
         direct_session_id="session-invalid-registry",
     )
@@ -602,7 +734,7 @@ def test_build_agent_context_returns_empty_packet_for_archived_agent(tmp_path, m
     _use_tmp_project_root(tmp_path, monkeypatch)
     agent = agent_directory_service.create_agent_instance(
         display_name="已归档上下文 Agent",
-        profile_id="primary",
+        llm_bindings={"dialogue": {"modelId": "model-primary"}},
         primary_mode="chat",
         direct_session_id="session-archived",
     )
@@ -635,7 +767,7 @@ def test_prepare_subagent_spawn_isolated_by_default_and_fork_is_explicit(tmp_pat
     _use_tmp_project_root(tmp_path, monkeypatch)
     parent = agent_directory_service.create_agent_instance(
         display_name="父 Agent",
-        profile_id="primary",
+        llm_bindings={"dialogue": {"modelId": "model-primary"}},
         primary_mode="chat",
         direct_session_id="session-parent",
         metadata={
@@ -669,7 +801,7 @@ def test_prepare_subagent_spawn_respects_delegation_policy(tmp_path, monkeypatch
     _use_tmp_project_root(tmp_path, monkeypatch)
     parent = agent_directory_service.create_agent_instance(
         display_name="受控父 Agent",
-        profile_id="primary",
+        llm_bindings={"dialogue": {"modelId": "model-primary"}},
         primary_mode="chat",
         direct_session_id="session-parent",
         metadata={
@@ -719,7 +851,7 @@ def test_record_agent_turn_result_writes_bounded_agent_event(tmp_path, monkeypat
     _use_tmp_project_root(tmp_path, monkeypatch)
     agent = agent_directory_service.create_agent_instance(
         display_name="会话 Agent",
-        profile_id="primary",
+        llm_bindings={"dialogue": {"modelId": "model-primary"}},
         primary_mode="chat",
         direct_session_id="session-live",
     )
@@ -760,7 +892,7 @@ def test_record_agent_turn_result_writes_bounded_agent_event(tmp_path, monkeypat
     assert snapshot["agentId"] == agent["agentId"]
     assert snapshot["agentCode"] == agent["agentCode"]
     assert snapshot["primaryMode"] == "chat"
-    assert snapshot["profileId"] == "primary"
+    assert snapshot["dialogueModelId"] == "model-primary"
     assert snapshot["promptTemplateId"] == "prompt-chat-default"
     assert snapshot["workspacePath"] == agent["workspacePath"]
     assert snapshot["sessionId"] == "session-live"
@@ -775,7 +907,7 @@ def test_list_agent_runs_returns_bounded_safe_snapshots(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     agent = agent_directory_service.create_agent_instance(
         display_name="运行历史 Agent",
-        profile_id="primary",
+        llm_bindings={"dialogue": {"modelId": "model-primary"}},
         primary_mode="chat",
         direct_session_id="session-runs",
     )

@@ -15,12 +15,19 @@ import time
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any, Iterable
 from urllib.parse import quote
 
 from core.chat.chat_task_types import trim_lines
+from core.llm.agent_runtime import (
+    AGENT_LLM_SLOTS,
+    DEFAULT_AGENT_LLM_SLOT,
+    agent_dialogue_model_id,
+    agent_llm_model_id,
+    normalize_agent_llm_bindings,
+)
 
 from .runtime_scene_service import record_runtime_scene_event
 
@@ -31,6 +38,48 @@ DEFAULT_AGENT_KIND = "persistent"
 DEFAULT_TOOL_POLICY_ID = "default"
 DEFAULT_MEMORY_POLICY_ID = "private"
 DEFAULT_AGENT_PRIMARY_MODE = "chat"
+DEFAULT_SESSION_AGENT_ALLOWED_TOOLS = (
+    # Codex-like local work loop: use cli_tool for locate/read/search/verify,
+    # then edit through structured mutation tools.
+    "apply_patch_tool",
+    "apply_diff_edit_tool",
+    "write_file_tool",
+    "cli_tool",
+    "python_lint_tool",
+    "run_test_for_tool",
+    # External and media capabilities stay available when the user intent needs them.
+    "web_search_tool",
+    "web_fetch_tool",
+    "image2_generate_tool",
+    # Conversation diagnostics and memory are core Agent capabilities.
+    "conversation_log_inspect_tool",
+    "create_child_session_tool",
+    "list_child_sessions_tool",
+    "session_reference_query_tool",
+    "agent_message_tool",
+    "get_core_context_tool",
+    "get_current_goal_tool",
+    "search_memory_tool",
+    "search_error_archive_tool",
+    "record_learning_tool",
+    "compress_context_tool",
+    # Lightweight state and repository evidence.
+    "task_list_tool",
+    "get_git_status_summary_tool",
+    "get_recent_changes_tool",
+    "get_entity_history_tool",
+    "explain_current_worktree_tool",
+)
+DEFAULT_SESSION_AGENT_PREFERRED_TOOLS = (
+    "cli_tool",
+    "create_child_session_tool",
+    "list_child_sessions_tool",
+    "session_reference_query_tool",
+    "conversation_log_inspect_tool",
+    "get_core_context_tool",
+    "search_memory_tool",
+)
+AGENT_LLM_BINDING_SLOTS = AGENT_LLM_SLOTS
 KNOWLEDGE_STEWARD_AGENT_ID = "agent-knowledge-steward"
 KNOWLEDGE_STEWARD_TOOL_POLICY_ID = "tool-knowledge-steward"
 KNOWLEDGE_STEWARD_MEMORY_POLICY_ID = "memory-knowledge-steward"
@@ -114,6 +163,17 @@ AGENT_TASK_PROFILE_TEXT_LINE_LIMITS = {
     "constraints": 6,
     "handoffNotes": 6,
 }
+AGENT_CREATION_REQUIRED_FIELDS = (
+    "displayName",
+    "llmBindings",
+    "primaryMode",
+    "roleKey",
+    "promptTemplateId",
+    "personaProfile",
+    "taskProfile",
+    "toolPolicy",
+    "memoryPolicy",
+)
 AGENT_WORKSPACE_SUBDIRS = (
     "conversation",
     "memory",
@@ -131,6 +191,7 @@ AGENT_TERRITORY_WRITE_SCOPES = ("private",)
 AGENT_TERRITORY_READ_SCOPES = ("private", "shared")
 TOOL_POLICY_WORKSPACE_SCOPES = ("private", "shared")
 EXPLICIT_TOOL_POLICY_REQUIRED_TOOLS = {
+    "computer_use_task_tool",
     "knowledge_governance_tasks_tool",
     "knowledge_ingestion_tool",
     "knowledge_proposal_tool",
@@ -144,6 +205,10 @@ EXPLICIT_TOOL_POLICY_REQUIRED_TOOLS = {
     "research_knowledge_query_tool",
     "research_agent_creation_proposal_tool",
     "research_communication_edge_proposal_tool",
+    "research_proposal_apply_tool",
+    "record_learning_tool",
+    "search_error_archive_tool",
+    "search_memory_tool",
 }
 KNOWN_AGENT_PRIMARY_MODES = {"chat", "research", "self_evolution", "supervised_evolution", "general"}
 WRITE_RETRY_TIMEOUT_SECONDS = 2.0
@@ -243,6 +308,17 @@ class ToolPolicyDecision:
 
 
 @dataclass(frozen=True)
+class EffectiveToolVisibility:
+    policy_id: str
+    visible_tools: tuple[str, ...] = ()
+    configured_unavailable_tools: tuple[str, ...] = ()
+    blocked_tools: tuple[str, ...] = ()
+    hidden_restricted_tools: tuple[str, ...] = ()
+    preferred_tools: tuple[str, ...] = ()
+    write_scopes: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class DelegationPolicyDecision:
     allowed: bool
     message: str = ""
@@ -277,7 +353,7 @@ class AgentWorkspaceWriteDecision:
 
 
 def utc_now_iso() -> str:
-    return datetime.now(UTC).isoformat()
+    return datetime.now(timezone.utc).isoformat()
 
 
 def default_state() -> dict[str, Any]:
@@ -321,8 +397,7 @@ def get_agent(agent_id: str, *, include_archived: bool = True) -> dict[str, Any]
 def create_agent_instance(
     *,
     display_name: str = "",
-    template_id: str = "",
-    profile_id: str = "",
+    llm_bindings: dict[str, Any] | None = None,
     primary_mode: str = DEFAULT_AGENT_PRIMARY_MODE,
     role_key: str = "",
     prompt_template_id: str = "",
@@ -348,24 +423,40 @@ def create_agent_instance(
             agent_id=agent_id,
             metadata=metadata_payload,
         )
-        normalized_profile = str(profile_id or template_id or "primary").strip() or "primary"
-        normalized_template = str(template_id or normalized_profile).strip() or normalized_profile
+        normalized_llm_bindings = normalize_agent_llm_bindings(llm_bindings)
+        normalized_primary_mode = _normalize_primary_mode(primary_mode)
+        normalized_role_key = _normalize_role_key(role_key)
+        normalized_prompt_template_id = _normalize_prompt_template_id(prompt_template_id)
         agent_workspace = workspace_path or _agent_workspace_relative_path(agent_id)
         _ensure_agent_workspace(agent_workspace)
+        tool_policy_id = _default_tool_policy_id_for_agent(agent_id, normalized_primary_mode)
         memory_policy_id = f"memory-{agent_id}"
+        tool_policy = _default_tool_policy_for_agent(tool_policy_id, normalized_primary_mode)
+        metadata_payload = _with_agent_creation_spec(
+            metadata_payload,
+            created_by=str(created_by or "user").strip() or "user",
+            display_name=title,
+            llm_bindings=normalized_llm_bindings,
+            primary_mode=normalized_primary_mode,
+            role_key=normalized_role_key,
+            prompt_template_id=normalized_prompt_template_id,
+            tool_policy_id=tool_policy_id,
+            memory_policy_id=memory_policy_id,
+            memory_policy={"policyId": memory_policy_id},
+            created_at=now,
+        )
         agent = {
             "agentId": agent_id,
             "agentCode": _next_agent_code(state.get("agents") or []),
             "displayName": public_name,
             "kind": DEFAULT_AGENT_KIND,
-            "primaryMode": _normalize_primary_mode(primary_mode),
-            "roleKey": _normalize_role_key(role_key),
-            "templateId": normalized_template,
-            "profileId": normalized_profile,
-            "promptTemplateId": _normalize_prompt_template_id(prompt_template_id),
+            "primaryMode": normalized_primary_mode,
+            "roleKey": normalized_role_key,
+            "llmBindings": normalized_llm_bindings,
+            "promptTemplateId": normalized_prompt_template_id,
             "directSessionId": str(direct_session_id or "").strip(),
             "workspacePath": agent_workspace,
-            "toolPolicyId": DEFAULT_TOOL_POLICY_ID,
+            "toolPolicyId": tool_policy_id,
             "memoryPolicyId": memory_policy_id,
             "createdBy": str(created_by or "user").strip() or "user",
             "status": "active",
@@ -374,6 +465,9 @@ def create_agent_instance(
             "updatedAt": now,
         }
         _ensure_agent_default_avatar(agent)
+        tool_policies = _tool_policies(state)
+        tool_policies[tool_policy_id] = tool_policy
+        state["toolPolicies"] = tool_policies
         policies = _memory_policies(state)
         policies[memory_policy_id] = default_memory_policy(memory_policy_id, agent_workspace)
         state["agents"] = list(state.get("agents") or []) + [agent]
@@ -388,7 +482,7 @@ def ensure_agent_for_session(
     session_id: str,
     *,
     display_name: str = "",
-    profile_id: str = "primary",
+    llm_bindings: dict[str, Any] | None = None,
     primary_mode: str = DEFAULT_AGENT_PRIMARY_MODE,
     role_key: str = "",
     prompt_template_id: str = "",
@@ -403,14 +497,14 @@ def ensure_agent_for_session(
     with _STATE_LOCK:
         state = repair_agent_directory()
         now = utc_now_iso()
+        normalized_llm_bindings = normalize_agent_llm_bindings(llm_bindings)
         agent = _find_agent(state, existing_agent_id)
         if agent is None:
             agent = _find_agent_by_direct_session(state, normalized_session_id)
         if agent is None:
             created = create_agent_instance(
                 display_name=display_name or normalized_session_id,
-                template_id=profile_id,
-                profile_id=profile_id,
+                llm_bindings=normalized_llm_bindings,
                 primary_mode=primary_mode,
                 role_key=role_key,
                 prompt_template_id=prompt_template_id,
@@ -467,14 +561,15 @@ def ensure_agent_for_session(
                 metadata=dict(agent.get("metadata") or {}),
             )
             changed = True
-        normalized_profile = str(profile_id or agent.get("profileId") or "primary").strip() or "primary"
-        if str(agent.get("profileId") or "").strip() != normalized_profile:
-            agent["profileId"] = normalized_profile
-            agent["templateId"] = normalized_profile
+        if normalized_llm_bindings and normalize_agent_llm_bindings(agent.get("llmBindings")) != normalized_llm_bindings:
+            agent["llmBindings"] = normalized_llm_bindings
             changed = True
         if str(agent.get("status") or "active").strip() == "archived":
             _record_agent_event("agent.ensure.skipped_archived", agent, lifecycle=True)
             raise AgentArchivedError(f"Archived Agent cannot be ensured for session: {agent.get('agentId') or ''}")
+        policy_changed = _ensure_session_agent_tool_policy(state, agent)
+        if policy_changed:
+            changed = True
         metadata = dict(agent.get("metadata") or {})
         legacy_path = str(session_workspace_path or "").strip()
         if legacy_path and metadata.get("legacySessionWorkspacePath") != legacy_path:
@@ -507,8 +602,7 @@ def update_agent_instance(
     agent_id: str,
     *,
     display_name: str | None = None,
-    template_id: str | None = None,
-    profile_id: str | None = None,
+    llm_bindings: dict[str, Any] | None = None,
     primary_mode: str | None = None,
     role_key: str | None = None,
     prompt_template_id: str | None = None,
@@ -557,15 +651,8 @@ def update_agent_instance(
                 agent["displayName"] = title[:120].rstrip()
                 metadata_payload["displayNameSource"] = "user"
             agent["metadata"] = metadata_payload
-        if template_id is not None:
-            normalized_template = str(template_id or "").strip()
-            if normalized_template:
-                agent["templateId"] = normalized_template
-        if profile_id is not None:
-            normalized = str(profile_id or "").strip() or "primary"
-            agent["profileId"] = normalized
-            if template_id is None:
-                agent["templateId"] = normalized
+        if llm_bindings is not None:
+            agent["llmBindings"] = normalize_agent_llm_bindings(llm_bindings)
         if primary_mode is not None:
             agent["primaryMode"] = _normalize_primary_mode(primary_mode)
         if role_key is not None:
@@ -647,6 +734,7 @@ def update_agent_instance(
             updated_task_profile = normalize_task_profile(task_profile)
             metadata_payload["taskProfile"] = updated_task_profile
             agent["metadata"] = metadata_payload
+        _refresh_agent_onboarding_metadata(state, agent)
         _ensure_agent_default_avatar(agent)
         agent["updatedAt"] = utc_now_iso()
         save_state(state)
@@ -698,6 +786,7 @@ def list_agent_policy_options() -> dict[str, list[dict[str, Any]]]:
                 "readKnowledgeBaseCount": len(list(policy.get("readKnowledgeBaseIds") or [])),
                 "proposeKnowledgeBaseCount": len(list(policy.get("proposeKnowledgeBaseIds") or [])),
                 "reviewKnowledgeBaseCount": len(list(policy.get("reviewKnowledgeBaseIds") or [])),
+                "rateKnowledgeBaseCount": len(list(policy.get("rateKnowledgeBaseIds") or [])),
                 "hasInboxPath": bool(str(policy.get("agentInboxMessagesPath") or "").strip()),
             }
             for policy_id, policy in sorted(memory_policies.items())
@@ -717,6 +806,9 @@ def archive_agent_instance(agent_id: str) -> dict[str, Any]:
         agent["updatedAt"] = utc_now_iso()
         save_state(state)
     _record_agent_event("agent.archived", agent, lifecycle=True)
+    from .agent_mode_binding_service import remove_agent_from_mode_bindings
+
+    remove_agent_from_mode_bindings(agent_id)
     return _agent_to_api(agent)
 
 
@@ -838,12 +930,14 @@ def reset_agent_instance(
             reset_summary["resetTaskProfile"] = True
         if reset_tool_policy:
             previous_policy_id = str(agent.get("toolPolicyId") or DEFAULT_TOOL_POLICY_ID).strip() or DEFAULT_TOOL_POLICY_ID
-            agent["toolPolicyId"] = DEFAULT_TOOL_POLICY_ID
+            policy_id = _default_tool_policy_id_for_agent(normalized_agent_id, str(agent.get("primaryMode") or ""))
+            agent["toolPolicyId"] = policy_id
             policies = _tool_policies(state)
             if previous_policy_id != DEFAULT_TOOL_POLICY_ID and _count_policy_refs(state.get("agents") or [], "toolPolicyId", previous_policy_id) == 0:
                 policies.pop(previous_policy_id, None)
+            policies[policy_id] = _default_tool_policy_for_agent(policy_id, str(agent.get("primaryMode") or ""))
             state["toolPolicies"] = policies
-            updated_tool_policy = normalize_tool_policy(policies.get(DEFAULT_TOOL_POLICY_ID) or default_tool_policy(DEFAULT_TOOL_POLICY_ID), DEFAULT_TOOL_POLICY_ID)
+            updated_tool_policy = normalize_tool_policy(policies.get(policy_id) or default_tool_policy(policy_id), policy_id)
             reset_summary["resetToolPolicy"] = True
         if reset_memory_policy:
             policy_id = str(agent.get("memoryPolicyId") or "").strip() or f"memory-{normalized_agent_id}"
@@ -962,11 +1056,27 @@ def repair_agent_directory() -> dict[str, Any]:
         display_name_repaired_agents: list[dict[str, Any]] = []
         avatar_defaulted_agents: list[dict[str, Any]] = []
         territory_repaired_agents: list[dict[str, Any]] = []
+        llm_binding_migrated_agents: list[dict[str, Any]] = []
         used_agent_codes: set[str] = set()
         policies = _memory_policies(state)
         for agent in state.get("agents") or []:
             if not isinstance(agent, dict):
                 continue
+            llm_migration = _migrate_agent_llm_bindings_to_new_design(agent)
+            if llm_migration.get("changed"):
+                llm_binding_migrated_agents.append(
+                    {
+                        "agentId": str(agent.get("agentId") or "").strip(),
+                        "agentCode": _normalize_agent_code(agent.get("agentCode")),
+                        "legacyModelSourceId": str(llm_migration.get("legacyModelSourceId") or "").strip(),
+                        "legacyTemplateId": str(llm_migration.get("legacyTemplateId") or "").strip(),
+                        "dialogueModelId": str(llm_migration.get("dialogueModelId") or "").strip(),
+                        "migrated": bool(llm_migration.get("migrated")),
+                    }
+                )
+                changed = True
+            if _normalize_agent_legacy_metadata_fields(agent):
+                changed = True
             territory_changed = False
             if not str(agent.get("primaryMode") or "").strip():
                 agent["primaryMode"] = _infer_agent_primary_mode(agent)
@@ -1065,6 +1175,9 @@ def repair_agent_directory() -> dict[str, Any]:
                 territory_changed = True
             if territory_changed:
                 territory_repaired_agents.append(dict(agent))
+            if _ensure_session_agent_tool_policy(state, agent):
+                changed = True
+            _refresh_agent_onboarding_metadata(state, agent)
         state["memoryPolicies"] = policies
         if changed:
             save_state(state)
@@ -1078,6 +1191,8 @@ def repair_agent_directory() -> dict[str, Any]:
                     created=bool(knowledge_steward_result.get("created")),
                     repaired_fields=list(knowledge_steward_result.get("repairedFields") or []),
                 )
+            if llm_binding_migrated_agents:
+                _record_agent_llm_binding_migration_event(llm_binding_migrated_agents)
             for repaired_agent in territory_repaired_agents:
                 _record_agent_territory_event("agent_territory.resolved", repaired_agent, outcome="repaired")
         return state
@@ -1143,29 +1258,103 @@ def active_agent_runtime(
         _CURRENT_AGENT_RUNTIME.reset(token)
 
 
-def filter_llm_tools_for_current_agent(tools: Iterable[Any]) -> list[Any]:
-    policy = current_agent_runtime().get("toolPolicy") or {}
-    allowed = set(str(item or "").strip() for item in policy.get("allowedTools") or [] if str(item or "").strip())
-    blocked = set(str(item or "").strip() for item in policy.get("blockedTools") or [] if str(item or "").strip())
-    if not allowed and not blocked:
-        return [
-            tool
-            for tool in list(tools or [])
-            if str(getattr(tool, "name", "") or "").strip() not in EXPLICIT_TOOL_POLICY_REQUIRED_TOOLS
-        ]
-    filtered = []
+def _tool_name_list(tools: Iterable[Any]) -> list[str]:
+    names: list[str] = []
+    seen: set[str] = set()
     for tool in list(tools or []):
-        name = str(getattr(tool, "name", "") or "").strip()
-        if not name:
+        name = str(getattr(tool, "name", "") or tool or "").strip()
+        if not name or name in seen:
             continue
-        if name in EXPLICIT_TOOL_POLICY_REQUIRED_TOOLS and name not in allowed:
-            continue
-        if allowed and name not in allowed:
-            continue
-        if name in blocked:
-            continue
-        filtered.append(tool)
-    return filtered
+        seen.add(name)
+        names.append(name)
+    return names
+
+
+def compute_effective_tool_visibility(
+    tools: Iterable[Any],
+    *,
+    policy: dict[str, Any] | None = None,
+) -> EffectiveToolVisibility:
+    normalized_policy = policy if isinstance(policy, dict) else {}
+    policy_id = str(normalized_policy.get("policyId") or normalized_policy.get("id") or DEFAULT_TOOL_POLICY_ID).strip()
+    policy_id = policy_id or DEFAULT_TOOL_POLICY_ID
+    tool_names = _tool_name_list(tools)
+    tool_name_set = set(tool_names)
+    allowed = tuple(
+        name
+        for name in _tool_name_list(normalized_policy.get("allowedTools") or [])
+        if name
+    )
+    blocked = tuple(
+        name
+        for name in _tool_name_list(normalized_policy.get("blockedTools") or [])
+        if name
+    )
+    preferred = tuple(
+        name
+        for name in _tool_name_list(normalized_policy.get("preferredTools") or [])
+        if name in tool_name_set
+    )
+    blocked_set = set(blocked)
+    allowed_set = set(allowed)
+
+    if not allowed_set and not blocked_set:
+        visible = tuple(
+            name
+            for name in tool_names
+            if name not in EXPLICIT_TOOL_POLICY_REQUIRED_TOOLS
+        )
+    else:
+        visible = tuple(
+            name
+            for name in tool_names
+            if name not in blocked_set
+            and (not allowed_set or name in allowed_set)
+            and (name not in EXPLICIT_TOOL_POLICY_REQUIRED_TOOLS or name in allowed_set)
+        )
+
+    hidden_restricted = tuple(
+        name
+        for name in sorted(EXPLICIT_TOOL_POLICY_REQUIRED_TOOLS)
+        if name in tool_name_set and name not in visible
+    )
+    configured_unavailable = tuple(
+        name
+        for name in allowed
+        if name not in tool_name_set
+    )
+    return EffectiveToolVisibility(
+        policy_id=policy_id,
+        visible_tools=visible,
+        configured_unavailable_tools=configured_unavailable,
+        blocked_tools=tuple(name for name in blocked if name),
+        hidden_restricted_tools=hidden_restricted,
+        preferred_tools=preferred,
+        write_scopes=tuple(_normalize_tool_policy_scopes(normalized_policy.get("writeScopes"))),
+    )
+
+
+def effective_visible_tool_names_for_current_agent(tools: Iterable[Any] | None = None) -> list[str]:
+    runtime = current_agent_runtime()
+    if tools is None:
+        try:
+            from tools.Key_Tools import create_llm_facing_tools
+
+            tools = create_llm_facing_tools()
+        except Exception:
+            tools = []
+    visibility = compute_effective_tool_visibility(tools or [], policy=runtime.get("toolPolicy") or {})
+    return list(visibility.visible_tools)
+
+
+def filter_llm_tools_for_current_agent(tools: Iterable[Any]) -> list[Any]:
+    tool_list = list(tools or [])
+    visible_names = set(effective_visible_tool_names_for_current_agent(tool_list))
+    return [
+        tool
+        for tool in tool_list
+        if str(getattr(tool, "name", "") or "").strip() in visible_names
+    ]
 
 
 def resolve_tool_policy_for_agent(agent_id: str) -> dict[str, Any]:
@@ -1878,6 +2067,51 @@ def consume_agent_inbox_message(
     raise AgentMessageNotFoundError(f"Agent inbox message not found: {message_id}")
 
 
+def consume_all_agent_inbox_messages(
+    agent_id: str,
+    *,
+    consumed_by_session_id: str = "",
+    consumed_by_turn_id: str = "",
+) -> dict[str, Any]:
+    agent = get_agent(agent_id, include_archived=True)
+    if not agent:
+        raise AgentNotFoundError(f"Agent not found: {agent_id}")
+    path = _agent_workspace_event_path(agent, "agent_inbox_messages.jsonl")
+    messages = _read_jsonl(path)
+    now = utc_now_iso()
+    consumed_ids: list[str] = []
+    for item in messages:
+        if str(item.get("status") or "pending").strip().lower() == "consumed":
+            continue
+        item["status"] = "consumed"
+        item["consumedAt"] = now
+        item["consumedBySessionId"] = str(consumed_by_session_id or agent.get("directSessionId") or "").strip()
+        item["consumedByTurnId"] = str(consumed_by_turn_id or "").strip()
+        consumed_ids.append(str(item.get("messageId") or item.get("eventId") or "").strip())
+    if consumed_ids:
+        _write_jsonl(path, messages)
+        _record_memory_event(
+            "agent_inbox.messages_consumed",
+            {
+                "eventId": _new_event_id("agentinbox"),
+                "messageId": "",
+                "targetAgentId": str(agent.get("agentId") or "").strip(),
+                "status": "consumed",
+                "createdAt": now,
+                "metadata": {"consumedCount": len(consumed_ids)},
+            },
+            agent_id=str(agent.get("agentId") or ""),
+            lifecycle=True,
+        )
+    return {
+        "agentId": str(agent.get("agentId") or "").strip(),
+        "consumed": True,
+        "consumedCount": len(consumed_ids),
+        "consumedMessageIds": [item for item in consumed_ids if item],
+        "remainingPendingCount": count_agent_inbox_messages_for_agent(agent_id, status="pending"),
+    }
+
+
 def revoke_agent_inbox_message(
     agent_id: str,
     message_id: str,
@@ -1965,7 +2199,6 @@ def build_agent_runtime_context_block(agent_id: str, *, limit: int = 6) -> str:
         prompt_eligible_only=True,
     )
     memory_policy = resolve_memory_policy_for_agent(agent_id)
-    tool_policy = resolve_tool_policy_for_agent(agent_id)
     lines = [
         "## Agent Runtime Context",
         f"AgentId: {agent.get('agentId') or ''}",
@@ -1978,8 +2211,8 @@ def build_agent_runtime_context_block(agent_id: str, *, limit: int = 6) -> str:
         f"- ReadKnowledgeBaseIds: {', '.join(list(memory_policy.get('readKnowledgeBaseIds') or [])) or 'team-membership'}",
         f"- ProposeKnowledgeBaseIds: {', '.join(list(memory_policy.get('proposeKnowledgeBaseIds') or [])) or 'team-membership'}",
         f"- ReviewKnowledgeBaseIds: {', '.join(list(memory_policy.get('reviewKnowledgeBaseIds') or [])) or 'team-review-roles'}",
+        f"- RateKnowledgeBaseIds: {', '.join(list(memory_policy.get('rateKnowledgeBaseIds') or [])) or 'team-review-roles'}",
         "- Knowledge bodies are tool-readable only; do not treat team knowledge as prompt-injected memory.",
-        _format_tool_policy_summary(tool_policy),
     ]
     persona_lines = _format_persona_profile_context(agent.get("personaProfile"))
     if persona_lines:
@@ -2048,6 +2281,76 @@ def default_tool_policy(policy_id: str = DEFAULT_TOOL_POLICY_ID) -> dict[str, An
     }
 
 
+def default_session_agent_tool_policy(policy_id: str) -> dict[str, Any]:
+    payload = default_tool_policy(policy_id)
+    payload["allowedTools"] = list(DEFAULT_SESSION_AGENT_ALLOWED_TOOLS)
+    payload["preferredTools"] = list(DEFAULT_SESSION_AGENT_PREFERRED_TOOLS)
+    payload["readScopes"] = ["private", "shared"]
+    payload["writeScopes"] = ["private"]
+    return payload
+
+
+def _default_tool_policy_id_for_agent(agent_id: str, primary_mode: str) -> str:
+    if _is_session_agent_primary_mode(primary_mode):
+        return f"tool-{agent_id}"
+    return DEFAULT_TOOL_POLICY_ID
+
+
+def _default_tool_policy_for_agent(policy_id: str, primary_mode: str) -> dict[str, Any]:
+    if _is_session_agent_primary_mode(primary_mode):
+        return default_session_agent_tool_policy(policy_id)
+    return default_tool_policy(policy_id)
+
+
+def _is_session_agent_primary_mode(primary_mode: str) -> bool:
+    return str(primary_mode or "").strip() in {"", "chat"}
+
+
+def _ensure_session_agent_tool_policy(state: dict[str, Any], agent: dict[str, Any]) -> bool:
+    if not _is_session_agent_primary_mode(str(agent.get("primaryMode") or "")):
+        return False
+    agent_id = str(agent.get("agentId") or "").strip()
+    if not agent_id:
+        return False
+    policies = _tool_policies(state)
+    current_policy_id = str(agent.get("toolPolicyId") or DEFAULT_TOOL_POLICY_ID).strip() or DEFAULT_TOOL_POLICY_ID
+    current_policy = normalize_tool_policy(policies.get(current_policy_id) or default_tool_policy(current_policy_id), current_policy_id)
+    allowed = set(_tool_name_list(current_policy.get("allowedTools") or []))
+    preferred = set(_tool_name_list(current_policy.get("preferredTools") or []))
+    needs_session_defaults = (
+        current_policy_id == DEFAULT_TOOL_POLICY_ID
+        or not allowed
+        or not set(DEFAULT_SESSION_AGENT_ALLOWED_TOOLS).issubset(allowed)
+    )
+    if not needs_session_defaults:
+        return False
+
+    policy_id = current_policy_id if current_policy_id != DEFAULT_TOOL_POLICY_ID else f"tool-{agent_id}"
+    merged_allowed = [
+        *list(current_policy.get("allowedTools") or []),
+        *list(DEFAULT_SESSION_AGENT_ALLOWED_TOOLS),
+    ]
+    merged_preferred = [
+        *list(DEFAULT_SESSION_AGENT_PREFERRED_TOOLS),
+        *list(current_policy.get("preferredTools") or []),
+    ]
+    updated = normalize_tool_policy(
+        {
+            **current_policy,
+            "policyId": policy_id,
+            "allowedTools": merged_allowed,
+            "preferredTools": merged_preferred,
+            "readScopes": current_policy.get("readScopes") or ["private", "shared"],
+            "writeScopes": current_policy.get("writeScopes") or ["private"],
+        },
+        policy_id,
+    )
+    policies[policy_id] = updated
+    state["toolPolicies"] = policies
+    agent["toolPolicyId"] = policy_id
+    return True
+
+
 def normalize_persona_profile(profile: dict[str, Any] | None) -> dict[str, Any]:
     raw = profile if isinstance(profile, dict) else {}
     normalized: dict[str, Any] = {}
@@ -2075,6 +2378,10 @@ def normalize_persona_profile(profile: dict[str, Any] | None) -> dict[str, Any]:
             break
     normalized["expertise"] = expertise_values
     return normalized
+
+
+def agent_persona_profile_has_content(profile: dict[str, Any] | None) -> bool:
+    return _persona_profile_has_content(normalize_persona_profile(profile))
 
 
 def _persona_profile_has_content(profile: dict[str, Any]) -> bool:
@@ -2144,6 +2451,10 @@ def normalize_task_profile(profile: dict[str, Any] | None) -> dict[str, Any]:
     return normalized
 
 
+def agent_task_profile_has_content(profile: dict[str, Any] | None) -> bool:
+    return _task_profile_has_content(normalize_task_profile(profile))
+
+
 def _task_profile_has_content(profile: dict[str, Any]) -> bool:
     return any(str(profile.get(field) or "").strip() for field in AGENT_TASK_PROFILE_TEXT_FIELDS) or bool(profile.get("taskTypes"))
 
@@ -2152,6 +2463,222 @@ def _task_profile_for_agent(agent: dict[str, Any]) -> dict[str, Any]:
     metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
     raw = metadata.get("taskProfile") if isinstance(metadata.get("taskProfile"), dict) else {}
     return normalize_task_profile(raw)
+
+
+def _with_agent_creation_spec(
+    metadata: dict[str, Any],
+    *,
+    created_by: str,
+    display_name: str,
+    llm_bindings: dict[str, Any],
+    primary_mode: str,
+    role_key: str,
+    prompt_template_id: str,
+    tool_policy_id: str,
+    memory_policy_id: str,
+    memory_policy: dict[str, Any] | None = None,
+    created_at: str,
+) -> dict[str, Any]:
+    payload = dict(metadata or {})
+    persona_profile = normalize_persona_profile(payload.get("personaProfile") if isinstance(payload.get("personaProfile"), dict) else {})
+    task_profile = normalize_task_profile(payload.get("taskProfile") if isinstance(payload.get("taskProfile"), dict) else {})
+    tool_policy = payload.get("toolPolicy") if isinstance(payload.get("toolPolicy"), dict) else {}
+    metadata_memory_policy = payload.get("memoryPolicy") if isinstance(payload.get("memoryPolicy"), dict) else {}
+    effective_memory_policy = memory_policy if isinstance(memory_policy, dict) else metadata_memory_policy
+    missing = _agent_creation_missing_fields(
+        display_name=display_name,
+        llm_bindings=llm_bindings,
+        primary_mode=primary_mode,
+        role_key=role_key,
+        prompt_template_id=prompt_template_id,
+        persona_profile=persona_profile,
+        task_profile=task_profile,
+        tool_policy_id=tool_policy_id,
+        tool_policy=tool_policy,
+        memory_policy_id=memory_policy_id,
+        memory_policy=effective_memory_policy,
+    )
+    payload["creationSpec"] = {
+        "schemaVersion": 1,
+        "source": str(created_by or "user").strip() or "user",
+        "requiredFields": list(AGENT_CREATION_REQUIRED_FIELDS),
+        "createdAt": created_at,
+    }
+    payload["onboardingStatus"] = "incomplete" if missing else "complete"
+    payload["onboardingMissing"] = missing
+    return payload
+
+
+def _refresh_agent_onboarding_metadata(state: dict[str, Any], agent: dict[str, Any]) -> None:
+    metadata = dict(agent.get("metadata") or {})
+    if not isinstance(metadata.get("creationSpec"), dict):
+        return
+    agent_id = str(agent.get("agentId") or "").strip()
+    tool_policy_id = str(agent.get("toolPolicyId") or DEFAULT_TOOL_POLICY_ID).strip() or DEFAULT_TOOL_POLICY_ID
+    memory_policy_id = str(agent.get("memoryPolicyId") or "").strip()
+    tool_policies = _tool_policies(state)
+    memory_policies = _memory_policies(state)
+    missing = _agent_creation_missing_fields(
+        display_name=str(agent.get("displayName") or "").strip(),
+        llm_bindings=normalize_agent_llm_bindings(agent.get("llmBindings")),
+        primary_mode=_normalize_primary_mode(agent.get("primaryMode")),
+        role_key=_normalize_role_key(agent.get("roleKey")),
+        prompt_template_id=_normalize_prompt_template_id(agent.get("promptTemplateId")),
+        persona_profile=_persona_profile_for_agent(agent),
+        task_profile=_task_profile_for_agent(agent),
+        tool_policy_id=tool_policy_id,
+        tool_policy=tool_policies.get(tool_policy_id) if isinstance(tool_policies.get(tool_policy_id), dict) else {},
+        memory_policy_id=memory_policy_id,
+        memory_policy=memory_policies.get(memory_policy_id) if isinstance(memory_policies.get(memory_policy_id), dict) else {},
+    )
+    metadata["onboardingStatus"] = "incomplete" if missing else "complete"
+    metadata["onboardingMissing"] = missing
+    if agent_id:
+        creation_spec = dict(metadata.get("creationSpec") or {})
+        creation_spec["agentId"] = agent_id
+        metadata["creationSpec"] = creation_spec
+    agent["metadata"] = metadata
+
+
+def _agent_creation_missing_fields(
+    *,
+    display_name: str,
+    llm_bindings: dict[str, Any],
+    primary_mode: str,
+    role_key: str,
+    prompt_template_id: str,
+    persona_profile: dict[str, Any],
+    task_profile: dict[str, Any],
+    tool_policy_id: str,
+    tool_policy: dict[str, Any],
+    memory_policy_id: str,
+    memory_policy: dict[str, Any],
+) -> list[str]:
+    missing: list[str] = []
+    if not str(display_name or "").strip():
+        missing.append("displayName")
+    if not agent_dialogue_model_id({"llmBindings": llm_bindings}):
+        missing.append("llmBindings")
+    if not str(primary_mode or "").strip():
+        missing.append("primaryMode")
+    is_work_session = _is_session_agent_primary_mode(primary_mode)
+    if not is_work_session and not str(role_key or "").strip():
+        missing.append("roleKey")
+    if not str(prompt_template_id or "").strip():
+        missing.append("promptTemplateId")
+    if not is_work_session and not _persona_profile_has_content(persona_profile):
+        missing.append("personaProfile")
+    if not is_work_session and not _task_profile_has_content(task_profile):
+        missing.append("taskProfile")
+    allowed_tools = list(tool_policy.get("allowedTools") or []) if isinstance(tool_policy, dict) else []
+    if str(tool_policy_id or "").strip() == DEFAULT_TOOL_POLICY_ID and not allowed_tools:
+        missing.append("toolPolicy")
+    if not str(memory_policy_id or "").strip() or not isinstance(memory_policy, dict) or not memory_policy:
+        missing.append("memoryPolicy")
+    return missing
+
+
+def _normalize_agent_record_for_storage(agent: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(agent or {})
+    normalized["llmBindings"] = normalize_agent_llm_bindings(normalized.get("llmBindings"))
+    metadata = dict(normalized.get("metadata") or {})
+    creation_spec = dict(metadata.get("creationSpec") or {})
+    required_fields = list(creation_spec.get("requiredFields") or []) if isinstance(creation_spec.get("requiredFields"), list) else []
+    if required_fields:
+        creation_spec["requiredFields"] = [
+            "llmBindings" if str(item or "").strip() == "profileId" else str(item or "").strip()
+            for item in required_fields
+            if str(item or "").strip() and str(item or "").strip() not in {"templateId", "profile_id", "template_id"}
+        ]
+        metadata["creationSpec"] = creation_spec
+    migration = dict(metadata.get("llmBindingMigration") or {})
+    legacy_profile_id = str(migration.pop("legacyProfileId", "") or "").strip()
+    if legacy_profile_id and not str(migration.get("legacyModelSourceId") or "").strip():
+        migration["legacyModelSourceId"] = legacy_profile_id
+    if migration:
+        metadata["llmBindingMigration"] = migration
+        normalized["metadata"] = metadata
+    normalized.pop("profileId", None)
+    normalized.pop("profile_id", None)
+    normalized.pop("templateId", None)
+    normalized.pop("template_id", None)
+    return normalized
+
+
+def _normalize_agent_legacy_metadata_fields(agent: dict[str, Any]) -> bool:
+    before = json.dumps(agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}, ensure_ascii=False, sort_keys=True)
+    normalized = _normalize_agent_record_for_storage(agent)
+    agent["metadata"] = normalized.get("metadata", {})
+    after = json.dumps(agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}, ensure_ascii=False, sort_keys=True)
+    return before != after
+
+
+def _profile_id_to_model_id(profile_id: str) -> str:
+    normalized = str(profile_id or "").strip()
+    candidates = [normalized] if normalized else []
+    if "primary" not in candidates:
+        candidates.append("primary")
+    try:
+        from config.settings import get_config
+
+        config = get_config()
+        for candidate in candidates:
+            try:
+                profile = config.llm.get_profile(profile_id=candidate)
+                model_id, _entry = config.llm.get_model_library_entry_for_profile(profile)
+            except Exception:
+                continue
+            if model_id:
+                return str(model_id).strip()
+        model_library = getattr(config.llm, "model_library", {}) or {}
+        if isinstance(model_library, dict):
+            for model_id, item in model_library.items():
+                if isinstance(item, dict) and str(model_id or "").strip():
+                    return str(model_id).strip()
+    except Exception:
+        return ""
+    return ""
+
+
+def _migrate_agent_llm_bindings_to_new_design(agent: dict[str, Any]) -> dict[str, Any]:
+    old_profile_id = str(agent.get("profileId") or agent.get("profile_id") or "").strip()
+    old_template_id = str(agent.get("templateId") or agent.get("template_id") or "").strip()
+    before = normalize_agent_llm_bindings(agent.get("llmBindings"))
+    after = dict(before)
+    migrated = False
+    if not str(after.get(DEFAULT_AGENT_LLM_SLOT, {}).get("modelId") or "").strip():
+        model_id = _profile_id_to_model_id(old_profile_id or old_template_id)
+        if model_id:
+            after[DEFAULT_AGENT_LLM_SLOT] = {"modelId": model_id}
+            migrated = True
+    had_legacy_fields = any(key in agent for key in ("profileId", "profile_id", "templateId", "template_id"))
+    agent["llmBindings"] = after
+    for key in ("profileId", "profile_id", "templateId", "template_id"):
+        agent.pop(key, None)
+    if migrated or before != after or had_legacy_fields:
+        metadata = dict(agent.get("metadata") or {})
+        migration = dict(metadata.get("llmBindingMigration") or {})
+        migration.update(
+            {
+                "schemaVersion": 1,
+                "source": "agent_registry_repair",
+                "migratedAt": utc_now_iso(),
+                "legacyModelSourceId": old_profile_id,
+                "legacyTemplateId": old_template_id,
+                "dialogueModelId": str(after.get(DEFAULT_AGENT_LLM_SLOT, {}).get("modelId") or "").strip(),
+            }
+        )
+        metadata["llmBindingMigration"] = migration
+        agent["metadata"] = metadata
+        agent["updatedAt"] = utc_now_iso()
+        return {
+            "changed": True,
+            "migrated": migrated,
+            "legacyModelSourceId": old_profile_id,
+            "legacyTemplateId": old_template_id,
+            "dialogueModelId": str(after.get(DEFAULT_AGENT_LLM_SLOT, {}).get("modelId") or "").strip(),
+        }
+    return {"changed": False}
 
 
 def _format_task_profile_context(profile: Any) -> list[str]:
@@ -2193,7 +2720,15 @@ def normalize_tool_policy(policy: dict[str, Any], policy_id: str = "") -> dict[s
         "allowedCommandKinds",
         "blockedCommandPatterns",
     ):
-        payload[key] = [str(item or "").strip() for item in list(payload.get(key) or []) if str(item or "").strip()]
+        normalized_values: list[str] = []
+        seen_values: set[str] = set()
+        for item in list(payload.get(key) or []):
+            value = str(item or "").strip()
+            if not value or value in seen_values:
+                continue
+            normalized_values.append(value)
+            seen_values.add(value)
+        payload[key] = normalized_values
     payload["readScopes"] = _normalize_tool_policy_scopes(payload.get("readScopes"))
     payload["writeScopes"] = _normalize_tool_policy_scopes(payload.get("writeScopes"))
     payload["perToolRules"] = dict(payload.get("perToolRules") or {})
@@ -2231,6 +2766,7 @@ def default_memory_policy(policy_id: str, agent_workspace_path: str) -> dict[str
         "readKnowledgeBaseIds": [],
         "proposeKnowledgeBaseIds": [],
         "reviewKnowledgeBaseIds": [],
+        "rateKnowledgeBaseIds": [],
     }
 
 
@@ -2258,6 +2794,7 @@ def normalize_memory_policy(policy: dict[str, Any], policy_id: str, agent_worksp
         "readKnowledgeBaseIds",
         "proposeKnowledgeBaseIds",
         "reviewKnowledgeBaseIds",
+        "rateKnowledgeBaseIds",
     ):
         payload[key] = _unique_string_list(payload.get(key))
     return payload
@@ -2327,7 +2864,13 @@ def save_state(state: dict[str, Any]) -> dict[str, Any]:
         payload.update(state if isinstance(state, dict) else {})
         payload["version"] = AGENT_REGISTRY_VERSION
         payload["updatedAt"] = utc_now_iso()
-        payload["agents"] = list(payload.get("agents") or []) if isinstance(payload.get("agents"), list) else []
+        raw_agents = list(payload.get("agents") or []) if isinstance(payload.get("agents"), list) else []
+        payload["agents"] = [
+            normalized
+            for item in raw_agents
+            if isinstance(item, dict)
+            for normalized in [_normalize_agent_record_for_storage(item)]
+        ]
         payload["toolPolicies"] = _tool_policies(payload)
         payload["memoryPolicies"] = _memory_policies(payload)
         _atomic_write_json(registry_path(), payload)
@@ -2467,6 +3010,9 @@ def _ensure_knowledge_steward_agent(state: dict[str, Any]) -> dict[str, Any]:
 
     if agent is None:
         metadata = _knowledge_steward_metadata()
+        llm_bindings = normalize_agent_llm_bindings(
+            {DEFAULT_AGENT_LLM_SLOT: {"modelId": _profile_id_to_model_id("primary")}}
+        )
         agent = {
             "agentId": KNOWLEDGE_STEWARD_AGENT_ID,
             "agentCode": _next_agent_code(agents),
@@ -2479,8 +3025,7 @@ def _ensure_knowledge_steward_agent(state: dict[str, Any]) -> dict[str, Any]:
             "kind": DEFAULT_AGENT_KIND,
             "primaryMode": "general",
             "roleKey": KNOWLEDGE_STEWARD_ROLE_KEY,
-            "templateId": "primary",
-            "profileId": "primary",
+            "llmBindings": llm_bindings,
             "promptTemplateId": "prompt-chat-default",
             "directSessionId": KNOWLEDGE_STEWARD_DIRECT_SESSION_ID,
             "workspacePath": workspace_path,
@@ -2506,8 +3051,6 @@ def _ensure_knowledge_steward_agent(state: dict[str, Any]) -> dict[str, Any]:
         "kind": DEFAULT_AGENT_KIND,
         "primaryMode": "general",
         "roleKey": KNOWLEDGE_STEWARD_ROLE_KEY,
-        "templateId": "primary",
-        "profileId": "primary",
         "promptTemplateId": "prompt-chat-default",
         "directSessionId": KNOWLEDGE_STEWARD_DIRECT_SESSION_ID,
         "workspacePath": workspace_path,
@@ -2520,6 +3063,11 @@ def _ensure_knowledge_steward_agent(state: dict[str, Any]) -> dict[str, Any]:
             agent[key] = value
             changed = True
             repaired_fields.append(key)
+
+    llm_repair = _migrate_agent_llm_bindings_to_new_design(agent)
+    if llm_repair.get("changed"):
+        changed = True
+        repaired_fields.append("llmBindings")
 
     if not _normalize_agent_code(agent.get("agentCode")):
         agent["agentCode"] = _next_agent_code(agents, exclude_agent_id=KNOWLEDGE_STEWARD_AGENT_ID)
@@ -2781,8 +3329,6 @@ def _agent_avatar_match_key(agent: dict[str, Any]) -> str:
         agent.get("primaryMode"),
         agent.get("roleKey"),
         agent.get("promptTemplateId"),
-        agent.get("profileId"),
-        agent.get("templateId"),
         metadata.get("functionalDisplayName"),
         metadata.get("researchAgentKey"),
         metadata.get("selfEvolutionRole"),
@@ -2807,8 +3353,7 @@ def _agent_to_api(agent: dict[str, Any]) -> dict[str, Any]:
         "kind": str(agent.get("kind") or DEFAULT_AGENT_KIND).strip() or DEFAULT_AGENT_KIND,
         "primaryMode": _normalize_primary_mode(agent.get("primaryMode") or _infer_agent_primary_mode(agent)),
         "roleKey": _normalize_role_key(agent.get("roleKey") or _infer_agent_role_key(agent)),
-        "templateId": str(agent.get("templateId") or agent.get("profileId") or "").strip(),
-        "profileId": str(agent.get("profileId") or agent.get("templateId") or "").strip(),
+        "llmBindings": normalize_agent_llm_bindings(agent.get("llmBindings")),
         "promptTemplateId": _normalize_prompt_template_id(
             agent.get("promptTemplateId") or _infer_agent_prompt_template_id(agent)
         ),
@@ -3469,7 +4014,6 @@ def _record_state_write_event(
     except Exception:
         return
 
-
 def _blocked_decision(tool_name: str, reason: str, policy_id: str, agent_id: str, message: str) -> ToolPolicyDecision:
     return ToolPolicyDecision(False, message=message, reason=reason, policy_id=policy_id, agent_id=agent_id)
 
@@ -3489,7 +4033,6 @@ def _record_agent_event(event_code: str, agent: dict[str, Any], *, lifecycle: bo
                 "directSessionId": str(agent.get("directSessionId") or "").strip(),
                 "primaryMode": _normalize_primary_mode(agent.get("primaryMode")),
                 "roleKey": _normalize_role_key(agent.get("roleKey")),
-                "profileId": str(agent.get("profileId") or "").strip(),
                 "promptTemplateId": _normalize_prompt_template_id(agent.get("promptTemplateId")),
                 "status": str(agent.get("status") or "").strip(),
             },
@@ -3723,9 +4266,37 @@ def _record_agent_memory_policy_event(agent: dict[str, Any], policy: dict[str, A
                 "readKnowledgeBaseCount": len(list(policy.get("readKnowledgeBaseIds") or [])),
                 "proposeKnowledgeBaseCount": len(list(policy.get("proposeKnowledgeBaseIds") or [])),
                 "reviewKnowledgeBaseCount": len(list(policy.get("reviewKnowledgeBaseIds") or [])),
+                "rateKnowledgeBaseCount": len(list(policy.get("rateKnowledgeBaseIds") or [])),
                 "hasPrivateMemoryRoot": bool(str(policy.get("privateMemoryRoot") or "").strip()),
             },
             lifecycle=True,
+        )
+    except Exception:
+        return
+
+
+def _record_agent_llm_binding_migration_event(agents: list[dict[str, Any]]) -> None:
+    try:
+        migrated_count = sum(1 for item in agents if item.get("migrated"))
+        unresolved = [
+            str(item.get("agentId") or "").strip()
+            for item in agents
+            if not str(item.get("dialogueModelId") or "").strip()
+        ][:20]
+        record_runtime_scene_event(
+            "agent_directory",
+            "agent_llm_bindings",
+            "agent.llm_bindings_migrated",
+            message="Legacy Agent profile/template fields were migrated to llmBindings.",
+            level="warning" if unresolved else "info",
+            outcome="repaired" if not unresolved else "partial",
+            fields={
+                "agentCount": len(agents),
+                "migratedCount": migrated_count,
+                "unresolvedCount": len(unresolved),
+                "unresolvedAgentIds": unresolved,
+                "sample": agents[:12],
+            },
         )
     except Exception:
         return
@@ -3984,21 +4555,3 @@ def _record_memory_event(event_code: str, payload: dict[str, Any], *, agent_id: 
         )
     except Exception:
         return
-
-
-def _format_tool_policy_summary(policy: dict[str, Any]) -> str:
-    allowed = list(policy.get("allowedTools") or [])
-    blocked = list(policy.get("blockedTools") or [])
-    preferred = list(policy.get("preferredTools") or [])
-    write_scopes = _normalize_tool_policy_scopes(policy.get("writeScopes"))
-    parts = [f"ToolPolicy: {policy.get('policyId') or DEFAULT_TOOL_POLICY_ID}"]
-    if allowed:
-        parts.append(f"allowed={', '.join(allowed[:12])}")
-    else:
-        parts.append("allowed=global_pool")
-    if preferred:
-        parts.append(f"preferred={', '.join(preferred[:8])}")
-    if blocked:
-        parts.append(f"blocked={', '.join(blocked[:8])}")
-    parts.append(f"writeScopes={', '.join(write_scopes) if write_scopes else 'private_only'}")
-    return "; ".join(parts)

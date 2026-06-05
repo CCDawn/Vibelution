@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import re
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from core.chat.chat_task_types import trim_lines
@@ -35,7 +35,7 @@ _PUBLIC_AGENT_RUN_KEYS = {
     "displayName",
     "primaryMode",
     "roleKey",
-    "profileId",
+    "dialogueModelId",
     "promptTemplateId",
     "toolPolicyId",
     "memoryPolicyId",
@@ -114,7 +114,7 @@ def persist_agent_run_snapshot(
         "displayName": str(agent.get("displayName") or "").strip(),
         "primaryMode": str(agent.get("primaryMode") or "").strip(),
         "roleKey": str(agent.get("roleKey") or "").strip(),
-        "profileId": str(agent.get("profileId") or "").strip(),
+        "dialogueModelId": _agent_dialogue_model_id(agent),
         "promptTemplateId": str(agent.get("promptTemplateId") or "").strip(),
         "toolPolicyId": str(agent.get("toolPolicyId") or "").strip(),
         "memoryPolicyId": str(agent.get("memoryPolicyId") or "").strip(),
@@ -218,6 +218,12 @@ def _run_sort_key(snapshot: dict[str, Any]) -> tuple[str, str, str, str]:
     )
 
 
+def _agent_dialogue_model_id(agent: dict[str, Any]) -> str:
+    bindings = agent.get("llmBindings") if isinstance(agent.get("llmBindings"), dict) else {}
+    dialogue = bindings.get("dialogue") if isinstance(bindings.get("dialogue"), dict) else {}
+    return str(dialogue.get("modelId") or dialogue.get("model_id") or "").strip()
+
+
 def _agent_run_id(agent_id: str, source_run_id: str) -> str:
     return _bounded_run_id("agentrun", agent_id, source_run_id or _now_compact())
 
@@ -285,4 +291,4 @@ def _safe_int(value: Any) -> int:
 
 
 def _now_compact() -> str:
-    return datetime.now(UTC).strftime("%Y%m%d%H%M%S%f")
+    return datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S%f")

@@ -76,40 +76,37 @@ describe("ConfigRoute content experience contract", () => {
     expect(configRouteSource).toContain("setModelEditorError(markError(error))");
   });
 
-  it("uses compact cards for LLM config model and key scanning", () => {
-    const profilesStart = configRouteSource.indexOf("copy.profilesBody");
-    const profileFormStart = configRouteSource.indexOf("profileFormRef", profilesStart);
-    const profilesSection = configRouteSource.slice(profilesStart, profileFormStart);
+  it("keeps model binding editing out of settings after moving it to Agent management", () => {
+    expect(configRouteSource).toContain('modelsTitle: "模型库"');
+    expect(configRouteSource).toContain("每个 Agent 的具体 LLM 槽位绑定请到 Agent 管理中维护");
+    expect(configRouteSource).toContain('modelsTitle: "Model Library"');
+    expect(configRouteSource).toContain("Edit each Agent's LLM slot bindings in Agent management");
+    expect(configRouteSource).not.toContain('modelsTitle: "模型中心"');
+    expect(configRouteSource).not.toContain('modelsTitle: "Model Center"');
+    expect(configRouteSource).not.toContain("copy.profilesBody");
+    expect(configRouteSource).not.toContain('id: "profile-bindings"');
+    expect(configRouteSource).not.toContain('memberSectionIds: ["profiles"]');
+    expect(configRouteSource).not.toContain("styles.profileCardGroups");
+    expect(configRouteSource).not.toContain("handleApplySelectedProfileModels");
+    expect(configRouteSource).not.toContain("handleAddProfile");
+    expect(configRouteSource).not.toContain("handleTestProfile(");
 
-    expect(profilesSection).toContain("styles.profileCardGroups");
-    expect(profilesSection).toContain("styles.profileCardGrid");
-    expect(profilesSection).toContain("styles.profileConfigCard");
-    expect(profilesSection).toContain("styles.profileCardActions");
-    expect(profilesSection).not.toContain("styles.profileTableWrap");
-    expect(profilesSection).not.toContain("<table");
-    expect(configRouteSource).toContain("copy.profileTableModel");
-    expect(configRouteSource).toContain("resolveProfileDisplayState");
-    expect(configRouteSource).toContain("selectedImageInputStatus");
-    expect(configRouteSource).toContain("selectedModel?.supports_image_input");
-    expect(profilesSection).not.toContain("handleTestProfileImageInput");
-    expect(profilesSection).not.toContain("styles.researchAgentPool");
-    expect(profilesSection).not.toContain("copy.openAgentManagement");
-
-    expect(cssRule(".profileCardGrid")).toContain("repeat(auto-fill, minmax(260px, 1fr))");
-    expect(cssRule(".profileConfigCard")).toContain("min-height: 214px");
-    expect(cssRule(".profileConfigCardBody")).toContain("grid-template-columns: minmax(0, 1fr)");
-    expect(configRouteCss).toContain(".profileStatusBadges");
+    const modelsStart = configRouteSource.indexOf("copy.modelsBody");
+    const modelEditorStart = configRouteSource.indexOf("modelEditor.mode", modelsStart);
+    const modelsIntroSource = configRouteSource.slice(modelsStart, modelEditorStart);
+    expect(modelsIntroSource).toContain("copy.modelCenterModels");
+    expect(modelsIntroSource).toContain("copy.modelCenterAccounts");
+    expect(modelsIntroSource).toContain("copy.modelCenterBindings");
+    expect(modelsIntroSource).toContain("copy.modelCenterCapabilityIssues");
   });
 
-  it("separates model assets, call profiles, and git model settings in the sidebar", () => {
+  it("separates model assets and git model settings in the sidebar", () => {
     expect(configRouteSource).toContain('id: "models-profiles"');
     expect(configRouteSource).toContain('memberSectionIds: ["models", "llm-discovery"]');
-    expect(configRouteSource).toContain('id: "profile-bindings"');
-    expect(configRouteSource).toContain('memberSectionIds: ["profiles"]');
-    expect(configRouteSource).toContain('memberSectionIds: ["prompt"]');
     expect(configRouteSource).toContain(
       'memberSectionIds: ["health-diagnostics", "tools", "git-commit-profile", "git-commit-prompt", "security", "network", "log", "parser", "debug"]',
     );
+    expect(configRouteSource).not.toContain('memberSectionIds: ["prompt"]');
     expect(configRouteSource).not.toContain('memberSectionIds: ["profiles", "models", "llm-profiles", "llm-discovery", "git-commit-profile"]');
   });
 
@@ -124,12 +121,97 @@ describe("ConfigRoute content experience contract", () => {
     expect(advancedPanelSource).toContain("copy.transport");
     expect(advancedPanelSource).toContain("copy.contract");
     expect(advancedPanelSource).toContain("copy.timeout");
+    expect(advancedPanelSource).toContain("MODEL_TRANSPORT_OPTIONS.map");
+    expect(advancedPanelSource).toContain("MODEL_CONTRACT_OPTIONS.map");
+    expect(advancedPanelSource).toContain("MODEL_TOOL_CALLING_MODE_OPTIONS.map");
+    expect(advancedPanelSource).toContain("PROVIDER_COMPAT_MODE_OPTIONS.map");
+    expect(advancedPanelSource).toContain("<select\n                        value={modelEditor.details.transport}");
+    expect(advancedPanelSource).toContain("<select\n                        value={modelEditor.details.contract}");
+    expect(advancedPanelSource).toContain("<select\n                        value={modelEditor.details.tool_calling_mode}");
+  });
+
+  it("treats model deletion as model-key cleanup in user-facing copy", () => {
+    expect(configRouteSource).toContain("删除模型会同步清理该模型唯一绑定的环境密钥");
+    expect(configRouteSource).toContain("Deleting a model also clears the unique environment key bound to that model");
+    expect(configRouteSource).toContain("window.confirm(copy.deleteModelConfirm)");
+    expect(configRouteSource).not.toContain("Deleting a model only removes the config entry");
+  });
+
+  it("guards model library action buttons against invalid or locked edits", () => {
+    expect(configRouteSource).toContain("const modelEditorRequiredFieldsReady = Boolean(modelEditor.model.trim() && modelEditor.provider.base_url.trim())");
+    expect(configRouteSource).toContain("const canSubmitModelEditor = !structuredActionsDisabled && modelEditorRequiredFieldsReady");
+    expect(configRouteSource).toContain("disabled={!canSubmitModelEditor}");
+    expect(configRouteSource).toContain("setModelEditorError(copy.modelRequiredFieldsMissing)");
+    expect(configRouteSource).toContain("disabled={structuredActionsDisabled || !row.editable || !option}");
+    expect(configRouteSource).toContain("disabled={structuredActionsDisabled}");
+  });
+
+  it("labels the bulk image capability check as saved-model scoped", () => {
+    expect(configRouteSource).toContain("copy.checkSavedImageCapabilities");
+    expect(configRouteSource).toContain('checkSavedImageCapabilities: "检测已保存模型图像输入"');
+    expect(configRouteSource).toContain('checkSavedImageCapabilities: "Check saved models image input"');
+  });
+
+  it("uses one model-library test control for the selected model", () => {
+    expect(configRouteSource).toContain("selectedModelTestId");
+    expect(configRouteSource).toContain("handleTestSelectedLibraryModel");
+    expect(configRouteSource).toContain("copy.modelTestSelect");
+    expect(configRouteSource).toContain("copy.testSelectedLibraryModel");
+    expect(configRouteSource).toContain("modelId: selectedModelTestId");
+    expect(configRouteSource).toContain("styles.modelLibraryTestBar");
+
+    const tableStart = configRouteSource.indexOf("styles.modelInventoryTable");
+    const tableEnd = configRouteSource.indexOf("activeEditorSections.map", tableStart);
+    const tableSource = configRouteSource.slice(tableStart, tableEnd);
+    expect(tableSource).toContain("copy.modelCenterActions");
+    expect(tableSource).not.toContain("copy.testConnection");
+    expect(tableSource).not.toContain("handleTestSelectedLibraryModel");
+  });
+
+  it("keeps model-library rows free of usage-location details", () => {
+    const tableStart = configRouteSource.indexOf("styles.modelInventoryTable");
+    const tableEnd = configRouteSource.indexOf("activeEditorSections.map", tableStart);
+    const tableSource = configRouteSource.slice(tableStart, tableEnd);
+
+    expect(tableSource).not.toContain("copy.modelCenterUsage");
+    expect(tableSource).not.toContain("copy.modelCenterUsageCount");
+    expect(tableSource).not.toContain("row.usages");
+    expect(tableSource).not.toContain("row.usageCount");
+  });
+
+  it("shows the model key environment variable as a read-only model-id binding", () => {
+    expect(configRouteSource).toContain("copy.modelKeyEnv");
+    expect(configRouteSource).toContain("模型密钥变量名由模型 ID 唯一生成");
+    expect(configRouteSource).toContain('aria-readonly="true"');
+    expect(configRouteSource).not.toContain("setModelEditor((current) => ({ ...current, api_key_env: event.target.value }))");
+  });
+
+  it("shows provider default variables as compatibility-only display instead of editable key inputs", () => {
+    expect(configRouteSource).toContain("copy.providerKeyEnv");
+    expect(configRouteSource).toContain("服务商默认变量仅作兼容来源展示");
+    expect(configRouteSource).toContain("The provider default variable is compatibility-only display");
+    expect(configRouteSource).not.toContain("provider: { ...current.provider, api_key_env: event.target.value }");
+  });
+
+  it("passes the model unique key binding to model discovery requests", () => {
+    expect(configRouteSource).toContain("const discoveryModelId =");
+    expect(configRouteSource).toContain("const discoveryApiKeyEnv =");
+    expect(configRouteSource).toContain("modelId: discoveryModelId");
+    expect(configRouteSource).toContain("apiKeyEnv: discoveryApiKeyEnv");
+    expect(configRouteSource).toContain("defaultModelApiKeyEnv(discoveryModelId)");
   });
 
   it("keeps Agent editing out of the config page", () => {
-    expect(configRouteSource).toContain('to="/agents"');
-    expect(configRouteSource).toContain("copy.openAgentManagement");
-    expect(configRouteSource).toContain("copy.agentConfigActive");
+    expect(configRouteSource).not.toContain('id="config-agent-center"');
+    expect(configRouteSource).not.toContain('to="/agents"');
+    expect(configRouteSource).not.toContain("copy.openAgentManagement");
+    expect(configRouteSource).not.toContain("copy.agentConfigActive");
+    expect(configRouteSource).not.toContain("copy.agentConfigCenterTitle");
+    expect(configRouteSource).not.toContain('memberSectionIds: ["agent"');
+    expect(configRouteSource).toContain('id: "runtime-context"');
+    expect(configRouteSource).toContain('memberSectionIds: ["context-compression", "analysis"]');
+    expect(configRouteSource).toContain("copy.groupRuntimeContextTitle");
+    expect(configRouteSource).not.toContain('memberSectionIds: ["agent", "context-compression", "memory", "strategy", "analysis", "evolution"]');
     expect(configRouteSource).not.toContain("saveResearchAgent");
     expect(configRouteSource).not.toContain("deleteResearchAgent");
     expect(configRouteSource).not.toContain("updateModeSlot");
@@ -140,14 +222,16 @@ describe("ConfigRoute content experience contract", () => {
     expect(configRouteSource).not.toContain("config-mode-bindings");
   });
 
-  it("keeps Agent prompt editing out of generic config sections", () => {
-    expect(configRouteSource).toContain("section.id !== \"prompt\"");
-    expect(configRouteSource).toContain('to="/agents/prompts"');
-    const promptSectionStart = configRouteSource.indexOf('id="config-prompt-templates"');
-    const editorSectionsStart = configRouteSource.indexOf("activeEditorSections.map", promptSectionStart);
-    const promptSectionSource = configRouteSource.slice(promptSectionStart, editorSectionsStart);
-    expect(promptSectionSource).not.toContain("ConfigSectionEditor");
-    expect(promptSectionSource).not.toContain("onSaveSection");
+  it("keeps Agent prompt management out of the config page", () => {
+    expect(configRouteSource).not.toContain('id="config-prompt-templates"');
+    expect(configRouteSource).not.toContain("PromptTemplateWorkspace");
+    expect(configRouteSource).not.toContain("queryKeys.promptTemplates");
+    expect(configRouteSource).not.toContain("copy.promptTemplateCenterTitle");
+    expect(configRouteSource).not.toContain('to="/agents/prompts"');
+    expect(configRouteSource).not.toContain('section.id !== "prompt"');
+    expect(configRouteCss).not.toContain("promptTemplateGrid");
+    expect(configRouteCss).not.toContain("agentCardGrid");
+    expect(configRouteCss).not.toContain("bindingCardGrid");
   });
 
   it("guards internal route changes when config changes have not been saved to disk", () => {

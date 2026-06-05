@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
 from urllib.parse import urlparse
 
 from pydantic import (
@@ -29,6 +29,8 @@ from pydantic import (
     computed_field,
 )
 from pydantic import ConfigDict
+
+from .llm_security import is_llm_local_network_base_url
 
 
 PROVIDER_API_KEY_ENV_MAP: Dict[str, str] = {
@@ -47,6 +49,7 @@ PROVIDER_API_KEY_ENV_MAP: Dict[str, str] = {
 }
 
 PROVIDER_API_KEY_ENV_ALIASES: Dict[str, List[str]] = {
+    "anthropic": ["ANTHROPIC_AUTH_TOKEN"],
     "minimax": ["MINIMAX2_7_API_KEY", "minimax2.7"],
     "xiaomi": ["XIAOMI_MIMO_API_KEY"],
 }
@@ -86,8 +89,32 @@ def _read_env_var(name: str) -> Optional[str]:
 
 
 def _is_local_base_url(base_url: str) -> bool:
-    parsed = urlparse(str(base_url or "").strip())
-    return parsed.hostname in {"localhost", "127.0.0.1", "::1"}
+    return is_llm_local_network_base_url(base_url)
+
+
+def _discover_llm_facing_tool_names() -> Tuple[List[str], str]:
+    """Return tool names actually registered for the project LLM surface.
+
+    ``tools.shell.enabled`` only describes configuration permission.  The model
+    can call a shell only when the runtime exposes a concrete tool such as
+    ``cli_tool``.  Keeping this lightweight probe in config diagnosis makes the
+    awareness section distinguish configured capability from the effective
+    project tool surface.
+    """
+    try:
+        from tools.Key_Tools import create_llm_facing_tools
+
+        names: List[str] = []
+        seen: set[str] = set()
+        for tool in create_llm_facing_tools():
+            name = str(getattr(tool, "name", "") or "").strip()
+            if not name or name in seen:
+                continue
+            seen.add(name)
+            names.append(name)
+        return sorted(names), ""
+    except Exception as exc:  # pragma: no cover - diagnostic fallback only
+        return [], f"{exc.__class__.__name__}: {exc}"
 
 
 def resolve_api_key(provider: str, explicit_api_key: str = "") -> Optional[str]:
@@ -153,12 +180,17 @@ class PromptCacheConfig(BaseModel):
             raise ValueError("prompt_cache.retention must be one of: in_memory, 24h")
         return value
 
+
 class ProviderConfig(BaseModel):
     """Provider 级配置。"""
     model_config = ConfigDict(extra="ignore")
 
     provider_id: str = Field(default="")
     kind: str = Field(default="openai")
+    api: str = Field(
+        default="",
+        description="Provider API contract, for example openai-completions, openai-responses, or anthropic-messages.",
+    )
     api_key: str = Field(default="")
     api_key_env: str = Field(default="")
     base_url: str = Field(default="")
@@ -171,6 +203,11 @@ class ProviderConfig(BaseModel):
     @classmethod
     def normalize_kind(cls, v: str) -> str:
         return (v or "").strip().lower()
+
+    @field_validator("api")
+    @classmethod
+    def normalize_api(cls, v: str) -> str:
+        return (v or "").strip().lower().replace("_", "-")
 
     def resolve_api_key(self) -> Optional[str]:
         env_candidates: List[str] = []
@@ -202,6 +239,14 @@ class LLMProfile(BaseModel):
     api_key_env: str = Field(default="")
     transport: str = Field(default="chat_completions")
     contract: str = Field(default="tool_chat")
+    protocol: str = Field(
+        default="",
+        description="Explicit model protocol route, for example llamacpp_qwen_thinking.",
+    )
+    compat: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Model-level compatibility hints for protocol payload shaping.",
+    )
     reasoning_state_field: str = Field(default="")
     strict_compatibility: bool = Field(default=True)
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
@@ -213,6 +258,14 @@ class LLMProfile(BaseModel):
     retry_policy: RetryPolicyConfig = Field(default_factory=RetryPolicyConfig)
     prompt_cache: PromptCacheConfig = Field(default_factory=PromptCacheConfig)
     discovery_enabled: bool = Field(default=True)
+    thinking_type: str = Field(
+        default="",
+        description="Provider-specific thinking mode, for example Anthropic adaptive thinking.",
+    )
+    thinking_display: str = Field(
+        default="",
+        description="Provider-specific thinking display mode, for example summarized or omitted.",
+    )
     supports_image_input: Optional[bool] = Field(
         default=None,
         description="Whether this profile is confirmed to accept image inputs in chat turns.",
@@ -236,10 +289,39 @@ class LLMProfile(BaseModel):
             )
         return value
 
+    @field_validator("protocol")
+    @classmethod
+    def normalize_protocol(cls, v: str) -> str:
+        return (v or "").strip().lower()
+
     @field_validator("reasoning_state_field")
     @classmethod
     def normalize_reasoning_state_field(cls, v: str) -> str:
         return (v or "").strip()
+
+    @field_validator("thinking_type")
+    @classmethod
+    def normalize_thinking_type(cls, v: str) -> str:
+        value = (v or "").strip().lower()
+        if value not in {"", "adaptive", "disabled"}:
+            raise ValueError("thinking_type must be one of: adaptive, disabled")
+        return value
+
+    @field_validator("thinking_display")
+    @classmethod
+    def normalize_thinking_display(cls, v: str) -> str:
+        value = (v or "").strip().lower()
+        if value not in {"", "summarized", "omitted"}:
+            raise ValueError("thinking_display must be one of: summarized, omitted")
+        return value
+
+    @model_validator(mode="after")
+    def validate_thinking_display(self) -> "LLMProfile":
+        if self.thinking_type == "disabled" and self.thinking_display:
+            self.thinking_display = ""
+        if self.thinking_display and not self.thinking_type:
+            raise ValueError("thinking_display requires thinking_type")
+        return self
 
 
 class LLMDiscoveryConfig(BaseModel):
@@ -404,13 +486,16 @@ class LLMConfig(BaseModel):
         profile = self.get_profile(profile_id=profile_id, role=role)
         provider = self.get_provider(profile.provider_id)
         profile_model_env = str(getattr(profile, "api_key_env", "") or "").strip()
-        if profile_model_env and _read_env_var(profile_model_env):
-            return f"profile-env:{profile_model_env}"
         _, model_entry = self.get_model_library_entry_for_profile(profile)
+        model_env = ""
         if isinstance(model_entry, dict):
             model_env = str(model_entry.get("api_key_env") or "").strip()
-            if model_env and _read_env_var(model_env):
+            if model_env and model_env == profile_model_env and _read_env_var(model_env):
                 return f"model-env:{model_env}"
+        if profile_model_env and _read_env_var(profile_model_env):
+            return f"profile-env:{profile_model_env}"
+        if model_env and _read_env_var(model_env):
+            return f"model-env:{model_env}"
 
         provider_env = provider.api_key_env or get_provider_api_key_env(provider.kind)
         if provider_env and _read_env_var(provider_env):
@@ -1802,6 +1887,8 @@ class AppConfig(BaseModel):
         profile = self.runtime.profile or "(none)"
         api_key_source = self.get_api_key_source_label()
         has_api_key = bool(self.get_api_key())
+        llm_tool_names, tool_surface_error = _discover_llm_facing_tool_names()
+        effective_shell_tool = "cli_tool" if "cli_tool" in llm_tool_names else ""
 
         if provider != "local" and not has_api_key:
             blocking_issues.append(f"{provider} provider 缺少可用 API Key")
@@ -1809,7 +1896,7 @@ class AppConfig(BaseModel):
 
         if provider == "local" and not _is_local_base_url(provider_cfg.base_url):
             blocking_issues.append("local provider 指向了非本地 API base")
-            suggested_actions.append("将 local provider 的 base_url 改为 localhost / 127.0.0.1 / ::1")
+            suggested_actions.append("将 local provider 的 base_url 改为 localhost / 127.0.0.1 / ::1 或私有局域网地址")
 
         if provider != "local" and _is_local_base_url(provider_cfg.base_url):
             warnings.append(f"{provider} provider 使用了本地 API base")
@@ -1842,6 +1929,19 @@ class AppConfig(BaseModel):
 
         if self.tools.search.max_results > 200:
             warnings.append("tools.search.max_results 较高，可能导致上下文噪声增加")
+
+        if self.tools.shell.enabled:
+            if effective_shell_tool:
+                suggested_actions.append(
+                    f"Shell 配置已启用；当前项目 LLM 工具面暴露 {effective_shell_tool} 作为实际 shell 入口"
+                )
+            elif tool_surface_error:
+                warnings.append(f"无法探测当前项目 LLM 工具面：{tool_surface_error}")
+            else:
+                warnings.append("tools.shell.enabled=true，但当前项目 LLM 工具面未暴露 cli_tool")
+                suggested_actions.append("按实际工具列表行动；不要仅凭 tools.shell.enabled 假设 shell 可调用")
+        else:
+            suggested_actions.append("Shell 配置已禁用；当前轮应优先使用结构化读写、搜索和测试工具")
 
         from core.llm import doctor_llm_profile
 
@@ -1878,6 +1978,12 @@ class AppConfig(BaseModel):
                 "prompt_sections_count": len(self.prompt.sections),
                 "default_components_count": len(self.prompt.default_components),
             },
+            "tool_surface": {
+                "config_shell_enabled": self.tools.shell.enabled,
+                "effective_shell_tool": effective_shell_tool,
+                "llm_facing_tool_count": len(llm_tool_names),
+                "probe_error": tool_surface_error,
+            },
             "warnings": warnings,
             "blocking_issues": blocking_issues,
             "suggested_actions": suggested_actions,
@@ -1889,6 +1995,7 @@ class AppConfig(BaseModel):
         identity = diagnosis["identity"]
         sources = diagnosis["sources"]
         status = diagnosis["status"]
+        tool_surface = diagnosis.get("tool_surface") or {}
 
         lines = [
             "## 配置自感知",
@@ -1906,6 +2013,12 @@ class AppConfig(BaseModel):
                 f"- 当前状态: has_api_key={status['has_api_key']} | "
                 f"prompt_sections={status['prompt_sections_count']} | "
                 f"default_components={status['default_components_count']}"
+            ),
+            (
+                "- 工具能力面: "
+                f"config_shell_enabled={tool_surface.get('config_shell_enabled')} | "
+                f"effective_shell_tool={tool_surface.get('effective_shell_tool') or 'none'} | "
+                f"llm_facing_tools={tool_surface.get('llm_facing_tool_count', 0)}"
             ),
         ]
 

@@ -13,13 +13,13 @@ def test_mode_binding_repairs_chat_and_research_agent_refs(tmp_path, monkeypatch
     _use_tmp_project_root(tmp_path, monkeypatch)
     chat_agent = agent_directory_service.create_agent_instance(
         display_name="对话 Agent",
-        profile_id="primary",
+        llm_bindings={"dialogue": {"modelId": "model-primary"}},
         primary_mode="chat",
         direct_session_id="session-chat",
     )
     research_agent = agent_directory_service.create_agent_instance(
         display_name="科研广搜 Agent",
-        profile_id="research_broad",
+        llm_bindings={"dialogue": {"modelId": "model-research-broad"}},
         primary_mode="research",
         role_key="research_broad",
         prompt_template_id="prompt-research-broad",
@@ -39,13 +39,13 @@ def test_mode_binding_payload_reuses_loaded_agent_options_without_per_reference_
     _use_tmp_project_root(tmp_path, monkeypatch)
     chat_agent = agent_directory_service.create_agent_instance(
         display_name="对话 Agent",
-        profile_id="primary",
+        llm_bindings={"dialogue": {"modelId": "model-primary"}},
         primary_mode="chat",
         direct_session_id="session-chat",
     )
     research_agent = agent_directory_service.create_agent_instance(
         display_name="科研 Agent",
-        profile_id="research_broad",
+        llm_bindings={"dialogue": {"modelId": "model-research-broad"}},
         primary_mode="research",
         role_key="research_broad",
     )
@@ -56,7 +56,7 @@ def test_mode_binding_payload_reuses_loaded_agent_options_without_per_reference_
             "displayName": chat_agent["displayName"],
             "primaryMode": chat_agent["primaryMode"],
             "roleKey": chat_agent["roleKey"],
-            "profileId": chat_agent["profileId"],
+            "llmBindings": chat_agent["llmBindings"],
             "promptTemplateId": chat_agent["promptTemplateId"],
             "directSessionId": chat_agent["directSessionId"],
             "metadata": chat_agent["metadata"],
@@ -67,7 +67,7 @@ def test_mode_binding_payload_reuses_loaded_agent_options_without_per_reference_
             "displayName": research_agent["displayName"],
             "primaryMode": research_agent["primaryMode"],
             "roleKey": research_agent["roleKey"],
-            "profileId": research_agent["profileId"],
+            "llmBindings": research_agent["llmBindings"],
             "promptTemplateId": research_agent["promptTemplateId"],
             "directSessionId": research_agent["directSessionId"],
             "metadata": research_agent["metadata"],
@@ -95,7 +95,7 @@ def test_mode_binding_repairs_supervised_slots_from_agent_instances(tmp_path, mo
     _use_tmp_project_root(tmp_path, monkeypatch)
     baseline = agent_directory_service.create_agent_instance(
         display_name="监督进化基线 Agent",
-        profile_id="supervised_baseline",
+        llm_bindings={"dialogue": {"modelId": "model-supervised-baseline"}},
         primary_mode="supervised_evolution",
         role_key="baseline",
         prompt_template_id="prompt-supervised-baseline",
@@ -112,7 +112,7 @@ def test_mode_binding_drops_archived_agent_with_repair_warning(tmp_path, monkeyp
     _use_tmp_project_root(tmp_path, monkeypatch)
     agent = agent_directory_service.create_agent_instance(
         display_name="旧 Agent",
-        profile_id="primary",
+        llm_bindings={"dialogue": {"modelId": "model-primary"}},
         primary_mode="chat",
         direct_session_id="session-old",
     )
@@ -133,7 +133,7 @@ def test_mode_binding_update_rejects_archived_agent(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     agent = agent_directory_service.create_agent_instance(
         display_name="归档 Agent",
-        profile_id="primary",
+        llm_bindings={"dialogue": {"modelId": "model-primary"}},
         primary_mode="chat",
     )
     agent_directory_service.archive_agent_instance(agent["agentId"])
@@ -150,7 +150,7 @@ def test_remove_agent_from_mode_bindings_excludes_removed_fixed_slot(tmp_path, m
     _use_tmp_project_root(tmp_path, monkeypatch)
     agent = agent_directory_service.create_agent_instance(
         display_name="监督进化裁决 Agent",
-        profile_id="primary",
+        llm_bindings={"dialogue": {"modelId": "model-primary"}},
         primary_mode="supervised_evolution",
         role_key="judge",
         prompt_template_id="prompt-supervised-judge",
@@ -174,7 +174,7 @@ def test_remove_agent_from_mode_bindings_preserves_fixed_role_tombstone_after_re
     _use_tmp_project_root(tmp_path, monkeypatch)
     agent = agent_directory_service.create_agent_instance(
         display_name="自进化执行 Agent",
-        profile_id="primary",
+        llm_bindings={"dialogue": {"modelId": "model-primary"}},
         primary_mode="self_evolution",
         role_key="executor",
         prompt_template_id="prompt-self-executor",
@@ -198,7 +198,7 @@ def test_mode_binding_repair_persists_flow_binding_normalization(tmp_path, monke
     _use_tmp_project_root(tmp_path, monkeypatch)
     active_agent = agent_directory_service.create_agent_instance(
         display_name="新科研 Agent",
-        profile_id="research_deep",
+        llm_bindings={"dialogue": {"modelId": "model-research-deep"}},
         primary_mode="research",
         role_key="research_deep",
     )
@@ -230,7 +230,7 @@ def test_agent_mode_membership_updates_chat_and_research_without_reseeding_remov
     _use_tmp_project_root(tmp_path, monkeypatch)
     agent = agent_directory_service.create_agent_instance(
         display_name="科研 Agent",
-        profile_id="research_broad",
+        llm_bindings={"dialogue": {"modelId": "model-research-broad"}},
         primary_mode="research",
         role_key="research_broad",
     )
@@ -263,13 +263,13 @@ def test_agent_mode_membership_assigns_unique_supervised_and_self_slots(tmp_path
     _use_tmp_project_root(tmp_path, monkeypatch)
     first = agent_directory_service.create_agent_instance(
         display_name="第一 Agent",
-        profile_id="primary",
+        llm_bindings={"dialogue": {"modelId": "model-primary"}},
         primary_mode="supervised_evolution",
         role_key="baseline",
     )
     second = agent_directory_service.create_agent_instance(
         display_name="第二 Agent",
-        profile_id="primary",
+        llm_bindings={"dialogue": {"modelId": "model-primary"}},
         primary_mode="supervised_evolution",
         role_key="reviewer",
     )

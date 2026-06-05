@@ -3,8 +3,8 @@ import type { LauncherControlResponse, LauncherStatus } from "./types";
 
 export const LAUNCHER_ENDPOINT = "/api/launcher";
 
-export function launcherRestartEndpoint(confirmedActiveWork = false) {
-  return confirmedActiveWork ? `${LAUNCHER_ENDPOINT}/restart?confirmedActiveWork=true` : `${LAUNCHER_ENDPOINT}/restart`;
+export function launcherRestartEndpoint() {
+  return `${LAUNCHER_ENDPOINT}/restart`;
 }
 
 export function getLauncherStatus() {
@@ -23,8 +23,8 @@ export function stopLauncherBundle() {
   });
 }
 
-export function restartLauncherBundle(confirmedActiveWork = false) {
-  return fetchJson<LauncherControlResponse>(launcherRestartEndpoint(confirmedActiveWork), {
+export function restartLauncherBundle() {
+  return fetchJson<LauncherControlResponse>(launcherRestartEndpoint(), {
     method: "POST",
   });
 }
