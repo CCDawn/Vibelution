@@ -1611,6 +1611,17 @@ def _probe_llm_runtime(provider, profile, api_key: str | None = None) -> dict:
         probe_profile.retry_policy = RetryPolicyConfig(max_attempts=1, backoff_base_seconds=0.1)
 
     class _ProbeConfig:
+        def _probe_model_library_entry(self, probe_target_profile):
+            details = _model_library_details(getattr(probe_target_profile, "model_extra", {}) or {})
+            return (
+                str(getattr(probe_target_profile, "model_ref", "") or "probe_model"),
+                {
+                    **details,
+                    "model": probe_target_profile.model,
+                    "provider_id": probe_target_profile.provider_id,
+                },
+            )
+
         llm = type(
             "_ProbeLlm",
             (),
@@ -1618,6 +1629,10 @@ def _probe_llm_runtime(provider, profile, api_key: str | None = None) -> dict:
                 "get_role_profile_id": lambda self, role="primary": profile.profile_id,
                 "get_profile": lambda self, profile_id=None, role="primary": probe_profile,
                 "get_provider": lambda self, provider_id=None, role="primary": provider,
+                "get_model_library_entry_for_profile": lambda self, probe_target_profile: _ProbeConfig._probe_model_library_entry(
+                    self,
+                    probe_target_profile,
+                ),
             },
         )()
 
