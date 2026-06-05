@@ -909,6 +909,136 @@ def submit_steward_pack_to_knowledge_ingestion(team_id: str, candidate_id: str, 
     }
 
 
+def review_steward_pack_knowledge_ingestion(team_id: str, candidate_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
+    normalized_candidate_id = _normalize_required_id(candidate_id, "Candidate id is required.")
+    team_service.get_team(normalized_team_id)
+    knowledge_base_id = _normalize_required_id(payload.get("knowledgeBaseId"), "Knowledge base id is required.")
+    reviewed_by_agent_id = _normalize_required_id(payload.get("reviewedByAgentId"), "Reviewed by Agent id is required.")
+    decision = _normalize_steward_review_decision(payload.get("decision"))
+    resolution_note = _trim_text(payload.get("resolutionNote"), max_length=2000)
+
+    with _WORKFLOW_LOCK:
+        workflow = _load_or_create_workflow(normalized_team_id)
+        candidate_store = _load_candidate_store(normalized_team_id)
+        candidate = _find_candidate(candidate_store, normalized_candidate_id)
+        if candidate is None:
+            raise TeamWorkflowOrchestrationError("Steward pack candidate not found.")
+        metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {}
+        ingestion = metadata.get("knowledgeIngestion") if isinstance(metadata.get("knowledgeIngestion"), dict) else {}
+        if str(candidate.get("currentState") or "") != "steward_pending_knowledge_review":
+            raise TeamWorkflowOrchestrationError("Only steward_pending_knowledge_review candidates can be reviewed by the ingestion approval gate.")
+        if str(ingestion.get("knowledgeBaseId") or "") != knowledge_base_id:
+            raise TeamWorkflowOrchestrationError("Knowledge base id does not match the steward pack ingestion record.")
+        proposal_id = str(ingestion.get("proposalId") or "").strip()
+        if not proposal_id:
+            raise TeamWorkflowOrchestrationError("Steward pack ingestion record is missing proposalId.")
+
+    review_status = "applied" if decision == "approved" else "rejected"
+    try:
+        review_result = team_knowledge_service.review_refinement_proposal(
+            knowledge_base_id,
+            proposal_id,
+            status=review_status,
+            reviewed_by_agent_id=reviewed_by_agent_id,
+            resolution_note=resolution_note,
+        )
+    except (team_knowledge_service.TeamKnowledgeError, team_knowledge_service.TeamKnowledgeNotFoundError) as exc:
+        raise TeamWorkflowOrchestrationError(str(exc)) from exc
+
+    now = utc_now_iso()
+    item = review_result.get("item") if isinstance(review_result.get("item"), dict) else None
+    batch = review_result.get("batch") if isinstance(review_result.get("batch"), dict) else None
+    proposal = review_result.get("proposal") if isinstance(review_result.get("proposal"), dict) else {}
+    knowledge_item_ids = [str(item.get("knowledgeItemId") or "")] if item else []
+    knowledge_item_ids = [item_id for item_id in knowledge_item_ids if item_id]
+    batch_id = str((batch or {}).get("batchId") or "")
+    next_state = "official_synced" if decision == "approved" else "steward_needs_revision"
+    quality_status = "approved" if decision == "approved" else "rejected_by_gate"
+    official_record = {
+        "status": "official_synced" if decision == "approved" else "rejected_by_gate",
+        "decision": decision,
+        "knowledgeBaseId": knowledge_base_id,
+        "proposalId": proposal_id,
+        "batchId": batch_id,
+        "knowledgeItemIds": knowledge_item_ids,
+        "ratingSuggestionId": str(ingestion.get("ratingSuggestionId") or ""),
+        "reviewedByAgentId": reviewed_by_agent_id,
+        "reviewedAt": now,
+        "resolutionNote": resolution_note,
+        "formalKnowledgeItemCreated": decision == "approved" and bool(knowledge_item_ids),
+        "writesOfficialKnowledge": decision == "approved",
+        "writesOfficialRag": False,
+        "writesOfficialGraph": False,
+        "ragStatus": "queryable_via_reviewed_team_knowledge" if decision == "approved" else "not_synced",
+        "graphStatus": "visible_via_memory_knowledge_graph" if decision == "approved" else "not_synced",
+    }
+
+    with _WORKFLOW_LOCK:
+        workflow = _load_or_create_workflow(normalized_team_id)
+        candidate_store = _load_candidate_store(normalized_team_id)
+        candidate = _find_candidate(candidate_store, normalized_candidate_id)
+        if candidate is None:
+            raise TeamWorkflowOrchestrationError("Steward pack candidate not found after approval gate review.")
+        metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {}
+        ingestion = metadata.get("knowledgeIngestion") if isinstance(metadata.get("knowledgeIngestion"), dict) else {}
+        ingestion.update(
+            {
+                "status": official_record["status"],
+                "decision": decision,
+                "proposalStatus": str(proposal.get("status") or ""),
+                "batchId": batch_id,
+                "knowledgeItemIds": knowledge_item_ids,
+                "reviewedByAgentId": reviewed_by_agent_id,
+                "reviewedAt": now,
+                "resolutionNote": resolution_note,
+                "writesOfficialKnowledge": decision == "approved",
+                "writesOfficialRag": False,
+                "writesOfficialGraph": False,
+            }
+        )
+        metadata["knowledgeIngestion"] = ingestion
+        metadata["officialSyncRecord"] = official_record
+        candidate["metadata"] = metadata
+        candidate["currentState"] = next_state
+        candidate["qualityStatus"] = quality_status
+        candidate["updatedAt"] = now
+        candidate_store["updatedAt"] = now
+        _write_json(_candidate_store_path(normalized_team_id), candidate_store)
+        workflow["updatedAt"] = now
+        workflow["activeWorkflowItems"] = _upsert_active_item(
+            workflow.get("activeWorkflowItems"),
+            candidate_id=normalized_candidate_id,
+            current_node=str(candidate.get("currentWorkflowNode") or "steward_ingestion"),
+            status=str(candidate.get("currentState") or next_state),
+            transfer_id="",
+        )
+        _write_json(_workflow_path(normalized_team_id), workflow)
+
+    _record_workflow_event(
+        "steward_pack.knowledge_ingestion_reviewed",
+        normalized_team_id,
+        fields={
+            "workflowId": workflow["workflowId"],
+            "candidateId": normalized_candidate_id,
+            "knowledgeBaseId": knowledge_base_id,
+            "proposalId": proposal_id,
+            "decision": decision,
+            "knowledgeItemCount": len(knowledge_item_ids),
+        },
+    )
+    return {
+        "candidate": candidate,
+        "knowledgeIngestion": {
+            "status": official_record["status"],
+            "decision": decision,
+            "review": review_result,
+            "officialSyncRecord": official_record,
+        },
+        "workflow": _workflow_to_api(normalized_team_id, workflow, candidate_store),
+    }
+
+
 def validate_local_research_model_output(task_type: str, output: dict[str, Any]) -> dict[str, Any]:
     normalized_task_type = _normalize_local_research_task_type(task_type)
     issues: list[dict[str, str]] = []
@@ -1508,6 +1638,22 @@ def _normalize_rating_enum(value: Any, allowed: set[str], *, default: str) -> st
     }
     normalized = aliases.get(normalized, normalized)
     return normalized if normalized in allowed else default
+
+
+def _normalize_steward_review_decision(value: Any) -> str:
+    normalized = _trim_text(value, max_length=32).lower().replace("-", "_").replace(" ", "_")
+    aliases = {
+        "apply": "approved",
+        "applied": "approved",
+        "approve": "approved",
+        "accepted": "approved",
+        "reject": "rejected",
+        "declined": "rejected",
+    }
+    normalized = aliases.get(normalized, normalized)
+    if normalized not in {"approved", "rejected"}:
+        raise TeamWorkflowOrchestrationError("Steward ingestion review decision must be approved or rejected.")
+    return normalized
 
 
 def _validate_candidate_graph_candidate(candidate: dict[str, Any]) -> list[dict[str, str]]:

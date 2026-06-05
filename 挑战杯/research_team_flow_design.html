@@ -234,7 +234,7 @@
 <div class="state-row">
                   <b>steward_pending_knowledge_review</b>
                   <strong>待审入库对象</strong>
-                  <span>已创建 SourceArtifact、pending RefinementProposal，可选 pending ratingSuggestion；仍未写正式知识。</span>
+                  <span>已创建 SourceArtifact、pending RefinementProposal，可选 pending ratingSuggestion；等待审批门禁。</span>
                 </div>
 <div class="state-row">
                   <b>candidate_graph_visible</b>
@@ -392,7 +392,7 @@
                 </div>
 <div class="service-row">
                   <b>memory_ingestion_bridge</b>
-                  <span>已复用 Team Knowledge create_ingestion_package，把 steward_pack_draft 映射为 SourceArtifact + pending RefinementProposal；可选创建 pending ratingSuggestion。</span>
+                  <span>已复用 Team Knowledge create_ingestion_package 与 review_refinement_proposal；steward_pack_draft 可进入 pending proposal，审批通过后创建正式 KnowledgeItem。</span>
                 </div>
           </div>
         </div>
@@ -722,6 +722,11 @@
               <span>有效 steward_pack_draft 可提交到指定 knowledgeBaseId，创建 SourceArtifact、pending RefinementProposal 和可选 pending ratingSuggestion；候选进入 steward_pending_knowledge_review。</span>
             </div>
 <div class="blueprint-row compact">
+              <b>steward_pack 审批门禁</b>
+              <strong>/api/teams/{teamId}/workflow-orchestration/steward-packs/{candidateId}/knowledge-ingestion/review</strong>
+              <span>只审批 steward_pending_knowledge_review；approved 创建正式 KnowledgeItem 并进入 official_synced，rejected 退回 steward_needs_revision。</span>
+            </div>
+<div class="blueprint-row compact">
               <b>candidate_graph 预览</b>
               <strong>CandidateStore candidate_graph snapshot</strong>
               <span>POST candidate-graph 会从当前候选重建 candidate_only 图谱，输出 nodes/edges/missingLinks/unreviewedNodes/officialBoundary；断链时 qualityStatus=broken_links。</span>
@@ -772,8 +777,8 @@
 <div class="blueprint-row">
               <b>M5</b>
               <strong>知识治理与正式同步</strong>
-              <span>steward_pack_draft 后端草稿包门禁与待审入库桥已落地：有效草稿可提交为 SourceArtifact + pending RefinementProposal，可选 pending ratingSuggestion。</span>
-              <span>当前只写 Team Knowledge 待审对象；未通过授权审批门禁不能创建正式 KnowledgeItem/RAG/正式图谱。</span>
+              <span>steward_pack_draft 门禁、待审入库桥和 Ingestion Approval Gate 已落地：有效草稿可提交为待审对象，批准后创建正式 KnowledgeItem，拒绝后退回修订。</span>
+              <span>正式 RAG/Graph 通过已审核 KnowledgeItem 的现有读取面可检索/可见；本轮不另写挑战杯专用图谱边或向量索引。</span>
             </div>
       </div>
       <div class="tag-row">
@@ -841,8 +846,8 @@
 <div class="agent-row">
         <b>07</b>
         <strong>Knowledge Steward Agent / agent-knowledge-steward</strong>
-        <span>后端草稿包门禁与 Team Knowledge 待审入库桥已接入；正式审批/应用仍待接</span>
-        <span>sourceTrace 校验 / proposalPayload / ratingSuggestion / approvalRequired=true / SourceArtifact / pending RefinementProposal / official write 禁止项</span>
+        <span>后端草稿包门禁、Team Knowledge 待审入库桥和审批门禁已接入</span>
+        <span>sourceTrace 校验 / proposalPayload / ratingSuggestion / approvalRequired=true / SourceArtifact / pending RefinementProposal / officialSyncRecord / official write 禁止项</span>
         <span>必须经 Knowledge Steward Agent / Ingestion Approval Gate 确认，不能由科研执行 Agent 或本地模型直接入库。</span>
       </div>
 <div class="agent-row">
@@ -855,8 +860,8 @@
 <div class="agent-row">
         <b>09</b>
         <strong>Ingestion Approval Gate + Knowledge Platform</strong>
-        <span>授权审批门禁为硬门；平台负责正式 Team Knowledge/RAG/Graph 同步</span>
-        <span>正式审核确认 / 正式 KnowledgeItem 创建/同步 / RAG 索引更新 / official_sync_record / 正式图谱边生成</span>
+        <span>授权审批门禁已接入 Team Knowledge review/apply；平台负责正式 KnowledgeItem 的读取、RAG 检索和 Memory Graph 展示</span>
+        <span>正式审核确认 / 正式 KnowledgeItem 创建/同步 / RAG 可检索 / official_sync_record / Memory Graph 可见</span>
         <span>必须通过授权审批门禁批准 ingestion pack。</span>
       </div>
       </div>
@@ -1029,7 +1034,7 @@
             </article>
 <article class="gate-card">
               <h3>入库门</h3>
-              <p><b>通过：</b>授权审批门禁确认正式摄取</p>
+              <p><b>通过：</b>授权审批门禁确认正式摄取；approved 创建正式 KnowledgeItem，rejected 回到 steward_needs_revision</p>
               <p><b>进入：</b>official_synced</p>
               <p><b>失败：</b>停在候选图谱，不进正式图谱</p>
             </article>
@@ -1270,6 +1275,11 @@
               <strong>/api/teams/{team_id}/workflow-orchestration/steward-packs/{candidate_id}/knowledge-ingestion</strong>
               <span>把有效 steward_pack_draft 提交为 SourceArtifact + pending RefinementProposal，可选 pending ratingSuggestion；不创建 KnowledgeItem/RAG/正式图谱。</span>
             </div>
+<div class="blueprint-row compact">
+              <b>POST</b>
+              <strong>/api/teams/{team_id}/workflow-orchestration/steward-packs/{candidate_id}/knowledge-ingestion/review</strong>
+              <span>审批 pending steward pack；approved 复用 Team Knowledge review/apply 创建正式 KnowledgeItem 并写 officialSyncRecord，rejected 退回 steward_needs_revision。</span>
+            </div>
       </div>
     </section>
 
@@ -1360,8 +1370,8 @@
 <a class="node-card" href="research_flow_pages/07-steward-ingestion.html">
                 <span class="num">07</span>
                 <h3>知识治理入库</h3>
-                <p>steward_pack_draft 可提交到 Team Knowledge 待审队列，正式入库仍由审批门禁控制。</p>
-                <div class="tag-row"><span class="tag done">M5 待审入库桥已落地</span><span class="tag">Knowledge Steward Agent · agent-knowledge-steward</span></div>
+                <p>steward_pack_draft 可提交到 Team Knowledge 待审队列，并由审批门禁批准或退回。</p>
+                <div class="tag-row"><span class="tag done">M5 审批门禁已落地</span><span class="tag">Knowledge Steward Agent · agent-knowledge-steward</span></div>
               </a>
 <a class="node-card" href="research_flow_pages/08-candidate-graph.html">
                 <span class="num">08</span>

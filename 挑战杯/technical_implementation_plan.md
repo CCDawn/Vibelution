@@ -284,6 +284,7 @@ source_registered
 | POST | `/api/teams/{team_id}/workflow-orchestration/local-research-model/outputs` | 校验并记录本地研究模型 JSON 草稿 |
 | POST | `/api/teams/{team_id}/workflow-orchestration/local-research-model/invoke` | 构建任务包、调用 `bossAGI-standard / qwen3.5-9b`、解析 JSON 并写入 CandidateStore；解析失败不入库 |
 | POST | `/api/teams/{team_id}/workflow-orchestration/steward-packs/{candidate_id}/knowledge-ingestion` | 把有效 `steward_pack_draft` 提交到指定 `knowledgeBaseId`，创建 `SourceArtifact`、pending `RefinementProposal` 和可选 pending `ratingSuggestion`；不创建正式 `KnowledgeItem`、RAG 或正式图谱 |
+| POST | `/api/teams/{team_id}/workflow-orchestration/steward-packs/{candidate_id}/knowledge-ingestion/review` | 只审批 `steward_pending_knowledge_review`；`approved` 复用 Team Knowledge `review/apply` 创建正式 `KnowledgeItem` 并写 `officialSyncRecord`，`rejected` 退回 `steward_needs_revision` |
 
 已落盘结构：
 
@@ -318,6 +319,8 @@ workspace/teams/<teamId>/
 - 合格 `steward_pack_draft` 本地模型输出进入 `steward_pack_draft`，仍只写 CandidateStore；缺治理字段、`approvalRequired` 非 true，或包含 `officialSync`、`applyNow=true`、`writeOfficialGraph=true` 等正式写入意图时进入 `steward_needs_revision`。
 - 有效 `steward_pack_draft` 可通过待审入库 API 映射为 Team Knowledge 的 `SourceArtifact`、pending `RefinementProposal`，并可选创建 pending `ratingSuggestion`；候选状态更新为 `steward_pending_knowledge_review`，metadata 记录 `knowledgeBaseId`、`sourceArtifactId`、`proposalId`、`ratingSuggestionId` 和 officialBoundary=false。
 - 该步骤仍不创建正式 `KnowledgeItem`，不写正式 RAG，不写正式图谱。
+- `steward_pending_knowledge_review` 可通过审批门禁 API 审批；`approved` 调用 Team Knowledge `review_refinement_proposal(status=applied)` 创建正式 `KnowledgeItem`，候选进入 `official_synced`；`rejected` 调用 `status=rejected`，候选进入 `steward_needs_revision`。
+- 审批结果写入 `metadata.officialSyncRecord`，记录 `knowledgeBaseId`、`proposalId`、`batchId`、`knowledgeItemIds`、`reviewedByAgentId`、`ragStatus`、`graphStatus` 和正式写入边界。
 
 已验证：
 
@@ -622,7 +625,7 @@ Agent 创建策略：
 - candidate_validator：已落地 source_manifest/PDF 字段校验、paper_note citation anchor 校验、neuro_mechanism 证据/术语风险校验、mechanism_mapping 类比风险校验、algorithm_hypothesis experimentPlan 校验、review_prefilter 最终 decision 禁止、steward_pack_draft 审批门禁、candidate_graph officialBoundary/断链状态校验和 CandidateStore 校验报告。
 - candidate_graph_builder：已落地后端/API，生成 CandidateStore 内的 candidate_graph 候选快照、断链报告、未审节点清单和 candidate_only officialBoundary；前端图谱读取仍待接。
 - research_agent_binding：复用 research_service、research flow canvas、prompt-research-* 和 research 组织治理工具。
-- memory_ingestion_bridge：已复用现有 Team Knowledge `create_ingestion_package`，把 `steward_pack_draft` 映射到 `SourceArtifact` + pending `RefinementProposal`，并可选创建 pending `ratingSuggestion`；正式 `review/apply` 仍由 Ingestion Approval Gate 控制。
+- memory_ingestion_bridge：已复用现有 Team Knowledge `create_ingestion_package` 与 `review_refinement_proposal`，把 `steward_pack_draft` 映射到 pending proposal，并由 Ingestion Approval Gate 审批为正式 `KnowledgeItem` 或退回修订。
 
 已落地 API：
 
@@ -637,6 +640,7 @@ Agent 创建策略：
 - POST `/api/teams/{team_id}/workflow-orchestration/local-research-model/outputs`
 - POST `/api/teams/{team_id}/workflow-orchestration/local-research-model/invoke`
 - POST `/api/teams/{team_id}/workflow-orchestration/steward-packs/{candidate_id}/knowledge-ingestion`
+- POST `/api/teams/{team_id}/workflow-orchestration/steward-packs/{candidate_id}/knowledge-ingestion/review`
 
 暂缓新增挑战杯专用 API。未来若进入 Web 工作台，再考虑：
 
@@ -732,8 +736,8 @@ Agent 创建策略：
 - 草稿包门禁已强制 `approvalRequired=true`，并禁止 `officialSync`、`applyNow=true`、`writeOfficialGraph=true`。
 - 待审入库桥已复用 Team Knowledge：有效 `steward_pack_draft` 可提交为 `SourceArtifact` + pending `RefinementProposal`，并可选生成 pending `ratingSuggestion`。
 - 提交后候选进入 `steward_pending_knowledge_review`，并记录 `metadata.knowledgeIngestion`。
-- official_sync_record 仍待接。
-- Ingestion Approval Gate 仍待接。
+- Ingestion Approval Gate 已接入：`approved` 复用 Team Knowledge review/apply 创建正式 `KnowledgeItem`，`rejected` 退回 `steward_needs_revision`。
+- `official_sync_record` 已以 `metadata.officialSyncRecord` 形式记录正式同步证据；RAG/图谱通过正式 KnowledgeItem 的现有读取面可检索/可见，本轮不另写挑战杯专用向量索引或正式图谱边文件。
 
 验收：
 
@@ -742,7 +746,10 @@ Agent 创建策略：
 - 已覆盖：包含 `officialSync`、`applyNow=true` 或 `writeOfficialGraph=true` 等立即正式写入意图时进入 `steward_needs_revision`。
 - 已覆盖：Knowledge Steward Agent 可将草稿包映射为 Team Knowledge 待审 SourceArtifact / pending RefinementProposal / pending ratingSuggestion。
 - 已覆盖：未通过授权审批门禁不能创建正式 KnowledgeItem、RAG 或正式图谱。
-- 待覆盖：official_synced 记录可追溯到 source_manifest、paper_note、review_record 和 steward_pack_draft。
+- 已覆盖：Ingestion Approval Gate 批准后创建正式 `KnowledgeItem`，候选进入 `official_synced`，并记录 `officialSyncRecord`。
+- 已覆盖：Ingestion Approval Gate 拒绝后不创建正式 `KnowledgeItem`，候选进入 `steward_needs_revision`。
+- 待覆盖：pending `ratingSuggestion` 自动迁移到正式 `KnowledgeItem` rating review。
+- 待覆盖：正式 supports/maps_to/inspires 图谱边的细粒度生成规则。
 
 ## 11. 测试计划
 

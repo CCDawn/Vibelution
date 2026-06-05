@@ -932,6 +932,200 @@ def test_steward_pack_submits_pending_knowledge_ingestion_without_official_write
     assert knowledge_items["summary"]["itemCount"] == 0
 
 
+def test_steward_pack_approval_gate_applies_pending_ingestion_to_formal_knowledge(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    steward = agent_directory_service.create_agent_instance(display_name="Knowledge Steward Agent")
+    team = team_service.create_team(
+        name="挑战杯科研团队",
+        members=[{"agentId": steward["agentId"], "role": "steward"}],
+    )
+    knowledge_base = team_knowledge_service.create_knowledge_base(
+        team["teamId"],
+        name="Challenge Cup Governed Knowledge",
+        actor_agent_id=steward["agentId"],
+    )
+    candidate = team_workflow_orchestration_service.record_local_research_model_output(
+        team["teamId"],
+        {
+            "taskType": "steward_pack_draft",
+            "title": "Steward ingestion pack draft",
+            "createdByAgent": steward["agentId"],
+            "output": {
+                "candidateType": "review_record",
+                "sourceRefs": [{"type": "paper", "id": "paper-1", "label": "Paper 1"}],
+                "evidenceRefs": [{"type": "review", "id": "review-1", "label": "Review 1"}],
+                "claims": [{"claim": "Candidate is ready for knowledge governance.", "sourceRef": "paper-1"}],
+                "candidateIds": ["hypothesis-1", "review-1"],
+                "targetDomain": "challenge_cup_neuro_algorithm",
+                "sourceTrace": {"sourceIds": ["paper-1"], "reviewRecordIds": ["review-1"], "candidateGraphId": "graph-1"},
+                "riskSummary": "Evidence is traceable, but experiment remains a smoke test.",
+                "proposalPayload": {"title": "Govern context-gated routing hypothesis", "summary": "Add the hypothesis as governed knowledge."},
+                "ratingSuggestion": {"importanceLevel": "high", "confidence": 0.66, "stability": "evolving", "reviewPriority": "elevated"},
+                "approvalRequired": True,
+                "uncertainty": ["experiment not yet validated"],
+                "riskFlags": ["approval_required"],
+                "confidence": 0.61,
+                "nextAction": "send_to_ingestion_approval_gate",
+                "requiresReview": True,
+            },
+        },
+    )["candidate"]
+    pending = team_workflow_orchestration_service.submit_steward_pack_to_knowledge_ingestion(
+        team["teamId"],
+        candidate["candidateId"],
+        {"knowledgeBaseId": knowledge_base["knowledgeBaseId"], "proposedByAgentId": steward["agentId"]},
+    )["candidate"]
+
+    response = team_workflow_orchestration_service.review_steward_pack_knowledge_ingestion(
+        team["teamId"],
+        pending["candidateId"],
+        {
+            "knowledgeBaseId": knowledge_base["knowledgeBaseId"],
+            "reviewedByAgentId": steward["agentId"],
+            "decision": "approved",
+            "resolutionNote": "Evidence accepted for official knowledge.",
+        },
+    )
+    knowledge_items = team_knowledge_service.list_knowledge_items(
+        knowledge_base["knowledgeBaseId"],
+        agent_id=steward["agentId"],
+    )
+
+    official_record = response["candidate"]["metadata"]["officialSyncRecord"]
+    assert response["candidate"]["currentState"] == "official_synced"
+    assert response["candidate"]["qualityStatus"] == "approved"
+    assert response["knowledgeIngestion"]["review"]["proposal"]["status"] == "applied"
+    assert response["knowledgeIngestion"]["review"]["item"]["knowledgeItemId"] in official_record["knowledgeItemIds"]
+    assert official_record["formalKnowledgeItemCreated"] is True
+    assert official_record["writesOfficialKnowledge"] is True
+    assert official_record["writesOfficialRag"] is False
+    assert official_record["writesOfficialGraph"] is False
+    assert official_record["ragStatus"] == "queryable_via_reviewed_team_knowledge"
+    assert official_record["graphStatus"] == "visible_via_memory_knowledge_graph"
+    assert knowledge_items["summary"]["itemCount"] == 1
+
+
+def test_steward_pack_approval_gate_rejects_pending_ingestion_without_formal_write(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    steward = agent_directory_service.create_agent_instance(display_name="Knowledge Steward Agent")
+    team = team_service.create_team(
+        name="挑战杯科研团队",
+        members=[{"agentId": steward["agentId"], "role": "steward"}],
+    )
+    knowledge_base = team_knowledge_service.create_knowledge_base(
+        team["teamId"],
+        name="Challenge Cup Governed Knowledge",
+        actor_agent_id=steward["agentId"],
+    )
+    candidate = team_workflow_orchestration_service.record_local_research_model_output(
+        team["teamId"],
+        {
+            "taskType": "steward_pack_draft",
+            "output": {
+                "candidateType": "review_record",
+                "sourceRefs": [{"type": "paper", "id": "paper-1", "label": "Paper 1"}],
+                "evidenceRefs": [{"type": "review", "id": "review-1", "label": "Review 1"}],
+                "claims": [{"claim": "Candidate needs governance.", "sourceRef": "paper-1"}],
+                "candidateIds": ["hypothesis-1"],
+                "targetDomain": "challenge_cup_neuro_algorithm",
+                "sourceTrace": {"sourceIds": ["paper-1"], "reviewRecordIds": ["review-1"]},
+                "riskSummary": "Evidence is not enough for official sync.",
+                "proposalPayload": {"title": "Rejectable research candidate", "summary": "Needs stronger evidence."},
+                "ratingSuggestion": {"importanceLevel": "medium", "confidence": 0.45, "stability": "evolving", "reviewPriority": "elevated"},
+                "approvalRequired": True,
+                "uncertainty": ["weak experiment evidence"],
+                "riskFlags": ["approval_required", "weak_evidence"],
+                "confidence": 0.45,
+                "nextAction": "send_to_ingestion_approval_gate",
+                "requiresReview": True,
+            },
+        },
+    )["candidate"]
+    pending = team_workflow_orchestration_service.submit_steward_pack_to_knowledge_ingestion(
+        team["teamId"],
+        candidate["candidateId"],
+        {"knowledgeBaseId": knowledge_base["knowledgeBaseId"], "proposedByAgentId": steward["agentId"]},
+    )["candidate"]
+
+    response = team_workflow_orchestration_service.review_steward_pack_knowledge_ingestion(
+        team["teamId"],
+        pending["candidateId"],
+        {
+            "knowledgeBaseId": knowledge_base["knowledgeBaseId"],
+            "reviewedByAgentId": steward["agentId"],
+            "decision": "rejected",
+            "resolutionNote": "Evidence is too weak.",
+        },
+    )
+    knowledge_items = team_knowledge_service.list_knowledge_items(
+        knowledge_base["knowledgeBaseId"],
+        agent_id=steward["agentId"],
+    )
+
+    official_record = response["candidate"]["metadata"]["officialSyncRecord"]
+    assert response["candidate"]["currentState"] == "steward_needs_revision"
+    assert response["candidate"]["qualityStatus"] == "rejected_by_gate"
+    assert response["knowledgeIngestion"]["review"]["proposal"]["status"] == "rejected"
+    assert official_record["formalKnowledgeItemCreated"] is False
+    assert official_record["writesOfficialKnowledge"] is False
+    assert official_record["ragStatus"] == "not_synced"
+    assert official_record["graphStatus"] == "not_synced"
+    assert knowledge_items["summary"]["itemCount"] == 0
+
+
+def test_steward_pack_approval_gate_rejects_unsubmitted_candidate(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    steward = agent_directory_service.create_agent_instance(display_name="Knowledge Steward Agent")
+    team = team_service.create_team(
+        name="挑战杯科研团队",
+        members=[{"agentId": steward["agentId"], "role": "steward"}],
+    )
+    knowledge_base = team_knowledge_service.create_knowledge_base(
+        team["teamId"],
+        name="Challenge Cup Governed Knowledge",
+        actor_agent_id=steward["agentId"],
+    )
+    candidate = team_workflow_orchestration_service.record_local_research_model_output(
+        team["teamId"],
+        {
+            "taskType": "steward_pack_draft",
+            "output": {
+                "candidateType": "review_record",
+                "sourceRefs": [{"type": "paper", "id": "paper-1", "label": "Paper 1"}],
+                "evidenceRefs": [{"type": "review", "id": "review-1", "label": "Review 1"}],
+                "claims": [{"claim": "Candidate is ready for governance.", "sourceRef": "paper-1"}],
+                "candidateIds": ["hypothesis-1"],
+                "targetDomain": "challenge_cup_neuro_algorithm",
+                "sourceTrace": {"sourceIds": ["paper-1"], "reviewRecordIds": ["review-1"]},
+                "riskSummary": "Evidence is traceable.",
+                "proposalPayload": {"title": "Unsubmitted candidate", "summary": "Not in pending queue."},
+                "ratingSuggestion": {"importanceLevel": "medium", "confidence": 0.6, "stability": "evolving", "reviewPriority": "elevated"},
+                "approvalRequired": True,
+                "uncertainty": [],
+                "riskFlags": ["approval_required"],
+                "confidence": 0.6,
+                "nextAction": "send_to_ingestion_approval_gate",
+                "requiresReview": True,
+            },
+        },
+    )["candidate"]
+
+    try:
+        team_workflow_orchestration_service.review_steward_pack_knowledge_ingestion(
+            team["teamId"],
+            candidate["candidateId"],
+            {
+                "knowledgeBaseId": knowledge_base["knowledgeBaseId"],
+                "reviewedByAgentId": steward["agentId"],
+                "decision": "approved",
+            },
+        )
+    except team_workflow_orchestration_service.TeamWorkflowOrchestrationError as exc:
+        assert "Only steward_pending_knowledge_review candidates" in str(exc)
+    else:
+        raise AssertionError("unsubmitted steward pack should not pass approval gate")
+
+
 def test_steward_pack_submission_rejects_non_steward_pack_candidate(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     steward = agent_directory_service.create_agent_instance(display_name="Knowledge Steward Agent")

@@ -84,23 +84,23 @@
       <div class="status-grid">
         <div class="status-item"><b>状态</b><span>official_synced</span></div>
         <div class="status-item"><b>功能岗位</b><span>Ingestion Approval Gate + Knowledge Platform</span></div>
-        <div class="status-item"><b>Agent 状态</b><span>授权审批门禁为硬门；平台负责正式 Team Knowledge/RAG/Graph 同步</span></div>
-        <div class="status-item"><b>进入条件</b><span>授权审批门禁已批准 ingestion pack。</span></div>
-        <div class="status-item"><b>退出条件</b><span>officialKnowledgeItemId、ragStatus、graphStatus 和 approvedBy 均已记录。</span></div>
+        <div class="status-item"><b>Agent 状态</b><span>授权审批门禁已接入 Team Knowledge review/apply；平台负责正式 KnowledgeItem 的读取、RAG 检索和 Memory Graph 展示</span></div>
+        <div class="status-item"><b>进入条件</b><span>授权审批门禁已批准 pending RefinementProposal。</span></div>
+        <div class="status-item"><b>退出条件</b><span>knowledgeItemIds、ragStatus、graphStatus、reviewedByAgentId 和 officialSyncRecord 均已记录。</span></div>
         <div class="status-item"><b>审核门禁</b><span>必须通过授权审批门禁批准 ingestion pack。</span></div>
       </div>
       <div class="plan-grid">
-        <article class="plan-card"><h2>本步操作</h2><p class="hint">同步 Team Knowledge、正式 RAG 和正式知识图谱，并保留候选来源链。</p></article>
+        <article class="plan-card"><h2>本步操作</h2><p class="hint">复用 Team Knowledge review/apply 创建 KnowledgeItem；RAG 通过 reviewed Team Knowledge 检索，Memory Graph 通过正式 KnowledgeItem 视图展示。</p></article>
 
         <article class="plan-card"><h2>所需功能</h2><ul><li>正式审核确认</li>
 <li>正式 KnowledgeItem 创建/同步</li>
-<li>RAG 索引更新</li>
+<li>RAG 可检索</li>
 <li>official_sync_record</li>
-<li>正式图谱边生成</li></ul></article>
+<li>Memory Graph 可见</li></ul></article>
         <article class="plan-card"><h2>工具/平台能力</h2><ul><li>knowledge_query_tool</li>
 <li>knowledge_rag_retrieve_tool</li>
 <li>Team Knowledge 审核/应用流程（平台能力）</li></ul></article>
-        <article class="plan-card"><h2>功能缺口</h2><p class="hint">需要正式图谱同步触发规则，以及 approved_to_ingest 到 official_synced 的证据记录。</p></article>
+        <article class="plan-card"><h2>功能缺口</h2><p class="hint">需要更细的正式 supports/maps_to/inspires 图谱边生成规则，以及 ratingSuggestion 自动迁移到 KnowledgeItem 评级。</p></article>
         <article class="plan-card"><h2>失败回退</h2><p class="hint">未批准时停留在 candidate_graph_visible，不进入正式知识库。</p></article>
       </div>
     </section>
