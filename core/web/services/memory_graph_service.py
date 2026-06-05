@@ -17,6 +17,8 @@ DEFAULT_LIMIT = 800
 MAX_LIMIT = 5000
 BODY_KEYS = {"content", "excerpt", "raw", "prompt", "messages", "transcript"}
 DETAIL_ITEM_LIMIT = 24
+NODE_DETAIL_ITEM_LIMIT = 40
+NODE_DETAIL_CONTENT_LIMIT = 12000
 
 
 def get_memory_knowledge_graph(
@@ -220,6 +222,57 @@ def get_memory_knowledge_graph(
         elapsed_ms=(time.perf_counter() - started_at) * 1000.0,
     )
     _record_graph_event(payload, normalized_agent_id)
+    return payload
+
+
+def get_memory_knowledge_graph_node_detail(node_id: str, *, agent_id: str = "", limit: int = NODE_DETAIL_ITEM_LIMIT) -> dict[str, Any] | None:
+    """Return full formal-knowledge content for one graph node, honoring the same ACL boundary as Team Knowledge."""
+
+    started_at = time.perf_counter()
+    _sync_roots()
+    normalized_node_id = str(node_id or "").strip()
+    normalized_agent_id = str(agent_id or "").strip()
+    bounded_limit = max(1, min(int(limit or NODE_DETAIL_ITEM_LIMIT), NODE_DETAIL_ITEM_LIMIT))
+    resolved = _resolve_node_detail(normalized_node_id, normalized_agent_id, limit=bounded_limit)
+    if resolved is None:
+        _record_node_detail_event(
+            normalized_node_id,
+            normalized_agent_id,
+            item_count=0,
+            found=False,
+            elapsed_ms=(time.perf_counter() - started_at) * 1000.0,
+        )
+        return None
+    content_items = resolved.get("contentItems") if isinstance(resolved.get("contentItems"), list) else []
+    payload = {
+        "schemaVersion": SCHEMA_VERSION,
+        "mode": "read_only_project_memory_graph_node_detail",
+        "nodeId": normalized_node_id,
+        "agentId": normalized_agent_id,
+        "nodeType": str(resolved.get("nodeType") or ""),
+        "label": str(resolved.get("label") or ""),
+        "summary": str(resolved.get("summary") or ""),
+        "contentItems": content_items,
+        "summaryCounts": {
+            "contentItemCount": len(content_items),
+            "truncatedContentItemCount": sum(1 for item in content_items if bool(item.get("contentTruncated"))),
+        },
+        "operatingBoundary": {
+            "readOnly": True,
+            "honorsKnowledgeAcl": True,
+            "fullContentIncluded": True,
+            "canEditGraph": False,
+            "canApplyKnowledge": False,
+        },
+        "elapsedMs": round((time.perf_counter() - started_at) * 1000.0, 2),
+    }
+    _record_node_detail_event(
+        normalized_node_id,
+        normalized_agent_id,
+        item_count=len(content_items),
+        found=True,
+        elapsed_ms=float(payload["elapsedMs"]),
+    )
     return payload
 
 
@@ -506,6 +559,200 @@ def _record_graph_event(payload: dict[str, Any], agent_id: str) -> None:
         )
     except Exception:
         pass
+
+
+def _record_node_detail_event(node_id: str, agent_id: str, *, item_count: int, found: bool, elapsed_ms: float) -> None:
+    try:
+        record_runtime_scene_event(
+            "memory_graph_service",
+            "memory_graph",
+            "memory.knowledge_graph.node_detail.viewed",
+            message="Memory knowledge graph node detail viewed.",
+            outcome="observed" if found else "not_found",
+            fields={
+                "agentId": agent_id,
+                "nodeId": node_id,
+                "contentItemCount": int(item_count),
+                "elapsedMs": round(float(elapsed_ms), 2),
+                "fullContentIncluded": True,
+            },
+        )
+    except Exception:
+        pass
+
+
+def _resolve_node_detail(node_id: str, actor_agent_id: str, *, limit: int) -> dict[str, Any] | None:
+    node_type, raw_value = _parse_node_id(node_id)
+    if not node_type or not raw_value:
+        return {"nodeType": node_type, "label": node_id, "summary": "", "contentItems": []}
+    if node_type == "team":
+        team = _get_team_or_none(raw_value)
+        if not team:
+            return None
+        owner = team_knowledge_service._owner_context("team", raw_value, team=team)
+        return {
+            "nodeType": "team",
+            "label": str(team.get("name") or raw_value),
+            "summary": str(team.get("purpose") or team.get("description") or ""),
+            "contentItems": _owner_full_knowledge_detail(owner, actor_agent_id, limit=limit),
+        }
+    if node_type == "agent":
+        agent = agent_directory_service.get_agent(raw_value, include_archived=True)
+        if not agent:
+            return None
+        metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+        owner = team_knowledge_service._owner_context("agent", raw_value, agent=agent)
+        return {
+            "nodeType": "agent",
+            "label": str(agent.get("displayName") or agent.get("agentCode") or raw_value),
+            "summary": str(metadata.get("functionalDisplayName") or agent.get("primaryMode") or ""),
+            "contentItems": _owner_full_knowledge_detail(owner, actor_agent_id, limit=limit),
+        }
+    if node_type == "knowledge_base":
+        found = _find_accessible_knowledge_base(raw_value, actor_agent_id)
+        if found is None:
+            return None
+        owner, base = found
+        return {
+            "nodeType": "knowledge_base",
+            "label": str(base.get("name") or raw_value),
+            "summary": str(base.get("description") or ""),
+            "contentItems": _base_full_knowledge_detail(owner, base, limit=limit),
+        }
+    if node_type == "knowledge_item":
+        found_item = _find_accessible_knowledge_item(raw_value, actor_agent_id)
+        if found_item is None:
+            return None
+        owner, base, item = found_item
+        return {
+            "nodeType": "knowledge_item",
+            "label": str(item.get("title") or raw_value),
+            "summary": str(item.get("summary") or ""),
+            "contentItems": [_full_knowledge_item_detail(item, base=base, owner=owner)],
+        }
+    return {"nodeType": node_type, "label": node_id, "summary": "", "contentItems": []}
+
+
+def _owner_full_knowledge_detail(owner: dict[str, Any], actor_agent_id: str, *, limit: int) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    all_items: list[dict[str, Any]] | None = None
+    for base in team_knowledge_service._knowledge_bases_for_owner(owner):
+        if not team_knowledge_service._can_access(owner, base, actor_agent_id, "read"):
+            continue
+        if all_items is None:
+            all_items = team_knowledge_service._read_jsonl(team_knowledge_service._items_path_for_owner(owner))
+        items.extend(_items_for_base_full_detail(owner, base, all_items))
+    items.sort(key=lambda item: str(item.get("updatedAt") or item.get("createdAt") or ""), reverse=True)
+    return items[:limit]
+
+
+def _base_full_knowledge_detail(owner: dict[str, Any], base: dict[str, Any], *, limit: int) -> list[dict[str, Any]]:
+    all_items = team_knowledge_service._read_jsonl(team_knowledge_service._items_path_for_owner(owner))
+    items = _items_for_base_full_detail(owner, base, all_items)
+    items.sort(key=lambda item: str(item.get("updatedAt") or item.get("createdAt") or ""), reverse=True)
+    return items[:limit]
+
+
+def _items_for_base_full_detail(
+    owner: dict[str, Any],
+    base: dict[str, Any],
+    all_items: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    base_id = str(base.get("knowledgeBaseId") or "").strip()
+    items: list[dict[str, Any]] = []
+    for item in all_items:
+        if str(item.get("knowledgeBaseId") or "") != base_id:
+            continue
+        items.append(_full_knowledge_item_detail(item, base=base, owner=owner))
+    return items
+
+
+def _find_accessible_knowledge_base(knowledge_base_id: str, actor_agent_id: str) -> tuple[dict[str, Any], dict[str, Any]] | None:
+    normalized_base_id = str(knowledge_base_id or "").strip()
+    if not normalized_base_id:
+        return None
+    for owner in _iter_known_knowledge_owners():
+        for base in team_knowledge_service._knowledge_bases_for_owner(owner):
+            if str(base.get("knowledgeBaseId") or "").strip() != normalized_base_id:
+                continue
+            if not team_knowledge_service._can_access(owner, base, actor_agent_id, "read"):
+                return None
+            return owner, base
+    return None
+
+
+def _find_accessible_knowledge_item(knowledge_item_id: str, actor_agent_id: str) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]] | None:
+    normalized_item_id = str(knowledge_item_id or "").strip()
+    if not normalized_item_id:
+        return None
+    for owner in _iter_known_knowledge_owners():
+        for item in team_knowledge_service._read_jsonl(team_knowledge_service._items_path_for_owner(owner)):
+            if str(item.get("knowledgeItemId") or "").strip() != normalized_item_id:
+                continue
+            base = team_knowledge_service._find_knowledge_base_for_owner(owner, str(item.get("knowledgeBaseId") or ""))
+            if not base:
+                return None
+            if not team_knowledge_service._can_access(owner, base, actor_agent_id, "read"):
+                return None
+            return owner, base, item
+    return None
+
+
+def _iter_known_knowledge_owners() -> list[dict[str, Any]]:
+    owners: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for team in team_service.list_team_graph_references(include_archived=True).get("teams") or []:
+        if not isinstance(team, dict):
+            continue
+        team_id = str(team.get("teamId") or "").strip()
+        key = ("team", team_id)
+        if team_id and key not in seen:
+            seen.add(key)
+            owners.append(team_knowledge_service._owner_context("team", team_id, team=team))
+    for agent in agent_directory_service.list_agents(include_archived=True):
+        agent_id = str(agent.get("agentId") or "").strip()
+        key = ("agent", agent_id)
+        if agent_id and key not in seen:
+            seen.add(key)
+            owners.append(team_knowledge_service._owner_context("agent", agent_id, agent=agent))
+    return owners
+
+
+def _full_knowledge_item_detail(item: dict[str, Any], *, base: dict[str, Any], owner: dict[str, Any]) -> dict[str, Any]:
+    content = str(item.get("content") or "")
+    trimmed_content = _trim(content, NODE_DETAIL_CONTENT_LIMIT)
+    return {
+        **_knowledge_item_detail(item, base=base),
+        "ownerType": str(owner.get("ownerType") or item.get("ownerType") or base.get("ownerType") or ""),
+        "ownerId": str(owner.get("ownerId") or item.get("ownerId") or base.get("ownerId") or ""),
+        "teamId": str(item.get("teamId") or (owner.get("ownerId") if owner.get("ownerType") == "team" else "")),
+        "agentId": str(item.get("agentId") or (owner.get("ownerId") if owner.get("ownerType") == "agent" else "")),
+        "knowledgeItemId": str(item.get("knowledgeItemId") or ""),
+        "content": trimmed_content,
+        "contentTruncated": len(content) > len(trimmed_content),
+        "sourceArtifactIds": _string_list(item.get("sourceArtifactIds"), limit=24),
+        "batchId": str(item.get("batchId") or ""),
+        "confidence": item.get("confidence"),
+        "stability": str(item.get("stability") or ""),
+        "scope": str(item.get("scope") or ""),
+        "reviewPriority": str(item.get("reviewPriority") or ""),
+        "fullContentIncluded": True,
+    }
+
+
+def _parse_node_id(node_id: str) -> tuple[str, str]:
+    normalized = str(node_id or "").strip()
+    if ":" not in normalized:
+        return "", normalized
+    node_type, raw_value = normalized.split(":", 1)
+    return node_type.strip(), raw_value.strip()
+
+
+def _get_team_or_none(team_id: str) -> dict[str, Any] | None:
+    try:
+        return team_service.get_team(team_id)
+    except Exception:
+        return None
 
 
 def _owner_knowledge_detail(owner: dict[str, Any], actor_agent_id: str, *, cache: dict[str, list[dict[str, Any]]] | None = None) -> list[dict[str, Any]]:

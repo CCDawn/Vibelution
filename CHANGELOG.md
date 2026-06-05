@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.32 - 2026-06-06
+
+- Added lazy-loaded Memory Graph node details through `/api/memory/knowledge-graph/node-detail`, returning full formal knowledge bodies only for the selected node and within Team Knowledge ACL boundaries.
+- Updated the Memory graph detail panel to fetch and render selected node knowledge content with loading and truncation states while keeping the main graph payload body-free.
+- Added runtime-scene diagnostics for node-detail views without logging knowledge content.
+
 ## 0.10.31 - 2026-06-06
 
 - Changed Launcher and runtime stop/restart requests to reject active project work with `409 active_work_*_blocked` instead of queuing or silently stopping chat, group, evolution, or worktree runs.
