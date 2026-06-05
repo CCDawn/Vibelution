@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.27 - 2026-06-05
+
+- Added official Challenge Cup research graph trace syncing on steward-pack approval, storing `officialResearchGraph` on the formal KnowledgeItem and `officialSyncRecord`.
+- Translated steward-pack `sourceTrace` and `candidateIds` into formal `supports`, `maps_to`, `inspires`, and `approved_for_ingestion` edges without promoting candidate graph drafts directly.
+- Updated the Challenge Cup flow HTML and technical plan to mark M5 formal graph trace metadata as landed, leaving only Memory Graph canvas expansion for a later slice.
+
 ## 0.10.26 - 2026-06-05
 
 - Migrated approved Challenge Cup steward-pack proposal rating suggestions into formal KnowledgeItem pending rating reviews without auto-applying the score.
