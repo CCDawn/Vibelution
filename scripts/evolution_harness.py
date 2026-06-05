@@ -204,6 +204,10 @@ class HarnessResult:
     preserved_evidence_path: str = ""
     preserved_evidence_files: List[str] = field(default_factory=list)
     agent_binding: Dict[str, Any] = field(default_factory=dict)
+    primary_returncode: Optional[int] = None
+    launcher_returncode: Optional[int] = None
+    agent_child_returncode: Optional[int] = None
+    effective_returncode: Optional[int] = None
 
 
 def stdout_tail_looks_like_idle_chat_ui(lines: List[str]) -> bool:
@@ -1905,6 +1909,51 @@ def summarize_process_history(
     }
 
 
+def summarize_agent_returncodes(
+    process_history: Iterable[ProcessRecord],
+    *,
+    primary_pid: Optional[int] = None,
+) -> Dict[str, Optional[int]]:
+    """保留 Windows python 启动器和真实 agent 子进程的退出码，供失败归因兜底。"""
+
+    primary_returncode: Optional[int] = None
+    launcher_returncode: Optional[int] = None
+    agent_child_returncode: Optional[int] = None
+    last_nonzero_returncode: Optional[int] = None
+    last_returncode: Optional[int] = None
+
+    for record in process_history:
+        family_key = _process_family_key(record)
+        returncode = record.returncode
+        if returncode is None:
+            continue
+        last_returncode = returncode
+        if returncode != 0:
+            last_nonzero_returncode = returncode
+        if primary_pid is not None and record.pid == primary_pid:
+            primary_returncode = returncode
+            launcher_returncode = returncode
+        elif family_key == "agent:agent_single_turn":
+            agent_child_returncode = returncode
+
+    effective_returncode = primary_returncode
+    if effective_returncode is None:
+        effective_returncode = agent_child_returncode
+    if effective_returncode is None:
+        effective_returncode = launcher_returncode
+    if effective_returncode is None:
+        effective_returncode = last_nonzero_returncode
+    if effective_returncode is None:
+        effective_returncode = last_returncode
+
+    return {
+        "primary_returncode": primary_returncode,
+        "launcher_returncode": launcher_returncode,
+        "agent_child_returncode": agent_child_returncode,
+        "effective_returncode": effective_returncode,
+    }
+
+
 def _process_family_key(record: ProcessRecord) -> str:
     raw_preview = record.cmdline_preview.replace("\\", "/").lower()
     if "core.restarter_manager.restarter" in raw_preview or "restarter.py" in raw_preview:
@@ -2136,6 +2185,30 @@ def preserve_harness_evidence(result: HarnessResult, report_path: Path) -> None:
                 target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(source, target)
                 copied.append((Path(label) / rel).as_posix())
+    summary_path = evidence_dir / "harness_postmortem.json"
+    summary_path.parent.mkdir(parents=True, exist_ok=True)
+    summary_payload = {
+        "harness_id": result.harness_id,
+        "status": result.status,
+        "reason": result.reason,
+        "returncode": result.returncode,
+        "primary_returncode": result.primary_returncode,
+        "launcher_returncode": result.launcher_returncode,
+        "agent_child_returncode": result.agent_child_returncode,
+        "effective_returncode": result.effective_returncode,
+        "command": result.command,
+        "process_summary": result.process_summary,
+        "process_history": result.process_history,
+        "new_conversation_files": result.new_conversation_files,
+        "new_debug_files": result.new_debug_files,
+        "last_observation": result.last_observation,
+        "post_restart_observation": result.post_restart_observation,
+        "evolution_summary": result.evolution_summary,
+        "stdout_tail": result.stdout_tail,
+        "stderr_tail": result.stderr_tail,
+    }
+    summary_path.write_text(json.dumps(summary_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    copied.append("harness_postmortem.json")
     if copied:
         result.preserved_evidence_path = str(evidence_dir)
         result.preserved_evidence_files = sorted(dict.fromkeys(copied))
@@ -2449,11 +2522,15 @@ def run_harness(
     elif step_limit_exceeded:
         status, reason = "failed", f"超过最大工具步数限制: {observed_tool_steps}/{max_steps}"
     else:
+        returncode_summary = summarize_agent_returncodes(
+            process_history.values(),
+            primary_pid=process.pid,
+        )
         status, reason = infer_result_status(
             timed_out=timed_out,
             restart_expected=expect_restart,
             restart_reentered=restart_reentered,
-            primary_returncode=primary_returncode,
+            primary_returncode=returncode_summary["effective_returncode"],
             last_observation=last_observation,
             scenario=scenario,
             evolution_summary=evolution_summary,
@@ -2462,6 +2539,10 @@ def run_harness(
     process_summary = summarize_process_history(
         process_history.values(),
         reentered_agent_pids=reentered_agent_pids,
+    )
+    returncode_summary = summarize_agent_returncodes(
+        process_history.values(),
+        primary_pid=process.pid,
     )
 
     result = HarnessResult(
@@ -2478,7 +2559,7 @@ def run_harness(
         tracked_dirty=snapshot.tracked_dirty,
         untracked_files=snapshot.untracked_files,
         command=command,
-        returncode=primary_returncode,
+        returncode=returncode_summary["effective_returncode"],
         agent_binding=normalized_agent_binding,
         timeout_seconds=timeout_seconds,
         restarts_observed=restarts_observed,
@@ -2495,6 +2576,10 @@ def run_harness(
         last_observation=last_observation,
         post_restart_observation=post_restart_observation,
         evolution_summary=evolution_summary,
+        primary_returncode=returncode_summary["primary_returncode"],
+        launcher_returncode=returncode_summary["launcher_returncode"],
+        agent_child_returncode=returncode_summary["agent_child_returncode"],
+        effective_returncode=returncode_summary["effective_returncode"],
     )
 
     report_path = write_report(result)

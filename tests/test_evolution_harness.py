@@ -50,6 +50,7 @@ from scripts.evolution_harness import (
     _safe_modify_probe_summary,
     _validation_passed_for_tool,
     ProcessRecord,
+    summarize_agent_returncodes,
     summarize_process_history,
     summarize_agent_state_file,
     summarize_latest_matching_file,
@@ -666,6 +667,81 @@ def test_infer_result_status_classifies_idle_chat_ui_single_turn_entry_failure()
     )
 
     assert stdout_tail_looks_like_idle_chat_ui(stdout_tail) is True
+    assert status == "failed"
+    assert "单轮入口失败" in reason
+    assert "未开账" not in reason
+
+
+def test_returncode_summary_recovers_windows_launcher_failure():
+    records = [
+        ProcessRecord(
+            pid=100,
+            role="agent",
+            first_seen="2026-06-06T01:45:52",
+            last_seen="2026-06-06T01:46:08",
+            returncode=1,
+            cmdline_preview=r"C:\repo\.venv\Scripts\python.exe agent.py --no-shell --single-turn --prompt probe",
+        ),
+        ProcessRecord(
+            pid=200,
+            role="agent",
+            first_seen="2026-06-06T01:46:07",
+            last_seen="2026-06-06T01:46:08",
+            returncode=None,
+            cmdline_preview=r"C:\Python312\python.exe agent.py --no-shell --single-turn --prompt probe",
+        ),
+    ]
+
+    summary = summarize_agent_returncodes(records, primary_pid=100)
+
+    assert summary["primary_returncode"] == 1
+    assert summary["launcher_returncode"] == 1
+    assert summary["agent_child_returncode"] is None
+    assert summary["effective_returncode"] == 1
+
+
+def test_effective_returncode_classifies_idle_chat_ui_when_primary_returncode_was_missing():
+    stdout_tail = [
+        "│  Vibelution Chat           │最近对话                              0 条消息  │",
+        "│  模式  Chat Session        │                                                │",
+        "│  任务  等待新的任务        │                                                │",
+        "│ 还没有最近对话 │",
+    ]
+    records = [
+        ProcessRecord(
+            pid=100,
+            role="agent",
+            first_seen="2026-06-06T01:45:52",
+            last_seen="2026-06-06T01:46:08",
+            returncode=1,
+            cmdline_preview=r"C:\repo\.venv\Scripts\python.exe agent.py --no-shell --single-turn --prompt probe",
+        ),
+        ProcessRecord(
+            pid=200,
+            role="agent",
+            first_seen="2026-06-06T01:46:07",
+            last_seen="2026-06-06T01:46:08",
+            returncode=None,
+            cmdline_preview=r"C:\Python312\python.exe agent.py --no-shell --single-turn --prompt probe",
+        ),
+    ]
+    returncodes = summarize_agent_returncodes(records, primary_pid=100)
+
+    status, reason = infer_result_status(
+        timed_out=False,
+        restart_expected=False,
+        restart_reentered=False,
+        primary_returncode=returncodes["effective_returncode"],
+        last_observation={"phase": "unknown"},
+        scenario="transaction",
+        evolution_summary={
+            "transaction": {"opened": False, "closed": False, "status": None},
+            "validation": {"passed": 0, "failed": 0},
+            "child": {"first_event_phase": "unknown"},
+        },
+        stdout_tail=stdout_tail,
+    )
+
     assert status == "failed"
     assert "单轮入口失败" in reason
     assert "未开账" not in reason
