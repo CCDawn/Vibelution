@@ -467,8 +467,7 @@ def make_language_awareness_section() -> SystemPromptSection:
     return SystemPromptSection(
         name="LANGUAGE_AWARENESS",
         compute=compute,
-        cache_break=True,
-        cache_prefix=True,
+        cache_break=False,
         priority=37,
         description="当前默认语言、保留原文边界与英文漂移自纠偏",
     )
@@ -492,8 +491,7 @@ def make_session_child_routing_section() -> SystemPromptSection:
     return SystemPromptSection(
         name="SESSION_CHILD_ROUTING",
         compute=compute,
-        cache_break=True,
-        cache_prefix=True,
+        cache_break=False,
         priority=37,
         description="多事项识别、子对话创建、上下文交接与一层子对话边界",
     )

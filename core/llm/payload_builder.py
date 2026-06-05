@@ -3,10 +3,12 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import re
+from contextvars import ContextVar
 from dataclasses import dataclass, field
-from typing import Any, Dict, List
+from typing import Any, Dict, Iterator, List
 
 from config import AppConfig, LLMProfile, ProviderConfig
 
@@ -62,6 +64,31 @@ class BuiltPayload:
 
 _PROMPT_CACHE_KEY_SAFE_RE = re.compile(r"[^a-zA-Z0-9_.:-]+")
 
+# 由上层（chat handler、agent loop、supervised run 等）在拥有 session/conversation
+# 上下文时设置，让 prompt_cache_key 在不同会话之间天然分片，避免共享 shard 互相
+# 挤压稳定前缀。未设置时退回到 agent+profile+model 维度，与历史行为兼容。
+_prompt_cache_partition: ContextVar[str] = ContextVar("vibelution_prompt_cache_partition", default="")
+
+
+def set_prompt_cache_partition(value: str):
+    """直接设置当前上下文的 prompt cache 分片标识，返回 Token 供 reset。"""
+    return _prompt_cache_partition.set(str(value or "").strip())
+
+
+def reset_prompt_cache_partition(token) -> None:
+    """重置 prompt cache 分片标识到 set_prompt_cache_partition 返回的快照。"""
+    _prompt_cache_partition.reset(token)
+
+
+@contextlib.contextmanager
+def prompt_cache_partition_scope(value: str) -> Iterator[None]:
+    """ContextManager 包装；适合 `with prompt_cache_partition_scope(conversation_id):` 模式。"""
+    token = set_prompt_cache_partition(value)
+    try:
+        yield
+    finally:
+        reset_prompt_cache_partition(token)
+
 
 def _default_prompt_cache_key(build_input: PayloadBuildInput) -> str:
     provider_kind = str(getattr(build_input.provider, "kind", "") or "provider").strip().lower()
@@ -69,9 +96,17 @@ def _default_prompt_cache_key(build_input: PayloadBuildInput) -> str:
     model = str(getattr(build_input.profile, "model", "") or "model").strip().lower()
     route_protocol = str(getattr(getattr(build_input.route, "protocol", None), "value", "") or "").strip().lower()
     route_transport = str(getattr(getattr(build_input.route, "policy", None), "transport", "") or "").strip().lower()
-    raw = "|".join([provider_kind, profile_id, model, route_protocol, route_transport])
+    agent_name = str(getattr(getattr(build_input.config, "agent", None), "name", "") or "").strip().lower()
+    partition = str(_prompt_cache_partition.get() or "").strip().lower()
+    raw = "|".join([provider_kind, profile_id, model, route_protocol, route_transport, agent_name, partition])
     digest = hashlib.sha256(raw.encode("utf-8", errors="ignore")).hexdigest()[:12]
-    label = _PROMPT_CACHE_KEY_SAFE_RE.sub("-", f"vibelution:{provider_kind}:{profile_id}:{digest}").strip("-")
+    suffix_parts = [provider_kind, profile_id]
+    if agent_name:
+        suffix_parts.append(agent_name)
+    if partition:
+        suffix_parts.append(partition)
+    suffix_parts.append(digest)
+    label = _PROMPT_CACHE_KEY_SAFE_RE.sub("-", "vibelution:" + ":".join(suffix_parts)).strip("-")
     return label[:80] or f"vibelution:{digest}"
 
 
