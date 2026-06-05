@@ -325,6 +325,79 @@ class TestToolMessageFlow:
         assert agent._last_llm_failure_attempts == 5
         assert agent._last_llm_failure_max_attempts == 5
 
+    def test_invoke_llm_retries_capability_error_without_tools(self, monkeypatch):
+        calls = []
+
+        class DummyContext:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        class DummyUI:
+            def thinking(self, _label):
+                return DummyContext()
+
+            def add_log(self, *_args, **_kwargs):
+                return None
+
+        class DummyLLM:
+            def __init__(self, *, with_tools: bool):
+                self.with_tools = with_tools
+                self.profile_id = "primary"
+
+            def invoke(self, _msgs):
+                calls.append(self.with_tools)
+                if self.with_tools:
+                    raise LLMError("capability_error", "profile `primary` 不支持 tool calling", retryable=False)
+                return SimpleNamespace(content="ok", tool_calls=[])
+
+        monkeypatch.setattr(agent_module, "get_ui", lambda: DummyUI())
+        monkeypatch.setattr(agent_module, "logger", SimpleNamespace(log_error=lambda *_args, **_kwargs: None))
+        monkeypatch.setattr(
+            agent_module,
+            "plan_llm_recovery",
+            lambda *args, **kwargs: SimpleNamespace(
+                category="capability_error",
+                retryable=False,
+                action="disable_tools",
+                user_message="当前模型不支持 tool calling",
+                wait_seconds=0,
+                stop_current_turn=False,
+                disable_streaming=False,
+                disable_tools=True,
+                request_context_compression=False,
+                fallback_profile_id=None,
+            ),
+        )
+
+        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent.llm_with_tools = DummyLLM(with_tools=True)
+        agent._base_llm = DummyLLM(with_tools=False)
+        agent._bound_llm_cache = {}
+        agent.key_tools = []
+        agent.key_tool_maps = set()
+        agent._key_tool_map = {}
+        agent._active_goal = ""
+        agent._turn_interrupt_checker = None
+        agent._force_disable_tools_for_turn = False
+        agent.config = SimpleNamespace(
+            llm=SimpleNamespace(
+                model_name="mimo-v2.5",
+                provider="xiaomi",
+                api_base="https://example.invalid",
+                api_timeout=30,
+            ),
+        )
+        agent._should_stream_llm = lambda *_args, **_kwargs: False
+
+        result = agent._invoke_llm([AIMessage(content="hello")])
+
+        assert result.content == "ok"
+        assert calls == [True, False]
+        assert agent._last_llm_error_category == "capability_error"
+
     def test_publish_llm_retry_status_uses_outer_reconnect_attempts(self, monkeypatch):
         published = []
 
@@ -2763,6 +2836,87 @@ class TestLocalProviderBootstrap:
         assert mental_model.set_shared_llm.call_args.args[0].model == "mental-model"
         assert agent.token_compressor.compression_llm.model == "summary-model"
         assert "dialogue-model" in created_models
+
+    def test_runtime_agent_dialogue_binding_is_default_chat_source_of_truth(self, monkeypatch):
+        monkeypatch.setenv("VIBELUTION_AGENT_ID", "agent-dialogue-default")
+        monkeypatch.delenv("VIBELUTION_AGENT_LLM_SLOT", raising=False)
+        monkeypatch.setattr(agent_module.Key_Tools, "create_llm_facing_tools", lambda: [SimpleNamespace(name="read_file_tool")])
+        monkeypatch.setattr(SelfEvolvingAgent, "_init_model_discovery", lambda self: 16000)
+        monkeypatch.setattr(SelfEvolvingAgent, "_init_token_compressor", lambda self: None)
+        monkeypatch.setattr(agent_module, "get_prompt_manager", lambda: MagicMock())
+        monkeypatch.setattr(agent_module, "get_state_manager", lambda: MagicMock())
+        monkeypatch.setattr(agent_module, "get_event_bus", lambda: MagicMock())
+        monkeypatch.setattr(agent_module, "get_tool_executor", lambda: MagicMock())
+        monkeypatch.setattr(agent_module, "get_security_validator", lambda *_args, **_kwargs: MagicMock())
+        monkeypatch.setattr(agent_module, "get_git_memory_service", lambda: MagicMock())
+        monkeypatch.setattr(agent_module, "get_mental_model", lambda **_kwargs: MagicMock())
+
+        config = Settings(
+            None,
+            **{
+                "llm.providers.default.kind": "local",
+                "llm.providers.default.api_key": "",
+                "llm.providers.default.api_key_env": "",
+                "llm.providers.default.base_url": "http://localhost:11434/v1",
+                "llm.providers.default.compat_mode": "openai",
+                "llm.providers.default.requires_api_key": False,
+                "llm.profiles.primary.provider_id": "default",
+                "llm.profiles.primary.model": "global-primary-model",
+                "llm.profiles.primary.tool_calling_mode": "disabled",
+            },
+        ).config
+        config.llm.model_library = {
+            "agent-dialogue-model-id": {
+                "provider_id": "default",
+                "model": "agent-dialogue-model",
+                "tool_calling_mode": "auto",
+            },
+        }
+        agent_record = {
+            "agentId": "agent-dialogue-default",
+            "llmBindings": {"dialogue": {"modelId": "agent-dialogue-model-id"}},
+        }
+        directory_module = __import__(
+            "core.web.services.agent_directory_service",
+            fromlist=["agent_directory_service"],
+        )
+        monkeypatch.setattr(directory_module, "get_agent", lambda _agent_id, include_archived=False: agent_record)
+        monkeypatch.setattr(directory_module, "filter_llm_tools_for_current_agent", lambda tools: list(tools or []))
+
+        class DummyClient:
+            def __init__(self, config=None, role=None, profile_id=None):
+                selected_profile_id = profile_id or config.llm.get_role_profile_id(role or "primary")
+                profile = config.llm.get_profile(profile_id=selected_profile_id)
+                self.model = profile.model
+                self.profile_id = selected_profile_id
+                self.bound_tool_count = 0
+
+            def bind_tools(self, tools):
+                rebound = DummyClient.__new__(DummyClient)
+                rebound.model = self.model
+                rebound.profile_id = self.profile_id
+                rebound.bound_tool_count = len(list(tools or []))
+                return rebound
+
+        monkeypatch.setattr(
+            agent_module,
+            "get_llm_client",
+            lambda role=None, profile_id=None, config=None: DummyClient(
+                config=config,
+                role=role,
+                profile_id=profile_id,
+            ),
+        )
+
+        agent = SelfEvolvingAgent(config=config)
+        llm_for_turn = agent._get_llm_for_current_mode()
+
+        assert agent.runtime_agent_binding["agentId"] == "agent-dialogue-default"
+        assert "llmSlot" not in agent.runtime_agent_binding
+        assert agent.config.llm.get_profile(profile_id="primary").model == "agent-dialogue-model"
+        assert getattr(agent._runtime_agent_llm_resolution, "slot", "") == "dialogue"
+        assert llm_for_turn.model == "agent-dialogue-model"
+        assert llm_for_turn.bound_tool_count == 1
 
     def test_runtime_agent_llm_slot_binding_maps_subagent_execution_to_primary(self, monkeypatch):
         monkeypatch.setenv("VIBELUTION_AGENT_ID", "agent-subagent-slot")

@@ -427,6 +427,37 @@ function agentModelLabel(model: AgentModelChoice | null | undefined) {
   return String(model?.label || model?.model || model?.modelId || "").trim() || "-";
 }
 
+function unresolvedDialogueModelIssue(agent: AgentConfigWorkspaceAgent | null | undefined) {
+  return (agent?.health ?? []).find((item) => item.code === "unresolved_model_reference_dialogue");
+}
+
+function agentDialogueModelDisplay(agent: AgentConfigWorkspaceAgent | null | undefined, lang: "zh" | "en") {
+  const model = agent?.dialogueModel;
+  const rawModelId = String(agent?.llmBindings?.dialogue?.modelId || "").trim();
+  const unresolved = unresolvedDialogueModelIssue(agent);
+  if (model) {
+    return {
+      label: agentModelLabel(model),
+      detail: String(model.providerKind || model.apiKeyState || model.modelId || "").trim() || "-",
+      unresolved: false,
+    };
+  }
+  if (rawModelId) {
+    return {
+      label: rawModelId,
+      detail: unresolved
+        ? (lang === "zh" ? "模型库未注册" : "Model reference unresolved")
+        : (lang === "zh" ? "模型详情不可用" : "Model details unavailable"),
+      unresolved: Boolean(unresolved),
+    };
+  }
+  return {
+    label: "-",
+    detail: lang === "zh" ? "未绑定对话模型" : "No dialogue model",
+    unresolved: false,
+  };
+}
+
 function agentModelChoiceLabel(model: AgentModelChoice) {
   const label = agentModelLabel(model);
   const provider = String(model.providerKind || "").trim();
@@ -4152,6 +4183,7 @@ export function AgentsRoute() {
                 const active = selectedAgent?.agentId === agent.agentId;
                 const tone = issueTone(agent.health);
                 const display = agentDisplayInfo(agent, lang);
+                const modelDisplay = agentDialogueModelDisplay(agent, lang);
                 return (
                   <button
                     key={agent.agentId}
@@ -4172,7 +4204,7 @@ export function AgentsRoute() {
                         </em>
                       </span>
                     </span>
-                    <span>{agentModelLabel(agent.dialogueModel)}</span>
+                    <span title={modelDisplay.detail}>{modelDisplay.label}</span>
                     <span>{promptTemplateDisplayName(agent.promptTemplate, agent.promptTemplateId, lang)}</span>
                     <span className={`${styles.runtimePill} ${styles[`runtime_${runtimeStatusTone(agent)}`]}`}>
                       {runtimeStatusLabel(agent, lang)}
@@ -4352,12 +4384,17 @@ export function AgentsRoute() {
               {activePane === "overview" ? (
                 <>
                   <div className={styles.factGrid}>
+                    {(() => {
+                      const selectedModelDisplay = agentDialogueModelDisplay(selectedAgent, lang);
+                      return (
                     <section>
                       <Bot size={16} />
                       <span>{copy.model}</span>
-                      <strong>{agentModelLabel(selectedAgent.dialogueModel)}</strong>
-                      <small>{selectedAgent.dialogueModel?.providerKind || selectedAgent.dialogueModel?.apiKeyState || "-"}</small>
+                      <strong>{selectedModelDisplay.label}</strong>
+                      <small>{selectedModelDisplay.detail}</small>
                     </section>
+                      );
+                    })()}
                     <section>
                       <Brain size={16} />
                       <span>{copy.llmSlots}</span>

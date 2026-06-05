@@ -602,6 +602,7 @@ def update_agent_instance(
     agent_id: str,
     *,
     display_name: str | None = None,
+    direct_session_id: str | None = None,
     llm_bindings: dict[str, Any] | None = None,
     primary_mode: str | None = None,
     role_key: str | None = None,
@@ -653,6 +654,8 @@ def update_agent_instance(
             agent["metadata"] = metadata_payload
         if llm_bindings is not None:
             agent["llmBindings"] = normalize_agent_llm_bindings(llm_bindings)
+        if direct_session_id is not None:
+            agent["directSessionId"] = str(direct_session_id or "").strip()
         if primary_mode is not None:
             agent["primaryMode"] = _normalize_primary_mode(primary_mode)
         if role_key is not None:
@@ -3849,10 +3852,20 @@ def _reset_agent_direct_session(agent: dict[str, Any]) -> dict[str, Any]:
             "replacementDirectSessionId": "",
             "skippedPaths": [f"direct_session:{session_id} ({type(exc).__name__})"],
         }
+    replacement_direct_session_id = str(result.get("replacementDirectSessionId") or result.get("nextActiveSessionId") or "").strip()
+    skipped_paths: list[str] = []
+    if replacement_direct_session_id:
+        try:
+            update_agent_instance(
+                str(agent.get("agentId") or "").strip(),
+                direct_session_id=replacement_direct_session_id,
+            )
+        except Exception as exc:
+            skipped_paths.append(f"direct_session_bind:{replacement_direct_session_id} ({type(exc).__name__})")
     return {
         "resetDirectSession": True,
-        "replacementDirectSessionId": str(result.get("replacementDirectSessionId") or result.get("nextActiveSessionId") or "").strip(),
-        "skippedPaths": [],
+        "replacementDirectSessionId": replacement_direct_session_id,
+        "skippedPaths": skipped_paths,
     }
 
 

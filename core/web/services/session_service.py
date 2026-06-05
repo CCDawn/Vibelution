@@ -2021,21 +2021,11 @@ def _delete_chat_session_state(session_id: str, *, activate_replacement: bool = 
         ]
         replacement_direct_session_id = ""
         if target_agent and target_agent_direct_session_id == conversation_id:
-            existing_ids = {conversation_id}
-            existing_ids.update(
-                str(item.get("id") or "").strip()
-                for item in normalized_remaining
-                if str(item.get("id") or "").strip()
+            update_agent_instance(
+                target_agent_id,
+                direct_session_id="",
+                metadata={"previousDirectSessionId": conversation_id},
             )
-            try:
-                existing_ids.update(
-                    str(agent.get("directSessionId") or "").strip()
-                    for agent in agent_directory_service.list_agents(include_archived=True)
-                    if isinstance(agent, dict) and str(agent.get("directSessionId") or "").strip()
-                )
-            except Exception:
-                pass
-            replacement_direct_session_id = _new_conversation_id(existing_ids)
 
         current_active_id = str(payload.get("active_conversation_id") or "").strip()
         if any(item["id"] == current_active_id for item in normalized_remaining) and current_active_id != conversation_id:
@@ -2048,46 +2038,15 @@ def _delete_chat_session_state(session_id: str, *, activate_replacement: bool = 
             next_active_id = latest["id"]
         else:
             now = _now_timestamp()
-            next_active_id = replacement_direct_session_id or _new_conversation_id({conversation_id})
+            next_active_id = _new_conversation_id({conversation_id})
             replacement_conversation = _make_empty_conversation(
                 next_active_id,
-                title=str((target_agent or {}).get("displayName") or target_conversation.get("title") or "").strip()
-                or text_for(lang, zh="新会话", en="New session"),
+                title=text_for(lang, zh="新会话", en="New session"),
                 timestamp=now,
             )
-            if target_agent and replacement_direct_session_id == next_active_id:
-                replacement_conversation["agent_id"] = target_agent_id
-                replacement_conversation["agentId"] = target_agent_id
-                _repair_conversation_agent_legacy_model_fields(
-                    replacement_conversation,
-                    conversation_id=next_active_id,
-                    agent_id=target_agent_id,
-                    agent=target_agent,
-                )
             remaining = [
                 replacement_conversation
             ]
-
-        if replacement_direct_session_id and target_agent:
-            ensure_agent_for_session(
-                replacement_direct_session_id,
-                display_name=str(
-                    (target_agent or {}).get("displayName")
-                    or target_conversation.get("title")
-                    or replacement_direct_session_id
-                ),
-                llm_bindings=target_agent.get("llmBindings") if isinstance(target_agent.get("llmBindings"), dict) else None,
-                primary_mode=str(
-                    target_agent.get("primaryMode") or agent_directory_service.DEFAULT_AGENT_PRIMARY_MODE
-                ),
-                role_key=str(target_agent.get("roleKey") or ""),
-                prompt_template_id=str(target_agent.get("promptTemplateId") or ""),
-                existing_agent_id=target_agent_id,
-                session_workspace_path=_session_workspace_relative_path(replacement_direct_session_id),
-                created_by="session_delete_rebind",
-            )
-            if activate_replacement:
-                next_active_id = replacement_direct_session_id
 
         now = _now_timestamp()
         payload["version"] = int(payload.get("version") or CHAT_STATE_VERSION)
@@ -2097,15 +2056,14 @@ def _delete_chat_session_state(session_id: str, *, activate_replacement: bool = 
         save_chat_state(PROJECT_ROOT, payload)
 
     _invalidate_session_list_cache()
-    if replacement_direct_session_id:
+    if target_agent and target_agent_direct_session_id == conversation_id:
         _record_session_delete_event(
-            "agent_rebound",
+            "agent_unbound",
             session_id=conversation_id,
-            outcome="rebound",
+            outcome="unbound",
             fields={
                 "agentId": target_agent_id,
                 "previousDirectSessionId": conversation_id,
-                "replacementDirectSessionId": replacement_direct_session_id,
             },
         )
     _record_session_delete_event(
@@ -2133,7 +2091,8 @@ def delete_chat_session(session_id: str) -> dict:
 
     delete_result = _delete_chat_session_state(session_id)
     next_active_id = str(delete_result.get("nextActiveSessionId") or "").strip()
-    return get_session_detail(next_active_id) or {}
+    target = _load_conversation_detail_target(next_active_id, repair=False, agent_by_id={})
+    return _build_lightweight_session_detail(target) if target is not None else {}
 
 
 def delete_chat_session_lightweight(session_id: str, *, activate_replacement: bool = False) -> dict[str, Any]:
@@ -4004,7 +3963,10 @@ def _complete_turn_error_visible_content(content: Any, metadata: dict[str, Any])
         diagnostics.append(f"HTTP {http_status}")
     if provider_error_type:
         diagnostics.append(provider_error_type)
-    if provider_error_message and provider_error_message not in visible:
+    if (
+        _provider_error_detail_safe_for_chat(provider_error_message)
+        and provider_error_message not in visible
+    ):
         diagnostics.append(provider_error_message)
     if diagnostics:
         diagnostic_line = " / ".join(diagnostics)
