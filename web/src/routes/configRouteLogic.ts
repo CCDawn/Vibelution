@@ -84,11 +84,6 @@ export type ModelScenarioId = "chat" | "relay" | "image" | "local" | "manual";
 
 export const MODEL_SCENARIOS: ModelScenarioId[] = ["chat", "relay", "image", "local", "manual"];
 
-export type ModelCenterLabels = ConfigProfileModeGroupLabels & {
-  image2Tool: string;
-  gitCommitModel: string;
-};
-
 export type ModelCenterAccount = {
   id: string;
   providerKind: string;
@@ -114,7 +109,6 @@ export type ModelCenterUsage = {
 
 export type ModelCenterSummary = {
   accounts: ModelCenterAccount[];
-  usages: ModelCenterUsage[];
   usagesByModelId: Record<string, ModelCenterUsage[]>;
   usageCountsByModelId: Record<string, number>;
   unresolvedUsageCount: number;
@@ -630,9 +624,6 @@ function summarizeAccountState(account: Omit<ModelCenterAccount, "modelCount" | 
 
 export function deriveModelCenterSummary(input: {
   modelOptions: ConfigModelOption[];
-  profiles: ConfigProfileCard[];
-  publicConfig: PublicConfigShape;
-  labels: ModelCenterLabels;
 }): ModelCenterSummary {
   const accountsById = new Map<string, Omit<ModelCenterAccount, "modelCount" | "apiKeyState">>();
   for (const option of input.modelOptions) {
@@ -664,69 +655,6 @@ export function deriveModelCenterSummary(input: {
     accountsById.set(id, current);
   }
 
-  const usages: ModelCenterUsage[] = [];
-  for (const profile of input.profiles) {
-    const modelId = profile.selectedModelId || profile.modelRef;
-    if (!modelId || profile.requiredModelMissing) {
-      continue;
-    }
-    const groupId = profileModeGroupId(profile.profileId);
-    usages.push({
-      id: `profile:${profile.profileId}`,
-      kind: "profile",
-      modelId,
-      label: profile.label || profile.profileId,
-      groupLabel: input.labels[groupId],
-      detail: profile.profileId,
-    });
-  }
-
-  const tools = asRecord(input.publicConfig.tools);
-  const image2 = asRecord(tools.image2);
-  const image2ModelRef = getString(image2.default_model_ref);
-  if (image2ModelRef) {
-    usages.push({
-      id: "tool:image2_generate_tool",
-      kind: "tool",
-      modelId: image2ModelRef,
-      label: input.labels.image2Tool,
-      groupLabel: input.labels.image2Tool,
-      detail: "image2_generate_tool",
-    });
-  }
-
-  const git = asRecord(input.publicConfig.git);
-  const gitCommitProfileId = getString(git.commit_message_profile);
-  const gitCommitProfile = gitCommitProfileId
-    ? input.profiles.find((profile) => profile.profileId === gitCommitProfileId)
-    : null;
-  const gitCommitModelId = gitCommitProfile?.selectedModelId || gitCommitProfile?.modelRef || "";
-  if (gitCommitProfileId && gitCommitModelId && !gitCommitProfile?.requiredModelMissing) {
-    usages.push({
-      id: "feature:git_commit_message",
-      kind: "feature",
-      modelId: gitCommitModelId,
-      label: input.labels.gitCommitModel,
-      groupLabel: input.labels.gitCommitModel,
-      detail: gitCommitProfile?.label || gitCommitProfileId,
-    });
-  }
-
-  const modelIds = new Set(input.modelOptions.map((option) => option.model_id));
-  const usagesByModelId: Record<string, ModelCenterUsage[]> = {};
-  let unresolvedUsageCount = 0;
-  for (const usage of usages) {
-    if (!modelIds.has(usage.modelId)) {
-      unresolvedUsageCount += 1;
-      continue;
-    }
-    usagesByModelId[usage.modelId] = [...(usagesByModelId[usage.modelId] ?? []), usage];
-  }
-
-  const usageCountsByModelId = Object.fromEntries(
-    Object.entries(usagesByModelId).map(([modelId, modelUsages]) => [modelId, modelUsages.length]),
-  );
-
   const accounts = Array.from(accountsById.values())
     .map((account) => ({
       ...account,
@@ -737,10 +665,9 @@ export function deriveModelCenterSummary(input: {
 
   return {
     accounts,
-    usages,
-    usagesByModelId,
-    usageCountsByModelId,
-    unresolvedUsageCount,
+    usagesByModelId: {},
+    usageCountsByModelId: {},
+    unresolvedUsageCount: 0,
   };
 }
 

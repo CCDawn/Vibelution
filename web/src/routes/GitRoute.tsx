@@ -23,7 +23,7 @@ import {
   getStagedFilesOutsideSelection,
 } from "./gitCommitUx";
 import {
-  configuredGitProfileId,
+  configuredGitModelId,
   displayGitPath,
   formatGitDateTime,
   gitFileName,
@@ -45,7 +45,7 @@ export function GitRoute() {
   const [activeFilter, setActiveFilter] = useState<GitFilter>("all");
   const [activePath, setActivePath] = useState<string | null>(null);
   const [selectedPaths, setSelectedPaths] = useState<string[]>([]);
-  const [selectedAiProfileId, setSelectedAiProfileId] = useState("");
+  const [selectedAiModelId, setSelectedAiModelId] = useState("");
   const [commitMessage, setCommitMessage] = useState("");
   const [commitNotice, setCommitNotice] = useState<{ tone: "neutral" | "success" | "error"; text: string }>({
     tone: "neutral",
@@ -89,21 +89,22 @@ export function GitRoute() {
     () => getStagedFilesOutsideSelection(files, selectedPaths),
     [files, selectedPaths],
   );
-  const aiProfileOptions = configQuery.data?.profileCards ?? [];
-  const configuredProfileId = configuredGitProfileId(configQuery.data);
-  const activeAiProfileId = selectedAiProfileId || configuredProfileId || aiProfileOptions[0]?.profileId || "";
-  const aiProfileSelectOptions = useMemo(() => {
-    if (!activeAiProfileId || aiProfileOptions.some((option) => option.profileId === activeAiProfileId)) {
-      return aiProfileOptions;
+  const aiModelOptions = configQuery.data?.modelOptions ?? [];
+  const configuredModelId = configuredGitModelId(configQuery.data);
+  const activeAiModelId = selectedAiModelId || configuredModelId || aiModelOptions[0]?.model_id || "";
+  const aiModelSelectOptions = useMemo(() => {
+    if (!activeAiModelId || aiModelOptions.some((option) => option.model_id === activeAiModelId)) {
+      return aiModelOptions;
     }
     return [
       {
-        profileId: activeAiProfileId,
-        label: activeAiProfileId,
+        model_id: activeAiModelId,
+        label: activeAiModelId,
+        model: activeAiModelId,
       },
-      ...aiProfileOptions,
+      ...aiModelOptions,
     ];
-  }, [activeAiProfileId, aiProfileOptions]);
+  }, [activeAiModelId, aiModelOptions]);
 
   useEffect(() => {
     if (!filteredFiles.length) {
@@ -131,7 +132,7 @@ export function GitRoute() {
   }, [changePanelWidth]);
 
   const generateMessageMutation = useMutation({
-    mutationFn: (payload: { paths: string[]; profileId: string }) =>
+    mutationFn: (payload: { paths: string[]; modelId: string }) =>
       fetchJson<GitCommitMessageResponse>("/api/git/commit-message", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -186,7 +187,7 @@ export function GitRoute() {
 
   const generateMessage = () => {
     setCommitNotice({ tone: "neutral", text: "" });
-    generateMessageMutation.mutate({ paths: selectedPaths, profileId: activeAiProfileId });
+    generateMessageMutation.mutate({ paths: selectedPaths, modelId: activeAiModelId });
   };
 
   const commitSelected = () => {
@@ -460,14 +461,14 @@ export function GitRoute() {
             <label className={styles.messageField}>
               <span>{t("gitAiAgentLabel")}</span>
               <select
-                value={activeAiProfileId}
-                disabled={!aiProfileSelectOptions.length || configQuery.isPending}
-                onChange={(event) => setSelectedAiProfileId(event.target.value)}
+                value={activeAiModelId}
+                disabled={!aiModelSelectOptions.length || configQuery.isPending}
+                onChange={(event) => setSelectedAiModelId(event.target.value)}
               >
-                {aiProfileSelectOptions.length ? (
-                  aiProfileSelectOptions.map((option) => (
-                    <option key={option.profileId} value={option.profileId}>
-                      {option.label || option.profileId}
+                {aiModelSelectOptions.length ? (
+                  aiModelSelectOptions.map((option) => (
+                    <option key={option.model_id} value={option.model_id}>
+                      {option.label || option.model || option.model_id}
                     </option>
                   ))
                 ) : (

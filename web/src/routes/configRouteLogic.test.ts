@@ -424,7 +424,7 @@ describe("configRouteLogic", () => {
     });
   });
 
-  it("derives model center accounts and usage from profiles and image2 tool binding", () => {
+  it("derives model center accounts without surfacing usage bindings", () => {
     const imageModel = option({
       model_id: "relay_image2",
       label: "Relay image2",
@@ -452,53 +452,18 @@ describe("configRouteLogic", () => {
         requires_api_key: true,
       },
     });
-    const profiles: ConfigProfileCard[] = [
-      {
-        profileId: "primary",
-        label: "主聊天",
-        modelRef: "relay_openai_gpt_5_5",
-        selectedModelId: "relay_openai_gpt_5_5",
-        selectedModelLabel: "GPT-5.5 via relay",
-        model: "gpt-5.5",
-        providerKind: "relay",
-        baseUrl: "https://ai-pixel.online",
-        apiKeyEnv: "VIBELUTION_LLM_RELAY_OPENAI_GPT_5_5_API_KEY",
-        apiKeyConfigured: false,
-        apiKeyState: "missing",
-        apiKeySource: "VIBELUTION_LLM_RELAY_OPENAI_GPT_5_5_API_KEY",
-        requiredModelMissing: false,
-      },
-    ];
-
     const summary = deriveModelCenterSummary({
       modelOptions: [imageModel, chatModel],
-      profiles,
-      publicConfig: { tools: { image2: { default_model_ref: "relay_image2" } } },
-      labels: {
-        chat: "对话模式",
-        support: "心智与压缩",
-        subagents: "子代理模式",
-        evolution: "进化模式",
-        research: "科研模型绑定",
-        other: "其他",
-        image2Tool: "image2 生图工具",
-        gitCommitModel: "Git 提交模型",
-      },
     });
 
     expect(summary.accounts).toHaveLength(2);
     expect(summary.accounts.map((account) => account.apiKeyState).sort()).toEqual(["configured", "missing"]);
-    expect(summary.usageCountsByModelId.relay_openai_gpt_5_5).toBe(1);
-    expect(summary.usageCountsByModelId.relay_image2).toBe(1);
-    expect(summary.usagesByModelId.relay_image2[0]).toMatchObject({
-      kind: "tool",
-      label: "image2 生图工具",
-      detail: "image2_generate_tool",
-    });
+    expect(summary.usageCountsByModelId).toEqual({});
+    expect(summary.usagesByModelId).toEqual({});
     expect(summary.unresolvedUsageCount).toBe(0);
   });
 
-  it("builds compact model inventory rows with usage and editability in one place", () => {
+  it("builds compact model inventory rows with asset editability in one place", () => {
     const libraryModel = option({
       model_id: "relay_openai_gpt_5_5",
       source: "model_library",
@@ -517,52 +482,8 @@ describe("configRouteLogic", () => {
         base_url: "https://relay.example.com",
       },
     });
-    const profiles: ConfigProfileCard[] = [
-      {
-        profileId: "primary",
-        label: "主聊天",
-        modelRef: "relay_openai_gpt_5_5",
-        selectedModelId: "relay_openai_gpt_5_5",
-        selectedModelLabel: "GPT-5.5 via relay",
-        model: "gpt-5.5",
-        providerKind: "relay",
-        baseUrl: "https://pixel.try-chatapi.com/v1",
-        apiKeyEnv: "VIBELUTION_LLM_RELAY_OPENAI_GPT_5_5_API_KEY",
-        apiKeyConfigured: true,
-        apiKeyState: "configured",
-        apiKeySource: "VIBELUTION_LLM_RELAY_OPENAI_GPT_5_5_API_KEY",
-        requiredModelMissing: false,
-      },
-      {
-        profileId: "research_writer",
-        label: "科研写作",
-        modelRef: "profile_inline_primary",
-        selectedModelId: "profile_inline_primary",
-        selectedModelLabel: "Inline primary model",
-        model: "inline-gpt",
-        providerKind: "openai_compatible",
-        baseUrl: "https://relay.example.com",
-        apiKeyEnv: "",
-        apiKeyConfigured: false,
-        apiKeyState: "missing",
-        apiKeySource: "",
-        requiredModelMissing: false,
-      },
-    ];
     const summary = deriveModelCenterSummary({
       modelOptions: [libraryModel, generatedModel],
-      profiles,
-      publicConfig: { tools: { image2: { default_model_ref: "relay_openai_gpt_5_5" } } },
-      labels: {
-        chat: "对话模式",
-        support: "心智与压缩",
-        subagents: "子代理模式",
-        evolution: "进化模式",
-        research: "科研模型绑定",
-        other: "其他",
-        image2Tool: "image2 生图工具",
-        gitCommitModel: "Git 提交模型",
-      },
     });
 
     const rows = deriveModelCenterInventoryRows([libraryModel, generatedModel], summary);
@@ -570,76 +491,21 @@ describe("configRouteLogic", () => {
     expect(rows).toHaveLength(2);
     expect(rows[0]).toMatchObject({
       modelId: "relay_openai_gpt_5_5",
-      usageCount: 2,
+      usageCount: 0,
       editable: true,
       deletable: true,
       apiKeyState: "configured",
     });
-    expect(rows[0].usages.map((usage) => usage.label)).toEqual(["主聊天", "image2 生图工具"]);
+    expect(rows[0].usages).toEqual([]);
     expect(rows[1]).toMatchObject({
       modelId: "profile_inline_primary",
       source: "profile",
-      usageCount: 1,
+      usageCount: 0,
       editable: false,
       deletable: false,
       apiKeyEnv: "",
     });
-    expect(rows[1].usages[0]).toMatchObject({
-      groupLabel: "科研模型绑定",
-      label: "科研写作",
-    });
-  });
-
-  it("tracks git commit message model usage through its selected model binding", () => {
-    const chatModel = option({
-      model_id: "relay_openai_gpt_5_5",
-      label: "GPT-5.5 via relay",
-      model: "gpt-5.5",
-    });
-    const profiles: ConfigProfileCard[] = [
-      {
-        profileId: "primary",
-        label: "主聊天",
-        modelRef: "relay_openai_gpt_5_5",
-        selectedModelId: "relay_openai_gpt_5_5",
-        selectedModelLabel: "GPT-5.5 via relay",
-        model: "gpt-5.5",
-        providerKind: "relay",
-        baseUrl: "https://pixel.try-chatapi.com/v1",
-        apiKeyEnv: "VIBELUTION_LLM_RELAY_OPENAI_GPT_5_5_API_KEY",
-        apiKeyConfigured: true,
-        apiKeyState: "configured",
-        apiKeySource: "VIBELUTION_LLM_RELAY_OPENAI_GPT_5_5_API_KEY",
-        requiredModelMissing: false,
-      },
-    ];
-
-    const summary = deriveModelCenterSummary({
-      modelOptions: [chatModel],
-      profiles,
-      publicConfig: { git: { commit_message_profile: "primary" } },
-      labels: {
-        chat: "对话 / 主智能体",
-        support: "心智与压缩",
-        subagents: "Agent 管理",
-        evolution: "监督进化",
-        research: "科研 / Team",
-        other: "其他模型绑定",
-        image2Tool: "image2 生图工具",
-        gitCommitModel: "Git 提交模型",
-      },
-    });
-
-    expect(summary.usageCountsByModelId.relay_openai_gpt_5_5).toBe(2);
-    expect(summary.usagesByModelId.relay_openai_gpt_5_5.map((usage) => usage.label)).toEqual([
-      "主聊天",
-      "Git 提交模型",
-    ]);
-    expect(summary.usagesByModelId.relay_openai_gpt_5_5[1]).toMatchObject({
-      kind: "feature",
-      detail: "主聊天",
-      groupLabel: "Git 提交模型",
-    });
+    expect(rows[1].usages).toEqual([]);
   });
 
   it("keeps image input support conservative when status and boolean disagree", () => {
@@ -709,25 +575,12 @@ describe("configRouteLogic", () => {
     });
   });
 
-  it("reports usage bindings that point to missing models", () => {
+  it("does not report external usage bindings in the settings model library", () => {
     const summary = deriveModelCenterSummary({
       modelOptions: [option()],
-      profiles: [],
-      publicConfig: { tools: { image2: { default_model_ref: "missing_image_model" } } },
-      labels: {
-        chat: "chat",
-        support: "support",
-        subagents: "subagents",
-        evolution: "evolution",
-        research: "research",
-        other: "other",
-        image2Tool: "image2",
-        gitCommitModel: "Git commit model",
-      },
     });
 
-    expect(summary.usages).toHaveLength(1);
-    expect(summary.unresolvedUsageCount).toBe(1);
+    expect(summary.unresolvedUsageCount).toBe(0);
     expect(summary.usagesByModelId.missing_image_model).toBeUndefined();
   });
 
@@ -911,11 +764,8 @@ describe("config route copy", () => {
     expect(CONFIG_COPY.zh.modelsTitle).toBe("模型库");
     expect(CONFIG_COPY.en.modelsTitle).toBe("Model Library");
     expect(CONFIG_COPY.zh.modelCenterAccounts).toBe("服务商账号");
-    expect(CONFIG_COPY.zh.modelCenterUsage).toBe("使用位置");
-    expect(CONFIG_COPY.zh.modelCenterBindings).toBe("引用");
     expect(CONFIG_COPY.zh.modelCenterSource).toBe("来源");
     expect(CONFIG_COPY.zh.modelScenarioImage).toBe("图片工具模型");
-    expect(CONFIG_COPY.en.modelCenterBindings).toBe("References");
     expect(CONFIG_COPY.en.modelCenterSource).toBe("Source");
     expect(CONFIG_COPY.en.modelScenarioImage).toBe("Image tool model");
   });

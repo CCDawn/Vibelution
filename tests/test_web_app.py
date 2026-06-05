@@ -11738,9 +11738,9 @@ def test_config_workspace_exposes_full_editor_schema(monkeypatch):
     assert "草稿" not in sections_by_id["draft"]["summary"]
     assert editor_sections["context-compression"]["title"] == "上下文压缩"
     assert "git" not in editor_sections
-    assert editor_sections["git-commit-profile"]["path"] == "git.commit_message_profile"
-    assert editor_sections["git-commit-profile"]["title"] == "Git 提交模型"
-    assert editor_sections["git-commit-profile"]["fieldCount"] == 1
+    assert editor_sections["git-commit-model"]["path"] == "git.commit_message_model_ref"
+    assert editor_sections["git-commit-model"]["title"] == "Git 提交模型"
+    assert editor_sections["git-commit-model"]["fieldCount"] == 1
     assert editor_sections["git-commit-prompt"]["path"] == "git.commit_message_prompt"
     assert editor_sections["git-commit-prompt"]["title"] == "Git 提交提示词"
     assert editor_sections["git-commit-prompt"]["fieldCount"] == 1
@@ -11787,11 +11787,12 @@ def test_config_workspace_exposes_full_editor_schema(monkeypatch):
     assert "llm.profiles.primary.model_ref" not in editor_meta
     assert "llm.profiles.primary.provider.kind" not in editor_meta
     assert "llm.profiles.primary.provider.base_url" not in editor_meta
-    assert payload["publicConfig"]["git"]["commit_message_profile"]
+    assert "commit_message_profile" not in payload["publicConfig"]["git"]
+    assert "commit_message_model_ref" in payload["publicConfig"]["git"]
     assert "{diff}" in payload["publicConfig"]["git"]["commit_message_prompt"]
-    assert editor_meta["git.commit_message_profile"]["kind"] == "select"
-    assert editor_meta["git.commit_message_profile"]["label"] == "Git 提交使用的模型绑定"
-    assert "profile" not in editor_meta["git.commit_message_profile"]["hint"].lower()
+    assert editor_meta["git.commit_message_model_ref"]["kind"] == "select"
+    assert editor_meta["git.commit_message_model_ref"]["label"] == "Git 提交使用的模型"
+    assert "profile" not in editor_meta["git.commit_message_model_ref"]["hint"].lower()
     assert editor_meta["git.commit_message_prompt"]["kind"] == "multiline"
     assert "系统提示词模板" in editor_meta["git.commit_message_prompt"]["hint"]
     assert sections_by_id["health-diagnostics"]["title"] == "健康诊断"
