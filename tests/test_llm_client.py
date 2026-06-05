@@ -639,6 +639,9 @@ def test_invoke_records_cached_input_token_observation(monkeypatch):
 
     assert message.response_metadata["usage_observation"]["cached_input_tokens"] == 64
     assert message.response_metadata["usage_observation"]["cache_hit_rate"] == pytest.approx(0.64)
+    assert message.response_metadata["llm_protocol"]["protocol"]
+    assert "payloadValidationResult" in message.response_metadata["llm_protocol"]
+    assert isinstance(message.response_metadata["llm_capability_source"], dict)
     success_event = next(item for item in recorded if item[0][1] == "llm.invoke.succeeded")
     assert success_event[1]["fields"]["cachedInputTokens"] == 64
     assert success_event[1]["fields"]["cacheHitRate"] == pytest.approx(0.64)
@@ -763,7 +766,46 @@ def test_invoke_failure_records_category_without_masking_provider_error(monkeypa
     assert 'One of "input"' in str(raised.value)
     assert recorded[-1][1]["message"] == "LLM invoke failed: provider_protocol_error"
     assert recorded[-1][1]["fields"]["errorType"] == "provider_protocol_error"
+    assert recorded[-1][1]["fields"]["protocol"]
+    assert recorded[-1][1]["fields"]["protocolSource"]
+    assert recorded[-1][1]["fields"]["payloadValidationResult"] == "passed"
     assert 'One of "input"' in recorded[-1][1]["fields"]["error"]
+
+
+def test_invoke_failure_records_model_library_capability_source(monkeypatch):
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "openai_compatible",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://example.test/v1",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "declared-failure-model",
+        }
+    )
+    profile = config.llm.get_profile("primary")
+    config.llm.model_library = {
+        "declared-failure-model": {
+            "provider_id": profile.provider_id,
+            "model": profile.model,
+            "capabilities": {"imageInput": True},
+        }
+    }
+    recorded = []
+
+    def backend(_payload):
+        raise Exception("provider closed connection")
+
+    monkeypatch.setattr("core.llm.client._record_llm_scene_event", lambda *args, **kwargs: recorded.append((args, kwargs)))
+
+    client = LLMClient(config=config, backend=backend)
+
+    with pytest.raises(LLMError):
+        client.invoke([{"role": "user", "content": "ping"}])
+
+    fields = recorded[-1][1]["fields"]
+    assert fields["modelLibraryId"] == "declared-failure-model"
+    assert fields["capabilitySource"] == "model_library.capabilities"
+    assert fields["declaredCapabilityFields"] == ["imageInput"]
 
 
 def test_invoke_retries_retryable_timeout_up_to_profile_limit(monkeypatch):
@@ -1142,6 +1184,9 @@ def test_stream_retries_without_usage_options_when_provider_rejects_them(monkeyp
     assert "llm.stream.usage_options_downgraded" in event_codes
     success_event = next(item for item in recorded if item[0][1] == "llm.stream.succeeded")
     assert success_event[1]["fields"]["usageObserved"] is False
+    assert success_event[1]["fields"]["protocol"]
+    assert success_event[1]["fields"]["payloadValidationResult"] == "passed"
+    assert success_event[1]["fields"]["streamUsageOptionsDowngraded"] is True
 
 
 def test_stream_final_chunk_exposes_usage_observation_for_ui():
@@ -1175,6 +1220,8 @@ def test_stream_final_chunk_exposes_usage_observation_for_ui():
     assert usage_observation["input_tokens"] == 80
     assert usage_observation["cached_input_tokens"] == 40
     assert usage_observation["cache_hit_rate"] == pytest.approx(0.5)
+    assert streamed[0].response_metadata["llm_protocol"]["protocol"]
+    assert streamed[-1].response_metadata["llm_protocol"]["payloadValidationResult"] == "passed"
 
 
 def test_stream_records_started_event_before_first_provider_chunk(monkeypatch):
@@ -1480,6 +1527,9 @@ def test_stream_failure_records_category_without_masking_provider_error(monkeypa
     assert recorded[-1][1]["message"] == "LLM stream failed before iterator: provider_protocol_error"
     assert recorded[-1][1]["fields"]["errorType"] == "provider_protocol_error"
     assert recorded[-1][1]["fields"]["messageRoles"] == ["user"]
+    assert recorded[-1][1]["fields"]["protocol"]
+    assert recorded[-1][1]["fields"]["protocolSource"]
+    assert recorded[-1][1]["fields"]["payloadValidationResult"] == "passed"
     assert 'One of "input"' in recorded[-1][1]["fields"]["error"]
 
 
