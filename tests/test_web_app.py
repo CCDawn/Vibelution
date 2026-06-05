@@ -4028,12 +4028,11 @@ def test_delete_session_switches_to_latest_remaining_session(tmp_path, monkeypat
     ]
     assert [event["eventCode"] for event in events] == [
         "session.delete.requested",
-        "session.delete.agent_rebound",
+        "session.delete.agent_unbound",
         "session.delete.deleted",
     ]
     assert events[0]["fields"]["phase"] == "ready"
     assert events[1]["fields"]["previousDirectSessionId"] == "session-live"
-    assert events[1]["fields"]["replacementDirectSessionId"] != "session-live"
     assert events[2]["fields"]["nextActiveSessionId"] == "session-newer"
 
 
@@ -4097,16 +4096,15 @@ def test_delete_bound_direct_session_rebinds_agent_without_reviving_old_session(
     rebound_agent = agent_directory_service.get_agent(agent["agentId"], include_archived=True)
     assert rebound_agent is not None
     assert rebound_agent["status"] == "active"
-    assert rebound_agent["directSessionId"]
-    assert rebound_agent["directSessionId"] != "session-live"
+    assert rebound_agent["directSessionId"] == ""
     assert session_service.get_session_detail("session-live") is None
     sessions = session_service.list_sessions()
     assert "session-live" not in {item["id"] for item in sessions}
-    assert rebound_agent["directSessionId"] in {item["id"] for item in sessions}
-    rebound_events = [event for event in events if event["eventCode"] == "session.delete.agent_rebound"]
-    assert len(rebound_events) == 1
-    assert rebound_events[0]["fields"]["agentId"] == agent["agentId"]
-    assert rebound_events[0]["fields"]["replacementDirectSessionId"] == rebound_agent["directSessionId"]
+    assert agent["agentId"] not in {item["agentId"] for item in sessions}
+    unbound_events = [event for event in events if event["eventCode"] == "session.delete.agent_unbound"]
+    assert len(unbound_events) == 1
+    assert unbound_events[0]["fields"]["agentId"] == agent["agentId"]
+    assert unbound_events[0]["fields"]["previousDirectSessionId"] == "session-live"
 
 
 def test_delete_last_session_creates_replacement(tmp_path, monkeypatch):
@@ -4119,6 +4117,8 @@ def test_delete_last_session_creates_replacement(tmp_path, monkeypatch):
     payload = response.json()
     assert payload["id"].startswith("session-")
     assert payload["id"] != "session-live"
+    assert payload["title"] == "新会话"
+    assert payload["agentId"] == ""
     assert payload["messages"] == []
 
     state = load_chat_state(tmp_path)
@@ -4156,10 +4156,8 @@ def test_delete_session_prefer_async_returns_lightweight_handoff(tmp_path, monke
         "deleted": True,
         "deletedSessionId": "session-live",
         "nextActiveSessionId": "session-next",
-        "replacementDirectSessionId": payload["replacementDirectSessionId"],
+        "replacementDirectSessionId": "",
     }
-    assert payload["replacementDirectSessionId"].startswith("session-")
-    assert payload["replacementDirectSessionId"] != "session-live"
     assert session_service.get_session_detail("session-live") is None
 
 

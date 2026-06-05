@@ -602,6 +602,7 @@ def update_agent_instance(
     agent_id: str,
     *,
     display_name: str | None = None,
+    direct_session_id: str | None = None,
     llm_bindings: dict[str, Any] | None = None,
     primary_mode: str | None = None,
     role_key: str | None = None,
@@ -653,6 +654,8 @@ def update_agent_instance(
             agent["metadata"] = metadata_payload
         if llm_bindings is not None:
             agent["llmBindings"] = normalize_agent_llm_bindings(llm_bindings)
+        if direct_session_id is not None:
+            agent["directSessionId"] = str(direct_session_id or "").strip()
         if primary_mode is not None:
             agent["primaryMode"] = _normalize_primary_mode(primary_mode)
         if role_key is not None:
