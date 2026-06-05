@@ -3,6 +3,9 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+from typing import Any
+
 from config import AppConfig
 
 from .adapters import capabilities_for_adapter
@@ -35,6 +38,55 @@ JSON_MODE_MODEL_HINTS = (
 )
 SUPPORTED_REASONING_STATE_FIELDS = {"reasoning_content"}
 
+_CAPABILITY_FIELD_ALIASES = {
+    "streaming": "supports_streaming",
+    "supportsStreaming": "supports_streaming",
+    "supports_streaming": "supports_streaming",
+    "tools": "supports_tool_calling",
+    "toolCalling": "supports_tool_calling",
+    "supportsToolCalling": "supports_tool_calling",
+    "supports_tool_calling": "supports_tool_calling",
+    "parallelTools": "supports_parallel_tool_calls",
+    "supportsParallelToolCalls": "supports_parallel_tool_calls",
+    "supports_parallel_tool_calls": "supports_parallel_tool_calls",
+    "systemMessages": "supports_system_messages",
+    "supportsSystemMessages": "supports_system_messages",
+    "supports_system_messages": "supports_system_messages",
+    "jsonMode": "supports_json_mode",
+    "supportsJsonMode": "supports_json_mode",
+    "supports_json_mode": "supports_json_mode",
+    "modelDiscovery": "supports_model_discovery",
+    "supportsModelDiscovery": "supports_model_discovery",
+    "supports_model_discovery": "supports_model_discovery",
+    "imageInput": "supports_image_input",
+    "supportsImageInput": "supports_image_input",
+    "supports_image_input": "supports_image_input",
+    "promptCache": "supports_prompt_cache",
+    "supportsPromptCache": "supports_prompt_cache",
+    "supports_prompt_cache": "supports_prompt_cache",
+    "thinking": "supports_thinking",
+    "supportsThinking": "supports_thinking",
+    "supports_thinking": "supports_thinking",
+    "reasoningRoundtrip": "supports_reasoning_roundtrip",
+    "supportsReasoningRoundtrip": "supports_reasoning_roundtrip",
+    "supports_reasoning_roundtrip": "supports_reasoning_roundtrip",
+    "explicitToolChoice": "supports_explicit_tool_choice",
+    "supportsExplicitToolChoice": "supports_explicit_tool_choice",
+    "supports_explicit_tool_choice": "supports_explicit_tool_choice",
+    "streamUsageOptions": "supports_stream_usage",
+    "supportsStreamUsage": "supports_stream_usage",
+    "supports_stream_usage": "supports_stream_usage",
+    "strictJsonSchema": "supports_strict_json_schema",
+    "supportsStrictJsonSchema": "supports_strict_json_schema",
+    "supports_strict_json_schema": "supports_strict_json_schema",
+    "responsesTransport": "supports_responses_transport",
+    "supportsResponsesTransport": "supports_responses_transport",
+    "supports_responses_transport": "supports_responses_transport",
+    "structuredContent": "supports_structured_content",
+    "supportsStructuredContent": "supports_structured_content",
+    "supports_structured_content": "supports_structured_content",
+}
+
 
 def _lookup_context_window(model_name: str, fallback: int) -> int:
     normalized = (model_name or "").strip().lower()
@@ -42,6 +94,61 @@ def _lookup_context_window(model_name: str, fallback: int) -> int:
         if key in normalized:
             return value
     return int(fallback or 32768)
+
+
+def _declared_capability_overrides(model_entry: Any) -> tuple[dict[str, bool], list[str]]:
+    if not isinstance(model_entry, dict):
+        return {}, []
+    raw = model_entry.get("capabilities")
+    source_fields: list[str] = []
+    overrides: dict[str, bool] = {}
+    if isinstance(raw, dict):
+        for key, value in raw.items():
+            field = _CAPABILITY_FIELD_ALIASES.get(str(key))
+            if field and isinstance(value, bool):
+                overrides[field] = value
+                source_fields.append(str(key))
+    legacy_image = model_entry.get("supports_image_input")
+    if isinstance(legacy_image, bool) and "supports_image_input" not in overrides:
+        overrides["supports_image_input"] = legacy_image
+        source_fields.append("supports_image_input")
+    return overrides, source_fields
+
+
+def _apply_declared_capability_overrides(
+    capabilities: LLMCapabilities,
+    overrides: dict[str, bool],
+) -> LLMCapabilities:
+    if not overrides:
+        return capabilities
+    return replace(
+        capabilities,
+        **{
+            field: value
+            for field, value in overrides.items()
+            if hasattr(capabilities, field)
+        },
+    )
+
+
+def _apply_runtime_capability_gates(
+    capabilities: LLMCapabilities,
+    profile: Any,
+) -> LLMCapabilities:
+    updated = capabilities
+    if not bool(getattr(profile, "streaming", True)):
+        updated = replace(updated, supports_streaming=False)
+    tool_mode = str(getattr(profile, "tool_calling_mode", "") or "auto").strip().lower()
+    if tool_mode == "disabled":
+        updated = replace(
+            updated,
+            supports_tool_calling=False,
+            supports_parallel_tool_calls=False,
+            supports_explicit_tool_choice=False,
+        )
+    elif tool_mode != "parallel":
+        updated = replace(updated, supports_parallel_tool_calls=False)
+    return updated
 
 
 def _base_capabilities_for_model(profile, provider) -> LLMCapabilities:
@@ -65,7 +172,17 @@ def discover_model(config: AppConfig, profile_id: str) -> ResolvedModelSpec:
     provider = config.llm.get_provider(profile.provider_id)
     base_capabilities = _base_capabilities_for_model(profile, provider)
     capabilities = capabilities_for_adapter(provider, profile, base_capabilities)
+    model_id, model_entry = config.llm.get_model_library_entry_for_profile(profile)
+    declared_overrides, declared_fields = _declared_capability_overrides(model_entry)
+    capabilities = _apply_declared_capability_overrides(capabilities, declared_overrides)
+    capabilities = _apply_runtime_capability_gates(capabilities, profile)
     context_window = _lookup_context_window(profile.model, provider.context_window)
+    provider_details = {"provider_id": provider.provider_id, "base_url": provider.base_url}
+    if model_id:
+        provider_details["model_library_id"] = model_id
+    if declared_fields:
+        provider_details["capability_source"] = "model_library.capabilities"
+        provider_details["declared_capability_fields"] = declared_fields
     return ResolvedModelSpec(
         provider=provider.kind,
         profile_id=profile.profile_id,
@@ -78,7 +195,7 @@ def discover_model(config: AppConfig, profile_id: str) -> ResolvedModelSpec:
         max_output_tokens=int(profile.max_output_tokens or 0),
         reasoning_state_field=profile.reasoning_state_field,
         strict_compatibility=bool(profile.strict_compatibility),
-        provider_details={"provider_id": provider.provider_id, "base_url": provider.base_url},
+        provider_details=provider_details,
     )
 
 

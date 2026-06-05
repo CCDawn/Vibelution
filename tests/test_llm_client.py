@@ -117,6 +117,74 @@ def test_llm_capabilities_expose_provider_runtime_features():
     assert client.capabilities.supports_responses_transport is True
 
 
+def test_llm_capabilities_apply_model_library_declared_capabilities():
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "openai_compatible",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://example.test/v1",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "declared-capability-model",
+        }
+    )
+    profile = config.llm.get_profile("primary")
+    config.llm.model_library = {
+        "declared-capability-model": {
+            "provider_id": profile.provider_id,
+            "model": profile.model,
+            "capabilities": {
+                "imageInput": True,
+                "promptCache": True,
+                "reasoningRoundtrip": True,
+                "streamUsageOptions": False,
+            },
+        }
+    }
+
+    client = LLMClient(config=config, backend=lambda payload: payload)
+
+    assert client.capabilities.supports_image_input is True
+    assert client.capabilities.supports_prompt_cache is True
+    assert client.capabilities.supports_reasoning_roundtrip is True
+    assert client.capabilities.supports_stream_usage is False
+    assert client.resolved_spec.provider_details["capability_source"] == "model_library.capabilities"
+    assert "imageInput" in client.resolved_spec.provider_details["declared_capability_fields"]
+
+
+def test_model_library_declared_capabilities_do_not_override_disabled_runtime_gates():
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "openai_compatible",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://example.test/v1",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "declared-tool-model",
+            "llm.profiles.primary.streaming": False,
+            "llm.profiles.primary.tool_calling_mode": "disabled",
+        }
+    )
+    profile = config.llm.get_profile("primary")
+    config.llm.model_library = {
+        "declared-tool-model": {
+            "provider_id": profile.provider_id,
+            "model": profile.model,
+            "capabilities": {
+                "streaming": True,
+                "tools": True,
+                "parallelTools": True,
+                "explicitToolChoice": True,
+            },
+        }
+    }
+
+    client = LLMClient(config=config, backend=lambda payload: payload)
+
+    assert client.capabilities.supports_streaming is False
+    assert client.capabilities.supports_tool_calling is False
+    assert client.capabilities.supports_parallel_tool_calls is False
+    assert client.capabilities.supports_explicit_tool_choice is False
+
+
 def test_llm_client_resolves_protocol_from_model_library_entry():
     config = make_config(
         **{
