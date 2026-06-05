@@ -41,7 +41,7 @@ def plan_recovery(
         wait_seconds=wait_seconds,
         stop_current_turn=_should_stop_current_turn(error, attempt, max_attempts),
         disable_streaming=error.category in {"empty_content_error", "tool_protocol_error"},
-        disable_tools=error.category in {"tool_protocol_error", "capability_error"},
+        disable_tools=error.category == "tool_protocol_error",
         request_context_compression=error.category == "context_length_error",
     )
 
@@ -55,7 +55,7 @@ def _action_for_category(category: str) -> str:
         "context_length_error": "compress_context",
         "tool_protocol_error": "disable_tools_and_retry_without_streaming",
         "empty_content_error": "retry_without_streaming",
-        "capability_error": "disable_tools",
+        "capability_error": "fail_fast",
         "quota_error": "fail_fast",
         "auth_error": "fail_fast",
         "configuration_error": "fail_fast",
@@ -75,7 +75,9 @@ def _retry_wait_seconds(error: LLMError, attempt: int, max_attempts: int) -> int
 def _should_stop_current_turn(error: LLMError, attempt: int, max_attempts: int) -> bool:
     if error.category in {"user_interrupt", "auth_error", "quota_error", "configuration_error"}:
         return True
-    if error.category in {"context_length_error", "tool_protocol_error", "empty_content_error", "capability_error"}:
+    if error.category == "capability_error":
+        return True
+    if error.category in {"context_length_error", "tool_protocol_error", "empty_content_error"}:
         return False
     if not error.retryable:
         return True
