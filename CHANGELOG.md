@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.23 - 2026-06-05
+
+- Added the Challenge Cup `steward_pack_draft` CandidateStore gate for knowledge-governance ingestion drafts, requiring traceable candidate IDs, target domain, source trace, proposal payload, rating suggestion, risk summary, and `approvalRequired=true`.
+- Blocked ingestion drafts that try to write official Team Knowledge, RAG, or graph state before the approval gate.
+- Updated the Challenge Cup research-flow HTML and technical plan to show M5 steward pack behavior and remaining official-ingestion work.
+
 ## 0.10.22 - 2026-06-05
 
 - Added a unified Model Library test control: choose one saved model and run a text connection test from that single button.
