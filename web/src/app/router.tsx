@@ -2,6 +2,7 @@ import { lazy, Suspense, type ComponentType, type ReactNode } from "react";
 import { createBrowserRouter } from "react-router-dom";
 
 import { AppShell } from "./AppShell";
+import { LauncherShell } from "./LauncherShell";
 import { LegacyChatRoomsRedirect } from "../routes/LegacyChatRoomsRedirect";
 import { LegacyTeamsRedirect } from "../routes/LegacyTeamsRedirect";
 import { LegacyMemoryRedirect } from "../routes/LegacyMemoryRedirect";
@@ -9,6 +10,7 @@ import { HomeRedirect } from "../routes/HomeRedirect";
 import { LegacyEvolutionRedirect } from "../routes/LegacyEvolutionRedirect";
 import { WorkbenchDomainRoute } from "../routes/WorkbenchDomainRoute";
 import { WorkbenchModeRoute } from "../routes/WorkbenchModeRoute";
+import { postBrowserTelemetry } from "./browserTelemetry";
 import { recoverFromDynamicImportFetchError } from "./routeChunkRecovery";
 
 const AgentsRoute = lazyRoute(() => import("../routes/AgentsRoute").then((module) => ({ default: module.AgentsRoute })));
@@ -31,7 +33,7 @@ const ToolsRoute = lazyRoute(() => import("../routes/ToolsRoute").then((module) 
 function lazyRoute<T extends ComponentType<any>>(loader: () => Promise<{ default: T }>) {
   return lazy(() =>
     loader().catch((error) => {
-      if (recoverFromDynamicImportFetchError(error)) {
+      if (recoverFromDynamicImportFetchError(error, globalThis.window, postBrowserTelemetry)) {
         return new Promise<{ default: T }>(() => undefined);
       }
       throw error;
@@ -44,6 +46,13 @@ function lazyElement(element: ReactNode) {
 }
 
 export const router = createBrowserRouter([
+  {
+    path: "/launcher",
+    element: <LauncherShell />,
+    children: [
+      { index: true, element: lazyElement(<LauncherRoute />) },
+    ],
+  },
   {
     path: "/",
     element: <AppShell />,
@@ -120,7 +129,6 @@ export const router = createBrowserRouter([
       { path: "memory/knowledge", element: lazyElement(<MemoryRoute forcedView="knowledge" />) },
       { path: "memory/graph", element: lazyElement(<MemoryRoute forcedView="graph" />) },
       { path: "teams", element: lazyElement(<TeamsRoute />) },
-      { path: "launcher", element: lazyElement(<LauncherRoute />) },
       { path: "git", element: lazyElement(<GitRoute />) },
       { path: "logs", element: lazyElement(<LogsRoute />) },
       { path: "research", element: <LegacyTeamsRedirect /> },

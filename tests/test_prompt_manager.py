@@ -447,19 +447,19 @@ class TestBuildAPI:
         assert "## Git 提交规则" in result
         assert "## 当前环境" in result
 
-    def test_tools_index_lists_only_llm_facing_canonical_tools(self):
+    def test_tools_index_is_not_injected_as_prompt_text(self):
         pm = PromptManager()
         sp = pm.build(include=["TOOLS_INDEX"])
         result = to_string(sp)
 
-        assert "## 工具索引" in result
-        assert "`read_file_tool`" in result
-        assert "`grep_search_tool`" in result
-        assert "`code_symbol_tool`" in result
+        assert "## 工具索引" not in result
+        assert "`read_file_tool`" not in result
+        assert "`grep_search_tool`" not in result
+        assert "`code_symbol_tool`" not in result
         assert "`clean_workspace_debris_tool`" not in result
-        assert "工具错误是可观察反馈" in result
-        assert "参数错误时按返回的必填/可选参数和示例修正后重试" in result
-        assert "安全、权限、停止和事务类拦截属于硬边界" in result
+        assert "工具错误是可观察反馈" not in result
+        assert "参数错误时按返回的必填/可选参数和示例修正后重试" not in result
+        assert "安全、权限、停止和事务类拦截属于硬边界" not in result
         for marker in LEGACY_PROMPT_TOOL_MARKERS:
             assert marker not in result
 
@@ -474,7 +474,8 @@ class TestBuildAPI:
         assert "命令平台纪律" in result
         assert "/dev/null" in result
         assert "Select-Object -First/-Last" in result
-        assert "不要用带 Unix 管道的 `cli_tool` 试探" in result
+        assert "读文件/搜索可用 `cli_tool`" in result
+        assert "Windows 兼容命令并限制输出" in result
 
     def test_build_exclude_filter(self):
         pm = PromptManager()
@@ -504,7 +505,7 @@ class TestBuildAPI:
         assert "## 语言状态" in result
         assert "## 你的记忆与状态" not in result or isinstance(result, str)
         names = [item["name"] for item in pm.get_last_index()]
-        for name in ["COMMON", "RUNTIME_GOAL", "SOUL", "SPEC_DIGEST", "MEMORY", "GIT_MEMORY", "RUNTIME_LOG_INDEX", "LANGUAGE_AWARENESS"]:
+        for name in ["COMMON", "RUNTIME_GOAL", "SOUL", "SPEC_DIGEST", "MEMORY", "GIT_MEMORY", "RUNTIME_LOG_INDEX", "SESSION_CHILD_ROUTING", "LANGUAGE_AWARENESS"]:
             assert name in names
 
     def test_runtime_goal_packet_renders_unified_agent_context(self):
@@ -580,6 +581,10 @@ class TestBuildAPI:
         assert "完整 `SOUL`" not in result
         assert "不要尝试 `cli_tool`" in result
         assert "禁止跳读" in result
+        assert "ToolPolicy 已授权" in result
+        assert "`grep_search_tool`" not in result
+        assert "`code_symbol_tool`" not in result
+        assert "`read_file_tool`" not in result
 
     def test_build_subagent_prompt_includes_role_contract(self):
         pm = PromptManager()
@@ -621,7 +626,7 @@ class TestBuildAPI:
         assert "# Vibelution 通用 Agent 基座" in result
         assert "## 语言状态" in result
         names = [item["name"] for item in pm.get_last_index()]
-        for name in ["COMMON", "RUNTIME_GOAL", "SOUL", "SPEC_DIGEST", "MEMORY", "GIT_MEMORY", "RUNTIME_LOG_INDEX", "LANGUAGE_AWARENESS"]:
+        for name in ["COMMON", "RUNTIME_GOAL", "SOUL", "SPEC_DIGEST", "MEMORY", "GIT_MEMORY", "RUNTIME_LOG_INDEX", "SESSION_CHILD_ROUTING", "LANGUAGE_AWARENESS"]:
             assert name in names
 
     def test_build_empty_include(self):
@@ -840,6 +845,8 @@ class TestLoadFunctions:
         assert "## 配置自感知" in content
         assert "当前身份" in content
         assert "关键来源" in content
+        assert "工具能力面" in content
+        assert "config_shell_enabled" in content
 
     def test_language_awareness_section_compute(self):
         pm = PromptManager()
@@ -850,6 +857,19 @@ class TestLoadFunctions:
         assert "## 语言状态" in content
         assert "当前默认表达语言：中文" in content
 
+    def test_session_child_routing_section_compute(self):
+        pm = PromptManager()
+        section = pm._sections.get("SESSION_CHILD_ROUTING")
+        assert section is not None, "SESSION_CHILD_ROUTING 章节应已注册"
+        content = section.compute()
+        assert content is not None
+        assert "## 会话子对话路由" in content
+        assert "明显独立的新事项" in content
+        assert "`create_child_session_tool`" in content
+        assert "`list_child_sessions_tool`" in content
+        assert "auto_start=true" in content
+        assert "子对话只做一层" in content
+
     def test_spec_digest_section_compute(self):
         pm = PromptManager()
         section = pm._sections.get("SPEC_DIGEST")
@@ -857,6 +877,9 @@ class TestLoadFunctions:
         content = section.compute()
         assert content is not None
         assert "## SPEC 运行时摘要" in content
+        assert "工具顺序按证据推进" in content
+        assert "cli_tool 是默认本地入口" in content
+        assert "record_learning 只在形成可复用经验或踩坑规律时写入" in content
 
     def test_runtime_log_index_section_compute_uses_runtime_scene_summaries(self, tmp_path, monkeypatch):
         from core.web.services import runtime_scene_service
@@ -1050,6 +1073,7 @@ class TestConfigDrivenSections:
         assert "TASK_CHECKLIST" in names
         assert "CODEBASE_MAP" in names
         assert "LANGUAGE_AWARENESS" in names
+        assert "SESSION_CHILD_ROUTING" in names
         assert "GIT_RULES" in names
         assert "ENV_INFO" in names
 
@@ -1093,6 +1117,7 @@ class TestConfigDrivenSections:
         assert "SPEC" not in names
         # 动态章节存在
         assert "TASK_CHECKLIST" in names
+        assert "SESSION_CHILD_ROUTING" in names
         assert "ENV_INFO" in names
 
     def test_config_priority_and_required_preserved(self):
@@ -1185,6 +1210,7 @@ class TestFallbackDefaults:
             "SPEC_DIGEST",
             "GIT_MEMORY",
             "RUNTIME_LOG_INDEX",
+            "SESSION_CHILD_ROUTING",
             "DELEGATION_RULES",
             "MEMORY",
             "LANGUAGE_AWARENESS",

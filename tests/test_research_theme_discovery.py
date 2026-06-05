@@ -2192,9 +2192,16 @@ def test_llm_research_agent_runner_resolves_model_and_prompt_from_agent_instance
     agent_directory_service.PROJECT_ROOT = project_root
     prompt_template_service.PROJECT_ROOT = project_root
     try:
+        base_config = session_service.get_config().model_copy(deep=True)
+        base_config.llm.model_library["research-live-model"] = {
+            "provider_id": base_config.llm.profiles["primary"].provider_id,
+            "model": "research-live-runtime",
+            "streaming": False,
+            "tool_calling_mode": "disabled",
+        }
         agent = agent_directory_service.create_agent_instance(
             display_name="统一科研 Agent",
-            profile_id="research_live_profile",
+            llm_bindings={"dialogue": {"modelId": "research-live-model"}},
             primary_mode="research",
             role_key="research_broad",
             prompt_template_id="prompt-research-broad-custom",
@@ -2241,6 +2248,7 @@ def test_llm_research_agent_runner_resolves_model_and_prompt_from_agent_instance
     class FakeClient:
         def invoke(self, messages, tools=None, metadata=None):
             captured["profile_id"] = self.profile_id
+            captured["primary_model"] = self.config.llm.get_profile(profile_id=self.profile_id).model
             captured["system"] = messages[0]["content"]
 
             class Response:
@@ -2249,11 +2257,16 @@ def test_llm_research_agent_runner_resolves_model_and_prompt_from_agent_instance
 
             return Response()
 
-        def __init__(self, profile_id):
+        def __init__(self, profile_id, config):
             self.profile_id = profile_id
+            self.config = config
 
     monkeypatch.setattr("core.research.agent_runner.get_workspace", lambda: FakeWorkspace())
-    monkeypatch.setattr("core.research.agent_runner.get_llm_client", lambda profile_id=None: FakeClient(profile_id))
+    monkeypatch.setattr("core.research.agent_runner.get_config", lambda: base_config)
+    monkeypatch.setattr(
+        "core.research.agent_runner.get_llm_client",
+        lambda profile_id=None, config=None: FakeClient(profile_id, config),
+    )
     runner = LLMResearchAgentRunner(search_provider=DeterministicResearchSearchProvider())
     session = ResearchDiscoverySession(
         session_id=new_id("research-session"),
@@ -2265,7 +2278,8 @@ def test_llm_research_agent_runner_resolves_model_and_prompt_from_agent_instance
     with pytest.raises(ValueError, match="did not call any search tools"):
         runner.run_search(phase="broad", session=session, suggested_queries=["ai scientist"], existing_sources=[])
 
-    assert captured["profile_id"] == "research_live_profile"
+    assert captured["profile_id"] == "primary"
+    assert captured["primary_model"] == "research-live-runtime"
     assert "Use custom AgentInstance prompt" in captured["system"]
     assert "STALE LEGACY PROMPT" not in captured["system"]
 
@@ -2279,12 +2293,18 @@ def test_llm_research_agent_runner_prefers_mode_binding_over_legacy_agent_config
     prompt_template_service.PROJECT_ROOT = project_root
     agent_mode_binding_service.PROJECT_ROOT = project_root
     try:
+        base_config = session_service.get_config().model_copy(deep=True)
+        base_config.llm.model_library["research-mode-bound-model"] = {
+            "provider_id": base_config.llm.profiles["primary"].provider_id,
+            "model": "research-mode-bound-runtime",
+            "streaming": False,
+            "tool_calling_mode": "disabled",
+        }
         agent = agent_directory_service.create_agent_instance(
             display_name="ModeBinding 广搜 Agent",
-            profile_id="research_mode_bound_profile",
+            llm_bindings={"dialogue": {"modelId": "research-mode-bound-model"}},
             primary_mode="research",
             role_key="research_broad",
-            template_id="research_broad_explorer",
             prompt_template_id="prompt-research-mode-bound",
             metadata={"researchAgentKey": "broad", "researchTemplateId": "research_broad_explorer"},
         )
@@ -2335,11 +2355,13 @@ def test_llm_research_agent_runner_prefers_mode_binding_over_legacy_agent_config
     captured: dict[str, Any] = {}
 
     class FakeClient:
-        def __init__(self, profile_id):
+        def __init__(self, profile_id, config):
             self.profile_id = profile_id
+            self.config = config
 
         def invoke(self, messages, tools=None, metadata=None):
             captured["profile_id"] = self.profile_id
+            captured["primary_model"] = self.config.llm.get_profile(profile_id=self.profile_id).model
             captured["system"] = messages[0]["content"]
 
             class Response:
@@ -2349,7 +2371,11 @@ def test_llm_research_agent_runner_prefers_mode_binding_over_legacy_agent_config
             return Response()
 
     monkeypatch.setattr("core.research.agent_runner.get_workspace", lambda: FakeWorkspace())
-    monkeypatch.setattr("core.research.agent_runner.get_llm_client", lambda profile_id=None: FakeClient(profile_id))
+    monkeypatch.setattr("core.research.agent_runner.get_config", lambda: base_config)
+    monkeypatch.setattr(
+        "core.research.agent_runner.get_llm_client",
+        lambda profile_id=None, config=None: FakeClient(profile_id, config),
+    )
     runner = LLMResearchAgentRunner(search_provider=DeterministicResearchSearchProvider())
     session = ResearchDiscoverySession(
         session_id=new_id("research-session"),
@@ -2361,7 +2387,8 @@ def test_llm_research_agent_runner_prefers_mode_binding_over_legacy_agent_config
     with pytest.raises(ValueError, match="did not call any search tools"):
         runner.run_search(phase="broad", session=session, suggested_queries=["ai scientist"], existing_sources=[])
 
-    assert captured["profile_id"] == "research_mode_bound_profile"
+    assert captured["profile_id"] == "primary"
+    assert captured["primary_model"] == "research-mode-bound-runtime"
     assert "Use ModeBinding prompt" in captured["system"]
     assert "STALE LEGACY PROMPT" not in captured["system"]
 

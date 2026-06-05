@@ -72,7 +72,7 @@ class TestToolExecutorInit:
             "apply_patch_tool", "plan_update_tool",
             "trigger_self_restart_tool", "grep_search_tool",
             "task_create_tool", "task_update_tool", "task_list_tool",
-            "cli_tool", "agent_message_tool",
+            "cli_tool", "agent_message_tool", "conversation_log_inspect_tool",
         ]
         
         for tool_name in expected_tools:
@@ -101,6 +101,29 @@ class TestToolExecutorInit:
         assert "research_knowledge_query_tool" in llm_names
         assert "knowledge_rag_retrieve_tool" in canonical_names
         assert "knowledge_rag_retrieve_tool" in llm_names
+
+    def test_conversation_log_inspect_tool_is_registered_and_llm_facing(self):
+        canonical_names = {tool.name for tool in create_key_tools()}
+        llm_names = {tool.name for tool in create_llm_facing_tools()}
+
+        assert "conversation_log_inspect_tool" in canonical_names
+        assert "conversation_log_inspect_tool" in llm_names
+
+    def test_memory_tools_are_llm_facing_but_policy_gated_by_default(self):
+        from core.web.services.agent_directory_service import compute_effective_tool_visibility, default_tool_policy
+
+        tools = create_llm_facing_tools()
+        llm_names = {tool.name for tool in tools}
+
+        assert "record_learning_tool" in llm_names
+        assert "search_memory_tool" in llm_names
+
+        visibility = compute_effective_tool_visibility(tools, policy=default_tool_policy())
+
+        assert "record_learning_tool" not in visibility.visible_tools
+        assert "search_memory_tool" not in visibility.visible_tools
+        assert "record_learning_tool" in visibility.hidden_restricted_tools
+        assert "search_memory_tool" in visibility.hidden_restricted_tools
 
     def test_tools_package_does_not_reexport_compat_aliases(self):
         """tools 包入口不再把底层 helper 伪装成 agent 工具别名。"""
@@ -261,6 +284,29 @@ class TestToolExecutorExecute:
         assert "read_file_tool" in event_data["error"]
         assert "read_file" not in event_data["error"].replace("read_file_tool", "")
 
+    def test_unknown_tool_in_agent_runtime_lists_only_visible_tools(self, executor, monkeypatch):
+        from core.web.services import agent_directory_service
+
+        monkeypatch.setattr(agent_directory_service, "current_agent_runtime", lambda: {
+            "agentId": "agent-policy",
+            "toolPolicy": {
+                "policyId": "tool-agent-policy",
+                "allowedTools": ["agent_message_tool", "read_memory_tool"],
+                "blockedTools": [],
+            },
+        })
+
+        result, action = executor.execute("read_memory_tool", {})
+
+        assert action is None
+        assert "[错误] 未知工具" in str(result)
+        assert "未暴露给当前 Agent" in str(result)
+        assert "当前 Agent 可见工具包括：agent_message_tool" in str(result)
+        assert "read_memory_tool" not in str(result)
+        assert "get_memory_summary_tool" not in str(result)
+        assert "read_file_tool" not in str(result)
+        assert "grep_search_tool" not in str(result)
+
     def test_execute_read_file(self, executor):
         """测试读取文件工具"""
         # 创建一个测试文件
@@ -365,8 +411,13 @@ class TestToolExecutorTimeout:
     def test_get_file_entities_tool_compat_alias_is_not_registered(self, executor):
         assert "get_file_entities_tool" not in executor._tool_map
 
-    def test_code_symbol_tool_outline_and_entity_modes(self, executor, tmp_path):
+    def test_code_symbol_tool_v2_project_graph_modes(self, executor, tmp_path, monkeypatch):
+        from core.code_context_graph import service as graph_service
+
+        (tmp_path / "core").mkdir()
+        (tmp_path / "tests").mkdir()
         source = tmp_path / "demo_symbols.py"
+        source = tmp_path / "core" / "demo_symbols.py"
         source.write_text(
             "class Demo:\n"
             "    def run(self):\n"
@@ -375,30 +426,46 @@ class TestToolExecutorTimeout:
             "    return 1\n",
             encoding="utf-8",
         )
-
-        outline, outline_action = executor.execute(
-            "code_symbol_tool",
-            {"mode": "outline", "file_path": str(source)},
+        (tmp_path / "tests" / "test_demo_symbols.py").write_text(
+            "from core.demo_symbols import helper\n\ndef test_helper():\n    assert helper() == 1\n",
+            encoding="utf-8",
         )
-        entity, entity_action = executor.execute(
+        monkeypatch.setattr(graph_service, "project_root", lambda: tmp_path)
+
+        indexed, index_action = executor.execute(
             "code_symbol_tool",
-            {"mode": "entity", "file_path": str(source), "symbol": "Demo.run"},
+            {"mode": "index"},
+        )
+        inspected, inspect_action = executor.execute(
+            "code_symbol_tool",
+            {"mode": "inspect", "file_path": "core/demo_symbols.py"},
+        )
+        affected, affected_action = executor.execute(
+            "code_symbol_tool",
+            {"mode": "affected_tests", "file_path": "core/demo_symbols.py"},
         )
 
-        assert outline_action is None
-        assert entity_action is None
-        assert "Demo" in str(outline)
-        assert "helper" in str(outline)
-        assert "def run" in str(entity)
-        assert "return helper()" in str(entity)
+        assert index_action is None
+        assert inspect_action is None
+        assert affected_action is None
+        assert json.loads(indexed)["summary"]["fileCount"] >= 2
+        assert any(item["qualifiedName"] == "Demo.run" for item in json.loads(inspected)["symbols"])
+        assert any(item["path"] == "tests/test_demo_symbols.py" for item in json.loads(affected)["tests"])
 
-    def test_code_symbol_tool_returns_parameter_correction_example(self, executor):
-        result, action = executor.execute("code_symbol_tool", {"mode": "entity"})
+    def test_code_symbol_tool_rejects_removed_legacy_parameters(self, executor):
+        result, action = executor.execute("code_symbol_tool", {"mode": "inspect", "entity_name": "Demo.run"})
 
         assert action is None
-        assert '"status": "error"' in str(result)
-        assert "entity 模式需要 file_path 和 symbol 或 entity_name" in str(result)
-        assert '"example"' in str(result)
+        assert "[工具参数错误]" in str(result)
+        assert "entity_name" in str(result)
+
+    def test_code_symbol_tool_reports_deprecated_legacy_mode(self, executor):
+        result, action = executor.execute("code_symbol_tool", {"mode": "entity", "file_path": "agent.py", "symbol": "Agent"})
+
+        assert action is None
+        payload = json.loads(result)
+        assert payload["status"] == "error"
+        assert payload["error"] == "deprecated_mode"
 
     def test_spawn_agent_tool_requires_internal_delegate_flag(self, executor):
         result, action = executor.execute("spawn_agent_tool", {"goal": "分析重复调用"})
@@ -847,6 +914,10 @@ class TestToolExecutorErrorHandling:
         assert call_counter["count"] == 2
         snapshot = get_session_state().get_attention_snapshot()
         assert "cli_tool:pipe" in snapshot["blocked_tool_patterns"]
+        pipe_hint = snapshot["blocked_tool_patterns"]["cli_tool:pipe"]["hint"]
+        assert "无 pipe 的有界命令" in pipe_hint
+        assert "已授权" in pipe_hint
+        assert "read_file_tool / grep_search_tool" not in pipe_hint
 
     def test_cross_platform_warning_is_recorded_as_successful_platform_check(self, executor):
         """跨平台命令拦截是平台检查通过，不能污染 pytest 失败状态。"""
@@ -954,7 +1025,7 @@ class TestToolExecutorErrorHandling:
         assert "[文件读取] 错误" not in str(result)
         assert "第     2 行" in str(result)
 
-    def test_duplicate_read_allows_reread_without_blocker(self, executor, tmp_path):
+    def test_duplicate_read_returns_compact_governance_without_body(self, executor, tmp_path):
         reset_session_state()
         file_path = tmp_path / "demo_repeat.txt"
         file_path.write_text("a\nb\nc\nd\ne\n", encoding="utf-8")
@@ -964,8 +1035,34 @@ class TestToolExecutorErrorHandling:
 
         snapshot = get_session_state().get_attention_snapshot()
         assert "[短路]" not in str(second)
+        assert "[阅读治理]" in str(second)
+        assert "未重复返回正文" in str(second)
+        assert "第     1 行" not in str(second)
+        assert any(item["kind"] == "duplicate_read_soft_redirect" for item in snapshot["recent_blockers"])
+
+    def test_duplicate_read_force_allows_reread(self, executor, tmp_path):
+        reset_session_state()
+        file_path = tmp_path / "demo_repeat_force.txt"
+        file_path.write_text("a\nb\nc\nd\ne\n", encoding="utf-8")
+
+        executor.execute("read_file_tool", {"file_path": str(file_path), "offset": 0, "max_lines": 2})
+        second, _ = executor.execute("read_file_tool", {"file_path": str(file_path), "offset": 0, "max_lines": 2, "force": True})
+
+        assert "[阅读治理]" not in str(second)
         assert "第     1 行" in str(second)
-        assert not any(item["kind"] in {"duplicate_read", "duplicate_read_guard"} for item in snapshot["recent_blockers"])
+
+    def test_full_file_read_requires_force(self, executor, tmp_path):
+        reset_session_state()
+        file_path = tmp_path / "demo_full_file.txt"
+        file_path.write_text("a\nb\nc\n", encoding="utf-8")
+
+        result, action = executor.execute("read_file_tool", {"file_path": str(file_path), "max_lines": 0})
+
+        assert action is None
+        assert "[阅读治理]" in str(result)
+        assert "全文件读取" in str(result)
+        snapshot = get_session_state().get_attention_snapshot()
+        assert any(item["kind"] == "read_file_full_file_redirect" for item in snapshot["recent_blockers"])
 
     def test_read_file_records_hint_when_continuation_is_ignored(self, executor, tmp_path):
         session = reset_session_state()
@@ -1037,7 +1134,7 @@ class TestToolExecutorErrorHandling:
         snapshot = get_session_state().get_attention_snapshot()
         assert not any(item["kind"] == "read_navigation_redirect" for item in snapshot["recent_blockers"])
 
-    def test_read_file_allows_high_overlap(self, executor, tmp_path):
+    def test_read_file_high_overlap_returns_governance(self, executor, tmp_path):
         session = reset_session_state()
         file_path = tmp_path / "demo_overlap.txt"
         file_path.write_text("\n".join(f"line {i}" for i in range(1, 160)), encoding="utf-8")
@@ -1047,9 +1144,10 @@ class TestToolExecutorErrorHandling:
 
         assert action is None
         assert "[短路]" not in str(result)
-        assert "第    31 行" in str(result) or "第     31 行" in str(result)
+        assert "[阅读治理]" in str(result)
+        assert "未重复返回正文" in str(result)
         snapshot = get_session_state().get_attention_snapshot()
-        assert not any(item["kind"] == "duplicate_read_guard" for item in snapshot["recent_blockers"])
+        assert any(item["kind"] == "duplicate_read_soft_redirect" for item in snapshot["recent_blockers"])
 
     def test_duplicate_search_records_state_without_blocker(self, executor):
         reset_session_state()
@@ -1149,7 +1247,7 @@ class TestToolExecutorErrorHandling:
         executor.register_tool("code_symbol_tool", fake_code_symbol_tool, timeout=5)
         result, action = executor.execute(
             "code_symbol_tool",
-            {"mode": "entity", "file_path": "core/demo.py", "entity_name": "Demo.run"},
+            {"mode": "inspect", "file_path": "core/demo.py", "symbol": "Demo.run"},
         )
 
         assert action is None
@@ -1171,6 +1269,24 @@ class TestToolExecutorErrorHandling:
         snapshot = get_session_state().get_attention_snapshot()
         assert any(item["tool_name"] == "cli_tool" for item in snapshot["tool_deviations"])
         assert any(item["kind"] == "tool_deviation" for item in snapshot["recent_blockers"])
+
+    def test_cli_tool_file_read_command_executes_normally(self, executor):
+        reset_session_state()
+
+        called = {"count": 0}
+
+        def fake_cli_tool(command="", timeout=60):
+            called["count"] += 1
+            return "file body"
+
+        executor.register_tool("cli_tool", fake_cli_tool, timeout=5)
+        result, action = executor.execute("cli_tool", {"command": "Get-Content core/demo.py | Select-Object -First 20"})
+
+        assert action is None
+        assert result == "file body"
+        assert called["count"] == 1
+        snapshot = get_session_state().get_attention_snapshot()
+        assert not any(item["kind"] == "cli_reading_shortcut" for item in snapshot["recent_blockers"])
 
     def test_execute_tool_missing_required_args(self, executor):
         """测试执行工具时缺少必需参数"""
@@ -1312,7 +1428,8 @@ class TestToolExecutorErrorHandling:
             return "should not run"
 
         executor.register_tool("write_file_tool", fake_write, timeout=5)
-        reset_session_state()
+        session = reset_session_state()
+        session.set_runtime_goal_packet(SimpleNamespace(allow_evolution_transaction=True))
 
         result, action = executor.execute(
             "write_file_tool",
@@ -1322,6 +1439,44 @@ class TestToolExecutorErrorHandling:
         assert action is None
         assert called["value"] is False
         assert "open_evolution_transaction_tool" in str(result)
+
+    def test_chat_user_development_write_skips_evolution_allowlist_guard(self, executor, monkeypatch, tmp_path):
+        project_root = tmp_path / "project"
+        project_root.mkdir(parents=True, exist_ok=True)
+
+        class _FakeWorkspace:
+            def __init__(self, root: Path):
+                self.project_root = root
+
+            def get_prompt_path(self, name: str) -> Path:
+                return self.project_root / "workspace" / "prompts" / name
+
+        evolution = SimpleNamespace(
+            allowed_target_dirs=["workspace/prompts/"],
+            audit_log_path="workspace/evolution/audit.jsonl",
+        )
+        monkeypatch.setattr(governor_module, "get_config", lambda: SimpleNamespace(evolution=evolution))
+        monkeypatch.setattr(governor_module, "get_workspace", lambda: _FakeWorkspace(project_root))
+        governor_module._governor = None
+
+        called = {"value": False}
+
+        def fake_write(file_path, content):
+            called["value"] = True
+            return "ok"
+
+        executor.register_tool("write_file_tool", fake_write, timeout=5)
+        session = reset_session_state()
+        session.set_runtime_goal_packet(SimpleNamespace(allow_evolution_transaction=False))
+
+        result, action = executor.execute(
+            "write_file_tool",
+            {"file_path": "core/runtime.py", "content": "x"},
+        )
+
+        assert action is None
+        assert called["value"] is True
+        assert result == "ok"
 
     def test_cli_python_write_to_risky_path_requires_active_txn(self, executor, monkeypatch, tmp_path):
         project_root = tmp_path / "project"
@@ -1349,7 +1504,8 @@ class TestToolExecutorErrorHandling:
             return "should not run"
 
         executor.register_tool("cli_tool", fake_cli_tool, timeout=5)
-        reset_session_state()
+        session = reset_session_state()
+        session.set_runtime_goal_packet(SimpleNamespace(allow_evolution_transaction=True))
 
         result, action = executor.execute(
             "cli_tool",

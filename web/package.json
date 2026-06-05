@@ -1,13 +1,16 @@
 {
   "name": "vibelution-web-workbench",
   "private": true,
-  "version": "0.10.15",
+  "version": "0.10.22",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview --host 127.0.0.1 --port 4173",
-    "test": "vitest run"
+    "test": "vitest run",
+    "bun:dev": "vite",
+    "bun:build": "tsc -b && vite build",
+    "bun:test": "vitest run"
   },
   "devDependencies": {
     "@types/react": "^19.2.2",

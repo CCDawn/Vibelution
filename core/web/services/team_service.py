@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import re
 import threading
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from time import perf_counter
 from typing import Any
@@ -34,6 +34,10 @@ EVOLUTION_SYSTEM_TEAM_SPECS = (
         "description": "由自进化固定角色自动同步的系统团队。",
         "purpose": "承接自进化执行、评审与总结角色的团队通讯。",
         "source": "self_evolution",
+        "teamKind": "self_evolution",
+        "teamCategory": "自进化系统团队",
+        "teamSource": "self_evolution",
+        "chatRoomPurpose": "self_evolution",
     },
     {
         "teamId": "supervised-evolution-team",
@@ -41,8 +45,35 @@ EVOLUTION_SYSTEM_TEAM_SPECS = (
         "description": "由监督进化固定角色自动同步的系统团队。",
         "purpose": "承接监督进化基线、候选、评审、审计与裁决角色的团队通讯。",
         "source": "supervised_evolution",
+        "teamKind": "supervised_evolution",
+        "teamCategory": "监督进化系统团队",
+        "teamSource": "supervised_evolution",
+        "chatRoomPurpose": "supervised_evolution",
     },
 )
+TEAM_KIND_DEFAULTS = {
+    "custom": {"teamCategory": "自定义团队", "teamSource": "manual", "chatRoomPurpose": "discussion"},
+    "research": {"teamCategory": "科研组织团队", "teamSource": "research_organization", "chatRoomPurpose": "research_coordination"},
+    "self_evolution": {"teamCategory": "自进化系统团队", "teamSource": "self_evolution", "chatRoomPurpose": "self_evolution"},
+    "supervised_evolution": {"teamCategory": "监督进化系统团队", "teamSource": "supervised_evolution", "chatRoomPurpose": "supervised_evolution"},
+    "template_demo": {"teamCategory": "演示业务团队", "teamSource": "team_template", "chatRoomPurpose": "meeting"},
+}
+TEAM_SOURCE_TO_KIND = {
+    "manual": "custom",
+    "research_organization": "research",
+    "self_evolution": "self_evolution",
+    "supervised_evolution": "supervised_evolution",
+    "team_template": "template_demo",
+}
+TEAM_ID_TO_KIND = {
+    "research-team": "research",
+    "self-evolution-team": "self_evolution",
+    "supervised-evolution-team": "supervised_evolution",
+}
+TEMPLATE_MEMBER_PREFIX_TO_TEMPLATE_ID = {
+    "medical-demo": "medical-consultation-demo",
+    "heletech-demo": "heletech-maternal-digital-health-demo",
+}
 
 
 class TeamServiceError(ValueError):
@@ -54,7 +85,7 @@ class TeamNotFoundError(TeamServiceError):
 
 
 def utc_now_iso() -> str:
-    return datetime.now(UTC).isoformat()
+    return datetime.now(timezone.utc).isoformat()
 
 
 def _perf_counter() -> float:
@@ -68,7 +99,9 @@ def _elapsed_ms(started_at: float) -> int:
 def list_teams(*, include_archived: bool = False) -> dict[str, Any]:
     with _TEAM_LOCK:
         state = _load_index()
-        if _repair_index_state(state):
+        changed = _repair_index_state(state)
+        changed = _repair_archived_team_member_agents(state, reason="list_teams", strict=False) or changed
+        if changed:
             _save_index(state)
     teams = [
         _team_to_api(item)
@@ -90,10 +123,31 @@ def list_teams_compact(*, include_archived: bool = False) -> dict[str, Any]:
 
     with _TEAM_LOCK:
         state = _load_index()
-        if _repair_index_shape(state):
+        changed = _repair_index_compact_contracts(state)
+        changed = _repair_archived_team_member_agents(state, reason="list_teams_compact", strict=False) or changed
+        if changed:
             _save_index(state)
     teams = [
         _team_to_compact_reference(item)
+        for item in list(state.get("teams") or [])
+        if isinstance(item, dict) and (include_archived or str(item.get("status") or DEFAULT_TEAM_STATUS) != "archived")
+    ]
+    teams.sort(key=lambda item: str(item.get("updatedAt") or item.get("createdAt") or ""), reverse=True)
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "teams": teams,
+        "summary": _summary(teams),
+        "updatedAt": str(state.get("updatedAt") or ""),
+        "storage": {"teamsPath": _relative_path(_teams_index_path()), "teamRoot": _relative_path(_teams_root())},
+    }
+
+
+def list_team_graph_references(*, include_archived: bool = False) -> dict[str, Any]:
+    """Return lightweight Team references for read-only graph surfaces."""
+
+    state = _load_index()
+    teams = [
+        _team_to_graph_reference(item)
         for item in list(state.get("teams") or [])
         if isinstance(item, dict) and (include_archived or str(item.get("status") or DEFAULT_TEAM_STATUS) != "archived")
     ]
@@ -129,6 +183,10 @@ def create_team(
     description: str = "",
     purpose: str = "",
     members: list[dict[str, Any]] | None = None,
+    team_kind: str = "custom",
+    team_category: str = "",
+    team_source: str = "manual",
+    team_template_id: str = "",
 ) -> dict[str, Any]:
     normalized_name = trim_lines(name or "", max_lines=1).strip()
     if not normalized_name:
@@ -156,6 +214,13 @@ def create_team(
             "createdAt": now,
             "updatedAt": now,
         }
+        _apply_team_contract(
+            team,
+            team_kind=team_kind,
+            team_category=team_category,
+            team_source=team_source,
+            team_template_id=team_template_id,
+        )
         state.setdefault("teams", []).append(team)
         state["updatedAt"] = now
         _save_index(state)
@@ -194,6 +259,7 @@ def ensure_research_team_from_organization(organization: dict[str, Any]) -> dict
                 "createdAt": now,
                 "updatedAt": now,
             }
+            _apply_team_contract(team, team_kind="research", team_source="research_organization")
             state.setdefault("teams", []).append(team)
         else:
             team["name"] = "科研团队"
@@ -203,6 +269,7 @@ def ensure_research_team_from_organization(organization: dict[str, Any]) -> dict
             team["members"] = members
             team["canvasPath"] = _relative_path(_team_canvas_path(team_id))
             team["updatedAt"] = now
+            _apply_team_contract(team, team_kind="research", team_source="research_organization")
         state["updatedAt"] = str(team.get("updatedAt") or now)
         _save_index(state)
         canvas = _canvas_from_research_organization(organization, team)
@@ -255,7 +322,9 @@ def get_team(team_id: str) -> dict[str, Any]:
         team = _find_team(state, normalized_team_id)
         if team is None:
             raise TeamNotFoundError("Team not found.")
-        if _repair_team(team):
+        changed = _repair_team(team)
+        changed = _repair_archived_team_member_agents_for_team(team, state, reason="get_team", strict=False) or changed
+        if changed:
             state["updatedAt"] = utc_now_iso()
             _save_index(state)
     detail = _team_detail_to_api(team)
@@ -291,6 +360,8 @@ def update_team(
             normalized_status = str(status or "").strip().lower() or DEFAULT_TEAM_STATUS
             if normalized_status not in TEAM_STATUSES:
                 raise TeamServiceError(f"Unsupported team status: {status}")
+            if normalized_status == "archived" and str(team.get("status") or DEFAULT_TEAM_STATUS).strip() != "archived":
+                return _archive_team_in_state(state, team)
             team["status"] = normalized_status
         if members is not None:
             normalized_members = _normalize_members(members, require_active=True)
@@ -305,7 +376,51 @@ def update_team(
 
 
 def archive_team(team_id: str) -> dict[str, Any]:
-    return update_team(team_id, status="archived")
+    normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
+    with _TEAM_LOCK:
+        state = _load_index()
+        team = _find_team(state, normalized_team_id)
+        if team is None:
+            raise TeamNotFoundError("Team not found.")
+        if str(team.get("status") or DEFAULT_TEAM_STATUS).strip() == "archived":
+            if _repair_archived_team_member_agents_for_team(team, state, reason="archive_team_already_archived", strict=True):
+                state["updatedAt"] = utc_now_iso()
+                _save_index(state)
+            return get_team(normalized_team_id)
+        return _archive_team_in_state(state, team)
+
+
+def _archive_team_in_state(state: dict[str, Any], team: dict[str, Any]) -> dict[str, Any]:
+    team_id = str(team.get("teamId") or "").strip()
+    team_kind = str(team.get("teamKind") or _infer_team_kind(team)).strip() or "custom"
+    if team_kind in {"research", "self_evolution", "supervised_evolution"}:
+        _record_team_archive_rejected(team, reason="system_team")
+        raise TeamServiceError("System Team cannot be archived with cascade Agent deletion.")
+    if team_kind not in {"custom", "template_demo"}:
+        _record_team_archive_rejected(team, reason="unsupported_team_kind")
+        raise TeamServiceError(f"Team kind cannot be archived with cascade Agent deletion: {team_kind}")
+
+    agent_ids = _unique_active_member_agent_ids(team)
+    _ensure_team_member_agents_can_archive(team, agent_ids)
+
+    now = utc_now_iso()
+    team["status"] = "archived"
+    team["updatedAt"] = now
+    team["canvasPath"] = _relative_path(_team_canvas_path(team_id))
+    state["updatedAt"] = now
+    _save_index(state)
+
+    archived_agent_ids = _archive_team_member_agents(team, agent_ids, reason="team_archive")
+
+    _record_team_event(
+        "team.archived_with_agents",
+        team,
+        fields={
+            "archivedAgentIds": archived_agent_ids,
+            "archivedAgentCount": len(archived_agent_ids),
+        },
+    )
+    return get_team(team_id)
 
 
 def send_team_message(
@@ -530,6 +645,11 @@ def _normalize_node(
         "agentName": str((agent or {}).get("displayName") or "").strip(),
         "role": trim_lines(item.get("role") or "", max_lines=1).strip(),
         "purpose": trim_lines(item.get("purpose") or "", max_lines=4).strip(),
+        "responsibilities": [
+            trim_lines(value, max_lines=2).strip()
+            for value in list(item.get("responsibilities") or [])[:8]
+            if str(value or "").strip()
+        ],
     }
 
 
@@ -624,6 +744,11 @@ def _normalize_members(items: list[dict[str, Any]], *, require_active: bool) -> 
                 "agentName": str(agent.get("displayName") or "").strip(),
                 "role": trim_lines(item.get("role") or "", max_lines=1).strip(),
                 "purpose": trim_lines(item.get("purpose") or "", max_lines=4).strip(),
+                "responsibilities": [
+                    trim_lines(value, max_lines=2).strip()
+                    for value in list(item.get("responsibilities") or [])[:8]
+                    if str(value or "").strip()
+                ],
                 "agentStatus": "active",
             }
         )
@@ -698,9 +823,19 @@ def _ensure_evolution_system_team_in_state(
             "linkedChatRoomId": "",
             "canvasPath": _relative_path(_team_canvas_path(team_id)),
             "systemTeamKind": source,
+            "teamKind": str(spec.get("teamKind") or source).strip(),
+            "teamCategory": str(spec.get("teamCategory") or "").strip(),
+            "teamSource": str(spec.get("teamSource") or source).strip(),
+            "teamTemplateId": "",
             "createdAt": now,
             "updatedAt": now,
         }
+        _apply_team_contract(
+            team,
+            team_kind=str(spec.get("teamKind") or source),
+            team_category=str(spec.get("teamCategory") or ""),
+            team_source=str(spec.get("teamSource") or source),
+        )
         state.setdefault("teams", []).append(team)
     else:
         expected = {
@@ -711,15 +846,26 @@ def _ensure_evolution_system_team_in_state(
             "members": members,
             "canvasPath": _relative_path(_team_canvas_path(team_id)),
             "systemTeamKind": source,
+            "teamKind": str(spec.get("teamKind") or source).strip(),
+            "teamCategory": str(spec.get("teamCategory") or "").strip(),
+            "teamSource": str(spec.get("teamSource") or source).strip(),
+            "teamTemplateId": "",
         }
         for key, value in expected.items():
             if team.get(key) != value:
                 team[key] = value
                 changed = True
+        if _apply_team_contract(
+            team,
+            team_kind=str(spec.get("teamKind") or source),
+            team_category=str(spec.get("teamCategory") or ""),
+            team_source=str(spec.get("teamSource") or source),
+        ):
+            changed = True
         if changed:
             team["updatedAt"] = now
     canvas_path = _team_canvas_path(team_id)
-    if changed or not canvas_path.exists():
+    if changed or not canvas_path.exists() or _default_canvas_edges_missing_for_team(team, canvas_path):
         _write_json(canvas_path, _default_canvas_for_team(team))
     if _team_chat_room_needs_sync(team):
         _ensure_team_chat_room_link(team)
@@ -810,6 +956,74 @@ def _find_active_team_for_agent_in_state(state: dict[str, Any], agent_id: str, *
     return None
 
 
+def _unique_active_member_agent_ids(team: dict[str, Any]) -> list[str]:
+    agent_ids: list[str] = []
+    seen: set[str] = set()
+    for member in list(team.get("members") or []):
+        if not isinstance(member, dict):
+            continue
+        agent_id = str(member.get("agentId") or "").strip()
+        if not agent_id or agent_id in seen:
+            continue
+        agent = agent_directory_service.get_agent(agent_id, include_archived=True)
+        if not agent or str(agent.get("status") or "active").strip() == "archived":
+            continue
+        seen.add(agent_id)
+        agent_ids.append(agent_id)
+    return agent_ids
+
+
+def _team_kind_allows_member_agent_cascade(team: dict[str, Any]) -> bool:
+    return str(team.get("teamKind") or _infer_team_kind(team)).strip() in {"custom", "template_demo"}
+
+
+def _ensure_team_member_agents_can_archive(team: dict[str, Any], agent_ids: list[str]) -> None:
+    for agent_id in agent_ids:
+        try:
+            agent_directory_service.ensure_agent_archive_allowed(agent_id)
+        except agent_directory_service.AgentDirectoryError as exc:
+            _record_team_archive_rejected(team, reason="agent_archive_rejected", agent_id=agent_id, error=exc)
+            raise TeamServiceError(str(exc)) from exc
+
+
+def _archive_team_member_agents(team: dict[str, Any], agent_ids: list[str], *, reason: str) -> list[str]:
+    archived_agent_ids: list[str] = []
+    for agent_id in agent_ids:
+        archived_agent = agent_directory_service.archive_agent_instance(agent_id)
+        archived_agent_ids.append(str(archived_agent.get("agentId") or agent_id).strip())
+    if archived_agent_ids and reason != "team_archive":
+        _record_archived_team_member_cascade_repaired(team, archived_agent_ids, reason=reason)
+    return archived_agent_ids
+
+
+def _repair_archived_team_member_agents(state: dict[str, Any], *, reason: str, strict: bool) -> bool:
+    changed = False
+    for team in list(state.get("teams") or []):
+        if isinstance(team, dict):
+            changed = _repair_archived_team_member_agents_for_team(team, state, reason=reason, strict=strict) or changed
+    return changed
+
+
+def _repair_archived_team_member_agents_for_team(team: dict[str, Any], state: dict[str, Any], *, reason: str, strict: bool) -> bool:
+    if str(team.get("status") or DEFAULT_TEAM_STATUS).strip() != "archived":
+        return False
+    if not _team_kind_allows_member_agent_cascade(team):
+        return False
+    agent_ids = _unique_active_member_agent_ids(team)
+    if not agent_ids:
+        return False
+    try:
+        _ensure_team_member_agents_can_archive(team, agent_ids)
+    except TeamServiceError:
+        if strict:
+            raise
+        return False
+    _archive_team_member_agents(team, agent_ids, reason=reason)
+    team["updatedAt"] = utc_now_iso()
+    state["updatedAt"] = team["updatedAt"]
+    return True
+
+
 def _sync_members_from_canvas(current_members: list[dict[str, Any]], canvas: dict[str, Any]) -> list[dict[str, Any]]:
     by_agent = {
         str(member.get("agentId") or "").strip(): dict(member)
@@ -833,6 +1047,12 @@ def _sync_members_from_canvas(current_members: list[dict[str, Any]], canvas: dic
                 "agentStatus": "active" if str(agent.get("status") or "active") != "archived" else "stale",
             }
         )
+        if isinstance(node.get("responsibilities"), list):
+            member["responsibilities"] = [
+                trim_lines(value, max_lines=2).strip()
+                for value in list(node.get("responsibilities") or [])[:8]
+                if str(value or "").strip()
+            ]
         by_agent[agent_id] = member
     return list(by_agent.values())
 
@@ -1120,13 +1340,90 @@ def _sync_chat_room_root() -> None:
         chat_room_service.PROJECT_ROOT = PROJECT_ROOT
 
 
+def _apply_team_contract(
+    team: dict[str, Any],
+    *,
+    team_kind: str = "",
+    team_category: str = "",
+    team_source: str = "",
+    team_template_id: str = "",
+) -> bool:
+    inferred_kind = _infer_team_kind(team, fallback=team_kind)
+    defaults = TEAM_KIND_DEFAULTS.get(inferred_kind, TEAM_KIND_DEFAULTS["custom"])
+    expected = {
+        "teamKind": inferred_kind,
+        "teamCategory": trim_lines(team_category or team.get("teamCategory") or defaults["teamCategory"], max_lines=1).strip(),
+        "teamSource": str(team_source or team.get("teamSource") or defaults["teamSource"]).strip(),
+        "teamTemplateId": str(team_template_id or team.get("teamTemplateId") or "").strip(),
+    }
+    if expected["teamSource"] in TEAM_SOURCE_TO_KIND:
+        expected["teamKind"] = TEAM_SOURCE_TO_KIND[expected["teamSource"]]
+    if expected["teamKind"] != "template_demo":
+        expected["teamTemplateId"] = ""
+    elif not expected["teamTemplateId"]:
+        expected["teamTemplateId"] = _infer_team_template_id(team)
+    changed = False
+    for key, value in expected.items():
+        if team.get(key) != value:
+            team[key] = value
+            changed = True
+    return changed
+
+
+def _infer_team_kind(team: dict[str, Any], *, fallback: str = "") -> str:
+    explicit = str(fallback or team.get("teamKind") or "").strip()
+    if explicit in TEAM_KIND_DEFAULTS:
+        return explicit
+    source = str(team.get("teamSource") or team.get("systemTeamKind") or "").strip()
+    if source in TEAM_SOURCE_TO_KIND:
+        return TEAM_SOURCE_TO_KIND[source]
+    team_id = str(team.get("teamId") or "").strip()
+    if team_id in TEAM_ID_TO_KIND:
+        return TEAM_ID_TO_KIND[team_id]
+    if _infer_team_template_id(team):
+        return "template_demo"
+    return "custom"
+
+
+def _infer_team_template_id(team: dict[str, Any]) -> str:
+    template_id = str(team.get("teamTemplateId") or "").strip()
+    if template_id:
+        return template_id
+    for member in list(team.get("members") or []):
+        if not isinstance(member, dict):
+            continue
+        member_id = str(member.get("memberId") or "").strip()
+        for prefix, candidate in TEMPLATE_MEMBER_PREFIX_TO_TEMPLATE_ID.items():
+            if member_id.startswith(f"{prefix}-"):
+                return candidate
+    return ""
+
+
+def _team_default_chat_room_purpose(team: dict[str, Any]) -> str:
+    kind = _infer_team_kind(team)
+    if kind == "template_demo":
+        template_id = str(team.get("teamTemplateId") or _infer_team_template_id(team)).strip()
+        if template_id == "medical-consultation-demo":
+            return "medical_triage"
+        if template_id == "heletech-maternal-digital-health-demo":
+            return "meeting"
+    return str(TEAM_KIND_DEFAULTS.get(kind, TEAM_KIND_DEFAULTS["custom"]).get("chatRoomPurpose") or "discussion")
+
+
+def _team_chat_room_purpose_for_update(team: dict[str, Any], current_purpose: Any) -> str:
+    normalized_current = str(current_purpose or "").strip()
+    expected = _team_default_chat_room_purpose(team)
+    if not normalized_current:
+        return expected
+    if normalized_current == "discussion" and _infer_team_kind(team) != "custom":
+        return expected
+    return normalized_current
+
+
 def _ensure_team_chat_room_link(team: dict[str, Any]) -> str:
     if str(team.get("status") or DEFAULT_TEAM_STATUS).strip() == "archived":
         return str(team.get("linkedChatRoomId") or "").strip()
     session_ids = _active_member_session_ids(team)
-    if not session_ids:
-        team["linkedChatRoomId"] = ""
-        return ""
     _sync_chat_room_root()
     linked_room_id = str(team.get("linkedChatRoomId") or "").strip()
     title = _team_chat_room_title(team)
@@ -1135,35 +1432,54 @@ def _ensure_team_chat_room_link(team: dict[str, Any]) -> str:
         "teamId": str(team.get("teamId") or "").strip(),
         "teamName": str(team.get("name") or "").strip(),
         "teamPurpose": str(team.get("purpose") or "").strip(),
+        "teamKind": str(team.get("teamKind") or _infer_team_kind(team)).strip(),
+        "teamCategory": str(team.get("teamCategory") or TEAM_KIND_DEFAULTS["custom"]["teamCategory"]).strip(),
+        "teamSource": str(team.get("teamSource") or TEAM_KIND_DEFAULTS["custom"]["teamSource"]).strip(),
+        "teamTemplateId": str(team.get("teamTemplateId") or "").strip(),
     }
     participant_contexts = _team_participant_contexts_by_agent_id(team)
-    if linked_room_id and chat_room_service.get_chat_room_detail(linked_room_id):
+    linked_room = chat_room_service.get_chat_room_detail(linked_room_id) if linked_room_id else None
+    if linked_room:
+        room_config = {
+            **dict(linked_room.get("config") or {}),
+            **config,
+        }
         room = chat_room_service.update_chat_room(
-            linked_room_id,
-            title=title,
-            participant_session_ids=session_ids,
-            participant_contexts_by_agent_id=participant_contexts,
-            purpose="discussion",
-            config=config,
-        )
+                linked_room_id,
+                title=title,
+                participant_session_ids=session_ids,
+                participant_contexts_by_agent_id=participant_contexts,
+                allow_empty_participants=True,
+                mode=str(linked_room.get("mode") or "round_robin"),
+                purpose=_team_chat_room_purpose_for_update(team, linked_room.get("purpose")),
+                config=room_config,
+            )
     else:
         reusable_room_id = _find_existing_team_chat_room_id(str(team.get("teamId") or "").strip())
         if reusable_room_id:
+            reusable_room = chat_room_service.get_chat_room_detail(reusable_room_id) or {}
+            room_config = {
+                **dict(reusable_room.get("config") or {}),
+                **config,
+            }
             room = chat_room_service.update_chat_room(
                 reusable_room_id,
                 title=title,
                 participant_session_ids=session_ids,
                 participant_contexts_by_agent_id=participant_contexts,
-                purpose="discussion",
-                config=config,
+                allow_empty_participants=True,
+                mode=str(reusable_room.get("mode") or "round_robin"),
+                purpose=_team_chat_room_purpose_for_update(team, reusable_room.get("purpose")),
+                config=room_config,
             )
         else:
             room = chat_room_service.create_chat_room(
                 title=title,
                 participant_session_ids=session_ids,
                 participant_contexts_by_agent_id=participant_contexts,
+                allow_empty_participants=True,
                 mode="round_robin",
-                purpose="discussion",
+                purpose=_team_default_chat_room_purpose(team),
                 config=config,
             )
     team["linkedChatRoomId"] = str(room.get("roomId") or "").strip()
@@ -1226,8 +1542,6 @@ def _team_chat_room_needs_sync(team: dict[str, Any]) -> bool:
         return False
     active_member_agent_ids = _active_member_agent_ids(team)
     linked_room_id = str(team.get("linkedChatRoomId") or "").strip()
-    if not active_member_agent_ids:
-        return bool(linked_room_id)
     if not linked_room_id:
         return True
     _sync_chat_room_root()
@@ -1239,12 +1553,69 @@ def _team_chat_room_needs_sync(team: dict[str, Any]) -> bool:
         for participant in list(linked_room.get("participants") or [])
         if isinstance(participant, dict) and str(participant.get("agentId") or "").strip()
     ]
-    return participant_agent_ids != active_member_agent_ids
+    if participant_agent_ids != active_member_agent_ids:
+        return True
+    team_kind = _infer_team_kind(team)
+    if team_kind == "custom":
+        return False
+    config = linked_room.get("config") if isinstance(linked_room.get("config"), dict) else {}
+    expected_pairs = {
+        "source": "team",
+        "teamId": str(team.get("teamId") or "").strip(),
+        "teamKind": str(team.get("teamKind") or team_kind).strip(),
+        "teamCategory": str(team.get("teamCategory") or "").strip(),
+        "teamSource": str(team.get("teamSource") or "").strip(),
+        "teamTemplateId": str(team.get("teamTemplateId") or "").strip(),
+    }
+    if any(str(config.get(key) or "").strip() != value for key, value in expected_pairs.items() if value):
+        return True
+    return str(linked_room.get("purpose") or "").strip() != _team_chat_room_purpose_for_update(team, linked_room.get("purpose"))
+
+
+def _sync_compact_team_chat_room_metadata(team: dict[str, Any]) -> bool:
+    if str(team.get("status") or DEFAULT_TEAM_STATUS).strip() == "archived":
+        return False
+    if _infer_team_kind(team) == "custom":
+        return False
+    linked_room_id = str(team.get("linkedChatRoomId") or "").strip()
+    if not linked_room_id:
+        return False
+    _sync_chat_room_root()
+    linked_room = chat_room_service.get_chat_room_compact(linked_room_id)
+    if not linked_room:
+        return False
+    next_purpose = _team_chat_room_purpose_for_update(team, linked_room.get("purpose"))
+    current_purpose = str(linked_room.get("purpose") or "").strip()
+    config = {
+        **dict(linked_room.get("config") or {}),
+        "source": "team",
+        "teamId": str(team.get("teamId") or "").strip(),
+        "teamName": str(team.get("name") or "").strip(),
+        "teamPurpose": str(team.get("purpose") or "").strip(),
+        "teamKind": str(team.get("teamKind") or _infer_team_kind(team)).strip(),
+        "teamCategory": str(team.get("teamCategory") or "").strip(),
+        "teamSource": str(team.get("teamSource") or "").strip(),
+        "teamTemplateId": str(team.get("teamTemplateId") or "").strip(),
+    }
+    needs_config = any(str((linked_room.get("config") or {}).get(key) or "").strip() != value for key, value in config.items() if value)
+    if current_purpose == next_purpose and not needs_config:
+        return False
+    try:
+        chat_room_service.update_chat_room(
+            linked_room_id,
+            purpose=next_purpose,
+            config=config,
+        )
+    except chat_room_service.ChatRoomBusyError as exc:
+        _record_compact_chat_room_sync_skipped_busy(team, linked_room_id, exc)
+        return False
+    return True
 
 
 def _team_to_api(team: dict[str, Any]) -> dict[str, Any]:
     repaired = dict(team)
     _repair_team(repaired)
+    repaired["members"] = _members_to_api(repaired.get("members"))
     canvas_summary = _canvas_summary_for_team(repaired)
     linked_room_id = str(repaired.get("linkedChatRoomId") or "").strip()
     _sync_chat_room_root()
@@ -1264,32 +1635,54 @@ def _team_to_api(team: dict[str, Any]) -> dict[str, Any]:
 
 
 def _team_to_compact_reference(team: dict[str, Any]) -> dict[str, Any]:
+    repaired = dict(team)
+    _apply_team_contract(repaired)
     team_id = _safe_token(team.get("teamId"), default="", max_length=96)
-    members = [
-        {
-            "memberId": _safe_token(member.get("memberId"), default=f"member-{index + 1}", max_length=96),
-            "agentId": str(member.get("agentId") or "").strip(),
-            "agentCode": str(member.get("agentCode") or "").strip(),
-            "agentName": str(member.get("agentName") or "").strip(),
-            "role": trim_lines(member.get("role") or "", max_lines=1).strip(),
-            "purpose": trim_lines(member.get("purpose") or "", max_lines=4).strip(),
-            "agentStatus": str(member.get("agentStatus") or "active").strip() or "active",
-        }
-        for index, member in enumerate(list(team.get("members") or []))
-        if isinstance(member, dict) and str(member.get("agentId") or "").strip()
-    ]
+    members = _members_to_api(repaired.get("members"))
+    linked_room_id = str(repaired.get("linkedChatRoomId") or "").strip()
+    _sync_chat_room_root()
+    linked_room = chat_room_service.get_chat_room_compact(linked_room_id) if linked_room_id else None
     return {
         "teamId": team_id,
-        "name": str(team.get("name") or team_id or "Team").strip(),
-        "description": str(team.get("description") or "").strip(),
-        "purpose": str(team.get("purpose") or "").strip(),
-        "status": str(team.get("status") or DEFAULT_TEAM_STATUS).strip() or DEFAULT_TEAM_STATUS,
+        "name": str(repaired.get("name") or team_id or "Team").strip(),
+        "description": str(repaired.get("description") or "").strip(),
+        "purpose": str(repaired.get("purpose") or "").strip(),
+        "status": str(repaired.get("status") or DEFAULT_TEAM_STATUS).strip() or DEFAULT_TEAM_STATUS,
+        "teamKind": str(repaired.get("teamKind") or "").strip(),
+        "teamCategory": str(repaired.get("teamCategory") or "").strip(),
+        "teamSource": str(repaired.get("teamSource") or "").strip(),
+        "teamTemplateId": str(repaired.get("teamTemplateId") or "").strip(),
         "members": members,
         "memberCount": len(members),
-        "linkedChatRoomId": str(team.get("linkedChatRoomId") or "").strip(),
-        "canvasPath": str(team.get("canvasPath") or (_relative_path(_team_canvas_path(team_id)) if team_id else "")).strip(),
-        "createdAt": str(team.get("createdAt") or "").strip(),
-        "updatedAt": str(team.get("updatedAt") or "").strip(),
+        "linkedChatRoomId": linked_room_id if linked_room else "",
+        "linkedChatRoom": _compact_chat_room(linked_room),
+        "canvasPath": str(repaired.get("canvasPath") or (_relative_path(_team_canvas_path(team_id)) if team_id else "")).strip(),
+        "createdAt": str(repaired.get("createdAt") or "").strip(),
+        "updatedAt": str(repaired.get("updatedAt") or "").strip(),
+    }
+
+
+def _team_to_graph_reference(team: dict[str, Any]) -> dict[str, Any]:
+    repaired = dict(team)
+    _apply_team_contract(repaired)
+    team_id = _safe_token(repaired.get("teamId"), default="", max_length=96)
+    members = _members_to_api(repaired.get("members"))
+    return {
+        "teamId": team_id,
+        "name": str(repaired.get("name") or team_id or "Team").strip(),
+        "description": str(repaired.get("description") or "").strip(),
+        "purpose": str(repaired.get("purpose") or "").strip(),
+        "status": str(repaired.get("status") or DEFAULT_TEAM_STATUS).strip() or DEFAULT_TEAM_STATUS,
+        "teamKind": str(repaired.get("teamKind") or "").strip(),
+        "teamCategory": str(repaired.get("teamCategory") or "").strip(),
+        "teamSource": str(repaired.get("teamSource") or "").strip(),
+        "teamTemplateId": str(repaired.get("teamTemplateId") or "").strip(),
+        "members": members,
+        "memberCount": len(members),
+        "linkedChatRoomId": str(repaired.get("linkedChatRoomId") or "").strip(),
+        "canvasPath": str(repaired.get("canvasPath") or (_relative_path(_team_canvas_path(team_id)) if team_id else "")).strip(),
+        "createdAt": str(repaired.get("createdAt") or "").strip(),
+        "updatedAt": str(repaired.get("updatedAt") or "").strip(),
     }
 
 
@@ -1308,6 +1701,7 @@ def _team_detail_to_api(team: dict[str, Any]) -> dict[str, Any]:
 def _team_to_api_without_canvas_summary(team: dict[str, Any]) -> dict[str, Any]:
     repaired = dict(team)
     _repair_team(repaired)
+    repaired["members"] = _members_to_api(repaired.get("members"))
     team_id = str(repaired.get("teamId") or "").strip()
     linked_room_id = str(repaired.get("linkedChatRoomId") or "").strip()
     _sync_chat_room_root()
@@ -1324,6 +1718,31 @@ def _team_to_api_without_canvas_summary(team: dict[str, Any]) -> dict[str, Any]:
         "linkedChatRoom": _compact_chat_room(linked_room),
         "conversation": conversation_projection,
     }
+
+
+def _members_to_api(members: Any) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    for index, member in enumerate(list(members or [])):
+        if not isinstance(member, dict) or not str(member.get("agentId") or "").strip():
+            continue
+        payload = {
+            "memberId": _safe_token(member.get("memberId"), default=f"member-{index + 1}", max_length=96),
+            "agentId": str(member.get("agentId") or "").strip(),
+            "agentCode": str(member.get("agentCode") or "").strip(),
+            "agentName": str(member.get("agentName") or "").strip(),
+            "role": trim_lines(member.get("role") or "", max_lines=1).strip(),
+            "purpose": trim_lines(member.get("purpose") or "", max_lines=4).strip(),
+            "agentStatus": str(member.get("agentStatus") or "active").strip() or "active",
+        }
+        responsibilities = [
+            trim_lines(value, max_lines=2).strip()
+            for value in list(member.get("responsibilities") or [])[:8]
+            if str(value or "").strip()
+        ]
+        if responsibilities:
+            payload["responsibilities"] = responsibilities
+        result.append(payload)
+    return result
 
 
 def _get_team_record(team_id: str) -> dict[str, Any]:
@@ -1425,6 +1844,36 @@ def _repair_index_shape(state: dict[str, Any]) -> bool:
     return changed
 
 
+def _repair_index_compact_contracts(state: dict[str, Any]) -> bool:
+    changed = _repair_index_shape(state)
+    for team in state.get("teams") or []:
+        if not isinstance(team, dict):
+            continue
+        if _repair_team_contract_only(team):
+            changed = True
+    return changed
+
+
+def _repair_team_contract_only(team: dict[str, Any]) -> bool:
+    changed = False
+    team_id = _safe_token(team.get("teamId"), default="", max_length=96)
+    if team.get("teamId") != team_id:
+        team["teamId"] = team_id
+        changed = True
+    expected_path = _relative_path(_team_canvas_path(team_id)) if team_id else ""
+    if team.get("canvasPath") != expected_path:
+        team["canvasPath"] = expected_path
+        changed = True
+    if "linkedChatRoomId" not in team:
+        team["linkedChatRoomId"] = ""
+        changed = True
+    if _apply_team_contract(team):
+        changed = True
+    if _sync_compact_team_chat_room_metadata(team):
+        changed = True
+    return changed
+
+
 def _repair_team(team: dict[str, Any]) -> bool:
     changed = False
     team_id = _safe_token(team.get("teamId"), default="", max_length=96)
@@ -1444,10 +1893,15 @@ def _repair_team(team: dict[str, Any]) -> bool:
     if "linkedChatRoomId" not in team:
         team["linkedChatRoomId"] = ""
         changed = True
+    if _apply_team_contract(team):
+        changed = True
     members = team.get("members") if isinstance(team.get("members"), list) else []
     repaired_members = _repair_members(members)
     if repaired_members != members:
         team["members"] = repaired_members
+        changed = True
+    if _team_chat_room_needs_sync(team):
+        _ensure_team_chat_room_link(team)
         changed = True
     return changed
 
@@ -1472,6 +1926,11 @@ def _repair_members(members: list[Any]) -> list[dict[str, Any]]:
                 "agentName": str((agent or {}).get("displayName") or item.get("agentName") or "").strip(),
                 "role": trim_lines(item.get("role") or "", max_lines=1).strip(),
                 "purpose": trim_lines(item.get("purpose") or "", max_lines=4).strip(),
+                "responsibilities": [
+                    trim_lines(value, max_lines=2).strip()
+                    for value in list(item.get("responsibilities") or [])[:8]
+                    if str(value or "").strip()
+                ],
                 "agentStatus": "active" if active else "stale",
             }
         )
@@ -1479,6 +1938,7 @@ def _repair_members(members: list[Any]) -> list[dict[str, Any]]:
 
 
 def _default_canvas_for_team(team: dict[str, Any]) -> dict[str, Any]:
+    nodes = _default_nodes_for_members(team.get("members") or [])
     return {
         "schemaVersion": SCHEMA_VERSION,
         "canvasKind": CANVAS_KIND,
@@ -1486,8 +1946,8 @@ def _default_canvas_for_team(team: dict[str, Any]) -> dict[str, Any]:
         "updatedAt": str(team.get("updatedAt") or utc_now_iso()),
         "path": _relative_path(_team_canvas_path(team["teamId"])),
         "viewport": {"x": 0, "y": 0, "zoom": 1},
-        "nodes": _default_nodes_for_members(team.get("members") or []),
-        "edges": [],
+        "nodes": nodes,
+        "edges": _default_edges_for_team(team, nodes),
     }
 
 
@@ -1531,6 +1991,73 @@ def _default_nodes_for_members(members: list[dict[str, Any]]) -> list[dict[str, 
             "purpose": "",
         }
     ]
+
+
+def _default_edges_for_team(team: dict[str, Any], nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    nodes_by_role: dict[str, dict[str, Any]] = {}
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        role = str(node.get("role") or "").strip()
+        if role and role not in nodes_by_role:
+            nodes_by_role[role] = node
+    if _infer_team_kind(team) == "self_evolution":
+        return _edges_from_role_chain(
+            nodes_by_role,
+            [
+                ("executor", "reviewer", "执行交付评审"),
+                ("reviewer", "summarizer", "评审结果总结"),
+            ],
+        )
+    if _infer_team_kind(team) == "supervised_evolution":
+        return _edges_from_role_chain(
+            nodes_by_role,
+            [
+                ("baseline", "reviewer", "基线方案评审"),
+                ("candidate", "reviewer", "候选方案评审"),
+                ("reviewer", "auditor", "评审进入审计"),
+                ("auditor", "judge", "审计进入裁决"),
+            ],
+        )
+    return []
+
+
+def _edges_from_role_chain(
+    nodes_by_role: dict[str, dict[str, Any]],
+    links: list[tuple[str, str, str]],
+) -> list[dict[str, Any]]:
+    edges: list[dict[str, Any]] = []
+    for index, (source_role, target_role, label) in enumerate(links, start=1):
+        source = nodes_by_role.get(source_role)
+        target = nodes_by_role.get(target_role)
+        if not source or not target:
+            continue
+        source_id = str(source.get("id") or "").strip()
+        target_id = str(target.get("id") or "").strip()
+        if not source_id or not target_id:
+            continue
+        edges.append(
+            {
+                "id": _safe_token(f"{source_role}-{target_role}", default=f"edge-{index}", max_length=96),
+                "source": source_id,
+                "target": target_id,
+                "label": label,
+                "type": "communication",
+            }
+        )
+    return edges
+
+
+def _default_canvas_edges_missing_for_team(team: dict[str, Any], canvas_path: Path) -> bool:
+    if _infer_team_kind(team) not in {"self_evolution", "supervised_evolution"}:
+        return False
+    if not canvas_path.exists():
+        return True
+    try:
+        canvas = _read_json(canvas_path)
+    except Exception:
+        return True
+    return not list(canvas.get("edges") or [])
 
 
 def _load_index() -> dict[str, Any]:
@@ -1694,6 +2221,10 @@ def _record_team_event(event_code: str, team: dict[str, Any], *, fields: dict[st
                 "teamId": team.get("teamId"),
                 "teamName": team.get("name"),
                 "status": team.get("status"),
+                "teamKind": team.get("teamKind"),
+                "teamCategory": team.get("teamCategory"),
+                "teamSource": team.get("teamSource"),
+                "teamTemplateId": team.get("teamTemplateId"),
                 **(fields or {}),
             },
         )
@@ -1713,6 +2244,10 @@ def _record_team_detail_loaded(team: dict[str, Any], started_at: float) -> None:
             fields={
                 "teamId": str(team.get("teamId") or "").strip(),
                 "teamName": str(team.get("name") or "").strip(),
+                "teamKind": str(team.get("teamKind") or "").strip(),
+                "teamCategory": str(team.get("teamCategory") or "").strip(),
+                "teamSource": str(team.get("teamSource") or "").strip(),
+                "teamTemplateId": str(team.get("teamTemplateId") or "").strip(),
                 "linkedChatRoomId": str(team.get("linkedChatRoomId") or "").strip(),
                 "memberCount": len(list(team.get("members") or [])),
                 "canvasNodeCount": len(list(canvas.get("nodes") or [])),
@@ -1737,6 +2272,90 @@ def _record_team_membership_conflict(team_id: str, agent_id: str, conflict: dict
                 "agentId": agent_id,
                 "conflictTeamId": conflict.get("teamId"),
                 "conflictTeamName": conflict.get("name"),
+            },
+        )
+    except Exception:
+        pass
+
+
+def _record_team_archive_rejected(
+    team: dict[str, Any],
+    *,
+    reason: str,
+    agent_id: str = "",
+    error: Exception | None = None,
+) -> None:
+    try:
+        record_runtime_scene_event(
+            "team_service",
+            "team",
+            "team.archive_rejected",
+            message="Team archive rejected before cascading Agent archive.",
+            outcome="blocked",
+            fields={
+                "teamId": str(team.get("teamId") or "").strip(),
+                "teamName": str(team.get("name") or "").strip(),
+                "teamKind": str(team.get("teamKind") or _infer_team_kind(team)).strip(),
+                "teamCategory": str(team.get("teamCategory") or "").strip(),
+                "teamSource": str(team.get("teamSource") or "").strip(),
+                "reason": str(reason or "").strip(),
+                "agentId": str(agent_id or "").strip(),
+                "errorType": type(error).__name__ if error else "",
+                "message": str(error) if error else "",
+            },
+        )
+    except Exception:
+        pass
+
+
+def _record_archived_team_member_cascade_repaired(
+    team: dict[str, Any],
+    archived_agent_ids: list[str],
+    *,
+    reason: str,
+) -> None:
+    try:
+        record_runtime_scene_event(
+            "team_service",
+            "team_repair",
+            "team.archived_agent_cascade_repaired",
+            message="Archived Team had active member Agents; cascading archive repair applied.",
+            outcome="repaired",
+            fields={
+                "teamId": str(team.get("teamId") or "").strip(),
+                "teamName": str(team.get("name") or "").strip(),
+                "teamKind": str(team.get("teamKind") or _infer_team_kind(team)).strip(),
+                "teamCategory": str(team.get("teamCategory") or "").strip(),
+                "teamSource": str(team.get("teamSource") or "").strip(),
+                "teamTemplateId": str(team.get("teamTemplateId") or "").strip(),
+                "archivedAgentIds": archived_agent_ids,
+                "archivedAgentCount": len(archived_agent_ids),
+                "reason": str(reason or "").strip(),
+            },
+        )
+    except Exception:
+        pass
+
+
+def _record_compact_chat_room_sync_skipped_busy(team: dict[str, Any], linked_room_id: str, exc: Exception) -> None:
+    try:
+        record_runtime_scene_event(
+            "team_service",
+            "team_compact_repair",
+            "team.compact_chat_room_sync_skipped_busy",
+            message="Team compact repair skipped linked chat room metadata sync because the room has an active round.",
+            level="warning",
+            outcome="skipped",
+            fields={
+                "teamId": str(team.get("teamId") or "").strip(),
+                "teamName": str(team.get("name") or "").strip(),
+                "teamKind": str(team.get("teamKind") or _infer_team_kind(team)).strip(),
+                "teamCategory": str(team.get("teamCategory") or "").strip(),
+                "teamSource": str(team.get("teamSource") or "").strip(),
+                "teamTemplateId": str(team.get("teamTemplateId") or "").strip(),
+                "linkedChatRoomId": str(linked_room_id or "").strip(),
+                "errorType": type(exc).__name__,
+                "message": str(exc),
             },
         )
     except Exception:

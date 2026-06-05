@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -69,10 +69,13 @@ PROTECTED_SYSTEM_ROLES = {"ceo", "organization_advisor", "capability_steward"}
 HIGH_RISK_ACTIONS = {"create_agent", "archive_agent", "update_tool_policy", "expand_tool_permissions"}
 RESEARCH_AGENT_CREATION_TOOL = "research_agent_creation_proposal_tool"
 RESEARCH_COMMUNICATION_EDGE_TOOL = "research_communication_edge_proposal_tool"
+RESEARCH_PROPOSAL_APPLY_TOOL = "research_proposal_apply_tool"
+SUPERSEDED_PROPOSAL_STATUSES = {"superseded", "rejected", "applied"}
 CEO_AGENT_TOOLS = [
     "agent_message_tool",
     RESEARCH_AGENT_CREATION_TOOL,
     RESEARCH_COMMUNICATION_EDGE_TOOL,
+    RESEARCH_PROPOSAL_APPLY_TOOL,
     "web_search_tool",
     "web_fetch_tool",
 ]
@@ -81,6 +84,7 @@ ORGANIZATION_ADVISOR_TOOLS = [
     "agent_tool_permission_request_tool",
     RESEARCH_AGENT_CREATION_TOOL,
     RESEARCH_COMMUNICATION_EDGE_TOOL,
+    RESEARCH_PROPOSAL_APPLY_TOOL,
     "web_search_tool",
     "web_fetch_tool",
 ]
@@ -89,6 +93,7 @@ CAPABILITY_STEWARD_TOOLS = [
     "agent_tool_permission_request_tool",
     RESEARCH_AGENT_CREATION_TOOL,
     RESEARCH_COMMUNICATION_EDGE_TOOL,
+    RESEARCH_PROPOSAL_APPLY_TOOL,
     "web_search_tool",
     "web_fetch_tool",
     "read_memory_tool",
@@ -98,21 +103,28 @@ CAPABILITY_STEWARD_TOOLS = [
     "research_knowledge_query_tool",
 ]
 DEFAULT_CREATED_AGENT_TOOLS = ["agent_message_tool", "web_search_tool", "web_fetch_tool"]
+CREATE_AGENT_ROLE_ALIASES = {
+    "memorycurator": "memory_management",
+    "memorysteward": "memory_management",
+    "记忆库管理员": "memory_management",
+    "记忆库管理": "memory_management",
+}
+GENERIC_CREATE_AGENT_ROLE_TOKENS = {"agent", "researchagent", "researchspecialist", "specialist", "科研agent", "科研专员"}
 ROLE_GOVERNANCE_BOUNDARIES = {
     "ceo": {
         "authority": "decides research priorities, delegates work, and may approve organization recommendations",
         "must_not": "must not apply high-risk organization changes without the user gate",
-        "proposal_actions": ["approve_recommendation", "request_create_agent", "request_permission_change", "request_edge_change"],
+        "proposal_actions": ["approve_recommendation", "apply_user_confirmed_proposal", "request_create_agent", "request_permission_change", "request_edge_change"],
     },
     "organization_advisor": {
         "authority": "designs organization structure, role boundaries, communication edges, and staffing changes",
-        "must_not": "must not directly apply new Agent creation, archives, or permission expansion",
-        "proposal_actions": ["propose_create_agent", "propose_archive_agent", "propose_permission_change", "propose_edge_change"],
+        "must_not": "must not apply new Agent creation, archives, or permission expansion unless the current user explicitly confirmed the exact proposal",
+        "proposal_actions": ["propose_create_agent", "apply_user_confirmed_proposal", "propose_archive_agent", "propose_permission_change", "propose_edge_change"],
     },
     "capability_steward": {
         "authority": "audits prompt, tool, and memory policy boundaries for each Agent",
         "must_not": "must not grant high-risk tools or rewrite core roles without CEO/user approval",
-        "proposal_actions": ["propose_prompt_policy", "propose_tool_policy", "propose_memory_policy", "report_capability_gap"],
+        "proposal_actions": ["propose_prompt_policy", "apply_user_confirmed_proposal", "propose_tool_policy", "propose_memory_policy", "report_capability_gap"],
     },
     "research_specialist": {
         "authority": "executes the specific research or engineering responsibility assigned in its role contract",
@@ -137,7 +149,7 @@ class ResearchOrganizationError(ValueError):
 
 
 def utc_now_iso() -> str:
-    return datetime.now(UTC).isoformat()
+    return datetime.now(timezone.utc).isoformat()
 
 
 def get_research_organization() -> dict[str, Any]:
@@ -220,18 +232,22 @@ def build_research_organization_context_block(agent_id: str, *, limit: int = 6) 
         "Use AgentId or AgentCode with agent_message_tool when contacting an Agent. Communication still follows edge policy, supervision policy, and wake rules.",
         "Organization Governance Protocol:",
         "- CEO decides priorities and may approve recommendations; high-risk changes still require the user gate before application.",
+        "- When the current user explicitly confirms a pending proposal, use research_proposal_apply_tool with that exact proposalId and user_confirmed=true; do not create a replacement proposal for the same role.",
         (
             "- If a required role/member does not exist yet, first use research_agent_creation_proposal_tool to create a reviewable create_agent proposal; only after that proposal is applied should you configure its tool permissions or communication edges."
             if can_create_agent_proposal
             else "- If a required role/member does not exist yet, report the gap to CEO, Organization Advisor, or Capability Steward; do not configure permissions or communication edges for a missing Agent."
         ),
-        "- Organization Advisor can propose new Agents, archives, permission changes, and communication edges, but does not directly apply them.",
-        "- Capability Steward can propose missing capability Agents and manages prompt/tool/memory policy recommendations; it does not grant hidden tools by itself.",
+        "- If an edge or permission tool reports agent_not_found/target_not_found, stop and apply the approved create_agent proposal first; do not loop by submitting another create_agent proposal unless the user rejects the existing one.",
+        "- Organization Advisor can propose new Agents, archives, permission changes, and communication edges; it may apply only the exact proposal the current user explicitly confirmed.",
+        "- Capability Steward can propose missing capability Agents and manages prompt/tool/memory policy recommendations; it may apply only the exact proposal the current user explicitly confirmed and does not grant hidden tools by itself.",
         "- Created specialist Agents must follow their role contract and request changes through CEO/Advisor/Capability Steward instead of self-expanding.",
         "Research Communication Protocol:",
         "- Every research_org message from an Agent must include metadata_json.researchOrgIntent; empty intent is blocked so messages stay routable.",
         "- Use only the relevant recipient; do not broadcast or use the group room for routine task handoff, evidence requests, knowledge updates, or permission reviews.",
         "- Reply format: Conclusion; Evidence; Risk; Decision needed; Next step. Do not send receipt-only acknowledgements.",
+        "- Send a message only when it changes shared state, requests a decision, reports a blocker, delivers a result, or assigns a concrete next action.",
+        "- If no state changed, keep the note local; do not create duplicate proposals, duplicate permission plans, or repeated confirmations.",
         "- Wake policy by intent: decision_request/risk_escalation wake immediately; status_report/knowledge_update/final_report/capability_report/report stay mailbox-only; task/evidence/validation/permission/organization requests wake only when the edge policy allows it.",
         f"- Standard intents: {', '.join(sorted(RESEARCH_COMMUNICATION_INTENTS))}.",
         "Members:",
@@ -366,8 +382,32 @@ def create_research_org_proposal(payload: dict[str, Any]) -> dict[str, Any]:
 
     graph = _ensure_default_organization(_read_organization())
     actions = _normalize_proposal_actions(payload)
+    actions = [_sanitize_proposal_action_tools(action) for action in actions]
     if not actions:
         raise ResearchOrganizationError("Research organization proposal requires at least one action.")
+    existing_proposal = _find_equivalent_pending_proposal(graph, actions)
+    if existing_proposal:
+        graph = _mark_superseded_equivalent_proposals(
+            graph,
+            actions,
+            canonical_proposal_id=str(existing_proposal.get("proposalId") or ""),
+        )
+        graph["updatedAt"] = utc_now_iso()
+        _write_organization(graph)
+        _record_org_event(
+            "research.organization.proposal_reused",
+            outcome=str(existing_proposal.get("status") or "pending_user_confirmation"),
+            fields={
+                "proposalId": str(existing_proposal.get("proposalId") or ""),
+                "actionCount": len(actions),
+                "reason": "equivalent_pending_proposal",
+            },
+        )
+        return {
+            "organization": _organization_to_api(graph),
+            "proposal": existing_proposal,
+            "reused": True,
+        }
     risk_level = _proposal_risk_level(payload, actions)
     now = utc_now_iso()
     proposal = {
@@ -423,7 +463,7 @@ def create_research_org_proposal(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def apply_research_org_proposal(proposal_id: str) -> dict[str, Any]:
+def apply_research_org_proposal(proposal_id: str, *, confirmation: dict[str, Any] | None = None) -> dict[str, Any]:
     """Apply a user-confirmed organization proposal."""
 
     normalized_id = _clean_id(proposal_id)
@@ -438,6 +478,7 @@ def apply_research_org_proposal(proposal_id: str) -> dict[str, Any]:
         return {"organization": _organization_to_api(graph), "proposal": proposal, "results": []}
     if str(proposal.get("status") or "").strip() not in {"pending_user_confirmation", "ceo_approved"}:
         raise ResearchOrganizationError("Research organization proposal is not ready to apply.")
+    confirmation_payload = _normalize_proposal_confirmation(confirmation)
 
     results: list[dict[str, Any]] = []
     for action in list(proposal.get("actions") or []):
@@ -454,7 +495,8 @@ def apply_research_org_proposal(proposal_id: str) -> dict[str, Any]:
             "at": now,
             "actor": "user",
             "event": "applied",
-            "reason": "User confirmed proposal application.",
+            "reason": confirmation_payload.get("text") or "User confirmed proposal application.",
+            "confirmation": confirmation_payload,
         }
     )
     graph["proposals"] = proposals
@@ -466,6 +508,7 @@ def apply_research_org_proposal(proposal_id: str) -> dict[str, Any]:
             "allowed": True,
             "reason": "user_confirmed",
             "summary": proposal.get("title") or "",
+            "confirmation": confirmation_payload,
         },
     )
     graph["updatedAt"] = now
@@ -478,12 +521,24 @@ def apply_research_org_proposal(proposal_id: str) -> dict[str, Any]:
             "proposalId": proposal["proposalId"],
             "actionCount": len(results),
             "resultStatuses": [item.get("status") for item in results],
+            "confirmationSource": confirmation_payload.get("source") or "",
+            "confirmationTextLength": len(str(confirmation_payload.get("text") or "")),
         },
     )
     return {
         "organization": _organization_to_api(graph),
         "proposal": proposal,
         "results": results,
+    }
+
+
+def _normalize_proposal_confirmation(confirmation: dict[str, Any] | None) -> dict[str, str]:
+    raw = confirmation if isinstance(confirmation, dict) else {}
+    return {
+        "source": trim_lines(str(raw.get("source") or "api"), max_lines=1).strip() or "api",
+        "actorAgentId": _clean_id(raw.get("actorAgentId")),
+        "text": trim_lines(str(raw.get("text") or ""), max_lines=3),
+        "turnId": trim_lines(str(raw.get("turnId") or ""), max_lines=1),
     }
 
 
@@ -613,7 +668,7 @@ def _organization_path(workspace: Any) -> Path:
 def _normalize_organization(raw: dict[str, Any] | None) -> dict[str, Any]:
     payload = raw if isinstance(raw, dict) else {}
     now = utc_now_iso()
-    return {
+    normalized = {
         "schemaVersion": ORG_SCHEMA_VERSION,
         "updatedAt": str(payload.get("updatedAt") or now),
         "agents": [item for item in list(payload.get("agents") or []) if isinstance(item, dict)],
@@ -623,6 +678,7 @@ def _normalize_organization(raw: dict[str, Any] | None) -> dict[str, Any]:
         "proposals": [item for item in list(payload.get("proposals") or []) if isinstance(item, dict)],
         "auditEvents": _limit_tail([item for item in list(payload.get("auditEvents") or []) if isinstance(item, dict)], MAX_AUDIT_EVENTS),
     }
+    return _normalize_proposal_backlog(normalized)
 
 
 def _organization_to_api(graph: dict[str, Any]) -> dict[str, Any]:
@@ -839,7 +895,7 @@ def _ensure_core_agent(
     if not agent:
         detail = session_service.create_chat_session(
             title=display_name,
-            profile_id="primary",
+            llm_bindings=session_service.llm_bindings_for_profile_id("primary"),
             created_by="research_organization",
         )
         agent_id = _clean_id(detail.get("agentId"))
@@ -1193,6 +1249,7 @@ def _ensure_core_edges(
                     "delegate",
                     "review",
                     "approve",
+                    "notice",
                     "research_goal",
                     "task_assignment",
                     "organization_design",
@@ -1218,6 +1275,8 @@ def _ensure_core_edges(
                     "prompt_policy",
                     "tool_policy",
                     "memory_policy",
+                    "capability_design",
+                    "approve",
                     "research_goal",
                     "permission_review",
                     "task_assignment",
@@ -1704,6 +1763,72 @@ def _normalize_proposal_actions(payload: dict[str, Any]) -> list[dict[str, Any]]
     return actions
 
 
+def _known_tool_names() -> set[str]:
+    try:
+        from tools.Key_Tools import create_llm_facing_tools
+
+        return {
+            str(getattr(tool, "name", "") or "").strip()
+            for tool in create_llm_facing_tools()
+            if str(getattr(tool, "name", "") or "").strip()
+        }
+    except Exception:
+        return set()
+
+
+def _sanitize_proposal_action_tools(action: dict[str, Any]) -> dict[str, Any]:
+    action_type = str(action.get("actionType") or "").strip()
+    if action_type not in {"create_agent", "update_tool_policy", "expand_tool_permissions"}:
+        return action
+    raw_allowed = action.get("allowedTools")
+    if raw_allowed is None and isinstance(action.get("toolPolicy"), dict):
+        raw_allowed = action["toolPolicy"].get("allowedTools")
+    if raw_allowed is None:
+        allowed_tools = list(DEFAULT_CREATED_AGENT_TOOLS) if action_type == "create_agent" else []
+    else:
+        allowed_tools = _normalize_allowed_tools(raw_allowed)
+    known_tool_names = _known_tool_names()
+    if not known_tool_names:
+        return {**action, "allowedTools": allowed_tools}
+    valid_tools = [tool for tool in allowed_tools if tool in known_tool_names]
+    missing_tools = _normalize_allowed_tools(
+        [
+            *(action.get("missingTools") or []),
+            *[tool for tool in allowed_tools if tool not in known_tool_names],
+        ]
+    )
+    if action_type == "create_agent" and not valid_tools:
+        valid_tools = list(DEFAULT_CREATED_AGENT_TOOLS)
+    next_action = {**action, "allowedTools": valid_tools}
+    if isinstance(action.get("toolPolicy"), dict):
+        next_action["toolPolicy"] = {**action["toolPolicy"], "allowedTools": valid_tools}
+    requested_tools = _normalize_allowed_tools([*(action.get("requestedTools") or []), *missing_tools])
+    if requested_tools:
+        next_action["requestedTools"] = requested_tools
+        next_action["missingTools"] = missing_tools
+    return next_action
+
+
+def _sanitize_proposal_actions_in_place(proposal: dict[str, Any]) -> bool:
+    raw_actions = [item for item in proposal.get("actions") or [] if isinstance(item, dict)]
+    if not raw_actions:
+        return False
+    sanitized_actions = [_sanitize_proposal_action_tools(action) for action in raw_actions]
+    if sanitized_actions == raw_actions:
+        return False
+    proposal["actions"] = sanitized_actions
+    proposal["updatedAt"] = utc_now_iso()
+    proposal.setdefault("auditTrail", []).append(
+        {
+            "at": proposal["updatedAt"],
+            "actor": "system",
+            "event": "sanitized",
+            "reason": "Removed unavailable tools from proposal allowedTools.",
+        }
+    )
+    return True
+
+
 def _proposal_risk_level(payload: dict[str, Any], actions: list[dict[str, Any]]) -> str:
     explicit = str(payload.get("riskLevel") or "").strip().lower()
     if explicit in {"low", "medium", "high"}:
@@ -1715,7 +1840,161 @@ def _proposal_risk_level(payload: dict[str, Any], actions: list[dict[str, Any]])
     return "medium"
 
 
+def _find_equivalent_pending_proposal(graph: dict[str, Any], actions: list[dict[str, Any]]) -> dict[str, Any] | None:
+    if len(actions) != 1:
+        return None
+    action = actions[0]
+    if str(action.get("actionType") or "").strip() != "create_agent":
+        return None
+    key = _proposal_equivalence_key(action)
+    if not key:
+        return None
+    for proposal in reversed([item for item in graph.get("proposals") or [] if isinstance(item, dict)]):
+        status = str(proposal.get("status") or "").strip()
+        if status not in {"pending_user_confirmation", "ceo_approved"}:
+            continue
+        if _proposal_equivalence_key(proposal) == key:
+            return proposal
+    return None
+
+
+def _normalize_create_agent_role_alias(value: Any) -> str:
+    raw = trim_lines(str(value or ""), max_lines=1).strip()
+    if not raw:
+        return ""
+    normalized = raw.casefold()
+    for suffix in (" agent", "_agent", "-agent", "agent", "代理"):
+        if normalized.endswith(suffix):
+            normalized = normalized[: -len(suffix)].strip(" _-")
+    normalized = normalized.replace(" ", "").replace("_", "").replace("-", "")
+    return CREATE_AGENT_ROLE_ALIASES.get(normalized, normalized)
+
+
+def _create_agent_equivalence_token(action: dict[str, Any]) -> str:
+    role_key = _normalize_create_agent_role_alias(action.get("roleKey") or action.get("role"))
+    display_name = _normalize_create_agent_role_alias(action.get("displayName") or action.get("title"))
+    if role_key in GENERIC_CREATE_AGENT_ROLE_TOKENS:
+        role_key = ""
+    if role_key:
+        return role_key
+    return display_name
+
+
+def _proposal_equivalence_key(proposal_or_action: dict[str, Any]) -> str:
+    action = proposal_or_action
+    if "actions" in proposal_or_action:
+        proposal_actions = [item for item in proposal_or_action.get("actions") or [] if isinstance(item, dict)]
+        if len(proposal_actions) != 1:
+            return ""
+        action = proposal_actions[0]
+    if str(action.get("actionType") or "").strip() != "create_agent":
+        return ""
+    token = _create_agent_equivalence_token(action)
+    if token:
+        return f"create_agent:{token}"
+    return ""
+
+
+def _normalize_proposal_backlog(graph: dict[str, Any]) -> dict[str, Any]:
+    proposals = [item for item in graph.get("proposals") or [] if isinstance(item, dict)]
+    if not proposals:
+        return graph
+    canonical_by_key: dict[str, str] = {}
+    changed = False
+    for proposal in proposals:
+        status = str(proposal.get("status") or "").strip()
+        if status in {"pending_user_confirmation", "ceo_approved", "superseded"}:
+            changed = _sanitize_proposal_actions_in_place(proposal) or changed
+        if status in SUPERSEDED_PROPOSAL_STATUSES:
+            continue
+        key = _proposal_equivalence_key(proposal)
+        if not key:
+            continue
+        proposal_id = _clean_id(proposal.get("proposalId"))
+        if key not in canonical_by_key:
+            canonical_by_key[key] = proposal_id
+            continue
+        proposal["status"] = "superseded"
+        proposal["supersededByProposalId"] = canonical_by_key[key]
+        proposal["updatedAt"] = str(proposal.get("updatedAt") or utc_now_iso())
+        proposal.setdefault("auditTrail", []).append(
+            {
+                "at": utc_now_iso(),
+                "actor": "system",
+                "event": "superseded",
+                "reason": "Equivalent pending create_agent proposal already exists.",
+                "canonicalProposalId": canonical_by_key[key],
+            }
+        )
+        changed = True
+    for proposal in proposals:
+        proposal_id = _clean_id(proposal.get("proposalId"))
+        if not proposal_id or str(proposal.get("status") or "").strip() != "superseded":
+            continue
+        superseded_by = _clean_id(proposal.get("supersededByProposalId"))
+        seen = {proposal_id}
+        while superseded_by and superseded_by not in seen:
+            seen.add(superseded_by)
+            next_proposal = next(
+                (
+                    item
+                    for item in proposals
+                    if _clean_id(item.get("proposalId")) == superseded_by
+                ),
+                None,
+            )
+            if not next_proposal or str(next_proposal.get("status") or "").strip() != "superseded":
+                break
+            superseded_by = _clean_id(next_proposal.get("supersededByProposalId"))
+        if superseded_by and proposal.get("supersededByProposalId") != superseded_by:
+            proposal["supersededByProposalId"] = superseded_by
+            proposal["updatedAt"] = utc_now_iso()
+            changed = True
+    if changed:
+        graph["proposals"] = proposals
+        graph["updatedAt"] = utc_now_iso()
+    return graph
+
+
+def _mark_superseded_equivalent_proposals(
+    graph: dict[str, Any],
+    actions: list[dict[str, Any]],
+    *,
+    canonical_proposal_id: str,
+) -> dict[str, Any]:
+    key = _proposal_equivalence_key(actions[0]) if len(actions) == 1 else ""
+    if not key:
+        return graph
+    now = utc_now_iso()
+    changed = False
+    for proposal in graph.get("proposals") or []:
+        proposal_id = _clean_id(proposal.get("proposalId"))
+        if proposal_id == canonical_proposal_id:
+            continue
+        if str(proposal.get("status") or "").strip() in SUPERSEDED_PROPOSAL_STATUSES:
+            continue
+        if _proposal_equivalence_key(proposal) != key:
+            continue
+        proposal["status"] = "superseded"
+        proposal["supersededByProposalId"] = canonical_proposal_id
+        proposal["updatedAt"] = now
+        proposal.setdefault("auditTrail", []).append(
+            {
+                "at": now,
+                "actor": "system",
+                "event": "superseded",
+                "reason": "Equivalent proposal was reused instead of creating another pending item.",
+                "canonicalProposalId": canonical_proposal_id,
+            }
+        )
+        changed = True
+    if changed:
+        graph["proposals"] = list(graph.get("proposals") or [])
+    return graph
+
+
 def _apply_proposal_action(graph: dict[str, Any], action: dict[str, Any]) -> dict[str, Any]:
+    action = _sanitize_proposal_action_tools(action)
     action_type = str(action.get("actionType") or "").strip()
     if action_type == "create_agent":
         return _apply_create_agent_action(graph, action)
@@ -1734,7 +2013,7 @@ def _apply_create_agent_action(graph: dict[str, Any], action: dict[str, Any]) ->
     display_name = trim_lines(str(action.get("displayName") or action.get("title") or "科研 Agent"), max_lines=1)
     session = session_service.create_chat_session(
         title=display_name,
-        profile_id=str(action.get("profileId") or "primary").strip() or "primary",
+        llm_bindings=session_service.llm_bindings_for_profile_id(str(action.get("profileId") or "primary").strip() or "primary"),
         created_by="research_organization_proposal",
     )
     agent_id = _clean_id(session.get("agentId"))
@@ -2158,7 +2437,7 @@ def _coerce_int(value: Any, default: int) -> int:
 
 
 def _new_org_id(prefix: str) -> str:
-    stamp = datetime.now(UTC).strftime("%Y%m%d%H%M%S%f")
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S%f")
     return f"{prefix}-{stamp}"
 
 

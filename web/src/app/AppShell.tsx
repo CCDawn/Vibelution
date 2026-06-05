@@ -1,9 +1,10 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate, useNavigationType } from "react-router-dom";
-import { ChevronDown, FolderTree, GitBranch, LoaderCircle, Moon, Power, RefreshCw, ScrollText, Search, Settings, Sun, Wrench } from "lucide-react";
+import { ChevronDown, ExternalLink, FolderTree, GitBranch, LoaderCircle, Moon, Power, RefreshCw, ScrollText, Search, Settings, Sun, Wrench } from "lucide-react";
 
 import { fetchJson, setFetchJsonFailureReporter, type FetchJsonFailureReport } from "../api/client";
+import { restartLauncherBundle, stopLauncherBundle } from "../api/launcher";
 import { queryKeys } from "../api/queryKeys";
 import {
   BackendHealth,
@@ -11,9 +12,7 @@ import {
   FileTreeNode,
   GitStatusSummary,
   RuntimeControlBlockedDetail,
-  RuntimeRestartResponse,
   RuntimeSummary,
-  ShutdownResponse,
 } from "../api/types";
 import { useAppI18n } from "../i18n/useAppI18n";
 import {
@@ -29,6 +28,7 @@ import {
   deriveBackendSystemState,
   deriveFrontendSystemState,
   deriveRuntimeControllerState,
+  deriveStartupDisconnectedState,
   deriveStartupLoadingState,
   deriveStartupProgressState,
   frontendSystemTone,
@@ -44,6 +44,7 @@ import { nextWorkbenchTheme, readStoredWorkbenchTheme, writeStoredWorkbenchTheme
 import { isWorkbenchDomainEnabled, isWorkbenchModeEnabled } from "./workbenchContract";
 import { requestWorkbenchExitGuard } from "./workbenchExitGuard";
 import { useChatWorkbenchStore } from "../store/chatWorkbenchStore";
+import { getPageInstanceId } from "./pageInstance";
 import styles from "./AppShell.module.css";
 import packageJson from "../../package.json";
 
@@ -260,24 +261,20 @@ export function restartRequestUnconfirmedBody(lang: string): string {
     : "重启流程已经开始，但这个窗口还没有收到最终确认。工作台正在继续检查运行状态。";
 }
 
-export function restartActiveWorkConfirmMessage(lang: string, activeWorkDetails: string): string {
+export function restartActiveWorkBlockedMessage(lang: string, activeWorkDetails: string): string {
   const details = activeWorkDetails.trim();
   if (lang === "en") {
     return [
-      "Active team communication or other work is still running.",
+      "Vibelution cannot restart while work is still running.",
       details ? `Running now: ${details}` : "",
-      "Restarting the workbench will stop those runs. Continue?",
+      "Wait for the task to finish or stop it first.",
     ].filter(Boolean).join("\n\n");
   }
   return [
-    "当前还有团队通信或其他任务正在运行。",
+    "有进行中的任务，无法重启 Vibelution。",
     details ? `正在运行：${details}` : "",
-    "重启工作台会停止这些轮次。确定继续吗？",
+    "请等待任务完成，或先停止任务。",
   ].filter(Boolean).join("\n\n");
-}
-
-function restartEndpoint(confirmedActiveWork: boolean): string {
-  return confirmedActiveWork ? "/api/runtime/restart?confirmedActiveWork=true" : "/api/runtime/restart";
 }
 
 function runtimeBlockedDetail(error: unknown): RuntimeControlBlockedDetail | null {
@@ -384,7 +381,7 @@ export function AppShell() {
   const lifecycleMenuRef = useRef<HTMLDivElement | null>(null);
   const shutdownLocalCompletionLoggedRef = useRef(false);
   const telemetrySeqRef = useRef(0);
-  const pageInstanceIdRef = useRef(`page-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`);
+  const pageInstanceIdRef = useRef(getPageInstanceId());
   const apiFailureTelemetrySeenRef = useRef(new Map<string, number>());
   const pagehideAtMsRef = useRef(0);
   const activeSessionId = useChatWorkbenchStore((state) => state.activeSessionId);
@@ -517,8 +514,18 @@ export function AppShell() {
     && !configQuery.data
     && !runtimeQuery.data
     && !backendHealthQuery.data;
+  const startupDisconnectedProgress = deriveStartupDisconnectedState(
+    {
+      startupActive: startupProgress.active,
+      runtimeUnavailable: runtimeQuery.isError || runtimeQuery.isRefetchError,
+      backendUnavailable: backendHealthQuery.isError || backendHealthQuery.isRefetchError,
+    },
+    lang,
+  );
   const startupPanel = startupProgress.active
-    ? startupProgress
+    ? startupDisconnectedProgress.active
+      ? startupDisconnectedProgress
+      : startupProgress
     : startupLoadingShouldBlock
       ? startupLoadingProgress
       : { active: false, title: "", detail: "", stage: "", tone: "idle" as const };
@@ -622,9 +629,7 @@ export function AppShell() {
       shutdownLocalCompletionLoggedRef.current = false;
       emitBrowserTelemetry(buildShutdownRequestedTelemetry(), { preferBeacon: true });
 
-      const payload = await fetchJson<ShutdownResponse>("/api/runtime/shutdown", {
-        method: "POST",
-      });
+      const payload = await stopLauncherBundle();
       if (payload.message) {
         setShutdownDetail(payload.message);
       }
@@ -644,7 +649,7 @@ export function AppShell() {
     return task;
   }, [emitBrowserTelemetry, restartRequested, shutdownBody, shutdownHeading, shutdownUnconfirmedBody]);
 
-  const beginRestart = useCallback((options?: { confirmedActiveWork?: boolean }) => {
+  const beginRestart = useCallback(() => {
     if (shutdownPromiseRef.current || shutdownRequested) {
       return shutdownPromiseRef.current ?? Promise.resolve();
     }
@@ -661,15 +666,13 @@ export function AppShell() {
       setShutdownDetail(restartBody);
       emitBrowserTelemetry(buildRestartRequestedTelemetry(), { preferBeacon: true });
 
-      const payload = await fetchJson<RuntimeRestartResponse>(restartEndpoint(Boolean(options?.confirmedActiveWork)), {
-        method: "POST",
-      });
+      const payload = await restartLauncherBundle();
       if (payload.message) {
         setShutdownDetail(payload.message);
       }
     })().catch((error) => {
       const blocked = runtimeBlockedDetail(error);
-      if (blocked?.code === "active_work_requires_confirmation") {
+      if (blocked?.code === "active_work_restart_blocked" || blocked?.code === "active_work_requires_confirmation") {
         setRestartRequested(false);
         setShutdownOpen(false);
         setShutdownSettled(false);
@@ -679,7 +682,7 @@ export function AppShell() {
           {
             phase: "restart",
             eventCode: "browser.user_action.restart_blocked_active_work",
-            message: "Restart was blocked because active work requires explicit confirmation.",
+            message: "Restart was blocked because active work is running.",
             level: "warning",
             fields: {
               action: "restart",
@@ -924,6 +927,10 @@ export function AppShell() {
   }, [emitBrowserTelemetry, location.hash, location.pathname, location.search, navigationType]);
 
   useEffect(() => {
+    if (!frontendVisible) {
+      return;
+    }
+
     function queryCacheSummary() {
       const queries = queryClient.getQueryCache().getAll();
       const activeQueries = queries.filter((query) => query.getObserversCount() > 0);
@@ -952,12 +959,16 @@ export function AppShell() {
     };
 
     const initialTimer = window.setTimeout(() => emitMemorySample("route_settled"), 1_000);
-    const interval = window.setInterval(() => emitMemorySample("periodic"), BROWSER_MEMORY_SAMPLE_INTERVAL_MS);
+    const interval = frontendVisible
+      ? window.setInterval(() => emitMemorySample("periodic"), BROWSER_MEMORY_SAMPLE_INTERVAL_MS)
+      : null;
     return () => {
       window.clearTimeout(initialTimer);
-      window.clearInterval(interval);
+      if (interval !== null) {
+        window.clearInterval(interval);
+      }
     };
-  }, [emitBrowserTelemetry, location.pathname, queryClient]);
+  }, [emitBrowserTelemetry, frontendVisible, location.pathname, queryClient]);
 
   useEffect(() => {
     function handlePopState() {
@@ -1032,7 +1043,7 @@ export function AppShell() {
             tagName: target.tagName.toLowerCase(),
           },
         });
-        recoverFromBuiltAssetResourceError(resourceUrl);
+        recoverFromBuiltAssetResourceError(resourceUrl, globalThis.window, emitBrowserTelemetry);
         return;
       }
 
@@ -1304,7 +1315,7 @@ export function AppShell() {
   const statusSummaryTitle = rightStatusCards.map((item) => `${item.label}: ${item.value}`).join(" · ");
 
   return (
-    <div className={styles.shell} data-theme={theme}>
+    <div className={styles.shell} data-theme={theme} data-shell="workbench" data-browser-role="workbench">
       {startupPanel.active && !shutdownOpen ? (
         <div
           className={styles.startupOverlay}
@@ -1485,10 +1496,10 @@ export function AppShell() {
                 <span>{t("topUtilityMenuHint")}</span>
               </div>
               <div className={styles.utilityButtonGrid}>
-                <NavLink to="/launcher" className={({ isActive }) => isActive ? `${styles.utilityButton} ${styles.utilityButtonActive}` : styles.utilityButton} role="menuitem" onClick={closeUtilityMenu}>
-                  <Power size={16} />
+                <a href="/launcher" target="_blank" rel="noreferrer" className={styles.utilityButton} role="menuitem" onClick={closeUtilityMenu}>
+                  <ExternalLink size={16} />
                   <span>{lang === "zh" ? "启动器" : "Launcher"}</span>
-                </NavLink>
+                </a>
                 <NavLink to="/logs" className={({ isActive }) => isActive ? `${styles.utilityButton} ${styles.utilityButtonActive}` : styles.utilityButton} role="menuitem" onClick={closeUtilityMenu}>
                   <ScrollText size={16} />
                   <span>{t("navLogs")}</span>
@@ -1734,27 +1745,29 @@ export function AppShell() {
                   setLifecycleMenuOpen(false);
                   const proceed = () => {
                     if (activeWorkIndicator) {
-                      const confirmed = window.confirm(restartActiveWorkConfirmMessage(lang, activeWorkDetailsTitle));
-                      if (!confirmed) {
-                        emitBrowserTelemetry(
-                          {
-                            phase: "restart",
-                            eventCode: "browser.user_action.restart_active_work_cancelled",
-                            message: "User cancelled workbench restart because active work is running.",
-                            level: "info",
-                            fields: {
-                              action: "restart",
-                              source: "app_shell",
-                              activeWorkCount: activeWorkIndicator.count,
-                              activeWorkKinds: activeWorkIndicator.items.map((item) => item.kind),
-                            },
+                      setShutdownOpen(true);
+                      setShutdownSettled(false);
+                      setRestartRequested(false);
+                      setShutdownTitle(restartHeading);
+                      setShutdownDetail(restartActiveWorkBlockedMessage(lang, activeWorkDetailsTitle));
+                      emitBrowserTelemetry(
+                        {
+                          phase: "restart",
+                          eventCode: "browser.user_action.restart_blocked_active_work",
+                          message: "Restart was blocked because active work is running.",
+                          level: "warning",
+                          fields: {
+                            action: "restart",
+                            source: "app_shell",
+                            activeWorkCount: activeWorkIndicator.count,
+                            activeWorkKinds: activeWorkIndicator.items.map((item) => item.kind),
                           },
-                          { preferBeacon: true },
-                        );
-                        return;
-                      }
+                        },
+                        { preferBeacon: true },
+                      );
+                      return;
                     }
-                    void beginRestart({ confirmedActiveWork: Boolean(activeWorkIndicator) });
+                    void beginRestart();
                   };
                   if (requestWorkbenchExitGuard("restart", proceed)) {
                     proceed();

@@ -85,6 +85,8 @@ def get_runtime_summary() -> dict:
 
     runtime_profile = "safe_local"
     model_ref = "unconfigured"
+    model_source = "fallback"
+    profile_source = "fallback"
     lang = get_web_language()
     public_config: dict | None = None
     contract = {
@@ -109,10 +111,19 @@ def get_runtime_summary() -> dict:
         llm_profiles = public_config.get("llm", {}).get("profiles", {})
         primary_profile = llm_profiles.get("primary", {})
         model_ref = primary_profile.get("model_ref") or primary_profile.get("model", model_ref)
+        model_source = "public_config_primary"
+        profile_source = "public_config_runtime"
     except Exception:
         pass
 
     active_session = get_active_session_detail() or {}
+    model_identity = _safe_active_session_model_identity(active_session)
+    if model_identity.get("model"):
+        model_ref = str(model_identity.get("model") or "").strip()
+        model_source = str(model_identity.get("modelSource") or "").strip() or "active_session_agent"
+    if model_identity.get("profile"):
+        runtime_profile = str(model_identity.get("profile") or "").strip()
+        profile_source = str(model_identity.get("profileSource") or "").strip() or "active_session_agent"
     runtime_state = _load_runtime_state()
     current_phase = str(active_session.get("currentPhase") or "").strip().lower()
     status = _derive_web_status(current_phase, runtime_state)
@@ -145,6 +156,10 @@ def get_runtime_summary() -> dict:
         "mode": contract["defaultMode"],
         "model": model_ref,
         "profile": runtime_profile,
+        "modelSource": model_source,
+        "profileSource": profile_source,
+        "modelId": str(model_identity.get("modelId") or "").strip(),
+        "modelAgentId": str(model_identity.get("agentId") or "").strip(),
         "defaultRoute": contract["defaultRoute"],
         "intakeMode": contract["intakeMode"],
         "modeAvailability": contract["modeAvailability"],
@@ -290,25 +305,71 @@ def request_runtime_restart() -> dict[str, object]:
         },
     )
     if active_work_runs:
-        message = text_for(
-            lang,
-            zh="有进行中的任务，无法重启 Vibelution。请等待任务完成或先停止任务。",
-            en="Vibelution cannot restart while work is still running. Wait for the task to finish or stop it first.",
-        )
+        try:
+            ensure_daemon_running()
+            command = submit_command(
+                "restart_workbench",
+                args={
+                    "reason": "web_restart_button",
+                    "source": "web_ui",
+                    "noBrowser": False,
+                    "deferredUntilActiveWorkClear": True,
+                    "queuedBecauseActiveWork": True,
+                    "queuedActiveWorkCount": len(active_work_runs),
+                    "queuedActiveWorkRuns": active_work_runs[:8],
+                },
+                requested_by="web_ui",
+            )
+        except Exception as exc:
+            _record_restart_event(
+                "runtime.restart.failed",
+                message="Runtime deferred restart could not be queued through runtime manager.",
+                outcome="failed",
+                level="error",
+                fields={
+                    "source": "web_ui",
+                    "mode": "runtime_manager",
+                    "activeWorkCount": len(active_work_runs),
+                    "activeWorkKinds": _active_work_kinds(active_work_runs),
+                    "activeWorkRuns": active_work_runs[:8],
+                    "errorType": type(exc).__name__,
+                    "errorMessage": str(exc),
+                },
+            )
+            raise
+
+        command_id = str(command.get("commandId") or "")
         _record_restart_event(
-            "runtime.restart.blocked_active_work",
-            message="Runtime restart blocked because active work is running.",
-            outcome="blocked",
+            "runtime.restart.queued_active_work",
+            message="Runtime restart queued until active work clears.",
+            outcome="queued",
             level="warning",
             fields={
                 "source": "web_ui",
                 "mode": "runtime_manager",
+                "commandId": command_id,
                 "activeWorkCount": len(active_work_runs),
                 "activeWorkKinds": _active_work_kinds(active_work_runs),
                 "activeWorkRuns": active_work_runs[:8],
             },
         )
-        raise RuntimeRestartActiveWorkBlocked(message, active_work_runs)
+        return {
+            "accepted": True,
+            "queued": True,
+            "pendingRestart": True,
+            "mode": "runtime_manager",
+            "commandId": command_id,
+            "message": text_for(
+                lang,
+                zh="已加入重启等待队列。当前任务完成后，Runtime Manager 会自动按队列重启 Vibelution。",
+                en="Restart queued. Runtime Manager will restart Vibelution automatically after active work finishes.",
+            ),
+            "activeWorkRuns": active_work_runs[:8],
+            "activeWorkCount": len(active_work_runs),
+            "chatTurns": [],
+            "chatRoomRounds": [],
+            "evolutionRuns": [],
+        }
     stopped_chat_room_rounds = _stop_active_chat_room_rounds_before_shutdown()
     stopped_chat_turns = _stop_active_chat_turns_before_shutdown()
     stopped_evolution_runs = _stop_active_evolution_runs_before_shutdown()
@@ -401,6 +462,29 @@ def _record_restart_event(
         record_runtime_scene_event(
             "runtime",
             "restart",
+            event_code,
+            message=message,
+            level=level,
+            outcome=outcome,
+            fields=fields or {},
+            lifecycle=True,
+        )
+    except Exception:
+        return
+
+
+def _record_runtime_summary_event(
+    event_code: str,
+    *,
+    message: str,
+    outcome: str = "observed",
+    level: str = "info",
+    fields: dict[str, object] | None = None,
+) -> None:
+    try:
+        record_runtime_scene_event(
+            "runtime",
+            "summary",
             event_code,
             message=message,
             level=level,
@@ -598,6 +682,62 @@ def _display_user_name(public_config: dict | None) -> str:
     profile = _user_profile_payload(public_config)
     display_name = str(profile.get("displayName") or "").strip()
     return display_name or _local_user_name()
+
+
+def _safe_active_session_model_identity(active_session: dict) -> dict[str, str]:
+    try:
+        return _active_session_model_identity(active_session)
+    except Exception as exc:
+        _record_runtime_summary_event(
+            "runtime.summary.model_identity_failed",
+            message="Runtime summary model identity resolution failed; falling back to public config model.",
+            outcome="fallback",
+            level="warning",
+            fields={
+                "exceptionType": type(exc).__name__,
+                "agentId": str(active_session.get("agentId") or "").strip()
+                if isinstance(active_session, dict)
+                else "",
+            },
+        )
+        return {}
+
+
+def _active_session_model_identity(active_session: dict) -> dict[str, str]:
+    if not isinstance(active_session, dict):
+        return {}
+    agent_id = str(active_session.get("agentId") or "").strip()
+    if not agent_id:
+        return {}
+    try:
+        from core.llm.agent_runtime import agent_dialogue_model_id
+        from .agent_directory_service import get_agent
+
+        agent = get_agent(agent_id, include_archived=True)
+    except Exception:
+        return {}
+    if not isinstance(agent, dict):
+        return {}
+    model_id = str(agent_dialogue_model_id(agent) or "").strip()
+    if not model_id:
+        return {}
+    try:
+        config = get_config()
+        entry = config.llm.model_library.get(model_id)
+        if not isinstance(entry, dict):
+            return {"modelId": model_id, "agentId": agent_id}
+        model_name = str(entry.get("model") or entry.get("label") or model_id).strip() or model_id
+        provider_id = str(entry.get("provider_id") or "").strip()
+    except Exception:
+        return {"model": model_id, "modelId": model_id, "agentId": agent_id}
+    return {
+        "model": model_name,
+        "profile": provider_id,
+        "modelId": model_id,
+        "agentId": agent_id,
+        "modelSource": "active_session_agent_dialogue_model",
+        "profileSource": "active_session_agent_dialogue_provider",
+    }
 
 
 def _stop_active_chat_turns_before_shutdown() -> list[dict[str, object]]:
@@ -1547,6 +1687,10 @@ def _context_compression_summary(runtime_state: dict, context_usage: dict[str, i
 
     return {
         "enabled": enabled,
+        "source": "runtime_state",
+        "scope": "runtime_prompt_estimate",
+        "tokenBasis": "current_context_tokens",
+        "limitBasis": "effective_token_limit",
         "currentTokens": used,
         "effectiveTokenLimit": effective_limit,
         "contextWindowLimit": context_window,

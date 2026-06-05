@@ -36,39 +36,36 @@ import {
   ConfigModelOption,
   ConfigModelPresetOption,
   ConfigWorkspace,
-  AgentInstance,
-  AgentModeBindings,
   HealthDiagnostics,
   HealthFinding,
   HealthQuickAction,
   LogHelper,
-  PromptTemplateWorkspace,
   SessionHelper,
 } from "../api/types";
 import {
-  applyModelOptionToProfileDraft,
   asRecord,
   avatarCropSourceRect,
   clonePublicConfig,
-  collectModelDetailKeys,
   configInvalidationDomainsForApply,
   defaultModelApiKeyEnv,
   deriveConfigEditorSyncState,
   deriveModelCenterInventoryRows,
   deriveModelCenterSummary,
-  groupConfigProfileCards,
   getString,
   clampAvatarCropOffset,
   groupModelPresets,
   hasPendingSecretChanges,
   modelLibraryIdFromParts,
+  canDiscoverModelsForProvider,
+  MODEL_CONTRACT_OPTIONS,
+  MODEL_TOOL_CALLING_MODE_OPTIONS,
+  MODEL_TRANSPORT_OPTIONS,
   PROVIDER_KIND_OPTIONS,
+  PROVIDER_COMPAT_MODE_OPTIONS,
   resolveConfigSectionUiStateOnSelect,
   resolveImageInputCapabilityStatus,
-  resolveProfileDisplayState,
   shouldBlockConfigLeave,
   selectModelScenarioPresetId,
-  type ConfigProfileModeGroupLabels,
   type ModelScenarioId,
   uniqueModelLibraryId,
   type ModelPresetGroupLabels,
@@ -82,6 +79,7 @@ type NoticeTone = "neutral" | "success" | "error";
 
 type ProviderDraft = {
   kind: string;
+  api: string;
   api_key_env: string;
   base_url: string;
   compat_mode: string;
@@ -92,6 +90,8 @@ type ProviderDraft = {
 type ModelDetailsDraft = {
   transport: string;
   contract: string;
+  protocol: string;
+  compat: string;
   reasoning_state_field: string;
   strict_compatibility: boolean;
   temperature: string;
@@ -114,16 +114,6 @@ type ModelEditorState = {
   clear_api_key: boolean;
   provider: ProviderDraft;
   details: ModelDetailsDraft;
-};
-
-type ProfileDraft = {
-  profile_id: string;
-  source_profile_id: string;
-  model_id: string;
-};
-
-type ProfileEditState = {
-  modelId: string;
 };
 
 type ConfigSectionUiState = {
@@ -248,10 +238,8 @@ export const CONFIG_COPY = {
     sourceBody: "这里显示当前修改是否已经保存，以及哪些系统级设置需要重启后才会生效。",
     runtimeTitle: "运行时与界面",
     runtimeBody: "语言、默认入口和治理模式可以在这里修改，确认后页面会立即展示本次修改。",
-    profilesTitle: "调用档案",
-    profilesBody: "按业务分区查看每个大模型调用档案使用哪套模型、服务商和密钥；需要修改时先点编辑，确认后页面立即展示本次修改。",
-    modelsTitle: "模型中心",
-    modelsBody: "按服务商账号、模型库存、使用位置和密钥状态管理模型；新增或编辑会先进入本次修改，保存后写回 config.toml。",
+    modelsTitle: "模型库",
+    modelsBody: "这里只管理模型资产：服务商、模型名、密钥状态、能力检测和连通性测试。每个 Agent 的具体 LLM 槽位绑定请到 Agent 管理中维护。",
     draftTitle: "高级配置检查",
     draftBody: "如果结构化面板不够用，可以直接检查整份当前配置；保存时仍只写 config.toml。",
     diagnosticsTitle: "诊断与保存",
@@ -287,14 +275,10 @@ export const CONFIG_COPY = {
     groupWorkbenchSummary: "默认入口、语言、前后端端口与重启后生效的工作台设置。",
     groupAvatarPetTitle: "用户、形象与陪伴体",
     groupAvatarPetSummary: "统一管理用户信息、形象、宠物与陪伴体相关配置。",
-    groupModelingTitle: "模型中心",
-    groupModelingSummary: "模型库、服务商账号、密钥、能力检测和模型发现都在这里集中管理。",
-    groupProfileBindingsTitle: "调用档案",
-    groupProfileBindingsSummary: "按对话、Agent、进化和科研分区管理 LLM 调用档案到模型库的绑定。",
-    groupPromptTitle: "系统提示词",
-    groupPromptSummary: "统一管理 agent 系统提示词组件、章节文件和功能提示词模板。",
-    groupAgentEvolutionTitle: "Agent 与进化",
-    groupAgentEvolutionSummary: "只保留 Agent 管理入口与进化/上下文系统配置，具体 Agent 绑定在 Agent 管理中维护。",
+    groupModelingTitle: "模型库",
+    groupModelingSummary: "模型资产、服务商账号、密钥、能力检测和模型发现都在这里集中管理。",
+    groupRuntimeContextTitle: "运行时与上下文",
+    groupRuntimeContextSummary: "只保留全局上下文压缩、分析和高级运行策略；Agent 个体配置在 Agent 管理维护。",
     groupToolingTitle: "工具与诊断",
     groupToolingSummary: "工具、网络、安全、日志、解析器与调试相关设置。",
     healthTitle: "健康诊断中心",
@@ -339,76 +323,14 @@ export const CONFIG_COPY = {
     defaultMode: "默认模式",
     defaultRoute: "默认入口",
     modelLibrary: "模型库",
-    profiles: "LLM 配置",
-    profileAdd: "新增调用档案",
-    profileId: "调用档案 ID",
-    sourceProfile: "参考配置",
-    assignModel: "模型",
-    createProfile: "确认新增",
-    profileTableModel: "当前模型",
-    profileTableProvider: "服务商",
-    profileTableKey: "Key 状态",
-    profileTableActions: "连接",
-    profileTableCurrent: "当前配置",
-    profileTableStaged: "本次修改预览",
+    profileId: "内部键",
     profileGroupChat: "对话 / 主智能体",
     profileGroupSupport: "心智与压缩",
     profileGroupSubagents: "Agent 管理",
     profileGroupEvolution: "监督进化",
     profileGroupResearch: "科研 / Team",
-    profileGroupOther: "其他调用档案",
-    promptTemplateCenterTitle: "Agent 提示词中心",
-    promptTemplateCenterBody: "提示词编辑已迁移到 Agent 管理，配置中心只保留当前模板和引用关系概览，避免双处编辑同一份 Agent 提示词。",
-    promptTemplateCategory: "分类",
-    promptTemplateSource: "来源",
-    promptTemplateUsage: "引用 Agent",
-    promptTemplateOpenCenter: "打开提示词中心",
-    promptTemplateOpenResearch: "查看科研提示词",
-    promptTemplateEmpty: "暂无提示词模板。",
-    agentConfigCenterTitle: "Agent 管理入口",
-    agentConfigCenterBody: "Agent 绑定、提示词、工具、记忆、私聊会话、工作区和模式成员关系已收口到 Agent 管理；配置页只保留只读引用概览。",
-    openAgentManagement: "打开 Agent 管理",
-    agentConfigRefs: "模式引用",
-    agentConfigIsolation: "隔离资源",
-    agentConfigRuns: "最近运行",
-    agentConfigRunsOpen: "运行记录",
-    agentConfigRunsLoading: "读取运行记录中",
-    agentConfigRunsEmpty: "暂无运行记录。",
-    agentConfigRunsFailed: "运行记录读取失败：",
-    agentConfigSubRuns: "子任务",
-    agentConfigStatus: "状态",
-    agentConfigActive: "长期 Agent",
-    agentConfigEmpty: "暂无长期 Agent。",
-    modeBindingTitle: "模式里的 Agent 分配",
-    modeBindingBody: "这里只读展示当前模式分配；修改默认 Agent、科研池、自进化和监督进化槽位请到 Agent 管理的成员关系中完成。",
-    modeBindingMode: "模式",
-    modeBindingSlot: "槽位",
-    modeBindingBoundAgent: "绑定 Agent",
-    modeBindingDefaultAgent: "默认 Agent",
-    modeBindingChatAvailable: "可用于对话",
-    modeBindingResearchPool: "科研池",
-    modeBindingUpdating: "更新模式绑定中",
-    modeBindingUpdated: "模式绑定已更新。",
-    modeBindingUpdateFailed: "模式绑定更新失败：",
-    researchAgentPoolTitle: "Agent 使用情况摘要",
-    researchAgentPoolBody: "Agent 引用详情已收口到 Agent 管理；这里仅保留调用档案到模型库的绑定。",
-    researchAgentAdd: "新增科研 Agent",
-    researchAgentKey: "Agent Key",
-    researchAgentName: "名称",
-    researchAgentInstance: "绑定 Agent",
-    researchAgentSession: "私聊会话",
-    researchAgentWorkspace: "工作区",
-    researchAgentUnlinked: "等待同步",
-    researchAgentPrompt: "提示词模板",
-    researchAgentTemplate: "Agent 类型",
-    researchAgentLlm: "模型配置",
-    researchAgentEnabled: "启用",
-    researchAgentSave: "保存 Agent",
-    researchAgentDelete: "删除",
-    researchAgentEmpty: "暂无科研 Agent。",
-    researchAgentBusy: "保存科研 Agent 中",
-    researchAgentDeleteBlocked: "删除失败：",
-    llmConfigMissing: "未找到对应 LLM 配置",
+    profileGroupOther: "其他模型绑定",
+    llmConfigMissing: "未找到对应模型绑定",
     modelEditorCreate: "新增模型",
     modelEditorEdit: "编辑模型",
     modelCenterAccounts: "服务商账号",
@@ -416,9 +338,12 @@ export const CONFIG_COPY = {
     modelCenterUsage: "使用位置",
     modelCenterHealth: "状态",
     modelCenterModels: "模型",
-    modelCenterBindings: "调用位置",
+    modelCenterBindings: "引用",
     modelCenterIssues: "异常",
+    modelCenterCapabilityIssues: "需关注",
+    modelCenterActions: "操作",
     modelCenterSource: "来源",
+    modelCenterProtocol: "协议链路",
     modelCenterAccountModels: "模型",
     modelCenterAccountKey: "密钥",
     modelCenterAccountHost: "地址",
@@ -449,17 +374,22 @@ export const CONFIG_COPY = {
     discoveredModel: "发现结果",
     discoveryEmpty: "没有发现可用模型",
     discoveryFailed: "模型发现失败",
+    discoveryUnavailable: "当前服务商不支持自动发现，请手动填写模型名。",
     providerKind: "服务商类型",
-    providerKeyEnv: "服务商密钥变量名",
-    modelKeyEnv: "模型密钥变量名",
+    providerKeyEnv: "服务商默认变量",
+    modelKeyEnv: "模型唯一变量",
     modelKeyInput: "API Key",
     keyStorageHint: "填写后先进入本次修改；点击“保存到 config.toml”时才会写入本机用户级环境变量。",
-    keyEnvAdvancedHint: "变量名会自动生成。只有要复用已有环境变量，或需要精确控制变量名时再改。",
-    deleteModelHint: "删除模型只移除配置项，不会删除系统环境变量。要清除密钥，请先编辑模型并勾选清除密钥。",
+    keyEnvAdvancedHint: "模型密钥变量名由模型 ID 唯一生成并只读展示；真正填写的是 API Key，保存时写入这个用户级环境变量。服务商默认变量仅作兼容来源展示，不作为新增密钥入口。",
+    deleteModelHint: "删除模型会同步清理该模型唯一绑定的环境密钥，并把使用它的模型绑定标记为未配置。",
+    deleteModelConfirm: "确认删除这个模型？这会清理它绑定的环境密钥，并把正在使用它的模型绑定标记为未配置。",
     keyLocation: "密钥存放位置",
     keyLocationHint: "这是系统环境变量名，不是要填写的 API Key。",
     baseUrl: "基础地址",
     compatMode: "兼容模式",
+    providerApi: "Provider API",
+    modelProtocol: "模型协议",
+    modelCompat: "兼容策略对象",
     contextWindow: "上下文窗口",
     requiresApiKey: "需要 API Key",
     transport: "传输协议",
@@ -476,12 +406,18 @@ export const CONFIG_COPY = {
     pendingSecret: "待写入新密钥",
     clearSecret: "保存时同时清除这个环境变量里的密钥",
     saveModel: "确认模型修改",
+    modelRequiredFieldsMissing: "请先填写模型名和基础地址。",
     deleteModel: "删除模型",
     cancelEditing: "清空表单",
     profileCards: "当前模型",
     testConnection: "测试连接",
+    modelTestSelect: "测试模型",
+    modelTestPlaceholder: "选择一个模型",
+    testSelectedLibraryModel: "测试选中模型",
+    modelTestRequired: "请先选择要测试的模型。",
     testImageInput: "检测图像输入",
-    checkAllImageCapabilities: "检测全部图像输入",
+    checkAllImageCapabilities: "批量检测图像输入",
+    checkSavedImageCapabilities: "检测已保存模型图像输入",
     checkModelImageCapability: "检测图像输入",
     imageCapabilityCheckPending: "检测模型能力中",
     imageCapabilityStatus: "图像能力",
@@ -490,18 +426,9 @@ export const CONFIG_COPY = {
     imageInputStatusUnsupported: "不支持图像输入",
     imageInputStatusFailed: "检测失败",
     imageInputUnsupportedHint: "当前模型不能接收图片作为聊天输入，请切换视觉模型或改用图片生成工具。",
-    selectedModel: "使用模型",
-    editProfiles: "编辑调用档案",
-    saveProfileBatch: "确认调用档案",
-    cancelProfileBatch: "取消编辑",
-    testSelectedModel: "测试当前内容",
-    profileSavePendingInline: "保存调用档案修改中",
-    profilePrepared: "已准备好新增调用档案",
-    profilePreparedHint: "可以在这里新增调用档案。确认后页面会立即展示本次修改，保存后写入 config.toml。",
     currentRoute: "当前配置",
     stagedRoute: "本次修改预览",
     apiKeySource: "密钥来源",
-    profileDraftSaved: "本次修改已更新，保存到 config.toml 后生效。",
     routeSummary: "路由信息",
     expandSection: "展开内容",
     collapseSection: "收起内容",
@@ -510,7 +437,7 @@ export const CONFIG_COPY = {
     keyClearPending: "待清除",
     keyMissing: "缺失",
     sourceLibrary: "模型库",
-    sourceProfileGenerated: "来自当前 LLM 配置",
+    sourceProfileGenerated: "来自当前模型绑定",
     requiredModelMissing: "未设置可用模型",
     noBlocking: "当前没有阻塞问题。",
     noWarnings: "当前没有警告。",
@@ -526,7 +453,6 @@ export const CONFIG_COPY = {
     modelSaveFailed: "模型修改未生效：",
     modelEditorAdvancedTitle: "高级参数",
     modelEditorAdvancedHint: "常用字段已经在上方，只有需要时再展开这里。",
-    profileSavePending: "保存调用档案修改中",
     gitCommitModelUsage: "Git 提交模型",
     testPending: "测试连接中",
     imageInputTestPending: "检测图像输入中",
@@ -570,10 +496,8 @@ export const CONFIG_COPY = {
     sourceBody: "Shows whether current changes are saved and which system-level settings take effect after restart.",
     runtimeTitle: "Runtime and Interface",
     runtimeBody: "Language, default route, and governance mode changes are shown here immediately after confirmation.",
-    profilesTitle: "Call Profiles",
-    profilesBody: "Review model, provider, and key bindings by business area. Click edit, then confirm to update the page immediately.",
-    modelsTitle: "Model Center",
-    modelsBody: "Manage model providers, inventory, usage, and key health together. Changes are staged first and saved to config.toml when you apply.",
+    modelsTitle: "Model Library",
+    modelsBody: "This section manages model assets only: provider routes, model names, key state, capability checks, and connection tests. Edit each Agent's LLM slot bindings in Agent management.",
     draftTitle: "Advanced Config Check",
     draftBody: "When the structured panel is not enough, check the full current config here. Saving still writes only config.toml.",
     diagnosticsTitle: "Diagnostics and Save",
@@ -609,14 +533,10 @@ export const CONFIG_COPY = {
     groupWorkbenchSummary: "Default entry, language, frontend/backend ports, and workbench settings that apply after restart.",
     groupAvatarPetTitle: "User, Avatar, and Companion",
     groupAvatarPetSummary: "Manage user info, avatar, pet, and companion-facing settings together.",
-    groupModelingTitle: "Model Center",
-    groupModelingSummary: "Manage model inventory, provider accounts, keys, capability checks, and discovery in one place.",
-    groupProfileBindingsTitle: "Call Profiles",
-    groupProfileBindingsSummary: "Map LLM call profiles to model library entries by chat, Agent, evolution, and research areas.",
-    groupPromptTitle: "System Prompts",
-    groupPromptSummary: "Manage agent prompt components, section files, and feature prompt templates in one place.",
-    groupAgentEvolutionTitle: "Agent and Evolution",
-    groupAgentEvolutionSummary: "Keep only the Agent management entry plus evolution/context system settings here; edit Agent bindings in Agent management.",
+    groupModelingTitle: "Model Library",
+    groupModelingSummary: "Manage model assets, provider accounts, keys, capability checks, and discovery in one place.",
+    groupRuntimeContextTitle: "Runtime and Context",
+    groupRuntimeContextSummary: "Keep global context compression, analysis, and advanced runtime policy here. Configure individual Agents in Agent management.",
     groupToolingTitle: "Tooling and Diagnostics",
     groupToolingSummary: "Tooling, network, security, logging, parser, and debug settings.",
     healthTitle: "Health Diagnostics Center",
@@ -661,76 +581,14 @@ export const CONFIG_COPY = {
     defaultMode: "Default mode",
     defaultRoute: "Default route",
     modelLibrary: "Model library",
-    profiles: "LLM configs",
-    profileAdd: "Add call profile",
-    profileId: "Call profile ID",
-    sourceProfile: "Based on config",
-    assignModel: "Model",
-    createProfile: "Confirm",
-    profileTableModel: "Current model",
-    profileTableProvider: "Provider",
-    profileTableKey: "Key status",
-    profileTableActions: "Connection",
-    profileTableCurrent: "Current config",
-    profileTableStaged: "Change preview",
+    profileId: "Internal key",
     profileGroupChat: "Chat / primary agent",
     profileGroupSupport: "Mental and compression",
     profileGroupSubagents: "Agent management",
     profileGroupEvolution: "Supervised evolution",
     profileGroupResearch: "Research / Team",
-    profileGroupOther: "Other call profiles",
-    promptTemplateCenterTitle: "Agent prompt center",
-    promptTemplateCenterBody: "Prompt editing has moved to Agent management. Config keeps the current template and usage overview only, so the same Agent prompt is not edited in two places.",
-    promptTemplateCategory: "Category",
-    promptTemplateSource: "Source",
-    promptTemplateUsage: "Linked agents",
-    promptTemplateOpenCenter: "Open prompt center",
-    promptTemplateOpenResearch: "View research prompts",
-    promptTemplateEmpty: "No prompt templates yet.",
-    agentConfigCenterTitle: "Agent management entry",
-    agentConfigCenterBody: "Agent bindings, prompts, tools, memory, direct sessions, workspaces, and mode membership now live in Agent management. Config keeps only a read-only reference overview.",
-    openAgentManagement: "Open Agent management",
-    agentConfigRefs: "Mode refs",
-    agentConfigIsolation: "Isolation",
-    agentConfigRuns: "Recent runs",
-    agentConfigRunsOpen: "Run history",
-    agentConfigRunsLoading: "Loading run history",
-    agentConfigRunsEmpty: "No runs recorded yet.",
-    agentConfigRunsFailed: "Run history load failed: ",
-    agentConfigSubRuns: "Subtasks",
-    agentConfigStatus: "Status",
-    agentConfigActive: "Long-lived Agents",
-    agentConfigEmpty: "No long-lived agents yet.",
-    modeBindingTitle: "Agent assignments by mode",
-    modeBindingBody: "This is a read-only view of current mode assignments. Edit the chat default agent, research pool, self-evolution roles, and supervised-evolution slots in Agent management.",
-    modeBindingMode: "Mode",
-    modeBindingSlot: "Slot",
-    modeBindingBoundAgent: "Bound agent",
-    modeBindingDefaultAgent: "Default agent",
-    modeBindingChatAvailable: "Chat available",
-    modeBindingResearchPool: "Research pool",
-    modeBindingUpdating: "Updating mode binding",
-    modeBindingUpdated: "Mode binding updated.",
-    modeBindingUpdateFailed: "Mode binding update failed: ",
-    researchAgentPoolTitle: "Agent usage summary",
-    researchAgentPoolBody: "Agent reference details now live in Agent management. Config only keeps call-profile to model-library bindings here.",
-    researchAgentAdd: "Add research agent",
-    researchAgentKey: "Agent key",
-    researchAgentName: "Name",
-    researchAgentInstance: "Bound agent",
-    researchAgentSession: "Direct session",
-    researchAgentWorkspace: "Workspace",
-    researchAgentUnlinked: "Pending sync",
-    researchAgentPrompt: "Prompt template",
-    researchAgentTemplate: "Agent type",
-    researchAgentLlm: "Model config",
-    researchAgentEnabled: "Enabled",
-    researchAgentSave: "Save agent",
-    researchAgentDelete: "Delete",
-    researchAgentEmpty: "No research agents yet.",
-    researchAgentBusy: "Saving research agent",
-    researchAgentDeleteBlocked: "Delete failed: ",
-    llmConfigMissing: "LLM config not found",
+    profileGroupOther: "Other model bindings",
+    llmConfigMissing: "Model binding not found",
     modelEditorCreate: "Create model",
     modelEditorEdit: "Edit model",
     modelCenterAccounts: "Provider accounts",
@@ -738,9 +596,12 @@ export const CONFIG_COPY = {
     modelCenterUsage: "Usage",
     modelCenterHealth: "Health",
     modelCenterModels: "Models",
-    modelCenterBindings: "Bindings",
+    modelCenterBindings: "References",
     modelCenterIssues: "Issues",
+    modelCenterCapabilityIssues: "Attention",
+    modelCenterActions: "Actions",
     modelCenterSource: "Source",
+    modelCenterProtocol: "Protocol route",
     modelCenterAccountModels: "models",
     modelCenterAccountKey: "key",
     modelCenterAccountHost: "host",
@@ -771,17 +632,22 @@ export const CONFIG_COPY = {
     discoveredModel: "Discovered model",
     discoveryEmpty: "No models discovered",
     discoveryFailed: "Model discovery failed",
+    discoveryUnavailable: "This provider does not support automatic discovery. Enter the model name manually.",
     providerKind: "Provider kind",
-    providerKeyEnv: "Provider key variable",
-    modelKeyEnv: "Model key variable",
+    providerKeyEnv: "Provider default variable",
+    modelKeyEnv: "Unique model variable",
     modelKeyInput: "API key",
     keyStorageHint: "This is staged first. It is written to the local user environment only when you save to config.toml.",
-    keyEnvAdvancedHint: "Variable names are generated automatically. Edit them only when reusing an existing env var or controlling the exact name.",
-    deleteModelHint: "Deleting a model only removes the config entry. It does not delete the system environment variable. Edit the model and enable key clearing first if needed.",
+    keyEnvAdvancedHint: "The model key variable is uniquely generated from the model ID and shown read-only. Enter the API key value; saving writes it to this user environment variable. The provider default variable is compatibility-only display, not a new key entry point.",
+    deleteModelHint: "Deleting a model also clears the unique environment key bound to that model and marks affected model bindings as unconfigured.",
+    deleteModelConfirm: "Delete this model? This clears its bound environment key and marks model bindings using it as unconfigured.",
     keyLocation: "Key storage",
     keyLocationHint: "This is the system environment variable name, not the API key value.",
     baseUrl: "Base URL",
     compatMode: "Compat mode",
+    providerApi: "Provider API",
+    modelProtocol: "Model protocol",
+    modelCompat: "Compat policy object",
     contextWindow: "Context window",
     requiresApiKey: "Requires API key",
     transport: "Transport",
@@ -798,12 +664,18 @@ export const CONFIG_COPY = {
     pendingSecret: "Pending new secret",
     clearSecret: "Also clear this environment key on save",
     saveModel: "Confirm model changes",
+    modelRequiredFieldsMissing: "Enter the model name and base URL first.",
     deleteModel: "Delete model",
     cancelEditing: "Clear form",
     profileCards: "Current models",
     testConnection: "Test connection",
+    modelTestSelect: "Test model",
+    modelTestPlaceholder: "Choose a model",
+    testSelectedLibraryModel: "Test selected model",
+    modelTestRequired: "Choose a model to test first.",
     testImageInput: "Check image input",
-    checkAllImageCapabilities: "Check all image input",
+    checkAllImageCapabilities: "Batch check image input",
+    checkSavedImageCapabilities: "Check saved models image input",
     checkModelImageCapability: "Check image input",
     imageCapabilityCheckPending: "Checking model capabilities",
     imageCapabilityStatus: "Image capability",
@@ -812,18 +684,9 @@ export const CONFIG_COPY = {
     imageInputStatusUnsupported: "No image input",
     imageInputStatusFailed: "Check failed",
     imageInputUnsupportedHint: "This model cannot receive images in chat. Switch to a vision model or use the image generation tool.",
-    selectedModel: "Model",
-    editProfiles: "Edit call profiles",
-    saveProfileBatch: "Confirm call profiles",
-    cancelProfileBatch: "Cancel editing",
-    testSelectedModel: "Test current values",
-    profileSavePendingInline: "Saving call profile changes",
-    profilePrepared: "Call profile is ready",
-    profilePreparedHint: "Add a new call profile here. Confirm updates the page immediately; saving writes config.toml.",
     currentRoute: "Current values",
     stagedRoute: "Change preview",
     apiKeySource: "API key source",
-    profileDraftSaved: "Changes are ready. Save to config.toml to persist them.",
     routeSummary: "Route details",
     expandSection: "Expand",
     collapseSection: "Collapse",
@@ -832,7 +695,7 @@ export const CONFIG_COPY = {
     keyClearPending: "clear pending",
     keyMissing: "missing",
     sourceLibrary: "model library",
-    sourceProfileGenerated: "from current LLM config",
+    sourceProfileGenerated: "from current model binding",
     requiredModelMissing: "No usable model selected",
     noBlocking: "No blocking issues right now.",
     noWarnings: "No warnings right now.",
@@ -848,7 +711,6 @@ export const CONFIG_COPY = {
     modelSaveFailed: "Model changes were not applied:",
     modelEditorAdvancedTitle: "Advanced parameters",
     modelEditorAdvancedHint: "The common fields are above. Expand this only when needed.",
-    profileSavePending: "Saving call profile changes",
     gitCommitModelUsage: "Git commit model",
     testPending: "Testing connection",
     imageInputTestPending: "Checking image input",
@@ -897,6 +759,7 @@ function emptyDraftMeta(): ConfigDraftMeta {
 function emptyProviderDraft(): ProviderDraft {
   return {
     kind: "openai_compatible",
+    api: "",
     api_key_env: "",
     base_url: "",
     compat_mode: "openai",
@@ -909,6 +772,8 @@ function emptyModelDetailsDraft(): ModelDetailsDraft {
   return {
     transport: "chat_completions",
     contract: "tool_chat",
+    protocol: "",
+    compat: "",
     reasoning_state_field: "",
     strict_compatibility: false,
     temperature: "",
@@ -963,22 +828,10 @@ function buildConfigSidebarGroups(copy: ConfigCopy): ConfigSidebarGroup[] {
       memberSectionIds: ["models", "llm-discovery"],
     },
     {
-      id: "profile-bindings",
-      title: copy.groupProfileBindingsTitle,
-      summary: copy.groupProfileBindingsSummary,
-      memberSectionIds: ["profiles"],
-    },
-    {
-      id: "system-prompts",
-      title: copy.groupPromptTitle,
-      summary: copy.groupPromptSummary,
-      memberSectionIds: ["prompt"],
-    },
-    {
-      id: "agent-evolution",
-      title: copy.groupAgentEvolutionTitle,
-      summary: copy.groupAgentEvolutionSummary,
-      memberSectionIds: ["agent", "context-compression", "memory", "strategy", "analysis", "evolution"],
+      id: "runtime-context",
+      title: copy.groupRuntimeContextTitle,
+      summary: copy.groupRuntimeContextSummary,
+      memberSectionIds: ["context-compression", "analysis"],
     },
     {
       id: "tooling-diagnostics",
@@ -987,20 +840,6 @@ function buildConfigSidebarGroups(copy: ConfigCopy): ConfigSidebarGroup[] {
       memberSectionIds: ["health-diagnostics", "tools", "git-commit-profile", "git-commit-prompt", "security", "network", "log", "parser", "debug"],
     },
   ];
-}
-
-function emptyProfileDraft(sourceProfileId = "primary"): ProfileDraft {
-  return {
-    profile_id: "",
-    source_profile_id: sourceProfileId,
-    model_id: "",
-  };
-}
-
-function emptyProfileEditState(modelId = ""): ProfileEditState {
-  return {
-    modelId,
-  };
 }
 
 function formatJson(value: unknown): string {
@@ -1055,6 +894,7 @@ function getDraftLanguage(config: PublicConfigShape | null, fallback: ConfigLang
 function buildProviderDraft(providerInput: Record<string, unknown>): ProviderDraft {
   return {
     kind: getString(providerInput.kind),
+    api: getString(providerInput.api),
     api_key_env: getString(providerInput.api_key_env),
     base_url: getString(providerInput.base_url),
     compat_mode: getString(providerInput.compat_mode) || "openai",
@@ -1067,6 +907,8 @@ function buildModelDetailsDraft(detailsInput: Record<string, unknown>): ModelDet
   return {
     transport: getString(detailsInput.transport) || "chat_completions",
     contract: getString(detailsInput.contract) || "tool_chat",
+    protocol: getString(detailsInput.protocol),
+    compat: Object.keys(asRecord(detailsInput.compat)).length ? JSON.stringify(asRecord(detailsInput.compat), null, 2) : "",
     reasoning_state_field: getString(detailsInput.reasoning_state_field),
     strict_compatibility: getBoolean(detailsInput.strict_compatibility, false),
     temperature: getString(detailsInput.temperature),
@@ -1097,6 +939,7 @@ function hydrateModelEditorFromOption(option: ConfigModelOption): ModelEditorSta
 function buildProviderPayload(draft: ProviderDraft): Record<string, unknown> {
   const payload: Record<string, unknown> = {
     kind: draft.kind.trim(),
+    api: draft.api.trim(),
     api_key_env: draft.api_key_env.trim(),
     base_url: draft.base_url.trim(),
     compat_mode: draft.compat_mode.trim(),
@@ -1106,6 +949,15 @@ function buildProviderPayload(draft: ProviderDraft): Record<string, unknown> {
     payload.context_window = Number(draft.context_window.trim());
   }
   return payload;
+}
+
+function parseModelCompatDraft(value: string): Record<string, unknown> | null {
+  const text = value.trim();
+  if (!text) {
+    return {};
+  }
+  const parsed = JSON.parse(text) as unknown;
+  return isPlainObject(parsed) ? parsed : null;
 }
 
 function buildModelDetailsPayload(draft: ModelDetailsDraft): Record<string, unknown> {
@@ -1119,6 +971,16 @@ function buildModelDetailsPayload(draft: ModelDetailsDraft): Record<string, unkn
   }
   if (draft.contract.trim()) {
     payload.contract = draft.contract.trim();
+  }
+  if (draft.protocol.trim()) {
+    payload.protocol = draft.protocol.trim();
+  }
+  const compat = parseModelCompatDraft(draft.compat);
+  if (!compat) {
+    throw new Error("compat must be a JSON object");
+  }
+  if (Object.keys(compat).length) {
+    payload.compat = compat;
   }
   if (draft.reasoning_state_field.trim()) {
     payload.reasoning_state_field = draft.reasoning_state_field.trim();
@@ -2318,7 +2180,6 @@ async function createCroppedAvatarFile(draft: AvatarCropDraft): Promise<File> {
 export function ConfigRoute() {
   const queryClient = useQueryClient();
   const pageRef = useRef<HTMLDivElement | null>(null);
-  const profileFormRef = useRef<HTMLDivElement | null>(null);
   const sidebarResizeCleanupRef = useRef<(() => void) | null>(null);
   const workspaceQuery = useQuery({
     queryKey: queryKeys.configWorkspace(),
@@ -2327,18 +2188,6 @@ export function ConfigRoute() {
   const healthDiagnosticsQuery = useQuery({
     queryKey: queryKeys.diagnosticsHealth(),
     queryFn: () => fetchJson<HealthDiagnostics>("/api/diagnostics/health"),
-  });
-  const agentsQuery = useQuery({
-    queryKey: queryKeys.agents(),
-    queryFn: () => fetchJson<AgentInstance[]>("/api/agents"),
-  });
-  const promptTemplatesQuery = useQuery({
-    queryKey: queryKeys.promptTemplates(),
-    queryFn: () => fetchJson<PromptTemplateWorkspace>("/api/prompt-templates"),
-  });
-  const modeBindingsQuery = useQuery({
-    queryKey: queryKeys.agentModeBindings(),
-    queryFn: () => fetchJson<AgentModeBindings>("/api/agent-mode-bindings"),
   });
 
   const [draftConfig, setDraftConfig] = useState<PublicConfigShape | null>(null);
@@ -2350,13 +2199,11 @@ export function ConfigRoute() {
   const [notice, setNotice] = useState<{ tone: NoticeTone; text: string }>({ tone: "neutral", text: "" });
   const [busyAction, setBusyAction] = useState("");
   const [modelEditor, setModelEditor] = useState<ModelEditorState>(emptyModelEditorState());
+  const [selectedModelTestId, setSelectedModelTestId] = useState("");
   const [modelEditorError, setModelEditorError] = useState("");
   const [modelDiscoveryError, setModelDiscoveryError] = useState("");
   const [discoveredModels, setDiscoveredModels] = useState<ConfigDiscoveredModel[]>([]);
   const [selectedDiscoveredModelId, setSelectedDiscoveredModelId] = useState("");
-  const [profileDraft, setProfileDraft] = useState<ProfileDraft>(emptyProfileDraft());
-  const [profileEditors, setProfileEditors] = useState<Record<string, ProfileEditState>>({});
-  const [profileFormExpanded, setProfileFormExpanded] = useState(false);
   const [modelEditorExpanded, setModelEditorExpanded] = useState(false);
   const [sidebarIndexCollapsed, setSidebarIndexCollapsed] = useState(() => readStoredFlag(SIDEBAR_INDEX_COLLAPSED_STORAGE_KEY) ?? false);
   const [activeSectionId, setActiveSectionId] = useState("");
@@ -2382,9 +2229,12 @@ export function ConfigRoute() {
     setJsonText(formatJson(workspace.publicConfig));
     setNotice({ tone, text: workspace.message || "" });
     setModelEditor(emptyModelEditorState());
+    setSelectedModelTestId((current) =>
+      current && workspace.modelOptions.some((option) => option.model_id === current)
+        ? current
+        : workspace.modelOptions[0]?.model_id ?? "",
+    );
     setModelEditorError("");
-    setProfileDraft(emptyProfileDraft(workspace.profileCards[0]?.profileId ?? "primary"));
-    setProfileEditors({});
   }
 
   useEffect(() => {
@@ -2465,11 +2315,10 @@ export function ConfigRoute() {
     if (!activeSection?.memberSectionIds.includes(section.id)) {
       return false;
     }
-    return section.id !== "prompt" && section.id !== "agent" && section.id !== "tools";
+    return section.id !== "agent" && section.id !== "tools";
   });
   const modelOptions = workspace?.modelOptions ?? [];
   const modelOptionsById = useMemo(() => new Map(modelOptions.map((option) => [option.model_id, option])), [modelOptions]);
-  const modelDetailKeys = useMemo(() => collectModelDetailKeys(modelOptions), [modelOptions]);
   const modelPresetGroups = useMemo(
     () => {
       const labels: ModelPresetGroupLabels = {
@@ -2493,17 +2342,6 @@ export function ConfigRoute() {
       ],
     [copy],
   );
-  const profileModeGroups = useMemo(() => {
-    const labels: ConfigProfileModeGroupLabels = {
-      chat: copy.profileGroupChat,
-      support: copy.profileGroupSupport,
-      subagents: copy.profileGroupSubagents,
-      evolution: copy.profileGroupEvolution,
-      research: copy.profileGroupResearch,
-      other: copy.profileGroupOther,
-    };
-    return groupConfigProfileCards(workspace?.profileCards ?? [], labels);
-  }, [copy, workspace?.profileCards]);
   const modelCenterSummary = useMemo(
     () =>
       deriveModelCenterSummary({
@@ -2527,22 +2365,25 @@ export function ConfigRoute() {
     () => deriveModelCenterInventoryRows(modelOptions, modelCenterSummary),
     [modelCenterSummary, modelOptions],
   );
-  const agentInstances = agentsQuery.data ?? [];
-  const promptTemplates = promptTemplatesQuery.data?.templates ?? [];
-  const promptTemplatesById = useMemo(
-    () => new Map(promptTemplates.map((template) => [template.promptTemplateId, template])),
-    [promptTemplates],
-  );
-  const promptTemplateUsageTotal = useMemo(
-    () => agentInstances.filter((agent) => Boolean(agent.promptTemplateId)).length,
-    [agentInstances],
-  );
-  const modeBindings = modeBindingsQuery.data?.modes ?? null;
-  const modeBindingWarnings = modeBindingsQuery.data?.repairWarnings ?? [];
-  const activeAgentInstances = useMemo(
-    () => agentInstances.filter((agent) => agent.status !== "archived"),
-    [agentInstances],
-  );
+  useEffect(() => {
+    if (!modelOptions.length) {
+      if (selectedModelTestId) {
+        setSelectedModelTestId("");
+      }
+      return;
+    }
+    if (!selectedModelTestId || !modelOptionsById.has(selectedModelTestId)) {
+      setSelectedModelTestId(modelOptions[0]?.model_id ?? "");
+    }
+  }, [modelOptions, modelOptionsById, selectedModelTestId]);
+  const modelCapabilityIssueCount =
+    modelCenterRows.filter(
+      (row) =>
+        row.apiKeyState === "missing" ||
+        row.apiKeyState === "clear_pending" ||
+        row.imageInputStatus !== "supported",
+    ).length + modelCenterSummary.unresolvedUsageCount;
+  const modelDiscoveryAvailable = canDiscoverModelsForProvider(modelEditor.provider);
 
   useEffect(() => {
     if (!visibleSidebarGroups.length) {
@@ -2588,7 +2429,8 @@ export function ConfigRoute() {
     canCheckCurrentChanges,
     canRestoreEditorText,
   } = editorSyncState;
-  const profilesEditing = Object.keys(profileEditors).length > 0;
+  const modelEditorRequiredFieldsReady = Boolean(modelEditor.model.trim() && modelEditor.provider.base_url.trim());
+  const canSubmitModelEditor = !structuredActionsDisabled && modelEditorRequiredFieldsReady;
   const shouldBlockLeave = useCallback<BlockerFunction>(
     ({ currentLocation, nextLocation }) =>
       shouldBlockConfigLeave({
@@ -2810,29 +2652,6 @@ export function ConfigRoute() {
     }
   }
 
-  function resolveSelectedProfileModelId(profileId: string, fallback = ""): string {
-    return profileEditors[profileId]?.modelId ?? fallback;
-  }
-
-  function beginProfilesEdit() {
-    const nextEditors: Record<string, ProfileEditState> = {};
-    for (const profile of workspace?.profileCards ?? []) {
-      nextEditors[profile.profileId] = emptyProfileEditState(profile.selectedModelId);
-    }
-    setProfileEditors(nextEditors);
-  }
-
-  function cancelProfilesEdit() {
-    setProfileEditors({});
-  }
-
-  function updateProfileModelDraft(profileId: string, modelId: string) {
-    setProfileEditors((current) => ({
-      ...current,
-      [profileId]: emptyProfileEditState(modelId),
-    }));
-  }
-
   function resetSidebarWidth() {
     if (typeof window === "undefined") {
       setSidebarWidth(SIDEBAR_WIDTH_DEFAULT);
@@ -2888,38 +2707,6 @@ export function ConfigRoute() {
       window.addEventListener("pointerup", cleanup);
       window.addEventListener("pointercancel", cleanup);
     };
-  }
-
-  function buildDraftWithSelectedProfileModel(profileId: string, fallback = "") {
-    const modelId = resolveSelectedProfileModelId(profileId, fallback);
-    if (!modelId) {
-      throw new Error(copy.requiredModelMissing);
-    }
-    const option = modelOptionsById.get(modelId);
-    if (!option) {
-      throw new Error(`Unknown model: ${modelId}`);
-    }
-    const next = clonePublicConfig(requireDraft());
-    applyModelOptionToProfileDraft(next, profileId, option, modelDetailKeys);
-    return { next, option };
-  }
-
-  function buildDraftWithSelectedProfileModels() {
-    let next = clonePublicConfig(requireDraft());
-    let changedCount = 0;
-    for (const profile of workspace?.profileCards ?? []) {
-      const selectedModelId = resolveSelectedProfileModelId(profile.profileId, profile.selectedModelId);
-      if (!selectedModelId || selectedModelId === profile.selectedModelId) {
-        continue;
-      }
-      const option = modelOptionsById.get(selectedModelId);
-      if (!option) {
-        throw new Error(`Unknown model: ${selectedModelId}`);
-      }
-      applyModelOptionToProfileDraft(next, profile.profileId, option, modelDetailKeys);
-      changedCount += 1;
-    }
-    return { next, changedCount };
   }
 
   function applyPreset(presetId: string) {
@@ -3005,18 +2792,29 @@ export function ConfigRoute() {
   }
 
   async function handleDiscoverModels() {
-    if (structuredActionsDisabled) {
+    if (structuredActionsDisabled || !modelDiscoveryAvailable) {
+      if (!modelDiscoveryAvailable) {
+        setModelDiscoveryError(copy.discoveryUnavailable);
+      }
       return;
     }
     setBusyAction(copy.discoveryPending);
     setModelDiscoveryError("");
     setDiscoveredModels([]);
     try {
+      const discoveryModelId =
+        modelEditor.mode === "edit"
+          ? modelEditor.model_id
+          : modelEditor.model_id.trim() ||
+            uniqueModelLibraryId(modelLibraryIdFromParts(modelEditor.label || modelEditor.model, modelEditor.model), modelOptions.map((option) => option.model_id));
+      const discoveryApiKeyEnv = modelEditor.api_key_env.trim() || defaultModelApiKeyEnv(discoveryModelId);
       const response = await requestJson<ConfigModelDiscoveryResult>("/api/config/discover-models", {
         publicConfig: requireDraft(),
         draftMeta,
         baseHash,
         provider: buildProviderPayload(modelEditor.provider),
+        modelId: discoveryModelId,
+        apiKeyEnv: discoveryApiKeyEnv,
         apiKey: modelEditor.api_key,
       });
       setDiscoveredModels(response.models);
@@ -3034,6 +2832,11 @@ export function ConfigRoute() {
 
   async function handleSaveModel() {
     if (structuredActionsDisabled) {
+      return;
+    }
+    if (!modelEditorRequiredFieldsReady) {
+      setModelEditorError(copy.modelRequiredFieldsMissing);
+      setModelEditorExpanded(true);
       return;
     }
     setBusyAction(copy.modelSavePending);
@@ -3074,6 +2877,9 @@ export function ConfigRoute() {
     if (structuredActionsDisabled) {
       return;
     }
+    if (typeof window !== "undefined" && !window.confirm(copy.deleteModelConfirm)) {
+      return;
+    }
     setBusyAction(copy.modelSavePending);
     try {
       const response = await requestJson<ConfigWorkspace>("/api/config/draft/delete-model", {
@@ -3090,47 +2896,12 @@ export function ConfigRoute() {
     }
   }
 
-  async function handleAddProfile() {
+  async function handleTestSelectedLibraryModel() {
     if (structuredActionsDisabled) {
       return;
     }
-    setBusyAction(copy.profileSavePending);
-    try {
-      const response = await requestJson<ConfigWorkspace>("/api/config/draft/add-profile", {
-        publicConfig: requireDraft(),
-        draftMeta,
-        baseHash,
-        profileId: profileDraft.profile_id,
-        sourceProfileId: profileDraft.source_profile_id,
-        modelId: profileDraft.model_id,
-      });
-      syncWorkspace(response, "success");
-      setProfileFormExpanded(false);
-    } catch (error) {
-      markError(error);
-    } finally {
-      setBusyAction("");
-    }
-  }
-
-  async function handleApplySelectedProfileModels() {
-    if (structuredActionsDisabled) {
-      return;
-    }
-    try {
-      const { next, changedCount } = buildDraftWithSelectedProfileModels();
-      if (changedCount > 0) {
-        await previewDraft(next, draftMeta, copy.profileSavePendingInline);
-        setNotice({ tone: "success", text: copy.profileDraftSaved });
-      }
-      cancelProfilesEdit();
-    } catch (error) {
-      markError(error);
-    }
-  }
-
-  async function handleTestProfile(profileId: string) {
-    if (structuredActionsDisabled) {
+    if (!selectedModelTestId) {
+      setNotice({ tone: "error", text: copy.modelTestRequired });
       return;
     }
     setBusyAction(copy.testPending);
@@ -3139,39 +2910,11 @@ export function ConfigRoute() {
         publicConfig: requireDraft(),
         draftMeta,
         baseHash,
-        profileId,
+        modelId: selectedModelTestId,
       });
       setNotice({
         tone: result.ok ? "success" : "error",
         text: formatTestNotice(result),
-      });
-    } catch (error) {
-      markError(error);
-    } finally {
-      setBusyAction("");
-    }
-  }
-
-  async function handleTestSelectedProfile(profileId: string, fallbackModelId = "") {
-    if (structuredActionsDisabled) {
-      return;
-    }
-    setBusyAction(copy.testPending);
-    try {
-      const { next, option } = buildDraftWithSelectedProfileModel(profileId, fallbackModelId);
-      const result = await requestJson<ConfigLlmTestResult>("/api/config/test-llm", {
-        publicConfig: next,
-        draftMeta,
-        baseHash,
-        profileId,
-      });
-      setNotice({
-        tone: result.ok ? "success" : "error",
-        text: formatTestNotice({
-          ...result,
-          provider_kind: result.provider_kind || option.provider_kind,
-          base_url: result.base_url || getString(asRecord(option.provider).base_url),
-        }),
       });
     } catch (error) {
       markError(error);
@@ -3238,7 +2981,7 @@ export function ConfigRoute() {
     if (result.capability === "image_input") {
       detailParts.push(`${copy.testCapabilityLabel}: ${imageInputStatusLabel(result)}`);
     }
-    return `${result.profile_id} / ${result.model}: ${result.message} [${detailParts.join(" | ")}]`;
+    return `${result.model_id || result.profile_id} / ${result.model}: ${result.message} [${detailParts.join(" | ")}]`;
   }
 
   function imageInputStatusFromResult(result: ConfigLlmTestResult): "supported" | "unsupported" | "unknown" {
@@ -3598,229 +3341,6 @@ export function ConfigRoute() {
         </section>
         ) : null}
 
-        {isSectionVisible("profiles") ? (
-        <section id="config-profiles" className={styles.sectionSurface}>
-          <div className={styles.sectionHeader}>
-            <div>
-              <p className={styles.eyebrow}>{sectionTitle("profiles", copy.profilesTitle)}</p>
-              <h2 className={styles.sectionTitle}>{copy.profilesTitle}</h2>
-            </div>
-            <div className={styles.sectionHeaderActions}>
-              {profilesEditing ? (
-                <>
-                  <button
-                    type="button"
-                    className={`${styles.primaryButton} ${styles.compactButton}`}
-                    disabled={structuredActionsDisabled}
-                    onClick={handleApplySelectedProfileModels}
-                  >
-                    <Save size={14} />
-                    {copy.saveProfileBatch}
-                  </button>
-                  <button
-                    type="button"
-                    className={`${styles.actionButton} ${styles.compactButton}`}
-                    disabled={structuredActionsDisabled}
-                    onClick={cancelProfilesEdit}
-                  >
-                    <RotateCcw size={14} />
-                    {copy.cancelProfileBatch}
-                  </button>
-                </>
-              ) : (
-                <button
-                  type="button"
-                  className={`${styles.actionButton} ${styles.compactButton}`}
-                  disabled={structuredActionsDisabled}
-                  onClick={beginProfilesEdit}
-                >
-                  <Pencil size={14} />
-                  {copy.editProfiles}
-                </button>
-              )}
-            </div>
-          </div>
-          <p className={styles.sectionText}>{copy.profilesBody}</p>
-          <div className={styles.profileCardGroups}>
-            <div className={styles.profileCardGrid}>
-              {profileModeGroups.flatMap((group) =>
-                group.profiles.map((profile) => {
-                    const profileEditor = profileEditors[profile.profileId];
-                    const isEditingProfile = profilesEditing && Boolean(profileEditor);
-                    const selectedModelId = resolveSelectedProfileModelId(profile.profileId, profile.selectedModelId);
-                    const selectedModel = modelOptionsById.get(selectedModelId) ?? null;
-                    const displayState = resolveProfileDisplayState(profile, selectedModelId, selectedModel, isEditingProfile);
-                    const selectedImageInputStatus = resolveImageInputCapabilityStatus({
-                      supportsImageInput: selectedModel?.supports_image_input,
-                      capabilityStatus: selectedModel?.capability_status,
-                    });
-                    const imageInputStatus = selectedImageInputStatus;
-                    const imageInputTitle =
-                      selectedModel?.capability_error ||
-                      selectedModel?.capability_checked_at ||
-                      selectedModel?.capability_source ||
-                      copy.imageCapabilityStatus;
-                    const keyStateClassName =
-                      displayState.apiKeyState === "missing" || displayState.apiKeyState === "clear_pending"
-                        ? `${styles.inlineBadge} ${styles.inlineBadgeWarning}`
-                        : styles.inlineBadge;
-                    const imageInputBadgeClassName =
-                      imageInputStatus === "supported"
-                        ? `${styles.inlineBadge} ${styles.inlineBadgeSuccess}`
-                        : imageInputStatus === "unsupported"
-                          ? `${styles.inlineBadge} ${styles.inlineBadgeWarning}`
-                          : `${styles.inlineBadge} ${styles.inlineBadgeMuted}`;
-                    return (
-                      <article key={profile.profileId} className={styles.profileConfigCard}>
-                        <div className={styles.profileConfigCardHeader}>
-                          <div className={styles.profileTaskCell}>
-                            <strong>{profile.label}</strong>
-                            <span>{profile.profileId}</span>
-                          </div>
-                          <div className={styles.profileConfigBadges}>
-                            <span className={styles.inlineBadge}>{group.label}</span>
-                            {displayState.selectionDirty ? <span className={styles.inlineBadge}>{copy.profileTableStaged}</span> : null}
-                          </div>
-                        </div>
-                        <div className={styles.profileConfigCardBody}>
-                          {isEditingProfile ? (
-                            <label className={`${styles.field} ${styles.profileCardSelect}`}>
-                              <span>{copy.selectedModel}</span>
-                              <select
-                                value={selectedModelId}
-                                disabled={structuredActionsDisabled}
-                                onChange={(event) => updateProfileModelDraft(profile.profileId, event.target.value)}
-                              >
-                                <option value="" />
-                                {modelOptions.map((option) => (
-                                  <option key={option.model_id} value={option.model_id}>
-                                    {option.label}
-                                  </option>
-                                ))}
-                              </select>
-                            </label>
-                          ) : (
-                            <div className={styles.profileModelCell}>
-                              <span>{copy.profileTableModel}</span>
-                              <strong>{profile.requiredModelMissing ? copy.requiredModelMissing : displayState.selectedModelLabel}</strong>
-                              <span>{displayState.model || "-"}</span>
-                            </div>
-                          )}
-                          <div className={styles.profileMetaCell}>
-                            <span>{copy.profileTableProvider}</span>
-                            <strong>{displayState.providerKind || "-"}</strong>
-                            <span>{displayState.baseUrl || "-"}</span>
-                          </div>
-                          <div className={styles.profileMetaCell}>
-                            <span>{copy.profileTableKey}</span>
-                            <div className={styles.profileStatusBadges}>
-                              <span className={keyStateClassName}>{keyStateLabel(displayState.apiKeyState)}</span>
-                              <span className={imageInputBadgeClassName} title={imageInputTitle}>
-                                {imageInputStatusLabel({
-                                  status: imageInputStatus,
-                                  message: "",
-                                  checkedAt: selectedModel?.capability_checked_at ?? "",
-                                })}
-                              </span>
-                            </div>
-                            {imageInputStatus === "unsupported" ? <span>{copy.imageInputUnsupportedHint}</span> : null}
-                          </div>
-                        </div>
-                        <div className={styles.profileCardActions}>
-                          <button
-                            type="button"
-                            className={`${styles.actionButton} ${styles.compactButton}`}
-                            disabled={structuredActionsDisabled || !selectedModelId}
-                            onClick={() =>
-                              isEditingProfile
-                                ? handleTestSelectedProfile(profile.profileId, profile.selectedModelId)
-                                : handleTestProfile(profile.profileId)
-                            }
-                          >
-                            <Play size={14} />
-                            {isEditingProfile ? copy.testSelectedModel : copy.testConnection}
-                          </button>
-                        </div>
-                      </article>
-                    );
-                  }),
-                )}
-            </div>
-          </div>
-          <div ref={profileFormRef} className={styles.formSurface}>
-            <div className={styles.formHeader}>
-              <div className={styles.formHeaderIntro}>
-                <Plus size={16} />
-                <div>
-                  <span>{copy.profileAdd}</span>
-                  <p className={styles.helperText}>{copy.profilePreparedHint}</p>
-                </div>
-              </div>
-              <button
-                type="button"
-                className={`${styles.actionButton} ${styles.compactButton}`}
-                aria-expanded={profileFormExpanded}
-                onClick={() => setProfileFormExpanded((current) => !current)}
-              >
-                <ChevronRight size={14} className={profileFormExpanded ? styles.treeToggleIconExpanded : styles.treeToggleIcon} />
-                {profileFormExpanded ? copy.collapseSection : copy.expandSection}
-              </button>
-            </div>
-            {profileFormExpanded ? (
-              <>
-                <div className={styles.formGrid}>
-                  <label className={styles.field}>
-                    <span>{copy.profileId}</span>
-                    <input
-                      value={profileDraft.profile_id}
-                      onChange={(event) => setProfileDraft((current) => ({ ...current, profile_id: event.target.value }))}
-                    />
-                  </label>
-                  <label className={styles.field}>
-                    <span>{copy.sourceProfile}</span>
-                    <select
-                      value={profileDraft.source_profile_id}
-                      onChange={(event) =>
-                        setProfileDraft((current) => ({ ...current, source_profile_id: event.target.value }))
-                      }
-                    >
-                      {workspace.profileCards.map((profile) => (
-                        <option key={profile.profileId} value={profile.profileId}>
-                          {profile.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className={styles.field}>
-                    <span>{copy.assignModel}</span>
-                    <select
-                      value={profileDraft.model_id}
-                      onChange={(event) => setProfileDraft((current) => ({ ...current, model_id: event.target.value }))}
-                    >
-                      <option value="" />
-                      {modelOptions.map((option) => (
-                        <option key={option.model_id} value={option.model_id}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                </div>
-                <button
-                  type="button"
-                  className={styles.primaryButton}
-                  disabled={structuredActionsDisabled}
-                  onClick={handleAddProfile}
-                >
-                  <Plus size={14} />
-                  {copy.createProfile}
-                </button>
-              </>
-            ) : null}
-          </div>
-        </section>
-        ) : null}
-
         {isSectionVisible("models") ? (
         <section id="config-models" className={styles.sectionSurface}>
           <div className={styles.sectionHeader}>
@@ -3835,9 +3355,36 @@ export function ConfigRoute() {
             <span><strong>{modelCenterRows.length}</strong> {copy.modelCenterModels}</span>
             <span><strong>{modelCenterSummary.accounts.length}</strong> {copy.modelCenterAccounts}</span>
             <span><strong>{modelCenterSummary.usages.length}</strong> {copy.modelCenterBindings}</span>
-            <span className={modelCenterSummary.unresolvedUsageCount ? styles.summaryBarWarning : undefined}>
-              <strong>{modelCenterSummary.unresolvedUsageCount}</strong> {copy.modelCenterIssues}
+            <span className={modelCapabilityIssueCount ? styles.summaryBarWarning : undefined}>
+              <strong>{modelCapabilityIssueCount}</strong> {copy.modelCenterCapabilityIssues}
             </span>
+          </div>
+          <div className={styles.modelLibraryTestBar}>
+            <label className={`${styles.field} ${styles.modelLibraryTestSelect}`}>
+              <span>{copy.modelTestSelect}</span>
+              <select
+                value={selectedModelTestId}
+                disabled={structuredActionsDisabled || !modelOptions.length}
+                onChange={(event) => setSelectedModelTestId(event.target.value)}
+              >
+                {modelOptions.length ? null : <option value="">{copy.modelTestPlaceholder}</option>}
+                {modelOptions.map((option) => (
+                  <option key={option.model_id} value={option.model_id}>
+                    {option.label || option.model || option.model_id}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="button"
+              className={styles.primaryButton}
+              disabled={structuredActionsDisabled || busyAction === copy.testPending || !selectedModelTestId}
+              title={selectedModelTestId ? copy.testSelectedLibraryModel : copy.modelTestRequired}
+              onClick={handleTestSelectedLibraryModel}
+            >
+              <Play size={14} />
+              {busyAction === copy.testPending ? copy.testPending : copy.testSelectedLibraryModel}
+            </button>
           </div>
           <div className={styles.formSurface} onChange={() => (modelEditorError ? setModelEditorError("") : undefined)}>
             <div className={styles.formHeader}>
@@ -3849,6 +3396,7 @@ export function ConfigRoute() {
                 type="button"
                 className={`${styles.actionButton} ${styles.compactButton}`}
                 aria-expanded={modelEditorExpanded}
+                disabled={structuredActionsDisabled}
                 onClick={() => setModelEditorExpanded((current) => !current)}
               >
                 <ChevronRight size={14} className={modelEditorExpanded ? styles.treeToggleIconExpanded : styles.treeToggleIcon} />
@@ -3957,12 +3505,16 @@ export function ConfigRoute() {
                   <button
                     type="button"
                     className={styles.actionButton}
-                    disabled={structuredActionsDisabled || busyAction === copy.discoveryPending || !modelEditor.provider.base_url.trim()}
+                    disabled={structuredActionsDisabled || busyAction === copy.discoveryPending || !modelDiscoveryAvailable}
+                    title={modelDiscoveryAvailable ? copy.discoverModels : copy.discoveryUnavailable}
                     onClick={handleDiscoverModels}
                   >
                     <RefreshCw size={14} />
                     {busyAction === copy.discoveryPending ? copy.discoveryPending : copy.discoverModels}
                   </button>
+                  {!modelDiscoveryAvailable && modelEditor.provider.base_url.trim() ? (
+                    <span className={styles.helperText}>{copy.discoveryUnavailable}</span>
+                  ) : null}
                   <button
                     type="button"
                     className={styles.actionButton}
@@ -3970,7 +3522,7 @@ export function ConfigRoute() {
                     onClick={() => void handleCheckModelImageCapabilities()}
                   >
                     <ImageIcon size={14} />
-                    {busyAction === copy.imageCapabilityCheckPending ? copy.imageCapabilityCheckPending : copy.checkAllImageCapabilities}
+                    {busyAction === copy.imageCapabilityCheckPending ? copy.imageCapabilityCheckPending : copy.checkSavedImageCapabilities}
                   </button>
                   {discoveredModels.length ? (
                     <label className={`${styles.field} ${styles.profileTableSelect}`}>
@@ -4008,31 +3560,42 @@ export function ConfigRoute() {
                   <div className={styles.formGridWide}>
                     <label className={styles.field}>
                       <span>{copy.providerKeyEnv}</span>
-                      <input
-                        value={modelEditor.provider.api_key_env}
-                        onChange={(event) =>
-                          setModelEditor((current) => ({
-                            ...current,
-                            provider: { ...current.provider, api_key_env: event.target.value },
-                          }))
-                        }
-                      />
+                      <code className={styles.readonlyCodeField} aria-readonly="true">
+                        {modelEditor.provider.api_key_env || copy.autoValue}
+                      </code>
                     </label>
                     <label className={styles.field}>
                       <span>{copy.modelKeyEnv}</span>
-                      <input
-                        value={modelEditor.api_key_env}
-                        onChange={(event) => setModelEditor((current) => ({ ...current, api_key_env: event.target.value }))}
-                      />
+                      <code className={styles.readonlyCodeField} aria-readonly="true">
+                        {modelEditor.api_key_env || copy.autoValue}
+                      </code>
                     </label>
                     <label className={styles.field}>
                       <span>{copy.compatMode}</span>
-                      <input
+                      <select
                         value={modelEditor.provider.compat_mode}
                         onChange={(event) =>
                           setModelEditor((current) => ({
                             ...current,
                             provider: { ...current.provider, compat_mode: event.target.value },
+                          }))
+                        }
+                      >
+                        {PROVIDER_COMPAT_MODE_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className={styles.field}>
+                      <span>{copy.providerApi}</span>
+                      <input
+                        value={modelEditor.provider.api}
+                        onChange={(event) =>
+                          setModelEditor((current) => ({
+                            ...current,
+                            provider: { ...current.provider, api: event.target.value },
                           }))
                         }
                       />
@@ -4051,7 +3614,7 @@ export function ConfigRoute() {
                     </label>
                     <label className={styles.field}>
                       <span>{copy.transport}</span>
-                      <input
+                      <select
                         value={modelEditor.details.transport}
                         onChange={(event) =>
                           setModelEditor((current) => ({
@@ -4059,16 +3622,40 @@ export function ConfigRoute() {
                             details: { ...current.details, transport: event.target.value },
                           }))
                         }
-                      />
+                      >
+                        {MODEL_TRANSPORT_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
                     </label>
                     <label className={styles.field}>
                       <span>{copy.contract}</span>
-                      <input
+                      <select
                         value={modelEditor.details.contract}
                         onChange={(event) =>
                           setModelEditor((current) => ({
                             ...current,
                             details: { ...current.details, contract: event.target.value },
+                          }))
+                        }
+                      >
+                        {MODEL_CONTRACT_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className={styles.field}>
+                      <span>{copy.modelProtocol}</span>
+                      <input
+                        value={modelEditor.details.protocol}
+                        onChange={(event) =>
+                          setModelEditor((current) => ({
+                            ...current,
+                            details: { ...current.details, protocol: event.target.value },
                           }))
                         }
                       />
@@ -4087,12 +3674,30 @@ export function ConfigRoute() {
                     </label>
                     <label className={styles.field}>
                       <span>{copy.toolCallingMode}</span>
-                      <input
+                      <select
                         value={modelEditor.details.tool_calling_mode}
                         onChange={(event) =>
                           setModelEditor((current) => ({
                             ...current,
                             details: { ...current.details, tool_calling_mode: event.target.value },
+                          }))
+                        }
+                      >
+                        {MODEL_TOOL_CALLING_MODE_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className={`${styles.field} ${styles.formGridWideSpan}`}>
+                      <span>{copy.modelCompat}</span>
+                      <textarea
+                        value={modelEditor.details.compat}
+                        onChange={(event) =>
+                          setModelEditor((current) => ({
+                            ...current,
+                            details: { ...current.details, compat: event.target.value },
                           }))
                         }
                       />
@@ -4213,13 +3818,20 @@ export function ConfigRoute() {
                 <p className={styles.fieldHint}>{copy.deleteModelHint}</p>
 
                 <div className={styles.actionsRow}>
-                  <button type="button" className={styles.primaryButton} disabled={structuredActionsDisabled} onClick={handleSaveModel}>
+                  <button
+                    type="button"
+                    className={styles.primaryButton}
+                    disabled={!canSubmitModelEditor}
+                    title={modelEditorRequiredFieldsReady ? undefined : copy.modelRequiredFieldsMissing}
+                    onClick={handleSaveModel}
+                  >
                     <Save size={14} />
                     {copy.saveModel}
                   </button>
                   <button
                     type="button"
                     className={styles.actionButton}
+                    disabled={structuredActionsDisabled}
                       onClick={() => {
                         setModelEditorError("");
                         setModelEditor(emptyModelEditorState());
@@ -4258,9 +3870,9 @@ export function ConfigRoute() {
                   <th>{copy.providerKind}</th>
                   <th>{copy.modelId}</th>
                   <th>{copy.modelCenterHealth}</th>
-                  <th>{copy.modelCenterUsage}</th>
+                  <th>{copy.modelCenterProtocol}</th>
                   <th>{copy.modelCenterSource}</th>
-                  <th>{copy.profileTableActions}</th>
+                  <th>{copy.modelCenterActions}</th>
                 </tr>
               </thead>
               <tbody>
@@ -4303,17 +3915,15 @@ export function ConfigRoute() {
                         </span>
                       </td>
                       <td className={styles.profileMetaCell}>
-                        <strong>{row.usageCount} {copy.modelCenterUsageCount}</strong>
-                        {row.usages.length ? (
-                          <>
-                            {row.usages.slice(0, 3).map((usage) => (
-                              <span key={usage.id}>{usage.groupLabel} · {usage.label}</span>
-                            ))}
-                            {row.usages.length > 3 ? <span>{row.usages.length - 3} {copy.modelCenterUsageMore}</span> : null}
-                          </>
-                        ) : (
-                          <span>{copy.modelCenterNoUsage}</span>
-                        )}
+                        <strong>{row.resolvedProtocol}</strong>
+                        <span>{row.protocolSource}</span>
+                        <span>{row.providerApi || "-"}</span>
+                        {row.compatSummary ? <span>{row.compatSummary}</span> : null}
+                        {row.protocolWarnings.length ? (
+                          <span className={`${styles.inlineBadge} ${styles.inlineBadgeWarning}`} title={row.protocolWarnings.join("\n")}>
+                            {row.protocolWarnings.length}
+                          </span>
+                        ) : null}
                       </td>
                       <td className={styles.profileMetaCell}>
                         <span className={styles.inlineBadge}>{sourceLabel}</span>
@@ -4323,7 +3933,7 @@ export function ConfigRoute() {
                           <button
                             type="button"
                             className={`${styles.actionButton} ${styles.compactButton}`}
-                            disabled={!row.editable || !option}
+                            disabled={structuredActionsDisabled || !row.editable || !option}
                             onClick={() => {
                               if (!option) {
                                 return;
@@ -4362,86 +3972,6 @@ export function ConfigRoute() {
               </tbody>
             </table>
           </div>
-        </section>
-        ) : null}
-
-        {isSectionVisible("agent") ? (
-        <section id="config-agent-center" className={styles.sectionSurface}>
-          <div className={styles.sectionHeader}>
-            <div>
-              <p className={styles.eyebrow}>{sectionTitle("agent", copy.agentConfigCenterTitle)}</p>
-              <h2 className={styles.sectionTitle}>{copy.agentConfigCenterTitle}</h2>
-            </div>
-            <div className={styles.sectionHeaderActions}>
-              <Link className={styles.primaryButton} to="/agents">
-                <ExternalLink size={14} />
-                {copy.openAgentManagement}
-              </Link>
-              <Blocks size={16} className={styles.sectionIcon} />
-            </div>
-          </div>
-          <p className={styles.sectionText}>{copy.agentConfigCenterBody}</p>
-          <div className={styles.matrixGrid}>
-            <article className={styles.matrixCard}>
-              <p className={styles.matrixTitle}>{copy.agentConfigActive}</p>
-              <strong>{agentsQuery.isPending ? copy.loading : activeAgentInstances.length}</strong>
-              <span>{copy.agentConfigCenterBody}</span>
-            </article>
-            <article className={styles.matrixCard}>
-              <p className={styles.matrixTitle}>{copy.modeBindingTitle}</p>
-              <strong>{modeBindingWarnings.length}</strong>
-              <span>{modeBindingWarnings.length ? copy.warningSignals : copy.noWarnings}</span>
-            </article>
-            <article className={styles.matrixCard}>
-              <p className={styles.matrixTitle}>{copy.promptTemplateCenterTitle}</p>
-              <strong>{promptTemplatesQuery.isPending ? copy.loading : promptTemplates.length}</strong>
-              <span>{copy.promptTemplateUsage}: {promptTemplateUsageTotal}</span>
-            </article>
-          </div>
-        </section>
-        ) : null}
-
-        {isSectionVisible("prompt") ? (
-        <section id="config-prompt-templates" className={styles.sectionSurface}>
-          <div className={styles.sectionHeader}>
-            <div>
-              <p className={styles.eyebrow}>{sectionTitle("prompt", copy.promptTemplateCenterTitle)}</p>
-              <h2 className={styles.sectionTitle}>{copy.promptTemplateCenterTitle}</h2>
-            </div>
-            <Pencil size={16} className={styles.sectionIcon} />
-          </div>
-          <p className={styles.sectionText}>{copy.promptTemplateCenterBody}</p>
-          <div className={styles.promptTemplateGrid}>
-            <article className={styles.promptTemplateCard}>
-              <div className={styles.promptTemplateMain}>
-                <strong>{promptTemplatesQuery.isPending ? copy.loading : promptTemplates.length}</strong>
-                <span>{copy.promptTemplateCenterTitle}</span>
-              </div>
-              <div className={styles.promptTemplateMeta}>
-                <span>{copy.promptTemplateCategory}: {new Set(promptTemplates.map((template) => template.category || "general")).size}</span>
-                <span>{copy.promptTemplateUsage}: {promptTemplateUsageTotal}</span>
-              </div>
-            </article>
-            <article className={styles.promptTemplateCard}>
-              <div className={styles.promptTemplateMain}>
-                <strong>{copy.promptTemplateUsage}</strong>
-                <span>{copy.promptTemplateCenterBody}</span>
-              </div>
-              <div className={styles.formActions}>
-                <Link className={styles.primaryButton} to="/agents/prompts">
-                  <ExternalLink size={14} />
-                  {copy.promptTemplateOpenCenter}
-                </Link>
-                <Link className={styles.actionButton} to="/agents/prompts?category=research">
-                  <Pencil size={14} />
-                  {copy.promptTemplateOpenResearch}
-                </Link>
-              </div>
-            </article>
-          </div>
-          {!promptTemplates.length && !promptTemplatesQuery.isPending ? (
-            <p className={styles.helperText}>{copy.promptTemplateEmpty}</p>
-          ) : null}
         </section>
         ) : null}
 

@@ -1,0 +1,448 @@
+from fastapi.testclient import TestClient
+
+from core.web.app import create_app
+from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
+from core.web.routes import team_workflows
+from core.web.services import (
+    agent_directory_service,
+    chat_room_service,
+    project_agent_bus_service,
+    session_service,
+    team_service,
+    team_workflow_orchestration_service,
+)
+
+
+def _client() -> TestClient:
+    return TestClient(create_app(), headers={CONTROL_TOKEN_HEADER: get_control_token()})
+
+
+def _use_tmp_project_root(tmp_path, monkeypatch):
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(project_agent_bus_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(team_workflow_orchestration_service, "PROJECT_ROOT", tmp_path)
+
+
+def test_team_workflow_routes_run_candidate_transfer_slice(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    client = _client()
+    team = client.post("/api/teams", json={"name": "挑战杯科研团队"}).json()
+
+    workflow_response = client.put(
+        f"/api/teams/{team['teamId']}/workflow-orchestration",
+        json={"workflowKind": "challenge_cup_research", "ownerAgentId": "Research Coordination Agent"},
+    )
+    candidate_response = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/candidates/source",
+        json={"title": "Neurology paper", "sourceKind": "paper", "createdByAgent": "Knowledge Collection Agent"},
+    )
+    transfer_response = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/transfers",
+        json={
+            "candidateId": candidate_response.json()["candidate"]["candidateId"],
+            "fromNode": "knowledge_collection",
+            "toNode": "source_screening",
+            "requestedByAgent": "Knowledge Collection Agent",
+        },
+    )
+    decision_response = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/transfers/{transfer_response.json()['transfer']['transferId']}/decide",
+        json={"decision": "approved", "decidedByAgent": "Research Coordination Agent", "targetState": "screening_ready"},
+    )
+
+    assert workflow_response.status_code == 200, workflow_response.text
+    assert workflow_response.json()["workflowKind"] == "challenge_cup_research"
+    assert candidate_response.status_code == 201, candidate_response.text
+    assert transfer_response.status_code == 201, transfer_response.text
+    assert transfer_response.json()["transfer"]["requiresUserConfirmation"] is False
+    assert decision_response.status_code == 200, decision_response.text
+    assert decision_response.json()["transfer"]["decidedByAgent"] == "Research Coordination Agent"
+    assert decision_response.json()["candidate"]["currentWorkflowNode"] == "source_screening"
+
+
+def test_team_workflow_route_blocks_non_owner_transfer_decision(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    client = _client()
+    team = client.post("/api/teams", json={"name": "挑战杯科研团队"}).json()
+    client.put(
+        f"/api/teams/{team['teamId']}/workflow-orchestration",
+        json={"workflowKind": "challenge_cup_research", "ownerAgentId": "Research Coordination Agent"},
+    )
+    candidate = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/candidates/source",
+        json={"title": "Neurology paper", "createdByAgent": "Knowledge Collection Agent"},
+    ).json()["candidate"]
+    transfer = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/transfers",
+        json={
+            "candidateId": candidate["candidateId"],
+            "fromNode": "knowledge_collection",
+            "toNode": "source_screening",
+            "requestedByAgent": "Knowledge Collection Agent",
+        },
+    ).json()["transfer"]
+
+    response = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/transfers/{transfer['transferId']}/decide",
+        json={"decision": "approved", "decidedByAgent": "Knowledge Collection Agent"},
+    )
+
+    assert response.status_code == 422
+    assert "Only the workflow owner agent" in response.json()["detail"]
+
+
+def test_team_workflow_routes_build_and_record_local_research_model_output(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    client = _client()
+    team = client.post("/api/teams", json={"name": "挑战杯科研团队"}).json()
+
+    task_response = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/local-research-model/tasks",
+        json={
+            "taskType": "neuro_mechanism_extract",
+            "sourceRefs": [{"type": "paper", "id": "paper-1", "label": "Paper 1"}],
+            "evidenceRefs": [{"type": "page", "id": "p5", "label": "page 5"}],
+            "excerpt": "The study reports a mechanism.",
+            "createdByAgent": "Neuro Mechanism Extraction Agent",
+        },
+    )
+    output_response = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/local-research-model/outputs",
+        json={
+            "taskType": "neuro_mechanism_extract",
+            "title": "Mechanism draft",
+            "createdByAgent": "Neuro Mechanism Extraction Agent",
+            "output": {
+                "candidateType": "neuro_mechanism",
+                "sourceRefs": [{"type": "paper", "id": "paper-1", "label": "Paper 1"}],
+                "evidenceRefs": [{"type": "page", "id": "p5", "label": "page 5"}],
+                "claims": [{"claim": "Candidate mechanism", "sourceRef": "paper-1"}],
+                "paperNoteIds": ["paper-note-1"],
+                "description": "Neuromodulation changes adaptive routing.",
+                "brainSystems": ["prefrontal cortex"],
+                "cognitiveFunctions": ["adaptive control"],
+                "experimentalPhenomena": ["task-dependent modulation"],
+                "authorInterpretation": "Authors link modulation to control.",
+                "projectInterpretation": "Candidate routing analogy only.",
+                "uncertainty": ["terminology may need review"],
+                "riskFlags": ["terminology_uncertain"],
+                "confidence": 0.61,
+                "nextAction": "send_to_mapping",
+                "requiresReview": True,
+            },
+        },
+    )
+
+    assert task_response.status_code == 201, task_response.text
+    assert task_response.json()["task"]["taskType"] == "neuro_mechanism_extract"
+    assert task_response.json()["task"]["model"]["contextWindow"] == 32000
+    assert output_response.status_code == 201, output_response.text
+    assert output_response.json()["validation"]["valid"] is True
+    assert output_response.json()["candidate"]["currentWorkflowNode"] == "neuro_mechanism"
+    assert output_response.json()["candidate"]["currentState"] == "mechanism_candidate"
+
+
+def test_team_workflow_routes_list_and_validate_candidate_store(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    client = _client()
+    team = client.post("/api/teams", json={"name": "挑战杯科研团队"}).json()
+
+    candidate_response = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/candidates/source",
+        json={
+            "title": "Incomplete PDF",
+            "sourcePath": "C:/papers/neuro.pdf",
+            "sourceKind": "pdf",
+            "allowedForAnalysis": False,
+            "createdByAgent": "Source Intake Agent",
+        },
+    )
+    list_response = client.get(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/candidates",
+        params={"candidateType": "source_manifest"},
+    )
+    validation_response = client.get(f"/api/teams/{team['teamId']}/workflow-orchestration/candidates/validation")
+
+    assert candidate_response.status_code == 201, candidate_response.text
+    assert candidate_response.json()["validation"]["valid"] is False
+    assert list_response.status_code == 200, list_response.text
+    assert list_response.json()["candidateCount"] == 1
+    assert list_response.json()["candidates"][0]["currentState"] == "source_needs_confirmation"
+    assert validation_response.status_code == 200, validation_response.text
+    assert validation_response.json()["summary"]["invalidCandidateCount"] == 1
+    assert validation_response.json()["summary"]["errorCount"] >= 2
+
+
+def test_team_workflow_routes_reject_paper_note_without_citation_anchor(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    client = _client()
+    team = client.post("/api/teams", json={"name": "挑战杯科研团队"}).json()
+
+    response = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/local-research-model/outputs",
+        json={
+            "taskType": "paper_note_draft",
+            "title": "Paper note missing citation",
+            "createdByAgent": "Paper Note Extraction Agent",
+            "output": {
+                "candidateType": "paper_note",
+                "sourceRefs": [{"type": "paper", "id": "paper-1", "label": "Paper 1"}],
+                "evidenceRefs": [{"type": "page", "id": "p3", "label": "page 3"}],
+                "claims": [{"claim": "Observed effect", "sourceRef": "paper-1"}],
+                "keyFindings": [{"finding": "Observed effect", "sourceRef": "paper-1"}],
+                "methods": ["controlled experiment"],
+                "limitations": ["small sample"],
+                "citations": [{"sourceRef": "paper-1"}],
+                "uncertainty": [],
+                "riskFlags": [],
+                "confidence": 0.62,
+                "nextAction": "fix_citations",
+                "requiresReview": True,
+            },
+        },
+    )
+
+    assert response.status_code == 201, response.text
+    assert response.json()["validation"]["valid"] is False
+    assert response.json()["candidate"]["currentState"] == "paper_note_needs_revision"
+    assert {issue["code"] for issue in response.json()["validation"]["issues"]} >= {
+        "missing_key_finding_citation",
+        "missing_citation_anchor",
+    }
+
+
+def test_team_workflow_routes_reject_neuro_mechanism_uncertain_terms_without_flag(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    client = _client()
+    team = client.post("/api/teams", json={"name": "挑战杯科研团队"}).json()
+
+    response = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/local-research-model/outputs",
+        json={
+            "taskType": "neuro_mechanism_extract",
+            "title": "Mechanism with uncertain terms",
+            "createdByAgent": "Neuro Mechanism Extraction Agent",
+            "output": {
+                "candidateType": "neuro_mechanism",
+                "sourceRefs": [{"type": "paper", "id": "paper-1", "label": "Paper 1"}],
+                "evidenceRefs": [{"type": "page", "id": "p5", "label": "page 5"}],
+                "claims": [{"claim": "Candidate mechanism", "sourceRef": "paper-1"}],
+                "paperNoteIds": ["paper-note-1"],
+                "description": "Possible control-related mechanism.",
+                "brainSystems": ["unknown"],
+                "cognitiveFunctions": ["adaptive control"],
+                "experimentalPhenomena": ["task-dependent modulation"],
+                "authorInterpretation": "Authors suggest a control role.",
+                "projectInterpretation": "Candidate mechanism only.",
+                "uncertainty": ["brain system unknown"],
+                "riskFlags": [],
+                "confidence": 0.44,
+                "nextAction": "fix_terminology",
+                "requiresReview": True,
+            },
+        },
+    )
+
+    assert response.status_code == 201, response.text
+    assert response.json()["validation"]["valid"] is False
+    assert response.json()["candidate"]["currentState"] == "mechanism_needs_revision"
+    assert {issue["code"] for issue in response.json()["validation"]["issues"]} >= {"terminology_uncertain_not_flagged"}
+
+
+def test_team_workflow_routes_record_mechanism_mapping_candidate(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    client = _client()
+    team = client.post("/api/teams", json={"name": "挑战杯科研团队"}).json()
+
+    response = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/local-research-model/outputs",
+        json={
+            "taskType": "mechanism_mapping",
+            "title": "Mechanism mapping draft",
+            "createdByAgent": "Mechanism Mapping Agent",
+            "output": {
+                "candidateType": "mechanism_mapping",
+                "sourceRefs": [{"type": "paper", "id": "paper-1", "label": "Paper 1"}],
+                "evidenceRefs": [{"type": "page", "id": "p8", "label": "page 8"}],
+                "claims": [{"claim": "Candidate computational abstraction", "sourceRef": "paper-1"}],
+                "neuroMechanismIds": ["mechanism-1"],
+                "computationalAbstraction": "context-gated dynamic routing",
+                "factLayer": ["The paper reports context-dependent modulation."],
+                "inferenceLayer": ["The project treats modulation as a routing analogy."],
+                "overAnalogyRisk": "low",
+                "engineeringImplication": "Use context signals to alter routing weights.",
+                "uncertainty": [],
+                "riskFlags": [],
+                "confidence": 0.57,
+                "nextAction": "send_to_algorithm_hypothesis",
+                "requiresReview": True,
+            },
+        },
+    )
+
+    assert response.status_code == 201, response.text
+    assert response.json()["validation"]["valid"] is True
+    assert response.json()["candidate"]["currentWorkflowNode"] == "mechanism_mapping"
+    assert response.json()["candidate"]["currentState"] == "mechanism_mapping_candidate"
+
+
+def test_team_workflow_routes_record_algorithm_hypothesis_candidate(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    client = _client()
+    team = client.post("/api/teams", json={"name": "挑战杯科研团队"}).json()
+
+    response = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/local-research-model/outputs",
+        json={
+            "taskType": "algorithm_hypothesis_draft",
+            "title": "Algorithm hypothesis draft",
+            "createdByAgent": "Algorithm Hypothesis Agent",
+            "output": {
+                "candidateType": "algorithm_hypothesis",
+                "sourceRefs": [{"type": "paper", "id": "paper-1", "label": "Paper 1"}],
+                "evidenceRefs": [{"type": "mapping", "id": "mapping-1", "label": "Mapping 1"}],
+                "claims": [{"claim": "Context-gated routing may improve adaptation.", "sourceRef": "paper-1"}],
+                "mechanismMappingIds": ["mapping-1"],
+                "hypothesis": "Context-gated routing improves adaptation under shifting tasks.",
+                "baseline": "standard MoE router",
+                "expectedBenefit": "better task adaptation at equal parameter count",
+                "expectedComputeCost": "one small gating MLP and no extra experts",
+                "experimentPlan": {
+                    "dataset": "synthetic task-switch benchmark",
+                    "metric": "validation accuracy and routing entropy",
+                    "baseline": "standard MoE router",
+                    "smokePlan": "train 200 mini-batches and compare metric direction",
+                },
+                "uncertainty": [],
+                "riskFlags": [],
+                "confidence": 0.53,
+                "nextAction": "send_to_research_review",
+                "requiresReview": True,
+            },
+        },
+    )
+
+    assert response.status_code == 201, response.text
+    assert response.json()["validation"]["valid"] is True
+    assert response.json()["candidate"]["currentWorkflowNode"] == "algorithm_hypothesis"
+    assert response.json()["candidate"]["currentState"] == "hypothesis_candidate"
+
+
+def test_team_workflow_routes_build_candidate_graph(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    client = _client()
+    team = client.post("/api/teams", json={"name": "挑战杯科研团队"}).json()
+    client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/local-research-model/outputs",
+        json={
+            "taskType": "algorithm_hypothesis_draft",
+            "title": "Algorithm hypothesis draft",
+            "createdByAgent": "Algorithm Hypothesis Agent",
+            "output": {
+                "candidateType": "algorithm_hypothesis",
+                "sourceRefs": [{"type": "paper", "id": "paper-1", "label": "Paper 1"}],
+                "evidenceRefs": [{"type": "mapping", "id": "missing-mapping", "label": "Missing mapping"}],
+                "claims": [{"claim": "Context-gated routing may improve adaptation.", "sourceRef": "paper-1"}],
+                "mechanismMappingIds": ["missing-mapping"],
+                "hypothesis": "Context-gated routing improves adaptation under shifting tasks.",
+                "baseline": "standard MoE router",
+                "expectedBenefit": "better task adaptation at equal parameter count",
+                "expectedComputeCost": "one small gating MLP and no extra experts",
+                "experimentPlan": {
+                    "dataset": "synthetic task-switch benchmark",
+                    "metric": "validation accuracy and routing entropy",
+                    "baseline": "standard MoE router",
+                    "smokePlan": "train 200 mini-batches and compare metric direction",
+                },
+                "uncertainty": [],
+                "riskFlags": [],
+                "confidence": 0.53,
+                "nextAction": "send_to_research_review",
+                "requiresReview": True,
+            },
+        },
+    )
+
+    response = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/candidate-graph",
+        json={"title": "Candidate graph preview", "createdByAgent": "Candidate Graph Preview Agent"},
+    )
+
+    assert response.status_code == 201, response.text
+    assert response.json()["candidateGraph"]["currentState"] == "candidate_graph_visible"
+    assert response.json()["candidateGraph"]["qualityStatus"] == "broken_links"
+    assert response.json()["graph"]["officialBoundary"]["writesOfficialKnowledge"] is False
+    assert response.json()["graph"]["summary"]["missingLinkCount"] == 1
+    assert response.json()["workflow"]["candidateStore"]["candidateCount"] == 2
+
+
+def test_team_workflow_routes_record_review_prefilter(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    client = _client()
+    team = client.post("/api/teams", json={"name": "挑战杯科研团队"}).json()
+
+    response = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/local-research-model/outputs",
+        json={
+            "taskType": "review_prefilter",
+            "title": "Review prefilter",
+            "createdByAgent": "Evidence Review Agent",
+            "output": {
+                "candidateType": "review_record",
+                "sourceRefs": [{"type": "paper", "id": "paper-1", "label": "Paper 1"}],
+                "evidenceRefs": [{"type": "hypothesis", "id": "hypothesis-1", "label": "Hypothesis 1"}],
+                "claims": [{"claim": "Candidate has a testable plan.", "sourceRef": "paper-1"}],
+                "candidateIds": ["hypothesis-1"],
+                "checklist": [{"item": "experiment plan", "status": "pass"}],
+                "comments": "Prefilter only; send to human review gate.",
+                "requiredChanges": [],
+                "needsDecision": True,
+                "uncertainty": [],
+                "riskFlags": ["needs_human_decision"],
+                "confidence": 0.66,
+                "nextAction": "request_review_decision",
+                "requiresReview": True,
+            },
+        },
+    )
+
+    assert response.status_code == 201, response.text
+    assert response.json()["validation"]["valid"] is True
+    assert response.json()["candidate"]["candidateType"] == "review_record"
+    assert response.json()["candidate"]["currentWorkflowNode"] == "research_review"
+    assert response.json()["candidate"]["currentState"] == "review_prefiltered"
+
+
+def test_team_workflow_route_invokes_local_research_model(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+
+    def fake_invoke(team_id, payload):
+        return {
+            "task": {"teamId": team_id, "taskType": payload["taskType"]},
+            "candidate": {"candidateId": "local-model-output-1", "candidateType": "paper_note"},
+            "validation": {"valid": True, "issues": []},
+            "modelResponse": {"modelId": "houmo_qwen35_9b_agent", "jsonSource": "content"},
+            "workflow": {"teamId": team_id, "candidateStore": {"candidateCount": 1}},
+        }
+
+    monkeypatch.setattr(team_workflows, "invoke_local_research_model", fake_invoke)
+    client = _client()
+    team = client.post("/api/teams", json={"name": "挑战杯科研团队"}).json()
+
+    response = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/local-research-model/invoke",
+        json={
+            "taskType": "paper_note_draft",
+            "sourceRefs": [{"type": "paper", "id": "paper-1", "label": "Paper 1"}],
+            "evidenceRefs": [{"type": "page", "id": "p3", "label": "page 3"}],
+            "excerpt": "A short source excerpt.",
+            "createdByAgent": "Paper Note Extraction Agent",
+        },
+    )
+
+    assert response.status_code == 201, response.text
+    assert response.json()["task"]["taskType"] == "paper_note_draft"
+    assert response.json()["modelResponse"]["modelId"] == "houmo_qwen35_9b_agent"

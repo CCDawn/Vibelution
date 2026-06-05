@@ -63,4 +63,38 @@ describe("supervised case trace formatting", () => {
       content: '{\n  "ok": true,\n  "path": "C:/repo/app.py"\n}',
     });
   });
+
+  it("preserves chronological order so the timeline can keep newest items at the bottom", () => {
+    const items = buildSupervisedCaseTraceItems(
+      [
+        {
+          timestamp: "2026-06-01T11:56:04",
+          kind: "input",
+          label: "prompt",
+          content: "先读取任务。",
+        },
+        {
+          timestamp: "2026-06-01T11:56:17",
+          kind: "tool",
+          label: "cli_tool",
+          content: '{"cmd":"pytest"}',
+          status: "success",
+        },
+        {
+          timestamp: "2026-06-01T11:56:31",
+          kind: "assistant",
+          label: "assistant",
+          content: "完成这一轮 case。",
+        },
+      ],
+      labels,
+    );
+
+    expect(items.map((item) => item.timestamp)).toEqual([
+      "2026-06-01T11:56:04",
+      "2026-06-01T11:56:17",
+      "2026-06-01T11:56:31",
+    ]);
+    expect(items.at(-1)?.preview).toBe("完成这一轮 case。");
+  });
 });

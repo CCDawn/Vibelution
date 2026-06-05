@@ -8,6 +8,7 @@ router/provider shape accepted by LiteLLM and provider APIs.
 
 from __future__ import annotations
 
+import re
 from dataclasses import replace
 from typing import Any, Dict, List
 from urllib.parse import urlparse
@@ -80,6 +81,15 @@ def _is_gpt5_family_model(model: str) -> bool:
     return any(part.startswith("gpt-5") for part in _model_segments(model))
 
 
+def _is_anthropic_opus_4_7_or_later(model: str) -> bool:
+    normalized = str(model or "").strip().lower().replace("_", "-").replace(".", "-")
+    for segment in normalized.split("/"):
+        match = re.match(r"^claude-opus-4-(\d+)(?:\b|-)", segment)
+        if match and int(match.group(1)) >= 7:
+            return True
+    return False
+
+
 def _convert_system_messages_after_first_to_user(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     normalized: List[Dict[str, Any]] = []
     seen_system = False
@@ -142,7 +152,21 @@ class ProviderAdapter:
         return messages
 
     def capabilities(self, base: LLMCapabilities) -> LLMCapabilities:
-        return base
+        transport = str(getattr(self.profile, "transport", "") or "").strip().lower()
+        prompt_cache_mode = str(
+            getattr(getattr(self.profile, "prompt_cache", None), "mode", "") or "disabled"
+        ).strip().lower()
+        return replace(
+            base,
+            supports_image_input=bool(getattr(self.profile, "supports_image_input", None) is True),
+            supports_prompt_cache=prompt_cache_mode not in {"", "disabled", "unsupported"},
+            supports_thinking=bool(str(getattr(self.profile, "thinking_type", "") or "").strip()),
+            supports_reasoning_roundtrip=bool(self.should_preserve_reasoning_content()),
+            supports_explicit_tool_choice=bool(self.supports_explicit_tool_choice()),
+            supports_stream_usage=bool(self.supports_stream_usage_options()),
+            supports_responses_transport=transport == "responses",
+            supports_structured_content=bool(self.preserves_structured_content),
+        )
 
     def sanitize_tool_schema(self, tool_schema: Dict[str, Any]) -> Dict[str, Any]:
         return sanitize_tool_schema(tool_schema)
@@ -169,6 +193,12 @@ class ProviderAdapter:
         if self.uses_openai_gpt5_chat_constraints():
             return 1.0
         return float(self.profile.temperature)
+
+    def payload_sampling_parameters(self) -> Dict[str, Any]:
+        return {"temperature": self.payload_temperature()}
+
+    def payload_thinking_parameters(self) -> Dict[str, Any]:
+        return {}
 
     def supports_explicit_tool_choice(self) -> bool:
         if self.uses_openai_gpt5_chat_constraints():
@@ -220,7 +250,26 @@ class AnthropicAdapter(ProviderAdapter):
         return "anthropic"
 
     def capabilities(self, base: LLMCapabilities) -> LLMCapabilities:
-        return replace(base, supports_json_mode=True)
+        return replace(
+            super().capabilities(base),
+            supports_json_mode=True,
+            supports_structured_content=True,
+        )
+
+    def payload_sampling_parameters(self) -> Dict[str, Any]:
+        if _is_anthropic_opus_4_7_or_later(self.profile.model):
+            return {}
+        return super().payload_sampling_parameters()
+
+    def payload_thinking_parameters(self) -> Dict[str, Any]:
+        thinking_type = str(getattr(self.profile, "thinking_type", "") or "").strip().lower()
+        if not thinking_type:
+            return {}
+        thinking: Dict[str, Any] = {"type": thinking_type}
+        thinking_display = str(getattr(self.profile, "thinking_display", "") or "").strip().lower()
+        if thinking_type != "disabled" and thinking_display:
+            thinking["display"] = thinking_display
+        return {"thinking": thinking}
 
 
 class DeepSeekAdapter(ProviderAdapter):

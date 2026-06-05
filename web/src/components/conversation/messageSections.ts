@@ -66,6 +66,18 @@ export function isRuntimeNoticeMessage(message: ConversationMessage) {
   ].some((notice) => content.includes(notice));
 }
 
+export function isRuntimeStatusContent(message: ConversationMessage) {
+  if (message.role !== "assistant") {
+    return false;
+  }
+  const content = String(message.content ?? "").trim();
+  if (!content) {
+    return false;
+  }
+  return /^(状态|status)\s+.+/i.test(content)
+    && /(正在|running|thinking|reasoning|tooling|模型|model|上下文|context)/i.test(content);
+}
+
 export function isAgentInboxMessage(message: ConversationMessage) {
   const kind = String(message.metadata?.kind ?? "").trim();
   if (kind === "agent_inbox_message") {
@@ -89,6 +101,7 @@ export function hasUserContent(message: ConversationMessage) {
 export function hasResponseBlock(message: ConversationMessage) {
   return message.role === "assistant"
     && !isRuntimeNoticeMessage(message)
+    && !isRuntimeStatusContent(message)
     && !isTurnErrorMessage(message)
     && !isGroupRoomTranscriptMessage(message)
     && Boolean(message.content.trim());

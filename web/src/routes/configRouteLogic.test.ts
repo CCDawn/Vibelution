@@ -6,6 +6,7 @@ import {
 import {
   applyModelOptionToProfileDraft,
   avatarCropSourceRect,
+  canDiscoverModelsForProvider,
   clampAvatarCropOffset,
   collectModelDetailKeys,
   configInvalidationDomainsForApply,
@@ -18,7 +19,11 @@ import {
   hasPendingSecretChanges,
   listSupervisedAgentInstances,
   modelLibraryIdFromParts,
+  MODEL_CONTRACT_OPTIONS,
+  MODEL_TOOL_CALLING_MODE_OPTIONS,
+  MODEL_TRANSPORT_OPTIONS,
   PROVIDER_KIND_OPTIONS,
+  PROVIDER_COMPAT_MODE_OPTIONS,
   presetCategory,
   resolveImageInputCapabilityStatus,
   resolveProfileDisplayState,
@@ -55,6 +60,7 @@ function option(overrides: Partial<ConfigModelOption> = {}): ConfigModelOption {
     source: "model_library",
     provider: {
       kind: "relay",
+      api: "openai-responses",
       base_url: "https://pixel.try-chatapi.com/v1",
       compat_mode: "openai",
       requires_api_key: true,
@@ -65,12 +71,21 @@ function option(overrides: Partial<ConfigModelOption> = {}): ConfigModelOption {
     details: {
       transport: "chat_completions",
       contract: "tool_chat",
+      protocol: "relay_responses",
+      compat: { streamUsageOptions: true },
       streaming: true,
       timeout: 120,
     },
     api_key_env: "VIBELUTION_LLM_RELAY_OPENAI_GPT_5_5_API_KEY",
     api_key_configured: false,
     api_key_state: "missing",
+    provider_api: "openai-responses",
+    protocol: "relay_responses",
+    compat: { streamUsageOptions: true },
+    resolved_protocol: "relay_responses",
+    protocol_source: "explicit_model",
+    resolved_provider_api: "openai-responses",
+    resolved_compat: { streamUsageOptions: true, toolChoiceMode: "auto" },
     ...overrides,
   };
 }
@@ -95,6 +110,7 @@ describe("configRouteLogic", () => {
   it("classifies model presets from explicit category before provider heuristics", () => {
     expect(presetCategory(preset("relay", { kind: "openai" }, "relay"))).toBe("relay");
     expect(presetCategory(preset("local", { kind: "openai", base_url: "http://127.0.0.1:11434/v1" }))).toBe("local");
+    expect(presetCategory(preset("llamacpp", { kind: "llamacpp", base_url: "http://192.168.20.46:8081/v1" }))).toBe("local");
     expect(presetCategory(preset("official", { kind: "openai", base_url: "https://api.openai.com/v1" }))).toBe("official");
   });
 
@@ -118,6 +134,43 @@ describe("configRouteLogic", () => {
     expect(groups[0].presets.map((item) => item.preset_id)).toEqual(["relay_model"]);
     expect(groups[1].presets.map((item) => item.preset_id)).toEqual(["compatible_model"]);
     expect(groups[2].presets.map((item) => item.preset_id)).toEqual(["local_model"]);
+  });
+
+  it("only exposes model discovery for OpenAI-compatible provider routes", () => {
+    expect(canDiscoverModelsForProvider({ kind: "local", base_url: "http://127.0.0.1:11434/v1", compat_mode: "openai" })).toBe(true);
+    expect(canDiscoverModelsForProvider({ kind: "llamacpp", base_url: "http://192.168.20.46:8081/v1", compat_mode: "openai" })).toBe(true);
+    expect(canDiscoverModelsForProvider({ kind: "openai_compatible", base_url: "https://relay.example.com/v1", compat_mode: "openai" })).toBe(true);
+    expect(canDiscoverModelsForProvider({ kind: "anthropic", base_url: "https://api.anthropic.com", compat_mode: "native" })).toBe(false);
+    expect(canDiscoverModelsForProvider({ kind: "google", base_url: "https://generativelanguage.googleapis.com", compat_mode: "native" })).toBe(false);
+    expect(canDiscoverModelsForProvider({ kind: "custom", base_url: "https://example.com/v1", compat_mode: "openai" })).toBe(true);
+    expect(canDiscoverModelsForProvider({ kind: "local", base_url: "", compat_mode: "openai" })).toBe(false);
+  });
+
+  it("keeps advanced model protocol fields constrained to supported enum values", () => {
+    expect(MODEL_TRANSPORT_OPTIONS.map((item) => item.value)).toEqual(["chat_completions", "responses"]);
+    expect(MODEL_CONTRACT_OPTIONS.map((item) => item.value)).toEqual([
+      "basic_chat",
+      "tool_chat",
+      "reasoning_chat",
+      "responses_agent",
+    ]);
+    expect(MODEL_TOOL_CALLING_MODE_OPTIONS.map((item) => item.value)).toEqual(["disabled", "auto", "parallel"]);
+    expect(PROVIDER_COMPAT_MODE_OPTIONS.map((item) => item.value)).toEqual(["openai", "openai_compatible", "native"]);
+  });
+
+  it("derives model protocol route evidence for inventory rows", () => {
+    const rows = deriveModelCenterInventoryRows([option()], {
+      usagesByModelId: {},
+      usageCountsByModelId: {},
+    });
+
+    expect(rows[0]).toMatchObject({
+      providerApi: "openai-responses",
+      configuredProtocol: "relay_responses",
+      resolvedProtocol: "relay_responses",
+      protocolSource: "explicit_model",
+      compatSummary: "streamUsageOptions=true · toolChoiceMode=auto",
+    });
   });
 
   it("groups LLM configs by mode before rendering the settings table", () => {
@@ -148,8 +201,8 @@ describe("configRouteLogic", () => {
       support: "心智与压缩",
       subagents: "子代理模式",
       evolution: "进化模式",
-      research: "科研模型配置",
-      other: "其他模型配置",
+      research: "科研模型绑定",
+      other: "其他模型绑定",
     });
 
     expect(groups.map((group) => group.id)).toEqual(["chat", "support", "subagents", "evolution", "research", "other"]);
@@ -266,9 +319,9 @@ describe("configRouteLogic", () => {
 
   it("derives the backend default model api key env for custom relay presets", () => {
     expect(defaultModelApiKeyEnv("custom_openai_compatible_relay")).toBe(
-      "VIBELUTION_LLM_CUSTOM_OPENAI_COMPATIBLE_RELAY_API_KEY",
+      "VIBELUTION_LLM_MODEL_CUSTOM_OPENAI_COMPATIBLE_RELAY_API_KEY",
     );
-    expect(defaultModelApiKeyEnv("custom-relay.gpt")).toBe("VIBELUTION_LLM_CUSTOM_RELAY_GPT_API_KEY");
+    expect(defaultModelApiKeyEnv("custom-relay.gpt")).toBe("VIBELUTION_LLM_MODEL_CUSTOM_RELAY_GPT_API_KEY");
   });
 
   it("derives readable internal model ids and exposes provider kind choices", () => {
@@ -277,6 +330,7 @@ describe("configRouteLogic", () => {
     expect(PROVIDER_KIND_OPTIONS.map((item) => item.value)).toContain("openai_compatible");
     expect(PROVIDER_KIND_OPTIONS.map((item) => item.value)).toContain("relay");
     expect(PROVIDER_KIND_OPTIONS.map((item) => item.value)).toContain("xiaomi");
+    expect(PROVIDER_KIND_OPTIONS.map((item) => item.value)).toContain("llamacpp");
     expect(PROVIDER_KIND_OPTIONS[0].value).toBe("relay");
   });
 
@@ -425,7 +479,7 @@ describe("configRouteLogic", () => {
         support: "心智与压缩",
         subagents: "子代理模式",
         evolution: "进化模式",
-        research: "科研模型配置",
+        research: "科研模型绑定",
         other: "其他",
         image2Tool: "image2 生图工具",
         gitCommitModel: "Git 提交模型",
@@ -504,7 +558,7 @@ describe("configRouteLogic", () => {
         support: "心智与压缩",
         subagents: "子代理模式",
         evolution: "进化模式",
-        research: "科研模型配置",
+        research: "科研模型绑定",
         other: "其他",
         image2Tool: "image2 生图工具",
         gitCommitModel: "Git 提交模型",
@@ -531,12 +585,12 @@ describe("configRouteLogic", () => {
       apiKeyEnv: "",
     });
     expect(rows[1].usages[0]).toMatchObject({
-      groupLabel: "科研模型配置",
+      groupLabel: "科研模型绑定",
       label: "科研写作",
     });
   });
 
-  it("tracks git commit message model usage through its selected call profile", () => {
+  it("tracks git commit message model usage through its selected model binding", () => {
     const chatModel = option({
       model_id: "relay_openai_gpt_5_5",
       label: "GPT-5.5 via relay",
@@ -570,7 +624,7 @@ describe("configRouteLogic", () => {
         subagents: "Agent 管理",
         evolution: "监督进化",
         research: "科研 / Team",
-        other: "其他调用档案",
+        other: "其他模型绑定",
         image2Tool: "image2 生图工具",
         gitCommitModel: "Git 提交模型",
       },
@@ -583,7 +637,7 @@ describe("configRouteLogic", () => {
     ]);
     expect(summary.usagesByModelId.relay_openai_gpt_5_5[1]).toMatchObject({
       kind: "feature",
-      detail: "primary",
+      detail: "主聊天",
       groupLabel: "Git 提交模型",
     });
   });
@@ -815,14 +869,12 @@ describe("config route copy", () => {
       .map(([, value]) => value)
       .join("\n");
 
-    expect(CONFIG_COPY.zh.profilesTitle).toBe("调用档案");
-    expect(CONFIG_COPY.en.profilesTitle).toBe("Call Profiles");
-    expect(CONFIG_COPY.zh.profileTableActions).toBe("连接");
-    expect(CONFIG_COPY.en.profileTableActions).toBe("Connection");
-    expect(CONFIG_COPY.zh.editProfiles).toBe("编辑调用档案");
-    expect(CONFIG_COPY.en.editProfiles).toBe("Edit call profiles");
     expect(CONFIG_COPY.zh.openEnvironment).toBe("打开系统环境变量");
     expect(CONFIG_COPY.en.openEnvironment).toBe("Open system environment variables");
+    expect("profilesTitle" in CONFIG_COPY.zh).toBe(false);
+    expect("profilesTitle" in CONFIG_COPY.en).toBe(false);
+    expect("editProfiles" in CONFIG_COPY.zh).toBe(false);
+    expect("editProfiles" in CONFIG_COPY.en).toBe(false);
     expect(zhCopy).not.toContain("配置档");
     expect(zhCopy).not.toContain("模型档案");
     expect(enCopy).not.toMatch(/\bdossiers?\b/i);
@@ -846,48 +898,46 @@ describe("config route copy", () => {
     expect(visibleCopy.en).not.toMatch(/\bJSON editor\b/i);
   });
 
-  it("splits model assets, call profiles, and git tooling into separate areas", () => {
-    expect(CONFIG_COPY.zh.groupModelingTitle).toBe("模型中心");
-    expect(CONFIG_COPY.en.groupModelingTitle).toBe("Model Center");
-    expect(CONFIG_COPY.zh.groupProfileBindingsTitle).toBe("调用档案");
-    expect(CONFIG_COPY.en.groupProfileBindingsTitle).toBe("Call Profiles");
-    expect(CONFIG_COPY.zh.groupPromptTitle).toBe("系统提示词");
-    expect(CONFIG_COPY.en.groupPromptTitle).toBe("System Prompts");
+  it("splits model assets and git tooling into separate areas", () => {
+    expect(CONFIG_COPY.zh.groupModelingTitle).toBe("模型库");
+    expect(CONFIG_COPY.en.groupModelingTitle).toBe("Model Library");
 
     const visibleCopy = `${Object.values(CONFIG_COPY.zh).join("\n")}\n${Object.values(CONFIG_COPY.en).join("\n")}`;
     expect(visibleCopy).toContain("Git 提交模型");
     expect(visibleCopy).toContain("Git commit model");
   });
 
-  it("exposes the settings model library as a task-oriented model center", () => {
-    expect(CONFIG_COPY.zh.modelsTitle).toBe("模型中心");
-    expect(CONFIG_COPY.en.modelsTitle).toBe("Model Center");
+  it("exposes the settings model library as asset-oriented inventory", () => {
+    expect(CONFIG_COPY.zh.modelsTitle).toBe("模型库");
+    expect(CONFIG_COPY.en.modelsTitle).toBe("Model Library");
     expect(CONFIG_COPY.zh.modelCenterAccounts).toBe("服务商账号");
     expect(CONFIG_COPY.zh.modelCenterUsage).toBe("使用位置");
+    expect(CONFIG_COPY.zh.modelCenterBindings).toBe("引用");
     expect(CONFIG_COPY.zh.modelCenterSource).toBe("来源");
     expect(CONFIG_COPY.zh.modelScenarioImage).toBe("图片工具模型");
+    expect(CONFIG_COPY.en.modelCenterBindings).toBe("References");
     expect(CONFIG_COPY.en.modelCenterSource).toBe("Source");
     expect(CONFIG_COPY.en.modelScenarioImage).toBe("Image tool model");
   });
 
-  it("keeps research agent settings aligned to user-facing agent concepts", () => {
-    expect(CONFIG_COPY.zh.researchAgentPrompt).toBe("提示词模板");
-    expect(CONFIG_COPY.zh.researchAgentTemplate).toBe("Agent 类型");
-    expect(CONFIG_COPY.zh.researchAgentLlm).toBe("模型配置");
-    expect(CONFIG_COPY.en.researchAgentPrompt).toBe("Prompt template");
-    expect(CONFIG_COPY.en.researchAgentTemplate).toBe("Agent type");
-    expect(CONFIG_COPY.en.researchAgentLlm).toBe("Model config");
-
+  it("keeps research agent editing copy out of generic config", () => {
     const visibleCopy = `${Object.values(CONFIG_COPY.zh).join("\n")}\n${Object.values(CONFIG_COPY.en).join("\n")}`;
+    expect("researchAgentPrompt" in CONFIG_COPY.zh).toBe(false);
+    expect("researchAgentPrompt" in CONFIG_COPY.en).toBe(false);
+    expect("researchAgentLlm" in CONFIG_COPY.zh).toBe(false);
+    expect("researchAgentLlm" in CONFIG_COPY.en).toBe(false);
     expect(visibleCopy).not.toContain("提示词文件");
     expect(visibleCopy).not.toContain("Prompt file");
   });
 
-  it("points configuration users to the Agent prompt center", () => {
-    expect(CONFIG_COPY.zh.promptTemplateCenterTitle).toBe("Agent 提示词中心");
-    expect(CONFIG_COPY.en.promptTemplateCenterTitle).toBe("Agent prompt center");
-    expect(CONFIG_COPY.zh.promptTemplateOpenCenter).toBe("打开提示词中心");
-    expect(CONFIG_COPY.en.promptTemplateOpenCenter).toBe("Open prompt center");
+  it("keeps Agent prompt center copy out of generic config", () => {
+    const visibleCopy = `${Object.values(CONFIG_COPY.zh).join("\n")}\n${Object.values(CONFIG_COPY.en).join("\n")}`;
+    expect(visibleCopy).not.toContain("Agent 提示词中心");
+    expect(visibleCopy).not.toContain("Agent prompt center");
+    expect(visibleCopy).not.toContain("打开提示词中心");
+    expect(visibleCopy).not.toContain("Open prompt center");
+    expect("groupPromptTitle" in CONFIG_COPY.zh).toBe(false);
+    expect("groupPromptTitle" in CONFIG_COPY.en).toBe(false);
   });
 
   it("keeps the settings sidebar status focused on save readiness", () => {
@@ -899,20 +949,20 @@ describe("config route copy", () => {
     expect(CONFIG_COPY.en.settingsNeedsCheck).toBe("Check advanced config first");
   });
 
-  it("keeps agent editing centralized in Agent management from the config page", () => {
-    expect(CONFIG_COPY.zh.agentConfigCenterTitle).toBe("Agent 管理入口");
-    expect(CONFIG_COPY.en.agentConfigCenterTitle).toBe("Agent management entry");
-    expect(CONFIG_COPY.zh.openAgentManagement).toBe("打开 Agent 管理");
-    expect(CONFIG_COPY.en.openAgentManagement).toBe("Open Agent management");
-    expect(CONFIG_COPY.zh.modeBindingTitle).toBe("模式里的 Agent 分配");
-    expect(CONFIG_COPY.en.modeBindingTitle).toBe("Agent assignments by mode");
-    expect(CONFIG_COPY.zh.modeBindingBody).toContain("只读展示");
-    expect(CONFIG_COPY.en.modeBindingBody).toContain("read-only");
-    expect(CONFIG_COPY.zh.researchAgentPoolBody).toContain("Agent 引用详情已收口到 Agent 管理");
-    expect(CONFIG_COPY.en.researchAgentPoolBody).toContain("Agent reference details now live in Agent management");
-    expect(CONFIG_COPY.zh.groupAgentEvolutionSummary).toContain("具体 Agent 绑定在 Agent 管理中维护");
-    expect(CONFIG_COPY.en.groupAgentEvolutionSummary).toContain("edit Agent bindings in Agent management");
+  it("keeps agent editing copy out of generic config", () => {
     const visibleCopy = `${Object.values(CONFIG_COPY.zh).join("\n")}\n${Object.values(CONFIG_COPY.en).join("\n")}`;
+    expect("agentConfigCenterTitle" in CONFIG_COPY.zh).toBe(false);
+    expect("agentConfigCenterTitle" in CONFIG_COPY.en).toBe(false);
+    expect("openAgentManagement" in CONFIG_COPY.zh).toBe(false);
+    expect("openAgentManagement" in CONFIG_COPY.en).toBe(false);
+    expect("modeBindingTitle" in CONFIG_COPY.zh).toBe(false);
+    expect("modeBindingTitle" in CONFIG_COPY.en).toBe(false);
+    expect("researchAgentPoolBody" in CONFIG_COPY.zh).toBe(false);
+    expect("researchAgentPoolBody" in CONFIG_COPY.en).toBe(false);
+    expect(visibleCopy).not.toContain("Agent 管理入口");
+    expect(visibleCopy).not.toContain("Agent management entry");
+    expect(visibleCopy).not.toContain("模式里的 Agent 分配");
+    expect(visibleCopy).not.toContain("Agent assignments by mode");
     expect(visibleCopy).not.toContain("ModeBinding");
     expect(visibleCopy).not.toContain("Persistent Agent");
     expect(visibleCopy).not.toContain("Persistent agent");

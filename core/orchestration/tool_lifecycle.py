@@ -13,7 +13,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from langchain_core.messages import AIMessage, ToolMessage
 
 from core.infrastructure.llm_utils import parse_tool_args
-from core.infrastructure.tool_result import truncate_result
+from core.infrastructure.tool_result import infer_tool_business_success, truncate_result
 from core.logging.logger import debug as _debug_logger
 from core.logging.unified_logger import logger
 from core.ui.cli_ui import get_ui
@@ -93,11 +93,8 @@ class ToolLifecycleBridge:
             result,
             post_close_action_pending=self._has_post_close_action_pending(),
         )
-        is_err = isinstance(result, str) and (
-            result.startswith("[错误]")
-            or result.startswith("[超时]")
-            or result.startswith("[短路]")
-        )
+        business_success = infer_tool_business_success(result)
+        is_err = not business_success
         ui.update_status("ERROR" if is_err else "WORKING")
 
         if result is not None:

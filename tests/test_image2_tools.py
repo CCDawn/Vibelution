@@ -35,7 +35,7 @@ def _bind_agent(root, session_id="session-image"):
     agent_directory_service.PROJECT_ROOT = root
     return agent_directory_service.create_agent_instance(
         display_name="Image Agent",
-        profile_id="primary",
+        llm_bindings={"dialogue": {"modelId": "model-primary"}},
         direct_session_id=session_id,
     )
 

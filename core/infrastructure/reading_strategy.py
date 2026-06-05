@@ -46,7 +46,7 @@ def build_reading_strategy(prompt: str = "", current_status: str = "", last_vali
         return ReadingStrategy(
             task_type=task_type,
             recommended_tools=["code_symbol_tool", "read_file_tool"],
-            rationale="优先实体级精读，避免整文件吞入。",
+            rationale="优先用代码图谱确认影响范围和候选测试，再补局部文件上下文。",
         )
     if task_type == "analyze":
         return ReadingStrategy(
@@ -58,12 +58,12 @@ def build_reading_strategy(prompt: str = "", current_status: str = "", last_vali
         return ReadingStrategy(
             task_type=task_type,
             recommended_tools=["code_symbol_tool", "read_file_tool"],
-            rationale="先看结构，再读目标实体和局部上下文。",
+            rationale="先看项目图谱，再读目标文件、符号和局部上下文。",
         )
     return ReadingStrategy(
         task_type="locate",
         recommended_tools=["grep_search_tool", "code_symbol_tool"],
-        rationale="先缩小范围，再决定读哪个实体或区间。",
+        rationale="先缩小范围，再用代码图谱决定读哪个文件、符号或影响链。",
     )
 
 

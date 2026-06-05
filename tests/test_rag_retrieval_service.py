@@ -187,6 +187,62 @@ def test_rag_retrieval_honors_knowledge_acl(rag_knowledge_env):
     assert payload["summary"]["scannedKnowledgeBaseCount"] == 1
 
 
+def test_rag_retrieval_includes_own_agent_formal_knowledge_by_default(tmp_path, monkeypatch):
+    from core.web.services import rag_retrieval_service
+
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(team_knowledge_service, "PROJECT_ROOT", tmp_path)
+    owner = agent_directory_service.create_agent_instance(display_name="RAG Owner")
+    other = agent_directory_service.create_agent_instance(display_name="RAG Other")
+    base = team_knowledge_service.create_agent_knowledge_base(
+        owner["agentId"],
+        name="Owner RAG Private Base",
+        actor_agent_id=owner["agentId"],
+    )
+    proposal = team_knowledge_service.create_refinement_proposal(
+        base["knowledgeBaseId"],
+        source_artifact_ids=[],
+        proposed_by_agent_id=owner["agentId"],
+        title="Agent private citation",
+        content="Agent private RAG retrieval should return this owner scoped citation.",
+        tags=["rag", "agent-private"],
+    )
+    item = team_knowledge_service.review_refinement_proposal(
+        base["knowledgeBaseId"],
+        proposal["proposalId"],
+        status="approved",
+        reviewed_by_agent_id=owner["agentId"],
+    )["item"]
+
+    owner_payload = rag_retrieval_service.retrieve_rag_contexts(
+        agent_id=owner["agentId"],
+        query="owner scoped citation",
+        retrieval_mode="semantic",
+        provider="local",
+        top_k=5,
+    )
+    other_payload = rag_retrieval_service.retrieve_rag_contexts(
+        agent_id=other["agentId"],
+        query="owner scoped citation",
+        retrieval_mode="semantic",
+        provider="local",
+        top_k=5,
+    )
+
+    assert owner_payload["summary"]["contextCount"] == 1
+    context = owner_payload["contexts"][0]
+    citation = owner_payload["citations"][0]
+    assert context["source"]["ownerType"] == "agent"
+    assert context["source"]["ownerId"] == owner["agentId"]
+    assert context["source"]["agentId"] == owner["agentId"]
+    assert citation["ownerType"] == "agent"
+    assert citation["ownerId"] == owner["agentId"]
+    assert citation["knowledgeItemId"] == item["knowledgeItemId"]
+    assert other_payload["summary"]["contextCount"] == 0
+
+
 def test_rag_context_budget_trims_text_but_keeps_source(rag_knowledge_env):
     from core.web.services import rag_retrieval_service
 

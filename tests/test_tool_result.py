@@ -17,6 +17,7 @@ from core.infrastructure.tool_result import (
     truncate_result,
     package_tool_result,
     format_tool_message,
+    infer_tool_business_success,
     DEFAULT_MAX_CHARS,
 )
 
@@ -170,6 +171,23 @@ class TestFormatToolMessage:
         )
         assert result_str is not None
         assert call_id is not None
+
+
+class TestInferToolBusinessSuccess:
+    """业务层工具结果成功性推断。"""
+
+    def test_ok_false_json_string_is_business_failure(self):
+        result = '{"error":"RuntimeError","message":"cannot schedule new futures after shutdown","ok":false,"status":"failed"}'
+        assert infer_tool_business_success(result) is False
+
+    def test_failed_dict_is_business_failure(self):
+        assert infer_tool_business_success({"status": "failed", "message": "send failed"}) is False
+
+    def test_plain_text_is_success(self):
+        assert infer_tool_business_success("normal output") is True
+
+    def test_error_prefix_is_failure(self):
+        assert infer_tool_business_success("[错误] something failed") is False
 
 
 if __name__ == "__main__":

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { resolveLegacyTeamsRedirect } from "./LegacyTeamsRedirect";
 import routeSource from "./TeamsRoute.tsx?raw";
+import routeStyles from "./TeamsRoute.module.css";
 import routerSource from "../app/router.tsx?raw";
 
 describe("TeamsRoute layout contract", () => {
@@ -23,6 +24,9 @@ describe("TeamsRoute layout contract", () => {
 
   it("uses Team APIs and Agent Center as the binding source", () => {
     expect(routeSource).toContain('fetchJson<TeamListPayload>("/api/teams")');
+    expect(routeSource).toContain('fetchJson<TeamTemplateListPayload>("/api/team-templates")');
+    expect(routeSource).toContain("/api/team-templates/${encodeURIComponent(templateId)}/instantiate");
+    expect(routeSource).toContain("instantiateTeamTemplateMutation");
     expect(routeSource).toContain("fetchJson<Team>(`/api/teams/${encodeURIComponent(effectiveTeamId)}`)");
     expect(routeSource).toContain('fetchJson<AgentConfigWorkspace>("/api/agents/config-workspace")');
     expect(routeSource).toContain("fetchJson<Team>(`/api/teams/${encodeURIComponent(teamId)}`");
@@ -54,6 +58,8 @@ describe("TeamsRoute layout contract", () => {
   it("can deep-link from Agent references to a selected Team", () => {
     expect(routeSource).toContain("useSearchParams");
     expect(routeSource).toContain('searchParams.get("team")');
+    expect(routeSource).toContain('searchParams.get("agent")');
+    expect(routeSource).toContain("requestedAgentTeamId");
     expect(routeSource).toContain("setSearchParams({ team: team.teamId })");
   });
 
@@ -61,7 +67,22 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("teamList");
     expect(routeSource).toContain("canvasPanel");
     expect(routeSource).toContain("inspector");
+    expect(routeSource).toContain("teamNameInputRef");
+    expect(routeSource).toContain("从模板创建");
+    expect(routeSource).toContain("创建 Demo 团队");
+    expect(routeSource).toContain("selectedTemplate.chatRoom.mode");
+    expect(routeSource).toContain("styles.templatePanel");
+    expect(routeSource).toContain("styles.templatePicker");
+    expect(routeSource).toContain("styles.templateSelect");
+    expect(routeSource).toContain("styles.templatePreview");
+    expect(routeSource).not.toContain("styles.templateCard");
+    expect(routeSource).toContain("先填写团队名称，再创建团队。");
+    expect(routeSource).toContain("styles.formError");
+    expect(routeSource).toContain("styles.formHint");
     expect(routeSource).toContain("绑定 Agent");
+    expect(routeSource).toContain("styles.nodeBindingSection");
+    expect(routeSource).toContain("styles.nodeBindingPlaceholder");
+    expect(routeSource).toContain("正在读取团队节点");
     expect(routeSource).toContain("agentTeamMembership");
     expect(routeSource).toContain("membership.teamId !== selectedTeam?.teamId");
     expect(routeSource).toContain("disabled={ownedByOtherTeam}");
@@ -84,7 +105,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("发送给团队");
     expect(routeSource).toContain("最近团队广播");
     expect(routeSource).toContain("已衔接群聊");
-    expect(routeSource).toContain("to={`/chat?room=${encodeURIComponent(startTeamRoundMutation.data.roomId)}`}");
+    expect(routeSource).toContain("to={`/chat?room=${encodeURIComponent(selectedTeamStartRoundResult.roomId)}`}");
     expect(routeSource).toContain("to={`/chat?room=${encodeURIComponent(latestTeamRound.roomId)}`}");
     expect(routeSource).toContain("styles.linkedRoomLine");
     expect(routeSource).toContain("styles.toolbarLink");
@@ -95,6 +116,27 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("styles.teamHistoryPanel");
     expect(routeSource).toContain("interrupt_targets");
     expect(routeSource).toContain("edges: canvas.edges.filter((edge) => edge.source !== deletedNodeId && edge.target !== deletedNodeId)");
+    expect(routeStyles.templatePanel).toBeTypeOf("string");
+    expect(routeStyles.templatePicker).toBeTypeOf("string");
+    expect(routeStyles.templateSelect).toBeTypeOf("string");
+    expect(routeStyles.templatePreview).toBeTypeOf("string");
+    expect(routeStyles.nodeBindingSection).toBeTypeOf("string");
+    expect(routeStyles.nodeBindingPlaceholder).toBeTypeOf("string");
+  });
+
+  it("keeps Team actions scoped to the selected Team or message event", () => {
+    expect(routeSource).toContain("canvasSavePendingForTeam");
+    expect(routeSource).toContain("saveCanvasMutation.variables?.teamId === teamId");
+    expect(routeSource).toContain("selectedTeamSyncPending");
+    expect(routeSource).toContain("syncTeamChatRoomMutation.variables === selectedTeam?.teamId");
+    expect(routeSource).toContain("selectedTeamStartRoundPending");
+    expect(routeSource).toContain("startTeamRoundMutation.variables?.teamId === selectedTeam?.teamId");
+    expect(routeSource).toContain("selectedTeamMessagePending");
+    expect(routeSource).toContain("sendTeamMessageMutation.variables?.teamId === selectedTeam?.teamId");
+    expect(routeSource).toContain("revokeTeamMessageMutation.variables?.eventId === event.eventId");
+    expect(routeSource).toContain("revokeTeamMessageMutation.mutate({ teamId: selectedTeam.teamId, eventId: event.eventId })");
+    expect(routeSource).not.toContain("chatWorkspaceCache.afterTeamChanged(selectedTeamId || undefined)");
+    expect(routeSource).not.toContain("revokeTeamMessageMutation.mutate(event.eventId)");
   });
 
   it("renders visible directional communication edges on the Team canvas", () => {

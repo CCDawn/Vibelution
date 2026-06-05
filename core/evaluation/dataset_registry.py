@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import json
-import re
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -13,18 +12,16 @@ from typing import Any, Dict, Iterable, List, Optional
 from core.infrastructure.workspace_manager import get_workspace
 
 from .chat_case_lifecycle import chat_reviewed_dataset_metadata
+from .dataset_adapters import (
+    adapter_bundle_dataset_metadata,
+    adapter_usability,
+    materialize_adapter_case,
+)
 from .self_evolution_candidate_pool import ALLOWED_CANDIDATE_TYPES, list_candidate_records
 from .supervised_intake import (
-    ALLOWED_SUPERVISED_CASE_TYPES,
-    DYNAMIC_REPLANNING_CASE_TYPE,
-    GENERATED_CASE_TYPE,
-    IMPOSSIBLE_TASK_CASE_TYPE,
-    REVIEWED_CHAT_CASE_TYPE,
-    STATIC_CASE_TYPE,
     dataset_intake_boundary,
     generated_case_dataset_metadata,
     protected_dataset_boundary_fields,
-    reviewed_chat_row_status,
     self_evolution_candidate_risk_level,
 )
 from .supervised_evolution import (
@@ -92,8 +89,6 @@ TERMINAL_BENCH_SMOKE_ROWS: List[Dict[str, Any]] = [
         },
     },
 ]
-TERMINAL_BENCH_CORE_REPO = "https://github.com/harbor-framework/terminal-bench-2"
-TERMINAL_BENCH_CORE_REVISION = "2fd12b88aafdd04a52c298e3940bcb189f9766d6"
 TERMINAL_BENCH_CORE_ROWS: List[Dict[str, Any]] = [
     {
         "case_id": "tb2_fix_code_vulnerability",
@@ -608,36 +603,15 @@ def list_dataset_status(project_root: Optional[Path] = None) -> List[Dict[str, A
                 validation_error = str(exc)
                 case_count = 0
 
-        if validation_error:
-            usability_status = "invalid"
-            usability_reason = validation_error
-        elif not spec.runnable and spec.adapter_status == "requires_swe_harness":
-            usability_status = "requires_external_harness"
-            if not available:
-                usability_reason = "需要接入外部 SWE harness，且当前源文件不存在。"
-            else:
-                usability_reason = "需要接入外部 SWE harness 后才能真实判分。"
-        elif not spec.runnable and spec.adapter_status == "requires_harbor_task_environment":
-            usability_status = "requires_official_task_environment"
-            if not available:
-                usability_reason = "需要接入 Harbor/Docker 官方任务环境，且当前源文件不存在。"
-            else:
-                usability_reason = "需要接入 Harbor/Docker 官方任务环境，当前 harness 没有 /app sandbox 和官方判分器。"
-        elif not available:
-            usability_status = "missing_source"
-            usability_reason = "数据集源文件不存在。"
-        elif not spec.runnable:
-            usability_status = "blocked"
-            usability_reason = spec.adapter_status or "当前适配器阻止运行。"
-        elif case_count == 0:
-            usability_status = "empty"
-            usability_reason = "数据集当前没有可物化 case。"
-        elif spec.official_verifier_status == "harbor_pending":
-            usability_status = "custom_harness_ready"
-            usability_reason = "可启动 Vibelution 自定义 harness 多步评测；结果不是 Terminal-Bench 官方成绩，官方 Harbor 判分器尚未接通。"
-        else:
-            usability_status = "ready"
-            usability_reason = "数据集已有可运行 case。"
+        usability = adapter_usability(
+            spec,
+            available=available,
+            case_count=case_count,
+            validation_error=validation_error,
+            project_root=root,
+        )
+        usability_status = str(usability.get("usability_status") or "blocked")
+        usability_reason = str(usability.get("usability_reason") or spec.adapter_status or "当前适配器阻止运行。")
         effective = usability_status in {"ready", "agent_harness_ready", "custom_harness_ready"}
         visibility = "primary" if effective and spec.workbench_visible else "hidden"
         if not spec.workbench_visible:
@@ -705,6 +679,8 @@ def list_dataset_status(project_root: Optional[Path] = None) -> List[Dict[str, A
                 "formal_supervised_evaluation_allowed": boundary[
                     "formal_supervised_evaluation_allowed"
                 ],
+                "environment_contract": usability.get("environment_contract", {}),
+                "environment_preflight": usability.get("environment_preflight", {}),
             }
         )
     return rows
@@ -727,369 +703,6 @@ def _iter_jsonl(path: Path, *, limit: Optional[int] = None) -> Iterable[Dict[str
             count += 1
             if limit is not None and count >= limit:
                 break
-
-
-def _slug(value: str, fallback: str) -> str:
-    text = re.sub(r"[^a-zA-Z0-9_.-]+", "_", value.strip()).strip("_")
-    return text[:120] or fallback
-
-
-def _prompt_from_row(row: Dict[str, Any]) -> str:
-    for key in ("prompt", "problem_statement", "text", "instruction", "task", "prompt_seed"):
-        value = row.get(key)
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-    raise ValueError("JSONL row 缺少 prompt/problem_statement/text/instruction/task/prompt_seed 字段")
-
-
-def _case_id_from_row(row: Dict[str, Any], index: int) -> str:
-    for key in ("case_id", "instance_id", "task_id", "id"):
-        value = row.get(key)
-        if value is not None and str(value).strip():
-            return _slug(str(value), f"case_{index:04d}")
-    return f"case_{index:04d}"
-
-
-def _dataset_ref_from_row(row: Dict[str, Any]) -> Dict[str, Any]:
-    explicit_ref = row.get("dataset_ref")
-    if isinstance(explicit_ref, dict) and explicit_ref:
-        return dict(explicit_ref)
-    return {key: row.get(key) for key in ("id", "task_id", "instance_id", "repo", "base_commit") if key in row}
-
-
-def _normalize_case_type(row: Dict[str, Any], *, default: str = "static") -> str:
-    case_type = str(row.get("case_type") or default).strip().lower()
-    if case_type not in ALLOWED_SUPERVISED_CASE_TYPES:
-        raise ValueError(f"未知 case_type: {row.get('case_type')}")
-    return case_type
-
-
-def _require_dict_field(row: Dict[str, Any], field_name: str, *, case_type: str) -> Dict[str, Any]:
-    value = row.get(field_name)
-    if not isinstance(value, dict) or not value:
-        raise ValueError(f"{case_type} case 缺少 {field_name}")
-    return value
-
-
-def _copy_case_schema_fields(case: Dict[str, Any], row: Dict[str, Any], *, case_type: str) -> None:
-    case["case_type"] = case_type
-    for key in (
-        "provenance",
-        "expected_final_state",
-        "expected_infeasible_outcome",
-        "dynamic_events",
-    ):
-        value = row.get(key)
-        if value not in (None, "", [], {}):
-            case[key] = value
-
-
-def _validate_dynamic_or_impossible_case(row: Dict[str, Any], *, case_type: str) -> None:
-    if case_type not in {DYNAMIC_REPLANNING_CASE_TYPE, IMPOSSIBLE_TASK_CASE_TYPE}:
-        return
-    _require_dict_field(row, "provenance", case_type=case_type)
-    if case_type == DYNAMIC_REPLANNING_CASE_TYPE:
-        _require_dict_field(row, "expected_final_state", case_type=case_type)
-    if case_type == IMPOSSIBLE_TASK_CASE_TYPE:
-        _require_dict_field(row, "expected_infeasible_outcome", case_type=case_type)
-
-
-def _build_prompt_case(spec: DatasetSpec, row: Dict[str, Any], index: int) -> Dict[str, Any]:
-    prompt = _prompt_from_row(row)
-    default_case_type = REVIEWED_CHAT_CASE_TYPE if spec.name == "chat_reviewed_multiturn" else STATIC_CASE_TYPE
-    case_type = _normalize_case_type(row, default=default_case_type)
-    if spec.name == "chat_reviewed_multiturn" and case_type != REVIEWED_CHAT_CASE_TYPE:
-        raise ValueError("Reviewed Chat Case 必须使用 case_type=reviewed_chat")
-    if case_type == GENERATED_CASE_TYPE and spec.name != "generated_cases":
-        raise ValueError("generated_case case_type 只能由 generated_cases 数据集物化")
-    _validate_dynamic_or_impossible_case(row, case_type=case_type)
-    case = {
-        "case_id": _case_id_from_row(row, index),
-        "scenario": str(row.get("scenario") or spec.scenario),
-        "mode": str(row.get("mode") or spec.mode),
-        "timeout_seconds": int(row.get("timeout_seconds") or spec.timeout_seconds),
-        "expect_restart": bool(row.get("expect_restart", False)),
-        "baseline_prompt": str(row.get("baseline_prompt") or prompt).strip(),
-        "candidate_prompt": str(row.get("candidate_prompt") or prompt).strip(),
-        "training_tier": _normalize_training_tier(row.get("training_tier")),
-        "dataset_ref": _dataset_ref_from_row(row),
-    }
-    _copy_case_schema_fields(case, row, case_type=case_type)
-    if spec.name == "chat_reviewed_multiturn":
-        status = reviewed_chat_row_status(row)
-        if status != "positive":
-            raise ValueError("Reviewed Chat Case 必须经过 positive review 才能物化为监督 case")
-        for key in ("approval", "review", "quality_signals", "conversation_turns", "next_state_signals"):
-            if key in row:
-                case[key] = row[key]
-        review_payload = case.get("review") if isinstance(case.get("review"), dict) else {}
-        case["review"] = {
-            **review_payload,
-            "status": status,
-            "review_required": True,
-            "source_track": "dialogue",
-        }
-    if spec.source_track:
-        case["source_track"] = spec.source_track
-    if spec.allowed_downstream_uses:
-        case["allowed_downstream_uses"] = list(spec.allowed_downstream_uses)
-    case["intake_boundary"] = dataset_intake_boundary(
-        name=spec.name,
-        kind=spec.kind,
-        review_required=spec.review_required,
-        source_track=spec.source_track,
-        allowed_downstream_uses=spec.allowed_downstream_uses,
-        holdout_allowed=spec.holdout_allowed,
-        raw_chat_direct_training_allowed=spec.raw_chat_direct_training_allowed,
-    )
-    if "expected" in row:
-        case["expected"] = row["expected"]
-    if "rubric" in row:
-        case["rubric"] = row["rubric"]
-    if "dataset_splits" in row:
-        case["dataset_splits"] = _normalize_dataset_splits(row["dataset_splits"])
-    return case
-
-
-def _normalize_dataset_splits(value: Any) -> List[str]:
-    allowed = {"train", "dev", "observe", "regression", "holdout", "smoke"}
-    if value is None:
-        return ["train"]
-    raw_items = value if isinstance(value, list) else [value]
-    splits: List[str] = []
-    for raw in raw_items:
-        split = str(raw).strip().lower()
-        if not split:
-            continue
-        if split not in allowed:
-            raise ValueError(f"未知 dataset split: {raw}")
-        if split not in splits:
-            splits.append(split)
-    return splits or ["train"]
-
-
-def _normalize_training_tier(value: Any) -> str:
-    tier = str(value or "foundation").strip().lower()
-    allowed = {"foundation", "coordination", "intelligence"}
-    if tier not in allowed:
-        raise ValueError(f"未知 training tier: {value}")
-    return tier
-
-
-def _validate_generated_case_provenance(row: Dict[str, Any]) -> Dict[str, Any]:
-    provenance = row.get("provenance")
-    if not isinstance(provenance, dict):
-        raise ValueError("Generated Case 缺少 provenance")
-    required = [
-        "source_trace_id",
-        "source_episode_id",
-        "source_harness_gap",
-        "generation_reason",
-        "creator_version",
-        "created_at",
-        "allowed_splits",
-    ]
-    missing = [key for key in required if not provenance.get(key)]
-    if missing:
-        raise ValueError(f"Generated Case provenance 缺少字段: {', '.join(missing)}")
-    allowed_splits = _normalize_dataset_splits(provenance.get("allowed_splits"))
-    if "holdout" in allowed_splits:
-        raise ValueError("Generated Case provenance 不允许自动进入 holdout")
-    provenance["allowed_splits"] = allowed_splits
-    return provenance
-
-
-def _build_generated_case(spec: DatasetSpec, row: Dict[str, Any], index: int) -> Dict[str, Any]:
-    provenance = _validate_generated_case_provenance(row)
-    splits = _normalize_dataset_splits(row.get("dataset_splits") or provenance.get("allowed_splits"))
-    if "holdout" in splits:
-        raise ValueError("Generated Case 不能自动进入 holdout")
-    disallowed = [split for split in splits if split not in provenance["allowed_splits"]]
-    if disallowed:
-        raise ValueError(f"Generated Case split 超出 provenance allowed_splits: {', '.join(disallowed)}")
-    explicit_case_type = str(row.get("case_type") or GENERATED_CASE_TYPE).strip().lower()
-    if explicit_case_type != GENERATED_CASE_TYPE:
-        raise ValueError("generated_cases 数据集必须使用 case_type=generated_case")
-    case = _build_prompt_case(spec, row, index)
-    case["case_type"] = GENERATED_CASE_TYPE
-    case["dataset_splits"] = splits
-    case["provenance"] = provenance
-    case["generated"] = True
-    case["source_track"] = "generated"
-    case["allowed_downstream_uses"] = list(spec.allowed_downstream_uses)
-    case["intake_boundary"] = dataset_intake_boundary(
-        name=spec.name,
-        kind=spec.kind,
-        review_required=spec.review_required,
-        source_track=spec.source_track,
-        allowed_downstream_uses=spec.allowed_downstream_uses,
-        holdout_allowed=spec.holdout_allowed,
-        raw_chat_direct_training_allowed=spec.raw_chat_direct_training_allowed,
-    )
-    return case
-
-
-def _build_swe_case(spec: DatasetSpec, row: Dict[str, Any], index: int) -> Dict[str, Any]:
-    instance_id = _case_id_from_row(row, index)
-    problem = str(row.get("problem_statement") or row.get("prompt") or "").strip()
-    if not problem:
-        raise ValueError("SWE row 缺少 problem_statement")
-    repo = str(row.get("repo") or "").strip()
-    base_commit = str(row.get("base_commit") or "").strip()
-    prompt = (
-        "处理 SWE 数据集 case。\n"
-        f"instance_id: {instance_id}\n"
-        f"repo: {repo or '-'}\n"
-        f"base_commit: {base_commit or '-'}\n\n"
-        "问题描述:\n"
-        f"{problem}\n\n"
-        "要求：生成能解决该 issue 的代码修改，并通过对应测试。"
-    )
-    return {
-        "case_id": instance_id,
-        "case_type": STATIC_CASE_TYPE,
-        "scenario": spec.scenario,
-        "mode": spec.mode,
-        "timeout_seconds": spec.timeout_seconds,
-        "expect_restart": False,
-        "baseline_prompt": prompt,
-        "candidate_prompt": prompt,
-        "training_tier": _normalize_training_tier(row.get("training_tier")),
-        "dataset_ref": {
-            "dataset": spec.name,
-            "instance_id": instance_id,
-            "repo": repo,
-            "base_commit": base_commit,
-        },
-        "requires_external_harness": "swe_bench",
-    }
-
-
-def _build_terminal_bench_prompt(row: Dict[str, Any], *, case_id: str) -> str:
-    instruction = _prompt_from_row(row)
-    verifier = row.get("verifier") if isinstance(row.get("verifier"), dict) else {}
-    allowed_tools = _text_list(row.get("allowed_tools"))
-    max_steps = int(row.get("max_steps") or 8)
-    official_task_name = str(row.get("official_task_name") or "").strip()
-    docker_image = str(row.get("docker_image") or "").strip()
-    verifier_command = str(verifier.get("command") or "").strip()
-    success_marker = str(verifier.get("success_marker") or "").strip()
-    tool_line = ", ".join(allowed_tools) if allowed_tools else "project-approved terminal and evolution tools"
-    official_lines = []
-    if official_task_name:
-        official_lines.append(f"- Official task: {official_task_name}")
-    if docker_image:
-        official_lines.append(f"- Docker image: {docker_image}")
-    if official_lines:
-        official_lines.append(f"- Official dataset: {TERMINAL_BENCH_CORE_REPO}@{TERMINAL_BENCH_CORE_REVISION}")
-    official_block = "\n".join(official_lines)
-    verifier_lines = []
-    if verifier_command:
-        verifier_lines.append(f"- Verifier command: {verifier_command}")
-    if success_marker:
-        verifier_lines.append(f"- Success marker: {success_marker}")
-    verifier_block = "\n".join(verifier_lines) or "- Verifier: use the dataset row verifier metadata."
-    return (
-        "Run this Terminal-Bench-style local smoke case through the full agent harness.\n"
-        f"Case: {case_id}\n\n"
-        "Task:\n"
-        f"{instruction}\n\n"
-        + (f"Official metadata:\n{official_block}\n\n" if official_block else "")
-        +
-        "Harness contract:\n"
-        "1. Open an evolution transaction before doing meaningful work.\n"
-        "2. Use a multi-step ReAct loop: inspect evidence, choose a tool action, observe, adjust, then verify.\n"
-        f"3. Use only these intended tool classes unless the local runtime requires an equivalent: {tool_line}.\n"
-        f"4. Keep the loop within roughly {max_steps} meaningful tool steps.\n"
-        "5. Run the verifier before closing the transaction.\n"
-        "6. Close the transaction with status=success only when verification passes; otherwise close with status=failed.\n"
-        "7. Do not commit or publish changes.\n\n"
-        "Verifier:\n"
-        f"{verifier_block}"
-    )
-
-
-def _build_terminal_bench_case(spec: DatasetSpec, row: Dict[str, Any], index: int) -> Dict[str, Any]:
-    case_id = _case_id_from_row(row, index)
-    prompt = str(row.get("baseline_prompt") or row.get("candidate_prompt") or "").strip()
-    if not prompt:
-        prompt = _build_terminal_bench_prompt(row, case_id=case_id)
-    verifier = row.get("verifier") if isinstance(row.get("verifier"), dict) else {}
-    allowed_tools = _text_list(row.get("allowed_tools"))
-    max_steps = int(row.get("max_steps") or 8)
-    adapter = "official_seed" if spec.name == "terminal_bench_core" else "local_smoke"
-    official_metadata = {
-        "dataset": "terminal-bench@2.0",
-        "repo": TERMINAL_BENCH_CORE_REPO,
-        "revision": TERMINAL_BENCH_CORE_REVISION,
-        "task_slug": str(row.get("task_slug") or case_id).strip(),
-        "task_name": str(row.get("official_task_name") or "").strip(),
-        "docker_image": str(row.get("docker_image") or "").strip(),
-        "difficulty": str(row.get("difficulty") or "").strip(),
-        "category": str(row.get("category") or "").strip(),
-    }
-    case = {
-        "case_id": case_id,
-        "case_type": STATIC_CASE_TYPE,
-        "scenario": str(row.get("scenario") or spec.scenario),
-        "mode": str(row.get("mode") or spec.mode),
-        "timeout_seconds": int(row.get("timeout_seconds") or spec.timeout_seconds),
-        "expect_restart": bool(row.get("expect_restart", False)),
-        "baseline_prompt": prompt,
-        "candidate_prompt": str(row.get("candidate_prompt") or prompt).strip(),
-        "training_tier": _normalize_training_tier(row.get("training_tier")),
-        "dataset_ref": {
-            "dataset": spec.name,
-            "case_id": case_id,
-            **_dataset_ref_from_row(row),
-        },
-        "benchmark_family": "terminal_bench",
-        "terminal_bench_adapter": adapter,
-        "requires_react_trace": True,
-        "requires_terminal_harness": True,
-        "official_runner": "harbor_pending" if adapter == "official_seed" else "pending",
-        "requires_official_task_environment": False,
-        "official_task_environment_required_for": "official_verifier" if adapter == "official_seed" else "",
-        "required_task_paths": ["/app"] if adapter == "official_seed" else [],
-        "evaluation_mode": "custom_harness" if adapter == "official_seed" else "local_harness",
-        "score_label": (
-            "Vibelution custom score (non-official Terminal-Bench score)"
-            if adapter == "official_seed"
-            else "Vibelution local smoke score"
-        ),
-        "official_score": None,
-        "official_score_available": False if adapter == "official_seed" else False,
-        "official_verifier_status": spec.official_verifier_status,
-        "official_metadata": official_metadata,
-        "allowed_tools": allowed_tools,
-        "max_steps": max_steps,
-        "verifier": verifier,
-        "expected": row.get(
-            "expected",
-            {
-                "kind": "terminal_harness",
-                "requires_transaction": True,
-                "requires_validation": True,
-                "requires_multi_step_trace": True,
-            },
-        ),
-        "source_track": spec.source_track,
-        "allowed_downstream_uses": list(spec.allowed_downstream_uses),
-        "intake_boundary": dataset_intake_boundary(
-            name=spec.name,
-            kind=spec.kind,
-            review_required=spec.review_required,
-            source_track=spec.source_track,
-            allowed_downstream_uses=spec.allowed_downstream_uses,
-            holdout_allowed=spec.holdout_allowed,
-            raw_chat_direct_training_allowed=spec.raw_chat_direct_training_allowed,
-        ),
-    }
-    if "rubric" in row:
-        case["rubric"] = row["rubric"]
-    if "dataset_splits" in row:
-        case["dataset_splits"] = _normalize_dataset_splits(row["dataset_splits"])
-    return case
 
 
 def materialize_dataset_bundle(
@@ -1140,50 +753,12 @@ def materialize_dataset_bundle(
 
     cases: List[Dict[str, Any]] = []
     for index, row in enumerate(_iter_jsonl(source, limit=limit), start=1):
-        if spec.kind == "swe_bench_jsonl":
-            cases.append(_build_swe_case(spec, row, index))
-        elif spec.kind == "generated_case_jsonl":
-            cases.append(_build_generated_case(spec, row, index))
-        elif spec.kind == "terminal_bench_jsonl":
-            cases.append(_build_terminal_bench_case(spec, row, index))
-        elif spec.kind == "prompt_jsonl":
-            cases.append(_build_prompt_case(spec, row, index))
-        else:
-            raise ValueError(f"暂不支持的数据集 kind: {spec.kind}")
+        cases.append(materialize_adapter_case(spec, row, index))
 
     bundle = {
         "benchmark": f"dataset::{spec.name}",
         "bundle_name": spec.bundle_name,
-        "dataset": {
-            "name": spec.name,
-            "kind": spec.kind,
-            "source_path": str(source),
-            "adapter_status": spec.adapter_status,
-            "official_verifier_status": spec.official_verifier_status,
-            "evaluation_mode": "custom_harness" if spec.official_verifier_status == "harbor_pending" else "official_or_not_required",
-            "score_label": (
-                "Vibelution custom score (non-official Terminal-Bench score)"
-                if spec.official_verifier_status == "harbor_pending"
-                else "official_or_local_score"
-            ),
-            "official_score": None,
-            "official_score_available": spec.official_verifier_status != "harbor_pending",
-            "runnable": spec.runnable,
-            "review_required": spec.review_required,
-            "source_track": spec.source_track,
-            "allowed_downstream_uses": spec.allowed_downstream_uses,
-            "holdout_allowed": spec.holdout_allowed,
-            "raw_chat_direct_training_allowed": spec.raw_chat_direct_training_allowed,
-            "intake_boundary": dataset_intake_boundary(
-                name=spec.name,
-                kind=spec.kind,
-                review_required=spec.review_required,
-                source_track=spec.source_track,
-                allowed_downstream_uses=spec.allowed_downstream_uses,
-                holdout_allowed=spec.holdout_allowed,
-                raw_chat_direct_training_allowed=spec.raw_chat_direct_training_allowed,
-            ),
-        },
+        "dataset": adapter_bundle_dataset_metadata(spec, source),
         "default_timeout_seconds": spec.timeout_seconds,
         "cases": cases,
     }

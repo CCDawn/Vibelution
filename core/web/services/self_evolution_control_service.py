@@ -440,10 +440,14 @@ def self_evolution_agent_bindings() -> dict[str, dict[str, Any]]:
             _record_self_evolution_binding_failure(role, agent_id=agent_id, reason="missing_or_archived_slot_agent")
             raise SelfEvolutionRunValidationError(f"Self-evolution role slot points to an archived or missing Agent: {role}")
         metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+        llm_bindings = agent_directory_service.normalize_agent_llm_bindings(agent.get("llmBindings"))
+        dialogue_model_id = agent_directory_service.agent_dialogue_model_id({"llmBindings": llm_bindings})
         bindings[role] = {
             "agentId": str(agent.get("agentId") or "").strip(),
             "displayName": str(agent.get("displayName") or "").strip(),
             "profileId": str(agent.get("profileId") or "").strip(),
+            "llmBindings": llm_bindings,
+            "dialogueModelId": dialogue_model_id,
             "promptTemplateId": str(agent.get("promptTemplateId") or "").strip(),
             "directSessionId": str(agent.get("directSessionId") or "").strip(),
             "workspacePath": str(agent.get("workspacePath") or "").strip(),
@@ -511,6 +515,7 @@ def _ensure_self_evolution_role(role: dict[str, str]) -> dict[str, Any] | None:
     label = str(role.get("label") or role_key).strip() or role_key
     profile_id = str(role.get("profileId") or "primary").strip() or "primary"
     prompt_template_id = str(role.get("promptTemplateId") or "").strip()
+    seed_llm_bindings = session_service.llm_bindings_for_profile_id(profile_id)
     existing = _find_agent_by_self_evolution_role(role_key)
     if _self_evolution_role_slot_excluded(role_key):
         _record_self_evolution_agent_sync_skipped(
@@ -522,7 +527,7 @@ def _ensure_self_evolution_role(role: dict[str, str]) -> dict[str, Any] | None:
     if not existing:
         session_detail = session_service.create_chat_session(
             title=label,
-            profile_id=profile_id,
+            llm_bindings=seed_llm_bindings,
             created_by="self_evolution",
         )
         agent_id = str(session_detail.get("agentId") or "").strip()
@@ -536,6 +541,9 @@ def _ensure_self_evolution_role(role: dict[str, str]) -> dict[str, Any] | None:
             reason="agent_archived",
         )
         return None
+    existing_llm_bindings = agent_directory_service.normalize_agent_llm_bindings(existing.get("llmBindings"))
+    existing_dialogue_model_id = agent_directory_service.agent_dialogue_model_id({"llmBindings": existing_llm_bindings})
+    desired_llm_bindings = existing_llm_bindings if existing_dialogue_model_id else seed_llm_bindings
     metadata = dict(existing.get("metadata") or {})
     expected_metadata = {
         "agentMode": "self_evolution",
@@ -549,14 +557,14 @@ def _ensure_self_evolution_role(role: dict[str, str]) -> dict[str, Any] | None:
         str((metadata or {}).get("functionalDisplayName") or "").strip() != label
         or str(existing.get("primaryMode") or "").strip() != "self_evolution"
         or str(existing.get("roleKey") or "").strip() != role_key
-        or str(existing.get("profileId") or "").strip() != profile_id
+        or not existing_dialogue_model_id
         or str(existing.get("promptTemplateId") or "").strip() != prompt_template_id
         or any(metadata.get(key) != value for key, value in expected_metadata.items())
     ):
         existing = agent_directory_service.update_agent_instance(
             str(existing.get("agentId") or ""),
             display_name=label,
-            profile_id=profile_id,
+            llm_bindings=desired_llm_bindings,
             primary_mode="self_evolution",
             role_key=role_key,
             prompt_template_id=prompt_template_id,
@@ -654,6 +662,7 @@ def _compact_agent_bindings(bindings: dict[str, Any]) -> dict[str, dict[str, str
         compact[str(role)] = {
             "agentId": str(binding.get("agentId") or "").strip(),
             "profileId": str(binding.get("profileId") or "").strip(),
+            "dialogueModelId": str(binding.get("dialogueModelId") or "").strip(),
             "promptTemplateId": str(binding.get("promptTemplateId") or "").strip(),
         }
     return compact
@@ -665,11 +674,14 @@ def _self_role_binding(bindings: dict[str, Any], role: str) -> dict[str, Any]:
 
 
 def _self_evolution_agent_config(binding: dict[str, Any]) -> Any | None:
-    profile_id = str((binding or {}).get("profileId") or "").strip()
-    if not profile_id:
+    agent_id = str((binding or {}).get("agentId") or "").strip()
+    if not agent_id:
         return None
     try:
-        return session_service._session_agent_config_for_profile(profile_id)
+        agent = agent_directory_service.get_agent(agent_id, include_archived=False)
+        if not agent:
+            return None
+        return session_service._session_agent_config_for_llm_slot(agent, "dialogue")
     except Exception:
         return None
 

@@ -9,7 +9,7 @@ Agent's private event log for audit and UI review.
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -227,7 +227,7 @@ def resolve_tool_governance_request(
 
 
 def utc_now_iso() -> str:
-    return datetime.now(UTC).isoformat()
+    return datetime.now(timezone.utc).isoformat()
 
 
 def _resolve_optional_agent(agent_id: str) -> dict[str, Any] | None:
@@ -504,7 +504,7 @@ def _actor_label(agent: dict[str, Any] | None) -> str:
 
 
 def _new_request_id() -> str:
-    return f"toolgov-{datetime.now(UTC).strftime('%Y%m%d-%H%M%S-%f')}"
+    return f"toolgov-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S-%f')}"
 
 
 def _record_tool_governance_event(event_code: str, request: dict[str, Any], *, outcome: str = "observed") -> None:

@@ -42,7 +42,7 @@ def test_project_agent_bus_routes_list_and_send_message(tmp_path, monkeypatch):
     assert list_response.status_code == 200
     listed = list_response.json()
     assert listed["events"][-1]["eventId"] == payload["eventId"]
-    assert listed["activeAgentCount"] == 1
+    assert listed["activeAgentCount"] == 2
 
 
 def test_project_agent_bus_route_revokes_message_and_requests_stop(tmp_path, monkeypatch):

@@ -306,7 +306,10 @@ def test_tools_api_tests_safe_builtin_for_selected_agent_policy(tmp_path, monkey
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_directory_service, "record_runtime_scene_event", lambda *args, **kwargs: None)
     monkeypatch.setattr(registry, "_record_registry_event", lambda *args, **kwargs: None)
-    agent = agent_directory_service.create_agent_instance(display_name="Route Policy Agent", profile_id="primary")
+    agent = agent_directory_service.create_agent_instance(
+        display_name="Route Policy Agent",
+        llm_bindings={"dialogue": {"modelId": "model-primary"}},
+    )
     agent_directory_service.update_agent_instance(
         agent["agentId"],
         tool_policy={"blockedTools": ["get_current_goal_tool"]},

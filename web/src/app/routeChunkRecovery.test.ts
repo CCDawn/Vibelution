@@ -35,11 +35,18 @@ describe("route chunk recovery", () => {
   it("reloads once for a stale chunk on the current route", () => {
     const win = fakeWindow();
     const error = new TypeError("Failed to fetch dynamically imported module: http://127.0.0.1:8000/assets/TeamsRoute-old.js");
+    const reports: Array<{ eventCode: string; fields?: Record<string, unknown> }> = [];
 
-    expect(recoverFromDynamicImportFetchError(error, win)).toBe(true);
+    expect(recoverFromDynamicImportFetchError(error, win, (event) => reports.push(event))).toBe(true);
     expect(win.location.reload).toHaveBeenCalledTimes(1);
-    expect(recoverFromDynamicImportFetchError(error, win)).toBe(false);
+    expect(reports[0].eventCode).toBe("browser.route_chunk_recovery.reload_requested");
+    expect(reports[0].fields?.reason).toBe("dynamic_import_fetch_error");
+    expect(reports[0].fields?.reloadRequested).toBe(true);
+
+    expect(recoverFromDynamicImportFetchError(error, win, (event) => reports.push(event))).toBe(false);
     expect(win.location.reload).toHaveBeenCalledTimes(1);
+    expect(reports[1].eventCode).toBe("browser.route_chunk_recovery.reload_skipped");
+    expect(reports[1].fields?.duplicateRoute).toBe(true);
   });
 
   it("recognizes local built asset resource failures", () => {
@@ -53,10 +60,16 @@ describe("route chunk recovery", () => {
 
   it("reloads once for stale local built asset resource failures", () => {
     const win = fakeWindow("/config");
+    const reports: Array<{ eventCode: string; fields?: Record<string, unknown> }> = [];
 
-    expect(recoverFromBuiltAssetResourceError("/assets/ConfigRoute-CeO6d7JC.js", win)).toBe(true);
+    expect(recoverFromBuiltAssetResourceError("/assets/ConfigRoute-CeO6d7JC.js", win, (event) => reports.push(event))).toBe(true);
     expect(win.location.reload).toHaveBeenCalledTimes(1);
-    expect(recoverFromBuiltAssetResourceError("/assets/ConfigRoute-CeO6d7JC.js", win)).toBe(false);
+    expect(reports[0].eventCode).toBe("browser.route_chunk_recovery.reload_requested");
+    expect(reports[0].fields?.reason).toBe("built_asset_resource_error");
+    expect(reports[0].fields?.resourceUrl).toBe("/assets/ConfigRoute-CeO6d7JC.js");
+
+    expect(recoverFromBuiltAssetResourceError("/assets/ConfigRoute-CeO6d7JC.js", win, (event) => reports.push(event))).toBe(false);
     expect(win.location.reload).toHaveBeenCalledTimes(1);
+    expect(reports[1].eventCode).toBe("browser.route_chunk_recovery.reload_skipped");
   });
 });

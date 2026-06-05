@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>02 生成 paper_note · 科研流程计划页</title>
+    <link rel="stylesheet" href="flow_pages.css" />
+  </head>
+  <body>
+    <main class="shell page-layout">
+
+    <nav class="nav-rail">
+      <a href="../research_team_flow_design.html"><span class="mini">IDX</span><span>返回总索引</span></a>
+      <a class="" href="01-source-workspace.html"><span class="mini">01</span><span>资料进入工作区</span></a>
+<a class=" active" href="02-paper-note.html"><span class="mini">02</span><span>生成 paper_note</span></a>
+<a class="" href="03-neuro-mechanism.html"><span class="mini">03</span><span>提取 neuro_mechanism</span></a>
+<a class="" href="04-mechanism-mapping.html"><span class="mini">04</span><span>机制到计算抽象</span></a>
+<a class="" href="05-algorithm-hypothesis.html"><span class="mini">05</span><span>生成 algorithm_hypothesis</span></a>
+<a class="" href="06-research-review.html"><span class="mini">06</span><span>科研审稿</span></a>
+<a class="" href="07-steward-ingestion.html"><span class="mini">07</span><span>知识治理入库</span></a>
+<a class="" href="08-candidate-graph.html"><span class="mini">08</span><span>候选图谱预览</span></a>
+<a class="" href="09-official-graph.html"><span class="mini">09</span><span>正式知识图谱同步</span></a>
+<a class="" href="10-experiment-loop.html"><span class="mini">10</span><span>实验验证闭环</span></a>
+<a class="" href="11-iteration-versioning.html"><span class="mini">11</span><span>持续迭代与版本化</span></a>
+<a class="" href="12-challenge-cup-delivery.html"><span class="mini">12</span><span>挑战杯交付计划</span></a>
+<a class="" href="13-flow-html-maintenance.html"><span class="mini">13</span><span>流程 HTML 维护门禁</span></a>
+    </nav>
+
+      <div>
+        <section class="plan-hero">
+          <div class="kicker">Research Flow Node 02</div>
+          <h1>生成 paper_note</h1>
+          <p class="subtitle">把资料转成可审查的论文/资料笔记候选。</p>
+          <div class="tag-row"><span class="tag done">已规划</span><span class="tag">Paper Note Extraction Agent</span><span class="tag">独立计划页</span></div>
+          <div class="diagram">
+            <div class="flow-cell"><strong>输入</strong><span>资料清单 / PDF 页码</span></div>
+            <div class="flow-cell"><strong>动作</strong><span>生成 summary、keyFindings、methods、limitations。</span></div>
+            <div class="flow-cell"><strong>输出</strong><span>paper_note_YYYYMMDD_NNN.json / 候选状态 draft</span></div>
+            <div class="flow-cell"><strong>记忆/图谱</strong><span>进入候选图谱，可被 neuro_mechanism links 引用。</span></div>
+          </div>
+        </section>
+
+        <section class="section">
+          <div class="section-head">
+            <h2>当前节点规划</h2>
+            <p class="hint">本页只展示 02 节点。通过左侧导航可进入其它节点页。</p>
+          </div>
+          <div class="plan-grid">
+            <article class="plan-card"><h2>目标</h2><p class="hint">从资料中提取背景、方法、关键发现、局限和引用位置。</p></article>
+            <article class="plan-card"><h2>输入</h2><ul><li>资料清单</li>
+<li>PDF 页码</li>
+<li>论文片段</li>
+<li>补充备注</li></ul></article>
+            <article class="plan-card"><h2>处理动作</h2><ul><li>生成 summary、keyFindings、methods、limitations。</li>
+<li>每条关键发现尽量绑定页码、章节或 citation。</li>
+<li>保留 uncertainty，避免把摘要写成确定事实。</li></ul></article>
+            <article class="plan-card"><h2>输出物</h2><ul><li>paper_note_YYYYMMDD_NNN.json</li>
+<li>候选状态 draft</li>
+<li>Paper -&gt; PaperNote 关系</li></ul></article>
+            <article class="plan-card"><h2>风险</h2><ul><li>摘要过度压缩</li>
+<li>缺页码</li>
+<li>把作者假设当成实验结论</li></ul></article>
+            <article class="plan-card "><h2>未决事项</h2><ul><li>是否需要为长论文拆分多个 paper_note。</li></ul></article>
+          </div>
+        </section>
+
+        <section class="section">
+          <div class="section-head">
+            <h2>记忆与图谱边界</h2>
+            <p class="hint">区分候选工作区、知识治理 Agent、正式 Team Knowledge 和正式知识图谱。</p>
+          </div>
+          <div class="status-grid">
+            <div class="status-item"><b>候选状态</b><span>已规划</span></div>
+            <div class="status-item"><b>记忆平台</b><span>仍属于候选知识，不进入正式 RAG。</span></div>
+            <div class="status-item"><b>图谱同步</b><span>进入候选图谱，可被 neuro_mechanism links 引用。</span></div>
+          </div>
+        </section>
+
+
+    <section class="section">
+      <div class="section-head">
+        <h2>可跑通节点契约</h2>
+        <p class="hint">这一块只覆盖知识搜集、筛选和入库 MVP，不涉及实验训练或交付实现。</p>
+      </div>
+      <div class="status-grid">
+        <div class="status-item"><b>状态</b><span>paper_note_draft</span></div>
+        <div class="status-item"><b>功能岗位</b><span>Paper Note Extraction Agent</span></div>
+        <div class="status-item"><b>Agent 状态</b><span>可复用 research_broad / 需要资料摘要模板</span></div>
+        <div class="status-item"><b>进入条件</b><span>资料已登记且 allowedForAnalysis=true。</span></div>
+        <div class="status-item"><b>退出条件</b><span>关键发现能回指 sourceFiles、页码或章节；uncertainty 不为空时显式保留。</span></div>
+        <div class="status-item"><b>审核门禁</b><span>必要时确认摘要是否保守、是否遗漏关键章节。</span></div>
+      </div>
+      <div class="plan-grid">
+        <article class="plan-card"><h2>本步操作</h2><p class="hint">生成 paper_note，抽取 summary、keyFindings、methods、limitations 和 citation anchors。</p></article>
+        <article class="plan-card"><h2>本地研究模型用法</h2><p class="hint">本地 9B 模型适合按章节或 chunk 生成 paper_note 草稿；32k 内保留 18k-22k 原文证据和输出预留。</p></article>
+        <article class="plan-card"><h2>所需功能</h2><ul><li>PDF/资料摘录</li>
+<li>paper_note 候选 JSON 生成</li>
+<li>citation anchors</li>
+<li>uncertainty 字段</li></ul></article>
+        <article class="plan-card"><h2>工具/平台能力</h2><ul><li>research_knowledge_query_tool</li>
+<li>本地 PDF 解析/摘录能力（待接入流程）</li></ul></article>
+        <article class="plan-card"><h2>功能缺口</h2><p class="hint">paper_note schema 与页码引用校验已接入 CandidateStore；长文拆分规则和本地 PDF 页码摘录仍待接。</p></article>
+        <article class="plan-card"><h2>失败回退</h2><p class="hint">缺页码、缺来源或摘要过度推断时退回 paper_note_needs_revision。</p></article>
+      </div>
+    </section>
+
+
+        <div class="pager">
+          <a href="01-source-workspace.html">上一节点：01 资料进入工作区</a>
+          <a href="03-neuro-mechanism.html">下一节点：03 提取 neuro_mechanism</a>
+        </div>
+      </div>
+    </main>
+  </body>
+</html>

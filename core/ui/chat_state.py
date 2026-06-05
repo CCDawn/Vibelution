@@ -96,6 +96,30 @@ def normalize_chat_attachments(value: Any) -> list[dict[str, Any]]:
     return attachments
 
 
+def normalize_chat_references(value: Any) -> list[dict[str, Any]]:
+    references: list[dict[str, Any]] = []
+    for item in list(value or []):
+        if not isinstance(item, dict):
+            continue
+        session_id = str(item.get("sessionId") or item.get("session_id") or "").strip()
+        if not session_id:
+            continue
+        reference_id = str(item.get("referenceId") or item.get("reference_id") or f"session:{session_id}").strip()
+        normalized: dict[str, Any] = {
+            "referenceId": reference_id,
+            "kind": str(item.get("kind") or "session").strip() or "session",
+            "sessionId": session_id,
+            "title": str(item.get("title") or session_id).strip(),
+            "agentId": str(item.get("agentId") or item.get("agent_id") or "").strip(),
+            "agentCode": str(item.get("agentCode") or item.get("agent_code") or "").strip(),
+            "agentDisplayName": str(item.get("agentDisplayName") or item.get("agent_display_name") or "").strip(),
+            "summary": str(item.get("summary") or "").strip(),
+            "createdAt": str(item.get("createdAt") or item.get("created_at") or "").strip(),
+        }
+        references.append(normalized)
+    return references
+
+
 def normalize_chat_message(item: Any) -> dict[str, Any] | None:
     if not isinstance(item, dict):
         return None
@@ -114,8 +138,13 @@ def normalize_chat_message(item: Any) -> dict[str, Any] | None:
     if mental_snapshot is None:
         mental_snapshot = item.get("mentalSnapshot")
     tool_calls = normalize_chat_tool_calls(item.get("tool_calls") or item.get("tools") or [])
+    feedback_events = item.get("feedback_events") or item.get("feedbackEvents") or []
+    if not isinstance(feedback_events, list):
+        feedback_events = []
     attachments = normalize_chat_attachments(item.get("attachments") or item.get("imageAttachments") or [])
-    if role == "user" and not content and not attachments:
+    metadata = item.get("metadata")
+    references = normalize_chat_references(item.get("references") or (metadata if isinstance(metadata, dict) else {}).get("sessionReferences") or [])
+    if role == "user" and not content and not attachments and not references:
         return None
     if role == "assistant" and not content and not thought and not isinstance(mental_snapshot, dict) and not tool_calls:
         return None
@@ -131,9 +160,12 @@ def normalize_chat_message(item: Any) -> dict[str, Any] | None:
         normalized["mental_snapshot"] = dict(mental_snapshot)
     if tool_calls:
         normalized["tool_calls"] = tool_calls
+    if feedback_events:
+        normalized["feedback_events"] = [dict(event) for event in feedback_events if isinstance(event, dict)]
     if attachments:
         normalized["attachments"] = attachments
-    metadata = item.get("metadata")
+    if references:
+        normalized["references"] = references
     if isinstance(metadata, dict) and metadata:
         normalized["metadata"] = dict(metadata)
     return normalized

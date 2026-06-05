@@ -194,6 +194,35 @@ class TestTriggerSelfRestart:
             )
         ]
 
+    def test_trigger_hot_restart_delegates_to_runtime_manager_with_session(self, monkeypatch):
+        """传入 sessionId 时，重启工具应进入前后端热重启闭环。"""
+        calls = []
+
+        monkeypatch.setattr(rebirth_tools_module, "_runtime_manager_controls_current_project", lambda: True)
+        monkeypatch.setattr(
+            "core.runtime_manager.command_queue.submit_command",
+            lambda command_type, args=None, requested_by="unknown": calls.append((command_type, args, requested_by))
+            or {"commandId": "cmd-hot"},
+        )
+
+        def fake_wait(_command_id, timeout_seconds=0):
+            raise TimeoutError("still running")
+
+        monkeypatch.setattr("core.runtime_manager.command_queue.wait_for_result", fake_wait)
+
+        result = trigger_self_restart_tool(
+            reason="code_update",
+            sessionId="session-live",
+            runId="turn-live",
+            resumeMessage="continue",
+        )
+
+        assert "前后端热重启事务已交给 Runtime Manager" in result
+        assert calls[0][0] == "hot_restart_workbench"
+        assert calls[0][1]["allowActiveSessionId"] == "session-live"
+        assert calls[0][1]["allowActiveRunId"] == "turn-live"
+        assert calls[0][1]["hotRestart"]["resumeMessage"] == "continue"
+
     def test_trigger_restart_returns_string(self):
         """测试重启返回字符串结果"""
         result = trigger_self_restart_tool(reason="测试重启")

@@ -15,7 +15,9 @@ from urllib.parse import urljoin, urlparse
 import httpx
 
 import config.public_config as public_config_module
+from config import LLMProfile, ProviderConfig
 from core.chat.chat_task_types import trim_lines
+from core.llm.protocol_resolver import resolve_model_protocol
 from config.public_config import (
     CONFIG_PATH,
     UNCONFIGURED_MODEL_REF,
@@ -54,8 +56,8 @@ class ConfigConflictError(ValueError):
 PROFILE_LABELS = {
     "primary": {"zh": "主智能体", "en": "Primary"},
     "mental_model": {"zh": "心智模型", "en": "Mental Model"},
-    "subagent_worker": {"zh": "子代理 Worker", "en": "Subagent Worker"},
-    "subagent_explorer": {"zh": "子代理 Explorer", "en": "Subagent Explorer"},
+    "subagent_worker": {"zh": "子代理执行", "en": "Subagent Worker"},
+    "subagent_explorer": {"zh": "子代理探索", "en": "Subagent Explorer"},
     "supervised_baseline": {"zh": "监督基线", "en": "Supervised Baseline"},
     "supervised_candidate": {"zh": "监督候选", "en": "Supervised Candidate"},
     "research_broad": {"zh": "科研广搜", "en": "Research Broad Search"},
@@ -63,11 +65,45 @@ PROFILE_LABELS = {
     "research_review": {"zh": "科研审查", "en": "Research Review"},
     "research_themes": {"zh": "科研主题生成", "en": "Research Theme Generation"},
     "research_card": {"zh": "科研主题卡", "en": "Research Theme Card"},
-    "compression": {"zh": "压缩配置", "en": "Compression"},
+    "compression": {"zh": "上下文压缩", "en": "Compression"},
 }
 _PENDING_SECRET_PREFIX = "pending-secret:"
 _PENDING_API_KEY_SECRETS: dict[str, tuple[str, str]] = {}
 _PENDING_CLEAR_ENVS: set[str] = set()
+
+
+def _model_option_protocol_route_summary(option: dict[str, Any], details: dict[str, Any]) -> dict[str, Any]:
+    provider_input = option.get("provider") if isinstance(option.get("provider"), dict) else {}
+    try:
+        provider = ProviderConfig.model_validate({
+            **copy.deepcopy(provider_input),
+            "provider_id": "__model_option_provider__",
+        })
+        profile = LLMProfile.model_validate({
+            **copy.deepcopy(details),
+            "profile_id": "__model_option_profile__",
+            "provider_id": "__model_option_provider__",
+            "model": str(option.get("model") or "").strip(),
+        })
+        route = resolve_model_protocol(
+            profile,
+            provider,
+            model_entry={
+                **copy.deepcopy(details),
+                "model_id": str(option.get("model_id") or "").strip(),
+            },
+        )
+        summary = route.log_summary()
+        summary["compat"] = route.compat.to_log_dict()
+        return summary
+    except Exception as exc:
+        return {
+            "protocol": str(details.get("protocol") or option.get("protocol") or "").strip().lower(),
+            "protocolSource": "unresolved",
+            "providerApi": str(provider_input.get("api") or option.get("provider_api") or "").strip().lower().replace("_", "-"),
+            "protocolWarnings": [trim_lines(str(exc), max_lines=2)],
+            "compat": copy.deepcopy(details.get("compat", {})) if isinstance(details.get("compat"), dict) else {},
+        }
 _OPEN_ENVIRONMENT_TASK_NAME = r"\Vibelution\OpenEnvironmentVariables"
 _ENVIRONMENT_WINDOW_TITLE_PARTS = ("环境变量", "Environment Variables")
 _MODEL_DISCOVERY_ENDPOINTS = ("models", "v1/models")
@@ -153,21 +189,12 @@ def _config_sections(lang: str, editor_sections: list[dict[str, Any]] | None = N
             ),
         },
         {
-            "id": "profiles",
-            "title": text_for(lang, zh="调用档案", en="Call Profiles"),
-            "summary": text_for(
-                lang,
-                zh="按业务分区查看每个大模型调用档案使用的模型、密钥状态，并直接做连接测试。",
-                en="Inspect model and key state for each LLM call profile by business area, then run direct connection checks.",
-            ),
-        },
-        {
             "id": "models",
-            "title": text_for(lang, zh="模型中心", en="Model Center"),
+            "title": text_for(lang, zh="模型库", en="Model Library"),
             "summary": text_for(
                 lang,
-                zh="集中管理模型库、服务商账号、密钥、能力检测和模型发现。",
-                en="Manage model inventory, provider accounts, keys, capability checks, and discovery in one place.",
+                zh="集中管理模型资产、服务商账号、密钥、能力检测和模型发现。",
+                en="Manage model assets, provider accounts, keys, capability checks, and discovery in one place.",
             ),
         },
     ]
@@ -385,6 +412,27 @@ def _move_pending_api_key_env(meta: dict[str, object], old_env: str, new_env: st
     return payload
 
 
+def _env_has_value(env_name: str) -> bool:
+    env_name = validate_llm_api_key_env(env_name, required=False, context="api_key_env")
+    return bool(env_name and os.environ.get(env_name))
+
+
+def _with_model_key_env_migration(meta: dict[str, object], old_env: str, new_env: str) -> dict[str, object]:
+    payload = _move_pending_api_key_env(meta, old_env, new_env)
+    old_env = validate_llm_api_key_env(old_env, required=False, context="api_key_env")
+    new_env = validate_llm_api_key_env(new_env, required=False, context="api_key_env")
+    if not old_env or not new_env or old_env == new_env:
+        return payload
+    pending = payload["pending_api_keys"]
+    if isinstance(pending, dict) and new_env in pending:
+        return payload
+    if _env_has_value(old_env) and not _env_has_value(new_env):
+        secret = os.environ.get(old_env, "")
+        if secret:
+            payload = _with_pending_api_key(payload, new_env, secret)
+    return _with_cleared_api_key(payload, old_env)
+
+
 def _api_key_display_state(api_key_env: str, configured: bool, draft_meta: dict | None) -> tuple[bool, str]:
     env_name = str(api_key_env or "").strip()
     meta = _normalize_draft_meta(draft_meta)
@@ -397,7 +445,10 @@ def _api_key_display_state(api_key_env: str, configured: bool, draft_meta: dict 
     return configured, "configured" if configured else "missing"
 
 
-def _profile_label(profile_id: str, lang: str) -> str:
+def _profile_label(profile_id: str, lang: str, profile: dict[str, Any] | None = None) -> str:
+    configured_label = str((profile or {}).get("label", "") or "").strip() if isinstance(profile, dict) else ""
+    if configured_label:
+        return configured_label
     mapping = PROFILE_LABELS.get(str(profile_id).strip())
     if mapping:
         return text_for(lang, zh=mapping["zh"], en=mapping["en"])
@@ -455,12 +506,16 @@ def _validate_required_llm_profiles(public_config: dict[str, Any], lang: str) ->
     missing = _missing_required_llm_profiles(public_config)
     if not missing:
         return
-    display_names = " / ".join(_profile_label(profile_id, lang) for profile_id in missing)
+    profiles = public_config.get("llm", {}).get("profiles", {}) if isinstance(public_config.get("llm", {}), dict) else {}
+    display_names = " / ".join(
+        _profile_label(profile_id, lang, profiles.get(profile_id, {}) if isinstance(profiles, dict) else {})
+        for profile_id in missing
+    )
     raise ValueError(
         text_for(
             lang,
-            zh=f"以下 LLM 配置还没有绑定可用模型：{display_names}",
-            en=f"These LLM configs do not have a usable model bound yet: {display_names}",
+            zh=f"以下模型绑定还没有绑定可用模型：{display_names}",
+            en=f"These model bindings do not have a usable model bound yet: {display_names}",
         )
     )
 
@@ -473,8 +528,18 @@ def _decorate_model_options(public_config: dict[str, Any], draft_meta: dict | No
         resolved_configured, state = _api_key_display_state(api_key_env, configured, draft_meta)
         decorated = copy.deepcopy(option)
         details = decorated.get("details") if isinstance(decorated.get("details"), dict) else {}
+        provider = decorated.get("provider") if isinstance(decorated.get("provider"), dict) else {}
+        protocol_route = _model_option_protocol_route_summary(decorated, details)
         decorated["api_key_configured"] = resolved_configured
         decorated["api_key_state"] = state
+        decorated["provider_api"] = str(decorated.get("provider_api") or provider.get("api") or "").strip().lower().replace("_", "-")
+        decorated["protocol"] = str(decorated.get("protocol") or details.get("protocol") or "").strip().lower()
+        decorated["compat"] = copy.deepcopy(decorated.get("compat") if isinstance(decorated.get("compat"), dict) else details.get("compat") if isinstance(details.get("compat"), dict) else {})
+        decorated["resolved_protocol"] = str(protocol_route.get("protocol") or "").strip()
+        decorated["protocol_source"] = str(protocol_route.get("protocolSource") or "").strip()
+        decorated["protocol_warnings"] = protocol_route.get("protocolWarnings") if isinstance(protocol_route.get("protocolWarnings"), list) else []
+        decorated["resolved_provider_api"] = str(protocol_route.get("providerApi") or decorated["provider_api"]).strip()
+        decorated["resolved_compat"] = copy.deepcopy(protocol_route.get("compat") if isinstance(protocol_route.get("compat"), dict) else {})
         decorated["supports_image_input"] = details.get("supports_image_input")
         decorated["capability_status"] = str(details.get("capability_status") or "").strip() or (
             "supported" if details.get("supports_image_input") is True else "unsupported" if details.get("supports_image_input") is False else "unknown"
@@ -613,7 +678,7 @@ def _list_profile_cards(public_config: dict[str, Any], draft_meta: dict | None, 
         cards.append(
             {
                 "profileId": str(profile_id),
-                "label": _profile_label(str(profile_id), lang),
+                "label": _profile_label(str(profile_id), lang, public_profile),
                 "modelRef": str(public_profile.get("model_ref", "")).strip(),
                 "selectedModelId": str((selected or {}).get("model_id", "")).strip(),
                 "selectedModelLabel": str((selected or {}).get("label", "")).strip() or profile.model,
@@ -698,6 +763,7 @@ def _run_draft_test_llm_connection(
             outcome="failed",
             fields={
                 "profileId": profile.profile_id,
+                "modelId": str((selected_option or {}).get("model_id") or "").strip(),
                 "providerId": provider.provider_id,
                 "providerKind": provider.kind,
                 "model": profile.model,
@@ -721,6 +787,7 @@ def _run_draft_test_llm_connection(
         outcome="succeeded" if success else "failed",
         fields={
             "profileId": profile.profile_id,
+            "modelId": str((selected_option or {}).get("model_id") or "").strip(),
             "providerId": provider.provider_id,
             "providerKind": provider.kind,
             "model": profile.model,
@@ -738,6 +805,7 @@ def _run_draft_test_llm_connection(
     return {
         **result,
         "profile_id": profile.profile_id,
+        "model_id": str((selected_option or {}).get("model_id") or "").strip(),
         "provider_id": provider.provider_id,
         "provider_kind": provider.kind,
         "base_url": provider.base_url,
@@ -1237,7 +1305,7 @@ def draft_update_model(
     updated_library = updated.get("llm", {}).get("model_library", {}) if isinstance(updated.get("llm", {}), dict) else {}
     new_item = updated_library.get(model_id, {}) if isinstance(updated_library, dict) else {}
     new_env = str(new_item.get("api_key_env", "")).strip() if isinstance(new_item, dict) else ""
-    current_meta = _move_pending_api_key_env(current_meta, old_env, new_env)
+    current_meta = _with_model_key_env_migration(current_meta, old_env, new_env)
     if clear_api_key:
         current_meta = _with_cleared_api_key(current_meta, new_env)
     elif api_key:
@@ -1268,7 +1336,7 @@ def draft_delete_model(
     old_item = current_library.get(model_id, {}) if isinstance(current_library, dict) else {}
     old_env = str(old_item.get("api_key_env", "")).strip() if isinstance(old_item, dict) else ""
     updated = delete_llm_model(current, model_id)
-    current_meta = _drop_api_key_state(current_meta, old_env)
+    current_meta = _with_cleared_api_key(_drop_api_key_state(current_meta, old_env), old_env)
     return _build_workspace(
         updated,
         draft_meta=current_meta,
@@ -1305,8 +1373,8 @@ def draft_add_profile(
         base_hash=str(base_hash or public_config_hash(old_public)).strip(),
         message=text_for(
             _resolve_workspace_language(updated),
-            zh="LLM 配置修改已更新，尚未保存到 config.toml。",
-            en="LLM config changes updated and not yet saved to config.toml.",
+            zh="模型绑定修改已更新，尚未保存到 config.toml。",
+            en="Model binding changes updated and not yet saved to config.toml.",
         ),
     )
 
@@ -1316,11 +1384,19 @@ def run_draft_llm_test(
     *,
     draft_meta: dict | None = None,
     profile_id: str | None = None,
+    model_id: str | None = None,
     capability: str | None = None,
 ) -> dict[str, Any]:
     old_public = with_git_config_defaults(load_public_config())
     submitted = _prepare_submitted_public_config(public_config, old_public)
     validate_llm_public_config(submitted)
+    normalized_model_id = str(model_id or "").strip()
+    if normalized_model_id:
+        options = list_llm_model_options(submitted)
+        option = next((item for item in options if str(item.get("model_id") or "").strip() == normalized_model_id), None)
+        if option is None:
+            raise ValueError(f"unknown LLM model: {normalized_model_id}")
+        submitted, profile_id = _public_config_for_model_capability_probe(submitted, option)
     return _run_draft_test_llm_connection(
         submitted,
         profile_id,
@@ -1500,6 +1576,18 @@ def _discovery_key_source_label(*, explicit_api_key: str, api_key_env: str, draf
     return "", "未提供密钥"
 
 
+def _model_library_api_key_env(public_config: dict[str, Any], model_id: str) -> str:
+    model_id = str(model_id or "").strip()
+    if not model_id:
+        return ""
+    llm_cfg = public_config.get("llm", {}) if isinstance(public_config, dict) else {}
+    model_library = llm_cfg.get("model_library", {}) if isinstance(llm_cfg, dict) else {}
+    item = model_library.get(model_id, {}) if isinstance(model_library, dict) else {}
+    if not isinstance(item, dict):
+        return ""
+    return str(item.get("api_key_env") or "").strip()
+
+
 def _http_status_hint(error: Exception) -> str:
     if isinstance(error, httpx.HTTPStatusError):
         status_code = error.response.status_code
@@ -1546,6 +1634,8 @@ def discover_config_models(
     *,
     draft_meta: dict | None = None,
     provider: dict[str, Any] | None = None,
+    model_id: str = "",
+    api_key_env: str = "",
     api_key: str = "",
 ) -> dict[str, Any]:
     old_public = with_git_config_defaults(load_public_config())
@@ -1554,10 +1644,15 @@ def discover_config_models(
     validate_llm_public_config(current)
     provider_input = copy.deepcopy(provider or {})
     validate_llm_provider_target(provider_input, context="llm.model_discovery")
-    api_key_env = str(provider_input.get("api_key_env", "") or "").strip()
+    model_key_env = (
+        str(api_key_env or "").strip()
+        or _model_library_api_key_env(current, model_id)
+    )
+    provider_key_env = str(provider_input.get("api_key_env", "") or "").strip()
+    discovery_key_env = model_key_env or provider_key_env
     resolved_api_key, api_key_source = _discovery_key_source_label(
         explicit_api_key=api_key,
-        api_key_env=api_key_env,
+        api_key_env=discovery_key_env,
         draft_meta=current_meta,
     )
     models = _normalize_discovered_models(_discover_openai_compatible_model_list(

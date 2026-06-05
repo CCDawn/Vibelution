@@ -1,5 +1,6 @@
 import {
   ArrowDown,
+  ArrowUp,
   BrainCircuit,
   CheckCircle2,
   ChevronDown,
@@ -8,9 +9,11 @@ import {
   Download,
   ExternalLink,
   ImagePlus,
+  Link2,
   LoaderCircle,
   MessageSquarePlus,
   Pencil,
+  Square,
   X,
   Search,
   Sparkles,
@@ -23,8 +26,10 @@ import {
   ChatNextStateSignalSummary,
   ConversationMessage,
   MentalStateSnapshot,
+  SessionReferenceAttachment,
   SessionTurnError,
 } from "../../api/types";
+import { fetchJson } from "../../api/client";
 import { useAppI18n } from "../../i18n/useAppI18n";
 import { shouldSubmitComposerOnKeydown } from "./composerShortcuts";
 import {
@@ -50,11 +55,18 @@ import styles from "./ConversationView.module.css";
 
 const RUNNING_OPERATION_STATUSES = new Set(["queued", "pending", "running", "thinking", "tooling", "answering"]);
 const DEFAULT_EXPANDED_RESPONSE_TAIL_COUNT = 1;
+const INITIAL_VISIBLE_MESSAGE_COUNT = 14;
+const INITIAL_VISIBLE_FEEDBACK_OPERATION_COUNT = 36;
+const COMPUTER_USE_TOOL_NAME = "computer_use_task_tool";
 
 type ComposerDragData = {
   files?: ArrayLike<File> | Iterable<File> | null;
   items?: ArrayLike<DataTransferItem> | Iterable<DataTransferItem> | null;
+  types?: ArrayLike<string> | Iterable<string> | null;
+  getData?: (format: string) => string;
 } | null | undefined;
+
+export const COMPOSER_SESSION_REFERENCE_MIME = "application/vnd.vibelution.session-reference+json";
 
 export function extractComposerImageDropFiles(data: ComposerDragData): File[] {
   const files = data?.files;
@@ -75,6 +87,38 @@ export function hasComposerImageDragPayload(data: ComposerDragData): boolean {
   return Array.from(items).some((item) => item.kind === "file" && item.type.startsWith("image/"));
 }
 
+export function extractComposerSessionReferenceDrop(data: ComposerDragData): SessionReferenceAttachment | null {
+  const types = data?.types ? Array.from(data.types) : [];
+  if (!types.includes(COMPOSER_SESSION_REFERENCE_MIME) || !data?.getData) {
+    return null;
+  }
+  try {
+    const raw = data.getData(COMPOSER_SESSION_REFERENCE_MIME);
+    const parsed = JSON.parse(raw) as Partial<SessionReferenceAttachment>;
+    const sessionId = String(parsed.sessionId ?? "").trim();
+    if (!sessionId) {
+      return null;
+    }
+    return {
+      referenceId: String(parsed.referenceId ?? "").trim() || `ref-${sessionId}`,
+      kind: "session",
+      sessionId,
+      title: String(parsed.title ?? "").trim(),
+      agentId: String(parsed.agentId ?? "").trim(),
+      agentCode: String(parsed.agentCode ?? "").trim(),
+      agentDisplayName: String(parsed.agentDisplayName ?? "").trim(),
+      summary: String(parsed.summary ?? "").trim(),
+      createdAt: String(parsed.createdAt ?? "").trim(),
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function hasComposerSessionReferenceDragPayload(data: ComposerDragData): boolean {
+  return Boolean(extractComposerSessionReferenceDrop(data));
+}
+
 type MarkdownBlock =
   | { type: "heading"; level: 1 | 2 | 3 | 4; content: string }
   | { type: "paragraph"; content: string }
@@ -83,6 +127,16 @@ type MarkdownBlock =
   | { type: "unorderedList"; items: string[] }
   | { type: "orderedList"; items: string[] }
   | { type: "divider" };
+
+type ComputerUseResult = {
+  status: string;
+  sessionId: string;
+  summary: string;
+  steps: Array<{ index?: number; action?: string; summary?: string; status?: string }>;
+  screenshotUrl: string;
+  needsConfirmation: boolean;
+  error: string;
+};
 
 export function buildTimelineScrollSignal(messages: ConversationMessage[]) {
   return messages
@@ -119,6 +173,20 @@ export function buildTimelineScrollSignal(messages: ConversationMessage[]) {
           ].join(":"),
         )
         .join("|");
+      const feedbackSignal = (message.feedbackEvents ?? [])
+        .map((event) =>
+          [
+            event.sequence,
+            event.kind,
+            event.status,
+            event.name ?? "",
+            event.summary ?? "",
+            event.resultPreview ?? "",
+            event.error ?? "",
+            event.relatedThoughtSequence ?? "",
+          ].join(":"),
+        )
+        .join("|");
       const metadataSignal = message.metadata
         ? [
             String(message.metadata.kind ?? ""),
@@ -132,6 +200,7 @@ export function buildTimelineScrollSignal(messages: ConversationMessage[]) {
         message.id,
         message.content.length,
         message.thought?.length ?? 0,
+        feedbackSignal,
         toolSignal,
         mentalSignal,
         metadataSignal,
@@ -159,9 +228,69 @@ function userAvatarSymbol(preset: string | undefined, label: string) {
   return label.trim().slice(0, 1).toUpperCase() || "U";
 }
 
+export type TurnAvatarResolution = {
+  imageUrl?: string;
+  fallback: string;
+};
+
+type TurnAvatarContent =
+  | TurnAvatarResolution
+  | { icon: "groupTranscript" };
+
+function renderTurnAvatarContent(resolution: TurnAvatarContent) {
+  if ("icon" in resolution) {
+    return <MessageSquarePlus size={17} />;
+  }
+  if (resolution.imageUrl) {
+    return <img src={resolution.imageUrl} alt="" className={styles.turnAvatarImage} />;
+  }
+  return resolution.fallback;
+}
+
+function resolveMessageTurnAvatar(
+  message: ConversationMessage,
+  options: {
+    resolveTurnAvatar?: (message: ConversationMessage) => TurnAvatarResolution | undefined;
+    assistantAvatarImageUrl?: string;
+    assistantAvatarFallback?: string;
+    assistantLabel: string;
+    userAvatarImageUrl?: string;
+    userAvatarLabel: string;
+    agentInboxMessage: boolean;
+    groupTranscriptMessage: boolean;
+  },
+): TurnAvatarContent {
+  if (options.groupTranscriptMessage) {
+    return { icon: "groupTranscript" };
+  }
+  if (options.agentInboxMessage) {
+    const resolved = options.resolveTurnAvatar?.(message);
+    if (resolved) {
+      return resolved;
+    }
+    return { fallback: "?" };
+  }
+  if (message.role === "assistant") {
+    return {
+      imageUrl: options.assistantAvatarImageUrl,
+      fallback: options.assistantAvatarFallback || options.assistantLabel.trim().slice(0, 2) || "AI",
+    };
+  }
+  return {
+    imageUrl: options.userAvatarImageUrl,
+    fallback: options.userAvatarLabel,
+  };
+}
+
 function metadataText(metadata: Record<string, unknown> | undefined, key: string) {
   const value = metadata?.[key];
-  return typeof value === "string" ? value.trim() : "";
+  if (typeof value === "string") {
+    return value.trim();
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value).trim();
+  }
+  return "";
 }
 
 function agentInboxSourceLabel(message: ConversationMessage) {
@@ -205,6 +334,41 @@ function turnErrorType(message: ConversationMessage) {
   return typeof raw === "string" ? raw.trim() : "";
 }
 
+function turnErrorReasonRows(message: ConversationMessage, lang: "zh" | "en") {
+  const summary = metadataText(message.metadata, "reasonSummary") || metadataText(message.metadata, "reason_summary");
+  const detail = metadataText(message.metadata, "reasonDetail") || metadataText(message.metadata, "reason_detail");
+  const code = metadataText(message.metadata, "reasonCode") || metadataText(message.metadata, "reason_code");
+  const httpStatus = metadataText(message.metadata, "httpStatus") || metadataText(message.metadata, "http_status");
+  const providerErrorType = metadataText(message.metadata, "providerErrorType") || metadataText(message.metadata, "provider_error_type");
+  const providerErrorMessage = metadataText(message.metadata, "providerErrorMessage") || metadataText(message.metadata, "provider_error_message");
+  const provider = metadataText(message.metadata, "provider");
+  const providerHost = metadataText(message.metadata, "providerHost") || metadataText(message.metadata, "provider_host");
+  const model = metadataText(message.metadata, "model");
+  return [
+    httpStatus ? { label: lang === "zh" ? "状态码" : "Status", value: httpStatus } : null,
+    summary ? { label: lang === "zh" ? "原因" : "Reason", value: summary } : null,
+    detail ? { label: lang === "zh" ? "详情" : "Detail", value: detail } : null,
+    providerErrorType ? { label: lang === "zh" ? "类型" : "Type", value: providerErrorType } : null,
+    providerErrorMessage ? { label: lang === "zh" ? "上游" : "Upstream", value: providerErrorMessage } : null,
+    provider || providerHost ? { label: lang === "zh" ? "通道" : "Provider", value: [provider, providerHost].filter(Boolean).join(" · ") } : null,
+    model ? { label: lang === "zh" ? "模型" : "Model", value: model } : null,
+    code ? { label: lang === "zh" ? "代码" : "Code", value: code } : null,
+  ].filter((row): row is { label: string; value: string } => Boolean(row));
+}
+
+function turnErrorBannerRows(turnError: SessionTurnError, lang: "zh" | "en") {
+  return [
+    turnError.httpStatus ? { label: lang === "zh" ? "状态码" : "Status", value: String(turnError.httpStatus) } : null,
+    turnError.reasonSummary ? { label: lang === "zh" ? "原因" : "Reason", value: turnError.reasonSummary } : null,
+    turnError.reasonDetail ? { label: lang === "zh" ? "详情" : "Detail", value: turnError.reasonDetail } : null,
+    turnError.providerErrorType ? { label: lang === "zh" ? "类型" : "Type", value: turnError.providerErrorType } : null,
+    turnError.providerErrorMessage ? { label: lang === "zh" ? "上游" : "Upstream", value: turnError.providerErrorMessage } : null,
+    turnError.provider || turnError.providerHost ? { label: lang === "zh" ? "通道" : "Provider", value: [turnError.provider, turnError.providerHost].filter(Boolean).join(" · ") } : null,
+    turnError.model ? { label: lang === "zh" ? "模型" : "Model", value: turnError.model } : null,
+    turnError.reasonCode ? { label: lang === "zh" ? "代码" : "Code", value: turnError.reasonCode } : null,
+  ].filter((row): row is { label: string; value: string } => Boolean(row));
+}
+
 function groupRoomTranscriptLabel(message: ConversationMessage) {
   const metadata = message.metadata;
   const roomTitle = metadataText(metadata, "sourceRoomTitle");
@@ -228,11 +392,22 @@ function mergeAdjacentTurnErrorMessages(previous: ConversationMessage, next: Con
     seenToolCalls.add(key);
     toolCalls.push(toolCall);
   }
+  const feedbackEvents = [...(previous.feedbackEvents ?? [])];
+  const seenFeedbackEvents = new Set(feedbackEvents.map((event) => JSON.stringify(event)));
+  for (const event of next.feedbackEvents ?? []) {
+    const key = JSON.stringify(event);
+    if (seenFeedbackEvents.has(key)) {
+      continue;
+    }
+    seenFeedbackEvents.add(key);
+    feedbackEvents.push(event);
+  }
   return {
     ...previous,
     thought: thought || undefined,
-    mentalSnapshot: previous.mentalSnapshot ?? next.mentalSnapshot,
+    mentalSnapshot: next.mentalSnapshot,
     toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+    feedbackEvents: feedbackEvents.length > 0 ? feedbackEvents : undefined,
     metadata: {
       ...(next.metadata ?? {}),
       ...(previous.metadata ?? {}),
@@ -265,6 +440,25 @@ export function shouldShowNextStateSignalInConversation(
   return true;
 }
 
+export function safeConversationMarkdownUrl(rawUrl: string): string | null {
+  const trimmed = String(rawUrl ?? "").trim();
+  if (!trimmed || /[\u0000-\u001f\u007f]/.test(trimmed) || /\s/.test(trimmed)) {
+    return null;
+  }
+  if (trimmed.startsWith("//")) {
+    return null;
+  }
+  if (trimmed.startsWith("/") || trimmed.startsWith("./") || trimmed.startsWith("../") || trimmed.startsWith("#")) {
+    return trimmed;
+  }
+  const schemeMatch = trimmed.match(/^([A-Za-z][A-Za-z0-9+.-]*):/);
+  if (!schemeMatch) {
+    return trimmed;
+  }
+  const scheme = schemeMatch[1].toLowerCase();
+  return scheme === "http" || scheme === "https" ? trimmed : null;
+}
+
 type ConversationViewProps = {
   sessionId: string;
   title: string;
@@ -274,6 +468,9 @@ type ConversationViewProps = {
   density?: "default" | "compact";
   eyebrowLabel?: string;
   assistantDisplayName?: string;
+  assistantAvatarImageUrl?: string;
+  assistantAvatarFallback?: string;
+  resolveTurnAvatar?: (message: ConversationMessage) => TurnAvatarResolution | undefined;
   userDisplayName?: string;
   userAvatarPreset?: string;
   userAvatarImageUrl?: string;
@@ -291,6 +488,7 @@ type ConversationViewProps = {
   supplementalContent?: ReactNode;
   showHeader?: boolean;
   showSessionOverview?: boolean;
+  showMentalSnapshots?: boolean;
   autoScrollToLatest?: boolean;
   composerValue: string;
   composerPlaceholder: string;
@@ -303,6 +501,7 @@ type ConversationViewProps = {
   composerError?: string;
   composerGuidance?: string;
   composerAttachments?: ComposerAttachment[];
+  composerReferences?: SessionReferenceAttachment[];
   composerAttachmentInputDisabled?: boolean;
   turnError?: SessionTurnError | null;
   nextStateSignals?: ChatNextStateSignalSummary[];
@@ -322,6 +521,8 @@ type ConversationViewProps = {
   onComposerChange: (value: string) => void;
   onAddComposerAttachments?: (files: FileList | File[]) => void;
   onRemoveComposerAttachment?: (attachmentId: string) => void;
+  onAddComposerReference?: (reference: SessionReferenceAttachment) => void;
+  onRemoveComposerReference?: (referenceId: string) => void;
   onEditUserMessage?: (message: ConversationMessage) => void;
   onCancelComposerMode?: () => void;
   onSubmit: () => void;
@@ -339,6 +540,9 @@ export function ConversationView({
   density = "default",
   eyebrowLabel,
   assistantDisplayName,
+  assistantAvatarImageUrl,
+  assistantAvatarFallback,
+  resolveTurnAvatar,
   userDisplayName,
   userAvatarPreset,
   userAvatarImageUrl,
@@ -350,6 +554,7 @@ export function ConversationView({
   supplementalContent,
   showHeader = true,
   showSessionOverview = true,
+  showMentalSnapshots = true,
   autoScrollToLatest = true,
   composerValue,
   composerPlaceholder,
@@ -362,6 +567,7 @@ export function ConversationView({
   composerError,
   composerGuidance,
   composerAttachments = [],
+  composerReferences = [],
   composerAttachmentInputDisabled,
   turnError,
   nextStateSignals = [],
@@ -381,6 +587,8 @@ export function ConversationView({
   onComposerChange,
   onAddComposerAttachments,
   onRemoveComposerAttachment,
+  onAddComposerReference,
+  onRemoveComposerReference,
   onEditUserMessage,
   onCancelComposerMode,
   onSubmit,
@@ -388,6 +596,9 @@ export function ConversationView({
   onSafeGuidance,
   onInterruptGuidance,
 }: ConversationViewProps) {
+  void interruptGuidanceLabel;
+  void interruptGuidancePendingLabel;
+  void onInterruptGuidance;
   const { lang, t, statusLabel } = useAppI18n();
   const timelineRef = useRef<HTMLDivElement | null>(null);
   const composerInputRef = useRef<HTMLTextAreaElement | null>(null);
@@ -399,13 +610,15 @@ export function ConversationView({
   const [isAtBottom, setIsAtBottom] = useState(true);
   const [previewImage, setPreviewImage] = useState<PreviewImageState | null>(null);
   const [composerDragActive, setComposerDragActive] = useState(false);
+  const [allMessagesVisible, setAllMessagesVisible] = useState(false);
   const previousStreamingRef = useRef<Record<string, boolean>>({});
   const resolvedActionMode = composerActionMode ?? "send";
   const hasComposerAttachments = composerAttachments.length > 0;
+  const hasComposerReferences = composerReferences.length > 0;
   const attachmentInputDisabled = composerAttachmentInputDisabled ?? composerDisabled;
   const resolvedActionDisabled =
     composerActionDisabled
-    ?? (resolvedActionMode === "stop" ? composerDisabled : composerDisabled || (!composerValue.trim() && !hasComposerAttachments));
+    ?? (resolvedActionMode === "stop" ? composerDisabled : composerDisabled || (!composerValue.trim() && !hasComposerAttachments && !hasComposerReferences));
   const resolvedActionLabel =
     resolvedActionMode === "stop" ? (stopLabel ?? t("stop")) : (submitLabel ?? t("send"));
   const resolvedPendingLabel =
@@ -419,7 +632,10 @@ export function ConversationView({
   const runningGuidanceActionsEnabled = resolvedActionMode === "stop";
   const guidanceActionDisabled =
     !composerValue.trim() || composerDisabled || composerSafeGuidancePending || composerInterruptGuidancePending;
+  const guidanceDraftReady = Boolean(composerValue.trim());
+  const showSafeGuidanceAction = runningGuidanceActionsEnabled && guidanceDraftReady;
   const composerCanAcceptImageDrop = Boolean(onAddComposerAttachments) && !attachmentInputDisabled;
+  const composerCanAcceptReferenceDrop = Boolean(onAddComposerReference) && !composerDisabled;
   const timestampFormatter = useMemo(
     () =>
       new Intl.DateTimeFormat(lang === "zh" ? "zh-CN" : "en-US", {
@@ -433,13 +649,15 @@ export function ConversationView({
   );
 
   useEffect(() => {
-    if (!composerCanAcceptImageDrop && composerDragActive) {
+    if (!composerCanAcceptImageDrop && !composerCanAcceptReferenceDrop && composerDragActive) {
       setComposerDragActive(false);
     }
-  }, [composerCanAcceptImageDrop, composerDragActive]);
+  }, [composerCanAcceptImageDrop, composerCanAcceptReferenceDrop, composerDragActive]);
 
   function handleComposerDragEnter(event: DragEvent<HTMLDivElement>) {
-    if (!composerCanAcceptImageDrop || !hasComposerImageDragPayload(event.dataTransfer)) {
+    const acceptsImage = composerCanAcceptImageDrop && hasComposerImageDragPayload(event.dataTransfer);
+    const acceptsReference = composerCanAcceptReferenceDrop && hasComposerSessionReferenceDragPayload(event.dataTransfer);
+    if (!acceptsImage && !acceptsReference) {
       return;
     }
     event.preventDefault();
@@ -448,7 +666,9 @@ export function ConversationView({
   }
 
   function handleComposerDragOver(event: DragEvent<HTMLDivElement>) {
-    if (!composerCanAcceptImageDrop || !hasComposerImageDragPayload(event.dataTransfer)) {
+    const acceptsImage = composerCanAcceptImageDrop && hasComposerImageDragPayload(event.dataTransfer);
+    const acceptsReference = composerCanAcceptReferenceDrop && hasComposerSessionReferenceDragPayload(event.dataTransfer);
+    if (!acceptsImage && !acceptsReference) {
       return;
     }
     event.preventDefault();
@@ -464,6 +684,14 @@ export function ConversationView({
   }
 
   function handleComposerDrop(event: DragEvent<HTMLDivElement>) {
+    const reference = composerCanAcceptReferenceDrop ? extractComposerSessionReferenceDrop(event.dataTransfer) : null;
+    if (reference && onAddComposerReference) {
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "copy";
+      setComposerDragActive(false);
+      onAddComposerReference(reference);
+      return;
+    }
     if (!composerCanAcceptImageDrop || !onAddComposerAttachments) {
       setComposerDragActive(false);
       return;
@@ -537,6 +765,18 @@ export function ConversationView({
     },
     [messages],
   );
+  const hasVisibleTurnErrorMessage = useMemo(
+    () => displayMessages.some((message) => isTurnErrorMessage(message)),
+    [displayMessages],
+  );
+  const visibleMessageCount = allMessagesVisible
+    ? displayMessages.length
+    : Math.min(displayMessages.length, INITIAL_VISIBLE_MESSAGE_COUNT);
+  const hiddenMessageCount = Math.max(0, displayMessages.length - visibleMessageCount);
+  const timelineMessages = useMemo(
+    () => displayMessages.slice(displayMessages.length - visibleMessageCount),
+    [displayMessages, visibleMessageCount],
+  );
   const imageArtifactUrlsBeforeMessage = useMemo(() => {
     const urlsByMessageId = new Map<string, Set<string>>();
     const seenImageUrls = new Set<string>();
@@ -560,8 +800,8 @@ export function ConversationView({
   );
   const defaultExpandedResponseIds = useMemo(() => {
     const ids: string[] = [];
-    for (let index = displayMessages.length - 1; index >= 0; index -= 1) {
-      const message = displayMessages[index];
+    for (let index = timelineMessages.length - 1; index >= 0; index -= 1) {
+      const message = timelineMessages[index];
       if (!hasResponseBlock(message)) {
         continue;
       }
@@ -571,16 +811,24 @@ export function ConversationView({
       }
     }
     return new Set(ids);
-  }, [displayMessages]);
-  const timelineScrollSignal = useMemo(() => buildTimelineScrollSignal(displayMessages), [displayMessages]);
+  }, [timelineMessages]);
+  const timelineSignalMessages = useMemo(
+    () =>
+      showMentalSnapshots
+        ? timelineMessages
+        : timelineMessages.map((message) => ({ ...message, mentalSnapshot: undefined })),
+    [showMentalSnapshots, timelineMessages],
+  );
+  const timelineScrollSignal = useMemo(() => buildTimelineScrollSignal(timelineSignalMessages), [timelineSignalMessages]);
   const hasSessionMeta = resolvedStats.length > 0 || latestToolCalls.length > 0;
   const hasMetaSection = showSessionOverview && (hasSessionMeta || Boolean(supplementalContent));
   const operationLabels = useMemo(
     () => ({
       thought: t("thoughtProcess"),
       mental: t("mentalProcess"),
+      status: lang === "zh" ? "运行状态" : "Runtime status",
     }),
-    [t],
+    [lang, t],
   );
 
   function formatTimestamp(timestamp: string) {
@@ -687,6 +935,10 @@ export function ConversationView({
   }, [composerDisabled, editingMessageId]);
 
   useEffect(() => {
+    setAllMessagesVisible(false);
+  }, [sessionId]);
+
+  useEffect(() => {
     const previous = previousStreamingRef.current;
     const nextStreaming: Record<string, boolean> = {};
     let shouldCollapse = false;
@@ -780,10 +1032,44 @@ export function ConversationView({
     if (seconds === null || !Number.isFinite(seconds) || seconds < 0) {
       return "";
     }
+    if (seconds >= 60) {
+      const minutes = Math.floor(seconds / 60);
+      const rest = Math.round(seconds % 60);
+      return rest > 0 ? `${minutes}m ${rest}s` : `${minutes}m`;
+    }
     if (seconds < 10) {
       return `${seconds.toFixed(1)}s`;
     }
     return `${Math.round(seconds)}s`;
+  }
+
+  function elapsedSinceTimestampSeconds(timestamp: string | undefined) {
+    const normalized = String(timestamp ?? "").trim();
+    if (!normalized) {
+      return null;
+    }
+    const parsed = Date.parse(normalized);
+    if (!Number.isFinite(parsed)) {
+      return null;
+    }
+    return Math.max(0, (Date.now() - parsed) / 1000);
+  }
+
+  function formatOperationTimestamp(timestamp: string | undefined) {
+    const normalized = String(timestamp ?? "").trim();
+    if (!normalized) {
+      return "";
+    }
+    const parsed = Date.parse(normalized);
+    if (!Number.isFinite(parsed)) {
+      return normalized;
+    }
+    return new Intl.DateTimeFormat(lang === "zh" ? "zh-CN" : "en-US", {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    }).format(parsed);
   }
 
   function operationIcon(kind: ConversationOperationKind, label: string) {
@@ -814,15 +1100,47 @@ export function ConversationView({
     return <Wrench size={17} />;
   }
 
+  function operationTone(operation: ConversationOperation) {
+    if (operation.kind === "thought") {
+      return "thought";
+    }
+    if (operation.kind === "mental") {
+      return "mental";
+    }
+    if (operation.kind === "status") {
+      return "status";
+    }
+    return "tool";
+  }
+
   function operationStatusIcon(operation: ConversationOperation) {
     const status = operation.status.trim().toLowerCase();
     if (["done", "success", "completed", "succeeded"].includes(status)) {
       return <CheckCircle2 size={14} />;
     }
     if (isRunningOperationStatus(status)) {
-      return <LoaderCircle className={styles.statusSpinner} size={14} />;
+      return (
+        <>
+          <LoaderCircle className={styles.statusSpinner} size={14} />
+          <CircleDot className={styles.statusRunningDot} size={14} />
+        </>
+      );
     }
     return <CircleDot size={14} />;
+  }
+
+  function operationStatusTone(operation: ConversationOperation) {
+    const status = operation.status.trim().toLowerCase();
+    if (["failed", "error", "timeout"].includes(status)) {
+      return "failed";
+    }
+    if (isRunningOperationStatus(status)) {
+      return "running";
+    }
+    if (["done", "success", "completed", "succeeded"].includes(status)) {
+      return "done";
+    }
+    return "pending";
   }
 
   function isRunningOperationStatus(status: string) {
@@ -862,6 +1180,134 @@ export function ConversationView({
     return `${t("toolProcess")} ${count}`;
   }
 
+  function operationTimelineTitle(operations: ConversationOperation[]) {
+    if (operations.length > 0) {
+      return lang === "zh" ? "执行过程" : "Execution trace";
+    }
+    const thoughtCount = operations.filter((operation) => operation.kind === "thought").length;
+    const toolCount = operations.filter((operation) => operation.kind === "tool").length;
+    const mentalCount = operations.filter((operation) => operation.kind === "mental").length;
+    const parts = [
+      thoughtCount > 0 ? `${t("thoughtProcess")} ${thoughtCount}` : "",
+      toolCount > 0 ? `${t("toolProcess")} ${toolCount}` : "",
+      mentalCount > 0 ? `${t("mentalProcess")} ${mentalCount}` : "",
+    ].filter(Boolean);
+    return parts.length > 0 ? parts.join(" · ") : `${t("toolProcess")} ${operations.length}`;
+  }
+
+  function operationStepCountLabel(count: number) {
+    if (count <= 0) {
+      return "";
+    }
+    return lang === "zh" ? `${count} 步` : `${count} steps`;
+  }
+
+  function runningOperationPhrase(operation: ConversationOperation | undefined) {
+    if (!operation) {
+      return "";
+    }
+    const label = operationLabel(operation);
+    if (lang === "zh") {
+      if (label.endsWith("中")) {
+        return label;
+      }
+      return `${label}中`;
+    }
+    return label;
+  }
+
+  function compactOperationLabel(operation: ConversationOperation) {
+    const label = operationLabel(operation).trim();
+    if (!label) {
+      return t("toolProcess");
+    }
+    return label;
+  }
+
+  function dedupeProgressOperations(operations: ConversationOperation[]) {
+    const deduped: ConversationOperation[] = [];
+    const indexByKey = new Map<string, number>();
+    operations.forEach((operation) => {
+      const label = compactOperationLabel(operation).trim().toLowerCase();
+      const key = label || `${operation.kind}:${operation.rawLabel ?? operation.label}`;
+      const previousIndex = indexByKey.get(key);
+      if (previousIndex === undefined) {
+        indexByKey.set(key, deduped.length);
+        deduped.push(operation);
+        return;
+      }
+      deduped[previousIndex] = mergeProgressOperationTone(deduped[previousIndex], operation);
+    });
+    return deduped;
+  }
+
+  function mergeProgressOperationTone(previous: ConversationOperation, next: ConversationOperation) {
+    const previousTone = operationStatusTone(previous);
+    const nextTone = operationStatusTone(next);
+    if (nextTone === "failed" && previousTone !== "running") {
+      return next;
+    }
+    if (nextTone === "running" && previousTone !== "failed") {
+      return next;
+    }
+    if (previousTone === "pending" && nextTone === "done") {
+      return next;
+    }
+    return previous;
+  }
+
+  function operationProgressMeta(operations: ConversationOperation[]) {
+    const latestActive = [...operations].reverse().find((operation) => isRunningOperationStatus(operation.status));
+    const latestFailed = [...operations].reverse().find((operation) => operation.status.trim().toLowerCase() === "failed");
+    const latestEvent = [...operations].reverse().find((operation) => operation.timestamp);
+    const completedCount = operations.filter((operation) => operationStatusTone(operation) === "done").length;
+    const phase = latestActive
+      ? runningOperationPhrase(latestActive)
+      : latestFailed
+        ? lang === "zh"
+          ? `${operationLabel(latestFailed)}失败`
+          : `${operationLabel(latestFailed)} failed`
+        : statusLabel("done");
+    return {
+      latestActive,
+      latestFailed,
+      latestEvent,
+      completedCount,
+      phase,
+      currentSummary: latestActive?.kind === "status" ? "" : latestActive?.summary || latestFailed?.summary || "",
+    };
+  }
+
+  function operationProgressLocation(progress: ReturnType<typeof operationProgressMeta>) {
+    const operation = progress.latestActive ?? progress.latestFailed;
+    if (!operation) {
+      return "";
+    }
+    const label = operationLabel(operation);
+    const status = statusLabel(operation.status);
+    if (lang === "zh") {
+      return `${progress.latestActive ? "当前位置" : "最近停靠"}: ${label} · ${status}`;
+    }
+    return `${progress.latestActive ? "Current" : "Latest"}: ${label} · ${status}`;
+  }
+
+  function operationProgressMetricItems(progress: ReturnType<typeof operationProgressMeta>) {
+    const operation = progress.latestActive ?? progress.latestFailed;
+    if (!operation) {
+      return [];
+    }
+    const elapsed = operation.durationSeconds ?? elapsedSinceTimestampSeconds(operation.timestamp);
+    return [
+      elapsed !== null ? (lang === "zh" ? `已持续 ${formatDuration(elapsed)}` : `running ${formatDuration(elapsed)}`) : "",
+      operation.timeoutSeconds !== undefined
+        ? (lang === "zh" ? `超时阈值 ${formatDuration(operation.timeoutSeconds)}` : `timeout ${formatDuration(operation.timeoutSeconds)}`)
+        : "",
+      progress.latestEvent?.timestamp
+        ? (lang === "zh" ? `最后事件 ${formatOperationTimestamp(progress.latestEvent.timestamp)}` : `last event ${formatOperationTimestamp(progress.latestEvent.timestamp)}`)
+        : "",
+    ].filter(Boolean);
+  }
+
   function hasOperationDetails(operation: ConversationOperation) {
     return Boolean(
       Object.keys(operation.arguments ?? {}).length
@@ -877,10 +1323,29 @@ export function ConversationView({
   function operationDetailRows(operation: ConversationOperation) {
     const rows: Array<{ label: string; value: string }> = [];
     const args = operation.arguments ?? {};
+    if (operation.rawLabel && operation.rawLabel !== operation.label) {
+      rows.push({ label: lang === "zh" ? "原始名称" : "Raw name", value: operation.rawLabel });
+    }
+    if (operation.kind === "status" && operation.resultPreview) {
+      rows.push({ label: lang === "zh" ? "完整状态" : "Full status", value: operation.resultPreview });
+    }
+    if (operation.rawStatus && operation.rawStatus !== operation.status) {
+      rows.push({ label: lang === "zh" ? "原始状态" : "Raw status", value: operation.rawStatus });
+    }
+    if (operation.sequence !== undefined || operation.timestamp || operation.relatedThoughtSequence !== undefined) {
+      rows.push({
+        label: lang === "zh" ? "事件索引" : "Event index",
+        value: [
+          operation.sequence !== undefined ? `sequence: ${operation.sequence}` : "",
+          operation.timestamp ? `timestamp: ${operation.timestamp}` : "",
+          operation.relatedThoughtSequence !== undefined ? `relatedThoughtSequence: ${operation.relatedThoughtSequence}` : "",
+        ].filter(Boolean).join("\n"),
+      });
+    }
     if (Object.keys(args).length > 0) {
       rows.push({ label: t("toolCallArguments"), value: JSON.stringify(args, null, 2) });
     }
-    if (operation.resultPreview) {
+    if (operation.resultPreview && operation.kind !== "status") {
       rows.push({
         label: operation.kind === "thought" ? t("thoughtProcess") : t("toolCallResult"),
         value: operation.resultPreview,
@@ -901,21 +1366,137 @@ export function ConversationView({
     return rows;
   }
 
-  function renderOperationTimeline(operations: ConversationOperation[]) {
+  function computerUseResultForOperation(operation: ConversationOperation): ComputerUseResult | null {
+    if (operation.kind !== "tool" || (operation.rawLabel ?? operation.label) !== COMPUTER_USE_TOOL_NAME) {
+      return null;
+    }
+    const preview = String(operation.resultPreview ?? "").trim();
+    if (!preview || !preview.startsWith("{")) {
+      return null;
+    }
+    try {
+      const payload = JSON.parse(preview) as Partial<ComputerUseResult>;
+      const sessionId = String(payload.sessionId ?? "").trim();
+      if (!sessionId) {
+        return null;
+      }
+      return {
+        status: String(payload.status ?? ""),
+        sessionId,
+        summary: String(payload.summary ?? ""),
+        steps: Array.isArray(payload.steps) ? payload.steps : [],
+        screenshotUrl: String(payload.screenshotUrl ?? ""),
+        needsConfirmation: Boolean(payload.needsConfirmation),
+        error: String(payload.error ?? ""),
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  function renderComputerUseResult(operation: ConversationOperation) {
+    const result = computerUseResultForOperation(operation);
+    if (!result) {
+      return null;
+    }
+    const previewLabel = lang === "zh" ? "预览沙盒截图" : "Preview sandbox screenshot";
+    const confirmLabel = lang === "zh" ? "确认继续" : "Confirm";
+    const cancelLabel = lang === "zh" ? "停止任务" : "Stop";
+    const imageAlt = result.summary || (lang === "zh" ? "Computer Use 沙盒截图" : "Computer Use sandbox screenshot");
+    const confirmSession = () => {
+      void fetchJson(`/api/computer-use/sessions/${encodeURIComponent(result.sessionId)}/confirm`, {
+        method: "POST",
+        body: JSON.stringify({ confirmation: "approved_from_chat" }),
+      });
+    };
+    const cancelSession = () => {
+      void fetchJson(`/api/computer-use/sessions/${encodeURIComponent(result.sessionId)}/cancel`, {
+        method: "POST",
+        body: JSON.stringify({ reason: "cancelled_from_chat" }),
+      });
+    };
+    return (
+      <section className={styles.computerUsePanel}>
+        <div className={styles.computerUseHeader}>
+          <span>{result.status || "computer_use"}</span>
+          <code>{result.sessionId}</code>
+        </div>
+        {result.summary ? <p className={styles.computerUseSummary}>{result.summary}</p> : null}
+        {result.screenshotUrl ? (
+          <button
+            type="button"
+            className={`${styles.imageArtifactFrame} ${styles.imagePreviewButton}`}
+            onClick={() =>
+              openImagePreview({
+                src: result.screenshotUrl,
+                alt: imageAlt,
+                downloadUrl: result.screenshotUrl,
+                downloadName: true,
+              })
+            }
+            aria-label={previewLabel}
+            title={previewLabel}
+          >
+            <img className={styles.computerUseScreenshot} src={result.screenshotUrl} alt={imageAlt} loading="lazy" />
+          </button>
+        ) : null}
+        {result.steps.length > 0 ? (
+          <ol className={styles.computerUseSteps}>
+            {result.steps.slice(0, 6).map((step, index) => (
+              <li key={`${result.sessionId}-${step.index ?? index}`}>
+                <span>{step.action || step.status || `${index + 1}`}</span>
+                <p>{step.summary || step.status || ""}</p>
+              </li>
+            ))}
+          </ol>
+        ) : null}
+        {result.error ? <p className={styles.computerUseError}>{result.error}</p> : null}
+        {result.needsConfirmation || result.status === "running" ? (
+          <div className={styles.computerUseActions}>
+            {result.needsConfirmation ? (
+              <button type="button" onClick={confirmSession}>{confirmLabel}</button>
+            ) : null}
+            <button type="button" onClick={cancelSession}>{cancelLabel}</button>
+          </div>
+        ) : null}
+      </section>
+    );
+  }
+
+  function renderOperationTimeline(operations: ConversationOperation[], options: { limitInitialRows?: boolean } = {}) {
+    const shouldLimitRows = options.limitInitialRows && operations.length > INITIAL_VISIBLE_FEEDBACK_OPERATION_COUNT;
+    const hiddenOperationCount = shouldLimitRows ? operations.length - INITIAL_VISIBLE_FEEDBACK_OPERATION_COUNT : 0;
+    const visibleOperations = shouldLimitRows
+      ? operations.slice(-INITIAL_VISIBLE_FEEDBACK_OPERATION_COUNT)
+      : operations;
     return (
       <div className={styles.operationTimeline}>
-        {operations.map((operation) => {
+        {hiddenOperationCount > 0 ? (
+          <div className={styles.operationTimelineTrimmed}>
+            {lang === "zh"
+              ? `已折叠更早 ${hiddenOperationCount} 步执行记录`
+              : `${hiddenOperationCount} earlier execution steps collapsed`}
+          </div>
+        ) : null}
+        {visibleOperations.map((operation) => {
           const duration = formatDuration(operation.durationSeconds);
           const detailsId = `operation-detail-${operation.id}`;
           const detailsExpanded = getExpansionState(operation.id, "details", false);
           const detailRows = operationDetailRows(operation);
           const canExpandDetails = detailRows.length > 0;
+          const computerUseResult = renderComputerUseResult(operation);
           const detailToggleTitle = operation.kind === "thought"
             ? detailsExpanded ? t("thoughtProcessVisible") : t("thoughtProcessHidden")
             : detailsExpanded ? t("toolCallDetailsVisible") : t("toolCallDetailsHidden");
+          const operationClassName = [
+            styles.operationItem,
+            operation.kind === "tool" ? styles.operationItemTool : "",
+            styles[`operationItem_${operationTone(operation)}`],
+            isRunningOperationStatus(operation.status) ? styles.operationItemActive : "",
+          ].filter(Boolean).join(" ");
           return (
             <div key={operation.id} className={styles.operationItemWrap}>
-              <div className={operation.kind === "tool" ? `${styles.operationItem} ${styles.operationItemTool}` : styles.operationItem}>
+              <div className={operationClassName}>
                 {operation.kind !== "tool" ? (
                   <span className={`${styles.operationIcon} ${styles[`operationIcon_${operation.kind}`]}`}>
                     {operationIcon(operation.kind, operation.label)}
@@ -966,9 +1547,134 @@ export function ConversationView({
                   ))}
                 </div>
               ) : null}
+              {computerUseResult}
             </div>
           );
         })}
+      </div>
+    );
+  }
+
+  function renderOperationProgressRail(operations: ConversationOperation[]) {
+    const progressOperations = dedupeProgressOperations(operations);
+    return (
+      <div className={styles.operationProgressRail} aria-label={lang === "zh" ? "执行进度" : "Execution progress"}>
+        {progressOperations.map((operation, index) => {
+          const tone = operationStatusTone(operation);
+          return (
+            <span
+              key={`${operation.id}-rail`}
+              className={`${styles.operationRailStep} ${styles[`operationRailStep_${tone}`]}`}
+              title={`${operationLabel(operation)} · ${statusLabel(operation.status)}`}
+            >
+              <span className={styles.operationRailDot} aria-hidden="true" />
+              <span className={styles.operationRailLabel}>{compactOperationLabel(operation)}</span>
+              {tone === "running" ? (
+                <span className={styles.operationRailBadge}>{lang === "zh" ? "当前" : "now"}</span>
+              ) : tone === "failed" ? (
+                <span className={styles.operationRailBadge}>{lang === "zh" ? "失败" : "failed"}</span>
+              ) : null}
+              {index < progressOperations.length - 1 ? <span className={styles.operationRailConnector} aria-hidden="true" /> : null}
+            </span>
+          );
+        })}
+      </div>
+    );
+  }
+
+  function renderFeedbackOperationTable(operations: ConversationOperation[], options: { limitInitialRows?: boolean } = {}) {
+    const shouldLimitRows = options.limitInitialRows && operations.length > INITIAL_VISIBLE_FEEDBACK_OPERATION_COUNT;
+    const hiddenOperationCount = shouldLimitRows ? operations.length - INITIAL_VISIBLE_FEEDBACK_OPERATION_COUNT : 0;
+    const visibleOperations = shouldLimitRows
+      ? operations.slice(-INITIAL_VISIBLE_FEEDBACK_OPERATION_COUNT)
+      : operations;
+    return (
+      <div className={styles.operationTableWrap}>
+        {hiddenOperationCount > 0 ? (
+          <div className={styles.operationTimelineTrimmed}>
+            {lang === "zh"
+              ? `已折叠更早 ${hiddenOperationCount} 步执行记录`
+              : `${hiddenOperationCount} earlier execution steps collapsed`}
+          </div>
+        ) : null}
+        <div className={styles.operationTable} role="table" aria-label={lang === "zh" ? "执行过程明细" : "Execution detail"}>
+          <div className={`${styles.operationTableRow} ${styles.operationTableHead}`} role="row">
+            <span role="columnheader">{lang === "zh" ? "阶段" : "Stage"}</span>
+            <span role="columnheader">{lang === "zh" ? "状态" : "Status"}</span>
+            <span role="columnheader">{lang === "zh" ? "摘要" : "Summary"}</span>
+            <span role="columnheader">{lang === "zh" ? "耗时" : "Time"}</span>
+            <span role="columnheader" aria-label={lang === "zh" ? "详情" : "Details"} />
+          </div>
+          {visibleOperations.map((operation) => {
+            const duration = formatDuration(operation.durationSeconds);
+            const detailsId = `operation-detail-${operation.id}`;
+            const detailsExpanded = getExpansionState(operation.id, "details", false);
+            const detailRows = operationDetailRows(operation);
+            const canExpandDetails = detailRows.length > 0;
+            const computerUseResult = renderComputerUseResult(operation);
+            const detailToggleTitle = operation.kind === "thought"
+              ? detailsExpanded ? t("thoughtProcessVisible") : t("thoughtProcessHidden")
+              : detailsExpanded ? t("toolCallDetailsVisible") : t("toolCallDetailsHidden");
+            const tone = operationStatusTone(operation);
+            return (
+              <div key={operation.id} className={styles.operationTableItem}>
+                <div
+                  className={`${styles.operationTableRow} ${styles[`operationTableRow_${tone}`]}`}
+                  role="row"
+                >
+                  <span className={styles.operationTableStage} role="cell">
+                    <span className={styles.operationTableStageIcon} aria-hidden="true">
+                      {operationIcon(operation.kind, operation.label)}
+                    </span>
+                    <span>{operationLabel(operation)}</span>
+                  </span>
+                  <span className={styles.operationTableStatus} role="cell">
+                    {operationStatusIcon(operation)}
+                    <span>{statusLabel(operation.status)}</span>
+                  </span>
+                  <span className={styles.operationTableSummary} role="cell">
+                    {operation.summary || (lang === "zh" ? "无摘要" : "No summary")}
+                  </span>
+                  <span className={styles.operationTableDuration} role="cell">
+                    {duration || "--"}
+                  </span>
+                  <span className={styles.operationTableAction} role="cell">
+                    {canExpandDetails ? (
+                      <button
+                        type="button"
+                        className={styles.operationDetailToggle}
+                        aria-expanded={detailsExpanded}
+                        aria-controls={detailsId}
+                        onClick={() => toggleSection(operation.id, "details", false)}
+                        title={detailToggleTitle}
+                      >
+                        {detailsExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                      </button>
+                    ) : null}
+                  </span>
+                </div>
+                {canExpandDetails && detailsExpanded ? (
+                  <div
+                    id={detailsId}
+                    className={
+                      operation.kind === "thought"
+                        ? `${styles.operationDetails} ${styles.operationDetails_thought}`
+                        : styles.operationDetails
+                    }
+                  >
+                    {detailRows.map((row) => (
+                      <div key={`${operation.id}-${row.label}`} className={styles.operationDetailRow}>
+                        <span className={styles.operationDetailLabel}>{row.label}</span>
+                        <pre className={styles.operationDetailValue}>{row.value}</pre>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+                {computerUseResult}
+              </div>
+            );
+          })}
+        </div>
       </div>
     );
   }
@@ -985,7 +1691,6 @@ export function ConversationView({
     const expanded = getExpansionState(messageId, section, defaultExpanded);
     const kind = operations[0]?.kind ?? "tool";
     const title = operationGroupTitle(kind, operations.length);
-    const isRunning = hasRunningOperation(operations);
     const toggleTitle = expanded
       ? section === "thought"
         ? t("thoughtProcessVisible")
@@ -1011,12 +1716,68 @@ export function ConversationView({
           {!expanded && operations[0]?.summary ? (
             <span className={styles.operationSummaryPreview}>{operations[0].summary}</span>
           ) : null}
-          {isRunning ? <LoaderCircle className={styles.statusSpinner} size={14} /> : null}
           {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
         </button>
         {expanded ? renderOperationTimeline(operations) : null}
       </section>
     );
+  }
+
+  function renderFeedbackTimelineGroup(
+    messageId: string,
+    operations: ConversationOperation[],
+    defaultExpanded: boolean,
+  ) {
+    if (operations.length === 0) {
+      return null;
+    }
+    const expanded = getExpansionState(messageId, "feedback", defaultExpanded);
+    const title = operationTimelineTitle(operations);
+    const progress = operationProgressMeta(operations);
+    const counts = [
+      operationStepCountLabel(operations.length),
+      progress.phase,
+      `${progress.completedCount}/${operations.length}`,
+    ].filter(Boolean).join(" · ");
+    const location = operationProgressLocation(progress);
+    const metricItems = operationProgressMetricItems(progress);
+    return (
+      <section className={`${styles.operationGroup} ${styles.executionTraceGroup}`}>
+        <button
+          type="button"
+          className={styles.operationSummary}
+          aria-expanded={expanded}
+          onClick={() => toggleSection(messageId, "feedback", defaultExpanded)}
+          title={expanded ? t("toolProcessVisible") : t("toolProcessHidden")}
+        >
+          {operationIcon(operations[0]?.kind ?? "tool", title)}
+          <span>{title}</span>
+          {counts ? <span className={styles.operationSummaryCount}>{counts}</span> : null}
+          {expanded && progress.currentSummary ? (
+            <span className={styles.operationSummaryPreview}>{progress.currentSummary}</span>
+          ) : null}
+          {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+        </button>
+        {location || progress.currentSummary ? (
+          <div className={styles.operationLiveLocator} aria-live="polite">
+            {location ? <span className={styles.operationLiveLocation}>{location}</span> : null}
+            {metricItems.length > 0 ? (
+              <span className={styles.operationLiveMetrics}>{metricItems.join(" · ")}</span>
+            ) : null}
+            {progress.currentSummary ? (
+              <span className={styles.operationLiveSummary}>{progress.currentSummary}</span>
+            ) : null}
+          </div>
+        ) : null}
+        {renderOperationProgressRail(operations)}
+        {expanded ? renderFeedbackOperationTable(operations, { limitInitialRows: true }) : null}
+      </section>
+    );
+  }
+
+  function shouldExpandToolGroupByDefault(message: ConversationMessage, operations: ConversationOperation[]) {
+    return Boolean(message.streaming)
+      || operations.some((operation) => operation.kind === "tool" && (operation.rawLabel ?? operation.label) === COMPUTER_USE_TOOL_NAME);
   }
 
   function mentalSnapshotPreview(snapshot: MentalStateSnapshot | undefined) {
@@ -1089,7 +1850,7 @@ export function ConversationView({
       return null;
     }
     const thought = message.thought?.trim() ?? "";
-    const hasLaterActiveSection = hasMentalBlock(message) || hasToolBlock(message) || hasResponseBlock(message);
+    const hasLaterActiveSection = (showMentalSnapshots && hasMentalBlock(message)) || hasToolBlock(message) || hasResponseBlock(message);
     return renderAuxiliaryToggle(
       message.id,
       "thought",
@@ -1104,7 +1865,7 @@ export function ConversationView({
   }
 
   function renderMentalPanel(message: ConversationMessage) {
-    if (!hasMentalBlock(message)) {
+    if (!showMentalSnapshots || !hasMentalBlock(message)) {
       return null;
     }
     const snapshot = message.mentalSnapshot;
@@ -1179,7 +1940,7 @@ export function ConversationView({
     const label = responseSegmentLabel(segment);
     const isCodeLike = segment.kind === "code"
       || Boolean(segment.language)
-      || (["commit", "verification", "logs"].includes(segment.kind) && segment.content.includes("\n"));
+      || (["commit", "verification"].includes(segment.kind) && segment.content.includes("\n"));
     return (
       <section
         key={segment.id}
@@ -1230,14 +1991,18 @@ export function ConversationView({
       return <hr key={`divider-${index}`} className={styles.markdownDivider} />;
     }
     if (block.type === "image") {
-      const previewUrl = previewUrlForImage(block.url);
-      if (duplicateImageUrls?.has(comparableImageUrl(block.url))) {
+      const safeUrl = safeConversationMarkdownUrl(block.url);
+      if (!safeUrl) {
+        return null;
+      }
+      const previewUrl = previewUrlForImage(safeUrl);
+      if (duplicateImageUrls?.has(comparableImageUrl(safeUrl))) {
         return null;
       }
       const imageAlt = block.alt || (lang === "zh" ? "生成图片" : "Generated image");
       const previewLabel = lang === "zh" ? "预览图片" : "Preview image";
       return (
-        <figure key={`image-${index}-${block.url}`} className={styles.markdownImageFigure}>
+        <figure key={`image-${index}-${safeUrl}`} className={styles.markdownImageFigure}>
           <button
             type="button"
             className={styles.imagePreviewButton}
@@ -1245,8 +2010,8 @@ export function ConversationView({
               openImagePreview({
                 src: previewUrl,
                 alt: imageAlt,
-                downloadUrl: block.url,
-                downloadName: downloadNameFromUrl(block.url) || true,
+                downloadUrl: safeUrl,
+                downloadName: downloadNameFromUrl(safeUrl) || true,
               })
             }
             aria-label={previewLabel}
@@ -1258,8 +2023,8 @@ export function ConversationView({
             {block.alt ? <span>{block.alt}</span> : null}
             <a
               className={styles.markdownImageLink}
-              href={block.url}
-              download={downloadNameFromUrl(block.url) || true}
+              href={safeUrl}
+              download={downloadNameFromUrl(safeUrl) || true}
             >
               {lang === "zh" ? "下载图片" : "Download image"}
             </a>
@@ -1317,41 +2082,54 @@ export function ConversationView({
   }
 
   function renderInlineContent(content: string) {
-    const parts = content.split(/(`[^`\n]+`)/g).filter((part) => part.length > 0);
-    return parts.map((part, index) => {
-      if (part.startsWith("`") && part.endsWith("`") && part.length > 2) {
-        return (
-          <code key={`${part}-${index}`} className={styles.inlineCode}>
-            {part.slice(1, -1)}
-          </code>
-        );
-      }
-      return renderLinkedInlineText(part, index);
-    });
+    return renderInlineMarkdown(content, "inline");
   }
 
-  function renderLinkedInlineText(content: string, partIndex: number) {
+  function renderInlineMarkdown(content: string, partIndex: number | string) {
     const nodes: ReactNode[] = [];
-    const linkPattern = /\[([^\]\n]+)\]\(([^)\s]+)\)/g;
+    const inlinePattern = /`([^`\n]+)`|\[([^\]\n]+)\]\(([^)\s]+)\)|(\*\*|__)(?=\S)([\s\S]*?\S)\4/g;
     let cursor = 0;
     let match: RegExpExecArray | null;
-    while ((match = linkPattern.exec(content)) !== null) {
+    while ((match = inlinePattern.exec(content)) !== null) {
       if (match.index > cursor) {
         nodes.push(content.slice(cursor, match.index));
       }
-      const label = match[1];
-      const href = match[2];
-      nodes.push(
-        <a
-          key={`link-${partIndex}-${match.index}`}
-          className={styles.inlineLink}
-          href={href}
-          download={isLikelyImageUrl(href) ? downloadNameFromUrl(href) || true : undefined}
-        >
-          {label}
-        </a>,
-      );
+      if (match[1]) {
+        nodes.push(
+          <code key={`code-${partIndex}-${match.index}`} className={styles.inlineCode}>
+            {match[1]}
+          </code>,
+        );
+      } else if (match[2] && match[3]) {
+        const label = match[2];
+        const href = match[3];
+        const safeHref = safeConversationMarkdownUrl(href);
+        if (safeHref) {
+          nodes.push(
+            <a
+              key={`link-${partIndex}-${match.index}`}
+              className={styles.inlineLink}
+              href={safeHref}
+              download={isLikelyImageUrl(safeHref) ? downloadNameFromUrl(safeHref) || true : undefined}
+            >
+              {label}
+            </a>,
+          );
+        } else {
+          nodes.push(label);
+        }
+      } else {
+        const strongContent = match[5] ?? "";
+        nodes.push(
+          <strong key={`strong-${partIndex}-${match.index}`} className={styles.inlineStrong}>
+            {renderInlineMarkdown(strongContent, `${partIndex}-strong-${match.index}`)}
+          </strong>,
+        );
+      }
       cursor = match.index + match[0].length;
+      if (match[2] && match[3] && !safeConversationMarkdownUrl(match[3]) && content[cursor] === ")") {
+        cursor += 1;
+      }
     }
     if (cursor < content.length) {
       nodes.push(content.slice(cursor));
@@ -1662,9 +2440,27 @@ export function ConversationView({
         {displayMessages.length === 0 ? (
           <div className={styles.emptyState}>{t("sessionNoMessages")}</div>
         ) : (
-          displayMessages.map((message) => {
+          <>
+            {hiddenMessageCount > 0 ? (
+              <div className={styles.timelineHistoryGate}>
+                <button
+                  type="button"
+                  className={styles.timelineHistoryButton}
+                  onClick={() => setAllMessagesVisible(true)}
+                >
+                  <ArrowUp size={15} />
+                  <span>
+                    {lang === "zh"
+                      ? `显示更早 ${hiddenMessageCount} 条消息`
+                      : `Show ${hiddenMessageCount} earlier messages`}
+                  </span>
+                </button>
+              </div>
+            ) : null}
+            {timelineMessages.map((message) => {
             const operationGroups = buildConversationOperationGroups(message, operationLabels);
             const hasRunningTools = hasRunningOperation(operationGroups.tools);
+            const hasFeedbackTimeline = (message.feedbackEvents?.length ?? 0) > 0;
             const turnErrorMessage = isTurnErrorMessage(message);
             const agentInboxMessage = isAgentInboxMessage(message);
             const groupTranscriptMessage = isGroupRoomTranscriptMessage(message);
@@ -1702,16 +2498,17 @@ export function ConversationView({
                 className={turnClassName}
               >
                 <div className={styles.turnAvatar} aria-hidden="true">
-                  {groupTranscriptMessage ? (
-                    <MessageSquarePlus size={17} />
-                  ) : message.role === "assistant" ? (
-                    <Sparkles size={18} />
-                  ) : agentInboxMessage ? (
-                    <MessageSquarePlus size={17} />
-                  ) : userAvatarImageUrl ? (
-                    <img src={userAvatarImageUrl} alt="" className={styles.turnAvatarImage} />
-                  ) : (
-                    userAvatarLabel
+                  {renderTurnAvatarContent(
+                    resolveMessageTurnAvatar(message, {
+                      resolveTurnAvatar,
+                      assistantAvatarImageUrl,
+                      assistantAvatarFallback,
+                      assistantLabel,
+                      userAvatarImageUrl,
+                      userAvatarLabel,
+                      agentInboxMessage,
+                      groupTranscriptMessage,
+                    }),
                   )}
                 </div>
             <div className={styles.turnContent}>
@@ -1785,9 +2582,19 @@ export function ConversationView({
                   ) : null}
                   {renderUserAttachments(message)}
 
-                  {renderThoughtPanel(message)}
-                  {renderMentalPanel(message)}
-                  {renderOperationGroup(message.id, "tools", operationGroups.tools, Boolean(message.streaming))}
+                  {hasFeedbackTimeline ? (
+                    renderFeedbackTimelineGroup(
+                      message.id,
+                      operationGroups.timeline,
+                      false,
+                    )
+                  ) : (
+                    <>
+                      {renderThoughtPanel(message)}
+                      {renderMentalPanel(message)}
+                      {renderOperationGroup(message.id, "tools", operationGroups.tools, shouldExpandToolGroupByDefault(message, operationGroups.tools))}
+                    </>
+                  )}
                   {turnErrorMessage ? (
                     <div className={styles.turnErrorNotice} role="status" aria-live="polite">
                       <div className={styles.turnErrorNoticeIcon} aria-hidden="true">
@@ -1799,6 +2606,16 @@ export function ConversationView({
                           {turnErrorType(message) ? <span>{turnErrorType(message)}</span> : null}
                         </div>
                         <div className={styles.turnErrorNoticeText}>{renderResponseText(message.content)}</div>
+                        {turnErrorReasonRows(message, lang).length > 0 ? (
+                          <dl className={styles.turnErrorReasonList}>
+                            {turnErrorReasonRows(message, lang).map((row) => (
+                              <div key={`${row.label}-${row.value}`} className={styles.turnErrorReasonRow}>
+                                <dt>{row.label}</dt>
+                                <dd>{row.value}</dd>
+                              </div>
+                            ))}
+                          </dl>
+                        ) : null}
                       </div>
                     </div>
                   ) : null}
@@ -1829,7 +2646,8 @@ export function ConversationView({
                 </div>
               </article>
             );
-          })
+            })}
+          </>
         )}
       </div>
 
@@ -1846,11 +2664,16 @@ export function ConversationView({
         </button>
       ) : null}
 
-      {turnError?.message ? (
+      {turnError?.message && !hasVisibleTurnErrorMessage ? (
         <div className={styles.turnError} role="status" aria-live="polite">
           <div className={styles.turnErrorText}>
             <span className={styles.turnErrorLabel}>{t("turnErrorLabel")}</span>
             <span>{turnError.message}</span>
+            {turnErrorBannerRows(turnError, lang).map((row) => (
+              <span key={`${row.label}-${row.value}`} className={styles.turnErrorDetail}>
+                {row.label}: {row.value}
+              </span>
+            ))}
           </div>
           {turnError.errorType ? <span className={styles.turnErrorType}>{turnError.errorType}</span> : null}
         </div>
@@ -1945,6 +2768,36 @@ export function ConversationView({
               ))}
             </div>
           ) : null}
+          {composerReferences.length ? (
+            <div className={styles.composerReferenceTray} aria-label={lang === "zh" ? "待发送会话引用" : "Session references to send"}>
+              {composerReferences.map((reference) => {
+                const referenceId = reference.referenceId || reference.sessionId;
+                const title = reference.title || reference.sessionId;
+                const agentLabel = reference.agentDisplayName || reference.agentCode || reference.agentId || "";
+                return (
+                  <div key={referenceId} className={styles.composerReferenceChip}>
+                    <span className={styles.composerReferenceIcon} aria-hidden="true">
+                      <Link2 size={13} />
+                    </span>
+                    <span className={styles.composerReferenceCopy}>
+                      <strong title={title}>{title}</strong>
+                      {agentLabel ? <small title={agentLabel}>{agentLabel}</small> : null}
+                    </span>
+                    {onRemoveComposerReference ? (
+                      <button
+                        type="button"
+                        onClick={() => onRemoveComposerReference(referenceId)}
+                        title={lang === "zh" ? "移除会话引用" : "Remove session reference"}
+                        aria-label={lang === "zh" ? "移除会话引用" : "Remove session reference"}
+                      >
+                        <X size={13} />
+                      </button>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+          ) : null}
           <textarea
             ref={composerInputRef}
             className={styles.input}
@@ -1978,7 +2831,7 @@ export function ConversationView({
                 if (
                   resolvedActionMode === "send"
                   && !resolvedActionDisabled
-                  && (composerValue.trim() || hasComposerAttachments)
+                  && (composerValue.trim() || hasComposerAttachments || hasComposerReferences)
                 ) {
                   onSubmit();
                 }
@@ -2010,40 +2863,52 @@ export function ConversationView({
         >
           <ImagePlus size={16} />
         </button>
-        <button
-          className={styles.sendButton}
-          disabled={runningGuidanceActionsEnabled ? guidanceActionDisabled || !onSafeGuidance : resolvedActionDisabled}
-          type="button"
-          onClick={runningGuidanceActionsEnabled ? onSafeGuidance : handlePrimaryAction}
-        >
-          {runningGuidanceActionsEnabled
-            ? composerSafeGuidancePending
-              ? (safeGuidancePendingLabel ?? t("safeGuidancePending"))
-              : (safeGuidanceLabel ?? t("safeGuidance"))
-            : composerPending
-              ? resolvedPendingLabel
-              : resolvedActionLabel}
-        </button>
-        {runningGuidanceActionsEnabled ? (
+        {!runningGuidanceActionsEnabled || showSafeGuidanceAction ? (
           <button
-            className={`${styles.sendButton} ${styles.interruptGuidanceButton}`}
-            disabled={guidanceActionDisabled || !onInterruptGuidance}
+            className={`${styles.sendButton} ${styles.composerRoundButton} ${styles.composerRoundButtonPrimary}`}
+            disabled={runningGuidanceActionsEnabled ? guidanceActionDisabled || !onSafeGuidance : resolvedActionDisabled}
             type="button"
-            onClick={onInterruptGuidance}
+            onClick={runningGuidanceActionsEnabled ? onSafeGuidance : handlePrimaryAction}
+            title={
+              runningGuidanceActionsEnabled
+                ? composerSafeGuidancePending
+                  ? (safeGuidancePendingLabel ?? t("safeGuidancePending"))
+                  : (safeGuidanceLabel ?? t("safeGuidance"))
+                : composerPending
+                  ? resolvedPendingLabel
+                  : resolvedActionLabel
+            }
+            aria-label={
+              runningGuidanceActionsEnabled
+                ? composerSafeGuidancePending
+                  ? (safeGuidancePendingLabel ?? t("safeGuidancePending"))
+                  : (safeGuidanceLabel ?? t("safeGuidance"))
+                : composerPending
+                  ? resolvedPendingLabel
+                  : resolvedActionLabel
+            }
           >
-            {composerInterruptGuidancePending
-              ? (interruptGuidancePendingLabel ?? t("interruptGuidancePending"))
-              : (interruptGuidanceLabel ?? t("interruptGuidance"))}
+            {composerPending || composerSafeGuidancePending ? (
+              <LoaderCircle className={styles.statusSpinner} size={17} aria-hidden="true" />
+            ) : (
+              <ArrowUp size={18} aria-hidden="true" />
+            )}
           </button>
         ) : null}
         {runningGuidanceActionsEnabled ? (
           <button
-            className={`${styles.sendButton} ${styles.stopButton}`}
+            className={`${styles.sendButton} ${styles.composerRoundButton} ${styles.stopButton}`}
             disabled={resolvedActionDisabled}
             type="button"
             onClick={handlePrimaryAction}
+            title={composerPending ? resolvedPendingLabel : resolvedActionLabel}
+            aria-label={composerPending ? resolvedPendingLabel : resolvedActionLabel}
           >
-            {composerPending ? resolvedPendingLabel : resolvedActionLabel}
+            {composerPending ? (
+              <LoaderCircle className={styles.statusSpinner} size={17} aria-hidden="true" />
+            ) : (
+              <Square size={14} aria-hidden="true" />
+            )}
           </button>
         ) : null}
       </div>

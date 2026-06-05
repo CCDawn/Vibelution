@@ -98,6 +98,46 @@ class OpportunisticScheduler:
 
 
 @dataclass(frozen=True)
+class MedicalConsultationPanelScheduler:
+    mode: str = "medical_consultation_panel"
+    status: str = "ready"
+    label: str = "Medical consultation panel"
+
+    def select_speakers(
+        self,
+        participants: list[dict[str, Any]],
+        *,
+        topic: str,
+        history: list[dict[str, Any]],
+        config: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        limit = _positive_int(config.get("maxSpeakers") or config.get("max_speakers"))
+        enabled = [item for item in participants if item.get("enabled", True)]
+        selected: list[dict[str, Any]] = []
+        seen: set[str] = set()
+
+        for bucket in _medical_consultation_buckets():
+            for participant in enabled:
+                participant_id = str(participant.get("participantId") or "").strip()
+                if not participant_id or participant_id in seen:
+                    continue
+                if _participant_matches_any(participant, bucket):
+                    seen.add(participant_id)
+                    selected.append(participant)
+
+        for participant in enabled:
+            participant_id = str(participant.get("participantId") or "").strip()
+            if not participant_id or participant_id in seen:
+                continue
+            seen.add(participant_id)
+            selected.append(participant)
+
+        if limit > 0:
+            return selected[:limit]
+        return selected
+
+
+@dataclass(frozen=True)
 class PlannedScheduler:
     mode: str
     label: str
@@ -177,10 +217,38 @@ def _find_participant(participants: list[dict[str, Any]], candidate_id: str) -> 
     return None
 
 
+def _medical_consultation_buckets() -> list[tuple[str, ...]]:
+    return [
+        ("问诊主持", "主持", "协调", "coordinator", "moderator", "host", "navigator"),
+        ("风险", "分诊", "红旗", "triage", "risk", "red_flag", "safety_triage"),
+        ("症状", "采集", "病史", "intake", "symptom", "history"),
+        ("专科", "顾问", "specialist", "clinical_advisor", "department"),
+        ("交叉", "质询", "复核", "异议", "challenge", "review", "second_opinion"),
+        ("整理", "总结", "result", "summary", "synthesizer"),
+        ("安全", "审查", "合规", "safety", "guardrail"),
+    ]
+
+
+def _participant_matches_any(participant: dict[str, Any], needles: tuple[str, ...]) -> bool:
+    haystack = " ".join(
+        str(value or "")
+        for value in (
+            participant.get("teamRole"),
+            participant.get("teamMemberPurpose"),
+            participant.get("title"),
+            participant.get("agentCode"),
+            participant.get("agentId"),
+            participant.get("participantId"),
+        )
+    ).lower()
+    return any(str(needle or "").lower() in haystack for needle in needles)
+
+
 _REGISTRY = SchedulerRegistry(
     [
         RoundRobinScheduler(),
         OpportunisticScheduler(),
+        MedicalConsultationPanelScheduler(),
     ]
 )
 

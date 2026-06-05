@@ -12,29 +12,26 @@ import {
   Pause,
   Play,
   RefreshCw,
+  Save,
   Sparkles,
   Square,
-  Save,
   Pencil,
   Trash2,
   TriangleAlert,
-  GitMerge,
-  SearchCheck,
-  ShieldCheck,
   Wrench,
   X,
 } from "lucide-react";
-import { type CSSProperties, type KeyboardEvent, type PointerEvent, useEffect, useMemo, useState } from "react";
+import { type CSSProperties, type KeyboardEvent, type PointerEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
 import { fetchJson } from "../api/client";
 import { queryKeys } from "../api/queryKeys";
 import {
   EvolutionActiveRun,
+  EvolutionActiveRunAgentBinding,
   EvolutionActiveRunStreamEvent,
   EvolutionActionState,
   ConfigSummary,
-  EvolutionOverview,
   EvolutionRunActionResponse,
   EvolutionRunDeleteResponse,
   EvolutionWorkbench,
@@ -43,15 +40,13 @@ import {
   EvolutionProposalDetail,
   EvolutionProposalUpdateResponse,
   EvolutionLibraryEntry,
-  EvolutionLibraryPayload,
+  EvolutionWorkspaceSnapshot,
   SupervisedWorktreeRun,
   SelfEvolutionActiveRun,
   SelfEvolutionHistoryDeleteResponse,
   SelfEvolutionHandoffResponse,
   SelfEvolutionRunStreamEvent,
   EvolutionRun,
-  SelfEvolutionOverview,
-  SelfEvolutionTransaction,
 } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
@@ -59,6 +54,7 @@ import { useAppI18n } from "../i18n/useAppI18n";
 import { useShellStore } from "../store/shellStore";
 import { SelfEvolutionTrack } from "./SelfEvolutionTrack";
 import { SupervisedWorkspaceControls } from "./SupervisedWorkspaceControls";
+import { isSelfEvolutionWorktreeRun } from "./supervisedWorktreeReview";
 import {
   isLiveSupervisedRunStatus,
   parseRunStreamSnapshot,
@@ -119,6 +115,16 @@ type SupervisedSourceOption =
       bundle: EvolutionWorkbench["bundles"][number];
     };
 
+type SupervisedMemberRole = "baseline" | "candidate" | "reviewer" | "auditor" | "judge";
+type SupervisedRunMember = {
+  role: SupervisedMemberRole;
+  label: string;
+  name: string;
+  model: string;
+  agentId: string;
+  status: "active" | "configured" | "missing";
+};
+
 const LIBRARY_STATUS_FILTERS: LibraryStatusFilter[] = [
   "all",
   "proposed",
@@ -146,32 +152,7 @@ const EVOLUTION_LIVE_RUN_DEFAULT_WIDTH = 380;
 const EVOLUTION_LIVE_IO_HEIGHT_KEY = "vibelution.evolution.live-io-height";
 const EVOLUTION_LIVE_IO_HEIGHT_BOUNDS = { min: 260, max: 780 };
 const EVOLUTION_LIVE_IO_DEFAULT_HEIGHT = 340;
-const WORKTREE_ACTION_ITEMS = [
-  {
-    action: "analyze_merge",
-    stateKey: "analyzeMerge",
-    labelKey: "analyzeWorktreeMerge",
-    icon: SearchCheck,
-  },
-  {
-    action: "preserve",
-    stateKey: "preserve",
-    labelKey: "preserveWorktree",
-    icon: Save,
-  },
-  {
-    action: "discard",
-    stateKey: "discard",
-    labelKey: "discardWorktree",
-    icon: Trash2,
-  },
-  {
-    action: "merge",
-    stateKey: "merge",
-    labelKey: "mergeWorktree",
-    icon: GitMerge,
-  },
-] as const;
+const SUPERVISED_MEMBER_ROLES: SupervisedMemberRole[] = ["baseline", "candidate", "reviewer", "auditor", "judge"];
 
 type ProposalEditDraft = {
   improvementType: string;
@@ -192,6 +173,15 @@ function isSelfRunExecutingStatus(status: string) {
 
 function isSelfRunLockedStatus(status: string) {
   return ["queued", "running", "stopping", "paused"].includes(String(status || "").trim().toLowerCase());
+}
+
+function supervisedMemberModelLabel(binding: EvolutionActiveRunAgentBinding | undefined) {
+  const dialogueModel =
+    binding?.dialogueModelId
+    || binding?.llmBindings?.dialogue?.modelId
+    || binding?.llmBindings?.primary?.modelId
+    || "";
+  return String(dialogueModel || "").trim() || "--";
 }
 
 function statusIcon(status: string, decision = "") {
@@ -300,24 +290,6 @@ function isSelfEvolutionCandidateItem(item: EvolutionLibraryEntry | null | undef
   return item?.ingestMode === "self_evolution_candidate";
 }
 
-function isSelfEvolutionWorktreeRun(run: SupervisedWorktreeRun | null | undefined) {
-  if (!run) {
-    return false;
-  }
-  const sourceTrack = String(run.selfEvolutionOrigin?.sourceTrack || "").trim().toLowerCase();
-  return Boolean(run.selfEvolutionOrigin)
-    || sourceTrack === "self_evolution"
-    || Boolean(run.reviewGate?.required)
-    || Boolean(run.mergeAnalysis?.reviewGate?.required);
-}
-
-function worktreeReviewGate(run: SupervisedWorktreeRun | null | undefined) {
-  if (!run) {
-    return undefined;
-  }
-  return run.reviewGate ?? run.mergeAnalysis?.reviewGate;
-}
-
 function proposalDisplaySourceRun(item: EvolutionLibraryEntry | null | undefined) {
   if (!item) {
     return "";
@@ -372,7 +344,6 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const [selectedPendingItemId, setSelectedPendingItemId] = useState<string | null>(null);
   const [selectedRunIds, setSelectedRunIds] = useState<string[]>([]);
   const [selectedProposalRunIds, setSelectedProposalRunIds] = useState<string[]>([]);
-  const [selectedWorktreeRunId, setSelectedWorktreeRunId] = useState<string | null>(null);
   const [librarySearchInput, setLibrarySearchInput] = useState("");
   const [libraryStatusFilter, setLibraryStatusFilter] = useState<LibraryStatusFilter>("all");
   const [libraryDeleteFilter, setLibraryDeleteFilter] = useState<LibraryDeleteFilter>("all");
@@ -383,7 +354,6 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const [bundleNameInput, setBundleNameInput] = useState("");
   const [keepWorktree, setKeepWorktree] = useState(false);
   const [liveActiveRun, setLiveActiveRun] = useState<EvolutionActiveRun | null>(null);
-  const [worktreeRunFeedback, setWorktreeRunFeedback] = useState("");
   const [selfGoalInput, setSelfGoalInput] = useState("");
   const [selfGoalInitialized, setSelfGoalInitialized] = useState(false);
   const [liveSelfRun, setLiveSelfRun] = useState<SelfEvolutionActiveRun | null>(null);
@@ -448,78 +418,12 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     refetchIntervalInBackground: false,
   });
 
-  const runsQuery = useQuery({
-    queryKey: queryKeys.evolutionRuns(),
-    queryFn: () => fetchJson<EvolutionRun[]>("/api/evolution/runs"),
-    refetchInterval: resolvePollingInterval(pageVisible, 8_000),
-    refetchIntervalInBackground: false,
-    enabled: supervisedTrackQueriesEnabled,
-  });
-  const libraryQuery = useQuery({
-    queryKey: queryKeys.evolutionLibrary(),
-    queryFn: () => fetchJson<EvolutionLibraryPayload>("/api/evolution/library"),
-    refetchInterval: resolvePollingInterval(pageVisible, 8_000),
-    refetchIntervalInBackground: false,
-    enabled: supervisedTrackQueriesEnabled,
-  });
-  const workbenchQuery = useQuery({
-    queryKey: queryKeys.evolutionWorkbench(),
-    queryFn: () => fetchJson<EvolutionWorkbench>("/api/evolution/workbench"),
-    refetchInterval: resolvePollingInterval(pageVisible, 8_000),
-    refetchIntervalInBackground: false,
-    enabled: supervisedTrackQueriesEnabled
-      || (selfTrackQueriesEnabled && (configQuery.data?.modeAvailability.supervised_evolution ?? false)),
-  });
-  const overviewQuery = useQuery({
-    queryKey: queryKeys.evolutionOverview(),
-    queryFn: () => fetchJson<EvolutionOverview>("/api/evolution/overview"),
-    refetchInterval: resolvePollingInterval(pageVisible, 8_000),
-    refetchIntervalInBackground: false,
-    enabled: supervisedTrackQueriesEnabled,
-  });
-  const activeRunQuery = useQuery({
-    queryKey: queryKeys.evolutionActiveRun(),
-    queryFn: () => fetchJson<EvolutionActiveRun | null>("/api/evolution/active-run"),
+  const workspaceSnapshotQuery = useQuery({
+    queryKey: queryKeys.evolutionWorkspaceSnapshot(),
+    queryFn: () => fetchJson<EvolutionWorkspaceSnapshot>("/api/evolution/workspace-snapshot"),
     refetchInterval: resolvePollingInterval(pageVisible, 4_000),
     refetchIntervalInBackground: false,
-    enabled: supervisedTrackQueriesEnabled,
-  });
-  const worktreeActiveRunQuery = useQuery({
-    queryKey: queryKeys.evolutionWorktreeActiveRun(),
-    queryFn: () => fetchJson<SupervisedWorktreeRun | null>("/api/evolution/worktree-runs/active"),
-    refetchInterval: resolvePollingInterval(pageVisible, 4_000),
-    refetchIntervalInBackground: false,
-    enabled: supervisedTrackQueriesEnabled
-      || (selfTrackQueriesEnabled && (configQuery.data?.modeAvailability.supervised_evolution ?? false)),
-  });
-  const worktreeRunsQuery = useQuery({
-    queryKey: queryKeys.evolutionWorktreeRuns(),
-    queryFn: () => fetchJson<SupervisedWorktreeRun[]>("/api/evolution/worktree-runs"),
-    refetchInterval: resolvePollingInterval(pageVisible, 8_000),
-    refetchIntervalInBackground: false,
-    enabled: supervisedTrackQueriesEnabled
-      || (selfTrackQueriesEnabled && (configQuery.data?.modeAvailability.supervised_evolution ?? false)),
-  });
-  const selfOverviewQuery = useQuery({
-    queryKey: queryKeys.evolutionSelfOverview(),
-    queryFn: () => fetchJson<SelfEvolutionOverview>("/api/evolution/self/overview"),
-    refetchInterval: resolvePollingInterval(pageVisible, 8_000),
-    refetchIntervalInBackground: false,
-    enabled: selfTrackQueriesEnabled && (configQuery.data ? configQuery.data.modeAvailability.self_evolution : true),
-  });
-  const selfLatestRunQuery = useQuery({
-    queryKey: queryKeys.evolutionSelfLatestRun(),
-    queryFn: () => fetchJson<SelfEvolutionActiveRun | null>("/api/evolution/self/latest-run"),
-    refetchInterval: resolvePollingInterval(pageVisible, 4_000),
-    refetchIntervalInBackground: false,
-    enabled: selfTrackQueriesEnabled && (configQuery.data ? configQuery.data.modeAvailability.self_evolution : true),
-  });
-  const selfTransactionsQuery = useQuery({
-    queryKey: queryKeys.evolutionSelfTransactions(),
-    queryFn: () => fetchJson<SelfEvolutionTransaction[]>("/api/evolution/self/transactions"),
-    refetchInterval: resolvePollingInterval(pageVisible, 8_000),
-    refetchIntervalInBackground: false,
-    enabled: selfTrackQueriesEnabled && (configQuery.data ? configQuery.data.modeAvailability.self_evolution : true),
+    enabled: supervisedTrackQueriesEnabled || selfTrackQueriesEnabled,
   });
   const startRunMutation = useMutation({
     mutationFn: () =>
@@ -547,7 +451,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   });
   const startWorktreeRunMutation = useMutation({
     onMutate: () => {
-      setWorktreeRunFeedback("");
+      setActionFeedback("");
     },
     mutationFn: () =>
       fetchJson<SupervisedWorktreeRun>("/api/evolution/worktree-runs", {
@@ -572,7 +476,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
         }),
       }),
     onSuccess: async (snapshot) => {
-      setWorktreeRunFeedback(snapshot.latestMessage || t("startClosedLoopQueued"));
+      setActionFeedback(snapshot.latestMessage || t("startClosedLoopQueued"));
       await evolutionWorkspaceCache.afterWorktreeRunChanged();
     },
   });
@@ -680,8 +584,8 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     mutationFn: () => {
       const fallbackBundleName =
         bundleNameInput.trim()
-        || workbenchQuery.data?.defaultBundleName
-        || workbenchQuery.data?.bundles?.[0]?.name
+        || workspaceSnapshotQuery.data?.workbench?.defaultBundleName
+        || workspaceSnapshotQuery.data?.workbench?.bundles?.[0]?.name
         || "";
       return fetchJson<SupervisedWorktreeRun>("/api/evolution/self/worktree-runs", {
         method: "POST",
@@ -800,26 +704,6 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       await invalidateSelfEvolution();
     },
   });
-  const worktreeActionMutation = useMutation({
-    onMutate: () => {
-      setWorktreeRunFeedback("");
-    },
-    mutationFn: (variables: { runId: string; action: string; reviewerNote?: string }) =>
-      fetchJson<SupervisedWorktreeRun>(`/api/evolution/worktree-runs/${variables.runId}/actions`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          action: variables.action,
-          reviewerNote: variables.reviewerNote ?? "",
-        }),
-      }),
-    onSuccess: async (snapshot) => {
-      setWorktreeRunFeedback(snapshot.latestMessage || t("selfWorktreeReviewApproved"));
-      await evolutionWorkspaceCache.afterWorktreeRunChanged();
-    },
-  });
   const actionMutation = useMutation({
     mutationFn: (variables: { sessionId: string; action: string }) =>
       fetchJson<EvolutionRunActionResponse>(`/api/evolution/runs/${variables.sessionId}/actions`, {
@@ -834,33 +718,23 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       await evolutionWorkspaceCache.afterSupervisedWorkspaceChanged();
     },
   });
-  const runs = runsQuery.data ?? EMPTY_RUNS;
-  const libraryItems = libraryQuery.data?.items ?? EMPTY_LIBRARY_ENTRIES;
-  const pendingItems = libraryQuery.data?.pending ?? EMPTY_LIBRARY_ENTRIES;
-  const overview = overviewQuery.data;
-  const workbenchControl = workbenchQuery.data;
+  const workspaceSnapshot = workspaceSnapshotQuery.data;
+  const runs = workspaceSnapshot?.runs ?? EMPTY_RUNS;
+  const libraryItems = workspaceSnapshot?.library?.items ?? EMPTY_LIBRARY_ENTRIES;
+  const pendingItems = workspaceSnapshot?.library?.pending ?? EMPTY_LIBRARY_ENTRIES;
+  const overview = workspaceSnapshot?.overview;
+  const workbenchControl = workspaceSnapshot?.workbench;
   const workbenchState = overview?.workbench ?? workbenchControl?.savedState;
-  const activeRunSnapshot = selectRunSnapshotWithRunId(activeRunQuery.data);
-  const activeWorktreeRun = worktreeActiveRunQuery.data ?? null;
-  const worktreeRuns = worktreeRunsQuery.data ?? EMPTY_WORKTREE_RUNS;
-  const selectedWorktreeRun = selectedWorktreeRunId
-    ? worktreeRuns.find((item) => item.runId === selectedWorktreeRunId) ?? null
-    : null;
-  const highlightedWorktreeRun = activeWorktreeRun ?? selectedWorktreeRun ?? worktreeRuns[0] ?? null;
-  const highlightedReviewGate = worktreeReviewGate(highlightedWorktreeRun);
-  const highlightedSelfOrigin = highlightedWorktreeRun?.selfEvolutionOrigin;
-  const highlightedIsSelfOrigin = isSelfEvolutionWorktreeRun(highlightedWorktreeRun);
-  const highlightedReviewStatus = String(highlightedReviewGate?.status || "").trim().toLowerCase();
-  const highlightedReviewPending = highlightedIsSelfOrigin
-    && Boolean(highlightedReviewGate?.required)
-    && highlightedReviewStatus !== "approved";
-  const highlightedApproveReviewAction = highlightedWorktreeRun?.actionStates?.approveReview;
-  const highlightedMergeBlockers = highlightedWorktreeRun?.mergeAnalysis?.blockers ?? [];
-  const highlightedWorktreeActions = WORKTREE_ACTION_ITEMS.map((item) => ({
-    ...item,
-    state: highlightedWorktreeRun?.actionStates?.[item.stateKey],
-  }));
-  const latestSelfRunSnapshot = selectRunSnapshotWithRunId(selfLatestRunQuery.data);
+  const activeRunSnapshot = selectRunSnapshotWithRunId(workspaceSnapshot?.activeRun);
+  const latestSupervisedRunSnapshot = selectRunSnapshotWithRunId(workspaceSnapshot?.latestRun);
+  const activeWorktreeRun = workspaceSnapshot?.worktreeActiveRun ?? null;
+  const worktreeRuns = workspaceSnapshot?.worktreeRuns ?? EMPTY_WORKTREE_RUNS;
+  const reviewCandidateWorktree = activeWorktreeRun ?? worktreeRuns[0] ?? null;
+  const reviewCandidateGate = reviewCandidateWorktree?.reviewGate ?? reviewCandidateWorktree?.mergeAnalysis?.reviewGate;
+  const highlightedReviewPending = isSelfEvolutionWorktreeRun(reviewCandidateWorktree)
+    && Boolean(reviewCandidateGate?.required)
+    && String(reviewCandidateGate?.status || "").trim().toLowerCase() !== "approved";
+  const latestSelfRunSnapshot = selectRunSnapshotWithRunId(workspaceSnapshot?.selfLatestRun);
   const latestRun = runs[0] ?? null;
   const selfTrackEnabled = configQuery.data?.modeAvailability.self_evolution ?? false;
   const supervisedTrackEnabled = configQuery.data?.modeAvailability.supervised_evolution ?? true;
@@ -894,7 +768,8 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const monitoredRun = effectiveActiveRunSnapshot
     ?? (liveActiveRun && ["done", "failed", "cancelled"].includes(String(liveActiveRun.status || "").toLowerCase())
       ? liveActiveRun
-      : null);
+      : null)
+    ?? latestSupervisedRunSnapshot;
   const runningRun = effectiveActiveRunSnapshot ?? (liveActiveRun && isLiveSupervisedRunStatus(liveActiveRun.status)
     ? liveActiveRun
     : null);
@@ -918,6 +793,15 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       }),
     [lang, monitoredCaseTranscript],
   );
+  const caseTraceTimelineRef = useRef<HTMLDivElement | null>(null);
+  const latestCaseTraceKey = monitoredCaseTraceItems.at(-1)?.key ?? "";
+  useEffect(() => {
+    const timeline = caseTraceTimelineRef.current;
+    if (!timeline || monitoredCaseTraceItems.length === 0) {
+      return;
+    }
+    timeline.scrollTop = timeline.scrollHeight;
+  }, [latestCaseTraceKey, monitoredCaseTraceItems.length]);
   const monitoredCaseHasOutput = Boolean(
     monitoredRun?.currentCaseIo?.latestOutput || monitoredCaseTraceItems.length > 0,
   );
@@ -935,6 +819,31 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const monitoredStatusLabel = monitoredRun?.decision === "INCONCLUSIVE"
     ? decisionLabel(monitoredRun.decision)
     : statusLabel(monitoredRun?.status || "");
+  const supervisedRunMembers = useMemo<SupervisedRunMember[]>(() => {
+    const bindings = monitoredRun?.agentBindings ?? {};
+    const currentRole = String(monitoredRun?.currentRole || "").trim().toLowerCase();
+    const currentAgentId = String(monitoredRun?.currentAgentBinding?.agentId || "").trim();
+    return SUPERVISED_MEMBER_ROLES.map((role) => {
+      const binding = bindings[role] ?? {};
+      const agentId = String(binding.agentId || "").trim();
+      const roleText = String(binding.roleLabel || "").trim() || runRoleLabel(role);
+      const displayName = String(binding.displayName || binding.agentCode || agentId || "").trim();
+      const isActive =
+        currentRole === role
+        || (Boolean(currentAgentId) && Boolean(agentId) && currentAgentId === agentId);
+      return {
+        role,
+        label: roleText,
+        name: displayName || (lang === "zh" ? "未配置" : "Not configured"),
+        model: supervisedMemberModelLabel(binding),
+        agentId,
+        status: isActive ? "active" : agentId ? "configured" : "missing",
+      };
+    });
+  }, [lang, monitoredRun?.agentBindings, monitoredRun?.currentAgentBinding?.agentId, monitoredRun?.currentRole]);
+  const latestRunStatusLabel = latestRun?.decision
+    ? decisionLabel(latestRun.decision)
+    : statusLabel(latestRun?.status || "");
   const monitoredControlSummary = monitoredRun
     ? buildSupervisedRunControlSummary(monitoredRun, lang, {
       statusLabel,
@@ -981,7 +890,6 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     ?? retryRunMutation.error?.message
     ?? terminateRunMutation.error?.message
     ?? deleteRunMutation.error?.message
-    ?? worktreeActionMutation.error?.message
     ?? startRunMutation.error?.message
     ?? startWorktreeRunMutation.error?.message
     ?? "";
@@ -1037,6 +945,14 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       ? (lang === "zh"
         ? `${selectedSourceOption.dataset.scoreLabel || "Vibelution 自定义分数"}；非官方 Terminal-Bench 成绩`
         : `${selectedSourceOption.dataset.scoreLabel || "Vibelution custom score"}; not an official Terminal-Bench score`)
+      : "";
+  const selectedSourceOfficialWarning =
+    selectedSourceOption?.kind === "dataset"
+      && (
+        String(selectedSourceOption.dataset.evaluationMode || "").trim() === "custom_harness"
+        || String(selectedSourceOption.dataset.officialVerifierStatus || "").trim() === "harbor_pending"
+      )
+      ? t("sourceOfficialVerifierWarning")
       : "";
   const normalizedLibrarySearch = librarySearchInput.trim().toLowerCase();
   const filterLibraryEntries = (entries: EvolutionLibraryEntry[]) =>
@@ -1296,13 +1212,17 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       setLiveActiveRun(activeRunSnapshot);
       return;
     }
+    if (latestSupervisedRunSnapshot) {
+      setLiveActiveRun(latestSupervisedRunSnapshot);
+      return;
+    }
     setLiveActiveRun((current) => {
       if (current && ["done", "failed", "cancelled"].includes(String(current.status || "").toLowerCase())) {
         return current;
       }
       return null;
     });
-  }, [activeRunSnapshot]);
+  }, [activeRunSnapshot, latestSupervisedRunSnapshot]);
 
   useEffect(() => {
     if (!forcedTrack || evolutionTrack === forcedTrack) {
@@ -1318,12 +1238,12 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   }, [forcedView, rawEvolutionView, setEvolutionView]);
 
   useEffect(() => {
-    if (selfGoalInitialized || !selfOverviewQuery.data?.goal) {
+    if (selfGoalInitialized || !workspaceSnapshot?.selfOverview?.goal) {
       return;
     }
-    setSelfGoalInput(selfOverviewQuery.data.goal);
+    setSelfGoalInput(workspaceSnapshot.selfOverview.goal);
     setSelfGoalInitialized(true);
-  }, [selfGoalInitialized, selfOverviewQuery.data?.goal]);
+  }, [selfGoalInitialized, workspaceSnapshot?.selfOverview?.goal]);
 
   useEffect(() => {
     if (latestSelfRunSnapshot) {
@@ -1533,18 +1453,6 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     });
   }, [visibleDeletableRunIds]);
 
-  useEffect(() => {
-    const activeRunId = activeWorktreeRun?.runId;
-    if (activeRunId && activeRunId !== selectedWorktreeRunId) {
-      setSelectedWorktreeRunId(activeRunId);
-      return;
-    }
-    if (selectedWorktreeRunId && worktreeRuns.some((item) => item.runId === selectedWorktreeRunId)) {
-      return;
-    }
-    setSelectedWorktreeRunId(worktreeRuns[0]?.runId ?? null);
-  }, [activeWorktreeRun?.runId, selectedWorktreeRunId, worktreeRuns]);
-
   const relatedLibraryItems = selectedRun
     ? libraryItems.filter((item) => item.sourceRun === selectedRun.id)
     : [];
@@ -1609,6 +1517,15 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     }
     if (normalized === "candidate") {
       return t("roleCandidate");
+    }
+    if (normalized === "reviewer") {
+      return lang === "zh" ? "评审" : "Reviewer";
+    }
+    if (normalized === "auditor") {
+      return lang === "zh" ? "审计" : "Auditor";
+    }
+    if (normalized === "judge") {
+      return lang === "zh" ? "裁决" : "Judge";
     }
     return normalized || "--";
   }
@@ -1833,27 +1750,6 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   function triggerRunAction(sessionId: string, action: string) {
     setActionFeedback("");
     actionMutation.mutate({ sessionId, action });
-  }
-
-  function triggerWorktreeReviewApproval(run: SupervisedWorktreeRun | null) {
-    if (!run?.runId) {
-      return;
-    }
-    worktreeActionMutation.mutate({
-      runId: run.runId,
-      action: "approve_review",
-      reviewerNote: t("selfWorktreeReviewNote"),
-    });
-  }
-
-  function triggerWorktreeAction(run: SupervisedWorktreeRun | null, action: string) {
-    if (!run?.runId) {
-      return;
-    }
-    worktreeActionMutation.mutate({
-      runId: run.runId,
-      action,
-    });
   }
 
   function toggleRunSelection(run: EvolutionRun) {
@@ -2308,7 +2204,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
 
       {activeTrack === "self" ? (
         <SelfEvolutionTrack
-          overview={selfOverviewQuery.data}
+          overview={workspaceSnapshot?.selfOverview}
           latestRun={monitoredSelfRun}
           goalInput={selfGoalInput}
           onGoalInputChange={setSelfGoalInput}
@@ -2339,8 +2235,8 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
           actionFeedback={selfActionFeedback}
           runLocked={selfRunLocked}
           worktreeRunLocked={worktreeRunLocked}
-          transactions={selfTransactionsQuery.data ?? []}
-          loading={selfOverviewQuery.isLoading || selfLatestRunQuery.isLoading || selfTransactionsQuery.isLoading}
+          transactions={workspaceSnapshot?.selfTransactions ?? []}
+          loading={workspaceSnapshotQuery.isLoading}
         />
       ) : null}
 
@@ -2349,11 +2245,12 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
           <section
             className={
               liveLaunchCollapsed
-                ? `${styles.surface} ${styles.launchSurface} ${styles.dashboardLaunch} ${styles.paneCollapsed}`
-                : `${styles.surface} ${styles.launchSurface} ${styles.dashboardLaunch}`
+                ? `${styles.dashboardLaunch} ${styles.liveLaunchStack} ${styles.paneCollapsed}`
+                : `${styles.dashboardLaunch} ${styles.liveLaunchStack}`
             }
             aria-hidden={liveLaunchCollapsed}
           >
+            <div className={`${styles.surface} ${styles.launchSurface}`}>
             <div className={styles.surfaceHeaderCompact}>
               <div>
                 <p className={styles.eyebrow}>{t("supervisedControl")}</p>
@@ -2430,6 +2327,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                         value={datasetLimitInput}
                         onChange={(event) => setDatasetLimitInput(event.target.value)}
                       />
+                      <span className={styles.formHint}>{t("caseLimitHint")}</span>
                     </div>
                   ) : null}
                 </div>
@@ -2444,6 +2342,9 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                       {selectedSourceKindLabel} · {selectedSourceCaseText}
                     </span>
                   </div>
+                ) : null}
+                {selectedSourceOfficialWarning ? (
+                  <p className={styles.sourceWarningStrip}>{selectedSourceOfficialWarning}</p>
                 ) : null}
                 {sourceKind === "bundle" && !selectedBundleExists ? (
                   <p className={styles.errorTextCompact}>
@@ -2478,6 +2379,12 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                     {startRunMutation.isPending ? <LoaderCircle size={15} /> : <Play size={15} />}
                     {t("startSupervisedRun")}
                   </button>
+                </div>
+                <div className={styles.closedLoopLaunchBlock}>
+                  <div>
+                    <strong>{t("closedLoopLaunchPanelTitle")}</strong>
+                    <span>{t("closedLoopLaunchPanelHint")}</span>
+                  </div>
                   <button
                     type="button"
                     className={styles.inlineAction}
@@ -2495,117 +2402,55 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                     {t("startClosedLoopRun")}
                   </button>
                 </div>
-                {highlightedWorktreeRun ? (
-                  <div className={styles.closedLoopStatus}>
-                    <span className={styles.secondaryPill}>
-                      {highlightedIsSelfOrigin ? t("selfWorktreeReviewSource") : t("closedLoopActive")}
-                    </span>
-                    <strong>{highlightedWorktreeRun.status || "--"}</strong>
-                    <span>{highlightedWorktreeRun.latestMessage || highlightedWorktreeRun.phase || "--"}</span>
-                  </div>
-                ) : null}
-                {worktreeRuns.length > 0 ? (
-                  <div className={styles.worktreeRunPicker}>
-                    <div className={styles.worktreeRunPickerHeader}>
-                      <span>{t("worktreeRunHistory")}</span>
-                      <span>{worktreeRuns.length}</span>
-                    </div>
-                    <div className={styles.worktreeRunList}>
-                      {worktreeRuns.slice(0, 4).map((run) => {
-                        const selected = highlightedWorktreeRun?.runId === run.runId;
-                        const runReviewGate = worktreeReviewGate(run);
-                        const runReviewPending = isSelfEvolutionWorktreeRun(run)
-                          && Boolean(runReviewGate?.required)
-                          && String(runReviewGate?.status || "").trim().toLowerCase() !== "approved";
-                        return (
-                          <button
-                            key={run.runId}
-                            type="button"
-                            className={selected ? `${styles.worktreeRunItem} ${styles.worktreeRunItemActive}` : styles.worktreeRunItem}
-                            aria-pressed={selected}
-                            onClick={() => setSelectedWorktreeRunId(run.runId)}
-                          >
-                            <span className={styles.worktreeRunItemTop}>
-                              <strong>{run.runId || "--"}</strong>
-                              <span>{statusLabel(run.status)}</span>
-                            </span>
-                            <span className={styles.worktreeRunItemMeta}>
-                              {isSelfEvolutionWorktreeRun(run) ? t("selfWorktreeReviewSource") : t("closedLoopActive")}
-                              {" · "}
-                              {runReviewPending ? t("selfWorktreeReviewPending") : (run.phase || compactTimestamp(run.updatedAt))}
-                            </span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                ) : null}
-                {highlightedIsSelfOrigin && highlightedWorktreeRun ? (
-                  <div className={styles.worktreeReviewGate}>
-                    <div className={styles.worktreeReviewHeader}>
-                      <span className={highlightedReviewPending ? styles.statusPill : styles.secondaryPill}>
-                        {highlightedReviewPending ? t("selfWorktreeReviewPending") : t("selfWorktreeReviewApprovedStatus")}
-                      </span>
-                      <strong className={styles.truncateText} title={highlightedSelfOrigin?.goal || highlightedWorktreeRun.runId}>
-                        {highlightedSelfOrigin?.goal || highlightedWorktreeRun.runId}
-                      </strong>
-                    </div>
-                    <p className={styles.noticeText}>
-                      {highlightedReviewGate?.reason || highlightedSelfOrigin?.riskReason || t("selfWorktreeReviewHint")}
-                    </p>
-                    {highlightedMergeBlockers.length > 0 ? (
-                      <div className={styles.metaRow}>
-                        <span>{t("selfWorktreeMergeBlockers")}</span>
-                        <span>{highlightedMergeBlockers.join(", ")}</span>
-                      </div>
-                    ) : null}
-                    <div className={styles.controlActions}>
-                      <button
-                        type="button"
-                        className={styles.inlineAction}
-                        disabled={
-                          !highlightedApproveReviewAction?.enabled
-                          || worktreeActionMutation.isPending
-                        }
-                        onClick={() => triggerWorktreeReviewApproval(highlightedWorktreeRun)}
-                        title={disabledReason(highlightedApproveReviewAction) || t("approveSelfWorktreeReview")}
-                      >
-                        {worktreeActionMutation.isPending ? <LoaderCircle size={15} /> : <ShieldCheck size={15} />}
-                        {t("approveSelfWorktreeReview")}
-                      </button>
-                      {highlightedWorktreeActions.map((item) => {
-                        const Icon = item.icon;
-                        const disabled = !item.state?.enabled || worktreeActionMutation.isPending;
-                        const reason = disabledReason(item.state);
-                        return (
-                          <button
-                            key={item.action}
-                            type="button"
-                            className={styles.inlineAction}
-                            disabled={disabled}
-                            onClick={() => triggerWorktreeAction(highlightedWorktreeRun, item.action)}
-                            title={reason || t(item.labelKey)}
-                          >
-                            {worktreeActionMutation.isPending ? <LoaderCircle size={15} /> : <Icon size={15} />}
-                            {t(item.labelKey)}
-                          </button>
-                        );
-                      })}
-                      {!highlightedApproveReviewAction?.enabled && disabledReason(highlightedApproveReviewAction) ? (
-                        <p className={styles.noticeText}>{disabledReason(highlightedApproveReviewAction)}</p>
-                      ) : null}
-                      {highlightedReviewPending ? (
-                        <p className={styles.noticeText}>{t("selfWorktreeMergeRequiresReview")}</p>
-                      ) : null}
-                    </div>
-                  </div>
-                ) : null}
-                {worktreeRunFeedback ? <p className={styles.noticeText}>{worktreeRunFeedback}</p> : null}
                 {runLocked || worktreeRunLocked ? <p className={styles.noticeText}>{t("runningLockHint")}</p> : null}
                 {supervisedControlError ? (
                   <p className={styles.errorText}>{supervisedControlError}</p>
                 ) : null}
               </div>
+            </div>
+
+            <div className={`${styles.surface} ${styles.supervisedMembersPanel}`}>
+              <div className={styles.supervisedMembersHeader}>
+                <div>
+                  <p className={styles.eyebrow}>{lang === "zh" ? "运行成员" : "Run members"}</p>
+                  <h2 className={styles.sectionTitle}>{lang === "zh" ? "本轮监督成员" : "Supervised members"}</h2>
+                </div>
+                <span className={styles.secondaryPill}>
+                  {monitoredRun ? monitoredStatusLabel : lang === "zh" ? "等待启动" : "Waiting"}
+                </span>
+              </div>
+              <div className={styles.supervisedMembersList}>
+                {supervisedRunMembers.map((member) => (
+                  <article
+                    key={member.role}
+                    className={
+                      member.status === "active"
+                        ? `${styles.supervisedMemberRow} ${styles.supervisedMemberRowActive}`
+                        : member.status === "missing"
+                          ? `${styles.supervisedMemberRow} ${styles.supervisedMemberRowMissing}`
+                          : styles.supervisedMemberRow
+                    }
+                  >
+                    <div className={styles.supervisedMemberRole}>
+                      <span>{member.label}</span>
+                      {member.status === "active" ? (
+                        <strong>{lang === "zh" ? "当前执行" : "Active"}</strong>
+                      ) : null}
+                    </div>
+                    <div className={styles.supervisedMemberIdentity}>
+                      <strong>{member.name}</strong>
+                      <span>{member.model}</span>
+                    </div>
+                  </article>
+                ))}
+              </div>
+              {!monitoredRun ? (
+                <p className={styles.noticeTextCompact}>
+                  {lang === "zh" ? "启动监督运行后，这里会显示本轮实际绑定的 Agent 和模型。" : "Start a supervised run to show the bound agents and models for that run."}
+                </p>
+              ) : null}
+            </div>
+
           </section>
 
           <PaneCollapseHandle
@@ -2798,6 +2643,22 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
               ) : (
                 <div className={styles.idleMonitor}>
                   <p className={styles.noticeText}>{t("noActiveSupervisedRun")}</p>
+                  {latestRun ? (
+                    <div className={styles.latestSupervisedResult}>
+                      <div className={styles.latestSupervisedResultHeader}>
+                        <span className={latestRun.status === "failed" ? styles.statusPill : styles.secondaryPill}>
+                          {latestRunStatusLabel || "--"}
+                        </span>
+                        <strong className={styles.truncateText} title={latestRun.id}>{latestRun.id}</strong>
+                      </div>
+                      <p>{latestRun.diagnosis || latestRun.summary || latestRun.nextAction}</p>
+                      <div className={styles.latestSupervisedResultMeta}>
+                        <span>baseline {latestRun.baselineScore}</span>
+                        <span>candidate {latestRun.candidateScore}</span>
+                        <span>{compactTimestamp(latestRun.endedAt)}</span>
+                      </div>
+                    </div>
+                  ) : null}
                   <div className={styles.metricStrip}>
                     <article className={styles.stripItem}>
                       <span>{t("latestRun")}</span>
@@ -2891,56 +2752,61 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                       </details>
                     ) : null}
 
-                    <div className={`${styles.detailSection} ${styles.detailSectionCompact}`}>
-                      <h3>{currentCaseOutputLabel(monitoredRun)}</h3>
-                      {monitoredRun?.currentCaseIo?.latestOutput ? (
-                        <div className={`${styles.rawBlock} ${styles.primaryEvidenceBlock}`}>
-                          <pre className={styles.ioContent}>{monitoredRun.currentCaseIo.latestOutput}</pre>
+                    <div className={`${styles.detailSection} ${styles.detailSectionCompact} ${styles.transcriptSection}`}>
+                      {monitoredCaseTraceItems.length > 0 ? (
+                        <div ref={caseTraceTimelineRef} className={styles.caseTraceTimeline}>
+                          <div className={styles.caseTraceStack}>
+                            {monitoredCaseTraceItems.map((entry) => {
+                              const expanded = caseTraceItemExpanded(entry);
+                              return (
+                                <article
+                                  key={entry.key}
+                                  className={`${styles.caseTraceTurn} ${styles[`caseTraceTurn_${entry.tone}`]}`}
+                                >
+                                  <button
+                                    type="button"
+                                    className={styles.caseTraceSummary}
+                                    aria-expanded={expanded}
+                                    onClick={() => toggleCaseTraceItem(entry)}
+                                  >
+                                    <span className={styles.caseTraceIcon}>{caseTraceIcon(entry)}</span>
+                                    <span className={styles.caseTraceMessage}>
+                                      <span className={styles.caseTraceTitle}>{entry.title}</span>
+                                      <span className={styles.caseTracePreview}>{entry.preview}</span>
+                                    </span>
+                                    <span className={styles.caseTraceMeta}>
+                                      {entry.status ? (
+                                        <span className={styles.caseTraceStatus}>{statusLabel(entry.status)}</span>
+                                      ) : null}
+                                      {entry.timestamp ? (
+                                        <span className={styles.caseTraceTime}>{compactTimestamp(entry.timestamp)}</span>
+                                      ) : null}
+                                    </span>
+                                    <span className={styles.caseTraceChevron}>
+                                      {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                                    </span>
+                                  </button>
+                                  {expanded ? (
+                                    <div className={styles.caseTraceBody}>
+                                      {entry.sections.map((section, sectionIndex) => renderCaseTraceSection(section, sectionIndex))}
+                                    </div>
+                                  ) : null}
+                                </article>
+                              );
+                            })}
+                          </div>
                         </div>
                       ) : (
                         <p className={styles.noticeText}>{t("caseIoWaiting")}</p>
                       )}
                     </div>
 
-                    <div className={`${styles.detailSection} ${styles.detailSectionCompact} ${styles.transcriptSection}`}>
-                      <h3>{t("currentCaseTranscript")}</h3>
-                      {monitoredCaseTraceItems.length > 0 ? (
-                        <div className={styles.caseTraceTimeline}>
-                          {monitoredCaseTraceItems.map((entry) => {
-                            const expanded = caseTraceItemExpanded(entry);
-                            return (
-                              <article
-                                key={entry.key}
-                                className={`${styles.caseTraceTurn} ${styles[`caseTraceTurn_${entry.tone}`]}`}
-                              >
-                                <button
-                                  type="button"
-                                  className={styles.caseTraceSummary}
-                                  aria-expanded={expanded}
-                                  onClick={() => toggleCaseTraceItem(entry)}
-                                >
-                                  <span className={styles.caseTraceIcon}>{caseTraceIcon(entry)}</span>
-                                  <span className={styles.caseTraceTitle}>{entry.title}</span>
-                                  <span className={styles.caseTracePreview}>{entry.preview}</span>
-                                  {entry.status ? <span className={styles.caseTraceStatus}>{statusLabel(entry.status)}</span> : null}
-                                  {entry.timestamp ? (
-                                    <span className={styles.caseTraceTime}>{compactTimestamp(entry.timestamp)}</span>
-                                  ) : null}
-                                  {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-                                </button>
-                                {expanded ? (
-                                  <div className={styles.caseTraceBody}>
-                                    {entry.sections.map((section, sectionIndex) => renderCaseTraceSection(section, sectionIndex))}
-                                  </div>
-                                ) : null}
-                              </article>
-                            );
-                          })}
-                        </div>
-                      ) : (
-                        <p className={styles.noticeText}>{t("caseIoWaiting")}</p>
-                      )}
-                    </div>
+                    {monitoredRun?.currentCaseIo?.latestOutput ? (
+                      <details className={`${styles.rawBlock} ${styles.collapsibleEvidence} ${styles.caseRawEvidence}`}>
+                        <summary>{currentCaseOutputLabel(monitoredRun)}</summary>
+                        <pre className={styles.ioContent}>{monitoredRun.currentCaseIo.latestOutput}</pre>
+                      </details>
+                    ) : null}
                   </div>
                 ) : (
                   <div className={styles.ioWaitingState}>

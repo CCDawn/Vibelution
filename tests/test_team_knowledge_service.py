@@ -51,6 +51,67 @@ def test_team_member_can_register_source_and_submit_proposal(knowledge_env):
     assert proposal["sourceArtifactIds"] == [source["sourceArtifactId"]]
 
 
+def test_agent_formal_knowledge_is_private_and_governed(tmp_path, monkeypatch):
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(team_knowledge_service, "PROJECT_ROOT", tmp_path)
+    owner = agent_directory_service.create_agent_instance(display_name="Owner Agent")
+    other = agent_directory_service.create_agent_instance(display_name="Other Agent")
+
+    base = team_knowledge_service.create_agent_knowledge_base(
+        owner["agentId"],
+        name="Owner Private Formal Knowledge",
+        actor_agent_id=owner["agentId"],
+    )
+    source = team_knowledge_service.create_source_artifact(
+        base["knowledgeBaseId"],
+        source_type="agent_authored",
+        source_ref={"agentId": owner["agentId"], "note": "private formal memory"},
+        title="Private source",
+        actor_agent_id=owner["agentId"],
+    )
+    proposal = team_knowledge_service.create_refinement_proposal(
+        base["knowledgeBaseId"],
+        source_artifact_ids=[source["sourceArtifactId"]],
+        proposed_by_agent_id=owner["agentId"],
+        title="Private RAG boundary",
+        content="Agent private formal knowledge can be governed and retrieved only by its owning Agent.",
+        tags=["agent-private"],
+    )
+    reviewed = team_knowledge_service.review_refinement_proposal(
+        base["knowledgeBaseId"],
+        proposal["proposalId"],
+        status="approved",
+        reviewed_by_agent_id=owner["agentId"],
+    )
+
+    owner_results = team_knowledge_service.search_knowledge_items(
+        agent_id=owner["agentId"],
+        owner_type="agent",
+        owner_id=owner["agentId"],
+        query="private formal knowledge",
+        search_mode="semantic",
+    )
+    other_results = team_knowledge_service.search_knowledge_items(
+        agent_id=other["agentId"],
+        owner_type="agent",
+        owner_id=owner["agentId"],
+        query="private formal knowledge",
+        search_mode="semantic",
+    )
+
+    assert base["ownerType"] == "agent"
+    assert base["ownerId"] == owner["agentId"]
+    assert reviewed["item"]["ownerType"] == "agent"
+    assert reviewed["item"]["agentId"] == owner["agentId"]
+    assert owner_results["summary"]["resultCount"] == 1
+    assert owner_results["results"][0]["ownerType"] == "agent"
+    assert owner_results["results"][0]["agentId"] == owner["agentId"]
+    assert other_results["summary"]["resultCount"] == 0
+    assert (tmp_path / "workspace" / "agents" / owner["agentId"] / "knowledge" / "knowledge_bases.json").exists()
+
+
 def test_non_member_cannot_submit_proposal(knowledge_env):
     with pytest.raises(team_knowledge_service.TeamKnowledgePermissionError):
         team_knowledge_service.create_refinement_proposal(
@@ -418,8 +479,19 @@ def test_memory_knowledge_graph_links_project_agents_team_and_knowledge_without_
     assert graph["mode"] == "read_only_project_memory_graph"
     assert graph["operatingBoundary"]["readOnly"] is True
     assert graph["operatingBoundary"]["gpuPreferred"] is True
-    assert {"project", "team", "agent", "agent_private_memory", "knowledge_base", "knowledge_item", "source_artifact"}.issubset(node_types)
-    assert {"project_has_team", "team_has_agent", "team_owns_knowledge_base", "knowledge_base_contains_item"}.issubset(edge_types)
+    assert {"project", "team", "agent"}.issubset(node_types)
+    assert not {"agent_private_memory", "knowledge_base", "knowledge_item", "source_artifact"}.intersection(node_types)
+    assert {"project_has_team", "team_has_agent"}.issubset(edge_types)
+    member_node = next(
+        node for node in graph["nodes"]
+        if node["type"] == "agent" and node["metadata"]["agentId"] == knowledge_env["member"]["agentId"]
+    )
+    team_node = next(node for node in graph["nodes"] if node["type"] == "team")
+    assert member_node["visual"]["agentCategory"] == "team_member_agent"
+    assert member_node["responsibilityQuestion"]
+    assert {member_node["id"], f"agent:{knowledge_env['lead']['agentId']}"}.issubset(set(team_node["childNodeIds"]))
+    assert member_node["contentItems"] == []
+    assert team_node["contentItems"][0]["title"] == "Graph proposal"
     assert reviewed["item"]["knowledgeItemId"] in payload_text
     assert "SECRET FORMAL KNOWLEDGE BODY SHOULD NOT LEAK" not in payload_text
     assert "do not expose source body" not in payload_text
@@ -438,12 +510,26 @@ def test_memory_knowledge_graph_honors_team_knowledge_acl(knowledge_env):
     outsider_graph = memory_graph_service.get_memory_knowledge_graph(agent_id=knowledge_env["outsider"]["agentId"])
 
     assert any(
-        node["type"] == "knowledge_base" and node["metadata"]["knowledgeBaseId"] == knowledge_env["base"]["knowledgeBaseId"]
+        node["type"] == "team" and node["metadata"]["teamId"] == knowledge_env["team"]["teamId"]
         for node in member_graph["nodes"]
     )
     assert not any(
-        node["type"] == "knowledge_base" and node["metadata"].get("knowledgeBaseId") == knowledge_env["base"]["knowledgeBaseId"]
+        node["type"] == "team" and node["metadata"].get("teamId") == knowledge_env["team"]["teamId"]
         for node in outsider_graph["nodes"]
+    )
+
+
+def test_memory_knowledge_graph_uses_lightweight_team_graph_references(knowledge_env, monkeypatch):
+    def fail_compact(*, include_archived: bool = False):
+        raise AssertionError("memory graph must not hydrate compact team chat rooms")
+
+    monkeypatch.setattr(team_service, "list_teams_compact", fail_compact)
+
+    graph = memory_graph_service.get_memory_knowledge_graph(agent_id=knowledge_env["member"]["agentId"])
+
+    assert any(
+        node["type"] == "team" and node["metadata"]["teamId"] == knowledge_env["team"]["teamId"]
+        for node in graph["nodes"]
     )
 
 

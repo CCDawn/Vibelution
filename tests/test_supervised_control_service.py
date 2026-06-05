@@ -114,6 +114,25 @@ def _seed_running_run() -> str:
     return context["runId"]
 
 
+def _valid_agent_bindings() -> dict[str, dict[str, object]]:
+    return {
+        "baseline": {
+            "agentId": "a-base",
+            "displayName": "Baseline",
+            "dialogueModelId": "model-xiaomi-baseline",
+            "llmBindings": {"dialogue": {"modelId": "model-xiaomi-baseline"}},
+            "role": "baseline",
+        },
+        "candidate": {
+            "agentId": "a-candidate",
+            "displayName": "Candidate",
+            "dialogueModelId": "model-xiaomi-candidate",
+            "llmBindings": {"dialogue": {"modelId": "model-xiaomi-candidate"}},
+            "role": "candidate",
+        },
+    }
+
+
 def _wait_until(predicate, *, timeout: float = 1.0) -> None:
     deadline = time.time() + timeout
     while time.time() < deadline:
@@ -440,7 +459,7 @@ def test_retry_supervised_run_starts_new_run_from_finished_decision(monkeypatch,
         "eventTail": [],
     }
     service.persist_manager_run_snapshot("supervised", source_snapshot, active_run_id="")
-    monkeypatch.setattr(service, "supervised_agent_bindings", lambda: {"baseline": {"agentId": "a-base"}})
+    monkeypatch.setattr(service, "supervised_agent_bindings", _valid_agent_bindings)
     monkeypatch.setattr(service, "_RUN_EXECUTOR", _ImmediateExecutor())
     observed: dict[str, object] = {}
 
@@ -477,7 +496,7 @@ def test_start_supervised_run_allows_custom_terminal_bench_bundle(monkeypatch, t
     monkeypatch.setattr(service, "_runtime_manager_live_control_enabled", lambda: False)
     monkeypatch.setattr(service.shutil, "which", lambda name: None)
     monkeypatch.setattr(service, "_docker_daemon_available", lambda: False)
-    monkeypatch.setattr(service, "supervised_agent_bindings", lambda: {})
+    monkeypatch.setattr(service, "supervised_agent_bindings", _valid_agent_bindings)
     monkeypatch.setattr(service, "_RUN_EXECUTOR", _ImmediateExecutor())
     calls: list[object] = []
 
@@ -496,6 +515,22 @@ def test_start_supervised_run_allows_custom_terminal_bench_bundle(monkeypatch, t
 
     assert snapshot["bundleName"] == "terminal_bench_core_v1"
     assert calls and calls[0]["bundle_name"] == "terminal_bench_core_v1"
+
+
+def test_start_supervised_run_blocks_incomplete_agent_model_binding(monkeypatch, tmp_path):
+    monkeypatch.setattr(service, "PROJECT_ROOT", tmp_path)
+    bundle_path = tmp_path / "workspace" / "evaluation" / "bundles" / "manual_bundle.json"
+    bundle_path.parent.mkdir(parents=True, exist_ok=True)
+    bundle_path.write_text('{"bundle_name":"manual_bundle","cases":[]}', encoding="utf-8")
+    monkeypatch.setattr(service, "_runtime_manager_live_control_enabled", lambda: False)
+    monkeypatch.setattr(
+        service,
+        "supervised_agent_bindings",
+        lambda: {"baseline": {"agentId": "a-base", "role": "baseline"}},
+    )
+
+    with pytest.raises(service.SupervisedRunValidationError, match="baseline"):
+        service.start_supervised_run({"sourceKind": "bundle", "bundleName": "manual_bundle"})
 
 
 def test_start_supervised_run_blocks_official_terminal_bench_bundle_when_requested(monkeypatch, tmp_path):
@@ -558,7 +593,7 @@ def test_retry_supervised_run_allows_custom_terminal_bench_bundle(monkeypatch, t
     monkeypatch.setattr(service, "_runtime_manager_live_control_enabled", lambda: False)
     monkeypatch.setattr(service.shutil, "which", lambda name: None)
     monkeypatch.setattr(service, "_docker_daemon_available", lambda: False)
-    monkeypatch.setattr(service, "supervised_agent_bindings", lambda: {})
+    monkeypatch.setattr(service, "supervised_agent_bindings", _valid_agent_bindings)
     monkeypatch.setattr(service, "_RUN_EXECUTOR", _ImmediateExecutor())
     calls: list[object] = []
 

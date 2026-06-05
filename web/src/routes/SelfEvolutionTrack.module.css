@@ -131,6 +131,36 @@
   padding: 14px;
 }
 
+.petCompanionSurface {
+  display: grid;
+  gap: 12px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 16%, var(--border-soft));
+  border-radius: 8px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--accent-cool) 8%, transparent), transparent 58%),
+    var(--surface-panel);
+  padding: 14px;
+}
+
+.petCompanionTone_active {
+  border-color: color-mix(in srgb, var(--accent-cool) 28%, var(--border-soft));
+}
+
+.petCompanionTone_paused {
+  border-color: color-mix(in srgb, var(--accent-warm) 24%, var(--border-soft));
+}
+
+.petCompanionTone_caution,
+.petCompanionTone_error {
+  border-color: color-mix(in srgb, var(--state-warning) 28%, var(--border-soft));
+}
+
+.petCompanionTone_error {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--state-error) 8%, transparent), transparent 58%),
+    var(--surface-panel);
+}
+
 .sectionHeader,
 .itemTop,
 .detailRow,
@@ -360,6 +390,10 @@
   place-items: center;
 }
 
+.petCompanionSurface .petAvatarStage {
+  min-height: 136px;
+}
+
 .petAvatarHalo {
   position: absolute;
   inset: auto;
@@ -421,6 +455,27 @@
   background: var(--surface-panel-strong);
   color: var(--fg-secondary);
   font-size: 0.78rem;
+}
+
+.petCompanionCopy {
+  display: grid;
+  gap: 6px;
+}
+
+.petCompanionCopy p,
+.petCompanionCopy span {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.petCompanionCopy p {
+  color: var(--fg-primary);
+  font-size: 0.92rem;
+}
+
+.petCompanionCopy span {
+  color: var(--fg-secondary);
+  font-size: 0.82rem;
 }
 
 .supportColumns,

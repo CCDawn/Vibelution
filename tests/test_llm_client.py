@@ -2,10 +2,12 @@ from langchain_core.messages import AIMessage
 import pytest
 from types import SimpleNamespace
 import json
+import threading
+from concurrent.futures import ThreadPoolExecutor
 
 from config import Settings
 from core.orchestration.response_processor import ResponseProcessor
-from core.llm.client import LLMClient
+from core.llm.client import LLMClient, llm_cancel_context
 from core.llm.errors import classify_exception
 from core.llm.types import LLMError
 from core.llm.recovery import plan_recovery
@@ -64,6 +66,7 @@ def test_litellm_payload_prefixes_openai_compatible_local_model():
             "llm.providers.default.base_url": "http://localhost:8000/v1",
             "llm.profiles.primary.provider_id": "default",
             "llm.profiles.primary.model": "qwen-32b-awq",
+            "llm.profiles.primary.prompt_cache.mode": "disabled",
         }
     )
 
@@ -89,6 +92,29 @@ def test_litellm_payload_prefixes_relay_openai_compatible_model():
     payload = client._build_payload([{"role": "user", "content": "ping"}])
 
     assert payload["model"] == "openai/gpt-5.5"
+
+
+def test_llm_capabilities_expose_provider_runtime_features():
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "openai_compatible",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://example.test/v1",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "gpt-4o",
+            "llm.profiles.primary.supports_image_input": True,
+            "llm.profiles.primary.prompt_cache.mode": "automatic",
+        }
+    )
+    config.llm.profiles["primary"].transport = "responses"
+
+    client = LLMClient(config=config, backend=lambda payload: payload)
+
+    assert client.capabilities.supports_image_input is True
+    assert client.capabilities.supports_prompt_cache is True
+    assert client.capabilities.supports_stream_usage is True
+    assert client.capabilities.supports_explicit_tool_choice is True
+    assert client.capabilities.supports_responses_transport is True
 
 
 def test_openai_compatible_payload_converts_runtime_system_messages_after_first_to_user():
@@ -146,6 +172,120 @@ def test_openai_gpt5_payload_sanitizes_temperature_and_tool_choice():
     assert payload["temperature"] == 1.0
     assert "tools" in payload
     assert "tool_choice" not in payload
+
+
+def test_anthropic_claude_opus_4_7_payload_omits_deprecated_sampling_parameters():
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "anthropic",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://www.atpify.cn",
+            "llm.providers.default.compat_mode": "native",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "claude-opus-4-7",
+            "llm.profiles.primary.temperature": 0.7,
+            "llm.profiles.primary.thinking_type": "adaptive",
+            "llm.profiles.primary.thinking_display": "summarized",
+        }
+    )
+
+    client = LLMClient(config=config, backend=lambda payload: payload)
+    payload = client._build_payload([{"role": "user", "content": "ping"}])
+
+    assert payload["model"] == "anthropic/claude-opus-4-7"
+    assert "temperature" not in payload
+    assert "top_p" not in payload
+    assert "top_k" not in payload
+    assert payload["thinking"] == {"type": "adaptive", "display": "summarized"}
+
+
+def test_anthropic_thinking_disabled_payload_omits_display():
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "anthropic",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://www.atpify.cn",
+            "llm.providers.default.compat_mode": "native",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "claude-opus-4-7",
+            "llm.profiles.primary.thinking_type": "disabled",
+        }
+    )
+
+    client = LLMClient(config=config, backend=lambda payload: payload)
+    payload = client._build_payload([{"role": "user", "content": "ping"}])
+
+    assert payload["thinking"] == {"type": "disabled"}
+
+
+def test_anthropic_thinking_display_requires_type():
+    with pytest.raises(ValueError, match="thinking_display requires thinking_type"):
+        make_config(
+            **{
+                "llm.providers.default.kind": "anthropic",
+                "llm.providers.default.api_key": "test-key",
+                "llm.providers.default.base_url": "https://www.atpify.cn",
+                "llm.providers.default.compat_mode": "native",
+                "llm.profiles.primary.provider_id": "default",
+                "llm.profiles.primary.model": "claude-opus-4-7",
+                "llm.profiles.primary.thinking_type": "",
+                "llm.profiles.primary.thinking_display": "summarized",
+            }
+        )
+
+
+def test_anthropic_older_claude_payload_keeps_temperature():
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "anthropic",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://api.anthropic.com",
+            "llm.providers.default.compat_mode": "native",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "claude-3-5-sonnet-20241022",
+            "llm.profiles.primary.temperature": 0.2,
+        }
+    )
+
+    client = LLMClient(config=config, backend=lambda payload: payload)
+    payload = client._build_payload([{"role": "user", "content": "ping"}])
+
+    assert payload["model"] == "anthropic/claude-3-5-sonnet-20241022"
+    assert payload["temperature"] == 0.2
+
+
+def test_llamacpp_qwen_thinking_blocks_assistant_prefill_before_provider():
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "llamacpp",
+            "llm.providers.default.requires_api_key": False,
+            "llm.providers.default.base_url": "http://192.168.20.30:8081/v1",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "HiModel_xh2_qwen3.5_9b.gguf",
+            "llm.profiles.primary.thinking_type": "adaptive",
+        }
+    )
+    called = False
+
+    def backend(payload):
+        nonlocal called
+        called = True
+        return payload
+
+    client = LLMClient(config=config, backend=backend)
+
+    with pytest.raises(LLMError) as exc_info:
+        client.invoke(
+            [
+                {"role": "user", "content": "今天是星期几"},
+                {"role": "assistant", "content": "今天是"},
+            ]
+        )
+
+    assert called is False
+    assert exc_info.value.category == "payload_protocol_error"
+    assert exc_info.value.details["protocol"] == "llamacpp_qwen_thinking"
+    assert exc_info.value.details["payloadValidationResult"] == "blocked_before_provider"
 
 
 def test_responses_transport_routes_openai_compatible_model_through_responses_bridge():
@@ -380,6 +520,7 @@ def test_invoke_records_cached_input_token_observation(monkeypatch):
             "llm.providers.default.base_url": "http://localhost:8000/v1",
             "llm.profiles.primary.provider_id": "default",
             "llm.profiles.primary.model": "qwen-32b-awq",
+            "llm.profiles.primary.prompt_cache.mode": "disabled",
         }
     )
     recorded = []
@@ -405,6 +546,45 @@ def test_invoke_records_cached_input_token_observation(monkeypatch):
     success_event = next(item for item in recorded if item[0][1] == "llm.invoke.succeeded")
     assert success_event[1]["fields"]["cachedInputTokens"] == 64
     assert success_event[1]["fields"]["cacheHitRate"] == pytest.approx(0.64)
+
+
+def test_invoke_records_anthropic_cache_read_token_observation(monkeypatch):
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "anthropic",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://api.anthropic.com",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "claude-3-5-sonnet-20241022",
+            "llm.profiles.primary.prompt_cache.mode": "explicit_cache_control",
+        }
+    )
+    recorded = []
+
+    def backend(_payload):
+        return {
+            "choices": [{"message": {"role": "assistant", "content": "ok"}}],
+            "usage": {
+                "input_tokens": 200,
+                "output_tokens": 10,
+                "cache_read_input_tokens": 80,
+                "cache_creation_input_tokens": 40,
+            },
+        }
+
+    monkeypatch.setattr("core.llm.client._record_llm_scene_event", lambda *args, **kwargs: recorded.append((args, kwargs)))
+
+    client = LLMClient(config=config, backend=backend)
+    message = client.invoke([{"role": "user", "content": "ping"}])
+
+    usage = message.response_metadata["usage_observation"]
+    assert usage["input_tokens"] == 200
+    assert usage["output_tokens"] == 10
+    assert usage["cached_input_tokens"] == 80
+    assert usage["cache_hit_rate"] == pytest.approx(0.4)
+    success_event = next(item for item in recorded if item[0][1] == "llm.invoke.succeeded")
+    assert success_event[1]["fields"]["cachedInputTokens"] == 80
+    assert success_event[1]["fields"]["cacheHitRate"] == pytest.approx(0.4)
 
 
 def test_invoke_records_safe_payload_shape_without_prompt_text(monkeypatch):
@@ -468,6 +648,7 @@ def test_invoke_failure_records_category_without_masking_provider_error(monkeypa
             "llm.providers.default.base_url": "http://localhost:8000/v1",
             "llm.profiles.primary.provider_id": "default",
             "llm.profiles.primary.model": "qwen-32b-awq",
+            "llm.profiles.primary.prompt_cache.mode": "disabled",
         }
     )
     recorded = []
@@ -566,8 +747,9 @@ def test_stream_retries_retryable_failure_before_first_event(monkeypatch):
     assert events[0].text == "ok"
     retry_events = [item for item in recorded if item[0][1] == "llm.stream.failed.retrying"]
     assert [event[1]["fields"]["attempt"] for event in retry_events] == [1, 2]
-    assert [item[0] for item in statuses] == ["retrying", "retrying"]
-    assert [item[1]["attempt"] for item in statuses] == [1, 2]
+    retry_statuses = [item for item in statuses if item[0] == "retrying"]
+    assert [item[0] for item in retry_statuses] == ["retrying", "retrying"]
+    assert [item[1]["attempt"] for item in retry_statuses] == [1, 2]
 
 
 def test_stream_falls_back_to_non_streaming_after_retryable_pre_chunk_failures(monkeypatch):
@@ -617,7 +799,11 @@ def test_stream_falls_back_to_non_streaming_after_retryable_pre_chunk_failures(m
     event_codes = [item[0][1] for item in recorded]
     assert "llm.stream.fallback.invoke_started" in event_codes
     assert "llm.stream.fallback.invoke_succeeded" in event_codes
-    assert [item[0] for item in statuses] == ["retrying", "failed", "fallback_invoke_started", "fallback_invoke_succeeded"]
+    business_statuses = [
+        item for item in statuses
+        if item[0] in {"retrying", "failed", "fallback_invoke_started", "fallback_invoke_succeeded"}
+    ]
+    assert [item[0] for item in business_statuses] == ["retrying", "failed", "fallback_invoke_started", "fallback_invoke_succeeded"]
 
 
 def test_stream_records_success_event_with_safe_summary(monkeypatch):
@@ -669,6 +855,12 @@ def test_stream_records_success_event_with_safe_summary(monkeypatch):
     assert fields["textDeltaCount"] == 1
     assert fields["toolCallCount"] == 1
     assert "latencyMs" in fields
+    assert fields["firstChunkMs"] is not None
+    assert fields["firstTextDeltaMs"] is not None
+    assert fields["firstReasoningDeltaMs"] is None
+    assert fields["maxInterChunkMs"] >= 0
+    assert fields["avgInterChunkMs"] >= 0
+    assert fields["interChunkCount"] == 2
 
 
 def test_stream_records_usage_and_cache_hit_rate(monkeypatch):
@@ -713,6 +905,9 @@ def test_stream_records_usage_and_cache_hit_rate(monkeypatch):
     assert events[-1].usage.cached_input_tokens == 64
     success_event = next(item for item in recorded if item[0][1] == "llm.stream.succeeded")
     fields = success_event[1]["fields"]
+    field_keys = list(fields)
+    assert field_keys.index("usageObserved") < 24
+    assert field_keys.index("cachedInputTokens") < 24
     assert fields["inputTokens"] == 100
     assert fields["outputTokens"] == 20
     assert fields["cachedInputTokens"] == 64
@@ -720,6 +915,101 @@ def test_stream_records_usage_and_cache_hit_rate(monkeypatch):
     assert fields["usageObserved"] is True
     assert fields["payloadShape"]["messageTextCharsByRole"] == {"user": len("ping")}
     assert fields["payloadShape"]["toolSchemaHash"] == ""
+
+
+def test_stream_records_anthropic_cache_read_token_observation(monkeypatch):
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "anthropic",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://api.anthropic.com",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "claude-3-5-sonnet-20241022",
+            "llm.profiles.primary.prompt_cache.mode": "explicit_cache_control",
+        }
+    )
+    recorded = []
+
+    def backend(_payload):
+        return iter(
+            [
+                {"choices": [{"delta": {"content": "ok"}}]},
+                {
+                    "usage": {
+                        "input_tokens": 200,
+                        "output_tokens": 20,
+                        "cache_read_input_tokens": 75,
+                        "cache_creation_input_tokens": 25,
+                    },
+                },
+            ]
+        )
+
+    monkeypatch.setattr("core.llm.client._record_llm_scene_event", lambda *args, **kwargs: recorded.append((args, kwargs)))
+
+    client = LLMClient(config=config, backend=backend)
+    events = list(client.stream_events([{"role": "user", "content": "ping"}]))
+
+    assert [event.type for event in events] == ["text_delta", "done"]
+    assert events[-1].usage is not None
+    assert events[-1].usage.input_tokens == 200
+    assert events[-1].usage.cached_input_tokens == 75
+    success_event = next(item for item in recorded if item[0][1] == "llm.stream.succeeded")
+    fields = success_event[1]["fields"]
+    assert fields["inputTokens"] == 200
+    assert fields["outputTokens"] == 20
+    assert fields["cachedInputTokens"] == 75
+    assert fields["cacheHitRate"] == pytest.approx(0.375)
+    assert fields["usageObserved"] is True
+
+
+def test_stream_logs_prompt_cache_design_for_automatic_mode(monkeypatch):
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "relay",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://ai-pixel.online",
+            "llm.providers.default.compat_mode": "openai",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "gpt-5.5",
+            "llm.profiles.primary.transport": "responses",
+            "llm.profiles.primary.prompt_cache.mode": "automatic",
+            "llm.profiles.primary.prompt_cache.key": "vibelution-primary",
+        }
+    )
+    recorded = []
+
+    def backend(_payload):
+        return iter(
+            [
+                {"choices": [{"delta": {"content": "ok"}}]},
+                {
+                    "usage": {
+                        "input_tokens": 160,
+                        "output_tokens": 12,
+                        "prompt_tokens_details": {"cached_tokens": 80},
+                    },
+                },
+            ]
+        )
+
+    monkeypatch.setattr("core.llm.client._record_llm_scene_event", lambda *args, **kwargs: recorded.append((args, kwargs)))
+
+    content = [
+        {"type": "text", "text": "stable-stream-prefix", "cache_control": {"type": "ephemeral"}},
+        {"type": "text", "text": "dynamic-stream-suffix"},
+    ]
+    client = LLMClient(config=config, backend=backend)
+    events = list(client.stream_events([{"role": "system", "content": content}]))
+
+    assert [event.type for event in events] == ["text_delta", "done"]
+    fields = next(item for item in recorded if item[0][1] == "llm.stream.succeeded")[1]["fields"]
+    assert fields["payloadShape"]["firstSystemCacheControlBlockCount"] == 0
+    assert fields["promptCacheDesign"]["mode"] == "automatic"
+    assert fields["promptCacheDesign"]["hasCacheControl"] is True
+    assert fields["promptCacheDesign"]["firstSystemCacheControlBlockCount"] == 1
+    assert fields["promptCacheDesign"]["firstSystemCacheableTextChars"] == len("stable-stream-prefix")
+    assert fields["cachedInputTokens"] == 80
 
 
 def test_stream_retries_without_usage_options_when_provider_rejects_them(monkeypatch):
@@ -863,6 +1153,150 @@ def test_stream_records_safe_message_role_summary(monkeypatch):
         fields = event[1]["fields"]
         assert fields["messageRoles"] == ["system", "user"]
         assert fields["messageRoleCounts"] == {"system": 1, "user": 1}
+
+
+def test_stream_limits_concurrent_calls_per_route(monkeypatch):
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "local",
+            "llm.providers.default.requires_api_key": False,
+            "llm.providers.default.base_url": "http://localhost:8000/v1",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "qwen-32b-awq",
+        }
+    )
+    monkeypatch.setattr("core.llm.client._LLM_ROUTE_CONCURRENCY_LIMIT", 2)
+    monkeypatch.setattr("core.llm.client._LLM_ROUTE_CONCURRENCY_GATES", {})
+    entered = 0
+    max_entered = 0
+    entered_lock = threading.Lock()
+    two_entered = threading.Event()
+    release = threading.Event()
+
+    def backend(_payload):
+        nonlocal entered, max_entered
+        with entered_lock:
+            entered += 1
+            max_entered = max(max_entered, entered)
+            if entered == 2:
+                two_entered.set()
+
+        def chunks():
+            try:
+                assert release.wait(2.0)
+                yield {"choices": [{"delta": {"content": "ok"}}]}
+            finally:
+                nonlocal entered
+                with entered_lock:
+                    entered -= 1
+
+        return chunks()
+
+    def run_stream():
+        client = LLMClient(config=config, backend=backend)
+        return [event.type for event in client.stream_events([{"role": "user", "content": "ping"}])]
+
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        futures = [executor.submit(run_stream) for _ in range(3)]
+        assert two_entered.wait(1.0)
+        assert max_entered == 2
+        release.set()
+        assert [future.result(timeout=2.0) for future in futures] == [
+            ["text_delta", "done"],
+            ["text_delta", "done"],
+            ["text_delta", "done"],
+        ]
+    assert max_entered == 2
+
+
+def test_stream_waiting_for_route_slot_can_be_cancelled(monkeypatch):
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "local",
+            "llm.providers.default.requires_api_key": False,
+            "llm.providers.default.base_url": "http://localhost:8000/v1",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "qwen-32b-awq",
+        }
+    )
+    monkeypatch.setattr("core.llm.client._LLM_ROUTE_CONCURRENCY_LIMIT", 1)
+    monkeypatch.setattr("core.llm.client._LLM_ROUTE_CONCURRENCY_GATES", {})
+    first_entered = threading.Event()
+    release_first = threading.Event()
+    backend_calls = 0
+
+    def backend(_payload):
+        nonlocal backend_calls
+        backend_calls += 1
+        first_entered.set()
+
+        def chunks():
+            assert release_first.wait(2.0)
+            yield {"choices": [{"delta": {"content": "ok"}}]}
+
+        return chunks()
+
+    first_client = LLMClient(config=config, backend=backend)
+    first_future_result = []
+
+    def run_first():
+        first_future_result.extend(event.type for event in first_client.stream_events([{"role": "user", "content": "first"}]))
+
+    thread = threading.Thread(target=run_first)
+    thread.start()
+    assert first_entered.wait(1.0)
+
+    cancelled = {"reason": ""}
+
+    def cancel_checker():
+        return cancelled["reason"]
+
+    second_client = LLMClient(config=config, backend=backend)
+    try:
+        cancelled["reason"] = "操作者请求停止当前轮。"
+        with llm_cancel_context(cancel_checker), pytest.raises(LLMError) as raised:
+            list(second_client.stream_events([{"role": "user", "content": "second"}]))
+    finally:
+        release_first.set()
+        thread.join(timeout=2.0)
+    assert raised.value.category == "cancelled"
+    assert backend_calls == 1
+    assert first_future_result == ["text_delta", "done"]
+
+
+def test_stream_cancellation_closes_provider_iterator():
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "local",
+            "llm.providers.default.requires_api_key": False,
+            "llm.providers.default.base_url": "http://localhost:8000/v1",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "qwen-32b-awq",
+        }
+    )
+    cancelled = {"reason": "", "closed": False}
+
+    class ClosableIterator:
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            if not cancelled["reason"]:
+                cancelled["reason"] = "操作者请求停止当前轮。"
+            return {"choices": [{"delta": {"content": "late-token"}}]}
+
+        def close(self):
+            cancelled["closed"] = True
+
+    def cancel_checker():
+        return cancelled["reason"]
+
+    client = LLMClient(config=config, backend=lambda _payload: ClosableIterator())
+    with llm_cancel_context(cancel_checker), pytest.raises(LLMError) as raised:
+        list(client.stream_events([{"role": "user", "content": "ping"}]))
+
+    assert raised.value.category == "cancelled"
+    assert cancelled["closed"] is True
 
 
 def test_stream_does_not_replay_after_partial_output(monkeypatch):
@@ -1053,6 +1487,56 @@ def test_openai_compatible_automatic_prompt_cache_strips_cache_control_and_keeps
         {"type": "text", "text": "stable"},
         {"type": "text", "text": "dynamic"},
     ]
+
+
+def test_automatic_prompt_cache_logs_design_even_when_payload_strips_cache_control(monkeypatch):
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "relay",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://ai-pixel.online",
+            "llm.providers.default.compat_mode": "openai",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "gpt-5.5",
+            "llm.profiles.primary.transport": "responses",
+            "llm.profiles.primary.prompt_cache.mode": "automatic",
+            "llm.profiles.primary.prompt_cache.key": "vibelution-primary",
+        }
+    )
+    recorded = []
+    captured_payload = {}
+
+    def backend(payload):
+        captured_payload.update(payload)
+        return {
+            "choices": [{"message": {"role": "assistant", "content": "ok"}}],
+            "usage": {
+                "input_tokens": 100,
+                "output_tokens": 5,
+                "prompt_tokens_details": {"cached_tokens": 40},
+            },
+        }
+
+    monkeypatch.setattr("core.llm.client._record_llm_scene_event", lambda *args, **kwargs: recorded.append((args, kwargs)))
+
+    content = [
+        {"type": "text", "text": "stable-prefix", "cache_control": {"type": "ephemeral"}},
+        {"type": "text", "text": "dynamic-suffix"},
+    ]
+    client = LLMClient(config=config, backend=backend)
+    client.invoke([{"role": "system", "content": content}])
+
+    assert captured_payload["messages"][0]["content"] == [
+        {"type": "text", "text": "stable-prefix"},
+        {"type": "text", "text": "dynamic-suffix"},
+    ]
+    fields = next(item for item in recorded if item[0][1] == "llm.invoke.succeeded")[1]["fields"]
+    assert fields["payloadShape"]["firstSystemCacheControlBlockCount"] == 0
+    assert fields["promptCacheDesign"]["mode"] == "automatic"
+    assert fields["promptCacheDesign"]["hasCacheControl"] is True
+    assert fields["promptCacheDesign"]["firstSystemCacheControlBlockCount"] == 1
+    assert fields["promptCacheDesign"]["firstSystemCacheableTextChars"] == len("stable-prefix")
+    assert fields["cachedInputTokens"] == 40
 
 
 def test_openai_compatible_payload_preserves_image_blocks_for_chat_completions():
@@ -1370,6 +1854,36 @@ def test_stream_exposes_reasoning_deltas_without_polluting_content():
     assert streamed[2].content == "结论"
 
 
+def test_stream_converts_cumulative_reasoning_prefixes_to_deltas():
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "anthropic",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://www.atpify.cn",
+            "llm.providers.default.compat_mode": "native",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "claude-opus-4-7",
+        }
+    )
+    chunks = [
+        {"choices": [{"delta": {"reasoning": "先看"}}]},
+        {"choices": [{"delta": {"reasoning": "先看日志"}}]},
+        {"choices": [{"delta": {"reasoning": "先看日志"}}]},
+        {"choices": [{"delta": {"content": "结论"}}]},
+    ]
+
+    client = LLMClient(config=config, backend=lambda payload: iter(chunks))
+    streamed = list(client.stream([{"role": "user", "content": "read"}]))
+
+    reasoning_deltas = [
+        chunk.additional_kwargs.get("reasoning_content_delta")
+        for chunk in streamed
+        if chunk.additional_kwargs.get("reasoning_content_delta")
+    ]
+    assert reasoning_deltas == ["先看", "日志"]
+    assert streamed[-1].content == "结论"
+
+
 def test_stream_exposes_reasoning_aliases_and_strips_think_tags_from_content():
     config = make_config(
         **{
@@ -1423,11 +1937,14 @@ def test_stream_splits_reasoning_when_think_tags_span_chunks():
 def test_stream_events_record_reasoning_source_summary(monkeypatch):
     config = make_config(
         **{
-            "llm.providers.default.kind": "llamacpp",
-            "llm.providers.default.requires_api_key": False,
-            "llm.providers.default.base_url": "http://localhost:8000/v1",
+            "llm.providers.default.kind": "anthropic",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://www.atpify.cn",
+            "llm.providers.default.compat_mode": "native",
             "llm.profiles.primary.provider_id": "default",
-            "llm.profiles.primary.model": "qwen3-local",
+            "llm.profiles.primary.model": "claude-opus-4-7",
+            "llm.profiles.primary.thinking_type": "adaptive",
+            "llm.profiles.primary.thinking_display": "summarized",
         }
     )
     chunks = [
@@ -1445,6 +1962,10 @@ def test_stream_events_record_reasoning_source_summary(monkeypatch):
     assert success_event[1]["fields"]["reasoningDeltaCount"] == 1
     assert success_event[1]["fields"]["reasoningChars"] == 2
     assert success_event[1]["fields"]["reasoningSources"] == ["reasoning"]
+    assert success_event[1]["fields"]["reasoningObserved"] is True
+    assert success_event[1]["fields"]["thinkingRequested"] is True
+    assert success_event[1]["fields"]["thinkingType"] == "adaptive"
+    assert success_event[1]["fields"]["thinkingDisplay"] == "summarized"
 
 
 def test_stream_events_drop_incomplete_tool_calls_with_empty_name():

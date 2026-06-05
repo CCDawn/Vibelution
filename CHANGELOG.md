@@ -1,5 +1,49 @@
 # Changelog
 
+## 0.10.22 - 2026-06-05
+
+- Added a unified Model Library test control: choose one saved model and run a text connection test from that single button.
+- Extended `/api/config/test-llm` to accept `modelId`, using the selected model library entry and its unique key binding through a temporary probe profile.
+- Kept per-row Model Library actions focused on edit, image capability check, and delete, with model test diagnostics now logging the tested model ID.
+
+## 0.10.21 - 2026-06-05
+
+- Fixed Agent Center debug reset pending state so only the Agent being reset shows "resetting", while other Agent detail views remain usable.
+- Added Agent reset requested/failed runtime-scene diagnostics at the API boundary, complementing the existing completed event so reset crashes and validation failures are traceable.
+- Restored resetToolPolicy behavior for work-session Agents to the session default tool package instead of an empty default policy.
+
+## 0.10.20 - 2026-06-04
+
+- Surfaced live Chat/Coding model status while streamed LLM calls retry, fail, or fall back to non-streaming invoke, so the assistant output area no longer appears idle during retry backoff or fallback work.
+- Added safe `llm:status` breadcrumbs with session/turn context and lifecycle logging for retry, fallback-started, fallback-succeeded, and failed states.
+- Preserved fallback non-streaming assistant replies in the live session stream when the final result is otherwise only a control marker.
+- Added the Anthropic thinking request contract for Claude Opus 4.7 via ATPify, including `thinking_type` / `thinking_display` model fields, payload injection, and safe runtime-scene diagnostics for requested and observed reasoning.
+
+## 0.10.19 - 2026-06-04
+
+- Added `conversation_log_inspect_tool`, a read-only JSONL conversation log inspector that summarizes candidate logs, event counts, LLM/token usage, tool-call sequences, errors, repeated calls, and large-result inefficiency signals without shell execution or raw full-log expansion.
+- Added the new log inspector to the built-in tool registry and the 会话 Agent 基础包, with safe fixed-argument registry testing.
+- Changed work-session Agent defaults so new and repaired chat/session Agents receive a private read-only session tool policy that includes `conversation_log_inspect_tool`; Agent Center work-session creation now lets the backend default policy apply instead of requiring a manual tool package.
+
+## 0.10.18 - 2026-06-04
+
+- Reduced Chat/Coding background polling while a direct session SSE stream is connected, pausing session, conversation, and team index polling until the stream disconnects or the user switches surfaces.
+- Added low-noise `session.detail_snapshot.published` runtime-scene telemetry for active SSE subscribers, including snapshot publish latency, subscriber count, delivery/drop counts, message count, and current phase.
+- Updated focused backend and ChatCodingRoute layout tests for the stream-backed polling and telemetry contract.
+
+## 0.10.17 - 2026-06-04
+
+- Clarified Chat/Coding context indicators so session message history estimates and runtime context compression estimates are displayed as separate scopes.
+- Added `source`, `scope`, `tokenBasis`, and `limitBasis` metadata to runtime `contextCompression` payloads so the UI can explain why compression percentages differ from session history usage.
+- Expanded Chat/Coding provider-failure notices with safe user-facing reason summaries such as quota exhaustion, deprecated sampling parameters, authentication failure, context limit, timeout, and upstream gateway failure.
+- Updated Chat/Coding layout tests and runtime summary tests for the new context-scope contract.
+
+## 0.10.16 - 2026-06-04
+
+- Rebuilt `code_symbol_tool` as the native project code context graph tool, replacing the old Python-only outline/entity/definition/hover contract with status/index/search/explore/inspect/references/impact/affected_tests/files modes.
+- Added a local cache-backed project index for code, frontend, docs, config, and workspace prompt assets while excluding runtime-history noise.
+- Updated agent guidance, tool metadata, reading strategy, runtime observations, and focused tests for the new graph-based code navigation contract.
+
 ## 0.10.15 - 2026-06-04
 
 - Added per-turn `llmUsage` to chat session details, sourced from provider usage metadata only.

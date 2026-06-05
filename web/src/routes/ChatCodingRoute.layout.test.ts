@@ -34,6 +34,15 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.runtimeNoticeMessage).toBeTypeOf("string");
   });
 
+  it("passes agent avatar context into the conversation timeline", () => {
+    expect(routeSource).toContain("assistantAvatarImageUrl={activeAgentAvatarImageUrl}");
+    expect(routeSource).toContain("assistantAvatarFallback={activeAgentAvatarFallback}");
+    expect(routeSource).toContain("resolveTurnAvatar={resolveConversationTurnAvatar}");
+    expect(routeSource).toContain("resolveConversationTurnAvatar");
+    expect(routeSource).toContain("agentsByCode");
+    expect(conversationStyles.turnAvatarImage).toBeTypeOf("string");
+  });
+
   it("keeps side panes collapsible while allowing narrow screens to prioritize the center pane", () => {
     expect(routeSource).toContain("CHAT_CENTER_FIRST_MEDIA_QUERY");
     expect(routeSource).toContain("centerFirstLayout");
@@ -51,6 +60,8 @@ describe("ChatCodingRoute layout contract", () => {
   it("compresses the left rail into primary controls plus auxiliary status groups", () => {
     expect(routeSource).toContain("styles.resourceBlock");
     expect(routeSource).toContain("styles.resourceSplit");
+    expect(routeSource).toContain("styles.compressionFactGrid");
+    expect(routeSource).toContain("styles.compressionFactWide");
     expect(routeSource).toContain("styles.companionBlock");
     expect(routeSource).toContain("styles.companionCompact");
     expect(routeSource).toContain("styles.petMiniAvatar");
@@ -62,6 +73,9 @@ describe("ChatCodingRoute layout contract", () => {
 
     expect(routeStyles.resourceBlock).toBeTypeOf("string");
     expect(routeStyles.resourceSplit).toBeTypeOf("string");
+    expect(routeStyles.compressionFactGrid).toBeTypeOf("string");
+    expect(routeStyles.compressionFact).toBeTypeOf("string");
+    expect(routeStyles.compressionFactWide).toBeTypeOf("string");
     expect(routeStyles.companionBlock).toBeTypeOf("string");
     expect(routeStyles.companionCompact).toBeTypeOf("string");
     expect(routeStyles.petMiniAvatar).toBeTypeOf("string");
@@ -85,6 +99,9 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("styles.rightIndexTabs");
     expect(routeSource).toContain("styles.agentIndexRoster");
     expect(routeSource).toContain("styles.agentIndexHeader");
+    expect(routeSource).toContain("styles.agentIndexExpandButton");
+    expect(routeSource).toContain("styles.agentIndexOpenButton");
+    expect(routeSource).toContain("onClick={() => handleOpenDirectSession(participant.sessionId)}");
     expect(routeSource).toContain("avatarImageUrlFrom(participantAgent, participant)");
     expect(routeSource).toContain("styles.agentAvatarImage");
     expect(routeSource).toContain("styles.agentIndexNameLine");
@@ -104,30 +121,113 @@ describe("ChatCodingRoute layout contract", () => {
 
     expect(routeStyles.groupProfileBlock).toBeTypeOf("string");
     expect(routeStyles.rightIndexTabs).toBeTypeOf("string");
-    expect(routeStyles.rightIndexTabsSingle).toBeTypeOf("string");
     expect(routeStyles.rightIndexTab).toBeTypeOf("string");
     expect(routeStyles.memberIndexSummary).toBeTypeOf("string");
     expect(routeStyles.agentIndexRoster).toBeTypeOf("string");
     expect(routeStyles.agentIndexList).toBeTypeOf("string");
     expect(routeStyles.agentIndexCard).toBeTypeOf("string");
     expect(routeStyles.agentIndexHeader).toBeTypeOf("string");
+    expect(routeStyles.agentIndexExpandButton).toBeTypeOf("string");
+    expect(routeStyles.agentIndexOpenButton).toBeTypeOf("string");
     expect(routeStyles.agentIndexNameLine).toBeTypeOf("string");
     expect(routeStyles.agentIndexDetails).toBeTypeOf("string");
     expect(routeStyles.agentIndexMentalBlock).toBeTypeOf("string");
     expect(routeStyles.agentIndexEmptyState).toBeTypeOf("string");
   });
 
+  it("hides the right index tab switcher when only the conversation index is available", () => {
+    const rightAsideStart = routeSource.indexOf("<aside className={rightPaneCollapsed");
+    const tabsRenderStart = routeSource.indexOf("{legacyGroupRoomActive ? (", rightAsideStart);
+    const tabsClassStart = routeSource.indexOf("className={styles.rightIndexTabs}", tabsRenderStart);
+    const memberSummaryStart = routeSource.indexOf("{rightIndexPanel === \"members\" && legacyGroupRoomActive", tabsClassStart);
+    expect(rightAsideStart).toBeGreaterThan(-1);
+    expect(tabsRenderStart).toBeGreaterThan(rightAsideStart);
+    expect(tabsClassStart).toBeGreaterThan(tabsRenderStart);
+    expect(tabsClassStart).toBeLessThan(memberSummaryStart);
+    expect(routeSource).not.toContain("rightIndexTabsSingle");
+  });
+
   it("keeps prompt cache observation visible in the current session status strip", () => {
     expect(routeSource).toContain("const sessionCacheUsage = detail?.cacheUsage");
+    expect(routeSource).toContain("sessionCacheUsage?.source === \"provider_usage\"");
     expect(routeSource).toContain("label: t(\"promptCache\")");
     expect(routeSource).toContain("turnCachedInputTokens");
     expect(routeSource).toContain("turnInputTokens");
     expect(routeSource).toContain("turnCacheHitRate");
-    expect(routeSource).toContain("lastCachedInputTokens");
-    expect(routeSource).toContain("lastInputTokens");
-    expect(routeSource).toContain("totalCachedInputTokens");
-    expect(routeSource).toContain("totalInputTokens");
-    expect(routeSource).toContain("cacheObservationPending");
+    expect(routeSource).toContain("cacheHitMissing");
+  });
+
+  it("renders previous-turn context and cache composition inside the session status area", () => {
+    expect(routeSource).toContain("const lastContextComposition = detail?.lastContextComposition ?? null");
+    expect(routeSource).toContain("const lastCacheComposition = detail?.lastCacheComposition ?? null");
+    expect(routeSource).toContain("styles.contextCompositionPanel");
+    expect(routeSource).toContain("t(\"previousContextComposition\")");
+    expect(routeSource).toContain("t(\"previousCacheHit\")");
+    expect(routeSource).toContain("contextCompositionSegmentClass(segment.key)");
+    expect(routeSource).toContain("const contextCompositionLimitTokens = Math.max(");
+    expect(routeSource).toContain("contextWindowSegmentWidth(segment.tokens ?? 0, contextCompositionLimitTokens)");
+    expect(routeSource).toContain("contextCompositionRemainingTokens");
+    expect(routeSource).toContain("styles.contextCompositionSegmentExact");
+    expect(routeSource).toContain("styles.contextCompositionSegmentUnused");
+    expect(routeSource).toContain("cacheCompositionSegmentClass(segment.key)");
+    expect(routeSource.indexOf("styles.contextCompositionPanel")).toBeGreaterThan(routeSource.indexOf("sessionCompactRows.map"));
+    expect(routeSource.indexOf("styles.contextCompositionPanel")).toBeLessThan(routeSource.indexOf("<aside className={rightPaneCollapsed"));
+
+    expect(routeStyles.contextCompositionPanel).toBeTypeOf("string");
+    expect(routeStyles.contextCompositionBar).toBeTypeOf("string");
+    expect(routeStyles.contextCompositionLegend).toBeTypeOf("string");
+    expect(routeStyles.contextCompositionSegmentCached).toBeTypeOf("string");
+    expect(routeStyles.contextCompositionSegmentUncached).toBeTypeOf("string");
+    expect(routeStyles.contextCompositionSegmentMissing).toBeTypeOf("string");
+    expect(routeStyles.contextCompositionSegmentExact).toBeTypeOf("string");
+    expect(routeStyles.contextCompositionSegmentUnused).toBeTypeOf("string");
+  });
+
+  it("shows provider-observed LLM input separately from session context estimates", () => {
+    expect(routeSource).toContain("const sessionLlmUsage = detail?.llmUsage ?? null");
+    expect(routeSource).toContain("sessionLlmUsage?.source === \"provider_usage\"");
+    expect(routeSource).toContain("label: t(\"llmInputTokens\")");
+    expect(routeSource).toContain("t(\"llmUsageMissing\")");
+    expect(routeSource).toContain("t(\"sessionContextEstimate\")");
+  });
+
+  it("labels runtime compression as a separate estimate from session message history", () => {
+    expect(routeSource).toContain("const contextSourceLine = lastContextComposition");
+    expect(routeSource).toContain("t(\"runtimeContextEstimate\")");
+    expect(routeSource).toContain("t(\"compressionScopeRuntime\")");
+    expect(routeSource).toContain("t(\"compressionLimitBasisEffective\")");
+    expect(routeSource).toContain("t(\"compressionModelWindow\")");
+    expect(routeSource).toContain("t(\"compressionThresholdBasis\")");
+    expect(routeSource).toContain("const compressionModelWindowLine = compression");
+    expect(routeSource).toContain("styles.compressionFactGrid");
+    expect(routeSource).toContain("compressionTitleLine");
+    expect(routeSource).toContain("compression.contextWindowLimit");
+    expect(routeSource).toContain("compression.source || \"runtime_state\"");
+  });
+
+  it("keeps the current session status bar keyed to the selected session", () => {
+    expect(routeSource).toContain("const rawSessionDetail = sessionDetailQuery.data");
+    expect(routeSource).toContain("const selectedSessionDetail =");
+    expect(routeSource).toContain("rawSessionDetail && rawSessionDetail.id === activeSessionId ? rawSessionDetail : undefined");
+    expect(routeSource).toContain("const detail = selectedSessionDetail");
+    expect(routeSource).toContain("const runtimeMatchesSelectedSession = Boolean(");
+    expect(routeSource).toContain("runtimeActiveChatTurnSessionIds.has(activeSessionId)");
+    expect(routeSource).toContain("const runtimeMismatchLine = runtimeActiveChatTurnSessionId && !runtimeMatchesSelectedSession");
+    expect(routeSource).toContain("detail?.title ?? directSessionActiveSummary?.title ?? t(\"loadingSession\")");
+    expect(routeSource).toContain("lastContextComposition?.totalTokens ?? sessionContextUsage?.used ?? 0");
+    expect(routeSource).toContain("lastContextComposition?.limitTokens ?? sessionContextUsage?.limit ?? 0");
+    expect(routeSource).toContain("const compression = runtimeMatchesSelectedSession ? runtime?.contextCompression : undefined");
+    expect(routeSource).toContain("runtimeMatchesSelectedSession && runtime?.sessionStateLine");
+    expect(routeSource).toContain("runtimeMismatchLine || (sessionDetailErrorState.blockingError");
+    expect(routeSource).toContain("(runtimeMatchesSelectedSession ? runtime?.taskSummary : \"\")");
+    expect(routeSource).toContain("detail?.defaultFileContext ?? (runtimeMatchesSelectedSession ? runtime?.defaultRoute : undefined) ?? \"workspace\"");
+
+    expect(routeSource).not.toContain("detail?.title ?? runtime?.sessionTitle");
+    expect(routeSource).not.toContain("sessionContextUsage?.used ?? runtime?.contextUsage.used");
+    expect(routeSource).not.toContain("sessionContextUsage?.limit ?? runtime?.contextUsage.limit");
+    expect(routeSource).not.toContain(": runtime?.sessionStateLine");
+    expect(routeSource).not.toContain("|| runtime?.taskSummary");
+    expect(routeSource).not.toContain("detail?.defaultFileContext ?? runtime?.defaultRoute");
   });
 
   it("keeps live token speed visible in the current session status strip", () => {
@@ -139,6 +239,51 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource.indexOf("label: t(\"tokenSpeed\")")).toBeLessThan(
       routeSource.indexOf("label: t(\"currentTask\")"),
     );
+  });
+
+  it("records direct chat submit lifecycle telemetry before backend acceptance", () => {
+    expect(routeSource).toContain("postSubmitTelemetry");
+    expect(routeSource).toContain("browser.chat_submit.requested");
+    expect(routeSource).toContain("browser.chat_submit.blocked");
+    expect(routeSource).toContain("browser.chat_submit.upload_started");
+    expect(routeSource).toContain("browser.chat_submit.upload_failed");
+    expect(routeSource).toContain("browser.chat_submit.mutate_called");
+    expect(routeSource).toContain("browser.chat_submit.request_started");
+    expect(routeSource).toContain("browser.chat_submit.accepted");
+    expect(routeSource).toContain("browser.chat_submit.request_failed");
+    expect(routeSource).toContain("contentLength");
+    expect(routeSource).toContain("guardReason");
+    expect(routeSource).not.toContain("fields: { content,");
+  });
+
+  it("clears the direct chat composer immediately after submit and restores only failed text", () => {
+    const submitWithAttachmentsStart = routeSource.indexOf("async function submitTurnWithAttachments");
+    const optimisticAppend = routeSource.indexOf("appendOptimisticUserMessage(detail, { sessionId, content, references })", submitWithAttachmentsStart);
+    const immediateDraftClear = routeSource.indexOf("clearSessionDraftForSubmittedTurn(current, sessionId)", submitWithAttachmentsStart);
+    const uploadFailureDraftRestore = routeSource.indexOf(
+      "restoreSubmittedDraftIfComposerStillEmpty(current, sessionId, content)",
+      submitWithAttachmentsStart,
+    );
+    expect(submitWithAttachmentsStart).toBeGreaterThan(-1);
+    expect(immediateDraftClear).toBeGreaterThan(submitWithAttachmentsStart);
+    expect(immediateDraftClear).toBeLessThan(optimisticAppend);
+    expect(uploadFailureDraftRestore).toBeGreaterThan(optimisticAppend);
+
+    const submitMutationStart = routeSource.indexOf("const submitTurnMutation = useMutation");
+    const submitSuccessStart = routeSource.indexOf("onSuccess: (acceptedTurn, variables)", submitMutationStart);
+    const submitErrorStart = routeSource.indexOf("onError: (error, variables)", submitSuccessStart);
+    const submitSuccessBlock = routeSource.slice(submitSuccessStart, submitErrorStart);
+    const submitErrorBlock = routeSource.slice(submitErrorStart, routeSource.indexOf("const editResubmitMutation", submitErrorStart));
+    expect(submitSuccessBlock).not.toContain("setSessionDrafts");
+    expect(submitErrorBlock).toContain("restoreSubmittedDraftIfComposerStillEmpty(current, variables.sessionId, variables.content)");
+  });
+
+  it("keeps mental model opt-in explicit and uses it to gate timeline snapshots", () => {
+    expect(routeSource).toContain("readStoredMentalModelToggle() ?? false");
+    expect(routeSource).not.toContain("const defaultEnabled = String(runtime.mentalState?.source");
+    expect(routeSource).toContain("showMentalSnapshots={mentalModelEnabledForNextTurn}");
+    expect(routeSource).toContain("mentalModelEnabled: mentalModelEnabledForNextTurn");
+    expect(routeSource).toContain("const memberMental = mentalModelEnabledForNextTurn ? latestMentalSnapshot(memberDetail?.messages) : undefined");
   });
 
   it("exposes dynamic group creation from the unified conversation list", () => {
@@ -181,12 +326,17 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("handleOpenGroupRoom");
     expect(routeSource).toContain('new URLSearchParams(location.search).get("room")');
     expect(routeSource).toContain("requestedRoomId && activeGroupRoomId !== requestedRoomId");
+    expect(routeSource).toContain("navigate(`/chat?room=${encodeURIComponent(roomId)}`, { replace: false })");
     expect(routeSource).toContain("setRightPaneCollapsed(false)");
     expect(routeSource).toContain("chatRoomModeLabel(mode, lang)");
     expect(routeSource).toContain("chatRoomPurposeLabel(purpose, lang)");
     expect(routeSource).toContain("queryKeys.chatRoomPurposes()");
     expect(routeSource).toContain("fetchJson<ChatRoomPurpose[]>(\"/api/chat-rooms/purposes\")");
     expect(routeSource).toContain("抢占式讨论");
+    expect(routeSource).toContain("协同问诊会诊");
+    expect(routeSource).toContain("医疗分诊建议");
+    expect(routeSource).toContain("medical_consultation_panel");
+    expect(routeSource).toContain("medical_triage");
     expect(routeSource).toContain("对话目的");
     expect(routeSource).toContain("purpose: groupPurposeDraft || \"discussion\"");
     expect(routeSource).toContain("purpose: activeGroupRoom?.purpose || \"discussion\"");
@@ -225,7 +375,17 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("setGroupManageSessionIds((current) => current.filter((sessionId) => sessionId !== variables.sessionId))");
     expect(routeSource).toContain("styles.groupManagementPanel");
     expect(routeSource).toContain("styles.groupConversationFrame");
-    expect(routeSource).toContain("stripGroupSpeakerPrefix(message, speakerIdentity.name)");
+    expect(routeSource).toContain("compactAgentRoleLabel");
+    expect(routeSource).toContain("shouldCollapseGroupMessage");
+    expect(routeSource).toContain("shouldDefaultCollapseGroupMessage");
+    expect(routeSource).toContain("message.audience === \"internal\"");
+    expect(routeSource).toContain("展开讨论");
+    expect(routeSource).toContain("expandedGroupMessageIds");
+    expect(routeSource).toContain("stripGroupSpeakerPrefix(message, identityName)");
+    expect(routeSource).toContain("renderGroupMessageBody(message, speakerIdentity.name)");
+    expect(routeSource).toContain("title={speakerIdentity.fullIdentityLabel}");
+    expect(routeSource).toContain("展开全文");
+    expect(routeSource).toContain("收起");
     expect(routeSource).toContain("message.status !== \"completed\" ? <span>{statusLabel(message.status)}</span> : null");
     expect(routeSource).toContain("numericTail.slice(-2)");
     expect(routeSource).not.toContain("navigate(`/chat-rooms");
@@ -246,6 +406,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.groupBubbleRow).toBeTypeOf("string");
     expect(routeStyles.groupBubbleAvatar).toBeTypeOf("string");
     expect(routeStyles.groupBubble).toBeTypeOf("string");
+    expect(routeStyles.groupBubbleBodyCollapsed).toBeTypeOf("string");
+    expect(routeStyles.groupBubbleToggle).toBeTypeOf("string");
     expect(routeStyles.groupTypingDots).toBeTypeOf("string");
     expect(routeStyles.groupComposerBar).toBeTypeOf("string");
   });
@@ -291,12 +453,74 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("stream.close()");
   });
 
+  it("coalesces high-frequency direct session stream snapshots before updating UI cache", () => {
+    expect(routeSource).toContain("const SESSION_STREAM_MIN_APPLY_INTERVAL_MS = 350");
+    expect(routeSource).toContain("sessionDetailSnapshotKey(previous) === sessionDetailSnapshotKey(detail)");
+    expect(routeSource).toContain("let pendingDetail: SessionDetail | null = null");
+    expect(routeSource).toContain("function queueSessionDetail(detail: SessionDetail, payloadLength: number)");
+    expect(routeSource).toContain("browser.session_stream.snapshot_queued");
+    expect(routeSource).toContain("browser.session_stream.snapshot_applied");
+    expect(routeSource).toContain("queueSessionDetail(payload.detail, event.data.length)");
+  });
+
+  it("applies lightweight assistant delta stream events without full detail sync", () => {
+    expect(routeSource).toContain("function mergeAssistantDeltaIntoSessionDetail(");
+    expect(routeSource).toContain("stream.addEventListener(\"assistant_delta\", handleAssistantDelta as EventListener)");
+    expect(routeSource).toContain("stream.removeEventListener(\"assistant_delta\", handleAssistantDelta as EventListener)");
+    expect(routeSource).toContain("queryClient.setQueryData<SessionDetail>(queryKeys.session(streamSessionId), (detail) =>");
+    expect(routeSource).toContain("browser.session_stream.assistant_delta_applied");
+  });
+
   it("backs off index polling when detail streams are connected", () => {
     expect(routeSource).toContain("const ACTIVE_INDEX_POLL_MS = 3_000");
-    expect(routeSource).toContain("const STREAM_BACKED_INDEX_POLL_MS = 15_000");
-    expect(routeSource).toContain("sessionStreamConnected ? STREAM_BACKED_INDEX_POLL_MS : ACTIVE_INDEX_POLL_MS");
-    expect(routeSource).toContain("sessionStreamConnected || groupStreamConnected ? STREAM_BACKED_INDEX_POLL_MS : ACTIVE_INDEX_POLL_MS");
+    expect(routeSource).toContain("const directSessionPanelActive = Boolean(activeSessionId) && !groupPanelActive");
+    expect(routeSource).toContain("sessionStreamConnected && directSessionPanelActive ? false : ACTIVE_INDEX_POLL_MS");
+    expect(routeSource).toContain("groupStreamConnected && legacyGroupRoomActive");
+    expect(routeSource).toContain("directSessionPanelActive ? false : ACTIVE_INDEX_POLL_MS");
     expect(routeSource).toContain("mergeSessionDetailIntoConversations(conversations, detail)");
+  });
+
+  it("keeps active chat streams stable during direct session route switches", () => {
+    expect(routeSource).toContain("const ACTIVE_BACKGROUND_SYNC_POLL_MS = 5_000");
+    expect(routeSource).toContain("const SESSION_STREAM_ROUTE_SWITCH_GRACE_MS = 4_000");
+    expect(routeSource).toContain("directSessionBackgroundSyncActive");
+    expect(routeSource).toContain("groupBackgroundSyncActive");
+    expect(routeSource).toContain("sessionStreamRouteTargetMatches");
+    expect(routeSource).toContain("sessionStreamRouteSettling");
+    expect(routeSource).toContain("sessionStreamRouteSwitchGraceActive");
+    expect(routeSource).toContain("requestedSessionId !== activeSessionId");
+    expect(routeSource).toContain("&& sessionStreamRouteTargetMatches");
+    expect(routeSource).toContain("pageVisible || sessionStreamRouteSwitchGraceActive");
+    expect(routeSource).not.toContain("pageVisible || directSessionBackgroundSyncActive || sessionStreamRouteSwitchGraceActive");
+    expect(routeSource).toContain("&& (pageVisible || groupBackgroundSyncActive)");
+    expect(routeSource).toContain("if (!sessionStreamShouldConnect || typeof EventSource === \"undefined\")");
+    expect(routeSource).toContain("if (!groupStreamShouldConnect || typeof EventSource === \"undefined\")");
+    expect(routeSource).toContain("backgroundMs: directSessionBackgroundSyncActive && !sessionStreamConnected ? ACTIVE_BACKGROUND_SYNC_POLL_MS : false");
+    expect(routeSource).toContain("backgroundMs: groupBackgroundSyncActive && !groupStreamConnected ? ACTIVE_BACKGROUND_SYNC_POLL_MS : false");
+    expect(routeSource).toContain("refetchIntervalInBackground: directSessionBackgroundSyncActive");
+    expect(routeSource).toContain("refetchIntervalInBackground: groupBackgroundSyncActive");
+  });
+
+  it("updates active direct session before pushing the route", () => {
+    const openDirectSessionSource = routeSource.slice(
+      routeSource.indexOf("function handleOpenDirectSession"),
+      routeSource.indexOf("function handleOpenMentionTarget"),
+    );
+
+    expect(openDirectSessionSource).toContain("setActiveSession(sessionId)");
+    expect(openDirectSessionSource).toContain("navigate(`/chat?session=${encodeURIComponent(sessionId)}`, { replace: false })");
+    expect(openDirectSessionSource.indexOf("setActiveSession(sessionId)")).toBeLessThan(
+      openDirectSessionSource.indexOf("navigate(`/chat?session=${encodeURIComponent(sessionId)}`, { replace: false })"),
+    );
+  });
+
+  it("logs direct session stream connect decisions with visibility inputs", () => {
+    expect(routeSource).toContain("browser.session_stream.effect_started");
+    expect(routeSource).toContain("browser.session_stream.skipped");
+    expect(routeSource).toContain("routeTargetMatches");
+    expect(routeSource).toContain("routeSettling");
+    expect(routeSource).toContain("routeSwitchGraceActive");
+    expect(routeSource).toContain("visibilityState: typeof document === \"undefined\" ? \"unknown\" : document.visibilityState");
   });
 
   it("visually distinguishes direct sessions from group chats in the conversation list", () => {
@@ -305,7 +529,9 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("styles.conversationAvatarGroup");
     expect(routeSource).toContain("styles.directSessionItem");
     expect(routeSource).toContain("styles.groupSessionItem");
+    expect(routeSource).toContain("navigate(`/chat?session=${encodeURIComponent(sessionId)}`, { replace: false })");
     expect(routeSource).toContain("styles.conversationKindBadgeDirect");
+    expect(routeSource).toContain("styles.conversationKindBadgeChild");
     expect(routeSource).toContain("styles.conversationKindBadgeGroup");
 
     expect(routeStyles.conversationAvatar).toBeTypeOf("string");
@@ -313,27 +539,55 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.conversationAvatarGroup).toBeTypeOf("string");
     expect(routeStyles.conversationTitleRow).toBeTypeOf("string");
     expect(routeStyles.conversationMetaRow).toBeTypeOf("string");
-    expect(routeStyles.sessionActionStack).toBeTypeOf("string");
     expect(routeStyles.directSessionItem).toBeTypeOf("string");
     expect(routeStyles.groupSessionItem).toBeTypeOf("string");
     expect(routeStyles.conversationKindBadge).toBeTypeOf("string");
     expect(routeStyles.conversationKindBadgeDirect).toBeTypeOf("string");
+    expect(routeStyles.conversationKindBadgeChild).toBeTypeOf("string");
     expect(routeStyles.conversationKindBadgeGroup).toBeTypeOf("string");
+  });
+
+  it("moves direct session actions into a right-click context menu", () => {
+    expect(routeSource).toContain("type SessionContextMenuState");
+    expect(routeSource).toContain("const [sessionContextMenu, setSessionContextMenu]");
+    expect(routeSource).toContain("function openSessionContextMenu");
+    expect(routeSource).toContain("onContextMenu={(event) => openSessionContextMenu(event, session)}");
+    expect(routeSource).toContain("contextMenuSession");
+    expect(routeSource).toContain("styles.sessionContextMenu");
+    expect(routeSource).toContain("handleAddSessionToReview(contextMenuSession)");
+    expect(routeSource).toContain("beginRenameSession(contextMenuSession)");
+    expect(routeSource).toContain("handleDeleteSession(contextMenuSession)");
+    expect(routeSource).toContain("event.key === \"Escape\"");
+    expect(routeSource).not.toContain("onClick={() => handleAddSessionToReview(session)}");
+    expect(routeSource).not.toContain("onClick={() => beginRenameSession(session)}");
+    expect(routeSource).not.toContain("onClick={() => handleDeleteSession(session)}");
+
+    expect(routeStyles.sessionContextMenu).toBeTypeOf("string");
+    expect(routeStyles.sessionContextMenuItem).toBeTypeOf("string");
+    expect(routeStyles.sessionContextMenuDanger).toBeTypeOf("string");
   });
 
   it("shows each visible agent with a functional role label, not only a person name", () => {
     expect(routeSource).toContain("agentDisplayInfo(agent, lang)");
     expect(routeSource).toContain("sessionAgentDisplayInfo(session, sessionAgent, lang)");
     expect(routeSource).toContain("participantAgentDisplayInfo(participantLike, participantAgent, lang)");
+    expect(routeSource).toContain("dialogueModelId: session.dialogueModelId");
+    expect(routeSource).toContain("sessionDisplay.modelLabel");
+    expect(routeSource).toContain("participantDisplay.modelLabel");
+    expect(routeSource).toContain("display.modelLabel");
     expect(routeSource).toContain("const sessionAgent = session.agentId ? agentsById.get(session.agentId) : undefined");
     expect(routeSource).toContain("const sessionDisplay = sessionAgentDisplayInfo(session, sessionAgent, lang)");
     expect(routeSource).toContain("const participantDisplay = groupParticipantIdentity(participant)");
     expect(routeSource).toContain("identityLabel: formatAgentIdentityWithRole");
     expect(routeSource).toContain("styles.groupMemberCopy");
     expect(routeSource).toContain("styles.agentRoleTag");
+    expect(routeSource).toContain("styles.agentModelTag");
+    expect(routeSource).toContain("styles.agentModelLine");
 
     expect(routeStyles.groupMemberCopy).toBeTypeOf("string");
     expect(routeStyles.agentRoleTag).toBeTypeOf("string");
+    expect(routeStyles.agentModelTag).toBeTypeOf("string");
+    expect(routeStyles.agentModelLine).toBeTypeOf("string");
   });
 
   it("hides direct sessions whose Agent is no longer active in Agent Center", () => {
@@ -342,10 +596,59 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("function isVisibleConversation");
     expect(routeSource).toContain("return !conversation.agentMissing");
     expect(routeSource).toContain("return sessions.filter(isVisibleDirectSession)");
-    expect(routeSource).toContain("const visibleSessions = useMemo");
-    expect(routeSource).toContain("visibleSessions.map(sessionToConversationSummary)");
+    expect(routeSource).toContain("const allVisibleSessions = useMemo");
+    expect(routeSource).toContain("const rightIndexSessions = useMemo");
+    expect(routeSource).toContain("mergeVisibleSessionsIntoConversations(conversationsQuery.data, rightIndexSessions)");
     expect(routeSource).toContain("conversation.type !== \"group_room\"");
-    expect(routeSource).toContain(".filter((conversation) => isVisibleConversation(conversation, sessionsById))");
+    expect(routeSource).toContain("if (!isVisibleConversation(conversation, sessionsById))");
+  });
+
+  it("renders child sessions in the top Agent session strip instead of the right conversation index", () => {
+    expect(routeSource).toContain("function isChildSession");
+    expect(routeSource).toContain("function rootSessionIdFor");
+    expect(routeSource).toContain("function isRepresentedInAgentSessionTabs");
+    expect(routeSource).toContain("function hasInvalidChildSessionLink");
+    expect(routeSource).toContain("function mergeVisibleSessionsIntoConversations");
+    expect(routeSource).toContain("const rightIndexSessions = useMemo");
+    expect(routeSource).toContain("return allVisibleSessions.filter((session) => !isRepresentedInAgentSessionTabs(session))");
+    expect(routeSource).toContain("const agentSessionTabs = useMemo");
+    expect(routeSource).toContain("rootSessionIdFor(session) === activeRootSessionId");
+    expect(routeSource).toContain("mergeVisibleSessionsIntoConversations(conversationsQuery.data, rightIndexSessions)");
+    expect(routeSource).toContain("if (isRepresentedInAgentSessionTabs(session))");
+    expect(routeSource).toContain("const invalidChildSessionLinkMessage = hasInvalidChildSessionLink(directSessionActiveSummary)");
+    expect(routeSource).toContain("child_session_link_invalid");
+    expect(routeSource).toContain("子对话缺少 parentSessionId/rootSessionId");
+    expect(routeSource).not.toContain("rootSessionId || session.parentSessionId || session.id");
+    expect(routeSource).not.toContain("const childSessionsByRootId = useMemo");
+    expect(routeSource).not.toContain("function renderChildSessionItems");
+    expect(routeSource).not.toContain("styles.childSessionList");
+    expect(routeSource).toContain("styles.agentSessionTabGroup");
+    expect(routeSource).toContain("styles.agentSessionTabActive");
+    expect(routeSource).toContain("styles.agentSessionTabChild");
+    expect(routeSource).toContain("styles.agentSessionTabRoot");
+    expect(routeSource).toContain("styles.agentSessionTabEditing");
+    expect(routeSource).toContain("onContextMenu={(event) => openSessionContextMenu(event, session)}");
+    expect(routeSource).toContain("sessionIsChild ? <MessageCircleHeart size={14} /> : <Bot size={14} />");
+    expect(routeSource).toContain("session.taskTitle || session.resultCard?.title || session.title");
+    expect(routeSource).toContain("session.resultCard?.summary || session.taskSummary");
+    expect(routeSource).toContain("handleOpenDirectSession(session.id)");
+    expect(routeSource).toContain("const tabEditing = editingSessionId === session.id");
+    expect(routeSource).toContain("className={styles.agentSessionTabTitleInput}");
+    expect(routeSource).toContain("submitRenameSession(session)");
+    expect(routeSource).toContain("cancelRenameSession");
+
+    expect(routeStyles.agentSessionTabGroup).toBeTypeOf("string");
+    expect(routeStyles.agentSessionTab).toBeTypeOf("string");
+    expect(routeStyles.agentSessionTabActive).toBeTypeOf("string");
+    expect(routeStyles.agentSessionTabChild).toBeTypeOf("string");
+    expect(routeStyles.agentSessionTabRoot).toBeTypeOf("string");
+    expect(routeStyles.agentSessionTabEditing).toBeTypeOf("string");
+    expect(routeStyles.agentSessionTabIcon).toBeTypeOf("string");
+    expect(routeStyles.agentSessionTabTitle).toBeTypeOf("string");
+    expect(routeStyles.agentSessionTabTitleInput).toBeTypeOf("string");
+    expect(routeStyles.agentSessionTabEditActions).toBeTypeOf("string");
+    expect(routeStyles.agentSessionTabEditButton).toBeTypeOf("string");
+    expect(routeStyles.conversationKindBadgeChild).toBeTypeOf("string");
   });
 
   it("renders a QQ-style tree with direct sessions separate from Team-owned rooms", () => {
@@ -354,18 +657,35 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("linkedTeamRoomIds");
     expect(routeSource).toContain("filteredTeams");
     expect(routeSource).toContain("filteredStandaloneGroupConversations");
+    expect(routeSource).toContain("function teamStatusLabel");
+    expect(routeSource).toContain("teamStatusLabel(team.status, lang, statusLabel)");
     expect(routeSource).toContain("team.linkedChatRoom?.title");
     expect(routeSource).toContain("team.members ?? []");
+    expect(routeSource).toContain("team.teamCategory");
+    expect(routeSource).toContain("team.teamKind");
+    expect(routeSource).toContain("team.teamSource");
+    expect(routeSource).toContain("team.teamTemplateId");
     expect(routeSource).toContain("群成员");
+    expect(routeSource).toContain("团队分类");
+    expect(routeSource).toContain("团队群聊");
+    expect(routeSource).toContain("待绑定");
+    expect(routeSource).toContain("styles.teamTreeLabelRow");
+    expect(routeSource).toContain("`/teams?team=${encodeURIComponent(team.teamId)}`");
     expect(routeSource).toContain("未归属群聊");
-    expect(routeSource).toContain("styles.conversationTreeRootHeader");
+    expect(routeSource).toContain("toggleConversationGroup(\"teams\")");
+    expect(routeSource).toContain("toggleConversationGroup(\"standaloneGroups\")");
+    expect(routeSource).toContain("aria-expanded={searchHasTerm || !collapsedConversationGroups.teams}");
+    expect(routeSource).toContain("aria-expanded={searchHasTerm || !collapsedConversationGroups.standaloneGroups}");
+    expect(routeSource).toContain("conversationGroupLabel(\"teams\"");
+    expect(routeSource).toContain("conversationGroupLabel(\"standaloneGroups\"");
     expect(routeSource).toContain("styles.teamTreeGroup");
     expect(routeSource).toContain("styles.teamTreeChildren");
     expect(routeSource).toContain("styles.teamTreeChild");
 
-    expect(routeStyles.conversationTreeRootHeader).toBeTypeOf("string");
+    expect(routeStyles.conversationGroupHeader).toBeTypeOf("string");
     expect(routeStyles.teamTreeGroup).toBeTypeOf("string");
     expect(routeStyles.teamTreeItem).toBeTypeOf("string");
+    expect(routeStyles.teamTreeLabelRow).toBeTypeOf("string");
     expect(routeStyles.teamTreeChildren).toBeTypeOf("string");
     expect(routeStyles.teamTreeChild).toBeTypeOf("string");
   });
@@ -389,7 +709,6 @@ describe("ChatCodingRoute layout contract", () => {
   it("asks for confirmation before deleting conversations", () => {
     expect(routeSource).toContain("t(\"deleteSessionConfirm\").replace(\"{title}\"");
     expect(routeSource).toContain("t(\"deleteGroupConfirm\").replace(\"{title}\"");
-    expect(routeSource).toContain("title={deleteDisabled ? t(\"deleteSessionBusy\") : t(\"deleteSession\")}");
     expect(routeSource).toContain("if (!window.confirm(sessionConfirmMessage))");
     expect(routeSource).toContain("if (!window.confirm(groupConfirmMessage))");
     expect(routeSource).toContain("[session.id]: t(\"deleteSessionBusy\")");
@@ -424,19 +743,36 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("keeps renamed direct session titles visible before conversation refetch finishes", () => {
-    const renameMutationSource = routeSource.slice(routeSource.indexOf("const renameSessionMutation"));
+    const renameStart = routeSource.indexOf("const renameSessionMutation");
+    const renameEnd = routeSource.indexOf("const updateSessionAgentMutation", renameStart);
+    const renameMutationSource = routeSource.slice(renameStart, renameEnd);
     expect(routeSource).toContain("mergeSessionDetailIntoConversations");
+    expect(routeSource).toContain("renameSessionInSummaries");
+    expect(routeSource).toContain("renameSessionInConversations");
+    expect(routeSource).toContain("renameSessionDetail");
     expect(routeSource).toContain("title: String(session.title || session.agentDisplayName || session.id).trim()");
     expect(routeSource).toContain("agentDisplayName: conversation.agentDisplayName");
     expect(routeSource).toContain("const sessionAgentName =");
-    expect(routeSource).toContain("{session.title || sessionDisplay.name}");
+    expect(routeSource).toContain("const sessionTitle =");
+    expect(routeSource).toContain("(sessionIsChild ? (session.taskTitle || session.resultCard?.title || session.title) : session.title)");
+    expect(routeSource).toContain("{sessionTitle}");
+    expect(renameMutationSource).toContain("onMutate: (variables) =>");
+    expect(renameMutationSource).toContain("setEditingSessionId(null)");
+    expect(renameMutationSource).toContain("queryClient.setQueryData<SessionSummary[]>(queryKeys.sessions()");
     expect(renameMutationSource).toContain("queryClient.setQueryData<ConversationSummary[]>(queryKeys.conversations()");
+    expect(renameMutationSource).toContain("queryClient.setQueryData<SessionDetail>(queryKeys.session(variables.sessionId)");
+    expect(renameMutationSource).toContain("setEditingSessionId(variables.sessionId)");
+    expect(renameMutationSource).toContain("setEditingSessionTitle(variables.title)");
     expect(renameMutationSource.indexOf("queryClient.setQueryData<ConversationSummary[]>(queryKeys.conversations()")).toBeLessThan(
-      renameMutationSource.indexOf("syncSessionDetail(nextDetail)"),
+      renameMutationSource.indexOf("onError:"),
     );
-    expect(renameMutationSource.indexOf("queryClient.setQueryData<ConversationSummary[]>(queryKeys.conversations()")).toBeLessThan(
-      renameMutationSource.indexOf("void chatWorkspaceCache.afterSessionChanged({ sessionId: variables.sessionId })"),
-    );
+    expect(renameMutationSource).toContain("const confirmedTitle =");
+    expect(renameMutationSource).toContain("const confirmedUpdatedAt =");
+    expect(renameMutationSource).not.toContain("mergeSessionDetailIntoSummaries(sessions, nextDetail)");
+    expect(renameMutationSource).not.toContain("mergeSessionDetailIntoConversations(conversations, nextDetail)");
+    expect(renameMutationSource).not.toContain("syncSessionDetail(nextDetail)");
+    expect(renameMutationSource).not.toContain("void chatWorkspaceCache.afterSessionChanged({ sessionId: variables.sessionId })");
+    expect(renameMutationSource).not.toContain("void chatWorkspaceCache.refreshSessionRuntime(variables.sessionId)");
   });
 
   it("classifies direct conversations from Agent Center role metadata", () => {

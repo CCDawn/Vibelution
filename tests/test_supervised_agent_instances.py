@@ -1,3 +1,5 @@
+import json
+
 from fastapi.testclient import TestClient
 import pytest
 
@@ -49,12 +51,13 @@ def test_ensure_supervised_agent_instances_creates_fixed_role_agents_without_ste
 
     by_role = {agent["metadata"]["supervisedRole"]: agent for agent in agents}
     assert set(by_role) == {"baseline", "candidate", "reviewer", "auditor", "judge"}
-    assert by_role["baseline"]["profileId"] == "supervised_baseline"
+    assert "profileId" not in by_role["baseline"]
+    assert by_role["baseline"]["llmBindings"]["dialogue"]["modelId"]
     assert by_role["baseline"]["primaryMode"] == "supervised_evolution"
     assert by_role["baseline"]["roleKey"] == "baseline"
     assert by_role["baseline"]["promptTemplateId"] == "prompt-supervised-baseline"
-    assert by_role["candidate"]["profileId"] == "supervised_candidate"
-    assert by_role["reviewer"]["profileId"] == "primary"
+    assert "profileId" not in by_role["candidate"]
+    assert "profileId" not in by_role["reviewer"]
     assert all(agent["directSessionId"] for agent in agents)
     assert all(agent["metadata"]["agentMode"] == "supervised_evolution" for agent in agents)
     assert all(agent["metadata"]["configSurface"] == "model_config" for agent in agents)
@@ -79,7 +82,7 @@ def test_ensure_supervised_agent_instances_is_idempotent_and_repairs_active_meta
     agent_directory_service.update_agent_instance(
         baseline["agentId"],
         display_name="旧名称",
-        profile_id="primary",
+        llm_bindings={"dialogue": {"modelId": "model-primary"}},
         metadata={"supervisedRoleLabel": "旧标签"},
     )
 
@@ -89,10 +92,11 @@ def test_ensure_supervised_agent_instances_is_idempotent_and_repairs_active_meta
     assert {agent["agentId"] for agent in second} == {agent["agentId"] for agent in first}
     repaired = next(agent for agent in second if agent["metadata"]["supervisedRole"] == "baseline")
     assert repaired["displayName"] != "监督进化基线 Agent"
-    assert repaired["profileId"] == "supervised_baseline"
+    assert "profileId" not in repaired
     assert repaired["status"] == "active"
     assert repaired["metadata"]["supervisedRoleLabel"] == "监督进化基线 Agent"
     assert repaired["metadata"]["functionalDisplayName"] == "监督进化基线 Agent"
+    assert repaired["llmBindings"]["dialogue"]["modelId"] == "model-primary"
 
 
 def test_ensure_supervised_agent_instances_does_not_reactivate_archived_fixed_role(tmp_path, monkeypatch):
@@ -176,14 +180,17 @@ def test_supervised_agent_bindings_are_run_safe_payloads(tmp_path, monkeypatch):
 
     bindings = supervised_agent_service.supervised_agent_bindings()
 
-    assert bindings["baseline"]["profileId"] == "supervised_baseline"
+    assert not bindings["baseline"]["profileId"]
+    assert bindings["baseline"]["dialogueModelId"]
+    assert bindings["baseline"]["llmBindings"]["dialogue"]["modelId"] == bindings["baseline"]["dialogueModelId"]
     assert bindings["baseline"]["agentCode"]
     assert bindings["baseline"]["primaryMode"] == "supervised_evolution"
     assert bindings["baseline"]["roleKey"] == "baseline"
     assert bindings["baseline"]["promptTemplateId"] == "prompt-supervised-baseline"
     assert bindings["baseline"]["toolPolicyId"]
     assert bindings["baseline"]["memoryPolicyId"]
-    assert bindings["candidate"]["profileId"] == "supervised_candidate"
+    assert not bindings["candidate"]["profileId"]
+    assert bindings["candidate"]["dialogueModelId"]
     assert bindings["judge"]["roleLabel"] == "监督进化裁决 Agent"
     assert all("metadata" not in binding for binding in bindings.values())
     assert all("toolPolicy" not in binding for binding in bindings.values())
@@ -196,7 +203,7 @@ def test_supervised_agent_bindings_follow_mode_binding_slot_replacement(tmp_path
     supervised_agent_service.ensure_supervised_agent_instances()
     replacement = agent_directory_service.create_agent_instance(
         display_name="替换基线 Agent",
-        profile_id="primary",
+        llm_bindings={"dialogue": {"modelId": "model-primary"}},
         primary_mode="supervised_evolution",
         role_key="baseline",
         prompt_template_id="prompt-supervised-baseline",
@@ -218,7 +225,7 @@ def test_supervised_agent_bindings_block_archived_slot_replacement(tmp_path, mon
     supervised_agent_service.ensure_supervised_agent_instances()
     replacement = agent_directory_service.create_agent_instance(
         display_name="将被归档的基线 Agent",
-        profile_id="primary",
+        llm_bindings={"dialogue": {"modelId": "model-primary"}},
         primary_mode="supervised_evolution",
         role_key="baseline",
         prompt_template_id="prompt-supervised-baseline",
@@ -230,6 +237,20 @@ def test_supervised_agent_bindings_block_archived_slot_replacement(tmp_path, mon
     agent_directory_service.archive_agent_instance(replacement["agentId"])
 
     with pytest.raises(supervised_agent_service.SupervisedAgentBindingError, match="baseline"):
+        supervised_agent_service.supervised_agent_bindings()
+
+
+def test_supervised_agent_bindings_block_missing_dialogue_model(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agents = supervised_agent_service.ensure_supervised_agent_instances()
+    baseline = next(agent for agent in agents if agent["metadata"]["supervisedRole"] == "baseline")
+    state = agent_directory_service.load_state()
+    for item in state["agents"]:
+        if item.get("agentId") == baseline["agentId"]:
+            item["llmBindings"] = {}
+    agent_directory_service.registry_path().write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    with pytest.raises(supervised_agent_service.SupervisedAgentBindingError, match="dialogue LLM binding"):
         supervised_agent_service.supervised_agent_bindings()
 
 

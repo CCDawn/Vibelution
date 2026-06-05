@@ -419,6 +419,65 @@ def test_runtime_scene_issue_state_tracks_tool_registry_policy_signals(tmp_path,
     assert "issueState.activeClusterCount" not in diagnosis["agentNextStep"]
 
 
+def test_runtime_scene_diagnosis_keeps_memory_status_mirror_out_of_active_clusters(tmp_path, monkeypatch):
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+    scene_id = "scene-diagnosis-memory-mirror"
+    _seed_scene(
+        tmp_path,
+        scene_id,
+        [
+            {
+                "runtime_scene_id": scene_id,
+                "ts": "2026-05-18T12:00:01Z",
+                "seq": 1,
+                "component": "tool_executor",
+                "phase": "execute",
+                "event_code": "tool.execute.degraded",
+                "level": "warning",
+                "outcome": "degraded",
+                "message": "Tool execution degraded.",
+                "fields": {"toolName": "shell", "status": "degraded", "runId": "run-tool-1"},
+                "raw_refs": [{"path": "events/tool_executor.jsonl", "tail_lines": 80}],
+            },
+            {
+                "runtime_scene_id": scene_id,
+                "ts": "2026-05-18T12:00:02Z",
+                "seq": 2,
+                "component": "agent_memory",
+                "phase": "memory",
+                "event_code": "memory.event_written",
+                "level": "info",
+                "outcome": "written",
+                "message": "Agent memory event was written.",
+                "fields": {
+                    "sourceEventCode": "tool.execute.degraded",
+                    "status": "degraded",
+                    "runId": "run-tool-1",
+                },
+                "raw_refs": [{"path": "events/agent_memory.jsonl", "tail_lines": 80}],
+            },
+        ],
+        status="running",
+    )
+
+    detail = runtime_scene_service.get_runtime_scene_detail(scene_id)
+
+    diagnosis = detail["packageDiagnosis"]
+    issue_state = diagnosis["issueState"]
+    assert diagnosis["severity"] == "warning"
+    assert issue_state["activeClusterCount"] == 1
+    assert issue_state["activeWarningCount"] == 1
+    assert issue_state["activeClusters"][0]["eventCode"] == "tool.execute.degraded"
+    active_codes = {cluster["eventCode"] for cluster in issue_state["activeClusters"]}
+    assert "memory.event_written" not in active_codes
+    assert diagnosis["firstSignal"]["eventCode"] == "tool.execute.degraded"
+
+    summary = json.loads((tmp_path / "logs" / "runtime_scenes" / f"20260518T120000Z__{scene_id}" / "summary.json").read_text(encoding="utf-8"))
+    assert summary["event_counts"]["warnings"] == 1
+    assert summary["agent_brief"]["diagnosis_status"] == "active_issue"
+    assert summary["agent_brief"]["primary_issue"] == "tool.execute.degraded"
+
+
 def test_runtime_scene_busy_command_is_actionable_policy_not_active_failure(tmp_path, monkeypatch):
     monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
     scene_id = "scene-diagnosis-busy-command"

@@ -12,6 +12,10 @@ from core.evaluation.dataset_registry import (
     list_dataset_status,
     materialize_dataset_bundle,
 )
+from core.evaluation.dataset_environment import (
+    preflight_environment_contract,
+    terminal_bench_environment_contract,
+)
 from core.evaluation.self_evolution_candidate_pool import append_candidate_record
 
 
@@ -58,6 +62,8 @@ def test_default_dataset_registry_lists_builtin_and_swe(tmp_path: Path):
     assert by_name["terminal_bench_core"]["visibility"] == "primary"
     assert "不是 Terminal-Bench 官方成绩" in by_name["terminal_bench_core"]["usability_reason"]
     assert by_name["terminal_bench_core"]["case_count"] >= 5
+    assert by_name["terminal_bench_core"]["environment_contract"]["kind"] == "terminal_bench_task_environment"
+    assert by_name["terminal_bench_core"]["environment_preflight"]["status"] in {"available", "missing"}
     assert by_name["swe_bench_lite"]["runnable"] is False
     assert by_name["swe_bench_lite"]["adapter_status"] == "requires_swe_harness"
 
@@ -489,7 +495,9 @@ def test_materialize_terminal_bench_smoke_preserves_harness_contract(tmp_path: P
     assert case["requires_terminal_harness"] is True
     assert case["official_runner"] == "pending"
     assert case["verifier"]["command"]
+    assert case["max_steps"] == 8
     assert "multi-step ReAct" in case["baseline_prompt"]
+    assert "roughly 8 meaningful tool steps" in case["baseline_prompt"]
     assert "Official metadata" not in case["baseline_prompt"]
     assert "Close the transaction" in case["baseline_prompt"] or "close the transaction" in case["baseline_prompt"]
 
@@ -519,6 +527,9 @@ def test_materialize_terminal_bench_core_preserves_official_metadata(tmp_path: P
     assert case["official_score"] is None
     assert case["official_score_available"] is False
     assert "/app" in case["required_task_paths"]
+    assert case["environment_contract"]["kind"] == "terminal_bench_task_environment"
+    assert case["environment_contract"]["required_paths"][0]["path"] == "/app"
+    assert "C:\\app" in case["environment_contract"]["required_paths"][0]["aliases"]
     assert case["official_metadata"]["dataset"] == "terminal-bench@2.0"
     assert case["official_metadata"]["repo"].endswith("terminal-bench-2")
     assert case["official_metadata"]["revision"]
@@ -526,7 +537,28 @@ def test_materialize_terminal_bench_core_preserves_official_metadata(tmp_path: P
     assert case["official_metadata"]["docker_image"]
     assert case["verifier"]["kind"] == "harbor_terminal_bench"
     assert "uv run harbor run --dataset terminal-bench@2.0" in case["verifier"]["command"]
+    assert case["max_steps"] == 100
     assert "Official metadata" in case["baseline_prompt"]
+    assert "roughly 100 meaningful tool steps" in case["baseline_prompt"]
+    assert "Custom harness environment contract" in case["baseline_prompt"]
+    assert "required task paths" in case["baseline_prompt"]
+    assert "C:\\app" in case["baseline_prompt"]
+    assert "declared alias" in case["baseline_prompt"]
+    assert "close the transaction with status=failed" in case["baseline_prompt"]
+    assert "Do not keep retrying" in case["baseline_prompt"]
+
+
+def test_terminal_bench_environment_preflight_accepts_windows_alias(tmp_path: Path):
+    app_dir = tmp_path / "app"
+    app_dir.mkdir()
+    contract = terminal_bench_environment_contract(official_seed=True)
+    contract["required_paths"][0]["aliases"] = [str(app_dir)]
+
+    result = preflight_environment_contract(contract, project_root=tmp_path)
+
+    assert result["status"] == "available"
+    assert result["checked"][0]["path"] == "/app"
+    assert str(app_dir) in result["checked"][0]["existing"]
 
 
 def test_materialize_missing_dataset_source_fails_clearly(tmp_path: Path):

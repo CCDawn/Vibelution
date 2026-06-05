@@ -50,6 +50,16 @@
   text-decoration: none;
 }
 
+.iconButton:disabled,
+.toolbarActions button:disabled,
+.createForm button:disabled,
+.actionRow button:disabled,
+.teamMessageForm button:disabled,
+.teamTaskForm button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .toolbarActions .dangerButton,
 .actionRow .dangerButton {
   border-color: color-mix(in srgb, var(--accent-danger) 36%, var(--border-soft));
@@ -128,6 +138,107 @@
   color: var(--fg-primary);
   font: inherit;
   font-size: 0.78rem;
+}
+
+.createForm input[aria-invalid="true"] {
+  border-color: color-mix(in srgb, var(--accent-danger) 62%, var(--border-soft));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-danger) 28%, transparent);
+}
+
+.formHint,
+.formError {
+  margin: 0;
+  font-size: 0.71rem;
+  line-height: 1.35;
+}
+
+.formHint {
+  color: var(--fg-muted);
+}
+
+.formError {
+  color: color-mix(in srgb, var(--accent-danger) 78%, var(--fg-primary));
+  font-weight: 720;
+}
+
+.templatePanel {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border-bottom: 1px solid var(--border-soft);
+  background: color-mix(in srgb, var(--surface-panel-strong) 58%, transparent);
+}
+
+.templatePanelHeader,
+.templatePreviewHeader,
+.templateMeta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.templatePanelHeader strong,
+.templatePreviewHeader strong {
+  color: var(--fg-primary);
+  font-size: 0.78rem;
+}
+
+.templatePanelHeader span,
+.templatePreviewHeader span,
+.templateMeta span,
+.templateEmpty {
+  color: var(--fg-muted);
+  font-size: 0.71rem;
+}
+
+.templatePicker {
+  display: grid;
+  gap: 6px;
+}
+
+.templateSelect {
+  min-height: 30px;
+  width: 100%;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: var(--surface-panel-strong);
+  color: var(--fg-primary);
+  font: inherit;
+  font-size: 0.76rem;
+  font-weight: 740;
+}
+
+.templatePreview {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 2px 1px;
+}
+
+.templatePreview p {
+  display: -webkit-box;
+  margin: 0;
+  color: var(--fg-secondary);
+  font-size: 0.72rem;
+  line-height: 1.32;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.templateCreateButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 28px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: var(--surface-panel-strong);
+  color: var(--fg-primary);
+  font-size: 0.76rem;
+  font-weight: 750;
 }
 
 .inspectorBody textarea {
@@ -483,6 +594,23 @@
   color: var(--fg-secondary);
   font-size: 0.74rem;
   font-weight: 700;
+}
+
+.nodeBindingSection {
+  display: grid;
+  gap: 10px;
+  min-height: 292px;
+  align-content: start;
+}
+
+.nodeBindingPlaceholder {
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.nodeBindingPlaceholder .empty {
+  display: flex;
+  min-height: 190px;
+  align-items: center;
 }
 
 .issueList {

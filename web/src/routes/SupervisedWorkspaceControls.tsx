@@ -6,7 +6,11 @@ import { ConfigSummary, EvolutionOverview } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { useAppI18n } from "../i18n/useAppI18n";
 import styles from "./SupervisedWorkspaceControls.module.css";
-import { SupervisedWorkspaceTabs, type SupervisedWorkspaceView } from "./SupervisedWorkspaceTabs";
+import {
+  SupervisedWorkspaceTabs,
+  type SupervisedWorkspaceTabSummary,
+  type SupervisedWorkspaceView,
+} from "./SupervisedWorkspaceTabs";
 
 type IntakeMode = "manual_review" | "auto";
 
@@ -14,6 +18,7 @@ type SupervisedWorkspaceControlsProps = {
   activeView: SupervisedWorkspaceView;
   overviewIntakeMode?: string | null;
   configIntakeMode?: string | null;
+  tabSummaries?: SupervisedWorkspaceTabSummary;
 };
 
 export function getEffectiveIntakeMode(
@@ -30,6 +35,7 @@ export function SupervisedWorkspaceControls({
   activeView,
   overviewIntakeMode,
   configIntakeMode,
+  tabSummaries,
 }: SupervisedWorkspaceControlsProps) {
   const { t, intakeModeLabel } = useAppI18n();
   const queryClient = useQueryClient();
@@ -78,7 +84,7 @@ export function SupervisedWorkspaceControls({
 
   return (
     <>
-      <SupervisedWorkspaceTabs activeView={activeView} />
+      <SupervisedWorkspaceTabs activeView={activeView} summaries={tabSummaries} />
 
       <div className={styles.intakeControl}>
         <span className={styles.controlLabel}>{t("intakeMode")}</span>

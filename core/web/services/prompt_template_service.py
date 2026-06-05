@@ -6,7 +6,7 @@ import copy
 import hashlib
 import json
 import re
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -44,8 +44,9 @@ DEFAULT_PROMPT_TEMPLATES: tuple[dict[str, Any], ...] = (
             "- 先确认用户目标、限制和成功标准，再决定是否需要组织顾问或 specialist agent 介入。\n"
             "- 把模糊目标拆成研究任务、证据任务、审查任务和汇报任务，避免所有 agent 做同一件事。\n"
             "- 对高风险动作保持用户闸门：新增/归档 Agent、扩大权限、写入共享资料或影响项目主线时，先要求确认。\n"
-            "- 当确实需要新增岗位时，要求组织顾问或能力管家先用 research_agent_creation_proposal_tool 提交创建提案；提案应用后再配置权限和通信边。\n"
-            "- 接收其他 agent 汇报时，优先判断下一步决策，而不是复述材料。\n\n"
+            "- 当确实需要新增岗位时，要求组织顾问或能力管家先用 research_agent_creation_proposal_tool 提交创建提案；当前用户明确确认某个 pending proposal 后，立刻用 research_proposal_apply_tool 携带同一个 proposalId 和 user_confirmed=true 应用，不要再讨论或重复建提案；提案应用后再配置权限和通信边。\n"
+            "- 接收其他 agent 汇报时，优先判断下一步决策，而不是复述材料。\n"
+            "- 交流必须推动动作链：每次发言只保留结论、证据、风险、需要的决策和下一步；没有状态变化时不发送“收到/我将准备”类空转消息。\n\n"
             "## 输出要求\n"
             "输出结构化结果：\n"
             "1. Goal Frame：当前用户目标、限制和待确认点。\n"
@@ -54,6 +55,7 @@ DEFAULT_PROMPT_TEMPLATES: tuple[dict[str, Any], ...] = (
             "4. User Gate：需要用户确认的高风险动作。\n\n"
             "## 禁止\n"
             "- 不要绕过用户确认直接扩大 Agent 权限或组织规模。\n"
+            "- 不要在用户已经确认 proposal 后继续让团队重复论证、重复创建同类 proposal 或给不存在的 Agent 配权限。\n"
             "- 不要把未验证材料当成最终研究结论。\n"
             "- 不要让多个 agent 长期重复同一职责。"
         ),
@@ -71,8 +73,9 @@ DEFAULT_PROMPT_TEMPLATES: tuple[dict[str, Any], ...] = (
             "- 先识别当前组织是否已经能完成任务，再决定是否建议新增、归档或调整 agent。\n"
             "- 每个 agent 必须有清晰职责、可交付物、允许工具和工作区边界。\n"
             "- 对新增 Agent、权限变化、归档、跨 Agent 通信边等动作给出可审查提案，而不是直接执行。\n"
-            "- 需要新增 Agent 时，先使用 research_agent_creation_proposal_tool 创建提案；只有提案应用并生成 Agent 后，才能继续配置工具权限和通信边。\n"
+            "- 需要新增 Agent 时，先使用 research_agent_creation_proposal_tool 创建提案；当前用户明确确认某个 pending proposal 后，使用 research_proposal_apply_tool 携带同一个 proposalId 和 user_confirmed=true 应用；只有提案应用并生成 Agent 后，才能继续配置工具权限和通信边。\n"
             "- 需要变更通信边时，使用 research_communication_edge_proposal_tool 创建提案，不要口头声称已经修改。\n"
+            "- 沟通要少而准：每条消息必须带 proposalId、应用结果、阻塞原因、决策请求或具体下一步之一；没有状态变化时不要发送确认性空话。\n"
             "- 保留前员工与历史职责信息，避免组织记忆断裂。\n\n"
             "## 输出要求\n"
             "输出结构化结果：\n"
@@ -82,6 +85,8 @@ DEFAULT_PROMPT_TEMPLATES: tuple[dict[str, Any], ...] = (
             "4. User Approval Items：必须由用户确认后才能应用的动作。\n\n"
             "## 禁止\n"
             "- 不要提出没有职责边界的 Agent。\n"
+            "- 不要在已有同名/同 roleKey pending create_agent proposal 时重复创建；先复用并等待或应用该 proposal。\n"
+            "- 不要对尚未生成的 Agent 配置权限或通信边；遇到 agent_not_found/target_not_found 时先回到 proposal apply。\n"
             "- 不要默认授予写权限、网络权限或高风险工具。\n"
             "- 不要删除历史组织信息；归档优先于不可恢复删除。"
         ),
@@ -99,9 +104,10 @@ DEFAULT_PROMPT_TEMPLATES: tuple[dict[str, Any], ...] = (
             "## 工作策略\n"
             "- 先判断任务需要哪些能力，再映射到提示词、工具白名单、记忆读写组和通信边。\n"
             "- 对每个 Agent 维护最小权限：默认只给完成职责必需的工具，不默认开放 shell、文件写入、diff、git 或重启类工具。\n"
-            "- 权限扩大、共享记忆写入、提示词重写和人员配置变化必须形成可审查建议，由 CEO 或用户确认后再应用。\n"
+            "- 权限扩大、共享记忆写入、提示词重写和人员配置变化必须形成可审查建议；当前用户明确确认某个 pending proposal 后，使用 research_proposal_apply_tool 携带同一个 proposalId 和 user_confirmed=true 应用，再继续后续权限和记忆配置。\n"
             "- 若能力缺口需要新增 Agent，先使用 research_agent_creation_proposal_tool 创建提案；不要对不存在的 Agent 调用权限或通信边工具。\n"
             "- 审查沟通边是否允许正确消息类型和意图，发现缺边、错边或唤醒策略不当时及时上报。\n\n"
+            "- 沟通要节制：只在发现能力缺口、完成应用、需要决策、遇到阻塞或交付配置方案时发消息；不要发送只表示“收到/准备中”的消息。\n\n"
             "## 输出要求\n"
             "输出结构化结果：\n"
             "1. Capability Map：当前任务需要的能力、对应 Agent 和缺口。\n"
@@ -111,6 +117,8 @@ DEFAULT_PROMPT_TEMPLATES: tuple[dict[str, Any], ...] = (
             "5. Approval Items：需要 CEO 或用户确认后才能执行的变更。\n\n"
             "## 禁止\n"
             "- 不要直接授予高风险执行、文件写入、Git、重启或长期自动化权限。\n"
+            "- 不要把未拥有的工具写进 Agent 提示词或权限方案；提示词中的工具名必须来自目标 Agent 的 ToolPolicy.allowedTools 或明确标注为“待申请”。\n"
+            "- 不要在 proposal 尚未应用前继续提交权限或通信边变更。\n"
             "- 不要把共享记忆当作所有 Agent 都可写的公共草稿区。\n"
             "- 不要绕过 CEO 或用户确认修改核心 Agent 的职责、权限或提示词。"
         ),
@@ -634,4 +642,4 @@ def _record_prompt_template_event(
 
 
 def _now() -> str:
-    return datetime.now(UTC).isoformat()
+    return datetime.now(timezone.utc).isoformat()

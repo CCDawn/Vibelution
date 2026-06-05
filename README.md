@@ -77,6 +77,7 @@ Vibelution/
 - 按 `requirements.txt` 安装或更新 Python 依赖。
 - 缺少 `web/node_modules` 或前端依赖变更时自动执行 `npm ci`/`npm install`。
 - 缺少 `web/dist` 或前端源码更新时自动执行 `npm run build`。
+- Bun 仅作为前端本地辅助工具；正式 launcher、CI 和锁文件路径仍以 npm/package-lock 为准。
 
 如果系统级前置依赖缺失，启动器会先停止并给出缺失项；项目内安装和构建过程日志会写入 `.runtime/launcher/launcher-control.log` 和当前 `logs/runtime_scenes/` 包。后续启动只做快速指纹检查，已就绪时会直接复用。
 
@@ -93,6 +94,15 @@ pip install -r requirements.txt
 ```bash
 cd web
 npm install
+```
+
+如果本机已安装 Bun，可以在依赖已就绪后使用辅助脚本加快本地开发循环：
+
+```bash
+cd web
+bun run bun:dev
+bun run bun:test
+bun run bun:build
 ```
 
 ### 4. 配置 LLM
@@ -158,6 +168,8 @@ npm run dev
 ```
 
 Vite 默认监听 `http://127.0.0.1:5173`，并把 `/api` 代理到本地后端。
+
+本地前端调试也可以使用 `bun run bun:dev`，但不要因此提交 `bun.lock`/`bun.lockb`，除非本轮明确迁移包管理器。
 
 ### 统一 Agent 入口
 
@@ -248,6 +260,14 @@ pytest tests/test_supervised_evolution.py -q
 cd web
 npm run test
 npm run build
+```
+
+Bun 辅助验证：
+
+```bash
+cd web
+bun run bun:test
+bun run bun:build
 ```
 
 CI 通常覆盖：

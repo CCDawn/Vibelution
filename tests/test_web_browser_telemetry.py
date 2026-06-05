@@ -69,6 +69,7 @@ def test_runtime_browser_telemetry_records_into_active_scene(tmp_path, monkeypat
                 "pathname": "/chat",
                 "href": "http://127.0.0.1:8000/chat",
                 "title": "Chat",
+                "browserRole": "workbench",
                 "activeNavHref": "/self-evolution",
                 "heading": "Self evolution",
             },
@@ -93,6 +94,59 @@ def test_runtime_browser_telemetry_records_into_active_scene(tmp_path, monkeypat
     assert manifest["browser"]["current_pathname"] == "/chat"
     assert manifest["browser"]["active_nav_href"] == "/self-evolution"
     assert manifest["browser"]["current_heading"] == "Self evolution"
+    assert manifest["browser"]["browser_role"] == "workbench"
+    assert manifest["workbenchBrowser"]["current_pathname"] == "/chat"
+    assert manifest["workbenchBrowser"]["browser_role"] == "workbench"
+
+
+def test_runtime_browser_telemetry_keeps_launcher_and_workbench_manifest_slots_separate(tmp_path, monkeypatch):
+    scene_dir = _activate_runtime_scene(tmp_path, monkeypatch, "scene-dual-browser")
+
+    launcher_response = _post_browser_telemetry(
+        {
+            "phase": "page",
+            "eventCode": "browser.page.snapshot",
+            "message": "Launcher snapshot",
+            "level": "info",
+            "fields": {
+                "pathname": "/launcher",
+                "href": "http://127.0.0.1:8000/launcher",
+                "title": "Launcher",
+                "browserRole": "launcher_control_surface",
+                "telemetrySurface": "managed_launcher",
+                "pageInstanceId": "page-launcher",
+            },
+        }
+    )
+    workbench_response = _post_browser_telemetry(
+        {
+            "phase": "navigation",
+            "eventCode": "browser.route.changed",
+            "message": "Workbench route changed",
+            "level": "info",
+            "fields": {
+                "pathname": "/chat",
+                "href": "http://127.0.0.1:8000/chat",
+                "title": "Vibelution 工作台",
+                "browserRole": "workbench",
+                "telemetrySurface": "managed_workbench",
+                "pageInstanceId": "page-workbench",
+            },
+        }
+    )
+
+    assert launcher_response.status_code == 202
+    assert workbench_response.status_code == 202
+    manifest = json.loads((scene_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["launcherBrowser"]["current_pathname"] == "/launcher"
+    assert manifest["launcherBrowser"]["browser_role"] == "launcher_control_surface"
+    assert manifest["launcherBrowser"]["telemetry_surface"] == "managed_launcher"
+    assert manifest["launcherBrowser"]["page_instance_id"] == "page-launcher"
+    assert manifest["workbenchBrowser"]["current_pathname"] == "/chat"
+    assert manifest["workbenchBrowser"]["browser_role"] == "workbench"
+    assert manifest["workbenchBrowser"]["telemetry_surface"] == "managed_workbench"
+    assert manifest["workbenchBrowser"]["page_instance_id"] == "page-workbench"
+    assert manifest["browser"]["current_pathname"] == "/chat"
 
 
 def test_runtime_browser_memory_telemetry_updates_manifest_summary(tmp_path, monkeypatch):
@@ -232,6 +286,7 @@ def test_runtime_browser_telemetry_from_vite_dev_stays_out_of_index(tmp_path, mo
                 "href": "http://127.0.0.1:5173/chat",
                 "port": "5173",
                 "telemetrySurface": "vite_dev",
+                "browserRole": "workbench",
                 "pathname": "/chat",
                 "usedJSHeapMB": 166.2,
                 "queryCount": 17,
@@ -247,6 +302,7 @@ def test_runtime_browser_telemetry_from_vite_dev_stays_out_of_index(tmp_path, mo
     manifest = json.loads((scene_dir / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["browser"]["last_ignored_telemetry_reason"] == "vite_dev_surface"
     assert manifest["browser"]["last_ignored_telemetry_surface"] == "vite_dev"
+    assert manifest["workbenchBrowser"]["last_ignored_telemetry_reason"] == "vite_dev_surface"
     assert "current_pathname" not in manifest["browser"]
     assert "last_memory_used_js_heap_mb" not in manifest["browser"]
 

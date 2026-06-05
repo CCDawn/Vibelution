@@ -74,7 +74,8 @@ def test_main_config_exposes_all_public_model_blocks():
     assert "discovery" in raw["llm"]
     assert "model_library" in raw["llm"]
     assert "primary" in raw["llm"]["profiles"]
-    assert "provider" in raw["llm"]["profiles"]["primary"]
+    assert "model_ref" in raw["llm"]["profiles"]["primary"]
+    assert "overrides" in raw["llm"]["profiles"]["primary"]
     assert "relay_openai_gpt_5_5" in raw["llm"]["model_library"]
     assert "provider" in raw["llm"]["model_library"]["relay_openai_gpt_5_5"]
 
@@ -84,7 +85,10 @@ def test_config_loader_normalizes_nested_public_blocks():
     normalized = normalize_public_config_dict(raw)
     config = AppConfig.model_validate(normalized)
 
-    assert config.llm.get_profile("compression").model == raw["llm"]["profiles"]["compression"]["model"]
+    compression_profile = raw["llm"]["profiles"]["compression"]
+    compression_model_ref = str(compression_profile.get("model_ref") or "").strip()
+    expected_compression_model = raw["llm"]["model_library"][compression_model_ref]["model"]
+    assert config.llm.get_profile("compression").model == expected_compression_model
     assert config.llm.discovery.timeout == raw["llm"]["discovery"]["timeout"]
     assert config.pet_gene.inherit_from_model == raw["pet"]["gene"]["inherit_from_model"]
     assert len(config.prompt.sections) == len(raw["prompt"]["sections"])

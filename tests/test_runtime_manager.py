@@ -191,7 +191,6 @@ def test_launcher_action_passes_runtime_manager_process_protection(monkeypatch, 
     assert env["VIBELUTION_PROTECTED_PROCESS_IDS"] == "29960;31096"
 
 
-
 def test_launcher_command_uses_python_adapter_on_posix(monkeypatch, tmp_path):
     launcher_path = tmp_path / "vibelution_launcher.py"
     monkeypatch.setattr(workbench_controller.os, "name", "posix", raising=False)
@@ -273,6 +272,81 @@ def test_python_launcher_discovers_lan_address_from_udp_route(monkeypatch):
 
     assert launcher._local_lan_addresses() == ["192.168.20.30"]
 
+
+def test_python_launcher_frontend_build_defaults_to_npm(monkeypatch, tmp_path):
+    import importlib.util
+
+    launcher_path = constants.PROJECT_ROOT / "scripts" / "vibelution_launcher.py"
+    spec = importlib.util.spec_from_file_location("vibelution_launcher_for_frontend_pm_test", launcher_path)
+    assert spec and spec.loader
+    launcher = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(launcher)
+
+    project_root = tmp_path / "repo"
+    web_dir = project_root / "web"
+    web_dir.mkdir(parents=True)
+    log_path = tmp_path / "frontend-build.log"
+    calls: list[tuple[list[str], str]] = []
+
+    monkeypatch.setattr(launcher, "PROJECT_ROOT", project_root)
+    monkeypatch.setattr(launcher, "FRONTEND_BUILD_LOG_PATH", log_path)
+    monkeypatch.delenv("VIBELUTION_FRONTEND_PM", raising=False)
+    monkeypatch.setattr(
+        launcher,
+        "_run_checked",
+        lambda args, *, cwd, label: calls.append((list(args), label)),
+    )
+
+    launcher._ensure_frontend_build()
+
+    assert calls == [
+        (["npm", "install"], "npm install"),
+        (["npm", "run", "build"], "npm run build"),
+    ]
+    event = json.loads(log_path.read_text(encoding="utf-8").splitlines()[-1])
+    assert event["event"] == "frontend_build.ensure"
+    assert event["packageManager"] == "npm"
+    assert event["needsInstall"] is True
+    assert event["needsBuild"] is True
+
+
+def test_python_launcher_frontend_build_can_opt_into_bun(monkeypatch, tmp_path):
+    import importlib.util
+
+    launcher_path = constants.PROJECT_ROOT / "scripts" / "vibelution_launcher.py"
+    spec = importlib.util.spec_from_file_location("vibelution_launcher_for_bun_pm_test", launcher_path)
+    assert spec and spec.loader
+    launcher = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(launcher)
+
+    project_root = tmp_path / "repo"
+    web_dir = project_root / "web"
+    web_dir.mkdir(parents=True)
+    log_path = tmp_path / "frontend-build.log"
+    calls: list[tuple[list[str], str]] = []
+
+    monkeypatch.setattr(launcher, "PROJECT_ROOT", project_root)
+    monkeypatch.setattr(launcher, "FRONTEND_BUILD_LOG_PATH", log_path)
+    monkeypatch.setenv("VIBELUTION_FRONTEND_PM", "bun")
+    monkeypatch.setattr(
+        launcher,
+        "_run_checked",
+        lambda args, *, cwd, label: calls.append((list(args), label)),
+    )
+
+    launcher._ensure_frontend_build()
+
+    assert calls == [
+        (["bun", "install"], "bun install"),
+        (["bun", "run", "bun:build"], "bun run bun:build"),
+    ]
+    event = json.loads(log_path.read_text(encoding="utf-8").splitlines()[-1])
+    assert event["event"] == "frontend_build.ensure"
+    assert event["packageManager"] == "bun"
+    assert event["needsInstall"] is True
+    assert event["needsBuild"] is True
+
+
 def test_launcher_error_detail_prioritizes_stderr_over_progress_stdout():
     detail = daemon._launcher_error_detail(
         subprocess.CompletedProcess(
@@ -330,6 +404,7 @@ def test_observe_workbench_keeps_launcher_control_surface_out_of_project_lifecyc
                 "url": "http://127.0.0.1:8000",
                 "backendPid": 3200,
                 "browserWindowPid": 4500,
+                "launcherBrowserWindowPid": 4500,
                 "browserManaged": True,
             }
         ),
@@ -347,7 +422,8 @@ def test_observe_workbench_keeps_launcher_control_surface_out_of_project_lifecyc
     assert snapshot["sessionRole"] == "launcher_control_surface"
     assert snapshot["observedState"] == "closed"
     assert snapshot["backendHealthy"] is True
-    assert snapshot["browserWindowAlive"] is True
+    assert snapshot["browserWindowAlive"] is False
+    assert snapshot["launcherBrowserWindowAlive"] is True
     assert snapshot["frontendOrphaned"] is False
 
 
@@ -565,6 +641,7 @@ def test_handle_start_supervised_run_returns_snapshot(monkeypatch):
     assert result["runId"] == "web-supervised-managed"
     assert result["snapshot"]["status"] == "queued"
 
+
 def test_runtime_manager_active_work_runs_collects_destructive_guard_sources(monkeypatch):
     from core.web.services import chat_room_service, session_service, supervised_worktree_evolution_service
 
@@ -651,6 +728,29 @@ def test_runtime_manager_active_work_runs_ignores_needs_continue_chat_turn(monke
     assert active == [
         {"kind": "chat_turn", "runId": "chat-live", "status": "running", "sessionId": "session-b"}
     ]
+
+
+def test_handle_retry_supervised_run_returns_new_snapshot(monkeypatch):
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    monkeypatch.setattr(daemon, "load_state", lambda: {"command": {}, "workbench": {}})
+    monkeypatch.setattr(daemon, "save_state", lambda state: state)
+    monkeypatch.setattr(daemon, "now_iso", lambda: "2026-05-19T08:00:00+00:00")
+    monkeypatch.setattr(daemon, "observe_workbench", lambda: {"observedState": "closed"})
+    monkeypatch.setattr(daemon, "build_evolution_summary", lambda: {"self": {}, "supervised": {}})
+    monkeypatch.setattr(
+        daemon.supervised_control_service,
+        "_LOCAL_RETRY_SUPERVISED_RUN",
+        lambda run_id: {"runId": "web-supervised-retry", "status": "queued", "retryOfRunId": run_id},
+    )
+
+    result = runtime_daemon._handle_retry_supervised_run(
+        command_id="cmd-retry",
+        args={"runId": "web-supervised-old"},
+    )
+
+    assert result["ok"] is True
+    assert result["runId"] == "web-supervised-retry"
+    assert result["snapshot"]["retryOfRunId"] == "web-supervised-old"
 
 
 def test_run_forever_refreshes_manager_started_at(monkeypatch):
@@ -1443,6 +1543,93 @@ def test_command_queue_records_queued_claimed_and_result_written_events(tmp_path
     assert [event_type for event_type, _, _ in scene_events] == [event["type"] for event in file_events]
     assert {kwargs["phase"] for _, _, kwargs in scene_events} == {"queue"}
     assert all(kwargs["occurred_at"] for _, _, kwargs in scene_events)
+
+
+def test_claim_next_command_skips_restart_deferred_until_future(tmp_path, monkeypatch):
+    inbox_dir = tmp_path / "inbox"
+    processing_dir = tmp_path / "processing"
+    results_dir = tmp_path / "results"
+    events_path = tmp_path / "events.jsonl"
+    for path in (inbox_dir, processing_dir, results_dir):
+        path.mkdir(parents=True)
+    (inbox_dir / "cmd-deferred.json").write_text(
+        json.dumps(
+            {
+                "commandId": "cmd-deferred",
+                "type": "restart_workbench",
+                "requestedBy": "web_ui",
+                "args": {
+                    "reason": "web_restart_button",
+                    "deferredUntilActiveWorkClear": True,
+                    "deferUntil": "2999-01-01T00:00:00+00:00",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    ready_command = {
+        "commandId": "cmd-ready",
+        "type": "open_workbench",
+        "requestedBy": "launcher_ps",
+        "args": {"reason": "launcher_start"},
+    }
+    (inbox_dir / "cmd-ready.json").write_text(json.dumps(ready_command), encoding="utf-8")
+
+    monkeypatch.setattr(command_queue, "INBOX_DIR", inbox_dir)
+    monkeypatch.setattr(command_queue, "PROCESSING_DIR", processing_dir)
+    monkeypatch.setattr(command_queue, "RESULTS_DIR", results_dir)
+    monkeypatch.setattr(command_queue, "EVENTS_PATH", events_path)
+    monkeypatch.setattr(command_queue, "ensure_runtime_manager_dirs", lambda: None)
+
+    claimed = command_queue.claim_next_command()
+
+    assert claimed is not None
+    processing_path, payload = claimed
+    assert payload["commandId"] == "cmd-ready"
+    assert processing_path.name == "cmd-ready.json"
+    assert (inbox_dir / "cmd-deferred.json").exists()
+
+
+def test_defer_processing_command_for_active_work_requeues_and_logs(tmp_path, monkeypatch):
+    inbox_dir = tmp_path / "inbox"
+    processing_dir = tmp_path / "processing"
+    results_dir = tmp_path / "results"
+    events_path = tmp_path / "events.jsonl"
+    for path in (inbox_dir, processing_dir, results_dir):
+        path.mkdir(parents=True)
+    processing_path = processing_dir / "cmd-restart.json"
+    command = {
+        "commandId": "cmd-restart",
+        "type": "restart_workbench",
+        "requestedBy": "web_ui",
+        "args": {"reason": "web_restart_button", "activeWorkDeferCount": 1},
+    }
+    processing_path.write_text(json.dumps(command), encoding="utf-8")
+
+    monkeypatch.setattr(command_queue, "INBOX_DIR", inbox_dir)
+    monkeypatch.setattr(command_queue, "PROCESSING_DIR", processing_dir)
+    monkeypatch.setattr(command_queue, "RESULTS_DIR", results_dir)
+    monkeypatch.setattr(command_queue, "EVENTS_PATH", events_path)
+    monkeypatch.setattr(command_queue, "ensure_runtime_manager_dirs", lambda: None)
+    monkeypatch.setattr(command_queue, "record_runtime_manager_scene_event", lambda *args, **kwargs: None)
+
+    command_queue.defer_processing_command_for_active_work(
+        processing_path,
+        command,
+        active_work_runs=[{"kind": "chat_turn", "runId": "turn-live"}],
+        delay_seconds=1,
+    )
+
+    queued = json.loads((inbox_dir / "cmd-restart.json").read_text(encoding="utf-8"))
+    assert not processing_path.exists()
+    assert queued["args"]["activeWorkDeferCount"] == 2
+    assert queued["args"]["lastActiveWorkCount"] == 1
+    assert queued["args"]["lastActiveWorkRuns"][0]["runId"] == "turn-live"
+    assert queued["args"]["deferUntil"]
+    event = json.loads(events_path.read_text(encoding="utf-8").splitlines()[-1])
+    assert event["type"] == "command_queue.command_deferred_active_work"
+    assert event["payload"]["attemptCount"] == 2
+    assert event["payload"]["activeWorkCount"] == 1
 
 
 def test_recover_processing_queue_completes_stale_satisfied_stop_manager_close(tmp_path, monkeypatch):
@@ -2397,6 +2584,69 @@ def test_observe_workbench_reports_backend_launch_pid(monkeypatch):
     assert observation["observedState"] == "open"
     assert observation["backendPid"] == 25744
     assert observation["backendLaunchPid"] == 43460
+
+
+def test_observe_workbench_recovers_managed_browser_window_from_profile(monkeypatch, tmp_path):
+    profile_dir = tmp_path / "workbench-app-profile"
+    profile_dir.mkdir()
+    monkeypatch.setattr(
+        workbench_controller,
+        "_load_launcher_state",
+        lambda: {
+            "url": "http://127.0.0.1:8000",
+            "backendPid": 25744,
+            "backendLaunchPid": 43460,
+            "browserLaunchPid": 4500,
+            "browserWindowPid": 4500,
+            "workbenchBrowserProfileDir": str(profile_dir),
+            "browserManaged": True,
+            "sessionId": "managed-browser-remap",
+        },
+    )
+    monkeypatch.setattr(workbench_controller, "_is_process_alive", lambda pid: pid in {25744, 4600})
+    monkeypatch.setattr(workbench_controller, "_is_backend_healthy", lambda url: True)
+    monkeypatch.setattr(workbench_controller, "_listening_pid_for_port", lambda port: 25744)
+    monkeypatch.setattr(workbench_controller, "_port_is_listening_socket", lambda port: True)
+    monkeypatch.setattr(
+        workbench_controller,
+        "managed_browser_process_payload",
+        lambda **kwargs: {
+            "supported": True,
+            "profileDir": str(profile_dir),
+            "count": 2,
+            "items": [
+                {
+                    "pid": 4600,
+                    "parentPid": 1,
+                    "name": "msedge.exe",
+                    "type": "browser",
+                    "subtype": "",
+                    "workingSetMB": 100,
+                    "privateMB": 90,
+                    "commandLinePreview": f"msedge.exe --user-data-dir={profile_dir} --app=http://127.0.0.1:8000",
+                },
+                {
+                    "pid": 4601,
+                    "parentPid": 4600,
+                    "name": "msedge.exe",
+                    "type": "renderer",
+                    "subtype": "",
+                    "workingSetMB": 60,
+                    "privateMB": 50,
+                    "commandLinePreview": "msedge.exe --type=renderer",
+                },
+            ],
+        },
+    )
+
+    observation = workbench_controller.observe_workbench()
+
+    assert observation["observedState"] == "open"
+    assert observation["browserWindowPid"] == 4600
+    assert observation["browserWindowAlive"] is True
+    assert observation["browserWindowRecoveredPid"] == 4600
+    assert observation["browserWindowRecoverySource"] == "managed_profile"
+    assert observation["lifecycleConsistency"] == "consistent"
 
 
 def test_snapshot_residual_excluded_pids_includes_backend_launch_tree_root():
@@ -3449,6 +3699,7 @@ def test_handle_restart_workbench_surfaces_launcher_error(monkeypatch):
     with pytest.raises(RuntimeError, match="launcher failed"):
         runtime_daemon._handle_restart_workbench(command_id="cmd-restart", args={})
 
+
 def test_handle_restart_workbench_blocks_active_chat_turn_before_close(monkeypatch):
     runtime_daemon = daemon.RuntimeManagerDaemon()
     state = {
@@ -3502,6 +3753,219 @@ def test_handle_restart_workbench_blocks_active_chat_turn_before_close(monkeypat
     )
     assert state["lastError"]["scope"] == "active_work"
     assert state["workbench"]["phase"] != "failed"
+
+
+def test_handle_restart_workbench_defers_active_chat_turn_before_close(monkeypatch):
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    state = {
+        "command": {"activeCommandId": "cmd-restart"},
+        "workbench": {
+            "desiredState": "open",
+            "observedState": "open",
+            "phase": "steady",
+        },
+    }
+    events: list[tuple[str, dict]] = []
+    close_calls: list[str] = []
+
+    monkeypatch.setattr(daemon, "load_state", lambda: state)
+    monkeypatch.setattr(daemon, "save_state", lambda next_state: next_state)
+    monkeypatch.setattr(daemon, "observe_workbench", lambda: {"observedState": "open"})
+    monkeypatch.setattr(
+        daemon,
+        "_runtime_manager_active_work_runs",
+        lambda: [{"kind": "chat_turn", "runId": "chat-live", "status": "running", "sessionId": "session-a"}],
+    )
+    monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: events.append((event_type, payload)))
+    monkeypatch.setattr(
+        daemon,
+        "close_workbench",
+        lambda: close_calls.append("close") or subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
+    )
+
+    result = runtime_daemon._handle_restart_workbench(
+        command_id="cmd-restart",
+        args={
+            "reason": "web_restart_button",
+            "source": "web_ui",
+            "deferredUntilActiveWorkClear": True,
+        },
+    )
+
+    assert result["completed"] is False
+    assert result["deferCommandUntilActiveWorkClear"] is True
+    assert result["activeWorkRuns"][0]["runId"] == "chat-live"
+    assert close_calls == []
+    assert events[0] == (
+        "workbench.restart.deferred_active_work_wait",
+        {
+            "commandId": "cmd-restart",
+            "commandType": "restart_workbench",
+            "reason": "web_restart_button",
+            "source": "web_ui",
+            "activeWorkCount": 1,
+            "activeWorkRuns": [
+                {"kind": "chat_turn", "runId": "chat-live", "status": "running", "sessionId": "session-a"}
+            ],
+        },
+    )
+    assert "lastError" not in state
+    assert state["workbench"]["phase"] != "failed"
+
+
+def test_handle_restart_workbench_build_preflight_fails_before_close(monkeypatch):
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    state = {
+        "command": {"activeCommandId": "cmd-restart"},
+        "workbench": {
+            "desiredState": "open",
+            "observedState": "open",
+            "phase": "steady",
+            "backendAlive": True,
+            "browserWindowAlive": True,
+            "browserManaged": True,
+            "browserWindowPid": 4567,
+        },
+    }
+    events: list[tuple[str, dict]] = []
+    close_calls: list[str] = []
+
+    monkeypatch.setattr(daemon, "load_state", lambda: state)
+    monkeypatch.setattr(daemon, "save_state", lambda next_state: next_state)
+    monkeypatch.setattr(daemon, "observe_workbench", lambda: dict(state["workbench"]))
+    monkeypatch.setattr(daemon, "_runtime_manager_active_work_runs", lambda: [])
+    monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: events.append((event_type, payload)))
+    monkeypatch.setattr(
+        daemon,
+        "_preflight_frontend_build_for_restart",
+        lambda command_id: (_ for _ in ()).throw(RuntimeError("Restart preflight failed before closing the workbench.")),
+    )
+    monkeypatch.setattr(
+        daemon,
+        "close_workbench",
+        lambda: close_calls.append("close") or subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
+    )
+
+    with pytest.raises(RuntimeError, match="Restart preflight failed before closing"):
+        runtime_daemon._handle_restart_workbench(
+            command_id="cmd-restart",
+            args={"reason": "launcher_restart", "source": "launcher_ps"},
+        )
+
+    assert close_calls == []
+    assert state["workbench"]["observedState"] == "open"
+
+
+def test_restart_build_preflight_uses_hidden_node_entrypoints_on_windows(monkeypatch):
+    calls: list[dict[str, object]] = []
+    events: list[tuple[str, dict]] = []
+
+    class DummyStartupInfo:
+        def __init__(self):
+            self.dwFlags = 0
+            self.wShowWindow = -1
+
+    def fake_run(*args, **kwargs):
+        calls.append({"args": args, "kwargs": kwargs})
+        return subprocess.CompletedProcess(args=args[0], returncode=0, stdout="built", stderr="")
+
+    monkeypatch.setattr(daemon.os, "name", "nt")
+    monkeypatch.setattr(daemon.shutil, "which", lambda command: "C:\\Program Files\\nodejs\\node.exe")
+    monkeypatch.setattr(daemon.subprocess, "DETACHED_PROCESS", 0x00000008, raising=False)
+    monkeypatch.setattr(daemon.subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200, raising=False)
+    monkeypatch.setattr(daemon.subprocess, "CREATE_NO_WINDOW", 0x08000000, raising=False)
+    monkeypatch.setattr(daemon.subprocess, "STARTF_USESHOWWINDOW", 0x00000001, raising=False)
+    monkeypatch.setattr(daemon.subprocess, "SW_HIDE", 0, raising=False)
+    monkeypatch.setattr(daemon.subprocess, "STARTUPINFO", DummyStartupInfo, raising=False)
+    monkeypatch.setattr(daemon.subprocess, "run", fake_run)
+    monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: events.append((event_type, payload)))
+
+    result = daemon._preflight_frontend_build_for_restart("cmd-restart")
+
+    assert len(calls) == 2
+    assert calls[0]["args"][0][0].endswith("node.exe")
+    assert "typescript" in calls[0]["args"][0][1]
+    assert calls[0]["args"][0][2:] == ["-b"]
+    assert calls[1]["args"][0][0].endswith("node.exe")
+    assert "vite" in calls[1]["args"][0][1]
+    assert calls[1]["args"][0][2:] == ["build"]
+    assert all("npm" not in str(call["args"][0]).lower() for call in calls)
+    for call in calls:
+        kwargs = call["kwargs"]
+        startupinfo = kwargs["startupinfo"]
+        assert kwargs["creationflags"] & 0x00000008
+        assert kwargs["creationflags"] & 0x00000200
+        assert kwargs["creationflags"] & 0x08000000
+        assert isinstance(startupinfo, DummyStartupInfo)
+        assert startupinfo.dwFlags & 0x00000001
+        assert startupinfo.wShowWindow == 0
+    assert result["ok"] is True
+    assert result["completedSteps"] == ["tsc -b", "vite build"]
+    assert events[-1][0] == "workbench.restart.build_preflight_succeeded"
+
+
+def test_runtime_manager_run_forever_requeues_deferred_restart(monkeypatch, tmp_path):
+    class StopLoop(Exception):
+        pass
+
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    command_path = tmp_path / "cmd-restart.json"
+    command_payload = {
+        "commandId": "cmd-restart",
+        "type": "restart_workbench",
+        "requestedBy": "web_ui",
+        "args": {"deferredUntilActiveWorkClear": True},
+    }
+    defer_calls: list[dict[str, object]] = []
+    completed: list[dict[str, object]] = []
+    saved_states: list[dict[str, object]] = []
+
+    monkeypatch.setattr(daemon, "ensure_runtime_manager_dirs", lambda: None)
+    monkeypatch.setattr(daemon, "save_pid", lambda pid: None)
+    monkeypatch.setattr(daemon, "clear_pid", lambda pid: None)
+    monkeypatch.setattr(daemon, "_mark_daemon_not_running_after_exit", lambda manager_pid: None)
+    monkeypatch.setattr(daemon, "load_state", lambda: {"stateVersion": 1, "command": {}})
+    monkeypatch.setattr(daemon, "save_state", lambda state: saved_states.append(dict(state)) or state)
+    monkeypatch.setattr(daemon, "recover_processing_queue", lambda: None)
+    monkeypatch.setattr(type(runtime_daemon), "_reconcile_observation", lambda self, state: state)
+    monkeypatch.setattr(daemon, "claim_next_command", lambda: (command_path, command_payload))
+    monkeypatch.setattr(
+        type(runtime_daemon),
+        "_handle_command",
+        lambda self, payload: {
+            "commandId": "cmd-restart",
+            "deferCommandUntilActiveWorkClear": True,
+            "activeWorkRuns": [{"kind": "chat_turn", "runId": "turn-live"}],
+        },
+    )
+    monkeypatch.setattr(
+        daemon,
+        "defer_processing_command_for_active_work",
+        lambda path, command, *, active_work_runs, delay_seconds: defer_calls.append(
+            {
+                "path": path,
+                "commandId": command["commandId"],
+                "activeWorkRuns": active_work_runs,
+                "delaySeconds": delay_seconds,
+            }
+        ),
+    )
+    monkeypatch.setattr(type(runtime_daemon), "_clear_active_command", lambda self: (_ for _ in ()).throw(StopLoop()))
+    monkeypatch.setattr(daemon, "complete_command", lambda path, result: completed.append(result))
+
+    with pytest.raises(StopLoop):
+        runtime_daemon.run_forever()
+
+    assert defer_calls == [
+        {
+            "path": command_path,
+            "commandId": "cmd-restart",
+            "activeWorkRuns": [{"kind": "chat_turn", "runId": "turn-live"}],
+            "delaySeconds": daemon._DEFERRED_RESTART_ACTIVE_WORK_POLL_SECONDS,
+        }
+    ]
+    assert completed == []
+    assert saved_states[0]["runtimeState"] == "running"
 
 
 def test_hot_restart_allows_only_requester_active_chat_turn(monkeypatch):
@@ -3886,6 +4350,7 @@ def test_handle_close_workbench_records_shutdown_source(monkeypatch):
     assert closed_calls == ["closed"]
     assert saved_states[0]["workbench"]["lastReason"] == "web_close_button"
     assert saved_states[0]["workbench"]["lastSource"] == "web_ui"
+
 
 def test_handle_close_workbench_blocks_active_chat_turn_before_close(monkeypatch):
     runtime_daemon = daemon.RuntimeManagerDaemon()
@@ -5131,6 +5596,46 @@ def test_residual_process_payload_reports_unmanaged_frontend_dev_server(monkeypa
     assert {item["kind"] for item in payload["items"]} == {"unmanaged_frontend_dev_server"}
     assert {item["pid"] for item in payload["items"]} == {51517, 51518}
     assert {item["port"] for item in payload["items"]} == {5173}
+
+
+def test_residual_process_payload_ignores_one_shot_frontend_build(monkeypatch, tmp_path):
+    class FakeProc:
+        def __init__(self, info):
+            self.info = info
+
+    repo = tmp_path / "repo"
+    web = repo / "web"
+    web.mkdir(parents=True)
+    monkeypatch.setattr(
+        process_inventory.psutil,
+        "process_iter",
+        lambda attrs: iter(
+            [
+                FakeProc(
+                    {
+                        "pid": 51520,
+                        "ppid": 1,
+                        "name": "cmd.exe",
+                        "cmdline": ["cmd.exe", "/d", "/s", "/c", "tsc", "-b", "&&", "vite", "build"],
+                        "cwd": str(web),
+                    }
+                ),
+                FakeProc(
+                    {
+                        "pid": 51521,
+                        "ppid": 51520,
+                        "name": "node.exe",
+                        "cmdline": ["node", "node_modules/.bin/vite", "build"],
+                        "cwd": str(web),
+                    }
+                ),
+            ]
+        ),
+    )
+
+    payload = process_inventory.residual_process_payload(project_root=repo)
+
+    assert payload == {"count": 0, "items": []}
 
 
 def test_residual_process_payload_ignores_inline_diagnostics_mentioning_frontend_tools(monkeypatch, tmp_path):

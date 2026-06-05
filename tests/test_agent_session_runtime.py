@@ -158,7 +158,7 @@ def test_tool_decision_and_deviation_render():
     summary = session.render_runtime_constraints()
 
     assert "下一步意图：精读实体" in summary
-    assert "代码符号 -> 读局部片段" in summary
+    assert "代码图谱 -> 读局部片段" in summary
     assert "命令兜底" in summary
 
 

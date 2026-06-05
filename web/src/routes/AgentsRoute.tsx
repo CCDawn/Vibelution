@@ -40,6 +40,9 @@ import {
   AgentConfigWorkspace,
   AgentConfigWorkspaceAgent,
   AgentConfigWorkspaceGroup,
+  AgentLlmBindings,
+  AgentLlmSlotDefinition,
+  AgentModelChoice,
   MemoryPolicy,
   ToolPolicy,
   ToolBundle,
@@ -57,7 +60,7 @@ type FilterId = string;
 
 type AgentConfigDraft = {
   displayName: string;
-  profileId: string;
+  llmBindings: AgentLlmBindings;
   promptTemplateId: string;
   toolPolicyId: string;
   memoryPolicyId: string;
@@ -74,10 +77,13 @@ type AgentTaskDraft = Omit<AgentTaskProfile, "taskTypes"> & {
 
 type AgentCreateDraft = {
   displayName: string;
-  profileId: string;
+  llmBindings: AgentLlmBindings;
   primaryMode: string;
   roleKey: string;
   promptTemplateId: string;
+  personaSummary: string;
+  taskMission: string;
+  allowedTools: string;
 };
 
 type AgentModeMembershipDraft = {
@@ -108,11 +114,13 @@ type AgentMemoryPolicyDraft = {
   readKnowledgeBaseIds: string[];
   proposeKnowledgeBaseIds: string[];
   reviewKnowledgeBaseIds: string[];
+  rateKnowledgeBaseIds: string[];
   newReadGroup: string;
   newWriteGroup: string;
   newReadKnowledgeBaseId: string;
   newProposeKnowledgeBaseId: string;
   newReviewKnowledgeBaseId: string;
+  newRateKnowledgeBaseId: string;
 };
 
 type AgentResetOptions = {
@@ -143,8 +151,10 @@ type AgentDraftSyncSource = {
 type ToolPolicyMode = "inherited" | "allowed" | "blocked" | "excluded";
 type AgentConfigPaneId = "overview" | "config" | "activity";
 type ToolPermissionGroup = {
-  category: string;
+  bundleId: string;
   label: string;
+  description: string;
+  category: string;
   tools: ToolRegistryItem[];
   allowedCount: number;
   blockedCount: number;
@@ -157,6 +167,7 @@ type AgentManagementAction = {
   label: string;
   detail: string;
   pane: AgentConfigPaneId;
+  route?: string;
 };
 type AgentManagementBrief = {
   score: number;
@@ -200,12 +211,62 @@ type AgentActivityTimelineItem = {
   canOpenLogs: boolean;
   evidence: AgentRuntimeEvidenceMatch | null;
 };
+type ModelProfileChoice = {
+  key: string;
+  modelId: string;
+  label: string;
+  modelLabel: string;
+};
 type RuntimeFocusEvidenceResult = {
   match: AgentRuntimeEvidenceMatch | null;
   reason: "run" | "source_run" | "session" | "fallback" | "missing";
 };
 
 const AGENT_PRIMARY_MODE_OPTIONS = ["chat", "research", "supervised_evolution", "self_evolution", "general"];
+const FALLBACK_AGENT_LLM_SLOTS: AgentLlmSlotDefinition[] = [
+  {
+    slot: "dialogue",
+    label: "对话模型",
+    description: "处理用户对话、工具规划和主回复生成。",
+    required: true,
+    requiresImageInput: false,
+  },
+  {
+    slot: "mentalModel",
+    label: "心智模型",
+    description: "用于心智状态、长期偏好和自我解释相关推理。",
+    required: false,
+    requiresImageInput: false,
+  },
+  {
+    slot: "summary",
+    label: "摘要模型",
+    description: "用于会话压缩、运行摘要和交接材料整理。",
+    required: false,
+    requiresImageInput: false,
+  },
+  {
+    slot: "subagentPlanning",
+    label: "子 Agent 规划",
+    description: "用于拆解委派任务、确定子 Agent 目标和边界。",
+    required: false,
+    requiresImageInput: false,
+  },
+  {
+    slot: "subagentExecution",
+    label: "子 Agent 执行",
+    description: "用于执行被委派的窄任务和返回结构化证据。",
+    required: false,
+    requiresImageInput: false,
+  },
+  {
+    slot: "vision",
+    label: "视觉理解",
+    description: "用于图片输入、截图分析和多模态理解。",
+    required: false,
+    requiresImageInput: true,
+  },
+];
 const DEFAULT_AGENT_RESET_OPTIONS: AgentResetOptions = {
   clearRuntimeState: true,
   resetDirectSession: true,
@@ -215,6 +276,17 @@ const DEFAULT_AGENT_RESET_OPTIONS: AgentResetOptions = {
   resetMemoryPolicy: false,
   resetRuntimePolicy: false,
 };
+const DEFAULT_SESSION_AGENT_ALLOWED_TOOLS = [
+  "grep_search_tool",
+  "glob_tool",
+  "read_file_tool",
+  "conversation_log_inspect_tool",
+  "get_core_context_tool",
+  "get_current_goal_tool",
+  "task_list_tool",
+  "get_git_status_summary_tool",
+  "get_recent_changes_tool",
+];
 
 function normalizeText(value: unknown) {
   return String(value ?? "").trim().toLowerCase();
@@ -299,7 +371,9 @@ function agentSearchText(agent: AgentConfigWorkspaceAgent) {
       agent.displayName,
       agent.primaryMode,
       agent.roleKey,
-      agent.profileId,
+      Object.values(agent.llmBindings ?? {}).map((binding) => binding?.modelId).join(" "),
+      agent.dialogueModel?.label,
+      agent.dialogueModel?.model,
       agent.promptTemplateId,
       agent.toolPolicyId,
       agent.memoryPolicyId,
@@ -347,6 +421,101 @@ function promptTemplateOptionLabel(
   const category = String(template.category || "").trim();
   const name = promptTemplateDisplayName(template, id, lang);
   return category ? `${name} · ${category}` : name;
+}
+
+function agentModelLabel(model: AgentModelChoice | null | undefined) {
+  return String(model?.label || model?.model || model?.modelId || "").trim() || "-";
+}
+
+function agentModelChoiceLabel(model: AgentModelChoice) {
+  const label = agentModelLabel(model);
+  const provider = String(model.providerKind || "").trim();
+  const modelName = String(model.model || "").trim();
+  return [label, provider && provider !== label ? provider : "", modelName && modelName !== label ? modelName : ""]
+    .filter(Boolean)
+    .join(" · ") || "-";
+}
+
+function agentModelChoiceAllowed(model: AgentModelChoice) {
+  const text = normalizeText([
+    agentModelLabel(model),
+    model.model,
+    model.modelId,
+    model.providerKind,
+  ].join(" "));
+  return !/\bimage\d*\b/.test(text) && !text.includes("image2");
+}
+
+function buildAgentModelChoices(models: AgentModelChoice[]): ModelProfileChoice[] {
+  return models
+    .filter(agentModelChoiceAllowed)
+    .map((model) => ({
+      key: model.modelId,
+      modelId: model.modelId,
+      label: agentModelChoiceLabel(model),
+      modelLabel: agentModelLabel(model),
+    }))
+    .sort((left, right) => left.label.localeCompare(right.label) || left.modelId.localeCompare(right.modelId));
+}
+
+function buildAgentSlotModelChoices(
+  models: AgentModelChoice[],
+  slot: AgentLlmSlotDefinition | undefined,
+): ModelProfileChoice[] {
+  const filtered = slot?.requiresImageInput
+    ? models.filter((model) => agentModelChoiceAllowed(model) && model.supportsImageInput !== false)
+    : models.filter(agentModelChoiceAllowed);
+  return filtered
+    .map((model) => ({
+      key: model.modelId,
+      modelId: model.modelId,
+      label: agentModelChoiceLabel(model),
+      modelLabel: agentModelLabel(model),
+    }))
+    .sort((left, right) => left.label.localeCompare(right.label) || left.modelId.localeCompare(right.modelId));
+}
+
+function agentLlmSlots(workspace: AgentConfigWorkspace | undefined): AgentLlmSlotDefinition[] {
+  return workspace?.agentLlmSlots?.length ? workspace.agentLlmSlots : FALLBACK_AGENT_LLM_SLOTS;
+}
+
+function normalizeAgentLlmBindings(bindings: AgentLlmBindings | null | undefined): AgentLlmBindings {
+  return Object.fromEntries(
+    Object.entries(bindings ?? {})
+      .map(([slot, binding]) => [slot, String(binding?.modelId ?? "").trim()])
+      .filter(([, modelId]) => modelId)
+      .map(([slot, modelId]) => [slot, { modelId }]),
+  ) as AgentLlmBindings;
+}
+
+function agentLlmSlotModelId(bindings: AgentLlmBindings | null | undefined, slot: AgentLlmSlotDefinition | undefined) {
+  const slotKey = slot?.slot ?? "dialogue";
+  return String(bindings?.[slotKey]?.modelId ?? "").trim();
+}
+
+function updateAgentLlmSlotBinding(
+  bindings: AgentLlmBindings,
+  slot: AgentLlmSlotDefinition,
+  modelId: string,
+): AgentLlmBindings {
+  const next = { ...normalizeAgentLlmBindings(bindings) };
+  const normalizedModelId = String(modelId || "").trim();
+  if (normalizedModelId) {
+    next[slot.slot] = { modelId: normalizedModelId };
+  } else {
+    delete next[slot.slot];
+  }
+  return next;
+}
+
+function sameAgentLlmBindings(left: AgentLlmBindings | null | undefined, right: AgentLlmBindings | null | undefined) {
+  const normalizedLeft = normalizeAgentLlmBindings(left);
+  const normalizedRight = normalizeAgentLlmBindings(right);
+  const keys = Array.from(new Set([...Object.keys(normalizedLeft), ...Object.keys(normalizedRight)])).sort();
+  return keys.every((key) => {
+    const slot = key as keyof AgentLlmBindings;
+    return String(normalizedLeft[slot]?.modelId ?? "") === String(normalizedRight[slot]?.modelId ?? "");
+  });
 }
 
 function issueTone(issues: AgentConfigHealthIssue[]) {
@@ -780,6 +949,68 @@ function archivedWorkspaceCache(
   };
 }
 
+function purgedWorkspaceCache(
+  workspace: AgentConfigWorkspace | undefined,
+  purgedAgentId: string,
+): AgentConfigWorkspace | undefined {
+  if (!workspace) {
+    return workspace;
+  }
+  const agentId = String(purgedAgentId || "").trim();
+  if (!agentId) {
+    return workspace;
+  }
+  const cachedAgent = workspace.agents.find((agent) => agent.agentId === agentId);
+  const nextAgents = workspace.agents.filter((agent) => agent.agentId !== agentId);
+  const nextGroups = workspace.groups.map((group) => {
+    const agentIds = group.agentIds.filter((id) => id !== agentId);
+    return {
+      ...group,
+      agentIds,
+      count: agentIds.length,
+    };
+  });
+  const wasActive = cachedAgent ? cachedAgent.status !== "archived" : false;
+  const wasArchived = cachedAgent ? cachedAgent.status === "archived" : false;
+  return {
+    ...workspace,
+    agents: nextAgents,
+    groups: nextGroups,
+    summary: {
+      ...workspace.summary,
+      activeAgentCount: wasActive ? Math.max(0, workspace.summary.activeAgentCount - 1) : workspace.summary.activeAgentCount,
+      archivedAgentCount: wasArchived ? Math.max(0, workspace.summary.archivedAgentCount - 1) : workspace.summary.archivedAgentCount,
+    },
+  };
+}
+
+function updatedAgentWorkspaceCache(
+  workspace: AgentConfigWorkspace | undefined,
+  updatedAgent: Partial<AgentConfigWorkspaceAgent> & Pick<AgentConfigWorkspaceAgent, "agentId">,
+): AgentConfigWorkspace | undefined {
+  if (!workspace) {
+    return workspace;
+  }
+  const nextAgents = workspace.agents.map((agent) =>
+    agent.agentId === updatedAgent.agentId
+      ? {
+          ...agent,
+          ...updatedAgent,
+          references: updatedAgent.references ?? agent.references,
+          health: updatedAgent.health ?? agent.health,
+          runtimeStatus: updatedAgent.runtimeStatus ?? agent.runtimeStatus,
+          dialogueModel: updatedAgent.dialogueModel ?? agent.dialogueModel,
+          llmBindingModels: updatedAgent.llmBindingModels ?? agent.llmBindingModels,
+          promptTemplate: updatedAgent.promptTemplate ?? agent.promptTemplate,
+        }
+      : agent,
+  );
+  return {
+    ...workspace,
+    agents: nextAgents,
+  };
+}
+
 function groupDisplayLabel(group: { id: string; label?: string } | undefined, copy: ReturnType<typeof agentsRouteCopy>) {
   if (!group) {
     return copy.activeAgents;
@@ -799,7 +1030,7 @@ function groupDescription(group: { id: string; description?: string }, copy: Ret
 function draftFromAgent(agent: AgentConfigWorkspaceAgent | null | undefined): AgentConfigDraft {
   return {
     displayName: agent?.displayName ?? "",
-    profileId: agent?.profileId ?? "",
+    llmBindings: normalizeAgentLlmBindings(agent?.llmBindings),
     promptTemplateId: agent?.promptTemplateId ?? "",
     toolPolicyId: agent?.toolPolicyId ?? "",
     memoryPolicyId: agent?.memoryPolicyId ?? "",
@@ -812,7 +1043,14 @@ function draftEqualsAgent(draft: AgentConfigDraft, agent: AgentConfigWorkspaceAg
     return true;
   }
   const base = draftFromAgent(agent);
-  return (Object.keys(base) as Array<keyof AgentConfigDraft>).every((key) => draft[key] === base[key]);
+  return (
+    draft.displayName === base.displayName
+    && sameAgentLlmBindings(draft.llmBindings, base.llmBindings)
+    && draft.promptTemplateId === base.promptTemplateId
+    && draft.toolPolicyId === base.toolPolicyId
+    && draft.memoryPolicyId === base.memoryPolicyId
+    && draft.status === base.status
+  );
 }
 
 function defaultPersonaProfile(): AgentPersonaProfile {
@@ -996,10 +1234,41 @@ function hasToolPolicyConfiguration(agent: AgentConfigWorkspaceAgent | null | un
   return Boolean(
     policy?.allowedTools?.length
       || policy?.preferredTools?.length
-      || policy?.blockedTools?.length
-      || policy?.writeScopes?.length
-      || policy?.readScopes?.length,
+      || policy?.blockedTools?.length,
   );
+}
+
+function agentBoundaryType(agent: AgentConfigWorkspaceAgent | null | undefined) {
+  return String(agent?.agentBoundary?.type || (agent?.status === "archived" ? "archived" : "")).trim();
+}
+
+function isWorkSessionAgent(agent: AgentConfigWorkspaceAgent | null | undefined) {
+  return agentBoundaryType(agent) === "work_session";
+}
+
+function isWorkSessionCreateDraft(draft: AgentCreateDraft) {
+  const primaryMode = String(draft.primaryMode || "").trim();
+  return primaryMode === "" || primaryMode === "chat";
+}
+
+function requiresPersonaProfile(agent: AgentConfigWorkspaceAgent | null | undefined) {
+  return agent?.agentBoundary?.requiresPersonaProfile === "true";
+}
+
+function requiresTaskProfile(agent: AgentConfigWorkspaceAgent | null | undefined) {
+  return agent?.agentBoundary?.requiresTaskProfile === "true";
+}
+
+function requiresTeamMembership(agent: AgentConfigWorkspaceAgent | null | undefined) {
+  return agent?.agentBoundary?.requiresTeamMembership === "true";
+}
+
+function hasModelAndPromptConfiguration(agent: AgentConfigWorkspaceAgent | null | undefined) {
+  return Boolean(agent?.llmBindings?.dialogue?.modelId && agent.promptTemplateId);
+}
+
+function hasWorkspaceConfiguration(agent: AgentConfigWorkspaceAgent | null | undefined) {
+  return Boolean(agent?.workspacePath || agent?.workspaceTerritory?.privateRoot);
 }
 
 function agentHasTeamReference(agent: AgentConfigWorkspaceAgent | null | undefined) {
@@ -1007,7 +1276,8 @@ function agentHasTeamReference(agent: AgentConfigWorkspaceAgent | null | undefin
 }
 
 function agentHasRuntimeSignal(agent: AgentConfigWorkspaceAgent | null | undefined) {
-  return Boolean(agent?.directSessionId || agent?.runtimeStatus || (agent?.agentInboxPendingCount ?? 0) > 0);
+  const runtimeState = String(agent?.runtimeStatus?.state || "").trim();
+  return Boolean(runtimeState && runtimeState !== "idle") || (agent?.agentInboxPendingCount ?? 0) > 0;
 }
 
 function buildAgentManagementBrief(
@@ -1015,25 +1285,45 @@ function buildAgentManagementBrief(
   copy: ReturnType<typeof agentsRouteCopy>,
   lang: "zh" | "en",
 ): AgentManagementBrief {
-  const items = [
-    { id: "identity", label: copy.managementIdentity, complete: hasPersonaProfile(agent), pane: "config" as const },
-    { id: "task", label: copy.managementTask, complete: hasTaskProfile(agent), pane: "config" as const },
-    { id: "tools", label: copy.managementTools, complete: hasToolPolicyConfiguration(agent), pane: "config" as const },
-    { id: "membership", label: copy.managementMembership, complete: agentHasTeamReference(agent), pane: "config" as const },
-    { id: "runtime", label: copy.managementRuntime, complete: agentHasRuntimeSignal(agent), pane: "activity" as const },
-  ];
+  const workSession = isWorkSessionAgent(agent);
+  const items = workSession
+    ? [
+        { id: "model_prompt", label: copy.managementModelPrompt, complete: hasModelAndPromptConfiguration(agent), pane: "config" as const },
+        { id: "tools", label: copy.managementTools, complete: hasToolPolicyConfiguration(agent), pane: "config" as const },
+        { id: "workspace", label: copy.managementWorkspace, complete: hasWorkspaceConfiguration(agent), pane: "config" as const },
+        { id: "runtime", label: copy.managementRuntime, complete: agentHasRuntimeSignal(agent), pane: "activity" as const },
+      ]
+    : [
+        { id: "identity", label: copy.managementIdentity, complete: !requiresPersonaProfile(agent) || hasPersonaProfile(agent), pane: "config" as const },
+        { id: "task", label: copy.managementTask, complete: !requiresTaskProfile(agent) || hasTaskProfile(agent), pane: "config" as const },
+        { id: "tools", label: copy.managementTools, complete: hasToolPolicyConfiguration(agent), pane: "config" as const },
+        { id: "membership", label: copy.managementMembership, complete: !requiresTeamMembership(agent) || agentHasTeamReference(agent), pane: "config" as const },
+        { id: "runtime", label: copy.managementRuntime, complete: agentHasRuntimeSignal(agent), pane: "activity" as const },
+      ];
   const actions: AgentManagementAction[] = [];
-  if (!items[0].complete) {
+  if (workSession && !items[0].complete) {
+    actions.push({ id: "model_prompt", label: copy.nextSetupModelPrompt, detail: copy.nextSetupModelPromptHint, pane: "config" });
+  }
+  if (!workSession && !items[0].complete) {
     actions.push({ id: "identity", label: copy.nextSetupIdentity, detail: copy.nextSetupIdentityHint, pane: "config" });
   }
-  if (!items[1].complete) {
+  if (!workSession && !items[1].complete) {
     actions.push({ id: "task", label: copy.nextSetupTask, detail: copy.nextSetupTaskHint, pane: "config" });
   }
-  if (!items[2].complete) {
+  if (!items.find((item) => item.id === "tools")?.complete) {
     actions.push({ id: "tools", label: copy.nextSetupTools, detail: copy.nextSetupToolsHint, pane: "config" });
   }
-  if (!items[3].complete) {
-    actions.push({ id: "membership", label: copy.nextSetupMembership, detail: copy.nextSetupMembershipHint, pane: "config" });
+  if (workSession && !items.find((item) => item.id === "workspace")?.complete) {
+    actions.push({ id: "workspace", label: copy.nextSetupWorkspace, detail: copy.nextSetupWorkspaceHint, pane: "config" });
+  }
+  if (!workSession && !items.find((item) => item.id === "membership")?.complete) {
+    actions.push({
+      id: "membership",
+      label: copy.nextSetupMembership,
+      detail: copy.nextSetupMembershipHint,
+      pane: "config",
+      route: agent?.agentId ? `/teams?agent=${encodeURIComponent(agent.agentId)}` : "/teams",
+    });
   }
   if ((agent?.agentInboxPendingCount ?? 0) > 0) {
     actions.unshift({ id: "inbox", label: copy.nextHandleInbox, detail: copy.nextHandleInboxHint, pane: "activity" });
@@ -1061,13 +1351,13 @@ function buildManagementFilterGroups(
     {
       id: "setup:persona",
       label: copy.managementFilterMissingPersona,
-      count: count((agent) => !hasPersonaProfile(agent)),
+      count: count((agent) => requiresPersonaProfile(agent) && !hasPersonaProfile(agent)),
       description: copy.managementFilterMissingPersonaHint,
     },
     {
       id: "setup:task",
       label: copy.managementFilterMissingTask,
-      count: count((agent) => !hasTaskProfile(agent)),
+      count: count((agent) => requiresTaskProfile(agent) && !hasTaskProfile(agent)),
       description: copy.managementFilterMissingTaskHint,
     },
     {
@@ -1079,7 +1369,7 @@ function buildManagementFilterGroups(
     {
       id: "setup:membership",
       label: copy.managementFilterNoTeam,
-      count: count((agent) => !agentHasTeamReference(agent)),
+      count: count((agent) => requiresTeamMembership(agent) && !agentHasTeamReference(agent)),
       description: copy.managementFilterNoTeamHint,
     },
     {
@@ -1092,7 +1382,7 @@ function buildManagementFilterGroups(
     {
       id: "setup:maintenance",
       label: copy.managementFilterMaintenance,
-      count: count((agent) => agent.health.length > 0 || agent.status === "archived"),
+      count: count((agent) => agent.health.length > 0),
       description: copy.managementFilterMaintenanceHint,
     },
   ];
@@ -1101,17 +1391,17 @@ function buildManagementFilterGroups(
 function managementFilterMatches(agent: AgentConfigWorkspaceAgent, activeFilter: FilterId) {
   switch (activeFilter) {
     case "setup:persona":
-      return !hasPersonaProfile(agent);
+      return requiresPersonaProfile(agent) && !hasPersonaProfile(agent);
     case "setup:task":
-      return !hasTaskProfile(agent);
+      return requiresTaskProfile(agent) && !hasTaskProfile(agent);
     case "setup:tools":
       return !hasToolPolicyConfiguration(agent);
     case "setup:membership":
-      return !agentHasTeamReference(agent);
+      return requiresTeamMembership(agent) && !agentHasTeamReference(agent);
     case "setup:inbox":
       return (agent.agentInboxPendingCount ?? 0) > 0;
     case "setup:maintenance":
-      return agent.health.length > 0 || agent.status === "archived";
+      return agent.health.length > 0;
     default:
       return true;
   }
@@ -1138,7 +1428,14 @@ function buildAgentCapabilityPreview(
 }
 
 function configDraftEqualsDraft(left: AgentConfigDraft, right: AgentConfigDraft) {
-  return (Object.keys(right) as Array<keyof AgentConfigDraft>).every((key) => left[key] === right[key]);
+  return (
+    left.displayName === right.displayName
+    && sameAgentLlmBindings(left.llmBindings, right.llmBindings)
+    && left.promptTemplateId === right.promptTemplateId
+    && left.toolPolicyId === right.toolPolicyId
+    && left.memoryPolicyId === right.memoryPolicyId
+    && left.status === right.status
+  );
 }
 
 function membershipDraftEqualsDraft(left: AgentModeMembershipDraft, right: AgentModeMembershipDraft) {
@@ -1178,14 +1475,19 @@ function taskDraftEqualsDraft(left: AgentTaskDraft, right: AgentTaskDraft) {
 }
 
 function createDraftFromWorkspace(workspace: AgentConfigWorkspace | undefined): AgentCreateDraft {
-  const firstProfile = workspace?.modelProfiles?.[0]?.profileId ?? "primary";
+  const firstModel = buildAgentModelChoices(workspace?.agentModelChoices ?? [])[0]?.modelId
+    ?? workspace?.agentModelChoices?.[0]?.modelId
+    ?? "";
   const firstPrompt = workspace?.promptTemplates?.find((item) => item.category === "chat") ?? workspace?.promptTemplates?.[0];
   return {
     displayName: "",
-    profileId: firstProfile || "primary",
+    llmBindings: firstModel ? { dialogue: { modelId: firstModel } } : {},
     primaryMode: "chat",
     roleKey: "",
     promptTemplateId: firstPrompt?.promptTemplateId || firstPrompt?.templateId || "prompt-chat-default",
+    personaSummary: "",
+    taskMission: "",
+    allowedTools: DEFAULT_SESSION_AGENT_ALLOWED_TOOLS.join(", "),
   };
 }
 
@@ -1194,21 +1496,33 @@ function normalizeCreateDraftForWorkspace(draft: AgentCreateDraft, workspace: Ag
     return draft;
   }
   const defaults = createDraftFromWorkspace(workspace);
-  const profileIds = new Set((workspace.modelProfiles ?? []).map((profile) => profile.profileId));
+  const modelIds = new Set(buildAgentModelChoices(workspace.agentModelChoices ?? []).map((choice) => choice.modelId));
   const promptIds = new Set((workspace.promptTemplates ?? []).map((template) => template.promptTemplateId || template.templateId || ""));
-  const profileId = profileIds.size === 0 || profileIds.has(draft.profileId) ? draft.profileId : defaults.profileId;
+  const dialogueModelId = agentLlmSlotModelId(draft.llmBindings, FALLBACK_AGENT_LLM_SLOTS[0]);
+  const defaultDialogueModelId = agentLlmSlotModelId(defaults.llmBindings, FALLBACK_AGENT_LLM_SLOTS[0]);
+  const nextDialogueModelId = modelIds.size === 0 || modelIds.has(dialogueModelId) ? dialogueModelId : defaultDialogueModelId;
   const promptTemplateId = !draft.promptTemplateId || promptIds.size === 0 || promptIds.has(draft.promptTemplateId)
     ? draft.promptTemplateId || defaults.promptTemplateId
     : defaults.promptTemplateId;
   return {
     ...draft,
-    profileId: profileId || defaults.profileId,
+    llmBindings: updateAgentLlmSlotBinding(draft.llmBindings, FALLBACK_AGENT_LLM_SLOTS[0], nextDialogueModelId || defaultDialogueModelId),
     promptTemplateId,
   };
 }
 
 function createDraftReady(draft: AgentCreateDraft) {
-  return Boolean(draft.displayName.trim() && draft.profileId.trim() && draft.primaryMode.trim());
+  const workSession = isWorkSessionCreateDraft(draft);
+  return Boolean(
+    draft.displayName.trim()
+    && agentLlmSlotModelId(draft.llmBindings, FALLBACK_AGENT_LLM_SLOTS[0])
+    && draft.primaryMode.trim()
+    && (workSession || draft.roleKey.trim())
+    && draft.promptTemplateId.trim()
+    && (workSession || draft.personaSummary.trim())
+    && (workSession || draft.taskMission.trim())
+    && expertiseFromDraft(draft.allowedTools).length > 0
+  );
 }
 
 function slotForAgent(slots: Record<string, string> | undefined, agentId: string) {
@@ -1413,7 +1727,7 @@ function toolCategoryLabel(category: string, fallback: string | undefined, lang:
   const normalized = String(category || "").trim();
   const zh: Record<string, string> = {
     workspace_read: "工作区读取",
-    workspace_write: "工作区写入",
+    workspace_write: "工作区保存",
     code_quality: "代码质量",
     web_research: "网络与检索",
     git_evolution: "Git 与进化",
@@ -1459,27 +1773,21 @@ function toolTierLabel(tier: string, lang: "zh" | "en") {
   return ((lang === "zh" ? zh : en)[normalized] ?? normalized) || "-";
 }
 
-function groupPolicyToolsByCategory(
+function fallbackToolBundleLabel(lang: "zh" | "en") {
+  return lang === "zh" ? "未归入工具包" : "Unbundled tools";
+}
+
+function groupPolicyToolsByBundle(
   tools: ToolRegistryItem[],
+  bundles: ToolBundle[],
   draft: AgentToolPolicyDraft,
   lang: "zh" | "en",
 ): ToolPermissionGroup[] {
-  const groups = new Map<string, ToolPermissionGroup>();
-  for (const tool of tools) {
-    const category = String(tool.category || "uncategorized").trim() || "uncategorized";
-    let group = groups.get(category);
-    if (!group) {
-      group = {
-        category,
-        label: toolCategoryLabel(category, tool.categoryLabel, lang),
-        tools: [],
-        allowedCount: 0,
-        blockedCount: 0,
-        inheritedCount: 0,
-        highRiskCount: 0,
-      };
-      groups.set(category, group);
-    }
+  const toolByName = new Map(tools.map((tool) => [tool.name, tool]));
+  const groups: ToolPermissionGroup[] = [];
+  const pushedToolKeys = new Set<string>();
+
+  const pushTool = (group: ToolPermissionGroup, tool: ToolRegistryItem) => {
     const mode = toolPolicyMode(draft, tool.name);
     group.tools.push(tool);
     if (mode === "allowed") {
@@ -1492,8 +1800,54 @@ function groupPolicyToolsByCategory(
     if (tool.permissionTier === "high" || tool.permissionPolicy?.requiresExplicitAllow) {
       group.highRiskCount += 1;
     }
+  };
+
+  for (const bundle of bundles) {
+    const group: ToolPermissionGroup = {
+      bundleId: bundle.bundleId,
+      label: bundle.label,
+      description: bundle.description,
+      category: bundle.category,
+      tools: [],
+      allowedCount: 0,
+      blockedCount: 0,
+      inheritedCount: 0,
+      highRiskCount: 0,
+    };
+    for (const toolName of bundle.toolNames) {
+      const tool = toolByName.get(toolName);
+      if (!tool) {
+        continue;
+      }
+      pushedToolKeys.add(tool.name);
+      pushTool(group, tool);
+    }
+    if (group.tools.length) {
+      groups.push(group);
+    }
   }
-  return Array.from(groups.values()).sort((left, right) => {
+
+  const unbundled: ToolPermissionGroup = {
+    bundleId: "unbundled",
+    label: fallbackToolBundleLabel(lang),
+    description: lang === "zh" ? "这些工具暂未归入任何工具包，建议单独审查后再授权。" : "Tools not yet assigned to a package. Review them individually before allowing them.",
+    category: "unbundled",
+    tools: [],
+    allowedCount: 0,
+    blockedCount: 0,
+    inheritedCount: 0,
+    highRiskCount: 0,
+  };
+  for (const tool of tools) {
+    if (!pushedToolKeys.has(tool.name)) {
+      pushTool(unbundled, tool);
+    }
+  }
+  if (unbundled.tools.length) {
+    groups.push(unbundled);
+  }
+
+  return groups.sort((left, right) => {
     const leftTouched = left.allowedCount + left.blockedCount;
     const rightTouched = right.allowedCount + right.blockedCount;
     if (leftTouched !== rightTouched) {
@@ -1517,6 +1871,7 @@ function defaultMemoryPolicy(policyId = ""): MemoryPolicy {
     readKnowledgeBaseIds: [],
     proposeKnowledgeBaseIds: [],
     reviewKnowledgeBaseIds: [],
+    rateKnowledgeBaseIds: [],
   };
 }
 
@@ -1527,11 +1882,13 @@ function memoryPolicyDraftFromAgent(agent: AgentConfigWorkspaceAgent | null | un
     readKnowledgeBaseIds: sortedIds(agent?.memoryPolicy?.readKnowledgeBaseIds ?? []),
     proposeKnowledgeBaseIds: sortedIds(agent?.memoryPolicy?.proposeKnowledgeBaseIds ?? []),
     reviewKnowledgeBaseIds: sortedIds(agent?.memoryPolicy?.reviewKnowledgeBaseIds ?? []),
+    rateKnowledgeBaseIds: sortedIds(agent?.memoryPolicy?.rateKnowledgeBaseIds ?? []),
     newReadGroup: "",
     newWriteGroup: "",
     newReadKnowledgeBaseId: "",
     newProposeKnowledgeBaseId: "",
     newReviewKnowledgeBaseId: "",
+    newRateKnowledgeBaseId: "",
   };
 }
 
@@ -1543,6 +1900,7 @@ function memoryPolicyDraftEqualsAgent(draft: AgentMemoryPolicyDraft, agent: Agen
     && sameStringSet(draft.readKnowledgeBaseIds, base.readKnowledgeBaseIds)
     && sameStringSet(draft.proposeKnowledgeBaseIds, base.proposeKnowledgeBaseIds)
     && sameStringSet(draft.reviewKnowledgeBaseIds, base.reviewKnowledgeBaseIds)
+    && sameStringSet(draft.rateKnowledgeBaseIds, base.rateKnowledgeBaseIds)
   );
 }
 
@@ -1553,6 +1911,7 @@ function memoryPolicyDraftEqualsDraft(left: AgentMemoryPolicyDraft, right: Agent
     && sameStringSet(left.readKnowledgeBaseIds, right.readKnowledgeBaseIds)
     && sameStringSet(left.proposeKnowledgeBaseIds, right.proposeKnowledgeBaseIds)
     && sameStringSet(left.reviewKnowledgeBaseIds, right.reviewKnowledgeBaseIds)
+    && sameStringSet(left.rateKnowledgeBaseIds, right.rateKnowledgeBaseIds)
   );
 }
 
@@ -1709,7 +2068,7 @@ function agentsRouteCopy(lang: "zh" | "en") {
     ? {
         eyebrow: "Agent Center",
         title: "Agent 中心",
-        subtitle: "统一查看长期 Agent 的身份、模型、提示词、工具、记忆、模式归属和健康状态。",
+        subtitle: "统一查看长期 Agent 的身份、模型、提示词、工具、记忆、使用位置和健康状态。",
         refresh: "刷新",
         loading: "正在整理 Agent 配置...",
         loadFailed: "Agent 配置加载失败",
@@ -1719,6 +2078,7 @@ function agentsRouteCopy(lang: "zh" | "en") {
         activeAgents: "活跃 Agent",
         filterSections: {
           status: "状态",
+          boundary: "Agent 类型",
           mode: "运行模式",
           reference: "引用关系",
           management: "管理任务",
@@ -1727,6 +2087,10 @@ function agentsRouteCopy(lang: "zh" | "en") {
           active: "活跃 Agent",
           needs_review: "需要处理",
           archived: "已归档",
+          work_session: "会话工作 Agent",
+          team_role: "团队角色 Agent",
+          system_role: "系统角色 Agent",
+          service_role: "服务维护 Agent",
           chat: "会话模式",
           research: "科研模式",
           supervised_evolution: "监督进化模式",
@@ -1738,6 +2102,10 @@ function agentsRouteCopy(lang: "zh" | "en") {
           active: "当前可被业务页面引用或调度的 Agent。",
           needs_review: "存在阻塞或警告健康项的活跃 Agent。",
           archived: "只保留历史数据、不再进入可用池的 Agent。",
+          work_session: "用于项目开发、调试、实现和审计的 Codex-like 会话执行体。",
+          team_role: "拥有人物/任务档案，并进入团队或科研组织结构的 Agent。",
+          system_role: "由自进化、监督进化等系统流程固定管理的 Agent。",
+          service_role: "负责知识、工具、记忆或平台维护的非人物团队成员 Agent。",
           group_chat: "被一个或多个群聊引用的 Agent。",
           team: "被一个或多个团队画布引用的 Agent。",
         } as Record<string, string>,
@@ -1745,8 +2113,8 @@ function agentsRouteCopy(lang: "zh" | "en") {
         managementFilterMissingPersonaHint: "缺少性别、年龄、沟通风格、背景或专长等人物档案。",
         managementFilterMissingTask: "未配置任务",
         managementFilterMissingTaskHint: "缺少使命、职责、适合任务、完成标准或交接说明。",
-        managementFilterMissingTools: "工具权限为空",
-        managementFilterMissingToolsHint: "缺少工具策略、允许/优先/禁用工具或写入边界。",
+        managementFilterMissingTools: "工具能力未配置",
+        managementFilterMissingToolsHint: "缺少工具能力包、允许/优先/禁用工具或默认保存位置。",
         managementFilterNoTeam: "无团队归属",
         managementFilterNoTeamHint: "尚未被任何团队画布引用，适合继续分配组织位置。",
         managementFilterPendingInbox: "有待处理消息",
@@ -1754,12 +2122,18 @@ function agentsRouteCopy(lang: "zh" | "en") {
         managementFilterMaintenance: "维护/健康处理",
         managementFilterMaintenanceHint: "存在健康问题或归档状态，需要进入维护区处理。",
         createAgent: "新增 Agent",
-        createAgentTitle: "新增长期 Agent",
-        createAgentHint: "新 Agent 会创建一个直连会话，并保留独立工作区、记忆策略和工具策略。",
+        createAgentTitle: "新增 Agent",
+        createAgentHint: "会话工作 Agent 用于项目开发和调试，按 Codex-like 配置创建；团队/科研 Agent 才需要人物摘要、任务使命和团队归属。",
         createAgentName: "功能名",
         createAgentNamePlaceholder: "例如：科研复核 Agent",
         createAgentRole: "角色键",
-        createAgentRolePlaceholder: "可选，例如 research_reviewer",
+        createAgentRolePlaceholder: "必填，例如 research_reviewer",
+        createAgentPersonaSummary: "人物摘要",
+        createAgentPersonaPlaceholder: "例如：冷静、细致，负责把结论拆成可验证证据。",
+        createAgentTaskMission: "任务使命",
+        createAgentTaskMissionPlaceholder: "例如：复核科研结论，指出证据缺口并给出下一步建议。",
+        createAgentAllowedTools: "允许工具",
+        createAgentAllowedToolsPlaceholder: "例如：agent_message_tool, web_search_tool",
         cancelCreate: "取消",
         creatingAgent: "创建中...",
         resetAgent: "重置调试状态",
@@ -1776,12 +2150,12 @@ function agentsRouteCopy(lang: "zh" | "en") {
         resetPersonaProfileHint: "清空性别、年龄、称谓、性格、背景、专长、沟通风格等身份描述。",
         resetTaskProfile: "重置任务档案",
         resetTaskProfileHint: "清空使命、职责、适合/不适合任务、完成标准、交付物和交接说明。",
-        resetToolPolicy: "重置工具权限",
-        resetToolPolicyHint: "恢复为默认工具策略，移除该 Agent 私有工具允许、优先、禁用和工作区写入调整。",
-        resetMemoryPolicy: "重置记忆策略",
-        resetMemoryPolicyHint: "恢复该 Agent 私有记忆策略配置；不删除 memory 目录里的记忆内容。",
+        resetToolPolicy: "重置工具能力",
+        resetToolPolicyHint: "恢复为默认工具设置，移除该 Agent 私有工具允许、优先、禁用和保存位置调整。",
+        resetMemoryPolicy: "重置记忆设置",
+        resetMemoryPolicyHint: "恢复该 Agent 私有记忆配置；不删除 memory 目录里的记忆内容。",
         resetRuntimePolicy: "重置运行策略",
-        resetRuntimePolicyHint: "恢复子 Agent 委派、并发深度、唤醒和监督审批策略为默认值。",
+        resetRuntimePolicyHint: "恢复协作助手委派、并发深度、唤醒和监督审批策略为默认值。",
         archiveAgent: "安全归档",
         archivingAgent: "归档中...",
         archiveAgentTitle: "安全删减",
@@ -1803,44 +2177,55 @@ function agentsRouteCopy(lang: "zh" | "en") {
         inbox: "待处理消息",
         runningAgents: "运行中",
         blockedAgents: "阻塞/失败",
-        model: "模型模板",
+        model: "模型绑定",
+        llmSlots: "Agent 模型绑定",
+        llmSlotsHint: "按 Agent 自己配置对话、心智模型、摘要、子 Agent 和视觉等 LLM 槽位；设置页只维护模型库资产。",
+        requiredSlot: "必填",
+        optionalSlot: "可选",
+        inheritDialogueModel: "未单独指定",
         prompt: "提示词",
-        tools: "工具权限",
-        memory: "记忆策略",
-        territory: "工作领地",
-        privateTerritory: "私有写入根",
-        sharedTerritory: "共享读取区",
-        writeBoundary: "默认写入边界",
+        tools: "工具能力",
+        memory: "记忆设置",
+        territory: "工作空间",
+        privateTerritory: "私人工作区",
+        sharedTerritory: "共享资料区",
+        writeBoundary: "默认保存位置",
         territoryLegacy: "历史会话路径",
         context: "上下文",
         run: "运行",
         communication: "通信",
-        delegation: "子 Agent",
-        modeMembership: "模式归属",
+        delegation: "协作助手",
+        modeMembership: "使用位置",
         references: "引用位置",
         sessions: "会话 / 群聊 / 工作区",
         logs: "运行记录与日志",
         noAgents: "没有匹配当前筛选的 Agent。",
         selectAgent: "选择一个 Agent 查看统一配置卡片。",
         readOnly: "只读总览",
-        policyPending: "策略注册表待接入",
+        policyPending: "协作策略待配置",
         noIssues: "当前没有明显健康问题。",
         routeHint: "这张卡片是 Agent 的唯一配置点；业务页面只引用这里的 Agent。",
         managementBriefTitle: "管理完整度",
-        managementBriefHint: "按招人后最常见的配置顺序检查：人物、任务、工具、归属、运行。",
+        managementBriefHint: "按当前 Agent 类型检查必要配置；会话工作 Agent 不要求人物档案和团队归属。",
         managementIdentity: "人物",
         managementTask: "任务",
+        managementModelPrompt: "模型/指令",
+        managementWorkspace: "工作区",
         managementTools: "工具",
         managementMembership: "归属",
         managementRuntime: "运行",
         nextActionsTitle: "下一步建议",
         nextAllReady: "关键配置已齐，可以直接在团队或会话中使用。",
+        nextSetupModelPrompt: "配置模型与项目指令",
+        nextSetupModelPromptHint: "会话工作 Agent 需要先确定 LLM 和提示词/项目指令入口。",
         nextSetupIdentity: "补齐人物档案",
         nextSetupIdentityHint: "让顾问和用户知道这个 Agent 的性格、背景、专长与协作方式。",
         nextSetupTask: "补齐任务档案",
         nextSetupTaskHint: "明确它适合承担什么任务、产出什么交付物、何时需要交接。",
         nextSetupTools: "配置工具能力包",
         nextSetupToolsHint: "选择核心/科研/协作等工具包，并检查高风险工具授权。",
+        nextSetupWorkspace: "检查工作区边界",
+        nextSetupWorkspaceHint: "确认项目根、私人工作区和共享写入权限符合开发任务需要。",
         nextSetupMembership: "绑定团队归属",
         nextSetupMembershipHint: "把它放进团队画布，形成可观察的组织结构。",
         nextHandleInbox: "处理待办消息",
@@ -1850,7 +2235,7 @@ function agentsRouteCopy(lang: "zh" | "en") {
         effectiveAllowedTools: "实际允许",
         highRiskAllowedTools: "高风险允许",
         explicitAllowedTools: "显式授权",
-        writeBoundaryPreview: "写入边界",
+        writeBoundaryPreview: "保存位置",
         maintenanceTitle: "维护与危险操作",
         maintenanceHint: "调试重置、归档和彻底删除集中在这里；普通身份、任务、工具配置不和删除动作混在一起。",
         healthReason: "原因",
@@ -1860,10 +2245,10 @@ function agentsRouteCopy(lang: "zh" | "en") {
         configGuideIdentityHint: "名称、状态、人物档案决定用户和其他 Agent 如何称呼它。",
         configGuideRuntime: "它用什么脑子",
         configGuideRuntimeHint: "模型模板和提示词模板决定每次会话的基础能力与说话方式。",
-        configGuideBoundary: "它能碰哪里",
-        configGuideBoundaryHint: "工具和记忆只在这里选择模板；细粒度授权到策略页调整。",
-        toolPolicyPickerHint: "选择工具权限模板；具体允许、优先、禁用哪些工具，请到“策略”页调整。",
-        memoryPolicyPickerHint: "选择记忆边界模板；具体可读/可写共享组，请到“策略”页调整。",
+        configGuideBoundary: "它能用哪些资源",
+        configGuideBoundaryHint: "工具和记忆先在这里选择模板；细粒度配置到“策略”页调整。",
+        toolPolicyPickerHint: "选择工具能力模板；具体允许、优先、禁用哪些工具，请到“策略”页调整。",
+        memoryPolicyPickerHint: "选择记忆范围模板；具体可查看/可保存的共享组，请到“策略”页调整。",
         editAvatar: "编辑头像",
         avatarEditorTitle: "Agent 头像",
         avatarEditorHint: "头像写入 AgentDirectory，Chat、团队和群聊引用会同步使用。",
@@ -1914,16 +2299,16 @@ function agentsRouteCopy(lang: "zh" | "en") {
         resetConfig: "重置",
         savingConfig: "保存中...",
         status: "状态",
-        membershipTitle: "模式归属",
+        membershipTitle: "使用位置",
         saveMembership: "保存归属",
         savingMembership: "保存归属中...",
         chatRoomMembership: "群聊成员",
         noChatRooms: "还没有可配置的群聊。",
-        toolPolicyTitle: "工具权限",
-        saveToolPolicy: "保存权限",
-        savingToolPolicy: "保存权限中...",
-        toolBundlesTitle: "工具包快速配置",
-        toolBundlesHint: "工具包会写入允许工具和优先工具；叠加会保留手动调整，重置会把草稿改为该工具包。",
+        toolPolicyTitle: "工具能力",
+        saveToolPolicy: "保存工具",
+        savingToolPolicy: "保存工具中...",
+        toolBundlesTitle: "按工具包配置",
+        toolBundlesHint: "先选适合这个 Agent 的工具包，再在下方微调单个工具；同一工具只会保存一份授权状态。",
         applyBundle: "叠加",
         replaceWithBundle: "重置为此包",
         preferredTools: "优先",
@@ -1932,37 +2317,38 @@ function agentsRouteCopy(lang: "zh" | "en") {
         toolGovernanceSubmit: "提交治理请求",
         toolGovernanceSubmitting: "提交中...",
         toolGovernanceReason: "变更理由",
-        toolGovernanceReasonPlaceholder: "说明为什么这个 Agent 需要这些工具权限",
+        toolGovernanceReasonPlaceholder: "说明为什么这个 Agent 需要这些工具能力",
         toolGovernanceApplyAuto: "低风险自动应用",
         toolGovernanceApplyReview: "全部走审批",
         toolGovernancePending: "待审批请求",
         toolGovernanceHistory: "最近治理记录",
         toolGovernanceApprove: "批准",
         toolGovernanceReject: "拒绝",
-        toolGovernanceNoDelta: "先调整工具权限草稿，再提交治理请求。",
+        toolGovernanceNoDelta: "先调整工具配置草稿，再提交治理请求。",
         toolGovernanceEmpty: "还没有工具治理记录。",
         toolGovernanceSuccess: "工具治理请求已记录",
         toolGovernanceResolved: "工具治理请求已处理",
         toolSearch: "筛选工具",
         noTools: "当前没有可配置的工具。",
-        toolCategoryCount: "工具分类",
+        toolCategoryCount: "工具包",
         toolHighRisk: "高风险",
         toolTags: "能力标签",
         allowedTools: "允许",
         blockedTools: "禁用",
         inheritedTools: "默认",
-        workspaceWriteScopes: "工作区写入",
-        privateWriteScope: "私有领地",
-        sharedWriteScope: "共享工作区",
+        workspaceWriteScopes: "保存位置",
+        privateWriteScope: "私人工作区",
+        sharedWriteScope: "共享空间",
         sharedWriteHint: "开启后该 Agent 可以把工具产物写入 workspace/shared。",
-        memoryPolicyTitle: "记忆策略",
+        memoryPolicyTitle: "记忆设置",
         saveMemoryPolicy: "保存记忆",
         savingMemoryPolicy: "保存记忆中...",
-        readSharedGroups: "可读共享组",
-        writeSharedGroups: "可写共享组",
-        readKnowledgeBaseIds: "可读知识库",
+        readSharedGroups: "可查看共享组",
+        writeSharedGroups: "可保存共享组",
+        readKnowledgeBaseIds: "可查看知识库",
         proposeKnowledgeBaseIds: "可提交知识库",
         reviewKnowledgeBaseIds: "可审核知识库",
+        rateKnowledgeBaseIds: "可评级知识库",
         knowledgeBasePlaceholder: "输入知识库 ID，例如 kb-research",
         noKnowledgeBaseIds: "未限定知识库，默认按团队成员和角色判定。",
         addSharedGroup: "添加",
@@ -1972,7 +2358,7 @@ function agentsRouteCopy(lang: "zh" | "en") {
         supervisionPolicyTitle: "监督策略",
         saveRuntimePolicy: "保存运行策略",
         savingRuntimePolicy: "保存运行策略中...",
-        allowSubagents: "允许子 Agent",
+        allowSubagents: "允许协作助手",
         maxConcurrent: "最大并发",
         allowWakeMessages: "允许唤醒消息",
         openSession: "打开会话",
@@ -1998,16 +2384,18 @@ function agentsRouteCopy(lang: "zh" | "en") {
         runtimeNextStep: "建议下一步",
         runtimeEvidence: "日志证据",
         runHistoryLoading: "正在读取运行历史...",
-        noRunHistory: "还没有运行或子 Agent 记录。",
+        noRunHistory: "还没有运行或协作助手记录。",
         inboxTitle: "Inbox 待办",
         inboxLoading: "正在读取待办消息...",
         inboxEmpty: "当前没有待处理消息。",
         consumeMessage: "标记已处理",
+        consumeAllMessages: "全部标记已处理",
         consumingMessage: "处理中...",
+        handleInboxNow: "处理 Inbox",
         wakeStatus: "唤醒状态",
         activityTimeline: "活动时间线",
         activityTimelineEmpty: "还没有可汇总的运行、消息或上下文事件。",
-        subAgentRuns: "子 Agent 运行",
+        subAgentRuns: "协作助手运行",
         parentRuns: "主运行",
         supervisedRole: "监督角色",
         maxDepth: "最大深度",
@@ -2025,6 +2413,7 @@ function agentsRouteCopy(lang: "zh" | "en") {
         activeAgents: "Active Agents",
         filterSections: {
           status: "Status",
+          boundary: "Agent type",
           mode: "Runtime mode",
           reference: "References",
           management: "Management tasks",
@@ -2033,6 +2422,10 @@ function agentsRouteCopy(lang: "zh" | "en") {
           active: "Active Agents",
           needs_review: "Needs Review",
           archived: "Archived",
+          work_session: "Work-session Agents",
+          team_role: "Team role Agents",
+          system_role: "System role Agents",
+          service_role: "Service Agents",
           chat: "Chat mode",
           research: "Research mode",
           supervised_evolution: "Supervised evolution mode",
@@ -2044,6 +2437,10 @@ function agentsRouteCopy(lang: "zh" | "en") {
           active: "Agents currently available for business pages and routing.",
           needs_review: "Active Agents with blocking or warning health issues.",
           archived: "Historical records that no longer enter the available pool.",
+          work_session: "Codex-like execution Agents for project development, debugging, implementation, and audit sessions.",
+          team_role: "Agents with persona and task profiles that belong to team, research, or business organization structures.",
+          system_role: "Agents owned by fixed system flows such as self-evolution or supervised evolution.",
+          service_role: "Non-persona maintenance Agents for knowledge, tools, memory, or platform upkeep.",
           group_chat: "Agents referenced by one or more group chats.",
           team: "Agents referenced by one or more team canvases.",
         } as Record<string, string>,
@@ -2061,11 +2458,17 @@ function agentsRouteCopy(lang: "zh" | "en") {
         managementFilterMaintenanceHint: "Has health issues or archived state that needs maintenance.",
         createAgent: "New Agent",
         createAgentTitle: "Create persistent Agent",
-        createAgentHint: "A new Agent gets a direct chat session plus its own workspace, memory policy, and tool policy.",
+        createAgentHint: "Work-session Agents are created like Codex-style project executors. Team and research Agents still need persona, task mission, and organization placement.",
         createAgentName: "Functional name",
         createAgentNamePlaceholder: "e.g. Research review Agent",
         createAgentRole: "Role key",
-        createAgentRolePlaceholder: "Optional, e.g. research_reviewer",
+        createAgentRolePlaceholder: "Required, e.g. research_reviewer",
+        createAgentPersonaSummary: "Persona summary",
+        createAgentPersonaPlaceholder: "e.g. Calm, detail-oriented, and evidence-first.",
+        createAgentTaskMission: "Task mission",
+        createAgentTaskMissionPlaceholder: "e.g. Review research conclusions and identify evidence gaps.",
+        createAgentAllowedTools: "Allowed tools",
+        createAgentAllowedToolsPlaceholder: "e.g. agent_message_tool, web_search_tool",
         cancelCreate: "Cancel",
         creatingAgent: "Creating...",
         resetAgent: "Reset debug state",
@@ -2109,7 +2512,12 @@ function agentsRouteCopy(lang: "zh" | "en") {
         inbox: "Pending inbox",
         runningAgents: "Running",
         blockedAgents: "Blocked/failed",
-        model: "Model profile",
+        model: "Model binding",
+        llmSlots: "Agent model bindings",
+        llmSlotsHint: "Configure dialogue, mental model, summary, subagent, and vision LLM slots per Agent. Settings only manages model library assets.",
+        requiredSlot: "Required",
+        optionalSlot: "Optional",
+        inheritDialogueModel: "Not separately assigned",
         prompt: "Prompt",
         tools: "Tool policy",
         memory: "Memory policy",
@@ -2133,20 +2541,26 @@ function agentsRouteCopy(lang: "zh" | "en") {
         noIssues: "No obvious health issues.",
         routeHint: "This card is the single Agent config point. Product pages should only reference Agents from here.",
         managementBriefTitle: "Management readiness",
-        managementBriefHint: "Checks the usual post-hiring setup order: persona, task, tools, membership, runtime.",
+        managementBriefHint: "Checks only the fields required by the current Agent type. Work-session Agents do not require persona profiles or team membership.",
         managementIdentity: "Persona",
         managementTask: "Task",
+        managementModelPrompt: "Model / instructions",
+        managementWorkspace: "Workspace",
         managementTools: "Tools",
         managementMembership: "Membership",
         managementRuntime: "Runtime",
         nextActionsTitle: "Next actions",
         nextAllReady: "Core configuration is ready for teams or chat.",
+        nextSetupModelPrompt: "Configure model and project instructions",
+        nextSetupModelPromptHint: "Work-session Agents need an LLM binding and prompt/project instruction entry before use.",
         nextSetupIdentity: "Complete persona",
         nextSetupIdentityHint: "Give users and advisors a clear identity, background, expertise, and collaboration style.",
         nextSetupTask: "Complete task profile",
         nextSetupTaskHint: "Clarify what this Agent should take, deliver, avoid, and hand off.",
         nextSetupTools: "Configure tool package",
         nextSetupToolsHint: "Pick core/research/collaboration packages and review high-risk grants.",
+        nextSetupWorkspace: "Check workspace boundary",
+        nextSetupWorkspaceHint: "Confirm the project root, private workspace, and shared write grants fit the development task.",
         nextSetupMembership: "Bind team membership",
         nextSetupMembershipHint: "Place this Agent on a team canvas so the organization remains observable.",
         nextHandleInbox: "Handle pending messages",
@@ -2228,8 +2642,8 @@ function agentsRouteCopy(lang: "zh" | "en") {
         toolPolicyTitle: "Tool permissions",
         saveToolPolicy: "Save permissions",
         savingToolPolicy: "Saving permissions...",
-        toolBundlesTitle: "Tool package presets",
-        toolBundlesHint: "Packages fill allowed and preferred tools. Merge preserves manual edits; reset replaces the draft with the selected package.",
+        toolBundlesTitle: "Configure by tool package",
+        toolBundlesHint: "Pick packages for this Agent first, then tune individual tools below. A tool still saves as one permission state.",
         applyBundle: "Merge",
         replaceWithBundle: "Reset to package",
         preferredTools: "Preferred",
@@ -2251,7 +2665,7 @@ function agentsRouteCopy(lang: "zh" | "en") {
         toolGovernanceResolved: "Tool governance request resolved",
         toolSearch: "Filter tools",
         noTools: "No configurable tools are available.",
-        toolCategoryCount: "Tool categories",
+        toolCategoryCount: "Tool packages",
         toolHighRisk: "High risk",
         toolTags: "Capability tags",
         allowedTools: "Allowed",
@@ -2269,6 +2683,7 @@ function agentsRouteCopy(lang: "zh" | "en") {
         readKnowledgeBaseIds: "Readable knowledge bases",
         proposeKnowledgeBaseIds: "Proposal knowledge bases",
         reviewKnowledgeBaseIds: "Review knowledge bases",
+        rateKnowledgeBaseIds: "Rating knowledge bases",
         knowledgeBasePlaceholder: "Enter knowledge base ID, e.g. kb-research",
         noKnowledgeBaseIds: "No knowledge base limit; team membership and roles apply.",
         addSharedGroup: "Add",
@@ -2309,7 +2724,9 @@ function agentsRouteCopy(lang: "zh" | "en") {
         inboxLoading: "Loading pending messages...",
         inboxEmpty: "No pending messages.",
         consumeMessage: "Mark consumed",
+        consumeAllMessages: "Mark all consumed",
         consumingMessage: "Consuming...",
+        handleInboxNow: "Handle inbox",
         wakeStatus: "Wake status",
         activityTimeline: "Activity timeline",
         activityTimelineEmpty: "No run, message, or context event to summarize yet.",
@@ -2343,6 +2760,7 @@ export function AgentsRoute() {
   const [delegationPolicyDraft, setDelegationPolicyDraft] = useState<AgentDelegationPolicyDraft>(() => delegationPolicyDraftFromAgent(null));
   const [supervisionPolicyDraft, setSupervisionPolicyDraft] = useState<AgentSupervisionPolicyDraft>(() => supervisionPolicyDraftFromAgent(null));
   const [resetOptions, setResetOptions] = useState<AgentResetOptions>(DEFAULT_AGENT_RESET_OPTIONS);
+  const [resettingAgentIds, setResettingAgentIds] = useState<Set<string>>(() => new Set());
   const [toolSearchText, setToolSearchText] = useState("");
   const [focusedMessageId, setFocusedMessageId] = useState("");
   const [avatarEditorOpen, setAvatarEditorOpen] = useState(false);
@@ -2373,13 +2791,18 @@ export function AgentsRoute() {
 
   const workspace = workspaceQuery.data;
   const tools = toolsQuery.data?.tools ?? [];
+  const agentModelChoices = useMemo(
+    () => buildAgentModelChoices(workspace?.agentModelChoices ?? []),
+    [workspace?.agentModelChoices],
+  );
+  const llmSlots = useMemo(() => agentLlmSlots(workspace), [workspace?.agentLlmSlots]);
   const groups = workspace?.groups ?? [];
   const managementFilterGroups = useMemo(
     () => buildManagementFilterGroups(workspace?.agents ?? [], copy),
     [copy, workspace?.agents],
   );
   const groupedFilters = useMemo(() => {
-    const sectionOrder = ["status", "mode", "reference"] as const;
+    const sectionOrder = ["status", "boundary", "mode", "reference"] as const;
     const defaultSections = sectionOrder
       .map((section) => ({
         id: section,
@@ -2420,14 +2843,15 @@ export function AgentsRoute() {
         tool.category,
         tool.categoryLabel,
         tool.permissionTier,
+        ...(tool.bundleIds ?? []),
         ...(tool.capabilityTags ?? []),
         ...(tool.riskTags ?? []),
       ].join(" ")).includes(query);
     });
   }, [toolSearchText, tools]);
   const visiblePolicyToolGroups = useMemo(
-    () => groupPolicyToolsByCategory(visiblePolicyTools, toolPolicyDraft, lang),
-    [lang, toolPolicyDraft, visiblePolicyTools],
+    () => groupPolicyToolsByBundle(visiblePolicyTools, toolBundles, toolPolicyDraft, lang),
+    [lang, toolBundles, toolPolicyDraft, visiblePolicyTools],
   );
   const selectedAgent = selectedAgentFromList(visibleAgents, selectedAgentId, workspace?.agents ?? [], activeFilter);
   const managementBrief = useMemo(() => buildAgentManagementBrief(selectedAgent, copy, lang), [copy, lang, selectedAgent]);
@@ -2451,6 +2875,7 @@ export function AgentsRoute() {
     refetchInterval: resolvePollingInterval(pageVisible, 12_000),
     refetchIntervalInBackground: false,
   });
+  const selectedAgentInboxPendingCount = selectedAgent?.agentInboxPendingCount ?? agentMessagesQuery.data?.length ?? 0;
   const agentRuntimeEvidenceQuery = useQuery({
     queryKey: queryKeys.agentRuntimeEvidence(selectedAgent?.agentId ?? ""),
     queryFn: () => fetchJson<AgentRuntimeEvidence>(
@@ -2519,7 +2944,7 @@ export function AgentsRoute() {
 
   useEffect(() => {
     setCreateDraft((current) => {
-      if (current.profileId || current.promptTemplateId) {
+      if (agentLlmSlotModelId(current.llmBindings, FALLBACK_AGENT_LLM_SLOTS[0]) || current.promptTemplateId) {
         return normalizeCreateDraftForWorkspace(current, workspace);
       }
       return createDraftFromWorkspace(workspace);
@@ -2545,24 +2970,70 @@ export function AgentsRoute() {
   const canSaveMemoryPolicy = Boolean(selectedAgent?.agentId && memoryPolicyDirty);
   const canSaveRuntimePolicy = Boolean(selectedAgent?.agentId && runtimePolicyDirty);
   const canCreateAgent = createDraftReady(createDraft);
+  const createDraftIsWorkSession = isWorkSessionCreateDraft(createDraft);
+  const selectedAgentRequiresPersona = requiresPersonaProfile(selectedAgent);
+  const selectedAgentRequiresTask = requiresTaskProfile(selectedAgent);
+  const selectedAgentRequiresTeamMembership = requiresTeamMembership(selectedAgent);
   const selectedAgentProtected = agentArchiveProtected(selectedAgent);
+  const selectedAgentResetPending = Boolean(selectedAgent?.agentId && resettingAgentIds.has(selectedAgent.agentId));
   const canResetAgent = Boolean(selectedAgent?.agentId && selectedAgent.status !== "archived");
   const canArchiveAgent = Boolean(selectedAgent?.agentId && selectedAgent.status !== "archived" && !selectedAgentProtected);
   const canPurgeAgent = Boolean(selectedAgent?.agentId && selectedAgent.status === "archived" && !selectedAgentProtected);
 
   const createAgentMutation = useMutation({
-    mutationFn: (draft: AgentCreateDraft) =>
-      fetchJson<AgentConfigWorkspaceAgent>("/api/agents", {
+    mutationFn: (draft: AgentCreateDraft) => {
+      const workSession = isWorkSessionCreateDraft(draft);
+      const roleKey = workSession ? "" : draft.roleKey.trim();
+      const personaProfile = workSession
+        ? {}
+        : {
+            personality: draft.personaSummary.trim(),
+            communicationStyle: "按角色边界回应；先给结论，再说明依据和需要交接的事项。",
+            background: `由 Agent 中心创建，用于 ${draft.displayName.trim()}。`,
+            collaborationPreference: "优先保持短反馈和清晰交接；超出任务使命时主动说明边界。",
+            identityNotes: "创建时已完成最小建档；可在人物档案中继续细化。",
+            expertise: roleKey ? [roleKey] : [],
+          };
+      const taskProfile = workSession
+        ? {}
+        : {
+            mission: draft.taskMission.trim(),
+            taskTypes: roleKey ? [roleKey] : [draft.primaryMode],
+            responsibilities: `围绕 ${draft.displayName.trim()} 执行任务；遵守角色键 ${roleKey} 的职责边界。`,
+            preferredTasks: draft.taskMission.trim(),
+            avoidTasks: "不要承担未授权工具调用、未绑定团队职位或超出任务使命的长期职责。",
+            successCriteria: "用户能清楚理解该 Agent 的职责、边界、下一步和交付结果。",
+            deliverables: "结论、依据、待确认事项和必要的交接说明。",
+            constraints: "只使用已授权工具；需要更多权限时走工具治理或用户确认。",
+            handoffNotes: "由 Agent 中心创建，后续可在人物档案和任务档案中继续细化。",
+          };
+      return fetchJson<AgentConfigWorkspaceAgent>("/api/agents", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           displayName: draft.displayName.trim(),
-          profileId: draft.profileId,
+          llmBindings: normalizeAgentLlmBindings(draft.llmBindings),
           primaryMode: draft.primaryMode,
-          roleKey: draft.roleKey,
+          roleKey,
           promptTemplateId: draft.promptTemplateId,
+          personaProfile,
+          taskProfile,
+          toolPolicy: workSession ? {} : {
+            allowedTools: expertiseFromDraft(draft.allowedTools),
+            preferredTools: expertiseFromDraft(draft.allowedTools).includes("agent_message_tool") ? ["agent_message_tool"] : [],
+            readScopes: ["private"],
+            writeScopes: ["private"],
+            networkAccess: "controlled",
+            mutationAccess: "controlled",
+          },
+          metadata: {
+            creationChannel: "agent_center",
+            onboardingStatus: "complete",
+            onboardingMissing: [],
+          },
         }),
-      }),
+      });
+    },
     onSuccess: (agent) => {
       setSelectedAgentId(agent.agentId);
       setActivePane("config");
@@ -2586,7 +3057,7 @@ export function AgentsRoute() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           displayName: payload.draft.displayName,
-          profileId: payload.draft.profileId,
+          llmBindings: normalizeAgentLlmBindings(payload.draft.llmBindings),
           promptTemplateId: payload.draft.promptTemplateId,
           toolPolicyId: payload.draft.toolPolicyId,
           memoryPolicyId: payload.draft.memoryPolicyId,
@@ -2594,6 +3065,10 @@ export function AgentsRoute() {
         }),
       }),
     onSuccess: (agent) => {
+      queryClient.setQueryData<AgentConfigWorkspace | undefined>(
+        queryKeys.agentConfigWorkspace(),
+        (current) => updatedAgentWorkspaceCache(current, agent),
+      );
       setNotice({
         tone: "success",
         text: lang === "zh" ? `已保存 ${agentLabel(agent)} 的 Agent 配置` : `Saved config for ${agentLabel(agent)}`,
@@ -2614,7 +3089,13 @@ export function AgentsRoute() {
           personaProfile: personaProfileFromDraft(payload.draft),
         }),
       }),
-    onSuccess: () => {
+    onSuccess: (agent) => {
+      queryClient.setQueryData<AgentConfigWorkspace | undefined>(
+        queryKeys.agentConfigWorkspace(),
+        (current) => updatedAgentWorkspaceCache(current, agent),
+      );
+      setPersonaDraft(personaDraftFromAgent(agent));
+      draftSyncSourceRef.current = draftSyncSourceFromAgent(workspace, agent);
       setNotice({ tone: "success", text: copy.personaUpdateSuccess });
       void chatWorkspaceCache.afterAgentWorkspaceChanged();
     },
@@ -2632,7 +3113,13 @@ export function AgentsRoute() {
           taskProfile: taskProfileFromDraft(payload.draft),
         }),
       }),
-    onSuccess: () => {
+    onSuccess: (agent) => {
+      queryClient.setQueryData<AgentConfigWorkspace | undefined>(
+        queryKeys.agentConfigWorkspace(),
+        (current) => updatedAgentWorkspaceCache(current, agent),
+      );
+      setTaskDraft(taskDraftFromAgent(agent));
+      draftSyncSourceRef.current = draftSyncSourceFromAgent(workspace, agent);
       setNotice({ tone: "success", text: copy.taskUpdateSuccess });
       void chatWorkspaceCache.afterAgentWorkspaceChanged();
     },
@@ -2670,7 +3157,11 @@ export function AgentsRoute() {
         `/api/agents/${encodeURIComponent(payload.agentId)}/purge`,
         { method: "DELETE" },
       ),
-    onSuccess: () => {
+    onSuccess: (result) => {
+      queryClient.setQueryData<AgentConfigWorkspace | undefined>(
+        queryKeys.agentConfigWorkspace(),
+        (current) => purgedWorkspaceCache(current, result.agentId),
+      );
       setSelectedAgentId("");
       setActivePane("overview");
       setNotice({
@@ -2694,6 +3185,13 @@ export function AgentsRoute() {
           body: JSON.stringify(payload.options),
         },
       ),
+    onMutate: (payload) => {
+      setResettingAgentIds((current) => {
+        const next = new Set(current);
+        next.add(payload.agentId);
+        return next;
+      });
+    },
     onSuccess: (result) => {
       const agent = result.agent;
       setNotice({ tone: "success", text: copy.resetAgentSuccess });
@@ -2705,6 +3203,13 @@ export function AgentsRoute() {
     },
     onError: (error) => {
       setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
+    },
+    onSettled: (_result, _error, payload) => {
+      setResettingAgentIds((current) => {
+        const next = new Set(current);
+        next.delete(payload.agentId);
+        return next;
+      });
     },
   });
 
@@ -2718,7 +3223,11 @@ export function AgentsRoute() {
           resetToDefault: Boolean(payload.resetToDefault),
         }),
       }),
-    onSuccess: () => {
+    onSuccess: (agent) => {
+      queryClient.setQueryData<AgentConfigWorkspace | undefined>(
+        queryKeys.agentConfigWorkspace(),
+        (current) => updatedAgentWorkspaceCache(current, agent),
+      );
       setNotice({ tone: "success", text: copy.avatarUpdateSuccess });
       void chatWorkspaceCache.afterAgentWorkspaceChanged();
     },
@@ -2738,7 +3247,11 @@ export function AgentsRoute() {
           dataBase64: encodeArrayBufferBase64(await payload.file.arrayBuffer()),
         }),
       }),
-    onSuccess: () => {
+    onSuccess: (result) => {
+      queryClient.setQueryData<AgentConfigWorkspace | undefined>(
+        queryKeys.agentConfigWorkspace(),
+        (current) => updatedAgentWorkspaceCache(current, result.agent),
+      );
       setNotice({ tone: "success", text: copy.avatarUpdateSuccess });
       void queryClient.invalidateQueries({ queryKey: ["agent-avatar-options"] });
       void chatWorkspaceCache.afterAgentWorkspaceChanged();
@@ -2758,7 +3271,7 @@ export function AgentsRoute() {
     onSuccess: () => {
       setNotice({
         tone: "success",
-        text: lang === "zh" ? "已保存 Agent 模式归属" : "Saved Agent mode membership",
+        text: lang === "zh" ? "已保存 Agent 使用位置" : "Saved Agent mode membership",
       });
       void chatWorkspaceCache.afterAgentWorkspaceChanged();
     },
@@ -2785,9 +3298,13 @@ export function AgentsRoute() {
         }),
       }),
     onSuccess: (agent) => {
+      queryClient.setQueryData<AgentConfigWorkspace | undefined>(
+        queryKeys.agentConfigWorkspace(),
+        (current) => updatedAgentWorkspaceCache(current, agent),
+      );
       setNotice({
         tone: "success",
-        text: lang === "zh" ? `已保存 ${agentLabel(agent)} 的工具权限` : `Saved tool permissions for ${agentLabel(agent)}`,
+        text: lang === "zh" ? `已保存 ${agentLabel(agent)} 的工具能力` : `Saved tool permissions for ${agentLabel(agent)}`,
       });
       void chatWorkspaceCache.afterAgentWorkspaceChanged();
     },
@@ -2865,13 +3382,18 @@ export function AgentsRoute() {
             readKnowledgeBaseIds: sortedIds(payload.draft.readKnowledgeBaseIds),
             proposeKnowledgeBaseIds: sortedIds(payload.draft.proposeKnowledgeBaseIds),
             reviewKnowledgeBaseIds: sortedIds(payload.draft.reviewKnowledgeBaseIds),
+            rateKnowledgeBaseIds: sortedIds(payload.draft.rateKnowledgeBaseIds),
           },
         }),
       }),
     onSuccess: (agent) => {
+      queryClient.setQueryData<AgentConfigWorkspace | undefined>(
+        queryKeys.agentConfigWorkspace(),
+        (current) => updatedAgentWorkspaceCache(current, agent),
+      );
       setNotice({
         tone: "success",
-        text: lang === "zh" ? `已保存 ${agentLabel(agent)} 的记忆策略` : `Saved memory policy for ${agentLabel(agent)}`,
+        text: lang === "zh" ? `已保存 ${agentLabel(agent)} 的记忆设置` : `Saved memory policy for ${agentLabel(agent)}`,
       });
       void chatWorkspaceCache.afterAgentWorkspaceChanged();
     },
@@ -2906,6 +3428,10 @@ export function AgentsRoute() {
         }),
       }),
     onSuccess: (agent) => {
+      queryClient.setQueryData<AgentConfigWorkspace | undefined>(
+        queryKeys.agentConfigWorkspace(),
+        (current) => updatedAgentWorkspaceCache(current, agent),
+      );
       setNotice({
         tone: "success",
         text: lang === "zh" ? `已保存 ${agentLabel(agent)} 的运行策略` : `Saved runtime policy for ${agentLabel(agent)}`,
@@ -2931,20 +3457,48 @@ export function AgentsRoute() {
           }),
         },
       ),
-    onSuccess: () => {
+    onSuccess: (_message, variables) => {
       setNotice({
         tone: "success",
         text: lang === "zh" ? "已标记消息为已处理" : "Marked message as consumed",
       });
-      if (selectedAgent?.agentId) {
-        void queryClient.invalidateQueries({ queryKey: queryKeys.agentMessages(selectedAgent.agentId, "pending") });
-      }
+      void queryClient.invalidateQueries({ queryKey: queryKeys.agentMessages(variables.agentId, "pending") });
       void chatWorkspaceCache.afterAgentWorkspaceChanged();
     },
     onError: (error) => {
       setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
     },
   });
+
+  const consumeAllMessagesMutation = useMutation({
+    mutationFn: (payload: { agentId: string; sessionId: string }) =>
+      fetchJson<{ agentId: string; consumed: boolean; consumedCount: number; remainingPendingCount: number }>(
+        `/api/agents/${encodeURIComponent(payload.agentId)}/messages/consume-all`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            consumedBySessionId: payload.sessionId,
+            consumedByTurnId: "agent-center",
+          }),
+        },
+      ),
+    onSuccess: (result, variables) => {
+      setNotice({
+        tone: "success",
+        text: lang === "zh" ? `已处理 ${result.consumedCount} 条 Inbox 消息` : `Consumed ${result.consumedCount} inbox messages`,
+      });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.agentMessages(result.agentId || variables.agentId, "pending") });
+      void chatWorkspaceCache.afterAgentWorkspaceChanged();
+    },
+    onError: (error) => {
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
+    },
+  });
+
+  const selectedAgentAvatarUpdatePending = updateAvatarMutation.isPending && updateAvatarMutation.variables?.agentId === selectedAgent?.agentId;
+  const selectedAgentAvatarUploadPending = uploadAvatarMutation.isPending && uploadAvatarMutation.variables?.agentId === selectedAgent?.agentId;
+  const selectedAgentConsumeAllPending = consumeAllMessagesMutation.isPending && consumeAllMessagesMutation.variables?.agentId === selectedAgent?.agentId;
 
   const updateDraft = (patch: Partial<AgentConfigDraft>) => {
     setConfigDraft((current) => ({ ...current, ...patch }));
@@ -3061,7 +3615,7 @@ export function AgentsRoute() {
   };
 
   const addKnowledgeBaseId = (
-    field: "readKnowledgeBaseIds" | "proposeKnowledgeBaseIds" | "reviewKnowledgeBaseIds",
+    field: "readKnowledgeBaseIds" | "proposeKnowledgeBaseIds" | "reviewKnowledgeBaseIds" | "rateKnowledgeBaseIds",
     value: string,
   ) => {
     const normalized = String(value || "").trim();
@@ -3074,11 +3628,12 @@ export function AgentsRoute() {
       newReadKnowledgeBaseId: field === "readKnowledgeBaseIds" ? "" : current.newReadKnowledgeBaseId,
       newProposeKnowledgeBaseId: field === "proposeKnowledgeBaseIds" ? "" : current.newProposeKnowledgeBaseId,
       newReviewKnowledgeBaseId: field === "reviewKnowledgeBaseIds" ? "" : current.newReviewKnowledgeBaseId,
+      newRateKnowledgeBaseId: field === "rateKnowledgeBaseIds" ? "" : current.newRateKnowledgeBaseId,
     }));
   };
 
   const removeKnowledgeBaseId = (
-    field: "readKnowledgeBaseIds" | "proposeKnowledgeBaseIds" | "reviewKnowledgeBaseIds",
+    field: "readKnowledgeBaseIds" | "proposeKnowledgeBaseIds" | "reviewKnowledgeBaseIds" | "rateKnowledgeBaseIds",
     value: string,
   ) => {
     setMemoryPolicyDraft((current) => ({
@@ -3235,7 +3790,7 @@ export function AgentsRoute() {
   };
 
   const resetSelectedAgent = () => {
-    if (!selectedAgent || !canResetAgent || resetAgentMutation.isPending) {
+    if (!selectedAgent || !canResetAgent || resettingAgentIds.has(selectedAgent.agentId)) {
       return;
     }
     const confirmed = window.confirm(copy.resetAgentConfirm.replace("{name}", agentLabel(selectedAgent)));
@@ -3246,38 +3801,52 @@ export function AgentsRoute() {
   };
 
   const resetSelectedAgentAvatar = () => {
-    if (!selectedAgent?.agentId || updateAvatarMutation.isPending) {
+    if (!selectedAgent?.agentId || selectedAgentAvatarUpdatePending) {
       return;
     }
     updateAvatarMutation.mutate({ agentId: selectedAgent.agentId, resetToDefault: true });
   };
 
   const selectAgentAvatar = (avatarImagePath: string) => {
-    if (!selectedAgent?.agentId || updateAvatarMutation.isPending) {
+    if (!selectedAgent?.agentId || selectedAgentAvatarUpdatePending) {
       return;
     }
     updateAvatarMutation.mutate({ agentId: selectedAgent.agentId, avatarImagePath });
   };
 
   const uploadSelectedAgentAvatar = (file: File | undefined) => {
-    if (!selectedAgent?.agentId || !file || uploadAvatarMutation.isPending) {
+    if (!selectedAgent?.agentId || !file || selectedAgentAvatarUploadPending) {
       return;
     }
     uploadAvatarMutation.mutate({ agentId: selectedAgent.agentId, file });
   };
 
   const consumeInboxMessage = (message: AgentInboxMessage) => {
-    if (!selectedAgent?.agentId || consumeMessageMutation.isPending) {
+    if (!selectedAgent?.agentId) {
       return;
     }
     const messageId = String(message.messageId || message.eventId || "").trim();
-    if (!messageId) {
+    const messagePending =
+      consumeMessageMutation.isPending
+      && consumeMessageMutation.variables?.agentId === selectedAgent.agentId
+      && consumeMessageMutation.variables?.messageId === messageId;
+    if (!messageId || messagePending) {
       return;
     }
     consumeMessageMutation.mutate({
       agentId: selectedAgent.agentId,
       messageId,
       sessionId: selectedAgent.directSessionId || message.targetSessionId || "",
+    });
+  };
+
+  const consumeAllInboxMessages = () => {
+    if (!selectedAgent?.agentId || selectedAgentConsumeAllPending) {
+      return;
+    }
+    consumeAllMessagesMutation.mutate({
+      agentId: selectedAgent.agentId,
+      sessionId: selectedAgent.directSessionId || "",
     });
   };
 
@@ -3453,10 +4022,15 @@ export function AgentsRoute() {
                 </label>
                 <label className={styles.field}>
                   <span>{copy.model}</span>
-                  <select value={createDraft.profileId} onChange={(event) => updateCreateDraft({ profileId: event.target.value })}>
-                    {workspace?.modelProfiles.map((profile) => (
-                      <option key={profile.profileId} value={profile.profileId}>
-                        {profile.label || profile.profileId} · {profile.model || profile.providerKind || "-"}
+                  <select
+                    value={agentLlmSlotModelId(createDraft.llmBindings, FALLBACK_AGENT_LLM_SLOTS[0])}
+                    onChange={(event) => updateCreateDraft({
+                      llmBindings: updateAgentLlmSlotBinding(createDraft.llmBindings, FALLBACK_AGENT_LLM_SLOTS[0], event.target.value),
+                    })}
+                  >
+                    {agentModelChoices.map((model) => (
+                      <option key={model.key} value={model.modelId} title={model.modelLabel || model.modelId}>
+                        {model.label}
                       </option>
                     ))}
                   </select>
@@ -3471,14 +4045,16 @@ export function AgentsRoute() {
                     ))}
                   </select>
                 </label>
-                <label className={styles.field}>
-                  <span>{copy.createAgentRole}</span>
-                  <input
-                    value={createDraft.roleKey}
-                    placeholder={copy.createAgentRolePlaceholder}
-                    onChange={(event) => updateCreateDraft({ roleKey: event.target.value })}
-                  />
-                </label>
+                {!createDraftIsWorkSession ? (
+                  <label className={styles.field}>
+                    <span>{copy.createAgentRole}</span>
+                    <input
+                      value={createDraft.roleKey}
+                      placeholder={copy.createAgentRolePlaceholder}
+                      onChange={(event) => updateCreateDraft({ roleKey: event.target.value })}
+                    />
+                  </label>
+                ) : null}
                 <label className={styles.field}>
                   <span>{copy.prompt}</span>
                   <select value={createDraft.promptTemplateId} onChange={(event) => updateCreateDraft({ promptTemplateId: event.target.value })}>
@@ -3489,6 +4065,34 @@ export function AgentsRoute() {
                       </option>
                     ))}
                   </select>
+                </label>
+                {!createDraftIsWorkSession ? (
+                  <>
+                    <label className={styles.fieldWide}>
+                      <span>{copy.createAgentPersonaSummary}</span>
+                      <textarea
+                        value={createDraft.personaSummary}
+                        placeholder={copy.createAgentPersonaPlaceholder}
+                        onChange={(event) => updateCreateDraft({ personaSummary: event.target.value })}
+                      />
+                    </label>
+                    <label className={styles.fieldWide}>
+                      <span>{copy.createAgentTaskMission}</span>
+                      <textarea
+                        value={createDraft.taskMission}
+                        placeholder={copy.createAgentTaskMissionPlaceholder}
+                        onChange={(event) => updateCreateDraft({ taskMission: event.target.value })}
+                      />
+                    </label>
+                  </>
+                ) : null}
+                <label className={styles.fieldWide}>
+                  <span>{copy.createAgentAllowedTools}</span>
+                  <input
+                    value={createDraft.allowedTools}
+                    placeholder={copy.createAgentAllowedToolsPlaceholder}
+                    onChange={(event) => updateCreateDraft({ allowedTools: event.target.value })}
+                  />
                 </label>
               </div>
               {notice ? (
@@ -3568,7 +4172,7 @@ export function AgentsRoute() {
                         </em>
                       </span>
                     </span>
-                    <span>{agent.modelProfile?.label || agent.profileId || "-"}</span>
+                    <span>{agentModelLabel(agent.dialogueModel)}</span>
                     <span>{promptTemplateDisplayName(agent.promptTemplate, agent.promptTemplateId, lang)}</span>
                     <span className={`${styles.runtimePill} ${styles[`runtime_${runtimeStatusTone(agent)}`]}`}>
                       {runtimeStatusLabel(agent, lang)}
@@ -3626,16 +4230,16 @@ export function AgentsRoute() {
                           <input
                             type="file"
                             accept="image/png,image/jpeg,image/webp"
-                            disabled={uploadAvatarMutation.isPending}
+                            disabled={selectedAgentAvatarUploadPending}
                             onChange={(event) => {
                               uploadSelectedAgentAvatar(event.target.files?.[0]);
                               event.currentTarget.value = "";
                             }}
                           />
-                          <span>{uploadAvatarMutation.isPending ? copy.uploadingAvatar : copy.uploadAvatar}</span>
+                          <span>{selectedAgentAvatarUploadPending ? copy.uploadingAvatar : copy.uploadAvatar}</span>
                         </label>
-                        <button type="button" className={styles.secondaryButton} disabled={updateAvatarMutation.isPending} onClick={resetSelectedAgentAvatar}>
-                          {updateAvatarMutation.isPending ? copy.resettingAvatar : copy.resetDefaultAvatar}
+                        <button type="button" className={styles.secondaryButton} disabled={selectedAgentAvatarUpdatePending} onClick={resetSelectedAgentAvatar}>
+                          {selectedAgentAvatarUpdatePending ? copy.resettingAvatar : copy.resetDefaultAvatar}
                         </button>
                       </div>
                       <div className={styles.avatarLibraryHeader}>
@@ -3654,7 +4258,7 @@ export function AgentsRoute() {
                                 type="button"
                                 className={selected ? `${styles.avatarOption} ${styles.avatarOptionSelected}` : styles.avatarOption}
                                 onClick={() => selectAgentAvatar(option.path)}
-                                disabled={updateAvatarMutation.isPending}
+                                disabled={selectedAgentAvatarUpdatePending}
                                 title={option.filename}
                               >
                                 <img src={option.url} alt="" />
@@ -3724,7 +4328,17 @@ export function AgentsRoute() {
                   <span>{copy.nextActionsTitle}</span>
                   {managementBrief.actions.length ? (
                     managementBrief.actions.map((action) => (
-                      <button key={action.id} type="button" onClick={() => setActivePane(action.pane)}>
+                      <button
+                        key={action.id}
+                        type="button"
+                        onClick={() => {
+                          if (action.route) {
+                            void navigate(action.route);
+                            return;
+                          }
+                          setActivePane(action.pane);
+                        }}
+                      >
                         <strong>{action.label}</strong>
                         <small>{action.detail}</small>
                       </button>
@@ -3741,12 +4355,20 @@ export function AgentsRoute() {
                     <section>
                       <Bot size={16} />
                       <span>{copy.model}</span>
-                      <strong>{selectedAgent.modelProfile?.label || selectedAgent.profileId || "-"}</strong>
-                      <small>{selectedAgent.modelProfile?.model || selectedAgent.modelProfile?.providerKind || "-"}</small>
+                      <strong>{agentModelLabel(selectedAgent.dialogueModel)}</strong>
+                      <small>{selectedAgent.dialogueModel?.providerKind || selectedAgent.dialogueModel?.apiKeyState || "-"}</small>
+                    </section>
+                    <section>
+                      <Brain size={16} />
+                      <span>{copy.llmSlots}</span>
+                      <strong>
+                        {Object.keys(normalizeAgentLlmBindings(selectedAgent.llmBindings)).length}/{llmSlots.length}
+                      </strong>
+                      <small>{llmSlots.map((slot) => `${slot.label}:${agentLlmSlotModelId(selectedAgent.llmBindings, slot) ? "on" : "off"}`).join(" / ")}</small>
                     </section>
                     <section>
                       <Layers3 size={16} />
-                      <span>{lang === "zh" ? "后台编号" : "Backend IDs"}</span>
+                      <span>{lang === "zh" ? "系统编号" : "System IDs"}</span>
                       <strong>{selectedAgent.agentCode || "-"}</strong>
                       <small>{selectedAgent.agentId || "-"}</small>
                     </section>
@@ -3768,18 +4390,22 @@ export function AgentsRoute() {
                       <strong>{selectedAgent.memoryPolicyId || "-"}</strong>
                       <small>{selectedAgent.memoryPolicy?.privateMemoryRoot || "-"}</small>
                     </section>
-                    <section>
-                      <UserRound size={16} />
-                      <span>{copy.personaTitle}</span>
-                      <strong>{personaProfileSummary(selectedAgent, lang)}</strong>
-                      <small>{(selectedAgent.personaProfile?.expertise ?? []).join(" / ") || copy.expertise}</small>
-                    </section>
-                    <section>
-                      <CheckCircle2 size={16} />
-                      <span>{copy.taskTitle}</span>
-                      <strong>{taskProfileSummary(selectedAgent, lang)}</strong>
-                      <small>{(selectedAgent.taskProfile?.taskTypes ?? []).join(" / ") || copy.taskTypes}</small>
-                    </section>
+                    {selectedAgentRequiresPersona ? (
+                      <section>
+                        <UserRound size={16} />
+                        <span>{copy.personaTitle}</span>
+                        <strong>{personaProfileSummary(selectedAgent, lang)}</strong>
+                        <small>{(selectedAgent.personaProfile?.expertise ?? []).join(" / ") || copy.expertise}</small>
+                      </section>
+                    ) : null}
+                    {selectedAgentRequiresTask ? (
+                      <section>
+                        <CheckCircle2 size={16} />
+                        <span>{copy.taskTitle}</span>
+                        <strong>{taskProfileSummary(selectedAgent, lang)}</strong>
+                        <small>{(selectedAgent.taskProfile?.taskTypes ?? []).join(" / ") || copy.taskTypes}</small>
+                      </section>
+                    ) : null}
                     <section>
                       <FolderTree size={16} />
                       <span>{copy.territory}</span>
@@ -3906,16 +4532,37 @@ export function AgentsRoute() {
                       <option value="archived">{lang === "zh" ? "归档" : "Archived"}</option>
                     </select>
                   </label>
-                  <label className={styles.field}>
-                    <span>{copy.model}</span>
-                    <select value={configDraft.profileId} onChange={(event) => updateDraft({ profileId: event.target.value })}>
-                      {workspace?.modelProfiles.map((profile) => (
-                        <option key={profile.profileId} value={profile.profileId}>
-                          {profile.label || profile.profileId} · {profile.model || profile.providerKind || "-"}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                  <section className={styles.fieldWide}>
+                    <span>{copy.llmSlots}</span>
+                    <small>{copy.llmSlotsHint}</small>
+                    <div className={styles.llmSlotGrid}>
+                      {llmSlots.map((slot) => {
+                        const slotChoices = buildAgentSlotModelChoices(workspace?.agentModelChoices ?? [], slot);
+                        return (
+                          <label key={slot.slot} className={styles.llmSlotField}>
+                            <span>
+                              <strong>{slot.label}</strong>
+                              <small>{slot.required ? copy.requiredSlot : copy.optionalSlot}</small>
+                            </span>
+                            <select
+                              value={agentLlmSlotModelId(configDraft.llmBindings, slot)}
+                              onChange={(event) => updateDraft({
+                                llmBindings: updateAgentLlmSlotBinding(configDraft.llmBindings, slot, event.target.value),
+                              })}
+                            >
+                              {!slot.required ? <option value="">{copy.inheritDialogueModel}</option> : null}
+                              {slotChoices.map((model) => (
+                                <option key={`${slot.slot}:${model.key}`} value={model.modelId} title={model.modelLabel || model.modelId}>
+                                  {model.label}
+                                </option>
+                              ))}
+                            </select>
+                            <small>{slot.description}</small>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </section>
                   <label className={styles.field}>
                     <span>{copy.prompt}</span>
                     <select value={configDraft.promptTemplateId} onChange={(event) => updateDraft({ promptTemplateId: event.target.value })}>
@@ -3963,6 +4610,7 @@ export function AgentsRoute() {
                 </div>
               </section>
 
+              {selectedAgentRequiresPersona ? (
               <section className={styles.configEditor}>
                 <div className={styles.panelHeader}>
                   <div>
@@ -4041,6 +4689,7 @@ export function AgentsRoute() {
                   </button>
                 </div>
               </section>
+              ) : null}
 
               <section className={styles.configEditor}>
                 <div className={styles.panelHeader}>
@@ -4078,7 +4727,12 @@ export function AgentsRoute() {
                 </div>
                 <div className={styles.toolGovernanceList}>
                   {(selectedAgent.toolGovernanceRequests ?? []).length ? (
-                    (selectedAgent.toolGovernanceRequests ?? []).map((request) => (
+                    (selectedAgent.toolGovernanceRequests ?? []).map((request) => {
+                      const requestPending =
+                        resolveToolGovernanceMutation.isPending
+                        && resolveToolGovernanceMutation.variables?.agentId === selectedAgent.agentId
+                        && resolveToolGovernanceMutation.variables?.requestId === request.requestId;
+                      return (
                       <article key={request.requestId} className={styles.toolGovernanceItem}>
                         <div>
                           <strong>{governanceStatusLabel(request.status, lang)} · {governanceRiskLabel(request.riskLevel, lang)}</strong>
@@ -4090,7 +4744,7 @@ export function AgentsRoute() {
                             <button
                               type="button"
                               className={styles.secondaryButton}
-                              disabled={resolveToolGovernanceMutation.isPending}
+                              disabled={requestPending}
                               onClick={() => resolveToolGovernanceRequest(request, "reject")}
                             >
                               {copy.toolGovernanceReject}
@@ -4098,7 +4752,7 @@ export function AgentsRoute() {
                             <button
                               type="button"
                               className={styles.primaryButton}
-                              disabled={resolveToolGovernanceMutation.isPending}
+                              disabled={requestPending}
                               onClick={() => resolveToolGovernanceRequest(request, "approve")}
                             >
                               {copy.toolGovernanceApprove}
@@ -4106,7 +4760,8 @@ export function AgentsRoute() {
                           </div>
                         ) : null}
                       </article>
-                    ))
+                      );
+                    })
                   ) : (
                     <p className={styles.emptyText}>{copy.toolGovernanceEmpty}</p>
                   )}
@@ -4123,6 +4778,7 @@ export function AgentsRoute() {
                 </div>
               </section>
 
+              {selectedAgentRequiresTask ? (
               <section className={styles.configEditor}>
                 <div className={styles.panelHeader}>
                   <div>
@@ -4195,6 +4851,7 @@ export function AgentsRoute() {
                   </button>
                 </div>
               </section>
+              ) : null}
 
               <section className={styles.detailSection}>
                 <div className={styles.panelHeader}>
@@ -4211,6 +4868,16 @@ export function AgentsRoute() {
                       <article key={`${issue.code}:${issue.detail}`} className={`${styles.issueItem} ${styles[`issueItem_${issue.severity}`]}`}>
                         <strong>{issue.title}</strong>
                         <p>{issue.detail}</p>
+                        {issue.code === "pending_inbox_messages" ? (
+                          <button
+                            type="button"
+                            className={styles.secondaryButton}
+                            onClick={() => setActivePane("activity")}
+                          >
+                            <MessageSquare size={15} />
+                            {copy.handleInboxNow}
+                          </button>
+                        ) : null}
                       </article>
                     ))}
                   </div>
@@ -4375,11 +5042,11 @@ export function AgentsRoute() {
                     <button
                       type="button"
                       className={styles.secondaryButton}
-                      disabled={!canResetAgent || resetAgentMutation.isPending}
+                      disabled={!canResetAgent || selectedAgentResetPending}
                       onClick={resetSelectedAgent}
                     >
                       <RefreshCw size={15} />
-                      {resetAgentMutation.isPending ? copy.resettingAgent : copy.resetAgent}
+                      {selectedAgentResetPending ? copy.resettingAgent : copy.resetAgent}
                     </button>
                   </div>
                 </section>
@@ -4419,6 +5086,25 @@ export function AgentsRoute() {
                   <strong>{copy.explicitAllowedTools}: {capabilityPreview.explicitAllowed}</strong>
                   <strong>{copy.writeBoundaryPreview}: {capabilityPreview.writeBoundaryLabel}</strong>
                 </section>
+                <section className={styles.workspaceScopePanel}>
+                  <div>
+                    <span>{copy.workspaceWriteScopes}</span>
+                    <strong>{toolPolicyDraft.writeScopes.includes("shared") ? copy.sharedWriteScope : copy.privateWriteScope}</strong>
+                    <small>{copy.sharedWriteHint}</small>
+                  </div>
+                  <label className={styles.checkField}>
+                    <input type="checkbox" checked disabled />
+                    <span>{copy.privateWriteScope}</span>
+                  </label>
+                  <label className={styles.checkField}>
+                    <input
+                      type="checkbox"
+                      checked={toolPolicyDraft.writeScopes.includes("shared")}
+                      onChange={(event) => toggleToolPolicyScope("writeScopes", "shared", event.target.checked)}
+                    />
+                    <span>{copy.sharedWriteScope}</span>
+                  </label>
+                </section>
                 {toolBundles.length ? (
                   <section className={styles.toolBundlePanel}>
                     <div className={styles.toolBundlePanelHeader}>
@@ -4448,25 +5134,6 @@ export function AgentsRoute() {
                     </div>
                   </section>
                 ) : null}
-                <section className={styles.workspaceScopePanel}>
-                  <div>
-                    <span>{copy.workspaceWriteScopes}</span>
-                    <strong>{toolPolicyDraft.writeScopes.includes("shared") ? copy.sharedWriteScope : copy.privateWriteScope}</strong>
-                    <small>{copy.sharedWriteHint}</small>
-                  </div>
-                  <label className={styles.checkField}>
-                    <input type="checkbox" checked disabled />
-                    <span>{copy.privateWriteScope}</span>
-                  </label>
-                  <label className={styles.checkField}>
-                    <input
-                      type="checkbox"
-                      checked={toolPolicyDraft.writeScopes.includes("shared")}
-                      onChange={(event) => toggleToolPolicyScope("writeScopes", "shared", event.target.checked)}
-                    />
-                    <span>{copy.sharedWriteScope}</span>
-                  </label>
-                </section>
                 <label className={styles.searchBox}>
                   <Search size={15} />
                   <input value={toolSearchText} placeholder={copy.toolSearch} onChange={(event) => setToolSearchText(event.target.value)} />
@@ -4497,6 +5164,7 @@ export function AgentsRoute() {
                                   <small>{tool.description || tool.source}</small>
                                   <span className={styles.toolPermissionMeta}>
                                     <em>{toolTierLabel(tool.permissionTier, lang)}</em>
+                                    <small>{toolCategoryLabel(tool.category, tool.categoryLabel, lang)}</small>
                                     {tags.length ? <small>{copy.toolTags}: {tags.join(" / ")}</small> : null}
                                   </span>
                                 </span>
@@ -4669,6 +5337,26 @@ export function AgentsRoute() {
                       </button>
                     </div>
                   </section>
+                  <section>
+                    <span>{copy.rateKnowledgeBaseIds}</span>
+                    <div className={styles.tagList}>
+                      {memoryPolicyDraft.rateKnowledgeBaseIds.length ? memoryPolicyDraft.rateKnowledgeBaseIds.map((knowledgeBaseId) => (
+                        <button key={`kb-rate:${knowledgeBaseId}`} type="button" onClick={() => removeKnowledgeBaseId("rateKnowledgeBaseIds", knowledgeBaseId)}>
+                          {knowledgeBaseId} x
+                        </button>
+                      )) : <small>{copy.noKnowledgeBaseIds}</small>}
+                    </div>
+                    <div className={styles.inlineAdd}>
+                      <input
+                        value={memoryPolicyDraft.newRateKnowledgeBaseId}
+                        placeholder={copy.knowledgeBasePlaceholder}
+                        onChange={(event) => updateMemoryDraftField({ newRateKnowledgeBaseId: event.target.value })}
+                      />
+                      <button type="button" onClick={() => addKnowledgeBaseId("rateKnowledgeBaseIds", memoryPolicyDraft.newRateKnowledgeBaseId)}>
+                        {copy.addSharedGroup}
+                      </button>
+                    </div>
+                  </section>
                 </div>
                 <datalist id="agent-memory-groups">
                   {memoryGroupOptions.map((group) => <option key={group} value={group} />)}
@@ -4697,6 +5385,7 @@ export function AgentsRoute() {
 
               {activePane === "config" ? (
                 <>
+              {selectedAgentRequiresTeamMembership ? (
               <section className={styles.configEditor}>
                 <div className={styles.panelHeader}>
                   <div>
@@ -4772,7 +5461,9 @@ export function AgentsRoute() {
                   </button>
                 </div>
               </section>
+              ) : null}
 
+              {selectedAgentRequiresTeamMembership ? (
               <section className={styles.configEditor}>
                 <div className={styles.panelHeader}>
                   <div>
@@ -4815,6 +5506,7 @@ export function AgentsRoute() {
                     : "Group membership is edited from Chat group settings, while Team-owned rooms sync from Teams. This Agent view is read-only to avoid duplicate writers."}
                 </p>
               </section>
+              ) : null}
 
               <section className={styles.detailSection}>
                 <div className={styles.panelHeader}>
@@ -5007,9 +5699,19 @@ export function AgentsRoute() {
                 <div className={styles.panelHeader}>
                   <div>
                     <p className={styles.panelEyebrow}>{copy.communication}</p>
-                    <h3>{copy.inboxTitle}: {agentMessagesQuery.data?.length ?? selectedAgent.agentInboxPendingCount ?? 0}</h3>
+                    <h3>{copy.inboxTitle}: {selectedAgentInboxPendingCount}</h3>
                   </div>
-                  <MessageSquare size={16} />
+                  <div className={styles.panelHeaderActions}>
+                    <button
+                      type="button"
+                      className={styles.secondaryButton}
+                      disabled={selectedAgentInboxPendingCount <= 0 || selectedAgentConsumeAllPending}
+                      onClick={consumeAllInboxMessages}
+                    >
+                      {selectedAgentConsumeAllPending ? copy.consumingMessage : copy.consumeAllMessages}
+                    </button>
+                    <MessageSquare size={16} />
+                  </div>
                 </div>
                 {agentMessagesQuery.isPending ? (
                   <p className={styles.emptyText}>{copy.inboxLoading}</p>
@@ -5017,6 +5719,10 @@ export function AgentsRoute() {
                   <div className={styles.inboxMessageList}>
                     {agentMessagesQuery.data?.map((message) => {
                       const messageId = message.messageId || message.eventId;
+                      const messagePending =
+                        consumeMessageMutation.isPending
+                        && consumeMessageMutation.variables?.agentId === selectedAgent.agentId
+                        && consumeMessageMutation.variables?.messageId === messageId;
                       return (
                         <article
                           key={messageId}
@@ -5030,10 +5736,10 @@ export function AgentsRoute() {
                             <button
                               type="button"
                               className={styles.secondaryButton}
-                              disabled={consumeMessageMutation.isPending}
+                              disabled={messagePending}
                               onClick={() => consumeInboxMessage(message)}
                             >
-                              {consumeMessageMutation.isPending ? copy.consumingMessage : copy.consumeMessage}
+                              {messagePending ? copy.consumingMessage : copy.consumeMessage}
                             </button>
                           </div>
                           <p>{message.summary || message.content || message.threadId || messageId}</p>

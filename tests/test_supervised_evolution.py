@@ -193,6 +193,7 @@ def test_run_supervised_evolution_session_persists_decision_record(tmp_path: Pat
       "official_verifier_status": "harbor_pending",
       "official_score": null,
       "official_score_available": false,
+      "max_steps": 4,
       "baseline_prompt": "baseline",
       "candidate_prompt": "candidate"
     }
@@ -205,7 +206,7 @@ def test_run_supervised_evolution_session_persists_decision_record(tmp_path: Pat
     seen = []
 
     def fake_runner(**kwargs):
-        seen.append((kwargs["prompt"], kwargs["scenario"], kwargs["mode"]))
+        seen.append((kwargs["prompt"], kwargs["scenario"], kwargs["mode"], kwargs["max_steps"]))
         if kwargs["prompt"] == "baseline":
             return _fake_result("success", "baseline ok", "baseline")
         return _fake_result("success", "candidate ok", "candidate")
@@ -217,8 +218,8 @@ def test_run_supervised_evolution_session_persists_decision_record(tmp_path: Pat
     )
 
     assert seen == [
-        ("baseline", "transaction", "single_turn"),
-        ("candidate", "transaction", "single_turn"),
+        ("baseline", "transaction", "single_turn", 4),
+        ("candidate", "transaction", "single_turn", 4),
     ]
     assert decision.decision == "HOLD"
     assert decision.baseline_success_rate == 1.0
@@ -461,6 +462,12 @@ def test_run_supervised_evolution_session_persists_agent_bindings(tmp_path: Path
             "workspacePath": "workspace/agents/agent-baseline",
             "toolPolicyId": "tool-agent-baseline",
             "memoryPolicyId": "memory-agent-baseline",
+            "dialogueModelId": "generated_xiaomi_mimo_v2_5_baseline",
+            "llmSlot": "dialogue",
+            "llmBindings": {
+                "dialogue": {"modelId": "generated_xiaomi_mimo_v2_5_baseline", "apiKey": "secret"},
+                "subagentExecution": {"modelId": "generated_xiaomi_mimo_v2_5_helper"},
+            },
             "apiKey": "should-not-leak",
         },
         "candidate": {
@@ -475,6 +482,10 @@ def test_run_supervised_evolution_session_persists_agent_bindings(tmp_path: Path
             "workspacePath": "workspace/agents/agent-candidate",
             "toolPolicyId": "tool-agent-candidate",
             "memoryPolicyId": "memory-agent-candidate",
+            "llmSlot": "dialogue",
+            "llmBindings": {
+                "dialogue": {"modelId": "generated_xiaomi_mimo_v2_5_candidate"},
+            },
         },
     }
 
@@ -490,17 +501,25 @@ def test_run_supervised_evolution_session_persists_agent_bindings(tmp_path: Path
     assert decision.agent_bindings["baseline"]["promptTemplateId"] == "prompt-supervised-baseline"
     assert decision.agent_bindings["baseline"]["toolPolicyId"] == "tool-agent-baseline"
     assert decision.agent_bindings["baseline"]["memoryPolicyId"] == "memory-agent-baseline"
+    assert decision.agent_bindings["baseline"]["dialogueModelId"] == "generated_xiaomi_mimo_v2_5_baseline"
+    assert decision.agent_bindings["baseline"]["llmSlot"] == "dialogue"
+    assert decision.agent_bindings["baseline"]["llmBindings"]["dialogue"]["modelId"] == "generated_xiaomi_mimo_v2_5_baseline"
+    assert "apiKey" not in json.dumps(decision.agent_bindings, ensure_ascii=False)
     assert decision.baseline_runs[0].agent_binding["profileId"] == "supervised_baseline"
     assert decision.baseline_runs[0].agent_binding["promptTemplateId"] == "prompt-supervised-baseline"
+    assert decision.baseline_runs[0].agent_binding["llmBindings"]["subagentExecution"]["modelId"] == "generated_xiaomi_mimo_v2_5_helper"
     assert decision.candidate_runs[0].agent_binding["directSessionId"] == "session-candidate"
     assert runner_calls[0]["agent_binding"]["agentId"] == "agent-baseline"
     assert runner_calls[0]["agent_binding"]["agentCode"] == "A101"
     assert runner_calls[0]["agent_binding"]["promptTemplateId"] == "prompt-supervised-baseline"
+    assert runner_calls[0]["agent_binding"]["llmSlot"] == "dialogue"
+    assert runner_calls[0]["agent_binding"]["llmBindings"]["dialogue"]["modelId"] == "generated_xiaomi_mimo_v2_5_baseline"
     assert runner_calls[1]["agent_binding"]["profileId"] == "supervised_candidate"
     persisted = json.loads(Path(decision.decision_path or "").read_text(encoding="utf-8"))
     assert persisted["agent_bindings"]["candidate"]["agentId"] == "agent-candidate"
     assert persisted["agent_bindings"]["candidate"]["agentCode"] == "A102"
     assert persisted["agent_bindings"]["candidate"]["promptTemplateId"] == "prompt-supervised-candidate"
+    assert persisted["agent_bindings"]["candidate"]["llmBindings"]["dialogue"]["modelId"] == "generated_xiaomi_mimo_v2_5_candidate"
     assert persisted["baseline_runs"][0]["agent_binding"]["agentId"] == "agent-baseline"
     assert persisted["baseline_runs"][0]["agent_binding"]["promptTemplateId"] == "prompt-supervised-baseline"
     assert "apiKey" not in json.dumps(persisted, ensure_ascii=False)
@@ -1230,6 +1249,74 @@ def test_run_supervised_evolution_session_forwards_live_case_events(tmp_path: Pa
     assert live_events[0]["transcript"][1]["kind"] == "assistant"
     assert live_events[1]["role"] == "candidate"
     assert live_events[1]["latest_input"] == "candidate"
+
+
+def test_run_supervised_evolution_session_fails_environment_preflight_without_starting_runner(tmp_path: Path):
+    bundle_dir = tmp_path / "workspace" / "evaluation" / "bundles"
+    bundle_dir.mkdir(parents=True, exist_ok=True)
+    bundle_path = bundle_dir / f"{DEFAULT_BUNDLE_NAME}.json"
+    bundle_path.write_text(
+        """
+{
+  "benchmark": "terminal_bench",
+  "bundle_name": "supervised_evolution_dry_run_v1",
+  "default_timeout_seconds": 321,
+  "cases": [
+    {
+      "case_id": "missing_env_probe",
+      "scenario": "transaction",
+      "mode": "single_turn",
+      "baseline_prompt": "baseline",
+      "candidate_prompt": "candidate",
+      "environment_contract": {
+        "kind": "terminal_bench_task_environment",
+        "preflight": {"required": true, "strategy": "path_alias"},
+        "required_paths": [
+          {
+            "path": "definitely_missing_vibelution_app",
+            "aliases": [],
+            "required_for": "custom_harness_task_files"
+          }
+        ]
+      }
+    }
+  ]
+}
+        """.strip(),
+        encoding="utf-8",
+    )
+    events = []
+    runner_calls = []
+
+    def fake_runner(**kwargs):
+        runner_calls.append(kwargs)
+        raise AssertionError("runner should not start when dataset environment preflight fails")
+
+    decision = run_supervised_evolution_session(
+        bundle_name=DEFAULT_BUNDLE_NAME,
+        project_root=tmp_path,
+        harness_runner=fake_runner,
+        progress_callback=events.append,
+    )
+
+    assert runner_calls == []
+    assert [run.status for run in decision.baseline_runs] == ["failed"]
+    assert [run.status for run in decision.candidate_runs] == ["failed"]
+    assert "数据集环境预检失败" in decision.baseline_runs[0].reason
+    assert "未启动 agent" in decision.candidate_runs[0].reason
+
+    reports = [Path(run.report_path or "") for run in [*decision.baseline_runs, *decision.candidate_runs]]
+    assert all(report.exists() for report in reports)
+    report_payload = json.loads(reports[0].read_text(encoding="utf-8"))
+    assert report_payload["last_observation"]["phase"] == "environment_preflight"
+    assert report_payload["evolution_summary"]["environment"]["unavailable"] is True
+    assert report_payload["evolution_summary"]["environment"]["preflight"]["status"] == "missing"
+
+    live_events = [event for event in events if event["event"] == "role_live"]
+    assert [event["phase"] for event in live_events] == ["environment_preflight", "environment_preflight"]
+    assert live_events[0]["environment_contract_kind"] == "terminal_bench_task_environment"
+    finish_events = [event for event in events if event["event"] == "role_finish"]
+    assert [event["status"] for event in finish_events] == ["failed", "failed"]
 
 
 def test_run_supervised_evolution_session_stops_after_cancelled_harness_result(tmp_path: Path):

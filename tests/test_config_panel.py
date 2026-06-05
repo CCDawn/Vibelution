@@ -3,6 +3,7 @@
 配置面板测试
 """
 
+import io
 import json
 import copy
 import os
@@ -48,6 +49,7 @@ from scripts.config_panel import (
     update_llm_model,
 )
 from config.public_config import UNCONFIGURED_MODEL_REF, public_config_hash
+import config.public_config as public_config_module
 
 
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -103,17 +105,17 @@ def _provider(
 
 
 def _set_subagent_explorer_deepseek(public_config: dict) -> None:
-    public_config["llm"]["profiles"]["subagent_explorer"]["provider"] = _provider(
-        "deepseek",
-        "https://api.deepseek.com",
-        "DEEPSEEK_API_KEY",
-        compat_mode="openai",
-        context_window=64000,
-    )
-    public_config["llm"]["profiles"]["subagent_explorer"]["model"] = "deepseek-v4-pro"
-    public_config["llm"]["profiles"]["subagent_explorer"]["api_key_env"] = (
-        "VIBELUTION_LLM_DEEPSEEK_V4_PRO_API_KEY"
-    )
+    public_config["llm"]["profiles"]["subagent_explorer"] = {
+        "provider": _provider(
+            "deepseek",
+            "https://api.deepseek.com",
+            "DEEPSEEK_API_KEY",
+            compat_mode="openai",
+            context_window=131072,
+        ),
+        "model": "deepseek-v4-pro",
+        "api_key_env": "VIBELUTION_LLM_DEEPSEEK_V4_PRO_API_KEY",
+    }
 
 
 def test_public_llm_shape_is_inline_provider_only():
@@ -121,7 +123,7 @@ def test_public_llm_shape_is_inline_provider_only():
     llm = public_config["llm"]
 
     assert "providers" not in llm
-    assert all("provider" in profile for profile in llm["profiles"].values())
+    assert all("provider" in profile or "model_ref" in profile for profile in llm["profiles"].values())
     assert all("provider_id" not in profile for profile in llm["profiles"].values())
     assert all("provider" in item for item in llm["model_library"].values())
     assert all("provider_id" not in item for item in llm["model_library"].values())
@@ -139,7 +141,7 @@ def test_render_panel_html_uses_inline_provider_controls():
     assert 'data-edit-field="provider_kind"' in html
     assert 'data-edit-field="provider_id"' not in html
     assert 'data-path="llm.providers.remote_main.kind"' not in html
-    assert 'data-path="llm.profiles.primary.provider.kind"' in html
+    assert 'data-path="llm.profiles.primary.model_ref"' in html
     assert 'data-provider="' in html
 
 
@@ -388,7 +390,11 @@ def test_draft_add_llm_profile_returns_preview_fragments_without_persisting_conf
 
     assert response.status == 200
     assert result["ok"] is True
-    assert result["public_config"]["llm"]["profiles"]["preview_profile_copy"]["model"] == "gpt-5.5"
+    assert result["public_config"]["llm"]["profiles"]["preview_profile_copy"] == {
+        "model_ref": "relay_openai_gpt_5_5",
+        "overrides": {},
+    }
+    assert build_effective_config(result["public_config"]).llm.profiles["preview_profile_copy"].model == "gpt-5.5"
     assert 'data-profile-id="preview_profile_copy"' in result["main_html"]
     assert result["message"] == "修改已确认，等待应用"
     assert config_path.read_text(encoding="utf-8") == original_text
@@ -532,12 +538,12 @@ def test_get_config_language_falls_back_safely():
 def test_label_localization_prefers_exact_and_fallback_rules():
     assert localize_label("llm.providers.remote_main.api_key", "api_key", "zh") == "API 密钥"
     assert localize_label("tools.shell.default_timeout", "default_timeout", "en") == "Default Timeout"
-    assert localize_label("git.commit_message_profile", "commit_message_profile", "zh") == "Git 提交使用的模型配置"
-    assert localize_label("git.commit_message_profile", "commit_message_profile", "en") == "Git Commit Model Config"
+    assert localize_label("git.commit_message_profile", "commit_message_profile", "zh") == "Git 提交使用的模型绑定"
+    assert localize_label("git.commit_message_profile", "commit_message_profile", "en") == "Git Commit Model Binding"
     assert localize_label("network.proxy_enabled", "proxy_enabled", "zh") == "启用代理"
     assert localize_label("network.proxy_url", "proxy_url", "en") == "Proxy URL"
-    assert localize_section_label("llm.profiles", "profiles", "zh") == "模型配置"
-    assert localize_section_label("llm.profiles", "profiles", "en") == "Model Configs"
+    assert localize_section_label("llm.profiles", "profiles", "zh") == "模型绑定"
+    assert localize_section_label("llm.profiles", "profiles", "en") == "Model Bindings"
     assert localize_section_label("prompt", "prompt", "zh") == "系统提示词"
     assert localize_section_label("git.commit_message_prompt", "commit_message_prompt", "zh") == "Git 提交提示词"
     assert localize_section_label("llm.discovery", "discovery", "zh") == "模型发现"
@@ -630,6 +636,104 @@ def test_list_llm_model_options_exposes_inline_provider_and_source():
     assert all(item["source"] in {"model_library", "profile"} for item in options)
 
 
+def test_public_config_canonicalizes_model_key_env_from_model_id(monkeypatch):
+    public_config = load_public_config()
+    public_config["llm"]["model_library"]["custom_codex"] = {
+        "provider": _provider("openai", "https://api.openai.com/v1", "OPENAI_API_KEY"),
+        "model": "gpt-5.3-codex",
+        "label": "Custom Codex",
+        "api_key_env": "LEGACY_CUSTOM_CODEX_API_KEY",
+    }
+
+    normalized = build_effective_config(public_config).llm.model_library["custom_codex"]
+    output = io.StringIO()
+    monkeypatch.setattr(public_config_module, "CONFIG_PATH", Path("config.toml"))
+    monkeypatch.setattr(Path, "write_text", lambda self, text, encoding="utf-8": output.write(text))
+    save_public_config(public_config)
+    saved = output.getvalue()
+
+    assert normalized["api_key_env"] == "VIBELUTION_LLM_MODEL_CUSTOM_CODEX_API_KEY"
+    assert 'api_key_env = "VIBELUTION_LLM_MODEL_CUSTOM_CODEX_API_KEY"' in saved
+    assert "LEGACY_CUSTOM_CODEX_API_KEY" not in saved
+
+
+def test_public_config_model_key_env_uses_ascii_safe_model_id_token():
+    public_config = load_public_config()
+    public_config["llm"]["model_library"]["小米模型"] = {
+        "provider": _provider("xiaomi", "https://api.xiaomimimo.com/v1", "MIMO_API_KEY", context_window=1000000),
+        "model": "mimo-v2.5",
+        "label": "小米模型",
+        "api_key_env": "LEGACY_XIAOMI_KEY",
+    }
+
+    normalized = build_effective_config(public_config).llm.model_library["小米模型"]
+
+    assert normalized["api_key_env"].startswith("VIBELUTION_LLM_MODEL_ID_")
+    assert normalized["api_key_env"].endswith("_API_KEY")
+    assert normalized["api_key_env"] != "VIBELUTION_LLM_MODEL_API_KEY"
+
+
+def test_public_config_promotes_inline_profile_models_to_library_entries():
+    public_config = load_public_config()
+    public_config["llm"]["model_library"].pop("xiaomi_mimo_v2_5_multimodal", None)
+    public_config["llm"]["profiles"]["primary"] = {
+        "provider": _provider("xiaomi", "https://api.xiaomimimo.com/v1", "MIMO_API_KEY", context_window=1000000),
+        "model": "mimo-v2.5",
+        "api_key_env": "LEGACY_XIAOMI_MIMO_KEY",
+        "transport": "chat_completions",
+        "contract": "tool_chat",
+        "supports_image_input": True,
+    }
+
+    normalized = public_config_module._canonicalize_public_config(public_config)
+
+    assert normalized["llm"]["model_library"]["xiaomi_mimo_v2_5_multimodal"]["api_key_env"] == (
+        "VIBELUTION_LLM_MODEL_XIAOMI_MIMO_V2_5_MULTIMODAL_API_KEY"
+    )
+    assert normalized["llm"]["model_library"]["xiaomi_mimo_v2_5_multimodal"]["supports_image_input"] is True
+    assert normalized["llm"]["profiles"]["primary"] == {
+        "model_ref": "xiaomi_mimo_v2_5_multimodal",
+        "overrides": {},
+    }
+    effective = build_effective_config(normalized)
+    profile = effective.llm.profiles["primary"]
+    assert profile.model == "mimo-v2.5"
+    assert profile.supports_image_input is True
+
+
+def test_public_config_does_not_force_preset_id_for_different_provider_route():
+    public_config = load_public_config()
+    public_config["llm"]["model_library"].pop("xiaomi_mimo_v2_5_multimodal", None)
+    public_config["llm"]["profiles"]["primary"] = {
+        "provider": _provider("xiaomi", "https://token-plan-cn.xiaomimimo.com/v1", "MIMO_API_KEY", context_window=1000000),
+        "model": "mimo-v2.5",
+        "transport": "chat_completions",
+        "contract": "tool_chat",
+        "supports_image_input": True,
+    }
+
+    normalized = public_config_module._canonicalize_public_config(public_config)
+
+    assert "xiaomi_mimo_v2_5_multimodal" not in normalized["llm"]["model_library"]
+    generated = [
+        item
+        for item in normalized["llm"]["model_library"].values()
+        if isinstance(item, dict)
+        and item.get("model") == "mimo-v2.5"
+        and item.get("provider", {}).get("base_url") == "https://token-plan-cn.xiaomimimo.com/v1"
+    ]
+    assert len(generated) == 1
+    assert generated[0]["api_key_env"].startswith("VIBELUTION_LLM_MODEL_GENERATED_")
+    generated_id = next(
+        model_id
+        for model_id, item in normalized["llm"]["model_library"].items()
+        if isinstance(item, dict)
+        and item.get("model") == "mimo-v2.5"
+        and item.get("provider", {}).get("base_url") == "https://token-plan-cn.xiaomimimo.com/v1"
+    )
+    assert normalized["llm"]["profiles"]["primary"] == {"model_ref": generated_id, "overrides": {}}
+
+
 def test_apply_codex_model_preset_materializes_inline_provider():
     updated = apply_llm_model_preset(load_public_config(), "openai_gpt_5_3_codex")
     model = updated["llm"]["model_library"]["openai_gpt_5_3_codex"]
@@ -640,7 +744,7 @@ def test_apply_codex_model_preset_materializes_inline_provider():
     assert model["provider"]["context_window"] == 400000
     assert model["model"] == "gpt-5.3-codex"
     assert model["contract"] == "tool_chat"
-    assert model["api_key_env"] == "VIBELUTION_LLM_OPENAI_GPT_5_3_CODEX_API_KEY"
+    assert model["api_key_env"] == "VIBELUTION_LLM_MODEL_OPENAI_GPT_5_3_CODEX_API_KEY"
     build_effective_config(updated)
 
 
@@ -660,7 +764,7 @@ def test_apply_relay_model_preset_materializes_openai_compatible_provider():
     assert model["model"] == "gpt-5.5"
     assert model["transport"] == "responses"
     assert model["contract"] == "tool_chat"
-    assert model["api_key_env"] == "VIBELUTION_LLM_RELAY_OPENAI_GPT_5_5_API_KEY"
+    assert model["api_key_env"] == "VIBELUTION_LLM_MODEL_RELAY_OPENAI_GPT_5_5_API_KEY"
     build_effective_config(updated)
 
 
@@ -682,7 +786,7 @@ def test_apply_relay_image2_model_preset_materializes_root_base_url_provider():
     assert model["transport"] == "responses"
     assert model["streaming"] is False
     assert model["tool_calling_mode"] == "disabled"
-    assert model["api_key_env"] == "VIBELUTION_LLM_RELAY_IMAGE2_API_KEY"
+    assert model["api_key_env"] == "VIBELUTION_LLM_MODEL_RELAY_IMAGE2_API_KEY"
     build_effective_config(updated)
 
 
@@ -702,7 +806,7 @@ def test_apply_xiaomi_mimo_token_plan_preset_materializes_provider():
     assert model["model"] == "mimo-v2.5-pro"
     assert model["transport"] == "chat_completions"
     assert model["contract"] == "tool_chat"
-    assert model["api_key_env"] == "VIBELUTION_LLM_XIAOMI_MIMO_V2_5_PRO_TOKEN_PLAN_API_KEY"
+    assert model["api_key_env"] == "VIBELUTION_LLM_MODEL_XIAOMI_MIMO_V2_5_PRO_TOKEN_PLAN_API_KEY"
     build_effective_config(updated)
 
 
@@ -720,12 +824,12 @@ def test_apply_xiaomi_mimo_multimodal_preset_materializes_image_support():
     assert model["transport"] == "chat_completions"
     assert model["contract"] == "tool_chat"
     assert model["supports_image_input"] is True
-    assert model["api_key_env"] == "VIBELUTION_LLM_XIAOMI_MIMO_V2_5_MULTIMODAL_API_KEY"
+    assert model["api_key_env"] == "VIBELUTION_LLM_MODEL_XIAOMI_MIMO_V2_5_MULTIMODAL_API_KEY"
     build_effective_config(updated)
 
 
 def test_xiaomi_mimo_multimodal_model_ref_materializes_image_support_to_profile():
-    public_config = load_public_config()
+    public_config = apply_llm_model_preset(load_public_config(), "xiaomi_mimo_v2_5_multimodal")
     public_config["llm"]["profiles"]["primary"] = {"model_ref": "xiaomi_mimo_v2_5_multimodal"}
 
     effective = build_effective_config(public_config)
@@ -755,7 +859,7 @@ def test_apply_custom_openai_compatible_relay_preset_accepts_user_base_url():
         },
         model="custom-gpt",
         label="Custom Relay",
-        api_key_env="VIBELUTION_LLM_CUSTOM_RELAY_API_KEY",
+        api_key_env="VIBELUTION_LLM_MODEL_CUSTOM_RELAY_API_KEY",
     )
     model = updated["llm"]["model_library"]["custom_relay"]
 
@@ -763,7 +867,7 @@ def test_apply_custom_openai_compatible_relay_preset_accepts_user_base_url():
     assert model["provider"]["base_url"] == "https://relay.example.com/v1"
     assert model["provider"]["compat_mode"] == "openai"
     assert model["model"] == "custom-gpt"
-    assert model["api_key_env"] == "VIBELUTION_LLM_CUSTOM_RELAY_API_KEY"
+    assert model["api_key_env"] == "VIBELUTION_LLM_MODEL_CUSTOM_RELAY_API_KEY"
     build_effective_config(updated)
 
 
@@ -784,14 +888,14 @@ def test_apply_custom_relay_responses_preset_accepts_approved_relay_host():
         },
         model="gpt-5.5",
         label="Custom Relay Responses",
-        api_key_env="VIBELUTION_LLM_CUSTOM_RELAY_RESPONSES_MODEL_API_KEY",
+        api_key_env="VIBELUTION_LLM_MODEL_CUSTOM_RELAY_RESPONSES_MODEL_API_KEY",
     )
     model = updated["llm"]["model_library"]["custom_relay_responses_model"]
 
     assert model["provider"]["kind"] == "relay"
     assert model["provider"]["base_url"] == "https://ai-pixel.online"
     assert model["transport"] == "responses"
-    assert model["api_key_env"] == "VIBELUTION_LLM_CUSTOM_RELAY_RESPONSES_MODEL_API_KEY"
+    assert model["api_key_env"] == "VIBELUTION_LLM_MODEL_CUSTOM_RELAY_RESPONSES_MODEL_API_KEY"
     build_effective_config(updated)
 
 
@@ -809,18 +913,19 @@ def test_default_public_config_includes_new_official_model_templates():
     assert relay_model["model"] == "gpt-5.5"
     assert relay_model["contract"] == "tool_chat"
     assert relay_model["max_output_tokens"] == 128000
-    assert relay_model["api_key_env"] == "VIBELUTION_LLM_RELAY_OPENAI_GPT_5_5_API_KEY"
+    assert relay_model["api_key_env"] == "VIBELUTION_LLM_MODEL_RELAY_OPENAI_GPT_5_5_API_KEY"
     assert image_model["provider"]["kind"] == "relay"
     assert image_model["provider"]["base_url"] == "https://ai-pixel.online"
     assert not image_model["provider"]["base_url"].endswith("/v1")
     assert image_model["model"] == "image2"
     assert image_model["streaming"] is False
     assert image_model["tool_calling_mode"] == "disabled"
-    assert image_model["api_key_env"] == "VIBELUTION_LLM_RELAY_IMAGE2_API_KEY"
+    assert image_model["api_key_env"] == "VIBELUTION_LLM_MODEL_RELAY_IMAGE2_API_KEY"
     assert public_config["tools"]["image2"]["default_model_ref"] == "relay_image2"
     assert "custom_relay_responses" not in public_config["llm"]["model_library"]
 
-    deepseek_model = public_config["llm"]["model_library"]["deepseek_v4_flash"]
+    with_deepseek_flash = apply_llm_model_preset(public_config, "deepseek_v4_flash")
+    deepseek_model = with_deepseek_flash["llm"]["model_library"]["deepseek_v4_flash"]
 
     assert deepseek_model["provider"]["kind"] == "deepseek"
     assert deepseek_model["provider"]["context_window"] == 1000000
@@ -841,9 +946,10 @@ def test_default_public_config_includes_new_official_model_templates():
     assert xiaomi_model["model"] == "mimo-v2.5-pro"
     assert xiaomi_model["contract"] == "tool_chat"
     assert xiaomi_model["max_output_tokens"] == 128000
-    assert xiaomi_model["api_key_env"] == "VIBELUTION_LLM_XIAOMI_MIMO_V2_5_PRO_TOKEN_PLAN_API_KEY"
+    assert xiaomi_model["api_key_env"] == "VIBELUTION_LLM_MODEL_XIAOMI_MIMO_V2_5_PRO_TOKEN_PLAN_API_KEY"
 
-    xiaomi_multimodal_model = public_config["llm"]["model_library"]["xiaomi_mimo_v2_5_multimodal"]
+    with_xiaomi_multimodal = apply_llm_model_preset(public_config, "xiaomi_mimo_v2_5_multimodal")
+    xiaomi_multimodal_model = with_xiaomi_multimodal["llm"]["model_library"]["xiaomi_mimo_v2_5_multimodal"]
 
     assert xiaomi_multimodal_model["provider"]["kind"] == "xiaomi"
     assert xiaomi_multimodal_model["provider"]["api_key_env"] == "MIMO_API_KEY"
@@ -851,7 +957,7 @@ def test_default_public_config_includes_new_official_model_templates():
     assert xiaomi_multimodal_model["model"] == "mimo-v2.5"
     assert xiaomi_multimodal_model["contract"] == "tool_chat"
     assert xiaomi_multimodal_model["supports_image_input"] is True
-    assert xiaomi_multimodal_model["api_key_env"] == "VIBELUTION_LLM_XIAOMI_MIMO_V2_5_MULTIMODAL_API_KEY"
+    assert xiaomi_multimodal_model["api_key_env"] == "VIBELUTION_LLM_MODEL_XIAOMI_MIMO_V2_5_MULTIMODAL_API_KEY"
     build_effective_config(public_config)
 
 
@@ -871,7 +977,7 @@ def test_add_update_and_delete_llm_model_with_inline_provider():
         "provider": openai,
         "model": "gpt-5.3-codex",
         "label": "Custom Codex",
-        "api_key_env": "VIBELUTION_LLM_CUSTOM_CODEX_API_KEY",
+        "api_key_env": "VIBELUTION_LLM_MODEL_CUSTOM_CODEX_API_KEY",
     }
     assert "custom_codex" not in public_config.get("llm", {}).get("model_library", {})
     build_effective_config(updated)
@@ -899,7 +1005,7 @@ def test_add_update_and_delete_llm_model_with_inline_provider():
     assert edited["llm"]["model_library"]["custom_codex"]["provider"] == local
     assert edited["llm"]["model_library"]["custom_codex"]["model"] == "qwen-72b-awq"
     assert edited["llm"]["model_library"]["custom_codex"]["label"] == "Qwen Local"
-    assert edited["llm"]["model_library"]["custom_codex"]["api_key_env"] == "VIBELUTION_LLM_CUSTOM_CODEX_API_KEY"
+    assert edited["llm"]["model_library"]["custom_codex"]["api_key_env"] == "VIBELUTION_LLM_MODEL_CUSTOM_CODEX_API_KEY"
     assert edited["llm"]["model_library"]["custom_codex"]["reasoning_state_field"] == "reasoning_content"
     build_effective_config(edited)
 
@@ -926,11 +1032,18 @@ def test_update_llm_model_rejects_unknown_model_id():
 def test_delete_generated_profile_model_clears_matching_profiles():
     public_config = load_public_config()
     provider = _provider("openai", "https://api.openai.com/v1", "OPENAI_API_KEY")
-    public_config["llm"]["profiles"]["primary"]["provider"] = provider.copy()
-    public_config["llm"]["profiles"]["primary"]["model"] = "gpt-5.4"
-    public_config["llm"]["profiles"]["mental_model"]["provider"] = provider.copy()
-    public_config["llm"]["profiles"]["mental_model"]["model"] = "gpt-5.4"
-    explorer_model_before = public_config["llm"]["profiles"]["subagent_explorer"]["model"]
+    public_config["llm"]["profiles"]["primary"] = {
+        "provider": provider.copy(),
+        "model": "gpt-5.4",
+    }
+    public_config["llm"]["profiles"]["mental_model"] = {
+        "provider": provider.copy(),
+        "model": "gpt-5.4",
+    }
+    public_config["llm"]["profiles"]["subagent_explorer"] = {
+        "provider": _provider("deepseek", "https://api.deepseek.com", "DEEPSEEK_API_KEY"),
+        "model": "deepseek-v4-pro",
+    }
 
     generated = next(
         item
@@ -939,9 +1052,11 @@ def test_delete_generated_profile_model_clears_matching_profiles():
     )
     deleted = delete_llm_model(public_config, generated["model_id"])
 
-    assert deleted["llm"]["profiles"]["primary"]["model"] == ""
-    assert deleted["llm"]["profiles"]["mental_model"]["model"] == ""
-    assert deleted["llm"]["profiles"]["subagent_explorer"]["model"] == explorer_model_before
+    assert deleted["llm"]["profiles"]["primary"]["model_ref"] == UNCONFIGURED_MODEL_REF
+    assert deleted["llm"]["profiles"]["mental_model"]["model_ref"] == UNCONFIGURED_MODEL_REF
+    assert "model" not in deleted["llm"]["profiles"]["primary"]
+    assert "model" not in deleted["llm"]["profiles"]["mental_model"]
+    assert deleted["llm"]["profiles"]["subagent_explorer"]["model"] == "deepseek-v4-pro"
     assert not any(item["model_id"] == generated["model_id"] for item in list_llm_model_options(deleted))
     build_effective_config(deleted)
 
@@ -951,9 +1066,10 @@ def test_add_llm_profile_from_model_library_copies_provider_independently():
     updated = add_llm_profile(public_config, "codex_clone", source_profile_id="primary", model_id="relay_openai_gpt_5_5")
 
     clone = updated["llm"]["profiles"]["codex_clone"]
-    assert clone["model"] == "gpt-5.5"
-    assert clone["provider"] == updated["llm"]["model_library"]["relay_openai_gpt_5_5"]["provider"]
-    assert clone["api_key_env"] == "VIBELUTION_LLM_RELAY_OPENAI_GPT_5_5_API_KEY"
+    assert clone == {"model_ref": "relay_openai_gpt_5_5", "overrides": {}}
+    effective_clone = build_effective_config(updated).llm.profiles["codex_clone"]
+    assert effective_clone.model == "gpt-5.5"
+    assert effective_clone.api_key_env == "VIBELUTION_LLM_MODEL_RELAY_OPENAI_GPT_5_5_API_KEY"
 
     edited = update_llm_model(
         updated,
@@ -962,24 +1078,29 @@ def test_add_llm_profile_from_model_library_copies_provider_independently():
         "deepseek-v4-pro",
         "DeepSeek Changed",
     )
-    assert edited["llm"]["profiles"]["codex_clone"]["model"] == "gpt-5.5"
-    assert edited["llm"]["profiles"]["codex_clone"]["provider"]["kind"] == "relay"
+    edited_profile = build_effective_config(edited).llm.profiles["codex_clone"]
+    edited_provider = build_effective_config(edited).llm.get_provider(edited_profile.provider_id)
+    assert edited_profile.model == "deepseek-v4-pro"
+    assert edited_provider.kind == "deepseek"
 
     deleted = delete_llm_model(updated, "relay_openai_gpt_5_5")
-    assert deleted["llm"]["profiles"]["codex_clone"]["model"] == "gpt-5.5"
-    assert deleted["llm"]["profiles"]["codex_clone"]["provider"]["kind"] == "relay"
+    assert deleted["llm"]["profiles"]["codex_clone"]["model_ref"] == UNCONFIGURED_MODEL_REF
+    assert deleted["llm"]["profiles"]["codex_clone"]["overrides"] == {}
+    assert "model" not in deleted["llm"]["profiles"]["codex_clone"]
+    assert "provider" not in deleted["llm"]["profiles"]["codex_clone"]
 
 
 def test_build_effective_config_rejects_reasoning_chat_without_supported_state_field():
     public_config = load_public_config()
-    profile = public_config["llm"]["profiles"]["primary"]
-    profile["provider"] = _provider("openai", "https://api.openai.com/v1", "OPENAI_API_KEY")
-    profile["model"] = "gpt-5.4"
-    profile["transport"] = "chat_completions"
-    profile["contract"] = "reasoning_chat"
-    profile["tool_calling_mode"] = "auto"
-    profile["reasoning_state_field"] = ""
-    profile["strict_compatibility"] = True
+    public_config["llm"]["profiles"]["primary"] = {
+        "provider": _provider("openai", "https://api.openai.com/v1", "OPENAI_API_KEY"),
+        "model": "gpt-5.4",
+        "transport": "chat_completions",
+        "contract": "reasoning_chat",
+        "tool_calling_mode": "auto",
+        "reasoning_state_field": "",
+        "strict_compatibility": True,
+    }
 
     with pytest.raises(ValueError, match="reasoning_state_field"):
         build_effective_config(public_config)
@@ -987,14 +1108,15 @@ def test_build_effective_config_rejects_reasoning_chat_without_supported_state_f
 
 def test_build_effective_config_accepts_reasoning_chat_with_reasoning_content():
     public_config = load_public_config()
-    profile = public_config["llm"]["profiles"]["primary"]
-    profile["provider"] = _provider("openai", "https://api.openai.com/v1", "OPENAI_API_KEY")
-    profile["model"] = "gpt-5.4"
-    profile["transport"] = "chat_completions"
-    profile["contract"] = "reasoning_chat"
-    profile["tool_calling_mode"] = "auto"
-    profile["reasoning_state_field"] = "reasoning_content"
-    profile["strict_compatibility"] = True
+    public_config["llm"]["profiles"]["primary"] = {
+        "provider": _provider("openai", "https://api.openai.com/v1", "OPENAI_API_KEY"),
+        "model": "gpt-5.4",
+        "transport": "chat_completions",
+        "contract": "reasoning_chat",
+        "tool_calling_mode": "auto",
+        "reasoning_state_field": "reasoning_content",
+        "strict_compatibility": True,
+    }
 
     config = build_effective_config(public_config)
 
@@ -1037,7 +1159,7 @@ def test_inline_profile_provider_switch_resets_incompatible_responses_transport(
 def test_llm_connection_returns_route_diagnostics(monkeypatch):
     public_config = load_public_config()
     _set_subagent_explorer_deepseek(public_config)
-    monkeypatch.setenv("VIBELUTION_LLM_DEEPSEEK_V4_PRO_API_KEY", "model-secret")
+    monkeypatch.setenv("VIBELUTION_LLM_MODEL_DEEPSEEK_V4_PRO_API_KEY", "model-secret")
 
     def fake_runtime_probe(provider, profile, api_key=None):
         assert api_key == "model-secret"
@@ -1051,7 +1173,7 @@ def test_llm_connection_returns_route_diagnostics(monkeypatch):
     assert result["provider_kind"] == "deepseek"
     assert result["base_url"] == "https://api.deepseek.com"
     assert result["contract"] == "tool_chat"
-    assert result["api_key_source"] == "profile-env:VIBELUTION_LLM_DEEPSEEK_V4_PRO_API_KEY"
+    assert result["api_key_source"] == "model-env:VIBELUTION_LLM_MODEL_DEEPSEEK_V4_PRO_API_KEY"
 
 
 def test_llm_connection_reports_responses_runtime_route(monkeypatch):
@@ -1066,7 +1188,7 @@ def test_llm_connection_reports_responses_runtime_route(monkeypatch):
         calls.append((provider.kind, profile.transport, profile.contract, profile.model))
         return {"ok": True, "message": "ok", "runtime_route": "openai/responses/gpt-5.5"}
 
-    monkeypatch.setenv("VIBELUTION_LLM_RELAY_OPENAI_GPT_5_5_API_KEY", "relay-secret")
+    monkeypatch.setenv("VIBELUTION_LLM_MODEL_RELAY_OPENAI_GPT_5_5_API_KEY", "relay-secret")
     monkeypatch.setattr("scripts.config_panel._probe_llm_runtime", fake_runtime_probe)
 
     result = run_llm_connection_test(public_config, "primary")
@@ -1080,6 +1202,10 @@ def test_llm_connection_reports_responses_runtime_route(monkeypatch):
 
 def test_runtime_llm_probe_uses_real_backend_with_small_payload(monkeypatch):
     public_config = load_public_config()
+    public_config["llm"]["profiles"]["primary"] = {
+        "model_ref": "relay_openai_gpt_5_5",
+        "overrides": {},
+    }
     effective = build_effective_config(public_config)
     profile = effective.llm.get_profile("primary")
     provider = effective.llm.get_provider(profile.provider_id)
@@ -1092,7 +1218,7 @@ def test_runtime_llm_probe_uses_real_backend_with_small_payload(monkeypatch):
             "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
         }
 
-    monkeypatch.setenv("VIBELUTION_LLM_RELAY_OPENAI_GPT_5_5_API_KEY", "relay-secret")
+    monkeypatch.setenv("VIBELUTION_LLM_MODEL_RELAY_OPENAI_GPT_5_5_API_KEY", "relay-secret")
     monkeypatch.setattr("core.llm.client._default_completion_backend", fake_backend)
 
     result = _probe_llm_runtime(provider, profile, "relay-secret")
@@ -1144,14 +1270,16 @@ def test_llm_connection_rejects_metadata_service_base_url():
 
 def test_llm_connection_allows_localhost_without_api_key(monkeypatch):
     public_config = load_public_config()
-    public_config["llm"]["profiles"]["primary"]["provider"] = _provider(
-        "local",
-        "http://127.0.0.1:11434/v1",
-        "",
-        requires_api_key=False,
-        context_window=65536,
-    )
-    public_config["llm"]["profiles"]["primary"]["model"] = "llama3.2"
+    public_config["llm"]["profiles"]["primary"] = {
+        "provider": _provider(
+            "local",
+            "http://127.0.0.1:11434/v1",
+            "",
+            requires_api_key=False,
+            context_window=65536,
+        ),
+        "model": "llama3.2",
+    }
     monkeypatch.setenv("VIBELUTION_LLM_DEEPSEEK_V4_PRO_API_KEY", "should-not-be-sent")
 
     def fake_runtime_probe(provider, profile, api_key=None):
@@ -1202,14 +1330,14 @@ def test_model_library_api_key_writes_user_env_without_persisting_secret(monkeyp
 
     env_name = set_llm_model_api_key(public_config, "custom_codex", "model-secret")
 
-    assert env_name == "VIBELUTION_LLM_CUSTOM_CODEX_API_KEY"
-    assert writes == [("VIBELUTION_LLM_CUSTOM_CODEX_API_KEY", "model-secret")]
+    assert env_name == "VIBELUTION_LLM_MODEL_CUSTOM_CODEX_API_KEY"
+    assert writes == [("VIBELUTION_LLM_MODEL_CUSTOM_CODEX_API_KEY", "model-secret")]
     assert "model-secret" not in dumps_public_config(public_config, HEADER_LINES)
     assert "model-secret" not in render_panel_html(public_config, lang="zh")
 
     clear_llm_model_api_key(public_config, "custom_codex")
 
-    assert deletes == ["VIBELUTION_LLM_CUSTOM_CODEX_API_KEY"]
+    assert deletes == ["VIBELUTION_LLM_MODEL_CUSTOM_CODEX_API_KEY"]
 
 
 def test_set_user_env_var_uses_windows_registry_helper(monkeypatch):
@@ -1254,15 +1382,15 @@ def test_list_llm_model_options_detects_windows_user_scoped_model_key(monkeypatc
 
     monkeypatch.setattr("config.public_config.os.name", "nt", raising=False)
     monkeypatch.setenv("VIBELUTION_ENABLE_USER_ENV_FALLBACK", "1")
-    monkeypatch.delenv("VIBELUTION_LLM_CUSTOM_CODEX_API_KEY", raising=False)
+    monkeypatch.delenv("VIBELUTION_LLM_MODEL_CUSTOM_CODEX_API_KEY", raising=False)
     monkeypatch.setattr(
         "config.public_config._read_windows_user_env_var",
-        lambda name: "model-secret" if name == "VIBELUTION_LLM_CUSTOM_CODEX_API_KEY" else "",
+        lambda name: "model-secret" if name == "VIBELUTION_LLM_MODEL_CUSTOM_CODEX_API_KEY" else "",
     )
 
     option = next(item for item in list_llm_model_options(public_config) if item["model_id"] == "custom_codex")
 
-    assert option["api_key_env"] == "VIBELUTION_LLM_CUSTOM_CODEX_API_KEY"
+    assert option["api_key_env"] == "VIBELUTION_LLM_MODEL_CUSTOM_CODEX_API_KEY"
     assert option["api_key_configured"] is True
 
 
@@ -1274,25 +1402,25 @@ def test_build_effective_config_prefers_model_user_env_key_on_windows(monkeypatc
         "gpt-5.3-codex",
         "Custom Codex",
     )
-    primary = public_config["llm"]["profiles"]["primary"]
-    primary["provider"] = public_config["llm"]["model_library"]["custom_codex"]["provider"].copy()
-    primary["model"] = "gpt-5.3-codex"
-    primary.pop("api_key_env", None)
+    public_config["llm"]["profiles"]["primary"] = {
+        "model_ref": "custom_codex",
+        "overrides": {},
+    }
 
     monkeypatch.setattr("config.models.os.name", "nt", raising=False)
     monkeypatch.setenv("VIBELUTION_ENABLE_USER_ENV_FALLBACK", "1")
-    monkeypatch.delenv("VIBELUTION_LLM_CUSTOM_CODEX_API_KEY", raising=False)
+    monkeypatch.delenv("VIBELUTION_LLM_MODEL_CUSTOM_CODEX_API_KEY", raising=False)
     monkeypatch.setenv("OPENAI_API_KEY", "provider-secret")
     monkeypatch.setattr(
         "config.models._read_windows_user_env_var",
-        lambda name: "model-secret" if name == "VIBELUTION_LLM_CUSTOM_CODEX_API_KEY" else None,
+        lambda name: "model-secret" if name == "VIBELUTION_LLM_MODEL_CUSTOM_CODEX_API_KEY" else None,
     )
 
     effective = build_effective_config(public_config)
 
     assert effective.get_api_key_for_profile(profile_id="primary") == "model-secret"
     assert effective.llm.get_api_key_source_label_for_profile(profile_id="primary") == (
-        "model-env:VIBELUTION_LLM_CUSTOM_CODEX_API_KEY"
+        "model-env:VIBELUTION_LLM_MODEL_CUSTOM_CODEX_API_KEY"
     )
 
 
@@ -1329,9 +1457,11 @@ def test_toml_writer_round_trip_for_public_config_uses_inline_provider_blocks():
     loaded = tomllib.loads(dumped)
 
     assert "[llm.providers]" not in dumped
-    assert "[llm.profiles.primary.provider]" in dumped
+    assert "[llm.profiles.primary.provider]" not in dumped
+    assert "model_ref" in loaded["llm"]["profiles"]["primary"]
     assert "[llm.model_library.relay_openai_gpt_5_5.provider]" in dumped
-    assert loaded["llm"]["profiles"]["primary"]["provider"]["kind"] == public_config["llm"]["profiles"]["primary"]["provider"]["kind"]
+    primary_model_ref = loaded["llm"]["profiles"]["primary"]["model_ref"]
+    assert loaded["llm"]["model_library"][primary_model_ref]["provider"]["kind"]
     assert loaded["prompt"]["sections"][0]["name"] == public_config["prompt"]["sections"][0]["name"]
     assert loaded["pet"]["heart"]["enabled"] is True
 
@@ -1381,7 +1511,7 @@ def test_load_public_config_recovers_from_legacy_dotted_model_library_shape(tmp_
 [llm.model_library.custom.gpt-5.3-codex]
 model = "gpt-5.3-codex"
 label = "Custom Codex"
-api_key_env = "VIBELUTION_LLM_CUSTOM_GPT_5_3_CODEX_API_KEY"
+api_key_env = "VIBELUTION_LLM_MODEL_CUSTOM_GPT_5_3_CODEX_API_KEY"
 
 [llm.model_library.custom.gpt-5.3-codex.provider]
 kind = "openai"
@@ -1400,18 +1530,19 @@ context_window = 400000
     assert loaded["llm"]["model_library"]["custom.gpt-5.3-codex"]["provider"]["kind"] == "openai"
 
 
-def test_build_effective_config_from_public_structure_uses_inline_provider():
+def test_build_effective_config_from_public_structure_resolves_model_ref_provider():
     public_config = load_public_config()
     config = build_effective_config(public_config)
     profile = config.llm.get_profile("subagent_explorer")
     provider = config.llm.get_provider(profile.provider_id)
     explorer_public = public_config["llm"]["profiles"]["subagent_explorer"]
+    explorer_model = public_config["llm"]["model_library"][explorer_public["model_ref"]]
 
     assert config.runtime.profile == "safe_remote"
-    assert profile.model == explorer_public["model"]
-    assert profile.contract == explorer_public.get("contract", profile.contract)
-    assert profile.reasoning_state_field == explorer_public.get("reasoning_state_field", "")
-    assert provider.kind == explorer_public["provider"]["kind"]
+    assert profile.model == explorer_model["model"]
+    assert profile.contract == explorer_model.get("contract", profile.contract)
+    assert profile.reasoning_state_field == explorer_model.get("reasoning_state_field", "")
+    assert provider.kind == explorer_model["provider"]["kind"]
     assert config.ui.language == public_config["ui"]["language"]
 
 
@@ -1445,7 +1576,7 @@ def test_inspect_public_config_warns_when_profiles_bypass_matching_relay_respons
             "context_window": 128000,
         },
         "model": "gpt-5.5",
-        "api_key_env": "VIBELUTION_LLM_CUSTOM_OPENAI_COMPATIBLE_RELAY_API_KEY",
+        "api_key_env": "VIBELUTION_LLM_MODEL_CUSTOM_OPENAI_COMPATIBLE_RELAY_API_KEY",
         "transport": "chat_completions",
         "contract": "tool_chat",
         "strict_compatibility": False,

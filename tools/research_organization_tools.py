@@ -82,17 +82,125 @@ def research_agent_creation_proposal_tool(
                 "recommendedByAgentId": proposer_agent_id,
                 "actions": [action],
             }
-        )["proposal"]
+        )
+        reused = bool(proposal.get("reused"))
+        proposal = proposal["proposal"]
         return _json_result(
             {
                 "ok": True,
-                "status": "proposal_created",
+                "status": "existing_proposal" if reused else "proposal_created",
                 "proposalId": proposal.get("proposalId") or "",
                 "proposalStatus": proposal.get("status") or "",
                 "riskLevel": proposal.get("riskLevel") or "",
                 "requiresUserConfirmation": bool(proposal.get("requiresUserConfirmation")),
                 "action": action,
-                "message": "新增 Agent 提案已创建；应用后才会生成 Agent，之后再配置工具权限和通信边。",
+                "message": (
+                    "已找到同名或同角色的待应用创建提案；请等待用户确认或使用 research_proposal_apply_tool 应用，不要重复创建。"
+                    if reused
+                    else "新增 Agent 提案已创建；应用后才会生成 Agent，之后再配置工具权限和通信边。"
+                ),
+            }
+        )
+    except Exception as exc:
+        return _json_result(
+            {
+                "ok": False,
+                "status": "failed",
+                "error": type(exc).__name__,
+                "message": trim_lines(str(exc), max_lines=2),
+            }
+        )
+
+
+def research_proposal_apply_tool(
+    proposal_id: str,
+    user_confirmed: bool = False,
+    reason: str = "",
+    confirmation_text: str = "",
+    confirmation_turn_id: str = "",
+) -> str:
+    """
+    Apply a user-confirmed research organization proposal.
+
+    This is the missing bridge between a high-risk proposal and the actual Agent/edge
+    state change. It refuses to run unless the caller records explicit user confirmation.
+    """
+
+    try:
+        from core.web.services.agent_directory_service import current_agent_runtime
+        from core.web.services.research_organization_service import apply_research_org_proposal
+
+        runtime = current_agent_runtime()
+        actor_agent_id = str(runtime.get("agentId") or "").strip()
+        if not actor_agent_id:
+            return _json_result(
+                {
+                    "ok": False,
+                    "status": "blocked",
+                    "error": "agent_runtime_missing",
+                    "message": "当前工具需要在已绑定 AgentInstance 的运行时中调用。",
+                }
+            )
+        normalized_proposal_id = trim_lines(str(proposal_id or ""), max_lines=1).strip()
+        if not normalized_proposal_id:
+            return _json_result(
+                {
+                    "ok": False,
+                    "status": "blocked",
+                    "error": "proposal_id_required",
+                    "message": "应用科研组织提案需要 proposal_id。",
+                }
+            )
+        normalized_confirmation = trim_lines(str(confirmation_text or reason or ""), max_lines=3).strip()
+        if not user_confirmed or not normalized_confirmation:
+            return _json_result(
+                {
+                    "ok": False,
+                    "status": "blocked",
+                    "error": "user_confirmation_required",
+                    "message": "应用科研组织提案必须先得到当前用户明确确认，并提供 confirmation_text 或 reason 作为确认摘要。",
+                    "proposalId": normalized_proposal_id,
+                    "requires": ["user_confirmed=true", "confirmation_text"],
+                }
+            )
+
+        applied = apply_research_org_proposal(
+            normalized_proposal_id,
+            confirmation={
+                "source": "research_proposal_apply_tool",
+                "actorAgentId": actor_agent_id,
+                "text": normalized_confirmation,
+                "turnId": trim_lines(str(confirmation_turn_id or ""), max_lines=1).strip(),
+            },
+        )
+        proposal = applied.get("proposal") or {}
+        results = [item for item in applied.get("results") or [] if isinstance(item, dict)]
+        created_agents = [
+            {
+                "agentId": str(item.get("agentId") or ""),
+                "displayName": str(item.get("displayName") or ""),
+            }
+            for item in results
+            if item.get("actionType") == "create_agent" and item.get("status") == "applied"
+        ]
+        return _json_result(
+            {
+                "ok": True,
+                "status": str(proposal.get("status") or "applied"),
+                "proposalId": str(proposal.get("proposalId") or normalized_proposal_id),
+                "resultStatuses": [str(item.get("status") or "") for item in results],
+                "createdAgents": created_agents,
+                "message": "科研组织提案已应用；若包含 create_agent，现在 Agent 已生成，之后才能配置工具权限和通信边。",
+                "reason": trim_lines(str(reason or ""), max_lines=2),
+            }
+        )
+    except FileNotFoundError as exc:
+        return _json_result(
+            {
+                "ok": False,
+                "status": "blocked",
+                "error": "proposal_not_found",
+                "message": trim_lines(str(exc), max_lines=2),
             }
         )
     except Exception as exc:

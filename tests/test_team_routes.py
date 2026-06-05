@@ -105,6 +105,8 @@ def test_team_routes_save_canvas(tmp_path, monkeypatch):
     monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
     client = _client()
     team = client.post("/api/teams", json={"name": "画布团队"}).json()
+    assert team["linkedChatRoomId"]
+    assert team["linkedChatRoom"]["participantCount"] == 0
     canvas = client.get(f"/api/teams/{team['teamId']}/canvas").json()
     canvas["nodes"].append(
         {
@@ -145,6 +147,80 @@ def test_team_routes_sync_linked_chat_room(tmp_path, monkeypatch):
     room = client.get(f"/api/chat-rooms/{payload['linkedChatRoomId']}").json()
     assert room["config"]["source"] == "team"
     assert room["config"]["teamId"] == team["teamId"]
+
+
+def test_archived_team_room_is_hidden_from_conversation_index(tmp_path, monkeypatch):
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(project_agent_bus_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
+    client = _client()
+    team = client.post("/api/teams", json={"name": "医疗问诊"}).json()
+    room_id = team["linkedChatRoomId"]
+
+    archive_response = client.patch(f"/api/teams/{team['teamId']}", json={"status": "archived"})
+    conversations = client.get("/api/conversations").json()
+    room_response = client.get(f"/api/chat-rooms/{room_id}")
+
+    assert archive_response.status_code == 200, archive_response.text
+    assert archive_response.json()["status"] == "archived"
+    assert all(item.get("roomId") != room_id for item in conversations)
+    assert room_response.status_code == 200
+    assert room_response.json()["roomId"] == room_id
+
+
+def test_team_delete_route_cascades_member_agent_archive(tmp_path, monkeypatch):
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(project_agent_bus_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
+    agent = agent_directory_service.create_agent_instance(display_name="Alpha", direct_session_id="session-alpha")
+    client = _client()
+    team = client.post("/api/teams", json={"name": "删除团队", "members": [{"agentId": agent["agentId"]}]}).json()
+
+    response = client.delete(f"/api/teams/{team['teamId']}")
+
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "archived"
+    assert agent_directory_service.get_agent(agent["agentId"], include_archived=True)["status"] == "archived"
+
+
+def test_team_delete_route_repairs_already_archived_team_members(tmp_path, monkeypatch):
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(project_agent_bus_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
+    agent = agent_directory_service.create_agent_instance(display_name="Legacy", direct_session_id="session-legacy")
+    client = _client()
+    team = client.post("/api/teams", json={"name": "旧删除团队", "members": [{"agentId": agent["agentId"]}]}).json()
+    state = team_service._load_index()
+    stored = next(item for item in state["teams"] if item["teamId"] == team["teamId"])
+    stored["status"] = "archived"
+    team_service._save_index(state)
+
+    response = client.delete(f"/api/teams/{team['teamId']}")
+
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "archived"
+    assert agent_directory_service.get_agent(agent["agentId"], include_archived=True)["status"] == "archived"
+
+
+def test_team_delete_route_rejects_system_team(tmp_path, monkeypatch):
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(project_agent_bus_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
+    team_service.ensure_evolution_system_teams()
+    client = _client()
+
+    response = client.delete("/api/teams/self-evolution-team")
+
+    assert response.status_code == 422
+    assert "System Team cannot be archived" in response.json()["detail"]
 
 
 def test_team_routes_send_message_to_team_members(tmp_path, monkeypatch):

@@ -6,6 +6,7 @@ import {
   deriveBackendSystemState,
   deriveFrontendSystemState,
   deriveRuntimeControllerState,
+  deriveStartupDisconnectedState,
   deriveStartupLoadingState,
   deriveStartupProgressState,
   frontendSystemTone,
@@ -419,6 +420,36 @@ describe("systemStatus", () => {
     });
 
     expect(advisoryFailureAfterReady.active).toBe(false);
+  });
+
+  it("switches a stale startup overlay to a disconnected stopped state", () => {
+    expect(
+      deriveStartupDisconnectedState({
+        startupActive: true,
+        runtimeUnavailable: true,
+        backendUnavailable: true,
+      }),
+    ).toMatchObject({
+      active: true,
+      title: "工作台已停止",
+      stage: "连接已断开",
+      tone: "failed",
+    });
+
+    expect(
+      deriveStartupDisconnectedState({
+        startupActive: true,
+        runtimeUnavailable: false,
+        backendUnavailable: false,
+      }).active,
+    ).toBe(false);
+    expect(
+      deriveStartupDisconnectedState({
+        startupActive: false,
+        runtimeUnavailable: true,
+        backendUnavailable: true,
+      }).active,
+    ).toBe(false);
   });
 
   it("summarizes frontend build failures with the first TypeScript error", () => {

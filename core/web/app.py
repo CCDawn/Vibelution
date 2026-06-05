@@ -19,6 +19,7 @@ from .control import WebControlGuardMiddleware, control_token_payload, ensure_co
 from .routes.config import router as config_router
 from .routes.agents import router as agents_router
 from .routes.chat_rooms import router as chat_rooms_router
+from .routes.computer_use import router as computer_use_router
 from .routes.conversations import router as conversations_router
 from .routes.diagnostics import router as diagnostics_router
 from .routes.evolution import router as evolution_router
@@ -35,6 +36,8 @@ from .routes.reset import router as reset_router
 from .routes.runtime import router as runtime_router
 from .routes.sessions import router as sessions_router
 from .routes.skills import router as skills_router
+from .routes.team_templates import router as team_templates_router
+from .routes.team_workflows import router as team_workflows_router
 from .routes.teams import router as teams_router
 from .routes.tools import router as tools_router
 from .services.runtime_scene_service import record_backend_api_event
@@ -42,6 +45,10 @@ from .services.runtime_scene_service import record_backend_api_event
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 WEB_DIST = PROJECT_ROOT / "web" / "dist"
+FRONTEND_BUILD_HINT = (
+    "Run `npm install` and `npm run build` in `web/`, or use `bun run bun:build` "
+    "for local auxiliary builds after dependencies are ready, then restart the server."
+)
 INDEX_CACHE_HEADERS = {
     "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
     "Pragma": "no-cache",
@@ -212,9 +219,12 @@ def create_app() -> FastAPI:
     app.include_router(sessions_router, prefix="/api")
     app.include_router(chat_rooms_router, prefix="/api")
     app.include_router(project_agent_bus_router, prefix="/api")
+    app.include_router(team_templates_router, prefix="/api")
     app.include_router(teams_router, prefix="/api")
+    app.include_router(team_workflows_router, prefix="/api")
     app.include_router(skills_router, prefix="/api")
     app.include_router(tools_router, prefix="/api")
+    app.include_router(computer_use_router, prefix="/api")
     app.include_router(files_router, prefix="/api")
     app.include_router(git_router, prefix="/api")
     app.include_router(knowledge_router, prefix="/api")
@@ -235,7 +245,7 @@ def create_app() -> FastAPI:
         return JSONResponse(
             {
                 "message": "Web frontend has not been built yet.",
-                "next": "Run `npm install` and `npm run build` in `web/`, then restart the server.",
+                "next": FRONTEND_BUILD_HINT,
             },
             status_code=503,
         )
@@ -260,7 +270,7 @@ def create_app() -> FastAPI:
         return JSONResponse(
             {
                 "message": "Web frontend has not been built yet.",
-                "next": "Run `npm install` and `npm run build` in `web/`, then restart the server.",
+                "next": FRONTEND_BUILD_HINT,
             },
             status_code=503,
         )

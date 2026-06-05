@@ -62,6 +62,7 @@ def test_research_organization_initializes_protected_core_agents_with_explicit_t
         "agent_message_tool",
         "research_agent_creation_proposal_tool",
         "research_communication_edge_proposal_tool",
+        "research_proposal_apply_tool",
         "web_search_tool",
         "web_fetch_tool",
     ]
@@ -70,6 +71,7 @@ def test_research_organization_initializes_protected_core_agents_with_explicit_t
         "agent_tool_permission_request_tool",
         "research_agent_creation_proposal_tool",
         "research_communication_edge_proposal_tool",
+        "research_proposal_apply_tool",
         "web_search_tool",
         "web_fetch_tool",
     ]
@@ -78,6 +80,7 @@ def test_research_organization_initializes_protected_core_agents_with_explicit_t
         "agent_tool_permission_request_tool",
         "research_agent_creation_proposal_tool",
         "research_communication_edge_proposal_tool",
+        "research_proposal_apply_tool",
         "web_search_tool",
         "web_fetch_tool",
         "read_memory_tool",
@@ -701,6 +704,49 @@ def test_core_capability_steward_edges_route_policy_requests(org_workspace):
     assert steward_report["message"]["deliveries"][0]["wakeStatus"] == "not_requested"
 
 
+def test_core_management_edges_allow_ceo_approval_notice_and_capability_design(org_workspace):
+    org = research_organization_service.get_research_organization()
+    ceo, advisor, steward = _core_agents(org)
+
+    notice = research_organization_service.send_research_org_message(
+        {
+            "sourceType": "agent",
+            "sourceAgentId": ceo["agentId"],
+            "targetAgentId": advisor["agentId"],
+            "messageType": "notice",
+            "intent": "notice",
+            "content": "已收到用户确认，请停止重复提交同类提案。",
+            "wakeTarget": False,
+        }
+    )
+    approve = research_organization_service.send_research_org_message(
+        {
+            "sourceType": "agent",
+            "sourceAgentId": ceo["agentId"],
+            "targetAgentId": steward["agentId"],
+            "messageType": "decision",
+            "intent": "approve",
+            "content": "批准按当前方案准备能力配置。",
+            "wakeTarget": False,
+        }
+    )
+    capability_design = research_organization_service.send_research_org_message(
+        {
+            "sourceType": "agent",
+            "sourceAgentId": ceo["agentId"],
+            "targetAgentId": steward["agentId"],
+            "messageType": "request",
+            "intent": "capability_design",
+            "content": "请调整记忆库管理 Agent 的能力设计。",
+            "wakeTarget": False,
+        }
+    )
+
+    assert notice["message"]["deliveries"][0]["allowed"] is True
+    assert approve["message"]["deliveries"][0]["allowed"] is True
+    assert capability_design["message"]["deliveries"][0]["allowed"] is True
+
+
 def test_busy_target_keeps_pending_message_and_retry_can_wake(org_workspace, monkeypatch):
     org = research_organization_service.get_research_organization()
     ceo, advisor, _ = _core_agents(org)
@@ -777,13 +823,244 @@ def test_high_risk_create_agent_proposal_requires_user_apply(org_workspace):
     assert proposal["status"] == "pending_user_confirmation"
     assert proposal["requiresUserConfirmation"] is True
 
-    applied = research_organization_service.apply_research_org_proposal(proposal["proposalId"])
+    applied = research_organization_service.apply_research_org_proposal(
+        proposal["proposalId"],
+        confirmation={"source": "test", "text": "用户确认新增神经科学专家"},
+    )
 
     created = applied["results"][0]
     assert created["status"] == "applied"
     assert created["agentId"]
     created_node = next(node for node in applied["organization"]["agents"] if node["agentId"] == created["agentId"])
     assert created_node["allowedTools"] == ["agent_message_tool", "web_search_tool"]
+    assert applied["proposal"]["auditTrail"][-1]["confirmation"]["text"] == "用户确认新增神经科学专家"
+
+
+def test_equivalent_pending_create_agent_proposal_is_reused(org_workspace):
+    first = research_organization_service.create_research_org_proposal(
+        {
+            "actions": [
+                {
+                    "actionType": "create_agent",
+                    "displayName": "记忆库管理员",
+                    "role": "memory_steward",
+                    "roleKey": "memory_steward",
+                    "allowedTools": ["agent_message_tool"],
+                }
+            ],
+        }
+    )
+    second = research_organization_service.create_research_org_proposal(
+        {
+            "actions": [
+                {
+                    "actionType": "create_agent",
+                    "displayName": "记忆库管理员",
+                    "role": "memory_steward",
+                    "roleKey": "memory_steward",
+                    "allowedTools": ["agent_message_tool", "web_search_tool"],
+                }
+            ],
+        }
+    )
+
+    assert second.get("reused") is True
+    assert second["proposal"]["proposalId"] == first["proposal"]["proposalId"]
+    org = research_organization_service.get_research_organization()
+    matching = [
+        item for item in org["proposals"]
+        if item["proposalId"] == first["proposal"]["proposalId"]
+    ]
+    assert len(matching) == 1
+
+
+def test_duplicate_pending_create_agent_proposals_are_superseded_on_repair(org_workspace):
+    first = research_organization_service.create_research_org_proposal(
+        {
+            "actions": [
+                {
+                    "actionType": "create_agent",
+                    "displayName": "记忆库管理员",
+                    "role": "memory_curator",
+                    "roleKey": "memory_curator",
+                    "allowedTools": ["agent_message_tool"],
+                }
+            ],
+        }
+    )["proposal"]
+    graph = org_workspace.read_research_organization()
+    duplicate = json.loads(json.dumps(first))
+    duplicate["proposalId"] = "roprop-duplicate-memory-curator"
+    duplicate["createdAt"] = "2026-01-01T00:00:00+00:00"
+    duplicate["updatedAt"] = "2026-01-01T00:00:00+00:00"
+    graph["proposals"].append(duplicate)
+    org_workspace.write_research_organization(graph)
+
+    repaired = research_organization_service.get_research_organization()
+
+    canonical = next(item for item in repaired["proposals"] if item["proposalId"] == first["proposalId"])
+    superseded = next(item for item in repaired["proposals"] if item["proposalId"] == duplicate["proposalId"])
+    assert canonical["status"] == "pending_user_confirmation"
+    assert superseded["status"] == "superseded"
+    assert superseded["supersededByProposalId"] == first["proposalId"]
+
+
+def test_semantic_duplicate_memory_manager_proposals_are_superseded_on_repair(org_workspace):
+    curator = research_organization_service.create_research_org_proposal(
+        {
+            "actions": [
+                {
+                    "actionType": "create_agent",
+                    "displayName": "记忆库管理员",
+                    "role": "memory_curator",
+                    "roleKey": "memory_curator",
+                    "allowedTools": ["agent_message_tool"],
+                }
+            ],
+        }
+    )["proposal"]
+    graph = org_workspace.read_research_organization()
+    steward = json.loads(json.dumps(curator))
+    steward["proposalId"] = "roprop-duplicate-memory-steward"
+    steward["title"] = "新增记忆库管理agent"
+    steward["actions"][0]["displayName"] = "记忆库管理agent"
+    steward["actions"][0]["role"] = "memory_steward"
+    steward["actions"][0]["roleKey"] = "memory_steward"
+    graph["proposals"].append(steward)
+    org_workspace.write_research_organization(graph)
+
+    repaired = research_organization_service.get_research_organization()
+
+    canonical = next(item for item in repaired["proposals"] if item["proposalId"] == curator["proposalId"])
+    superseded = next(item for item in repaired["proposals"] if item["proposalId"] == steward["proposalId"])
+    assert canonical["status"] == "pending_user_confirmation"
+    assert superseded["status"] == "superseded"
+    assert superseded["supersededByProposalId"] == curator["proposalId"]
+
+
+def test_generic_research_specialist_role_does_not_merge_distinct_agent_names(org_workspace):
+    first = research_organization_service.create_research_org_proposal(
+        {
+            "actions": [
+                {
+                    "actionType": "create_agent",
+                    "displayName": "技术架构分析师",
+                    "role": "research_specialist",
+                    "allowedTools": ["agent_message_tool"],
+                }
+            ],
+        }
+    )
+    second = research_organization_service.create_research_org_proposal(
+        {
+            "actions": [
+                {
+                    "actionType": "create_agent",
+                    "displayName": "数据库工程师",
+                    "role": "research_specialist",
+                    "allowedTools": ["agent_message_tool"],
+                }
+            ],
+        }
+    )
+
+    assert second.get("reused") is not True
+    assert second["proposal"]["proposalId"] != first["proposal"]["proposalId"]
+
+
+def test_create_agent_proposal_separates_unknown_tools_from_allowed_tools(org_workspace):
+    proposal = research_organization_service.create_research_org_proposal(
+        {
+            "actions": [
+                {
+                    "actionType": "create_agent",
+                    "displayName": "记忆库管理员",
+                    "role": "memory_steward",
+                    "roleKey": "memory_steward",
+                    "allowedTools": [
+                        "agent_message_tool",
+                        "memory_tools.py",
+                        "codebase_analyzer",
+                        "web_search_tool",
+                    ],
+                }
+            ],
+        }
+    )["proposal"]
+    action = proposal["actions"][0]
+
+    assert action["allowedTools"] == ["agent_message_tool", "web_search_tool"]
+    assert action["missingTools"] == ["memory_tools.py", "codebase_analyzer"]
+    assert action["requestedTools"] == ["memory_tools.py", "codebase_analyzer"]
+
+    applied = research_organization_service.apply_research_org_proposal(
+        proposal["proposalId"],
+        confirmation={"source": "test", "text": "用户确认创建记忆库管理员"},
+    )
+
+    created = applied["results"][0]
+    created_node = next(node for node in applied["organization"]["agents"] if node["agentId"] == created["agentId"])
+    assert created_node["allowedTools"] == ["agent_message_tool", "web_search_tool"]
+
+
+def test_historical_pending_create_agent_proposal_allowed_tools_are_repaired(org_workspace):
+    proposal = research_organization_service.create_research_org_proposal(
+        {
+            "actions": [
+                {
+                    "actionType": "create_agent",
+                    "displayName": "记忆库管理员",
+                    "role": "memory_steward",
+                    "roleKey": "memory_steward",
+                    "allowedTools": ["agent_message_tool"],
+                }
+            ],
+        }
+    )["proposal"]
+    graph = org_workspace.read_research_organization()
+    stored = next(item for item in graph["proposals"] if item["proposalId"] == proposal["proposalId"])
+    stored["actions"][0]["allowedTools"] = [
+        "agent_message_tool",
+        "memory_tools.py",
+        "codebase_analyzer",
+        "web_search_tool",
+    ]
+    org_workspace.write_research_organization(graph)
+
+    repaired = research_organization_service.get_research_organization()
+
+    repaired_proposal = next(item for item in repaired["proposals"] if item["proposalId"] == proposal["proposalId"])
+    repaired_action = repaired_proposal["actions"][0]
+    assert repaired_action["allowedTools"] == ["agent_message_tool", "web_search_tool"]
+    assert repaired_action["missingTools"] == ["memory_tools.py", "codebase_analyzer"]
+    assert repaired_action["requestedTools"] == ["memory_tools.py", "codebase_analyzer"]
+
+
+def test_applying_confirmed_create_agent_proposal_is_idempotent(org_workspace):
+    proposal = research_organization_service.create_research_org_proposal(
+        {
+            "actions": [
+                {
+                    "actionType": "create_agent",
+                    "displayName": "记忆库管理员",
+                    "role": "memory_steward",
+                    "roleKey": "memory_steward",
+                    "allowedTools": ["agent_message_tool"],
+                }
+            ],
+        }
+    )["proposal"]
+
+    applied = research_organization_service.apply_research_org_proposal(proposal["proposalId"])
+    repeated = research_organization_service.apply_research_org_proposal(proposal["proposalId"])
+
+    assert applied["results"][0]["status"] == "applied"
+    created_agent_id = applied["results"][0]["agentId"]
+    assert created_agent_id
+    assert repeated["results"] == []
+    org = research_organization_service.get_research_organization()
+    created_nodes = [node for node in org["agents"] if node["agentId"] == created_agent_id]
+    assert len(created_nodes) == 1
 
 
 def test_edge_proposal_apply_syncs_research_team_canvas(org_workspace):

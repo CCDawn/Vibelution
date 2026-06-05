@@ -1,9 +1,9 @@
-"""Runtime-manager logging helpers for lifecycle scene packages."""
+﻿"""Runtime-manager logging helpers for lifecycle scene packages."""
 
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -31,7 +31,7 @@ def append_runtime_manager_file_event(
     ensure_dirs: Any | None = None,
     suppress_io_errors: bool = False,
 ) -> str:
-    event_at = datetime.now(UTC).isoformat()
+    event_at = datetime.now(timezone.utc).isoformat()
     target_path = events_path or EVENTS_PATH
     ensure_func = ensure_dirs or ensure_runtime_manager_dirs
     try:
@@ -246,7 +246,7 @@ def _backfill_runtime_manager_scene_events(
     if backfill_key in _BACKFILLED_SCENE_KEYS:
         return
     _BACKFILLED_SCENE_KEYS.add(backfill_key)
-    cutoff = _parse_event_datetime(before_at) or datetime.now(UTC)
+    cutoff = _parse_event_datetime(before_at) or datetime.now(timezone.utc)
     earliest = cutoff - timedelta(seconds=_BACKFILL_WINDOW_SECONDS)
     existing_keys = _existing_scene_event_keys(
         runtime_scene_service,
@@ -378,5 +378,5 @@ def _parse_event_datetime(value: str) -> datetime | None:
     except ValueError:
         return None
     if parsed.tzinfo is None:
-        return parsed.replace(tzinfo=UTC)
-    return parsed.astimezone(UTC)
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)

@@ -496,11 +496,25 @@ def _looks_like_frontend_dev_server(normalized_command_line: str) -> bool:
     parts = normalized_command_line.split()
     if _contains_python_inline_command(parts):
         return False
+    if _looks_like_frontend_build_command(parts):
+        return False
     if "http.server" in parts and "frontend" in parts:
         return True
     if any(_looks_like_vite_invocation(part) for part in parts):
         return True
     if any(_looks_like_package_runner(part) for part in parts) and "dev" in parts:
+        return True
+    return False
+
+
+def _looks_like_frontend_build_command(parts: list[str]) -> bool:
+    if "build" in parts and any(_looks_like_package_runner(part) for part in parts):
+        return True
+    if "vite" in parts and "build" in parts:
+        return True
+    if any(_looks_like_vite_invocation(part) for part in parts) and "build" in parts:
+        return True
+    if "tsc" in parts and "-b" in parts and "build" in parts:
         return True
     return False
 

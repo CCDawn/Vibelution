@@ -102,7 +102,16 @@ def test_launcher_status_exposes_control_plane_evidence(tmp_path, monkeypatch):
                 "type": "restart_workbench",
                 "requestedBy": "launcher_api",
                 "requestedAt": "2026-06-03T00:00:02+00:00",
-                "args": {"reason": "launcher_restart", "source": "launcher_api"},
+                "args": {
+                    "reason": "launcher_restart",
+                    "source": "launcher_api",
+                    "deferredUntilActiveWorkClear": True,
+                    "queuedBecauseActiveWork": True,
+                    "queuedActiveWorkCount": 2,
+                    "deferUntil": "2026-06-03T00:00:12+00:00",
+                    "activeWorkDeferCount": 1,
+                    "lastActiveWorkCount": 2,
+                },
             }
         ),
         encoding="utf-8",
@@ -128,7 +137,33 @@ def test_launcher_status_exposes_control_plane_evidence(tmp_path, monkeypatch):
             [
                 json.dumps({"type": "command.completed", "at": "2026-06-03T00:00:03+00:00", "payload": {"commandId": "cmd-result", "ok": True, "message": "done"}}),
                 json.dumps({"type": "daemon.stopped", "at": "2026-06-03T00:00:04+00:00", "payload": {"commandId": "cmd-stop"}}),
+                json.dumps(
+                    {
+                        "type": "command_queue.processing_recovered",
+                        "at": "2026-06-03T00:00:05+00:00",
+                        "payload": {"commandId": "cmd-recovered", "type": "restart_workbench"},
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "command_queue.command_result_written",
+                        "at": "2026-06-03T00:00:06+00:00",
+                        "payload": {"commandId": "cmd-recovered", "ok": True, "message": "Workbench restarted."},
+                    }
+                ),
             ]
+        ),
+        encoding="utf-8",
+    )
+    (results_dir / "cmd-recovered.json").write_text(
+        json.dumps(
+            {
+                "commandId": "cmd-recovered",
+                "ok": True,
+                "completed": True,
+                "message": "Workbench restarted.",
+                "stateVersion": 9,
+            }
         ),
         encoding="utf-8",
     )
@@ -158,8 +193,19 @@ def test_launcher_status_exposes_control_plane_evidence(tmp_path, monkeypatch):
     assert evidence["queue"]["pendingCount"] == 1
     assert evidence["queue"]["processingCount"] == 1
     assert evidence["queue"]["pending"][0]["reason"] == "launcher_restart"
-    assert evidence["results"]["recent"][0]["commandId"] == "cmd-result"
-    assert evidence["events"]["recent"][0]["type"] == "daemon.stopped"
+    assert evidence["queue"]["pending"][0]["deferredUntilActiveWorkClear"] is True
+    assert evidence["restartQueue"]["pending"] is True
+    assert evidence["restartQueue"]["pendingCount"] == 1
+    assert evidence["restartQueue"]["commandId"] == "cmd-pending"
+    assert evidence["restartQueue"]["lastActiveWorkCount"] == 2
+    assert "2" in evidence["restartQueue"]["statusLine"]
+    assert evidence["results"]["recent"][0]["commandId"] in {"cmd-result", "cmd-recovered"}
+    assert evidence["events"]["recent"][0]["type"] == "command_queue.command_result_written"
+    assert evidence["recovery"]["active"] is True
+    assert evidence["recovery"]["commandId"] == "cmd-recovered"
+    assert evidence["recovery"]["commandType"] == "restart_workbench"
+    assert evidence["recovery"]["resultOk"] is True
+    assert "Workbench restarted." in evidence["recovery"]["statusLine"]
 
 
 def test_launcher_status_prefers_launcher_control_surface_state(tmp_path, monkeypatch):

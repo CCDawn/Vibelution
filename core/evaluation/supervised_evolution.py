@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from core.infrastructure.workspace_manager import get_workspace
+from core.evaluation.dataset_environment import preflight_environment_contract
 from core.evaluation.selection_policy import execute_supervised_policy
 from core.evaluation.supervised_intake import (
     ALLOWED_SUPERVISED_CASE_TYPES,
@@ -123,6 +124,66 @@ def _now_stamp() -> str:
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def _environment_preflight_failure_result(
+    *,
+    root: Path,
+    case_id: str,
+    role: str,
+    timeout_seconds: int,
+    preflight: Dict[str, Any],
+    agent_binding: Dict[str, Any],
+) -> HarnessResult:
+    now = _now_iso()
+    missing = [str(item.get("path") or "").strip() for item in preflight.get("missing") or [] if isinstance(item, dict)]
+    missing_text = ", ".join(item for item in missing if item) or "required task environment"
+    reason = f"数据集环境预检失败：缺少 {missing_text}，未启动 agent。"
+    return HarnessResult(
+        harness_id=f"preflight_{role}_{_safe_report_file_stem(case_id)}",
+        status="failed",
+        reason=reason,
+        started_at=now,
+        ended_at=now,
+        repo_root=str(root),
+        worktree_path="",
+        base_head="",
+        checkpoint_commit="",
+        checkpoint_ref=None,
+        tracked_dirty=False,
+        untracked_files=[],
+        command=[],
+        timeout_seconds=timeout_seconds,
+        restarts_observed=0,
+        normalized_restarts_observed=0,
+        restart_expected=False,
+        restart_reentered=False,
+        process_history=[],
+        process_summary={},
+        new_conversation_files=[],
+        new_debug_files=[],
+        stdout_tail=[],
+        stderr_tail=[],
+        agent_realtime_tail=[],
+        last_observation={
+            "phase": "environment_preflight",
+            "environment_preflight": preflight,
+        },
+        post_restart_observation={},
+        evolution_summary={
+            "validation": {"passed": 0, "failed": 0, "last": None},
+            "transaction": {"opened": False, "closed": False, "status": None, "txn_id": None},
+            "git": {"commit_detected": False, "commit_refs": []},
+            "restart": {"expected": False, "triggered": False, "reentered": False},
+            "guarded_tools": {"total": 0, "restart_guarded": 0},
+            "environment": {
+                "unavailable": True,
+                "preflight": preflight,
+                "evidence": reason,
+            },
+        },
+        agent_binding=agent_binding,
+    )
 
 
 @dataclass
@@ -349,7 +410,7 @@ def _normalize_supervised_agent_bindings(bindings: Optional[Dict[str, Any]]) -> 
         role = str(raw_role or "").strip()
         if not role or not isinstance(raw_binding, dict):
             continue
-        normalized[role] = {
+        safe_binding: Dict[str, Any] = {
             "agentId": str(raw_binding.get("agentId") or "").strip(),
             "agentCode": str(raw_binding.get("agentCode") or "").strip(),
             "displayName": str(raw_binding.get("displayName") or "").strip(),
@@ -364,6 +425,25 @@ def _normalize_supervised_agent_bindings(bindings: Optional[Dict[str, Any]]) -> 
             "role": str(raw_binding.get("role") or role).strip(),
             "roleLabel": str(raw_binding.get("roleLabel") or "").strip(),
         }
+        llm_slot = str(raw_binding.get("llmSlot") or "").strip()
+        if llm_slot:
+            safe_binding["llmSlot"] = llm_slot
+        dialogue_model_id = str(raw_binding.get("dialogueModelId") or "").strip()
+        if dialogue_model_id:
+            safe_binding["dialogueModelId"] = dialogue_model_id
+        llm_bindings = raw_binding.get("llmBindings")
+        if isinstance(llm_bindings, dict):
+            safe_llm_bindings: Dict[str, Dict[str, str]] = {}
+            for slot_key, slot_binding in llm_bindings.items():
+                slot = str(slot_key or "").strip()
+                if not slot or not isinstance(slot_binding, dict):
+                    continue
+                model_id = str(slot_binding.get("modelId") or "").strip()
+                if model_id:
+                    safe_llm_bindings[slot] = {"modelId": model_id}
+            if safe_llm_bindings:
+                safe_binding["llmBindings"] = safe_llm_bindings
+        normalized[role] = safe_binding
     return normalized
 
 
@@ -1703,6 +1783,7 @@ def run_supervised_evolution_session(
         scenario = str(case.get("scenario") or "transaction").strip() or "transaction"
         mode = str(case.get("mode") or "single_turn").strip() or "single_turn"
         timeout_seconds = int(case.get("timeout_seconds") or bundle.get("default_timeout_seconds") or 600)
+        max_steps = int(case.get("max_steps") or 0)
         post_restart_observe_seconds = int(case.get("post_restart_observe_seconds") or 20)
         expect_restart = bool(case.get("expect_restart", False))
         baseline_prompt = str(case.get("baseline_prompt") or case.get("prompt") or "").strip()
@@ -1773,6 +1854,7 @@ def run_supervised_evolution_session(
                     "mode": mode,
                     "prompt": prompt,
                     "timeout_seconds": timeout_seconds,
+                    "max_steps": max_steps,
                     "keep_worktree": keep_worktree,
                     "agent_binding": role_agent_binding,
                 },
@@ -1796,19 +1878,45 @@ def run_supervised_evolution_session(
                         },
                     )
 
-                result = runner(
-                    repo_root=root,
-                    mode=mode,
-                    prompt=prompt,
-                    scenario=scenario,
-                    timeout_seconds=timeout_seconds,
-                    expect_restart=expect_restart,
-                    post_restart_observe_seconds=post_restart_observe_seconds,
-                    keep_worktree=keep_worktree,
-                    agent_binding=role_agent_binding,
-                    progress_callback=emit_live_case_progress,
-                    cancel_checker=cancel_checker,
-                )
+                environment_contract = case.get("environment_contract")
+                preflight_result: Optional[Dict[str, Any]] = None
+                if isinstance(environment_contract, dict):
+                    preflight_config = environment_contract.get("preflight") if isinstance(environment_contract.get("preflight"), dict) else {}
+                    should_preflight = bool(preflight_config.get("required")) or bool(environment_contract.get("required_paths"))
+                    if should_preflight:
+                        preflight_result = preflight_environment_contract(environment_contract, project_root=root)
+                        emit_live_case_progress(
+                            {
+                                "phase": "environment_preflight",
+                                "environment_preflight": preflight_result,
+                                "environment_contract_kind": str(environment_contract.get("kind") or ""),
+                            }
+                        )
+
+                if preflight_result is not None and not bool(preflight_result.get("available")):
+                    result = _environment_preflight_failure_result(
+                        root=root,
+                        case_id=case_id,
+                        role=role,
+                        timeout_seconds=timeout_seconds,
+                        preflight=preflight_result,
+                        agent_binding=role_agent_binding,
+                    )
+                else:
+                    result = runner(
+                        repo_root=root,
+                        mode=mode,
+                        prompt=prompt,
+                        scenario=scenario,
+                        timeout_seconds=timeout_seconds,
+                        max_steps=max_steps or None,
+                        expect_restart=expect_restart,
+                        post_restart_observe_seconds=post_restart_observe_seconds,
+                        keep_worktree=keep_worktree,
+                        agent_binding=role_agent_binding,
+                        progress_callback=emit_live_case_progress,
+                        cancel_checker=cancel_checker,
+                    )
             except Exception as exc:
                 if isinstance(exc, SupervisedEvolutionCancelled):
                     raise

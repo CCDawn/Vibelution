@@ -64,8 +64,10 @@ from core.web.services.supervised_control_service import (
     delete_supervised_run_snapshot,
     execute_supervised_action,
     get_active_supervised_run,
+    get_latest_supervised_run,
     get_supervised_workbench,
     request_pause_supervised_run,
+    retry_supervised_run,
     request_resume_supervised_run,
     request_stop_supervised_run,
     start_supervised_run,
@@ -174,6 +176,27 @@ class ChatReviewBulkDeletePayload(BaseModel):
 @router.get("/evolution/overview")
 def evolution_overview() -> dict:
     return get_evolution_overview()
+
+
+@router.get("/evolution/workspace-snapshot")
+def evolution_workspace_snapshot() -> dict:
+    library = {
+        "items": list_library_items(),
+        "pending": list_pending_library_items(),
+    }
+    return {
+        "overview": get_evolution_overview(),
+        "runs": list_runs(),
+        "library": library,
+        "workbench": get_supervised_workbench(),
+        "activeRun": get_active_supervised_run(),
+        "latestRun": get_latest_supervised_run(),
+        "worktreeActiveRun": get_active_supervised_worktree_run(),
+        "worktreeRuns": list_supervised_worktree_runs(),
+        "selfOverview": get_self_evolution_overview(),
+        "selfLatestRun": get_latest_self_evolution_run(),
+        "selfTransactions": list_self_evolution_transactions(),
+    }
 
 
 @router.get("/evolution/runs")
@@ -309,13 +332,16 @@ def evolution_active_run() -> dict | None:
     return get_active_supervised_run()
 
 
+@router.get("/evolution/latest-run")
+def evolution_latest_run() -> dict | None:
+    return get_latest_supervised_run()
+
+
 @router.get("/evolution/active-run/events")
 def evolution_active_run_events() -> StreamingResponse:
     snapshot = get_active_supervised_run()
-    if snapshot is None:
-        raise HTTPException(status_code=404, detail="No active supervised run")
     return StreamingResponse(
-        stream_active_supervised_run_events(initial_snapshot=snapshot),
+        stream_active_supervised_run_events(initial_snapshot=snapshot) if snapshot is not None else iter(()),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -427,6 +453,20 @@ def evolution_resume_run(run_id: str) -> dict:
         return request_resume_supervised_run(run_id)
     except SupervisedRunNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except SupervisedRunStateError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except SupervisedRunValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/evolution/runs/{run_id}/retry", status_code=status.HTTP_202_ACCEPTED)
+def evolution_retry_run(run_id: str) -> dict:
+    try:
+        return retry_supervised_run(run_id)
+    except SupervisedRunNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except SupervisedRunBusyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except SupervisedRunStateError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except SupervisedRunValidationError as exc:

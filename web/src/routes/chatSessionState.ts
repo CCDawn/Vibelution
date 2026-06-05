@@ -1,4 +1,81 @@
-import { SessionDetail, SessionStreamEvent, SessionSummary } from "../api/types";
+import { ConversationMessage, SessionDetail, SessionReferenceAttachment, SessionStreamEvent, SessionSummary } from "../api/types";
+
+export type OptimisticUserMessageInput = {
+  sessionId: string;
+  content: string;
+  attachmentIds?: string[];
+  references?: SessionReferenceAttachment[];
+  createdAt?: string;
+};
+
+const OPTIMISTIC_USER_MESSAGE_METADATA_KEY = "optimisticUserMessage";
+
+function optimisticUserMessageId(input: OptimisticUserMessageInput, createdAt: string): string {
+  const contentHash = Array.from(input.content)
+    .reduce((hash, char) => ((hash << 5) - hash + char.charCodeAt(0)) | 0, 0)
+    .toString(16);
+  return `optimistic-user-${input.sessionId}-${createdAt}-${contentHash}`;
+}
+
+function isMatchingOptimisticUserMessage(message: ConversationMessage, input: OptimisticUserMessageInput): boolean {
+  return message.role === "user"
+    && message.content === input.content
+    && message.metadata?.[OPTIMISTIC_USER_MESSAGE_METADATA_KEY] === true;
+}
+
+export function appendOptimisticUserMessage(
+  detail: SessionDetail | undefined,
+  input: OptimisticUserMessageInput,
+): SessionDetail | undefined {
+  if (!detail) {
+    return detail;
+  }
+
+  if (detail.messages.some((message) => isMatchingOptimisticUserMessage(message, input))) {
+    return detail;
+  }
+
+  const createdAt = input.createdAt ?? new Date().toISOString();
+  const optimisticMessage: ConversationMessage = {
+    id: optimisticUserMessageId(input, createdAt),
+    role: "user",
+    content: input.content,
+    timestamp: createdAt,
+    metadata: {
+      [OPTIMISTIC_USER_MESSAGE_METADATA_KEY]: true,
+      pending: true,
+      attachmentIds: input.attachmentIds ?? [],
+      references: input.references ?? [],
+    },
+    references: input.references ?? [],
+  };
+
+  return {
+    ...detail,
+    messages: [...detail.messages, optimisticMessage],
+    updatedAt: createdAt,
+  };
+}
+
+export function removeOptimisticUserMessage(
+  detail: SessionDetail | undefined,
+  input: OptimisticUserMessageInput,
+): SessionDetail | undefined {
+  if (!detail) {
+    return detail;
+  }
+
+  const nextMessages = detail.messages.filter((message) => !isMatchingOptimisticUserMessage(message, input));
+  if (nextMessages.length === detail.messages.length) {
+    return detail;
+  }
+
+  return {
+    ...detail,
+    messages: nextMessages,
+    updatedAt: new Date().toISOString(),
+  };
+}
 
 export type SessionDetailLoadState = {
   blockingError: boolean;
@@ -16,6 +93,14 @@ export function sessionSummaryFromDetail(detail: SessionDetail): SessionSummary 
     lastActive: detail.lastActive,
     updatedAt: detail.updatedAt,
     currentPhase: detail.currentPhase,
+    sessionKind: detail.sessionKind,
+    parentSessionId: detail.parentSessionId,
+    rootSessionId: detail.rootSessionId,
+    childSessionIds: detail.childSessionIds,
+    activeChildSessionId: detail.activeChildSessionId,
+    childStatus: detail.childStatus,
+    taskTitle: detail.taskTitle,
+    resultCard: detail.resultCard,
   };
   if (detail.agentId !== undefined) {
     summary.agentId = detail.agentId;
@@ -25,15 +110,6 @@ export function sessionSummaryFromDetail(detail: SessionDetail): SessionSummary 
   }
   if (detail.agentDisplayName !== undefined) {
     summary.agentDisplayName = detail.agentDisplayName;
-  }
-  if (detail.agentProfileId !== undefined) {
-    summary.agentProfileId = detail.agentProfileId;
-  }
-  if (detail.agentTemplateId !== undefined) {
-    summary.agentTemplateId = detail.agentTemplateId;
-  }
-  if (detail.agentTemplateLabel !== undefined) {
-    summary.agentTemplateLabel = detail.agentTemplateLabel;
   }
   if (detail.agentWorkspacePath !== undefined) {
     summary.agentWorkspacePath = detail.agentWorkspacePath;
@@ -81,6 +157,44 @@ export function removeDeletedSessionFromSummaries(
     currentSessions.filter((session) => session.id !== deletedSessionId),
     nextDetail,
   );
+}
+
+export function renameSessionInSummaries(
+  sessions: SessionSummary[] | undefined,
+  sessionId: string,
+  title: string,
+  updatedAt: string,
+): SessionSummary[] | undefined {
+  if (!sessions || !sessionId) {
+    return sessions;
+  }
+
+  return sessions.map((session) =>
+    session.id === sessionId
+      ? {
+          ...session,
+          title,
+          updatedAt,
+        }
+      : session,
+  );
+}
+
+export function renameSessionDetail(
+  detail: SessionDetail | undefined,
+  sessionId: string,
+  title: string,
+  updatedAt: string,
+): SessionDetail | undefined {
+  if (!detail || detail.id !== sessionId) {
+    return detail;
+  }
+
+  return {
+    ...detail,
+    title,
+    updatedAt,
+  };
 }
 
 export function markSessionSummaryRunning(
@@ -159,11 +273,11 @@ export function shouldAcceptSessionStreamEvent(
   payload: SessionStreamEvent | undefined,
   activeSessionId: string | null | undefined,
 ): payload is SessionStreamEvent {
-  return Boolean(
-    payload
-      && payload.type === "session_detail"
-      && payload.detail
-      && payload.sessionId === activeSessionId
-      && payload.detail.id === activeSessionId,
-  );
+  if (!payload || payload.sessionId !== activeSessionId) {
+    return false;
+  }
+  if (payload.type === "session_detail") {
+    return Boolean(payload.detail && payload.detail.id === activeSessionId);
+  }
+  return payload.type === "assistant_delta";
 }

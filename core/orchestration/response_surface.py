@@ -6,6 +6,7 @@ from __future__ import annotations
 from typing import Any, Callable, Dict, Sequence
 
 from core.mental_model_flags import is_mental_model_enabled
+from core.llm.usage import cached_input_tokens_from_usage, usage_tokens_from_dict
 
 
 def _resolve_mental_model_enabled(override: bool | None = None) -> bool:
@@ -14,15 +15,50 @@ def _resolve_mental_model_enabled(override: bool | None = None) -> bool:
     return is_mental_model_enabled()
 
 
-def _read_nested_int(data: Dict[str, Any], *keys: str) -> int:
-    for key in keys:
-        value = data.get(key)
-        if value not in (None, ""):
-            try:
-                return max(0, int(value))
-            except (TypeError, ValueError):
-                continue
-    return 0
+class TokenUsageObservation:
+    """Tuple-compatible token usage with provider-observation metadata."""
+
+    def __new__(
+        cls,
+        input_tokens: int,
+        output_tokens: int,
+        *,
+        cached_input_tokens: int = 0,
+        observed: bool = False,
+    ) -> "TokenUsageObservation":
+        value = super().__new__(cls)
+        value._input_tokens = max(0, int(input_tokens or 0))
+        value._output_tokens = max(0, int(output_tokens or 0))
+        value.cached_input_tokens = max(0, int(cached_input_tokens or 0))
+        value.observed = bool(observed)
+        return value
+
+    def __iter__(self):
+        yield self.input_tokens
+        yield self.output_tokens
+
+    def __len__(self) -> int:
+        return 2
+
+    def __getitem__(self, index: int) -> int:
+        return (self.input_tokens, self.output_tokens)[index]
+
+    def __eq__(self, other: Any) -> bool:
+        if isinstance(other, tuple):
+            return (self.input_tokens, self.output_tokens) == other
+        return super().__eq__(other)
+
+    @property
+    def input_tokens(self) -> int:
+        return self._input_tokens
+
+    @property
+    def output_tokens(self) -> int:
+        return self._output_tokens
+
+    @property
+    def total_tokens(self) -> int:
+        return self.input_tokens + self.output_tokens
 
 
 class ResponseSurfaceController:
@@ -123,7 +159,7 @@ class ResponseSurfaceController:
         messages: Sequence[Any] | None = None,
         raw_content: str = "",
         estimate_output_tokens: Callable[[str], int] | None = None,
-    ) -> tuple[int, int]:
+    ) -> "TokenUsageObservation":
         ui = self._ui_getter()
         input_tokens = 0
         output_tokens = 0
@@ -146,6 +182,7 @@ class ResponseSurfaceController:
             )
 
         estimated = False
+        observed_usage = bool(usage or usage_observation)
         if not input_tokens and messages is not None:
             input_tokens = max(0, int(self._estimate_tokens(messages) or 0))
             estimated = input_tokens > 0
@@ -175,11 +212,16 @@ class ResponseSurfaceController:
                 input_tokens,
                 output_tokens,
                 cached_input_tokens=cached_input_tokens,
-                observed=True,
+                observed=observed_usage,
             )
         else:
             ui.note_token_usage(observed=False)
-        return input_tokens, output_tokens
+        return TokenUsageObservation(
+            input_tokens,
+            output_tokens,
+            cached_input_tokens=cached_input_tokens,
+            observed=observed_usage,
+        )
 
     @staticmethod
     def _extract_usage_payload(response: Any) -> Dict[str, Any]:
@@ -208,34 +250,7 @@ class ResponseSurfaceController:
 
     @staticmethod
     def _extract_usage_tokens(usage: Dict[str, Any] | Any) -> tuple[int, int]:
-        if not isinstance(usage, dict):
-            return 0, 0
-
-        def _read_int(*keys: str) -> int:
-            for key in keys:
-                value = usage.get(key)
-                if value not in (None, ""):
-                    try:
-                        return max(0, int(value))
-                    except (TypeError, ValueError):
-                        continue
-            return 0
-
-        input_tokens = _read_int("input_tokens", "prompt_tokens", "input_token_count")
-        output_tokens = _read_int("output_tokens", "completion_tokens", "output_token_count")
-
-        if not input_tokens and isinstance(usage.get("input_token_details"), dict):
-            input_tokens = _read_nested_int(usage["input_token_details"], "input_tokens", "prompt_tokens")
-        if not output_tokens and isinstance(usage.get("output_token_details"), dict):
-            output_tokens = _read_nested_int(usage["output_token_details"], "output_tokens", "completion_tokens")
-
-        total_tokens = _read_int("total_tokens")
-        if total_tokens > 0:
-            if input_tokens and not output_tokens:
-                output_tokens = max(0, total_tokens - input_tokens)
-            elif output_tokens and not input_tokens:
-                input_tokens = max(0, total_tokens - output_tokens)
-
+        input_tokens, output_tokens, _total_tokens = usage_tokens_from_dict(usage)
         return input_tokens, output_tokens
 
     @staticmethod
@@ -253,15 +268,7 @@ class ResponseSurfaceController:
 
     @classmethod
     def _extract_cached_input_tokens(cls, usage: Dict[str, Any] | Any) -> int:
-        if not isinstance(usage, dict):
-            return 0
-        prompt_details = usage.get("prompt_tokens_details")
-        input_details = usage.get("input_token_details")
-        return max(
-            cls._read_int_from_mapping(usage, "cached_tokens", "cached_input_tokens"),
-            cls._read_int_from_mapping(prompt_details, "cached_tokens", "cached_input_tokens"),
-            cls._read_int_from_mapping(input_details, "cached_tokens", "cached_input_tokens"),
-        )
+        return cached_input_tokens_from_usage(usage)
 
     def emit_visible_response(
         self,

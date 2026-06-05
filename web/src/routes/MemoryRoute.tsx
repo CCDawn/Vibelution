@@ -26,11 +26,10 @@ import { queryKeys } from "../api/queryKeys";
 import {
   KnowledgeItemsPayload,
   KnowledgeItem,
-  KnowledgeGovernancePlanPayload,
+  KnowledgeDashboardSnapshotPayload,
   KnowledgeGovernanceTasksPayload,
   KnowledgeIngestionAdaptersPayload,
   KnowledgeIngestionPackageResponse,
-  KnowledgeOperationsHealthPayload,
   KnowledgePermissionAuditPayload,
   KnowledgeRagHealthPayload,
   KnowledgeRatingSuggestionBulkReviewResponse,
@@ -42,9 +41,6 @@ import {
   KnowledgeRagRetrievalPayload,
   KnowledgeSearchPayload,
   KnowledgeSourceArtifact,
-  KnowledgeStewardOverview,
-  KnowledgeStewardRecommendationsPayload,
-  KnowledgeStewardWorkbenchPayload,
   KnowledgeTracePayload,
   MemoryItem,
   MemoryKnowledgeGraphEdge,
@@ -55,7 +51,6 @@ import {
   MemorySection,
   MemoryUsageContractPayload,
   TeamKnowledgeBase,
-  TeamKnowledgeOverview,
 } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { useAppI18n } from "../i18n/useAppI18n";
@@ -363,6 +358,11 @@ type Copy = {
   graphNoSelection: string;
   graphInteractionHint: string;
   graphCanvasFallback: string;
+  graphResponsibilityQuestion: string;
+  graphDirectChildren: string;
+  graphNoChildren: string;
+  graphNodeKnowledge: string;
+  graphNoKnowledge: string;
 };
 
 type FilterMode = "all" | "prompt" | "visible" | "manual" | "missing";
@@ -740,6 +740,11 @@ const COPY: Record<"zh" | "en", Copy> = {
     graphNoSelection: "选择一个节点查看摘要、时间戳、权限和关联信息。",
     graphInteractionHint: "左键移动视角 · 中键拖动图谱 · 滚轮缩放",
     graphCanvasFallback: "3D 画布正在接入；当前先展示可过滤的只读图谱结构。",
+    graphResponsibilityQuestion: "职责问题",
+    graphDirectChildren: "直接子成员",
+    graphNoChildren: "当前节点没有直接子成员。",
+    graphNodeKnowledge: "节点知识",
+    graphNoKnowledge: "当前节点没有可见知识条目。",
   },
   en: {
     eyebrow: "Memory Library",
@@ -1024,6 +1029,11 @@ const COPY: Record<"zh" | "en", Copy> = {
     graphNoSelection: "Select a node to inspect summary, timestamps, permissions, and links.",
     graphInteractionHint: "Left drag view · Middle drag graph · Wheel zoom",
     graphCanvasFallback: "The 3D canvas is being connected; this view shows the filterable read-only graph structure first.",
+    graphResponsibilityQuestion: "Responsibility question",
+    graphDirectChildren: "Direct children",
+    graphNoChildren: "This node has no direct children.",
+    graphNodeKnowledge: "Node knowledge",
+    graphNoKnowledge: "This node has no visible knowledge items.",
   },
 };
 
@@ -1595,6 +1605,10 @@ function reviewReasonLabels(copy: Copy, item: MemoryItem) {
   return reasons;
 }
 
+function invalidateKnowledgeDashboard(queryClient: ReturnType<typeof useQueryClient>) {
+  void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeDashboardSnapshot("") });
+}
+
 export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
   const { lang } = useAppI18n();
   const copy = COPY[lang];
@@ -1651,9 +1665,9 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     enabled: forcedView === "knowledge",
   });
 
-  const knowledgeOverviewQuery = useQuery({
-    queryKey: queryKeys.knowledgeOverview(),
-    queryFn: () => fetchJson<TeamKnowledgeOverview>("/api/knowledge/overview"),
+  const knowledgeDashboardSnapshotQuery = useQuery({
+    queryKey: queryKeys.knowledgeDashboardSnapshot(""),
+    queryFn: () => fetchJson<KnowledgeDashboardSnapshotPayload>("/api/knowledge/dashboard-snapshot?recommendationLimit=6&workbenchLimit=8&planLimit=8"),
     refetchInterval: resolvePollingInterval(pageVisible, 45_000),
     refetchIntervalInBackground: false,
     enabled: forcedView === "knowledge",
@@ -1665,42 +1679,6 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     refetchInterval: resolvePollingInterval(pageVisible, 60_000),
     refetchIntervalInBackground: false,
     enabled: forcedView === "graph",
-  });
-
-  const knowledgeStewardQuery = useQuery({
-    queryKey: queryKeys.knowledgeStewardOverview(),
-    queryFn: () => fetchJson<KnowledgeStewardOverview>("/api/knowledge/steward/overview"),
-    refetchInterval: resolvePollingInterval(pageVisible, 45_000),
-    refetchIntervalInBackground: false,
-    enabled: forcedView === "knowledge",
-  });
-  const knowledgeStewardRecommendationsQuery = useQuery({
-    queryKey: queryKeys.knowledgeStewardRecommendations(""),
-    queryFn: () => fetchJson<KnowledgeStewardRecommendationsPayload>("/api/knowledge/steward/recommendations?limit=6"),
-    refetchInterval: resolvePollingInterval(pageVisible, 45_000),
-    refetchIntervalInBackground: false,
-    enabled: forcedView === "knowledge",
-  });
-  const knowledgeStewardWorkbenchQuery = useQuery({
-    queryKey: queryKeys.knowledgeStewardWorkbench(""),
-    queryFn: () => fetchJson<KnowledgeStewardWorkbenchPayload>("/api/knowledge/steward/workbench?limit=8"),
-    refetchInterval: resolvePollingInterval(pageVisible, 45_000),
-    refetchIntervalInBackground: false,
-    enabled: forcedView === "knowledge",
-  });
-  const knowledgeOperationsHealthQuery = useQuery({
-    queryKey: queryKeys.knowledgeOperationsHealth(""),
-    queryFn: () => fetchJson<KnowledgeOperationsHealthPayload>("/api/knowledge/operations/health"),
-    refetchInterval: resolvePollingInterval(pageVisible, 45_000),
-    refetchIntervalInBackground: false,
-    enabled: forcedView === "knowledge",
-  });
-  const knowledgeGovernancePlanQuery = useQuery({
-    queryKey: queryKeys.knowledgeGovernancePlan(""),
-    queryFn: () => fetchJson<KnowledgeGovernancePlanPayload>("/api/knowledge/governance/plan?limit=8"),
-    refetchInterval: resolvePollingInterval(pageVisible, 45_000),
-    refetchIntervalInBackground: false,
-    enabled: forcedView === "knowledge",
   });
 
   const memoryMutation = useMutation({
@@ -1798,9 +1776,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
         sourceArtifactIds: [...commaList(current.sourceArtifactIds), payload.sourceArtifactId].join(", "),
       }));
       setKnowledgeFeedback({ tone: "success", text: copy.mutationDone });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeOverview() });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeOperationsHealth("") });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeGovernancePlan("") });
+      invalidateKnowledgeDashboard(queryClient);
       void queryClient.invalidateQueries({ queryKey: queryKeys.memoryOverview() });
     },
     onError: (error) => {
@@ -1825,9 +1801,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     onSuccess: () => {
       setProposalDraft(newProposalDraft());
       setKnowledgeFeedback({ tone: "success", text: copy.mutationDone });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeOverview() });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeOperationsHealth("") });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeGovernancePlan("") });
+      invalidateKnowledgeDashboard(queryClient);
       void queryClient.invalidateQueries({ queryKey: queryKeys.memoryOverview() });
     },
     onError: (error) => {
@@ -1859,9 +1833,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     onSuccess: (payload) => {
       setIngestionDraft(newIngestionDraft());
       setKnowledgeFeedback({ tone: "success", text: `${copy.mutationDone} · ${payload.proposal.title}` });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeOverview() });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeOperationsHealth("") });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeGovernancePlan("") });
+      invalidateKnowledgeDashboard(queryClient);
       void queryClient.invalidateQueries({ queryKey: queryKeys.memoryOverview() });
     },
     onError: (error) => {
@@ -1881,11 +1853,9 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
       ),
     onSuccess: (payload) => {
       setKnowledgeFeedback({ tone: "success", text: payload.item ? `${copy.mutationDone} · ${payload.item.title}` : copy.mutationDone });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeOverview() });
+      invalidateKnowledgeDashboard(queryClient);
       void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeItems(activeKnowledgeBaseId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeSearch(activeKnowledgeBaseId, knowledgeSearchDraft.query, knowledgeSearchDraft.tags) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeOperationsHealth("") });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeGovernancePlan("") });
       void queryClient.invalidateQueries({ queryKey: queryKeys.memoryOverview() });
     },
     onError: (error) => {
@@ -1912,9 +1882,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     onSuccess: () => {
       setKnowledgeFeedback({ tone: "success", text: copy.mutationDone });
       void queryClient.invalidateQueries({ queryKey: ["knowledge", "rating-suggestions"] });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeOverview() });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeOperationsHealth("") });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeGovernancePlan("") });
+      invalidateKnowledgeDashboard(queryClient);
     },
     onError: (error) => {
       setKnowledgeFeedback({ tone: "error", text: `${copy.mutationFailed}: ${error instanceof Error ? error.message : String(error)}` });
@@ -1936,8 +1904,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
       void queryClient.invalidateQueries({ queryKey: ["knowledge", "rating-suggestions"] });
       void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeItems(activeKnowledgeBaseId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeSearch(activeKnowledgeBaseId, knowledgeSearchDraft.query, knowledgeSearchDraft.tags) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeOperationsHealth("") });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeGovernancePlan("") });
+      invalidateKnowledgeDashboard(queryClient);
     },
     onError: (error) => {
       setKnowledgeFeedback({ tone: "error", text: `${copy.mutationFailed}: ${error instanceof Error ? error.message : String(error)}` });
@@ -1963,8 +1930,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
       void queryClient.invalidateQueries({ queryKey: ["knowledge", "rating-suggestions"] });
       void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeItems(activeKnowledgeBaseId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeSearch(activeKnowledgeBaseId, knowledgeSearchDraft.query, knowledgeSearchDraft.tags) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeOperationsHealth("") });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeGovernancePlan("") });
+      invalidateKnowledgeDashboard(queryClient);
     },
     onError: (error) => {
       setKnowledgeFeedback({ tone: "error", text: `${copy.mutationFailed}: ${error instanceof Error ? error.message : String(error)}` });
@@ -1974,12 +1940,13 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
   const overview = overviewQuery.data;
   const memoryUsageContract = memoryUsageContractQuery.data;
   const sections = overview?.sections ?? [];
-  const knowledgeOverview = knowledgeOverviewQuery.data;
-  const knowledgeSteward = knowledgeStewardQuery.data;
-  const knowledgeStewardRecommendations = knowledgeStewardRecommendationsQuery.data?.recommendations ?? [];
-  const knowledgeStewardWorkbench = knowledgeStewardWorkbenchQuery.data;
-  const knowledgeOperationsHealth = knowledgeOperationsHealthQuery.data;
-  const knowledgeGovernancePlan = knowledgeGovernancePlanQuery.data;
+  const knowledgeDashboardSnapshot = knowledgeDashboardSnapshotQuery.data;
+  const knowledgeOverview = knowledgeDashboardSnapshot?.overview;
+  const knowledgeSteward = knowledgeDashboardSnapshot?.steward;
+  const knowledgeStewardRecommendations = knowledgeDashboardSnapshot?.recommendations.recommendations ?? [];
+  const knowledgeStewardWorkbench = knowledgeDashboardSnapshot?.workbench;
+  const knowledgeOperationsHealth = knowledgeDashboardSnapshot?.operationsHealth;
+  const knowledgeGovernancePlan = knowledgeDashboardSnapshot?.governancePlan;
   const knowledgeBases = knowledgeOverview?.knowledgeBases ?? [];
   const activeKnowledgeBase: TeamKnowledgeBase | null =
     knowledgeBases.find((base) => base.knowledgeBaseId === activeKnowledgeBaseId) ?? knowledgeBases[0] ?? null;
@@ -2111,7 +2078,14 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
       return nodes;
     }
     return nodes.filter((node) =>
-      [node.label, node.type, node.status, node.summary].some((value) => String(value || "").toLowerCase().includes(graphSearch)),
+      [
+        node.label,
+        node.type,
+        node.status,
+        node.summary,
+        node.responsibilityQuestion,
+        ...(node.contentItems ?? []).map((item) => `${item.title} ${item.summary} ${item.knowledgeBaseName ?? ""}`),
+      ].some((value) => String(value || "").toLowerCase().includes(graphSearch)),
     );
   }, [graphPayload?.nodes, graphSearch]);
   const filteredGraphNodes = useMemo(
@@ -2146,6 +2120,20 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
       .slice(0, 8);
     return { incoming, outgoing };
   }, [graphNodeById, graphPayload?.edges, selectedGraphNode]);
+  const selectedGraphChildren = useMemo(() => {
+    if (!selectedGraphNode) {
+      return [] as MemoryKnowledgeGraphNode[];
+    }
+    return (selectedGraphNode.childNodeIds ?? []).flatMap((nodeId) => {
+      const child = graphNodeById.get(nodeId);
+      return child ? [child] : [];
+    });
+  }, [graphNodeById, selectedGraphNode]);
+  const selectGraphNode = (nodeId: string) => {
+    setGraphSearchText("");
+    setActiveGraphNodeType("");
+    setSelectedGraphNodeId(nodeId);
+  };
   const graphTypeEntries = useMemo(
     () => Object.entries(graphPayload?.summary.nodeTypeCounts ?? {}).sort((left, right) => right[1] - left[1]),
     [graphPayload?.summary.nodeTypeCounts],
@@ -2460,7 +2448,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
 
   const refresh = () => {
     void queryClient.invalidateQueries({ queryKey: queryKeys.memoryOverview() });
-    void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeOverview() });
+    invalidateKnowledgeDashboard(queryClient);
     void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeGovernanceTasks("", "open") });
     void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeIngestionAdapters() });
     if (activeKnowledgeBaseForItems) {
@@ -3766,7 +3754,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
           <div className={styles.stewardRecommendationHeader}>
             <span>{copy.stewardRecommendations}</span>
             <small>
-              {knowledgeStewardRecommendationsQuery.data?.operatingBoundary.recommendationsOnly ? copy.recommendationsOnly : copy.stewardRecommendationHint}
+              {knowledgeDashboardSnapshot?.recommendations.operatingBoundary.recommendationsOnly ? copy.recommendationsOnly : copy.stewardRecommendationHint}
             </small>
           </div>
           {knowledgeStewardRecommendations.map((recommendation) => (
@@ -3783,7 +3771,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
               </button>
             </section>
           ))}
-          {!knowledgeStewardRecommendationsQuery.isPending && !knowledgeStewardRecommendations.length ? (
+          {!knowledgeDashboardSnapshotQuery.isPending && !knowledgeStewardRecommendations.length ? (
             <section className={styles.emptyDetail}>
               <CheckCircle2 size={20} />
               <strong>{copy.noIssues}</strong>
@@ -3853,8 +3841,8 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
               </span>
             ))}
           </section>
-          {knowledgeOverviewQuery.isPending ? <div className={styles.emptyState}>{copy.loading}</div> : null}
-          {!knowledgeOverviewQuery.isPending && !knowledgeBases.length ? (
+          {knowledgeDashboardSnapshotQuery.isPending ? <div className={styles.emptyState}>{copy.loading}</div> : null}
+          {!knowledgeDashboardSnapshotQuery.isPending && !knowledgeBases.length ? (
             <section className={styles.emptyDetail}>
               <Database size={22} />
               <strong>{copy.noKnowledgeBases}</strong>
@@ -4033,7 +4021,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
                   <small>{finding.nextReviewTargetIds.slice(0, 2).join(", ") || "-"}</small>
                 </section>
               ))}
-              {!knowledgeOperationsHealthQuery.isPending && !(knowledgeOperationsHealth?.findings ?? []).length ? (
+              {!knowledgeDashboardSnapshotQuery.isPending && !(knowledgeOperationsHealth?.findings ?? []).length ? (
                 <section className={styles.emptyDetail}>
                   <CheckCircle2 size={20} />
                   <strong>{copy.noIssues}</strong>
@@ -4065,7 +4053,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
                   <small>{action.mutatesFormalKnowledge ? copy.createsKnowledgeItem : copy.planOnly}</small>
                 </section>
               ))}
-              {!knowledgeGovernancePlanQuery.isPending && !(knowledgeGovernancePlan?.actions ?? []).length ? (
+              {!knowledgeDashboardSnapshotQuery.isPending && !(knowledgeGovernancePlan?.actions ?? []).length ? (
                 <section className={styles.emptyDetail}>
                   <CheckCircle2 size={20} />
                   <strong>{copy.noIssues}</strong>
@@ -4635,6 +4623,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
                 type="button"
                 className={selectedGraphNode?.id === node.id ? `${styles.itemButton} ${styles.itemButtonActive}` : styles.itemButton}
                 data-node-type={node.type}
+                data-agent-category={String(node.visual?.agentCategory || node.metadata?.agentCategory || "")}
                 onClick={() => setSelectedGraphNodeId(node.id)}
               >
                 <span className={styles.graphNodeTypeMark}>{GRAPH_NODE_TYPE_LABELS[node.type] ?? node.type.slice(0, 10)}</span>
@@ -4656,11 +4645,61 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
                 <strong>{selectedGraphNode.type}</strong>
                 <p>{selectedGraphNode.summary || selectedGraphNode.id}</p>
               </section>
+              <section className={styles.graphResponsibilityPanel}>
+                <span>{copy.graphResponsibilityQuestion}</span>
+                <strong>{selectedGraphNode.responsibilityQuestion || "-"}</strong>
+              </section>
               <div className={styles.detailMeta}>
                 <span>{copy.status}: {selectedGraphNode.status || "-"}</span>
                 <span>{copy.sourceOrigin}: {selectedGraphNode.id}</span>
                 <span>{copy.generatedAt}: {formatTimestamp(selectedGraphNode.createdAt || selectedGraphNode.updatedAt, lang)}</span>
               </div>
+              <section className={styles.graphRelationPanel}>
+                <div className={styles.graphRelationHeader}>
+                  <p className={styles.panelEyebrow}>{copy.graphDirectChildren}</p>
+                  <strong>{selectedGraphChildren.length}</strong>
+                </div>
+                {!selectedGraphChildren.length ? (
+                  <p className={styles.graphRelationEmpty}>{copy.graphNoChildren}</p>
+                ) : (
+                  <div className={styles.graphRelationGroup}>
+                    {selectedGraphChildren.map((child) => (
+                      <button
+                        key={child.id}
+                        type="button"
+                        data-node-type={child.type}
+                        data-agent-category={String(child.visual?.agentCategory || child.metadata?.agentCategory || "")}
+                        onClick={() => selectGraphNode(child.id)}
+                      >
+                        <small>{GRAPH_NODE_TYPE_LABELS[child.type] ?? child.type}</small>
+                        <strong>{child.label}</strong>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </section>
+              <section className={styles.graphKnowledgePanel}>
+                <div className={styles.graphRelationHeader}>
+                  <p className={styles.panelEyebrow}>{copy.graphNodeKnowledge}</p>
+                  <strong>{selectedGraphNode.contentItems?.length ?? 0}</strong>
+                </div>
+                {!selectedGraphNode.contentItems?.length ? (
+                  <p className={styles.graphRelationEmpty}>{copy.graphNoKnowledge}</p>
+                ) : (
+                  <div className={styles.graphKnowledgeList}>
+                    {selectedGraphNode.contentItems.map((item) => (
+                      <article key={`${item.type}:${item.id}`} className={styles.graphKnowledgeItem}>
+                        <div>
+                          <strong>{item.title}</strong>
+                          <small>{item.knowledgeBaseName || item.type}</small>
+                        </div>
+                        {item.summary ? <p>{item.summary}</p> : null}
+                        <span>{item.status || "-"} · {formatTimestamp(String(item.updatedAt || item.createdAt || ""), lang)}</span>
+                      </article>
+                    ))}
+                  </div>
+                )}
+              </section>
               <section className={styles.graphRelationPanel}>
                 <div className={styles.graphRelationHeader}>
                   <p className={styles.panelEyebrow}>{copy.graphRelations}</p>
@@ -4677,11 +4716,8 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
                           key={relation.edge.id}
                           type="button"
                           data-node-type={relation.neighbor.type}
-                          onClick={() => {
-                            setGraphSearchText("");
-                            setActiveGraphNodeType("");
-                            setSelectedGraphNodeId(relation.neighbor.id);
-                          }}
+                          data-agent-category={String(relation.neighbor.visual?.agentCategory || relation.neighbor.metadata?.agentCategory || "")}
+                          onClick={() => selectGraphNode(relation.neighbor.id)}
                         >
                           <small>{relation.edge.label || relation.edge.type}</small>
                           <strong>{relation.neighbor.label}</strong>
@@ -4695,11 +4731,8 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
                           key={relation.edge.id}
                           type="button"
                           data-node-type={relation.neighbor.type}
-                          onClick={() => {
-                            setGraphSearchText("");
-                            setActiveGraphNodeType("");
-                            setSelectedGraphNodeId(relation.neighbor.id);
-                          }}
+                          data-agent-category={String(relation.neighbor.visual?.agentCategory || relation.neighbor.metadata?.agentCategory || "")}
+                          onClick={() => selectGraphNode(relation.neighbor.id)}
                         >
                           <small>{relation.edge.label || relation.edge.type}</small>
                           <strong>{relation.neighbor.label}</strong>

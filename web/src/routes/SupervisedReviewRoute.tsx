@@ -10,12 +10,16 @@ import {
   EvolutionChatReviewCandidate,
   EvolutionChatReviewDecisionResponse,
   EvolutionChatReviewQueue,
+  EvolutionWorkspaceSnapshot,
   EvolutionWorkbench,
+  SupervisedWorktreeRun,
 } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
 import { useAppI18n } from "../i18n/useAppI18n";
+import { createEvolutionWorkspaceCache } from "./evolutionWorkspaceCache";
 import { SupervisedWorkspaceControls } from "./SupervisedWorkspaceControls";
+import { SupervisedWorktreeReviewPanel } from "./SupervisedWorktreeReviewPanel";
 import { clampPaneWidth, keyboardPaneWidth, storedPaneWidth } from "./resizablePane";
 import styles from "./SupervisedReviewRoute.module.css";
 
@@ -31,6 +35,7 @@ const REVIEW_QUEUE_DEFAULT_WIDTH = 380;
 export function SupervisedReviewRoute() {
   const { lang, t, statusLabel } = useAppI18n();
   const queryClient = useQueryClient();
+  const evolutionWorkspaceCache = useMemo(() => createEvolutionWorkspaceCache(queryClient), [queryClient]);
   const [filter, setFilter] = useState<ReviewFilter>("pending");
   const [searchInput, setSearchInput] = useState("");
   const [selectedCandidateId, setSelectedCandidateId] = useState<string | null>(null);
@@ -58,6 +63,12 @@ export function SupervisedReviewRoute() {
   const workbenchQuery = useQuery({
     queryKey: queryKeys.evolutionWorkbench(),
     queryFn: () => fetchJson<EvolutionWorkbench>("/api/evolution/workbench"),
+    refetchInterval: resolvePollingInterval(pageVisible, 8_000),
+    refetchIntervalInBackground: false,
+  });
+  const workspaceSnapshotQuery = useQuery({
+    queryKey: queryKeys.evolutionWorkspaceSnapshot(),
+    queryFn: () => fetchJson<EvolutionWorkspaceSnapshot>("/api/evolution/workspace-snapshot"),
     refetchInterval: resolvePollingInterval(pageVisible, 8_000),
     refetchIntervalInBackground: false,
   });
@@ -123,8 +134,27 @@ export function SupervisedReviewRoute() {
       ]);
     },
   });
+  const worktreeActionMutation = useMutation({
+    mutationFn: (variables: { runId: string; action: string; reviewerNote?: string }) =>
+      fetchJson<SupervisedWorktreeRun>(`/api/evolution/worktree-runs/${variables.runId}/actions`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action: variables.action,
+          reviewerNote: variables.reviewerNote ?? "",
+        }),
+      }),
+    onSuccess: async () => {
+      await evolutionWorkspaceCache.afterWorktreeRunChanged();
+    },
+  });
 
   const reviewData = reviewQuery.data;
+  const workspaceSnapshot = workspaceSnapshotQuery.data;
+  const worktreeRuns = workspaceSnapshot?.worktreeRuns ?? [];
+  const activeWorktreeRun = workspaceSnapshot?.worktreeActiveRun ?? null;
   const items = reviewData?.items ?? EMPTY_REVIEW_ITEMS;
   const positiveDatasetVisible = workbenchQuery.data?.datasets.some(
     (item) => item.name === reviewData?.positiveDatasetName && item.available,
@@ -157,6 +187,17 @@ export function SupervisedReviewRoute() {
     visibleItems.find((item) => item.candidateId === selectedCandidateId)
     ?? visibleItems[0]
     ?? null;
+  const reviewTabSummaries = {
+    review: {
+      status: lang === "zh"
+        ? `${reviewData?.pendingCount ?? 0} 待审`
+        : `${reviewData?.pendingCount ?? 0} pending`,
+      detail: lang === "zh"
+        ? `${reviewData?.positiveCount ?? 0} 正例 / ${reviewData?.negativeCount ?? 0} 负例`
+        : `${reviewData?.positiveCount ?? 0} positive / ${reviewData?.negativeCount ?? 0} negative`,
+      count: reviewData?.pendingCount ?? 0,
+    },
+  };
   const visiblePendingItems = useMemo(() => {
     return visibleItems.filter((item) => item.status === "pending");
   }, [visibleItems]);
@@ -329,6 +370,33 @@ export function SupervisedReviewRoute() {
     setQueuePanelWidth(nextWidth);
   }
 
+  function triggerWorktreeReviewApproval(run: SupervisedWorktreeRun) {
+    if (!run.runId) {
+      return;
+    }
+    worktreeActionMutation.mutate({
+      runId: run.runId,
+      action: "approve_review",
+      reviewerNote: t("selfWorktreeReviewNote"),
+    });
+  }
+
+  function triggerWorktreeAction(run: SupervisedWorktreeRun, action: string) {
+    if (!run.runId) {
+      return;
+    }
+    if (action === "discard" || action === "merge") {
+      const confirmKey = action === "discard" ? "discardWorktreeConfirm" : "mergeWorktreeConfirm";
+      if (!window.confirm(t(confirmKey).replace("{runId}", run.runId))) {
+        return;
+      }
+    }
+    worktreeActionMutation.mutate({
+      runId: run.runId,
+      action,
+    });
+  }
+
   const reasonOptions = draftDecision === "positive"
     ? [
       { value: "grounded_workflow", label: lang === "zh" ? "过程扎实" : "Grounded workflow" },
@@ -357,7 +425,7 @@ export function SupervisedReviewRoute() {
         </div>
 
         <div className={styles.toolbarControls}>
-          <SupervisedWorkspaceControls activeView="review" />
+          <SupervisedWorkspaceControls activeView="review" tabSummaries={reviewTabSummaries} />
         </div>
       </section>
 
@@ -408,6 +476,16 @@ export function SupervisedReviewRoute() {
           ))}
         </div>
       </section>
+
+      <SupervisedWorktreeReviewPanel
+        activeRun={activeWorktreeRun}
+        runs={worktreeRuns}
+        pending={worktreeActionMutation.isPending}
+        feedback={worktreeActionMutation.data?.latestMessage || ""}
+        error={worktreeActionMutation.error?.message ?? ""}
+        onApproveReview={triggerWorktreeReviewApproval}
+        onRunAction={triggerWorktreeAction}
+      />
 
       <div className={styles.workspace} style={workspaceStyle}>
         <aside className={queuePanelCollapsed ? `${styles.queuePanel} ${styles.paneCollapsed}` : styles.queuePanel} aria-hidden={queuePanelCollapsed}>

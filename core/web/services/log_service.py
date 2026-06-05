@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -294,7 +294,7 @@ def _iter_log_children(root_id: str, root_path: Path):
 def _format_mtime(value: float) -> str:
     if value <= 0:
         return ""
-    return datetime.fromtimestamp(value, UTC).isoformat().replace("+00:00", "Z")
+    return datetime.fromtimestamp(value, timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def _resolve_log_root(root_id: str) -> Path:

@@ -6,7 +6,7 @@ import json
 import os
 import tempfile
 import time
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -29,8 +29,11 @@ from .state_store import load_pid, load_state
 from .restart_coordinator import create_restart_intent
 
 
+DEFERRED_COMMAND_POLL_SECONDS = 10.0
+
+
 def _command_timestamp() -> str:
-    return datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
 
 def build_command(command_type: str, *, args: dict[str, Any] | None = None, requested_by: str = "unknown") -> dict[str, Any]:
@@ -38,7 +41,7 @@ def build_command(command_type: str, *, args: dict[str, Any] | None = None, requ
         "commandId": f"cmd_{_command_timestamp()}_{uuid4().hex[:8]}",
         "type": str(command_type or "").strip(),
         "requestedBy": str(requested_by or "unknown").strip() or "unknown",
-        "requestedAt": datetime.now(UTC).isoformat(),
+        "requestedAt": datetime.now(timezone.utc).isoformat(),
         "args": args or {},
     }
 
@@ -53,6 +56,34 @@ def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
     finally:
         if os.path.exists(temp_path):
             os.remove(temp_path)
+
+
+def _parse_datetime(value: str) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = f"{text[:-1]}+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _command_defer_until(command: dict[str, Any]) -> datetime | None:
+    args = command.get("args") if isinstance(command.get("args"), dict) else {}
+    return _parse_datetime(str(args.get("deferUntil") or ""))
+
+
+def _command_is_deferred(command: dict[str, Any], *, now: datetime | None = None) -> bool:
+    defer_until = _command_defer_until(command)
+    if defer_until is None:
+        return False
+    current = now or datetime.now(timezone.utc)
+    return defer_until > current
 
 
 def submit_command(
@@ -135,7 +166,11 @@ def recover_processing_queue() -> None:
 
 def claim_next_command() -> tuple[Path, dict[str, Any]] | None:
     ensure_runtime_manager_dirs()
+    now = datetime.now(timezone.utc)
     for path in sorted(INBOX_DIR.glob("*.json")):
+        pending = _load_command_file(path)
+        if pending and _command_is_deferred(pending, now=now):
+            continue
         target = PROCESSING_DIR / path.name
         try:
             os.replace(path, target)
@@ -153,6 +188,49 @@ def claim_next_command() -> tuple[Path, dict[str, Any]] | None:
         except OSError:
             pass
     return None
+
+
+def defer_processing_command_for_active_work(
+    path: Path,
+    command: dict[str, Any],
+    *,
+    active_work_runs: list[dict[str, Any]],
+    delay_seconds: float = DEFERRED_COMMAND_POLL_SECONDS,
+) -> None:
+    ensure_runtime_manager_dirs()
+    command_id = str(command.get("commandId") or path.stem).strip() or path.stem
+    args = command.get("args") if isinstance(command.get("args"), dict) else {}
+    now = datetime.now(timezone.utc)
+    attempt_count = int(args.get("activeWorkDeferCount") or 0) + 1
+    args.update(
+        {
+            "deferUntil": datetime.fromtimestamp(now.timestamp() + max(1.0, float(delay_seconds)), tz=timezone.utc).isoformat(),
+            "activeWorkDeferCount": attempt_count,
+            "lastActiveWorkCount": len(active_work_runs),
+            "lastActiveWorkRuns": active_work_runs[:8],
+        }
+    )
+    command["args"] = args
+    command["commandId"] = command_id
+    target = INBOX_DIR / f"{command_id}.json"
+    _atomic_write_json(target, command)
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        pass
+    _append_queue_event(
+        "command_queue.command_deferred_active_work",
+        {
+            "commandId": command_id,
+            "type": str(command.get("type") or ""),
+            "requestedBy": str(command.get("requestedBy") or ""),
+            "deferUntil": str(args.get("deferUntil") or ""),
+            "activeWorkCount": len(active_work_runs),
+            "activeWorkRuns": active_work_runs[:8],
+            "attemptCount": attempt_count,
+            "queuePath": target.name,
+        },
+    )
 
 
 def _should_defer_open_during_shutdown(command: dict[str, Any]) -> bool:

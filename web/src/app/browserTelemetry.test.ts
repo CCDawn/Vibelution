@@ -2,11 +2,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { getControlToken, resetControlTokenForTests } from "../api/client";
 import { collectBrowserMemorySnapshot, collectBrowserPageSnapshot, postBrowserTelemetry } from "./browserTelemetry";
+import { resetPageInstanceIdForTests } from "./pageInstance";
 
 describe("browser telemetry", () => {
   afterEach(() => {
     vi.restoreAllMocks();
     resetControlTokenForTests();
+    resetPageInstanceIdForTests();
   });
 
   it("clears cached control token after telemetry receives 403", async () => {
@@ -62,6 +64,14 @@ describe("browser telemetry", () => {
       readyState: "complete",
       visibilityState: "visible",
       querySelector: (selector: string) => {
+        if (selector === "[data-browser-role], [data-shell]") {
+          return {
+            dataset: {
+              shell: "workbench",
+              browserRole: "workbench",
+            },
+          };
+        }
         if (selector === "header nav a[aria-current='page']") {
           return {
             getAttribute: (name: string) => (name === "href" ? "/chat" : ""),
@@ -81,8 +91,10 @@ describe("browser telemetry", () => {
     const snapshot = collectBrowserPageSnapshot();
 
     expect(snapshot).toMatchObject({
+      pageInstanceId: expect.stringMatching(/^page-/),
       pathname: "/chat",
       telemetrySurface: "managed_workbench",
+      browserRole: "workbench",
       port: "8000",
       activeNavHref: "/chat",
       activeNavText: "对话",
@@ -116,6 +128,43 @@ describe("browser telemetry", () => {
       href: "http://127.0.0.1:5173/chat",
       telemetrySurface: "vite_dev",
       port: "5173",
+    });
+  });
+
+  it("marks Launcher control pages with a separate browser role", () => {
+    vi.stubGlobal("window", {
+      location: {
+        href: "http://127.0.0.1:8000/launcher",
+        origin: "http://127.0.0.1:8000",
+        hostname: "127.0.0.1",
+        port: "8000",
+        pathname: "/launcher",
+        search: "",
+        hash: "",
+      },
+    });
+    vi.stubGlobal("document", {
+      title: "Launcher",
+      readyState: "complete",
+      visibilityState: "visible",
+      querySelector: (selector: string) => {
+        if (selector === "[data-browser-role], [data-shell]") {
+          return {
+            dataset: {
+              shell: "launcher",
+              browserRole: "launcher_control_surface",
+            },
+          };
+        }
+        return null;
+      },
+    });
+
+    expect(collectBrowserPageSnapshot()).toMatchObject({
+      href: "http://127.0.0.1:8000/launcher",
+      telemetrySurface: "managed_launcher",
+      browserRole: "launcher_control_surface",
+      pathname: "/launcher",
     });
   });
 

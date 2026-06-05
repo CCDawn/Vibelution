@@ -31,6 +31,7 @@ from core.runtime_manager.command_queue import submit_command, wait_for_result
 from core.runtime_manager.evolution_store import (
     delete_run_snapshot as delete_manager_run_snapshot,
     load_active_run_snapshot as load_manager_active_run_snapshot,
+    load_latest_run_snapshot as load_manager_latest_run_snapshot,
     load_run_snapshot as load_manager_run_snapshot,
     persist_run_snapshot as persist_manager_run_snapshot,
 )
@@ -424,7 +425,7 @@ def start_supervised_run(payload: dict[str, Any]) -> dict[str, Any]:
         dataset_limit = None
 
     _raise_if_supervised_lease_conflict(lang=lang)
-    agent_bindings = supervised_agent_bindings()
+    agent_bindings = _validate_supervised_agent_bindings(supervised_agent_bindings(), lang=lang)
 
     context = {
         "runId": f"web-supervised-{uuid4().hex[:12]}",
@@ -509,7 +510,7 @@ def _local_retry_supervised_run(run_id: str) -> dict[str, Any]:
         )
 
     _raise_if_supervised_lease_conflict(lang=lang)
-    agent_bindings = supervised_agent_bindings()
+    agent_bindings = _validate_supervised_agent_bindings(supervised_agent_bindings(), lang=lang)
     context = {
         "runId": f"web-supervised-{uuid4().hex[:12]}",
         "lang": lang,
@@ -1751,6 +1752,8 @@ def _agent_bindings_snapshot(bindings: dict[str, Any]) -> dict[str, Any]:
             "agentId": str(binding.get("agentId") or "").strip(),
             "displayName": str(binding.get("displayName") or "").strip(),
             "profileId": str(binding.get("profileId") or "").strip(),
+            "dialogueModelId": str(binding.get("dialogueModelId") or "").strip(),
+            "llmBindings": dict(binding.get("llmBindings") or {}) if isinstance(binding.get("llmBindings"), dict) else {},
             "directSessionId": str(binding.get("directSessionId") or "").strip(),
             "workspacePath": str(binding.get("workspacePath") or "").strip(),
             "role": str(binding.get("role") or normalized_role).strip(),
@@ -1766,11 +1769,74 @@ def _agent_binding_snapshot(binding: Any) -> dict[str, Any]:
         "agentId": str(binding.get("agentId") or "").strip(),
         "displayName": str(binding.get("displayName") or "").strip(),
         "profileId": str(binding.get("profileId") or "").strip(),
+        "dialogueModelId": str(binding.get("dialogueModelId") or "").strip(),
+        "llmBindings": dict(binding.get("llmBindings") or {}) if isinstance(binding.get("llmBindings"), dict) else {},
         "directSessionId": str(binding.get("directSessionId") or "").strip(),
         "workspacePath": str(binding.get("workspacePath") or "").strip(),
         "role": str(binding.get("role") or "").strip(),
         "roleLabel": str(binding.get("roleLabel") or "").strip(),
     }
+
+
+def _validate_supervised_agent_bindings(bindings: Any, *, lang: str) -> dict[str, dict[str, Any]]:
+    if not isinstance(bindings, dict) or not bindings:
+        _record_supervised_scene_event(
+            "preflight",
+            "supervised_run.preflight.agent_binding_invalid",
+            message="Supervised run has no Agent bindings.",
+            level="error",
+            outcome="blocked",
+            fields={"reason": "missing_agent_bindings"},
+            lifecycle=True,
+        )
+        raise SupervisedRunValidationError(
+            text_for(lang, zh="监督运行缺少 Agent 绑定，已阻止启动。", en="Supervised run is missing Agent bindings and was blocked.")
+        )
+    validated: dict[str, dict[str, Any]] = {}
+    for role, binding in bindings.items():
+        normalized_role = str(role or "").strip()
+        if not normalized_role or not isinstance(binding, dict):
+            continue
+        agent_id = str(binding.get("agentId") or "").strip()
+        dialogue_model_id = str(binding.get("dialogueModelId") or "").strip()
+        llm_bindings = binding.get("llmBindings") if isinstance(binding.get("llmBindings"), dict) else {}
+        dialogue_binding_id = str((llm_bindings.get("dialogue") or {}).get("modelId") or "").strip() if isinstance(llm_bindings.get("dialogue"), dict) else ""
+        reason = ""
+        if not agent_id:
+            reason = "missing_agent_id"
+        elif not dialogue_model_id:
+            reason = "missing_dialogue_model_id"
+        elif not dialogue_binding_id:
+            reason = "missing_dialogue_llm_binding"
+        elif dialogue_binding_id != dialogue_model_id:
+            reason = "dialogue_model_mismatch"
+        if reason:
+            _record_supervised_scene_event(
+                "preflight",
+                "supervised_run.preflight.agent_binding_invalid",
+                message="Supervised Agent binding is incomplete.",
+                level="error",
+                outcome="blocked",
+                fields={
+                    "role": normalized_role,
+                    "agentId": agent_id,
+                    "dialogueModelId": dialogue_model_id,
+                    "dialogueBindingModelId": dialogue_binding_id,
+                    "reason": reason,
+                },
+                lifecycle=True,
+            )
+            raise SupervisedRunValidationError(
+                text_for(
+                    lang,
+                    zh=f"监督角色 {normalized_role} 的 Agent 模型绑定不完整，已阻止启动：{reason}",
+                    en=f"Supervised role {normalized_role} has an incomplete Agent model binding and was blocked: {reason}",
+                )
+            )
+        normalized = dict(binding)
+        normalized["llmSlot"] = str(normalized.get("llmSlot") or "dialogue").strip() or "dialogue"
+        validated[normalized_role] = normalized
+    return validated
 
 
 def _current_runtime_manager_owner_pid() -> int:
@@ -2269,12 +2335,16 @@ def _event_tail_entry(event: dict[str, Any], *, timestamp: str) -> dict[str, Any
 def _record_supervised_progress_scene_event(run_id: str, item: dict[str, Any]) -> None:
     event_name = str(item.get("event") or "").strip() or "progress"
     status = str(item.get("status") or "").strip().lower()
-    level = "error" if status == "failed" or event_name == "session_error" else "info"
+    level = "error" if event_name == "session_error" else "info"
     outcome = (
         "cancelled"
         if event_name == "session_cancelled"
         else "failed"
-        if level == "error"
+        if event_name == "session_error"
+        else "failed"
+        if event_name == "role_finish" and status == "failed"
+        else "timeout"
+        if event_name == "role_finish" and status == "timeout"
         else "succeeded"
         if event_name in {"role_finish", "role_reused", "session_finish"}
         else "observed"
@@ -2720,6 +2790,25 @@ def get_active_supervised_run() -> dict[str, Any] | None:
             return None
         return _decorate_supervised_snapshot(_clone_locked(snapshot))
     return _LOCAL_GET_ACTIVE_SUPERVISED_RUN()
+
+
+def get_latest_supervised_run() -> dict[str, Any] | None:
+    if _runtime_manager_live_control_enabled():
+        active = get_active_supervised_run()
+        if active is not None:
+            return active
+        snapshot = load_manager_latest_run_snapshot("supervised")
+        if snapshot is None:
+            return None
+        status = str(snapshot.get("status") or "").strip().lower()
+        if status in _ACTIVE_RUN_STATUSES and not _manager_control_is_current(snapshot):
+            return _cancel_file_only_supervised_run(str(snapshot.get("runId") or ""), lang=get_web_language())
+        return _decorate_supervised_snapshot(_clone_locked(snapshot))
+    active = _LOCAL_GET_ACTIVE_SUPERVISED_RUN()
+    if active is not None:
+        return active
+    latest = load_manager_latest_run_snapshot("supervised")
+    return _decorate_supervised_snapshot(_clone_locked(latest)) if isinstance(latest, dict) else None
 
 
 def get_supervised_run_snapshot(run_id: str) -> dict[str, Any]:

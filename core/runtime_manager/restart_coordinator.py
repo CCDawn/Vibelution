@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -15,7 +15,7 @@ from .scene_logging import append_runtime_manager_file_event, record_runtime_man
 
 
 def now_iso() -> str:
-    return datetime.now(UTC).isoformat()
+    return datetime.now(timezone.utc).isoformat()
 
 
 def create_restart_intent(
@@ -31,7 +31,7 @@ def create_restart_intent(
     ensure_runtime_manager_dirs()
     created_at = now_iso()
     intent = {
-        "intentId": f"intent_{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}_{uuid4().hex[:8]}",
+        "intentId": f"intent_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}_{uuid4().hex[:8]}",
         "target": str(target or "").strip(),
         "reason": str(reason or "").strip(),
         "requestedBy": str(requested_by or "unknown").strip() or "unknown",

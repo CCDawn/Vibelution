@@ -208,6 +208,36 @@
   background: var(--surface-card);
 }
 
+.timelineHistoryGate {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+  padding: 2px 0 4px;
+}
+
+.timelineHistoryButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 30px;
+  max-width: 100%;
+  padding: 5px 10px;
+  border: 1px solid color-mix(in srgb, var(--fg-tertiary) 18%, transparent);
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--surface-card) 78%, var(--accent-cool) 5%);
+  color: var(--fg-secondary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 650;
+}
+
+.timelineHistoryButton:hover {
+  border-color: color-mix(in srgb, var(--accent-cool) 34%, transparent);
+  background: color-mix(in srgb, var(--surface-card) 88%, var(--accent-cool) 8%);
+  color: var(--fg-primary);
+}
+
 .assistantTurn,
 .agentInboxTurn,
 .groupTranscriptTurn,
@@ -285,8 +315,40 @@
 .turnErrorNoticeText {
   color: color-mix(in srgb, var(--fg-secondary) 72%, var(--fg-tertiary));
   font-size: 0.85rem;
-  font-style: italic;
   line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.turnErrorReasonList {
+  display: grid;
+  gap: 5px;
+  margin: 2px 0 0;
+  padding: 7px 8px;
+  border: 1px solid color-mix(in srgb, var(--accent-warm) 18%, transparent);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--accent-warm) 6%, transparent);
+}
+
+.turnErrorReasonRow {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  min-width: 0;
+  font-size: 0.78rem;
+  line-height: 1.42;
+}
+
+.turnErrorReasonRow dt {
+  margin: 0;
+  color: color-mix(in srgb, var(--accent-warm-2) 78%, var(--fg-tertiary));
+  font-weight: 740;
+}
+
+.turnErrorReasonRow dd {
+  margin: 0;
+  min-width: 0;
+  color: var(--fg-secondary);
   overflow-wrap: anywhere;
 }
 
@@ -667,6 +729,10 @@
   max-width: 100%;
 }
 
+.executionTraceGroup {
+  gap: 4px;
+}
+
 .auxiliaryBlock {
   display: grid;
   gap: 6px;
@@ -696,6 +762,11 @@
   font-weight: 620;
 }
 
+.executionTraceGroup .operationSummary {
+  min-height: 26px;
+  background: color-mix(in srgb, var(--surface-card) 54%, transparent);
+}
+
 .operationSummary:hover,
 .responseToggle:hover {
   color: var(--fg-primary);
@@ -712,6 +783,274 @@
   font-weight: 450;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.operationSummaryCount {
+  min-width: 0;
+  max-width: min(34vw, 320px);
+  overflow: hidden;
+  color: color-mix(in srgb, var(--fg-tertiary) 78%, transparent);
+  font-size: 0.68rem;
+  font-weight: 520;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.operationLiveLocator {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--fg-tertiary);
+  font-size: 0.71rem;
+  line-height: 1.35;
+  white-space: nowrap;
+}
+
+.operationLiveLocation {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: min(42vw, 360px);
+  overflow: hidden;
+  color: color-mix(in srgb, var(--accent-cool-2) 82%, var(--fg-secondary));
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.operationLiveMetrics {
+  flex: 0 0 auto;
+  color: color-mix(in srgb, var(--fg-tertiary) 80%, transparent);
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+}
+
+.operationLiveSummary {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: color-mix(in srgb, var(--fg-tertiary) 88%, var(--fg-secondary));
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.operationProgressRail {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  min-width: 0;
+  max-width: 100%;
+  gap: 0;
+  padding: 1px 0 2px 2px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.operationRailStep {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  max-width: 128px;
+  color: var(--fg-tertiary);
+  font-size: 0.68rem;
+  font-weight: 560;
+}
+
+.operationRailDot {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  margin-right: 5px;
+  border: 1px solid color-mix(in srgb, var(--fg-tertiary) 46%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-card) 72%, transparent);
+}
+
+.operationRailLabel {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.operationRailBadge {
+  flex: 0 0 auto;
+  margin-left: 5px;
+  padding: 1px 4px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-card) 62%, transparent);
+  color: inherit;
+  font-size: 0.58rem;
+  font-weight: 760;
+  line-height: 1.25;
+}
+
+.operationRailConnector {
+  flex: 0 0 22px;
+  height: 1px;
+  margin: 0 7px;
+  background: color-mix(in srgb, var(--fg-tertiary) 18%, transparent);
+}
+
+.operationRailStep_done .operationRailDot {
+  border-color: color-mix(in srgb, var(--state-success) 38%, transparent);
+  background: color-mix(in srgb, var(--state-success) 26%, transparent);
+}
+
+.operationRailStep_running {
+  color: color-mix(in srgb, var(--accent-cool-2) 88%, var(--fg-secondary));
+}
+
+.operationRailStep_running .operationRailDot {
+  border-color: color-mix(in srgb, var(--accent-cool-2) 72%, transparent);
+  background: var(--accent-cool-2);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-cool-2) 14%, transparent);
+}
+
+.operationRailStep_running .operationRailBadge {
+  background: color-mix(in srgb, var(--accent-cool-2) 13%, transparent);
+}
+
+.operationRailStep_failed {
+  color: color-mix(in srgb, var(--danger) 86%, var(--fg-secondary));
+}
+
+.operationRailStep_failed .operationRailDot {
+  border-color: color-mix(in srgb, var(--danger) 68%, transparent);
+  background: color-mix(in srgb, var(--danger) 72%, transparent);
+}
+
+.operationRailStep_failed .operationRailBadge {
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+
+.operationTableWrap {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+  margin-top: 1px;
+}
+
+.operationTable {
+  display: grid;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--fg-tertiary) 12%, transparent);
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--surface-card) 44%, transparent);
+}
+
+.operationTableItem {
+  display: grid;
+  min-width: 0;
+}
+
+.operationTableRow {
+  display: grid;
+  grid-template-columns: minmax(118px, 0.9fr) 86px minmax(160px, 1.6fr) 48px 24px;
+  align-items: center;
+  min-width: 0;
+  min-height: 28px;
+  border-top: 1px solid color-mix(in srgb, var(--fg-tertiary) 9%, transparent);
+  color: var(--fg-secondary);
+  font-size: 0.72rem;
+}
+
+.operationTableHead {
+  min-height: 24px;
+  border-top: 0;
+  background: color-mix(in srgb, var(--fg-tertiary) 5%, transparent);
+  color: var(--fg-tertiary);
+  font-size: 0.66rem;
+  font-weight: 680;
+}
+
+.operationTableHead span,
+.operationTableStage,
+.operationTableStatus,
+.operationTableSummary,
+.operationTableDuration,
+.operationTableAction {
+  min-width: 0;
+  padding: 4px 7px;
+}
+
+.operationTableStage {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--fg-secondary);
+  font-weight: 620;
+}
+
+.operationTableStage span:last-child,
+.operationTableSummary {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.operationTableStageIcon {
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 16px;
+  color: var(--fg-tertiary);
+}
+
+.operationTableStageIcon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.operationTableStatus {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--fg-tertiary);
+  white-space: nowrap;
+}
+
+.operationTableSummary {
+  color: var(--fg-tertiary);
+}
+
+.operationTableDuration {
+  color: var(--fg-tertiary);
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.operationTableAction {
+  display: grid;
+  place-items: center;
+  padding-left: 2px;
+  padding-right: 4px;
+}
+
+.operationTableRow_running {
+  background: color-mix(in srgb, var(--accent-cool) 8%, transparent);
+}
+
+.operationTableRow_running .operationTableStage,
+.operationTableRow_running .operationTableStatus {
+  color: color-mix(in srgb, var(--accent-cool-2) 88%, var(--fg-secondary));
+}
+
+.operationTableRow_failed {
+  background: color-mix(in srgb, var(--danger) 7%, transparent);
+}
+
+.operationTableRow_failed .operationTableStage,
+.operationTableRow_failed .operationTableStatus {
+  color: color-mix(in srgb, var(--danger) 82%, var(--fg-secondary));
 }
 
 .operationTimeline {
@@ -735,6 +1074,17 @@
   background: color-mix(in srgb, var(--fg-tertiary) 20%, transparent);
 }
 
+.operationTimelineTrimmed {
+  min-width: 0;
+  max-width: 100%;
+  padding: 4px 8px;
+  border: 1px dashed color-mix(in srgb, var(--fg-tertiary) 18%, transparent);
+  border-radius: var(--radius-control);
+  color: var(--fg-tertiary);
+  font-size: 0.7rem;
+  font-weight: 540;
+}
+
 .operationItemWrap {
   display: grid;
   gap: 5px;
@@ -752,10 +1102,36 @@
   max-width: 100%;
   padding: 3px 0;
   color: var(--fg-secondary);
+  border-radius: 6px;
 }
 
 .operationItemTool {
   grid-template-columns: minmax(0, 1fr) auto auto 16px;
+}
+
+.operationItem_status {
+  color: color-mix(in srgb, var(--fg-tertiary) 88%, var(--fg-secondary));
+}
+
+.operationItem_tool .operationName {
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+}
+
+.operationItem_thought .operationName {
+  color: color-mix(in srgb, var(--accent-cool-2) 82%, var(--fg-secondary));
+}
+
+.operationItemActive {
+  margin-left: -5px;
+  padding-left: 5px;
+  padding-right: 5px;
+  background: color-mix(in srgb, var(--accent-cool) 7%, transparent);
+  color: var(--fg-primary);
+}
+
+.operationItemActive .operationStatus {
+  color: color-mix(in srgb, var(--accent-cool-2) 86%, var(--fg-secondary));
 }
 
 .operationIcon {
@@ -814,6 +1190,12 @@
   animation: status-spin 0.9s linear infinite;
 }
 
+.statusRunningDot {
+  display: none;
+  flex: 0 0 auto;
+  color: var(--accent);
+}
+
 @keyframes status-spin {
   to {
     transform: rotate(360deg);
@@ -822,7 +1204,11 @@
 
 @media (prefers-reduced-motion: reduce) {
   .statusSpinner {
-    animation: none;
+    display: none;
+  }
+
+  .statusRunningDot {
+    display: inline-block;
   }
 }
 
@@ -864,7 +1250,7 @@
   gap: 7px;
   min-width: 0;
   max-width: 100%;
-  margin: 0 0 4px 29px;
+  margin: 0 6px 6px 6px;
   padding: 8px 9px;
   border: 1px solid color-mix(in srgb, var(--fg-tertiary) 12%, transparent);
   border-radius: 6px;
@@ -874,6 +1260,103 @@
 .operationDetails_thought {
   border-color: color-mix(in srgb, var(--accent-warm) 22%, transparent);
   background: color-mix(in srgb, var(--accent-warm) 7%, var(--surface-card));
+}
+
+.computerUsePanel {
+  display: grid;
+  gap: 8px;
+  width: min(460px, calc(100% - 29px));
+  max-width: 100%;
+  margin: 2px 0 8px 29px;
+  padding: 9px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 24%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--surface-card) 70%, transparent);
+}
+
+.computerUseHeader {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--fg-secondary);
+  font-size: 0.74rem;
+  font-weight: 700;
+}
+
+.computerUseHeader code {
+  color: var(--fg-tertiary);
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  font-weight: 500;
+}
+
+.computerUseSummary,
+.computerUseError {
+  margin: 0;
+  color: var(--fg-secondary);
+  font-size: 0.76rem;
+  line-height: 1.45;
+}
+
+.computerUseError {
+  color: var(--danger);
+}
+
+.computerUseScreenshot {
+  display: block;
+  width: 100%;
+  max-height: 260px;
+  object-fit: contain;
+  background: var(--surface-page);
+}
+
+.computerUseSteps {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding-left: 18px;
+  color: var(--fg-secondary);
+  font-size: 0.72rem;
+}
+
+.computerUseSteps li {
+  padding-left: 2px;
+}
+
+.computerUseSteps span {
+  color: var(--fg-tertiary);
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+}
+
+.computerUseSteps p {
+  margin: 1px 0 0;
+}
+
+.computerUseActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.computerUseActions button {
+  min-height: 28px;
+  padding: 4px 9px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 28%, transparent);
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--surface-panel-strong) 82%, transparent);
+  color: var(--fg-secondary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.computerUseActions button:hover {
+  border-color: color-mix(in srgb, var(--accent-cool) 45%, transparent);
+  color: var(--fg-primary);
 }
 
 .auxiliaryPanel {
@@ -1284,6 +1767,11 @@
   text-decoration: underline;
 }
 
+.inlineStrong {
+  color: var(--fg-primary);
+  font-weight: 720;
+}
+
 .responseSegmentList {
   display: grid;
   gap: 3px;
@@ -1685,7 +2173,9 @@
   flex: 0 0 auto;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto auto;
-  gap: 8px;
+  grid-template-areas: "field attach primary stop";
+  align-items: end;
+  gap: 10px;
   padding: 8px 12px 10px;
   border-top: 1px solid color-mix(in srgb, var(--border-soft) 82%, transparent);
   background: color-mix(in srgb, var(--surface-panel-strong) 92%, transparent);
@@ -1717,6 +2207,12 @@
   min-width: 0;
   line-height: 1.45;
   overflow-wrap: anywhere;
+}
+
+.turnErrorDetail {
+  color: var(--fg-secondary);
+  font-size: 0.8rem;
+  line-height: 1.4;
 }
 
 .turnErrorLabel {
@@ -1968,6 +2464,78 @@
   color: var(--state-error);
 }
 
+.composerReferenceTray {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.composerReferenceChip {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  max-width: 280px;
+  min-height: 34px;
+  padding: 4px 6px 4px 5px;
+  border: 1px solid color-mix(in srgb, var(--accent-warm) 22%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent-warm) 7%, var(--surface-panel-strong));
+}
+
+.composerReferenceIcon {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--accent-warm) 14%, transparent);
+  color: var(--accent-warm-2);
+}
+
+.composerReferenceCopy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.composerReferenceCopy strong,
+.composerReferenceCopy small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composerReferenceCopy strong {
+  color: var(--fg-secondary);
+  font-size: 0.76rem;
+  font-weight: 720;
+}
+
+.composerReferenceCopy small {
+  color: var(--fg-tertiary);
+  font-size: 0.66rem;
+  font-weight: 620;
+}
+
+.composerReferenceChip button {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--fg-tertiary);
+  cursor: pointer;
+}
+
+.composerReferenceChip button:hover {
+  background: color-mix(in srgb, var(--state-error) 12%, transparent);
+  color: var(--state-error);
+}
+
 .input {
   min-height: 56px;
   max-height: 180px;
@@ -1998,6 +2566,7 @@
 }
 
 .attachButton {
+  grid-area: attach;
   align-self: end;
   display: inline-grid;
   place-items: center;
@@ -2022,53 +2591,84 @@
 }
 
 .sendButton {
+  grid-area: primary;
   align-self: end;
-  min-width: 76px;
-  min-height: 36px;
-  padding: 8px 13px;
-  border: 1px solid color-mix(in srgb, var(--accent-warm) 24%, transparent);
-  border-radius: var(--radius-control);
-  background: color-mix(in srgb, var(--accent-warm) 18%, transparent);
-  color: var(--accent-warm-2);
+  display: inline-grid;
+  place-items: center;
+  min-width: 0;
+  width: 42px;
+  height: 42px;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--surface-inverse, #111318) 72%, transparent);
+  border-radius: 999px;
+  background: #111318;
+  color: #ffffff;
   cursor: pointer;
-  transition: background 120ms ease, border-color 120ms ease;
+  box-shadow: 0 10px 24px rgba(9, 12, 17, 0.18);
+  transition:
+    transform 120ms ease,
+    background 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease,
+    box-shadow 120ms ease;
 }
 
 .surfaceCompact .sendButton {
-  min-height: 36px;
-  padding: 8px 13px;
+  width: 40px;
+  height: 40px;
 }
 
 .sendButton:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--accent-warm) 26%, transparent);
-  border-color: color-mix(in srgb, var(--accent-warm) 34%, transparent);
+  background: #05070a;
+  border-color: #05070a;
+  box-shadow: 0 12px 28px rgba(9, 12, 17, 0.24);
+  transform: translateY(-1px);
+}
+
+.sendButton:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.composerRoundButton > svg {
+  display: block;
+}
+
+.composerRoundButtonPrimary {
+  background: #111318;
+  color: #ffffff;
 }
 
 .stopButton {
-  border-color: color-mix(in srgb, var(--state-error) 28%, transparent);
-  background: color-mix(in srgb, var(--state-error) 16%, transparent);
-  color: var(--state-error);
-}
-
-.interruptGuidanceButton {
-  border-color: color-mix(in srgb, var(--accent-cool) 24%, transparent);
-  background: color-mix(in srgb, var(--accent-cool) 10%, transparent);
-  color: var(--accent-cool);
-}
-
-.interruptGuidanceButton:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--accent-cool) 16%, transparent);
-  border-color: color-mix(in srgb, var(--accent-cool) 34%, transparent);
+  grid-area: stop;
+  border-color: color-mix(in srgb, var(--state-error) 74%, transparent);
+  background: color-mix(in srgb, var(--state-error) 92%, #3a0508);
+  color: #ffffff;
 }
 
 .stopButton:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--state-error) 22%, transparent);
-  border-color: color-mix(in srgb, var(--state-error) 38%, transparent);
+  background: color-mix(in srgb, var(--state-error) 96%, #250204);
+  border-color: color-mix(in srgb, var(--state-error) 88%, transparent);
 }
 
 .sendButton:disabled {
   cursor: not-allowed;
-  opacity: 0.62;
+  opacity: 0.58;
+}
+
+.composer > .input {
+  grid-area: field;
+}
+
+.composer > .attachButton {
+  grid-area: attach;
+}
+
+.composer > .sendButton {
+  grid-area: primary;
+}
+
+.composer > .stopButton {
+  grid-area: stop;
 }
 
 .backToBottomButton {
@@ -2178,7 +2778,7 @@
   }
 
   .composer {
-    grid-template-columns: minmax(0, 1fr) auto auto;
+    grid-template-columns: minmax(0, 1fr) auto auto auto;
     padding: 10px 12px 12px;
   }
 

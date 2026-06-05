@@ -100,7 +100,14 @@ def supervised_agent_bindings() -> dict[str, dict[str, Any]]:
     """Return run-safe AgentInstance bindings keyed by supervised role."""
 
     raw_slots = _raw_supervised_mode_slots()
+    raw_registry = _load_raw_agent_registry_state()
+    _assert_raw_supervised_slot_dialogue_bindings(raw_slots, raw_registry)
     ensure_supervised_agent_instances()
+    raw_agents = {
+        str(agent.get("agentId") or "").strip(): agent
+        for agent in (_load_raw_agent_registry_state().get("agents") or [])
+        if isinstance(agent, dict) and str(agent.get("agentId") or "").strip()
+    }
     bindings: dict[str, dict[str, Any]] = {}
     mode_payload = agent_mode_binding_service.get_mode_bindings_payload()
     supervised_mode = (mode_payload.get("modes") or {}).get("supervised_evolution")
@@ -127,7 +134,15 @@ def supervised_agent_bindings() -> dict[str, dict[str, Any]]:
         if not agent:
             _record_supervised_binding_failure(role, agent_id=agent_id, reason="missing_or_archived_slot_agent")
             raise SupervisedAgentBindingError(f"Supervised role slot points to an archived or missing Agent: {role} ({agent_id})")
+        raw_agent = raw_agents.get(agent_id) if isinstance(raw_agents.get(agent_id), dict) else agent
         metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+        llm_bindings = agent_directory_service.normalize_agent_llm_bindings(raw_agent.get("llmBindings"))
+        dialogue_model_id = agent_directory_service.agent_dialogue_model_id({"llmBindings": llm_bindings})
+        if not dialogue_model_id:
+            _record_supervised_binding_failure(role, agent_id=agent_id, reason="missing_dialogue_llm_binding")
+            raise SupervisedAgentBindingError(
+                f"Supervised role Agent is missing required dialogue LLM binding: {role} ({agent_id})"
+            )
         bindings[role] = {
             "agentId": str(agent.get("agentId") or "").strip(),
             "agentCode": str(agent.get("agentCode") or "").strip(),
@@ -135,6 +150,9 @@ def supervised_agent_bindings() -> dict[str, dict[str, Any]]:
             "primaryMode": str(agent.get("primaryMode") or "").strip(),
             "roleKey": str(agent.get("roleKey") or role).strip() or role,
             "profileId": str(agent.get("profileId") or "").strip(),
+            "llmBindings": llm_bindings,
+            "dialogueModelId": dialogue_model_id,
+            "llmSlot": "dialogue",
             "promptTemplateId": str(agent.get("promptTemplateId") or "").strip(),
             "directSessionId": str(agent.get("directSessionId") or "").strip(),
             "workspacePath": str(agent.get("workspacePath") or "").strip(),
@@ -144,6 +162,44 @@ def supervised_agent_bindings() -> dict[str, dict[str, Any]]:
             "roleLabel": str(metadata.get("supervisedRoleLabel") or role).strip(),
         }
     return bindings
+
+
+def _load_raw_agent_registry_state() -> dict[str, Any]:
+    try:
+        payload = json.loads(agent_directory_service.registry_path().read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _assert_raw_supervised_slot_dialogue_bindings(raw_slots: dict[str, str], raw_registry: dict[str, Any]) -> None:
+    if not raw_slots:
+        return
+    raw_agents = {
+        str(agent.get("agentId") or "").strip(): agent
+        for agent in (raw_registry.get("agents") or [])
+        if isinstance(agent, dict) and str(agent.get("agentId") or "").strip()
+    }
+    for role, agent_id in raw_slots.items():
+        normalized_role = str(role or "").strip()
+        normalized_agent_id = str(agent_id or "").strip()
+        if not normalized_role or not normalized_agent_id:
+            continue
+        agent = raw_agents.get(normalized_agent_id)
+        if not isinstance(agent, dict):
+            continue
+        raw_bindings = agent.get("llmBindings") if isinstance(agent.get("llmBindings"), dict) else {}
+        dialogue = raw_bindings.get("dialogue") if isinstance(raw_bindings.get("dialogue"), dict) else {}
+        if str(dialogue.get("modelId") or "").strip():
+            continue
+        _record_supervised_binding_failure(
+            normalized_role,
+            agent_id=normalized_agent_id,
+            reason="missing_dialogue_llm_binding",
+        )
+        raise SupervisedAgentBindingError(
+            f"Supervised role Agent is missing required dialogue LLM binding: {normalized_role} ({normalized_agent_id})"
+        )
 
 
 def _raw_supervised_mode_slots() -> dict[str, str]:
@@ -245,6 +301,7 @@ def _sync_supervised_mode_binding(agents: list[dict[str, Any]], *, preserve_exis
 def _ensure_supervised_role(role: SupervisedAgentRole) -> tuple[dict[str, Any] | None, bool]:
     existing = _find_agent_by_supervised_role(role.role)
     changed = False
+    seed_llm_bindings = session_service.llm_bindings_for_profile_id(role.profile_id)
     if role.role not in CORE_SUPERVISED_AGENT_ROLES and _supervised_role_slot_excluded(role.role):
         _record_supervised_agent_event(
             "supervised.agent_instance.sync_skipped_excluded_slot",
@@ -260,7 +317,7 @@ def _ensure_supervised_role(role: SupervisedAgentRole) -> tuple[dict[str, Any] |
     if not existing:
         session_detail = session_service.create_chat_session(
             title=role.label,
-            profile_id=role.profile_id,
+            llm_bindings=seed_llm_bindings,
             created_by="supervised_evolution",
         )
         agent_id = str(session_detail.get("agentId") or "").strip()
@@ -302,6 +359,8 @@ def _ensure_supervised_role(role: SupervisedAgentRole) -> tuple[dict[str, Any] |
         return None, False
 
     metadata = dict(existing.get("metadata") or {})
+    existing_llm_bindings = agent_directory_service.normalize_agent_llm_bindings(existing.get("llmBindings"))
+    existing_dialogue_model_id = agent_directory_service.agent_dialogue_model_id({"llmBindings": existing_llm_bindings})
     expected_metadata = {
         "agentMode": "supervised_evolution",
         "configSurface": "model_config",
@@ -311,14 +370,10 @@ def _ensure_supervised_role(role: SupervisedAgentRole) -> tuple[dict[str, Any] |
         "supervisedRoleLabel": role.label,
         "functionalDisplayName": role.label,
     }
-    needs_update = (
-        str(existing.get("profileId") or "").strip() != role.profile_id
-        or any(metadata.get(key) != value for key, value in expected_metadata.items())
-    )
+    needs_update = any(metadata.get(key) != value for key, value in expected_metadata.items())
     if needs_update:
         existing = agent_directory_service.update_agent_instance(
             str(existing.get("agentId") or ""),
-            profile_id=role.profile_id,
             primary_mode="supervised_evolution",
             role_key=role.role,
             prompt_template_id=f"prompt-supervised-{role.role}",
@@ -333,7 +388,6 @@ def _ensure_supervised_role(role: SupervisedAgentRole) -> tuple[dict[str, Any] |
             session_service.update_chat_session(
                 direct_session_id,
                 title=role.label,
-                profile_id=role.profile_id,
             )
         except Exception:
             pass

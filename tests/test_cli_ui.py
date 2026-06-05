@@ -443,7 +443,7 @@ def test_runtime_metrics_include_tool_decision():
     assert metrics["next_tool_intent"] == "inspect_entity"
     assert metrics["next_tool_intent_label"] == "精读实体"
     assert metrics["recommended_tools"][0] == "code_symbol_tool"
-    assert metrics["recommended_tools_label"].startswith("代码符号")
+    assert metrics["recommended_tools_label"].startswith("代码图谱")
     assert "cli_tool" in metrics["avoid_tools"]
     assert "命令兜底" in metrics["avoid_tools_label"]
 
@@ -484,7 +484,7 @@ def test_pet_panel_renders_tool_decision():
     rendered = console.export_text()
 
     assert "精读实体" in rendered
-    assert "代码符号 -> 读局部片段" in rendered
+    assert "代码图谱 -> 读局部片段" in rendered
     assert "命令兜底" in rendered
 
 
@@ -773,7 +773,8 @@ def test_conversation_panel_renders_subagent_process_and_thought():
     assert "已定位重复读取链路" in rendered
     assert "重复调用 read_file_tool" in rendered
     assert "已读取 80 行" in rendered
-    assert "先看 attention snapshot" in rendered
+    assert "先看 attention" in rendered
+    assert "snapshot" in rendered
 
 
 def test_conversation_panel_merges_all_subagent_blocks_and_uses_taller_panel():

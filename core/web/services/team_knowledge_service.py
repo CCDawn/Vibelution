@@ -7,7 +7,7 @@ import json
 import re
 import threading
 import uuid
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -71,6 +71,7 @@ STABILITY_VALUES = {"temporary", "evolving", "stable", "deprecated"}
 SCOPES = {"agent", "team", "project", "global"}
 REVIEW_PRIORITIES = {"normal", "elevated", "urgent"}
 SUGGESTION_STATUSES = {"pending", "applied", "rejected"}
+KNOWLEDGE_OWNER_TYPES = {"team", "agent"}
 _SAFE_ID_FRAGMENT = re.compile(r"[^A-Za-z0-9_.-]+")
 _SEARCH_TOKEN_PATTERN = re.compile(r"[A-Za-z0-9_.-]+|[\u4e00-\u9fff]")
 _LOCK = threading.RLock()
@@ -89,35 +90,31 @@ class TeamKnowledgePermissionError(TeamKnowledgeError):
 
 
 def utc_now_iso() -> str:
-    return datetime.now(UTC).isoformat()
+    return datetime.now(timezone.utc).isoformat()
 
 
 def list_knowledge_overview(*, agent_id: str = "") -> dict[str, Any]:
-    """Return all knowledge bases visible to an optional Agent."""
+    """Return formal knowledge bases visible to an optional Agent."""
 
     _sync_roots()
-    teams = team_service.list_teams_compact().get("teams") or []
     visible_bases: list[dict[str, Any]] = []
     pending_proposals = 0
     item_count = 0
     source_count = 0
-    for team in teams:
-        team_id = str(team.get("teamId") or "").strip()
-        if not team_id:
-            continue
-        for base in _knowledge_bases_for_team(team_id):
-            if not _can_access(team, base, agent_id, "read"):
+    for owner in _iter_knowledge_owners(agent_id=agent_id, include_archived=False):
+        for base in _knowledge_bases_for_owner(owner):
+            if not _can_access(owner, base, agent_id, "read"):
                 continue
-            stats = _knowledge_base_stats(team_id, str(base.get("knowledgeBaseId") or ""))
+            stats = _knowledge_base_stats_for_owner(owner, str(base.get("knowledgeBaseId") or ""))
             pending_proposals += stats["pendingProposalCount"]
             item_count += stats["itemCount"]
             source_count += stats["sourceArtifactCount"]
             visible_bases.append(
                 {
-                    **_knowledge_base_to_api(base, team),
+                    **_knowledge_base_to_api(base, owner),
                     "stats": stats,
-                    "pendingProposals": _pending_proposals_for_base(team_id, str(base.get("knowledgeBaseId") or "")),
-                    "permissions": _permissions_for_actor(team, base, agent_id),
+                    "pendingProposals": _pending_proposals_for_base(owner, str(base.get("knowledgeBaseId") or "")),
+                    "permissions": _permissions_for_actor(owner, base, agent_id),
                 }
             )
     return {
@@ -137,10 +134,26 @@ def list_knowledge_overview(*, agent_id: str = "") -> dict[str, Any]:
 def get_knowledge_steward_overview() -> dict[str, Any]:
     """Return the default knowledge steward Agent and its read-only governance posture."""
 
+    payload = _build_knowledge_steward_overview()
+    _record_event(
+        "knowledge.steward.overview.viewed",
+        "",
+        "",
+        actor_agent_id=str((payload.get("steward") or {}).get("agentId") or agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID),
+        fields={
+            "stewardAgentId": str((payload.get("steward") or {}).get("agentId") or ""),
+            "openTaskCount": int((payload["governance"]["summary"] or {}).get("openTaskCount") or 0),
+            "permissionBoundary": str((payload.get("steward") or {}).get("permissionBoundary") or ""),
+        },
+    )
+    return payload
+
+
+def _build_knowledge_steward_overview(*, governance_tasks: dict[str, Any] | None = None) -> dict[str, Any]:
     _sync_roots()
     steward = agent_directory_service.get_agent(agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID)
     steward_id = str((steward or {}).get("agentId") or agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID).strip()
-    governance_tasks = list_knowledge_governance_tasks(agent_id="", status="all")
+    governance_tasks = governance_tasks or list_knowledge_governance_tasks(agent_id="", status="all")
     task_summary = dict(governance_tasks.get("summary") or {})
     open_tasks = [task for task in list(governance_tasks.get("tasks") or []) if str(task.get("status") or "") == "open"]
     open_tasks.sort(
@@ -205,17 +218,6 @@ def get_knowledge_steward_overview() -> dict[str, Any]:
         },
         "updatedAt": utc_now_iso(),
     }
-    _record_event(
-        "knowledge.steward.overview.viewed",
-        "",
-        "",
-        actor_agent_id=steward_id,
-        fields={
-            "stewardAgentId": steward_id,
-            "openTaskCount": int((payload["governance"]["summary"] or {}).get("openTaskCount") or 0),
-            "permissionBoundary": permission_boundary,
-        },
-    )
     return payload
 
 
@@ -245,20 +247,44 @@ def list_ingestion_adapters() -> dict[str, Any]:
 
 def list_team_knowledge_bases(team_id: str, *, agent_id: str = "") -> dict[str, Any]:
     team = _require_team(team_id)
+    owner = _owner_context("team", team["teamId"], team=team)
     bases = []
-    for base in _knowledge_bases_for_team(team["teamId"]):
-        if _can_access(team, base, agent_id, "read"):
+    for base in _knowledge_bases_for_owner(owner):
+        if _can_access(owner, base, agent_id, "read"):
             bases.append(
                 {
-                    **_knowledge_base_to_api(base, team),
-                    "stats": _knowledge_base_stats(team["teamId"], str(base.get("knowledgeBaseId") or "")),
-                    "pendingProposals": _pending_proposals_for_base(team["teamId"], str(base.get("knowledgeBaseId") or "")),
-                    "permissions": _permissions_for_actor(team, base, agent_id),
+                    **_knowledge_base_to_api(base, owner),
+                    "stats": _knowledge_base_stats_for_owner(owner, str(base.get("knowledgeBaseId") or "")),
+                    "pendingProposals": _pending_proposals_for_base(owner, str(base.get("knowledgeBaseId") or "")),
+                    "permissions": _permissions_for_actor(owner, base, agent_id),
                 }
             )
     return {
         "schemaVersion": SCHEMA_VERSION,
         "teamId": team["teamId"],
+        "knowledgeBases": bases,
+        "summary": {"knowledgeBaseCount": len(bases)},
+        "updatedAt": utc_now_iso(),
+    }
+
+
+def list_agent_knowledge_bases(agent_id: str, *, actor_agent_id: str = "") -> dict[str, Any]:
+    agent = _require_agent(agent_id)
+    owner = _owner_context("agent", agent["agentId"], agent=agent)
+    bases = []
+    for base in _knowledge_bases_for_owner(owner):
+        if _can_access(owner, base, actor_agent_id, "read"):
+            bases.append(
+                {
+                    **_knowledge_base_to_api(base, owner),
+                    "stats": _knowledge_base_stats_for_owner(owner, str(base.get("knowledgeBaseId") or "")),
+                    "pendingProposals": _pending_proposals_for_base(owner, str(base.get("knowledgeBaseId") or "")),
+                    "permissions": _permissions_for_actor(owner, base, actor_agent_id),
+                }
+            )
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "agentId": agent["agentId"],
         "knowledgeBases": bases,
         "summary": {"knowledgeBaseCount": len(bases)},
         "updatedAt": utc_now_iso(),
@@ -274,19 +300,52 @@ def create_knowledge_base(
     acl: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     team = _require_team(team_id)
+    owner = _owner_context("team", team["teamId"], team=team)
     if actor_agent_id and not _member_role(team, actor_agent_id):
         raise TeamKnowledgePermissionError("Only Team members can create a team knowledge base.")
+    return _create_knowledge_base_for_owner(owner, name=name, description=description, actor_agent_id=actor_agent_id, acl=acl)
+
+
+def create_agent_knowledge_base(
+    agent_id: str,
+    *,
+    name: str,
+    description: str = "",
+    actor_agent_id: str = "",
+    acl: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    agent = _require_agent(agent_id)
+    owner = _owner_context("agent", agent["agentId"], agent=agent)
+    normalized_actor = str(actor_agent_id or agent["agentId"]).strip()
+    if normalized_actor != agent["agentId"]:
+        raise TeamKnowledgePermissionError("Only the owning Agent can create its private formal knowledge base.")
+    return _create_knowledge_base_for_owner(owner, name=name, description=description, actor_agent_id=normalized_actor, acl=acl)
+
+
+def _create_knowledge_base_for_owner(
+    owner: dict[str, Any],
+    *,
+    name: str,
+    description: str = "",
+    actor_agent_id: str = "",
+    acl: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     normalized_name = trim_lines(name or "", max_lines=1).strip()
     if not normalized_name:
         raise TeamKnowledgeError("Knowledge base name is required.")
     now = utc_now_iso()
+    owner_type = str(owner.get("ownerType") or "team")
+    owner_id = str(owner.get("ownerId") or "").strip()
     with _LOCK:
-        state = _load_bases_state(team["teamId"])
+        state = _load_bases_state_for_owner(owner)
         existing_ids = {str(item.get("knowledgeBaseId") or "") for item in state.get("knowledgeBases") or []}
         knowledge_base_id = _new_id("kb", existing_ids, normalized_name)
         base = {
             "knowledgeBaseId": knowledge_base_id,
-            "teamId": team["teamId"],
+            "ownerType": owner_type,
+            "ownerId": owner_id,
+            "teamId": owner_id if owner_type == "team" else "",
+            "agentId": owner_id if owner_type == "agent" else "",
             "name": normalized_name,
             "description": trim_lines(description or "", max_lines=6).strip(),
             "status": "active",
@@ -296,13 +355,13 @@ def create_knowledge_base(
         }
         state.setdefault("knowledgeBases", []).append(base)
         state["updatedAt"] = now
-        _save_bases_state(team["teamId"], state)
-        _append_audit(team["teamId"], "knowledge_base.created", base, actor_agent_id=actor_agent_id)
-    _record_event("knowledge.knowledge_base.created", team["teamId"], knowledge_base_id, actor_agent_id=actor_agent_id)
+        _save_bases_state_for_owner(owner, state)
+        _append_audit(owner, "knowledge_base.created", base, actor_agent_id=actor_agent_id)
+    _record_event("knowledge.knowledge_base.created", owner, knowledge_base_id, actor_agent_id=actor_agent_id)
     return {
-        **_knowledge_base_to_api(base, team),
-        "stats": _knowledge_base_stats(team["teamId"], knowledge_base_id),
-        "permissions": _permissions_for_actor(team, base, actor_agent_id),
+        **_knowledge_base_to_api(base, owner),
+        "stats": _knowledge_base_stats_for_owner(owner, knowledge_base_id),
+        "permissions": _permissions_for_actor(owner, base, actor_agent_id),
     }
 
 
@@ -319,18 +378,23 @@ def create_source_artifact(
     summary: str = "",
     actor_agent_id: str = "",
 ) -> dict[str, Any]:
-    team, base = _require_base_with_team(knowledge_base_id)
-    _require_permission(team, base, actor_agent_id, "propose")
+    owner, base = _require_base_with_owner(knowledge_base_id)
+    _require_permission(owner, base, actor_agent_id, "propose")
     normalized_type = str(source_type or "").strip()
     if normalized_type not in SOURCE_TYPES:
         raise TeamKnowledgeError(f"Unsupported source type: {source_type}")
     normalized_ref = source_ref if isinstance(source_ref, dict) else {}
     if normalized_type == "team_chat_refinement":
-        _validate_team_chat_source(team, normalized_ref)
+        if str(owner.get("ownerType") or "") != "team":
+            raise TeamKnowledgeError("team_chat_refinement sources require a Team knowledge base.")
+        _validate_team_chat_source(owner["team"], normalized_ref)
     now = utc_now_iso()
     artifact = {
         "sourceArtifactId": _new_event_id("src"),
-        "teamId": team["teamId"],
+        "ownerType": owner["ownerType"],
+        "ownerId": owner["ownerId"],
+        "teamId": owner["ownerId"] if owner["ownerType"] == "team" else "",
+        "agentId": owner["ownerId"] if owner["ownerType"] == "agent" else "",
         "knowledgeBaseId": base["knowledgeBaseId"],
         "sourceType": normalized_type,
         "sourceRef": _bounded_dict(normalized_ref),
@@ -343,11 +407,11 @@ def create_source_artifact(
         "summary": trim_lines(summary or "", max_lines=8).strip(),
     }
     with _LOCK:
-        _append_jsonl(_source_artifacts_path(team["teamId"]), artifact)
-        _append_audit(team["teamId"], "knowledge.source.registered", artifact, actor_agent_id=actor_agent_id)
+        _append_jsonl(_source_artifacts_path_for_owner(owner), artifact)
+        _append_audit(owner, "knowledge.source.registered", artifact, actor_agent_id=actor_agent_id)
     _record_event(
         "knowledge.source.registered",
-        team["teamId"],
+        owner,
         base["knowledgeBaseId"],
         actor_agent_id=actor_agent_id,
         fields={"sourceArtifactId": artifact["sourceArtifactId"], "sourceType": artifact["sourceType"]},
@@ -365,9 +429,9 @@ def create_refinement_proposal(
     content: str,
     tags: list[str] | None = None,
 ) -> dict[str, Any]:
-    team, base = _require_base_with_team(knowledge_base_id)
+    owner, base = _require_base_with_owner(knowledge_base_id)
     actor_agent_id = str(proposed_by_agent_id or "").strip()
-    _require_permission(team, base, actor_agent_id, "propose")
+    _require_permission(owner, base, actor_agent_id, "propose")
     normalized_title = trim_lines(title or "", max_lines=1).strip()
     normalized_content = trim_lines(content or "", max_lines=80).strip()
     if not normalized_title:
@@ -376,14 +440,17 @@ def create_refinement_proposal(
         raise TeamKnowledgeError("Proposal content is required.")
     artifact_ids = _unique_strings(source_artifact_ids or [])
     if artifact_ids:
-        known_artifacts = {item["sourceArtifactId"] for item in _source_artifacts_for_base(team["teamId"], base["knowledgeBaseId"])}
+        known_artifacts = {item["sourceArtifactId"] for item in _source_artifacts_for_base(owner, base["knowledgeBaseId"])}
         missing = [item for item in artifact_ids if item not in known_artifacts]
         if missing:
             raise TeamKnowledgeError(f"Unknown source artifact ids: {', '.join(missing[:3])}")
     now = utc_now_iso()
     proposal = {
         "proposalId": _new_event_id("kprop"),
-        "teamId": team["teamId"],
+        "ownerType": owner["ownerType"],
+        "ownerId": owner["ownerId"],
+        "teamId": owner["ownerId"] if owner["ownerType"] == "team" else "",
+        "agentId": owner["ownerId"] if owner["ownerType"] == "agent" else "",
         "targetKnowledgeBaseId": base["knowledgeBaseId"],
         "sourceArtifactIds": artifact_ids,
         "proposedByAgentId": actor_agent_id,
@@ -401,11 +468,11 @@ def create_refinement_proposal(
         "knowledgeItemIds": [],
     }
     with _LOCK:
-        _append_jsonl(_proposals_path(team["teamId"]), proposal)
-        _append_audit(team["teamId"], "knowledge.proposal.created", proposal, actor_agent_id=actor_agent_id)
+        _append_jsonl(_proposals_path_for_owner(owner), proposal)
+        _append_audit(owner, "knowledge.proposal.created", proposal, actor_agent_id=actor_agent_id)
     _record_event(
         "knowledge.proposal.created",
-        team["teamId"],
+        owner,
         base["knowledgeBaseId"],
         actor_agent_id=actor_agent_id,
         fields={"proposalId": proposal["proposalId"], "sourceArtifactCount": len(artifact_ids)},
@@ -432,9 +499,9 @@ def create_ingestion_package(
 ) -> dict[str, Any]:
     """Create one source artifact and one pending proposal from a semi-automatic adapter."""
 
-    team, base = _require_base_with_team(knowledge_base_id)
+    owner, base = _require_base_with_owner(knowledge_base_id)
     actor_agent_id = str(proposed_by_agent_id or captured_by or "").strip()
-    _require_permission(team, base, actor_agent_id, "propose")
+    _require_permission(owner, base, actor_agent_id, "propose")
     normalized_type = str(source_type or "").strip()
     if normalized_type not in SOURCE_TYPES:
         raise TeamKnowledgeError(f"Unsupported source type: {source_type}")
@@ -467,17 +534,20 @@ def create_ingestion_package(
     )
     payload = {
         "schemaVersion": SCHEMA_VERSION,
-        "teamId": team["teamId"],
+        "ownerType": owner["ownerType"],
+        "ownerId": owner["ownerId"],
+        "teamId": owner["ownerId"] if owner["ownerType"] == "team" else "",
+        "agentId": owner["ownerId"] if owner["ownerType"] == "agent" else "",
         "knowledgeBaseId": base["knowledgeBaseId"],
         "status": "submitted",
         "sourceArtifact": source,
         "proposal": proposal,
         "updatedAt": utc_now_iso(),
     }
-    _append_audit(team["teamId"], "knowledge.ingestion.adapter.created", proposal, actor_agent_id=actor_agent_id)
+    _append_audit(owner, "knowledge.ingestion.adapter.created", proposal, actor_agent_id=actor_agent_id)
     _record_event(
         "knowledge.ingestion.adapter.created",
-        team["teamId"],
+        owner,
         base["knowledgeBaseId"],
         actor_agent_id=actor_agent_id,
         fields={
@@ -497,14 +567,14 @@ def review_refinement_proposal(
     reviewed_by_agent_id: str = "",
     resolution_note: str = "",
 ) -> dict[str, Any]:
-    team, base = _require_base_with_team(knowledge_base_id)
+    owner, base = _require_base_with_owner(knowledge_base_id)
     reviewer_id = str(reviewed_by_agent_id or "").strip()
-    _require_permission(team, base, reviewer_id, "review")
+    _require_permission(owner, base, reviewer_id, "review")
     normalized_status = str(status or "").strip().lower()
     if normalized_status not in {"approved", "applied", "rejected"}:
         raise TeamKnowledgeError("Review status must be approved, applied, or rejected.")
     with _LOCK:
-        proposals = _read_jsonl(_proposals_path(team["teamId"]))
+        proposals = _read_jsonl(_proposals_path_for_owner(owner))
         proposal = _find_by_id(proposals, "proposalId", proposal_id)
         if not proposal or str(proposal.get("targetKnowledgeBaseId") or "") != base["knowledgeBaseId"]:
             raise TeamKnowledgeNotFoundError("Knowledge proposal not found.")
@@ -519,18 +589,18 @@ def review_refinement_proposal(
         batch: dict[str, Any] | None = None
         item: dict[str, Any] | None = None
         if proposal["status"] == "applied":
-            batch = _batch_from_proposal(team, base, proposal, reviewer_id, now)
-            item = _item_from_proposal(team, base, proposal, batch, reviewer_id, now)
+            batch = _batch_from_proposal(owner, base, proposal, reviewer_id, now)
+            item = _item_from_proposal(owner, base, proposal, batch, reviewer_id, now)
             proposal["batchId"] = batch["batchId"]
             proposal["knowledgeItemIds"] = [item["knowledgeItemId"]]
-            _append_jsonl(_batches_path(team["teamId"]), batch)
-            _append_jsonl(_items_path(team["teamId"]), item)
-            _append_audit(team["teamId"], "knowledge.batch.applied", batch, actor_agent_id=reviewer_id)
-        _write_jsonl(_proposals_path(team["teamId"]), proposals)
-        _append_audit(team["teamId"], "knowledge.proposal.reviewed", proposal, actor_agent_id=reviewer_id)
+            _append_jsonl(_batches_path_for_owner(owner), batch)
+            _append_jsonl(_items_path_for_owner(owner), item)
+            _append_audit(owner, "knowledge.batch.applied", batch, actor_agent_id=reviewer_id)
+        _write_jsonl(_proposals_path_for_owner(owner), proposals)
+        _append_audit(owner, "knowledge.proposal.reviewed", proposal, actor_agent_id=reviewer_id)
     _record_event(
         "knowledge.proposal.reviewed",
-        team["teamId"],
+        owner,
         base["knowledgeBaseId"],
         actor_agent_id=reviewer_id,
         fields={"proposalId": proposal["proposalId"], "status": proposal["status"], "batchId": proposal.get("batchId") or ""},
@@ -538,7 +608,7 @@ def review_refinement_proposal(
     if batch:
         _record_event(
             "knowledge.batch.applied",
-            team["teamId"],
+            owner,
             base["knowledgeBaseId"],
             actor_agent_id=reviewer_id,
             fields={"batchId": batch["batchId"], "knowledgeItemCount": 1},
@@ -547,18 +617,21 @@ def review_refinement_proposal(
 
 
 def list_knowledge_items(knowledge_base_id: str, *, agent_id: str = "") -> dict[str, Any]:
-    team, base = _require_base_with_team(knowledge_base_id)
-    _require_permission(team, base, agent_id, "read")
+    owner, base = _require_base_with_owner(knowledge_base_id)
+    _require_permission(owner, base, agent_id, "read")
     items = [
         item
-        for item in _read_jsonl(_items_path(team["teamId"]))
+        for item in _read_jsonl(_items_path_for_owner(owner))
         if str(item.get("knowledgeBaseId") or "") == base["knowledgeBaseId"]
     ]
     items.sort(key=lambda item: str(item.get("updatedAt") or item.get("createdAt") or ""), reverse=True)
     return {
         "schemaVersion": SCHEMA_VERSION,
-        "teamId": team["teamId"],
-        "knowledgeBase": _knowledge_base_to_api(base, team),
+        "ownerType": owner["ownerType"],
+        "ownerId": owner["ownerId"],
+        "teamId": owner["ownerId"] if owner["ownerType"] == "team" else "",
+        "agentId": owner["ownerId"] if owner["ownerType"] == "agent" else "",
+        "knowledgeBase": _knowledge_base_to_api(base, owner),
         "items": items,
         "summary": {"itemCount": len(items)},
         "updatedAt": utc_now_iso(),
@@ -573,18 +646,15 @@ def list_knowledge_governance_tasks(*, agent_id: str = "", status: str = "open")
     if normalized_status not in {"open", "closed", "all"}:
         raise TeamKnowledgeError(f"Unsupported governance task status: {status}")
     tasks: list[dict[str, Any]] = []
-    for team in team_service.list_teams_compact(include_archived=True).get("teams") or []:
-        team_id = str(team.get("teamId") or "").strip()
-        if not team_id:
-            continue
-        for base in _knowledge_bases_for_team(team_id):
+    for owner in _iter_knowledge_owners(agent_id=agent_id, include_archived=True):
+        for base in _knowledge_bases_for_owner(owner):
             base_id = str(base.get("knowledgeBaseId") or "")
-            permissions = _permissions_for_actor(team, base, agent_id)
+            permissions = _permissions_for_actor(owner, base, agent_id)
             if not permissions["canRead"]:
                 continue
             proposals = [
                 proposal
-                for proposal in _read_jsonl(_proposals_path(team_id))
+                for proposal in _read_jsonl(_proposals_path_for_owner(owner))
                 if str(proposal.get("targetKnowledgeBaseId") or "") == base_id
             ]
             proposal_source_ids = {
@@ -600,7 +670,7 @@ def list_knowledge_governance_tasks(*, agent_id: str = "", status: str = "open")
                     continue
                 tasks.append(
                     _governance_task(
-                        team,
+                        owner,
                         base,
                         task_type="proposal_review",
                         status="closed" if task_closed else "open",
@@ -615,7 +685,7 @@ def list_knowledge_governance_tasks(*, agent_id: str = "", status: str = "open")
                         source_artifact_ids=[str(value) for value in list(proposal.get("sourceArtifactIds") or []) if str(value or "").strip()],
                     )
                 )
-            for suggestion in _read_jsonl(_rating_suggestions_path(team_id)):
+            for suggestion in _read_jsonl(_rating_suggestions_path_for_owner(owner)):
                 if str(suggestion.get("knowledgeBaseId") or "") != base_id:
                     continue
                 suggestion_status = str(suggestion.get("status") or "")
@@ -624,7 +694,7 @@ def list_knowledge_governance_tasks(*, agent_id: str = "", status: str = "open")
                     continue
                 tasks.append(
                     _governance_task(
-                        team,
+                        owner,
                         base,
                         task_type="rating_review",
                         status="closed" if task_closed else "open",
@@ -640,13 +710,13 @@ def list_knowledge_governance_tasks(*, agent_id: str = "", status: str = "open")
                     )
                 )
             if normalized_status in {"open", "all"}:
-                for artifact in _source_artifacts_for_base(team_id, base_id):
+                for artifact in _source_artifacts_for_base(owner, base_id):
                     source_id = str(artifact.get("sourceArtifactId") or "")
                     if source_id in proposal_source_ids:
                         continue
                     tasks.append(
                         _governance_task(
-                            team,
+                            owner,
                             base,
                             task_type="source_needs_proposal",
                             status="open",
@@ -680,12 +750,33 @@ def list_knowledge_governance_tasks(*, agent_id: str = "", status: str = "open")
 def list_knowledge_steward_recommendations(*, agent_id: str = "", limit: int = 12) -> dict[str, Any]:
     """Return read-only steward recommendations derived from open governance tasks."""
 
+    payload = _build_knowledge_steward_recommendations(agent_id=agent_id, limit=limit)
+    _record_event(
+        "knowledge.steward.recommendations.viewed",
+        "",
+        "",
+        actor_agent_id=str(payload.get("stewardAgentId") or agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID),
+        fields={
+            "agentId": str(payload.get("agentId") or ""),
+            "recommendationCount": payload["summary"]["recommendationCount"],
+            "visibleRecommendationCount": payload["summary"]["visibleRecommendationCount"],
+        },
+    )
+    return payload
+
+
+def _build_knowledge_steward_recommendations(
+    *,
+    agent_id: str = "",
+    limit: int = 12,
+    tasks_payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     _sync_roots()
     steward = agent_directory_service.get_agent(agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID)
     steward_id = str((steward or {}).get("agentId") or agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID).strip()
     normalized_agent_id = str(agent_id or "").strip()
     bounded_limit = max(1, min(50, int(limit or 12)))
-    tasks_payload = list_knowledge_governance_tasks(agent_id=normalized_agent_id, status="open")
+    tasks_payload = tasks_payload or list_knowledge_governance_tasks(agent_id=normalized_agent_id, status="open")
     recommendations = [_steward_recommendation_from_task(task) for task in list(tasks_payload.get("tasks") or [])]
     recommendations.sort(
         key=lambda item: (
@@ -717,29 +808,46 @@ def list_knowledge_steward_recommendations(*, agent_id: str = "", limit: int = 1
         },
         "updatedAt": utc_now_iso(),
     }
-    _record_event(
-        "knowledge.steward.recommendations.viewed",
-        "",
-        "",
-        actor_agent_id=steward_id,
-        fields={
-            "agentId": normalized_agent_id,
-            "recommendationCount": payload["summary"]["recommendationCount"],
-            "visibleRecommendationCount": payload["summary"]["visibleRecommendationCount"],
-        },
-    )
     return payload
 
 
 def get_knowledge_steward_workbench(*, agent_id: str = "", limit: int = 12) -> dict[str, Any]:
     """Return the Knowledge Steward's consolidated read-only workbench."""
 
+    payload = _build_knowledge_steward_workbench(agent_id=agent_id, limit=limit)
+    _record_event(
+        "knowledge.steward.workbench.viewed",
+        "",
+        "",
+        actor_agent_id=str((payload.get("steward") or {}).get("agentId") or agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID),
+        fields={
+            "agentId": str(payload.get("agentId") or ""),
+            "openTaskCount": int(payload["summary"].get("openTaskCount") or 0),
+            "recommendationCount": int(payload["summary"].get("recommendationCount") or 0),
+            "stageCount": len(payload.get("stages") or []),
+        },
+    )
+    return payload
+
+
+def _build_knowledge_steward_workbench(
+    *,
+    agent_id: str = "",
+    limit: int = 12,
+    overview: dict[str, Any] | None = None,
+    tasks_payload: dict[str, Any] | None = None,
+    recommendations_payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     _sync_roots()
     normalized_agent_id = str(agent_id or "").strip()
     bounded_limit = max(1, min(50, int(limit or 12)))
-    overview = get_knowledge_steward_overview()
-    tasks_payload = list_knowledge_governance_tasks(agent_id=normalized_agent_id, status="open")
-    recommendations_payload = list_knowledge_steward_recommendations(agent_id=normalized_agent_id, limit=bounded_limit)
+    overview = overview or _build_knowledge_steward_overview()
+    tasks_payload = tasks_payload or list_knowledge_governance_tasks(agent_id=normalized_agent_id, status="open")
+    recommendations_payload = recommendations_payload or _build_knowledge_steward_recommendations(
+        agent_id=normalized_agent_id,
+        limit=bounded_limit,
+        tasks_payload=tasks_payload,
+    )
     recommendations = list(recommendations_payload.get("recommendations") or [])
     tasks = list(tasks_payload.get("tasks") or [])
     stages = [
@@ -821,48 +929,36 @@ def get_knowledge_steward_workbench(*, agent_id: str = "", limit: int = 12) -> d
         },
         "updatedAt": utc_now_iso(),
     }
-    _record_event(
-        "knowledge.steward.workbench.viewed",
-        "",
-        "",
-        actor_agent_id=str((payload.get("steward") or {}).get("agentId") or agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID),
-        fields={
-            "agentId": normalized_agent_id,
-            "openTaskCount": int(payload["summary"].get("openTaskCount") or 0),
-            "recommendationCount": int(payload["summary"].get("recommendationCount") or 0),
-            "stageCount": len(stages),
-        },
-    )
     return payload
 
 
 def get_knowledge_trace(knowledge_base_id: str, target_id: str, *, agent_id: str = "") -> dict[str, Any]:
     """Return the source -> proposal -> batch -> item -> rating trail for one knowledge object."""
 
-    team, base = _require_base_with_team(knowledge_base_id)
-    _require_permission(team, base, agent_id, "read")
+    owner, base = _require_base_with_owner(knowledge_base_id)
+    _require_permission(owner, base, agent_id, "read")
     normalized_target_id = str(target_id or "").strip()
     if not normalized_target_id:
         raise TeamKnowledgeError("Knowledge trace target id is required.")
-    artifacts = _source_artifacts_for_base(team["teamId"], base["knowledgeBaseId"])
+    artifacts = _source_artifacts_for_base(owner, base["knowledgeBaseId"])
     proposals = [
         proposal
-        for proposal in _read_jsonl(_proposals_path(team["teamId"]))
+        for proposal in _read_jsonl(_proposals_path_for_owner(owner))
         if str(proposal.get("targetKnowledgeBaseId") or "") == base["knowledgeBaseId"]
     ]
     batches = [
         batch
-        for batch in _read_jsonl(_batches_path(team["teamId"]))
+        for batch in _read_jsonl(_batches_path_for_owner(owner))
         if str(batch.get("knowledgeBaseId") or "") == base["knowledgeBaseId"]
     ]
     items = [
         item
-        for item in _read_jsonl(_items_path(team["teamId"]))
+        for item in _read_jsonl(_items_path_for_owner(owner))
         if str(item.get("knowledgeBaseId") or "") == base["knowledgeBaseId"]
     ]
     suggestions = [
         suggestion
-        for suggestion in _read_jsonl(_rating_suggestions_path(team["teamId"]))
+        for suggestion in _read_jsonl(_rating_suggestions_path_for_owner(owner))
         if str(suggestion.get("knowledgeBaseId") or "") == base["knowledgeBaseId"]
     ]
     target_type = "unknown"
@@ -935,8 +1031,11 @@ def get_knowledge_trace(knowledge_base_id: str, target_id: str, *, agent_id: str
     }
     return {
         "schemaVersion": SCHEMA_VERSION,
-        "teamId": team["teamId"],
-        "knowledgeBase": _knowledge_base_to_api(base, team),
+        "ownerType": owner["ownerType"],
+        "ownerId": owner["ownerId"],
+        "teamId": owner["ownerId"] if owner["ownerType"] == "team" else "",
+        "agentId": owner["ownerId"] if owner["ownerType"] == "agent" else "",
+        "knowledgeBase": _knowledge_base_to_api(base, owner),
         "targetId": normalized_target_id,
         "targetType": target_type,
         "nodes": nodes,
@@ -957,10 +1056,10 @@ def update_knowledge_item_rating(
     review_priority: str = "",
     marking_reason: str = "",
 ) -> dict[str, Any]:
-    team, base = _require_base_with_team(knowledge_base_id)
-    _require_permission(team, base, actor_agent_id, "review")
+    owner, base = _require_base_with_owner(knowledge_base_id)
+    _require_permission(owner, base, actor_agent_id, "review")
     with _LOCK:
-        items = _read_jsonl(_items_path(team["teamId"]))
+        items = _read_jsonl(_items_path_for_owner(owner))
         item = _find_by_id(items, "knowledgeItemId", knowledge_item_id)
         if not item or str(item.get("knowledgeBaseId") or "") != base["knowledgeBaseId"]:
             raise TeamKnowledgeNotFoundError("Knowledge item not found.")
@@ -979,11 +1078,11 @@ def update_knowledge_item_rating(
         item["markedAt"] = now
         item["markingReason"] = trim_lines(marking_reason or "", max_lines=4).strip()
         item["updatedAt"] = now
-        _write_jsonl(_items_path(team["teamId"]), items)
-        _append_audit(team["teamId"], "knowledge.item.rating.updated", item, actor_agent_id=actor_agent_id)
+        _write_jsonl(_items_path_for_owner(owner), items)
+        _append_audit(owner, "knowledge.item.rating.updated", item, actor_agent_id=actor_agent_id)
     _record_event(
         "knowledge.item.rating.updated",
-        team["teamId"],
+        owner,
         base["knowledgeBaseId"],
         actor_agent_id=actor_agent_id,
         fields={"knowledgeItemId": item["knowledgeItemId"], "importanceLevel": item.get("importanceLevel")},
@@ -1004,9 +1103,9 @@ def create_rating_suggestion(
     review_priority: str,
     marking_reason: str = "",
 ) -> dict[str, Any]:
-    team, base = _require_base_with_team(knowledge_base_id)
+    owner, base = _require_base_with_owner(knowledge_base_id)
     suggester_id = str(suggested_by_agent_id or "").strip()
-    _require_permission(team, base, suggester_id, "rate")
+    _require_permission(owner, base, suggester_id, "rate")
     normalized_target_type = str(target_type or "").strip().lower()
     if normalized_target_type not in {"proposal", "knowledge_item"}:
         raise TeamKnowledgeError("Rating suggestion targetType must be proposal or knowledge_item.")
@@ -1015,15 +1114,18 @@ def create_rating_suggestion(
     if normalized_target_type == "knowledge_item":
         if not normalized_item_id:
             raise TeamKnowledgeError("knowledge_item rating suggestions require knowledgeItemId.")
-        _require_item(team["teamId"], base["knowledgeBaseId"], normalized_item_id)
+        _require_item(owner, base["knowledgeBaseId"], normalized_item_id)
     if normalized_target_type == "proposal":
         if not normalized_proposal_id:
             raise TeamKnowledgeError("proposal rating suggestions require proposalId.")
-        _require_proposal(team["teamId"], base["knowledgeBaseId"], normalized_proposal_id)
+        _require_proposal(owner, base["knowledgeBaseId"], normalized_proposal_id)
     now = utc_now_iso()
     suggestion = {
         "suggestionId": _new_event_id("krate"),
-        "teamId": team["teamId"],
+        "ownerType": owner["ownerType"],
+        "ownerId": owner["ownerId"],
+        "teamId": owner["ownerId"] if owner["ownerType"] == "team" else "",
+        "agentId": owner["ownerId"] if owner["ownerType"] == "agent" else "",
         "knowledgeBaseId": base["knowledgeBaseId"],
         "targetType": normalized_target_type,
         "knowledgeItemId": normalized_item_id,
@@ -1042,11 +1144,11 @@ def create_rating_suggestion(
         "resolutionNote": "",
     }
     with _LOCK:
-        _append_jsonl(_rating_suggestions_path(team["teamId"]), suggestion)
-        _append_audit(team["teamId"], "knowledge.rating.suggested", suggestion, actor_agent_id=suggester_id)
+        _append_jsonl(_rating_suggestions_path_for_owner(owner), suggestion)
+        _append_audit(owner, "knowledge.rating.suggested", suggestion, actor_agent_id=suggester_id)
     _record_event(
         "knowledge.rating.suggested",
-        team["teamId"],
+        owner,
         base["knowledgeBaseId"],
         actor_agent_id=suggester_id,
         fields={
@@ -1060,22 +1162,25 @@ def create_rating_suggestion(
 
 
 def list_rating_suggestions(knowledge_base_id: str, *, agent_id: str = "", status: str = "") -> dict[str, Any]:
-    team, base = _require_base_with_team(knowledge_base_id)
-    _require_permission(team, base, agent_id, "read")
+    owner, base = _require_base_with_owner(knowledge_base_id)
+    _require_permission(owner, base, agent_id, "read")
     normalized_status = str(status or "").strip().lower()
     if normalized_status and normalized_status not in SUGGESTION_STATUSES:
         raise TeamKnowledgeError(f"Unsupported rating suggestion status: {status}")
     suggestions = [
         item
-        for item in _read_jsonl(_rating_suggestions_path(team["teamId"]))
+        for item in _read_jsonl(_rating_suggestions_path_for_owner(owner))
         if str(item.get("knowledgeBaseId") or "") == base["knowledgeBaseId"]
         and (not normalized_status or str(item.get("status") or "") == normalized_status)
     ]
     suggestions.sort(key=lambda item: str(item.get("updatedAt") or item.get("createdAt") or ""), reverse=True)
     return {
         "schemaVersion": SCHEMA_VERSION,
-        "teamId": team["teamId"],
-        "knowledgeBase": _knowledge_base_to_api(base, team),
+        "ownerType": owner["ownerType"],
+        "ownerId": owner["ownerId"],
+        "teamId": owner["ownerId"] if owner["ownerType"] == "team" else "",
+        "agentId": owner["ownerId"] if owner["ownerType"] == "agent" else "",
+        "knowledgeBase": _knowledge_base_to_api(base, owner),
         "suggestions": suggestions,
         "summary": {
             "suggestionCount": len(suggestions),
@@ -1093,9 +1198,9 @@ def review_rating_suggestions_bulk(
     reviewed_by_agent_id: str = "",
     resolution_note: str = "",
 ) -> dict[str, Any]:
-    team, base = _require_base_with_team(knowledge_base_id)
+    owner, base = _require_base_with_owner(knowledge_base_id)
     reviewer_id = str(reviewed_by_agent_id or "").strip()
-    _require_permission(team, base, reviewer_id, "rate")
+    _require_permission(owner, base, reviewer_id, "rate")
     normalized_status = str(status or "").strip().lower()
     if normalized_status not in {"applied", "rejected"}:
         raise TeamKnowledgeError("Rating suggestion review status must be applied or rejected.")
@@ -1108,7 +1213,7 @@ def review_rating_suggestions_bulk(
     applied_items: list[dict[str, Any]] = []
     now = utc_now_iso()
     with _LOCK:
-        suggestions = _read_jsonl(_rating_suggestions_path(team["teamId"]))
+        suggestions = _read_jsonl(_rating_suggestions_path_for_owner(owner))
         items: list[dict[str, Any]] | None = None
         items_changed = False
         for suggestion_id in normalized_ids:
@@ -1122,7 +1227,7 @@ def review_rating_suggestions_bulk(
             applied_item: dict[str, Any] | None = None
             if normalized_status == "applied" and str(suggestion.get("targetType") or "") == "knowledge_item":
                 if items is None:
-                    items = _read_jsonl(_items_path(team["teamId"]))
+                    items = _read_jsonl(_items_path_for_owner(owner))
                 item = _find_by_id(items, "knowledgeItemId", str(suggestion.get("knowledgeItemId") or ""))
                 if not item or str(item.get("knowledgeBaseId") or "") != base["knowledgeBaseId"]:
                     skipped.append({"suggestionId": suggestion_id, "reason": "target_not_found"})
@@ -1138,22 +1243,25 @@ def review_rating_suggestions_bulk(
                 applied_item = item
                 applied_items.append(item)
                 items_changed = True
-                _append_audit(team["teamId"], "knowledge.item.rating.updated", item, actor_agent_id=reviewer_id)
+                _append_audit(owner, "knowledge.item.rating.updated", item, actor_agent_id=reviewer_id)
             suggestion["status"] = normalized_status
             suggestion["updatedAt"] = now
             suggestion["reviewedAt"] = now
             suggestion["reviewedByAgentId"] = reviewer_id
             suggestion["resolutionNote"] = trim_lines(resolution_note or "", max_lines=4).strip()
             reviewed.append({"suggestion": suggestion, "item": applied_item})
-            _append_audit(team["teamId"], "knowledge.rating_suggestion.reviewed", suggestion, actor_agent_id=reviewer_id)
+            _append_audit(owner, "knowledge.rating_suggestion.reviewed", suggestion, actor_agent_id=reviewer_id)
         if items is not None and items_changed:
-            _write_jsonl(_items_path(team["teamId"]), items)
-        _write_jsonl(_rating_suggestions_path(team["teamId"]), suggestions)
+            _write_jsonl(_items_path_for_owner(owner), items)
+        _write_jsonl(_rating_suggestions_path_for_owner(owner), suggestions)
         _append_audit(
-            team["teamId"],
+            owner,
             "knowledge.rating_suggestion.bulk_reviewed",
             {
-                "teamId": team["teamId"],
+                "ownerType": owner["ownerType"],
+                "ownerId": owner["ownerId"],
+                "teamId": owner["ownerId"] if owner["ownerType"] == "team" else "",
+                "agentId": owner["ownerId"] if owner["ownerType"] == "agent" else "",
                 "knowledgeBaseId": base["knowledgeBaseId"],
                 "status": normalized_status,
                 "reviewedCount": len(reviewed),
@@ -1163,7 +1271,7 @@ def review_rating_suggestions_bulk(
         )
     _record_event(
         "knowledge.rating_suggestion.bulk_reviewed",
-        team["teamId"],
+        owner,
         base["knowledgeBaseId"],
         actor_agent_id=reviewer_id,
         fields={
@@ -1175,14 +1283,17 @@ def review_rating_suggestions_bulk(
     for applied_item in applied_items:
         _record_event(
             "knowledge.item.rating.updated",
-            team["teamId"],
+            owner,
             base["knowledgeBaseId"],
             actor_agent_id=reviewer_id,
             fields={"knowledgeItemId": applied_item["knowledgeItemId"], "importanceLevel": applied_item.get("importanceLevel")},
         )
     return {
         "schemaVersion": SCHEMA_VERSION,
-        "teamId": team["teamId"],
+        "ownerType": owner["ownerType"],
+        "ownerId": owner["ownerId"],
+        "teamId": owner["ownerId"] if owner["ownerType"] == "team" else "",
+        "agentId": owner["ownerId"] if owner["ownerType"] == "agent" else "",
         "knowledgeBaseId": base["knowledgeBaseId"],
         "status": normalized_status,
         "reviewed": reviewed,
@@ -1205,14 +1316,14 @@ def review_rating_suggestion(
     reviewed_by_agent_id: str = "",
     resolution_note: str = "",
 ) -> dict[str, Any]:
-    team, base = _require_base_with_team(knowledge_base_id)
+    owner, base = _require_base_with_owner(knowledge_base_id)
     reviewer_id = str(reviewed_by_agent_id or "").strip()
-    _require_permission(team, base, reviewer_id, "rate")
+    _require_permission(owner, base, reviewer_id, "rate")
     normalized_status = str(status or "").strip().lower()
     if normalized_status not in {"applied", "rejected"}:
         raise TeamKnowledgeError("Rating suggestion review status must be applied or rejected.")
     with _LOCK:
-        suggestions = _read_jsonl(_rating_suggestions_path(team["teamId"]))
+        suggestions = _read_jsonl(_rating_suggestions_path_for_owner(owner))
         suggestion = _find_by_id(suggestions, "suggestionId", suggestion_id)
         if not suggestion or str(suggestion.get("knowledgeBaseId") or "") != base["knowledgeBaseId"]:
             raise TeamKnowledgeNotFoundError("Rating suggestion not found.")
@@ -1226,7 +1337,7 @@ def review_rating_suggestion(
         suggestion["resolutionNote"] = trim_lines(resolution_note or "", max_lines=4).strip()
         applied_item: dict[str, Any] | None = None
         if normalized_status == "applied" and str(suggestion.get("targetType") or "") == "knowledge_item":
-            items = _read_jsonl(_items_path(team["teamId"]))
+            items = _read_jsonl(_items_path_for_owner(owner))
             item = _find_by_id(items, "knowledgeItemId", str(suggestion.get("knowledgeItemId") or ""))
             if not item or str(item.get("knowledgeBaseId") or "") != base["knowledgeBaseId"]:
                 raise TeamKnowledgeNotFoundError("Knowledge item not found.")
@@ -1239,13 +1350,13 @@ def review_rating_suggestion(
             item["markingReason"] = str(suggestion.get("markingReason") or "")
             item["updatedAt"] = now
             applied_item = item
-            _write_jsonl(_items_path(team["teamId"]), items)
-            _append_audit(team["teamId"], "knowledge.item.rating.updated", item, actor_agent_id=reviewer_id)
-        _write_jsonl(_rating_suggestions_path(team["teamId"]), suggestions)
-        _append_audit(team["teamId"], "knowledge.rating_suggestion.reviewed", suggestion, actor_agent_id=reviewer_id)
+            _write_jsonl(_items_path_for_owner(owner), items)
+            _append_audit(owner, "knowledge.item.rating.updated", item, actor_agent_id=reviewer_id)
+        _write_jsonl(_rating_suggestions_path_for_owner(owner), suggestions)
+        _append_audit(owner, "knowledge.rating_suggestion.reviewed", suggestion, actor_agent_id=reviewer_id)
     _record_event(
         "knowledge.rating_suggestion.reviewed",
-        team["teamId"],
+        owner,
         base["knowledgeBaseId"],
         actor_agent_id=reviewer_id,
         fields={"suggestionId": suggestion["suggestionId"], "status": suggestion["status"]},
@@ -1253,7 +1364,7 @@ def review_rating_suggestion(
     if applied_item:
         _record_event(
             "knowledge.item.rating.updated",
-            team["teamId"],
+            owner,
             base["knowledgeBaseId"],
             actor_agent_id=reviewer_id,
             fields={"knowledgeItemId": applied_item["knowledgeItemId"], "importanceLevel": applied_item.get("importanceLevel")},
@@ -1266,6 +1377,8 @@ def search_knowledge_items(
     agent_id: str = "",
     query: str = "",
     team_id: str = "",
+    owner_type: str = "",
+    owner_id: str = "",
     knowledge_base_id: str = "",
     tags: list[str] | None = None,
     source_type: str = "",
@@ -1280,6 +1393,8 @@ def search_knowledge_items(
     _sync_roots()
     normalized_query = trim_lines(query or "", max_lines=4).strip().lower()
     normalized_team_id = str(team_id or "").strip()
+    normalized_owner_type = _normalize_owner_type(owner_type)
+    normalized_owner_id = str(owner_id or "").strip()
     normalized_base_id = str(knowledge_base_id or "").strip()
     normalized_tags = {item.lower() for item in _unique_strings(tags or [])}
     normalized_source_type = str(source_type or "").strip()
@@ -1293,22 +1408,33 @@ def search_knowledge_items(
     bounded_limit = max(1, min(100, int(limit or 25)))
     results: list[dict[str, Any]] = []
     scanned_bases = 0
-    for team in team_service.list_teams_compact(include_archived=True).get("teams") or []:
-        current_team_id = str(team.get("teamId") or "").strip()
-        if normalized_team_id and current_team_id != normalized_team_id:
+    owner_candidates = _iter_knowledge_owners(agent_id=agent_id, include_archived=True)
+    if normalized_owner_type and normalized_owner_id and not any(
+        str(owner.get("ownerType") or "") == normalized_owner_type and str(owner.get("ownerId") or "") == normalized_owner_id
+        for owner in owner_candidates
+    ):
+        owner_candidates.append(_owner_context(normalized_owner_type, normalized_owner_id))
+    for owner in owner_candidates:
+        current_owner_type = str(owner.get("ownerType") or "").strip()
+        current_owner_id = str(owner.get("ownerId") or "").strip()
+        if normalized_owner_type and current_owner_type != normalized_owner_type:
             continue
-        for base in _knowledge_bases_for_team(current_team_id):
+        if normalized_owner_id and current_owner_id != normalized_owner_id:
+            continue
+        if normalized_team_id and not (current_owner_type == "team" and current_owner_id == normalized_team_id):
+            continue
+        for base in _knowledge_bases_for_owner(owner):
             base_id = str(base.get("knowledgeBaseId") or "")
             if normalized_base_id and base_id != normalized_base_id:
                 continue
-            if not _can_access(team, base, agent_id, "read"):
+            if not _can_access(owner, base, agent_id, "read"):
                 continue
             scanned_bases += 1
             artifacts_by_id = {
                 str(item.get("sourceArtifactId") or ""): item
-                for item in _source_artifacts_for_base(current_team_id, base_id)
+                for item in _source_artifacts_for_base(owner, base_id)
             }
-            for item in _read_jsonl(_items_path(current_team_id)):
+            for item in _read_jsonl(_items_path_for_owner(owner)):
                 if str(item.get("knowledgeBaseId") or "") != base_id:
                     continue
                 if not _item_matches_filters(
@@ -1325,7 +1451,7 @@ def search_knowledge_items(
                     search_mode=normalized_search_mode,
                 ):
                     continue
-                view = _search_item_view(item, base, team, artifacts_by_id)
+                view = _search_item_view(item, base, owner, artifacts_by_id)
                 score = _semantic_match_score(view, normalized_query) if normalized_query else 1.0
                 if normalized_query and normalized_search_mode == "semantic" and score <= 0:
                     continue
@@ -1363,6 +1489,8 @@ def search_knowledge_items(
         "filters": {
             "query": normalized_query,
             "teamId": normalized_team_id,
+            "ownerType": normalized_owner_type,
+            "ownerId": normalized_owner_id,
             "knowledgeBaseId": normalized_base_id,
             "tags": sorted(normalized_tags),
             "sourceType": normalized_source_type,
@@ -1383,32 +1511,41 @@ def search_knowledge_items(
 def get_knowledge_operations_health(*, agent_id: str = "") -> dict[str, Any]:
     """Return operational health for accessible team knowledge bases."""
 
+    payload = _build_knowledge_operations_health(agent_id=agent_id)
+    _record_event(
+        "knowledge.operations.health.viewed",
+        "",
+        "",
+        actor_agent_id=str(payload.get("agentId") or ""),
+        fields={"knowledgeBaseCount": payload["summary"]["knowledgeBaseCount"], "findingCount": payload["summary"]["findingCount"]},
+    )
+    return payload
+
+
+def _build_knowledge_operations_health(*, agent_id: str = "") -> dict[str, Any]:
     _sync_roots()
     normalized_agent_id = str(agent_id or "").strip()
     rows: list[dict[str, Any]] = []
     findings: list[dict[str, Any]] = []
-    for team in team_service.list_teams_compact(include_archived=True).get("teams") or []:
-        team_id = str(team.get("teamId") or "").strip()
-        if not team_id:
-            continue
-        for base in _knowledge_bases_for_team(team_id):
-            if not _can_access(team, base, normalized_agent_id, "read"):
+    for owner in _iter_knowledge_owners(agent_id=normalized_agent_id, include_archived=True):
+        for base in _knowledge_bases_for_owner(owner):
+            if not _can_access(owner, base, normalized_agent_id, "read"):
                 continue
             base_id = str(base.get("knowledgeBaseId") or "")
-            artifacts = _source_artifacts_for_base(team_id, base_id)
+            artifacts = _source_artifacts_for_base(owner, base_id)
             proposals = [
                 proposal
-                for proposal in _read_jsonl(_proposals_path(team_id))
+                for proposal in _read_jsonl(_proposals_path_for_owner(owner))
                 if str(proposal.get("targetKnowledgeBaseId") or "") == base_id
             ]
             items = [
                 item
-                for item in _read_jsonl(_items_path(team_id))
+                for item in _read_jsonl(_items_path_for_owner(owner))
                 if str(item.get("knowledgeBaseId") or "") == base_id
             ]
             suggestions = [
                 suggestion
-                for suggestion in _read_jsonl(_rating_suggestions_path(team_id))
+                for suggestion in _read_jsonl(_rating_suggestions_path_for_owner(owner))
                 if str(suggestion.get("knowledgeBaseId") or "") == base_id
             ]
             proposal_source_ids = {
@@ -1433,8 +1570,12 @@ def get_knowledge_operations_health(*, agent_id: str = "") -> dict[str, Any]:
             if orphan_sources and not proposals:
                 health = "attention"
             row = {
-                "teamId": team_id,
-                "teamName": str(team.get("name") or ""),
+                "ownerType": owner["ownerType"],
+                "ownerId": owner["ownerId"],
+                "teamId": owner["ownerId"] if owner["ownerType"] == "team" else "",
+                "teamName": str((owner.get("team") or {}).get("name") or ""),
+                "agentId": owner["ownerId"] if owner["ownerType"] == "agent" else "",
+                "agentName": str((owner.get("agent") or {}).get("displayName") or ""),
                 "knowledgeBaseId": base_id,
                 "knowledgeBaseName": str(base.get("name") or ""),
                 "health": health,
@@ -1473,13 +1614,6 @@ def get_knowledge_operations_health(*, agent_id: str = "") -> dict[str, Any]:
         "pendingRatingSuggestionCount": sum(int(row["counts"]["pendingRatingSuggestionCount"]) for row in rows),
         "unratedItemCount": sum(int(row["counts"]["unratedItemCount"]) for row in rows),
     }
-    _record_event(
-        "knowledge.operations.health.viewed",
-        "",
-        "",
-        actor_agent_id=normalized_agent_id,
-        fields={"knowledgeBaseCount": summary["knowledgeBaseCount"], "findingCount": summary["findingCount"]},
-    )
     return {
         "schemaVersion": SCHEMA_VERSION,
         "agentId": normalized_agent_id,
@@ -1493,10 +1627,30 @@ def get_knowledge_operations_health(*, agent_id: str = "") -> dict[str, Any]:
 def get_knowledge_governance_plan(*, agent_id: str = "", limit: int = 12) -> dict[str, Any]:
     """Return a read-only governance plan derived from health and steward workbench state."""
 
+    payload = _build_knowledge_governance_plan(agent_id=agent_id, limit=limit)
+    _record_event(
+        "knowledge.governance.plan.viewed",
+        "",
+        "",
+        actor_agent_id=str(payload.get("agentId") or ""),
+        fields={"actionCount": len(payload.get("actions") or []), "healthFindingCount": payload["summary"]["healthFindingCount"]},
+    )
+    return payload
+
+
+def _build_knowledge_governance_plan(
+    *,
+    agent_id: str = "",
+    limit: int = 12,
+    workbench: dict[str, Any] | None = None,
+    health: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build a read-only governance plan, optionally reusing already computed dashboard state."""
+
     normalized_agent_id = str(agent_id or "").strip()
     bounded_limit = max(1, min(50, int(limit or 12)))
-    workbench = get_knowledge_steward_workbench(agent_id=normalized_agent_id, limit=bounded_limit)
-    health = get_knowledge_operations_health(agent_id=normalized_agent_id)
+    workbench = workbench or _build_knowledge_steward_workbench(agent_id=normalized_agent_id, limit=bounded_limit)
+    health = health or _build_knowledge_operations_health(agent_id=normalized_agent_id)
     actions: list[dict[str, Any]] = []
     for item in list(workbench.get("nextActions") or []):
         actions.append(
@@ -1552,14 +1706,60 @@ def get_knowledge_governance_plan(*, agent_id: str = "", limit: int = 12) -> dic
         },
         "updatedAt": utc_now_iso(),
     }
-    _record_event(
-        "knowledge.governance.plan.viewed",
-        "",
-        "",
-        actor_agent_id=normalized_agent_id,
-        fields={"actionCount": len(actions), "healthFindingCount": payload["summary"]["healthFindingCount"]},
-    )
     return payload
+
+
+def get_knowledge_dashboard_snapshot(*, agent_id: str = "", recommendation_limit: int = 6, workbench_limit: int = 8, plan_limit: int = 8) -> dict[str, Any]:
+    """Return the Memory route's knowledge dashboard state with shared intermediate scans."""
+
+    _sync_roots()
+    normalized_agent_id = str(agent_id or "").strip()
+    bounded_recommendation_limit = max(1, min(50, int(recommendation_limit or 6)))
+    bounded_workbench_limit = max(1, min(50, int(workbench_limit or 8)))
+    bounded_plan_limit = max(1, min(50, int(plan_limit or 8)))
+    overview = list_knowledge_overview(agent_id=normalized_agent_id)
+    governance_tasks_all = list_knowledge_governance_tasks(agent_id="", status="all")
+    governance_tasks_open = list_knowledge_governance_tasks(agent_id=normalized_agent_id, status="open")
+    steward = _build_knowledge_steward_overview(governance_tasks=governance_tasks_all)
+    recommendations = _build_knowledge_steward_recommendations(
+        agent_id=normalized_agent_id,
+        limit=bounded_recommendation_limit,
+        tasks_payload=governance_tasks_open,
+    )
+    workbench_recommendations = (
+        recommendations
+        if bounded_workbench_limit == bounded_recommendation_limit
+        else _build_knowledge_steward_recommendations(
+            agent_id=normalized_agent_id,
+            limit=bounded_workbench_limit,
+            tasks_payload=governance_tasks_open,
+        )
+    )
+    workbench = _build_knowledge_steward_workbench(
+        agent_id=normalized_agent_id,
+        limit=bounded_workbench_limit,
+        overview=steward,
+        tasks_payload=governance_tasks_open,
+        recommendations_payload=workbench_recommendations,
+    )
+    health = _build_knowledge_operations_health(agent_id=normalized_agent_id)
+    governance_plan = _build_knowledge_governance_plan(
+        agent_id=normalized_agent_id,
+        limit=bounded_plan_limit,
+        workbench=workbench,
+        health=health,
+    )
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "agentId": normalized_agent_id,
+        "overview": overview,
+        "steward": steward,
+        "recommendations": recommendations,
+        "workbench": workbench,
+        "operationsHealth": health,
+        "governancePlan": governance_plan,
+        "updatedAt": utc_now_iso(),
+    }
 
 
 def knowledge_permission_audit(*, agent_id: str = "") -> dict[str, Any]:
@@ -1580,23 +1780,28 @@ def knowledge_permission_audit(*, agent_id: str = "") -> dict[str, Any]:
     review_policy = set(_unique_strings(memory_policy.get("reviewKnowledgeBaseIds") or []))
     rate_policy = set(_unique_strings(memory_policy.get("rateKnowledgeBaseIds") or []))
     rows: list[dict[str, Any]] = []
-    for team in team_service.list_teams_compact(include_archived=True).get("teams") or []:
-        team_id = str(team.get("teamId") or "").strip()
-        role = _member_role(team, normalized_agent_id) if normalized_agent_id else ""
-        for base in _knowledge_bases_for_team(team_id):
+    for owner in _iter_knowledge_owners(agent_id=normalized_agent_id, include_archived=True):
+        team = owner.get("team") if isinstance(owner.get("team"), dict) else {}
+        agent = owner.get("agent") if isinstance(owner.get("agent"), dict) else {}
+        role = _member_role(team, normalized_agent_id) if normalized_agent_id and owner["ownerType"] == "team" else ""
+        for base in _knowledge_bases_for_owner(owner):
             base_id = str(base.get("knowledgeBaseId") or "")
             rows.append(
                 {
-                    "teamId": team_id,
+                    "ownerType": owner["ownerType"],
+                    "ownerId": owner["ownerId"],
+                    "teamId": owner["ownerId"] if owner["ownerType"] == "team" else "",
                     "teamName": str(team.get("name") or ""),
+                    "agentId": owner["ownerId"] if owner["ownerType"] == "agent" else "",
+                    "agentName": str(agent.get("displayName") or agent.get("agentCode") or ""),
                     "knowledgeBaseId": base_id,
                     "knowledgeBaseName": str(base.get("name") or ""),
                     "teamRole": role,
                     "permissions": {
-                        "read": _permission_explain(team, base, normalized_agent_id, "read", read_policy),
-                        "propose": _permission_explain(team, base, normalized_agent_id, "propose", propose_policy),
-                        "review": _permission_explain(team, base, normalized_agent_id, "review", review_policy),
-                        "rate": _permission_explain(team, base, normalized_agent_id, "rate", rate_policy),
+                        "read": _permission_explain(owner, base, normalized_agent_id, "read", read_policy),
+                        "propose": _permission_explain(owner, base, normalized_agent_id, "propose", propose_policy),
+                        "review": _permission_explain(owner, base, normalized_agent_id, "review", review_policy),
+                        "rate": _permission_explain(owner, base, normalized_agent_id, "rate", rate_policy),
                     },
                 }
             )
@@ -1646,19 +1851,23 @@ def team_knowledge_memory_section_summary() -> dict[str, Any]:
     }
 
 
-def _require_base_with_team(knowledge_base_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
+def _require_base_with_owner(knowledge_base_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
     normalized_id = _safe_token(knowledge_base_id, default="", max_length=128)
     if not normalized_id:
         raise TeamKnowledgeError("Knowledge base id is required.")
     _sync_roots()
-    for team in team_service.list_teams_compact(include_archived=True).get("teams") or []:
-        team_id = str(team.get("teamId") or "").strip()
-        if not team_id:
-            continue
-        base = _find_knowledge_base(team_id, normalized_id)
+    for owner in _iter_knowledge_owners(agent_id="", include_archived=True, include_all_agents=True):
+        base = _find_knowledge_base_for_owner(owner, normalized_id)
         if base:
-            return team_service.get_team(team_id), base
+            return owner, base
     raise TeamKnowledgeNotFoundError("Knowledge base not found.")
+
+
+def _require_base_with_team(knowledge_base_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    owner, base = _require_base_with_owner(knowledge_base_id)
+    if str(owner.get("ownerType") or "") != "team":
+        raise TeamKnowledgeNotFoundError("Team knowledge base not found.")
+    return dict(owner.get("team") or {}), base
 
 
 def _require_team(team_id: str) -> dict[str, Any]:
@@ -1671,11 +1880,31 @@ def _require_team(team_id: str) -> dict[str, Any]:
         raise TeamKnowledgeError(str(exc)) from exc
 
 
-def _knowledge_base_to_api(base: dict[str, Any], team: dict[str, Any]) -> dict[str, Any]:
+def _require_agent(agent_id: str) -> dict[str, Any]:
+    _sync_roots()
+    normalized_id = str(agent_id or "").strip()
+    if not normalized_id:
+        raise TeamKnowledgeError("Agent id is required.")
+    agent = agent_directory_service.get_agent(normalized_id)
+    if not agent:
+        raise TeamKnowledgeNotFoundError("Agent not found.")
+    return agent
+
+
+def _knowledge_base_to_api(base: dict[str, Any], owner_value: dict[str, Any]) -> dict[str, Any]:
+    owner = _coerce_owner_context(owner_value)
+    owner_type = str(base.get("ownerType") or owner.get("ownerType") or "team").strip() or "team"
+    owner_id = str(base.get("ownerId") or owner.get("ownerId") or base.get("teamId") or "").strip()
+    team = owner.get("team") if isinstance(owner.get("team"), dict) else {}
+    agent = owner.get("agent") if isinstance(owner.get("agent"), dict) else {}
     return {
         "knowledgeBaseId": str(base.get("knowledgeBaseId") or "").strip(),
-        "teamId": str(base.get("teamId") or team.get("teamId") or "").strip(),
+        "ownerType": owner_type,
+        "ownerId": owner_id,
+        "teamId": str(base.get("teamId") or (owner_id if owner_type == "team" else "")).strip(),
         "teamName": str(team.get("name") or "").strip(),
+        "agentId": str(base.get("agentId") or (owner_id if owner_type == "agent" else "")).strip(),
+        "agentName": str(agent.get("displayName") or agent.get("agentCode") or "").strip(),
         "name": str(base.get("name") or "").strip(),
         "description": str(base.get("description") or "").strip(),
         "status": str(base.get("status") or "active").strip(),
@@ -1685,63 +1914,75 @@ def _knowledge_base_to_api(base: dict[str, Any], team: dict[str, Any]) -> dict[s
     }
 
 
-def _knowledge_base_stats(team_id: str, knowledge_base_id: str) -> dict[str, int]:
+def _knowledge_base_stats_for_owner(owner_value: Any, knowledge_base_id: str) -> dict[str, int]:
+    owner = _coerce_owner_context(owner_value)
     proposals = [
         item
-        for item in _read_jsonl(_proposals_path(team_id))
+        for item in _read_jsonl(_proposals_path_for_owner(owner))
         if str(item.get("targetKnowledgeBaseId") or "") == knowledge_base_id
     ]
     return {
-        "sourceArtifactCount": len(_source_artifacts_for_base(team_id, knowledge_base_id)),
+        "sourceArtifactCount": len(_source_artifacts_for_base(owner, knowledge_base_id)),
         "pendingProposalCount": sum(1 for item in proposals if str(item.get("status") or "") == "pending"),
         "proposalCount": len(proposals),
         "itemCount": sum(
             1
-            for item in _read_jsonl(_items_path(team_id))
+            for item in _read_jsonl(_items_path_for_owner(owner))
             if str(item.get("knowledgeBaseId") or "") == knowledge_base_id
         ),
         "batchCount": sum(
             1
-            for item in _read_jsonl(_batches_path(team_id))
+            for item in _read_jsonl(_batches_path_for_owner(owner))
             if str(item.get("knowledgeBaseId") or "") == knowledge_base_id
         ),
     }
 
 
-def _pending_proposals_for_base(team_id: str, knowledge_base_id: str) -> list[dict[str, Any]]:
+def _knowledge_base_stats(team_id: str, knowledge_base_id: str) -> dict[str, int]:
+    return _knowledge_base_stats_for_owner(_owner_context("team", team_id), knowledge_base_id)
+
+
+def _pending_proposals_for_base(owner_value: Any, knowledge_base_id: str) -> list[dict[str, Any]]:
+    owner = _coerce_owner_context(owner_value)
     proposals = [
         item
-        for item in _read_jsonl(_proposals_path(team_id))
+        for item in _read_jsonl(_proposals_path_for_owner(owner))
         if str(item.get("targetKnowledgeBaseId") or "") == knowledge_base_id and str(item.get("status") or "") == "pending"
     ]
     proposals.sort(key=lambda item: str(item.get("createdAt") or ""), reverse=True)
     return proposals[:12]
 
 
-def _permissions_for_actor(team: dict[str, Any], base: dict[str, Any], agent_id: str) -> dict[str, bool]:
+def _permissions_for_actor(owner_value: Any, base: dict[str, Any], agent_id: str) -> dict[str, bool]:
     return {
-        "canRead": _can_access(team, base, agent_id, "read"),
-        "canPropose": _can_access(team, base, agent_id, "propose"),
-        "canReview": _can_access(team, base, agent_id, "review"),
-        "canRate": _can_access(team, base, agent_id, "rate"),
+        "canRead": _can_access(owner_value, base, agent_id, "read"),
+        "canPropose": _can_access(owner_value, base, agent_id, "propose"),
+        "canReview": _can_access(owner_value, base, agent_id, "review"),
+        "canRate": _can_access(owner_value, base, agent_id, "rate"),
     }
 
 
-def _require_permission(team: dict[str, Any], base: dict[str, Any], agent_id: str, action: str) -> None:
-    if not _can_access(team, base, agent_id, action):
+def _require_permission(owner_value: Any, base: dict[str, Any], agent_id: str, action: str) -> None:
+    if not _can_access(owner_value, base, agent_id, action):
         raise TeamKnowledgePermissionError(f"Agent is not allowed to {action} this knowledge base.")
 
 
-def _can_access(team: dict[str, Any], base: dict[str, Any], agent_id: str, action: str) -> bool:
+def _can_access(owner_value: Any, base: dict[str, Any], agent_id: str, action: str) -> bool:
+    owner = _coerce_owner_context(owner_value)
     normalized_agent_id = str(agent_id or "").strip()
     if not normalized_agent_id:
         return True
-    role = _member_role(team, normalized_agent_id)
     acl = _normalize_acl(base.get("acl") if isinstance(base.get("acl"), dict) else {})
     grants = acl.get("grants") if isinstance(acl.get("grants"), dict) else {}
     agent_grants = _unique_strings((grants.get(action) or []) + (grants.get("*") or [])) if isinstance(grants, dict) else []
     if normalized_agent_id in agent_grants:
         return True
+    owner_type = str(owner.get("ownerType") or "team").strip()
+    owner_id = str(owner.get("ownerId") or "").strip()
+    if owner_type == "agent":
+        return normalized_agent_id == owner_id
+    team = owner.get("team") if isinstance(owner.get("team"), dict) else owner
+    role = _member_role(team, normalized_agent_id)
     if action == "read":
         return bool(role)
     if action == "propose":
@@ -1760,19 +2001,21 @@ def _permission_explain(
     action: str,
     policy_ids: set[str],
 ) -> dict[str, Any]:
+    owner = _coerce_owner_context(team)
     base_id = str(base.get("knowledgeBaseId") or "")
-    team_allowed = _can_access(team, base, agent_id, action)
+    team_allowed = _can_access(owner, base, agent_id, action)
     policy_allowed = not policy_ids or base_id in policy_ids
     allowed = team_allowed and policy_allowed
     reason = "allowed"
     if not team_allowed:
-        reason = "team_acl_blocked"
+        reason = "agent_owner_blocked" if str(owner.get("ownerType") or "") == "agent" else "team_acl_blocked"
     elif not policy_allowed:
         reason = "memory_policy_blocked"
     return {
         "allowed": allowed,
         "reason": reason,
-        "teamAclAllowed": team_allowed,
+        "teamAclAllowed": team_allowed if str(owner.get("ownerType") or "") == "team" else False,
+        "agentOwnerAllowed": team_allowed if str(owner.get("ownerType") or "") == "agent" else False,
         "memoryPolicyAllowed": policy_allowed,
         "memoryPolicyExplicit": bool(policy_ids),
     }
@@ -1802,36 +2045,48 @@ def _validate_team_chat_source(team: dict[str, Any], source_ref: dict[str, Any])
     raise TeamKnowledgeError("team_chat_refinement roomId must belong to the Team linked chat room.")
 
 
-def _knowledge_bases_for_team(team_id: str) -> list[dict[str, Any]]:
-    state = _load_bases_state(team_id)
+def _knowledge_bases_for_owner(owner_value: Any) -> list[dict[str, Any]]:
+    owner = _coerce_owner_context(owner_value)
+    state = _load_bases_state_for_owner(owner)
     bases = [item for item in state.get("knowledgeBases") or [] if isinstance(item, dict)]
-    return [_repair_base(team_id, item) for item in bases]
+    return [_repair_base_for_owner(owner, item) for item in bases]
 
 
-def _find_knowledge_base(team_id: str, knowledge_base_id: str) -> dict[str, Any] | None:
-    for base in _knowledge_bases_for_team(team_id):
+def _knowledge_bases_for_team(team_id: str) -> list[dict[str, Any]]:
+    return _knowledge_bases_for_owner(_owner_context("team", team_id))
+
+
+def _find_knowledge_base_for_owner(owner_value: Any, knowledge_base_id: str) -> dict[str, Any] | None:
+    for base in _knowledge_bases_for_owner(owner_value):
         if str(base.get("knowledgeBaseId") or "").strip() == knowledge_base_id:
             return base
     return None
 
 
-def _source_artifacts_for_base(team_id: str, knowledge_base_id: str) -> list[dict[str, Any]]:
+def _find_knowledge_base(team_id: str, knowledge_base_id: str) -> dict[str, Any] | None:
+    return _find_knowledge_base_for_owner(_owner_context("team", team_id), knowledge_base_id)
+
+
+def _source_artifacts_for_base(owner_value: Any, knowledge_base_id: str) -> list[dict[str, Any]]:
+    owner = _coerce_owner_context(owner_value)
     return [
         item
-        for item in _read_jsonl(_source_artifacts_path(team_id))
+        for item in _read_jsonl(_source_artifacts_path_for_owner(owner))
         if str(item.get("knowledgeBaseId") or "") == knowledge_base_id
     ]
 
 
-def _require_item(team_id: str, knowledge_base_id: str, knowledge_item_id: str) -> dict[str, Any]:
-    item = _find_by_id(_read_jsonl(_items_path(team_id)), "knowledgeItemId", knowledge_item_id)
+def _require_item(owner_value: Any, knowledge_base_id: str, knowledge_item_id: str) -> dict[str, Any]:
+    owner = _coerce_owner_context(owner_value)
+    item = _find_by_id(_read_jsonl(_items_path_for_owner(owner)), "knowledgeItemId", knowledge_item_id)
     if not item or str(item.get("knowledgeBaseId") or "") != knowledge_base_id:
         raise TeamKnowledgeNotFoundError("Knowledge item not found.")
     return item
 
 
-def _require_proposal(team_id: str, knowledge_base_id: str, proposal_id: str) -> dict[str, Any]:
-    proposal = _find_by_id(_read_jsonl(_proposals_path(team_id)), "proposalId", proposal_id)
+def _require_proposal(owner_value: Any, knowledge_base_id: str, proposal_id: str) -> dict[str, Any]:
+    owner = _coerce_owner_context(owner_value)
+    proposal = _find_by_id(_read_jsonl(_proposals_path_for_owner(owner)), "proposalId", proposal_id)
     if not proposal or str(proposal.get("targetKnowledgeBaseId") or "") != knowledge_base_id:
         raise TeamKnowledgeNotFoundError("Knowledge proposal not found.")
     return proposal
@@ -1949,9 +2204,12 @@ def _item_matches_filters(
 def _search_item_view(
     item: dict[str, Any],
     base: dict[str, Any],
-    team: dict[str, Any],
+    owner_value: dict[str, Any],
     artifacts_by_id: dict[str, dict[str, Any]],
 ) -> dict[str, Any]:
+    owner = _coerce_owner_context(owner_value)
+    team = owner.get("team") if isinstance(owner.get("team"), dict) else {}
+    agent = owner.get("agent") if isinstance(owner.get("agent"), dict) else {}
     source_artifacts = [
         artifacts_by_id[source_id]
         for source_id in [str(value or "") for value in list(item.get("sourceArtifactIds") or [])]
@@ -1961,8 +2219,12 @@ def _search_item_view(
         "knowledgeItemId": str(item.get("knowledgeItemId") or ""),
         "knowledgeBaseId": str(base.get("knowledgeBaseId") or ""),
         "knowledgeBaseName": str(base.get("name") or ""),
-        "teamId": str(team.get("teamId") or ""),
+        "ownerType": str(item.get("ownerType") or base.get("ownerType") or owner.get("ownerType") or "team"),
+        "ownerId": str(item.get("ownerId") or base.get("ownerId") or owner.get("ownerId") or ""),
+        "teamId": str(item.get("teamId") or (owner.get("ownerId") if owner.get("ownerType") == "team" else "")),
         "teamName": str(team.get("name") or ""),
+        "agentId": str(item.get("agentId") or (owner.get("ownerId") if owner.get("ownerType") == "agent" else "")),
+        "agentName": str(agent.get("displayName") or agent.get("agentCode") or ""),
         "batchId": str(item.get("batchId") or ""),
         "sourceArtifactIds": [str(value) for value in list(item.get("sourceArtifactIds") or [])[:12] if str(value or "").strip()],
         "sourceTypes": sorted({str(source.get("sourceType") or "") for source in source_artifacts if str(source.get("sourceType") or "")}),
@@ -2000,7 +2262,7 @@ def _task_status_matches(closed: bool, normalized_status: str) -> bool:
 
 
 def _governance_task(
-    team: dict[str, Any],
+    owner_value: dict[str, Any],
     base: dict[str, Any],
     *,
     task_type: str,
@@ -2015,13 +2277,20 @@ def _governance_task(
     permissions: dict[str, bool],
     source_artifact_ids: list[str],
 ) -> dict[str, Any]:
+    owner = _coerce_owner_context(owner_value)
+    team = owner.get("team") if isinstance(owner.get("team"), dict) else {}
+    agent = owner.get("agent") if isinstance(owner.get("agent"), dict) else {}
     return {
         "taskId": f"ktask:{base.get('knowledgeBaseId')}:{task_type}:{target_id}",
         "taskType": task_type,
         "status": status,
         "priority": priority if priority in REVIEW_PRIORITIES else "normal",
+        "ownerType": owner["ownerType"],
+        "ownerId": owner["ownerId"],
         "teamId": str(team.get("teamId") or ""),
         "teamName": str(team.get("name") or ""),
+        "agentId": owner["ownerId"] if owner["ownerType"] == "agent" else "",
+        "agentName": str(agent.get("displayName") or agent.get("agentCode") or ""),
         "knowledgeBaseId": str(base.get("knowledgeBaseId") or ""),
         "knowledgeBaseName": str(base.get("name") or ""),
         "targetId": target_id,
@@ -2173,15 +2442,19 @@ def _add_all(target: set[str], values: list[str]) -> bool:
 
 
 def _batch_from_proposal(
-    team: dict[str, Any],
+    owner_value: dict[str, Any],
     base: dict[str, Any],
     proposal: dict[str, Any],
     reviewer_id: str,
     now: str,
 ) -> dict[str, Any]:
+    owner = _coerce_owner_context(owner_value)
     return {
         "batchId": _new_event_id("kbatch"),
-        "teamId": team["teamId"],
+        "ownerType": owner["ownerType"],
+        "ownerId": owner["ownerId"],
+        "teamId": owner["ownerId"] if owner["ownerType"] == "team" else "",
+        "agentId": owner["ownerId"] if owner["ownerType"] == "agent" else "",
         "knowledgeBaseId": base["knowledgeBaseId"],
         "proposalIds": [proposal["proposalId"]],
         "sourceArtifactIds": list(proposal.get("sourceArtifactIds") or []),
@@ -2192,16 +2465,20 @@ def _batch_from_proposal(
 
 
 def _item_from_proposal(
-    team: dict[str, Any],
+    owner_value: dict[str, Any],
     base: dict[str, Any],
     proposal: dict[str, Any],
     batch: dict[str, Any],
     reviewer_id: str,
     now: str,
 ) -> dict[str, Any]:
+    owner = _coerce_owner_context(owner_value)
     return {
         "knowledgeItemId": _new_event_id("kitem"),
-        "teamId": team["teamId"],
+        "ownerType": owner["ownerType"],
+        "ownerId": owner["ownerId"],
+        "teamId": owner["ownerId"] if owner["ownerType"] == "team" else "",
+        "agentId": owner["ownerId"] if owner["ownerType"] == "agent" else "",
         "knowledgeBaseId": base["knowledgeBaseId"],
         "batchId": batch["batchId"],
         "sourceArtifactIds": list(proposal.get("sourceArtifactIds") or []),
@@ -2212,7 +2489,7 @@ def _item_from_proposal(
         "importanceLevel": "medium",
         "confidence": 0.7,
         "stability": "evolving",
-        "scope": "team",
+        "scope": "team" if owner["ownerType"] == "team" else "agent",
         "reviewPriority": "normal",
         "createdAt": now,
         "updatedAt": now,
@@ -2240,12 +2517,18 @@ def _normalize_acl(raw: Any) -> dict[str, Any]:
     }
 
 
-def _repair_base(team_id: str, base: dict[str, Any]) -> dict[str, Any]:
+def _repair_base_for_owner(owner_value: Any, base: dict[str, Any]) -> dict[str, Any]:
+    owner = _coerce_owner_context(owner_value)
     now = utc_now_iso()
+    owner_type = str(base.get("ownerType") or owner.get("ownerType") or "team").strip()
+    owner_id = _safe_token(base.get("ownerId"), default=str(owner.get("ownerId") or ""), max_length=128)
     return {
         "knowledgeBaseId": _safe_token(base.get("knowledgeBaseId"), default=_new_event_id("kb"), max_length=128),
-        "teamId": _safe_token(base.get("teamId"), default=team_id, max_length=96),
-        "name": trim_lines(str(base.get("name") or "Team Knowledge"), max_lines=1).strip(),
+        "ownerType": owner_type,
+        "ownerId": owner_id,
+        "teamId": _safe_token(base.get("teamId"), default=owner_id if owner_type == "team" else "", max_length=96),
+        "agentId": _safe_token(base.get("agentId"), default=owner_id if owner_type == "agent" else "", max_length=128),
+        "name": trim_lines(str(base.get("name") or ("Agent Knowledge" if owner_type == "agent" else "Team Knowledge")), max_lines=1).strip(),
         "description": trim_lines(str(base.get("description") or ""), max_lines=6).strip(),
         "status": str(base.get("status") or "active").strip() or "active",
         "acl": _normalize_acl(base.get("acl")),
@@ -2254,8 +2537,12 @@ def _repair_base(team_id: str, base: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _load_bases_state(team_id: str) -> dict[str, Any]:
-    path = _knowledge_bases_path(team_id)
+def _repair_base(team_id: str, base: dict[str, Any]) -> dict[str, Any]:
+    return _repair_base_for_owner(_owner_context("team", team_id), base)
+
+
+def _load_bases_state_for_owner(owner_value: Any) -> dict[str, Any]:
+    path = _knowledge_bases_path_for_owner(_coerce_owner_context(owner_value))
     if not path.exists():
         return {"schemaVersion": SCHEMA_VERSION, "updatedAt": utc_now_iso(), "knowledgeBases": []}
     try:
@@ -2270,20 +2557,32 @@ def _load_bases_state(team_id: str) -> dict[str, Any]:
     return payload
 
 
+def _load_bases_state(team_id: str) -> dict[str, Any]:
+    return _load_bases_state_for_owner(_owner_context("team", team_id))
+
+
+def _save_bases_state_for_owner(owner_value: Any, state: dict[str, Any]) -> None:
+    _write_json(_knowledge_bases_path_for_owner(_coerce_owner_context(owner_value)), state)
+
+
 def _save_bases_state(team_id: str, state: dict[str, Any]) -> None:
-    _write_json(_knowledge_bases_path(team_id), state)
+    _save_bases_state_for_owner(_owner_context("team", team_id), state)
 
 
-def _append_audit(team_id: str, action: str, payload: dict[str, Any], *, actor_agent_id: str = "") -> None:
+def _append_audit(owner_value: Any, action: str, payload: dict[str, Any], *, actor_agent_id: str = "") -> None:
+    owner = _coerce_owner_context(owner_value)
     _append_jsonl(
-        _audit_path(team_id),
+        _audit_path_for_owner(owner),
         {
             "auditId": _new_event_id("kaudit"),
             "action": action,
             "actorAgentId": str(actor_agent_id or "").strip(),
             "createdAt": utc_now_iso(),
             "payload": {
+                "ownerType": payload.get("ownerType") or owner.get("ownerType"),
+                "ownerId": payload.get("ownerId") or owner.get("ownerId"),
                 "teamId": payload.get("teamId"),
+                "agentId": payload.get("agentId"),
                 "knowledgeBaseId": payload.get("knowledgeBaseId") or payload.get("targetKnowledgeBaseId"),
                 "sourceArtifactId": payload.get("sourceArtifactId"),
                 "proposalId": payload.get("proposalId"),
@@ -2297,12 +2596,13 @@ def _append_audit(team_id: str, action: str, payload: dict[str, Any], *, actor_a
 
 def _record_event(
     event_code: str,
-    team_id: str,
+    owner_value: Any,
     knowledge_base_id: str,
     *,
     actor_agent_id: str = "",
     fields: dict[str, Any] | None = None,
 ) -> None:
+    owner = _coerce_owner_context(owner_value)
     try:
         record_runtime_scene_event(
             "team_knowledge_service",
@@ -2311,7 +2611,10 @@ def _record_event(
             message=event_code,
             outcome="observed",
             fields={
-                "teamId": team_id,
+                "ownerType": owner.get("ownerType"),
+                "ownerId": owner.get("ownerId"),
+                "teamId": owner.get("ownerId") if owner.get("ownerType") == "team" else "",
+                "agentId": owner.get("ownerId") if owner.get("ownerType") == "agent" else "",
                 "knowledgeBaseId": knowledge_base_id,
                 "actorAgentId": str(actor_agent_id or "").strip(),
                 **(fields or {}),
@@ -2379,32 +2682,146 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
+def _owner_context(
+    owner_type: str,
+    owner_id: str,
+    *,
+    team: dict[str, Any] | None = None,
+    agent: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    normalized_type = _normalize_owner_type(owner_type) or "team"
+    normalized_id = str(owner_id or "").strip()
+    payload: dict[str, Any] = {
+        "ownerType": normalized_type,
+        "ownerId": normalized_id,
+        "team": team if isinstance(team, dict) else {},
+        "agent": agent if isinstance(agent, dict) else {},
+    }
+    if normalized_type == "team" and not payload["team"] and normalized_id:
+        try:
+            payload["team"] = team_service.get_team(normalized_id)
+        except Exception:
+            payload["team"] = {"teamId": normalized_id, "name": ""}
+    if normalized_type == "agent" and not payload["agent"] and normalized_id:
+        try:
+            payload["agent"] = agent_directory_service.get_agent(normalized_id) or {"agentId": normalized_id}
+        except Exception:
+            payload["agent"] = {"agentId": normalized_id}
+    return payload
+
+
+def _coerce_owner_context(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict) and str(value.get("ownerType") or "").strip() in KNOWLEDGE_OWNER_TYPES:
+        raw_type = str(value.get("ownerType") or "")
+        return _owner_context(
+            raw_type,
+            str(value.get("ownerId") or value.get("teamId") or value.get("agentId") or ""),
+            team=value.get("team") if isinstance(value.get("team"), dict) else (value if raw_type == "team" else None),
+            agent=value.get("agent") if isinstance(value.get("agent"), dict) else (value if raw_type == "agent" else None),
+        )
+    if isinstance(value, dict) and str(value.get("teamId") or "").strip():
+        return _owner_context("team", str(value.get("teamId") or ""), team=value)
+    if isinstance(value, dict) and str(value.get("agentId") or "").strip():
+        return _owner_context("agent", str(value.get("agentId") or ""), agent=value)
+    return _owner_context("team", str(value or ""))
+
+
+def _normalize_owner_type(owner_type: Any) -> str:
+    normalized = str(owner_type or "").strip().lower()
+    if not normalized:
+        return ""
+    if normalized not in KNOWLEDGE_OWNER_TYPES:
+        raise TeamKnowledgeError(f"Unsupported knowledge owner type: {owner_type}")
+    return normalized
+
+
+def _iter_knowledge_owners(
+    *,
+    agent_id: str = "",
+    include_archived: bool = True,
+    include_all_agents: bool = False,
+) -> list[dict[str, Any]]:
+    owners: list[dict[str, Any]] = []
+    normalized_agent_id = str(agent_id or "").strip()
+    if normalized_agent_id:
+        agent = agent_directory_service.get_agent(normalized_agent_id, include_archived=include_archived)
+        if agent:
+            owners.append(_owner_context("agent", normalized_agent_id, agent=agent))
+    elif include_all_agents:
+        for agent in agent_directory_service.list_agents(include_archived=include_archived):
+            agent_id_value = str(agent.get("agentId") or "").strip()
+            if agent_id_value:
+                owners.append(_owner_context("agent", agent_id_value, agent=agent))
+    for team in team_service.list_teams_compact(include_archived=include_archived).get("teams") or []:
+        team_id = str(team.get("teamId") or "").strip()
+        if team_id:
+            owners.append(_owner_context("team", team_id, team=team))
+    return owners
+
+
 def _knowledge_root(team_id: str) -> Path:
     return _project_root() / "workspace" / "teams" / _safe_token(team_id, default="team", max_length=96) / "knowledge"
+
+
+def _knowledge_root_for_owner(owner_value: Any) -> Path:
+    owner = _coerce_owner_context(owner_value)
+    owner_type = str(owner.get("ownerType") or "team")
+    owner_id = str(owner.get("ownerId") or "").strip()
+    if owner_type == "agent":
+        return _project_root() / "workspace" / "agents" / _safe_token(owner_id, default="agent", max_length=128) / "knowledge"
+    return _knowledge_root(owner_id)
+
+
+def _knowledge_bases_path_for_owner(owner_value: Any) -> Path:
+    return _knowledge_root_for_owner(owner_value) / "knowledge_bases.json"
 
 
 def _knowledge_bases_path(team_id: str) -> Path:
     return _knowledge_root(team_id) / "knowledge_bases.json"
 
 
+def _source_artifacts_path_for_owner(owner_value: Any) -> Path:
+    return _knowledge_root_for_owner(owner_value) / "source_artifacts.jsonl"
+
+
 def _source_artifacts_path(team_id: str) -> Path:
     return _knowledge_root(team_id) / "source_artifacts.jsonl"
+
+
+def _proposals_path_for_owner(owner_value: Any) -> Path:
+    return _knowledge_root_for_owner(owner_value) / "refinement_proposals.jsonl"
 
 
 def _proposals_path(team_id: str) -> Path:
     return _knowledge_root(team_id) / "refinement_proposals.jsonl"
 
 
+def _batches_path_for_owner(owner_value: Any) -> Path:
+    return _knowledge_root_for_owner(owner_value) / "batches.jsonl"
+
+
 def _batches_path(team_id: str) -> Path:
     return _knowledge_root(team_id) / "batches.jsonl"
+
+
+def _items_path_for_owner(owner_value: Any) -> Path:
+    return _knowledge_root_for_owner(owner_value) / "items.jsonl"
 
 
 def _items_path(team_id: str) -> Path:
     return _knowledge_root(team_id) / "items.jsonl"
 
 
+def _audit_path_for_owner(owner_value: Any) -> Path:
+    return _knowledge_root_for_owner(owner_value) / "audit.jsonl"
+
+
 def _audit_path(team_id: str) -> Path:
     return _knowledge_root(team_id) / "audit.jsonl"
+
+
+def _rating_suggestions_path_for_owner(owner_value: Any) -> Path:
+    return _knowledge_root_for_owner(owner_value) / "rating_suggestions.jsonl"
 
 
 def _rating_suggestions_path(team_id: str) -> Path:
@@ -2421,6 +2838,8 @@ def _sync_roots() -> None:
         team_service.PROJECT_ROOT = PROJECT_ROOT
     if chat_room_service.PROJECT_ROOT != PROJECT_ROOT:
         chat_room_service.PROJECT_ROOT = PROJECT_ROOT
+    if agent_directory_service.PROJECT_ROOT != PROJECT_ROOT:
+        agent_directory_service.PROJECT_ROOT = PROJECT_ROOT
 
 
 def _safe_token(value: Any, *, default: str, max_length: int) -> str:

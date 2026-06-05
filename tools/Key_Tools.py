@@ -53,8 +53,10 @@ from tools.agent_tool_governance_tools import agent_tool_permission_request_tool
 from tools.research_organization_tools import (
     research_agent_creation_proposal_tool as _research_agent_creation_proposal_impl,
     research_communication_edge_proposal_tool as _research_communication_edge_proposal_impl,
+    research_proposal_apply_tool as _research_proposal_apply_impl,
 )
 from tools.image2_tools import image2_generate_tool as _image2_generate_impl
+from tools.computer_use_tools import computer_use_task_tool as _computer_use_task_impl
 from tools.research_knowledge_tools import research_knowledge_query_tool as _research_knowledge_query_impl
 from tools.team_knowledge_tools import (
     knowledge_governance_plan_tool as _knowledge_governance_plan_impl,
@@ -74,18 +76,26 @@ from tools.python_intelligence_tools import (
     python_lint_tool as _python_lint_impl,
 )
 from tools.plan_tools import plan_update_tool as _plan_update_impl
+from tools.conversation_log_tools import conversation_log_inspect_tool as _conversation_log_inspect_impl
+from tools.session_reference_tools import session_reference_query_tool as _session_reference_query_impl
+from tools.session_child_tools import (
+    create_child_session_tool as _create_child_session_impl,
+    list_child_sessions_tool as _list_child_sessions_impl,
+)
 
 _CLI_TOOL_DOCSTRING = """
 【CLI】执行任意 Shell 命令。
 
-适合运行项目命令、脚本、编译、测试和诊断命令。读文件、搜索、文件匹配和测试映射通常优先使用专用工具
-(read_file_tool / grep_search_tool / glob_tool / run_test_for_tool)，这样返回更结构化、上下文更小。
+默认的本地工作入口，适合高效完成代码定位、文件检查、搜索、脚本、编译、测试和诊断。
+优先用项目可用的快速命令收窄证据，例如 `rg`/`rg --files`、PowerShell `Get-Content`
+配合 `Select-Object`、以及针对单文件或单测试目标的命令。
 
 === 使用建议 ===
 1. 避免交互式命令 (vim, top, less) 和无休止命令 (ping, tail -f)。
-2. 命令链与管道 (`&&`、`||`、`|`、`;`、`` ` ``、`$()`) 会增加失败面，能拆开时分步运行。
-3. 长输出优先通过专用工具分页、缩小 pytest 目标，或直接读取结果文件。
-4. 读取大文件时优先 read_file_tool / grep_search_tool，以便按目标收窄上下文。
+2. 搜索优先 `rg -n "pattern" path`；列文件优先 `rg --files path`，再读取命中的小范围。
+3. 读文件要限制输出：用 `Get-Content <file> | Select-Object -First/-Skip`，或只读相关文件。
+4. 长输出先缩小目录、文件、测试名或行数；必要时用 `max_output_chars` 限制返回。
+5. 命令链与管道 (`&&`、`||`、`|`、`;`、`` ` ``、`$()`) 会增加失败面，能拆开时分步运行。
 
 === 闭环 ===
 修改代码后按顺序分开执行:
@@ -127,20 +137,29 @@ def create_key_tools() -> List[BaseTool]:
         return _commit_compressed_impl(new_core_context=new_core_context, next_goal=next_goal)
 
     @tool
-    def trigger_self_restart_tool(reason: str = "") -> str:
+    def trigger_self_restart_tool(
+        reason: str = "",
+        sessionId: str = "",
+        runId: str = "",
+        resumeMessage: str = "",
+    ) -> str:
         """
-        触发 Agent 自我重启。
+        触发 Vibelution 热重启。
 
         适合在代码更新已经完成且验证通过后应用运行时更新。
-        重启会丢失当前上下文；重启前可先用 commit_compressed_memory_tool 保存必要摘要。
+        在 Runtime Manager 可用且传入 sessionId 时，会走 Launcher 管理的前后端热重启闭环：
+        自动备份、重启、验证、失败现场保存、必要时回滚，并在完成后唤醒原会话。
 
         Args:
             reason: 重启原因
+            sessionId: 调用者当前会话 ID；前后端热重启闭环必填
+            runId: 调用者当前轮次 ID，可选
+            resumeMessage: 热重启成功后唤醒会话使用的恢复消息，可选
 
         Returns:
-            操作结果（原进程将退出）
+            操作结果；热重启事务接管后当前轮会结束，等待系统唤醒本会话
         """
-        return _restart_impl(reason=reason)
+        return _restart_impl(reason=reason, sessionId=sessionId, runId=runId, resumeMessage=resumeMessage)
 
     @tool
     def get_core_context_tool() -> str:
@@ -173,7 +192,8 @@ def create_key_tools() -> List[BaseTool]:
         """
         全局正则表达式搜索 (Cursor/Aider 范式)。
 
-        在项目中快速搜索代码，支持正则表达式。适合替代 `cli_tool` 的 `cat`/`Get-Content` 粗读方式。
+        在项目中快速搜索代码，支持正则表达式。普通 Chat/Coding Agent 默认用 cli_tool + rg；
+        该工具保留给显式授权策略或专用 Agent 使用。
 
         Args:
             regex_pattern: 正则表达式模式
@@ -246,46 +266,46 @@ def create_key_tools() -> List[BaseTool]:
     @tool
     def code_symbol_tool(
         mode: str,
+        query: str = "",
         file_path: str = "",
         symbol: str = "",
-        entity_name: str = "",
-        line: int = 0,
-        column: int = 0,
-        scope: str = ".",
         max_results: int = 20,
+        refresh: bool = False,
     ) -> str:
         """
-        【Python 结构感知】统一查询 Python 文件结构、目标实体、定义、引用和悬浮信息。
+        【代码上下文图谱】索引并查询整个 Vibelution 项目的结构、符号、引用、影响范围和候选测试。
 
         常用模式：
-        - mode="outline": 查看单个 Python 文件的类/函数/方法大纲，需要提供 file_path。
-        - mode="entity": 读取指定类、函数或方法源码，需要提供 file_path，并用 symbol 或 entity_name 指定目标。
-        - mode="definition": 查找符号定义；可提供 symbol + scope，也可提供 file_path + line + column。
-        - mode="references": 查找符号引用；可提供 symbol + scope，也可提供 file_path + line + column。
-        - mode="hover": 查询光标位置说明，需要提供 file_path + line + column。
+        - mode="status": 查看索引状态、文件数、语言分布和新鲜度。
+        - mode="index": 重新构建本地项目索引。
+        - mode="search": 按 query/symbol/file_path 搜索文件和符号。
+        - mode="explore": 面向问题检索相关文件、符号、源码片段和关系图。
+        - mode="inspect": 查看指定 file_path 或 symbol 的结构化详情和片段。
+        - mode="references": 查找符号、路径或关键词引用。
+        - mode="impact": 分析修改某个 file_path 或 symbol 的影响范围。
+        - mode="affected_tests": 推荐与目标相关的测试文件。
+        - mode="files": 查看索引内文件列表。
+
+        注意：v2 不再支持 outline/entity/definition/hover。旧需求请改用 inspect/search/references。
 
         Args:
-            mode: outline / entity / definition / references / hover
-            file_path: Python 文件路径；outline/entity/hover 必填，definition/references 可选
-            symbol: 符号名；entity/definition/references 可用，如 "ClassName.method" 或 "function_name"
-            entity_name: entity 模式的实体名，等价于 symbol
-            line: 1-based 行号；definition/references/hover 可用
-            column: 0-based 列号；definition/references/hover 可用
-            scope: 按 symbol 搜索定义/引用时的目录范围
+            mode: status / index / search / explore / inspect / references / impact / affected_tests / files
+            query: 自然语言问题、关键词、路径片段或符号名
+            file_path: 目标文件路径；inspect/impact/affected_tests/references 可用
+            symbol: 目标符号名；inspect/search/references/impact/affected_tests 可用
             max_results: 最多返回多少条结果
+            refresh: 是否在查询前重新刷新索引
 
         Returns:
-            结构化符号查询结果
+            JSON 格式的项目代码上下文图谱查询结果
         """
         return _code_symbol_impl(
             mode=mode,
+            query=query,
             file_path=file_path,
             symbol=symbol,
-            entity_name=entity_name,
-            line=line,
-            column=column,
-            scope=scope,
             max_results=max_results,
+            refresh=refresh,
         )
 
     @tool
@@ -441,6 +461,36 @@ def create_key_tools() -> List[BaseTool]:
         from tools.git_tools import get_evolution_fitness_tool as _get_evolution_fitness_impl
         return _get_evolution_fitness_impl(recent_limit=recent_limit)
 
+    @tool
+    def conversation_log_inspect_tool(
+        query: str = "",
+        log_path: str = "",
+        limit: int = 5,
+        max_events: int = 8000,
+    ) -> str:
+        """
+        【会话日志审查】只读分析 conversation JSONL 日志并返回紧凑诊断摘要。
+
+        适合在用户要求审查“最近对话”“某个 Agent 对话日志”“为什么卡/慢/失败”时优先调用。
+        本工具不会执行 shell，不写文件，不返回整段日志正文；它会先定位候选 conversation_*.jsonl，
+        再汇总事件类型、LLM/token 用量、工具调用序列、错误摘要和低效模式提示。
+
+        Args:
+            query: 可选关键词，会匹配文件名和日志开头片段；为空时读取最近日志候选
+            log_path: 可选明确日志路径，仅允许项目内 log_info/ 或 logs/runtime_scenes/ 下的 .jsonl
+            limit: 候选日志数量，默认 5，最大 20
+            max_events: 单个日志最多解析事件数，默认 8000，最大 50000
+
+        Returns:
+            JSON 格式的只读日志审查摘要
+        """
+        return _conversation_log_inspect_impl(
+            query=query,
+            log_path=log_path,
+            limit=limit,
+            max_events=max_events,
+        )
+
     # ── 文件操作工具 ────────────────────────────────────────────────────────
 
     def _cli_tool_impl(command: str = "", timeout: int = 60, cwd: str = "", max_output_chars: int = 12000) -> str:
@@ -471,17 +521,18 @@ def create_key_tools() -> List[BaseTool]:
     # ── 文件读写工具 ──────────────────────────────────────────────────────
 
     @tool
-    def read_file_tool(file_path: str, max_lines: int = 80, offset: int = 0) -> str:
+    def read_file_tool(file_path: str, max_lines: int = 80, offset: int = 0, force: bool = False) -> str:
         """
         【读取文件】读取本地文件的全部或部分内容。
 
-        比 cli_tool 更高效，支持编码自动检测、行号显示、分页读取。
-        遇到未知文件时优先使用此工具而非 cli_tool。
+        支持编码自动检测、行号显示、分页读取。普通 Chat/Coding Agent 默认用 cli_tool 读取；
+        该工具保留给显式授权策略或专用 Agent 使用。
 
         Args:
             file_path: 文件路径（相对或绝对）
             max_lines: 最大读取行数，默认分页读取 80 行；0 表示读取全部
             offset: 从第几行开始读取，0 表示从头开始
+            force: 主动确认需要重读已读范围或全文件时设为 true
 
         Returns:
             带行号的文件内容
@@ -592,6 +643,72 @@ def create_key_tools() -> List[BaseTool]:
             JSON 格式的计划更新结果。
         """
         return _plan_update_impl(plan=plan, explanation=explanation, plan_id=plan_id)
+
+    @tool
+    def create_child_session_tool(
+        user_request: str,
+        task_title: str = "",
+        split_reason: str = "",
+        inherited_facts: str = "",
+        relevant_files: str = "",
+        relevant_logs: str = "",
+        constraints: str = "",
+        excluded_context_summary: str = "",
+        auto_start: bool = True,
+        switch_to_child: bool = True,
+        parent_session_id: str = "",
+    ) -> str:
+        """
+        【子对话创建】把当前会话中的独立事项拆到同一 Agent 的子对话中。
+
+        适合当用户提出的新事项与当前主线明显不同、继续混在当前会话会造成上下文混乱时使用。
+        若事项明显独立，可以直接创建并自动启动；若是否同一件事不清楚，先向用户追问确认。
+        子对话会继承同一 Agent，并携带 handoff 上下文，便于独立推进。
+
+        Args:
+            user_request: 子对话要处理的完整用户请求
+            task_title: 子对话标题，可留空自动取请求首行
+            split_reason: 为什么这应当拆成独立事项
+            inherited_facts: 需要携带的有效事实，支持换行列表或 JSON 数组
+            relevant_files: 相关文件路径，支持换行列表或 JSON 数组
+            relevant_logs: 相关日志路径，支持换行列表或 JSON 数组
+            constraints: 子对话需要遵守的约束，支持换行列表或 JSON 数组
+            excluded_context_summary: 明确不携带哪些主会话历史
+            auto_start: 创建后是否立即让子对话开始工作
+            switch_to_child: 创建后是否把界面切到子对话
+            parent_session_id: 可选，默认使用当前 Agent runtime 的 sessionId
+
+        Returns:
+            JSON 格式的创建结果，包含 parentSessionId、childSessionId、childSession 和 parentSession
+        """
+        return _create_child_session_impl(
+            user_request=user_request,
+            task_title=task_title,
+            split_reason=split_reason,
+            inherited_facts=inherited_facts,
+            relevant_files=relevant_files,
+            relevant_logs=relevant_logs,
+            constraints=constraints,
+            excluded_context_summary=excluded_context_summary,
+            auto_start=auto_start,
+            switch_to_child=switch_to_child,
+            parent_session_id=parent_session_id,
+        )
+
+    @tool
+    def list_child_sessions_tool(parent_session_id: str = "") -> str:
+        """
+        【子对话列表】查看当前主会话下已经拆出的子对话。
+
+        适合在继续多事项工作、汇报并行事项状态，或判断是否已有对应子对话时使用。
+
+        Args:
+            parent_session_id: 可选，默认使用当前 Agent runtime 的 sessionId
+
+        Returns:
+            JSON 格式的子对话摘要列表
+        """
+        return _list_child_sessions_impl(parent_session_id=parent_session_id)
 
     # ── 后台任务工具 ──────────────────────────────────────────────────────
 
@@ -868,6 +985,38 @@ def create_key_tools() -> List[BaseTool]:
         )
 
     @tool
+    def session_reference_query_tool(
+        reference_id: str = "",
+        session_id: str = "",
+        query: str = "",
+        limit: int = 8,
+        max_chars_per_message: int = 700,
+    ) -> str:
+        """
+        【会话引用查询】读取用户本轮拖入消息框的会话引用历史。
+
+        只能查询当前用户消息附带的结构化会话引用，返回有限条数和截断内容。
+        默认只读；不要因为存在引用就发送消息给目标 Agent。只有用户明确要求“问/通知/发送给该 Agent”时，才可另行使用 agent_message_tool。
+
+        Args:
+            reference_id: 引用 chip 的 referenceId，例如 session:xxx
+            session_id: 目标会话 id；reference_id 或 session_id 至少填一个
+            query: 可选关键词，留空返回最近消息
+            limit: 返回消息数，1-20
+            max_chars_per_message: 单条消息最大字符数，120-1600
+
+        Returns:
+            JSON 格式的引用会话历史片段与只读边界说明
+        """
+        return _session_reference_query_impl(
+            reference_id=reference_id,
+            session_id=session_id,
+            query=query,
+            limit=limit,
+            max_chars_per_message=max_chars_per_message,
+        )
+
+    @tool
     def agent_tool_permission_request_tool(
         target_agent: str,
         grant_tools: str = "",
@@ -1006,6 +1155,38 @@ def create_key_tools() -> List[BaseTool]:
         )
 
     @tool
+    def research_proposal_apply_tool(
+        proposal_id: str,
+        user_confirmed: bool = False,
+        reason: str = "",
+        confirmation_text: str = "",
+        confirmation_turn_id: str = "",
+    ) -> str:
+        """
+        【科研组织提案应用】在用户明确确认后应用科研组织变更提案。
+
+        用于把 pending_user_confirmation / ceo_approved 提案真正落到组织图和 Agent 目录中。
+        对 create_agent 提案，应用成功后才会生成真实 Agent；之后才能配置工具权限和通信边。
+
+        Args:
+            proposal_id: 待应用的科研组织提案 ID，如 roprop-...
+            user_confirmed: 只有当前用户明确确认该提案后才设为 true
+            reason: 应用理由，简述用户确认内容或本轮目标
+            confirmation_text: 当前用户确认内容摘要；为空时会回落 reason
+            confirmation_turn_id: 可选，本轮用户确认消息 ID 或可追踪标识
+
+        Returns:
+            JSON 格式的应用状态、resultStatuses，以及新创建 Agent 列表
+        """
+        return _research_proposal_apply_impl(
+            proposal_id=proposal_id,
+            user_confirmed=user_confirmed,
+            reason=reason,
+            confirmation_text=confirmation_text,
+            confirmation_turn_id=confirmation_turn_id,
+        )
+
+    @tool
     def image2_generate_tool(
         prompt: str,
         size: str = "1024x1024",
@@ -1038,6 +1219,42 @@ def create_key_tools() -> List[BaseTool]:
             quality=quality,
             output_format=output_format,
             input_artifact_id=input_artifact_id,
+        )
+
+    @tool
+    def computer_use_task_tool(
+        task: str,
+        target_url: str = "",
+        allowed_domains: str = "",
+        max_steps: int = 20,
+        require_confirmation: bool = True,
+        mode: str = "browser",
+    ) -> str:
+        """
+        【受控电脑操作】在沙盒浏览器中执行一次受限 Computer Use 任务。
+
+        该工具不会控制用户真实鼠标；v1 只支持 browser 模式。需要提供目标域名边界，高风险操作会返回
+        need_confirmation 等待用户确认。只有 Agent 的 ToolPolicy.allowedTools 显式包含
+        computer_use_task_tool 时才可调用。
+
+        Args:
+            task: 要完成的浏览器操作任务
+            target_url: 可选起始 URL，格式为 http:// 或 https://
+            allowed_domains: 允许访问的域名，多个域名用逗号分隔；target_url 的 host 会自动加入
+            max_steps: 最大步骤数，范围 1-30，默认 20
+            require_confirmation: 高风险动作是否等待用户确认，默认 True
+            mode: 当前只支持 browser
+
+        Returns:
+            JSON 格式的任务状态、sessionId、步骤、截图 URL 和确认状态
+        """
+        return _computer_use_task_impl(
+            task=task,
+            target_url=target_url,
+            allowed_domains=allowed_domains,
+            max_steps=max_steps,
+            require_confirmation=require_confirmation,
+            mode=mode,
         )
 
     @tool
@@ -1095,20 +1312,24 @@ def create_key_tools() -> List[BaseTool]:
     def knowledge_rag_retrieve_tool(
         query: str = "",
         knowledge_base_id: str = "",
+        owner_type: str = "",
+        owner_id: str = "",
         retrieval_mode: str = "hybrid",
         provider: str = "local",
         top_k: int = 5,
         max_context_chars: int = 1200,
     ) -> str:
         """
-        【团队知识 RAG 检索】只读检索已审核团队正式知识，并返回可引用的紧凑上下文候选。
+        【正式知识 RAG 检索】只读检索已审核 Team/Agent 正式知识，并返回可引用的紧凑上下文候选。
 
         该工具返回 contexts 与 citations，不读取 pending proposal，不写入知识库，也不会默认注入 prompt。
-        只有 Agent 的 ToolPolicy.allowedTools 显式包含 knowledge_rag_retrieve_tool，且其团队/MemoryPolicy 允许读取目标知识库时才可用。
+        只有 Agent 的 ToolPolicy.allowedTools 显式包含 knowledge_rag_retrieve_tool，且其 Owner ACL/MemoryPolicy 允许读取目标知识库时才可用。
 
         Args:
             query: 查询关键词，可为空以查看最近正式知识
             knowledge_base_id: 可选知识库 ID；为空时检索当前 Agent 可访问的知识库
+            owner_type: 可选 owner 类型，支持 team / agent
+            owner_id: 可选 owner id，teamId 或 agentId
             retrieval_mode: exact / semantic / hybrid，默认 hybrid
             provider: 当前支持 local
             top_k: 最多返回上下文数量，范围 1-20
@@ -1120,6 +1341,8 @@ def create_key_tools() -> List[BaseTool]:
         return _knowledge_rag_retrieve_impl(
             query=query,
             knowledge_base_id=knowledge_base_id,
+            owner_type=owner_type,
+            owner_id=owner_id,
             retrieval_mode=retrieval_mode,
             provider=provider,
             top_k=top_k,
@@ -1443,6 +1666,7 @@ def create_key_tools() -> List[BaseTool]:
         explain_current_worktree_tool,
         open_evolution_transaction_tool,
         close_evolution_transaction_tool,
+        conversation_log_inspect_tool,
         # 文件操作
         cli_tool,
         read_file_tool,
@@ -1453,6 +1677,9 @@ def create_key_tools() -> List[BaseTool]:
         task_update_tool,
         task_list_tool,
         plan_update_tool,
+        create_child_session_tool,
+        list_child_sessions_tool,
+        session_reference_query_tool,
         # 后台任务
         task_start_tool,
         task_output_tool,
@@ -1474,7 +1701,9 @@ def create_key_tools() -> List[BaseTool]:
         agent_tool_permission_request_tool,
         research_agent_creation_proposal_tool,
         research_communication_edge_proposal_tool,
+        research_proposal_apply_tool,
         image2_generate_tool,
+        computer_use_task_tool,
         research_knowledge_query_tool,
         knowledge_query_tool,
         knowledge_rag_retrieve_tool,
@@ -1506,13 +1735,11 @@ def create_llm_facing_tools() -> List[BaseTool]:
         "list_workspace_debris_tool",
         "clean_workspace_debris_tool",
         "get_session_files_tool",
-        # 自我建模/长期学习类工具默认不常驻，避免在普通轮次抢占操作面
+        # 自我建模类工具默认不常驻，避免在普通轮次抢占操作面。
+        # 长期记忆工具保留在 LLM-facing 目录中，再由 Agent ToolPolicy 控制可见性。
         "update_diagnosis_rules_tool",
         "update_self_model_tool",
         "get_self_model_tool",
         "record_evolution_tool",
-        "record_learning_tool",
-        "search_memory_tool",
-        "search_error_archive_tool",
     }
     return [tool for tool in all_tools if getattr(tool, "name", "") not in excluded_names]

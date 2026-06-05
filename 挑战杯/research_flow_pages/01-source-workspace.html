@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>01 资料进入工作区 · 科研流程计划页</title>
+    <link rel="stylesheet" href="flow_pages.css" />
+  </head>
+  <body>
+    <main class="shell page-layout">
+
+    <nav class="nav-rail">
+      <a href="../research_team_flow_design.html"><span class="mini">IDX</span><span>返回总索引</span></a>
+      <a class=" active" href="01-source-workspace.html"><span class="mini">01</span><span>资料进入工作区</span></a>
+<a class="" href="02-paper-note.html"><span class="mini">02</span><span>生成 paper_note</span></a>
+<a class="" href="03-neuro-mechanism.html"><span class="mini">03</span><span>提取 neuro_mechanism</span></a>
+<a class="" href="04-mechanism-mapping.html"><span class="mini">04</span><span>机制到计算抽象</span></a>
+<a class="" href="05-algorithm-hypothesis.html"><span class="mini">05</span><span>生成 algorithm_hypothesis</span></a>
+<a class="" href="06-research-review.html"><span class="mini">06</span><span>科研审稿</span></a>
+<a class="" href="07-steward-ingestion.html"><span class="mini">07</span><span>知识治理入库</span></a>
+<a class="" href="08-candidate-graph.html"><span class="mini">08</span><span>候选图谱预览</span></a>
+<a class="" href="09-official-graph.html"><span class="mini">09</span><span>正式知识图谱同步</span></a>
+<a class="" href="10-experiment-loop.html"><span class="mini">10</span><span>实验验证闭环</span></a>
+<a class="" href="11-iteration-versioning.html"><span class="mini">11</span><span>持续迭代与版本化</span></a>
+<a class="" href="12-challenge-cup-delivery.html"><span class="mini">12</span><span>挑战杯交付计划</span></a>
+<a class="" href="13-flow-html-maintenance.html"><span class="mini">13</span><span>流程 HTML 维护门禁</span></a>
+    </nav>
+
+      <div>
+        <section class="plan-hero">
+          <div class="kicker">Research Flow Node 01</div>
+          <h1>资料进入工作区</h1>
+          <p class="subtitle">建立稳定证据源，不把未确认信息混入候选知识链。</p>
+          <div class="tag-row"><span class="tag done">已规划</span><span class="tag">Source Intake Agent</span><span class="tag">独立计划页</span></div>
+          <div class="diagram">
+            <div class="flow-cell"><strong>输入</strong><span>用户提供的论文/PDF / 赛题 PDF</span></div>
+            <div class="flow-cell"><strong>动作</strong><span>登记文件路径、资料类型、页码范围和来源可信度。</span></div>
+            <div class="flow-cell"><strong>输出</strong><span>资料清单 / sourceFiles 引用</span></div>
+            <div class="flow-cell"><strong>记忆/图谱</strong><span>可作为候选图谱的 Paper source 节点，不进入正式知识图谱。</span></div>
+          </div>
+        </section>
+
+        <section class="section">
+          <div class="section-head">
+            <h2>当前节点规划</h2>
+            <p class="hint">本页只展示 01 节点。通过左侧导航可进入其它节点页。</p>
+          </div>
+          <div class="plan-grid">
+            <article class="plan-card"><h2>目标</h2><p class="hint">把用户提供的论文、PDF、赛题文件和补充资料登记为可追溯输入。</p></article>
+            <article class="plan-card"><h2>输入</h2><ul><li>用户提供的论文/PDF</li>
+<li>赛题 PDF</li>
+<li>补充资料</li>
+<li>挑战杯工作区路径</li></ul></article>
+            <article class="plan-card"><h2>处理动作</h2><ul><li>登记文件路径、资料类型、页码范围和来源可信度。</li>
+<li>区分允许分析、暂不分析、需要用户确认的资料。</li>
+<li>保留原始文件，不在资料入口阶段改写内容。</li></ul></article>
+            <article class="plan-card"><h2>输出物</h2><ul><li>资料清单</li>
+<li>sourceFiles 引用</li>
+<li>Paper 原始来源节点</li></ul></article>
+            <article class="plan-card"><h2>风险</h2><ul><li>资料来源不明</li>
+<li>PDF 页码不可追溯</li>
+<li>联网搜索结果混入第一版</li></ul></article>
+            <article class="plan-card "><h2>未决事项</h2><ul><li>是否需要单独维护 source_manifest.json。</li></ul></article>
+          </div>
+        </section>
+
+        <section class="section">
+          <div class="section-head">
+            <h2>记忆与图谱边界</h2>
+            <p class="hint">区分候选工作区、知识治理 Agent、正式 Team Knowledge 和正式知识图谱。</p>
+          </div>
+          <div class="status-grid">
+            <div class="status-item"><b>候选状态</b><span>已规划</span></div>
+            <div class="status-item"><b>记忆平台</b><span>不进入正式记忆库；只作为后续 paper_note 的 sourceFiles。</span></div>
+            <div class="status-item"><b>图谱同步</b><span>可作为候选图谱的 Paper source 节点，不进入正式知识图谱。</span></div>
+          </div>
+        </section>
+
+
+    <section class="section">
+      <div class="section-head">
+        <h2>可跑通节点契约</h2>
+        <p class="hint">这一块只覆盖知识搜集、筛选和入库 MVP，不涉及实验训练或交付实现。</p>
+      </div>
+      <div class="status-grid">
+        <div class="status-item"><b>状态</b><span>source_registered</span></div>
+        <div class="status-item"><b>功能岗位</b><span>Source Intake Agent</span></div>
+        <div class="status-item"><b>Agent 状态</b><span>可复用 research_broad / 待绑定挑战杯资料登记职责</span></div>
+        <div class="status-item"><b>进入条件</b><span>用户提供 PDF、论文、赛题或补充资料；文件可在挑战杯工作区定位。</span></div>
+        <div class="status-item"><b>退出条件</b><span>每个资料项都有 id、path、type、sourceTrust、allowedForAnalysis 和 pageScope。</span></div>
+        <div class="status-item"><b>审核门禁</b><span>确认资料允许分析、来源可信度和是否纳入本轮。</span></div>
+      </div>
+      <div class="plan-grid">
+        <article class="plan-card"><h2>本步操作</h2><p class="hint">建立 source_manifest 记录，不改写原文，不自动混入联网资料。</p></article>
+        <article class="plan-card"><h2>本地研究模型用法</h2><p class="hint">本地 9B 模型适合做标题/摘要/片段初筛，输出 relevanceScore、topicTags、excludeReason，不直接决定正式纳入。</p></article>
+        <article class="plan-card"><h2>所需功能</h2><ul><li>本地资料登记</li>
+<li>source_manifest 写入</li>
+<li>文件路径/页码/来源可信度记录</li>
+<li>可选 research_knowledge_query_tool 查重</li></ul></article>
+        <article class="plan-card"><h2>工具/平台能力</h2><ul><li>research_knowledge_query_tool</li>
+<li>本地文件读取/PDF 解析能力（待接入流程）</li></ul></article>
+        <article class="plan-card"><h2>功能缺口</h2><p class="hint">需要候选资料 manifest 的落盘规则和 PDF 页码锚点提取能力。</p></article>
+        <article class="plan-card"><h2>失败回退</h2><p class="hint">路径缺失、来源不明或权限不清时停在 source_needs_confirmation。</p></article>
+      </div>
+    </section>
+
+
+        <div class="pager">
+          <a href="../research_team_flow_design.html">返回总索引</a>
+          <a href="02-paper-note.html">下一节点：02 生成 paper_note</a>
+        </div>
+      </div>
+    </main>
+  </body>
+</html>

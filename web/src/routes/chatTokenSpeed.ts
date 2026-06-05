@@ -118,6 +118,7 @@ function looksLikeAnswerOutput(content: string): boolean {
   return ![
     /^正在准备对话上下文/i,
     /^正在读取当前会话/i,
+    /^当前会话或 Agent 并发槽暂满/i,
     /^当前 Agent 正在处理上一项任务/i,
     /^正在唤起对话 agent/i,
     /^正在恢复上一轮对话记忆/i,
@@ -125,6 +126,7 @@ function looksLikeAnswerOutput(content: string): boolean {
     /^正在准备继续推进下一步/i,
     /^Preparing the conversation context/i,
     /^Reading the current session/i,
+    /^This session or Agent concurrency slot is busy/i,
     /^The agent is handling another task/i,
     /^Preparing the conversation agent/i,
     /^Restoring the previous conversation memory/i,

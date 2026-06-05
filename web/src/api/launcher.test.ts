@@ -17,7 +17,6 @@ describe("launcher api helpers", () => {
 
   it("builds canonical launcher restart endpoints", () => {
     expect(launcherRestartEndpoint()).toBe("/api/launcher/restart");
-    expect(launcherRestartEndpoint(true)).toBe("/api/launcher/restart?confirmedActiveWork=true");
   });
 
   it("fetches launcher status as a read-only request", async () => {
@@ -59,7 +58,7 @@ describe("launcher api helpers", () => {
     expect((requestInit.headers as Headers).get("X-Vibelution-Control-Token")).toBe("test-token");
   });
 
-  it("restarts the bundle with active-work confirmation when requested", async () => {
+  it("restarts the bundle through the guarded launcher endpoint", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce({
         ok: true,
@@ -74,10 +73,10 @@ describe("launcher api helpers", () => {
       });
     vi.stubGlobal("fetch", fetchMock);
 
-    const payload = await restartLauncherBundle(true);
+    const payload = await restartLauncherBundle();
 
     expect(payload.commandId).toBe("cmd-1");
-    expect(fetchMock.mock.calls[1][0]).toBe("/api/launcher/restart?confirmedActiveWork=true");
+    expect(fetchMock.mock.calls[1][0]).toBe("/api/launcher/restart");
   });
 
   it("requests guarded supervisor reattach through the launcher endpoint", async () => {

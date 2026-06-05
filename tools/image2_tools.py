@@ -56,7 +56,7 @@ def image2_generate_tool(
         session_id = str(runtime.get("sessionId") or "").strip()
         agent = runtime.get("agent") if isinstance(runtime.get("agent"), dict) else {}
         agent_id = str(runtime.get("agentId") or (agent or {}).get("agentId") or "").strip()
-        profile_id = str((agent or {}).get("profileId") or "primary").strip() or "primary"
+        profile_id = "primary"
 
         normalized_prompt = trim_lines(str(prompt or ""), max_lines=80).strip()
         normalized_size = str(size or "1024x1024").strip() or "1024x1024"
@@ -282,7 +282,7 @@ def image2_generate_tool(
             error_type=error_type,
             session_id=session_id,
             agent_id=str(runtime.get("agentId") or (agent or {}).get("agentId") or "").strip(),
-            profile_id=str((agent or {}).get("profileId") or "primary").strip() or "primary",
+            profile_id="primary",
             model=model,
             model_ref=model_ref,
             size=str(size or "1024x1024"),

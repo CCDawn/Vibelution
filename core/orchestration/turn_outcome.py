@@ -48,15 +48,26 @@ class TurnOutcomeController:
         retryable: bool,
         consecutive_failures: int,
         iteration: int,
+        attempts: int = 0,
+        max_attempts: int = 0,
     ) -> Optional[str]:
         if category and not retryable:
             return f"遇到不可重试错误 `{category}`，当前轮次直接结束。"
-        if category in {"server_error", "rate_limit"} and consecutive_failures >= 1:
-            return f"模型 provider 暂时不可用（`{category}`），本轮已用尽单次调用重试预算，直接失败收口。"
-        if category == "network_error" and consecutive_failures >= 2 and iteration >= 2:
-            return "网络失败已连续出现，当前轮次提前结束，等待下一轮再恢复。"
-        if category == "timeout" and consecutive_failures >= 3 and iteration >= 2:
-            return "连续超时未恢复，当前轮次提前结束。"
+        effective_max_attempts = max(0, int(max_attempts or 0))
+        effective_attempts = max(0, int(attempts or 0))
+        retry_budget_exhausted = (
+            effective_max_attempts > 0
+            and max(effective_attempts, max(0, int(consecutive_failures or 0))) >= effective_max_attempts
+        )
+        if category in {"server_error", "rate_limit"} and retry_budget_exhausted:
+            return f"模型 provider 暂时不可用（`{category}`），本轮已用尽重试预算，直接失败收口。"
+        if category == "network_error" and retry_budget_exhausted:
+            return "网络失败已连续出现且重连预算已耗尽，当前轮次提前结束。"
+        if category == "timeout" and retry_budget_exhausted:
+            return "连续超时且重试预算已耗尽，当前轮次提前结束。"
+        stop_limit = effective_max_attempts or self.max_consecutive_failures
+        if consecutive_failures >= stop_limit:
+            return f"LLM 连续失败达到 {stop_limit} 次，当前轮次结束。"
         return None
 
     def should_stop_for_convergence(

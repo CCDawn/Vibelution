@@ -1,0 +1,4774 @@
+{
+  "schemaVersion": 1,
+  "metadata": {
+    "id": "vibelution.action_risk_classification",
+    "title": "Vibelution Agent Action Risk Classification Config",
+    "language": "zh-CN",
+    "generatedAt": "2026-06-04",
+    "sourceReports": [
+      "docs/security/tool-vulnerability-report.json",
+      "BossAI live server source scan 2026-06-05",
+      "BossAI overlap cleanup 2026-06-05",
+      "BossAI security gap review 2026-06-05",
+      "BossAI second-pass security review 2026-06-05",
+      "BossAI API surface security review 2026-06-05"
+    ],
+    "sourceCodeRefs": [
+      "tools/Key_Tools.py",
+      "tools/shell_tools.py",
+      "tools/computer_use_tools.py",
+      "core/web/services/tool_catalog.py",
+      "apps/server/src/services/piSession.ts",
+      "apps/server/src/services/knowledgeSearchTool.ts",
+      "apps/server/src/services/fileDownloadLinkTool.ts",
+      "apps/server/src/services/bochaSearchTools.ts",
+      "apps/server/src/services/bochaSearchTools.test.ts",
+      "apps/server/src/services/knowledgeSearchTool.test.ts",
+      "apps/server/src/services/fileDownloadLinkTool.test.ts",
+      "apps/server/src/server.ts",
+      "apps/server/src/routes/files.ts",
+      "apps/server/src/routes/knowledge.ts",
+      "apps/server/src/routes/providers.ts",
+      "apps/server/src/routes/settings.ts",
+      "apps/server/src/routes/models.ts",
+      "apps/server/src/routes/sessions.ts",
+      "apps/server/src/routes/projects.ts",
+      "apps/server/src/routes/assistants.ts",
+      "apps/server/src/services/ragPipeline.ts",
+      "apps/server/src/services/sessionFiles.ts"
+    ],
+    "purpose": "Provide advisory pre-execution risk levels for individual agent actions.",
+    "nonGoals": [
+      "Do not enforce blocking decisions.",
+      "Do not implement approval workflows.",
+      "Do not replace ToolPolicy, sandboxing, RBAC, or audit logging.",
+      "Do not enforce approval or blocking decisions; classify BossAI custom tools when they are explicitly injected into Pi sessions."
+    ],
+    "perspective": "bossai_primary",
+    "removedOverlappingTools": [
+      {
+        "toolName": "web_search_tool",
+        "replacement": "bocha_fast_search",
+        "status": "removed_from_active_bossai_profile"
+      },
+      {
+        "toolName": "grep_search_tool",
+        "replacement": "knowledge_search",
+        "status": "removed_from_active_bossai_profile"
+      },
+      {
+        "toolName": "glob_tool",
+        "replacement": "knowledge_search",
+        "status": "removed_from_active_bossai_profile"
+      },
+      {
+        "toolName": "read_file_tool",
+        "replacement": "knowledge_search",
+        "status": "removed_from_active_bossai_profile"
+      }
+    ],
+    "supersededToolMappings": {
+      "web_search_tool": "bocha_fast_search",
+      "grep_search_tool": "knowledge_search",
+      "glob_tool": "knowledge_search",
+      "read_file_tool": "knowledge_search"
+    },
+    "securityReviewNotes": {
+      "addedAt": "2026-06-05",
+      "focus": "BossAI-primary tool risk gaps: local file exposure, knowledge dump, external query leakage, upload DoS/content risk.",
+      "secondPassFocus": "desktop localPath disclosure, symlink/realpath escape, cross-session upload, media-type mismatch, knowledge query/snippet logging, knowledge index enumeration.",
+      "thirdPassFocus": "BossAI unauthenticated/LAN API surface: open CORS, knowledge ingestion persistence, full document reads, destructive knowledge mutations, async reindex, external embed/OCR/rerank calls, provider/settings/model/session/project state changes."
+    }
+  },
+  "userFacingSummary": {
+    "readFirst": "先看 riskLegend 和 toolRiskMatrix：当前矩阵以 BossAI 工具为主，重叠旧工具已由 BossAI 对应工具替代。",
+    "positioning": "这是以 BossAI 当前实际注入工具为主的执行前风险评估参考；旧 Vibelution 抽象中与 BossAI 工具重叠的 profile 已删除。",
+    "riskLegend": [
+      {
+        "riskLevel": "low",
+        "label": "低",
+        "plainMeaning": "只读、范围小、通常不会改变系统状态。",
+        "userQuestion": "它只是读一个明确的普通文件或列一个明确目录吗？"
+      },
+      {
+        "riskLevel": "medium",
+        "label": "中",
+        "plainMeaning": "仍偏可控，但会扩大读取范围、访问外网，或把外部内容带进上下文。",
+        "userQuestion": "它是否会搜索很多内容、访问公开网页，或预览待清理文件？"
+      },
+      {
+        "riskLevel": "high",
+        "label": "高",
+        "plainMeaning": "可能执行命令、写文件、删文件、控制浏览器，或处理敏感候选内容。",
+        "userQuestion": "它是否会改变项目文件、运行本地命令，或操作浏览器页面？"
+      },
+      {
+        "riskLevel": "critical",
+        "label": "严重",
+        "plainMeaning": "可能不可逆破坏、泄露密钥、访问内网/metadata、改生产或提交高影响浏览器操作。",
+        "userQuestion": "它是否涉及递归删除、工作区外路径、密钥、私网 URL、付款/提交/发布/部署？"
+      }
+    ],
+    "instantRedFlags": [
+      "命令里出现 rm -rf、Remove-Item -Recurse、del /s、rmdir /s。",
+      "命令里出现 curl/wget/iwr 后接管道执行、Invoke-Expression、Base64 动态执行。",
+      "路径指向 .env、.ssh、id_rsa、credentials、token、cookie、config 或工作区外目录。",
+      "URL 指向 localhost、127.0.0.1、10.x、172.16-31.x、192.168.x、169.254.169.254 或 cloud metadata。",
+      "浏览器任务包含 submit、pay、checkout、delete、publish、deploy、approve、merge、rollback、upload、download。",
+      "写入或 patch 涉及认证、权限、安全、密钥、CI、依赖、Docker、启动脚本或配置文件。",
+      "BossAI knowledge_search 的 shell 尝试使用 >、>>、<<、tee、rm、mv、cp、touch、mkdir 等写入/变更语义。",
+      "BossAI create_file_download_link 的 path 指向 .env、.ssh、数据库、配置、token、cookie、用户主目录或工作区外文件。",
+      "BossAI bocha_fast_search 的 query 包含内部项目路径、源码片段、客户资料、凭据或未公开计划。",
+      "BossAI create_file_download_link 的 path 不是本轮生成的 outputs/artifacts/reports 文件，或无法证明属于允许输出目录。",
+      "BossAI knowledge_search 使用 cat/head/tail/sed/awk/jq 输出整份知识库文件或超大片段。",
+      "BossAI bocha_fast_search 的 query 是整段代码、JSON/YAML 配置、日志、异常栈或超过安全长度的文本。",
+      "BossAI 文件上传 API 接收超大 base64、可执行文件、脚本、压缩包或未知 mediaType。",
+      "BossAI create_file_download_link 在桌面模式返回真实 localPath，可能把用户机器路径暴露给模型和聊天记录。",
+      "BossAI create_file_download_link 的 path 是 symlink、junction、hardlink 或 realpath 解析后逃出允许输出目录。",
+      "BossAI 文件上传 API 的 sessionId 不是当前会话，或请求试图写入其他会话文件区。",
+      "BossAI 文件上传的 data URL mediaType、请求 mediaType 和文件扩展名不一致，或 mediaType 为空/未知。",
+      "BossAI knowledge_search 可能把 semanticQuery、命中文档片段或 RAG snippet 写入服务日志。",
+      "BossAI knowledge_search 读取 /knowledge/index.json 会暴露知识库 ID、文档来源、路径和文件清单。"
+    ],
+    "toolRiskMatrix": [
+      {
+        "toolName": "cli_tool",
+        "baseRiskLevel": "high",
+        "plainRisk": "执行本地命令，能力最大，默认高风险。",
+        "checkFirst": [
+          "command",
+          "cwd"
+        ],
+        "criticalSignals": [
+          "递归/强制删除",
+          "下载后直接执行",
+          "提权或权限修改",
+          "生产部署/重启",
+          "读取或输出密钥"
+        ],
+        "saferSignals": [
+          "只读诊断命令",
+          "目标路径明确且在工作区内"
+        ]
+      },
+      {
+        "toolName": "apply_patch_tool",
+        "baseRiskLevel": "high",
+        "plainRisk": "可新增、修改、删除多文件，默认高风险。",
+        "checkFirst": [
+          "patch_text",
+          "cwd"
+        ],
+        "criticalSignals": [
+          "Delete File",
+          "工作区外写入/删除",
+          "安全/权限/认证改动",
+          "密钥内容",
+          "依赖、CI、Docker、配置文件"
+        ],
+        "saferSignals": [
+          "仅改文档",
+          "单文件",
+          "无删除",
+          "目标在工作区内"
+        ]
+      },
+      {
+        "toolName": "apply_diff_edit_tool",
+        "baseRiskLevel": "high",
+        "plainRisk": "局部替换文件内容，弱上下文时可能改错位置。",
+        "checkFirst": [
+          "file_path",
+          "diff_text"
+        ],
+        "criticalSignals": [
+          "工作区外写入",
+          "安全/权限/认证改动",
+          "密钥内容"
+        ],
+        "highSignals": [
+          "SEARCH 块过短",
+          "匹配位置不唯一",
+          "修改可执行逻辑或配置"
+        ],
+        "saferSignals": [
+          "只改注释/文档",
+          "SEARCH 上下文唯一",
+          "目标在工作区内"
+        ]
+      },
+      {
+        "toolName": "write_file_tool",
+        "baseRiskLevel": "high",
+        "plainRisk": "创建或覆盖文件，默认高风险。",
+        "checkFirst": [
+          "file_path",
+          "content"
+        ],
+        "criticalSignals": [
+          "覆盖脚本/配置/依赖/启动文件",
+          "工作区外写入",
+          "写入密钥或危险脚本"
+        ],
+        "saferSignals": [
+          "写入普通文档或交付物",
+          "路径在 workspace/report/output 类目录"
+        ]
+      },
+      {
+        "toolName": "list_workspace_debris_tool",
+        "baseRiskLevel": "medium",
+        "plainRisk": "只读扫描清理候选，默认中风险。",
+        "checkFirst": [
+          "directory"
+        ],
+        "highSignals": [
+          "扫描工作区外目录",
+          "扫描敏感目录"
+        ],
+        "saferSignals": [
+          "directory 为默认 workspace",
+          "只展示不删除"
+        ]
+      },
+      {
+        "toolName": "clean_workspace_debris_tool",
+        "baseRiskLevel": "high",
+        "plainRisk": "可能删除 workspace 碎片文件，confirm=true 时高风险。",
+        "checkFirst": [
+          "confirm",
+          "target_categories"
+        ],
+        "criticalSignals": [
+          "删除目标逃出 workspace",
+          "删除敏感或受保护文件"
+        ],
+        "highSignals": [
+          "confirm=true",
+          "target_categories=all"
+        ],
+        "saferSignals": [
+          "confirm=false 仅预览",
+          "只清理明确类别"
+        ]
+      },
+      {
+        "toolName": "web_fetch_tool",
+        "baseRiskLevel": "medium",
+        "plainRisk": "抓取 URL 内容，公开网页中风险，私网/metadata 严重。",
+        "checkFirst": [
+          "url",
+          "max_chars"
+        ],
+        "criticalSignals": [
+          "localhost/127.0.0.1",
+          "10.x/172.16-31.x/192.168.x",
+          "169.254.169.254",
+          "cloud metadata"
+        ],
+        "highSignals": [
+          "URL 带 token 或 basic auth",
+          "抓取内容过大"
+        ],
+        "saferSignals": [
+          "公开 http/https 文档",
+          "max_chars 受控"
+        ]
+      },
+      {
+        "toolName": "computer_use_task_tool",
+        "baseRiskLevel": "high",
+        "plainRisk": "浏览器自动化，可能点击、输入、提交或使用登录态。",
+        "checkFirst": [
+          "task",
+          "target_url",
+          "allowed_domains",
+          "require_confirmation"
+        ],
+        "criticalSignals": [
+          "submit/pay/checkout/delete/publish/deploy/approve/merge/rollback",
+          "后台、账单、账户、登录态页面",
+          "上传/下载/导入/导出文件",
+          "私网或 metadata URL"
+        ],
+        "saferSignals": [
+          "只读查看",
+          "域名受限",
+          "require_confirmation=true",
+          "步骤数较少"
+        ]
+      },
+      {
+        "toolName": "knowledge_search",
+        "baseRiskLevel": "medium",
+        "plainRisk": "在 BossAI 知识库虚拟 /knowledge 中执行只读 shell 检索，并融合 RAG 结果。",
+        "checkFirst": [
+          "shell",
+          "semanticQuery",
+          "knowledgeBaseId",
+          "knowledgePaths"
+        ],
+        "criticalSignals": [],
+        "highSignals": [
+          "尝试重定向或写入",
+          "全文 dump 知识库",
+          "搜索凭据/token/password",
+          "未限定知识库范围却大范围检索"
+        ],
+        "saferSignals": [
+          "只读 grep/rg/find/cat/head",
+          "查询词明确",
+          "知识库范围已选定",
+          "输出量受限"
+        ]
+      },
+      {
+        "toolName": "create_file_download_link",
+        "baseRiskLevel": "high",
+        "plainRisk": "把本地文件注册为持久下载链接，可能暴露敏感文件或工作区外文件。",
+        "checkFirst": [
+          "path"
+        ],
+        "criticalSignals": [
+          "路径指向 .env/.ssh/credentials/token/config",
+          "路径越出工作区或输出目录",
+          "链接系统目录或用户主目录文件"
+        ],
+        "saferSignals": [
+          "文件是 agent 刚生成的普通交付物",
+          "路径位于会话 outputs/artifacts/report 目录",
+          "不是配置、凭据、脚本或数据库文件"
+        ]
+      },
+      {
+        "toolName": "bocha_fast_search",
+        "baseRiskLevel": "medium",
+        "plainRisk": "把 query 发送到 Bocha 外部 Web Search API，返回 10 条带摘要的搜索结果。",
+        "checkFirst": [
+          "query"
+        ],
+        "criticalSignals": [],
+        "highSignals": [
+          "query 包含内部路径、源码、客户数据、密钥、token 或未发布信息"
+        ],
+        "saferSignals": [
+          "查询公开事实或公开网页",
+          "query 简短且不含内部上下文"
+        ]
+      },
+      {
+        "toolName": "bossai_file_upload_api",
+        "baseRiskLevel": "high",
+        "plainRisk": "BossAI 文件上传接口会把 base64 内容解码并写入会话文件区，超大 payload 或可执行内容风险较高。",
+        "checkFirst": [
+          "sessionId",
+          "name",
+          "mediaType",
+          "data"
+        ],
+        "criticalSignals": [
+          "base64 payload 超大",
+          "文件名或 mediaType 指向脚本/可执行/压缩包",
+          "上传内容疑似凭据或配置导出"
+        ],
+        "saferSignals": [
+          "普通图片/文档",
+          "大小受限",
+          "文件名已清洗",
+          "会话 ID 明确"
+        ]
+      },
+      {
+        "toolName": "bossai_knowledge_ingestion_api",
+        "baseRiskLevel": "high",
+        "plainRisk": "知识库上传、原文读取、重建索引和删除会持久化私有文档，并可能把内容送入 embed/OCR/rerank 服务。",
+        "checkFirst": [
+          "route",
+          "method",
+          "kbId",
+          "documentId",
+          "files[].name",
+          "files[].content",
+          "recursive"
+        ],
+        "criticalSignals": [
+          "DELETE 知识库/文档/recursive folder",
+          "读取 /api/documents/:id 返回完整 content",
+          "上传含凭据、合同、客户数据或大批量文件"
+        ],
+        "highSignals": [
+          "触发 /reindex 后台任务",
+          "图片 OCR 或 embedding/rerank 外部调用",
+          "docx/图片解析不可信内容",
+          "文件批量或 base64 内容过大"
+        ],
+        "saferSignals": [
+          "小型普通文档",
+          "知识库 ID 明确",
+          "不返回完整原文",
+          "不触发删除或重建索引"
+        ]
+      },
+      {
+        "toolName": "bossai_management_api",
+        "baseRiskLevel": "high",
+        "plainRisk": "BossAI 设置、provider、模型、项目、会话和助手接口会改变应用状态或保存/测试敏感配置。",
+        "checkFirst": [
+          "route",
+          "method",
+          "key",
+          "value",
+          "provider",
+          "baseUrl",
+          "apiKey",
+          "modelId",
+          "sessionId"
+        ],
+        "criticalSignals": [
+          "开放 CORS 下的跨站/局域网写操作",
+          "DELETE 会话/项目/模型/助手/设置",
+          "保存或测试 apiKey/token/baseUrl",
+          "baseUrl 指向私网或本机服务"
+        ],
+        "highSignals": [
+          "模型下载/删除/状态修改",
+          "会话消息包含本地路径或凭据",
+          "项目路径切换到工作区外",
+          "provider test-stream 发起真实外部调用"
+        ],
+        "saferSignals": [
+          "只读 GET 列表",
+          "不含凭据值",
+          "目标路由不改变状态"
+        ]
+      }
+    ],
+    "howToUseForHumans": [
+      "第一步：看 toolName 对应的 baseRiskLevel。",
+      "第二步：看 checkFirst 指出的参数字段。",
+      "第三步：如果命中 instantRedFlags 或 criticalSignals，就按 serious/critical 理解。",
+      "第四步：如果只命中 saferSignals，风险可以按说明降低理解，但仍以用户判断为准。"
+    ]
+  },
+  "scope": {
+    "evaluationMode": "advisory_classification_only",
+    "includedGroups": [
+      "command_execution",
+      "filesystem_read",
+      "filesystem_write",
+      "filesystem_cleanup",
+      "network_access",
+      "browser_automation",
+      "bossai_knowledge_rag",
+      "bossai_file_delivery",
+      "bossai_knowledge_ingestion",
+      "bossai_management_api"
+    ],
+    "includedTools": [
+      "cli_tool",
+      "apply_patch_tool",
+      "apply_diff_edit_tool",
+      "write_file_tool",
+      "list_workspace_debris_tool",
+      "clean_workspace_debris_tool",
+      "web_fetch_tool",
+      "computer_use_task_tool",
+      "knowledge_search",
+      "create_file_download_link",
+      "bocha_fast_search",
+      "bossai_file_upload_api",
+      "bossai_knowledge_ingestion_api",
+      "bossai_management_api"
+    ],
+    "deferredToolGroups": [
+      {
+        "groupId": "sub_agent_and_multi_agent",
+        "reason": "deferred_by_user",
+        "examples": [
+          "spawn_agent_tool",
+          "agent_message_tool",
+          "agent_tool_permission_request_tool",
+          "research_agent_creation_proposal_tool",
+          "research_communication_edge_proposal_tool",
+          "research_proposal_apply_tool"
+        ]
+      },
+      {
+        "groupId": "restart_and_self_evolution",
+        "reason": "deferred_by_user",
+        "examples": [
+          "trigger_self_restart_tool",
+          "open_evolution_transaction_tool",
+          "close_evolution_transaction_tool",
+          "record_evolution_tool"
+        ]
+      },
+      {
+        "groupId": "knowledge_and_rag",
+        "reason": "legacy_or_non_bossai_rag_tools_deferred",
+        "examples": [
+          "knowledge_query_tool",
+          "knowledge_rag_retrieve_tool",
+          "knowledge_proposal_tool",
+          "knowledge_ingestion_tool",
+          "knowledge_rating_suggestion_tool",
+          "research_knowledge_query_tool"
+        ]
+      },
+      {
+        "groupId": "memory_context",
+        "reason": "deferred_by_user",
+        "examples": [
+          "commit_compressed_memory_tool",
+          "record_learning_tool",
+          "search_memory_tool",
+          "search_error_archive_tool",
+          "compress_context_tool",
+          "get_core_context_tool",
+          "get_current_goal_tool"
+        ]
+      },
+      {
+        "groupId": "test_build_lint",
+        "reason": "deferred_by_user",
+        "examples": [
+          "run_test_for_tool",
+          "python_lint_tool"
+        ]
+      },
+      {
+        "groupId": "background_task",
+        "reason": "deferred_by_user",
+        "examples": [
+          "task_start_tool",
+          "task_stop_tool",
+          "task_output_tool"
+        ]
+      },
+      {
+        "groupId": "git_workspace_read_only",
+        "reason": "deferred_by_user",
+        "examples": [
+          "get_git_status_summary_tool",
+          "get_recent_changes_tool",
+          "get_entity_history_tool",
+          "explain_current_worktree_tool"
+        ]
+      },
+      {
+        "groupId": "tool_registry_control_plane",
+        "reason": "deferred_by_user",
+        "examples": [
+          "/api/tools/*"
+        ]
+      },
+      {
+        "groupId": "bossai_disabled_search_tools",
+        "reason": "implemented_but_not_currently_injected_by_piSession",
+        "examples": [
+          "bocha_precise_search"
+        ]
+      }
+    ],
+    "outOfScopeResultContract": {
+      "scopeStatus": "out_of_scope",
+      "riskLevel": null,
+      "riskLabel": "未覆盖",
+      "headline": "未覆盖：{toolName} 不在当前风险配置范围内",
+      "summary": "该工具属于 deferredToolGroups，本配置暂不对它给出风险等级。",
+      "reasonField": "deferredToolGroups[].reason",
+      "userCheck": "如需评估该工具，请先为对应 deferred group 增加 toolProfiles。"
+    }
+  },
+  "riskLevels": {
+    "low": {
+      "rank": 10,
+      "label": "低",
+      "definition": "只读、范围明确、无写入、无删除、无外网、无浏览器状态变更、无敏感路径或凭据暴露迹象。",
+      "typicalSignals": [
+        "Read a specific non-sensitive file inside the workspace.",
+        "Search a bounded source directory with a simple pattern.",
+        "List files or workspace debris without deletion."
+      ],
+      "userReadableMeaning": "该操作一般只读取或定位信息，预期不会改变本地、网络或浏览器状态。"
+    },
+    "medium": {
+      "rank": 20,
+      "label": "中",
+      "definition": "存在可控风险或较宽读取范围，例如普通外网查询、大范围搜索、读取会话产物、列出清理候选、抓取公开网页。",
+      "typicalSignals": [
+        "Query or fetch public web content.",
+        "Search all extensions or a broad directory.",
+        "Read moderately large output or non-code artifacts.",
+        "Preview cleanup candidates without deleting."
+      ],
+      "userReadableMeaning": "该操作通常仍可接受，但可能扩大信息暴露、消耗资源，或把外部内容带入上下文。"
+    },
+    "high": {
+      "rank": 30,
+      "label": "高",
+      "definition": "会执行命令、写入或删除工作区文件、修改代码或配置、控制浏览器、读取敏感候选路径，或向外部服务发送可能敏感的查询。",
+      "typicalSignals": [
+        "Run a shell command.",
+        "Create, overwrite, patch, or delete workspace files.",
+        "Use browser automation.",
+        "Search or read likely sensitive files.",
+        "Send internal source snippets, paths, or customer data to web search."
+      ],
+      "userReadableMeaning": "该操作可能改变项目状态、暴露信息或触发外部副作用，执行前应让用户能看懂风险来源。"
+    },
+    "critical": {
+      "rank": 40,
+      "label": "严重",
+      "definition": "可能造成不可逆破坏、工作区外写入/删除、密钥泄露、私网/metadata 访问、生产环境变更、浏览器提交高影响操作或明显绕过安全边界。",
+      "typicalSignals": [
+        "Recursive or force deletion.",
+        "Write or delete outside the workspace.",
+        "Read or transmit credentials, SSH keys, tokens, cookies, or .env files.",
+        "Fetch localhost, private network, link-local, or cloud metadata URLs.",
+        "Run curl/wget piped into a shell or Invoke-Expression.",
+        "Submit forms, make payments, change production settings, or upload files through browser automation."
+      ],
+      "userReadableMeaning": "该操作可能带来高影响损害或越权风险；config 只给出严重等级，是否拦截由外部模块决定。"
+    }
+  },
+  "normalizedActionContract": {
+    "description": "External modules should normalize each agent action into this shape before applying this config. Missing fields should be treated as empty values.",
+    "requiredFields": [
+      "toolName",
+      "operationType",
+      "args"
+    ],
+    "fields": {
+      "toolName": {
+        "type": "string",
+        "examples": [
+          "cli_tool",
+          "web_fetch_tool"
+        ]
+      },
+      "operationType": {
+        "type": "string",
+        "examples": [
+          "command_execution",
+          "filesystem_read",
+          "filesystem_write",
+          "network_fetch",
+          "browser_automation"
+        ]
+      },
+      "args": {
+        "type": "object",
+        "description": "Original tool call arguments."
+      },
+      "rawCommand": {
+        "type": "string",
+        "description": "Command string extracted from args.command or equivalent shell fields."
+      },
+      "paths": {
+        "type": "array",
+        "items": "string",
+        "description": "All file or directory paths extracted from args, patch text, command text, or tool-specific fields."
+      },
+      "urls": {
+        "type": "array",
+        "items": "string",
+        "description": "All URLs extracted from args, command text, browser task, or fetched content references."
+      },
+      "textPayloads": {
+        "type": "array",
+        "items": "string",
+        "description": "Content-like fields such as query, task, content, patch_text, diff_text, or command."
+      },
+      "context": {
+        "type": "object",
+        "fields": {
+          "cwd": "string",
+          "workspaceRoot": "string",
+          "projectRoot": "string",
+          "environment": "local|staging|production|unknown",
+          "userIntent": "string",
+          "sourceAgentId": "string"
+        }
+      }
+    },
+    "normalizationHints": [
+      "For cli_tool, map args.command to rawCommand and textPayloads.",
+      "For apply_patch_tool, parse Add File, Update File, Delete File targets into paths and retain patch_text in textPayloads.",
+      "For apply_diff_edit_tool, map args.file_path to paths and args.diff_text to textPayloads.",
+      "For write_file_tool, map args.file_path to paths and args.content to textPayloads.",
+      "For web_fetch_tool and computer_use_task_tool, extract target URLs into urls."
+    ]
+  },
+  "categories": {
+    "command_execution": {
+      "label": "命令执行",
+      "defaultRiskLevel": "high",
+      "summary": "本地命令可能读写文件、访问网络、继承环境变量或触发脚本。"
+    },
+    "filesystem_read": {
+      "label": "文件读取",
+      "defaultRiskLevel": "low",
+      "summary": "文件读取通常低风险，但敏感路径、工作区外读取和大范围读取会升级。"
+    },
+    "filesystem_write": {
+      "label": "文件写入",
+      "defaultRiskLevel": "high",
+      "summary": "写入、覆盖、patch 或删除文件可能改变代码和配置。"
+    },
+    "filesystem_cleanup": {
+      "label": "工作区清理",
+      "defaultRiskLevel": "high",
+      "summary": "清理执行会删除文件；预览扫描风险较低但仍可能扩大读取范围。"
+    },
+    "network_access": {
+      "label": "网络访问",
+      "defaultRiskLevel": "medium",
+      "summary": "联网会把查询或 URL 发送给外部服务，抓取内容也可能把外部指令带入上下文。"
+    },
+    "browser_automation": {
+      "label": "浏览器自动化",
+      "defaultRiskLevel": "high",
+      "summary": "浏览器自动化可能提交表单、使用登录态、上传文件或修改远端系统。"
+    },
+    "bossai_knowledge_rag": {
+      "label": "BossAI 知识库 / RAG",
+      "defaultRiskLevel": "medium",
+      "summary": "BossAI knowledge_search 在只读虚拟 /knowledge 文件系统中执行 shell 检索，并把命中文档和 RAG 片段带入模型上下文。"
+    },
+    "bossai_file_delivery": {
+      "label": "BossAI 文件下载链接",
+      "defaultRiskLevel": "high",
+      "summary": "BossAI 文件上传、下载链接和本地文件暴露相关操作；路径、持久链接、文件大小和文件类型是主要风险。"
+    },
+    "bossai_knowledge_ingestion": {
+      "label": "BossAI 知识库摄取/管理 API",
+      "defaultRiskLevel": "high",
+      "summary": "BossAI 知识库上传、原文读取、重建索引、删除和文档管理接口；原文持久化、外部 embedding/OCR、递归删除和大 payload 是主要风险。"
+    },
+    "bossai_management_api": {
+      "label": "BossAI 管理/状态变更 API",
+      "defaultRiskLevel": "high",
+      "summary": "BossAI 设置、provider、模型、项目、会话、助手等管理接口会改变本地状态、保存敏感配置或触发外部模型调用。"
+    }
+  },
+  "toolProfiles": [
+    {
+      "toolName": "cli_tool",
+      "category": "command_execution",
+      "operationTypes": [
+        "command_execution"
+      ],
+      "baseRiskLevel": "high",
+      "quickView": {
+        "oneLine": "执行本地命令，默认高风险；删除、下载执行、提权、部署、密钥相关直接看严重。",
+        "lookAt": [
+          "command",
+          "cwd"
+        ],
+        "userMustNotice": [
+          "是否会删除或写入文件",
+          "是否会访问网络或下载后执行",
+          "是否涉及生产、权限或密钥"
+        ],
+        "saferWhen": "只读诊断命令，路径明确且在工作区内。"
+      },
+      "argumentFieldsToInspect": [
+        "command",
+        "cwd",
+        "timeout",
+        "max_output_chars"
+      ],
+      "riskDrivers": [
+        "Runs through local shell command execution.",
+        "Can inherit environment and local credentials.",
+        "Can read, write, delete, install, fetch, run scripts, or start long-running processes depending on command text."
+      ],
+      "escalationRules": [
+        "global.command.destructive_delete",
+        "global.command.shell_download_execute",
+        "global.command.powershell_dynamic_execution",
+        "global.command.privilege_or_permission_change",
+        "global.command.production_deploy_or_restart",
+        "global.command.package_install_or_script_execution",
+        "global.path.sensitive_path_reference",
+        "global.path.outside_workspace_write_or_delete",
+        "global.secret.secret_literal_or_sensitive_env",
+        "global.command.shell_chaining_or_pipe",
+        "global.path.system_or_home_directory"
+      ],
+      "downgradeConditions": [
+        {
+          "toRiskLevel": "medium",
+          "whenAll": [
+            "command is read-only",
+            "command targets a bounded workspace path",
+            "command has no shell chaining, pipe, download, install, delete, write, or network side effect"
+          ],
+          "examples": [
+            "pwd",
+            "git status --short",
+            "python -m py_compile path/to/file.py"
+          ],
+          "structuredWhenAll": [
+            {
+              "conditionId": "command_is_read-only",
+              "type": "manual_check",
+              "description": "command is read-only"
+            },
+            {
+              "conditionId": "command_targets_a_bounded_workspace_path",
+              "type": "manual_check",
+              "description": "command targets a bounded workspace path"
+            },
+            {
+              "conditionId": "command_has_no_shell_chaining,_pipe,_download,_install,_delete,_write,_or_network_side_effect",
+              "type": "manual_check",
+              "description": "command has no shell chaining, pipe, download, install, delete, write, or network side effect"
+            }
+          ]
+        }
+      ],
+      "readableSummary": "cli_tool 默认按高风险处理；如果命令只读且范围明确，外部模块可以降为中风险。",
+      "evidenceRefs": [
+        "tools/Key_Tools.py:448",
+        "tools/shell_tools.py:509",
+        "docs/security/tool-vulnerability-report.json category=command"
+      ]
+    },
+    {
+      "toolName": "apply_patch_tool",
+      "category": "filesystem_write",
+      "operationTypes": [
+        "filesystem_patch",
+        "filesystem_add",
+        "filesystem_update",
+        "filesystem_delete"
+      ],
+      "baseRiskLevel": "high",
+      "quickView": {
+        "oneLine": "可新增、修改、删除多文件，默认高风险；删除、配置、安全边界或密钥内容看严重。",
+        "lookAt": [
+          "patch_text",
+          "cwd"
+        ],
+        "userMustNotice": [
+          "是否 Delete File",
+          "是否多文件",
+          "是否改配置、依赖、CI、Docker、权限或认证",
+          "是否工作区外"
+        ],
+        "saferWhen": "只改单个文档或非执行文本，无删除，目标在工作区内。"
+      },
+      "argumentFieldsToInspect": [
+        "patch_text",
+        "cwd"
+      ],
+      "riskDrivers": [
+        "Can add, update, or delete multiple files in one action.",
+        "Can alter source code, configuration, scripts, or security behavior.",
+        "Patch targets are embedded in patch_text and must be parsed before classification."
+      ],
+      "escalationRules": [
+        "global.patch.delete_file",
+        "global.patch.multi_file_or_config_change",
+        "global.path.sensitive_path_reference",
+        "global.path.outside_workspace_write_or_delete",
+        "global.secret.secret_literal_or_sensitive_env",
+        "global.code.security_boundary_change",
+        "global.path.system_or_home_directory"
+      ],
+      "downgradeConditions": [
+        {
+          "toRiskLevel": "medium",
+          "whenAll": [
+            "patch only updates documentation or non-executable text",
+            "all targets are inside workspace or project",
+            "no deletion, config, script, dependency, credential, security, or runtime behavior change is detected"
+          ],
+          "structuredWhenAll": [
+            {
+              "conditionId": "patch_only_updates_documentation_or_non-executable_text",
+              "type": "manual_check",
+              "description": "patch only updates documentation or non-executable text"
+            },
+            {
+              "conditionId": "all_targets_are_inside_workspace_or_project",
+              "type": "manual_check",
+              "description": "all targets are inside workspace or project"
+            },
+            {
+              "conditionId": "no_deletion,_config,_script,_dependency,_credential,_security,_or_runtime_behavior_change_is_detected",
+              "type": "manual_check",
+              "description": "no deletion, config, script, dependency, credential, security, or runtime behavior change is detected"
+            }
+          ]
+        }
+      ],
+      "readableSummary": "apply_patch_tool 默认高风险；删除、多文件、配置、安全边界、工作区外写入或密钥内容会升为严重。",
+      "evidenceRefs": [
+        "tools/Key_Tools.py:226",
+        "docs/security/tool-vulnerability-report.json tool=apply_patch_tool"
+      ]
+    },
+    {
+      "toolName": "apply_diff_edit_tool",
+      "category": "filesystem_write",
+      "operationTypes": [
+        "filesystem_edit"
+      ],
+      "baseRiskLevel": "high",
+      "quickView": {
+        "oneLine": "局部替换文件，默认高风险；弱上下文可能改错位置。",
+        "lookAt": [
+          "file_path",
+          "diff_text"
+        ],
+        "userMustNotice": [
+          "SEARCH 是否足够唯一",
+          "是否改安全、权限或配置",
+          "是否工作区外",
+          "是否含密钥"
+        ],
+        "saferWhen": "只改文档或注释，SEARCH 上下文唯一，目标在工作区内。"
+      },
+      "argumentFieldsToInspect": [
+        "file_path",
+        "diff_text"
+      ],
+      "riskDrivers": [
+        "Edits a file with SEARCH/REPLACE blocks and fuzzy matching.",
+        "May update the wrong similar location if context is weak.",
+        "Can alter code, config, scripts, or security behavior."
+      ],
+      "escalationRules": [
+        "global.path.sensitive_path_reference",
+        "global.path.outside_workspace_write_or_delete",
+        "global.secret.secret_literal_or_sensitive_env",
+        "global.code.security_boundary_change",
+        "global.diff.weak_or_fuzzy_match_context",
+        "global.path.system_or_home_directory"
+      ],
+      "downgradeConditions": [
+        {
+          "toRiskLevel": "medium",
+          "whenAll": [
+            "file_path is inside workspace or project",
+            "diff only edits documentation or comments",
+            "search block is specific and no sensitive or executable behavior change is detected"
+          ],
+          "structuredWhenAll": [
+            {
+              "conditionId": "file_path_inside_workspace",
+              "type": "path_scope",
+              "field": "args.file_path",
+              "operator": "inside_any",
+              "reference": [
+                "context.workspaceRoot",
+                "context.projectRoot"
+              ]
+            },
+            {
+              "conditionId": "diff_only_edits_documentation_or_comments",
+              "type": "manual_check",
+              "description": "diff only edits documentation or comments"
+            },
+            {
+              "conditionId": "search_block_is_specific_and_no_sensitive_or_executable_behavior_change_is_detected",
+              "type": "manual_check",
+              "description": "search block is specific and no sensitive or executable behavior change is detected"
+            }
+          ]
+        }
+      ],
+      "readableSummary": "apply_diff_edit_tool 默认高风险；敏感路径、工作区外、弱上下文或安全相关改动会升级。",
+      "evidenceRefs": [
+        "tools/Key_Tools.py:199",
+        "docs/security/tool-vulnerability-report.json tool=apply_diff_edit_tool"
+      ]
+    },
+    {
+      "toolName": "write_file_tool",
+      "category": "filesystem_write",
+      "operationTypes": [
+        "filesystem_write",
+        "filesystem_overwrite"
+      ],
+      "baseRiskLevel": "high",
+      "quickView": {
+        "oneLine": "创建或覆盖文件，默认高风险；覆盖脚本、配置、依赖或工作区外写入看严重。",
+        "lookAt": [
+          "file_path",
+          "content"
+        ],
+        "userMustNotice": [
+          "是否覆盖已有关键文件",
+          "是否写脚本、配置或依赖文件",
+          "是否包含密钥",
+          "是否工作区外"
+        ],
+        "saferWhen": "写普通文档或交付物，位于 workspace/report/output 类目录。"
+      },
+      "argumentFieldsToInspect": [
+        "file_path",
+        "content"
+      ],
+      "riskDrivers": [
+        "Creates or overwrites a file.",
+        "Can replace configuration, scripts, source code, or generated artifacts.",
+        "Content may introduce secrets, unsafe scripts, or malicious behavior."
+      ],
+      "escalationRules": [
+        "global.path.sensitive_path_reference",
+        "global.path.outside_workspace_write_or_delete",
+        "global.secret.secret_literal_or_sensitive_env",
+        "global.code.security_boundary_change",
+        "global.write.executable_or_startup_file",
+        "global.path.system_or_home_directory"
+      ],
+      "downgradeConditions": [
+        {
+          "toRiskLevel": "medium",
+          "whenAll": [
+            "file_path is inside workspace or configured artifact output directory",
+            "content is documentation or a non-executable generated artifact",
+            "target is not an existing important source, config, script, or credential file"
+          ],
+          "structuredWhenAll": [
+            {
+              "conditionId": "file_path_is_inside_workspace_or_configured_artifact_output_directory",
+              "type": "manual_check",
+              "description": "file_path is inside workspace or configured artifact output directory"
+            },
+            {
+              "conditionId": "content_is_documentation_or_a_non-executable_generated_artifact",
+              "type": "manual_check",
+              "description": "content is documentation or a non-executable generated artifact"
+            },
+            {
+              "conditionId": "target_is_not_an_existing_important_source,_config,_script,_or_credential_file",
+              "type": "manual_check",
+              "description": "target is not an existing important source, config, script, or credential file"
+            }
+          ]
+        }
+      ],
+      "readableSummary": "write_file_tool 默认高风险；工作区外、敏感文件、脚本/配置覆盖或密钥内容会升为严重。",
+      "evidenceRefs": [
+        "tools/Key_Tools.py:495",
+        "tools/shell_tools.py:1029",
+        "docs/security/tool-vulnerability-report.json tool=write_file_tool"
+      ]
+    },
+    {
+      "toolName": "list_workspace_debris_tool",
+      "category": "filesystem_cleanup",
+      "operationTypes": [
+        "filesystem_cleanup_preview"
+      ],
+      "baseRiskLevel": "medium",
+      "quickView": {
+        "oneLine": "只读扫描清理候选，默认中风险；默认 workspace 扫描可视为较低风险。",
+        "lookAt": [
+          "directory"
+        ],
+        "userMustNotice": [
+          "是否扫描工作区外",
+          "是否枚举敏感目录"
+        ],
+        "saferWhen": "directory 是默认 workspace，且只展示不删除。"
+      },
+      "argumentFieldsToInspect": [
+        "directory"
+      ],
+      "riskDrivers": [
+        "Scans workspace debris without deleting files.",
+        "Can enumerate generated scripts, unknown directories, or project artifacts.",
+        "Directory broadening can expose more filesystem structure than intended."
+      ],
+      "escalationRules": [
+        "global.path.outside_workspace_read",
+        "global.path.sensitive_path_reference",
+        "global.search.broad_scope"
+      ],
+      "downgradeConditions": [
+        {
+          "toRiskLevel": "low",
+          "whenAll": [
+            "directory is the default workspace directory",
+            "no sensitive or outside-workspace path is referenced"
+          ],
+          "structuredWhenAll": [
+            {
+              "conditionId": "directory_is_the_default_workspace_directory",
+              "type": "manual_check",
+              "description": "directory is the default workspace directory"
+            },
+            {
+              "conditionId": "no_sensitive_or_outside-workspace_path_is_referenced",
+              "type": "manual_check",
+              "description": "no sensitive or outside-workspace path is referenced"
+            }
+          ]
+        }
+      ],
+      "readableSummary": "list_workspace_debris_tool 是只读清理预览，默认中风险；默认 workspace 扫描可降为低风险。",
+      "evidenceRefs": [
+        "tools/Key_Tools.py:746"
+      ]
+    },
+    {
+      "toolName": "clean_workspace_debris_tool",
+      "category": "filesystem_cleanup",
+      "operationTypes": [
+        "filesystem_cleanup",
+        "filesystem_delete"
+      ],
+      "baseRiskLevel": "high",
+      "quickView": {
+        "oneLine": "清理 workspace 碎片，confirm=true 会删除文件，默认高风险。",
+        "lookAt": [
+          "confirm",
+          "target_categories"
+        ],
+        "userMustNotice": [
+          "confirm 是否为 true",
+          "是否 target_categories=all",
+          "是否可能删到敏感或受保护文件"
+        ],
+        "saferWhen": "confirm=false 仅预览，或只清理明确类别。"
+      },
+      "argumentFieldsToInspect": [
+        "confirm",
+        "target_categories"
+      ],
+      "riskDrivers": [
+        "Deletes workspace debris when confirm is true.",
+        "Category selection errors can remove useful artifacts.",
+        "confirm=false behaves like a preview and should be classified lower."
+      ],
+      "escalationRules": [
+        "global.cleanup.confirmed_delete",
+        "global.cleanup.all_categories",
+        "global.path.sensitive_path_reference",
+        "global.path.outside_workspace_write_or_delete",
+        "global.path.system_or_home_directory"
+      ],
+      "downgradeConditions": [
+        {
+          "toRiskLevel": "medium",
+          "whenAll": [
+            "confirm is false",
+            "action is preview-only"
+          ],
+          "structuredWhenAll": [
+            {
+              "conditionId": "confirm_is_false",
+              "type": "manual_check",
+              "description": "confirm is false"
+            },
+            {
+              "conditionId": "action_is_preview-only",
+              "type": "manual_check",
+              "description": "action is preview-only"
+            }
+          ]
+        }
+      ],
+      "readableSummary": "clean_workspace_debris_tool 默认高风险；confirm=false 时是预览可降为中风险，confirm=true 且 all 类别应保持高风险。",
+      "evidenceRefs": [
+        "tools/Key_Tools.py:762",
+        "docs/security/tool-vulnerability-report.json tool=clean_workspace_debris_tool"
+      ]
+    },
+    {
+      "toolName": "web_fetch_tool",
+      "category": "network_access",
+      "operationTypes": [
+        "network_fetch"
+      ],
+      "baseRiskLevel": "medium",
+      "quickView": {
+        "oneLine": "抓取 URL 内容，公开网页中风险；私网、本机、metadata URL 看严重。",
+        "lookAt": [
+          "url",
+          "max_chars"
+        ],
+        "userMustNotice": [
+          "是否 localhost/私网/169.254.169.254",
+          "URL 是否带 token/auth",
+          "max_chars 是否过大"
+        ],
+        "saferWhen": "公开 http/https 文档，抓取长度受控。"
+      },
+      "argumentFieldsToInspect": [
+        "url",
+        "max_chars"
+      ],
+      "riskDrivers": [
+        "Fetches a URL with redirects enabled.",
+        "Can access external content that enters model context.",
+        "Without private network checks it may create SSRF-like access patterns if pointed at local, private, or metadata endpoints."
+      ],
+      "escalationRules": [
+        "global.url.private_or_local_address",
+        "global.url.cloud_metadata_address",
+        "global.url.credential_in_url",
+        "global.network.excessive_fetch_size",
+        "global.network.untrusted_instruction_source"
+      ],
+      "downgradeConditions": [
+        {
+          "toRiskLevel": "medium",
+          "whenAll": [
+            "url is public http or https",
+            "host is not private, local, link-local, or metadata",
+            "max_chars is bounded"
+          ],
+          "structuredWhenAll": [
+            {
+              "conditionId": "url_is_public_http_or_https",
+              "type": "manual_check",
+              "description": "url is public http or https"
+            },
+            {
+              "conditionId": "host_is_not_private,_local,_link-local,_or_metadata",
+              "type": "manual_check",
+              "description": "host is not private, local, link-local, or metadata"
+            },
+            {
+              "conditionId": "max_chars_is_bounded",
+              "type": "manual_check",
+              "description": "max_chars is bounded"
+            }
+          ]
+        }
+      ],
+      "readableSummary": "web_fetch_tool 默认中风险；私网、本机、metadata、带凭据 URL 或超大抓取会升级。",
+      "evidenceRefs": [
+        "tools/Key_Tools.py:327",
+        "docs/security/tool-vulnerability-report.json tool=web_fetch_tool"
+      ]
+    },
+    {
+      "toolName": "computer_use_task_tool",
+      "category": "browser_automation",
+      "operationTypes": [
+        "browser_automation"
+      ],
+      "baseRiskLevel": "high",
+      "quickView": {
+        "oneLine": "浏览器自动化，默认高风险；提交、付款、后台、上传下载看严重。",
+        "lookAt": [
+          "task",
+          "target_url",
+          "allowed_domains",
+          "require_confirmation"
+        ],
+        "userMustNotice": [
+          "是否 submit/pay/delete/publish/deploy",
+          "是否后台、账单或登录态页面",
+          "是否上传下载",
+          "allowed_domains 是否为空或过宽"
+        ],
+        "saferWhen": "只读查看，域名受限，require_confirmation=true，步骤数较少。"
+      },
+      "argumentFieldsToInspect": [
+        "task",
+        "target_url",
+        "allowed_domains",
+        "max_steps",
+        "require_confirmation",
+        "mode"
+      ],
+      "riskDrivers": [
+        "Automates a browser session through an external Computer Use flow.",
+        "Can click, type, navigate, read screenshots, submit forms, or interact with authenticated pages.",
+        "Task text and target URL determine whether remote state may change."
+      ],
+      "escalationRules": [
+        "global.browser.high_impact_action",
+        "global.browser.authenticated_or_admin_surface",
+        "global.browser.file_upload_or_download",
+        "global.browser.missing_domain_bound",
+        "global.url.private_or_local_address",
+        "global.url.cloud_metadata_address"
+      ],
+      "downgradeConditions": [
+        {
+          "toRiskLevel": "medium",
+          "whenAll": [
+            "task is read-only inspection",
+            "target_url is public and non-sensitive",
+            "allowed_domains is bounded",
+            "require_confirmation is true",
+            "max_steps is modest"
+          ],
+          "structuredWhenAll": [
+            {
+              "conditionId": "task_is_read-only_inspection",
+              "type": "manual_check",
+              "description": "task is read-only inspection"
+            },
+            {
+              "conditionId": "target_url_is_public_and_non-sensitive",
+              "type": "manual_check",
+              "description": "target_url is public and non-sensitive"
+            },
+            {
+              "conditionId": "allowed_domains_is_bounded",
+              "type": "manual_check",
+              "description": "allowed_domains is bounded"
+            },
+            {
+              "conditionId": "require_confirmation_is_true",
+              "type": "manual_check",
+              "description": "require_confirmation is true"
+            },
+            {
+              "conditionId": "max_steps_is_modest",
+              "type": "manual_check",
+              "description": "max_steps is modest"
+            }
+          ]
+        }
+      ],
+      "readableSummary": "computer_use_task_tool 默认高风险；只读、域名受限且要求确认时可降为中风险；提交、付款、后台配置或上传下载应升为严重。",
+      "evidenceRefs": [
+        "tools/Key_Tools.py:1078",
+        "tools/computer_use_tools.py:10",
+        "docs/security/tool-vulnerability-report.json tool=computer_use_task_tool"
+      ]
+    },
+    {
+      "toolName": "knowledge_search",
+      "category": "bossai_knowledge_rag",
+      "operationTypes": [
+        "knowledge_search",
+        "virtual_shell_read",
+        "rag_retrieval"
+      ],
+      "baseRiskLevel": "medium",
+      "quickView": {
+        "oneLine": "BossAI 知识库只读检索工具，默认中风险；大范围 dump、敏感字段检索或写入语义会升级。",
+        "lookAt": [
+          "shell",
+          "semanticQuery",
+          "knowledgeBaseId",
+          "knowledgePaths"
+        ],
+        "userMustNotice": [
+          "shell 是否保持只读",
+          "是否试图全文读取大量知识库文档",
+          "semanticQuery 是否包含敏感信息",
+          "当前知识库范围是否明确"
+        ],
+        "saferWhen": "只读命令、查询词明确、知识库范围明确、输出量受限。"
+      },
+      "argumentFieldsToInspect": [
+        "shell",
+        "semanticQuery",
+        "knowledgeBaseId",
+        "knowledgePaths"
+      ],
+      "riskDrivers": [
+        "Runs a read-only just-bash command inside an in-memory /knowledge virtual filesystem.",
+        "Knowledge base documents may contain private business, customer, or internal project content.",
+        "Shell output and hybrid RAG snippets are appended to model context.",
+        "Implementation rejects shell redirection and limits output/time, but broad reads can still expose too much knowledge content.",
+        "Runtime logs may include semanticQuery and snippets from top RAG results.",
+        "Reading /knowledge/index.json enumerates knowledge base structure and document paths."
+      ],
+      "escalationRules": [
+        "global.knowledge.shell_write_or_redirection_attempt",
+        "global.knowledge.broad_or_full_dump",
+        "global.knowledge.secret_hunting",
+        "global.knowledge.unbounded_scope",
+        "global.search.regex_complexity",
+        "global.secret.secret_literal_or_sensitive_env",
+        "global.knowledge.large_read_command",
+        "global.knowledge.prompt_injection_content",
+        "global.knowledge.runtime_log_exposure",
+        "global.knowledge.index_metadata_enumeration",
+        "global.knowledge.base64_secret_decode_exposure"
+      ],
+      "downgradeConditions": [
+        {
+          "toRiskLevel": "low",
+          "whenAll": [
+            "shell uses only read-only knowledge commands",
+            "knowledgeBaseId or knowledgePaths is explicitly scoped",
+            "semanticQuery is public or document-topic text only",
+            "shell output is bounded to a small relevant snippet",
+            "user explicitly requested knowledge-base grounded content",
+            "no broad dump, large read, index enumeration, secret decoding, secret hunting, or prompt injection signal is detected"
+          ],
+          "structuredWhenAll": [
+            {
+              "conditionId": "knowledge_shell_read_only",
+              "type": "command_allowlist",
+              "field": "args.shell",
+              "operator": "only_uses",
+              "reference": "READ_ONLY_COMMANDS"
+            },
+            {
+              "conditionId": "knowledge_scope_explicit",
+              "type": "argument_presence",
+              "fields": [
+                "context.knowledgeBaseId",
+                "context.knowledgePaths"
+              ],
+              "operator": "any_present"
+            },
+            {
+              "conditionId": "knowledge_query_not_sensitive",
+              "type": "rule_absence",
+              "ruleIds": [
+                "global.knowledge.secret_hunting",
+                "global.secret.secret_literal_or_sensitive_env"
+              ]
+            },
+            {
+              "conditionId": "knowledge_output_small_snippet",
+              "type": "external_check_false",
+              "check": "knowledge_output_or_command_too_broad"
+            },
+            {
+              "conditionId": "knowledge_user_requested_grounding",
+              "type": "intent_check",
+              "description": "user explicitly requested knowledge-base grounded content"
+            },
+            {
+              "conditionId": "knowledge_no_high_risk_read_or_injection",
+              "type": "rule_absence",
+              "ruleIds": [
+                "global.knowledge.broad_or_full_dump",
+                "global.knowledge.large_read_command",
+                "global.knowledge.index_metadata_enumeration",
+                "global.knowledge.base64_secret_decode_exposure",
+                "global.knowledge.prompt_injection_content"
+              ]
+            }
+          ]
+        }
+      ],
+      "readableSummary": "knowledge_search 默认中风险；只读不等于低风险。只有范围明确、输出片段很小、用户明确请求知识库内容且没有注入/敏感/大范围读取信号时才可降为低风险。",
+      "evidenceRefs": [
+        "apps/server/src/services/piSession.ts:644",
+        "apps/server/src/services/knowledgeSearchTool.ts:185",
+        "apps/server/src/services/knowledgeSearchTool.ts:152",
+        "apps/server/src/services/knowledgeSearchTool.test.ts:54",
+        "apps/server/src/services/knowledgeSearchTool.test.ts:70"
+      ]
+    },
+    {
+      "toolName": "create_file_download_link",
+      "category": "bossai_file_delivery",
+      "operationTypes": [
+        "file_download_link",
+        "filesystem_read",
+        "local_file_exposure"
+      ],
+      "baseRiskLevel": "high",
+      "quickView": {
+        "oneLine": "为本地文件创建持久下载链接，默认高风险；未通过允许输出目录校验或敏感路径看严重。",
+        "lookAt": [
+          "path"
+        ],
+        "userMustNotice": [
+          "path 是否指向用户真正要交付的文件",
+          "是否位于 outputs/artifacts/reports 等生成物目录",
+          "是否为 .env、配置、数据库、凭据、脚本或工作区外文件"
+        ],
+        "saferWhen": "链接的是本轮任务生成的普通交付物，位于允许输出目录。"
+      },
+      "argumentFieldsToInspect": [
+        "path"
+      ],
+      "riskDrivers": [
+        "Creates a persistent database record that maps /api/files/download/{id} to a local file path.",
+        "On desktop mode, the tool result may include localPath for user convenience.",
+        "A wrong path can expose sensitive local files, configs, databases, or private artifacts.",
+        "Desktop mode returns localPath in the tool result, which can expose real user filesystem structure."
+      ],
+      "escalationRules": [
+        "global.filelink.persistent_local_file_exposure",
+        "global.path.sensitive_path_reference",
+        "global.path.outside_workspace_read",
+        "global.path.system_or_home_directory",
+        "global.secret.secret_file_name",
+        "global.filelink.unapproved_local_path_exposure",
+        "global.filelink.bearer_download_link_leakage",
+        "global.filelink.desktop_local_path_disclosure",
+        "global.filelink.symlink_or_realpath_escape"
+      ],
+      "downgradeConditions": [
+        {
+          "toRiskLevel": "medium",
+          "whenAll": [
+            "path points to an artifact generated for the user",
+            "path is inside allowed output directory",
+            "file name and extension are not sensitive",
+            "download_path_not_allowed_artifact external check is false"
+          ],
+          "structuredWhenAll": [
+            {
+              "conditionId": "download_path_inside_allowed_output",
+              "type": "path_scope",
+              "field": "args.path",
+              "operator": "inside_any",
+              "reference": [
+                "context.outputsDir",
+                "context.artifactsDir",
+                "allowedOutputDirectories"
+              ]
+            },
+            {
+              "conditionId": "download_target_generated_artifact",
+              "type": "rule_presence",
+              "ruleId": "global.filelink.generated_artifact_only"
+            },
+            {
+              "conditionId": "download_target_not_sensitive",
+              "type": "rule_absence",
+              "ruleIds": [
+                "global.path.sensitive_path_reference",
+                "global.secret.secret_file_name"
+              ]
+            },
+            {
+              "conditionId": "download_path_not_unapproved",
+              "type": "external_check_false",
+              "check": "download_path_not_allowed_artifact"
+            }
+          ]
+        }
+      ],
+      "readableSummary": "create_file_download_link 默认高风险；路径未通过允许输出目录校验、敏感路径、系统/主目录或工作区外文件应按严重风险处理。",
+      "evidenceRefs": [
+        "apps/server/src/services/piSession.ts:648",
+        "apps/server/src/services/fileDownloadLinkTool.ts:25",
+        "apps/server/src/services/fileDownloadLinks.ts:115",
+        "apps/server/src/services/fileDownloadLinkTool.test.ts:24"
+      ]
+    },
+    {
+      "toolName": "bocha_fast_search",
+      "category": "network_access",
+      "operationTypes": [
+        "network_search",
+        "external_search_provider",
+        "bocha_web_search"
+      ],
+      "baseRiskLevel": "medium",
+      "quickView": {
+        "oneLine": "把 query 发送给 Bocha Web Search API，默认中风险；内部信息或凭据会升级。",
+        "lookAt": [
+          "query"
+        ],
+        "userMustNotice": [
+          "query 是否包含内部路径、源码、客户数据或未发布信息",
+          "query 是否包含 token/password/key/cookie",
+          "query 是否是整段代码、配置、日志、异常栈或长文本",
+          "搜索结果摘要是否被当作不可信外部内容处理"
+        ],
+        "saferWhen": "查询公开事实、政策、网页或产品信息，不含内部上下文。"
+      },
+      "argumentFieldsToInspect": [
+        "query"
+      ],
+      "riskDrivers": [
+        "Sends query text to https://api.bocha.cn/v1/web-search with summary=true, freshness=noLimit, count=10.",
+        "Requires BOCHA_API_KEY and returns external web snippets into model context.",
+        "Search results can contain untrusted instructions or incorrect facts."
+      ],
+      "escalationRules": [
+        "global.network.query_sensitive_data",
+        "global.secret.secret_literal_or_sensitive_env",
+        "global.network.untrusted_instruction_source",
+        "global.network.long_or_structured_query_exfiltration",
+        "global.network.query_text_too_long"
+      ],
+      "downgradeConditions": [
+        {
+          "toRiskLevel": "medium",
+          "whenAll": [
+            "query contains only public, non-sensitive terms",
+            "question requires current or source-backed web information"
+          ],
+          "structuredWhenAll": [
+            {
+              "conditionId": "bocha_query_public_only",
+              "type": "manual_check",
+              "description": "query contains only public, non-sensitive terms"
+            },
+            {
+              "conditionId": "bocha_current_info_needed",
+              "type": "intent_check",
+              "description": "question requires current or source-backed web information"
+            }
+          ]
+        }
+      ],
+      "readableSummary": "bocha_fast_search 默认中风险；query 含内部信息、源码、客户数据、凭据、长文本、配置块、日志或异常栈时升级为高风险。",
+      "evidenceRefs": [
+        "apps/server/src/services/piSession.ts:649",
+        "apps/server/src/services/bochaSearchTools.ts:17",
+        "apps/server/src/services/bochaSearchTools.ts:35",
+        "apps/server/src/services/bochaSearchTools.ts:138",
+        "apps/server/src/services/bochaSearchTools.test.ts:54"
+      ]
+    },
+    {
+      "toolName": "bossai_file_upload_api",
+      "category": "bossai_file_delivery",
+      "operationTypes": [
+        "file_upload",
+        "filesystem_write",
+        "local_file_ingest"
+      ],
+      "baseRiskLevel": "high",
+      "quickView": {
+        "oneLine": "BossAI 文件上传接口会解码 base64 并写入会话文件区，默认高风险。",
+        "lookAt": [
+          "sessionId",
+          "name",
+          "mediaType",
+          "data"
+        ],
+        "userMustNotice": [
+          "data 是否超大",
+          "name/mediaType 是否脚本、可执行或压缩包",
+          "是否包含凭据、环境文件或配置导出",
+          "sessionId 是否属于当前会话",
+          "data URL mediaType、请求 mediaType 和扩展名是否一致"
+        ],
+        "saferWhen": "普通图片或文档，大小受限，文件名无敏感信号，属于当前会话。"
+      },
+      "argumentFieldsToInspect": [
+        "sessionId",
+        "name",
+        "mediaType",
+        "data"
+      ],
+      "riskDrivers": [
+        "Accepts a base64 data URL and decodes it into memory before writing to the session workspace.",
+        "Uploaded files become local artifacts and may receive persistent download links.",
+        "Executable, archive, oversized, or sensitive uploads can create storage, malware, or data exposure risks."
+      ],
+      "escalationRules": [
+        "global.fileupload.large_base64_payload",
+        "global.fileupload.executable_or_archive_upload",
+        "global.fileupload.sensitive_upload_content",
+        "global.secret.secret_literal_or_sensitive_env",
+        "global.fileupload.cross_session_or_unowned_session_id",
+        "global.fileupload.media_type_mismatch_or_unknown"
+      ],
+      "downgradeConditions": [
+        {
+          "toRiskLevel": "medium",
+          "whenAll": [
+            "payload size is below configured limit",
+            "mediaType is image or ordinary document",
+            "file name is not sensitive or executable",
+            "sessionId matches current session"
+          ],
+          "structuredWhenAll": [
+            {
+              "conditionId": "upload_payload_size_bounded",
+              "type": "external_check_false",
+              "check": "upload_payload_too_large"
+            },
+            {
+              "conditionId": "upload_media_type_allowed",
+              "type": "argument_value",
+              "field": "args.mediaType",
+              "operator": "matches_allowlist",
+              "reference": [
+                "image/*",
+                "text/plain",
+                "application/pdf",
+                "application/vnd.openxmlformats-officedocument.*"
+              ]
+            },
+            {
+              "conditionId": "upload_name_not_sensitive_or_executable",
+              "type": "rule_absence",
+              "ruleIds": [
+                "global.fileupload.executable_or_archive_upload",
+                "global.fileupload.sensitive_upload_content"
+              ]
+            }
+          ]
+        }
+      ],
+      "readableSummary": "bossai_file_upload_api 默认高风险；超大 base64、可执行/压缩包、凭据文件或敏感内容应升级。",
+      "evidenceRefs": [
+        "apps/server/src/routes/files.ts:11",
+        "apps/server/src/services/fileDownloadLinks.ts:52",
+        "apps/server/src/services/fileDownloadLinks.ts:130"
+      ]
+    },
+    {
+      "toolName": "bossai_knowledge_ingestion_api",
+      "category": "bossai_knowledge_ingestion",
+      "operationTypes": [
+        "knowledge_document_upload",
+        "knowledge_document_read",
+        "knowledge_document_create",
+        "knowledge_document_update",
+        "knowledge_document_delete",
+        "knowledge_reindex",
+        "knowledge_folder_mutation"
+      ],
+      "baseRiskLevel": "high",
+      "quickView": {
+        "oneLine": "知识库摄取/管理 API 默认高风险；原文读取、敏感文档、reindex、外部 OCR/embed 或删除会升级。",
+        "lookAt": [
+          "route",
+          "method",
+          "kbId",
+          "documentId",
+          "files[].name",
+          "files[].content",
+          "recursive"
+        ],
+        "userMustNotice": [
+          "是否上传或返回完整原文",
+          "是否触发 reindex、OCR、embedding 或 rerank",
+          "是否删除知识库、文档或 recursive 文件夹",
+          "files 数量和 base64 体积是否过大",
+          "文档是否含凭据、客户数据、合同、薪资或隐私信息"
+        ],
+        "saferWhen": "小批量普通文档、知识库范围明确、只读元数据、不触发删除/reindex、不返回完整 content。"
+      },
+      "argumentFieldsToInspect": [
+        "route",
+        "method",
+        "kbId",
+        "documentId",
+        "path",
+        "files",
+        "content",
+        "recursive"
+      ],
+      "riskDrivers": [
+        "apps/server/src/routes/knowledge.ts stores uploaded document content in knowledge_documents.content.",
+        "Upload and reindex call chunkText/embedChunks; images call OCR and docs may be parsed with mammoth.",
+        "GET /api/documents/:id returns the full content field.",
+        "DELETE knowledge base/document/folder can remove source records and vector chunks.",
+        "Reindex runs asynchronously and logs document names, IDs, chunk counts, and errors."
+      ],
+      "escalationRules": [
+        "global.knowledge_ingest.raw_content_persistence",
+        "global.knowledge_ingest.full_document_content_read",
+        "global.knowledge_ingest.destructive_delete_or_recursive_folder_delete",
+        "global.knowledge_ingest.reindex_background_job",
+        "global.knowledge_ingest.external_embed_ocr_rerank_exposure",
+        "global.knowledge_ingest.large_batch_or_base64_payload",
+        "global.knowledge_ingest.untrusted_parser_or_ocr_input",
+        "global.knowledge_ingest.sensitive_document_content",
+        "global.secret.secret_literal_or_sensitive_env"
+      ],
+      "downgradeConditions": [
+        {
+          "toRiskLevel": "medium",
+          "whenAll": [
+            "request is metadata-only or a small ordinary document upload",
+            "no full document content is returned",
+            "no delete or recursive mutation is requested",
+            "no reindex/OCR/external embedding exposure is triggered",
+            "content has no secret/customer/privacy signal"
+          ],
+          "structuredWhenAll": [
+            {
+              "conditionId": "knowledge_ingest_no_destructive_mutation",
+              "type": "rule_absence",
+              "ruleIds": [
+                "global.knowledge_ingest.destructive_delete_or_recursive_folder_delete"
+              ]
+            },
+            {
+              "conditionId": "knowledge_ingest_no_full_content_read",
+              "type": "rule_absence",
+              "ruleIds": [
+                "global.knowledge_ingest.full_document_content_read"
+              ]
+            },
+            {
+              "conditionId": "knowledge_ingest_payload_bounded",
+              "type": "external_check_false",
+              "check": "knowledge_upload_batch_or_base64_too_large"
+            },
+            {
+              "conditionId": "knowledge_ingest_content_not_sensitive",
+              "type": "rule_absence",
+              "ruleIds": [
+                "global.knowledge_ingest.sensitive_document_content",
+                "global.secret.secret_literal_or_sensitive_env"
+              ]
+            }
+          ]
+        }
+      ],
+      "readableSummary": "bossai_knowledge_ingestion_api 默认高风险；完整原文读取、敏感文档、删除、reindex、大批量上传或外部 embed/OCR/rerank 应按高到严重风险处理。",
+      "evidenceRefs": [
+        "apps/server/src/routes/knowledge.ts:509",
+        "apps/server/src/routes/knowledge.ts:638",
+        "apps/server/src/routes/knowledge.ts:468",
+        "apps/server/src/routes/knowledge.ts:314",
+        "apps/server/src/routes/knowledge.ts:391",
+        "apps/server/src/services/ragPipeline.ts:182",
+        "apps/server/src/services/ragPipeline.ts:208"
+      ]
+    },
+    {
+      "toolName": "bossai_management_api",
+      "category": "bossai_management_api",
+      "operationTypes": [
+        "bossai_api_mutation",
+        "settings_write",
+        "provider_test",
+        "model_mutation",
+        "session_mutation",
+        "project_mutation",
+        "assistant_mutation"
+      ],
+      "baseRiskLevel": "high",
+      "quickView": {
+        "oneLine": "BossAI 管理 API 默认高风险；开放 CORS、删除、provider 密钥测试、设置写入和项目路径变更看严重。",
+        "lookAt": [
+          "route",
+          "method",
+          "key",
+          "value",
+          "provider",
+          "baseUrl",
+          "apiKey",
+          "modelId",
+          "sessionId",
+          "projectPath"
+        ],
+        "userMustNotice": [
+          "请求是否 POST/PATCH/PUT/DELETE",
+          "是否来自浏览器/局域网且 Origin 未限制",
+          "是否保存或测试 apiKey/baseUrl",
+          "是否删除会话、项目、模型、助手或设置",
+          "是否写入本地路径、localPath、uploadsDir 或凭据到消息"
+        ],
+        "saferWhen": "只读 GET、无凭据、无状态变更、目标资源属于当前用户且 Origin/认证边界明确。"
+      },
+      "argumentFieldsToInspect": [
+        "route",
+        "method",
+        "url",
+        "body",
+        "key",
+        "value",
+        "baseUrl",
+        "apiKey",
+        "modelId",
+        "sessionId",
+        "projectPath"
+      ],
+      "riskDrivers": [
+        "apps/server/src/server.ts uses cors() and registers many /api routers directly.",
+        "/api/providers/test and /test-stream execute real provider calls with request-supplied baseUrl/apiKey/testPrompt.",
+        "/api/settings can write or delete arbitrary setting key/value pairs.",
+        "Models, sessions, messages, projects, assistants, and agents expose mutating and delete routes.",
+        "Session prompts may include uploadsDir/localPath, and messages persist chat content."
+      ],
+      "escalationRules": [
+        "global.bossai_api.open_cors_mutating_request",
+        "global.bossai_api.unauthenticated_state_change",
+        "global.bossai_api.delete_session_project_model_or_setting",
+        "global.bossai_api.provider_test_secret_or_private_base_url",
+        "global.bossai_api.settings_secret_storage_or_delete",
+        "global.bossai_api.model_download_or_delete_resource_impact",
+        "global.bossai_api.session_message_sensitive_persistence",
+        "global.bossai_api.project_path_outside_allowed_workspace",
+        "global.bossai_api.assistant_or_agent_system_prompt_change",
+        "global.url.private_or_local_address",
+        "global.secret.secret_literal_or_sensitive_env"
+      ],
+      "downgradeConditions": [
+        {
+          "toRiskLevel": "medium",
+          "whenAll": [
+            "request is read-only GET",
+            "no apiKey/token/secret/localPath is present",
+            "no provider test or external model call is triggered",
+            "no delete or mutating operation is requested",
+            "Origin/auth/session ownership checks are known good"
+          ],
+          "structuredWhenAll": [
+            {
+              "conditionId": "bossai_api_read_only_get",
+              "type": "argument_value",
+              "field": "args.method",
+              "operator": "equals_any",
+              "reference": [
+                "GET"
+              ]
+            },
+            {
+              "conditionId": "bossai_api_no_state_change_rules",
+              "type": "rule_absence",
+              "ruleIds": [
+                "global.bossai_api.unauthenticated_state_change",
+                "global.bossai_api.delete_session_project_model_or_setting",
+                "global.bossai_api.provider_test_secret_or_private_base_url"
+              ]
+            },
+            {
+              "conditionId": "bossai_api_no_sensitive_values",
+              "type": "rule_absence",
+              "ruleIds": [
+                "global.secret.secret_literal_or_sensitive_env",
+                "global.bossai_api.session_message_sensitive_persistence"
+              ]
+            }
+          ]
+        }
+      ],
+      "readableSummary": "bossai_management_api 默认高风险；开放 CORS 下的状态变更、DELETE、provider 密钥测试、设置写入、项目路径越界或会话敏感内容持久化应升级。",
+      "evidenceRefs": [
+        "apps/server/src/server.ts:80",
+        "apps/server/src/routes/providers.ts:47",
+        "apps/server/src/routes/settings.ts:8",
+        "apps/server/src/routes/models.ts:4",
+        "apps/server/src/routes/sessions.ts:48",
+        "apps/server/src/routes/projects.ts:24",
+        "apps/server/src/routes/assistants.ts:28"
+      ]
+    }
+  ],
+  "globalRuleGroups": [
+    {
+      "groupId": "global.command",
+      "description": "Rules for raw shell command text, usually extracted from cli_tool.command.",
+      "rules": [
+        {
+          "id": "global.command.destructive_delete",
+          "riskLevel": "critical",
+          "match": {
+            "fields": [
+              "rawCommand"
+            ],
+            "regexAny": [
+              "(?i)\\brm\\s+(-[^\\n;&|]*[rf]|-[^\\n;&|]*f[^\\n;&|]*r)\\b",
+              "(?i)\\bRemove-Item\\b[^\\n;&|]*(?:-Recurse|-Force)",
+              "(?i)\\bdel\\b[^\\n;&|]*(?:/s|/q|/f)",
+              "(?i)\\brmdir\\b[^\\n;&|]*(?:/s|/q)",
+              "(?i)\\bshutil\\.rmtree\\b",
+              "(?i)\\bunlink\\b|\\bRemove-Item\\b"
+            ]
+          },
+          "reason": "命令包含递归、强制或批量删除信号，可能造成不可逆文件损失。",
+          "evidenceHint": "Show the matched delete token and extracted target path if available.",
+          "display": {
+            "headline": "命令可能删除大量文件",
+            "plainReason": "命令包含递归、强制或批量删除信号，可能造成不可逆文件损失。",
+            "userCheck": "确认删除目标、cwd 和是否可恢复。",
+            "evidenceTemplate": "命中 {{matchedField}}: {{matchedText}}",
+            "badges": [
+              "命令风险",
+              "严重"
+            ]
+          }
+        },
+        {
+          "id": "global.command.shell_download_execute",
+          "riskLevel": "critical",
+          "match": {
+            "fields": [
+              "rawCommand"
+            ],
+            "regexAny": [
+              "(?i)\\b(curl|wget|iwr|Invoke-WebRequest)\\b[^\\n]*(\\||;|&&)\\s*(sh|bash|python|powershell|pwsh|cmd)",
+              "(?i)\\b(curl|wget|iwr|Invoke-WebRequest)\\b[^\\n]*\\|\\s*(iex|Invoke-Expression)",
+              "(?i)\\bSet-ExecutionPolicy\\b[^\\n]*(Bypass|Unrestricted)"
+            ]
+          },
+          "reason": "命令疑似下载后直接执行或放宽脚本执行策略，供应链和远程代码执行风险极高。",
+          "display": {
+            "headline": "命令可能下载后直接执行",
+            "plainReason": "命令疑似下载后直接执行或放宽脚本执行策略，供应链和远程代码执行风险极高。",
+            "userCheck": "确认来源可信，不要把下载内容直接交给 shell。",
+            "evidenceTemplate": "命中 {{matchedField}}: {{matchedText}}",
+            "badges": [
+              "命令风险",
+              "严重"
+            ]
+          }
+        },
+        {
+          "id": "global.command.powershell_dynamic_execution",
+          "riskLevel": "critical",
+          "match": {
+            "fields": [
+              "rawCommand"
+            ],
+            "regexAny": [
+              "(?i)\\bInvoke-Expression\\b|\\biex\\b",
+              "(?i)\\bFromBase64String\\b",
+              "(?i)\\bStart-Process\\b[^\\n]*(?:-Verb\\s+RunAs|powershell|pwsh|cmd)"
+            ]
+          },
+          "reason": "PowerShell 动态执行、Base64 执行或提权启动会降低可审计性并扩大执行风险。",
+          "display": {
+            "headline": "PowerShell 命令可能动态执行或提权",
+            "plainReason": "PowerShell 动态执行、Base64 执行或提权启动会降低可审计性并扩大执行风险。",
+            "userCheck": "检查是否包含 iex、Base64、RunAs 或启动新 shell。",
+            "evidenceTemplate": "命中 {{matchedField}}: {{matchedText}}",
+            "badges": [
+              "命令风险",
+              "严重"
+            ]
+          }
+        },
+        {
+          "id": "global.command.privilege_or_permission_change",
+          "riskLevel": "critical",
+          "match": {
+            "fields": [
+              "rawCommand"
+            ],
+            "regexAny": [
+              "(?i)\\bsudo\\b",
+              "(?i)\\bchmod\\s+(777|\\+x)",
+              "(?i)\\bchown\\b",
+              "(?i)\\bicacls\\b|\\btakeown\\b",
+              "(?i)\\bnet\\s+user\\b|\\bNew-LocalUser\\b|\\bAdd-LocalGroupMember\\b"
+            ]
+          },
+          "reason": "命令涉及提权、权限放宽、用户或系统权限变更。",
+          "display": {
+            "headline": "命令可能修改权限或提权",
+            "plainReason": "命令涉及提权、权限放宽、用户或系统权限变更。",
+            "userCheck": "确认是否需要 sudo/chmod/chown/icacls 或用户权限变更。",
+            "evidenceTemplate": "命中 {{matchedField}}: {{matchedText}}",
+            "badges": [
+              "命令风险",
+              "严重"
+            ]
+          }
+        },
+        {
+          "id": "global.command.production_deploy_or_restart",
+          "riskLevel": "critical",
+          "match": {
+            "fields": [
+              "rawCommand",
+              "textPayloads"
+            ],
+            "regexAny": [
+              "(?i)\\b(prod|production)\\b",
+              "(?i)\\bdeploy\\b|\\bpublish\\b|\\brelease\\b",
+              "(?i)\\brestart\\b|\\bStart-Service\\b|\\bRestart-Service\\b|\\bsystemctl\\s+restart\\b",
+              "(?i)\\bkubectl\\b|\\bhelm\\b|\\bterraform\\s+apply\\b"
+            ]
+          },
+          "reason": "命令疑似影响生产、部署、发布、重启或基础设施状态。",
+          "display": {
+            "headline": "命令可能影响生产、部署或重启",
+            "plainReason": "命令疑似影响生产、部署、发布、重启或基础设施状态。",
+            "userCheck": "确认环境、目标服务和是否会改变线上状态。",
+            "evidenceTemplate": "命中 {{matchedField}}: {{matchedText}}",
+            "badges": [
+              "命令风险",
+              "严重"
+            ]
+          }
+        },
+        {
+          "id": "global.command.package_install_or_script_execution",
+          "riskLevel": "high",
+          "match": {
+            "fields": [
+              "rawCommand"
+            ],
+            "regexAny": [
+              "(?i)\\b(npm|pnpm|yarn|bun)\\s+(install|add|run)\\b",
+              "(?i)\\bpip\\s+install\\b|\\bpython\\s+-m\\s+pip\\s+install\\b",
+              "(?i)\\bpoetry\\s+add\\b|\\bcargo\\s+install\\b",
+              "(?i)\\bnode\\b[^\\n]*\\.js\\b|\\bpython\\b[^\\n]*\\.py\\b|\\bpowershell\\b[^\\n]*\\.ps1\\b"
+            ]
+          },
+          "reason": "命令安装依赖或运行脚本，可能触发任意代码、网络访问或文件写入。",
+          "display": {
+            "headline": "命令可能安装依赖或执行脚本",
+            "plainReason": "命令安装依赖或运行脚本，可能触发任意代码、网络访问或文件写入。",
+            "userCheck": "确认依赖来源、脚本内容和是否会触发安装后脚本。",
+            "evidenceTemplate": "命中 {{matchedField}}: {{matchedText}}",
+            "badges": [
+              "命令风险",
+              "高"
+            ]
+          }
+        },
+        {
+          "id": "global.command.shell_chaining_or_pipe",
+          "riskLevel": "high",
+          "match": {
+            "fields": [
+              "rawCommand"
+            ],
+            "regexAny": [
+              "[;&|]{1,2}",
+              "`[^`]+`",
+              "\\$\\([^)]*\\)"
+            ]
+          },
+          "reason": "命令包含链式执行、管道或子表达式，实际执行行为更难从单个命令直观看清。",
+          "display": {
+            "headline": "命令包含链式执行或管道",
+            "plainReason": "命令包含链式执行、管道或子表达式，实际执行行为更难从单个命令直观看清。",
+            "userCheck": "把每一段命令拆开确认真实执行行为。",
+            "evidenceTemplate": "命中 {{matchedField}}: {{matchedText}}",
+            "badges": [
+              "命令风险",
+              "高"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "groupId": "global.path",
+      "description": "Rules for paths extracted from args, commands, patches, browser tasks, or URLs.",
+      "rules": [
+        {
+          "id": "global.path.sensitive_path_reference",
+          "riskLevel": "high",
+          "match": {
+            "fields": [
+              "paths",
+              "rawCommand",
+              "textPayloads"
+            ],
+            "regexAny": [
+              "(?i)(^|[\\\\/\\.])\\.env($|[\\\\/\\.\\w-])",
+              "(?i)(^|[\\\\/])(id_rsa|id_dsa|id_ecdsa|id_ed25519|known_hosts|authorized_keys)$",
+              "(?i)(^|[\\\\/])(credentials|credential|secrets?|token|apikey|api_key|cookie|session)\\.(json|yml|yaml|toml|ini|txt|env)$",
+              "(?i)(^|[\\\\/])\\.ssh([\\\\/]|$)",
+              "(?i)(^|[\\\\/])\\.aws([\\\\/]|$)|(^|[\\\\/])\\.azure([\\\\/]|$)|(^|[\\\\/])\\.config([\\\\/]|$)",
+              "(?i)(^|[\\\\/])config\\.(toml|json|yml|yaml|py)$"
+            ]
+          },
+          "reason": "操作引用了敏感配置、凭据、SSH、云服务或 token 候选路径。",
+          "display": {
+            "headline": "路径疑似指向敏感文件",
+            "plainReason": "操作引用了敏感配置、凭据、SSH、云服务或 token 候选路径。",
+            "userCheck": "确认是否涉及 .env、SSH、凭据、token 或 cookie。",
+            "evidenceTemplate": "命中 {{matchedField}}: {{matchedText}}",
+            "badges": [
+              "路径范围",
+              "高"
+            ]
+          }
+        },
+        {
+          "id": "global.path.outside_workspace_read",
+          "riskLevel": "high",
+          "match": {
+            "requiresExternalCheck": "path_is_outside_workspace",
+            "appliesToOperationTypes": [
+              "filesystem_read",
+              "filesystem_search",
+              "filesystem_list"
+            ]
+          },
+          "reason": "读取范围不在工作区或项目允许根目录内，可能暴露用户或系统文件。",
+          "display": {
+            "headline": "读取范围可能越出工作区",
+            "plainReason": "读取范围不在工作区或项目允许根目录内，可能暴露用户或系统文件。",
+            "userCheck": "确认路径解析后仍在允许项目目录内。",
+            "evidenceTemplate": "命中 {{matchedField}}: {{matchedText}}",
+            "badges": [
+              "路径范围",
+              "高"
+            ]
+          }
+        },
+        {
+          "id": "global.path.outside_workspace_write_or_delete",
+          "riskLevel": "critical",
+          "match": {
+            "requiresExternalCheck": "path_is_outside_workspace",
+            "appliesToOperationTypes": [
+              "filesystem_write",
+              "filesystem_overwrite",
+              "filesystem_patch",
+              "filesystem_add",
+              "filesystem_update",
+              "filesystem_delete",
+              "filesystem_cleanup",
+              "command_execution"
+            ]
+          },
+          "reason": "写入或删除目标不在工作区或项目允许根目录内，可能破坏用户或系统文件。",
+          "display": {
+            "headline": "写入或删除可能越出工作区",
+            "plainReason": "写入或删除目标不在工作区或项目允许根目录内，可能破坏用户或系统文件。",
+            "userCheck": "确认目标路径解析后没有逃出 workspace/projectRoot。",
+            "evidenceTemplate": "命中 {{matchedField}}: {{matchedText}}",
+            "badges": [
+              "路径范围",
+              "严重"
+            ]
+          }
+        },
+        {
+          "id": "global.path.system_or_home_directory",
+          "riskLevel": "critical",
+          "match": {
+            "fields": [
+              "paths",
+              "rawCommand"
+            ],
+            "regexAny": [
+              "(?i)\\bC:\\\\Windows\\b|\\bC:\\\\Program Files\\b|\\bC:\\\\Users\\\\[^\\\\]+\\\\(Desktop|Documents|Downloads|AppData)\\b",
+              "(?i)(^|\\s)/(etc|bin|sbin|usr|var|home|root)(/|\\s|$)",
+              "(?i)~[/\\\\]"
+            ]
+          },
+          "reason": "操作引用系统目录、用户主目录或常见个人数据目录。",
+          "display": {
+            "headline": "路径指向系统目录或用户目录",
+            "plainReason": "操作引用系统目录、用户主目录或常见个人数据目录。",
+            "userCheck": "确认不是系统目录、主目录或个人数据目录。",
+            "evidenceTemplate": "命中 {{matchedField}}: {{matchedText}}",
+            "badges": [
+              "路径范围",
+              "严重"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "groupId": "global.secret",
+      "description": "Rules for literal credentials or sensitive values in command, content, query, patch, or task text.",
+      "rules": [
+        {
+          "id": "global.secret.secret_file_name",
+          "riskLevel": "high",
+          "match": {
+            "fields": [
+              "paths"
+            ],
+            "regexAny": [
+              "(?i)(secret|token|password|passwd|credential|cookie|session|private[_-]?key|api[_-]?key)"
+            ]
+          },
+          "reason": "目标路径名疑似包含凭据或敏感会话数据。",
+          "display": {
+            "headline": "文件名疑似包含密钥或凭据",
+            "plainReason": "目标路径名疑似包含凭据或敏感会话数据。",
+            "userCheck": "确认文件是否包含 secret、token、cookie、credential 等敏感内容。",
+            "evidenceTemplate": "命中 {{matchedField}}: {{matchedText}}",
+            "badges": [
+              "敏感信息",
+              "高"
+            ]
+          }
+        },
+        {
+          "id": "global.secret.secret_literal_or_sensitive_env",
+          "riskLevel": "critical",
+          "match": {
+            "fields": [
+              "rawCommand",
+              "textPayloads"
+            ],
+            "regexAny": [
+              "(?i)(api[_-]?key|secret|token|password|passwd|authorization|bearer|cookie)\\s*[:=]\\s*['\\\"]?[A-Za-z0-9_./+=:-]{12,}",
+              "(?i)-----BEGIN\\s+(RSA|OPENSSH|EC|DSA|PRIVATE)\\s+KEY-----",
+              "(?i)\\b(AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY|OPENAI_API_KEY|ANTHROPIC_API_KEY|GITHUB_TOKEN|AUTOGLM_APP_KEY)\\b"
+            ]
+          },
+          "reason": "文本中出现密钥、token、授权头、私钥或敏感环境变量名。",
+          "display": {
+            "headline": "文本疑似包含密钥或敏感环境变量",
+            "plainReason": "文本中出现密钥、token、授权头、私钥或敏感环境变量名。",
+            "userCheck": "只展示键名或片段，避免暴露完整值。",
+            "evidenceTemplate": "命中 {{matchedField}}: {{matchedText}}",
+            "badges": [
+              "敏感信息",
+              "严重"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "groupId": "global.search",
+      "description": "Rules for filesystem search and glob behavior.",
+      "rules": [
+        {
+          "id": "global.search.broad_scope",
+          "riskLevel": "medium",
+          "match": {
+            "fields": [
+              "args.search_dir",
+              "args.include_ext",
+              "args.pattern",
+              "args.regex_pattern"
+            ],
+            "regexAny": [
+              "^\\.$",
+              "^\\*+$",
+              "^\\*\\*/\\*$",
+              "(?i)include_ext\\s*[:=]\\s*['\\\"]?\\*",
+              "(?i)max_results\\s*[:=]\\s*(?:[5-9][0-9]|[1-9][0-9]{2,})"
+            ]
+          },
+          "reason": "搜索范围或返回数量较宽，可能读取过多无关内容。",
+          "display": {
+            "headline": "搜索范围过宽",
+            "plainReason": "搜索范围或返回数量较宽，可能读取过多无关内容。",
+            "userCheck": "缩小目录、文件类型或 max_results。",
+            "evidenceTemplate": "命中 {{matchedField}}: {{matchedText}}",
+            "badges": [
+              "搜索范围",
+              "中"
+            ]
+          }
+        },
+        {
+          "id": "global.search.secret_hunting",
+          "riskLevel": "high",
+          "match": {
+            "fields": [
+              "args.regex_pattern",
+              "textPayloads"
+            ],
+            "regexAny": [
+              "(?i)(password|passwd|secret|token|api[_-]?key|private[_-]?key|authorization|bearer|cookie)"
+            ]
+          },
+          "reason": "搜索模式疑似专门定位凭据或敏感数据。",
+          "display": {
+            "headline": "搜索模式疑似查找密钥",
+            "plainReason": "搜索模式疑似专门定位凭据或敏感数据。",
+            "userCheck": "确认是否真的需要定位凭据或敏感数据。",
+            "evidenceTemplate": "命中 {{matchedField}}: {{matchedText}}",
+            "badges": [
+              "搜索范围",
+              "高"
+            ]
+          }
+        },
+        {
+          "id": "global.search.regex_complexity",
+          "riskLevel": "medium",
+          "match": {
+            "fields": [
+              "args.regex_pattern"
+            ],
+            "regexAny": [
+              "\\([^)]*[+*][^)]*\\)[+*?]",
+              "\\([^)]*\\{[^}]+\\}[^)]*\\)[+*?]"
+            ]
+          },
+          "reason": "正则包含常见高复杂度嵌套量词形态，可能带来资源消耗风险。",
+          "display": {
+            "headline": "正则可能过于复杂",
+            "plainReason": "正则包含常见高复杂度嵌套量词形态，可能带来资源消耗风险。",
+            "userCheck": "确认正则不会造成资源消耗或卡顿。",
+            "evidenceTemplate": "命中 {{matchedField}}: {{matchedText}}",
+            "badges": [
+              "搜索范围",
+              "中"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "groupId": "global.read",
+      "description": "Rules for direct file reads.",
+      "rules": [
+        {
+          "id": "global.read.large_unbounded_read",
+          "riskLevel": "medium",
+          "match": {
+            "fields": [
+              "args.max_lines"
+            ],
+            "equalsAny": [
+              0,
+              "0",
+              null
+            ]
+          },
+          "reason": "读取行数未限制或请求读取全文，可能把大量无关内容带入上下文。",
+          "display": {
+            "headline": "读取内容可能过大或无边界",
+            "plainReason": "读取行数未限制或请求读取全文，可能把大量无关内容带入上下文。",
+            "userCheck": "限制行数、大小或只读取需要的片段。",
+            "evidenceTemplate": "命中 {{matchedField}}: {{matchedText}}",
+            "badges": [
+              "读取范围",
+              "中"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "groupId": "global.patch",
+      "description": "Rules for patch_text and diff_text.",
+      "rules": [
+        {
+          "id": "global.patch.delete_file",
+          "riskLevel": "critical",
+          "match": {
+            "fields": [
+              "args.patch_text",
+              "textPayloads"
+            ],
+            "regexAny": [
+              "(?m)^\\*\\*\\* Delete File:\\s+.+$",
+              "(?i)\\bDelete File\\b"
+            ]
+          },
+          "reason": "patch 包含删除文件操作。",
+          "display": {
+            "headline": "补丁包含删除文件",
+            "plainReason": "patch 包含删除文件操作。",
+            "userCheck": "确认删除目标和是否可恢复。",
+            "evidenceTemplate": "命中 {{matchedField}}: {{matchedText}}",
+            "badges": [
+              "补丁修改",
+              "严重"
+            ]
+          }
+        },
+        {
+          "id": "global.patch.multi_file_or_config_change",
+          "riskLevel": "high",
+          "match": {
+            "fields": [
+              "args.patch_text",
+              "textPayloads",
+              "paths"
+            ],
+            "regexAny": [
+              "(?m)^\\*\\*\\* (Add|Update|Delete) File: .+\\n(?:.|\\n)*^\\*\\*\\* (Add|Update|Delete) File: ",
+              "(?i)(package-lock\\.json|package\\.json|pyproject\\.toml|requirements\\.txt|config\\.(toml|json|yml|yaml|py)|Dockerfile|docker-compose\\.ya?ml|\\.github[\\\\/])"
+            ]
+          },
+          "reason": "patch 涉及多文件或配置、依赖、CI、容器等高影响文件。",
+          "display": {
+            "headline": "补丁涉及多文件或配置变更",
+            "plainReason": "patch 涉及多文件或配置、依赖、CI、容器等高影响文件。",
+            "userCheck": "确认影响面、依赖、CI、配置和安全边界。",
+            "evidenceTemplate": "命中 {{matchedField}}: {{matchedText}}",
+            "badges": [
+              "补丁修改",
+              "高"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "groupId": "global.diff",
+      "description": "Rules specific to SEARCH/REPLACE style diff edits.",
+      "rules": [
+        {
+          "id": "global.diff.weak_or_fuzzy_match_context",
+          "riskLevel": "high",
+          "match": {
+            "requiresExternalCheck": "diff_search_block_is_short_or_non_unique"
+          },
+          "reason": "SEARCH 块过短或在目标文件中非唯一，模糊替换可能改到错误位置。",
+          "display": {
+            "headline": "差异替换上下文可能不稳定",
+            "plainReason": "SEARCH 块过短或在目标文件中非唯一，模糊替换可能改到错误位置。",
+            "userCheck": "确认 SEARCH 块唯一且足够具体。",
+            "evidenceTemplate": "命中 {{matchedField}}: {{matchedText}}",
+            "badges": [
+              "差异替换",
+              "高"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "groupId": "global.write",
+      "description": "Rules for write_file content and target paths.",
+      "rules": [
+        {
+          "id": "global.write.executable_or_startup_file",
+          "riskLevel": "critical",
+          "match": {
+            "fields": [
+              "paths"
+            ],
+            "regexAny": [
+              "(?i)\\.(ps1|bat|cmd|sh|bash|zsh|fish|exe|dll|so|dylib)$",
+              "(?i)(^|[\\\\/])(package\\.json|pyproject\\.toml|requirements\\.txt|Dockerfile|docker-compose\\.ya?ml)$",
+              "(?i)(^|[\\\\/])(\\.github[\\\\/]workflows|systemd|launchd|Startup|Start Menu[\\\\/]Programs[\\\\/]Startup)([\\\\/]|$)"
+            ]
+          },
+          "reason": "写入目标是可执行脚本、依赖配置、容器配置、CI 或启动路径。",
+          "display": {
+            "headline": "写入目标可能是可执行或启动文件",
+            "plainReason": "写入目标是可执行脚本、依赖配置、容器配置、CI 或启动路径。",
+            "userCheck": "确认脚本、配置、CI 或启动路径是否会改变执行行为。",
+            "evidenceTemplate": "命中 {{matchedField}}: {{matchedText}}",
+            "badges": [
+              "文件写入",
+              "严重"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "groupId": "global.cleanup",
+      "description": "Rules for workspace debris cleanup.",
+      "rules": [
+        {
+          "id": "global.cleanup.confirmed_delete",
+          "riskLevel": "high",
+          "match": {
+            "fields": [
+              "args.confirm"
+            ],
+            "equalsAny": [
+              true,
+              "true",
+              "True"
+            ]
+          },
+          "reason": "清理工具已请求真实删除，而不是仅预览。",
+          "display": {
+            "headline": "清理操作已确认删除",
+            "plainReason": "清理工具已请求真实删除，而不是仅预览。",
+            "userCheck": "确认删除范围只限预期 workspace 碎片。",
+            "evidenceTemplate": "命中 {{matchedField}}: {{matchedText}}",
+            "badges": [
+              "清理操作",
+              "高"
+            ]
+          }
+        },
+        {
+          "id": "global.cleanup.all_categories",
+          "riskLevel": "high",
+          "match": {
+            "fields": [
+              "args.target_categories"
+            ],
+            "regexAny": [
+              "(?i)^all$"
+            ]
+          },
+          "reason": "清理目标为全部类别，删除范围较宽。",
+          "display": {
+            "headline": "清理范围包含全部类别",
+            "plainReason": "清理目标为全部类别，删除范围较宽。",
+            "userCheck": "确认不是一次性删除过多类型的文件。",
+            "evidenceTemplate": "命中 {{matchedField}}: {{matchedText}}",
+            "badges": [
+              "清理操作",
+              "高"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "groupId": "global.url",
+      "description": "Rules for URLs extracted from network and browser actions.",
+      "rules": [
+        {
+          "id": "global.url.private_or_local_address",
+          "riskLevel": "critical",
+          "match": {
+            "fields": [
+              "urls",
+              "args.url",
+              "args.target_url",
+              "rawCommand",
+              "textPayloads"
+            ],
+            "regexAny": [
+              "(?i)https?://(?:localhost|127(?:\\.\\d{1,3}){3}|0\\.0\\.0\\.0|::1)(?::\\d+)?(?:/|$)",
+              "(?i)https?://10(?:\\.\\d{1,3}){3}(?::\\d+)?(?:/|$)",
+              "(?i)https?://172\\.(?:1[6-9]|2\\d|3[0-1])(?:\\.\\d{1,3}){2}(?::\\d+)?(?:/|$)",
+              "(?i)https?://192\\.168(?:\\.\\d{1,3}){2}(?::\\d+)?(?:/|$)",
+              "(?i)https?://169\\.254(?:\\.\\d{1,3}){2}(?::\\d+)?(?:/|$)",
+              "(?i)https?://\\[[fF][cCdD][0-9a-fA-F:]+\\]"
+            ]
+          },
+          "reason": "URL 指向本机、私网、链路本地或内网地址，存在 SSRF 或内网探测风险。",
+          "display": {
+            "headline": "URL 指向本机或私网",
+            "plainReason": "URL 指向本机、私网、链路本地或内网地址，存在 SSRF 或内网探测风险。",
+            "userCheck": "确认不会访问内部服务或本地调试端口。",
+            "evidenceTemplate": "命中 {{matchedField}}: {{matchedText}}",
+            "badges": [
+              "URL 风险",
+              "严重"
+            ]
+          }
+        },
+        {
+          "id": "global.url.cloud_metadata_address",
+          "riskLevel": "critical",
+          "match": {
+            "fields": [
+              "urls",
+              "args.url",
+              "args.target_url",
+              "rawCommand",
+              "textPayloads"
+            ],
+            "regexAny": [
+              "(?i)https?://169\\.254\\.169\\.254",
+              "(?i)metadata\\.google\\.internal",
+              "(?i)metadata\\.azure\\.com",
+              "(?i)/latest/meta-data",
+              "(?i)/computeMetadata/v1"
+            ]
+          },
+          "reason": "URL 指向云实例 metadata 服务，可能泄露临时凭据。",
+          "display": {
+            "headline": "URL 指向云 metadata 服务",
+            "plainReason": "URL 指向云实例 metadata 服务，可能泄露临时凭据。",
+            "userCheck": "避免读取临时凭据或实例元数据。",
+            "evidenceTemplate": "命中 {{matchedField}}: {{matchedText}}",
+            "badges": [
+              "URL 风险",
+              "严重"
+            ]
+          }
+        },
+        {
+          "id": "global.url.credential_in_url",
+          "riskLevel": "high",
+          "match": {
+            "fields": [
+              "urls",
+              "args.url",
+              "args.target_url"
+            ],
+            "regexAny": [
+              "(?i)[?&](token|api_key|apikey|key|secret|password|auth|signature|access_token)=",
+              "(?i)https?://[^/\\s:@]+:[^/\\s:@]+@"
+            ]
+          },
+          "reason": "URL 中包含凭据、token、签名或 basic auth。",
+          "display": {
+            "headline": "URL 中可能包含凭据",
+            "plainReason": "URL 中包含凭据、token、签名或 basic auth。",
+            "userCheck": "移除 URL 用户名、密码、token 或 basic auth。",
+            "evidenceTemplate": "命中 {{matchedField}}: {{matchedText}}",
+            "badges": [
+              "URL 风险",
+              "高"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "groupId": "global.network",
+      "description": "Rules for web search and fetch payloads.",
+      "rules": [
+        {
+          "id": "global.network.query_sensitive_data",
+          "riskLevel": "high",
+          "match": {
+            "fields": [
+              "args.query",
+              "textPayloads"
+            ],
+            "regexAny": [
+              "(?i)(internal|confidential|customer|客户|密钥|密码|源码|内网|未发布)",
+              "(?i)(C:\\\\Users\\\\|/home/|/Users/|server-python|workspace/|tools/|core/)",
+              "(?i)(api[_-]?key|token|secret|password|credential|cookie|authorization)"
+            ]
+          },
+          "reason": "联网查询词疑似包含内部信息、源码路径、客户数据或凭据关键词。",
+          "display": {
+            "headline": "网络查询可能包含敏感数据",
+            "plainReason": "联网查询词疑似包含内部信息、源码路径、客户数据或凭据关键词。",
+            "userCheck": "确认不要把源码、客户数据或凭据发给外部服务。",
+            "evidenceTemplate": "命中 {{matchedField}}: {{matchedText}}",
+            "badges": [
+              "网络访问",
+              "高"
+            ]
+          }
+        },
+        {
+          "id": "global.network.excessive_result_count",
+          "riskLevel": "medium",
+          "match": {
+            "fields": [
+              "args.max_results"
+            ],
+            "numericGreaterThan": 20
+          },
+          "reason": "搜索结果数量较高，会扩大外部内容进入上下文的范围。",
+          "display": {
+            "headline": "网络结果数量偏大",
+            "plainReason": "搜索结果数量较高，会扩大外部内容进入上下文的范围。",
+            "userCheck": "降低返回数量，避免引入过多外部内容。",
+            "evidenceTemplate": "命中 {{matchedField}}: {{matchedText}}",
+            "badges": [
+              "网络访问",
+              "中"
+            ]
+          }
+        },
+        {
+          "id": "global.network.excessive_fetch_size",
+          "riskLevel": "medium",
+          "match": {
+            "fields": [
+              "args.max_chars"
+            ],
+            "numericGreaterThan": 20000
+          },
+          "reason": "网页抓取字符上限较高，会扩大外部内容进入上下文的范围。",
+          "display": {
+            "headline": "抓取内容可能过大",
+            "plainReason": "网页抓取字符上限较高，会扩大外部内容进入上下文的范围。",
+            "userCheck": "限制抓取大小或只读取必要片段。",
+            "evidenceTemplate": "命中 {{matchedField}}: {{matchedText}}",
+            "badges": [
+              "网络访问",
+              "中"
+            ]
+          }
+        },
+        {
+          "id": "global.network.untrusted_instruction_source",
+          "riskLevel": "medium",
+          "match": {
+            "appliesToOperationTypes": [
+              "network_fetch",
+              "network_search"
+            ]
+          },
+          "reason": "外部网页或搜索摘要可能包含提示注入、错误事实或恶意指令；默认作为不可信资料处理。",
+          "display": {
+            "headline": "外部页面可能包含不可信指令",
+            "plainReason": "外部网页或搜索摘要可能包含提示注入、错误事实或恶意指令；默认作为不可信资料处理。",
+            "userCheck": "把网页内容当资料，不要当系统指令执行。",
+            "evidenceTemplate": "命中 {{matchedField}}: {{matchedText}}",
+            "badges": [
+              "网络访问",
+              "中"
+            ]
+          }
+        },
+        {
+          "id": "global.network.long_or_structured_query_exfiltration",
+          "riskLevel": "high",
+          "match": {
+            "fields": [
+              "args.query",
+              "textPayloads"
+            ],
+            "regexAny": [
+              "```",
+              "(?m)^\\s*[\\{\\[]\\s*$",
+              "(?m)^\\s*[A-Za-z0-9_.-]+:\\s+.{20,}$",
+              "(?i)(Traceback \\(most recent call last\\)|stack trace|Exception:|Error:| at [A-Za-z0-9_.$<>]+\\()",
+              "(?i)(package\\.json|pyproject\\.toml|config\\.(json|toml|ya?ml)|\\.env|Authorization:|Bearer\\s+[A-Za-z0-9_.-]{12,})"
+            ]
+          },
+          "reason": "外部搜索 query 像是整段代码、配置、日志、异常栈或授权片段，可能把内部上下文发送给第三方搜索服务。",
+          "display": {
+            "headline": "外部搜索 query 疑似包含代码、配置或日志",
+            "plainReason": "外部搜索 query 像是整段代码、配置、日志、异常栈或授权片段，可能把内部上下文发送给第三方搜索服务。",
+            "userCheck": "将 query 改写成简短公开问题，不要外发源码、配置、日志或授权头。",
+            "evidenceTemplate": "命中 {{matchedField}}: {{matchedText}}",
+            "badges": [
+              "网络访问",
+              "高"
+            ]
+          }
+        },
+        {
+          "id": "global.network.query_text_too_long",
+          "riskLevel": "high",
+          "match": {
+            "requiresExternalCheck": "query_text_too_long",
+            "appliesToOperationTypes": [
+              "network_search",
+              "bocha_web_search"
+            ]
+          },
+          "reason": "外部搜索 query 超过安全长度时，通常意味着整段内部材料、日志或文档被发送给第三方服务。",
+          "display": {
+            "headline": "外部搜索 query 过长",
+            "plainReason": "外部搜索 query 超过安全长度时，通常意味着整段内部材料、日志或文档被发送给第三方服务。",
+            "userCheck": "压缩成公开关键词；不要把原文大段复制到外部搜索。",
+            "evidenceTemplate": "命中 {{matchedField}}: {{matchedText}}",
+            "badges": [
+              "网络访问",
+              "高"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "groupId": "global.browser",
+      "description": "Rules for Computer Use browser automation task text and target URL.",
+      "rules": [
+        {
+          "id": "global.browser.high_impact_action",
+          "riskLevel": "critical",
+          "match": {
+            "fields": [
+              "args.task",
+              "textPayloads"
+            ],
+            "regexAny": [
+              "(?i)\\b(submit|purchase|pay|checkout|order|transfer|send|delete|remove|publish|deploy|approve|merge|rollback|save|update settings|change password)\\b",
+              "(?i)(提交|付款|支付|下单|转账|删除|发布|部署|批准|合并|回滚|保存|修改配置|改密码)"
+            ]
+          },
+          "reason": "浏览器任务文本包含提交、付款、删除、发布、部署或配置变更等高影响动作。",
+          "display": {
+            "headline": "浏览器任务包含高影响动作",
+            "plainReason": "浏览器任务文本包含提交、付款、删除、发布、部署或配置变更等高影响动作。",
+            "userCheck": "确认提交、付款、删除、发布、部署等动作是否必要。",
+            "evidenceTemplate": "命中 {{matchedField}}: {{matchedText}}",
+            "badges": [
+              "浏览器自动化",
+              "严重"
+            ]
+          }
+        },
+        {
+          "id": "global.browser.authenticated_or_admin_surface",
+          "riskLevel": "critical",
+          "match": {
+            "fields": [
+              "args.task",
+              "args.target_url",
+              "textPayloads",
+              "urls"
+            ],
+            "regexAny": [
+              "(?i)(admin|dashboard|console|settings|billing|account|login|auth|sso)",
+              "(?i)(后台|管理台|控制台|设置|账单|账户|登录|认证)"
+            ]
+          },
+          "reason": "浏览器任务疑似进入登录态、后台、账单或管理配置界面。",
+          "display": {
+            "headline": "浏览器任务疑似进入登录态或管理界面",
+            "plainReason": "浏览器任务疑似进入登录态、后台、账单或管理配置界面。",
+            "userCheck": "确认页面是否涉及账号、账单、后台或权限配置。",
+            "evidenceTemplate": "命中 {{matchedField}}: {{matchedText}}",
+            "badges": [
+              "浏览器自动化",
+              "严重"
+            ]
+          }
+        },
+        {
+          "id": "global.browser.file_upload_or_download",
+          "riskLevel": "critical",
+          "match": {
+            "fields": [
+              "args.task",
+              "textPayloads"
+            ],
+            "regexAny": [
+              "(?i)\\b(upload|download|attach|export|import)\\b",
+              "(?i)(上传|下载|附件|导出|导入)"
+            ]
+          },
+          "reason": "浏览器任务涉及文件上传、下载、导入或导出，可能泄露或改变远端数据。",
+          "display": {
+            "headline": "浏览器任务涉及上传或下载",
+            "plainReason": "浏览器任务涉及文件上传、下载、导入或导出，可能泄露或改变远端数据。",
+            "userCheck": "确认文件来源、目标和是否会泄露远端/本地数据。",
+            "evidenceTemplate": "命中 {{matchedField}}: {{matchedText}}",
+            "badges": [
+              "浏览器自动化",
+              "严重"
+            ]
+          }
+        },
+        {
+          "id": "global.browser.missing_domain_bound",
+          "riskLevel": "high",
+          "match": {
+            "requiresExternalCheck": "allowed_domains_empty_or_not_matching_target_url"
+          },
+          "reason": "浏览器自动化缺少明确域名边界，可能导航到非预期站点。",
+          "display": {
+            "headline": "浏览器自动化缺少域名边界",
+            "plainReason": "浏览器自动化缺少明确域名边界，可能导航到非预期站点。",
+            "userCheck": "补充 allowed_domains 或确认目标域名。",
+            "evidenceTemplate": "命中 {{matchedField}}: {{matchedText}}",
+            "badges": [
+              "浏览器自动化",
+              "高"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "groupId": "global.code",
+      "description": "Rules for detecting security-sensitive code or config changes in write/patch/diff payloads.",
+      "rules": [
+        {
+          "id": "global.code.security_boundary_change",
+          "riskLevel": "critical",
+          "match": {
+            "fields": [
+              "paths",
+              "textPayloads"
+            ],
+            "regexAny": [
+              "(?i)(auth|permission|policy|rbac|cors|csrf|token|secret|credential|security|sandbox|signature|encrypt|decrypt)",
+              "(?i)(权限|认证|鉴权|安全|密钥|令牌|沙箱|签名|加密|解密)"
+            ]
+          },
+          "reason": "写入或 patch 内容疑似修改认证、权限、安全、密钥或沙箱边界。",
+          "display": {
+            "headline": "代码改动触及安全边界",
+            "plainReason": "写入或 patch 内容疑似修改认证、权限、安全、密钥或沙箱边界。",
+            "userCheck": "确认认证、权限、密钥、CORS、沙箱或加密逻辑。",
+            "evidenceTemplate": "命中 {{matchedField}}: {{matchedText}}",
+            "badges": [
+              "代码安全边界",
+              "严重"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "groupId": "global.knowledge",
+      "description": "Rules for BossAI knowledge_search virtual shell and RAG retrieval.",
+      "rules": [
+        {
+          "id": "global.knowledge.shell_write_or_redirection_attempt",
+          "riskLevel": "high",
+          "match": {
+            "fields": [
+              "args.shell",
+              "rawCommand",
+              "textPayloads"
+            ],
+            "regexAny": [
+              "(^|[^\\\\])>{1,2}",
+              "<<<?",
+              "(?i)\\b(tee|touch|mkdir|rm|mv|cp|chmod|chown|curl|wget|python|node|bash|sh)\\b"
+            ]
+          },
+          "reason": "knowledge_search 设计为只读虚拟 shell；写入、重定向或外部执行语义会被拒绝或偏离只读检索意图。",
+          "display": {
+            "headline": "知识库检索疑似尝试写入或执行非只读命令",
+            "plainReason": "knowledge_search 设计为只读虚拟 shell；写入、重定向或外部执行语义会被拒绝或偏离只读检索意图。",
+            "userCheck": "确认 shell 只使用 grep/rg/find/cat/head/tail/awk/sed/jq/wc 等只读命令。",
+            "evidenceTemplate": "命中 {{matchedField}}: {{matchedText}}",
+            "badges": [
+              "BossAI 知识库",
+              "高"
+            ]
+          }
+        },
+        {
+          "id": "global.knowledge.broad_or_full_dump",
+          "riskLevel": "high",
+          "match": {
+            "fields": [
+              "args.shell",
+              "rawCommand",
+              "textPayloads"
+            ],
+            "regexAny": [
+              "(?i)\\bcat\\s+/(knowledge)(\\s|$)",
+              "(?i)\\bcat\\s+/knowledge/.*\\*",
+              "(?i)\\b(find|ls)\\s+(-R\\s+)?/knowledge(\\s|$)",
+              "(?i)\\b(rg|grep)\\s+(-R\\s+|-r\\s+)?[\"']?\\.?[\"']?\\s+/knowledge",
+              "(?i)-exec\\s+cat\\b"
+            ]
+          },
+          "reason": "知识库检索范围过宽，可能把大量私有文档内容带入模型上下文。",
+          "display": {
+            "headline": "知识库检索可能全文或大范围 dump",
+            "plainReason": "知识库检索范围过宽，可能把大量私有文档内容带入模型上下文。",
+            "userCheck": "先缩小知识库、路径、关键词或只读取命中的少量文件片段。",
+            "evidenceTemplate": "命中 {{matchedField}}: {{matchedText}}",
+            "badges": [
+              "BossAI 知识库",
+              "高"
+            ]
+          }
+        },
+        {
+          "id": "global.knowledge.secret_hunting",
+          "riskLevel": "high",
+          "match": {
+            "fields": [
+              "args.shell",
+              "args.semanticQuery",
+              "textPayloads"
+            ],
+            "regexAny": [
+              "(?i)(password|passwd|secret|token|api[_-]?key|private[_-]?key|authorization|bearer|cookie|凭据|密钥|密码)"
+            ]
+          },
+          "reason": "知识库检索意图疑似定位凭据、密钥或敏感字段。",
+          "display": {
+            "headline": "知识库检索疑似查找密钥或凭据",
+            "plainReason": "知识库检索意图疑似定位凭据、密钥或敏感字段。",
+            "userCheck": "确认是否确实需要检索敏感字段，并避免把完整值输出到回答中。",
+            "evidenceTemplate": "命中 {{matchedField}}: {{matchedText}}",
+            "badges": [
+              "BossAI 知识库",
+              "高"
+            ]
+          }
+        },
+        {
+          "id": "global.knowledge.unbounded_scope",
+          "riskLevel": "medium",
+          "match": {
+            "requiresExternalCheck": "knowledge_scope_unbounded",
+            "appliesToOperationTypes": [
+              "knowledge_search",
+              "rag_retrieval"
+            ]
+          },
+          "reason": "未选择明确 knowledgeBaseId 或 knowledgePaths 时，检索可能跨多个知识库。",
+          "display": {
+            "headline": "知识库检索范围未明确限定",
+            "plainReason": "未选择明确 knowledgeBaseId 或 knowledgePaths 时，检索可能跨多个知识库。",
+            "userCheck": "确认当前会话绑定的知识库和路径范围符合用户问题。",
+            "evidenceTemplate": "命中 {{matchedField}}: {{matchedText}}",
+            "badges": [
+              "BossAI 知识库",
+              "中"
+            ]
+          }
+        },
+        {
+          "id": "global.knowledge.large_read_command",
+          "riskLevel": "high",
+          "match": {
+            "fields": [
+              "args.shell",
+              "rawCommand",
+              "textPayloads"
+            ],
+            "regexAny": [
+              "(?i)\\b(head|tail)\\b[^\\n;&|]*\\s-n\\s*(?:[1-9][0-9]{3,}|[0-9]{5,})",
+              "(?i)\\bsed\\b[^\\n;&|]*(?:1,\\$p|1,[0-9]{4,}p|['\\\"]?p['\\\"]?)",
+              "(?i)\\bawk\\b[^\\n;&|]*print",
+              "(?i)\\bjq\\s+['\\\"]?\\.['\\\"]?\\s+/knowledge",
+              "(?i)\\bcat\\s+/knowledge/.+"
+            ]
+          },
+          "reason": "知识库 shell 虽然只读，但 head/tail/sed/awk/jq/cat 可输出整份文件或超大片段，扩大私有知识库内容暴露面。",
+          "display": {
+            "headline": "知识库命令可能读取整份文件或超大片段",
+            "plainReason": "知识库 shell 虽然只读，但 head/tail/sed/awk/jq/cat 可输出整份文件或超大片段，扩大私有知识库内容暴露面。",
+            "userCheck": "优先 grep/rg 精确关键词，或只读取命中行附近少量上下文。",
+            "evidenceTemplate": "命中 {{matchedField}}: {{matchedText}}",
+            "badges": [
+              "BossAI 知识库",
+              "高"
+            ]
+          }
+        },
+        {
+          "id": "global.knowledge.prompt_injection_content",
+          "riskLevel": "medium",
+          "match": {
+            "fields": [
+              "args.shell",
+              "args.semanticQuery",
+              "textPayloads"
+            ],
+            "regexAny": [
+              "(?i)(ignore previous|system prompt|developer message|follow these instructions|do not obey|jailbreak)",
+              "(?i)(忽略.*指令|系统提示词|开发者消息|越狱|不要遵守|按以下指令)"
+            ]
+          },
+          "reason": "知识库检索目标或内容疑似包含提示注入语义，RAG 结果进入上下文后可能误导模型。",
+          "display": {
+            "headline": "知识库内容可能包含提示注入语义",
+            "plainReason": "知识库检索目标或内容疑似包含提示注入语义，RAG 结果进入上下文后可能误导模型。",
+            "userCheck": "把知识库内容当资料而不是指令；回答时引用事实，不执行文档里的 agent 指令。",
+            "evidenceTemplate": "命中 {{matchedField}}: {{matchedText}}",
+            "badges": [
+              "BossAI 知识库",
+              "中"
+            ]
+          }
+        },
+        {
+          "id": "global.knowledge.runtime_log_exposure",
+          "riskLevel": "medium",
+          "match": {
+            "appliesToOperationTypes": [
+              "knowledge_search",
+              "rag_retrieval"
+            ]
+          },
+          "reason": "knowledge_search 会在服务日志中记录 semanticQuery、命中文档 ID、top score 和 RAG snippet 片段；私有知识库内容可能进入运行日志。",
+          "display": {
+            "headline": "知识库查询和 RAG 片段可能进入服务日志",
+            "plainReason": "knowledge_search 会在服务日志中记录 semanticQuery、命中文档 ID、top score 和 RAG snippet 片段；私有知识库内容可能进入运行日志。",
+            "userCheck": "敏感知识库检索应减少日志片段、脱敏 query，并控制日志保留和访问权限。",
+            "evidenceTemplate": "命中 {{matchedField}}: {{matchedText}}",
+            "badges": [
+              "BossAI 知识库",
+              "中"
+            ]
+          }
+        },
+        {
+          "id": "global.knowledge.index_metadata_enumeration",
+          "riskLevel": "high",
+          "match": {
+            "fields": [
+              "args.shell",
+              "rawCommand",
+              "textPayloads"
+            ],
+            "regexAny": [
+              "(?i)\\bcat\\s+/knowledge/index\\.json\\b",
+              "(?i)\\bjq\\b[^\\n;&|]*/knowledge/index\\.json",
+              "(?i)\\b(head|tail|sed|awk)\\b[^\\n;&|]*/knowledge/index\\.json"
+            ]
+          },
+          "reason": "/knowledge/index.json 包含知识库范围、文档 ID、来源、路径、虚拟路径和字节数，读取它会枚举私有知识库结构。",
+          "display": {
+            "headline": "知识库 index.json 会暴露文档清单和路径",
+            "plainReason": "/knowledge/index.json 包含知识库范围、文档 ID、来源、路径、虚拟路径和字节数，读取它会枚举私有知识库结构。",
+            "userCheck": "只有需要定位文件时才读取 index；回答中避免暴露完整文档清单和内部路径。",
+            "evidenceTemplate": "命中 {{matchedField}}: {{matchedText}}",
+            "badges": [
+              "BossAI 知识库",
+              "高"
+            ]
+          }
+        },
+        {
+          "id": "global.knowledge.base64_secret_decode_exposure",
+          "riskLevel": "high",
+          "match": {
+            "fields": [
+              "args.shell",
+              "args.semanticQuery",
+              "textPayloads"
+            ],
+            "regexAny": [
+              "(?i)(base64|decode|atob|解码).*(secret|token|password|key|credential|密钥|密码|凭据)",
+              "(?i)(secret|token|password|key|credential|密钥|密码|凭据).*(base64|decode|atob|解码)"
+            ]
+          },
+          "reason": "knowledge_search 会兼容解码历史 base64 文档；如果检索意图要求解码凭据或密钥，可能暴露隐藏敏感值。",
+          "display": {
+            "headline": "知识库检索可能解码并暴露隐藏凭据",
+            "plainReason": "knowledge_search 会兼容解码历史 base64 文档；如果检索意图要求解码凭据或密钥，可能暴露隐藏敏感值。",
+            "userCheck": "不要要求模型解码密钥、token 或凭据；必要时只确认是否存在并脱敏。",
+            "evidenceTemplate": "命中 {{matchedField}}: {{matchedText}}",
+            "badges": [
+              "BossAI 知识库",
+              "高"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "groupId": "global.filelink",
+      "description": "Rules for BossAI create_file_download_link local file exposure.",
+      "rules": [
+        {
+          "id": "global.filelink.persistent_local_file_exposure",
+          "riskLevel": "high",
+          "match": {
+            "appliesToOperationTypes": [
+              "file_download_link"
+            ]
+          },
+          "reason": "该操作会为本地文件创建持久下载记录，文件内容随后可通过 /api/files/download/{id} 获取。",
+          "display": {
+            "headline": "本地文件会被注册为持久下载链接",
+            "plainReason": "该操作会为本地文件创建持久下载记录，文件内容随后可通过 /api/files/download/{id} 获取。",
+            "userCheck": "确认文件是用户需要交付的结果，而不是内部配置、数据库、源码包或隐私数据。",
+            "evidenceTemplate": "命中 {{matchedField}}: {{matchedText}}",
+            "badges": [
+              "BossAI 文件链接",
+              "高"
+            ]
+          }
+        },
+        {
+          "id": "global.filelink.generated_artifact_only",
+          "riskLevel": "medium",
+          "match": {
+            "fields": [
+              "paths",
+              "args.path"
+            ],
+            "regexAny": [
+              "(?i)(outputs?|artifacts?|reports?|exports?)[\\\\/].+\\.(md|txt|pdf|docx|xlsx|pptx|csv|png|jpg|jpeg|webp)$"
+            ]
+          },
+          "reason": "下载链接目标像是生成交付物；仍需确认文件不是敏感数据导出。",
+          "display": {
+            "headline": "下载链接目标像是生成交付物",
+            "plainReason": "下载链接目标像是生成交付物；仍需确认文件不是敏感数据导出。",
+            "userCheck": "确认该文件由本轮任务生成，且用户确实需要下载。",
+            "evidenceTemplate": "命中 {{matchedField}}: {{matchedText}}",
+            "badges": [
+              "BossAI 文件链接",
+              "中"
+            ]
+          }
+        },
+        {
+          "id": "global.filelink.unapproved_local_path_exposure",
+          "riskLevel": "critical",
+          "match": {
+            "requiresExternalCheck": "download_path_not_allowed_artifact",
+            "appliesToOperationTypes": [
+              "file_download_link"
+            ]
+          },
+          "reason": "下载链接目标无法证明位于会话 outputs/artifacts 或用户明确允许的输出目录，可能暴露任意本地可读文件。",
+          "display": {
+            "headline": "下载链接路径未通过允许输出目录校验",
+            "plainReason": "下载链接目标无法证明位于会话 outputs/artifacts 或用户明确允许的输出目录，可能暴露任意本地可读文件。",
+            "userCheck": "只允许链接本轮任务生成的交付物；拒绝 .env、数据库、配置、源码、用户目录或系统路径。",
+            "evidenceTemplate": "命中 {{matchedField}}: {{matchedText}}",
+            "badges": [
+              "BossAI 文件链接",
+              "严重"
+            ]
+          }
+        },
+        {
+          "id": "global.filelink.bearer_download_link_leakage",
+          "riskLevel": "high",
+          "match": {
+            "appliesToOperationTypes": [
+              "file_download_link",
+              "file_download_resolve"
+            ]
+          },
+          "reason": "下载 URL 本质上是持久 bearer-style 能力链接；一旦聊天记录、日志或截图泄露，缺少二次所有权校验时文件可被下载。",
+          "display": {
+            "headline": "下载链接泄露后可能直接访问文件",
+            "plainReason": "下载 URL 本质上是持久 bearer-style 能力链接；一旦聊天记录、日志或截图泄露，缺少二次所有权校验时文件可被下载。",
+            "userCheck": "避免把下载链接发到外部渠道；敏感文件不要生成下载链接。",
+            "evidenceTemplate": "命中 {{matchedField}}: {{matchedText}}",
+            "badges": [
+              "BossAI 文件链接",
+              "高"
+            ]
+          }
+        },
+        {
+          "id": "global.filelink.desktop_local_path_disclosure",
+          "riskLevel": "high",
+          "match": {
+            "appliesToOperationTypes": [
+              "file_download_link"
+            ]
+          },
+          "reason": "桌面模式下工具结果包含真实 localPath，可能把用户机器路径、目录结构和文件名暴露给模型、聊天记录或后续日志。",
+          "display": {
+            "headline": "桌面模式会返回真实 localPath",
+            "plainReason": "桌面模式下工具结果包含真实 localPath，可能把用户机器路径、目录结构和文件名暴露给模型、聊天记录或后续日志。",
+            "userCheck": "确认 localPath 不包含用户名、项目隐私、客户名或敏感目录；云端/共享场景避免展示真实本地路径。",
+            "evidenceTemplate": "命中 {{matchedField}}: {{matchedText}}",
+            "badges": [
+              "BossAI 文件链接",
+              "高"
+            ]
+          }
+        },
+        {
+          "id": "global.filelink.symlink_or_realpath_escape",
+          "riskLevel": "critical",
+          "match": {
+            "requiresExternalCheck": "download_path_symlink_or_realpath_escape",
+            "appliesToOperationTypes": [
+              "file_download_link"
+            ]
+          },
+          "reason": "下载路径表面位于允许目录，但 symlink/junction/hardlink 或 realpath 解析后可能指向敏感文件或工作区外文件。",
+          "display": {
+            "headline": "下载路径可能通过链接逃出允许目录",
+            "plainReason": "下载路径表面位于允许目录，但 symlink/junction/hardlink 或 realpath 解析后可能指向敏感文件或工作区外文件。",
+            "userCheck": "对 path 做 realpath 解析并拒绝链接逃逸；不要只用字符串前缀判断。",
+            "evidenceTemplate": "命中 {{matchedField}}: {{matchedText}}",
+            "badges": [
+              "BossAI 文件链接",
+              "严重"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "groupId": "global.fileupload",
+      "description": "Rules for BossAI file upload API payloads.",
+      "rules": [
+        {
+          "id": "global.fileupload.large_base64_payload",
+          "riskLevel": "high",
+          "match": {
+            "requiresExternalCheck": "upload_payload_too_large",
+            "appliesToOperationTypes": [
+              "file_upload"
+            ]
+          },
+          "reason": "上传接口一次性接收 base64 data URL 并解码为 Buffer，超大 payload 可能造成内存或磁盘压力。",
+          "display": {
+            "headline": "上传 payload 过大可能造成资源压力",
+            "plainReason": "上传接口一次性接收 base64 data URL 并解码为 Buffer，超大 payload 可能造成内存或磁盘压力。",
+            "userCheck": "限制上传大小，优先使用分片或后端大小上限；拒绝异常大的 data 字段。",
+            "evidenceTemplate": "命中 {{matchedField}}: {{matchedText}}",
+            "badges": [
+              "BossAI 文件上传",
+              "高"
+            ]
+          }
+        },
+        {
+          "id": "global.fileupload.executable_or_archive_upload",
+          "riskLevel": "high",
+          "match": {
+            "fields": [
+              "args.name",
+              "args.mediaType",
+              "paths",
+              "textPayloads"
+            ],
+            "regexAny": [
+              "(?i)\\.(exe|dll|so|dylib|bat|cmd|ps1|sh|bash|jar|apk|ipa|msi|deb|rpm|zip|7z|rar|tar|gz|tgz)$",
+              "(?i)(application/x-msdownload|application/x-sh|application/x-executable|application/zip|application/x-7z-compressed|application/x-rar-compressed|application/gzip)"
+            ]
+          },
+          "reason": "上传文件名或 mediaType 指向脚本、可执行文件或压缩包，可能引入恶意载荷、隐藏内容或后续执行风险。",
+          "display": {
+            "headline": "上传内容可能是可执行文件或压缩包",
+            "plainReason": "上传文件名或 mediaType 指向脚本、可执行文件或压缩包，可能引入恶意载荷、隐藏内容或后续执行风险。",
+            "userCheck": "确认上传内容确实需要进入 BossAI，会话文件区不要执行上传文件。",
+            "evidenceTemplate": "命中 {{matchedField}}: {{matchedText}}",
+            "badges": [
+              "BossAI 文件上传",
+              "高"
+            ]
+          }
+        },
+        {
+          "id": "global.fileupload.sensitive_upload_content",
+          "riskLevel": "critical",
+          "match": {
+            "fields": [
+              "args.name",
+              "args.data",
+              "textPayloads"
+            ],
+            "regexAny": [
+              "(?i)(\\.env|id_rsa|id_ed25519|credentials|credential|secrets?|token|apikey|api_key|cookie|session)",
+              "(?i)(api[_-]?key|secret|token|password|passwd|authorization|bearer|cookie)"
+            ]
+          },
+          "reason": "上传文件名或内容片段疑似包含凭据、环境文件、token 或会话数据。",
+          "display": {
+            "headline": "上传内容疑似包含密钥或凭据",
+            "plainReason": "上传文件名或内容片段疑似包含凭据、环境文件、token 或会话数据。",
+            "userCheck": "不要上传完整凭据文件；如需排查，仅提供脱敏片段。",
+            "evidenceTemplate": "命中 {{matchedField}}: {{matchedText}}",
+            "badges": [
+              "BossAI 文件上传",
+              "严重"
+            ]
+          }
+        },
+        {
+          "id": "global.fileupload.cross_session_or_unowned_session_id",
+          "riskLevel": "critical",
+          "match": {
+            "requiresExternalCheck": "upload_session_id_not_current_or_authorized",
+            "appliesToOperationTypes": [
+              "file_upload"
+            ]
+          },
+          "reason": "上传接口使用请求体 sessionId 决定写入目录；如果 sessionId 不属于当前用户/当前会话，可能发生跨会话文件写入或污染。",
+          "display": {
+            "headline": "上传 sessionId 可能跨会话写入",
+            "plainReason": "上传接口使用请求体 sessionId 决定写入目录；如果 sessionId 不属于当前用户/当前会话，可能发生跨会话文件写入或污染。",
+            "userCheck": "确认 sessionId 来自当前会话上下文，而不是由模型或外部请求随意指定。",
+            "evidenceTemplate": "命中 {{matchedField}}: {{matchedText}}",
+            "badges": [
+              "BossAI 文件上传",
+              "严重"
+            ]
+          }
+        },
+        {
+          "id": "global.fileupload.media_type_mismatch_or_unknown",
+          "riskLevel": "high",
+          "match": {
+            "requiresExternalCheck": "upload_media_type_mismatch_or_unknown",
+            "appliesToOperationTypes": [
+              "file_upload"
+            ]
+          },
+          "reason": "上传的 data URL mediaType、请求 mediaType 与文件扩展名不一致或未知，可能绕过图片/文档分类并隐藏脚本、二进制或敏感导出。",
+          "display": {
+            "headline": "上传 mediaType 与文件类型不一致或未知",
+            "plainReason": "上传的 data URL mediaType、请求 mediaType 与文件扩展名不一致或未知，可能绕过图片/文档分类并隐藏脚本、二进制或敏感导出。",
+            "userCheck": "用内容嗅探和 allowlist 校验 mediaType、扩展名、magic bytes 三者一致。",
+            "evidenceTemplate": "命中 {{matchedField}}: {{matchedText}}",
+            "badges": [
+              "BossAI 文件上传",
+              "高"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "groupId": "global.knowledge_ingest",
+      "description": "Rules for BossAI knowledge base ingestion, document management, OCR/embed/reindex, and full-content reads.",
+      "rules": [
+        {
+          "id": "global.knowledge_ingest.raw_content_persistence",
+          "riskLevel": "high",
+          "match": {
+            "appliesToOperationTypes": [
+              "knowledge_document_upload",
+              "knowledge_document_create",
+              "knowledge_document_update"
+            ]
+          },
+          "reason": "知识库上传/写入会把文档原文保存到 knowledge_documents.content，并把分块写入索引；私有文档会长期进入 BossAI 数据库。",
+          "display": {
+            "headline": "知识库上传会持久化原文",
+            "plainReason": "知识库上传/写入会把文档原文保存到 knowledge_documents.content，并把分块写入索引；私有文档会长期进入 BossAI 数据库。",
+            "userCheck": "确认文件确实需要进入知识库；敏感文档先脱敏或选择更小范围。",
+            "evidenceTemplate": "命中 {{matchedField}}: {{matchedText}}",
+            "badges": [
+              "BossAI 知识库摄取",
+              "高"
+            ]
+          }
+        },
+        {
+          "id": "global.knowledge_ingest.full_document_content_read",
+          "riskLevel": "high",
+          "match": {
+            "fields": [
+              "args.route",
+              "args.url",
+              "urls",
+              "textPayloads"
+            ],
+            "regexAny": [
+              "(?i)/api/documents/[^/?#]+(?:$|[?#])",
+              "(?i)includeContent\\s*[:=]\\s*true"
+            ]
+          },
+          "reason": "/api/documents/:id 会返回 includeContent=true 的完整文档原文，可能把知识库私有内容直接带出。",
+          "display": {
+            "headline": "API 可能读取完整知识库原文",
+            "plainReason": "/api/documents/:id 会返回 includeContent=true 的完整文档原文，可能把知识库私有内容直接带出。",
+            "userCheck": "确认是否只需要摘要、片段或元数据；避免整篇原文进入日志、聊天或外部工具。",
+            "evidenceTemplate": "命中 {{matchedField}}: {{matchedText}}",
+            "badges": [
+              "BossAI 知识库摄取",
+              "高"
+            ]
+          }
+        },
+        {
+          "id": "global.knowledge_ingest.destructive_delete_or_recursive_folder_delete",
+          "riskLevel": "critical",
+          "match": {
+            "fields": [
+              "args.method",
+              "args.route",
+              "args.url",
+              "textPayloads"
+            ],
+            "regexAny": [
+              "(?i)\\bDELETE\\b.*(/api/knowledge-bases|/api/documents)",
+              "(?i)/api/knowledge-bases/[^\\s?#]+/folders.*recursive\\s*[:=]\\s*true",
+              "(?i)recursive\\s*[:=]\\s*true"
+            ]
+          },
+          "reason": "知识库、文档或 recursive 文件夹删除会移除私有知识库数据和向量 chunks，属于不可逆或难恢复操作。",
+          "display": {
+            "headline": "知识库操作可能删除数据",
+            "plainReason": "知识库、文档或 recursive 文件夹删除会移除私有知识库数据和向量 chunks，属于不可逆或难恢复操作。",
+            "userCheck": "确认目标 kbId/docId/path、是否 recursive、是否已有备份或可恢复导出。",
+            "evidenceTemplate": "命中 {{matchedField}}: {{matchedText}}",
+            "badges": [
+              "BossAI 知识库摄取",
+              "严重"
+            ]
+          }
+        },
+        {
+          "id": "global.knowledge_ingest.reindex_background_job",
+          "riskLevel": "high",
+          "match": {
+            "fields": [
+              "args.route",
+              "args.url",
+              "textPayloads"
+            ],
+            "regexAny": [
+              "(?i)/api/knowledge-bases/[^\\s?#]+/reindex\\b",
+              "(?i)\\breindex\\b|重新索引"
+            ]
+          },
+          "reason": "知识库 reindex 会异步遍历所有文档、可能解码历史 base64、重新分块并调用 embedding 服务，造成资源压力和内容外发风险。",
+          "display": {
+            "headline": "知识库重建索引会后台处理全部文档",
+            "plainReason": "知识库 reindex 会异步遍历所有文档、可能解码历史 base64、重新分块并调用 embedding 服务，造成资源压力和内容外发风险。",
+            "userCheck": "确认知识库规模、当前服务负载、embedding 服务位置和日志保留策略。",
+            "evidenceTemplate": "命中 {{matchedField}}: {{matchedText}}",
+            "badges": [
+              "BossAI 知识库摄取",
+              "高"
+            ]
+          }
+        },
+        {
+          "id": "global.knowledge_ingest.external_embed_ocr_rerank_exposure",
+          "riskLevel": "high",
+          "match": {
+            "requiresExternalCheck": "embed_api_not_local_trusted_or_content_sensitive",
+            "appliesToOperationTypes": [
+              "knowledge_document_upload",
+              "knowledge_reindex",
+              "rag_retrieval"
+            ]
+          },
+          "reason": "上传、reindex 和 RAG 会把文档 chunk、查询或图片 base64 发送到 EMBED_API 的 /embed、/rerank、/ocr；如果该服务不是受信本地服务，会产生内容外发。",
+          "display": {
+            "headline": "知识库内容可能发送到 embed/OCR/rerank 服务",
+            "plainReason": "上传、reindex 和 RAG 会把文档 chunk、查询或图片 base64 发送到 EMBED_API 的 /embed、/rerank、/ocr；如果该服务不是受信本地服务，会产生内容外发。",
+            "userCheck": "确认 EMBED_API 是否为本机/可信内网服务；敏感文档不要送外部 embedding/OCR。",
+            "evidenceTemplate": "命中 {{matchedField}}: {{matchedText}}",
+            "badges": [
+              "BossAI 知识库摄取",
+              "高"
+            ]
+          }
+        },
+        {
+          "id": "global.knowledge_ingest.large_batch_or_base64_payload",
+          "riskLevel": "high",
+          "match": {
+            "requiresExternalCheck": "knowledge_upload_batch_or_base64_too_large",
+            "appliesToOperationTypes": [
+              "knowledge_document_upload"
+            ]
+          },
+          "reason": "知识库上传接口接收 files[].content base64 并逐个解码、解析、分块和异步 embedding；大批量或超大文件会造成内存、CPU、磁盘和向量索引压力。",
+          "display": {
+            "headline": "知识库上传批量或 base64 内容过大",
+            "plainReason": "知识库上传接口接收 files[].content base64 并逐个解码、解析、分块和异步 embedding；大批量或超大文件会造成内存、CPU、磁盘和向量索引压力。",
+            "userCheck": "限制单文件大小和 files 数量，必要时分批上传并观察队列/日志。",
+            "evidenceTemplate": "命中 {{matchedField}}: {{matchedText}}",
+            "badges": [
+              "BossAI 知识库摄取",
+              "高"
+            ]
+          }
+        },
+        {
+          "id": "global.knowledge_ingest.untrusted_parser_or_ocr_input",
+          "riskLevel": "high",
+          "match": {
+            "fields": [
+              "args.files[].name",
+              "args.name",
+              "paths",
+              "textPayloads"
+            ],
+            "regexAny": [
+              "(?i)\\.(docx|jpg|jpeg|png|bmp|webp)$",
+              "(?i)(OCR|mammoth|图片|文档解析)"
+            ]
+          },
+          "reason": "知识库上传会用 mammoth 解析 docx、用 OCR 服务处理图片；不可信复杂文件可能触发解析资源消耗、错误日志泄露或提取异常内容。",
+          "display": {
+            "headline": "知识库上传会解析 docx 或图片 OCR",
+            "plainReason": "知识库上传会用 mammoth 解析 docx、用 OCR 服务处理图片；不可信复杂文件可能触发解析资源消耗、错误日志泄露或提取异常内容。",
+            "userCheck": "确认文件来源可信，限制大小，解析失败日志不要暴露完整文件名或敏感内容。",
+            "evidenceTemplate": "命中 {{matchedField}}: {{matchedText}}",
+            "badges": [
+              "BossAI 知识库摄取",
+              "高"
+            ]
+          }
+        },
+        {
+          "id": "global.knowledge_ingest.sensitive_document_content",
+          "riskLevel": "critical",
+          "match": {
+            "fields": [
+              "args.files[].name",
+              "args.files[].content",
+              "args.content",
+              "textPayloads"
+            ],
+            "regexAny": [
+              "(?i)(\\.env|id_rsa|id_ed25519|credentials|secrets?|token|api[_-]?key|password|authorization|bearer|cookie)",
+              "(?i)(客户|合同|薪资|身份证|银行卡|隐私|confidential|internal only)"
+            ]
+          },
+          "reason": "知识库上传或文档写入疑似包含凭据、客户数据、合同、薪资或隐私信息；这些内容会进入原文表、chunks、向量索引和可能的运行日志。",
+          "display": {
+            "headline": "知识库文档疑似包含高度敏感内容",
+            "plainReason": "知识库上传或文档写入疑似包含凭据、客户数据、合同、薪资或隐私信息；这些内容会进入原文表、chunks、向量索引和可能的运行日志。",
+            "userCheck": "先脱敏或只上传必要片段；凭据类内容不应进入知识库。",
+            "evidenceTemplate": "命中 {{matchedField}}: {{matchedText}}",
+            "badges": [
+              "BossAI 知识库摄取",
+              "严重"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "groupId": "global.bossai_api",
+      "description": "Rules for BossAI LAN/API management routes, provider tests, settings, sessions, projects, models, and open CORS exposure.",
+      "rules": [
+        {
+          "id": "global.bossai_api.open_cors_mutating_request",
+          "riskLevel": "critical",
+          "match": {
+            "requiresExternalCheck": "bossai_open_cors_mutating_api_request",
+            "appliesToOperationTypes": [
+              "bossai_api_mutation",
+              "bossai_management_api"
+            ]
+          },
+          "reason": "BossAI server 当前使用 cors() 默认配置；对局域网或浏览器暴露的 mutating /api 请求如果缺少认证/CSRF/Origin 限制，可能被跨站触发状态变更。",
+          "display": {
+            "headline": "BossAI mutating API 可能受开放 CORS 影响",
+            "plainReason": "BossAI server 当前使用 cors() 默认配置；对局域网或浏览器暴露的 mutating /api 请求如果缺少认证/CSRF/Origin 限制，可能被跨站触发状态变更。",
+            "userCheck": "确认 Origin/CORS、认证、CSRF 和局域网访问边界；浏览器发起的 POST/PATCH/DELETE 默认按严重风险看。",
+            "evidenceTemplate": "命中 {{matchedField}}: {{matchedText}}",
+            "badges": [
+              "BossAI 管理 API",
+              "严重"
+            ]
+          }
+        },
+        {
+          "id": "global.bossai_api.unauthenticated_state_change",
+          "riskLevel": "critical",
+          "match": {
+            "appliesToOperationTypes": [
+              "bossai_api_mutation",
+              "settings_write",
+              "provider_test",
+              "model_mutation",
+              "session_mutation",
+              "project_mutation",
+              "assistant_mutation"
+            ]
+          },
+          "reason": "BossAI 多个 /api 路由直接注册在应用上；状态变更类请求必须确认认证、授权和会话所有权，否则可能越权改配置、会话、项目或模型。",
+          "display": {
+            "headline": "BossAI API 请求会改变应用状态",
+            "plainReason": "BossAI 多个 /api 路由直接注册在应用上；状态变更类请求必须确认认证、授权和会话所有权，否则可能越权改配置、会话、项目或模型。",
+            "userCheck": "确认请求来源、登录态、用户/会话所有权和目标资源 ID。",
+            "evidenceTemplate": "命中 {{matchedField}}: {{matchedText}}",
+            "badges": [
+              "BossAI 管理 API",
+              "严重"
+            ]
+          }
+        },
+        {
+          "id": "global.bossai_api.delete_session_project_model_or_setting",
+          "riskLevel": "critical",
+          "match": {
+            "fields": [
+              "args.method",
+              "args.route",
+              "args.url",
+              "textPayloads"
+            ],
+            "regexAny": [
+              "(?i)\\bDELETE\\b.*(/api/(sessions|messages|projects|models|assistants|agents|settings))",
+              "(?i)/api/(sessions|messages|projects|models|assistants|agents|settings)/[^\\s?#]+.*\\bDELETE\\b"
+            ]
+          },
+          "reason": "删除会话、消息、项目、模型、助手或设置会丢失用户数据、模型配置或工作上下文。",
+          "display": {
+            "headline": "BossAI API 可能删除关键状态",
+            "plainReason": "删除会话、消息、项目、模型、助手或设置会丢失用户数据、模型配置或工作上下文。",
+            "userCheck": "确认具体资源 ID、是否有备份、是否只删除当前用户拥有的资源。",
+            "evidenceTemplate": "命中 {{matchedField}}: {{matchedText}}",
+            "badges": [
+              "BossAI 管理 API",
+              "严重"
+            ]
+          }
+        },
+        {
+          "id": "global.bossai_api.provider_test_secret_or_private_base_url",
+          "riskLevel": "critical",
+          "match": {
+            "fields": [
+              "args.baseUrl",
+              "args.apiKey",
+              "args.provider",
+              "args.route",
+              "args.url",
+              "textPayloads"
+            ],
+            "regexAny": [
+              "(?i)/api/providers/test(-stream)?",
+              "(?i)(api[_-]?key|authorization|bearer|sk-[A-Za-z0-9_-]{8,}|token|secret)",
+              "(?i)https?://(?:localhost|127\\.|0\\.0\\.0\\.0|10\\.|192\\.168\\.|172\\.(?:1[6-9]|2\\d|3[0-1])\\.)"
+            ]
+          },
+          "reason": "provider test/test-stream 会用请求体里的 apiKey/baseUrl/testPrompt 发起真实模型调用；私网 baseUrl 或凭据可能被滥用为 SSRF、凭据验证或外发通道。",
+          "display": {
+            "headline": "Provider 测试可能携带密钥并访问指定 baseUrl",
+            "plainReason": "provider test/test-stream 会用请求体里的 apiKey/baseUrl/testPrompt 发起真实模型调用；私网 baseUrl 或凭据可能被滥用为 SSRF、凭据验证或外发通道。",
+            "userCheck": "确认 baseUrl 属于预期供应商，apiKey 不进入日志，testPrompt 不含敏感内容。",
+            "evidenceTemplate": "命中 {{matchedField}}: {{matchedText}}",
+            "badges": [
+              "BossAI 管理 API",
+              "严重"
+            ]
+          }
+        },
+        {
+          "id": "global.bossai_api.settings_secret_storage_or_delete",
+          "riskLevel": "high",
+          "match": {
+            "fields": [
+              "args.key",
+              "args.value",
+              "args.route",
+              "args.url",
+              "textPayloads"
+            ],
+            "regexAny": [
+              "(?i)/api/settings",
+              "(?i)(api[_-]?key|token|secret|password|credential|cookie|authorization|baseUrl|provider)"
+            ]
+          },
+          "reason": "设置接口可写入或删除配置值；如果 key/value 含 API key、token、baseUrl 或 provider 配置，会改变模型访问和敏感凭据存储。",
+          "display": {
+            "headline": "设置 API 可能写入或删除敏感配置",
+            "plainReason": "设置接口可写入或删除配置值；如果 key/value 含 API key、token、baseUrl 或 provider 配置，会改变模型访问和敏感凭据存储。",
+            "userCheck": "确认只保存必要配置，密钥加密/脱敏显示，删除设置前确认影响范围。",
+            "evidenceTemplate": "命中 {{matchedField}}: {{matchedText}}",
+            "badges": [
+              "BossAI 管理 API",
+              "高"
+            ]
+          }
+        },
+        {
+          "id": "global.bossai_api.model_download_or_delete_resource_impact",
+          "riskLevel": "high",
+          "match": {
+            "fields": [
+              "args.route",
+              "args.url",
+              "args.method",
+              "textPayloads"
+            ],
+            "regexAny": [
+              "(?i)/api/models",
+              "(?i)(download|downloading|delete|remove|install|embedding|modelId|模型下载|删除模型)"
+            ]
+          },
+          "reason": "模型接口可新增、更新、下载或删除模型记录；下载/安装模型会消耗网络、磁盘和运行时资源，删除会影响后续推理。",
+          "display": {
+            "headline": "模型管理 API 可能影响运行资源",
+            "plainReason": "模型接口可新增、更新、下载或删除模型记录；下载/安装模型会消耗网络、磁盘和运行时资源，删除会影响后续推理。",
+            "userCheck": "确认 modelId、磁盘空间、网络来源和当前是否有会话依赖该模型。",
+            "evidenceTemplate": "命中 {{matchedField}}: {{matchedText}}",
+            "badges": [
+              "BossAI 管理 API",
+              "高"
+            ]
+          }
+        },
+        {
+          "id": "global.bossai_api.session_message_sensitive_persistence",
+          "riskLevel": "high",
+          "match": {
+            "fields": [
+              "args.content",
+              "args.messages",
+              "args.route",
+              "args.url",
+              "textPayloads"
+            ],
+            "regexAny": [
+              "(?i)/api/(messages|sessions)",
+              "(?i)(api[_-]?key|token|secret|password|authorization|bearer|cookie|C:\\\\Users\\\\|/home/[^\\s]+/\\.bossai|uploadsDir|localPath)"
+            ]
+          },
+          "reason": "会话/消息接口会把内容写入聊天历史；凭据、本地路径、uploadsDir/localPath 或敏感片段会被长期保存在会话上下文。",
+          "display": {
+            "headline": "会话消息可能持久化敏感内容",
+            "plainReason": "会话/消息接口会把内容写入聊天历史；凭据、本地路径、uploadsDir/localPath 或敏感片段会被长期保存在会话上下文。",
+            "userCheck": "发送前脱敏密钥和本地路径；避免把完整凭据或私有文件路径写入消息。",
+            "evidenceTemplate": "命中 {{matchedField}}: {{matchedText}}",
+            "badges": [
+              "BossAI 管理 API",
+              "高"
+            ]
+          }
+        },
+        {
+          "id": "global.bossai_api.project_path_outside_allowed_workspace",
+          "riskLevel": "critical",
+          "match": {
+            "requiresExternalCheck": "bossai_project_path_outside_allowed_workspace",
+            "appliesToOperationTypes": [
+              "project_mutation",
+              "bossai_api_mutation"
+            ]
+          },
+          "reason": "项目接口可能创建或切换项目路径；如果 path 指向用户主目录、系统目录或其他项目，会扩大文件/知识库/工具访问边界。",
+          "display": {
+            "headline": "项目路径可能越出允许工作区",
+            "plainReason": "项目接口可能创建或切换项目路径；如果 path 指向用户主目录、系统目录或其他项目，会扩大文件/知识库/工具访问边界。",
+            "userCheck": "确认项目路径在允许工作区内，避免指向 home、系统目录、SSH/配置目录或其他客户项目。",
+            "evidenceTemplate": "命中 {{matchedField}}: {{matchedText}}",
+            "badges": [
+              "BossAI 管理 API",
+              "严重"
+            ]
+          }
+        },
+        {
+          "id": "global.bossai_api.assistant_or_agent_system_prompt_change",
+          "riskLevel": "high",
+          "match": {
+            "fields": [
+              "args.route",
+              "args.url",
+              "args.instructions",
+              "args.prompt",
+              "textPayloads"
+            ],
+            "regexAny": [
+              "(?i)/api/(assistants|agents)",
+              "(?i)(system prompt|instructions|developer|tool|permission|ignore previous|越狱|系统提示词|权限|工具)"
+            ]
+          },
+          "reason": "助手/Agent 配置改动可能改变系统提示词、工具使用方式或安全边界，影响后续所有会话行为。",
+          "display": {
+            "headline": "助手或 Agent 配置可能改变安全边界",
+            "plainReason": "助手/Agent 配置改动可能改变系统提示词、工具使用方式或安全边界，影响后续所有会话行为。",
+            "userCheck": "确认 instructions/prompt 是否可信，是否放宽工具权限或加入提示注入语句。",
+            "evidenceTemplate": "命中 {{matchedField}}: {{matchedText}}",
+            "badges": [
+              "BossAI 管理 API",
+              "高"
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "aggregationPolicy": {
+    "strategy": "highest_risk_wins",
+    "riskRankField": "riskLevels.*.rank",
+    "retainAllMatches": true,
+    "baseRiskHandling": "Start from the tool profile baseRiskLevel, then apply downgradeConditions and escalation rules. If both downgrade and escalation apply, use the highest resulting risk level.",
+    "unknownIncludedToolBehavior": "If a tool is expected by scope but missing a profile, classify as high and report missing_profile.",
+    "outOfScopeToolBehavior": "If the tool belongs to deferredToolGroups, return out_of_scope with no riskLevel unless the external module has an override policy.",
+    "unknownToolBehavior": "For unknown tools, classify as high if the action appears to execute, write, delete, browse, or access network; otherwise classify as medium."
+  },
+  "outputContract": {
+    "description": "Recommended user-facing result shape for the external module. The goal is that a user can understand the level, reason, evidence, and next inspection point in one glance. The config does not enforce decisions.",
+    "displayPrinciples": [
+      "第一行必须同时出现风险等级、工具名和一句话结论。",
+      "先给结论，再给证据；不要让用户先读规则 ID。",
+      "证据最多展示 3 条，优先展示命中的原始参数片段、路径、URL 或危险关键词。",
+      "规则 ID 只放在 details/debug 字段，默认 UI 不需要突出显示。",
+      "用户提示必须描述风险来源，不要替用户做强制拦截决定。",
+      "如果是 out_of_scope，要明确说明本配置未覆盖该工具，而不是伪造等级。"
+    ],
+    "requiredFields": [
+      "riskLevel",
+      "riskLabel",
+      "headline",
+      "summary",
+      "categories",
+      "matchedRuleIds",
+      "evidence",
+      "readableReason",
+      "whatToCheck",
+      "scopeStatus",
+      "matchedRules",
+      "evidenceObjects",
+      "userChecks"
+    ],
+    "shape": {
+      "riskLevel": "low|medium|high|critical",
+      "riskLabel": "低|中|高|严重",
+      "severityRank": 10,
+      "toolName": "cli_tool",
+      "headline": "严重风险：cli_tool 准备执行递归删除命令",
+      "summary": "这条命令包含 rm -rf，可能删除大量文件。",
+      "categories": [
+        "command_execution"
+      ],
+      "baseRiskLevel": "high",
+      "matchedRuleIds": [
+        "global.command.destructive_delete"
+      ],
+      "evidence": [
+        "matched text, field name, path, URL, or external check result"
+      ],
+      "readableReason": "Human-readable Chinese explanation of why this action received the final level.",
+      "whatToCheck": [
+        "用户优先查看的参数或风险点，例如 command、file_path、url、task、patch_text。"
+      ],
+      "riskBadges": [
+        "命令执行",
+        "递归删除",
+        "工作区外路径"
+      ],
+      "compactCard": {
+        "title": "严重风险 · cli_tool",
+        "subtitle": "命中递归删除：rm -rf dist",
+        "body": "可能删除大量文件。请确认目标路径、当前工作目录和是否有备份。",
+        "chips": [
+          "命令执行",
+          "删除",
+          "critical"
+        ]
+      },
+      "details": {
+        "matchedRules": [
+          {
+            "id": "global.command.destructive_delete",
+            "riskLevel": "critical",
+            "reason": "命令包含递归、强制或批量删除信号，可能造成不可逆文件损失。",
+            "evidence": [
+              "rm -rf"
+            ]
+          }
+        ],
+        "profileSummary": "Tool profile readableSummary.",
+        "confidence": "low|medium|high",
+        "outOfScope": false,
+        "scopeStatus": "in_scope|out_of_scope|unknown_tool"
+      },
+      "profileSummary": "Tool profile readableSummary.",
+      "confidence": "low|medium|high",
+      "outOfScope": false,
+      "scopeStatus": "in_scope|out_of_scope|unknown_tool",
+      "matchedRules": [
+        {
+          "id": "global.command.destructive_delete",
+          "riskLevel": "critical",
+          "headline": "命令可能删除大量文件",
+          "plainReason": "命令包含递归、强制或批量删除信号。",
+          "userCheck": "确认删除目标、cwd 和是否可恢复。"
+        }
+      ],
+      "evidenceObjects": [
+        {
+          "type": "matchedText|path|url|argumentField|externalCheck|ruleId",
+          "field": "rawCommand",
+          "valuePreview": "rm -rf",
+          "sourceArgumentPath": "args.command",
+          "redacted": false
+        }
+      ],
+      "userChecks": [
+        "确认目标路径是否明确且在工作区内。"
+      ]
+    },
+    "fieldOrderForDisplay": [
+      "headline",
+      "summary",
+      "evidence",
+      "whatToCheck",
+      "riskBadges",
+      "details"
+    ],
+    "headlineTemplates": {
+      "low": "低风险：{toolName} 主要是只读或范围明确的操作",
+      "medium": "中风险：{toolName} 需要留意范围、外部内容或预览结果",
+      "high": "高风险：{toolName} 可能改变项目状态或暴露敏感信息",
+      "critical": "严重风险：{toolName} 可能造成不可逆破坏、泄密或越权访问",
+      "outOfScope": "未覆盖：{toolName} 不在当前风险配置范围内"
+    },
+    "messageTemplates": {
+      "low": "该操作主要是只读或范围明确的低风险动作：{reason}",
+      "medium": "该操作存在可控风险，需要留意范围或外部内容：{reason}",
+      "high": "该操作可能改变项目状态、暴露敏感信息或触发外部副作用：{reason}",
+      "critical": "该操作可能造成不可逆破坏、敏感信息泄露或越权访问：{reason}"
+    },
+    "evidenceFormatting": {
+      "maxVisibleEvidenceItems": 3,
+      "maxEvidenceCharsEach": 160,
+      "preferEvidenceTypesInOrder": [
+        "matchedText",
+        "path",
+        "url",
+        "argumentField",
+        "externalCheck",
+        "ruleId"
+      ],
+      "redactionHints": [
+        "If evidence contains a likely secret value, show the key name and redact the value.",
+        "Keep path and URL host visible unless they themselves contain credentials.",
+        "Do not include full file content in evidence; show field name, path, and small matched snippet."
+      ]
+    },
+    "whatToCheckByCategory": {
+      "command_execution": [
+        "command 是否包含删除、下载执行、提权、部署或链式执行。",
+        "cwd 是否指向预期工作区。",
+        "命令目标路径是否在允许范围内。"
+      ],
+      "filesystem_read": [
+        "file_path/search_dir 是否在工作区内。",
+        "目标是否包含 .env、.ssh、credentials、token、cookie 等敏感信号。",
+        "读取范围是否过大。"
+      ],
+      "filesystem_write": [
+        "目标文件是否是源码、配置、脚本、依赖、CI 或安全相关文件。",
+        "是否包含 Delete File、覆盖已有文件或多文件修改。",
+        "写入内容是否包含密钥或权限/认证改动。"
+      ],
+      "filesystem_cleanup": [
+        "confirm 是否为 true。",
+        "target_categories 是否为 all。",
+        "清理目标是否只限 workspace 碎片。"
+      ],
+      "network_access": [
+        "query/url 是否包含内部信息、源码、客户数据或凭据。",
+        "URL 是否指向 localhost、私网或 metadata 地址。",
+        "返回内容是否来自不可信外部来源。"
+      ],
+      "browser_automation": [
+        "task 是否包含提交、付款、删除、发布、部署、上传或下载。",
+        "target_url 是否是后台、账单、登录态或管理页面。",
+        "allowed_domains 是否明确限制。"
+      ],
+      "bossai_knowledge_ingestion": [
+        "route/method 是否上传、读取完整 content、reindex 或 DELETE。",
+        "files[].content 是否过大，文件是否是 docx/图片/OCR 或包含敏感信息。",
+        "EMBED_API/OCR/rerank 是否为可信本地服务，日志是否会记录文档名和片段。"
+      ],
+      "bossai_management_api": [
+        "route/method 是否 POST/PATCH/PUT/DELETE，Origin/CORS/认证是否明确。",
+        "provider/settings 是否包含 apiKey/token/baseUrl 或私网地址。",
+        "sessions/projects/models/assistants 是否删除或改变长期状态。"
+      ]
+    },
+    "exampleUserOutputs": [
+      {
+        "id": "display.cli.recursive_delete",
+        "forExample": "example.cli.recursive_delete",
+        "output": {
+          "riskLevel": "critical",
+          "riskLabel": "严重",
+          "severityRank": 40,
+          "toolName": "cli_tool",
+          "headline": "严重风险：cli_tool 准备执行递归删除命令",
+          "summary": "命令包含 rm -rf，可能删除大量文件。",
+          "evidence": [
+            "command: rm -rf dist",
+            "matched: rm -rf",
+            "path: dist"
+          ],
+          "whatToCheck": [
+            "确认 dist 是否是唯一删除目标。",
+            "确认 cwd 是否在预期工作区。",
+            "确认是否有备份或可恢复方式。"
+          ],
+          "riskBadges": [
+            "命令执行",
+            "递归删除",
+            "critical"
+          ],
+          "categories": [
+            "command_execution"
+          ],
+          "matchedRuleIds": [
+            "global.command.destructive_delete"
+          ],
+          "readableReason": "命令包含递归删除信号 rm -rf，可能造成不可逆文件损失。"
+        }
+      },
+      {
+        "id": "display.web_fetch.metadata",
+        "forExample": "example.web_fetch_metadata",
+        "output": {
+          "riskLevel": "critical",
+          "riskLabel": "严重",
+          "severityRank": 40,
+          "toolName": "web_fetch_tool",
+          "headline": "严重风险：web_fetch_tool 指向云 metadata 地址",
+          "summary": "URL 指向 169.254.169.254，可能读取云实例临时凭据。",
+          "evidence": [
+            "url: http://169.254.169.254/latest/meta-data/",
+            "matched: 169.254.169.254",
+            "rule: cloud metadata address"
+          ],
+          "whatToCheck": [
+            "确认该 URL 是否确实需要访问。",
+            "确认不会把 metadata 或临时凭据带入模型上下文。",
+            "优先改用公开文档 URL。"
+          ],
+          "riskBadges": [
+            "网络访问",
+            "metadata",
+            "critical"
+          ],
+          "categories": [
+            "network_access"
+          ],
+          "matchedRuleIds": [
+            "global.url.cloud_metadata_address",
+            "global.url.private_or_local_address"
+          ],
+          "readableReason": "URL 指向 cloud metadata 地址，可能读取云实例临时凭据。"
+        }
+      }
+    ],
+    "antiPatterns": {
+      "tooVerbose": "不要把所有命中规则、完整 patch、完整文件内容直接展示在第一屏。",
+      "tooOpaque": "不要只输出 high/critical，不解释命中的参数、路径或关键词。",
+      "tooPolicyLike": "不要把建议分级写成强制拦截结论，例如“禁止执行”。"
+    },
+    "matchedRuleDisplayContract": {
+      "source": "globalRuleGroups[].rules[].display",
+      "fallbackFields": [
+        "reason",
+        "evidenceHint",
+        "id"
+      ],
+      "maxVisibleRules": 3
+    },
+    "evidenceObjectContract": {
+      "requiredFields": [
+        "type",
+        "field",
+        "valuePreview"
+      ],
+      "optionalFields": [
+        "sourceArgumentPath",
+        "matchedRuleId",
+        "redacted",
+        "confidence"
+      ],
+      "redactionRequired": true
+    }
+  },
+  "examples": [
+    {
+      "id": "example.cli.read_only_pwd",
+      "input": {
+        "toolName": "cli_tool",
+        "operationType": "command_execution",
+        "args": {
+          "command": "pwd"
+        },
+        "rawCommand": "pwd",
+        "paths": [],
+        "urls": [],
+        "textPayloads": [
+          "pwd"
+        ]
+      },
+      "expectedRiskLevel": "medium",
+      "why": "cli_tool 默认高风险，但只读、无链式执行、无写入删除，可按 downgradeConditions 降到 medium。"
+    },
+    {
+      "id": "example.cli.recursive_delete",
+      "input": {
+        "toolName": "cli_tool",
+        "operationType": "command_execution",
+        "args": {
+          "command": "rm -rf dist"
+        },
+        "rawCommand": "rm -rf dist",
+        "paths": [
+          "dist"
+        ],
+        "urls": [],
+        "textPayloads": [
+          "rm -rf dist"
+        ]
+      },
+      "expectedRiskLevel": "critical",
+      "why": "命中 global.command.destructive_delete。"
+    },
+    {
+      "id": "example.patch.docs_only",
+      "input": {
+        "toolName": "apply_patch_tool",
+        "operationType": "filesystem_patch",
+        "args": {
+          "patch_text": "*** Begin Patch\n*** Update File: docs/readme.md\n@@\n-old\n+new\n*** End Patch",
+          "cwd": "."
+        },
+        "paths": [
+          "docs/readme.md"
+        ],
+        "textPayloads": [
+          "*** Begin Patch\n*** Update File: docs/readme.md\n@@\n-old\n+new\n*** End Patch"
+        ]
+      },
+      "expectedRiskLevel": "medium",
+      "why": "patch 工具默认高风险，但仅修改文档且无删除、安全、配置或工作区外写入，可降为 medium。"
+    },
+    {
+      "id": "example.patch.delete_file",
+      "input": {
+        "toolName": "apply_patch_tool",
+        "operationType": "filesystem_delete",
+        "args": {
+          "patch_text": "*** Begin Patch\n*** Delete File: config.toml\n*** End Patch"
+        },
+        "paths": [
+          "config.toml"
+        ],
+        "textPayloads": [
+          "*** Begin Patch\n*** Delete File: config.toml\n*** End Patch"
+        ]
+      },
+      "expectedRiskLevel": "critical",
+      "why": "删除文件且目标是配置文件。"
+    },
+    {
+      "id": "example.write_artifact",
+      "input": {
+        "toolName": "write_file_tool",
+        "operationType": "filesystem_write",
+        "args": {
+          "file_path": "workspace/reports/summary.md",
+          "content": "# Summary"
+        },
+        "paths": [
+          "workspace/reports/summary.md"
+        ],
+        "textPayloads": [
+          "# Summary"
+        ]
+      },
+      "expectedRiskLevel": "medium",
+      "why": "写入普通 markdown 交付物，路径在 workspace 内且无敏感内容。"
+    },
+    {
+      "id": "example.cleanup_preview",
+      "input": {
+        "toolName": "clean_workspace_debris_tool",
+        "operationType": "filesystem_cleanup_preview",
+        "args": {
+          "confirm": false,
+          "target_categories": "all"
+        }
+      },
+      "expectedRiskLevel": "medium",
+      "why": "confirm=false 时仅预览，未执行删除。"
+    },
+    {
+      "id": "example.cleanup_confirm_all",
+      "input": {
+        "toolName": "clean_workspace_debris_tool",
+        "operationType": "filesystem_cleanup",
+        "args": {
+          "confirm": true,
+          "target_categories": "all"
+        }
+      },
+      "expectedRiskLevel": "high",
+      "why": "确认清理全部类别，存在文件删除风险。"
+    },
+    {
+      "id": "example.web_fetch_metadata",
+      "input": {
+        "toolName": "web_fetch_tool",
+        "operationType": "network_fetch",
+        "args": {
+          "url": "http://169.254.169.254/latest/meta-data/"
+        },
+        "urls": [
+          "http://169.254.169.254/latest/meta-data/"
+        ]
+      },
+      "expectedRiskLevel": "critical",
+      "why": "命中 metadata 地址规则。"
+    },
+    {
+      "id": "example.browser_read_only",
+      "input": {
+        "toolName": "computer_use_task_tool",
+        "operationType": "browser_automation",
+        "args": {
+          "task": "Open the public docs page and summarize the visible headings.",
+          "target_url": "https://example.com/docs",
+          "allowed_domains": "example.com",
+          "max_steps": 8,
+          "require_confirmation": true
+        },
+        "urls": [
+          "https://example.com/docs"
+        ],
+        "textPayloads": [
+          "Open the public docs page and summarize the visible headings."
+        ]
+      },
+      "expectedRiskLevel": "medium",
+      "why": "只读浏览、域名受限、步骤较少且要求确认，可由高风险降到中风险。"
+    },
+    {
+      "id": "example.browser_submit_payment",
+      "input": {
+        "toolName": "computer_use_task_tool",
+        "operationType": "browser_automation",
+        "args": {
+          "task": "Log in and submit the payment form.",
+          "target_url": "https://billing.example.com",
+          "allowed_domains": "billing.example.com",
+          "require_confirmation": true
+        },
+        "urls": [
+          "https://billing.example.com"
+        ],
+        "textPayloads": [
+          "Log in and submit the payment form."
+        ]
+      },
+      "expectedRiskLevel": "critical",
+      "why": "浏览器任务涉及登录、账单和提交付款。"
+    },
+    {
+      "id": "example.bossai.knowledge_search_targeted",
+      "input": {
+        "toolName": "knowledge_search",
+        "operationType": "knowledge_search",
+        "args": {
+          "shell": "grep -R \"invoice\" /knowledge",
+          "semanticQuery": "invoice acceptance requirements"
+        },
+        "textPayloads": [
+          "grep -R \"invoice\" /knowledge",
+          "invoice acceptance requirements"
+        ]
+      },
+      "expectedRiskLevel": "low",
+      "why": "只读 grep，查询词明确，未尝试写入或全文 dump；在知识库范围明确时可降为 low。"
+    },
+    {
+      "id": "example.bossai.knowledge_search_secret_hunting",
+      "input": {
+        "toolName": "knowledge_search",
+        "operationType": "knowledge_search",
+        "args": {
+          "shell": "rg \"api_key|password|token\" /knowledge",
+          "semanticQuery": "api key password token"
+        },
+        "textPayloads": [
+          "rg \"api_key|password|token\" /knowledge",
+          "api key password token"
+        ]
+      },
+      "expectedRiskLevel": "high",
+      "why": "命中 global.knowledge.secret_hunting，知识库检索疑似定位凭据或敏感字段。"
+    },
+    {
+      "id": "example.bossai.file_download_generated_report",
+      "input": {
+        "toolName": "create_file_download_link",
+        "operationType": "file_download_link",
+        "args": {
+          "path": "/home/kylin/BossAI-dev/BossAI/outputs/reports/summary.md"
+        },
+        "paths": [
+          "/home/kylin/BossAI-dev/BossAI/outputs/reports/summary.md"
+        ]
+      },
+      "expectedRiskLevel": "medium",
+      "why": "目标像是生成报告交付物，仍需确认位于允许输出目录且不含敏感数据。"
+    },
+    {
+      "id": "example.bossai.file_download_env",
+      "input": {
+        "toolName": "create_file_download_link",
+        "operationType": "file_download_link",
+        "args": {
+          "path": "/home/kylin/BossAI-dev/BossAI/.env"
+        },
+        "paths": [
+          "/home/kylin/BossAI-dev/BossAI/.env"
+        ]
+      },
+      "expectedRiskLevel": "critical",
+      "why": "下载链接目标是敏感环境文件，命中敏感路径和持久本地文件暴露规则。"
+    },
+    {
+      "id": "example.bossai.bocha_public_query",
+      "input": {
+        "toolName": "bocha_fast_search",
+        "operationType": "network_search",
+        "args": {
+          "query": "BossAI public documentation"
+        },
+        "textPayloads": [
+          "BossAI public documentation"
+        ]
+      },
+      "expectedRiskLevel": "medium",
+      "why": "公开查询发送到外部搜索服务，默认中风险。"
+    },
+    {
+      "id": "example.bossai.bocha_sensitive_query",
+      "input": {
+        "toolName": "bocha_fast_search",
+        "operationType": "network_search",
+        "args": {
+          "query": "C:/Users/project config.toml BOCHA_API_KEY token"
+        },
+        "textPayloads": [
+          "C:/Users/project config.toml BOCHA_API_KEY token"
+        ]
+      },
+      "expectedRiskLevel": "high",
+      "why": "外部搜索 query 疑似包含本地路径、配置文件和密钥字段。"
+    },
+    {
+      "id": "example.bossai.file_download_unapproved_path",
+      "input": {
+        "toolName": "create_file_download_link",
+        "operationType": "file_download_link",
+        "args": {
+          "path": "/home/kylin/BossAI-dev/BossAI/config.toml"
+        },
+        "paths": [
+          "/home/kylin/BossAI-dev/BossAI/config.toml"
+        ]
+      },
+      "expectedRiskLevel": "critical",
+      "why": "配置文件不是本轮生成的交付物，且下载链接会持久暴露本地文件。"
+    },
+    {
+      "id": "example.bossai.knowledge_large_read",
+      "input": {
+        "toolName": "knowledge_search",
+        "operationType": "knowledge_search",
+        "args": {
+          "shell": "sed -n \"1,$p\" /knowledge/kb/doc__policy.md",
+          "semanticQuery": "policy"
+        },
+        "textPayloads": [
+          "sed -n \"1,$p\" /knowledge/kb/doc__policy.md"
+        ]
+      },
+      "expectedRiskLevel": "high",
+      "why": "命中 global.knowledge.large_read_command，可能输出整份知识库文件。"
+    },
+    {
+      "id": "example.bossai.bocha_structured_query_exfiltration",
+      "input": {
+        "toolName": "bocha_fast_search",
+        "operationType": "network_search",
+        "args": {
+          "query": "```toml\n[secrets]\nBOCHA_API_KEY=xxxx\n```\nsearch why this config fails"
+        },
+        "textPayloads": [
+          "```toml\n[secrets]\nBOCHA_API_KEY=xxxx\n```"
+        ]
+      },
+      "expectedRiskLevel": "high",
+      "why": "外部搜索 query 包含配置块和密钥字段，命中 long_or_structured_query_exfiltration。"
+    },
+    {
+      "id": "example.bossai.file_upload_executable",
+      "input": {
+        "toolName": "bossai_file_upload_api",
+        "operationType": "file_upload",
+        "args": {
+          "sessionId": "session-1",
+          "name": "payload.sh",
+          "mediaType": "application/x-sh",
+          "data": "data:application/x-sh;base64,ZXhpdCAw"
+        },
+        "textPayloads": [
+          "payload.sh",
+          "application/x-sh"
+        ]
+      },
+      "expectedRiskLevel": "high",
+      "why": "上传脚本文件，命中 global.fileupload.executable_or_archive_upload。"
+    },
+    {
+      "id": "example.bossai.file_download_symlink_escape",
+      "input": {
+        "toolName": "create_file_download_link",
+        "operationType": "file_download_link",
+        "args": {
+          "path": "/home/kylin/BossAI-dev/BossAI/outputs/latest-report.md"
+        },
+        "paths": [
+          "/home/kylin/BossAI-dev/BossAI/outputs/latest-report.md"
+        ]
+      },
+      "expectedRiskLevel": "critical",
+      "why": "如果 latest-report.md 是 symlink 且 realpath 指向 .env 或工作区外文件，应命中 global.filelink.symlink_or_realpath_escape。"
+    },
+    {
+      "id": "example.bossai.file_upload_cross_session",
+      "input": {
+        "toolName": "bossai_file_upload_api",
+        "operationType": "file_upload",
+        "args": {
+          "sessionId": "other-session-id",
+          "name": "note.txt",
+          "mediaType": "text/plain",
+          "data": "data:text/plain;base64,SGVsbG8="
+        }
+      },
+      "expectedRiskLevel": "critical",
+      "why": "上传 sessionId 不属于当前会话时，可能跨会话写入文件。"
+    },
+    {
+      "id": "example.bossai.knowledge_index_enumeration",
+      "input": {
+        "toolName": "knowledge_search",
+        "operationType": "knowledge_search",
+        "args": {
+          "shell": "cat /knowledge/index.json",
+          "semanticQuery": "list all knowledge files"
+        },
+        "textPayloads": [
+          "cat /knowledge/index.json"
+        ]
+      },
+      "expectedRiskLevel": "high",
+      "why": "读取 /knowledge/index.json 会枚举知识库文档清单和路径。"
+    },
+    {
+      "id": "example.bossai.knowledge_base64_secret_decode",
+      "input": {
+        "toolName": "knowledge_search",
+        "operationType": "knowledge_search",
+        "args": {
+          "shell": "rg \"base64 token\" /knowledge",
+          "semanticQuery": "decode base64 token secret"
+        },
+        "textPayloads": [
+          "decode base64 token secret"
+        ]
+      },
+      "expectedRiskLevel": "high",
+      "why": "检索意图要求解码或定位隐藏凭据，命中 global.knowledge.base64_secret_decode_exposure。"
+    },
+    {
+      "id": "example.bossai.knowledge_upload_sensitive_contract",
+      "input": {
+        "toolName": "bossai_knowledge_ingestion_api",
+        "operationType": "knowledge_document_upload",
+        "args": {
+          "route": "/api/knowledge-bases/kb1/documents/upload",
+          "files": [
+            {
+              "name": "customer-contract-with-token.txt",
+              "content": "base64..."
+            }
+          ]
+        },
+        "textPayloads": [
+          "customer contract token confidential"
+        ]
+      },
+      "expectedRiskLevel": "critical",
+      "why": "知识库上传疑似包含客户/合同/token 等敏感内容，会持久化原文和索引。"
+    },
+    {
+      "id": "example.bossai.knowledge_read_full_document",
+      "input": {
+        "toolName": "bossai_knowledge_ingestion_api",
+        "operationType": "knowledge_document_read",
+        "args": {
+          "method": "GET",
+          "route": "/api/documents/doc-123"
+        },
+        "urls": [
+          "/api/documents/doc-123"
+        ]
+      },
+      "expectedRiskLevel": "high",
+      "why": "/api/documents/:id 返回完整 content，命中 full_document_content_read。"
+    },
+    {
+      "id": "example.bossai.knowledge_recursive_delete",
+      "input": {
+        "toolName": "bossai_knowledge_ingestion_api",
+        "operationType": "knowledge_folder_mutation",
+        "args": {
+          "method": "DELETE",
+          "route": "/api/knowledge-bases/kb1/folders",
+          "recursive": true,
+          "path": "policies"
+        },
+        "textPayloads": [
+          "DELETE /api/knowledge-bases/kb1/folders recursive=true"
+        ]
+      },
+      "expectedRiskLevel": "critical",
+      "why": "recursive 删除知识库文件夹会删除文档和 chunks。"
+    },
+    {
+      "id": "example.bossai.knowledge_reindex",
+      "input": {
+        "toolName": "bossai_knowledge_ingestion_api",
+        "operationType": "knowledge_reindex",
+        "args": {
+          "method": "POST",
+          "route": "/api/knowledge-bases/kb1/reindex"
+        },
+        "textPayloads": [
+          "POST /api/knowledge-bases/kb1/reindex"
+        ]
+      },
+      "expectedRiskLevel": "high",
+      "why": "reindex 会后台处理全部文档并调用 embedding。"
+    },
+    {
+      "id": "example.bossai.provider_test_private_url_with_key",
+      "input": {
+        "toolName": "bossai_management_api",
+        "operationType": "provider_test",
+        "args": {
+          "method": "POST",
+          "route": "/api/providers/test-stream",
+          "baseUrl": "http://192.168.20.30:8081/v1",
+          "apiKey": "sk-redacted"
+        },
+        "urls": [
+          "http://192.168.20.30:8081/v1"
+        ],
+        "textPayloads": [
+          "POST /api/providers/test-stream apiKey baseUrl http://192.168.20.30:8081/v1"
+        ]
+      },
+      "expectedRiskLevel": "critical",
+      "why": "provider test 使用请求体密钥并访问私网 baseUrl，命中 provider_test_secret_or_private_base_url。"
+    },
+    {
+      "id": "example.bossai.settings_write_secret",
+      "input": {
+        "toolName": "bossai_management_api",
+        "operationType": "settings_write",
+        "args": {
+          "method": "PUT",
+          "route": "/api/settings",
+          "key": "OPENAI_API_KEY",
+          "value": "sk-redacted"
+        },
+        "textPayloads": [
+          "PUT /api/settings OPENAI_API_KEY sk-redacted"
+        ]
+      },
+      "expectedRiskLevel": "high",
+      "why": "设置接口写入 API key，命中 settings_secret_storage_or_delete。"
+    },
+    {
+      "id": "example.bossai.delete_session",
+      "input": {
+        "toolName": "bossai_management_api",
+        "operationType": "session_mutation",
+        "args": {
+          "method": "DELETE",
+          "route": "/api/sessions/session-1"
+        },
+        "textPayloads": [
+          "DELETE /api/sessions/session-1"
+        ]
+      },
+      "expectedRiskLevel": "critical",
+      "why": "删除会话会丢失用户上下文，命中 delete_session_project_model_or_setting。"
+    },
+    {
+      "id": "example.bossai.message_local_path_persistence",
+      "input": {
+        "toolName": "bossai_management_api",
+        "operationType": "session_mutation",
+        "args": {
+          "method": "POST",
+          "route": "/api/messages",
+          "content": "localPath: /home/kylin/.bossai/session-data/s1/uploads/secret.txt"
+        },
+        "textPayloads": [
+          "localPath: /home/kylin/.bossai/session-data/s1/uploads/secret.txt"
+        ]
+      },
+      "expectedRiskLevel": "high",
+      "why": "会话消息持久化 localPath 和 session-data 路径。"
+    }
+  ],
+  "extensionPoints": {
+    "matcherTypes": [
+      "regexAny",
+      "equalsAny",
+      "numericGreaterThan",
+      "requiresExternalCheck",
+      "appliesToOperationTypes"
+    ],
+    "externalChecks": {
+      "path_is_outside_workspace": "Resolve each path against context.workspaceRoot/projectRoot and return true when it escapes allowed roots.",
+      "diff_search_block_is_short_or_non_unique": "Parse SEARCH blocks and determine if any block is too short, lacks stable context, or matches multiple locations.",
+      "allowed_domains_empty_or_not_matching_target_url": "Parse target_url host and allowed_domains; return true when no explicit domain bound exists or target host is not covered.",
+      "knowledge_scope_unbounded": "Return true when BossAI knowledge_search has no context.knowledgeBaseId and no context.knowledgePaths, or when the selected scope means all knowledge bases.",
+      "download_path_is_allowed_artifact": "Resolve args.path and return true only when it is inside session outputs/artifacts or another user-approved output directory.",
+      "download_path_not_allowed_artifact": "Resolve args.path and return true when it is outside session outputs/artifacts or another user-approved output directory, or when ownership cannot be established.",
+      "upload_payload_too_large": "Return true when the decoded base64 upload size or encoded args.data length exceeds the configured BossAI upload limit.",
+      "query_text_too_long": "Return true when args.query exceeds the configured external-search safe length threshold, for example 300-500 characters.",
+      "knowledge_output_or_command_too_broad": "Return true when knowledge_search command/output is expected to return full files, thousands of lines, or broad /knowledge listings rather than small relevant snippets.",
+      "download_path_symlink_or_realpath_escape": "Resolve args.path with realpath/lstat and return true when the path is a symlink/junction/hardlink or the resolved target escapes allowed output roots.",
+      "upload_session_id_not_current_or_authorized": "Return true when args.sessionId is missing, user/model supplied, or does not match the current authenticated chat/session context.",
+      "upload_media_type_mismatch_or_unknown": "Return true when data URL mediaType, args.mediaType, file extension, or magic bytes disagree, are missing, or are not in the allowed upload type list."
+    },
+    "futureProfileGroups": [
+      "test_build_lint",
+      "background_task",
+      "git_workspace_read_only",
+      "tool_registry_control_plane",
+      "memory_context",
+      "knowledge_and_rag",
+      "sub_agent_and_multi_agent",
+      "restart_and_self_evolution",
+      "bossai_disabled_search_tools"
+    ],
+    "versioningPolicy": "Increment schemaVersion for breaking field changes. Add new toolProfiles, rule groups, or examples without changing schemaVersion when backward compatible."
+  }
+}

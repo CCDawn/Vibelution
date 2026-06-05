@@ -17,9 +17,9 @@ except ImportError:  # pragma: no cover - Python < 3.11 compatibility
     import toml as tomllib  # type: ignore[no-redef]
 
 from core.llm import assert_llm_compatibility
-
 from .llm_security import (
     coerce_llm_probe_timeout,
+    is_llm_local_network_base_url,
     redact_llm_probe_error,
     validate_llm_api_key_env,
     validate_llm_provider_target,
@@ -52,6 +52,8 @@ MODEL_LIBRARY_DETAIL_FIELDS = (
     "api_key_env",
     "transport",
     "contract",
+    "protocol",
+    "compat",
     "reasoning_state_field",
     "strict_compatibility",
     "temperature",
@@ -62,6 +64,8 @@ MODEL_LIBRARY_DETAIL_FIELDS = (
     "tool_calling_mode",
     "prompt_cache",
     "discovery_enabled",
+    "thinking_type",
+    "thinking_display",
     "supports_image_input",
     "capability_status",
     "capability_source",
@@ -95,6 +99,7 @@ LLM_MODEL_PRESETS = {
             "streaming": True,
             "tool_calling_mode": "auto",
             "discovery_enabled": True,
+            "prompt_cache": {"mode": "automatic"},
         },
     },
     "openai_gpt_image_1_5": {
@@ -176,6 +181,7 @@ LLM_MODEL_PRESETS = {
             "streaming": True,
             "tool_calling_mode": "auto",
             "discovery_enabled": True,
+            "prompt_cache": {"mode": "automatic"},
         },
     },
     "custom_openai_compatible_relay": {
@@ -204,6 +210,7 @@ LLM_MODEL_PRESETS = {
             "streaming": True,
             "tool_calling_mode": "auto",
             "discovery_enabled": True,
+            "prompt_cache": {"mode": "automatic"},
         },
     },
     "custom_relay_responses": {
@@ -232,6 +239,7 @@ LLM_MODEL_PRESETS = {
             "streaming": True,
             "tool_calling_mode": "auto",
             "discovery_enabled": True,
+            "prompt_cache": {"mode": "automatic"},
         },
     },
     "openai_gpt_5_4": {
@@ -258,6 +266,7 @@ LLM_MODEL_PRESETS = {
             "streaming": True,
             "tool_calling_mode": "auto",
             "discovery_enabled": True,
+            "prompt_cache": {"mode": "automatic"},
         },
     },
     "openai_gpt_5_3_codex": {
@@ -284,6 +293,7 @@ LLM_MODEL_PRESETS = {
             "streaming": True,
             "tool_calling_mode": "auto",
             "discovery_enabled": True,
+            "prompt_cache": {"mode": "automatic"},
         },
     },
     "anthropic_claude_sonnet": {
@@ -310,6 +320,7 @@ LLM_MODEL_PRESETS = {
             "streaming": True,
             "tool_calling_mode": "auto",
             "discovery_enabled": True,
+            "prompt_cache": {"mode": "explicit_cache_control"},
         },
     },
     "deepseek_v4_flash": {
@@ -396,6 +407,7 @@ LLM_MODEL_PRESETS = {
             "streaming": True,
             "tool_calling_mode": "auto",
             "discovery_enabled": True,
+            "prompt_cache": {"mode": "automatic"},
         },
     },
     "minimax_m2_7": {
@@ -478,6 +490,7 @@ LLM_MODEL_PRESETS = {
             "streaming": True,
             "tool_calling_mode": "auto",
             "discovery_enabled": True,
+            "prompt_cache": {"mode": "automatic"},
             "supports_image_input": True,
             "capability_status": "supported",
             "capability_source": "preset",
@@ -616,6 +629,9 @@ def _profile_reference_payload(source: dict[str, Any]) -> dict[str, Any]:
     model_ref = _profile_model_ref(source)
     if model_ref:
         payload: dict[str, Any] = {"model_ref": model_ref}
+        label = str(source.get("label", "") or "").strip()
+        if label:
+            payload["label"] = label
         overrides = source.get("overrides")
         if isinstance(overrides, dict) and overrides:
             payload["overrides"] = copy.deepcopy(overrides)
@@ -661,7 +677,8 @@ def _provider_fingerprint(provider: dict[str, Any]) -> str:
 
 def _generated_model_id(provider: dict[str, Any], model: str) -> str:
     fingerprint = _provider_fingerprint(provider)
-    raw = f"generated-{fingerprint}-{str(model or '').strip().lower()}"
+    provider_kind = _provider_kind(provider).lower()
+    raw = f"generated-{provider_kind}-{str(model or '').strip().lower()}-{fingerprint[:12]}"
     return "".join(char if char.isalnum() else "_" for char in raw).strip("_") or "generated_model"
 
 
@@ -700,11 +717,112 @@ def _repair_legacy_model_library_shape(public_config: dict) -> dict:
     return repaired
 
 
+def _canonicalize_model_library_api_key_envs(public_config: dict) -> dict:
+    updated = copy.deepcopy(public_config)
+    llm = updated.get("llm", {})
+    if not isinstance(llm, dict):
+        return updated
+    model_library = llm.get("model_library", {})
+    if not isinstance(model_library, dict):
+        return updated
+    for model_id, item in model_library.items():
+        if isinstance(item, dict):
+            item["api_key_env"] = _canonical_model_api_key_env(str(model_id))
+    return updated
+
+
+def _model_preset_entry(preset_id: str) -> tuple[str, dict[str, Any]] | None:
+    preset = LLM_MODEL_PRESETS.get(preset_id)
+    if not isinstance(preset, dict):
+        return None
+    model_id = str(preset.get("model_id") or preset_id).strip()
+    model_defaults = copy.deepcopy(preset.get("model", {}))
+    provider = _public_provider_entry(preset.get("provider"))
+    model = str(model_defaults.get("model", "")).strip()
+    label = str(model_defaults.get("label") or preset.get("label") or model).strip()
+    if not model_id or not provider or not model:
+        return None
+    entry = _model_library_entry(provider, model, label, model_defaults)
+    entry["api_key_env"] = _canonical_model_api_key_env(model_id)
+    return model_id, entry
+
+
+def _matching_model_preset_id(provider: dict[str, Any], model: str, details: dict[str, Any] | None = None) -> str:
+    model_name = str(model or "").strip()
+    if not provider or not model_name:
+        return ""
+    provider_fingerprint = _provider_fingerprint(provider)
+    for preset_id, preset in LLM_MODEL_PRESETS.items():
+        if not isinstance(preset, dict):
+            continue
+        preset_model = preset.get("model", {})
+        if not isinstance(preset_model, dict):
+            continue
+        if str(preset_model.get("model", "")).strip() != model_name:
+            continue
+        preset_provider = _public_provider_entry(preset.get("provider"))
+        if preset_provider and _provider_fingerprint(preset_provider) == provider_fingerprint:
+            return str(preset.get("model_id") or preset_id).strip()
+
+    provider_kind = _provider_kind(provider).lower()
+    if provider_kind == "xiaomi" and model_name == "mimo-v2.5-pro":
+        return "xiaomi_mimo_v2_5_pro_token_plan"
+    return ""
+
+
+def _ensure_profile_model_library_entries(public_config: dict) -> dict:
+    updated = copy.deepcopy(public_config)
+    llm = updated.get("llm", {})
+    if not isinstance(llm, dict):
+        return updated
+    profiles = llm.get("profiles", {})
+    model_library = llm.setdefault("model_library", {})
+    if not isinstance(profiles, dict) or not isinstance(model_library, dict):
+        return updated
+
+    route_model_ids: dict[tuple[str, str], str] = {}
+    for existing_model_id, item in model_library.items():
+        if not isinstance(item, dict):
+            continue
+        provider = _owner_provider(item)
+        model = str(item.get("model", "")).strip()
+        if provider and model:
+            route_model_ids.setdefault((_provider_fingerprint(provider), model), str(existing_model_id))
+
+    for profile in profiles.values():
+        if not isinstance(profile, dict) or _profile_model_ref(profile):
+            continue
+        provider = _owner_provider(profile)
+        model = str(profile.get("model", "")).strip()
+        if not provider or not model:
+            continue
+        route_key = (_provider_fingerprint(provider), model)
+        model_id = route_model_ids.get(route_key, "")
+        details = _model_library_details(profile)
+        if not model_id:
+            preset_id = _matching_model_preset_id(provider, model, details)
+            preset_entry = _model_preset_entry(preset_id) if preset_id else None
+            if preset_entry:
+                model_id, entry = preset_entry
+            else:
+                model_id = _unique_model_library_id(model_library, _generated_model_id(provider, model))
+                entry = _model_library_entry(provider, model, model, details)
+                entry["api_key_env"] = _canonical_model_api_key_env(model_id)
+            if model_id not in model_library:
+                model_library[model_id] = entry
+            route_model_ids[route_key] = model_id
+        profile.clear()
+        profile["model_ref"] = model_id
+        profile["overrides"] = {}
+    return updated
+
+
 def _canonicalize_public_config(public_config: dict) -> dict:
-    normalized = normalize_public_config_dict(public_config)
-    denormalized = denormalize_config_dict(normalized)
+    denormalized = denormalize_config_dict(copy.deepcopy(public_config))
     repaired = _repair_legacy_model_library_shape(denormalized)
-    return _fill_missing_role_profiles(repaired)
+    with_profile_models = _ensure_profile_model_library_entries(repaired)
+    canonicalized = _canonicalize_model_library_api_key_envs(with_profile_models)
+    return _fill_missing_role_profiles(canonicalized)
 
 
 def public_config_hash(public_config: dict) -> str:
@@ -747,8 +865,25 @@ def _unique_model_library_id(model_library: dict, model_id: str) -> str:
 
 
 def _default_model_api_key_env(model_id: str) -> str:
-    token = "".join(char if char.isalnum() else "_" for char in str(model_id or "").upper()).strip("_")
-    return f"VIBELUTION_LLM_{token}_API_KEY" if token else "VIBELUTION_LLM_MODEL_API_KEY"
+    raw = str(model_id or "")
+    token = "".join(
+        char if ("A" <= char <= "Z" or "0" <= char <= "9") else "_"
+        for char in raw.upper()
+    ).strip("_")
+    if not token and raw:
+        token = f"ID_{hashlib.sha1(raw.encode('utf-8')).hexdigest()[:12].upper()}"
+    if len(token) > 48:
+        digest = hashlib.sha1(raw.encode("utf-8")).hexdigest()[:12].upper()
+        token = f"{token[:35].strip('_')}_{digest}".strip("_")
+    return f"VIBELUTION_LLM_MODEL_{token}_API_KEY" if token else "VIBELUTION_LLM_MODEL_API_KEY"
+
+
+def _canonical_model_api_key_env(model_id: str) -> str:
+    return validate_llm_api_key_env(
+        _default_model_api_key_env(model_id),
+        required=True,
+        context="llm.model_library.api_key_env",
+    )
 
 
 def _resolve_model_reference(public_config: dict, model_id: str) -> dict[str, Any]:
@@ -867,12 +1002,17 @@ def _coerce_model_library_detail(key: str, value):
         return None
     if key == "prompt_cache":
         return copy.deepcopy(value) if isinstance(value, dict) else {"mode": str(value).strip()}
+    if key == "compat":
+        return copy.deepcopy(value) if isinstance(value, dict) else None
     if key == "api_key_env":
         return str(value).strip()
     if key in {
         "transport",
         "contract",
+        "protocol",
         "reasoning_state_field",
+        "thinking_type",
+        "thinking_display",
         "capability_status",
         "capability_source",
         "capability_checked_at",
@@ -946,7 +1086,7 @@ def _llm_model_preset_category(preset: dict[str, Any]) -> str:
     provider = provider if isinstance(provider, dict) else {}
     kind = str(provider.get("kind", "") or "").strip().lower()
     base_url = str(provider.get("base_url", "") or "").strip().lower()
-    if kind in {"local", "ollama"} or "localhost" in base_url or "127.0.0.1" in base_url:
+    if kind in {"local", "ollama", "llamacpp"} or is_llm_local_network_base_url(base_url):
         return "local"
     if kind == "relay":
         return "relay"
@@ -990,8 +1130,6 @@ def apply_llm_model_preset(
         resolved_model_id = str(preset["model_id"]).strip()
     resolved_provider = _resolve_public_provider_input(public_config, provider_id, fallback=preset["provider"])
     validate_llm_provider_target(resolved_provider, context="llm.model_library")
-    if api_key_env:
-        api_key_env = validate_llm_api_key_env(api_key_env, context="llm.model_library.api_key_env")
     model_defaults = copy.deepcopy(preset["model"])
     model_defaults.update(_model_library_details(details or {}))
     resolved_model = (model or str(model_defaults.get("model", ""))).strip()
@@ -1014,7 +1152,7 @@ def apply_llm_model_preset(
     model_defaults["model"] = resolved_model
     model_defaults["label"] = resolved_label
     entry = _model_library_entry(resolved_provider, resolved_model, resolved_label, model_defaults)
-    entry["api_key_env"] = (api_key_env or _default_model_api_key_env(resolved_model_id)).strip()
+    entry["api_key_env"] = _canonical_model_api_key_env(resolved_model_id)
     model_library[resolved_model_id] = entry
     build_effective_config(updated)
     return updated
@@ -1043,9 +1181,12 @@ def list_llm_model_options(public_config: dict) -> list[dict[str, object]]:
                     "source": "model_library",
                     "provider": provider,
                     "provider_kind": _provider_kind(provider),
+                    "provider_api": str(provider.get("api", "") or "").strip().lower().replace("_", "-"),
                     "model": model,
                     "label": label,
                     "details": _model_library_details(item),
+                    "protocol": str(item.get("protocol", "") or "").strip().lower(),
+                    "compat": copy.deepcopy(item.get("compat", {})) if isinstance(item.get("compat"), dict) else {},
                     "api_key_env": str(item.get("api_key_env", "")).strip(),
                     "api_key_configured": bool(_read_env_var(str(item.get("api_key_env", "")).strip())),
                 }
@@ -1064,17 +1205,23 @@ def list_llm_model_options(public_config: dict) -> list[dict[str, object]]:
             if key in seen:
                 continue
             provider_kind = _provider_kind(provider)
+            preset_model_id = _matching_model_preset_id(provider, model, _model_library_details(profile))
+            if preset_model_id and preset_model_id in model_library:
+                continue
             generated_model_id = _generated_model_id(provider, model)
-            generated_api_key_env = str(profile.get("api_key_env", "")).strip() or _default_model_api_key_env(generated_model_id)
+            generated_api_key_env = _canonical_model_api_key_env(generated_model_id)
             options.append(
                 {
                     "model_id": generated_model_id,
                     "source": "profile",
                     "provider": provider,
                     "provider_kind": provider_kind,
+                    "provider_api": str(provider.get("api", "") or "").strip().lower().replace("_", "-"),
                     "model": model,
                     "label": model,
                     "details": _model_library_details(profile),
+                    "protocol": str(profile.get("protocol", "") or "").strip().lower(),
+                    "compat": copy.deepcopy(profile.get("compat", {})) if isinstance(profile.get("compat"), dict) else {},
                     "api_key_env": generated_api_key_env,
                     "api_key_configured": bool(_read_env_var(generated_api_key_env)),
                 }
@@ -1100,8 +1247,6 @@ def add_llm_model(
 
     provider = _resolve_public_provider_input(public_config, provider_id)
     validate_llm_provider_target(provider, context="llm.model_library")
-    if api_key_env:
-        api_key_env = validate_llm_api_key_env(api_key_env, context="llm.model_library.api_key_env")
     updated = copy.deepcopy(public_config)
     llm = updated.setdefault("llm", {})
     model_library = llm.setdefault("model_library", {})
@@ -1114,9 +1259,7 @@ def add_llm_model(
     elif model_id in model_library:
         raise ValueError(f"LLM model already exists: {model_id}")
     entry = _model_library_entry(provider, model, label or model, details)
-    entry["api_key_env"] = (
-        api_key_env or entry.get("api_key_env") or _default_model_api_key_env(model_id)
-    ).strip()
+    entry["api_key_env"] = _canonical_model_api_key_env(model_id)
     model_library[model_id] = entry
     build_effective_config(updated)
     return updated
@@ -1149,15 +1292,8 @@ def update_llm_model(
         raise ValueError(f"unknown LLM model: {model_id}")
     provider = _resolve_public_provider_input(updated, provider_id, fallback=existing.get("provider"))
     validate_llm_provider_target(provider, context="llm.model_library")
-    if api_key_env:
-        api_key_env = validate_llm_api_key_env(api_key_env, context="llm.model_library.api_key_env")
     entry = _model_library_entry(provider, model, label or model, details)
-    entry["api_key_env"] = (
-        api_key_env
-        or entry.get("api_key_env")
-        or existing.get("api_key_env")
-        or _default_model_api_key_env(model_id)
-    ).strip()
+    entry["api_key_env"] = _canonical_model_api_key_env(model_id)
     model_library[model_id] = entry
     build_effective_config(updated)
     return updated
@@ -1189,15 +1325,22 @@ def delete_llm_model(public_config: dict, model_id: str) -> dict:
     provider = reference.get("provider", {}) if isinstance(reference, dict) else {}
     model = str(reference.get("model", "")).strip() if isinstance(reference, dict) else ""
     provider_fingerprint = _provider_fingerprint(provider) if provider else ""
-    if reference.get("source") == "profile" and provider_fingerprint and model and isinstance(profiles, dict):
+    if provider_fingerprint and model and isinstance(profiles, dict):
         for profile in profiles.values():
             if not isinstance(profile, dict):
+                continue
+            if _profile_model_ref(profile):
                 continue
             if str(profile.get("model", "")).strip() != model:
                 continue
             if _provider_fingerprint(_owner_provider(profile)) != provider_fingerprint:
                 continue
-            profile["model"] = ""
+            profile["model_ref"] = UNCONFIGURED_MODEL_REF
+            profile["overrides"] = {}
+            profile.pop("provider", None)
+            profile.pop("model", None)
+            for key in PROFILE_OVERRIDE_FIELDS:
+                profile.pop(key, None)
     build_effective_config(updated)
     return updated
 
@@ -1343,15 +1486,10 @@ def add_llm_profile(
         )
         if not selected_option:
             raise ValueError(f"unknown LLM model: {model_id}")
-        for key in MODEL_LIBRARY_DETAIL_FIELDS:
-            new_profile.pop(key, None)
-        new_profile["provider"] = copy.deepcopy(selected_option.get("provider", {}))
-        new_profile["model"] = str(selected_option.get("model", "")).strip()
-        new_profile.update(_model_library_details(selected_option.get("details", {})))
-        new_profile["api_key_env"] = validate_llm_api_key_env(
-            str(selected_option.get("api_key_env", "")).strip(),
-            context="llm.profiles.api_key_env",
-        )
+        new_profile = {
+            "model_ref": str(selected_option.get("model_id", "")).strip(),
+            "overrides": {},
+        }
     else:
         if not model:
             raise ValueError("model is required")
@@ -1376,17 +1514,46 @@ def _probe_llm_http(provider, profile, api_key: str | None = None) -> dict:
         return {"ok": False, "message": str(exc)}
 
     base_url = provider.base_url.rstrip("/")
-    url = f"{base_url}/chat/completions"
-    payload = {
-        "model": profile.model,
-        "messages": [{"role": "user", "content": "ping"}],
-        "max_tokens": 1,
-        "temperature": 0,
-        "stream": False,
-    }
-    headers = {"Content-Type": "application/json"}
-    if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
+    kind = str(getattr(provider, "kind", "") or "").strip().lower()
+    compat_mode = str(getattr(provider, "compat_mode", "") or "").strip().lower()
+    if kind == "anthropic" and compat_mode != "openai":
+        root = base_url[:-3] if base_url.endswith("/v1") else base_url
+        url = f"{root}/v1/messages"
+        payload = {
+            "model": profile.model,
+            "messages": [{"role": "user", "content": "ping"}],
+            "max_tokens": 1,
+            "stream": False,
+        }
+        try:
+            from core.llm.adapters import get_provider_adapter
+
+            payload.update(get_provider_adapter(provider, profile).payload_sampling_parameters())
+        except Exception:
+            pass
+        headers = {
+            "Content-Type": "application/json",
+            "anthropic-version": "2023-06-01",
+        }
+        if api_key:
+            headers["x-api-key"] = api_key
+    else:
+        url = f"{base_url}/chat/completions"
+        payload = {
+            "model": profile.model,
+            "messages": [{"role": "user", "content": "ping"}],
+            "max_tokens": 1,
+            "stream": False,
+        }
+        try:
+            from core.llm.adapters import get_provider_adapter
+
+            payload.update(get_provider_adapter(provider, profile).payload_sampling_parameters())
+        except Exception:
+            payload["temperature"] = 0
+        headers = {"Content-Type": "application/json"}
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
     request = urllib.request.Request(
         url,
         data=json.dumps(payload).encode("utf-8"),

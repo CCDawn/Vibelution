@@ -118,6 +118,42 @@ def _preferred_required_user_input(result: Dict[str, Any]) -> str:
     return trim_lines(result.get("required_user_input") or "", max_lines=2)
 
 
+def _has_visible_completion_signal(result: Dict[str, Any]) -> bool:
+    text = trim_lines(result.get("summary") or result.get("raw_output") or "", max_lines=8).lower()
+    if not text:
+        return False
+    incomplete_markers = (
+        "未完成",
+        "没有完成",
+        "尚未完成",
+        "继续完成",
+        "not completed",
+        "incomplete",
+    )
+    if any(marker in text for marker in incomplete_markers):
+        return False
+    completion_markers = (
+        "任务完成",
+        "已完成",
+        "已经完成",
+        "执行成功",
+        "已生成",
+        "生成完成",
+        "生成完毕",
+        "成功生成",
+        "已成功生成",
+        "文件已成功创建",
+        "成功创建",
+        "已为您生成",
+        "created successfully",
+        "successfully created",
+        "generated successfully",
+        "task complete",
+        "task completed",
+    )
+    return any(marker in text for marker in completion_markers)
+
+
 def _preferred_verification(result: Dict[str, Any], tool_trace: List[Dict[str, Any]]) -> Tuple[str, str]:
     status = str(result.get("verification_status") or "").strip().lower()
     summary = trim_lines(result.get("verification_summary") or "", max_lines=3)
@@ -145,6 +181,8 @@ def _preferred_outcome(
     status = str(result.get("status") or "").strip().lower()
     if status in {"failed", "timeout"} or verification_status == "failed":
         return "blocked"
+    if status == "completed" and changed_files and _has_visible_completion_signal(result):
+        return "done"
     if verification_status == "passed" and changed_files:
         return "done"
     if changed_files or read_files or int(result.get("tool_call_count") or 0) > 0:

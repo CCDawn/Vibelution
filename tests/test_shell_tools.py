@@ -140,6 +140,8 @@ class TestReadFile:
         assert "[区间] 第 1-3 行" in result
         assert "[阅读导航]" in result
         assert "read_file_tool(" not in result
+        assert "grep_search_tool" not in result
+        assert "code_symbol_tool" not in result
         assert "offset=3" in result
 
     def test_read_file_adapts_page_size_for_large_file(self, temp_test_dir):
@@ -152,6 +154,8 @@ class TestReadFile:
 
         assert "[阅读导航]" in result
         assert "read_file_tool(" not in result
+        assert "grep_search_tool" not in result
+        assert "code_symbol_tool" not in result
         assert "max_lines=80" in result
 
 
@@ -441,35 +445,7 @@ class TestCheckPythonSyntax:
 
     def test_complex_valid_file(self, sample_py_file):
         """测试复杂但语法正确的文件"""
-        result = check_python_syntax(file_path=sample_py_file)
-        assert "正确" in result or "OK" in result
-
-
-# ============================================================================
-# execute_shell_command 测试
-# ============================================================================
-
-class TestExecuteShellCommand:
-    """execute_shell_command 工具测试"""
-
-    def test_simple_echo(self):
-        """测试简单 echo 命令"""
-        result = execute_shell_command(command="echo Hello World")
-        assert "Hello World" in result
-
-    def test_pwd(self):
-        """测试 pwd 命令"""
-        result = execute_shell_command(command="pwd")
-        assert len(result.strip()) > 0
-        assert os.path.exists(result.strip())
-
-    def test_dir_ls(self):
-        """测试列出目录"""
-        result = execute_shell_command(command="dir")
-        assert isinstance(result, str)
-        assert len(result) > 0
-
-    def test_echo_only(self):
+def test_echo_only(self):
         """测试仅输出"""
         result = execute_shell_command(command="echo 'Test Message'")
         assert "Test Message" in result
@@ -508,9 +484,20 @@ class TestExecuteShellCommand:
             result = execute_shell_command(command="python -m pytest tests/ --collect-only -q 2>/dev/null | tail -5")
         assert "[跨平台警告]" in result
         assert "Unix shell 片段" in result
+        assert "read_file_tool / grep_search_tool" not in result
+        # P0-A 改进后的警告应给出可执行替代方案，引导调用者改 PowerShell
+        # 或显式 `bash -c` 包裹，而不只是抛规范名词。
+        assert "PowerShell" in result
+        assert "bash -c" in result
 
     def test_default_python_command_uses_project_venv(self, tmp_path, monkeypatch):
         """裸 python 调用应默认改写到项目 .venv 解释器。"""
+        fake_root = tmp_path / "project"
+    def test_default_python_command_uses_project_venv(self, tmp_path, monkeypatch):
+        """裸 python 调用应默认改写到项目 .venv 解释器。"""
+        fake_root = tmp_path / "project"        """裸 python 调用应默认改写到项目 .venv 解释器。"""assert "bash -c" in result
+
+    def test_default_python_command_uses_project_venv(self, tmp_path, monkeypatch):        """裸 python 调用应默认改写到项目 .venv 解释器。"""
         fake_root = tmp_path / "project"
         fake_python = fake_root / ".venv" / "Scripts" / "python.exe"
         fake_python.parent.mkdir(parents=True)

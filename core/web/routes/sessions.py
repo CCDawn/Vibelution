@@ -8,17 +8,19 @@ from pydantic import BaseModel
 from starlette.responses import StreamingResponse
 
 from core.web.services.session_service import (
+    SESSION_USER_IMAGE_MAX_BYTES,
     SessionChatReviewCandidateExistsError,
     SessionBusyError,
     SessionNotFoundError,
     SessionValidationError,
     create_chat_review_candidate_from_session,
+    create_child_session,
     create_chat_session,
     delete_chat_session,
     delete_chat_session_lightweight,
     edit_and_resubmit_session_message,
     get_session_detail,
-    list_session_agent_templates,
+    list_child_sessions,
     list_sessions,
     request_stop_session_turn,
     resolve_session_image_artifact,
@@ -30,15 +32,85 @@ from core.web.services.session_service import (
     update_chat_session,
     update_chat_session_title,
 )
+from core.web.services.runtime_scene_service import record_runtime_scene_event
 
 
 router = APIRouter(tags=["sessions"])
+
+
+def _record_session_attachment_upload_rejected(
+    session_id: str,
+    *,
+    content_length: int,
+    received_bytes: int,
+    reason: str,
+) -> None:
+    try:
+        record_runtime_scene_event(
+            "conversation",
+            "attachment_upload",
+            "conversation.attachment_upload.rejected",
+            message="Session image attachment upload was rejected before storage.",
+            level="warning",
+            outcome="too_large",
+            fields={
+                "sessionId": str(session_id or "").strip(),
+                "contentLength": max(0, int(content_length or 0)),
+                "receivedBytes": max(0, int(received_bytes or 0)),
+                "limitBytes": SESSION_USER_IMAGE_MAX_BYTES,
+                "reason": str(reason or "").strip(),
+            },
+            lifecycle=True,
+        )
+    except Exception:
+        return
+
+
+def _content_length_from_request(request: Request) -> int | None:
+    raw = str(request.headers.get("content-length") or "").strip()
+    if not raw:
+        return None
+    try:
+        value = int(raw)
+    except ValueError:
+        return None
+    return value if value >= 0 else None
+
+
+async def _read_session_attachment_payload(session_id: str, request: Request) -> bytes:
+    content_length = _content_length_from_request(request)
+    if content_length is not None and content_length > SESSION_USER_IMAGE_MAX_BYTES:
+        _record_session_attachment_upload_rejected(
+            session_id,
+            content_length=content_length,
+            received_bytes=0,
+            reason="content_length_exceeded",
+        )
+        raise HTTPException(status_code=status.HTTP_413_CONTENT_TOO_LARGE, detail="Image attachment is too large.")
+
+    chunks: list[bytes] = []
+    total = 0
+    async for chunk in request.stream():
+        if not chunk:
+            continue
+        total += len(chunk)
+        if total > SESSION_USER_IMAGE_MAX_BYTES:
+            _record_session_attachment_upload_rejected(
+                session_id,
+                content_length=content_length or 0,
+                received_bytes=total,
+                reason="stream_limit_exceeded",
+            )
+            raise HTTPException(status_code=status.HTTP_413_CONTENT_TOO_LARGE, detail="Image attachment is too large.")
+        chunks.append(bytes(chunk))
+    return b"".join(chunks)
 
 
 class SessionMessagePayload(BaseModel):
     content: str = ""
     contentUtf8Base64: str = ""
     attachmentIds: list[str] = []
+    references: list[dict] = []
     mentalModelEnabled: bool | None = None
     turnMode: str = ""
     writeIntent: bool | None = None
@@ -56,12 +128,20 @@ class SessionGuidancePayload(BaseModel):
 class SessionUpdatePayload(BaseModel):
     title: str | None = None
     agentId: str | None = None
-    agentProfileId: str | None = None
 
 
-@router.get("/sessions/agent-templates")
-def session_agent_templates() -> list[dict]:
-    return list_session_agent_templates()
+class ChildSessionCreatePayload(BaseModel):
+    userRequest: str = ""
+    taskTitle: str = ""
+    splitReason: str = ""
+    inheritedFacts: list[str] = []
+    relevantFiles: list[str] = []
+    relevantLogs: list[str] = []
+    constraints: list[str] = []
+    excludedContextSummary: str = ""
+    autoStart: bool = True
+    switchToChild: bool = True
+    source: str = "agent_auto_split"
 
 
 @router.get("/sessions")
@@ -82,15 +162,44 @@ def session_detail(session_id: str) -> dict:
     return detail
 
 
+@router.get("/sessions/{session_id}/child-sessions")
+def session_child_sessions(session_id: str) -> list[dict]:
+    return list_child_sessions(session_id)
+
+
+@router.post("/sessions/{session_id}/child-sessions", status_code=status.HTTP_201_CREATED)
+def session_create_child_session(session_id: str, payload: ChildSessionCreatePayload) -> dict:
+    try:
+        return create_child_session(
+            session_id,
+            user_request=payload.userRequest,
+            task_title=payload.taskTitle,
+            split_reason=payload.splitReason,
+            inherited_facts=payload.inheritedFacts,
+            relevant_files=payload.relevantFiles,
+            relevant_logs=payload.relevantLogs,
+            constraints=payload.constraints,
+            excluded_context_summary=payload.excludedContextSummary,
+            auto_start=payload.autoStart,
+            switch_to_child=payload.switchToChild,
+            source=payload.source,
+        )
+    except SessionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except SessionBusyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except SessionValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 @router.patch("/sessions/{session_id}")
 def session_update(session_id: str, payload: SessionUpdatePayload) -> dict:
     try:
-        if payload.agentId is not None or payload.agentProfileId is not None:
+        if payload.agentId is not None:
             return update_chat_session(
                 session_id,
                 title=payload.title,
                 agent_id=payload.agentId,
-                profile_id=payload.agentProfileId,
             )
         return update_chat_session_title(session_id, payload.title or "")
     except SessionNotFoundError as exc:
@@ -145,7 +254,7 @@ async def session_upload_attachment(session_id: str, request: Request) -> dict:
     content_type = str(request.headers.get("content-type") or "").strip()
     filename = str(request.headers.get("x-vibelution-filename") or "").strip()
     try:
-        payload = await request.body()
+        payload = await _read_session_attachment_payload(session_id, request)
         return store_session_user_image_attachment(
             session_id,
             payload,
@@ -167,6 +276,7 @@ def session_submit_message(session_id: str, payload: SessionMessagePayload, requ
                 payload.content,
                 content_utf8_base64=payload.contentUtf8Base64,
                 attachment_ids=payload.attachmentIds,
+                references=payload.references,
                 mental_model_enabled=payload.mentalModelEnabled,
                 turn_mode=payload.turnMode,
                 write_intent=payload.writeIntent,
@@ -176,6 +286,7 @@ def session_submit_message(session_id: str, payload: SessionMessagePayload, requ
             payload.content,
             content_utf8_base64=payload.contentUtf8Base64,
             attachment_ids=payload.attachmentIds,
+            references=payload.references,
             mental_model_enabled=payload.mentalModelEnabled,
             turn_mode=payload.turnMode,
             write_intent=payload.writeIntent,

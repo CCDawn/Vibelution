@@ -22,8 +22,10 @@ RUNTIME_DIR = PROJECT_ROOT / ".runtime" / "launcher"
 STATE_PATH = RUNTIME_DIR / "state.json"
 BACKEND_STDOUT_PATH = RUNTIME_DIR / "backend.stdout.log"
 BACKEND_STDERR_PATH = RUNTIME_DIR / "backend.stderr.log"
+FRONTEND_BUILD_LOG_PATH = RUNTIME_DIR / "frontend-build.log"
 DEFAULT_HOST = "127.0.0.1"
 TRUSTED_WEB_HOSTS_ENV = "VIBELUTION_TRUSTED_WEB_HOSTS"
+FRONTEND_PACKAGE_MANAGER_ENV = "VIBELUTION_FRONTEND_PM"
 
 
 def _now_iso() -> str:
@@ -94,6 +96,16 @@ def _run_checked(args: list[str], *, cwd: Path, label: str) -> None:
         raise RuntimeError(f"{label} failed with exit code {result.returncode}.")
 
 
+def _append_frontend_build_log(payload: dict) -> None:
+    RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
+    event = {
+        "timestamp": _now_iso(),
+        **payload,
+    }
+    with FRONTEND_BUILD_LOG_PATH.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(event, ensure_ascii=False, separators=(",", ":")) + "\n")
+
+
 def _host_is_wildcard(host: str) -> bool:
     return str(host or "").strip() in {"0.0.0.0", "::"}
 
@@ -128,16 +140,34 @@ def _backend_environment(host: str) -> dict[str, str]:
     return env
 
 
+def _frontend_package_manager() -> str:
+    value = os.environ.get(FRONTEND_PACKAGE_MANAGER_ENV, "").strip().lower()
+    return "bun" if value == "bun" else "npm"
+
+
 def _ensure_frontend_build() -> None:
     web_dir = PROJECT_ROOT / "web"
     if not web_dir.exists():
         return
+    package_manager = _frontend_package_manager()
     node_modules = web_dir / "node_modules"
-    if not node_modules.exists():
-        _run_checked(["npm", "install"], cwd=web_dir, label="npm install")
+    needs_install = not node_modules.exists()
     dist_index = web_dir / "dist" / "index.html"
-    if not dist_index.exists():
-        _run_checked(["npm", "run", "build"], cwd=web_dir, label="npm run build")
+    needs_build = not dist_index.exists()
+    _append_frontend_build_log(
+        {
+            "event": "frontend_build.ensure",
+            "packageManager": package_manager,
+            "needsInstall": needs_install,
+            "needsBuild": needs_build,
+        }
+    )
+    if needs_install:
+        install_command = ["bun", "install"] if package_manager == "bun" else ["npm", "install"]
+        _run_checked(install_command, cwd=web_dir, label=" ".join(install_command))
+    if needs_build:
+        build_command = ["bun", "run", "bun:build"] if package_manager == "bun" else ["npm", "run", "build"]
+        _run_checked(build_command, cwd=web_dir, label=" ".join(build_command))
 
 
 def _start_backend(port: int, host: str, *, no_browser: bool) -> dict:

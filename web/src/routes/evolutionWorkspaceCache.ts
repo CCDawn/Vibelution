@@ -28,8 +28,10 @@ export function createEvolutionWorkspaceCache(queryClient: QueryClientLike) {
   return {
     afterSupervisedWorkspaceChanged() {
       return invalidateAll(queryClient, [
+        queryKeys.evolutionWorkspaceSnapshot(),
         queryKeys.evolutionWorkbench(),
         queryKeys.evolutionActiveRun(),
+        queryKeys.evolutionLatestRun(),
         queryKeys.evolutionOverview(),
         queryKeys.evolutionRuns(),
         queryKeys.evolutionLibrary(),
@@ -37,7 +39,9 @@ export function createEvolutionWorkspaceCache(queryClient: QueryClientLike) {
     },
     afterSupervisedRunTerminal() {
       return invalidateAll(queryClient, [
+        queryKeys.evolutionWorkspaceSnapshot(),
         queryKeys.evolutionActiveRun(),
+        queryKeys.evolutionLatestRun(),
         queryKeys.evolutionOverview(),
         queryKeys.evolutionRuns(),
         queryKeys.evolutionLibrary(),
@@ -45,10 +49,15 @@ export function createEvolutionWorkspaceCache(queryClient: QueryClientLike) {
       ]);
     },
     refreshSupervisedActiveRun() {
-      return invalidateAll(queryClient, [queryKeys.evolutionActiveRun()]);
+      return invalidateAll(queryClient, [
+        queryKeys.evolutionWorkspaceSnapshot(),
+        queryKeys.evolutionActiveRun(),
+        queryKeys.evolutionLatestRun(),
+      ]);
     },
     afterWorktreeRunChanged() {
       return invalidateAll(queryClient, [
+        queryKeys.evolutionWorkspaceSnapshot(),
         queryKeys.evolutionWorktreeActiveRun(),
         queryKeys.evolutionWorktreeRuns(),
         queryKeys.runtimeSummary(),
@@ -56,6 +65,7 @@ export function createEvolutionWorkspaceCache(queryClient: QueryClientLike) {
     },
     afterSelfEvolutionChanged() {
       return invalidateAll(queryClient, [
+        queryKeys.evolutionWorkspaceSnapshot(),
         queryKeys.evolutionSelfOverview(),
         queryKeys.evolutionSelfActiveRun(),
         queryKeys.evolutionSelfLatestRun(),
@@ -65,10 +75,14 @@ export function createEvolutionWorkspaceCache(queryClient: QueryClientLike) {
       ]);
     },
     refreshSelfLatestRun() {
-      return invalidateAll(queryClient, [queryKeys.evolutionSelfLatestRun()]);
+      return invalidateAll(queryClient, [
+        queryKeys.evolutionWorkspaceSnapshot(),
+        queryKeys.evolutionSelfLatestRun(),
+      ]);
     },
     afterSelfHandoff() {
       return invalidateAll(queryClient, [
+        queryKeys.evolutionWorkspaceSnapshot(),
         queryKeys.evolutionSelfOverview(),
         queryKeys.evolutionSelfActiveRun(),
         queryKeys.evolutionSelfLatestRun(),
@@ -80,6 +94,7 @@ export function createEvolutionWorkspaceCache(queryClient: QueryClientLike) {
     },
     afterProposalChanged(sessionId: string) {
       return invalidateAll(queryClient, [
+        queryKeys.evolutionWorkspaceSnapshot(),
         queryKeys.evolutionOverview(),
         queryKeys.evolutionRuns(),
         queryKeys.evolutionLibrary(),
