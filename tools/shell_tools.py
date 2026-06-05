@@ -128,15 +128,18 @@ def _subprocess_no_window_kwargs() -> dict:
 LINUX_COMMANDS = {
     'grep', 'egrep', 'fgrep', 'awk', 'sed', 'find', 'xargs',
     'sort', 'uniq', 'cut', 'tr', 'tee', 'which', 'type', 'command',
-    'ls', 'rm', 'cp', 'mv', 'mkdir', 'chmod', 'chown', 'ln', 'readlink',
+    'ls', 'rm', 'rmdir', 'cp', 'mv', 'mkdir', 'chmod', 'chown', 'ln', 'readlink',
     'realpath', 'dirname', 'basename', 'wc', 'head', 'tail', 'cat',
     'less', 'more', 'tar', 'gzip', 'gunzip', 'zip', 'unzip',
     'curl', 'wget', 'ssh', 'scp', 'rsync', 'diff', 'patch',
-    'env', 'export', 'source', 'alias', 'echo', 'printf',
+    'env', 'printenv', 'export', 'source', 'alias', 'echo', 'printf',
     'kill', 'pkill', 'pgrep', 'ps', 'top', 'htop',
     'df', 'du', 'free', 'mount', 'umount', 'lsof', 'netstat',
     'git', 'svn', 'hg', 'make', 'cmake', 'gcc', 'g++', 'clang',
     'pip3', 'python3', 'node', 'npm', 'yarn', 'cargo',
+    # 补全：避免落到 cmd /c 导致正斜杠路径被当 switch 解析
+    'touch', 'stat', 'true', 'false', 'date', 'sleep',
+    'uname', 'hostname', 'whoami', 'id', 'yes', 'seq',
 }
 
 # Windows cmd 特有命令集合（在 Linux/macOS 上需要特殊处理）
@@ -228,6 +231,39 @@ def _has_unix_shell_markers(command: str) -> bool:
         "$(pwd)",
     )
     return any(marker in lowered for marker in markers)
+
+
+def _is_explicit_bash_invocation(command: str) -> bool:
+    """
+    检测命令是否显式以 bash -c / "bash" -c / bash.exe -c 开头。
+
+    含义：调用者已显式声明 "把整段交给 bash 解释"，
+    Windows 拦截层不应再用 Unix marker 把它误杀。
+    """
+    text = str(command or "").lstrip()
+    if not text:
+        return False
+    lowered = text.lower()
+    # 形态 1: 裸 bash / bash.exe（可带绝对路径）
+    prefixes = (
+        "bash -c",
+        "bash.exe -c",
+        "/bin/bash -c",
+        "/usr/bin/bash -c",
+    )
+    if any(lowered.startswith(p) for p in prefixes):
+        return True
+    # 形态 2: 引号包裹的 bash 可执行路径，如 "C:\Program Files\Git\bin\bash.exe" -c "..."
+    if lowered.startswith('"') or lowered.startswith("'"):
+        quote = lowered[0]
+        end = lowered.find(quote, 1)
+        if end > 0:
+            head = lowered[1:end]
+            rest = lowered[end + 1:].lstrip()
+            if head.endswith("bash") or head.endswith("bash.exe"):
+                if rest.startswith("-c"):
+                    return True
+    return False
 
 
 # ============================================================================
@@ -548,12 +584,12 @@ def execute_shell_command(
         stripped_command = command.strip()
         if stripped_command.lower() == "pwd":
             final_command = 'powershell -NoProfile -ExecutionPolicy Bypass -Command "(Get-Location).Path"'
-        elif _has_unix_shell_markers(stripped_command):
-            return (
-                f"[跨平台警告] 在 Windows 上检测到 Unix shell 片段: {stripped_command}\n"
-                "请改用 PowerShell/Windows 等价命令，或使用 read_file_tool / grep_search_tool。"
-            )
+        # P0-A: 调用者显式以 bash -c 包装，整段委托给 bash，绕过 marker 拦截
+        elif _is_explicit_bash_invocation(stripped_command):
+            final_command = stripped_command
         # Windows 上执行 Linux 特有命令 → 尝试用 Git Bash 包装
+        # P0-B: 这一支放到 marker 检查之前，避免合法的 Unix 命令因含
+        # "| head" / "grep -n" 等子串被误杀
         elif _is_linux_command(command):
             git_bash_paths = [
                 "C:\\Program Files\\Git\\bin\\bash.exe",
@@ -572,6 +608,13 @@ def execute_shell_command(
                     f"[跨平台警告] 在 Windows 上检测到 Linux 命令 '{command}'，"
                     "但未找到 Git Bash。请安装 Git 或使用 Windows 原生命令。"
                 )
+        # 裸命令（无 bash 包装、无 Linux 头命令）若含 Unix shell 片段 → 拦截
+        elif _has_unix_shell_markers(stripped_command):
+            return (
+                f"[跨平台警告] 在 Windows 上检测到 Unix shell 片段: {stripped_command}\n"
+                "请改用 PowerShell/Windows 等价命令，并用有界输出；"
+                "或显式以 `bash -c \"...\"` 包裹整段命令交给 bash 解释。"
+            )
         # PowerShell cmdlet → powershell.exe
         elif _is_powershell_command(command):
             final_command = f'powershell -NoProfile -ExecutionPolicy Bypass -Command {json.dumps(command)}'
@@ -861,8 +904,8 @@ def read_file(
             result_lines.extend([
                 f"[剩余] 还有 {remaining_lines} 行未显示；不要因为存在剩余内容就默认顺序翻页。",
                 (
-                    "[阅读导航] 下一步应按当前目标选择：若在找文本/调用点，用 grep_search_tool；"
-                    "若在理解结构，用 code_symbol_tool 的 outline/entity 模式；"
+                    "[阅读导航] 下一步应按当前目标选择已授权入口：若在找文本/调用点，先用有界搜索；"
+                    "若在理解结构或影响范围，先用代码图谱或精确定位；"
                     f"只有目标确实需要相邻下文时，才读取 offset={end_line}, max_lines={adaptive_max_lines}。"
                 ),
             ])
