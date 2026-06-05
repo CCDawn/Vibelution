@@ -565,6 +565,93 @@ def test_handle_start_supervised_run_returns_snapshot(monkeypatch):
     assert result["runId"] == "web-supervised-managed"
     assert result["snapshot"]["status"] == "queued"
 
+def test_runtime_manager_active_work_runs_collects_destructive_guard_sources(monkeypatch):
+    from core.web.services import chat_room_service, session_service, supervised_worktree_evolution_service
+
+    events: list[tuple[str, dict]] = []
+    monkeypatch.setattr(
+        daemon,
+        "build_evolution_summary",
+        lambda: {
+            "self": {"activeRunId": "self-live", "activeStatus": "running"},
+            "supervised": {"activeRunId": "supervised-done", "activeStatus": "completed"},
+        },
+    )
+    monkeypatch.setattr(
+        session_service,
+        "list_active_session_work_runs",
+        lambda: [
+            {"runId": "chat-live", "runKind": "chat_turn", "sessionId": "session-a", "status": "running"},
+            {"runId": "chat-done", "runKind": "chat_turn", "sessionId": "session-b", "status": "completed"},
+        ],
+    )
+    monkeypatch.setattr(
+        chat_room_service,
+        "list_active_chat_room_work_runs",
+        lambda: [{"roundId": "round-live", "runKind": "chat_room_round", "status": "running"}],
+    )
+    monkeypatch.setattr(
+        supervised_worktree_evolution_service,
+        "get_active_supervised_worktree_run",
+        lambda: {"runId": "worktree-live", "runKind": "supervised_worktree_evolution_run", "status": "queued"},
+    )
+    monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: events.append((event_type, payload)))
+
+    active = daemon._runtime_manager_active_work_runs()
+
+    assert active == [
+        {"kind": "self_evolution_run", "runId": "self-live", "status": "running", "sessionId": ""},
+        {"kind": "chat_turn", "runId": "chat-live", "status": "running", "sessionId": "session-a"},
+        {"kind": "chat_room_round", "runId": "round-live", "status": "running", "sessionId": ""},
+        {
+            "kind": "supervised_worktree_evolution_run",
+            "runId": "worktree-live",
+            "status": "queued",
+            "sessionId": "",
+        },
+    ]
+    assert events == []
+
+
+def test_runtime_manager_active_work_runs_ignores_needs_continue_chat_turn(monkeypatch):
+    from core.web.services import chat_room_service, session_service, supervised_worktree_evolution_service
+
+    monkeypatch.setattr(daemon, "build_evolution_summary", lambda: {"self": {}, "supervised": {}})
+    monkeypatch.setattr(
+        session_service,
+        "list_active_session_work_runs",
+        lambda: [
+            {
+                "runId": "chat-waiting",
+                "runKind": "chat_turn",
+                "sessionId": "session-a",
+                "status": "needs_continue",
+                "finishedAt": "2026-06-05T11:30:33Z",
+            },
+            {
+                "runId": "chat-finished-running",
+                "runKind": "chat_turn",
+                "sessionId": "session-c",
+                "status": "running",
+                "finishedAt": "2026-06-05T11:30:34Z",
+            },
+            {
+                "runId": "chat-live",
+                "runKind": "chat_turn",
+                "sessionId": "session-b",
+                "status": "running",
+            },
+        ],
+    )
+    monkeypatch.setattr(chat_room_service, "list_active_chat_room_work_runs", lambda: [])
+    monkeypatch.setattr(supervised_worktree_evolution_service, "get_active_supervised_worktree_run", lambda: None)
+
+    active = daemon._runtime_manager_active_work_runs()
+
+    assert active == [
+        {"kind": "chat_turn", "runId": "chat-live", "status": "running", "sessionId": "session-b"}
+    ]
+
 
 def test_run_forever_refreshes_manager_started_at(monkeypatch):
     class StopLoop(Exception):
@@ -3362,6 +3449,152 @@ def test_handle_restart_workbench_surfaces_launcher_error(monkeypatch):
     with pytest.raises(RuntimeError, match="launcher failed"):
         runtime_daemon._handle_restart_workbench(command_id="cmd-restart", args={})
 
+def test_handle_restart_workbench_blocks_active_chat_turn_before_close(monkeypatch):
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    state = {
+        "command": {"activeCommandId": "cmd-restart"},
+        "workbench": {
+            "desiredState": "open",
+            "observedState": "open",
+            "phase": "steady",
+        },
+    }
+    events: list[tuple[str, dict]] = []
+    close_calls: list[str] = []
+
+    monkeypatch.setattr(daemon, "load_state", lambda: state)
+    monkeypatch.setattr(daemon, "save_state", lambda next_state: next_state)
+    monkeypatch.setattr(daemon, "observe_workbench", lambda: {"observedState": "open"})
+    monkeypatch.setattr(
+        daemon,
+        "_runtime_manager_active_work_runs",
+        lambda: [{"kind": "chat_turn", "runId": "chat-live", "status": "running", "sessionId": "session-a"}],
+    )
+    monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: events.append((event_type, payload)))
+    monkeypatch.setattr(
+        daemon,
+        "close_workbench",
+        lambda: close_calls.append("close") or subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
+    )
+
+    result = runtime_daemon._handle_restart_workbench(
+        command_id="cmd-restart",
+        args={"reason": "launcher_restart", "source": "launcher_ps"},
+    )
+
+    assert result["ok"] is False
+    assert result["errorType"] == "ActiveWorkBlocked"
+    assert result["message"] == "有进行中的任务，无法重启 Vibelution。请等待任务完成或先停止任务。"
+    assert result["activeWorkRuns"]["count"] == 1
+    assert close_calls == []
+    assert events[0] == (
+        "workbench.restart.blocked_active_work",
+        {
+            "commandId": "cmd-restart",
+            "commandType": "restart_workbench",
+            "reason": "launcher_restart",
+            "source": "launcher_ps",
+            "activeWorkCount": 1,
+            "activeWorkRuns": [
+                {"kind": "chat_turn", "runId": "chat-live", "status": "running", "sessionId": "session-a"}
+            ],
+        },
+    )
+    assert state["lastError"]["scope"] == "active_work"
+    assert state["workbench"]["phase"] != "failed"
+
+
+def test_hot_restart_allows_only_requester_active_chat_turn(monkeypatch):
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    state = {
+        "command": {"activeCommandId": "cmd-hot", "activeType": "hot_restart_workbench"},
+        "workbench": {
+            "desiredState": "open",
+            "observedState": "open",
+            "phase": "steady",
+        },
+    }
+    events: list[tuple[str, dict]] = []
+
+    monkeypatch.setattr(daemon, "load_state", lambda: state)
+    monkeypatch.setattr(daemon, "save_state", lambda next_state: next_state)
+    monkeypatch.setattr(daemon, "observe_workbench", lambda: {"observedState": "open"})
+    monkeypatch.setattr(
+        daemon,
+        "_runtime_manager_active_work_runs",
+        lambda: [{"kind": "chat_turn", "runId": "turn-live", "status": "running", "sessionId": "session-a"}],
+    )
+    monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: events.append((event_type, payload)))
+    monkeypatch.setattr(daemon, "latest_stable_backup", lambda: {"backupId": "stable-1", "archivePath": "snapshot.zip"})
+    monkeypatch.setattr(
+        runtime_daemon,
+        "_perform_restart_workbench",
+        lambda command_id, args: {"residualCleanup": {}, "requestedNoBrowser": False, "effectiveNoBrowser": False},
+    )
+    monkeypatch.setattr(daemon, "create_stable_backup", lambda **_kwargs: {"backupId": "stable-2"})
+    monkeypatch.setattr(
+        runtime_daemon,
+        "_wake_hot_restart_session",
+        lambda **_kwargs: {"wakeStatus": "delivered", "turnId": "turn-resume"},
+    )
+
+    result = runtime_daemon._handle_hot_restart_workbench(
+        command_id="cmd-hot",
+        args={
+            "reason": "code_update",
+            "allowActiveSessionId": "session-a",
+            "allowActiveRunId": "turn-live",
+            "hotRestart": {"sessionId": "session-a", "runId": "turn-live"},
+        },
+    )
+
+    assert result["ok"] is True
+    assert result["hotRestart"]["status"] == "completed"
+    assert events[0][0] == "workbench.hot_restart.allowed_requester_active_work"
+
+
+def test_hot_restart_blocks_other_active_work(monkeypatch):
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    state = {
+        "command": {"activeCommandId": "cmd-hot", "activeType": "hot_restart_workbench"},
+        "workbench": {
+            "desiredState": "open",
+            "observedState": "open",
+            "phase": "steady",
+        },
+    }
+    events: list[tuple[str, dict]] = []
+
+    monkeypatch.setattr(daemon, "load_state", lambda: state)
+    monkeypatch.setattr(daemon, "save_state", lambda next_state: next_state)
+    monkeypatch.setattr(daemon, "observe_workbench", lambda: {"observedState": "open"})
+    monkeypatch.setattr(
+        daemon,
+        "_runtime_manager_active_work_runs",
+        lambda: [
+            {"kind": "chat_turn", "runId": "turn-live", "status": "running", "sessionId": "session-a"},
+            {"kind": "chat_turn", "runId": "turn-other", "status": "running", "sessionId": "session-b"},
+        ],
+    )
+    monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: events.append((event_type, payload)))
+
+    result = runtime_daemon._handle_hot_restart_workbench(
+        command_id="cmd-hot",
+        args={
+            "reason": "code_update",
+            "allowActiveSessionId": "session-a",
+            "allowActiveRunId": "turn-live",
+            "hotRestart": {"sessionId": "session-a", "runId": "turn-live"},
+        },
+    )
+
+    assert result["ok"] is False
+    assert result["errorType"] == "ActiveWorkBlocked"
+    assert result["activeWorkRuns"]["count"] == 1
+    assert result["activeWorkRuns"]["items"][0]["sessionId"] == "session-b"
+    assert result["activeWorkRuns"]["allowedItems"][0]["sessionId"] == "session-a"
+    assert events[0][0] == "workbench.hot_restart.blocked_active_work"
+
 
 def test_handle_restart_workbench_preserves_visible_browser_when_no_browser_was_forwarded(monkeypatch):
     runtime_daemon = daemon.RuntimeManagerDaemon()
@@ -3653,6 +3886,85 @@ def test_handle_close_workbench_records_shutdown_source(monkeypatch):
     assert closed_calls == ["closed"]
     assert saved_states[0]["workbench"]["lastReason"] == "web_close_button"
     assert saved_states[0]["workbench"]["lastSource"] == "web_ui"
+
+def test_handle_close_workbench_blocks_active_chat_turn_before_close(monkeypatch):
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    state = {
+        "command": {"activeCommandId": "cmd-close"},
+        "workbench": {
+            "desiredState": "open",
+            "observedState": "open",
+            "phase": "steady",
+        },
+    }
+    events: list[tuple[str, dict]] = []
+    close_calls: list[str] = []
+
+    monkeypatch.setattr(daemon, "load_state", lambda: state)
+    monkeypatch.setattr(daemon, "save_state", lambda next_state: next_state)
+    monkeypatch.setattr(daemon, "observe_workbench", lambda: {"observedState": "open"})
+    monkeypatch.setattr(
+        daemon,
+        "_runtime_manager_active_work_runs",
+        lambda: [{"kind": "chat_turn", "runId": "chat-live", "status": "running", "sessionId": "session-a"}],
+    )
+    monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: events.append((event_type, payload)))
+    monkeypatch.setattr(
+        daemon,
+        "close_workbench",
+        lambda: close_calls.append("close") or subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
+    )
+
+    result = runtime_daemon._handle_close_workbench(
+        command_id="cmd-close",
+        args={"reason": "launcher_stop", "source": "launcher_ps", "stopManager": True},
+    )
+
+    assert result["ok"] is False
+    assert result["errorType"] == "ActiveWorkBlocked"
+    assert result["message"] == "有进行中的任务，无法重启 Vibelution。请等待任务完成或先停止任务。"
+    assert result["activeWorkRuns"]["items"][0]["runId"] == "chat-live"
+    assert close_calls == []
+    assert events[0][0] == "workbench.close.blocked_active_work"
+    assert events[0][1]["activeWorkCount"] == 1
+    assert state["lastError"]["scope"] == "active_work"
+    assert state["workbench"]["phase"] != "failed"
+
+
+def test_handle_toggle_workbench_blocks_active_chat_turn_when_open(monkeypatch):
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    state = {
+        "command": {"activeCommandId": "cmd-toggle"},
+        "workbench": {
+            "desiredState": "open",
+            "observedState": "open",
+            "phase": "steady",
+        },
+    }
+    events: list[tuple[str, dict]] = []
+    close_calls: list[str] = []
+
+    monkeypatch.setattr(daemon, "load_state", lambda: state)
+    monkeypatch.setattr(daemon, "save_state", lambda next_state: next_state)
+    monkeypatch.setattr(daemon, "observe_workbench", lambda: {"observedState": "open"})
+    monkeypatch.setattr(
+        daemon,
+        "_runtime_manager_active_work_runs",
+        lambda: [{"kind": "chat_turn", "runId": "chat-live", "status": "running", "sessionId": "session-a"}],
+    )
+    monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: events.append((event_type, payload)))
+    monkeypatch.setattr(
+        daemon,
+        "close_workbench",
+        lambda: close_calls.append("close") or subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
+    )
+
+    result = runtime_daemon._handle_toggle_workbench(command_id="cmd-toggle", args={"reason": "launcher_toggle"})
+
+    assert result["ok"] is False
+    assert result["errorType"] == "ActiveWorkBlocked"
+    assert close_calls == []
+    assert events[0][0] == "workbench.toggle.blocked_active_work"
 
 
 def test_handle_close_workbench_closes_active_evolution_runs(monkeypatch):

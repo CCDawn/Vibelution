@@ -9,7 +9,7 @@ import signal
 import subprocess
 import sys
 import time
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +27,7 @@ from .constants import (
     STATE_PATH,
     ensure_runtime_manager_dirs,
 )
+from .hot_restart_backup import create_failure_package, create_stable_backup, latest_stable_backup, restore_stable_backup
 from .restart_coordinator import claim_next_restart_intent, complete_restart_intent
 from .scene_logging import append_runtime_manager_file_event, record_runtime_manager_scene_event, runtime_manager_event_phase
 from .state_store import clear_pid, default_state, load_pid, load_state, now_iso, save_pid, save_state
@@ -39,7 +40,13 @@ from .process_inventory import (
 from .workbench_controller import close_workbench, observe_workbench, open_workbench, restart_workbench
 
 
-_WORKBENCH_LIFECYCLE_COMMANDS = {"open_workbench", "close_workbench", "restart_workbench", "toggle_workbench"}
+_WORKBENCH_LIFECYCLE_COMMANDS = {
+    "open_workbench",
+    "close_workbench",
+    "restart_workbench",
+    "hot_restart_workbench",
+    "toggle_workbench",
+}
 _SOURCE_SIGNATURE_PATHS = (
     Path("core/runtime_manager/cli.py"),
     Path("core/runtime_manager/command_queue.py"),
@@ -59,10 +66,210 @@ _OPEN_VERIFICATION_TIMEOUT_SECONDS = 60.0
 _OPEN_VERIFICATION_POLL_INTERVAL_SECONDS = 0.4
 _CLOSE_VERIFICATION_TIMEOUT_SECONDS = 8.0
 _CLOSE_VERIFICATION_POLL_INTERVAL_SECONDS = 0.4
+_ACTIVE_WORK_LIFECYCLE_BLOCKED_MESSAGE = "有进行中的任务，无法重启 Vibelution。请等待任务完成或先停止任务。"
+_ACTIVE_WORK_RUNNING_STATUSES = {
+    "",
+    "active",
+    "queued",
+    "running",
+    "stopping",
+    "started",
+    "in_progress",
+    "pausing",
+    "resuming",
+    "force_stopping",
+}
+_ACTIVE_WORK_NON_BLOCKING_STATUSES = {
+    "cancelled",
+    "closed",
+    "completed",
+    "done",
+    "failed",
+    "failed_provider",
+    "failed_runtime",
+    "idle",
+    "needs_continue",
+    "paused_limit",
+    "ready",
+    "stopped",
+    "stopped_by_user",
+    "stop_failed",
+    "superseded",
+}
 
 
 def _command_affects_workbench_lifecycle(command_type: str) -> bool:
     return str(command_type or "").strip() in _WORKBENCH_LIFECYCLE_COMMANDS
+
+
+def _active_work_run_item(kind: str, payload: dict[str, Any]) -> dict[str, str]:
+    run_id = str(
+        payload.get("runId")
+        or payload.get("roundId")
+        or payload.get("sessionId")
+        or payload.get("id")
+        or ""
+    ).strip()
+    status = str(payload.get("status") or payload.get("currentPhase") or "").strip().lower()
+    session_id = str(payload.get("sessionId") or payload.get("conversationId") or "").strip()
+    return {
+        "kind": str(payload.get("runKind") or kind or "").strip(),
+        "runId": run_id,
+        "status": status,
+        "sessionId": session_id,
+    }
+
+
+def _active_work_status_blocks_lifecycle(status: str) -> bool:
+    normalized = str(status or "").strip().lower()
+    if normalized in _ACTIVE_WORK_NON_BLOCKING_STATUSES:
+        return False
+    if normalized in _ACTIVE_WORK_RUNNING_STATUSES:
+        return True
+    return bool(normalized)
+
+
+def _append_active_work_run(
+    items: list[dict[str, str]],
+    seen: set[tuple[str, str]],
+    *,
+    kind: str,
+    payload: dict[str, Any] | None,
+) -> None:
+    if not isinstance(payload, dict):
+        return
+    if str(payload.get("finishedAt") or payload.get("endedAt") or "").strip():
+        return
+    item = _active_work_run_item(kind, payload)
+    if not item["kind"]:
+        return
+    if not _active_work_status_blocks_lifecycle(item["status"]):
+        return
+    key = (item["kind"], item["runId"] or item["sessionId"])
+    if key in seen:
+        return
+    seen.add(key)
+    items.append(item)
+
+
+def _hot_restart_requester_fields(args: dict[str, Any]) -> dict[str, str]:
+    hot_restart = args.get("hotRestart") if isinstance(args.get("hotRestart"), dict) else {}
+    return {
+        "sessionId": str(
+            args.get("allowActiveSessionId")
+            or hot_restart.get("sessionId")
+            or hot_restart.get("session_id")
+            or ""
+        ).strip(),
+        "runId": str(
+            args.get("allowActiveRunId")
+            or hot_restart.get("runId")
+            or hot_restart.get("run_id")
+            or ""
+        ).strip(),
+    }
+
+
+def _active_work_allowed_for_hot_restart(item: dict[str, str], requester: dict[str, str]) -> bool:
+    if str(item.get("kind") or "").strip() != "chat_turn":
+        return False
+    requester_session_id = str(requester.get("sessionId") or "").strip()
+    requester_run_id = str(requester.get("runId") or "").strip()
+    item_session_id = str(item.get("sessionId") or "").strip()
+    item_run_id = str(item.get("runId") or "").strip()
+    if requester_run_id and item_run_id == requester_run_id:
+        return True
+    return bool(requester_session_id and item_session_id == requester_session_id)
+
+
+def _filter_active_work_for_lifecycle_command(
+    active_work_runs: list[dict[str, str]],
+    *,
+    command_type: str,
+    args: dict[str, Any],
+) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
+    if command_type != "hot_restart_workbench":
+        return active_work_runs, []
+    requester = _hot_restart_requester_fields(args)
+    blocked: list[dict[str, str]] = []
+    allowed: list[dict[str, str]] = []
+    for item in active_work_runs:
+        if _active_work_allowed_for_hot_restart(item, requester):
+            allowed.append(item)
+        else:
+            blocked.append(item)
+    return blocked, allowed
+
+
+def _runtime_manager_active_work_runs() -> list[dict[str, str]]:
+    """Return active project work that must block destructive lifecycle commands."""
+
+    items: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+
+    try:
+        summary = build_evolution_summary()
+    except Exception as exc:
+        _append_event(
+            "workbench.lifecycle.active_work_probe_failed",
+            {"source": "evolution_summary", "errorType": type(exc).__name__, "message": str(exc)},
+        )
+        summary = {}
+    if isinstance(summary, dict):
+        for kind, payload in (
+            ("self_evolution_run", summary.get("self") if isinstance(summary.get("self"), dict) else {}),
+            ("supervised_evolution_run", summary.get("supervised") if isinstance(summary.get("supervised"), dict) else {}),
+        ):
+            active_run_id = str(payload.get("activeRunId") or "").strip()
+            if not active_run_id:
+                continue
+            _append_active_work_run(
+                items,
+                seen,
+                kind=kind,
+                payload={"runId": active_run_id, "status": payload.get("activeStatus") or "running"},
+            )
+
+    for source_name, kind, loader_name in (
+        ("chat_turn", "chat_turn", "list_active_session_work_runs"),
+        ("chat_room_round", "chat_room_round", "list_active_chat_room_work_runs"),
+    ):
+        try:
+            if source_name == "chat_turn":
+                from core.web.services.session_service import list_active_session_work_runs as loader
+            else:
+                from core.web.services.chat_room_service import list_active_chat_room_work_runs as loader
+            payloads = loader()
+        except Exception as exc:
+            _append_event(
+                "workbench.lifecycle.active_work_probe_failed",
+                {
+                    "source": loader_name,
+                    "errorType": type(exc).__name__,
+                    "message": str(exc),
+                },
+            )
+            continue
+        for payload in payloads if isinstance(payloads, list) else []:
+            _append_active_work_run(items, seen, kind=kind, payload=payload)
+
+    try:
+        from core.web.services.supervised_worktree_evolution_service import get_active_supervised_worktree_run
+
+        worktree_run = get_active_supervised_worktree_run()
+    except Exception as exc:
+        _append_event(
+            "workbench.lifecycle.active_work_probe_failed",
+            {"source": "get_active_supervised_worktree_run", "errorType": type(exc).__name__, "message": str(exc)},
+        )
+        worktree_run = None
+    _append_active_work_run(
+        items,
+        seen,
+        kind="supervised_worktree_evolution_run",
+        payload=worktree_run,
+    )
+    return items
 
 
 def _runtime_manager_source_signature() -> str:
@@ -101,8 +308,8 @@ def _active_command_is_recent(state: dict[str, Any]) -> bool:
     except ValueError:
         return False
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=UTC)
-    age_seconds = (datetime.now(UTC) - parsed.astimezone(UTC)).total_seconds()
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    age_seconds = (datetime.now(timezone.utc) - parsed.astimezone(timezone.utc)).total_seconds()
     return age_seconds < _ACTIVE_COMMAND_RESTART_GRACE_SECONDS
 
 
@@ -222,6 +429,7 @@ def _snapshot_should_persist_reconciliation(original_state: dict[str, Any], snap
         "backendPortOwnerTrusted",
         "backendPortConflict",
         "browserWindowAlive",
+        "browserWindowRecoverySource",
         "backendMissing",
         "frontendOrphaned",
         "lifecycleConsistency",
@@ -765,6 +973,7 @@ def load_runtime_snapshot() -> dict[str, Any]:
             "backendPortOwnerResidual": bool(observation.get("backendPortOwnerResidual")),
             "backendPortConflict": bool(observation.get("backendPortConflict")),
             "browserWindowAlive": bool(observation.get("browserWindowAlive")),
+            "browserWindowRecoverySource": str(observation.get("browserWindowRecoverySource") or ""),
             "browserManaged": bool(observation.get("browserManaged", True)),
             "backendMissing": bool(consistency_fields["backendMissing"]),
             "frontendOrphaned": bool(consistency_fields["frontendOrphaned"]),
@@ -1183,6 +1392,70 @@ class RuntimeManagerDaemon:
             result.update(result_data)
         return result
 
+    def _block_lifecycle_command_if_active_work(
+        self,
+        *,
+        command_id: str,
+        command_type: str,
+        args: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        active_work_runs = _runtime_manager_active_work_runs()
+        blocked_active_work_runs, allowed_active_work_runs = _filter_active_work_for_lifecycle_command(
+            active_work_runs,
+            command_type=command_type,
+            args=args,
+        )
+        if not blocked_active_work_runs:
+            if allowed_active_work_runs:
+                event_verb = {
+                    "hot_restart_workbench": "hot_restart",
+                }.get(command_type, "lifecycle")
+                _append_event(
+                    f"workbench.{event_verb}.allowed_requester_active_work",
+                    {
+                        "commandId": command_id,
+                        "commandType": command_type,
+                        "reason": str(args.get("reason") or "").strip(),
+                        "source": str(args.get("source") or "").strip(),
+                        "allowedActiveWorkCount": len(allowed_active_work_runs),
+                        "allowedActiveWorkRuns": allowed_active_work_runs[:8],
+                    },
+                )
+            return None
+
+        event_verb = {
+            "close_workbench": "close",
+            "restart_workbench": "restart",
+            "hot_restart_workbench": "hot_restart",
+            "toggle_workbench": "toggle",
+        }.get(command_type, "lifecycle")
+        event_payload = {
+            "commandId": command_id,
+            "commandType": command_type,
+            "reason": str(args.get("reason") or "").strip(),
+            "source": str(args.get("source") or "").strip(),
+            "activeWorkCount": len(blocked_active_work_runs),
+            "activeWorkRuns": blocked_active_work_runs[:8],
+        }
+        if allowed_active_work_runs:
+            event_payload["allowedActiveWorkRuns"] = allowed_active_work_runs[:8]
+        _append_event(f"workbench.{event_verb}.blocked_active_work", event_payload)
+        return self._finish_command(
+            command_id,
+            ok=False,
+            message=_ACTIVE_WORK_LIFECYCLE_BLOCKED_MESSAGE,
+            error_scope="active_work",
+            failure_message="",
+            error_type="ActiveWorkBlocked",
+            result_data={
+                "activeWorkRuns": {
+                    "count": len(blocked_active_work_runs),
+                    "items": blocked_active_work_runs,
+                    "allowedItems": allowed_active_work_runs,
+                }
+            },
+        )
+
     def _reconcile_observation(self, state: dict[str, Any]) -> dict[str, Any]:
         observation = observe_workbench()
         residual_processes = residual_process_payload(
@@ -1324,6 +1597,7 @@ class RuntimeManagerDaemon:
                 "backendPortOwnerResidual": bool(observation.get("backendPortOwnerResidual")),
                 "backendPortConflict": bool(observation.get("backendPortConflict")),
                 "browserWindowAlive": bool(observation.get("browserWindowAlive")),
+                "browserWindowRecoverySource": str(observation.get("browserWindowRecoverySource") or ""),
                 "browserManaged": bool(observation.get("browserManaged", True)),
                 "backendMissing": bool(consistency_fields["backendMissing"]),
                 "frontendOrphaned": bool(consistency_fields["frontendOrphaned"]),
@@ -1382,6 +1656,33 @@ class RuntimeManagerDaemon:
                     "message": str(exc),
                 },
             )
+
+    def _create_stable_backup_after_successful_open(self, *, command_id: str, reason: str) -> dict[str, Any]:
+        try:
+            backup = create_stable_backup(reason=reason, command_id=command_id)
+        except Exception as exc:
+            backup = {"errorType": type(exc).__name__, "message": str(exc)}
+            _append_event(
+                "workbench.stable_backup.failed",
+                {
+                    "commandId": command_id,
+                    "reason": reason,
+                    "errorType": type(exc).__name__,
+                    "message": str(exc),
+                },
+            )
+            return backup
+        _append_event(
+            "workbench.stable_backup.created",
+            {
+                "commandId": command_id,
+                "reason": reason,
+                "backupId": str(backup.get("backupId") or ""),
+                "fileCount": int(backup.get("fileCount") or 0),
+                "prunedBackupIds": backup.get("prunedBackupIds") if isinstance(backup.get("prunedBackupIds"), list) else [],
+            },
+        )
+        return backup
 
     def _handle_open_workbench(self, *, command_id: str, args: dict[str, Any]) -> dict[str, Any]:
         state = load_state()
@@ -1482,7 +1783,16 @@ class RuntimeManagerDaemon:
                         )
                         | {"attempts": verification_attempts, "retry": "stale_session_cleanup"},
                     )
-                    return self._finish_command(command_id, ok=True, message="Workbench opened.")
+                    stable_backup = self._create_stable_backup_after_successful_open(
+                        command_id=command_id,
+                        reason="launcher_open_retry_success",
+                    )
+                    return self._finish_command(
+                        command_id,
+                        ok=True,
+                        message="Workbench opened.",
+                        result_data={"stableBackup": stable_backup},
+                    )
             message = _open_verification_failure_message(verification, no_browser=no_browser)
             _append_event(
                 "workbench.open.verification_failed",
@@ -1505,9 +1815,26 @@ class RuntimeManagerDaemon:
             )
             | {"attempts": verification_attempts},
         )
-        return self._finish_command(command_id, ok=True, message="Workbench opened.")
+        stable_backup = self._create_stable_backup_after_successful_open(
+            command_id=command_id,
+            reason="launcher_open_success",
+        )
+        return self._finish_command(
+            command_id,
+            ok=True,
+            message="Workbench opened.",
+            result_data={"stableBackup": stable_backup},
+        )
 
     def _handle_close_workbench(self, *, command_id: str, args: dict[str, Any]) -> dict[str, Any]:
+        blocked = self._block_lifecycle_command_if_active_work(
+            command_id=command_id,
+            command_type="close_workbench",
+            args=args,
+        )
+        if blocked is not None:
+            return blocked
+
         state = load_state()
         workbench = state.setdefault("workbench", {})
         observation = observe_workbench()
@@ -1644,7 +1971,7 @@ class RuntimeManagerDaemon:
             exclude_pids=_snapshot_residual_excluded_pids(observe_workbench(), self._pid, include_workbench=False),
         )
 
-    def _handle_restart_workbench(self, *, command_id: str, args: dict[str, Any]) -> dict[str, Any]:
+    def _perform_restart_workbench(self, *, command_id: str, args: dict[str, Any]) -> dict[str, Any]:
         state = load_state()
         workbench = state.setdefault("workbench", {})
         requested_no_browser = bool(args.get("noBrowser"))
@@ -1748,14 +2075,323 @@ class RuntimeManagerDaemon:
             )
             | {"attempts": open_attempts},
         )
+        return {
+            "residualCleanup": cleanup_result,
+            "requestedNoBrowser": requested_no_browser,
+            "effectiveNoBrowser": effective_no_browser,
+        }
+
+    def _handle_restart_workbench(self, *, command_id: str, args: dict[str, Any]) -> dict[str, Any]:
+        if not bool(args.get("skipActiveWorkGuard")):
+            blocked = self._block_lifecycle_command_if_active_work(
+                command_id=command_id,
+                command_type="restart_workbench",
+                args=args,
+            )
+            if blocked is not None:
+                return blocked
+
+        result_data = self._perform_restart_workbench(command_id=command_id, args=args)
         return self._finish_command(
             command_id,
             ok=True,
             message="Workbench restarted.",
+            result_data=result_data,
+        )
+
+    def _wake_hot_restart_session(
+        self,
+        *,
+        session_id: str,
+        message: str,
+        command_id: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        delivery = {
+            "wakeRequested": bool(session_id),
+            "wakeStatus": "skipped",
+            "targetSessionId": str(session_id or "").strip(),
+            "turnId": "",
+            "reason": "",
+        }
+        if not session_id:
+            delivery["reason"] = "missing_session_id"
+            return delivery
+        try:
+            from core.web.services import session_service
+
+            if session_service._is_session_running(session_id):
+                try:
+                    session_service.request_stop_session_turn(session_id)
+                except Exception:
+                    pass
+
+            detail = session_service.submit_session_message(
+                session_id,
+                message,
+                turn_mode="hot_restart_resume",
+                write_intent=False,
+                message_metadata={
+                    "kind": "hot_restart_resume",
+                    "commandId": command_id,
+                    **(metadata or {}),
+                },
+                message_source="hot_restart_resume",
+                include_started_turn_id=True,
+            )
+        except Exception as exc:
+            delivery["wakeStatus"] = "failed"
+            delivery["reason"] = f"{type(exc).__name__}: {exc}"
+            _append_event(
+                "workbench.hot_restart.session_wake_failed",
+                {
+                    "commandId": command_id,
+                    "sessionId": session_id,
+                    "errorType": type(exc).__name__,
+                    "message": str(exc),
+                },
+            )
+            return delivery
+        delivery["wakeStatus"] = "delivered"
+        delivery["turnId"] = str((detail or {}).get("startedTurnId") or "")
+        _append_event(
+            "workbench.hot_restart.session_wake_delivered",
+            {
+                "commandId": command_id,
+                "sessionId": session_id,
+                "turnId": delivery["turnId"],
+            },
+        )
+        return delivery
+
+    def _handle_hot_restart_workbench(self, *, command_id: str, args: dict[str, Any]) -> dict[str, Any]:
+        hot_restart = args.get("hotRestart") if isinstance(args.get("hotRestart"), dict) else {}
+        requester = _hot_restart_requester_fields(args)
+        session_id = requester["sessionId"]
+        run_id = requester["runId"]
+        reason = str(args.get("reason") or hot_restart.get("reason") or "agent_hot_restart").strip() or "agent_hot_restart"
+        if not session_id:
+            return self._finish_command(
+                command_id,
+                ok=False,
+                message="Hot restart requires sessionId.",
+                error_scope="hot_restart_workbench",
+                failure_message="Hot restart requires sessionId.",
+                error_type="HotRestartSessionRequired",
+            )
+
+        blocked = self._block_lifecycle_command_if_active_work(
+            command_id=command_id,
+            command_type="hot_restart_workbench",
+            args=args,
+        )
+        if blocked is not None:
+            return blocked
+
+        backup = latest_stable_backup()
+        if not backup:
+            try:
+                backup = create_stable_backup(reason="pre_hot_restart_seed", command_id=command_id)
+            except Exception as exc:
+                return self._finish_command(
+                    command_id,
+                    ok=False,
+                    message=f"Hot restart could not create a rollback backup: {exc}",
+                    error_scope="hot_restart_workbench",
+                    failure_message=str(exc),
+                    error_type=type(exc).__name__,
+                )
+
+        try:
+            restart_data = self._perform_restart_workbench(
+                command_id=command_id,
+                args={
+                    **args,
+                    "reason": reason,
+                    "source": "agent_hot_restart",
+                    "noBrowser": bool(args.get("noBrowser")),
+                    "skipActiveWorkGuard": True,
+                },
+            )
+            restart_result = {"ok": True, "message": "Workbench restarted.", **restart_data}
+        except Exception as exc:
+            restart_result = {
+                "ok": False,
+                "message": str(exc),
+                "errorType": type(exc).__name__,
+            }
+        if bool(restart_result.get("ok")):
+            try:
+                stable_backup = create_stable_backup(reason="hot_restart_success", command_id=command_id)
+            except Exception as exc:
+                stable_backup = {"errorType": type(exc).__name__, "message": str(exc)}
+                _append_event(
+                    "workbench.hot_restart.stable_backup_failed",
+                    {"commandId": command_id, "errorType": type(exc).__name__, "message": str(exc)},
+                )
+            delivery = self._wake_hot_restart_session(
+                session_id=session_id,
+                command_id=command_id,
+                message=str(
+                    hot_restart.get("resumeMessage")
+                    or "热重启已完成。请继续完成当前任务的验证、记忆同步和收口。"
+                ),
+                metadata={
+                    "hotRestartStatus": "completed",
+                    "stableBackupId": str((stable_backup or {}).get("backupId") or ""),
+                    "runId": run_id,
+                },
+            )
+            if delivery.get("wakeStatus") == "delivered":
+                return self._finish_command(
+                    command_id,
+                    ok=True,
+                    message="Hot restart completed and the requester session was awakened.",
+                    result_data={
+                        "hotRestart": {
+                            "status": "completed",
+                            "sessionId": session_id,
+                            "runId": run_id,
+                            "stableBackup": stable_backup,
+                            "delivery": delivery,
+                            "restartResult": restart_result,
+                        }
+                    },
+                )
+            failure = create_failure_package(
+                reason=reason,
+                command_id=command_id,
+                session_id=session_id,
+                run_id=run_id,
+                failure_stage="session_wake",
+                error_type="HotRestartWakeFailed",
+                error_message=str(delivery.get("reason") or "session wake failed"),
+                runtime_result=restart_result,
+            )
+            return self._rollback_after_hot_restart_failure(
+                command_id=command_id,
+                args=args,
+                session_id=session_id,
+                run_id=run_id,
+                reason=reason,
+                backup=backup,
+                failure=failure,
+                error_type="HotRestartWakeFailed",
+                error_message=str(delivery.get("reason") or "session wake failed"),
+            )
+
+        failure = create_failure_package(
+            reason=reason,
+            command_id=command_id,
+            session_id=session_id,
+            run_id=run_id,
+            failure_stage="restart",
+            error_type=str(restart_result.get("errorType") or "HotRestartFailed"),
+            error_message=str(restart_result.get("message") or "hot restart failed"),
+            runtime_result=restart_result,
+        )
+        return self._rollback_after_hot_restart_failure(
+            command_id=command_id,
+            args=args,
+            session_id=session_id,
+            run_id=run_id,
+            reason=reason,
+            backup=backup,
+            failure=failure,
+            error_type=str(restart_result.get("errorType") or "HotRestartFailed"),
+            error_message=str(restart_result.get("message") or "hot restart failed"),
+        )
+
+    def _rollback_after_hot_restart_failure(
+        self,
+        *,
+        command_id: str,
+        args: dict[str, Any],
+        session_id: str,
+        run_id: str,
+        reason: str,
+        backup: dict[str, Any],
+        failure: dict[str, Any],
+        error_type: str,
+        error_message: str,
+    ) -> dict[str, Any]:
+        try:
+            rollback = restore_stable_backup(backup)
+            _append_event(
+                "workbench.hot_restart.rollback_restored",
+                {
+                    "commandId": command_id,
+                    "backupId": rollback.get("backupId"),
+                    "failurePackageId": failure.get("packageId"),
+                },
+            )
+        except Exception as exc:
+            rollback = {"status": "failed", "errorType": type(exc).__name__, "message": str(exc)}
+            return self._finish_command(
+                command_id,
+                ok=False,
+                message=f"Hot restart failed and rollback failed: {exc}",
+                error_scope="hot_restart_workbench",
+                failure_message=str(exc),
+                error_type=type(exc).__name__,
+                result_data={
+                    "hotRestart": {
+                        "status": "rollback_failed",
+                        "sessionId": session_id,
+                        "runId": run_id,
+                        "failurePackage": failure,
+                        "rollback": rollback,
+                    }
+                },
+            )
+
+        try:
+            recovery_data = self._perform_restart_workbench(
+                command_id=command_id,
+                args={
+                    **args,
+                    "reason": f"rollback_after_hot_restart_failure: {reason}",
+                    "source": "agent_hot_restart_rollback",
+                    "noBrowser": bool(args.get("noBrowser")),
+                    "skipActiveWorkGuard": True,
+                },
+            )
+            recovery_result = {"ok": True, "message": "Workbench restarted after rollback.", **recovery_data}
+        except Exception as exc:
+            recovery_result = {"ok": False, "message": str(exc), "errorType": type(exc).__name__}
+        delivery = self._wake_hot_restart_session(
+            session_id=session_id,
+            command_id=command_id,
+            message=(
+                "热重启失败，已回滚。失败现场已保存，请根据最新日志和失败现场包分析问题。\n"
+                f"- failurePackageId: {failure.get('packageId')}\n"
+                f"- failureStage: {failure.get('failureStage')}\n"
+                f"- error: {error_type}: {error_message}"
+            ),
+            metadata={
+                "hotRestartStatus": "rolled_back",
+                "failurePackageId": str(failure.get("packageId") or ""),
+                "restoredBackupId": str(rollback.get("backupId") or ""),
+                "runId": run_id,
+            },
+        )
+        return self._finish_command(
+            command_id,
+            ok=False,
+            message="Hot restart failed; rollback was applied.",
+            error_scope="hot_restart_workbench",
+            failure_message=str(error_message or "hot restart failed"),
+            error_type=str(error_type or "HotRestartFailed"),
             result_data={
-                "residualCleanup": cleanup_result,
-                "requestedNoBrowser": requested_no_browser,
-                "effectiveNoBrowser": effective_no_browser,
+                "hotRestart": {
+                    "status": "rolled_back",
+                    "sessionId": session_id,
+                    "runId": run_id,
+                    "rollback": rollback,
+                    "failurePackage": failure,
+                    "recoveryRestart": recovery_result,
+                    "delivery": delivery,
+                }
             },
         )
 
@@ -1763,6 +2399,13 @@ class RuntimeManagerDaemon:
         state = load_state()
         observed_state = str(state.setdefault("workbench", {}).get("observedState") or "closed").strip() or "closed"
         if observed_state == "open":
+            blocked = self._block_lifecycle_command_if_active_work(
+                command_id=command_id,
+                command_type="toggle_workbench",
+                args=args,
+            )
+            if blocked is not None:
+                return blocked
             return self._handle_close_workbench(command_id=command_id, args=args)
         return self._handle_open_workbench(command_id=command_id, args=args)
 
@@ -1830,6 +2473,16 @@ class RuntimeManagerDaemon:
             command_id,
             ok=True,
             message="Supervised run started.",
+            result_data={"runId": str(snapshot.get("runId") or ""), "snapshot": snapshot},
+        )
+
+    def _handle_retry_supervised_run(self, *, command_id: str, args: dict[str, Any]) -> dict[str, Any]:
+        run_id = str(args.get("runId") or "").strip()
+        snapshot = supervised_control_service._LOCAL_RETRY_SUPERVISED_RUN(run_id)
+        return self._finish_command(
+            command_id,
+            ok=True,
+            message="Supervised run retry started.",
             result_data={"runId": str(snapshot.get("runId") or ""), "snapshot": snapshot},
         )
 
