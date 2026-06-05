@@ -36,7 +36,7 @@
             <div class="flow-cell"><strong>输入</strong><span>review_record 候选 / algorithm_hypothesis 候选</span></div>
             <div class="flow-cell"><strong>动作</strong><span>校验 candidateIds、targetDomain、sourceTrace、riskSummary、proposalPayload、ratingSuggestion。</span></div>
             <div class="flow-cell"><strong>输出</strong><span>steward_pack_draft 候选 / SourceArtifact</span></div>
-            <div class="flow-cell"><strong>记忆/图谱</strong><span>审批通过后正式 KnowledgeItem metadata 记录 officialResearchGraph；Memory Graph/RAG 可从正式 KnowledgeItem 继续读取，前端显式渲染仍待接。</span></div>
+            <div class="flow-cell"><strong>记忆/图谱</strong><span>审批通过后正式 KnowledgeItem metadata 记录 officialResearchGraph；Memory Graph 通过 include=officialResearchGraph 显式展开正式科研 trace，RAG 可从正式 KnowledgeItem 继续读取。</span></div>
           </div>
         </section>
 
@@ -67,7 +67,7 @@
             <article class="plan-card"><h2>风险</h2><ul><li>绕过审批门禁</li>
 <li>目标知识域错误</li>
 <li>把 ingestion pack 草稿误当正式入库记录</li></ul></article>
-            <article class="plan-card "><h2>未决事项</h2><ul><li>是否把 KnowledgeItem metadata.officialResearchGraph 显式渲染到 Memory Graph 画布。</li></ul></article>
+            <article class="plan-card "><h2>未决事项</h2><ul><li>是否为 officialResearchGraph 增加专门筛选/图例，而不是仅用 Memory Graph 默认节点样式。</li></ul></article>
           </div>
         </section>
 
@@ -79,7 +79,7 @@
           <div class="status-grid">
             <div class="status-item"><b>候选状态</b><span>M5 审批门禁已落地</span></div>
             <div class="status-item"><b>记忆平台</b><span>待审阶段不创建正式 KnowledgeItem；审批通过后复用 Team Knowledge review/apply 创建正式 KnowledgeItem，并把评分建议和正式科研图谱引用承接到 KnowledgeItem。</span></div>
-            <div class="status-item"><b>图谱同步</b><span>审批通过后正式 KnowledgeItem metadata 记录 officialResearchGraph；Memory Graph/RAG 可从正式 KnowledgeItem 继续读取，前端显式渲染仍待接。</span></div>
+            <div class="status-item"><b>图谱同步</b><span>审批通过后正式 KnowledgeItem metadata 记录 officialResearchGraph；Memory Graph 通过 include=officialResearchGraph 显式展开正式科研 trace，RAG 可从正式 KnowledgeItem 继续读取。</span></div>
           </div>
         </section>
 
@@ -116,7 +116,7 @@
 <li>knowledge_proposal_tool</li>
 <li>knowledge_ingestion_tool</li>
 <li>knowledge_rating_suggestion_tool</li></ul></article>
-        <article class="plan-card"><h2>功能缺口</h2><p class="hint">pending ratingSuggestion 到正式 KnowledgeItem rating review 的承接已接入；正式 supports/maps_to/inspires/approved_for_ingestion 边已写入 officialResearchGraph，前端显式图谱展开仍待补。</p></article>
+        <article class="plan-card"><h2>功能缺口</h2><p class="hint">pending ratingSuggestion 到正式 KnowledgeItem rating review 的承接已接入；正式 supports/maps_to/inspires/approved_for_ingestion 边已写入 officialResearchGraph，Memory Graph 显式展开已接入。后续可补图例和筛选。</p></article>
         <article class="plan-card"><h2>失败回退</h2><p class="hint">缺必填治理字段、approvalRequired 非 true，或包含 officialSync/applyNow/writeOfficialGraph 时返回 steward_needs_revision。</p></article>
       </div>
     </section>

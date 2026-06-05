@@ -69,7 +69,7 @@ describe("MemoryRoute layout contract", () => {
 
   it("wires the read-only 3D memory knowledge graph API and canvas shell", () => {
     expect(routeSource).toContain("queryKeys.memoryKnowledgeGraph()");
-    expect(routeSource).toContain('fetchJson<MemoryKnowledgeGraphPayload>("/api/memory/knowledge-graph")');
+    expect(routeSource).toContain('fetchJson<MemoryKnowledgeGraphPayload>("/api/memory/knowledge-graph?include=officialResearchGraph")');
     expect(routeSource).toContain("MemoryGraphCanvas");
     expect(routeSource).toContain("copy.graphGpu");
     expect(routeSource).toContain("copy.graphWorker");

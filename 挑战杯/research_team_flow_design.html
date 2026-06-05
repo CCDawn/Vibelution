@@ -777,8 +777,8 @@
 <div class="blueprint-row">
               <b>M5</b>
               <strong>知识治理与正式同步</strong>
-              <span>steward_pack_draft 门禁、待审入库桥、Ingestion Approval Gate、评分建议迁移和 officialResearchGraph 正式边已落地：有效草稿批准后创建正式 KnowledgeItem、承接待审评级并记录正式科研 trace，拒绝后退回修订。</span>
-              <span>正式 RAG 通过已审核 KnowledgeItem 检索；正式图谱边先落在 KnowledgeItem metadata，前端显式展开仍待接。</span>
+              <span>steward_pack_draft 门禁、待审入库桥、Ingestion Approval Gate、评分建议迁移、officialResearchGraph 正式边和 Memory Graph 展开已落地：有效草稿批准后创建正式 KnowledgeItem、承接待审评级并可视化正式科研 trace，拒绝后退回修订。</span>
+              <span>正式 RAG 通过已审核 KnowledgeItem 检索；正式图谱边落在 KnowledgeItem metadata，并由 Memory Graph 只读展开。</span>
             </div>
       </div>
       <div class="tag-row">
@@ -915,8 +915,8 @@
       </div>
 <div class="feature-row">
         <strong>正式图谱同步</strong>
-        <span>approved 后进入 Team Knowledge/RAG，并把正式科研边写入 KnowledgeItem metadata.officialResearchGraph；Memory Graph 显式展开仍待前端接线</span>
-        <b class="status-pill">已接线+待展示</b>
+        <span>approved 后进入 Team Knowledge/RAG，并把正式科研边写入 KnowledgeItem metadata.officialResearchGraph；Memory Graph 请求 include=officialResearchGraph 后显式展开</span>
+        <b class="status-pill">已接线</b>
       </div>
       </div>
     </section>

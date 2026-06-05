@@ -739,7 +739,7 @@ Agent 创建策略：
 - 待审入库桥已复用 Team Knowledge：有效 `steward_pack_draft` 可提交为 `SourceArtifact` + pending `RefinementProposal`，并可选生成 pending `ratingSuggestion`。
 - 提交后候选进入 `steward_pending_knowledge_review`，并记录 `metadata.knowledgeIngestion`。
 - Ingestion Approval Gate 已接入：`approved` 复用 Team Knowledge review/apply 创建正式 `KnowledgeItem`，并把 proposal 级 pending `ratingSuggestion` 迁移为 KnowledgeItem 级 pending rating review，同时把正式科研边写入 `KnowledgeItem.metadata.officialResearchGraph`；`rejected` 退回 `steward_needs_revision`。
-- `official_sync_record` 已以 `metadata.officialSyncRecord` 形式记录正式同步证据、`ratingSuggestionMigration` 和 `officialResearchGraph`；RAG 通过正式 KnowledgeItem 的现有读取面可检索，正式图谱 trace 先落在 KnowledgeItem metadata，前端 Memory Graph 显式展开仍待接。
+- `official_sync_record` 已以 `metadata.officialSyncRecord` 形式记录正式同步证据、`ratingSuggestionMigration` 和 `officialResearchGraph`；RAG 通过正式 KnowledgeItem 的现有读取面可检索，Memory Graph 通过 `include=officialResearchGraph` 显式展开正式科研 trace。
 
 验收：
 
@@ -752,7 +752,7 @@ Agent 创建策略：
 - 已覆盖：Ingestion Approval Gate 拒绝后不创建正式 `KnowledgeItem`，候选进入 `steward_needs_revision`。
 - 已覆盖：pending proposal 级 `ratingSuggestion` 在批准后关闭为 `applied`，并迁移为正式 `KnowledgeItem` 的 pending rating review，不自动应用评分。
 - 已覆盖：正式 `supports` / `maps_to` / `inspires` / `approved_for_ingestion` 图谱边以 `officialResearchGraph` 写入正式 `KnowledgeItem.metadata` 和 `officialSyncRecord`。
-- 待覆盖：Memory Graph 画布显式展开 `officialResearchGraph` 边。
+- 已覆盖：Memory Graph 画布请求 `include=officialResearchGraph` 后显式展开 `officialResearchGraph` 的正式科研引用节点和 `official_*` 边。
 
 ## 11. 测试计划
 

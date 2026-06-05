@@ -177,6 +177,14 @@ def get_memory_knowledge_graph(
                 label=str(member.get("role") or "member"),
                 metadata={"role": str(member.get("role") or "member"), "agentStatus": str(member.get("agentStatus") or "")},
             )
+        if "officialresearchgraph" in include_set or "official_research_graph" in include_set or "all" in include_set:
+            _add_official_research_graph_nodes(
+                graph,
+                team_node_id,
+                team_knowledge_service._owner_context("team", team_id_value, team=team),
+                actor_agent_id=normalized_agent_id,
+                knowledge_base_id=normalized_base_id,
+            )
 
     if "runtime" in include_set or "all" in include_set or not include_set:
         _add_runtime_scene_nodes(graph, project_node_id)
@@ -371,6 +379,103 @@ def _add_file_backed_domain_node(
         metadata={"paths": existing_paths, "fullContentIncluded": False},
     )
     graph.add_edge(project_node_id, node_id, edge_type)
+
+
+def _add_official_research_graph_nodes(
+    graph: _GraphBuilder,
+    team_node_id: str,
+    owner: dict[str, Any],
+    *,
+    actor_agent_id: str,
+    knowledge_base_id: str,
+) -> None:
+    for base in team_knowledge_service._knowledge_bases_for_owner(owner):
+        base_id = str(base.get("knowledgeBaseId") or "").strip()
+        if knowledge_base_id and base_id != knowledge_base_id:
+            continue
+        if not team_knowledge_service._can_access(owner, base, actor_agent_id, "read"):
+            continue
+        base_node_id = _node_id("knowledge_base", base_id)
+        graph.add_node(
+            base_node_id,
+            "knowledge_base",
+            str(base.get("name") or base_id),
+            summary=str(base.get("description") or ""),
+            status=str(base.get("status") or "active"),
+            created_at=str(base.get("createdAt") or ""),
+            updated_at=str(base.get("updatedAt") or ""),
+            metadata={"knowledgeBaseId": base_id, "ownerType": owner.get("ownerType"), "ownerId": owner.get("ownerId")},
+            responsibility_question=_responsibility_question("knowledge_base", base),
+            visual={"size": "container"},
+        )
+        graph.add_edge(team_node_id, base_node_id, "team_has_knowledge_base")
+        for item in team_knowledge_service._read_jsonl(team_knowledge_service._items_path_for_owner(owner)):
+            if str(item.get("knowledgeBaseId") or "") != base_id:
+                continue
+            metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+            official_graph = metadata.get("officialResearchGraph") if isinstance(metadata.get("officialResearchGraph"), dict) else {}
+            if str(official_graph.get("status") or "") != "synced":
+                continue
+            item_id = str(item.get("knowledgeItemId") or "").strip()
+            if not item_id:
+                continue
+            item_node_id = _node_id("knowledge_item", item_id)
+            graph.add_node(
+                item_node_id,
+                "knowledge_item",
+                str(item.get("title") or item_id),
+                summary=str(item.get("summary") or ""),
+                status=str(item.get("importanceLevel") or "medium"),
+                created_at=str(item.get("createdAt") or ""),
+                updated_at=str(item.get("updatedAt") or item.get("appliedAt") or ""),
+                metadata={
+                    "knowledgeItemId": item_id,
+                    "knowledgeBaseId": base_id,
+                    "graphKind": str(official_graph.get("graphKind") or "formal_research_trace"),
+                    "edgeCount": int((official_graph.get("summary") or {}).get("edgeCount") or 0)
+                    if isinstance(official_graph.get("summary"), dict)
+                    else 0,
+                    "fullContentIncluded": False,
+                },
+                visual={"size": "leaf"},
+                content_items=[],
+            )
+            graph.add_edge(base_node_id, item_node_id, "knowledge_base_has_item")
+            for edge in official_graph.get("edges") or []:
+                if not isinstance(edge, dict):
+                    continue
+                source_id = str(edge.get("sourceId") or "").strip()
+                relation = str(edge.get("relation") or "").strip()
+                if not source_id or not relation:
+                    continue
+                source_type = str(edge.get("sourceType") or "research_ref").strip() or "research_ref"
+                ref_node_id = _node_id("official_research_ref", f"{source_type}:{source_id}")
+                graph.add_node(
+                    ref_node_id,
+                    "official_research_ref",
+                    source_id,
+                    summary=f"{source_type} reference promoted into formal research trace.",
+                    status="official_synced",
+                    metadata={
+                        "sourceId": source_id,
+                        "sourceType": source_type,
+                        "knowledgeItemId": item_id,
+                        "knowledgeBaseId": base_id,
+                        "fullContentIncluded": False,
+                    },
+                    visual={"size": "support", "sourceType": source_type},
+                )
+                graph.add_edge(
+                    ref_node_id,
+                    item_node_id,
+                    f"official_{relation}",
+                    label=relation,
+                    metadata={
+                        "relation": relation,
+                        "edgeState": str(edge.get("edgeState") or "official_synced"),
+                        "targetType": str(edge.get("targetType") or "knowledge_item"),
+                    },
+                )
 
 
 def _sync_roots() -> None:
