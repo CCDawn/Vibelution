@@ -34,7 +34,7 @@ SECTION_LABELS = {
         "ui": "界面",
         "parser": "解析器",
         "prompt": "系统提示词",
-        "git.commit_message_profile": "Git 提交模型",
+        "git.commit_message_model_ref": "Git 提交模型",
         "git.commit_message_prompt": "Git 提交提示词",
         "debug": "调试",
         "pet": "宠物",
@@ -59,7 +59,7 @@ SECTION_LABELS = {
         "ui": "UI",
         "parser": "Parser",
         "prompt": "System Prompts",
-        "git.commit_message_profile": "Git Commit Model",
+        "git.commit_message_model_ref": "Git Commit Model",
         "git.commit_message_prompt": "Git Commit Prompt",
         "debug": "Debug",
         "pet": "Pet",
@@ -132,7 +132,7 @@ FIELD_LABELS = {
         "ui.show_ascii_art": "显示 ASCII Art",
         "ui.show_welcome": "显示欢迎面板",
         "prompt.default_components": "默认提示词组件",
-        "git.commit_message_profile": "Git 提交使用的模型绑定",
+        "git.commit_message_model_ref": "Git 提交使用的模型",
         "git.commit_message_prompt": "AI 提交说明提示词",
         "network.proxy_enabled": "启用代理",
         "network.proxy_url": "代理地址",
@@ -215,7 +215,7 @@ FIELD_LABELS = {
         "ui.show_ascii_art": "Show ASCII Art",
         "ui.show_welcome": "Show Welcome Panel",
         "prompt.default_components": "Default Prompt Components",
-        "git.commit_message_profile": "Git Commit Model Binding",
+        "git.commit_message_model_ref": "Git Commit Model",
         "git.commit_message_prompt": "AI Commit Message Prompt",
         "network.proxy_enabled": "Enable Proxy",
         "network.proxy_url": "Proxy URL",
@@ -356,7 +356,7 @@ FIELD_HINTS = {
         "evolution.chat_dataset.segmentation_strategy": "chat 采样如何切分连续多轮上下文。",
         "ui.refresh_rate": "终端工作台刷新频率。",
         "ui.max_log_entries": "UI 内部保留的日志条目数。",
-        "git.commit_message_profile": "Git 页面点击“AI 生成说明”时使用哪一个模型绑定。",
+        "git.commit_message_model_ref": "Git 页面点击“AI 生成说明”时使用哪一个模型库条目。",
         "git.commit_message_prompt": "Git 页面生成提交说明时使用的系统提示词模板。可使用 {summary}、{files}、{diff}、{branch} 占位符。",
         "network.proxy_enabled": "启用后，科研调研等真实公网请求会通过下方代理地址访问。",
         "network.proxy_url": "填写 HTTP/HTTPS 代理地址，例如 http://127.0.0.1:7890。",
@@ -388,7 +388,7 @@ FIELD_HINTS = {
         "evolution.chat_dataset.segmentation_strategy": "How chat capture segments contiguous multi-turn context.",
         "ui.refresh_rate": "Refresh cadence for the terminal workbench.",
         "ui.max_log_entries": "How many UI log entries are retained.",
-        "git.commit_message_profile": "Model binding used by the AI commit message button on the Git page.",
+        "git.commit_message_model_ref": "Model library entry used by the AI commit message button on the Git page.",
         "git.commit_message_prompt": "System prompt template for generated commit messages. Supports {summary}, {files}, {diff}, and {branch}.",
         "network.proxy_enabled": "When enabled, real public research requests use the proxy URL below.",
         "network.proxy_url": "HTTP/HTTPS proxy URL, for example http://127.0.0.1:7890.",
@@ -414,7 +414,7 @@ EDITOR_SECTION_SPECS = [
     ("analysis", "analysis"),
     ("ui", "ui"),
     ("parser", "parser"),
-    ("git-commit-profile", "git.commit_message_profile"),
+    ("git-commit-model", "git.commit_message_model_ref"),
     ("git-commit-prompt", "git.commit_message_prompt"),
     ("debug", "debug"),
     ("pet", "pet"),
@@ -498,11 +498,17 @@ def _field_options(path: str, lang: str) -> list[dict[str, str]]:
 
 
 def _field_options_for_config(path: str, public_config: dict[str, Any], lang: str) -> list[dict[str, str]]:
-    if path == "git.commit_message_profile":
-        profiles = public_config.get("llm", {}).get("profiles", {}) if isinstance(public_config.get("llm", {}), dict) else {}
-        if isinstance(profiles, dict):
-            return [{"value": str(profile_id), "label": str(profile_id)} for profile_id in profiles.keys()]
-        return [{"value": "primary", "label": "primary"}]
+    if path == "git.commit_message_model_ref":
+        llm = public_config.get("llm", {})
+        model_library = llm.get("model_library", {}) if isinstance(llm, dict) else {}
+        options = [{"value": "", "label": "未设置" if lang == "zh" else "Not set"}]
+        if isinstance(model_library, dict):
+            for model_id, item in model_library.items():
+                if not isinstance(item, dict):
+                    continue
+                label = str(item.get("label") or item.get("model") or model_id)
+                options.append({"value": str(model_id), "label": label})
+        return options
     if path == "tools.image2.default_model_ref":
         llm = public_config.get("llm", {})
         model_library = llm.get("model_library", {}) if isinstance(llm, dict) else {}

@@ -175,9 +175,25 @@ def test_generate_git_commit_message_cleans_fenced_ai_output(monkeypatch):
         git_status_service,
         "load_public_config",
         lambda: {
-            "llm": {"profiles": {"primary": {"model": "local-model"}}},
+            "llm": {
+                "profiles": {"primary": {"model_ref": "local_commit_model"}},
+                "model_library": {
+                    "local_commit_model": {
+                        "provider": {
+                            "kind": "local",
+                            "api_key_env": "",
+                            "base_url": "http://localhost:11434/v1",
+                            "compat_mode": "openai",
+                            "requires_api_key": False,
+                        },
+                        "model": "local-model",
+                        "contract": "basic_chat",
+                        "strict_compatibility": False,
+                    }
+                },
+            },
             "git": {
-                "commit_message_profile": "primary",
+                "commit_message_model_ref": "local_commit_model",
                 "commit_message_prompt": "Summary: {summary}\nFiles: {files}\nDiff: {diff}",
             },
         },
@@ -188,6 +204,8 @@ def test_generate_git_commit_message_cleans_fenced_ai_output(monkeypatch):
     payload = git_status_service.generate_git_commit_message(["web/src/routes/GitRoute.tsx"])
 
     assert payload["message"] == "feat: add git commit controls"
+    assert payload["modelId"] == "local_commit_model"
+    assert payload["profileId"] == git_status_service.GIT_COMMIT_MESSAGE_PROFILE_ID
 
 
 def test_with_git_config_defaults_does_not_mutate_input_and_recovers_invalid_git_block():
@@ -197,7 +215,7 @@ def test_with_git_config_defaults_does_not_mutate_input_and_recovers_invalid_git
 
     assert public_config == {"ui": {"language": "zh"}, "git": "disabled"}
     assert payload["ui"] == {"language": "zh"}
-    assert payload["git"]["commit_message_profile"] == git_status_service.DEFAULT_GIT_COMMIT_PROFILE
+    assert payload["git"]["commit_message_model_ref"] == ""
     assert "{diff}" in payload["git"]["commit_message_prompt"]
 
 
@@ -210,7 +228,7 @@ def test_git_config_defaults_round_trip_through_public_toml(tmp_path):
     save_public_config(public_config, config_path)
     loaded = load_public_config(config_path)
 
-    assert loaded["git"]["commit_message_profile"] == public_config["git"]["commit_message_profile"]
+    assert loaded["git"]["commit_message_model_ref"] == public_config["git"]["commit_message_model_ref"]
     assert loaded["git"]["commit_message_prompt"] == public_config["git"]["commit_message_prompt"]
 
 
