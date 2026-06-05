@@ -20,6 +20,7 @@ DAEMON_STDOUT_PATH = RUNTIME_MANAGER_DIR / "daemon.out.log"
 DAEMON_STDERR_PATH = RUNTIME_MANAGER_DIR / "daemon.err.log"
 
 LAUNCHER_SCRIPT_PATH = PROJECT_ROOT / "scripts" / "vibelution_launcher.ps1"
+PYTHON_LAUNCHER_SCRIPT_PATH = PROJECT_ROOT / "scripts" / "vibelution_launcher.py"
 LAUNCHER_STATE_PATH = PROJECT_ROOT / ".runtime" / "launcher" / "state.json"
 
 DEFAULT_HOST = DEFAULT_WORKBENCH_HOST

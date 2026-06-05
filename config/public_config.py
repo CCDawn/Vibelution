@@ -6,11 +6,15 @@ import copy
 import hashlib
 import json
 import os
-import tomllib
 import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any
+
+try:
+    import tomllib
+except ImportError:  # pragma: no cover - Python < 3.11 compatibility
+    import toml as tomllib  # type: ignore[no-redef]
 
 from core.llm import assert_llm_compatibility
 

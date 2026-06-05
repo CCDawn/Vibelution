@@ -196,6 +196,28 @@ def test_web_control_token_endpoint_rejects_untrusted_origin():
     assert "origin" in response.json()["detail"].lower()
 
 
+
+def test_web_control_guard_rejects_untrusted_host_by_default():
+    guarded_client = TestClient(create_app(), base_url="http://192.168.20.30:8000")
+
+    response = guarded_client.get("/api/control-token")
+
+    assert response.status_code == 403
+    assert "host" in response.json()["detail"].lower()
+
+
+def test_web_control_guard_allows_configured_remote_host(monkeypatch):
+    monkeypatch.setenv("VIBELUTION_TRUSTED_WEB_HOSTS", "192.168.20.30")
+    guarded_client = TestClient(create_app(), base_url="http://192.168.20.30:8000")
+
+    response = guarded_client.get(
+        "/api/control-token",
+        headers={"Origin": "http://192.168.20.30:8000"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["controlToken"]
+
 def test_static_assets_allow_same_origin_referer_on_custom_port(tmp_path, monkeypatch):
     dist_dir = tmp_path / "web-dist"
     assets_dir = dist_dir / "assets"

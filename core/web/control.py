@@ -14,6 +14,7 @@ from starlette.responses import JSONResponse, Response
 
 CONTROL_TOKEN_HEADER = "X-Vibelution-Control-Token"
 CONTROL_TOKEN_ENV = "VIBELUTION_WEB_CONTROL_TOKEN"
+TRUSTED_WEB_HOSTS_ENV = "VIBELUTION_TRUSTED_WEB_HOSTS"
 
 _MUTATING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 _CONTROL_TOKEN = str(os.environ.get(CONTROL_TOKEN_ENV) or "").strip() or secrets.token_urlsafe(32)
@@ -46,6 +47,8 @@ def trusted_control_origins() -> set[str]:
         f"http://127.0.0.1:{backend_port}",
         f"http://localhost:{backend_port}",
     }
+    for host in _trusted_extra_hosts():
+        origins.add(f"http://{host}:{backend_port}")
     return {origin.rstrip("/") for origin in origins}
 
 
@@ -112,6 +115,8 @@ def _is_trusted_host(value: str) -> bool:
     host = _parse_hostname(value)
     if not host:
         return False
+    if host in _trusted_extra_hosts():
+        return True
     if host == "testserver":
         return True
     if host.lower() == "localhost":
@@ -163,3 +168,13 @@ def _parse_hostname(value: str) -> str:
         return ""
     parsed = urlparse(raw if "://" in raw else f"//{raw}")
     return str(parsed.hostname or "").strip().lower()
+
+
+def _trusted_extra_hosts() -> set[str]:
+    raw_value = str(os.environ.get(TRUSTED_WEB_HOSTS_ENV) or "")
+    hosts: set[str] = set()
+    for item in raw_value.replace(";", ",").split(","):
+        host = _parse_hostname(item)
+        if host:
+            hosts.add(host)
+    return hosts
