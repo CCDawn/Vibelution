@@ -30,8 +30,8 @@
         <section class="plan-hero">
           <div class="kicker">Research Flow Node 01</div>
           <h1>资料进入工作区</h1>
-          <p class="subtitle">建立稳定证据源，不把未确认信息混入候选知识链。</p>
-          <div class="tag-row"><span class="tag done">已规划</span><span class="tag">Source Intake Agent</span><span class="tag">独立计划页</span></div>
+          <p class="subtitle">建立稳定证据源，并把本地 PDF 转成可引用的页码锚点。</p>
+          <div class="tag-row"><span class="tag done">source-extraction 已落地</span><span class="tag">Source Intake Agent</span><span class="tag">独立计划页</span></div>
           <div class="diagram">
             <div class="flow-cell"><strong>输入</strong><span>用户提供的论文/PDF / 赛题 PDF</span></div>
             <div class="flow-cell"><strong>动作</strong><span>登记文件路径、资料类型、页码范围和来源可信度。</span></div>
@@ -52,15 +52,17 @@
 <li>补充资料</li>
 <li>挑战杯工作区路径</li></ul></article>
             <article class="plan-card"><h2>处理动作</h2><ul><li>登记文件路径、资料类型、页码范围和来源可信度。</li>
+<li>对本地 PDF source_manifest 运行 source-extraction，计算 sha256 并生成 pageAnchors 与 excerpt。</li>
 <li>区分允许分析、暂不分析、需要用户确认的资料。</li>
 <li>保留原始文件，不在资料入口阶段改写内容。</li></ul></article>
             <article class="plan-card"><h2>输出物</h2><ul><li>资料清单</li>
 <li>sourceFiles 引用</li>
+<li>sourceExtraction.pageAnchors</li>
 <li>Paper 原始来源节点</li></ul></article>
             <article class="plan-card"><h2>风险</h2><ul><li>资料来源不明</li>
-<li>PDF 页码不可追溯</li>
+<li>PDF 抽取失败</li>
 <li>联网搜索结果混入第一版</li></ul></article>
-            <article class="plan-card "><h2>未决事项</h2><ul><li>是否需要单独维护 source_manifest.json。</li></ul></article>
+            <article class="plan-card "><h2>未决事项</h2><ul><li>长 PDF 是否需要自动分批抽取与章节级拆分规则。</li></ul></article>
           </div>
         </section>
 
@@ -70,7 +72,7 @@
             <p class="hint">区分候选工作区、知识治理 Agent、正式 Team Knowledge 和正式知识图谱。</p>
           </div>
           <div class="status-grid">
-            <div class="status-item"><b>候选状态</b><span>已规划</span></div>
+            <div class="status-item"><b>候选状态</b><span>source-extraction 已落地</span></div>
             <div class="status-item"><b>记忆平台</b><span>不进入正式记忆库；只作为后续 paper_note 的 sourceFiles。</span></div>
             <div class="status-item"><b>图谱同步</b><span>可作为候选图谱的 Paper source 节点，不进入正式知识图谱。</span></div>
           </div>
@@ -85,22 +87,23 @@
       <div class="status-grid">
         <div class="status-item"><b>状态</b><span>source_registered</span></div>
         <div class="status-item"><b>功能岗位</b><span>Source Intake Agent</span></div>
-        <div class="status-item"><b>Agent 状态</b><span>可复用 research_broad / 待绑定挑战杯资料登记职责</span></div>
+        <div class="status-item"><b>Agent 状态</b><span>可复用 research_broad / source-extraction 后端已接入</span></div>
         <div class="status-item"><b>进入条件</b><span>用户提供 PDF、论文、赛题或补充资料；文件可在挑战杯工作区定位。</span></div>
-        <div class="status-item"><b>退出条件</b><span>每个资料项都有 id、path、type、sourceTrust、allowedForAnalysis 和 pageScope。</span></div>
+        <div class="status-item"><b>退出条件</b><span>每个 PDF 资料项都有 id、path、type、allowedForAnalysis、sha256、pageScope 和 sourceExtraction.pageAnchors。</span></div>
         <div class="status-item"><b>审核门禁</b><span>确认资料允许分析、来源可信度和是否纳入本轮。</span></div>
       </div>
       <div class="plan-grid">
-        <article class="plan-card"><h2>本步操作</h2><p class="hint">建立 source_manifest 记录，不改写原文，不自动混入联网资料。</p></article>
+        <article class="plan-card"><h2>本步操作</h2><p class="hint">建立 source_manifest 记录；对本地 PDF 运行 source-extraction，计算 sha256、生成 pageAnchors/excerpt，不改写原文，不自动混入联网资料。</p></article>
         <article class="plan-card"><h2>本地研究模型用法</h2><p class="hint">本地 9B 模型适合做标题/摘要/片段初筛，输出 relevanceScore、topicTags、excludeReason，不直接决定正式纳入。</p></article>
         <article class="plan-card"><h2>所需功能</h2><ul><li>本地资料登记</li>
 <li>source_manifest 写入</li>
 <li>文件路径/页码/来源可信度记录</li>
+<li>本地 PDF sha256/pageAnchors/excerpt 抽取</li>
 <li>可选 research_knowledge_query_tool 查重</li></ul></article>
         <article class="plan-card"><h2>工具/平台能力</h2><ul><li>research_knowledge_query_tool</li>
-<li>本地文件读取/PDF 解析能力（待接入流程）</li></ul></article>
-        <article class="plan-card"><h2>功能缺口</h2><p class="hint">需要候选资料 manifest 的落盘规则和 PDF 页码锚点提取能力。</p></article>
-        <article class="plan-card"><h2>失败回退</h2><p class="hint">路径缺失、来源不明或权限不清时停在 source_needs_confirmation。</p></article>
+<li>/api/teams/{teamId}/workflow-orchestration/candidates/{candidateId}/source-extraction</li></ul></article>
+        <article class="plan-card"><h2>功能缺口</h2><p class="hint">本地 PDF 页码锚点提取已接入 CandidateStore；长 PDF 自动分批、章节识别和非 PDF 资料解析仍待补。</p></article>
+        <article class="plan-card"><h2>失败回退</h2><p class="hint">路径缺失、来源不明、权限不清、抽取失败或解析器不可用时停在 source_needs_confirmation。</p></article>
       </div>
     </section>
 

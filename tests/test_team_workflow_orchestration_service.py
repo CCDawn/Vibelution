@@ -217,6 +217,89 @@ def test_candidate_store_validates_pdf_source_manifest(tmp_path, monkeypatch):
     assert report["summary"]["errorCount"] >= 2
 
 
+def test_source_extraction_updates_pdf_manifest_with_page_anchors(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    source_path = tmp_path / "sources" / "neuro.pdf"
+    source_path.parent.mkdir(parents=True)
+    source_path.write_bytes(b"%PDF-1.4\nfake local pdf bytes\n")
+
+    def fake_extract(path, *, page_scope, max_pages, max_chars_per_page):
+        assert path == source_path
+        assert page_scope == "1-2"
+        assert max_pages == 2
+        assert max_chars_per_page == 500
+        return [
+            {"type": "pdf_page", "id": "neuro-p1", "label": "p. 1", "page": 1, "text": "Neural evidence on page one."},
+            {"type": "pdf_page", "id": "neuro-p2", "label": "p. 2", "page": 2, "text": "Mechanism evidence on page two."},
+        ]
+
+    monkeypatch.setattr(team_workflow_orchestration_service, "_extract_pdf_page_anchors", fake_extract)
+    candidate = team_workflow_orchestration_service.register_candidate_source(
+        team["teamId"],
+        {
+            "title": "Local PDF",
+            "sourcePath": str(source_path),
+            "sourceKind": "pdf",
+            "allowedForAnalysis": False,
+            "createdByAgent": "Source Intake Agent",
+        },
+    )["candidate"]
+
+    response = team_workflow_orchestration_service.extract_candidate_source_pages(
+        team["teamId"],
+        candidate["candidateId"],
+        {
+            "createdByAgent": "Source Extraction Agent",
+            "allowedForAnalysis": True,
+            "pageScope": "1-2",
+            "maxPages": 2,
+            "maxCharsPerPage": 500,
+        },
+    )
+
+    extraction = response["sourceExtraction"]
+    assert response["validation"]["valid"] is True
+    assert response["candidate"]["currentState"] == "source_registered"
+    assert response["candidate"]["qualityStatus"] == "source_manifest_ready"
+    assert response["candidate"]["sha256"]
+    assert response["candidate"]["pageScope"] == "1-2"
+    assert extraction["status"] == "extracted"
+    assert len(extraction["pageAnchors"]) == 2
+    assert "[p. 1]" in extraction["excerpt"]
+    assert response["workflow"]["candidateStore"]["candidateCount"] == 1
+
+
+def test_source_extraction_failure_keeps_manifest_needing_confirmation(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    missing_path = tmp_path / "missing.pdf"
+    candidate = team_workflow_orchestration_service.register_candidate_source(
+        team["teamId"],
+        {
+            "title": "Missing PDF",
+            "sourcePath": str(missing_path),
+            "sourceKind": "pdf",
+            "allowedForAnalysis": True,
+            "sha256": "a" * 64,
+            "pageScope": "1",
+            "createdByAgent": "Source Intake Agent",
+        },
+    )["candidate"]
+
+    response = team_workflow_orchestration_service.extract_candidate_source_pages(
+        team["teamId"],
+        candidate["candidateId"],
+        {"createdByAgent": "Source Extraction Agent"},
+    )
+
+    assert response["sourceExtraction"]["status"] == "failed"
+    assert response["sourceExtraction"]["errorCode"] == "missing_file"
+    assert response["candidate"]["currentState"] == "source_needs_confirmation"
+    assert response["candidate"]["qualityStatus"] == "source_manifest_invalid"
+    assert {issue["code"] for issue in response["validation"]["issues"]} >= {"source_extraction_failed"}
+
+
 def test_candidate_store_lists_candidates_with_filters(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     team = team_service.create_team(name="挑战杯科研团队")

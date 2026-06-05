@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.29 - 2026-06-06
+
+- Added the Challenge Cup source-extraction API for local PDF `source_manifest` candidates, computing `sha256`, extracting page anchors and excerpts, and writing traceable `metadata.sourceExtraction` evidence back to CandidateStore.
+- Kept source extraction inside the candidate boundary: failed extraction leaves the source in `source_needs_confirmation`, and no formal Team Knowledge, RAG, or official graph writes happen.
+- Added `pypdf` as the runtime PDF text extraction dependency and updated the Challenge Cup flow HTML and technical plan to mark local PDF page-anchor extraction as landed while keeping automatic `paper_note` generation pending.
+
 ## 0.10.28 - 2026-06-05
 
 - Expanded `officialResearchGraph` into the read-only Memory Graph when requested, adding formal research reference nodes and `official_*` edges while preserving the default high-level graph.

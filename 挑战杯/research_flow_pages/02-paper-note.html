@@ -33,7 +33,7 @@
           <p class="subtitle">把资料转成可审查的论文/资料笔记候选。</p>
           <div class="tag-row"><span class="tag done">已规划</span><span class="tag">Paper Note Extraction Agent</span><span class="tag">独立计划页</span></div>
           <div class="diagram">
-            <div class="flow-cell"><strong>输入</strong><span>资料清单 / PDF 页码</span></div>
+            <div class="flow-cell"><strong>输入</strong><span>资料清单 / sourceExtraction.pageAnchors</span></div>
             <div class="flow-cell"><strong>动作</strong><span>生成 summary、keyFindings、methods、limitations。</span></div>
             <div class="flow-cell"><strong>输出</strong><span>paper_note_YYYYMMDD_NNN.json / 候选状态 draft</span></div>
             <div class="flow-cell"><strong>记忆/图谱</strong><span>进入候选图谱，可被 neuro_mechanism links 引用。</span></div>
@@ -48,11 +48,13 @@
           <div class="plan-grid">
             <article class="plan-card"><h2>目标</h2><p class="hint">从资料中提取背景、方法、关键发现、局限和引用位置。</p></article>
             <article class="plan-card"><h2>输入</h2><ul><li>资料清单</li>
+<li>sourceExtraction.pageAnchors</li>
 <li>PDF 页码</li>
 <li>论文片段</li>
 <li>补充备注</li></ul></article>
             <article class="plan-card"><h2>处理动作</h2><ul><li>生成 summary、keyFindings、methods、limitations。</li>
 <li>每条关键发现尽量绑定页码、章节或 citation。</li>
+<li>优先使用 sourceExtraction.excerpt 作为本地研究模型 evidence 输入。</li>
 <li>保留 uncertainty，避免把摘要写成确定事实。</li></ul></article>
             <article class="plan-card"><h2>输出物</h2><ul><li>paper_note_YYYYMMDD_NNN.json</li>
 <li>候选状态 draft</li>
@@ -98,8 +100,9 @@
 <li>citation anchors</li>
 <li>uncertainty 字段</li></ul></article>
         <article class="plan-card"><h2>工具/平台能力</h2><ul><li>research_knowledge_query_tool</li>
-<li>本地 PDF 解析/摘录能力（待接入流程）</li></ul></article>
-        <article class="plan-card"><h2>功能缺口</h2><p class="hint">paper_note schema 与页码引用校验已接入 CandidateStore；长文拆分规则和本地 PDF 页码摘录仍待接。</p></article>
+<li>sourceExtraction.excerpt</li>
+<li>本地研究模型 task/output API</li></ul></article>
+        <article class="plan-card"><h2>功能缺口</h2><p class="hint">paper_note schema 与页码引用校验已接入 CandidateStore；本地 PDF 页码摘录已可由 source-extraction 提供，长文拆分和自动生成 paper_note 仍待接。</p></article>
         <article class="plan-card"><h2>失败回退</h2><p class="hint">缺页码、缺来源或摘要过度推断时退回 paper_note_needs_revision。</p></article>
       </div>
     </section>
