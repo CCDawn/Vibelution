@@ -191,6 +191,88 @@ def test_launcher_action_passes_runtime_manager_process_protection(monkeypatch, 
     assert env["VIBELUTION_PROTECTED_PROCESS_IDS"] == "29960;31096"
 
 
+
+def test_launcher_command_uses_python_adapter_on_posix(monkeypatch, tmp_path):
+    launcher_path = tmp_path / "vibelution_launcher.py"
+    monkeypatch.setattr(workbench_controller.os, "name", "posix", raising=False)
+    monkeypatch.setattr(workbench_controller, "PYTHON_LAUNCHER_SCRIPT_PATH", launcher_path)
+    monkeypatch.setattr(workbench_controller.sys, "executable", "/usr/bin/python3")
+
+    args = workbench_controller._launcher_command_args("internal-start", no_browser=True)
+
+    assert args == [
+        "/usr/bin/python3",
+        str(launcher_path),
+        "--action",
+        "internal-start",
+        "--no-browser",
+    ]
+
+
+def test_launcher_command_keeps_powershell_adapter_on_windows(monkeypatch, tmp_path):
+    launcher_path = tmp_path / "vibelution_launcher.ps1"
+    monkeypatch.setattr(workbench_controller.os, "name", "nt", raising=False)
+    monkeypatch.setattr(workbench_controller, "LAUNCHER_SCRIPT_PATH", launcher_path)
+
+    args = workbench_controller._launcher_command_args("internal-stop", no_browser=True)
+
+    assert args == [
+        "powershell.exe",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        str(launcher_path),
+        "-Action",
+        "internal-stop",
+        "-NoBrowser",
+    ]
+
+
+def test_python_launcher_allows_lan_hosts_when_binding_wildcard(monkeypatch):
+    import importlib.util
+
+    launcher_path = constants.PROJECT_ROOT / "scripts" / "vibelution_launcher.py"
+    spec = importlib.util.spec_from_file_location("vibelution_launcher_for_test", launcher_path)
+    assert spec and spec.loader
+    launcher = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(launcher)
+
+    monkeypatch.delenv("VIBELUTION_TRUSTED_WEB_HOSTS", raising=False)
+    monkeypatch.setattr(launcher, "_local_lan_addresses", lambda: ["192.168.20.30"])
+
+    env = launcher._backend_environment("0.0.0.0")
+
+    assert env["VIBELUTION_TRUSTED_WEB_HOSTS"] == "192.168.20.30"
+
+
+def test_python_launcher_discovers_lan_address_from_udp_route(monkeypatch):
+    import importlib.util
+
+    launcher_path = constants.PROJECT_ROOT / "scripts" / "vibelution_launcher.py"
+    spec = importlib.util.spec_from_file_location("vibelution_launcher_for_udp_test", launcher_path)
+    assert spec and spec.loader
+    launcher = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(launcher)
+
+    class FakeSocket:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def connect(self, _target):
+            return None
+
+        def getsockname(self):
+            return ("192.168.20.30", 53124)
+
+    monkeypatch.setattr(launcher.socket, "getaddrinfo", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(launcher.socket, "socket", lambda *_args, **_kwargs: FakeSocket())
+
+    assert launcher._local_lan_addresses() == ["192.168.20.30"]
+
 def test_launcher_error_detail_prioritizes_stderr_over_progress_stdout():
     detail = daemon._launcher_error_detail(
         subprocess.CompletedProcess(

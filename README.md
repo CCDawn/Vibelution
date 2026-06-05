@@ -67,7 +67,10 @@ Vibelution/
 
 ### 1. 首次打开自动准备环境
 
-从桌面入口或 `scripts/vibelution_launcher.ps1 start` 首次打开时，launcher 会自动准备项目内运行环境：
+从桌面入口或平台 launcher 首次打开时，launcher 会自动准备项目内运行环境：
+
+- Windows 桌面/托管窗口入口：`powershell -ExecutionPolicy Bypass -File scripts/vibelution_launcher.ps1 -Action start`
+- macOS/Linux 第一阶段 headless 入口：`python scripts/vibelution_launcher.py --action start --no-browser`
 
 - 先检查系统级前置依赖：Python、Node.js/npm，以及打开窗口时需要的 Microsoft Edge。
 - 缺少 `.venv` 时用系统 `python` 创建项目虚拟环境。
@@ -130,6 +133,16 @@ $env:MINIMAX_API_KEY="your-api-key"
 ## 启动方式
 
 ### Web Workbench
+
+统一 launcher 入口：
+
+```bash
+# Windows
+powershell -ExecutionPolicy Bypass -File scripts/vibelution_launcher.ps1 -Action start
+
+# macOS/Linux headless adapter
+python scripts/vibelution_launcher.py --action start --no-browser
+```
 
 后端与静态前端入口：
 

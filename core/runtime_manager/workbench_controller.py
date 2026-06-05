@@ -7,6 +7,7 @@ import locale
 import os
 import socket
 import subprocess
+import sys
 import tempfile
 import urllib.error
 import urllib.parse
@@ -16,7 +17,14 @@ from typing import Any
 
 from config.workbench import configured_backend_port
 
-from .constants import DEFAULT_HEALTH_URL, DEFAULT_URL, LAUNCHER_SCRIPT_PATH, LAUNCHER_STATE_PATH, PROJECT_ROOT
+from .constants import (
+    DEFAULT_HEALTH_URL,
+    DEFAULT_URL,
+    LAUNCHER_SCRIPT_PATH,
+    LAUNCHER_STATE_PATH,
+    PROJECT_ROOT,
+    PYTHON_LAUNCHER_SCRIPT_PATH,
+)
 from .process_inventory import list_repo_runtime_processes
 
 
@@ -288,19 +296,34 @@ def _read_capture_file(path: str) -> str:
     return raw.decode(encoding, errors="replace")
 
 
-def run_launcher_action(action: str, *, no_browser: bool = False) -> subprocess.CompletedProcess[str]:
+def _launcher_command_args(action: str, *, no_browser: bool = False) -> list[str]:
+    if os.name == "nt":
+        args = [
+            "powershell.exe",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(LAUNCHER_SCRIPT_PATH),
+            "-Action",
+            str(action),
+        ]
+        if no_browser:
+            args.append("-NoBrowser")
+        return args
     args = [
-        "powershell.exe",
-        "-NoProfile",
-        "-ExecutionPolicy",
-        "Bypass",
-        "-File",
-        str(LAUNCHER_SCRIPT_PATH),
-        "-Action",
+        sys.executable,
+        str(PYTHON_LAUNCHER_SCRIPT_PATH),
+        "--action",
         str(action),
     ]
     if no_browser:
-        args.append("-NoBrowser")
+        args.append("--no-browser")
+    return args
+
+
+def run_launcher_action(action: str, *, no_browser: bool = False) -> subprocess.CompletedProcess[str]:
+    args = _launcher_command_args(action, no_browser=no_browser)
     env = os.environ.copy()
     env["VIBELUTION_PORT"] = str(configured_backend_port())
     env["VIBELUTION_PROTECTED_PROCESS_IDS"] = ";".join(
