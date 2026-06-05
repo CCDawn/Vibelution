@@ -2206,6 +2206,10 @@ export type AgentRuntimeStatus = {
   sessionId: string;
   summary: string;
   updatedAt: string;
+  staleRuntimeRunCount?: number;
+  latestHistoricalRunId?: string;
+  latestHistoricalSessionId?: string;
+  latestHistoricalUpdatedAt?: string;
 };
 
 export type AgentPersonaProfile = {

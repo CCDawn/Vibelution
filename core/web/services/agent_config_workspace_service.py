@@ -330,11 +330,12 @@ def _derive_health(
                     )
                 continue
             if model_id not in model_refs:
+                _record_unresolved_model_reference(agent, slot_key=slot_key, model_id=model_id)
                 issues.append(
                     _agent_issue(
                         agent,
                         "blocking" if bool(slot.get("required")) else "warning",
-                        f"missing_llm_slot_model_ref_{slot_key}",
+                        f"unresolved_model_reference_{slot_key}",
                         f"{slot_label}不存在",
                         f"{slot_key} 槽位引用的模型库键 {model_id} 不存在或已被删除。",
                     )
@@ -737,8 +738,42 @@ def _runtime_status_for_agent(agent: dict[str, Any]) -> dict[str, Any]:
     if not snapshots:
         return base
     snapshots.sort(key=_runtime_snapshot_sort_key, reverse=True)
-    active = next((item for item in snapshots if _runtime_state_from_status(str(item.get("status") or item.get("currentPhase") or "")) == "running"), None)
-    latest = active or snapshots[0]
+    direct_session_id = str(agent.get("directSessionId") or "").strip()
+    current_snapshots = (
+        [item for item in snapshots if _runtime_snapshot_session_id(item) == direct_session_id]
+        if direct_session_id
+        else list(snapshots)
+    )
+    stale_snapshots = [item for item in snapshots if item not in current_snapshots] if direct_session_id else []
+    if not current_snapshots:
+        if stale_snapshots:
+            latest_stale = stale_snapshots[0]
+            _record_stale_runtime_snapshot_ignored(agent, latest_stale, stale_count=len(stale_snapshots))
+            return {
+                **base,
+                "reason": "no_current_direct_session_runs",
+                "staleRuntimeRunCount": len(stale_snapshots),
+                "latestHistoricalRunId": str(latest_stale.get("runId") or "").strip(),
+                "latestHistoricalSessionId": _runtime_snapshot_session_id(latest_stale),
+                "latestHistoricalUpdatedAt": str(
+                    latest_stale.get("updatedAt")
+                    or latest_stale.get("finishedAt")
+                    or latest_stale.get("endedAt")
+                    or latest_stale.get("startedAt")
+                    or latest_stale.get("createdAt")
+                    or ""
+                ).strip(),
+            }
+        return base
+    active = next(
+        (
+            item
+            for item in current_snapshots
+            if _runtime_state_from_status(str(item.get("status") or item.get("currentPhase") or "")) == "running"
+        ),
+        None,
+    )
+    latest = active or current_snapshots[0]
     state = _runtime_state_from_status(str(latest.get("status") or latest.get("currentPhase") or ""))
     return {
         "state": state,
@@ -746,7 +781,7 @@ def _runtime_status_for_agent(agent: dict[str, Any]) -> dict[str, Any]:
         "reason": str(latest.get("status") or latest.get("currentPhase") or state).strip() or state,
         "runId": str(latest.get("runId") or "").strip(),
         "runKind": str(latest.get("runKind") or "").strip(),
-        "sessionId": str(latest.get("sessionId") or latest.get("parentSessionId") or agent.get("directSessionId") or "").strip(),
+        "sessionId": _runtime_snapshot_session_id(latest) or direct_session_id,
         "summary": str(latest.get("summary") or "").strip(),
         "updatedAt": str(
             latest.get("updatedAt")
@@ -757,6 +792,7 @@ def _runtime_status_for_agent(agent: dict[str, Any]) -> dict[str, Any]:
             or agent.get("updatedAt")
             or ""
         ).strip(),
+        "staleRuntimeRunCount": len(stale_snapshots),
     }
 
 
@@ -816,6 +852,42 @@ def _runtime_snapshot_sort_key(snapshot: dict[str, Any]) -> tuple[str, str, str,
         str(snapshot.get("finishedAt") or snapshot.get("endedAt") or ""),
         str(snapshot.get("startedAt") or snapshot.get("createdAt") or ""),
         str(snapshot.get("runId") or ""),
+    )
+
+
+def _runtime_snapshot_session_id(snapshot: dict[str, Any]) -> str:
+    return str(snapshot.get("sessionId") or snapshot.get("parentSessionId") or "").strip()
+
+
+def _record_stale_runtime_snapshot_ignored(agent: dict[str, Any], snapshot: dict[str, Any], *, stale_count: int) -> None:
+    record_runtime_scene_event(
+        "agent_config",
+        "runtime_status",
+        "agent_config.runtime_status_stale_run_ignored",
+        message="Ignored stale Agent run snapshot while deriving current direct-session runtime status.",
+        fields={
+            "agentId": str(agent.get("agentId") or "").strip(),
+            "directSessionId": str(agent.get("directSessionId") or "").strip(),
+            "runId": str(snapshot.get("runId") or "").strip(),
+            "snapshotSessionId": _runtime_snapshot_session_id(snapshot),
+            "staleRuntimeRunCount": max(0, int(stale_count or 0)),
+        },
+    )
+
+
+def _record_unresolved_model_reference(agent: dict[str, Any], *, slot_key: str, model_id: str) -> None:
+    record_runtime_scene_event(
+        "agent_config",
+        "model_binding",
+        "agent_config.unresolved_model_reference",
+        message="Agent LLM binding references a model id that is not present in the model library.",
+        level="warning",
+        fields={
+            "agentId": str(agent.get("agentId") or "").strip(),
+            "agentCode": str(agent.get("agentCode") or "").strip(),
+            "slot": str(slot_key or "").strip(),
+            "modelId": str(model_id or "").strip(),
+        },
     )
 
 

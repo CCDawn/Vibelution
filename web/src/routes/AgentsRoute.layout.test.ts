@@ -88,7 +88,9 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("agentLlmSlots(workspace)");
     expect(routeSource).toContain("workspace?.agentLlmSlots?.length");
     expect(routeSource).toContain("key: model.modelId");
-    expect(routeSource).toContain("agentModelLabel(agent.dialogueModel)");
+    expect(routeSource).toContain("agentDialogueModelDisplay(agent, lang)");
+    expect(routeSource).toContain("unresolved_model_reference_dialogue");
+    expect(routeSource).toContain("模型库未注册");
     expect(routeSource).toContain("agentModelChoices.map((model)");
     expect(routeSource).toContain("value={agentLlmSlotModelId(createDraft.llmBindings, FALLBACK_AGENT_LLM_SLOTS[0])}");
     expect(routeSource).toContain("value={agentLlmSlotModelId(configDraft.llmBindings, slot)}");
