@@ -101,7 +101,8 @@ def supervised_agent_bindings() -> dict[str, dict[str, Any]]:
 
     raw_slots = _raw_supervised_mode_slots()
     raw_registry = _load_raw_agent_registry_state()
-    _assert_raw_supervised_slot_dialogue_bindings(raw_slots, raw_registry)
+    model_library_ids = _configured_model_library_ids()
+    _assert_raw_supervised_slot_dialogue_bindings(raw_slots, raw_registry, model_library_ids=model_library_ids)
     ensure_supervised_agent_instances()
     raw_agents = {
         str(agent.get("agentId") or "").strip(): agent
@@ -143,6 +144,16 @@ def supervised_agent_bindings() -> dict[str, dict[str, Any]]:
             raise SupervisedAgentBindingError(
                 f"Supervised role Agent is missing required dialogue LLM binding: {role} ({agent_id})"
             )
+        if model_library_ids and dialogue_model_id not in model_library_ids:
+            _record_supervised_binding_failure(
+                role,
+                agent_id=agent_id,
+                reason="unresolved_dialogue_model_reference",
+                model_id=dialogue_model_id,
+            )
+            raise SupervisedAgentBindingError(
+                f"Supervised role Agent dialogue model is not present in model library: {role} ({agent_id}) modelId={dialogue_model_id}"
+            )
         bindings[role] = {
             "agentId": str(agent.get("agentId") or "").strip(),
             "agentCode": str(agent.get("agentCode") or "").strip(),
@@ -172,7 +183,24 @@ def _load_raw_agent_registry_state() -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
-def _assert_raw_supervised_slot_dialogue_bindings(raw_slots: dict[str, str], raw_registry: dict[str, Any]) -> None:
+def _configured_model_library_ids() -> set[str]:
+    try:
+        from config.settings import get_config
+
+        model_library = getattr(get_config().llm, "model_library", {}) or {}
+    except Exception:
+        return set()
+    if not isinstance(model_library, dict):
+        return set()
+    return {str(model_id or "").strip() for model_id in model_library.keys() if str(model_id or "").strip()}
+
+
+def _assert_raw_supervised_slot_dialogue_bindings(
+    raw_slots: dict[str, str],
+    raw_registry: dict[str, Any],
+    *,
+    model_library_ids: set[str] | None = None,
+) -> None:
     if not raw_slots:
         return
     raw_agents = {
@@ -190,7 +218,18 @@ def _assert_raw_supervised_slot_dialogue_bindings(raw_slots: dict[str, str], raw
             continue
         raw_bindings = agent.get("llmBindings") if isinstance(agent.get("llmBindings"), dict) else {}
         dialogue = raw_bindings.get("dialogue") if isinstance(raw_bindings.get("dialogue"), dict) else {}
-        if str(dialogue.get("modelId") or "").strip():
+        model_id = str(dialogue.get("modelId") or "").strip()
+        if model_id:
+            if model_library_ids and model_id not in model_library_ids:
+                _record_supervised_binding_failure(
+                    normalized_role,
+                    agent_id=normalized_agent_id,
+                    reason="unresolved_dialogue_model_reference",
+                    model_id=model_id,
+                )
+                raise SupervisedAgentBindingError(
+                    f"Supervised role Agent dialogue model is not present in model library: {normalized_role} ({normalized_agent_id}) modelId={model_id}"
+                )
             continue
         _record_supervised_binding_failure(
             normalized_role,
@@ -232,7 +271,7 @@ def _supervised_slot_warning(mode_payload: dict[str, Any], role: str) -> dict[st
     return None
 
 
-def _record_supervised_binding_failure(role: str, *, agent_id: str, reason: str) -> None:
+def _record_supervised_binding_failure(role: str, *, agent_id: str, reason: str, model_id: str = "") -> None:
     try:
         record_runtime_scene_event(
             "agent_runtime",
@@ -246,6 +285,7 @@ def _record_supervised_binding_failure(role: str, *, agent_id: str, reason: str)
                 "slot": str(role or "").strip(),
                 "roleKey": str(role or "").strip(),
                 "agentId": str(agent_id or "").strip(),
+                "modelId": str(model_id or "").strip(),
                 "source": "ModeBinding.slots",
                 "reason": str(reason or "").strip(),
             },

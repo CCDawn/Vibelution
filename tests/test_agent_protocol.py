@@ -312,7 +312,7 @@ class TestToolMessageFlow:
         assert agent._last_llm_failure_attempts == 5
         assert agent._last_llm_failure_max_attempts == 5
 
-    def test_invoke_llm_retries_capability_error_without_tools(self, monkeypatch):
+    def test_invoke_llm_stops_on_tool_calling_capability_error(self, monkeypatch):
         calls = []
 
         class DummyContext:
@@ -330,15 +330,12 @@ class TestToolMessageFlow:
                 return None
 
         class DummyLLM:
-            def __init__(self, *, with_tools: bool):
-                self.with_tools = with_tools
+            def __init__(self):
                 self.profile_id = "primary"
 
             def invoke(self, _msgs):
-                calls.append(self.with_tools)
-                if self.with_tools:
-                    raise LLMError("capability_error", "profile `primary` 不支持 tool calling", retryable=False)
-                return SimpleNamespace(content="ok", tool_calls=[])
+                calls.append("with_tools")
+                raise LLMError("capability_error", "profile `primary` 不支持 tool calling", retryable=False)
 
         monkeypatch.setattr(agent_module, "get_ui", lambda: DummyUI())
         monkeypatch.setattr(agent_module, "logger", SimpleNamespace(log_error=lambda *_args, **_kwargs: None))
@@ -348,20 +345,20 @@ class TestToolMessageFlow:
             lambda *args, **kwargs: SimpleNamespace(
                 category="capability_error",
                 retryable=False,
-                action="disable_tools",
-                user_message="当前模型不支持 tool calling",
+                action="fail_fast",
+                user_message="profile `primary` 不支持 tool calling",
                 wait_seconds=0,
-                stop_current_turn=False,
+                stop_current_turn=True,
                 disable_streaming=False,
-                disable_tools=True,
+                disable_tools=False,
                 request_context_compression=False,
                 fallback_profile_id=None,
             ),
         )
 
         agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
-        agent.llm_with_tools = DummyLLM(with_tools=True)
-        agent._base_llm = DummyLLM(with_tools=False)
+        agent.llm_with_tools = DummyLLM()
+        agent._base_llm = DummyLLM()
         agent._bound_llm_cache = {}
         agent.key_tools = []
         agent.key_tool_maps = set()
@@ -381,9 +378,11 @@ class TestToolMessageFlow:
 
         result = agent._invoke_llm([AIMessage(content="hello")])
 
-        assert result.content == "ok"
-        assert calls == [True, False]
+        assert result is None
+        assert calls == ["with_tools"]
         assert agent._last_llm_error_category == "capability_error"
+        assert agent._last_llm_recovery_action == "fail_fast"
+        assert agent._last_llm_error_message == "capability_error: profile `primary` 不支持 tool calling"
 
     def test_publish_llm_retry_status_uses_outer_reconnect_attempts(self, monkeypatch):
         published = []

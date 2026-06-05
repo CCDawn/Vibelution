@@ -245,8 +245,8 @@ def test_git_commit_message_endpoint_generates_ai_draft(monkeypatch):
         "load_public_config",
         lambda: {
             "llm": {
-                "profiles": {
-                    "primary": {
+                "model_library": {
+                    "local_commit_model": {
                         "provider": {
                             "kind": "local",
                             "api_key_env": "",
@@ -259,23 +259,18 @@ def test_git_commit_message_endpoint_generates_ai_draft(monkeypatch):
                         "contract": "basic_chat",
                         "strict_compatibility": False,
                     },
+                },
+                "profiles": {
+                    "primary": {
+                        "model_ref": "local_commit_model",
+                    },
                     "subagent_explorer": {
-                        "provider": {
-                            "kind": "local",
-                            "api_key_env": "",
-                            "base_url": "http://localhost:11434/v1",
-                            "compat_mode": "openai",
-                            "requires_api_key": False,
-                            "context_window": 65536,
-                        },
-                        "model": "local-model",
-                        "contract": "basic_chat",
-                        "strict_compatibility": False,
+                        "model_ref": "local_commit_model",
                     },
                 }
             },
             "git": {
-                "commit_message_profile": "primary",
+                "commit_message_model_ref": "local_commit_model",
                 "commit_message_prompt": "Summary: {summary}\nFiles: {files}\nDiff: {diff}",
             },
         },
@@ -289,15 +284,16 @@ def test_git_commit_message_endpoint_generates_ai_draft(monkeypatch):
 
     response = client.post(
         "/api/git/commit-message",
-        json={"paths": ["web/src/routes/GitRoute.tsx"], "profileId": "subagent_explorer"},
+        json={"paths": ["web/src/routes/GitRoute.tsx"], "modelId": "local_commit_model"},
     )
 
     assert response.status_code == 200, response.json()
     payload = response.json()
     assert payload["message"] == "feat: add git commit controls"
-    assert payload["profileId"] == "subagent_explorer"
+    assert payload["modelId"] == "local_commit_model"
+    assert payload["profileId"] == git_status_service.GIT_COMMIT_MESSAGE_PROFILE_ID
     assert payload["files"] == ["web/src/routes/GitRoute.tsx"]
-    assert captured_profiles == ["subagent_explorer"]
+    assert captured_profiles == [git_status_service.GIT_COMMIT_MESSAGE_PROFILE_ID]
 
 
 def test_git_commit_endpoint_rejects_empty_message():

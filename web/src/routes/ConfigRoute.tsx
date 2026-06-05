@@ -335,10 +335,8 @@ export const CONFIG_COPY = {
     modelEditorEdit: "编辑模型",
     modelCenterAccounts: "服务商账号",
     modelCenterInventory: "模型库存",
-    modelCenterUsage: "使用位置",
     modelCenterHealth: "状态",
     modelCenterModels: "模型",
-    modelCenterBindings: "引用",
     modelCenterIssues: "异常",
     modelCenterCapabilityIssues: "需关注",
     modelCenterActions: "操作",
@@ -348,9 +346,6 @@ export const CONFIG_COPY = {
     modelCenterAccountKey: "密钥",
     modelCenterAccountHost: "地址",
     modelCenterNoUsage: "暂未被使用",
-    modelCenterUsageCount: "处使用",
-    modelCenterUsageMore: "更多",
-    modelCenterUnresolvedUsage: "有使用位置指向了不存在的模型",
     modelScenario: "新增方式",
     modelScenarioChat: "聊天 Agent",
     modelScenarioRelay: "中转站模型",
@@ -381,8 +376,8 @@ export const CONFIG_COPY = {
     modelKeyInput: "API Key",
     keyStorageHint: "填写后先进入本次修改；点击“保存到 config.toml”时才会写入本机用户级环境变量。",
     keyEnvAdvancedHint: "模型密钥变量名由模型 ID 唯一生成并只读展示；真正填写的是 API Key，保存时写入这个用户级环境变量。服务商默认变量仅作兼容来源展示，不作为新增密钥入口。",
-    deleteModelHint: "删除模型会同步清理该模型唯一绑定的环境密钥，并把使用它的模型绑定标记为未配置。",
-    deleteModelConfirm: "确认删除这个模型？这会清理它绑定的环境密钥，并把正在使用它的模型绑定标记为未配置。",
+    deleteModelHint: "删除模型会同步清理该模型唯一绑定的环境密钥；Agent 与工具的模型选择请在各自管理页调整。",
+    deleteModelConfirm: "确认删除这个模型？这会清理它绑定的环境密钥，并从模型库移除该资产。",
     keyLocation: "密钥存放位置",
     keyLocationHint: "这是系统环境变量名，不是要填写的 API Key。",
     baseUrl: "基础地址",
@@ -437,7 +432,7 @@ export const CONFIG_COPY = {
     keyClearPending: "待清除",
     keyMissing: "缺失",
     sourceLibrary: "模型库",
-    sourceProfileGenerated: "来自当前模型绑定",
+    sourceProfileGenerated: "历史导入",
     requiredModelMissing: "未设置可用模型",
     noBlocking: "当前没有阻塞问题。",
     noWarnings: "当前没有警告。",
@@ -593,10 +588,8 @@ export const CONFIG_COPY = {
     modelEditorEdit: "Edit model",
     modelCenterAccounts: "Provider accounts",
     modelCenterInventory: "Model inventory",
-    modelCenterUsage: "Usage",
     modelCenterHealth: "Health",
     modelCenterModels: "Models",
-    modelCenterBindings: "References",
     modelCenterIssues: "Issues",
     modelCenterCapabilityIssues: "Attention",
     modelCenterActions: "Actions",
@@ -606,9 +599,6 @@ export const CONFIG_COPY = {
     modelCenterAccountKey: "key",
     modelCenterAccountHost: "host",
     modelCenterNoUsage: "not used yet",
-    modelCenterUsageCount: "uses",
-    modelCenterUsageMore: "more",
-    modelCenterUnresolvedUsage: "Some usages point to a missing model",
     modelScenario: "Add as",
     modelScenarioChat: "Chat agent",
     modelScenarioRelay: "Relay model",
@@ -639,8 +629,8 @@ export const CONFIG_COPY = {
     modelKeyInput: "API key",
     keyStorageHint: "This is staged first. It is written to the local user environment only when you save to config.toml.",
     keyEnvAdvancedHint: "The model key variable is uniquely generated from the model ID and shown read-only. Enter the API key value; saving writes it to this user environment variable. The provider default variable is compatibility-only display, not a new key entry point.",
-    deleteModelHint: "Deleting a model also clears the unique environment key bound to that model and marks affected model bindings as unconfigured.",
-    deleteModelConfirm: "Delete this model? This clears its bound environment key and marks model bindings using it as unconfigured.",
+    deleteModelHint: "Deleting a model also clears the unique environment key bound to that model. Adjust Agent and tool model choices in their own management pages.",
+    deleteModelConfirm: "Delete this model? This clears its bound environment key and removes the asset from the model library.",
     keyLocation: "Key storage",
     keyLocationHint: "This is the system environment variable name, not the API key value.",
     baseUrl: "Base URL",
@@ -695,7 +685,7 @@ export const CONFIG_COPY = {
     keyClearPending: "clear pending",
     keyMissing: "missing",
     sourceLibrary: "model library",
-    sourceProfileGenerated: "from current model binding",
+    sourceProfileGenerated: "legacy import",
     requiredModelMissing: "No usable model selected",
     noBlocking: "No blocking issues right now.",
     noWarnings: "No warnings right now.",
@@ -837,7 +827,7 @@ function buildConfigSidebarGroups(copy: ConfigCopy): ConfigSidebarGroup[] {
       id: "tooling-diagnostics",
       title: copy.groupToolingTitle,
       summary: copy.groupToolingSummary,
-      memberSectionIds: ["health-diagnostics", "tools", "git-commit-profile", "git-commit-prompt", "security", "network", "log", "parser", "debug"],
+      memberSectionIds: ["health-diagnostics", "tools", "git-commit-model", "git-commit-prompt", "security", "network", "log", "parser", "debug"],
     },
   ];
 }
@@ -2346,20 +2336,8 @@ export function ConfigRoute() {
     () =>
       deriveModelCenterSummary({
         modelOptions,
-        profiles: workspace?.profileCards ?? [],
-        publicConfig: draftConfig ?? workspace?.publicConfig ?? {},
-        labels: {
-          chat: copy.profileGroupChat,
-          support: copy.profileGroupSupport,
-          subagents: copy.profileGroupSubagents,
-          evolution: copy.profileGroupEvolution,
-          research: copy.profileGroupResearch,
-          other: copy.profileGroupOther,
-          image2Tool: copy.image2ToolUsage,
-          gitCommitModel: copy.gitCommitModelUsage,
-        },
       }),
-    [copy, draftConfig, modelOptions, workspace?.profileCards, workspace?.publicConfig],
+    [modelOptions],
   );
   const modelCenterRows = useMemo(
     () => deriveModelCenterInventoryRows(modelOptions, modelCenterSummary),
@@ -2382,7 +2360,7 @@ export function ConfigRoute() {
         row.apiKeyState === "missing" ||
         row.apiKeyState === "clear_pending" ||
         row.imageInputStatus !== "supported",
-    ).length + modelCenterSummary.unresolvedUsageCount;
+    ).length;
   const modelDiscoveryAvailable = canDiscoverModelsForProvider(modelEditor.provider);
 
   useEffect(() => {
@@ -3354,7 +3332,6 @@ export function ConfigRoute() {
           <div className={styles.modelCenterSummaryBar}>
             <span><strong>{modelCenterRows.length}</strong> {copy.modelCenterModels}</span>
             <span><strong>{modelCenterSummary.accounts.length}</strong> {copy.modelCenterAccounts}</span>
-            <span><strong>{modelCenterSummary.usages.length}</strong> {copy.modelCenterBindings}</span>
             <span className={modelCapabilityIssueCount ? styles.summaryBarWarning : undefined}>
               <strong>{modelCapabilityIssueCount}</strong> {copy.modelCenterCapabilityIssues}
             </span>

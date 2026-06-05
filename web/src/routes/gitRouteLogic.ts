@@ -45,10 +45,10 @@ export function formatGitDateTime(value: string, locale: string) {
   }).format(date);
 }
 
-export function configuredGitProfileId(workspace?: ConfigWorkspace) {
+export function configuredGitModelId(workspace?: ConfigWorkspace) {
   const gitConfig = workspace?.publicConfig?.git;
   if (!gitConfig || typeof gitConfig !== "object" || Array.isArray(gitConfig)) {
     return "";
   }
-  return String((gitConfig as Record<string, unknown>).commit_message_profile ?? "").trim();
+  return String((gitConfig as Record<string, unknown>).commit_message_model_ref ?? "").trim();
 }

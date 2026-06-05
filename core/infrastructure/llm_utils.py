@@ -158,7 +158,7 @@ def parse_xml_tool_calls(content: str) -> list:
     Returns:
         [{"name": "tool_name", "args": {"arg1": "value1"}, "id": "xml_0"}, ...]
     """
-    if '<invoke' not in content:
+    if '<invoke' not in content and '<tool_call' not in content:
         return []
 
     tool_calls = []
@@ -183,6 +183,29 @@ def parse_xml_tool_calls(content: str) -> list:
                 continue
             args[param_name] = (pm.group(2) or "").strip()
         tool_calls.append({"name": tool_name, "args": args, "id": f"xml_{i}"})
+
+    tool_call_pattern = re.compile(
+        r'<tool_call\b[^>]*>\s*<function\b[^>]*>(.*?)</function>\s*</tool_call>',
+        re.DOTALL | re.IGNORECASE,
+    )
+    offset = len(tool_calls)
+    for i, m in enumerate(tool_call_pattern.finditer(content)):
+        payload_text = (m.group(1) or "").strip()
+        if not payload_text:
+            continue
+        try:
+            payload = json.loads(payload_text)
+        except (json.JSONDecodeError, ValueError, TypeError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+        tool_name = str(payload.get("name") or "").strip()
+        if not tool_name:
+            continue
+        args = payload.get("arguments")
+        if not isinstance(args, dict):
+            args = {}
+        tool_calls.append({"name": tool_name, "args": args, "id": f"xml_{offset + i}"})
 
     return tool_calls
 

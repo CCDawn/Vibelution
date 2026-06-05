@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { ConfigWorkspace, GitStatusFile } from "../api/types";
 import {
-  configuredGitProfileId,
+  configuredGitModelId,
   displayGitPath,
   formatGitDateTime,
   gitFileName,
@@ -47,18 +47,18 @@ describe("gitRouteLogic", () => {
     expect(formatGitDateTime("2026-05-21T10:00:00+08:00", "en-US")).toContain("05/21");
   });
 
-  it("reads the configured git commit profile defensively", () => {
+  it("reads the configured git commit model defensively", () => {
     const workspace = {
       publicConfig: {
         git: {
-          commit_message_profile: " primary ",
+          commit_message_model_ref: " relay_openai_gpt_5_5 ",
         },
       },
     } as unknown as ConfigWorkspace;
 
-    expect(configuredGitProfileId(workspace)).toBe("primary");
-    expect(configuredGitProfileId({ publicConfig: { git: [] } } as unknown as ConfigWorkspace)).toBe("");
-    expect(configuredGitProfileId(undefined)).toBe("");
+    expect(configuredGitModelId(workspace)).toBe("relay_openai_gpt_5_5");
+    expect(configuredGitModelId({ publicConfig: { git: [] } } as unknown as ConfigWorkspace)).toBe("");
+    expect(configuredGitModelId(undefined)).toBe("");
   });
 
   it("keeps filter type names explicit", () => {
