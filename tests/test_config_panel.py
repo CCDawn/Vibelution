@@ -1306,6 +1306,16 @@ def test_validate_required_llm_profiles_blocks_missing_models():
         _validate_required_llm_profiles(public_config, "zh")
 
 
+def test_validate_required_llm_profiles_allows_non_primary_missing_models():
+    public_config = load_public_config()
+    public_config["llm"]["profiles"]["mental_model"] = {
+        "model_ref": UNCONFIGURED_MODEL_REF,
+        "overrides": {},
+    }
+
+    _validate_required_llm_profiles(public_config, "zh")
+
+
 def test_model_library_api_key_writes_user_env_without_persisting_secret(monkeypatch):
     public_config = add_llm_model(
         load_public_config(),

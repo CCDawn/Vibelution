@@ -11947,6 +11947,57 @@ def test_config_workspace_draft_delete_model_marks_profiles_unconfigured(monkeyp
     assert next(item for item in payload["profileCards"] if item["profileId"] == "primary")["requiredModelMissing"] is True
 
 
+def test_config_workspace_apply_allows_deleted_non_primary_profile_model(monkeypatch):
+    public_config = copy.deepcopy(load_public_config())
+    public_config["llm"]["profiles"]["primary"] = {
+        "model_ref": "deepseek_v4_pro",
+        "overrides": {},
+    }
+    public_config["llm"]["profiles"]["mental_model"] = {
+        "model_ref": "relay_openai_gpt_5_5",
+        "overrides": {},
+    }
+
+    saved_configs = []
+    scene_events = []
+    monkeypatch.setattr(config_service, "load_public_config", lambda: copy.deepcopy(public_config))
+    monkeypatch.setattr(config_service, "save_public_config", lambda payload: saved_configs.append(copy.deepcopy(payload)))
+    monkeypatch.setattr(config_service, "reload_config", lambda path: config_service.build_effective_config(saved_configs[-1]))
+    monkeypatch.setattr(
+        config_service,
+        "_record_config_scene_event",
+        lambda phase, event_code, **kwargs: scene_events.append((phase, event_code, kwargs)),
+    )
+
+    delete_response = client.post(
+        "/api/config/draft/delete-model",
+        json={
+            "publicConfig": public_config,
+            "draftMeta": {},
+            "baseHash": public_config_hash(public_config),
+            "modelId": "relay_openai_gpt_5_5",
+        },
+    )
+
+    assert delete_response.status_code == 200, delete_response.json()
+    draft_payload = delete_response.json()
+    assert draft_payload["publicConfig"]["llm"]["profiles"]["mental_model"]["model_ref"] == UNCONFIGURED_MODEL_REF
+
+    apply_response = client.put(
+        "/api/config/apply",
+        json={
+            "publicConfig": draft_payload["publicConfig"],
+            "draftMeta": draft_payload["draftMeta"],
+            "baseHash": public_config_hash(public_config),
+        },
+    )
+
+    assert apply_response.status_code == 200, apply_response.json()
+    assert saved_configs
+    assert "relay_openai_gpt_5_5" not in saved_configs[-1]["llm"]["model_library"]
+    assert any(event_code == "config.llm_profiles.optional_missing_allowed" for _, event_code, _ in scene_events)
+
+
 def test_config_open_environment_opens_system_ui_without_returning_keys(monkeypatch):
     launched_commands = []
     focused_windows = []
