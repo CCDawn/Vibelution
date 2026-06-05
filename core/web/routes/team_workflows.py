@@ -21,7 +21,9 @@ from core.web.services.team_workflow_orchestration_service import (
     list_candidate_store,
     record_local_research_model_output,
     register_candidate_source,
+    review_steward_pack_knowledge_ingestion,
     submit_transfer_request,
+    submit_steward_pack_to_knowledge_ingestion,
     validate_candidate_store,
 )
 
@@ -97,6 +99,18 @@ class CandidateGraphBuildPayload(BaseModel):
     createdByAgent: str = Field("", max_length=160)
 
 
+class StewardPackKnowledgeIngestionPayload(BaseModel):
+    knowledgeBaseId: str = Field("", max_length=128)
+    proposedByAgentId: str = Field("", max_length=160)
+
+
+class StewardPackKnowledgeIngestionReviewPayload(BaseModel):
+    knowledgeBaseId: str = Field("", max_length=128)
+    reviewedByAgentId: str = Field("", max_length=160)
+    decision: str = Field("", max_length=32)
+    resolutionNote: str = Field("", max_length=2000)
+
+
 @router.get("/teams/{team_id}/workflow-orchestration")
 def team_workflow_detail(team_id: str) -> dict:
     try:
@@ -167,6 +181,37 @@ def team_workflow_candidate_validation(team_id: str) -> dict:
 def team_workflow_candidate_graph_build(team_id: str, payload: CandidateGraphBuildPayload) -> dict:
     try:
         return build_candidate_graph(team_id, payload.model_dump())
+    except TeamNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post(
+    "/teams/{team_id}/workflow-orchestration/steward-packs/{candidate_id}/knowledge-ingestion",
+    status_code=status.HTTP_201_CREATED,
+)
+def team_workflow_steward_pack_knowledge_ingestion_submit(
+    team_id: str,
+    candidate_id: str,
+    payload: StewardPackKnowledgeIngestionPayload,
+) -> dict:
+    try:
+        return submit_steward_pack_to_knowledge_ingestion(team_id, candidate_id, payload.model_dump())
+    except TeamNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/teams/{team_id}/workflow-orchestration/steward-packs/{candidate_id}/knowledge-ingestion/review")
+def team_workflow_steward_pack_knowledge_ingestion_review(
+    team_id: str,
+    candidate_id: str,
+    payload: StewardPackKnowledgeIngestionReviewPayload,
+) -> dict:
+    try:
+        return review_steward_pack_knowledge_ingestion(team_id, candidate_id, payload.model_dump())
     except TeamNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:

@@ -1,10 +1,37 @@
 # Changelog
 
+## 0.10.28 - 2026-06-05
+
+- Expanded `officialResearchGraph` into the read-only Memory Graph when requested, adding formal research reference nodes and `official_*` edges while preserving the default high-level graph.
+- Updated the Memory page to request `include=officialResearchGraph`, so formal Challenge Cup research trace edges are visible in the graph canvas without exposing full knowledge bodies.
+- Updated the Challenge Cup flow HTML and technical plan to mark Memory Graph canvas expansion as landed.
+
+## 0.10.27 - 2026-06-05
+
+- Added official Challenge Cup research graph trace syncing on steward-pack approval, storing `officialResearchGraph` on the formal KnowledgeItem and `officialSyncRecord`.
+- Translated steward-pack `sourceTrace` and `candidateIds` into formal `supports`, `maps_to`, `inspires`, and `approved_for_ingestion` edges without promoting candidate graph drafts directly.
+- Updated the Challenge Cup flow HTML and technical plan to mark M5 formal graph trace metadata as landed, leaving only Memory Graph canvas expansion for a later slice.
+
+## 0.10.26 - 2026-06-05
+
+- Migrated approved Challenge Cup steward-pack proposal rating suggestions into formal KnowledgeItem pending rating reviews without auto-applying the score.
+- Recorded `ratingSuggestionMigration` in `officialSyncRecord` and `knowledgeIngestion` metadata so approval, skipped, and failed migration outcomes are traceable.
+- Updated the Challenge Cup flow HTML and technical plan to mark M5 rating suggestion migration as landed while keeping fine-grained formal graph edges for later.
+
+## 0.10.25 - 2026-06-05
+
+- Added the Challenge Cup steward-pack ingestion approval gate API, approving pending steward packs into formal Team Knowledge or rejecting them back to revision.
+- Recorded `officialSyncRecord` evidence on steward candidates, including proposal, batch, KnowledgeItem, reviewer, RAG, and graph status boundaries.
+- Updated the Challenge Cup flow HTML and technical plan to mark M5 approval-gate behavior as landed while leaving rating migration and fine-grained graph edges for later.
+
 ## 0.10.24 - 2026-06-05
 
 - Fixed Agent Center runtime status so current direct-session cards ignore stale run snapshots from old direct sessions, while preserving those runs as historical diagnostics.
 - Surfaced unresolved Agent dialogue model references as blocking health issues and showed the raw model ID in Agent Center instead of a misleading `-`.
 - Kept Agent reset replacement direct sessions synchronized back to AgentDirectory so Agent Center and the Chat/Coding session list stay aligned.
+- Added the Challenge Cup steward-pack knowledge-ingestion API, submitting valid `steward_pack_draft` candidates to Team Knowledge as a `SourceArtifact` plus pending `RefinementProposal`, with optional pending rating suggestion.
+- Moved submitted steward packs into `steward_pending_knowledge_review` while keeping official `KnowledgeItem`, RAG, and graph writes blocked until the approval gate.
+- Updated the Challenge Cup research-flow HTML and technical plan to show the M5 pending-review bridge and remaining official-sync work.
 
 ## 0.10.23 - 2026-06-05
 
