@@ -933,6 +933,7 @@ def review_steward_pack_knowledge_ingestion(team_id: str, candidate_id: str, pay
         proposal_id = str(ingestion.get("proposalId") or "").strip()
         if not proposal_id:
             raise TeamWorkflowOrchestrationError("Steward pack ingestion record is missing proposalId.")
+        output = metadata.get("output") if isinstance(metadata.get("output"), dict) else {}
 
     review_status = "applied" if decision == "approved" else "rejected"
     try:
@@ -953,6 +954,31 @@ def review_steward_pack_knowledge_ingestion(team_id: str, candidate_id: str, pay
     knowledge_item_ids = [str(item.get("knowledgeItemId") or "")] if item else []
     knowledge_item_ids = [item_id for item_id in knowledge_item_ids if item_id]
     batch_id = str((batch or {}).get("batchId") or "")
+    official_research_graph = _official_research_graph_record(
+        output,
+        knowledge_item_ids=knowledge_item_ids,
+        proposal_id=proposal_id,
+        batch_id=batch_id,
+        knowledge_base_id=knowledge_base_id,
+        reviewed_by_agent_id=reviewed_by_agent_id,
+        reviewed_at=now,
+        decision=decision,
+    )
+    if decision == "approved" and item and official_research_graph["status"] == "synced":
+        try:
+            item = team_knowledge_service.update_knowledge_item_metadata(
+                knowledge_base_id,
+                knowledge_item_ids[0],
+                metadata_patch={"officialResearchGraph": official_research_graph},
+                actor_agent_id=reviewed_by_agent_id,
+            )
+            review_result["item"] = item
+        except (team_knowledge_service.TeamKnowledgeError, team_knowledge_service.TeamKnowledgeNotFoundError) as exc:
+            official_research_graph = {
+                **official_research_graph,
+                "status": "metadata_update_failed",
+                "error": str(exc),
+            }
     if decision == "approved":
         rating_migration = _migrate_steward_pack_rating_suggestion(
             knowledge_base_id,
@@ -969,6 +995,7 @@ def review_steward_pack_knowledge_ingestion(team_id: str, candidate_id: str, pay
             "targetSuggestionId": "",
             "knowledgeItemId": "",
         }
+    writes_official_graph = decision == "approved" and str(official_research_graph.get("status") or "") == "synced"
     next_state = "official_synced" if decision == "approved" else "steward_needs_revision"
     quality_status = "approved" if decision == "approved" else "rejected_by_gate"
     official_record = {
@@ -980,15 +1007,16 @@ def review_steward_pack_knowledge_ingestion(team_id: str, candidate_id: str, pay
         "knowledgeItemIds": knowledge_item_ids,
         "ratingSuggestionId": str(ingestion.get("ratingSuggestionId") or ""),
         "ratingSuggestionMigration": rating_migration,
+        "officialResearchGraph": official_research_graph,
         "reviewedByAgentId": reviewed_by_agent_id,
         "reviewedAt": now,
         "resolutionNote": resolution_note,
         "formalKnowledgeItemCreated": decision == "approved" and bool(knowledge_item_ids),
         "writesOfficialKnowledge": decision == "approved",
         "writesOfficialRag": False,
-        "writesOfficialGraph": False,
+        "writesOfficialGraph": writes_official_graph,
         "ragStatus": "queryable_via_reviewed_team_knowledge" if decision == "approved" else "not_synced",
-        "graphStatus": "visible_via_memory_knowledge_graph" if decision == "approved" else "not_synced",
+        "graphStatus": "official_research_trace_synced" if writes_official_graph else ("visible_via_memory_knowledge_graph" if decision == "approved" else "not_synced"),
     }
 
     with _WORKFLOW_LOCK:
@@ -1007,12 +1035,13 @@ def review_steward_pack_knowledge_ingestion(team_id: str, candidate_id: str, pay
                 "batchId": batch_id,
                 "knowledgeItemIds": knowledge_item_ids,
                 "ratingSuggestionMigration": rating_migration,
+                "officialResearchGraph": official_research_graph,
                 "reviewedByAgentId": reviewed_by_agent_id,
                 "reviewedAt": now,
                 "resolutionNote": resolution_note,
                 "writesOfficialKnowledge": decision == "approved",
                 "writesOfficialRag": False,
-                "writesOfficialGraph": False,
+                "writesOfficialGraph": writes_official_graph,
             }
         )
         metadata["knowledgeIngestion"] = ingestion
@@ -1044,6 +1073,8 @@ def review_steward_pack_knowledge_ingestion(team_id: str, candidate_id: str, pay
             "decision": decision,
             "knowledgeItemCount": len(knowledge_item_ids),
             "ratingSuggestionMigrationStatus": str(rating_migration.get("status") or ""),
+            "officialResearchGraphStatus": str(official_research_graph.get("status") or ""),
+            "officialResearchGraphEdgeCount": int((official_research_graph.get("summary") or {}).get("edgeCount") or 0),
         },
     )
     return {
@@ -1749,6 +1780,117 @@ def _migrate_steward_pack_rating_suggestion(
         "targetStatus": str(target_suggestion.get("status") or ""),
         "targetType": str(target_suggestion.get("targetType") or ""),
         "knowledgeItemId": normalized_item_id,
+    }
+
+
+def _official_research_graph_record(
+    output: dict[str, Any],
+    *,
+    knowledge_item_ids: list[str],
+    proposal_id: str,
+    batch_id: str,
+    knowledge_base_id: str,
+    reviewed_by_agent_id: str,
+    reviewed_at: str,
+    decision: str,
+) -> dict[str, Any]:
+    normalized_item_ids = _normalize_id_values(knowledge_item_ids)
+    if decision != "approved":
+        return {
+            "status": "not_synced",
+            "reason": "decision_not_approved",
+            "graphKind": "formal_research_trace",
+            "knowledgeItemIds": [],
+            "edges": [],
+            "summary": {"edgeCount": 0},
+        }
+    if not normalized_item_ids:
+        return {
+            "status": "not_synced",
+            "reason": "missing_knowledge_item",
+            "graphKind": "formal_research_trace",
+            "knowledgeItemIds": [],
+            "edges": [],
+            "summary": {"edgeCount": 0},
+        }
+    source_trace = output.get("sourceTrace") if isinstance(output.get("sourceTrace"), dict) else {}
+    primary_item_id = normalized_item_ids[0]
+    candidate_ids = _normalize_id_values(output.get("candidateIds"))
+    source_ids = _normalize_id_values(source_trace.get("sourceIds") or source_trace.get("paperIds"))
+    paper_note_ids = _normalize_id_values(source_trace.get("paperNoteIds"))
+    neuro_mechanism_ids = _normalize_id_values(source_trace.get("neuroMechanismIds"))
+    mechanism_mapping_ids = _normalize_id_values(source_trace.get("mechanismMappingIds"))
+    algorithm_hypothesis_ids = _normalize_id_values(source_trace.get("algorithmHypothesisIds") or output.get("algorithmHypothesisIds"))
+    review_record_ids = _normalize_id_values(source_trace.get("reviewRecordIds"))
+    candidate_graph_id = _trim_text(source_trace.get("candidateGraphId"), max_length=160)
+    if not algorithm_hypothesis_ids and candidate_ids:
+        algorithm_hypothesis_ids = [item for item in candidate_ids if "hypothesis" in item.lower()]
+    edges: list[dict[str, str]] = []
+    for source_id in source_ids:
+        edges.append(_official_research_graph_edge(source_id, primary_item_id, "supports", source_type="source", target_type="knowledge_item"))
+    for paper_note_id in paper_note_ids:
+        edges.append(_official_research_graph_edge(paper_note_id, primary_item_id, "supports", source_type="paper_note", target_type="knowledge_item"))
+    for mechanism_id in neuro_mechanism_ids:
+        edges.append(_official_research_graph_edge(mechanism_id, primary_item_id, "supports", source_type="neuro_mechanism", target_type="knowledge_item"))
+    for mapping_id in mechanism_mapping_ids:
+        edges.append(_official_research_graph_edge(mapping_id, primary_item_id, "maps_to", source_type="mechanism_mapping", target_type="knowledge_item"))
+    for hypothesis_id in algorithm_hypothesis_ids:
+        edges.append(_official_research_graph_edge(hypothesis_id, primary_item_id, "inspires", source_type="algorithm_hypothesis", target_type="knowledge_item"))
+    for candidate_id in candidate_ids:
+        edges.append(_official_research_graph_edge(candidate_id, primary_item_id, "approved_for_ingestion", source_type="candidate", target_type="knowledge_item"))
+    for review_id in review_record_ids:
+        edges.append(_official_research_graph_edge(review_id, primary_item_id, "approved_for_ingestion", source_type="review_record", target_type="knowledge_item"))
+    deduped_edges: list[dict[str, str]] = []
+    seen_edges: set[tuple[str, str, str]] = set()
+    for edge in edges:
+        edge_key = (edge["sourceId"], edge["targetId"], edge["relation"])
+        if edge_key in seen_edges:
+            continue
+        seen_edges.add(edge_key)
+        deduped_edges.append(edge)
+    return {
+        "status": "synced",
+        "graphKind": "formal_research_trace",
+        "knowledgeBaseId": knowledge_base_id,
+        "knowledgeItemIds": normalized_item_ids,
+        "proposalId": proposal_id,
+        "batchId": batch_id,
+        "candidateGraphId": candidate_graph_id,
+        "targetDomain": _trim_text(output.get("targetDomain"), max_length=160),
+        "reviewedByAgentId": reviewed_by_agent_id,
+        "reviewedAt": reviewed_at,
+        "edges": deduped_edges,
+        "sourceTrace": {
+            "sourceIds": source_ids,
+            "paperNoteIds": paper_note_ids,
+            "neuroMechanismIds": neuro_mechanism_ids,
+            "mechanismMappingIds": mechanism_mapping_ids,
+            "algorithmHypothesisIds": algorithm_hypothesis_ids,
+            "reviewRecordIds": review_record_ids,
+            "candidateIds": candidate_ids,
+        },
+        "officialBoundary": {
+            "writesOfficialKnowledge": True,
+            "writesOfficialRag": False,
+            "writesOfficialGraph": True,
+            "candidateGraphPromoted": bool(deduped_edges),
+        },
+        "summary": {
+            "edgeCount": len(deduped_edges),
+            "sourceCount": len(source_ids),
+            "candidateCount": len(candidate_ids),
+        },
+    }
+
+
+def _official_research_graph_edge(source_id: str, target_id: str, relation: str, *, source_type: str, target_type: str) -> dict[str, str]:
+    return {
+        "sourceId": source_id,
+        "sourceType": source_type,
+        "targetId": target_id,
+        "targetType": target_type,
+        "relation": relation,
+        "edgeState": "official_synced",
     }
 
 

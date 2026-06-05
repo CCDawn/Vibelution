@@ -997,6 +997,7 @@ def test_steward_pack_approval_gate_applies_pending_ingestion_to_formal_knowledg
 
     official_record = response["candidate"]["metadata"]["officialSyncRecord"]
     rating_migration = official_record["ratingSuggestionMigration"]
+    official_graph = official_record["officialResearchGraph"]
     migrated_source = next(
         item
         for item in rating_suggestions["suggestions"]
@@ -1014,9 +1015,16 @@ def test_steward_pack_approval_gate_applies_pending_ingestion_to_formal_knowledg
     assert official_record["formalKnowledgeItemCreated"] is True
     assert official_record["writesOfficialKnowledge"] is True
     assert official_record["writesOfficialRag"] is False
-    assert official_record["writesOfficialGraph"] is False
+    assert official_record["writesOfficialGraph"] is True
     assert official_record["ragStatus"] == "queryable_via_reviewed_team_knowledge"
-    assert official_record["graphStatus"] == "visible_via_memory_knowledge_graph"
+    assert official_record["graphStatus"] == "official_research_trace_synced"
+    assert official_graph["status"] == "synced"
+    assert official_graph["officialBoundary"]["writesOfficialGraph"] is True
+    assert official_graph["summary"]["edgeCount"] >= 3
+    assert {edge["relation"] for edge in official_graph["edges"]}.issuperset({"supports", "approved_for_ingestion"})
+    formal_item = knowledge_items["items"][0]
+    assert formal_item["metadata"]["officialResearchGraph"]["knowledgeItemIds"] == official_record["knowledgeItemIds"]
+    assert formal_item["metadata"]["officialResearchGraph"]["edges"] == official_graph["edges"]
     assert rating_migration["status"] == "migrated"
     assert rating_migration["targetType"] == "knowledge_item"
     assert rating_migration["knowledgeItemId"] == response["knowledgeIngestion"]["review"]["item"]["knowledgeItemId"]
@@ -1096,8 +1104,11 @@ def test_steward_pack_approval_gate_rejects_pending_ingestion_without_formal_wri
     assert response["knowledgeIngestion"]["review"]["proposal"]["status"] == "rejected"
     assert official_record["formalKnowledgeItemCreated"] is False
     assert official_record["writesOfficialKnowledge"] is False
+    assert official_record["writesOfficialGraph"] is False
     assert official_record["ragStatus"] == "not_synced"
     assert official_record["graphStatus"] == "not_synced"
+    assert official_record["officialResearchGraph"]["status"] == "not_synced"
+    assert official_record["officialResearchGraph"]["reason"] == "decision_not_approved"
     assert official_record["ratingSuggestionMigration"]["status"] == "skipped"
     assert official_record["ratingSuggestionMigration"]["reason"] == "decision_not_approved"
     assert all(item["targetType"] != "knowledge_item" for item in rating_suggestions["suggestions"])

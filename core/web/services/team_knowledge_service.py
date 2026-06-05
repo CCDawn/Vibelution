@@ -638,6 +638,43 @@ def list_knowledge_items(knowledge_base_id: str, *, agent_id: str = "") -> dict[
     }
 
 
+def update_knowledge_item_metadata(
+    knowledge_base_id: str,
+    knowledge_item_id: str,
+    *,
+    metadata_patch: dict[str, Any],
+    actor_agent_id: str = "",
+) -> dict[str, Any]:
+    owner, base = _require_base_with_owner(knowledge_base_id)
+    actor_id = str(actor_agent_id or "").strip()
+    _require_permission(owner, base, actor_id, "review")
+    normalized_item_id = str(knowledge_item_id or "").strip()
+    if not normalized_item_id:
+        raise TeamKnowledgeError("Knowledge item id is required.")
+    if not isinstance(metadata_patch, dict) or not metadata_patch:
+        raise TeamKnowledgeError("Knowledge item metadata patch is required.")
+    now = utc_now_iso()
+    with _LOCK:
+        items = _read_jsonl(_items_path_for_owner(owner))
+        item = _find_by_id(items, "knowledgeItemId", normalized_item_id)
+        if not item or str(item.get("knowledgeBaseId") or "") != base["knowledgeBaseId"]:
+            raise TeamKnowledgeNotFoundError("Knowledge item not found.")
+        metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+        metadata.update(_bounded_dict(metadata_patch))
+        item["metadata"] = metadata
+        item["updatedAt"] = now
+        _write_jsonl(_items_path_for_owner(owner), items)
+        _append_audit(owner, "knowledge.item.metadata.updated", item, actor_agent_id=actor_id)
+    _record_event(
+        "knowledge.item.metadata.updated",
+        owner,
+        base["knowledgeBaseId"],
+        actor_agent_id=actor_id,
+        fields={"knowledgeItemId": item["knowledgeItemId"], "metadataKeys": sorted(_bounded_dict(metadata_patch).keys())},
+    )
+    return item
+
+
 def list_knowledge_governance_tasks(*, agent_id: str = "", status: str = "open") -> dict[str, Any]:
     """Return a reviewer-facing queue derived from proposals, rating suggestions, and source-only evidence."""
 

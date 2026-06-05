@@ -591,6 +591,7 @@ def test_team_workflow_routes_review_steward_pack_knowledge_ingestion(tmp_path, 
     payload = response.json()
     official_record = payload["candidate"]["metadata"]["officialSyncRecord"]
     rating_migration = payload["knowledgeIngestion"]["officialSyncRecord"]["ratingSuggestionMigration"]
+    official_graph = payload["knowledgeIngestion"]["officialSyncRecord"]["officialResearchGraph"]
     migrated_target = next(
         item
         for item in rating_suggestions_response.json()["suggestions"]
@@ -602,7 +603,9 @@ def test_team_workflow_routes_review_steward_pack_knowledge_ingestion(tmp_path, 
     assert payload["knowledgeIngestion"]["review"]["item"]["knowledgeItemId"] in official_record["knowledgeItemIds"]
     assert official_record["writesOfficialKnowledge"] is True
     assert official_record["writesOfficialRag"] is False
-    assert official_record["writesOfficialGraph"] is False
+    assert official_record["writesOfficialGraph"] is True
+    assert official_graph["status"] == "synced"
+    assert any(edge["relation"] == "approved_for_ingestion" for edge in official_graph["edges"])
     assert rating_migration["status"] == "migrated"
     assert migrated_target["targetType"] == "knowledge_item"
     assert migrated_target["status"] == "pending"
