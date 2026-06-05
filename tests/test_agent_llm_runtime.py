@@ -1,5 +1,7 @@
+import pytest
+
 from config import Settings
-from core.llm.agent_runtime import resolve_agent_llm
+from core.llm.agent_runtime import AgentLlmResolutionError, resolve_agent_llm
 
 
 def _config_with_agent_models():
@@ -94,3 +96,11 @@ def test_resolve_agent_llm_falls_back_to_dialogue_when_optional_slot_missing():
     assert resolved.fallback_chain == ["summary->dialogue"]
     assert resolved.capabilities.supports_streaming is False
     assert resolved.capabilities.supports_tool_calling is False
+
+
+def test_resolve_agent_llm_rejects_unregistered_model_before_runtime_call():
+    config = _config_with_agent_models()
+    agent = {"agentId": "agent-a", "llmBindings": {"dialogue": {"modelId": "missing-model-id"}}}
+
+    with pytest.raises(AgentLlmResolutionError, match="Agent dialogue model not found in model library: missing-model-id"):
+        resolve_agent_llm(agent, "dialogue", config=config)
