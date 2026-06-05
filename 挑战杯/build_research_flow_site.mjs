@@ -137,22 +137,22 @@ const nodes = [
     id: "07",
     slug: "steward-ingestion",
     title: "知识治理入库",
-    status: "已规划",
+    status: "M5 草稿包门禁已落地",
     statusKind: "done",
     role: "Knowledge Steward Agent · agent-knowledge-steward",
-    summary: "现有知识库管理员 Agent 是固定网关，不新增平行管理员。",
-    objective: "把 ready_for_steward 候选整理为记忆平台 proposal、评级建议和摄取包。",
-    inputs: ["ready_for_steward 候选", "sourceFiles", "review 字段", "目标知识域"],
+    summary: "steward_pack_draft 先进入 CandidateStore 草稿包，正式入库仍由审批门禁控制。",
+    objective: "把待治理候选整理为带 sourceTrace、proposalPayload、ratingSuggestion 和 approvalRequired=true 的摄取草稿包。",
+    inputs: ["review_record 候选", "algorithm_hypothesis 候选", "candidate_graph 快照", "目标知识域"],
     actions: [
-      "检查来源、目标知识域、证据链、评级建议和摄取包。",
-      "使用 knowledge proposal / ingestion / rating suggestion 相关工具。",
-      "遇到证据不足时返回 steward_needs_revision。",
+      "校验 candidateIds、targetDomain、sourceTrace、riskSummary、proposalPayload、ratingSuggestion。",
+      "强制 approvalRequired=true，禁止 officialSync、applyNow 或 writeOfficialGraph 等立即正式写入意图。",
+      "合格草稿进入 steward_pack_draft；证据链或审批边界不合格进入 steward_needs_revision。",
     ],
-    outputs: ["knowledge proposal", "rating suggestion", "steward_recommended 状态"],
-    memory: "知识治理 Agent 边界是 proposal_and_rating_suggestion_only，不绕过正式审核。",
-    graph: "通过后等待授权审批门禁批准，再进入正式知识图谱。",
-    risks: ["绕过审核", "目标知识域错误", "把候选图谱误当正式事实"],
-    openQuestions: ["正式审核角色除用户外是否还需要 Team owner/lead。"],
+    outputs: ["steward_pack_draft 候选", "steward_needs_revision 状态", "approval gate 待接入"],
+    memory: "只写 CandidateStore；不写正式 Team Knowledge/RAG，等待 Knowledge Steward Agent 和 Ingestion Approval Gate。",
+    graph: "不写正式知识图谱；候选图谱只能作为 sourceTrace/candidateGraphId 追溯来源。",
+    risks: ["绕过审批门禁", "目标知识域错误", "把 ingestion pack 草稿误当正式入库记录"],
+    openQuestions: ["下一步如何把 steward_pack_draft 映射到现有 knowledge proposal / ingestion tool 的待审对象。"],
   },
   {
     id: "08",
@@ -292,7 +292,8 @@ const knowledgeRunbook = {
     ["hypothesis_candidate", "算法假设候选", "包含计算抽象、算法设想和 experimentPlan 占位。"],
     ["review_ready", "待科研审稿", "候选字段完整，等待风险筛选。"],
     ["ready_for_steward", "可交知识治理 Agent", "审稿通过或需要治理建议。"],
-    ["steward_recommended", "治理建议完成", "知识治理 Agent 生成 proposal、rating 和 ingestion pack。"],
+    ["steward_pack_draft", "治理草稿包", "CandidateStore 中已有 proposalPayload、ratingSuggestion、sourceTrace，且 approvalRequired=true。"],
+    ["steward_recommended", "治理建议完成", "知识治理 Agent 复核后生成正式 proposal/rating 待审对象。"],
     ["candidate_graph_visible", "候选图谱可见", "只进入候选图谱，不能当正式事实。"],
     ["official_synced", "正式同步完成", "授权审批门禁通过后进入 Team Knowledge、RAG 和正式图谱。"],
   ],
@@ -312,6 +313,7 @@ const knowledgeRunbook = {
     ["映射门", "机制映射区分论文事实、项目推断和过度类比风险", "mechanism_mapping_candidate", "退回补 fact / inference 边界"],
     ["假设门", "算法假设有 baseline、预期收益和 experimentPlan", "review_ready", "退回补实验计划"],
     ["审稿门", "review.decision 不是 rejected，风险可解释", "ready_for_steward", "退回 revision 或 rejectionArchive"],
+    ["治理草稿门", "steward_pack_draft 必须 approvalRequired=true，且不得请求 officialSync/applyNow/writeOfficialGraph", "steward_pack_draft", "退回 steward_needs_revision"],
     ["治理门", "知识治理 Agent 只给 proposal/rating，不直接写正式库", "steward_recommended", "退回 steward_needs_revision"],
     ["入库门", "授权审批门禁确认正式摄取", "official_synced", "停在候选图谱，不进正式图谱"],
   ],
@@ -451,7 +453,7 @@ const implementationBlueprint = {
     ["M2", "paper_note 与 PDF 锚点", "已新增 paper_note 输出契约与 Citation Anchor 校验：paper_note_draft 必须含 keyFindings、methods、limitations、citations；每条 keyFinding 必须有 sourceRef 和 page/citation/evidenceRef。PDF 页码摘录脚本仍待接。", "合格本地模型输出进入 paper_note_draft；缺 citation/page anchor 时进入 paper_note_needs_revision，不能自然推进到 mechanism_candidate。"],
     ["M3", "机制与算法假设", "已新增 neuro_mechanism、mechanism_mapping、algorithm_hypothesis 三段候选门禁；algorithm_hypothesis 必须含 mechanismMappingIds 或 neuroMechanismIds、hypothesis、baseline、expectedBenefit、expectedComputeCost 和含 dataset/metric/baseline/smokePlan 的 experimentPlan。", "合格机制进入 mechanism_candidate，合格映射进入 mechanism_mapping_candidate，合格算法假设进入 hypothesis_candidate；缺机制证据/术语风险、类比风险未标记或实验计划不完整时分别进入 mechanism_needs_revision / mapping_needs_revision / hypothesis_needs_revision。"],
     ["M4", "证据复核与候选图谱", "candidate_graph builder 后端/API 已落地；review_prefilter 已补 review_record 候选门禁，必须含 candidateIds、checklist、comments、requiredChanges、needsDecision，且禁止写最终 decision。", "candidate_graph_visible 和 review_prefiltered 都只进入 CandidateStore；断链进入 broken_links，带最终 decision 的 prefilter 进入 review_needs_revision，不进入正式知识库/RAG/图谱。"],
-    ["M5", "知识治理与正式同步", "复用 agent-knowledge-steward、knowledge tools 和 /api/knowledge-bases/*；补 official_sync_record。", "未通过授权审批门禁不能写 Team Knowledge/RAG/正式图谱。"],
+    ["M5", "知识治理与正式同步", "steward_pack_draft 后端草稿包门禁已落地：必填 candidateIds/targetDomain/sourceTrace/riskSummary/proposalPayload/ratingSuggestion/approvalRequired。", "当前只写 CandidateStore 草稿；未通过授权审批门禁不能写 Team Knowledge/RAG/正式图谱。"],
   ],
   schemas: [
     "source_manifest",
@@ -536,7 +538,7 @@ const implementationBlueprint = {
       ["04 机制到计算抽象", "生成多种计算抽象映射，强制区分 neuroMechanismIds、computationalAbstraction、factLayer、inferenceLayer、overAnalogyRisk、engineeringImplication；高类比风险必须标记 over_analogy_risk。"],
       ["05 生成 algorithm_hypothesis", "生成算法假设草稿，补 baseline、expectedBenefit、expectedComputeCost、experimentPlan。"],
       ["06 科研审稿", "只做 review prefilter，给 riskFlags 和 requiredChanges，不做最终审稿裁决。"],
-      ["07 知识治理入库", "只生成 proposal/ingestion pack 草稿，不直接调用正式应用或入库动作。"],
+      ["07 知识治理入库", "只生成 steward_pack_draft 草稿；approvalRequired 必须为 true，且不得请求 officialSync/applyNow/writeOfficialGraph。"],
     ],
     hardBoundaries: [
       "不得直接写正式 Team Knowledge、正式 RAG 或正式知识图谱。",
@@ -579,6 +581,12 @@ const implementationBlueprint = {
     "comments",
     "requiredChanges",
     "needsDecision",
+    "targetDomain",
+    "sourceTrace",
+    "riskSummary",
+    "proposalPayload",
+    "ratingSuggestion",
+    "approvalRequired",
     "uncertainty",
     "riskFlags",
       "confidence",
@@ -601,6 +609,7 @@ const implementationBlueprint = {
     ["mechanism_mapping 门禁", "CandidateStore mechanism_mapping validation", "mechanism_mapping_candidate 必须含 neuroMechanismIds、computationalAbstraction、factLayer、inferenceLayer、overAnalogyRisk、engineeringImplication；高类比风险未标记 over_analogy_risk 时进入 mapping_needs_revision。"],
     ["algorithm_hypothesis 门禁", "CandidateStore algorithm_hypothesis validation", "hypothesis_candidate 必须含 mechanismMappingIds 或 neuroMechanismIds、hypothesis、baseline、expectedBenefit、expectedComputeCost，以及 dataset/metric/baseline/smokePlan 完整的 experimentPlan；否则进入 hypothesis_needs_revision。"],
     ["review_record prefilter", "CandidateStore review_record validation", "review_prefiltered 必须含 candidateIds、checklist、comments、requiredChanges、needsDecision；输出包含最终 decision 时进入 review_needs_revision。"],
+    ["steward_pack_draft 门禁", "CandidateStore review_record validation", "steward_pack_draft 必须含 candidateIds、targetDomain、sourceTrace、riskSummary、proposalPayload、ratingSuggestion 且 approvalRequired=true；包含 officialSync/applyNow/writeOfficialGraph 时进入 steward_needs_revision。"],
     ["candidate_graph 预览", "CandidateStore candidate_graph snapshot", "POST candidate-graph 会从当前候选重建 candidate_only 图谱，输出 nodes/edges/missingLinks/unreviewedNodes/officialBoundary；断链时 qualityStatus=broken_links。"],
     ["验证", "tests/test_team_workflow_orchestration_service.py + tests/test_team_workflow_routes.py", "覆盖主路径、非 ownerAgent 不能写最终状态、本地模型任务包和输出校验。"],
   ],
@@ -692,18 +701,18 @@ const knowledgeNodeRunbook = {
     fallback: "缺 checklist/comments/needsDecision，或本地模型写最终 decision 时进入 review_needs_revision。",
   },
   "07": {
-    state: "steward_recommended",
+    state: "steward_pack_draft",
     agent: "Knowledge Steward Agent / agent-knowledge-steward",
-    agentStatus: "固定现有知识管理员 Agent；边界 proposal_and_rating_suggestion_only",
-    features: ["知识治理任务读取", "knowledge proposal", "rating suggestion", "ingestion pack", "targetDomain 选择"],
+    agentStatus: "后端草稿包门禁已接入 CandidateStore；正式 knowledge tools 映射待接",
+    features: ["sourceTrace 校验", "proposalPayload", "ratingSuggestion", "approvalRequired=true", "official write 禁止项"],
     tools: ["knowledge_governance_tasks_tool", "knowledge_steward_workbench_tool", "knowledge_steward_recommendations_tool", "knowledge_proposal_tool", "knowledge_ingestion_tool", "knowledge_rating_suggestion_tool"],
-    localModelUse: "本地 9B 模型只能生成 proposal/ingestion pack 草稿，正式建议仍由 Knowledge Steward Agent 检查。",
-    humanGate: "知识治理 Agent 只给建议；正式应用 proposal/rating/入库必须等待授权审核。",
-    gap: "需要 steward_ingestion_pack 格式和知识治理 Agent 与证据复核 Agent 的交接规则。",
-    entry: "review.decision=approve_for_steward，且 sourceFiles、review 字段存在。",
-    operation: "知识治理 Agent 生成 knowledge proposal、rating suggestion 和 ingestion pack。",
-    exit: "摄取包包含 targetDomain、sourceTrace、riskSummary、ratingSuggestion、approvalRequired=true。",
-    fallback: "证据链不足或目标知识域错误时返回 steward_needs_revision。",
+    localModelUse: "本地 9B 模型只能生成 steward_pack_draft 草稿，正式建议仍由 Knowledge Steward Agent 检查；禁止在输出中请求正式写入。",
+    humanGate: "必须经 Knowledge Steward Agent / Ingestion Approval Gate 确认，不能由科研执行 Agent 或本地模型直接入库。",
+    gap: "需要把 steward_pack_draft 映射到现有 knowledge proposal / ingestion tool 的待审对象，并补 official_sync_record。",
+    entry: "review_record 或候选图谱已给出可追溯 candidateIds，且具备目标知识域。",
+    operation: "生成带 sourceTrace、riskSummary、proposalPayload、ratingSuggestion、approvalRequired=true 的 CandidateStore 草稿包。",
+    exit: "合格草稿停在 steward_pack_draft，等待 Knowledge Steward Agent 复核和审批门禁。",
+    fallback: "缺必填治理字段、approvalRequired 非 true，或包含 officialSync/applyNow/writeOfficialGraph 时返回 steward_needs_revision。",
   },
   "08": {
     state: "candidate_graph_visible",
@@ -1915,9 +1924,13 @@ function indexHtml() {
 `;
 }
 
+function cleanGeneratedHtml(content) {
+  return content.replace(/[ \t]+$/gm, "");
+}
+
 await fs.mkdir(pagesDir, { recursive: true });
 await fs.writeFile(path.join(pagesDir, "flow_pages.css"), css.trim(), "utf8");
-await fs.writeFile(indexPath, indexHtml(), "utf8");
-await Promise.all(nodes.map((node, index) => fs.writeFile(path.join(pagesDir, pageName(node)), pageFor(node, index), "utf8")));
+await fs.writeFile(indexPath, cleanGeneratedHtml(indexHtml()), "utf8");
+await Promise.all(nodes.map((node, index) => fs.writeFile(path.join(pagesDir, pageName(node)), cleanGeneratedHtml(pageFor(node, index)), "utf8")));
 
 console.log(`Generated ${nodes.length} research flow pages in ${pagesDir}`);

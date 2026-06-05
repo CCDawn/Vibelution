@@ -227,9 +227,14 @@
                   <span>审稿通过或需要治理建议。</span>
                 </div>
 <div class="state-row">
+                  <b>steward_pack_draft</b>
+                  <strong>治理草稿包</strong>
+                  <span>CandidateStore 中已有 proposalPayload、ratingSuggestion、sourceTrace，且 approvalRequired=true。</span>
+                </div>
+<div class="state-row">
                   <b>steward_recommended</b>
                   <strong>治理建议完成</strong>
-                  <span>知识治理 Agent 生成 proposal、rating 和 ingestion pack。</span>
+                  <span>知识治理 Agent 复核后生成正式 proposal/rating 待审对象。</span>
                 </div>
 <div class="state-row">
                   <b>candidate_graph_visible</b>
@@ -579,7 +584,7 @@
             </div>
 <div class="service-row">
               <strong>07 知识治理入库</strong>
-              <span>只生成 proposal/ingestion pack 草稿，不直接调用正式应用或入库动作。</span>
+              <span>只生成 steward_pack_draft 草稿；approvalRequired 必须为 true，且不得请求 officialSync/applyNow/writeOfficialGraph。</span>
             </div>
       </div>
       <div class="tag-row" style="margin-top: 12px;">
@@ -615,6 +620,12 @@
 <span class="tag">comments</span>
 <span class="tag">requiredChanges</span>
 <span class="tag">needsDecision</span>
+<span class="tag">targetDomain</span>
+<span class="tag">sourceTrace</span>
+<span class="tag">riskSummary</span>
+<span class="tag">proposalPayload</span>
+<span class="tag">ratingSuggestion</span>
+<span class="tag">approvalRequired</span>
 <span class="tag">uncertainty</span>
 <span class="tag">riskFlags</span>
 <span class="tag">confidence</span>
@@ -701,6 +712,11 @@
               <span>review_prefiltered 必须含 candidateIds、checklist、comments、requiredChanges、needsDecision；输出包含最终 decision 时进入 review_needs_revision。</span>
             </div>
 <div class="blueprint-row compact">
+              <b>steward_pack_draft 门禁</b>
+              <strong>CandidateStore review_record validation</strong>
+              <span>steward_pack_draft 必须含 candidateIds、targetDomain、sourceTrace、riskSummary、proposalPayload、ratingSuggestion 且 approvalRequired=true；包含 officialSync/applyNow/writeOfficialGraph 时进入 steward_needs_revision。</span>
+            </div>
+<div class="blueprint-row compact">
               <b>candidate_graph 预览</b>
               <strong>CandidateStore candidate_graph snapshot</strong>
               <span>POST candidate-graph 会从当前候选重建 candidate_only 图谱，输出 nodes/edges/missingLinks/unreviewedNodes/officialBoundary；断链时 qualityStatus=broken_links。</span>
@@ -751,8 +767,8 @@
 <div class="blueprint-row">
               <b>M5</b>
               <strong>知识治理与正式同步</strong>
-              <span>复用 agent-knowledge-steward、knowledge tools 和 /api/knowledge-bases/*；补 official_sync_record。</span>
-              <span>未通过授权审批门禁不能写 Team Knowledge/RAG/正式图谱。</span>
+              <span>steward_pack_draft 后端草稿包门禁已落地：必填 candidateIds/targetDomain/sourceTrace/riskSummary/proposalPayload/ratingSuggestion/approvalRequired。</span>
+              <span>当前只写 CandidateStore 草稿；未通过授权审批门禁不能写 Team Knowledge/RAG/正式图谱。</span>
             </div>
       </div>
       <div class="tag-row">
@@ -820,9 +836,9 @@
 <div class="agent-row">
         <b>07</b>
         <strong>Knowledge Steward Agent / agent-knowledge-steward</strong>
-        <span>固定现有知识管理员 Agent；边界 proposal_and_rating_suggestion_only</span>
-        <span>知识治理任务读取 / knowledge proposal / rating suggestion / ingestion pack / targetDomain 选择</span>
-        <span>知识治理 Agent 只给建议；正式应用 proposal/rating/入库必须等待授权审核。</span>
+        <span>后端草稿包门禁已接入 CandidateStore；正式 knowledge tools 映射待接</span>
+        <span>sourceTrace 校验 / proposalPayload / ratingSuggestion / approvalRequired=true / official write 禁止项</span>
+        <span>必须经 Knowledge Steward Agent / Ingestion Approval Gate 确认，不能由科研执行 Agent 或本地模型直接入库。</span>
       </div>
 <div class="agent-row">
         <b>08</b>
@@ -993,6 +1009,12 @@
               <p><b>通过：</b>review.decision 不是 rejected，风险可解释</p>
               <p><b>进入：</b>ready_for_steward</p>
               <p><b>失败：</b>退回 revision 或 rejectionArchive</p>
+            </article>
+<article class="gate-card">
+              <h3>治理草稿门</h3>
+              <p><b>通过：</b>steward_pack_draft 必须 approvalRequired=true，且不得请求 officialSync/applyNow/writeOfficialGraph</p>
+              <p><b>进入：</b>steward_pack_draft</p>
+              <p><b>失败：</b>退回 steward_needs_revision</p>
             </article>
 <article class="gate-card">
               <h3>治理门</h3>
@@ -1328,8 +1350,8 @@
 <a class="node-card" href="research_flow_pages/07-steward-ingestion.html">
                 <span class="num">07</span>
                 <h3>知识治理入库</h3>
-                <p>现有知识库管理员 Agent 是固定网关，不新增平行管理员。</p>
-                <div class="tag-row"><span class="tag done">已规划</span><span class="tag">Knowledge Steward Agent · agent-knowledge-steward</span></div>
+                <p>steward_pack_draft 先进入 CandidateStore 草稿包，正式入库仍由审批门禁控制。</p>
+                <div class="tag-row"><span class="tag done">M5 草稿包门禁已落地</span><span class="tag">Knowledge Steward Agent · agent-knowledge-steward</span></div>
               </a>
 <a class="node-card" href="research_flow_pages/08-candidate-graph.html">
                 <span class="num">08</span>

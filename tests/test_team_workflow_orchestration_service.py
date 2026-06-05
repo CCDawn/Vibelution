@@ -36,6 +36,25 @@ def _use_tmp_project_root(tmp_path, monkeypatch):
     monkeypatch.setattr(team_workflow_orchestration_service, "PROJECT_ROOT", tmp_path)
 
 
+def _use_fake_local_research_config(monkeypatch):
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "load_public_config",
+        lambda: {
+            "llm": {
+                "profiles": {},
+                "model_library": {
+                    "houmo_qwen35_9b_agent": {
+                        "model": "qwen3.5-9b",
+                        "provider": "local",
+                    }
+                },
+            }
+        },
+    )
+    monkeypatch.setattr(team_workflow_orchestration_service, "build_effective_config", lambda public_config: public_config)
+
+
 def test_challenge_cup_workflow_registers_candidate_and_decides_transfer(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     team = team_service.create_team(name="挑战杯科研团队")
@@ -749,8 +768,93 @@ def test_review_prefilter_rejects_final_decision(tmp_path, monkeypatch):
     assert any(issue["code"] == "final_decision_not_allowed" for issue in response["validation"]["issues"])
 
 
+def test_steward_pack_draft_records_ingestion_pack_candidate(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+
+    response = team_workflow_orchestration_service.record_local_research_model_output(
+        team["teamId"],
+        {
+            "taskType": "steward_pack_draft",
+            "title": "Steward ingestion pack draft",
+            "createdByAgent": "Knowledge Steward Agent",
+            "output": {
+                "candidateType": "review_record",
+                "sourceRefs": [{"type": "paper", "id": "paper-1", "label": "Paper 1"}],
+                "evidenceRefs": [{"type": "review", "id": "review-1", "label": "Review 1"}],
+                "claims": [{"claim": "Candidate is ready for knowledge governance.", "sourceRef": "paper-1"}],
+                "candidateIds": ["hypothesis-1", "review-1"],
+                "targetDomain": "challenge_cup_neuro_algorithm",
+                "sourceTrace": {
+                    "sourceIds": ["paper-1"],
+                    "reviewRecordIds": ["review-1"],
+                    "candidateGraphId": "graph-1",
+                },
+                "riskSummary": "Evidence is traceable, but experiment remains a smoke test.",
+                "proposalPayload": {
+                    "proposalType": "refinement_proposal",
+                    "summary": "Add context-gated routing hypothesis as a governed research candidate.",
+                },
+                "ratingSuggestion": {
+                    "rating": "reviewable",
+                    "reason": "Needs approval before official ingestion.",
+                },
+                "approvalRequired": True,
+                "uncertainty": ["experiment not yet validated"],
+                "riskFlags": ["approval_required"],
+                "confidence": 0.61,
+                "nextAction": "send_to_ingestion_approval_gate",
+                "requiresReview": True,
+            },
+        },
+    )
+
+    assert response["validation"]["valid"] is True
+    assert response["candidate"]["candidateType"] == "review_record"
+    assert response["candidate"]["currentWorkflowNode"] == "steward_ingestion"
+    assert response["candidate"]["currentState"] == "steward_pack_draft"
+
+
+def test_steward_pack_requires_approval_gate(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+
+    response = team_workflow_orchestration_service.record_local_research_model_output(
+        team["teamId"],
+        {
+            "taskType": "steward_pack_draft",
+            "output": {
+                "candidateType": "review_record",
+                "sourceRefs": [{"type": "paper", "id": "paper-1", "label": "Paper 1"}],
+                "evidenceRefs": [{"type": "review", "id": "review-1", "label": "Review 1"}],
+                "claims": [{"claim": "Candidate is ready.", "sourceRef": "paper-1"}],
+                "candidateIds": ["hypothesis-1"],
+                "targetDomain": "challenge_cup_neuro_algorithm",
+                "sourceTrace": {"sourceIds": ["paper-1"]},
+                "riskSummary": "Needs approval.",
+                "proposalPayload": {"proposalType": "refinement_proposal"},
+                "ratingSuggestion": {"rating": "reviewable"},
+                "approvalRequired": False,
+                "officialSync": {"write": True},
+                "uncertainty": [],
+                "riskFlags": [],
+                "confidence": 0.5,
+                "nextAction": "write_official",
+                "requiresReview": True,
+            },
+        },
+    )
+
+    assert response["validation"]["valid"] is False
+    assert response["candidate"]["currentState"] == "steward_needs_revision"
+    issue_codes = {issue["code"] for issue in response["validation"]["issues"]}
+    assert "approval_required_not_true" in issue_codes
+    assert "official_write_not_allowed" in issue_codes
+
+
 def test_local_research_model_invoke_records_candidate_from_json_content(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
     team = team_service.create_team(name="挑战杯科研团队")
     _FakeLocalResearchClient.response = _FakeLocalResearchMessage(
         """
@@ -796,6 +900,7 @@ def test_local_research_model_invoke_records_candidate_from_json_content(tmp_pat
 
 def test_local_research_model_invoke_rejects_unparseable_output_without_candidate(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
     team = team_service.create_team(name="挑战杯科研团队")
     _FakeLocalResearchClient.response = _FakeLocalResearchMessage("not json")
     _FakeLocalResearchClient.captured_messages = []

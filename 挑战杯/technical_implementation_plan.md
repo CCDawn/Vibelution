@@ -164,7 +164,14 @@
 - proposalPayload
 - ratingSuggestion
 - approvalRequired: true
-- status: steward_recommended | steward_needs_revision | approved_to_ingest
+- status: steward_pack_draft | steward_needs_revision | steward_recommended | approved_to_ingest
+
+边界：
+
+- `steward_pack_draft` 第一版只进入 CandidateStore，候选类型沿用 `review_record`。
+- 草稿包必须显式 `approvalRequired=true`。
+- 草稿包不得包含 `officialSync`、`applyNow=true`、`writeOfficialGraph=true` 等立即正式写入意图。
+- 合格草稿进入 `steward_pack_draft`；缺治理字段、审批字段不合规或试图写正式库时进入 `steward_needs_revision`。
 
 ### 4.8 official_sync_record
 
@@ -191,6 +198,7 @@ source_registered
   -> hypothesis_candidate
   -> review_ready
   -> ready_for_steward
+  -> steward_pack_draft
   -> steward_recommended
   -> candidate_graph_visible
   -> approved_to_ingest
@@ -305,6 +313,8 @@ workspace/teams/<teamId>/
 - 合格 `neuro_mechanism` 本地模型输出进入 `mechanism_candidate`；缺机制证据或神经术语不确定但未标记 `terminology_uncertain` 时进入 `mechanism_needs_revision`，不能自然推进到机制映射。
 - `mechanism_mapping` 输出契约已补齐 `neuroMechanismIds`、`computationalAbstraction`、`factLayer`、`inferenceLayer`、`overAnalogyRisk`、`engineeringImplication`。
 - 合格 `mechanism_mapping` 本地模型输出进入 `mechanism_mapping_candidate`；缺事实/推断分层、工程含义，或高类比风险未标记 `over_analogy_risk` 时进入 `mapping_needs_revision`，不能自然推进到算法假设。
+- `steward_pack_draft` 输出契约已补齐 `candidateIds`、`targetDomain`、`sourceTrace`、`riskSummary`、`proposalPayload`、`ratingSuggestion`、`approvalRequired`。
+- 合格 `steward_pack_draft` 本地模型输出进入 `steward_pack_draft`，仍只写 CandidateStore；缺治理字段、`approvalRequired` 非 true，或包含 `officialSync`、`applyNow=true`、`writeOfficialGraph=true` 等正式写入意图时进入 `steward_needs_revision`。
 
 已验证：
 
@@ -606,7 +616,7 @@ Agent 创建策略：
 - local_research_worker_model：已落地任务包构建、32k 上下文预算、统一 `LLMClient` invoke、JSON 输出提取/校验和 CandidateStore 草稿记录；解析失败不入库。
 - candidate_store：已落地 Team 级 index、候选列表查询、按类型/状态过滤和 validationSummary，并接入 source_manifest、paper_note、neuro_mechanism、mechanism_mapping、algorithm_hypothesis、candidate_graph 最小校验。
 - source_parser：待新增本地脚本/模块，PDF/资料解析与页码锚点。
-- candidate_validator：已落地 source_manifest/PDF 字段校验、paper_note citation anchor 校验、neuro_mechanism 证据/术语风险校验、mechanism_mapping 类比风险校验、algorithm_hypothesis experimentPlan 校验、candidate_graph officialBoundary/断链状态校验和 CandidateStore 校验报告。
+- candidate_validator：已落地 source_manifest/PDF 字段校验、paper_note citation anchor 校验、neuro_mechanism 证据/术语风险校验、mechanism_mapping 类比风险校验、algorithm_hypothesis experimentPlan 校验、review_prefilter 最终 decision 禁止、steward_pack_draft 审批门禁、candidate_graph officialBoundary/断链状态校验和 CandidateStore 校验报告。
 - candidate_graph_builder：已落地后端/API，生成 CandidateStore 内的 candidate_graph 候选快照、断链报告、未审节点清单和 candidate_only officialBoundary；前端图谱读取仍待接。
 - research_agent_binding：复用 research_service、research flow canvas、prompt-research-* 和 research 组织治理工具。
 - memory_ingestion_bridge：复用现有 knowledge tools 与 /api/knowledge-bases/* 路由，把 steward_ingestion_pack 映射到 SourceArtifact/RefinementProposal/IngestionPackage。
@@ -713,16 +723,21 @@ Agent 创建策略：
 
 交付：
 
-- steward_ingestion_pack schema。
-- 复用 agent-knowledge-steward 和现有 knowledge tools。
-- official_sync_record。
-- Ingestion Approval Gate。
+- steward_ingestion_pack / steward_pack_draft schema 已接入 TeamWorkflowOrchestration 的本地模型输出契约。
+- CandidateStore 已能记录合格 `steward_pack_draft` 草稿包。
+- 草稿包门禁已强制 `approvalRequired=true`，并禁止 `officialSync`、`applyNow=true`、`writeOfficialGraph=true`。
+- 复用 agent-knowledge-steward 和现有 knowledge tools 的正式 proposal/ingestion 映射仍待接。
+- official_sync_record 仍待接。
+- Ingestion Approval Gate 仍待接。
 
 验收：
 
-- Knowledge Steward Agent 只能提交建议。
-- 未通过授权审批门禁不能写 Team Knowledge/RAG/正式图谱。
-- official_synced 记录可追溯到 source_manifest、paper_note、review_record。
+- 已覆盖：合格 steward pack 草稿进入 `steward_pack_draft`，且只写 CandidateStore。
+- 已覆盖：`approvalRequired` 非 true 时进入 `steward_needs_revision`。
+- 已覆盖：包含 `officialSync`、`applyNow=true` 或 `writeOfficialGraph=true` 等立即正式写入意图时进入 `steward_needs_revision`。
+- 待覆盖：Knowledge Steward Agent 将草稿包映射为正式待审 proposal / rating / ingestion pack。
+- 待覆盖：未通过授权审批门禁不能写 Team Knowledge/RAG/正式图谱。
+- 待覆盖：official_synced 记录可追溯到 source_manifest、paper_note、review_record 和 steward_pack_draft。
 
 ## 11. 测试计划
 
