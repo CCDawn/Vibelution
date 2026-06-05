@@ -502,7 +502,7 @@ def _looks_like_frontend_dev_server(normalized_command_line: str) -> bool:
         return True
     if any(_looks_like_vite_invocation(part) for part in parts):
         return True
-    if any(_looks_like_package_runner(part) for part in parts) and "dev" in parts:
+    if any(_looks_like_package_runner(part) for part in parts) and any(_looks_like_dev_script(part) for part in parts):
         return True
     return False
 
@@ -538,9 +538,23 @@ def _looks_like_vite_invocation(part: str) -> bool:
 
 def _looks_like_package_runner(part: str) -> bool:
     normalized = str(part or "").replace("\\", "/").lower().strip('"')
-    return normalized in {"npm", "npm.cmd", "pnpm", "pnpm.cmd", "yarn", "yarn.cmd"} or normalized.endswith(
-        ("/npm", "/npm.cmd", "/pnpm", "/pnpm.cmd", "/yarn", "/yarn.cmd")
+    return normalized in {
+        "npm",
+        "npm.cmd",
+        "pnpm",
+        "pnpm.cmd",
+        "yarn",
+        "yarn.cmd",
+        "bun",
+        "bun.exe",
+    } or normalized.endswith(
+        ("/npm", "/npm.cmd", "/pnpm", "/pnpm.cmd", "/yarn", "/yarn.cmd", "/bun", "/bun.exe")
     )
+
+
+def _looks_like_dev_script(part: str) -> bool:
+    normalized = str(part or "").replace("\\", "/").lower().strip('"')
+    return normalized == "dev" or normalized.endswith(":dev")
 
 
 def _is_project_owned(*, command_line: str, cwd: str, project_root: Path) -> bool:
