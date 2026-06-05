@@ -271,7 +271,30 @@ def _llm_retry_event_fields(
     safe_metadata = metadata or {}
     role_fields = {}
     if isinstance(safe_metadata, dict):
-        for key in ("messageRoles", "messageRoleCounts"):
+        for key in (
+            "messageRoles",
+            "messageRoleCounts",
+            "protocol",
+            "protocolSource",
+            "protocolWarnings",
+            "reasoningRoundtripEnabled",
+            "thinkingFormat",
+            "toolChoiceMode",
+            "strictMessageKeys",
+            "requiresStringContent",
+            "allowAssistantPrefill",
+            "payloadValidationResult",
+            "payloadValidationErrorType",
+            "payloadPolicySystemMessagesConverted",
+            "payloadPolicyStringContentMessages",
+            "payloadPolicyReasoningContentStripped",
+            "payloadPolicyEmptyAssistantPrefillRemoved",
+            "payloadPolicyQwenThinkingParameter",
+            "payloadPolicyMinimalToolSchema",
+            "modelLibraryId",
+            "capabilitySource",
+            "declaredCapabilityFields",
+        ):
             if key in safe_metadata:
                 role_fields[key] = safe_metadata[key]
     return {
@@ -313,6 +336,27 @@ def _safe_message_role_summary(messages: List[Any]) -> Dict[str, Any]:
         "messageRoles": roles,
         "messageRoleCounts": counts,
     }
+
+
+def _safe_capability_source_summary(resolved_spec: Any) -> Dict[str, Any]:
+    details = getattr(resolved_spec, "provider_details", None)
+    if not isinstance(details, dict):
+        return {}
+    summary: Dict[str, Any] = {}
+    model_library_id = str(details.get("model_library_id") or "").strip()
+    capability_source = str(details.get("capability_source") or "").strip()
+    declared_fields = details.get("declared_capability_fields")
+    if model_library_id:
+        summary["modelLibraryId"] = model_library_id
+    if capability_source:
+        summary["capabilitySource"] = capability_source
+    if isinstance(declared_fields, list):
+        summary["declaredCapabilityFields"] = [
+            str(item)
+            for item in declared_fields
+            if str(item or "").strip()
+        ]
+    return summary
 
 
 def _short_hash(value: Any) -> str:
@@ -854,6 +898,7 @@ class LLMClient:
         )
         thinking_summary = _safe_payload_thinking_summary(payload)
         protocol_summary = dict(self._last_payload_protocol_summary or payload_protocol_summary(payload, self.protocol_route))
+        capability_source_summary = _safe_capability_source_summary(self._resolved_spec)
         response = self._invoke_backend_with_retry(
             payload,
             phase="invoke",
@@ -868,6 +913,7 @@ class LLMClient:
                 **prompt_cache_design_summary,
                 **thinking_summary,
                 **protocol_summary,
+                **capability_source_summary,
             },
         )
         latency_ms = int((time.time() - start) * 1000)
@@ -898,6 +944,7 @@ class LLMClient:
                 **prompt_cache_design_summary,
                 **thinking_summary,
                 **protocol_summary,
+                **capability_source_summary,
                 "inputTokens": usage.input_tokens,
                 "outputTokens": usage.output_tokens,
                 "totalTokens": usage.total_tokens,
@@ -938,6 +985,8 @@ class LLMClient:
                 },
                 "latency_ms": latency_ms,
                 "capabilities": self.capabilities.__dict__,
+                "llm_protocol": protocol_summary,
+                "llm_capability_source": capability_source_summary,
                 "metadata": metadata or {},
             },
             additional_kwargs=additional_kwargs,
@@ -949,6 +998,8 @@ class LLMClient:
             "profile_id": self.profile_id,
             "provider": self.provider.kind,
             "model": self.profile.model,
+            "llm_protocol": dict(self._last_payload_protocol_summary or self.protocol_route.log_summary()),
+            "llm_capability_source": _safe_capability_source_summary(self._resolved_spec),
             "metadata": metadata or {},
         }
 
@@ -1267,6 +1318,7 @@ class LLMClient:
         )
         thinking_summary = _safe_payload_thinking_summary(payload)
         protocol_summary = dict(self._last_payload_protocol_summary or payload_protocol_summary(payload, self.protocol_route))
+        capability_source_summary = _safe_capability_source_summary(self._resolved_spec)
         event_metadata = {
             **message_role_summary,
             **route_summary,
@@ -1274,6 +1326,7 @@ class LLMClient:
             **prompt_cache_design_summary,
             **thinking_summary,
             **protocol_summary,
+            **capability_source_summary,
         }
         max_attempts = _retry_policy_max_attempts(self.profile)
         last_error: LLMError | None = None
@@ -1493,6 +1546,8 @@ class LLMClient:
                         **payload_shape_summary,
                         **prompt_cache_design_summary,
                         **_safe_payload_thinking_summary(payload),
+                        **protocol_summary,
+                        **capability_source_summary,
                         "streamUsageOptionsDowngraded": True,
                     }
                     stream_usage_options_downgraded = True
@@ -1541,8 +1596,8 @@ class LLMClient:
                     raise llm_error from exc
 
     def stream(self, messages: List[Any], *, tools: Optional[List[Any]] = None, metadata: Optional[Dict[str, Any]] = None) -> Iterator[AIMessageChunk]:
-        response_metadata = self._response_metadata(metadata)
         for event in self.stream_events(messages, tools=tools):
+            response_metadata = self._response_metadata(metadata)
             if event.type == "done":
                 if event.usage is not None:
                     done_metadata = dict(response_metadata)

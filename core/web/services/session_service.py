@@ -4004,7 +4004,10 @@ def _complete_turn_error_visible_content(content: Any, metadata: dict[str, Any])
         diagnostics.append(f"HTTP {http_status}")
     if provider_error_type:
         diagnostics.append(provider_error_type)
-    if provider_error_message and provider_error_message not in visible:
+    if (
+        _provider_error_detail_safe_for_chat(provider_error_message)
+        and provider_error_message not in visible
+    ):
         diagnostics.append(provider_error_message)
     if diagnostics:
         diagnostic_line = " / ".join(diagnostics)
