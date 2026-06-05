@@ -497,6 +497,77 @@ def test_memory_knowledge_graph_links_project_agents_team_and_knowledge_without_
     assert "do not expose source body" not in payload_text
 
 
+def test_memory_knowledge_graph_expands_official_research_trace_on_include(knowledge_env):
+    source = team_knowledge_service.create_source_artifact(
+        knowledge_env["base"]["knowledgeBaseId"],
+        source_type="agent_authored",
+        source_ref={"agentId": knowledge_env["member"]["agentId"]},
+        title="Official graph source",
+        actor_agent_id=knowledge_env["member"]["agentId"],
+    )
+    proposal = team_knowledge_service.create_refinement_proposal(
+        knowledge_env["base"]["knowledgeBaseId"],
+        source_artifact_ids=[source["sourceArtifactId"]],
+        proposed_by_agent_id=knowledge_env["member"]["agentId"],
+        title="Official graph item",
+        summary="Trace summary.",
+        content="OFFICIAL GRAPH BODY SHOULD NOT LEAK",
+        tags=["challenge-cup"],
+    )
+    reviewed = team_knowledge_service.review_refinement_proposal(
+        knowledge_env["base"]["knowledgeBaseId"],
+        proposal["proposalId"],
+        status="approved",
+        reviewed_by_agent_id=knowledge_env["lead"]["agentId"],
+    )
+    team_knowledge_service.update_knowledge_item_metadata(
+        knowledge_env["base"]["knowledgeBaseId"],
+        reviewed["item"]["knowledgeItemId"],
+        actor_agent_id=knowledge_env["lead"]["agentId"],
+        metadata_patch={
+            "officialResearchGraph": {
+                "status": "synced",
+                "graphKind": "formal_research_trace",
+                "summary": {"edgeCount": 2},
+                "edges": [
+                    {
+                        "sourceId": "paper-note-1",
+                        "sourceType": "paper_note",
+                        "targetId": reviewed["item"]["knowledgeItemId"],
+                        "targetType": "knowledge_item",
+                        "relation": "supports",
+                        "edgeState": "official_synced",
+                    },
+                    {
+                        "sourceId": "hypothesis-1",
+                        "sourceType": "algorithm_hypothesis",
+                        "targetId": reviewed["item"]["knowledgeItemId"],
+                        "targetType": "knowledge_item",
+                        "relation": "inspires",
+                        "edgeState": "official_synced",
+                    },
+                ],
+            }
+        },
+    )
+
+    default_graph = memory_graph_service.get_memory_knowledge_graph(agent_id=knowledge_env["member"]["agentId"])
+    expanded_graph = memory_graph_service.get_memory_knowledge_graph(
+        agent_id=knowledge_env["member"]["agentId"],
+        include="officialResearchGraph",
+    )
+    expanded_text = str(expanded_graph)
+    node_types = {node["type"] for node in expanded_graph["nodes"]}
+    edge_types = {edge["type"] for edge in expanded_graph["edges"]}
+
+    assert default_graph["summary"]["nodeTypeCounts"].get("knowledge_item", 0) == 0
+    assert {"knowledge_base", "knowledge_item", "official_research_ref"}.issubset(node_types)
+    assert {"team_has_knowledge_base", "knowledge_base_has_item", "official_supports", "official_inspires"}.issubset(edge_types)
+    assert any(node["metadata"].get("sourceId") == "paper-note-1" for node in expanded_graph["nodes"])
+    assert reviewed["item"]["knowledgeItemId"] in expanded_text
+    assert "OFFICIAL GRAPH BODY SHOULD NOT LEAK" not in expanded_text
+
+
 def test_memory_knowledge_graph_honors_team_knowledge_acl(knowledge_env):
     team_knowledge_service.create_refinement_proposal(
         knowledge_env["base"]["knowledgeBaseId"],

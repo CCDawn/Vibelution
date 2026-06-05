@@ -1,7 +1,7 @@
 {
   "name": "vibelution-web-workbench",
   "private": true,
-  "version": "0.10.24",
+  "version": "0.10.28",
   "type": "module",
   "scripts": {
     "dev": "vite",

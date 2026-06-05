@@ -30,13 +30,13 @@
         <section class="plan-hero">
           <div class="kicker">Research Flow Node 09</div>
           <h1>正式知识图谱同步</h1>
-          <p class="subtitle">只有审核入库后的知识进入正式图谱与 RAG。</p>
+          <p class="subtitle">只有审核入库后的知识进入正式图谱 trace 与 RAG。</p>
           <div class="tag-row"><span class="tag done">已规划</span><span class="tag">Knowledge Platform</span><span class="tag">独立计划页</span></div>
           <div class="diagram">
             <div class="flow-cell"><strong>输入</strong><span>approved_to_ingest 候选 / 正式 KnowledgeItem</span></div>
             <div class="flow-cell"><strong>动作</strong><span>将 official_pending 转为 official_synced。</span></div>
-            <div class="flow-cell"><strong>输出</strong><span>正式知识图谱节点 / 正式 RAG 可检索上下文</span></div>
-            <div class="flow-cell"><strong>记忆/图谱</strong><span>正式图谱必须能追溯到 paper_note 和原始来源。</span></div>
+            <div class="flow-cell"><strong>输出</strong><span>正式知识图谱 trace / 正式 RAG 可检索上下文</span></div>
+            <div class="flow-cell"><strong>记忆/图谱</strong><span>正式图谱 trace 必须能追溯到 sourceTrace、candidateIds、reviewRecordIds 和正式 KnowledgeItem。</span></div>
           </div>
         </section>
 
@@ -46,20 +46,21 @@
             <p class="hint">本页只展示 09 节点。通过左侧导航可进入其它节点页。</p>
           </div>
           <div class="plan-grid">
-            <article class="plan-card"><h2>目标</h2><p class="hint">将 ingested 知识同步到 Team Knowledge、正式 RAG 和正式知识图谱。</p></article>
+            <article class="plan-card"><h2>目标</h2><p class="hint">将 ingested 知识同步到 Team Knowledge、正式 RAG 和 KnowledgeItem officialResearchGraph。</p></article>
             <article class="plan-card"><h2>输入</h2><ul><li>approved_to_ingest 候选</li>
 <li>正式 KnowledgeItem</li>
 <li>知识治理建议</li></ul></article>
             <article class="plan-card"><h2>处理动作</h2><ul><li>将 official_pending 转为 official_synced。</li>
 <li>生成正式 supports、maps_to、inspires、approved_for_ingestion 边。</li>
 <li>保留 sourceFiles 和 review 追溯链。</li></ul></article>
-            <article class="plan-card"><h2>输出物</h2><ul><li>正式知识图谱节点</li>
+            <article class="plan-card"><h2>输出物</h2><ul><li>正式知识图谱 trace</li>
 <li>正式 RAG 可检索上下文</li>
-<li>officialKnowledgeItemId</li></ul></article>
+<li>officialKnowledgeItemId</li>
+<li>officialResearchGraph</li></ul></article>
             <article class="plan-card"><h2>风险</h2><ul><li>候选误同步</li>
 <li>sourceFiles 丢失</li>
 <li>正式图谱缺审核记录</li></ul></article>
-            <article class="plan-card "><h2>未决事项</h2><ul><li>正式图谱同步由记忆平台自动触发还是审批门禁触发。</li></ul></article>
+            <article class="plan-card "><h2>未决事项</h2><ul><li>是否在 Memory Graph 详情栏增加 officialResearchGraph 专用摘要。</li></ul></article>
           </div>
         </section>
 
@@ -70,8 +71,8 @@
           </div>
           <div class="status-grid">
             <div class="status-item"><b>候选状态</b><span>已规划</span></div>
-            <div class="status-item"><b>记忆平台</b><span>只同步 ingested 内容。</span></div>
-            <div class="status-item"><b>图谱同步</b><span>正式图谱必须能追溯到 paper_note 和原始来源。</span></div>
+            <div class="status-item"><b>记忆平台</b><span>只同步 ingested 内容，正式图谱 trace 挂在 KnowledgeItem metadata 上。</span></div>
+            <div class="status-item"><b>图谱同步</b><span>正式图谱 trace 必须能追溯到 sourceTrace、candidateIds、reviewRecordIds 和正式 KnowledgeItem。</span></div>
           </div>
         </section>
 
@@ -84,23 +85,25 @@
       <div class="status-grid">
         <div class="status-item"><b>状态</b><span>official_synced</span></div>
         <div class="status-item"><b>功能岗位</b><span>Ingestion Approval Gate + Knowledge Platform</span></div>
-        <div class="status-item"><b>Agent 状态</b><span>授权审批门禁为硬门；平台负责正式 Team Knowledge/RAG/Graph 同步</span></div>
-        <div class="status-item"><b>进入条件</b><span>授权审批门禁已批准 ingestion pack。</span></div>
-        <div class="status-item"><b>退出条件</b><span>officialKnowledgeItemId、ragStatus、graphStatus 和 approvedBy 均已记录。</span></div>
+        <div class="status-item"><b>Agent 状态</b><span>授权审批门禁已接入 Team Knowledge review/apply、KnowledgeItem metadata patch；平台负责正式 KnowledgeItem 的读取、RAG 检索和 Memory Graph 展示</span></div>
+        <div class="status-item"><b>进入条件</b><span>授权审批门禁已批准 pending RefinementProposal。</span></div>
+        <div class="status-item"><b>退出条件</b><span>knowledgeItemIds、ratingSuggestionMigration、officialResearchGraph、ragStatus、graphStatus、reviewedByAgentId 和 officialSyncRecord 均已记录。</span></div>
         <div class="status-item"><b>审核门禁</b><span>必须通过授权审批门禁批准 ingestion pack。</span></div>
       </div>
       <div class="plan-grid">
-        <article class="plan-card"><h2>本步操作</h2><p class="hint">同步 Team Knowledge、正式 RAG 和正式知识图谱，并保留候选来源链。</p></article>
+        <article class="plan-card"><h2>本步操作</h2><p class="hint">复用 Team Knowledge review/apply 创建 KnowledgeItem；旧 proposal 级 ratingSuggestion 标记 applied，新 KnowledgeItem 级 ratingSuggestion 保持 pending 等待评级审阅；sourceTrace/candidateIds 被翻译为 officialResearchGraph 正式边；RAG 通过 reviewed Team Knowledge 检索。</p></article>
 
         <article class="plan-card"><h2>所需功能</h2><ul><li>正式审核确认</li>
 <li>正式 KnowledgeItem 创建/同步</li>
-<li>RAG 索引更新</li>
+<li>KnowledgeItem rating review</li>
+<li>officialResearchGraph</li>
+<li>RAG 可检索</li>
 <li>official_sync_record</li>
-<li>正式图谱边生成</li></ul></article>
+<li>Memory Graph 可见</li></ul></article>
         <article class="plan-card"><h2>工具/平台能力</h2><ul><li>knowledge_query_tool</li>
 <li>knowledge_rag_retrieve_tool</li>
 <li>Team Knowledge 审核/应用流程（平台能力）</li></ul></article>
-        <article class="plan-card"><h2>功能缺口</h2><p class="hint">需要正式图谱同步触发规则，以及 approved_to_ingest 到 official_synced 的证据记录。</p></article>
+        <article class="plan-card"><h2>功能缺口</h2><p class="hint">ratingSuggestion 自动迁移到 KnowledgeItem 待审评级已接入；正式 supports/maps_to/inspires/approved_for_ingestion 边已接入 officialResearchGraph，并可在 Memory Graph 画布展开。后续可补专用摘要与筛选。</p></article>
         <article class="plan-card"><h2>失败回退</h2><p class="hint">未批准时停留在 candidate_graph_visible，不进入正式知识库。</p></article>
       </div>
     </section>
