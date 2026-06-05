@@ -2883,7 +2883,7 @@ Write-Output "ok"
     assert result.stdout.strip().splitlines()[-1] == "ok"
 
 
-def test_launcher_restart_guard_blocks_when_active_work_probe_fails_on_healthy_backend(tmp_path):
+def test_launcher_restart_guard_blocks_when_probe_fails_but_local_active_work_exists(tmp_path):
     result = _run_launcher_ast_harness(
         tmp_path,
         """
@@ -2908,12 +2908,32 @@ $functionAst = $ast.Find({
     $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
         $node.Name -eq "Test-LauncherRestartActiveWorkBlocked"
 }, $true)
-if ($null -eq $functionAst) {
-    throw "Test-LauncherRestartActiveWorkBlocked was not found."
+foreach ($functionName in @(
+    "Get-ObjectPropertyValue",
+    "Test-LauncherWorkRunStatusBlocksLifecycle",
+    "Get-LauncherLocalActiveWorkRunCount",
+    "Test-LauncherRestartActiveWorkBlocked"
+)) {
+    $functionAst = $ast.Find({
+        param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+            $node.Name -eq $functionName
+    }, $true)
+    if ($null -eq $functionAst) {
+        throw "$functionName was not found."
+    }
+    . ([scriptblock]::Create($functionAst.Extent.Text))
 }
-. ([scriptblock]::Create($functionAst.Extent.Text))
 
 $script:url = "http://127.0.0.1:8000"
+$script:projectDir = Join-Path ([System.IO.Path]::GetTempPath()) ("vibelution-launcher-active-work-" + [guid]::NewGuid().ToString("N"))
+$kindDir = Join-Path $script:projectDir ".runtime\\runtime-manager\\work_runs\\chat_turn"
+$runDir = Join-Path $kindDir "runs"
+New-Item -ItemType Directory -Path $runDir -Force | Out-Null
+'{"version":1,"activeRunId":"chat-live","latestRunId":"chat-live"}' |
+    Set-Content -LiteralPath (Join-Path $kindDir "index.json") -Encoding utf8
+'{"runId":"chat-live","sessionId":"session-live","status":"running","currentPhase":"running"}' |
+    Set-Content -LiteralPath (Join-Path $runDir "chat-live.json") -Encoding utf8
 $script:notes = @()
 $script:events = @()
 function Test-WebHealthy { return $true }
@@ -2928,9 +2948,81 @@ function Invoke-WebRequest {
 }
 
 $blocked = Test-LauncherRestartActiveWorkBlocked
-if (-not $blocked) { throw "healthy backend with failed active-work probe should block restart." }
+if (-not $blocked) { throw "healthy backend with failed probe and local active work should block restart." }
 if ($script:notes[0] -notmatch "有进行中的任务，无法重启 Vibelution") { throw "probe failure block message was not user-readable." }
 if ($script:events[0].event -ne "launcher.restart.blocked_active_work_probe_failed") { throw "probe failure block event was not logged." }
+if ($script:events[0].fields.error -notmatch "status timeout") { throw "probe failure error was not logged." }
+if ($script:events[0].fields.local_active_work_count -ne 1) { throw "local active work count was not logged." }
+Write-Output "ok"
+""",
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip().splitlines()[-1] == "ok"
+
+
+def test_launcher_restart_guard_allows_when_probe_fails_and_local_work_is_clear(tmp_path):
+    result = _run_launcher_ast_harness(
+        tmp_path,
+        """
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$LauncherPath
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$source = Get-Content -Raw -LiteralPath $LauncherPath
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors -and $parseErrors.Count -gt 0) {
+    throw "Launcher script parse failed: $($parseErrors[0].Message)"
+}
+
+foreach ($functionName in @(
+    "Get-ObjectPropertyValue",
+    "Test-LauncherWorkRunStatusBlocksLifecycle",
+    "Get-LauncherLocalActiveWorkRunCount",
+    "Test-LauncherRestartActiveWorkBlocked"
+)) {
+    $functionAst = $ast.Find({
+        param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+            $node.Name -eq $functionName
+    }, $true)
+    if ($null -eq $functionAst) {
+        throw "$functionName was not found."
+    }
+    . ([scriptblock]::Create($functionAst.Extent.Text))
+}
+
+$script:url = "http://127.0.0.1:8000"
+$script:projectDir = Join-Path ([System.IO.Path]::GetTempPath()) ("vibelution-launcher-clear-work-" + [guid]::NewGuid().ToString("N"))
+$runDir = Join-Path $script:projectDir ".runtime\\runtime-manager\\work_runs\\chat_turn\\runs"
+New-Item -ItemType Directory -Path $runDir -Force | Out-Null
+'{"runId":"chat-done","sessionId":"session-done","status":"completed","currentPhase":"completed","finishedAt":"2026-06-05T04:00:00Z"}' |
+    Set-Content -LiteralPath (Join-Path $runDir "chat-done.json") -Encoding utf8
+'{"runId":"chat-waiting","sessionId":"session-waiting","status":"needs_continue","currentPhase":"needs_continue","finishedAt":"2026-06-05T04:01:00Z"}' |
+    Set-Content -LiteralPath (Join-Path $runDir "chat-waiting.json") -Encoding utf8
+$script:notes = @()
+$script:events = @()
+function Test-WebHealthy { return $true }
+function Write-Note { param([string]$Message) $script:notes += $Message }
+function Write-LauncherControlLog {
+    param([string]$Event, [string]$Message, [string]$Level = "info", [hashtable]$Fields = @{})
+    $script:events += ,@{ event = $Event; message = $Message; level = $Level; fields = $Fields }
+}
+function Invoke-WebRequest {
+    param([string]$Uri, [int]$TimeoutSec, [switch]$UseBasicParsing)
+    throw "status timeout"
+}
+
+$blocked = Test-LauncherRestartActiveWorkBlocked
+if ($blocked) { throw "healthy backend with failed probe but clear local work should not block restart." }
+if ($script:notes.Count -ne 0) { throw "clear local work should not show active-work block note." }
+if ($script:events[0].event -ne "launcher.restart.active_work_probe_failed_local_clear") { throw "local clear event was not logged." }
 if ($script:events[0].fields.error -notmatch "status timeout") { throw "probe failure error was not logged." }
 Write-Output "ok"
 """,

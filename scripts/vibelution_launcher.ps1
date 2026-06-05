@@ -1858,6 +1858,101 @@ function Test-WebHealthy {
     }
 }
 
+function Test-LauncherWorkRunStatusBlocksLifecycle {
+    param([string]$Status)
+
+    $normalized = ([string]($Status -or "")).Trim().ToLowerInvariant()
+    if ($normalized -in @(
+        "cancelled",
+        "closed",
+        "completed",
+        "done",
+        "failed",
+        "failed_provider",
+        "failed_runtime",
+        "idle",
+        "needs_continue",
+        "paused_limit",
+        "ready",
+        "stopped",
+        "stopped_by_user",
+        "stop_failed",
+        "superseded"
+    )) {
+        return $false
+    }
+    if ($normalized -in @(
+        "",
+        "active",
+        "queued",
+        "running",
+        "stopping",
+        "started",
+        "in_progress",
+        "pausing",
+        "resuming",
+        "force_stopping"
+    )) {
+        return $true
+    }
+    return [bool]$normalized
+}
+
+function Get-LauncherLocalActiveWorkRunCount {
+    $workRunsDir = Join-Path $projectDir ".runtime\runtime-manager\work_runs"
+    if (-not (Test-Path $workRunsDir)) {
+        return 0
+    }
+
+    $count = 0
+    foreach ($indexPath in @(Get-ChildItem -LiteralPath $workRunsDir -Recurse -Filter "index.json" -ErrorAction SilentlyContinue)) {
+        try {
+            $indexPayload = Get-Content -LiteralPath $indexPath.FullName -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        } catch {
+            continue
+        }
+        $activeRunId = [string](Get-ObjectPropertyValue -Object $indexPayload -Name "activeRunId" -Default "")
+        if (-not $activeRunId.Trim()) {
+            continue
+        }
+        $runKindDir = Split-Path -Parent $indexPath.FullName
+        $snapshotPath = Join-Path (Join-Path $runKindDir "runs") "$($activeRunId.Trim()).json"
+        try {
+            $payload = Get-Content -LiteralPath $snapshotPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        } catch {
+            $count += 1
+            continue
+        }
+        $runIdentity = [string](Get-ObjectPropertyValue -Object $payload -Name "runId" -Default "")
+        if (-not $runIdentity.Trim()) {
+            $runIdentity = [string](Get-ObjectPropertyValue -Object $payload -Name "roundId" -Default "")
+        }
+        if (-not $runIdentity.Trim()) {
+            $runIdentity = [string](Get-ObjectPropertyValue -Object $payload -Name "sessionId" -Default "")
+        }
+        if (-not $runIdentity.Trim()) {
+            $runIdentity = [string](Get-ObjectPropertyValue -Object $payload -Name "id" -Default "")
+        }
+        $status = [string](Get-ObjectPropertyValue -Object $payload -Name "status" -Default "")
+        if (-not $status) {
+            $status = [string](Get-ObjectPropertyValue -Object $payload -Name "currentPhase" -Default "")
+        }
+        if (-not $runIdentity.Trim() -and -not $status.Trim()) {
+            continue
+        }
+        if ([string](Get-ObjectPropertyValue -Object $payload -Name "finishedAt" -Default "")) {
+            continue
+        }
+        if ([string](Get-ObjectPropertyValue -Object $payload -Name "endedAt" -Default "")) {
+            continue
+        }
+        if (Test-LauncherWorkRunStatusBlocksLifecycle -Status $status) {
+            $count += 1
+        }
+    }
+    return $count
+}
+
 function Test-LauncherRestartActiveWorkBlocked {
     if (-not (Test-WebHealthy)) {
         return $false
@@ -1891,13 +1986,22 @@ function Test-LauncherRestartActiveWorkBlocked {
             -Fields @{ active_work_count = $count; status_url = $statusUrl }
         return $true
     } catch {
+        $localActiveCount = Get-LauncherLocalActiveWorkRunCount
+        if ($localActiveCount -le 0) {
+            Write-LauncherControlLog `
+                -Event "launcher.restart.active_work_probe_failed_local_clear" `
+                -Message "Launcher status active-work probe failed, but local runtime-manager work-run state has no active work." `
+                -Level "warning" `
+                -Fields @{ status_url = $statusUrl; error = $_.Exception.Message }
+            return $false
+        }
         $message = "有进行中的任务，无法重启 Vibelution。请等待任务完成或先停止任务。"
         Write-Note $message
         Write-LauncherControlLog `
             -Event "launcher.restart.blocked_active_work_probe_failed" `
             -Message "Launcher restart active-work probe failed while backend was healthy; blocking restart conservatively." `
             -Level "warning" `
-            -Fields @{ status_url = $statusUrl; error = $_.Exception.Message }
+            -Fields @{ status_url = $statusUrl; error = $_.Exception.Message; local_active_work_count = $localActiveCount }
         return $true
     }
 }
