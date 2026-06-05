@@ -146,6 +146,18 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(stylesSource).toContain(".supervisedMemberRowActive");
   });
 
+  it("shows immediate local feedback while a supervised start request is waiting for the backend", () => {
+    expect(routeSource).toContain("LOCAL_SUPERVISED_RUN_PREFIX");
+    expect(routeSource).toContain("buildSupervisedStartPlaceholder");
+    expect(routeSource).toContain("isLocalSupervisedStartPlaceholder");
+    expect(routeSource).toContain("onMutate: () =>");
+    expect(routeSource).toContain("启动请求已提交，正在等待后端返回真实运行记录。");
+    expect(routeSource).toContain("setLiveActiveRun(buildSupervisedStartPlaceholder");
+    expect(routeSource).toContain("visibleLiveRunSnapshot");
+    expect(routeSource).toContain("const streamLiveRun = isLocalSupervisedStartPlaceholder(liveActiveRun) ? null : liveActiveRun");
+    expect(routeSource).toContain("setLiveActiveRun((current) => (isLocalSupervisedStartPlaceholder(current) ? null : current))");
+  });
+
   it("explains closed-loop launch and dataset case limits without changing review actions", () => {
     expect(routeSource).toContain('t("caseLimitHint")');
     expect(routeSource).toContain("styles.closedLoopLaunchBlock");
