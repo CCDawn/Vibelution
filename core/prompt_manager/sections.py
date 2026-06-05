@@ -190,6 +190,7 @@ def make_user_profile_section() -> SystemPromptSection:
         name="USER_PROFILE",
         compute=compute,
         cache_break=True,
+        cache_prefix=True,
         priority=19,
         description="用户在设置区维护的身份、背景与协作偏好",
     )
@@ -446,6 +447,7 @@ def make_delegation_rules_section() -> SystemPromptSection:
         name="DELEGATION_RULES",
         compute=compute,
         cache_break=True,
+        cache_prefix=True,
         priority=36,
         description="主脑调度、子代理边界、结果回收与失败接管规则",
     )
@@ -466,6 +468,7 @@ def make_language_awareness_section() -> SystemPromptSection:
         name="LANGUAGE_AWARENESS",
         compute=compute,
         cache_break=True,
+        cache_prefix=True,
         priority=37,
         description="当前默认语言、保留原文边界与英文漂移自纠偏",
     )
@@ -490,6 +493,7 @@ def make_session_child_routing_section() -> SystemPromptSection:
         name="SESSION_CHILD_ROUTING",
         compute=compute,
         cache_break=True,
+        cache_prefix=True,
         priority=37,
         description="多事项识别、子对话创建、上下文交接与一层子对话边界",
     )

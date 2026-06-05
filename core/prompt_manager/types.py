@@ -26,6 +26,7 @@ class SystemPromptSection:
         name: 唯一标识，同时也是缓存 key。
         compute: 同步计算函数，返回章节内容或 None。
         cache_break: True = 每轮重新计算（动态章节），False = 全会话计算一次（静态章节）。
+        cache_prefix: True = 内容允许进入 prompt-cache 稳定前缀，即使每轮重新计算。
         priority: 排序优先级，数字越小越靠前。
         description: 章节描述（供 LLM 的 <active_components> 标签参考）。
         required: True 时无法被 exclude 移除。
@@ -35,6 +36,7 @@ class SystemPromptSection:
     name: str
     compute: Callable[[], Optional[str]]
     cache_break: bool = False
+    cache_prefix: bool = False
     priority: int = 50
     description: str = ""
     required: bool = False
@@ -49,6 +51,7 @@ class SectionRenderResult:
     priority: int
     required: bool
     cache_break: bool
+    cache_prefix: bool
     description: str
     content: Optional[str]
     is_empty: bool
