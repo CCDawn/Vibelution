@@ -40,10 +40,39 @@ LAUNCHER_SCRIPT_PATH = PROJECT_ROOT / "scripts" / "vibelution_launcher.ps1"
 LAUNCHER_STATE_PATH = PROJECT_ROOT / ".runtime" / "launcher" / "state.json"
 LAUNCHER_SHUTDOWN_LOG_PATH = PROJECT_ROOT / ".runtime" / "launcher" / "shutdown-request.log"
 RUNNING_SESSION_PHASES = {"running", "stopping"}
+_ACTIVE_WORK_BLOCKING_STATUSES = {
+    "",
+    "active",
+    "queued",
+    "running",
+    "stopping",
+    "started",
+    "in_progress",
+    "pausing",
+    "resuming",
+    "force_stopping",
+}
+_ACTIVE_WORK_NON_BLOCKING_STATUSES = {
+    "cancelled",
+    "closed",
+    "completed",
+    "done",
+    "failed",
+    "failed_provider",
+    "failed_runtime",
+    "idle",
+    "needs_continue",
+    "paused_limit",
+    "ready",
+    "stopped",
+    "stopped_by_user",
+    "stop_failed",
+    "superseded",
+}
 
 
 class RuntimeRestartActiveWorkBlocked(Exception):
-    """Raised when a restart would interrupt active work without confirmation."""
+    """Raised when a restart would interrupt active work."""
 
     def __init__(self, message: str, active_work_runs: list[dict[str, str]]) -> None:
         super().__init__(message)
@@ -168,7 +197,7 @@ def request_runtime_shutdown() -> dict[str, object]:
             ensure_daemon_running()
             submit_command(
                 "close_workbench",
-                args={"reason": "web_close_button", "source": "web_ui", "stopManager": True},
+                args={"reason": "web_close_button", "source": "web_ui", "stopManager": False},
                 requested_by="web_ui",
             )
             _record_shutdown_event(
@@ -187,8 +216,8 @@ def request_runtime_shutdown() -> dict[str, object]:
                 "mode": "runtime_manager",
                 "message": text_for(
                     lang,
-                    zh="正在关闭工作台，窗口会在后端停稳后自动关闭。",
-                    en="Closing the workbench. The app window will close after the backend stops.",
+                    zh="正在关闭项目工作台，Launcher 控制器会保持可再次启动。",
+                    en="Closing the project workbench. The Launcher controller will stay available for the next start.",
                 ),
                 "chatTurns": stopped_chat_turns,
                 "chatRoomRounds": stopped_chat_room_rounds,
@@ -246,7 +275,7 @@ def request_runtime_shutdown() -> dict[str, object]:
     }
 
 
-def request_runtime_restart(*, confirmed_active_work: bool = False) -> dict[str, object]:
+def request_runtime_restart() -> dict[str, object]:
     """Request a managed workbench restart through the runtime manager."""
 
     lang = get_web_language()
@@ -256,26 +285,24 @@ def request_runtime_restart(*, confirmed_active_work: bool = False) -> dict[str,
         message="Runtime restart requested from web UI.",
         fields={
             "source": "web_ui",
-            "confirmedActiveWork": bool(confirmed_active_work),
             "activeWorkCount": len(active_work_runs),
             "activeWorkKinds": _active_work_kinds(active_work_runs),
         },
     )
-    if active_work_runs and not confirmed_active_work:
+    if active_work_runs:
         message = text_for(
             lang,
-            zh="仍有团队通信或其他任务正在运行。请先等待完成，或确认后再重启工作台。",
-            en="Team communication or other work is still running. Wait for it to finish, or confirm the workbench restart.",
+            zh="有进行中的任务，无法重启 Vibelution。请等待任务完成或先停止任务。",
+            en="Vibelution cannot restart while work is still running. Wait for the task to finish or stop it first.",
         )
         _record_restart_event(
             "runtime.restart.blocked_active_work",
-            message="Runtime restart blocked because active work was not confirmed.",
+            message="Runtime restart blocked because active work is running.",
             outcome="blocked",
             level="warning",
             fields={
                 "source": "web_ui",
                 "mode": "runtime_manager",
-                "confirmedActiveWork": False,
                 "activeWorkCount": len(active_work_runs),
                 "activeWorkKinds": _active_work_kinds(active_work_runs),
                 "activeWorkRuns": active_work_runs[:8],
@@ -304,7 +331,6 @@ def request_runtime_restart(*, confirmed_active_work: bool = False) -> dict[str,
                 stopped_chat_room_rounds=stopped_chat_room_rounds,
                 stopped_chat_turns=stopped_chat_turns,
                 stopped_evolution_runs=stopped_evolution_runs,
-                confirmed_active_work=confirmed_active_work,
                 active_work_runs=active_work_runs,
             )
             | {"errorType": type(exc).__name__, "errorMessage": str(exc)},
@@ -321,7 +347,6 @@ def request_runtime_restart(*, confirmed_active_work: bool = False) -> dict[str,
             stopped_chat_room_rounds=stopped_chat_room_rounds,
             stopped_chat_turns=stopped_chat_turns,
             stopped_evolution_runs=stopped_evolution_runs,
-            confirmed_active_work=confirmed_active_work,
             active_work_runs=active_work_runs,
         )
         | {"commandId": command_id},
@@ -419,14 +444,12 @@ def _restart_event_fields(
     stopped_chat_room_rounds: list[dict[str, object]],
     stopped_chat_turns: list[dict[str, object]],
     stopped_evolution_runs: list[dict[str, object]],
-    confirmed_active_work: bool = False,
     active_work_runs: list[dict[str, str]] | None = None,
 ) -> dict[str, object]:
     active_work_runs = active_work_runs or []
     return {
         "source": "web_ui",
         "mode": mode,
-        "confirmedActiveWork": bool(confirmed_active_work),
         "activeWorkCount": len(active_work_runs),
         "activeWorkKinds": _active_work_kinds(active_work_runs),
         "chatRoomRoundCount": len(stopped_chat_room_rounds),
@@ -476,6 +499,8 @@ def _restart_guard_active_work_runs() -> list[dict[str, str]]:
     seen: set[tuple[str, str]] = set()
     for run in chat_runs:
         if not isinstance(run, dict):
+            continue
+        if not _active_work_payload_blocks_lifecycle(run):
             continue
         item = {
             "kind": "chat_turn",
@@ -1150,6 +1175,8 @@ def _active_work_runs(work_runs: dict) -> list[dict[str, str]]:
 
 
 def _active_work_run_item(kind: str, payload: dict) -> dict[str, str]:
+    if not _active_work_payload_blocks_lifecycle(payload):
+        return {}
     run_id = str(payload.get("runId") or payload.get("sessionId") or "").strip()
     status = str(payload.get("status") or payload.get("currentPhase") or "").strip()
     return {
@@ -1158,6 +1185,23 @@ def _active_work_run_item(kind: str, payload: dict) -> dict[str, str]:
         "status": status,
         "sessionId": str(payload.get("sessionId") or "").strip(),
     }
+
+
+def _active_work_payload_blocks_lifecycle(payload: dict) -> bool:
+    if str(payload.get("finishedAt") or payload.get("endedAt") or "").strip():
+        return False
+    status = str(
+        payload.get("status")
+        or payload.get("currentPhase")
+        or payload.get("phase")
+        or payload.get("runtimeStatus")
+        or ""
+    ).strip().lower()
+    if status in _ACTIVE_WORK_NON_BLOCKING_STATUSES:
+        return False
+    if status in _ACTIVE_WORK_BLOCKING_STATUSES:
+        return True
+    return bool(status)
 
 
 def _active_work_run_detail(lang: str, active_work_runs: list[dict[str, str]]) -> str:

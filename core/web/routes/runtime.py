@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import json
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from fastapi.responses import StreamingResponse
 
@@ -42,14 +42,14 @@ def runtime_shutdown() -> dict:
 
 
 @router.post("/runtime/restart", status_code=202)
-def runtime_restart(confirmed_active_work: bool = Query(default=False, alias="confirmedActiveWork")) -> dict:
+def runtime_restart() -> dict:
     try:
-        return request_runtime_restart(confirmed_active_work=confirmed_active_work)
+        return request_runtime_restart()
     except RuntimeRestartActiveWorkBlocked as exc:
         raise HTTPException(
             status_code=409,
             detail={
-                "code": "active_work_requires_confirmation",
+                "code": "active_work_restart_blocked",
                 "message": exc.message,
                 "activeWorkRuns": exc.active_work_runs,
             },
@@ -67,7 +67,7 @@ async def runtime_events() -> StreamingResponse:
         while True:
             payload = {
                 "type": "heartbeat",
-                "at": datetime.now(UTC).isoformat(),
+                "at": datetime.now(timezone.utc).isoformat(),
             }
             yield f"event: heartbeat\ndata: {json.dumps(payload)}\n\n"
             await asyncio.sleep(15)
