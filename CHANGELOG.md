@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.24 - 2026-06-05
+
+- Added the Challenge Cup steward-pack knowledge-ingestion API, submitting valid `steward_pack_draft` candidates to Team Knowledge as a `SourceArtifact` plus pending `RefinementProposal`, with optional pending rating suggestion.
+- Moved submitted steward packs into `steward_pending_knowledge_review` while keeping official `KnowledgeItem`, RAG, and graph writes blocked until the approval gate.
+- Updated the Challenge Cup research-flow HTML and technical plan to show the M5 pending-review bridge and remaining official-sync work.
+
 ## 0.10.23 - 2026-06-05
 
 - Added the Challenge Cup `steward_pack_draft` CandidateStore gate for knowledge-governance ingestion drafts, requiring traceable candidate IDs, target domain, source trace, proposal payload, rating suggestion, risk summary, and `approvalRequired=true`.

@@ -8,6 +8,7 @@ from core.web.services import (
     chat_room_service,
     project_agent_bus_service,
     session_service,
+    team_knowledge_service,
     team_service,
     team_workflow_orchestration_service,
 )
@@ -22,6 +23,7 @@ def _use_tmp_project_root(tmp_path, monkeypatch):
     monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(project_agent_bus_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(team_knowledge_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(team_workflow_orchestration_service, "PROJECT_ROOT", tmp_path)
 
@@ -452,6 +454,70 @@ def test_team_workflow_routes_record_steward_pack_draft(tmp_path, monkeypatch):
     assert response.json()["validation"]["valid"] is True
     assert response.json()["candidate"]["currentWorkflowNode"] == "steward_ingestion"
     assert response.json()["candidate"]["currentState"] == "steward_pack_draft"
+
+
+def test_team_workflow_routes_submit_steward_pack_to_knowledge_ingestion(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    client = _client()
+    steward = agent_directory_service.create_agent_instance(display_name="Knowledge Steward Agent")
+    team = client.post(
+        "/api/teams",
+        json={
+            "name": "挑战杯科研团队",
+            "members": [{"agentId": steward["agentId"], "role": "steward"}],
+        },
+    ).json()
+    knowledge_base = client.post(
+        f"/api/teams/{team['teamId']}/knowledge-bases",
+        json={"name": "Challenge Cup Governed Knowledge", "actorAgentId": steward["agentId"]},
+    ).json()
+    candidate = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/local-research-model/outputs",
+        json={
+            "taskType": "steward_pack_draft",
+            "title": "Steward ingestion pack draft",
+            "createdByAgent": steward["agentId"],
+            "output": {
+                "candidateType": "review_record",
+                "sourceRefs": [{"type": "paper", "id": "paper-1", "label": "Paper 1"}],
+                "evidenceRefs": [{"type": "review", "id": "review-1", "label": "Review 1"}],
+                "claims": [{"claim": "Candidate is ready for governance.", "sourceRef": "paper-1"}],
+                "candidateIds": ["hypothesis-1", "review-1"],
+                "targetDomain": "challenge_cup_neuro_algorithm",
+                "sourceTrace": {"sourceIds": ["paper-1"], "reviewRecordIds": ["review-1"]},
+                "riskSummary": "Evidence is traceable; official ingestion still requires approval.",
+                "proposalPayload": {"title": "Governed research candidate", "summary": "Governed research candidate."},
+                "ratingSuggestion": {"importanceLevel": "high", "confidence": 0.62, "stability": "evolving", "reviewPriority": "elevated"},
+                "approvalRequired": True,
+                "uncertainty": [],
+                "riskFlags": ["approval_required"],
+                "confidence": 0.62,
+                "nextAction": "send_to_ingestion_approval_gate",
+                "requiresReview": True,
+            },
+        },
+    ).json()["candidate"]
+
+    response = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/steward-packs/{candidate['candidateId']}/knowledge-ingestion",
+        json={
+            "knowledgeBaseId": knowledge_base["knowledgeBaseId"],
+            "proposedByAgentId": steward["agentId"],
+        },
+    )
+    items_response = client.get(
+        f"/api/knowledge-bases/{knowledge_base['knowledgeBaseId']}/items",
+        params={"agentId": steward["agentId"]},
+    )
+
+    assert response.status_code == 201, response.text
+    payload = response.json()
+    assert payload["candidate"]["currentState"] == "steward_pending_knowledge_review"
+    assert payload["knowledgeIngestion"]["package"]["proposal"]["status"] == "pending"
+    assert payload["knowledgeIngestion"]["officialBoundary"]["writesOfficialKnowledge"] is False
+    assert payload["knowledgeIngestion"]["officialBoundary"]["writesOfficialGraph"] is False
+    assert payload["knowledgeIngestion"]["ratingSuggestion"]["status"] == "pending"
+    assert items_response.json()["summary"]["itemCount"] == 0
 
 
 def test_team_workflow_route_invokes_local_research_model(tmp_path, monkeypatch):

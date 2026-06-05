@@ -232,9 +232,9 @@
                   <span>CandidateStore 中已有 proposalPayload、ratingSuggestion、sourceTrace，且 approvalRequired=true。</span>
                 </div>
 <div class="state-row">
-                  <b>steward_recommended</b>
-                  <strong>治理建议完成</strong>
-                  <span>知识治理 Agent 复核后生成正式 proposal/rating 待审对象。</span>
+                  <b>steward_pending_knowledge_review</b>
+                  <strong>待审入库对象</strong>
+                  <span>已创建 SourceArtifact、pending RefinementProposal，可选 pending ratingSuggestion；仍未写正式知识。</span>
                 </div>
 <div class="state-row">
                   <b>candidate_graph_visible</b>
@@ -392,7 +392,7 @@
                 </div>
 <div class="service-row">
                   <b>memory_ingestion_bridge</b>
-                  <span>复用现有 knowledge tools 与 /api/knowledge-bases/*，把摄取包映射到正式知识平台。</span>
+                  <span>已复用 Team Knowledge create_ingestion_package，把 steward_pack_draft 映射为 SourceArtifact + pending RefinementProposal；可选创建 pending ratingSuggestion。</span>
                 </div>
           </div>
         </div>
@@ -717,6 +717,11 @@
               <span>steward_pack_draft 必须含 candidateIds、targetDomain、sourceTrace、riskSummary、proposalPayload、ratingSuggestion 且 approvalRequired=true；包含 officialSync/applyNow/writeOfficialGraph 时进入 steward_needs_revision。</span>
             </div>
 <div class="blueprint-row compact">
+              <b>steward_pack 待审入库</b>
+              <strong>/api/teams/{teamId}/workflow-orchestration/steward-packs/{candidateId}/knowledge-ingestion</strong>
+              <span>有效 steward_pack_draft 可提交到指定 knowledgeBaseId，创建 SourceArtifact、pending RefinementProposal 和可选 pending ratingSuggestion；候选进入 steward_pending_knowledge_review。</span>
+            </div>
+<div class="blueprint-row compact">
               <b>candidate_graph 预览</b>
               <strong>CandidateStore candidate_graph snapshot</strong>
               <span>POST candidate-graph 会从当前候选重建 candidate_only 图谱，输出 nodes/edges/missingLinks/unreviewedNodes/officialBoundary；断链时 qualityStatus=broken_links。</span>
@@ -767,8 +772,8 @@
 <div class="blueprint-row">
               <b>M5</b>
               <strong>知识治理与正式同步</strong>
-              <span>steward_pack_draft 后端草稿包门禁已落地：必填 candidateIds/targetDomain/sourceTrace/riskSummary/proposalPayload/ratingSuggestion/approvalRequired。</span>
-              <span>当前只写 CandidateStore 草稿；未通过授权审批门禁不能写 Team Knowledge/RAG/正式图谱。</span>
+              <span>steward_pack_draft 后端草稿包门禁与待审入库桥已落地：有效草稿可提交为 SourceArtifact + pending RefinementProposal，可选 pending ratingSuggestion。</span>
+              <span>当前只写 Team Knowledge 待审对象；未通过授权审批门禁不能创建正式 KnowledgeItem/RAG/正式图谱。</span>
             </div>
       </div>
       <div class="tag-row">
@@ -836,8 +841,8 @@
 <div class="agent-row">
         <b>07</b>
         <strong>Knowledge Steward Agent / agent-knowledge-steward</strong>
-        <span>后端草稿包门禁已接入 CandidateStore；正式 knowledge tools 映射待接</span>
-        <span>sourceTrace 校验 / proposalPayload / ratingSuggestion / approvalRequired=true / official write 禁止项</span>
+        <span>后端草稿包门禁与 Team Knowledge 待审入库桥已接入；正式审批/应用仍待接</span>
+        <span>sourceTrace 校验 / proposalPayload / ratingSuggestion / approvalRequired=true / SourceArtifact / pending RefinementProposal / official write 禁止项</span>
         <span>必须经 Knowledge Steward Agent / Ingestion Approval Gate 确认，不能由科研执行 Agent 或本地模型直接入库。</span>
       </div>
 <div class="agent-row">
@@ -933,7 +938,7 @@
         <strong>知识治理 Agent</strong>
         <span>agent-knowledge-steward 固定存在；ToolPolicy 含 knowledge proposal/ingestion/governance/rating 工具；边界 proposal_and_rating_suggestion_only</span>
         <b class="status-pill ready">高度匹配</b>
-        <span>07 节点可直接对齐知识治理 Agent；但该 Agent 不能直接应用正式知识，只能提交建议和待审摄取包。</span>
+        <span>07 节点已对齐 Team Knowledge 待审摄取包；该 Agent 不能直接应用正式知识，只能提交建议和待审对象。</span>
       </div>
 <div class="alignment-row">
         <strong>正式知识平台</strong>
@@ -1018,8 +1023,8 @@
             </article>
 <article class="gate-card">
               <h3>治理门</h3>
-              <p><b>通过：</b>知识治理 Agent 只给 proposal/rating，不直接写正式库</p>
-              <p><b>进入：</b>steward_recommended</p>
+              <p><b>通过：</b>知识治理 Agent 只创建 SourceArtifact + pending RefinementProposal + 可选 pending ratingSuggestion，不直接创建 KnowledgeItem</p>
+              <p><b>进入：</b>steward_pending_knowledge_review</p>
               <p><b>失败：</b>退回 steward_needs_revision</p>
             </article>
 <article class="gate-card">
@@ -1260,6 +1265,11 @@
               <strong>/api/teams/{team_id}/workflow-orchestration/local-research-model/invoke</strong>
               <span>构建任务包、调用 bossAGI-standard / qwen3.5-9b、解析 JSON 并写入 CandidateStore；解析失败不入库。</span>
             </div>
+<div class="blueprint-row compact">
+              <b>POST</b>
+              <strong>/api/teams/{team_id}/workflow-orchestration/steward-packs/{candidate_id}/knowledge-ingestion</strong>
+              <span>把有效 steward_pack_draft 提交为 SourceArtifact + pending RefinementProposal，可选 pending ratingSuggestion；不创建 KnowledgeItem/RAG/正式图谱。</span>
+            </div>
       </div>
     </section>
 
@@ -1350,8 +1360,8 @@
 <a class="node-card" href="research_flow_pages/07-steward-ingestion.html">
                 <span class="num">07</span>
                 <h3>知识治理入库</h3>
-                <p>steward_pack_draft 先进入 CandidateStore 草稿包，正式入库仍由审批门禁控制。</p>
-                <div class="tag-row"><span class="tag done">M5 草稿包门禁已落地</span><span class="tag">Knowledge Steward Agent · agent-knowledge-steward</span></div>
+                <p>steward_pack_draft 可提交到 Team Knowledge 待审队列，正式入库仍由审批门禁控制。</p>
+                <div class="tag-row"><span class="tag done">M5 待审入库桥已落地</span><span class="tag">Knowledge Steward Agent · agent-knowledge-steward</span></div>
               </a>
 <a class="node-card" href="research_flow_pages/08-candidate-graph.html">
                 <span class="num">08</span>
