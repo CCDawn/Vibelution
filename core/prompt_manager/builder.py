@@ -36,18 +36,14 @@ def get_system_prompt(
     Returns:
         组装完成的 SystemPrompt。
     """
-    parts: List[str] = []
+    prefix_parts: List[str] = []
+    dynamic_parts: List[str] = []
     results: List[SectionRenderResult] = []
-    found_boundary = False
 
     for section in sections:
         if section.cache_break:
             # 动态章节：每轮重算，不读缓存
             content = section.compute()
-            # 在第一个动态章节前插入边界标记
-            if not found_boundary and content:
-                parts.append(SYSTEM_PROMPT_DYNAMIC_BOUNDARY)
-                found_boundary = True
         else:
             # 静态章节：优先从缓存读取
             if cache.has(section.name):
@@ -61,6 +57,7 @@ def get_system_prompt(
             priority=section.priority,
             required=section.required,
             cache_break=section.cache_break,
+            cache_prefix=section.cache_prefix,
             description=section.description,
             content=content,
             is_empty=not bool(content),
@@ -68,12 +65,21 @@ def get_system_prompt(
         results.append(rendered)
 
         if content:
-            parts.append(content)
+            if not section.cache_break or section.cache_prefix:
+                prefix_parts.append(content)
+            else:
+                dynamic_parts.append(content)
 
     # 可用章节提示：基于本次真实渲染结果 + 注册表
     available = _build_available_sections(results, all_sections or sections)
     if available:
-        parts.insert(0, available)
+        dynamic_parts.insert(0, available)
+
+    parts: List[str] = []
+    parts.extend(prefix_parts)
+    if dynamic_parts:
+        parts.append(SYSTEM_PROMPT_DYNAMIC_BOUNDARY)
+        parts.extend(dynamic_parts)
 
     return PromptBuildResult(
         prompt=as_system_prompt(parts),
