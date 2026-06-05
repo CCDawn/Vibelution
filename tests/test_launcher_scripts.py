@@ -2883,6 +2883,63 @@ Write-Output "ok"
     assert result.stdout.strip().splitlines()[-1] == "ok"
 
 
+def test_launcher_restart_guard_blocks_when_active_work_probe_fails_on_healthy_backend(tmp_path):
+    result = _run_launcher_ast_harness(
+        tmp_path,
+        """
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$LauncherPath
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$source = Get-Content -Raw -LiteralPath $LauncherPath
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors -and $parseErrors.Count -gt 0) {
+    throw "Launcher script parse failed: $($parseErrors[0].Message)"
+}
+
+$functionAst = $ast.Find({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -eq "Test-LauncherRestartActiveWorkBlocked"
+}, $true)
+if ($null -eq $functionAst) {
+    throw "Test-LauncherRestartActiveWorkBlocked was not found."
+}
+. ([scriptblock]::Create($functionAst.Extent.Text))
+
+$script:url = "http://127.0.0.1:8000"
+$script:notes = @()
+$script:events = @()
+function Test-WebHealthy { return $true }
+function Write-Note { param([string]$Message) $script:notes += $Message }
+function Write-LauncherControlLog {
+    param([string]$Event, [string]$Message, [string]$Level = "info", [hashtable]$Fields = @{})
+    $script:events += ,@{ event = $Event; message = $Message; level = $Level; fields = $Fields }
+}
+function Invoke-WebRequest {
+    param([string]$Uri, [int]$TimeoutSec, [switch]$UseBasicParsing)
+    throw "status timeout"
+}
+
+$blocked = Test-LauncherRestartActiveWorkBlocked
+if (-not $blocked) { throw "healthy backend with failed active-work probe should block restart." }
+if ($script:notes[0] -notmatch "有进行中的任务，无法重启 Vibelution") { throw "probe failure block message was not user-readable." }
+if ($script:events[0].event -ne "launcher.restart.blocked_active_work_probe_failed") { throw "probe failure block event was not logged." }
+if ($script:events[0].fields.error -notmatch "status timeout") { throw "probe failure error was not logged." }
+Write-Output "ok"
+""",
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip().splitlines()[-1] == "ok"
+
+
 def test_launcher_backend_candidates_include_tracked_launch_and_listener_pids(tmp_path):
     result = _run_launcher_ast_harness(
         tmp_path,
