@@ -199,11 +199,31 @@ def request_runtime_shutdown() -> dict[str, object]:
     """Request the local workbench backend to stop."""
 
     lang = get_web_language()
+    active_work_runs = _restart_guard_active_work_runs()
     _record_shutdown_event(
         "runtime.shutdown.requested",
         message="Runtime shutdown requested from web UI.",
-        fields={"source": "web_ui"},
+        fields={
+            "source": "web_ui",
+            "activeWorkCount": len(active_work_runs),
+            "activeWorkKinds": _active_work_kinds(active_work_runs),
+        },
     )
+    if active_work_runs:
+        message = _lifecycle_active_work_block_message("shutdown", lang)
+        _record_shutdown_event(
+            "runtime.shutdown.blocked_active_work",
+            message="Runtime shutdown blocked by active work.",
+            outcome="blocked",
+            level="warning",
+            fields={
+                "source": "web_ui",
+                "activeWorkCount": len(active_work_runs),
+                "activeWorkKinds": _active_work_kinds(active_work_runs),
+                "activeWorkRuns": active_work_runs[:8],
+            },
+        )
+        raise RuntimeRestartActiveWorkBlocked(message, active_work_runs[:8])
     stopped_chat_room_rounds = _stop_active_chat_room_rounds_before_shutdown()
     stopped_chat_turns = _stop_active_chat_turns_before_shutdown()
     stopped_evolution_runs = _stop_active_evolution_runs_before_shutdown()
@@ -305,71 +325,19 @@ def request_runtime_restart() -> dict[str, object]:
         },
     )
     if active_work_runs:
-        try:
-            ensure_daemon_running()
-            command = submit_command(
-                "restart_workbench",
-                args={
-                    "reason": "web_restart_button",
-                    "source": "web_ui",
-                    "noBrowser": False,
-                    "deferredUntilActiveWorkClear": True,
-                    "queuedBecauseActiveWork": True,
-                    "queuedActiveWorkCount": len(active_work_runs),
-                    "queuedActiveWorkRuns": active_work_runs[:8],
-                },
-                requested_by="web_ui",
-            )
-        except Exception as exc:
-            _record_restart_event(
-                "runtime.restart.failed",
-                message="Runtime deferred restart could not be queued through runtime manager.",
-                outcome="failed",
-                level="error",
-                fields={
-                    "source": "web_ui",
-                    "mode": "runtime_manager",
-                    "activeWorkCount": len(active_work_runs),
-                    "activeWorkKinds": _active_work_kinds(active_work_runs),
-                    "activeWorkRuns": active_work_runs[:8],
-                    "errorType": type(exc).__name__,
-                    "errorMessage": str(exc),
-                },
-            )
-            raise
-
-        command_id = str(command.get("commandId") or "")
         _record_restart_event(
-            "runtime.restart.queued_active_work",
-            message="Runtime restart queued until active work clears.",
-            outcome="queued",
+            "runtime.restart.blocked_active_work",
+            message="Runtime restart blocked by active work.",
+            outcome="blocked",
             level="warning",
             fields={
                 "source": "web_ui",
-                "mode": "runtime_manager",
-                "commandId": command_id,
                 "activeWorkCount": len(active_work_runs),
                 "activeWorkKinds": _active_work_kinds(active_work_runs),
                 "activeWorkRuns": active_work_runs[:8],
             },
         )
-        return {
-            "accepted": True,
-            "queued": True,
-            "pendingRestart": True,
-            "mode": "runtime_manager",
-            "commandId": command_id,
-            "message": text_for(
-                lang,
-                zh="已加入重启等待队列。当前任务完成后，Runtime Manager 会自动按队列重启 Vibelution。",
-                en="Restart queued. Runtime Manager will restart Vibelution automatically after active work finishes.",
-            ),
-            "activeWorkRuns": active_work_runs[:8],
-            "activeWorkCount": len(active_work_runs),
-            "chatTurns": [],
-            "chatRoomRounds": [],
-            "evolutionRuns": [],
-        }
+        raise RuntimeRestartActiveWorkBlocked(_lifecycle_active_work_block_message("restart", lang), active_work_runs[:8])
     stopped_chat_room_rounds = _stop_active_chat_room_rounds_before_shutdown()
     stopped_chat_turns = _stop_active_chat_turns_before_shutdown()
     stopped_evolution_runs = _stop_active_evolution_runs_before_shutdown()
@@ -562,6 +530,20 @@ def _status_counts(items: list[dict[str, object]]) -> dict[str, int]:
 
 def _active_work_kinds(items: list[dict[str, str]]) -> list[str]:
     return sorted({str(item.get("kind") or "").strip() for item in items if str(item.get("kind") or "").strip()})
+
+
+def _lifecycle_active_work_block_message(action: str, lang: str) -> str:
+    if action == "restart":
+        return text_for(
+            lang,
+            zh="有进行中的任务，无法重启 Vibelution。请等待任务完成或先停止任务。",
+            en="Vibelution cannot restart while work is active. Wait for it to finish or stop the task first.",
+        )
+    return text_for(
+        lang,
+        zh="有进行中的任务，无法停止 Vibelution。请等待任务完成或先停止任务。",
+        en="Vibelution cannot stop while work is active. Wait for it to finish or stop the task first.",
+    )
 
 
 def _restart_guard_active_work_runs() -> list[dict[str, str]]:

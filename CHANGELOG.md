@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.31 - 2026-06-06
+
+- Changed Launcher and runtime stop/restart requests to reject active project work with `409 active_work_*_blocked` instead of queuing or silently stopping chat, group, evolution, or worktree runs.
+- Added blocked active-work lifecycle evidence for runtime and launcher stop/restart paths, preserving active task state for later diagnosis.
+- Updated Launcher copy so active work is presented as a hard stop/restart guard, with legacy deferred restart queue text marked as historical diagnostics rather than an automatic action.
+
 ## 0.10.30 - 2026-06-06
 
 - Added the Challenge Cup source-extraction API for local PDF `source_manifest` candidates, computing `sha256`, extracting page anchors and excerpts, and writing traceable `metadata.sourceExtraction` evidence back to CandidateStore.
