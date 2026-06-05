@@ -483,7 +483,13 @@ class PromptManager:
         include: Optional[List[str]],
         active_override: Optional[List[str]],
     ) -> List[SystemPromptSection]:
-        """按当前任务相关性裁剪高噪声可选 section。"""
+        """按当前任务相关性裁剪高噪声可选 section。
+
+        约束：会落进 cacheable system prefix 的 section（静态章节，或
+        `cache_prefix=True` 的动态章节）不参与基于 mode/goal 的关键词裁剪——
+        关键词来源不稳定，让这类 section 闪烁会破坏 prompt cache 前缀的字节
+        稳定性。如要省 token，请用显式 `exclude=` 或 `_active_sections_override`。
+        """
         explicit_names = set(include or active_override or [])
         pruned: List[SystemPromptSection] = []
         for section in sections:
@@ -491,6 +497,9 @@ class PromptManager:
                 pruned.append(section)
                 continue
             if section.name in explicit_names:
+                pruned.append(section)
+                continue
+            if not section.cache_break or section.cache_prefix:
                 pruned.append(section)
                 continue
             if self._is_optional_section_relevant(section.name):

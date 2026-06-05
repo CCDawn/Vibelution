@@ -92,44 +92,6 @@ from tools.memory_tools import get_current_goal
 from tools.rebirth_tools import handle_restart_request  # noqa: F401
 
 
-def _runtime_context_cache_prefix_text(blocks: List[str]) -> str:
-    normalized: List[str] = []
-    for block in list(blocks or []):
-        text = str(block or "").strip()
-        if text:
-            normalized.append(text)
-    if not normalized:
-        return ""
-    return "\n\n".join(["## Agent Stable Runtime Context", *normalized])
-
-
-def _merge_runtime_context_into_cacheable_system_message(system_message: Any, runtime_context: str) -> Any:
-    text = str(runtime_context or "").strip()
-    if not text:
-        return system_message
-    if not isinstance(system_message, dict):
-        return system_message
-    if str(system_message.get("role") or "").strip().lower() != "system":
-        return system_message
-    content = system_message.get("content")
-    if not isinstance(content, list):
-        return system_message
-    merged_blocks: List[Any] = []
-    merged = False
-    for block in content:
-        if not merged and isinstance(block, dict) and block.get("cache_control"):
-            updated = dict(block)
-            original_text = str(updated.get("text") or "").rstrip()
-            updated["text"] = "\n\n".join(part for part in [original_text, text] if part)
-            merged_blocks.append(updated)
-            merged = True
-        else:
-            merged_blocks.append(block)
-    if not merged:
-        return system_message
-    updated_message = dict(system_message)
-    updated_message["content"] = merged_blocks
-    return updated_message
 from tools.agent_tools import set_subagent_stream_sink  # noqa: F401
 
 # 导入 CLI UI
@@ -1498,33 +1460,20 @@ class SelfEvolvingAgent:
         )
         pending_runtime_context_blocks = list(getattr(self, "_pending_runtime_context_blocks", []) or [])
         self._pending_runtime_context_blocks = []
-        cache_prefix_runtime_context = _runtime_context_cache_prefix_text(pending_runtime_context_blocks)
         if pending_runtime_context_blocks:
-            if messages and cache_prefix_runtime_context:
-                merged_system = _merge_runtime_context_into_cacheable_system_message(
-                    messages[0],
-                    cache_prefix_runtime_context,
-                )
-                if merged_system != messages[0]:
-                    messages[0] = merged_system
-                    _record_agent_scene_event(
-                        "prompt",
-                        "agent.runtime_context_cache_prefix_merged",
-                        message="Agent runtime context merged into cacheable system prefix.",
-                        fields={
-                            "runtimeContextBlockCount": len(pending_runtime_context_blocks),
-                            "runtimeContextChars": len(cache_prefix_runtime_context),
-                            "systemMessageKind": "structured_cache_control",
-                        },
-                    )
-                else:
-                    insert_at = 1 if messages else 0
-                    for block in reversed(pending_runtime_context_blocks):
-                        messages.insert(insert_at, SystemMessage(content=block))
-            else:
-                insert_at = 1 if messages else 0
-                for block in reversed(pending_runtime_context_blocks):
-                    messages.insert(insert_at, SystemMessage(content=block))
+            insert_at = 1 if messages else 0
+            for block in reversed(pending_runtime_context_blocks):
+                messages.insert(insert_at, SystemMessage(content=block))
+            _record_agent_scene_event(
+                "prompt",
+                "agent.runtime_context_inserted_as_system",
+                message="Agent runtime context inserted as independent system messages.",
+                fields={
+                    "runtimeContextBlockCount": len(pending_runtime_context_blocks),
+                    "runtimeContextChars": sum(len(str(b or "")) for b in pending_runtime_context_blocks),
+                    "systemMessageKind": "independent_system_message",
+                },
+            )
         try:
             get_ui().note_context_window(
                 estimate_messages_tokens(messages),
@@ -1571,10 +1520,7 @@ class SelfEvolvingAgent:
                 current_sp = self.prompt_manager.build()
                 current_prompt = to_string(current_sp)
                 if current_prompt != self._cached_system_prompt:
-                    messages[0] = _merge_runtime_context_into_cacheable_system_message(
-                        build_system_message(current_sp),
-                        cache_prefix_runtime_context,
-                    )
+                    messages[0] = build_system_message(current_sp)
                     self._cached_system_prompt = current_prompt
                 try:
                     ui.note_context_window(

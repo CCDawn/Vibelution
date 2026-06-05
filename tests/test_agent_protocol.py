@@ -230,24 +230,11 @@ class TestToolMessageFlow:
         assert result is not None
         assert captured["cancel_reason"] == "操作者请求停止当前轮。"
 
-    def test_runtime_context_merges_into_cacheable_system_prefix(self):
-        system_message = {
-            "role": "system",
-            "content": [
-                {"type": "text", "text": "stable", "cache_control": {"type": "ephemeral"}},
-                {"type": "text", "text": "dynamic"},
-            ],
-        }
+    def test_runtime_context_stays_out_of_cacheable_system_prefix(self):
+        """运行时上下文不得拼进带 cache_control 的系统块，否则破坏 prompt cache 前缀稳定性。"""
 
-        merged = agent_module._merge_runtime_context_into_cacheable_system_message(
-            system_message,
-            "## Agent Runtime Context\nagent stable facts",
-        )
-
-        assert merged["content"][0]["cache_control"] == {"type": "ephemeral"}
-        assert "stable" in merged["content"][0]["text"]
-        assert "agent stable facts" in merged["content"][0]["text"]
-        assert merged["content"][1]["text"] == "dynamic"
+        assert not hasattr(agent_module, "_merge_runtime_context_into_cacheable_system_message")
+        assert not hasattr(agent_module, "_runtime_context_cache_prefix_text")
 
     def test_invoke_llm_returns_none_for_exhausted_llmerror(self, monkeypatch):
         calls = {"count": 0}
@@ -3142,21 +3129,24 @@ class TestLocalProviderBootstrap:
         pending = list(agent._pending_runtime_context_blocks)
         assert pending == ["## Agent Runtime Context\nPromptTemplateId: prompt-supervised-baseline"]
 
-        cache_prefix_context = agent_module._runtime_context_cache_prefix_text(pending)
-        messages[0] = agent_module._merge_runtime_context_into_cacheable_system_message(
-            messages[0],
-            cache_prefix_context,
-        )
+        # 模拟 _run_one_turn 起点：把 pending 作为独立 SystemMessage 插到 messages[1]。
+        agent._pending_runtime_context_blocks = []
+        insert_at = 1 if messages else 0
+        for block in reversed(pending):
+            messages.insert(insert_at, SystemMessage(content=block))
 
         assert resumed is False
+        # 关键不变量：cacheable 系统块的文本不得被运行时上下文污染。
         assert isinstance(messages[0], dict)
         assert messages[0]["content"][0]["cache_control"] == {"type": "ephemeral"}
-        assert "prompt-supervised-baseline" in messages[0]["content"][0]["text"]
-        assert not any(
-            isinstance(message, SystemMessage)
+        assert "prompt-supervised-baseline" not in messages[0]["content"][0]["text"]
+        # 运行时上下文以独立 SystemMessage 形式存在于系统块之后。
+        runtime_carriers = [
+            message for message in messages[1:]
+            if isinstance(message, SystemMessage)
             and "prompt-supervised-baseline" in str(message.content)
-            for message in messages[1:]
-        )
+        ]
+        assert len(runtime_carriers) == 1
 
 
 class TestDelegationExposure:

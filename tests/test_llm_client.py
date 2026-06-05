@@ -1760,6 +1760,42 @@ def test_automatic_prompt_cache_uses_stable_default_cache_key_when_not_configure
     assert payload_two["prompt_cache_key"] == payload_one["prompt_cache_key"]
 
 
+def test_default_prompt_cache_key_partitions_by_agent_and_context():
+    """默认 cache key 应按 agent.name 和 ContextVar 分片，避免多 session 共享同一 OpenAI cache shard。"""
+    from core.llm.payload_builder import prompt_cache_partition_scope
+
+    def make(agent_name: str = "alpha"):
+        return make_config(
+            **{
+                "agent.name": agent_name,
+                "llm.providers.default.kind": "xiaomi",
+                "llm.providers.default.api_key": "test-key",
+                "llm.providers.default.base_url": "https://token-plan-cn.xiaomimimo.com/v1",
+                "llm.providers.default.compat_mode": "openai",
+                "llm.profiles.primary.provider_id": "default",
+                "llm.profiles.primary.model": "mimo-v2.5-pro",
+                "llm.profiles.primary.prompt_cache.mode": "automatic",
+            }
+        )
+
+    client_a = LLMClient(config=make("alpha"), backend=lambda payload: payload)
+    client_b = LLMClient(config=make("beta"), backend=lambda payload: payload)
+    key_alpha = client_a._build_payload([{"role": "system", "content": "stable"}])["prompt_cache_key"]
+    key_beta = client_b._build_payload([{"role": "system", "content": "stable"}])["prompt_cache_key"]
+    assert "alpha" in key_alpha and "alpha" not in key_beta
+    assert "beta" in key_beta
+    assert key_alpha != key_beta
+
+    # ContextVar 分片：相同 agent 不同会话也能分片。
+    with prompt_cache_partition_scope("conv-1"):
+        key_conv1 = client_a._build_payload([{"role": "system", "content": "stable"}])["prompt_cache_key"]
+    with prompt_cache_partition_scope("conv-2"):
+        key_conv2 = client_a._build_payload([{"role": "system", "content": "stable"}])["prompt_cache_key"]
+    assert "conv-1" in key_conv1
+    assert "conv-2" in key_conv2
+    assert key_conv1 != key_conv2 != key_alpha
+
+
 def test_automatic_prompt_cache_logs_design_even_when_payload_strips_cache_control(monkeypatch):
     config = make_config(
         **{

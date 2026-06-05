@@ -351,14 +351,20 @@ class TestBuildAPI:
         assert isinstance(result, str)
         assert "优化代码" in result
 
-    def test_default_build_keeps_full_spec_but_prunes_other_low_relevance_optional_sections(self):
+    def test_default_build_keeps_prefix_anchored_sections_but_prunes_volatile_dynamic_sections(self):
+        """落进 cacheable system prefix 的 section 必须始终被包含，避免按 mode/goal 关键词闪烁
+        破坏 prompt cache 字节稳定性；纯动态可选 section（ENV_INFO/CONFIG_AWARENESS）按相关性裁剪。"""
         pm = PromptManager()
         sp = pm.build()
         result = to_string(sp)
-        assert "## 当前任务局部地图" not in result
         assert "# SPEC 开发流程规范" in result
         assert "## SPEC 运行时摘要" in result
-        assert "## Git 提交规则" not in result
+        # CODEBASE_MAP / GIT_RULES 是 prefix 段成员，已注册即始终经过裁剪保留（实际是否落入 prefix
+        # 取决于 compute 是否返回非空，is_empty=True 则 builder 不会把它放进 prefix_parts）。
+        selected_names = [s.name for s in pm._select_sections(include=None, exclude=None)]
+        assert "CODEBASE_MAP" in selected_names
+        assert "GIT_RULES" in selected_names
+        # 纯动态 + 非 cache_prefix 的 section 仍按相关性裁剪。
         assert "## 配置自感知" not in result
         assert "## 当前环境" not in result
 
@@ -422,16 +428,21 @@ class TestBuildAPI:
         result = to_string(sp)
         assert "# SPEC 开发流程规范" in result
 
-    def test_readonly_log_diagnosis_keeps_heavy_sections_trimmed(self):
+    def test_readonly_log_diagnosis_does_not_flicker_prefix_sections(self):
+        """只读日志诊断场景下，prefix 段成员（CODEBASE_MAP/GIT_RULES/SPEC）仍被保留——
+        让它们按 mode 闪烁会破坏 prompt cache 字节稳定。如要省 token，请用 exclude= 显式裁剪。"""
         pm = PromptManager()
         sp = pm.build(
             current_goal="分析 log_info/conversation_20260511_162502.jsonl 中子 agent 为什么会超时，只做诊断，不要修改代码。",
             core_context="目标锚点：log_info/conversation_20260511_162502.jsonl",
         )
+        selected_names = [s.name for s in pm._select_sections(include=None, exclude=None)]
+        assert "CODEBASE_MAP" in selected_names
+        assert "GIT_RULES" in selected_names
+        assert "SPEC" in selected_names or "SPEC" not in [s.name for s in pm._sections.values()]
+        # 纯动态段（ENV_INFO）仍按相关性裁剪——只读日志诊断下不重要。
         result = to_string(sp)
-        assert "## 当前任务局部地图" not in result
-        assert "## Git 提交规则" not in result
-        assert "# SPEC 开发流程规范" not in result
+        assert "## 当前环境" not in result
 
     def test_build_include_filter(self):
         pm = PromptManager()
@@ -823,12 +834,15 @@ class TestCache:
         assert index["INDEX_TEST"]["is_empty"] is False
 
     def test_build_status_records_omitted_heavy_sections(self):
+        """heavy section 漂移仅记录纯动态成员；prefix 段成员（CODEBASE_MAP/SPEC/GIT_RULES）
+        始终保留，不再出现在 omitted_heavy_sections。"""
         pm = PromptManager()
         pm.build()
         summary = pm.get_status()["last_build_summary"]
         assert summary["prompt_mode"] in {"orient", "diagnose", "delegate", "execute", "verify"}
-        assert "CODEBASE_MAP" in summary["omitted_heavy_sections"]
+        assert "CODEBASE_MAP" not in summary["omitted_heavy_sections"]
         assert "SPEC" not in summary["omitted_heavy_sections"]
+        assert "GIT_RULES" not in summary["omitted_heavy_sections"]
 
     def test_build_logs_prompt_summary(self, monkeypatch):
         pm = PromptManager()
