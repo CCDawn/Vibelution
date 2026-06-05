@@ -29,6 +29,7 @@ def _fake_harness_result(*, status: str, harness_id: str) -> HarnessResult:
         tracked_dirty=False,
         untracked_files=[],
         command=["python", "agent.py"],
+        returncode=0 if status == "success" else 1,
         timeout_seconds=600,
         restarts_observed=0,
         normalized_restarts_observed=0,

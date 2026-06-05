@@ -22,6 +22,15 @@ def _use_tmp_project_root(tmp_path, monkeypatch):
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_mode_binding_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(supervised_agent_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        supervised_agent_service,
+        "_configured_model_library_ids",
+        lambda: {
+            "model-primary",
+            "xiaomi_mimo_v2_5_pro_token_plan",
+            "generated_xiaomi_mimo_v2_5_cdff497b2d9b",
+        },
+    )
 
 
 def _seed_active_chat(root):
@@ -251,6 +260,21 @@ def test_supervised_agent_bindings_block_missing_dialogue_model(tmp_path, monkey
     agent_directory_service.registry_path().write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
 
     with pytest.raises(supervised_agent_service.SupervisedAgentBindingError, match="dialogue LLM binding"):
+        supervised_agent_service.supervised_agent_bindings()
+
+
+def test_supervised_agent_bindings_block_unregistered_dialogue_model(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(supervised_agent_service, "_configured_model_library_ids", lambda: {"model-primary"})
+    agents = supervised_agent_service.ensure_supervised_agent_instances()
+    judge = next(agent for agent in agents if agent["metadata"]["supervisedRole"] == "judge")
+    state = agent_directory_service.load_state()
+    for item in state["agents"]:
+        if item.get("agentId") == judge["agentId"]:
+            item["llmBindings"] = {"dialogue": {"modelId": "missing-model"}}
+    agent_directory_service.registry_path().write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    with pytest.raises(supervised_agent_service.SupervisedAgentBindingError, match="not present in model library"):
         supervised_agent_service.supervised_agent_bindings()
 
 

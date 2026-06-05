@@ -185,6 +185,7 @@ class HarnessResult:
     tracked_dirty: bool
     untracked_files: List[str]
     command: List[str]
+    returncode: Optional[int]
     timeout_seconds: int
     restarts_observed: int
     normalized_restarts_observed: int
@@ -203,6 +204,21 @@ class HarnessResult:
     preserved_evidence_path: str = ""
     preserved_evidence_files: List[str] = field(default_factory=list)
     agent_binding: Dict[str, Any] = field(default_factory=dict)
+
+
+def stdout_tail_looks_like_idle_chat_ui(lines: List[str]) -> bool:
+    """Detect a failed harness entry that only rendered the idle terminal chat UI."""
+
+    text = "\n".join(str(line) for line in lines[-80:])
+    if not text:
+        return False
+    idle_markers = (
+        "Vibelution Chat",
+        "Chat Session",
+        "还没有最近对话",
+        "等待新的任务",
+    )
+    return sum(1 for marker in idle_markers if marker in text) >= 3
 
 
 def supervised_agent_binding_env(agent_binding: Optional[Dict[str, Any]]) -> Dict[str, str]:
@@ -1950,9 +1966,16 @@ def should_stop_after_primary_exit(
     *,
     expect_restart: bool,
     primary_returncode: Optional[int],
+    live_agent_pids: Optional[List[int]] = None,
+    primary_pid: Optional[int] = None,
 ) -> bool:
     """非重启场景以主进程退出为收束点，残留子进程由清理阶段处理。"""
-    return not expect_restart and primary_returncode is not None
+    if expect_restart or primary_returncode is None:
+        return False
+    live_pids = set(live_agent_pids or [])
+    if primary_pid is not None:
+        live_pids.discard(primary_pid)
+    return not live_pids
 
 
 def infer_result_status(
@@ -1964,6 +1987,7 @@ def infer_result_status(
     last_observation: Dict[str, Any],
     scenario: str = "",
     evolution_summary: Optional[Dict[str, Any]] = None,
+    stdout_tail: Optional[List[str]] = None,
 ) -> tuple[str, str]:
     if timed_out:
         phase = last_observation.get("phase") or "unknown"
@@ -2008,6 +2032,16 @@ def infer_result_status(
         validation = evolution_summary.get("validation") or {}
         if scenario in {"transaction", "modify_rollback", "full_evolution"}:
             if not transaction.get("opened"):
+                child = evolution_summary.get("child") if isinstance(evolution_summary, dict) else {}
+                child_phase = ""
+                if isinstance(child, dict):
+                    child_phase = str(child.get("first_event_phase") or "").strip()
+                if (
+                    primary_returncode not in {None, 0}
+                    and child_phase in {"", "unknown", "no_meaningful_event"}
+                    and stdout_tail_looks_like_idle_chat_ui(stdout_tail or [])
+                ):
+                    return "failed", "agent 单轮入口失败：子进程落入空闲 Chat UI，未消费 prompt 或进入事务循环"
                 return "failed", "事务探针未开账"
             transaction_status = str(transaction.get("status") or "")
             if not transaction.get("closed"):
@@ -2293,6 +2327,10 @@ def run_harness(
                             pass
                     break
 
+            live_agent_pids = [
+                item["pid"] for item in find_agent_processes(worktree_path)
+                if item["role"] == "agent"
+            ]
             if expect_restart and restart_reentered and restart_observed_at is not None:
                 latest_conversation = summarize_latest_matching_file(
                     log_info_dir,
@@ -2305,10 +2343,6 @@ def run_harness(
                     summarize_debug_file,
                 )
                 latest_state = summarize_agent_state_file(state_file)
-                live_agent_pids = [
-                    item["pid"] for item in find_agent_processes(worktree_path)
-                    if item["role"] == "agent"
-                ]
                 reentered_processes = [
                     asdict(record)
                     for pid, record in process_history.items()
@@ -2334,6 +2368,8 @@ def run_harness(
             if should_stop_after_primary_exit(
                 expect_restart=expect_restart,
                 primary_returncode=primary_returncode,
+                live_agent_pids=live_agent_pids,
+                primary_pid=process.pid,
             ):
                 break
 
@@ -2421,6 +2457,7 @@ def run_harness(
             last_observation=last_observation,
             scenario=scenario,
             evolution_summary=evolution_summary,
+            stdout_tail=stdout_tail,
         )
     process_summary = summarize_process_history(
         process_history.values(),
@@ -2441,6 +2478,7 @@ def run_harness(
         tracked_dirty=snapshot.tracked_dirty,
         untracked_files=snapshot.untracked_files,
         command=command,
+        returncode=primary_returncode,
         agent_binding=normalized_agent_binding,
         timeout_seconds=timeout_seconds,
         restarts_observed=restarts_observed,
