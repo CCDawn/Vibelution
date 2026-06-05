@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.10.29 - 2026-06-06
+
+- Fixed OpenAI-compatible `tool_chat` protocol routing so Xiaomi MiMo and similar providers with `compat_mode = "openai"` resolve to `openai_chat_tools` instead of falling back to `basic_chat_no_tools`.
+- Preserved Qwen thinking and local runtime special routes while adding regression coverage for Xiaomi `tool_chat` tool support.
+
 ## 0.10.28 - 2026-06-05
 
 - Expanded `officialResearchGraph` into the read-only Memory Graph when requested, adding formal research reference nodes and `official_*` edges while preserving the default high-level graph.

@@ -47,6 +47,28 @@ def test_provider_api_selects_responses_protocol():
     assert route.source == "provider_api"
 
 
+def test_openai_compatible_tool_chat_contract_allows_tools():
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "xiaomi",
+            "llm.providers.default.compat_mode": "openai",
+            "llm.providers.default.base_url": "https://token-plan-cn.xiaomimimo.com/v1",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "mimo-v2.5",
+            "llm.profiles.primary.contract": "tool_chat",
+        }
+    )
+
+    profile = config.llm.get_profile("primary")
+    provider = config.llm.get_provider(profile.provider_id)
+    route = resolve_model_protocol(profile, provider)
+
+    assert route.protocol == ModelProtocol.OPENAI_CHAT_TOOLS
+    assert route.source == "profile_contract"
+    assert route.policy.allow_tools is True
+    assert "model_protocol.missing_explicit_protocol" in route.warnings
+
+
 def test_llamacpp_qwen_thinking_inferred_from_local_model():
     config = make_config(
         **{

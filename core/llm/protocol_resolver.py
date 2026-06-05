@@ -101,6 +101,22 @@ def _normalize_provider_api(provider: ProviderConfig) -> str:
     return _read_optional_string(provider, "api").lower().replace("_", "-")
 
 
+def _is_openai_compatible_provider(provider_kind: str, compat_mode: str = "") -> bool:
+    kind = str(provider_kind or "").strip().lower()
+    compat = str(compat_mode or "").strip().lower().replace("-", "_")
+    if kind in {"anthropic", "deepseek", "llamacpp", "minimax", "ollama", "local"}:
+        return False
+    return kind in {
+        "aliyun",
+        "openai",
+        "openai_compatible",
+        "relay",
+        "siliconflow",
+        "xiaomi",
+        "zhipu",
+    } or compat in {"openai", "openai_compatible"}
+
+
 def _protocol_from_provider_api(provider_api: str, provider_kind: str, profile: LLMProfile) -> ModelProtocol | None:
     api = str(provider_api or "").strip().lower()
     if not api:
@@ -120,10 +136,12 @@ def _protocol_from_provider_api(provider_api: str, provider_kind: str, profile: 
     return None
 
 
-def _protocol_from_contract(provider_kind: str, profile: LLMProfile) -> ModelProtocol | None:
+def _protocol_from_contract(provider_kind: str, provider: ProviderConfig, profile: LLMProfile) -> ModelProtocol | None:
     transport = _read_optional_string(profile, "transport").lower() or "chat_completions"
     contract = _read_optional_string(profile, "contract").lower() or "tool_chat"
     thinking_enabled = _thinking_enabled(profile)
+    compat_mode = _read_optional_string(provider, "compat_mode")
+    model_family = _model_family(_read_optional_string(profile, "model"))
     if transport == "responses":
         return ModelProtocol.RELAY_RESPONSES if provider_kind == "relay" else ModelProtocol.OPENAI_RESPONSES
     if provider_kind == "anthropic":
@@ -134,7 +152,9 @@ def _protocol_from_contract(provider_kind: str, profile: LLMProfile) -> ModelPro
         return ModelProtocol.MINIMAX_CHAT
     if contract == "basic_chat":
         return ModelProtocol.BASIC_CHAT_NO_TOOLS
-    if contract == "tool_chat" and provider_kind in {"openai", "relay"}:
+    if contract == "tool_chat" and thinking_enabled and model_family == "qwen":
+        return None
+    if contract == "tool_chat" and _is_openai_compatible_provider(provider_kind, compat_mode):
         return ModelProtocol.OPENAI_CHAT_TOOLS
     return None
 
@@ -185,7 +205,7 @@ def resolve_model_protocol(
         if protocol is not None:
             source = "provider_api"
     if protocol is None:
-        protocol = _protocol_from_contract(provider_kind, profile)
+        protocol = _protocol_from_contract(provider_kind, provider, profile)
         if protocol is not None:
             source = "profile_contract"
     if protocol is None:
