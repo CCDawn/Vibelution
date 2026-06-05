@@ -829,7 +829,9 @@ def test_apply_xiaomi_mimo_multimodal_preset_materializes_image_support():
 
 
 def test_xiaomi_mimo_multimodal_model_ref_materializes_image_support_to_profile():
-    public_config = apply_llm_model_preset(load_public_config(), "xiaomi_mimo_v2_5_multimodal")
+    public_config = load_public_config()
+    public_config["llm"]["model_library"].pop("xiaomi_mimo_v2_5_multimodal", None)
+    public_config = apply_llm_model_preset(public_config, "xiaomi_mimo_v2_5_multimodal")
     public_config["llm"]["profiles"]["primary"] = {"model_ref": "xiaomi_mimo_v2_5_multimodal"}
 
     effective = build_effective_config(public_config)
@@ -924,7 +926,9 @@ def test_default_public_config_includes_new_official_model_templates():
     assert public_config["tools"]["image2"]["default_model_ref"] == "relay_image2"
     assert "custom_relay_responses" not in public_config["llm"]["model_library"]
 
-    with_deepseek_flash = apply_llm_model_preset(public_config, "deepseek_v4_flash")
+    with_deepseek_flash = load_public_config()
+    with_deepseek_flash["llm"]["model_library"].pop("deepseek_v4_flash", None)
+    with_deepseek_flash = apply_llm_model_preset(with_deepseek_flash, "deepseek_v4_flash")
     deepseek_model = with_deepseek_flash["llm"]["model_library"]["deepseek_v4_flash"]
 
     assert deepseek_model["provider"]["kind"] == "deepseek"
@@ -948,7 +952,9 @@ def test_default_public_config_includes_new_official_model_templates():
     assert xiaomi_model["max_output_tokens"] == 128000
     assert xiaomi_model["api_key_env"] == "VIBELUTION_LLM_MODEL_XIAOMI_MIMO_V2_5_PRO_TOKEN_PLAN_API_KEY"
 
-    with_xiaomi_multimodal = apply_llm_model_preset(public_config, "xiaomi_mimo_v2_5_multimodal")
+    with_xiaomi_multimodal = load_public_config()
+    with_xiaomi_multimodal["llm"]["model_library"].pop("xiaomi_mimo_v2_5_multimodal", None)
+    with_xiaomi_multimodal = apply_llm_model_preset(with_xiaomi_multimodal, "xiaomi_mimo_v2_5_multimodal")
     xiaomi_multimodal_model = with_xiaomi_multimodal["llm"]["model_library"]["xiaomi_mimo_v2_5_multimodal"]
 
     assert xiaomi_multimodal_model["provider"]["kind"] == "xiaomi"
