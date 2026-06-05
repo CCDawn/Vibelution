@@ -133,7 +133,7 @@ def _protocol_from_contract(provider_kind: str, profile: LLMProfile) -> ModelPro
         return ModelProtocol.MINIMAX_CHAT
     if contract == "basic_chat":
         return ModelProtocol.BASIC_CHAT_NO_TOOLS
-    if contract == "tool_chat":
+    if contract == "tool_chat" and provider_kind in {"openai", "relay"}:
         return ModelProtocol.OPENAI_CHAT_TOOLS
     return None
 
@@ -184,16 +184,22 @@ def resolve_model_protocol(
         if protocol is not None:
             source = "provider_api"
     if protocol is None:
-        protocol = _protocol_from_model_hint(provider, profile)
-        if protocol is not None:
-            source = "inferred"
-    if protocol is None:
         protocol = _protocol_from_contract(provider_kind, profile)
         if protocol is not None:
             source = "profile_contract"
     if protocol is None:
+        protocol = _protocol_from_model_hint(provider, profile)
+        if protocol is not None:
+            source = "inferred"
+    if protocol is None:
         protocol = ModelProtocol.BASIC_CHAT_NO_TOOLS
         warnings.append("model protocol fell back to basic_chat_no_tools")
+    if source in {"profile_contract", "inferred", "fallback"} and not explicit_protocol and not provider_api:
+        warnings.append("model_protocol.missing_explicit_protocol")
+    if source == "inferred":
+        warnings.append("model_protocol.inferred")
+        if provider_kind in {"local", "llamacpp", "ollama"} or _base_url_is_localish(_read_optional_string(provider, "base_url")):
+            warnings.append("model_protocol.local_advanced_route_warning")
     policy = get_protocol_policy(protocol)
     raw_compat = _read_optional_dict(model_entry, "compat") or _read_optional_dict(profile, "compat")
     compat = policy.compat_defaults.merged(
