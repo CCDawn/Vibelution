@@ -24,6 +24,7 @@ MAX_AI_DIFF_CHARS = 24_000
 MAX_AI_FILE_DIFF_CHARS = 8_000
 MAX_COMMIT_MESSAGE_CHARS = 5_000
 DEFAULT_GIT_COMMIT_PROFILE = "primary"
+GIT_COMMIT_MESSAGE_PROFILE_ID = "__git_commit_message__"
 DEFAULT_COMMIT_MESSAGE_PROMPT = """你是这个仓库的提交说明助手。根据用户选中的 git 改动，写一条清晰、简洁、行为导向的提交说明。
 
 要求：
@@ -71,7 +72,7 @@ def _record_git_scene_event(
 
 def default_git_config() -> dict[str, str]:
     return {
-        "commit_message_profile": DEFAULT_GIT_COMMIT_PROFILE,
+        "commit_message_model_ref": "",
         "commit_message_prompt": DEFAULT_COMMIT_MESSAGE_PROMPT,
     }
 
@@ -89,6 +90,58 @@ def with_git_config_defaults(public_config: dict[str, Any]) -> dict[str, Any]:
     for key, value in defaults.items():
         if not str(git_cfg.get(key, "") or "").strip():
             git_cfg[key] = value
+    if not str(git_cfg.get("commit_message_model_ref", "") or "").strip():
+        legacy_profile_id = str(git_cfg.get("commit_message_profile", "") or DEFAULT_GIT_COMMIT_PROFILE).strip()
+        model_ref = _model_ref_for_legacy_profile(payload, legacy_profile_id)
+        if model_ref:
+            git_cfg["commit_message_model_ref"] = model_ref
+    git_cfg.pop("commit_message_profile", None)
+    return payload
+
+
+def _model_ref_for_legacy_profile(public_config: dict[str, Any], profile_id: str) -> str:
+    llm = public_config.get("llm", {}) if isinstance(public_config, dict) else {}
+    profiles = llm.get("profiles", {}) if isinstance(llm, dict) else {}
+    profile = profiles.get(str(profile_id or "").strip()) if isinstance(profiles, dict) else None
+    if not isinstance(profile, dict):
+        return ""
+    model_ref = str(profile.get("model_ref") or "").strip()
+    if model_ref:
+        return model_ref
+    model = str(profile.get("model") or "").strip()
+    if not model:
+        return ""
+    model_library = llm.get("model_library", {}) if isinstance(llm, dict) else {}
+    if not isinstance(model_library, dict):
+        return ""
+    provider_id = str(profile.get("provider_id") or "").strip()
+    for model_id, item in model_library.items():
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("model") or "").strip() != model:
+            continue
+        if provider_id and str(item.get("provider_id") or "").strip() not in {"", provider_id}:
+            continue
+        return str(model_id)
+    return ""
+
+
+def _public_config_for_git_commit_model(public_config: dict[str, Any], model_id: str) -> dict[str, Any]:
+    normalized_model_id = str(model_id or "").strip()
+    payload = copy.deepcopy(public_config)
+    llm = payload.setdefault("llm", {})
+    if not isinstance(llm, dict):
+        raise ValueError("llm must be an object")
+    model_library = llm.get("model_library", {})
+    if not isinstance(model_library, dict) or normalized_model_id not in model_library:
+        raise ValueError(f"unknown Git commit message model: {normalized_model_id}")
+    profiles = llm.setdefault("profiles", {})
+    if not isinstance(profiles, dict):
+        raise ValueError("llm.profiles must be an object")
+    profiles[GIT_COMMIT_MESSAGE_PROFILE_ID] = {
+        "label": "Git Commit Message",
+        "model_ref": normalized_model_id,
+    }
     return payload
 
 
@@ -221,7 +274,12 @@ def get_git_file_diff(path: str) -> dict[str, Any]:
     }
 
 
-def generate_git_commit_message(paths: list[str], profile_id: str | None = None) -> dict[str, Any]:
+def generate_git_commit_message(
+    paths: list[str],
+    *,
+    model_id: str | None = None,
+    profile_id: str | None = None,
+) -> dict[str, Any]:
     service = get_git_memory_service()
     available, error = service.is_git_available()
     if not available:
@@ -230,7 +288,13 @@ def generate_git_commit_message(paths: list[str], profile_id: str | None = None)
     selected_files = _selected_status_files(service, paths)
     selected_paths = [item["path"] for item in selected_files]
     git_cfg = _git_commit_config()
-    profile_id = str(profile_id or git_cfg.get("commit_message_profile") or DEFAULT_GIT_COMMIT_PROFILE).strip()
+    public_config = with_git_config_defaults(load_public_config())
+    model_id = str(model_id or git_cfg.get("commit_message_model_ref") or "").strip()
+    if not model_id:
+        legacy_profile_id = str(profile_id or git_cfg.get("commit_message_profile") or DEFAULT_GIT_COMMIT_PROFILE).strip()
+        model_id = _model_ref_for_legacy_profile(public_config, legacy_profile_id)
+    if not model_id:
+        raise ValueError("Git commit message model is not configured")
     prompt_template = str(git_cfg.get("commit_message_prompt") or DEFAULT_COMMIT_MESSAGE_PROMPT).strip()
     diff_payload = _ai_diff_payload(service, selected_files)
     user_prompt = _render_prompt_template(
@@ -242,8 +306,9 @@ def generate_git_commit_message(paths: list[str], profile_id: str | None = None)
             "branch": _current_branch(service),
         },
     )
-    effective_config = build_effective_config(load_public_config())
-    client = get_llm_client(profile_id=profile_id, config=effective_config)
+    runtime_public_config = _public_config_for_git_commit_model(public_config, model_id)
+    effective_config = build_effective_config(runtime_public_config)
+    client = get_llm_client(profile_id=GIT_COMMIT_MESSAGE_PROFILE_ID, config=effective_config)
     try:
         response = client.invoke(
             [
@@ -266,7 +331,8 @@ def generate_git_commit_message(paths: list[str], profile_id: str | None = None)
             level="error",
             outcome="failed",
             fields={
-                "profileId": profile_id,
+                "modelId": model_id,
+                "runtimeProfileId": GIT_COMMIT_MESSAGE_PROFILE_ID,
                 "selectedFileCount": len(selected_paths),
                 "selectedPaths": selected_paths,
                 "diffSummary": diff_payload["summary"],
@@ -282,7 +348,8 @@ def generate_git_commit_message(paths: list[str], profile_id: str | None = None)
         message="Git commit message generated.",
         outcome="succeeded",
         fields={
-            "profileId": profile_id,
+            "modelId": model_id,
+            "runtimeProfileId": GIT_COMMIT_MESSAGE_PROFILE_ID,
             "selectedFileCount": len(selected_paths),
             "selectedPaths": selected_paths,
             "diffSummary": diff_payload["summary"],
@@ -292,7 +359,8 @@ def generate_git_commit_message(paths: list[str], profile_id: str | None = None)
     )
     return {
         "message": message,
-        "profileId": profile_id,
+        "modelId": model_id,
+        "profileId": GIT_COMMIT_MESSAGE_PROFILE_ID,
         "prompt": prompt_template,
         "files": selected_paths,
         "diffSummary": diff_payload["summary"],

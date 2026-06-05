@@ -153,6 +153,7 @@ def _environment_preflight_failure_result(
         tracked_dirty=False,
         untracked_files=[],
         command=[],
+        returncode=None,
         timeout_seconds=timeout_seconds,
         restarts_observed=0,
         normalized_restarts_observed=0,

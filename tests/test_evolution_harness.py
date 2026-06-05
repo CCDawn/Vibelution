@@ -50,6 +50,7 @@ from scripts.evolution_harness import (
     _safe_modify_probe_summary,
     _validation_passed_for_tool,
     ProcessRecord,
+    summarize_agent_returncodes,
     summarize_process_history,
     summarize_agent_state_file,
     summarize_latest_matching_file,
@@ -59,6 +60,7 @@ from scripts.evolution_harness import (
     run_harness,
     SUPERVISED_FINAL_STATE_MARKER,
     SUPERVISED_INFEASIBLE_OUTCOME_MARKER,
+    stdout_tail_looks_like_idle_chat_ui,
 )
 from core.orchestration.turn_outcome import TurnOutcomeController
 
@@ -445,6 +447,27 @@ def test_should_stop_after_primary_exit_for_non_restart_scenarios():
     assert should_stop_after_primary_exit(expect_restart=True, primary_returncode=0) is False
 
 
+def test_should_not_stop_when_python_launcher_exits_but_child_agent_is_live():
+    assert (
+        should_stop_after_primary_exit(
+            expect_restart=False,
+            primary_returncode=1,
+            live_agent_pids=[100, 200],
+            primary_pid=100,
+        )
+        is False
+    )
+    assert (
+        should_stop_after_primary_exit(
+            expect_restart=False,
+            primary_returncode=1,
+            live_agent_pids=[100],
+            primary_pid=100,
+        )
+        is True
+    )
+
+
 def test_run_harness_returns_cancelled_when_cancel_checker_requests_stop(monkeypatch, tmp_path: Path):
     class FakeStream:
         def readline(self):
@@ -526,6 +549,7 @@ def test_run_harness_returns_cancelled_when_cancel_checker_requests_stop(monkeyp
             "directSessionId": "session-baseline",
             "workspacePath": "workspace/agents/agent-supervised-baseline",
             "role": "baseline",
+            "llmSlot": "dialogue",
         },
         cancel_checker=lambda: "operator stop",
     )
@@ -541,6 +565,7 @@ def test_run_harness_returns_cancelled_when_cancel_checker_requests_stop(monkeyp
     assert env["VIBELUTION_AGENT_DIRECT_SESSION_ID"] == "session-baseline"
     assert env["VIBELUTION_AGENT_WORKSPACE_PATH"] == "workspace/agents/agent-supervised-baseline"
     assert env["VIBELUTION_SUPERVISED_ROLE"] == "baseline"
+    assert env["VIBELUTION_AGENT_LLM_SLOT"] == "dialogue"
     assert result.preserved_evidence_path
     evidence_dir = Path(result.preserved_evidence_path)
     assert (evidence_dir / "log_info" / "conversation_case.jsonl").exists()
@@ -615,6 +640,111 @@ def test_infer_result_status_rejects_restart_when_safe_modify_missing_even_if_re
 
     assert status == "failed"
     assert "未创建目标文件" in reason
+
+
+def test_infer_result_status_classifies_idle_chat_ui_single_turn_entry_failure():
+    stdout_tail = [
+        "│  Vibelution Chat           │最近对话                              0 条消息  │",
+        "│  模式  Chat Session        │                                                │",
+        "│  当前状态                  │                                                │",
+        "│  任务  等待新的任务        │                                                │",
+        "│ 还没有最近对话 │",
+    ]
+
+    status, reason = infer_result_status(
+        timed_out=False,
+        restart_expected=False,
+        restart_reentered=False,
+        primary_returncode=1,
+        last_observation={"phase": "unknown"},
+        scenario="transaction",
+        evolution_summary={
+            "transaction": {"opened": False, "closed": False, "status": None},
+            "validation": {"passed": 0, "failed": 0},
+            "child": {"first_event_phase": "unknown"},
+        },
+        stdout_tail=stdout_tail,
+    )
+
+    assert stdout_tail_looks_like_idle_chat_ui(stdout_tail) is True
+    assert status == "failed"
+    assert "单轮入口失败" in reason
+    assert "未开账" not in reason
+
+
+def test_returncode_summary_recovers_windows_launcher_failure():
+    records = [
+        ProcessRecord(
+            pid=100,
+            role="agent",
+            first_seen="2026-06-06T01:45:52",
+            last_seen="2026-06-06T01:46:08",
+            returncode=1,
+            cmdline_preview=r"C:\repo\.venv\Scripts\python.exe agent.py --no-shell --single-turn --prompt probe",
+        ),
+        ProcessRecord(
+            pid=200,
+            role="agent",
+            first_seen="2026-06-06T01:46:07",
+            last_seen="2026-06-06T01:46:08",
+            returncode=None,
+            cmdline_preview=r"C:\Python312\python.exe agent.py --no-shell --single-turn --prompt probe",
+        ),
+    ]
+
+    summary = summarize_agent_returncodes(records, primary_pid=100)
+
+    assert summary["primary_returncode"] == 1
+    assert summary["launcher_returncode"] == 1
+    assert summary["agent_child_returncode"] is None
+    assert summary["effective_returncode"] == 1
+
+
+def test_effective_returncode_classifies_idle_chat_ui_when_primary_returncode_was_missing():
+    stdout_tail = [
+        "│  Vibelution Chat           │最近对话                              0 条消息  │",
+        "│  模式  Chat Session        │                                                │",
+        "│  任务  等待新的任务        │                                                │",
+        "│ 还没有最近对话 │",
+    ]
+    records = [
+        ProcessRecord(
+            pid=100,
+            role="agent",
+            first_seen="2026-06-06T01:45:52",
+            last_seen="2026-06-06T01:46:08",
+            returncode=1,
+            cmdline_preview=r"C:\repo\.venv\Scripts\python.exe agent.py --no-shell --single-turn --prompt probe",
+        ),
+        ProcessRecord(
+            pid=200,
+            role="agent",
+            first_seen="2026-06-06T01:46:07",
+            last_seen="2026-06-06T01:46:08",
+            returncode=None,
+            cmdline_preview=r"C:\Python312\python.exe agent.py --no-shell --single-turn --prompt probe",
+        ),
+    ]
+    returncodes = summarize_agent_returncodes(records, primary_pid=100)
+
+    status, reason = infer_result_status(
+        timed_out=False,
+        restart_expected=False,
+        restart_reentered=False,
+        primary_returncode=returncodes["effective_returncode"],
+        last_observation={"phase": "unknown"},
+        scenario="transaction",
+        evolution_summary={
+            "transaction": {"opened": False, "closed": False, "status": None},
+            "validation": {"passed": 0, "failed": 0},
+            "child": {"first_event_phase": "unknown"},
+        },
+        stdout_tail=stdout_tail,
+    )
+
+    assert status == "failed"
+    assert "单轮入口失败" in reason
+    assert "未开账" not in reason
 
 
 def test_resolve_python_executable_prefers_usable_repo_venv(monkeypatch, tmp_path: Path):

@@ -445,7 +445,18 @@ class TestCheckPythonSyntax:
 
     def test_complex_valid_file(self, sample_py_file):
         """测试复杂但语法正确的文件"""
-def test_echo_only(self):
+        result = check_python_syntax(file_path=sample_py_file)
+        assert "正确" in result or "OK" in result or "通过" in result
+
+
+# ============================================================================
+# execute_shell_command 测试
+# ============================================================================
+
+class TestExecuteShellCommand:
+    """execute_shell_command 工具测试"""
+
+    def test_echo_only(self):
         """测试仅输出"""
         result = execute_shell_command(command="echo 'Test Message'")
         assert "Test Message" in result
@@ -492,12 +503,6 @@ def test_echo_only(self):
 
     def test_default_python_command_uses_project_venv(self, tmp_path, monkeypatch):
         """裸 python 调用应默认改写到项目 .venv 解释器。"""
-        fake_root = tmp_path / "project"
-    def test_default_python_command_uses_project_venv(self, tmp_path, monkeypatch):
-        """裸 python 调用应默认改写到项目 .venv 解释器。"""
-        fake_root = tmp_path / "project"        """裸 python 调用应默认改写到项目 .venv 解释器。"""assert "bash -c" in result
-
-    def test_default_python_command_uses_project_venv(self, tmp_path, monkeypatch):        """裸 python 调用应默认改写到项目 .venv 解释器。"""
         fake_root = tmp_path / "project"
         fake_python = fake_root / ".venv" / "Scripts" / "python.exe"
         fake_python.parent.mkdir(parents=True)

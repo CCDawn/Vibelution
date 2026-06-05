@@ -2393,6 +2393,19 @@ def test_recovery_policy_disables_tools_for_tool_protocol_error():
     assert decision.stop_current_turn is False
 
 
+def test_recovery_policy_fail_fast_for_tool_calling_capability_error():
+    error = LLMError("capability_error", "profile `primary` 不支持 tool calling", retryable=False)
+
+    decision = plan_recovery(error, attempt=1, max_attempts=5)
+
+    assert decision.category == "capability_error"
+    assert decision.action == "fail_fast"
+    assert decision.disable_tools is False
+    assert decision.disable_streaming is False
+    assert decision.stop_current_turn is True
+    assert decision.user_message == "profile `primary` 不支持 tool calling"
+
+
 def test_recovery_policy_uses_longer_backoff_for_rate_limit():
     error = Exception("429 rate limit exceeded")
 
@@ -2472,6 +2485,39 @@ def test_recovery_decision_attaches_fallback_profile():
     )
 
     assert enriched.fallback_profile_id == "fallback_backup"
+
+
+def test_capability_error_recovery_does_not_attach_fallback_profile():
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "minimax",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://api.minimaxi.com/v1",
+            "llm.providers.backup.kind": "local",
+            "llm.providers.backup.requires_api_key": False,
+            "llm.providers.backup.base_url": "http://localhost:8000/v1",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "MiniMax-M2.7",
+            "llm.profiles.fallback_backup.provider_id": "backup",
+            "llm.profiles.fallback_backup.model": "qwen-32b-awq",
+            "llm.profiles.fallback_backup.streaming": False,
+            "llm.profiles.fallback_backup.tool_calling_mode": "disabled",
+        }
+    )
+    decision = plan_recovery(
+        LLMError("capability_error", "profile `primary` 不支持 tool calling", retryable=False),
+        attempt=1,
+        max_attempts=5,
+    )
+
+    enriched = attach_recovery_fallback(
+        decision,
+        config=config,
+        current_profile_id="primary",
+    )
+
+    assert enriched.action == "fail_fast"
+    assert enriched.fallback_profile_id is None
 
 
 def test_provider_retry_does_not_use_compression_profile_as_fallback():
