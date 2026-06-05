@@ -145,17 +145,17 @@ def request_launcher_stop() -> dict[str, Any]:
     return _launcher_command_response("stop", result)
 
 
-def request_launcher_restart(*, confirmed_active_work: bool = False) -> dict[str, Any]:
+def request_launcher_restart() -> dict[str, Any]:
     """Request the managed project bundle to restart as one lifecycle unit."""
 
     _record_launcher_event(
         "launcher.bundle.restart.requested",
         phase="restart",
         message="Launcher project bundle restart requested.",
-        fields={"source": "launcher_api", "confirmedActiveWork": bool(confirmed_active_work)},
+        fields={"source": "launcher_api"},
     )
     try:
-        result = request_runtime_restart(confirmed_active_work=confirmed_active_work)
+        result = request_runtime_restart()
     except RuntimeRestartActiveWorkBlocked as exc:
         _record_launcher_event(
             "launcher.bundle.restart.blocked_active_work",

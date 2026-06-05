@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException
 
 from core.web.services.launcher_service import (
     get_launcher_status,
@@ -33,14 +33,14 @@ def launcher_stop() -> dict:
 
 
 @router.post("/launcher/restart", status_code=202)
-def launcher_restart(confirmed_active_work: bool = Query(default=False, alias="confirmedActiveWork")) -> dict:
+def launcher_restart() -> dict:
     try:
-        return request_launcher_restart(confirmed_active_work=confirmed_active_work)
+        return request_launcher_restart()
     except RuntimeRestartActiveWorkBlocked as exc:
         raise HTTPException(
             status_code=409,
             detail={
-                "code": "active_work_requires_confirmation",
+                "code": "active_work_restart_blocked",
                 "message": exc.message,
                 "activeWorkRuns": exc.active_work_runs,
             },

@@ -607,7 +607,7 @@ def test_runtime_shutdown_queues_runtime_manager_when_state_exists(tmp_path, mon
     assert calls[0] == "ensure"
     assert calls[1] == (
         "close_workbench",
-        {"reason": "web_close_button", "source": "web_ui", "stopManager": True},
+        {"reason": "web_close_button", "source": "web_ui", "stopManager": False},
         "web_ui",
     )
     event_codes = [item[2] for item in scene_events]
@@ -752,7 +752,7 @@ def test_launcher_start_queues_open_workbench_and_records_lifecycle(monkeypatch)
     assert accepted_event[3]["fields"]["commandId"] == "cmd-launcher-start"
 
 
-def test_launcher_restart_blocks_unconfirmed_active_work(monkeypatch):
+def test_launcher_restart_blocks_active_work(monkeypatch):
     scene_events: list[tuple[str, str, str, dict]] = []
 
     def record_scene_event(component, phase, event_code, **kwargs):
@@ -763,7 +763,7 @@ def test_launcher_restart_blocks_unconfirmed_active_work(monkeypatch):
     monkeypatch.setattr(
         launcher_service,
         "request_runtime_restart",
-        lambda confirmed_active_work=False: (_ for _ in ()).throw(
+        lambda: (_ for _ in ()).throw(
             runtime_service.RuntimeRestartActiveWorkBlocked(
                 "active work",
                 [{"kind": "chat_turn", "runId": "chat-turn-live", "status": "running"}],
@@ -775,7 +775,7 @@ def test_launcher_restart_blocks_unconfirmed_active_work(monkeypatch):
 
     assert response.status_code == 409
     payload = response.json()
-    assert payload["detail"]["code"] == "active_work_requires_confirmation"
+    assert payload["detail"]["code"] == "active_work_restart_blocked"
     assert payload["detail"]["activeWorkRuns"][0]["runId"] == "chat-turn-live"
     event_codes = [item[2] for item in scene_events]
     assert "launcher.bundle.restart.requested" in event_codes
@@ -828,7 +828,7 @@ def test_launcher_restart_delegates_runtime_restart_and_normalizes_response(monk
     monkeypatch.setattr(
         launcher_service,
         "request_runtime_restart",
-        lambda confirmed_active_work=False: {
+        lambda: {
             "accepted": True,
             "mode": "runtime_manager",
             "commandId": "cmd-launcher-restart",
@@ -839,7 +839,7 @@ def test_launcher_restart_delegates_runtime_restart_and_normalizes_response(monk
         },
     )
 
-    response = client.post("/api/launcher/restart?confirmedActiveWork=true")
+    response = client.post("/api/launcher/restart")
 
     assert response.status_code == 202
     payload = response.json()
@@ -854,7 +854,7 @@ def test_launcher_restart_delegates_runtime_restart_and_normalizes_response(monk
     assert accepted_event[3]["fields"]["commandId"] == "cmd-launcher-restart"
 
 
-def test_runtime_restart_blocks_unconfirmed_active_work(monkeypatch):
+def test_runtime_restart_blocks_active_work(monkeypatch):
     calls: list[object] = []
     scene_events: list[tuple[str, str, str, dict]] = []
 
@@ -902,7 +902,7 @@ def test_runtime_restart_blocks_unconfirmed_active_work(monkeypatch):
     assert blocked_event[3]["fields"]["activeWorkCount"] == 1
 
 
-def test_runtime_restart_releases_active_work_before_manager_restart(monkeypatch):
+def test_runtime_restart_blocks_confirmed_active_work_without_releasing_tasks(monkeypatch):
     calls: list[object] = []
     self_calls: list[str] = []
     supervised_calls: list[str] = []
@@ -943,25 +943,14 @@ def test_runtime_restart_releases_active_work_before_manager_restart(monkeypatch
 
     response = client.post("/api/runtime/restart?confirmedActiveWork=true")
 
-    assert response.status_code == 202
+    assert response.status_code == 409
     payload = response.json()
-    assert payload["accepted"] is True
-    assert payload["chatTurns"][0]["sessionId"] == "session-live"
-    assert payload["chatTurns"][0]["status"] == "failed"
-    assert "RuntimeError" in payload["chatTurns"][0]["error"]
-    assert payload["evolutionRuns"] == [
-        {"kind": "self_evolution_run", "runId": "web-self-active", "status": "cancelled"},
-        {"kind": "supervised_evolution_run", "runId": "web-supervised-active", "status": "cancelled"},
-        {"kind": "supervised_worktree_evolution_run", "runId": "web-worktree-active", "status": "cancelled"},
-    ]
-    assert self_calls
-    assert supervised_calls
-    assert worktree_calls
-    assert calls[-1] == (
-        "restart_workbench",
-        {"reason": "web_restart_button", "source": "web_ui", "noBrowser": False},
-        "web_ui",
-    )
+    assert payload["detail"]["code"] == "active_work_restart_blocked"
+    assert payload["detail"]["activeWorkRuns"][0]["runId"] == "chat-turn-live"
+    assert self_calls == []
+    assert supervised_calls == []
+    assert worktree_calls == []
+    assert calls == []
 
 
 def test_runtime_shutdown_stops_active_chat_turn_before_manager_close(tmp_path, monkeypatch):
@@ -1013,7 +1002,7 @@ def test_runtime_shutdown_stops_active_chat_turn_before_manager_close(tmp_path, 
             "ensure",
             (
                 "close_workbench",
-                {"reason": "web_close_button", "source": "web_ui", "stopManager": True},
+                {"reason": "web_close_button", "source": "web_ui", "stopManager": False},
                 "web_ui",
             ),
         ]
@@ -1111,7 +1100,7 @@ def test_runtime_shutdown_stops_active_chat_room_round_before_manager_close(tmp_
             "ensure",
             (
                 "close_workbench",
-                {"reason": "web_close_button", "source": "web_ui", "stopManager": True},
+                {"reason": "web_close_button", "source": "web_ui", "stopManager": False},
                 "web_ui",
             ),
         ]
@@ -1175,7 +1164,7 @@ def test_runtime_shutdown_releases_active_evolution_runs_before_manager_close(tm
         "ensure",
         (
             "close_workbench",
-            {"reason": "web_close_button", "source": "web_ui", "stopManager": True},
+            {"reason": "web_close_button", "source": "web_ui", "stopManager": False},
             "web_ui",
         ),
     ]
@@ -1221,7 +1210,7 @@ def test_runtime_shutdown_continues_when_chat_stop_fails(tmp_path, monkeypatch):
         "ensure",
         (
             "close_workbench",
-            {"reason": "web_close_button", "source": "web_ui", "stopManager": True},
+            {"reason": "web_close_button", "source": "web_ui", "stopManager": False},
             "web_ui",
         ),
     ]
