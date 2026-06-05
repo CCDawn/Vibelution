@@ -687,3 +687,34 @@ def test_team_workflow_route_invokes_local_research_model(tmp_path, monkeypatch)
     assert response.status_code == 201, response.text
     assert response.json()["task"]["taskType"] == "paper_note_draft"
     assert response.json()["modelResponse"]["modelId"] == "houmo_qwen35_9b_agent"
+
+
+def test_team_workflow_route_autodrafts_paper_note_from_source_candidate(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+
+    def fake_autodraft(team_id, candidate_id, payload):
+        return {
+            "task": {"teamId": team_id, "taskType": "paper_note_draft"},
+            "sourceCandidate": {"candidateId": candidate_id, "candidateType": "source_manifest"},
+            "candidate": {"candidateId": "paper-note-1", "candidateType": "paper_note"},
+            "validation": {"valid": True, "issues": []},
+            "modelResponse": {"modelId": "houmo_qwen35_9b_agent", "jsonSource": "content"},
+            "workflow": {"teamId": team_id, "candidateStore": {"candidateCount": 2}},
+        }
+
+    monkeypatch.setattr(team_workflows, "draft_paper_note_from_source_candidate", fake_autodraft)
+    client = _client()
+    team = client.post("/api/teams", json={"name": "挑战杯科研团队"}).json()
+
+    response = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/candidates/source-1/paper-note-draft",
+        json={
+            "createdByAgent": "Paper Note Extraction Agent",
+            "title": "Paper note draft",
+        },
+    )
+
+    assert response.status_code == 201, response.text
+    assert response.json()["sourceCandidate"]["candidateId"] == "source-1"
+    assert response.json()["candidate"]["candidateType"] == "paper_note"
+    assert response.json()["workflow"]["candidateStore"]["candidateCount"] == 2

@@ -75,7 +75,7 @@
     <span class="graph-id">01</span>
     <h3>资料进入工作区</h3>
   </a>
-    <a class="graph-node done" style="--x:540px; --y:150px;" href="research_flow_pages/02-paper-note.html">
+    <a class="graph-node active" style="--x:540px; --y:150px;" href="research_flow_pages/02-paper-note.html">
     <span class="graph-id">02</span>
     <h3>生成 paper_note</h3>
   </a>
@@ -360,7 +360,7 @@
                 </div>
 <div class="service-row">
                   <b>team_workflows API</b>
-                  <span>已落地：/api/teams/{team_id}/workflow-orchestration、candidates/source、candidates/{candidate_id}/source-extraction、candidates、candidates/validation、candidate-graph、transfers、decide。</span>
+                  <span>已落地：/api/teams/{team_id}/workflow-orchestration、candidates/source、candidates/{candidate_id}/source-extraction、candidates/{candidate_id}/paper-note-draft、candidates、candidates/validation、candidate-graph、transfers、decide。</span>
                 </div>
 <div class="service-row">
                   <b>local_research_worker_model</b>
@@ -759,8 +759,8 @@
 <div class="blueprint-row">
               <b>M2</b>
               <strong>paper_note 与 PDF 锚点</strong>
-              <span>已新增 paper_note 输出契约与 Citation Anchor 校验：paper_note_draft 必须含 keyFindings、methods、limitations、citations；每条 keyFinding 必须有 sourceRef 和 page/citation/evidenceRef。本地 PDF 页码锚点可由 source-extraction 提供。</span>
-              <span>合格本地模型输出进入 paper_note_draft；缺 citation/page anchor 时进入 paper_note_needs_revision，不能自然推进到 mechanism_candidate；自动从 excerpt 生成 paper_note 的端到端链路仍待接。</span>
+              <span>已新增 paper_note 输出契约与 Citation Anchor 校验，并接入 sourceExtraction -&gt; paper_note_draft 自动草稿桥：本地 PDF pageAnchors/excerpt 会被转为 sourceRefs/evidenceRefs/excerpt 后调用本地模型。</span>
+              <span>合格本地模型输出进入 paper_note_draft；缺 citation/page anchor 时进入 paper_note_needs_revision，不能自然推进到 mechanism_candidate；长文拆分和多草稿合并仍待接。</span>
             </div>
 <div class="blueprint-row">
               <b>M3</b>
@@ -811,7 +811,7 @@
 <div class="agent-row">
         <b>02</b>
         <strong>Paper Note Extraction Agent</strong>
-        <span>可复用 research_broad / 需要资料摘要模板</span>
+        <span>自动草稿桥已接入 / 长文 chunk 策略待规划</span>
         <span>PDF/资料摘录 / paper_note 候选 JSON 生成 / citation anchors / uncertainty 字段</span>
         <span>必要时确认摘要是否保守、是否遗漏关键章节。</span>
       </div>
@@ -972,8 +972,8 @@
 <div class="alignment-row">
         <strong>PDF/本地资料解析</strong>
         <span>Team Workflow 已新增 source-extraction API；知识 ingestion 工具仍要求传入已有 excerpt/source_ref，不负责解析 PDF</span>
-        <b class="status-pill">部分接入</b>
-        <span>01 已能把本地 PDF 解析成 sourceExtraction.pageAnchors/excerpt；02 自动 paper_note 生成链路仍待接。</span>
+        <b class="status-pill">已接入首版</b>
+        <span>01 已能把本地 PDF 解析成 sourceExtraction.pageAnchors/excerpt；02 已能基于该摘录自动生成 paper_note_draft，长文拆分仍待接。</span>
       </div>
 <div class="alignment-row">
         <strong>候选 schema 与工作区</strong>
@@ -1252,6 +1252,11 @@
             </div>
 <div class="blueprint-row compact">
               <b>POST</b>
+              <strong>/api/teams/{team_id}/workflow-orchestration/candidates/{candidate_id}/paper-note-draft</strong>
+              <span>把已完成的 sourceExtraction.excerpt/pageAnchors 组装成本地模型 paper_note_draft 任务，落 CandidateStore，并回写 source candidate 的 paperNoteDrafts trace。</span>
+            </div>
+<div class="blueprint-row compact">
+              <b>POST</b>
               <strong>/api/teams/{team_id}/workflow-orchestration/transfers</strong>
               <span>功能 Agent 提交流程转移请求。</span>
             </div>
@@ -1346,7 +1351,7 @@
                 <span class="num">02</span>
                 <h3>生成 paper_note</h3>
                 <p>把资料转成可审查的论文/资料笔记候选。</p>
-                <div class="tag-row"><span class="tag done">已规划</span><span class="tag">Paper Note Extraction Agent</span></div>
+                <div class="tag-row"><span class="tag active">自动草稿桥已接入</span><span class="tag">Paper Note Extraction Agent</span></div>
               </a>
 <a class="node-card" href="research_flow_pages/03-neuro-mechanism.html">
                 <span class="num">03</span>
