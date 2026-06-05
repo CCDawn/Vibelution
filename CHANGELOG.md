@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.31 - 2026-06-06
+
+- Added a Challenge Cup paper-note autodraft API that turns a completed local PDF `sourceExtraction` into a `paper_note_draft` local-model invocation.
+- Reused the existing Local Research Worker Model and CandidateStore recording path, preserving source refs, page-anchor evidence refs, validation, and source-candidate draft trace metadata.
+- Updated the Challenge Cup flow HTML and technical plan to mark the first source-extraction to paper-note bridge as landed while keeping long-document splitting pending.
+
 ## 0.10.30 - 2026-06-06
 
 - Added the Challenge Cup source-extraction API for local PDF `source_manifest` candidates, computing `sha256`, extracting page anchors and excerpts, and writing traceable `metadata.sourceExtraction` evidence back to CandidateStore.

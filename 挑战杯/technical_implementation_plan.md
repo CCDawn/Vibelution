@@ -256,7 +256,7 @@ source_registered
 
 ### 5.1.1 已落地的前半段后端切片
 
-本轮已先完成 Team 编排与知识搜集/筛选入库前置链路的最小后端能力，并补入本地 PDF `source-extraction` 页码锚点抽取；暂不包含前端，不自动从 PDF 生成完整 `paper_note`，不直接接正式 Team Knowledge 入库。
+本轮已先完成 Team 编排与知识搜集/筛选入库前置链路的最小后端能力，并补入本地 PDF `source-extraction` 页码锚点抽取，以及 `sourceExtraction` 到 `paper_note_draft` 的首版自动草稿桥；暂不包含前端，不处理长文自动分块，不直接接正式 Team Knowledge 入库。
 
 新增文件：
 
@@ -277,6 +277,7 @@ source_registered
 | PUT | `/api/teams/{team_id}/workflow-orchestration` | 确保 `challenge_cup_research` 编排与 `ownerAgentId` |
 | POST | `/api/teams/{team_id}/workflow-orchestration/candidates/source` | 登记 `source_manifest` 候选 |
 | POST | `/api/teams/{team_id}/workflow-orchestration/candidates/{candidate_id}/source-extraction` | 对本地 PDF `source_manifest` 计算 `sha256`、抽取 `metadata.sourceExtraction.pageAnchors` / `excerpt`，并重新校验候选；抽取失败停在 `source_needs_confirmation` |
+| POST | `/api/teams/{team_id}/workflow-orchestration/candidates/{candidate_id}/paper-note-draft` | 将已完成的 `sourceExtraction.excerpt/pageAnchors` 转为本地研究模型 `paper_note_draft` 任务，记录 `paper_note` 候选，并回写 source candidate 的 `metadata.paperNoteDrafts` trace |
 | GET | `/api/teams/{team_id}/workflow-orchestration/candidates` | 按 `candidateType`、`currentState`、`qualityStatus` 查询 CandidateStore，并返回 `validationSummary` |
 | GET | `/api/teams/{team_id}/workflow-orchestration/candidates/validation` | 生成 CandidateStore 校验报告，统计 valid/invalid/error/warning 并列出每个候选的问题 |
 | POST | `/api/teams/{team_id}/workflow-orchestration/transfers` | 功能 Agent 提交流程转移请求 |
@@ -312,9 +313,11 @@ workspace/teams/<teamId>/
 - 本地 PDF `source-extraction` 已落地：对已登记 `source_manifest` 读取本地 PDF，计算 `sha256`，抽取 `pageAnchors` 与 `excerpt` 写入 `metadata.sourceExtraction`，并把 `pageScope` 回写候选。
 - `source-extraction` 不会自动修改原文，不会下载远程资料，不会创建正式 `KnowledgeItem`、RAG 或正式图谱；只有调用方显式传入 `allowedForAnalysis=true` 时才更新分析许可。
 - 缺文件、非 PDF、PDF 解析器不可用、PDF 打不开或无可抽取文本时，`metadata.sourceExtraction.status=failed`，候选保持 `source_needs_confirmation` / `source_manifest_invalid`，并在校验中记录 `source_extraction_failed`。
+- `paper-note-draft` 自动草稿桥已落地：读取完成状态的 `metadata.sourceExtraction`，把 `excerpt/pageAnchors` 组装为 `sourceRefs/evidenceRefs/excerpt`，复用 `invoke_local_research_model` 调用本地研究模型，并通过 `record_local_research_model_output` 写入 `paper_note` 候选。
+- 成功或需修订的 `paper_note` 都停留在 CandidateStore，不写正式 Team Knowledge、RAG 或正式图谱；source candidate 会追加 `metadata.paperNoteDrafts` trace，保留 source -> paper_note 的可追溯关系。
 - 新增运行事件日志：`candidate_store.validated`，只记录候选数、invalid 数、error/warning 数和 workflowId。
 - `paper_note_draft` 输出契约已补齐 `keyFindings`、`methods`、`limitations`、`citations`；每条 `keyFinding` 必须带 `sourceRef` 和 `page` / `citation` / `evidenceRef` 锚点。
-- 合格 `paper_note` 本地模型输出进入 `paper_note_draft`；缺 citation/page anchor 时进入 `paper_note_needs_revision`，不能自然推进到 `mechanism_candidate`。
+- 合格 `paper_note` 本地模型输出进入 `paper_note_draft`；缺 citation/page anchor 时进入 `paper_note_needs_revision`，不能自然推进到 `mechanism_candidate`。长文拆分、多 chunk 汇总和多草稿合并仍待接。
 - `neuro_mechanism_extract` 输出契约已补齐 `paperNoteIds`、`description`、`brainSystems`、`cognitiveFunctions`、`experimentalPhenomena`、`authorInterpretation`、`projectInterpretation`。
 - 合格 `neuro_mechanism` 本地模型输出进入 `mechanism_candidate`；缺机制证据或神经术语不确定但未标记 `terminology_uncertain` 时进入 `mechanism_needs_revision`，不能自然推进到机制映射。
 - `mechanism_mapping` 输出契约已补齐 `neuroMechanismIds`、`computationalAbstraction`、`factLayer`、`inferenceLayer`、`overAnalogyRisk`、`engineeringImplication`。
@@ -489,7 +492,6 @@ Agent 创建策略：
 
 待接入能力：
 
-- 从 `sourceExtraction.excerpt` 自动生成 `paper_note` 的端到端链路。
 - 长文 chunk 合并。
 - 本地 9B 研究模型负责按章节或 chunk 生成 paper_note 草稿，32k 内优先保留 18k-22k 原文证据和输出预留。
 
@@ -622,7 +624,7 @@ Agent 创建策略：
 复用优先的服务边界：
 
 - team_workflow_orchestration_service：已新增，读写 Team 级 workflow_orchestration、CandidateStore 和 transfer_records。
-- team_workflows API：已新增 `/api/teams/{team_id}/workflow-orchestration` 及 candidates/source、candidates/{candidate_id}/source-extraction、transfers、decide。
+- team_workflows API：已新增 `/api/teams/{team_id}/workflow-orchestration` 及 candidates/source、candidates/{candidate_id}/source-extraction、candidates/{candidate_id}/paper-note-draft、transfers、decide。
 - local_research_worker_model：已落地任务包构建、32k 上下文预算、统一 `LLMClient` invoke、JSON 输出提取/校验和 CandidateStore 草稿记录；解析失败不入库。
 - candidate_store：已落地 Team 级 index、候选列表查询、按类型/状态过滤和 validationSummary，并接入 source_manifest、paper_note、neuro_mechanism、mechanism_mapping、algorithm_hypothesis、candidate_graph 最小校验。
 - source_parser：已新增 Team Workflow 后端/API 能力，支持本地 PDF `source_manifest` 的 `sha256`、`pageAnchors`、`excerpt` 抽取；缺文件、非 PDF、解析器不可用或抽取无文本时写 failed extraction 并停在 `source_needs_confirmation`。
@@ -637,6 +639,7 @@ Agent 创建策略：
 - PUT `/api/teams/{team_id}/workflow-orchestration`
 - POST `/api/teams/{team_id}/workflow-orchestration/candidates/source`
 - POST `/api/teams/{team_id}/workflow-orchestration/candidates/{candidate_id}/source-extraction`
+- POST `/api/teams/{team_id}/workflow-orchestration/candidates/{candidate_id}/paper-note-draft`
 - GET `/api/teams/{team_id}/workflow-orchestration/candidates`
 - GET `/api/teams/{team_id}/workflow-orchestration/candidates/validation`
 - POST `/api/teams/{team_id}/workflow-orchestration/transfers`
@@ -686,13 +689,15 @@ Agent 创建策略：
 - paper_note 输出契约与 CandidateStore 校验已落地：`keyFindings`、`methods`、`limitations`、`citations` 为本地模型输出必填。
 - 每条 `keyFinding` 必须回指 `sourceRef`，并提供 `page` / `citation` / `evidenceRef` 锚点。
 - 缺 citation/page anchor 的 paper_note 会进入 `paper_note_needs_revision`。
-- 本地 PDF 页码摘录已可由 `source-extraction` 提供；长文拆分规则和 prompt-research-broad 自动生成链路仍待接。
+- 本地 PDF 页码摘录已可由 `source-extraction` 提供，并已通过 `/paper-note-draft` 自动组装成本地模型调用输入。
+- `paper_note` 候选写入后会在 source candidate 的 `metadata.paperNoteDrafts` 中留下 trace，便于后续候选图谱和治理入库追踪。
 
 验收：
 
 - 已覆盖：每条 keyFinding 能回指 sourceRef/page/citation anchor。
 - 已覆盖：缺 citation 的 finding 不能进入 mechanism_candidate，只能停在 `paper_note_needs_revision`。
-- 待覆盖：从本地 PDF `sourceExtraction.excerpt` 自动生成 paper_note。
+- 已覆盖：从本地 PDF `sourceExtraction.excerpt/pageAnchors` 自动生成 paper_note，并回写 source candidate trace。
+- 待覆盖：长文 chunk、多草稿合并和真实 Qwen 模型质量评估。
 
 ### M3：机制与算法假设
 

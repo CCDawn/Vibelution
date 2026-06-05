@@ -397,6 +397,105 @@ def extract_candidate_source_pages(team_id: str, candidate_id: str, payload: dic
     }
 
 
+def draft_paper_note_from_source_candidate(
+    team_id: str,
+    candidate_id: str,
+    payload: dict[str, Any] | None = None,
+    *,
+    llm_client_factory: Any = None,
+) -> dict[str, Any]:
+    normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
+    normalized_candidate_id = _normalize_required_id(candidate_id, "Candidate id is required.")
+    team_service.get_team(normalized_team_id)
+    payload = payload if isinstance(payload, dict) else {}
+    created_by_agent = _trim_text(payload.get("createdByAgent"), max_length=160) or "Paper Note Extraction Agent"
+    model_id = _trim_text(payload.get("modelId"), max_length=160)
+    title_override = _trim_text(payload.get("title"), max_length=240)
+    summary_override = _trim_text(payload.get("summary"), max_length=4000)
+    excerpt_override = _trim_text(payload.get("excerpt"), max_length=24_000)
+    with _WORKFLOW_LOCK:
+        candidate_store = _load_candidate_store(normalized_team_id)
+        source_candidate = _find_candidate(candidate_store, normalized_candidate_id)
+        if source_candidate is None:
+            raise TeamWorkflowOrchestrationError("Candidate not found.")
+        if str(source_candidate.get("candidateType") or "") != "source_manifest":
+            raise TeamWorkflowOrchestrationError("Paper note autodraft requires a source_manifest candidate.")
+        extraction = _ready_source_extraction(source_candidate)
+        excerpt = excerpt_override or _trim_text(extraction.get("excerpt"), max_length=24_000)
+        if not excerpt:
+            raise TeamWorkflowOrchestrationError("Source extraction does not include excerpt text for paper_note drafting.")
+        source_refs = [_source_manifest_source_ref(source_candidate)]
+        evidence_refs = _source_extraction_evidence_refs(source_candidate, extraction)
+        if not evidence_refs:
+            raise TeamWorkflowOrchestrationError("Source extraction does not include page anchors for paper_note drafting.")
+        candidate_refs = [
+            {
+                "type": "source_manifest",
+                "id": normalized_candidate_id,
+                "label": _source_manifest_label(source_candidate),
+            }
+        ]
+        paper_note_title = title_override or f"paper_note draft - {_source_manifest_label(source_candidate)}"
+        paper_note_summary = summary_override or f"Autodrafted from sourceExtraction pageScope {extraction.get('pageScope') or source_candidate.get('pageScope') or ''}".strip()
+
+    invoke_response = invoke_local_research_model(
+        normalized_team_id,
+        {
+            "taskType": "paper_note_draft",
+            "modelId": model_id,
+            "sourceRefs": source_refs,
+            "evidenceRefs": evidence_refs,
+            "candidateRefs": candidate_refs,
+            "excerpt": excerpt,
+            "title": paper_note_title,
+            "summary": paper_note_summary,
+            "createdByAgent": created_by_agent,
+        },
+        llm_client_factory=llm_client_factory,
+    )
+    paper_note_candidate = invoke_response.get("candidate") if isinstance(invoke_response.get("candidate"), dict) else {}
+    validation = invoke_response.get("validation") if isinstance(invoke_response.get("validation"), dict) else {"valid": False, "issues": []}
+    task = invoke_response.get("task") if isinstance(invoke_response.get("task"), dict) else {}
+    now = utc_now_iso()
+    with _WORKFLOW_LOCK:
+        workflow = _load_or_create_workflow(normalized_team_id)
+        candidate_store = _load_candidate_store(normalized_team_id)
+        source_candidate = _find_candidate(candidate_store, normalized_candidate_id)
+        if source_candidate is not None:
+            metadata = source_candidate.get("metadata") if isinstance(source_candidate.get("metadata"), dict) else {}
+            drafts = metadata.get("paperNoteDrafts") if isinstance(metadata.get("paperNoteDrafts"), list) else []
+            draft_record = {
+                "candidateId": str(paper_note_candidate.get("candidateId") or ""),
+                "taskId": str(task.get("taskId") or ""),
+                "status": "drafted" if validation.get("valid") is True else "needs_revision",
+                "createdByAgent": created_by_agent,
+                "createdAt": now,
+                "sourceExtractionSha256": str(extraction.get("sha256") or source_candidate.get("sha256") or ""),
+                "pageScope": str(extraction.get("pageScope") or source_candidate.get("pageScope") or ""),
+            }
+            metadata["paperNoteDrafts"] = [*drafts[-23:], draft_record]
+            source_candidate["metadata"] = metadata
+            source_candidate["updatedAt"] = now
+            candidate_store["updatedAt"] = now
+            _write_json(_candidate_store_path(normalized_team_id), candidate_store)
+        else:
+            source_candidate = {}
+    _record_workflow_event(
+        "candidate.paper_note_autodrafted",
+        normalized_team_id,
+        fields={
+            "workflowId": workflow["workflowId"],
+            "sourceCandidateId": normalized_candidate_id,
+            "paperNoteCandidateId": str(paper_note_candidate.get("candidateId") or ""),
+            "valid": validation.get("valid") is True,
+            "issueCount": len(validation.get("issues") or []) if isinstance(validation.get("issues"), list) else 0,
+        },
+    )
+    invoke_response["sourceCandidate"] = source_candidate
+    invoke_response["workflow"] = _workflow_to_api(normalized_team_id, workflow, candidate_store)
+    return invoke_response
+
+
 def list_candidate_store(
     team_id: str,
     *,
@@ -1473,6 +1572,58 @@ def _source_manifest_path(candidate: dict[str, Any]) -> str:
     metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {}
     metadata_path = _trim_text(metadata.get("path") or metadata.get("sourcePath"), max_length=2000)
     return source_path or metadata_path
+
+
+def _source_manifest_label(candidate: dict[str, Any]) -> str:
+    return (
+        _trim_text(candidate.get("title"), max_length=240)
+        or _trim_text(candidate.get("sourceUrl"), max_length=240)
+        or _trim_text(candidate.get("sourcePath"), max_length=240)
+        or _trim_text(candidate.get("candidateId"), max_length=128)
+        or "source_manifest"
+    )
+
+
+def _source_manifest_source_ref(candidate: dict[str, Any]) -> dict[str, str]:
+    source_kind = _trim_text(candidate.get("sourceKind"), max_length=80) or "source_manifest"
+    return {
+        "type": source_kind,
+        "id": _trim_text(candidate.get("candidateId"), max_length=240),
+        "label": _source_manifest_label(candidate),
+    }
+
+
+def _ready_source_extraction(candidate: dict[str, Any]) -> dict[str, Any]:
+    metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {}
+    extraction = metadata.get("sourceExtraction") if isinstance(metadata.get("sourceExtraction"), dict) else {}
+    if extraction.get("status") != "extracted":
+        raise TeamWorkflowOrchestrationError("Source extraction must be completed before paper_note autodraft.")
+    page_anchors = extraction.get("pageAnchors")
+    if not isinstance(page_anchors, list) or not page_anchors:
+        raise TeamWorkflowOrchestrationError("Source extraction must include pageAnchors before paper_note autodraft.")
+    if not _trim_text(extraction.get("excerpt"), max_length=24_000):
+        raise TeamWorkflowOrchestrationError("Source extraction must include excerpt before paper_note autodraft.")
+    return extraction
+
+
+def _source_extraction_evidence_refs(candidate: dict[str, Any], extraction: dict[str, Any]) -> list[dict[str, str]]:
+    source_label = _source_manifest_label(candidate)
+    refs: list[dict[str, str]] = []
+    for anchor in list(extraction.get("pageAnchors") or [])[:32]:
+        if not isinstance(anchor, dict):
+            continue
+        page = int(anchor.get("page") or 0)
+        anchor_id = _trim_text(anchor.get("id"), max_length=240) or f"{candidate.get('candidateId')}-p{page}"
+        label = _trim_text(anchor.get("label"), max_length=120) or (f"p. {page}" if page else "page anchor")
+        if anchor_id or label:
+            refs.append(
+                {
+                    "type": "pdf_page",
+                    "id": anchor_id,
+                    "label": f"{source_label} {label}".strip(),
+                }
+            )
+    return refs
 
 
 def _resolve_source_path(source_path: str) -> Path:

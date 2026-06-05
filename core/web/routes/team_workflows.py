@@ -17,6 +17,7 @@ from core.web.services.team_workflow_orchestration_service import (
     ensure_team_workflow_orchestration,
     get_team_workflow_orchestration,
     build_local_research_model_task,
+    draft_paper_note_from_source_candidate,
     extract_candidate_source_pages,
     invoke_local_research_model,
     list_candidate_store,
@@ -106,6 +107,14 @@ class SourceExtractionPayload(BaseModel):
     allowedForAnalysis: bool | None = None
     maxPages: int = Field(24, ge=1, le=64)
     maxCharsPerPage: int = Field(1800, ge=200, le=6000)
+
+
+class PaperNoteAutodraftPayload(BaseModel):
+    createdByAgent: str = Field("", max_length=160)
+    modelId: str = Field("", max_length=160)
+    title: str = Field("", max_length=240)
+    summary: str = Field("", max_length=4000)
+    excerpt: str = Field("", max_length=24000)
 
 
 class StewardPackKnowledgeIngestionPayload(BaseModel):
@@ -200,6 +209,16 @@ def team_workflow_candidate_graph_build(team_id: str, payload: CandidateGraphBui
 def team_workflow_candidate_source_extract(team_id: str, candidate_id: str, payload: SourceExtractionPayload) -> dict:
     try:
         return extract_candidate_source_pages(team_id, candidate_id, payload.model_dump())
+    except TeamNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/teams/{team_id}/workflow-orchestration/candidates/{candidate_id}/paper-note-draft", status_code=status.HTTP_201_CREATED)
+def team_workflow_candidate_paper_note_autodraft(team_id: str, candidate_id: str, payload: PaperNoteAutodraftPayload) -> dict:
+    try:
+        return draft_paper_note_from_source_candidate(team_id, candidate_id, payload.model_dump())
     except TeamNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:

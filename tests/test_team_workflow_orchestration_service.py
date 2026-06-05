@@ -300,6 +300,104 @@ def test_source_extraction_failure_keeps_manifest_needing_confirmation(tmp_path,
     assert {issue["code"] for issue in response["validation"]["issues"]} >= {"source_extraction_failed"}
 
 
+def test_paper_note_autodraft_uses_source_extraction_excerpt_and_anchors(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    source_path = tmp_path / "sources" / "neuro.pdf"
+    source_path.parent.mkdir(parents=True)
+    source_path.write_bytes(b"%PDF-1.4\nfake local pdf bytes\n")
+
+    def fake_extract(path, *, page_scope, max_pages, max_chars_per_page):
+        return [
+            {"type": "pdf_page", "id": "neuro-p1", "label": "p. 1", "page": 1, "text": "Neuromodulation evidence."},
+            {"type": "pdf_page", "id": "neuro-p2", "label": "p. 2", "page": 2, "text": "Adaptive control finding."},
+        ]
+
+    monkeypatch.setattr(team_workflow_orchestration_service, "_extract_pdf_page_anchors", fake_extract)
+    _FakeLocalResearchClient.response = _FakeLocalResearchMessage(
+        """
+        {
+          "candidateType": "paper_note",
+          "sourceRefs": [{"type": "pdf", "id": "source-1", "label": "Local PDF"}],
+          "evidenceRefs": [{"type": "pdf_page", "id": "neuro-p1", "label": "Local PDF p. 1"}],
+          "claims": [{"claim": "Neuromodulation supports adaptive control.", "sourceRef": "source-1"}],
+          "keyFindings": [{"finding": "Neuromodulation supports adaptive control.", "sourceRef": "source-1", "page": "1", "citation": "Local PDF, p.1"}],
+          "methods": ["paper excerpt synthesis"],
+          "limitations": ["autodraft requires review"],
+          "citations": [{"sourceRef": "source-1", "page": "1", "citation": "Local PDF, p.1"}],
+          "uncertainty": [],
+          "riskFlags": [],
+          "confidence": 0.7,
+          "nextAction": "send_to_mechanism_extraction",
+          "requiresReview": true
+        }
+        """
+    )
+    _FakeLocalResearchClient.captured_messages = []
+    candidate = team_workflow_orchestration_service.register_candidate_source(
+        team["teamId"],
+        {
+            "title": "Local PDF",
+            "sourcePath": str(source_path),
+            "sourceKind": "pdf",
+            "allowedForAnalysis": False,
+            "createdByAgent": "Source Intake Agent",
+        },
+    )["candidate"]
+    team_workflow_orchestration_service.extract_candidate_source_pages(
+        team["teamId"],
+        candidate["candidateId"],
+        {"allowedForAnalysis": True, "pageScope": "1-2"},
+    )
+
+    response = team_workflow_orchestration_service.draft_paper_note_from_source_candidate(
+        team["teamId"],
+        candidate["candidateId"],
+        {"createdByAgent": "Paper Note Extraction Agent"},
+        llm_client_factory=_FakeLocalResearchClient,
+    )
+
+    assert response["validation"]["valid"] is True
+    assert response["candidate"]["candidateType"] == "paper_note"
+    assert response["candidate"]["currentState"] == "paper_note_draft"
+    assert response["sourceCandidate"]["metadata"]["paperNoteDrafts"][0]["candidateId"] == response["candidate"]["candidateId"]
+    captured_payload = _FakeLocalResearchClient.captured_messages[-1]["messages"][1]["content"]
+    assert "Neuromodulation evidence" in captured_payload
+    assert "neuro-p1" in captured_payload
+    assert "source_manifest" in captured_payload
+    assert response["workflow"]["candidateStore"]["candidateCount"] == 2
+
+
+def test_paper_note_autodraft_requires_completed_source_extraction(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    candidate = team_workflow_orchestration_service.register_candidate_source(
+        team["teamId"],
+        {
+            "title": "Unextracted PDF",
+            "sourcePath": str(tmp_path / "missing.pdf"),
+            "sourceKind": "pdf",
+            "allowedForAnalysis": True,
+            "sha256": "a" * 64,
+            "pageScope": "1",
+            "createdByAgent": "Source Intake Agent",
+        },
+    )["candidate"]
+
+    try:
+        team_workflow_orchestration_service.draft_paper_note_from_source_candidate(
+            team["teamId"],
+            candidate["candidateId"],
+            {},
+            llm_client_factory=_FakeLocalResearchClient,
+        )
+    except team_workflow_orchestration_service.TeamWorkflowOrchestrationError as exc:
+        assert "Source extraction must be completed" in str(exc)
+    else:
+        raise AssertionError("paper note autodraft should require completed source extraction")
+
+
 def test_candidate_store_lists_candidates_with_filters(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     team = team_service.create_team(name="挑战杯科研团队")
