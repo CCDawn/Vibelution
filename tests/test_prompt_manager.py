@@ -28,6 +28,7 @@ from core.prompt_manager import (
     get_prompt_manager,
     build_system_prompt,
     build_simple_system_prompt,
+    split_sys_prompt_prefix,
     to_string,
 )
 from core.orchestration.runtime_goal import RuntimeGoalPacket
@@ -653,6 +654,48 @@ class TestBuildAPI:
         parts = list(sp)
         assert SYSTEM_PROMPT_DYNAMIC_BOUNDARY in parts
 
+    def test_cache_prefix_dynamic_sections_stay_before_boundary(self):
+        sections = [
+            SystemPromptSection(
+                name="VOLATILE_EARLY",
+                priority=5,
+                compute=lambda: "current goal",
+                cache_break=True,
+            ),
+            SystemPromptSection(
+                name="STATIC",
+                priority=10,
+                compute=lambda: "static foundation",
+                cache_break=False,
+            ),
+            SystemPromptSection(
+                name="STABLE_DYNAMIC",
+                priority=20,
+                compute=lambda: "stable dynamic agent facts",
+                cache_break=True,
+                cache_prefix=True,
+            ),
+            SystemPromptSection(
+                name="VOLATILE_DYNAMIC",
+                priority=30,
+                compute=lambda: "current task and logs",
+                cache_break=True,
+            ),
+        ]
+
+        from core.prompt_manager.builder import get_system_prompt
+
+        build_result = get_system_prompt(sections, SystemPromptCache())
+        static_parts, dynamic_parts = split_sys_prompt_prefix(build_result.prompt)
+
+        assert any("static foundation" in part for part in static_parts)
+        assert any("stable dynamic agent facts" in part for part in static_parts)
+        assert not any("current goal" in part for part in static_parts)
+        assert not any("current task and logs" in part for part in static_parts)
+        assert any("current goal" in part for part in dynamic_parts)
+        assert any("current task and logs" in part for part in dynamic_parts)
+        assert build_result.section_results[2].cache_prefix is True
+
 
 class TestCompatibilityFunctions:
     """向后兼容函数测试"""
@@ -1018,6 +1061,7 @@ class TestSectionPriority:
         pm = PromptManager()
         sp = pm.build(include=["GIT_MEMORY", "CONFIG_AWARENESS", "LANGUAGE_AWARENESS", "GIT_RULES"])
         result = to_string(sp)
+        static_parts, dynamic_parts = split_sys_prompt_prefix(sp)
 
         git_memory_pos = result.find("Git") if "Git" in result else result.find("脏区")
         config_awareness_pos = result.find("## 配置自感知")
@@ -1027,7 +1071,8 @@ class TestSectionPriority:
         if git_memory_pos != -1 and config_awareness_pos != -1:
             assert git_memory_pos < config_awareness_pos, "GIT_MEMORY (p35) 应在 CONFIG_AWARENESS (p36) 之前"
         if config_awareness_pos != -1 and language_awareness_pos != -1:
-            assert config_awareness_pos < language_awareness_pos, "CONFIG_AWARENESS (p36) 应在 LANGUAGE_AWARENESS (p37) 之前"
+            assert any("## 语言状态" in part for part in static_parts)
+            assert any("## 配置自感知" in part for part in dynamic_parts)
         if language_awareness_pos != -1 and git_rules_pos != -1:
             assert language_awareness_pos < git_rules_pos, "LANGUAGE_AWARENESS (p37) 应在 GIT_RULES (p38) 之前"
 

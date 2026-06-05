@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List
 
@@ -35,6 +37,21 @@ class BuiltPayload:
     route: ResolvedProtocolRoute
     summary: Dict[str, Any]
     warnings: tuple[str, ...] = field(default_factory=tuple)
+
+
+_PROMPT_CACHE_KEY_SAFE_RE = re.compile(r"[^a-zA-Z0-9_.:-]+")
+
+
+def _default_prompt_cache_key(build_input: PayloadBuildInput) -> str:
+    provider_kind = str(getattr(build_input.provider, "kind", "") or "provider").strip().lower()
+    profile_id = str(build_input.profile_id or "profile").strip().lower()
+    model = str(getattr(build_input.profile, "model", "") or "model").strip().lower()
+    route_protocol = str(getattr(getattr(build_input.route, "protocol", None), "value", "") or "").strip().lower()
+    route_transport = str(getattr(getattr(build_input.route, "policy", None), "transport", "") or "").strip().lower()
+    raw = "|".join([provider_kind, profile_id, model, route_protocol, route_transport])
+    digest = hashlib.sha256(raw.encode("utf-8", errors="ignore")).hexdigest()[:12]
+    label = _PROMPT_CACHE_KEY_SAFE_RE.sub("-", f"vibelution:{provider_kind}:{profile_id}:{digest}").strip("-")
+    return label[:80] or f"vibelution:{digest}"
 
 
 def build_llm_payload(
@@ -120,6 +137,8 @@ def build_llm_payload(
     if prompt_cache_mode == "automatic":
         prompt_cache_key = str(getattr(prompt_cache, "key", "") or "").strip()
         prompt_cache_retention = str(getattr(prompt_cache, "retention", "") or "").strip()
+        if not prompt_cache_key:
+            prompt_cache_key = _default_prompt_cache_key(build_input)
         if prompt_cache_key:
             payload["prompt_cache_key"] = prompt_cache_key
         if prompt_cache_retention:

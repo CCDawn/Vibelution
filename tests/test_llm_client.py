@@ -1489,6 +1489,27 @@ def test_openai_compatible_automatic_prompt_cache_strips_cache_control_and_keeps
     ]
 
 
+def test_automatic_prompt_cache_uses_stable_default_cache_key_when_not_configured():
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "xiaomi",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://token-plan-cn.xiaomimimo.com/v1",
+            "llm.providers.default.compat_mode": "openai",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "mimo-v2.5-pro",
+            "llm.profiles.primary.prompt_cache.mode": "automatic",
+        }
+    )
+
+    client = LLMClient(config=config, backend=lambda payload: payload)
+    payload_one = client._build_payload([{"role": "system", "content": "stable"}])
+    payload_two = client._build_payload([{"role": "system", "content": "stable"}, {"role": "user", "content": "new"}])
+
+    assert payload_one["prompt_cache_key"].startswith("vibelution:xiaomi:primary:")
+    assert payload_two["prompt_cache_key"] == payload_one["prompt_cache_key"]
+
+
 def test_automatic_prompt_cache_logs_design_even_when_payload_strips_cache_control(monkeypatch):
     config = make_config(
         **{
