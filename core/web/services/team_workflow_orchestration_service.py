@@ -12,7 +12,7 @@ from typing import Any
 
 from config.public_config import build_effective_config, load_public_config
 from core.llm import LLMClient
-from core.web.services import team_service
+from core.web.services import team_knowledge_service, team_service
 from core.web.services.runtime_scene_service import record_runtime_scene_event
 
 
@@ -789,6 +789,126 @@ def invoke_local_research_model(team_id: str, payload: dict[str, Any], *, llm_cl
     return record_response
 
 
+def submit_steward_pack_to_knowledge_ingestion(team_id: str, candidate_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
+    normalized_candidate_id = _normalize_required_id(candidate_id, "Candidate id is required.")
+    team_service.get_team(normalized_team_id)
+    knowledge_base_id = _normalize_required_id(payload.get("knowledgeBaseId"), "Knowledge base id is required.")
+    proposed_by_agent_id = _normalize_required_id(payload.get("proposedByAgentId"), "Proposed by Agent id is required.")
+
+    with _WORKFLOW_LOCK:
+        workflow = _load_or_create_workflow(normalized_team_id)
+        candidate_store = _load_candidate_store(normalized_team_id)
+        candidate = _find_candidate(candidate_store, normalized_candidate_id)
+        if candidate is None:
+            raise TeamWorkflowOrchestrationError("Steward pack candidate not found.")
+        metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {}
+        task_type = str(metadata.get("taskType") or "")
+        output = metadata.get("output") if isinstance(metadata.get("output"), dict) else {}
+        if task_type != "steward_pack_draft" or str(candidate.get("currentState") or "") != "steward_pack_draft":
+            raise TeamWorkflowOrchestrationError("Only steward_pack_draft candidates can be submitted to knowledge ingestion.")
+        validation = validate_local_research_model_output("steward_pack_draft", output)
+        if not validation["valid"]:
+            raise TeamWorkflowOrchestrationError("Steward pack candidate must be valid before knowledge ingestion submission.")
+
+    ingestion_payload = _steward_pack_ingestion_payload(
+        normalized_team_id,
+        candidate,
+        output,
+        proposed_by_agent_id=proposed_by_agent_id,
+    )
+    try:
+        ingestion_package = team_knowledge_service.create_ingestion_package(
+            knowledge_base_id,
+            source_type="agent_authored",
+            source_ref=ingestion_payload["sourceRef"],
+            source_created_at=str(candidate.get("createdAt") or ""),
+            captured_by=proposed_by_agent_id,
+            evidence_range=ingestion_payload["evidenceRange"],
+            source_title=ingestion_payload["sourceTitle"],
+            source_summary=ingestion_payload["sourceSummary"],
+            excerpt=ingestion_payload["excerpt"],
+            proposed_by_agent_id=proposed_by_agent_id,
+            proposal_title=ingestion_payload["proposalTitle"],
+            proposal_summary=ingestion_payload["proposalSummary"],
+            proposal_content=ingestion_payload["proposalContent"],
+            tags=ingestion_payload["tags"],
+        )
+    except (team_knowledge_service.TeamKnowledgeError, team_knowledge_service.TeamKnowledgeNotFoundError) as exc:
+        raise TeamWorkflowOrchestrationError(str(exc)) from exc
+
+    rating_result: dict[str, Any] | None = None
+    rating_payload = _steward_pack_rating_suggestion_payload(output, ingestion_package.get("proposal"), proposed_by_agent_id)
+    if rating_payload is not None:
+        try:
+            rating_result = team_knowledge_service.create_rating_suggestion(knowledge_base_id, **rating_payload)
+        except team_knowledge_service.TeamKnowledgeError:
+            rating_result = None
+
+    now = utc_now_iso()
+    with _WORKFLOW_LOCK:
+        workflow = _load_or_create_workflow(normalized_team_id)
+        candidate_store = _load_candidate_store(normalized_team_id)
+        candidate = _find_candidate(candidate_store, normalized_candidate_id)
+        if candidate is None:
+            raise TeamWorkflowOrchestrationError("Steward pack candidate not found after ingestion submission.")
+        metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {}
+        metadata["knowledgeIngestion"] = {
+            "status": "pending_review",
+            "knowledgeBaseId": knowledge_base_id,
+            "sourceArtifactId": str((ingestion_package.get("sourceArtifact") or {}).get("sourceArtifactId") or ""),
+            "proposalId": str((ingestion_package.get("proposal") or {}).get("proposalId") or ""),
+            "ratingSuggestionId": str((rating_result or {}).get("suggestionId") or ""),
+            "submittedByAgentId": proposed_by_agent_id,
+            "submittedAt": now,
+            "writesOfficialKnowledge": False,
+            "writesOfficialRag": False,
+            "writesOfficialGraph": False,
+        }
+        candidate["metadata"] = metadata
+        candidate["currentState"] = "steward_pending_knowledge_review"
+        candidate["qualityStatus"] = "pending_knowledge_review"
+        candidate["updatedAt"] = now
+        candidate_store["updatedAt"] = now
+        _write_json(_candidate_store_path(normalized_team_id), candidate_store)
+        workflow["updatedAt"] = now
+        workflow["activeWorkflowItems"] = _upsert_active_item(
+            workflow.get("activeWorkflowItems"),
+            candidate_id=normalized_candidate_id,
+            current_node=str(candidate.get("currentWorkflowNode") or "steward_ingestion"),
+            status=str(candidate.get("currentState") or "steward_pending_knowledge_review"),
+            transfer_id="",
+        )
+        _write_json(_workflow_path(normalized_team_id), workflow)
+
+    _record_workflow_event(
+        "steward_pack.knowledge_ingestion_submitted",
+        normalized_team_id,
+        fields={
+            "workflowId": workflow["workflowId"],
+            "candidateId": normalized_candidate_id,
+            "knowledgeBaseId": knowledge_base_id,
+            "proposalId": str((ingestion_package.get("proposal") or {}).get("proposalId") or ""),
+            "sourceArtifactId": str((ingestion_package.get("sourceArtifact") or {}).get("sourceArtifactId") or ""),
+            "ratingSuggestionCreated": rating_result is not None,
+        },
+    )
+    return {
+        "candidate": candidate,
+        "knowledgeIngestion": {
+            "status": "pending_review",
+            "package": ingestion_package,
+            "ratingSuggestion": rating_result,
+            "officialBoundary": {
+                "writesOfficialKnowledge": False,
+                "writesOfficialRag": False,
+                "writesOfficialGraph": False,
+            },
+        },
+        "workflow": _workflow_to_api(normalized_team_id, workflow, candidate_store),
+    }
+
+
 def validate_local_research_model_output(task_type: str, output: dict[str, Any]) -> dict[str, Any]:
     normalized_task_type = _normalize_local_research_task_type(task_type)
     issues: list[dict[str, str]] = []
@@ -1276,6 +1396,118 @@ def _validate_steward_pack_output(output: dict[str, Any]) -> list[dict[str, str]
     if _has_value(output.get("officialSync")) or output.get("applyNow") is True or output.get("writeOfficialGraph") is True:
         issues.append({"severity": "error", "code": "official_write_not_allowed", "message": "steward_pack draft must not request immediate official write or graph sync."})
     return issues
+
+
+def _steward_pack_ingestion_payload(
+    team_id: str,
+    candidate: dict[str, Any],
+    output: dict[str, Any],
+    *,
+    proposed_by_agent_id: str,
+) -> dict[str, Any]:
+    proposal_payload = output.get("proposalPayload") if isinstance(output.get("proposalPayload"), dict) else {}
+    source_trace = output.get("sourceTrace") if isinstance(output.get("sourceTrace"), dict) else {}
+    source_ref = {
+        "agentId": proposed_by_agent_id,
+        "teamId": team_id,
+        "candidateId": str(candidate.get("candidateId") or ""),
+        "workflowId": str(candidate.get("workflowId") or ""),
+        "taskType": "steward_pack_draft",
+        "targetDomain": _trim_text(output.get("targetDomain"), max_length=160),
+        "candidateIds": _normalize_text_list(output.get("candidateIds"), max_items=32, max_length=160),
+        "sourceTrace": _normalize_metadata(source_trace),
+    }
+    title = (
+        _trim_text(proposal_payload.get("title"), max_length=240)
+        or _trim_text(candidate.get("title"), max_length=240)
+        or "Challenge Cup steward ingestion proposal"
+    )
+    summary = _trim_text(proposal_payload.get("summary") or output.get("riskSummary") or candidate.get("summary"), max_length=4000)
+    content_payload = {
+        "proposalPayload": _normalize_metadata(proposal_payload),
+        "ratingSuggestion": _normalize_metadata(output.get("ratingSuggestion") if isinstance(output.get("ratingSuggestion"), dict) else {}),
+        "riskSummary": _trim_text(output.get("riskSummary"), max_length=4000),
+        "claims": output.get("claims") if isinstance(output.get("claims"), list) else [],
+        "uncertainty": output.get("uncertainty") if isinstance(output.get("uncertainty"), list) else [],
+        "sourceTrace": _normalize_metadata(source_trace),
+        "approvalRequired": True,
+        "officialBoundary": {
+            "writesOfficialKnowledge": False,
+            "writesOfficialRag": False,
+            "writesOfficialGraph": False,
+        },
+    }
+    content = json.dumps(content_payload, ensure_ascii=False, indent=2, sort_keys=True)
+    tags = ["challenge-cup", "steward-pack", "pending-review", _trim_text(output.get("targetDomain"), max_length=80)]
+    return {
+        "sourceRef": source_ref,
+        "evidenceRange": {
+            "sourceRefs": _normalize_ref_list(output.get("sourceRefs"), max_items=32),
+            "evidenceRefs": _normalize_ref_list(output.get("evidenceRefs"), max_items=32),
+        },
+        "sourceTitle": f"Steward pack source: {title}",
+        "sourceSummary": summary,
+        "excerpt": _trim_text(output.get("riskSummary"), max_length=12000) or summary or title,
+        "proposalTitle": title,
+        "proposalSummary": summary,
+        "proposalContent": content,
+        "tags": [item for item in _normalize_text_list(tags, max_items=8, max_length=80) if item],
+    }
+
+
+def _steward_pack_rating_suggestion_payload(
+    output: dict[str, Any],
+    proposal: Any,
+    proposed_by_agent_id: str,
+) -> dict[str, Any] | None:
+    if not isinstance(proposal, dict):
+        return None
+    proposal_id = _trim_text(proposal.get("proposalId"), max_length=160)
+    if not proposal_id:
+        return None
+    rating = output.get("ratingSuggestion") if isinstance(output.get("ratingSuggestion"), dict) else {}
+    if not rating:
+        return None
+    importance_level = _normalize_rating_enum(
+        rating.get("importanceLevel") or rating.get("importance") or rating.get("rating"),
+        {"low", "medium", "high", "critical"},
+        default="medium",
+    )
+    stability = _normalize_rating_enum(rating.get("stability"), {"temporary", "evolving", "stable", "deprecated"}, default="evolving")
+    review_priority = _normalize_rating_enum(
+        rating.get("reviewPriority") or rating.get("priority"),
+        {"normal", "elevated", "urgent"},
+        default="elevated",
+    )
+    confidence = rating.get("confidence")
+    if confidence is None:
+        confidence = output.get("confidence")
+    try:
+        normalized_confidence = max(0.0, min(1.0, float(confidence if confidence is not None else 0.7)))
+    except (TypeError, ValueError):
+        normalized_confidence = 0.7
+    reason = _trim_text(rating.get("reason") or rating.get("markingReason") or output.get("riskSummary"), max_length=2000)
+    return {
+        "suggested_by_agent_id": proposed_by_agent_id,
+        "target_type": "proposal",
+        "proposal_id": proposal_id,
+        "importance_level": importance_level,
+        "confidence": normalized_confidence,
+        "stability": stability,
+        "review_priority": review_priority,
+        "marking_reason": reason,
+    }
+
+
+def _normalize_rating_enum(value: Any, allowed: set[str], *, default: str) -> str:
+    normalized = _trim_text(value, max_length=80).lower().replace("-", "_").replace(" ", "_")
+    aliases = {
+        "reviewable": "medium",
+        "needs_review": "elevated",
+        "pending_review": "elevated",
+    }
+    normalized = aliases.get(normalized, normalized)
+    return normalized if normalized in allowed else default
 
 
 def _validate_candidate_graph_candidate(candidate: dict[str, Any]) -> list[dict[str, str]]:
