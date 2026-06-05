@@ -760,7 +760,12 @@ class LLMClient:
         self._backend = backend or _default_completion_backend
         self.adapter = get_provider_adapter(self.provider, self.profile)
         self._resolved_spec = discover_model(self.config, self.profile_id)
-        self.protocol_route = resolve_model_protocol(self.profile, self.provider)
+        _model_id, model_entry = self.config.llm.get_model_library_entry_for_profile(self.profile)
+        self.protocol_route = resolve_model_protocol(
+            self.profile,
+            self.provider,
+            model_entry=model_entry if isinstance(model_entry, dict) else None,
+        )
         self._last_payload_protocol_summary: Dict[str, Any] = {}
 
     @property
