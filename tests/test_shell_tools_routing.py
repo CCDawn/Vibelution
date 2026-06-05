@@ -100,6 +100,83 @@ class TestMarkerInteraction:
 
 
 # ---------------------------------------------------------------------------
+# 结构化命令路由分类
+# ---------------------------------------------------------------------------
+
+class TestShellCommandClassifier:
+    def test_explicit_bash_routes_to_bash_on_windows(self, monkeypatch):
+        monkeypatch.setattr(shell_tools, "IS_WINDOWS", True)
+
+        route = shell_tools.classify_shell_command('bash -c "ls | head"')
+
+        assert route.route == "bash"
+        assert route.reason == "explicit_bash_invocation"
+        assert route.final_command == 'bash -c "ls | head"'
+        assert not route.blocked
+
+    def test_linux_command_routes_to_git_bash_on_windows(self, monkeypatch, tmp_path):
+        bash = tmp_path / "bash.exe"
+        bash.write_text("", encoding="utf-8")
+        monkeypatch.setattr(shell_tools, "IS_WINDOWS", True)
+        monkeypatch.setattr(shell_tools, "_find_git_bash", lambda: str(bash))
+
+        route = shell_tools.classify_shell_command("rmdir workspace/memory/test")
+
+        assert route.route == "git_bash"
+        assert route.reason == "linux_command_on_windows"
+        assert str(bash) in route.final_command
+        assert "rmdir workspace/memory/test" in route.final_command
+
+    def test_linux_command_without_git_bash_is_blocked_on_windows(self, monkeypatch):
+        monkeypatch.setattr(shell_tools, "IS_WINDOWS", True)
+        monkeypatch.setattr(shell_tools, "_find_git_bash", lambda: "")
+
+        route = shell_tools.classify_shell_command("touch /tmp/foo")
+
+        assert route.route == "blocked"
+        assert route.reason == "git_bash_missing"
+        assert route.blocked
+        assert "未找到 Git Bash" in route.error
+
+    def test_unix_marker_is_blocked_on_windows(self, monkeypatch):
+        monkeypatch.setattr(shell_tools, "IS_WINDOWS", True)
+
+        route = shell_tools.classify_shell_command("python -m pytest tests -q 2>/dev/null | tail -5")
+
+        assert route.route == "blocked"
+        assert route.reason == "unix_shell_marker_on_windows"
+        assert "Unix shell 片段" in route.error
+
+    def test_powershell_cmdlet_routes_to_powershell_on_windows(self, monkeypatch):
+        monkeypatch.setattr(shell_tools, "IS_WINDOWS", True)
+
+        route = shell_tools.classify_shell_command("Get-ChildItem tools")
+
+        assert route.route == "powershell"
+        assert route.reason == "powershell_cmdlet"
+        assert route.final_command.startswith("powershell -NoProfile")
+
+    def test_plain_windows_command_routes_to_cmd_on_windows(self, monkeypatch):
+        monkeypatch.setattr(shell_tools, "IS_WINDOWS", True)
+
+        route = shell_tools.classify_shell_command("dir")
+
+        assert route.route == "cmd"
+        assert route.reason == "windows_default_cmd"
+        assert route.final_command == "cmd /c dir"
+
+    def test_windows_command_is_blocked_on_unix(self, monkeypatch):
+        monkeypatch.setattr(shell_tools, "IS_WINDOWS", False)
+        monkeypatch.setattr(shell_tools, "CURRENT_SYSTEM", "linux")
+
+        route = shell_tools.classify_shell_command("dir")
+
+        assert route.route == "blocked"
+        assert route.reason == "windows_command_on_unix"
+        assert "Windows 特有命令" in route.error
+
+
+# ---------------------------------------------------------------------------
 # 端到端路由（只在 Windows 上验证；其他平台跳过）
 # ---------------------------------------------------------------------------
 
