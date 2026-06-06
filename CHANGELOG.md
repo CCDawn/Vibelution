@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.37 - 2026-06-06
+
+- Added the Challenge Cup review rework/rejection closure path: transfer decisions can now return candidates to the smallest upstream revision node or archive rejected candidates in `metadata.rejectionArchive`.
+- Candidate graph snapshots now exclude rejected/archive candidates from the active graph while reporting `archivedCandidateCount`.
+- Updated the Teams research workflow graph stats and Challenge Cup flow HTML/technical plan to show the closed rework/rejection behavior.
+
 ## 0.10.36 - 2026-06-06
 
 - Added a Candidate Graph panel to the Team workspace research workflow view, reading latest `candidate_graph` snapshots and rendering candidate nodes, evidence-direction edges, missing links, unreviewed nodes, and candidate-only boundary status.

@@ -376,7 +376,7 @@
                 </div>
 <div class="service-row">
                   <b>candidate_store</b>
-                  <span>已落地 Team 级 index、候选列表查询、按类型/状态过滤、validationSummary，并接入 source_manifest、paper_note、neuro_mechanism、mechanism_mapping、algorithm_hypothesis、candidate_graph 最小校验。</span>
+                  <span>已落地 Team 级 index、候选列表查询、按类型/状态过滤、validationSummary，并接入 source_manifest、paper_note、neuro_mechanism、mechanism_mapping、algorithm_hypothesis、candidate_graph 最小校验；rejected 候选保留在 CandidateStore metadata.rejectionArchive，但不进入候选图谱推进节点。</span>
                 </div>
 <div class="service-row">
                   <b>source_parser</b>
@@ -388,7 +388,7 @@
                 </div>
 <div class="service-row">
                   <b>candidate_graph_builder</b>
-                  <span>已落地后端/API：生成 candidate_graph 候选快照、断链报告、未审节点清单和 candidate_only officialBoundary；Teams 工作台已接入首版候选图谱读取、刷新和 SVG 预览。</span>
+                  <span>已落地后端/API：生成 candidate_graph 候选快照、断链报告、未审节点清单、archivedCandidateCount 和 candidate_only officialBoundary；Teams 工作台已接入首版候选图谱读取、刷新和 SVG 预览。</span>
                 </div>
 <div class="service-row">
                   <b>research_agent_binding</b>
@@ -721,6 +721,11 @@
               <span>review_prefiltered 必须含 candidateIds、checklist、comments、requiredChanges、needsDecision；输出包含最终 decision 时进入 review_needs_revision。</span>
             </div>
 <div class="blueprint-row compact">
+              <b>review 返工/拒绝闭环</b>
+              <strong>/api/teams/{teamId}/workflow-orchestration/transfers/{transferId}/decide</strong>
+              <span>decision=returned 会把候选移动到目标上游节点并设为目标修订状态；decision=rejected 会写 metadata.rejectionArchive、进入 rejection_archive，并从 candidate_graph 推进节点中隔离。</span>
+            </div>
+<div class="blueprint-row compact">
               <b>steward_pack_draft 门禁</b>
               <strong>CandidateStore review_record validation</strong>
               <span>steward_pack_draft 必须含 candidateIds、targetDomain、sourceTrace、riskSummary、proposalPayload、ratingSuggestion 且 approvalRequired=true；包含 officialSync/applyNow/writeOfficialGraph 时进入 steward_needs_revision。</span>
@@ -738,7 +743,7 @@
 <div class="blueprint-row compact">
               <b>candidate_graph 预览</b>
               <strong>CandidateStore candidate_graph snapshot</strong>
-              <span>POST candidate-graph 会从当前候选重建 candidate_only 图谱，输出 nodes/edges/missingLinks/unreviewedNodes/officialBoundary；断链时 qualityStatus=broken_links。</span>
+              <span>POST candidate-graph 会从当前未归档候选重建 candidate_only 图谱，输出 nodes/edges/missingLinks/unreviewedNodes/archivedCandidateCount/officialBoundary；断链时 qualityStatus=broken_links。</span>
             </div>
 <div class="blueprint-row compact">
               <b>验证</b>
@@ -786,8 +791,8 @@
 <div class="blueprint-row">
               <b>M4</b>
               <strong>证据复核与候选图谱</strong>
-              <span>candidate_graph builder 后端/API 已落地；Teams 科研流程面板已接入 latest candidate_graph SVG 预览；review_prefilter 已补 review_record 候选门禁，必须含 candidateIds、checklist、comments、requiredChanges、needsDecision，且禁止写最终 decision。</span>
-              <span>candidate_graph_visible 和 review_prefiltered 都只进入 CandidateStore；断链进入 broken_links，带最终 decision 的 prefilter 进入 review_needs_revision，不进入正式知识库/RAG/图谱。</span>
+              <span>candidate_graph builder 后端/API 已落地；Teams 科研流程面板已接入 latest candidate_graph SVG 预览；review_prefilter 已补 review_record 候选门禁，必须含 candidateIds、checklist、comments、requiredChanges、needsDecision，且禁止写最终 decision；returned/rejected 转移闭环已接入。</span>
+              <span>candidate_graph_visible 和 review_prefiltered 都只进入 CandidateStore；断链进入 broken_links，带最终 decision 的 prefilter 进入 review_needs_revision；returned 可回到最小上游修订节点，rejected 进入 rejection_archive 并从候选图谱推进视图隔离。</span>
             </div>
 <div class="blueprint-row">
               <b>M5</b>
@@ -854,8 +859,8 @@
 <div class="agent-row">
         <b>06</b>
         <strong>Evidence Review Agent</strong>
-        <span>review prefilter 后端已接入；最终裁决门禁仍待接</span>
-        <span>证据审查 / 类比风险审查 / 可测性/成本审查 / review_record 生成</span>
+        <span>review prefilter 与返工/拒绝 transfer 闭环已接入；最终裁决仍复用通用转移裁决</span>
+        <span>证据审查 / 类比风险审查 / 可测性/成本审查 / review_record 生成 / 返工转移 / 拒绝归档</span>
         <span>高争议候选、拒绝重要候选或放行弱证据候选时进入审核门禁确认。</span>
       </div>
 <div class="agent-row">
@@ -1389,7 +1394,7 @@
 <a class="node-card" href="research_flow_pages/06-research-review.html">
                 <span class="num">06</span>
                 <h3>科研审稿</h3>
-                <p>在交给记忆平台前先做领域与工程风险过滤。</p>
+                <p>在交给记忆平台前先做领域与工程风险过滤，并把返工/拒绝纳入状态机闭环。</p>
                 <div class="tag-row"><span class="tag done">prefilter 已落地</span><span class="tag">Evidence Review Agent</span></div>
               </a>
 <a class="node-card" href="research_flow_pages/07-steward-ingestion.html">

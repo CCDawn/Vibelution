@@ -30,13 +30,13 @@
         <section class="plan-hero">
           <div class="kicker">Research Flow Node 06</div>
           <h1>科研审稿</h1>
-          <p class="subtitle">在交给记忆平台前先做领域与工程风险过滤。</p>
+          <p class="subtitle">在交给记忆平台前先做领域与工程风险过滤，并把返工/拒绝纳入状态机闭环。</p>
           <div class="tag-row"><span class="tag done">prefilter 已落地</span><span class="tag">Evidence Review Agent</span><span class="tag">独立计划页</span></div>
           <div class="diagram">
             <div class="flow-cell"><strong>输入</strong><span>paper_note / neuro_mechanism</span></div>
             <div class="flow-cell"><strong>动作</strong><span>填写 candidateIds、checklist、comments、requiredChanges、riskFlags、needsDecision。</span></div>
             <div class="flow-cell"><strong>输出</strong><span>review_record 候选 / review_prefiltered 状态</span></div>
-            <div class="flow-cell"><strong>记忆/图谱</strong><span>候选图谱可展示 reviewed_by、rejected_by、needs_revision 边。</span></div>
+            <div class="flow-cell"><strong>记忆/图谱</strong><span>候选图谱可展示 reviewed_by、needs_revision 边；rejected 归档候选从可推进图谱中隔离，并在 summary 中计数。</span></div>
           </div>
         </section>
 
@@ -46,20 +46,23 @@
             <p class="hint">本页只展示 06 节点。通过左侧导航可进入其它节点页。</p>
           </div>
           <div class="plan-grid">
-            <article class="plan-card"><h2>目标</h2><p class="hint">先用 review_record 候选记录证据、类比、可测性和成本风险，不写最终审稿裁决。</p></article>
+            <article class="plan-card"><h2>目标</h2><p class="hint">先用 review_record 候选记录证据、类比、可测性和成本风险；返工走 transfer returned，拒绝进入 rejection_archive。</p></article>
             <article class="plan-card"><h2>输入</h2><ul><li>paper_note</li>
 <li>neuro_mechanism</li>
 <li>algorithm_hypothesis</li></ul></article>
             <article class="plan-card"><h2>处理动作</h2><ul><li>填写 candidateIds、checklist、comments、requiredChanges、riskFlags、needsDecision。</li>
 <li>标记 weak_evidence、missing_citation、over_analogy、not_testable 等风险。</li>
-<li>禁止本地模型写最终 decision；高争议候选进入人工/门禁决策。</li></ul></article>
+<li>禁止本地模型写最终 decision；高争议候选进入人工/门禁决策。</li>
+<li>Research Coordination Agent 可将 needs_revision 转移回最小上游节点，或将 rejected 候选归档到 rejection_archive。</li></ul></article>
             <article class="plan-card"><h2>输出物</h2><ul><li>review_record 候选</li>
 <li>review_prefiltered 状态</li>
-<li>review_needs_revision 状态</li></ul></article>
+<li>review_needs_revision 状态</li>
+<li>transfer returned/rejected 记录</li>
+<li>rejection_archive</li></ul></article>
             <article class="plan-card"><h2>风险</h2><ul><li>证据复核 Agent 只做形式审核</li>
 <li>缺少明确退回项</li>
 <li>风险标记不可复用</li></ul></article>
-            <article class="plan-card "><h2>未决事项</h2><ul><li>最终 review decision 由 Evidence Review Agent 独立写，还是由 Ingestion Approval Gate 统一裁决。</li></ul></article>
+            <article class="plan-card "><h2>未决事项</h2><ul><li>是否需要为 Evidence Review Agent 增加专用 decision API，而不是继续复用通用 transfer decide。</li></ul></article>
           </div>
         </section>
 
@@ -70,8 +73,8 @@
           </div>
           <div class="status-grid">
             <div class="status-item"><b>候选状态</b><span>prefilter 已落地</span></div>
-            <div class="status-item"><b>记忆平台</b><span>审稿记录仍是候选工作区内容。</span></div>
-            <div class="status-item"><b>图谱同步</b><span>候选图谱可展示 reviewed_by、rejected_by、needs_revision 边。</span></div>
+            <div class="status-item"><b>记忆平台</b><span>审稿记录仍是候选工作区内容；rejected 候选只保留归档证据，不进入正式记忆。</span></div>
+            <div class="status-item"><b>图谱同步</b><span>候选图谱可展示 reviewed_by、needs_revision 边；rejected 归档候选从可推进图谱中隔离，并在 summary 中计数。</span></div>
           </div>
         </section>
 
@@ -84,7 +87,7 @@
       <div class="status-grid">
         <div class="status-item"><b>状态</b><span>review_ready</span></div>
         <div class="status-item"><b>功能岗位</b><span>Evidence Review Agent</span></div>
-        <div class="status-item"><b>Agent 状态</b><span>review prefilter 后端已接入；最终裁决门禁仍待接</span></div>
+        <div class="status-item"><b>Agent 状态</b><span>review prefilter 与返工/拒绝 transfer 闭环已接入；最终裁决仍复用通用转移裁决</span></div>
         <div class="status-item"><b>进入条件</b><span>paper_note、neuro_mechanism、algorithm_hypothesis 字段完整。</span></div>
         <div class="status-item"><b>退出条件</b><span>review_record 候选含 candidateIds、checklist、comments、requiredChanges、needsDecision，状态为 review_prefiltered。</span></div>
         <div class="status-item"><b>审核门禁</b><span>高争议候选、拒绝重要候选或放行弱证据候选时进入审核门禁确认。</span></div>
@@ -95,11 +98,13 @@
         <article class="plan-card"><h2>所需功能</h2><ul><li>证据审查</li>
 <li>类比风险审查</li>
 <li>可测性/成本审查</li>
-<li>review_record 生成</li></ul></article>
+<li>review_record 生成</li>
+<li>返工转移</li>
+<li>拒绝归档</li></ul></article>
         <article class="plan-card"><h2>工具/平台能力</h2><ul><li>research_knowledge_query_tool</li>
 <li>knowledge_rag_retrieve_tool</li></ul></article>
-        <article class="plan-card"><h2>功能缺口</h2><p class="hint">最终 review.decision 写入、riskFlags 枚举和 rejectionArchive 规则仍待接。</p></article>
-        <article class="plan-card"><h2>失败回退</h2><p class="hint">缺 checklist/comments/needsDecision，或本地模型写最终 decision 时进入 review_needs_revision。</p></article>
+        <article class="plan-card"><h2>功能缺口</h2><p class="hint">rejectionArchive 规则和 returned/rejected 转移已接入；后续可补 Evidence Review Agent 专用 decision API 和 riskFlags 枚举。</p></article>
+        <article class="plan-card"><h2>失败回退</h2><p class="hint">缺 checklist/comments/needsDecision，或本地模型写最终 decision 时进入 review_needs_revision；审稿要求返工时 Research Coordination Agent 通过 transfer returned 回到最小上游节点；明确拒绝时 transfer rejected 进入 rejection_archive。</p></article>
       </div>
     </section>
 

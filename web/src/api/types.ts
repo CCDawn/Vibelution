@@ -2954,6 +2954,7 @@ export type TeamWorkflowCandidateGraphPayload = {
     edgeCount: number;
     missingLinkCount: number;
     unreviewedNodeCount: number;
+    archivedCandidateCount?: number;
   };
   createdAt: string;
 };

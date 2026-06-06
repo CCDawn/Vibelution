@@ -281,7 +281,7 @@ source_registered
 | GET | `/api/teams/{team_id}/workflow-orchestration/candidates` | 按 `candidateType`、`currentState`、`qualityStatus` 查询 CandidateStore，并返回 `validationSummary` |
 | GET | `/api/teams/{team_id}/workflow-orchestration/candidates/validation` | 生成 CandidateStore 校验报告，统计 valid/invalid/error/warning 并列出每个候选的问题 |
 | POST | `/api/teams/{team_id}/workflow-orchestration/transfers` | 功能 Agent 提交流程转移请求 |
-| POST | `/api/teams/{team_id}/workflow-orchestration/transfers/{transfer_id}/decide` | `Research Coordination Agent` 裁决并写最终状态 |
+| POST | `/api/teams/{team_id}/workflow-orchestration/transfers/{transfer_id}/decide` | `Research Coordination Agent` 裁决并写最终状态；`returned` 可回到最小上游修订节点，`rejected` 写入 `metadata.rejectionArchive` 并进入 `rejection_archive` |
 | POST | `/api/teams/{team_id}/workflow-orchestration/local-research-model/tasks` | 构建本地研究模型任务包，不直接调用模型 |
 | POST | `/api/teams/{team_id}/workflow-orchestration/local-research-model/outputs` | 校验并记录本地研究模型 JSON 草稿 |
 | POST | `/api/teams/{team_id}/workflow-orchestration/local-research-model/invoke` | 构建任务包、调用 `bossAGI-standard / qwen3.5-9b`、解析 JSON 并写入 CandidateStore；解析失败不入库 |
@@ -330,6 +330,8 @@ workspace/teams/<teamId>/
 - 审批通过且存在 proposal 级 pending `ratingSuggestion` 时，系统会先把旧 suggestion 标记为 `applied`，再创建一个面向正式 `KnowledgeItem` 的 pending rating suggestion；不会自动把评分应用到 `KnowledgeItem`。
 - 审批通过后，系统会把 `sourceTrace`、`candidateIds`、`reviewRecordIds` 等治理上下文翻译为 `supports`、`maps_to`、`inspires`、`approved_for_ingestion` 正式科研 trace，写入正式 `KnowledgeItem.metadata.officialResearchGraph`。
 - 审批结果写入 `metadata.officialSyncRecord`，记录 `knowledgeBaseId`、`proposalId`、`batchId`、`knowledgeItemIds`、`ratingSuggestionMigration`、`officialResearchGraph`、`reviewedByAgentId`、`ragStatus`、`graphStatus` 和正式写入边界。
+- 通用流程转移闭环已补齐：`decision=returned` 会把候选移动到 `toNode` 并设为目标修订状态，保留 `transitionHistory`、requiredChanges/evidence 等转移元数据；`decision=rejected` 会把候选移动到 `rejection_archive`、设置 `qualityStatus=rejected`、写入 `metadata.rejectionArchive`，并要求后续 reopen 必须再走 transfer_record。
+- candidate_graph builder 会跳过 rejected/rejection_archive 候选，只在 graph summary 中记录 `archivedCandidateCount`，避免拒绝候选继续污染候选推进图。
 
 已验证：
 
@@ -738,9 +740,11 @@ Agent 创建策略：
 - candidate_graph builder 后端/API：`POST /api/teams/{team_id}/workflow-orchestration/candidate-graph`。
 - CandidateStore 内新增 `candidate_graph` 候选快照，包含 `nodes`、`edges`、`missingLinks`、`unreviewedNodes`、`officialBoundary`。
 - Teams 科研流程面板已接入 latest candidate_graph 读取、刷新按钮和候选链路 SVG 预览。
+- Teams 候选图谱统计条会显示 archived candidate 数；已拒绝候选从推进图节点中隔离。
 - 断链报告和未审节点清单。
 - `candidate_graph` officialBoundary 明确不写正式 Team Knowledge/RAG/Graph。
 - review_prefilter 后端门禁：本地模型可生成 `review_record` 候选，必须含 `candidateIds`、`checklist`、`comments`、`requiredChanges`、`needsDecision`，且不能写最终 `decision`。
+- review transfer 闭环：Research Coordination Agent 可用通用 transfer decide 把 `needs_revision` 退回最小上游节点，或把 `reject` 候选归档到 `rejection_archive`。
 
 验收：
 
@@ -749,8 +753,8 @@ Agent 创建策略：
 - 已覆盖：候选链接指向不存在对象时生成 `missingLinks`，`candidate_graph.qualityStatus=broken_links`。
 - 已覆盖：合格 review prefilter 进入 `review_prefiltered`。
 - 已覆盖：review prefilter 输出最终 `decision` 时进入 `review_needs_revision`。
-- 待覆盖：reject 进入 rejection_archive。
-- 待覆盖：needs_revision 回到对应上游节点。
+- 已覆盖：reject 进入 `rejection_archive`，写 `metadata.rejectionArchive`，并从 candidate_graph 推进节点中隔离。
+- 已覆盖：needs_revision 可通过 `decision=returned` 回到对应上游节点，并记录 targetState、transitionHistory 和转移元数据。
 
 ### M5：知识治理与正式同步
 
