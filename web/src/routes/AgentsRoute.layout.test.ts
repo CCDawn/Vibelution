@@ -55,6 +55,21 @@ describe("AgentsRoute layout contract", () => {
     expect(styles.groupSectionTitle).toBeTruthy();
   });
 
+  it("labels Agent filter health counts instead of concatenating bare numbers", () => {
+    expect(routeSource).toContain("function groupAriaLabel");
+    expect(routeSource).toContain("aria-label={groupAriaLabel(displayLabel, group, copy, lang)}");
+    expect(routeSource).toContain("{copy.healthIssueShort} {group.healthCount}");
+    expect(routeSource).not.toContain("{group.healthCount ? <em>{group.healthCount}</em> : null}");
+  });
+
+  it("localizes the workspace health badge and names the avatar editor trigger", () => {
+    expect(routeSource).toContain("workspaceHealthStatusLabel(healthStatus, lang)");
+    expect(routeSource).toContain("workspaceHealthStatusDescription(healthStatus, summary, lang)");
+    expect(routeSource).toContain("copy.workspaceHealthStatus");
+    expect(routeSource).toContain("aria-label={`${copy.workspaceHealthStatus}: ${healthStatusLabel}. ${healthStatusDescription}`}");
+    expect(routeSource).toContain("aria-label={copy.editAvatar}");
+  });
+
   it("shows the unified Agent card sections needed by later editing phases", () => {
     expect(routeSource).toContain("copy.model");
     expect(routeSource).toContain("agentModelLabel");
@@ -636,7 +651,13 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("styles.agentRow");
     expect(routeSource).toContain("styles.detailPanel");
     expect(styles.workspace).toBeTruthy();
-    expect(stylesSource).toContain("grid-template-columns: minmax(220px, 276px) minmax(500px, 1.08fr) minmax(360px, 0.86fr)");
+    expect(stylesSource).toContain("grid-template-columns: minmax(214px, 268px) minmax(430px, 1.08fr) minmax(330px, 0.86fr)");
+    expect(stylesSource).toContain("@media (max-width: 1040px)");
+    expect(stylesSource).not.toContain("@media (max-width: 1280px)");
+    expect(stylesSource).toContain("grid-auto-rows: minmax(260px, auto)");
+    expect(stylesSource).toContain("grid-template-rows: auto auto minmax(0, 1fr)");
+    expect(stylesSource).toContain("overflow: auto");
+    expect(stylesSource).toContain("min-height: 420px");
   });
 
   it("keeps Agent empty states compact and left-aligned for dense workbench scanning", () => {
