@@ -758,6 +758,98 @@ def test_memory_management_api_persists_user_items_and_system_overrides(tmp_path
     assert all("content" not in event.get("fields", {}) for event in management_events)
 
 
+def test_memory_overview_base_sections_reuse_recent_cache(tmp_path, monkeypatch):
+    calls = {"count": 0}
+    now = {"value": 20.0}
+
+    def fake_monotonic():
+        return now["value"]
+
+    def fake_project_memory_section(root, warnings):
+        calls["count"] += 1
+        warnings.append(f"warning-{calls['count']}")
+        return {
+            "id": "project-memory",
+            "title": "Project Memory",
+            "items": [
+                {
+                    "id": "project-state",
+                    "title": "Project State",
+                    "updatedAt": f"call-{calls['count']}",
+                }
+            ],
+        }
+
+    monkeypatch.setattr(memory_service.time, "monotonic", fake_monotonic)
+    monkeypatch.setattr(memory_service, "MEMORY_OVERVIEW_SECTION_CACHE_TTL_SECONDS", 3.0)
+    monkeypatch.setattr(memory_service, "_project_memory_section", fake_project_memory_section)
+    monkeypatch.setattr(memory_service, "_runtime_memory_section", lambda root: {"id": "runtime-memory", "items": []})
+    monkeypatch.setattr(memory_service, "_prompt_memory_section", lambda root: {"id": "prompt-memory", "items": []})
+    monkeypatch.setattr(memory_service, "_workspace_database_section", lambda root: {"id": "workspace-database", "items": []})
+    monkeypatch.setattr(memory_service, "_research_memory_section", lambda root: {"id": "research-memory", "items": []})
+    monkeypatch.setattr(memory_service, "_team_knowledge_memory_section", lambda root: {"id": "team-knowledge", "items": []})
+    monkeypatch.setattr(memory_service, "_git_memory_section", lambda root: {"id": "git-memory", "items": []})
+    monkeypatch.setattr(memory_service, "_chat_session_memory_section", lambda root: {"id": "chat-session-memory", "items": []})
+    monkeypatch.setattr(memory_service, "_self_evolution_memory_section", lambda root: {"id": "self-evolution-memory", "items": []})
+    monkeypatch.setattr(memory_service, "_supervised_evolution_memory_section", lambda root: {"id": "supervised-evolution-memory", "items": []})
+    monkeypatch.setattr(memory_service, "_runtime_scene_memory_section", lambda root: {"id": "runtime-scene-evidence", "items": []})
+
+    memory_service._clear_memory_overview_section_cache()
+    first_warnings: list[str] = []
+    second_warnings: list[str] = []
+    first_sections, first_timings = memory_service._timed_base_memory_sections(tmp_path, first_warnings)
+    second_sections, second_timings = memory_service._timed_base_memory_sections(tmp_path, second_warnings)
+    second_sections[0]["items"][0]["title"] = "mutated"
+
+    assert calls["count"] == 1
+    assert first_sections[0]["items"][0]["updatedAt"] == "call-1"
+    assert first_warnings == ["warning-1"]
+    assert second_warnings == ["warning-1"]
+    assert second_timings == first_timings
+
+    now["value"] = 24.0
+    third_warnings: list[str] = []
+    third_sections, _third_timings = memory_service._timed_base_memory_sections(tmp_path, third_warnings)
+
+    assert calls["count"] == 2
+    assert third_sections[0]["items"][0]["updatedAt"] == "call-2"
+    assert third_warnings == ["warning-2"]
+    memory_service._clear_memory_overview_section_cache()
+
+
+def test_memory_overview_section_cache_keeps_managed_overrides_realtime(tmp_path, monkeypatch):
+    prompt_dir = tmp_path / "workspace" / "prompts"
+    prompt_dir.mkdir(parents=True)
+    state_memory_path = prompt_dir / "STATE_MEMORY.md"
+    state_memory_path.write_text("Original state memory.", encoding="utf-8")
+    monkeypatch.setattr(memory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(memory_service, "MEMORY_OVERVIEW_SECTION_CACHE_TTL_SECONDS", 30.0)
+    memory_service._clear_memory_overview_section_cache()
+
+    overview = client.get("/api/memory/overview").json()
+    prompt_section = next(section for section in overview["sections"] if section["id"] == "prompt-memory")
+    state_item_id = next(item["id"] for item in prompt_section["items"] if item["title"] == "STATE_MEMORY.md")
+
+    patch_response = client.patch(
+        f"/api/memory/items/prompt-memory/{state_item_id}",
+        json={
+            "title": "缓存内覆盖标题",
+            "summary": "覆盖层应该实时生效",
+            "content": "覆盖展示内容，不改原文件。",
+        },
+    )
+
+    assert patch_response.status_code == 200, patch_response.json()
+    overview = client.get("/api/memory/overview").json()
+    prompt_section = next(section for section in overview["sections"] if section["id"] == "prompt-memory")
+    state_item = next(item for item in prompt_section["items"] if item["id"] == state_item_id)
+    assert state_item["title"] == "缓存内覆盖标题"
+    assert state_item["summary"] == "覆盖层应该实时生效"
+    assert state_item["managedState"]["overridden"] is True
+    assert state_memory_path.read_text(encoding="utf-8") == "Original state memory."
+    memory_service._clear_memory_overview_section_cache()
+
+
 def test_memory_overview_slow_event_includes_section_timings(tmp_path, monkeypatch):
     recorded_events: list[dict] = []
 
