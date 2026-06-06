@@ -21,6 +21,10 @@ import {
   TeamCanvasNode,
   TeamListPayload,
   TeamOrganizationCanvas,
+  TeamWorkflowCandidate,
+  TeamWorkflowCandidateGraphBuildPayload,
+  TeamWorkflowCandidateGraphPayload,
+  TeamWorkflowCandidateGraphNode,
   TeamTemplateInstantiatePayload,
   TeamTemplateListPayload,
   TeamWorkflowCandidateListPayload,
@@ -41,6 +45,14 @@ const RESEARCH_TEAM_ID = "research-team";
 const LINKED_ROOM_ACTIVE_REFETCH_MS = 5_000;
 const LINKED_ROOM_IDLE_REFETCH_MS = 30_000;
 const TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT = 8;
+const TEAM_WORKFLOW_CANDIDATE_GRAPH_LIMIT = 20;
+const WORKFLOW_GRAPH_WIDTH = 620;
+const WORKFLOW_GRAPH_MIN_HEIGHT = 170;
+const WORKFLOW_GRAPH_NODE_WIDTH = 124;
+const WORKFLOW_GRAPH_NODE_HEIGHT = 42;
+const WORKFLOW_GRAPH_NODE_GAP = 18;
+const WORKFLOW_GRAPH_MARGIN_X = 22;
+const WORKFLOW_GRAPH_MARGIN_Y = 28;
 
 type TeamDraft = {
   name: string;
@@ -75,6 +87,26 @@ type CanvasViewportStyle = CSSProperties & {
 type NodePositionStyle = CSSProperties & {
   "--node-x": string;
   "--node-y": string;
+};
+
+type WorkflowGraphFrameStyle = CSSProperties & {
+  "--workflow-graph-height": string;
+};
+
+type WorkflowGraphNodeStyle = CSSProperties & {
+  "--workflow-graph-node-x": string;
+  "--workflow-graph-node-y": string;
+};
+
+type WorkflowGraphNodeView = TeamWorkflowCandidateGraphNode & {
+  x: number;
+  y: number;
+};
+
+type WorkflowGraphLayout = {
+  nodes: WorkflowGraphNodeView[];
+  edges: TeamWorkflowCandidateGraphPayload["edges"];
+  height: number;
 };
 
 type CanvasFrameSize = {
@@ -386,6 +418,114 @@ function workflowQualityTone(value: string) {
   return styles.workflowTagNeutral;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isWorkflowCandidateGraphPayload(value: unknown): value is TeamWorkflowCandidateGraphPayload {
+  if (!isRecord(value)) {
+    return false;
+  }
+  return (
+    Array.isArray(value.nodes)
+    && Array.isArray(value.edges)
+    && Array.isArray(value.missingLinks)
+    && Array.isArray(value.unreviewedNodes)
+    && isRecord(value.officialBoundary)
+    && isRecord(value.summary)
+  );
+}
+
+function workflowCandidateGraphFromCandidate(candidate: TeamWorkflowCandidate | null | undefined) {
+  const graph = candidate?.metadata?.graph;
+  return isWorkflowCandidateGraphPayload(graph) ? graph : null;
+}
+
+function latestWorkflowCandidate(candidates: TeamWorkflowCandidate[]) {
+  return [...candidates].sort((left, right) => {
+    const rightTime = new Date(right.updatedAt || right.createdAt || "").getTime();
+    const leftTime = new Date(left.updatedAt || left.createdAt || "").getTime();
+    return (Number.isFinite(rightTime) ? rightTime : 0) - (Number.isFinite(leftTime) ? leftTime : 0);
+  })[0] ?? null;
+}
+
+function workflowGraphTypeRank(candidateType: string) {
+  const order: Record<string, number> = {
+    source_manifest: 0,
+    paper_note: 1,
+    neuro_mechanism: 2,
+    mechanism_mapping: 3,
+    algorithm_hypothesis: 4,
+    review_record: 5,
+    candidate_graph: 6,
+  };
+  return order[candidateType] ?? 7;
+}
+
+function workflowGraphLayout(graph: TeamWorkflowCandidateGraphPayload): WorkflowGraphLayout {
+  const columns = Math.max(1, Math.floor((WORKFLOW_GRAPH_WIDTH - WORKFLOW_GRAPH_MARGIN_X * 2 + WORKFLOW_GRAPH_NODE_GAP) / (WORKFLOW_GRAPH_NODE_WIDTH + WORKFLOW_GRAPH_NODE_GAP)));
+  const nodes = [...graph.nodes]
+    .sort((left, right) => {
+      const rankDelta = workflowGraphTypeRank(left.candidateType) - workflowGraphTypeRank(right.candidateType);
+      if (rankDelta !== 0) {
+        return rankDelta;
+      }
+      return String(left.title || left.candidateId).localeCompare(String(right.title || right.candidateId));
+    })
+    .map((node, index) => ({
+      ...node,
+      x: WORKFLOW_GRAPH_MARGIN_X + (index % columns) * (WORKFLOW_GRAPH_NODE_WIDTH + WORKFLOW_GRAPH_NODE_GAP),
+      y: WORKFLOW_GRAPH_MARGIN_Y + Math.floor(index / columns) * (WORKFLOW_GRAPH_NODE_HEIGHT + WORKFLOW_GRAPH_NODE_GAP),
+    }));
+  const rows = Math.max(1, Math.ceil(nodes.length / columns));
+  const height = Math.max(
+    WORKFLOW_GRAPH_MIN_HEIGHT,
+    WORKFLOW_GRAPH_MARGIN_Y * 2 + rows * WORKFLOW_GRAPH_NODE_HEIGHT + Math.max(0, rows - 1) * WORKFLOW_GRAPH_NODE_GAP,
+  );
+  return { nodes, edges: graph.edges, height };
+}
+
+function workflowGraphVisualEndpoints(edge: TeamWorkflowCandidateGraphPayload["edges"][number]) {
+  const evidenceToCandidateRelations = new Set([
+    "supported_by_paper_note",
+    "maps_from_neuro_mechanism",
+    "inspired_by_mapping",
+    "inspired_by_neuro_mechanism",
+    "reviews_candidate",
+  ]);
+  return evidenceToCandidateRelations.has(edge.relation)
+    ? { sourceCandidateId: edge.targetCandidateId, targetCandidateId: edge.sourceCandidateId }
+    : { sourceCandidateId: edge.sourceCandidateId, targetCandidateId: edge.targetCandidateId };
+}
+
+function workflowGraphEdgePath(edge: TeamWorkflowCandidateGraphPayload["edges"][number], nodes: WorkflowGraphNodeView[]) {
+  const endpoints = workflowGraphVisualEndpoints(edge);
+  const source = nodes.find((node) => node.candidateId === endpoints.sourceCandidateId);
+  const target = nodes.find((node) => node.candidateId === endpoints.targetCandidateId);
+  if (!source || !target) {
+    return null;
+  }
+  const x1 = source.x + WORKFLOW_GRAPH_NODE_WIDTH;
+  const y1 = source.y + WORKFLOW_GRAPH_NODE_HEIGHT / 2;
+  const x2 = target.x;
+  const y2 = target.y + WORKFLOW_GRAPH_NODE_HEIGHT / 2;
+  const curve = Math.max(34, Math.abs(x2 - x1) * 0.42);
+  return `M ${x1} ${y1} C ${x1 + curve} ${y1}, ${x2 - curve} ${y2}, ${x2} ${y2}`;
+}
+
+function workflowGraphNodeTone(node: TeamWorkflowCandidateGraphNode) {
+  if (!node.valid || String(node.qualityStatus || "").includes("broken")) {
+    return styles.workflowGraphNodeDanger;
+  }
+  if (node.requiresReview || String(node.currentState || "").includes("revision")) {
+    return styles.workflowGraphNodeWarning;
+  }
+  if (String(node.currentState || "").includes("synced") || String(node.qualityStatus || "").includes("ready")) {
+    return styles.workflowGraphNodeReady;
+  }
+  return styles.workflowGraphNodeNeutral;
+}
+
 export function TeamsRoute() {
   const { lang } = useAppI18n();
   const queryClient = useQueryClient();
@@ -472,6 +612,14 @@ export function TeamsRoute() {
     queryFn: () =>
       fetchJson<TeamWorkflowCandidateListPayload>(
         `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/candidates?limit=${TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT}`,
+      ),
+    enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && teamWorkflowQuery.data),
+  });
+  const teamWorkflowCandidateGraphQuery = useQuery({
+    queryKey: queryKeys.teamWorkflowCandidateGraph(effectiveTeamId || "none"),
+    queryFn: () =>
+      fetchJson<TeamWorkflowCandidateListPayload>(
+        `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/candidates?candidateType=candidate_graph&limit=${TEAM_WORKFLOW_CANDIDATE_GRAPH_LIMIT}`,
       ),
     enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && teamWorkflowQuery.data),
   });
@@ -720,6 +868,23 @@ export function TeamsRoute() {
     },
   });
 
+  const buildCandidateGraphMutation = useMutation({
+    mutationFn: (teamId: string) =>
+      fetchJson<TeamWorkflowCandidateGraphBuildPayload>(`/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration/candidate-graph`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: "Candidate graph preview",
+          createdByAgent: "Candidate Graph Preview Agent",
+        }),
+      }),
+    onSuccess: (payload, teamId) => {
+      queryClient.setQueryData(queryKeys.teamWorkflow(teamId), payload.workflow);
+      void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowCandidates(teamId, TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowCandidateGraph(teamId) });
+    },
+  });
+
   const canvasSavePendingForTeam = (teamId: string | undefined | null) =>
     saveCanvasMutation.isPending && Boolean(teamId) && saveCanvasMutation.variables?.teamId === teamId;
 
@@ -964,6 +1129,15 @@ export function TeamsRoute() {
   const teamWorkflow = teamWorkflowQuery.data ?? null;
   const teamWorkflowCandidates = teamWorkflowCandidatesQuery.data?.candidates ?? [];
   const teamWorkflowValidationSummary = teamWorkflowCandidatesQuery.data?.validationSummary ?? null;
+  const teamWorkflowCandidateGraphRecord = latestWorkflowCandidate(teamWorkflowCandidateGraphQuery.data?.candidates ?? []);
+  const teamWorkflowCandidateGraph = workflowCandidateGraphFromCandidate(teamWorkflowCandidateGraphRecord);
+  const teamWorkflowCandidateGraphLayout = teamWorkflowCandidateGraph ? workflowGraphLayout(teamWorkflowCandidateGraph) : null;
+  const selectedTeamBuildCandidateGraphPending =
+    buildCandidateGraphMutation.isPending && buildCandidateGraphMutation.variables === selectedTeam?.teamId;
+  const selectedTeamBuildCandidateGraphError =
+    buildCandidateGraphMutation.variables === selectedTeam?.teamId && buildCandidateGraphMutation.error instanceof Error
+      ? buildCandidateGraphMutation.error
+      : null;
   const activeWorkflowItemCount = teamWorkflow?.activeWorkflowItems.length ?? 0;
 
   return (
@@ -1366,6 +1540,114 @@ export function TeamsRoute() {
                       ) : teamWorkflowCandidatesQuery.isPending ? (
                         <div className={styles.empty}>{lang === "zh" ? "正在读取候选校验摘要..." : "Loading candidate validation summary..."}</div>
                       ) : null}
+                      <div className={styles.workflowGraphPanel}>
+                        <div className={styles.workflowGraphHeader}>
+                          <div>
+                            <strong>{lang === "zh" ? "候选图谱" : "Candidate graph"}</strong>
+                            <span>
+                              {teamWorkflowCandidateGraph
+                                ? `${teamWorkflowCandidateGraph.summary.nodeCount} nodes / ${teamWorkflowCandidateGraph.summary.edgeCount} edges`
+                                : teamWorkflowCandidateGraphQuery.isPending
+                                ? (lang === "zh" ? "读取中" : "loading")
+                                : (lang === "zh" ? "未生成" : "not built")}
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => selectedTeam?.teamId && buildCandidateGraphMutation.mutate(selectedTeam.teamId)}
+                            disabled={!selectedTeam?.teamId || selectedTeamBuildCandidateGraphPending}
+                          >
+                            <RefreshCw size={13} />
+                            {selectedTeamBuildCandidateGraphPending
+                              ? (lang === "zh" ? "生成中" : "Building")
+                              : (lang === "zh" ? "刷新图谱" : "Refresh graph")}
+                          </button>
+                        </div>
+                        {teamWorkflowCandidateGraph && teamWorkflowCandidateGraphLayout ? (
+                          <>
+                            <div className={styles.workflowGraphStats}>
+                              <span>{teamWorkflowCandidateGraph.graphKind}</span>
+                              <span>{teamWorkflowCandidateGraph.summary.missingLinkCount} missing</span>
+                              <span>{teamWorkflowCandidateGraph.summary.unreviewedNodeCount} review</span>
+                              <span>
+                                {teamWorkflowCandidateGraph.officialBoundary.writesOfficialGraph
+                                  ? (lang === "zh" ? "会写正式图谱" : "writes official graph")
+                                  : (lang === "zh" ? "候选边界" : "candidate boundary")}
+                              </span>
+                            </div>
+                            <div
+                              className={styles.workflowGraphFrame}
+                              style={{ "--workflow-graph-height": `${teamWorkflowCandidateGraphLayout.height}px` } as WorkflowGraphFrameStyle}
+                            >
+                              <svg
+                                className={styles.workflowGraphSvg}
+                                viewBox={`0 0 ${WORKFLOW_GRAPH_WIDTH} ${teamWorkflowCandidateGraphLayout.height}`}
+                                preserveAspectRatio="xMinYMin meet"
+                                aria-hidden="true"
+                              >
+                                <defs>
+                                  <marker id="workflow-graph-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto">
+                                    <path d="M 0 0 L 10 5 L 0 10 z" />
+                                  </marker>
+                                </defs>
+                                {teamWorkflowCandidateGraphLayout.edges.map((edge) => {
+                                  const path = workflowGraphEdgePath(edge, teamWorkflowCandidateGraphLayout.nodes);
+                                  return path ? (
+                                    <path
+                                      key={`${edge.sourceCandidateId}-${edge.targetCandidateId}-${edge.relation}`}
+                                      className={styles.workflowGraphEdge}
+                                      d={path}
+                                    />
+                                  ) : null;
+                                })}
+                              </svg>
+                              {teamWorkflowCandidateGraphLayout.nodes.map((node) => (
+                                <div
+                                  key={node.candidateId}
+                                  className={`${styles.workflowGraphNode} ${workflowGraphNodeTone(node)}`}
+                                  style={{
+                                    "--workflow-graph-node-x": `${node.x}px`,
+                                    "--workflow-graph-node-y": `${node.y}px`,
+                                  } as WorkflowGraphNodeStyle}
+                                  title={`${node.candidateId} · ${node.currentState}`}
+                                >
+                                  <strong>{node.title || node.candidateId}</strong>
+                                  <span>{workflowStateLabel(node.currentState, lang)}</span>
+                                </div>
+                              ))}
+                            </div>
+                            {teamWorkflowCandidateGraph.missingLinks.length || teamWorkflowCandidateGraph.unreviewedNodes.length ? (
+                              <div className={styles.workflowGraphIssues}>
+                                {teamWorkflowCandidateGraph.missingLinks.slice(0, 3).map((edge) => (
+                                  <span key={`${edge.sourceCandidateId}-${edge.targetCandidateId}-${edge.relation}`}>
+                                    {edge.relation}: {edge.targetCandidateId}
+                                  </span>
+                                ))}
+                                {teamWorkflowCandidateGraph.unreviewedNodes.slice(0, 3).map((node) => (
+                                  <span key={`${node.candidateId}-${node.reason}`}>{workflowStateLabel(node.currentState, lang)}</span>
+                                ))}
+                              </div>
+                            ) : null}
+                            <div className={styles.workflowGraphBoundary}>
+                              {lang === "zh"
+                                ? "CandidateStore 快照 · 正式知识/RAG/图谱写入关闭"
+                                : "CandidateStore snapshot · official Knowledge/RAG/Graph writes off"}
+                            </div>
+                          </>
+                        ) : (
+                          <div className={styles.empty}>
+                            {teamWorkflowCandidateGraphQuery.isPending
+                              ? (lang === "zh" ? "正在读取候选图谱快照..." : "Loading candidate graph snapshot...")
+                              : (lang === "zh" ? "还没有候选图谱快照，可先点击刷新图谱。" : "No candidate graph snapshot yet. Refresh the graph first.")}
+                          </div>
+                        )}
+                        {teamWorkflowCandidateGraphQuery.error instanceof Error ? (
+                          <div className={styles.messageError}>{teamWorkflowCandidateGraphQuery.error.message}</div>
+                        ) : null}
+                        {selectedTeamBuildCandidateGraphError ? (
+                          <div className={styles.messageError}>{selectedTeamBuildCandidateGraphError.message}</div>
+                        ) : null}
+                      </div>
                       {teamWorkflowCandidates.length ? (
                         <div className={styles.workflowCandidateList}>
                           {teamWorkflowCandidates.map((candidate) => (

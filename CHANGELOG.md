@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.36 - 2026-06-06
+
+- Added a Candidate Graph panel to the Team workspace research workflow view, reading latest `candidate_graph` snapshots and rendering candidate nodes, evidence-direction edges, missing links, unreviewed nodes, and candidate-only boundary status.
+- Added a Team workflow graph refresh action that reuses the existing candidate-only graph builder without writing formal Team Knowledge, RAG, or the official knowledge graph.
+- Updated the Challenge Cup flow HTML and technical plan to mark Teams candidate graph visualization as landed.
+
 ## 0.10.35 - 2026-06-06
 
 - Fixed Launcher `status` so it remains read-only: it now reports missing or incomplete Python dependencies without creating `.venv` or running `pip install`.
