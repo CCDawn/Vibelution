@@ -13,7 +13,7 @@ from core.web.services.memory_service import (
     restore_memory_item,
     update_memory_item,
 )
-from core.web.services.memory_graph_service import get_memory_knowledge_graph
+from core.web.services.memory_graph_service import get_memory_knowledge_graph, get_memory_knowledge_graph_node_detail
 
 
 router = APIRouter(tags=["memory"])
@@ -50,6 +50,20 @@ def memory_knowledge_graph(
         include=include,
         limit=limit,
     )
+
+
+@router.get("/memory/knowledge-graph/node-detail")
+def memory_knowledge_graph_node_detail(
+    nodeId: str = "",
+    agentId: str = "",
+    limit: int = 40,
+) -> dict:
+    if not str(nodeId or "").strip():
+        raise HTTPException(status_code=422, detail="nodeId is required.")
+    payload = get_memory_knowledge_graph_node_detail(nodeId, agent_id=agentId, limit=limit)
+    if payload is None:
+        raise HTTPException(status_code=404, detail="Memory graph node detail not found.")
+    return payload
 
 
 @router.post("/memory/items", status_code=status.HTTP_201_CREATED)

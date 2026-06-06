@@ -251,6 +251,61 @@ def test_memory_knowledge_graph_endpoint_returns_read_only_project_structure(tmp
     assert "GRAPH API BODY MUST STAY OUT" not in str(payload)
 
 
+def test_memory_knowledge_graph_node_detail_endpoint_returns_selected_node_content(tmp_path, monkeypatch):
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(memory_graph_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(memory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(team_knowledge_service, "PROJECT_ROOT", tmp_path)
+    agent = agent_directory_service.create_agent_instance(display_name="Graph Detail Agent", direct_session_id="session-graph-detail")
+    outsider = agent_directory_service.create_agent_instance(display_name="Graph Detail Outsider")
+    team = team_service.create_team(name="Graph Detail Team", members=[{"agentId": agent["agentId"], "role": "lead"}])
+    knowledge_base = team_knowledge_service.create_knowledge_base(
+        team["teamId"],
+        name="Graph Detail Knowledge",
+        actor_agent_id=agent["agentId"],
+    )
+    proposal = team_knowledge_service.create_refinement_proposal(
+        knowledge_base["knowledgeBaseId"],
+        source_artifact_ids=[],
+        proposed_by_agent_id=agent["agentId"],
+        title="Graph detail proposal",
+        content="GRAPH DETAIL API BODY SHOULD LOAD",
+    )
+    reviewed = team_knowledge_service.review_refinement_proposal(
+        knowledge_base["knowledgeBaseId"],
+        proposal["proposalId"],
+        status="approved",
+        reviewed_by_agent_id=agent["agentId"],
+    )
+
+    graph_response = client.get("/api/memory/knowledge-graph", params={"agentId": agent["agentId"]})
+    detail_response = client.get(
+        "/api/memory/knowledge-graph/node-detail",
+        params={"nodeId": f"knowledge_item:{reviewed['item']['knowledgeItemId']}", "agentId": agent["agentId"]},
+    )
+    outsider_response = client.get(
+        "/api/memory/knowledge-graph/node-detail",
+        params={"nodeId": f"team:{team['teamId']}", "agentId": outsider["agentId"]},
+    )
+    missing_response = client.get(
+        "/api/memory/knowledge-graph/node-detail",
+        params={"nodeId": "knowledge_base:not-found", "agentId": agent["agentId"]},
+    )
+
+    assert graph_response.status_code == 200
+    assert "GRAPH DETAIL API BODY SHOULD LOAD" not in str(graph_response.json())
+    assert detail_response.status_code == 200, detail_response.json()
+    detail_payload = detail_response.json()
+    assert detail_payload["mode"] == "read_only_project_memory_graph_node_detail"
+    assert detail_payload["operatingBoundary"]["fullContentIncluded"] is True
+    assert detail_payload["contentItems"][0]["content"] == "GRAPH DETAIL API BODY SHOULD LOAD"
+    assert detail_payload["contentItems"][0]["knowledgeItemId"] == reviewed["item"]["knowledgeItemId"]
+    assert outsider_response.status_code == 200, outsider_response.json()
+    assert outsider_response.json()["contentItems"] == []
+    assert missing_response.status_code == 404
+
+
 def test_memory_overview_marks_research_knowledge_base_missing_before_first_search(tmp_path, monkeypatch):
     monkeypatch.setattr(memory_service, "PROJECT_ROOT", tmp_path)
 

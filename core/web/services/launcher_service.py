@@ -134,7 +134,18 @@ def request_launcher_stop() -> dict[str, Any]:
         message="Launcher project bundle stop requested.",
         fields={"source": "launcher_api"},
     )
-    result = request_runtime_shutdown()
+    try:
+        result = request_runtime_shutdown()
+    except RuntimeRestartActiveWorkBlocked as exc:
+        _record_launcher_event(
+            "launcher.bundle.stop.blocked_active_work",
+            phase="stop",
+            message="Launcher project bundle stop blocked by active work.",
+            outcome="blocked",
+            level="warning",
+            fields={"activeWorkCount": len(exc.active_work_runs), "activeWorkRuns": exc.active_work_runs[:8]},
+        )
+        raise
     _record_launcher_event(
         "launcher.bundle.stop.accepted",
         phase="stop",
@@ -680,16 +691,20 @@ def _restart_queue_summary(
 def _restart_queue_status_line(*, pending_count: int, active_restart: bool, active_work_count: int) -> str:
     lang = get_web_language()
     if active_restart:
-        return text_for(lang, zh="正在执行已排队的重启。", en="Executing the queued restart.")
+        return text_for(lang, zh="正在执行历史重启命令。", en="Executing an existing restart command.")
     if pending_count <= 0:
         return ""
     if active_work_count > 0:
         return text_for(
             lang,
-            zh=f"重启已在等待队列中；当前还有 {active_work_count} 个任务，任务结束后会自动重启。",
-            en=f"Restart is waiting in the queue; {active_work_count} active task(s) remain before automatic restart.",
+            zh=f"检测到旧版等待重启命令；当前还有 {active_work_count} 个任务，本版不会自动重启，请任务结束后重新提交。",
+            en=f"A legacy deferred restart command exists; {active_work_count} active task(s) remain. This version will not restart automatically; submit restart again after work finishes.",
         )
-    return text_for(lang, zh="重启已在等待队列中，会在下一轮安全检查后执行。", en="Restart is queued and will run after the next safety check.")
+    return text_for(
+        lang,
+        zh="检测到旧版等待重启命令；本版不会自动重启，请确认状态后重新提交。",
+        en="A legacy deferred restart command exists. This version will not restart automatically; confirm status and submit restart again.",
+    )
 
 
 def _result_summary(result: dict[str, Any]) -> dict[str, Any]:

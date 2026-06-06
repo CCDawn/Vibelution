@@ -860,45 +860,65 @@ def test_launcher_start_queues_open_workbench_and_records_lifecycle(monkeypatch)
 
 def test_launcher_restart_blocks_active_work(monkeypatch):
     scene_events: list[tuple[str, str, str, dict]] = []
+    active_work_runs = [{"kind": "chat_turn", "runId": "chat-turn-live", "status": "running"}]
 
     def record_scene_event(component, phase, event_code, **kwargs):
         scene_events.append((component, phase, event_code, kwargs))
         return {"accepted": True}
 
     monkeypatch.setattr(launcher_service, "record_runtime_scene_event", record_scene_event, raising=False)
-    monkeypatch.setattr(
-        launcher_service,
-        "request_runtime_restart",
-        lambda: {
-            "accepted": True,
-            "queued": True,
-            "pendingRestart": True,
-            "mode": "runtime_manager",
-            "commandId": "cmd-queued-restart",
-            "message": "restart queued",
-            "activeWorkCount": 1,
-            "activeWorkRuns": [{"kind": "chat_turn", "runId": "chat-turn-live", "status": "running"}],
-            "chatTurns": [],
-            "chatRoomRounds": [],
-            "evolutionRuns": [],
-        },
-    )
+    def block_restart():
+        raise runtime_service.RuntimeRestartActiveWorkBlocked(
+            "有进行中的任务，无法重启 Vibelution。请等待任务完成或先停止任务。",
+            active_work_runs,
+        )
+
+    monkeypatch.setattr(launcher_service, "request_runtime_restart", block_restart)
 
     response = client.post("/api/launcher/restart")
 
-    assert response.status_code == 202
-    payload = response.json()
-    assert payload["accepted"] is True
-    assert payload["queued"] is True
-    assert payload["pendingRestart"] is True
-    assert payload["commandId"] == "cmd-queued-restart"
-    assert payload["activeWorkRuns"][0]["runId"] == "chat-turn-live"
+    assert response.status_code == 409
+    detail = response.json()["detail"]
+    assert detail["code"] == "active_work_restart_blocked"
+    assert detail["message"] == "有进行中的任务，无法重启 Vibelution。请等待任务完成或先停止任务。"
+    assert detail["activeWorkRuns"][0]["runId"] == "chat-turn-live"
     event_codes = [item[2] for item in scene_events]
     assert "launcher.bundle.restart.requested" in event_codes
-    assert "launcher.bundle.restart.accepted" in event_codes
-    accepted_event = next(item for item in scene_events if item[2] == "launcher.bundle.restart.accepted")
-    assert accepted_event[3]["outcome"] == "queued"
-    assert accepted_event[3]["fields"]["pendingRestart"] is True
+    assert "launcher.bundle.restart.blocked_active_work" in event_codes
+    assert "launcher.bundle.restart.accepted" not in event_codes
+    blocked_event = next(item for item in scene_events if item[2] == "launcher.bundle.restart.blocked_active_work")
+    assert blocked_event[3]["outcome"] == "blocked"
+    assert blocked_event[3]["fields"]["activeWorkCount"] == 1
+
+
+def test_launcher_stop_blocks_active_work(monkeypatch):
+    scene_events: list[tuple[str, str, str, dict]] = []
+    active_work_runs = [{"kind": "chat_turn", "runId": "chat-turn-live", "status": "running"}]
+
+    def record_scene_event(component, phase, event_code, **kwargs):
+        scene_events.append((component, phase, event_code, kwargs))
+        return {"accepted": True}
+
+    def block_stop():
+        raise runtime_service.RuntimeRestartActiveWorkBlocked(
+            "有进行中的任务，无法停止 Vibelution。请等待任务完成或先停止任务。",
+            active_work_runs,
+        )
+
+    monkeypatch.setattr(launcher_service, "record_runtime_scene_event", record_scene_event, raising=False)
+    monkeypatch.setattr(launcher_service, "request_runtime_shutdown", block_stop)
+
+    response = client.post("/api/launcher/stop")
+
+    assert response.status_code == 409
+    detail = response.json()["detail"]
+    assert detail["code"] == "active_work_stop_blocked"
+    assert detail["message"] == "有进行中的任务，无法停止 Vibelution。请等待任务完成或先停止任务。"
+    assert detail["activeWorkRuns"][0]["runId"] == "chat-turn-live"
+    event_codes = [item[2] for item in scene_events]
+    assert "launcher.bundle.stop.requested" in event_codes
+    assert "launcher.bundle.stop.blocked_active_work" in event_codes
+    assert "launcher.bundle.stop.accepted" not in event_codes
 
 
 def test_launcher_stop_delegates_runtime_shutdown_and_normalizes_response(monkeypatch):
@@ -973,7 +993,7 @@ def test_launcher_restart_delegates_runtime_restart_and_normalizes_response(monk
     assert accepted_event[3]["fields"]["commandId"] == "cmd-launcher-restart"
 
 
-def test_runtime_restart_queues_active_work(monkeypatch):
+def test_runtime_restart_blocks_active_work(monkeypatch):
     calls: list[object] = []
     scene_events: list[tuple[str, str, str, dict]] = []
 
@@ -1009,42 +1029,26 @@ def test_runtime_restart_queues_active_work(monkeypatch):
 
     response = client.post("/api/runtime/restart")
 
-    assert response.status_code == 202
-    payload = response.json()
-    assert payload["accepted"] is True
-    assert payload["queued"] is True
-    assert payload["pendingRestart"] is True
-    assert payload["activeWorkRuns"][0]["runId"] == "chat-turn-live"
-    assert payload["activeWorkCount"] == 1
-    assert calls == [
-        "ensure",
-        (
-            "restart_workbench",
-            {
-                "reason": "web_restart_button",
-                "source": "web_ui",
-                "noBrowser": False,
-                "deferredUntilActiveWorkClear": True,
-                "queuedBecauseActiveWork": True,
-                "queuedActiveWorkCount": 1,
-                "queuedActiveWorkRuns": [
-                    {
-                        "kind": "chat_turn",
-                        "runId": "chat-turn-live",
-                        "status": "running",
-                        "sessionId": "session-live",
-                    }
-                ],
-            },
-            "web_ui",
-        ),
+    assert response.status_code == 409
+    detail = response.json()["detail"]
+    assert detail["code"] == "active_work_restart_blocked"
+    assert detail["message"] == "有进行中的任务，无法重启 Vibelution。请等待任务完成或先停止任务。"
+    assert detail["activeWorkRuns"] == [
+        {
+            "kind": "chat_turn",
+            "runId": "chat-turn-live",
+            "status": "running",
+            "sessionId": "session-live",
+        }
     ]
+    assert calls == []
     event_codes = [item[2] for item in scene_events]
     assert "runtime.restart.requested" in event_codes
-    assert "runtime.restart.queued_active_work" in event_codes
-    queued_event = next(item for item in scene_events if item[2] == "runtime.restart.queued_active_work")
-    assert queued_event[3]["fields"]["activeWorkCount"] == 1
-    assert queued_event[3]["fields"]["commandId"] == "cmd-restart-web"
+    assert "runtime.restart.blocked_active_work" in event_codes
+    assert "runtime.restart.accepted" not in event_codes
+    blocked_event = next(item for item in scene_events if item[2] == "runtime.restart.blocked_active_work")
+    assert blocked_event[3]["outcome"] == "blocked"
+    assert blocked_event[3]["fields"]["activeWorkCount"] == 1
 
 
 def test_runtime_restart_blocks_confirmed_active_work_without_releasing_tasks(monkeypatch):
@@ -1090,36 +1094,18 @@ def test_runtime_restart_blocks_confirmed_active_work_without_releasing_tasks(mo
 
     response = client.post("/api/runtime/restart?confirmedActiveWork=true")
 
-    assert response.status_code == 202
-    payload = response.json()
-    assert payload["queued"] is True
-    assert payload["pendingRestart"] is True
-    assert payload["activeWorkRuns"][0]["runId"] == "chat-turn-live"
+    assert response.status_code == 409
+    detail = response.json()["detail"]
+    assert detail["code"] == "active_work_restart_blocked"
+    assert detail["activeWorkRuns"][0]["runId"] == "chat-turn-live"
     assert stop_calls == []
     assert self_calls == []
     assert supervised_calls == []
     assert worktree_calls == []
-    assert calls == [
-        "ensure",
-        (
-            "restart_workbench",
-            {
-                "reason": "web_restart_button",
-                "source": "web_ui",
-                "noBrowser": False,
-                "deferredUntilActiveWorkClear": True,
-                "queuedBecauseActiveWork": True,
-                "queuedActiveWorkCount": 1,
-                "queuedActiveWorkRuns": [
-                    {"kind": "chat_turn", "sessionId": "session-live", "runId": "chat-turn-live", "status": "running"}
-                ],
-            },
-            "web_ui",
-        ),
-    ]
+    assert calls == []
 
 
-def test_runtime_shutdown_stops_active_chat_turn_before_manager_close(tmp_path, monkeypatch):
+def test_runtime_shutdown_blocks_active_chat_turn_before_manager_close(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: None)
@@ -1157,39 +1143,21 @@ def test_runtime_shutdown_stops_active_chat_turn_before_manager_close(tmp_path, 
 
         response = client.post("/api/runtime/shutdown")
 
-        assert response.status_code == 202
-        payload = response.json()
-        assert payload["accepted"] is True
-        assert payload["mode"] == "runtime_manager"
-        assert payload["chatTurns"] == [
-            {"sessionId": "session-live", "runId": turn_control.turn_id, "status": "stopped"}
-        ]
-        assert calls == [
-            "ensure",
-            (
-                "close_workbench",
-                {"reason": "web_close_button", "source": "web_ui", "stopManager": False},
-                "web_ui",
-            ),
-        ]
-
-        detail_response = client.get("/api/sessions/session-live")
-        assert detail_response.status_code == 200
-        detail = detail_response.json()
-        assert detail["currentPhase"] == "ready"
-        assert detail["messages"][-1]["role"] == "assistant"
-        assert "当前回答已经输出了一半" in detail["messages"][-1]["content"]
-        assert "本轮已按请求停止" in detail["messages"][-1]["content"]
-        assert detail["messages"][-1]["thought"] == "关闭前已经捕获到思考片段。"
-        assert detail["messages"][-1]["toolCalls"][0]["name"] == "read_file_tool"
-        assert session_service.load_chat_turn_work_run_summary()["active"] is None
+        assert response.status_code == 409
+        detail = response.json()["detail"]
+        assert detail["code"] == "active_work_stop_blocked"
+        assert detail["message"] == "有进行中的任务，无法停止 Vibelution。请等待任务完成或先停止任务。"
+        assert detail["activeWorkRuns"][0]["runId"] == turn_control.turn_id
+        assert calls == []
+        active = session_service.load_chat_turn_work_run_summary()["active"]
+        assert active["runId"] == turn_control.turn_id
     finally:
         session_service._set_session_running("session-live", False)
         session_service._clear_session_turn_control("session-live")
         session_service._clear_session_live_output("session-live")
 
 
-def test_runtime_shutdown_stops_active_chat_room_round_before_manager_close(tmp_path, monkeypatch):
+def test_runtime_shutdown_blocks_active_chat_room_round_before_manager_close(tmp_path, monkeypatch):
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
@@ -1244,38 +1212,24 @@ def test_runtime_shutdown_stops_active_chat_room_round_before_manager_close(tmp_
     try:
         response = client.post("/api/runtime/shutdown")
 
-        assert response.status_code == 202
-        payload = response.json()
-        assert payload["accepted"] is True
-        assert payload["mode"] == "runtime_manager"
-        assert payload["chatRoomRounds"] == [
-            {
-                "kind": "chat_room_round",
-                "roomId": room["roomId"],
-                "runId": round_id,
-                "roundId": round_id,
-                "status": "stopped",
-            }
-        ]
+        assert response.status_code == 409
+        detail = response.json()["detail"]
+        assert detail["code"] == "active_work_stop_blocked"
+        assert detail["message"] == "有进行中的任务，无法停止 Vibelution。请等待任务完成或先停止任务。"
+        assert detail["activeWorkRuns"][0]["kind"] == "chat_room_round"
+        assert detail["activeWorkRuns"][0]["runId"] == round_id
         final_detail = chat_room_service.get_chat_room_detail(room["roomId"])
-        assert final_detail["status"] == "ready"
-        assert final_detail["activeRoundId"] == ""
-        assert final_detail["rounds"][-1]["status"] == "stopped"
-        assert chat_room_service.load_chat_room_work_run_summary()["active"] is None
-        assert calls == [
-            "ensure",
-            (
-                "close_workbench",
-                {"reason": "web_close_button", "source": "web_ui", "stopManager": False},
-                "web_ui",
-            ),
-        ]
+        assert final_detail["status"] == "running"
+        assert final_detail["activeRoundId"] == round_id
+        assert final_detail["rounds"][-1]["status"] == "running"
+        assert chat_room_service.load_chat_room_work_run_summary()["active"]["runId"] == round_id
+        assert calls == []
     finally:
         release_room.set()
         room_executor.shutdown(wait=True, cancel_futures=True)
 
 
-def test_runtime_shutdown_releases_active_evolution_runs_before_manager_close(tmp_path, monkeypatch):
+def test_runtime_shutdown_blocks_active_evolution_runs_before_manager_close(tmp_path, monkeypatch):
     script_path = tmp_path / "vibelution_launcher.ps1"
     script_path.write_text("Write-Host managed\n", encoding="utf-8")
     state_path = tmp_path / "state.json"
@@ -1297,6 +1251,18 @@ def test_runtime_shutdown_releases_active_evolution_runs_before_manager_close(tm
     )
     monkeypatch.setattr(
         runtime_service,
+        "_work_run_summary",
+        lambda: {
+            "active": {
+                "self_evolution_run": {"runId": "web-self-active", "status": "running"},
+                "supervised_evolution_run": {"runId": "web-supervised-active", "status": "running"},
+                "supervised_worktree_evolution_run": {"runId": "web-worktree-active", "status": "running"},
+            },
+            "activeItems": {},
+        },
+    )
+    monkeypatch.setattr(
+        runtime_service,
         "_force_cancel_self_evolution_for_shutdown",
         lambda reason: self_calls.append(reason) or [{"runId": "web-self-active", "status": "cancelled"}],
     )
@@ -1314,36 +1280,31 @@ def test_runtime_shutdown_releases_active_evolution_runs_before_manager_close(tm
 
     response = client.post("/api/runtime/shutdown")
 
-    assert response.status_code == 202
-    payload = response.json()
-    assert payload["accepted"] is True
-    assert payload["mode"] == "runtime_manager"
-    assert payload["evolutionRuns"] == [
-        {"kind": "self_evolution_run", "runId": "web-self-active", "status": "cancelled"},
-        {"kind": "supervised_evolution_run", "runId": "web-supervised-active", "status": "cancelled"},
-        {"kind": "supervised_worktree_evolution_run", "runId": "web-worktree-active", "status": "cancelled"},
-    ]
-    assert self_calls
-    assert supervised_calls
-    assert worktree_calls
-    assert calls == [
-        "ensure",
-        (
-            "close_workbench",
-            {"reason": "web_close_button", "source": "web_ui", "stopManager": False},
-            "web_ui",
-        ),
-    ]
+    assert response.status_code == 409
+    detail = response.json()["detail"]
+    assert detail["code"] == "active_work_stop_blocked"
+    assert detail["message"] == "有进行中的任务，无法停止 Vibelution。请等待任务完成或先停止任务。"
+    assert {item["runId"] for item in detail["activeWorkRuns"]} == {
+        "web-self-active",
+        "web-supervised-active",
+        "web-worktree-active",
+    }
+    assert self_calls == []
+    assert supervised_calls == []
+    assert worktree_calls == []
+    assert calls == []
 
 
-def test_runtime_shutdown_continues_when_chat_stop_fails(tmp_path, monkeypatch):
+def test_runtime_shutdown_blocks_active_chat_turn_without_trying_stop(tmp_path, monkeypatch):
     script_path = tmp_path / "vibelution_launcher.ps1"
     script_path.write_text("Write-Host managed\n", encoding="utf-8")
     state_path = tmp_path / "state.json"
     state_path.write_text("{}", encoding="utf-8")
     calls: list[object] = []
+    stop_calls: list[str] = []
 
     def fail_stop(session_id):
+        stop_calls.append(session_id)
         raise RuntimeError(f"stop failed for {session_id}")
 
     monkeypatch.setattr(runtime_service, "LAUNCHER_SCRIPT_PATH", script_path)
@@ -1364,22 +1325,13 @@ def test_runtime_shutdown_continues_when_chat_stop_fails(tmp_path, monkeypatch):
 
     response = client.post("/api/runtime/shutdown")
 
-    assert response.status_code == 202
-    payload = response.json()
-    assert payload["accepted"] is True
-    assert payload["mode"] == "runtime_manager"
-    assert payload["chatTurns"][0]["sessionId"] == "session-live"
-    assert payload["chatTurns"][0]["runId"] == "chat-turn-live"
-    assert payload["chatTurns"][0]["status"] == "failed"
-    assert "RuntimeError" in payload["chatTurns"][0]["error"]
-    assert calls == [
-        "ensure",
-        (
-            "close_workbench",
-            {"reason": "web_close_button", "source": "web_ui", "stopManager": False},
-            "web_ui",
-        ),
-    ]
+    assert response.status_code == 409
+    detail = response.json()["detail"]
+    assert detail["code"] == "active_work_stop_blocked"
+    assert detail["activeWorkRuns"][0]["sessionId"] == "session-live"
+    assert detail["activeWorkRuns"][0]["runId"] == "chat-turn-live"
+    assert stop_calls == []
+    assert calls == []
 
 
 def test_runtime_shutdown_falls_back_to_launcher_stop_when_manager_queue_fails(tmp_path, monkeypatch):
@@ -1393,6 +1345,7 @@ def test_runtime_shutdown_falls_back_to_launcher_stop_when_manager_queue_fails(t
     monkeypatch.setattr(runtime_service, "LAUNCHER_STATE_PATH", state_path)
     monkeypatch.setattr(runtime_service.os, "name", "nt", raising=False)
     monkeypatch.setattr(runtime_service, "list_active_session_work_runs", lambda: [])
+    monkeypatch.setattr(runtime_service, "_work_run_summary", lambda: {"active": {}, "activeItems": {}})
     monkeypatch.setattr(runtime_service, "ensure_daemon_running", lambda: (_ for _ in ()).throw(RuntimeError("boom")))
     monkeypatch.setattr(runtime_service, "_spawn_managed_launcher_shutdown", lambda: calls.append("fallback"))
 
@@ -1412,6 +1365,7 @@ def test_runtime_shutdown_falls_back_to_local_exit_when_not_managed(monkeypatch)
     monkeypatch.setattr(runtime_service, "LAUNCHER_STATE_PATH", Path("missing-state.json"))
     monkeypatch.setattr(runtime_service.os, "name", "nt", raising=False)
     monkeypatch.setattr(runtime_service, "list_active_session_work_runs", lambda: [])
+    monkeypatch.setattr(runtime_service, "_work_run_summary", lambda: {"active": {}, "activeItems": {}})
     monkeypatch.setattr(runtime_service, "_schedule_local_backend_exit", lambda delay_seconds=0.35: calls.append("local"))
 
     response = client.post("/api/runtime/shutdown")

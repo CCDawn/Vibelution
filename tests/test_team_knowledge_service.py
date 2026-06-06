@@ -497,6 +497,57 @@ def test_memory_knowledge_graph_links_project_agents_team_and_knowledge_without_
     assert "do not expose source body" not in payload_text
 
 
+def test_memory_knowledge_graph_node_detail_returns_acl_scoped_full_content(knowledge_env):
+    source = team_knowledge_service.create_source_artifact(
+        knowledge_env["base"]["knowledgeBaseId"],
+        source_type="agent_authored",
+        source_ref={"agentId": knowledge_env["member"]["agentId"]},
+        title="Node detail source",
+        actor_agent_id=knowledge_env["member"]["agentId"],
+    )
+    proposal = team_knowledge_service.create_refinement_proposal(
+        knowledge_env["base"]["knowledgeBaseId"],
+        source_artifact_ids=[source["sourceArtifactId"]],
+        proposed_by_agent_id=knowledge_env["member"]["agentId"],
+        title="Node detail knowledge",
+        summary="Node detail summary.",
+        content="NODE DETAIL FORMAL KNOWLEDGE BODY",
+        tags=["node-detail"],
+    )
+    reviewed = team_knowledge_service.review_refinement_proposal(
+        knowledge_env["base"]["knowledgeBaseId"],
+        proposal["proposalId"],
+        status="approved",
+        reviewed_by_agent_id=knowledge_env["lead"]["agentId"],
+    )
+
+    graph = memory_graph_service.get_memory_knowledge_graph(agent_id=knowledge_env["member"]["agentId"])
+    member_detail = memory_graph_service.get_memory_knowledge_graph_node_detail(
+        f"team:{knowledge_env['team']['teamId']}",
+        agent_id=knowledge_env["member"]["agentId"],
+    )
+    item_detail = memory_graph_service.get_memory_knowledge_graph_node_detail(
+        f"knowledge_item:{reviewed['item']['knowledgeItemId']}",
+        agent_id=knowledge_env["member"]["agentId"],
+    )
+    outsider_detail = memory_graph_service.get_memory_knowledge_graph_node_detail(
+        f"team:{knowledge_env['team']['teamId']}",
+        agent_id=knowledge_env["outsider"]["agentId"],
+    )
+
+    assert "NODE DETAIL FORMAL KNOWLEDGE BODY" not in str(graph)
+    assert member_detail is not None
+    assert member_detail["operatingBoundary"]["fullContentIncluded"] is True
+    assert member_detail["summaryCounts"]["contentItemCount"] == 1
+    assert member_detail["contentItems"][0]["content"] == "NODE DETAIL FORMAL KNOWLEDGE BODY"
+    assert member_detail["contentItems"][0]["fullContentIncluded"] is True
+    assert item_detail is not None
+    assert item_detail["contentItems"][0]["knowledgeItemId"] == reviewed["item"]["knowledgeItemId"]
+    assert item_detail["contentItems"][0]["content"] == "NODE DETAIL FORMAL KNOWLEDGE BODY"
+    assert outsider_detail is not None
+    assert outsider_detail["contentItems"] == []
+
+
 def test_memory_knowledge_graph_expands_official_research_trace_on_include(knowledge_env):
     source = team_knowledge_service.create_source_artifact(
         knowledge_env["base"]["knowledgeBaseId"],

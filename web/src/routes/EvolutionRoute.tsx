@@ -153,6 +153,7 @@ const EVOLUTION_LIVE_IO_HEIGHT_KEY = "vibelution.evolution.live-io-height";
 const EVOLUTION_LIVE_IO_HEIGHT_BOUNDS = { min: 260, max: 780 };
 const EVOLUTION_LIVE_IO_DEFAULT_HEIGHT = 340;
 const SUPERVISED_MEMBER_ROLES: SupervisedMemberRole[] = ["baseline", "candidate", "reviewer", "auditor", "judge"];
+const LOCAL_SUPERVISED_RUN_PREFIX = "local-supervised-start-";
 
 type ProposalEditDraft = {
   improvementType: string;
@@ -173,6 +174,88 @@ function isSelfRunExecutingStatus(status: string) {
 
 function isSelfRunLockedStatus(status: string) {
   return ["queued", "running", "stopping", "paused"].includes(String(status || "").trim().toLowerCase());
+}
+
+function isLocalSupervisedStartPlaceholder(run: EvolutionActiveRun | null | undefined) {
+  return String(run?.runId || "").startsWith(LOCAL_SUPERVISED_RUN_PREFIX);
+}
+
+function buildSupervisedStartPlaceholder(input: {
+  sourceKind: "dataset" | "bundle";
+  datasetName: string;
+  datasetLimit: number | null;
+  bundleName: string;
+  keepWorktree: boolean;
+  lang: "zh" | "en";
+}): EvolutionActiveRun {
+  const timestamp = new Date().toISOString();
+  const sourceKind = input.sourceKind;
+  const sourceName = sourceKind === "dataset" ? input.datasetName : input.bundleName;
+  const isZh = input.lang === "zh";
+  const summary = isZh
+    ? `正在提交监督运行请求，来源${sourceKind === "dataset" ? "数据集" : "评测包"} ${sourceName || "--"}。`
+    : `Submitting supervised run request from ${sourceKind === "dataset" ? "dataset" : "bundle"} ${sourceName || "--"}.`;
+
+  return {
+    runId: `${LOCAL_SUPERVISED_RUN_PREFIX}${Date.now()}`,
+    status: "queued",
+    currentPhase: "submitted",
+    runtimeStatus: "submitted",
+    sourceKind,
+    sessionId: "",
+    bundleName: sourceKind === "bundle" ? input.bundleName : "",
+    datasetName: sourceKind === "dataset" ? input.datasetName : "",
+    datasetLimit: input.datasetLimit,
+    keepWorktree: input.keepWorktree,
+    startedAt: timestamp,
+    updatedAt: timestamp,
+    finishedAt: "",
+    caseTotal: 0,
+    currentCaseIndex: 0,
+    currentCaseId: "",
+    currentRole: "",
+    currentCaseScenario: "",
+    currentCaseMode: "",
+    currentCasePrompt: "",
+    currentAgentBinding: {},
+    currentCaseIo: null,
+    currentTask: isZh ? "启动请求已提交，等待后端接收并返回真实运行记录。" : "Start request submitted; waiting for the backend to return the real run record.",
+    decision: "",
+    reason: "",
+    decisionPath: "",
+    policyAction: "",
+    lineageIndexPath: "",
+    lineageSummary: "",
+    activeAdvisoryCount: 0,
+    pauseRequested: false,
+    pauseRequestedAt: "",
+    pausedAt: "",
+    stopRequested: false,
+    stopRequestedAt: "",
+    latestMessage: summary,
+    eventTail: [
+      {
+        timestamp,
+        event: "start_submitted",
+        title: isZh ? "启动请求已提交" : "Start request submitted",
+        summary,
+        status: "queued",
+        sourceKind,
+        datasetName: sourceKind === "dataset" ? input.datasetName : "",
+        datasetLimit: input.datasetLimit,
+        bundleName: sourceKind === "bundle" ? input.bundleName : "",
+        keepWorktree: input.keepWorktree,
+      },
+    ],
+    agentBindings: {},
+    actionStates: {
+      pause: { enabled: false, reason: isZh ? "等待真实运行记录返回后才能暂停。" : "Pause is available after the real run record is returned." },
+      resume: { enabled: false, reason: isZh ? "启动请求尚未进入可恢复状态。" : "The start request is not resumable yet." },
+      retry: { enabled: false, reason: isZh ? "启动完成或失败后才能重跑。" : "Retry is available after the start completes or fails." },
+      terminate: { enabled: false, reason: isZh ? "等待真实运行记录返回后才能终止。" : "Terminate is available after the real run record is returned." },
+      delete: { enabled: false, reason: isZh ? "本地启动占位不会写入运行记录。" : "This local placeholder is not persisted as a run record." },
+    },
+  };
 }
 
 function supervisedMemberModelLabel(binding: EvolutionActiveRunAgentBinding | undefined) {
@@ -425,7 +508,26 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     refetchIntervalInBackground: false,
     enabled: supervisedTrackQueriesEnabled || selfTrackQueriesEnabled,
   });
+  const selectedDatasetLimit = useMemo(
+    () => (
+      sourceKind === "dataset" && datasetLimitInput.trim()
+        ? Number(datasetLimitInput.trim())
+        : null
+    ),
+    [datasetLimitInput, sourceKind],
+  );
   const startRunMutation = useMutation({
+    onMutate: () => {
+      setActionFeedback(lang === "zh" ? "启动请求已提交，正在等待后端返回真实运行记录。" : "Start request submitted; waiting for the backend to return the real run record.");
+      setLiveActiveRun(buildSupervisedStartPlaceholder({
+        sourceKind,
+        datasetName: sourceKind === "dataset" ? datasetName : "",
+        datasetLimit: selectedDatasetLimit,
+        bundleName: sourceKind === "bundle" ? bundleNameInput : "",
+        keepWorktree,
+        lang,
+      }));
+    },
     mutationFn: () =>
       fetchJson<EvolutionActiveRun>("/api/evolution/runs", {
         method: "POST",
@@ -435,10 +537,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
         body: JSON.stringify({
           sourceKind,
           datasetName: sourceKind === "dataset" ? datasetName : "",
-          datasetLimit:
-            sourceKind === "dataset" && datasetLimitInput.trim()
-              ? Number(datasetLimitInput.trim())
-              : null,
+          datasetLimit: selectedDatasetLimit,
           bundleName: sourceKind === "bundle" ? bundleNameInput : "",
           keepWorktree,
         }),
@@ -447,6 +546,10 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       setActionFeedback("");
       setLiveActiveRun(snapshot);
       await evolutionWorkspaceCache.afterSupervisedWorkspaceChanged();
+    },
+    onError: () => {
+      setLiveActiveRun((current) => (isLocalSupervisedStartPlaceholder(current) ? null : current));
+      void evolutionWorkspaceCache.refreshSupervisedActiveRun();
     },
   });
   const startWorktreeRunMutation = useMutation({
@@ -765,10 +868,14 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const effectiveActiveRunSnapshot = shouldIgnoreActiveRunSnapshot(activeRunSnapshot, liveActiveRun)
     ? null
     : activeRunSnapshot;
+  const visibleLiveRunSnapshot = liveActiveRun && (
+    isLiveSupervisedRunStatus(liveActiveRun.status)
+    || ["done", "failed", "cancelled"].includes(String(liveActiveRun.status || "").toLowerCase())
+  )
+    ? liveActiveRun
+    : null;
   const monitoredRun = effectiveActiveRunSnapshot
-    ?? (liveActiveRun && ["done", "failed", "cancelled"].includes(String(liveActiveRun.status || "").toLowerCase())
-      ? liveActiveRun
-      : null)
+    ?? visibleLiveRunSnapshot
     ?? latestSupervisedRunSnapshot;
   const runningRun = effectiveActiveRunSnapshot ?? (liveActiveRun && isLiveSupervisedRunStatus(liveActiveRun.status)
     ? liveActiveRun
@@ -1300,7 +1407,8 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     if (!pageVisible) {
       return;
     }
-    const target = selectSupervisedRunStreamTarget(activeRunSnapshot, liveActiveRun);
+    const streamLiveRun = isLocalSupervisedStartPlaceholder(liveActiveRun) ? null : liveActiveRun;
+    const target = selectSupervisedRunStreamTarget(activeRunSnapshot, streamLiveRun);
     if (!target) {
       return;
     }

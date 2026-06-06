@@ -326,7 +326,7 @@ function resolveLifecycleDisplay(
   const recoveryType = String(evidence?.recovery?.commandType || "").toLowerCase();
   const activeLifecycleCommand = commandType || (evidence?.recovery?.active ? recoveryType : "");
 
-  if (restartQueue?.pending || restartQueue?.active) {
+  if (restartQueue?.active) {
     return {
       state: "restarting",
       label: copy.lifecycleRestarting,
@@ -489,7 +489,7 @@ export function LauncherRoute() {
         activeWork: "任务保护",
         activeTasks: "进行中任务",
         noActiveWork: "无进行中任务",
-        restartProtected: "重启会等待",
+        restartProtected: "有任务，禁止重启",
         restartClear: "可安全重启",
         userAction: "下一步",
         projectRunning: "项目正在运行",
@@ -586,7 +586,7 @@ export function LauncherRoute() {
         advancedDetails: "技术细节",
         notBlocking: "不影响项目使用",
         maintenanceScopeSummary: "Launcher 正在维护项目启动、停止、重启、后端、窗口和日志证据。",
-        activeWorkSummary: "有任务运行时，重启请求会进入等待队列；任务结束后自动重启，不打断会话或进化任务。",
+        activeWorkSummary: "有任务运行时，Launcher 会拒绝停止或重启，避免打断会话或进化任务。",
         noActiveWorkSummary: "当前没有进行中的项目任务，生命周期操作不会打断运行任务。",
         openWorkbenchSummary: "工作台已就绪，可继续开发或查看页面。",
         startProjectSummary: "项目未运行时，从这里统一启动前后端和窗口。",
@@ -610,7 +610,7 @@ export function LauncherRoute() {
         activeWork: "Work Guard",
         activeTasks: "Active Tasks",
         noActiveWork: "No active tasks",
-        restartProtected: "Restart will wait",
+        restartProtected: "Blocked by work",
         restartClear: "Safe to restart",
         userAction: "Next Step",
         projectRunning: "Project is running",
@@ -707,7 +707,7 @@ export function LauncherRoute() {
         advancedDetails: "Technical details",
         notBlocking: "Not blocking project use",
         maintenanceScopeSummary: "Launcher maintains project start, stop, restart, backend, window, and runtime evidence.",
-        activeWorkSummary: "When tasks are running, restart requests enter a waiting queue and run automatically after work finishes.",
+        activeWorkSummary: "When tasks are running, Launcher rejects stop and restart requests so chat or evolution work is not interrupted.",
         noActiveWorkSummary: "There are no active project tasks, so lifecycle actions will not interrupt running work.",
         openWorkbenchSummary: "Workbench is ready for development or inspection.",
         startProjectSummary: "When closed, start frontend, backend, and window from here.",
@@ -794,8 +794,9 @@ export function LauncherRoute() {
   const activeWorkCount = status?.lifecycleProof.activeWorkRuns.count ?? 0;
   const activeWorkKinds = status?.lifecycleProof.activeWorkRuns.kinds ?? [];
   const restartQueue = evidence?.restartQueue;
-  const restartQueuePending = Boolean(restartQueue?.pending || restartQueue?.active);
-  const activeWorkSummary = restartQueuePending
+  const restartQueueActive = Boolean(restartQueue?.active);
+  const restartQueuePending = Boolean(restartQueue?.pending);
+  const activeWorkSummary = restartQueueActive
     ? copy.lifecycleRestarting
     : activeWorkCount > 0
       ? copy.restartProtected
@@ -805,7 +806,7 @@ export function LauncherRoute() {
     : restartQueue?.statusLine
       ? restartQueue.statusLine
     : copy.noActiveWorkSummary;
-  const nextAction = restartQueuePending
+  const nextAction = restartQueueActive
     ? copy.useWaitAction
     : projectIsOpen
     ? copy.safeToUse
@@ -814,7 +815,7 @@ export function LauncherRoute() {
       : projectIsClosed
         ? copy.useStartAction
         : copy.useCheckAction;
-  const nextActionDetail = restartQueuePending
+  const nextActionDetail = restartQueueActive
     ? restartQueue?.statusLine || lifecycleDisplay.detail
     : projectIsOpen
     ? copy.openWorkbenchSummary
