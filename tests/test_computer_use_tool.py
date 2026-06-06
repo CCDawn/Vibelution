@@ -150,6 +150,58 @@ def test_computer_use_service_pauses_high_risk_explicit_action_before_provider(c
     assert result["status"] == "need_confirmation"
     assert result["needsConfirmation"] is True
     assert result["steps"][0]["requiresConfirmation"] is True
+    cancelled = computer_use_service.cancel_computer_use_session(result["sessionId"], reason="test_cancel")
+    assert cancelled["status"] == "cancelled"
+    assert "pendingExecution" not in computer_use_service._load_session(result["sessionId"])
+
+
+def test_computer_use_service_confirm_resumes_high_risk_explicit_action_and_redacts_text(computer_use_tmp, monkeypatch):
+    monkeypatch.setenv("VIBELUTION_COMPUTER_USE_ENABLED", "1")
+    monkeypatch.setenv("VIBELUTION_COMPUTER_USE_BASE_URL", "https://computer-use.invalid")
+
+    calls = []
+
+    def fake_call(request, *, session_id):
+        calls.append(request)
+        assert request["requireConfirmation"] is False
+        assert request["actions"] == [
+            {"action": "fill", "selector": "#login", "text": "secret password"},
+            {"action": "click", "selector": "#submit"},
+        ]
+        return {
+            "status": "completed",
+            "summary": "Confirmed actions completed.",
+            "steps": [{"action": "click", "summary": "Submitted login form", "status": "completed"}],
+            "screenshot_b64": base64.b64encode(PNG_BYTES).decode("ascii"),
+        }
+
+    monkeypatch.setattr(computer_use_service, "_call_open_computer_use", fake_call)
+
+    started = computer_use_service.start_computer_use_task(
+        task="Login to example",
+        target_url="https://example.com/login",
+        allowed_domains="example.com",
+        actions=[
+            {"action": "fill", "selector": "#login", "text": "secret password"},
+            {"action": "click", "selector": "#submit"},
+        ],
+    )
+
+    assert calls == []
+    assert started["status"] == "need_confirmation"
+    assert started["requestedActions"][0]["textLength"] == len("secret password")
+    assert "secret password" not in json.dumps(started, ensure_ascii=False)
+
+    confirmed = computer_use_service.confirm_computer_use_session(started["sessionId"], confirmation="approved_by_test")
+
+    assert len(calls) == 1
+    assert confirmed["status"] == "completed"
+    assert confirmed["needsConfirmation"] is False
+    assert confirmed["screenshotUrl"].startswith(f"/api/computer-use/sessions/{started['sessionId']}/screenshots/")
+    assert [step.get("status") for step in confirmed["steps"]][-1] == "completed"
+    assert "secret password" not in json.dumps(confirmed, ensure_ascii=False)
+    saved = computer_use_service._load_session(started["sessionId"])
+    assert "pendingExecution" not in saved
 
 
 def test_computer_use_service_requires_confirmation_for_high_risk_step(computer_use_tmp, monkeypatch):
@@ -177,6 +229,50 @@ def test_computer_use_service_requires_confirmation_for_high_risk_step(computer_
     assert result["needsConfirmation"] is True
     assert confirmed["status"] == "completed"
     assert confirmed["needsConfirmation"] is False
+
+
+def test_computer_use_routes_confirm_resumes_pending_actions(computer_use_tmp, monkeypatch):
+    monkeypatch.setenv("VIBELUTION_COMPUTER_USE_ENABLED", "1")
+    monkeypatch.setenv("VIBELUTION_COMPUTER_USE_BASE_URL", "https://computer-use.invalid")
+
+    calls = []
+
+    def fake_call(request, *, session_id):
+        calls.append(request)
+        return {
+            "status": "completed",
+            "summary": "Confirmed route action completed.",
+            "steps": [{"action": "click", "summary": "Clicked submit", "status": "completed"}],
+            "screenshot_b64": base64.b64encode(PNG_BYTES).decode("ascii"),
+        }
+
+    monkeypatch.setattr(computer_use_service, "_call_open_computer_use", fake_call)
+    client = TestClient(create_app(), headers={CONTROL_TOKEN_HEADER: get_control_token()})
+
+    create_response = client.post(
+        "/api/computer-use/tasks",
+        json={
+            "task": "Submit example form",
+            "targetUrl": "https://example.com/form",
+            "allowedDomains": ["example.com"],
+            "actions": [{"action": "click", "selector": "#submit"}],
+        },
+    )
+    assert create_response.status_code == 200, create_response.text
+    created = create_response.json()
+
+    confirm_response = client.post(
+        f"/api/computer-use/sessions/{created['sessionId']}/confirm",
+        json={"confirmation": "approved_from_route_test"},
+    )
+    confirmed = confirm_response.json()
+
+    assert calls and calls[0]["requireConfirmation"] is False
+    assert confirm_response.status_code == 200, confirm_response.text
+    assert confirmed["status"] == "completed"
+    assert confirmed["needsConfirmation"] is False
+    assert confirmed["summary"] == "Confirmed route action completed."
+    assert confirmed["screenshotUrl"].startswith(f"/api/computer-use/sessions/{created['sessionId']}/screenshots/")
 
 
 def test_computer_use_routes_create_read_cancel_and_screenshot(computer_use_tmp, monkeypatch):
