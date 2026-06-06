@@ -412,6 +412,10 @@
                   <b>knowledge_ingestion_status</b>
                   <span>已新增只读状态聚合：输出 summary/stages/actionItems/candidateBreakdown/candidateGraphSummary/knowledgeBases/officialBoundary，并记录 knowledge_ingestion.status_viewed 运行事件计数。</span>
                 </div>
+<div class="service-row">
+                  <b>research_launchpad</b>
+                  <span>待实施：Teams 科研团队页的操作启动台，按状态推荐下一步，并调用现有 candidates/source、source-extraction、local-research-model/invoke、candidate-graph、steward ingestion 和 review API。</span>
+                </div>
           </div>
         </div>
       </div>
@@ -765,6 +769,11 @@
               <span>POST candidate-graph 会从当前未归档候选重建 candidate_only 图谱，输出 nodes/edges/missingLinks/unreviewedNodes/archivedCandidateCount/officialBoundary；断链时 qualityStatus=broken_links。</span>
             </div>
 <div class="blueprint-row compact">
+              <b>科研流程启动台计划</b>
+              <strong>docs/plans/2026-06-07-challenge-cup-research-launchpad.md</strong>
+              <span>下一步实现 Teams 页操作面板：注册来源、抽取 PDF、调用 qwen、刷新候选图、提交 steward pack、审核 pending proposal；不新增正式写入捷径。</span>
+            </div>
+<div class="blueprint-row compact">
               <b>验证</b>
               <strong>tests/test_team_workflow_orchestration_service.py + tests/test_team_workflow_routes.py</strong>
               <span>覆盖主路径、非 ownerAgent 不能写最终状态、本地模型任务包、输出校验和知识入库状态总览。</span>
@@ -830,6 +839,12 @@
               <strong>团队协调状态队列</strong>
               <span>coordination/status 只读聚合 API 和 Teams 工作台协调队列已接入，把 pendingTransfers、needsRework、stewardship、blocked、active 汇成队列、summary、actionItems、coordinationPolicy 和 communicationBrief。</span>
               <span>Research Coordination Agent/组织层可集中看到待决转移、返工候选、治理待审、阻塞项、目标功能 Agent 与建议通道；本轮不自动调转，不自动发送消息，不提供审批按钮。</span>
+            </div>
+<div class="blueprint-row">
+              <b>M6.2</b>
+              <strong>科研流程启动台</strong>
+              <span>计划在 Teams 科研团队页新增可操作启动台，把资料登记、PDF 抽取、qwen 草稿生成、候选图谱刷新、steward pack 提交和最小审核入口串成可点击流程。</span>
+              <span>只复用现有 workflow-orchestration / CandidateStore / local-research-model / Team Knowledge API；qwen 只写草稿，communicationBrief 仍只读，正式 KnowledgeItem/图谱同步仍必须经过审批门禁。</span>
             </div>
       </div>
       <div class="tag-row">
