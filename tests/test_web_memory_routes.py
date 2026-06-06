@@ -800,6 +800,56 @@ def test_memory_overview_slow_event_includes_section_timings(tmp_path, monkeypat
     ]
 
 
+def test_git_snapshot_reuses_recent_subprocess_result(tmp_path, monkeypatch):
+    class FakeCompletedProcess:
+        def __init__(self, returncode: int, stdout: str = "", stderr: str = ""):
+            self.returncode = returncode
+            self.stdout = stdout
+            self.stderr = stderr
+
+    calls: list[tuple[str, ...]] = []
+    now = {"value": 10.0}
+
+    def fake_monotonic():
+        return now["value"]
+
+    def fake_run(command, **kwargs):
+        calls.append(tuple(command))
+        if command[:3] == ["git", "status", "--porcelain=1"]:
+            return FakeCompletedProcess(0, " M core/example.py\n")
+        if command[:3] == ["git", "rev-parse", "--short=12"]:
+            return FakeCompletedProcess(0, "abc123def456\n")
+        return FakeCompletedProcess(1, stderr="unexpected command")
+
+    memory_service._clear_git_snapshot_cache()
+    monkeypatch.setattr(memory_service.time, "monotonic", fake_monotonic)
+    monkeypatch.setattr(memory_service.subprocess, "run", fake_run)
+    monkeypatch.setattr(memory_service, "GIT_SNAPSHOT_CACHE_TTL_SECONDS", 3.0)
+
+    first = memory_service._git_snapshot(tmp_path)
+    second = memory_service._git_snapshot(tmp_path)
+    second["files"].append({"status": "??", "path": "local-mutation"})
+
+    assert first["head"] == "abc123def456"
+    assert second["fileCount"] == 1
+    assert calls == [
+        ("git", "status", "--porcelain=1"),
+        ("git", "rev-parse", "--short=12", "HEAD"),
+    ]
+
+    now["value"] = 14.0
+    third = memory_service._git_snapshot(tmp_path)
+
+    assert third["fileCount"] == 1
+    assert calls == [
+        ("git", "status", "--porcelain=1"),
+        ("git", "rev-parse", "--short=12", "HEAD"),
+        ("git", "status", "--porcelain=1"),
+        ("git", "rev-parse", "--short=12", "HEAD"),
+    ]
+    memory_service._clear_git_snapshot_cache()
+
+
 def test_memory_overview_perf_event_records_single_recovery_after_slow(tmp_path, monkeypatch):
     recorded_events: list[dict] = []
 

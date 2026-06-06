@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import re
 import sqlite3
@@ -28,6 +29,9 @@ MANAGED_MEMORY_WRITE_LOCK = Lock()
 MEMORY_OVERVIEW_PERF_STATE_LOCK = Lock()
 MEMORY_OVERVIEW_WAS_SLOW = False
 MEMORY_OVERVIEW_SLOW_MS = 500.0
+GIT_SNAPSHOT_CACHE_TTL_SECONDS = 3.0
+GIT_SNAPSHOT_CACHE_LOCK = Lock()
+GIT_SNAPSHOT_CACHE: dict[str, Any] = {"root": "", "expiresAt": 0.0, "payload": None}
 SQLITE_APPEND_ONLY_TABLES = {"GitFileChange", "GitEntityChange"}
 
 
@@ -1865,6 +1869,35 @@ def _normalize_sqlite_row(row: dict[str, Any]) -> dict[str, Any]:
 
 
 def _git_snapshot(root: Path) -> dict[str, Any]:
+    cache_root = str(root.resolve())
+    now = time.monotonic()
+    with GIT_SNAPSHOT_CACHE_LOCK:
+        cached_payload = GIT_SNAPSHOT_CACHE.get("payload")
+        if (
+            GIT_SNAPSHOT_CACHE.get("root") == cache_root
+            and cached_payload is not None
+            and float(GIT_SNAPSHOT_CACHE.get("expiresAt") or 0.0) > now
+        ):
+            return copy.deepcopy(cached_payload)
+
+    payload = _load_git_snapshot(root)
+    with GIT_SNAPSHOT_CACHE_LOCK:
+        GIT_SNAPSHOT_CACHE.update(
+            {
+                "root": cache_root,
+                "expiresAt": time.monotonic() + GIT_SNAPSHOT_CACHE_TTL_SECONDS,
+                "payload": copy.deepcopy(payload),
+            }
+        )
+    return payload
+
+
+def _clear_git_snapshot_cache() -> None:
+    with GIT_SNAPSHOT_CACHE_LOCK:
+        GIT_SNAPSHOT_CACHE.update({"root": "", "expiresAt": 0.0, "payload": None})
+
+
+def _load_git_snapshot(root: Path) -> dict[str, Any]:
     no_window_kwargs = _subprocess_no_window_kwargs()
     try:
         status = subprocess.run(
