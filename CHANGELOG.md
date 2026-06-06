@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.46 - 2026-06-07
+
+- Fixed child sessions so they no longer steal the owning Agent's canonical direct session binding from the root conversation.
+- Hid child sessions from the top-level session index while loading them through the dedicated child-session API for the top Agent session strip.
+- Added repair logging for root sessions that recover an Agent direct-session binding previously pointed at a child session.
+
 ## 0.10.45 - 2026-06-07
 
 - Added read-only communication briefs to the Challenge Cup workflow coordination status API, mapping queue items to target functional Agent roles and suggested delivery channels without sending messages automatically.

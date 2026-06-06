@@ -2853,12 +2853,75 @@ def test_create_child_session_api_persists_root_child_relationship(tmp_path, mon
     assert child["handoffContext"]["relevantFiles"] == ["web/src/routes/ChatCodingRoute.tsx"]
     assert parent["childSessionIds"] == [child_id]
     assert parent["activeChildSessionId"] == child_id
+    assert child["agentDirectSessionMismatch"] is False
+    assert parent["agentDirectSessionMismatch"] is False
     assert parent["messages"][-1]["metadata"]["kind"] == "child_session_card"
     assert parent["messages"][-1]["metadata"]["childSessionId"] == child_id
+    rebound_agent = agent_directory_service.get_agent(agent["agentId"])
+    assert rebound_agent["directSessionId"] == "session-live"
 
     list_response = client.get("/api/sessions/session-live/child-sessions")
     assert list_response.status_code == 200
     assert [item["id"] for item in list_response.json()] == [child_id]
+    top_level_sessions = client.get("/api/sessions").json()
+    assert "session-live" in {item["id"] for item in top_level_sessions}
+    assert child_id not in {item["id"] for item in top_level_sessions}
+
+
+def test_session_detail_repairs_agent_direct_session_stolen_by_child(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    recorded_scene_events: list[tuple[tuple, dict]] = []
+    monkeypatch.setattr(
+        session_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: recorded_scene_events.append((args, kwargs)) or {"accepted": True},
+    )
+    agent = agent_directory_service.ensure_agent_for_session("session-live", display_name="真实会话")
+    state = load_chat_state(tmp_path)
+    state["conversations"][0]["agent_id"] = agent["agentId"]
+    state["conversations"][0]["agentId"] = agent["agentId"]
+    save_chat_state(tmp_path, state)
+    response = client.post(
+        "/api/sessions/session-live/child-sessions",
+        json={
+            "userRequest": "单独修复子对话展示",
+            "taskTitle": "子对话展示修复",
+            "autoStart": False,
+            "switchToChild": False,
+        },
+    )
+    assert response.status_code == 201, response.text
+    child_id = response.json()["childSessionId"]
+    agent_directory_service.ensure_agent_for_session(
+        child_id,
+        existing_agent_id=agent["agentId"],
+        display_name="被旧逻辑误绑的子对话",
+    )
+    stolen_agent = agent_directory_service.get_agent(agent["agentId"])
+    assert stolen_agent["directSessionId"] == child_id
+
+    detail_response = client.get("/api/sessions/session-live")
+
+    assert detail_response.status_code == 200
+    detail = detail_response.json()
+    assert detail["agentDirectSessionMismatch"] is False
+    repaired_agent = agent_directory_service.get_agent(agent["agentId"])
+    assert repaired_agent["directSessionId"] == "session-live"
+    repair_events = [
+        item
+        for item in recorded_scene_events
+        if item[0][:3] == (
+            "conversation",
+            "session_agent_child_direct_binding_repaired",
+            "session.agent_child_direct_binding_repaired",
+        )
+    ]
+    assert repair_events
+    assert repair_events[-1][1]["fields"]["sessionId"] == "session-live"
+    assert repair_events[-1][1]["fields"]["agentId"] == agent["agentId"]
+    assert repair_events[-1][1]["fields"]["previousDirectSessionId"] == child_id
 
 
 def test_create_child_session_from_child_attaches_sibling_to_root(tmp_path, monkeypatch):

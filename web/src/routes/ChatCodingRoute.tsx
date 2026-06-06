@@ -1334,9 +1334,16 @@ export function ChatCodingRoute() {
       if (!shouldSyncSummaries) {
         return;
       }
-      queryClient.setQueryData<SessionSummary[]>(queryKeys.sessions(), (sessions) =>
-        mergeSessionDetailIntoSummaries(sessions, detail),
-      );
+      const detailRootSessionId = rootSessionIdFor(detail);
+      if (isChildSession(detail) && detailRootSessionId) {
+        queryClient.setQueryData<SessionSummary[]>(queryKeys.sessionChildSessions(detailRootSessionId), (sessions) =>
+          mergeSessionDetailIntoSummaries(sessions, detail),
+        );
+      } else {
+        queryClient.setQueryData<SessionSummary[]>(queryKeys.sessions(), (sessions) =>
+          mergeSessionDetailIntoSummaries(sessions, detail),
+        );
+      }
       queryClient.setQueryData<ConversationSummary[]>(queryKeys.conversations(), (conversations) =>
         mergeSessionDetailIntoConversations(conversations, detail),
       );
@@ -1373,7 +1380,6 @@ export function ChatCodingRoute() {
     if (
       requestedSessionId
       && !requestedRoomId
-      && sessionsQuery.data?.some((session) => session.id === requestedSessionId)
       && activeSessionId !== requestedSessionId
     ) {
       setActiveGroupRoomId("");
@@ -1387,6 +1393,7 @@ export function ChatCodingRoute() {
     if (
       activeSessionId
       && !requestedRoomId
+      && !requestedSessionId
       && sessionsQuery.data
       && sessionsQuery.data.length > 0
       && !sessionsQuery.data.some((session) => session.id === activeSessionId)
@@ -1427,6 +1434,20 @@ export function ChatCodingRoute() {
       ? resolvePollingInterval(
           pageVisible,
           sessionStreamConnected ? false : 3_000,
+          { backgroundMs: directSessionBackgroundSyncActive && !sessionStreamConnected ? ACTIVE_BACKGROUND_SYNC_POLL_MS : false },
+        )
+      : false,
+    refetchIntervalInBackground: directSessionBackgroundSyncActive,
+  });
+  const activeRootSessionId = rootSessionIdFor(sessionDetailQuery.data ?? directSessionActiveSummary);
+  const childSessionsQuery = useQuery({
+    queryKey: queryKeys.sessionChildSessions(activeRootSessionId || "none"),
+    queryFn: () => fetchJson<SessionSummary[]>(`/api/sessions/${activeRootSessionId}/child-sessions`),
+    enabled: Boolean(activeRootSessionId) && directSessionPanelActive,
+    refetchInterval: activeRootSessionId
+      ? resolvePollingInterval(
+          pageVisible,
+          sessionStreamConnected ? false : ACTIVE_INDEX_POLL_MS,
           { backgroundMs: directSessionBackgroundSyncActive && !sessionStreamConnected ? ACTIVE_BACKGROUND_SYNC_POLL_MS : false },
         )
       : false,
@@ -2806,7 +2827,7 @@ export function ChatCodingRoute() {
   const sessionDetailErrorMessage = sessionDetailQuery.isError
     ? describeError(sessionDetailQuery.error, t("loadFailed"))
     : "";
-  const invalidChildSessionLinkMessage = hasInvalidChildSessionLink(directSessionActiveSummary)
+  const invalidChildSessionLinkMessage = hasInvalidChildSessionLink(sessionDetailQuery.data ?? directSessionActiveSummary)
     ? (
       lang === "zh"
         ? "child_session_link_invalid: 子对话缺少 parentSessionId/rootSessionId，无法挂载到顶部 Agent 会话轨道。本轮已停止展示，请修复会话索引数据。"
@@ -3272,8 +3293,11 @@ export function ChatCodingRoute() {
   }, [agentsQuery.data]);
 
   const allVisibleSessions = useMemo(() => {
-    return (sessionsQuery.data ?? []).filter(isVisibleDirectSession);
-  }, [sessionsQuery.data]);
+    const merged = [...(sessionsQuery.data ?? []), ...(childSessionsQuery.data ?? [])];
+    return merged
+      .filter(isVisibleDirectSession)
+      .filter((session, index, sessions) => sessions.findIndex((item) => item.id === session.id) === index);
+  }, [childSessionsQuery.data, sessionsQuery.data]);
 
   const sessionsById = useMemo(() => {
     return new Map(allVisibleSessions.map((session) => [session.id, session]));
@@ -3290,7 +3314,6 @@ export function ChatCodingRoute() {
     return allVisibleSessions.filter((session) => !isRepresentedInAgentSessionTabs(session));
   }, [allVisibleSessions]);
 
-  const activeRootSessionId = rootSessionIdFor(directSessionActiveSummary);
   const agentSessionTabs = useMemo(() => {
     if (!activeRootSessionId) {
       return [];
