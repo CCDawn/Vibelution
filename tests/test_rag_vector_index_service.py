@@ -126,6 +126,74 @@ def test_vector_index_metadata_includes_agent_owner_partition(tmp_path, monkeypa
     assert health["items"][0]["ownerId"] == agent["agentId"]
 
 
+def test_vector_index_records_are_owner_scoped_for_duplicate_item_ids(tmp_path, monkeypatch):
+    from core.web.services import rag_vector_index_service
+
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(team_knowledge_service, "PROJECT_ROOT", tmp_path)
+    original_new_event_id = team_knowledge_service._new_event_id
+
+    def fake_new_event_id(prefix: str) -> str:
+        if prefix == "kitem":
+            return "kitem-shared-vector"
+        return original_new_event_id(prefix)
+
+    monkeypatch.setattr(team_knowledge_service, "_new_event_id", fake_new_event_id)
+    first_agent = agent_directory_service.create_agent_instance(display_name="Vector Collision One")
+    second_agent = agent_directory_service.create_agent_instance(display_name="Vector Collision Two")
+    first_base = team_knowledge_service.create_agent_knowledge_base(
+        first_agent["agentId"],
+        name="Collision Vector Base",
+        actor_agent_id=first_agent["agentId"],
+    )
+    second_base = team_knowledge_service.create_agent_knowledge_base(
+        second_agent["agentId"],
+        name="Collision Vector Base",
+        actor_agent_id=second_agent["agentId"],
+    )
+    first_proposal = team_knowledge_service.create_refinement_proposal(
+        first_base["scopedKnowledgeBaseId"],
+        source_artifact_ids=[],
+        proposed_by_agent_id=first_agent["agentId"],
+        title="First vector collision",
+        content="First owner vector collision content.",
+    )
+    second_proposal = team_knowledge_service.create_refinement_proposal(
+        second_base["scopedKnowledgeBaseId"],
+        source_artifact_ids=[],
+        proposed_by_agent_id=second_agent["agentId"],
+        title="Second vector collision",
+        content="Second owner vector collision content.",
+    )
+    team_knowledge_service.review_refinement_proposal(
+        first_base["scopedKnowledgeBaseId"],
+        first_proposal["proposalId"],
+        status="approved",
+        reviewed_by_agent_id=first_agent["agentId"],
+    )
+    team_knowledge_service.review_refinement_proposal(
+        second_base["scopedKnowledgeBaseId"],
+        second_proposal["proposalId"],
+        status="approved",
+        reviewed_by_agent_id=second_agent["agentId"],
+    )
+
+    first_item = rag_vector_index_service.list_indexable_knowledge_items(agent_id=first_agent["agentId"])[0]
+    second_item = rag_vector_index_service.list_indexable_knowledge_items(agent_id=second_agent["agentId"])[0]
+    first_record = rag_vector_index_service.write_index_record(first_item, embedding_provider="test", embedding_model="collision-v1")
+    second_record = rag_vector_index_service.write_index_record(second_item, embedding_provider="test", embedding_model="collision-v1")
+    health = rag_vector_index_service.get_vector_index_health(internal=True)
+
+    assert first_item["knowledgeItemId"] == second_item["knowledgeItemId"] == "kitem-shared-vector"
+    assert first_record["recordId"] != second_record["recordId"]
+    assert first_record["recordId"].startswith(f"agent:{first_agent['agentId']}:")
+    assert second_record["recordId"].startswith(f"agent:{second_agent['agentId']}:")
+    assert health["indexedItemCount"] == 2
+    assert {item["recordId"] for item in health["items"]} == {first_record["recordId"], second_record["recordId"]}
+
+
 def test_vector_index_health_counts_empty_index_as_missing(vector_index_env):
     from core.web.services import rag_vector_index_service
 
