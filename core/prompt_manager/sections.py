@@ -73,6 +73,44 @@ def _build_git_rules_summary(content: str) -> Optional[str]:
     return "\n".join(lines) if len(lines) > 1 else None
 
 
+_DEFAULT_GIT_WORKFLOW = """
+## 提交模板
+
+- 使用清晰的 Conventional Commit 前缀，例如 `fix:`, `feat:`, `refactor:`, `test:`, `docs:`。
+- 第一行说明行为变化和原因，不写泛泛的“update files”。
+- 正文只在必要时补充验证、风险或迁移说明。
+
+## 拆提交规则
+
+- 每个提交只覆盖一个明确目标。
+- 不把无关重构、格式化和运行产物夹进同一提交。
+- 暂存前先检查当前脏区，只 stage 本轮任务文件。
+
+## 高风险改动
+
+- 修改配置、提示词、运行时状态、Git 操作或持久化逻辑时，提交前必须说明验证证据。
+- 涉及密钥、权限、回滚或覆盖远端历史时，先确认身份和风险边界。
+
+## 反模式
+
+- 禁止 `git add .` 式夹带提交。
+- 禁止提交真实密钥、本地运行产物、缓存、日志和临时文件。
+- 禁止在未验证的情况下把修复声明为完成。
+""".strip()
+
+
+def _looks_like_vibelution_project_root(project_root: Path) -> bool:
+    try:
+        root = Path(project_root)
+        return (
+            (root / "core" / "prompt_manager" / "sections.py").exists()
+            and (root / "core" / "core_prompt" / "SPEC.md").exists()
+            and (root / "config.example.toml").exists()
+        )
+    except Exception:
+        return False
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # 通用文件章节工厂
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -245,19 +283,23 @@ def make_git_rules_section(project_root: Path) -> SystemPromptSection:
     workflow_path = project_root / "workspace" / "prompts" / "GIT_WORKFLOW.md"
 
     def compute() -> Optional[str]:
-        if not workflow_path.exists():
-            return None
         try:
-            return _build_git_rules_summary(workflow_path.read_text(encoding="utf-8"))
+            if workflow_path.exists():
+                return _build_git_rules_summary(workflow_path.read_text(encoding="utf-8"))
+            if _looks_like_vibelution_project_root(project_root):
+                return _build_git_rules_summary(_DEFAULT_GIT_WORKFLOW)
+            return None
         except Exception:
             return None
 
     is_empty = True
-    if workflow_path.exists():
-        try:
+    try:
+        if workflow_path.exists():
             is_empty = not bool(_build_git_rules_summary(workflow_path.read_text(encoding="utf-8")))
-        except Exception:
-            is_empty = True
+        elif _looks_like_vibelution_project_root(project_root):
+            is_empty = not bool(_build_git_rules_summary(_DEFAULT_GIT_WORKFLOW))
+    except Exception:
+        is_empty = True
 
     return SystemPromptSection(
         name="GIT_RULES",

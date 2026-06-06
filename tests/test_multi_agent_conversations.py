@@ -107,15 +107,18 @@ def test_create_chat_session_creates_persistent_agent_and_direct_conversation(tm
     assert agent["workspacePath"].startswith("workspace/agents/")
     assert (tmp_path / agent["workspacePath"] / "memory").exists()
     assert agent["memoryPolicy"]["privateMemoryRoot"].endswith("/memory")
+    assert detail["title"] == agent["displayName"]
+    assert detail["taskTitle"] == "配置 Agent"
+    assert agent["metadata"]["functionalDisplayName"] == "配置 Agent"
+    assert agent["metadata"]["displayNameSource"] == "generated_person_name"
 
     conversations = conversation_service.list_conversations()
     direct = [item for item in conversations if item["type"] == "direct_agent"]
     assert direct[0]["conversationId"] == detail["id"]
-    assert direct[0]["title"] == "配置 Agent"
+    assert direct[0]["title"] == agent["displayName"]
     assert direct[0]["agentId"] == detail["agentId"]
     assert direct[0]["agentCode"] == agent["agentCode"]
     assert direct[0]["agentDisplayName"] == agent["displayName"]
-    assert direct[0]["agentDisplayName"] != direct[0]["title"]
     assert direct[0]["agentPrimaryMode"] == "chat"
     assert direct[0]["agentRoleKey"] == ""
     assert direct[0]["agentPromptTemplateId"] == "prompt-chat-default"
@@ -254,10 +257,12 @@ def test_session_list_uses_short_snapshot_cache_and_invalidates_on_update(tmp_pa
     lookup_calls = 0
     load_calls = 0
     updated = session_service.list_sessions()
+    updated_session = next(item for item in updated if item["id"] == created["id"])
 
     assert lookup_calls == 1
     assert load_calls == 1
-    assert next(item for item in updated if item["id"] == created["id"])["title"] == "Renamed Cached Agent"
+    assert updated_session["title"] == created["title"]
+    assert updated_session["taskTitle"] == "Renamed Cached Agent"
     assert [item for item in events if item[0][2] == "session.list.loaded"][-1][1]["fields"]["cacheHit"] is False
 
 

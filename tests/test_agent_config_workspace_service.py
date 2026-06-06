@@ -1597,7 +1597,7 @@ def test_agent_tool_governance_low_risk_change_auto_applies_for_governance_agent
         display_name="能力顾问",
         metadata={"systemRole": "organization_advisor", "researchOrgRole": "organization_advisor"},
     )
-    target = agent_directory_service.create_agent_instance(display_name="资料 Agent")
+    target = agent_directory_service.create_agent_instance(display_name="资料 Agent", primary_mode="general")
 
     request = agent_tool_governance_service.submit_tool_governance_request(
         target["agentId"],
@@ -1629,7 +1629,7 @@ def test_agent_tool_governance_high_risk_change_waits_for_review_and_can_be_appr
         display_name="权限顾问",
         metadata={"systemRole": "capability_steward", "researchOrgRole": "capability_steward"},
     )
-    target = agent_directory_service.create_agent_instance(display_name="执行 Agent")
+    target = agent_directory_service.create_agent_instance(display_name="执行 Agent", primary_mode="general")
 
     request = agent_tool_governance_service.submit_tool_governance_request(
         target["agentId"],
@@ -1665,7 +1665,7 @@ def test_agent_tool_governance_uses_shared_tool_catalog_risk_metadata(tmp_path, 
         display_name="工具目录顾问",
         metadata={"systemRole": "capability_steward", "researchOrgRole": "capability_steward"},
     )
-    target = agent_directory_service.create_agent_instance(display_name="图像 Agent")
+    target = agent_directory_service.create_agent_instance(display_name="图像 Agent", primary_mode="general")
 
     request = agent_tool_governance_service.submit_tool_governance_request(
         target["agentId"],

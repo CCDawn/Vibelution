@@ -38,6 +38,33 @@ def _openai_gpt_5_5_library_entry() -> dict:
     }
 
 
+def _anthropic_claude_opus_4_7_library_entry() -> dict:
+    return {
+        "model": "claude-opus-4-7",
+        "label": "Anthropic Claude Opus 4.7",
+        "api_key_env": "VIBELUTION_LLM_ANTHROPIC_CLAUDE_OPUS_4_7_API_KEY",
+        "transport": "chat_completions",
+        "contract": "tool_chat",
+        "max_output_tokens": 8192,
+        "timeout": 120,
+        "connect_timeout": 20,
+        "streaming": True,
+        "tool_calling_mode": "auto",
+        "discovery_enabled": True,
+        "prompt_cache": {"mode": "explicit_cache_control"},
+        "thinking_type": "adaptive",
+        "thinking_display": "summarized",
+        "provider": {
+            "kind": "anthropic",
+            "api_key_env": "ANTHROPIC_API_KEY",
+            "base_url": "https://api.anthropic.com",
+            "compat_mode": "native",
+            "requires_api_key": True,
+            "context_window": 200000,
+        },
+    }
+
+
 def test_build_effective_config_resolves_model_ref_and_overrides():
     public_config = load_public_config()
     public_config["llm"].setdefault("model_library", {})["openai_gpt_5_5"] = _openai_gpt_5_5_library_entry()
@@ -61,14 +88,25 @@ def test_build_effective_config_resolves_model_ref_and_overrides():
     assert profile.timeout == 120
 
 
-def test_current_claude_opus_4_7_template_omits_temperature():
+def test_claude_opus_4_7_model_ref_template_omits_temperature():
     public_config = load_public_config()
-    claude = public_config["llm"]["model_library"]["claude_opus_4_7_atpify"]
+    public_config["llm"].setdefault("model_library", {})[
+        "anthropic_claude_opus_4_7"
+    ] = _anthropic_claude_opus_4_7_library_entry()
+    public_config["llm"]["profiles"]["primary"] = {
+        "model_ref": "anthropic_claude_opus_4_7",
+        "overrides": {},
+    }
+    claude = public_config["llm"]["model_library"]["anthropic_claude_opus_4_7"]
+    effective = build_effective_config(public_config)
+    profile = effective.llm.get_profile("primary")
 
     assert claude["provider"]["kind"] == "anthropic"
     assert claude["model"] == "claude-opus-4-7"
     assert "temperature" not in claude
     assert claude["prompt_cache"] == {"mode": "explicit_cache_control"}
+    assert profile.model == "claude-opus-4-7"
+    assert profile.prompt_cache.mode == "explicit_cache_control"
 
 
 def test_current_prompt_cache_modes_follow_model_library_config():

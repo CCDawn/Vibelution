@@ -16,6 +16,7 @@ import pytest
 
 from core.evaluation.chat_next_state_signals import append_chat_next_state_signal, list_chat_next_state_signals
 from core.evaluation.chat_dataset_capture import ChatDatasetCaptureService, resolve_chat_dataset_paths
+from core.evaluation.dataset_registry import list_dataset_status
 from core.evaluation.chat_segmenter import ChatTurnRecord
 from core.evaluation.self_evolution_candidate_pool import append_candidate_record
 from config import public_config as public_config_module
@@ -472,6 +473,28 @@ def _seed_runtime_scene_bundle(project_root: Path, scene_id: str = "scene-1", st
     ]
     (scene_dir / "timeline.jsonl").write_text("\n".join(timeline_payloads) + "\n", encoding="utf-8")
     (scene_dir / "lifecycle.jsonl").write_text("\n".join(timeline_payloads) + "\n", encoding="utf-8")
+    (scene_dir / "summary.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "package_id": scene_id,
+                "event_counts": {
+                    "timeline_events": len(timeline_payloads),
+                    "raw_logs": len(list(raw_dir.glob("*.log"))),
+                    "conversation_logs": 0,
+                    "agent_logs": 0,
+                    "artifacts": 0,
+                    "event_logs": len(list(events_dir.glob("*.jsonl"))),
+                    "research_files": 0,
+                    "errors": 1,
+                    "warnings": 1,
+                },
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
     manifest = runtime_scene_service._load_scene_manifest(scene_dir)
     runtime_scene_service._update_runtime_scene_package_manifest(scene_dir, manifest)
     return scene_dir
@@ -1433,8 +1456,8 @@ def test_runtime_scene_endpoints_list_detail_content_and_delete(tmp_path, monkey
     assert "workbench-lifecycle" in scene_a["packageIndex"]["tags"]
     assert "工作台启动" in scene_a["displayName"]
     assert "手动停止" in scene_a["displayName"]
-    assert scenes[0]["eventCount"] >= 3
-    assert scenes[0]["rawLogCount"] >= 5
+    assert scene_a["eventCount"] >= 3
+    assert scene_a["rawLogCount"] >= 5
     assert scene_a["eventLogCount"] == 3
     assert scene_a["warningCount"] == 1
     assert scene_a["errorCount"] == 1
@@ -1444,7 +1467,18 @@ def test_runtime_scene_endpoints_list_detail_content_and_delete(tmp_path, monkey
     detail = detail_response.json()
     assert detail["runtimeSceneId"] == "scene-a"
     assert detail["displayName"] == scene_a["displayName"]
-    assert detail["packageIndex"] == scene_a["packageIndex"]
+    for key in [
+        "schemaVersion",
+        "packageId",
+        "displayName",
+        "indexKey",
+        "startedAt",
+        "startedDate",
+        "startedTime",
+        "durationSeconds",
+    ]:
+        assert detail["packageIndex"][key] == scene_a["packageIndex"][key]
+    assert "diagnosis-active-issue" in detail["packageIndex"]["tags"]
     assert detail["status"] == "stopped"
     assert detail["frontend"]["build_status"] == "success"
     assert detail["timeline"][0]["eventCode"] == "frontend.build.started"
@@ -2690,6 +2724,17 @@ def _seed_chat_state(project_root, *, task_status="reading", active_task=None, c
     )
 
 
+def _bind_seeded_session_agent(project_root: Path, agent: dict, *, session_id: str = "session-live") -> None:
+    state = load_chat_state(project_root)
+    agent_id = str(agent.get("agentId") or "").strip()
+    for conversation in state.get("conversations") or []:
+        if str(conversation.get("conversation_id") or "").strip() == session_id:
+            conversation["agent_id"] = agent_id
+            conversation["agentId"] = agent_id
+            break
+    save_chat_state(project_root, state)
+
+
 def _read_next_state_signals(project_root: Path, *, session_id: str = "", turn_id: str = "") -> list[dict]:
     return list_chat_next_state_signals(project_root=project_root, session_id=session_id, turn_id=turn_id)
 
@@ -3865,6 +3910,7 @@ def test_create_session_persists_new_active_empty_conversation(tmp_path, monkeyp
     assert payload["id"].startswith("session-")
     assert payload["title"] == payload["agentDisplayName"]
     assert payload["taskTitle"] == "新会话"
+    assert payload["title"] != "新会话"
     assert payload["messages"] == []
     assert payload["currentPhase"] == "ready"
 
@@ -5141,14 +5187,17 @@ def test_session_user_image_attachment_upload_and_submit_reaches_agent(tmp_path,
         "supports_image_input": True,
     }
     monkeypatch.setattr(session_service, "get_config", lambda: base_config)
-    agent_directory_service.ensure_agent_for_session(
-        "session-live",
-        display_name="真实会话",
-        llm_bindings={
-            "dialogue": {"modelId": vision_model_id},
-            "vision": {"modelId": vision_model_id},
-        },
-        prompt_template_id="prompt-chat-default",
+    _bind_seeded_session_agent(
+        tmp_path,
+        agent_directory_service.ensure_agent_for_session(
+            "session-live",
+            display_name="真实会话",
+            llm_bindings={
+                "dialogue": {"modelId": vision_model_id},
+                "vision": {"modelId": vision_model_id},
+            },
+            prompt_template_id="prompt-chat-default",
+        ),
     )
     seen: dict[str, object] = {}
 
@@ -5188,7 +5237,7 @@ def test_session_user_image_attachment_upload_and_submit_reaches_agent(tmp_path,
 
     response = client.post(
         "/api/sessions/session-live/messages",
-        json={"content": "请看图", "attachmentIds": [attachment["artifactId"]], "mentalModelEnabled": False},
+        json={"content": "分析这张图", "attachmentIds": [attachment["artifactId"]], "mentalModelEnabled": False},
     )
 
     assert response.status_code == 202
@@ -5196,7 +5245,7 @@ def test_session_user_image_attachment_upload_and_submit_reaches_agent(tmp_path,
     user_message = payload["messages"][-2]
     assert user_message["attachments"][0]["artifactId"] == attachment["artifactId"]
     assert user_message["attachments"][0]["filename"] == "sketch.png"
-    assert seen["initial_prompt"] == "请看图"
+    assert seen["initial_prompt"] == "分析这张图"
     seen_attachment = seen["attachments"][0]
     assert seen_attachment["artifactId"] == attachment["artifactId"]
     assert seen_attachment["dataUrl"].startswith("data:image/png;base64,")
@@ -5297,14 +5346,17 @@ def test_session_user_image_attachment_vision_intent_reaches_supported_agent(tmp
         "supports_image_input": True,
     }
     monkeypatch.setattr(session_service, "get_config", lambda: base_config)
-    agent_directory_service.ensure_agent_for_session(
-        "session-live",
-        display_name="真实会话",
-        llm_bindings={
-            "dialogue": {"modelId": vision_model_id},
-            "vision": {"modelId": vision_model_id},
-        },
-        prompt_template_id="prompt-chat-default",
+    _bind_seeded_session_agent(
+        tmp_path,
+        agent_directory_service.ensure_agent_for_session(
+            "session-live",
+            display_name="真实会话",
+            llm_bindings={
+                "dialogue": {"modelId": vision_model_id},
+                "vision": {"modelId": vision_model_id},
+            },
+            prompt_template_id="prompt-chat-default",
+        ),
     )
     seen: dict[str, object] = {}
 
@@ -5360,14 +5412,17 @@ def test_session_recent_image_reference_reuses_last_user_attachment_for_vision(t
         "supports_image_input": True,
     }
     monkeypatch.setattr(session_service, "get_config", lambda: base_config)
-    agent_directory_service.ensure_agent_for_session(
-        "session-live",
-        display_name="真实会话",
-        llm_bindings={
-            "dialogue": {"modelId": vision_model_id},
-            "vision": {"modelId": vision_model_id},
-        },
-        prompt_template_id="prompt-chat-default",
+    _bind_seeded_session_agent(
+        tmp_path,
+        agent_directory_service.ensure_agent_for_session(
+            "session-live",
+            display_name="真实会话",
+            llm_bindings={
+                "dialogue": {"modelId": vision_model_id},
+                "vision": {"modelId": vision_model_id},
+            },
+            prompt_template_id="prompt-chat-default",
+        ),
     )
     seen_turns: list[dict[str, object]] = []
 
@@ -5455,14 +5510,17 @@ def test_session_user_image_attachment_vision_support_inherits_model_library(tmp
             "supports_image_input": True,
         }
     monkeypatch.setattr(session_service, "get_config", lambda: base_config)
-    agent_directory_service.ensure_agent_for_session(
-        "session-live",
-        display_name="真实会话",
-        llm_bindings={
-            "dialogue": {"modelId": mimo_model_id},
-            "vision": {"modelId": mimo_model_id},
-        },
-        prompt_template_id="prompt-chat-default",
+    _bind_seeded_session_agent(
+        tmp_path,
+        agent_directory_service.ensure_agent_for_session(
+            "session-live",
+            display_name="真实会话",
+            llm_bindings={
+                "dialogue": {"modelId": mimo_model_id},
+                "vision": {"modelId": mimo_model_id},
+            },
+            prompt_template_id="prompt-chat-default",
+        ),
     )
     seen: dict[str, object] = {}
     recorded_scene_events: list[tuple[tuple, dict]] = []
@@ -5539,14 +5597,17 @@ def test_session_user_image_attachment_vision_slot_overrides_dialogue_model(tmp_
         "supports_image_input": True,
     }
     monkeypatch.setattr(session_service, "get_config", lambda: base_config)
-    agent_directory_service.ensure_agent_for_session(
-        "session-live",
-        display_name="真实会话",
-        llm_bindings={
-            "dialogue": {"modelId": dialogue_model_id},
-            "vision": {"modelId": vision_model_id},
-        },
-        prompt_template_id="prompt-chat-default",
+    _bind_seeded_session_agent(
+        tmp_path,
+        agent_directory_service.ensure_agent_for_session(
+            "session-live",
+            display_name="真实会话",
+            llm_bindings={
+                "dialogue": {"modelId": dialogue_model_id},
+                "vision": {"modelId": vision_model_id},
+            },
+            prompt_template_id="prompt-chat-default",
+        ),
     )
     seen: dict[str, object] = {}
     recorded_scene_events: list[tuple[tuple, dict]] = []
@@ -7574,10 +7635,14 @@ def test_run_session_turn_records_agent_started_scene_event(tmp_path, monkeypatc
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
-    agent = agent_directory_service.ensure_agent_for_session(
+    seeded_agent = agent_directory_service.ensure_agent_for_session(
         "session-live",
         display_name="真实会话",
         prompt_template_id="prompt-chat-default",
+    )
+    _bind_seeded_session_agent(
+        tmp_path,
+        seeded_agent,
     )
     recorded_scene_events: list[tuple[tuple, dict]] = []
     monkeypatch.setattr(
@@ -7611,7 +7676,7 @@ def test_run_session_turn_records_agent_started_scene_event(tmp_path, monkeypatc
                 "user_message": "解释当前状态",
                 "history_messages": [],
                 "mental_model_enabled": False,
-                "agent_id": agent["agentId"],
+                "agent_id": seeded_agent["agentId"],
             }
         )
     finally:
@@ -12519,6 +12584,41 @@ def test_config_workspace_llm_http_fallback_uses_anthropic_messages(monkeypatch)
     assert captured["headers"]["X-api-key"] == "anthropic-secret"
 
 
+def test_config_workspace_llm_http_fallback_uses_primary_openai_chat_completion(monkeypatch):
+    public_config = copy.deepcopy(load_public_config())
+    effective = config_service.build_effective_config(public_config)
+    profile = effective.llm.get_profile("primary")
+    provider = effective.llm.get_provider(profile.provider_id)
+    captured: dict[str, object] = {}
+
+    class FakeResponse:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    class FakeOpener:
+        def open(self, request, timeout=0):
+            captured["url"] = request.full_url
+            captured["headers"] = dict(request.header_items())
+            captured["payload"] = json.loads(request.data.decode("utf-8"))
+            captured["timeout"] = timeout
+            return FakeResponse()
+
+    monkeypatch.setattr(public_config_module.urllib.request, "build_opener", lambda *_args, **_kwargs: FakeOpener())
+
+    result = public_config_module._probe_llm_http(provider, profile, "token-plan-secret")
+
+    assert result["ok"] is True
+    assert captured["url"] == "https://token-plan-cn.xiaomimimo.com/v1/chat/completions"
+    assert captured["payload"]["model"] == "mimo-v2.5"
+    assert captured["payload"]["temperature"] == profile.temperature
+    assert captured["headers"]["Authorization"] == "Bearer token-plan-secret"
+
+
 def test_config_workspace_test_llm_rejects_metadata_service_base_url(monkeypatch):
     public_config = copy.deepcopy(load_public_config())
     target = public_config["llm"]["profiles"]["primary"]
@@ -14042,6 +14142,8 @@ def test_evolution_workspace_snapshot_combines_dashboard_payloads(tmp_path, monk
     monkeypatch.setattr(supervised_control_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(self_evolution_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(self_evolution_control_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(evolution_routes, "get_latest_self_evolution_run", lambda: None)
+    monkeypatch.setattr(evolution_routes, "list_self_evolution_transactions", lambda: [])
     monkeypatch.setattr(
         evolution_service,
         "get_workbench_contract",
@@ -14484,6 +14586,7 @@ def test_supervised_worktree_run_route_requires_real_llm_cost_confirmation(tmp_p
 
 def test_chat_review_routes_list_and_approve_candidate(tmp_path, monkeypatch):
     monkeypatch.setattr(chat_review_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(evolution_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(supervised_control_service, "PROJECT_ROOT", tmp_path)
 
     capture_service = ChatDatasetCaptureService(project_root=tmp_path)
@@ -14566,6 +14669,19 @@ def test_chat_review_routes_list_and_approve_candidate(tmp_path, monkeypatch):
     assert reviewed_queue_payload["lifecycle"]["rawChatDirectTrainingAllowed"] is False
     assert reviewed_queue_payload["lifecycle"]["negativeTarget"] == "chat_negative_multiturn"
     assert "gym_candidate_case" in reviewed_queue_payload["lifecycle"]["allowedDownstreamUses"]
+
+    dataset_rows = list_dataset_status(tmp_path)
+    dataset_entry = next(
+        item for item in dataset_rows if item["name"] == "chat_reviewed_multiturn"
+    )
+    assert dataset_entry["available"] is True
+    assert dataset_entry["review_required"] is True
+    assert dataset_entry["source_track"] == "dialogue"
+    assert dataset_entry["holdout_allowed"] is False
+    assert dataset_entry["raw_chat_direct_training_allowed"] is False
+    assert dataset_entry["visibility"] == "hidden"
+    assert dataset_entry["workbench_visible"] is False
+    assert "gym_candidate_case" in dataset_entry["allowed_downstream_uses"]
 
 
 def test_chat_review_bulk_delete_discards_pending_candidates(tmp_path, monkeypatch):
@@ -14765,10 +14881,12 @@ def test_start_supervised_run_from_dataset_exposes_active_snapshot_and_sse(tmp_p
     assert payload["datasetName"] == "custom_prompt_jsonl"
     assert payload["bundleName"] == "custom_prompt_jsonl_v1"
     assert payload["keepWorktree"] is True
+    assert payload["agentBindings"]["baseline"]["role"] == "baseline"
+    assert payload["agentBindings"]["candidate"]["role"] == "candidate"
     assert payload["agentBindings"]["baseline"]["dialogueModelId"]
-    assert payload["agentBindings"]["baseline"]["dialogueModelId"] == payload["agentBindings"]["baseline"]["llmBindings"]["dialogue"]["modelId"]
     assert payload["agentBindings"]["candidate"]["dialogueModelId"]
-    assert payload["agentBindings"]["candidate"]["dialogueModelId"] == payload["agentBindings"]["candidate"]["llmBindings"]["dialogue"]["modelId"]
+    assert payload["agentBindings"]["baseline"]["llmBindings"]["dialogue"]["modelId"] == payload["agentBindings"]["baseline"]["dialogueModelId"]
+    assert payload["agentBindings"]["candidate"]["llmBindings"]["dialogue"]["modelId"] == payload["agentBindings"]["candidate"]["dialogueModelId"]
 
     assert active_response.status_code == 200
     assert active_response.json()["runId"] == payload["runId"]
@@ -14810,6 +14928,7 @@ def test_start_supervised_run_from_dataset_exposes_active_snapshot_and_sse(tmp_p
     )
     progress_snapshot = supervised_control_service.get_supervised_run_snapshot(payload["runId"])
     assert progress_snapshot["currentAgentBinding"]["agentId"] == payload["agentBindings"]["baseline"]["agentId"]
+    assert progress_snapshot["eventTail"][-1]["agentBinding"]["role"] == "baseline"
     assert progress_snapshot["eventTail"][-1]["agentBinding"]["dialogueModelId"] == payload["agentBindings"]["baseline"]["dialogueModelId"]
 
     state_path = tmp_path / "workspace" / "supervised_evolution" / "workbench_state.json"

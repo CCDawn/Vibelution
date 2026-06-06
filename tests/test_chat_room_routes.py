@@ -27,7 +27,8 @@ def test_chat_room_purposes_api_exposes_conversation_purpose_modes():
 
     assert response.status_code == 200
     purposes = {item["id"]: item for item in response.json()}
-    assert list(purposes) == ["chat", "discussion", "meeting"]
+    assert list(purposes)[:3] == ["chat", "discussion", "meeting"]
+    assert {"medical_triage", "research_coordination", "self_evolution", "supervised_evolution"}.issubset(purposes)
     assert purposes["chat"]["label"] == "Chat"
     assert "natural replies" in purposes["chat"]["description"]
 
@@ -97,7 +98,7 @@ def test_chat_room_api_create_and_run_round(tmp_path, monkeypatch):
     room = create_response.json()
     assert room["title"] == "项目群聊"
     assert room["purpose"] == "chat"
-    assert [item["id"] for item in room["availablePurposes"]] == ["chat", "discussion", "meeting"]
+    assert [item["id"] for item in room["availablePurposes"]][:3] == ["chat", "discussion", "meeting"]
     assert len(room["participants"]) == 2
 
     round_response = client.post(
