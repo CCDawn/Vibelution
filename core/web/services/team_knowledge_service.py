@@ -1936,13 +1936,87 @@ def knowledge_permission_audit(*, agent_id: str = "") -> dict[str, Any]:
 def team_knowledge_memory_section_summary() -> dict[str, Any]:
     """Return a lightweight summary for /api/memory/overview."""
 
-    overview = list_knowledge_overview(internal=True)
+    overview = _lightweight_knowledge_memory_summary()
     return {
         "knowledgeBaseCount": int((overview.get("summary") or {}).get("knowledgeBaseCount") or 0),
         "pendingProposalCount": int((overview.get("summary") or {}).get("pendingProposalCount") or 0),
         "itemCount": int((overview.get("summary") or {}).get("itemCount") or 0),
         "sourceArtifactCount": int((overview.get("summary") or {}).get("sourceArtifactCount") or 0),
         "updatedAt": str(overview.get("updatedAt") or ""),
+    }
+
+
+def _lightweight_knowledge_memory_summary() -> dict[str, Any]:
+    """Count knowledge artifacts without expanding owners, permissions, or proposal payloads."""
+
+    knowledge_base_count = 0
+    pending_proposal_count = 0
+    item_count = 0
+    source_artifact_count = 0
+    updated_at = ""
+    for root in _iter_existing_knowledge_roots():
+        bases_state = _load_knowledge_bases_state_from_path(root / "knowledge_bases.json")
+        base_ids = {
+            str(item.get("knowledgeBaseId") or "").strip()
+            for item in list(bases_state.get("knowledgeBases") or [])
+            if isinstance(item, dict) and str(item.get("knowledgeBaseId") or "").strip()
+        }
+        knowledge_base_count += len(base_ids)
+        updated_at = max(updated_at, str(bases_state.get("updatedAt") or ""))
+        if not base_ids:
+            continue
+        for item in _read_jsonl(root / "items.jsonl"):
+            if str(item.get("knowledgeBaseId") or "") in base_ids:
+                item_count += 1
+                updated_at = max(updated_at, str(item.get("updatedAt") or item.get("createdAt") or ""))
+        for item in _read_jsonl(root / "source_artifacts.jsonl"):
+            if str(item.get("knowledgeBaseId") or "") in base_ids:
+                source_artifact_count += 1
+                updated_at = max(updated_at, str(item.get("updatedAt") or item.get("createdAt") or ""))
+        for item in _read_jsonl(root / "refinement_proposals.jsonl"):
+            if str(item.get("targetKnowledgeBaseId") or "") not in base_ids:
+                continue
+            updated_at = max(updated_at, str(item.get("updatedAt") or item.get("createdAt") or ""))
+            if str(item.get("status") or "") == "pending":
+                pending_proposal_count += 1
+
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "summary": {
+            "knowledgeBaseCount": knowledge_base_count,
+            "pendingProposalCount": pending_proposal_count,
+            "itemCount": item_count,
+            "sourceArtifactCount": source_artifact_count,
+        },
+        "updatedAt": updated_at or utc_now_iso(),
+    }
+
+
+def _iter_existing_knowledge_roots() -> list[Path]:
+    workspace_root = _project_root() / "workspace"
+    roots: list[Path] = []
+    for parent in (workspace_root / "teams", workspace_root / "agents"):
+        if not parent.exists():
+            continue
+        for path in sorted(parent.glob("*/knowledge/knowledge_bases.json")):
+            roots.append(path.parent)
+    return roots
+
+
+def _load_knowledge_bases_state_from_path(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {"schemaVersion": SCHEMA_VERSION, "updatedAt": "", "knowledgeBases": []}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {"schemaVersion": SCHEMA_VERSION, "updatedAt": "", "knowledgeBases": []}
+    if not isinstance(payload, dict):
+        return {"schemaVersion": SCHEMA_VERSION, "updatedAt": "", "knowledgeBases": []}
+    knowledge_bases = [item for item in list(payload.get("knowledgeBases") or []) if isinstance(item, dict)]
+    return {
+        "schemaVersion": int(payload.get("schemaVersion") or SCHEMA_VERSION),
+        "updatedAt": str(payload.get("updatedAt") or ""),
+        "knowledgeBases": knowledge_bases,
     }
 
 

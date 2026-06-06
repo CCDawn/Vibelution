@@ -374,6 +374,154 @@ def test_runtime_scene_issue_state_excludes_control_signals_from_clusters(tmp_pa
     assert "主问题簇" not in detail["packageDiagnosis"]["agentNextStep"]
 
 
+def test_runtime_scene_issue_state_treats_pagehide_get_network_failures_as_control(tmp_path, monkeypatch):
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+    scene_id = "scene-diagnosis-pagehide-fetch"
+    _seed_scene(
+        tmp_path,
+        scene_id,
+        [
+            {
+                "runtime_scene_id": scene_id,
+                "ts": "2026-05-18T12:00:01.100Z",
+                "seq": 1,
+                "component": "browser_page",
+                "phase": "lifecycle",
+                "event_code": "browser.page.hide",
+                "level": "info",
+                "outcome": "observed",
+                "message": "Page hide at /supervised-evolution",
+                "fields": {
+                    "pageInstanceId": "page-a",
+                    "pathname": "/supervised-evolution",
+                },
+                "raw_refs": [{"path": "raw/browser.telemetry.log", "tail_lines": 80}],
+            },
+            {
+                "runtime_scene_id": scene_id,
+                "ts": "2026-05-18T12:00:01.150Z",
+                "seq": 2,
+                "component": "browser_page",
+                "phase": "api",
+                "event_code": "browser.api.network_error",
+                "level": "error",
+                "outcome": "observed",
+                "message": "GET /api/runtime/summary failed",
+                "fields": {
+                    "pageInstanceId": "page-a",
+                    "endpoint": "/api/runtime/summary",
+                    "method": "GET",
+                    "failureKind": "network",
+                    "failureMessage": "Failed to fetch",
+                },
+                "raw_refs": [{"path": "raw/browser.telemetry.log", "tail_lines": 80}],
+            },
+            {
+                "runtime_scene_id": scene_id,
+                "ts": "2026-05-18T12:00:01.150Z",
+                "seq": 3,
+                "component": "browser_page",
+                "phase": "api",
+                "event_code": "browser.api.network_error",
+                "level": "error",
+                "outcome": "observed",
+                "message": "GET /api/evolution/workspace-snapshot failed",
+                "fields": {
+                    "pageInstanceId": "page-a",
+                    "endpoint": "/api/evolution/workspace-snapshot",
+                    "method": "GET",
+                    "failureKind": "network",
+                    "failureMessage": "Failed to fetch",
+                },
+                "raw_refs": [{"path": "raw/browser.telemetry.log", "tail_lines": 80}],
+            },
+            {
+                "runtime_scene_id": scene_id,
+                "ts": "2026-05-18T12:00:02.200Z",
+                "seq": 4,
+                "component": "browser_page",
+                "phase": "page",
+                "event_code": "browser.page.snapshot",
+                "level": "info",
+                "outcome": "observed",
+                "message": "Page snapshot for /supervised-evolution",
+                "fields": {
+                    "pageInstanceId": "page-b",
+                    "pathname": "/supervised-evolution",
+                    "readyState": "complete",
+                    "mainTextLength": 4551,
+                },
+                "raw_refs": [{"path": "raw/browser.telemetry.log", "tail_lines": 80}],
+            },
+        ],
+        status="running",
+    )
+
+    detail = runtime_scene_service.get_runtime_scene_detail(scene_id)
+
+    diagnosis = detail["packageDiagnosis"]
+    issue_state = diagnosis["issueState"]
+    assert diagnosis["severity"] == "info"
+    assert issue_state["activeErrorCount"] == 0
+    assert issue_state["activeClusterCount"] == 0
+    assert issue_state["controlSignalCount"] == 2
+    assert issue_state["activeClusters"] == []
+    assert "控制类信号" in diagnosis["userSummary"]
+    assert "browser.api.network_error" not in diagnosis["agentNextStep"]
+
+
+def test_runtime_scene_issue_state_keeps_foreground_post_network_failures_active(tmp_path, monkeypatch):
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+    scene_id = "scene-diagnosis-post-network"
+    _seed_scene(
+        tmp_path,
+        scene_id,
+        [
+            {
+                "runtime_scene_id": scene_id,
+                "ts": "2026-05-18T12:00:01.100Z",
+                "seq": 1,
+                "component": "browser_page",
+                "phase": "lifecycle",
+                "event_code": "browser.page.hide",
+                "level": "info",
+                "outcome": "observed",
+                "message": "Page hide at /supervised-evolution",
+                "fields": {"pageInstanceId": "page-a"},
+                "raw_refs": [{"path": "raw/browser.telemetry.log", "tail_lines": 80}],
+            },
+            {
+                "runtime_scene_id": scene_id,
+                "ts": "2026-05-18T12:00:01.150Z",
+                "seq": 2,
+                "component": "browser_page",
+                "phase": "api",
+                "event_code": "browser.api.network_error",
+                "level": "error",
+                "outcome": "observed",
+                "message": "POST /api/evolution/runs failed",
+                "fields": {
+                    "pageInstanceId": "page-a",
+                    "endpoint": "/api/evolution/runs",
+                    "method": "POST",
+                    "failureKind": "network",
+                    "failureMessage": "Failed to fetch",
+                },
+                "raw_refs": [{"path": "raw/browser.telemetry.log", "tail_lines": 80}],
+            },
+        ],
+        status="running",
+    )
+
+    detail = runtime_scene_service.get_runtime_scene_detail(scene_id)
+
+    issue_state = detail["packageDiagnosis"]["issueState"]
+    assert issue_state["activeErrorCount"] == 1
+    assert issue_state["activeClusterCount"] == 1
+    assert issue_state["controlSignalCount"] == 0
+    assert issue_state["firstActiveCluster"]["eventCode"] == "browser.api.network_error"
+
+
 def test_runtime_scene_issue_state_tracks_tool_registry_policy_signals(tmp_path, monkeypatch):
     monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
     _seed_scene(
@@ -417,6 +565,126 @@ def test_runtime_scene_issue_state_tracks_tool_registry_policy_signals(tmp_path,
     assert "testPolicy" in diagnosis["agentNextStep"]
     assert "不要按业务故障继续追恢复链" in diagnosis["agentNextStep"]
     assert "issueState.activeClusterCount" not in diagnosis["agentNextStep"]
+
+
+def test_runtime_scene_issue_state_treats_resource_lease_conflict_as_policy(tmp_path, monkeypatch):
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+    scene_id = "scene-diagnosis-lease-conflict"
+    _seed_scene(
+        tmp_path,
+        scene_id,
+        [
+            {
+                "runtime_scene_id": scene_id,
+                "ts": "2026-05-18T12:00:01.000Z",
+                "seq": 1,
+                "component": "backend",
+                "phase": "api",
+                "event_code": "backend.api.request",
+                "level": "warning",
+                "outcome": "client_error",
+                "message": "POST /api/sessions/{session_id}/messages -> 409",
+                "fields": {
+                    "method": "POST",
+                    "path": "/api/sessions/session-a/messages",
+                    "pathTemplate": "/api/sessions/{session_id}/messages",
+                    "statusCode": 409,
+                },
+                "raw_refs": [{"path": "raw/backend.api.log", "tail_lines": 80}],
+            },
+            {
+                "runtime_scene_id": scene_id,
+                "ts": "2026-05-18T12:00:01.500Z",
+                "seq": 2,
+                "component": "browser_page",
+                "phase": "api",
+                "event_code": "browser.api.request_failed",
+                "level": "error",
+                "outcome": "observed",
+                "message": "POST /api/sessions/session-a/messages failed (409)",
+                "fields": {
+                    "endpoint": "/api/sessions/session-a/messages",
+                    "method": "POST",
+                    "status": 409,
+                    "failureKind": "http",
+                    "failureMessage": (
+                        "当前资源正在被另一条运行占用，请等待它收束后再继续。"
+                        "Resource lease conflict on worktree_write with web-supervised-run-1."
+                    ),
+                },
+                "raw_refs": [{"path": "raw/browser.telemetry.log", "tail_lines": 80}],
+            },
+            {
+                "runtime_scene_id": scene_id,
+                "ts": "2026-05-18T12:00:01.700Z",
+                "seq": 3,
+                "component": "browser_page",
+                "phase": "chat_submit",
+                "event_code": "browser.chat_submit.request_failed",
+                "level": "error",
+                "outcome": "observed",
+                "message": "Direct chat submit request failed before the backend accepted the turn.",
+                "fields": {
+                    "sessionId": "session-a",
+                    "errorMessage": "Resource lease conflict on worktree_write with web-supervised-run-1.",
+                },
+                "raw_refs": [{"path": "raw/browser.telemetry.log", "tail_lines": 80}],
+            },
+        ],
+        status="running",
+    )
+
+    detail = runtime_scene_service.get_runtime_scene_detail(scene_id)
+
+    diagnosis = detail["packageDiagnosis"]
+    issue_state = diagnosis["issueState"]
+    assert diagnosis["severity"] == "warning"
+    assert issue_state["activeClusterCount"] == 0
+    assert issue_state["policySignalCount"] == 3
+    assert issue_state["policyClusterCount"] == 3
+    assert diagnosis["firstSignal"]["eventCode"] in {"backend.api.request", "browser.api.request_failed"}
+    assert issue_state["firstPolicyCluster"]["eventCode"] in {"backend.api.request", "browser.api.request_failed"}
+    assert "控制/策略问题簇" in diagnosis["userSummary"]
+    assert "issueState.policyClusterCount" in diagnosis["agentNextStep"]
+
+
+def test_runtime_scene_issue_state_keeps_unknown_http_409_active(tmp_path, monkeypatch):
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+    scene_id = "scene-diagnosis-unknown-409"
+    _seed_scene(
+        tmp_path,
+        scene_id,
+        [
+            {
+                "runtime_scene_id": scene_id,
+                "ts": "2026-05-18T12:00:01Z",
+                "seq": 1,
+                "component": "browser_page",
+                "phase": "api",
+                "event_code": "browser.api.request_failed",
+                "level": "error",
+                "outcome": "observed",
+                "message": "POST /api/sessions/session-a/messages failed (409)",
+                "fields": {
+                    "endpoint": "/api/sessions/session-a/messages",
+                    "method": "POST",
+                    "status": 409,
+                    "failureKind": "http",
+                    "failureMessage": "Unknown conflict while saving the turn.",
+                },
+                "raw_refs": [{"path": "raw/browser.telemetry.log", "tail_lines": 80}],
+            },
+        ],
+        status="running",
+    )
+
+    detail = runtime_scene_service.get_runtime_scene_detail(scene_id)
+
+    issue_state = detail["packageDiagnosis"]["issueState"]
+    assert issue_state["activeErrorCount"] == 1
+    assert issue_state["activeClusterCount"] == 1
+    assert issue_state["policySignalCount"] == 0
+    assert issue_state["firstActiveCluster"]["eventCode"] == "browser.api.request_failed"
 
 
 def test_runtime_scene_diagnosis_keeps_memory_status_mirror_out_of_active_clusters(tmp_path, monkeypatch):

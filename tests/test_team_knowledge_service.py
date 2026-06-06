@@ -233,6 +233,60 @@ def test_empty_actor_cannot_create_or_read_governed_knowledge_service(knowledge_
     assert internal_health["summary"]["knowledgeBaseCount"] == 1
 
 
+def test_team_knowledge_memory_section_summary_uses_lightweight_disk_counts(tmp_path, monkeypatch):
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(team_knowledge_service, "PROJECT_ROOT", tmp_path)
+    lead = agent_directory_service.create_agent_instance(display_name="Lead Agent")
+    team = team_service.create_team(name="Knowledge Team", members=[{"agentId": lead["agentId"], "role": "lead"}])
+    base = team_knowledge_service.create_knowledge_base(
+        team["teamId"],
+        name="Shared Decisions",
+        actor_agent_id=lead["agentId"],
+    )
+    source = team_knowledge_service.create_source_artifact(
+        base["knowledgeBaseId"],
+        source_type="manual_user_entry",
+        source_ref={"note": "summary source"},
+        title="Summary source",
+        actor_agent_id=lead["agentId"],
+    )
+    proposal = team_knowledge_service.create_refinement_proposal(
+        base["knowledgeBaseId"],
+        source_artifact_ids=[source["sourceArtifactId"]],
+        proposed_by_agent_id=lead["agentId"],
+        title="Pending summary proposal",
+        content="Pending proposal should be counted by the lightweight summary.",
+    )
+    team_knowledge_service.review_refinement_proposal(
+        base["knowledgeBaseId"],
+        proposal["proposalId"],
+        status="approved",
+        reviewed_by_agent_id=lead["agentId"],
+    )
+    team_knowledge_service.create_refinement_proposal(
+        base["knowledgeBaseId"],
+        source_artifact_ids=[],
+        proposed_by_agent_id=lead["agentId"],
+        title="Still pending",
+        content="This proposal remains pending.",
+    )
+
+    def fail_full_overview(**_kwargs):
+        raise AssertionError("memory summary must not call full list_knowledge_overview")
+
+    monkeypatch.setattr(team_knowledge_service, "list_knowledge_overview", fail_full_overview)
+
+    summary = team_knowledge_service.team_knowledge_memory_section_summary()
+
+    assert summary["knowledgeBaseCount"] == 1
+    assert summary["pendingProposalCount"] == 1
+    assert summary["itemCount"] == 1
+    assert summary["sourceArtifactCount"] == 1
+    assert summary["updatedAt"]
+
+
 def test_non_member_cannot_submit_proposal(knowledge_env):
     with pytest.raises(team_knowledge_service.TeamKnowledgePermissionError):
         team_knowledge_service.create_refinement_proposal(

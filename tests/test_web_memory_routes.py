@@ -731,3 +731,33 @@ def test_memory_overview_slow_event_includes_section_timings(tmp_path, monkeypat
         {"sectionId": "project-memory", "durationMs": 12.3, "itemCount": 1},
         {"sectionId": "runtime-memory", "durationMs": 45.6, "itemCount": 1},
     ]
+
+
+def test_memory_overview_perf_event_records_single_recovery_after_slow(tmp_path, monkeypatch):
+    recorded_events: list[dict] = []
+
+    def fake_record_runtime_scene_event(component, phase, event_code, **kwargs):
+        recorded_events.append(
+            {
+                "component": component,
+                "phase": phase,
+                "eventCode": event_code,
+                **kwargs,
+            }
+        )
+        return {"accepted": True, "runtimeSceneId": "scene-memory"}
+
+    monkeypatch.setattr(runtime_scene_service, "record_runtime_scene_event", fake_record_runtime_scene_event)
+    monkeypatch.setattr(memory_service, "MEMORY_OVERVIEW_WAS_SLOW", False)
+
+    payload = {"summary": {"itemCount": 0}, "sections": []}
+    memory_service._record_memory_overview_perf_event(tmp_path, payload, duration_ms=900, section_timings=[])
+    memory_service._record_memory_overview_perf_event(tmp_path, payload, duration_ms=120, section_timings=[])
+    memory_service._record_memory_overview_perf_event(tmp_path, payload, duration_ms=110, section_timings=[])
+
+    assert [event["eventCode"] for event in recorded_events] == [
+        "memory.overview.slow",
+        "memory.overview.recovered",
+    ]
+    assert recorded_events[-1]["level"] == "info"
+    assert recorded_events[-1]["outcome"] == "recovered"

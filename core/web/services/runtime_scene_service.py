@@ -120,6 +120,7 @@ TIMELINE_DIAGNOSTIC_ONLY_EVENT_CODES = {
     "conversation.index.filtered_archived_team_rooms",
     "runtime.snapshot.reconciled",
     "session.agent_missing.hidden_from_index",
+    "session.agent_missing.hidden_from_index.batch",
     "session.detail_snapshot.published",
     "session.detail_snapshot.throttled",
     "session.list.loaded",
@@ -2820,6 +2821,8 @@ def _runtime_scene_first_key_event(lifecycle: list[dict], timeline: list[dict]) 
 def _runtime_scene_issue_state(events: list[dict]) -> dict[str, Any]:
     startup_context = _runtime_scene_startup_failure_context(events)
     wrapped_failure_context = _runtime_scene_wrapped_failure_context(events)
+    browser_lifecycle_context = _runtime_scene_browser_lifecycle_context(events)
+    resource_lease_context = _runtime_scene_resource_lease_conflict_context(events)
     signals: list[dict[str, Any]] = []
     for index, event in enumerate(events):
         severity = _runtime_scene_event_severity(event)
@@ -2829,6 +2832,8 @@ def _runtime_scene_issue_state(events: list[dict]) -> dict[str, Any]:
             event,
             startup_context=startup_context,
             wrapped_failure_context=wrapped_failure_context,
+            browser_lifecycle_context=browser_lifecycle_context,
+            resource_lease_context=resource_lease_context,
         )
         diagnosis_event = _runtime_scene_diagnosis_event(event, startup_context=startup_context)
         signals.append(
@@ -3093,6 +3098,204 @@ def _runtime_scene_is_conversation_failure_wrapper(
     return bool(context.get("image2Failed")) and "image2" in diagnostic_text
 
 
+BROWSER_UNLOAD_NETWORK_FAILURE_WINDOW_SECONDS = 2.5
+RESOURCE_LEASE_CONFLICT_MATCH_WINDOW_SECONDS = 5.0
+RESOURCE_LEASE_TOKENS = {
+    "readonly_chat",
+    "worktree_write",
+    "memory_write",
+    "policy_write",
+    "evaluation",
+    "evolution_transaction",
+}
+
+
+def _runtime_scene_browser_lifecycle_context(events: list[dict]) -> dict[str, Any]:
+    pagehide_by_instance: dict[str, list[float]] = {}
+    for event in events:
+        if str(event.get("eventCode") or "").strip() != "browser.page.hide":
+            continue
+        fields = event.get("fields") if isinstance(event.get("fields"), dict) else {}
+        page_instance_id = str(fields.get("pageInstanceId") or "").strip()
+        if not page_instance_id:
+            continue
+        timestamp = _runtime_scene_event_epoch_seconds(event)
+        if timestamp is None:
+            continue
+        pagehide_by_instance.setdefault(page_instance_id, []).append(timestamp)
+    return {"pagehideByInstance": pagehide_by_instance}
+
+
+def _runtime_scene_is_browser_unload_network_cancellation(
+    event: dict[str, Any],
+    *,
+    browser_lifecycle_context: dict[str, Any] | None = None,
+) -> bool:
+    event_code = str(event.get("eventCode") or "").strip()
+    if event_code != "browser.api.network_error":
+        return False
+    if str(event.get("component") or "").strip() != "browser_page":
+        return False
+    fields = event.get("fields") if isinstance(event.get("fields"), dict) else {}
+    if str(fields.get("failureKind") or "").strip().lower() != "network":
+        return False
+    method = str(fields.get("method") or "").strip().upper()
+    if method != "GET":
+        return False
+    page_instance_id = str(fields.get("pageInstanceId") or "").strip()
+    if not page_instance_id:
+        return False
+    event_timestamp = _runtime_scene_event_epoch_seconds(event)
+    if event_timestamp is None:
+        return False
+    context = browser_lifecycle_context if isinstance(browser_lifecycle_context, dict) else {}
+    pagehide_by_instance = context.get("pagehideByInstance") if isinstance(context.get("pagehideByInstance"), dict) else {}
+    pagehide_timestamps = pagehide_by_instance.get(page_instance_id)
+    if not isinstance(pagehide_timestamps, list):
+        return False
+    for pagehide_timestamp in pagehide_timestamps:
+        if not isinstance(pagehide_timestamp, (int, float)):
+            continue
+        if abs(event_timestamp - float(pagehide_timestamp)) <= BROWSER_UNLOAD_NETWORK_FAILURE_WINDOW_SECONDS:
+            return True
+    return False
+
+
+def _runtime_scene_resource_lease_conflict_context(events: list[dict]) -> dict[str, Any]:
+    conflicts: list[dict[str, Any]] = []
+    for event in events:
+        if not _runtime_scene_event_has_resource_lease_conflict(event):
+            continue
+        timestamp = _runtime_scene_event_epoch_seconds(event)
+        conflicts.append(
+            {
+                "timestamp": timestamp,
+                "endpoints": _runtime_scene_event_endpoint_candidates(event),
+                "sessionId": _runtime_scene_event_session_id(event),
+            }
+        )
+    return {"conflicts": conflicts}
+
+
+def _runtime_scene_is_expected_resource_lease_conflict(
+    event: dict[str, Any],
+    *,
+    resource_lease_context: dict[str, Any] | None = None,
+) -> bool:
+    if _runtime_scene_event_has_resource_lease_conflict(event):
+        return True
+
+    if str(event.get("component") or "").strip().lower() != "backend":
+        return False
+    if str(event.get("eventCode") or "").strip() != "backend.api.request":
+        return False
+    if _runtime_scene_event_status_code(event) != 409:
+        return False
+
+    fields = event.get("fields") if isinstance(event.get("fields"), dict) else {}
+    method = str(fields.get("method") or "").strip().upper()
+    if method and method != "POST":
+        return False
+
+    context = resource_lease_context if isinstance(resource_lease_context, dict) else {}
+    conflicts = context.get("conflicts") if isinstance(context.get("conflicts"), list) else []
+    if not conflicts:
+        return False
+
+    event_timestamp = _runtime_scene_event_epoch_seconds(event)
+    event_endpoints = set(_runtime_scene_event_endpoint_candidates(event))
+    event_session_id = _runtime_scene_event_session_id(event)
+    for conflict in conflicts:
+        if not isinstance(conflict, dict):
+            continue
+        conflict_timestamp = conflict.get("timestamp")
+        if (
+            event_timestamp is not None
+            and isinstance(conflict_timestamp, (int, float))
+            and abs(event_timestamp - float(conflict_timestamp)) > RESOURCE_LEASE_CONFLICT_MATCH_WINDOW_SECONDS
+        ):
+            continue
+        conflict_endpoints = {
+            str(item or "").strip()
+            for item in list(conflict.get("endpoints") or [])
+            if str(item or "").strip()
+        }
+        if event_endpoints and conflict_endpoints and event_endpoints.intersection(conflict_endpoints):
+            return True
+        conflict_session_id = str(conflict.get("sessionId") or "").strip()
+        if event_session_id and conflict_session_id and event_session_id == conflict_session_id:
+            return True
+        if conflict_session_id and any(conflict_session_id in endpoint for endpoint in event_endpoints):
+            return True
+    return False
+
+
+def _runtime_scene_event_has_resource_lease_conflict(event: dict[str, Any]) -> bool:
+    text = _runtime_scene_resource_lease_text(event)
+    if not text:
+        return False
+    lowered = text.lower()
+    if "resource lease conflict on" in lowered:
+        return True
+    if "资源正在被另一条运行占用" not in text:
+        return False
+    return any(token in lowered for token in RESOURCE_LEASE_TOKENS)
+
+
+def _runtime_scene_resource_lease_text(event: dict[str, Any]) -> str:
+    fields = event.get("fields") if isinstance(event.get("fields"), dict) else {}
+    return " ".join(
+        str(value or "")
+        for value in (
+            event.get("message"),
+            fields.get("message"),
+            fields.get("reason"),
+            fields.get("detail"),
+            fields.get("error"),
+            fields.get("errorMessage"),
+            fields.get("exceptionMessage"),
+            fields.get("failureMessage"),
+        )
+    ).strip()
+
+
+def _runtime_scene_event_endpoint_candidates(event: dict[str, Any]) -> list[str]:
+    fields = event.get("fields") if isinstance(event.get("fields"), dict) else {}
+    endpoints: list[str] = []
+    seen: set[str] = set()
+    for key in ("endpoint", "path", "pathTemplate"):
+        endpoint = _normalize_endpoint_path(fields.get(key))
+        if not endpoint or endpoint in seen:
+            continue
+        seen.add(endpoint)
+        endpoints.append(endpoint)
+    return endpoints
+
+
+def _runtime_scene_event_session_id(event: dict[str, Any]) -> str:
+    fields = event.get("fields") if isinstance(event.get("fields"), dict) else {}
+    explicit = str(fields.get("sessionId") or "").strip()
+    if explicit:
+        return explicit
+    for endpoint in _runtime_scene_event_endpoint_candidates(event):
+        parts = endpoint.strip("/").split("/")
+        for index, part in enumerate(parts[:-1]):
+            if part == "sessions" and parts[index + 1]:
+                return parts[index + 1]
+    return ""
+
+
+def _runtime_scene_event_epoch_seconds(event: dict[str, Any]) -> float | None:
+    timestamp = str(event.get("ts") or event.get("timestamp") or "").strip()
+    if not timestamp:
+        return None
+    try:
+        normalized = timestamp.replace("Z", "+00:00")
+        return datetime.fromisoformat(normalized).timestamp()
+    except ValueError:
+        return None
+
+
 def _runtime_scene_issue_cluster_hint(cluster: dict[str, Any] | None) -> str:
     if not isinstance(cluster, dict):
         return ""
@@ -3115,6 +3318,8 @@ def _runtime_scene_signal_kind(
     *,
     startup_context: dict[str, Any] | None = None,
     wrapped_failure_context: dict[str, Any] | None = None,
+    browser_lifecycle_context: dict[str, Any] | None = None,
+    resource_lease_context: dict[str, Any] | None = None,
 ) -> str:
     fields = event.get("fields") if isinstance(event.get("fields"), dict) else {}
     if str(event.get("eventCode") or "") == "conversation.next_state_signal.recorded":
@@ -3125,6 +3330,10 @@ def _runtime_scene_signal_kind(
         return "control"
     if _runtime_scene_is_conversation_failure_wrapper(event, wrapped_failure_context=wrapped_failure_context):
         return "control"
+    if _runtime_scene_is_browser_unload_network_cancellation(event, browser_lifecycle_context=browser_lifecycle_context):
+        return "control"
+    if _runtime_scene_is_expected_resource_lease_conflict(event, resource_lease_context=resource_lease_context):
+        return "policy"
     if _runtime_scene_is_expected_runtime_manager_block(event):
         return "policy"
     if _runtime_scene_is_expected_work_run_manager_block(event):

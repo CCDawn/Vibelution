@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.10.37 - 2026-06-06
+
+- Treated browser page-hide adjacent GET network cancellations as lifecycle control signals in runtime-scene diagnosis, so route refresh noise no longer appears as an active Workbench issue.
+- Treated expected `worktree_write` resource lease conflicts as policy signals, so a chat submit blocked during an active supervised run no longer looks like a failed supervised evolution run.
+- Kept foreground POST network failures active, preserving real supervised-evolution run/start failures as actionable diagnostics.
+- Replaced Team Knowledge memory overview aggregation with lightweight disk counts, reducing the Team Knowledge section from minute-scale scans to millisecond-scale summary reads.
+- Added `memory.overview.recovered` evidence after a slow memory overview returns below threshold, so old slow warnings can be closed in runtime-scene diagnosis.
+- Added regression coverage for page-hide cancellation, foreground network failure, expected lease-conflict policy classification, unknown 409 handling, Team Knowledge summary counts, and memory overview recovery logging.
+
+## 0.10.36 - 2026-06-06
+
+- Added compact `run_summary` metadata to supervised harness reports and session reports, including case, role, duration, transaction, validation, logs, process, and Agent model context.
+- Added `supervised_run.summary.completed` lifecycle evidence so completed supervised runs can be understood from runtime-scene logs without opening the full decision JSON first.
+- Surfaced baseline/candidate harness summaries in supervised case diagnostics and the Web result/proposal details, with quiet fallback for older runs that do not contain `run_summary`.
+
 ## 0.10.35 - 2026-06-06
 
 - Moved the Launcher UI/API onto an independent control backend and port, so opening Launcher no longer auto-starts or focuses the Workbench.
