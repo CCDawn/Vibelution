@@ -21,6 +21,7 @@ from core.chat.chat_task_types import trim_lines
 from core.llm.protocol_resolver import resolve_model_protocol
 from config.public_config import (
     CONFIG_PATH,
+    UNCONFIGURED_MODEL_REF,
     _delete_user_env_var,
     _set_user_env_var,
     add_llm_model,
@@ -529,7 +530,7 @@ def _image_input_capability_result_details(result: dict[str, Any]) -> dict[str, 
 
 def _model_probe_route_id(model_id: str) -> str:
     safe = "".join(ch if ch.isalnum() else "_" for ch in str(model_id or "").strip().lower()).strip("_")
-    return f"__model_probe_{safe or 'model'}"
+    return f"__capability_probe_{safe or 'model'}"
 
 
 def _model_option_provider_id(model_id: str) -> str:
@@ -616,6 +617,31 @@ def _model_option_test_target(
     }
 
 
+def _profile_test_target(
+    public_config: dict[str, Any],
+    profile_id: str,
+    draft_meta: dict | None = None,
+) -> dict[str, Any]:
+    normalized_profile_id = str(profile_id or "").strip() or "primary"
+    effective = build_effective_config(public_config)
+    profile = effective.llm.get_profile(profile_id=normalized_profile_id)
+    provider = effective.llm.get_provider(profile.provider_id)
+    if provider.requires_api_key:
+        api_key, api_key_source = _resolve_model_option_api_key(provider, profile, draft_meta)
+    else:
+        api_key = None
+        api_key_source = "not-required"
+    model_id = str(getattr(profile, "model_ref", "") or "").strip() or normalized_profile_id
+    return {
+        "model_id": model_id,
+        "route_id": normalized_profile_id,
+        "provider": provider,
+        "profile": profile,
+        "api_key": api_key,
+        "api_key_source": api_key_source,
+    }
+
+
 def _apply_image_input_capability_result_to_config(
     public_config: dict[str, Any],
     option: dict[str, Any],
@@ -637,6 +663,23 @@ def _apply_image_input_capability_result_to_config(
         entry["capability_error"] = details["capability_error"]
     else:
         entry.pop("capability_error", None)
+    profiles = llm.get("profiles", {}) if isinstance(llm, dict) else {}
+    if not isinstance(profiles, dict):
+        return
+    for profile in profiles.values():
+        if not isinstance(profile, dict):
+            continue
+        if str(profile.get("model_ref") or "").strip() != model_id:
+            continue
+        if "supports_image_input" in details:
+            profile["supports_image_input"] = details["supports_image_input"]
+        profile["capability_status"] = details["capability_status"]
+        profile["capability_source"] = details["capability_source"]
+        profile["capability_checked_at"] = details["capability_checked_at"]
+        if details.get("capability_error"):
+            profile["capability_error"] = details["capability_error"]
+        else:
+            profile.pop("capability_error", None)
 
 
 def _run_draft_test_llm_connection(
@@ -1251,6 +1294,7 @@ def draft_delete_model(
     old_item = current_library.get(model_id, {}) if isinstance(current_library, dict) else {}
     old_env = str(old_item.get("api_key_env", "")).strip() if isinstance(old_item, dict) else ""
     updated = delete_llm_model(current, model_id)
+    updated = _mark_model_ref_profiles_unconfigured(updated, model_id)
     current_meta = _with_cleared_api_key(_drop_api_key_state(current_meta, old_env), old_env)
     return _build_workspace(
         updated,
@@ -1269,19 +1313,24 @@ def run_draft_llm_test(
     *,
     draft_meta: dict | None = None,
     model_id: str | None = None,
+    profile_id: str | None = None,
     capability: str | None = None,
 ) -> dict[str, Any]:
     old_public = with_git_config_defaults(load_public_config())
     submitted = _prepare_submitted_public_config(public_config, old_public)
     validate_llm_public_config(submitted)
     normalized_model_id = str(model_id or "").strip()
-    if not normalized_model_id:
+    normalized_profile_id = str(profile_id or "").strip()
+    if normalized_model_id:
+        options = list_llm_model_options(submitted)
+        option = next((item for item in options if str(item.get("model_id") or "").strip() == normalized_model_id), None)
+        if option is None:
+            raise ValueError(f"unknown LLM model: {normalized_model_id}")
+        target = _model_option_test_target(submitted, option, draft_meta)
+    elif normalized_profile_id:
+        target = _profile_test_target(submitted, normalized_profile_id, draft_meta)
+    else:
         raise ValueError("modelId is required")
-    options = list_llm_model_options(submitted)
-    option = next((item for item in options if str(item.get("model_id") or "").strip() == normalized_model_id), None)
-    if option is None:
-        raise ValueError(f"unknown LLM model: {normalized_model_id}")
-    target = _model_option_test_target(submitted, option, draft_meta)
     return _run_draft_test_llm_connection(
         submitted,
         model_id=target["model_id"],
@@ -1481,6 +1530,38 @@ def _model_library_api_key_env(public_config: dict[str, Any], model_id: str) -> 
     if not isinstance(item, dict):
         return ""
     return str(item.get("api_key_env") or "").strip()
+
+
+def _optional_unconfigured_profile_ids(public_config: dict[str, Any]) -> list[str]:
+    llm = public_config.get("llm", {}) if isinstance(public_config, dict) else {}
+    profiles = llm.get("profiles", {}) if isinstance(llm, dict) else {}
+    if not isinstance(profiles, dict):
+        return []
+    profile_ids: list[str] = []
+    for profile_id, profile in sorted(profiles.items()):
+        if str(profile_id or "").strip() == "primary" or not isinstance(profile, dict):
+            continue
+        if str(profile.get("model_ref") or "").strip() == UNCONFIGURED_MODEL_REF:
+            profile_ids.append(str(profile_id or "").strip())
+    return [item for item in profile_ids if item]
+
+
+def _mark_model_ref_profiles_unconfigured(public_config: dict[str, Any], model_id: str) -> dict[str, Any]:
+    normalized_model_id = str(model_id or "").strip()
+    if not normalized_model_id:
+        return public_config
+    llm = public_config.get("llm", {}) if isinstance(public_config, dict) else {}
+    profiles = llm.get("profiles", {}) if isinstance(llm, dict) else {}
+    if not isinstance(profiles, dict):
+        return public_config
+    for profile in profiles.values():
+        if not isinstance(profile, dict):
+            continue
+        if str(profile.get("model_ref") or "").strip() != normalized_model_id:
+            continue
+        profile["model_ref"] = UNCONFIGURED_MODEL_REF
+        profile["overrides"] = dict(profile.get("overrides") or {})
+    return public_config
 
 
 def _http_status_hint(error: Exception) -> str:
@@ -1698,6 +1779,19 @@ def apply_config_workspace(
     lang = _resolve_workspace_language(submitted)
     _assert_base_hash_matches(base_hash, old_public, lang)
     validate_llm_public_config(submitted)
+    optional_unconfigured_profile_ids = _optional_unconfigured_profile_ids(submitted)
+    if optional_unconfigured_profile_ids:
+        _record_config_scene_event(
+            "validate",
+            "config.llm_profiles.optional_missing_allowed",
+            message="Optional LLM profiles are intentionally unconfigured.",
+            outcome="allowed",
+            fields={
+                "profileCount": len(optional_unconfigured_profile_ids),
+                "profileIds": optional_unconfigured_profile_ids,
+            },
+            lifecycle=True,
+        )
     build_effective_config(submitted)
     save_public_config(submitted)
 
@@ -1720,6 +1814,9 @@ def apply_config_workspace(
     llm_config = persisted.get("llm", {}) if isinstance(persisted.get("llm", {}), dict) else {}
     model_library = llm_config.get("model_library", {}) if isinstance(llm_config, dict) else {}
     model_options = list_llm_model_options(persisted)
+    effective_config = build_effective_config(persisted)
+    primary_profile = effective_config.llm.get_profile(role="primary")
+    primary_provider = effective_config.llm.get_provider(primary_profile.provider_id)
     workspace = _build_workspace(
         persisted,
         message=text_for(
@@ -1743,6 +1840,10 @@ def apply_config_workspace(
             "clearedApiKeyEnvCount": len(cleared_envs),
             "clearedApiKeyEnvs": cleared_envs,
             "runtimeConfigReloaded": True,
+            "primaryProviderKind": primary_provider.kind,
+            "primaryModel": primary_profile.model,
+            "primaryTransport": primary_profile.transport,
+            "primaryContract": primary_profile.contract,
             "modelLibraryCount": len(model_library) if isinstance(model_library, dict) else 0,
             "selectableModelCount": len(model_options),
             "modelIds": [str(item.get("model_id") or "").strip() for item in model_options[:20]],

@@ -25,6 +25,8 @@ SECTION_LABELS = {
         "network": "网络",
         "evolution": "进化",
         "analysis": "分析",
+        "git.commit_message_model_ref": "Git 提交模型",
+        "git.commit_message_prompt": "Git 提交提示词",
         "ui": "界面",
         "parser": "解析器",
         "debug": "调试",
@@ -42,6 +44,8 @@ SECTION_LABELS = {
         "network": "Network",
         "evolution": "Evolution",
         "analysis": "Analysis",
+        "git.commit_message_model_ref": "Git Commit Model",
+        "git.commit_message_prompt": "Git Commit Prompt",
         "ui": "UI",
         "parser": "Parser",
         "debug": "Debug",
@@ -96,6 +100,8 @@ FIELD_LABELS = {
         "evolution.chat_dataset.approved_raw_dir": "已批准原始目录",
         "evolution.chat_dataset.approved_jsonl_path": "已批准数据集路径",
         "evolution.chat_dataset.rejected_log_path": "拒绝审计路径",
+        "git.commit_message_model_ref": "Git 提交使用的模型",
+        "git.commit_message_prompt": "Git 提交提示词",
     },
     "en": {
         "runtime.profile": "Runtime Mode",
@@ -143,6 +149,8 @@ FIELD_LABELS = {
         "evolution.chat_dataset.approved_raw_dir": "Approved Raw Directory",
         "evolution.chat_dataset.approved_jsonl_path": "Approved Dataset Path",
         "evolution.chat_dataset.rejected_log_path": "Rejected Audit Path",
+        "git.commit_message_model_ref": "Git Commit Model",
+        "git.commit_message_prompt": "Git Commit Prompt",
     },
 }
 
@@ -260,6 +268,8 @@ FIELD_HINTS = {
         "ui.max_log_entries": "UI 内部保留的日志条目数。",
         "network.proxy_enabled": "启用后，科研调研等真实公网请求会通过下方代理地址访问。",
         "network.proxy_url": "填写 HTTP/HTTPS 代理地址，例如 http://127.0.0.1:7890。",
+        "git.commit_message_model_ref": "选择用于生成 Git 提交说明的模型库条目。",
+        "git.commit_message_prompt": "Git 提交说明生成的系统提示词模板，需要保留 {diff} 占位符。",
         "user_profile.display_name": "用于工作台和对话消息的用户名称；为空时回退到系统用户名。",
         "user_profile.bio": "简短用户背景，会作为 agent 的参考依据进入系统提示词。",
         "user_profile.preferences": "用户偏好列表，会作为 agent 的参考依据进入系统提示词。",
@@ -281,6 +291,8 @@ FIELD_HINTS = {
         "ui.max_log_entries": "How many UI log entries are retained.",
         "network.proxy_enabled": "When enabled, real public research requests use the proxy URL below.",
         "network.proxy_url": "HTTP/HTTPS proxy URL, for example http://127.0.0.1:7890.",
+        "git.commit_message_model_ref": "Model-library entry used to generate Git commit messages.",
+        "git.commit_message_prompt": "System prompt template for Git commit message generation. Keep the {diff} placeholder.",
         "user_profile.display_name": "User name used by the workbench and chat messages. Falls back to the OS user name when empty.",
         "user_profile.bio": "Short user background included as agent reference context.",
         "user_profile.preferences": "User preference list included as agent reference context.",
@@ -300,6 +312,8 @@ EDITOR_SECTION_SPECS = [
     ("log", "log"),
     ("network", "network"),
     ("analysis", "analysis"),
+    ("git-commit-model", "git.commit_message_model_ref"),
+    ("git-commit-prompt", "git.commit_message_prompt"),
     ("ui", "ui"),
     ("parser", "parser"),
     ("debug", "debug"),
@@ -382,13 +396,28 @@ def _field_options(path: str, lang: str) -> list[dict[str, str]]:
 
 
 def _field_options_for_config(path: str, public_config: dict[str, Any], lang: str) -> list[dict[str, str]]:
+    if path == "git.commit_message_model_ref":
+        model_library = (
+            ((public_config.get("llm") or {}).get("model_library") or {})
+            if isinstance(public_config.get("llm"), dict)
+            else {}
+        )
+        if isinstance(model_library, dict):
+            return [
+                {
+                    "value": str(model_id or ""),
+                    "label": str((model.get("label") if isinstance(model, dict) else "") or model_id),
+                }
+                for model_id, model in sorted(model_library.items())
+                if str(model_id or "").strip()
+            ]
     return _field_options(path, lang)
 
 
 def _field_kind(path: str, value: Any, options: list[dict[str, str]] | None = None) -> tuple[str, str]:
     if path == "user_profile.avatar_image_path":
         return "image", "Image"
-    if path in {"user_profile.bio"}:
+    if path in {"user_profile.bio", "git.commit_message_prompt"}:
         return "multiline", "Multiline"
     if isinstance(value, bool):
         return "boolean", "Toggle"

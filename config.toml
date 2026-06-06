@@ -48,12 +48,6 @@ model_ref = "xiaomi_mimo_v2_5_pro_token_plan"
 
 [llm.profiles.subagent_worker.overrides]
 
-[llm.profiles.subagent_explorer]
-label = "子代理探索"
-model_ref = "xiaomi_mimo_v2_5_pro_token_plan"
-
-[llm.profiles.subagent_explorer.overrides]
-
 [llm.profiles.supervised_baseline]
 label = "监督基线"
 model_ref = "xiaomi_mimo_v2_5_pro_token_plan"
@@ -95,12 +89,6 @@ label = "科研主题卡"
 model_ref = "xiaomi_mimo_v2_5_pro_token_plan"
 
 [llm.profiles.research_card.overrides]
-
-[llm.profiles.compression]
-label = "上下文压缩"
-model_ref = "xiaomi_mimo_v2_5_pro_token_plan"
-
-[llm.profiles.compression.overrides]
 
 [llm.discovery]
 enabled = true
