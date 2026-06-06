@@ -77,6 +77,19 @@ def default_git_config() -> dict[str, str]:
     }
 
 
+def validate_git_commit_message_prompt(prompt: str) -> str:
+    """Return a normalized commit prompt template after validating required context slots."""
+
+    normalized_prompt = str(prompt or "").strip()
+    if not normalized_prompt:
+        raise ValueError("Git commit message prompt is required")
+    required_placeholders = ["{summary}", "{files}", "{diff}"]
+    missing = [placeholder for placeholder in required_placeholders if placeholder not in normalized_prompt]
+    if missing:
+        raise ValueError(f"Git commit message prompt must include: {', '.join(missing)}")
+    return normalized_prompt
+
+
 def with_git_config_defaults(public_config: dict[str, Any]) -> dict[str, Any]:
     payload = copy.deepcopy(public_config) if isinstance(public_config, dict) else {}
     user_profile = payload.setdefault("user_profile", {})
@@ -197,14 +210,7 @@ def update_git_commit_message_model(model_id: str) -> dict[str, Any]:
 def update_git_commit_message_prompt(prompt: str) -> dict[str, Any]:
     """Persist the prompt template used by the Git commit message drafter."""
 
-    normalized_prompt = str(prompt or "").strip()
-    if not normalized_prompt:
-        raise ValueError("Git commit message prompt is required")
-    required_placeholders = ["{summary}", "{files}", "{diff}"]
-    missing = [placeholder for placeholder in required_placeholders if placeholder not in normalized_prompt]
-    if missing:
-        raise ValueError(f"Git commit message prompt must include: {', '.join(missing)}")
-
+    normalized_prompt = validate_git_commit_message_prompt(prompt)
     public_config = with_git_config_defaults(load_public_config())
     updated = copy.deepcopy(public_config)
     git_cfg = updated.setdefault("git", {})

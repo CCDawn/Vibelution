@@ -43,7 +43,7 @@ from config.llm_security import validate_llm_provider_target
 from config.settings import reload_config
 
 from .config_editor_schema import build_editor_meta, build_editor_sections
-from .git_status_service import with_git_config_defaults
+from .git_status_service import validate_git_commit_message_prompt, with_git_config_defaults
 from .i18n import resolve_language, text_for
 from .runtime_scene_service import record_runtime_scene_event
 from .workbench_contract_service import get_workbench_contract
@@ -623,6 +623,7 @@ def _profile_test_target(
     draft_meta: dict | None = None,
 ) -> dict[str, Any]:
     normalized_profile_id = str(profile_id or "").strip() or "primary"
+    public_profile = _public_profile(public_config, normalized_profile_id)
     effective = build_effective_config(public_config)
     profile = effective.llm.get_profile(profile_id=normalized_profile_id)
     provider = effective.llm.get_provider(profile.provider_id)
@@ -631,7 +632,10 @@ def _profile_test_target(
     else:
         api_key = None
         api_key_source = "not-required"
-    model_id = str(getattr(profile, "model_ref", "") or "").strip() or normalized_profile_id
+    model_id = str((public_profile or {}).get("model_ref") or "").strip()
+    if not model_id:
+        model_id, _ = effective.llm.get_model_library_entry_for_profile(profile)
+    model_id = str(model_id or "").strip() or normalized_profile_id
     return {
         "model_id": model_id,
         "route_id": normalized_profile_id,
@@ -1293,6 +1297,7 @@ def draft_delete_model(
     current_library = current.get("llm", {}).get("model_library", {}) if isinstance(current.get("llm", {}), dict) else {}
     old_item = current_library.get(model_id, {}) if isinstance(current_library, dict) else {}
     old_env = str(old_item.get("api_key_env", "")).strip() if isinstance(old_item, dict) else ""
+    _assert_model_deletion_allowed(current, model_id)
     updated = delete_llm_model(current, model_id)
     updated = _mark_model_ref_profiles_unconfigured(updated, model_id)
     current_meta = _with_cleared_api_key(_drop_api_key_state(current_meta, old_env), old_env)
@@ -1546,6 +1551,83 @@ def _optional_unconfigured_profile_ids(public_config: dict[str, Any]) -> list[st
     return [item for item in profile_ids if item]
 
 
+def _public_profile(public_config: dict[str, Any], profile_id: str) -> dict[str, Any] | None:
+    llm = public_config.get("llm", {}) if isinstance(public_config, dict) else {}
+    profiles = llm.get("profiles", {}) if isinstance(llm, dict) else {}
+    profile = profiles.get(str(profile_id or "").strip()) if isinstance(profiles, dict) else None
+    return profile if isinstance(profile, dict) else None
+
+
+def _git_config(public_config: dict[str, Any]) -> dict[str, Any]:
+    git_config = public_config.get("git", {}) if isinstance(public_config, dict) else {}
+    return git_config if isinstance(git_config, dict) else {}
+
+
+def _assert_model_deletion_allowed(public_config: dict[str, Any], model_id: str) -> None:
+    normalized_model_id = str(model_id or "").strip()
+    if not normalized_model_id:
+        return
+    primary_profile = _public_profile(public_config, "primary")
+    if str((primary_profile or {}).get("model_ref") or "").strip() == normalized_model_id:
+        _record_config_scene_event(
+            "validate",
+            "config.llm_model.delete_rejected",
+            message="LLM model deletion rejected because primary profile still references it.",
+            level="warning",
+            outcome="rejected",
+            fields={"modelId": normalized_model_id, "reason": "primary_profile_ref"},
+            lifecycle=True,
+        )
+        raise ValueError("Cannot delete the model used by the primary LLM profile. Rebind primary before deleting this model.")
+    git_model_id = str(_git_config(public_config).get("commit_message_model_ref") or "").strip()
+    if git_model_id == normalized_model_id:
+        _record_config_scene_event(
+            "validate",
+            "config.llm_model.delete_rejected",
+            message="LLM model deletion rejected because Git commit messages still reference it.",
+            level="warning",
+            outcome="rejected",
+            fields={"modelId": normalized_model_id, "reason": "git_commit_model_ref"},
+            lifecycle=True,
+        )
+        raise ValueError("Cannot delete the model used for Git commit messages. Rebind the Git commit model before deleting this model.")
+
+
+def _validate_git_commit_settings(public_config: dict[str, Any]) -> None:
+    git_config = _git_config(public_config)
+    prompt = git_config.get("commit_message_prompt")
+    if prompt is not None:
+        try:
+            validate_git_commit_message_prompt(str(prompt))
+        except ValueError as exc:
+            _record_config_scene_event(
+                "validate",
+                "config.git_commit_prompt.rejected",
+                message="Git commit message prompt validation rejected the config draft.",
+                level="warning",
+                outcome="rejected",
+                fields={"reason": "missing_required_placeholder", "error": str(exc)},
+                lifecycle=True,
+            )
+            raise
+    model_id = str(git_config.get("commit_message_model_ref") or "").strip()
+    if not model_id:
+        return
+    llm = public_config.get("llm", {}) if isinstance(public_config, dict) else {}
+    model_library = llm.get("model_library", {}) if isinstance(llm, dict) else {}
+    if not isinstance(model_library, dict) or model_id not in model_library:
+        _record_config_scene_event(
+            "validate",
+            "config.git_commit_model_ref.rejected",
+            message="Git commit message model reference is not in the LLM model library.",
+            level="warning",
+            outcome="rejected",
+            fields={"modelId": model_id, "reason": "unknown_model"},
+            lifecycle=True,
+        )
+        raise ValueError(f"unknown Git commit message model: {model_id}")
+
+
 def _mark_model_ref_profiles_unconfigured(public_config: dict[str, Any], model_id: str) -> dict[str, Any]:
     normalized_model_id = str(model_id or "").strip()
     if not normalized_model_id:
@@ -1779,6 +1861,7 @@ def apply_config_workspace(
     lang = _resolve_workspace_language(submitted)
     _assert_base_hash_matches(base_hash, old_public, lang)
     validate_llm_public_config(submitted)
+    _validate_git_commit_settings(submitted)
     optional_unconfigured_profile_ids = _optional_unconfigured_profile_ids(submitted)
     if optional_unconfigured_profile_ids:
         _record_config_scene_event(
