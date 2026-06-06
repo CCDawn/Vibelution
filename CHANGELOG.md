@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.39 - 2026-06-06
+
+- Persisted chat preflight rejections such as worktree lease conflicts as explicit `not_called` LLM/cache observations, including HTTP status, conflict details, and runtime-scene evidence.
+- Updated the Chat/Coding status UI to distinguish "model not called" from upstream missing token or prompt-cache usage.
+- Added regression coverage for preflight rejection persistence and frontend observability labels.
+
 ## 0.10.38 - 2026-06-06
 
 - Split prompt-cache usage observation into cache read hits, cache writes, and uncached input tokens across LLM logs, session detail APIs, and the Chat/Coding status UI.

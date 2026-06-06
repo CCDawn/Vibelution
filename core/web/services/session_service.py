@@ -63,6 +63,7 @@ from core.runtime_manager.work_run_leases import (
     check_lease_conflicts,
     infer_chat_turn_leases,
     leases_for_snapshot,
+    normalize_leases,
 )
 from core.runtime_manager.work_run_store import WorkRunStore
 from tools.session_reference_tools import session_reference_context
@@ -2627,7 +2628,21 @@ def submit_session_message(
         )
         lease_decision = _check_chat_turn_lease_decision(requested_leases)
         if not lease_decision.allowed:
-            raise SessionBusyError(_localize_lease_conflict(lease_decision.reason, lang=lang))
+            localized_reason = _localize_lease_conflict(lease_decision.reason, lang=lang)
+            _persist_session_preflight_rejection(
+                conversation,
+                message=message,
+                reason=localized_reason,
+                error_type="resource_lease_conflict",
+                http_status=409,
+                source="conversation.turn.lease_conflict",
+                requested_leases=requested_leases,
+                lease_conflicts=lease_decision.conflicts,
+                lang=lang,
+            )
+            payload["updated_at"] = conversation.get("updated_at") or _now_timestamp()
+            save_chat_state(PROJECT_ROOT, payload)
+            raise SessionBusyError(localized_reason)
 
         _ensure_conversation_agent_metadata(conversation)
         agent_id = str(conversation.get("agent_id") or conversation.get("agentId") or "").strip()
@@ -3212,7 +3227,21 @@ def edit_and_resubmit_session_message(
         )
         lease_decision = _check_chat_turn_lease_decision(requested_leases)
         if not lease_decision.allowed:
-            raise SessionBusyError(_localize_lease_conflict(lease_decision.reason, lang=lang))
+            localized_reason = _localize_lease_conflict(lease_decision.reason, lang=lang)
+            _persist_session_preflight_rejection(
+                conversation,
+                message=message,
+                reason=localized_reason,
+                error_type="resource_lease_conflict",
+                http_status=409,
+                source="conversation.turn.lease_conflict",
+                requested_leases=requested_leases,
+                lease_conflicts=lease_decision.conflicts,
+                lang=lang,
+            )
+            payload["updated_at"] = conversation.get("updated_at") or _now_timestamp()
+            save_chat_state(PROJECT_ROOT, payload)
+            raise SessionBusyError(localized_reason)
 
         _ensure_conversation_agent_metadata(conversation)
         agent_id = str(conversation.get("agent_id") or conversation.get("agentId") or "").strip()
@@ -3685,6 +3714,152 @@ def _normalize_session_runtime_notices(items: Any) -> list[dict[str, Any]]:
 
 def _append_session_runtime_notice(items: Any, notice: dict[str, Any]) -> list[dict[str, Any]]:
     return _normalize_session_runtime_notices([*list(items or []), notice])
+
+
+def _not_called_llm_usage(*, recorded_at: str = "") -> dict[str, Any]:
+    return {
+        "source": "not_called",
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "totalTokens": 0,
+        "cachedInputTokens": 0,
+        "cacheReadInputTokens": 0,
+        "cacheCreationInputTokens": 0,
+        "uncachedInputTokens": 0,
+        "cacheHitRate": 0.0,
+        "provider": "",
+        "model": "",
+        "recordedAt": str(recorded_at or "").strip() or _now_timestamp(),
+    }
+
+
+def _not_called_cache_composition(*, recorded_at: str = "", reason: str = "") -> dict[str, Any]:
+    return _normalize_session_cache_composition(
+        {
+            "recordedAt": str(recorded_at or "").strip() or _now_timestamp(),
+            "source": "not_called",
+            "segments": [
+                {
+                    "key": "missing",
+                    "label": "not called",
+                    "tokens": 1,
+                    "status": str(reason or "not_called").strip() or "not_called",
+                }
+            ],
+        }
+    ) or {}
+
+
+def _persist_session_preflight_rejection(
+    conversation: dict[str, Any],
+    *,
+    message: str,
+    reason: str,
+    error_type: str,
+    http_status: int,
+    source: str,
+    requested_leases: list[str] | None = None,
+    lease_conflicts: list[dict[str, Any]] | None = None,
+    lang: str,
+) -> dict[str, Any]:
+    timestamp = _now_timestamp()
+    reason_text = str(reason or "").strip()
+    normalized_http_status = _coerce_nonnegative_int(http_status)
+    requested = normalize_leases(requested_leases or [])
+    conflicts = list(lease_conflicts or [])
+    conflict = conflicts[0] if conflicts and isinstance(conflicts[0], dict) else {}
+    conflict_run_id = str(conflict.get("runId") or "").strip()
+    conflict_leases = normalize_leases(conflict.get("leases") or [])
+    message_lines = [
+        text_for(
+            lang,
+            zh="本轮未调用模型：请求在进入 LLM 前被系统拒绝。",
+            en="The model was not called: this request was rejected before the LLM stage.",
+        ),
+        f"HTTP {normalized_http_status}" if normalized_http_status else "",
+        reason_text,
+    ]
+    if conflict_run_id:
+        message_lines.append(f"activeRunId: {conflict_run_id}")
+    if conflict_leases:
+        message_lines.append(f"leases: {', '.join(conflict_leases)}")
+    notice_message = "\n".join(line for line in message_lines if str(line or "").strip())
+    turn_error = {
+        "message": notice_message,
+        "error_type": str(error_type or "preflight_rejected").strip() or "preflight_rejected",
+        "reason_code": "preflight_rejected",
+        "reason_summary": text_for(
+            lang,
+            zh="请求在进入模型调用前被拒绝",
+            en="Request rejected before model call",
+        ),
+        "reason_detail": reason_text,
+        "http_status": normalized_http_status,
+        "provider": "",
+        "provider_host": "",
+        "provider_error_type": "",
+        "provider_error_message": "",
+        "model": "",
+        "recoverable": True,
+        "timestamp": timestamp,
+        "turn_id": "",
+    }
+    conversation["runtime_notices"] = _append_session_runtime_notice(
+        conversation.get("runtime_notices") or conversation.get("runtimeNotices") or [],
+        {
+            "kind": "turn_rejected",
+            "level": "warning" if normalized_http_status != 401 else "error",
+            "message": notice_message,
+            "timestamp": timestamp,
+            "source": source,
+            "previousStatus": "preflight_rejected",
+        },
+    )
+    conversation["last_llm_usage"] = _not_called_llm_usage(recorded_at=timestamp)
+    conversation["last_cache_composition"] = _not_called_cache_composition(
+        recorded_at=timestamp,
+        reason="preflight_rejected",
+    )
+    conversation["last_turn_status"] = "blocked"
+    conversation["last_turn_error"] = turn_error
+    conversation["updated_at"] = timestamp
+    try:
+        record_runtime_scene_event(
+            "conversation",
+            "turn_rejected",
+            "conversation.turn.rejected_before_llm",
+            level="warning" if normalized_http_status != 401 else "error",
+            outcome="rejected",
+            message="Conversation turn rejected before any LLM call.",
+            fields={
+                "sessionId": str(conversation.get("conversation_id") or conversation.get("id") or "").strip(),
+                "source": source,
+                "httpStatus": normalized_http_status,
+                "errorType": str(error_type or "preflight_rejected").strip() or "preflight_rejected",
+                "requestedLeases": requested,
+                "conflictRunId": conflict_run_id,
+                "conflictLeases": conflict_leases,
+                "reason": reason_text,
+                "userMessageChars": len(str(message or "")),
+                "llmCalled": False,
+            },
+            child_log_path=f"conversations/{_safe_session_workspace_token(str(conversation.get('conversation_id') or conversation.get('id') or '').strip())}-turns.jsonl",
+            child_log_payload={
+                "event": "turn_rejected_before_llm",
+                "timestamp": timestamp,
+                "httpStatus": normalized_http_status,
+                "errorType": str(error_type or "preflight_rejected").strip() or "preflight_rejected",
+                "requestedLeases": requested,
+                "conflictRunId": conflict_run_id,
+                "conflictLeases": conflict_leases,
+                "reason": reason_text,
+                "llmCalled": False,
+            },
+            lifecycle=True,
+        )
+    except Exception:
+        pass
+    return turn_error
 
 
 def _runtime_notices_from_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -4612,7 +4787,8 @@ def _build_session_detail_from_summary(
 
 def _build_session_cache_usage(llm_usage: dict[str, Any] | None) -> dict[str, Any]:
     usage = _normalize_turn_llm_usage(llm_usage)
-    observed = usage is not None and usage.get("source") == "provider_usage"
+    usage_source = str((usage or {}).get("source") or "").strip()
+    observed = usage is not None and usage_source == "provider_usage"
     last_input_tokens = _coerce_nonnegative_int((usage or {}).get("inputTokens") or 0) if observed else 0
     last_cached_input_tokens = min(
         _coerce_nonnegative_int((usage or {}).get("cachedInputTokens") or 0),
@@ -4656,7 +4832,7 @@ def _build_session_cache_usage(llm_usage: dict[str, Any] | None) -> dict[str, An
         "totalUncachedInputTokens": total_uncached_input_tokens,
         "totalCacheHitRate": (total_cached_input_tokens / total_input_tokens) if total_input_tokens > 0 else 0.0,
         "updatedAt": str((usage or {}).get("recordedAt") or "").strip(),
-        "source": "provider_usage" if observed else "missing",
+        "source": "provider_usage" if observed else "not_called" if usage_source == "not_called" else "missing",
     }
 
 
@@ -4681,6 +4857,8 @@ def _normalize_turn_llm_usage(value: Any) -> dict[str, Any] | None:
     if not isinstance(value, dict):
         return None
     source = str(value.get("source") or "").strip() or "missing"
+    if source in {"not_called", "not_called_preflight"}:
+        source = "not_called"
     input_tokens = _coerce_nonnegative_int(value.get("input_tokens") or value.get("inputTokens") or 0)
     output_tokens = _coerce_nonnegative_int(value.get("output_tokens") or value.get("outputTokens") or 0)
     total_tokens = _coerce_nonnegative_int(value.get("total_tokens") or value.get("totalTokens") or 0)
@@ -4850,6 +5028,8 @@ def _normalize_session_cache_composition(value: Any) -> dict[str, Any] | None:
     if not uncached_tokens and input_tokens:
         uncached_tokens = max(0, input_tokens - cached_tokens)
     source = str(value.get("source") or "").strip() or "missing"
+    if source in {"not_called", "not_called_preflight"}:
+        source = "not_called"
     segments = []
     for item in list(value.get("segments") or []):
         if not isinstance(item, dict):
@@ -4872,7 +5052,7 @@ def _normalize_session_cache_composition(value: Any) -> dict[str, Any] | None:
                 {"key": "cache_write", "label": "cache write", "tokens": cache_creation_tokens, "status": "write"},
                 {"key": "uncached", "label": "uncached", "tokens": uncached_tokens, "status": "miss"},
             ]
-        elif source == "missing":
+        elif source in {"missing", "not_called"}:
             segments = [{"key": "missing", "label": "missing", "tokens": 1, "status": "missing"}]
     return {
         "turnId": str(value.get("turnId") or value.get("turn_id") or "").strip(),
