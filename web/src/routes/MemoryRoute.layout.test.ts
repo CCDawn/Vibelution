@@ -157,8 +157,8 @@ describe("MemoryRoute layout contract", () => {
     expect(graphWorkerSource).toContain("runtime_scene: 34");
     expect(memoryCssSource).toContain(".graphCanvasShell");
     expect(memoryCssSource).toContain(".graphCanvasShell::after");
-    expect(memoryCssSource).toContain("grid-template-columns: minmax(204px, 240px) minmax(0, 1fr) minmax(248px, 0.32fr)");
-    expect(memoryCssSource).toContain("min-height: 260px");
+    expect(memoryCssSource).toContain("grid-template-columns: minmax(210px, 250px) minmax(760px, 1fr) minmax(260px, 0.34fr)");
+    expect(memoryCssSource).toContain("min-height: 360px");
     expect(memoryCssSource).toContain("min-height: 320px");
     expect(memoryCssSource).toContain("#06101d");
     expect(memoryCssSource).toContain("91px 91px");
