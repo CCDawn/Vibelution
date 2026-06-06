@@ -109,6 +109,7 @@ def start_computer_use_task(
                 "summary": "Computer Use task is waiting for user confirmation before executing a high-risk action.",
                 "steps": [ready_step],
                 "needsConfirmation": True,
+                "pendingExecution": _pending_execution_payload(normalized, reason="explicit_high_risk_action"),
                 "updatedAt": _now(),
                 "durationMs": _duration_ms(started),
             }
@@ -155,9 +156,67 @@ def confirm_computer_use_session(session_id: str, confirmation: str = "approved"
     payload = _load_session(normalized_id)
     if str(payload.get("status") or "") != "need_confirmation":
         raise ComputerUseError("Only sessions waiting for confirmation can be confirmed.")
+    confirmation_text = str(confirmation or "approved").strip() or "approved"
+    pending_request = _pending_request_for_resume(payload)
+    if pending_request:
+        started = time.perf_counter()
+        confirmation_step = {
+            "action": "confirmation",
+            "summary": "Computer Use task confirmed by user; resuming pending browser actions.",
+            "status": "completed",
+        }
+        payload.update(
+            {
+                "status": "running",
+                "needsConfirmation": False,
+                "confirmation": confirmation_text,
+                "summary": "Computer Use task confirmed by user; resuming pending browser actions.",
+                "updatedAt": _now(),
+            }
+        )
+        payload["steps"] = list(payload.get("steps") or []) + [confirmation_step]
+        _append_step(normalized_id, confirmation_step)
+        _save_session(payload)
+        _record_event("computer_use.task.confirmed", payload, outcome="confirmed")
+        try:
+            provider_payload = _call_open_computer_use(pending_request, session_id=normalized_id)
+            result = _normalize_provider_result(provider_payload, session_id=normalized_id, require_confirmation=False)
+            combined_steps = list(payload.get("steps") or []) + list(result.get("steps") or [])
+            payload.update(result)
+            payload["steps"] = _reindex_steps(combined_steps)
+        except TimeoutError as exc:
+            payload.update({"status": "timeout", "summary": "Computer Use task timed out after confirmation.", "error": str(exc)})
+        except Exception as exc:
+            payload.update(
+                {
+                    "status": "failed",
+                    "summary": "Computer Use task failed after confirmation.",
+                    "error": f"{type(exc).__name__}: {exc}",
+                }
+            )
+        payload.pop("pendingExecution", None)
+        payload["needsConfirmation"] = str(payload.get("status") or "") == "need_confirmation"
+        payload["durationMs"] = _duration_ms(started)
+        payload["updatedAt"] = _now()
+        _save_session(payload)
+        event_code = {
+            "completed": "computer_use.task.confirmed_resumed",
+            "need_confirmation": "computer_use.task.confirmation_required",
+            "blocked": "computer_use.task.blocked",
+            "timeout": "computer_use.task.timeout",
+            "cancelled": "computer_use.task.cancelled",
+        }.get(str(payload.get("status") or ""), "computer_use.task.failed")
+        _record_event(
+            event_code,
+            payload,
+            outcome=str(payload.get("status") or "failed"),
+            level="warning" if payload.get("status") in {"need_confirmation", "blocked", "timeout", "failed"} else "info",
+        )
+        return _public_payload(payload)
+
     payload["status"] = "completed"
     payload["needsConfirmation"] = False
-    payload["confirmation"] = str(confirmation or "approved").strip() or "approved"
+    payload["confirmation"] = confirmation_text
     payload["summary"] = "Computer Use task confirmed by user."
     payload["updatedAt"] = _now()
     _append_step(normalized_id, {"type": "confirmation", "summary": payload["summary"], "status": "completed"})
@@ -173,6 +232,7 @@ def cancel_computer_use_session(session_id: str, reason: str = "cancelled_by_use
         return _public_payload(payload)
     payload["status"] = "cancelled"
     payload["needsConfirmation"] = False
+    payload.pop("pendingExecution", None)
     payload["summary"] = "Computer Use task cancelled."
     payload["error"] = str(reason or "cancelled_by_user").strip() or "cancelled_by_user"
     payload["updatedAt"] = _now()
@@ -366,6 +426,47 @@ def _initial_session_payload(session_id: str, request: dict[str, Any], *, status
         "updatedAt": now,
         "durationMs": 0,
     }
+
+
+def _pending_execution_payload(request: dict[str, Any], *, reason: str) -> dict[str, Any]:
+    return {
+        "kind": "explicit_actions",
+        "reason": reason,
+        "createdAt": _now(),
+        "request": {
+            "task": request["task"],
+            "targetUrl": request["targetUrl"],
+            "allowedDomains": list(request.get("allowedDomains") or []),
+            "actions": list(request.get("actions") or []),
+            "maxSteps": request["maxSteps"],
+            "requireConfirmation": request["requireConfirmation"],
+            "mode": request["mode"],
+            "timeoutSeconds": request["timeoutSeconds"],
+        },
+    }
+
+
+def _pending_request_for_resume(payload: dict[str, Any]) -> dict[str, Any]:
+    pending = payload.get("pendingExecution")
+    if not isinstance(pending, dict) or pending.get("kind") != "explicit_actions":
+        return {}
+    request = pending.get("request")
+    if not isinstance(request, dict):
+        return {}
+    return _normalize_request(
+        task=request.get("task"),
+        target_url=request.get("targetUrl"),
+        allowed_domains=request.get("allowedDomains"),
+        actions=request.get("actions"),
+        max_steps=request.get("maxSteps"),
+        require_confirmation=False,
+        mode=request.get("mode"),
+        timeout_seconds=request.get("timeoutSeconds"),
+    )
+
+
+def _reindex_steps(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [{**step, "index": index} for index, step in enumerate(steps, start=1)]
 
 
 def _public_payload(payload: dict[str, Any]) -> dict[str, Any]:

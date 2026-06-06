@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.36 - 2026-06-06
+
+- Changed Computer Use high-risk explicit actions to persist a pending execution request and resume the sandbox provider call after `/api/computer-use/sessions/{session_id}/confirm` approves it.
+- Kept confirmation-resume payloads public-safe by returning redacted action summaries while clearing the internal pending execution state after completion, failure, or timeout.
+- Updated the Chat/Coding Computer Use panel so confirm and cancel responses immediately replace the local session card result instead of requiring a manual refresh.
+
 ## 0.10.35 - 2026-06-06
 
 - Extended `computer_use_task_tool` and `/api/computer-use/tasks` with an `actions` protocol for explicit sandbox browser steps such as `fill`, `click`, `press`, `scroll`, `navigate`, `wait`, and `screenshot`.
