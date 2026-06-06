@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("launcher", "toggle", "start", "stop", "restart", "status", "monitor", "supervise", "internal-start", "internal-stop", "internal-restart", "internal-status")]
+    [ValidateSet("launcher", "toggle", "start", "stop", "restart", "status", "repair-deps", "monitor", "supervise", "internal-start", "internal-stop", "internal-restart", "internal-status")]
     [string]$Action = "launcher",
     [switch]$NoBrowser,
     [string]$SessionId
@@ -13,6 +13,8 @@ $projectVenvDir = Join-Path $projectDir ".venv"
 $preferredPythonExe = Join-Path $projectDir ".venv\Scripts\python.exe"
 $preferredPythonNoConsoleExe = Join-Path $projectDir ".venv\Scripts\pythonw.exe"
 $launcherPythonOverride = $env:VIBELUTION_PYTHON_EXE
+$launcherPipIndexUrl = if ($env:VIBELUTION_PIP_INDEX_URL) { $env:VIBELUTION_PIP_INDEX_URL } else { $env:PIP_INDEX_URL }
+$launcherPipExtraArgs = $env:VIBELUTION_PIP_EXTRA_ARGS
 $requirementsPath = Join-Path $projectDir "requirements.txt"
 $webDir = Join-Path $projectDir "web"
 $webDistDir = Join-Path $webDir "dist"
@@ -275,16 +277,23 @@ function Invoke-RuntimeManagerClient {
         [switch]$StopManager
     )
 
-    Ensure-ProjectPythonDependencies
-    $pythonRuntime = Resolve-PythonRuntime
-    $runtimeNoConsolePath = Get-ObjectPropertyValue -Object $pythonRuntime -Name "NoConsoleFilePath" -Default ""
-    $runtimeCommandPath = if ($runtimeNoConsolePath) { [string]$runtimeNoConsolePath } else { [string]$pythonRuntime.FilePath }
-    $pythonArgs = @()
-    if ($pythonRuntime.PrefixArgs) {
-        $pythonArgs += $pythonRuntime.PrefixArgs
-    }
-
     if ($Mode -eq "status") {
+        $pythonRuntime = Resolve-PythonRuntimeReadOnly
+        if (-not $pythonRuntime) {
+            $dependencyStatus = Get-PythonDependencyStatusReadOnly
+            Write-Note "Runtime manager status is unavailable because Python dependencies are not ready."
+            Write-Note "Python    : $($dependencyStatus.Status) ($($dependencyStatus.Reason))"
+            Write-Note "Repair    : run this launcher with -Action repair-deps, then retry status."
+            Write-StatusDependencyObservation -DependencyStatus $dependencyStatus
+            return 0
+        }
+
+        $runtimeNoConsolePath = Get-ObjectPropertyValue -Object $pythonRuntime -Name "NoConsoleFilePath" -Default ""
+        $runtimeCommandPath = if ($runtimeNoConsolePath) { [string]$runtimeNoConsolePath } else { [string]$pythonRuntime.FilePath }
+        $pythonArgs = @()
+        if ($pythonRuntime.PrefixArgs) {
+            $pythonArgs += $pythonRuntime.PrefixArgs
+        }
         $pythonArgs += @("-m", "core.runtime_manager.cli", "status")
         $exitCode = Invoke-HiddenNativeCommand -CommandPath $runtimeCommandPath -ArgumentList $pythonArgs
         Set-LauncherWindowTitle
@@ -292,6 +301,15 @@ function Invoke-RuntimeManagerClient {
             throw "Runtime manager status failed with exit code $exitCode."
         }
         return 0
+    }
+
+    Ensure-ProjectPythonDependencies
+    $pythonRuntime = Resolve-PythonRuntime
+    $runtimeNoConsolePath = Get-ObjectPropertyValue -Object $pythonRuntime -Name "NoConsoleFilePath" -Default ""
+    $runtimeCommandPath = if ($runtimeNoConsolePath) { [string]$runtimeNoConsolePath } else { [string]$pythonRuntime.FilePath }
+    $pythonArgs = @()
+    if ($pythonRuntime.PrefixArgs) {
+        $pythonArgs += $pythonRuntime.PrefixArgs
     }
 
     if (-not $CommandType) {
@@ -954,6 +972,27 @@ function Save-ActiveRuntimeSceneReference {
     }
     $payloadJson = $payload | ConvertTo-Json -Depth 6
     Write-LauncherStateFile -Path $activeRuntimeScenePath -Value $payloadJson
+}
+
+function Clear-ActiveRuntimeSceneReference {
+    param([string]$SceneId = "")
+
+    if (-not (Test-Path -LiteralPath $activeRuntimeScenePath)) {
+        return
+    }
+
+    if ($SceneId) {
+        try {
+            $payload = Get-Content -LiteralPath $activeRuntimeScenePath -Raw -Encoding utf8 | ConvertFrom-Json
+            if ([string]$payload.runtimeSceneId -ne $SceneId) {
+                return
+            }
+        } catch {
+            return
+        }
+    }
+
+    Remove-Item -LiteralPath $activeRuntimeScenePath -Force -ErrorAction SilentlyContinue
 }
 
 function Restore-RuntimeSceneContextFromState {
@@ -2049,7 +2088,10 @@ function Write-BootstrapPrerequisiteEvent {
 }
 
 function Assert-LauncherSystemPrerequisites {
-    param([bool]$BrowserRequired = $true)
+    param(
+        [bool]$BrowserRequired = $true,
+        [bool]$FrontendRequired = $true
+    )
 
     $missing = New-Object System.Collections.Generic.List[string]
 
@@ -2078,21 +2120,23 @@ function Assert-LauncherSystemPrerequisites {
             -Fields @{ path = $preferredPythonExe }
     }
 
-    try {
-        $npmCommand = Resolve-NpmCommand
-        Write-BootstrapPrerequisiteEvent `
-            -Name "npm" `
-            -Status "available" `
-            -Message "npm is available for frontend dependency install and build." `
-            -Fields @{ path = $npmCommand; required_for = "web dependencies and build" }
-    } catch {
-        [void]$missing.Add("Node.js/npm on PATH")
-        Write-BootstrapPrerequisiteEvent `
-            -Name "npm" `
-            -Status "missing" `
-            -Message "npm is required to install frontend dependencies and build web/dist." `
-            -Level "error" `
-            -Fields @{ required_for = "web dependencies and build"; error = $_.Exception.Message }
+    if ($FrontendRequired) {
+        try {
+            $npmCommand = Resolve-NpmCommand
+            Write-BootstrapPrerequisiteEvent `
+                -Name "npm" `
+                -Status "available" `
+                -Message "npm is available for frontend dependency install and build." `
+                -Fields @{ path = $npmCommand; required_for = "web dependencies and build" }
+        } catch {
+            [void]$missing.Add("Node.js/npm on PATH")
+            Write-BootstrapPrerequisiteEvent `
+                -Name "npm" `
+                -Status "missing" `
+                -Message "npm is required to install frontend dependencies and build web/dist." `
+                -Level "error" `
+                -Fields @{ required_for = "web dependencies and build"; error = $_.Exception.Message }
+        }
     }
 
     if ($BrowserRequired) {
@@ -2592,6 +2636,146 @@ function Test-PythonRuntime {
     }
 }
 
+function Get-PipExtraArgumentList {
+    if (-not $launcherPipExtraArgs) {
+        return @()
+    }
+
+    $arguments = New-Object System.Collections.Generic.List[string]
+    $pattern = '("[^"]*"|''[^'']*''|[^\s]+)'
+    foreach ($match in [regex]::Matches([string]$launcherPipExtraArgs, $pattern)) {
+        $value = [string]$match.Value
+        if ($value.Length -ge 2) {
+            $first = $value.Substring(0, 1)
+            $last = $value.Substring($value.Length - 1, 1)
+            if (($first -eq '"' -and $last -eq '"') -or ($first -eq "'" -and $last -eq "'")) {
+                $value = $value.Substring(1, $value.Length - 2)
+            }
+        }
+        if ($value) {
+            [void]$arguments.Add($value)
+        }
+    }
+    return $arguments.ToArray()
+}
+
+function Get-PipConfigSummary {
+    $indexHost = ""
+    if ($launcherPipIndexUrl) {
+        try {
+            $indexHost = ([uri]$launcherPipIndexUrl).Host
+        } catch {
+            $indexHost = "unparseable"
+        }
+    }
+
+    return @{
+        pip_index_configured = [bool]$launcherPipIndexUrl
+        pip_index_host = $indexHost
+        pip_extra_args_configured = [bool]$launcherPipExtraArgs
+    }
+}
+
+function Get-PipInstallArgumentList {
+    $pipArgs = New-Object System.Collections.Generic.List[string]
+    foreach ($item in @("-m", "pip", "install", "--disable-pip-version-check")) {
+        [void]$pipArgs.Add($item)
+    }
+    if ($launcherPipIndexUrl) {
+        [void]$pipArgs.Add("--index-url")
+        [void]$pipArgs.Add([string]$launcherPipIndexUrl)
+    }
+    foreach ($item in @(Get-PipExtraArgumentList)) {
+        [void]$pipArgs.Add([string]$item)
+    }
+    [void]$pipArgs.Add("-r")
+    [void]$pipArgs.Add($requirementsPath)
+    return $pipArgs.ToArray()
+}
+
+function Get-PythonDependencyStatusReadOnly {
+    $candidates = @(Get-ProjectPythonCandidates)
+    foreach ($candidate in $candidates) {
+        if (Test-PythonRuntime -CommandPath $candidate.FilePath -PrefixArgs $candidate.PrefixArgs) {
+            return [pscustomobject]@{
+                Status = "ready"
+                Reason = "backend runtime imports are available"
+                Runtime = $candidate
+                CandidateCount = $candidates.Count
+                VenvPath = $projectVenvDir
+                RequirementsPath = $requirementsPath
+            }
+        }
+    }
+
+    if (-not (Test-Path -LiteralPath $preferredPythonExe)) {
+        return [pscustomobject]@{
+            Status = "dependency_bootstrap_required"
+            Reason = "project virtual environment is missing"
+            Runtime = $null
+            CandidateCount = $candidates.Count
+            VenvPath = $projectVenvDir
+            RequirementsPath = $requirementsPath
+        }
+    }
+
+    return [pscustomobject]@{
+        Status = "dependency_bootstrap_required"
+        Reason = "project virtual environment exists but backend imports are incomplete"
+        Runtime = $null
+        CandidateCount = $candidates.Count
+        VenvPath = $projectVenvDir
+        RequirementsPath = $requirementsPath
+    }
+}
+
+function Resolve-PythonRuntimeReadOnly {
+    $dependencyStatus = Get-PythonDependencyStatusReadOnly
+    if ($dependencyStatus.Status -eq "ready" -and $dependencyStatus.Runtime) {
+        Write-PythonRuntimeSelectedLog -PythonRuntime $dependencyStatus.Runtime
+        return $dependencyStatus.Runtime
+    }
+    return $null
+}
+
+function Write-StatusDependencyObservation {
+    param([pscustomobject]$DependencyStatus)
+
+    if (-not $DependencyStatus) {
+        return
+    }
+
+    $fields = @{
+        status = [string]$DependencyStatus.Status
+        reason = [string]$DependencyStatus.Reason
+        candidate_count = [int]$DependencyStatus.CandidateCount
+        venv_path = [string]$DependencyStatus.VenvPath
+        requirements_path = [string]$DependencyStatus.RequirementsPath
+    }
+    $eventCode = if ($DependencyStatus.Status -eq "ready") {
+        "backend.dependencies.status.ready"
+    } else {
+        "backend.dependencies.bootstrap.required"
+    }
+    $level = if ($DependencyStatus.Status -eq "ready") { "info" } else { "warning" }
+
+    Write-LauncherControlLog `
+        -Event $eventCode `
+        -Message $(if ($DependencyStatus.Status -eq "ready") { "Backend dependencies are ready for status." } else { "Backend dependency bootstrap is required, but status remained read-only." }) `
+        -Level $level `
+        -Fields $fields
+    if ($script:currentRuntimeSceneId) {
+        Write-RuntimeSceneEvent `
+            -Component "launcher" `
+            -Phase "python_dependencies" `
+            -EventCode $eventCode `
+            -Message $(if ($DependencyStatus.Status -eq "ready") { "Backend dependencies are ready for status." } else { "Backend dependency bootstrap is required, but status remained read-only." }) `
+            -Level $level `
+            -Outcome $(if ($DependencyStatus.Status -eq "ready") { "succeeded" } else { "observed" }) `
+            -Fields $fields
+    }
+}
+
 function Ensure-ProjectVirtualEnvironment {
     if (Test-Path -LiteralPath $preferredPythonExe) {
         return
@@ -2778,6 +2962,8 @@ function Ensure-ProjectPythonDependencies {
     $installTarget = $venvCandidates[0]
     $installExitCode = 0
     $maxInstallAttempts = 3
+    $pipInstallArgs = @(Get-PipInstallArgumentList)
+    $pipConfigSummary = Get-PipConfigSummary
     $installReason = if (-not $runtimeReady) {
         "backend runtime imports are incomplete"
     } elseif (-not $storedFingerprint) {
@@ -2789,17 +2975,20 @@ function Ensure-ProjectPythonDependencies {
     for ($attempt = 1; $attempt -le $maxInstallAttempts; $attempt++) {
         Write-Note "Installing Python dependencies into $($installTarget.Label) ($installReason, attempt $attempt/$maxInstallAttempts) ..."
         if ($script:currentRuntimeSceneId) {
+            $installStartedFields = Merge-HashtableRecursively `
+                -Base @{ reason = $installReason; attempt = $attempt; max_attempts = $maxInstallAttempts } `
+                -Changes $pipConfigSummary
             Write-RuntimeSceneEvent `
                 -Component "launcher" `
                 -Phase "python_dependencies" `
                 -EventCode "backend.dependencies.install.started" `
                 -Message "Installing Python dependencies." `
                 -Outcome "started" `
-                -Fields @{ reason = $installReason; attempt = $attempt; max_attempts = $maxInstallAttempts }
+                -Fields $installStartedFields
         }
         $installExitCode = Invoke-NativeCommand `
             -CommandPath $installTarget.FilePath `
-            -ArgumentList @($installTarget.PrefixArgs + @("-m", "pip", "install", "--disable-pip-version-check", "-r", $requirementsPath))
+            -ArgumentList @($installTarget.PrefixArgs + $pipInstallArgs)
         if ($installExitCode -eq 0) {
             break
         }
@@ -2811,6 +3000,9 @@ function Ensure-ProjectPythonDependencies {
 
     if ($installExitCode -ne 0) {
         if ($script:currentRuntimeSceneId) {
+            $installFailedFields = Merge-HashtableRecursively `
+                -Base @{ reason = $installReason; exit_code = $installExitCode } `
+                -Changes $pipConfigSummary
             Write-RuntimeSceneEvent `
                 -Component "launcher" `
                 -Phase "python_dependencies" `
@@ -2818,7 +3010,7 @@ function Ensure-ProjectPythonDependencies {
                 -Message "Installing Python dependencies failed." `
                 -Level "error" `
                 -Outcome "failed" `
-                -Fields @{ reason = $installReason; exit_code = $installExitCode }
+                -Fields $installFailedFields
         }
         throw "Installing Python dependencies failed with exit code $installExitCode."
     }
@@ -5242,10 +5434,16 @@ function Show-Status {
     $snapshot = Get-SessionSnapshot
     $buildReason = Get-WebBuildReason
     $sessionRestartReason = Get-SessionRestartReason -Snapshot $snapshot
+    $dependencyStatus = Get-PythonDependencyStatusReadOnly
 
     Write-Host "Mode      : $mode"
     Write-Host "Project   : $projectDir"
     Write-Host "URL       : $url"
+    Write-Host "Python    : $($dependencyStatus.Status) ($($dependencyStatus.Reason))"
+    if ($dependencyStatus.Status -ne "ready") {
+        Write-Host "Repair    : run -Action repair-deps before start/restart if dependency install is required"
+    }
+    Write-StatusDependencyObservation -DependencyStatus $dependencyStatus
 
     if ($snapshot.BackendPid) {
         $backendHealth = if ($snapshot.BackendHealthy) { "healthy" } else { "starting or unhealthy" }
@@ -5299,6 +5497,39 @@ function Show-Status {
         }
     } else {
         Write-Host "State     : not tracking a managed session"
+    }
+}
+
+function Repair-ProjectPythonDependencies {
+    Ensure-Directories
+    Initialize-RuntimeScene -Trigger "repair-deps" -BrowserManaged $false
+    try {
+        Assert-LauncherSystemPrerequisites -BrowserRequired $false -FrontendRequired $false
+        Ensure-ProjectPythonDependencies
+        $dependencyStatus = Get-PythonDependencyStatusReadOnly
+        Write-StatusDependencyObservation -DependencyStatus $dependencyStatus
+        if ($dependencyStatus.Status -ne "ready") {
+            throw "Python dependency repair completed, but dependencies are still not ready: $($dependencyStatus.Reason)"
+        }
+        Update-RuntimeSceneManifest @{
+            ended_at = (Get-Date).ToUniversalTime().ToString("o")
+            status = "success"
+            result = "python_dependencies_ready"
+            backend = @{ health_status = "not_started" }
+            browser = @{ status = "disabled" }
+            supervisor = @{ status = "disabled" }
+        }
+        Write-Note "Python dependencies are ready."
+    } catch {
+        Update-RuntimeSceneManifest @{
+            ended_at = (Get-Date).ToUniversalTime().ToString("o")
+            status = "failed"
+            result = "python_dependency_repair_failed"
+            stop_reason = $_.Exception.Message
+        }
+        throw
+    } finally {
+        Clear-ActiveRuntimeSceneReference -SceneId $script:currentRuntimeSceneId
     }
 }
 
@@ -5726,7 +5957,7 @@ function Invoke-DesktopLifecycleMonitor {
     }
 }
 
-$runtimeManagerClientActions = @("toggle", "start", "stop", "restart", "status")
+$runtimeManagerClientActions = @("toggle", "start", "stop", "restart")
 if ($runtimeManagerClientActions -contains $Action) {
     $clientExitCode = 0
     switch ($Action) {
@@ -5744,9 +5975,6 @@ if ($runtimeManagerClientActions -contains $Action) {
                 exit 11
             }
             $clientExitCode = Invoke-RuntimeManagerClient -Mode "command" -CommandType "restart_workbench" -Reason "launcher_restart" -ForwardNoBrowser:$NoBrowser
-        }
-        "status" {
-            $clientExitCode = Invoke-RuntimeManagerClient -Mode "status"
         }
     }
     if ($clientExitCode -ne 0) {
@@ -5798,6 +6026,9 @@ try {
         }
         "status" {
             Show-Status
+        }
+        "repair-deps" {
+            Repair-ProjectPythonDependencies
         }
         "supervise" {
             Run-SupervisorLoop -ManagedSessionId $SessionId

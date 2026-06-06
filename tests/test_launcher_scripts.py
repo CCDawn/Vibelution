@@ -1876,6 +1876,9 @@ function Resolve-PythonRuntime {
     }
     return [pscustomobject]@{ FilePath = "python-test"; NoConsoleFilePath = "pythonw-test"; PrefixArgs = @() }
 }
+function Resolve-PythonRuntimeReadOnly {
+    return [pscustomobject]@{ FilePath = "python-status"; NoConsoleFilePath = "pythonw-status"; PrefixArgs = @() }
+}
 function Get-ObjectPropertyValue {
     param($Object, [string]$Name, $Default = $null)
     if ($null -eq $Object) { return $Default }
@@ -1903,14 +1906,177 @@ $statusArgs = @($script:calls[2].argumentList)
 
 if ($script:calls[0].commandPath -ne "pythonw-test") { throw "open_workbench did not use the no-console runtime." }
 if ($script:calls[1].commandPath -ne "pythonw-test") { throw "close_workbench did not use the no-console runtime." }
-if ($script:calls[2].commandPath -ne "pythonw-test") { throw "status did not use the no-console runtime." }
+if ($script:calls[2].commandPath -ne "pythonw-status") { throw "status did not use the read-only no-console runtime." }
 if ($openArgs -notcontains "--no-browser") { throw "open_workbench did not forward --no-browser." }
 if ($openArgs -contains "--stop-manager") { throw "open_workbench forwarded --stop-manager unexpectedly." }
 if ($closeArgs -notcontains "--stop-manager") { throw "close_workbench did not forward --stop-manager." }
 if ($closeArgs -contains "--no-browser") { throw "close_workbench forwarded --no-browser unexpectedly." }
 if ($statusArgs -contains "command") { throw "status used command mode unexpectedly." }
 if ($statusArgs -notcontains "status") { throw "status did not invoke runtime manager status." }
-if ($script:dependencyCalls -ne 3) { throw "runtime manager client did not repair dependencies before each command." }
+if ($script:dependencyCalls -ne 2) { throw "runtime manager client should repair dependencies only for mutating commands." }
+Write-Output "ok"
+""",
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip().splitlines()[-1] == "ok"
+
+
+def test_launcher_status_reports_missing_dependencies_without_bootstrap(tmp_path):
+    result = _run_launcher_ast_harness(
+        tmp_path,
+        """
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$LauncherPath
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$source = Get-Content -Raw -LiteralPath $LauncherPath
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors -and $parseErrors.Count -gt 0) {
+    throw "Launcher script parse failed: $($parseErrors[0].Message)"
+}
+
+foreach ($name in @(
+    "Get-ProjectPythonCandidates",
+    "Get-PythonDependencyStatusReadOnly",
+    "Write-StatusDependencyObservation",
+    "Show-Status"
+)) {
+    $functionAst = $ast.Find({
+        param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+            $node.Name -eq $name
+    }, $true)
+    if ($null -eq $functionAst) {
+        throw "$name was not found."
+    }
+    . ([scriptblock]::Create($functionAst.Extent.Text))
+}
+
+$script:bootstrapCalls = 0
+$script:observations = @()
+$projectDir = Join-Path $env:TEMP ("vibelution-status-readonly-" + [guid]::NewGuid().ToString("N"))
+$projectVenvDir = Join-Path $projectDir ".venv"
+$preferredPythonExe = Join-Path $projectVenvDir "Scripts\\python.exe"
+$preferredPythonNoConsoleExe = Join-Path $projectVenvDir "Scripts\\pythonw.exe"
+$launcherPythonOverride = ""
+$requirementsPath = Join-Path $projectDir "requirements.txt"
+$mode = "test"
+$url = "http://127.0.0.1:8000"
+$statePath = Join-Path $projectDir ".runtime\\launcher\\state.json"
+$script:currentRuntimeSceneId = $null
+$script:currentRuntimeSceneDir = $null
+New-Item -ItemType Directory -Path $projectDir -Force | Out-Null
+
+function Ensure-ProjectVirtualEnvironment { $script:bootstrapCalls += 1 }
+function Ensure-ProjectPythonDependencies { $script:bootstrapCalls += 1 }
+function Test-PythonRuntime { return $false }
+function Get-SessionSnapshot {
+    return [pscustomobject]@{
+        BackendPid = 0
+        BackendHealthy = $false
+        BrowserWindowCount = 0
+        BrowserWindowPid = 0
+        BrowserPids = @()
+        SupervisorPid = 0
+        SessionRunning = $false
+        BackendPids = @()
+        State = $null
+    }
+}
+function Get-WebBuildReason { return "" }
+function Get-SessionRestartReason { param($Snapshot) return "" }
+function Write-LauncherControlLog {
+    param([string]$Event, [string]$Message, [string]$Level = "info", [hashtable]$Fields = @{})
+    $script:observations += ,@{ event = $Event; fields = $Fields }
+}
+function Write-RuntimeSceneEvent {}
+
+Show-Status
+
+if ($script:bootstrapCalls -ne 0) {
+    throw "status triggered dependency bootstrap unexpectedly."
+}
+if (-not @($script:observations | Where-Object { $_.event -eq "backend.dependencies.bootstrap.required" }).Count) {
+    throw "status did not log dependency bootstrap requirement."
+}
+Write-Output "ok"
+""",
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip().splitlines()[-1] == "ok"
+
+
+def test_launcher_python_dependency_install_honors_pip_overrides(tmp_path):
+    result = _run_launcher_ast_harness(
+        tmp_path,
+        """
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$LauncherPath
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$source = Get-Content -Raw -LiteralPath $LauncherPath
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors -and $parseErrors.Count -gt 0) {
+    throw "Launcher script parse failed: $($parseErrors[0].Message)"
+}
+
+foreach ($name in @("Get-PipExtraArgumentList", "Get-PipConfigSummary", "Get-PipInstallArgumentList")) {
+    $functionAst = $ast.Find({
+        param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+            $node.Name -eq $name
+    }, $true)
+    if ($null -eq $functionAst) {
+        throw "$name was not found."
+    }
+    . ([scriptblock]::Create($functionAst.Extent.Text))
+}
+
+$launcherPipIndexUrl = "https://mirror.example.invalid/simple"
+$launcherPipExtraArgs = "--trusted-host mirror.example.invalid --timeout 30"
+$requirementsPath = "C:\\project\\requirements.txt"
+
+$args = @(Get-PipInstallArgumentList)
+$summary = Get-PipConfigSummary
+
+foreach ($required in @(
+    "-m",
+    "pip",
+    "install",
+    "--disable-pip-version-check",
+    "--index-url",
+    "https://mirror.example.invalid/simple",
+    "--trusted-host",
+    "mirror.example.invalid",
+    "--timeout",
+    "30",
+    "-r",
+    "C:\\project\\requirements.txt"
+)) {
+    if ($args -notcontains $required) {
+        throw "pip install args are missing $required"
+    }
+}
+if (-not $summary.pip_index_configured -or $summary.pip_index_host -ne "mirror.example.invalid") {
+    throw "pip index summary was not captured."
+}
+if (-not $summary.pip_extra_args_configured) {
+    throw "pip extra arg summary was not captured."
+}
 Write-Output "ok"
 """,
     )
@@ -1982,11 +2148,22 @@ foreach ($requiredProfile in @("launcher-control-profile", "workbench-app-profil
 }
 
 $scriptText = $ast.EndBlock.Extent.Text
-if ($scriptText -notmatch '\\$runtimeManagerClientActions\\s*=\\s*@\\("toggle", "start", "stop", "restart", "status"\\)') {
+if ($scriptText -notmatch '\\$runtimeManagerClientActions\\s*=\\s*@\\("toggle", "start", "stop", "restart"\\)') {
     throw "Runtime-manager client actions changed unexpectedly."
 }
-if ($scriptText -match '\\$runtimeManagerClientActions\\s*=\\s*@\\([^\\)]*"launcher"') {
-    throw "launcher action must stay out of runtime-manager client actions."
+foreach ($forbiddenClientAction in @("launcher", "status", "repair-deps")) {
+    if ($scriptText -match ('\\$runtimeManagerClientActions\\s*=\\s*@\\([^\\)]*"' + [regex]::Escape($forbiddenClientAction) + '"')) {
+        throw "$forbiddenClientAction action must stay out of runtime-manager client actions."
+    }
+}
+if ($source -notmatch '"repair-deps"') {
+    throw "Launcher script is missing the explicit dependency repair action."
+}
+if ($scriptText -notmatch '"status"\\s*\\{\\s*Show-Status\\s*\\}') {
+    throw "status action must stay on the read-only Show-Status path."
+}
+if ($scriptText -notmatch '"repair-deps"\\s*\\{\\s*Repair-ProjectPythonDependencies\\s*\\}') {
+    throw "repair-deps action must invoke explicit Python dependency repair."
 }
 if ($scriptText -notmatch '"launcher"\\s*\\{\\s*Open-LauncherAndEnsureWorkbench\\s*\\}') {
     throw "launcher action does not open the Launcher control surface and ensure the workbench."
