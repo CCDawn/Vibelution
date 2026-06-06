@@ -909,6 +909,89 @@ def _ensure_conversation_workspace_metadata(conversation: dict[str, Any]) -> boo
     return changed
 
 
+def _raw_conversation_session_kind(conversation: dict[str, Any]) -> str:
+    return _normalize_session_kind(conversation.get("session_kind") or conversation.get("sessionKind"))
+
+
+def _raw_conversation_root_session_id(conversation: dict[str, Any], conversation_id: str) -> str:
+    parent_session_id = str(conversation.get("parent_session_id") or conversation.get("parentSessionId") or "").strip()
+    root_session_id = str(conversation.get("root_session_id") or conversation.get("rootSessionId") or "").strip()
+    if root_session_id:
+        return root_session_id
+    if _raw_conversation_session_kind(conversation) == "child" and parent_session_id:
+        return parent_session_id
+    return conversation_id
+
+
+def _raw_conversation_child_session_ids(conversation: dict[str, Any]) -> list[str]:
+    return _normalize_string_list(conversation.get("child_session_ids") or conversation.get("childSessionIds"))
+
+
+def _conversation_agent_direct_session_is_allowed(
+    *,
+    conversation: dict[str, Any],
+    conversation_id: str,
+    direct_session_id: str,
+) -> bool:
+    if not direct_session_id or direct_session_id == conversation_id:
+        return True
+    session_kind = _raw_conversation_session_kind(conversation)
+    if session_kind == "child":
+        root_id = _raw_conversation_root_session_id(conversation, conversation_id)
+        parent_id = str(conversation.get("parent_session_id") or conversation.get("parentSessionId") or "").strip()
+        return direct_session_id in {root_id, parent_id}
+    if direct_session_id in _raw_conversation_child_session_ids(conversation):
+        return True
+    return False
+
+
+def _repair_child_root_agent_direct_session_bindings(
+    payload: dict[str, Any],
+    *,
+    agent_by_id: dict[str, dict[str, Any]],
+) -> bool:
+    conversations = payload.get("conversations")
+    if not isinstance(conversations, list):
+        return False
+    changed = False
+    for conversation in conversations:
+        if not isinstance(conversation, dict):
+            continue
+        conversation_id = str(conversation.get("conversation_id") or "").strip()
+        if not conversation_id or _raw_conversation_session_kind(conversation) == "child":
+            continue
+        agent_id = str(conversation.get("agent_id") or conversation.get("agentId") or "").strip()
+        if not agent_id:
+            continue
+        agent = _agent_from_lookup(agent_by_id, agent_id)
+        if not agent:
+            continue
+        direct_session_id = str(agent.get("directSessionId") or "").strip()
+        if not direct_session_id or direct_session_id not in _raw_conversation_child_session_ids(conversation):
+            continue
+        title = str(conversation.get("title") or DEFAULT_CHAT_CONVERSATION_TITLE).strip() or DEFAULT_CHAT_CONVERSATION_TITLE
+        session_workspace = str(conversation.get("workspace_path") or _session_workspace_relative_path(conversation_id))
+        repaired_agent = ensure_agent_for_session(
+            conversation_id,
+            display_name=title,
+            llm_bindings=agent_directory_service.normalize_agent_llm_bindings(agent.get("llmBindings")),
+            primary_mode=str(agent.get("primaryMode") or agent_directory_service.DEFAULT_AGENT_PRIMARY_MODE).strip()
+            or agent_directory_service.DEFAULT_AGENT_PRIMARY_MODE,
+            role_key=str(agent.get("roleKey") or "").strip(),
+            prompt_template_id=str(agent.get("promptTemplateId") or "").strip(),
+            existing_agent_id=agent_id,
+            session_workspace_path=session_workspace,
+        )
+        agent_by_id[agent_id] = _conversation_agent_from_state(repaired_agent)
+        _record_session_agent_child_direct_binding_repaired_event(
+            conversation_id,
+            agent_id=agent_id,
+            previous_direct_session_id=direct_session_id,
+        )
+        changed = True
+    return changed
+
+
 def _repair_conversation_agent_legacy_model_fields(
     conversation: dict[str, Any],
     *,
@@ -951,6 +1034,7 @@ def _ensure_conversation_agent_metadata(
     session_workspace = str(conversation.get("workspace_path") or _session_workspace_relative_path(conversation_id))
     existing_agent_id = str(conversation.get("agent_id") or conversation.get("agentId") or "").strip()
     existing_agent = _agent_from_lookup(agent_by_id, existing_agent_id) if existing_agent_id else None
+    session_kind = _raw_conversation_session_kind(conversation)
     default_primary_mode = agent_directory_service.DEFAULT_AGENT_PRIMARY_MODE
     primary_mode = str((existing_agent or {}).get("primaryMode") or default_primary_mode).strip() or default_primary_mode
     role_key = str((existing_agent or {}).get("roleKey") or "").strip()
@@ -1030,19 +1114,44 @@ def _ensure_conversation_agent_metadata(
             agent=existing_agent,
         ) or changed
         existing_direct_session_id = str(existing_agent.get("directSessionId") or "").strip()
-        if existing_direct_session_id and existing_direct_session_id != conversation_id:
-            if conversation.get("agentDirectSessionMismatch") is not True:
-                conversation["agentDirectSessionMismatch"] = True
-                changed = True
-            if conversation.get("agentPrimaryDirectSessionId") != existing_direct_session_id:
-                conversation["agentPrimaryDirectSessionId"] = existing_direct_session_id
-                changed = True
-        else:
+        child_session_ids = _raw_conversation_child_session_ids(conversation)
+        if (
+            session_kind != "child"
+            and existing_direct_session_id
+            and existing_direct_session_id in child_session_ids
+        ):
+            repaired_agent = ensure_agent_for_session(
+                conversation_id,
+                display_name=title,
+                llm_bindings=agent_directory_service.normalize_agent_llm_bindings(existing_agent.get("llmBindings")),
+                primary_mode=primary_mode,
+                role_key=role_key,
+                prompt_template_id=prompt_template_id,
+                existing_agent_id=existing_agent_id,
+                session_workspace_path=session_workspace,
+            )
+            existing_agent = _conversation_agent_from_state(repaired_agent)
+            if agent_by_id is not None:
+                agent_by_id[existing_agent_id] = existing_agent
+            existing_direct_session_id = str(existing_agent.get("directSessionId") or "").strip()
+            changed = True
+        if _conversation_agent_direct_session_is_allowed(
+            conversation=conversation,
+            conversation_id=conversation_id,
+            direct_session_id=existing_direct_session_id,
+        ):
             if conversation.get("agentDirectSessionMismatch"):
                 conversation["agentDirectSessionMismatch"] = False
                 changed = True
             if conversation.get("agentPrimaryDirectSessionId"):
                 conversation["agentPrimaryDirectSessionId"] = ""
+                changed = True
+        elif existing_direct_session_id:
+            if conversation.get("agentDirectSessionMismatch") is not True:
+                conversation["agentDirectSessionMismatch"] = True
+                changed = True
+            if conversation.get("agentPrimaryDirectSessionId") != existing_direct_session_id:
+                conversation["agentPrimaryDirectSessionId"] = existing_direct_session_id
                 changed = True
         return changed
     archived_direct_agent = _archived_agent_for_direct_session(conversation_id) if not existing_agent_id else None
@@ -1258,6 +1367,8 @@ def _resolve_active_agent_for_turn(
 
 
 def _session_agent_visible_in_indexes(summary: dict[str, Any]) -> bool:
+    if str(summary.get("sessionKind") or "").strip() == "child":
+        return False
     if bool(summary.get("agentMissing")):
         return False
     if not bool(str(summary.get("agentId") or "").strip()):
@@ -3475,6 +3586,8 @@ def _load_conversations(
     conversations: list[dict[str, Any]] = []
     changed = False
     agent_by_id = agent_by_id if agent_by_id is not None else _agent_lookup_for_conversations()
+    if repair:
+        changed = _repair_child_root_agent_direct_session_bindings(payload, agent_by_id=agent_by_id) or changed
     for raw in list(payload.get("conversations") or []):
         if repair and isinstance(raw, dict):
             changed = _ensure_conversation_workspace_metadata(raw) or changed
@@ -3510,6 +3623,8 @@ def _load_conversation_detail_target(
         return None
     agent_by_id = agent_by_id if agent_by_id is not None else _agent_lookup_for_conversations()
     changed = False
+    if repair:
+        changed = _repair_child_root_agent_direct_session_bindings(payload, agent_by_id=agent_by_id) or changed
     for raw in conversations:
         if not isinstance(raw, dict):
             continue
@@ -3870,6 +3985,13 @@ def _normalize_conversation(
     if ensure_workspace:
         _ensure_session_workspace(conversation_id)
     title = str(raw.get("title") or DEFAULT_CHAT_CONVERSATION_TITLE).strip() or DEFAULT_CHAT_CONVERSATION_TITLE
+    session_kind = _normalize_session_kind(raw.get("session_kind") or raw.get("sessionKind"))
+    parent_session_id = str(raw.get("parent_session_id") or raw.get("parentSessionId") or "").strip()
+    if session_kind == "main":
+        parent_session_id = ""
+    root_session_id = str(raw.get("root_session_id") or raw.get("rootSessionId") or "").strip()
+    if not root_session_id:
+        root_session_id = parent_session_id if session_kind == "child" and parent_session_id else conversation_id
     agent_id = str(raw.get("agent_id") or raw.get("agentId") or "").strip()
     agent = _agent_from_lookup(agent_by_id, agent_id) if agent_id else None
     agent_lookup_checked = agent_by_id is not None
@@ -3878,12 +4000,22 @@ def _normalize_conversation(
     agent_status_code = str(raw.get("agentStatusCode") or "").strip()
     agent_direct_session_mismatch = bool(raw.get("agentDirectSessionMismatch"))
     agent_primary_direct_session_id = str(raw.get("agentPrimaryDirectSessionId") or "").strip()
-    if agent and str(agent.get("directSessionId") or "").strip() != conversation_id:
-        agent_direct_session_mismatch = True
-        agent_primary_direct_session_id = str(agent.get("directSessionId") or "").strip()
-    elif agent and str(agent.get("directSessionId") or "").strip() == conversation_id:
+    agent_direct_session_id = str((agent or {}).get("directSessionId") or "").strip()
+    if agent and _conversation_agent_direct_session_is_allowed(
+        conversation={
+            **raw,
+            "session_kind": session_kind,
+            "parent_session_id": parent_session_id,
+            "root_session_id": root_session_id,
+        },
+        conversation_id=conversation_id,
+        direct_session_id=agent_direct_session_id,
+    ):
         agent_direct_session_mismatch = False
         agent_primary_direct_session_id = ""
+    elif agent and agent_direct_session_id:
+        agent_direct_session_mismatch = True
+        agent_primary_direct_session_id = agent_direct_session_id
     elif agent_id and agent_lookup_checked and agent is None:
         missing_agent_id = agent_id
         agent_missing = True
@@ -3910,13 +4042,6 @@ def _normalize_conversation(
     last_cache_composition = _normalize_session_cache_composition(
         raw.get("last_cache_composition") or raw.get("lastCacheComposition")
     )
-    session_kind = _normalize_session_kind(raw.get("session_kind") or raw.get("sessionKind"))
-    parent_session_id = str(raw.get("parent_session_id") or raw.get("parentSessionId") or "").strip()
-    if session_kind == "main":
-        parent_session_id = ""
-    root_session_id = str(raw.get("root_session_id") or raw.get("rootSessionId") or "").strip()
-    if not root_session_id:
-        root_session_id = parent_session_id if session_kind == "child" and parent_session_id else conversation_id
     child_session_ids = _normalize_string_list(raw.get("child_session_ids") or raw.get("childSessionIds"))
     active_child_session_id = str(raw.get("active_child_session_id") or raw.get("activeChildSessionId") or "").strip()
     task_title = trim_lines(raw.get("task_title") or raw.get("taskTitle") or title, max_lines=1).strip() or title
@@ -9100,6 +9225,41 @@ def _record_session_agent_binding_updated_event(
                 "prompt_template_id": str(prompt_template_id or "").strip(),
                 "role_key": str(role_key or "").strip(),
                 "source": str(source or "").strip(),
+            },
+            lifecycle=True,
+        )
+    except Exception:
+        return
+
+
+def _record_session_agent_child_direct_binding_repaired_event(
+    session_id: str,
+    *,
+    agent_id: str,
+    previous_direct_session_id: str,
+) -> None:
+    normalized_session_id = str(session_id or "").strip()
+    previous_session_id = str(previous_direct_session_id or "").strip()
+    try:
+        record_runtime_scene_event(
+            "conversation",
+            "session_agent_child_direct_binding_repaired",
+            "session.agent_child_direct_binding_repaired",
+            level="warning",
+            outcome="repaired",
+            message="Root session repaired an Agent directSessionId that pointed at one of its child sessions.",
+            fields={
+                "sessionId": normalized_session_id,
+                "agentId": str(agent_id or "").strip(),
+                "previousDirectSessionId": previous_session_id,
+                "source": "session_child_contract_repair",
+            },
+            child_log_path=f"conversations/{_safe_session_workspace_token(normalized_session_id)}-agent-bindings.jsonl",
+            child_log_payload={
+                "session_id": normalized_session_id,
+                "agent_id": str(agent_id or "").strip(),
+                "previous_direct_session_id": previous_session_id,
+                "source": "session_child_contract_repair",
             },
             lifecycle=True,
         )
