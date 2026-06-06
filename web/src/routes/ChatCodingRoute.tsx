@@ -4596,77 +4596,146 @@ export function ChatCodingRoute() {
               ))}
             </div>
           ) : null}
-          <section className={styles.contextCompositionPanel} aria-label={lang === "zh" ? "状态栏上一轮上下文与缓存事实" : "Status bar previous turn context and cache facts"}>
-            <div className={styles.contextCompositionItem} title={contextCompositionTitle}>
-              <div className={styles.contextCompositionHeader}>
-                <span>{t("previousContextComposition")}</span>
-                <strong>{contextCompositionSummary}</strong>
-              </div>
-              <div className={styles.contextCompositionBar} aria-hidden="true">
-                {contextCompositionSegments.length ? (
-                  contextCompositionSegments.map((segment) => (
-                    <span
-                      key={`${segment.key}-${segment.source}`}
-                      className={`${styles.contextCompositionSegment} ${styles.contextCompositionSegmentExact} ${contextCompositionSegmentClass(segment.key)}`}
-                      style={{ width: contextWindowSegmentWidth(segment.tokens ?? 0, contextCompositionLimitTokens) }}
-                    />
-                  ))
-                ) : (
-                  <span className={`${styles.contextCompositionSegment} ${styles.contextCompositionSegmentMissing}`} />
-                )}
-                {contextCompositionRemainingTokens > 0 ? (
-                  <span
-                    className={`${styles.contextCompositionSegment} ${styles.contextCompositionSegmentExact} ${styles.contextCompositionSegmentUnused}`}
-                    style={{ width: contextWindowSegmentWidth(contextCompositionRemainingTokens, contextCompositionLimitTokens) }}
-                  />
-                ) : null}
-              </div>
-              {contextCompositionSegments.length ? (
-                <div className={styles.contextCompositionLegend}>
-                  {contextCompositionSegments.map((segment) => (
-                    <span key={`${segment.key}-${segment.source}-legend`} title={segment.description || segment.source}>
-                      <i className={contextCompositionSegmentClass(segment.key)} />
-                      {contextCompositionSegmentLabel(segment.key, segment.label, t)}
-                      {" "}
-                      {numberFormatter.format(segment.tokens ?? 0)}
-                    </span>
-                  ))}
+          <details className={styles.sessionDiagnosticsDetails}>
+            <summary className={styles.sessionDiagnosticsSummary}>
+              <span className={styles.sessionDiagnosticsSummaryText}>
+                <ChevronRight size={14} />
+                <span>{t("contextDiagnostics")}</span>
+              </span>
+              <span className={styles.sessionDiagnosticsSnapshot}>
+                {contextPercent}% · {cacheHitLine}
+              </span>
+            </summary>
+            <div className={styles.sessionDiagnosticsBody}>
+              <section className={styles.contextCompositionPanel} aria-label={lang === "zh" ? "状态栏上一轮上下文与缓存事实" : "Status bar previous turn context and cache facts"}>
+                <div className={styles.contextCompositionItem} title={contextCompositionTitle}>
+                  <div className={styles.contextCompositionHeader}>
+                    <span>{t("previousContextComposition")}</span>
+                    <strong>{contextCompositionSummary}</strong>
+                  </div>
+                  <div className={styles.contextCompositionBar} aria-hidden="true">
+                    {contextCompositionSegments.length ? (
+                      contextCompositionSegments.map((segment) => (
+                        <span
+                          key={`${segment.key}-${segment.source}`}
+                          className={`${styles.contextCompositionSegment} ${styles.contextCompositionSegmentExact} ${contextCompositionSegmentClass(segment.key)}`}
+                          style={{ width: contextWindowSegmentWidth(segment.tokens ?? 0, contextCompositionLimitTokens) }}
+                        />
+                      ))
+                    ) : (
+                      <span className={`${styles.contextCompositionSegment} ${styles.contextCompositionSegmentMissing}`} />
+                    )}
+                    {contextCompositionRemainingTokens > 0 ? (
+                      <span
+                        className={`${styles.contextCompositionSegment} ${styles.contextCompositionSegmentExact} ${styles.contextCompositionSegmentUnused}`}
+                        style={{ width: contextWindowSegmentWidth(contextCompositionRemainingTokens, contextCompositionLimitTokens) }}
+                      />
+                    ) : null}
+                  </div>
+                  {contextCompositionSegments.length ? (
+                    <div className={styles.contextCompositionLegend}>
+                      {contextCompositionSegments.map((segment) => (
+                        <span key={`${segment.key}-${segment.source}-legend`} title={segment.description || segment.source}>
+                          <i className={contextCompositionSegmentClass(segment.key)} />
+                          {contextCompositionSegmentLabel(segment.key, segment.label, t)}
+                          {" "}
+                          {numberFormatter.format(segment.tokens ?? 0)}
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
                 </div>
-              ) : null}
-            </div>
 
-            <div className={styles.contextCompositionItem} title={cacheCompositionTitle}>
-              <div className={styles.contextCompositionHeader}>
-                <span>{t("previousCacheHit")}</span>
-                <strong>{cacheCompositionSummary}</strong>
-              </div>
-              <div className={styles.contextCompositionBar} aria-hidden="true">
-                {cacheCompositionSegments.length ? (
-                  cacheCompositionSegments.map((segment) => (
-                    <span
-                      key={`${segment.key}-${segment.status}`}
-                      className={`${styles.contextCompositionSegment} ${cacheCompositionSegmentClass(segment.key)}`}
-                      style={{ width: compositionSegmentWidth(segment.tokens ?? 0, cacheCompositionTotalTokens || 1) }}
-                    />
-                  ))
-                ) : (
-                  <span className={`${styles.contextCompositionSegment} ${styles.contextCompositionSegmentMissing}`} />
-                )}
-              </div>
-              {cacheCompositionSegments.length ? (
-                <div className={styles.contextCompositionLegend}>
-                  {cacheCompositionSegments.map((segment) => (
-                    <span key={`${segment.key}-${segment.status}-legend`}>
-                      <i className={cacheCompositionSegmentClass(segment.key)} />
-                      {cacheCompositionSegmentLabel(segment.key, segment.label, t)}
-                      {" "}
-                      {segment.key === "missing" ? "" : numberFormatter.format(segment.tokens ?? 0)}
-                    </span>
-                  ))}
+                <div className={styles.contextCompositionItem} title={cacheCompositionTitle}>
+                  <div className={styles.contextCompositionHeader}>
+                    <span>{t("previousCacheHit")}</span>
+                    <strong>{cacheCompositionSummary}</strong>
+                  </div>
+                  <div className={styles.contextCompositionBar} aria-hidden="true">
+                    {cacheCompositionSegments.length ? (
+                      cacheCompositionSegments.map((segment) => (
+                        <span
+                          key={`${segment.key}-${segment.status}`}
+                          className={`${styles.contextCompositionSegment} ${cacheCompositionSegmentClass(segment.key)}`}
+                          style={{ width: compositionSegmentWidth(segment.tokens ?? 0, cacheCompositionTotalTokens || 1) }}
+                        />
+                      ))
+                    ) : (
+                      <span className={`${styles.contextCompositionSegment} ${styles.contextCompositionSegmentMissing}`} />
+                    )}
+                  </div>
+                  {cacheCompositionSegments.length ? (
+                    <div className={styles.contextCompositionLegend}>
+                      {cacheCompositionSegments.map((segment) => (
+                        <span key={`${segment.key}-${segment.status}-legend`}>
+                          <i className={cacheCompositionSegmentClass(segment.key)} />
+                          {cacheCompositionSegmentLabel(segment.key, segment.label, t)}
+                          {" "}
+                          {segment.key === "missing" ? "" : numberFormatter.format(segment.tokens ?? 0)}
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
                 </div>
-              ) : null}
+              </section>
+
+              <section className={`${styles.resourceBlock} ${styles.sessionResourceDiagnostics}`}>
+                <div className={styles.sectionHeader}>
+                  <p className={styles.blockEyebrow}>{t("sessionContextEstimate")}</p>
+                  <span className={styles.metricValue}>{contextPercent}%</span>
+                </div>
+                <div className={styles.resourceSplit}>
+                  <div className={styles.resourceMetric}>
+                    <span>{contextSourceLine}</span>
+                    <strong title={contextStatusLine}>{contextStatusLine}</strong>
+                  </div>
+                  <div className={styles.resourceMetric}>
+                    <span>{t("contextCompression")}</span>
+                    <strong title={compressionTitleLine}>{compressionCurrentLine}</strong>
+                  </div>
+                </div>
+                <div className={styles.compressionFactGrid} title={compressionTitleLine}>
+                  <div className={styles.compressionFact}>
+                    <span>{t("runtimeContextEstimate")}</span>
+                    <strong>{compressionMainLine}</strong>
+                  </div>
+                  <div className={styles.compressionFact}>
+                    <span>{t("compressionModelWindow")}</span>
+                    <strong>{compressionModelWindowLine}</strong>
+                  </div>
+                  <div className={`${styles.compressionFact} ${styles.compressionFactWide}`}>
+                    <span>{t("compressionThresholdBasis")}</span>
+                    <strong>{compressionScopeLine}</strong>
+                  </div>
+                </div>
+                <p className={styles.oneLineValue} title={lastCompression?.reason || lastCompressionLine}>
+                  <span>{t("compressionLastRun")}</span>
+                  {lastCompressionLine}
+                </p>
+                <details className={styles.compactDetails}>
+                  <summary>
+                    <ChevronRight size={14} />
+                    <span className={styles.compactDetailsClosedLabel}>{t("compressionStrategy")}</span>
+                    <span className={styles.compactDetailsOpenLabel}>{t("collapseSection")}</span>
+                  </summary>
+                  <div className={styles.compressionStrategyList}>
+                    {(compression?.strategy.levels ?? []).map((level) => (
+                      <div key={level.level} className={styles.compressionStrategyRow}>
+                        <strong>{level.level}</strong>
+                        <span>{t("compressionThreshold")} {Math.round(level.thresholdRatio * 100)}% / {numberFormatter.format(level.thresholdTokens)}</span>
+                        <span>{t("compressionKeepAi")} {level.keepAiMessages}</span>
+                        <span>{t("compressionSummary")} {numberFormatter.format(level.summaryMaxChars)}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <p className={styles.detailNote}>
+                    <span>{t("compressionErrorProtection")}</span>
+                    {(compression?.strategy.errorProtectionKeywords ?? []).join(" / ") || "--"}
+                  </p>
+                </details>
+              </section>
             </div>
-          </section>
+          </details>
         </section>
 
         <section className={`${styles.leftBlock} ${styles.featurePresetBlock}`}>
@@ -4717,62 +4786,6 @@ export function ChatCodingRoute() {
             })}
           </div>
           <p className={styles.featurePresetNote}>{t("chatFeaturePanelHint")}</p>
-        </section>
-
-        <section className={`${styles.leftBlock} ${styles.resourceBlock}`}>
-          <div className={styles.sectionHeader}>
-            <p className={styles.blockEyebrow}>{t("sessionContextEstimate")}</p>
-            <span className={styles.metricValue}>{contextPercent}%</span>
-          </div>
-          <div className={styles.resourceSplit}>
-            <div className={styles.resourceMetric}>
-              <span>{contextSourceLine}</span>
-              <strong title={contextStatusLine}>{contextStatusLine}</strong>
-            </div>
-            <div className={styles.resourceMetric}>
-              <span>{t("contextCompression")}</span>
-              <strong title={compressionTitleLine}>{compressionCurrentLine}</strong>
-            </div>
-          </div>
-          <div className={styles.compressionFactGrid} title={compressionTitleLine}>
-            <div className={styles.compressionFact}>
-              <span>{t("runtimeContextEstimate")}</span>
-              <strong>{compressionMainLine}</strong>
-            </div>
-            <div className={styles.compressionFact}>
-              <span>{t("compressionModelWindow")}</span>
-              <strong>{compressionModelWindowLine}</strong>
-            </div>
-            <div className={`${styles.compressionFact} ${styles.compressionFactWide}`}>
-              <span>{t("compressionThresholdBasis")}</span>
-              <strong>{compressionScopeLine}</strong>
-            </div>
-          </div>
-          <p className={styles.oneLineValue} title={lastCompression?.reason || lastCompressionLine}>
-            <span>{t("compressionLastRun")}</span>
-            {lastCompressionLine}
-          </p>
-          <details className={styles.compactDetails}>
-            <summary>
-              <ChevronRight size={14} />
-              <span className={styles.compactDetailsClosedLabel}>{t("compressionStrategy")}</span>
-              <span className={styles.compactDetailsOpenLabel}>{t("collapseSection")}</span>
-            </summary>
-            <div className={styles.compressionStrategyList}>
-              {(compression?.strategy.levels ?? []).map((level) => (
-                <div key={level.level} className={styles.compressionStrategyRow}>
-                  <strong>{level.level}</strong>
-                  <span>{t("compressionThreshold")} {Math.round(level.thresholdRatio * 100)}% / {numberFormatter.format(level.thresholdTokens)}</span>
-                  <span>{t("compressionKeepAi")} {level.keepAiMessages}</span>
-                  <span>{t("compressionSummary")} {numberFormatter.format(level.summaryMaxChars)}</span>
-                </div>
-              ))}
-            </div>
-            <p className={styles.detailNote}>
-              <span>{t("compressionErrorProtection")}</span>
-              {(compression?.strategy.errorProtectionKeywords ?? []).join(" / ") || "--"}
-            </p>
-          </details>
         </section>
 
         <section className={`${styles.leftBlock} ${styles.companionBlock}`}>

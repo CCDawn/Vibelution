@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.42 - 2026-06-06
+
+- Collapsed low-frequency Chat/Coding session diagnostics behind a compact context diagnostics disclosure while keeping status, LLM input, token speed, current task, and prompt-cache facts visible.
+- Kept previous-turn context/cache composition and compression details available inside the diagnostics disclosure instead of occupying the default left rail.
+- Renamed ordered execution-trace expansion copy from tool-call language to execution-detail language so mixed thought/status/tool chains are labeled truthfully.
+
 ## 0.10.41 - 2026-06-06
 
 - Added a Teams workspace knowledge-ingestion status panel for the Challenge Cup research team, showing staged source/candidate/steward/review/official-sync progress from the read-only status API.
