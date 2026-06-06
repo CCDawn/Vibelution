@@ -271,6 +271,17 @@ def test_ensure_evolution_system_teams_materializes_mode_roles(tmp_path, monkeyp
     ]
 
 
+def test_ensure_evolution_system_teams_preserves_existing_team_member_status(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = agent_directory_service.create_agent_instance(display_name="Research Lead", direct_session_id="session-research-lead")
+    team = team_service.create_team(name="Research Team", members=[{"agentId": agent["agentId"], "role": "lead"}])
+
+    team_service.ensure_evolution_system_teams()
+
+    reloaded = team_service.get_team(team["teamId"])
+    assert reloaded["members"][0]["agentStatus"] == "active"
+
+
 def test_compact_team_list_repairs_legacy_team_contract_without_full_hydration(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     room = chat_room_service.create_chat_room(
@@ -402,6 +413,107 @@ def test_compact_team_list_uses_compact_linked_room_without_full_hydration(tmp_p
     assert payload["teams"][0]["linkedChatRoomId"]
     assert payload["teams"][0]["linkedChatRoom"]["participantCount"] == 1
     assert "conversation" not in payload["teams"][0]
+
+
+def test_compact_team_list_batches_linked_room_compact_reads(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    alpha = agent_directory_service.create_agent_instance(display_name="Alpha", direct_session_id="session-alpha")
+    beta = agent_directory_service.create_agent_instance(display_name="Beta", direct_session_id="session-beta")
+    team_service.create_team(name="Compact Team Alpha", members=[{"agentId": alpha["agentId"], "role": "lead"}])
+    team_service.create_team(name="Compact Team Beta", members=[{"agentId": beta["agentId"], "role": "lead"}])
+    list_calls = []
+    real_list_compact = chat_room_service.list_chat_rooms_compact
+
+    def tracked_list_chat_rooms_compact():
+        list_calls.append("list")
+        return real_list_compact()
+
+    monkeypatch.setattr(chat_room_service, "list_chat_rooms_compact", tracked_list_chat_rooms_compact)
+    monkeypatch.setattr(
+        chat_room_service,
+        "get_chat_room_compact",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("compact list should batch linked room references")),
+    )
+
+    payload = team_service.list_teams_compact()
+
+    assert list_calls == ["list"]
+    assert payload["summary"]["activeTeamCount"] == 2
+    assert all((team.get("linkedChatRoom") or {}).get("participantCount") == 1 for team in payload["teams"])
+
+
+def test_compact_team_list_does_not_hydrate_agents_for_active_teams(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    alpha = agent_directory_service.create_agent_instance(display_name="Alpha", direct_session_id="session-alpha")
+    beta = agent_directory_service.create_agent_instance(display_name="Beta", direct_session_id="session-beta")
+    team_service.create_team(name="Compact Team Alpha", members=[{"agentId": alpha["agentId"], "role": "lead"}])
+    team_service.create_team(name="Compact Team Beta", members=[{"agentId": beta["agentId"], "role": "lead"}])
+    monkeypatch.setattr(
+        agent_directory_service,
+        "get_agent",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("compact list should not hydrate agents one by one")),
+    )
+    monkeypatch.setattr(
+        agent_directory_service,
+        "list_agents",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("active compact list should not need agent list hydration")),
+    )
+
+    payload = team_service.list_teams_compact()
+
+    assert payload["summary"]["activeTeamCount"] == 2
+    assert [team["memberCount"] for team in payload["teams"]] == [1, 1]
+
+
+def test_compact_team_list_skips_archived_agent_cascade_repair(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    alpha = agent_directory_service.create_agent_instance(display_name="Alpha", direct_session_id="session-alpha")
+    team = team_service.create_team(name="Archived Compact Team", members=[{"agentId": alpha["agentId"], "role": "lead"}])
+    state = team_service._load_index()
+    stored = state["teams"][0]
+    stored["status"] = "archived"
+    team_service._save_index(state)
+    monkeypatch.setattr(
+        agent_directory_service,
+        "get_agent",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("compact list should not repair archived member agents")),
+    )
+    monkeypatch.setattr(
+        agent_directory_service,
+        "list_agents",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("compact list should not hydrate archived member agents")),
+    )
+
+    payload = team_service.list_teams_compact(include_archived=True)
+
+    assert payload["teams"][0]["teamId"] == team["teamId"]
+    assert payload["teams"][0]["status"] == "archived"
+    assert payload["teams"][0]["memberCount"] == 1
+
+
+def test_team_detail_uses_lightweight_agent_references_for_member_repair(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    alpha = agent_directory_service.create_agent_instance(display_name="Alpha", direct_session_id="session-alpha")
+    beta = agent_directory_service.create_agent_instance(display_name="Beta", direct_session_id="session-beta")
+    team = team_service.create_team(
+        name="Fast Detail Team",
+        members=[{"agentId": alpha["agentId"], "role": "lead"}, {"agentId": beta["agentId"], "role": "reviewer"}],
+    )
+    monkeypatch.setattr(
+        agent_directory_service,
+        "list_agents",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("team detail should not use full agent list hydration")),
+    )
+    monkeypatch.setattr(
+        agent_directory_service,
+        "get_agent",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("team detail should reuse lightweight agent references")),
+    )
+
+    detail = team_service.get_team(team["teamId"])
+
+    assert [member["agentId"] for member in detail["members"]] == [alpha["agentId"], beta["agentId"]]
+    assert detail["canvas"]["validation"]["valid"] is True
 
 
 def test_team_graph_references_skip_linked_room_hydration_and_repair(tmp_path, monkeypatch):
@@ -657,6 +769,40 @@ def test_team_canvas_validation_flags_stale_agent_ref(tmp_path, monkeypatch):
     assert canvas["validation"]["valid"] is True
     assert canvas["nodes"][0]["status"] == "stale"
     assert canvas["validation"]["issues"][0]["code"] == "stale_agent_ref"
+
+
+def test_get_team_repairs_linked_room_stale_archived_participant(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    alpha = agent_directory_service.create_agent_instance(display_name="Alpha", direct_session_id="session-alpha")
+    beta = agent_directory_service.create_agent_instance(display_name="Beta", direct_session_id="session-beta")
+    team = team_service.create_team(
+        name="历史残留团队",
+        members=[{"agentId": alpha["agentId"]}, {"agentId": beta["agentId"]}],
+    )
+    agent_directory_service.archive_agent_instance(beta["agentId"])
+    team_service.update_team(team["teamId"], members=[{"agentId": alpha["agentId"]}])
+    room_before = chat_room_service.get_chat_room_detail(team["linkedChatRoomId"])
+    assert [participant["agentId"] for participant in room_before["participants"]] == [alpha["agentId"]]
+
+    store = chat_room_service._store()
+    rooms_payload = store.load()
+    room = next(item for item in rooms_payload["rooms"] if item["roomId"] == team["linkedChatRoomId"])
+    room["participants"].append(
+        {
+            "participantId": f"agent:{beta['agentId']}",
+            "agentId": beta["agentId"],
+            "sessionId": beta["directSessionId"],
+            "displayName": beta["displayName"],
+            "enabled": True,
+        }
+    )
+    store.save(rooms_payload)
+
+    repaired = team_service.get_team(team["teamId"])
+    room_after = chat_room_service.get_chat_room_detail(repaired["linkedChatRoomId"])
+
+    assert [member["agentId"] for member in repaired["members"]] == [alpha["agentId"]]
+    assert [participant["agentId"] for participant in room_after["participants"]] == [alpha["agentId"]]
 
 
 def test_save_team_canvas_rejects_missing_edge_endpoint(tmp_path, monkeypatch):
