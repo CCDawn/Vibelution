@@ -1049,6 +1049,7 @@ def _ensure_conversation_agent_metadata(
 def _sync_agent_directory_project_root() -> None:
     if agent_directory_service.PROJECT_ROOT != PROJECT_ROOT:
         agent_directory_service.PROJECT_ROOT = PROJECT_ROOT
+        _invalidate_session_list_cache()
 
 
 def _agent_lookup_for_conversations() -> dict[str, dict[str, Any]]:
