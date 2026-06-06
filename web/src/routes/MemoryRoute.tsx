@@ -43,6 +43,7 @@ import {
   KnowledgeSourceArtifact,
   KnowledgeTracePayload,
   MemoryItem,
+  MemoryItemDetailPayload,
   MemoryKnowledgeGraphEdge,
   MemoryKnowledgeGraphNode,
   MemoryKnowledgeGraphNodeDetailPayload,
@@ -1665,6 +1666,11 @@ function invalidateKnowledgeDashboard(queryClient: ReturnType<typeof useQueryCli
   void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeDashboardSnapshot(agentId) });
 }
 
+function invalidateMemoryQueries(queryClient: ReturnType<typeof useQueryClient>) {
+  void queryClient.invalidateQueries({ queryKey: queryKeys.memoryOverview() });
+  void queryClient.invalidateQueries({ queryKey: queryKeys.memoryItemDetails() });
+}
+
 export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
   const { lang } = useAppI18n();
   const copy = COPY[lang];
@@ -1710,7 +1716,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
 
   const overviewQuery = useQuery({
     queryKey: queryKeys.memoryOverview(),
-    queryFn: () => fetchJson<MemoryOverview>("/api/memory/overview"),
+    queryFn: () => fetchJson<MemoryOverview>("/api/memory/overview?includeContent=false"),
     refetchInterval: resolvePollingInterval(pageVisible, 30_000),
     refetchIntervalInBackground: false,
   });
@@ -1793,7 +1799,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
       setActiveSectionId(payload.sectionId);
       setActiveItemId(payload.itemId);
       setMutationFeedback({ tone: "success", text: copy.mutationDone });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.memoryOverview() });
+      invalidateMemoryQueries(queryClient);
     },
     onError: (error) => {
       setMutationFeedback({
@@ -1812,7 +1818,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
       setActiveSectionId(payload.sectionId === "user-managed-memory" ? "" : payload.sectionId);
       setActiveItemId(payload.sectionId === "user-managed-memory" ? "" : payload.itemId);
       setMutationFeedback({ tone: "success", text: copy.mutationDone });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.memoryOverview() });
+      invalidateMemoryQueries(queryClient);
     },
     onError: (error) => {
       setMutationFeedback({
@@ -1831,7 +1837,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
       setActiveSectionId(payload.sectionId);
       setActiveItemId(payload.itemId);
       setMutationFeedback({ tone: "success", text: copy.mutationDone });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.memoryOverview() });
+      invalidateMemoryQueries(queryClient);
     },
     onError: (error) => {
       setMutationFeedback({
@@ -1865,7 +1871,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
       }));
       setKnowledgeFeedback({ tone: "success", text: copy.mutationDone });
       invalidateKnowledgeDashboard(queryClient, activeKnowledgeActorAgentId);
-      void queryClient.invalidateQueries({ queryKey: queryKeys.memoryOverview() });
+      invalidateMemoryQueries(queryClient);
     },
     onError: (error) => {
       setKnowledgeFeedback({ tone: "error", text: `${copy.mutationFailed}: ${error instanceof Error ? error.message : String(error)}` });
@@ -1890,7 +1896,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
       setProposalDraft(newProposalDraft());
       setKnowledgeFeedback({ tone: "success", text: copy.mutationDone });
       invalidateKnowledgeDashboard(queryClient, activeKnowledgeActorAgentId);
-      void queryClient.invalidateQueries({ queryKey: queryKeys.memoryOverview() });
+      invalidateMemoryQueries(queryClient);
     },
     onError: (error) => {
       setKnowledgeFeedback({ tone: "error", text: `${copy.mutationFailed}: ${error instanceof Error ? error.message : String(error)}` });
@@ -1922,7 +1928,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
       setIngestionDraft(newIngestionDraft());
       setKnowledgeFeedback({ tone: "success", text: `${copy.mutationDone} · ${payload.proposal.title}` });
       invalidateKnowledgeDashboard(queryClient, activeKnowledgeActorAgentId);
-      void queryClient.invalidateQueries({ queryKey: queryKeys.memoryOverview() });
+      invalidateMemoryQueries(queryClient);
     },
     onError: (error) => {
       setKnowledgeFeedback({ tone: "error", text: `${copy.mutationFailed}: ${error instanceof Error ? error.message : String(error)}` });
@@ -1952,7 +1958,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
           knowledgeSearchDraft.searchMode,
         ),
       });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.memoryOverview() });
+      invalidateMemoryQueries(queryClient);
     },
     onError: (error) => {
       setKnowledgeFeedback({ tone: "error", text: `${copy.mutationFailed}: ${error instanceof Error ? error.message : String(error)}` });
@@ -2439,7 +2445,17 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     flatVisibleItems.find(({ item }) => item.id === activeItemId) ?? flatVisibleItems[0] ?? null;
   const activeItem = activePair?.item ?? null;
   const activeSection = activePair?.section ?? null;
-  const activeImpact = activeItem ? impactCopy(copy, activeItem) : null;
+  const activeItemDetailQuery = useQuery({
+    queryKey: queryKeys.memoryItemDetail(activeSection?.id ?? "", activeItem?.id ?? ""),
+    queryFn: () =>
+      fetchJson<MemoryItemDetailPayload>(
+        `/api/memory/items/${encodeURIComponent(activeSection?.id ?? "")}/${encodeURIComponent(activeItem?.id ?? "")}`,
+      ),
+    enabled: Boolean(activeSection?.id && activeItem?.id && activeItem.contentDeferred),
+    refetchInterval: false,
+  });
+  const resolvedActiveItem = activeItemDetailQuery.data?.item ?? activeItem;
+  const activeImpact = resolvedActiveItem ? impactCopy(copy, resolvedActiveItem) : null;
   const selectedMemoryKeySet = useMemo(() => new Set(selectedMemoryKeys), [selectedMemoryKeys]);
   const selectedMemoryPairs = useMemo(
     () => manageablePairs.filter(({ section, item }) => selectedMemoryKeySet.has(pairSelectionKey(section.id, item.id))),
@@ -2463,7 +2479,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
   const selectedSectionPromptCount = activeSectionId
     ? sourceSectionMetrics.get(activeSectionId)?.promptCount ?? 0
     : flatVisibleItems.filter(({ item }) => item.inPrompt).length;
-  const canCopyRawContent = Boolean(activeItem?.content);
+  const canCopyRawContent = Boolean(resolvedActiveItem?.content);
 
   useEffect(() => {
     const sectionParam = searchParams.get("section") ?? "";
@@ -2598,7 +2614,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
   }, [pendingVisibleRatingSuggestions, selectedRatingSuggestionIds]);
 
   const refresh = () => {
-    void queryClient.invalidateQueries({ queryKey: queryKeys.memoryOverview() });
+    invalidateMemoryQueries(queryClient);
     invalidateKnowledgeDashboard(queryClient, activeKnowledgeActorAgentId || fallbackKnowledgeActorAgentId);
     void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeGovernanceTasks(activeKnowledgeActorAgentId, "open") });
     void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeIngestionAdapters() });
@@ -2624,21 +2640,21 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     [activeChannel, activeFilter, activeItemId, activeManageFilter, activeSectionId, requestedKnowledgeActorAgentId, searchText],
   );
   const handleCopySourceSummary = async () => {
-    if (!activeSection || !activeItem) {
+    if (!activeSection || !resolvedActiveItem) {
       return;
     }
     try {
-      await copyText(buildInspectionText(copy, activeSection, activeItem, currentUrl));
+      await copyText(buildInspectionText(copy, activeSection, resolvedActiveItem, currentUrl));
       setCopyFeedback({ tone: "success", text: `${copy.copySourceSummary} · ${copy.copyDone}` });
     } catch {
       setCopyFeedback({ tone: "error", text: `${copy.copySourceSummary} · ${copy.copyFailed}` });
     }
   };
   const handleCopySourcePath = async () => {
-    if (!activeSection || !activeItem) {
+    if (!activeSection || !resolvedActiveItem) {
       return;
     }
-    const sourcePath = activeItem.path || activeItem.source || activeSection.sourcePath || "";
+    const sourcePath = resolvedActiveItem.path || resolvedActiveItem.source || activeSection.sourcePath || "";
     if (!sourcePath) {
       return;
     }
@@ -2650,11 +2666,11 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     }
   };
   const handleCopyRawContent = async () => {
-    if (!activeItem?.content) {
+    if (!resolvedActiveItem?.content) {
       return;
     }
     try {
-      await copyText(activeItem.content);
+      await copyText(resolvedActiveItem.content);
       setCopyFeedback({ tone: "success", text: `${copy.copyRawContentAction} · ${copy.copyDone}` });
     } catch {
       setCopyFeedback({ tone: "error", text: `${copy.copyRawContentAction} · ${copy.copyFailed}` });
@@ -2677,10 +2693,10 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     setActiveItemId("");
   };
   const startEdit = () => {
-    if (!activeSection || !activeItem) {
+    if (!activeSection || !resolvedActiveItem) {
       return;
     }
-    setEditDraft(draftFromItem(activeSection, activeItem));
+    setEditDraft(draftFromItem(activeSection, resolvedActiveItem));
   };
   const saveDraft = () => {
     if (!editDraft || !editDraft.title.trim()) {
@@ -2693,16 +2709,16 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     setEditDraft(null);
   };
   const disableOrDeleteActiveItem = () => {
-    if (!activeSection || !activeItem || !activeItem.managedState?.deletable) {
+    if (!activeSection || !resolvedActiveItem || !resolvedActiveItem.managedState?.deletable) {
       return;
     }
-    deleteMemoryMutation.mutate({ sectionId: activeSection.id, itemId: activeItem.id });
+    deleteMemoryMutation.mutate({ sectionId: activeSection.id, itemId: resolvedActiveItem.id });
   };
   const restoreActiveItem = () => {
-    if (!activeSection || !activeItem || !activeItem.managedState?.restorable) {
+    if (!activeSection || !resolvedActiveItem || !resolvedActiveItem.managedState?.restorable) {
       return;
     }
-    restoreMemoryMutation.mutate({ sectionId: activeSection.id, itemId: activeItem.id });
+    restoreMemoryMutation.mutate({ sectionId: activeSection.id, itemId: resolvedActiveItem.id });
   };
   const mutationBusy = memoryMutation.isPending || deleteMemoryMutation.isPending || restoreMemoryMutation.isPending || bulkActionPending !== null;
   const knowledgeBusy =
@@ -2754,7 +2770,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
         tone: "success",
         text: skipped > 0 ? `${copy.mutationDone} · ${copy.bulkActionSkipped}: ${skipped}` : copy.mutationDone,
       });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.memoryOverview() });
+      invalidateMemoryQueries(queryClient);
     } catch (error) {
       setMutationFeedback({
         tone: "error",
@@ -3207,12 +3223,12 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
               <h3>{editDraft.title.trim() || copy.titleField}</h3>
             </div>
           </div>
-          {activeItem && editDraft.mode === "edit" ? (
+          {resolvedActiveItem && editDraft.mode === "edit" ? (
             <div className={styles.editPreviewGrid}>
               {[
-                { label: copy.titleField, current: activeItem.title, draft: editDraft.title },
-                { label: copy.summaryField, current: activeItem.summary, draft: editDraft.summary },
-                { label: copy.contentField, current: activeItem.content, draft: editDraft.content },
+                { label: copy.titleField, current: resolvedActiveItem.title, draft: editDraft.title },
+                { label: copy.summaryField, current: resolvedActiveItem.summary, draft: editDraft.summary },
+                { label: copy.contentField, current: resolvedActiveItem.content, draft: editDraft.content },
               ].map((field) => (
                 <section key={field.label}>
                   <strong>{field.label}</strong>
@@ -3241,39 +3257,39 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     ) : null;
 
   const renderSelectedMemoryConfig = () =>
-    activeItem && activeSection && !editDraft ? (
+    resolvedActiveItem && activeSection && !editDraft ? (
       <section className={styles.managementPanel} aria-label={copy.management}>
         <div className={styles.managementHeader}>
           <div>
             <p className={styles.panelEyebrow}>{activeSection.title}</p>
-            <h2>{activeItem.managedState?.userManaged ? copy.userManaged : activeItem.managedState?.overridden ? copy.overridden : copy.management}</h2>
+            <h2>{resolvedActiveItem.managedState?.userManaged ? copy.userManaged : resolvedActiveItem.managedState?.overridden ? copy.overridden : copy.management}</h2>
           </div>
           <span className={styles.countPill}>
-            {activeItem.managedState?.disabled
+            {resolvedActiveItem.managedState?.disabled
               ? copy.disabledByUser
-              : activeItem.managedState?.userManaged
+              : resolvedActiveItem.managedState?.userManaged
                 ? copy.userManaged
-                : activeItem.managedState?.overridden
+                : resolvedActiveItem.managedState?.overridden
                   ? copy.overridden
                   : copy.canUse}
           </span>
         </div>
-        <p>{activeItem.managedState?.actionHint || copy.managementHint}</p>
+        <p>{resolvedActiveItem.managedState?.actionHint || copy.managementHint}</p>
         <div className={styles.selectedConfigSummary}>
-          <strong>{activeItem.title}</strong>
-          <p>{activeItem.summary || activeItem.content || copy.noContent}</p>
+          <strong>{resolvedActiveItem.title}</strong>
+          <p>{resolvedActiveItem.summary || resolvedActiveItem.content || copy.noContent}</p>
         </div>
         <div className={styles.managementActions}>
           <button
             type="button"
             className={styles.detailActionButton}
             onClick={startEdit}
-            disabled={!activeItem.managedState?.editable || mutationBusy}
+            disabled={!resolvedActiveItem.managedState?.editable || mutationBusy}
           >
             <Pencil size={15} />
             <span>{copy.editMemory}</span>
           </button>
-          {activeItem.managedState?.restorable ? (
+          {resolvedActiveItem.managedState?.restorable ? (
             <button type="button" className={styles.detailActionButton} onClick={restoreActiveItem} disabled={mutationBusy}>
               <Undo2 size={15} />
               <span>{copy.restoreMemory}</span>
@@ -3283,10 +3299,10 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
             type="button"
             className={styles.detailActionButton}
             onClick={disableOrDeleteActiveItem}
-            disabled={!activeItem.managedState?.deletable || mutationBusy}
+            disabled={!resolvedActiveItem.managedState?.deletable || mutationBusy}
           >
             <Trash2 size={15} />
-            <span>{activeItem.managedState?.userManaged ? copy.deleteMemory : copy.disableMemory}</span>
+            <span>{resolvedActiveItem.managedState?.userManaged ? copy.deleteMemory : copy.disableMemory}</span>
           </button>
         </div>
         {mutationFeedback.tone !== "idle" ? (
@@ -3302,16 +3318,16 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     <aside className={showEditor ? styles.detailPanel : `${styles.detailPanel} ${styles.manageDetailPanel}`}>
       {showEditor ? renderManagementEditor() : null}
 
-      {activeItem && activeSection ? (
+      {resolvedActiveItem && activeSection ? (
         <>
           <section className={styles.detailHeader}>
             <div>
               <p className={styles.panelEyebrow}>{activeSection.title}</p>
-              <h2>{activeItem.title}</h2>
-              <p>{activeItem.summary}</p>
+              <h2>{resolvedActiveItem.title}</h2>
+              <p>{resolvedActiveItem.summary}</p>
             </div>
-            <span className={statusClassName(activeItem.agentVisible, activeItem.inPrompt)}>
-              {activeItem.inPrompt ? copy.inPrompt : activeItem.agentVisible ? copy.canUse : copy.manualOnly}
+            <span className={statusClassName(resolvedActiveItem.agentVisible, resolvedActiveItem.inPrompt)}>
+              {resolvedActiveItem.inPrompt ? copy.inPrompt : resolvedActiveItem.agentVisible ? copy.canUse : copy.manualOnly}
             </span>
           </section>
 
@@ -3363,7 +3379,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
           <div className={styles.factGrid}>
             <section>
               <span>{copy.sourcePath}</span>
-              <strong title={activeItem.path}>{activeItem.path || "-"}</strong>
+              <strong title={resolvedActiveItem.path}>{resolvedActiveItem.path || "-"}</strong>
             </section>
             <section>
               <span>{copy.sourceApi}</span>
@@ -3371,11 +3387,11 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
             </section>
             <section>
               <span>{copy.agentVisible}</span>
-              <strong>{activeItem.agentVisible ? copy.yes : copy.no}</strong>
+              <strong>{resolvedActiveItem.agentVisible ? copy.yes : copy.no}</strong>
             </section>
             <section>
               <span>{copy.runtimeInjected}</span>
-              <strong>{activeItem.inPrompt ? copy.yes : copy.no}</strong>
+              <strong>{resolvedActiveItem.inPrompt ? copy.yes : copy.no}</strong>
             </section>
           </div>
 
@@ -3388,16 +3404,16 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
               </div>
             </div>
             <div className={styles.usageList}>
-              {itemChannelPills(copy, activeItem).map((pill) => (
-                <span key={`${activeItem.id}:channel:${pill.label}`} title={pill.hint}>
+              {itemChannelPills(copy, resolvedActiveItem).map((pill) => (
+                <span key={`${resolvedActiveItem.id}:channel:${pill.label}`} title={pill.hint}>
                   <CheckCircle2 size={13} />
                   {pill.label}
                 </span>
               ))}
             </div>
             <div className={styles.usageList}>
-              {activeItem.usedBy.map((usage) => (
-                <span key={`${activeItem.id}:${usage}`}>
+              {resolvedActiveItem.usedBy.map((usage) => (
+                <span key={`${resolvedActiveItem.id}:${usage}`}>
                   <CheckCircle2 size={13} />
                   {usage}
                 </span>
@@ -3420,9 +3436,17 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
             <summary>
               <FileText size={15} />
               <span>{copy.rawContent}</span>
-              <code>{activeItem.contentType}</code>
+              <code>{resolvedActiveItem.contentType}</code>
             </summary>
-            {activeItem.content ? <pre data-language={contentLanguage(activeItem.contentType)}>{activeItem.content}</pre> : <p>{copy.noContent}</p>}
+            {activeItemDetailQuery.isFetching ? <p>{copy.loading}</p> : null}
+            {activeItemDetailQuery.isError ? (
+              <p>{copy.loadFailed}: {activeItemDetailQuery.error instanceof Error ? activeItemDetailQuery.error.message : String(activeItemDetailQuery.error)}</p>
+            ) : null}
+            {resolvedActiveItem.content ? (
+              <pre data-language={contentLanguage(resolvedActiveItem.contentType)}>{resolvedActiveItem.content}</pre>
+            ) : !activeItemDetailQuery.isFetching ? (
+              <p>{copy.noContent}</p>
+            ) : null}
           </details>
         </>
       ) : editDraft ? null : (

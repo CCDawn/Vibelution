@@ -39,6 +39,8 @@ export const queryKeys = {
   fileTree: () => ["files", "tree"] as const,
   fileContent: (path: string) => ["files", "content", path] as const,
   memoryOverview: () => ["memory", "overview"] as const,
+  memoryItemDetails: () => ["memory", "item-detail"] as const,
+  memoryItemDetail: (sectionId: string, itemId: string) => ["memory", "item-detail", sectionId, itemId] as const,
   memoryUsageContract: () => ["memory", "usage-contract"] as const,
   memoryKnowledgeGraph: (agentId = "") => ["memory", "knowledge-graph", agentId] as const,
   memoryKnowledgeGraphNodeDetail: (nodeId: string, agentId = "") => ["memory", "knowledge-graph", "node-detail", nodeId, agentId] as const,

@@ -204,6 +204,37 @@ def test_memory_overview_endpoint_groups_agent_memory_sources(tmp_path, monkeypa
     assert "<html" not in project_items["overview.html"]["summary"].lower()
 
 
+def test_memory_overview_can_defer_item_content_to_detail_endpoint(tmp_path, monkeypatch):
+    prompt_dir = tmp_path / "workspace" / "prompts"
+    prompt_dir.mkdir(parents=True)
+    (prompt_dir / "STATE_MEMORY.md").write_text("Full prompt memory body.", encoding="utf-8")
+    monkeypatch.setattr(memory_service, "PROJECT_ROOT", tmp_path)
+    memory_service._clear_memory_overview_section_cache()
+
+    full_response = client.get("/api/memory/overview")
+    light_response = client.get("/api/memory/overview", params={"includeContent": "false"})
+
+    assert full_response.status_code == 200, full_response.json()
+    assert light_response.status_code == 200, light_response.json()
+    full_sections = {section["id"]: section for section in full_response.json()["sections"]}
+    light_sections = {section["id"]: section for section in light_response.json()["sections"]}
+    full_item = next(item for item in full_sections["prompt-memory"]["items"] if item["title"] == "STATE_MEMORY.md")
+    light_item = next(item for item in light_sections["prompt-memory"]["items"] if item["id"] == full_item["id"])
+
+    assert full_item["content"] == "Full prompt memory body."
+    assert light_item["content"] == ""
+    assert light_item["contentDeferred"] is True
+    assert light_item["contentLength"] == len("Full prompt memory body.")
+
+    detail_response = client.get(f"/api/memory/items/prompt-memory/{full_item['id']}")
+
+    assert detail_response.status_code == 200, detail_response.json()
+    detail_payload = detail_response.json()
+    assert detail_payload["section"]["id"] == "prompt-memory"
+    assert detail_payload["item"]["id"] == full_item["id"]
+    assert detail_payload["item"]["content"] == "Full prompt memory body."
+
+
 def test_memory_knowledge_graph_endpoint_returns_read_only_project_structure(tmp_path, monkeypatch):
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(memory_graph_service, "PROJECT_ROOT", tmp_path)

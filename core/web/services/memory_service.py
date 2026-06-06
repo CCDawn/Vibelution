@@ -44,7 +44,7 @@ GIT_SNAPSHOT_CACHE: dict[str, Any] = {"root": "", "expiresAt": 0.0, "payload": N
 SQLITE_APPEND_ONLY_TABLES = {"GitFileChange", "GitEntityChange"}
 
 
-def get_memory_overview() -> dict[str, Any]:
+def get_memory_overview(*, include_content: bool = True) -> dict[str, Any]:
     """Return a snapshot of every known agent-memory source plus user management state."""
 
     started_at = time.perf_counter()
@@ -73,6 +73,8 @@ def get_memory_overview() -> dict[str, Any]:
         },
         "sections": sections,
     }
+    if not include_content:
+        overview["sections"] = _defer_memory_overview_content(sections)
     _record_memory_overview_perf_event(
         root,
         overview,
@@ -80,6 +82,31 @@ def get_memory_overview() -> dict[str, Any]:
         section_timings=section_timings,
     )
     return overview
+
+
+def get_memory_item_detail(section_id: str, item_id: str) -> dict[str, Any] | None:
+    """Return one memory item with full content and current user-management overlay."""
+
+    root = PROJECT_ROOT.resolve()
+    section_id = str(section_id or "").strip()
+    item_id = str(item_id or "").strip()
+    warnings: list[str] = []
+    managed_memory = _load_managed_memory(root, warnings=warnings)
+    sections = _apply_managed_memory(root, _base_memory_sections(root, warnings), managed_memory)
+    for section in sections:
+        if str(section.get("id") or "") != section_id:
+            continue
+        for item in section.get("items") or []:
+            if isinstance(item, dict) and str(item.get("id") or "") == item_id:
+                return {
+                    "schemaVersion": 1,
+                    "generatedAt": _now_iso(),
+                    "projectRoot": str(root),
+                    "section": {key: value for key, value in section.items() if key != "items"},
+                    "item": dict(item),
+                    "warnings": warnings,
+                }
+    return None
 
 
 def get_memory_usage_contract() -> dict[str, Any]:
@@ -1288,6 +1315,19 @@ def _apply_managed_memory(root: Path, sections: list[dict[str, Any]], managed_me
         }
         merged_sections.append(merged)
     return merged_sections
+
+
+def _defer_memory_overview_content(sections: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    light_sections = copy.deepcopy(sections)
+    for section in light_sections:
+        for item in section.get("items") or []:
+            if not isinstance(item, dict):
+                continue
+            content = str(item.get("content") or "")
+            item["contentLength"] = len(content)
+            item["contentDeferred"] = bool(content)
+            item["content"] = ""
+    return light_sections
 
 
 def _user_managed_memory_section(root: Path, managed_memory: dict[str, Any]) -> dict[str, Any]:

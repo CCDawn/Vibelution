@@ -26,6 +26,8 @@ export type MemoryItem = {
   usedBy: string[];
   summary: string;
   content: string;
+  contentDeferred?: boolean;
+  contentLength?: number;
   contentType: string;
   contentTruncated: boolean;
   exists: boolean;
@@ -73,6 +75,15 @@ export type MemoryMutationResponse = {
   sectionId: string;
   itemId: string;
   item: MemoryItem;
+};
+
+export type MemoryItemDetailPayload = {
+  schemaVersion: number;
+  generatedAt: string;
+  projectRoot: string;
+  section: Omit<MemorySection, "items">;
+  item: MemoryItem;
+  warnings: string[];
 };
 
 export type MemoryKnowledgeGraphNode = {
