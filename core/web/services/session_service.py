@@ -4617,13 +4617,14 @@ def _build_session_summary(conversation: dict[str, Any], *, hydrate_agent: bool 
     raw_title = str(conversation["title"]).strip()
     session_kind = str(conversation.get("sessionKind") or "main").strip() or "main"
     task_title = str(conversation.get("taskTitle") or raw_title).strip() or raw_title
-    display_title = task_title if session_kind == "child" else raw_title
+    display_agent_name = agent_display_name or raw_title
+    display_title = task_title if session_kind == "child" else display_agent_name
     return {
         "id": conversation["id"],
         "title": display_title,
         "agentId": agent_id,
         "agentCode": agent_code,
-        "agentDisplayName": agent_display_name or str(conversation["title"]).strip(),
+        "agentDisplayName": display_agent_name,
         "agentAvatarImagePath": agent_avatar_image_path,
         "agentAvatarImageUrl": agent_avatar_image_url,
         "agentPrimaryMode": agent_primary_mode,
@@ -5628,7 +5629,7 @@ def _find_conversation_entry(payload: dict[str, Any], session_id: str) -> dict[s
 
 def _new_conversation_id(existing_ids: set[str] | None = None) -> str:
     existing = set(existing_ids or set())
-    base = f"session-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+    base = f"session-{datetime.now().strftime('%Y%m%d-%H%M%S-%f')}"
     candidate = base
     suffix = 2
     while candidate in existing:
@@ -6948,6 +6949,7 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                 mental_model_enabled=mental_model_enabled,
                 session_workspace=session_workspace,
                 active_task_hint=context.get("active_task"),
+                user_message_source=str(context.get("user_message_source") or "").strip(),
                 turn_id=turn_id,
             )
             return
@@ -6973,6 +6975,7 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                     _build_stopped_turn_result(initial_stop_reason),
                     mental_model_enabled=mental_model_enabled,
                     active_task_hint=context.get("active_task"),
+                    user_message_source=str(context.get("user_message_source") or "").strip(),
                     turn_id=turn_id,
                 )
                 return
@@ -7104,6 +7107,7 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                         _build_stopped_turn_result(preflight_stop_reason),
                         mental_model_enabled=mental_model_enabled,
                         active_task_hint=context.get("active_task"),
+                        user_message_source=str(context.get("user_message_source") or "").strip(),
                         turn_id=turn_id,
                     )
                     return
@@ -7204,6 +7208,7 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                 mental_model_enabled=mental_model_enabled,
                 session_workspace=session_workspace,
                 active_task_hint=context.get("active_task"),
+                user_message_source=str(context.get("user_message_source") or "").strip(),
                 turn_id=turn_id,
             )
             if agent_id and _is_session_turn_current(session_id, turn_id):
@@ -7630,6 +7635,7 @@ def _persist_session_turn_result(
     mental_model_enabled: bool | None = None,
     session_workspace: str | Path | None = None,
     active_task_hint: Any = None,
+    user_message_source: str = "",
     turn_id: str = "",
 ) -> None:
     lang = get_web_language()
@@ -7714,6 +7720,7 @@ def _persist_session_turn_result(
                 result,
                 messages,
                 existing_task=existing_active_task,
+                user_message_source=user_message_source,
             )
             if next_active_task is not None:
                 conversation["active_task"] = next_active_task
@@ -7906,6 +7913,7 @@ def _persist_session_turn_result(
             task_result,
             conversation["messages"],
             existing_task=existing_active_task,
+            user_message_source=user_message_source,
         )
         if next_active_task is not None:
             conversation["active_task"] = next_active_task
@@ -13000,6 +13008,7 @@ def _build_session_active_task(
     messages: list[dict[str, Any]],
     *,
     existing_task: dict[str, Any] | None = None,
+    user_message_source: str = "",
 ) -> dict[str, Any] | None:
     if not isinstance(result, dict):
         return existing_task
@@ -13105,7 +13114,10 @@ def _build_session_active_task(
         metadata["blocked_reason"] = blocked_reason
     if required_user_input:
         metadata["required_user_input"] = required_user_input
-    if raw_last_user_message and raw_last_user_message != last_user_message:
+    if str(user_message_source or "").strip() == "agent_inbox":
+        metadata["last_user_message_filtered"] = True
+        metadata["last_user_message_reason"] = "agent_inbox_message"
+    elif raw_last_user_message and raw_last_user_message != last_user_message:
         metadata["last_user_message_filtered"] = True
         metadata["last_user_message_reason"] = "agent_inbox_message"
 

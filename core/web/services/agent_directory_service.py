@@ -3833,7 +3833,7 @@ def _find_agent_by_direct_session(state: dict[str, Any], session_id: str) -> dic
 
 def _new_agent_id(existing_ids: set[str] | None = None) -> str:
     existing = set(existing_ids or set())
-    base = f"agent-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+    base = f"agent-{datetime.now().strftime('%Y%m%d-%H%M%S-%f')}"
     candidate = base
     suffix = 2
     while candidate in existing:

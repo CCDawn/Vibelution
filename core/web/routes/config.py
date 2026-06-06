@@ -72,6 +72,7 @@ class ConfigDraftDeleteModelPayload(ConfigDraftPayload):
 
 class ConfigDraftTestPayload(ConfigDraftPayload):
     modelId: str = ""
+    profileId: str = ""
     capability: str = "text"
 
 
@@ -207,6 +208,7 @@ def config_test_llm(payload: ConfigDraftTestPayload) -> dict:
             payload.publicConfig,
             draft_meta=payload.draftMeta,
             model_id=payload.modelId,
+            profile_id=payload.profileId,
             capability=payload.capability,
         )
     except Exception as exc:  # pragma: no cover - routed below
