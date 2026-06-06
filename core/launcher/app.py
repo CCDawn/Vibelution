@@ -2,12 +2,35 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, FastAPI, HTTPException
+from pathlib import Path
 
+from fastapi import APIRouter, FastAPI, HTTPException
+from fastapi.responses import FileResponse, JSONResponse
+
+from core.web.control import control_token_payload
 from . import service as launcher_service
 
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+WEB_DIST = PROJECT_ROOT / "web" / "dist"
+WEB_INDEX = WEB_DIST / "index.html"
+INDEX_CACHE_HEADERS = {
+    "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+    "Pragma": "no-cache",
+    "Expires": "0",
+}
+
 router = APIRouter()
+
+
+@router.get("/api/health")
+def launcher_health() -> dict:
+    return {"status": "ok", "service": "launcher"}
+
+
+@router.get("/api/control-token")
+def launcher_control_token() -> dict:
+    return control_token_payload()
 
 
 @router.get("/api/launcher/status")
@@ -61,6 +84,38 @@ def create_launcher_app() -> FastAPI:
         description="Standalone lifecycle control plane for the Vibelution project bundle.",
     )
     app.include_router(router)
+
+    @app.get("/launcher", include_in_schema=False)
+    @app.get("/", include_in_schema=False)
+    def launcher_index():
+        if WEB_INDEX.is_file():
+            return FileResponse(WEB_INDEX, headers=INDEX_CACHE_HEADERS)
+        return JSONResponse(
+            {
+                "message": "Launcher frontend has not been built yet.",
+                "next": "Build web/dist, then reopen the Launcher.",
+            },
+            status_code=503,
+        )
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    def launcher_spa_fallback(full_path: str):
+        if str(full_path or "").startswith("api/"):
+            return JSONResponse({"detail": "Not Found"}, status_code=404)
+        if WEB_INDEX.is_file():
+            candidate = (WEB_DIST / full_path).resolve()
+            dist_root = WEB_DIST.resolve()
+            if candidate.exists() and candidate.is_file() and (candidate == dist_root or dist_root in candidate.parents):
+                return FileResponse(candidate)
+            return FileResponse(WEB_INDEX, headers=INDEX_CACHE_HEADERS)
+        return JSONResponse(
+            {
+                "message": "Launcher frontend has not been built yet.",
+                "next": "Build web/dist, then reopen the Launcher.",
+            },
+            status_code=503,
+        )
+
     return app
 
 

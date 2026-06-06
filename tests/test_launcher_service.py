@@ -39,6 +39,43 @@ def test_standalone_launcher_app_exposes_project_status_route(monkeypatch):
     assert response.json()["launcher"]["mode"] == "standalone_control_plane"
 
 
+def test_standalone_launcher_app_serves_health_token_and_launcher_shell(monkeypatch, tmp_path):
+    dist = tmp_path / "web" / "dist"
+    dist.mkdir(parents=True)
+    (dist / "index.html").write_text("<!doctype html><title>Launcher</title>", encoding="utf-8")
+    (dist / "asset.txt").write_text("asset-ok", encoding="utf-8")
+    monkeypatch.setattr(launcher_app, "WEB_DIST", dist)
+    monkeypatch.setattr(launcher_app, "WEB_INDEX", dist / "index.html")
+    client = TestClient(launcher_app.create_launcher_app())
+
+    health = client.get("/api/health")
+    token = client.get("/api/control-token")
+    shell = client.get("/launcher")
+    asset = client.get("/asset.txt")
+
+    assert health.status_code == 200
+    assert health.json()["service"] == "launcher"
+    assert token.status_code == 200
+    assert token.json()["controlToken"]
+    assert shell.status_code == 200
+    assert "Launcher" in shell.text
+    assert asset.status_code == 200
+    assert asset.text == "asset-ok"
+
+
+def test_standalone_launcher_app_reports_missing_shell_when_index_is_absent(monkeypatch, tmp_path):
+    dist = tmp_path / "web" / "dist"
+    dist.mkdir(parents=True)
+    monkeypatch.setattr(launcher_app, "WEB_DIST", dist)
+    monkeypatch.setattr(launcher_app, "WEB_INDEX", dist / "index.html")
+    client = TestClient(launcher_app.create_launcher_app())
+
+    response = client.get("/launcher")
+
+    assert response.status_code == 503
+    assert "not been built" in response.json()["message"]
+
+
 def test_launcher_status_is_independent_from_web_runtime_service(monkeypatch, tmp_path):
     import core.web.services.runtime_service as runtime_service
 
