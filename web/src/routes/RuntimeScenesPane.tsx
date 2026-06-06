@@ -621,7 +621,44 @@ function formatBytes(size: number) {
   return `${(value / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function issueCount(value: unknown) {
+  const count = Number(value || 0);
+  return Number.isFinite(count) && count > 0 ? count : 0;
+}
+
 function runtimeSceneSignal(scene: RuntimeSceneDetail, lang: "zh" | "en") {
+  const issueState = scene.packageDiagnosis?.issueState;
+  if (issueState) {
+    const activeErrors = issueCount(issueState.activeErrorCount);
+    const activeWarnings = issueCount(issueState.activeWarningCount);
+    const activeClusters = Math.max(
+      issueCount(issueState.activeClusterCount),
+      activeErrors + activeWarnings,
+    );
+    if (activeClusters > 0) {
+      return {
+        severity: activeErrors > 0 || scene.packageDiagnosis?.severity === "error" ? "error" : "warning",
+        label: lang === "zh" ? `${activeClusters} 个活跃问题` : `${activeClusters} active issues`,
+      };
+    }
+    const policyClusters = Math.max(
+      issueCount(issueState.policyClusterCount),
+      issueCount(issueState.policySignalCount),
+    );
+    if (policyClusters > 0) {
+      return {
+        severity: "warning",
+        label: lang === "zh" ? `${policyClusters} 个策略信号` : `${policyClusters} policy signals`,
+      };
+    }
+    const historicalClusters = issueCount(issueState.historicalClusterCount);
+    if (historicalClusters > 0) {
+      return {
+        severity: "info",
+        label: lang === "zh" ? "历史已恢复" : "Recovered history",
+      };
+    }
+  }
   const errors = scene.packageSummary?.errorCount ?? 0;
   const warnings = scene.packageSummary?.warningCount ?? 0;
   if (errors > 0) {
@@ -643,6 +680,32 @@ function runtimeSceneSignal(scene: RuntimeSceneDetail, lang: "zh" | "en") {
 }
 
 function runtimeSceneListSignal(scene: RuntimeSceneListItem, lang: "zh" | "en") {
+  if (scene.diagnosisSummary) {
+    const activeErrors = issueCount(scene.diagnosisSummary.activeErrorCount);
+    const activeWarnings = issueCount(scene.diagnosisSummary.activeWarningCount);
+    const activeClusters = Math.max(
+      issueCount(scene.diagnosisSummary.activeClusterCount),
+      activeErrors + activeWarnings,
+      scene.diagnosisSummary.needsAction ? 1 : 0,
+    );
+    if (activeClusters > 0) {
+      return {
+        severity: activeErrors > 0 || scene.diagnosisSummary.severity === "error" ? "error" : "warning",
+        label: lang === "zh" ? `${activeClusters} 个活跃问题` : `${activeClusters} active issues`,
+      };
+    }
+    const policyClusters = Math.max(
+      issueCount(scene.diagnosisSummary.policyClusterCount),
+      issueCount(scene.diagnosisSummary.policySignalCount),
+    );
+    if (policyClusters > 0) {
+      return {
+        severity: "warning",
+        label: lang === "zh" ? `${policyClusters} 个策略信号` : `${policyClusters} policy signals`,
+      };
+    }
+    return null;
+  }
   const errors = Number(scene.errorCount || 0);
   const warnings = Number(scene.warningCount || 0);
   if (errors <= 0 && warnings <= 0) {

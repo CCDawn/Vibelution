@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import copy
+import json
 from pathlib import Path
 from types import SimpleNamespace
-import json
 
 import pytest
 
@@ -205,7 +206,7 @@ def test_generate_git_commit_message_cleans_fenced_ai_output(monkeypatch):
 
     assert payload["message"] == "feat: add git commit controls"
     assert payload["modelId"] == "local_commit_model"
-    assert payload["profileId"] == git_status_service.GIT_COMMIT_MESSAGE_PROFILE_ID
+    assert "profileId" not in payload
 
 
 def test_with_git_config_defaults_does_not_mutate_input_and_recovers_invalid_git_block():
@@ -230,6 +231,77 @@ def test_git_config_defaults_round_trip_through_public_toml(tmp_path):
 
     assert loaded["git"]["commit_message_model_ref"] == public_config["git"]["commit_message_model_ref"]
     assert loaded["git"]["commit_message_prompt"] == public_config["git"]["commit_message_prompt"]
+
+
+def test_update_git_commit_message_model_persists_model_ref_and_clears_legacy_profile(monkeypatch):
+    saved_payloads: list[dict] = []
+    public_config = {
+        "llm": {
+            "profiles": {"primary": {"model_ref": "old_model"}},
+            "model_library": {
+                "old_model": {
+                    "provider": {"kind": "local", "base_url": "http://localhost:11434/v1", "requires_api_key": False},
+                    "model": "old",
+                },
+                "new_model": {
+                    "provider": {"kind": "local", "base_url": "http://localhost:11434/v1", "requires_api_key": False},
+                    "model": "new",
+                },
+            },
+        },
+        "git": {
+            "commit_message_profile": "primary",
+            "commit_message_model_ref": "old_model",
+            "commit_message_prompt": "Summary: {summary}\nFiles: {files}\nDiff: {diff}",
+        },
+    }
+    monkeypatch.setattr(git_status_service, "load_public_config", lambda: copy.deepcopy(public_config))
+    monkeypatch.setattr(git_status_service, "build_effective_config", lambda updated: SimpleNamespace())
+    monkeypatch.setattr(git_status_service, "save_public_config", lambda updated: saved_payloads.append(copy.deepcopy(updated)))
+
+    payload = git_status_service.update_git_commit_message_model("new_model")
+
+    assert payload == {"modelId": "new_model", "previousModelId": "old_model"}
+    assert saved_payloads
+    assert saved_payloads[0]["git"]["commit_message_model_ref"] == "new_model"
+    assert "commit_message_profile" not in saved_payloads[0]["git"]
+
+
+def test_update_git_commit_message_model_rejects_unknown_model(monkeypatch):
+    monkeypatch.setattr(
+        git_status_service,
+        "load_public_config",
+        lambda: {"llm": {"model_library": {}}, "git": {"commit_message_prompt": "Summary: {summary}"}},
+    )
+
+    with pytest.raises(ValueError, match="unknown Git commit message model"):
+        git_status_service.update_git_commit_message_model("missing_model")
+
+
+def test_update_git_commit_message_prompt_persists_template(monkeypatch):
+    saved_payloads: list[dict] = []
+    public_config = {
+        "llm": {"model_library": {}},
+        "git": {
+            "commit_message_model_ref": "",
+            "commit_message_prompt": "Summary: {summary}\nFiles: {files}\nDiff: {diff}",
+        },
+    }
+    monkeypatch.setattr(git_status_service, "load_public_config", lambda: copy.deepcopy(public_config))
+    monkeypatch.setattr(git_status_service, "build_effective_config", lambda updated: SimpleNamespace())
+    monkeypatch.setattr(git_status_service, "save_public_config", lambda updated: saved_payloads.append(copy.deepcopy(updated)))
+
+    payload = git_status_service.update_git_commit_message_prompt("New: {summary}\nFiles: {files}\nDiff: {diff}")
+
+    assert payload["prompt"] == "New: {summary}\nFiles: {files}\nDiff: {diff}"
+    assert saved_payloads[0]["git"]["commit_message_prompt"] == payload["prompt"]
+
+
+def test_update_git_commit_message_prompt_requires_placeholders(monkeypatch):
+    monkeypatch.setattr(git_status_service, "load_public_config", lambda: {"git": {}})
+
+    with pytest.raises(ValueError, match=r"\{files\}"):
+        git_status_service.update_git_commit_message_prompt("Summary: {summary}\nDiff: {diff}")
 
 
 def test_ai_diff_payload_truncates_large_diffs_without_dropping_summary(monkeypatch):

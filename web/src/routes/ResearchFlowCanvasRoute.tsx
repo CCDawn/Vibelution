@@ -1199,7 +1199,7 @@ function nextCustomTemplateKey(prefix: string, rawBase: string, templates: Pick<
 }
 
 export function createCustomResearchModuleTemplate(
-  node: Pick<ResearchFlowNode, "id" | "label" | "type" | "agentId" | "agentKey" | "promptKey" | "llmConfigId" | "description" | "routeCondition">,
+  node: Pick<ResearchFlowNode, "id" | "label" | "type" | "agentId" | "agentKey" | "promptKey" | "description" | "routeCondition">,
   templates: Pick<ResearchModuleTemplate, "key">[] = [],
 ): ResearchModuleTemplate {
   const baseId = safeTemplateIdPart(node.id || node.agentKey || node.promptKey || node.label) || "research_module";
@@ -1270,7 +1270,6 @@ export function applyResearchModuleTemplateToNode(template: ResearchModuleTempla
     agentId: template.agentId,
     agentKey: template.agentKey,
     promptKey: template.promptKey,
-    llmConfigId: "",
     description: template.description,
     routeCondition: template.routeCondition,
   };
@@ -1278,10 +1277,6 @@ export function applyResearchModuleTemplateToNode(template: ResearchModuleTempla
 
 function researchAgentInstanceId(agent: Pick<ResearchAgentConfig, "agentId" | "agentInstanceId"> | undefined) {
   return (agent?.agentId || agent?.agentInstanceId || "").trim();
-}
-
-function researchAgentProfileId(agent: Pick<ResearchAgentConfig, "profileId"> | undefined) {
-  return (agent?.profileId || "").trim();
 }
 
 export function applyResearchAgentBindingToNode(agent: ResearchAgentConfig | undefined): Partial<ResearchFlowNode> {
@@ -1292,12 +1287,15 @@ export function applyResearchAgentBindingToNode(agent: ResearchAgentConfig | und
     agentId: researchAgentInstanceId(agent),
     agentKey: agent.key,
     promptKey: agent.key,
-    llmConfigId: "",
   };
 }
 
+type ResearchFlowNodeWithLegacyFields = ResearchFlowNode & {
+  llmConfigId?: string;
+};
+
 export function normalizeResearchFlowNodesForSave(
-  nodes: ResearchFlowNode[],
+  nodes: ResearchFlowNodeWithLegacyFields[],
   agents: ResearchAgentConfig[],
 ): ResearchFlowNode[] {
   const byKey = new Map(agents.map((agent) => [agent.key, agent]));
@@ -1307,16 +1305,16 @@ export function normalizeResearchFlowNodesForSave(
       .filter(([agentId]) => Boolean(agentId)),
   );
   return nodes.map((node) => {
+    const { llmConfigId: _legacyLlmConfigId, ...nodeForSave } = node;
     const agent = (node.agentId ? byId.get(node.agentId) : undefined) ?? (node.agentKey ? byKey.get(node.agentKey) : undefined);
     if (!agent) {
-      return node.agentId ? { ...node, llmConfigId: "" } : node;
+      return nodeForSave;
     }
     return {
-      ...node,
+      ...nodeForSave,
       agentId: researchAgentInstanceId(agent),
-      agentKey: node.agentKey || agent.key,
-      promptKey: node.promptKey || agent.key,
-      llmConfigId: "",
+      agentKey: nodeForSave.agentKey || agent.key,
+      promptKey: nodeForSave.promptKey || agent.key,
     };
   });
 }
@@ -1632,7 +1630,6 @@ export function createResearchNodeFromTemplate(
     agentId: template.agentId,
     agentKey: template.agentKey,
     promptKey: template.promptKey,
-    llmConfigId: "",
     description: template.description,
     routeCondition: template.routeCondition,
   };

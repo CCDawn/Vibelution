@@ -111,14 +111,16 @@ def submit_command(
         _complete_rejected_shutdown_command(command, shutdown_state=shutdown_state)
         return command
     superseded_commands = _supersede_pending_open_commands_for_close(command)
-    joined_command_id = _joinable_open_command_id(command)
+    joined_command_id = _joinable_lifecycle_command_id(command)
     if joined_command_id:
         command["commandId"] = joined_command_id
+        command_type = str(command.get("type") or "")
+        event_type = "command_queue.restart_joined" if command_type == "restart_workbench" else "command_queue.open_joined"
         _append_queue_event(
-            "command_queue.open_joined",
+            event_type,
             {
                 "commandId": joined_command_id,
-                "type": str(command.get("type") or ""),
+                "type": command_type,
                 "requestedBy": str(command.get("requestedBy") or ""),
                 "noBrowser": bool((command.get("args") or {}).get("noBrowser")),
             },
@@ -429,6 +431,15 @@ def _shutdown_in_progress_state() -> dict[str, Any] | None:
     return state
 
 
+def _joinable_lifecycle_command_id(command: dict[str, Any]) -> str:
+    command_type = str(command.get("type") or "").strip()
+    if command_type == "open_workbench":
+        return _joinable_open_command_id(command)
+    if command_type == "restart_workbench":
+        return _joinable_restart_command_id(command)
+    return ""
+
+
 def _joinable_open_command_id(command: dict[str, Any]) -> str:
     command_type = str(command.get("type") or "").strip()
     if command_type != "open_workbench":
@@ -457,6 +468,45 @@ def _joinable_open_command_id(command: dict[str, Any]) -> str:
         if not isinstance(payload, dict):
             continue
         if str(payload.get("type") or "").strip() != "open_workbench":
+            continue
+        existing_args = payload.get("args") if isinstance(payload.get("args"), dict) else {}
+        if not _open_requests_are_compatible(
+            existing_no_browser=bool(existing_args.get("noBrowser")),
+            requested_no_browser=requested_no_browser,
+        ):
+            continue
+        return str(payload.get("commandId") or path.stem).strip() or path.stem
+    return ""
+
+
+def _joinable_restart_command_id(command: dict[str, Any]) -> str:
+    command_type = str(command.get("type") or "").strip()
+    if command_type != "restart_workbench":
+        return ""
+    manager_pid = load_pid()
+    if not _process_is_alive(manager_pid):
+        return ""
+    state = load_state()
+    if not isinstance(state, dict) or not _state_belongs_to_current_manager(state, manager_pid):
+        return ""
+    requested_args = command.get("args") if isinstance(command.get("args"), dict) else {}
+    requested_no_browser = bool(requested_args.get("noBrowser"))
+    active = state.get("command") if isinstance(state.get("command"), dict) else {}
+    active_command_id = str(active.get("activeCommandId") or "").strip()
+    if (
+        active_command_id
+        and str(active.get("activeType") or "").strip() == "restart_workbench"
+        and _open_requests_are_compatible(existing_no_browser=bool(active.get("noBrowser")), requested_no_browser=requested_no_browser)
+    ):
+        return active_command_id
+    for path in sorted(INBOX_DIR.glob("*.json")):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+        if str(payload.get("type") or "").strip() != "restart_workbench":
             continue
         existing_args = payload.get("args") if isinstance(payload.get("args"), dict) else {}
         if not _open_requests_are_compatible(

@@ -619,7 +619,7 @@ def get_knowledge_ingestion_status(team_id: str) -> dict[str, Any]:
         candidate_graph["summary"]["archivedCandidateCount"] = len(archived_candidates)
 
     try:
-        knowledge_overview = team_knowledge_service.list_team_knowledge_bases(normalized_team_id)
+        knowledge_overview = team_knowledge_service.list_team_knowledge_bases(normalized_team_id, internal=True)
     except (team_knowledge_service.TeamKnowledgeError, team_knowledge_service.TeamKnowledgeNotFoundError) as exc:
         raise TeamWorkflowOrchestrationError(str(exc)) from exc
 
@@ -1202,7 +1202,7 @@ def invoke_local_research_model(team_id: str, payload: dict[str, Any], *, llm_cl
         "contentChars": len(raw_content),
         "reasoningChars": len(reasoning_content),
         "jsonSource": parse_source,
-        "profileId": LOCAL_RESEARCH_INVOKE_PROFILE_ID,
+        "modelProfileId": LOCAL_RESEARCH_INVOKE_PROFILE_ID,
         "modelId": model_id,
     }
     _record_workflow_event(

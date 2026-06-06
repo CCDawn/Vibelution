@@ -886,7 +886,6 @@ function defaultFlowStageItems(copy: (typeof COPY)["zh"]): FlowStageItem[] {
       y: index * 120,
       agentKey: stage.id,
       promptKey: stage.id,
-      llmConfigId: "",
       description: "",
       routeCondition: "",
     },

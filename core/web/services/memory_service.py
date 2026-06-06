@@ -25,6 +25,8 @@ USER_MANAGED_SOURCE_KIND = "user_managed_memory"
 USER_MANAGED_MEMORY_FILENAME = "user_memory_overrides.json"
 MANAGED_AUDIT_LIMIT = 200
 MANAGED_MEMORY_WRITE_LOCK = Lock()
+MEMORY_OVERVIEW_PERF_STATE_LOCK = Lock()
+MEMORY_OVERVIEW_WAS_SLOW = False
 MEMORY_OVERVIEW_SLOW_MS = 500.0
 SQLITE_APPEND_ONLY_TABLES = {"GitFileChange", "GitEntityChange"}
 
@@ -36,7 +38,8 @@ def get_memory_overview() -> dict[str, Any]:
     root = PROJECT_ROOT.resolve()
     warnings: list[str] = []
     managed_memory = _load_managed_memory(root, warnings=warnings)
-    sections = _apply_managed_memory(root, _base_memory_sections(root, warnings), managed_memory)
+    base_sections, section_timings = _timed_base_memory_sections(root, warnings)
+    sections = _apply_managed_memory(root, base_sections, managed_memory)
     item_count = sum(len(section["items"]) for section in sections)
     agent_visible_count = sum(
         1 for section in sections for item in section["items"] if bool(item.get("agentVisible"))
@@ -57,7 +60,12 @@ def get_memory_overview() -> dict[str, Any]:
         },
         "sections": sections,
     }
-    _record_memory_overview_perf_event(root, overview, duration_ms=(time.perf_counter() - started_at) * 1000)
+    _record_memory_overview_perf_event(
+        root,
+        overview,
+        duration_ms=(time.perf_counter() - started_at) * 1000,
+        section_timings=section_timings,
+    )
     return overview
 
 
@@ -72,9 +80,9 @@ def get_memory_usage_contract() -> dict[str, Any]:
             list_knowledge_overview,
         )
 
-        knowledge_overview = list_knowledge_overview()
-        operations_health = get_knowledge_operations_health()
-        governance_plan = get_knowledge_governance_plan(limit=8)
+        knowledge_overview = list_knowledge_overview(internal=True)
+        operations_health = get_knowledge_operations_health(internal=True)
+        governance_plan = get_knowledge_governance_plan(limit=8, internal=True)
     except Exception:
         knowledge_overview = {"summary": {}}
         operations_health = {"summary": {}}
@@ -369,19 +377,40 @@ def restore_memory_item(section_id: str, item_id: str) -> dict[str, Any]:
 
 
 def _base_memory_sections(root: Path, warnings: list[str]) -> list[dict[str, Any]]:
-    return [
-        _project_memory_section(root, warnings),
-        _runtime_memory_section(root),
-        _prompt_memory_section(root),
-        _workspace_database_section(root),
-        _research_memory_section(root),
-        _team_knowledge_memory_section(root),
-        _git_memory_section(root),
-        _chat_session_memory_section(root),
-        _self_evolution_memory_section(root),
-        _supervised_evolution_memory_section(root),
-        _runtime_scene_memory_section(root),
+    sections, _timings = _timed_base_memory_sections(root, warnings)
+    return sections
+
+
+def _timed_base_memory_sections(root: Path, warnings: list[str]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    specs = [
+        ("project-memory", lambda: _project_memory_section(root, warnings)),
+        ("runtime-memory", lambda: _runtime_memory_section(root)),
+        ("prompt-memory", lambda: _prompt_memory_section(root)),
+        ("workspace-database", lambda: _workspace_database_section(root)),
+        ("research-memory", lambda: _research_memory_section(root)),
+        ("team-knowledge", lambda: _team_knowledge_memory_section(root)),
+        ("git-memory", lambda: _git_memory_section(root)),
+        ("chat-session-memory", lambda: _chat_session_memory_section(root)),
+        ("self-evolution-memory", lambda: _self_evolution_memory_section(root)),
+        ("supervised-evolution-memory", lambda: _supervised_evolution_memory_section(root)),
+        ("runtime-scene-evidence", lambda: _runtime_scene_memory_section(root)),
     ]
+    sections: list[dict[str, Any]] = []
+    timings: list[dict[str, Any]] = []
+    for fallback_section_id, load_section in specs:
+        started_at = time.perf_counter()
+        section = load_section()
+        duration_ms = round((time.perf_counter() - started_at) * 1000, 1)
+        section_id = str(section.get("id") or fallback_section_id).strip() if isinstance(section, dict) else fallback_section_id
+        sections.append(section)
+        timings.append(
+            {
+                "sectionId": section_id,
+                "durationMs": duration_ms,
+                "itemCount": len(section.get("items") or []) if isinstance(section, dict) else 0,
+            }
+        )
+    return sections, timings
 
 
 def _project_memory_section(root: Path, warnings: list[str]) -> dict[str, Any]:
@@ -1682,8 +1711,20 @@ def _record_memory_management_event(action: str, section_id: str, item_id: str, 
         pass
 
 
-def _record_memory_overview_perf_event(root: Path, overview: dict[str, Any], *, duration_ms: float) -> None:
-    if duration_ms < MEMORY_OVERVIEW_SLOW_MS:
+def _record_memory_overview_perf_event(
+    root: Path,
+    overview: dict[str, Any],
+    *,
+    duration_ms: float,
+    section_timings: list[dict[str, Any]] | None = None,
+) -> None:
+    global MEMORY_OVERVIEW_WAS_SLOW
+    slow = duration_ms >= MEMORY_OVERVIEW_SLOW_MS
+    recovered = False
+    with MEMORY_OVERVIEW_PERF_STATE_LOCK:
+        recovered = bool(MEMORY_OVERVIEW_WAS_SLOW and not slow)
+        MEMORY_OVERVIEW_WAS_SLOW = slow
+    if not slow and not recovered:
         return
     try:
         from core.web.services.runtime_scene_service import record_runtime_scene_event
@@ -1697,13 +1738,18 @@ def _record_memory_overview_perf_event(root: Path, overview: dict[str, Any], *, 
             for section in sections
             if isinstance(section, dict)
         ]
+        event_code = "memory.overview.slow" if slow else "memory.overview.recovered"
         record_runtime_scene_event(
             "memory_service",
             "performance",
-            "memory.overview.slow",
-            message="Memory overview generation exceeded slow threshold",
-            level="warning",
-            outcome="observed",
+            event_code,
+            message=(
+                "Memory overview generation exceeded slow threshold"
+                if slow
+                else "Memory overview generation recovered below slow threshold"
+            ),
+            level="warning" if slow else "info",
+            outcome="observed" if slow else "recovered",
             fields={
                 "durationMs": round(float(duration_ms), 1),
                 "thresholdMs": MEMORY_OVERVIEW_SLOW_MS,
@@ -1711,6 +1757,7 @@ def _record_memory_overview_perf_event(root: Path, overview: dict[str, Any], *, 
                 "sectionCount": len(section_metrics),
                 "itemCount": int((overview.get("summary") or {}).get("itemCount") or 0),
                 "sections": section_metrics,
+                "sectionTimingsMs": list(section_timings or []),
             },
             lifecycle=True,
         )

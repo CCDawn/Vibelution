@@ -72,6 +72,9 @@ def test_reset_summary_includes_memory_as_optional_item(reset_project: Path):
     assert "workspace/prompts/STATE_MEMORY.md" not in protected_paths
     assert "workspace/prompts/DYNAMIC.md" in protected_paths
     assert ".docs/project-memory/" in protected_paths
+    protected_labels = {group["label"] for group in summary["protected"]}
+    assert "配置与模型库" in protected_labels
+    assert "配置与模型绑定" not in protected_labels
 
 
 def test_preview_and_execute_memory_cleanup(reset_project: Path):

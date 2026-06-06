@@ -25,7 +25,7 @@ from .llm_security import (
     validate_llm_provider_target,
     validate_llm_public_config,
 )
-from .models import AppConfig, DEFAULT_ROLE_PROFILE_IDS, RetryPolicyConfig
+from .models import AppConfig, RetryPolicyConfig
 from .profiles import apply_runtime_profile
 from .settings import (
     PROFILE_REFERENCE_OVERRIDE_FIELDS,
@@ -314,6 +314,33 @@ LLM_MODEL_PRESETS = {
             "transport": "chat_completions",
             "contract": "tool_chat",
             "temperature": 0.7,
+            "max_output_tokens": 8192,
+            "timeout": 120,
+            "connect_timeout": 20,
+            "streaming": True,
+            "tool_calling_mode": "auto",
+            "discovery_enabled": True,
+            "prompt_cache": {"mode": "explicit_cache_control"},
+        },
+    },
+    "claude_opus_4_7_atpify": {
+        "label": "Claude Opus 4.7 via ATPify",
+        "provider_id": "anthropic_atpify",
+        "model_id": "claude_opus_4_7_atpify",
+        "provider": {
+            "kind": "anthropic",
+            "api_key_env": "ANTHROPIC_API_KEY",
+            "base_url": "https://www.atpify.cn",
+            "compat_mode": "native",
+            "requires_api_key": True,
+            "context_window": 200000,
+        },
+        "model": {
+            "model": "claude-opus-4-7",
+            "label": "Claude Opus 4.7 via ATPify",
+            "api_key_env": "VIBELUTION_LLM_MODEL_CLAUDE_OPUS_4_7_ATPIFY_API_KEY",
+            "transport": "chat_completions",
+            "contract": "tool_chat",
             "max_output_tokens": 8192,
             "timeout": 120,
             "connect_timeout": 20,
@@ -615,33 +642,7 @@ def _profile_model_ref(profile: Any) -> str:
     return str(profile.get("model_ref", "") or "").strip()
 
 
-def _profile_has_model_binding(profile: Any) -> bool:
-    if not isinstance(profile, dict):
-        return False
-    if _profile_model_ref(profile):
-        return True
-    if str(profile.get("model", "") or "").strip() and _owner_provider(profile):
-        return True
-    return False
-
-
-def _profile_reference_payload(source: dict[str, Any]) -> dict[str, Any]:
-    model_ref = _profile_model_ref(source)
-    if model_ref:
-        payload: dict[str, Any] = {"model_ref": model_ref}
-        label = str(source.get("label", "") or "").strip()
-        if label:
-            payload["label"] = label
-        overrides = source.get("overrides")
-        if isinstance(overrides, dict) and overrides:
-            payload["overrides"] = copy.deepcopy(overrides)
-        return payload
-    payload = copy.deepcopy(source)
-    payload.pop("profile_id", None)
-    return payload
-
-
-def _fill_missing_role_profiles(public_config: dict) -> dict:
+def _ensure_llm_profiles_container(public_config: dict) -> dict:
     updated = copy.deepcopy(public_config) if isinstance(public_config, dict) else {}
     llm = updated.setdefault("llm", {})
     if not isinstance(llm, dict):
@@ -649,24 +650,6 @@ def _fill_missing_role_profiles(public_config: dict) -> dict:
     profiles = llm.setdefault("profiles", {})
     if not isinstance(profiles, dict):
         llm["profiles"] = profiles = {}
-
-    primary = profiles.get("primary", {}) if isinstance(profiles.get("primary", {}), dict) else {}
-    worker = profiles.get("subagent_worker", {}) if isinstance(profiles.get("subagent_worker", {}), dict) else {}
-    explorer = profiles.get("subagent_explorer", {}) if isinstance(profiles.get("subagent_explorer", {}), dict) else {}
-    research_sources = {
-        "research_broad": explorer if _profile_has_model_binding(explorer) else primary,
-        "research_deep": explorer if _profile_has_model_binding(explorer) else primary,
-        "research_review": worker if _profile_has_model_binding(worker) else primary,
-        "research_themes": worker if _profile_has_model_binding(worker) else primary,
-        "research_card": primary,
-    }
-    for profile_id in DEFAULT_ROLE_PROFILE_IDS:
-        if isinstance(profiles.get(profile_id), dict) and _profile_has_model_binding(profiles.get(profile_id)):
-            continue
-        source = research_sources.get(profile_id, primary)
-        if not _profile_has_model_binding(source):
-            continue
-        profiles[profile_id] = _profile_reference_payload(source)
     return updated
 
 
@@ -822,7 +805,7 @@ def _canonicalize_public_config(public_config: dict) -> dict:
     repaired = _repair_legacy_model_library_shape(denormalized)
     with_profile_models = _ensure_profile_model_library_entries(repaired)
     canonicalized = _canonicalize_model_library_api_key_envs(with_profile_models)
-    return _fill_missing_role_profiles(canonicalized)
+    return _ensure_llm_profiles_container(canonicalized)
 
 
 def public_config_hash(public_config: dict) -> str:
@@ -1308,39 +1291,6 @@ def delete_llm_model(public_config: dict, model_id: str) -> dict:
         model_library.pop(model_id, None)
     elif not isinstance(model_library, dict):
         llm["model_library"] = {}
-    profiles = llm.get("profiles", {})
-    if isinstance(profiles, dict):
-        for profile in profiles.values():
-            if not isinstance(profile, dict):
-                continue
-            if _profile_model_ref(profile) != model_id:
-                continue
-            profile["model_ref"] = UNCONFIGURED_MODEL_REF
-            profile["overrides"] = {}
-            profile.pop("provider", None)
-            profile.pop("model", None)
-            for key in PROFILE_OVERRIDE_FIELDS:
-                profile.pop(key, None)
-
-    provider = reference.get("provider", {}) if isinstance(reference, dict) else {}
-    model = str(reference.get("model", "")).strip() if isinstance(reference, dict) else ""
-    provider_fingerprint = _provider_fingerprint(provider) if provider else ""
-    if provider_fingerprint and model and isinstance(profiles, dict):
-        for profile in profiles.values():
-            if not isinstance(profile, dict):
-                continue
-            if _profile_model_ref(profile):
-                continue
-            if str(profile.get("model", "")).strip() != model:
-                continue
-            if _provider_fingerprint(_owner_provider(profile)) != provider_fingerprint:
-                continue
-            profile["model_ref"] = UNCONFIGURED_MODEL_REF
-            profile["overrides"] = {}
-            profile.pop("provider", None)
-            profile.pop("model", None)
-            for key in PROFILE_OVERRIDE_FIELDS:
-                profile.pop(key, None)
     build_effective_config(updated)
     return updated
 

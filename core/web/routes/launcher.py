@@ -4,14 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
 
-from core.web.services.launcher_service import (
-    get_launcher_status,
-    request_launcher_restart,
-    request_launcher_start,
-    request_launcher_stop,
-    request_launcher_supervisor_reattach,
-)
-from core.web.services.runtime_service import RuntimeRestartActiveWorkBlocked
+from core.launcher import service as launcher_service
 
 
 router = APIRouter(tags=["launcher"])
@@ -19,19 +12,19 @@ router = APIRouter(tags=["launcher"])
 
 @router.get("/launcher/status")
 def launcher_status() -> dict:
-    return get_launcher_status()
+    return launcher_service.get_launcher_status()
 
 
 @router.post("/launcher/start", status_code=202)
 def launcher_start() -> dict:
-    return request_launcher_start()
+    return launcher_service.request_launcher_start()
 
 
 @router.post("/launcher/stop", status_code=202)
 def launcher_stop() -> dict:
     try:
-        return request_launcher_stop()
-    except RuntimeRestartActiveWorkBlocked as exc:
+        return launcher_service.request_launcher_stop()
+    except launcher_service.LauncherActiveWorkBlocked as exc:
         raise HTTPException(
             status_code=409,
             detail={
@@ -45,8 +38,8 @@ def launcher_stop() -> dict:
 @router.post("/launcher/restart", status_code=202)
 def launcher_restart() -> dict:
     try:
-        return request_launcher_restart()
-    except RuntimeRestartActiveWorkBlocked as exc:
+        return launcher_service.request_launcher_restart()
+    except launcher_service.LauncherActiveWorkBlocked as exc:
         raise HTTPException(
             status_code=409,
             detail={
@@ -59,4 +52,4 @@ def launcher_restart() -> dict:
 
 @router.post("/launcher/supervisor/reattach", status_code=202)
 def launcher_supervisor_reattach() -> dict:
-    return request_launcher_supervisor_reattach()
+    return launcher_service.request_launcher_supervisor_reattach()

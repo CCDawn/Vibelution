@@ -3,8 +3,10 @@ import {
   Activity,
   ArrowUpRight,
   CheckSquare,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ChevronUp,
   LoaderCircle,
   Pause,
   Play,
@@ -89,6 +91,24 @@ type ConversationTaskSummary = {
 };
 
 type SelfEvolutionPetCompanionTone = "idle" | "active" | "paused" | "caution" | "error";
+export type SelfEvolutionTransactionFilter = "all" | "needs_review" | "open" | "changed";
+export type SelfEvolutionTransactionDateFilter = "all" | string;
+export type SelfEvolutionTransactionDateGroup = {
+  key: string;
+  label: string;
+  count: number;
+  needsReviewCount: number;
+  items: SelfEvolutionTransaction[];
+};
+
+export type SelfEvolutionTransactionHistoryView = {
+  filteredTransactions: SelfEvolutionTransaction[];
+  transactionDateOptions: SelfEvolutionTransactionDateGroup[];
+  dateFilteredTransactions: SelfEvolutionTransaction[];
+  visibleTransactions: SelfEvolutionTransaction[];
+  visibleTransactionGroups: SelfEvolutionTransactionDateGroup[];
+  hiddenTransactionCount: number;
+};
 
 export type SelfEvolutionPetCompanionState = {
   tone: SelfEvolutionPetCompanionTone;
@@ -97,7 +117,41 @@ export type SelfEvolutionPetCompanionState = {
 };
 
 const WORKTREE_PAGE_SIZE = 10;
+export const SELF_TRANSACTION_COLLAPSED_LIMIT = 8;
 const SELF_SIDEBAR_WIDTH_STORAGE_KEY = "vibelution.self.sidebar.width";
+
+export function matchesTransactionFilter(item: SelfEvolutionTransaction, filter: SelfEvolutionTransactionFilter) {
+  if (filter === "needs_review") {
+    return item.validationFailed > 0
+      || item.mutationsBlocked > 0
+      || ["failed", "error", "blocked"].includes(String(item.status || "").trim().toLowerCase());
+  }
+  if (filter === "open") {
+    return item.isOpen || ["queued", "running", "stopping", "paused"].includes(String(item.status || "").trim().toLowerCase());
+  }
+  if (filter === "changed") {
+    return item.mutationsRecorded > 0;
+  }
+  return true;
+}
+
+export function countTransactionsByFilter(items: SelfEvolutionTransaction[], filter: SelfEvolutionTransactionFilter) {
+  return items.filter((item) => matchesTransactionFilter(item, filter)).length;
+}
+
+export function filterSelfEvolutionTransactions(items: SelfEvolutionTransaction[], filter: SelfEvolutionTransactionFilter) {
+  if (filter === "all") {
+    return items;
+  }
+  return items.filter((item) => matchesTransactionFilter(item, filter));
+}
+
+export function filterTransactionsByDate(items: SelfEvolutionTransaction[], dateFilter: SelfEvolutionTransactionDateFilter) {
+  if (!dateFilter || dateFilter === "all") {
+    return items;
+  }
+  return items.filter((item) => transactionDateKey(item) === dateFilter);
+}
 
 export function deriveSelfEvolutionPetCompanionState({
   petLoadFailed = false,
@@ -185,6 +239,23 @@ function compactRevision(value: string) {
   return text.length > 12 ? text.slice(0, 12) : text;
 }
 
+function compactDuration(seconds: number | null | undefined, lang: string) {
+  if (typeof seconds !== "number" || Number.isNaN(seconds) || seconds < 0) {
+    return "--";
+  }
+  if (seconds < 60) {
+    return lang === "zh" ? `${Math.round(seconds)}秒` : `${Math.round(seconds)}s`;
+  }
+  const minutes = Math.floor(seconds / 60);
+  const rest = Math.round(seconds % 60);
+  if (minutes < 60) {
+    return lang === "zh" ? `${minutes}分${rest ? `${rest}秒` : ""}` : `${minutes}m${rest ? ` ${rest}s` : ""}`;
+  }
+  const hours = Math.floor(minutes / 60);
+  const minuteRest = minutes % 60;
+  return lang === "zh" ? `${hours}小时${minuteRest ? `${minuteRest}分` : ""}` : `${hours}h${minuteRest ? ` ${minuteRest}m` : ""}`;
+}
+
 function looksLikeStructuredPayload(value: string) {
   const text = String(value || "").trim();
   return text.startsWith("{") || text.startsWith("[");
@@ -264,6 +335,116 @@ function joinReadableLines(values: Array<string | null | undefined>) {
   return values.map((value) => String(value || "").trim()).filter(Boolean).join("\n");
 }
 
+export function buildTransactionDisplayTitle(
+  item: SelfEvolutionTransaction,
+  options: { closedLabel: string; openLabel: string },
+) {
+  const summary = String(item.summary || "").trim();
+  if (summary) {
+    return summary.length > 72 ? `${summary.slice(0, 72)}...` : summary;
+  }
+  const timestamp = compactTimestamp(item.closedAt || item.openedAt);
+  const stateLabel = item.isOpen ? options.openLabel : options.closedLabel;
+  return timestamp && timestamp !== "--" ? `${stateLabel} · ${timestamp}` : stateLabel;
+}
+
+export function buildTransactionOutcomeLabel(item: SelfEvolutionTransaction, lang: string) {
+  if (matchesTransactionFilter(item, "needs_review")) {
+    return lang === "zh" ? "需复盘" : "Needs review";
+  }
+  if (!item.isOpen && item.validationPassed > 0) {
+    return lang === "zh" ? "验证通过" : "Validated";
+  }
+  return item.isOpen ? (lang === "zh" ? "进行中" : "Open") : (lang === "zh" ? "已记录" : "Recorded");
+}
+
+function transactionTimestamp(item: SelfEvolutionTransaction) {
+  return String(item.closedAt || item.openedAt || "").trim();
+}
+
+export function transactionDateKey(item: SelfEvolutionTransaction) {
+  const timestamp = transactionTimestamp(item);
+  return timestamp.length >= 10 ? timestamp.slice(0, 10) : "unknown";
+}
+
+export function transactionDateLabel(key: string, lang: string) {
+  if (!key || key === "unknown") {
+    return lang === "zh" ? "未记录日期" : "Undated";
+  }
+  if (lang === "zh" && /^\d{4}-\d{2}-\d{2}$/.test(key)) {
+    const [year, month, day] = key.split("-");
+    return `${year}年${month}月${day}日`;
+  }
+  return key;
+}
+
+export function buildTransactionBatchLabel(item: SelfEvolutionTransaction, lang: string) {
+  const timestamp = transactionTimestamp(item);
+  const batchTime = timestamp.length >= 16 ? timestamp.slice(11, 16) : "";
+  const prefix = lang === "zh" ? "批次" : "Batch";
+  if (batchTime) {
+    return `${prefix} ${batchTime}`;
+  }
+  const revision = compactRevision(item.baseRevShort || item.baseRev);
+  return revision && revision !== "--" ? `${prefix} ${revision}` : `${prefix} ${item.txnId}`;
+}
+
+export function groupTransactionsByDate(items: SelfEvolutionTransaction[], lang: string): SelfEvolutionTransactionDateGroup[] {
+  const groups: SelfEvolutionTransactionDateGroup[] = [];
+  const groupByKey = new Map<string, SelfEvolutionTransactionDateGroup>();
+  for (const item of items) {
+    const key = transactionDateKey(item);
+    let group = groupByKey.get(key);
+    if (!group) {
+      group = {
+        key,
+        label: transactionDateLabel(key, lang),
+        count: 0,
+        needsReviewCount: 0,
+        items: [],
+      };
+      groupByKey.set(key, group);
+      groups.push(group);
+    }
+    group.count += 1;
+    if (matchesTransactionFilter(item, "needs_review")) {
+      group.needsReviewCount += 1;
+    }
+    group.items.push(item);
+  }
+  return groups;
+}
+
+export function buildSelfEvolutionTransactionHistoryView({
+  items,
+  filter,
+  dateFilter,
+  lang,
+  expanded,
+  collapsedLimit = SELF_TRANSACTION_COLLAPSED_LIMIT,
+}: {
+  items: SelfEvolutionTransaction[];
+  filter: SelfEvolutionTransactionFilter;
+  dateFilter: SelfEvolutionTransactionDateFilter;
+  lang: string;
+  expanded: boolean;
+  collapsedLimit?: number;
+}): SelfEvolutionTransactionHistoryView {
+  const filteredTransactions = filterSelfEvolutionTransactions(items, filter);
+  const transactionDateOptions = groupTransactionsByDate(filteredTransactions, lang);
+  const dateFilteredTransactions = filterTransactionsByDate(filteredTransactions, dateFilter);
+  const limit = expanded ? dateFilteredTransactions.length : Math.max(0, collapsedLimit);
+  const visibleTransactions = dateFilteredTransactions.slice(0, limit);
+  return {
+    filteredTransactions,
+    transactionDateOptions,
+    dateFilteredTransactions,
+    visibleTransactions,
+    visibleTransactionGroups: groupTransactionsByDate(visibleTransactions, lang),
+    hiddenTransactionCount: Math.max(0, dateFilteredTransactions.length - visibleTransactions.length),
+  };
+}
+
 export function SelfEvolutionTrack({
   overview,
   latestRun,
@@ -303,6 +484,10 @@ export function SelfEvolutionTrack({
   const [worktreePage, setWorktreePage] = useState(1);
   const [activePage, setActivePage] = useState<"workspace" | "status">("workspace");
   const [selectedHistoryTxnIds, setSelectedHistoryTxnIds] = useState<string[]>([]);
+  const [expandedHistoryTxnIds, setExpandedHistoryTxnIds] = useState<string[]>([]);
+  const [transactionFilter, setTransactionFilter] = useState<SelfEvolutionTransactionFilter>("all");
+  const [transactionDateFilter, setTransactionDateFilter] = useState<SelfEvolutionTransactionDateFilter>("all");
+  const [transactionHistoryExpanded, setTransactionHistoryExpanded] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(() => {
     if (typeof window === "undefined") {
       return 304;
@@ -429,7 +614,30 @@ export function SelfEvolutionTrack({
     handoffError,
     deleteHistoryError,
   ]).join("\n");
-  const visibleTransactions = useMemo(() => transactionItems.slice(0, 8), [transactionItems]);
+  const transactionFilterOptions = useMemo(() => ([
+    { id: "all" as const, label: t("filterAll"), count: countTransactionsByFilter(transactionItems, "all") },
+    { id: "needs_review" as const, label: t("selfTransactionFilterNeedsReview"), count: countTransactionsByFilter(transactionItems, "needs_review") },
+    { id: "open" as const, label: t("selfTransactionFilterOpen"), count: countTransactionsByFilter(transactionItems, "open") },
+    { id: "changed" as const, label: t("selfTransactionFilterChanged"), count: countTransactionsByFilter(transactionItems, "changed") },
+  ]), [t, transactionItems]);
+  const transactionHistoryView = useMemo(
+    () => buildSelfEvolutionTransactionHistoryView({
+      items: transactionItems,
+      filter: transactionFilter,
+      dateFilter: transactionDateFilter,
+      lang,
+      expanded: transactionHistoryExpanded,
+    }),
+    [lang, transactionDateFilter, transactionFilter, transactionHistoryExpanded, transactionItems],
+  );
+  const {
+    filteredTransactions,
+    transactionDateOptions,
+    dateFilteredTransactions,
+    visibleTransactions,
+    visibleTransactionGroups,
+    hiddenTransactionCount,
+  } = transactionHistoryView;
   const visibleAuditTrail = useMemo(() => (overview?.auditTail ?? []).slice(-8).reverse(), [overview?.auditTail]);
   const visibleTransactionIds = useMemo(
     () => visibleTransactions.map((item) => item.txnId).filter(Boolean),
@@ -576,7 +784,21 @@ export function SelfEvolutionTrack({
 
   useEffect(() => {
     setSelectedHistoryTxnIds((current) => pruneSelectedHistoryTxnIds(current, visibleTransactionIds));
+    setExpandedHistoryTxnIds((current) => pruneSelectedHistoryTxnIds(current, visibleTransactionIds));
   }, [visibleTransactionIds]);
+
+  useEffect(() => {
+    if (transactionDateFilter === "all") {
+      return;
+    }
+    if (!transactionDateOptions.some((option) => option.key === transactionDateFilter)) {
+      setTransactionDateFilter("all");
+    }
+  }, [transactionDateFilter, transactionDateOptions]);
+
+  useEffect(() => {
+    setTransactionHistoryExpanded(false);
+  }, [transactionDateFilter, transactionFilter]);
 
   function beginSidebarResize(event: ReactPointerEvent<HTMLButtonElement>) {
     if (sidebarCollapsed) {
@@ -618,25 +840,75 @@ export function SelfEvolutionTrack({
     setSelectedHistoryTxnIds(allSelected ? [] : visibleTransactionIds);
   }
 
-  if (loading && !overview) {
+  function toggleTransactionDetails(txnId: string) {
+    if (!txnId) {
+      return;
+    }
+    setExpandedHistoryTxnIds((current) => (
+      current.includes(txnId)
+        ? current.filter((item) => item !== txnId)
+        : [...current, txnId]
+    ));
+  }
+
+  function renderLoadingShell(message: string) {
     return (
-      <section className={styles.surface}>
-        <div className={styles.emptyState}>{t("loading")}</div>
+      <section className={`${styles.surface} ${styles.loadingShell}`} aria-busy="true">
+        <div className={styles.loadingRail}>
+          <div>
+            <p className={styles.eyebrow}>{lang === "zh" ? "自进化状态" : "Self-evolution status"}</p>
+            <h2 className={styles.sectionTitle}>{message}</h2>
+          </div>
+          <div className={styles.loadingStatGrid}>
+            <span>{lang === "zh" ? "工作区" : "Workspace"}<strong>--</strong></span>
+            <span>{lang === "zh" ? "事务" : "Transactions"}<strong>--</strong></span>
+            <span>{lang === "zh" ? "运行" : "Run"}<strong>--</strong></span>
+          </div>
+        </div>
+        <div className={styles.loadingBody}>
+          <div className={styles.loadingPanel}>
+            <strong>{lang === "zh" ? "现场证据" : "Live evidence"}</strong>
+            <span className={styles.skeletonLineWide} />
+            <span className={styles.skeletonLine} />
+            <span className={styles.skeletonLineShort} />
+          </div>
+          <div className={styles.loadingPanel}>
+            <strong>{lang === "zh" ? "事务历史" : "Transaction history"}</strong>
+            <span className={styles.skeletonLine} />
+            <span className={styles.skeletonLineWide} />
+            <span className={styles.skeletonLineShort} />
+          </div>
+          <div className={styles.loadingPanel}>
+            <strong>{lang === "zh" ? "工作区状态" : "Workspace state"}</strong>
+            <span className={styles.skeletonLineShort} />
+            <span className={styles.skeletonLineWide} />
+            <span className={styles.skeletonLine} />
+          </div>
+        </div>
       </section>
     );
   }
 
-  if (!overview) {
+  function renderLoadFailedShell() {
     return (
-      <section className={styles.surface}>
+      <section className={styles.surface} aria-busy="false">
         <div className={styles.emptyState}>{t("loadFailed")}</div>
       </section>
     );
   }
 
+  if (loading && !overview) {
+    return renderLoadingShell(t("loading"));
+  }
+
+  if (!overview) {
+    return renderLoadFailedShell();
+  }
+
   const allVisibleHistorySelected = visibleTransactionIds.length > 0
     && visibleTransactionIds.every((txnId) => selectedHistoryTxnIds.includes(txnId));
   const selectedHistorySet = new Set(selectedHistoryTxnIds);
+  const expandedHistorySet = new Set(expandedHistoryTxnIds);
 
   return (
     <div className={styles.pageStack}>
@@ -1130,11 +1402,76 @@ export function SelfEvolutionTrack({
                   </div>
                 </div>
 
+                <div className={styles.transactionFilterBar} aria-label={t("selfTransactionFilterLabel")}>
+                  {transactionFilterOptions.map((option) => (
+                    <button
+                      key={option.id}
+                      type="button"
+                      className={
+                        option.id === transactionFilter
+                          ? `${styles.transactionFilterButton} ${styles.transactionFilterButtonActive}`
+                          : styles.transactionFilterButton
+                      }
+                      onClick={() => setTransactionFilter(option.id)}
+                    >
+                      <span>{option.label}</span>
+                      <strong>{option.count}</strong>
+                    </button>
+                  ))}
+                </div>
+
+                <div className={styles.transactionDateFilterBar} aria-label={t("selfTransactionDateFilterLabel")}>
+                  <span>{t("selfTransactionDateFilterLabel")}</span>
+                  <button
+                    type="button"
+                    className={
+                      transactionDateFilter === "all"
+                        ? `${styles.transactionFilterButton} ${styles.transactionFilterButtonActive}`
+                        : styles.transactionFilterButton
+                    }
+                    onClick={() => setTransactionDateFilter("all")}
+                  >
+                    <span>{t("selfTransactionDateAll")}</span>
+                    <strong>{filteredTransactions.length}</strong>
+                  </button>
+                  {transactionDateOptions.map((option) => (
+                    <button
+                      key={option.key}
+                      type="button"
+                      className={
+                        option.key === transactionDateFilter
+                          ? `${styles.transactionFilterButton} ${styles.transactionFilterButtonActive}`
+                          : styles.transactionFilterButton
+                      }
+                      onClick={() => setTransactionDateFilter(option.key)}
+                    >
+                      <span>{option.label}</span>
+                      <strong>{option.count}</strong>
+                    </button>
+                  ))}
+                </div>
+
                 <div className={styles.historyToolbar}>
                   <span className={styles.noticeText}>
                     {t("selfHistoryGroup")} {t("selectedCount")} {selectedHistoryTxnIds.length}
                   </span>
                   <div className={styles.toolbarActions}>
+                    <span className={styles.transactionVisibleSummary}>
+                      {lang === "zh"
+                        ? `${t("selfTransactionVisibleSummary")} ${visibleTransactions.length}/${dateFilteredTransactions.length} 条`
+                        : `${t("selfTransactionVisibleSummary")} ${visibleTransactions.length}/${dateFilteredTransactions.length}`}
+                      {hiddenTransactionCount > 0 ? ` · ${hiddenTransactionCount} ${t("selfTransactionHiddenSuffix")}` : ""}
+                    </span>
+                    {dateFilteredTransactions.length > SELF_TRANSACTION_COLLAPSED_LIMIT ? (
+                      <button
+                        type="button"
+                        className={styles.secondaryAction}
+                        onClick={() => setTransactionHistoryExpanded((current) => !current)}
+                      >
+                        {transactionHistoryExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                        {transactionHistoryExpanded ? t("selfTransactionCollapseRecent") : t("selfTransactionShowAll")}
+                      </button>
+                    ) : null}
                     <button
                       type="button"
                       className={styles.secondaryAction}
@@ -1159,36 +1496,114 @@ export function SelfEvolutionTrack({
                 <p className={styles.noticeText}>{t("batchDeleteHint")}</p>
 
                 <div className={styles.listBlock}>
-                  {visibleTransactions.length === 0 ? (
+                  {transactionItems.length === 0 ? (
                     <div className={styles.emptyState}>{t("selfNoTransactions")}</div>
+                  ) : visibleTransactions.length === 0 ? (
+                    <div className={styles.emptyState}>{t("selfTransactionFilterEmpty")}</div>
                   ) : (
-                    visibleTransactions.map((item) => (
-                      <div
-                        key={item.txnId}
-                        className={
-                          selectedHistorySet.has(item.txnId)
-                            ? `${styles.listItem} ${styles.listItemSelected}`
-                            : styles.listItem
-                        }
-                      >
-                        <div className={styles.itemTop}>
-                          <label className={styles.checkboxRow}>
-                            <input
-                              type="checkbox"
-                              checked={selectedHistorySet.has(item.txnId)}
-                              onChange={() => toggleHistorySelection(item.txnId)}
-                            />
-                            <strong>{item.txnId}</strong>
-                          </label>
-                          <div className={styles.pillRow}>
-                            <span className={styles.secondaryPill}>{t("selfLinkedAuditCount")} {auditCountByTxnId.get(item.txnId) || 0}</span>
-                            <span className={styles.secondaryPill}>{statusLabel(item.status)}</span>
-                          </div>
+                    visibleTransactionGroups.map((group) => (
+                      <div key={group.key} className={styles.transactionDateGroup}>
+                        <div className={styles.transactionDateHeader}>
+                          <strong>{group.label}</strong>
+                          <span>
+                            {lang === "zh"
+                              ? `${group.count}条 · ${group.needsReviewCount}条需复盘`
+                              : `${group.count} items · ${group.needsReviewCount} need review`}
+                          </span>
                         </div>
-                        <span className={styles.mutedText}>
-                          {compactTimestamp(item.closedAt || item.openedAt)} · {compactRevision(item.baseRevShort || item.baseRev)}
-                        </span>
-                        <span className={styles.mutedText}>{item.summary || "--"}</span>
+                        <div className={styles.transactionGroupList}>
+                          {group.items.map((item) => {
+                            const displayTitle = buildTransactionDisplayTitle(item, {
+                              closedLabel: lang === "zh" ? "已收口事务" : "Closed transaction",
+                              openLabel: lang === "zh" ? "进行中事务" : "Open transaction",
+                            });
+                            const outcomeLabel = buildTransactionOutcomeLabel(item, lang);
+                            const validationLabel = lang === "zh"
+                              ? `验证 ${item.validationPassed}/${item.validationFailed}`
+                              : `Validation ${item.validationPassed}/${item.validationFailed}`;
+                            const mutationLabel = lang === "zh"
+                              ? `变更 ${item.mutationsRecorded} · 阻塞 ${item.mutationsBlocked}`
+                              : `Changes ${item.mutationsRecorded} · blocked ${item.mutationsBlocked}`;
+                            const durationLabel = lang === "zh"
+                              ? `耗时 ${compactDuration(item.durationSeconds, lang)}`
+                              : `Duration ${compactDuration(item.durationSeconds, lang)}`;
+                            const evidenceLabel = lang === "zh"
+                              ? `证据 ${item.auditEventCount}`
+                              : `Evidence ${item.auditEventCount}`;
+                            const detailsExpanded = expandedHistorySet.has(item.txnId);
+                            const batchLabel = buildTransactionBatchLabel(item, lang);
+                            return (
+                              <div
+                                key={item.txnId}
+                                className={
+                                  selectedHistorySet.has(item.txnId)
+                                    ? `${styles.listItem} ${styles.listItemSelected}`
+                                    : styles.listItem
+                                }
+                              >
+                                <div className={styles.itemTop}>
+                                  <label className={styles.checkboxRow}>
+                                    <input
+                                      type="checkbox"
+                                      checked={selectedHistorySet.has(item.txnId)}
+                                      onChange={() => toggleHistorySelection(item.txnId)}
+                                    />
+                                    <span className={styles.transactionTitleStack}>
+                                      <strong>{displayTitle}</strong>
+                                      <span>{batchLabel} · {compactTimestamp(item.closedAt || item.openedAt)} · {item.txnId}</span>
+                                    </span>
+                                  </label>
+                                  <div className={styles.pillRow}>
+                                    <span className={styles.secondaryPill}>{outcomeLabel}</span>
+                                    <span className={styles.secondaryPill}>{statusLabel(item.status)}</span>
+                                    <span className={styles.secondaryPill}>{t("selfLinkedAuditCount")} {auditCountByTxnId.get(item.txnId) || 0}</span>
+                                    <button
+                                      type="button"
+                                      className={styles.transactionDetailsToggle}
+                                      aria-expanded={detailsExpanded}
+                                      onClick={() => toggleTransactionDetails(item.txnId)}
+                                    >
+                                      {detailsExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                                      {detailsExpanded ? t("hideDetails") : t("showDetails")}
+                                    </button>
+                                  </div>
+                                </div>
+                                <div className={styles.transactionMetaGrid}>
+                                  <span>{validationLabel}</span>
+                                  <span>{mutationLabel}</span>
+                                  <span>{durationLabel}</span>
+                                  <span>{evidenceLabel}</span>
+                                </div>
+                                {detailsExpanded ? (
+                                  <div className={styles.transactionDetailsPanel}>
+                                    <div className={styles.transactionDetailRow}>
+                                      <span>{t("selfGoal")}</span>
+                                      <strong>{item.goalPreview || item.summary || "--"}</strong>
+                                    </div>
+                                    <div className={styles.transactionDetailRow}>
+                                      <span>{t("selfFinishedAt")}</span>
+                                      <strong>{compactTimestamp(item.closedAt || item.openedAt)}</strong>
+                                    </div>
+                                    <div className={styles.transactionDetailRow}>
+                                      <span>{t("sourceRun")}</span>
+                                      <strong>{compactRevision(item.baseRevShort || item.baseRev)}</strong>
+                                    </div>
+                                    <div className={styles.transactionDetailRow}>
+                                      <span>{t("selfAuditTrail")}</span>
+                                      <strong>{item.lastAuditEvent || "--"}</strong>
+                                    </div>
+                                  </div>
+                                ) : item.goalPreview ? (
+                                  <p className={styles.transactionGoalPreview}>{item.goalPreview}</p>
+                                ) : null}
+                                <span className={styles.mutedText}>
+                                  {compactRevision(item.baseRevShort || item.baseRev)}
+                                  {item.lastAuditEvent ? ` · ${item.lastAuditEvent}` : ""}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
                       </div>
                     ))
                   )}

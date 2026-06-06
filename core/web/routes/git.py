@@ -11,6 +11,8 @@ from core.web.services.git_status_service import (
     get_git_commits,
     get_git_file_diff,
     get_git_status,
+    update_git_commit_message_model,
+    update_git_commit_message_prompt,
 )
 
 
@@ -20,12 +22,19 @@ router = APIRouter(tags=["git"])
 class GitCommitMessagePayload(BaseModel):
     paths: list[str] = Field(default_factory=list)
     model_id: str = Field(default="", alias="modelId")
-    profile_id: str = Field(default="", alias="profileId")
 
 
 class GitCommitPayload(BaseModel):
     paths: list[str] = Field(default_factory=list)
     message: str = ""
+
+
+class GitCommitMessageModelPayload(BaseModel):
+    model_id: str = Field(default="", alias="modelId")
+
+
+class GitCommitMessagePromptPayload(BaseModel):
+    prompt: str = ""
 
 
 @router.get("/git/status")
@@ -49,7 +58,23 @@ def git_diff(path: str = Query(min_length=1)) -> dict:
 @router.post("/git/commit-message")
 def git_commit_message(payload: GitCommitMessagePayload) -> dict:
     try:
-        return generate_git_commit_message(payload.paths, model_id=payload.model_id, profile_id=payload.profile_id)
+        return generate_git_commit_message(payload.paths, model_id=payload.model_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.put("/git/commit-message/default-model")
+def git_commit_message_default_model(payload: GitCommitMessageModelPayload) -> dict:
+    try:
+        return update_git_commit_message_model(payload.model_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.put("/git/commit-message/prompt")
+def git_commit_message_prompt(payload: GitCommitMessagePromptPayload) -> dict:
+    try:
+        return update_git_commit_message_prompt(payload.prompt)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 

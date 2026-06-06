@@ -251,10 +251,52 @@ def test_ensure_dataset_registry_bootstraps_generated_and_chat_sources(tmp_path:
     assert (tmp_path / "workspace" / "evaluation" / "datasets" / "chat_reviewed_multiturn.jsonl").exists()
     terminal_path = tmp_path / "workspace" / "evaluation" / "datasets" / "terminal_bench_smoke.jsonl"
     assert terminal_path.exists()
-    assert len([line for line in terminal_path.read_text(encoding="utf-8").splitlines() if line.strip()]) >= 2
+    terminal_rows = [
+        json.loads(line)
+        for line in terminal_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert len(terminal_rows) >= 2
+    assert {row["max_steps"] for row in terminal_rows} == {100}
     core_path = tmp_path / "workspace" / "evaluation" / "datasets" / "terminal_bench_core.jsonl"
     assert core_path.exists()
     assert len([line for line in core_path.read_text(encoding="utf-8").splitlines() if line.strip()]) >= 5
+
+
+def test_ensure_dataset_registry_refreshes_stale_builtin_terminal_smoke_source(tmp_path: Path):
+    terminal_path = tmp_path / "workspace" / "evaluation" / "datasets" / "terminal_bench_smoke.jsonl"
+    terminal_path.parent.mkdir(parents=True, exist_ok=True)
+    terminal_path.write_text(
+        "\n".join(
+            [
+                json.dumps({"case_id": "tb_smoke_inspect_validate", "max_steps": 8}, ensure_ascii=False),
+                json.dumps({"case_id": "tb_smoke_safe_probe_edit", "max_steps": 10}, ensure_ascii=False),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    ensure_dataset_registry(tmp_path)
+
+    rows = [json.loads(line) for line in terminal_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert [row["case_id"] for row in rows] == ["tb_smoke_inspect_validate", "tb_smoke_safe_probe_edit"]
+    assert {row["max_steps"] for row in rows} == {100}
+    assert rows[0]["verifier"]["command"] == "python -m pytest tests/test_dataset_registry.py -q"
+
+
+def test_ensure_dataset_registry_does_not_overwrite_customized_terminal_smoke_source(tmp_path: Path):
+    terminal_path = tmp_path / "workspace" / "evaluation" / "datasets" / "terminal_bench_smoke.jsonl"
+    terminal_path.parent.mkdir(parents=True, exist_ok=True)
+    custom_lines = [
+        json.dumps({"case_id": "tb_smoke_inspect_validate", "max_steps": 8}, ensure_ascii=False),
+        json.dumps({"case_id": "custom_local_probe", "max_steps": 12}, ensure_ascii=False),
+    ]
+    terminal_path.write_text("\n".join(custom_lines) + "\n", encoding="utf-8")
+
+    ensure_dataset_registry(tmp_path)
+
+    assert terminal_path.read_text(encoding="utf-8") == "\n".join(custom_lines) + "\n"
 
 
 def test_dataset_status_distinguishes_effective_empty_missing_and_harness(tmp_path: Path):
@@ -495,9 +537,9 @@ def test_materialize_terminal_bench_smoke_preserves_harness_contract(tmp_path: P
     assert case["requires_terminal_harness"] is True
     assert case["official_runner"] == "pending"
     assert case["verifier"]["command"]
-    assert case["max_steps"] == 8
+    assert case["max_steps"] == 100
     assert "multi-step ReAct" in case["baseline_prompt"]
-    assert "roughly 8 meaningful tool steps" in case["baseline_prompt"]
+    assert "roughly 100 meaningful tool steps" in case["baseline_prompt"]
     assert "Official metadata" not in case["baseline_prompt"]
     assert "Close the transaction" in case["baseline_prompt"] or "close the transaction" in case["baseline_prompt"]
 

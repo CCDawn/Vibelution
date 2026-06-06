@@ -25,15 +25,14 @@ class SupervisedAgentBindingError(ValueError):
 class SupervisedAgentRole:
     role: str
     label: str
-    profile_id: str
 
 
 SUPERVISED_AGENT_ROLES: tuple[SupervisedAgentRole, ...] = (
-    SupervisedAgentRole("baseline", "监督进化基线 Agent", "supervised_baseline"),
-    SupervisedAgentRole("candidate", "监督进化候选 Agent", "supervised_candidate"),
-    SupervisedAgentRole("reviewer", "监督进化评审 Agent", "primary"),
-    SupervisedAgentRole("auditor", "监督进化审计 Agent", "primary"),
-    SupervisedAgentRole("judge", "监督进化裁决 Agent", "primary"),
+    SupervisedAgentRole("baseline", "监督进化基线 Agent"),
+    SupervisedAgentRole("candidate", "监督进化候选 Agent"),
+    SupervisedAgentRole("reviewer", "监督进化评审 Agent"),
+    SupervisedAgentRole("auditor", "监督进化审计 Agent"),
+    SupervisedAgentRole("judge", "监督进化裁决 Agent"),
 )
 CORE_SUPERVISED_AGENT_ROLES = {"judge"}
 
@@ -101,7 +100,11 @@ def supervised_agent_bindings() -> dict[str, dict[str, Any]]:
 
     raw_slots = _raw_supervised_mode_slots()
     raw_registry = _load_raw_agent_registry_state()
-    model_library_ids = _configured_model_library_ids()
+    config = _current_config()
+    try:
+        model_library_ids = _configured_model_library_ids(config)
+    except TypeError:
+        model_library_ids = _configured_model_library_ids()
     _assert_raw_supervised_slot_dialogue_bindings(raw_slots, raw_registry, model_library_ids=model_library_ids)
     ensure_supervised_agent_instances()
     raw_agents = {
@@ -154,13 +157,19 @@ def supervised_agent_bindings() -> dict[str, dict[str, Any]]:
             raise SupervisedAgentBindingError(
                 f"Supervised role Agent dialogue model is not present in model library: {role} ({agent_id}) modelId={dialogue_model_id}"
             )
+        if _config_model_library_contains(config, dialogue_model_id):
+            _assert_supervised_binding_model_ready(
+                role,
+                agent_id=agent_id,
+                model_id=dialogue_model_id,
+                config=config,
+            )
         bindings[role] = {
             "agentId": str(agent.get("agentId") or "").strip(),
             "agentCode": str(agent.get("agentCode") or "").strip(),
             "displayName": str(agent.get("displayName") or "").strip(),
             "primaryMode": str(agent.get("primaryMode") or "").strip(),
             "roleKey": str(agent.get("roleKey") or role).strip() or role,
-            "profileId": str(agent.get("profileId") or "").strip(),
             "llmBindings": llm_bindings,
             "dialogueModelId": dialogue_model_id,
             "llmSlot": "dialogue",
@@ -175,6 +184,12 @@ def supervised_agent_bindings() -> dict[str, dict[str, Any]]:
     return bindings
 
 
+def _current_config() -> Any:
+    from config.settings import get_config
+
+    return get_config()
+
+
 def _load_raw_agent_registry_state() -> dict[str, Any]:
     try:
         payload = json.loads(agent_directory_service.registry_path().read_text(encoding="utf-8"))
@@ -183,16 +198,74 @@ def _load_raw_agent_registry_state() -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
-def _configured_model_library_ids() -> set[str]:
+def _configured_model_library_ids(config: Any | None = None) -> set[str]:
     try:
-        from config.settings import get_config
-
-        model_library = getattr(get_config().llm, "model_library", {}) or {}
+        resolved_config = config or _current_config()
+        model_library = getattr(resolved_config.llm, "model_library", {}) or {}
     except Exception:
         return set()
     if not isinstance(model_library, dict):
         return set()
     return {str(model_id or "").strip() for model_id in model_library.keys() if str(model_id or "").strip()}
+
+
+def _config_model_library_contains(config: Any, model_id: str) -> bool:
+    try:
+        model_library = getattr(config.llm, "model_library", {}) or {}
+    except Exception:
+        return False
+    return isinstance(model_library, dict) and str(model_id or "").strip() in model_library
+
+
+def _assert_supervised_binding_model_ready(
+    role: str,
+    *,
+    agent_id: str,
+    model_id: str,
+    config: Any,
+) -> None:
+    try:
+        from core.llm.agent_runtime import config_for_agent_llm_model
+
+        runtime_config = config_for_agent_llm_model(
+            config,
+            model_id=model_id,
+            runtime_profile_id="primary",
+            slot="dialogue",
+        )
+        profile = runtime_config.llm.get_profile(profile_id="primary")
+        provider = runtime_config.llm.get_provider(profile.provider_id)
+        api_key = runtime_config.get_api_key_for_profile(profile_id="primary")
+        api_key_source = runtime_config.llm.get_api_key_source_label_for_profile(profile_id="primary")
+        api_key_env = str(getattr(profile, "api_key_env", "") or "").strip()
+        if bool(getattr(provider, "requires_api_key", True)) and not api_key:
+            _record_supervised_binding_failure(
+                role,
+                agent_id=agent_id,
+                reason="missing_dialogue_model_api_key",
+                model_id=model_id,
+                extra_fields={
+                    "apiKeyEnv": api_key_env,
+                    "apiKeySource": api_key_source,
+                    "providerKind": str(getattr(provider, "kind", "") or "").strip(),
+                },
+            )
+            raise SupervisedAgentBindingError(
+                f"Supervised role Agent dialogue model has no configured API key: {role} ({agent_id}) modelId={model_id} apiKeyEnv={api_key_env or 'unknown'}"
+            )
+    except SupervisedAgentBindingError:
+        raise
+    except Exception as exc:
+        _record_supervised_binding_failure(
+            role,
+            agent_id=agent_id,
+            reason="dialogue_model_resolution_failed",
+            model_id=model_id,
+            extra_fields={"errorType": type(exc).__name__, "message": str(exc)},
+        )
+        raise SupervisedAgentBindingError(
+            f"Supervised role Agent dialogue model cannot be resolved: {role} ({agent_id}) modelId={model_id}: {type(exc).__name__}: {exc}"
+        ) from exc
 
 
 def _assert_raw_supervised_slot_dialogue_bindings(
@@ -271,7 +344,25 @@ def _supervised_slot_warning(mode_payload: dict[str, Any], role: str) -> dict[st
     return None
 
 
-def _record_supervised_binding_failure(role: str, *, agent_id: str, reason: str, model_id: str = "") -> None:
+def _record_supervised_binding_failure(
+    role: str,
+    *,
+    agent_id: str,
+    reason: str,
+    model_id: str = "",
+    extra_fields: dict[str, Any] | None = None,
+) -> None:
+    fields = {
+        "mode": "supervised_evolution",
+        "slot": str(role or "").strip(),
+        "roleKey": str(role or "").strip(),
+        "agentId": str(agent_id or "").strip(),
+        "modelId": str(model_id or "").strip(),
+        "source": "ModeBinding.slots",
+        "reason": str(reason or "").strip(),
+    }
+    if extra_fields:
+        fields.update(extra_fields)
     try:
         record_runtime_scene_event(
             "agent_runtime",
@@ -280,15 +371,7 @@ def _record_supervised_binding_failure(role: str, *, agent_id: str, reason: str,
             message="Supervised evolution role Agent resolution failed",
             level="error",
             outcome="failed",
-            fields={
-                "mode": "supervised_evolution",
-                "slot": str(role or "").strip(),
-                "roleKey": str(role or "").strip(),
-                "agentId": str(agent_id or "").strip(),
-                "modelId": str(model_id or "").strip(),
-                "source": "ModeBinding.slots",
-                "reason": str(reason or "").strip(),
-            },
+            fields=fields,
             lifecycle=True,
         )
     except Exception:
@@ -341,7 +424,7 @@ def _sync_supervised_mode_binding(agents: list[dict[str, Any]], *, preserve_exis
 def _ensure_supervised_role(role: SupervisedAgentRole) -> tuple[dict[str, Any] | None, bool]:
     existing = _find_agent_by_supervised_role(role.role)
     changed = False
-    seed_llm_bindings = session_service.llm_bindings_for_profile_id(role.profile_id)
+    seed_llm_bindings = session_service.default_session_llm_bindings()
     if role.role not in CORE_SUPERVISED_AGENT_ROLES and _supervised_role_slot_excluded(role.role):
         _record_supervised_agent_event(
             "supervised.agent_instance.sync_skipped_excluded_slot",
@@ -498,7 +581,6 @@ def _record_supervised_agent_event(
             fields={
                 "supervisedRole": role.role,
                 "supervisedRoleLabel": role.label,
-                "profileId": role.profile_id,
                 **dict(fields or {}),
             },
             lifecycle=True,

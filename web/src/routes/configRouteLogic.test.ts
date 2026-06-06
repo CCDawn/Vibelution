@@ -4,25 +4,26 @@ import {
   CONFIG_COPY,
 } from "./ConfigRoute";
 import {
-  applyModelOptionToProfileDraft,
   avatarCropSourceRect,
   canDiscoverModelsForProvider,
   clampAvatarCropOffset,
-  collectModelDetailKeys,
   configInvalidationDomainsForApply,
   defaultModelApiKeyEnv,
   deriveConfigEditorSyncState,
   deriveModelCenterInventoryRows,
   deriveModelCenterSummary,
+  countModelCenterHealthIssues,
   groupModelPresets,
   hasPendingSecretChanges,
   listSupervisedAgentInstances,
   modelLibraryIdFromParts,
+  mergeEditableConfigView,
   MODEL_CONTRACT_OPTIONS,
   MODEL_TOOL_CALLING_MODE_OPTIONS,
   MODEL_TRANSPORT_OPTIONS,
   PROVIDER_KIND_OPTIONS,
   PROVIDER_COMPAT_MODE_OPTIONS,
+  pickEditableConfigView,
   presetCategory,
   resolveImageInputCapabilityStatus,
   resolveConfigSectionUiStateOnSelect,
@@ -105,6 +106,51 @@ describe("configRouteLogic", () => {
     ]);
   });
 
+  it("limits the advanced config editor to editable settings sections", () => {
+    const config: PublicConfigShape = {
+      runtime: { profile: "safe_local" },
+      workbench: { backend_port: 8000 },
+      agent: { name: "Should stay hidden" },
+      tools: { image2: { default_model_ref: "relay_image2" } },
+      memory: { enabled: true },
+    };
+    const sections = [{ path: "runtime" }, { path: "workbench" }];
+
+    const view = pickEditableConfigView(config, sections);
+
+    expect(view).toEqual({
+      runtime: { profile: "safe_local" },
+      workbench: { backend_port: 8000 },
+    });
+    expect(view.agent).toBeUndefined();
+    expect(view.tools).toBeUndefined();
+    expect(view.memory).toBeUndefined();
+  });
+
+  it("merges editable config editor changes without touching hidden domains", () => {
+    const config: PublicConfigShape = {
+      runtime: { profile: "safe_local" },
+      workbench: { backend_port: 8000 },
+      agent: { name: "Persistent Agent" },
+      tools: { image2: { default_model_ref: "relay_image2" } },
+      memory: { enabled: true },
+    };
+    const editorView: PublicConfigShape = {
+      runtime: { profile: "debug" },
+      tools: { image2: { default_model_ref: "hijacked" } },
+    };
+
+    const merged = mergeEditableConfigView(config, editorView, [{ path: "runtime" }, { path: "workbench" }]);
+
+    expect(merged).toEqual({
+      runtime: { profile: "debug" },
+      workbench: { backend_port: 8000 },
+      agent: { name: "Persistent Agent" },
+      tools: { image2: { default_model_ref: "relay_image2" } },
+      memory: { enabled: true },
+    });
+  });
+
   it("classifies model presets from explicit category before provider heuristics", () => {
     expect(presetCategory(preset("relay", { kind: "openai" }, "relay"))).toBe("relay");
     expect(presetCategory(preset("local", { kind: "openai", base_url: "http://127.0.0.1:11434/v1" }))).toBe("local");
@@ -157,10 +203,7 @@ describe("configRouteLogic", () => {
   });
 
   it("derives model protocol route evidence for inventory rows", () => {
-    const rows = deriveModelCenterInventoryRows([option()], {
-      usagesByModelId: {},
-      usageCountsByModelId: {},
-    });
+    const rows = deriveModelCenterInventoryRows([option()]);
 
     expect(rows[0]).toMatchObject({
       providerApi: "openai-responses",
@@ -237,41 +280,6 @@ describe("configRouteLogic", () => {
     expect(supervisedAgentRoleLabel(supervised[0])).toBe("基线");
   });
 
-  it("applies a model option to a profile draft and removes stale model binding fields", () => {
-    const publicConfig: PublicConfigShape = {
-      llm: {
-        profiles: {
-          primary: {
-            model_ref: "old_model",
-            provider_id: "legacy_provider",
-            provider: { kind: "deepseek", base_url: "https://api.deepseek.com" },
-            model: "deepseek-v4-pro",
-            api_key_env: "OLD_KEY",
-            overrides: { temperature: 0.2 },
-            transport: "old_transport",
-            contract: "old_contract",
-            timeout: 5,
-          },
-        },
-      },
-    };
-    const selected = option();
-    const detailKeys = collectModelDetailKeys([selected]);
-
-    applyModelOptionToProfileDraft(publicConfig, "primary", selected, detailKeys);
-
-    const profile = (publicConfig.llm as Record<string, unknown>).profiles as Record<string, Record<string, unknown>>;
-    expect(profile.primary.model_ref).toBe("relay_openai_gpt_5_5");
-    expect(profile.primary.provider_id).toBeUndefined();
-    expect(profile.primary.overrides).toEqual({});
-    expect(profile.primary.provider).toBeUndefined();
-    expect(profile.primary.model).toBeUndefined();
-    expect(profile.primary.api_key_env).toBeUndefined();
-    expect(profile.primary.transport).toBeUndefined();
-    expect(profile.primary.contract).toBeUndefined();
-    expect(profile.primary.timeout).toBeUndefined();
-  });
-
   it("derives the backend default model api key env for custom relay presets", () => {
     expect(defaultModelApiKeyEnv("custom_openai_compatible_relay")).toBe(
       "VIBELUTION_LLM_MODEL_CUSTOM_OPENAI_COMPATIBLE_RELAY_API_KEY",
@@ -287,25 +295,6 @@ describe("configRouteLogic", () => {
     expect(PROVIDER_KIND_OPTIONS.map((item) => item.value)).toContain("xiaomi");
     expect(PROVIDER_KIND_OPTIONS.map((item) => item.value)).toContain("llamacpp");
     expect(PROVIDER_KIND_OPTIONS[0].value).toBe("relay");
-  });
-
-  it("removes profile api_key_env when the selected model has none", () => {
-    const publicConfig: PublicConfigShape = {
-      llm: {
-        profiles: {
-          primary: {
-            api_key_env: "OLD_KEY",
-          },
-        },
-      },
-    };
-    const selected = option({ api_key_env: "" });
-
-    applyModelOptionToProfileDraft(publicConfig, "primary", selected, collectModelDetailKeys([selected]));
-
-    const profile = (publicConfig.llm as Record<string, unknown>).profiles as Record<string, Record<string, unknown>>;
-    expect(profile.primary.model_ref).toBe("relay_openai_gpt_5_5");
-    expect(profile.primary.api_key_env).toBeUndefined();
   });
 
   it("preserves a manually collapsed config section when it is selected again", () => {
@@ -369,9 +358,6 @@ describe("configRouteLogic", () => {
 
     expect(summary.accounts).toHaveLength(2);
     expect(summary.accounts.map((account) => account.apiKeyState).sort()).toEqual(["configured", "missing"]);
-    expect(summary.usageCountsByModelId).toEqual({});
-    expect(summary.usagesByModelId).toEqual({});
-    expect(summary.unresolvedUsageCount).toBe(0);
   });
 
   it("builds compact model inventory rows with asset editability in one place", () => {
@@ -381,42 +367,20 @@ describe("configRouteLogic", () => {
       api_key_state: "configured",
       api_key_configured: true,
     });
-    const generatedModel = option({
-      model_id: "profile_inline_primary",
-      source: "profile",
-      label: "Inline primary model",
-      model: "inline-gpt",
-      api_key_env: "",
-      api_key_state: "missing",
-      provider: {
-        kind: "openai_compatible",
-        base_url: "https://relay.example.com",
-      },
-    });
     const summary = deriveModelCenterSummary({
-      modelOptions: [libraryModel, generatedModel],
+      modelOptions: [libraryModel],
     });
 
-    const rows = deriveModelCenterInventoryRows([libraryModel, generatedModel], summary);
+    const rows = deriveModelCenterInventoryRows([libraryModel]);
 
-    expect(rows).toHaveLength(2);
+    expect(summary.accounts).toHaveLength(1);
+    expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({
       modelId: "relay_openai_gpt_5_5",
-      usageCount: 0,
       editable: true,
       deletable: true,
       apiKeyState: "configured",
     });
-    expect(rows[0].usages).toEqual([]);
-    expect(rows[1]).toMatchObject({
-      modelId: "profile_inline_primary",
-      source: "profile",
-      usageCount: 0,
-      editable: false,
-      deletable: false,
-      apiKeyEnv: "",
-    });
-    expect(rows[1].usages).toEqual([]);
   });
 
   it("keeps image input support conservative when status and boolean disagree", () => {
@@ -447,30 +411,24 @@ describe("configRouteLogic", () => {
   });
 
   it("does not mark DeepSeek-like inventory rows as image-capable without boolean support", () => {
-    const rows = deriveModelCenterInventoryRows(
-      [
-        option({
-          model_id: "deepseek_v4_pro",
-          provider_kind: "deepseek",
-          model: "deepseek-v4-pro",
-          label: "DeepSeek V4 Pro",
-          supports_image_input: null,
-          capability_status: "supported",
-        }),
-        option({
-          model_id: "xiaomi_mimo_v2_5_multimodal",
-          provider_kind: "xiaomi",
-          model: "mimo-v2.5",
-          label: "小米 MiMo V2.5 多模态",
-          supports_image_input: true,
-          capability_status: "supported",
-        }),
-      ],
-      {
-        usagesByModelId: {},
-        usageCountsByModelId: {},
-      },
-    );
+    const rows = deriveModelCenterInventoryRows([
+      option({
+        model_id: "deepseek_v4_pro",
+        provider_kind: "deepseek",
+        model: "deepseek-v4-pro",
+        label: "DeepSeek V4 Pro",
+        supports_image_input: null,
+        capability_status: "supported",
+      }),
+      option({
+        model_id: "xiaomi_mimo_v2_5_multimodal",
+        provider_kind: "xiaomi",
+        model: "mimo-v2.5",
+        label: "小米 MiMo V2.5 多模态",
+        supports_image_input: true,
+        capability_status: "supported",
+      }),
+    ]);
 
     expect(rows[0]).toMatchObject({
       modelId: "deepseek_v4_pro",
@@ -486,13 +444,38 @@ describe("configRouteLogic", () => {
     });
   });
 
-  it("does not report external usage bindings in the settings model library", () => {
-    const summary = deriveModelCenterSummary({
-      modelOptions: [option()],
-    });
+  it("counts only key and failed runtime probe issues in the model library", () => {
+    const rows = deriveModelCenterInventoryRows([
+      option({
+        model_id: "missing_key",
+        api_key_state: "missing",
+        supports_image_input: true,
+        capability_status: "supported",
+      }),
+      option({
+        model_id: "text_only",
+        api_key_state: "configured",
+        supports_image_input: false,
+        capability_status: "unsupported",
+        capability_source: "runtime_probe",
+      }),
+      option({
+        model_id: "not_checked",
+        api_key_state: "configured",
+        supports_image_input: null,
+        capability_status: "unknown",
+      }),
+      option({
+        model_id: "probe_failed",
+        api_key_state: "configured",
+        supports_image_input: null,
+        capability_status: "unknown",
+        capability_source: "runtime_probe",
+        capability_error: "connection refused",
+      }),
+    ]);
 
-    expect(summary.unresolvedUsageCount).toBe(0);
-    expect(summary.usagesByModelId.missing_image_model).toBeUndefined();
+    expect(countModelCenterHealthIssues(rows)).toBe(2);
   });
 
   it("maps model creation scenarios to extensible preset defaults", () => {
@@ -667,18 +650,40 @@ describe("config route copy", () => {
     expect(CONFIG_COPY.en.groupModelingTitle).toBe("Model Library");
 
     const visibleCopy = `${Object.values(CONFIG_COPY.zh).join("\n")}\n${Object.values(CONFIG_COPY.en).join("\n")}`;
-    expect(visibleCopy).toContain("Git 提交模型");
-    expect(visibleCopy).toContain("Git commit model");
+    expect(visibleCopy).not.toContain("Git 提交模型");
+    expect(visibleCopy).not.toContain("Git commit model");
   });
 
   it("exposes the settings model library as asset-oriented inventory", () => {
     expect(CONFIG_COPY.zh.modelsTitle).toBe("模型库");
     expect(CONFIG_COPY.en.modelsTitle).toBe("Model Library");
     expect(CONFIG_COPY.zh.modelCenterAccounts).toBe("服务商账号");
-    expect(CONFIG_COPY.zh.modelCenterSource).toBe("来源");
+    expect(CONFIG_COPY.zh.modelScenarioChat).toBe("通用对话模型");
     expect(CONFIG_COPY.zh.modelScenarioImage).toBe("图片工具模型");
-    expect(CONFIG_COPY.en.modelCenterSource).toBe("Source");
+    expect(CONFIG_COPY.en.modelScenarioChat).toBe("General chat model");
     expect(CONFIG_COPY.en.modelScenarioImage).toBe("Image tool model");
+
+    const allCopy = `${Object.values(CONFIG_COPY.zh).join("\n")}\n${Object.values(CONFIG_COPY.en).join("\n")}`;
+    expect("modelCenterSource" in CONFIG_COPY.zh).toBe(false);
+    expect("modelCenterSource" in CONFIG_COPY.en).toBe(false);
+    expect("sourceLibrary" in CONFIG_COPY.zh).toBe(false);
+    expect("sourceLibrary" in CONFIG_COPY.en).toBe(false);
+    expect("modelLibrary" in CONFIG_COPY.zh).toBe(false);
+    expect("modelLibrary" in CONFIG_COPY.en).toBe(false);
+    expect("modelCenterIssues" in CONFIG_COPY.zh).toBe(false);
+    expect("modelCenterIssues" in CONFIG_COPY.en).toBe(false);
+    expect("modelCenterAccountModels" in CONFIG_COPY.zh).toBe(false);
+    expect("modelCenterAccountModels" in CONFIG_COPY.en).toBe(false);
+    expect("image2ToolUsage" in CONFIG_COPY.zh).toBe(false);
+    expect("image2ToolUsage" in CONFIG_COPY.en).toBe(false);
+    expect(allCopy).not.toContain("聊天 Agent");
+    expect(allCopy).not.toContain("Chat agent");
+    expect(allCopy).not.toContain("LLM 槽位绑定");
+    expect(allCopy).not.toMatch(/\bslot bindings?\b/i);
+    expect(allCopy).not.toContain("模型绑定");
+    expect(allCopy).not.toContain("内部键");
+    expect(allCopy).not.toMatch(/\bmodel bindings?\b/i);
+    expect(allCopy).not.toMatch(/\binternal key\b/i);
   });
 
   it("keeps research agent editing copy out of generic config", () => {
@@ -710,6 +715,15 @@ describe("config route copy", () => {
     expect(CONFIG_COPY.en.settingsNeedsCheck).toBe("Check advanced config first");
   });
 
+  it("names evolution intake separately from runtime mode", () => {
+    expect(CONFIG_COPY.zh.runtimeProfile).toBe("运行档位");
+    expect(CONFIG_COPY.zh.defaultMode).toBe("默认模式");
+    expect(CONFIG_COPY.zh.intakeMode).toBe("进化审核");
+    expect(CONFIG_COPY.en.runtimeProfile).toBe("Runtime mode");
+    expect(CONFIG_COPY.en.defaultMode).toBe("Default mode");
+    expect(CONFIG_COPY.en.intakeMode).toBe("Review intake");
+  });
+
   it("keeps agent editing copy out of generic config", () => {
     const visibleCopy = `${Object.values(CONFIG_COPY.zh).join("\n")}\n${Object.values(CONFIG_COPY.en).join("\n")}`;
     expect("agentConfigCenterTitle" in CONFIG_COPY.zh).toBe(false);
@@ -728,5 +742,12 @@ describe("config route copy", () => {
     expect(visibleCopy).not.toContain("Persistent Agent");
     expect(visibleCopy).not.toContain("Persistent agent");
     expect(visibleCopy).not.toContain("execution-chain binding follows");
+  });
+
+  it("distinguishes terminal avatar settings from the Web user avatar", () => {
+    expect(CONFIG_COPY.zh.groupAvatarPetTitle).toBe("用户、终端形象与陪伴体");
+    expect(CONFIG_COPY.zh.groupAvatarPetSummary).toContain("Web 用户头像在用户信息里维护");
+    expect(CONFIG_COPY.en.groupAvatarPetTitle).toBe("User, Terminal Avatar, and Companion");
+    expect(CONFIG_COPY.en.groupAvatarPetSummary).toContain("Web user avatar lives under User Info");
   });
 });

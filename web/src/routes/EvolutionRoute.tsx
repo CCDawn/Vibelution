@@ -33,6 +33,7 @@ import {
   EvolutionActionState,
   ConfigSummary,
   EvolutionRunActionResponse,
+  EvolutionRunStartResponse,
   EvolutionRunDeleteResponse,
   EvolutionWorkbench,
   EvolutionProposalBulkDeleteResponse,
@@ -57,6 +58,7 @@ import { SupervisedWorkspaceControls } from "./SupervisedWorkspaceControls";
 import { isSelfEvolutionWorktreeRun } from "./supervisedWorktreeReview";
 import {
   isLiveSupervisedRunStatus,
+  isEvolutionRunCommandAccepted,
   parseRunStreamSnapshot,
   requireEvolutionRunSnapshot,
   selectRunSnapshotWithRunId,
@@ -518,7 +520,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   );
   const startRunMutation = useMutation({
     onMutate: () => {
-      setActionFeedback(lang === "zh" ? "启动请求已提交，正在等待后端返回真实运行记录。" : "Start request submitted; waiting for the backend to return the real run record.");
+      setActionFeedback(lang === "zh" ? "启动请求已提交，正在等待运行记录刷新。" : "Start request submitted; waiting for the run record to refresh.");
       setLiveActiveRun(buildSupervisedStartPlaceholder({
         sourceKind,
         datasetName: sourceKind === "dataset" ? datasetName : "",
@@ -529,7 +531,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       }));
     },
     mutationFn: () =>
-      fetchJson<EvolutionActiveRun>("/api/evolution/runs", {
+      fetchJson<EvolutionRunStartResponse>("/api/evolution/runs", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -541,8 +543,14 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
           bundleName: sourceKind === "bundle" ? bundleNameInput : "",
           keepWorktree,
         }),
-      }).then((snapshot) => requireEvolutionRunSnapshot(snapshot, "supervised evolution start")),
-    onSuccess: async (snapshot) => {
+      }),
+    onSuccess: async (payload) => {
+      if (isEvolutionRunCommandAccepted(payload)) {
+        setActionFeedback(payload.summary || (lang === "zh" ? "启动命令已排队，等待运行记录刷新。" : "Start command queued; waiting for the run record to refresh."));
+        await evolutionWorkspaceCache.refreshSupervisedActiveRun();
+        return;
+      }
+      const snapshot = requireEvolutionRunSnapshot(payload, "supervised evolution start");
       setActionFeedback("");
       setLiveActiveRun(snapshot);
       await evolutionWorkspaceCache.afterSupervisedWorkspaceChanged();
@@ -652,7 +660,9 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       }),
     onSuccess: async (payload) => {
       setActionFeedback(payload.summary || "");
-      setLiveActiveRun(null);
+      if (!isEvolutionRunCommandAccepted(payload)) {
+        setLiveActiveRun(null);
+      }
       await invalidateSupervisedEvolution();
     },
   });
@@ -875,8 +885,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     ? liveActiveRun
     : null;
   const monitoredRun = effectiveActiveRunSnapshot
-    ?? visibleLiveRunSnapshot
-    ?? latestSupervisedRunSnapshot;
+    ?? visibleLiveRunSnapshot;
   const runningRun = effectiveActiveRunSnapshot ?? (liveActiveRun && isLiveSupervisedRunStatus(liveActiveRun.status)
     ? liveActiveRun
     : null);
@@ -1319,17 +1328,13 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       setLiveActiveRun(activeRunSnapshot);
       return;
     }
-    if (latestSupervisedRunSnapshot) {
-      setLiveActiveRun(latestSupervisedRunSnapshot);
-      return;
-    }
     setLiveActiveRun((current) => {
       if (current && ["done", "failed", "cancelled"].includes(String(current.status || "").toLowerCase())) {
         return current;
       }
       return null;
     });
-  }, [activeRunSnapshot, latestSupervisedRunSnapshot]);
+  }, [activeRunSnapshot]);
 
   useEffect(() => {
     if (!forcedTrack || evolutionTrack === forcedTrack) {

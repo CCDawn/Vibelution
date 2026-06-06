@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
 from core.web.services.rag_retrieval_service import RagRetrievalError, get_rag_retrieval_health, retrieve_rag_contexts
+from core.web.services.runtime_scene_service import record_runtime_scene_event
 from core.web.services.team_knowledge_service import (
     TeamKnowledgeError,
     TeamKnowledgeNotFoundError,
@@ -42,6 +43,13 @@ from core.web.services.team_knowledge_service import (
 
 
 router = APIRouter(tags=["knowledge"])
+
+
+def _require_agent_id(agent_id: str, *, purpose: str = "governed Team Knowledge access") -> str:
+    normalized = str(agent_id or "").strip()
+    if not normalized:
+        raise HTTPException(status_code=422, detail=f"agentId is required for {purpose}.")
+    return normalized
 
 
 class KnowledgeBaseCreatePayload(BaseModel):
@@ -136,9 +144,10 @@ def knowledge_overview(agentId: str = "") -> dict:
 
 @router.get("/knowledge/dashboard-snapshot")
 def knowledge_dashboard_snapshot(agentId: str = "", recommendationLimit: int = 6, workbenchLimit: int = 8, planLimit: int = 8) -> dict:
+    normalized_agent_id = _require_agent_id(agentId, purpose="knowledge dashboard snapshot")
     try:
         return get_knowledge_dashboard_snapshot(
-            agent_id=agentId,
+            agent_id=normalized_agent_id,
             recommendation_limit=recommendationLimit,
             workbench_limit=workbenchLimit,
             plan_limit=planLimit,
@@ -150,14 +159,15 @@ def knowledge_dashboard_snapshot(agentId: str = "", recommendationLimit: int = 6
 
 
 @router.get("/knowledge/steward/overview")
-def knowledge_steward_overview() -> dict:
-    return get_knowledge_steward_overview()
+def knowledge_steward_overview(agentId: str = "") -> dict:
+    return get_knowledge_steward_overview(agent_id=_require_agent_id(agentId, purpose="knowledge steward overview"))
 
 
 @router.get("/knowledge/steward/recommendations")
 def knowledge_steward_recommendations(agentId: str = "", limit: int = 12) -> dict:
+    normalized_agent_id = _require_agent_id(agentId, purpose="knowledge steward recommendations")
     try:
-        return list_knowledge_steward_recommendations(agent_id=agentId, limit=limit)
+        return list_knowledge_steward_recommendations(agent_id=normalized_agent_id, limit=limit)
     except TeamKnowledgePermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except TeamKnowledgeError as exc:
@@ -166,8 +176,9 @@ def knowledge_steward_recommendations(agentId: str = "", limit: int = 12) -> dic
 
 @router.get("/knowledge/steward/workbench")
 def knowledge_steward_workbench(agentId: str = "", limit: int = 12) -> dict:
+    normalized_agent_id = _require_agent_id(agentId, purpose="knowledge steward workbench")
     try:
-        return get_knowledge_steward_workbench(agent_id=agentId, limit=limit)
+        return get_knowledge_steward_workbench(agent_id=normalized_agent_id, limit=limit)
     except TeamKnowledgePermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except TeamKnowledgeError as exc:
@@ -176,8 +187,9 @@ def knowledge_steward_workbench(agentId: str = "", limit: int = 12) -> dict:
 
 @router.get("/knowledge/operations/health")
 def knowledge_operations_health(agentId: str = "") -> dict:
+    normalized_agent_id = _require_agent_id(agentId, purpose="knowledge operations health")
     try:
-        return get_knowledge_operations_health(agent_id=agentId)
+        return get_knowledge_operations_health(agent_id=normalized_agent_id)
     except TeamKnowledgePermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except TeamKnowledgeError as exc:
@@ -186,8 +198,9 @@ def knowledge_operations_health(agentId: str = "") -> dict:
 
 @router.get("/knowledge/governance/plan")
 def knowledge_governance_plan(agentId: str = "", limit: int = 12) -> dict:
+    normalized_agent_id = _require_agent_id(agentId, purpose="knowledge governance plan")
     try:
-        return get_knowledge_governance_plan(agent_id=agentId, limit=limit)
+        return get_knowledge_governance_plan(agent_id=normalized_agent_id, limit=limit)
     except TeamKnowledgePermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except TeamKnowledgeError as exc:
@@ -212,9 +225,10 @@ def knowledge_search(
     searchMode: str = "exact",
     limit: int = 25,
 ) -> dict:
+    normalized_agent_id = _require_agent_id(agentId, purpose="governed knowledge search")
     try:
         return search_knowledge_items(
-            agent_id=agentId,
+            agent_id=normalized_agent_id,
             query=query,
             team_id=teamId,
             owner_type=ownerType,
@@ -252,9 +266,22 @@ def knowledge_rag_retrieve(
     topK: int = 5,
     maxContextChars: int = 1200,
 ) -> dict:
+    normalized_agent_id = str(agentId or "").strip()
+    if not normalized_agent_id:
+        _record_rag_retrieve_event(
+            "knowledge.rag.retrieve.blocked",
+            agent_id="",
+            knowledge_base_id=knowledgeBaseId,
+            retrieval_mode=retrievalMode,
+            provider=provider,
+            query_length=len(str(query or "").strip()),
+            outcome="blocked",
+            fields={"reason": "agent_id_required"},
+        )
+        raise HTTPException(status_code=422, detail="agentId is required for governed RAG retrieval.")
     try:
-        return retrieve_rag_contexts(
-            agent_id=agentId,
+        payload = retrieve_rag_contexts(
+            agent_id=normalized_agent_id,
             query=query,
             team_id=teamId,
             owner_type=ownerType,
@@ -266,11 +293,59 @@ def knowledge_rag_retrieve(
             top_k=topK,
             max_context_chars=maxContextChars,
         )
+        summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
+        request = payload.get("request") if isinstance(payload.get("request"), dict) else {}
+        _record_rag_retrieve_event(
+            "knowledge.rag.retrieve.succeeded",
+            agent_id=normalized_agent_id,
+            knowledge_base_id=knowledgeBaseId,
+            retrieval_mode=str(request.get("retrievalMode") or retrievalMode),
+            provider=str(request.get("provider") or provider),
+            query_length=int(request.get("queryLength") or len(str(query or "").strip())),
+            outcome="succeeded",
+            fields={
+                "contextCount": int(summary.get("contextCount") or 0),
+                "citationCount": int(summary.get("citationCount") or 0),
+                "candidateCount": int(summary.get("candidateCount") or 0),
+                "scannedKnowledgeBaseCount": int(summary.get("scannedKnowledgeBaseCount") or 0),
+            },
+        )
+        return payload
     except TeamKnowledgePermissionError as exc:
+        _record_rag_retrieve_event(
+            "knowledge.rag.retrieve.blocked",
+            agent_id=normalized_agent_id,
+            knowledge_base_id=knowledgeBaseId,
+            retrieval_mode=retrievalMode,
+            provider=provider,
+            query_length=len(str(query or "").strip()),
+            outcome="blocked",
+            fields={"errorType": type(exc).__name__},
+        )
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except TeamKnowledgeNotFoundError as exc:
+        _record_rag_retrieve_event(
+            "knowledge.rag.retrieve.failed",
+            agent_id=normalized_agent_id,
+            knowledge_base_id=knowledgeBaseId,
+            retrieval_mode=retrievalMode,
+            provider=provider,
+            query_length=len(str(query or "").strip()),
+            outcome="failed",
+            fields={"errorType": type(exc).__name__},
+        )
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except (RagRetrievalError, TeamKnowledgeError) as exc:
+        _record_rag_retrieve_event(
+            "knowledge.rag.retrieve.failed",
+            agent_id=normalized_agent_id,
+            knowledge_base_id=knowledgeBaseId,
+            retrieval_mode=retrievalMode,
+            provider=provider,
+            query_length=len(str(query or "").strip()),
+            outcome="failed",
+            fields={"errorType": type(exc).__name__},
+        )
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
@@ -279,15 +354,48 @@ def knowledge_rag_health() -> dict:
     return get_rag_retrieval_health()
 
 
+def _record_rag_retrieve_event(
+    event_code: str,
+    *,
+    agent_id: str,
+    knowledge_base_id: str,
+    retrieval_mode: str,
+    provider: str,
+    query_length: int,
+    outcome: str,
+    fields: dict[str, Any] | None = None,
+) -> None:
+    try:
+        record_runtime_scene_event(
+            "knowledge_routes",
+            "rag",
+            event_code,
+            message=event_code,
+            outcome=outcome,
+            fields={
+                "agentId": str(agent_id or "").strip(),
+                "knowledgeBaseId": str(knowledge_base_id or "").strip(),
+                "retrievalMode": str(retrieval_mode or "").strip(),
+                "provider": str(provider or "").strip(),
+                "queryLength": max(0, int(query_length or 0)),
+                **dict(fields or {}),
+            },
+            lifecycle=True,
+        )
+    except Exception:
+        pass
+
+
 @router.get("/knowledge/permissions/audit")
 def knowledge_permissions_audit(agentId: str = "") -> dict:
-    return knowledge_permission_audit(agent_id=agentId)
+    return knowledge_permission_audit(agent_id=_require_agent_id(agentId, purpose="knowledge permission audit"))
 
 
 @router.get("/knowledge/governance/tasks")
 def knowledge_governance_tasks(agentId: str = "", status: str = "open") -> dict:
+    normalized_agent_id = _require_agent_id(agentId, purpose="knowledge governance tasks")
     try:
-        return list_knowledge_governance_tasks(agent_id=agentId, status=status)
+        return list_knowledge_governance_tasks(agent_id=normalized_agent_id, status=status)
     except TeamKnowledgePermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except TeamKnowledgeError as exc:
@@ -301,8 +409,9 @@ def knowledge_ingestion_adapters() -> dict:
 
 @router.get("/teams/{team_id}/knowledge-bases")
 def team_knowledge_base_list(team_id: str, agentId: str = "") -> dict:
+    normalized_agent_id = _require_agent_id(agentId, purpose="team knowledge base listing")
     try:
-        return list_team_knowledge_bases(team_id, agent_id=agentId)
+        return list_team_knowledge_bases(team_id, agent_id=normalized_agent_id)
     except TeamKnowledgeNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except TeamKnowledgeError as exc:
@@ -329,8 +438,9 @@ def team_knowledge_base_create(team_id: str, payload: KnowledgeBaseCreatePayload
 
 @router.get("/agents/{agent_id}/knowledge-bases")
 def agent_knowledge_base_list(agent_id: str, actorAgentId: str = "") -> dict:
+    normalized_actor_agent_id = _require_agent_id(actorAgentId, purpose="agent knowledge base listing")
     try:
-        return list_agent_knowledge_bases(agent_id, actor_agent_id=actorAgentId)
+        return list_agent_knowledge_bases(agent_id, actor_agent_id=normalized_actor_agent_id)
     except TeamKnowledgePermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except TeamKnowledgeNotFoundError as exc:
@@ -451,8 +561,9 @@ def knowledge_refinement_proposal_review(
 
 @router.get("/knowledge-bases/{knowledge_base_id}/items")
 def knowledge_item_list(knowledge_base_id: str, agentId: str = "") -> dict:
+    normalized_agent_id = _require_agent_id(agentId, purpose="knowledge item listing")
     try:
-        return list_knowledge_items(knowledge_base_id, agent_id=agentId)
+        return list_knowledge_items(knowledge_base_id, agent_id=normalized_agent_id)
     except TeamKnowledgePermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except TeamKnowledgeNotFoundError as exc:
@@ -463,8 +574,9 @@ def knowledge_item_list(knowledge_base_id: str, agentId: str = "") -> dict:
 
 @router.get("/knowledge-bases/{knowledge_base_id}/trace/{target_id}")
 def knowledge_trace(knowledge_base_id: str, target_id: str, agentId: str = "") -> dict:
+    normalized_agent_id = _require_agent_id(agentId, purpose="knowledge trace")
     try:
-        return get_knowledge_trace(knowledge_base_id, target_id, agent_id=agentId)
+        return get_knowledge_trace(knowledge_base_id, target_id, agent_id=normalized_agent_id)
     except TeamKnowledgePermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except TeamKnowledgeNotFoundError as exc:
@@ -501,8 +613,9 @@ def knowledge_item_rating_update(
 
 @router.get("/knowledge-bases/{knowledge_base_id}/rating-suggestions")
 def knowledge_rating_suggestion_list(knowledge_base_id: str, agentId: str = "", status: str = "") -> dict:
+    normalized_agent_id = _require_agent_id(agentId, purpose="rating suggestion listing")
     try:
-        return list_rating_suggestions(knowledge_base_id, agent_id=agentId, status=status)
+        return list_rating_suggestions(knowledge_base_id, agent_id=normalized_agent_id, status=status)
     except TeamKnowledgePermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except TeamKnowledgeNotFoundError as exc:
