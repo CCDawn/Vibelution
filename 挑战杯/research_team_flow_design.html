@@ -237,6 +237,11 @@
                   <span>已创建 SourceArtifact、pending RefinementProposal，可选 pending ratingSuggestion；等待审批门禁。</span>
                 </div>
 <div class="state-row">
+                  <b>knowledge_ingestion_needs_review</b>
+                  <strong>入库状态待审</strong>
+                  <span>状态总览显示 pendingProposalCount、actionItems 和 officialBoundary，便于团队协调员分派审核。</span>
+                </div>
+<div class="state-row">
                   <b>candidate_graph_visible</b>
                   <strong>候选图谱可见</strong>
                   <span>只进入候选图谱，不能当正式事实。</span>
@@ -290,6 +295,11 @@
                   <code>official_sync_record_YYYYMMDD_NNN.json</code>
                   <b>正式同步记录</b>
                   <span>记录审批门禁、正式 KnowledgeItem、RAG 和图谱同步状态。</span>
+                </div>
+<div class="artifact-row">
+                  <code>knowledge_ingestion_status</code>
+                  <b>入库状态总览</b>
+                  <span>只读聚合 CandidateStore、候选图摘要、Team Knowledge stats、stages、actionItems 和 officialBoundary。</span>
                 </div>
           </div>
         </div>
@@ -360,7 +370,7 @@
                 </div>
 <div class="service-row">
                   <b>team_workflows API</b>
-                  <span>已落地：/api/teams/{team_id}/workflow-orchestration、candidates/source、candidates/{candidate_id}/source-extraction、candidates/{candidate_id}/paper-note-draft、candidates、candidates/validation、candidate-graph、transfers、decide。</span>
+                  <span>已落地：/api/teams/{team_id}/workflow-orchestration、candidates/source、candidates/{candidate_id}/source-extraction、candidates/{candidate_id}/paper-note-draft、candidates、candidates/validation、candidate-graph、transfers、decide、knowledge-ingestion/status。</span>
                 </div>
 <div class="service-row">
                   <b>TeamsRoute workflow panel</b>
@@ -397,6 +407,10 @@
 <div class="service-row">
                   <b>memory_ingestion_bridge</b>
                   <span>已复用 Team Knowledge create_ingestion_package、review_refinement_proposal、rating suggestion review/create 和 KnowledgeItem metadata patch；steward_pack_draft 可进入 pending proposal，审批通过后创建正式 KnowledgeItem、迁移待审评分建议，并写入 officialResearchGraph 正式科研边。</span>
+                </div>
+<div class="service-row">
+                  <b>knowledge_ingestion_status</b>
+                  <span>已新增只读状态聚合：输出 summary/stages/actionItems/candidateBreakdown/candidateGraphSummary/knowledgeBases/officialBoundary，并记录 knowledge_ingestion.status_viewed 运行事件计数。</span>
                 </div>
           </div>
         </div>
@@ -741,6 +755,11 @@
               <span>只审批 steward_pending_knowledge_review；approved 创建正式 KnowledgeItem、迁移 proposal 级评分建议为 KnowledgeItem 级 pending 评级并进入 official_synced，rejected 退回 steward_needs_revision。</span>
             </div>
 <div class="blueprint-row compact">
+              <b>知识入库状态总览</b>
+              <strong>/api/teams/{teamId}/workflow-orchestration/knowledge-ingestion/status</strong>
+              <span>只读聚合 source_collection、candidate_screening、steward_pack、knowledge_review、official_sync 状态；返回 actionItems 与 officialBoundary，不写正式知识、不写 RAG、不生成候选图快照。</span>
+            </div>
+<div class="blueprint-row compact">
               <b>candidate_graph 预览</b>
               <strong>CandidateStore candidate_graph snapshot</strong>
               <span>POST candidate-graph 会从当前未归档候选重建 candidate_only 图谱，输出 nodes/edges/missingLinks/unreviewedNodes/archivedCandidateCount/officialBoundary；断链时 qualityStatus=broken_links。</span>
@@ -748,7 +767,7 @@
 <div class="blueprint-row compact">
               <b>验证</b>
               <strong>tests/test_team_workflow_orchestration_service.py + tests/test_team_workflow_routes.py</strong>
-              <span>覆盖主路径、非 ownerAgent 不能写最终状态、本地模型任务包和输出校验。</span>
+              <span>覆盖主路径、非 ownerAgent 不能写最终状态、本地模型任务包、输出校验和知识入库状态总览。</span>
             </div>
       </div>
       <div class="agent-matrix" style="margin-top: 12px;">
@@ -799,6 +818,12 @@
               <strong>知识治理与正式同步</strong>
               <span>steward_pack_draft 门禁、待审入库桥、Ingestion Approval Gate、评分建议迁移、officialResearchGraph 正式边和 Memory Graph 展开已落地：有效草稿批准后创建正式 KnowledgeItem、承接待审评级并可视化正式科研 trace，拒绝后退回修订。</span>
               <span>正式 RAG 通过已审核 KnowledgeItem 检索；正式图谱边落在 KnowledgeItem metadata，并由 Memory Graph 只读展开。</span>
+            </div>
+<div class="blueprint-row">
+              <b>M6</b>
+              <strong>知识入库状态总览</strong>
+              <span>新增 knowledge-ingestion/status 只读聚合 API，把 CandidateStore、候选校验、候选图摘要、Team Knowledge stats 和 officialBoundary 汇成 stages/actionItems。</span>
+              <span>团队协调员可看到 source_collection、candidate_screening、steward_pack、knowledge_review、official_sync 的 ready/needs_review/blocked 状态；查询不会创建 KnowledgeItem、不会写 RAG、不会生成 candidate_graph 快照。</span>
             </div>
       </div>
       <div class="tag-row">
@@ -866,8 +891,8 @@
 <div class="agent-row">
         <b>07</b>
         <strong>Knowledge Steward Agent / agent-knowledge-steward</strong>
-        <span>后端草稿包门禁、Team Knowledge 待审入库桥和审批门禁已接入</span>
-        <span>sourceTrace 校验 / proposalPayload / ratingSuggestion / approvalRequired=true / SourceArtifact / pending RefinementProposal / KnowledgeItem rating suggestion migration / officialResearchGraph / officialSyncRecord / official write 禁止项</span>
+        <span>后端草稿包门禁、Team Knowledge 待审入库桥、审批门禁和入库状态总览已接入</span>
+        <span>sourceTrace 校验 / proposalPayload / ratingSuggestion / approvalRequired=true / SourceArtifact / pending RefinementProposal / KnowledgeItem rating suggestion migration / knowledge_ingestion_status / officialResearchGraph / officialSyncRecord / official write 禁止项</span>
         <span>必须经 Knowledge Steward Agent / Ingestion Approval Gate 确认，不能由科研执行 Agent 或本地模型直接入库。</span>
       </div>
 <div class="agent-row">
@@ -880,8 +905,8 @@
 <div class="agent-row">
         <b>09</b>
         <strong>Ingestion Approval Gate + Knowledge Platform</strong>
-        <span>授权审批门禁已接入 Team Knowledge review/apply、KnowledgeItem metadata patch；平台负责正式 KnowledgeItem 的读取、RAG 检索和 Memory Graph 展示</span>
-        <span>正式审核确认 / 正式 KnowledgeItem 创建/同步 / KnowledgeItem rating review / officialResearchGraph / RAG 可检索 / official_sync_record / Memory Graph 可见</span>
+        <span>授权审批门禁已接入 Team Knowledge review/apply、KnowledgeItem metadata patch 和 officialBoundary 状态聚合</span>
+        <span>正式审核确认 / 正式 KnowledgeItem 创建/同步 / KnowledgeItem rating review / officialResearchGraph / RAG 可检索 / official_sync_record / Memory Graph 可见 / officialBoundary status</span>
         <span>必须通过授权审批门禁批准 ingestion pack。</span>
       </div>
       </div>
@@ -922,6 +947,11 @@
         <strong>知识治理工作台</strong>
         <span>knowledge_governance_tasks_tool、knowledge_steward_workbench_tool、recommendations</span>
         <b class="status-pill ready">已有能力</b>
+      </div>
+<div class="feature-row">
+        <strong>入库状态总览</strong>
+        <span>knowledge-ingestion/status 聚合 CandidateStore、校验报告、候选图摘要、pending proposals、formal KnowledgeItem 和 officialBoundary</span>
+        <b class="status-pill">已接入后端/API</b>
       </div>
 <div class="feature-row">
         <strong>评级建议</strong>
@@ -988,6 +1018,12 @@
         <span>/api/memory/knowledge-graph 和 MemoryRoute 知识图谱视图已存在</span>
         <b class="status-pill partial">部分匹配</b>
         <span>适合展示正式 Team/Agent/KnowledgeBase/KnowledgeItem 结构；候选图谱首版在 Teams 工作台读取 CandidateStore 快照，不混入正式 Memory Graph。</span>
+      </div>
+<div class="alignment-row">
+        <strong>入库状态聚合</strong>
+        <span>Team Workflow 新增 knowledge-ingestion/status；读取 CandidateStore + Team Knowledge overview，不写正式知识、不写候选图快照</span>
+        <b class="status-pill">已接入首版</b>
+        <span>适合作为团队协调面板和后续状态机转移判断输入。</span>
       </div>
 <div class="alignment-row">
         <strong>PDF/本地资料解析</strong>
@@ -1310,6 +1346,11 @@
               <strong>/api/teams/{team_id}/workflow-orchestration/steward-packs/{candidate_id}/knowledge-ingestion/review</strong>
               <span>审批 pending steward pack；approved 复用 Team Knowledge review/apply 创建正式 KnowledgeItem、迁移评分建议、写 officialResearchGraph 并写 officialSyncRecord，rejected 退回 steward_needs_revision。</span>
             </div>
+<div class="blueprint-row compact">
+              <b>GET</b>
+              <strong>/api/teams/{team_id}/workflow-orchestration/knowledge-ingestion/status</strong>
+              <span>只读聚合知识入库漏斗：stages、summary、actionItems、CandidateGraphSummary、Team Knowledge stats 和 officialBoundary；不会生成新的 candidate_graph 快照。</span>
+            </div>
       </div>
     </section>
 
@@ -1400,8 +1441,8 @@
 <a class="node-card" href="research_flow_pages/07-steward-ingestion.html">
                 <span class="num">07</span>
                 <h3>知识治理入库</h3>
-                <p>steward_pack_draft 可提交到 Team Knowledge 待审队列，并由审批门禁批准或退回。</p>
-                <div class="tag-row"><span class="tag done">M5 审批门禁已落地</span><span class="tag">Knowledge Steward Agent · agent-knowledge-steward</span></div>
+                <p>steward_pack_draft 可提交到 Team Knowledge 待审队列，且团队可读取知识入库状态漏斗。</p>
+                <div class="tag-row"><span class="tag done">M6 状态总览已落地</span><span class="tag">Knowledge Steward Agent · agent-knowledge-steward</span></div>
               </a>
 <a class="node-card" href="research_flow_pages/08-candidate-graph.html">
                 <span class="num">08</span>
@@ -1412,8 +1453,8 @@
 <a class="node-card" href="research_flow_pages/09-official-graph.html">
                 <span class="num">09</span>
                 <h3>正式知识图谱同步</h3>
-                <p>只有审核入库后的知识进入正式图谱 trace 与 RAG。</p>
-                <div class="tag-row"><span class="tag done">已规划</span><span class="tag">Knowledge Platform</span></div>
+                <p>只有审核入库后的知识进入正式图谱 trace 与 RAG；状态 API 可观察同步是否完成。</p>
+                <div class="tag-row"><span class="tag done">状态边界已接入</span><span class="tag">Knowledge Platform</span></div>
               </a>
 <a class="node-card" href="research_flow_pages/10-experiment-loop.html">
                 <span class="num">10</span>
