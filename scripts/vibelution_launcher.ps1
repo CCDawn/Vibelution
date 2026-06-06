@@ -1513,6 +1513,16 @@ function Get-FileFingerprint {
     return Get-StringHash -Value ($parts -join "`n")
 }
 
+function Get-LauncherControlSourceSignature {
+    $paths = @(
+        (Join-Path $projectDir "core\launcher\app.py"),
+        (Join-Path $projectDir "core\launcher\service.py"),
+        (Join-Path $projectDir "core\web\control.py"),
+        (Join-Path $projectDir "core\version.py")
+    )
+    return Get-FileFingerprint -Paths $paths
+}
+
 function Get-StoredStampValue {
     param([string]$Path)
 
@@ -1925,6 +1935,34 @@ function Test-LauncherControlHealthy {
     } catch {
         return $false
     }
+}
+
+function Get-LauncherControlBackendSourceSignature {
+    param([int]$BackendPid)
+
+    $state = Get-State
+    $storedSignature = [string](Get-ObjectPropertyValue -Object $state -Name "launcherControlSourceSignature" -Default "")
+    if (-not $storedSignature) {
+        return ""
+    }
+    $trackedPids = @(
+        [int](Get-ObjectPropertyValue -Object $state -Name "launcherBackendPid" -Default 0),
+        [int](Get-ObjectPropertyValue -Object $state -Name "launcherBackendLaunchPid" -Default 0)
+    ) | Where-Object { $_ -gt 0 }
+    if ($BackendPid -gt 0 -and @($trackedPids | Where-Object { $_ -eq $BackendPid }).Count -gt 0) {
+        return $storedSignature
+    }
+    return ""
+}
+
+function Test-LauncherControlSourceCurrent {
+    param([int]$BackendPid)
+
+    $storedSignature = Get-LauncherControlBackendSourceSignature -BackendPid $BackendPid
+    if (-not $storedSignature) {
+        return $false
+    }
+    return $storedSignature -eq (Get-LauncherControlSourceSignature)
 }
 
 function Wait-ForLauncherControlHealthy {
@@ -4643,6 +4681,7 @@ function Save-LauncherControlWindowState {
         $payload["launcherBackendLaunchPid"] = $BackendLaunchPid
         $payload["launcherControlPort"] = $launcherControlPort
         $payload["launcherControlUrl"] = "$launcherControlUrl/launcher"
+        $payload["launcherControlSourceSignature"] = Get-LauncherControlSourceSignature
         $payload["launcherControlStartedAt"] = (Get-Date).ToString("o")
         Save-State $payload
         return
@@ -4726,6 +4765,7 @@ function Save-SessionState {
         launcherBackendLaunchPid = if ($SessionRole -eq "launcher_control_surface") { $BackendLaunchPid } else { [int](Get-ObjectPropertyValue -Object $existingState -Name "launcherBackendLaunchPid" -Default 0) }
         launcherControlPort = $launcherControlPort
         launcherControlUrl = "$launcherControlUrl/launcher"
+        launcherControlSourceSignature = if ($SessionRole -eq "launcher_control_surface") { Get-LauncherControlSourceSignature } else { [string](Get-ObjectPropertyValue -Object $existingState -Name "launcherControlSourceSignature" -Default "") }
         backendStdout = if ($script:currentRuntimeSceneDir) { Get-CurrentRuntimeSceneFilePath $rawPaths.BackendStdout } else { $null }
         backendStderr = if ($script:currentRuntimeSceneDir) { Get-CurrentRuntimeSceneFilePath $rawPaths.BackendStderr } else { $null }
         pythonCommand = if ($PythonRuntime) { $PythonRuntime.FilePath } else { $null }
@@ -4981,10 +5021,29 @@ function Open-LauncherControlSurface {
     $launcherBackendPids = @(Get-ManagedLauncherControlCandidatePids)
     $launcherBackendPid = if ($launcherBackendPids.Count -gt 0) { [int]$launcherBackendPids[0] } else { 0 }
     $launcherBackendHealthy = [bool]($launcherBackendPid -gt 0 -and (Test-LauncherControlHealthy))
+    $launcherBackendSourceCurrent = [bool]($launcherBackendHealthy -and (Test-LauncherControlSourceCurrent -BackendPid $launcherBackendPid))
+    if ($launcherBackendHealthy -and -not $launcherBackendSourceCurrent) {
+        Write-Note "Launcher control service changed. Restarting Launcher control surface ..."
+        Write-LauncherControlLog `
+            -Event "launcher.control_backend.source_changed" `
+            -Message "Launcher control backend source changed; restarting the standalone control backend." `
+            -Fields @{
+                backend_pid = $launcherBackendPid
+                port = $launcherControlPort
+            }
+        Stop-ManagedBrowserProcesses -ProfileDir $launcherBrowserProfileDir -Role "launcher_control_surface"
+        Stop-ProcessesById -ProcessIds $launcherBackendPids
+        $launcherSnapshot = Get-SessionSnapshot -BrowserRole "launcher_control_surface" -ProfileDir $launcherBrowserProfileDir
+        $snapshot = Get-SessionSnapshot
+        $launcherBackendPids = @()
+        $launcherBackendPid = 0
+        $launcherBackendHealthy = $false
+        $launcherBackendSourceCurrent = $false
+    }
     $startedControlBackend = $false
     $preserveExistingStateOnFailure = [bool]$snapshot.State
 
-    if ($launcherBackendHealthy -and $launcherSnapshot.BrowserWindowCount -gt 0) {
+    if ($launcherBackendHealthy -and $launcherBackendSourceCurrent -and $launcherSnapshot.BrowserWindowCount -gt 0) {
         Write-LauncherControlLog `
             -Event "launcher.control_surface.focus_existing_launcher" `
             -Message "Launcher control surface found an existing Launcher window." `
@@ -4998,7 +5057,7 @@ function Open-LauncherControlSurface {
     }
 
     if ($launcherSnapshot.BrowserPids.Count -gt 0) {
-        if (-not ($launcherBackendHealthy -and $launcherSnapshot.BrowserWindowCount -eq 0)) {
+        if (-not ($launcherBackendHealthy -and $launcherBackendSourceCurrent -and $launcherSnapshot.BrowserWindowCount -eq 0)) {
             Write-Note "Found an incomplete launcher control surface session. Cleaning it up before opening Launcher."
             Stop-ManagedBrowserProcesses -ProfileDir $launcherBrowserProfileDir -Role "launcher_control_surface"
             $launcherSnapshot = Get-SessionSnapshot -BrowserRole "launcher_control_surface" -ProfileDir $launcherBrowserProfileDir
@@ -5016,7 +5075,7 @@ function Open-LauncherControlSurface {
         $pythonRuntime = $null
         $backendPid = 0
         $backendLaunchPid = 0
-        if ($launcherBackendHealthy -and $launcherBackendPid -gt 0) {
+        if ($launcherBackendHealthy -and $launcherBackendSourceCurrent -and $launcherBackendPid -gt 0) {
             $backendPid = [int]$launcherBackendPid
             $backendLaunchPid = [int](Get-ObjectPropertyValue -Object $snapshot.State -Name "launcherBackendLaunchPid" -Default $backendPid)
             Write-RuntimeSceneEvent `

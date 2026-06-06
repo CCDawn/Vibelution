@@ -124,6 +124,8 @@ def get_launcher_status() -> dict[str, Any]:
                 "independent": True,
                 "adapter": "runtime_manager",
                 "nextPhase": "standalone_launcher_frontend",
+                "url": str(launcher_state.get("launcherControlUrl") or "").strip(),
+                "port": int(launcher_state.get("launcherControlPort") or 0),
             },
             "message": "Launcher 已作为独立控制面运行；项目工作台前后端现在是被管理对象。",
         },

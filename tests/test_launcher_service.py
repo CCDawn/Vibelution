@@ -127,7 +127,50 @@ def test_launcher_status_is_independent_from_web_runtime_service(monkeypatch, tm
 
     assert payload["launcher"]["mode"] == "standalone_control_plane"
     assert payload["launcher"]["controlPlane"]["independent"] is True
+    assert payload["launcher"]["controlPlane"]["url"] == ""
+    assert payload["launcher"]["controlPlane"]["port"] == 0
     assert payload["projectBundle"]["observedState"] == "closed"
+
+
+def test_launcher_status_exposes_configured_control_plane_url(tmp_path, monkeypatch):
+    launcher_state_path = tmp_path / ".runtime" / "launcher" / "state.json"
+    launcher_state_path.parent.mkdir(parents=True, exist_ok=True)
+    launcher_state_path.write_text(
+        json.dumps(
+            {
+                "launcherControlUrl": "http://127.0.0.1:8899/launcher",
+                "launcherControlPort": 8899,
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(launcher_service, "STATE_PATH", tmp_path / ".runtime" / "runtime-manager" / "state.json")
+    monkeypatch.setattr(launcher_service, "INBOX_DIR", tmp_path / ".runtime" / "runtime-manager" / "inbox")
+    monkeypatch.setattr(launcher_service, "PROCESSING_DIR", tmp_path / ".runtime" / "runtime-manager" / "processing")
+    monkeypatch.setattr(launcher_service, "RESULTS_DIR", tmp_path / ".runtime" / "runtime-manager" / "results")
+    monkeypatch.setattr(launcher_service, "EVENTS_PATH", tmp_path / ".runtime" / "runtime-manager" / "events.jsonl")
+    monkeypatch.setattr(launcher_service, "LAUNCHER_STATE_PATH", launcher_state_path)
+    monkeypatch.setattr(launcher_service, "load_state", lambda: {})
+    monkeypatch.setattr(launcher_service, "load_pid", lambda: 0)
+    monkeypatch.setattr(launcher_service, "_is_process_alive", lambda pid: False)
+    monkeypatch.setattr(
+        launcher_service,
+        "observe_workbench",
+        lambda: {
+            "observedState": "closed",
+            "sessionRole": "workbench",
+            "backendAlive": False,
+            "backendHealthy": False,
+            "browserWindowAlive": False,
+            "browserManaged": True,
+            "url": "http://127.0.0.1:8000",
+        },
+    )
+
+    payload = launcher_service.get_launcher_status()
+
+    assert payload["launcher"]["controlPlane"]["url"] == "http://127.0.0.1:8899/launcher"
+    assert payload["launcher"]["controlPlane"]["port"] == 8899
 
 
 def test_standalone_launcher_active_work_guard_reads_runtime_manager_store(tmp_path, monkeypatch):

@@ -6,6 +6,7 @@ import {
   launcherEndpoint,
   launcherRestartEndpoint,
   reattachLauncherSupervisor,
+  resetLauncherControlOriginForTests,
   restartLauncherBundle,
   startLauncherBundle,
 } from "./launcher";
@@ -15,6 +16,7 @@ describe("launcher api helpers", () => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
     resetControlTokenForTests();
+    resetLauncherControlOriginForTests();
   });
 
   it("builds canonical launcher restart endpoints", () => {
@@ -56,6 +58,49 @@ describe("launcher api helpers", () => {
     expect(payload.launcher.mode).toBe("standalone_control_plane");
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls[0][0]).toBe("http://127.0.0.1:8765/api/launcher/status");
+  });
+
+  it("uses the reported launcher control origin after status discovery", async () => {
+    vi.stubGlobal("window", {
+      location: {
+        href: "http://127.0.0.1:8000/chat",
+        origin: "http://127.0.0.1:8000",
+      },
+    });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          launcher: {
+            mode: "standalone_control_plane",
+            controlPlane: {
+              url: "http://127.0.0.1:8899/launcher",
+            },
+          },
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          header: "X-Vibelution-Control-Token",
+          controlToken: "test-token",
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ accepted: true, operation: "restart", commandId: "cmd-custom-port" }),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getLauncherStatus();
+    const payload = await restartLauncherBundle();
+
+    expect(payload.commandId).toBe("cmd-custom-port");
+    expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
+      "http://127.0.0.1:8765/api/launcher/status",
+      "http://127.0.0.1:8899/api/control-token",
+      "http://127.0.0.1:8899/api/launcher/restart",
+    ]);
   });
 
   it("starts the bundle through the guarded launcher endpoint", async () => {
