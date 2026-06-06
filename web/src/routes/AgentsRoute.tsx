@@ -577,6 +577,35 @@ function issueLabel(issues: AgentConfigHealthIssue[], lang: "zh" | "en") {
   return lang === "zh" ? "正常" : "OK";
 }
 
+function workspaceHealthStatusLabel(status: string, lang: "zh" | "en") {
+  const normalized = String(status || "ok").trim().toLowerCase();
+  const zh: Record<string, string> = {
+    ok: "正常",
+    warning: "需处理",
+    blocked: "阻塞",
+  };
+  const en: Record<string, string> = {
+    ok: "OK",
+    warning: "Needs review",
+    blocked: "Blocked",
+  };
+  return (lang === "zh" ? zh : en)[normalized] ?? status;
+}
+
+function workspaceHealthStatusDescription(status: string, summary: AgentConfigWorkspace["summary"] | undefined, lang: "zh" | "en") {
+  const normalized = String(status || "ok").trim().toLowerCase();
+  const issueCount = summary?.healthIssueCount ?? 0;
+  const blockingCount = summary?.blockingIssueCount ?? 0;
+  const warningCount = summary?.warningIssueCount ?? 0;
+  if (normalized === "ok" || issueCount === 0) {
+    return lang === "zh" ? "当前没有明显健康问题。" : "No obvious health issues.";
+  }
+  if (lang === "zh") {
+    return `共 ${issueCount} 个健康问题，阻塞 ${blockingCount} 个，警告 ${warningCount} 个。`;
+  }
+  return `${issueCount} health issues: ${blockingCount} blocking, ${warningCount} warning.`;
+}
+
 function sortedHealthIssues(issues: AgentConfigHealthIssue[]) {
   const order: Record<string, number> = { blocking: 0, warning: 1, info: 2 };
   return [...issues].sort((left, right) => (order[left.severity] ?? 3) - (order[right.severity] ?? 3));
@@ -1057,6 +1086,20 @@ function groupSectionId(group: AgentConfigWorkspaceGroup) {
 
 function groupDescription(group: { id: string; description?: string }, copy: ReturnType<typeof agentsRouteCopy>) {
   return copy.groupDescriptions[group.id] ?? group.description ?? "";
+}
+
+function groupAriaLabel(
+  label: string,
+  group: { count: number; healthCount?: number },
+  copy: ReturnType<typeof agentsRouteCopy>,
+  lang: "zh" | "en",
+) {
+  if (!group.healthCount) {
+    return lang === "zh" ? `${label}，${group.count} 个 Agent` : `${label}, ${group.count} Agents`;
+  }
+  return lang === "zh"
+    ? `${label}，${group.count} 个 Agent，${copy.healthIssues} ${group.healthCount} 个`
+    : `${label}, ${group.count} Agents, ${copy.healthIssues} ${group.healthCount}`;
 }
 
 function draftFromAgent(agent: AgentConfigWorkspaceAgent | null | undefined): AgentConfigDraft {
@@ -2276,6 +2319,8 @@ function agentsRouteCopy(lang: "zh" | "en") {
         archivedAgents: "已归档",
         teams: "团队",
         healthIssues: "健康问题",
+        healthIssueShort: "问题",
+        workspaceHealthStatus: "工作区健康状态",
         chatRooms: "群聊",
         inbox: "待处理消息",
         runningAgents: "运行中",
@@ -2615,6 +2660,8 @@ function agentsRouteCopy(lang: "zh" | "en") {
         archivedAgents: "Archived",
         teams: "Teams",
         healthIssues: "Health Issues",
+        healthIssueShort: "Issues",
+        workspaceHealthStatus: "Workspace health status",
         chatRooms: "Group Rooms",
         inbox: "Pending inbox",
         runningAgents: "Running",
@@ -3002,6 +3049,8 @@ export function AgentsRoute() {
   );
   const summary = workspace?.summary;
   const healthStatus = workspace?.health.status ?? "ok";
+  const healthStatusLabel = workspaceHealthStatusLabel(healthStatus, lang);
+  const healthStatusDescription = workspaceHealthStatusDescription(healthStatus, summary, lang);
   const refresh = () => {
     void chatWorkspaceCache.afterAgentWorkspaceChanged();
   };
@@ -4026,8 +4075,12 @@ export function AgentsRoute() {
           <h1 className={styles.title}>{copy.title}</h1>
           <p className={styles.subtitle}>{copy.subtitle}</p>
         </div>
-        <span className={`${styles.healthPill} ${styles[`health_${healthStatus}`]}`}>
-          {healthStatus}
+        <span
+          className={`${styles.healthPill} ${styles[`health_${healthStatus}`]}`}
+          title={healthStatusDescription}
+          aria-label={`${copy.workspaceHealthStatus}: ${healthStatusLabel}. ${healthStatusDescription}`}
+        >
+          {healthStatusLabel}
         </span>
         <button type="button" className={styles.refreshButton} onClick={refresh}>
           <RefreshCw size={16} />
@@ -4092,6 +4145,7 @@ export function AgentsRoute() {
                   {section.groups.map((group) => {
                     const active = activeFilter === group.id;
                     const description = groupDescription(group, copy);
+                    const displayLabel = groupDisplayLabel(group, copy);
                     return (
                       <button
                         key={group.id}
@@ -4101,14 +4155,15 @@ export function AgentsRoute() {
                           setActiveFilter(group.id);
                           setSelectedAgentId("");
                         }}
+                        aria-label={groupAriaLabel(displayLabel, group, copy, lang)}
                         title={description}
                       >
                         <span>
                           {section.id === "management" ? <CheckCircle2 size={15} /> : section.id === "reference" ? <Users size={15} /> : section.id === "mode" ? <Layers3 size={15} /> : group.id === "needs_review" ? <AlertTriangle size={15} /> : <Bot size={15} />}
-                          {groupDisplayLabel(group, copy)}
+                          {displayLabel}
                         </span>
                         <strong>{group.count}</strong>
-                        {group.healthCount ? <em>{group.healthCount}</em> : null}
+                        {group.healthCount ? <em>{copy.healthIssueShort} {group.healthCount}</em> : null}
                       </button>
                     );
                   })}
@@ -4391,6 +4446,7 @@ export function AgentsRoute() {
                     className={styles.detailAvatarButton}
                     onClick={() => setAvatarEditorOpen((current) => !current)}
                     aria-expanded={avatarEditorOpen}
+                    aria-label={copy.editAvatar}
                     title={copy.editAvatar}
                   >
                     {renderAgentAvatar(
