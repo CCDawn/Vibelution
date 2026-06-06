@@ -56,7 +56,10 @@ from tools.research_organization_tools import (
     research_proposal_apply_tool as _research_proposal_apply_impl,
 )
 from tools.image2_tools import image2_generate_tool as _image2_generate_impl
-from tools.computer_use_tools import computer_use_task_tool as _computer_use_task_impl
+from tools.computer_use_tools import (
+    computer_use_session_tool as _computer_use_session_impl,
+    computer_use_task_tool as _computer_use_task_impl,
+)
 from tools.research_knowledge_tools import research_knowledge_query_tool as _research_knowledge_query_impl
 from tools.team_knowledge_tools import (
     knowledge_governance_plan_tool as _knowledge_governance_plan_impl,
@@ -1261,6 +1264,36 @@ def create_key_tools() -> List[BaseTool]:
         )
 
     @tool
+    def computer_use_session_tool(
+        session_id: str,
+        action: str = "get",
+        confirmation: str = "approved",
+        reason: str = "cancelled_by_agent",
+    ) -> str:
+        """
+        【受控电脑操作会话】读取、确认继续或取消一个 Computer Use 沙盒浏览器会话。
+
+        适合在 computer_use_task_tool 返回 sessionId 后继续闭环：查看最新状态、对 need_confirmation
+        会话确认继续，或取消 running/need_confirmation 会话。该工具仍属于高风险 Computer Use 边界，
+        只有 Agent 的 ToolPolicy.allowedTools 显式包含 computer_use_session_tool 时才可调用。
+
+        Args:
+            session_id: Computer Use 会话 ID
+            action: get / confirm / cancel，默认 get
+            confirmation: action=confirm 时记录的确认说明
+            reason: action=cancel 时记录的取消原因
+
+        Returns:
+            JSON 格式的会话状态、步骤、截图 URL 和确认状态
+        """
+        return _computer_use_session_impl(
+            session_id=session_id,
+            action=action,
+            confirmation=confirmation,
+            reason=reason,
+        )
+
+    @tool
     def research_knowledge_query_tool(
         query: str = "",
         collection: str = "all",
@@ -1707,6 +1740,7 @@ def create_key_tools() -> List[BaseTool]:
         research_proposal_apply_tool,
         image2_generate_tool,
         computer_use_task_tool,
+        computer_use_session_tool,
         research_knowledge_query_tool,
         knowledge_query_tool,
         knowledge_rag_retrieve_tool,

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.37 - 2026-06-06
+
+- Added `computer_use_session_tool` so authorized Agents can read, confirm, or cancel existing Computer Use sandbox sessions after `computer_use_task_tool` returns a `sessionId`.
+- Registered the session tool with the same high-risk explicit ToolPolicy boundary as Computer Use task execution, including operations bundle metadata and read-only subagent blocking.
+- Added regression coverage for Agent-facing Computer Use session read/confirm/cancel flows, ToolExecutor policy blocking, and tool registry metadata.
+
 ## 0.10.36 - 2026-06-06
 
 - Changed Computer Use high-risk explicit actions to persist a pending execution request and resume the sandbox provider call after `/api/computer-use/sessions/{session_id}/confirm` approves it.
