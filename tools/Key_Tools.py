@@ -1233,6 +1233,7 @@ def create_key_tools() -> List[BaseTool]:
         max_steps: int = 20,
         require_confirmation: bool = True,
         mode: str = "browser",
+        timeout_seconds: int = 180,
     ) -> str:
         """
         【受控电脑操作】在沙盒浏览器中执行一次受限 Computer Use 任务。
@@ -1249,6 +1250,7 @@ def create_key_tools() -> List[BaseTool]:
             max_steps: 最大步骤数，范围 1-30，默认 20
             require_confirmation: 高风险动作是否等待用户确认，默认 True
             mode: 当前只支持 browser
+            timeout_seconds: 超时时间秒数，范围 1-300，默认 180
 
         Returns:
             JSON 格式的任务状态、sessionId、步骤、截图 URL 和确认状态
@@ -1261,6 +1263,7 @@ def create_key_tools() -> List[BaseTool]:
             max_steps=max_steps,
             require_confirmation=require_confirmation,
             mode=mode,
+            timeout_seconds=timeout_seconds,
         )
 
     @tool

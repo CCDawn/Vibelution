@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.39 - 2026-06-07
+
+- Hardened Computer Use confirmation policy so explicit high-risk actions cannot bypass approval even when a caller disables optional confirmation.
+- Changed provider confirmation sessions without continuation state to block instead of reporting a false completion, and added a resuming guard for duplicate confirms.
+- Redacted target URL query/hash values from public session payloads and runtime events, and exposed `timeout_seconds` through the Agent tool and API payload.
+
 ## 0.10.38 - 2026-06-07
 
 - Changed provider-driven Computer Use confirmation pauses to persist provider continuation data and resume through the same session after approval.

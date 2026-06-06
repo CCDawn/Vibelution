@@ -15,6 +15,7 @@ def computer_use_task_tool(
     max_steps: int = 20,
     require_confirmation: bool = True,
     mode: str = "browser",
+    timeout_seconds: int = 180,
 ) -> str:
     """Run a bounded Computer Use task in a sandbox browser session."""
 
@@ -29,6 +30,7 @@ def computer_use_task_tool(
             max_steps=max_steps,
             require_confirmation=require_confirmation,
             mode=mode,
+            timeout_seconds=timeout_seconds,
         )
     except Exception as exc:
         result: dict[str, Any] = {
