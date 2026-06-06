@@ -1401,7 +1401,6 @@ export type GitFileDiff = {
 export type GitCommitMessageResponse = {
   message: string;
   modelId: string;
-  profileId: string;
   prompt: string;
   files: string[];
   diffSummary: string;
