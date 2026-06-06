@@ -3092,6 +3092,78 @@ export type TeamWorkflowKnowledgeIngestionStatus = {
   updatedAt: string;
 };
 
+export type TeamWorkflowCoordinationQueueItem = {
+  queue: "pending_transfer" | "needs_rework" | "stewardship" | "blocked" | "active" | string;
+  candidateId: string;
+  candidateType: string;
+  title: string;
+  currentWorkflowNode: string;
+  currentState: string;
+  qualityStatus: string;
+  valid: boolean;
+  issueCount: number;
+  reason: string;
+  updatedAt: string;
+  transferId?: string;
+  fromNode?: string;
+  toNode?: string;
+  requestedByAgent?: string;
+};
+
+export type TeamWorkflowCoordinationActionItem = {
+  code: string;
+  severity: "blocked" | "needs_revision" | "needs_review" | "pending" | string;
+  message: string;
+  nextAction: string;
+  queue: string;
+};
+
+export type TeamWorkflowCoordinationStatus = {
+  schemaVersion: number;
+  teamId: string;
+  workflowId: string;
+  workflowKind: "challenge_cup_research" | string;
+  status: "empty" | "blocked" | "needs_transfer_decision" | "needs_rework" | "stewardship_review" | "in_progress" | string;
+  ownerAgentId: string;
+  summary: {
+    candidateCount: number;
+    activeCandidateCount: number;
+    archivedCandidateCount: number;
+    pendingTransferCount: number;
+    reworkCandidateCount: number;
+    stewardshipCandidateCount: number;
+    blockedCandidateCount: number;
+    activeQueueCount: number;
+    actionItemCount: number;
+    byWorkflowNode: Record<string, number>;
+    byState: Record<string, number>;
+    byQualityStatus: Record<string, number>;
+  };
+  queues: {
+    pendingTransfers: TeamWorkflowCoordinationQueueItem[];
+    needsRework: TeamWorkflowCoordinationQueueItem[];
+    stewardship: TeamWorkflowCoordinationQueueItem[];
+    blocked: TeamWorkflowCoordinationQueueItem[];
+    active: TeamWorkflowCoordinationQueueItem[];
+  };
+  actionItems: TeamWorkflowCoordinationActionItem[];
+  coordinationPolicy: {
+    coordinationAgentId: string;
+    organizingAgentId: string;
+    functionalAgentsMayRequestTransfer: boolean;
+    requiresUserConfirmation: boolean;
+    finalStateWriter: string;
+    readOnlyStatus: boolean;
+    autoTransferEnabled: boolean;
+  };
+  storage: {
+    workflowPath: string;
+    candidateStorePath: string;
+    transferRecordsPath: string;
+  };
+  updatedAt: string;
+};
+
 export type ConversationSummary = {
   conversationId: string;
   type: "direct_agent" | "group_room" | string;

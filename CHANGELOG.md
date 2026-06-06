@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.43 - 2026-06-06
+
+- Added a read-only Challenge Cup workflow coordination status API that groups pending transfers, rework candidates, stewardship items, blocked candidates, and active work for the research team.
+- Surfaced the coordination queue in the Teams research workflow panel without adding automatic transfer, approval, or formal-knowledge write controls.
+- Updated the Challenge Cup flow HTML to show the coordination queue as the team organization layer for research review and knowledge-governance handoff.
+
 ## 0.10.42 - 2026-06-06
 
 - Collapsed low-frequency Chat/Coding session diagnostics behind a compact context diagnostics disclosure while keeping status, LLM input, token speed, current task, and prompt-cache facts visible.

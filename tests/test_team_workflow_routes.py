@@ -269,6 +269,55 @@ def test_team_workflow_route_returns_knowledge_ingestion_status(tmp_path, monkey
     assert payload["officialBoundary"]["candidateGraphWritesOfficialGraph"] is False
 
 
+def test_team_workflow_route_returns_coordination_status(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+
+    def fake_status(team_id):
+        return {
+            "schemaVersion": 1,
+            "teamId": team_id,
+            "workflowId": "challenge-cup-research-flow",
+            "workflowKind": "challenge_cup_research",
+            "status": "needs_transfer_decision",
+            "ownerAgentId": "Research Coordination Agent",
+            "summary": {
+                "candidateCount": 2,
+                "activeCandidateCount": 2,
+                "pendingTransferCount": 1,
+                "reworkCandidateCount": 0,
+                "blockedCandidateCount": 0,
+                "actionItemCount": 1,
+            },
+            "queues": {
+                "pendingTransfers": [{"candidateId": "candidate-1", "transferId": "transfer-1"}],
+                "needsRework": [],
+                "stewardship": [],
+                "blocked": [],
+                "active": [],
+            },
+            "actionItems": [{"code": "transfer_decision_pending", "severity": "needs_review"}],
+            "coordinationPolicy": {
+                "coordinationAgentId": "Research Coordination Agent",
+                "requiresUserConfirmation": False,
+                "autoTransferEnabled": False,
+            },
+        }
+
+    monkeypatch.setattr(team_workflows, "get_team_workflow_coordination_status", fake_status)
+    client = _client()
+    team = client.post("/api/teams", json={"name": "挑战杯科研团队"}).json()
+
+    response = client.get(f"/api/teams/{team['teamId']}/workflow-orchestration/coordination/status")
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["teamId"] == team["teamId"]
+    assert payload["status"] == "needs_transfer_decision"
+    assert payload["summary"]["pendingTransferCount"] == 1
+    assert payload["queues"]["pendingTransfers"][0]["transferId"] == "transfer-1"
+    assert payload["coordinationPolicy"]["autoTransferEnabled"] is False
+
+
 def test_team_workflow_routes_extract_candidate_source_pages(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     client = _client()

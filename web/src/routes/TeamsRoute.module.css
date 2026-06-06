@@ -885,6 +885,86 @@
   color: var(--fg-primary);
 }
 
+.workflowCoordinationPanel {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 24%, var(--border-soft));
+  border-radius: 8px;
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--accent-cool) 7%, transparent), transparent 44%),
+    color-mix(in srgb, var(--surface-panel-strong) 68%, transparent);
+}
+
+.workflowCoordinationStats,
+.workflowCoordinationQueues {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.workflowCoordinationStats {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.workflowCoordinationStats span,
+.workflowCoordinationQueue {
+  min-width: 0;
+  border: 1px solid var(--border-soft);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--surface-card) 70%, transparent);
+}
+
+.workflowCoordinationStats span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  min-height: 25px;
+  padding: 0 6px;
+  color: var(--fg-muted);
+  font-size: 0.66rem;
+  font-weight: 720;
+}
+
+.workflowCoordinationStats strong {
+  color: var(--fg-primary);
+  font-size: 0.76rem;
+}
+
+.workflowCoordinationQueues {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.workflowCoordinationQueue {
+  display: grid;
+  gap: 3px;
+  min-height: 58px;
+  padding: 6px;
+  align-content: start;
+}
+
+.workflowCoordinationQueue strong,
+.workflowCoordinationQueue span,
+.workflowCoordinationQueue small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workflowCoordinationQueue strong {
+  color: var(--fg-primary);
+  font-size: 0.67rem;
+}
+
+.workflowCoordinationQueue span,
+.workflowCoordinationQueue small {
+  color: var(--fg-muted);
+  font-size: 0.61rem;
+}
+
 .workflowIngestionPanel {
   display: grid;
   gap: 7px;
