@@ -3054,9 +3054,10 @@ class TestLocalProviderBootstrap:
                 "llm.profiles.primary.tool_calling_mode": "disabled",
             },
         ).config
+        provider_id = config.llm.get_profile(profile_id="primary").provider_id
         config.llm.model_library = {
             "agent-dialogue-model-id": {
-                "provider_id": "default",
+                "provider_id": provider_id,
                 "model": "agent-dialogue-model",
                 "tool_calling_mode": "auto",
             },
@@ -3134,10 +3135,11 @@ class TestLocalProviderBootstrap:
                 "llm.profiles.primary.model": "dialogue-model",
             },
         ).config
+        provider_id = config.llm.get_profile(profile_id="primary").provider_id
         config.llm.model_library = {
-            "dialogue-model-id": {"provider_id": "default", "model": "dialogue-model"},
+            "dialogue-model-id": {"provider_id": provider_id, "model": "dialogue-model"},
             "subagent-execution-model-id": {
-                "provider_id": "default",
+                "provider_id": provider_id,
                 "model": "subagent-execution-model",
                 "tool_calling_mode": "disabled",
             },
@@ -3230,8 +3232,9 @@ class TestLocalProviderBootstrap:
                 "llm.profiles.primary.model": "primary-model",
             },
         ).config
+        provider_id = config.llm.get_profile(profile_id="primary").provider_id
         config.llm.model_library = {
-            "dialogue-model-id": {"provider_id": "default", "model": "dialogue-model"},
+            "dialogue-model-id": {"provider_id": provider_id, "model": "dialogue-model"},
         }
         directory_module = __import__(
             "core.web.services.agent_directory_service",
