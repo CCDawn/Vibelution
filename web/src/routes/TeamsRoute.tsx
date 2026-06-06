@@ -1569,6 +1569,9 @@ export function TeamsRoute() {
                               <span>{teamWorkflowCandidateGraph.graphKind}</span>
                               <span>{teamWorkflowCandidateGraph.summary.missingLinkCount} missing</span>
                               <span>{teamWorkflowCandidateGraph.summary.unreviewedNodeCount} review</span>
+                              {typeof teamWorkflowCandidateGraph.summary.archivedCandidateCount === "number" ? (
+                                <span>{teamWorkflowCandidateGraph.summary.archivedCandidateCount} archived</span>
+                              ) : null}
                               <span>
                                 {teamWorkflowCandidateGraph.officialBoundary.writesOfficialGraph
                                   ? (lang === "zh" ? "会写正式图谱" : "writes official graph")

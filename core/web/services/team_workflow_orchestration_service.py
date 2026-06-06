@@ -33,6 +33,8 @@ CANDIDATE_TYPES = {
     "candidate_graph",
 }
 TRANSFER_DECISIONS = {"approved", "rejected", "returned"}
+ARCHIVED_CANDIDATE_STATES = {"rejected", "archived"}
+ARCHIVED_WORKFLOW_NODES = {"rejection_archive"}
 LOCAL_RESEARCH_MODEL_ID = "houmo_qwen35_9b_agent"
 LOCAL_RESEARCH_MODEL_NAME = "bossAGI-standard / qwen3.5-9b"
 LOCAL_RESEARCH_MODEL_ROLE = "Local Research Worker Model"
@@ -591,12 +593,15 @@ def build_candidate_graph(team_id: str, payload: dict[str, Any] | None = None) -
     with _WORKFLOW_LOCK:
         workflow = _load_or_create_workflow(normalized_team_id)
         candidate_store = _load_candidate_store(normalized_team_id)
-        candidates = [
+        all_candidates = [
             item
             for item in list(candidate_store.get("candidates") or [])
             if isinstance(item, dict) and str(item.get("candidateType") or "") != "candidate_graph"
         ]
+        archived_candidates = [item for item in all_candidates if _candidate_is_archived(item)]
+        candidates = [item for item in all_candidates if not _candidate_is_archived(item)]
         graph = _build_candidate_graph_payload(normalized_team_id, workflow["workflowId"], candidates)
+        graph["summary"]["archivedCandidateCount"] = len(archived_candidates)
         record = {
             "schemaVersion": SCHEMA_VERSION,
             "candidateId": _new_record_id("candidate-graph"),
@@ -605,7 +610,10 @@ def build_candidate_graph(team_id: str, payload: dict[str, Any] | None = None) -
             "workflowId": workflow["workflowId"],
             "title": _trim_text(payload.get("title"), max_length=240) or "Candidate graph snapshot",
             "sourceKind": "candidate_graph_builder",
-            "summary": f"{len(graph['nodes'])} nodes, {len(graph['edges'])} edges, {len(graph['missingLinks'])} missing links",
+            "summary": (
+                f"{len(graph['nodes'])} nodes, {len(graph['edges'])} edges, "
+                f"{len(graph['missingLinks'])} missing links, {len(archived_candidates)} archived"
+            ),
             "sourceRefs": [],
             "evidenceRefs": [],
             "metadata": {
@@ -644,6 +652,7 @@ def build_candidate_graph(team_id: str, payload: dict[str, Any] | None = None) -
             "edgeCount": len(graph["edges"]),
             "missingLinkCount": len(graph["missingLinks"]),
             "unreviewedNodeCount": len(graph["unreviewedNodes"]),
+            "archivedCandidateCount": len(archived_candidates),
         },
     )
     return {
@@ -746,6 +755,8 @@ def decide_transfer_request(team_id: str, transfer_id: str, payload: dict[str, A
                 "status": decision,
                 "decisionNote": _trim_text(payload.get("decisionNote"), max_length=4000),
                 "decidedByAgent": decided_by_agent,
+                "targetState": _trim_text(payload.get("targetState"), max_length=120),
+                "decisionMetadata": _normalize_metadata(payload.get("metadata")),
                 "decidedAt": now,
                 "updatedAt": now,
             }
@@ -759,10 +770,31 @@ def decide_transfer_request(team_id: str, transfer_id: str, payload: dict[str, A
             candidate["lastTransferId"] = normalized_transfer_id
             candidate.pop("pendingTransferId", None)
         elif decision == "returned":
-            candidate["currentState"] = "returned_for_rework"
+            current_node = target_node or current_node
+            candidate["currentWorkflowNode"] = current_node
+            candidate["currentState"] = _trim_text(payload.get("targetState"), max_length=120) or "returned_for_rework"
+            candidate["qualityStatus"] = "needs_revision"
+            candidate["lastTransferId"] = normalized_transfer_id
             candidate.pop("pendingTransferId", None)
         else:
-            candidate["currentState"] = "transfer_rejected"
+            current_node = "rejection_archive"
+            candidate["currentWorkflowNode"] = current_node
+            candidate["currentState"] = "rejected"
+            candidate["qualityStatus"] = "rejected"
+            candidate["lastTransferId"] = normalized_transfer_id
+            metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {}
+            metadata["rejectionArchive"] = {
+                "status": "archived",
+                "transferId": normalized_transfer_id,
+                "fromNode": transfer.get("fromNode", ""),
+                "toNode": transfer.get("toNode", ""),
+                "reason": transfer.get("reason", ""),
+                "decisionNote": transfer.get("decisionNote", ""),
+                "decidedByAgent": decided_by_agent,
+                "archivedAt": now,
+                "reopenRequiresTransfer": True,
+            }
+            candidate["metadata"] = metadata
             candidate.pop("pendingTransferId", None)
         candidate["updatedAt"] = now
         candidate.setdefault("transitionHistory", []).append(
@@ -773,6 +805,8 @@ def decide_transfer_request(team_id: str, transfer_id: str, payload: dict[str, A
                 "toNode": transfer.get("toNode", ""),
                 "decidedByAgent": decided_by_agent,
                 "decidedAt": now,
+                "targetState": candidate["currentState"],
+                "metadata": transfer.get("metadata", {}),
             }
         )
         candidate_store["updatedAt"] = now
@@ -796,6 +830,8 @@ def decide_transfer_request(team_id: str, transfer_id: str, payload: dict[str, A
             "transferId": normalized_transfer_id,
             "decision": decision,
             "decidedByAgent": decided_by_agent,
+            "targetState": candidate["currentState"],
+            "archiveStatus": "archived" if decision == "rejected" else "",
         },
     )
     return {
@@ -1533,6 +1569,16 @@ def _candidate_graph_node(candidate: dict[str, Any]) -> dict[str, Any]:
         "requiresReview": bool(output.get("requiresReview")) if "requiresReview" in output else str(candidate.get("qualityStatus") or "") != "approved",
         "officialState": "candidate_only",
     }
+
+
+def _candidate_is_archived(candidate: dict[str, Any]) -> bool:
+    metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {}
+    rejection_archive = metadata.get("rejectionArchive") if isinstance(metadata.get("rejectionArchive"), dict) else {}
+    return (
+        str(candidate.get("currentState") or "") in ARCHIVED_CANDIDATE_STATES
+        or str(candidate.get("currentWorkflowNode") or "") in ARCHIVED_WORKFLOW_NODES
+        or str(rejection_archive.get("status") or "") == "archived"
+    )
 
 
 def _candidate_graph_edges(candidate: dict[str, Any]) -> list[dict[str, str]]:
