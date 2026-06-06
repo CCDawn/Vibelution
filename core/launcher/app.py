@@ -8,6 +8,7 @@ from fastapi import APIRouter, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 
+from core.version import get_product_version
 from core.web.control import CONTROL_TOKEN_HEADER, control_token_payload, trusted_control_origins
 from . import service as launcher_service
 
@@ -81,7 +82,7 @@ def project_restart() -> dict:
 def create_launcher_app() -> FastAPI:
     app = FastAPI(
         title="Vibelution Launcher",
-        version="0.1.0",
+        version=get_product_version(),
         description="Standalone lifecycle control plane for the Vibelution project bundle.",
     )
     app.add_middleware(
