@@ -1763,6 +1763,8 @@ class SelfEvolvingAgent:
                         "output_tokens": int(getattr(token_usage, "output_tokens", output_tokens) or 0) if token_usage_observed else 0,
                         "total_tokens": int(getattr(token_usage, "total_tokens", (input_tokens + output_tokens)) or 0) if token_usage_observed else 0,
                         "cached_input_tokens": int(getattr(token_usage, "cached_input_tokens", 0) or 0) if token_usage_observed else 0,
+                        "cache_creation_input_tokens": int(getattr(token_usage, "cache_creation_input_tokens", 0) or 0) if token_usage_observed else 0,
+                        "uncached_input_tokens": int(getattr(token_usage, "uncached_input_tokens", 0) or 0) if token_usage_observed else 0,
                     },
                 }
 

@@ -468,6 +468,69 @@ def _safe_prompt_cache_design_summary(messages: List[Any], *, prompt_cache_mode:
     }
 
 
+def _safe_prompt_cache_payload_summary(payload: Dict[str, Any]) -> Dict[str, Any]:
+    cache_key_field = ""
+    cache_key = ""
+    for field in ("prompt_cache_key", "promptCacheKey"):
+        value = payload.get(field)
+        if isinstance(value, str) and value.strip():
+            cache_key_field = field
+            cache_key = value.strip()
+            break
+    retention = payload.get("prompt_cache_retention") or payload.get("promptCacheRetention") or ""
+    messages = payload.get("messages") if isinstance(payload.get("messages"), list) else []
+    cache_control_blocks = 0
+    for message in messages:
+        if not isinstance(message, dict):
+            continue
+        content = message.get("content")
+        if not isinstance(content, list):
+            continue
+        for block in content:
+            if isinstance(block, dict) and block.get("cache_control"):
+                cache_control_blocks += 1
+    return {
+        "promptCachePayload": {
+            "keyField": cache_key_field,
+            "keyHash": _short_hash(cache_key),
+            "keyChars": len(cache_key),
+            "retention": str(retention or "").strip(),
+            "cacheControlBlockCount": cache_control_blocks,
+        }
+    }
+
+
+def _usage_cache_observation_fields(usage: UsageStats) -> Dict[str, Any]:
+    input_tokens = max(0, int(getattr(usage, "input_tokens", 0) or 0))
+    cache_read_tokens = max(0, int(getattr(usage, "cached_input_tokens", 0) or 0))
+    cache_creation_tokens = max(0, int(getattr(usage, "cache_creation_input_tokens", 0) or 0))
+    if input_tokens:
+        cache_read_tokens = min(cache_read_tokens, input_tokens)
+        cache_creation_tokens = min(cache_creation_tokens, input_tokens)
+    uncached_tokens = max(0, input_tokens - cache_read_tokens)
+    return {
+        "cachedInputTokens": cache_read_tokens,
+        "cacheReadInputTokens": cache_read_tokens,
+        "cacheCreationInputTokens": cache_creation_tokens,
+        "uncachedInputTokens": uncached_tokens,
+        "cacheHitRate": round(cache_read_tokens / input_tokens, 4) if input_tokens > 0 else 0.0,
+    }
+
+
+def _usage_observation_metadata(usage: UsageStats) -> Dict[str, Any]:
+    cache_fields = _usage_cache_observation_fields(usage)
+    return {
+        "input_tokens": usage.input_tokens,
+        "output_tokens": usage.output_tokens,
+        "total_tokens": usage.total_tokens,
+        "cached_input_tokens": cache_fields["cacheReadInputTokens"],
+        "cache_read_input_tokens": cache_fields["cacheReadInputTokens"],
+        "cache_creation_input_tokens": cache_fields["cacheCreationInputTokens"],
+        "uncached_input_tokens": cache_fields["uncachedInputTokens"],
+        "cache_hit_rate": cache_fields["cacheHitRate"],
+    }
+
+
 def _strip_cache_control_from_content(value: Any) -> Any:
     if not isinstance(value, list):
         return value
@@ -897,6 +960,7 @@ class LLMClient:
             messages,
             prompt_cache_mode=str(getattr(getattr(self.profile, "prompt_cache", None), "mode", "") or "disabled"),
         )
+        prompt_cache_payload_summary = _safe_prompt_cache_payload_summary(payload)
         thinking_summary = _safe_payload_thinking_summary(payload)
         protocol_summary = dict(self._last_payload_protocol_summary or payload_protocol_summary(payload, self.protocol_route))
         capability_source_summary = _safe_capability_source_summary(self._resolved_spec)
@@ -912,6 +976,7 @@ class LLMClient:
                 **route_summary,
                 **payload_shape_summary,
                 **prompt_cache_design_summary,
+                **prompt_cache_payload_summary,
                 **thinking_summary,
                 **protocol_summary,
                 **capability_source_summary,
@@ -926,6 +991,7 @@ class LLMClient:
         reasoning_content = reasoning.text
         if reasoning_content.strip():
             additional_kwargs["reasoning_content"] = reasoning_content
+        cache_observation_fields = _usage_cache_observation_fields(usage)
         _record_llm_scene_event(
             "invoke",
             "llm.invoke.succeeded",
@@ -943,19 +1009,17 @@ class LLMClient:
                 **message_role_summary,
                 **payload_shape_summary,
                 **prompt_cache_design_summary,
+                **prompt_cache_payload_summary,
                 **thinking_summary,
                 **protocol_summary,
                 **capability_source_summary,
                 "inputTokens": usage.input_tokens,
                 "outputTokens": usage.output_tokens,
                 "totalTokens": usage.total_tokens,
-                "cachedInputTokens": usage.cached_input_tokens,
+                **cache_observation_fields,
                 "reasoningSource": reasoning.source,
                 "reasoningChars": len(reasoning_content),
                 "reasoningObserved": bool(reasoning_content.strip()),
-                "cacheHitRate": round(usage.cached_input_tokens / usage.input_tokens, 4)
-                if usage.input_tokens > 0
-                else 0.0,
                 "latencyMs": latency_ms,
                 "metadata": metadata or {},
             },
@@ -973,17 +1037,7 @@ class LLMClient:
                 "provider": self.provider.kind,
                 "model": self.profile.model,
                 "usage": usage.provider_raw_usage,
-                "usage_observation": {
-                    "input_tokens": usage.input_tokens,
-                    "output_tokens": usage.output_tokens,
-                    "total_tokens": usage.total_tokens,
-                    "cached_input_tokens": usage.cached_input_tokens,
-                    "cache_hit_rate": (
-                        usage.cached_input_tokens / usage.input_tokens
-                        if usage.input_tokens > 0
-                        else 0.0
-                    ),
-                },
+                "usage_observation": _usage_observation_metadata(usage),
                 "latency_ms": latency_ms,
                 "capabilities": self.capabilities.__dict__,
                 "llm_protocol": protocol_summary,
@@ -1160,6 +1214,7 @@ class LLMClient:
         reasoning = extract_reasoning_text(message, extract_text_content)
         tool_calls = extract_message_tool_calls(message)
         usage = self._usage_from_response(response, latency_ms)
+        cache_observation_fields = _usage_cache_observation_fields(usage)
         _record_llm_scene_event(
             "stream",
             "llm.stream.fallback.invoke_succeeded",
@@ -1180,10 +1235,7 @@ class LLMClient:
                 "inputTokens": usage.input_tokens,
                 "outputTokens": usage.output_tokens,
                 "totalTokens": usage.total_tokens,
-                "cachedInputTokens": usage.cached_input_tokens,
-                "cacheHitRate": round(usage.cached_input_tokens / usage.input_tokens, 4)
-                if usage.input_tokens > 0
-                else 0.0,
+                **cache_observation_fields,
                 "latencyMs": latency_ms,
             },
             lifecycle=True,
@@ -1317,6 +1369,7 @@ class LLMClient:
             messages,
             prompt_cache_mode=str(getattr(getattr(self.profile, "prompt_cache", None), "mode", "") or "disabled"),
         )
+        prompt_cache_payload_summary = _safe_prompt_cache_payload_summary(payload)
         thinking_summary = _safe_payload_thinking_summary(payload)
         protocol_summary = dict(self._last_payload_protocol_summary or payload_protocol_summary(payload, self.protocol_route))
         capability_source_summary = _safe_capability_source_summary(self._resolved_spec)
@@ -1325,6 +1378,7 @@ class LLMClient:
             **route_summary,
             **payload_shape_summary,
             **prompt_cache_design_summary,
+            **prompt_cache_payload_summary,
             **thinking_summary,
             **protocol_summary,
             **capability_source_summary,
@@ -1430,8 +1484,10 @@ class LLMClient:
                         or usage_observation.output_tokens > 0
                         or usage_observation.total_tokens > 0
                         or usage_observation.cached_input_tokens > 0
+                        or usage_observation.cache_creation_input_tokens > 0
                     )
                 )
+                cache_observation_fields = _usage_cache_observation_fields(usage_observation)
                 _record_llm_scene_event(
                     "stream",
                     "llm.stream.succeeded",
@@ -1446,13 +1502,7 @@ class LLMClient:
                         "inputTokens": usage_observation.input_tokens,
                         "outputTokens": usage_observation.output_tokens,
                         "totalTokens": usage_observation.total_tokens,
-                        "cachedInputTokens": usage_observation.cached_input_tokens,
-                        "cacheHitRate": round(
-                            usage_observation.cached_input_tokens / usage_observation.input_tokens,
-                            4,
-                        )
-                        if usage_observation.input_tokens > 0
-                        else 0.0,
+                        **cache_observation_fields,
                         "latencyMs": usage_observation.latency_ms,
                         "messageCount": message_count,
                         "toolCount": tool_count,
@@ -1546,6 +1596,7 @@ class LLMClient:
                         **route_summary,
                         **payload_shape_summary,
                         **prompt_cache_design_summary,
+                        **_safe_prompt_cache_payload_summary(payload),
                         **_safe_payload_thinking_summary(payload),
                         **protocol_summary,
                         **capability_source_summary,
@@ -1603,17 +1654,7 @@ class LLMClient:
                 if event.usage is not None:
                     done_metadata = dict(response_metadata)
                     done_metadata["usage"] = event.usage.provider_raw_usage
-                    done_metadata["usage_observation"] = {
-                        "input_tokens": event.usage.input_tokens,
-                        "output_tokens": event.usage.output_tokens,
-                        "total_tokens": event.usage.total_tokens,
-                        "cached_input_tokens": event.usage.cached_input_tokens,
-                        "cache_hit_rate": (
-                            event.usage.cached_input_tokens / event.usage.input_tokens
-                            if event.usage.input_tokens > 0
-                            else 0.0
-                        ),
-                    }
+                    done_metadata["usage_observation"] = _usage_observation_metadata(event.usage)
                     yield AIMessageChunk(content="", response_metadata=done_metadata)
                 continue
             if event.type == "text_delta":

@@ -3106,6 +3106,7 @@ def test_session_detail_uses_provider_usage_for_prompt_cache_observation(tmp_pat
         "input_tokens": 800,
         "output_tokens": 120,
         "cached_input_tokens": 200,
+        "cache_creation_input_tokens": 160,
         "recorded_at": "2026-05-18T12:04:00",
     }
     save_chat_state(tmp_path, state)
@@ -3117,8 +3118,13 @@ def test_session_detail_uses_provider_usage_for_prompt_cache_observation(tmp_pat
     cache_usage = response.json()["cacheUsage"]
     assert cache_usage["turnInputTokens"] == 800
     assert cache_usage["turnCachedInputTokens"] == 200
+    assert cache_usage["turnCacheReadInputTokens"] == 200
+    assert cache_usage["turnCacheCreationInputTokens"] == 160
+    assert cache_usage["turnUncachedInputTokens"] == 600
     assert cache_usage["lastInputTokens"] == 800
     assert cache_usage["lastCachedInputTokens"] == 200
+    assert cache_usage["lastCacheCreationInputTokens"] == 160
+    assert cache_usage["lastUncachedInputTokens"] == 600
     assert cache_usage["turnCacheHitRate"] == pytest.approx(0.25)
     assert cache_usage["totalCacheHitRate"] == pytest.approx(0.25)
     assert cache_usage["updatedAt"] == "2026-05-18T12:04:00"
@@ -3155,6 +3161,7 @@ def test_session_detail_exposes_last_provider_llm_usage(tmp_path, monkeypatch):
         "input_tokens": 2048,
         "output_tokens": 256,
         "cached_input_tokens": 512,
+        "cache_creation_input_tokens": 384,
         "provider": "openai",
         "model": "gpt-5",
         "recorded_at": "2026-05-18T12:04:00",
@@ -3171,6 +3178,9 @@ def test_session_detail_exposes_last_provider_llm_usage(tmp_path, monkeypatch):
     assert llm_usage["outputTokens"] == 256
     assert llm_usage["totalTokens"] == 2304
     assert llm_usage["cachedInputTokens"] == 512
+    assert llm_usage["cacheReadInputTokens"] == 512
+    assert llm_usage["cacheCreationInputTokens"] == 384
+    assert llm_usage["uncachedInputTokens"] == 1536
     assert llm_usage["cacheHitRate"] == pytest.approx(0.25)
     assert llm_usage["provider"] == "openai"
     assert llm_usage["model"] == "gpt-5"
@@ -3395,6 +3405,7 @@ def test_persist_turn_result_records_provider_llm_usage(tmp_path, monkeypatch):
                 "input_tokens": 1500,
                 "output_tokens": 120,
                 "cached_input_tokens": 300,
+                "cache_creation_input_tokens": 450,
             },
         },
         turn_id="turn-provider-usage",
@@ -3404,7 +3415,10 @@ def test_persist_turn_result_records_provider_llm_usage(tmp_path, monkeypatch):
     assistant_metadata = conversation["messages"][-1]["metadata"]
     assert conversation["last_llm_usage"]["source"] == "provider_usage"
     assert conversation["last_llm_usage"]["inputTokens"] == 1500
+    assert conversation["last_llm_usage"]["cacheCreationInputTokens"] == 450
+    assert conversation["last_llm_usage"]["uncachedInputTokens"] == 1200
     assert assistant_metadata["llmUsage"]["inputTokens"] == 1500
+    assert assistant_metadata["llmUsage"]["cacheCreationInputTokens"] == 450
     assert assistant_metadata["llmUsage"]["cacheHitRate"] == pytest.approx(0.2)
     detail = session_service.get_session_detail("session-live")
     assert detail["llmUsage"]["source"] == "provider_usage"
@@ -3412,6 +3426,8 @@ def test_persist_turn_result_records_provider_llm_usage(tmp_path, monkeypatch):
     assert any(
         event["args"][:3] == ("conversation", "llm_usage", "conversation.llm_usage.recorded")
         and event["kwargs"]["fields"]["inputTokens"] == 1500
+        and event["kwargs"]["fields"]["cacheCreationInputTokens"] == 450
+        and event["kwargs"]["fields"]["uncachedInputTokens"] == 1200
         for event in events
     )
 
@@ -3460,6 +3476,7 @@ def test_persist_turn_result_exposes_previous_context_and_cache_composition(tmp_
                 "input_tokens": 1000,
                 "output_tokens": 80,
                 "cached_input_tokens": 250,
+                "cache_creation_input_tokens": 125,
             },
         },
         turn_id="turn-context-composition",
@@ -3473,7 +3490,9 @@ def test_persist_turn_result_exposes_previous_context_and_cache_composition(tmp_
     assert detail["lastCacheComposition"]["source"] == "provider_usage"
     assert detail["lastCacheComposition"]["inputTokens"] == 1000
     assert detail["lastCacheComposition"]["cachedInputTokens"] == 250
-    assert [item["key"] for item in detail["lastCacheComposition"]["segments"]] == ["cached", "uncached"]
+    assert detail["lastCacheComposition"]["cacheCreationInputTokens"] == 125
+    assert detail["lastCacheComposition"]["uncachedInputTokens"] == 750
+    assert [item["key"] for item in detail["lastCacheComposition"]["segments"]] == ["cached", "cache_write", "uncached"]
 
 
 def test_session_detail_live_context_uses_current_missing_cache_composition(tmp_path, monkeypatch):

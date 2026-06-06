@@ -782,9 +782,15 @@ def test_invoke_records_anthropic_cache_read_token_observation(monkeypatch):
     assert usage["input_tokens"] == 200
     assert usage["output_tokens"] == 10
     assert usage["cached_input_tokens"] == 80
+    assert usage["cache_read_input_tokens"] == 80
+    assert usage["cache_creation_input_tokens"] == 40
+    assert usage["uncached_input_tokens"] == 120
     assert usage["cache_hit_rate"] == pytest.approx(0.4)
     success_event = next(item for item in recorded if item[0][1] == "llm.invoke.succeeded")
     assert success_event[1]["fields"]["cachedInputTokens"] == 80
+    assert success_event[1]["fields"]["cacheReadInputTokens"] == 80
+    assert success_event[1]["fields"]["cacheCreationInputTokens"] == 40
+    assert success_event[1]["fields"]["uncachedInputTokens"] == 120
     assert success_event[1]["fields"]["cacheHitRate"] == pytest.approx(0.4)
 
 
@@ -1195,13 +1201,61 @@ def test_stream_records_anthropic_cache_read_token_observation(monkeypatch):
     assert events[-1].usage is not None
     assert events[-1].usage.input_tokens == 200
     assert events[-1].usage.cached_input_tokens == 75
+    assert events[-1].usage.cache_creation_input_tokens == 25
     success_event = next(item for item in recorded if item[0][1] == "llm.stream.succeeded")
     fields = success_event[1]["fields"]
     assert fields["inputTokens"] == 200
     assert fields["outputTokens"] == 20
     assert fields["cachedInputTokens"] == 75
+    assert fields["cacheReadInputTokens"] == 75
+    assert fields["cacheCreationInputTokens"] == 25
+    assert fields["uncachedInputTokens"] == 125
     assert fields["cacheHitRate"] == pytest.approx(0.375)
     assert fields["usageObserved"] is True
+
+
+def test_stream_marks_cache_creation_only_usage_as_observed(monkeypatch):
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "anthropic",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://api.anthropic.com",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "claude-3-5-sonnet-20241022",
+            "llm.profiles.primary.prompt_cache.mode": "explicit_cache_control",
+        }
+    )
+    recorded = []
+
+    def backend(_payload):
+        return iter(
+            [
+                {"choices": [{"delta": {"content": "ok"}}]},
+                {
+                    "usage": {
+                        "input_tokens": 200,
+                        "output_tokens": 20,
+                        "cache_creation_input_tokens": 60,
+                    },
+                },
+            ]
+        )
+
+    monkeypatch.setattr("core.llm.client._record_llm_scene_event", lambda *args, **kwargs: recorded.append((args, kwargs)))
+
+    client = LLMClient(config=config, backend=backend)
+    events = list(client.stream_events([{"role": "user", "content": "ping"}]))
+
+    assert events[-1].usage is not None
+    assert events[-1].usage.cached_input_tokens == 0
+    assert events[-1].usage.cache_creation_input_tokens == 60
+    fields = next(item for item in recorded if item[0][1] == "llm.stream.succeeded")[1]["fields"]
+    assert fields["usageObserved"] is True
+    assert fields["cachedInputTokens"] == 0
+    assert fields["cacheReadInputTokens"] == 0
+    assert fields["cacheCreationInputTokens"] == 60
+    assert fields["uncachedInputTokens"] == 200
+    assert fields["cacheHitRate"] == 0.0
 
 
 def test_stream_logs_prompt_cache_design_for_automatic_mode(monkeypatch):
@@ -1323,6 +1377,9 @@ def test_stream_final_chunk_exposes_usage_observation_for_ui():
     usage_observation = streamed[-1].response_metadata["usage_observation"]
     assert usage_observation["input_tokens"] == 80
     assert usage_observation["cached_input_tokens"] == 40
+    assert usage_observation["cache_read_input_tokens"] == 40
+    assert usage_observation["cache_creation_input_tokens"] == 0
+    assert usage_observation["uncached_input_tokens"] == 40
     assert usage_observation["cache_hit_rate"] == pytest.approx(0.5)
     assert streamed[0].response_metadata["llm_protocol"]["protocol"]
     assert streamed[-1].response_metadata["llm_protocol"]["payloadValidationResult"] == "passed"
