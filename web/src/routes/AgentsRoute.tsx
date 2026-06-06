@@ -83,6 +83,7 @@ type AgentCreateDraft = {
   promptTemplateId: string;
   personaSummary: string;
   taskMission: string;
+  selectedToolBundleIds: string[];
   allowedTools: string;
 };
 
@@ -1505,7 +1506,7 @@ function taskDraftEqualsDraft(left: AgentTaskDraft, right: AgentTaskDraft) {
   );
 }
 
-function createDraftFromWorkspace(workspace: AgentConfigWorkspace | undefined): AgentCreateDraft {
+function createDraftFromWorkspace(workspace: AgentConfigWorkspace | undefined, bundles: ToolBundle[] = []): AgentCreateDraft {
   const firstModel = buildAgentModelChoices(workspace?.agentModelChoices ?? [])[0]?.modelId
     ?? workspace?.agentModelChoices?.[0]?.modelId
     ?? "";
@@ -1518,15 +1519,16 @@ function createDraftFromWorkspace(workspace: AgentConfigWorkspace | undefined): 
     promptTemplateId: firstPrompt?.promptTemplateId || firstPrompt?.templateId || "prompt-chat-default",
     personaSummary: "",
     taskMission: "",
+    selectedToolBundleIds: defaultCreateToolBundleIds(true, bundles),
     allowedTools: DEFAULT_SESSION_AGENT_ALLOWED_TOOLS.join(", "),
   };
 }
 
-function normalizeCreateDraftForWorkspace(draft: AgentCreateDraft, workspace: AgentConfigWorkspace | undefined) {
+function normalizeCreateDraftForWorkspace(draft: AgentCreateDraft, workspace: AgentConfigWorkspace | undefined, bundles: ToolBundle[] = []) {
   if (!workspace) {
     return draft;
   }
-  const defaults = createDraftFromWorkspace(workspace);
+  const defaults = createDraftFromWorkspace(workspace, bundles);
   const modelIds = new Set(buildAgentModelChoices(workspace.agentModelChoices ?? []).map((choice) => choice.modelId));
   const promptIds = new Set((workspace.promptTemplates ?? []).map((template) => template.promptTemplateId || template.templateId || ""));
   const dialogueModelId = agentLlmSlotModelId(draft.llmBindings, FALLBACK_AGENT_LLM_SLOTS[0]);
@@ -1542,8 +1544,10 @@ function normalizeCreateDraftForWorkspace(draft: AgentCreateDraft, workspace: Ag
   };
 }
 
-function createDraftReady(draft: AgentCreateDraft) {
+function createDraftReady(draft: AgentCreateDraft, bundles: ToolBundle[] = []) {
   const workSession = isWorkSessionCreateDraft(draft);
+  const selectedPolicy = toolBundleSelectionToPolicy(draft.selectedToolBundleIds, bundles);
+  const configuredToolCount = selectedPolicy.allowedTools.length || expertiseFromDraft(draft.allowedTools).length;
   return Boolean(
     draft.displayName.trim()
     && agentLlmSlotModelId(draft.llmBindings, FALLBACK_AGENT_LLM_SLOTS[0])
@@ -1552,7 +1556,7 @@ function createDraftReady(draft: AgentCreateDraft) {
     && draft.promptTemplateId.trim()
     && (workSession || draft.personaSummary.trim())
     && (workSession || draft.taskMission.trim())
-    && expertiseFromDraft(draft.allowedTools).length > 0
+    && configuredToolCount > 0
   );
 }
 
@@ -1679,6 +1683,70 @@ function toolBundleMeta(bundle: ToolBundle, lang: "zh" | "en") {
     parts.push(lang === "zh" ? `${bundle.explicitAllowToolCount} 个需显式允许` : `${bundle.explicitAllowToolCount} explicit allow`);
   }
   return parts.join(" · ");
+}
+
+function defaultCreateToolBundleIds(workSession: boolean, bundles: ToolBundle[]) {
+  const available = new Set(bundles.map((bundle) => bundle.bundleId));
+  const preferred = workSession ? ["core", "coding", "memory_context"] : ["core", "research", "collaboration"];
+  const selected = preferred.filter((bundleId) => available.has(bundleId));
+  if (selected.length) {
+    return selected;
+  }
+  return bundles[0]?.bundleId ? [bundles[0].bundleId] : [];
+}
+
+function toolBundleIdsForModeChange(draft: AgentCreateDraft, nextPrimaryMode: string, bundles: ToolBundle[]) {
+  const currentDefaults = defaultCreateToolBundleIds(isWorkSessionCreateDraft(draft), bundles);
+  const hasCustomSelection = draft.selectedToolBundleIds.length > 0 && !sameStringSet(draft.selectedToolBundleIds, currentDefaults);
+  if (hasCustomSelection) {
+    return draft.selectedToolBundleIds;
+  }
+  const nextWorkSession = !String(nextPrimaryMode || "").trim() || nextPrimaryMode === "chat";
+  return defaultCreateToolBundleIds(nextWorkSession, bundles);
+}
+
+function toolBundleSelectionToPolicy(bundleIds: string[], bundles: ToolBundle[]) {
+  const selectedIds = new Set(sortedIds(bundleIds));
+  const selectedBundles = bundles.filter((bundle) => selectedIds.has(bundle.bundleId));
+  const allowed = new Set<string>();
+  const preferred = new Set<string>();
+  for (const bundle of selectedBundles) {
+    for (const tool of bundle.toolNames ?? []) {
+      allowed.add(tool);
+    }
+    for (const tool of bundle.preferredToolNames ?? []) {
+      if ((bundle.toolNames ?? []).includes(tool)) {
+        preferred.add(tool);
+      }
+    }
+  }
+  return {
+    selectedBundles,
+    allowedTools: sortedIds(Array.from(allowed)),
+    preferredTools: sortedIds(Array.from(preferred).filter((tool) => allowed.has(tool))),
+  };
+}
+
+function createToolBundleSummary(bundleIds: string[], bundles: ToolBundle[], lang: "zh" | "en") {
+  const policy = toolBundleSelectionToPolicy(bundleIds, bundles);
+  const highRiskCount = policy.selectedBundles.reduce((total, bundle) => total + Math.max(0, bundle.highRiskToolCount || 0), 0);
+  const explicitAllowCount = policy.selectedBundles.reduce((total, bundle) => total + Math.max(0, bundle.explicitAllowToolCount || 0), 0);
+  const bundleLabels = policy.selectedBundles.map((bundle) => bundle.label);
+  return {
+    ...policy,
+    bundleLabels,
+    highRiskCount,
+    explicitAllowCount,
+    label: bundleLabels.length
+      ? bundleLabels.join(" / ")
+      : (lang === "zh" ? "未选择工具包" : "No package selected"),
+    meta: [
+      lang === "zh" ? `${policy.allowedTools.length} 个允许工具` : `${policy.allowedTools.length} allowed tools`,
+      lang === "zh" ? `${policy.preferredTools.length} 个优先工具` : `${policy.preferredTools.length} preferred tools`,
+      highRiskCount ? (lang === "zh" ? `${highRiskCount} 个高风险` : `${highRiskCount} high risk`) : "",
+      explicitAllowCount ? (lang === "zh" ? `${explicitAllowCount} 个需显式授权` : `${explicitAllowCount} explicit allow`) : "",
+    ].filter(Boolean).join(" · "),
+  };
 }
 
 function toolPolicyMode(draft: AgentToolPolicyDraft, toolName: string): ToolPolicyMode {
@@ -2165,6 +2233,10 @@ function agentsRouteCopy(lang: "zh" | "en") {
         createAgentTaskMissionPlaceholder: "例如：复核科研结论，指出证据缺口并给出下一步建议。",
         createAgentAllowedTools: "允许工具",
         createAgentAllowedToolsPlaceholder: "例如：agent_message_tool, web_search_tool",
+        createAgentToolBundles: "工具包",
+        createAgentToolBundlesHint: "直接选择适合这个 Agent 的能力包；创建后仍可在工具能力里细调单个工具。",
+        createAgentToolBundlePreview: "创建后工具能力",
+        createAgentToolBundleEmpty: "还没有选择工具包。",
         cancelCreate: "取消",
         creatingAgent: "创建中...",
         resetAgent: "重置调试状态",
@@ -2208,8 +2280,8 @@ function agentsRouteCopy(lang: "zh" | "en") {
         inbox: "待处理消息",
         runningAgents: "运行中",
         blockedAgents: "阻塞/失败",
-        model: "模型绑定",
-        llmSlots: "Agent 模型绑定",
+        model: "模型槽位",
+        llmSlots: "Agent 模型槽位",
         llmSlotsHint: "按 Agent 自己配置对话、心智模型、摘要、子 Agent 和视觉等 LLM 槽位；设置页只维护模型库资产。",
         requiredSlot: "必填",
         optionalSlot: "可选",
@@ -2500,6 +2572,10 @@ function agentsRouteCopy(lang: "zh" | "en") {
         createAgentTaskMissionPlaceholder: "e.g. Review research conclusions and identify evidence gaps.",
         createAgentAllowedTools: "Allowed tools",
         createAgentAllowedToolsPlaceholder: "e.g. agent_message_tool, web_search_tool",
+        createAgentToolBundles: "Tool packages",
+        createAgentToolBundlesHint: "Choose capability packages for this Agent. You can still tune individual tools after creation.",
+        createAgentToolBundlePreview: "Tool permissions after creation",
+        createAgentToolBundleEmpty: "No tool package selected.",
         cancelCreate: "Cancel",
         creatingAgent: "Creating...",
         resetAgent: "Reset debug state",
@@ -2543,8 +2619,8 @@ function agentsRouteCopy(lang: "zh" | "en") {
         inbox: "Pending inbox",
         runningAgents: "Running",
         blockedAgents: "Blocked/failed",
-        model: "Model binding",
-        llmSlots: "Agent model bindings",
+        model: "Model slot",
+        llmSlots: "Agent model slots",
         llmSlotsHint: "Configure dialogue, mental model, summary, subagent, and vision LLM slots per Agent. Settings only manages model library assets.",
         requiredSlot: "Required",
         optionalSlot: "Optional",
@@ -2583,7 +2659,7 @@ function agentsRouteCopy(lang: "zh" | "en") {
         nextActionsTitle: "Next actions",
         nextAllReady: "Core configuration is ready for teams or chat.",
         nextSetupModelPrompt: "Configure model and project instructions",
-        nextSetupModelPromptHint: "Work-session Agents need an LLM binding and prompt/project instruction entry before use.",
+        nextSetupModelPromptHint: "Work-session Agents need a model slot and prompt/project instruction entry before use.",
         nextSetupIdentity: "Complete persona",
         nextSetupIdentityHint: "Give users and advisors a clear identity, background, expertise, and collaboration style.",
         nextSetupTask: "Complete task profile",
@@ -2780,7 +2856,7 @@ export function AgentsRoute() {
   const [selectedAgentId, setSelectedAgentId] = useState("");
   const [activePane, setActivePane] = useState<AgentConfigPaneId>("overview");
   const [createOpen, setCreateOpen] = useState(false);
-  const [createDraft, setCreateDraft] = useState<AgentCreateDraft>(() => createDraftFromWorkspace(undefined));
+  const [createDraft, setCreateDraft] = useState<AgentCreateDraft>(() => createDraftFromWorkspace(undefined, []));
   const [configDraft, setConfigDraft] = useState<AgentConfigDraft>(() => draftFromAgent(null));
   const [membershipDraft, setMembershipDraft] = useState<AgentModeMembershipDraft>(() => membershipDraftFromWorkspace(undefined, null));
   const [personaDraft, setPersonaDraft] = useState<AgentPersonaDraft>(() => personaDraftFromAgent(null));
@@ -2976,11 +3052,18 @@ export function AgentsRoute() {
   useEffect(() => {
     setCreateDraft((current) => {
       if (agentLlmSlotModelId(current.llmBindings, FALLBACK_AGENT_LLM_SLOTS[0]) || current.promptTemplateId) {
-        return normalizeCreateDraftForWorkspace(current, workspace);
+        const normalized = normalizeCreateDraftForWorkspace(current, workspace, toolBundles);
+        if (normalized.selectedToolBundleIds.length || !toolBundles.length) {
+          return normalized;
+        }
+        return {
+          ...normalized,
+          selectedToolBundleIds: defaultCreateToolBundleIds(isWorkSessionCreateDraft(normalized), toolBundles),
+        };
       }
-      return createDraftFromWorkspace(workspace);
+      return createDraftFromWorkspace(workspace, toolBundles);
     });
-  }, [workspace]);
+  }, [toolBundles, workspace]);
 
   const configDirty = !draftEqualsAgent(configDraft, selectedAgent);
   const membershipDirty = !membershipDraftEqualsWorkspace(membershipDraft, workspace, selectedAgent);
@@ -3000,7 +3083,11 @@ export function AgentsRoute() {
   const canSaveToolPolicy = Boolean(selectedAgent?.agentId && toolPolicyDirty);
   const canSaveMemoryPolicy = Boolean(selectedAgent?.agentId && memoryPolicyDirty);
   const canSaveRuntimePolicy = Boolean(selectedAgent?.agentId && runtimePolicyDirty);
-  const canCreateAgent = createDraftReady(createDraft);
+  const createToolBundleSummaryValue = useMemo(
+    () => createToolBundleSummary(createDraft.selectedToolBundleIds, toolBundles, lang),
+    [createDraft.selectedToolBundleIds, lang, toolBundles],
+  );
+  const canCreateAgent = createDraftReady(createDraft, toolBundles);
   const createDraftIsWorkSession = isWorkSessionCreateDraft(createDraft);
   const selectedAgentRequiresPersona = requiresPersonaProfile(selectedAgent);
   const selectedAgentRequiresTask = requiresTaskProfile(selectedAgent);
@@ -3015,6 +3102,12 @@ export function AgentsRoute() {
     mutationFn: (draft: AgentCreateDraft) => {
       const workSession = isWorkSessionCreateDraft(draft);
       const roleKey = workSession ? "" : draft.roleKey.trim();
+      const selectedToolPolicy = toolBundleSelectionToPolicy(draft.selectedToolBundleIds, toolBundles);
+      const fallbackAllowedTools = expertiseFromDraft(draft.allowedTools);
+      const allowedTools = selectedToolPolicy.allowedTools.length ? selectedToolPolicy.allowedTools : fallbackAllowedTools;
+      const preferredTools = selectedToolPolicy.preferredTools.length
+        ? selectedToolPolicy.preferredTools
+        : fallbackAllowedTools.includes("agent_message_tool") ? ["agent_message_tool"] : [];
       const personaProfile = workSession
         ? {}
         : {
@@ -3049,9 +3142,9 @@ export function AgentsRoute() {
           promptTemplateId: draft.promptTemplateId,
           personaProfile,
           taskProfile,
-          toolPolicy: workSession ? {} : {
-            allowedTools: expertiseFromDraft(draft.allowedTools),
-            preferredTools: expertiseFromDraft(draft.allowedTools).includes("agent_message_tool") ? ["agent_message_tool"] : [],
+          toolPolicy: {
+            allowedTools,
+            preferredTools,
             readScopes: ["private"],
             writeScopes: ["private"],
             networkAccess: "controlled",
@@ -3061,6 +3154,7 @@ export function AgentsRoute() {
             creationChannel: "agent_center",
             onboardingStatus: "complete",
             onboardingMissing: [],
+            creationToolBundleIds: sortedIds(draft.selectedToolBundleIds),
           },
         }),
       });
@@ -3069,7 +3163,7 @@ export function AgentsRoute() {
       setSelectedAgentId(agent.agentId);
       setActivePane("config");
       setCreateOpen(false);
-      setCreateDraft(createDraftFromWorkspace(workspace));
+      setCreateDraft(createDraftFromWorkspace(workspace, toolBundles));
       setNotice({
         tone: "success",
         text: lang === "zh" ? `已新增 ${agentLabel(agent)}` : `Created ${agentLabel(agent)}`,
@@ -3530,6 +3624,17 @@ export function AgentsRoute() {
   const selectedAgentAvatarUpdatePending = updateAvatarMutation.isPending && updateAvatarMutation.variables?.agentId === selectedAgent?.agentId;
   const selectedAgentAvatarUploadPending = uploadAvatarMutation.isPending && uploadAvatarMutation.variables?.agentId === selectedAgent?.agentId;
   const selectedAgentConsumeAllPending = consumeAllMessagesMutation.isPending && consumeAllMessagesMutation.variables?.agentId === selectedAgent?.agentId;
+  const selectedAgentConfigPending = updateAgentMutation.isPending && updateAgentMutation.variables?.agentId === selectedAgent?.agentId;
+  const selectedAgentPersonaPending = updatePersonaMutation.isPending && updatePersonaMutation.variables?.agentId === selectedAgent?.agentId;
+  const selectedAgentTaskPending = updateTaskMutation.isPending && updateTaskMutation.variables?.agentId === selectedAgent?.agentId;
+  const selectedAgentMembershipPending = updateMembershipMutation.isPending && updateMembershipMutation.variables?.agentId === selectedAgent?.agentId;
+  const selectedAgentToolPolicyPending = updateToolPolicyMutation.isPending && updateToolPolicyMutation.variables?.agentId === selectedAgent?.agentId;
+  const selectedAgentMemoryPolicyPending = updateMemoryPolicyMutation.isPending && updateMemoryPolicyMutation.variables?.agentId === selectedAgent?.agentId;
+  const selectedAgentRuntimePolicyPending = updateRuntimePolicyMutation.isPending && updateRuntimePolicyMutation.variables?.agentId === selectedAgent?.agentId;
+  const selectedAgentArchivePending = archiveAgentMutation.isPending && archiveAgentMutation.variables?.agentId === selectedAgent?.agentId;
+  const selectedAgentPurgePending = purgeAgentMutation.isPending && purgeAgentMutation.variables?.agentId === selectedAgent?.agentId;
+  const selectedAgentToolGovernanceCreatePending =
+    createToolGovernanceMutation.isPending && createToolGovernanceMutation.variables?.agentId === selectedAgent?.agentId;
 
   const updateDraft = (patch: Partial<AgentConfigDraft>) => {
     setConfigDraft((current) => ({ ...current, ...patch }));
@@ -3704,35 +3809,35 @@ export function AgentsRoute() {
   };
 
   const saveAgentConfig = () => {
-    if (!selectedAgent || !canSaveConfig) {
+    if (!selectedAgent || !canSaveConfig || selectedAgentConfigPending) {
       return;
     }
     updateAgentMutation.mutate({ agentId: selectedAgent.agentId, draft: configDraft });
   };
 
   const saveModeMembership = () => {
-    if (!selectedAgent || !canSaveMembership) {
+    if (!selectedAgent || !canSaveMembership || selectedAgentMembershipPending) {
       return;
     }
     updateMembershipMutation.mutate({ agentId: selectedAgent.agentId, draft: membershipDraft });
   };
 
   const savePersonaProfile = () => {
-    if (!selectedAgent || !canSavePersona) {
+    if (!selectedAgent || !canSavePersona || selectedAgentPersonaPending) {
       return;
     }
     updatePersonaMutation.mutate({ agentId: selectedAgent.agentId, draft: personaDraft });
   };
 
   const saveTaskProfile = () => {
-    if (!selectedAgent || !canSaveTask) {
+    if (!selectedAgent || !canSaveTask || selectedAgentTaskPending) {
       return;
     }
     updateTaskMutation.mutate({ agentId: selectedAgent.agentId, draft: taskDraft });
   };
 
   const saveToolPolicy = () => {
-    if (!selectedAgent || !canSaveToolPolicy) {
+    if (!selectedAgent || !canSaveToolPolicy || selectedAgentToolPolicyPending) {
       return;
     }
     updateToolPolicyMutation.mutate({
@@ -3743,7 +3848,7 @@ export function AgentsRoute() {
   };
 
   const submitToolGovernanceRequest = () => {
-    if (!selectedAgent || !canSubmitToolGovernance) {
+    if (!selectedAgent || !canSubmitToolGovernance || selectedAgentToolGovernanceCreatePending) {
       setNotice({ tone: "error", text: copy.toolGovernanceNoDelta });
       return;
     }
@@ -3755,7 +3860,11 @@ export function AgentsRoute() {
   };
 
   const resolveToolGovernanceRequest = (request: AgentToolGovernanceRequest, decision: "approve" | "reject") => {
-    if (!request.targetAgentId || !request.requestId || resolveToolGovernanceMutation.isPending) {
+    const requestPending =
+      resolveToolGovernanceMutation.isPending
+      && resolveToolGovernanceMutation.variables?.agentId === request.targetAgentId
+      && resolveToolGovernanceMutation.variables?.requestId === request.requestId;
+    if (!request.targetAgentId || !request.requestId || requestPending) {
       return;
     }
     resolveToolGovernanceMutation.mutate({
@@ -3766,7 +3875,7 @@ export function AgentsRoute() {
   };
 
   const saveMemoryPolicy = () => {
-    if (!selectedAgent || !canSaveMemoryPolicy) {
+    if (!selectedAgent || !canSaveMemoryPolicy || selectedAgentMemoryPolicyPending) {
       return;
     }
     updateMemoryPolicyMutation.mutate({
@@ -3777,7 +3886,7 @@ export function AgentsRoute() {
   };
 
   const saveRuntimePolicy = () => {
-    if (!selectedAgent || !canSaveRuntimePolicy) {
+    if (!selectedAgent || !canSaveRuntimePolicy || selectedAgentRuntimePolicyPending) {
       return;
     }
     updateRuntimePolicyMutation.mutate({
@@ -3795,7 +3904,7 @@ export function AgentsRoute() {
   };
 
   const archiveSelectedAgent = () => {
-    if (!selectedAgent || !canArchiveAgent || archiveAgentMutation.isPending) {
+    if (!selectedAgent || !canArchiveAgent || selectedAgentArchivePending) {
       return;
     }
     const confirmed = window.confirm(copy.archiveConfirm.replace("{name}", agentLabel(selectedAgent)));
@@ -3806,7 +3915,7 @@ export function AgentsRoute() {
   };
 
   const purgeSelectedAgent = () => {
-    if (!selectedAgent || !canPurgeAgent || purgeAgentMutation.isPending) {
+    if (!selectedAgent || !canPurgeAgent || selectedAgentPurgePending) {
       return;
     }
     const confirmed = window.confirm(copy.purgeConfirm.replace("{name}", agentLabel(selectedAgent)));
@@ -3969,7 +4078,7 @@ export function AgentsRoute() {
         </div>
       </div>
 
-      <div className={styles.workspace}>
+      <div className={createOpen ? `${styles.workspace} ${styles.workspaceCreating}` : styles.workspace}>
         <aside className={styles.filterPanel}>
           <label className={styles.searchBox}>
             <Search size={15} />
@@ -4014,7 +4123,7 @@ export function AgentsRoute() {
           </section>
         </aside>
 
-        <main className={styles.agentPanel}>
+        <main className={createOpen ? `${styles.agentPanel} ${styles.agentPanelCreating}` : styles.agentPanel}>
           <div className={styles.panelHeader}>
             <div>
               <p className={styles.panelEyebrow}>{copy.agentFilters}</p>
@@ -4068,7 +4177,16 @@ export function AgentsRoute() {
                 </label>
                 <label className={styles.field}>
                   <span>{copy.modeMembership}</span>
-                  <select value={createDraft.primaryMode} onChange={(event) => updateCreateDraft({ primaryMode: event.target.value })}>
+                  <select
+                    value={createDraft.primaryMode}
+                    onChange={(event) => {
+                      const primaryMode = event.target.value;
+                      updateCreateDraft({
+                        primaryMode,
+                        selectedToolBundleIds: toolBundleIdsForModeChange(createDraft, primaryMode, toolBundles),
+                      });
+                    }}
+                  >
                     {AGENT_PRIMARY_MODE_OPTIONS.map((mode) => (
                       <option key={mode} value={mode}>
                         {modeLabel(mode, lang)}
@@ -4117,14 +4235,50 @@ export function AgentsRoute() {
                     </label>
                   </>
                 ) : null}
-                <label className={styles.fieldWide}>
-                  <span>{copy.createAgentAllowedTools}</span>
-                  <input
-                    value={createDraft.allowedTools}
-                    placeholder={copy.createAgentAllowedToolsPlaceholder}
-                    onChange={(event) => updateCreateDraft({ allowedTools: event.target.value })}
-                  />
-                </label>
+                <section className={styles.fieldWide}>
+                  <span>{copy.createAgentToolBundles}</span>
+                  <small>{copy.createAgentToolBundlesHint}</small>
+                  {toolBundles.length ? (
+                    <div className={styles.createToolBundleGrid}>
+                      {toolBundles.map((bundle) => {
+                        const selected = createDraft.selectedToolBundleIds.includes(bundle.bundleId);
+                        return (
+                          <label key={bundle.bundleId} className={selected ? styles.createToolBundleSelected : styles.createToolBundleOption}>
+                            <input
+                              type="checkbox"
+                              checked={selected}
+                              onChange={(event) => {
+                                const next = new Set(createDraft.selectedToolBundleIds);
+                                if (event.target.checked) {
+                                  next.add(bundle.bundleId);
+                                } else {
+                                  next.delete(bundle.bundleId);
+                                }
+                                updateCreateDraft({ selectedToolBundleIds: sortedIds(Array.from(next)) });
+                              }}
+                            />
+                            <span>
+                              <strong>{bundle.label}</strong>
+                              <small>{toolBundleMeta(bundle, lang)}</small>
+                              <small>{bundle.description}</small>
+                            </span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <input
+                      value={createDraft.allowedTools}
+                      placeholder={copy.createAgentAllowedToolsPlaceholder}
+                      onChange={(event) => updateCreateDraft({ allowedTools: event.target.value })}
+                    />
+                  )}
+                </section>
+                <section className={`${styles.fieldWide} ${styles.createToolBundlePreview}`}>
+                  <span>{copy.createAgentToolBundlePreview}</span>
+                  <strong>{createToolBundleSummaryValue.label}</strong>
+                  <small>{createToolBundleSummaryValue.meta || copy.createAgentToolBundleEmpty}</small>
+                </section>
               </div>
               {notice ? (
                 <p className={notice.tone === "error" ? styles.errorText : styles.successText}>{notice.text}</p>
@@ -4136,7 +4290,7 @@ export function AgentsRoute() {
                   disabled={createAgentMutation.isPending}
                   onClick={() => {
                     setCreateOpen(false);
-                    setCreateDraft(createDraftFromWorkspace(workspace));
+                    setCreateDraft(createDraftFromWorkspace(workspace, toolBundles));
                   }}
                 >
                   {copy.cancelCreate}
@@ -4566,7 +4720,6 @@ export function AgentsRoute() {
                     <span>{copy.status}</span>
                     <select value={configDraft.status} onChange={(event) => updateDraft({ status: event.target.value })}>
                       <option value="active">{lang === "zh" ? "活跃" : "Active"}</option>
-                      <option value="archived">{lang === "zh" ? "归档" : "Archived"}</option>
                     </select>
                   </label>
                   <section className={styles.fieldWide}>
@@ -4638,11 +4791,11 @@ export function AgentsRoute() {
                   <p className={notice.tone === "error" ? styles.errorText : styles.successText}>{notice.text}</p>
                 ) : null}
                 <div className={styles.editorActions}>
-                  <button type="button" className={styles.secondaryButton} disabled={!configDirty || updateAgentMutation.isPending} onClick={() => setConfigDraft(draftFromAgent(selectedAgent))}>
+                  <button type="button" className={styles.secondaryButton} disabled={!configDirty || selectedAgentConfigPending} onClick={() => setConfigDraft(draftFromAgent(selectedAgent))}>
                     {copy.resetConfig}
                   </button>
-                  <button type="button" className={styles.primaryButton} disabled={!canSaveConfig || updateAgentMutation.isPending} onClick={saveAgentConfig}>
-                    {updateAgentMutation.isPending ? copy.savingConfig : copy.saveConfig}
+                  <button type="button" className={styles.primaryButton} disabled={!canSaveConfig || selectedAgentConfigPending} onClick={saveAgentConfig}>
+                    {selectedAgentConfigPending ? copy.savingConfig : copy.saveConfig}
                   </button>
                 </div>
               </section>
@@ -4711,7 +4864,7 @@ export function AgentsRoute() {
                   <button
                     type="button"
                     className={styles.secondaryButton}
-                    disabled={!personaDirty || updatePersonaMutation.isPending}
+                    disabled={!personaDirty || selectedAgentPersonaPending}
                     onClick={() => setPersonaDraft(personaDraftFromAgent(selectedAgent))}
                   >
                     {copy.resetConfig}
@@ -4719,10 +4872,10 @@ export function AgentsRoute() {
                   <button
                     type="button"
                     className={styles.primaryButton}
-                    disabled={!canSavePersona || updatePersonaMutation.isPending}
+                    disabled={!canSavePersona || selectedAgentPersonaPending}
                     onClick={savePersonaProfile}
                   >
-                    {updatePersonaMutation.isPending ? copy.savingPersona : copy.savePersona}
+                    {selectedAgentPersonaPending ? copy.savingPersona : copy.savePersona}
                   </button>
                 </div>
               </section>
@@ -4807,10 +4960,10 @@ export function AgentsRoute() {
                   <button
                     type="button"
                     className={styles.primaryButton}
-                    disabled={!canSubmitToolGovernance || createToolGovernanceMutation.isPending}
+                    disabled={!canSubmitToolGovernance || selectedAgentToolGovernanceCreatePending}
                     onClick={submitToolGovernanceRequest}
                   >
-                    {createToolGovernanceMutation.isPending ? copy.toolGovernanceSubmitting : copy.toolGovernanceSubmit}
+                    {selectedAgentToolGovernanceCreatePending ? copy.toolGovernanceSubmitting : copy.toolGovernanceSubmit}
                   </button>
                 </div>
               </section>
@@ -4873,7 +5026,7 @@ export function AgentsRoute() {
                   <button
                     type="button"
                     className={styles.secondaryButton}
-                    disabled={!taskDirty || updateTaskMutation.isPending}
+                    disabled={!taskDirty || selectedAgentTaskPending}
                     onClick={() => setTaskDraft(taskDraftFromAgent(selectedAgent))}
                   >
                     {copy.resetConfig}
@@ -4881,10 +5034,10 @@ export function AgentsRoute() {
                   <button
                     type="button"
                     className={styles.primaryButton}
-                    disabled={!canSaveTask || updateTaskMutation.isPending}
+                    disabled={!canSaveTask || selectedAgentTaskPending}
                     onClick={saveTaskProfile}
                   >
-                    {updateTaskMutation.isPending ? copy.savingTask : copy.saveTask}
+                    {selectedAgentTaskPending ? copy.savingTask : copy.saveTask}
                   </button>
                 </div>
               </section>
@@ -4966,21 +5119,21 @@ export function AgentsRoute() {
                       <button
                         type="button"
                         className={styles.dangerButton}
-                        disabled={!canPurgeAgent || purgeAgentMutation.isPending}
+                        disabled={!canPurgeAgent || selectedAgentPurgePending}
                         onClick={purgeSelectedAgent}
                       >
                         <Trash2 size={15} />
-                        {purgeAgentMutation.isPending ? copy.purgingAgent : copy.purgeAgent}
+                        {selectedAgentPurgePending ? copy.purgingAgent : copy.purgeAgent}
                       </button>
                     ) : (
                       <button
                         type="button"
                         className={styles.dangerButton}
-                        disabled={!canArchiveAgent || archiveAgentMutation.isPending}
+                        disabled={!canArchiveAgent || selectedAgentArchivePending}
                         onClick={archiveSelectedAgent}
                       >
                         <Trash2 size={15} />
-                        {archiveAgentMutation.isPending ? copy.archivingAgent : copy.archiveAgent}
+                        {selectedAgentArchivePending ? copy.archivingAgent : copy.archiveAgent}
                       </button>
                     )}
                   </div>
@@ -5242,7 +5395,7 @@ export function AgentsRoute() {
                   <button
                     type="button"
                     className={styles.secondaryButton}
-                    disabled={!toolPolicyDirty || updateToolPolicyMutation.isPending}
+                    disabled={!toolPolicyDirty || selectedAgentToolPolicyPending}
                     onClick={() => setToolPolicyDraft(toolPolicyDraftFromAgent(selectedAgent))}
                   >
                     {copy.resetConfig}
@@ -5250,10 +5403,10 @@ export function AgentsRoute() {
                   <button
                     type="button"
                     className={styles.primaryButton}
-                    disabled={!canSaveToolPolicy || updateToolPolicyMutation.isPending}
+                    disabled={!canSaveToolPolicy || selectedAgentToolPolicyPending}
                     onClick={saveToolPolicy}
                   >
-                    {updateToolPolicyMutation.isPending ? copy.savingToolPolicy : copy.saveToolPolicy}
+                    {selectedAgentToolPolicyPending ? copy.savingToolPolicy : copy.saveToolPolicy}
                   </button>
                 </div>
               </section>
@@ -5402,7 +5555,7 @@ export function AgentsRoute() {
                   <button
                     type="button"
                     className={styles.secondaryButton}
-                    disabled={!memoryPolicyDirty || updateMemoryPolicyMutation.isPending}
+                    disabled={!memoryPolicyDirty || selectedAgentMemoryPolicyPending}
                     onClick={() => setMemoryPolicyDraft(memoryPolicyDraftFromAgent(selectedAgent))}
                   >
                     {copy.resetConfig}
@@ -5410,10 +5563,10 @@ export function AgentsRoute() {
                   <button
                     type="button"
                     className={styles.primaryButton}
-                    disabled={!canSaveMemoryPolicy || updateMemoryPolicyMutation.isPending}
+                    disabled={!canSaveMemoryPolicy || selectedAgentMemoryPolicyPending}
                     onClick={saveMemoryPolicy}
                   >
-                    {updateMemoryPolicyMutation.isPending ? copy.savingMemoryPolicy : copy.saveMemoryPolicy}
+                    {selectedAgentMemoryPolicyPending ? copy.savingMemoryPolicy : copy.saveMemoryPolicy}
                   </button>
                 </div>
               </section>
@@ -5483,7 +5636,7 @@ export function AgentsRoute() {
                   <button
                     type="button"
                     className={styles.secondaryButton}
-                    disabled={!membershipDirty || updateMembershipMutation.isPending}
+                    disabled={!membershipDirty || selectedAgentMembershipPending}
                     onClick={() => setMembershipDraft(membershipDraftFromWorkspace(workspace, selectedAgent))}
                   >
                     {copy.resetConfig}
@@ -5491,10 +5644,10 @@ export function AgentsRoute() {
                   <button
                     type="button"
                     className={styles.primaryButton}
-                    disabled={!canSaveMembership || updateMembershipMutation.isPending}
+                    disabled={!canSaveMembership || selectedAgentMembershipPending}
                     onClick={saveModeMembership}
                   >
-                    {updateMembershipMutation.isPending ? copy.savingMembership : copy.saveMembership}
+                    {selectedAgentMembershipPending ? copy.savingMembership : copy.saveMembership}
                   </button>
                 </div>
               </section>
@@ -5916,7 +6069,7 @@ export function AgentsRoute() {
                   <button
                     type="button"
                     className={styles.secondaryButton}
-                    disabled={!runtimePolicyDirty || updateRuntimePolicyMutation.isPending}
+                    disabled={!runtimePolicyDirty || selectedAgentRuntimePolicyPending}
                     onClick={() => {
                       setDelegationPolicyDraft(delegationPolicyDraftFromAgent(selectedAgent));
                       setSupervisionPolicyDraft(supervisionPolicyDraftFromAgent(selectedAgent));
@@ -5927,10 +6080,10 @@ export function AgentsRoute() {
                   <button
                     type="button"
                     className={styles.primaryButton}
-                    disabled={!canSaveRuntimePolicy || updateRuntimePolicyMutation.isPending}
+                    disabled={!canSaveRuntimePolicy || selectedAgentRuntimePolicyPending}
                     onClick={saveRuntimePolicy}
                   >
-                    {updateRuntimePolicyMutation.isPending ? copy.savingRuntimePolicy : copy.saveRuntimePolicy}
+                    {selectedAgentRuntimePolicyPending ? copy.savingRuntimePolicy : copy.saveRuntimePolicy}
                   </button>
                 </div>
               </section>

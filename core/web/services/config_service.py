@@ -52,6 +52,20 @@ class ConfigConflictError(ValueError):
     """Raised when a saved config changed since the draft was loaded."""
 
 
+PROFILE_LABELS = {
+    "primary": {"zh": "主智能体", "en": "Primary"},
+    "mental_model": {"zh": "心智模型", "en": "Mental Model"},
+    "subagent_worker": {"zh": "子代理执行", "en": "Subagent Worker"},
+    "subagent_explorer": {"zh": "子代理探索", "en": "Subagent Explorer"},
+    "supervised_baseline": {"zh": "监督基线", "en": "Supervised Baseline"},
+    "supervised_candidate": {"zh": "监督候选", "en": "Supervised Candidate"},
+    "research_broad": {"zh": "科研广搜", "en": "Research Broad Search"},
+    "research_deep": {"zh": "科研深搜", "en": "Research Deep Search"},
+    "research_review": {"zh": "科研审查", "en": "Research Review"},
+    "research_themes": {"zh": "科研主题生成", "en": "Research Theme Generation"},
+    "research_card": {"zh": "科研主题卡", "en": "Research Theme Card"},
+    "compression": {"zh": "上下文压缩", "en": "Compression"},
+}
 _PENDING_SECRET_PREFIX = "pending-secret:"
 _PENDING_API_KEY_SECRETS: dict[str, tuple[str, str]] = {}
 _PENDING_CLEAR_ENVS: set[str] = set()
@@ -151,6 +165,17 @@ def _normalize_llm_test_capability(capability: str | None) -> str:
 
 def _resolve_workspace_language(public_config: dict[str, Any]) -> str:
     return resolve_language(public_config.get("ui", {}).get("language", "zh"))
+
+
+def _profile_label(profile_id: str, lang: str, profile: dict[str, Any] | None = None) -> str:
+    configured_label = str((profile or {}).get("label", "") or "").strip() if isinstance(profile, dict) else ""
+    if configured_label:
+        return configured_label
+    mapping = PROFILE_LABELS.get(str(profile_id).strip())
+    if mapping:
+        return text_for(lang, zh=mapping["zh"], en=mapping["en"])
+    token = str(profile_id or "").strip().replace("_", " ")
+    return token.title() if lang == "en" else token
 
 
 def _config_sections(lang: str, editor_sections: list[dict[str, Any]] | None = None) -> list[dict[str, str]]:

@@ -30,6 +30,7 @@ from core.chat.skill_registry import build_skill_runtime_context, skill_descript
 from core.chat.slash_commands import SkillSlashCommand, parse_skill_slash_command
 from core.infrastructure.event_bus import EventNames, get_event_bus
 from core.llm.client import llm_status_context
+from core.llm.payload_builder import prompt_cache_partition_scope
 from core.llm.agent_runtime import (
     AgentLlmResolutionError,
     resolve_agent_llm,
@@ -146,6 +147,7 @@ _SESSION_IMAGE_ARTIFACT_SAFE_CHARS = re.compile(r"^[A-Za-z0-9_.-]+$")
 _SESSION_WORKSPACE_SUBDIRS = ("artifacts", "tmp", "mental_model", "notes", "logs", "memory")
 _SESSION_INDEX_EVENT_DEDUPE_LOCK = threading.Lock()
 _SESSION_MISSING_INDEX_EVENT_KEYS: set[tuple[str, str, str, str, str]] = set()
+_SESSION_MISSING_INDEX_BATCH_EVENT_KEYS: set[tuple[Any, ...]] = set()
 _AGENT_DIRECTORY_INDEX_EVENT_KEYS: set[tuple[str, str, str]] = set()
 _SESSION_IMAGE_ARTIFACT_CONTENT_TYPES = {
     "png": "image/png",
@@ -478,6 +480,28 @@ def _safe_session_workspace_token(session_id: str) -> str:
         digest = hashlib.sha256(raw.encode("utf-8", errors="replace")).hexdigest()[:10]
         token = f"{token[:84].rstrip('._-') or 'session'}-{digest}"
     return token
+
+
+def _session_prompt_cache_partition(
+    *,
+    session_id: str,
+    agent_id: str = "",
+    llm_slot: str = SESSION_LLM_SLOT_DIALOGUE,
+    model_id: str = "",
+) -> str:
+    """Build a short stable provider cache shard for the ordinary chat flow."""
+
+    raw_parts = [
+        "chat",
+        str(session_id or "").strip(),
+        str(agent_id or "").strip(),
+        str(llm_slot or SESSION_LLM_SLOT_DIALOGUE).strip() or SESSION_LLM_SLOT_DIALOGUE,
+        str(model_id or "").strip(),
+    ]
+    raw = "|".join(raw_parts)
+    digest = hashlib.sha256(raw.encode("utf-8", errors="replace")).hexdigest()[:16]
+    session_token = _safe_session_workspace_token(session_id)[:24].strip("._-") or "session"
+    return f"chat-{session_token}-{digest}"
 
 
 def _session_workspace_relative_path(session_id: str) -> str:
@@ -948,11 +972,26 @@ def _ensure_conversation_agent_metadata(
     prompt_template_id = str((existing_agent or {}).get("promptTemplateId") or "").strip()
     if existing_agent_id and not existing_agent:
         changed = False
-        if conversation.get("agent_id") != existing_agent_id:
-            conversation["agent_id"] = existing_agent_id
+        if conversation.get("agent_id") != "":
+            conversation["agent_id"] = ""
             changed = True
-        if conversation.get("agentId") != existing_agent_id:
-            conversation["agentId"] = existing_agent_id
+        if conversation.get("agentId") != "":
+            conversation["agentId"] = ""
+            changed = True
+        if conversation.get("agent_missing_id") != existing_agent_id:
+            conversation["agent_missing_id"] = existing_agent_id
+            changed = True
+        if conversation.get("agentMissingId") != existing_agent_id:
+            conversation["agentMissingId"] = existing_agent_id
+            changed = True
+        if conversation.get("agentMissing") is not True:
+            conversation["agentMissing"] = True
+            changed = True
+        if conversation.get("agentStatusCode") != "missing_agent":
+            conversation["agentStatusCode"] = "missing_agent"
+            changed = True
+        if conversation.get("agentDirectSessionMismatch"):
+            conversation["agentDirectSessionMismatch"] = False
             changed = True
         return changed
     if existing_agent and str(existing_agent.get("status") or "active").strip().lower() == "archived":
@@ -984,6 +1023,42 @@ def _ensure_conversation_agent_metadata(
             agent_id=existing_agent_id,
             agent=existing_agent,
         ) or changed
+        if conversation.get("agentDirectSessionMismatch"):
+            conversation["agentDirectSessionMismatch"] = False
+            changed = True
+        if conversation.get("agentPrimaryDirectSessionId"):
+            conversation["agentPrimaryDirectSessionId"] = ""
+            changed = True
+        return changed
+    if existing_agent:
+        changed = False
+        if conversation.get("agent_id") != existing_agent_id:
+            conversation["agent_id"] = existing_agent_id
+            changed = True
+        if conversation.get("agentId") != existing_agent_id:
+            conversation["agentId"] = existing_agent_id
+            changed = True
+        changed = _repair_conversation_agent_legacy_model_fields(
+            conversation,
+            conversation_id=conversation_id,
+            agent_id=existing_agent_id,
+            agent=existing_agent,
+        ) or changed
+        existing_direct_session_id = str(existing_agent.get("directSessionId") or "").strip()
+        if existing_direct_session_id and existing_direct_session_id != conversation_id:
+            if conversation.get("agentDirectSessionMismatch") is not True:
+                conversation["agentDirectSessionMismatch"] = True
+                changed = True
+            if conversation.get("agentPrimaryDirectSessionId") != existing_direct_session_id:
+                conversation["agentPrimaryDirectSessionId"] = existing_direct_session_id
+                changed = True
+        else:
+            if conversation.get("agentDirectSessionMismatch"):
+                conversation["agentDirectSessionMismatch"] = False
+                changed = True
+            if conversation.get("agentPrimaryDirectSessionId"):
+                conversation["agentPrimaryDirectSessionId"] = ""
+                changed = True
         return changed
     archived_direct_agent = _archived_agent_for_direct_session(conversation_id) if not existing_agent_id else None
     if archived_direct_agent:
@@ -1197,6 +1272,8 @@ def _resolve_active_agent_for_turn(
 
 
 def _session_agent_visible_in_indexes(summary: dict[str, Any]) -> bool:
+    if bool(summary.get("agentMissing")):
+        return False
     if not bool(str(summary.get("agentId") or "").strip()):
         return True
     return not bool(summary.get("agentMissing"))
@@ -1536,15 +1613,17 @@ def list_sessions() -> list[dict]:
 
     try:
         agent_by_id = _agent_lookup_for_conversations()
-        active_id, conversations = _load_conversations(repair=False, agent_by_id=agent_by_id)
+        active_id, conversations = _load_conversations(repair=False, agent_by_id=agent_by_id, lightweight=True)
         conversations = _append_agent_directory_conversations(conversations, agent_by_id=agent_by_id)
         sessions = []
+        hidden_summaries = []
         for item in conversations:
             summary = _build_session_summary(item, hydrate_agent=False)
             if _session_agent_visible_in_indexes(summary):
                 sessions.append(summary)
             else:
-                _record_session_agent_missing_index_event(summary, source="list_sessions")
+                hidden_summaries.append(summary)
+        _record_session_agent_missing_index_batch_event(hidden_summaries, source="list_sessions")
         sessions.sort(
             key=lambda item: (
                 0 if item["id"] == active_id else 1,
@@ -3399,6 +3478,7 @@ def _load_conversations(
     *,
     repair: bool = True,
     agent_by_id: dict[str, dict[str, Any]] | None = None,
+    lightweight: bool = False,
 ) -> tuple[str, list[dict[str, Any]]]:
     payload = load_chat_state(PROJECT_ROOT)
     if repair:
@@ -3411,7 +3491,12 @@ def _load_conversations(
         if repair and isinstance(raw, dict):
             changed = _ensure_conversation_workspace_metadata(raw) or changed
             changed = _ensure_conversation_agent_metadata(raw, agent_by_id=agent_by_id) or changed
-        conversation = _normalize_conversation(raw, agent_by_id=agent_by_id, ensure_workspace=repair)
+        conversation = _normalize_conversation(
+            raw,
+            agent_by_id=agent_by_id,
+            ensure_workspace=repair,
+            lightweight=lightweight,
+        )
         if conversation is not None:
             conversations.append(conversation)
     if repair and changed:
@@ -3786,6 +3871,7 @@ def _normalize_conversation(
     *,
     agent_by_id: dict[str, dict[str, Any]] | None = None,
     ensure_workspace: bool = True,
+    lightweight: bool = False,
 ) -> dict[str, Any] | None:
     if not isinstance(raw, dict):
         return None
@@ -3799,15 +3885,34 @@ def _normalize_conversation(
     agent_id = str(raw.get("agent_id") or raw.get("agentId") or "").strip()
     agent = _agent_from_lookup(agent_by_id, agent_id) if agent_id else None
     agent_lookup_checked = agent_by_id is not None
-    raw_messages = _normalize_messages(conversation_id, raw.get("messages") or [])
-    messages = _filter_runtime_notice_messages(raw_messages)
-    runtime_notices = _normalize_session_runtime_notices(
-        raw.get("runtime_notices") or raw.get("runtimeNotices") or []
-    )
-    visible_runtime_notices = _visible_session_runtime_notices(
-        [*runtime_notices, *_runtime_notices_from_messages(raw_messages)],
-        messages,
-    )
+    missing_agent_id = str(raw.get("agent_missing_id") or raw.get("agentMissingId") or "").strip()
+    agent_missing = bool(raw.get("agentMissing"))
+    agent_status_code = str(raw.get("agentStatusCode") or "").strip()
+    agent_direct_session_mismatch = bool(raw.get("agentDirectSessionMismatch"))
+    agent_primary_direct_session_id = str(raw.get("agentPrimaryDirectSessionId") or "").strip()
+    if agent and str(agent.get("directSessionId") or "").strip() != conversation_id:
+        agent_direct_session_mismatch = True
+        agent_primary_direct_session_id = str(agent.get("directSessionId") or "").strip()
+    elif agent and str(agent.get("directSessionId") or "").strip() == conversation_id:
+        agent_direct_session_mismatch = False
+        agent_primary_direct_session_id = ""
+    elif agent_id and agent_lookup_checked and agent is None:
+        missing_agent_id = agent_id
+        agent_missing = True
+        agent_status_code = "missing_agent"
+    if lightweight:
+        messages = _normalize_latest_preview_messages(conversation_id, raw.get("messages") or [])
+        visible_runtime_notices: list[dict[str, Any]] = []
+    else:
+        raw_messages = _normalize_messages(conversation_id, raw.get("messages") or [])
+        messages = _filter_runtime_notice_messages(raw_messages)
+        runtime_notices = _normalize_session_runtime_notices(
+            raw.get("runtime_notices") or raw.get("runtimeNotices") or []
+        )
+        visible_runtime_notices = _visible_session_runtime_notices(
+            [*runtime_notices, *_runtime_notices_from_messages(raw_messages)],
+            messages,
+        )
     last_turn_status = str(raw.get("last_turn_status") or "").strip().lower()
     last_turn_error = _normalize_session_turn_error(raw.get("last_turn_error") or raw.get("lastTurnError"))
     last_llm_usage = _normalize_turn_llm_usage(raw.get("last_llm_usage") or raw.get("lastLlmUsage"))
@@ -3845,6 +3950,11 @@ def _normalize_conversation(
         "id": conversation_id,
         "title": title,
         "agentId": agent_id,
+        "agentMissingId": missing_agent_id,
+        "agentMissing": agent_missing,
+        "agentStatusCode": agent_status_code,
+        "agentDirectSessionMismatch": agent_direct_session_mismatch,
+        "agentPrimaryDirectSessionId": agent_primary_direct_session_id,
         "workspacePath": workspace_path,
         "messages": messages,
         "runtimeNotices": visible_runtime_notices,
@@ -3911,6 +4021,30 @@ def _normalize_messages(conversation_id: str, items: Any) -> list[dict[str, Any]
                 entry["content"] = _complete_turn_error_visible_content(entry["content"], metadata)
         messages.append(entry)
     return messages
+
+
+def _normalize_latest_preview_messages(conversation_id: str, items: Any, *, scan_limit: int = 12) -> list[dict[str, Any]]:
+    raw_items = list(items or [])
+    total_count = len(raw_items)
+    for reverse_index, raw in enumerate(reversed(raw_items[-scan_limit:]), start=1):
+        if not isinstance(raw, dict):
+            continue
+        role = str(raw.get("role") or "").strip().lower()
+        if role not in {"user", "assistant"}:
+            continue
+        content = _sanitize_message_content(role, raw.get("content") or "")
+        if not content or (role == "assistant" and _looks_like_runtime_failure_notice(content)):
+            continue
+        index = total_count - reverse_index + 1
+        return [
+            {
+                "id": f"{conversation_id}-message-{index}",
+                "role": role,
+                "content": content,
+                "timestamp": str(raw.get("timestamp") or "").strip(),
+            }
+        ]
+    return []
 
 
 def _normalize_session_kind(value: Any) -> str:
@@ -4048,6 +4182,8 @@ def _should_omit_message_from_agent_history(message: dict[str, Any]) -> bool:
     metadata = message.get("metadata")
     if isinstance(metadata, dict) and str(metadata.get("kind") or "").strip() == "turn_error":
         return True
+    if role == "user" and _is_system_authored_user_message_entry(message):
+        return True
     attachments = _normalize_message_attachments(message.get("attachments") or message.get("imageAttachments") or [])
     if role != "user":
         return role == "assistant" and (
@@ -4092,7 +4228,7 @@ def _latest_effective_user_message_with_index(messages: list[dict[str, Any]]) ->
         item = messages[index]
         if not isinstance(item, dict):
             continue
-        if str(item.get("role") or "").strip().lower() != "user":
+        if not _is_real_user_message_entry(item):
             continue
         content = trim_lines(item.get("content") or "", max_lines=4)
         if _is_effective_user_message(content):
@@ -4104,7 +4240,7 @@ def _latest_effective_user_messages(messages: list[dict[str, Any]], *, limit: in
     values: list[str] = []
     seen: set[str] = set()
     for item in reversed(messages):
-        if str(item.get("role") or "").strip().lower() != "user":
+        if not _is_real_user_message_entry(item):
             continue
         content = trim_lines(item.get("content") or "", max_lines=4)
         if not _is_effective_user_message(content):
@@ -4127,7 +4263,7 @@ def _latest_user_message_index_matching_goal(messages: list[dict[str, Any]], goa
         item = messages[index]
         if not isinstance(item, dict):
             continue
-        if str(item.get("role") or "").strip().lower() != "user":
+        if not _is_real_user_message_entry(item):
             continue
         content = trim_lines(item.get("content") or "", max_lines=4)
         if _task_goal_dedupe_key(content) == target:
@@ -4260,16 +4396,15 @@ def _find_user_message_index_by_api_id(
     if not normalized_target:
         return -1
     for index, item in enumerate(list(messages or []), start=1):
-        role = str(item.get("role") or "").strip().lower()
         api_id = str(item.get("id") or f"{conversation_id}-message-{index}").strip()
-        if api_id == normalized_target and role == "user":
+        if api_id == normalized_target and _is_real_user_message_entry(item):
             return index - 1
     return -1
 
 
 def _latest_user_message_index(messages: list[dict[str, Any]]) -> int:
     for index in range(len(messages or []) - 1, -1, -1):
-        if str((messages[index] or {}).get("role") or "").strip().lower() == "user":
+        if _is_real_user_message_entry(messages[index] or {}):
             return index
     return -1
 
@@ -4475,13 +4610,26 @@ def _build_session_summary(conversation: dict[str, Any], *, hydrate_agent: bool 
         hydrate_agent=hydrate_agent,
         agent_lookup_checked=agent_lookup_checked,
     )
+    if not agent_status["agentMissing"] and bool(conversation.get("agentMissing")):
+        agent_status = {
+            "agentMissing": True,
+            "agentStatusCode": str(conversation.get("agentStatusCode") or "missing_agent").strip() or "missing_agent",
+            "agentStatusMessage": text_for(
+                get_web_language(),
+                zh="缺少有效 Agent：当前会话引用的 Agent 已不存在或不可用。",
+                en="Missing valid Agent: this session references an Agent that no longer exists or is unavailable.",
+            ),
+        }
+    agent_missing_id = str(conversation.get("agentMissingId") or "").strip()
+    agent_direct_session_mismatch = bool(conversation.get("agentDirectSessionMismatch"))
+    agent_primary_direct_session_id = str(conversation.get("agentPrimaryDirectSessionId") or "").strip()
     agent_display_name = str((agent or {}).get("displayName") or "").strip()
     if agent_status["agentMissing"] and not agent_display_name:
         agent_display_name = text_for(get_web_language(), zh="缺少有效 Agent", en="Missing Agent")
     raw_title = str(conversation["title"]).strip()
     session_kind = str(conversation.get("sessionKind") or "main").strip() or "main"
     task_title = str(conversation.get("taskTitle") or raw_title).strip() or raw_title
-    display_title = task_title if session_kind == "child" else (agent_display_name or raw_title)
+    display_title = task_title if session_kind == "child" else raw_title
     return {
         "id": conversation["id"],
         "title": display_title,
@@ -4493,6 +4641,9 @@ def _build_session_summary(conversation: dict[str, Any], *, hydrate_agent: bool 
         "agentPrimaryMode": agent_primary_mode,
         "agentRoleKey": agent_role_key,
         "agentPromptTemplateId": agent_prompt_template_id,
+        "agentMissingId": agent_missing_id,
+        "agentDirectSessionMismatch": agent_direct_session_mismatch,
+        "agentPrimaryDirectSessionId": agent_primary_direct_session_id,
         "dialogueModelId": dialogue_model_id,
         "workspacePath": str(conversation.get("workspacePath") or _session_workspace_relative_path(conversation["id"])),
         "agentWorkspacePath": agent_workspace_path,
@@ -4665,6 +4816,11 @@ def _normalize_turn_llm_usage(value: Any) -> dict[str, Any] | None:
         "cacheHitRate": (cached_input_tokens / input_tokens) if input_tokens > 0 else 0.0,
         "provider": str(value.get("provider") or "").strip(),
         "model": str(value.get("model") or "").strip(),
+        "promptCacheScope": str(value.get("prompt_cache_scope") or value.get("promptCacheScope") or "").strip(),
+        "promptCachePartition": str(
+            value.get("prompt_cache_partition") or value.get("promptCachePartition") or ""
+        ).strip(),
+        "llmModelId": str(value.get("llm_model_id") or value.get("llmModelId") or "").strip(),
         "recordedAt": str(value.get("recorded_at") or value.get("recordedAt") or "").strip(),
     }
 
@@ -5317,7 +5473,7 @@ def _latest_assistant_summary(messages: list[dict[str, Any]]) -> str:
 
 def _latest_user_summary(messages: list[dict[str, Any]]) -> str:
     for item in reversed(messages):
-        if str(item.get("role") or "").strip().lower() != "user":
+        if not _is_real_user_message_entry(item):
             continue
         return _compact_preview_text(item.get("content") or "")
     return ""
@@ -5325,7 +5481,7 @@ def _latest_user_summary(messages: list[dict[str, Any]]) -> str:
 
 def _latest_user_message(messages: list[dict[str, Any]]) -> str:
     for item in reversed(messages):
-        if str(item.get("role") or "").strip().lower() != "user":
+        if not _is_real_user_message_entry(item):
             continue
         return trim_lines(item.get("content") or "", max_lines=4)
     return ""
@@ -5333,21 +5489,43 @@ def _latest_user_message(messages: list[dict[str, Any]]) -> str:
 
 def _latest_real_user_message(messages: list[dict[str, Any]]) -> str:
     for item in reversed(messages):
-        if str(item.get("role") or "").strip().lower() != "user":
-            continue
-        if _is_agent_inbox_message_entry(item):
+        if not _is_real_user_message_entry(item):
             continue
         return trim_lines(item.get("content") or "", max_lines=4)
     return ""
 
 
+def _message_metadata_kind(item: Any) -> str:
+    if not isinstance(item, dict):
+        return ""
+    metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+    return str(metadata.get("kind") or "").strip()
+
+
+def _is_system_authored_user_message_entry(item: Any) -> bool:
+    if not isinstance(item, dict):
+        return False
+    if str(item.get("role") or "").strip().lower() != "user":
+        return False
+    return _message_metadata_kind(item) == "hot_restart_resume"
+
+
 def _is_agent_inbox_message_entry(item: Any) -> bool:
     if not isinstance(item, dict):
         return False
-    metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
-    if str(metadata.get("kind") or "").strip() == "agent_inbox_message":
+    if str(item.get("role") or "").strip().lower() != "user":
+        return False
+    if _message_metadata_kind(item) == "agent_inbox_message":
         return True
     return _looks_like_agent_inbox_protocol_message(item.get("content"))
+
+
+def _is_real_user_message_entry(item: Any) -> bool:
+    if not isinstance(item, dict):
+        return False
+    if str(item.get("role") or "").strip().lower() != "user":
+        return False
+    return not (_is_agent_inbox_message_entry(item) or _is_system_authored_user_message_entry(item))
 
 
 def _latest_message_summary(messages: list[dict[str, Any]]) -> str:
@@ -5426,7 +5604,7 @@ def _root_session_id_for_conversations(session_id: str, conversations: list[dict
 def _latest_user_message_id(conversation_id: str, messages: list[dict[str, Any]]) -> str:
     for index in range(len(messages or []) - 1, -1, -1):
         item = messages[index] or {}
-        if str(item.get("role") or "").strip().lower() != "user":
+        if not _is_real_user_message_entry(item):
             continue
         return str(item.get("id") or f"{conversation_id}-message-{index + 1}").strip()
     return ""
@@ -5487,11 +5665,6 @@ def _make_empty_conversation(session_id: str, *, title: str, timestamp: str) -> 
     }
 
 
-def _normalize_session_agent_profile_id(value: Any) -> str:
-    normalized = str(value or "").strip()
-    return normalized or DEFAULT_SESSION_AGENT_PROFILE_ID
-
-
 def _normalize_session_agent_llm_bindings(value: Any) -> dict[str, dict[str, str]]:
     normalized = agent_directory_service.normalize_agent_llm_bindings(value)
     if agent_dialogue_model_id({"llmBindings": normalized}):
@@ -5500,6 +5673,15 @@ def _normalize_session_agent_llm_bindings(value: Any) -> dict[str, dict[str, str
     if default_model_id:
         normalized["dialogue"] = {"modelId": default_model_id}
     return normalized
+
+
+def default_session_llm_bindings() -> dict[str, dict[str, str]]:
+    return _normalize_session_agent_llm_bindings(None)
+
+
+def _normalize_session_agent_profile_id(value: Any) -> str:
+    normalized = str(value or "").strip()
+    return normalized or DEFAULT_SESSION_AGENT_PROFILE_ID
 
 
 def llm_bindings_for_profile_id(profile_id: Any) -> dict[str, dict[str, str]]:
@@ -5536,50 +5718,6 @@ def _default_session_dialogue_model_id() -> str:
         return str(model_id or "").strip()
     except Exception:
         return ""
-
-
-def _session_agent_profile_label(profile_id: str, lang: str) -> str:
-    labels = {
-        "primary": text_for(lang, zh="主 Agent", en="Primary agent"),
-        "subagent_worker": text_for(lang, zh="执行 Agent", en="Worker agent"),
-        "subagent_explorer": text_for(lang, zh="探索 Agent", en="Explorer agent"),
-        "mental_model": text_for(lang, zh="心智模型 Agent", en="Mental model agent"),
-        "supervised_baseline": text_for(lang, zh="监督基线 Agent", en="Supervised baseline agent"),
-        "supervised_candidate": text_for(lang, zh="监督候选 Agent", en="Supervised candidate agent"),
-        "research_broad": text_for(lang, zh="广搜 Agent", en="Broad research agent"),
-        "research_deep": text_for(lang, zh="深搜 Agent", en="Deep research agent"),
-        "research_review": text_for(lang, zh="审查 Agent", en="Review agent"),
-        "research_themes": text_for(lang, zh="主题 Agent", en="Theme agent"),
-        "research_card": text_for(lang, zh="主题卡 Agent", en="Card agent"),
-        "compression": text_for(lang, zh="压缩 Agent", en="Compression agent"),
-    }
-    normalized = _normalize_session_agent_profile_id(profile_id)
-    return labels.get(normalized, normalized.replace("_", " ").strip().title() or normalized)
-
-
-def _validate_session_agent_profile_id(profile_id: str, *, lang: str) -> None:
-    normalized = _normalize_session_agent_profile_id(profile_id)
-    if normalized not in get_config().llm.profiles:
-        raise SessionValidationError(
-            text_for(
-                lang,
-                zh=f"未找到 Agent 模板：{normalized}",
-                en=f"Agent template not found: {normalized}",
-            )
-        )
-
-
-def _session_agent_config_for_profile(profile_id: str) -> Any:
-    normalized = _normalize_session_agent_profile_id(profile_id)
-    config = copy.deepcopy(get_config())
-    if normalized == DEFAULT_SESSION_AGENT_PROFILE_ID:
-        return config
-    if normalized not in config.llm.profiles:
-        return config
-    selected = copy.deepcopy(config.llm.profiles[normalized])
-    selected.profile_id = DEFAULT_SESSION_AGENT_PROFILE_ID
-    config.llm.profiles[DEFAULT_SESSION_AGENT_PROFILE_ID] = selected
-    return config
 
 
 def _session_agent_config_for_llm_bindings(agent_instance: dict[str, Any] | None) -> Any:
@@ -6027,7 +6165,18 @@ def _persist_chat_turn_work_run(
         "updatedAt": str(updated_at or now).strip(),
         "finishedAt": finished
         if normalized_status
-        in {"completed", "failed", "stopped", "cancelled", "paused_limit", "needs_continue", "stopped_by_user", "superseded"}
+        in {
+            "completed",
+            "failed",
+            "failed_provider",
+            "failed_runtime",
+            "stopped",
+            "cancelled",
+            "paused_limit",
+            "needs_continue",
+            "stopped_by_user",
+            "superseded",
+        }
         else "",
     }
     _WORK_RUN_STORE.persist_snapshot("chat_turn", payload, active_run_id=active_run_id)
@@ -6547,6 +6696,28 @@ def _run_session_turn(context: dict[str, Any]) -> None:
             resolved_agent_llm = _resolve_session_agent_llm(agent_instance, llm_slot)
         except SessionValidationError as exc:
             visible = str(exc)
+            missing_model_id = _extract_missing_agent_llm_model_id(visible)
+            turn_error = _make_local_runtime_turn_error(
+                visible,
+                lang=get_web_language(),
+                error_type="agent_llm_resolution_failed",
+                reason_code="agent_llm_model_missing" if missing_model_id else "agent_llm_resolution_failed",
+                reason_summary=text_for(
+                    get_web_language(),
+                    zh="当前 Agent 绑定的对话模型不在模型库中",
+                    en="The current Agent dialogue model is not present in the model library",
+                )
+                if missing_model_id
+                else text_for(
+                    get_web_language(),
+                    zh="当前 Agent 的模型槽位无法解析",
+                    en="The current Agent model slot could not be resolved",
+                ),
+                reason_detail=visible,
+                turn_id=turn_id,
+                model=missing_model_id,
+                extra={"llmSlot": llm_slot, "agentId": agent_id},
+            )
             _record_session_turn_lifecycle_event(
                 session_id,
                 "agent_llm_resolve_failed",
@@ -6559,24 +6730,44 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                     "error": visible,
                 },
             )
-            _persist_session_turn_result(
+            _persist_session_turn_runtime_error(
                 session_id,
-                {
-                    "status": "failed_runtime",
-                    "summary": visible,
-                    "raw_output": visible,
-                    "error": visible,
-                    "outcome": "blocked",
-                    "metadata": {"reason": "agent_llm_resolution_failed", "llmSlot": llm_slot},
-                },
-                mental_model_enabled=mental_model_enabled,
-                session_workspace=session_workspace,
-                active_task_hint=context.get("active_task"),
+                turn_error,
+                raw_error=visible,
                 turn_id=turn_id,
+                status="failed_runtime",
+                work_run_summary=text_for(
+                    get_web_language(),
+                    zh="本轮在本地模型槽位解析阶段失败，未调用 provider。",
+                    en="This turn failed while resolving the local model slot before any provider call.",
+                ),
             )
+            _record_session_turn_lifecycle_event(
+                session_id,
+                "worker_finished",
+                turn_id=turn_id,
+                outcome="failed_runtime",
+                fields={
+                    "wasCurrentTurn": _is_session_turn_current(session_id, turn_id),
+                    "reason": "agent_llm_resolution_failed",
+                },
+            )
+            _set_session_running(session_id, False, turn_id=turn_id)
+            _clear_session_turn_control(session_id, turn_id=turn_id)
+            _publish_session_detail_snapshot(session_id)
             return
         prepare_timings["agentLlmResolveMs"] = _elapsed_ms(stage_started_at)
     prepare_timings["totalPrepareMs"] = _elapsed_ms(prepare_started_at)
+    llm_model_id_for_turn = str(getattr(resolved_agent_llm, "model_id", "") or "") or _session_agent_llm_slot_model_id(
+        agent_instance or historical_agent,
+        llm_slot,
+    )
+    prompt_cache_partition = _session_prompt_cache_partition(
+        session_id=session_id,
+        agent_id=agent_id,
+        llm_slot=llm_slot,
+        model_id=llm_model_id_for_turn,
+    )
     _record_session_turn_lifecycle_event(
         session_id,
         "worker_started",
@@ -6587,13 +6778,14 @@ def _run_session_turn(context: dict[str, Any]) -> None:
             "hasTurnControl": isinstance(turn_control, SessionTurnControl),
             "mentalModelEnabled": mental_model_enabled,
             "llmSlot": llm_slot,
-            "llmModelId": str(getattr(resolved_agent_llm, "model_id", "") or "")
-            or _session_agent_llm_slot_model_id(agent_instance or historical_agent, llm_slot),
+            "llmModelId": llm_model_id_for_turn,
             "agentId": agent_id,
             "agentWorkspacePath": agent_workspace,
             "agentMemoryRoot": memory_root,
             "toolWorkspacePath": str(tool_workspace),
             "toolWorkspaceScope": str(getattr(workspace_decision, "scope", "") or ""),
+            "promptCacheScope": "chat_session",
+            "promptCachePartition": prompt_cache_partition,
             "executorWaitMs": _elapsed_ms_between(context.get("_executor_submitted_at_monotonic"), prepare_started_at),
             "schedulerToWorkerStartedMs": _elapsed_ms_between(
                 context.get("_scheduler_started_at_monotonic") or context.get("_scheduler_scheduled_at_monotonic"),
@@ -6614,12 +6806,26 @@ def _run_session_turn(context: dict[str, Any]) -> None:
             "agentCode": str((agent_instance or {}).get("agentCode") or "").strip(),
             "dialogueModelId": agent_dialogue_model_id(agent_instance),
             "llmSlot": llm_slot,
-            "llmModelId": str(getattr(resolved_agent_llm, "model_id", "") or "")
-            or _session_agent_llm_slot_model_id(agent_instance, llm_slot),
+            "llmModelId": llm_model_id_for_turn,
             "promptTemplateId": str((agent_instance or {}).get("promptTemplateId") or "").strip(),
             "roleKey": str((agent_instance or {}).get("roleKey") or "").strip(),
             "source": "AgentLlmBindings" if agent_instance else "missing_agent",
+            "promptCacheScope": "chat_session",
+            "promptCachePartition": prompt_cache_partition,
             **(resolved_agent_llm.log_fields() if resolved_agent_llm is not None else {}),
+        },
+    )
+    _record_session_turn_lifecycle_event(
+        session_id,
+        "prompt_cache_partition_bound",
+        turn_id=turn_id,
+        outcome="bound",
+        fields={
+            "scope": "chat_session",
+            "promptCachePartition": prompt_cache_partition,
+            "agentId": agent_id,
+            "llmSlot": llm_slot,
+            "llmModelId": llm_model_id_for_turn,
         },
     )
     _record_session_execution_registry_event(
@@ -6883,6 +7089,11 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                         history_messages=history_messages,
                         attachments=llm_attachments,
                         user_message_source=str(context.get("user_message_source") or "").strip(),
+                        prompt_cache_partition=prompt_cache_partition,
+                        prompt_cache_scope="chat_session",
+                        agent_id=agent_id,
+                        llm_slot=llm_slot,
+                        llm_model_id=llm_model_id_for_turn,
                     )
                 if isinstance(result, dict):
                     result["context_composition"] = context_composition
@@ -7044,6 +7255,28 @@ def _record_session_skill_command_event(
         )
 
 
+def _attach_session_prompt_cache_metadata(
+    result: Any,
+    *,
+    prompt_cache_scope: str,
+    prompt_cache_partition: str,
+    llm_model_id: str,
+) -> Any:
+    if not isinstance(result, dict):
+        return result
+    metadata = dict(result.get("metadata") or {}) if isinstance(result.get("metadata"), dict) else {}
+    metadata.setdefault("promptCacheScope", str(prompt_cache_scope or "").strip())
+    metadata.setdefault("promptCachePartition", str(prompt_cache_partition or "").strip())
+    metadata.setdefault("llmModelId", str(llm_model_id or "").strip())
+    result["metadata"] = metadata
+    usage = result.get("llm_usage")
+    if isinstance(usage, dict):
+        usage.setdefault("promptCacheScope", metadata.get("promptCacheScope") or "")
+        usage.setdefault("promptCachePartition", metadata.get("promptCachePartition") or "")
+        usage.setdefault("llmModelId", metadata.get("llmModelId") or "")
+    return result
+
+
 def _run_session_continuation_loop(
     agent: Any,
     *,
@@ -7053,6 +7286,11 @@ def _run_session_continuation_loop(
     history_messages: list[dict[str, Any]],
     attachments: list[dict[str, Any]] | None = None,
     user_message_source: str = "",
+    prompt_cache_partition: str = "",
+    prompt_cache_scope: str = "chat_session",
+    agent_id: str = "",
+    llm_slot: str = SESSION_LLM_SLOT_DIALOGUE,
+    llm_model_id: str = "",
 ) -> Any:
     prompt = str(initial_prompt or "").strip()
     has_initial_attachments = bool(list(attachments or []))
@@ -7129,6 +7367,11 @@ def _run_session_continuation_loop(
                 "turnIndex": turn_index,
                 "promptLength": len(prompt),
                 "historyMessageCount": len(history_messages),
+                "promptCacheScope": str(prompt_cache_scope or "").strip(),
+                "promptCachePartition": str(prompt_cache_partition or "").strip(),
+                "agentId": str(agent_id or "").strip(),
+                "llmSlot": str(llm_slot or "").strip(),
+                "llmModelId": str(llm_model_id or "").strip(),
             },
         )
         _record_session_execution_registry_event(
@@ -7156,7 +7399,14 @@ def _run_session_continuation_loop(
         )
         turn_attachments = list(attachments or []) if turn_index == 1 else []
         llm_started_at = _perf_counter()
-        result = run_existing_agent_single_turn(agent, initial_prompt=prompt, attachments=turn_attachments)
+        with prompt_cache_partition_scope(prompt_cache_partition):
+            result = run_existing_agent_single_turn(agent, initial_prompt=prompt, attachments=turn_attachments)
+        result = _attach_session_prompt_cache_metadata(
+            result,
+            prompt_cache_scope=prompt_cache_scope,
+            prompt_cache_partition=prompt_cache_partition,
+            llm_model_id=llm_model_id,
+        )
         llm_elapsed_ms = _elapsed_ms(llm_started_at)
         return_stop_reason = _get_turn_control_stop_reason(turn_control) or _get_session_stop_reason(session_id)
         if return_stop_reason:
@@ -7194,6 +7444,9 @@ def _run_session_continuation_loop(
                 "visibleHasNextAction": has_next_action_signal(result_visible_reply),
                 "isProviderFailed": _is_provider_failed_result(result),
                 "llmElapsedMs": llm_elapsed_ms,
+                "promptCacheScope": str(prompt_cache_scope or "").strip(),
+                "promptCachePartition": str(prompt_cache_partition or "").strip(),
+                "llmModelId": str(llm_model_id or "").strip(),
             },
         )
         _record_session_execution_registry_event(
@@ -7500,6 +7753,25 @@ def _persist_session_turn_result(
         llm_usage = _normalize_turn_llm_usage(result.get("llm_usage") if isinstance(result, dict) else None)
         if llm_usage is not None:
             llm_usage["recordedAt"] = llm_usage.get("recordedAt") or _now_timestamp()
+            metadata = result.get("metadata") if isinstance(result.get("metadata"), dict) else {}
+            llm_usage["promptCacheScope"] = (
+                llm_usage.get("promptCacheScope")
+                or metadata.get("promptCacheScope")
+                or metadata.get("prompt_cache_scope")
+                or "chat_session"
+            )
+            llm_usage["promptCachePartition"] = (
+                llm_usage.get("promptCachePartition")
+                or metadata.get("promptCachePartition")
+                or metadata.get("prompt_cache_partition")
+                or ""
+            )
+            llm_usage["llmModelId"] = (
+                llm_usage.get("llmModelId")
+                or metadata.get("llmModelId")
+                or metadata.get("llm_model_id")
+                or ""
+            )
         context_composition = _normalize_session_context_composition(
             result.get("context_composition") if isinstance(result, dict) else None
         )
@@ -7896,7 +8168,170 @@ def _deliver_agent_inbox_turn_reply(reply: dict[str, Any]) -> None:
             {"wakeStatus": "failed", "reason": type(exc).__name__},
             level="warning",
             outcome="failed",
-        )
+            )
+
+
+def _extract_missing_agent_llm_model_id(message: Any) -> str:
+    value = str(message or "").strip()
+    marker = "model not found in model library:"
+    lowered = value.lower()
+    marker_index = lowered.find(marker)
+    if marker_index < 0:
+        return ""
+    return value[marker_index + len(marker):].strip().split()[0].strip("`'\".,;")
+
+
+def _make_local_runtime_turn_error(
+    raw_error: Any,
+    *,
+    lang: str,
+    error_type: str,
+    reason_code: str,
+    reason_summary: str,
+    reason_detail: str = "",
+    turn_id: str = "",
+    model: str = "",
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    normalized_reason_summary = trim_lines(reason_summary, max_lines=2)
+    normalized_reason_detail = trim_lines(reason_detail or raw_error, max_lines=4)
+    message = text_for(
+        lang,
+        zh="运行提示：本轮没有进入模型调用，因为本地 Agent 模型槽位无法解析。",
+        en="Runtime notice: this turn did not reach the model call because the local Agent model slot could not be resolved.",
+    )
+    if normalized_reason_summary:
+        message = f"{message} 原因：{normalized_reason_summary}。" if lang == "zh" else f"{message} Reason: {normalized_reason_summary}."
+    payload: dict[str, Any] = {
+        "message": message,
+        "error_type": str(error_type or "runtime_error").strip() or "runtime_error",
+        "reason_code": str(reason_code or "").strip(),
+        "reason_summary": normalized_reason_summary,
+        "reason_detail": normalized_reason_detail,
+        "http_status": 0,
+        "provider": "",
+        "provider_host": "",
+        "provider_error_type": "",
+        "provider_error_message": "",
+        "model": str(model or "").strip(),
+        "recoverable": False,
+        "timestamp": _now_timestamp(),
+        "turn_id": str(turn_id or "").strip(),
+    }
+    if extra:
+        payload["extra"] = {str(key): value for key, value in extra.items() if str(key or "").strip()}
+    return payload
+
+
+def _persist_session_turn_runtime_error(
+    session_id: str,
+    turn_error: dict[str, Any],
+    *,
+    raw_error: str,
+    turn_id: str = "",
+    status: str = "failed_runtime",
+    work_run_summary: str = "",
+) -> None:
+    timestamp = str(turn_error.get("timestamp") or _now_timestamp()).strip()
+    error_entry = _make_local_runtime_error_chat_message(turn_error, turn_id=turn_id)
+    message = str(error_entry.get("content") or turn_error.get("message") or "").strip()
+    normalized_status = str(status or "failed_runtime").strip() or "failed_runtime"
+    normalized_error_type = str(turn_error.get("error_type") or turn_error.get("errorType") or "runtime_error").strip()
+    with _CHAT_STATE_LOCK:
+        payload = load_chat_state(PROJECT_ROOT)
+        conversation = _find_conversation_entry(payload, session_id)
+        if conversation is None:
+            return
+        if turn_id and not _is_session_turn_current(session_id, turn_id):
+            return
+        messages = normalize_chat_messages(conversation.get("messages") or [])
+        conversation["messages"] = messages + [error_entry]
+        conversation["last_turn_status"] = normalized_status
+        conversation["last_turn_error"] = turn_error
+        conversation["updated_at"] = timestamp
+        payload["updated_at"] = timestamp
+        save_chat_state(PROJECT_ROOT, payload)
+    _clear_session_live_output(session_id, turn_id=turn_id)
+    _persist_chat_turn_work_run(
+        session_id=session_id,
+        turn_id=turn_id,
+        status=normalized_status,
+        summary=work_run_summary or message,
+        error_type=normalized_error_type,
+        error=raw_error,
+        finished_at=timestamp,
+        updated_at=timestamp,
+    )
+    _record_session_turn_result_log(
+        session_id,
+        turn_id,
+        status=normalized_status,
+        summary=message,
+        recovery_pointer={"resumeAllowed": False, "source": "local_runtime_error"},
+    )
+    _record_session_turn_visible_message(
+        session_id,
+        turn_id,
+        error_entry,
+        event="assistant_turn_error",
+        status=normalized_status,
+    )
+    _record_session_cycle_message(
+        session_id,
+        error_entry,
+        event="assistant_turn_error",
+        status=normalized_status,
+    )
+    _record_session_turn_lifecycle_event(
+        session_id,
+        "runtime_error_persisted",
+        turn_id=turn_id,
+        level="error",
+        outcome=normalized_status,
+        fields={
+            "errorType": normalized_error_type,
+            "reasonCode": str(turn_error.get("reason_code") or turn_error.get("reasonCode") or "").strip(),
+            "model": str(turn_error.get("model") or "").strip(),
+            "visibleTurnErrorMessagePersisted": True,
+            "normalAssistantReplyPersisted": False,
+        },
+    )
+    _record_session_turn_error(
+        session_id,
+        turn_error,
+        raw_error=raw_error,
+        status=normalized_status,
+    )
+
+
+def _make_local_runtime_error_chat_message(turn_error: dict[str, Any], *, turn_id: str = "") -> dict[str, Any]:
+    timestamp = str(turn_error.get("timestamp") or _now_timestamp()).strip()
+    error_type = str(turn_error.get("error_type") or turn_error.get("errorType") or "runtime_error").strip()
+    reason_summary = str(turn_error.get("reason_summary") or turn_error.get("reasonSummary") or "").strip()
+    reason_detail = str(turn_error.get("reason_detail") or turn_error.get("reasonDetail") or "").strip()
+    visible_message = str(turn_error.get("message") or "").strip()
+    message = _make_chat_message(
+        "assistant",
+        visible_message,
+        metadata={
+            "kind": "turn_error",
+            "errorType": error_type,
+            "turnId": str(turn_error.get("turn_id") or turn_error.get("turnId") or turn_id or "").strip(),
+            "recoverable": bool(turn_error.get("recoverable")),
+            "providerFailure": False,
+            "reasonCode": str(turn_error.get("reason_code") or turn_error.get("reasonCode") or "").strip(),
+            "reasonSummary": reason_summary,
+            "reasonDetail": reason_detail,
+            "httpStatus": _coerce_nonnegative_int(turn_error.get("http_status") or turn_error.get("httpStatus")) or None,
+            "provider": str(turn_error.get("provider") or "").strip(),
+            "providerHost": str(turn_error.get("provider_host") or turn_error.get("providerHost") or "").strip(),
+            "providerErrorType": str(turn_error.get("provider_error_type") or turn_error.get("providerErrorType") or "").strip(),
+            "providerErrorMessage": str(turn_error.get("provider_error_message") or turn_error.get("providerErrorMessage") or "").strip(),
+            "model": str(turn_error.get("model") or "").strip(),
+        },
+    )
+    message["timestamp"] = timestamp
+    return message
 
 
 def _record_agent_inbox_reply_event(
@@ -8487,6 +8922,12 @@ def _record_session_llm_usage_event(
         "outputTokens": int((normalized or {}).get("outputTokens") or 0),
         "totalTokens": int((normalized or {}).get("totalTokens") or 0),
         "cachedInputTokens": int((normalized or {}).get("cachedInputTokens") or 0),
+        "cacheHitRate": float((normalized or {}).get("cacheHitRate") or 0.0),
+        "promptCacheScope": str((normalized or {}).get("promptCacheScope") or "").strip(),
+        "promptCachePartition": str((normalized or {}).get("promptCachePartition") or "").strip(),
+        "llmModelId": str((normalized or {}).get("llmModelId") or "").strip(),
+        "provider": str((normalized or {}).get("provider") or "").strip(),
+        "model": str((normalized or {}).get("model") or "").strip(),
     }
     try:
         record_runtime_scene_event(
@@ -8588,7 +9029,7 @@ def _record_session_agent_missing_index_event(
     if not session_id:
         return
     agent_status_code = str(summary.get("agentStatusCode") or "").strip()
-    agent_id = str(summary.get("agentId") or "").strip()
+    agent_id = str(summary.get("agentId") or summary.get("agentMissingId") or "").strip()
     normalized_source = str(source or "").strip()
     dedupe_key = (str(PROJECT_ROOT.resolve()), session_id, agent_id, agent_status_code, normalized_source)
     with _SESSION_INDEX_EVENT_DEDUPE_LOCK:
@@ -8622,6 +9063,71 @@ def _record_session_agent_missing_index_event(
                 "control_signal": True,
             },
             lifecycle=True,
+        )
+    except Exception:
+        return
+
+
+def _record_session_agent_missing_index_batch_event(
+    summaries: list[dict[str, Any]],
+    *,
+    source: str,
+) -> None:
+    normalized_source = str(source or "").strip()
+    samples: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str]] = set()
+    hidden_count = 0
+    for summary in list(summaries or []):
+        if not isinstance(summary, dict):
+            continue
+        session_id = str(summary.get("id") or "").strip()
+        if not session_id:
+            continue
+        agent_id = str(summary.get("agentId") or summary.get("agentMissingId") or "").strip()
+        agent_status_code = str(summary.get("agentStatusCode") or "").strip()
+        dedupe_key = (session_id, agent_id, agent_status_code)
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+        hidden_count += 1
+        if len(samples) < 8:
+            samples.append(
+                {
+                    "sessionId": session_id,
+                    "agentId": agent_id,
+                    "agentStatusCode": agent_status_code,
+                    "agentStatusMessage": trim_lines(str(summary.get("agentStatusMessage") or ""), max_lines=2),
+                }
+            )
+    if hidden_count <= 0:
+        return
+    dedupe_key = (
+        str(PROJECT_ROOT.resolve()),
+        normalized_source,
+        hidden_count,
+        tuple((item["sessionId"], item["agentId"], item["agentStatusCode"]) for item in samples),
+    )
+    with _SESSION_INDEX_EVENT_DEDUPE_LOCK:
+        if dedupe_key in _SESSION_MISSING_INDEX_BATCH_EVENT_KEYS:
+            return
+        _SESSION_MISSING_INDEX_BATCH_EVENT_KEYS.add(dedupe_key)
+    try:
+        record_runtime_scene_event(
+            "conversation",
+            "session_agent_missing_batch",
+            "session.agent_missing.hidden_from_index.batch",
+            level="info",
+            outcome="hidden_control",
+            message="Known stale sessions hidden from indexes because their bound Agents are missing or archived.",
+            fields={
+                "source": normalized_source,
+                "hiddenCount": hidden_count,
+                "sampleSessions": samples,
+                "sampleCount": len(samples),
+                "hiddenFromIndex": True,
+                "controlSignal": True,
+            },
+            lifecycle=False,
         )
     except Exception:
         return
@@ -12154,6 +12660,8 @@ def _build_resume_goal_from_conversation_context(
             continue
         role = str(item.get("role") or "").strip().lower()
         if role not in {"user", "assistant"}:
+            continue
+        if role == "user" and _is_system_authored_user_message_entry(item):
             continue
         content = trim_lines(_sanitize_message_content(role, item.get("content") or ""), max_lines=4)
         if not content:

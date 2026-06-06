@@ -490,7 +490,14 @@ def archive_team(team_id: str) -> dict[str, Any]:
         if team is None:
             raise TeamNotFoundError("Team not found.")
         if str(team.get("status") or DEFAULT_TEAM_STATUS).strip() == "archived":
-            if _repair_archived_team_member_agents_for_team(team, state, reason="archive_team_already_archived", strict=True):
+            member_changed = _repair_archived_team_member_agents_for_team(
+                team,
+                state,
+                reason="archive_team_already_archived",
+                strict=True,
+            )
+            room_changed = _repair_archived_team_linked_chat_room(team, reason="archive_team_already_archived")
+            if member_changed or room_changed:
                 state["updatedAt"] = utc_now_iso()
                 _save_index(state)
             return get_team(normalized_team_id)
@@ -509,6 +516,7 @@ def _archive_team_in_state(state: dict[str, Any], team: dict[str, Any]) -> dict[
 
     agent_ids = _unique_active_member_agent_ids(team)
     _ensure_team_member_agents_can_archive(team, agent_ids)
+    deleted_room_ids = _delete_team_linked_chat_rooms(team, reason="team_archive", strict_busy=True)
 
     now = utc_now_iso()
     team["status"] = "archived"
@@ -525,6 +533,8 @@ def _archive_team_in_state(state: dict[str, Any], team: dict[str, Any]) -> dict[
         fields={
             "archivedAgentIds": archived_agent_ids,
             "archivedAgentCount": len(archived_agent_ids),
+            "deletedLinkedChatRoomIds": deleted_room_ids,
+            "deletedLinkedChatRoomCount": len(deleted_room_ids),
         },
     )
     return get_team(team_id)
@@ -1690,6 +1700,102 @@ def _archive_duplicate_team_chat_rooms(keep_room_id: str, team_id: str) -> None:
                 "duplicateRoomCount": len(duplicates),
             },
         )
+
+
+def repair_archived_team_chat_rooms() -> dict[str, Any]:
+    """Delete linked team chat rooms for Teams that are already archived."""
+
+    _sync_chat_room_root()
+    with _TEAM_LOCK:
+        state = _load_index()
+        changed = False
+        deleted_room_ids: list[str] = []
+        for team in list(state.get("teams") or []):
+            if not isinstance(team, dict):
+                continue
+            if str(team.get("status") or DEFAULT_TEAM_STATUS).strip() != "archived":
+                continue
+            before = str(team.get("linkedChatRoomId") or "").strip()
+            deleted = _delete_team_linked_chat_rooms(team, reason="archived_team_repair")
+            if deleted:
+                deleted_room_ids.extend(deleted)
+            if deleted or before != str(team.get("linkedChatRoomId") or "").strip():
+                changed = True
+        if changed:
+            state["updatedAt"] = utc_now_iso()
+            _save_index(state)
+    return {
+        "deleted": bool(deleted_room_ids),
+        "deletedRoomIds": deleted_room_ids,
+        "deletedRoomCount": len(deleted_room_ids),
+    }
+
+
+def _repair_archived_team_linked_chat_room(team: dict[str, Any], *, reason: str) -> bool:
+    if str(team.get("status") or DEFAULT_TEAM_STATUS).strip() != "archived":
+        return False
+    before = str(team.get("linkedChatRoomId") or "").strip()
+    deleted = _delete_team_linked_chat_rooms(team, reason=reason)
+    after = str(team.get("linkedChatRoomId") or "").strip()
+    return bool(deleted) or before != after
+
+
+def _delete_team_linked_chat_rooms(team: dict[str, Any], *, reason: str, strict_busy: bool = False) -> list[str]:
+    team_id = str(team.get("teamId") or "").strip()
+    if not team_id:
+        return []
+    _sync_chat_room_root()
+    room_ids: list[str] = []
+    linked_room_id = str(team.get("linkedChatRoomId") or "").strip()
+    if linked_room_id:
+        room_ids.append(linked_room_id)
+    for room in chat_room_service.list_chat_rooms_compact():
+        if not isinstance(room, dict):
+            continue
+        room_id = str(room.get("roomId") or "").strip()
+        room_config = dict(room.get("config") or {})
+        if (
+            room_id
+            and room_id not in room_ids
+            and str(room_config.get("source") or "").strip() == "team"
+            and str(room_config.get("teamId") or "").strip() == team_id
+        ):
+            room_ids.append(room_id)
+
+    deleted_room_ids: list[str] = []
+    missing_room_ids: list[str] = []
+    for room_id in room_ids:
+        try:
+            chat_room_service.delete_chat_room(room_id)
+        except chat_room_service.ChatRoomNotFoundError:
+            missing_room_ids.append(room_id)
+            continue
+        except chat_room_service.ChatRoomBusyError as exc:
+            _record_team_event(
+                "team.chat_room.archive_delete_rejected",
+                team,
+                fields={"linkedChatRoomId": room_id, "reason": reason, "errorType": type(exc).__name__},
+            )
+            if strict_busy:
+                raise TeamServiceError("Team chat room has an active round and cannot be deleted while archiving.") from exc
+            continue
+        deleted_room_ids.append(room_id)
+
+    if linked_room_id and linked_room_id in {*deleted_room_ids, *missing_room_ids}:
+        team["linkedChatRoomId"] = ""
+    if deleted_room_ids or missing_room_ids:
+        _record_team_event(
+            "team.chat_room.deleted_for_archive",
+            team,
+            fields={
+                "deletedLinkedChatRoomIds": deleted_room_ids,
+                "deletedLinkedChatRoomCount": len(deleted_room_ids),
+                "clearedMissingLinkedChatRoomIds": missing_room_ids,
+                "clearedMissingLinkedChatRoomCount": len(missing_room_ids),
+                "reason": reason,
+            },
+        )
+    return deleted_room_ids
 
 
 def _team_chat_room_needs_sync(

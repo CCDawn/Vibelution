@@ -216,6 +216,46 @@ def test_agent_config_workspace_lists_agents_once_and_derives_references(tmp_pat
     assert research_agent["agentId"] in groups["group_chat"]["agentIds"]
 
 
+def test_agent_directory_reuses_repaired_snapshot_for_repeated_reads(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
+    agent_directory_service.create_agent_instance(display_name="缓存 Agent")
+
+    repair_calls = 0
+    real_repair = agent_directory_service.repair_agent_directory
+
+    def tracked_repair():
+        nonlocal repair_calls
+        repair_calls += 1
+        return real_repair()
+
+    monkeypatch.setattr(agent_directory_service, "repair_agent_directory", tracked_repair)
+
+    first = agent_directory_service.list_agents(include_archived=True)
+    second = agent_directory_service.list_agents(include_archived=True)
+    looked_up = agent_directory_service.get_agent(first[0]["agentId"])
+
+    assert [item["agentId"] for item in first] == [item["agentId"] for item in second]
+    assert looked_up and looked_up["agentId"] == first[0]["agentId"]
+    assert repair_calls == 1
+
+
+def test_agent_directory_repaired_snapshot_cache_invalidates_after_save(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
+    agent = agent_directory_service.create_agent_instance(
+        display_name="缓存 Agent",
+        metadata={"cacheProbe": "before"},
+    )
+
+    assert agent_directory_service.get_agent(agent["agentId"])["metadata"]["cacheProbe"] == "before"
+    assert agent_directory_service.get_agent(agent["agentId"])["metadata"]["cacheProbe"] == "before"
+
+    agent_directory_service.update_agent_instance(agent["agentId"], metadata={"cacheProbe": "after"})
+
+    assert agent_directory_service.get_agent(agent["agentId"])["metadata"]["cacheProbe"] == "after"
+
+
 def test_work_session_boundary_skips_persona_task_and_team_onboarding_requirements(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
@@ -378,7 +418,16 @@ def test_repair_agent_directory_moves_legacy_workspace_into_private_territory(tm
 def test_agent_config_workspace_logs_stage_timings_and_reuses_loaded_agents(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
-    agent = agent_directory_service.create_agent_instance(display_name="计时 Agent", primary_mode="research")
+    agent = agent_directory_service.create_agent_instance(
+        display_name="计时 Agent",
+        primary_mode="research",
+        role_key="research_broad",
+        prompt_template_id="prompt-research-broad",
+        metadata={
+            "personaProfile": {"personality": "稳定记录加载计时。"},
+            "taskProfile": {"mission": "验证 Agent 配置工作区日志。", "taskTypes": ["diagnostics"]},
+        },
+    )
     captured_bindings = {}
     recorded_events = []
 
@@ -418,9 +467,175 @@ def test_agent_config_workspace_logs_stage_timings_and_reuses_loaded_agents(tmp_
     ]
     assert loaded_events
     timings = loaded_events[-1][1]["fields"]["timingsMs"]
-    assert {"list_agents", "mode_bindings", "runtime_statuses", "total"}.issubset(timings)
+    assert {"list_agents", "mode_bindings", "runtime_histories", "runtime_statuses", "total"}.issubset(timings)
     assert timings["total"] >= timings["mode_bindings"]
-    assert loaded_events[-1][1]["fields"]["loadModes"] == {"chatRooms": "compact", "teams": "compact"}
+    assert loaded_events[-1][1]["fields"]["loadModes"] == {
+        "chatRooms": "compact",
+        "teams": "graph_references",
+        "runtimeStatuses": "batched",
+    }
+
+
+def test_agent_config_workspace_records_model_reference_resolution(monkeypatch):
+    recorded_events = []
+    monkeypatch.setattr(
+        agent_config_workspace_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: recorded_events.append((args, kwargs)) or {"accepted": True},
+    )
+
+    agent_config_workspace_service._record_model_reference_resolution([])
+
+    assert recorded_events
+    args, kwargs = recorded_events[-1]
+    assert args[:3] == ("agent_config", "model_binding", "agent_config.model_references.resolved")
+    assert kwargs["outcome"] == "resolved"
+    assert kwargs["fields"]["unresolvedCount"] == 0
+
+
+def test_agent_directory_list_agents_logs_slow_hydration_breakdown(monkeypatch):
+    recorded_events = []
+    monkeypatch.setattr(
+        agent_directory_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: recorded_events.append((args, kwargs)) or {"accepted": True},
+    )
+
+    agent_directory_service._record_agent_list_loaded(
+        include_archived=True,
+        raw_agent_count=49,
+        returned_agent_count=49,
+        timings={
+            "lock_wait": 12.0,
+            "repair": 42.0,
+            "filter": 1.0,
+            "hydrate": 3600.0,
+            "to_api": 84.0,
+            "sort": 0.5,
+            "total": 3740.0,
+        },
+        hydration_timings={
+            "tool_policies": 1.0,
+            "memory_policies": 1.5,
+            "tool_governance_requests": 2100.0,
+            "group_context_events": 900.0,
+            "agent_inbox_messages": 520.0,
+        },
+    )
+
+    assert recorded_events
+    args, kwargs = recorded_events[-1]
+    assert args[:3] == ("agent_directory", "list_agents", "agent_directory.list_agents.slow")
+    assert kwargs["level"] == "warning"
+    fields = kwargs["fields"]
+    assert fields["includeArchived"] is True
+    assert fields["rawAgentCount"] == 49
+    assert fields["returnedAgentCount"] == 49
+    assert fields["timingsMs"]["hydrate"] == 3600.0
+    assert fields["hydrationTimingsMs"]["tool_governance_requests"] == 2100.0
+    assert fields["slowestStage"] == "hydrate"
+    assert fields["slowestHydrationStage"] == "tool_governance_requests"
+
+
+def test_agent_config_workspace_batches_agent_api_hydration(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
+    alpha = agent_directory_service.create_agent_instance(display_name="Alpha", primary_mode="chat")
+    beta = agent_directory_service.create_agent_instance(display_name="Beta", primary_mode="research")
+    agent_directory_service.write_agent_inbox_message(
+        alpha["agentId"],
+        content="请处理待办。",
+        created_by="test",
+    )
+    agent_directory_service.write_group_context_event(
+        beta["agentId"],
+        {
+            "sourceRoomId": "room-test",
+            "sourceRoundId": "round-1",
+            "topic": "配置页性能",
+            "summary": "确认批量 hydration。",
+            "ownMessage": "Beta ready",
+            "peerHighlights": [],
+        },
+    )
+    agent_tool_governance_service.submit_tool_governance_request(
+        alpha["agentId"],
+        grant_tools=["grep_search_tool"],
+        reason="low-risk check",
+        apply_mode="review",
+    )
+    full_read_paths = []
+    original_read_jsonl = agent_directory_service._read_jsonl
+
+    def counting_read_jsonl(path):
+        full_read_paths.append(str(path).replace("\\", "/"))
+        return original_read_jsonl(path)
+
+    monkeypatch.setattr(agent_directory_service, "_read_jsonl", counting_read_jsonl)
+
+    payload = agent_config_workspace_service.get_agent_config_workspace()
+
+    agents = {item["agentId"]: item for item in payload["agents"]}
+    assert agents[alpha["agentId"]]["agentInboxPendingCount"] == 1
+    assert len(agents[alpha["agentId"]]["agentInboxMessages"]) == 1
+    assert len(agents[alpha["agentId"]]["toolGovernanceRequests"]) == 1
+    assert len(agents[beta["agentId"]]["groupContextEvents"]) == 1
+    assert agents[alpha["agentId"]]["toolPolicy"]["policyId"]
+    assert agents[alpha["agentId"]]["memoryPolicy"]["privateMemoryRoot"].endswith(f"{alpha['agentId']}/memory")
+    assert not any("agent_inbox_messages.jsonl" in path for path in full_read_paths)
+    assert not any("group_context_events.jsonl" in path for path in full_read_paths)
+    assert not any("tool_governance_requests.jsonl" in path for path in full_read_paths)
+
+
+def test_agent_config_workspace_recent_jsonl_preserves_older_pending_messages(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
+    agent = agent_directory_service.create_agent_instance(display_name="Pending Tail Agent", primary_mode="chat")
+    path = agent_directory_service._agent_workspace_event_path(agent, "agent_inbox_messages.jsonl")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    rows = [
+        {
+            "eventId": "older-pending",
+            "messageId": "older-pending",
+            "status": "pending",
+            "content": "仍需处理",
+            "createdAt": "2026-06-01T00:00:00+00:00",
+        }
+    ]
+    rows.extend(
+        {
+            "eventId": f"consumed-{index}",
+            "messageId": f"consumed-{index}",
+            "status": "consumed",
+            "content": f"已处理 {index}",
+            "createdAt": f"2026-06-01T00:00:{index:02d}+00:00",
+        }
+        for index in range(24)
+    )
+    path.write_text("\n".join(json.dumps(item, ensure_ascii=False) for item in rows) + "\n", encoding="utf-8")
+
+    payload = agent_config_workspace_service.get_agent_config_workspace()
+
+    workspace_agent = next(item for item in payload["agents"] if item["agentId"] == agent["agentId"])
+    assert workspace_agent["agentInboxPendingCount"] == 1
+    assert [item["messageId"] for item in workspace_agent["agentInboxMessages"]] == ["older-pending"]
+    assert agent_directory_service.list_agent_inbox_messages_for_agent(agent["agentId"], status="pending", limit=8)[0]["messageId"] == "older-pending"
+
+
+def test_agent_config_workspace_reuses_loaded_agents_for_policy_options(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
+    agent = agent_directory_service.create_agent_instance(display_name="Policy Agent")
+    monkeypatch.setattr(
+        agent_config_workspace_service,
+        "list_agent_policy_options",
+        lambda: (_ for _ in ()).throw(AssertionError("policy options should be derived from loaded agents")),
+    )
+
+    payload = agent_config_workspace_service.get_agent_config_workspace()
+
+    assert any(item["policyId"] == agent["toolPolicyId"] for item in payload["toolPolicies"])
+    assert any(item["policyId"] == agent["memoryPolicyId"] for item in payload["memoryPolicies"])
 
 
 def test_agent_config_workspace_uses_compact_room_and_team_indexes(tmp_path, monkeypatch):
@@ -450,6 +665,109 @@ def test_agent_config_workspace_uses_compact_room_and_team_indexes(tmp_path, mon
     alpha_refs = payload["references"][alpha["agentId"]]
     assert any(item["kind"] == "chat_room" and item["sourceLabel"] == "配置中心群聊" for item in alpha_refs)
     assert any(item["kind"] == "team" and item["sourceLabel"] == "配置中心团队" for item in alpha_refs)
+
+
+def test_agent_config_workspace_batches_runtime_history_reads(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
+    alpha = agent_directory_service.create_agent_instance(display_name="Alpha", direct_session_id="session-alpha")
+    beta = agent_directory_service.create_agent_instance(display_name="Beta", direct_session_id="session-beta")
+    calls = []
+
+    def fake_list_agent_runs_for_agents(agent_ids, *, limit=20):
+        calls.append((tuple(agent_ids), limit))
+        return {
+            "agentIds": list(agent_ids),
+            "limit": limit,
+            "agents": {
+                alpha["agentId"]: {
+                    "agentId": alpha["agentId"],
+                    "limit": limit,
+                    "runs": [
+                        {
+                            "runId": "turn-alpha",
+                            "runKind": "agent_run",
+                            "agentId": alpha["agentId"],
+                            "sessionId": "session-alpha",
+                            "status": "running",
+                            "summary": "alpha working",
+                            "updatedAt": "2026-06-06T01:00:00Z",
+                        }
+                    ],
+                    "subAgentRuns": [],
+                },
+                beta["agentId"]: {
+                    "agentId": beta["agentId"],
+                    "limit": limit,
+                    "runs": [
+                        {
+                            "runId": "turn-beta",
+                            "runKind": "agent_run",
+                            "agentId": beta["agentId"],
+                            "sessionId": "session-beta",
+                            "status": "failed",
+                            "summary": "beta failed",
+                            "updatedAt": "2026-06-06T01:01:00Z",
+                        }
+                    ],
+                    "subAgentRuns": [],
+                },
+            },
+        }
+
+    monkeypatch.setattr(agent_config_workspace_service, "list_agent_runs_for_agents", fake_list_agent_runs_for_agents)
+
+    payload = agent_config_workspace_service.get_agent_config_workspace()
+    agents = {item["agentId"]: item for item in payload["agents"]}
+
+    assert len(calls) == 1
+    assert calls[0][1] == 6
+    assert alpha["agentId"] in calls[0][0]
+    assert beta["agentId"] in calls[0][0]
+    assert agents[alpha["agentId"]]["runtimeStatus"]["state"] == "running"
+    assert agents[beta["agentId"]]["runtimeStatus"]["state"] == "failed"
+    assert payload["summary"]["runningAgentCount"] == 1
+    assert payload["summary"]["blockedAgentCount"] == 1
+
+
+def test_agent_config_workspace_uses_graph_team_references_without_room_hydration(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
+    agent = agent_directory_service.create_agent_instance(display_name="Alpha", direct_session_id="session-alpha")
+    team_service.create_team(name="Graph Reference Team", members=[{"agentId": agent["agentId"], "role": "lead"}])
+    monkeypatch.setattr(
+        chat_room_service,
+        "get_chat_room_compact",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("agent config should not hydrate linked room compact")),
+    )
+
+    payload = agent_config_workspace_service.get_agent_config_workspace()
+
+    assert payload["summary"]["teamCount"] == 1
+    assert payload["teams"][0]["teamId"]
+    assert "linkedChatRoom" not in payload["teams"][0]
+    assert any(item["kind"] == "team" and item["sourceLabel"] == "Graph Reference Team" for item in payload["references"][agent["agentId"]])
+
+
+def test_agent_config_workspace_repairs_archived_team_chat_room_residue(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
+    agent = agent_directory_service.create_agent_instance(display_name="Alpha", direct_session_id="session-alpha")
+    team = team_service.create_team(name="Archived Residue Team", members=[{"agentId": agent["agentId"], "role": "lead"}])
+    room_id = team["linkedChatRoomId"]
+    teams_path = tmp_path / "workspace" / "teams" / "teams.json"
+    teams_payload = json.loads(teams_path.read_text(encoding="utf-8"))
+    teams_payload["teams"][0]["status"] = "archived"
+    teams_payload["teams"][0]["updatedAt"] = "2026-06-06T00:00:00+00:00"
+    teams_path.write_text(json.dumps(teams_payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    agent_directory_service.archive_agent_instance(agent["agentId"])
+
+    payload = agent_config_workspace_service.get_agent_config_workspace()
+
+    assert chat_room_service.get_chat_room_detail(room_id) is None
+    assert not any(item["code"] == "stale_chat_room_participant" for item in payload["health"]["issues"])
+    stored = json.loads(teams_path.read_text(encoding="utf-8"))
+    assert stored["teams"][0]["linkedChatRoomId"] == ""
 
 
 def test_agent_workspace_write_boundary_uses_tool_policy_for_shared_paths(tmp_path, monkeypatch):
@@ -708,6 +1026,55 @@ def test_agent_config_workspace_reports_unresolved_model_reference(tmp_path, mon
     assert payload["health"]["counts"]["blocking"] >= 1
 
 
+def test_agent_config_workspace_reports_unresolved_chat_room_participant_model_reference(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
+    agent = agent_directory_service.create_agent_instance(
+        display_name="群聊模型 Agent",
+        llm_bindings={"dialogue": {"modelId": "model-primary"}},
+        primary_mode="chat",
+        direct_session_id="session-room-model-agent",
+    )
+    peer = agent_directory_service.create_agent_instance(
+        display_name="群聊正常 Agent",
+        llm_bindings={"dialogue": {"modelId": "model-primary"}},
+        primary_mode="chat",
+        direct_session_id="session-room-model-peer",
+    )
+    room = chat_room_service.create_chat_room(
+        title="配置中心群聊",
+        participant_agent_ids=[agent["agentId"], peer["agentId"]],
+    )
+    room_path = tmp_path / "workspace" / "chat_rooms" / "chat_rooms.json"
+    state = json.loads(room_path.read_text(encoding="utf-8"))
+    participant = state["rooms"][0]["participants"][0]
+    participant["dialogueModelId"] = "missing-room-model"
+    participant["llmBindings"] = {"dialogue": {"modelId": "missing-room-model"}}
+    room_path.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
+
+    compact = chat_room_service.list_chat_rooms_compact()
+    payload = agent_config_workspace_service.get_agent_config_workspace()
+    issues = payload["health"]["byAgent"][agent["agentId"]]
+
+    compact_room = next(item for item in compact if item["roomId"] == room["roomId"])
+    compact_participant = compact_room["participants"][0]
+    assert compact_participant["dialogueModelId"] == "missing-room-model"
+    assert compact_participant["llmBindings"]["dialogue"]["modelId"] == "missing-room-model"
+    assert any(
+        item["code"] == "unresolved_chat_room_participant_model_reference"
+        and "missing-room-model" in item["detail"]
+        and item["source"] == "chat_room"
+        for item in issues
+    )
+    assert sum(
+        1
+        for item in issues
+        if item["code"] == "unresolved_chat_room_participant_model_reference"
+        and "missing-room-model" in item["detail"]
+    ) == 1
+    assert payload["health"]["counts"]["blocking"] >= 1
+
+
 def test_agent_create_api_adds_direct_agent_with_safe_defaults(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
@@ -907,6 +1274,10 @@ def test_agent_delete_api_archives_and_cleans_bindings_and_rooms(tmp_path, monke
         title="待清理群聊",
         participant_agent_ids=[alpha["agentId"], beta["agentId"]],
     )
+    team = team_service.create_team(
+        name="待清理团队",
+        members=[{"agentId": alpha["agentId"], "role": "lead"}, {"agentId": beta["agentId"], "role": "peer"}],
+    )
 
     response = client.delete(f"/api/agents/{alpha['agentId']}")
 
@@ -915,6 +1286,7 @@ def test_agent_delete_api_archives_and_cleans_bindings_and_rooms(tmp_path, monke
     assert archived["status"] == "archived"
     assert archived["archiveSummary"]["dataRetention"] == "archived_only"
     assert archived["archiveSummary"]["removedFromRoomIds"] == [room["roomId"]]
+    assert archived["archiveSummary"]["removedFromTeamIds"] == [team["teamId"]]
     assert alpha["agentId"] not in {item["agentId"] for item in agent_directory_service.list_agents(include_archived=False)}
     assert agent_directory_service.get_agent(alpha["agentId"], include_archived=True)["status"] == "archived"
     bindings = agent_mode_binding_service.get_mode_bindings_payload()["modes"]
@@ -924,6 +1296,11 @@ def test_agent_delete_api_archives_and_cleans_bindings_and_rooms(tmp_path, monke
     assert alpha["agentId"] not in bindings["research"]["flowBindings"].values()
     room_detail = chat_room_service.get_chat_room_detail(room["roomId"])
     assert [participant["agentId"] for participant in room_detail["participants"]] == [beta["agentId"]]
+    team_detail = team_service.get_team(team["teamId"])
+    assert [member["agentId"] for member in team_detail["members"]] == [beta["agentId"]]
+    assert all(node.get("agentId") != alpha["agentId"] for node in team_detail["canvas"]["nodes"])
+    linked_room = chat_room_service.get_chat_room_detail(team_detail["linkedChatRoomId"])
+    assert [participant["agentId"] for participant in linked_room["participants"]] == [beta["agentId"]]
     workspace = agent_config_workspace_service.get_agent_config_workspace()
     groups = {group["id"]: group for group in workspace["groups"]}
     assert alpha["agentId"] in groups["archived"]["agentIds"]
@@ -931,6 +1308,25 @@ def test_agent_delete_api_archives_and_cleans_bindings_and_rooms(tmp_path, monke
     assert alpha["agentId"] not in groups["chat"]["agentIds"]
     assert alpha["agentId"] not in groups["research"]["agentIds"]
     assert alpha["agentId"] not in groups["group_chat"]["agentIds"]
+
+
+def test_agent_config_workspace_does_not_report_historical_mode_repair_warnings(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
+    agent = session_service.create_chat_session(title="归档 Agent")
+    state = agent_mode_binding_service.default_mode_binding_state()
+    state["modes"]["chat"]["defaultAgentId"] = agent["agentId"]
+    state["modes"]["chat"]["availableAgentIds"] = [agent["agentId"]]
+    agent_mode_binding_service.save_mode_binding_state(state)
+    agent_directory_service.archive_agent_instance(agent["agentId"])
+
+    payload = agent_config_workspace_service.get_agent_config_workspace()
+
+    assert agent["agentId"] not in payload["modeBindings"]["chat"]["availableAgentIds"]
+    assert not any(
+        item["code"] == "stale_mode_binding" and item["agentId"] == agent["agentId"]
+        for item in payload["health"]["issues"]
+    )
 
 
 def test_agent_delete_api_does_not_reactivate_archived_supervised_non_core_fixed_role(tmp_path, monkeypatch):
@@ -988,6 +1384,10 @@ def test_agent_patch_status_archived_uses_safe_archive_cleanup(tmp_path, monkeyp
         title="PATCH 归档群聊",
         participant_agent_ids=[reviewer["agentId"], peer["agentId"]],
     )
+    team = team_service.create_team(
+        name="PATCH 归档团队",
+        members=[{"agentId": reviewer["agentId"], "role": "reviewer"}, {"agentId": peer["agentId"], "role": "peer"}],
+    )
 
     response = client.patch(
         f"/api/agents/{reviewer['agentId']}",
@@ -999,6 +1399,7 @@ def test_agent_patch_status_archived_uses_safe_archive_cleanup(tmp_path, monkeyp
     assert payload["status"] == "archived"
     assert payload["archiveSummary"]["source"] == "patch_status"
     assert payload["archiveSummary"]["removedFromRoomIds"] == [room["roomId"]]
+    assert payload["archiveSummary"]["removedFromTeamIds"] == [team["teamId"]]
     archived = agent_directory_service.get_agent(reviewer["agentId"], include_archived=True)
     assert archived["status"] == "archived"
     bindings = agent_mode_binding_service.get_mode_bindings_payload()["modes"]["supervised_evolution"]
@@ -1007,6 +1408,8 @@ def test_agent_patch_status_archived_uses_safe_archive_cleanup(tmp_path, monkeyp
     assert reviewer["agentId"] not in bindings["availableAgentIds"]
     room_detail = chat_room_service.get_chat_room_detail(room["roomId"])
     assert [participant["agentId"] for participant in room_detail["participants"]] == [peer["agentId"]]
+    team_detail = team_service.get_team(team["teamId"])
+    assert [member["agentId"] for member in team_detail["members"]] == [peer["agentId"]]
 
 
 def test_agent_purge_api_does_not_recreate_deleted_supervised_fixed_role(tmp_path, monkeypatch):
@@ -1104,6 +1507,43 @@ def test_agent_delete_api_rejects_protected_agent_without_reference_cleanup(tmp_
     assert [participant["agentId"] for participant in room_detail["participants"]] == [protected["agentId"], peer["agentId"]]
 
 
+def test_agent_delete_api_logs_stage_timings_and_skips_duplicate_mode_cleanup(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    alpha = session_service.create_chat_session(title="Alpha Agent")
+    beta = session_service.create_chat_session(title="Beta Agent")
+    agent_mode_binding_service.update_mode_binding(
+        "chat",
+        default_agent_id=alpha["agentId"],
+        available_agent_ids=[alpha["agentId"], beta["agentId"]],
+    )
+    events = []
+    mode_cleanup_calls = []
+    real_remove_agent_from_mode_bindings = agents_route.remove_agent_from_mode_bindings
+
+    def tracked_remove_agent_from_mode_bindings(agent_id):
+        mode_cleanup_calls.append(agent_id)
+        return real_remove_agent_from_mode_bindings(agent_id)
+
+    monkeypatch.setattr(agents_route, "remove_agent_from_mode_bindings", tracked_remove_agent_from_mode_bindings)
+    monkeypatch.setattr(
+        agents_route,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: events.append((args, kwargs)) or {"accepted": True},
+    )
+
+    response = client.delete(f"/api/agents/{alpha['agentId']}")
+
+    assert response.status_code == 200, response.text
+    assert mode_cleanup_calls == [alpha["agentId"]]
+    completed = [event for event in events if event[0][:3] == ("agent_directory", "delete", "agent.archive.completed")]
+    assert completed
+    fields = completed[-1][1]["fields"]
+    assert {"ensure_archive_allowed", "remove_from_teams", "remove_from_chat_rooms", "remove_from_mode_bindings", "archive_agent"}.issubset(fields["timingsMs"])
+    assert fields["durationMs"] >= fields["timingsMs"]["archive_agent"]
+    bindings = agent_mode_binding_service.get_mode_bindings_payload()["modes"]
+    assert bindings["chat"]["defaultAgentId"] == beta["agentId"]
+
+
 def test_agent_purge_api_deletes_archived_agent_workspace_and_registry_record(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
@@ -1127,6 +1567,10 @@ def test_agent_purge_api_deletes_archived_agent_workspace_and_registry_record(tm
         title="待 purge 群聊",
         participant_agent_ids=[alpha["agentId"], beta["agentId"]],
     )
+    team = team_service.create_team(
+        name="待 purge 团队",
+        members=[{"agentId": alpha["agentId"], "role": "lead"}, {"agentId": beta["agentId"], "role": "peer"}],
+    )
     agent_directory_service.archive_agent_instance(alpha["agentId"])
 
     response = client.delete(f"/api/agents/{alpha['agentId']}/purge")
@@ -1142,6 +1586,7 @@ def test_agent_purge_api_deletes_archived_agent_workspace_and_registry_record(tm
     assert payload["removedMemoryPolicy"] is True
     assert payload["purgeSummary"]["dataRetention"] == "purged"
     assert payload["purgeSummary"]["removedFromRoomIds"] == [room["roomId"]]
+    assert payload["purgeSummary"]["removedFromTeamIds"] == [team["teamId"]]
     assert not workspace_path.exists()
     assert agent_directory_service.get_agent(alpha["agentId"], include_archived=True) is None
     state = agent_directory_service.load_state()
@@ -1152,6 +1597,8 @@ def test_agent_purge_api_deletes_archived_agent_workspace_and_registry_record(tm
     assert alpha["agentId"] not in bindings["chat"]["availableAgentIds"]
     room_detail = chat_room_service.get_chat_room_detail(room["roomId"])
     assert [participant["agentId"] for participant in room_detail["participants"]] == [beta["agentId"]]
+    team_detail = team_service.get_team(team["teamId"])
+    assert [member["agentId"] for member in team_detail["members"]] == [beta["agentId"]]
 
 
 def test_agent_purge_api_rejects_active_agent(tmp_path, monkeypatch):
@@ -1226,14 +1673,9 @@ def test_agent_purge_api_reports_workspace_delete_failure_without_server_error(t
 
     response = client.delete(f"/api/agents/{agent['agentId']}/purge")
 
-    assert response.status_code == 200, response.text
-    payload = response.json()
-    assert payload["deleted"] is True
-    assert payload["workspaceDeleted"] is False
-    assert payload["deletedPaths"] == []
-    assert payload["skippedPaths"]
-    assert "PermissionError" in payload["skippedPaths"][0]
-    assert agent_directory_service.get_agent(agent["agentId"], include_archived=True) is None
+    assert response.status_code == 422, response.text
+    assert "PermissionError" in response.json()["detail"]
+    assert agent_directory_service.get_agent(agent["agentId"], include_archived=True)["status"] == "archived"
     assert workspace_path.exists()
 
 
@@ -1336,7 +1778,7 @@ def test_agent_reset_api_can_keep_existing_direct_session_when_requested(tmp_pat
     assert direct_session["id"] in {item["id"] for item in session_service.list_sessions()}
 
 
-def test_agent_reset_api_can_reset_selected_advanced_profiles_and_policies(tmp_path, monkeypatch):
+def test_agent_reset_api_can_reset_session_agent_advanced_policies_without_profiles(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     agent = agent_directory_service.create_agent_instance(display_name="Advanced Reset Agent")
     response = client.patch(
@@ -1378,10 +1820,10 @@ def test_agent_reset_api_can_reset_selected_advanced_profiles_and_policies(tmp_p
     assert reset.status_code == 200, reset.text
     payload = reset.json()
     assert payload["resetSummary"]["clearedRuntimeState"] is False
-    assert payload["agent"]["personaProfile"]["communicationStyle"] == ""
-    assert payload["agent"]["personaProfile"]["age"] == ""
-    assert payload["agent"]["taskProfile"]["mission"] == ""
-    assert payload["agent"]["taskProfile"]["taskTypes"] == []
+    assert payload["agent"]["personaProfile"] == {}
+    assert payload["agent"]["taskProfile"] == {}
+    assert payload["resetSummary"]["resetPersonaProfile"] is False
+    assert payload["resetSummary"]["resetTaskProfile"] is False
     assert payload["agent"]["toolPolicyId"].startswith("tool-")
     assert "conversation_log_inspect_tool" in payload["agent"]["toolPolicy"]["allowedTools"]
     assert "cli_tool" in payload["agent"]["toolPolicy"]["allowedTools"]
@@ -1392,6 +1834,45 @@ def test_agent_reset_api_can_reset_selected_advanced_profiles_and_policies(tmp_p
     assert payload["agent"]["memoryPolicy"]["writeSharedGroups"] == []
     assert payload["agent"]["metadata"]["delegationPolicy"]["allowSubagents"] is False
     assert payload["agent"]["metadata"]["supervisionPolicy"]["supervisionEnabled"] is False
+
+
+def test_agent_reset_api_can_reset_team_agent_profiles(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = agent_directory_service.create_agent_instance(
+        display_name="Advanced Profile Reset Agent",
+        primary_mode="research",
+        role_key="research_broad",
+        prompt_template_id="prompt-research-broad",
+    )
+    response = client.patch(
+        f"/api/agents/{agent['agentId']}",
+        json={
+            "personaProfile": {"gender": "female", "age": "34", "communicationStyle": "brief"},
+            "taskProfile": {"mission": "run experiments", "taskTypes": ["research"]},
+        },
+    )
+    assert response.status_code == 200, response.text
+
+    reset = client.post(
+        f"/api/agents/{agent['agentId']}/reset",
+        json={
+            "clearRuntimeState": False,
+            "resetPersonaProfile": True,
+            "resetTaskProfile": True,
+            "resetToolPolicy": False,
+            "resetMemoryPolicy": False,
+            "resetRuntimePolicy": False,
+        },
+    )
+
+    assert reset.status_code == 200, reset.text
+    payload = reset.json()
+    assert payload["resetSummary"]["resetPersonaProfile"] is True
+    assert payload["resetSummary"]["resetTaskProfile"] is True
+    assert payload["agent"]["personaProfile"]["communicationStyle"] == ""
+    assert payload["agent"]["personaProfile"]["age"] == ""
+    assert payload["agent"]["taskProfile"]["mission"] == ""
+    assert payload["agent"]["taskProfile"]["taskTypes"] == []
 
 
 def test_agent_reset_api_rejects_archived_agent(tmp_path, monkeypatch):
@@ -1597,7 +2078,12 @@ def test_agent_tool_governance_low_risk_change_auto_applies_for_governance_agent
         display_name="能力顾问",
         metadata={"systemRole": "organization_advisor", "researchOrgRole": "organization_advisor"},
     )
-    target = agent_directory_service.create_agent_instance(display_name="资料 Agent")
+    target = agent_directory_service.create_agent_instance(
+        display_name="资料 Agent",
+        primary_mode="research",
+        role_key="research_broad",
+        prompt_template_id="prompt-research-broad",
+    )
 
     request = agent_tool_governance_service.submit_tool_governance_request(
         target["agentId"],
@@ -1629,7 +2115,12 @@ def test_agent_tool_governance_high_risk_change_waits_for_review_and_can_be_appr
         display_name="权限顾问",
         metadata={"systemRole": "capability_steward", "researchOrgRole": "capability_steward"},
     )
-    target = agent_directory_service.create_agent_instance(display_name="执行 Agent")
+    target = agent_directory_service.create_agent_instance(
+        display_name="执行 Agent",
+        primary_mode="research",
+        role_key="research_broad",
+        prompt_template_id="prompt-research-broad",
+    )
 
     request = agent_tool_governance_service.submit_tool_governance_request(
         target["agentId"],
@@ -1665,7 +2156,12 @@ def test_agent_tool_governance_uses_shared_tool_catalog_risk_metadata(tmp_path, 
         display_name="工具目录顾问",
         metadata={"systemRole": "capability_steward", "researchOrgRole": "capability_steward"},
     )
-    target = agent_directory_service.create_agent_instance(display_name="图像 Agent")
+    target = agent_directory_service.create_agent_instance(
+        display_name="图像 Agent",
+        primary_mode="research",
+        role_key="research_broad",
+        prompt_template_id="prompt-research-broad",
+    )
 
     request = agent_tool_governance_service.submit_tool_governance_request(
         target["agentId"],
@@ -1688,7 +2184,12 @@ def test_agent_tool_governance_routes_create_and_resolve_requests(tmp_path, monk
         display_name="路由顾问",
         metadata={"systemRole": "organization_advisor", "researchOrgRole": "organization_advisor"},
     )
-    target = agent_directory_service.create_agent_instance(display_name="路由目标")
+    target = agent_directory_service.create_agent_instance(
+        display_name="路由目标",
+        primary_mode="research",
+        role_key="research_broad",
+        prompt_template_id="prompt-research-broad",
+    )
 
     created = client.post(
         f"/api/agents/{target['agentId']}/tool-governance-requests",
@@ -1723,7 +2224,12 @@ def test_agent_config_workspace_surfaces_recent_tool_governance_requests(tmp_pat
         display_name="配置顾问",
         metadata={"systemRole": "organization_advisor", "researchOrgRole": "organization_advisor"},
     )
-    target = agent_directory_service.create_agent_instance(display_name="配置目标")
+    target = agent_directory_service.create_agent_instance(
+        display_name="配置目标",
+        primary_mode="research",
+        role_key="research_broad",
+        prompt_template_id="prompt-research-broad",
+    )
     request = agent_tool_governance_service.submit_tool_governance_request(
         target["agentId"],
         proposed_by_agent_id=advisor["agentId"],
@@ -2105,7 +2611,12 @@ def test_agent_patch_persona_profile_updates_api_context_and_logs(tmp_path, monk
         "record_runtime_scene_event",
         lambda *args, **kwargs: recorded_events.append((args, kwargs)) or {"accepted": True},
     )
-    agent = agent_directory_service.create_agent_instance(display_name="人物 Agent")
+    agent = agent_directory_service.create_agent_instance(
+        display_name="人物 Agent",
+        primary_mode="research",
+        role_key="research_broad",
+        prompt_template_id="prompt-research-broad",
+    )
 
     response = client.patch(
         f"/api/agents/{agent['agentId']}",
@@ -2156,7 +2667,12 @@ def test_agent_patch_task_profile_updates_api_context_and_logs(tmp_path, monkeyp
         "record_runtime_scene_event",
         lambda *args, **kwargs: recorded_events.append((args, kwargs)) or {"accepted": True},
     )
-    agent = agent_directory_service.create_agent_instance(display_name="任务 Agent")
+    agent = agent_directory_service.create_agent_instance(
+        display_name="任务 Agent",
+        primary_mode="research",
+        role_key="research_broad",
+        prompt_template_id="prompt-research-broad",
+    )
 
     response = client.patch(
         f"/api/agents/{agent['agentId']}",
@@ -2195,6 +2711,50 @@ def test_agent_patch_task_profile_updates_api_context_and_logs(tmp_path, monkeyp
         and event[1]["fields"]["taskTypeCount"] == 2
         for event in recorded_events
     )
+
+
+def test_work_session_agent_ignores_persona_and_task_profiles(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
+    recorded_events = []
+    monkeypatch.setattr(
+        agent_directory_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: recorded_events.append((args, kwargs)) or {"accepted": True},
+    )
+    agent = agent_directory_service.create_agent_instance(
+        display_name="会话实现 Agent",
+        primary_mode="chat",
+        role_key="",
+        prompt_template_id="prompt-chat-default",
+    )
+
+    response = client.patch(
+        f"/api/agents/{agent['agentId']}",
+        json={
+            "personaProfile": {"gender": "女", "communicationStyle": "不要暴露到会话 Agent。"},
+            "taskProfile": {"mission": "不要暴露到会话 Agent。", "taskTypes": ["research"]},
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["personaProfile"] == {}
+    assert payload["taskProfile"] == {}
+    assert "personaProfile" not in payload["metadata"]
+    assert "taskProfile" not in payload["metadata"]
+    workspace = agent_config_workspace_service.get_agent_config_workspace()
+    workspace_agent = next(item for item in workspace["agents"] if item["agentId"] == agent["agentId"])
+    assert workspace_agent["agentBoundary"]["type"] == "work_session"
+    assert workspace_agent["personaProfile"] == {}
+    assert workspace_agent["taskProfile"] == {}
+    assert "AgentPersonaProfile:" not in agent_directory_service.build_agent_runtime_context_block(agent["agentId"])
+    stored = json.loads((tmp_path / "workspace" / "agents" / "agents.json").read_text(encoding="utf-8"))
+    stored_agent = next(item for item in stored["agents"] if item["agentId"] == agent["agentId"])
+    assert "personaProfile" not in stored_agent["metadata"]
+    assert "taskProfile" not in stored_agent["metadata"]
+    assert not any(event[0][:3] == ("agent_directory", "persona_profile", "agent.persona_profile.updated") for event in recorded_events)
+    assert not any(event[0][:3] == ("agent_directory", "task_profile", "agent.task_profile.updated") for event in recorded_events)
 
 
 def test_agent_mode_membership_api_updates_selected_agent_bindings(tmp_path, monkeypatch):

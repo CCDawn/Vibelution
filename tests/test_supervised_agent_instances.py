@@ -26,6 +26,7 @@ def _use_tmp_project_root(tmp_path, monkeypatch):
         supervised_agent_service,
         "_configured_model_library_ids",
         lambda: {
+            "deepseek_v4_pro",
             "model-primary",
             "xiaomi_mimo_v2_5_pro_token_plan",
             "generated_xiaomi_mimo_v2_5_cdff497b2d9b",
@@ -189,7 +190,7 @@ def test_supervised_agent_bindings_are_run_safe_payloads(tmp_path, monkeypatch):
 
     bindings = supervised_agent_service.supervised_agent_bindings()
 
-    assert not bindings["baseline"]["profileId"]
+    assert "profileId" not in bindings["baseline"]
     assert bindings["baseline"]["dialogueModelId"]
     assert bindings["baseline"]["llmBindings"]["dialogue"]["modelId"] == bindings["baseline"]["dialogueModelId"]
     assert bindings["baseline"]["agentCode"]
@@ -198,7 +199,7 @@ def test_supervised_agent_bindings_are_run_safe_payloads(tmp_path, monkeypatch):
     assert bindings["baseline"]["promptTemplateId"] == "prompt-supervised-baseline"
     assert bindings["baseline"]["toolPolicyId"]
     assert bindings["baseline"]["memoryPolicyId"]
-    assert not bindings["candidate"]["profileId"]
+    assert "profileId" not in bindings["candidate"]
     assert bindings["candidate"]["dialogueModelId"]
     assert bindings["judge"]["roleLabel"] == "监督进化裁决 Agent"
     assert all("metadata" not in binding for binding in bindings.values())
@@ -278,6 +279,58 @@ def test_supervised_agent_bindings_block_unregistered_dialogue_model(tmp_path, m
         supervised_agent_service.supervised_agent_bindings()
 
 
+def test_supervised_agent_bindings_block_missing_dialogue_model_api_key(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.delenv("SUPERVISED_MODEL_KEY", raising=False)
+    monkeypatch.delenv("VIBELUTION_ENABLE_USER_ENV_FALLBACK", raising=False)
+
+    from config.models import AppConfig
+
+    config = AppConfig.model_validate(
+        {
+            "llm": {
+                "providers": {
+                    "inline_model_model_primary": {
+                        "provider_id": "inline_model_model_primary",
+                        "kind": "openai_compatible",
+                        "api_key_env": "",
+                        "base_url": "https://relay.example.com/v1",
+                        "compat_mode": "openai",
+                        "requires_api_key": True,
+                    }
+                },
+                "profiles": {
+                    "primary": {
+                        "profile_id": "primary",
+                        "provider_id": "inline_model_model_primary",
+                        "model": "probe-model",
+                    }
+                },
+                "model_library": {
+                    "model-primary": {
+                        "provider_id": "inline_model_model_primary",
+                        "model": "probe-model",
+                        "label": "Probe Model",
+                        "api_key_env": "SUPERVISED_MODEL_KEY",
+                        "transport": "chat_completions",
+                        "contract": "tool_chat",
+                    }
+                },
+            }
+        }
+    )
+    monkeypatch.setattr(supervised_agent_service, "_current_config", lambda: config)
+    agents = supervised_agent_service.ensure_supervised_agent_instances()
+    state = agent_directory_service.load_state()
+    for item in state["agents"]:
+        if item.get("agentId") in {agent["agentId"] for agent in agents}:
+            item["llmBindings"] = {"dialogue": {"modelId": "model-primary"}}
+    agent_directory_service.registry_path().write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    with pytest.raises(supervised_agent_service.SupervisedAgentBindingError, match="no configured API key"):
+        supervised_agent_service.supervised_agent_bindings()
+
+
 def test_child_process_agent_runtime_falls_back_to_supervised_env(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     baseline = next(
@@ -313,3 +366,35 @@ def test_child_process_agent_runtime_falls_back_to_supervised_env(tmp_path, monk
     assert runtime["supervisionPolicy"]["reviewMode"] == "required"
     assert runtime["supervisionPolicy"]["evidenceLevel"] == "strict"
     assert [tool.name for tool in visible_tools] == ["read_file_tool"]
+
+
+def test_child_process_agent_runtime_uses_env_llm_snapshot_when_registry_missing(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    missing_agent_id = "agent-supervised-worktree"
+    monkeypatch.setenv("VIBELUTION_AGENT_ID", missing_agent_id)
+    monkeypatch.setenv("VIBELUTION_AGENT_DIRECT_SESSION_ID", "session-supervised-worktree")
+    monkeypatch.setenv("VIBELUTION_SUPERVISED_ROLE", "candidate")
+    monkeypatch.setenv("VIBELUTION_AGENT_LLM_SLOT", "dialogue")
+    monkeypatch.setenv("VIBELUTION_AGENT_LLM_MODEL_ID", "model-primary")
+    monkeypatch.setenv(
+        "VIBELUTION_AGENT_LLM_BINDINGS_JSON",
+        json.dumps({"dialogue": {"modelId": "model-primary", "apiKey": "should-not-leak"}}),
+    )
+
+    runtime = agent_directory_service.current_agent_runtime()
+
+    assert runtime["agentId"] == missing_agent_id
+    assert runtime["sessionId"] == "session-supervised-worktree"
+    assert runtime["supervisedRole"] == "candidate"
+    assert runtime["agent"]["agentId"] == missing_agent_id
+    assert runtime["agent"]["llmBindings"] == {"dialogue": {"modelId": "model-primary"}}
+    assert "should-not-leak" not in json.dumps(runtime["agent"], ensure_ascii=False)
+
+
+def test_child_process_agent_runtime_rejects_invalid_env_llm_snapshot(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setenv("VIBELUTION_AGENT_ID", "agent-supervised-worktree")
+    monkeypatch.setenv("VIBELUTION_AGENT_LLM_BINDINGS_JSON", "{not-json")
+
+    with pytest.raises(agent_directory_service.AgentDirectoryError, match="not valid JSON"):
+        agent_directory_service.current_agent_runtime()

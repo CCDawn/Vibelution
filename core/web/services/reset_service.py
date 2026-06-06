@@ -110,7 +110,7 @@ def get_reset_summary() -> dict:
         },
         {
             "id": "config",
-            "label": text_for(lang, zh="配置与模型绑定", en="Config and model bindings"),
+            "label": text_for(lang, zh="配置与模型库", en="Config and model library"),
             "paths": ["config.toml", "config/"],
             "reason": text_for(lang, zh="配置不是垃圾内容，不提供重置勾选。", en="Config is not cleanup residue."),
         },

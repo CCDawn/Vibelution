@@ -147,6 +147,32 @@ def test_legacy_session_list_is_read_only_until_detail_repairs_agent_binding(tmp
     assert (tmp_path / "workspace" / "sessions" / "session-alpha").exists()
 
 
+def test_detail_repair_does_not_rebind_agent_owned_by_another_direct_session(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    direct = session_service.create_chat_session(title="Direct Agent")
+    direct_agent_id = direct["agentId"]
+    state = load_chat_state(tmp_path)
+    state["conversations"].append(
+        {
+            "conversation_id": "session-legacy",
+            "title": "Legacy view",
+            "updated_at": "2026-05-26T10:02:00",
+            "agent_id": direct_agent_id,
+            "agentId": direct_agent_id,
+            "messages": [{"role": "user", "content": "历史任务", "timestamp": "2026-05-26T10:02:00"}],
+        }
+    )
+    save_chat_state(tmp_path, state)
+
+    detail = session_service.get_session_detail("session-legacy")
+
+    assert detail is not None
+    assert detail["agentId"] == direct_agent_id
+    rebound_agent = agent_directory_service.get_agent(direct_agent_id)
+    assert rebound_agent is not None
+    assert rebound_agent["directSessionId"] == direct["id"]
+
+
 def test_session_list_reuses_agent_lookup_for_existing_bound_sessions(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _seed_chat_sessions(tmp_path)
@@ -163,6 +189,43 @@ def test_session_list_reuses_agent_lookup_for_existing_bound_sessions(tmp_path, 
 
     assert {item["id"] for item in seeded_sessions} == {"session-alpha", "session-beta"}
     assert all(item["agentId"] for item in seeded_sessions)
+
+
+def test_session_list_uses_lightweight_message_preview(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    save_chat_state(
+        tmp_path,
+        {
+            "version": 1,
+            "active_conversation_id": "session-long",
+            "conversations": [
+                {
+                    "conversation_id": "session-long",
+                    "title": "Long Session",
+                    "updated_at": "2026-05-26T10:00:00",
+                    "messages": [
+                        {"role": "user", "content": f"历史消息 {index}", "timestamp": f"2026-05-26T10:00:{index % 60:02d}"}
+                        for index in range(250)
+                    ],
+                }
+            ],
+        },
+    )
+    normalized_count = 0
+    real_sanitize_message_content = session_service._sanitize_message_content
+
+    def counting_sanitize_message_content(role, content):
+        nonlocal normalized_count
+        normalized_count += 1
+        return real_sanitize_message_content(role, content)
+
+    monkeypatch.setattr(session_service, "_sanitize_message_content", counting_sanitize_message_content)
+
+    sessions = session_service.list_sessions()
+
+    assert sessions[0]["id"] == "session-long"
+    assert sessions[0]["taskSummary"] == "历史消息 249"
+    assert normalized_count <= 12
 
 
 def test_session_list_hides_bound_session_when_agent_is_missing_without_hydration(tmp_path, monkeypatch):
@@ -195,12 +258,13 @@ def test_session_list_hides_bound_session_when_agent_is_missing_without_hydratio
     assert "session-alpha" not in {item["id"] for item in sessions}
     hidden_events = [
         event for event in recorded_events
-        if event[0][2] == "session.agent_missing.hidden_from_index"
+        if event[0][2] == "session.agent_missing.hidden_from_index.batch"
     ]
     assert hidden_events
-    assert hidden_events[-1][1]["fields"]["sessionId"] == "session-alpha"
-    assert hidden_events[-1][1]["fields"]["agentId"] == missing_agent_id
-    assert hidden_events[-1][1]["fields"]["agentStatusCode"] == "missing_agent"
+    assert hidden_events[-1][1]["fields"]["hiddenCount"] == 1
+    assert hidden_events[-1][1]["fields"]["sampleSessions"][0]["sessionId"] == "session-alpha"
+    assert hidden_events[-1][1]["fields"]["sampleSessions"][0]["agentId"] == missing_agent_id
+    assert hidden_events[-1][1]["fields"]["sampleSessions"][0]["agentStatusCode"] == "missing_agent"
 
 
 def test_session_list_uses_short_snapshot_cache_and_invalidates_on_update(tmp_path, monkeypatch):
@@ -533,12 +597,14 @@ def test_missing_agent_hidden_index_logging_is_deduplicated_per_session(tmp_path
     assert "session-alpha" not in {item["id"] for item in second}
     hidden_events = [
         event for event in recorded_events
-        if event[0][2] == "session.agent_missing.hidden_from_index"
+        if event[0][2] == "session.agent_missing.hidden_from_index.batch"
     ]
     assert len(hidden_events) == 1
-    assert hidden_events[0][1]["fields"]["sessionId"] == "session-alpha"
-    assert hidden_events[0][1]["fields"]["agentId"] == alpha["agentId"]
-    assert hidden_events[0][1]["fields"]["agentStatusCode"] == "archived_agent"
+    assert hidden_events[0][1]["fields"]["hiddenCount"] == 1
+    sample = hidden_events[0][1]["fields"]["sampleSessions"][0]
+    assert sample["sessionId"] == "session-alpha"
+    assert sample["agentId"] == alpha["agentId"]
+    assert sample["agentStatusCode"] == "archived_agent"
 
 
 def test_agent_directory_repairs_legacy_mode_role_and_prompt_fields(tmp_path, monkeypatch):
@@ -859,7 +925,7 @@ def test_agents_api_skips_config_agent_sync_when_fixed_roles_are_present(tmp_pat
     for role in supervised_agent_service.SUPERVISED_AGENT_ROLES:
         agent_directory_service.create_agent_instance(
             display_name=role.label,
-            llm_bindings={"dialogue": {"modelId": f"model-{role.profile_id.replace('_', '-')}"}},
+            llm_bindings={"dialogue": {"modelId": f"model-{role.role.replace('_', '-')}"}},
             primary_mode="supervised_evolution",
             role_key=role.role,
             prompt_template_id=f"prompt-supervised-{role.role}",
@@ -869,7 +935,7 @@ def test_agents_api_skips_config_agent_sync_when_fixed_roles_are_present(tmp_pat
         role_key = role["role"]
         agent_directory_service.create_agent_instance(
             display_name=role["label"],
-            llm_bindings={"dialogue": {"modelId": f"model-{str(role['profileId']).replace('_', '-')}"}},
+            llm_bindings={"dialogue": {"modelId": f"model-{role_key.replace('_', '-')}"}},
             primary_mode="self_evolution",
             role_key=role_key,
             prompt_template_id=role["promptTemplateId"],

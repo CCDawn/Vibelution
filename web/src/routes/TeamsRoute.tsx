@@ -354,6 +354,7 @@ export function TeamsRoute() {
     [workspaceQuery.data],
   );
   const teams = teamsQuery.data?.teams ?? [];
+  const hasTeams = teams.length > 0;
   const teamTemplates = useMemo(() => teamTemplatesQuery.data?.templates ?? [], [teamTemplatesQuery.data?.templates]);
   const selectedTemplate = useMemo(
     () => teamTemplates.find((template) => template.templateId === selectedTemplateId) ?? teamTemplates[0] ?? null,
@@ -889,7 +890,7 @@ export function TeamsRoute() {
         <span>{lang === "zh" ? "成员源" : "Member source"} <strong>Agent Center</strong></span>
       </div>
 
-      <div className={styles.workspace}>
+      <div className={hasTeams ? styles.workspace : `${styles.workspace} ${styles.workspaceEmpty}`}>
         <aside className={styles.teamPanel}>
           <form
             className={styles.createForm}
@@ -1076,59 +1077,78 @@ export function TeamsRoute() {
               </button>
             </div>
           </div>
-          <div className={styles.canvas} ref={canvasFrameRef}>
-            <div className={styles.canvasViewport} style={canvasViewportStyle}>
-              <svg className={styles.edges} width="100%" height="100%" aria-hidden="true">
-                <defs>
-                  <marker
-                    id="team-edge-arrow"
-                    viewBox="0 0 10 10"
-                    refX="10"
-                    refY="5"
-                    markerWidth="6"
-                    markerHeight="6"
-                    orient="auto-start-reverse"
-                  >
-                    <path d="M 0 0 L 10 5 L 0 10 z" />
-                  </marker>
-                </defs>
-                {visibleEdges.map((edge) => {
-                  const line = edgeLine(edge, canvasNodes, visibleEdges);
-                  return line ? (
-                    <path
-                      key={edge.id}
-                      className={isCommunicationEdge(edge) ? styles.edgeCommunication : styles.edgeOrganization}
-                      d={`M ${line.x1} ${line.y1} Q ${line.cx} ${line.cy} ${line.x2} ${line.y2}`}
-                    />
-                  ) : null;
+          {canvas ? (
+            <div className={styles.canvas} ref={canvasFrameRef}>
+              <div className={styles.canvasViewport} style={canvasViewportStyle}>
+                <svg className={styles.edges} width="100%" height="100%" aria-hidden="true">
+                  <defs>
+                    <marker
+                      id="team-edge-arrow"
+                      viewBox="0 0 10 10"
+                      refX="10"
+                      refY="5"
+                      markerWidth="6"
+                      markerHeight="6"
+                      orient="auto-start-reverse"
+                    >
+                      <path d="M 0 0 L 10 5 L 0 10 z" />
+                    </marker>
+                  </defs>
+                  {visibleEdges.map((edge) => {
+                    const line = edgeLine(edge, canvasNodes, visibleEdges);
+                    return line ? (
+                      <path
+                        key={edge.id}
+                        className={isCommunicationEdge(edge) ? styles.edgeCommunication : styles.edgeOrganization}
+                        d={`M ${line.x1} ${line.y1} Q ${line.cx} ${line.cy} ${line.x2} ${line.y2}`}
+                      />
+                    ) : null;
+                  })}
+                </svg>
+                {canvasNodes.map((node) => {
+                  const agent = activeAgents.find((item) => item.agentId === node.agentId);
+                  const display = agent ? agentDisplayInfo(agent, lang) : null;
+                  const functionLabel = teamNodeFunctionLabel(node, display?.functionLabel, lang);
+                  return (
+                    <button
+                      key={node.id}
+                      type="button"
+                      className={`${styles.node} ${nodeTone(node)} ${selectedNode?.id === node.id ? styles.nodeActive : ""}`}
+                      style={{ "--node-x": `${node.x}px`, "--node-y": `${node.y}px` } as NodePositionStyle}
+                      title={lang === "zh" ? "拖动调整节点位置" : "Drag to reposition"}
+                      onPointerDown={(event) => startNodeDrag(event, node)}
+                      onPointerMove={moveNodeDrag}
+                      onPointerUp={finishNodeDrag}
+                      onPointerCancel={finishNodeDrag}
+                      onClick={() => setSelectedNodeId(node.id)}
+                    >
+                      <span className={styles.nodeIcon}>{node.agentId ? <Bot size={15} /> : <Users size={15} />}</span>
+                      <strong>{node.label}</strong>
+                      <span className={`${styles.nodeRoleBadge} ${roleBadgeTone(node, display?.tone)}`}>{functionLabel}</span>
+                      <small>{node.agentCode || node.status}</small>
+                    </button>
+                  );
                 })}
-              </svg>
-              {canvasNodes.map((node) => {
-                const agent = activeAgents.find((item) => item.agentId === node.agentId);
-                const display = agent ? agentDisplayInfo(agent, lang) : null;
-                const functionLabel = teamNodeFunctionLabel(node, display?.functionLabel, lang);
-                return (
-                  <button
-                    key={node.id}
-                    type="button"
-                    className={`${styles.node} ${nodeTone(node)} ${selectedNode?.id === node.id ? styles.nodeActive : ""}`}
-                    style={{ "--node-x": `${node.x}px`, "--node-y": `${node.y}px` } as NodePositionStyle}
-                    title={lang === "zh" ? "拖动调整节点位置" : "Drag to reposition"}
-                    onPointerDown={(event) => startNodeDrag(event, node)}
-                    onPointerMove={moveNodeDrag}
-                    onPointerUp={finishNodeDrag}
-                    onPointerCancel={finishNodeDrag}
-                    onClick={() => setSelectedNodeId(node.id)}
-                  >
-                    <span className={styles.nodeIcon}>{node.agentId ? <Bot size={15} /> : <Users size={15} />}</span>
-                    <strong>{node.label}</strong>
-                    <span className={`${styles.nodeRoleBadge} ${roleBadgeTone(node, display?.tone)}`}>{functionLabel}</span>
-                    <small>{node.agentCode || node.status}</small>
-                  </button>
-                );
-              })}
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className={styles.emptyCanvasPanel} ref={canvasFrameRef}>
+              <div className={styles.emptyCanvasContent}>
+                <span className={styles.emptyCanvasKicker}>{lang === "zh" ? "团队入口" : "Team entry"}</span>
+                <strong>{lang === "zh" ? "先创建团队，再进入组织画布" : "Create a team before opening the canvas"}</strong>
+                <p>
+                  {lang === "zh"
+                    ? "左侧可直接创建空团队或用模板生成 Demo 团队；创建后这里会切换为节点画布。"
+                    : "Use the left rail to create a blank team or instantiate a demo template; the node canvas appears after creation."}
+                </p>
+                <div className={styles.emptyCanvasSteps}>
+                  <span>{lang === "zh" ? "1 填团队名称" : "1 Name team"}</span>
+                  <span>{lang === "zh" ? "2 创建或套模板" : "2 Create/template"}</span>
+                  <span>{lang === "zh" ? "3 绑定 Agent" : "3 Bind agents"}</span>
+                </div>
+              </div>
+            </div>
+          )}
         </main>
 
         <aside className={styles.inspector}>
@@ -1137,7 +1157,15 @@ export function TeamsRoute() {
             {validation && !validation.valid ? <AlertTriangle size={16} /> : <Link2 size={16} />}
           </div>
           <div className={styles.inspectorBody}>
-            {selectedNode ? (
+            {!selectedTeam ? (
+              <section className={`${styles.nodeBindingSection} ${styles.nodeBindingPlaceholder}`}>
+                <div className={styles.empty}>
+                  {lang === "zh"
+                    ? "暂无团队。请先在左侧创建团队或使用模板。"
+                    : "No team yet. Create one or use a template from the left rail."}
+                </div>
+              </section>
+            ) : selectedNode ? (
               <section className={styles.nodeBindingSection}>
               <label>
                 <span>{lang === "zh" ? "节点名称" : "Node label"}</span>

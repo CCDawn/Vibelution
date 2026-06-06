@@ -52,3 +52,47 @@ def test_agent_run_store_persists_public_agent_and_subagent_snapshots(tmp_path, 
     assert payload["subAgentRuns"][0]["parentAgentId"] == "agent-main"
     assert "metadata" not in payload["subAgentRuns"][0]
     assert sub_snapshot["runId"].startswith("subagentrun-")
+
+
+def test_agent_run_store_lists_many_agents_with_one_snapshot_scan(tmp_path, monkeypatch):
+    monkeypatch.setattr(work_run_store, "WORK_RUNS_DIR", tmp_path / "work_runs")
+    alpha = {"agentId": "agent-alpha", "displayName": "Alpha"}
+    beta = {"agentId": "agent-beta", "displayName": "Beta"}
+
+    agent_run_store.persist_agent_run_snapshot(
+        alpha,
+        source_run_id="turn-alpha",
+        session_id="session-alpha",
+        status="running",
+        summary="alpha running",
+        tool_call_count=1,
+        timestamp="2026-06-06T01:00:00Z",
+        result={"updatedAt": "2026-06-06T01:00:00Z"},
+    )
+    agent_run_store.persist_agent_run_snapshot(
+        beta,
+        source_run_id="turn-beta",
+        session_id="session-beta",
+        status="failed",
+        summary="beta failed",
+        tool_call_count=2,
+        timestamp="2026-06-06T01:01:00Z",
+        result={"updatedAt": "2026-06-06T01:01:00Z"},
+    )
+    agent_run_store.persist_sub_agent_run_snapshot(
+        parent_run_id="turn-alpha",
+        sub_run_id="sub-alpha",
+        status="completed",
+        summary="sub alpha",
+        tool_call_count=0,
+        timestamp="2026-06-06T01:02:00Z",
+        result={"parentAgentId": "agent-alpha", "parentSessionId": "session-alpha"},
+    )
+
+    payload = agent_run_store.list_agent_runs_for_agents(["agent-alpha", "agent-beta"], limit=5)
+
+    assert payload["agentIds"] == ["agent-alpha", "agent-beta"]
+    assert payload["agents"]["agent-alpha"]["runs"][0]["status"] == "running"
+    assert payload["agents"]["agent-alpha"]["subAgentRuns"][0]["parentAgentId"] == "agent-alpha"
+    assert payload["agents"]["agent-beta"]["runs"][0]["status"] == "failed"
+    assert payload["agents"]["agent-beta"]["subAgentRuns"] == []

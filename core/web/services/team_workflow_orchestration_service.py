@@ -907,7 +907,7 @@ def invoke_local_research_model(team_id: str, payload: dict[str, Any], *, llm_cl
         "contentChars": len(raw_content),
         "reasoningChars": len(reasoning_content),
         "jsonSource": parse_source,
-        "profileId": LOCAL_RESEARCH_INVOKE_PROFILE_ID,
+        "modelProfileId": LOCAL_RESEARCH_INVOKE_PROFILE_ID,
         "modelId": model_id,
     }
     _record_workflow_event(
