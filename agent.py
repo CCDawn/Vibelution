@@ -665,6 +665,12 @@ class SelfEvolvingAgent:
             return bool(llm_cfg.get_profile(role="primary").streaming)
         return True
 
+    def _should_stream_llm_compat(self, llm_for_turn: Any = None) -> bool:
+        try:
+            return bool(self._should_stream_llm(llm_for_turn))
+        except TypeError:
+            return bool(self._should_stream_llm())
+
     def _sync_runtime_state_memory(self):
         """将会话级短期约束同步到 MEMORY/state_memory。"""
         try:
@@ -2002,7 +2008,7 @@ class SelfEvolvingAgent:
                     )
                     if (
                         not disable_streaming_for_retry
-                        and self._should_stream_llm(llm_for_turn)
+                        and self._should_stream_llm_compat(llm_for_turn)
                         and hasattr(llm_for_turn, "stream")
                     ):
                         full_chunk = None
@@ -2166,7 +2172,7 @@ class SelfEvolvingAgent:
                         "provider": getattr(self.config.llm, "provider", ""),
                         "api_base": getattr(self.config.llm, "api_base", ""),
                         "api_timeout": getattr(self.config.llm, "api_timeout", None),
-                        "streaming_enabled": bool(self._should_stream_llm(llm_for_turn if "llm_for_turn" in locals() else None)),
+                        "streaming_enabled": bool(self._should_stream_llm_compat(llm_for_turn if "llm_for_turn" in locals() else None)),
                         "message_count": len(clean_messages),
                     }
                     try:
