@@ -61,6 +61,7 @@ class TestLinuxCommandSet:
         "hostname",
         "whoami",
         "printenv PATH",
+        "bun run bun:test",
     ])
     def test_newly_added_commands_recognized(self, cmd):
         assert shell_tools._is_linux_command(cmd) is True, (

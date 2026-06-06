@@ -137,7 +137,7 @@ LINUX_COMMANDS = {
     'kill', 'pkill', 'pgrep', 'ps', 'top', 'htop',
     'df', 'du', 'free', 'mount', 'umount', 'lsof', 'netstat',
     'git', 'svn', 'hg', 'make', 'cmake', 'gcc', 'g++', 'clang',
-    'pip3', 'python3', 'node', 'npm', 'yarn', 'cargo',
+    'pip3', 'python3', 'node', 'npm', 'yarn', 'bun', 'cargo',
     # 补全：避免落到 cmd /c 导致正斜杠路径被当 switch 解析
     'touch', 'stat', 'true', 'false', 'date', 'sleep',
     'uname', 'hostname', 'whoami', 'id', 'yes', 'seq',

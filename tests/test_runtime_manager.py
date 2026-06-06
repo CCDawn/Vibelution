@@ -5598,6 +5598,40 @@ def test_residual_process_payload_reports_unmanaged_frontend_dev_server(monkeypa
     assert {item["port"] for item in payload["items"]} == {5173}
 
 
+def test_residual_process_payload_reports_bun_frontend_dev_server(monkeypatch, tmp_path):
+    class FakeProc:
+        def __init__(self, info):
+            self.info = info
+
+    repo = tmp_path / "repo"
+    web = repo / "web"
+    web.mkdir(parents=True)
+    monkeypatch.setattr(
+        process_inventory.psutil,
+        "process_iter",
+        lambda attrs: iter(
+            [
+                FakeProc(
+                    {
+                        "pid": 51522,
+                        "ppid": 1,
+                        "name": "bun.exe",
+                        "cmdline": ["bun", "run", "bun:dev", "--host", "127.0.0.1"],
+                        "cwd": str(web),
+                    }
+                ),
+            ]
+        ),
+    )
+
+    payload = process_inventory.residual_process_payload(project_root=repo)
+
+    assert payload["count"] == 1
+    assert payload["items"][0]["kind"] == "unmanaged_frontend_dev_server"
+    assert payload["items"][0]["pid"] == 51522
+    assert payload["items"][0]["port"] == 5173
+
+
 def test_residual_process_payload_ignores_one_shot_frontend_build(monkeypatch, tmp_path):
     class FakeProc:
         def __init__(self, info):
@@ -5626,6 +5660,15 @@ def test_residual_process_payload_ignores_one_shot_frontend_build(monkeypatch, t
                         "ppid": 51520,
                         "name": "node.exe",
                         "cmdline": ["node", "node_modules/.bin/vite", "build"],
+                        "cwd": str(web),
+                    }
+                ),
+                FakeProc(
+                    {
+                        "pid": 51523,
+                        "ppid": 1,
+                        "name": "bun.exe",
+                        "cmdline": ["bun", "run", "bun:build"],
                         "cwd": str(web),
                     }
                 ),
