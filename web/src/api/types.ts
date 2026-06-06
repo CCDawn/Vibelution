@@ -2910,6 +2910,54 @@ export type TeamWorkflowCandidateValidation = {
   issues: TeamWorkflowCandidateValidationIssue[];
 };
 
+export type TeamWorkflowCandidateGraphNode = {
+  candidateId: string;
+  candidateType: string;
+  title: string;
+  currentWorkflowNode: string;
+  currentState: string;
+  qualityStatus: string;
+  valid: boolean;
+  requiresReview: boolean;
+  officialState: string;
+};
+
+export type TeamWorkflowCandidateGraphEdge = {
+  sourceCandidateId: string;
+  targetCandidateId: string;
+  relation: string;
+  edgeState: string;
+};
+
+export type TeamWorkflowCandidateGraphPayload = {
+  schemaVersion: number;
+  teamId: string;
+  workflowId: string;
+  graphKind: "candidate_only" | string;
+  nodes: TeamWorkflowCandidateGraphNode[];
+  edges: TeamWorkflowCandidateGraphEdge[];
+  missingLinks: TeamWorkflowCandidateGraphEdge[];
+  unreviewedNodes: Array<{
+    candidateId: string;
+    candidateType: string;
+    currentState: string;
+    reason: string;
+  }>;
+  officialBoundary: {
+    writesOfficialKnowledge: boolean;
+    writesOfficialRag: boolean;
+    writesOfficialGraph: boolean;
+    requiresIngestionApproval: boolean;
+  };
+  summary: {
+    nodeCount: number;
+    edgeCount: number;
+    missingLinkCount: number;
+    unreviewedNodeCount: number;
+  };
+  createdAt: string;
+};
+
 export type TeamWorkflowCandidate = {
   schemaVersion: number;
   candidateId: string;
@@ -2923,6 +2971,12 @@ export type TeamWorkflowCandidate = {
   currentState: string;
   qualityStatus: string;
   validation?: TeamWorkflowCandidateValidation;
+  metadata?: Record<string, unknown> & {
+    graph?: TeamWorkflowCandidateGraphPayload;
+    missingLinkCount?: number;
+    unreviewedNodeCount?: number;
+    officialBoundary?: TeamWorkflowCandidateGraphPayload["officialBoundary"];
+  };
   createdByAgent: string;
   createdAt: string;
   updatedAt: string;
@@ -2949,6 +3003,12 @@ export type TeamWorkflowCandidateListPayload = {
   candidateCount: number;
   store: TeamWorkflowCandidateStoreSummary;
   validationSummary: TeamWorkflowValidationSummary;
+};
+
+export type TeamWorkflowCandidateGraphBuildPayload = {
+  candidateGraph: TeamWorkflowCandidate;
+  graph: TeamWorkflowCandidateGraphPayload;
+  workflow: TeamWorkflowOrchestration;
 };
 
 export type ConversationSummary = {

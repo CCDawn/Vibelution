@@ -31,11 +31,11 @@
           <div class="kicker">Research Flow Node 08</div>
           <h1>候选图谱预览</h1>
           <p class="subtitle">让团队先看到研究链路，但不污染正式知识图谱。</p>
-          <div class="tag-row"><span class="tag done">后端切片已落地</span><span class="tag">Candidate Graph Preview Agent</span><span class="tag">独立计划页</span></div>
+          <div class="tag-row"><span class="tag done">Teams 可视化已接入</span><span class="tag">Candidate Graph Preview Agent</span><span class="tag">独立计划页</span></div>
           <div class="diagram">
             <div class="flow-cell"><strong>输入</strong><span>CandidateStore candidates / paperNoteIds / neuroMechanismIds / mechanismMappingIds</span></div>
             <div class="flow-cell"><strong>动作</strong><span>读取 candidate_only、ready_for_candidate_graph、excluded 状态。</span></div>
-            <div class="flow-cell"><strong>输出</strong><span>candidate_graph 候选快照 / missingLinks 断链报告</span></div>
+            <div class="flow-cell"><strong>输出</strong><span>candidate_graph 候选快照 / Teams 候选图谱面板</span></div>
             <div class="flow-cell"><strong>记忆/图谱</strong><span>只展示候选图谱；正式图谱同步必须等 ingested。</span></div>
           </div>
         </section>
@@ -52,13 +52,16 @@
 <li>候选状态</li></ul></article>
             <article class="plan-card"><h2>处理动作</h2><ul><li>读取 candidate_only、ready_for_candidate_graph、excluded 状态。</li>
 <li>展示 supports、maps_to、inspires、reviewed_by 等候选边。</li>
-<li>突出缺失链接和断裂证据链。</li></ul></article>
+<li>突出缺失链接和断裂证据链。</li>
+<li>Teams 工作台科研流程面板可读取 latest candidate_graph，并用 SVG 小图展示节点、边、断链和未审节点。</li>
+<li>刷新图谱按钮复用 POST candidate-graph，只生成 candidate_only 快照，不写正式 Team Knowledge、RAG 或正式图谱。</li></ul></article>
             <article class="plan-card"><h2>输出物</h2><ul><li>candidate_graph 候选快照</li>
+<li>Teams 候选图谱面板</li>
 <li>missingLinks 断链报告</li>
 <li>unreviewedNodes 未审节点清单</li></ul></article>
             <article class="plan-card"><h2>风险</h2><ul><li>候选图谱被误读为正式知识</li>
 <li>links 指向不存在对象</li></ul></article>
-            <article class="plan-card "><h2>未决事项</h2><ul><li>后续是否导出独立 candidate_graph.json，或直接由前端读取 CandidateStore graph payload。</li></ul></article>
+            <article class="plan-card "><h2>未决事项</h2><ul><li>是否仍需要导出独立 candidate_graph.json，或保持前端直接读取 CandidateStore graph payload。</li></ul></article>
           </div>
         </section>
 
@@ -68,7 +71,7 @@
             <p class="hint">区分候选工作区、知识治理 Agent、正式 Team Knowledge 和正式知识图谱。</p>
           </div>
           <div class="status-grid">
-            <div class="status-item"><b>候选状态</b><span>后端切片已落地</span></div>
+            <div class="status-item"><b>候选状态</b><span>Teams 可视化已接入</span></div>
             <div class="status-item"><b>记忆平台</b><span>候选图谱只进入 CandidateStore 草稿区，不进入正式 RAG。</span></div>
             <div class="status-item"><b>图谱同步</b><span>只展示候选图谱；正式图谱同步必须等 ingested。</span></div>
           </div>
@@ -83,23 +86,25 @@
       <div class="status-grid">
         <div class="status-item"><b>状态</b><span>candidate_graph_visible</span></div>
         <div class="status-item"><b>功能岗位</b><span>Candidate Graph Preview Agent</span></div>
-        <div class="status-item"><b>Agent 状态</b><span>后端/API 已可生成候选图谱快照；前端可视化读取仍待接</span></div>
+        <div class="status-item"><b>Agent 状态</b><span>后端/API 已可生成候选图谱快照；Teams 工作台科研流程面板已接入首版 SVG 可视化读取</span></div>
         <div class="status-item"><b>进入条件</b><span>CandidateStore 中存在 paper_note / neuro_mechanism / mechanism_mapping / algorithm_hypothesis 等候选。</span></div>
-        <div class="status-item"><b>退出条件</b><span>candidate_graph 候选快照能列出 nodes、edges、missingLinks、unreviewedNodes 和 officialBoundary。</span></div>
+        <div class="status-item"><b>退出条件</b><span>candidate_graph 候选快照能列出 nodes、edges、missingLinks、unreviewedNodes 和 officialBoundary，并能在 Teams 科研流程面板可视化查看。</span></div>
         <div class="status-item"><b>审核门禁</b><span>确认候选图谱只作预览，不作为正式知识证据使用。</span></div>
       </div>
       <div class="plan-grid">
-        <article class="plan-card"><h2>本步操作</h2><p class="hint">从 paperNoteIds、neuroMechanismIds、mechanismMappingIds 重建候选链路。</p></article>
+        <article class="plan-card"><h2>本步操作</h2><p class="hint">从 paperNoteIds、neuroMechanismIds、mechanismMappingIds 重建候选链路；Teams 面板可请求最新 candidate_graph 并渲染 evidence -&gt; candidate 的阅读向箭头。</p></article>
 
         <article class="plan-card"><h2>所需功能</h2><ul><li>candidate_graph 候选快照生成</li>
 <li>候选节点/边预览 payload</li>
 <li>断链报告</li>
 <li>未审节点清单</li>
-<li>候选/正式边界标识</li></ul></article>
+<li>候选/正式边界标识</li>
+<li>Teams SVG 候选图谱面板</li>
+<li>手动刷新 candidate_only 快照</li></ul></article>
         <article class="plan-card"><h2>工具/平台能力</h2><ul><li>/api/teams/{teamId}/workflow-orchestration/candidate-graph</li>
 <li>CandidateStore</li>
-<li>图结构渲染能力（待接入前端）</li></ul></article>
-        <article class="plan-card"><h2>功能缺口</h2><p class="hint">图谱页面读取逻辑和独立 candidate_graph.json 导出仍待接。</p></article>
+<li>TeamsRoute 候选图谱渲染</li></ul></article>
+        <article class="plan-card"><h2>功能缺口</h2><p class="hint">独立 candidate_graph.json 导出仍待接；首版前端直接读取 CandidateStore graph payload。</p></article>
         <article class="plan-card"><h2>失败回退</h2><p class="hint">候选链接指向不存在对象时输出 missingLinks，并把质量状态标记为 broken_links，不允许进入正式同步。</p></article>
       </div>
     </section>
