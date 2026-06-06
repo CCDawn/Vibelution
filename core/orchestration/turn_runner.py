@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from core.llm.payload_builder import prompt_cache_partition_scope
+from core.orchestration.turn_runtime import AgentTurnRuntime, AgentTurnRuntimeRequest, prepare_agent_turn_runtime
 
 
 AgentFactory = Callable[..., Any]
@@ -27,12 +28,15 @@ class AgentSingleTurnRequest:
     carryover: dict[str, Any] | None = None
     runtime_context: str = ""
     interrupt_checker: InterruptChecker | None = None
+    runtime: AgentTurnRuntimeRequest | None = None
+    prompt_cache_partition: str = ""
 
 
 @dataclass(frozen=True)
 class AgentSingleTurnResult:
     result: dict[str, Any]
     carryover: dict[str, Any]
+    runtime: AgentTurnRuntime | None = None
 
 
 def default_agent_factory(*, mode: str, workspace_path: str | None = None, config: Any = None) -> Any:
@@ -142,6 +146,12 @@ def run_agent_single_turn(
 ) -> AgentSingleTurnResult:
     """Run one Agent Turn and return the visible result plus next carryover."""
 
+    runtime = prepare_agent_turn_runtime(request.runtime) if request.runtime is not None else None
+    prompt_cache_partition = (
+        runtime.prompt_cache_partition
+        if runtime is not None
+        else str(request.prompt_cache_partition or "").strip()
+    )
     agent = create_agent_runtime(
         mode=request.mode,
         workspace_path=request.workspace_path,
@@ -155,8 +165,14 @@ def run_agent_single_turn(
         interrupt_checker=request.interrupt_checker,
     )
 
-    raw_result = run_existing_agent_single_turn(agent, initial_prompt=request.initial_prompt)
+    raw_result = run_existing_agent_single_turn(
+        agent,
+        initial_prompt=request.initial_prompt,
+        prompt_cache_partition=prompt_cache_partition,
+    )
     result = raw_result if isinstance(raw_result, dict) else {}
+    if runtime is not None:
+        result = {**result, "turn_runtime": dict(runtime.metadata)}
 
     carryover_payload: dict[str, Any] = {}
     export_turn_carryover = getattr(agent, "export_turn_carryover", None)
@@ -165,7 +181,7 @@ def run_agent_single_turn(
         if isinstance(exported, dict):
             carryover_payload = exported
 
-    return AgentSingleTurnResult(result=result, carryover=carryover_payload)
+    return AgentSingleTurnResult(result=result, carryover=carryover_payload, runtime=runtime)
 
 
 __all__ = [
