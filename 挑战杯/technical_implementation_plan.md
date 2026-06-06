@@ -609,7 +609,9 @@ Agent 创建策略：
 - 图谱 payload 包含 `nodes`、`edges`、`missingLinks`、`unreviewedNodes`、`officialBoundary` 和 summary。
 - 当前链接字段优先使用候选输出中的 `paperNoteIds`、`neuroMechanismIds`、`mechanismMappingIds`、`candidateIds`，避免把外部 sourceRef 误判成候选断链。
 - 断链时 `candidate_graph.qualityStatus=broken_links`，未断链时为 `preview_ready`。
-- 独立 `candidate_graph.json` 导出和前端图谱读取仍待接。
+- Teams 工作台科研流程面板已读取 latest `candidate_graph` 候选快照，用紧凑 SVG 小图展示候选节点、候选链路、断链数量、未审节点和 candidate_only 官方边界。
+- 刷新图谱按钮复用 `POST /api/teams/{team_id}/workflow-orchestration/candidate-graph` 生成新的 CandidateStore 快照；该动作仍不写正式 Team Knowledge、RAG 或正式图谱。
+- 独立 `candidate_graph.json` 导出仍待接；首版前端直接读取 CandidateStore graph payload。
 
 正式图谱：
 
@@ -625,12 +627,12 @@ Agent 创建策略：
 
 - team_workflow_orchestration_service：已新增，读写 Team 级 workflow_orchestration、CandidateStore 和 transfer_records。
 - team_workflows API：已新增 `/api/teams/{team_id}/workflow-orchestration` 及 candidates/source、candidates/{candidate_id}/source-extraction、candidates/{candidate_id}/paper-note-draft、transfers、decide。
-- Teams 工作台科研流程面板：已新增只读入口，选择 `research-team` 或科研组织团队后读取 workflow detail 与最近候选列表，展示当前阶段、候选数、activeWorkflowItems、validationSummary 和候选状态；非科研团队不触发 workflow 初始化。
+- Teams 工作台科研流程面板：已新增入口，选择 `research-team` 或科研组织团队后读取 workflow detail、最近候选列表和 latest candidate_graph，展示当前阶段、候选数、activeWorkflowItems、validationSummary、候选状态和候选图谱预览；刷新图谱只生成 candidate_only CandidateStore 快照，非科研团队不触发 workflow 初始化。
 - local_research_worker_model：已落地任务包构建、32k 上下文预算、统一 `LLMClient` invoke、JSON 输出提取/校验和 CandidateStore 草稿记录；解析失败不入库。
 - candidate_store：已落地 Team 级 index、候选列表查询、按类型/状态过滤和 validationSummary，并接入 source_manifest、paper_note、neuro_mechanism、mechanism_mapping、algorithm_hypothesis、candidate_graph 最小校验。
 - source_parser：已新增 Team Workflow 后端/API 能力，支持本地 PDF `source_manifest` 的 `sha256`、`pageAnchors`、`excerpt` 抽取；缺文件、非 PDF、解析器不可用或抽取无文本时写 failed extraction 并停在 `source_needs_confirmation`。
 - candidate_validator：已落地 source_manifest/PDF 字段校验、sourceExtraction 失败校验、paper_note citation anchor 校验、neuro_mechanism 证据/术语风险校验、mechanism_mapping 类比风险校验、algorithm_hypothesis experimentPlan 校验、review_prefilter 最终 decision 禁止、steward_pack_draft 审批门禁、candidate_graph officialBoundary/断链状态校验和 CandidateStore 校验报告。
-- candidate_graph_builder：已落地后端/API，生成 CandidateStore 内的 candidate_graph 候选快照、断链报告、未审节点清单和 candidate_only officialBoundary；前端图谱读取仍待接。
+- candidate_graph_builder：已落地后端/API，生成 CandidateStore 内的 candidate_graph 候选快照、断链报告、未审节点清单和 candidate_only officialBoundary；Teams 工作台已接入首版候选图谱读取、刷新和 SVG 预览。
 - research_agent_binding：复用 research_service、research flow canvas、prompt-research-* 和 research 组织治理工具。
 - memory_ingestion_bridge：已复用现有 Team Knowledge `create_ingestion_package`、`review_refinement_proposal`、rating suggestion review/create 与 KnowledgeItem metadata patch，把 `steward_pack_draft` 映射到 pending proposal，并由 Ingestion Approval Gate 审批为正式 `KnowledgeItem`、承接待审评分建议、写入 officialResearchGraph 或退回修订。
 
@@ -656,7 +658,9 @@ Agent 创建策略：
 - `/teams?team=research-team` 右侧 inspector 的“科研流程”面板。
 - 读取 `/api/teams/{team_id}/workflow-orchestration`。
 - 读取 `/api/teams/{team_id}/workflow-orchestration/candidates?limit=8`。
-- 只读展示，不提交 transfer、不审批 steward pack、不写正式 Team Knowledge/RAG/知识图谱。
+- 读取 `/api/teams/{team_id}/workflow-orchestration/candidates?candidateType=candidate_graph&limit=20`，展示最新候选图谱快照。
+- 可手动调用 `/api/teams/{team_id}/workflow-orchestration/candidate-graph` 刷新 candidate_only 图谱快照。
+- 不提交 transfer、不审批 steward pack、不写正式 Team Knowledge/RAG/知识图谱。
 
 暂缓新增挑战杯专用 API。未来若进入 Web 工作台，再考虑：
 
@@ -733,6 +737,7 @@ Agent 创建策略：
 
 - candidate_graph builder 后端/API：`POST /api/teams/{team_id}/workflow-orchestration/candidate-graph`。
 - CandidateStore 内新增 `candidate_graph` 候选快照，包含 `nodes`、`edges`、`missingLinks`、`unreviewedNodes`、`officialBoundary`。
+- Teams 科研流程面板已接入 latest candidate_graph 读取、刷新按钮和候选链路 SVG 预览。
 - 断链报告和未审节点清单。
 - `candidate_graph` officialBoundary 明确不写正式 Team Knowledge/RAG/Graph。
 - review_prefilter 后端门禁：本地模型可生成 `review_record` 候选，必须含 `candidateIds`、`checklist`、`comments`、`requiredChanges`、`needsDecision`，且不能写最终 `decision`。
@@ -740,6 +745,7 @@ Agent 创建策略：
 验收：
 
 - 已覆盖：完整 paper_note -> neuro_mechanism -> mechanism_mapping -> algorithm_hypothesis 候选链可生成 `candidate_graph_visible`，且 `officialBoundary.writesOfficialGraph=false`。
+- 已覆盖：Teams 工作台可读取最新 candidate_graph 候选快照，并显示候选节点、关系边、断链、未审节点和 candidate_only 边界。
 - 已覆盖：候选链接指向不存在对象时生成 `missingLinks`，`candidate_graph.qualityStatus=broken_links`。
 - 已覆盖：合格 review prefilter 进入 `review_prefiltered`。
 - 已覆盖：review prefilter 输出最终 `decision` 时进入 `review_needs_revision`。
