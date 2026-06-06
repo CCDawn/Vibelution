@@ -719,8 +719,7 @@ def test_memory_knowledge_graph_node_detail_returns_acl_scoped_full_content(know
     assert item_detail is not None
     assert item_detail["contentItems"][0]["knowledgeItemId"] == reviewed["item"]["knowledgeItemId"]
     assert item_detail["contentItems"][0]["content"] == "NODE DETAIL FORMAL KNOWLEDGE BODY"
-    assert outsider_detail is not None
-    assert outsider_detail["contentItems"] == []
+    assert outsider_detail is None
 
 
 def test_memory_knowledge_graph_expands_official_research_trace_on_include(knowledge_env):

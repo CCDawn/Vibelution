@@ -48,53 +48,22 @@ def get_memory_knowledge_graph(
     project_node_id = "project:vibelution"
     agents = agent_directory_service.list_agents(include_archived=False)
     agents_by_id = {str(agent.get("agentId") or "").strip(): agent for agent in agents if str(agent.get("agentId") or "").strip()}
-    team_member_agent_ids: set[str] = set()
     teams = [
         team
         for team in list(team_service.list_team_graph_references(include_archived=False).get("teams") or [])
         if isinstance(team, dict) and (not normalized_team_id or str(team.get("teamId") or "") == normalized_team_id)
     ]
-    for team in teams:
-        for member in list(team.get("members") or []):
-            if isinstance(member, dict):
-                member_agent_id = str(member.get("agentId") or "").strip()
-                if member_agent_id:
-                    team_member_agent_ids.add(member_agent_id)
-
-    visible_team_ids: set[str] = set()
-    visible_agent_ids: set[str] = set()
-    agent_team_ids: set[str] = set()
-    for team in teams:
-        team_id_value = str(team.get("teamId") or "").strip()
-        team_owner = team_knowledge_service._owner_context("team", team_id_value, team=team)
-        if normalized_agent_id and any(
-            str(member.get("agentId") or "").strip() == normalized_agent_id
-            for member in list(team.get("members") or [])
-            if isinstance(member, dict)
-        ):
-            agent_team_ids.add(team_id_value)
-        for base in team_knowledge_service._knowledge_bases_for_owner(team_owner):
-            base_id = str(base.get("knowledgeBaseId") or "").strip()
-            if not _knowledge_base_matches_filter(team_owner, base, filter_owner_type, filter_owner_id, normalized_base_id):
-                continue
-            if team_knowledge_service._can_access(team_owner, base, normalized_agent_id, "read"):
-                visible_team_ids.add(team_id_value)
-                for member in list(team.get("members") or []):
-                    if isinstance(member, dict):
-                        member_agent_id = str(member.get("agentId") or "").strip()
-                        if member_agent_id:
-                            visible_agent_ids.add(member_agent_id)
-    if normalized_agent_id:
-        visible_agent_ids.add(normalized_agent_id)
-        visible_team_ids.update(agent_team_ids)
-        for team in teams:
-            team_id_value = str(team.get("teamId") or "").strip()
-            if team_id_value in visible_team_ids:
-                for member in list(team.get("members") or []):
-                    if isinstance(member, dict):
-                        member_agent_id = str(member.get("agentId") or "").strip()
-                        if member_agent_id:
-                            visible_agent_ids.add(member_agent_id)
+    visibility = _resolve_graph_visibility(
+        normalized_agent_id,
+        teams,
+        agents_by_id=agents_by_id,
+        knowledge_base_owner_type=filter_owner_type,
+        knowledge_base_owner_id=filter_owner_id,
+        knowledge_base_id=normalized_base_id,
+    )
+    visible_team_ids = visibility["teamIds"]
+    visible_agent_ids = visibility["agentIds"]
+    team_member_agent_ids = visibility["teamMemberAgentIds"]
 
     project_child_node_ids = [
         _node_id("team", str(team.get("teamId") or "").strip())
@@ -628,6 +597,97 @@ def record_memory_knowledge_graph_blocked(*, reason: str, team_id: str = "", kno
         pass
 
 
+def _resolve_graph_visibility(
+    actor_agent_id: str,
+    teams: list[dict[str, Any]],
+    *,
+    agents_by_id: dict[str, dict[str, Any]] | None = None,
+    knowledge_base_owner_type: str = "",
+    knowledge_base_owner_id: str = "",
+    knowledge_base_id: str = "",
+) -> dict[str, set[str]]:
+    normalized_agent_id = str(actor_agent_id or "").strip()
+    known_agent_ids = set((agents_by_id or {}).keys())
+    visible_team_ids: set[str] = set()
+    visible_agent_ids: set[str] = set()
+    team_member_agent_ids: set[str] = set()
+    agent_team_ids: set[str] = set()
+
+    for team in teams:
+        team_id_value = str(team.get("teamId") or "").strip()
+        if not team_id_value:
+            continue
+        member_ids = [
+            str(member.get("agentId") or "").strip()
+            for member in list(team.get("members") or [])
+            if isinstance(member, dict) and str(member.get("agentId") or "").strip()
+        ]
+        team_member_agent_ids.update(member_ids)
+        if normalized_agent_id and normalized_agent_id in member_ids:
+            agent_team_ids.add(team_id_value)
+        team_owner = team_knowledge_service._owner_context("team", team_id_value, team=team)
+        for base in team_knowledge_service._knowledge_bases_for_owner(team_owner):
+            if not _knowledge_base_matches_filter(team_owner, base, knowledge_base_owner_type, knowledge_base_owner_id, knowledge_base_id):
+                continue
+            if team_knowledge_service._can_access(team_owner, base, normalized_agent_id, "read"):
+                visible_team_ids.add(team_id_value)
+                visible_agent_ids.update(member_ids)
+
+    if normalized_agent_id:
+        visible_agent_ids.add(normalized_agent_id)
+        visible_team_ids.update(agent_team_ids)
+        for team in teams:
+            team_id_value = str(team.get("teamId") or "").strip()
+            if team_id_value not in visible_team_ids:
+                continue
+            for member in list(team.get("members") or []):
+                if isinstance(member, dict):
+                    member_agent_id = str(member.get("agentId") or "").strip()
+                    if member_agent_id:
+                        visible_agent_ids.add(member_agent_id)
+
+    if known_agent_ids:
+        visible_agent_ids = {agent_id for agent_id in visible_agent_ids if agent_id in known_agent_ids}
+    return {
+        "teamIds": visible_team_ids,
+        "agentIds": visible_agent_ids,
+        "teamMemberAgentIds": team_member_agent_ids,
+    }
+
+
+def _actor_can_see_graph_team(team: dict[str, Any], actor_agent_id: str) -> bool:
+    team_id = str(team.get("teamId") or "").strip()
+    if not team_id:
+        return False
+    visibility = _resolve_graph_visibility(str(actor_agent_id or "").strip(), [team], agents_by_id=_active_agents_by_id())
+    return team_id in visibility["teamIds"]
+
+
+def _actor_can_see_graph_agent(agent: dict[str, Any], actor_agent_id: str) -> bool:
+    agent_id = str(agent.get("agentId") or "").strip()
+    if not agent_id:
+        return False
+    teams = [
+        team
+        for team in list(team_service.list_team_graph_references(include_archived=False).get("teams") or [])
+        if isinstance(team, dict)
+        and any(
+            isinstance(member, dict) and str(member.get("agentId") or "").strip() == agent_id
+            for member in list(team.get("members") or [])
+        )
+    ]
+    visibility = _resolve_graph_visibility(str(actor_agent_id or "").strip(), teams, agents_by_id=_active_agents_by_id())
+    return agent_id in visibility["agentIds"]
+
+
+def _active_agents_by_id() -> dict[str, dict[str, Any]]:
+    return {
+        str(agent.get("agentId") or "").strip(): agent
+        for agent in agent_directory_service.list_agents(include_archived=False)
+        if str(agent.get("agentId") or "").strip()
+    }
+
+
 def _record_node_detail_event(
     node_id: str,
     agent_id: str,
@@ -667,6 +727,8 @@ def _resolve_node_detail(node_id: str, actor_agent_id: str, *, limit: int) -> di
         team = _get_team_or_none(raw_value)
         if not team:
             return None
+        if not _actor_can_see_graph_team(team, actor_agent_id):
+            return None
         owner = team_knowledge_service._owner_context("team", raw_value, team=team)
         return {
             "nodeType": "team",
@@ -677,6 +739,8 @@ def _resolve_node_detail(node_id: str, actor_agent_id: str, *, limit: int) -> di
     if node_type == "agent":
         agent = agent_directory_service.get_agent(raw_value, include_archived=True)
         if not agent:
+            return None
+        if not _actor_can_see_graph_agent(agent, actor_agent_id):
             return None
         metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
         owner = team_knowledge_service._owner_context("agent", raw_value, agent=agent)

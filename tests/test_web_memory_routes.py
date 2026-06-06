@@ -321,6 +321,7 @@ def test_memory_knowledge_graph_node_detail_endpoint_returns_selected_node_conte
     monkeypatch.setattr(team_knowledge_service, "PROJECT_ROOT", tmp_path)
     agent = agent_directory_service.create_agent_instance(display_name="Graph Detail Agent", direct_session_id="session-graph-detail")
     outsider = agent_directory_service.create_agent_instance(display_name="Graph Detail Outsider")
+    hidden_agent = agent_directory_service.create_agent_instance(display_name="Graph Detail Hidden Agent")
     team = team_service.create_team(name="Graph Detail Team", members=[{"agentId": agent["agentId"], "role": "lead"}])
     knowledge_base = team_knowledge_service.create_knowledge_base(
         team["teamId"],
@@ -354,6 +355,10 @@ def test_memory_knowledge_graph_node_detail_endpoint_returns_selected_node_conte
         "/api/memory/knowledge-graph/node-detail",
         params={"nodeId": f"team:{team['teamId']}", "agentId": outsider["agentId"]},
     )
+    hidden_agent_response = client.get(
+        "/api/memory/knowledge-graph/node-detail",
+        params={"nodeId": f"agent:{hidden_agent['agentId']}", "agentId": outsider["agentId"]},
+    )
     missing_response = client.get(
         "/api/memory/knowledge-graph/node-detail",
         params={"nodeId": "knowledge_base:not-found", "agentId": agent["agentId"]},
@@ -368,8 +373,8 @@ def test_memory_knowledge_graph_node_detail_endpoint_returns_selected_node_conte
     assert detail_payload["contentItems"][0]["content"] == "GRAPH DETAIL API BODY SHOULD LOAD"
     assert detail_payload["contentItems"][0]["knowledgeItemId"] == reviewed["item"]["knowledgeItemId"]
     assert empty_actor_response.status_code == 422
-    assert outsider_response.status_code == 200, outsider_response.json()
-    assert outsider_response.json()["contentItems"] == []
+    assert outsider_response.status_code == 404
+    assert hidden_agent_response.status_code == 404
     assert missing_response.status_code == 404
 
 
