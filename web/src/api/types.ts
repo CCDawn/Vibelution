@@ -2841,6 +2841,116 @@ export type TeamTemplateInstantiatePayload = {
   updatedAt: string;
 };
 
+export type TeamWorkflowStateNode = {
+  nodeId: string;
+  label: string;
+};
+
+export type TeamWorkflowTransition = {
+  from: string;
+  to: string;
+  type?: string;
+};
+
+export type TeamWorkflowActiveItem = {
+  candidateId: string;
+  currentNode: string;
+  status: string;
+  pendingTransferId: string;
+  updatedAt: string;
+};
+
+export type TeamWorkflowCandidateStoreSummary = {
+  schemaVersion: number;
+  candidateCount: number;
+  candidateTypes: string[];
+  updatedAt: string;
+  storagePath: string;
+};
+
+export type TeamWorkflowOrchestration = {
+  schemaVersion: number;
+  workflowId: string;
+  teamId: string;
+  workflowKind: "challenge_cup_research" | string;
+  status: string;
+  ownerAgentId: string;
+  stateMachine: {
+    currentStage: string;
+    nodes: TeamWorkflowStateNode[];
+    transitions: TeamWorkflowTransition[];
+  };
+  routingPolicy: {
+    coordinationAgentId: string;
+    functionalAgentsMayRequestTransfer: boolean;
+    finalStateWriter: string;
+  };
+  transferPolicy: {
+    requiresUserConfirmation: boolean;
+    requestedBy: string;
+    decidedBy: string;
+    recordDecidedByAgent: boolean;
+  };
+  activeWorkflowItems: TeamWorkflowActiveItem[];
+  candidateStore: TeamWorkflowCandidateStoreSummary;
+  transferRecordsPath: string;
+  storagePath: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type TeamWorkflowCandidateValidationIssue = {
+  severity: "error" | "warning" | string;
+  code: string;
+  message: string;
+};
+
+export type TeamWorkflowCandidateValidation = {
+  valid: boolean;
+  issues: TeamWorkflowCandidateValidationIssue[];
+};
+
+export type TeamWorkflowCandidate = {
+  schemaVersion: number;
+  candidateId: string;
+  candidateType: string;
+  teamId: string;
+  workflowId: string;
+  title: string;
+  summary: string;
+  sourceKind?: string;
+  currentWorkflowNode: string;
+  currentState: string;
+  qualityStatus: string;
+  validation?: TeamWorkflowCandidateValidation;
+  createdByAgent: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type TeamWorkflowValidationSummary = {
+  candidateCount: number;
+  validCandidateCount: number;
+  invalidCandidateCount: number;
+  errorCount: number;
+  warningCount: number;
+};
+
+export type TeamWorkflowCandidateListPayload = {
+  teamId: string;
+  workflowId: string;
+  filters: {
+    candidateType: string;
+    currentState: string;
+    qualityStatus: string;
+    limit: number;
+  };
+  candidates: TeamWorkflowCandidate[];
+  candidateCount: number;
+  store: TeamWorkflowCandidateStoreSummary;
+  validationSummary: TeamWorkflowValidationSummary;
+};
+
 export type ConversationSummary = {
   conversationId: string;
   type: "direct_agent" | "group_room" | string;

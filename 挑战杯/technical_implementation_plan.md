@@ -256,7 +256,7 @@ source_registered
 
 ### 5.1.1 已落地的前半段后端切片
 
-本轮已先完成 Team 编排与知识搜集/筛选入库前置链路的最小后端能力，并补入本地 PDF `source-extraction` 页码锚点抽取，以及 `sourceExtraction` 到 `paper_note_draft` 的首版自动草稿桥；暂不包含前端，不处理长文自动分块，不直接接正式 Team Knowledge 入库。
+本轮已先完成 Team 编排与知识搜集/筛选入库前置链路的最小后端能力，并补入本地 PDF `source-extraction` 页码锚点抽取，以及 `sourceExtraction` 到 `paper_note_draft` 的首版自动草稿桥；Team 页面已新增科研流程只读面板，用于查看 `research-team` 的 workflow、CandidateStore、校验摘要和最近候选；暂不处理长文自动分块，不直接接正式 Team Knowledge 入库。
 
 新增文件：
 
@@ -619,12 +619,13 @@ Agent 创建策略：
 
 ## 9. API 与服务建议
 
-已落地第一段 Team workflow API，用于 Team 编排、候选资料登记和流程转移裁决。挑战杯专用 Web 页面仍暂缓新增，先复用 Team workflow API、本地脚本和现有 knowledge 工具。
+已落地第一段 Team workflow API，用于 Team 编排、候选资料登记和流程转移裁决。挑战杯专用 Web 页面仍暂缓新增，先复用 Team workflow API、本地脚本、现有 knowledge 工具和 Teams 工作台的科研流程只读面板。
 
 复用优先的服务边界：
 
 - team_workflow_orchestration_service：已新增，读写 Team 级 workflow_orchestration、CandidateStore 和 transfer_records。
 - team_workflows API：已新增 `/api/teams/{team_id}/workflow-orchestration` 及 candidates/source、candidates/{candidate_id}/source-extraction、candidates/{candidate_id}/paper-note-draft、transfers、decide。
+- Teams 工作台科研流程面板：已新增只读入口，选择 `research-team` 或科研组织团队后读取 workflow detail 与最近候选列表，展示当前阶段、候选数、activeWorkflowItems、validationSummary 和候选状态；非科研团队不触发 workflow 初始化。
 - local_research_worker_model：已落地任务包构建、32k 上下文预算、统一 `LLMClient` invoke、JSON 输出提取/校验和 CandidateStore 草稿记录；解析失败不入库。
 - candidate_store：已落地 Team 级 index、候选列表查询、按类型/状态过滤和 validationSummary，并接入 source_manifest、paper_note、neuro_mechanism、mechanism_mapping、algorithm_hypothesis、candidate_graph 最小校验。
 - source_parser：已新增 Team Workflow 后端/API 能力，支持本地 PDF `source_manifest` 的 `sha256`、`pageAnchors`、`excerpt` 抽取；缺文件、非 PDF、解析器不可用或抽取无文本时写 failed extraction 并停在 `source_needs_confirmation`。
@@ -649,6 +650,13 @@ Agent 创建策略：
 - POST `/api/teams/{team_id}/workflow-orchestration/local-research-model/invoke`
 - POST `/api/teams/{team_id}/workflow-orchestration/steward-packs/{candidate_id}/knowledge-ingestion`
 - POST `/api/teams/{team_id}/workflow-orchestration/steward-packs/{candidate_id}/knowledge-ingestion/review`
+
+已落地前端读取面：
+
+- `/teams?team=research-team` 右侧 inspector 的“科研流程”面板。
+- 读取 `/api/teams/{team_id}/workflow-orchestration`。
+- 读取 `/api/teams/{team_id}/workflow-orchestration/candidates?limit=8`。
+- 只读展示，不提交 transfer、不审批 steward pack、不写正式 Team Knowledge/RAG/知识图谱。
 
 暂缓新增挑战杯专用 API。未来若进入 Web 工作台，再考虑：
 
