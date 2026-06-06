@@ -694,7 +694,6 @@ class _ImmediateExecutor:
 
 def test_runtime_manager_start_supervised_run_submits_command(monkeypatch):
     calls: list[object] = []
-    snapshot = {"runId": "web-supervised-managed", "status": "queued"}
 
     monkeypatch.setattr(service, "_runtime_manager_live_control_enabled", lambda: True)
     monkeypatch.setattr(service, "_ensure_runtime_manager_daemon", lambda: calls.append("ensure"))
@@ -703,27 +702,29 @@ def test_runtime_manager_start_supervised_run_submits_command(monkeypatch):
         "submit_command",
         lambda command_type, args=None, requested_by="unknown": calls.append((command_type, args, requested_by)) or {"commandId": "cmd-1"},
     )
-    monkeypatch.setattr(service, "wait_for_result", lambda command_id: {"ok": True, "snapshot": snapshot})
+    monkeypatch.setattr(
+        service,
+        "wait_for_result",
+        lambda command_id, *, timeout_seconds=60: pytest.fail("accepted submission must not poll for command completion"),
+    )
+    monkeypatch.setattr(service, "_load_immediate_runtime_manager_command_result", lambda command_id: calls.append(("immediate", command_id)) or None)
 
     result = service.start_supervised_run({"sourceKind": "bundle", "bundleName": "manual_bundle"})
 
-    assert result == snapshot
+    assert result["accepted"] is True
+    assert result["commandId"] == "cmd-1"
+    assert result["commandType"] == "start_supervised_run"
+    assert result["status"] == "queued"
     assert calls[0] == "ensure"
     assert calls[1] == (
         "start_supervised_run",
         {"payload": {"sourceKind": "bundle", "bundleName": "manual_bundle"}},
         "web_ui",
     )
+    assert calls[2] == ("immediate", "cmd-1")
 
 
-@pytest.mark.parametrize(
-    "manager_result",
-    [
-        {"ok": True},
-        {"ok": True, "snapshot": {}},
-    ],
-)
-def test_runtime_manager_start_supervised_run_rejects_empty_success_result(monkeypatch, manager_result):
+def test_runtime_manager_start_supervised_run_rejects_immediate_manager_failure(monkeypatch):
     calls: list[object] = []
 
     monkeypatch.setattr(service, "_runtime_manager_live_control_enabled", lambda: True)
@@ -733,10 +734,18 @@ def test_runtime_manager_start_supervised_run_rejects_empty_success_result(monke
         "submit_command",
         lambda command_type, args=None, requested_by="unknown": calls.append((command_type, args, requested_by)) or {"commandId": "cmd-empty"},
     )
-    monkeypatch.setattr(service, "wait_for_result", lambda command_id: manager_result)
-    monkeypatch.setattr(service, "load_manager_run_snapshot", lambda kind, run_id: None)
+    monkeypatch.setattr(
+        service,
+        "wait_for_result",
+        lambda command_id, *, timeout_seconds=60: pytest.fail("accepted submission must not poll for command completion"),
+    )
+    monkeypatch.setattr(
+        service,
+        "_load_immediate_runtime_manager_command_result",
+        lambda command_id: {"ok": False, "message": "Runtime manager is shutting down.", "errorType": "RuntimeManagerStoppingError"},
+    )
 
-    with pytest.raises(service.SupervisedRunValidationError, match="snapshot"):
+    with pytest.raises(service.SupervisedRunValidationError, match="shutting down"):
         service.start_supervised_run({"sourceKind": "bundle", "bundleName": "manual_bundle"})
 
     assert calls[0] == "ensure"
@@ -745,6 +754,38 @@ def test_runtime_manager_start_supervised_run_rejects_empty_success_result(monke
         {"payload": {"sourceKind": "bundle", "bundleName": "manual_bundle"}},
         "web_ui",
     )
+
+
+def test_runtime_manager_delete_supervised_run_submits_command_without_waiting_for_completion(monkeypatch):
+    calls: list[object] = []
+
+    monkeypatch.setattr(service, "_runtime_manager_live_control_enabled", lambda: True)
+    monkeypatch.setattr(service, "_ensure_runtime_manager_daemon", lambda: calls.append("ensure"))
+    monkeypatch.setattr(
+        service,
+        "submit_command",
+        lambda command_type, args=None, requested_by="unknown": calls.append((command_type, args, requested_by)) or {"commandId": "cmd-delete"},
+    )
+    monkeypatch.setattr(
+        service,
+        "wait_for_result",
+        lambda command_id, *, timeout_seconds=60: pytest.fail("accepted submission must not poll for command completion"),
+    )
+    monkeypatch.setattr(service, "_load_immediate_runtime_manager_command_result", lambda command_id: calls.append(("immediate", command_id)) or None)
+
+    result = service.delete_supervised_run_snapshot("web-supervised-managed")
+
+    assert result["accepted"] is True
+    assert result["commandId"] == "cmd-delete"
+    assert result["commandType"] == "delete_supervised_run"
+    assert result["runId"] == "web-supervised-managed"
+    assert calls[0] == "ensure"
+    assert calls[1] == (
+        "delete_supervised_run",
+        {"runId": "web-supervised-managed"},
+        "web_ui",
+    )
+    assert calls[2] == ("immediate", "cmd-delete")
 
 
 def test_runtime_manager_get_active_supervised_run_reads_store(monkeypatch):

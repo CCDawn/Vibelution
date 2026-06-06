@@ -15046,6 +15046,58 @@ def test_start_supervised_run_from_web_does_not_write_real_runtime_manager_store
         _reset_supervised_live_state()
 
 
+def test_start_supervised_run_live_manager_route_returns_accepted_without_waiting(monkeypatch):
+    calls: list[object] = []
+    monkeypatch.setattr(supervised_control_service, "_runtime_manager_live_control_enabled", lambda: True)
+    monkeypatch.setattr(supervised_control_service, "_ensure_runtime_manager_daemon", lambda: calls.append("ensure"))
+    monkeypatch.setattr(
+        supervised_control_service,
+        "submit_command",
+        lambda command_type, args=None, requested_by="unknown": calls.append((command_type, args, requested_by)) or {"commandId": "cmd-web-start"},
+    )
+    monkeypatch.setattr(
+        supervised_control_service,
+        "wait_for_result",
+        lambda command_id, *, timeout_seconds=60: pytest.fail("accepted submission must not poll for command completion"),
+    )
+    monkeypatch.setattr(
+        supervised_control_service,
+        "_load_immediate_runtime_manager_command_result",
+        lambda command_id: calls.append(("immediate", command_id)) or None,
+    )
+
+    response = client.post(
+        "/api/evolution/runs",
+        json={
+            "sourceKind": "bundle",
+            "bundleName": "manual_bundle",
+            "keepWorktree": False,
+        },
+    )
+
+    assert response.status_code == 202
+    payload = response.json()
+    assert payload["accepted"] is True
+    assert payload["commandId"] == "cmd-web-start"
+    assert payload["commandType"] == "start_supervised_run"
+    assert payload["status"] == "queued"
+    assert calls[0] == "ensure"
+    assert calls[1] == (
+        "start_supervised_run",
+        {
+            "payload": {
+                "sourceKind": "bundle",
+                "datasetName": "",
+                "datasetLimit": None,
+                "bundleName": "manual_bundle",
+                "keepWorktree": False,
+            }
+        },
+        "web_ui",
+    )
+    assert calls[2] == ("immediate", "cmd-web-start")
+
+
 def test_start_supervised_run_from_bundle_uses_launchable_file_stem(tmp_path, monkeypatch):
     bundle_path = tmp_path / "workspace" / "evaluation" / "bundles" / "launchable_bundle.json"
     bundle_path.parent.mkdir(parents=True, exist_ok=True)
@@ -15262,6 +15314,43 @@ def test_supervised_run_delete_route_clears_queued_run_and_unlocks_start(tmp_pat
     assert restart_response.json()["runId"] != run_id
 
     _reset_supervised_live_state()
+
+
+def test_supervised_run_delete_live_manager_route_returns_accepted_without_waiting(monkeypatch):
+    calls: list[object] = []
+    monkeypatch.setattr(supervised_control_service, "_runtime_manager_live_control_enabled", lambda: True)
+    monkeypatch.setattr(supervised_control_service, "_ensure_runtime_manager_daemon", lambda: calls.append("ensure"))
+    monkeypatch.setattr(
+        supervised_control_service,
+        "submit_command",
+        lambda command_type, args=None, requested_by="unknown": calls.append((command_type, args, requested_by)) or {"commandId": "cmd-web-delete"},
+    )
+    monkeypatch.setattr(
+        supervised_control_service,
+        "wait_for_result",
+        lambda command_id, *, timeout_seconds=60: pytest.fail("accepted submission must not poll for command completion"),
+    )
+    monkeypatch.setattr(
+        supervised_control_service,
+        "_load_immediate_runtime_manager_command_result",
+        lambda command_id: calls.append(("immediate", command_id)) or None,
+    )
+
+    response = client.delete("/api/evolution/runs/web-supervised-old")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["accepted"] is True
+    assert payload["commandId"] == "cmd-web-delete"
+    assert payload["commandType"] == "delete_supervised_run"
+    assert payload["runId"] == "web-supervised-old"
+    assert calls[0] == "ensure"
+    assert calls[1] == (
+        "delete_supervised_run",
+        {"runId": "web-supervised-old"},
+        "web_ui",
+    )
+    assert calls[2] == ("immediate", "cmd-web-delete")
 
 
 def test_supervised_run_delete_route_rejects_running_run():

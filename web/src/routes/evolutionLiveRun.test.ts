@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { EvolutionActiveRun } from "../api/types";
 import {
+  isEvolutionRunCommandAccepted,
   parseRunStreamSnapshot,
   requireEvolutionRunSnapshot,
   selectRunSnapshotWithRunId,
@@ -40,6 +41,20 @@ describe("evolutionLiveRun", () => {
     expect(() => requireEvolutionRunSnapshot(null, "self-evolution")).toThrow("self-evolution");
     expect(() => requireEvolutionRunSnapshot({} as EvolutionActiveRun, "self-evolution")).toThrow("runId");
     expect(() => requireEvolutionRunSnapshot({ runId: "   " } as EvolutionActiveRun, "supervised")).toThrow("runId");
+  });
+
+  it("recognizes runtime-manager accepted envelopes separately from run snapshots", () => {
+    expect(
+      isEvolutionRunCommandAccepted({
+        accepted: true,
+        commandId: "cmd-1",
+        commandType: "start_supervised_run",
+        status: "queued",
+        summary: "queued",
+      }),
+    ).toBe(true);
+    expect(isEvolutionRunCommandAccepted(run("run-1", "queued"))).toBe(false);
+    expect(isEvolutionRunCommandAccepted({ accepted: true, commandId: "", commandType: "start_supervised_run" })).toBe(false);
   });
 
   it("uses the action label when rejecting control action payloads", () => {
