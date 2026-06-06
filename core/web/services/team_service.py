@@ -97,14 +97,15 @@ def _elapsed_ms(started_at: float) -> int:
 
 
 def list_teams(*, include_archived: bool = False) -> dict[str, Any]:
+    agent_refs = _agent_reference_maps()
     with _TEAM_LOCK:
         state = _load_index()
-        changed = _repair_index_state(state)
-        changed = _repair_archived_team_member_agents(state, reason="list_teams", strict=False) or changed
+        changed = _repair_index_state(state, agent_refs=agent_refs)
+        changed = _repair_archived_team_member_agents(state, reason="list_teams", strict=False, agent_refs=agent_refs) or changed
         if changed:
             _save_index(state)
     teams = [
-        _team_to_api(item)
+        _team_to_api(item, agent_refs=agent_refs)
         for item in list(state.get("teams") or [])
         if isinstance(item, dict) and (include_archived or str(item.get("status") or DEFAULT_TEAM_STATUS) != "archived")
     ]
@@ -121,14 +122,19 @@ def list_teams(*, include_archived: bool = False) -> dict[str, Any]:
 def list_teams_compact(*, include_archived: bool = False) -> dict[str, Any]:
     """Return Team references without canvas reads or linked room hydration."""
 
+    _sync_chat_room_root()
+    compact_rooms_by_id = {
+        str(room.get("roomId") or "").strip(): room
+        for room in chat_room_service.list_chat_rooms_compact()
+        if isinstance(room, dict) and str(room.get("roomId") or "").strip()
+    }
     with _TEAM_LOCK:
         state = _load_index()
-        changed = _repair_index_compact_contracts(state)
-        changed = _repair_archived_team_member_agents(state, reason="list_teams_compact", strict=False) or changed
+        changed = _repair_index_compact_contracts(state, compact_rooms_by_id=compact_rooms_by_id)
         if changed:
             _save_index(state)
     teams = [
-        _team_to_compact_reference(item)
+        _team_to_compact_reference(item, compact_rooms_by_id=compact_rooms_by_id)
         for item in list(state.get("teams") or [])
         if isinstance(item, dict) and (include_archived or str(item.get("status") or DEFAULT_TEAM_STATUS) != "archived")
     ]
@@ -295,12 +301,21 @@ def ensure_evolution_system_teams() -> dict[str, Any]:
     """Ensure self-evolution and supervised-evolution roles are visible as Teams."""
 
     ensured_agents = _ensure_evolution_system_agents()
+    agent_refs = _merged_agent_reference_maps(
+        _load_lightweight_agent_references(),
+        [agent for agents in ensured_agents.values() for agent in list(agents or []) if isinstance(agent, dict)],
+    )
     teams: list[dict[str, Any]] = []
     with _TEAM_LOCK:
         state = _load_index()
-        changed = _repair_index_state(state)
+        changed = _repair_index_state(state, agent_refs=agent_refs)
         for spec in EVOLUTION_SYSTEM_TEAM_SPECS:
-            team, team_changed = _ensure_evolution_system_team_in_state(state, spec, ensured_agents)
+            team, team_changed = _ensure_evolution_system_team_in_state(
+                state,
+                spec,
+                ensured_agents,
+                agent_refs=agent_refs,
+            )
             changed = changed or team_changed
             if team:
                 teams.append(dict(team))
@@ -317,17 +332,24 @@ def ensure_evolution_system_teams() -> dict[str, Any]:
 def get_team(team_id: str) -> dict[str, Any]:
     started_at = _perf_counter()
     normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
+    agent_refs = _agent_reference_maps()
     with _TEAM_LOCK:
         state = _load_index()
         team = _find_team(state, normalized_team_id)
         if team is None:
             raise TeamNotFoundError("Team not found.")
-        changed = _repair_team(team)
-        changed = _repair_archived_team_member_agents_for_team(team, state, reason="get_team", strict=False) or changed
+        changed = _repair_team(team, agent_refs=agent_refs)
+        changed = _repair_archived_team_member_agents_for_team(
+            team,
+            state,
+            reason="get_team",
+            strict=False,
+            agent_refs=agent_refs,
+        ) or changed
         if changed:
             state["updatedAt"] = utc_now_iso()
             _save_index(state)
-    detail = _team_detail_to_api(team)
+    detail = _team_detail_to_api(team, agent_refs=agent_refs)
     _record_team_detail_loaded(detail, started_at)
     return detail
 
@@ -373,6 +395,91 @@ def update_team(
         _save_index(state)
     _record_team_event("team.updated", team, fields={"memberCount": len(team.get("members") or [])})
     return get_team(normalized_team_id)
+
+
+def remove_agent_from_teams(agent_id: str) -> dict[str, Any]:
+    """Remove one unavailable Agent from active Team membership and linked rooms."""
+
+    normalized_agent_id = str(agent_id or "").strip()
+    if not normalized_agent_id:
+        raise TeamServiceError("Agent id is required.")
+    changed_team_ids: list[str] = []
+    with _TEAM_LOCK:
+        state = _load_index()
+        teams = [item for item in list(state.get("teams") or []) if isinstance(item, dict)]
+        now = utc_now_iso()
+        for team in teams:
+            if str(team.get("status") or DEFAULT_TEAM_STATUS).strip() == "archived":
+                continue
+            members = [dict(item) for item in list(team.get("members") or []) if isinstance(item, dict)]
+            next_members = [
+                member
+                for member in members
+                if str(member.get("agentId") or "").strip() != normalized_agent_id
+            ]
+            if next_members == members:
+                continue
+            team["members"] = next_members
+            team["updatedAt"] = now
+            team["canvasPath"] = _relative_path(_team_canvas_path(str(team.get("teamId") or "").strip()))
+            _remove_agent_from_team_canvas(team, normalized_agent_id)
+            _sync_chat_room_root()
+            _ensure_team_chat_room_link(team)
+            changed_team_ids.append(str(team.get("teamId") or "").strip())
+        if changed_team_ids:
+            state["updatedAt"] = now
+            _save_index(state)
+    for team_id in changed_team_ids:
+        _record_team_event(
+            "team.agent_membership.removed",
+            {"teamId": team_id, "status": DEFAULT_TEAM_STATUS},
+            fields={"agentId": normalized_agent_id},
+        )
+    return {
+        "agentId": normalized_agent_id,
+        "changedTeamIds": changed_team_ids,
+    }
+
+
+def _remove_agent_from_team_canvas(team: dict[str, Any], agent_id: str) -> None:
+    team_id = str(team.get("teamId") or "").strip()
+    normalized_agent_id = str(agent_id or "").strip()
+    if not team_id or not normalized_agent_id:
+        return
+    canvas_path = _team_canvas_path(team_id)
+    raw = _read_json(canvas_path) if canvas_path.exists() else _default_canvas_for_team(team)
+    if not isinstance(raw, dict):
+        raw = _default_canvas_for_team(team)
+    removed_node_ids = {
+        str(node.get("id") or "").strip()
+        for node in list(raw.get("nodes") or [])
+        if isinstance(node, dict) and str(node.get("agentId") or "").strip() == normalized_agent_id
+    }
+    nodes = [
+        dict(node)
+        for node in list(raw.get("nodes") or [])
+        if isinstance(node, dict) and str(node.get("agentId") or "").strip() != normalized_agent_id
+    ]
+    if not nodes:
+        nodes = _default_nodes_for_members(team.get("members") or [])
+    edges = [
+        dict(edge)
+        for edge in list(raw.get("edges") or [])
+        if isinstance(edge, dict)
+        and str(edge.get("source") or "").strip() not in removed_node_ids
+        and str(edge.get("target") or "").strip() not in removed_node_ids
+    ]
+    canvas = {
+        **raw,
+        "schemaVersion": SCHEMA_VERSION,
+        "canvasKind": CANVAS_KIND,
+        "teamId": team_id,
+        "updatedAt": str(team.get("updatedAt") or utc_now_iso()),
+        "path": _relative_path(canvas_path),
+        "nodes": nodes,
+        "edges": edges,
+    }
+    _write_json(canvas_path, canvas)
 
 
 def archive_team(team_id: str) -> dict[str, Any]:
@@ -472,22 +579,23 @@ def send_team_message(
 
 def sync_team_chat_room(team_id: str) -> dict[str, Any]:
     normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
+    agent_refs = _agent_reference_maps()
     with _TEAM_LOCK:
         state = _load_index()
         team = _find_team(state, normalized_team_id)
         if team is None:
             raise TeamNotFoundError("Team not found.")
-        if _repair_team(team):
+        if _repair_team(team, agent_refs=agent_refs):
             state["updatedAt"] = utc_now_iso()
-        _ensure_team_chat_room_link(team)
+        _ensure_team_chat_room_link(team, agent_refs=agent_refs)
         state["updatedAt"] = team["updatedAt"]
         _save_index(state)
     return get_team(normalized_team_id)
 
 
 def get_team_canvas(team_id: str) -> dict[str, Any]:
-    team = _get_team_record(team_id)
     agent_refs = _agent_reference_maps()
+    team = _get_team_record(team_id, agent_refs=agent_refs)
     return _team_canvas_with_validation(
         team,
         agents_by_id=agent_refs["by_id"],
@@ -516,9 +624,15 @@ def _team_canvas_with_validation(
 
 
 def save_team_canvas(team_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    agent_refs = _agent_reference_maps()
     team = get_team(team_id)
-    canvas = _normalize_canvas(payload, team)
-    validation = _validate_canvas(canvas, team_id=team["teamId"])
+    canvas = _normalize_canvas(
+        payload,
+        team,
+        agents_by_id=agent_refs["by_id"],
+        active_agents_by_id=agent_refs["active_by_id"],
+    )
+    validation = _validate_canvas(canvas, team_id=team["teamId"], active_agents_by_id=agent_refs["active_by_id"])
     if not validation["valid"]:
         raise TeamServiceError(_format_validation_error(validation))
     canvas["updatedAt"] = utc_now_iso()
@@ -533,7 +647,7 @@ def save_team_canvas(team_id: str, payload: dict[str, Any]) -> dict[str, Any]:
             stored["updatedAt"] = canvas["updatedAt"]
             stored["canvasPath"] = _relative_path(_team_canvas_path(team["teamId"]))
             stored["members"] = next_members
-            _ensure_team_chat_room_link(stored)
+            _ensure_team_chat_room_link(stored, agent_refs=agent_refs)
             state["updatedAt"] = canvas["updatedAt"]
             _save_index(state)
     _record_team_event(
@@ -801,6 +915,8 @@ def _ensure_evolution_system_team_in_state(
     state: dict[str, Any],
     spec: dict[str, str],
     ensured_agents: dict[str, list[dict[str, Any]]],
+    *,
+    agent_refs: dict[str, dict[str, dict[str, Any]]] | None = None,
 ) -> tuple[dict[str, Any] | None, bool]:
     team_id = str(spec.get("teamId") or "").strip()
     source = str(spec.get("source") or "").strip()
@@ -867,8 +983,8 @@ def _ensure_evolution_system_team_in_state(
     canvas_path = _team_canvas_path(team_id)
     if changed or not canvas_path.exists() or _default_canvas_edges_missing_for_team(team, canvas_path):
         _write_json(canvas_path, _default_canvas_for_team(team))
-    if _team_chat_room_needs_sync(team):
-        _ensure_team_chat_room_link(team)
+    if _team_chat_room_needs_sync(team, agent_refs=agent_refs):
+        _ensure_team_chat_room_link(team, agent_refs=agent_refs)
         changed = True
     if changed:
         _record_team_event(
@@ -956,7 +1072,11 @@ def _find_active_team_for_agent_in_state(state: dict[str, Any], agent_id: str, *
     return None
 
 
-def _unique_active_member_agent_ids(team: dict[str, Any]) -> list[str]:
+def _unique_active_member_agent_ids(
+    team: dict[str, Any],
+    *,
+    agent_refs: dict[str, dict[str, dict[str, Any]]] | None = None,
+) -> list[str]:
     agent_ids: list[str] = []
     seen: set[str] = set()
     for member in list(team.get("members") or []):
@@ -965,7 +1085,7 @@ def _unique_active_member_agent_ids(team: dict[str, Any]) -> list[str]:
         agent_id = str(member.get("agentId") or "").strip()
         if not agent_id or agent_id in seen:
             continue
-        agent = agent_directory_service.get_agent(agent_id, include_archived=True)
+        agent = _agent_reference(agent_id, include_archived=True, agent_refs=agent_refs)
         if not agent or str(agent.get("status") or "active").strip() == "archived":
             continue
         seen.add(agent_id)
@@ -996,20 +1116,39 @@ def _archive_team_member_agents(team: dict[str, Any], agent_ids: list[str], *, r
     return archived_agent_ids
 
 
-def _repair_archived_team_member_agents(state: dict[str, Any], *, reason: str, strict: bool) -> bool:
+def _repair_archived_team_member_agents(
+    state: dict[str, Any],
+    *,
+    reason: str,
+    strict: bool,
+    agent_refs: dict[str, dict[str, dict[str, Any]]] | None = None,
+) -> bool:
     changed = False
     for team in list(state.get("teams") or []):
         if isinstance(team, dict):
-            changed = _repair_archived_team_member_agents_for_team(team, state, reason=reason, strict=strict) or changed
+            changed = _repair_archived_team_member_agents_for_team(
+                team,
+                state,
+                reason=reason,
+                strict=strict,
+                agent_refs=agent_refs,
+            ) or changed
     return changed
 
 
-def _repair_archived_team_member_agents_for_team(team: dict[str, Any], state: dict[str, Any], *, reason: str, strict: bool) -> bool:
+def _repair_archived_team_member_agents_for_team(
+    team: dict[str, Any],
+    state: dict[str, Any],
+    *,
+    reason: str,
+    strict: bool,
+    agent_refs: dict[str, dict[str, dict[str, Any]]] | None = None,
+) -> bool:
     if str(team.get("status") or DEFAULT_TEAM_STATUS).strip() != "archived":
         return False
     if not _team_kind_allows_member_agent_cascade(team):
         return False
-    agent_ids = _unique_active_member_agent_ids(team)
+    agent_ids = _unique_active_member_agent_ids(team, agent_refs=agent_refs)
     if not agent_ids:
         return False
     try:
@@ -1272,7 +1411,11 @@ def _research_member_function_label(item: dict[str, Any], agent: dict[str, Any])
     return trim_lines(item.get("role") or "科研协作", max_lines=1).strip()
 
 
-def _active_member_agent_ids(team: dict[str, Any]) -> list[str]:
+def _active_member_agent_ids(
+    team: dict[str, Any],
+    *,
+    agent_refs: dict[str, dict[str, dict[str, Any]]] | None = None,
+) -> list[str]:
     ids: list[str] = []
     seen: set[str] = set()
     for member in list(team.get("members") or []):
@@ -1281,18 +1424,22 @@ def _active_member_agent_ids(team: dict[str, Any]) -> list[str]:
         agent_id = str(member.get("agentId") or "").strip()
         if not agent_id or agent_id in seen:
             continue
-        if not agent_directory_service.get_agent(agent_id, include_archived=False):
+        if not _agent_reference(agent_id, include_archived=False, agent_refs=agent_refs):
             continue
         seen.add(agent_id)
         ids.append(agent_id)
     return ids
 
 
-def _active_member_session_ids(team: dict[str, Any]) -> list[str]:
+def _active_member_session_ids(
+    team: dict[str, Any],
+    *,
+    agent_refs: dict[str, dict[str, dict[str, Any]]] | None = None,
+) -> list[str]:
     session_ids: list[str] = []
     seen: set[str] = set()
-    for agent_id in _active_member_agent_ids(team):
-        agent = agent_directory_service.get_agent(agent_id, include_archived=False)
+    for agent_id in _active_member_agent_ids(team, agent_refs=agent_refs):
+        agent = _agent_reference(agent_id, include_archived=False, agent_refs=agent_refs)
         session_id = str((agent or {}).get("directSessionId") or "").strip()
         if not session_id or session_id in seen:
             continue
@@ -1306,7 +1453,11 @@ def _team_chat_room_title(team: dict[str, Any]) -> str:
     return f"{name} 团队群聊"
 
 
-def _team_participant_contexts_by_agent_id(team: dict[str, Any]) -> dict[str, dict[str, Any]]:
+def _team_participant_contexts_by_agent_id(
+    team: dict[str, Any],
+    *,
+    agent_refs: dict[str, dict[str, dict[str, Any]]] | None = None,
+) -> dict[str, dict[str, Any]]:
     contexts: dict[str, dict[str, Any]] = {}
     team_id = str(team.get("teamId") or "").strip()
     team_name = str(team.get("name") or "").strip()
@@ -1317,7 +1468,7 @@ def _team_participant_contexts_by_agent_id(team: dict[str, Any]) -> dict[str, di
         agent_id = str(member.get("agentId") or "").strip()
         if not agent_id:
             continue
-        agent = agent_directory_service.get_agent(agent_id, include_archived=False) or {}
+        agent = _agent_reference(agent_id, include_archived=False, agent_refs=agent_refs) or {}
         metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
         responsibilities = []
         if isinstance(member.get("responsibilities"), list):
@@ -1420,10 +1571,14 @@ def _team_chat_room_purpose_for_update(team: dict[str, Any], current_purpose: An
     return normalized_current
 
 
-def _ensure_team_chat_room_link(team: dict[str, Any]) -> str:
+def _ensure_team_chat_room_link(
+    team: dict[str, Any],
+    *,
+    agent_refs: dict[str, dict[str, dict[str, Any]]] | None = None,
+) -> str:
     if str(team.get("status") or DEFAULT_TEAM_STATUS).strip() == "archived":
         return str(team.get("linkedChatRoomId") or "").strip()
-    session_ids = _active_member_session_ids(team)
+    session_ids = _active_member_session_ids(team, agent_refs=agent_refs)
     _sync_chat_room_root()
     linked_room_id = str(team.get("linkedChatRoomId") or "").strip()
     title = _team_chat_room_title(team)
@@ -1437,7 +1592,7 @@ def _ensure_team_chat_room_link(team: dict[str, Any]) -> str:
         "teamSource": str(team.get("teamSource") or TEAM_KIND_DEFAULTS["custom"]["teamSource"]).strip(),
         "teamTemplateId": str(team.get("teamTemplateId") or "").strip(),
     }
-    participant_contexts = _team_participant_contexts_by_agent_id(team)
+    participant_contexts = _team_participant_contexts_by_agent_id(team, agent_refs=agent_refs)
     linked_room = chat_room_service.get_chat_room_detail(linked_room_id) if linked_room_id else None
     if linked_room:
         room_config = {
@@ -1537,10 +1692,14 @@ def _archive_duplicate_team_chat_rooms(keep_room_id: str, team_id: str) -> None:
         )
 
 
-def _team_chat_room_needs_sync(team: dict[str, Any]) -> bool:
+def _team_chat_room_needs_sync(
+    team: dict[str, Any],
+    *,
+    agent_refs: dict[str, dict[str, dict[str, Any]]] | None = None,
+) -> bool:
     if str(team.get("status") or DEFAULT_TEAM_STATUS).strip() == "archived":
         return False
-    active_member_agent_ids = _active_member_agent_ids(team)
+    active_member_agent_ids = _active_member_agent_ids(team, agent_refs=agent_refs)
     linked_room_id = str(team.get("linkedChatRoomId") or "").strip()
     if not linked_room_id:
         return True
@@ -1572,7 +1731,11 @@ def _team_chat_room_needs_sync(team: dict[str, Any]) -> bool:
     return str(linked_room.get("purpose") or "").strip() != _team_chat_room_purpose_for_update(team, linked_room.get("purpose"))
 
 
-def _sync_compact_team_chat_room_metadata(team: dict[str, Any]) -> bool:
+def _sync_compact_team_chat_room_metadata(
+    team: dict[str, Any],
+    *,
+    compact_rooms_by_id: dict[str, dict[str, Any]] | None = None,
+) -> bool:
     if str(team.get("status") or DEFAULT_TEAM_STATUS).strip() == "archived":
         return False
     if _infer_team_kind(team) == "custom":
@@ -1580,8 +1743,11 @@ def _sync_compact_team_chat_room_metadata(team: dict[str, Any]) -> bool:
     linked_room_id = str(team.get("linkedChatRoomId") or "").strip()
     if not linked_room_id:
         return False
-    _sync_chat_room_root()
-    linked_room = chat_room_service.get_chat_room_compact(linked_room_id)
+    if compact_rooms_by_id is None:
+        _sync_chat_room_root()
+        linked_room = chat_room_service.get_chat_room_compact(linked_room_id)
+    else:
+        linked_room = compact_rooms_by_id.get(linked_room_id)
     if not linked_room:
         return False
     next_purpose = _team_chat_room_purpose_for_update(team, linked_room.get("purpose"))
@@ -1612,11 +1778,15 @@ def _sync_compact_team_chat_room_metadata(team: dict[str, Any]) -> bool:
     return True
 
 
-def _team_to_api(team: dict[str, Any]) -> dict[str, Any]:
+def _team_to_api(
+    team: dict[str, Any],
+    *,
+    agent_refs: dict[str, dict[str, dict[str, Any]]] | None = None,
+) -> dict[str, Any]:
     repaired = dict(team)
-    _repair_team(repaired)
+    _repair_team(repaired, agent_refs=agent_refs)
     repaired["members"] = _members_to_api(repaired.get("members"))
-    canvas_summary = _canvas_summary_for_team(repaired)
+    canvas_summary = _canvas_summary_for_team(repaired, agent_refs=agent_refs)
     linked_room_id = str(repaired.get("linkedChatRoomId") or "").strip()
     _sync_chat_room_root()
     linked_room = chat_room_service.get_chat_room_compact(linked_room_id) if linked_room_id else None
@@ -1634,14 +1804,21 @@ def _team_to_api(team: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _team_to_compact_reference(team: dict[str, Any]) -> dict[str, Any]:
+def _team_to_compact_reference(
+    team: dict[str, Any],
+    *,
+    compact_rooms_by_id: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     repaired = dict(team)
     _apply_team_contract(repaired)
     team_id = _safe_token(team.get("teamId"), default="", max_length=96)
     members = _members_to_api(repaired.get("members"))
     linked_room_id = str(repaired.get("linkedChatRoomId") or "").strip()
-    _sync_chat_room_root()
-    linked_room = chat_room_service.get_chat_room_compact(linked_room_id) if linked_room_id else None
+    if compact_rooms_by_id is None:
+        _sync_chat_room_root()
+        linked_room = chat_room_service.get_chat_room_compact(linked_room_id) if linked_room_id else None
+    else:
+        linked_room = compact_rooms_by_id.get(linked_room_id) if linked_room_id else None
     return {
         "teamId": team_id,
         "name": str(repaired.get("name") or team_id or "Team").strip(),
@@ -1686,10 +1863,14 @@ def _team_to_graph_reference(team: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _team_detail_to_api(team: dict[str, Any]) -> dict[str, Any]:
-    agent_refs = _agent_reference_maps()
+def _team_detail_to_api(
+    team: dict[str, Any],
+    *,
+    agent_refs: dict[str, dict[str, dict[str, Any]]] | None = None,
+) -> dict[str, Any]:
+    agent_refs = agent_refs or _agent_reference_maps()
     return {
-        **_team_to_api_without_canvas_summary(team),
+        **_team_to_api_without_canvas_summary(team, agent_refs=agent_refs),
         "canvas": _team_canvas_with_validation(
             team,
             agents_by_id=agent_refs["by_id"],
@@ -1698,9 +1879,13 @@ def _team_detail_to_api(team: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _team_to_api_without_canvas_summary(team: dict[str, Any]) -> dict[str, Any]:
+def _team_to_api_without_canvas_summary(
+    team: dict[str, Any],
+    *,
+    agent_refs: dict[str, dict[str, dict[str, Any]]] | None = None,
+) -> dict[str, Any]:
     repaired = dict(team)
-    _repair_team(repaired)
+    _repair_team(repaired, agent_refs=agent_refs)
     repaired["members"] = _members_to_api(repaired.get("members"))
     team_id = str(repaired.get("teamId") or "").strip()
     linked_room_id = str(repaired.get("linkedChatRoomId") or "").strip()
@@ -1745,26 +1930,34 @@ def _members_to_api(members: Any) -> list[dict[str, Any]]:
     return result
 
 
-def _get_team_record(team_id: str) -> dict[str, Any]:
+def _get_team_record(
+    team_id: str,
+    *,
+    agent_refs: dict[str, dict[str, dict[str, Any]]] | None = None,
+) -> dict[str, Any]:
     normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
     with _TEAM_LOCK:
         state = _load_index()
         team = _find_team(state, normalized_team_id)
         if team is None:
             raise TeamNotFoundError("Team not found.")
-        if _repair_team(team):
+        if _repair_team(team, agent_refs=agent_refs):
             state["updatedAt"] = utc_now_iso()
             _save_index(state)
         return dict(team)
 
 
-def _canvas_summary_for_team(team: dict[str, Any]) -> dict[str, Any]:
+def _canvas_summary_for_team(
+    team: dict[str, Any],
+    *,
+    agent_refs: dict[str, dict[str, dict[str, Any]]] | None = None,
+) -> dict[str, Any]:
     team_id = str(team.get("teamId") or "").strip()
     if not team_id:
         return {"path": "", "nodeCount": 0, "edgeCount": 0, "validation": _validate_canvas({"nodes": [], "edges": []}, team_id=team_id)}
     canvas_path = _team_canvas_path(team_id)
     raw = _read_json(canvas_path) if canvas_path.exists() else {}
-    agent_refs = _agent_reference_maps()
+    agent_refs = agent_refs or _agent_reference_maps()
     try:
         canvas = _normalize_canvas(
             raw or _default_canvas_for_team(team),
@@ -1800,10 +1993,46 @@ def _canvas_path_summary(team: dict[str, Any], *, team_id: str = "") -> dict[str
 
 
 def _agent_reference_maps() -> dict[str, dict[str, dict[str, Any]]]:
+    agents = _load_lightweight_agent_references()
+    return _agent_reference_maps_from_agents(agents)
+
+
+def _load_lightweight_agent_references() -> list[dict[str, Any]]:
+    """Read Agent identity fields without running Agent repair or API hydration."""
+
+    path = _project_root() / "workspace" / "agents" / "agents.json"
+    if not path.exists():
+        return []
     try:
-        agents = agent_directory_service.list_agents(include_archived=True)
-    except Exception:
-        agents = []
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    if not isinstance(payload, dict):
+        return []
+    agents: list[dict[str, Any]] = []
+    for item in list(payload.get("agents") or []):
+        if not isinstance(item, dict):
+            continue
+        agent_id = str(item.get("agentId") or "").strip()
+        if not agent_id:
+            continue
+        metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+        agents.append(
+            {
+                "agentId": agent_id,
+                "agentCode": str(item.get("agentCode") or "").strip(),
+                "displayName": str(item.get("displayName") or "").strip(),
+                "directSessionId": str(item.get("directSessionId") or "").strip(),
+                "status": str(item.get("status") or "active").strip() or "active",
+                "metadata": dict(metadata),
+                "createdAt": str(item.get("createdAt") or "").strip(),
+                "updatedAt": str(item.get("updatedAt") or "").strip(),
+            }
+        )
+    return agents
+
+
+def _agent_reference_maps_from_agents(agents: list[dict[str, Any]]) -> dict[str, dict[str, dict[str, Any]]]:
     by_id: dict[str, dict[str, Any]] = {}
     active_by_id: dict[str, dict[str, Any]] = {}
     for agent in agents:
@@ -1819,7 +2048,39 @@ def _agent_reference_maps() -> dict[str, dict[str, dict[str, Any]]]:
     return {"by_id": by_id, "active_by_id": active_by_id}
 
 
-def _repair_index_state(state: dict[str, Any]) -> bool:
+def _merged_agent_reference_maps(*agent_groups: list[dict[str, Any]]) -> dict[str, dict[str, dict[str, Any]]]:
+    merged: dict[str, dict[str, Any]] = {}
+    for agents in agent_groups:
+        for agent in list(agents or []):
+            if not isinstance(agent, dict):
+                continue
+            agent_id = str(agent.get("agentId") or "").strip()
+            if agent_id:
+                merged[agent_id] = dict(agent)
+    return _agent_reference_maps_from_agents(list(merged.values()))
+
+
+def _agent_reference(
+    agent_id: str,
+    *,
+    include_archived: bool,
+    agent_refs: dict[str, dict[str, dict[str, Any]]] | None = None,
+) -> dict[str, Any] | None:
+    normalized_agent_id = str(agent_id or "").strip()
+    if not normalized_agent_id:
+        return None
+    if agent_refs is not None:
+        key = "by_id" if include_archived else "active_by_id"
+        agent = (agent_refs.get(key) or {}).get(normalized_agent_id)
+        return dict(agent) if isinstance(agent, dict) else None
+    return agent_directory_service.get_agent(normalized_agent_id, include_archived=include_archived)
+
+
+def _repair_index_state(
+    state: dict[str, Any],
+    *,
+    agent_refs: dict[str, dict[str, dict[str, Any]]] | None = None,
+) -> bool:
     changed = False
     if state.get("schemaVersion") != SCHEMA_VERSION:
         state["schemaVersion"] = SCHEMA_VERSION
@@ -1829,7 +2090,7 @@ def _repair_index_state(state: dict[str, Any]) -> bool:
         changed = True
     for team in state.get("teams") or []:
         if isinstance(team, dict):
-            changed = _repair_team(team) or changed
+            changed = _repair_team(team, agent_refs=agent_refs) or changed
     return changed
 
 
@@ -1844,17 +2105,25 @@ def _repair_index_shape(state: dict[str, Any]) -> bool:
     return changed
 
 
-def _repair_index_compact_contracts(state: dict[str, Any]) -> bool:
+def _repair_index_compact_contracts(
+    state: dict[str, Any],
+    *,
+    compact_rooms_by_id: dict[str, dict[str, Any]] | None = None,
+) -> bool:
     changed = _repair_index_shape(state)
     for team in state.get("teams") or []:
         if not isinstance(team, dict):
             continue
-        if _repair_team_contract_only(team):
+        if _repair_team_contract_only(team, compact_rooms_by_id=compact_rooms_by_id):
             changed = True
     return changed
 
 
-def _repair_team_contract_only(team: dict[str, Any]) -> bool:
+def _repair_team_contract_only(
+    team: dict[str, Any],
+    *,
+    compact_rooms_by_id: dict[str, dict[str, Any]] | None = None,
+) -> bool:
     changed = False
     team_id = _safe_token(team.get("teamId"), default="", max_length=96)
     if team.get("teamId") != team_id:
@@ -1869,12 +2138,16 @@ def _repair_team_contract_only(team: dict[str, Any]) -> bool:
         changed = True
     if _apply_team_contract(team):
         changed = True
-    if _sync_compact_team_chat_room_metadata(team):
+    if _sync_compact_team_chat_room_metadata(team, compact_rooms_by_id=compact_rooms_by_id):
         changed = True
     return changed
 
 
-def _repair_team(team: dict[str, Any]) -> bool:
+def _repair_team(
+    team: dict[str, Any],
+    *,
+    agent_refs: dict[str, dict[str, dict[str, Any]]] | None = None,
+) -> bool:
     changed = False
     team_id = _safe_token(team.get("teamId"), default="", max_length=96)
     if team.get("teamId") != team_id:
@@ -1896,17 +2169,21 @@ def _repair_team(team: dict[str, Any]) -> bool:
     if _apply_team_contract(team):
         changed = True
     members = team.get("members") if isinstance(team.get("members"), list) else []
-    repaired_members = _repair_members(members)
+    repaired_members = _repair_members(members, agent_refs=agent_refs)
     if repaired_members != members:
         team["members"] = repaired_members
         changed = True
-    if _team_chat_room_needs_sync(team):
-        _ensure_team_chat_room_link(team)
+    if _team_chat_room_needs_sync(team, agent_refs=agent_refs):
+        _ensure_team_chat_room_link(team, agent_refs=agent_refs)
         changed = True
     return changed
 
 
-def _repair_members(members: list[Any]) -> list[dict[str, Any]]:
+def _repair_members(
+    members: list[Any],
+    *,
+    agent_refs: dict[str, dict[str, dict[str, Any]]] | None = None,
+) -> list[dict[str, Any]]:
     repaired: list[dict[str, Any]] = []
     seen: set[str] = set()
     for index, item in enumerate(members):
@@ -1916,8 +2193,8 @@ def _repair_members(members: list[Any]) -> list[dict[str, Any]]:
         if not agent_id or agent_id in seen:
             continue
         seen.add(agent_id)
-        agent = agent_directory_service.get_agent(agent_id, include_archived=True)
-        active = agent_directory_service.get_agent(agent_id, include_archived=False) if agent_id else None
+        agent = _agent_reference(agent_id, include_archived=True, agent_refs=agent_refs)
+        active = _agent_reference(agent_id, include_archived=False, agent_refs=agent_refs) if agent_id else None
         repaired.append(
             {
                 "memberId": _safe_token(item.get("memberId"), default=f"member-{index + 1}", max_length=96),
