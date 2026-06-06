@@ -599,7 +599,7 @@ def _agent_options() -> list[dict[str, Any]]:
             "displayName": str(agent.get("displayName") or "").strip(),
             "primaryMode": str(agent.get("primaryMode") or "general").strip() or "general",
             "roleKey": str(agent.get("roleKey") or "").strip(),
-            "profileId": str(agent.get("profileId") or "").strip(),
+            "llmBindings": dict(agent.get("llmBindings") or {}) if isinstance(agent.get("llmBindings"), dict) else {},
             "promptTemplateId": str(agent.get("promptTemplateId") or "").strip(),
             "directSessionId": str(agent.get("directSessionId") or "").strip(),
             "metadata": dict(agent.get("metadata") or {}) if isinstance(agent.get("metadata"), dict) else {},

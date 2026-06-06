@@ -260,6 +260,7 @@ def test_create_chat_room_defaults_to_existing_sessions(tmp_path, monkeypatch):
     _seed_chat_sessions(tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
 
     room = chat_room_service.create_chat_room(title="方案群聊")
 
@@ -374,9 +375,11 @@ def test_team_case_orchestration_keeps_heletech_health_case_in_intake_phase(tmp_
         },
     )
     captured_prompts = []
+    captured_roles = []
 
     def fake_runner(participant, prompt, context):
         captured_prompts.append(prompt)
+        captured_roles.append(participant["teamRole"])
         return {
             "status": "completed",
             "raw_output": f"{participant['teamRole']} 先补齐关键信息。",
@@ -399,6 +402,8 @@ def test_team_case_orchestration_keeps_heletech_health_case_in_intake_phase(tmp_
     assert "伴随症状" in case_state["missingFacts"]
     assert latest_round["messages"][0]["participantId"] == f"session-{sessions[0]['id']}"
     assert latest_round["messages"][0]["content"] == "方案主持 先补齐关键信息。"
+    assert captured_roles == ["方案主持"]
+    assert [message["speakerTitle"] for message in latest_round["messages"]]
     assert latest_round["messages"][0]["messageKind"] == "user_clarification"
     assert latest_round["messages"][0]["audience"] == "user"
     assert len(captured_prompts) == 1
@@ -689,6 +694,7 @@ def test_chat_room_disables_missing_agent_participants(tmp_path, monkeypatch):
     _seed_chat_sessions(tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     recorded_room_events = []
     recorded_session_events = []
     monkeypatch.setattr(
@@ -710,6 +716,7 @@ def test_chat_room_disables_missing_agent_participants(tmp_path, monkeypatch):
     state["conversations"][0]["agent_id"] = "agent-missing"
     state["conversations"][0]["agentId"] = "agent-missing"
     save_chat_state(tmp_path, state)
+    session_service._invalidate_session_list_cache()
     room_state = chat_room_service._store().load()
     stored_room = next(item for item in room_state["rooms"] if item["roomId"] == room["roomId"])
     stored_room["participants"][0]["agentId"] = "agent-missing"
@@ -727,13 +734,13 @@ def test_chat_room_disables_missing_agent_participants(tmp_path, monkeypatch):
     assert participant["enabled"] is False
     hidden_events = [
         event for event in recorded_session_events
-        if event[0][2] == "session.agent_missing.hidden_from_index"
+        if event[0][2] == "session.agent_missing.hidden_from_index.batch"
     ]
     assert hidden_events
-    assert hidden_events[-1][1]["fields"]["sessionId"] == "session-alpha"
-    assert hidden_events[-1][1]["fields"]["agentId"] == "agent-missing"
-    assert hidden_events[-1][1]["fields"]["agentStatusCode"] == "missing_agent"
-    assert hidden_events[-1][1]["child_log_path"] == "conversations/session-alpha-agent-bindings.jsonl"
+    assert hidden_events[-1][1]["fields"]["hiddenCount"] == 1
+    assert hidden_events[-1][1]["fields"]["sampleSessions"][0]["sessionId"] == "session-alpha"
+    assert hidden_events[-1][1]["fields"]["sampleSessions"][0]["agentId"] == "agent-missing"
+    assert hidden_events[-1][1]["fields"]["sampleSessions"][0]["agentStatusCode"] == "missing_agent"
     room_missing_events = [
         event for event in recorded_room_events
         if event[0][2] == "chat_room.participant_agent_missing"

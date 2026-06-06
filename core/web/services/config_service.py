@@ -16,15 +16,14 @@ import httpx
 
 import config.public_config as public_config_module
 from config import LLMProfile, ProviderConfig
+from config.models import PROVIDER_API_KEY_ENV_ALIASES, _read_env_var, get_provider_api_key_env
 from core.chat.chat_task_types import trim_lines
 from core.llm.protocol_resolver import resolve_model_protocol
 from config.public_config import (
     CONFIG_PATH,
-    UNCONFIGURED_MODEL_REF,
     _delete_user_env_var,
     _set_user_env_var,
     add_llm_model,
-    add_llm_profile,
     apply_llm_model_preset,
     build_effective_config,
     delete_llm_model,
@@ -166,6 +165,17 @@ def _normalize_llm_test_capability(capability: str | None) -> str:
 
 def _resolve_workspace_language(public_config: dict[str, Any]) -> str:
     return resolve_language(public_config.get("ui", {}).get("language", "zh"))
+
+
+def _profile_label(profile_id: str, lang: str, profile: dict[str, Any] | None = None) -> str:
+    configured_label = str((profile or {}).get("label", "") or "").strip() if isinstance(profile, dict) else ""
+    if configured_label:
+        return configured_label
+    mapping = PROFILE_LABELS.get(str(profile_id).strip())
+    if mapping:
+        return text_for(lang, zh=mapping["zh"], en=mapping["en"])
+    token = str(profile_id or "").strip().replace("_", " ")
+    return token.title() if lang == "en" else token
 
 
 def _config_sections(lang: str, editor_sections: list[dict[str, Any]] | None = None) -> list[dict[str, str]]:
@@ -445,119 +455,41 @@ def _api_key_display_state(api_key_env: str, configured: bool, draft_meta: dict 
     return configured, "configured" if configured else "missing"
 
 
-def _profile_label(profile_id: str, lang: str, profile: dict[str, Any] | None = None) -> str:
-    configured_label = str((profile or {}).get("label", "") or "").strip() if isinstance(profile, dict) else ""
-    if configured_label:
-        return configured_label
-    mapping = PROFILE_LABELS.get(str(profile_id).strip())
-    if mapping:
-        return text_for(lang, zh=mapping["zh"], en=mapping["en"])
-    token = str(profile_id or "").strip().replace("_", " ")
-    return token.title() if lang == "en" else token
-
-
-def _provider_signature(provider: Any) -> str:
-    if not isinstance(provider, dict):
-        return ""
-    kind = str(provider.get("kind", "")).strip()
-    base_url = str(provider.get("base_url", "")).strip().rstrip("/")
-    api_key_env = str(provider.get("api_key_env", "")).strip()
-    compat_mode = str(provider.get("compat_mode", "")).strip()
-    return "|".join((kind, base_url, api_key_env, compat_mode))
-
-
-def _selected_model_option(public_config: dict[str, Any], profile: dict[str, Any]) -> dict[str, Any] | None:
-    model_ref = str(profile.get("model_ref", "")).strip()
-    options = list_llm_model_options(public_config)
-    if model_ref:
-        if model_ref == UNCONFIGURED_MODEL_REF:
-            return None
-        for option in options:
-            if str(option.get("model_id", "")).strip() == model_ref:
-                return option
-        return None
-
-    provider_signature = _provider_signature(profile.get("provider"))
-    model = str(profile.get("model", "")).strip()
-    if not provider_signature or not model:
-        return None
-    for option in options:
-        if _provider_signature(option.get("provider")) == provider_signature and str(option.get("model", "")).strip() == model:
-            return option
-    return None
-
-
-def _missing_required_llm_profiles(public_config: dict[str, Any]) -> list[str]:
-    llm = public_config.get("llm", {})
-    profiles = llm.get("profiles", {}) if isinstance(llm, dict) else {}
-    if not isinstance(profiles, dict):
-        return []
-    missing: list[str] = []
-    primary = profiles.get("primary")
-    if not isinstance(primary, dict) or _selected_model_option(public_config, primary) is None:
-        missing.append("primary")
-    return missing
-
-
-def _optional_unconfigured_llm_profiles(public_config: dict[str, Any]) -> list[str]:
-    llm = public_config.get("llm", {})
-    profiles = llm.get("profiles", {}) if isinstance(llm, dict) else {}
-    if not isinstance(profiles, dict):
-        return []
-    missing: list[str] = []
-    for profile_id, profile in profiles.items():
-        normalized_id = str(profile_id)
-        if normalized_id == "primary":
-            continue
-        if not isinstance(profile, dict) or _selected_model_option(public_config, profile) is None:
-            missing.append(normalized_id)
-    return missing
-
-
-def _validate_required_llm_profiles(public_config: dict[str, Any], lang: str) -> None:
-    missing = _missing_required_llm_profiles(public_config)
-    if not missing:
-        optional_missing = _optional_unconfigured_llm_profiles(public_config)
-        if optional_missing:
-            _record_config_scene_event(
-                "validate",
-                "config.llm_profiles.optional_missing_allowed",
-                message="Optional legacy LLM profiles are unconfigured but no longer block config apply.",
-                outcome="allowed",
-                fields={
-                    "legacyBindingCount": len(optional_missing),
-                    "legacyBindingIds": optional_missing[:20],
-                    "primaryRequired": True,
-                },
-                lifecycle=True,
-            )
-        return
-    profiles = public_config.get("llm", {}).get("profiles", {}) if isinstance(public_config.get("llm", {}), dict) else {}
-    display_names = " / ".join(
-        _profile_label(profile_id, lang, profiles.get(profile_id, {}) if isinstance(profiles, dict) else {})
-        for profile_id in missing
-    )
-    raise ValueError(
-        text_for(
-            lang,
-            zh=f"以下模型绑定还没有绑定可用模型：{display_names}",
-            en=f"These model bindings do not have a usable model bound yet: {display_names}",
-        )
-    )
-
-
 def _decorate_model_options(public_config: dict[str, Any], draft_meta: dict | None) -> list[dict[str, Any]]:
     options: list[dict[str, Any]] = []
     for option in list_llm_model_options(public_config):
-        api_key_env = str(option.get("api_key_env", "")).strip()
-        configured = bool(option.get("api_key_configured", False))
-        resolved_configured, state = _api_key_display_state(api_key_env, configured, draft_meta)
         decorated = copy.deepcopy(option)
         details = decorated.get("details") if isinstance(decorated.get("details"), dict) else {}
         provider = decorated.get("provider") if isinstance(decorated.get("provider"), dict) else {}
+        api_key_env = str(option.get("api_key_env", "") or details.get("api_key_env", "")).strip()
+        option_provider = ProviderConfig.model_validate(
+            {
+                **copy.deepcopy(provider),
+                "provider_id": _model_option_provider_id(str(option.get("model_id") or "")),
+            }
+        )
+        option_profile = LLMProfile.model_validate(
+            {
+                **copy.deepcopy(details),
+                "profile_id": _model_probe_route_id(str(option.get("model_id") or "")),
+                "provider_id": option_provider.provider_id,
+                "model": str(option.get("model") or "").strip(),
+                "api_key_env": api_key_env,
+            }
+        )
+        resolved_api_key, api_key_source = _resolve_model_option_api_key(option_provider, option_profile, draft_meta)
+        resolved_configured, state = _api_key_display_state(
+            api_key_env,
+            bool(resolved_api_key) or bool(option.get("api_key_configured", False)),
+            draft_meta,
+        )
+        if option_provider.requires_api_key and not resolved_api_key and not str(api_key_source or "").startswith(("pending-clear:", "pending-env:")):
+            state = "missing"
+            resolved_configured = False
         protocol_route = _model_option_protocol_route_summary(decorated, details)
         decorated["api_key_configured"] = resolved_configured
         decorated["api_key_state"] = state
+        decorated["api_key_source"] = api_key_source
         decorated["provider_api"] = str(decorated.get("provider_api") or provider.get("api") or "").strip().lower().replace("_", "-")
         decorated["protocol"] = str(decorated.get("protocol") or details.get("protocol") or "").strip().lower()
         decorated["compat"] = copy.deepcopy(decorated.get("compat") if isinstance(decorated.get("compat"), dict) else details.get("compat") if isinstance(details.get("compat"), dict) else {})
@@ -595,39 +527,93 @@ def _image_input_capability_result_details(result: dict[str, Any]) -> dict[str, 
     return details
 
 
-def _model_option_probe_profile(option: dict[str, Any]) -> dict[str, Any]:
-    profile: dict[str, Any] = {
-        "provider": copy.deepcopy(option.get("provider") or {}),
-        "model": str(option.get("model") or "").strip(),
-        "api_key_env": str(option.get("api_key_env") or "").strip(),
-    }
-    details = option.get("details") if isinstance(option.get("details"), dict) else {}
-    for key in public_config_module.MODEL_LIBRARY_DETAIL_FIELDS:
-        if key == "api_key_env":
-            continue
-        if key in details:
-            profile[key] = copy.deepcopy(details[key])
-    return profile
-
-
-def _capability_probe_profile_id(model_id: str) -> str:
+def _model_probe_route_id(model_id: str) -> str:
     safe = "".join(ch if ch.isalnum() else "_" for ch in str(model_id or "").strip().lower()).strip("_")
-    return f"__capability_probe_{safe or 'model'}"
+    return f"__model_probe_{safe or 'model'}"
 
 
-def _public_config_for_model_capability_probe(public_config: dict[str, Any], option: dict[str, Any]) -> tuple[dict[str, Any], str]:
+def _model_option_provider_id(model_id: str) -> str:
+    safe = "".join(ch if ch.isalnum() else "_" for ch in str(model_id or "").strip().lower()).strip("_")
+    return f"__model_probe_provider_{safe or 'model'}"
+
+
+def _resolve_model_option_api_key(
+    provider: ProviderConfig,
+    profile: LLMProfile,
+    draft_meta: dict | None = None,
+) -> tuple[str | None, str]:
+    if not provider.requires_api_key:
+        return None, "not-required"
+    meta = _normalize_draft_meta(draft_meta)
+    pending = meta["pending_api_keys"]
+    cleared = meta["pending_cleared_api_keys"]
+    env_candidates = [
+        str(profile.api_key_env or "").strip(),
+        str(provider.api_key_env or "").strip(),
+    ]
+    canonical_env = get_provider_api_key_env(provider.kind)
+    if canonical_env:
+        env_candidates.append(canonical_env)
+    env_candidates.extend(PROVIDER_API_KEY_ENV_ALIASES.get(str(provider.kind or "").strip().lower(), []))
+    seen: set[str] = set()
+    for env_name in env_candidates:
+        env_name = str(env_name or "").strip()
+        if not env_name or env_name in seen:
+            continue
+        seen.add(env_name)
+        if isinstance(cleared, list) and env_name in cleared:
+            return None, f"pending-clear:{env_name}"
+        if isinstance(pending, dict) and env_name in pending:
+            pending_secret = _resolve_pending_api_key(env_name, pending[env_name])
+            if pending_secret is not None:
+                return pending_secret, f"pending-env:{env_name}"
+        value = _read_env_var(env_name)
+        if value:
+            if env_name == str(profile.api_key_env or "").strip():
+                return value, f"model-env:{env_name}"
+            return value, f"provider-env:{env_name}"
+    if provider.api_key:
+        return provider.api_key, "config-or-kwargs"
+    return None, "missing"
+
+
+def _model_option_test_target(
+    public_config: dict[str, Any],
+    option: dict[str, Any],
+    draft_meta: dict | None = None,
+) -> dict[str, Any]:
     model_id = str(option.get("model_id") or "").strip()
-    probe_profile_id = _capability_probe_profile_id(model_id)
-    probe_config = copy.deepcopy(public_config)
-    llm = probe_config.setdefault("llm", {})
-    profiles = llm.setdefault("profiles", {})
-    if not isinstance(profiles, dict):
-        raise ValueError("llm.profiles must be an object")
-    if str(option.get("source") or "").strip() == "model_library":
-        profiles[probe_profile_id] = {"model_ref": model_id}
-    else:
-        profiles[probe_profile_id] = _model_option_probe_profile(option)
-    return probe_config, probe_profile_id
+    if not model_id:
+        raise ValueError("modelId is required")
+    provider_input = option.get("provider") if isinstance(option.get("provider"), dict) else {}
+    details = option.get("details") if isinstance(option.get("details"), dict) else {}
+    provider_id = _model_option_provider_id(model_id)
+    route_id = _model_probe_route_id(model_id)
+    provider = ProviderConfig.model_validate(
+        {
+            **copy.deepcopy(provider_input),
+            "provider_id": provider_id,
+        }
+    )
+    profile_payload: dict[str, Any] = {
+        **copy.deepcopy(details),
+        "profile_id": route_id,
+        "provider_id": provider_id,
+        "model": str(option.get("model") or "").strip(),
+    }
+    api_key_env = str(option.get("api_key_env") or details.get("api_key_env") or "").strip()
+    if api_key_env:
+        profile_payload["api_key_env"] = api_key_env
+    profile = LLMProfile.model_validate(profile_payload)
+    api_key, api_key_source = _resolve_model_option_api_key(provider, profile, draft_meta)
+    return {
+        "model_id": model_id,
+        "route_id": route_id,
+        "provider": provider,
+        "profile": profile,
+        "api_key": api_key,
+        "api_key_source": api_key_source,
+    }
 
 
 def _apply_image_input_capability_result_to_config(
@@ -637,95 +623,40 @@ def _apply_image_input_capability_result_to_config(
 ) -> None:
     model_id = str(option.get("model_id") or "").strip()
     details = _image_input_capability_result_details(result)
-    source = str(option.get("source") or "").strip()
     llm = public_config.setdefault("llm", {})
-    if source == "model_library":
-        model_library = llm.setdefault("model_library", {})
-        if isinstance(model_library, dict) and isinstance(model_library.get(model_id), dict):
-            entry = model_library[model_id]
-            if "supports_image_input" in details:
-                entry["supports_image_input"] = details["supports_image_input"]
-            entry["capability_status"] = details["capability_status"]
-            entry["capability_source"] = details["capability_source"]
-            entry["capability_checked_at"] = details["capability_checked_at"]
-            if details.get("capability_error"):
-                entry["capability_error"] = details["capability_error"]
-            else:
-                entry.pop("capability_error", None)
-
-    profiles = llm.setdefault("profiles", {})
-    if not isinstance(profiles, dict):
+    model_library = llm.setdefault("model_library", {})
+    if not isinstance(model_library, dict) or not isinstance(model_library.get(model_id), dict):
         return
-    option_provider_signature = _provider_signature(option.get("provider"))
-    option_model = str(option.get("model") or "").strip()
-    for profile in profiles.values():
-        if not isinstance(profile, dict):
-            continue
-        selected = _selected_model_option(public_config, profile)
-        selected_id = str((selected or {}).get("model_id") or "").strip()
-        selected_signature = _provider_signature((selected or {}).get("provider") if selected else profile.get("provider"))
-        selected_model = str((selected or {}).get("model") or profile.get("model") or "").strip()
-        if selected_id != model_id and (selected_signature != option_provider_signature or selected_model != option_model):
-            continue
-        if "supports_image_input" in details:
-            profile["supports_image_input"] = details["supports_image_input"]
-        profile["capability_status"] = details["capability_status"]
-        profile["capability_source"] = details["capability_source"]
-        profile["capability_checked_at"] = details["capability_checked_at"]
-        if details.get("capability_error"):
-            profile["capability_error"] = details["capability_error"]
-        else:
-            profile.pop("capability_error", None)
+    entry = model_library[model_id]
+    if "supports_image_input" in details:
+        entry["supports_image_input"] = details["supports_image_input"]
+    entry["capability_status"] = details["capability_status"]
+    entry["capability_source"] = details["capability_source"]
+    entry["capability_checked_at"] = details["capability_checked_at"]
+    if details.get("capability_error"):
+        entry["capability_error"] = details["capability_error"]
+    else:
+        entry.pop("capability_error", None)
 
 
 def _run_draft_test_llm_connection(
     public_config: dict[str, Any],
-    profile_id: str | None = None,
+    *,
+    model_id: str,
+    route_id: str,
+    profile: LLMProfile,
+    provider: ProviderConfig,
+    api_key: str | None,
+    api_key_source: str,
     draft_meta: dict | None = None,
     capability: str | None = None,
 ) -> dict[str, Any]:
-    validate_llm_public_config(public_config)
-    effective = build_effective_config(public_config)
-    profile = effective.llm.get_profile(profile_id=profile_id) if profile_id else effective.llm.get_profile(role="primary")
-    provider = effective.llm.get_provider(profile.provider_id)
-    api_key = effective.get_api_key_for_profile(profile_id=profile.profile_id)
-    api_key_source = effective.llm.get_api_key_source_label_for_profile(profile_id=profile.profile_id)
-    if not provider.requires_api_key:
-        api_key = None
-        api_key_source = "not-required"
-    meta = _normalize_draft_meta(draft_meta)
-    pending = meta["pending_api_keys"]
-    cleared = meta["pending_cleared_api_keys"]
-    profile_public = (
-        public_config.get("llm", {}).get("profiles", {}).get(profile.profile_id, {})
-        if isinstance(public_config.get("llm", {}), dict)
-        else {}
-    )
-    profile_public = profile_public if isinstance(profile_public, dict) else {}
-    selected_option = _selected_model_option(public_config, profile_public) or {}
-    env_candidates = [
-        str(profile_public.get("api_key_env", "")).strip(),
-        str(selected_option.get("api_key_env", "")).strip(),
-        str(getattr(provider, "api_key_env", "") or "").strip(),
-    ]
-    if provider.requires_api_key:
-        for env_name in env_candidates:
-            if not env_name:
-                continue
-            if isinstance(cleared, list) and env_name in cleared:
-                api_key = None
-                api_key_source = f"pending-clear:{env_name}"
-                break
-            if isinstance(pending, dict) and env_name in pending:
-                pending_secret = _resolve_pending_api_key(env_name, pending[env_name])
-                if pending_secret is not None:
-                    api_key = pending_secret
-                    api_key_source = f"pending-env:{env_name}"
-                    break
     normalized_capability = _normalize_llm_test_capability(capability)
     if normalized_capability == "image_input":
         return _run_draft_test_llm_image_input(
             public_config,
+            model_id,
+            route_id,
             profile,
             provider,
             api_key,
@@ -745,8 +676,8 @@ def _run_draft_test_llm_connection(
             level="error",
             outcome="failed",
             fields={
-                "profileId": profile.profile_id,
-                "modelId": str((selected_option or {}).get("model_id") or "").strip(),
+                "routeId": route_id,
+                "modelId": model_id,
                 "providerId": provider.provider_id,
                 "providerKind": provider.kind,
                 "model": profile.model,
@@ -769,8 +700,8 @@ def _run_draft_test_llm_connection(
         level="info" if success else "warning",
         outcome="succeeded" if success else "failed",
         fields={
-            "profileId": profile.profile_id,
-            "modelId": str((selected_option or {}).get("model_id") or "").strip(),
+            "routeId": route_id,
+            "modelId": model_id,
             "providerId": provider.provider_id,
             "providerKind": provider.kind,
             "model": profile.model,
@@ -787,8 +718,8 @@ def _run_draft_test_llm_connection(
     )
     return {
         **result,
-        "profile_id": profile.profile_id,
-        "model_id": str((selected_option or {}).get("model_id") or "").strip(),
+        "route_id": route_id,
+        "model_id": model_id,
         "provider_id": provider.provider_id,
         "provider_kind": provider.kind,
         "base_url": provider.base_url,
@@ -845,6 +776,8 @@ def _image_input_probe_status(error_text: str) -> tuple[bool | None, str]:
 
 def _run_draft_test_llm_image_input(
     public_config: dict[str, Any],
+    model_id: str,
+    route_id: str,
     profile: Any,
     provider: Any,
     api_key: str | None,
@@ -890,7 +823,8 @@ def _run_draft_test_llm_image_input(
                 level="error",
                 outcome="failed",
                 fields={
-                    "profileId": profile.profile_id,
+                    "routeId": route_id,
+                    "modelId": model_id,
                     "providerId": provider.provider_id,
                     "providerKind": provider.kind,
                     "model": profile.model,
@@ -906,7 +840,8 @@ def _run_draft_test_llm_image_input(
             )
             return {
                 **result,
-                "profile_id": profile.profile_id,
+                "route_id": route_id,
+                "model_id": model_id,
                 "provider_id": provider.provider_id,
                 "provider_kind": provider.kind,
                 "base_url": provider.base_url,
@@ -978,7 +913,8 @@ def _run_draft_test_llm_image_input(
         level="info" if result.get("supports_image_input") is True else "warning",
         outcome="succeeded" if result.get("supports_image_input") is True else "failed",
         fields={
-            "profileId": profile.profile_id,
+            "routeId": route_id,
+            "modelId": model_id,
             "providerId": provider.provider_id,
             "providerKind": provider.kind,
             "model": profile.model,
@@ -996,7 +932,8 @@ def _run_draft_test_llm_image_input(
     )
     return {
         **result,
-        "profile_id": profile.profile_id,
+        "route_id": route_id,
+        "model_id": model_id,
         "provider_id": provider.provider_id,
         "provider_kind": provider.kind,
         "base_url": provider.base_url,
@@ -1327,41 +1264,10 @@ def draft_delete_model(
     )
 
 
-def draft_add_profile(
-    public_config: dict[str, Any] | None,
-    *,
-    draft_meta: dict | None = None,
-    base_hash: str = "",
-    profile_id: str,
-    source_profile_id: str = "primary",
-    model_id: str = "",
-) -> dict[str, Any]:
-    old_public = with_git_config_defaults(load_public_config())
-    current = _prepare_submitted_public_config(public_config, old_public)
-    validate_llm_public_config(current)
-    updated = add_llm_profile(
-        current,
-        profile_id,
-        source_profile_id=source_profile_id,
-        model_id=model_id,
-    )
-    return _build_workspace(
-        updated,
-        draft_meta=draft_meta,
-        base_hash=str(base_hash or public_config_hash(old_public)).strip(),
-        message=text_for(
-            _resolve_workspace_language(updated),
-            zh="模型绑定修改已更新，尚未保存到 config.toml。",
-            en="Model binding changes updated and not yet saved to config.toml.",
-        ),
-    )
-
-
 def run_draft_llm_test(
     public_config: dict[str, Any] | None,
     *,
     draft_meta: dict | None = None,
-    profile_id: str | None = None,
     model_id: str | None = None,
     capability: str | None = None,
 ) -> dict[str, Any]:
@@ -1369,17 +1275,23 @@ def run_draft_llm_test(
     submitted = _prepare_submitted_public_config(public_config, old_public)
     validate_llm_public_config(submitted)
     normalized_model_id = str(model_id or "").strip()
-    if normalized_model_id:
-        options = list_llm_model_options(submitted)
-        option = next((item for item in options if str(item.get("model_id") or "").strip() == normalized_model_id), None)
-        if option is None:
-            raise ValueError(f"unknown LLM model: {normalized_model_id}")
-        submitted, profile_id = _public_config_for_model_capability_probe(submitted, option)
+    if not normalized_model_id:
+        raise ValueError("modelId is required")
+    options = list_llm_model_options(submitted)
+    option = next((item for item in options if str(item.get("model_id") or "").strip() == normalized_model_id), None)
+    if option is None:
+        raise ValueError(f"unknown LLM model: {normalized_model_id}")
+    target = _model_option_test_target(submitted, option, draft_meta)
     return _run_draft_test_llm_connection(
         submitted,
-        profile_id,
-        _normalize_draft_meta(draft_meta),
-        capability,
+        model_id=target["model_id"],
+        route_id=target["route_id"],
+        profile=target["profile"],
+        provider=target["provider"],
+        api_key=target["api_key"],
+        api_key_source=target["api_key_source"],
+        draft_meta=_normalize_draft_meta(draft_meta),
+        capability=capability,
     )
 
 
@@ -1409,12 +1321,17 @@ def draft_check_model_image_input_capabilities(
     for option in options:
         model_id = str(option.get("model_id") or "").strip()
         try:
-            probe_config, probe_profile_id = _public_config_for_model_capability_probe(current, option)
+            target = _model_option_test_target(current, option, current_meta)
             result = _run_draft_test_llm_connection(
-                probe_config,
-                probe_profile_id,
-                current_meta,
-                "image_input",
+                current,
+                model_id=target["model_id"],
+                route_id=target["route_id"],
+                profile=target["profile"],
+                provider=target["provider"],
+                api_key=target["api_key"],
+                api_key_source=target["api_key_source"],
+                draft_meta=current_meta,
+                capability="image_input",
             )
         except Exception as exc:
             result = {
@@ -1781,7 +1698,6 @@ def apply_config_workspace(
     lang = _resolve_workspace_language(submitted)
     _assert_base_hash_matches(base_hash, old_public, lang)
     validate_llm_public_config(submitted)
-    _validate_required_llm_profiles(submitted, lang)
     build_effective_config(submitted)
     save_public_config(submitted)
 
@@ -1800,14 +1716,10 @@ def apply_config_workspace(
         _drop_pending_api_key_token(api_key)
 
     persisted = with_git_config_defaults(load_public_config())
-    runtime_config = reload_config(str(CONFIG_PATH))
-    primary_profile = runtime_config.llm.get_profile(role="primary")
-    primary_provider = runtime_config.llm.get_provider(primary_profile.provider_id)
-    primary_transport = (
-        primary_profile.transport
-        or getattr(primary_provider, "transport", "")
-        or ("responses" if primary_provider.kind == "relay" else "chat_completions")
-    )
+    reload_config(str(CONFIG_PATH))
+    llm_config = persisted.get("llm", {}) if isinstance(persisted.get("llm", {}), dict) else {}
+    model_library = llm_config.get("model_library", {}) if isinstance(llm_config, dict) else {}
+    model_options = list_llm_model_options(persisted)
     workspace = _build_workspace(
         persisted,
         message=text_for(
@@ -1831,10 +1743,9 @@ def apply_config_workspace(
             "clearedApiKeyEnvCount": len(cleared_envs),
             "clearedApiKeyEnvs": cleared_envs,
             "runtimeConfigReloaded": True,
-            "primaryProviderId": primary_profile.provider_id,
-            "primaryProviderKind": primary_provider.kind,
-            "primaryTransport": primary_transport,
-            "primaryModel": primary_profile.model,
+            "modelLibraryCount": len(model_library) if isinstance(model_library, dict) else 0,
+            "selectableModelCount": len(model_options),
+            "modelIds": [str(item.get("model_id") or "").strip() for item in model_options[:20]],
         },
         lifecycle=True,
     )
@@ -1845,7 +1756,6 @@ __all__ = [
     "ConfigConflictError",
     "apply_config_workspace",
     "draft_add_model",
-    "draft_add_profile",
     "draft_check_model_image_input_capabilities",
     "draft_delete_model",
     "draft_update_model",

@@ -93,12 +93,14 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(stylesSource).toContain(".sourceWarningStrip");
   });
 
-  it("keeps the latest finished supervised run visible when no active run remains", () => {
+  it("keeps the latest finished supervised run in the idle result instead of the live monitor", () => {
     expect(routeSource).toContain("queryKeys.evolutionWorkspaceSnapshot()");
     expect(routeSource).toContain('"/api/evolution/workspace-snapshot"');
     expect(routeSource).toContain("latestSupervisedRunSnapshot");
-    expect(routeSource).toContain("?? latestSupervisedRunSnapshot");
-    expect(routeSource).toContain("setLiveActiveRun(latestSupervisedRunSnapshot)");
+    expect(routeSource).toContain("const monitoredRun = effectiveActiveRunSnapshot");
+    expect(routeSource).toContain("?? visibleLiveRunSnapshot;");
+    expect(routeSource).not.toContain("?? latestSupervisedRunSnapshot");
+    expect(routeSource).not.toContain("setLiveActiveRun(latestSupervisedRunSnapshot)");
     expect(routeSource).toContain("styles.latestSupervisedResult");
   });
 

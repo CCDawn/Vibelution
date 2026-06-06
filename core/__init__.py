@@ -13,7 +13,8 @@ core - 核心模块包
 
 """
 
-# 标记重组版本
-__version__ = "4.4"
+# 产品版本从仓库根部 VERSION 读取，避免前后端版本源漂移。
+from .version import __version__, get_product_version
+
 CORE_REORGANIZED = True
 CORE_REORGANIZE_DATE = "2026-04-18"

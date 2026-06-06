@@ -7,7 +7,7 @@ from dataclasses import asdict, is_dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from config.public_config import build_effective_config, load_public_config
+from config.public_config import build_effective_config, load_public_config, save_public_config
 from core.infrastructure.git_memory import WorkingTreeSnapshot, get_git_memory_service
 from core.llm.client import get_llm_client
 from core.web.services.file_service import LANGUAGE_BY_SUFFIX
@@ -145,6 +145,94 @@ def _public_config_for_git_commit_model(public_config: dict[str, Any], model_id:
     return payload
 
 
+def update_git_commit_message_model(model_id: str) -> dict[str, Any]:
+    """Persist the model library entry used as the Git commit message default."""
+
+    normalized_model_id = str(model_id or "").strip()
+    public_config = with_git_config_defaults(load_public_config())
+    llm = public_config.get("llm", {}) if isinstance(public_config, dict) else {}
+    model_library = llm.get("model_library", {}) if isinstance(llm, dict) else {}
+    if normalized_model_id and (not isinstance(model_library, dict) or normalized_model_id not in model_library):
+        _record_git_scene_event(
+            "commit_message_config",
+            "git.commit_message_model.update_rejected",
+            message="Git commit message default model update rejected.",
+            level="warning",
+            outcome="rejected",
+            fields={
+                "modelId": normalized_model_id,
+                "reason": "unknown_model",
+            },
+            lifecycle=True,
+        )
+        raise ValueError(f"unknown Git commit message model: {normalized_model_id}")
+
+    updated = copy.deepcopy(public_config)
+    git_cfg = updated.setdefault("git", {})
+    if not isinstance(git_cfg, dict):
+        git_cfg = {}
+        updated["git"] = git_cfg
+    previous_model_id = str(git_cfg.get("commit_message_model_ref") or "").strip()
+    git_cfg["commit_message_model_ref"] = normalized_model_id
+    git_cfg.pop("commit_message_profile", None)
+    build_effective_config(updated)
+    save_public_config(updated)
+    _record_git_scene_event(
+        "commit_message_config",
+        "git.commit_message_model.updated",
+        message="Git commit message default model updated.",
+        outcome="succeeded",
+        fields={
+            "previousModelId": previous_model_id,
+            "modelId": normalized_model_id,
+        },
+        lifecycle=True,
+    )
+    return {
+        "modelId": normalized_model_id,
+        "previousModelId": previous_model_id,
+    }
+
+
+def update_git_commit_message_prompt(prompt: str) -> dict[str, Any]:
+    """Persist the prompt template used by the Git commit message drafter."""
+
+    normalized_prompt = str(prompt or "").strip()
+    if not normalized_prompt:
+        raise ValueError("Git commit message prompt is required")
+    required_placeholders = ["{summary}", "{files}", "{diff}"]
+    missing = [placeholder for placeholder in required_placeholders if placeholder not in normalized_prompt]
+    if missing:
+        raise ValueError(f"Git commit message prompt must include: {', '.join(missing)}")
+
+    public_config = with_git_config_defaults(load_public_config())
+    updated = copy.deepcopy(public_config)
+    git_cfg = updated.setdefault("git", {})
+    if not isinstance(git_cfg, dict):
+        git_cfg = {}
+        updated["git"] = git_cfg
+    previous_prompt = str(git_cfg.get("commit_message_prompt") or "").strip()
+    git_cfg["commit_message_prompt"] = normalized_prompt
+    build_effective_config(updated)
+    save_public_config(updated)
+    _record_git_scene_event(
+        "commit_message_config",
+        "git.commit_message_prompt.updated",
+        message="Git commit message prompt template updated.",
+        outcome="succeeded",
+        fields={
+            "previousPromptChars": len(previous_prompt),
+            "promptChars": len(normalized_prompt),
+        },
+        lifecycle=True,
+    )
+    return {
+        "prompt": normalized_prompt,
+        "previousPromptChars": len(previous_prompt),
+        "promptChars": len(normalized_prompt),
+    }
+
+
 def get_git_status(limit: int | None = DEFAULT_STATUS_LIMIT) -> dict[str, Any]:
     """Return a compact, read-only view of the current repository state."""
 
@@ -278,7 +366,6 @@ def generate_git_commit_message(
     paths: list[str],
     *,
     model_id: str | None = None,
-    profile_id: str | None = None,
 ) -> dict[str, Any]:
     service = get_git_memory_service()
     available, error = service.is_git_available()
@@ -291,7 +378,7 @@ def generate_git_commit_message(
     public_config = with_git_config_defaults(load_public_config())
     model_id = str(model_id or git_cfg.get("commit_message_model_ref") or "").strip()
     if not model_id:
-        legacy_profile_id = str(profile_id or git_cfg.get("commit_message_profile") or DEFAULT_GIT_COMMIT_PROFILE).strip()
+        legacy_profile_id = str(git_cfg.get("commit_message_profile") or DEFAULT_GIT_COMMIT_PROFILE).strip()
         model_id = _model_ref_for_legacy_profile(public_config, legacy_profile_id)
     if not model_id:
         raise ValueError("Git commit message model is not configured")
@@ -360,7 +447,6 @@ def generate_git_commit_message(
     return {
         "message": message,
         "modelId": model_id,
-        "profileId": GIT_COMMIT_MESSAGE_PROFILE_ID,
         "prompt": prompt_template,
         "files": selected_paths,
         "diffSummary": diff_payload["summary"],

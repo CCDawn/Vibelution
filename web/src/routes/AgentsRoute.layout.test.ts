@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
 
+// @ts-expect-error Vitest runs this contract in Node; the web project intentionally omits global Node types.
+import { readFileSync } from "node:fs";
 import routeSource from "./AgentsRoute.tsx?raw";
 import styles from "./AgentsRoute.module.css";
 import routerSource from "../app/router.tsx?raw";
 import shellSource from "../app/AppShell.tsx?raw";
+
+const stylesSource = readFileSync(new URL("./AgentsRoute.module.css", import.meta.url), "utf-8");
 
 describe("AgentsRoute layout contract", () => {
   it("loads the read-only Agent config workspace endpoint", () => {
@@ -130,11 +134,32 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("return agent.health.length > 0;");
   });
 
-  it("defaults new work-session Agents to the backend session tool policy", () => {
+  it("creates Agents through tool bundle presets instead of raw tool strings", () => {
     expect(routeSource).toContain("DEFAULT_SESSION_AGENT_ALLOWED_TOOLS");
     expect(routeSource).toContain("\"conversation_log_inspect_tool\"");
     expect(routeSource).toContain("allowedTools: DEFAULT_SESSION_AGENT_ALLOWED_TOOLS.join(\", \")");
-    expect(routeSource).toContain("toolPolicy: workSession ? {} : {");
+    expect(routeSource).toContain("selectedToolBundleIds: string[]");
+    expect(routeSource).toContain("function defaultCreateToolBundleIds");
+    expect(routeSource).toContain('const preferred = workSession ? ["core", "coding", "memory_context"] : ["core", "research", "collaboration"]');
+    expect(routeSource).toContain("function toolBundleIdsForModeChange");
+    expect(routeSource).toContain("const hasCustomSelection = draft.selectedToolBundleIds.length > 0 && !sameStringSet(draft.selectedToolBundleIds, currentDefaults)");
+    expect(routeSource).toContain("selectedToolBundleIds: toolBundleIdsForModeChange(createDraft, primaryMode, toolBundles)");
+    expect(routeSource).toContain("function toolBundleSelectionToPolicy");
+    expect(routeSource).toContain("function createToolBundleSummary");
+    expect(routeSource).toContain("createToolBundleSummaryValue");
+    expect(routeSource).toContain("copy.createAgentToolBundles");
+    expect(routeSource).toContain("copy.createAgentToolBundlePreview");
+    expect(routeSource).toContain("creationToolBundleIds: sortedIds(draft.selectedToolBundleIds)");
+    expect(routeSource).toContain("toolPolicy: {");
+    expect(routeSource).toContain("styles.workspaceCreating");
+    expect(routeSource).toContain("styles.agentPanelCreating");
+    expect(routeSource).not.toContain("toolPolicy: workSession ? {} : {");
+    expect(styles.createToolBundleGrid).toBeTruthy();
+    expect(styles.createToolBundleOption).toBeTruthy();
+    expect(styles.createToolBundleSelected).toBeTruthy();
+    expect(styles.createToolBundlePreview).toBeTruthy();
+    expect(styles.workspaceCreating).toBeTruthy();
+    expect(styles.agentPanelCreating).toBeTruthy();
   });
 
   it("uses user-facing Chinese labels instead of internal workspace terms", () => {
@@ -610,6 +635,16 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("styles.agentTableHead");
     expect(routeSource).toContain("styles.agentRow");
     expect(routeSource).toContain("styles.detailPanel");
+    expect(styles.workspace).toBeTruthy();
+    expect(stylesSource).toContain("grid-template-columns: minmax(220px, 276px) minmax(500px, 1.08fr) minmax(360px, 0.86fr)");
+  });
+
+  it("keeps Agent empty states compact and left-aligned for dense workbench scanning", () => {
+    expect(styles.emptyState).toBeTruthy();
+    expect(routeSource).toContain("styles.emptyState");
+    expect(stylesSource).toContain("place-items: start");
+    expect(stylesSource).toContain("min-height: 72px");
+    expect(stylesSource).toContain("text-align: left");
   });
 
   it("renders every Agent as a person name plus colored functional role tag", () => {

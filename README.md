@@ -22,11 +22,11 @@ Vibelution 是一个本地优先的 AI Agent 工作台。它把编码对话、�
 | --- | --- |
 | Chat 工作台 | 面向日常编码协作的多会话界面，支持文件树、只读预览、消息流、停止/继续和任务状态摘要。 |
 | Git 局势 | 顶栏 Git chip 展示缩略状态，hover 预览变化；独立 Git 页面读取工作区、diff、最近提交，并支持选择文件手动提交。 |
-| AI 提交说明 | Git 页面可以根据当前选中的改动生成 commit message 草稿；使用的 AI profile 与提示词模板在配置页维护。 |
+| AI 提交说明 | Git 页面可以根据当前选中的改动生成 commit message 草稿；生成模型默认值在 Git 页维护，提示词模板在配置页维护。 |
 | Self Evolution | 自进化页面展示目标、事务、fitness、工作区状态、审计尾迹和回滚边界，支持从网页启动有界自进化。 |
 | Supervised Evolution | 监督进化页面支持 dataset / bundle 运行、active run 监控、case 输入输出、提案库和建议基线治理。 |
 | Runtime Scenes | 日志页按单次运行打包前端、后端、浏览器、生命周期和原始日志，便于复盘失败、卡住或漂移。 |
-| Config Workbench | Web 配置面管理语言、默认入口、模型库、profiles、Git 提交说明模型和提示词模板。 |
+| Config Workbench | Web 配置面管理语言、默认入口、模型库、全局运行项和 Git 提交说明提示词；每个 Agent 的模型槽位在 Agent 管理维护。 |
 | Reset / Pet | 提供受保护的清理面和长期陪伴体状态面，避免把运行产物、记忆和演化证据混在一起。 |
 
 ## 运行模式
@@ -44,7 +44,7 @@ Vibelution 是一个本地优先的 AI Agent 工作台。它把编码对话、�
 ```text
 Vibelution/
 ├── agent.py                    # Agent 主入口与主循环编排
-├── config/                     # 配置模型、profiles、provider 与 public config 同步
+├── config/                     # 配置模型库、provider、runtime defaults 与 public config 同步
 ├── core/
 │   ├── chat/                   # Chat session、结果格式与任务状态
 │   ├── evaluation/             # 监督进化、dataset registry、dashboard、chat case review
@@ -115,14 +115,18 @@ profile = "safe_remote"
 preflight_doctor = true
 require_venv = true
 
-[llm.profiles.primary]
-model = ""
-temperature = 1.0
+[llm.model_library.openai_gpt_4_1]
+model = "gpt-4.1"
+label = "OpenAI GPT-4.1"
+api_key_env = "VIBELUTION_LLM_MODEL_OPENAI_GPT_4_1_API_KEY"
+transport = "chat_completions"
+contract = "tool_chat"
+temperature = 0.7
 max_output_tokens = 8192
 timeout = 120
 streaming = true
 
-[llm.profiles.primary.provider]
+[llm.model_library.openai_gpt_4_1.provider]
 kind = "openai"
 api_key_env = "OPENAI_API_KEY"
 base_url = "https://api.openai.com/v1"
@@ -207,7 +211,7 @@ python agent.py --supervised-dashboard
 | `/supervised-evolution/library` | Proposal library 与待推进建议项。 |
 | `/supervised-evolution/review` | 对话样本审核面，把聊天片段转为可控监督样本。 |
 | `/logs` | Runtime scene 和日志文件观察面。 |
-| `/config` | 统一配置工作台，包含模型库、profiles、Git 提交说明配置和 JSON 草稿编辑。 |
+| `/config` | 统一配置工作台，包含模型库、全局运行项、Git 提交说明提示词和高级配置检查。 |
 | `/reset` | 受保护的本地清理入口。 |
 | `/pet` | 长期陪伴体状态入口。 |
 

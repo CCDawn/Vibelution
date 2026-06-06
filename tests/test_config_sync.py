@@ -76,6 +76,8 @@ def test_main_config_exposes_all_public_model_blocks():
     assert "primary" in raw["llm"]["profiles"]
     assert "model_ref" in raw["llm"]["profiles"]["primary"]
     assert "overrides" in raw["llm"]["profiles"]["primary"]
+    assert "compression" not in raw["llm"]["profiles"]
+    assert "subagent_explorer" not in raw["llm"]["profiles"]
     assert "relay_openai_gpt_5_5" in raw["llm"]["model_library"]
     assert "provider" in raw["llm"]["model_library"]["relay_openai_gpt_5_5"]
 
@@ -85,16 +87,66 @@ def test_config_loader_normalizes_nested_public_blocks():
     normalized = normalize_public_config_dict(raw)
     config = AppConfig.model_validate(normalized)
 
-    compression_profile = raw["llm"]["profiles"]["compression"]
-    compression_model_ref = str(compression_profile.get("model_ref") or "").strip()
-    expected_compression_model = raw["llm"]["model_library"][compression_model_ref]["model"]
-    assert config.llm.get_profile("compression").model == expected_compression_model
+    primary_profile = raw["llm"]["profiles"]["primary"]
+    primary_model_ref = str(primary_profile.get("model_ref") or "").strip()
+    expected_primary_model = raw["llm"]["model_library"][primary_model_ref]["model"]
+    assert config.llm.get_profile("primary").model == expected_primary_model
+    assert config.llm.get_profile(role="compression").profile_id == "primary"
     assert config.llm.discovery.timeout == raw["llm"]["discovery"]["timeout"]
     assert config.pet_gene.inherit_from_model == raw["pet"]["gene"]["inherit_from_model"]
     assert len(config.prompt.sections) == len(raw["prompt"]["sections"])
     assert config.workbench.backend_port == raw["workbench"]["backend_port"]
     assert config.workbench.frontend_port == raw["workbench"]["frontend_port"]
     assert config.workbench.window_mode == raw["workbench"]["window_mode"]
+
+
+def test_config_loader_canonicalizes_inline_profile_model_env(tmp_path, monkeypatch):
+    config_file = tmp_path / "config.toml"
+    config_file.write_text(
+        """
+[llm.profiles.primary]
+model = "unit-runtime-model"
+api_key_env = "LEGACY_PROFILE_ENV"
+transport = "chat_completions"
+contract = "tool_chat"
+strict_compatibility = false
+temperature = 0.7
+max_output_tokens = 128000
+timeout = 120
+connect_timeout = 20
+streaming = true
+tool_calling_mode = "auto"
+discovery_enabled = true
+supports_image_input = true
+
+[llm.profiles.primary.provider]
+kind = "openai_compatible"
+api_key_env = "UNIT_PROVIDER_KEY"
+base_url = "https://unit-test.example.com/v1"
+compat_mode = "openai"
+requires_api_key = true
+context_window = 1000000
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("LEGACY_PROFILE_ENV", raising=False)
+    monkeypatch.delenv("UNIT_PROVIDER_KEY", raising=False)
+    monkeypatch.delenv("VIBELUTION_ENABLE_USER_ENV_FALLBACK", raising=False)
+
+    config = ConfigLoader(str(config_file)).load()
+    profile = config.llm.get_profile("primary")
+    model_id, entry = config.llm.get_model_library_entry_for_profile(profile)
+
+    assert model_id
+    assert str(model_id).startswith("generated_openai_compatible_unit_runtime_model_")
+    assert isinstance(entry, dict)
+    assert profile.api_key_env == entry["api_key_env"]
+    assert entry["api_key_env"].startswith("VIBELUTION_LLM_MODEL_GENERATED_OPENAI_COMPATIBLE_UNIT_")
+    assert config.get_api_key_for_profile(profile_id="primary") is None
+
+    monkeypatch.setenv(entry["api_key_env"], "runtime-model-key")
+
+    assert config.get_api_key_for_profile(profile_id="primary") == "runtime-model-key"
 
 
 def test_evolution_default_allowlist_includes_safe_modify_probe_file():

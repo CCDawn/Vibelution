@@ -27,7 +27,7 @@ class RagRetrievalError(ValueError):
 def get_rag_retrieval_health() -> dict[str, Any]:
     """Return read-only RAG provider readiness for the memory platform."""
 
-    vector_health = rag_vector_index_service.get_vector_index_health()
+    vector_health = rag_vector_index_service.get_vector_index_health(internal=True)
     return {
         "schemaVersion": SCHEMA_VERSION,
         "provider": "local",

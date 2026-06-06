@@ -77,6 +77,7 @@ from core.llm.agent_runtime import (
     AGENT_LLM_SLOT_SUBAGENT_EXECUTION,
     AGENT_LLM_SLOT_SUMMARY,
     AgentLlmResolutionError,
+    normalize_agent_llm_bindings,
     resolve_agent_llm,
 )
 from core.llm import LLMError
@@ -179,6 +180,58 @@ _CORE_CHAT_TOOL_NAMES = {
 }
 
 
+def _agent_api_key_diagnostic(config: AppConfig) -> Dict[str, Any]:
+    primary = config.llm.get_profile(role="primary")
+    provider = config.llm.get_provider(primary.provider_id)
+    model_id, model_entry = config.llm.get_model_library_entry_for_profile(primary)
+    if not isinstance(model_entry, dict):
+        profile_model = str(getattr(primary, "model", "") or "").strip()
+        profile_key_env = str(getattr(primary, "api_key_env", "") or "").strip()
+        for candidate_id, item in (getattr(config.llm, "model_library", {}) or {}).items():
+            if not isinstance(item, dict):
+                continue
+            item_model = str(item.get("model") or "").strip()
+            item_key_env = str(item.get("api_key_env") or "").strip()
+            if item_model == profile_model and (not profile_key_env or item_key_env == profile_key_env):
+                model_id = str(candidate_id or "").strip()
+                model_entry = item
+                break
+    model_key_env = str(getattr(primary, "api_key_env", "") or "").strip()
+    if isinstance(model_entry, dict):
+        model_key_env = model_key_env or str(model_entry.get("api_key_env") or "").strip()
+    provider_key_env = str(provider.api_key_env or "").strip()
+    try:
+        api_key_source = config.get_api_key_source_label()
+    except Exception:
+        api_key_source = "unknown"
+    return {
+        "profileId": primary.profile_id,
+        "model": primary.model,
+        "modelId": str(model_id or "").strip(),
+        "providerId": provider.provider_id,
+        "providerKind": provider.kind,
+        "requiresApiKey": bool(provider.requires_api_key),
+        "apiKeySource": api_key_source,
+        "modelApiKeyEnv": model_key_env,
+        "providerApiKeyEnv": provider_key_env,
+    }
+
+
+def _format_missing_api_key_error(diagnostic: Dict[str, Any]) -> str:
+    model_env = str(diagnostic.get("modelApiKeyEnv") or "").strip()
+    provider_env = str(diagnostic.get("providerApiKeyEnv") or "").strip()
+    candidates = [item for item in (model_env, provider_env) if item]
+    candidate_text = "、".join(candidates) if candidates else "当前 provider 对应的环境变量"
+    model_id = str(diagnostic.get("modelId") or "").strip() or "未匹配到模型库 ID"
+    return (
+        "未设置 API Key。\n"
+        f"当前会话模型: {diagnostic.get('model') or 'unknown'} "
+        f"(modelId={model_id}, provider={diagnostic.get('providerId') or 'unknown'}, "
+        f"profile={diagnostic.get('profileId') or 'primary'})。\n"
+        f"请设置环境变量 {candidate_text}，或在当前模型/provider 配置中写入 api_key。"
+    )
+
+
 def _record_agent_scene_event(
     phase: str,
     event_code: str,
@@ -243,7 +296,7 @@ def _context_compression_trigger_source(reason: str) -> str:
 SUBAGENT_RESULT_MARKER = "__VIBELUTION_SUBAGENT_RESULT__"
 
 
-def _runtime_agent_binding_from_env() -> Dict[str, str]:
+def _runtime_agent_binding_from_env() -> Dict[str, Any]:
     key_map = {
         "agentId": "VIBELUTION_AGENT_ID",
         "profileId": "VIBELUTION_AGENT_PROFILE_ID",
@@ -252,11 +305,38 @@ def _runtime_agent_binding_from_env() -> Dict[str, str]:
         "workspacePath": "VIBELUTION_AGENT_WORKSPACE_PATH",
         "supervisedRole": "VIBELUTION_SUPERVISED_ROLE",
     }
-    return {
+    runtime: Dict[str, Any] = {
         target_key: value
         for target_key, env_key in key_map.items()
         if (value := str(os.environ.get(env_key) or "").strip())
     }
+    llm_bindings = _runtime_agent_llm_bindings_from_env(str(runtime.get("llmSlot") or "dialogue"))
+    if llm_bindings:
+        runtime["llmBindings"] = llm_bindings
+    return runtime
+
+
+def _runtime_agent_llm_bindings_from_env(default_slot: str) -> Dict[str, Dict[str, str]]:
+    bindings: Dict[str, Dict[str, str]] = {}
+    raw_bindings = str(os.environ.get("VIBELUTION_AGENT_LLM_BINDINGS_JSON") or "").strip()
+    if raw_bindings:
+        try:
+            payload = json.loads(raw_bindings)
+        except json.JSONDecodeError as exc:
+            raise AgentLlmResolutionError("Runtime Agent LLM bindings env is not valid JSON.") from exc
+        bindings = normalize_agent_llm_bindings(payload)
+        if not bindings:
+            raise AgentLlmResolutionError("Runtime Agent LLM bindings env did not contain any safe modelId.")
+    model_id = str(os.environ.get("VIBELUTION_AGENT_LLM_MODEL_ID") or "").strip()
+    if model_id:
+        slot = str(default_slot or "dialogue").strip() or "dialogue"
+        current_model_id = str((bindings.get(slot) or {}).get("modelId") or "").strip()
+        if current_model_id and current_model_id != model_id:
+            raise AgentLlmResolutionError(
+                f"Runtime Agent LLM model id conflicts with bindings JSON for slot {slot}."
+            )
+        bindings[slot] = {"modelId": model_id}
+    return bindings
 
 
 def _turn_runtime_from_env() -> Dict[str, str]:
@@ -329,10 +409,21 @@ class SelfEvolvingAgent:
         if not self.api_key:
             provider = self.config.llm.get_provider(role="primary")
             if provider.requires_api_key:
-                raise ValueError(
-                    "未设置 API Key。\n"
-                    "请在 llm.providers.<provider_id>.api_key 中配置，或设置对应环境变量。"
+                diagnostic = _agent_api_key_diagnostic(self.config)
+                _record_agent_scene_event(
+                    "startup",
+                    "agent.api_key.missing",
+                    message="Agent startup blocked because the selected LLM route has no API key.",
+                    level="error",
+                    outcome="failed",
+                    fields={
+                        **diagnostic,
+                        "agentId": str(self.runtime_agent_binding.get("agentId") or "").strip(),
+                        "requestedLlmSlot": str(self.runtime_agent_binding.get("llmSlot") or "dialogue").strip()
+                        or "dialogue",
+                    },
                 )
+                raise ValueError(_format_missing_api_key_error(diagnostic))
         self.config.set_api_key(self.api_key or "")
 
         # 创建主要工具
@@ -490,6 +581,7 @@ class SelfEvolvingAgent:
             from core.web.services import agent_directory_service
 
             agent = agent_directory_service.get_agent(agent_id, include_archived=False)
+            agent = self._agent_with_runtime_llm_binding_snapshot(agent)
             if not llm_slot:
                 bindings = agent.get("llmBindings") if isinstance(agent, dict) else {}
                 dialogue_binding = bindings.get("dialogue") if isinstance(bindings, dict) else None
@@ -547,6 +639,30 @@ class SelfEvolvingAgent:
                 "agentWorkspacePath": self.runtime_agent_binding.get("workspacePath", ""),
             },
         )
+
+    def _agent_with_runtime_llm_binding_snapshot(self, agent: Any) -> Dict[str, Any]:
+        env_bindings = normalize_agent_llm_bindings(self.runtime_agent_binding.get("llmBindings"))
+        if not env_bindings:
+            return agent if isinstance(agent, dict) else {}
+        payload = copy.deepcopy(agent) if isinstance(agent, dict) else {}
+        existing_bindings = normalize_agent_llm_bindings(payload.get("llmBindings"))
+        payload["llmBindings"] = {**existing_bindings, **env_bindings}
+        payload["agentId"] = str(payload.get("agentId") or self.runtime_agent_binding.get("agentId") or "").strip()
+        requested_slot = str(self.runtime_agent_binding.get("llmSlot") or "dialogue").strip() or "dialogue"
+        _record_agent_scene_event(
+            "startup",
+            "agent.runtime_llm_env_binding_applied",
+            message="运行时 Agent 使用本次监督快照补齐 LLM 绑定。",
+            fields={
+                "agentId": payload.get("agentId", ""),
+                "requestedLlmSlot": requested_slot,
+                "envBindingSlots": sorted(env_bindings.keys()),
+                "registryAgentPresent": isinstance(agent, dict) and bool(agent),
+                "supervisedRole": self.runtime_agent_binding.get("supervisedRole", ""),
+                "agentWorkspacePath": self.runtime_agent_binding.get("workspacePath", ""),
+            },
+        )
+        return payload
 
     def set_mental_model_enabled_override(self, enabled: Optional[bool]) -> None:
         """Override mental-model activity for this agent instance."""
@@ -702,11 +818,14 @@ class SelfEvolvingAgent:
             return bool(llm_cfg.get_profile(role="primary").streaming)
         return True
 
-    def _should_stream_llm_compat(self, llm_for_turn: Any = None) -> bool:
+    def _should_stream_llm_for_turn(self, llm_for_turn: Any = None) -> bool:
         try:
             return bool(self._should_stream_llm(llm_for_turn))
-        except TypeError:
-            return bool(self._should_stream_llm())
+        except TypeError as exc:
+            try:
+                return bool(self._should_stream_llm())
+            except TypeError:
+                raise exc
 
     def _sync_runtime_state_memory(self):
         """将会话级短期约束同步到 MEMORY/state_memory。"""
@@ -2047,7 +2166,7 @@ class SelfEvolvingAgent:
                     )
                     if (
                         not disable_streaming_for_retry
-                        and self._should_stream_llm_compat(llm_for_turn)
+                        and self._should_stream_llm_for_turn(llm_for_turn)
                         and hasattr(llm_for_turn, "stream")
                     ):
                         full_chunk = None
@@ -2211,7 +2330,9 @@ class SelfEvolvingAgent:
                         "provider": getattr(self.config.llm, "provider", ""),
                         "api_base": getattr(self.config.llm, "api_base", ""),
                         "api_timeout": getattr(self.config.llm, "api_timeout", None),
-                        "streaming_enabled": bool(self._should_stream_llm_compat(llm_for_turn if "llm_for_turn" in locals() else None)),
+                        "streaming_enabled": bool(
+                            self._should_stream_llm_for_turn(llm_for_turn if "llm_for_turn" in locals() else None)
+                        ),
                         "message_count": len(clean_messages),
                     }
                     try:

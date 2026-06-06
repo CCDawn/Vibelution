@@ -106,6 +106,58 @@ def test_knowledge_routes_reject_non_member_and_bad_source_type(tmp_path, monkey
     assert bad_source.status_code == 422
 
 
+def test_knowledge_routes_reject_empty_actor_for_governed_content(tmp_path, monkeypatch):
+    client, team, lead, member, _outsider = _setup(tmp_path, monkeypatch)
+    empty_create = client.post(
+        f"/api/teams/{team['teamId']}/knowledge-bases",
+        json={"name": "No Actor KB"},
+    )
+    assert empty_create.status_code == 403
+
+    base = client.post(
+        f"/api/teams/{team['teamId']}/knowledge-bases",
+        json={"name": "Guarded KB", "actorAgentId": lead["agentId"]},
+    ).json()
+    proposal = client.post(
+        f"/api/knowledge-bases/{base['knowledgeBaseId']}/refinement-proposals",
+        json={
+            "proposedByAgentId": member["agentId"],
+            "title": "Guarded item",
+            "content": "Empty actor must not read this formal body.",
+        },
+    ).json()
+    applied = client.patch(
+        f"/api/knowledge-bases/{base['knowledgeBaseId']}/refinement-proposals/{proposal['proposalId']}/review",
+        json={"status": "approved", "reviewedByAgentId": lead["agentId"]},
+    ).json()
+
+    assert client.get(f"/api/knowledge-bases/{base['knowledgeBaseId']}/items").status_code == 422
+    assert client.get("/api/knowledge/search", params={"knowledgeBaseId": base["knowledgeBaseId"], "query": "formal body"}).status_code == 422
+    assert client.get(
+        f"/api/knowledge-bases/{base['knowledgeBaseId']}/trace/{applied['item']['knowledgeItemId']}"
+    ).status_code == 422
+    assert client.get(
+        f"/api/knowledge-bases/{base['knowledgeBaseId']}/rating-suggestions"
+    ).status_code == 422
+    assert client.get("/api/knowledge/dashboard-snapshot").status_code == 422
+    assert client.get("/api/knowledge/permissions/audit").status_code == 422
+    assert client.get("/api/knowledge/governance/tasks").status_code == 422
+    assert client.get("/api/knowledge/rag/retrieve", params={"query": "formal body"}).status_code == 422
+    assert client.get("/api/knowledge/steward/overview").status_code == 422
+    assert client.get("/api/knowledge/steward/recommendations").status_code == 422
+    assert client.get("/api/knowledge/steward/workbench").status_code == 422
+    assert client.get("/api/knowledge/operations/health").status_code == 422
+    assert client.get("/api/knowledge/governance/plan").status_code == 422
+    assert client.get(f"/api/agents/{member['agentId']}/knowledge-bases").status_code == 422
+
+    allowed_items = client.get(
+        f"/api/knowledge-bases/{base['knowledgeBaseId']}/items",
+        params={"agentId": member["agentId"]},
+    )
+    assert allowed_items.status_code == 200
+    assert allowed_items.json()["summary"]["itemCount"] == 1
+
+
 def test_knowledge_overview_returns_visible_team_knowledge(tmp_path, monkeypatch):
     client, team, lead, member, _outsider = _setup(tmp_path, monkeypatch)
     base = client.post(
@@ -327,6 +379,18 @@ def test_knowledge_rag_retrieve_route_rejects_invalid_mode(tmp_path, monkeypatch
     assert "Unsupported RAG retrieval mode" in response.json()["detail"]
 
 
+def test_knowledge_rag_retrieve_route_requires_agent_id(tmp_path, monkeypatch):
+    client, _team, _lead, _member, _outsider = _setup(tmp_path, monkeypatch)
+
+    response = client.get(
+        "/api/knowledge/rag/retrieve",
+        params={"query": "rag", "retrievalMode": "hybrid"},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "agentId is required for governed RAG retrieval."
+
+
 def test_knowledge_rag_health_route_reports_local_provider_ready(tmp_path, monkeypatch):
     client, _team, _lead, _member, _outsider = _setup(tmp_path, monkeypatch)
 
@@ -439,7 +503,7 @@ def test_knowledge_steward_overview_surfaces_agent_boundary_and_queue(tmp_path, 
         },
     ).json()
 
-    response = client.get("/api/knowledge/steward/overview")
+    response = client.get("/api/knowledge/steward/overview", params={"agentId": lead["agentId"]})
 
     assert response.status_code == 200
     payload = response.json()

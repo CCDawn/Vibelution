@@ -295,8 +295,8 @@ def test_session_provider_failure_uses_llm_failure_metadata_when_summary_is_sani
             calls.append(initial_prompt)
             return {
                 "status": "failed",
-                "summary": "当前轮执行失败，请检查 模型绑定或日志。",
-                "raw_output": "当前轮执行失败，请检查 模型绑定或日志。",
+                "summary": "当前轮执行失败，请检查模型槽位或日志。",
+                "raw_output": "当前轮执行失败，请检查模型槽位或日志。",
                 "error": "server_error: litellm.ServiceUnavailableError",
                 "outcome": "blocked",
                 "tool_call_count": 0,

@@ -89,11 +89,15 @@ class TeamKnowledgePermissionError(TeamKnowledgeError):
     """Raised when an actor cannot perform the requested knowledge action."""
 
 
+class TeamKnowledgeAmbiguousKnowledgeBaseError(TeamKnowledgeError):
+    """Raised when an unscoped knowledge base id matches multiple owners."""
+
+
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def list_knowledge_overview(*, agent_id: str = "") -> dict[str, Any]:
+def list_knowledge_overview(*, agent_id: str = "", internal: bool = False) -> dict[str, Any]:
     """Return formal knowledge bases visible to an optional Agent."""
 
     _sync_roots()
@@ -101,9 +105,9 @@ def list_knowledge_overview(*, agent_id: str = "") -> dict[str, Any]:
     pending_proposals = 0
     item_count = 0
     source_count = 0
-    for owner in _iter_knowledge_owners(agent_id=agent_id, include_archived=False):
+    for owner in _iter_knowledge_owners(agent_id=agent_id, include_archived=False, include_all_agents=internal):
         for base in _knowledge_bases_for_owner(owner):
-            if not _can_access(owner, base, agent_id, "read"):
+            if not _can_access(owner, base, agent_id, "read", internal=internal):
                 continue
             stats = _knowledge_base_stats_for_owner(owner, str(base.get("knowledgeBaseId") or ""))
             pending_proposals += stats["pendingProposalCount"]
@@ -114,7 +118,7 @@ def list_knowledge_overview(*, agent_id: str = "") -> dict[str, Any]:
                     **_knowledge_base_to_api(base, owner),
                     "stats": stats,
                     "pendingProposals": _pending_proposals_for_base(owner, str(base.get("knowledgeBaseId") or "")),
-                    "permissions": _permissions_for_actor(owner, base, agent_id),
+                    "permissions": _permissions_for_actor(owner, base, agent_id, internal=internal),
                 }
             )
     return {
@@ -131,10 +135,10 @@ def list_knowledge_overview(*, agent_id: str = "") -> dict[str, Any]:
     }
 
 
-def get_knowledge_steward_overview() -> dict[str, Any]:
+def get_knowledge_steward_overview(*, agent_id: str = "", internal: bool = False) -> dict[str, Any]:
     """Return the default knowledge steward Agent and its read-only governance posture."""
 
-    payload = _build_knowledge_steward_overview()
+    payload = _build_knowledge_steward_overview(agent_id=agent_id, internal=internal)
     _record_event(
         "knowledge.steward.overview.viewed",
         "",
@@ -149,11 +153,21 @@ def get_knowledge_steward_overview() -> dict[str, Any]:
     return payload
 
 
-def _build_knowledge_steward_overview(*, governance_tasks: dict[str, Any] | None = None) -> dict[str, Any]:
+def _build_knowledge_steward_overview(
+    *,
+    agent_id: str = "",
+    governance_tasks: dict[str, Any] | None = None,
+    internal: bool = False,
+) -> dict[str, Any]:
     _sync_roots()
     steward = agent_directory_service.get_agent(agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID)
     steward_id = str((steward or {}).get("agentId") or agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID).strip()
-    governance_tasks = governance_tasks or list_knowledge_governance_tasks(agent_id="", status="all")
+    normalized_agent_id = str(agent_id or "").strip()
+    governance_tasks = governance_tasks or list_knowledge_governance_tasks(
+        agent_id=normalized_agent_id,
+        status="all",
+        internal=internal,
+    )
     task_summary = dict(governance_tasks.get("summary") or {})
     open_tasks = [task for task in list(governance_tasks.get("tasks") or []) if str(task.get("status") or "") == "open"]
     open_tasks.sort(
@@ -245,18 +259,18 @@ def list_ingestion_adapters() -> dict[str, Any]:
     }
 
 
-def list_team_knowledge_bases(team_id: str, *, agent_id: str = "") -> dict[str, Any]:
+def list_team_knowledge_bases(team_id: str, *, agent_id: str = "", internal: bool = False) -> dict[str, Any]:
     team = _require_team(team_id)
     owner = _owner_context("team", team["teamId"], team=team)
     bases = []
     for base in _knowledge_bases_for_owner(owner):
-        if _can_access(owner, base, agent_id, "read"):
+        if _can_access(owner, base, agent_id, "read", internal=internal):
             bases.append(
                 {
                     **_knowledge_base_to_api(base, owner),
                     "stats": _knowledge_base_stats_for_owner(owner, str(base.get("knowledgeBaseId") or "")),
                     "pendingProposals": _pending_proposals_for_base(owner, str(base.get("knowledgeBaseId") or "")),
-                    "permissions": _permissions_for_actor(owner, base, agent_id),
+                    "permissions": _permissions_for_actor(owner, base, agent_id, internal=internal),
                 }
             )
     return {
@@ -268,18 +282,18 @@ def list_team_knowledge_bases(team_id: str, *, agent_id: str = "") -> dict[str, 
     }
 
 
-def list_agent_knowledge_bases(agent_id: str, *, actor_agent_id: str = "") -> dict[str, Any]:
+def list_agent_knowledge_bases(agent_id: str, *, actor_agent_id: str = "", internal: bool = False) -> dict[str, Any]:
     agent = _require_agent(agent_id)
     owner = _owner_context("agent", agent["agentId"], agent=agent)
     bases = []
     for base in _knowledge_bases_for_owner(owner):
-        if _can_access(owner, base, actor_agent_id, "read"):
+        if _can_access(owner, base, actor_agent_id, "read", internal=internal):
             bases.append(
                 {
                     **_knowledge_base_to_api(base, owner),
                     "stats": _knowledge_base_stats_for_owner(owner, str(base.get("knowledgeBaseId") or "")),
                     "pendingProposals": _pending_proposals_for_base(owner, str(base.get("knowledgeBaseId") or "")),
-                    "permissions": _permissions_for_actor(owner, base, actor_agent_id),
+                    "permissions": _permissions_for_actor(owner, base, actor_agent_id, internal=internal),
                 }
             )
     return {
@@ -301,9 +315,12 @@ def create_knowledge_base(
 ) -> dict[str, Any]:
     team = _require_team(team_id)
     owner = _owner_context("team", team["teamId"], team=team)
-    if actor_agent_id and not _member_role(team, actor_agent_id):
+    normalized_actor = str(actor_agent_id or "").strip()
+    if not normalized_actor:
+        raise TeamKnowledgePermissionError("Agent identity is required to create a team knowledge base.")
+    if not _member_role(team, normalized_actor):
         raise TeamKnowledgePermissionError("Only Team members can create a team knowledge base.")
-    return _create_knowledge_base_for_owner(owner, name=name, description=description, actor_agent_id=actor_agent_id, acl=acl)
+    return _create_knowledge_base_for_owner(owner, name=name, description=description, actor_agent_id=normalized_actor, acl=acl)
 
 
 def create_agent_knowledge_base(
@@ -316,7 +333,9 @@ def create_agent_knowledge_base(
 ) -> dict[str, Any]:
     agent = _require_agent(agent_id)
     owner = _owner_context("agent", agent["agentId"], agent=agent)
-    normalized_actor = str(actor_agent_id or agent["agentId"]).strip()
+    normalized_actor = str(actor_agent_id or "").strip()
+    if not normalized_actor:
+        raise TeamKnowledgePermissionError("Agent identity is required to create a private formal knowledge base.")
     if normalized_actor != agent["agentId"]:
         raise TeamKnowledgePermissionError("Only the owning Agent can create its private formal knowledge base.")
     return _create_knowledge_base_for_owner(owner, name=name, description=description, actor_agent_id=normalized_actor, acl=acl)
@@ -675,7 +694,7 @@ def update_knowledge_item_metadata(
     return item
 
 
-def list_knowledge_governance_tasks(*, agent_id: str = "", status: str = "open") -> dict[str, Any]:
+def list_knowledge_governance_tasks(*, agent_id: str = "", status: str = "open", internal: bool = False) -> dict[str, Any]:
     """Return a reviewer-facing queue derived from proposals, rating suggestions, and source-only evidence."""
 
     _sync_roots()
@@ -683,10 +702,11 @@ def list_knowledge_governance_tasks(*, agent_id: str = "", status: str = "open")
     if normalized_status not in {"open", "closed", "all"}:
         raise TeamKnowledgeError(f"Unsupported governance task status: {status}")
     tasks: list[dict[str, Any]] = []
-    for owner in _iter_knowledge_owners(agent_id=agent_id, include_archived=True):
+    actor_id = str(agent_id or "").strip()
+    for owner in _iter_knowledge_owners(agent_id=actor_id, include_archived=True, include_all_agents=internal):
         for base in _knowledge_bases_for_owner(owner):
             base_id = str(base.get("knowledgeBaseId") or "")
-            permissions = _permissions_for_actor(owner, base, agent_id)
+            permissions = _permissions_for_actor(owner, base, actor_id, internal=internal)
             if not permissions["canRead"]:
                 continue
             proposals = [
@@ -771,7 +791,7 @@ def list_knowledge_governance_tasks(*, agent_id: str = "", status: str = "open")
     tasks.sort(key=lambda item: (_priority_rank(str(item.get("priority") or "")), str(item.get("updatedAt") or item.get("createdAt") or "")), reverse=True)
     return {
         "schemaVersion": SCHEMA_VERSION,
-        "agentId": str(agent_id or "").strip(),
+        "agentId": actor_id,
         "tasks": tasks,
         "summary": {
             "taskCount": len(tasks),
@@ -784,10 +804,10 @@ def list_knowledge_governance_tasks(*, agent_id: str = "", status: str = "open")
     }
 
 
-def list_knowledge_steward_recommendations(*, agent_id: str = "", limit: int = 12) -> dict[str, Any]:
+def list_knowledge_steward_recommendations(*, agent_id: str = "", limit: int = 12, internal: bool = False) -> dict[str, Any]:
     """Return read-only steward recommendations derived from open governance tasks."""
 
-    payload = _build_knowledge_steward_recommendations(agent_id=agent_id, limit=limit)
+    payload = _build_knowledge_steward_recommendations(agent_id=agent_id, limit=limit, internal=internal)
     _record_event(
         "knowledge.steward.recommendations.viewed",
         "",
@@ -807,13 +827,14 @@ def _build_knowledge_steward_recommendations(
     agent_id: str = "",
     limit: int = 12,
     tasks_payload: dict[str, Any] | None = None,
+    internal: bool = False,
 ) -> dict[str, Any]:
     _sync_roots()
     steward = agent_directory_service.get_agent(agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID)
     steward_id = str((steward or {}).get("agentId") or agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID).strip()
     normalized_agent_id = str(agent_id or "").strip()
     bounded_limit = max(1, min(50, int(limit or 12)))
-    tasks_payload = tasks_payload or list_knowledge_governance_tasks(agent_id=normalized_agent_id, status="open")
+    tasks_payload = tasks_payload or list_knowledge_governance_tasks(agent_id=normalized_agent_id, status="open", internal=internal)
     recommendations = [_steward_recommendation_from_task(task) for task in list(tasks_payload.get("tasks") or [])]
     recommendations.sort(
         key=lambda item: (
@@ -848,10 +869,10 @@ def _build_knowledge_steward_recommendations(
     return payload
 
 
-def get_knowledge_steward_workbench(*, agent_id: str = "", limit: int = 12) -> dict[str, Any]:
+def get_knowledge_steward_workbench(*, agent_id: str = "", limit: int = 12, internal: bool = False) -> dict[str, Any]:
     """Return the Knowledge Steward's consolidated read-only workbench."""
 
-    payload = _build_knowledge_steward_workbench(agent_id=agent_id, limit=limit)
+    payload = _build_knowledge_steward_workbench(agent_id=agent_id, limit=limit, internal=internal)
     _record_event(
         "knowledge.steward.workbench.viewed",
         "",
@@ -874,16 +895,18 @@ def _build_knowledge_steward_workbench(
     overview: dict[str, Any] | None = None,
     tasks_payload: dict[str, Any] | None = None,
     recommendations_payload: dict[str, Any] | None = None,
+    internal: bool = False,
 ) -> dict[str, Any]:
     _sync_roots()
     normalized_agent_id = str(agent_id or "").strip()
     bounded_limit = max(1, min(50, int(limit or 12)))
-    overview = overview or _build_knowledge_steward_overview()
-    tasks_payload = tasks_payload or list_knowledge_governance_tasks(agent_id=normalized_agent_id, status="open")
+    overview = overview or _build_knowledge_steward_overview(agent_id=normalized_agent_id, internal=internal)
+    tasks_payload = tasks_payload or list_knowledge_governance_tasks(agent_id=normalized_agent_id, status="open", internal=internal)
     recommendations_payload = recommendations_payload or _build_knowledge_steward_recommendations(
         agent_id=normalized_agent_id,
         limit=bounded_limit,
         tasks_payload=tasks_payload,
+        internal=internal,
     )
     recommendations = list(recommendations_payload.get("recommendations") or [])
     tasks = list(tasks_payload.get("tasks") or [])
@@ -1432,7 +1455,9 @@ def search_knowledge_items(
     normalized_team_id = str(team_id or "").strip()
     normalized_owner_type = _normalize_owner_type(owner_type)
     normalized_owner_id = str(owner_id or "").strip()
-    normalized_base_id = str(knowledge_base_id or "").strip()
+    scoped_owner_type, scoped_owner_id, normalized_base_id = _parse_owner_scoped_knowledge_base_id(knowledge_base_id)
+    normalized_owner_type = normalized_owner_type or scoped_owner_type
+    normalized_owner_id = normalized_owner_id or scoped_owner_id
     normalized_tags = {item.lower() for item in _unique_strings(tags or [])}
     normalized_source_type = str(source_type or "").strip()
     if normalized_source_type and normalized_source_type not in SOURCE_TYPES:
@@ -1451,6 +1476,22 @@ def search_knowledge_items(
         for owner in owner_candidates
     ):
         owner_candidates.append(_owner_context(normalized_owner_type, normalized_owner_id))
+    if normalized_base_id and not (normalized_owner_type and normalized_owner_id):
+        visible_matches = [
+            owner
+            for owner in owner_candidates
+            for base in _knowledge_bases_for_owner(owner)
+            if str(base.get("knowledgeBaseId") or "") == normalized_base_id
+            and _can_access(owner, base, agent_id, "read")
+        ]
+        unique_owner_keys = {
+            (str(owner.get("ownerType") or ""), str(owner.get("ownerId") or ""))
+            for owner in visible_matches
+        }
+        if len(unique_owner_keys) > 1:
+            raise TeamKnowledgeAmbiguousKnowledgeBaseError(
+                "Knowledge base id is ambiguous across owners; use scopedKnowledgeBaseId."
+            )
     for owner in owner_candidates:
         current_owner_type = str(owner.get("ownerType") or "").strip()
         current_owner_id = str(owner.get("ownerId") or "").strip()
@@ -1545,10 +1586,10 @@ def search_knowledge_items(
     }
 
 
-def get_knowledge_operations_health(*, agent_id: str = "") -> dict[str, Any]:
+def get_knowledge_operations_health(*, agent_id: str = "", internal: bool = False) -> dict[str, Any]:
     """Return operational health for accessible team knowledge bases."""
 
-    payload = _build_knowledge_operations_health(agent_id=agent_id)
+    payload = _build_knowledge_operations_health(agent_id=agent_id, internal=internal)
     _record_event(
         "knowledge.operations.health.viewed",
         "",
@@ -1559,14 +1600,14 @@ def get_knowledge_operations_health(*, agent_id: str = "") -> dict[str, Any]:
     return payload
 
 
-def _build_knowledge_operations_health(*, agent_id: str = "") -> dict[str, Any]:
+def _build_knowledge_operations_health(*, agent_id: str = "", internal: bool = False) -> dict[str, Any]:
     _sync_roots()
     normalized_agent_id = str(agent_id or "").strip()
     rows: list[dict[str, Any]] = []
     findings: list[dict[str, Any]] = []
-    for owner in _iter_knowledge_owners(agent_id=normalized_agent_id, include_archived=True):
+    for owner in _iter_knowledge_owners(agent_id=normalized_agent_id, include_archived=True, include_all_agents=internal):
         for base in _knowledge_bases_for_owner(owner):
-            if not _can_access(owner, base, normalized_agent_id, "read"):
+            if not _can_access(owner, base, normalized_agent_id, "read", internal=internal):
                 continue
             base_id = str(base.get("knowledgeBaseId") or "")
             artifacts = _source_artifacts_for_base(owner, base_id)
@@ -1661,10 +1702,10 @@ def _build_knowledge_operations_health(*, agent_id: str = "") -> dict[str, Any]:
     }
 
 
-def get_knowledge_governance_plan(*, agent_id: str = "", limit: int = 12) -> dict[str, Any]:
+def get_knowledge_governance_plan(*, agent_id: str = "", limit: int = 12, internal: bool = False) -> dict[str, Any]:
     """Return a read-only governance plan derived from health and steward workbench state."""
 
-    payload = _build_knowledge_governance_plan(agent_id=agent_id, limit=limit)
+    payload = _build_knowledge_governance_plan(agent_id=agent_id, limit=limit, internal=internal)
     _record_event(
         "knowledge.governance.plan.viewed",
         "",
@@ -1681,13 +1722,14 @@ def _build_knowledge_governance_plan(
     limit: int = 12,
     workbench: dict[str, Any] | None = None,
     health: dict[str, Any] | None = None,
+    internal: bool = False,
 ) -> dict[str, Any]:
     """Build a read-only governance plan, optionally reusing already computed dashboard state."""
 
     normalized_agent_id = str(agent_id or "").strip()
     bounded_limit = max(1, min(50, int(limit or 12)))
-    workbench = workbench or _build_knowledge_steward_workbench(agent_id=normalized_agent_id, limit=bounded_limit)
-    health = health or _build_knowledge_operations_health(agent_id=normalized_agent_id)
+    workbench = workbench or _build_knowledge_steward_workbench(agent_id=normalized_agent_id, limit=bounded_limit, internal=internal)
+    health = health or _build_knowledge_operations_health(agent_id=normalized_agent_id, internal=internal)
     actions: list[dict[str, Any]] = []
     for item in list(workbench.get("nextActions") or []):
         actions.append(
@@ -1746,7 +1788,14 @@ def _build_knowledge_governance_plan(
     return payload
 
 
-def get_knowledge_dashboard_snapshot(*, agent_id: str = "", recommendation_limit: int = 6, workbench_limit: int = 8, plan_limit: int = 8) -> dict[str, Any]:
+def get_knowledge_dashboard_snapshot(
+    *,
+    agent_id: str = "",
+    recommendation_limit: int = 6,
+    workbench_limit: int = 8,
+    plan_limit: int = 8,
+    internal: bool = False,
+) -> dict[str, Any]:
     """Return the Memory route's knowledge dashboard state with shared intermediate scans."""
 
     _sync_roots()
@@ -1754,14 +1803,20 @@ def get_knowledge_dashboard_snapshot(*, agent_id: str = "", recommendation_limit
     bounded_recommendation_limit = max(1, min(50, int(recommendation_limit or 6)))
     bounded_workbench_limit = max(1, min(50, int(workbench_limit or 8)))
     bounded_plan_limit = max(1, min(50, int(plan_limit or 8)))
-    overview = list_knowledge_overview(agent_id=normalized_agent_id)
-    governance_tasks_all = list_knowledge_governance_tasks(agent_id="", status="all")
-    governance_tasks_open = list_knowledge_governance_tasks(agent_id=normalized_agent_id, status="open")
-    steward = _build_knowledge_steward_overview(governance_tasks=governance_tasks_all)
+    internal_access = bool(internal)
+    overview = list_knowledge_overview(agent_id=normalized_agent_id, internal=internal_access)
+    governance_tasks_all = list_knowledge_governance_tasks(agent_id=normalized_agent_id, status="all", internal=internal_access)
+    governance_tasks_open = list_knowledge_governance_tasks(agent_id=normalized_agent_id, status="open", internal=internal_access)
+    steward = _build_knowledge_steward_overview(
+        agent_id=normalized_agent_id,
+        governance_tasks=governance_tasks_all,
+        internal=internal_access,
+    )
     recommendations = _build_knowledge_steward_recommendations(
         agent_id=normalized_agent_id,
         limit=bounded_recommendation_limit,
         tasks_payload=governance_tasks_open,
+        internal=internal_access,
     )
     workbench_recommendations = (
         recommendations
@@ -1770,6 +1825,7 @@ def get_knowledge_dashboard_snapshot(*, agent_id: str = "", recommendation_limit
             agent_id=normalized_agent_id,
             limit=bounded_workbench_limit,
             tasks_payload=governance_tasks_open,
+            internal=internal_access,
         )
     )
     workbench = _build_knowledge_steward_workbench(
@@ -1778,13 +1834,15 @@ def get_knowledge_dashboard_snapshot(*, agent_id: str = "", recommendation_limit
         overview=steward,
         tasks_payload=governance_tasks_open,
         recommendations_payload=workbench_recommendations,
+        internal=internal_access,
     )
-    health = _build_knowledge_operations_health(agent_id=normalized_agent_id)
+    health = _build_knowledge_operations_health(agent_id=normalized_agent_id, internal=internal_access)
     governance_plan = _build_knowledge_governance_plan(
         agent_id=normalized_agent_id,
         limit=bounded_plan_limit,
         workbench=workbench,
         health=health,
+        internal=internal_access,
     )
     return {
         "schemaVersion": SCHEMA_VERSION,
@@ -1878,7 +1936,7 @@ def knowledge_permission_audit(*, agent_id: str = "") -> dict[str, Any]:
 def team_knowledge_memory_section_summary() -> dict[str, Any]:
     """Return a lightweight summary for /api/memory/overview."""
 
-    overview = list_knowledge_overview()
+    overview = _lightweight_knowledge_memory_summary()
     return {
         "knowledgeBaseCount": int((overview.get("summary") or {}).get("knowledgeBaseCount") or 0),
         "pendingProposalCount": int((overview.get("summary") or {}).get("pendingProposalCount") or 0),
@@ -1888,15 +1946,102 @@ def team_knowledge_memory_section_summary() -> dict[str, Any]:
     }
 
 
+def _lightweight_knowledge_memory_summary() -> dict[str, Any]:
+    """Count knowledge artifacts without expanding owners, permissions, or proposal payloads."""
+
+    knowledge_base_count = 0
+    pending_proposal_count = 0
+    item_count = 0
+    source_artifact_count = 0
+    updated_at = ""
+    for root in _iter_existing_knowledge_roots():
+        bases_state = _load_knowledge_bases_state_from_path(root / "knowledge_bases.json")
+        base_ids = {
+            str(item.get("knowledgeBaseId") or "").strip()
+            for item in list(bases_state.get("knowledgeBases") or [])
+            if isinstance(item, dict) and str(item.get("knowledgeBaseId") or "").strip()
+        }
+        knowledge_base_count += len(base_ids)
+        updated_at = max(updated_at, str(bases_state.get("updatedAt") or ""))
+        if not base_ids:
+            continue
+        for item in _read_jsonl(root / "items.jsonl"):
+            if str(item.get("knowledgeBaseId") or "") in base_ids:
+                item_count += 1
+                updated_at = max(updated_at, str(item.get("updatedAt") or item.get("createdAt") or ""))
+        for item in _read_jsonl(root / "source_artifacts.jsonl"):
+            if str(item.get("knowledgeBaseId") or "") in base_ids:
+                source_artifact_count += 1
+                updated_at = max(updated_at, str(item.get("updatedAt") or item.get("createdAt") or ""))
+        for item in _read_jsonl(root / "refinement_proposals.jsonl"):
+            if str(item.get("targetKnowledgeBaseId") or "") not in base_ids:
+                continue
+            updated_at = max(updated_at, str(item.get("updatedAt") or item.get("createdAt") or ""))
+            if str(item.get("status") or "") == "pending":
+                pending_proposal_count += 1
+
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "summary": {
+            "knowledgeBaseCount": knowledge_base_count,
+            "pendingProposalCount": pending_proposal_count,
+            "itemCount": item_count,
+            "sourceArtifactCount": source_artifact_count,
+        },
+        "updatedAt": updated_at or utc_now_iso(),
+    }
+
+
+def _iter_existing_knowledge_roots() -> list[Path]:
+    workspace_root = _project_root() / "workspace"
+    roots: list[Path] = []
+    for parent in (workspace_root / "teams", workspace_root / "agents"):
+        if not parent.exists():
+            continue
+        for path in sorted(parent.glob("*/knowledge/knowledge_bases.json")):
+            roots.append(path.parent)
+    return roots
+
+
+def _load_knowledge_bases_state_from_path(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {"schemaVersion": SCHEMA_VERSION, "updatedAt": "", "knowledgeBases": []}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {"schemaVersion": SCHEMA_VERSION, "updatedAt": "", "knowledgeBases": []}
+    if not isinstance(payload, dict):
+        return {"schemaVersion": SCHEMA_VERSION, "updatedAt": "", "knowledgeBases": []}
+    knowledge_bases = [item for item in list(payload.get("knowledgeBases") or []) if isinstance(item, dict)]
+    return {
+        "schemaVersion": int(payload.get("schemaVersion") or SCHEMA_VERSION),
+        "updatedAt": str(payload.get("updatedAt") or ""),
+        "knowledgeBases": knowledge_bases,
+    }
+
+
 def _require_base_with_owner(knowledge_base_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
-    normalized_id = _safe_token(knowledge_base_id, default="", max_length=128)
+    owner_type, owner_id, normalized_id = _parse_owner_scoped_knowledge_base_id(knowledge_base_id)
     if not normalized_id:
         raise TeamKnowledgeError("Knowledge base id is required.")
     _sync_roots()
-    for owner in _iter_knowledge_owners(agent_id="", include_archived=True, include_all_agents=True):
+    if owner_type and owner_id:
+        owner = _owner_context(owner_type, owner_id)
         base = _find_knowledge_base_for_owner(owner, normalized_id)
         if base:
             return owner, base
+        raise TeamKnowledgeNotFoundError("Knowledge base not found.")
+    matches: list[tuple[dict[str, Any], dict[str, Any]]] = []
+    for owner in _iter_knowledge_owners(agent_id="", include_archived=True, include_all_agents=True):
+        base = _find_knowledge_base_for_owner(owner, normalized_id)
+        if base:
+            matches.append((owner, base))
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        raise TeamKnowledgeAmbiguousKnowledgeBaseError(
+            "Knowledge base id is ambiguous across owners; use scopedKnowledgeBaseId."
+        )
     raise TeamKnowledgeNotFoundError("Knowledge base not found.")
 
 
@@ -1934,8 +2079,10 @@ def _knowledge_base_to_api(base: dict[str, Any], owner_value: dict[str, Any]) ->
     owner_id = str(base.get("ownerId") or owner.get("ownerId") or base.get("teamId") or "").strip()
     team = owner.get("team") if isinstance(owner.get("team"), dict) else {}
     agent = owner.get("agent") if isinstance(owner.get("agent"), dict) else {}
+    scoped_id = _owner_scoped_knowledge_base_id(owner, str(base.get("knowledgeBaseId") or ""))
     return {
         "knowledgeBaseId": str(base.get("knowledgeBaseId") or "").strip(),
+        "scopedKnowledgeBaseId": scoped_id,
         "ownerType": owner_type,
         "ownerId": owner_id,
         "teamId": str(base.get("teamId") or (owner_id if owner_type == "team" else "")).strip(),
@@ -1990,12 +2137,12 @@ def _pending_proposals_for_base(owner_value: Any, knowledge_base_id: str) -> lis
     return proposals[:12]
 
 
-def _permissions_for_actor(owner_value: Any, base: dict[str, Any], agent_id: str) -> dict[str, bool]:
+def _permissions_for_actor(owner_value: Any, base: dict[str, Any], agent_id: str, *, internal: bool = False) -> dict[str, bool]:
     return {
-        "canRead": _can_access(owner_value, base, agent_id, "read"),
-        "canPropose": _can_access(owner_value, base, agent_id, "propose"),
-        "canReview": _can_access(owner_value, base, agent_id, "review"),
-        "canRate": _can_access(owner_value, base, agent_id, "rate"),
+        "canRead": _can_access(owner_value, base, agent_id, "read", internal=internal),
+        "canPropose": _can_access(owner_value, base, agent_id, "propose", internal=internal),
+        "canReview": _can_access(owner_value, base, agent_id, "review", internal=internal),
+        "canRate": _can_access(owner_value, base, agent_id, "rate", internal=internal),
     }
 
 
@@ -2004,11 +2151,13 @@ def _require_permission(owner_value: Any, base: dict[str, Any], agent_id: str, a
         raise TeamKnowledgePermissionError(f"Agent is not allowed to {action} this knowledge base.")
 
 
-def _can_access(owner_value: Any, base: dict[str, Any], agent_id: str, action: str) -> bool:
+def _can_access(owner_value: Any, base: dict[str, Any], agent_id: str, action: str, *, internal: bool = False) -> bool:
     owner = _coerce_owner_context(owner_value)
     normalized_agent_id = str(agent_id or "").strip()
-    if not normalized_agent_id:
+    if internal:
         return True
+    if not normalized_agent_id:
+        return False
     acl = _normalize_acl(base.get("acl") if isinstance(base.get("acl"), dict) else {})
     grants = acl.get("grants") if isinstance(acl.get("grants"), dict) else {}
     agent_grants = _unique_strings((grants.get(action) or []) + (grants.get("*") or [])) if isinstance(grants, dict) else []
@@ -2037,10 +2186,11 @@ def _permission_explain(
     agent_id: str,
     action: str,
     policy_ids: set[str],
+    internal: bool = False,
 ) -> dict[str, Any]:
     owner = _coerce_owner_context(team)
     base_id = str(base.get("knowledgeBaseId") or "")
-    team_allowed = _can_access(owner, base, agent_id, action)
+    team_allowed = _can_access(owner, base, agent_id, action, internal=internal)
     policy_allowed = not policy_ids or base_id in policy_ids
     allowed = team_allowed and policy_allowed
     reason = "allowed"
@@ -2094,8 +2244,9 @@ def _knowledge_bases_for_team(team_id: str) -> list[dict[str, Any]]:
 
 
 def _find_knowledge_base_for_owner(owner_value: Any, knowledge_base_id: str) -> dict[str, Any] | None:
+    _, _, normalized_id = _parse_owner_scoped_knowledge_base_id(knowledge_base_id)
     for base in _knowledge_bases_for_owner(owner_value):
-        if str(base.get("knowledgeBaseId") or "").strip() == knowledge_base_id:
+        if str(base.get("knowledgeBaseId") or "").strip() == normalized_id:
             return base
     return None
 
@@ -2885,6 +3036,27 @@ def _safe_token(value: Any, *, default: str, max_length: int) -> str:
         return default
     text = _SAFE_ID_FRAGMENT.sub("-", text).strip(".-_")
     return (text or default)[:max_length]
+
+
+def _owner_scoped_knowledge_base_id(owner_value: Any, knowledge_base_id: str) -> str:
+    owner = _coerce_owner_context(owner_value)
+    owner_type = _safe_token(owner.get("ownerType"), default="", max_length=32)
+    owner_id = _safe_token(owner.get("ownerId"), default="", max_length=128)
+    base_id = _safe_token(knowledge_base_id, default="", max_length=128)
+    if owner_type and owner_id and base_id:
+        return f"{owner_type}:{owner_id}:{base_id}"
+    return base_id
+
+
+def _parse_owner_scoped_knowledge_base_id(value: Any) -> tuple[str, str, str]:
+    normalized = str(value or "").strip()
+    parts = normalized.split(":", 2)
+    if len(parts) == 3 and parts[0].strip() in KNOWLEDGE_OWNER_TYPES and parts[1].strip() and parts[2].strip():
+        owner_type = _safe_token(parts[0], default="", max_length=32)
+        owner_id = _safe_token(parts[1], default="", max_length=128)
+        base_id = _safe_token(parts[2], default="", max_length=128)
+        return owner_type, owner_id, base_id
+    return "", "", _safe_token(normalized, default="", max_length=128)
 
 
 def _new_id(prefix: str, existing_ids: set[str], name: str) -> str:

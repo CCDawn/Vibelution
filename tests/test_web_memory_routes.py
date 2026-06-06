@@ -251,6 +251,68 @@ def test_memory_knowledge_graph_endpoint_returns_read_only_project_structure(tmp
     assert "GRAPH API BODY MUST STAY OUT" not in str(payload)
 
 
+def test_memory_knowledge_graph_endpoint_requires_actor_agent(tmp_path, monkeypatch):
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(memory_graph_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(memory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(team_knowledge_service, "PROJECT_ROOT", tmp_path)
+    agent = agent_directory_service.create_agent_instance(display_name="Anonymous Graph Guard Agent")
+    team = team_service.create_team(name="Anonymous Graph Guard Team", members=[{"agentId": agent["agentId"], "role": "lead"}])
+    base = team_knowledge_service.create_knowledge_base(
+        team["teamId"],
+        name="Anonymous Graph Guard Knowledge",
+        actor_agent_id=agent["agentId"],
+    )
+    proposal = team_knowledge_service.create_refinement_proposal(
+        base["knowledgeBaseId"],
+        source_artifact_ids=[],
+        proposed_by_agent_id=agent["agentId"],
+        title="Anonymous graph guard proposal",
+        content="ANONYMOUS GRAPH BODY MUST STAY OUT",
+    )
+    team_knowledge_service.review_refinement_proposal(
+        base["knowledgeBaseId"],
+        proposal["proposalId"],
+        status="approved",
+        reviewed_by_agent_id=agent["agentId"],
+    )
+
+    response = client.get("/api/memory/knowledge-graph")
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "agentId is required for memory knowledge graph."
+
+
+def test_memory_knowledge_graph_scopes_structure_to_actor_visibility(tmp_path, monkeypatch):
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(memory_graph_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(memory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(team_knowledge_service, "PROJECT_ROOT", tmp_path)
+    lead = agent_directory_service.create_agent_instance(display_name="Scoped Graph Lead")
+    outsider = agent_directory_service.create_agent_instance(display_name="Scoped Graph Outsider")
+    hidden_agent = agent_directory_service.create_agent_instance(display_name="Scoped Hidden Agent")
+    team = team_service.create_team(name="Scoped Graph Team", members=[{"agentId": lead["agentId"], "role": "lead"}])
+    team_knowledge_service.create_knowledge_base(
+        team["teamId"],
+        name="Scoped Graph Knowledge",
+        actor_agent_id=lead["agentId"],
+    )
+
+    response = client.get("/api/memory/knowledge-graph", params={"agentId": outsider["agentId"]})
+    payload = response.json()
+
+    assert response.status_code == 200
+    assert "Scoped Graph Team" not in str(payload)
+    assert "Scoped Graph Lead" not in str(payload)
+    assert "Scoped Hidden Agent" not in str(payload)
+    agent_nodes = [node for node in payload["nodes"] if node["type"] == "agent"]
+    assert [node["metadata"]["agentId"] for node in agent_nodes] == [outsider["agentId"]]
+    assert payload["summary"]["nodeTypeCounts"].get("team", 0) == 0
+    assert payload["summary"]["nodeTypeCounts"].get("agent", 0) == 1
+
+
 def test_memory_knowledge_graph_node_detail_endpoint_returns_selected_node_content(tmp_path, monkeypatch):
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(memory_graph_service, "PROJECT_ROOT", tmp_path)
@@ -259,6 +321,7 @@ def test_memory_knowledge_graph_node_detail_endpoint_returns_selected_node_conte
     monkeypatch.setattr(team_knowledge_service, "PROJECT_ROOT", tmp_path)
     agent = agent_directory_service.create_agent_instance(display_name="Graph Detail Agent", direct_session_id="session-graph-detail")
     outsider = agent_directory_service.create_agent_instance(display_name="Graph Detail Outsider")
+    hidden_agent = agent_directory_service.create_agent_instance(display_name="Graph Detail Hidden Agent")
     team = team_service.create_team(name="Graph Detail Team", members=[{"agentId": agent["agentId"], "role": "lead"}])
     knowledge_base = team_knowledge_service.create_knowledge_base(
         team["teamId"],
@@ -284,9 +347,17 @@ def test_memory_knowledge_graph_node_detail_endpoint_returns_selected_node_conte
         "/api/memory/knowledge-graph/node-detail",
         params={"nodeId": f"knowledge_item:{reviewed['item']['knowledgeItemId']}", "agentId": agent["agentId"]},
     )
+    empty_actor_response = client.get(
+        "/api/memory/knowledge-graph/node-detail",
+        params={"nodeId": f"knowledge_item:{reviewed['item']['knowledgeItemId']}"},
+    )
     outsider_response = client.get(
         "/api/memory/knowledge-graph/node-detail",
         params={"nodeId": f"team:{team['teamId']}", "agentId": outsider["agentId"]},
+    )
+    hidden_agent_response = client.get(
+        "/api/memory/knowledge-graph/node-detail",
+        params={"nodeId": f"agent:{hidden_agent['agentId']}", "agentId": outsider["agentId"]},
     )
     missing_response = client.get(
         "/api/memory/knowledge-graph/node-detail",
@@ -301,9 +372,178 @@ def test_memory_knowledge_graph_node_detail_endpoint_returns_selected_node_conte
     assert detail_payload["operatingBoundary"]["fullContentIncluded"] is True
     assert detail_payload["contentItems"][0]["content"] == "GRAPH DETAIL API BODY SHOULD LOAD"
     assert detail_payload["contentItems"][0]["knowledgeItemId"] == reviewed["item"]["knowledgeItemId"]
-    assert outsider_response.status_code == 200, outsider_response.json()
-    assert outsider_response.json()["contentItems"] == []
+    assert empty_actor_response.status_code == 422
+    assert outsider_response.status_code == 404
+    assert hidden_agent_response.status_code == 404
     assert missing_response.status_code == 404
+
+
+def test_memory_knowledge_graph_uses_owner_scoped_knowledge_node_ids(tmp_path, monkeypatch):
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(memory_graph_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(memory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(team_knowledge_service, "PROJECT_ROOT", tmp_path)
+    original_new_event_id = team_knowledge_service._new_event_id
+
+    def fake_new_event_id(prefix: str) -> str:
+        if prefix == "kitem":
+            return "kitem-shared-leaf"
+        return original_new_event_id(prefix)
+
+    monkeypatch.setattr(team_knowledge_service, "_new_event_id", fake_new_event_id)
+    first_agent = agent_directory_service.create_agent_instance(display_name="Graph Owner One")
+    second_agent = agent_directory_service.create_agent_instance(display_name="Graph Owner Two")
+    graph_viewer = agent_directory_service.create_agent_instance(display_name="Graph Cross-Team Viewer")
+    first_team = team_service.create_team(name="Graph Owner Team One", members=[{"agentId": first_agent["agentId"], "role": "lead"}])
+    second_team = team_service.create_team(name="Graph Owner Team Two", members=[{"agentId": second_agent["agentId"], "role": "lead"}])
+    first_base = team_knowledge_service.create_knowledge_base(
+        first_team["teamId"],
+        name="Shared Graph KB",
+        actor_agent_id=first_agent["agentId"],
+        acl={"grants": {"read": [graph_viewer["agentId"]], "propose": [first_agent["agentId"]], "review": [first_agent["agentId"]]}},
+    )
+    second_base = team_knowledge_service.create_knowledge_base(
+        second_team["teamId"],
+        name="Shared Graph KB",
+        actor_agent_id=second_agent["agentId"],
+        acl={"grants": {"read": [graph_viewer["agentId"]], "propose": [second_agent["agentId"]], "review": [second_agent["agentId"]]}},
+    )
+    assert first_base["knowledgeBaseId"] == second_base["knowledgeBaseId"]
+    first_scoped_base_id = first_base["scopedKnowledgeBaseId"]
+    second_scoped_base_id = second_base["scopedKnowledgeBaseId"]
+    assert first_scoped_base_id != second_scoped_base_id
+    assert first_scoped_base_id.startswith(f"team:{first_team['teamId']}:")
+    assert second_scoped_base_id.startswith(f"team:{second_team['teamId']}:")
+
+    first_proposal = team_knowledge_service.create_refinement_proposal(
+        first_scoped_base_id,
+        source_artifact_ids=[],
+        proposed_by_agent_id=first_agent["agentId"],
+        title="First owner graph item",
+        content="FIRST OWNER GRAPH BODY",
+    )
+    second_proposal = team_knowledge_service.create_refinement_proposal(
+        second_scoped_base_id,
+        source_artifact_ids=[],
+        proposed_by_agent_id=second_agent["agentId"],
+        title="Second owner graph item",
+        content="SECOND OWNER GRAPH BODY",
+    )
+    first_reviewed = team_knowledge_service.review_refinement_proposal(
+        first_scoped_base_id,
+        first_proposal["proposalId"],
+        status="approved",
+        reviewed_by_agent_id=first_agent["agentId"],
+    )["item"]
+    second_reviewed = team_knowledge_service.review_refinement_proposal(
+        second_scoped_base_id,
+        second_proposal["proposalId"],
+        status="approved",
+        reviewed_by_agent_id=second_agent["agentId"],
+    )["item"]
+    first_reviewed.setdefault("metadata", {})["officialResearchGraph"] = {
+        "status": "synced",
+        "summary": {"edgeCount": 0},
+        "edges": [],
+    }
+    second_reviewed.setdefault("metadata", {})["officialResearchGraph"] = {
+        "status": "synced",
+        "summary": {"edgeCount": 0},
+        "edges": [],
+    }
+    team_knowledge_service.update_knowledge_item_metadata(
+        first_scoped_base_id,
+        first_reviewed["knowledgeItemId"],
+        metadata_patch=first_reviewed["metadata"],
+        actor_agent_id=first_agent["agentId"],
+    )
+    team_knowledge_service.update_knowledge_item_metadata(
+        second_scoped_base_id,
+        second_reviewed["knowledgeItemId"],
+        metadata_patch=second_reviewed["metadata"],
+        actor_agent_id=second_agent["agentId"],
+    )
+
+    response = client.get(
+        "/api/memory/knowledge-graph",
+        params={"include": "officialResearchGraph", "agentId": graph_viewer["agentId"]},
+    )
+    payload = response.json()
+
+    assert response.status_code == 200
+    base_nodes = [
+        node
+        for node in payload["nodes"]
+        if node["type"] == "knowledge_base" and node["metadata"]["knowledgeBaseId"] == first_base["knowledgeBaseId"]
+    ]
+    assert len(base_nodes) == 2
+    assert {node["metadata"]["ownerId"] for node in base_nodes} == {first_team["teamId"], second_team["teamId"]}
+    assert len({node["id"] for node in base_nodes}) == 2
+    assert all(node["id"].startswith("knowledge_base:team:") for node in base_nodes)
+    item_nodes = [
+        node
+        for node in payload["nodes"]
+        if node["type"] == "knowledge_item" and node["metadata"]["knowledgeItemId"] == first_reviewed["knowledgeItemId"]
+    ]
+    assert len(item_nodes) == 2
+    assert len({node["id"] for node in item_nodes}) == 2
+
+    scoped_response = client.get(
+        "/api/memory/knowledge-graph",
+        params={
+            "include": "officialResearchGraph",
+            "agentId": graph_viewer["agentId"],
+            "knowledgeBaseId": first_scoped_base_id,
+        },
+    )
+    scoped_payload = scoped_response.json()
+    scoped_base_nodes = [
+        node
+        for node in scoped_payload["nodes"]
+        if node["type"] == "knowledge_base" and node["metadata"]["knowledgeBaseId"] == first_base["knowledgeBaseId"]
+    ]
+    scoped_item_nodes = [
+        node
+        for node in scoped_payload["nodes"]
+        if node["type"] == "knowledge_item" and node["metadata"]["knowledgeItemId"] == first_reviewed["knowledgeItemId"]
+    ]
+    bare_base_detail = client.get(
+        "/api/memory/knowledge-graph/node-detail",
+        params={"nodeId": f"knowledge_base:{first_base['knowledgeBaseId']}", "agentId": graph_viewer["agentId"]},
+    )
+    bare_item_detail = client.get(
+        "/api/memory/knowledge-graph/node-detail",
+        params={"nodeId": f"knowledge_item:{first_reviewed['knowledgeItemId']}", "agentId": graph_viewer["agentId"]},
+    )
+
+    assert scoped_response.status_code == 200
+    assert len(scoped_base_nodes) == 1
+    assert scoped_base_nodes[0]["metadata"]["ownerId"] == first_team["teamId"]
+    assert len(scoped_item_nodes) == 1
+    assert scoped_item_nodes[0]["metadata"]["ownerId"] == first_team["teamId"]
+    assert bare_base_detail.status_code == 422
+    assert bare_item_detail.status_code == 422
+
+    first_detail = client.get(
+        "/api/memory/knowledge-graph/node-detail",
+        params={
+            "nodeId": next(node["id"] for node in item_nodes if node["metadata"]["ownerId"] == first_team["teamId"]),
+            "agentId": first_agent["agentId"],
+        },
+    )
+    second_detail = client.get(
+        "/api/memory/knowledge-graph/node-detail",
+        params={
+            "nodeId": next(node["id"] for node in item_nodes if node["metadata"]["ownerId"] == second_team["teamId"]),
+            "agentId": second_agent["agentId"],
+        },
+    )
+
+    assert first_detail.status_code == 200
+    assert second_detail.status_code == 200
+    assert first_detail.json()["contentItems"][0]["content"] == "FIRST OWNER GRAPH BODY"
+    assert second_detail.json()["contentItems"][0]["content"] == "SECOND OWNER GRAPH BODY"
 
 
 def test_memory_overview_marks_research_knowledge_base_missing_before_first_search(tmp_path, monkeypatch):
@@ -516,3 +756,75 @@ def test_memory_management_api_persists_user_items_and_system_overrides(tmp_path
     assert all(event["phase"] == "memory_management" for event in management_events)
     assert all(event["lifecycle"] is True for event in management_events)
     assert all("content" not in event.get("fields", {}) for event in management_events)
+
+
+def test_memory_overview_slow_event_includes_section_timings(tmp_path, monkeypatch):
+    recorded_events: list[dict] = []
+
+    def fake_record_runtime_scene_event(component, phase, event_code, **kwargs):
+        recorded_events.append(
+            {
+                "component": component,
+                "phase": phase,
+                "eventCode": event_code,
+                **kwargs,
+            }
+        )
+        return {"accepted": True, "runtimeSceneId": "scene-memory"}
+
+    monkeypatch.setattr(runtime_scene_service, "record_runtime_scene_event", fake_record_runtime_scene_event)
+
+    memory_service._record_memory_overview_perf_event(
+        tmp_path,
+        {
+            "summary": {"itemCount": 2},
+            "sections": [
+                {"id": "project-memory", "items": [{"id": "one"}]},
+                {"id": "runtime-memory", "items": [{"id": "two"}]},
+            ],
+        },
+        duration_ms=900,
+        section_timings=[
+            {"sectionId": "project-memory", "durationMs": 12.3, "itemCount": 1},
+            {"sectionId": "runtime-memory", "durationMs": 45.6, "itemCount": 1},
+        ],
+    )
+
+    assert recorded_events
+    event = recorded_events[-1]
+    assert event["eventCode"] == "memory.overview.slow"
+    assert event["fields"]["durationMs"] == 900
+    assert event["fields"]["sectionTimingsMs"] == [
+        {"sectionId": "project-memory", "durationMs": 12.3, "itemCount": 1},
+        {"sectionId": "runtime-memory", "durationMs": 45.6, "itemCount": 1},
+    ]
+
+
+def test_memory_overview_perf_event_records_single_recovery_after_slow(tmp_path, monkeypatch):
+    recorded_events: list[dict] = []
+
+    def fake_record_runtime_scene_event(component, phase, event_code, **kwargs):
+        recorded_events.append(
+            {
+                "component": component,
+                "phase": phase,
+                "eventCode": event_code,
+                **kwargs,
+            }
+        )
+        return {"accepted": True, "runtimeSceneId": "scene-memory"}
+
+    monkeypatch.setattr(runtime_scene_service, "record_runtime_scene_event", fake_record_runtime_scene_event)
+    monkeypatch.setattr(memory_service, "MEMORY_OVERVIEW_WAS_SLOW", False)
+
+    payload = {"summary": {"itemCount": 0}, "sections": []}
+    memory_service._record_memory_overview_perf_event(tmp_path, payload, duration_ms=900, section_timings=[])
+    memory_service._record_memory_overview_perf_event(tmp_path, payload, duration_ms=120, section_timings=[])
+    memory_service._record_memory_overview_perf_event(tmp_path, payload, duration_ms=110, section_timings=[])
+
+    assert [event["eventCode"] for event in recorded_events] == [
+        "memory.overview.slow",
+        "memory.overview.recovered",
+    ]
+    assert recorded_events[-1]["level"] == "info"
+    assert recorded_events[-1]["outcome"] == "recovered"

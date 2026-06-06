@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.10.44 - 2026-06-06
+
+- Optimized Agent Center loading by reusing repaired Agent registry snapshots, batching Agent API hydration and runtime history reads, and logging slow `list_agents` hydration breakdowns.
+- Added Agent creation tool packages in the Web Agent Center, while keeping per-tool policy tuning available after creation.
+- Hardened direct-session Agent indexing, archive/purge cleanup, team-linked chat room cleanup, and runtime LLM binding diagnostics with focused lifecycle evidence.
+- Removed stale legacy `llmConfigId` flow-canvas persistence from the frontend contract and aligned visible copy around Agent model slots.
+
 ## 0.10.43 - 2026-06-06
 
 - Added a read-only Challenge Cup workflow coordination status API that groups pending transfers, rework candidates, stewardship items, blocked candidates, and active work for the research team.

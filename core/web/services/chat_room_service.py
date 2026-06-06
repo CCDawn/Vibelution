@@ -2394,14 +2394,12 @@ def _refresh_participants(
                 fallback["agentAvatarImageUrl"] = str(active_agent.get("avatarImageUrl") or fallback.get("agentAvatarImageUrl") or "").strip()
             session_id = str(fallback.get("sessionId") or fallback.get("directSessionId") or "").strip()
             if session_id and str(fallback.get("agentId") or "").strip():
-                detail = session_service.get_session_detail(session_id) or {}
-                if bool(detail.get("agentMissing")):
-                    fallback["agentMissing"] = True
-                    fallback["agentId"] = str(detail.get("agentId") or fallback.get("agentId") or "").strip()
-                    fallback["agentCode"] = str(detail.get("agentCode") or fallback.get("agentCode") or "").strip()
-                    fallback["agentStatusCode"] = str(detail.get("agentStatusCode") or "missing_agent").strip()
-                    fallback["agentStatusMessage"] = str(detail.get("agentStatusMessage") or _MISSING_SESSION_STATUS_MESSAGE).strip()
-                    fallback["enabled"] = False
+                archived_agent = agent_directory_service.get_agent(str(fallback.get("agentId") or "").strip(), include_archived=True)
+                archived_status = str((archived_agent or {}).get("status") or "").strip().lower()
+                fallback["agentMissing"] = True
+                fallback["agentStatusCode"] = "archived_agent" if archived_status == "archived" else "missing_agent"
+                fallback["agentStatusMessage"] = _MISSING_SESSION_STATUS_MESSAGE
+                fallback["enabled"] = False
             refreshed.append(fallback)
     return refreshed
 
@@ -2685,6 +2683,8 @@ def _room_to_compact_reference(room: dict[str, Any]) -> dict[str, Any]:
                 "agentCode": str(item.get("agentCode") or "").strip(),
                 "sessionId": str(item.get("sessionId") or item.get("directSessionId") or "").strip(),
                 "directSessionId": str(item.get("directSessionId") or item.get("sessionId") or "").strip(),
+                "dialogueModelId": str(item.get("dialogueModelId") or "").strip(),
+                "llmBindings": agent_directory_service.normalize_agent_llm_bindings(item.get("llmBindings")),
                 "enabled": bool(item.get("enabled", True)),
             }
             for item in list(room.get("participants") or [])

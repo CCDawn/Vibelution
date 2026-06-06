@@ -29,7 +29,6 @@ from config.public_config import (  # noqa: E402
     MODEL_LIBRARY_DETAIL_FIELDS,
     UNCONFIGURED_MODEL_REF,
     add_llm_model,
-    add_llm_profile,
     apply_llm_model_preset,
     build_effective_config,
     delete_llm_model,
@@ -101,7 +100,7 @@ I18N = {
         "actions": "建议动作",
         "raw_toml": "原始 TOML",
         "raw_toml_summary": "查看当前写盘内容",
-        "profile_id": "模型绑定键",
+        "profile_id": "旧模型配置键",
         "provider_id": "服务标识",
         "api_base": "API 地址",
         "open_runtime": "运行时设置",
@@ -116,7 +115,7 @@ I18N = {
         "provider_context_window": "上下文窗口",
         "provider_extra_headers": "额外请求头(JSON)",
         "model": "模型",
-        "profile": "模型绑定",
+        "profile": "旧模型配置",
         "api_key_source": "密钥来源",
         "selectable_models": "可选模型",
         "none": "无",
@@ -130,14 +129,14 @@ I18N = {
         "language": "语言",
         "lang_zh": "中文",
         "lang_en": "English",
-        "add_llm": "复制模型绑定",
+        "add_llm": "复制旧模型配置",
         "test_llm": "测试连接",
         "switch_provider": "切换",
         "test_provider": "测试",
         "switch_success": "主模型已切换",
         "test_success_title": "连接正常",
         "test_failed_title": "连接失败",
-        "prompt_profile_id": "模型绑定键",
+        "prompt_profile_id": "旧模型配置键",
         "prompt_provider_id": "模型服务标识",
         "prompt_source_profile_id": "参考任务",
         "prompt_model_id": "选择模型",
@@ -182,7 +181,7 @@ I18N = {
         "actions": "Suggested Actions",
         "raw_toml": "Raw TOML",
         "raw_toml_summary": "View current persisted content",
-        "profile_id": "Model Binding Key",
+        "profile_id": "Legacy Model Config Key",
         "provider_id": "Provider ID",
         "api_base": "API Base",
         "open_runtime": "Runtime",
@@ -197,7 +196,7 @@ I18N = {
         "provider_context_window": "Context Window",
         "provider_extra_headers": "Extra Headers (JSON)",
         "model": "Model",
-        "profile": "Model Binding",
+        "profile": "Legacy Model Config",
         "api_key_source": "API Key Source",
         "selectable_models": "Selectable Models",
         "none": "None",
@@ -211,7 +210,7 @@ I18N = {
         "language": "Language",
         "lang_zh": "中文",
         "lang_en": "English",
-        "add_llm": "Clone Model Binding",
+        "add_llm": "Clone Legacy Model Config",
         "test_llm": "Test Connection",
         "switch_provider": "Switch",
         "test_provider": "Test",
@@ -256,9 +255,9 @@ SECTION_LABELS = {
     "zh": {
         "runtime": "运行时",
         "avatar": "形象",
-        "llm": "模型绑定",
+        "llm": "模型",
         "llm.providers": "模型服务",
-        "llm.profiles": "模型绑定",
+        "llm.profiles": "旧模型配置",
         "llm.discovery": "模型发现",
         "agent": "智能体",
         "context_compression": "上下文压缩",
@@ -301,9 +300,9 @@ SECTION_LABELS = {
     "en": {
         "runtime": "Runtime",
         "avatar": "Avatar",
-        "llm": "Model Bindings",
+        "llm": "Models",
         "llm.providers": "Providers",
-        "llm.profiles": "Model Bindings",
+        "llm.profiles": "Legacy Model Config",
         "llm.discovery": "Model Discovery",
         "agent": "智能体",
         "context_compression": "Context Compression",
@@ -434,7 +433,7 @@ FIELD_LABELS = {
         "ui.show_ascii_art": "显示 ASCII Art",
         "ui.show_welcome": "显示欢迎面板",
         "prompt.default_components": "默认提示词组件",
-        "git.commit_message_profile": "Git 提交使用的模型绑定",
+        "git.commit_message_profile": "旧 Git 提交模型",
         "git.commit_message_model_ref": "Git 提交使用的模型",
         "git.commit_message_prompt": "Git 提交提示词",
         "network.proxy_enabled": "启用代理",
@@ -541,7 +540,7 @@ FIELD_LABELS = {
         "ui.show_ascii_art": "Show ASCII Art",
         "ui.show_welcome": "Show Welcome Panel",
         "prompt.default_components": "Default Prompt Components",
-        "git.commit_message_profile": "Git Commit Model Binding",
+        "git.commit_message_profile": "Legacy Git Commit Model",
         "git.commit_message_model_ref": "Git Commit Model",
         "git.commit_message_prompt": "Git Commit Prompt",
         "network.proxy_enabled": "Enable Proxy",
@@ -1087,67 +1086,6 @@ def _api_key_display_state(api_key_env: str, configured: bool, draft_meta: dict 
     return configured, "configured" if configured else "missing"
 
 
-def _selected_model_option(public_config: dict, profile: dict) -> dict | None:
-    model_ref = str(profile.get("model_ref", "")).strip()
-    if model_ref:
-        if model_ref == UNCONFIGURED_MODEL_REF:
-            return None
-        for option in list_llm_model_options(public_config):
-            if str(option.get("model_id", "")).strip() == model_ref:
-                return option
-        return None
-
-    provider_signature = _provider_signature(profile.get("provider"))
-    model = str(profile.get("model", "")).strip()
-    if not provider_signature or not model:
-        return None
-    for option in list_llm_model_options(public_config):
-        option_provider = _public_provider(option.get("provider", {}))
-        if _provider_signature(option_provider) == provider_signature and str(option.get("model", "")).strip() == model:
-            return option
-    return None
-
-
-def _missing_required_llm_profiles(public_config: dict) -> list[str]:
-    llm = public_config.get("llm", {})
-    profiles = llm.get("profiles", {}) if isinstance(llm, dict) else {}
-    if not isinstance(profiles, dict):
-        return []
-    missing: list[str] = []
-    primary = profiles.get("primary")
-    if not isinstance(primary, dict) or _selected_model_option(public_config, primary) is None:
-        missing.append("primary")
-    return missing
-
-
-def _validate_required_llm_profiles(public_config: dict, lang: str) -> None:
-    missing = _missing_required_llm_profiles(public_config)
-    if not missing:
-        return
-    display_names = "、".join(_display_profile_id(profile_id, lang) for profile_id in missing)
-    raise ValueError(f'{I18N[lang]["profile_model_missing"]} {display_names}')
-
-
-def list_llm_profile_options(public_config: dict, lang: str = DEFAULT_LANG) -> list[dict[str, str]]:
-    llm = public_config.get("llm", {})
-    profiles = llm.get("profiles", {}) if isinstance(llm, dict) else {}
-    options: list[dict[str, str]] = []
-    if not isinstance(profiles, dict):
-        return options
-    for profile_id, profile in profiles.items():
-        if not isinstance(profile, dict):
-            continue
-        model = str(profile.get("model", ""))
-        options.append(
-            {
-                "profile_id": str(profile_id),
-                "model": model,
-                "label": _display_profile_id(str(profile_id), lang),
-            }
-        )
-    return options
-
-
 def _default_model_api_key_env(model_id: str) -> str:
     token = "".join(char if char.isalnum() else "_" for char in str(model_id or "").upper()).strip("_")
     return f"VIBELUTION_LLM_{token}_API_KEY" if token else "VIBELUTION_LLM_MODEL_API_KEY"
@@ -1239,17 +1177,6 @@ def clear_llm_model_api_key(public_config: dict, model_id: str) -> str:
     return api_key_env
 
 
-def _find_profile_id_for_provider(public_config: dict, provider_id: str) -> str:
-    llm = public_config.get("llm", {})
-    profiles = llm.get("profiles", {}) if isinstance(llm, dict) else {}
-    if not isinstance(profiles, dict):
-        raise ValueError("llm.profiles must be an object")
-    for profile_id, profile in profiles.items():
-        if isinstance(profile, dict) and profile.get("provider_id") == provider_id:
-            return str(profile_id)
-    raise ValueError(f"no task model uses provider: {provider_id}")
-
-
 def _probe_llm_http(provider, profile, api_key: str | None = None) -> dict:
     if provider.requires_api_key and not api_key:
         return {"ok": False, "message": f"missing API key for provider `{provider.provider_id}`"}
@@ -1292,61 +1219,6 @@ def _probe_llm_http(provider, profile, api_key: str | None = None) -> dict:
         return {"ok": False, "message": f"HTTP {exc.code}: {exc.reason}"}
     except Exception as exc:
         return {"ok": False, "message": redact_llm_probe_error(str(exc), api_key=api_key)}
-
-
-def test_llm_connection(public_config: dict, profile_id: str | None = None, draft_meta: dict | None = None) -> dict:
-    validate_llm_public_config(public_config)
-    effective = build_effective_config(public_config)
-    profile = effective.llm.get_profile(profile_id=profile_id) if profile_id else effective.llm.get_profile(role="primary")
-    provider = effective.llm.get_provider(profile.provider_id)
-    api_key = effective.get_api_key_for_profile(profile_id=profile.profile_id)
-    api_key_source = effective.llm.get_api_key_source_label_for_profile(profile_id=profile.profile_id)
-    if not provider.requires_api_key:
-        api_key = None
-        api_key_source = "not-required"
-    meta = _normalize_draft_meta(draft_meta)
-    pending = meta["pending_api_keys"]
-    cleared = meta["pending_cleared_api_keys"]
-    profile_public = (
-        public_config.get("llm", {}).get("profiles", {}).get(profile.profile_id, {})
-        if isinstance(public_config.get("llm", {}), dict)
-        else {}
-    )
-    profile_api_key_env = str(profile_public.get("api_key_env", "")).strip() if isinstance(profile_public, dict) else ""
-    provider_api_key_env = str(getattr(provider, "api_key_env", "") or "").strip()
-    if provider.requires_api_key:
-        if isinstance(cleared, list) and profile_api_key_env and profile_api_key_env in cleared:
-            api_key = None
-            api_key_source = f"pending-clear:{profile_api_key_env}"
-        elif isinstance(cleared, list) and provider_api_key_env and provider_api_key_env in cleared:
-            api_key = None
-            api_key_source = f"pending-clear:{provider_api_key_env}"
-        elif isinstance(pending, dict) and profile_api_key_env and profile_api_key_env in pending:
-            api_key = pending[profile_api_key_env]
-            api_key_source = f"pending-env:{profile_api_key_env}"
-        elif isinstance(pending, dict) and provider_api_key_env and provider_api_key_env in pending:
-            api_key = pending[provider_api_key_env]
-            api_key_source = f"pending-env:{provider_api_key_env}"
-    try:
-        result = _probe_llm_runtime(provider, profile, api_key)
-    except TypeError:
-        result = _probe_llm_runtime(provider, profile)
-    return {
-        **result,
-        "profile_id": profile.profile_id,
-        "provider_id": provider.provider_id,
-        "provider_kind": provider.kind,
-        "base_url": provider.base_url,
-        "model": profile.model,
-        "transport": profile.transport,
-        "contract": profile.contract,
-        "api_key_source": api_key_source,
-    }
-
-
-def test_llm_connection_by_provider(public_config: dict, provider_id: str) -> dict:
-    profile_id = _find_profile_id_for_provider(public_config, provider_id)
-    return test_llm_connection(public_config, profile_id)
 
 
 def _json_for_attr(value) -> str:
@@ -1506,62 +1378,6 @@ def _dom_id_from_path(path: str) -> str:
     return "".join(char if char.isalnum() else "-" for char in path).strip("-")
 
 
-def _llm_profile_select(public_config: dict, selected_profile_id: str, select_id: str, lang: str) -> str:
-    options = []
-    for option in list_llm_profile_options(public_config, lang):
-        profile_id = option["profile_id"]
-        selected = " selected" if profile_id == selected_profile_id else ""
-        options.append(
-            f'<option value="{html.escape(profile_id)}"{selected}>{html.escape(option["label"])}</option>'
-        )
-    return f'<select id="{html.escape(select_id)}" class="card-profile-select">{"".join(options)}</select>'
-
-
-def _llm_model_select(
-    public_config: dict,
-    selected_provider: dict | None,
-    selected_model: str,
-    select_id: str,
-    profile_id: str,
-    lang: str,
-) -> str:
-    selected_signature = _provider_signature(selected_provider)
-    options = []
-    matched = False
-    for option in list_llm_model_options(public_config):
-        option_provider = _public_provider(option.get("provider", {}))
-        option_signature = _provider_signature(option_provider)
-        option_model = str(option["model"])
-        option_model_id = str(option["model_id"])
-        option_label = str(option["label"])
-        option_provider_kind = str(option["provider_kind"])
-        selected = " selected" if option_signature == selected_signature and option_model == selected_model else ""
-        if selected:
-            matched = True
-        details_json = html.escape(json.dumps(option.get("details", {}), ensure_ascii=False), quote=True)
-        provider_json = html.escape(json.dumps(option_provider, ensure_ascii=False), quote=True)
-        options.append(
-            f'<option value="{html.escape(option_model_id)}"{selected} '
-            f'data-provider="{provider_json}" '
-            f'data-model="{html.escape(option_model)}" '
-            f'data-label="{html.escape(option_label)}" '
-            f'data-api-key-env="{html.escape(str(option.get("api_key_env", "")))}" '
-            f'data-details="{details_json}">'
-            f'{html.escape(option_label)} / {html.escape(_display_provider_kind(option_provider_kind, lang))}</option>'
-        )
-    disabled = " disabled" if not options else ""
-    placeholder_selected = " selected" if not matched else ""
-    placeholder = (
-        f'<option value=""{placeholder_selected}>'
-        f'{html.escape(I18N[lang]["select_model_placeholder"])}</option>'
-    )
-    required_class = " is-required" if not matched else ""
-    return (
-        f'<select id="{html.escape(select_id)}" class="card-profile-select{required_class}" '
-        f'data-profile-id="{html.escape(profile_id)}"{disabled}>{placeholder}{"".join(options)}</select>'
-    )
-
-
 def _llm_model_id_select(public_config: dict, selected_model_id: str, select_id: str, lang: str) -> str:
     options = []
     for option in list_llm_model_options(public_config):
@@ -1577,40 +1393,6 @@ def _llm_model_id_select(public_config: dict, selected_model_id: str, select_id:
         )
     disabled = " disabled" if not options else ""
     return f'<select id="{html.escape(select_id)}" class="card-profile-select"{disabled}>{"".join(options)}</select>'
-
-
-def _primary_profile_id(public_config: dict) -> str:
-    llm = public_config.get("llm", {})
-    if not isinstance(llm, dict):
-        return "primary"
-    profiles = llm.get("profiles", {})
-    if isinstance(profiles, dict) and "primary" in profiles:
-        return "primary"
-    if isinstance(profiles, dict) and profiles:
-        return str(next(iter(profiles)))
-    return "primary"
-
-
-def _profile_group_key(profile_id: str) -> str:
-    token = str(profile_id or "").strip()
-    if token in {"supervised_baseline", "supervised_candidate"} or token.startswith("supervised_"):
-        return "supervised"
-    return "unsupervised"
-
-
-def _profile_group_title(group_key: str, lang: str) -> str:
-    mapping = {
-        "unsupervised": I18N[lang]["profile_group_unsupervised"],
-        "supervised": I18N[lang]["profile_group_supervised"],
-    }
-    return mapping.get(group_key, group_key)
-
-
-def _group_profile_ids(profile_map: dict) -> dict[str, list[str]]:
-    grouped = {"unsupervised": [], "supervised": []}
-    for profile_id in profile_map.keys():
-        grouped.setdefault(_profile_group_key(str(profile_id)), []).append(str(profile_id))
-    return grouped
 
 
 def _render_group_block(title: str, count: int, content_html: str, *, group_kind: str) -> str:
@@ -1637,15 +1419,12 @@ def _render_config_object_card(
         raise ValueError(f"config path is not an object card: {path}")
     key = path.split(".")[-1] if path else ""
     title = title_override or localize_section_label(path, key, lang)
-    if path == "llm.profiles":
-        content_html = _render_llm_profile_groups(value, path, lang, public_config)
-    else:
-        parent_path = path.rsplit(".", 1)[0] if "." in path else ""
-        if parent_path == "llm.providers":
-            title = _display_provider_id(key, lang)
-        elif parent_path == "llm.profiles":
-            title = _display_profile_id(key, lang)
-        content_html = _render_group_fields(value, path, lang, public_config)
+    parent_path = path.rsplit(".", 1)[0] if "." in path else ""
+    if parent_path == "llm.providers":
+        title = _display_provider_id(key, lang)
+    elif parent_path == "llm.profiles":
+        title = _display_profile_id(key, lang)
+    content_html = _render_group_fields(value, path, lang, public_config)
     return _render_collapsible_card(
         path,
         title,
@@ -1654,18 +1433,6 @@ def _render_config_object_card(
         actions_html=_card_actions(path, lang, public_config),
         lang=lang,
     )
-
-
-def _render_llm_profile_card(public_config: dict, profile_id: str, lang: str) -> str:
-    llm = public_config.get("llm", {})
-    profiles = llm.get("profiles", {}) if isinstance(llm, dict) else {}
-    if not isinstance(profiles, dict):
-        raise ValueError("llm.profiles must be an object")
-    value = profiles.get(profile_id, {})
-    if not isinstance(value, dict):
-        raise ValueError(f"unknown task model: {profile_id}")
-    path = f"llm.profiles.{profile_id}"
-    return _render_config_object_card(public_config, path, value, lang)
 
 
 def _lookup_config_path_value(public_config: dict, path: str):
@@ -1696,92 +1463,8 @@ def _render_config_card_preview(public_config: dict, card_path: str, lang: str) 
     return _render_config_object_card(public_config, resolved_path, value, lang)
 
 
-def _render_llm_profile_groups(data: dict, prefix: str, lang: str, public_config: dict) -> str:
-    cards: list[str] = [_render_inline_llm_profile_card(public_config, lang)]
-    grouped = _group_profile_ids(data)
-    for group_key in ("unsupervised", "supervised"):
-        profile_ids = grouped.get(group_key, [])
-        if not profile_ids:
-            continue
-        group_cards: list[str] = ['<div class="section-grid">']
-        for profile_id in profile_ids:
-            value = data.get(profile_id, {})
-            if not isinstance(value, dict):
-                continue
-            group_cards.append(_render_llm_profile_card(public_config, profile_id, lang))
-        group_cards.append("</div>")
-        cards.append(
-            _render_group_block(
-                _profile_group_title(group_key, lang),
-                len(profile_ids),
-                "".join(group_cards),
-                group_kind=group_key,
-            )
-        )
-    return "".join(cards)
-
-
-def _render_inline_llm_profile_card(public_config: dict, lang: str) -> str:
-    t = I18N[lang]
-    source_profile_options = "".join(
-        f'<option value="{html.escape(str(option["profile_id"]))}">{html.escape(str(option["label"]))}</option>'
-        for option in list_llm_profile_options(public_config, lang)
-    )
-    return (
-        f'<div id="add-llm-profile-card" class="inline-add-card" hidden>'
-        f'<div class="model-library-edit">'
-        f'<label><span>{html.escape(t["prompt_profile_id"])}</span><input type="text" data-add-profile-field="profile_id"></label>'
-        f'<label><span>{html.escape(t["prompt_source_profile_id"])}</span><select data-add-profile-field="source_profile_id">{source_profile_options}</select></label>'
-        f'<label><span>{html.escape(t["prompt_model_id"])}</span>{_llm_model_id_select(public_config, "", "add-llm-profile-model", lang)}</label>'
-        f'<div class="model-library-actions">'
-        f'<button type="button" class="card-action subtle" onclick="saveInlineLlmProfile()">{html.escape(t["save_model"])}</button>'
-        f'<button type="button" class="card-action" onclick="cancelInlineLlmProfile()">{html.escape(t["cancel"])}</button>'
-        f"</div>"
-        f"</div>"
-        f"</div>"
-    )
-
-
-def _profile_card_actions(path: str, lang: str, public_config: dict) -> str:
-    prefix = "llm.profiles."
-    if not path.startswith(prefix) or path.count(".") != 2:
-        return ""
-    profile_id = path.removeprefix(prefix)
-    safe_profile = html.escape(profile_id)
-    select_id = f"llm-model-switch-{_dom_id_from_path(path)}"
-    llm = public_config.get("llm", {})
-    profile = llm.get("profiles", {}).get(profile_id, {}) if isinstance(llm, dict) and isinstance(llm.get("profiles", {}), dict) else {}
-    selected_option = _selected_model_option(public_config, profile if isinstance(profile, dict) else {})
-    if selected_option:
-        selected_provider = _public_provider(selected_option.get("provider", {}))
-        selected_model = str(selected_option.get("model", ""))
-    else:
-        selected_provider = _public_provider(profile.get("provider")) if isinstance(profile, dict) else {}
-        selected_model = str(profile.get("model", "")) if isinstance(profile, dict) else ""
-    missing_required = selected_option is None
-    t = I18N[lang]
-    required_badge = (
-        f'<span class="required-indicator" data-profile-required="{safe_profile}">* {html.escape(t["required_field"])}</span>'
-        if missing_required
-        else ""
-    )
-    return (
-        f'<div class="card-actions" data-profile-actions="{safe_profile}">'
-        f'{_llm_model_select(public_config, selected_provider, selected_model, select_id, profile_id, lang)}'
-        f"{required_badge}"
-        f'<button type="button" class="card-action subtle" onclick="cloneLlmProfile(\'{safe_profile}\', \'{html.escape(select_id)}\')">{html.escape(t["add_llm"])}</button>'
-        f'<button type="button" class="card-action subtle" onclick="applySelectedProfileModel(\'{html.escape(select_id)}\')">{html.escape(t["apply_model"])}</button>'
-        f'<button type="button" class="card-action" onclick="testSelectedProfileModel(\'{html.escape(select_id)}\')">{html.escape(t["test_provider"])}</button>'
-        f"</div>"
-    )
-
-
-def _provider_card_actions(path: str, lang: str, public_config: dict) -> str:
-    return ""
-
-
 def _card_actions(path: str, lang: str, public_config: dict) -> str:
-    return _profile_card_actions(path, lang, public_config) or _provider_card_actions(path, lang, public_config)
+    return ""
 
 
 def _render_collapsible_card(path: str, title: str, content_html: str, *, count: int | None = None, actions_html: str = "", lang: str = DEFAULT_LANG) -> str:
@@ -2065,13 +1748,6 @@ def _inspect_panel_state(public_config: dict, lang: str) -> dict[str, object]:
     snapshot = inspect_public_config(public_config)
     diagnosis = copy.deepcopy(snapshot["diagnosis"])
     summary = copy.deepcopy(snapshot["summary"])
-    missing_profiles = _missing_required_llm_profiles(public_config)
-    if missing_profiles:
-        display_names = "、".join(_display_profile_id(profile_id, lang) for profile_id in missing_profiles)
-        blocking_message = f'{I18N[lang]["profile_model_missing"]} {display_names}'
-        if blocking_message not in diagnosis["blocking_issues"]:
-            diagnosis["blocking_issues"].append(blocking_message)
-        summary["blocking_count"] = len(diagnosis["blocking_issues"])
     return {
         "effective": snapshot["effective"],
         "diagnosis": diagnosis,
@@ -2091,6 +1767,7 @@ def _generic_public_config(display_config: dict) -> dict:
     generic_config = copy.deepcopy(display_config)
     if isinstance(generic_config.get("llm"), dict):
         generic_config["llm"].pop("model_library", None)
+        generic_config["llm"].pop("profiles", None)
     return generic_config
 
 
@@ -2877,127 +2554,6 @@ def render_panel_html(
       return details;
     }}
 
-    function resetProfileModelDetails(profile) {{
-      MODEL_LIBRARY_DETAIL_FIELDS.forEach((key) => {{
-        delete profile[key];
-      }});
-    }}
-
-    function applySelectedModelToProfile(profile, selected) {{
-      resetProfileModelDetails(profile);
-      delete profile.provider_id;
-      profile.provider = selected.provider || {{}};
-      profile.model = selected.model || "";
-      if (selected.apiKeyEnv) {{
-        profile.api_key_env = selected.apiKeyEnv;
-      }} else {{
-        delete profile.api_key_env;
-      }}
-      Object.entries(selected.details || {{}}).forEach(([key, value]) => {{
-        profile[key] = value;
-      }});
-    }}
-
-    function getSelectedModelOption(selectId) {{
-      const select = document.getElementById(selectId);
-      if (!select) {{
-        setToolbarMessage("Model selector not found: " + selectId, true);
-        return null;
-      }}
-      const option = select.selectedOptions[0];
-      if (!option) {{
-        setToolbarMessage("No model selected", true);
-        return null;
-      }}
-      return {{
-        select,
-        profileId: select.dataset.profileId,
-        modelId: option.value,
-        provider: option.dataset.provider ? JSON.parse(option.dataset.provider) : {{}},
-        model: option.dataset.model,
-        label: option.dataset.label || option.dataset.model || option.value,
-        apiKeyEnv: option.dataset.apiKeyEnv || "",
-        details: option.dataset.details ? JSON.parse(option.dataset.details) : {{}}
-      }};
-    }}
-
-    async function applySelectedProfileModel(selectId) {{
-      const selected = getSelectedModelOption(selectId);
-      if (!selected || !selected.profileId || !selected.model) {{
-        return;
-      }}
-      const lang = document.getElementById("lang-switch").value;
-      const card = selected.select.closest(".collapsible-card");
-      if (!draftPublicConfig.llm) {{
-        draftPublicConfig.llm = {{}};
-      }}
-      if (!draftPublicConfig.llm.profiles) {{
-        draftPublicConfig.llm.profiles = {{}};
-      }}
-      if (!draftPublicConfig.llm.profiles[selected.profileId]) {{
-        draftPublicConfig.llm.profiles[selected.profileId] = {{}};
-      }}
-      applySelectedModelToProfile(draftPublicConfig.llm.profiles[selected.profileId], selected);
-      const state = rememberCardState(card);
-      const response = await fetch("/preview-llm-profile-card", {{
-        method: "POST",
-        headers: {{ "Content-Type": "application/x-www-form-urlencoded" }},
-        body: new URLSearchParams({{
-          payload: JSON.stringify(collectPayload()),
-          base_hash: collectBaseHash(),
-          draft_meta: JSON.stringify(collectDraftMeta()),
-          profile_id: selected.profileId,
-          lang
-        }})
-      }});
-      const result = await response.json();
-      if (!result.ok) {{
-        setToolbarMessage("{html.escape(t['save_failed'])}: " + result.message, true);
-        showToast("error", "{html.escape(t['save_failed_title'])}", result.message);
-        return;
-      }}
-      const newCard = replaceCardHtml(card, result.html || "");
-      restoreCardState(newCard, state);
-      setToolbarMessage(result.message || "{html.escape(t['confirm_success'])}", false);
-      showToast("success", "{html.escape(t['confirm_success_title'])}", result.message || "{html.escape(t['confirm_success'])}");
-    }}
-
-    async function testSelectedProfileModel(selectId) {{
-      const selected = getSelectedModelOption(selectId);
-      if (!selected || !selected.profileId || !selected.model) {{
-        return;
-      }}
-      const lang = document.getElementById("lang-switch").value;
-      const payload = collectPayload();
-      if (!payload.llm) {{
-        payload.llm = {{}};
-      }}
-      if (!payload.llm.profiles) {{
-        payload.llm.profiles = {{}};
-      }}
-      if (!payload.llm.profiles[selected.profileId]) {{
-        payload.llm.profiles[selected.profileId] = {{}};
-      }}
-      applySelectedModelToProfile(payload.llm.profiles[selected.profileId], selected);
-      const response = await fetch("/test-llm", {{
-        method: "POST",
-        headers: {{ "Content-Type": "application/x-www-form-urlencoded" }},
-        body: new URLSearchParams({{
-          payload: JSON.stringify(payload),
-          base_hash: collectBaseHash(),
-          draft_meta: JSON.stringify(collectDraftMeta()),
-          profile_id: selected.profileId,
-          lang
-        }})
-      }});
-      const result = await response.json();
-      const title = result.ok ? "{html.escape(t['test_success_title'])}" : "{html.escape(t['test_failed_title'])}";
-      const routeDetail = [result.provider_kind || selected.provider.kind || "", result.base_url || "", result.api_key_source || ""].filter(Boolean).join(" · ");
-      const detail = selected.profileId + " / " + (result.model || selected.model) + (routeDetail ? " [" + routeDetail + "]" : "") + ": " + result.message;
-      setToolbarMessage(detail, !result.ok);
-      showToast(result.ok ? "success" : "error", title, detail);
-    }}
-
     function selectConfigPage(pageId, event) {{
       if (event) {{
         event.preventDefault();
@@ -3045,91 +2601,6 @@ def render_panel_html(
 
     window.addEventListener("DOMContentLoaded", activateInitialConfigPage);
     window.addEventListener("hashchange", activateInitialConfigPage);
-
-    function nextClonedProfileId(baseId, profiles) {{
-      const root = (baseId || "profile").trim() || "profile";
-      let candidate = root + "_copy";
-      let suffix = 2;
-      while (profiles && Object.prototype.hasOwnProperty.call(profiles, candidate)) {{
-        candidate = root + "_copy_" + suffix;
-        suffix += 1;
-      }}
-      return candidate;
-    }}
-
-    function cloneLlmProfile(sourceProfileId, selectId) {{
-      const card = document.getElementById("add-llm-profile-card");
-      const payload = collectPayload();
-      const profiles = payload.llm && payload.llm.profiles ? payload.llm.profiles : {{}};
-      const selected = selectId ? getSelectedModelOption(selectId) : null;
-      if (!card) {{
-        return;
-      }}
-      const profileIdField = card.querySelector('[data-add-profile-field="profile_id"]');
-      const sourceField = card.querySelector('[data-add-profile-field="source_profile_id"]');
-      const modelField = document.getElementById("add-llm-profile-model");
-      if (profileIdField) {{
-        profileIdField.value = nextClonedProfileId(sourceProfileId, profiles);
-      }}
-      if (sourceField) {{
-        sourceField.value = sourceProfileId;
-      }}
-      if (modelField) {{
-        modelField.value = (selected && selected.modelId) || "";
-      }}
-      card.hidden = false;
-      card.scrollIntoView({{ behavior: "smooth", block: "nearest" }});
-    }}
-
-    function cancelInlineLlmProfile() {{
-      const card = document.getElementById("add-llm-profile-card");
-      if (!card) {{
-        return;
-      }}
-      card.querySelectorAll("[data-add-profile-field]").forEach((field) => {{
-        if (field.tagName === "SELECT") {{
-          field.selectedIndex = 0;
-        }} else {{
-          field.value = "";
-        }}
-      }});
-      const modelField = document.getElementById("add-llm-profile-model");
-      if (modelField) {{
-        modelField.selectedIndex = 0;
-      }}
-      card.hidden = true;
-    }}
-
-    async function saveInlineLlmProfile() {{
-      const card = document.getElementById("add-llm-profile-card");
-      const lang = document.getElementById("lang-switch").value;
-      const profileId = (card.querySelector('[data-add-profile-field="profile_id"]')?.value || "").trim();
-      const sourceProfileId = (card.querySelector('[data-add-profile-field="source_profile_id"]')?.value || "").trim();
-      const modelId = (document.getElementById("add-llm-profile-model")?.value || "").trim();
-      if (!profileId || !modelId) {{
-        setToolbarMessage("{html.escape(t['save_failed'])}: task model id and model id are required", true);
-        return;
-      }}
-      try {{
-        const result = await postPreviewState(
-          "/draft-add-llm-profile",
-          {{
-            payload: JSON.stringify(collectPayload()),
-            draft_meta: JSON.stringify(collectDraftMeta()),
-            profile_id: profileId,
-            source_profile_id: sourceProfileId,
-            model_id: modelId,
-            lang
-          }},
-          activeConfigPageId("llm"),
-        );
-        setToolbarMessage(result.message || "{html.escape(t['confirm_success'])}", false);
-        showToast("success", "{html.escape(t['confirm_success_title'])}", result.message || "{html.escape(t['confirm_success'])}");
-      }} catch (error) {{
-        setToolbarMessage("{html.escape(t['save_failed'])}: " + error.message, true);
-        showToast("error", "{html.escape(t['save_failed_title'])}", error.message);
-      }}
-    }}
 
     function resetInlineLlmModelFields() {{
       const card = document.getElementById("add-llm-model-card");
@@ -3419,53 +2890,6 @@ def render_panel_html(
       }}
     }}
 
-    async function testProfileLlm(profileId) {{
-      const lang = document.getElementById("lang-switch").value;
-      const payload = collectPayload();
-      const response = await fetch("/test-llm", {{
-        method: "POST",
-        headers: {{ "Content-Type": "application/x-www-form-urlencoded" }},
-        body: new URLSearchParams({{
-          payload: JSON.stringify(payload),
-          base_hash: collectBaseHash(),
-          draft_meta: JSON.stringify(collectDraftMeta()),
-          profile_id: profileId,
-          lang
-        }})
-      }});
-      const result = await response.json();
-      const title = result.ok ? "{html.escape(t['test_success_title'])}" : "{html.escape(t['test_failed_title'])}";
-      const detail = profileId + " / " + (result.model || "") + ": " + result.message;
-      setToolbarMessage(detail, !result.ok);
-      showToast(result.ok ? "success" : "error", title, detail);
-    }}
-
-    async function testSelectedCardLlm(selectId) {{
-      const select = document.getElementById(selectId);
-      if (!select) {{
-        setToolbarMessage("LLM selector not found: " + selectId, true);
-        return;
-      }}
-      const lang = document.getElementById("lang-switch").value;
-      const payload = collectPayload();
-      const response = await fetch("/test-llm", {{
-        method: "POST",
-        headers: {{ "Content-Type": "application/x-www-form-urlencoded" }},
-        body: new URLSearchParams({{
-          payload: JSON.stringify(payload),
-          base_hash: collectBaseHash(),
-          draft_meta: JSON.stringify(collectDraftMeta()),
-          profile_id: select.value,
-          lang
-        }})
-      }});
-      const result = await response.json();
-      const title = result.ok ? "{html.escape(t['test_success_title'])}" : "{html.escape(t['test_failed_title'])}";
-      const detail = (result.profile_id || select.value) + " / " + (result.model || "") + ": " + result.message;
-      setToolbarMessage(detail, !result.ok);
-      showToast(result.ok ? "success" : "error", title, detail);
-    }}
-
     function switchLang(lang) {{
       if (!draftPublicConfig.ui) {{
         draftPublicConfig.ui = {{}};
@@ -3615,10 +3039,6 @@ def _render_preview_state_payload(
     }
 
 
-def _render_profile_card_preview(public_config: dict, profile_id: str, lang: str) -> str:
-    return _render_llm_profile_card(public_config, profile_id, lang)
-
-
 class ConfigPanelHandler(BaseHTTPRequestHandler):
     def _send_html(self, html_text: str, status: int = 200) -> None:
         data = html_text.encode("utf-8")
@@ -3662,17 +3082,13 @@ class ConfigPanelHandler(BaseHTTPRequestHandler):
         if self.path not in {
             "/preview",
             "/preview-config-card",
-            "/preview-llm-profile-card",
             "/save",
-            "/add-llm-profile",
             "/add-llm-model",
             "/update-llm-model",
             "/delete-llm-model",
-            "/draft-add-llm-profile",
             "/draft-add-llm-model",
             "/draft-update-llm-model",
             "/draft-delete-llm-model",
-            "/test-llm",
         }:
             self._send_json({"ok": False, "message": "Not found"}, status=404)
             return
@@ -3715,54 +3131,6 @@ class ConfigPanelHandler(BaseHTTPRequestHandler):
                         "message": I18N[lang]["confirm_success"],
                     }
                 )
-                return
-
-            if self.path == "/preview-llm-profile-card":
-                submitted = _submitted_public_config(form, old_public)
-                profile_id = form.get("profile_id", [""])[0]
-                self._send_json(
-                    {
-                        "ok": True,
-                        "html": _render_profile_card_preview(submitted, profile_id, lang),
-                        "message": I18N[lang]["confirm_success"],
-                    }
-                )
-                return
-
-            if self.path in {"/add-llm-profile", "/draft-add-llm-profile"}:
-                current = _submitted_public_config(form, old_public) if self.path.startswith("/draft-") else old_public
-                updated = add_llm_profile(
-                    current,
-                    form.get("profile_id", [""])[0],
-                    source_profile_id=form.get("source_profile_id", [""])[0],
-                    model_id=form.get("model_id", [""])[0],
-                )
-                if self.path.startswith("/draft-"):
-                    draft_meta = _submitted_draft_meta(form)
-                    if fragment_preview:
-                        self._send_json(
-                            _render_preview_state_payload(
-                                updated,
-                                lang,
-                                draft_meta,
-                                I18N[lang]["confirm_success"],
-                                _resolve_base_hash(form, old_public),
-                            )
-                        )
-                    else:
-                        self._send_html(
-                            _render_preview_html(
-                                updated,
-                                lang,
-                                draft_meta,
-                                I18N[lang]["confirm_success"],
-                                _resolve_base_hash(form, old_public),
-                            )
-                        )
-                    return
-                _assert_base_hash_matches(submitted_base_hash, old_public, lang)
-                save_public_config(updated)
-                self._send_json({"ok": True, "message": I18N[lang]["save_success"]})
                 return
 
             if self.path in {"/add-llm-model", "/draft-add-llm-model"}:
@@ -3929,14 +3297,6 @@ class ConfigPanelHandler(BaseHTTPRequestHandler):
                 self._send_json({"ok": True, "message": I18N[lang]["save_success"]})
                 return
 
-            if self.path == "/test-llm":
-                profile_id = form.get("profile_id", [""])[0] or None
-                submitted = _submitted_public_config(form, old_public)
-                draft_meta = _submitted_draft_meta(form)
-                result = test_llm_connection(submitted, profile_id, draft_meta)
-                self._send_json(result, status=200 if result.get("ok") else 400)
-                return
-
             submitted = _submitted_public_config(form, old_public)
             submitted.setdefault("ui", {})
             if isinstance(submitted["ui"], dict):
@@ -3944,7 +3304,6 @@ class ConfigPanelHandler(BaseHTTPRequestHandler):
             draft_meta = _submitted_draft_meta(form)
             _assert_base_hash_matches(submitted_base_hash, old_public, lang)
             validate_llm_public_config(submitted)
-            _validate_required_llm_profiles(submitted, lang)
             build_effective_config(submitted)
             save_public_config(submitted)
             for env_name in draft_meta.get("pending_cleared_api_keys", []):
@@ -3955,12 +3314,11 @@ class ConfigPanelHandler(BaseHTTPRequestHandler):
         except Exception as exc:
             html_preview_paths = {
                 "/preview",
-                "/draft-add-llm-profile",
                 "/draft-add-llm-model",
                 "/draft-update-llm-model",
                 "/draft-delete-llm-model",
             }
-            if self.path in {"/preview-config-card", "/preview-llm-profile-card"}:
+            if self.path in {"/preview-config-card"}:
                 self._send_json({"ok": False, "message": str(exc)}, status=400)
                 return
             if fragment_preview and self.path in html_preview_paths:
