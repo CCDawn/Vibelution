@@ -96,6 +96,55 @@ def test_team_workflow_route_blocks_non_owner_transfer_decision(tmp_path, monkey
     assert "Only the workflow owner agent" in response.json()["detail"]
 
 
+def test_team_workflow_route_rejected_transfer_archives_candidate(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    client = _client()
+    team = client.post("/api/teams", json={"name": "挑战杯科研团队"}).json()
+    client.put(
+        f"/api/teams/{team['teamId']}/workflow-orchestration",
+        json={"workflowKind": "challenge_cup_research", "ownerAgentId": "Research Coordination Agent"},
+    )
+    candidate = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/candidates/source",
+        json={
+            "title": "Unsupported routing analogy",
+            "sourceUrl": "https://example.test/rejected",
+            "sourceKind": "paper",
+            "createdByAgent": "Evidence Review Agent",
+        },
+    ).json()["candidate"]
+    transfer = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/transfers",
+        json={
+            "candidateId": candidate["candidateId"],
+            "fromNode": "research_review",
+            "toNode": "rejection_archive",
+            "requestedByAgent": "Evidence Review Agent",
+            "reason": "Evidence review rejected this analogy.",
+        },
+    ).json()["transfer"]
+
+    response = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/transfers/{transfer['transferId']}/decide",
+        json={
+            "decision": "rejected",
+            "decidedByAgent": "Research Coordination Agent",
+            "decisionNote": "Archive until a review gate gives a reopen reason.",
+        },
+    )
+    graph_response = client.post(f"/api/teams/{team['teamId']}/workflow-orchestration/candidate-graph", json={})
+
+    assert response.status_code == 200, response.text
+    assert response.json()["candidate"]["currentWorkflowNode"] == "rejection_archive"
+    assert response.json()["candidate"]["currentState"] == "rejected"
+    assert response.json()["candidate"]["metadata"]["rejectionArchive"]["reopenRequiresTransfer"] is True
+    assert graph_response.status_code == 201, graph_response.text
+    assert graph_response.json()["graph"]["summary"]["archivedCandidateCount"] == 1
+    assert candidate["candidateId"] not in {
+        node["candidateId"] for node in graph_response.json()["graph"]["nodes"]
+    }
+
+
 def test_team_workflow_routes_build_and_record_local_research_model_output(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     client = _client()
