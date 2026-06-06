@@ -5,6 +5,7 @@
 
 import importlib
 import io
+import pytest
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -67,6 +68,15 @@ def test_initialize_ui_for_run_starts_live_in_normal_mode():
 
     ui.console.clear.assert_called_once_with()
     ui.start_live.assert_called_once_with()
+
+
+def test_initialize_ui_for_run_skips_live_in_headless_mode():
+    ui = MagicMock()
+
+    agent_module.initialize_ui_for_run(ui, test_mode=False, headless_mode=True)
+
+    ui.console.clear.assert_not_called()
+    ui.start_live.assert_not_called()
 
 
 def test_create_config_from_args_applies_cli_overrides(monkeypatch):
@@ -320,3 +330,74 @@ def test_main_passes_resolved_agent_mode_when_supported(monkeypatch):
 
     assert created["mode"] == "chat"
     assert created["initial_prompt"] is None
+
+
+def test_main_single_turn_runs_headless_without_live_ui(monkeypatch):
+    ui = MagicMock()
+    created = {}
+    config = SimpleNamespace(
+        log=SimpleNamespace(level="INFO"),
+        llm=SimpleNamespace(get_profile=lambda role="primary": SimpleNamespace(model="local-model")),
+        agent=SimpleNamespace(
+            awake_interval=30,
+            default_mode="self_evolution",
+            modes=SimpleNamespace(default_headless_mode="supervised_evolution"),
+        ),
+        runtime=SimpleNamespace(preflight_doctor=False, require_venv=False),
+    )
+
+    class DummyAgent:
+        def __init__(self, config, mode=None):
+            created["mode"] = mode
+            self.key_tools = ["tool"]
+
+        def run_single_turn(self, initial_prompt=None, goal_override=None):
+            created["initial_prompt"] = initial_prompt
+            return {"status": "success"}
+
+    monkeypatch.setattr(agent_module, "get_ui", lambda: ui)
+    monkeypatch.setattr(agent_module, "create_config_from_args", lambda _args: config)
+    monkeypatch.setattr(agent_module, "setup_logging", lambda **_kwargs: None)
+    monkeypatch.setattr(agent_module, "SelfEvolvingAgent", DummyAgent)
+
+    agent_module.main(initial_prompt="probe", args=make_args(no_shell=True, single_turn=True, prompt="probe"))
+
+    assert created["mode"] == "supervised_evolution"
+    assert created["initial_prompt"] == "probe"
+    ui.console.clear.assert_not_called()
+    ui.start_live.assert_not_called()
+
+
+def test_main_headless_startup_failure_writes_stderr(monkeypatch):
+    ui = MagicMock()
+    config = SimpleNamespace(
+        log=SimpleNamespace(level="INFO"),
+        llm=SimpleNamespace(get_profile=lambda role="primary": SimpleNamespace(model="local-model")),
+        agent=SimpleNamespace(
+            awake_interval=30,
+            default_mode="self_evolution",
+            modes=SimpleNamespace(default_headless_mode="supervised_evolution"),
+        ),
+        runtime=SimpleNamespace(preflight_doctor=False, require_venv=False),
+    )
+    stderr = io.StringIO()
+
+    class FailingAgent:
+        def __init__(self, config, mode=None):
+            raise RuntimeError("boom before turn")
+
+    monkeypatch.setattr(agent_module, "get_ui", lambda: ui)
+    monkeypatch.setattr(agent_module, "create_config_from_args", lambda _args: config)
+    monkeypatch.setattr(agent_module, "setup_logging", lambda **_kwargs: None)
+    monkeypatch.setattr(agent_module, "SelfEvolvingAgent", FailingAgent)
+    monkeypatch.setattr(agent_module.sys, "stderr", stderr)
+
+    with pytest.raises(SystemExit) as exc:
+        agent_module.main(initial_prompt="probe", args=make_args(no_shell=True, single_turn=True, prompt="probe"))
+
+    assert exc.value.code == 1
+    output = stderr.getvalue()
+    assert "启动异常: RuntimeError: boom before turn" in output
+    assert "Traceback" in output
+    ui.console.clear.assert_not_called()
+    ui.start_live.assert_not_called()

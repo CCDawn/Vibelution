@@ -48,7 +48,7 @@ def test_project_agent_bus_plain_message_defaults_to_all_active_agents(tmp_path,
     assert event["messageType"] == "user_guidance"
     assert event["targetScope"] == "all"
     assert set(event["targetAgentIds"]) == {alpha["agentId"], beta["agentId"], steward["agentId"]}
-    assert len(event["deliveries"]) == 3
+    assert len(event["deliveries"]) == len(event["targetAgentIds"])
     assert all(item["status"] == "delivered" for item in event["deliveries"])
 
 
@@ -79,9 +79,9 @@ def test_project_agent_bus_all_mention_delivers_to_active_agents_only(tmp_path, 
     assert event["targetScope"] == "all"
     assert set(event["targetAgentIds"]) == {alpha["agentId"], beta["agentId"], steward["agentId"]}
     assert archived["agentId"] not in event["targetAgentIds"]
-    assert len(event["deliveries"]) == 3
+    assert len(event["deliveries"]) == len(event["targetAgentIds"])
     assert all(item["status"] == "delivered" for item in event["deliveries"])
-    assert len(wake_calls) == 3
+    assert len(wake_calls) == len(event["targetAgentIds"])
     assert agent_directory_service.count_agent_inbox_messages_for_agent(alpha["agentId"]) == 1
     assert agent_directory_service.count_agent_inbox_messages_for_agent(beta["agentId"]) == 1
     assert agent_directory_service.count_agent_inbox_messages_for_agent(steward["agentId"]) == 1
@@ -103,6 +103,24 @@ def test_project_agent_bus_named_mention_targets_one_agent_without_wake(tmp_path
     assert event["deliveries"][0]["wake"]["wakeStatus"] == "not_requested"
     assert agent_directory_service.count_agent_inbox_messages_for_agent(alpha["agentId"]) == 1
     assert agent_directory_service.count_agent_inbox_messages_for_agent(beta["agentId"]) == 0
+
+
+def test_project_agent_bus_named_mention_does_not_match_legacy_profile_id(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent_directory_service.create_agent_instance(
+        display_name="Research Broad",
+        llm_bindings={"dialogue": {"modelId": "research-broad-model"}},
+        direct_session_id="session-research-broad",
+    )
+
+    event = project_agent_bus_service.send_project_agent_bus_message(
+        content="@research_broad 这不应该再按旧 profile 命中",
+        wake_target=False,
+    )
+
+    assert event["targetScope"] == "agents"
+    assert event["targetAgentIds"] == []
+    assert event["unresolvedMentions"] == ["research_broad"]
 
 
 def test_project_agent_bus_revoke_marks_event_inbox_and_stops_targets(tmp_path, monkeypatch):

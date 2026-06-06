@@ -222,6 +222,68 @@ Write-Output ([string](Resolve-ConfiguredWorkbenchPort))
     return int(result.stdout.strip().splitlines()[-1])
 
 
+def _resolve_launcher_control_port(
+    tmp_path: Path,
+    *,
+    config_text: str,
+    env_overrides: dict[str, str] | None = None,
+    workbench_port: int = 8000,
+) -> int:
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(config_text, encoding="utf-8")
+
+    harness_path = tmp_path / "resolve-launcher-control-port.ps1"
+    harness_path.write_text(
+        """
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$LauncherPath,
+    [Parameter(Mandatory = $true)]
+    [string]$ConfigPath,
+    [Parameter(Mandatory = $true)]
+    [int]$WorkbenchPort
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$source = Get-Content -Raw -LiteralPath $LauncherPath
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors -and $parseErrors.Count -gt 0) {
+    throw "Launcher script parse failed: $($parseErrors[0].Message)"
+}
+
+$functionAst = $ast.Find({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -eq "Resolve-ConfiguredLauncherControlPort"
+}, $true)
+if ($null -eq $functionAst) {
+    throw "Resolve-ConfiguredLauncherControlPort was not found."
+}
+
+. ([scriptblock]::Create($functionAst.Extent.Text))
+Set-Variable -Name configPath -Value $ConfigPath -Scope Script
+Write-Output ([string](Resolve-ConfiguredLauncherControlPort -WorkbenchPort $WorkbenchPort))
+""".strip(),
+        encoding="utf-8",
+    )
+
+    command = [_powershell_exe(), "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(harness_path)]
+    command += ["-LauncherPath", str(LAUNCHER_SCRIPT), "-ConfigPath", str(config_path), "-WorkbenchPort", str(workbench_port)]
+    env = os.environ.copy()
+    env.pop("VIBELUTION_LAUNCHER_PORT", None)
+    env.pop("AGENT_LAUNCHER_CONTROL_PORT", None)
+    if env_overrides:
+        env.update(env_overrides)
+
+    result = subprocess.run(command, capture_output=True, text=True, env=env, check=False, timeout=20)
+    assert result.returncode == 0, result.stderr or result.stdout
+    return int(result.stdout.strip().splitlines()[-1])
+
+
 def _resolve_launcher_window_mode(
     tmp_path: Path,
     *,
@@ -468,6 +530,37 @@ def test_launcher_backend_port_ignores_invalid_config_token(tmp_path):
     )
 
     assert resolved == 8000
+
+
+def test_launcher_control_port_is_independent_from_workbench_port(tmp_path):
+    resolved = _resolve_launcher_control_port(
+        tmp_path,
+        config_text="[workbench]\nbackend_port = 8000\n[launcher]\ncontrol_port = 8765\n",
+        workbench_port=8000,
+    )
+
+    assert resolved == 8765
+
+
+def test_launcher_control_port_avoids_workbench_port_collision(tmp_path):
+    resolved = _resolve_launcher_control_port(
+        tmp_path,
+        config_text="[workbench]\nbackend_port = 8765\n[launcher]\ncontrol_port = 8765\n",
+        workbench_port=8765,
+    )
+
+    assert resolved != 8765
+
+
+def test_launcher_control_port_prefers_env_override(tmp_path):
+    resolved = _resolve_launcher_control_port(
+        tmp_path,
+        config_text="[launcher]\ncontrol_port = 8765\n",
+        env_overrides={"VIBELUTION_LAUNCHER_PORT": "8899"},
+        workbench_port=8000,
+    )
+
+    assert resolved == 8899
 
 
 def test_launcher_window_mode_defaults_to_windowed(tmp_path):
@@ -888,8 +981,11 @@ if ($null -eq $saveStateAst) {
     throw "Save-SessionState was not found."
 }
 $saveStateText = $saveStateAst.Extent.Text
-if ($saveStateText -notmatch 'backendLaunchPid\\s*=\\s*\\$BackendLaunchPid') {
-    throw "Save-SessionState does not persist backendLaunchPid."
+if ($saveStateText -notmatch 'backendLaunchPid\\s*=\\s*if \\(\\$SessionRole -eq "launcher_control_surface"\\) \\{ 0 \\} else \\{ \\$BackendLaunchPid \\}') {
+    throw "Save-SessionState does not persist workbench backendLaunchPid while separating launcher control state."
+}
+if ($saveStateText -notmatch 'launcherBackendLaunchPid\\s*=\\s*if \\(\\$SessionRole -eq "launcher_control_surface"\\) \\{ \\$BackendLaunchPid \\}') {
+    throw "Save-SessionState does not persist launcherBackendLaunchPid for the control plane."
 }
 if ($saveStateText -notmatch 'supervisorStderr\\s*=\\s*if \\(\\$script:currentRuntimeSceneDir\\)') {
     throw "Save-SessionState does not persist supervisorStderr."
@@ -1897,7 +1993,7 @@ function Invoke-HiddenNativeCommand {
 function Set-LauncherWindowTitle {}
 
 Invoke-RuntimeManagerClient -Mode "command" -CommandType "open_workbench" -Reason "launcher_start" -ForwardNoBrowser
-Invoke-RuntimeManagerClient -Mode "command" -CommandType "close_workbench" -Reason "launcher_stop" -StopManager
+Invoke-RuntimeManagerClient -Mode "command" -CommandType "close_workbench" -Reason "launcher_stop"
 Invoke-RuntimeManagerClient -Mode "status"
 
 $openArgs = @($script:calls[0].argumentList)
@@ -1909,7 +2005,7 @@ if ($script:calls[1].commandPath -ne "pythonw-test") { throw "close_workbench di
 if ($script:calls[2].commandPath -ne "pythonw-status") { throw "status did not use the read-only no-console runtime." }
 if ($openArgs -notcontains "--no-browser") { throw "open_workbench did not forward --no-browser." }
 if ($openArgs -contains "--stop-manager") { throw "open_workbench forwarded --stop-manager unexpectedly." }
-if ($closeArgs -notcontains "--stop-manager") { throw "close_workbench did not forward --stop-manager." }
+if ($closeArgs -contains "--stop-manager") { throw "close_workbench should stop the workbench without stopping the Launcher control manager." }
 if ($closeArgs -contains "--no-browser") { throw "close_workbench forwarded --no-browser unexpectedly." }
 if ($statusArgs -contains "command") { throw "status used command mode unexpectedly." }
 if ($statusArgs -notcontains "status") { throw "status did not invoke runtime manager status." }
@@ -2085,7 +2181,7 @@ Write-Output "ok"
     assert result.stdout.strip().splitlines()[-1] == "ok"
 
 
-def test_launcher_entry_opens_control_surface_and_ensures_workbench_without_direct_restart(tmp_path):
+def test_launcher_entry_opens_control_surface_without_starting_workbench(tmp_path):
     result = _run_launcher_ast_harness(
         tmp_path,
         """
@@ -2115,10 +2211,12 @@ if ($null -eq $controlAst) {
 }
 $controlText = $controlAst.Extent.Text
 foreach ($required in @(
-    '$controlSurfaceUrl = "$url/launcher"',
+    '$controlSurfaceUrl = "$launcherControlUrl/launcher"',
     '$startedControlBackend = $false',
     '$preserveExistingStateOnFailure = [bool]$snapshot.State',
-    "Start-ManagedBackend",
+    "Test-LauncherControlSourceCurrent",
+    "launcher.control_backend.source_changed",
+    "Start-LauncherControlBackend",
     "Start-ManagedBrowser",
     '-ProfileDir $launcherBrowserProfileDir',
     "launcher_control_surface",
@@ -2135,8 +2233,11 @@ if ($controlText -match "Start-Supervisor") {
 if ($controlText -match "Invoke-RuntimeManagerClient" -or $controlText -match "open_workbench") {
     throw "Launcher control surface should not queue runtime manager open_workbench."
 }
-if ($controlText -notmatch 'if\\s*\\(\\s*\\$startedControlBackend\\s*\\)\\s*\\{\\s*Stop-ManagedBackendProcesses\\s*\\}') {
-    throw "Launcher control surface failure cleanup must only stop a backend it started."
+if ($controlText -notmatch 'if\\s*\\(\\s*\\$startedControlBackend\\s*\\)\\s*\\{\\s*Stop-ProcessesById\\s+@\\(\\$backendPid\\)\\s*\\}') {
+    throw "Launcher control surface failure cleanup must only stop the launcher control backend it started."
+}
+if ($controlText -match 'if\\s*\\(\\s*\\$startedControlBackend\\s*\\)\\s*\\{\\s*Stop-ManagedBackendProcesses\\s*\\}') {
+    throw "Launcher control surface failure cleanup must not stop the workbench backend helper."
 }
 if ($controlText -notmatch 'if\\s*\\(\\s*-not\\s+\\$preserveExistingStateOnFailure\\s*\\)\\s*\\{\\s*Remove-State\\s*\\}') {
     throw "Launcher control surface failure cleanup must preserve existing workbench state."
@@ -2165,8 +2266,8 @@ if ($scriptText -notmatch '"status"\\s*\\{\\s*Show-Status\\s*\\}') {
 if ($scriptText -notmatch '"repair-deps"\\s*\\{\\s*Repair-ProjectPythonDependencies\\s*\\}') {
     throw "repair-deps action must invoke explicit Python dependency repair."
 }
-if ($scriptText -notmatch '"launcher"\\s*\\{\\s*Open-LauncherAndEnsureWorkbench\\s*\\}') {
-    throw "launcher action does not open the Launcher control surface and ensure the workbench."
+if ($scriptText -notmatch '"launcher"\\s*\\{\\s*Open-LauncherControlSurface\\s*\\}') {
+    throw "launcher action does not open only the Launcher control surface."
 }
 
 $entryAst = $ast.Find({
@@ -2192,6 +2293,228 @@ foreach ($required in @(
 if ($entryText -match "restart_workbench") {
     throw "Launcher entry should not submit a direct restart_workbench command."
 }
+if ($scriptText -match '"launcher"\\s*\\{\\s*Open-LauncherAndEnsureWorkbench\\s*\\}') {
+    throw "launcher action must not auto-start or focus the workbench."
+}
+
+Write-Output "ok"
+""",
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip().splitlines()[-1] == "ok"
+
+
+def test_launcher_control_source_signature_rejects_stale_backend(tmp_path):
+    result = _run_launcher_ast_harness(
+        tmp_path,
+        """
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$LauncherPath
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$source = Get-Content -Raw -LiteralPath $LauncherPath
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors -and $parseErrors.Count -gt 0) {
+    throw "Launcher script parse failed: $($parseErrors[0].Message)"
+}
+
+foreach ($functionName in @(
+    "Get-ObjectPropertyValue",
+    "Get-LauncherControlBackendSourceSignature",
+    "Test-LauncherControlSourceCurrent"
+)) {
+    $functionAst = $ast.Find({
+        param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+            $node.Name -eq $functionName
+    }, $true)
+    if ($null -eq $functionAst) {
+        throw "$functionName was not found."
+    }
+    . ([scriptblock]::Create($functionAst.Extent.Text))
+}
+
+$script:state = [pscustomobject]@{
+    launcherBackendPid = 1234
+    launcherBackendLaunchPid = 1234
+    launcherControlSourceSignature = "old-signature"
+}
+function Get-State { return $script:state }
+function Get-LauncherControlSourceSignature { return "new-signature" }
+
+if (Test-LauncherControlSourceCurrent -BackendPid 1234) {
+    throw "stale launcher control backend source was accepted."
+}
+
+$script:state.launcherControlSourceSignature = "new-signature"
+if (-not (Test-LauncherControlSourceCurrent -BackendPid 1234)) {
+    throw "current launcher control backend source was rejected."
+}
+
+if (Test-LauncherControlSourceCurrent -BackendPid 9999) {
+    throw "untracked launcher control backend source was accepted."
+}
+
+if (Test-LauncherControlSourceCurrent -BackendPid 0) {
+    throw "missing launcher control backend source was accepted."
+}
+
+Write-Output "ok"
+""",
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip().splitlines()[-1] == "ok"
+
+
+def test_frontend_toolchain_detection_requires_real_package_entries(tmp_path):
+    web_dir = tmp_path / "web"
+    (web_dir / "node_modules" / ".bin").mkdir(parents=True)
+    (web_dir / "node_modules" / "vite" / "bin").mkdir(parents=True)
+    (web_dir / "node_modules" / ".bin" / "tsc.cmd").write_text("", encoding="utf-8")
+    (web_dir / "node_modules" / ".bin" / "vite.cmd").write_text("", encoding="utf-8")
+    (web_dir / "node_modules" / "vite" / "bin" / "vite.js").write_text("", encoding="utf-8")
+    result = _run_launcher_ast_harness(
+        tmp_path,
+        f"""
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$LauncherPath
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$source = Get-Content -Raw -LiteralPath $LauncherPath
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors -and $parseErrors.Count -gt 0) {{
+    throw "Launcher script parse failed: $($parseErrors[0].Message)"
+}}
+
+foreach ($functionName in @(
+    "ConvertTo-WebRelativePath",
+    "Get-FrontendToolchainMissingPaths"
+)) {{
+    $functionAst = $ast.Find({{
+        param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+            $node.Name -eq $functionName
+    }}, $true)
+    if ($null -eq $functionAst) {{
+        throw "$functionName was not found."
+    }}
+    . ([scriptblock]::Create($functionAst.Extent.Text))
+}}
+
+Set-Variable -Name webDir -Value {json.dumps(str(web_dir))} -Scope Script
+$missing = @(Get-FrontendToolchainMissingPaths)
+if ($missing.Count -ne 1) {{
+    throw "Expected exactly one missing frontend toolchain path, got $($missing.Count): $($missing -join ', ')"
+}}
+if ($missing[0] -ne "node_modules\\typescript\\bin\\tsc") {{
+    throw "Unexpected missing frontend toolchain path: $($missing[0])"
+}}
+
+New-Item -ItemType Directory -Force -Path (Join-Path $webDir "node_modules\\typescript\\bin") | Out-Null
+New-Item -ItemType File -Force -Path (Join-Path $webDir "node_modules\\typescript\\bin\\tsc") | Out-Null
+$missing = @(Get-FrontendToolchainMissingPaths)
+if ($missing.Count -ne 0) {{
+    throw "Expected complete frontend toolchain after restoring tsc, got: $($missing -join ', ')"
+}}
+
+Write-Output "ok"
+""",
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip().splitlines()[-1] == "ok"
+
+
+def test_launcher_stop_preserves_control_surface_state(tmp_path):
+    result = _run_launcher_ast_harness(
+        tmp_path,
+        """
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$LauncherPath
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$source = Get-Content -Raw -LiteralPath $LauncherPath
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors -and $parseErrors.Count -gt 0) {
+    throw "Launcher script parse failed: $($parseErrors[0].Message)"
+}
+
+foreach ($functionName in @("Get-ObjectPropertyValue", "Restore-LauncherControlStateAfterWorkbenchStop")) {
+    $functionAst = $ast.Find({
+        param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+            $node.Name -eq $functionName
+    }, $true)
+    if ($null -eq $functionAst) {
+        throw "$functionName was not found."
+    }
+    . ([scriptblock]::Create($functionAst.Extent.Text))
+}
+
+$script:bindHost = "127.0.0.1"
+$script:port = 8000
+$script:url = "http://127.0.0.1:8000"
+$script:launcherControlPort = 8765
+$script:launcherControlUrl = "http://127.0.0.1:8765"
+$script:launcherBrowserProfileDir = "launcher-profile"
+$script:workbenchBrowserProfileDir = "workbench-profile"
+$script:savedState = $null
+$script:events = @()
+function Test-LauncherControlHealthy { return $true }
+function Get-ManagedBrowserPids {
+    param([string]$ProfileDir = "", [string]$Role = "workbench")
+    if ($Role -eq "launcher_control_surface") { return @(4500) }
+    return @()
+}
+function Save-State { param($Payload) $script:savedState = $Payload }
+function Write-LauncherControlLog {
+    param([string]$Event, [string]$Message, [string]$Level = "info", [hashtable]$Fields = @{})
+    $script:events += ,@{ event = $Event; message = $Message; fields = $Fields }
+}
+
+$previousState = [pscustomobject]@{
+    sessionRole = "workbench"
+    sessionId = "session-1"
+    backendPid = 3001
+    backendLaunchPid = 3001
+    launcherBackendPid = 87650
+    launcherBackendLaunchPid = 87650
+    launcherBrowserLaunchPid = 4500
+    launcherBrowserWindowPid = 4500
+    workbenchBrowserLaunchPid = 3200
+    workbenchBrowserWindowPid = 3200
+    launcherControlStartedAt = "2026-06-06T00:00:00Z"
+}
+
+$restored = Restore-LauncherControlStateAfterWorkbenchStop -PreviousState $previousState
+if (-not $restored) { throw "control surface state was not restored." }
+if ($script:savedState.sessionRole -ne "launcher_control_surface") { throw "session role was not preserved as launcher control surface." }
+if ($script:savedState.backendPid -ne 0) { throw "workbench backend pid should be cleared after stop." }
+if ($script:savedState.launcherBackendPid -ne 87650) { throw "launcher backend pid was not preserved." }
+if ($script:savedState.browserProfileDir -ne "launcher-profile") { throw "browser profile did not switch back to launcher profile." }
+if ($script:savedState.workbenchBrowserWindowPid -ne 0) { throw "workbench browser pid should be cleared after stop." }
+if ($script:savedState.launcherControlUrl -ne "http://127.0.0.1:8765/launcher") { throw "launcher control url was not restored." }
+if ($script:events[0].event -ne "launcher.control_surface.state_preserved_after_workbench_stop") { throw "state preservation was not logged." }
 
 Write-Output "ok"
 """,

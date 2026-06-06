@@ -51,6 +51,7 @@ import {
   MemoryOverview,
   MemorySection,
   MemoryUsageContractPayload,
+  AgentInstance,
   TeamKnowledgeBase,
 } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
@@ -1359,8 +1360,12 @@ function buildMemorySearchParams(
   activeManageFilter: ManageFilterMode,
   activeChannel: ChannelFilter,
   searchText: string,
+  agentId = "",
 ) {
   const next = new URLSearchParams();
+  if (agentId.trim()) {
+    next.set("agentId", agentId.trim());
+  }
   if (activeSectionId) {
     next.set("section", activeSectionId);
   }
@@ -1389,11 +1394,12 @@ function buildMemoryLink(
   activeManageFilter: ManageFilterMode,
   activeChannel: ChannelFilter,
   searchText: string,
+  agentId = "",
 ) {
   if (typeof window === "undefined") {
     return "";
   }
-  const next = buildMemorySearchParams(activeSectionId, activeItemId, activeFilter, activeManageFilter, activeChannel, searchText);
+  const next = buildMemorySearchParams(activeSectionId, activeItemId, activeFilter, activeManageFilter, activeChannel, searchText, agentId);
   const query = next.toString();
   return `${window.location.origin}${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`;
 }
@@ -1612,8 +1618,51 @@ function reviewReasonLabels(copy: Copy, item: MemoryItem) {
   return reasons;
 }
 
-function invalidateKnowledgeDashboard(queryClient: ReturnType<typeof useQueryClient>) {
-  void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeDashboardSnapshot("") });
+function actorAgentIdForKnowledgeBase(base: TeamKnowledgeBase | null) {
+  if (!base) {
+    return "";
+  }
+  if (base.ownerType === "agent" && base.ownerId) {
+    return base.ownerId;
+  }
+  const grants = base.acl.grants && typeof base.acl.grants === "object" ? base.acl.grants as Record<string, unknown> : {};
+  for (const key of ["read", "review", "propose", "rate", "*"]) {
+    const values = Array.isArray(grants[key]) ? grants[key] : [];
+    const agentId = values.map((value) => String(value || "").trim()).find(Boolean);
+    if (agentId) {
+      return agentId;
+    }
+  }
+  return "";
+}
+
+function actorAgentIdForKnowledgeContext(base: TeamKnowledgeBase | null, agents: AgentInstance[], preferredAgentId = "") {
+  const preferred = preferredAgentId.trim();
+  if (preferred) {
+    return preferred;
+  }
+  const baseActor = actorAgentIdForKnowledgeBase(base);
+  if (baseActor) {
+    return baseActor;
+  }
+  const activeAgent = agents.find((agent) => agent.status !== "archived");
+  return activeAgent?.agentId ?? "";
+}
+
+function appendAgentParam(params: URLSearchParams, agentId: string) {
+  const normalized = agentId.trim();
+  if (normalized) {
+    params.set("agentId", normalized);
+  }
+  return params;
+}
+
+function knowledgeBaseRequestId(base: TeamKnowledgeBase | null) {
+  return String(base?.scopedKnowledgeBaseId || base?.knowledgeBaseId || "").trim();
+}
+
+function invalidateKnowledgeDashboard(queryClient: ReturnType<typeof useQueryClient>, agentId = "") {
+  void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeDashboardSnapshot(agentId) });
 }
 
 export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
@@ -1657,6 +1706,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     tone: "idle",
     text: "",
   });
+  const requestedKnowledgeActorAgentId = (searchParams.get("agentId") ?? "").trim();
 
   const overviewQuery = useQuery({
     queryKey: queryKeys.memoryOverview(),
@@ -1672,29 +1722,50 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     enabled: forcedView === "knowledge",
   });
 
+  const agentsQuery = useQuery({
+    queryKey: queryKeys.agents(),
+    queryFn: () => fetchJson<AgentInstance[]>("/api/agents"),
+    enabled: forcedView === "knowledge" || forcedView === "graph",
+    refetchInterval: resolvePollingInterval(pageVisible, 60_000),
+    refetchIntervalInBackground: false,
+  });
+
+  const knowledgeActorAgents = agentsQuery.data ?? [];
+  const fallbackKnowledgeActorAgentId = requestedKnowledgeActorAgentId || knowledgeActorAgents.find((agent) => agent.status !== "archived")?.agentId || "";
+
   const knowledgeDashboardSnapshotQuery = useQuery({
-    queryKey: queryKeys.knowledgeDashboardSnapshot(""),
-    queryFn: () => fetchJson<KnowledgeDashboardSnapshotPayload>("/api/knowledge/dashboard-snapshot?recommendationLimit=6&workbenchLimit=8&planLimit=8"),
+    queryKey: queryKeys.knowledgeDashboardSnapshot(fallbackKnowledgeActorAgentId),
+    queryFn: () => {
+      const params = appendAgentParam(new URLSearchParams({
+        recommendationLimit: "6",
+        workbenchLimit: "8",
+        planLimit: "8",
+      }), fallbackKnowledgeActorAgentId);
+      return fetchJson<KnowledgeDashboardSnapshotPayload>(`/api/knowledge/dashboard-snapshot?${params.toString()}`);
+    },
     refetchInterval: resolvePollingInterval(pageVisible, 45_000),
     refetchIntervalInBackground: false,
-    enabled: forcedView === "knowledge",
+    enabled: forcedView === "knowledge" && Boolean(fallbackKnowledgeActorAgentId),
   });
 
   const memoryKnowledgeGraphQuery = useQuery({
-    queryKey: queryKeys.memoryKnowledgeGraph(),
-    queryFn: () => fetchJson<MemoryKnowledgeGraphPayload>("/api/memory/knowledge-graph?include=officialResearchGraph"),
+    queryKey: queryKeys.memoryKnowledgeGraph(fallbackKnowledgeActorAgentId),
+    queryFn: () => {
+      const params = appendAgentParam(new URLSearchParams({ include: "officialResearchGraph" }), fallbackKnowledgeActorAgentId);
+      return fetchJson<MemoryKnowledgeGraphPayload>(`/api/memory/knowledge-graph?${params.toString()}`);
+    },
     refetchInterval: resolvePollingInterval(pageVisible, 60_000),
     refetchIntervalInBackground: false,
-    enabled: forcedView === "graph",
+    enabled: forcedView === "graph" && Boolean(fallbackKnowledgeActorAgentId),
   });
   const memoryKnowledgeGraphNodeDetailQuery = useQuery({
-    queryKey: queryKeys.memoryKnowledgeGraphNodeDetail(selectedGraphNodeId),
-    queryFn: () =>
-      fetchJson<MemoryKnowledgeGraphNodeDetailPayload>(
-        `/api/memory/knowledge-graph/node-detail?nodeId=${encodeURIComponent(selectedGraphNodeId)}`,
-      ),
+    queryKey: queryKeys.memoryKnowledgeGraphNodeDetail(selectedGraphNodeId, fallbackKnowledgeActorAgentId),
+    queryFn: () => {
+      const params = appendAgentParam(new URLSearchParams({ nodeId: selectedGraphNodeId }), fallbackKnowledgeActorAgentId);
+      return fetchJson<MemoryKnowledgeGraphNodeDetailPayload>(`/api/memory/knowledge-graph/node-detail?${params.toString()}`);
+    },
     refetchInterval: false,
-    enabled: forcedView === "graph" && Boolean(selectedGraphNodeId),
+    enabled: forcedView === "graph" && Boolean(selectedGraphNodeId) && Boolean(fallbackKnowledgeActorAgentId),
   });
 
   const memoryMutation = useMutation({
@@ -1783,6 +1854,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
           evidenceRange: parseJsonObject(draft.evidenceRange),
           title: draft.title,
           summary: draft.summary,
+          actorAgentId: activeKnowledgeActorAgentId,
         }),
       }),
     onSuccess: (payload) => {
@@ -1792,7 +1864,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
         sourceArtifactIds: [...commaList(current.sourceArtifactIds), payload.sourceArtifactId].join(", "),
       }));
       setKnowledgeFeedback({ tone: "success", text: copy.mutationDone });
-      invalidateKnowledgeDashboard(queryClient);
+      invalidateKnowledgeDashboard(queryClient, activeKnowledgeActorAgentId);
       void queryClient.invalidateQueries({ queryKey: queryKeys.memoryOverview() });
     },
     onError: (error) => {
@@ -1817,7 +1889,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     onSuccess: () => {
       setProposalDraft(newProposalDraft());
       setKnowledgeFeedback({ tone: "success", text: copy.mutationDone });
-      invalidateKnowledgeDashboard(queryClient);
+      invalidateKnowledgeDashboard(queryClient, activeKnowledgeActorAgentId);
       void queryClient.invalidateQueries({ queryKey: queryKeys.memoryOverview() });
     },
     onError: (error) => {
@@ -1849,7 +1921,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     onSuccess: (payload) => {
       setIngestionDraft(newIngestionDraft());
       setKnowledgeFeedback({ tone: "success", text: `${copy.mutationDone} · ${payload.proposal.title}` });
-      invalidateKnowledgeDashboard(queryClient);
+      invalidateKnowledgeDashboard(queryClient, activeKnowledgeActorAgentId);
       void queryClient.invalidateQueries({ queryKey: queryKeys.memoryOverview() });
     },
     onError: (error) => {
@@ -1864,14 +1936,22 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
         {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ status }),
+          body: JSON.stringify({ status, reviewedByAgentId: activeKnowledgeActorAgentId }),
         },
       ),
     onSuccess: (payload) => {
       setKnowledgeFeedback({ tone: "success", text: payload.item ? `${copy.mutationDone} · ${payload.item.title}` : copy.mutationDone });
-      invalidateKnowledgeDashboard(queryClient);
-      void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeItems(activeKnowledgeBaseId) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeSearch(activeKnowledgeBaseId, knowledgeSearchDraft.query, knowledgeSearchDraft.tags) });
+      invalidateKnowledgeDashboard(queryClient, activeKnowledgeActorAgentId);
+      void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeItems(activeKnowledgeBaseForItems, activeKnowledgeActorAgentId) });
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.knowledgeSearch(
+          activeKnowledgeBaseForItems,
+          activeKnowledgeActorAgentId,
+          knowledgeSearchDraft.query,
+          knowledgeSearchDraft.tags,
+          knowledgeSearchDraft.searchMode,
+        ),
+      });
       void queryClient.invalidateQueries({ queryKey: queryKeys.memoryOverview() });
     },
     onError: (error) => {
@@ -1898,7 +1978,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     onSuccess: () => {
       setKnowledgeFeedback({ tone: "success", text: copy.mutationDone });
       void queryClient.invalidateQueries({ queryKey: ["knowledge", "rating-suggestions"] });
-      invalidateKnowledgeDashboard(queryClient);
+      invalidateKnowledgeDashboard(queryClient, activeKnowledgeActorAgentId);
     },
     onError: (error) => {
       setKnowledgeFeedback({ tone: "error", text: `${copy.mutationFailed}: ${error instanceof Error ? error.message : String(error)}` });
@@ -1912,15 +1992,23 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
         {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ status }),
+          body: JSON.stringify({ status, reviewedByAgentId: activeKnowledgeActorAgentId }),
         },
       ),
     onSuccess: () => {
       setKnowledgeFeedback({ tone: "success", text: copy.mutationDone });
       void queryClient.invalidateQueries({ queryKey: ["knowledge", "rating-suggestions"] });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeItems(activeKnowledgeBaseId) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeSearch(activeKnowledgeBaseId, knowledgeSearchDraft.query, knowledgeSearchDraft.tags) });
-      invalidateKnowledgeDashboard(queryClient);
+      void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeItems(activeKnowledgeBaseForItems, activeKnowledgeActorAgentId) });
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.knowledgeSearch(
+          activeKnowledgeBaseForItems,
+          activeKnowledgeActorAgentId,
+          knowledgeSearchDraft.query,
+          knowledgeSearchDraft.tags,
+          knowledgeSearchDraft.searchMode,
+        ),
+      });
+      invalidateKnowledgeDashboard(queryClient, activeKnowledgeActorAgentId);
     },
     onError: (error) => {
       setKnowledgeFeedback({ tone: "error", text: `${copy.mutationFailed}: ${error instanceof Error ? error.message : String(error)}` });
@@ -1934,7 +2022,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
         {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ suggestionIds, status }),
+          body: JSON.stringify({ suggestionIds, status, reviewedByAgentId: activeKnowledgeActorAgentId }),
         },
       ),
     onSuccess: (payload) => {
@@ -1944,9 +2032,17 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
         text: `${copy.mutationDone} · ${payload.summary.reviewedCount}/${payload.summary.requestedCount}${payload.summary.skippedCount ? ` · ${copy.skippedSuggestions}: ${payload.summary.skippedCount}` : ""}`,
       });
       void queryClient.invalidateQueries({ queryKey: ["knowledge", "rating-suggestions"] });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeItems(activeKnowledgeBaseId) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeSearch(activeKnowledgeBaseId, knowledgeSearchDraft.query, knowledgeSearchDraft.tags) });
-      invalidateKnowledgeDashboard(queryClient);
+      void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeItems(activeKnowledgeBaseForItems, activeKnowledgeActorAgentId) });
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.knowledgeSearch(
+          activeKnowledgeBaseForItems,
+          activeKnowledgeActorAgentId,
+          knowledgeSearchDraft.query,
+          knowledgeSearchDraft.tags,
+          knowledgeSearchDraft.searchMode,
+        ),
+      });
+      invalidateKnowledgeDashboard(queryClient, activeKnowledgeActorAgentId);
     },
     onError: (error) => {
       setKnowledgeFeedback({ tone: "error", text: `${copy.mutationFailed}: ${error instanceof Error ? error.message : String(error)}` });
@@ -1965,20 +2061,31 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
   const knowledgeGovernancePlan = knowledgeDashboardSnapshot?.governancePlan;
   const knowledgeBases = knowledgeOverview?.knowledgeBases ?? [];
   const activeKnowledgeBase: TeamKnowledgeBase | null =
-    knowledgeBases.find((base) => base.knowledgeBaseId === activeKnowledgeBaseId) ?? knowledgeBases[0] ?? null;
-  const activeKnowledgeBaseForItems = activeKnowledgeBase?.knowledgeBaseId ?? "";
+    knowledgeBases.find((base) => knowledgeBaseRequestId(base) === activeKnowledgeBaseId) ?? knowledgeBases[0] ?? null;
+  const activeKnowledgeBaseForItems = knowledgeBaseRequestId(activeKnowledgeBase);
+  const activeKnowledgeActorAgentId = actorAgentIdForKnowledgeContext(activeKnowledgeBase, knowledgeActorAgents, fallbackKnowledgeActorAgentId);
   const knowledgeItemsQuery = useQuery({
-    queryKey: queryKeys.knowledgeItems(activeKnowledgeBaseForItems),
-    queryFn: () => fetchJson<KnowledgeItemsPayload>(`/api/knowledge-bases/${encodeURIComponent(activeKnowledgeBaseForItems)}/items`),
-    enabled: forcedView === "knowledge" && Boolean(activeKnowledgeBaseForItems),
+    queryKey: queryKeys.knowledgeItems(activeKnowledgeBaseForItems, activeKnowledgeActorAgentId),
+    queryFn: () => {
+      const params = appendAgentParam(new URLSearchParams(), activeKnowledgeActorAgentId);
+      return fetchJson<KnowledgeItemsPayload>(`/api/knowledge-bases/${encodeURIComponent(activeKnowledgeBaseForItems)}/items?${params.toString()}`);
+    },
+    enabled: forcedView === "knowledge" && Boolean(activeKnowledgeBaseForItems) && Boolean(activeKnowledgeActorAgentId),
     refetchInterval: resolvePollingInterval(pageVisible, 45_000),
     refetchIntervalInBackground: false,
   });
   const knowledgeItems = knowledgeItemsQuery.data?.items ?? [];
   const knowledgeSearchQuery = useQuery({
-    queryKey: queryKeys.knowledgeSearch(activeKnowledgeBaseForItems, knowledgeSearchDraft.query, `${knowledgeSearchDraft.tags}:${knowledgeSearchDraft.searchMode}`),
+    queryKey: queryKeys.knowledgeSearch(
+      activeKnowledgeBaseForItems,
+      activeKnowledgeActorAgentId,
+      knowledgeSearchDraft.query,
+      knowledgeSearchDraft.tags,
+      knowledgeSearchDraft.searchMode,
+    ),
     queryFn: () => {
       const params = new URLSearchParams();
+      params.set("agentId", activeKnowledgeActorAgentId);
       if (activeKnowledgeBaseForItems) {
         params.set("knowledgeBaseId", activeKnowledgeBaseForItems);
       }
@@ -1990,7 +2097,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
       params.set("limit", "12");
       return fetchJson<KnowledgeSearchPayload>(`/api/knowledge/search?${params.toString()}`);
     },
-    enabled: forcedView === "knowledge" && Boolean(activeKnowledgeBaseForItems),
+    enabled: forcedView === "knowledge" && Boolean(activeKnowledgeBaseForItems) && Boolean(activeKnowledgeActorAgentId),
     refetchInterval: false,
   });
   const knowledgeRagHealthQuery = useQuery({
@@ -2003,6 +2110,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
   const knowledgeRagRetrieveQuery = useQuery({
     queryKey: queryKeys.knowledgeRagRetrieve(
       activeKnowledgeBaseForItems,
+      activeKnowledgeActorAgentId,
       knowledgeSearchDraft.query,
       knowledgeSearchDraft.tags,
       knowledgeSearchDraft.searchMode,
@@ -2011,6 +2119,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     ),
     queryFn: () => {
       const params = new URLSearchParams();
+      params.set("agentId", activeKnowledgeActorAgentId);
       if (activeKnowledgeBaseForItems) {
         params.set("knowledgeBaseId", activeKnowledgeBaseForItems);
       }
@@ -2024,13 +2133,18 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
       params.set("maxContextChars", String(knowledgeSearchDraft.ragMaxContextChars));
       return fetchJson<KnowledgeRagRetrievalPayload>(`/api/knowledge/rag/retrieve?${params.toString()}`);
     },
-    enabled: forcedView === "knowledge" && Boolean(activeKnowledgeBaseForItems),
+    enabled: forcedView === "knowledge" && Boolean(activeKnowledgeBaseForItems) && Boolean(activeKnowledgeActorAgentId),
     refetchInterval: false,
   });
   const ratingSuggestionsQuery = useQuery({
-    queryKey: queryKeys.knowledgeRatingSuggestions(activeKnowledgeBaseForItems, ratingSuggestionStatus, ratingSuggestionPriority),
+    queryKey: queryKeys.knowledgeRatingSuggestions(
+      activeKnowledgeBaseForItems,
+      activeKnowledgeActorAgentId,
+      ratingSuggestionStatus,
+      ratingSuggestionPriority,
+    ),
     queryFn: () => {
-      const params = new URLSearchParams();
+      const params = appendAgentParam(new URLSearchParams(), activeKnowledgeActorAgentId);
       if (ratingSuggestionStatus !== "all") {
         params.set("status", ratingSuggestionStatus);
       }
@@ -2038,21 +2152,21 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
         `/api/knowledge-bases/${encodeURIComponent(activeKnowledgeBaseForItems)}/rating-suggestions?${params.toString()}`,
       );
     },
-    enabled: forcedView === "knowledge" && Boolean(activeKnowledgeBaseForItems),
+    enabled: forcedView === "knowledge" && Boolean(activeKnowledgeBaseForItems) && Boolean(activeKnowledgeActorAgentId),
     refetchInterval: resolvePollingInterval(pageVisible, 45_000),
     refetchIntervalInBackground: false,
   });
   const permissionAuditQuery = useQuery({
-    queryKey: queryKeys.knowledgePermissionAudit(""),
-    queryFn: () => fetchJson<KnowledgePermissionAuditPayload>("/api/knowledge/permissions/audit"),
-    enabled: forcedView === "knowledge",
+    queryKey: queryKeys.knowledgePermissionAudit(activeKnowledgeActorAgentId),
+    queryFn: () => fetchJson<KnowledgePermissionAuditPayload>(`/api/knowledge/permissions/audit?agentId=${encodeURIComponent(activeKnowledgeActorAgentId)}`),
+    enabled: forcedView === "knowledge" && Boolean(activeKnowledgeActorAgentId),
     refetchInterval: resolvePollingInterval(pageVisible, 60_000),
     refetchIntervalInBackground: false,
   });
   const governanceTasksQuery = useQuery({
-    queryKey: queryKeys.knowledgeGovernanceTasks("", "open"),
-    queryFn: () => fetchJson<KnowledgeGovernanceTasksPayload>("/api/knowledge/governance/tasks?status=open"),
-    enabled: forcedView === "knowledge",
+    queryKey: queryKeys.knowledgeGovernanceTasks(activeKnowledgeActorAgentId, "open"),
+    queryFn: () => fetchJson<KnowledgeGovernanceTasksPayload>(`/api/knowledge/governance/tasks?agentId=${encodeURIComponent(activeKnowledgeActorAgentId)}&status=open`),
+    enabled: forcedView === "knowledge" && Boolean(activeKnowledgeActorAgentId),
     refetchInterval: resolvePollingInterval(pageVisible, 45_000),
     refetchIntervalInBackground: false,
   });
@@ -2063,12 +2177,14 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     refetchInterval: false,
   });
   const knowledgeTraceQuery = useQuery({
-    queryKey: queryKeys.knowledgeTrace(activeKnowledgeBaseForItems, traceTargetId),
-    queryFn: () =>
-      fetchJson<KnowledgeTracePayload>(
-        `/api/knowledge-bases/${encodeURIComponent(activeKnowledgeBaseForItems)}/trace/${encodeURIComponent(traceTargetId)}`,
-      ),
-    enabled: forcedView === "knowledge" && Boolean(activeKnowledgeBaseForItems) && Boolean(traceTargetId),
+    queryKey: queryKeys.knowledgeTrace(activeKnowledgeBaseForItems, activeKnowledgeActorAgentId, traceTargetId),
+    queryFn: () => {
+      const params = appendAgentParam(new URLSearchParams(), activeKnowledgeActorAgentId);
+      return fetchJson<KnowledgeTracePayload>(
+        `/api/knowledge-bases/${encodeURIComponent(activeKnowledgeBaseForItems)}/trace/${encodeURIComponent(traceTargetId)}?${params.toString()}`,
+      );
+    },
+    enabled: forcedView === "knowledge" && Boolean(activeKnowledgeBaseForItems) && Boolean(activeKnowledgeActorAgentId) && Boolean(traceTargetId),
     refetchInterval: false,
   });
   const knowledgeSearchResults = knowledgeSearchQuery.data?.results ?? [];
@@ -2377,11 +2493,29 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
   }, [searchParamText]);
 
   useEffect(() => {
-    const next = buildMemorySearchParams(activeSectionId, activeItemId, activeFilter, activeManageFilter, activeChannel, searchText);
+    const next = buildMemorySearchParams(
+      activeSectionId,
+      activeItemId,
+      activeFilter,
+      activeManageFilter,
+      activeChannel,
+      searchText,
+      requestedKnowledgeActorAgentId,
+    );
     if (next.toString() !== searchParamText) {
       setSearchParams(next, { replace: true });
     }
-  }, [activeChannel, activeFilter, activeItemId, activeManageFilter, activeSectionId, searchParamText, searchText, setSearchParams]);
+  }, [
+    activeChannel,
+    activeFilter,
+    activeItemId,
+    activeManageFilter,
+    activeSectionId,
+    requestedKnowledgeActorAgentId,
+    searchParamText,
+    searchText,
+    setSearchParams,
+  ]);
 
   useEffect(() => {
     if (copyFeedback.tone === "idle") {
@@ -2447,8 +2581,8 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
       }
       return;
     }
-    if (!activeKnowledgeBaseId || !knowledgeBases.some((base) => base.knowledgeBaseId === activeKnowledgeBaseId)) {
-      setActiveKnowledgeBaseId(knowledgeBases[0].knowledgeBaseId);
+    if (!activeKnowledgeBaseId || !knowledgeBases.some((base) => knowledgeBaseRequestId(base) === activeKnowledgeBaseId)) {
+      setActiveKnowledgeBaseId(knowledgeBaseRequestId(knowledgeBases[0]));
     }
   }, [activeKnowledgeBaseId, knowledgeBases]);
 
@@ -2465,14 +2599,16 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
 
   const refresh = () => {
     void queryClient.invalidateQueries({ queryKey: queryKeys.memoryOverview() });
-    invalidateKnowledgeDashboard(queryClient);
-    void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeGovernanceTasks("", "open") });
+    invalidateKnowledgeDashboard(queryClient, activeKnowledgeActorAgentId || fallbackKnowledgeActorAgentId);
+    void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeGovernanceTasks(activeKnowledgeActorAgentId, "open") });
     void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeIngestionAdapters() });
     if (activeKnowledgeBaseForItems) {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeItems(activeKnowledgeBaseForItems) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeItems(activeKnowledgeBaseForItems, activeKnowledgeActorAgentId) });
     }
     if (selectedGraphNodeId) {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.memoryKnowledgeGraphNodeDetail(selectedGraphNodeId) });
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.memoryKnowledgeGraphNodeDetail(selectedGraphNodeId, fallbackKnowledgeActorAgentId),
+      });
     }
   };
 
@@ -2484,8 +2620,8 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     setActiveChannel((current) => (current === channel ? "" : channel));
   };
   const currentUrl = useMemo(
-    () => buildMemoryLink(activeSectionId, activeItemId, activeFilter, activeManageFilter, activeChannel, searchText),
-    [activeChannel, activeFilter, activeItemId, activeManageFilter, activeSectionId, searchText],
+    () => buildMemoryLink(activeSectionId, activeItemId, activeFilter, activeManageFilter, activeChannel, searchText, requestedKnowledgeActorAgentId),
+    [activeChannel, activeFilter, activeItemId, activeManageFilter, activeSectionId, requestedKnowledgeActorAgentId, searchText],
   );
   const handleCopySourceSummary = async () => {
     if (!activeSection || !activeItem) {
@@ -2633,42 +2769,60 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     setActiveItemId(itemId);
   };
   const submitSourceArtifact = () => {
-    if (!activeKnowledgeBase) {
+    if (!activeKnowledgeBase || !activeKnowledgeActorAgentId) {
+      setKnowledgeFeedback({ tone: "error", text: `${copy.mutationFailed}: agentId` });
       return;
     }
-    sourceArtifactMutation.mutate({ knowledgeBaseId: activeKnowledgeBase.knowledgeBaseId, draft: sourceDraft });
+    sourceArtifactMutation.mutate({ knowledgeBaseId: knowledgeBaseRequestId(activeKnowledgeBase), draft: sourceDraft });
   };
   const submitRefinementProposal = () => {
-    if (!activeKnowledgeBase || !proposalDraft.title.trim() || !proposalDraft.content.trim()) {
+    if (!activeKnowledgeBase || !activeKnowledgeActorAgentId || !proposalDraft.title.trim() || !proposalDraft.content.trim()) {
       setKnowledgeFeedback({ tone: "error", text: `${copy.mutationFailed}: ${copy.proposalTitle}` });
       return;
     }
-    proposalMutation.mutate({ knowledgeBaseId: activeKnowledgeBase.knowledgeBaseId, draft: proposalDraft });
+    proposalMutation.mutate({
+      knowledgeBaseId: knowledgeBaseRequestId(activeKnowledgeBase),
+      draft: { ...proposalDraft, proposedByAgentId: proposalDraft.proposedByAgentId.trim() || activeKnowledgeActorAgentId },
+    });
   };
   const submitIngestionPackage = () => {
-    if (!activeKnowledgeBase || !ingestionDraft.sourceType.trim()) {
+    if (!activeKnowledgeBase || !activeKnowledgeActorAgentId || !ingestionDraft.sourceType.trim()) {
       setKnowledgeFeedback({ tone: "error", text: `${copy.mutationFailed}: ${copy.ingestionPackage}` });
       return;
     }
-    ingestionMutation.mutate({ knowledgeBaseId: activeKnowledgeBase.knowledgeBaseId, draft: ingestionDraft });
+    ingestionMutation.mutate({
+      knowledgeBaseId: knowledgeBaseRequestId(activeKnowledgeBase),
+      draft: {
+        ...ingestionDraft,
+        capturedBy: ingestionDraft.capturedBy.trim() || activeKnowledgeActorAgentId,
+        proposedByAgentId: ingestionDraft.proposedByAgentId.trim() || activeKnowledgeActorAgentId,
+      },
+    });
   };
   const reviewProposal = (proposalId: string, status: "approved" | "rejected") => {
-    if (!activeKnowledgeBase) {
+    if (!activeKnowledgeBase || !activeKnowledgeActorAgentId) {
+      setKnowledgeFeedback({ tone: "error", text: `${copy.mutationFailed}: agentId` });
       return;
     }
-    reviewMutation.mutate({ knowledgeBaseId: activeKnowledgeBase.knowledgeBaseId, proposalId, status });
+    reviewMutation.mutate({ knowledgeBaseId: knowledgeBaseRequestId(activeKnowledgeBase), proposalId, status });
   };
   const updateKnowledgeRating = (item: KnowledgeItem) => {
-    if (!activeKnowledgeBase) {
+    if (!activeKnowledgeBase || !activeKnowledgeActorAgentId) {
+      setKnowledgeFeedback({ tone: "error", text: `${copy.mutationFailed}: agentId` });
       return;
     }
-    ratingMutation.mutate({ knowledgeBaseId: activeKnowledgeBase.knowledgeBaseId, item, draft: ratingDraft });
+    ratingMutation.mutate({
+      knowledgeBaseId: knowledgeBaseRequestId(activeKnowledgeBase),
+      item,
+      draft: { ...ratingDraft, actorAgentId: ratingDraft.actorAgentId.trim() || activeKnowledgeActorAgentId },
+    });
   };
   const reviewRatingSuggestion = (suggestionId: string, status: "applied" | "rejected") => {
-    if (!activeKnowledgeBase) {
+    if (!activeKnowledgeBase || !activeKnowledgeActorAgentId) {
+      setKnowledgeFeedback({ tone: "error", text: `${copy.mutationFailed}: agentId` });
       return;
     }
-    ratingSuggestionReviewMutation.mutate({ knowledgeBaseId: activeKnowledgeBase.knowledgeBaseId, suggestionId, status });
+    ratingSuggestionReviewMutation.mutate({ knowledgeBaseId: knowledgeBaseRequestId(activeKnowledgeBase), suggestionId, status });
   };
   const toggleRatingSuggestionSelection = (suggestionId: string) => {
     setSelectedRatingSuggestionIds((current) =>
@@ -2689,11 +2843,12 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     });
   };
   const reviewSelectedRatingSuggestions = (status: "applied" | "rejected") => {
-    if (!activeKnowledgeBase || !selectedVisibleRatingSuggestionIds.length) {
+    if (!activeKnowledgeBase || !activeKnowledgeActorAgentId || !selectedVisibleRatingSuggestionIds.length) {
+      setKnowledgeFeedback({ tone: "error", text: `${copy.mutationFailed}: agentId` });
       return;
     }
     ratingSuggestionBulkReviewMutation.mutate({
-      knowledgeBaseId: activeKnowledgeBase.knowledgeBaseId,
+      knowledgeBaseId: knowledgeBaseRequestId(activeKnowledgeBase),
       suggestionIds: selectedVisibleRatingSuggestionIds,
       status,
     });
@@ -3869,23 +4024,26 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
             </section>
           ) : null}
           <nav className={styles.sourceList} aria-label={copy.knowledgeBases}>
-            {knowledgeBases.map((base) => (
-              <button
-                key={base.knowledgeBaseId}
-                type="button"
-                className={base.knowledgeBaseId === activeKnowledgeBase?.knowledgeBaseId ? `${styles.sourceButton} ${styles.sourceButtonActive}` : styles.sourceButton}
-                onClick={() => setActiveKnowledgeBaseId(base.knowledgeBaseId)}
-              >
-                <span className={styles.sourceIcon}>
-                  <Database size={15} />
-                </span>
-                <span className={styles.sourceCopy}>
-                  <strong>{base.name}</strong>
-                  <span>{base.teamName || base.teamId}</span>
-                </span>
-                <span className={styles.sourceStats}>{base.stats.itemCount}/{base.stats.pendingProposalCount}</span>
-              </button>
-            ))}
+            {knowledgeBases.map((base) => {
+              const requestId = knowledgeBaseRequestId(base);
+              return (
+                <button
+                  key={requestId}
+                  type="button"
+                  className={requestId === activeKnowledgeBaseForItems ? `${styles.sourceButton} ${styles.sourceButtonActive}` : styles.sourceButton}
+                  onClick={() => setActiveKnowledgeBaseId(requestId)}
+                >
+                  <span className={styles.sourceIcon}>
+                    <Database size={15} />
+                  </span>
+                  <span className={styles.sourceCopy}>
+                    <strong>{base.name}</strong>
+                    <span>{base.teamName || base.teamId}</span>
+                  </span>
+                  <span className={styles.sourceStats}>{base.stats.itemCount}/{base.stats.pendingProposalCount}</span>
+                </button>
+              );
+            })}
           </nav>
         </aside>
 

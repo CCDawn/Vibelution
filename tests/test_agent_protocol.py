@@ -3184,6 +3184,77 @@ class TestLocalProviderBootstrap:
         assert agent.config.llm.get_profile(profile_id="primary").model == "subagent-execution-model"
         assert "subagent-execution-model" in captured_models
 
+    def test_runtime_agent_llm_slot_binding_uses_supervised_env_snapshot_when_registry_missing(self, monkeypatch):
+        monkeypatch.setenv("VIBELUTION_AGENT_ID", "agent-supervised-worktree")
+        monkeypatch.setenv("VIBELUTION_AGENT_LLM_SLOT", "dialogue")
+        monkeypatch.setenv("VIBELUTION_AGENT_LLM_MODEL_ID", "supervised-dialogue-model-id")
+        monkeypatch.setenv(
+            "VIBELUTION_AGENT_LLM_BINDINGS_JSON",
+            json.dumps({"dialogue": {"modelId": "supervised-dialogue-model-id"}}),
+        )
+        monkeypatch.setenv("VIBELUTION_SUPERVISED_ROLE", "baseline")
+        monkeypatch.setattr(agent_module.Key_Tools, "create_llm_facing_tools", lambda: [])
+        monkeypatch.setattr(SelfEvolvingAgent, "_init_model_discovery", lambda self: 16000)
+        monkeypatch.setattr(SelfEvolvingAgent, "_init_token_compressor", lambda self: None)
+        monkeypatch.setattr(agent_module, "get_prompt_manager", lambda: MagicMock())
+        monkeypatch.setattr(agent_module, "get_state_manager", lambda: MagicMock())
+        monkeypatch.setattr(agent_module, "get_event_bus", lambda: MagicMock())
+        monkeypatch.setattr(agent_module, "get_tool_executor", lambda: MagicMock())
+        monkeypatch.setattr(agent_module, "get_security_validator", lambda *_args, **_kwargs: MagicMock())
+        monkeypatch.setattr(agent_module, "get_git_memory_service", lambda: MagicMock())
+        monkeypatch.setattr(agent_module, "get_mental_model", lambda **_kwargs: MagicMock())
+
+        config = Settings(
+            None,
+            **{
+                "llm.providers.default.kind": "local",
+                "llm.providers.default.api_key": "",
+                "llm.providers.default.api_key_env": "",
+                "llm.providers.default.base_url": "http://localhost:11434/v1",
+                "llm.providers.default.compat_mode": "openai",
+                "llm.providers.default.requires_api_key": False,
+                "llm.profiles.primary.provider_id": "default",
+                "llm.profiles.primary.model": "global-primary-model",
+            },
+        ).config
+        config.llm.model_library = {
+            "supervised-dialogue-model-id": {
+                "provider_id": "default",
+                "model": "supervised-dialogue-model",
+                "tool_calling_mode": "auto",
+            },
+        }
+        directory_module = __import__(
+            "core.web.services.agent_directory_service",
+            fromlist=["agent_directory_service"],
+        )
+        monkeypatch.setattr(directory_module, "get_agent", lambda _agent_id, include_archived=False: None)
+        monkeypatch.setattr(directory_module, "filter_llm_tools_for_current_agent", lambda tools: list(tools or []))
+
+        class DummyClient:
+            def __init__(self, config=None, role=None, profile_id=None):
+                selected_profile_id = profile_id or config.llm.get_role_profile_id(role or "primary")
+                self.model = config.llm.get_profile(profile_id=selected_profile_id).model
+
+            def bind_tools(self, _tools):
+                return self
+
+        monkeypatch.setattr(
+            agent_module,
+            "get_llm_client",
+            lambda role=None, profile_id=None, config=None: DummyClient(
+                config=config,
+                role=role,
+                profile_id=profile_id,
+            ),
+        )
+
+        agent = SelfEvolvingAgent(config=config)
+
+        assert agent.runtime_agent_binding["llmBindings"]["dialogue"]["modelId"] == "supervised-dialogue-model-id"
+        assert agent.config.llm.get_profile(profile_id="primary").model == "supervised-dialogue-model"
+        assert agent._runtime_agent_llm_resolution.agent_id == "agent-supervised-worktree"
+
     def test_runtime_agent_llm_slot_binding_failure_is_fatal(self, monkeypatch):
         monkeypatch.setenv("VIBELUTION_AGENT_ID", "agent-bad-slot")
         monkeypatch.setenv("VIBELUTION_AGENT_LLM_SLOT", "dialogue")
@@ -3466,6 +3537,56 @@ class TestDelegationExposure:
 
 class TestResolvedApiKeyUsage:
     """解析后的 API Key 使用一致性测试"""
+
+    def test_agent_missing_api_key_error_names_selected_model_envs(self, monkeypatch):
+        monkeypatch.delenv("VIBELUTION_LLM_MODEL_RELAY_OPENAI_GPT_5_5_API_KEY", raising=False)
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        scene_events = []
+        monkeypatch.setattr(
+            agent_module,
+            "_record_agent_scene_event",
+            lambda phase, event_code, **kwargs: scene_events.append((phase, event_code, kwargs)),
+        )
+
+        config = Settings(
+            None,
+            **{
+                "llm.providers.default.kind": "relay",
+                "llm.providers.default.api_key": "",
+                "llm.providers.default.api_key_env": "OPENAI_API_KEY",
+                "llm.providers.default.base_url": "https://ai-pixel.online",
+                "llm.providers.default.compat_mode": "openai",
+                "llm.providers.default.requires_api_key": True,
+                "llm.profiles.primary.provider_id": "default",
+                "llm.profiles.primary.model": "gpt-5.5",
+                "llm.profiles.primary.api_key_env": "VIBELUTION_LLM_MODEL_RELAY_OPENAI_GPT_5_5_API_KEY",
+            },
+        ).config
+        config.llm.model_library = {
+            "relay_openai_gpt_5_5": {
+                "provider_id": "default",
+                "model": "gpt-5.5",
+                "api_key_env": "VIBELUTION_LLM_MODEL_RELAY_OPENAI_GPT_5_5_API_KEY",
+            }
+        }
+
+        with pytest.raises(ValueError) as exc_info:
+            SelfEvolvingAgent(config=config)
+
+        message = str(exc_info.value)
+        assert "modelId=relay_openai_gpt_5_5" in message
+        assert "provider=inline_profile_primary" in message
+        assert "VIBELUTION_LLM_MODEL_RELAY_OPENAI_GPT_5_5_API_KEY" in message
+        assert "OPENAI_API_KEY" in message
+        assert "llm.providers.<provider_id>" not in message
+        missing_event = next(event for event in scene_events if event[1] == "agent.api_key.missing")
+        fields = missing_event[2]["fields"]
+        assert fields["modelId"] == "relay_openai_gpt_5_5"
+        assert fields["providerId"] == "inline_profile_primary"
+        assert fields["providerKind"] == "relay"
+        assert fields["modelApiKeyEnv"] == "VIBELUTION_LLM_MODEL_RELAY_OPENAI_GPT_5_5_API_KEY"
+        assert fields["providerApiKeyEnv"] == "OPENAI_API_KEY"
+        assert fields["apiKeySource"] == "missing"
 
     def test_agent_uses_provider_specific_resolved_key(self, monkeypatch):
         monkeypatch.delenv("MINIMAX_API_KEY", raising=False)

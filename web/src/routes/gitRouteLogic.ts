@@ -52,3 +52,11 @@ export function configuredGitModelId(workspace?: ConfigWorkspace) {
   }
   return String((gitConfig as Record<string, unknown>).commit_message_model_ref ?? "").trim();
 }
+
+export function configuredGitPrompt(workspace?: ConfigWorkspace) {
+  const gitConfig = workspace?.publicConfig?.git;
+  if (!gitConfig || typeof gitConfig !== "object" || Array.isArray(gitConfig)) {
+    return "";
+  }
+  return String((gitConfig as Record<string, unknown>).commit_message_prompt ?? "");
+}

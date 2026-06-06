@@ -78,9 +78,9 @@ describe("ConfigRoute content experience contract", () => {
 
   it("keeps model binding editing out of settings after moving it to Agent management", () => {
     expect(configRouteSource).toContain('modelsTitle: "模型库"');
-    expect(configRouteSource).toContain("每个 Agent 的具体 LLM 槽位绑定请到 Agent 管理中维护");
+    expect(configRouteSource).toContain("每个 Agent 的具体模型选择请到 Agent 管理中维护");
     expect(configRouteSource).toContain('modelsTitle: "Model Library"');
-    expect(configRouteSource).toContain("Edit each Agent's LLM slot bindings in Agent management");
+    expect(configRouteSource).toContain("Edit each Agent's model choices in Agent management");
     expect(configRouteSource).not.toContain('modelsTitle: "模型中心"');
     expect(configRouteSource).not.toContain('modelsTitle: "Model Center"');
     expect(configRouteSource).not.toContain("copy.profilesBody");
@@ -97,16 +97,18 @@ describe("ConfigRoute content experience contract", () => {
     expect(modelsIntroSource).toContain("copy.modelCenterModels");
     expect(modelsIntroSource).toContain("copy.modelCenterAccounts");
     expect(modelsIntroSource).toContain("copy.modelCenterCapabilityIssues");
+    expect(modelsIntroSource).not.toContain("copy.modelCenterBindings");
   });
 
   it("separates model assets and git model settings in the sidebar", () => {
     expect(configRouteSource).toContain('id: "models-profiles"');
     expect(configRouteSource).toContain('memberSectionIds: ["models", "llm-discovery"]');
     expect(configRouteSource).toContain(
-      'memberSectionIds: ["health-diagnostics", "git-commit-model", "git-commit-prompt", "security", "network", "log", "parser", "debug"]',
+      'memberSectionIds: ["health-diagnostics", "security", "network", "log", "parser", "debug"]',
     );
     expect(configRouteSource).not.toContain('memberSectionIds: ["prompt"]');
     expect(configRouteSource).not.toContain('memberSectionIds: ["profiles", "models", "llm-profiles", "llm-discovery", "git-commit-profile"]');
+    expect(configRouteSource).not.toContain('memberSectionIds: ["health-diagnostics", "tools", "git-commit-profile"');
   });
 
   it("keeps model-library advanced transport fields behind a disclosure", () => {

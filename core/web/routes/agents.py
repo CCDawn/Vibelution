@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from time import perf_counter
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, status
@@ -49,6 +50,10 @@ from core.web.services.chat_room_service import (
     ChatRoomValidationError,
     remove_agent_from_chat_rooms,
     update_agent_chat_room_membership,
+)
+from core.web.services.team_service import (
+    TeamServiceError,
+    remove_agent_from_teams,
 )
 from core.web.services.prompt_template_service import (
     PromptTemplateError,
@@ -352,12 +357,6 @@ def agent_create(payload: AgentCreatePayload) -> dict:
             raise AgentDirectoryError("Agent was not created for the direct session.")
         if metadata:
             agent = update_agent_instance(agent_id, metadata=metadata)
-        if persona_profile:
-            agent = update_agent_instance(agent_id, persona_profile=persona_profile)
-        if task_profile:
-            agent = update_agent_instance(agent_id, task_profile=task_profile)
-        if tool_policy:
-            agent = update_agent_instance(agent_id, tool_policy=tool_policy)
         if payload.primaryMode or payload.roleKey or payload.promptTemplateId:
             agent = update_agent_instance(
                 agent_id,
@@ -366,6 +365,12 @@ def agent_create(payload: AgentCreatePayload) -> dict:
                 role_key=payload.roleKey or None,
                 prompt_template_id=payload.promptTemplateId or None,
             )
+        if persona_profile:
+            agent = update_agent_instance(agent_id, persona_profile=persona_profile)
+        if task_profile:
+            agent = update_agent_instance(agent_id, task_profile=task_profile)
+        if tool_policy:
+            agent = update_agent_instance(agent_id, tool_policy=tool_policy)
         return agent
     except session_service.SessionValidationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -584,11 +589,13 @@ def agent_update(agent_id: str, payload: AgentUpdatePayload) -> dict:
             current = get_agent(agent_id)
             if current and str(current.get("status") or "active").strip() != "archived":
                 ensure_agent_archive_allowed(agent_id)
+                team_cleanup = remove_agent_from_teams(agent_id)
                 room_cleanup = remove_agent_from_chat_rooms(agent_id)
                 mode_cleanup = remove_agent_from_mode_bindings(agent_id)
                 archive_summary = {
                     "modeBindingsRepaired": len(mode_cleanup.get("repairWarnings") or []),
                     "removedFromRoomIds": list(room_cleanup.get("changedRoomIds") or []),
+                    "removedFromTeamIds": list(team_cleanup.get("changedTeamIds") or []),
                     "dataRetention": "archived_only",
                     "source": "patch_status",
                 }
@@ -614,7 +621,7 @@ def agent_update(agent_id: str, payload: AgentUpdatePayload) -> dict:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ChatRoomBusyError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except (AgentDirectoryError, AgentModeBindingError, ChatRoomValidationError) as exc:
+    except (AgentDirectoryError, AgentModeBindingError, ChatRoomValidationError, TeamServiceError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
@@ -680,6 +687,47 @@ def _record_agent_reset_route_event(
         return
 
 
+def _timed_agent_delete_stage(timings: dict[str, float], stage: str, fn: Any) -> Any:
+    started_at = perf_counter()
+    try:
+        return fn()
+    finally:
+        timings[stage] = round((perf_counter() - started_at) * 1000, 1)
+
+
+def _record_agent_delete_route_event(
+    event_code: str,
+    agent_id: str,
+    *,
+    timings: dict[str, float],
+    started_at: float,
+    outcome: str,
+    level: str = "info",
+    error: Exception | None = None,
+    fields: dict[str, Any] | None = None,
+) -> None:
+    try:
+        record_runtime_scene_event(
+            "agent_directory",
+            "delete",
+            event_code,
+            message=event_code,
+            level=level,
+            outcome=outcome,
+            fields={
+                "agentId": str(agent_id or "").strip(),
+                "durationMs": round((perf_counter() - started_at) * 1000, 1),
+                "timingsMs": dict(timings or {}),
+                "errorType": type(error).__name__ if error is not None else "",
+                "source": "AgentDeleteAPI",
+                **dict(fields or {}),
+            },
+            lifecycle=True,
+        )
+    except Exception:
+        return
+
+
 @router.post("/agents/{agent_id}/reset")
 def agent_reset(agent_id: str, payload: AgentResetPayload) -> dict:
     _record_agent_reset_route_event("agent.reset.requested", agent_id, payload, outcome="requested")
@@ -707,47 +755,97 @@ def agent_reset(agent_id: str, payload: AgentResetPayload) -> dict:
 
 @router.delete("/agents/{agent_id}")
 def agent_archive(agent_id: str) -> dict:
+    timings: dict[str, float] = {}
+    started_at = perf_counter()
     try:
-        ensure_agent_archive_allowed(agent_id)
-        room_cleanup = remove_agent_from_chat_rooms(agent_id)
-        mode_cleanup = remove_agent_from_mode_bindings(agent_id)
-        agent = archive_agent_instance(agent_id)
-        return {
+        _timed_agent_delete_stage(timings, "ensure_archive_allowed", lambda: ensure_agent_archive_allowed(agent_id))
+        team_cleanup = _timed_agent_delete_stage(timings, "remove_from_teams", lambda: remove_agent_from_teams(agent_id))
+        room_cleanup = _timed_agent_delete_stage(timings, "remove_from_chat_rooms", lambda: remove_agent_from_chat_rooms(agent_id))
+        mode_cleanup = _timed_agent_delete_stage(timings, "remove_from_mode_bindings", lambda: remove_agent_from_mode_bindings(agent_id))
+        agent = _timed_agent_delete_stage(
+            timings,
+            "archive_agent",
+            lambda: archive_agent_instance(agent_id, repair_mode_bindings=False),
+        )
+        payload = {
             **agent,
             "archiveSummary": {
                 "modeBindingsRepaired": len(mode_cleanup.get("repairWarnings") or []),
                 "removedFromRoomIds": list(room_cleanup.get("changedRoomIds") or []),
+                "removedFromTeamIds": list(team_cleanup.get("changedTeamIds") or []),
                 "dataRetention": "archived_only",
             },
         }
+        _record_agent_delete_route_event(
+            "agent.archive.completed",
+            agent_id,
+            timings=timings,
+            started_at=started_at,
+            outcome="succeeded",
+            fields={
+                "removedFromTeamCount": len(team_cleanup.get("changedTeamIds") or []),
+                "removedFromRoomCount": len(room_cleanup.get("changedRoomIds") or []),
+                "modeBindingRepairWarningCount": len(mode_cleanup.get("repairWarnings") or []),
+            },
+        )
+        return payload
     except AgentNotFoundError as exc:
+        _record_agent_delete_route_event("agent.archive.failed", agent_id, timings=timings, started_at=started_at, outcome="failed", level="warning", error=exc)
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ChatRoomBusyError as exc:
+        _record_agent_delete_route_event("agent.archive.failed", agent_id, timings=timings, started_at=started_at, outcome="failed", level="warning", error=exc)
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except (AgentDirectoryError, AgentModeBindingError, ChatRoomValidationError) as exc:
+    except (AgentDirectoryError, AgentModeBindingError, ChatRoomValidationError, TeamServiceError) as exc:
+        _record_agent_delete_route_event("agent.archive.failed", agent_id, timings=timings, started_at=started_at, outcome="failed", level="warning", error=exc)
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.delete("/agents/{agent_id}/purge")
 def agent_purge(agent_id: str) -> dict:
+    timings: dict[str, float] = {}
+    started_at = perf_counter()
     try:
-        ensure_agent_purge_allowed(agent_id)
-        room_cleanup = remove_agent_from_chat_rooms(agent_id, allow_empty_rooms=True)
-        mode_cleanup = remove_agent_from_mode_bindings(agent_id)
-        purge = purge_archived_agent_instance(agent_id)
-        return {
+        _timed_agent_delete_stage(timings, "ensure_purge_allowed", lambda: ensure_agent_purge_allowed(agent_id))
+        team_cleanup = _timed_agent_delete_stage(timings, "remove_from_teams", lambda: remove_agent_from_teams(agent_id))
+        room_cleanup = _timed_agent_delete_stage(
+            timings,
+            "remove_from_chat_rooms",
+            lambda: remove_agent_from_chat_rooms(agent_id, allow_empty_rooms=True),
+        )
+        mode_cleanup = _timed_agent_delete_stage(timings, "remove_from_mode_bindings", lambda: remove_agent_from_mode_bindings(agent_id))
+        purge = _timed_agent_delete_stage(timings, "purge_agent", lambda: purge_archived_agent_instance(agent_id))
+        payload = {
             **purge,
             "purgeSummary": {
                 "modeBindingsRepaired": len(mode_cleanup.get("repairWarnings") or []),
                 "removedFromRoomIds": list(room_cleanup.get("changedRoomIds") or []),
+                "removedFromTeamIds": list(team_cleanup.get("changedTeamIds") or []),
                 "dataRetention": "purged",
             },
         }
+        _record_agent_delete_route_event(
+            "agent.purge.completed",
+            agent_id,
+            timings=timings,
+            started_at=started_at,
+            outcome="succeeded",
+            fields={
+                "removedFromTeamCount": len(team_cleanup.get("changedTeamIds") or []),
+                "removedFromRoomCount": len(room_cleanup.get("changedRoomIds") or []),
+                "modeBindingRepairWarningCount": len(mode_cleanup.get("repairWarnings") or []),
+                "workspaceDeleted": bool(purge.get("workspaceDeleted")),
+                "skippedPathCount": len(purge.get("skippedPaths") or []),
+            },
+        )
+        return payload
     except AgentNotFoundError as exc:
+        _record_agent_delete_route_event("agent.purge.failed", agent_id, timings=timings, started_at=started_at, outcome="failed", level="warning", error=exc)
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ChatRoomBusyError as exc:
+        _record_agent_delete_route_event("agent.purge.failed", agent_id, timings=timings, started_at=started_at, outcome="failed", level="warning", error=exc)
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except (AgentDirectoryError, AgentModeBindingError, ChatRoomValidationError) as exc:
+    except (AgentDirectoryError, AgentModeBindingError, ChatRoomValidationError, TeamServiceError) as exc:
+        _record_agent_delete_route_event("agent.purge.failed", agent_id, timings=timings, started_at=started_at, outcome="failed", level="warning", error=exc)
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 

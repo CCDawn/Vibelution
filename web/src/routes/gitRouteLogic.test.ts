@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { ConfigWorkspace, GitStatusFile } from "../api/types";
 import {
   configuredGitModelId,
+  configuredGitPrompt,
   displayGitPath,
   formatGitDateTime,
   gitFileName,
@@ -47,7 +48,7 @@ describe("gitRouteLogic", () => {
     expect(formatGitDateTime("2026-05-21T10:00:00+08:00", "en-US")).toContain("05/21");
   });
 
-  it("reads the configured git commit model defensively", () => {
+  it("reads the configured Git default commit model defensively", () => {
     const workspace = {
       publicConfig: {
         git: {
@@ -59,6 +60,20 @@ describe("gitRouteLogic", () => {
     expect(configuredGitModelId(workspace)).toBe("relay_openai_gpt_5_5");
     expect(configuredGitModelId({ publicConfig: { git: [] } } as unknown as ConfigWorkspace)).toBe("");
     expect(configuredGitModelId(undefined)).toBe("");
+  });
+
+  it("reads the configured Git prompt template defensively", () => {
+    const workspace = {
+      publicConfig: {
+        git: {
+          commit_message_prompt: "Summary: {summary}\nFiles: {files}\nDiff: {diff}",
+        },
+      },
+    } as unknown as ConfigWorkspace;
+
+    expect(configuredGitPrompt(workspace)).toContain("{diff}");
+    expect(configuredGitPrompt({ publicConfig: { git: [] } } as unknown as ConfigWorkspace)).toBe("");
+    expect(configuredGitPrompt(undefined)).toBe("");
   });
 
   it("keeps filter type names explicit", () => {

@@ -875,8 +875,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     ? liveActiveRun
     : null;
   const monitoredRun = effectiveActiveRunSnapshot
-    ?? visibleLiveRunSnapshot
-    ?? latestSupervisedRunSnapshot;
+    ?? visibleLiveRunSnapshot;
   const runningRun = effectiveActiveRunSnapshot ?? (liveActiveRun && isLiveSupervisedRunStatus(liveActiveRun.status)
     ? liveActiveRun
     : null);
@@ -1319,17 +1318,13 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       setLiveActiveRun(activeRunSnapshot);
       return;
     }
-    if (latestSupervisedRunSnapshot) {
-      setLiveActiveRun(latestSupervisedRunSnapshot);
-      return;
-    }
     setLiveActiveRun((current) => {
       if (current && ["done", "failed", "cancelled"].includes(String(current.status || "").toLowerCase())) {
         return current;
       }
       return null;
     });
-  }, [activeRunSnapshot, latestSupervisedRunSnapshot]);
+  }, [activeRunSnapshot]);
 
   useEffect(() => {
     if (!forcedTrack || evolutionTrack === forcedTrack) {

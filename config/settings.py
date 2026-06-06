@@ -8,6 +8,8 @@
 from __future__ import annotations
 
 import copy
+import hashlib
+import json
 import os
 from pathlib import Path
 from typing import Optional, Dict, Any
@@ -101,6 +103,173 @@ PROFILE_REFERENCE_OVERRIDE_FIELDS = (
     "capability_error",
 )
 UNCONFIGURED_MODEL_REF = "__unconfigured__"
+
+
+def _default_model_api_key_env(model_id: str) -> str:
+    raw = str(model_id or "")
+    token = "".join(
+        char if ("A" <= char <= "Z" or "0" <= char <= "9") else "_"
+        for char in raw.upper()
+    ).strip("_")
+    if not token and raw:
+        import hashlib
+
+        token = f"ID_{hashlib.sha1(raw.encode('utf-8')).hexdigest()[:12].upper()}"
+    if len(token) > 48:
+        import hashlib
+
+        digest = hashlib.sha1(raw.encode("utf-8")).hexdigest()[:12].upper()
+        token = f"{token[:35].strip('_')}_{digest}".strip("_")
+    return f"VIBELUTION_LLM_MODEL_{token}_API_KEY" if token else "VIBELUTION_LLM_MODEL_API_KEY"
+
+
+def _canonical_model_api_key_env(model_id: str) -> str:
+    return _default_model_api_key_env(model_id)
+
+
+def _profile_model_ref(profile: Dict[str, Any]) -> str:
+    if not isinstance(profile, dict):
+        return ""
+    return str(profile.get("model_ref") or "").strip()
+
+
+def _provider_kind(provider: Dict[str, Any]) -> str:
+    return str(provider.get("kind") or provider.get("api") or "openai").strip() or "openai"
+
+
+def _provider_fingerprint(provider: Dict[str, Any]) -> str:
+    payload = json.dumps(_public_inline_provider_payload(provider), ensure_ascii=False, sort_keys=True)
+    return hashlib.sha1(payload.encode("utf-8")).hexdigest()
+
+
+def _generated_model_id(provider: Dict[str, Any], model: str) -> str:
+    fingerprint = _provider_fingerprint(provider)
+    raw = f"generated-{_provider_kind(provider).lower()}-{str(model or '').strip().lower()}-{fingerprint[:12]}"
+    return "".join(char if char.isalnum() else "_" for char in raw).strip("_") or "generated_model"
+
+
+def _flatten_model_library_entries(node: Any, prefix: str = "") -> Dict[str, Dict[str, Any]]:
+    flattened: Dict[str, Dict[str, Any]] = {}
+    if not isinstance(node, dict):
+        return flattened
+    for key, value in node.items():
+        path = f"{prefix}.{key}" if prefix else str(key)
+        if not isinstance(value, dict):
+            continue
+        model = str(value.get("model", "") or "").strip()
+        provider = _inline_provider_payload(value.get("provider"))
+        provider_id = str(value.get("provider_id", "") or "").strip()
+        if model and (provider or provider_id):
+            flattened[path] = copy.deepcopy(value)
+            continue
+        flattened.update(_flatten_model_library_entries(value, path))
+    return flattened
+
+
+def _repair_legacy_model_library_shape(public_config: Dict[str, Any]) -> Dict[str, Any]:
+    repaired = copy.deepcopy(public_config)
+    llm = repaired.get("llm", {})
+    if not isinstance(llm, dict):
+        return repaired
+    model_library = llm.get("model_library", {})
+    if not isinstance(model_library, dict):
+        return repaired
+    flattened = _flatten_model_library_entries(model_library)
+    if flattened and flattened != model_library:
+        llm["model_library"] = flattened
+    return repaired
+
+
+def _model_library_details(item: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        key: copy.deepcopy(item[key])
+        for key in PROFILE_REFERENCE_OVERRIDE_FIELDS
+        if key in item
+    }
+
+
+def _model_library_entry(
+    provider: Dict[str, Any],
+    model: str,
+    label: str,
+    details: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
+    entry: Dict[str, Any] = {
+        "provider": _public_inline_provider_payload(provider),
+        "model": model,
+        "label": label or model,
+    }
+    entry.update(_model_library_details(details or {}))
+    return entry
+
+
+def _unique_model_library_id(model_library: Dict[str, Any], model_id: str) -> str:
+    base = (model_id or "model").strip("_") or "model"
+    if base not in model_library:
+        return base
+    index = 2
+    while f"{base}_{index}" in model_library:
+        index += 1
+    return f"{base}_{index}"
+
+
+def _ensure_profile_model_library_entries(public_config: Dict[str, Any]) -> Dict[str, Any]:
+    updated = copy.deepcopy(public_config)
+    llm = updated.get("llm", {})
+    if not isinstance(llm, dict):
+        return updated
+    profiles = llm.get("profiles", {})
+    model_library = llm.setdefault("model_library", {})
+    if not isinstance(profiles, dict) or not isinstance(model_library, dict):
+        return updated
+
+    route_model_ids: Dict[tuple[str, str], str] = {}
+    for existing_model_id, item in model_library.items():
+        if not isinstance(item, dict):
+            continue
+        provider = _inline_provider_payload(item.get("provider"))
+        model = str(item.get("model", "") or "").strip()
+        if provider and model:
+            route_model_ids.setdefault((_provider_fingerprint(provider), model), str(existing_model_id))
+
+    for profile in profiles.values():
+        if not isinstance(profile, dict) or _profile_model_ref(profile):
+            continue
+        provider = _inline_provider_payload(profile.get("provider"))
+        model = str(profile.get("model", "") or "").strip()
+        if not provider or not model:
+            continue
+        route_key = (_provider_fingerprint(provider), model)
+        model_id = route_model_ids.get(route_key, "")
+        if not model_id:
+            model_id = _unique_model_library_id(model_library, _generated_model_id(provider, model))
+            entry = _model_library_entry(provider, model, str(profile.get("label") or model).strip(), _model_library_details(profile))
+            entry["api_key_env"] = _canonical_model_api_key_env(model_id)
+            model_library[model_id] = entry
+            route_model_ids[route_key] = model_id
+        profile.clear()
+        profile["model_ref"] = model_id
+        profile["overrides"] = {}
+    return updated
+
+
+def _canonicalize_model_library_api_key_envs(public_config: Dict[str, Any]) -> Dict[str, Any]:
+    updated = copy.deepcopy(public_config)
+    llm = updated.get("llm", {})
+    if not isinstance(llm, dict):
+        return updated
+    model_library = llm.get("model_library", {})
+    if not isinstance(model_library, dict):
+        return updated
+    for model_id, item in model_library.items():
+        if isinstance(item, dict):
+            item["api_key_env"] = _canonical_model_api_key_env(str(model_id))
+    return updated
+
+
+def _canonicalize_runtime_public_config(public_config: Dict[str, Any]) -> Dict[str, Any]:
+    repaired = _repair_legacy_model_library_shape(public_config)
+    return _ensure_profile_model_library_entries(repaired)
 
 
 def _materialize_role_bound_profiles(llm_section: Dict[str, Any]) -> None:
@@ -494,7 +663,7 @@ class ConfigLoader:
             with open(config_file, 'rb') as f:
                 config = tomllib.load(f)
             # 转换 TOML 嵌套键为 Pydantic 字段格式
-            return self._normalize_toml_keys(config)
+            return self._normalize_toml_keys(_canonicalize_runtime_public_config(config))
         except Exception as e:
             print(f"警告: 读取配置文件失败: {e}")
             return {}

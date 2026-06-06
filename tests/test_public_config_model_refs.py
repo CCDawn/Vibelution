@@ -6,7 +6,7 @@ LLM 模型模板引用结构测试
 from pathlib import Path
 
 from config import ConfigLoader
-from config.public_config import UNCONFIGURED_MODEL_REF, build_effective_config, delete_llm_model, list_llm_model_options, load_public_config
+from config.public_config import build_effective_config, delete_llm_model, list_llm_model_options, load_public_config
 from core.web.services.config_service import _decorate_model_options
 
 
@@ -223,7 +223,7 @@ max_output_tokens = 32000
     assert profile.max_output_tokens == 32000
 
 
-def test_delete_llm_model_marks_model_ref_profiles_unconfigured():
+def test_delete_llm_model_leaves_legacy_profiles_unchanged():
     public_config = load_public_config()
     public_config["llm"].setdefault("model_library", {})["openai_gpt_5_5"] = _openai_gpt_5_5_library_entry()
     public_config["llm"]["profiles"]["primary"] = {
@@ -237,7 +237,6 @@ def test_delete_llm_model_marks_model_ref_profiles_unconfigured():
 
     deleted = delete_llm_model(public_config, "openai_gpt_5_5")
 
-    assert deleted["llm"]["profiles"]["primary"]["model_ref"] == UNCONFIGURED_MODEL_REF
-    assert deleted["llm"]["profiles"]["primary"]["overrides"] == {}
-    assert deleted["llm"]["profiles"]["mental_model"]["model_ref"] == UNCONFIGURED_MODEL_REF
-    assert deleted["llm"]["profiles"]["mental_model"]["overrides"] == {}
+    assert "openai_gpt_5_5" not in deleted["llm"]["model_library"]
+    assert deleted["llm"]["profiles"]["primary"] == public_config["llm"]["profiles"]["primary"]
+    assert deleted["llm"]["profiles"]["mental_model"] == public_config["llm"]["profiles"]["mental_model"]

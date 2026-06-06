@@ -1,5 +1,4 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import CodeMirror from "@uiw/react-codemirror";
 import {
   Blocks,
   ChevronRight,
@@ -21,8 +20,6 @@ import {
 } from "lucide-react";
 import { type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, type BlockerFunction, useBlocker } from "react-router-dom";
-import { json } from "@codemirror/lang-json";
-import { EditorView } from "@codemirror/view";
 
 import { fetchJson } from "../api/client";
 import { queryKeys } from "../api/queryKeys";
@@ -51,11 +48,14 @@ import {
   deriveConfigEditorSyncState,
   deriveModelCenterInventoryRows,
   deriveModelCenterSummary,
+  countModelCenterHealthIssues,
+  mergeEditableConfigView,
   getString,
   clampAvatarCropOffset,
   groupModelPresets,
   hasPendingSecretChanges,
   modelLibraryIdFromParts,
+  pickEditableConfigView,
   canDiscoverModelsForProvider,
   MODEL_CONTRACT_OPTIONS,
   MODEL_TOOL_CALLING_MODE_OPTIONS,
@@ -71,7 +71,7 @@ import {
   type ModelPresetGroupLabels,
   type PublicConfigShape,
 } from "./configRouteLogic";
-import { workbenchCodeMirrorTheme } from "../design/codeMirrorTheme";
+import { LazyJsonCodeMirror } from "../components/editor/LazyJsonCodeMirror";
 import styles from "./ConfigRoute.module.css";
 
 type ConfigLanguage = "zh" | "en";
@@ -239,7 +239,7 @@ export const CONFIG_COPY = {
     runtimeTitle: "运行时与界面",
     runtimeBody: "语言、默认入口和治理模式可以在这里修改，确认后页面会立即展示本次修改。",
     modelsTitle: "模型库",
-    modelsBody: "这里只管理模型资产：服务商、模型名、密钥状态、能力检测和连通性测试。每个 Agent 的具体 LLM 槽位绑定请到 Agent 管理中维护。",
+    modelsBody: "这里只管理模型资产：服务商、模型名、密钥状态、能力检测和连通性测试。每个 Agent 的具体模型选择请到 Agent 管理中维护。",
     draftTitle: "高级配置检查",
     draftBody: "如果结构化面板不够用，可以直接检查整份当前配置；保存时仍只写 config.toml。",
     diagnosticsTitle: "诊断与保存",
@@ -266,15 +266,15 @@ export const CONFIG_COPY = {
     leaveGuardDiscard: "不保存离开",
     leaveGuardCancel: "取消",
     interfaceLanguage: "界面语言",
-    intakeMode: "模式",
+    intakeMode: "进化审核",
     languageChinese: "中文",
     languageEnglish: "English",
     groupOverviewSaveTitle: "总览与保存",
     groupOverviewSaveSummary: "查看保存状态、重新读取配置，并处理系统环境变量。",
     groupWorkbenchTitle: "工作台与界面",
     groupWorkbenchSummary: "默认入口、语言、前后端端口与重启后生效的工作台设置。",
-    groupAvatarPetTitle: "用户、形象与陪伴体",
-    groupAvatarPetSummary: "统一管理用户信息、形象、宠物与陪伴体相关配置。",
+    groupAvatarPetTitle: "用户、终端形象与陪伴体",
+    groupAvatarPetSummary: "统一管理用户信息、终端形象、宠物与陪伴体相关配置；Web 用户头像在用户信息里维护。",
     groupModelingTitle: "模型库",
     groupModelingSummary: "模型资产、服务商账号、密钥、能力检测和模型发现都在这里集中管理。",
     groupRuntimeContextTitle: "运行时与上下文",
@@ -322,38 +322,22 @@ export const CONFIG_COPY = {
     runtimeProfile: "运行档位",
     defaultMode: "默认模式",
     defaultRoute: "默认入口",
-    modelLibrary: "模型库",
-    profileId: "内部键",
-    profileGroupChat: "对话 / 主智能体",
-    profileGroupSupport: "心智与压缩",
-    profileGroupSubagents: "Agent 管理",
-    profileGroupEvolution: "监督进化",
-    profileGroupResearch: "科研 / Team",
-    profileGroupOther: "其他模型绑定",
-    llmConfigMissing: "未找到对应模型绑定",
     modelEditorCreate: "新增模型",
     modelEditorEdit: "编辑模型",
     modelCenterAccounts: "服务商账号",
     modelCenterInventory: "模型库存",
     modelCenterHealth: "状态",
     modelCenterModels: "模型",
-    modelCenterIssues: "异常",
     modelCenterCapabilityIssues: "需关注",
     modelCenterActions: "操作",
-    modelCenterSource: "来源",
     modelCenterProtocol: "协议链路",
-    modelCenterAccountModels: "模型",
-    modelCenterAccountKey: "密钥",
-    modelCenterAccountHost: "地址",
-    modelCenterNoUsage: "暂未被使用",
     modelScenario: "新增方式",
-    modelScenarioChat: "聊天 Agent",
+    modelScenarioChat: "通用对话模型",
     modelScenarioRelay: "中转站模型",
     modelScenarioImage: "图片工具模型",
     modelScenarioLocal: "本地模型",
     modelScenarioManual: "高级手填",
     modelScenarioHint: "选择场景会自动套用最接近的模板；服务商、模型名和密钥仍可以在下方调整。",
-    image2ToolUsage: "image2 生图工具",
     preset: "预设",
     presetGroupOfficial: "官方供应商",
     presetGroupRelay: "Relay Responses",
@@ -378,8 +362,6 @@ export const CONFIG_COPY = {
     keyEnvAdvancedHint: "模型密钥变量名由模型 ID 唯一生成并只读展示；真正填写的是 API Key，保存时写入这个用户级环境变量。服务商默认变量仅作兼容来源展示，不作为新增密钥入口。",
     deleteModelHint: "删除模型会同步清理该模型唯一绑定的环境密钥；Agent 与工具的模型选择请在各自管理页调整。",
     deleteModelConfirm: "确认删除这个模型？这会清理它绑定的环境密钥，并从模型库移除该资产。",
-    keyLocation: "密钥存放位置",
-    keyLocationHint: "这是系统环境变量名，不是要填写的 API Key。",
     baseUrl: "基础地址",
     compatMode: "兼容模式",
     providerApi: "Provider API",
@@ -398,41 +380,28 @@ export const CONFIG_COPY = {
     maxOutputTokens: "最大输出令牌数",
     timeout: "超时（秒）",
     connectTimeout: "连接超时（秒）",
-    pendingSecret: "待写入新密钥",
     clearSecret: "保存时同时清除这个环境变量里的密钥",
     saveModel: "确认模型修改",
     modelRequiredFieldsMissing: "请先填写模型名和基础地址。",
     deleteModel: "删除模型",
     cancelEditing: "清空表单",
-    testConnection: "测试连接",
     modelTestSelect: "测试模型",
     modelTestPlaceholder: "选择一个模型",
     testSelectedLibraryModel: "测试选中模型",
     modelTestRequired: "请先选择要测试的模型。",
-    testImageInput: "检测图像输入",
-    checkAllImageCapabilities: "批量检测图像输入",
     checkSavedImageCapabilities: "检测已保存模型图像输入",
-    checkModelImageCapability: "检测图像输入",
     imageCapabilityCheckPending: "检测模型能力中",
     imageCapabilityStatus: "图像能力",
     imageInputStatusUnknown: "图像未检测",
     imageInputStatusSupported: "支持图像输入",
     imageInputStatusUnsupported: "不支持图像输入",
     imageInputStatusFailed: "检测失败",
-    imageInputUnsupportedHint: "当前模型不能接收图片作为聊天输入，请切换视觉模型或改用图片生成工具。",
-    currentRoute: "当前配置",
-    stagedRoute: "本次修改预览",
-    apiKeySource: "密钥来源",
-    routeSummary: "路由信息",
     expandSection: "展开内容",
     collapseSection: "收起内容",
     keyConfigured: "已配置",
     keyPending: "待写入",
     keyClearPending: "待清除",
     keyMissing: "缺失",
-    sourceLibrary: "模型库",
-    sourceProfileGenerated: "历史导入",
-    requiredModelMissing: "未设置可用模型",
     noBlocking: "当前没有阻塞问题。",
     noWarnings: "当前没有警告。",
     noSuggestions: "当前没有额外建议动作。",
@@ -447,9 +416,7 @@ export const CONFIG_COPY = {
     modelSaveFailed: "模型修改未生效：",
     modelEditorAdvancedTitle: "高级参数",
     modelEditorAdvancedHint: "常用字段已经在上方，只有需要时再展开这里。",
-    gitCommitModelUsage: "Git 提交模型",
     testPending: "测试连接中",
-    imageInputTestPending: "检测图像输入中",
     testScopeDraft: "按当前修改测试",
     testScopeSaved: "按已保存配置测试",
     testRouteLabel: "测试路由",
@@ -474,7 +441,6 @@ export const CONFIG_COPY = {
     avatarCropConfirm: "确认裁剪",
     avatarCropCancel: "取消裁剪",
     avatarCropPreview: "头像预览",
-    closePanel: "关闭",
     fieldCountLabel: "字段",
     emptyValue: "空",
     itemLabel: "条目",
@@ -491,7 +457,7 @@ export const CONFIG_COPY = {
     runtimeTitle: "Runtime and Interface",
     runtimeBody: "Language, default route, and governance mode changes are shown here immediately after confirmation.",
     modelsTitle: "Model Library",
-    modelsBody: "This section manages model assets only: provider routes, model names, key state, capability checks, and connection tests. Edit each Agent's LLM slot bindings in Agent management.",
+    modelsBody: "This section manages model assets only: provider routes, model names, key state, capability checks, and connection tests. Edit each Agent's model choices in Agent management.",
     draftTitle: "Advanced Config Check",
     draftBody: "When the structured panel is not enough, check the full current config here. Saving still writes only config.toml.",
     diagnosticsTitle: "Diagnostics and Save",
@@ -518,15 +484,15 @@ export const CONFIG_COPY = {
     leaveGuardDiscard: "Leave without saving",
     leaveGuardCancel: "Cancel",
     interfaceLanguage: "Interface language",
-    intakeMode: "Mode",
+    intakeMode: "Review intake",
     languageChinese: "Chinese",
     languageEnglish: "English",
     groupOverviewSaveTitle: "Overview and Save",
     groupOverviewSaveSummary: "Review save status, reload config, and open system environment variables.",
     groupWorkbenchTitle: "Workbench and Interface",
     groupWorkbenchSummary: "Default entry, language, frontend/backend ports, and workbench settings that apply after restart.",
-    groupAvatarPetTitle: "User, Avatar, and Companion",
-    groupAvatarPetSummary: "Manage user info, avatar, pet, and companion-facing settings together.",
+    groupAvatarPetTitle: "User, Terminal Avatar, and Companion",
+    groupAvatarPetSummary: "Manage user info, terminal avatar, pet, and companion-facing settings together. The Web user avatar lives under User Info.",
     groupModelingTitle: "Model Library",
     groupModelingSummary: "Manage model assets, provider accounts, keys, capability checks, and discovery in one place.",
     groupRuntimeContextTitle: "Runtime and Context",
@@ -574,38 +540,22 @@ export const CONFIG_COPY = {
     runtimeProfile: "Runtime mode",
     defaultMode: "Default mode",
     defaultRoute: "Default route",
-    modelLibrary: "Model library",
-    profileId: "Internal key",
-    profileGroupChat: "Chat / primary agent",
-    profileGroupSupport: "Mental and compression",
-    profileGroupSubagents: "Agent management",
-    profileGroupEvolution: "Supervised evolution",
-    profileGroupResearch: "Research / Team",
-    profileGroupOther: "Other model bindings",
-    llmConfigMissing: "Model binding not found",
     modelEditorCreate: "Create model",
     modelEditorEdit: "Edit model",
     modelCenterAccounts: "Provider accounts",
     modelCenterInventory: "Model inventory",
     modelCenterHealth: "Health",
     modelCenterModels: "Models",
-    modelCenterIssues: "Issues",
     modelCenterCapabilityIssues: "Attention",
     modelCenterActions: "Actions",
-    modelCenterSource: "Source",
     modelCenterProtocol: "Protocol route",
-    modelCenterAccountModels: "models",
-    modelCenterAccountKey: "key",
-    modelCenterAccountHost: "host",
-    modelCenterNoUsage: "not used yet",
     modelScenario: "Add as",
-    modelScenarioChat: "Chat agent",
+    modelScenarioChat: "General chat model",
     modelScenarioRelay: "Relay model",
     modelScenarioImage: "Image tool model",
     modelScenarioLocal: "Local model",
     modelScenarioManual: "Advanced manual",
     modelScenarioHint: "The scenario picks the closest template. Provider, model name, and key can still be adjusted below.",
-    image2ToolUsage: "image2 image tool",
     preset: "Preset",
     presetGroupOfficial: "Official providers",
     presetGroupRelay: "Relay Responses",
@@ -630,8 +580,6 @@ export const CONFIG_COPY = {
     keyEnvAdvancedHint: "The model key variable is uniquely generated from the model ID and shown read-only. Enter the API key value; saving writes it to this user environment variable. The provider default variable is compatibility-only display, not a new key entry point.",
     deleteModelHint: "Deleting a model also clears the unique environment key bound to that model. Adjust Agent and tool model choices in their own management pages.",
     deleteModelConfirm: "Delete this model? This clears its bound environment key and removes the asset from the model library.",
-    keyLocation: "Key storage",
-    keyLocationHint: "This is the system environment variable name, not the API key value.",
     baseUrl: "Base URL",
     compatMode: "Compat mode",
     providerApi: "Provider API",
@@ -650,41 +598,28 @@ export const CONFIG_COPY = {
     maxOutputTokens: "Max output tokens",
     timeout: "Timeout (s)",
     connectTimeout: "Connect timeout (s)",
-    pendingSecret: "Pending new secret",
     clearSecret: "Also clear this environment key on save",
     saveModel: "Confirm model changes",
     modelRequiredFieldsMissing: "Enter the model name and base URL first.",
     deleteModel: "Delete model",
     cancelEditing: "Clear form",
-    testConnection: "Test connection",
     modelTestSelect: "Test model",
     modelTestPlaceholder: "Choose a model",
     testSelectedLibraryModel: "Test selected model",
     modelTestRequired: "Choose a model to test first.",
-    testImageInput: "Check image input",
-    checkAllImageCapabilities: "Batch check image input",
     checkSavedImageCapabilities: "Check saved models image input",
-    checkModelImageCapability: "Check image input",
     imageCapabilityCheckPending: "Checking model capabilities",
     imageCapabilityStatus: "Image capability",
     imageInputStatusUnknown: "Image not checked",
     imageInputStatusSupported: "Supports image input",
     imageInputStatusUnsupported: "No image input",
     imageInputStatusFailed: "Check failed",
-    imageInputUnsupportedHint: "This model cannot receive images in chat. Switch to a vision model or use the image generation tool.",
-    currentRoute: "Current values",
-    stagedRoute: "Change preview",
-    apiKeySource: "API key source",
-    routeSummary: "Route details",
     expandSection: "Expand",
     collapseSection: "Collapse",
     keyConfigured: "configured",
     keyPending: "pending",
     keyClearPending: "clear pending",
     keyMissing: "missing",
-    sourceLibrary: "model library",
-    sourceProfileGenerated: "legacy import",
-    requiredModelMissing: "No usable model selected",
     noBlocking: "No blocking issues right now.",
     noWarnings: "No warnings right now.",
     noSuggestions: "No extra suggested actions right now.",
@@ -699,9 +634,7 @@ export const CONFIG_COPY = {
     modelSaveFailed: "Model changes were not applied:",
     modelEditorAdvancedTitle: "Advanced parameters",
     modelEditorAdvancedHint: "The common fields are above. Expand this only when needed.",
-    gitCommitModelUsage: "Git commit model",
     testPending: "Testing connection",
-    imageInputTestPending: "Checking image input",
     testScopeDraft: "Testing current changes",
     testScopeSaved: "Testing saved config",
     testRouteLabel: "Route",
@@ -726,7 +659,6 @@ export const CONFIG_COPY = {
     avatarCropConfirm: "Confirm crop",
     avatarCropCancel: "Cancel crop",
     avatarCropPreview: "Avatar preview",
-    closePanel: "Close",
     fieldCountLabel: "fields",
     emptyValue: "Empty",
     itemLabel: "Item",
@@ -825,7 +757,7 @@ function buildConfigSidebarGroups(copy: ConfigCopy): ConfigSidebarGroup[] {
       id: "tooling-diagnostics",
       title: copy.groupToolingTitle,
       summary: copy.groupToolingSummary,
-      memberSectionIds: ["health-diagnostics", "git-commit-model", "git-commit-prompt", "security", "network", "log", "parser", "debug"],
+      memberSectionIds: ["health-diagnostics", "security", "network", "log", "parser", "debug"],
     },
   ];
 }
@@ -2214,7 +2146,7 @@ export function ConfigRoute() {
     setDraftMeta(clonePublicConfig(workspace.draftMeta));
     setBaseHash(workspace.baseHash);
     setDraftHash(workspace.hash);
-    setJsonText(formatJson(workspace.publicConfig));
+    setJsonText(formatJson(pickEditableConfigView(workspace.publicConfig, workspace.editorSections)));
     setNotice({ tone, text: workspace.message || "" });
     setModelEditor(emptyModelEditorState());
     setSelectedModelTestId((current) =>
@@ -2281,7 +2213,10 @@ export function ConfigRoute() {
   const resizeWidthTitle = currentLanguage === "en" ? "Drag to resize sidebar width" : "左右拖动调整侧栏宽度";
   const resizeHeightTitle = currentLanguage === "en" ? "Drag to resize sidebar height" : "上下拖动调整侧栏高度";
   const resizeCornerTitle = currentLanguage === "en" ? "Drag to resize sidebar" : "拖动调整侧栏尺寸";
-  const formattedDraft = useMemo(() => formatJson(draftConfig ?? {}), [draftConfig]);
+  const formattedDraft = useMemo(
+    () => formatJson(pickEditableConfigView(draftConfig ?? {}, workspace?.editorSections ?? [])),
+    [draftConfig, workspace?.editorSections],
+  );
   const hasUnsavedConfigChanges = Boolean(baseHash && draftHash && baseHash !== draftHash);
   const sidebarSections = workspace?.sections ?? [];
   const editorSections = workspace?.editorSections ?? [];
@@ -2337,10 +2272,7 @@ export function ConfigRoute() {
       }),
     [modelOptions],
   );
-  const modelCenterRows = useMemo(
-    () => deriveModelCenterInventoryRows(modelOptions, modelCenterSummary),
-    [modelCenterSummary, modelOptions],
-  );
+  const modelCenterRows = useMemo(() => deriveModelCenterInventoryRows(modelOptions), [modelOptions]);
   useEffect(() => {
     if (!modelOptions.length) {
       if (selectedModelTestId) {
@@ -2352,13 +2284,7 @@ export function ConfigRoute() {
       setSelectedModelTestId(modelOptions[0]?.model_id ?? "");
     }
   }, [modelOptions, modelOptionsById, selectedModelTestId]);
-  const modelCapabilityIssueCount =
-    modelCenterRows.filter(
-      (row) =>
-        row.apiKeyState === "missing" ||
-        row.apiKeyState === "clear_pending" ||
-        row.imageInputStatus !== "supported",
-    ).length;
+  const modelCapabilityIssueCount = countModelCenterHealthIssues(modelCenterRows);
   const modelDiscoveryAvailable = canDiscoverModelsForProvider(modelEditor.provider);
 
   useEffect(() => {
@@ -2487,7 +2413,8 @@ export function ConfigRoute() {
     if (!hasEditorChanges) {
       return draftConfig;
     }
-    return JSON.parse(jsonText) as PublicConfigShape;
+    const editorView = JSON.parse(jsonText) as PublicConfigShape;
+    return mergeEditableConfigView(draftConfig, editorView, workspace?.editorSections ?? []);
   }
 
   async function previewDraft(nextConfig: PublicConfigShape, nextMeta: ConfigDraftMeta, pendingLabel: string) {
@@ -2583,7 +2510,7 @@ export function ConfigRoute() {
 
   async function handleValidateEditorDraft() {
     try {
-      const parsed = JSON.parse(jsonText) as PublicConfigShape;
+      const parsed = mergeEditableConfigView(draftConfig ?? {}, JSON.parse(jsonText) as PublicConfigShape, workspace?.editorSections ?? []);
       await previewDraft(parsed, draftMeta, copy.validationPending);
     } catch (error) {
       markError(error);
@@ -2957,7 +2884,7 @@ export function ConfigRoute() {
     if (result.capability === "image_input") {
       detailParts.push(`${copy.testCapabilityLabel}: ${imageInputStatusLabel(result)}`);
     }
-    return `${result.model_id || result.profile_id} / ${result.model}: ${result.message} [${detailParts.join(" | ")}]`;
+    return `${result.model_id} / ${result.model}: ${result.message} [${detailParts.join(" | ")}]`;
   }
 
   function imageInputStatusFromResult(result: ConfigLlmTestResult): "supported" | "unsupported" | "unknown" {
@@ -3360,6 +3287,16 @@ export function ConfigRoute() {
               <Play size={14} />
               {busyAction === copy.testPending ? copy.testPending : copy.testSelectedLibraryModel}
             </button>
+            <button
+              type="button"
+              className={styles.actionButton}
+              disabled={structuredActionsDisabled || busyAction === copy.imageCapabilityCheckPending || !selectedModelTestId}
+              title={selectedModelTestId ? copy.checkSavedImageCapabilities : copy.modelTestRequired}
+              onClick={() => void handleCheckModelImageCapabilities([selectedModelTestId])}
+            >
+              <ImageIcon size={14} />
+              {busyAction === copy.imageCapabilityCheckPending ? copy.imageCapabilityCheckPending : copy.checkSavedImageCapabilities}
+            </button>
           </div>
           <div className={styles.formSurface} onChange={() => (modelEditorError ? setModelEditorError("") : undefined)}>
             <div className={styles.formHeader}>
@@ -3490,15 +3427,6 @@ export function ConfigRoute() {
                   {!modelDiscoveryAvailable && modelEditor.provider.base_url.trim() ? (
                     <span className={styles.helperText}>{copy.discoveryUnavailable}</span>
                   ) : null}
-                  <button
-                    type="button"
-                    className={styles.actionButton}
-                    disabled={structuredActionsDisabled || busyAction === copy.imageCapabilityCheckPending || !modelOptions.length}
-                    onClick={() => void handleCheckModelImageCapabilities()}
-                  >
-                    <ImageIcon size={14} />
-                    {busyAction === copy.imageCapabilityCheckPending ? copy.imageCapabilityCheckPending : copy.checkSavedImageCapabilities}
-                  </button>
                   {discoveredModels.length ? (
                     <label className={`${styles.field} ${styles.profileTableSelect}`}>
                       <span>{copy.discoveredModel}</span>
@@ -3846,14 +3774,12 @@ export function ConfigRoute() {
                   <th>{copy.modelId}</th>
                   <th>{copy.modelCenterHealth}</th>
                   <th>{copy.modelCenterProtocol}</th>
-                  <th>{copy.modelCenterSource}</th>
                   <th>{copy.modelCenterActions}</th>
                 </tr>
               </thead>
               <tbody>
                 {modelCenterRows.map((row) => {
                   const option = modelOptionsById.get(row.modelId);
-                  const sourceLabel = row.source === "profile" ? copy.sourceProfileGenerated : copy.sourceLibrary;
                   return (
                     <tr key={row.modelId}>
                       <td className={styles.profileTaskCell}>
@@ -3900,9 +3826,6 @@ export function ConfigRoute() {
                           </span>
                         ) : null}
                       </td>
-                      <td className={styles.profileMetaCell}>
-                        <span className={styles.inlineBadge}>{sourceLabel}</span>
-                      </td>
                       <td>
                         <div className={styles.profileTableActions}>
                           <button
@@ -3920,15 +3843,6 @@ export function ConfigRoute() {
                           >
                             <Pencil size={14} />
                             {copy.modelEditorEdit}
-                          </button>
-                          <button
-                            type="button"
-                            className={`${styles.actionButton} ${styles.compactButton}`}
-                            disabled={structuredActionsDisabled || busyAction === copy.imageCapabilityCheckPending || !option}
-                            onClick={() => void handleCheckModelImageCapabilities([row.modelId])}
-                          >
-                            <ImageIcon size={14} />
-                            {copy.checkModelImageCapability}
                           </button>
                           <button
                             type="button"
@@ -3993,17 +3907,7 @@ export function ConfigRoute() {
             <span className={styles.helperText}>{hasEditorChanges ? copy.editorDirtyHint : copy.editorCleanHint}</span>
           </div>
           <div className={styles.editorWrap}>
-            <CodeMirror
-              value={jsonText}
-              theme={workbenchCodeMirrorTheme}
-              height="100%"
-              extensions={[json(), EditorView.lineWrapping]}
-              onChange={(value) => setJsonText(value)}
-              basicSetup={{
-                foldGutter: false,
-                allowMultipleSelections: false,
-              }}
-            />
+            <LazyJsonCodeMirror value={jsonText} onChange={(value) => setJsonText(value)} />
           </div>
         </section>
         ) : null}

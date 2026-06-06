@@ -15,6 +15,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 
+from core.version import get_product_version
 from .control import WebControlGuardMiddleware, control_token_payload, ensure_control_source, trusted_control_origins
 from .routes.config import router as config_router
 from .routes.agents import router as agents_router
@@ -187,7 +188,7 @@ def create_app() -> FastAPI:
 
     app = FastAPI(
         title="Vibelution Web Workbench",
-        version="0.1.0",
+        version=get_product_version(),
         docs_url="/api/docs",
         openapi_url="/api/openapi.json",
         lifespan=_lifespan,

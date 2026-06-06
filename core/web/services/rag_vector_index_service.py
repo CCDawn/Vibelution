@@ -19,20 +19,36 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 _LOCK = threading.RLock()
 
 
-def list_indexable_knowledge_items(*, agent_id: str = "") -> list[dict[str, Any]]:
+def list_indexable_knowledge_items(*, agent_id: str = "", internal: bool = False) -> list[dict[str, Any]]:
     """Return reviewed formal knowledge items eligible for vector indexing."""
 
     _sync_roots()
     items: list[dict[str, Any]] = []
-    overview = team_knowledge_service.list_knowledge_overview(agent_id=agent_id)
+    overview = team_knowledge_service.list_knowledge_overview(agent_id=agent_id, internal=internal)
     for base in list(overview.get("knowledgeBases") or []):
         if not isinstance(base, dict):
             continue
-        base_id = str(base.get("knowledgeBaseId") or "").strip()
+        base_id = str(base.get("scopedKnowledgeBaseId") or base.get("knowledgeBaseId") or "").strip()
         if not base_id:
             continue
         try:
-            payload = team_knowledge_service.list_knowledge_items(base_id, agent_id=agent_id)
+            if internal:
+                owner, knowledge_base = team_knowledge_service._require_base_with_owner(base_id)
+                raw_items = [
+                    item
+                    for item in team_knowledge_service._read_jsonl(team_knowledge_service._items_path_for_owner(owner))
+                    if str(item.get("knowledgeBaseId") or "") == str(knowledge_base.get("knowledgeBaseId") or "")
+                ]
+                payload = {
+                    "ownerType": owner["ownerType"],
+                    "ownerId": owner["ownerId"],
+                    "teamId": owner["ownerId"] if owner["ownerType"] == "team" else "",
+                    "agentId": owner["ownerId"] if owner["ownerType"] == "agent" else "",
+                    "knowledgeBase": team_knowledge_service._knowledge_base_to_api(knowledge_base, owner),
+                    "items": raw_items,
+                }
+            else:
+                payload = team_knowledge_service.list_knowledge_items(base_id, agent_id=agent_id)
         except team_knowledge_service.TeamKnowledgeError:
             continue
         team_id = str(payload.get("teamId") or base.get("teamId") or "").strip()
@@ -46,6 +62,11 @@ def list_indexable_knowledge_items(*, agent_id: str = "") -> list[dict[str, Any]
             source_artifact_ids = [str(value or "").strip() for value in list(item.get("sourceArtifactIds") or []) if str(value or "").strip()]
             items.append(
                 {
+                    "recordId": _owner_scoped_item_record_id(
+                        owner_type=str(item.get("ownerType") or base.get("ownerType") or "team").strip(),
+                        owner_id=str(item.get("ownerId") or base.get("ownerId") or item.get("teamId") or base.get("teamId") or "").strip(),
+                        knowledge_item_id=knowledge_item_id,
+                    ),
                     "knowledgeItemId": knowledge_item_id,
                     "knowledgeBaseId": str(item.get("knowledgeBaseId") or base_id).strip(),
                     "knowledgeBaseName": str(knowledge_base.get("name") or base.get("name") or "").strip(),
@@ -80,13 +101,21 @@ def write_index_record(
     normalized_item_id = str(item.get("knowledgeItemId") or "").strip()
     if not normalized_item_id:
         raise ValueError("Vector index records require knowledgeItemId.")
+    owner_type = str(item.get("ownerType") or "team").strip()
+    owner_id = str(item.get("ownerId") or item.get("teamId") or item.get("agentId") or "").strip()
+    record_id = _owner_scoped_item_record_id(
+        owner_type=owner_type,
+        owner_id=owner_id,
+        knowledge_item_id=normalized_item_id,
+    )
     now = utc_now_iso()
     record = {
         "schemaVersion": INDEX_SCHEMA_VERSION,
+        "recordId": record_id,
         "knowledgeItemId": normalized_item_id,
         "knowledgeBaseId": str(item.get("knowledgeBaseId") or "").strip(),
-        "ownerType": str(item.get("ownerType") or "team").strip(),
-        "ownerId": str(item.get("ownerId") or item.get("teamId") or item.get("agentId") or "").strip(),
+        "ownerType": owner_type,
+        "ownerId": owner_id,
         "teamId": str(item.get("teamId") or "").strip(),
         "agentId": str(item.get("agentId") or "").strip(),
         "sourceArtifactIds": [str(value or "").strip() for value in list(item.get("sourceArtifactIds") or []) if str(value or "").strip()],
@@ -99,16 +128,16 @@ def write_index_record(
         "updatedAt": now,
     }
     with _LOCK:
-        _write_json(_item_record_path(normalized_item_id), record)
+        _write_json(_item_record_path(record_id), record)
         _write_index_summary(_load_all_index_records())
     return record
 
 
-def get_vector_index_health(*, agent_id: str = "") -> dict[str, Any]:
+def get_vector_index_health(*, agent_id: str = "", internal: bool = False) -> dict[str, Any]:
     """Return vector index readiness without exposing knowledge bodies."""
 
-    indexable_items = list_indexable_knowledge_items(agent_id=agent_id)
-    records = {str(record.get("knowledgeItemId") or "").strip(): record for record in _load_all_index_records()}
+    indexable_items = list_indexable_knowledge_items(agent_id=agent_id, internal=internal)
+    records = {_record_id_for_record(record): record for record in _load_all_index_records()}
     item_rows: list[dict[str, Any]] = []
     indexed_count = 0
     stale_count = 0
@@ -120,7 +149,8 @@ def get_vector_index_health(*, agent_id: str = "") -> dict[str, Any]:
 
     for item in indexable_items:
         item_id = str(item.get("knowledgeItemId") or "").strip()
-        record = records.get(item_id)
+        record_id = _record_id_for_item(item)
+        record = records.get(record_id)
         status = "missing"
         record_hash = ""
         error_type = ""
@@ -150,6 +180,7 @@ def get_vector_index_health(*, agent_id: str = "") -> dict[str, Any]:
         item_rows.append(
             {
                 "knowledgeItemId": item_id,
+                "recordId": record_id,
                 "knowledgeBaseId": str(item.get("knowledgeBaseId") or "").strip(),
                 "ownerType": str(item.get("ownerType") or "team").strip(),
                 "ownerId": str(item.get("ownerId") or item.get("teamId") or item.get("agentId") or "").strip(),
@@ -222,6 +253,7 @@ def _write_index_summary(records: list[dict[str, Any]]) -> None:
         "records": [
             {
                 "knowledgeItemId": str(record.get("knowledgeItemId") or "").strip(),
+                "recordId": _record_id_for_record(record),
                 "knowledgeBaseId": str(record.get("knowledgeBaseId") or "").strip(),
                 "ownerType": str(record.get("ownerType") or "team").strip(),
                 "ownerId": str(record.get("ownerId") or record.get("teamId") or record.get("agentId") or "").strip(),
@@ -240,6 +272,38 @@ def _write_index_summary(records: list[dict[str, Any]]) -> None:
 def _item_record_path(knowledge_item_id: str) -> Path:
     safe_id = "".join(char if char.isalnum() or char in {"-", "_", "."} else "-" for char in knowledge_item_id).strip(".-_") or "item"
     return _items_dir() / f"{safe_id}.json"
+
+
+def _record_id_for_item(item: dict[str, Any]) -> str:
+    return _owner_scoped_item_record_id(
+        owner_type=str(item.get("ownerType") or "team").strip(),
+        owner_id=str(item.get("ownerId") or item.get("teamId") or item.get("agentId") or "").strip(),
+        knowledge_item_id=str(item.get("knowledgeItemId") or "").strip(),
+    )
+
+
+def _record_id_for_record(record: dict[str, Any]) -> str:
+    existing = str(record.get("recordId") or "").strip()
+    if existing:
+        return existing
+    return _owner_scoped_item_record_id(
+        owner_type=str(record.get("ownerType") or "team").strip(),
+        owner_id=str(record.get("ownerId") or record.get("teamId") or record.get("agentId") or "").strip(),
+        knowledge_item_id=str(record.get("knowledgeItemId") or "").strip(),
+    )
+
+
+def _owner_scoped_item_record_id(*, owner_type: str, owner_id: str, knowledge_item_id: str) -> str:
+    safe_owner_type = _safe_record_fragment(owner_type or "team")
+    safe_owner_id = _safe_record_fragment(owner_id)
+    safe_item_id = _safe_record_fragment(knowledge_item_id)
+    if safe_owner_type and safe_owner_id and safe_item_id:
+        return f"{safe_owner_type}:{safe_owner_id}:{safe_item_id}"
+    return safe_item_id
+
+
+def _safe_record_fragment(value: Any) -> str:
+    return "".join(char if char.isalnum() or char in {"-", "_", "."} else "-" for char in str(value or "").strip()).strip(".-_")
 
 
 def _index_path() -> Path:
