@@ -152,6 +152,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("sessionCacheUsage?.source === \"provider_usage\"");
     expect(routeSource).toContain("label: t(\"promptCache\")");
     expect(routeSource).toContain("turnCachedInputTokens");
+    expect(routeSource).toContain("cacheCreationInputTokens");
     expect(routeSource).toContain("turnInputTokens");
     expect(routeSource).toContain("turnCacheHitRate");
     expect(routeSource).toContain("cacheHitMissing");
@@ -170,6 +171,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("styles.contextCompositionSegmentExact");
     expect(routeSource).toContain("styles.contextCompositionSegmentUnused");
     expect(routeSource).toContain("cacheCompositionSegmentClass(segment.key)");
+    expect(routeSource).toContain("case \"cache_write\"");
+    expect(routeSource).toContain("cacheCreationInputTokens");
     expect(routeSource.indexOf("styles.contextCompositionPanel")).toBeGreaterThan(routeSource.indexOf("sessionCompactRows.map"));
     expect(routeSource.indexOf("styles.contextCompositionPanel")).toBeLessThan(routeSource.indexOf("<aside className={rightPaneCollapsed"));
 
@@ -177,6 +180,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.contextCompositionBar).toBeTypeOf("string");
     expect(routeStyles.contextCompositionLegend).toBeTypeOf("string");
     expect(routeStyles.contextCompositionSegmentCached).toBeTypeOf("string");
+    expect(routeStyles.contextCompositionSegmentCacheWrite).toBeTypeOf("string");
     expect(routeStyles.contextCompositionSegmentUncached).toBeTypeOf("string");
     expect(routeStyles.contextCompositionSegmentMissing).toBeTypeOf("string");
     expect(routeStyles.contextCompositionSegmentExact).toBeTypeOf("string");

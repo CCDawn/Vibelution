@@ -8,6 +8,19 @@ from core.orchestration.turn_runner import (
 )
 
 
+class _FakePromptCachePartitionScope:
+    def __init__(self, events, partition):
+        self.events = events
+        self.partition = partition
+
+    def __enter__(self):
+        self.events.append(("enter", self.partition))
+
+    def __exit__(self, exc_type, exc, tb):
+        self.events.append(("exit", self.partition))
+        return False
+
+
 def test_create_agent_runtime_uses_shared_agent_factory():
     captured = {}
     agent = object()
@@ -192,6 +205,33 @@ def test_run_existing_agent_single_turn_passes_supported_optional_kwargs():
         "disable_tools": True,
         "attachments": [{"kind": "image"}],
     }
+
+
+def test_run_existing_agent_single_turn_wraps_runner_with_prompt_cache_partition(monkeypatch):
+    events: list[tuple[str, str]] = []
+
+    def fake_scope(partition):
+        return _FakePromptCachePartitionScope(events, partition)
+
+    monkeypatch.setattr("core.orchestration.turn_runner.prompt_cache_partition_scope", fake_scope)
+
+    class FakeAgent:
+        def run_single_turn(self, initial_prompt=None):
+            events.append(("run", initial_prompt))
+            return {"status": "completed"}
+
+    result = run_existing_agent_single_turn(
+        FakeAgent(),
+        initial_prompt="probe",
+        prompt_cache_partition="agent:a|session:s|slot:dialogue|model:m",
+    )
+
+    assert result == {"status": "completed"}
+    assert events == [
+        ("enter", "agent:a|session:s|slot:dialogue|model:m"),
+        ("run", "probe"),
+        ("exit", "agent:a|session:s|slot:dialogue|model:m"),
+    ]
 
 
 def test_run_existing_agent_single_turn_omits_unsupported_optional_kwargs():

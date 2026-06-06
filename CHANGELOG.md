@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.35 - 2026-06-06
+
+- Split prompt-cache usage observation into cache read hits, cache writes, and uncached input tokens across LLM logs, session detail APIs, and the Chat/Coding status UI.
+- Added stable per-agent/per-session/per-model prompt cache partitioning for chat turns so automatic cache keys no longer drift per turn.
+- Recorded safe prompt-cache key hashes and cache composition diagnostics without logging raw cache keys or prompt text.
+
 ## 0.10.34 - 2026-06-06
 
 - Added a read-only Research Workflow panel to the Team workspace for `research-team` / research-organization teams, showing workflow stage, CandidateStore totals, active workflow items, validation summary, and recent candidate states.

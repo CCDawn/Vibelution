@@ -1969,6 +1969,10 @@
   background: #31b977;
 }
 
+.contextCompositionSegmentCacheWrite {
+  background: #4f8cff;
+}
+
 .contextCompositionSegmentUncached {
   background: #8c96a6;
 }

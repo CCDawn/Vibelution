@@ -6,7 +6,11 @@ from __future__ import annotations
 from typing import Any, Callable, Dict, Sequence
 
 from core.mental_model_flags import is_mental_model_enabled
-from core.llm.usage import cached_input_tokens_from_usage, usage_tokens_from_dict
+from core.llm.usage import (
+    cache_creation_input_tokens_from_usage,
+    cached_input_tokens_from_usage,
+    usage_tokens_from_dict,
+)
 
 
 def _resolve_mental_model_enabled(override: bool | None = None) -> bool:
@@ -24,12 +28,25 @@ class TokenUsageObservation:
         output_tokens: int,
         *,
         cached_input_tokens: int = 0,
+        cache_creation_input_tokens: int = 0,
+        uncached_input_tokens: int | None = None,
         observed: bool = False,
     ) -> "TokenUsageObservation":
         value = super().__new__(cls)
         value._input_tokens = max(0, int(input_tokens or 0))
         value._output_tokens = max(0, int(output_tokens or 0))
-        value.cached_input_tokens = max(0, int(cached_input_tokens or 0))
+        cached_count = max(0, int(cached_input_tokens or 0))
+        if value._input_tokens:
+            cached_count = min(cached_count, value._input_tokens)
+        value.cached_input_tokens = cached_count
+        cache_creation_count = max(0, int(cache_creation_input_tokens or 0))
+        if value._input_tokens:
+            cache_creation_count = min(cache_creation_count, value._input_tokens)
+        value.cache_creation_input_tokens = cache_creation_count
+        if uncached_input_tokens is None:
+            value.uncached_input_tokens = max(0, value._input_tokens - cached_count)
+        else:
+            value.uncached_input_tokens = max(0, int(uncached_input_tokens or 0))
         value.observed = bool(observed)
         return value
 
@@ -164,10 +181,13 @@ class ResponseSurfaceController:
         input_tokens = 0
         output_tokens = 0
         cached_input_tokens = 0
+        cache_creation_input_tokens = 0
+        uncached_input_tokens: int | None = None
         usage = self._extract_usage_payload(response)
         if usage:
             input_tokens, output_tokens = self._extract_usage_tokens(usage)
             cached_input_tokens = self._extract_cached_input_tokens(usage)
+            cache_creation_input_tokens = self._extract_cache_creation_input_tokens(usage)
 
         usage_observation = self._extract_usage_observation(response)
         if usage_observation:
@@ -179,6 +199,21 @@ class ResponseSurfaceController:
                     "cachedInputTokens",
                     "cached_tokens",
                 ),
+            )
+            cache_creation_input_tokens = max(
+                cache_creation_input_tokens,
+                self._read_int_from_mapping(
+                    usage_observation,
+                    "cache_creation_input_tokens",
+                    "cacheCreationInputTokens",
+                    "cache_write_input_tokens",
+                    "cacheWriteInputTokens",
+                ),
+            )
+            uncached_input_tokens = self._read_int_from_mapping(
+                usage_observation,
+                "uncached_input_tokens",
+                "uncachedInputTokens",
             )
 
         estimated = False
@@ -220,6 +255,8 @@ class ResponseSurfaceController:
             input_tokens,
             output_tokens,
             cached_input_tokens=cached_input_tokens,
+            cache_creation_input_tokens=cache_creation_input_tokens,
+            uncached_input_tokens=uncached_input_tokens,
             observed=observed_usage,
         )
 
@@ -269,6 +306,10 @@ class ResponseSurfaceController:
     @classmethod
     def _extract_cached_input_tokens(cls, usage: Dict[str, Any] | Any) -> int:
         return cached_input_tokens_from_usage(usage)
+
+    @classmethod
+    def _extract_cache_creation_input_tokens(cls, usage: Dict[str, Any] | Any) -> int:
+        return cache_creation_input_tokens_from_usage(usage)
 
     def emit_visible_response(
         self,
