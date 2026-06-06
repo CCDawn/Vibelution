@@ -23,6 +23,8 @@ import {
   TeamOrganizationCanvas,
   TeamTemplateInstantiatePayload,
   TeamTemplateListPayload,
+  TeamWorkflowCandidateListPayload,
+  TeamWorkflowOrchestration,
 } from "../api/types";
 import { useAppI18n } from "../i18n/useAppI18n";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
@@ -35,8 +37,10 @@ const NODE_HEIGHT = 92;
 const CANVAS_VIEWPORT_WIDTH = 1180;
 const CANVAS_VIEWPORT_HEIGHT = 760;
 const TEAM_ORGANIZATION_CANVAS_KIND = "team_organization_canvas";
+const RESEARCH_TEAM_ID = "research-team";
 const LINKED_ROOM_ACTIVE_REFETCH_MS = 5_000;
 const LINKED_ROOM_IDLE_REFETCH_MS = 30_000;
+const TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT = 8;
 
 type TeamDraft = {
   name: string;
@@ -308,6 +312,80 @@ function chatRoomStatusLabel(status: string, lang: "zh" | "en") {
   return lang === "zh" ? "就绪" : "Ready";
 }
 
+function isResearchWorkflowTeam(team: Team | null | undefined) {
+  if (!team) {
+    return false;
+  }
+  return team.teamId === RESEARCH_TEAM_ID || team.teamSource === "research_organization" || team.teamKind === "research";
+}
+
+function workflowStateLabel(value: string, lang: "zh" | "en") {
+  const normalized = String(value || "").trim();
+  const zh: Record<string, string> = {
+    knowledge_collection: "知识搜集",
+    source_screening: "资料筛选",
+    candidate_ingestion: "候选入库",
+    team_memory_ready: "团队共享记忆",
+    source_registered: "资料已登记",
+    source_needs_confirmation: "资料待确认",
+    paper_note_draft: "论文笔记草稿",
+    paper_note_needs_revision: "论文笔记待修订",
+    mechanism_candidate: "机制候选",
+    mechanism_needs_revision: "机制待修订",
+    mechanism_mapping_candidate: "机制映射候选",
+    mapping_needs_revision: "映射待修订",
+    hypothesis_candidate: "算法假设候选",
+    hypothesis_needs_revision: "假设待修订",
+    review_prefiltered: "预审完成",
+    review_needs_revision: "预审待修订",
+    steward_pack_draft: "治理包草稿",
+    steward_pending_knowledge_review: "知识待审批",
+    steward_needs_revision: "治理包待修订",
+    candidate_graph_visible: "候选图谱可见",
+    official_synced: "正式同步完成",
+    returned_for_rework: "已退回返工",
+  };
+  const en: Record<string, string> = {
+    knowledge_collection: "Knowledge collection",
+    source_screening: "Source screening",
+    candidate_ingestion: "Candidate ingestion",
+    team_memory_ready: "Team memory ready",
+    source_registered: "Source registered",
+    source_needs_confirmation: "Source needs confirmation",
+    paper_note_draft: "Paper note draft",
+    paper_note_needs_revision: "Paper note needs revision",
+    mechanism_candidate: "Mechanism candidate",
+    mechanism_needs_revision: "Mechanism needs revision",
+    mechanism_mapping_candidate: "Mechanism mapping candidate",
+    mapping_needs_revision: "Mapping needs revision",
+    hypothesis_candidate: "Hypothesis candidate",
+    hypothesis_needs_revision: "Hypothesis needs revision",
+    review_prefiltered: "Review prefiltered",
+    review_needs_revision: "Review needs revision",
+    steward_pack_draft: "Steward pack draft",
+    steward_pending_knowledge_review: "Knowledge review pending",
+    steward_needs_revision: "Steward revision needed",
+    candidate_graph_visible: "Candidate graph visible",
+    official_synced: "Official sync complete",
+    returned_for_rework: "Returned for rework",
+  };
+  return (lang === "zh" ? zh : en)[normalized] ?? (normalized || "-");
+}
+
+function workflowQualityTone(value: string) {
+  const normalized = String(value || "").toLowerCase();
+  if (normalized.includes("approved") || normalized.includes("ready") || normalized.includes("prefiltered")) {
+    return styles.workflowTagReady;
+  }
+  if (normalized.includes("invalid") || normalized.includes("broken") || normalized.includes("rejected")) {
+    return styles.workflowTagDanger;
+  }
+  if (normalized.includes("revision") || normalized.includes("pending")) {
+    return styles.workflowTagWarning;
+  }
+  return styles.workflowTagNeutral;
+}
+
 export function TeamsRoute() {
   const { lang } = useAppI18n();
   const queryClient = useQueryClient();
@@ -383,6 +461,20 @@ export function TeamsRoute() {
     enabled: Boolean(effectiveTeamId),
   });
   const selectedTeam = teamDetailQuery.data ?? teams.find((team) => team.teamId === effectiveTeamId) ?? null;
+  const researchWorkflowTeamSelected = isResearchWorkflowTeam(selectedTeam);
+  const teamWorkflowQuery = useQuery({
+    queryKey: queryKeys.teamWorkflow(effectiveTeamId || "none"),
+    queryFn: () => fetchJson<TeamWorkflowOrchestration>(`/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration`),
+    enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected),
+  });
+  const teamWorkflowCandidatesQuery = useQuery({
+    queryKey: queryKeys.teamWorkflowCandidates(effectiveTeamId || "none", TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT),
+    queryFn: () =>
+      fetchJson<TeamWorkflowCandidateListPayload>(
+        `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/candidates?limit=${TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT}`,
+      ),
+    enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && teamWorkflowQuery.data),
+  });
   const linkedChatRoomId = selectedTeam?.linkedChatRoomId ?? "";
   const linkedRoomStatusForPolling = String(selectedTeam?.linkedChatRoom?.status || "").toLowerCase();
   const linkedChatRoomQuery = useQuery({
@@ -869,6 +961,10 @@ export function TeamsRoute() {
   const communicationEdgeButtonLabel = showCommunicationEdges
     ? (lang === "zh" ? "收起信息线" : "Hide info lines")
     : (lang === "zh" ? `展开信息线 ${communicationEdges.length}` : `Show info ${communicationEdges.length}`);
+  const teamWorkflow = teamWorkflowQuery.data ?? null;
+  const teamWorkflowCandidates = teamWorkflowCandidatesQuery.data?.candidates ?? [];
+  const teamWorkflowValidationSummary = teamWorkflowCandidatesQuery.data?.validationSummary ?? null;
+  const activeWorkflowItemCount = teamWorkflow?.activeWorkflowItems.length ?? 0;
 
   return (
     <section className={styles.route}>
@@ -1215,6 +1311,101 @@ export function TeamsRoute() {
                 </div>
               </section>
             )}
+              <section className={styles.workflowPanel}>
+                <div className={styles.sectionTitle}>
+                  <strong>{lang === "zh" ? "科研流程" : "Research workflow"}</strong>
+                  <span>
+                    {researchWorkflowTeamSelected
+                      ? teamWorkflow?.status || (teamWorkflowQuery.isPending ? (lang === "zh" ? "读取中" : "loading") : (lang === "zh" ? "待初始化" : "not initialized"))
+                      : (lang === "zh" ? "非科研团队" : "not research")}
+                  </span>
+                </div>
+                {researchWorkflowTeamSelected ? (
+                  teamWorkflowQuery.isPending ? (
+                    <div className={styles.empty}>{lang === "zh" ? "正在读取 TeamWorkflowOrchestration..." : "Loading TeamWorkflowOrchestration..."}</div>
+                  ) : teamWorkflow ? (
+                    <>
+                      <div className={styles.workflowStats}>
+                        <div>
+                          <span>{lang === "zh" ? "当前阶段" : "Stage"}</span>
+                          <strong>{workflowStateLabel(teamWorkflow.stateMachine.currentStage, lang)}</strong>
+                        </div>
+                        <div>
+                          <span>{lang === "zh" ? "候选" : "Candidates"}</span>
+                          <strong>{teamWorkflow.candidateStore.candidateCount}</strong>
+                        </div>
+                        <div>
+                          <span>{lang === "zh" ? "活跃项" : "Active"}</span>
+                          <strong>{activeWorkflowItemCount}</strong>
+                        </div>
+                      </div>
+                      <div className={styles.workflowMeta}>
+                        <span>{teamWorkflow.workflowKind}</span>
+                        <span>{teamWorkflow.ownerAgentId}</span>
+                        <span>{teamWorkflow.candidateStore.storagePath}</span>
+                      </div>
+                      <div className={styles.workflowStageList}>
+                        {teamWorkflow.stateMachine.nodes.map((node) => (
+                          <span
+                            key={node.nodeId}
+                            className={node.nodeId === teamWorkflow.stateMachine.currentStage ? styles.workflowStageActive : ""}
+                          >
+                            {workflowStateLabel(node.nodeId || node.label, lang)}
+                          </span>
+                        ))}
+                      </div>
+                      {teamWorkflowValidationSummary ? (
+                        <div className={styles.workflowValidation}>
+                          <span>{lang === "zh" ? "校验" : "Validation"}</span>
+                          <strong>
+                            {teamWorkflowValidationSummary.validCandidateCount}/{teamWorkflowValidationSummary.candidateCount}
+                          </strong>
+                          <span>{teamWorkflowValidationSummary.errorCount} errors</span>
+                          <span>{teamWorkflowValidationSummary.warningCount} warnings</span>
+                        </div>
+                      ) : teamWorkflowCandidatesQuery.isPending ? (
+                        <div className={styles.empty}>{lang === "zh" ? "正在读取候选校验摘要..." : "Loading candidate validation summary..."}</div>
+                      ) : null}
+                      {teamWorkflowCandidates.length ? (
+                        <div className={styles.workflowCandidateList}>
+                          {teamWorkflowCandidates.map((candidate) => (
+                            <article key={candidate.candidateId} className={styles.workflowCandidateItem}>
+                              <div className={styles.workflowCandidateHeader}>
+                                <strong>{candidate.title || candidate.candidateId}</strong>
+                                <span className={`${styles.workflowTag} ${workflowQualityTone(candidate.qualityStatus)}`}>
+                                  {workflowStateLabel(candidate.currentState, lang)}
+                                </span>
+                              </div>
+                              <p>{candidate.summary || candidate.candidateType}</p>
+                              <div className={styles.workflowCandidateMeta}>
+                                <span>{candidate.candidateType}</span>
+                                <span>{candidate.qualityStatus}</span>
+                                <span>{formatTime(candidate.updatedAt, lang)}</span>
+                              </div>
+                            </article>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className={styles.empty}>
+                          {lang === "zh" ? "候选仓库还没有资料、笔记或机制候选。" : "No sources, notes, or mechanism candidates yet."}
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <div className={styles.empty}>{lang === "zh" ? "科研流程尚未初始化。" : "Research workflow is not initialized yet."}</div>
+                  )
+                ) : (
+                  <div className={styles.empty}>
+                    {lang === "zh" ? "选择 research-team / 科研团队后显示挑战杯科研流程。" : "Select research-team to view the Challenge Cup workflow."}
+                  </div>
+                )}
+                {teamWorkflowQuery.error instanceof Error ? (
+                  <div className={styles.messageError}>{teamWorkflowQuery.error.message}</div>
+                ) : null}
+                {teamWorkflowCandidatesQuery.error instanceof Error ? (
+                  <div className={styles.messageError}>{teamWorkflowCandidatesQuery.error.message}</div>
+                ) : null}
+              </section>
               <form
                 className={styles.teamTaskForm}
                 onSubmit={(event) => {
