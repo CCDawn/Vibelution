@@ -2,29 +2,83 @@ import { fetchJson } from "./client";
 import type { LauncherControlResponse, LauncherStatus } from "./types";
 
 export const LAUNCHER_ENDPOINT = "/api/launcher";
+export const DEFAULT_LAUNCHER_CONTROL_PORT = 8765;
+
+function isLoopbackHost(hostname: string) {
+  const host = String(hostname || "").trim().toLowerCase();
+  return host === "localhost" || host === "127.0.0.1" || host === "::1";
+}
+
+function launcherControlOrigin() {
+  if (typeof window === "undefined") {
+    return "";
+  }
+  try {
+    const current = new URL(window.location.href);
+    if (!isLoopbackHost(current.hostname)) {
+      return "";
+    }
+    const currentPort = current.port || (current.protocol === "https:" ? "443" : "80");
+    if (currentPort === String(DEFAULT_LAUNCHER_CONTROL_PORT)) {
+      return "";
+    }
+    return `${current.protocol}//127.0.0.1:${DEFAULT_LAUNCHER_CONTROL_PORT}`;
+  } catch {
+    return "";
+  }
+}
+
+export function launcherEndpoint(path = "") {
+  return `${launcherControlOrigin()}${relativeLauncherEndpoint(path)}`;
+}
+
+function relativeLauncherEndpoint(path = "") {
+  const suffix = path ? `/${path.replace(/^\/+/, "")}` : "";
+  return `${LAUNCHER_ENDPOINT}${suffix}`;
+}
+
+async function fetchLauncherJson<T>(path: string, init?: RequestInit): Promise<T> {
+  const endpoint = launcherEndpoint(path);
+  try {
+    return await fetchJson<T>(endpoint, init);
+  } catch (error) {
+    if (!endpoint.startsWith("http") || !isLauncherControlConnectionError(error)) {
+      throw error;
+    }
+    return fetchJson<T>(relativeLauncherEndpoint(path), init);
+  }
+}
+
+function isLauncherControlConnectionError(error: unknown) {
+  if (error instanceof TypeError) {
+    return true;
+  }
+  const message = error instanceof Error ? error.message : String(error || "");
+  return /failed to fetch|networkerror|load failed|cors/i.test(message);
+}
 
 export function launcherRestartEndpoint() {
-  return `${LAUNCHER_ENDPOINT}/restart`;
+  return launcherEndpoint("restart");
 }
 
 export function getLauncherStatus() {
-  return fetchJson<LauncherStatus>(`${LAUNCHER_ENDPOINT}/status`);
+  return fetchLauncherJson<LauncherStatus>("status");
 }
 
 export function startLauncherBundle() {
-  return fetchJson<LauncherControlResponse>(`${LAUNCHER_ENDPOINT}/start`, {
+  return fetchLauncherJson<LauncherControlResponse>("start", {
     method: "POST",
   });
 }
 
 export function stopLauncherBundle() {
-  return fetchJson<LauncherControlResponse>(`${LAUNCHER_ENDPOINT}/stop`, {
+  return fetchLauncherJson<LauncherControlResponse>("stop", {
     method: "POST",
   });
 }
 
 export function restartLauncherBundle() {
-  return fetchJson<LauncherControlResponse>(launcherRestartEndpoint(), {
+  return fetchLauncherJson<LauncherControlResponse>("restart", {
     method: "POST",
   });
 }
@@ -36,7 +90,7 @@ export type LauncherSupervisorControlResponse = Omit<LauncherControlResponse, "o
 };
 
 export function reattachLauncherSupervisor() {
-  return fetchJson<LauncherSupervisorControlResponse>(`${LAUNCHER_ENDPOINT}/supervisor/reattach`, {
+  return fetchLauncherJson<LauncherSupervisorControlResponse>("supervisor/reattach", {
     method: "POST",
   });
 }

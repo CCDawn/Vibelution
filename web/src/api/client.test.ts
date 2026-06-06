@@ -5,6 +5,7 @@ import { fetchJson, getControlToken, resetControlTokenForTests, setFetchJsonFail
 describe("fetchJson control token", () => {
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
     resetControlTokenForTests();
     setFetchJsonFailureReporter(null);
   });
@@ -62,6 +63,40 @@ describe("fetchJson control token", () => {
     const requestInit = fetchMock.mock.calls[0][1] as RequestInit;
     const headers = requestInit.headers as Headers;
     expect(headers.get("X-Vibelution-Control-Token")).toBeNull();
+  });
+
+  it("attaches a control token from the target local API origin", async () => {
+    vi.stubGlobal("window", {
+      location: {
+        origin: "http://127.0.0.1:8000",
+      },
+    });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          header: "X-Vibelution-Control-Token",
+          controlToken: "launcher-token",
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ accepted: true }),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const payload = await fetchJson<{ accepted: boolean }>("http://127.0.0.1:8765/api/launcher/restart", {
+      method: "POST",
+    });
+
+    expect(payload.accepted).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[0][0]).toBe("http://127.0.0.1:8765/api/control-token");
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ credentials: "include" });
+    const requestInit = fetchMock.mock.calls[1][1] as RequestInit;
+    const headers = requestInit.headers as Headers;
+    expect(requestInit.credentials).toBe("include");
+    expect(headers.get("X-Vibelution-Control-Token")).toBe("launcher-token");
   });
 
   it("reports same-origin API http failures", async () => {

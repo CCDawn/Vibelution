@@ -5,9 +5,10 @@ from __future__ import annotations
 from pathlib import Path
 
 from fastapi import APIRouter, FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 
-from core.web.control import control_token_payload
+from core.web.control import CONTROL_TOKEN_HEADER, control_token_payload, trusted_control_origins
 from . import service as launcher_service
 
 
@@ -82,6 +83,13 @@ def create_launcher_app() -> FastAPI:
         title="Vibelution Launcher",
         version="0.1.0",
         description="Standalone lifecycle control plane for the Vibelution project bundle.",
+    )
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=sorted(trusted_control_origins()),
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*", CONTROL_TOKEN_HEADER],
     )
     app.include_router(router)
 
