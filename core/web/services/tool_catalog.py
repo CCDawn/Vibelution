@@ -10,6 +10,7 @@ MEDIUM_PERMISSION_TIER = "medium"
 HIGH_PERMISSION_TIER = "high"
 GENERATED_PERMISSION_TIER = "generated"
 EXPLICIT_ALLOW_TOOLS = {
+    "computer_use_session_tool",
     "computer_use_task_tool",
     "research_knowledge_query_tool",
     "research_agent_creation_proposal_tool",
@@ -361,6 +362,12 @@ TOOL_CATALOG: dict[str, dict[str, Any]] = {
         "riskTags": ["computer_control", "network_access", "external_automation"],
         "permissionTier": HIGH_PERMISSION_TIER,
     },
+    "computer_use_session_tool": {
+        "category": "task_runtime",
+        "capabilityTags": ["computer_use", "sandbox_browser", "session_control"],
+        "riskTags": ["computer_control", "external_automation", "session_state_write"],
+        "permissionTier": HIGH_PERMISSION_TIER,
+    },
     "research_knowledge_query_tool": {
         "category": "media_research",
         "capabilityTags": ["research_database", "read_only"],
@@ -590,6 +597,7 @@ TOOL_BUNDLE_DEFINITIONS: tuple[dict[str, Any], ...] = (
             "task_output_tool",
             "task_stop_tool",
             "computer_use_task_tool",
+            "computer_use_session_tool",
             "plan_update_tool",
             "open_evolution_transaction_tool",
             "close_evolution_transaction_tool",
@@ -602,6 +610,7 @@ TOOL_BUNDLE_DEFINITIONS: tuple[dict[str, Any], ...] = (
             "task_list_tool",
             "task_output_tool",
             "computer_use_task_tool",
+            "computer_use_session_tool",
         ],
     },
 )

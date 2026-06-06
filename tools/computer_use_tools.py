@@ -41,3 +41,40 @@ def computer_use_task_tool(
             "error": f"{type(exc).__name__}: {exc}",
         }
     return json.dumps(result, ensure_ascii=False)
+
+
+def computer_use_session_tool(
+    session_id: str,
+    action: str = "get",
+    confirmation: str = "approved",
+    reason: str = "cancelled_by_agent",
+) -> str:
+    """Read, confirm, or cancel a Computer Use sandbox browser session."""
+
+    try:
+        from core.web.services.computer_use_service import (
+            cancel_computer_use_session,
+            confirm_computer_use_session,
+            get_computer_use_session,
+        )
+
+        normalized_action = str(action or "get").strip().lower() or "get"
+        if normalized_action in {"get", "read", "status"}:
+            result = get_computer_use_session(session_id)
+        elif normalized_action in {"confirm", "approve", "continue"}:
+            result = confirm_computer_use_session(session_id, confirmation=confirmation)
+        elif normalized_action in {"cancel", "stop"}:
+            result = cancel_computer_use_session(session_id, reason=reason)
+        else:
+            raise ValueError("action must be one of: get, confirm, cancel.")
+    except Exception as exc:
+        result: dict[str, Any] = {
+            "status": "failed",
+            "sessionId": str(session_id or ""),
+            "summary": "Computer Use session operation failed.",
+            "steps": [],
+            "screenshotUrl": "",
+            "needsConfirmation": False,
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+    return json.dumps(result, ensure_ascii=False)

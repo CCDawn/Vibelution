@@ -11,7 +11,7 @@ from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
 from core.web.services import agent_directory_service
 from core.web.services import computer_use_service
 from core.web.services import tool_registry_service as registry
-from tools.computer_use_tools import computer_use_task_tool
+from tools.computer_use_tools import computer_use_session_tool, computer_use_task_tool
 
 
 PNG_BYTES = base64.b64decode(
@@ -204,6 +204,56 @@ def test_computer_use_service_confirm_resumes_high_risk_explicit_action_and_reda
     assert "pendingExecution" not in saved
 
 
+def test_computer_use_session_tool_reads_confirms_and_cancels_sessions(computer_use_tmp, monkeypatch):
+    monkeypatch.setenv("VIBELUTION_COMPUTER_USE_ENABLED", "1")
+    monkeypatch.setenv("VIBELUTION_COMPUTER_USE_BASE_URL", "https://computer-use.invalid")
+
+    calls = []
+
+    def fake_call(request, *, session_id):
+        calls.append(request)
+        return {
+            "status": "completed",
+            "summary": "Session tool confirmed actions.",
+            "steps": [{"action": "click", "summary": "Clicked submit", "status": "completed"}],
+        }
+
+    monkeypatch.setattr(computer_use_service, "_call_open_computer_use", fake_call)
+
+    pending = computer_use_service.start_computer_use_task(
+        task="Submit from session tool",
+        target_url="https://example.com/form",
+        allowed_domains="example.com",
+        actions=[{"action": "click", "selector": "#submit"}],
+    )
+    read_result = json.loads(computer_use_session_tool(session_id=pending["sessionId"], action="get"))
+    confirmed = json.loads(
+        computer_use_session_tool(
+            session_id=pending["sessionId"],
+            action="confirm",
+            confirmation="approved_by_session_tool",
+        )
+    )
+    running = computer_use_service.start_computer_use_task(
+        task="Open example and wait",
+        target_url="https://example.com",
+        allowed_domains="example.com",
+        actions=[{"action": "wait", "ms": 10}],
+    )
+    cancelled = json.loads(
+        computer_use_session_tool(
+            session_id=running["sessionId"],
+            action="cancel",
+            reason="cancelled_by_session_tool_test",
+        )
+    )
+
+    assert read_result["status"] == "need_confirmation"
+    assert confirmed["status"] == "completed"
+    assert calls and calls[0]["requireConfirmation"] is False
+    assert cancelled["status"] == "cancelled"
+
+
 def test_computer_use_service_requires_confirmation_for_high_risk_step(computer_use_tmp, monkeypatch):
     monkeypatch.setenv("VIBELUTION_COMPUTER_USE_ENABLED", "1")
     monkeypatch.setenv("VIBELUTION_COMPUTER_USE_BASE_URL", "https://computer-use.invalid")
@@ -365,15 +415,38 @@ def test_computer_use_tool_requires_explicit_tool_policy(computer_use_tmp, monke
     assert "ToolPolicy.allowedTools" in result
 
 
+def test_computer_use_session_tool_requires_explicit_tool_policy(computer_use_tmp, monkeypatch):
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", computer_use_tmp)
+    monkeypatch.setattr(agent_directory_service, "record_runtime_scene_event", lambda *args, **kwargs: None)
+    agent = agent_directory_service.create_agent_instance(
+        display_name="Computer Use Session Agent",
+        llm_bindings={"dialogue": {"modelId": "model-primary"}},
+    )
+
+    with agent_directory_service.active_agent_runtime(agent["agentId"]):
+        result, _ = ToolExecutor().execute(
+            "computer_use_session_tool",
+            {"session_id": "cu-test", "action": "get"},
+        )
+
+    assert "ToolPolicy.allowedTools" in result
+
+
 def test_tool_registry_marks_computer_use_as_high_risk_explicit_allow(tmp_path, monkeypatch):
     monkeypatch.setattr(registry, "GENERATED_TOOLS_PATH", tmp_path / "generated_tools.json")
 
     payload = registry.get_tool_registry()
     tool = next(item for item in payload["tools"] if item["name"] == "computer_use_task_tool")
+    session_tool = next(item for item in payload["tools"] if item["name"] == "computer_use_session_tool")
     operations = next(item for item in payload["toolBundles"] if item["bundleId"] == "operations")
 
     assert tool["category"] == "task_runtime"
     assert tool["permissionTier"] == "high"
     assert {"computer_control", "network_access", "external_automation"}.issubset(set(tool["riskTags"]))
     assert tool["permissionPolicy"]["requiresExplicitAllow"] is True
+    assert session_tool["category"] == "task_runtime"
+    assert session_tool["permissionTier"] == "high"
+    assert {"computer_control", "external_automation", "session_state_write"}.issubset(set(session_tool["riskTags"]))
+    assert session_tool["permissionPolicy"]["requiresExplicitAllow"] is True
     assert "computer_use_task_tool" in operations["toolNames"]
+    assert "computer_use_session_tool" in operations["toolNames"]
