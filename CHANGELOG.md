@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.35 - 2026-06-06
+
+- Removed archived Team member Agents from linked Team rooms and any extra group rooms during Team archive cascade, allowing deleted Team rooms to become empty instead of retaining unavailable participants.
+- Added Team archive cleanup evidence with removed room ids and per-Agent room cleanup mapping in runtime scene events.
+- Refreshed Team archive frontend caches for Agents, mode bindings, chat rooms, sessions, conversations, config workspace, and project bus state.
+
 ## 0.10.34 - 2026-06-06
 
 - Sped up Agent Center archive and purge by using lightweight room and mode-binding cleanup paths instead of returning full workspace payloads during the mutation.
