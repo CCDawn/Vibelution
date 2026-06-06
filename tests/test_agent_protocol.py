@@ -2967,15 +2967,16 @@ class TestLocalProviderBootstrap:
                 "llm.profiles.primary.model": "dialogue-model",
             },
         ).config
+        provider_id = config.llm.get_profile(profile_id="primary").provider_id
         config.llm.model_library = {
-            "dialogue-model-id": {"provider_id": "default", "model": "dialogue-model"},
+            "dialogue-model-id": {"provider_id": provider_id, "model": "dialogue-model"},
             "summary-model-id": {
-                "provider_id": "default",
+                "provider_id": provider_id,
                 "model": "summary-model",
                 "tool_calling_mode": "disabled",
             },
             "mental-model-id": {
-                "provider_id": "default",
+                "provider_id": provider_id,
                 "model": "mental-model",
                 "tool_calling_mode": "disabled",
             },
