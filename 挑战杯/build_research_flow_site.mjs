@@ -480,6 +480,7 @@ const implementationBlueprint = {
     ["M5", "知识治理与正式同步", "steward_pack_draft 门禁、待审入库桥、Ingestion Approval Gate、评分建议迁移、officialResearchGraph 正式边和 Memory Graph 展开已落地：有效草稿批准后创建正式 KnowledgeItem、承接待审评级并可视化正式科研 trace，拒绝后退回修订。", "正式 RAG 通过已审核 KnowledgeItem 检索；正式图谱边落在 KnowledgeItem metadata，并由 Memory Graph 只读展开。"],
     ["M6", "知识入库状态总览", "knowledge-ingestion/status 只读聚合 API 和 Teams 工作台可视化状态漏斗已接入，把 CandidateStore、候选校验、候选图摘要、Team Knowledge stats 和 officialBoundary 汇成 stages/actionItems。", "团队协调员可在 /teams?team=research-team 看到 source_collection、candidate_screening、steward_pack、knowledge_review、official_sync 的 ready/needs_review/blocked 状态；查询不会创建 KnowledgeItem、不会写 RAG、不会生成 candidate_graph 快照。"],
     ["M6.1", "团队协调状态队列", "coordination/status 只读聚合 API 和 Teams 工作台协调队列已接入，把 pendingTransfers、needsRework、stewardship、blocked、active 汇成队列、summary、actionItems、coordinationPolicy 和 communicationBrief。", "Research Coordination Agent/组织层可集中看到待决转移、返工候选、治理待审、阻塞项、目标功能 Agent 与建议通道；本轮不自动调转，不自动发送消息，不提供审批按钮。"],
+    ["M6.2", "科研流程启动台", "计划在 Teams 科研团队页新增可操作启动台，把资料登记、PDF 抽取、qwen 草稿生成、候选图谱刷新、steward pack 提交和最小审核入口串成可点击流程。", "只复用现有 workflow-orchestration / CandidateStore / local-research-model / Team Knowledge API；qwen 只写草稿，communicationBrief 仍只读，正式 KnowledgeItem/图谱同步仍必须经过审批门禁。"],
   ],
   schemas: [
     "source_manifest",
@@ -505,6 +506,7 @@ const implementationBlueprint = {
     ["research_agent_binding", "复用 research_service、research flow canvas、prompt-research-* 和研究组织治理工具。"],
     ["memory_ingestion_bridge", "已复用 Team Knowledge create_ingestion_package、review_refinement_proposal、rating suggestion review/create 和 KnowledgeItem metadata patch；steward_pack_draft 可进入 pending proposal，审批通过后创建正式 KnowledgeItem、迁移待审评分建议，并写入 officialResearchGraph 正式科研边。"],
     ["knowledge_ingestion_status", "已新增只读状态聚合：输出 summary/stages/actionItems/candidateBreakdown/candidateGraphSummary/knowledgeBases/officialBoundary，并记录 knowledge_ingestion.status_viewed 运行事件计数。"],
+    ["research_launchpad", "待实施：Teams 科研团队页的操作启动台，按状态推荐下一步，并调用现有 candidates/source、source-extraction、local-research-model/invoke、candidate-graph、steward ingestion 和 review API。"],
   ],
   communicationRoles: [
     ["Research Coordination Agent", "会议议题、任务拆分、状态汇总、风险升级和跨节点排期。"],
@@ -644,6 +646,7 @@ const implementationBlueprint = {
     ["steward_pack 审批门禁", "/api/teams/{teamId}/workflow-orchestration/steward-packs/{candidateId}/knowledge-ingestion/review", "只审批 steward_pending_knowledge_review；approved 创建正式 KnowledgeItem、迁移 proposal 级评分建议为 KnowledgeItem 级 pending 评级并进入 official_synced，rejected 退回 steward_needs_revision。"],
     ["知识入库状态总览", "/api/teams/{teamId}/workflow-orchestration/knowledge-ingestion/status", "只读聚合 source_collection、candidate_screening、steward_pack、knowledge_review、official_sync 状态；Teams 工作台已展示漏斗、actionItems 与 officialBoundary；不写正式知识、不写 RAG、不生成候选图快照。"],
     ["candidate_graph 预览", "CandidateStore candidate_graph snapshot", "POST candidate-graph 会从当前未归档候选重建 candidate_only 图谱，输出 nodes/edges/missingLinks/unreviewedNodes/archivedCandidateCount/officialBoundary；断链时 qualityStatus=broken_links。"],
+    ["科研流程启动台计划", "docs/plans/2026-06-07-challenge-cup-research-launchpad.md", "下一步实现 Teams 页操作面板：注册来源、抽取 PDF、调用 qwen、刷新候选图、提交 steward pack、审核 pending proposal；不新增正式写入捷径。"],
     ["验证", "tests/test_team_workflow_orchestration_service.py + tests/test_team_workflow_routes.py", "覆盖主路径、非 ownerAgent 不能写最终状态、本地模型任务包、输出校验和知识入库状态总览。"],
   ],
 };
