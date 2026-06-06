@@ -154,6 +154,7 @@ describe("self-evolution transaction history logic", () => {
       transaction({ txnId: "ok", validationPassed: 1 }),
       transaction({ txnId: "failed-validation", validationFailed: 1 }),
       transaction({ txnId: "blocked-mutation", mutationsBlocked: 1 }),
+      transaction({ txnId: "failed-status", status: "failed" }),
       transaction({ txnId: "running", status: "running", isOpen: true }),
       transaction({ txnId: "changed", mutationsRecorded: 2 }),
     ];
@@ -161,6 +162,7 @@ describe("self-evolution transaction history logic", () => {
     expect(filterSelfEvolutionTransactions(items, "needs_review").map((item) => item.txnId)).toEqual([
       "failed-validation",
       "blocked-mutation",
+      "failed-status",
     ]);
     expect(filterSelfEvolutionTransactions(items, "open").map((item) => item.txnId)).toEqual(["running"]);
     expect(filterSelfEvolutionTransactions(items, "changed").map((item) => item.txnId)).toEqual(["changed"]);
@@ -235,6 +237,8 @@ describe("self-evolution transaction history logic", () => {
       openLabel: "进行中事务",
     })).toBe("已收口事务 · 2026-05-20 10:15:00");
     expect(buildTransactionOutcomeLabel(transaction({ txnId: "needs-review", validationFailed: 1 }), "zh")).toBe("需复盘");
+    expect(buildTransactionOutcomeLabel(transaction({ txnId: "failed-status", status: "failed", validationPassed: 1 }), "zh")).toBe("需复盘");
+    expect(buildTransactionOutcomeLabel(transaction({ txnId: "error-status", status: "error" }), "en")).toBe("Needs review");
     expect(buildTransactionBatchLabel(untitled, "zh")).toBe("批次 10:15");
   });
 });
