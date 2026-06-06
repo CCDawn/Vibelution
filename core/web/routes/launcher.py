@@ -29,7 +29,17 @@ def launcher_start() -> dict:
 
 @router.post("/launcher/stop", status_code=202)
 def launcher_stop() -> dict:
-    return request_launcher_stop()
+    try:
+        return request_launcher_stop()
+    except RuntimeRestartActiveWorkBlocked as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "active_work_stop_blocked",
+                "message": exc.message,
+                "activeWorkRuns": exc.active_work_runs,
+            },
+        ) from exc
 
 
 @router.post("/launcher/restart", status_code=202)

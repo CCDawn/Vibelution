@@ -118,7 +118,8 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain('advancedDiagnostics: "高级诊断"');
     expect(routeSource).toContain("后台守护检查未运行，不影响当前项目使用。");
     expect(routeSource).toContain("Launcher 正在维护项目启动、停止、重启、后端、窗口和日志证据。");
-    expect(routeSource).toContain("有任务运行时，重启请求会进入等待队列");
+    expect(routeSource).toContain("有任务运行时，Launcher 会拒绝停止或重启");
+    expect(routeSource).not.toContain("任务结束后自动重启");
     expect(routeSource).toContain("内部迁移细节");
     expect(routeSource).not.toContain('controlPlane: "启动器职责"');
     expect(routeSource).not.toContain('guardian: "接管进度"');

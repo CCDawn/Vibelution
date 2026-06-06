@@ -38,7 +38,17 @@ def runtime_summary() -> dict:
 
 @router.post("/runtime/shutdown", status_code=202)
 def runtime_shutdown() -> dict:
-    return request_runtime_shutdown()
+    try:
+        return request_runtime_shutdown()
+    except RuntimeRestartActiveWorkBlocked as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "active_work_stop_blocked",
+                "message": exc.message,
+                "activeWorkRuns": exc.active_work_runs,
+            },
+        ) from exc
 
 
 @router.post("/runtime/restart", status_code=202)

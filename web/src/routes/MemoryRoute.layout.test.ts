@@ -70,6 +70,13 @@ describe("MemoryRoute layout contract", () => {
   it("wires the read-only 3D memory knowledge graph API and canvas shell", () => {
     expect(routeSource).toContain("queryKeys.memoryKnowledgeGraph()");
     expect(routeSource).toContain('fetchJson<MemoryKnowledgeGraphPayload>("/api/memory/knowledge-graph?include=officialResearchGraph")');
+    expect(routeSource).toContain("MemoryKnowledgeGraphNodeDetailPayload");
+    expect(routeSource).toContain("queryKeys.memoryKnowledgeGraphNodeDetail(selectedGraphNodeId)");
+    expect(routeSource).toContain("/api/memory/knowledge-graph/node-detail?nodeId=");
+    expect(routeSource).toContain("selectedGraphDetailItems");
+    expect(routeSource).toContain("copy.graphKnowledgeLoading");
+    expect(routeSource).toContain("copy.graphKnowledgeTruncated");
+    expect(routeSource).toContain("styles.graphKnowledgeContent");
     expect(routeSource).toContain("MemoryGraphCanvas");
     expect(routeSource).toContain("copy.graphGpu");
     expect(routeSource).toContain("copy.graphWorker");
@@ -158,6 +165,7 @@ describe("MemoryRoute layout contract", () => {
     expect(memoryCssSource).toContain(".graphResponsibilityPanel");
     expect(memoryCssSource).toContain(".graphKnowledgePanel");
     expect(memoryCssSource).toContain(".graphKnowledgeItem");
+    expect(memoryCssSource).toContain(".graphKnowledgeContent");
     expect(memoryCssSource).toContain(".graphInteractionHint");
     expect(memoryCssSource).toContain(".graphNodeTypeMark");
     expect(memoryCssSource).toContain(".graphTypeList button");
