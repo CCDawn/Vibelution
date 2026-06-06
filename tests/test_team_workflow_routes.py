@@ -289,13 +289,25 @@ def test_team_workflow_route_returns_coordination_status(tmp_path, monkeypatch):
                 "actionItemCount": 1,
             },
             "queues": {
-                "pendingTransfers": [{"candidateId": "candidate-1", "transferId": "transfer-1"}],
+                "pendingTransfers": [
+                    {
+                        "candidateId": "candidate-1",
+                        "transferId": "transfer-1",
+                        "communicationBrief": {"targetAgentRole": "Research Coordination Agent", "autoSendEnabled": False},
+                    }
+                ],
                 "needsRework": [],
                 "stewardship": [],
                 "blocked": [],
                 "active": [],
             },
             "actionItems": [{"code": "transfer_decision_pending", "severity": "needs_review"}],
+            "communication": {
+                "briefCount": 1,
+                "readOnly": True,
+                "autoSendEnabled": False,
+                "recommendedSender": "Research Coordination Agent",
+            },
             "coordinationPolicy": {
                 "coordinationAgentId": "Research Coordination Agent",
                 "requiresUserConfirmation": False,
@@ -315,6 +327,8 @@ def test_team_workflow_route_returns_coordination_status(tmp_path, monkeypatch):
     assert payload["status"] == "needs_transfer_decision"
     assert payload["summary"]["pendingTransferCount"] == 1
     assert payload["queues"]["pendingTransfers"][0]["transferId"] == "transfer-1"
+    assert payload["queues"]["pendingTransfers"][0]["communicationBrief"]["autoSendEnabled"] is False
+    assert payload["communication"]["briefCount"] == 1
     assert payload["coordinationPolicy"]["autoTransferEnabled"] is False
 
 

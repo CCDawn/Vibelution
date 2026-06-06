@@ -58,7 +58,7 @@
 <li>审批通过且创建正式 KnowledgeItem 后，将 proposal 级 pending ratingSuggestion 迁移为 KnowledgeItem 级 pending ratingSuggestion。</li>
 <li>审批通过后把 sourceTrace / candidateIds 转为 KnowledgeItem metadata.officialResearchGraph 中的 supports、maps_to、inspires、approved_for_ingestion 正式边。</li>
 <li>GET knowledge-ingestion/status 聚合 CandidateStore、校验报告、候选图摘要和 Team Knowledge stats，输出 stages、actionItems、officialBoundary。</li>
-<li>Teams 工作台同时读取 coordination/status，把待转移、待返工、待治理和阻塞候选集中显示，但不提供自动调转按钮。</li></ul></article>
+<li>Teams 工作台同时读取 coordination/status，把待转移、待返工、待治理和阻塞候选集中显示，并展示目标功能 Agent 与建议通道；不提供自动调转或自动发送按钮。</li></ul></article>
             <article class="plan-card"><h2>输出物</h2><ul><li>steward_pack_draft 候选</li>
 <li>SourceArtifact</li>
 <li>pending RefinementProposal</li>

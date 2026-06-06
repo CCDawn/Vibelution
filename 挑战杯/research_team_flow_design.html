@@ -370,11 +370,11 @@
                 </div>
 <div class="service-row">
                   <b>team_workflows API</b>
-                  <span>已落地：/api/teams/{team_id}/workflow-orchestration、candidates/source、candidates/{candidate_id}/source-extraction、candidates/{candidate_id}/paper-note-draft、candidates、candidates/validation、candidate-graph、transfers、decide、knowledge-ingestion/status、coordination/status。</span>
+                  <span>已落地：/api/teams/{team_id}/workflow-orchestration、candidates/source、candidates/{candidate_id}/source-extraction、candidates/{candidate_id}/paper-note-draft、candidates、candidates/validation、candidate-graph、transfers、decide、knowledge-ingestion/status、coordination/status；coordination/status 返回 communicationBrief 但不发送消息。</span>
                 </div>
 <div class="service-row">
                   <b>TeamsRoute workflow panel</b>
-                  <span>已落地只读入口：research-team 右侧 inspector 展示 workflow 当前阶段、candidateStore 摘要、coordination queue、knowledge ingestion status、validationSummary、候选图谱和最近候选，不做状态写操作。</span>
+                  <span>已落地只读入口：research-team 右侧 inspector 展示 workflow 当前阶段、candidateStore 摘要、coordination queue、communicationBrief、knowledge ingestion status、validationSummary、候选图谱和最近候选，不做状态写操作。</span>
                 </div>
 <div class="service-row">
                   <b>local_research_worker_model</b>
@@ -828,8 +828,8 @@
 <div class="blueprint-row">
               <b>M6.1</b>
               <strong>团队协调状态队列</strong>
-              <span>coordination/status 只读聚合 API 和 Teams 工作台协调队列已接入，把 pendingTransfers、needsRework、stewardship、blocked、active 汇成队列、summary、actionItems 和 coordinationPolicy。</span>
-              <span>Research Coordination Agent/组织层可集中看到待决转移、返工候选、治理待审和阻塞项；本轮不自动调转，不提供审批按钮，不要求用户确认。</span>
+              <span>coordination/status 只读聚合 API 和 Teams 工作台协调队列已接入，把 pendingTransfers、needsRework、stewardship、blocked、active 汇成队列、summary、actionItems、coordinationPolicy 和 communicationBrief。</span>
+              <span>Research Coordination Agent/组织层可集中看到待决转移、返工候选、治理待审、阻塞项、目标功能 Agent 与建议通道；本轮不自动调转，不自动发送消息，不提供审批按钮。</span>
             </div>
       </div>
       <div class="tag-row">
@@ -961,7 +961,7 @@
       </div>
 <div class="feature-row">
         <strong>团队协调队列</strong>
-        <span>coordination/status 聚合 pendingTransfers、needsRework、stewardship、blocked、active 队列；Teams 科研流程面板已显示协调状态与只读策略边界</span>
+        <span>coordination/status 聚合 pendingTransfers、needsRework、stewardship、blocked、active 队列，并输出 communicationBrief；Teams 科研流程面板已显示协调状态、目标 Agent、建议通道与只读策略边界</span>
         <b class="status-pill">已接入前端/API</b>
       </div>
 <div class="feature-row">
@@ -1038,9 +1038,9 @@
       </div>
 <div class="alignment-row">
         <strong>团队协调聚合</strong>
-        <span>Team Workflow 新增 coordination/status；读取 CandidateStore + transfer_records，按 pendingTransfers/needsRework/stewardship/blocked/active 分队列</span>
+        <span>Team Workflow 的 coordination/status 读取 CandidateStore + transfer_records，按 pendingTransfers/needsRework/stewardship/blocked/active 分队列，并为每个队列项生成 communicationBrief</span>
         <b class="status-pill">已接入首版</b>
-        <span>适合作为组织人员和协调人员的只读工作面；本轮不做自动调转、不要求用户确认、不写正式知识。</span>
+        <span>适合作为组织人员和协调人员的只读工作面；本轮不做自动调转、不自动发送消息、不写正式知识。</span>
       </div>
 <div class="alignment-row">
         <strong>PDF/本地资料解析</strong>
@@ -1452,7 +1452,7 @@
 <a class="node-card" href="research_flow_pages/06-research-review.html">
                 <span class="num">06</span>
                 <h3>科研审稿</h3>
-                <p>在交给记忆平台前先做领域与工程风险过滤，并把返工/拒绝/待转移纳入团队协调队列。</p>
+                <p>在交给记忆平台前先做领域与工程风险过滤，并把返工/拒绝/待转移纳入团队协调队列和沟通建议。</p>
                 <div class="tag-row"><span class="tag done">prefilter 与协调队列已落地</span><span class="tag">Evidence Review Agent</span></div>
               </a>
 <a class="node-card" href="research_flow_pages/07-steward-ingestion.html">

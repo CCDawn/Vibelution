@@ -476,6 +476,19 @@ function workflowCoordinationStatusLabel(value: string, lang: "zh" | "en") {
   return (lang === "zh" ? zh : en)[normalized] ?? workflowIngestionStatusLabel(normalized, lang);
 }
 
+function workflowCoordinationChannelLabel(value: string, lang: "zh" | "en") {
+  const normalized = String(value || "").trim();
+  const zh: Record<string, string> = {
+    team_linked_room: "团队群聊",
+    project_agent_bus: "Agent Bus",
+  };
+  const en: Record<string, string> = {
+    team_linked_room: "team room",
+    project_agent_bus: "Agent Bus",
+  };
+  return (lang === "zh" ? zh : en)[normalized] ?? (normalized || "-");
+}
+
 function workflowIngestionTone(value: string) {
   const normalized = String(value || "").toLowerCase();
   if (normalized === "ready" || normalized === "operational") {
@@ -1647,9 +1660,18 @@ export function TeamsRoute() {
                                   {(queueItems as TeamWorkflowCoordinationStatus["queues"]["active"]).length ? (
                                     (queueItems as TeamWorkflowCoordinationStatus["queues"]["active"]).slice(0, 3).map((item) => (
                                       <span key={`${queueName}-${item.transferId || item.candidateId}`}>
-                                        {item.transferId ? `${item.fromNode || "-"} -> ${item.toNode || "-"}` : workflowStateLabel(item.currentState, lang)}
-                                        {" · "}
-                                        {item.title || item.candidateType || item.candidateId}
+                                        <strong>
+                                          {item.transferId ? `${item.fromNode || "-"} -> ${item.toNode || "-"}` : workflowStateLabel(item.currentState, lang)}
+                                          {" · "}
+                                          {item.title || item.candidateType || item.candidateId}
+                                        </strong>
+                                        {item.communicationBrief ? (
+                                          <small>
+                                            {item.communicationBrief.targetAgentRole}
+                                            {" · "}
+                                            {workflowCoordinationChannelLabel(item.communicationBrief.channel, lang)}
+                                          </small>
+                                        ) : null}
                                       </span>
                                     ))
                                   ) : (
@@ -1667,6 +1689,17 @@ export function TeamsRoute() {
                                 ))}
                               </div>
                             ) : null}
+                            <div className={styles.workflowCoordinationBriefSummary}>
+                              <span>
+                                {lang === "zh" ? "沟通建议" : "briefs"} <strong>{teamWorkflowCoordinationStatus.communication.briefCount}</strong>
+                              </span>
+                              <span>{teamWorkflowCoordinationStatus.communication.recommendedSender}</span>
+                              <span>
+                                {teamWorkflowCoordinationStatus.communication.autoSendEnabled
+                                  ? (lang === "zh" ? "自动发送开启" : "auto-send on")
+                                  : (lang === "zh" ? "不会自动发送" : "no auto-send")}
+                              </span>
+                            </div>
                             <div className={styles.workflowIngestionBoundary}>
                               <span>{teamWorkflowCoordinationStatus.coordinationPolicy.coordinationAgentId}</span>
                               <span>

@@ -898,7 +898,8 @@
 }
 
 .workflowCoordinationStats,
-.workflowCoordinationQueues {
+.workflowCoordinationQueues,
+.workflowCoordinationBriefSummary {
   display: grid;
   gap: 5px;
   min-width: 0;
@@ -959,10 +960,51 @@
   font-size: 0.67rem;
 }
 
-.workflowCoordinationQueue span,
+.workflowCoordinationQueue > span,
 .workflowCoordinationQueue small {
   color: var(--fg-muted);
   font-size: 0.61rem;
+}
+
+.workflowCoordinationQueue > span {
+  display: grid;
+  gap: 1px;
+  padding: 3px 0 0;
+  border-top: 1px solid color-mix(in srgb, var(--border-soft) 55%, transparent);
+}
+
+.workflowCoordinationQueue > span:first-of-type {
+  border-top: 0;
+}
+
+.workflowCoordinationQueue > span strong {
+  color: var(--fg-secondary);
+  font-size: 0.62rem;
+}
+
+.workflowCoordinationQueue > span small {
+  color: var(--fg-muted);
+}
+
+.workflowCoordinationBriefSummary {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.workflowCoordinationBriefSummary span {
+  min-width: 0;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-card) 72%, transparent);
+  color: var(--fg-muted);
+  font-size: 0.66rem;
+  font-weight: 710;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workflowCoordinationBriefSummary strong {
+  color: var(--fg-primary);
 }
 
 .workflowIngestionPanel {

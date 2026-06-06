@@ -3108,6 +3108,15 @@ export type TeamWorkflowCoordinationQueueItem = {
   fromNode?: string;
   toNode?: string;
   requestedByAgent?: string;
+  communicationBrief?: {
+    targetAgentRole: string;
+    channel: "team_linked_room" | "project_agent_bus" | string;
+    subject: string;
+    message: string;
+    requiresCoordinatorReview: boolean;
+    autoSendEnabled: boolean;
+    sourceQueue: string;
+  };
 };
 
 export type TeamWorkflowCoordinationActionItem = {
@@ -3147,6 +3156,16 @@ export type TeamWorkflowCoordinationStatus = {
     active: TeamWorkflowCoordinationQueueItem[];
   };
   actionItems: TeamWorkflowCoordinationActionItem[];
+  communication: {
+    briefCount: number;
+    targetAgentRoleCounts: Record<string, number>;
+    channelCounts: Record<string, number>;
+    readOnly: boolean;
+    autoSendEnabled: boolean;
+    recommendedSender: string;
+    nextAction: string;
+    summaryLine: string;
+  };
   coordinationPolicy: {
     coordinationAgentId: string;
     organizingAgentId: string;

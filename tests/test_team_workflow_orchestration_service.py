@@ -322,8 +322,15 @@ def test_coordination_status_groups_pending_transfer_rework_and_blocked_candidat
     assert status["summary"]["pendingTransferCount"] == 1
     assert status["summary"]["reworkCandidateCount"] == 1
     assert status["summary"]["blockedCandidateCount"] == 1
+    assert status["summary"]["communicationBriefCount"] >= 2
+    assert status["communication"]["autoSendEnabled"] is False
+    assert status["communication"]["readOnly"] is True
     assert status["queues"]["pendingTransfers"][0]["candidateId"] == source["candidateId"]
+    assert status["queues"]["pendingTransfers"][0]["communicationBrief"]["targetAgentRole"] == "Research Coordination Agent"
+    assert status["queues"]["pendingTransfers"][0]["communicationBrief"]["autoSendEnabled"] is False
     assert status["queues"]["needsRework"][0]["candidateId"] == rework["candidateId"]
+    assert status["queues"]["needsRework"][0]["communicationBrief"]["targetAgentRole"] == "Algorithm Hypothesis Agent"
+    assert status["queues"]["needsRework"][0]["communicationBrief"]["channel"] == "project_agent_bus"
     assert status["queues"]["blocked"][0]["candidateId"] == rework["candidateId"]
     assert {item["code"] for item in status["actionItems"]} == {
         "transfer_decision_pending",
