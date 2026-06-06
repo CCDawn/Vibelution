@@ -29,6 +29,7 @@ class ComputerUseTaskPayload(BaseModel):
     maxSteps: int = 20
     requireConfirmation: bool = True
     mode: str = "browser"
+    timeoutSeconds: int = 180
 
 
 class ComputerUseConfirmPayload(BaseModel):
@@ -58,6 +59,7 @@ def create_computer_use_task(payload: ComputerUseTaskPayload) -> dict[str, Any]:
             max_steps=payload.maxSteps,
             require_confirmation=payload.requireConfirmation,
             mode=payload.mode,
+            timeout_seconds=payload.timeoutSeconds,
         )
     except Exception as exc:  # pragma: no cover - routed by helper
         _raise_computer_use_error(exc)

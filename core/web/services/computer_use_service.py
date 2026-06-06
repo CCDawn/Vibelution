@@ -95,7 +95,7 @@ def start_computer_use_task(
     _append_step(session_id, {"type": "start", "summary": "Computer Use sandbox task started.", "status": "running"})
     _record_event("computer_use.task.started", payload, outcome="started")
 
-    if normalized["requireConfirmation"] and _contains_high_risk_step(normalized.get("actions") or []):
+    if _contains_high_risk_step(normalized.get("actions") or []):
         ready_step = {
             "index": 1,
             "action": "confirmation",
@@ -154,6 +154,8 @@ def get_computer_use_session(session_id: str) -> dict[str, Any]:
 def confirm_computer_use_session(session_id: str, confirmation: str = "approved") -> dict[str, Any]:
     normalized_id = _normalize_session_id(session_id)
     payload = _load_session(normalized_id)
+    if str(payload.get("status") or "") == "resuming":
+        raise ComputerUseError("Computer Use session is already resuming after confirmation.")
     if str(payload.get("status") or "") != "need_confirmation":
         raise ComputerUseError("Only sessions waiting for confirmation can be confirmed.")
     confirmation_text = str(confirmation or "approved").strip() or "approved"
@@ -176,8 +178,10 @@ def confirm_computer_use_session(session_id: str, confirmation: str = "approved"
         )
         payload["steps"] = list(payload.get("steps") or []) + [confirmation_step]
         _append_step(normalized_id, confirmation_step)
+        payload["status"] = "resuming"
         _save_session(payload)
         _record_event("computer_use.task.confirmed", payload, outcome="confirmed")
+        payload["status"] = "running"
         payload.pop("pendingExecution", None)
         try:
             provider_payload = _call_open_computer_use(
@@ -219,15 +223,17 @@ def confirm_computer_use_session(session_id: str, confirmation: str = "approved"
         )
         return _public_payload(payload)
 
-    payload["status"] = "completed"
+    payload["status"] = "blocked"
     payload["needsConfirmation"] = False
     payload["confirmation"] = confirmation_text
-    payload["summary"] = "Computer Use task confirmed by user."
+    payload["summary"] = "Computer Use task cannot resume because the provider did not return continuation state."
+    payload["error"] = "CONFIRMATION_CONTINUATION_MISSING"
     payload["updatedAt"] = _now()
-    _append_step(normalized_id, {"type": "confirmation", "summary": payload["summary"], "status": "completed"})
+    payload.pop("pendingExecution", None)
+    _append_step(normalized_id, {"type": "confirmation", "summary": payload["summary"], "status": "blocked"})
     _save_session(payload)
-    _record_event("computer_use.task.confirmed", payload, outcome="confirmed")
-    return _public_payload(payload)
+    _record_event("computer_use.task.blocked", payload, outcome="confirmation_continuation_missing", level="warning")
+    raise ComputerUseError(payload["summary"])
 
 
 def cancel_computer_use_session(session_id: str, reason: str = "cancelled_by_user") -> dict[str, Any]:
@@ -351,8 +357,8 @@ def _normalize_provider_result(payload: dict[str, Any], *, session_id: str, requ
     for step in steps:
         _append_step(session_id, step)
         _record_event("computer_use.task.step_observed", {"sessionId": session_id, **step}, outcome=str(step.get("status") or "observed"))
-    high_risk = _contains_high_risk_step(steps)
-    if require_confirmation and (high_risk or bool(payload.get("needs_confirmation") or payload.get("needsConfirmation"))):
+    high_risk = _contains_unconfirmed_high_risk_step(steps)
+    if high_risk or bool(payload.get("needs_confirmation") or payload.get("needsConfirmation")):
         status = "need_confirmation"
     image_id, screenshot_url = _store_provider_screenshot(session_id, payload)
     result = {
@@ -574,7 +580,7 @@ def _public_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "needsConfirmation": bool(payload.get("needsConfirmation")),
         "error": str(payload.get("error") or ""),
         "mode": str(payload.get("mode") or "browser"),
-        "targetUrl": str(payload.get("targetUrl") or ""),
+        "targetUrl": _safe_url_summary(str(payload.get("targetUrl") or "")),
         "allowedDomains": list(payload.get("allowedDomains") or []),
         "actionCount": int(payload.get("actionCount") or 0),
         "requestedActions": list(payload.get("requestedActions") or []),
@@ -636,7 +642,7 @@ def _record_event(event_code: str, payload: dict[str, Any], *, outcome: str = "o
                 "sessionId": str(payload.get("sessionId") or ""),
                 "status": str(payload.get("status") or ""),
                 "mode": str(payload.get("mode") or ""),
-                "targetUrl": str(payload.get("targetUrl") or ""),
+                "targetUrl": _safe_url_summary(str(payload.get("targetUrl") or "")),
                 "allowedDomains": list(payload.get("allowedDomains") or []),
                 "stepIndex": payload.get("index"),
                 "action": str(payload.get("action") or ""),
@@ -875,6 +881,18 @@ def _contains_high_risk_step(steps: list[dict[str, Any]]) -> bool:
             for key in ("action", "summary", "selector", "url", "key")
         )
         if any(token in haystack for token in HIGH_RISK_ACTIONS):
+            return True
+    return False
+
+
+def _contains_unconfirmed_high_risk_step(steps: list[dict[str, Any]]) -> bool:
+    for step in steps:
+        if step.get("requiresConfirmation"):
+            return True
+        status = str(step.get("status") or "").strip().lower()
+        if status in {"completed", "done", "success", "succeeded"}:
+            continue
+        if _contains_high_risk_step([step]):
             return True
     return False
 

@@ -14,6 +14,9 @@ from core.web.services import tool_registry_service as registry
 from tools.computer_use_tools import computer_use_session_tool, computer_use_task_tool
 
 
+ORIGINAL_RECORD_EVENT = computer_use_service._record_event
+
+
 PNG_BYTES = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAFgwJ/l9Q9WQAAAABJRU5ErkJggg=="
 )
@@ -113,6 +116,35 @@ def test_computer_use_service_forwards_actions_and_redacts_public_text(computer_
     assert "secret query" not in json.dumps(result, ensure_ascii=False)
 
 
+def test_computer_use_task_tool_forwards_timeout_seconds(computer_use_tmp, monkeypatch):
+    monkeypatch.setenv("VIBELUTION_COMPUTER_USE_ENABLED", "1")
+    monkeypatch.setenv("VIBELUTION_COMPUTER_USE_BASE_URL", "https://computer-use.invalid")
+
+    calls = []
+
+    def fake_call(request, *, session_id):
+        calls.append(request)
+        return {
+            "status": "completed",
+            "summary": "Opened page.",
+            "steps": [{"action": "open", "summary": "Opened page", "status": "completed"}],
+        }
+
+    monkeypatch.setattr(computer_use_service, "_call_open_computer_use", fake_call)
+
+    result = json.loads(
+        computer_use_task_tool(
+            task="Open example",
+            target_url="https://example.com",
+            allowed_domains="example.com",
+            timeout_seconds=7,
+        )
+    )
+
+    assert result["status"] == "completed"
+    assert calls[0]["timeoutSeconds"] == 7
+
+
 def test_computer_use_service_blocks_cross_domain_action(computer_use_tmp, monkeypatch):
     monkeypatch.setenv("VIBELUTION_COMPUTER_USE_ENABLED", "1")
     monkeypatch.setenv("VIBELUTION_COMPUTER_USE_BASE_URL", "https://computer-use.invalid")
@@ -153,6 +185,32 @@ def test_computer_use_service_pauses_high_risk_explicit_action_before_provider(c
     cancelled = computer_use_service.cancel_computer_use_session(result["sessionId"], reason="test_cancel")
     assert cancelled["status"] == "cancelled"
     assert "pendingExecution" not in computer_use_service._load_session(result["sessionId"])
+
+
+def test_computer_use_service_forces_confirmation_even_when_opted_out(computer_use_tmp, monkeypatch):
+    monkeypatch.setenv("VIBELUTION_COMPUTER_USE_ENABLED", "1")
+    monkeypatch.setenv("VIBELUTION_COMPUTER_USE_BASE_URL", "https://computer-use.invalid")
+
+    called = False
+
+    def fake_call(request, *, session_id):
+        nonlocal called
+        called = True
+        return {"status": "completed", "summary": "Should not run."}
+
+    monkeypatch.setattr(computer_use_service, "_call_open_computer_use", fake_call)
+
+    result = computer_use_service.start_computer_use_task(
+        task="Submit a form",
+        target_url="https://example.com/form",
+        allowed_domains="example.com",
+        actions=[{"action": "click", "selector": "#submit"}],
+        require_confirmation=False,
+    )
+
+    assert called is False
+    assert result["status"] == "need_confirmation"
+    assert result["needsConfirmation"] is True
 
 
 def test_computer_use_service_confirm_resumes_high_risk_explicit_action_and_redacts_text(computer_use_tmp, monkeypatch):
@@ -204,6 +262,38 @@ def test_computer_use_service_confirm_resumes_high_risk_explicit_action_and_reda
     assert "pendingExecution" not in saved
 
 
+def test_computer_use_service_rejects_duplicate_confirmation_while_resuming(computer_use_tmp, monkeypatch):
+    monkeypatch.setenv("VIBELUTION_COMPUTER_USE_ENABLED", "1")
+    monkeypatch.setenv("VIBELUTION_COMPUTER_USE_BASE_URL", "https://computer-use.invalid")
+
+    nested_error = None
+
+    def fake_call(request, *, session_id):
+        nonlocal nested_error
+        if nested_error is None:
+            with pytest.raises(computer_use_service.ComputerUseError) as exc_info:
+                computer_use_service.confirm_computer_use_session(session_id, confirmation="duplicate_confirm")
+            nested_error = str(exc_info.value)
+        return {
+            "status": "completed",
+            "summary": "Confirmed actions completed.",
+            "steps": [{"action": "click", "summary": "Clicked submit", "status": "completed"}],
+        }
+
+    monkeypatch.setattr(computer_use_service, "_call_open_computer_use", fake_call)
+
+    started = computer_use_service.start_computer_use_task(
+        task="Submit example",
+        target_url="https://example.com/form",
+        allowed_domains="example.com",
+        actions=[{"action": "click", "selector": "#submit"}],
+    )
+    confirmed = computer_use_service.confirm_computer_use_session(started["sessionId"])
+
+    assert confirmed["status"] == "completed"
+    assert "already resuming" in str(nested_error)
+
+
 def test_computer_use_session_tool_reads_confirms_and_cancels_sessions(computer_use_tmp, monkeypatch):
     monkeypatch.setenv("VIBELUTION_COMPUTER_USE_ENABLED", "1")
     monkeypatch.setenv("VIBELUTION_COMPUTER_USE_BASE_URL", "https://computer-use.invalid")
@@ -212,6 +302,12 @@ def test_computer_use_session_tool_reads_confirms_and_cancels_sessions(computer_
 
     def fake_call(request, *, session_id):
         calls.append(request)
+        if request.get("actions") == [{"action": "wait", "ms": 10}]:
+            return {
+                "status": "running",
+                "summary": "Session tool task is still running.",
+                "steps": [{"action": "wait", "summary": "Waiting", "status": "running"}],
+            }
         return {
             "status": "completed",
             "summary": "Session tool confirmed actions.",
@@ -386,12 +482,50 @@ def test_computer_use_service_requires_confirmation_for_high_risk_step(computer_
         target_url="https://example.com/contact",
         allowed_domains="example.com",
     )
-    confirmed = computer_use_service.confirm_computer_use_session(result["sessionId"])
 
     assert result["status"] == "need_confirmation"
     assert result["needsConfirmation"] is True
-    assert confirmed["status"] == "completed"
-    assert confirmed["needsConfirmation"] is False
+    with pytest.raises(computer_use_service.ComputerUseError, match="cannot resume"):
+        computer_use_service.confirm_computer_use_session(result["sessionId"])
+    stored = computer_use_service._load_session(result["sessionId"])
+    assert stored["status"] == "blocked"
+    assert stored["needsConfirmation"] is False
+
+
+def test_computer_use_public_payload_and_events_redact_target_url_query(computer_use_tmp, monkeypatch):
+    monkeypatch.setenv("VIBELUTION_COMPUTER_USE_ENABLED", "1")
+    monkeypatch.setenv("VIBELUTION_COMPUTER_USE_BASE_URL", "https://computer-use.invalid")
+
+    events = []
+
+    from core.web.services import runtime_scene_service
+
+    monkeypatch.setattr(
+        runtime_scene_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: events.append(kwargs.get("fields") or {}),
+    )
+    monkeypatch.setattr(computer_use_service, "_record_event", ORIGINAL_RECORD_EVENT)
+    monkeypatch.setattr(
+        computer_use_service,
+        "_call_open_computer_use",
+        lambda request, *, session_id: {
+            "status": "completed",
+            "summary": "Opened page.",
+            "steps": [{"action": "open", "summary": "Opened page", "status": "completed"}],
+        },
+    )
+
+    result = computer_use_service.start_computer_use_task(
+        task="Open tokenized URL",
+        target_url="https://example.com/path?token=secret#frag",
+        allowed_domains="example.com",
+    )
+
+    assert result["targetUrl"] == "https://example.com/path"
+    assert "secret" not in json.dumps(result, ensure_ascii=False)
+    assert events
+    assert all("secret" not in json.dumps(event, ensure_ascii=False) for event in events)
 
 
 def test_computer_use_routes_confirm_resumes_pending_actions(computer_use_tmp, monkeypatch):
@@ -436,6 +570,37 @@ def test_computer_use_routes_confirm_resumes_pending_actions(computer_use_tmp, m
     assert confirmed["needsConfirmation"] is False
     assert confirmed["summary"] == "Confirmed route action completed."
     assert confirmed["screenshotUrl"].startswith(f"/api/computer-use/sessions/{created['sessionId']}/screenshots/")
+
+
+def test_computer_use_routes_forward_timeout_seconds(computer_use_tmp, monkeypatch):
+    monkeypatch.setenv("VIBELUTION_COMPUTER_USE_ENABLED", "1")
+    monkeypatch.setenv("VIBELUTION_COMPUTER_USE_BASE_URL", "https://computer-use.invalid")
+
+    calls = []
+
+    def fake_call(request, *, session_id):
+        calls.append(request)
+        return {
+            "status": "completed",
+            "summary": "Opened page.",
+            "steps": [{"action": "open", "summary": "Opened page", "status": "completed"}],
+        }
+
+    monkeypatch.setattr(computer_use_service, "_call_open_computer_use", fake_call)
+    client = TestClient(create_app(), headers={CONTROL_TOKEN_HEADER: get_control_token()})
+
+    response = client.post(
+        "/api/computer-use/tasks",
+        json={
+            "task": "Open example",
+            "targetUrl": "https://example.com",
+            "allowedDomains": ["example.com"],
+            "timeoutSeconds": 9,
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert calls[0]["timeoutSeconds"] == 9
 
 
 def test_computer_use_routes_create_read_cancel_and_screenshot(computer_use_tmp, monkeypatch):
