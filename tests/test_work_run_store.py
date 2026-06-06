@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from core.runtime_manager import evolution_store
+from core.runtime_manager import evolution_store, work_run_store
 from core.runtime_manager.work_run_store import WorkRunStore, normalize_run_id, normalize_run_kind
 
 
@@ -17,6 +17,70 @@ def test_work_run_store_tracks_active_and_latest_per_kind(tmp_path):
     assert store.load_active_snapshot("chat_turn")["runId"] == "chat_1"
     assert store.load_active_snapshot("self_evolution_run")["runId"] == "self_1"
     assert store.load_latest_snapshot("chat_turn")["status"] == "running"
+
+
+def test_work_run_store_skips_identical_snapshot_write_and_event(tmp_path, monkeypatch):
+    store = WorkRunStore(root=tmp_path / ".runtime" / "work_runs")
+    writes = []
+    events = []
+    original_atomic_write_json = work_run_store._atomic_write_json
+
+    def capture_write(path, payload):
+        writes.append(path)
+        original_atomic_write_json(path, payload)
+
+    def capture_event(phase, event_code, **kwargs):
+        events.append((phase, event_code, kwargs))
+
+    monkeypatch.setattr(work_run_store, "_atomic_write_json", capture_write)
+    monkeypatch.setattr(work_run_store, "_record_work_run_event", capture_event)
+
+    snapshot = {
+        "runId": "run_dedupe",
+        "runKind": "chat_turn",
+        "status": "running",
+        "currentPhase": "running",
+        "runtimeStatus": "running",
+        "updatedAt": "2026-06-06T18:20:00Z",
+    }
+
+    store.persist_snapshot("chat_turn", snapshot, active_run_id="run_dedupe")
+    store.persist_snapshot("chat_turn", snapshot, active_run_id="run_dedupe")
+
+    assert writes == [
+        store.runs_dir("chat_turn") / "run_dedupe.json",
+        store.index_path("chat_turn"),
+    ]
+    assert [event[1] for event in events] == ["work_run.snapshot.persisted"]
+    assert store.load_active_snapshot("chat_turn")["runId"] == "run_dedupe"
+    assert store.load_latest_snapshot("chat_turn")["runId"] == "run_dedupe"
+
+
+def test_work_run_store_repairs_index_for_existing_identical_snapshot(tmp_path, monkeypatch):
+    store = WorkRunStore(root=tmp_path / ".runtime" / "work_runs")
+    writes = []
+    original_atomic_write_json = work_run_store._atomic_write_json
+
+    def capture_write(path, payload):
+        writes.append(path)
+        original_atomic_write_json(path, payload)
+
+    monkeypatch.setattr(work_run_store, "_atomic_write_json", capture_write)
+
+    snapshot = {
+        "runId": "run_index_repair",
+        "runKind": "chat_turn",
+        "status": "running",
+    }
+    snapshot_path = store.runs_dir("chat_turn") / "run_index_repair.json"
+    snapshot_path.parent.mkdir(parents=True, exist_ok=True)
+    snapshot_path.write_text(json.dumps(snapshot, ensure_ascii=False), encoding="utf-8")
+
+    store.persist_snapshot("chat_turn", snapshot, active_run_id="run_index_repair")
+
+    assert writes == [store.index_path("chat_turn")]
+    assert store.load_run_index("chat_turn")["activeRunId"] == "run_index_repair"
+    assert store.load_run_index("chat_turn")["latestRunId"] == "run_index_repair"
 
 
 def test_work_run_store_lists_snapshots_for_kind(tmp_path):

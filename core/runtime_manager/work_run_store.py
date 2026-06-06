@@ -313,6 +313,20 @@ class WorkRunStore:
             else ()
         )
         current_signature = _snapshot_lifecycle_signature(payload, active_run_id=effective_active_run_id)
+        current_index = self.load_run_index(run_kind)
+        index_already_current = (
+            str(current_index.get("activeRunId") or "").strip() == effective_active_run_id
+            and str(current_index.get("latestRunId") or "").strip() == run_id
+        )
+        if previous_payload == payload:
+            if not index_already_current:
+                self.save_run_index(
+                    run_kind,
+                    active_run_id=effective_active_run_id,
+                    latest_run_id=run_id,
+                    emit_event=False,
+                )
+            return payload
         self.ensure_kind_dirs(run_kind)
         _atomic_write_json(self.runs_dir(run_kind) / f"{run_id}.json", payload)
         self.save_run_index(run_kind, active_run_id=effective_active_run_id, latest_run_id=run_id, emit_event=False)
