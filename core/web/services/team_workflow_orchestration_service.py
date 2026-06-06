@@ -682,6 +682,67 @@ def get_knowledge_ingestion_status(team_id: str) -> dict[str, Any]:
     return payload
 
 
+def get_team_workflow_coordination_status(team_id: str) -> dict[str, Any]:
+    """Return a read-only coordination queue for the Challenge Cup research workflow."""
+
+    normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
+    team_service.get_team(normalized_team_id)
+    with _WORKFLOW_LOCK:
+        workflow = _load_or_create_workflow(normalized_team_id)
+        candidate_store = _load_candidate_store(normalized_team_id)
+        transfers = _load_transfer_records(normalized_team_id)
+        candidates = [item for item in list(candidate_store.get("candidates") or []) if isinstance(item, dict)]
+
+    validation_reports = {str(candidate.get("candidateId") or ""): validate_candidate_record(candidate) for candidate in candidates}
+    requested_transfers = [transfer for transfer in transfers if str(transfer.get("status") or "") == "requested"]
+    active_candidates = [candidate for candidate in candidates if str(candidate.get("candidateType") or "") != "candidate_graph" and not _candidate_is_archived(candidate)]
+    archived_candidates = [candidate for candidate in candidates if str(candidate.get("candidateType") or "") != "candidate_graph" and _candidate_is_archived(candidate)]
+    queues = _coordination_queues(active_candidates, requested_transfers, validation_reports)
+    summary = _coordination_summary(active_candidates, archived_candidates, requested_transfers, queues)
+    action_items = _coordination_action_items(summary, queues)
+    status = _coordination_status(summary, action_items)
+    payload = {
+        "schemaVersion": SCHEMA_VERSION,
+        "teamId": normalized_team_id,
+        "workflowId": workflow["workflowId"],
+        "workflowKind": workflow["workflowKind"],
+        "status": status,
+        "ownerAgentId": workflow.get("ownerAgentId") or DEFAULT_OWNER_AGENT_ID,
+        "summary": summary,
+        "queues": queues,
+        "actionItems": action_items,
+        "coordinationPolicy": {
+            "coordinationAgentId": str(workflow.get("routingPolicy", {}).get("coordinationAgentId") or workflow.get("ownerAgentId") or DEFAULT_OWNER_AGENT_ID),
+            "organizingAgentId": str(workflow.get("ownerAgentId") or DEFAULT_OWNER_AGENT_ID),
+            "functionalAgentsMayRequestTransfer": bool(workflow.get("routingPolicy", {}).get("functionalAgentsMayRequestTransfer")),
+            "requiresUserConfirmation": bool(workflow.get("transferPolicy", {}).get("requiresUserConfirmation")),
+            "finalStateWriter": str(workflow.get("routingPolicy", {}).get("finalStateWriter") or workflow.get("ownerAgentId") or DEFAULT_OWNER_AGENT_ID),
+            "readOnlyStatus": True,
+            "autoTransferEnabled": False,
+        },
+        "storage": {
+            "workflowPath": _relative_path(_workflow_path(normalized_team_id)),
+            "candidateStorePath": _relative_path(_candidate_store_path(normalized_team_id)),
+            "transferRecordsPath": _relative_path(_transfer_records_path(normalized_team_id)),
+        },
+        "updatedAt": utc_now_iso(),
+    }
+    _record_workflow_event(
+        "coordination.status_viewed",
+        normalized_team_id,
+        fields={
+            "workflowId": workflow["workflowId"],
+            "status": status,
+            "activeCandidateCount": summary["activeCandidateCount"],
+            "pendingTransferCount": summary["pendingTransferCount"],
+            "reworkCandidateCount": summary["reworkCandidateCount"],
+            "blockedCandidateCount": summary["blockedCandidateCount"],
+            "actionItemCount": summary["actionItemCount"],
+        },
+    )
+    return payload
+
+
 def build_candidate_graph(team_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
     normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
     team_service.get_team(normalized_team_id)
@@ -2055,6 +2116,215 @@ def _candidate_breakdown(candidates: list[dict[str, Any]]) -> dict[str, Any]:
         "byState": dict(sorted(by_state.items())),
         "byQualityStatus": dict(sorted(by_quality.items())),
     }
+
+
+def _coordination_queues(
+    candidates: list[dict[str, Any]],
+    requested_transfers: list[dict[str, Any]],
+    validation_reports: dict[str, dict[str, Any]],
+) -> dict[str, list[dict[str, Any]]]:
+    candidate_by_id = {str(candidate.get("candidateId") or ""): candidate for candidate in candidates}
+    transfer_queue = [
+        _coordination_item(
+            candidate_by_id.get(str(transfer.get("candidateId") or "")),
+            validation_reports,
+            queue="pending_transfer",
+            transfer=transfer,
+            reason=str(transfer.get("reason") or ""),
+        )
+        for transfer in requested_transfers
+    ]
+    rework_queue = [
+        _coordination_item(candidate, validation_reports, queue="needs_rework", reason=_coordination_candidate_reason(candidate, validation_reports))
+        for candidate in candidates
+        if _candidate_needs_rework(candidate, validation_reports)
+    ]
+    stewardship_queue = [
+        _coordination_item(candidate, validation_reports, queue="stewardship", reason=_coordination_candidate_reason(candidate, validation_reports))
+        for candidate in candidates
+        if str(candidate.get("currentState") or "") in {"steward_pack_draft", "steward_pending_knowledge_review", "approved_to_ingest"}
+    ]
+    blocked_queue = [
+        _coordination_item(candidate, validation_reports, queue="blocked", reason=_coordination_candidate_reason(candidate, validation_reports))
+        for candidate in candidates
+        if _candidate_is_coordination_blocked(candidate, validation_reports)
+    ]
+    active_queue = [
+        _coordination_item(candidate, validation_reports, queue="active", reason=_coordination_candidate_reason(candidate, validation_reports))
+        for candidate in candidates
+        if not _candidate_needs_rework(candidate, validation_reports)
+        and not _candidate_is_coordination_blocked(candidate, validation_reports)
+        and str(candidate.get("currentState") or "") not in {"steward_pending_knowledge_review", "approved_to_ingest", "official_synced"}
+    ]
+    return {
+        "pendingTransfers": transfer_queue,
+        "needsRework": rework_queue,
+        "stewardship": stewardship_queue,
+        "blocked": blocked_queue,
+        "active": active_queue[:12],
+    }
+
+
+def _coordination_summary(
+    candidates: list[dict[str, Any]],
+    archived_candidates: list[dict[str, Any]],
+    requested_transfers: list[dict[str, Any]],
+    queues: dict[str, list[dict[str, Any]]],
+) -> dict[str, Any]:
+    active_count = len(candidates)
+    return {
+        "candidateCount": active_count + len(archived_candidates),
+        "activeCandidateCount": active_count,
+        "archivedCandidateCount": len(archived_candidates),
+        "pendingTransferCount": len(requested_transfers),
+        "reworkCandidateCount": len(queues["needsRework"]),
+        "stewardshipCandidateCount": len(queues["stewardship"]),
+        "blockedCandidateCount": len(queues["blocked"]),
+        "activeQueueCount": len(queues["active"]),
+        "actionItemCount": 0,
+        "byWorkflowNode": _coordination_count_by(candidates, "currentWorkflowNode"),
+        "byState": _coordination_count_by(candidates, "currentState"),
+        "byQualityStatus": _coordination_count_by(candidates, "qualityStatus"),
+    }
+
+
+def _coordination_action_items(summary: dict[str, Any], queues: dict[str, list[dict[str, Any]]]) -> list[dict[str, Any]]:
+    action_items: list[dict[str, Any]] = []
+    if summary["pendingTransferCount"] > 0:
+        action_items.append(
+            {
+                "code": "transfer_decision_pending",
+                "severity": "needs_review",
+                "message": f"{summary['pendingTransferCount']} transfer request(s) need the coordination agent decision.",
+                "nextAction": "Research Coordination Agent should approve, return, or reject the requested transfer.",
+                "queue": "pendingTransfers",
+            }
+        )
+    if summary["reworkCandidateCount"] > 0:
+        action_items.append(
+            {
+                "code": "candidate_rework_pending",
+                "severity": "needs_revision",
+                "message": f"{summary['reworkCandidateCount']} candidate(s) need upstream rework.",
+                "nextAction": "Route each candidate to the smallest upstream functional agent with requiredChanges.",
+                "queue": "needsRework",
+            }
+        )
+    if summary["blockedCandidateCount"] > 0:
+        action_items.append(
+            {
+                "code": "coordination_blocked_candidates",
+                "severity": "blocked",
+                "message": f"{summary['blockedCandidateCount']} candidate(s) are blocked by invalid evidence or missing links.",
+                "nextAction": "Resolve validation errors before requesting another workflow transfer.",
+                "queue": "blocked",
+            }
+        )
+    if summary["stewardshipCandidateCount"] > 0:
+        action_items.append(
+            {
+                "code": "stewardship_queue_ready",
+                "severity": "needs_review",
+                "message": f"{summary['stewardshipCandidateCount']} stewardship item(s) are waiting for governance review or sync.",
+                "nextAction": "Knowledge Steward Agent should keep these under approval gate until reviewed.",
+                "queue": "stewardship",
+            }
+        )
+    summary["actionItemCount"] = len(action_items)
+    return action_items
+
+
+def _coordination_status(summary: dict[str, Any], action_items: list[dict[str, Any]]) -> str:
+    if summary["activeCandidateCount"] == 0 and summary["archivedCandidateCount"] == 0:
+        return "empty"
+    if any(str(item.get("severity") or "") == "blocked" for item in action_items):
+        return "blocked"
+    if summary["pendingTransferCount"] > 0:
+        return "needs_transfer_decision"
+    if summary["reworkCandidateCount"] > 0:
+        return "needs_rework"
+    if summary["stewardshipCandidateCount"] > 0:
+        return "stewardship_review"
+    return "in_progress"
+
+
+def _coordination_item(
+    candidate: dict[str, Any] | None,
+    validation_reports: dict[str, dict[str, Any]],
+    *,
+    queue: str,
+    transfer: dict[str, Any] | None = None,
+    reason: str = "",
+) -> dict[str, Any]:
+    candidate_id = str((candidate or {}).get("candidateId") or (transfer or {}).get("candidateId") or "")
+    validation = validation_reports.get(candidate_id) or {"valid": True, "issues": []}
+    item = {
+        "queue": queue,
+        "candidateId": candidate_id,
+        "candidateType": str((candidate or {}).get("candidateType") or ""),
+        "title": str((candidate or {}).get("title") or ""),
+        "currentWorkflowNode": str((candidate or {}).get("currentWorkflowNode") or (transfer or {}).get("fromNode") or ""),
+        "currentState": str((candidate or {}).get("currentState") or ""),
+        "qualityStatus": str((candidate or {}).get("qualityStatus") or ""),
+        "valid": bool(validation.get("valid", True)),
+        "issueCount": len(validation.get("issues") or []),
+        "reason": _trim_text(reason, max_length=1000),
+        "updatedAt": str((candidate or {}).get("updatedAt") or (transfer or {}).get("updatedAt") or ""),
+    }
+    if transfer:
+        item.update(
+            {
+                "transferId": str(transfer.get("transferId") or ""),
+                "fromNode": str(transfer.get("fromNode") or ""),
+                "toNode": str(transfer.get("toNode") or ""),
+                "requestedByAgent": str(transfer.get("requestedByAgent") or ""),
+            }
+        )
+    return item
+
+
+def _candidate_needs_rework(candidate: dict[str, Any], validation_reports: dict[str, dict[str, Any]]) -> bool:
+    state = str(candidate.get("currentState") or "")
+    quality_status = str(candidate.get("qualityStatus") or "")
+    if "needs_revision" in state or quality_status == "needs_revision":
+        return True
+    metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {}
+    output = metadata.get("output") if isinstance(metadata.get("output"), dict) else {}
+    if isinstance(output.get("requiredChanges"), list) and output.get("requiredChanges"):
+        return True
+    validation = validation_reports.get(str(candidate.get("candidateId") or ""))
+    return bool(validation and not validation.get("valid", True))
+
+
+def _candidate_is_coordination_blocked(candidate: dict[str, Any], validation_reports: dict[str, dict[str, Any]]) -> bool:
+    state = str(candidate.get("currentState") or "")
+    quality_status = str(candidate.get("qualityStatus") or "")
+    if "blocked" in state or quality_status in {"broken_links", "source_manifest_invalid"}:
+        return True
+    validation = validation_reports.get(str(candidate.get("candidateId") or ""))
+    return bool(validation and any(issue.get("severity") == "error" for issue in validation.get("issues") or []))
+
+
+def _coordination_candidate_reason(candidate: dict[str, Any], validation_reports: dict[str, dict[str, Any]]) -> str:
+    metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {}
+    output = metadata.get("output") if isinstance(metadata.get("output"), dict) else {}
+    required_changes = output.get("requiredChanges") if isinstance(output.get("requiredChanges"), list) else []
+    if required_changes:
+        return "; ".join(str(item) for item in required_changes[:3] if str(item).strip())
+    validation = validation_reports.get(str(candidate.get("candidateId") or ""))
+    if validation:
+        errors = [issue for issue in validation.get("issues") or [] if issue.get("severity") == "error"]
+        if errors:
+            return str(errors[0].get("message") or errors[0].get("code") or "")
+    return str(candidate.get("summary") or candidate.get("currentState") or candidate.get("qualityStatus") or "")
+
+
+def _coordination_count_by(candidates: list[dict[str, Any]], field: str) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for candidate in candidates:
+        key = str(candidate.get(field) or "unknown")
+        counts[key] = counts.get(key, 0) + 1
+    return dict(sorted(counts.items()))
 
 
 def _knowledge_ingestion_knowledge_bases(knowledge_overview: dict[str, Any]) -> list[dict[str, Any]]:

@@ -25,6 +25,7 @@ import {
   TeamWorkflowCandidateGraphBuildPayload,
   TeamWorkflowCandidateGraphPayload,
   TeamWorkflowCandidateGraphNode,
+  TeamWorkflowCoordinationStatus,
   TeamWorkflowKnowledgeIngestionStatus,
   TeamTemplateInstantiatePayload,
   TeamTemplateListPayload,
@@ -444,6 +445,37 @@ function workflowIngestionStatusLabel(value: string, lang: "zh" | "en") {
   return (lang === "zh" ? zh : en)[normalized] ?? (normalized || "-");
 }
 
+function workflowCoordinationStatusLabel(value: string, lang: "zh" | "en") {
+  const normalized = String(value || "").trim();
+  const zh: Record<string, string> = {
+    empty: "暂无队列",
+    blocked: "存在阻塞",
+    needs_transfer_decision: "转移待决",
+    needs_rework: "返工待处理",
+    stewardship_review: "治理待审",
+    in_progress: "推进中",
+    pendingTransfers: "转移待决",
+    needsRework: "返工队列",
+    stewardship: "治理队列",
+    blockedQueue: "阻塞队列",
+    active: "进行中",
+  };
+  const en: Record<string, string> = {
+    empty: "empty",
+    blocked: "blocked",
+    needs_transfer_decision: "transfer decision",
+    needs_rework: "rework needed",
+    stewardship_review: "stewardship review",
+    in_progress: "in progress",
+    pendingTransfers: "transfers",
+    needsRework: "rework",
+    stewardship: "stewardship",
+    blockedQueue: "blocked",
+    active: "active",
+  };
+  return (lang === "zh" ? zh : en)[normalized] ?? workflowIngestionStatusLabel(normalized, lang);
+}
+
 function workflowIngestionTone(value: string) {
   const normalized = String(value || "").toLowerCase();
   if (normalized === "ready" || normalized === "operational") {
@@ -660,6 +692,14 @@ export function TeamsRoute() {
     queryFn: () =>
       fetchJson<TeamWorkflowCandidateListPayload>(
         `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/candidates?candidateType=candidate_graph&limit=${TEAM_WORKFLOW_CANDIDATE_GRAPH_LIMIT}`,
+      ),
+    enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && teamWorkflowQuery.data),
+  });
+  const teamWorkflowCoordinationStatusQuery = useQuery({
+    queryKey: queryKeys.teamWorkflowCoordinationStatus(effectiveTeamId || "none"),
+    queryFn: () =>
+      fetchJson<TeamWorkflowCoordinationStatus>(
+        `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/coordination/status`,
       ),
     enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && teamWorkflowQuery.data),
   });
@@ -1181,6 +1221,7 @@ export function TeamsRoute() {
   const teamWorkflowCandidateGraphRecord = latestWorkflowCandidate(teamWorkflowCandidateGraphQuery.data?.candidates ?? []);
   const teamWorkflowCandidateGraph = workflowCandidateGraphFromCandidate(teamWorkflowCandidateGraphRecord);
   const teamWorkflowCandidateGraphLayout = teamWorkflowCandidateGraph ? workflowGraphLayout(teamWorkflowCandidateGraph) : null;
+  const teamWorkflowCoordinationStatus = teamWorkflowCoordinationStatusQuery.data ?? null;
   const teamWorkflowKnowledgeIngestionStatus = teamWorkflowKnowledgeIngestionStatusQuery.data ?? null;
   const selectedTeamBuildCandidateGraphPending =
     buildCandidateGraphMutation.isPending && buildCandidateGraphMutation.variables === selectedTeam?.teamId;
@@ -1567,6 +1608,89 @@ export function TeamsRoute() {
                         <span>{teamWorkflow.workflowKind}</span>
                         <span>{teamWorkflow.ownerAgentId}</span>
                         <span>{teamWorkflow.candidateStore.storagePath}</span>
+                      </div>
+                      <div className={styles.workflowCoordinationPanel}>
+                        <div className={styles.workflowIngestionHeader}>
+                          <div>
+                            <strong>{lang === "zh" ? "团队协调队列" : "Coordination queue"}</strong>
+                            <span>
+                              {teamWorkflowCoordinationStatus
+                                ? `${teamWorkflowCoordinationStatus.summary.pendingTransferCount} transfer / ${teamWorkflowCoordinationStatus.summary.reworkCandidateCount} rework / ${teamWorkflowCoordinationStatus.summary.blockedCandidateCount} blocked`
+                                : teamWorkflowCoordinationStatusQuery.isPending
+                                ? (lang === "zh" ? "读取中" : "loading")
+                                : (lang === "zh" ? "等待流程数据" : "waiting for workflow data")}
+                            </span>
+                          </div>
+                          <span className={`${styles.workflowTag} ${workflowIngestionTone(teamWorkflowCoordinationStatus?.status || "")}`}>
+                            {teamWorkflowCoordinationStatus
+                              ? workflowCoordinationStatusLabel(teamWorkflowCoordinationStatus.status, lang)
+                              : (lang === "zh" ? "未读取" : "not loaded")}
+                          </span>
+                        </div>
+                        {teamWorkflowCoordinationStatus ? (
+                          <>
+                            <div className={styles.workflowCoordinationStats}>
+                              <span>{lang === "zh" ? "待决" : "transfer"} <strong>{teamWorkflowCoordinationStatus.summary.pendingTransferCount}</strong></span>
+                              <span>{lang === "zh" ? "返工" : "rework"} <strong>{teamWorkflowCoordinationStatus.summary.reworkCandidateCount}</strong></span>
+                              <span>{lang === "zh" ? "治理" : "steward"} <strong>{teamWorkflowCoordinationStatus.summary.stewardshipCandidateCount}</strong></span>
+                              <span>{lang === "zh" ? "阻塞" : "blocked"} <strong>{teamWorkflowCoordinationStatus.summary.blockedCandidateCount}</strong></span>
+                            </div>
+                            <div className={styles.workflowCoordinationQueues}>
+                              {[
+                                ["pendingTransfers", teamWorkflowCoordinationStatus.queues.pendingTransfers],
+                                ["needsRework", teamWorkflowCoordinationStatus.queues.needsRework],
+                                ["stewardship", teamWorkflowCoordinationStatus.queues.stewardship],
+                                ["blockedQueue", teamWorkflowCoordinationStatus.queues.blocked],
+                              ].map(([queueName, queueItems]) => (
+                                <div key={String(queueName)} className={styles.workflowCoordinationQueue}>
+                                  <strong>{workflowCoordinationStatusLabel(String(queueName), lang)}</strong>
+                                  {(queueItems as TeamWorkflowCoordinationStatus["queues"]["active"]).length ? (
+                                    (queueItems as TeamWorkflowCoordinationStatus["queues"]["active"]).slice(0, 3).map((item) => (
+                                      <span key={`${queueName}-${item.transferId || item.candidateId}`}>
+                                        {item.transferId ? `${item.fromNode || "-"} -> ${item.toNode || "-"}` : workflowStateLabel(item.currentState, lang)}
+                                        {" · "}
+                                        {item.title || item.candidateType || item.candidateId}
+                                      </span>
+                                    ))
+                                  ) : (
+                                    <small>{lang === "zh" ? "空" : "empty"}</small>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                            {teamWorkflowCoordinationStatus.actionItems.length ? (
+                              <div className={styles.workflowIngestionActions}>
+                                {teamWorkflowCoordinationStatus.actionItems.slice(0, 4).map((item) => (
+                                  <span key={`${item.code}-${item.queue}`} className={workflowIngestionTone(item.severity)}>
+                                    {workflowIngestionStatusLabel(item.severity, lang)} · {item.message}
+                                  </span>
+                                ))}
+                              </div>
+                            ) : null}
+                            <div className={styles.workflowIngestionBoundary}>
+                              <span>{teamWorkflowCoordinationStatus.coordinationPolicy.coordinationAgentId}</span>
+                              <span>
+                                {teamWorkflowCoordinationStatus.coordinationPolicy.requiresUserConfirmation
+                                  ? (lang === "zh" ? "需要用户确认" : "user confirmation")
+                                  : (lang === "zh" ? "无需用户确认" : "no user confirmation")}
+                              </span>
+                              <span>
+                                {teamWorkflowCoordinationStatus.coordinationPolicy.autoTransferEnabled
+                                  ? (lang === "zh" ? "自动调转开启" : "auto transfer on")
+                                  : (lang === "zh" ? "只读状态总览" : "read-only status")}
+                              </span>
+                            </div>
+                          </>
+                        ) : (
+                          <div className={styles.empty}>
+                            {teamWorkflowCoordinationStatusQuery.isPending
+                              ? (lang === "zh" ? "正在汇总候选队列、返工项和转移请求..." : "Aggregating candidates, rework items, and transfers...")
+                              : (lang === "zh" ? "暂无协调队列状态。" : "No coordination status yet.")}
+                          </div>
+                        )}
+                        {teamWorkflowCoordinationStatusQuery.error instanceof Error ? (
+                          <div className={styles.messageError}>{teamWorkflowCoordinationStatusQuery.error.message}</div>
+                        ) : null}
                       </div>
                       <div className={styles.workflowIngestionPanel}>
                         <div className={styles.workflowIngestionHeader}>

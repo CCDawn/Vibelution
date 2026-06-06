@@ -262,6 +262,76 @@ def test_transfer_rejected_archives_candidate_and_excludes_graph(tmp_path, monke
     assert candidate["candidateId"] not in {node["candidateId"] for node in graph["graph"]["nodes"]}
 
 
+def test_coordination_status_groups_pending_transfer_rework_and_blocked_candidates(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    workflow = team_workflow_orchestration_service.ensure_team_workflow_orchestration(
+        team["teamId"],
+        owner_agent_id="Research Coordination Agent",
+    )
+    source = team_workflow_orchestration_service.register_candidate_source(
+        team["teamId"],
+        {
+            "title": "Candidate source",
+            "sourceUrl": "https://example.test/source",
+            "createdByAgent": "Source Intake Agent",
+        },
+    )["candidate"]
+    team_workflow_orchestration_service.submit_transfer_request(
+        team["teamId"],
+        {
+            "candidateId": source["candidateId"],
+            "fromNode": "knowledge_collection",
+            "toNode": "source_screening",
+            "requestedByAgent": "Source Intake Agent",
+            "reason": "Ready for source screening.",
+        },
+    )
+    rework = team_workflow_orchestration_service.record_local_research_model_output(
+        team["teamId"],
+        {
+            "taskType": "algorithm_hypothesis_draft",
+            "title": "Incomplete hypothesis",
+            "createdByAgent": "Algorithm Hypothesis Agent",
+            "output": {
+                "candidateType": "algorithm_hypothesis",
+                "sourceRefs": [{"type": "paper", "id": "paper-1", "label": "Paper 1"}],
+                "evidenceRefs": [{"type": "mapping", "id": "mapping-1", "label": "Mapping 1"}],
+                "claims": [{"claim": "Possible algorithm idea", "sourceRef": "paper-1"}],
+                "mechanismMappingIds": ["mapping-1"],
+                "hypothesis": "Dynamic routing may help.",
+                "baseline": "standard MoE router",
+                "expectedBenefit": "better adaptation",
+                "expectedComputeCost": "small overhead",
+                "experimentPlan": {"dataset": "synthetic task-switch benchmark"},
+                "uncertainty": [],
+                "riskFlags": [],
+                "confidence": 0.38,
+                "nextAction": "fix_experiment_plan",
+                "requiresReview": True,
+            },
+        },
+    )["candidate"]
+
+    status = team_workflow_orchestration_service.get_team_workflow_coordination_status(team["teamId"])
+
+    assert status["status"] == "blocked"
+    assert status["ownerAgentId"] == workflow["ownerAgentId"]
+    assert status["coordinationPolicy"]["requiresUserConfirmation"] is False
+    assert status["coordinationPolicy"]["autoTransferEnabled"] is False
+    assert status["summary"]["pendingTransferCount"] == 1
+    assert status["summary"]["reworkCandidateCount"] == 1
+    assert status["summary"]["blockedCandidateCount"] == 1
+    assert status["queues"]["pendingTransfers"][0]["candidateId"] == source["candidateId"]
+    assert status["queues"]["needsRework"][0]["candidateId"] == rework["candidateId"]
+    assert status["queues"]["blocked"][0]["candidateId"] == rework["candidateId"]
+    assert {item["code"] for item in status["actionItems"]} == {
+        "transfer_decision_pending",
+        "candidate_rework_pending",
+        "coordination_blocked_candidates",
+    }
+
+
 def test_local_research_model_task_and_output_records_candidate(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     team = team_service.create_team(name="挑战杯科研团队")

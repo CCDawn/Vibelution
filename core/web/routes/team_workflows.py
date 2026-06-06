@@ -16,6 +16,7 @@ from core.web.services.team_workflow_orchestration_service import (
     decide_transfer_request,
     ensure_team_workflow_orchestration,
     get_knowledge_ingestion_status,
+    get_team_workflow_coordination_status,
     get_team_workflow_orchestration,
     build_local_research_model_task,
     draft_paper_note_from_source_candidate,
@@ -200,6 +201,16 @@ def team_workflow_candidate_validation(team_id: str) -> dict:
 def team_workflow_knowledge_ingestion_status(team_id: str) -> dict:
     try:
         return get_knowledge_ingestion_status(team_id)
+    except TeamNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/teams/{team_id}/workflow-orchestration/coordination/status")
+def team_workflow_coordination_status(team_id: str) -> dict:
+    try:
+        return get_team_workflow_coordination_status(team_id)
     except TeamNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
