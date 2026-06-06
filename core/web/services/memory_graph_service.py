@@ -47,6 +47,7 @@ def get_memory_knowledge_graph(
 
     project_node_id = "project:vibelution"
     agents = agent_directory_service.list_agents(include_archived=False)
+    agents_by_id = {str(agent.get("agentId") or "").strip(): agent for agent in agents if str(agent.get("agentId") or "").strip()}
     team_member_agent_ids: set[str] = set()
     teams = [
         team
@@ -59,26 +60,9 @@ def get_memory_knowledge_graph(
                 member_agent_id = str(member.get("agentId") or "").strip()
                 if member_agent_id:
                     team_member_agent_ids.add(member_agent_id)
-    project_child_node_ids = [_node_id("team", str(team.get("teamId") or "").strip()) for team in teams if str(team.get("teamId") or "").strip()]
-    project_child_node_ids.extend(
-        _node_id("agent", str(agent.get("agentId") or "").strip())
-        for agent in agents
-        if str(agent.get("agentId") or "").strip() and str(agent.get("agentId") or "").strip() not in team_member_agent_ids
-    )
-    graph.add_node(
-        project_node_id,
-        "project",
-        "Vibelution",
-        summary="项目运行结构、Agent、Team、记忆域和知识库的只读图谱根节点。",
-        status="active",
-        metadata={"root": _rel(_project_root())},
-        responsibility_question=_responsibility_question("project", {"label": "Vibelution"}),
-        visual={"size": "root"},
-        child_node_ids=project_child_node_ids,
-    )
 
     visible_team_ids: set[str] = set()
-    visible_base_ids: set[str] = set()
+    visible_agent_ids: set[str] = set()
     agent_team_ids: set[str] = set()
     for team in teams:
         team_id_value = str(team.get("teamId") or "").strip()
@@ -95,15 +79,48 @@ def get_memory_knowledge_graph(
                 continue
             if team_knowledge_service._can_access(team_owner, base, normalized_agent_id, "read"):
                 visible_team_ids.add(team_id_value)
-                visible_base_ids.add(base_id)
-        if not normalized_agent_id:
-            visible_team_ids.add(team_id_value)
+                for member in list(team.get("members") or []):
+                    if isinstance(member, dict):
+                        member_agent_id = str(member.get("agentId") or "").strip()
+                        if member_agent_id:
+                            visible_agent_ids.add(member_agent_id)
     if normalized_agent_id:
+        visible_agent_ids.add(normalized_agent_id)
         visible_team_ids.update(agent_team_ids)
+        for team in teams:
+            team_id_value = str(team.get("teamId") or "").strip()
+            if team_id_value in visible_team_ids:
+                for member in list(team.get("members") or []):
+                    if isinstance(member, dict):
+                        member_agent_id = str(member.get("agentId") or "").strip()
+                        if member_agent_id:
+                            visible_agent_ids.add(member_agent_id)
+
+    project_child_node_ids = [
+        _node_id("team", str(team.get("teamId") or "").strip())
+        for team in teams
+        if str(team.get("teamId") or "").strip() in visible_team_ids
+    ]
+    project_child_node_ids.extend(
+        _node_id("agent", agent_id_value)
+        for agent_id_value in sorted(visible_agent_ids)
+        if agent_id_value not in team_member_agent_ids and agent_id_value in agents_by_id
+    )
+    graph.add_node(
+        project_node_id,
+        "project",
+        "Vibelution",
+        summary="项目运行结构、Agent、Team、记忆域和知识库的只读图谱根节点。",
+        status="active",
+        metadata={"root": _rel(_project_root())},
+        responsibility_question=_responsibility_question("project", {"label": "Vibelution"}),
+        visual={"size": "root"},
+        child_node_ids=project_child_node_ids,
+    )
 
     for agent in agents:
         agent_id_value = str(agent.get("agentId") or "").strip()
-        if not agent_id_value:
+        if not agent_id_value or agent_id_value not in visible_agent_ids:
             continue
         metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
         agent_category = "team_member_agent" if agent_id_value in team_member_agent_ids else "session_agent"
@@ -143,7 +160,7 @@ def get_memory_knowledge_graph(
         child_node_ids = [
             _node_id("agent", str(member.get("agentId") or "").strip())
             for member in list(team.get("members") or [])
-            if isinstance(member, dict) and str(member.get("agentId") or "").strip()
+            if isinstance(member, dict) and str(member.get("agentId") or "").strip() in visible_agent_ids and str(member.get("agentId") or "").strip() in agents_by_id
         ]
         team_detail = _owner_knowledge_detail(
             team_knowledge_service._owner_context("team", team_id_value, team=team),
@@ -586,6 +603,26 @@ def _record_graph_event(payload: dict[str, Any], agent_id: str) -> None:
                 "truncated": bool(summary.get("truncated")),
                 "elapsedMs": float(summary.get("elapsedMs") or 0.0),
             },
+        )
+    except Exception:
+        pass
+
+
+def record_memory_knowledge_graph_blocked(*, reason: str, team_id: str = "", knowledge_base_id: str = "", include: str = "") -> None:
+    try:
+        record_runtime_scene_event(
+            "memory_graph_service",
+            "memory_graph",
+            "memory.knowledge_graph.blocked",
+            message="Memory knowledge graph request blocked.",
+            outcome="blocked",
+            fields={
+                "reason": str(reason or "").strip(),
+                "teamId": str(team_id or "").strip(),
+                "knowledgeBaseId": str(knowledge_base_id or "").strip(),
+                "include": sorted(_include_set(include)),
+            },
+            lifecycle=True,
         )
     except Exception:
         pass

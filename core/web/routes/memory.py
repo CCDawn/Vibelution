@@ -17,6 +17,7 @@ from core.web.services.memory_graph_service import (
     MemoryKnowledgeGraphAmbiguousNodeError,
     get_memory_knowledge_graph,
     get_memory_knowledge_graph_node_detail,
+    record_memory_knowledge_graph_blocked,
 )
 
 
@@ -47,8 +48,12 @@ def memory_knowledge_graph(
     include: str = "",
     limit: int = 800,
 ) -> dict:
+    normalized_agent_id = str(agentId or "").strip()
+    if not normalized_agent_id:
+        record_memory_knowledge_graph_blocked(reason="agent_id_required", team_id=teamId, knowledge_base_id=knowledgeBaseId, include=include)
+        raise HTTPException(status_code=422, detail="agentId is required for memory knowledge graph.")
     return get_memory_knowledge_graph(
-        agent_id=agentId,
+        agent_id=normalized_agent_id,
         team_id=teamId,
         knowledge_base_id=knowledgeBaseId,
         include=include,
