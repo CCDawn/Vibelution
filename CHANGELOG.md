@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.44 - 2026-06-07
+
+- Added read-only communication briefs to the Challenge Cup workflow coordination status API, mapping queue items to target functional Agent roles and suggested delivery channels without sending messages automatically.
+- Surfaced coordination brief targets and channel hints in the Teams research workflow panel while keeping transfer, approval, and formal-knowledge writes disabled.
+- Updated the Challenge Cup flow HTML to document coordination briefs as the bridge between workflow queues and later team communication dispatch.
+
 ## 0.10.43 - 2026-06-06
 
 - Added a read-only Challenge Cup workflow coordination status API that groups pending transfers, rework candidates, stewardship items, blocked candidates, and active work for the research team.

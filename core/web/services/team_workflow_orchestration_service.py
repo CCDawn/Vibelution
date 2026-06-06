@@ -711,6 +711,7 @@ def get_team_workflow_coordination_status(team_id: str) -> dict[str, Any]:
         "summary": summary,
         "queues": queues,
         "actionItems": action_items,
+        "communication": _coordination_communication_summary(summary, queues),
         "coordinationPolicy": {
             "coordinationAgentId": str(workflow.get("routingPolicy", {}).get("coordinationAgentId") or workflow.get("ownerAgentId") or DEFAULT_OWNER_AGENT_ID),
             "organizingAgentId": str(workflow.get("ownerAgentId") or DEFAULT_OWNER_AGENT_ID),
@@ -738,6 +739,7 @@ def get_team_workflow_coordination_status(team_id: str) -> dict[str, Any]:
             "reworkCandidateCount": summary["reworkCandidateCount"],
             "blockedCandidateCount": summary["blockedCandidateCount"],
             "actionItemCount": summary["actionItemCount"],
+            "communicationBriefCount": summary["communicationBriefCount"],
         },
     )
     return payload
@@ -2182,6 +2184,7 @@ def _coordination_summary(
         "blockedCandidateCount": len(queues["blocked"]),
         "activeQueueCount": len(queues["active"]),
         "actionItemCount": 0,
+        "communicationBriefCount": sum(1 for queue_items in queues.values() for item in queue_items if item.get("communicationBrief")),
         "byWorkflowNode": _coordination_count_by(candidates, "currentWorkflowNode"),
         "byState": _coordination_count_by(candidates, "currentState"),
         "byQualityStatus": _coordination_count_by(candidates, "qualityStatus"),
@@ -2280,6 +2283,7 @@ def _coordination_item(
                 "requestedByAgent": str(transfer.get("requestedByAgent") or ""),
             }
         )
+    item["communicationBrief"] = _coordination_communication_brief(item)
     return item
 
 
@@ -2317,6 +2321,100 @@ def _coordination_candidate_reason(candidate: dict[str, Any], validation_reports
         if errors:
             return str(errors[0].get("message") or errors[0].get("code") or "")
     return str(candidate.get("summary") or candidate.get("currentState") or candidate.get("qualityStatus") or "")
+
+
+def _coordination_communication_summary(
+    summary: dict[str, Any],
+    queues: dict[str, list[dict[str, Any]]],
+) -> dict[str, Any]:
+    briefs = [item.get("communicationBrief") for queue_items in queues.values() for item in queue_items if isinstance(item.get("communicationBrief"), dict)]
+    target_counts: dict[str, int] = {}
+    channel_counts: dict[str, int] = {}
+    for brief in briefs:
+        target = str(brief.get("targetAgentRole") or "unknown")
+        channel = str(brief.get("channel") or "unknown")
+        target_counts[target] = target_counts.get(target, 0) + 1
+        channel_counts[channel] = channel_counts.get(channel, 0) + 1
+    return {
+        "briefCount": len(briefs),
+        "targetAgentRoleCounts": dict(sorted(target_counts.items())),
+        "channelCounts": dict(sorted(channel_counts.items())),
+        "readOnly": True,
+        "autoSendEnabled": False,
+        "recommendedSender": DEFAULT_OWNER_AGENT_ID,
+        "nextAction": "Use the linked team room or Project Agent Bus to send selected briefs after coordinator review.",
+        "summaryLine": (
+            f"{len(briefs)} coordination brief(s), "
+            f"{summary['pendingTransferCount']} pending transfer(s), "
+            f"{summary['reworkCandidateCount']} rework item(s)."
+        ),
+    }
+
+
+def _coordination_communication_brief(item: dict[str, Any]) -> dict[str, Any]:
+    queue = str(item.get("queue") or "")
+    node = str(item.get("currentWorkflowNode") or item.get("fromNode") or "")
+    state = str(item.get("currentState") or "")
+    target_agent = _coordination_target_agent_role(queue, node, state)
+    channel = "team_linked_room" if queue == "pending_transfer" else "project_agent_bus"
+    subject = _trim_text(_coordination_brief_subject(item, target_agent), max_length=180)
+    message = _trim_text(_coordination_brief_message(item, target_agent), max_length=1200)
+    return {
+        "targetAgentRole": target_agent,
+        "channel": channel,
+        "subject": subject,
+        "message": message,
+        "requiresCoordinatorReview": True,
+        "autoSendEnabled": False,
+        "sourceQueue": queue,
+    }
+
+
+def _coordination_target_agent_role(queue: str, node: str, state: str) -> str:
+    if queue == "pending_transfer":
+        return DEFAULT_OWNER_AGENT_ID
+    if queue == "stewardship" or node == "steward_ingestion" or "steward" in state:
+        return "Knowledge Steward Agent"
+    if node in {"knowledge_collection", "source_screening"} or state.startswith("source_"):
+        return "Source Intake Agent"
+    if node == "paper_note" or "paper_note" in state:
+        return "Paper Note Extraction Agent"
+    if node == "neuro_mechanism" or ("mechanism_" in state and "mapping" not in state):
+        return "Neuro Mechanism Extraction Agent"
+    if node == "mechanism_mapping" or "mapping" in state:
+        return "Mechanism Mapping Agent"
+    if node == "algorithm_hypothesis" or "hypothesis" in state:
+        return "Algorithm Hypothesis Agent"
+    if node == "research_review" or "review" in state:
+        return "Evidence Review Agent"
+    if queue == "blocked":
+        return "Evidence Review Agent"
+    return DEFAULT_OWNER_AGENT_ID
+
+
+def _coordination_brief_subject(item: dict[str, Any], target_agent: str) -> str:
+    title = str(item.get("title") or item.get("candidateType") or item.get("candidateId") or "workflow item")
+    if item.get("transferId"):
+        return f"Transfer decision needed: {item.get('fromNode') or '-'} -> {item.get('toNode') or '-'}"
+    return f"{target_agent} follow-up needed: {title}"
+
+
+def _coordination_brief_message(item: dict[str, Any], target_agent: str) -> str:
+    candidate_id = str(item.get("candidateId") or "")
+    state = str(item.get("currentState") or "")
+    reason = str(item.get("reason") or "")
+    issue_count = int(item.get("issueCount") or 0)
+    if item.get("transferId"):
+        return (
+            f"Please review transfer {item.get('transferId')} for candidate {candidate_id}. "
+            f"Requested route: {item.get('fromNode') or '-'} -> {item.get('toNode') or '-'}. "
+            f"Reason: {reason or 'No reason recorded.'}"
+        )
+    return (
+        f"{target_agent} should review candidate {candidate_id} at state {state or '-'}. "
+        f"Issue count: {issue_count}. "
+        f"Reason: {reason or 'No reason recorded.'}"
+    )
 
 
 def _coordination_count_by(candidates: list[dict[str, Any]], field: str) -> dict[str, int]:

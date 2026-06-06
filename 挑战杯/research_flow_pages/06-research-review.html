@@ -30,7 +30,7 @@
         <section class="plan-hero">
           <div class="kicker">Research Flow Node 06</div>
           <h1>科研审稿</h1>
-          <p class="subtitle">在交给记忆平台前先做领域与工程风险过滤，并把返工/拒绝/待转移纳入团队协调队列。</p>
+          <p class="subtitle">在交给记忆平台前先做领域与工程风险过滤，并把返工/拒绝/待转移纳入团队协调队列和沟通建议。</p>
           <div class="tag-row"><span class="tag done">prefilter 与协调队列已落地</span><span class="tag">Evidence Review Agent</span><span class="tag">独立计划页</span></div>
           <div class="diagram">
             <div class="flow-cell"><strong>输入</strong><span>paper_note / neuro_mechanism</span></div>
@@ -54,7 +54,7 @@
 <li>标记 weak_evidence、missing_citation、over_analogy、not_testable 等风险。</li>
 <li>禁止本地模型写最终 decision；高争议候选进入人工/门禁决策。</li>
 <li>Research Coordination Agent 可将 needs_revision 转移回最小上游节点，或将 rejected 候选归档到 rejection_archive。</li>
-<li>GET coordination/status 只读聚合 pendingTransfers、needsRework、blocked、stewardship 和 active 队列，供团队协调/组织层分派下一步。</li></ul></article>
+<li>GET coordination/status 只读聚合 pendingTransfers、needsRework、blocked、stewardship 和 active 队列，并为每个队列项生成 communicationBrief。</li></ul></article>
             <article class="plan-card"><h2>输出物</h2><ul><li>review_record 候选</li>
 <li>review_prefiltered 状态</li>
 <li>review_needs_revision 状态</li>
