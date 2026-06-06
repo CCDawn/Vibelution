@@ -61,6 +61,8 @@ def test_reset_summary_includes_memory_as_optional_item(reset_project: Path):
     assert agents_item["risk"] == "high"
     assert agents_item["defaultSelected"] is False
     assert summary["presets"] == []
+    web_dist_item = next(item for item in summary["items"] if item["id"] == "web_dist")
+    assert "bun run bun:build" in web_dist_item["rebuildHint"]
     protected_paths = {path for group in summary["protected"] for path in group["paths"]}
     assert "core/" in protected_paths
     assert "tools/*.py" in protected_paths
