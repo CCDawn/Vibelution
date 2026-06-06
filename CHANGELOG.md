@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.38 - 2026-06-06
+
+- Aligned local Terminal-Bench smoke supervised-evaluation cases with the full harness step budget by raising their `max_steps` and prompt contract to 100.
+- Refreshed stale built-in Terminal-Bench smoke JSONL sources when their case ids still match the built-in template, preventing old 8/10-step sources from rematerializing outdated bundles.
+- Added registry tests covering stale built-in source refresh, customized source preservation, and 100-step bundle materialization.
+
 ## 0.10.37 - 2026-06-06
 
 - Treated browser page-hide adjacent GET network cancellations as lifecycle control signals in runtime-scene diagnosis, so route refresh noise no longer appears as an active Workbench issue.
