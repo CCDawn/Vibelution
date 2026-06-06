@@ -1442,6 +1442,8 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).toContain("3 步 · 已完成 · 3/3");
     expect(html).toContain("思考过程");
     expect(html).toContain("读取");
+    expect(html).toContain('title="展开执行明细"');
+    expect(html).not.toContain('title="展开工具调用"');
     expect(html).not.toContain("先看日志");
     expect(html).not.toContain("opened latest log");
     expect(html).not.toContain("再查 React 链路");
