@@ -898,7 +898,9 @@ class TestPerformance:
             timeit.repeat(lambda: estimate_tokens_precise(text), repeat=3, number=100),
         )
 
-        assert elapsed < max(1.5, baseline * 500)
+        coverage_active = "coverage" in __import__("sys").modules
+        limit = 8.0 if coverage_active else 1.5
+        assert elapsed < max(limit, baseline * 500)
 
     def test_compression_performance(self):
         """测试压缩性能"""

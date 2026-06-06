@@ -77,7 +77,7 @@ describe("buildSupervisedRunRecordDisplay", () => {
     const display = buildSupervisedRunRecordDisplay(
       run({
         id: "supervised_20260531_163627",
-        endedAt: "2026-06-01T09:08:00+08:00",
+        endedAt: "2026-06-01T09:08:00",
       }),
       "zh",
       labels,

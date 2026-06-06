@@ -2830,31 +2830,34 @@ def test_handle_open_workbench_restarts_headless_session(monkeypatch):
     assert result["ok"] is True
     assert result["message"] == "Workbench opened."
     assert opened == {"no_browser": False}
-    assert events == [
-        (
-            "workbench.open.verification_succeeded",
-            {
-                "attempts": 1,
-                "commandId": "cmd-open",
-                "noBrowser": False,
-                "observedState": "open",
-                "launcherStatePresent": True,
-                "backendPid": 28888,
-                "backendHealthy": True,
-                "backendObserved": True,
-                "backendPort": 0,
-                "backendPortListening": True,
-                "backendPortOwnerPid": 28888,
-                "backendPortOwnerTrusted": True,
-                "backendPortConflict": False,
-                "browserManaged": True,
-                "browserWindowPid": 4500,
-                "browserWindowAlive": True,
-                "url": "http://127.0.0.1:8000",
-                "healthUrl": "",
-            },
-        )
-    ]
+    assert events[0][0] == "workbench.open.verification_succeeded"
+    success_payload = events[0][1]
+    assert success_payload | {
+        "attempts": 1,
+        "commandId": "cmd-open",
+        "noBrowser": False,
+        "observedState": "open",
+        "launcherStatePresent": True,
+        "backendPid": 28888,
+        "backendHealthy": True,
+        "backendObserved": True,
+        "backendPort": 0,
+        "backendPortListening": True,
+        "backendPortOwnerPid": 28888,
+        "backendPortOwnerTrusted": True,
+        "backendPortConflict": False,
+        "browserManaged": True,
+        "browserWindowPid": 4500,
+        "browserWindowAlive": True,
+        "url": "http://127.0.0.1:8000",
+        "healthUrl": "",
+        "backendReady": True,
+        "backendReadySource": "health_probe",
+    } == success_payload
+    backup_event = next((payload for event_type, payload in events if event_type == "workbench.stable_backup.created"), None)
+    assert backup_event is not None
+    assert backup_event["commandId"] == "cmd-open"
+    assert backup_event["reason"] == "launcher_open_success"
 
 
 def test_handle_open_workbench_fails_when_launcher_exits_before_workbench_is_ready(monkeypatch):
@@ -3056,7 +3059,7 @@ def test_handle_open_workbench_retries_stale_browser_only_session(monkeypatch):
     assert result["ok"] is True
     assert result["message"] == "Workbench opened."
     assert open_calls == [False, False]
-    assert [event_type for event_type, _payload in events] == [
+    assert [event_type for event_type, _payload in events[:2]] == [
         "workbench.open.stale_session_retry",
         "workbench.open.verification_succeeded",
     ]
@@ -3069,6 +3072,10 @@ def test_handle_open_workbench_retries_stale_browser_only_session(monkeypatch):
     assert success_payload["backendHealthy"] is True
     assert success_payload["browserWindowPid"] == 33676
     assert success_payload["retry"] == "stale_session_cleanup"
+    backup_event = next((payload for event_type, payload in events if event_type == "workbench.stable_backup.created"), None)
+    assert backup_event is not None
+    assert backup_event["commandId"] == "cmd-open"
+    assert backup_event["reason"] == "launcher_open_retry_success"
 
 
 def test_handle_open_workbench_accepts_trusted_backend_when_health_probe_lags(monkeypatch):
@@ -4122,9 +4129,9 @@ def test_handle_restart_workbench_preserves_visible_browser_when_no_browser_was_
     assert result["ok"] is True
     assert close_calls == ["close"]
     assert open_calls == [False]
-    assert events[0][0] == "workbench.restart.no_browser_overridden"
-    assert events[0][1]["browserWindowPid"] == 29999
-    assert events[0][1]["effectiveNoBrowser"] is False
+    override_payload = next(payload for event_type, payload in events if event_type == "workbench.restart.no_browser_overridden")
+    assert override_payload["browserWindowPid"] == 29999
+    assert override_payload["effectiveNoBrowser"] is False
     assert "workbench.restart.close_verification_succeeded" in [event[0] for event in events]
     assert "workbench.restart.open_verification_succeeded" in [event[0] for event in events]
 

@@ -85,7 +85,8 @@ def test_team_template_instantiate_creates_medical_team_agents_and_room(tmp_path
         if agent.get("metadata", {}).get("teamTemplateId") == "medical-consultation-demo"
     ]
     assert len(demo_agents) == 4
-    assert all(agent["toolPolicy"]["allowedTools"] == [] for agent in demo_agents)
+    assert all("agent_message_tool" in agent["toolPolicy"]["allowedTools"] for agent in demo_agents)
+    assert all("research_knowledge_query_tool" not in agent["toolPolicy"]["allowedTools"] for agent in demo_agents)
 
 
 def test_team_template_instantiate_creates_heletech_demo_team(tmp_path, monkeypatch):
@@ -149,6 +150,7 @@ def test_team_template_instantiate_creates_heletech_demo_team(tmp_path, monkeypa
         if agent.get("metadata", {}).get("teamTemplateId") == "heletech-maternal-digital-health-demo"
     ]
     assert len(demo_agents) == 5
-    assert all(agent["toolPolicy"]["allowedTools"] == [] for agent in demo_agents)
+    assert all("agent_message_tool" in agent["toolPolicy"]["allowedTools"] for agent in demo_agents)
+    assert all("research_knowledge_query_tool" not in agent["toolPolicy"]["allowedTools"] for agent in demo_agents)
     assert all(agent.get("metadata", {}).get("heletechMaternalDigitalHealthDemo") is True for agent in demo_agents)
     assert all("medicalTriageDemo" not in agent.get("metadata", {}) for agent in demo_agents)

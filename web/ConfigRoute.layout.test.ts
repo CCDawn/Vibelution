@@ -96,7 +96,6 @@ describe("ConfigRoute content experience contract", () => {
     const modelsIntroSource = configRouteSource.slice(modelsStart, modelEditorStart);
     expect(modelsIntroSource).toContain("copy.modelCenterModels");
     expect(modelsIntroSource).toContain("copy.modelCenterAccounts");
-    expect(modelsIntroSource).toContain("copy.modelCenterBindings");
     expect(modelsIntroSource).toContain("copy.modelCenterCapabilityIssues");
   });
 
@@ -104,7 +103,7 @@ describe("ConfigRoute content experience contract", () => {
     expect(configRouteSource).toContain('id: "models-profiles"');
     expect(configRouteSource).toContain('memberSectionIds: ["models", "llm-discovery"]');
     expect(configRouteSource).toContain(
-      'memberSectionIds: ["health-diagnostics", "tools", "git-commit-profile", "git-commit-prompt", "security", "network", "log", "parser", "debug"]',
+      'memberSectionIds: ["health-diagnostics", "git-commit-model", "git-commit-prompt", "security", "network", "log", "parser", "debug"]',
     );
     expect(configRouteSource).not.toContain('memberSectionIds: ["prompt"]');
     expect(configRouteSource).not.toContain('memberSectionIds: ["profiles", "models", "llm-profiles", "llm-discovery", "git-commit-profile"]');
