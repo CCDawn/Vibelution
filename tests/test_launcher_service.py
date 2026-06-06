@@ -63,6 +63,23 @@ def test_standalone_launcher_app_serves_health_token_and_launcher_shell(monkeypa
     assert asset.text == "asset-ok"
 
 
+def test_standalone_launcher_app_allows_workbench_origin_for_control_preflight():
+    client = TestClient(launcher_app.create_launcher_app())
+
+    response = client.options(
+        "/api/launcher/restart",
+        headers={
+            "Origin": "http://127.0.0.1:8000",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "X-Vibelution-Control-Token",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "http://127.0.0.1:8000"
+    assert "X-Vibelution-Control-Token" in response.headers["access-control-allow-headers"]
+
+
 def test_standalone_launcher_app_reports_missing_shell_when_index_is_absent(monkeypatch, tmp_path):
     dist = tmp_path / "web" / "dist"
     dist.mkdir(parents=True)
