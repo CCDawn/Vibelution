@@ -413,8 +413,8 @@
                   <span>已新增只读状态聚合：输出 summary/stages/actionItems/candidateBreakdown/candidateGraphSummary/knowledgeBases/officialBoundary，并记录 knowledge_ingestion.status_viewed 运行事件计数。</span>
                 </div>
 <div class="service-row">
-                  <b>research_launchpad</b>
-                  <span>待实施：Teams 科研团队页的操作启动台，按状态推荐下一步，并调用现有 candidates/source、source-extraction、local-research-model/invoke、candidate-graph、steward ingestion 和 review API。</span>
+                  <b>data_processing_substrate</b>
+                  <span>待实施：通用数据处理底座，提供 DataPipelineProfile、DataProcessingRun、DataRecord、DataArtifact、ValidationReport、ReviewDecision、PublishTarget 和 ProcessingTrace；挑战杯通过 profile/adapter 复用。</span>
                 </div>
           </div>
         </div>
@@ -769,9 +769,9 @@
               <span>POST candidate-graph 会从当前未归档候选重建 candidate_only 图谱，输出 nodes/edges/missingLinks/unreviewedNodes/archivedCandidateCount/officialBoundary；断链时 qualityStatus=broken_links。</span>
             </div>
 <div class="blueprint-row compact">
-              <b>科研流程启动台计划</b>
-              <strong>docs/plans/2026-06-07-challenge-cup-research-launchpad.md</strong>
-              <span>下一步实现 Teams 页操作面板：注册来源、抽取 PDF、调用 qwen、刷新候选图、提交 steward pack、审核 pending proposal；不新增正式写入捷径。</span>
+              <b>通用数据处理底座计划</b>
+              <strong>docs/plans/2026-06-07-general-data-processing-substrate.md</strong>
+              <span>下一步先实现通用 data-processing API/存储/状态机/适配器/UI，再把挑战杯科研流程作为 challenge_cup_research_ingestion profile 接入；不把通用能力写死到科研或神经学场景。</span>
             </div>
 <div class="blueprint-row compact">
               <b>验证</b>
@@ -842,9 +842,9 @@
             </div>
 <div class="blueprint-row">
               <b>M6.2</b>
-              <strong>科研流程启动台</strong>
-              <span>计划在 Teams 科研团队页新增可操作启动台，把资料登记、PDF 抽取、qwen 草稿生成、候选图谱刷新、steward pack 提交和最小审核入口串成可点击流程。</span>
-              <span>只复用现有 workflow-orchestration / CandidateStore / local-research-model / Team Knowledge API；qwen 只写草稿，communicationBrief 仍只读，正式 KnowledgeItem/图谱同步仍必须经过审批门禁。</span>
+              <strong>通用数据处理底座</strong>
+              <span>计划新增 domain-neutral data-processing substrate，把 intake、extract、transform、validate、review、publish 做成通用 pipeline/profile/adapter；挑战杯科研只是其中一个 profile。</span>
+              <span>通用层不写 challenge cup、神经学、steward 或 qwen 专名；正式 Team Knowledge/RAG/图谱写入通过 publish adapter 和审批门禁完成。</span>
             </div>
       </div>
       <div class="tag-row">
