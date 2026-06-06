@@ -585,6 +585,103 @@ def validate_candidate_store(team_id: str) -> dict[str, Any]:
     }
 
 
+def get_knowledge_ingestion_status(team_id: str) -> dict[str, Any]:
+    """Return a read-only status view for the Challenge Cup knowledge ingestion funnel."""
+
+    normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
+    team_service.get_team(normalized_team_id)
+    with _WORKFLOW_LOCK:
+        workflow = _load_or_create_workflow(normalized_team_id)
+        candidate_store = _load_candidate_store(normalized_team_id)
+        candidates = [item for item in list(candidate_store.get("candidates") or []) if isinstance(item, dict)]
+        candidate_reports = [
+            {
+                "candidateId": str(candidate.get("candidateId") or ""),
+                "candidateType": str(candidate.get("candidateType") or ""),
+                "currentWorkflowNode": str(candidate.get("currentWorkflowNode") or ""),
+                "currentState": str(candidate.get("currentState") or ""),
+                "qualityStatus": str(candidate.get("qualityStatus") or ""),
+                "validation": validate_candidate_record(candidate),
+            }
+            for candidate in candidates
+        ]
+        active_graph_candidates = [
+            item
+            for item in candidates
+            if str(item.get("candidateType") or "") != "candidate_graph" and not _candidate_is_archived(item)
+        ]
+        archived_candidates = [
+            item
+            for item in candidates
+            if str(item.get("candidateType") or "") != "candidate_graph" and _candidate_is_archived(item)
+        ]
+        candidate_graph = _build_candidate_graph_payload(normalized_team_id, workflow["workflowId"], active_graph_candidates)
+        candidate_graph["summary"]["archivedCandidateCount"] = len(archived_candidates)
+
+    try:
+        knowledge_overview = team_knowledge_service.list_team_knowledge_bases(normalized_team_id)
+    except (team_knowledge_service.TeamKnowledgeError, team_knowledge_service.TeamKnowledgeNotFoundError) as exc:
+        raise TeamWorkflowOrchestrationError(str(exc)) from exc
+
+    candidate_summary = _knowledge_ingestion_candidate_summary(candidates, candidate_reports, candidate_graph)
+    knowledge_summary = _knowledge_ingestion_knowledge_summary(knowledge_overview)
+    stages = _knowledge_ingestion_stages(candidate_summary, knowledge_summary)
+    action_items = _knowledge_ingestion_action_items(candidates, candidate_reports, candidate_graph, candidate_summary, knowledge_summary)
+    overall_status = _knowledge_ingestion_overall_status(stages, action_items, candidate_summary, knowledge_summary)
+    summary = {
+        **candidate_summary,
+        **knowledge_summary,
+        "actionItemCount": len(action_items),
+    }
+    payload = {
+        "schemaVersion": SCHEMA_VERSION,
+        "teamId": normalized_team_id,
+        "workflowId": workflow["workflowId"],
+        "workflowKind": workflow["workflowKind"],
+        "status": overall_status,
+        "summary": summary,
+        "stages": stages,
+        "actionItems": action_items,
+        "candidateBreakdown": _candidate_breakdown(candidates),
+        "candidateGraphSummary": candidate_graph["summary"],
+        "officialBoundary": {
+            "candidateStoreOfficialState": "candidate_only_until_steward_approval",
+            "teamKnowledgeRequiresReview": True,
+            "candidateGraphWritesOfficialGraph": False,
+            "formalKnowledgeItemCreated": summary["formalKnowledgeItemCount"] > 0,
+            "writesOfficialKnowledge": summary["officialSyncedCandidateCount"] > 0,
+            "writesOfficialRag": False,
+            "writesOfficialGraph": summary["officialGraphSyncedCandidateCount"] > 0,
+            "graphStatus": "official_research_trace_synced"
+            if summary["officialGraphSyncedCandidateCount"] > 0
+            else "candidate_graph_preview_only",
+            "ragStatus": "queryable_via_reviewed_team_knowledge"
+            if summary["formalKnowledgeItemCount"] > 0
+            else "not_synced",
+        },
+        "knowledgeBases": _knowledge_ingestion_knowledge_bases(knowledge_overview),
+        "storage": {
+            "workflowPath": _relative_path(_workflow_path(normalized_team_id)),
+            "candidateStorePath": _relative_path(_candidate_store_path(normalized_team_id)),
+            "transferRecordsPath": _relative_path(_transfer_records_path(normalized_team_id)),
+        },
+        "updatedAt": utc_now_iso(),
+    }
+    _record_workflow_event(
+        "knowledge_ingestion.status_viewed",
+        normalized_team_id,
+        fields={
+            "workflowId": workflow["workflowId"],
+            "status": overall_status,
+            "candidateCount": summary["candidateCount"],
+            "pendingProposalCount": summary["pendingProposalCount"],
+            "formalKnowledgeItemCount": summary["formalKnowledgeItemCount"],
+            "actionItemCount": summary["actionItemCount"],
+        },
+    )
+    return payload
+
+
 def build_candidate_graph(team_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
     normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
     team_service.get_team(normalized_team_id)
@@ -1628,6 +1725,365 @@ def _source_manifest_label(candidate: dict[str, Any]) -> str:
         or _trim_text(candidate.get("candidateId"), max_length=128)
         or "source_manifest"
     )
+
+
+def _knowledge_ingestion_candidate_summary(
+    candidates: list[dict[str, Any]],
+    candidate_reports: list[dict[str, Any]],
+    candidate_graph: dict[str, Any],
+) -> dict[str, int]:
+    non_graph_candidates = [item for item in candidates if str(item.get("candidateType") or "") != "candidate_graph"]
+    source_candidates = [item for item in non_graph_candidates if str(item.get("candidateType") or "") == "source_manifest"]
+    source_ready = [
+        item
+        for item in source_candidates
+        if str(item.get("qualityStatus") or "") == "source_manifest_ready"
+        or str(item.get("currentState") or "") in {"source_registered", "screening_ready"}
+    ]
+    local_candidates = [
+        item
+        for item in non_graph_candidates
+        if str(item.get("candidateType") or "") in {"paper_note", "neuro_mechanism", "mechanism_mapping", "algorithm_hypothesis", "review_record"}
+    ]
+    steward_candidates = [
+        item
+        for item in non_graph_candidates
+        if str(item.get("currentWorkflowNode") or "") == "steward_ingestion"
+        or str((item.get("metadata") if isinstance(item.get("metadata"), dict) else {}).get("taskType") or "") == "steward_pack_draft"
+    ]
+    pending_ingestion = [item for item in non_graph_candidates if _candidate_knowledge_ingestion_status(item) == "pending_review"]
+    official_synced = [item for item in non_graph_candidates if str(item.get("currentState") or "") == "official_synced"]
+    official_graph_synced = [
+        item
+        for item in official_synced
+        if bool(
+            ((item.get("metadata") if isinstance(item.get("metadata"), dict) else {}).get("officialSyncRecord") or {}).get(
+                "writesOfficialGraph"
+            )
+        )
+    ]
+    archived_count = sum(1 for item in non_graph_candidates if _candidate_is_archived(item))
+    invalid_count = sum(1 for item in candidate_reports if not bool((item.get("validation") or {}).get("valid")))
+    return {
+        "candidateCount": len(non_graph_candidates),
+        "sourceCandidateCount": len(source_candidates),
+        "sourceReadyCount": len(source_ready),
+        "localDraftCandidateCount": len(local_candidates),
+        "stewardPackCandidateCount": len(steward_candidates),
+        "pendingKnowledgeReviewCandidateCount": len(pending_ingestion),
+        "officialSyncedCandidateCount": len(official_synced),
+        "officialGraphSyncedCandidateCount": len(official_graph_synced),
+        "archivedCandidateCount": archived_count,
+        "invalidCandidateCount": invalid_count,
+        "missingLinkCount": int((candidate_graph.get("summary") or {}).get("missingLinkCount") or 0),
+        "unreviewedNodeCount": int((candidate_graph.get("summary") or {}).get("unreviewedNodeCount") or 0),
+    }
+
+
+def _knowledge_ingestion_knowledge_summary(knowledge_overview: dict[str, Any]) -> dict[str, int]:
+    bases = [item for item in list(knowledge_overview.get("knowledgeBases") or []) if isinstance(item, dict)]
+    pending_proposals = 0
+    proposal_count = 0
+    formal_items = 0
+    source_artifacts = 0
+    for base in bases:
+        stats = base.get("stats") if isinstance(base.get("stats"), dict) else {}
+        pending_proposals += int(stats.get("pendingProposalCount") or 0)
+        proposal_count += int(stats.get("proposalCount") or 0)
+        formal_items += int(stats.get("itemCount") or 0)
+        source_artifacts += int(stats.get("sourceArtifactCount") or 0)
+    return {
+        "knowledgeBaseCount": len(bases),
+        "sourceArtifactCount": source_artifacts,
+        "proposalCount": proposal_count,
+        "pendingProposalCount": pending_proposals,
+        "formalKnowledgeItemCount": formal_items,
+    }
+
+
+def _knowledge_ingestion_stages(candidate_summary: dict[str, int], knowledge_summary: dict[str, int]) -> list[dict[str, Any]]:
+    return [
+        _knowledge_ingestion_stage(
+            "source_collection",
+            "知识搜集",
+            candidate_summary["sourceCandidateCount"],
+            ready=candidate_summary["sourceReadyCount"] > 0,
+            warning=candidate_summary["invalidCandidateCount"] > 0,
+            blocked=candidate_summary["sourceCandidateCount"] == 0,
+            next_action="register_candidate_source",
+            reason="至少需要一个可分析的来源候选。",
+        ),
+        _knowledge_ingestion_stage(
+            "candidate_screening",
+            "候选筛选",
+            candidate_summary["localDraftCandidateCount"],
+            ready=candidate_summary["localDraftCandidateCount"] > 0,
+            warning=candidate_summary["unreviewedNodeCount"] > 0 or candidate_summary["missingLinkCount"] > 0,
+            blocked=candidate_summary["sourceReadyCount"] == 0,
+            next_action="run_local_research_model_tasks",
+            reason="需要从来源生成 paper_note、机制、映射、算法假设或预审记录。",
+        ),
+        _knowledge_ingestion_stage(
+            "steward_pack",
+            "入库包生成",
+            candidate_summary["stewardPackCandidateCount"],
+            ready=candidate_summary["stewardPackCandidateCount"] > 0,
+            warning=candidate_summary["pendingKnowledgeReviewCandidateCount"] > 0,
+            blocked=candidate_summary["localDraftCandidateCount"] == 0,
+            next_action="draft_steward_pack",
+            reason="需要由知识治理边界生成 steward pack，不能直接写正式知识。",
+        ),
+        _knowledge_ingestion_stage(
+            "knowledge_review",
+            "共享记忆审核",
+            knowledge_summary["proposalCount"],
+            ready=knowledge_summary["formalKnowledgeItemCount"] > 0,
+            warning=knowledge_summary["pendingProposalCount"] > 0,
+            blocked=candidate_summary["stewardPackCandidateCount"] > 0 and knowledge_summary["proposalCount"] == 0,
+            next_action="submit_or_review_refinement_proposal",
+            reason="正式团队共享记忆必须经 refinement proposal 审核。",
+        ),
+        _knowledge_ingestion_stage(
+            "official_sync",
+            "图谱同步边界",
+            candidate_summary["officialSyncedCandidateCount"],
+            ready=candidate_summary["officialGraphSyncedCandidateCount"] > 0,
+            warning=knowledge_summary["formalKnowledgeItemCount"] > 0
+            and candidate_summary["officialGraphSyncedCandidateCount"] == 0,
+            blocked=knowledge_summary["formalKnowledgeItemCount"] == 0,
+            next_action="approve_steward_ingestion_gate",
+            reason="候选图只是预览，正式图谱同步只来自审核后的知识项元数据。",
+        ),
+    ]
+
+
+def _knowledge_ingestion_stage(
+    stage_id: str,
+    label: str,
+    count: int,
+    *,
+    ready: bool,
+    warning: bool,
+    blocked: bool,
+    next_action: str,
+    reason: str,
+) -> dict[str, Any]:
+    if blocked:
+        status_value = "blocked"
+    elif ready and warning:
+        status_value = "needs_review"
+    elif ready:
+        status_value = "ready"
+    elif warning:
+        status_value = "needs_review"
+    else:
+        status_value = "pending"
+    return {
+        "stageId": stage_id,
+        "label": label,
+        "status": status_value,
+        "count": count,
+        "nextAction": next_action if status_value != "ready" else "",
+        "reason": "" if status_value == "ready" else reason,
+    }
+
+
+def _knowledge_ingestion_action_items(
+    candidates: list[dict[str, Any]],
+    candidate_reports: list[dict[str, Any]],
+    candidate_graph: dict[str, Any],
+    candidate_summary: dict[str, int],
+    knowledge_summary: dict[str, int],
+) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    if candidate_summary["sourceCandidateCount"] == 0:
+        items.append(
+            _knowledge_ingestion_action_item(
+                "source_collection_empty",
+                "blocked",
+                "知识搜集还没有候选来源。",
+                "register_candidate_source",
+                "knowledge_collection",
+            )
+        )
+    for report in candidate_reports:
+        validation = report.get("validation") if isinstance(report.get("validation"), dict) else {}
+        if bool(validation.get("valid")):
+            continue
+        items.append(
+            _knowledge_ingestion_action_item(
+                "candidate_validation_failed",
+                "needs_revision",
+                f"{report.get('candidateType') or 'candidate'} has validation issues.",
+                "repair_candidate_record",
+                str(report.get("currentWorkflowNode") or ""),
+                candidateId=str(report.get("candidateId") or ""),
+                issueCount=len(validation.get("issues") or []) if isinstance(validation.get("issues"), list) else 0,
+            )
+        )
+    if candidate_summary["missingLinkCount"] > 0:
+        items.append(
+            _knowledge_ingestion_action_item(
+                "candidate_graph_missing_links",
+                "needs_evidence",
+                "候选图存在缺失引用，进入正式入库前需要补齐来源链。",
+                "repair_candidate_graph_links",
+                "candidate_graph",
+                issueCount=candidate_summary["missingLinkCount"],
+            )
+        )
+    if candidate_summary["unreviewedNodeCount"] > 0:
+        items.append(
+            _knowledge_ingestion_action_item(
+                "candidate_graph_unreviewed_nodes",
+                "needs_review",
+                "候选图仍有需要预审或正式审核的节点。",
+                "run_review_prefilter",
+                "research_review",
+                issueCount=candidate_summary["unreviewedNodeCount"],
+            )
+        )
+    pending_candidates = [
+        item
+        for item in candidates
+        if str(item.get("candidateType") or "") != "candidate_graph" and _candidate_knowledge_ingestion_status(item) == "pending_review"
+    ]
+    for candidate in pending_candidates[:12]:
+        metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {}
+        ingestion = metadata.get("knowledgeIngestion") if isinstance(metadata.get("knowledgeIngestion"), dict) else {}
+        items.append(
+            _knowledge_ingestion_action_item(
+                "knowledge_proposal_pending_review",
+                "needs_review",
+                "入库包已经提交，但共享记忆仍在审核队列。",
+                "review_refinement_proposal",
+                "steward_ingestion",
+                candidateId=str(candidate.get("candidateId") or ""),
+                proposalId=str(ingestion.get("proposalId") or ""),
+                knowledgeBaseId=str(ingestion.get("knowledgeBaseId") or ""),
+            )
+        )
+    if candidate_summary["stewardPackCandidateCount"] > 0 and knowledge_summary["proposalCount"] == 0:
+        items.append(
+            _knowledge_ingestion_action_item(
+                "steward_pack_not_submitted",
+                "pending",
+                "已有 steward pack 候选，但尚未进入团队知识库 proposal 队列。",
+                "submit_steward_pack_to_knowledge_ingestion",
+                "steward_ingestion",
+            )
+        )
+    if knowledge_summary["formalKnowledgeItemCount"] > 0 and candidate_summary["officialGraphSyncedCandidateCount"] == 0:
+        items.append(
+            _knowledge_ingestion_action_item(
+                "formal_knowledge_without_official_graph",
+                "needs_review",
+                "已有正式知识项，但科研图谱同步记录尚未完成。",
+                "inspect_official_research_graph_metadata",
+                "official_sync",
+            )
+        )
+    if not items and candidate_summary["officialGraphSyncedCandidateCount"] > 0:
+        items.append(
+            _knowledge_ingestion_action_item(
+                "knowledge_ingestion_operational",
+                "ready",
+                "知识搜集、筛选、共享记忆和图谱同步链路已跑通。",
+                "",
+                "official_sync",
+            )
+        )
+    return items[:24]
+
+
+def _knowledge_ingestion_action_item(
+    code: str,
+    severity: str,
+    message: str,
+    next_action: str,
+    workflow_node: str,
+    **extra: Any,
+) -> dict[str, Any]:
+    payload = {
+        "code": code,
+        "severity": severity,
+        "message": message,
+        "nextAction": next_action,
+        "workflowNode": workflow_node,
+    }
+    for key, value in extra.items():
+        if value not in ("", None, [], {}):
+            payload[key] = value
+    return payload
+
+
+def _knowledge_ingestion_overall_status(
+    stages: list[dict[str, Any]],
+    action_items: list[dict[str, Any]],
+    candidate_summary: dict[str, int],
+    knowledge_summary: dict[str, int],
+) -> str:
+    severities = {str(item.get("severity") or "") for item in action_items}
+    if "blocked" in severities:
+        return "blocked"
+    if "needs_revision" in severities:
+        return "needs_revision"
+    if "needs_review" in severities or "needs_evidence" in severities or knowledge_summary["pendingProposalCount"] > 0:
+        return "needs_review"
+    if candidate_summary["officialGraphSyncedCandidateCount"] > 0:
+        return "ready"
+    if candidate_summary["candidateCount"] > 0:
+        return "in_progress"
+    return "empty"
+
+
+def _candidate_breakdown(candidates: list[dict[str, Any]]) -> dict[str, Any]:
+    by_type: dict[str, int] = {}
+    by_state: dict[str, int] = {}
+    by_quality: dict[str, int] = {}
+    for candidate in candidates:
+        if str(candidate.get("candidateType") or "") == "candidate_graph":
+            continue
+        candidate_type = str(candidate.get("candidateType") or "unknown")
+        state = str(candidate.get("currentState") or "unknown")
+        quality = str(candidate.get("qualityStatus") or "unknown")
+        by_type[candidate_type] = by_type.get(candidate_type, 0) + 1
+        by_state[state] = by_state.get(state, 0) + 1
+        by_quality[quality] = by_quality.get(quality, 0) + 1
+    return {
+        "byType": dict(sorted(by_type.items())),
+        "byState": dict(sorted(by_state.items())),
+        "byQualityStatus": dict(sorted(by_quality.items())),
+    }
+
+
+def _knowledge_ingestion_knowledge_bases(knowledge_overview: dict[str, Any]) -> list[dict[str, Any]]:
+    bases: list[dict[str, Any]] = []
+    for base in list(knowledge_overview.get("knowledgeBases") or []):
+        if not isinstance(base, dict):
+            continue
+        stats = base.get("stats") if isinstance(base.get("stats"), dict) else {}
+        bases.append(
+            {
+                "knowledgeBaseId": str(base.get("knowledgeBaseId") or ""),
+                "name": str(base.get("name") or ""),
+                "status": str(base.get("status") or ""),
+                "stats": {
+                    "sourceArtifactCount": int(stats.get("sourceArtifactCount") or 0),
+                    "proposalCount": int(stats.get("proposalCount") or 0),
+                    "pendingProposalCount": int(stats.get("pendingProposalCount") or 0),
+                    "itemCount": int(stats.get("itemCount") or 0),
+                    "batchCount": int(stats.get("batchCount") or 0),
+                },
+            }
+        )
+    return bases
+
+
+def _candidate_knowledge_ingestion_status(candidate: dict[str, Any]) -> str:
+    metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {}
+    ingestion = metadata.get("knowledgeIngestion") if isinstance(metadata.get("knowledgeIngestion"), dict) else {}
+    return str(ingestion.get("status") or "")
 
 
 def _source_manifest_source_ref(candidate: dict[str, Any]) -> dict[str, str]:

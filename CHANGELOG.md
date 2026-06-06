@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.39 - 2026-06-06
+
+- Added a read-only Challenge Cup knowledge-ingestion status API for Team workflows, summarizing CandidateStore progress, candidate validation, candidate graph health, Team Knowledge proposal/item counts, and official sync boundaries.
+- Returned staged action items for source collection, candidate screening, steward-pack review, and official graph sync without creating KnowledgeItems, writing RAG content, or generating new candidate graph snapshots.
+- Updated the Challenge Cup flow HTML to mark the knowledge-ingestion status view as landed and document the pending-review versus official-sync boundary.
+
 ## 0.10.38 - 2026-06-06
 
 - Split prompt-cache usage observation into cache read hits, cache writes, and uncached input tokens across LLM logs, session detail APIs, and the Chat/Coding status UI.
