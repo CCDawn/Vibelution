@@ -296,6 +296,9 @@ capability_status = "supported"
 capability_source = "runtime_probe"
 capability_checked_at = "2026-05-31T17:00:47Z"
 
+[llm.model_library.generated_xiaomi_mimo_v2_5_cdff497b2d9b.prompt_cache]
+mode = "automatic"
+
 [llm.model_library.generated_xiaomi_mimo_v2_5_cdff497b2d9b.provider]
 kind = "xiaomi"
 api_key_env = "MIMO_API_KEY"
