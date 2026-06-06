@@ -34,6 +34,7 @@ export const queryKeys = {
   teamWorkflow: (id: string) => ["teams", id, "workflow-orchestration"] as const,
   teamWorkflowCandidates: (id: string, limit = 8) => ["teams", id, "workflow-orchestration", "candidates", limit] as const,
   teamWorkflowCandidateGraph: (id: string) => ["teams", id, "workflow-orchestration", "candidate-graph"] as const,
+  teamWorkflowKnowledgeIngestionStatus: (id: string) => ["teams", id, "workflow-orchestration", "knowledge-ingestion", "status"] as const,
   fileTree: () => ["files", "tree"] as const,
   fileContent: (path: string) => ["files", "content", path] as const,
   memoryOverview: () => ["memory", "overview"] as const,

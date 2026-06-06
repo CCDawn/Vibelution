@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.40 - 2026-06-06
+
+- Added a Teams workspace knowledge-ingestion status panel for the Challenge Cup research team, showing staged source/candidate/steward/review/official-sync progress from the read-only status API.
+- Surfaced action items and official Knowledge/RAG/Graph boundaries in the research workflow panel without adding approval or write controls.
+- Updated the Challenge Cup flow HTML to mark the Teams status funnel as the visible coordination entry for the knowledge ingestion process.
+
 ## 0.10.39 - 2026-06-06
 
 - Added a read-only Challenge Cup knowledge-ingestion status API for Team workflows, summarizing CandidateStore progress, candidate validation, candidate graph health, Team Knowledge proposal/item counts, and official sync boundaries.

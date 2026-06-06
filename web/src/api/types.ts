@@ -3012,6 +3012,86 @@ export type TeamWorkflowCandidateGraphBuildPayload = {
   workflow: TeamWorkflowOrchestration;
 };
 
+export type TeamWorkflowKnowledgeIngestionStage = {
+  stageId: string;
+  label: string;
+  status: "blocked" | "needs_review" | "ready" | "pending" | string;
+  count: number;
+  nextAction: string;
+  reason: string;
+};
+
+export type TeamWorkflowKnowledgeIngestionActionItem = {
+  code: string;
+  severity: "blocked" | "needs_revision" | "needs_evidence" | "needs_review" | "pending" | "ready" | string;
+  message: string;
+  nextAction: string;
+  workflowNode: string;
+  candidateId?: string;
+  issueCount?: number;
+  proposalId?: string;
+  knowledgeBaseId?: string;
+};
+
+export type TeamWorkflowKnowledgeIngestionStatus = {
+  schemaVersion: number;
+  teamId: string;
+  workflowId: string;
+  workflowKind: "challenge_cup_research" | string;
+  status: "empty" | "blocked" | "needs_revision" | "needs_review" | "in_progress" | "ready" | string;
+  summary: {
+    candidateCount: number;
+    sourceCandidateCount: number;
+    sourceReadyCount: number;
+    localDraftCandidateCount: number;
+    stewardPackCandidateCount: number;
+    pendingKnowledgeReviewCandidateCount: number;
+    officialSyncedCandidateCount: number;
+    officialGraphSyncedCandidateCount: number;
+    archivedCandidateCount: number;
+    invalidCandidateCount: number;
+    missingLinkCount: number;
+    unreviewedNodeCount: number;
+    knowledgeBaseCount: number;
+    sourceArtifactCount: number;
+    proposalCount: number;
+    pendingProposalCount: number;
+    formalKnowledgeItemCount: number;
+    actionItemCount: number;
+  };
+  stages: TeamWorkflowKnowledgeIngestionStage[];
+  actionItems: TeamWorkflowKnowledgeIngestionActionItem[];
+  candidateBreakdown: {
+    byType: Record<string, number>;
+    byState: Record<string, number>;
+    byQualityStatus: Record<string, number>;
+  };
+  candidateGraphSummary: TeamWorkflowCandidateGraphPayload["summary"];
+  officialBoundary: {
+    candidateStoreOfficialState: string;
+    teamKnowledgeRequiresReview: boolean;
+    candidateGraphWritesOfficialGraph: boolean;
+    formalKnowledgeItemCreated: boolean;
+    writesOfficialKnowledge: boolean;
+    writesOfficialRag: boolean;
+    writesOfficialGraph: boolean;
+    graphStatus: string;
+    ragStatus: string;
+  };
+  knowledgeBases: Array<{
+    knowledgeBaseId: string;
+    name: string;
+    status: string;
+    stats: TeamKnowledgeBase["stats"];
+  }>;
+  storage: {
+    workflowPath: string;
+    candidateStorePath: string;
+    transferRecordsPath: string;
+  };
+  updatedAt: string;
+};
+
 export type ConversationSummary = {
   conversationId: string;
   type: "direct_agent" | "group_room" | string;
