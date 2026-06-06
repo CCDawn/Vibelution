@@ -673,7 +673,7 @@ def test_save_team_canvas_rejects_missing_edge_endpoint(tmp_path, monkeypatch):
 def test_agent_config_workspace_includes_team_reference(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     monkeypatch.setattr(agent_config_workspace_service, "_safe_prompt_workspace", lambda: {"templates": []})
-    monkeypatch.setattr(agent_config_workspace_service, "_safe_config_workspace", lambda: {"profileCards": []})
+    monkeypatch.setattr(agent_config_workspace_service, "_safe_config_workspace", lambda: {"modelOptions": []})
     monkeypatch.setattr(agent_config_workspace_service, "_safe_chat_rooms", lambda: [])
     agent = agent_directory_service.create_agent_instance(display_name="Alpha", direct_session_id="session-alpha")
     team_service.create_team(name="Reference Team", members=[{"agentId": agent["agentId"], "role": "owner"}])

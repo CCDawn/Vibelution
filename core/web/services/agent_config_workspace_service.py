@@ -944,7 +944,7 @@ def _safe_config_workspace() -> dict[str, Any]:
         return config_service.get_config_workspace()
     except Exception as exc:
         _record_workspace_error("agent_config.models.load_failed", exc)
-        return {"profileCards": [], "modelOptions": []}
+        return {"modelOptions": []}
 
 
 def _safe_chat_rooms() -> list[dict[str, Any]]:

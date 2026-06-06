@@ -169,15 +169,32 @@ export function renameSessionInSummaries(
     return sessions;
   }
 
-  return sessions.map((session) =>
-    session.id === sessionId
-      ? {
-          ...session,
-          title,
-          updatedAt,
-        }
-      : session,
-  );
+  return sessions.map((session) => {
+    if (session.id !== sessionId) {
+      return session;
+    }
+    if (isRootAgentSession(session)) {
+      return {
+        ...session,
+        title,
+        agentDisplayName: title,
+        updatedAt,
+      };
+    }
+    if (session.sessionKind === "child") {
+      return {
+        ...session,
+        title,
+        taskTitle: title,
+        updatedAt,
+      };
+    }
+    return {
+      ...session,
+      title,
+      updatedAt,
+    };
+  });
 }
 
 export function renameSessionDetail(
@@ -190,11 +207,31 @@ export function renameSessionDetail(
     return detail;
   }
 
+  if (isRootAgentSession(detail)) {
+    return {
+      ...detail,
+      title,
+      agentDisplayName: title,
+      updatedAt,
+    };
+  }
+  if (detail.sessionKind === "child") {
+    return {
+      ...detail,
+      title,
+      taskTitle: title,
+      updatedAt,
+    };
+  }
   return {
     ...detail,
     title,
     updatedAt,
   };
+}
+
+function isRootAgentSession(session: Pick<SessionSummary, "agentId" | "sessionKind">): boolean {
+  return Boolean(String(session.agentId ?? "").trim()) && String(session.sessionKind ?? "main").trim() !== "child";
 }
 
 export function markSessionSummaryRunning(

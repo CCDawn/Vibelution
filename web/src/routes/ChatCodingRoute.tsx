@@ -757,7 +757,7 @@ function sessionToConversationSummary(session: SessionSummary): ConversationSumm
   return {
     conversationId: session.id,
     type: "direct_agent",
-    title: String(session.title || session.agentDisplayName || session.id).trim(),
+    title: String(session.agentDisplayName || session.title || session.id).trim(),
     agentId: session.agentId,
     agentCode: session.agentCode,
     agentDisplayName: session.agentDisplayName,
@@ -788,6 +788,10 @@ function isVisibleDirectSession(session: SessionSummary | undefined | null) {
 
 function isChildSession(session: SessionSummary | undefined | null) {
   return String(session?.sessionKind ?? "").trim() === "child";
+}
+
+function isAgentRootSession(session: SessionSummary | undefined | null) {
+  return Boolean(String(session?.agentId ?? "").trim()) && !isChildSession(session);
 }
 
 function rootSessionIdFor(session: SessionSummary | undefined | null) {
@@ -872,6 +876,7 @@ function renameSessionInConversations(
   sessionId: string,
   title: string,
   updatedAt: string,
+  session?: SessionSummary | SessionDetail,
 ): ConversationSummary[] | undefined {
   if (!conversations || !sessionId) {
     return conversations;
@@ -881,6 +886,14 @@ function renameSessionInConversations(
     const directSessionId = String(conversation.directSessionId || conversation.conversationId || "").trim();
     if (conversation.type !== "direct_agent" || directSessionId !== sessionId) {
       return conversation;
+    }
+    if (session && isAgentRootSession(session)) {
+      return {
+        ...conversation,
+        title,
+        agentDisplayName: title,
+        updatedAt,
+      };
     }
     return {
       ...conversation,
@@ -1955,6 +1968,7 @@ export function ChatCodingRoute() {
       const previousSessions = queryClient.getQueryData<SessionSummary[]>(queryKeys.sessions());
       const previousConversations = queryClient.getQueryData<ConversationSummary[]>(queryKeys.conversations());
       const previousDetail = queryClient.getQueryData<SessionDetail>(queryKeys.session(variables.sessionId));
+      const targetSession = previousDetail ?? previousSessions?.find((session) => session.id === variables.sessionId);
       setEditingSessionId(null);
       setEditingSessionTitle("");
       setSessionComposerErrors((current) => ({
@@ -1965,7 +1979,7 @@ export function ChatCodingRoute() {
         renameSessionInSummaries(sessions, variables.sessionId, variables.title, updatedAt),
       );
       queryClient.setQueryData<ConversationSummary[]>(queryKeys.conversations(), (conversations) =>
-        renameSessionInConversations(conversations, variables.sessionId, variables.title, updatedAt),
+        renameSessionInConversations(conversations, variables.sessionId, variables.title, updatedAt, targetSession),
       );
       queryClient.setQueryData<SessionDetail>(queryKeys.session(variables.sessionId), (detail) =>
         renameSessionDetail(detail, variables.sessionId, variables.title, updatedAt),
@@ -1983,11 +1997,15 @@ export function ChatCodingRoute() {
         renameSessionInSummaries(sessions, variables.sessionId, confirmedTitle, confirmedUpdatedAt),
       );
       queryClient.setQueryData<ConversationSummary[]>(queryKeys.conversations(), (conversations) =>
-        renameSessionInConversations(conversations, variables.sessionId, confirmedTitle, confirmedUpdatedAt),
+        renameSessionInConversations(conversations, variables.sessionId, confirmedTitle, confirmedUpdatedAt, nextDetail),
       );
       queryClient.setQueryData<SessionDetail>(queryKeys.session(variables.sessionId), (detail) =>
         renameSessionDetail(detail, variables.sessionId, confirmedTitle, confirmedUpdatedAt),
       );
+      queryClient.setQueryData<SessionDetail>(queryKeys.session(variables.sessionId), (detail) => ({
+        ...(detail ?? nextDetail),
+        ...nextDetail,
+      }));
     },
     onError: (error, variables, context) => {
       if (context?.previousSessions) {
@@ -2759,7 +2777,7 @@ export function ChatCodingRoute() {
         ? (lang === "zh" ? "Agent 通知流" : "Agent notice stream")
         : activeGroupRoom?.title ?? (lang === "zh" ? "群聊加载中" : "Loading group")
     )
-    : detail?.title ?? directSessionActiveSummary?.title ?? t("loadingSession");
+    : detail?.agentDisplayName ?? detail?.title ?? directSessionActiveSummary?.agentDisplayName ?? directSessionActiveSummary?.title ?? t("loadingSession");
   const activeSurfaceStatus = groupPanelActive
     ? (
       projectBusActive
@@ -4125,7 +4143,7 @@ export function ChatCodingRoute() {
       }));
       return;
     }
-    const sessionTitle = (session.title || session.agentDisplayName || session.id).trim();
+    const sessionTitle = (session.agentDisplayName || session.title || session.id).trim();
     const sessionConfirmMessage = t("deleteSessionConfirm").replace("{title}", sessionTitle || session.id);
     if (!window.confirm(sessionConfirmMessage)) {
       return;
@@ -4159,7 +4177,13 @@ export function ChatCodingRoute() {
   function beginRenameSession(session: SessionSummary) {
     setSessionContextMenu(null);
     setEditingSessionId(session.id);
-    setEditingSessionTitle(session.title);
+    setEditingSessionTitle(
+      isAgentRootSession(session)
+        ? (session.agentDisplayName || session.title)
+        : isChildSession(session)
+          ? (session.taskTitle || session.resultCard?.title || session.title)
+          : session.title,
+    );
     setSessionComposerErrors((current) => ({
       ...current,
       [session.id]: "",
@@ -4189,11 +4213,16 @@ export function ChatCodingRoute() {
     if (!title) {
       setSessionComposerErrors((current) => ({
         ...current,
-        [session.id]: t("renameSessionEmpty"),
+        [session.id]: t(isAgentRootSession(session) ? "renameAgentEmpty" : isChildSession(session) ? "renameTaskEmpty" : "renameSessionEmpty"),
       }));
       return;
     }
-    if (title === session.title) {
+    const currentTitle = isAgentRootSession(session)
+      ? (session.agentDisplayName || session.title)
+      : isChildSession(session)
+        ? (session.taskTitle || session.resultCard?.title || session.title)
+        : session.title;
+    if (title === currentTitle) {
       cancelRenameSession();
       return;
     }
@@ -4883,7 +4912,7 @@ export function ChatCodingRoute() {
                 const sessionDisplay = sessionAgentDisplayInfo(session, sessionAgent, lang);
                 const sessionStatus = sessionIsChild ? (session.childStatus || session.currentPhase || session.status) : session.status;
                 const sessionTitle =
-                  (sessionIsChild ? (session.taskTitle || session.resultCard?.title || session.title) : session.title)
+                  (sessionIsChild ? (session.taskTitle || session.resultCard?.title || session.title) : sessionDisplay.name)
                   || sessionDisplay.name
                   || t("agentSession");
                 const sessionSummary =
@@ -4933,7 +4962,7 @@ export function ChatCodingRoute() {
                               cancelRenameSession();
                             }
                           }}
-                          aria-label={t("renameSession")}
+                          aria-label={t(sessionIsChild ? "renameTask" : "renameAgent")}
                         />
                       </span>
                       <span className={styles.agentSessionTabEditActions}>
@@ -4942,8 +4971,8 @@ export function ChatCodingRoute() {
                           className={styles.agentSessionTabEditButton}
                           onClick={() => submitRenameSession(session)}
                           disabled={renamePending}
-                          title={t("saveSessionName")}
-                          aria-label={`${t("saveSessionName")} ${session.title}`}
+                          title={t(sessionIsChild ? "saveTaskName" : "saveAgentName")}
+                          aria-label={`${t(sessionIsChild ? "saveTaskName" : "saveAgentName")} ${sessionTitle}`}
                         >
                           <Check size={13} />
                         </button>
@@ -6081,7 +6110,7 @@ export function ChatCodingRoute() {
                 const sessionIsChild = isChildSession(session);
                 const sessionStatus = sessionIsChild ? (session.childStatus || session.currentPhase || session.status) : session.status;
                 const sessionTitle =
-                  (sessionIsChild ? (session.taskTitle || session.resultCard?.title || session.title) : session.title)
+                  (sessionIsChild ? (session.taskTitle || session.resultCard?.title || session.title) : sessionDisplay.name)
                   || sessionDisplay.name;
                 const sessionSummary =
                   (sessionIsChild ? (session.resultCard?.summary || session.taskSummary) : session.taskSummary)
@@ -6124,7 +6153,7 @@ export function ChatCodingRoute() {
                                   cancelRenameSession();
                                 }
                               }}
-                              aria-label={t("renameSession")}
+                              aria-label={t(sessionIsChild ? "renameTask" : isAgentRootSession(session) ? "renameAgent" : "renameSession")}
                             />
                             {!groupPanelActive && activeSessionId === session.id ? (
                               <span className={styles.sessionCurrentBadge}>{t("currentSession")}</span>
@@ -6213,8 +6242,8 @@ export function ChatCodingRoute() {
                           className={styles.sessionIconButton}
                           onClick={() => submitRenameSession(session)}
                           disabled={renamePending}
-                          title={t("saveSessionName")}
-                          aria-label={`${t("saveSessionName")} ${session.title}`}
+                          title={t(sessionIsChild ? "saveTaskName" : isAgentRootSession(session) ? "saveAgentName" : "saveSessionName")}
+                          aria-label={`${t(sessionIsChild ? "saveTaskName" : isAgentRootSession(session) ? "saveAgentName" : "saveSessionName")} ${sessionTitle}`}
                         >
                           <Check size={15} />
                         </button>

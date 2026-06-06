@@ -220,6 +220,74 @@ describe("chatSessionState", () => {
     expect(untouched?.title).toBe("其他会话");
   });
 
+  it("renames root Agent identity during optimistic title updates", () => {
+    const renamed = renameSessionInSummaries(
+      [
+        makeSummary({
+          agentId: "agent-001",
+          agentDisplayName: "旧 Agent 名",
+          title: "旧任务名",
+          sessionKind: "main",
+        }),
+      ],
+      "session-live",
+      "新 Agent 名",
+      "2026-05-22T10:02:00Z",
+    );
+    const detail = renameSessionDetail(
+      makeDetail({
+        agentId: "agent-001",
+        agentDisplayName: "旧 Agent 名",
+        title: "旧任务名",
+        sessionKind: "main",
+      }),
+      "session-live",
+      "新 Agent 名",
+      "2026-05-22T10:02:00Z",
+    );
+
+    expect(renamed?.[0].title).toBe("新 Agent 名");
+    expect(renamed?.[0].agentDisplayName).toBe("新 Agent 名");
+    expect(detail?.title).toBe("新 Agent 名");
+    expect(detail?.agentDisplayName).toBe("新 Agent 名");
+  });
+
+  it("renames child task titles without changing Agent identity during optimistic updates", () => {
+    const renamed = renameSessionInSummaries(
+      [
+        makeSummary({
+          agentId: "agent-001",
+          agentDisplayName: "根 Agent 名",
+          title: "旧子任务",
+          taskTitle: "旧子任务",
+          sessionKind: "child",
+        }),
+      ],
+      "session-live",
+      "新子任务",
+      "2026-05-22T10:02:00Z",
+    );
+    const detail = renameSessionDetail(
+      makeDetail({
+        agentId: "agent-001",
+        agentDisplayName: "根 Agent 名",
+        title: "旧子任务",
+        taskTitle: "旧子任务",
+        sessionKind: "child",
+      }),
+      "session-live",
+      "新子任务",
+      "2026-05-22T10:02:00Z",
+    );
+
+    expect(renamed?.[0].title).toBe("新子任务");
+    expect(renamed?.[0].taskTitle).toBe("新子任务");
+    expect(renamed?.[0].agentDisplayName).toBe("根 Agent 名");
+    expect(detail?.title).toBe("新子任务");
+    expect(detail?.taskTitle).toBe("新子任务");
+    expect(detail?.agentDisplayName).toBe("根 Agent 名");
+  });
+
   it("marks the active summary as running during submit before list refetch finishes", () => {
     const marked = markSessionSummaryRunning([makeSummary()], "session-live");
 
