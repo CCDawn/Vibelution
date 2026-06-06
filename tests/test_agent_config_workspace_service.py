@@ -933,6 +933,57 @@ def test_agent_delete_api_archives_and_cleans_bindings_and_rooms(tmp_path, monke
     assert alpha["agentId"] not in groups["group_chat"]["agentIds"]
 
 
+def test_agent_delete_api_uses_lightweight_archive_cleanup(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
+    alpha = session_service.create_chat_session(title="Alpha Agent")
+    beta = session_service.create_chat_session(title="Beta Agent")
+    room = chat_room_service.create_chat_room(
+        title="轻量归档群聊",
+        participant_agent_ids=[alpha["agentId"], beta["agentId"]],
+    )
+    mode_cleanup_calls: list[dict[str, object]] = []
+    room_cleanup_calls: list[dict[str, object]] = []
+    original_mode_cleanup = agent_mode_binding_service.remove_agent_from_mode_bindings
+    original_room_cleanup = agents_route.remove_agent_from_chat_rooms
+
+    def tracking_mode_cleanup(agent_id: str, **kwargs):
+        mode_cleanup_calls.append({"agentId": agent_id, **kwargs})
+        return original_mode_cleanup(agent_id, **kwargs)
+
+    def tracking_room_cleanup(agent_id: str, **kwargs):
+        room_cleanup_calls.append({"agentId": agent_id, **kwargs})
+        return original_room_cleanup(agent_id, **kwargs)
+
+    monkeypatch.setattr(agents_route, "remove_agent_from_mode_bindings", tracking_mode_cleanup)
+    monkeypatch.setattr(agent_mode_binding_service, "remove_agent_from_mode_bindings", tracking_mode_cleanup)
+    monkeypatch.setattr(agents_route, "remove_agent_from_chat_rooms", tracking_room_cleanup)
+    monkeypatch.setattr(
+        chat_room_service.session_service,
+        "list_sessions",
+        lambda: (_ for _ in ()).throw(AssertionError("Agent archive cleanup should not scan all sessions.")),
+    )
+    monkeypatch.setattr(
+        chat_room_service,
+        "list_chat_rooms",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("Agent archive cleanup should not reload chat rooms.")),
+    )
+
+    response = client.delete(f"/api/agents/{alpha['agentId']}")
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["archiveSummary"]["removedFromRoomIds"] == [room["roomId"]]
+    assert mode_cleanup_calls == [{"agentId": alpha["agentId"], "include_payload": False}]
+    assert room_cleanup_calls == [
+        {
+            "agentId": alpha["agentId"],
+            "include_chat_rooms": False,
+            "repair_participants": False,
+        }
+    ]
+
+
 def test_agent_delete_api_does_not_reactivate_archived_supervised_non_core_fixed_role(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)

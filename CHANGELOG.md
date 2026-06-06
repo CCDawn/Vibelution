@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.34 - 2026-06-06
+
+- Sped up Agent Center archive and purge by using lightweight room and mode-binding cleanup paths instead of returning full workspace payloads during the mutation.
+- Avoided duplicate mode-binding cleanup on the Agent archive API while preserving cleanup for direct service callers such as team cascade archive.
+- Added archive-stage runtime scene timings and kept the Agent Center cache patched locally instead of immediately refetching the heavy config workspace.
+
 ## 0.10.33 - 2026-06-06
 
 - Removed legacy `profileCards` and `profileCount` from the config workspace API contract, keeping Model Library access through `modelOptions`.

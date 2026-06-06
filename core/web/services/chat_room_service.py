@@ -360,7 +360,13 @@ def update_agent_chat_room_membership(agent_id: str, room_ids: list[str] | None)
     }
 
 
-def remove_agent_from_chat_rooms(agent_id: str, *, allow_empty_rooms: bool = False) -> dict[str, Any]:
+def remove_agent_from_chat_rooms(
+    agent_id: str,
+    *,
+    allow_empty_rooms: bool = False,
+    include_chat_rooms: bool = True,
+    repair_participants: bool = True,
+) -> dict[str, Any]:
     """Remove one Agent from all chat room participant lists before safe archival."""
 
     lang = get_web_language()
@@ -374,9 +380,10 @@ def remove_agent_from_chat_rooms(agent_id: str, *, allow_empty_rooms: bool = Fal
 
     changed_rooms: list[dict[str, Any]] = []
     now = utc_now_iso()
+    session_summaries = _session_summary_index() if repair_participants or include_chat_rooms else None
     with _CHAT_ROOM_LOCK:
         state = _store().load()
-        if _repair_room_participants_in_state(state, session_summaries=_session_summary_index()):
+        if repair_participants and _repair_room_participants_in_state(state, session_summaries=session_summaries):
             _store().save(state)
             state = _store().load()
         rooms = [item for item in list(state.get("rooms") or []) if isinstance(item, dict)]
@@ -414,11 +421,13 @@ def remove_agent_from_chat_rooms(agent_id: str, *, allow_empty_rooms: bool = Fal
                 "participantCount": len(room.get("participants") or []),
             },
         )
-    return {
+    result = {
         "agentId": normalized_agent_id,
         "changedRoomIds": [str(room.get("roomId") or "").strip() for room in changed_rooms],
-        "chatRooms": list_chat_rooms(),
     }
+    if include_chat_rooms:
+        result["chatRooms"] = list_chat_rooms(session_summaries=session_summaries)
+    return result
 
 
 def delete_chat_room(room_id: str) -> dict[str, Any]:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from time import perf_counter
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, status
@@ -68,6 +69,44 @@ from core.web.services.supervised_agent_service import (
 
 
 router = APIRouter(tags=["agents"])
+
+
+def _elapsed_ms(started_at: float) -> float:
+    return round((perf_counter() - started_at) * 1000, 1)
+
+
+def _record_agent_archive_route_event(
+    event_code: str,
+    agent_id: str,
+    *,
+    outcome: str,
+    timings: dict[str, float] | None = None,
+    room_cleanup: dict[str, Any] | None = None,
+    mode_cleanup: dict[str, Any] | None = None,
+    level: str = "info",
+    error: Exception | None = None,
+) -> None:
+    try:
+        record_runtime_scene_event(
+            "agent_directory",
+            "archive",
+            event_code,
+            message=event_code,
+            level=level,
+            outcome=outcome,
+            fields={
+                "agentId": str(agent_id or "").strip(),
+                "timingsMs": dict(timings or {}),
+                "removedRoomCount": len(list((room_cleanup or {}).get("changedRoomIds") or [])),
+                "modeChangedCount": len(list((mode_cleanup or {}).get("changedModes") or [])),
+                "repairWarningCount": len(list((mode_cleanup or {}).get("repairWarnings") or [])),
+                "errorType": type(error).__name__ if error is not None else "",
+                "source": "AgentArchiveAPI",
+            },
+            lifecycle=True,
+        )
+    except Exception:
+        return
 
 
 class AgentCreatePayload(BaseModel):
@@ -584,8 +623,12 @@ def agent_update(agent_id: str, payload: AgentUpdatePayload) -> dict:
             current = get_agent(agent_id)
             if current and str(current.get("status") or "active").strip() != "archived":
                 ensure_agent_archive_allowed(agent_id)
-                room_cleanup = remove_agent_from_chat_rooms(agent_id)
-                mode_cleanup = remove_agent_from_mode_bindings(agent_id)
+                room_cleanup = remove_agent_from_chat_rooms(
+                    agent_id,
+                    include_chat_rooms=False,
+                    repair_participants=False,
+                )
+                mode_cleanup = remove_agent_from_mode_bindings(agent_id, include_payload=False)
                 archive_summary = {
                     "modeBindingsRepaired": len(mode_cleanup.get("repairWarnings") or []),
                     "removedFromRoomIds": list(room_cleanup.get("changedRoomIds") or []),
@@ -707,11 +750,36 @@ def agent_reset(agent_id: str, payload: AgentResetPayload) -> dict:
 
 @router.delete("/agents/{agent_id}")
 def agent_archive(agent_id: str) -> dict:
+    total_started = perf_counter()
+    timings: dict[str, float] = {}
+    room_cleanup: dict[str, Any] = {}
+    mode_cleanup: dict[str, Any] = {}
     try:
+        stage_started = perf_counter()
         ensure_agent_archive_allowed(agent_id)
-        room_cleanup = remove_agent_from_chat_rooms(agent_id)
-        mode_cleanup = remove_agent_from_mode_bindings(agent_id)
-        agent = archive_agent_instance(agent_id)
+        timings["validate"] = _elapsed_ms(stage_started)
+        stage_started = perf_counter()
+        room_cleanup = remove_agent_from_chat_rooms(
+            agent_id,
+            include_chat_rooms=False,
+            repair_participants=False,
+        )
+        timings["chat_rooms"] = _elapsed_ms(stage_started)
+        stage_started = perf_counter()
+        mode_cleanup = remove_agent_from_mode_bindings(agent_id, include_payload=False)
+        timings["mode_bindings"] = _elapsed_ms(stage_started)
+        stage_started = perf_counter()
+        agent = archive_agent_instance(agent_id, cleanup_mode_bindings=False)
+        timings["directory"] = _elapsed_ms(stage_started)
+        timings["total"] = _elapsed_ms(total_started)
+        _record_agent_archive_route_event(
+            "agent.archive.completed",
+            agent_id,
+            outcome="succeeded",
+            timings=timings,
+            room_cleanup=room_cleanup,
+            mode_cleanup=mode_cleanup,
+        )
         return {
             **agent,
             "archiveSummary": {
@@ -721,10 +789,43 @@ def agent_archive(agent_id: str) -> dict:
             },
         }
     except AgentNotFoundError as exc:
+        timings["total"] = _elapsed_ms(total_started)
+        _record_agent_archive_route_event(
+            "agent.archive.failed",
+            agent_id,
+            outcome="failed",
+            level="warning",
+            timings=timings,
+            room_cleanup=room_cleanup,
+            mode_cleanup=mode_cleanup,
+            error=exc,
+        )
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ChatRoomBusyError as exc:
+        timings["total"] = _elapsed_ms(total_started)
+        _record_agent_archive_route_event(
+            "agent.archive.failed",
+            agent_id,
+            outcome="failed",
+            level="warning",
+            timings=timings,
+            room_cleanup=room_cleanup,
+            mode_cleanup=mode_cleanup,
+            error=exc,
+        )
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except (AgentDirectoryError, AgentModeBindingError, ChatRoomValidationError) as exc:
+        timings["total"] = _elapsed_ms(total_started)
+        _record_agent_archive_route_event(
+            "agent.archive.failed",
+            agent_id,
+            outcome="failed",
+            level="warning",
+            timings=timings,
+            room_cleanup=room_cleanup,
+            mode_cleanup=mode_cleanup,
+            error=exc,
+        )
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
@@ -732,8 +833,13 @@ def agent_archive(agent_id: str) -> dict:
 def agent_purge(agent_id: str) -> dict:
     try:
         ensure_agent_purge_allowed(agent_id)
-        room_cleanup = remove_agent_from_chat_rooms(agent_id, allow_empty_rooms=True)
-        mode_cleanup = remove_agent_from_mode_bindings(agent_id)
+        room_cleanup = remove_agent_from_chat_rooms(
+            agent_id,
+            allow_empty_rooms=True,
+            include_chat_rooms=False,
+            repair_participants=False,
+        )
+        mode_cleanup = remove_agent_from_mode_bindings(agent_id, include_payload=False)
         purge = purge_archived_agent_instance(agent_id)
         return {
             **purge,

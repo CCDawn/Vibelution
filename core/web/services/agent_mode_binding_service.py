@@ -219,7 +219,7 @@ def update_agent_mode_membership(
     return get_mode_bindings_payload()
 
 
-def remove_agent_from_mode_bindings(agent_id: str) -> dict[str, Any]:
+def remove_agent_from_mode_bindings(agent_id: str, *, include_payload: bool = True) -> dict[str, Any]:
     """Remove one Agent from all mode binding references before safe archival."""
 
     normalized_agent_id = str(agent_id or "").strip()
@@ -305,12 +305,13 @@ def remove_agent_from_mode_bindings(agent_id: str) -> dict[str, Any]:
             record["updatedAt"] = _now()
             changed_modes.append(str(record.get("mode") or ""))
         next_bindings.append(_normalize_binding(record))
+    repair_warnings = [
+        *list(payload.get("repairWarnings") or []),
+        *removal_warnings,
+    ][-50:]
     if changed_modes:
         payload["bindings"] = next_bindings
-        payload["repairWarnings"] = [
-            *list(payload.get("repairWarnings") or []),
-            *removal_warnings,
-        ][-50:]
+        payload["repairWarnings"] = repair_warnings
         _save_mode_bindings(payload)
         _record_mode_binding_event(
             "mode_binding.agent_removed",
@@ -318,6 +319,12 @@ def remove_agent_from_mode_bindings(agent_id: str) -> dict[str, Any]:
             outcome="updated",
             fields={"agentId": normalized_agent_id, "changedModes": changed_modes},
         )
+    if not include_payload:
+        return {
+            "agentId": normalized_agent_id,
+            "changedModes": changed_modes,
+            "repairWarnings": repair_warnings,
+        }
     return get_mode_bindings_payload()
 
 
