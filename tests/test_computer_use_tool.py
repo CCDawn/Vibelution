@@ -4,6 +4,7 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
+import scripts.computer_use_bridge as computer_use_bridge
 from core.infrastructure.tool_executor import ToolExecutor
 from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
@@ -81,6 +82,76 @@ def test_computer_use_service_derives_allowed_domain_and_saves_screenshot(comput
     assert computer_use_service.computer_use_screenshot_path(result["sessionId"], screenshot_id).read_bytes() == PNG_BYTES
 
 
+def test_computer_use_service_forwards_actions_and_redacts_public_text(computer_use_tmp, monkeypatch):
+    monkeypatch.setenv("VIBELUTION_COMPUTER_USE_ENABLED", "1")
+    monkeypatch.setenv("VIBELUTION_COMPUTER_USE_BASE_URL", "https://computer-use.invalid")
+
+    def fake_call(request, *, session_id):
+        assert request["actions"] == [
+            {"action": "fill", "selector": "#q", "text": "secret query"},
+            {"action": "press", "key": "Enter"},
+        ]
+        return {
+            "status": "completed",
+            "summary": "Actions completed.",
+            "steps": [{"action": "fill", "summary": "Filled search box", "status": "completed"}],
+        }
+
+    monkeypatch.setattr(computer_use_service, "_call_open_computer_use", fake_call)
+
+    result = computer_use_service.start_computer_use_task(
+        task="Search example",
+        target_url="https://example.com",
+        allowed_domains="example.com",
+        actions='fill selector=#q text="secret query"\npress key=Enter',
+    )
+
+    assert result["status"] == "completed"
+    assert result["actionCount"] == 2
+    assert result["requestedActions"][0]["action"] == "fill"
+    assert result["requestedActions"][0]["textLength"] == len("secret query")
+    assert "secret query" not in json.dumps(result, ensure_ascii=False)
+
+
+def test_computer_use_service_blocks_cross_domain_action(computer_use_tmp, monkeypatch):
+    monkeypatch.setenv("VIBELUTION_COMPUTER_USE_ENABLED", "1")
+    monkeypatch.setenv("VIBELUTION_COMPUTER_USE_BASE_URL", "https://computer-use.invalid")
+
+    with pytest.raises(computer_use_service.ComputerUseError, match="outside allowed_domains"):
+        computer_use_service.start_computer_use_task(
+            task="Navigate elsewhere",
+            target_url="https://example.com",
+            allowed_domains="example.com",
+            actions=[{"action": "navigate", "url": "https://not-example.com"}],
+        )
+
+
+def test_computer_use_service_pauses_high_risk_explicit_action_before_provider(computer_use_tmp, monkeypatch):
+    monkeypatch.setenv("VIBELUTION_COMPUTER_USE_ENABLED", "1")
+    monkeypatch.setenv("VIBELUTION_COMPUTER_USE_BASE_URL", "https://computer-use.invalid")
+
+    called = False
+
+    def fake_call(request, *, session_id):
+        nonlocal called
+        called = True
+        return {"status": "completed", "summary": "Should not run."}
+
+    monkeypatch.setattr(computer_use_service, "_call_open_computer_use", fake_call)
+
+    result = computer_use_service.start_computer_use_task(
+        task="Submit a form",
+        target_url="https://example.com/form",
+        allowed_domains="example.com",
+        actions=[{"action": "click", "selector": "#submit"}],
+    )
+
+    assert called is False
+    assert result["status"] == "need_confirmation"
+    assert result["needsConfirmation"] is True
+    assert result["steps"][0]["requiresConfirmation"] is True
+
+
 def test_computer_use_service_requires_confirmation_for_high_risk_step(computer_use_tmp, monkeypatch):
     monkeypatch.setenv("VIBELUTION_COMPUTER_USE_ENABLED", "1")
     monkeypatch.setenv("VIBELUTION_COMPUTER_USE_BASE_URL", "https://computer-use.invalid")
@@ -125,7 +196,12 @@ def test_computer_use_routes_create_read_cancel_and_screenshot(computer_use_tmp,
 
     create_response = client.post(
         "/api/computer-use/tasks",
-        json={"task": "Open example", "targetUrl": "https://example.com", "allowedDomains": []},
+        json={
+            "task": "Open example",
+            "targetUrl": "https://example.com",
+            "allowedDomains": [],
+            "actions": [{"action": "wait", "ms": 10}],
+        },
     )
     assert create_response.status_code == 200, create_response.text
     created = create_response.json()
@@ -140,6 +216,40 @@ def test_computer_use_routes_create_read_cancel_and_screenshot(computer_use_tmp,
     assert cancel_response.json()["status"] == "cancelled"
     assert image_response.status_code == 200
     assert image_response.content == PNG_BYTES
+    assert created["actionCount"] == 1
+    assert created["requestedActions"][0]["action"] == "wait"
+
+
+def test_computer_use_bridge_blocks_unsupported_action_without_launching_edge():
+    result = computer_use_bridge.run_browser_task(
+        {
+            "task": "Do unsupported action",
+            "target_url": "https://example.com",
+            "allowed_domains": ["example.com"],
+            "actions": [{"action": "drag"}],
+        },
+        edge=computer_use_bridge.Path("C:/missing/msedge.exe"),
+        timeout=1,
+    )
+
+    assert result["status"] == "blocked"
+    assert "Unsupported browser action" in result["summary"]
+
+
+def test_computer_use_bridge_blocks_malformed_action_without_launching_edge():
+    result = computer_use_bridge.run_browser_task(
+        {
+            "task": "Malformed click",
+            "target_url": "https://example.com",
+            "allowed_domains": ["example.com"],
+            "actions": [{"action": "click"}],
+        },
+        edge=computer_use_bridge.Path("C:/missing/msedge.exe"),
+        timeout=1,
+    )
+
+    assert result["status"] == "blocked"
+    assert "requires selector" in result["summary"]
 
 
 def test_computer_use_tool_requires_explicit_tool_policy(computer_use_tmp, monkeypatch):

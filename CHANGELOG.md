@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.35 - 2026-06-06
+
+- Extended `computer_use_task_tool` and `/api/computer-use/tasks` with an `actions` protocol for explicit sandbox browser steps such as `fill`, `click`, `press`, `scroll`, `navigate`, `wait`, and `screenshot`.
+- Upgraded the local Computer Use bridge to execute low-risk action sequences through Microsoft Edge CDP and return the final screenshot without adding a browser automation dependency.
+- Added service-level safety checks for action domain boundaries, public text redaction, and pre-provider confirmation pauses for explicit high-risk browser actions.
+
 ## 0.10.33 - 2026-06-06
 
 - Removed legacy `profileCards` and `profileCount` from the config workspace API contract, keeping Model Library access through `modelOptions`.

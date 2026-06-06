@@ -1226,6 +1226,7 @@ def create_key_tools() -> List[BaseTool]:
         task: str,
         target_url: str = "",
         allowed_domains: str = "",
+        actions: str = "",
         max_steps: int = 20,
         require_confirmation: bool = True,
         mode: str = "browser",
@@ -1241,6 +1242,7 @@ def create_key_tools() -> List[BaseTool]:
             task: 要完成的浏览器操作任务
             target_url: 可选起始 URL，格式为 http:// 或 https://
             allowed_domains: 允许访问的域名，多个域名用逗号分隔；target_url 的 host 会自动加入
+            actions: 可选动作列表 JSON 或简短 DSL；支持 click/type/fill/press/scroll/wait/navigate/screenshot
             max_steps: 最大步骤数，范围 1-30，默认 20
             require_confirmation: 高风险动作是否等待用户确认，默认 True
             mode: 当前只支持 browser
@@ -1252,6 +1254,7 @@ def create_key_tools() -> List[BaseTool]:
             task=task,
             target_url=target_url,
             allowed_domains=allowed_domains,
+            actions=actions,
             max_steps=max_steps,
             require_confirmation=require_confirmation,
             mode=mode,

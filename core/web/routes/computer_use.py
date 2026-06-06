@@ -25,6 +25,7 @@ class ComputerUseTaskPayload(BaseModel):
     task: str = ""
     targetUrl: str = ""
     allowedDomains: str | list[str] = Field(default_factory=list)
+    actions: str | list[Any] | dict[str, Any] = Field(default_factory=list)
     maxSteps: int = 20
     requireConfirmation: bool = True
     mode: str = "browser"
@@ -53,6 +54,7 @@ def create_computer_use_task(payload: ComputerUseTaskPayload) -> dict[str, Any]:
             task=payload.task,
             target_url=payload.targetUrl,
             allowed_domains=payload.allowedDomains,
+            actions=payload.actions,
             max_steps=payload.maxSteps,
             require_confirmation=payload.requireConfirmation,
             mode=payload.mode,
