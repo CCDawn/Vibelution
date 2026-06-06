@@ -349,10 +349,10 @@ export function buildTransactionDisplayTitle(
 }
 
 export function buildTransactionOutcomeLabel(item: SelfEvolutionTransaction, lang: string) {
-  if (item.validationFailed > 0 || item.mutationsBlocked > 0) {
+  if (matchesTransactionFilter(item, "needs_review")) {
     return lang === "zh" ? "需复盘" : "Needs review";
   }
-  if (!item.isOpen && item.validationPassed > 0 && item.status.toLowerCase() !== "failed") {
+  if (!item.isOpen && item.validationPassed > 0) {
     return lang === "zh" ? "验证通过" : "Validated";
   }
   return item.isOpen ? (lang === "zh" ? "进行中" : "Open") : (lang === "zh" ? "已记录" : "Recorded");
@@ -889,12 +889,20 @@ export function SelfEvolutionTrack({
     );
   }
 
+  function renderLoadFailedShell() {
+    return (
+      <section className={styles.surface} aria-busy="false">
+        <div className={styles.emptyState}>{t("loadFailed")}</div>
+      </section>
+    );
+  }
+
   if (loading && !overview) {
     return renderLoadingShell(t("loading"));
   }
 
   if (!overview) {
-    return renderLoadingShell(t("loadFailed"));
+    return renderLoadFailedShell();
   }
 
   const allVisibleHistorySelected = visibleTransactionIds.length > 0
