@@ -422,6 +422,42 @@ def test_memory_knowledge_graph_uses_owner_scoped_knowledge_node_ids(tmp_path, m
     assert len(item_nodes) == 2
     assert len({node["id"] for node in item_nodes}) == 2
 
+    scoped_response = client.get(
+        "/api/memory/knowledge-graph",
+        params={
+            "include": "officialResearchGraph",
+            "agentId": graph_viewer["agentId"],
+            "knowledgeBaseId": first_scoped_base_id,
+        },
+    )
+    scoped_payload = scoped_response.json()
+    scoped_base_nodes = [
+        node
+        for node in scoped_payload["nodes"]
+        if node["type"] == "knowledge_base" and node["metadata"]["knowledgeBaseId"] == first_base["knowledgeBaseId"]
+    ]
+    scoped_item_nodes = [
+        node
+        for node in scoped_payload["nodes"]
+        if node["type"] == "knowledge_item" and node["metadata"]["knowledgeItemId"] == first_reviewed["knowledgeItemId"]
+    ]
+    bare_base_detail = client.get(
+        "/api/memory/knowledge-graph/node-detail",
+        params={"nodeId": f"knowledge_base:{first_base['knowledgeBaseId']}", "agentId": graph_viewer["agentId"]},
+    )
+    bare_item_detail = client.get(
+        "/api/memory/knowledge-graph/node-detail",
+        params={"nodeId": f"knowledge_item:{first_reviewed['knowledgeItemId']}", "agentId": graph_viewer["agentId"]},
+    )
+
+    assert scoped_response.status_code == 200
+    assert len(scoped_base_nodes) == 1
+    assert scoped_base_nodes[0]["metadata"]["ownerId"] == first_team["teamId"]
+    assert len(scoped_item_nodes) == 1
+    assert scoped_item_nodes[0]["metadata"]["ownerId"] == first_team["teamId"]
+    assert bare_base_detail.status_code == 422
+    assert bare_item_detail.status_code == 422
+
     first_detail = client.get(
         "/api/memory/knowledge-graph/node-detail",
         params={

@@ -13,7 +13,11 @@ from core.web.services.memory_service import (
     restore_memory_item,
     update_memory_item,
 )
-from core.web.services.memory_graph_service import get_memory_knowledge_graph, get_memory_knowledge_graph_node_detail
+from core.web.services.memory_graph_service import (
+    MemoryKnowledgeGraphAmbiguousNodeError,
+    get_memory_knowledge_graph,
+    get_memory_knowledge_graph_node_detail,
+)
 
 
 router = APIRouter(tags=["memory"])
@@ -63,7 +67,10 @@ def memory_knowledge_graph_node_detail(
     normalized_agent_id = str(agentId or "").strip()
     if not normalized_agent_id:
         raise HTTPException(status_code=422, detail="agentId is required for memory graph node detail.")
-    payload = get_memory_knowledge_graph_node_detail(nodeId, agent_id=normalized_agent_id, limit=limit)
+    try:
+        payload = get_memory_knowledge_graph_node_detail(nodeId, agent_id=normalized_agent_id, limit=limit)
+    except MemoryKnowledgeGraphAmbiguousNodeError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     if payload is None:
         raise HTTPException(status_code=404, detail="Memory graph node detail not found.")
     return payload

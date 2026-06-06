@@ -21,6 +21,10 @@ NODE_DETAIL_ITEM_LIMIT = 40
 NODE_DETAIL_CONTENT_LIMIT = 12000
 
 
+class MemoryKnowledgeGraphAmbiguousNodeError(ValueError):
+    """Raised when an unscoped graph node id matches multiple accessible owners."""
+
+
 def get_memory_knowledge_graph(
     *,
     agent_id: str = "",
@@ -35,7 +39,7 @@ def get_memory_knowledge_graph(
     _sync_roots()
     normalized_agent_id = str(agent_id or "").strip()
     normalized_team_id = str(team_id or "").strip()
-    normalized_base_id = str(knowledge_base_id or "").strip()
+    filter_owner_type, filter_owner_id, normalized_base_id = _parse_owner_scoped_node_value(knowledge_base_id)
     include_set = _include_set(include)
     node_limit = max(1, min(int(limit or DEFAULT_LIMIT), MAX_LIMIT))
     graph = _GraphBuilder(node_limit)
@@ -87,7 +91,7 @@ def get_memory_knowledge_graph(
             agent_team_ids.add(team_id_value)
         for base in team_knowledge_service._knowledge_bases_for_owner(team_owner):
             base_id = str(base.get("knowledgeBaseId") or "").strip()
-            if normalized_base_id and base_id != normalized_base_id:
+            if not _knowledge_base_matches_filter(team_owner, base, filter_owner_type, filter_owner_id, normalized_base_id):
                 continue
             if team_knowledge_service._can_access(team_owner, base, normalized_agent_id, "read"):
                 visible_team_ids.add(team_id_value)
@@ -185,6 +189,8 @@ def get_memory_knowledge_graph(
                 team_node_id,
                 team_knowledge_service._owner_context("team", team_id_value, team=team),
                 actor_agent_id=normalized_agent_id,
+                knowledge_base_owner_type=filter_owner_type,
+                knowledge_base_owner_id=filter_owner_id,
                 knowledge_base_id=normalized_base_id,
             )
 
@@ -216,6 +222,8 @@ def get_memory_knowledge_graph(
         filters={
             "teamId": normalized_team_id,
             "knowledgeBaseId": normalized_base_id,
+            "knowledgeBaseOwnerType": filter_owner_type,
+            "knowledgeBaseOwnerId": filter_owner_id,
             "include": sorted(include_set),
             "limit": node_limit,
         },
@@ -233,7 +241,19 @@ def get_memory_knowledge_graph_node_detail(node_id: str, *, agent_id: str = "", 
     normalized_node_id = str(node_id or "").strip()
     normalized_agent_id = str(agent_id or "").strip()
     bounded_limit = max(1, min(int(limit or NODE_DETAIL_ITEM_LIMIT), NODE_DETAIL_ITEM_LIMIT))
-    resolved = _resolve_node_detail(normalized_node_id, normalized_agent_id, limit=bounded_limit)
+    try:
+        resolved = _resolve_node_detail(normalized_node_id, normalized_agent_id, limit=bounded_limit)
+    except MemoryKnowledgeGraphAmbiguousNodeError:
+        _record_node_detail_event(
+            normalized_node_id,
+            normalized_agent_id,
+            item_count=0,
+            found=False,
+            elapsed_ms=(time.perf_counter() - started_at) * 1000.0,
+            outcome="ambiguous",
+            reason="owner_scope_required",
+        )
+        raise
     if resolved is None:
         _record_node_detail_event(
             normalized_node_id,
@@ -440,15 +460,17 @@ def _add_official_research_graph_nodes(
     owner: dict[str, Any],
     *,
     actor_agent_id: str,
+    knowledge_base_owner_type: str,
+    knowledge_base_owner_id: str,
     knowledge_base_id: str,
 ) -> None:
     for base in team_knowledge_service._knowledge_bases_for_owner(owner):
         base_id = str(base.get("knowledgeBaseId") or "").strip()
-        if knowledge_base_id and base_id != knowledge_base_id:
+        if not _knowledge_base_matches_filter(owner, base, knowledge_base_owner_type, knowledge_base_owner_id, knowledge_base_id):
             continue
         if not team_knowledge_service._can_access(owner, base, actor_agent_id, "read"):
             continue
-        base_node_id = _node_id("knowledge_base", base_id)
+        base_node_id = _owner_scoped_node_id("knowledge_base", owner, base_id)
         graph.add_node(
             base_node_id,
             "knowledge_base",
@@ -457,7 +479,12 @@ def _add_official_research_graph_nodes(
             status=str(base.get("status") or "active"),
             created_at=str(base.get("createdAt") or ""),
             updated_at=str(base.get("updatedAt") or ""),
-            metadata={"knowledgeBaseId": base_id, "ownerType": owner.get("ownerType"), "ownerId": owner.get("ownerId")},
+            metadata={
+                "knowledgeBaseId": base_id,
+                "ownerType": owner.get("ownerType"),
+                "ownerId": owner.get("ownerId"),
+                "legacyNodeId": _node_id("knowledge_base", base_id),
+            },
             responsibility_question=_responsibility_question("knowledge_base", base),
             visual={"size": "container"},
         )
@@ -472,7 +499,7 @@ def _add_official_research_graph_nodes(
             item_id = str(item.get("knowledgeItemId") or "").strip()
             if not item_id:
                 continue
-            item_node_id = _node_id("knowledge_item", item_id)
+            item_node_id = _owner_scoped_node_id("knowledge_item", owner, item_id)
             graph.add_node(
                 item_node_id,
                 "knowledge_item",
@@ -484,11 +511,14 @@ def _add_official_research_graph_nodes(
                 metadata={
                     "knowledgeItemId": item_id,
                     "knowledgeBaseId": base_id,
+                    "ownerType": owner.get("ownerType"),
+                    "ownerId": owner.get("ownerId"),
                     "graphKind": str(official_graph.get("graphKind") or "formal_research_trace"),
                     "edgeCount": int((official_graph.get("summary") or {}).get("edgeCount") or 0)
                     if isinstance(official_graph.get("summary"), dict)
                     else 0,
                     "fullContentIncluded": False,
+                    "legacyNodeId": _node_id("knowledge_item", item_id),
                 },
                 visual={"size": "leaf"},
                 content_items=[],
@@ -561,20 +591,31 @@ def _record_graph_event(payload: dict[str, Any], agent_id: str) -> None:
         pass
 
 
-def _record_node_detail_event(node_id: str, agent_id: str, *, item_count: int, found: bool, elapsed_ms: float) -> None:
+def _record_node_detail_event(
+    node_id: str,
+    agent_id: str,
+    *,
+    item_count: int,
+    found: bool,
+    elapsed_ms: float,
+    outcome: str = "",
+    reason: str = "",
+) -> None:
     try:
+        normalized_outcome = outcome or ("observed" if found else "not_found")
         record_runtime_scene_event(
             "memory_graph_service",
             "memory_graph",
             "memory.knowledge_graph.node_detail.viewed",
             message="Memory knowledge graph node detail viewed.",
-            outcome="observed" if found else "not_found",
+            outcome=normalized_outcome,
             fields={
                 "agentId": agent_id,
                 "nodeId": node_id,
                 "contentItemCount": int(item_count),
                 "elapsedMs": round(float(elapsed_ms), 2),
                 "fullContentIncluded": True,
+                "reason": reason,
             },
         )
     except Exception:
@@ -668,34 +709,56 @@ def _items_for_base_full_detail(
 
 
 def _find_accessible_knowledge_base(knowledge_base_id: str, actor_agent_id: str) -> tuple[dict[str, Any], dict[str, Any]] | None:
-    normalized_base_id = str(knowledge_base_id or "").strip()
+    owner_type, owner_id, normalized_base_id = _parse_owner_scoped_node_value(knowledge_base_id)
     if not normalized_base_id:
         return None
+    has_owner_scope = bool(owner_type and owner_id)
+    matches: list[tuple[dict[str, Any], dict[str, Any]]] = []
     for owner in _iter_known_knowledge_owners():
+        if has_owner_scope and not _owner_matches_scope(owner, owner_type, owner_id):
+            continue
         for base in team_knowledge_service._knowledge_bases_for_owner(owner):
-            if str(base.get("knowledgeBaseId") or "").strip() != normalized_base_id:
+            if not _node_fragment_matches(base.get("knowledgeBaseId"), normalized_base_id):
                 continue
             if not team_knowledge_service._can_access(owner, base, actor_agent_id, "read"):
-                return None
-            return owner, base
-    return None
+                if has_owner_scope:
+                    return None
+                continue
+            if has_owner_scope:
+                return owner, base
+            matches.append((owner, base))
+    if len(matches) > 1:
+        raise MemoryKnowledgeGraphAmbiguousNodeError("Memory graph node id is ambiguous across owners; use owner-scoped node id.")
+    return matches[0] if matches else None
 
 
 def _find_accessible_knowledge_item(knowledge_item_id: str, actor_agent_id: str) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]] | None:
-    normalized_item_id = str(knowledge_item_id or "").strip()
+    owner_type, owner_id, normalized_item_id = _parse_owner_scoped_node_value(knowledge_item_id)
     if not normalized_item_id:
         return None
+    has_owner_scope = bool(owner_type and owner_id)
+    matches: list[tuple[dict[str, Any], dict[str, Any], dict[str, Any]]] = []
     for owner in _iter_known_knowledge_owners():
+        if has_owner_scope and not _owner_matches_scope(owner, owner_type, owner_id):
+            continue
         for item in team_knowledge_service._read_jsonl(team_knowledge_service._items_path_for_owner(owner)):
-            if str(item.get("knowledgeItemId") or "").strip() != normalized_item_id:
+            if not _node_fragment_matches(item.get("knowledgeItemId"), normalized_item_id):
                 continue
             base = team_knowledge_service._find_knowledge_base_for_owner(owner, str(item.get("knowledgeBaseId") or ""))
             if not base:
-                return None
+                if has_owner_scope:
+                    return None
+                continue
             if not team_knowledge_service._can_access(owner, base, actor_agent_id, "read"):
-                return None
-            return owner, base, item
-    return None
+                if has_owner_scope:
+                    return None
+                continue
+            if has_owner_scope:
+                return owner, base, item
+            matches.append((owner, base, item))
+    if len(matches) > 1:
+        raise MemoryKnowledgeGraphAmbiguousNodeError("Memory graph node id is ambiguous across owners; use owner-scoped node id.")
+    return matches[0] if matches else None
 
 
 def _iter_known_knowledge_owners() -> list[dict[str, Any]]:
@@ -748,6 +811,28 @@ def _parse_node_id(node_id: str) -> tuple[str, str]:
     return node_type.strip(), raw_value.strip()
 
 
+def _parse_owner_scoped_node_value(value: str) -> tuple[str, str, str]:
+    normalized = str(value or "").strip()
+    parts = normalized.split(":", 2)
+    if len(parts) == 3 and parts[0] in {"team", "agent"} and parts[1].strip() and parts[2].strip():
+        return _safe_id(parts[0]), _safe_id(parts[1]), parts[2].strip()
+    return "", "", normalized
+
+
+def _knowledge_base_matches_filter(
+    owner: dict[str, Any],
+    base: dict[str, Any],
+    owner_type: str,
+    owner_id: str,
+    knowledge_base_id: str,
+) -> bool:
+    if owner_type and owner_id and not _owner_matches_scope(owner, owner_type, owner_id):
+        return False
+    if knowledge_base_id and not _node_fragment_matches(base.get("knowledgeBaseId"), knowledge_base_id):
+        return False
+    return True
+
+
 def _get_team_or_none(team_id: str) -> dict[str, Any] | None:
     try:
         return team_service.get_team(team_id)
@@ -780,8 +865,12 @@ def _owner_knowledge_detail(owner: dict[str, Any], actor_agent_id: str, *, cache
 
 
 def _knowledge_item_detail(item: dict[str, Any], *, base: dict[str, Any]) -> dict[str, Any]:
+    owner = {
+        "ownerType": str(item.get("ownerType") or base.get("ownerType") or ""),
+        "ownerId": str(item.get("ownerId") or base.get("ownerId") or ""),
+    }
     return {
-        "id": str(item.get("knowledgeItemId") or ""),
+        "id": _owner_scoped_value(owner, str(item.get("knowledgeItemId") or "")),
         "type": "knowledge_item",
         "title": _trim(item.get("title") or item.get("knowledgeItemId") or "Knowledge item", 160),
         "summary": _trim(item.get("summary") or "", 500),
@@ -847,6 +936,27 @@ def _include_set(value: str) -> set[str]:
 
 def _node_id(node_type: str, value: str) -> str:
     return f"{node_type}:{_safe_id(value)}"
+
+
+def _owner_scoped_node_id(node_type: str, owner: dict[str, Any], value: str) -> str:
+    return f"{node_type}:{_owner_scoped_value(owner, value)}"
+
+
+def _owner_scoped_value(owner: dict[str, Any], value: str) -> str:
+    owner_type = _safe_id(str(owner.get("ownerType") or "").strip())
+    owner_id = _safe_id(str(owner.get("ownerId") or "").strip())
+    item_id = _safe_id(value)
+    if owner_type and owner_type != "unknown" and owner_id and owner_id != "unknown":
+        return f"{owner_type}:{owner_id}:{item_id}"
+    return item_id
+
+
+def _owner_matches_scope(owner: dict[str, Any], owner_type: str, owner_id: str) -> bool:
+    return _safe_id(str(owner.get("ownerType") or "")) == owner_type and _safe_id(str(owner.get("ownerId") or "")) == owner_id
+
+
+def _node_fragment_matches(value: Any, fragment: str) -> bool:
+    return str(value or "").strip() == fragment or _safe_id(value) == fragment
 
 
 def _safe_id(value: Any) -> str:
