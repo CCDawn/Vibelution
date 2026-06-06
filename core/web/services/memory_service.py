@@ -29,6 +29,15 @@ MANAGED_MEMORY_WRITE_LOCK = Lock()
 MEMORY_OVERVIEW_PERF_STATE_LOCK = Lock()
 MEMORY_OVERVIEW_WAS_SLOW = False
 MEMORY_OVERVIEW_SLOW_MS = 500.0
+MEMORY_OVERVIEW_SECTION_CACHE_TTL_SECONDS = 3.0
+MEMORY_OVERVIEW_SECTION_CACHE_LOCK = Lock()
+MEMORY_OVERVIEW_SECTION_CACHE: dict[str, Any] = {
+    "root": "",
+    "expiresAt": 0.0,
+    "sections": None,
+    "timings": None,
+    "warnings": None,
+}
 GIT_SNAPSHOT_CACHE_TTL_SECONDS = 3.0
 GIT_SNAPSHOT_CACHE_LOCK = Lock()
 GIT_SNAPSHOT_CACHE: dict[str, Any] = {"root": "", "expiresAt": 0.0, "payload": None}
@@ -386,6 +395,46 @@ def _base_memory_sections(root: Path, warnings: list[str]) -> list[dict[str, Any
 
 
 def _timed_base_memory_sections(root: Path, warnings: list[str]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    cache_root = str(root.resolve())
+    now = time.monotonic()
+    with MEMORY_OVERVIEW_SECTION_CACHE_LOCK:
+        cached_sections = MEMORY_OVERVIEW_SECTION_CACHE.get("sections")
+        cached_timings = MEMORY_OVERVIEW_SECTION_CACHE.get("timings")
+        cached_warnings = MEMORY_OVERVIEW_SECTION_CACHE.get("warnings")
+        if (
+            MEMORY_OVERVIEW_SECTION_CACHE.get("root") == cache_root
+            and cached_sections is not None
+            and cached_timings is not None
+            and cached_warnings is not None
+            and float(MEMORY_OVERVIEW_SECTION_CACHE.get("expiresAt") or 0.0) > now
+        ):
+            warnings.extend(copy.deepcopy(cached_warnings))
+            return copy.deepcopy(cached_sections), copy.deepcopy(cached_timings)
+
+    warning_count = len(warnings)
+    sections, timings = _load_timed_base_memory_sections(root, warnings)
+    added_warnings = warnings[warning_count:]
+    with MEMORY_OVERVIEW_SECTION_CACHE_LOCK:
+        MEMORY_OVERVIEW_SECTION_CACHE.update(
+            {
+                "root": cache_root,
+                "expiresAt": time.monotonic() + MEMORY_OVERVIEW_SECTION_CACHE_TTL_SECONDS,
+                "sections": copy.deepcopy(sections),
+                "timings": copy.deepcopy(timings),
+                "warnings": copy.deepcopy(added_warnings),
+            }
+        )
+    return sections, timings
+
+
+def _clear_memory_overview_section_cache() -> None:
+    with MEMORY_OVERVIEW_SECTION_CACHE_LOCK:
+        MEMORY_OVERVIEW_SECTION_CACHE.update(
+            {"root": "", "expiresAt": 0.0, "sections": None, "timings": None, "warnings": None}
+        )
+
+
+def _load_timed_base_memory_sections(root: Path, warnings: list[str]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     specs = [
         ("project-memory", lambda: _project_memory_section(root, warnings)),
         ("runtime-memory", lambda: _runtime_memory_section(root)),
