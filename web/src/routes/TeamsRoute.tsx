@@ -549,11 +549,11 @@ export function TeamsRoute() {
       fetchJson<Team>(`/api/teams/${encodeURIComponent(teamId)}`, {
         method: "DELETE",
       }),
-    onSuccess: (_team, teamId) => {
+    onSuccess: (team, teamId) => {
       setSelectedTeamId("");
       setSelectedNodeId("");
       setSearchParams({});
-      void chatWorkspaceCache.afterTeamChanged(teamId);
+      void chatWorkspaceCache.afterTeamArchived(teamId, team.linkedChatRoomId || team.linkedChatRoom?.roomId);
     },
   });
 

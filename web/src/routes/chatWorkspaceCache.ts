@@ -145,6 +145,20 @@ export function createChatWorkspaceCache(queryClient: QueryClientLike) {
         ...(teamId ? [queryKeys.team(teamId)] : []),
       ]);
     },
+    afterTeamArchived(teamId: string, roomId?: string) {
+      return invalidateAll(queryClient, [
+        queryKeys.teams(),
+        queryKeys.team(teamId),
+        queryKeys.agents(),
+        queryKeys.agentModeBindings(),
+        queryKeys.chatRooms(),
+        ...(roomId ? [queryKeys.chatRoom(roomId)] : []),
+        queryKeys.sessions(),
+        queryKeys.conversations(),
+        queryKeys.agentConfigWorkspace(),
+        queryKeys.projectAgentBus(),
+      ]);
+    },
     afterTeamRoomMembershipChanged(teamId: string, roomId: string) {
       return invalidateAll(queryClient, [
         queryKeys.teams(),

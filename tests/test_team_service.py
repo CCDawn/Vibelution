@@ -528,6 +528,39 @@ def test_archive_custom_team_cascades_member_agents(tmp_path, monkeypatch):
     assert archived_events[-1][1]["fields"]["archivedAgentCount"] == 2
 
 
+def test_archive_custom_team_removes_member_agents_from_chat_rooms(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    events = []
+    monkeypatch.setattr(team_service, "record_runtime_scene_event", lambda *args, **kwargs: events.append((args, kwargs)))
+    alpha = session_service.create_chat_session(title="Alpha Session")
+    beta = session_service.create_chat_session(title="Beta Session")
+    team = team_service.create_team(
+        name="Cascade Room Team",
+        members=[{"agentId": alpha["agentId"], "role": "lead"}],
+    )
+    extra_room = chat_room_service.create_chat_room(
+        title="Extra Room",
+        participant_agent_ids=[alpha["agentId"], beta["agentId"]],
+    )
+
+    archived = team_service.archive_team(team["teamId"])
+
+    assert archived["status"] == "archived"
+    assert agent_directory_service.get_agent(alpha["agentId"], include_archived=True)["status"] == "archived"
+    linked_room = chat_room_service.get_chat_room_detail(team["linkedChatRoomId"])
+    extra_room_detail = chat_room_service.get_chat_room_detail(extra_room["roomId"])
+    assert linked_room["participants"] == []
+    assert [participant["agentId"] for participant in extra_room_detail["participants"]] == [beta["agentId"]]
+    archived_events = [item for item in events if item[0][2] == "team.archived_with_agents"]
+    assert set(archived_events[-1][1]["fields"]["removedFromRoomIds"]) == {
+        team["linkedChatRoomId"],
+        extra_room["roomId"],
+    }
+    assert archived_events[-1][1]["fields"]["roomCleanupByAgentId"] == {
+        alpha["agentId"]: [team["linkedChatRoomId"], extra_room["roomId"]]
+    }
+
+
 def test_archive_team_rejects_protected_member_without_partial_changes(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     protected = agent_directory_service.create_agent_instance(
