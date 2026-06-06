@@ -2768,6 +2768,60 @@ def test_session_summary_exposes_dialogue_model_id(tmp_path, monkeypatch):
     assert detail_response.json()["dialogueModelId"] == "houmo_qwen3_30b_agent"
 
 
+def test_session_detail_marks_agent_direct_session_mismatch(tmp_path, monkeypatch):
+    _seed_chat_state(
+        tmp_path,
+        conversations=[
+            {
+                "conversation_id": "session-legacy",
+                "title": "旧直连会话",
+                "agent_id": "agent-live",
+                "agentId": "agent-live",
+                "updated_at": "2026-05-18T12:00:00",
+                "active_task": {
+                    "task_id": "old-task",
+                    "kind": "coding",
+                    "status": "blocked",
+                    "title": "旧任务",
+                    "latest_summary": "旧会话残留任务",
+                },
+                "messages": [{"role": "user", "content": "旧消息", "timestamp": "2026-05-18T11:55:00"}],
+            },
+            {
+                "conversation_id": "session-current",
+                "title": "当前直连会话",
+                "agent_id": "agent-live",
+                "agentId": "agent-live",
+                "updated_at": "2026-05-18T12:05:00",
+                "messages": [{"role": "user", "content": "当前消息", "timestamp": "2026-05-18T12:05:00"}],
+            },
+        ],
+    )
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    fake_agent = {
+        "agentId": "agent-live",
+        "agentCode": "A001",
+        "displayName": "程听澜",
+        "directSessionId": "session-current",
+        "primaryMode": "chat",
+        "workspacePath": "workspace/agents/agent-live",
+        "status": "active",
+        "llmBindings": {"dialogue": {"modelId": "houmo_qwen3_30b_agent"}},
+    }
+    agent_directory_service.save_state({"agents": [fake_agent]})
+    monkeypatch.setattr(session_service, "get_agent", lambda agent_id, **_kwargs: fake_agent if agent_id == "agent-live" else None)
+
+    response = client.get("/api/sessions/session-legacy")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["agentDirectSessionMismatch"] is True
+    assert payload["agentPrimaryDirectSessionId"] == "session-current"
+    assert payload["activeTask"]["latestSummary"] == "旧会话残留任务"
+    assert agent_directory_service.get_agent("agent-live")["directSessionId"] == "session-current"
+
+
 def test_session_detail_uses_targeted_conversation_read(tmp_path, monkeypatch):
     _seed_chat_state(
         tmp_path,
@@ -10425,6 +10479,86 @@ def test_submit_session_message_surfaces_provider_error_inside_messages(tmp_path
     latest_run = session_service._WORK_RUN_STORE.load_latest_snapshot("chat_turn")
     assert latest_run["errorType"] == "provider_upstream_error"
     assert "litellm.BadGatewayError" in latest_run["error"]
+
+
+def test_submit_session_message_surfaces_local_runtime_exception_as_turn_error(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="done")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        session_service,
+        "_WORK_RUN_STORE",
+        session_service.WorkRunStore(tmp_path / ".runtime" / "runtime-manager" / "work_runs"),
+    )
+
+    def raise_missing_key(*_args, **_kwargs):
+        raise ValueError("未设置 API Key: VIBELUTION_LLM_MODEL_RELAY_OPENAI_GPT_5_5_API_KEY")
+
+    monkeypatch.setattr(session_service, "create_chat_agent", raise_missing_key)
+    monkeypatch.setattr(
+        session_service,
+        "_schedule_session_turn",
+        lambda context: session_service._run_session_turn(context),
+    )
+
+    response = client.post(
+        "/api/sessions/session-live/messages",
+        json={"content": "继续当前对话"},
+    )
+
+    assert response.status_code == 202
+    payload = response.json()
+    error_message = payload["messages"][-1]
+    assert error_message["role"] == "assistant"
+    assert error_message["metadata"]["kind"] == "turn_error"
+    assert error_message["metadata"]["providerFailure"] is False
+    assert error_message["metadata"]["errorType"] == "ValueError"
+    assert "网页工作台这一轮执行失败" in error_message["content"]
+    assert "未设置 API Key" in error_message["content"]
+    assert payload["lastTurnError"]["errorType"] == "ValueError"
+    assert payload["lastTurnError"]["recoverable"] is False
+    latest_run = session_service._WORK_RUN_STORE.load_latest_snapshot("chat_turn")
+    assert latest_run["errorType"] == "ValueError"
+    assert "VIBELUTION_LLM_MODEL_RELAY_OPENAI_GPT_5_5_API_KEY" in latest_run["error"]
+
+
+def test_failed_runtime_turn_result_is_persisted_as_turn_error_with_trace(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="done")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+
+    failed_result = {
+        "status": "failed_runtime",
+        "summary": "图像路由失败：当前模型不支持图片输入。",
+        "raw_output": "图像路由失败：当前模型不支持图片输入。",
+        "error": "图像路由失败：当前模型不支持图片输入。",
+        "outcome": "blocked",
+        "thought": "Need a vision-capable model before continuing.",
+        "tool_trace": [{"name": "image2_generate_tool", "status": "failed", "summary": "unsupported"}],
+        "feedback_events": [{"kind": "status", "name": "model_request", "status": "failed", "summary": "模型请求失败"}],
+    }
+
+    session_service._set_session_running("session-live", True, turn_id="turn-runtime-failure")
+    try:
+        session_service._persist_session_turn_result(
+            "session-live",
+            failed_result,
+            turn_id="turn-runtime-failure",
+        )
+    finally:
+        session_service._set_session_running("session-live", False, turn_id="turn-runtime-failure")
+    payload = session_service.get_session_detail("session-live")
+
+    error_message = payload["messages"][-1]
+    assert error_message["metadata"]["kind"] == "turn_error"
+    assert error_message["metadata"]["providerFailure"] is False
+    assert error_message["content"].startswith("网页工作台这一轮执行失败")
+    assert "当前模型不支持图片输入" in error_message["content"]
+    assert error_message["thought"] == "Need a vision-capable model before continuing."
+    assert error_message["toolCalls"] == [
+        {"name": "image2_generate_tool", "status": "failed", "summary": "unsupported"}
+    ]
+    assert error_message["feedbackEvents"][0]["status"] == "failed"
+    assert payload["lastTurnError"]["errorType"] == "runtime_error"
+    assert payload["currentPhase"] == "failed"
 
 
 def test_submit_session_message_surfaces_provider_http_diagnostics(tmp_path, monkeypatch):

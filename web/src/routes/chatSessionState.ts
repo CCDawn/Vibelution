@@ -114,6 +114,12 @@ export function sessionSummaryFromDetail(detail: SessionDetail): SessionSummary 
   if (detail.agentWorkspacePath !== undefined) {
     summary.agentWorkspacePath = detail.agentWorkspacePath;
   }
+  if (detail.agentPrimaryDirectSessionId !== undefined) {
+    summary.agentPrimaryDirectSessionId = detail.agentPrimaryDirectSessionId;
+  }
+  if (detail.agentDirectSessionMismatch !== undefined) {
+    summary.agentDirectSessionMismatch = detail.agentDirectSessionMismatch;
+  }
   if (detail.agentMissing !== undefined) {
     summary.agentMissing = detail.agentMissing;
   }

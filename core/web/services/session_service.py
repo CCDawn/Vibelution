@@ -992,6 +992,21 @@ def _ensure_conversation_agent_metadata(
             agent=existing_agent,
         ) or changed
         return changed
+    if existing_agent:
+        changed = False
+        if conversation.get("agent_id") != existing_agent_id:
+            conversation["agent_id"] = existing_agent_id
+            changed = True
+        if conversation.get("agentId") != existing_agent_id:
+            conversation["agentId"] = existing_agent_id
+            changed = True
+        changed = _repair_conversation_agent_legacy_model_fields(
+            conversation,
+            conversation_id=conversation_id,
+            agent_id=existing_agent_id,
+            agent=existing_agent,
+        ) or changed
+        return changed
     archived_direct_agent = _archived_agent_for_direct_session(conversation_id) if not existing_agent_id else None
     if archived_direct_agent:
         archived_agent_id = str(archived_direct_agent.get("agentId") or "").strip()
@@ -4479,6 +4494,12 @@ def _build_session_summary(conversation: dict[str, Any], *, hydrate_agent: bool 
     agent_role_key = str((agent or {}).get("roleKey") or "").strip()
     agent_prompt_template_id = str((agent or {}).get("promptTemplateId") or "").strip()
     dialogue_model_id = agent_dialogue_model_id(agent) if agent else ""
+    agent_primary_direct_session_id = str((agent or {}).get("directSessionId") or "").strip()
+    agent_direct_session_mismatch = bool(
+        agent_id
+        and agent_primary_direct_session_id
+        and agent_primary_direct_session_id != conversation["id"]
+    )
     agent_status = _session_agent_status_payload(
         agent_id,
         agent,
@@ -4504,6 +4525,8 @@ def _build_session_summary(conversation: dict[str, Any], *, hydrate_agent: bool 
         "agentRoleKey": agent_role_key,
         "agentPromptTemplateId": agent_prompt_template_id,
         "dialogueModelId": dialogue_model_id,
+        "agentPrimaryDirectSessionId": agent_primary_direct_session_id,
+        "agentDirectSessionMismatch": agent_direct_session_mismatch,
         "workspacePath": str(conversation.get("workspacePath") or _session_workspace_relative_path(conversation["id"])),
         "agentWorkspacePath": agent_workspace_path,
         **agent_status,
@@ -7615,22 +7638,62 @@ def _persist_session_turn_result(
         cache_composition = _build_session_cache_composition(turn_id, llm_usage)
         final_status = _chat_turn_result_status(result_status, result, stop_requested=stop_requested)
         feedback_events_for_result = _extract_chat_feedback_events(result, final_status=final_status)
-        assistant_entry = _make_chat_message(
-            "assistant",
-            assistant_text,
-            _extract_chat_tool_calls(result),
-            thought=_extract_chat_thought(result, assistant_text),
-            feedback_events=feedback_events_for_result,
-            mental_snapshot=_build_turn_mental_snapshot(
+        runtime_failed = final_status in {"failed_runtime", "failed"} and not stop_requested
+        if runtime_failed:
+            error_type = _failure_error_type(assistant_text)
+            turn_error = _make_session_turn_error(
+                assistant_text,
+                lang=lang,
+                error_type=error_type,
+                turn_id=turn_id,
+            )
+            assistant_entry = _make_turn_error_chat_message(
+                turn_error,
+                error_type=error_type,
+                turn_id=turn_id,
+                provider_failure=False,
+            )
+            assistant_entry["tool_calls"] = _normalize_message_tool_calls(_extract_chat_tool_calls(result))
+            thought = _extract_chat_thought(result, assistant_text)
+            if thought:
+                assistant_entry["thought"] = thought
+            mental_snapshot = _build_turn_mental_snapshot(
                 result,
                 lang,
                 mental_model_enabled=mental_model_enabled,
                 session_workspace=session_workspace or _ensure_session_workspace(session_id),
                 session_id=session_id,
                 turn_id=turn_id,
-            ),
-            metadata={"llmUsage": llm_usage} if llm_usage is not None else None,
-        )
+            )
+            if mental_snapshot is not None:
+                assistant_entry["mental_snapshot"] = mental_snapshot
+            normalized_feedback_events = _normalize_message_feedback_events(feedback_events_for_result)
+            if normalized_feedback_events:
+                assistant_entry["feedback_events"] = normalized_feedback_events
+            if llm_usage is not None:
+                assistant_entry["metadata"] = {
+                    **(assistant_entry.get("metadata") if isinstance(assistant_entry.get("metadata"), dict) else {}),
+                    "llmUsage": llm_usage,
+                }
+        else:
+            error_type = ""
+            turn_error = None
+            assistant_entry = _make_chat_message(
+                "assistant",
+                assistant_text,
+                _extract_chat_tool_calls(result),
+                thought=_extract_chat_thought(result, assistant_text),
+                feedback_events=feedback_events_for_result,
+                mental_snapshot=_build_turn_mental_snapshot(
+                    result,
+                    lang,
+                    mental_model_enabled=mental_model_enabled,
+                    session_workspace=session_workspace or _ensure_session_workspace(session_id),
+                    session_id=session_id,
+                    turn_id=turn_id,
+                ),
+                metadata={"llmUsage": llm_usage} if llm_usage is not None else None,
+            )
         if isinstance(result, dict):
             assistant_entry["toolCalls"] = _normalize_message_tool_calls(_extract_chat_tool_calls(result))
             feedback_events = _normalize_message_feedback_events(feedback_events_for_result)
@@ -7679,8 +7742,11 @@ def _persist_session_turn_result(
         if context_composition is not None:
             conversation["last_context_composition"] = context_composition
         conversation["last_cache_composition"] = cache_composition
-        conversation.pop("last_turn_error", None)
-        conversation.pop("lastTurnError", None)
+        if runtime_failed and turn_error is not None:
+            conversation["last_turn_error"] = turn_error
+        else:
+            conversation.pop("last_turn_error", None)
+            conversation.pop("lastTurnError", None)
         conversation["last_turn_status"] = (
             "failed"
             if final_status in {"failed_provider", "failed_runtime", "failed"}
@@ -7707,6 +7773,8 @@ def _persist_session_turn_result(
             turn_id=turn_id,
             status=final_status,
             summary=assistant_text,
+            error_type=error_type if runtime_failed else "",
+            error=assistant_text if runtime_failed else "",
             finished_at=assistant_entry["timestamp"],
             updated_at=assistant_entry["timestamp"],
         )
@@ -7714,7 +7782,7 @@ def _persist_session_turn_result(
             session_id,
             turn_id,
             assistant_entry,
-            event="assistant_result",
+            event="assistant_turn_error" if runtime_failed else "assistant_result",
             status=final_status,
         )
         _record_session_turn_tool_calls(session_id, turn_id, tool_calls)
@@ -7766,6 +7834,9 @@ def _persist_session_turn_result(
             fields={
                 "resultStatus": result_status or "completed",
                 "finalStatus": final_status,
+                "errorType": error_type,
+                "providerFailure": False,
+                "visibleErrorMessagePersisted": bool(runtime_failed),
                 "activeTaskStatus": str((cycle_active_task or {}).get("status") or "").strip(),
                 "activeTaskOutcome": str(((cycle_active_task or {}).get("metadata") or {}).get("outcome") or "").strip(),
                 "activeTaskChangedFileCount": len(list((cycle_active_task or {}).get("changed_files") or [])),
@@ -7778,6 +7849,14 @@ def _persist_session_turn_result(
                 "phantomImageSuccess": phantom_image_success,
             },
         )
+        if runtime_failed and turn_error is not None:
+            _record_session_turn_error(
+                session_id,
+                turn_error,
+                raw_error=assistant_text,
+                status=final_status,
+                active_task=cycle_active_task,
+            )
         if phantom_image_success:
             _record_session_turn_lifecycle_event(
                 session_id,
@@ -7794,7 +7873,7 @@ def _persist_session_turn_result(
     _record_session_cycle_message(
         session_id,
         assistant_entry,
-        event="assistant_result",
+        event="assistant_turn_error" if runtime_failed else "assistant_result",
         status=final_status,
         active_task=cycle_active_task,
     )
@@ -8131,13 +8210,19 @@ def _persist_session_turn_failure(session_id: str, context: dict[str, Any], exc:
                 related_event_code="conversation.turn_error",
             )
             return
-        assistant_entry = _make_chat_message("assistant", summary)
-        conversation["messages"] = messages + [assistant_entry]
-        conversation.pop("last_turn_error", None)
-        conversation.pop("lastTurnError", None)
+        turn_error = _make_session_turn_error(raw_error, lang=lang, error_type=error_type, turn_id=turn_id)
+        error_entry = _make_turn_error_chat_message(
+            turn_error,
+            error_type=error_type,
+            turn_id=turn_id,
+            provider_failure=False,
+        )
+        timestamp = str(error_entry.get("timestamp") or _now_timestamp()).strip()
+        conversation["messages"] = messages + [error_entry]
+        conversation["last_turn_error"] = turn_error
         conversation["last_turn_status"] = "failed"
-        conversation["updated_at"] = assistant_entry["timestamp"]
-        payload["updated_at"] = assistant_entry["timestamp"]
+        conversation["updated_at"] = timestamp
+        payload["updated_at"] = timestamp
         save_chat_state(PROJECT_ROOT, payload)
         _clear_session_live_output(session_id, turn_id=turn_id)
         _persist_chat_turn_work_run(
@@ -8147,14 +8232,14 @@ def _persist_session_turn_failure(session_id: str, context: dict[str, Any], exc:
             summary=work_run_summary,
             error_type=error_type,
             error=raw_error,
-            finished_at=assistant_entry["timestamp"],
-            updated_at=assistant_entry["timestamp"],
+            finished_at=timestamp,
+            updated_at=timestamp,
         )
         _record_session_turn_visible_message(
             session_id,
             turn_id,
-            assistant_entry,
-            event="assistant_failure",
+            error_entry,
+            event="assistant_turn_error",
             status="failed",
         )
         _record_session_turn_result_log(
@@ -8173,14 +8258,20 @@ def _persist_session_turn_failure(session_id: str, context: dict[str, Any], exc:
             fields={
                 "errorType": error_type,
                 "providerFailure": False,
+                "visibleErrorMessagePersisted": True,
                 "messageCount": len(conversation.get("messages") or []),
-                "assistantTextLength": len(str(assistant_entry.get("content") or "")),
             },
+        )
+        _record_session_turn_error(
+            session_id,
+            turn_error,
+            raw_error=raw_error,
+            status="failed",
         )
     _record_session_cycle_message(
         session_id,
-        assistant_entry,
-        event="assistant_failure",
+        error_entry,
+        event="assistant_turn_error",
         status="failed",
     )
 
@@ -10028,6 +10119,21 @@ def _make_provider_failure_chat_message(
     error_type: str,
     turn_id: str,
 ) -> dict[str, Any]:
+    return _make_turn_error_chat_message(
+        turn_error,
+        error_type=error_type,
+        turn_id=turn_id,
+        provider_failure=str(error_type or "").strip() != "prompt_cache_unsupported",
+    )
+
+
+def _make_turn_error_chat_message(
+    turn_error: dict[str, Any],
+    *,
+    error_type: str,
+    turn_id: str,
+    provider_failure: bool,
+) -> dict[str, Any]:
     timestamp = str(turn_error.get("timestamp") or _now_timestamp()).strip()
     reason_summary = str(turn_error.get("reason_summary") or turn_error.get("reasonSummary") or "").strip()
     reason_detail = str(turn_error.get("reason_detail") or turn_error.get("reasonDetail") or "").strip()
@@ -10042,7 +10148,7 @@ def _make_provider_failure_chat_message(
             "errorType": str(error_type or "").strip(),
             "turnId": str(turn_id or "").strip(),
             "recoverable": bool(turn_error.get("recoverable")),
-            "providerFailure": str(error_type or "").strip() != "prompt_cache_unsupported",
+            "providerFailure": bool(provider_failure),
             "reasonCode": str(turn_error.get("reason_code") or turn_error.get("reasonCode") or "").strip(),
             "reasonSummary": reason_summary,
             "reasonDetail": reason_detail,
