@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 from core.web.services.memory_service import (
     create_user_memory_item,
     delete_memory_item,
+    get_memory_item_detail,
     get_memory_overview,
     get_memory_usage_contract,
     restore_memory_item,
@@ -31,8 +32,8 @@ class MemoryItemPayload(BaseModel):
 
 
 @router.get("/memory/overview")
-def memory_overview() -> dict:
-    return get_memory_overview()
+def memory_overview(includeContent: bool = True) -> dict:
+    return get_memory_overview(include_content=includeContent)
 
 
 @router.get("/memory/usage-contract")
@@ -87,6 +88,14 @@ def memory_item_create(payload: MemoryItemPayload) -> dict:
         return create_user_memory_item(payload.model_dump())
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/memory/items/{section_id}/{item_id}")
+def memory_item_detail(section_id: str, item_id: str) -> dict:
+    payload = get_memory_item_detail(section_id, item_id)
+    if payload is None:
+        raise HTTPException(status_code=404, detail="Memory item not found.")
+    return payload
 
 
 @router.patch("/memory/items/{section_id}/{item_id}")

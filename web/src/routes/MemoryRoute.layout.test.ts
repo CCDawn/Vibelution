@@ -13,7 +13,10 @@ const graphWorkerSource = readFileSync(new URL("./memoryGraphLayout.worker.ts", 
 describe("MemoryRoute layout contract", () => {
   it("reads the read-only memory overview endpoint through the shared query key", () => {
     expect(routeSource).toContain("queryKeys.memoryOverview()");
-    expect(routeSource).toContain('fetchJson<MemoryOverview>("/api/memory/overview")');
+    expect(routeSource).toContain('fetchJson<MemoryOverview>("/api/memory/overview?includeContent=false")');
+    expect(routeSource).toContain("queryKeys.memoryItemDetail(activeSection?.id ?? \"\", activeItem?.id ?? \"\")");
+    expect(routeSource).toContain("/api/memory/items/${encodeURIComponent(activeSection?.id ?? \"\")}/${encodeURIComponent(activeItem?.id ?? \"\")}");
+    expect(routeSource).toContain("queryKeys.memoryItemDetails()");
   });
 
   it("exposes manual memory management actions through guarded API mutations", () => {
@@ -341,10 +344,10 @@ describe("MemoryRoute layout contract", () => {
   });
 
   it("surfaces agent visibility, prompt injection, and raw content in the detail pane", () => {
-    expect(routeSource).toContain("activeItem.agentVisible");
-    expect(routeSource).toContain("activeItem.inPrompt");
+    expect(routeSource).toContain("resolvedActiveItem.agentVisible");
+    expect(routeSource).toContain("resolvedActiveItem.inPrompt");
     expect(routeSource).toContain("<details className={styles.rawPanel} open={showEditor}>");
-    expect(routeSource).toContain("activeItem.content");
+    expect(routeSource).toContain("resolvedActiveItem.content");
     expect(routeSource).toContain("copySourceSummary");
     expect(routeSource).toContain("copySourcePath");
     expect(routeSource).toContain("copyRawContentAction");
@@ -412,7 +415,7 @@ describe("MemoryRoute layout contract", () => {
 
     expect(impactIndex).toBeGreaterThan(0);
     expect(rawPanelIndex).toBeGreaterThan(impactIndex);
-    expect(routeSource).toContain("impactCopy(copy, activeItem)");
+    expect(routeSource).toContain("impactCopy(copy, resolvedActiveItem)");
   });
 
   it("makes source origin and inspection actions directly visible in the UI", () => {
@@ -423,7 +426,7 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain("styles.copyNotice");
     expect(routeSource).toContain("section.sourceApi");
     expect(routeSource).toContain("handleCopySourcePath");
-    expect(routeSource).toContain("activeItem.path || activeItem.source || activeSection.sourcePath");
+    expect(routeSource).toContain("resolvedActiveItem.path || resolvedActiveItem.source || activeSection.sourcePath");
   });
 
   it("keeps inspection actions compact enough for narrow detail panes", () => {
