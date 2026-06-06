@@ -57,6 +57,28 @@ def _use_fake_local_research_config(monkeypatch):
     monkeypatch.setattr(team_workflow_orchestration_service, "build_effective_config", lambda public_config: public_config)
 
 
+def _steward_pack_output(*, candidate_ids=None, confidence=0.61):
+    normalized_candidate_ids = list(candidate_ids or ["hypothesis-1", "review-1"])
+    return {
+        "candidateType": "review_record",
+        "sourceRefs": [{"type": "paper", "id": "paper-1", "label": "Paper 1"}],
+        "evidenceRefs": [{"type": "review", "id": "review-1", "label": "Review 1"}],
+        "claims": [{"claim": "Candidate is ready for knowledge governance.", "sourceRef": "paper-1"}],
+        "candidateIds": normalized_candidate_ids,
+        "targetDomain": "challenge_cup_neuro_algorithm",
+        "sourceTrace": {"sourceIds": ["paper-1"], "reviewRecordIds": ["review-1"], "candidateGraphId": "graph-1"},
+        "riskSummary": "Evidence is traceable, but experiment remains a smoke test.",
+        "proposalPayload": {"title": "Govern context-gated routing hypothesis", "summary": "Add the hypothesis as governed knowledge."},
+        "ratingSuggestion": {"importanceLevel": "high", "confidence": 0.66, "stability": "evolving", "reviewPriority": "elevated"},
+        "approvalRequired": True,
+        "uncertainty": ["experiment not yet validated"],
+        "riskFlags": ["approval_required"],
+        "confidence": confidence,
+        "nextAction": "send_to_ingestion_approval_gate",
+        "requiresReview": True,
+    }
+
+
 def test_challenge_cup_workflow_registers_candidate_and_decides_transfer(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     team = team_service.create_team(name="挑战杯科研团队")
@@ -1318,6 +1340,236 @@ def test_steward_pack_approval_gate_applies_pending_ingestion_to_formal_knowledg
     assert migrated_target["importanceLevel"] == "high"
     assert migrated_target["status"] == "pending"
     assert knowledge_items["summary"]["itemCount"] == 1
+
+
+def test_knowledge_ingestion_status_tracks_pending_and_official_sync(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    steward = agent_directory_service.create_agent_instance(display_name="Knowledge Steward Agent")
+    team = team_service.create_team(
+        name="挑战杯科研团队",
+        members=[{"agentId": steward["agentId"], "role": "steward"}],
+    )
+    knowledge_base = team_knowledge_service.create_knowledge_base(
+        team["teamId"],
+        name="Challenge Cup Governed Knowledge",
+        actor_agent_id=steward["agentId"],
+    )
+    team_workflow_orchestration_service.ensure_team_workflow_orchestration(
+        team["teamId"],
+        owner_agent_id="Research Coordination Agent",
+    )
+    team_workflow_orchestration_service.register_candidate_source(
+        team["teamId"],
+        {
+            "title": "Neuromodulation review",
+            "sourceUrl": "https://example.test/paper",
+            "sourceKind": "paper",
+            "createdByAgent": "Knowledge Collection Agent",
+        },
+    )
+    paper_note_candidate = team_workflow_orchestration_service.record_local_research_model_output(
+        team["teamId"],
+        {
+            "taskType": "paper_note_draft",
+            "title": "Paper note draft",
+            "createdByAgent": "Paper Note Extraction Agent",
+            "output": {
+                "candidateType": "paper_note",
+                "sourceRefs": [{"type": "paper", "id": "paper-1", "label": "Paper 1"}],
+                "evidenceRefs": [{"type": "page", "id": "p3", "label": "page 3"}],
+                "claims": [{"claim": "Observed modulation effect.", "sourceRef": "paper-1"}],
+                "keyFindings": [
+                    {
+                        "finding": "Observed modulation effect.",
+                        "sourceRef": "paper-1",
+                        "page": "3",
+                        "citation": "Paper 1, p.3",
+                    }
+                ],
+                "methods": ["controlled experiment"],
+                "limitations": ["small sample"],
+                "citations": [{"sourceRef": "paper-1", "page": "3", "citation": "Paper 1, p.3"}],
+                "uncertainty": [],
+                "riskFlags": [],
+                "confidence": 0.72,
+                "nextAction": "send_to_mechanism_extraction",
+                "requiresReview": False,
+            },
+        },
+    )["candidate"]
+    paper_transfer = team_workflow_orchestration_service.submit_transfer_request(
+        team["teamId"],
+        {
+            "candidateId": paper_note_candidate["candidateId"],
+            "fromNode": "paper_note",
+            "toNode": "research_review",
+            "requestedByAgent": "Evidence Review Agent",
+            "reason": "Paper note has citation anchors.",
+        },
+    )["transfer"]
+    team_workflow_orchestration_service.decide_transfer_request(
+        team["teamId"],
+        paper_transfer["transferId"],
+        {
+            "decision": "approved",
+            "decidedByAgent": "Research Coordination Agent",
+            "targetState": "approved_to_ingest",
+        },
+    )
+    mechanism_candidate = team_workflow_orchestration_service.record_local_research_model_output(
+        team["teamId"],
+        {
+            "taskType": "neuro_mechanism_extract",
+            "title": "Neuro mechanism draft",
+            "createdByAgent": "Neuro Mechanism Extraction Agent",
+            "output": {
+                "candidateType": "neuro_mechanism",
+                "sourceRefs": [{"type": "paper", "id": "paper-1", "label": "Paper 1"}],
+                "evidenceRefs": [{"type": "page", "id": "p3", "label": "page 3"}],
+                "claims": [{"claim": "Candidate mechanism.", "sourceRef": "paper-1"}],
+                "paperNoteIds": [paper_note_candidate["candidateId"]],
+                "description": "Neuromodulation changes adaptive routing.",
+                "brainSystems": ["prefrontal cortex"],
+                "cognitiveFunctions": ["adaptive control"],
+                "experimentalPhenomena": ["task-dependent modulation"],
+                "authorInterpretation": "Authors link modulation to control.",
+                "projectInterpretation": "Candidate routing analogy only.",
+                "uncertainty": [],
+                "riskFlags": [],
+                "confidence": 0.61,
+                "nextAction": "send_to_algorithm_hypothesis",
+                "requiresReview": False,
+            },
+        },
+    )["candidate"]
+    mechanism_transfer = team_workflow_orchestration_service.submit_transfer_request(
+        team["teamId"],
+        {
+            "candidateId": mechanism_candidate["candidateId"],
+            "fromNode": "neuro_mechanism",
+            "toNode": "research_review",
+            "requestedByAgent": "Evidence Review Agent",
+            "reason": "Mechanism candidate has paper note support.",
+        },
+    )["transfer"]
+    team_workflow_orchestration_service.decide_transfer_request(
+        team["teamId"],
+        mechanism_transfer["transferId"],
+        {
+            "decision": "approved",
+            "decidedByAgent": "Research Coordination Agent",
+            "targetState": "approved_to_ingest",
+        },
+    )
+    hypothesis_candidate = team_workflow_orchestration_service.record_local_research_model_output(
+        team["teamId"],
+        {
+            "taskType": "algorithm_hypothesis_draft",
+            "title": "Algorithm hypothesis draft",
+            "createdByAgent": "Algorithm Hypothesis Agent",
+            "output": {
+                "candidateType": "algorithm_hypothesis",
+                "sourceRefs": [{"type": "paper", "id": "paper-1", "label": "Paper 1"}],
+                "evidenceRefs": [{"type": "mechanism", "id": mechanism_candidate["candidateId"], "label": "Mechanism 1"}],
+                "claims": [{"claim": "Context-gated routing may improve adaptation.", "sourceRef": "paper-1"}],
+                "neuroMechanismIds": [mechanism_candidate["candidateId"]],
+                "hypothesis": "Context-gated routing improves adaptation under shifting tasks.",
+                "baseline": "standard MoE router",
+                "expectedBenefit": "better task adaptation at equal parameter count",
+                "expectedComputeCost": "one small gating MLP and no extra experts",
+                "experimentPlan": {
+                    "dataset": "synthetic task-switch benchmark",
+                    "metric": "validation accuracy and routing entropy",
+                    "baseline": "standard MoE router",
+                    "smokePlan": "train 200 mini-batches and compare metric direction",
+                },
+                "uncertainty": [],
+                "riskFlags": [],
+                "confidence": 0.53,
+                "nextAction": "send_to_research_review",
+                "requiresReview": False,
+            },
+        },
+    )["candidate"]
+    review_transfer = team_workflow_orchestration_service.submit_transfer_request(
+        team["teamId"],
+        {
+            "candidateId": hypothesis_candidate["candidateId"],
+            "fromNode": "algorithm_hypothesis",
+            "toNode": "research_review",
+            "requestedByAgent": "Evidence Review Agent",
+            "reason": "Hypothesis prefilter passed for steward ingestion pack.",
+        },
+    )["transfer"]
+    hypothesis_candidate = team_workflow_orchestration_service.decide_transfer_request(
+        team["teamId"],
+        review_transfer["transferId"],
+        {
+            "decision": "approved",
+            "decidedByAgent": "Research Coordination Agent",
+            "targetState": "approved_to_ingest",
+        },
+    )["candidate"]
+    steward_candidate = team_workflow_orchestration_service.record_local_research_model_output(
+        team["teamId"],
+        {
+            "taskType": "steward_pack_draft",
+            "title": "Steward ingestion pack draft",
+            "createdByAgent": steward["agentId"],
+            "output": _steward_pack_output(candidate_ids=[hypothesis_candidate["candidateId"]]),
+        },
+    )["candidate"]
+
+    pending_candidate = team_workflow_orchestration_service.submit_steward_pack_to_knowledge_ingestion(
+        team["teamId"],
+        steward_candidate["candidateId"],
+        {"knowledgeBaseId": knowledge_base["knowledgeBaseId"], "proposedByAgentId": steward["agentId"]},
+    )["candidate"]
+    pending_status = team_workflow_orchestration_service.get_knowledge_ingestion_status(team["teamId"])
+
+    assert pending_status["status"] == "needs_review"
+    assert pending_status["summary"]["sourceCandidateCount"] == 1
+    assert pending_status["summary"]["localDraftCandidateCount"] == 4
+    assert pending_status["summary"]["pendingKnowledgeReviewCandidateCount"] == 1
+    assert pending_status["summary"]["pendingProposalCount"] == 1
+    assert pending_status["summary"]["formalKnowledgeItemCount"] == 0
+    assert pending_status["officialBoundary"]["writesOfficialKnowledge"] is False
+    assert pending_status["officialBoundary"]["writesOfficialGraph"] is False
+    assert pending_status["officialBoundary"]["graphStatus"] == "candidate_graph_preview_only"
+    assert any(item["code"] == "knowledge_proposal_pending_review" for item in pending_status["actionItems"])
+    assert pending_status["knowledgeBases"][0]["stats"]["pendingProposalCount"] == 1
+
+    team_workflow_orchestration_service.review_steward_pack_knowledge_ingestion(
+        team["teamId"],
+        pending_candidate["candidateId"],
+        {
+            "knowledgeBaseId": knowledge_base["knowledgeBaseId"],
+            "reviewedByAgentId": steward["agentId"],
+            "decision": "approved",
+            "resolutionNote": "Evidence accepted for official knowledge.",
+        },
+    )
+    ready_status = team_workflow_orchestration_service.get_knowledge_ingestion_status(team["teamId"])
+
+    assert ready_status["status"] == "ready"
+    assert ready_status["summary"]["pendingProposalCount"] == 0
+    assert ready_status["summary"]["formalKnowledgeItemCount"] == 1
+    assert ready_status["summary"]["officialSyncedCandidateCount"] == 1
+    assert ready_status["summary"]["officialGraphSyncedCandidateCount"] == 1
+    assert ready_status["officialBoundary"]["writesOfficialKnowledge"] is True
+    assert ready_status["officialBoundary"]["writesOfficialRag"] is False
+    assert ready_status["officialBoundary"]["writesOfficialGraph"] is True
+    assert ready_status["officialBoundary"]["ragStatus"] == "queryable_via_reviewed_team_knowledge"
+    assert ready_status["officialBoundary"]["graphStatus"] == "official_research_trace_synced"
+    assert ready_status["actionItems"] == [
+        {
+            "code": "knowledge_ingestion_operational",
+            "severity": "ready",
+            "message": "知识搜集、筛选、共享记忆和图谱同步链路已跑通。",
+            "nextAction": "",
+            "workflowNode": "official_sync",
+        }
+    ]
 
 
 def test_steward_pack_approval_gate_rejects_pending_ingestion_without_formal_write(tmp_path, monkeypatch):
