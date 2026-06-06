@@ -138,6 +138,108 @@ def test_transfer_decision_rejects_non_owner_agent(tmp_path, monkeypatch):
         raise AssertionError("non-owner transfer decision should fail")
 
 
+def test_transfer_returned_moves_candidate_to_rework_node(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    workflow = team_workflow_orchestration_service.ensure_team_workflow_orchestration(
+        team["teamId"],
+        owner_agent_id="Research Coordination Agent",
+    )
+    candidate = team_workflow_orchestration_service.register_candidate_source(
+        team["teamId"],
+        {
+            "title": "Hypothesis note needing evidence",
+            "sourceKind": "paper",
+            "createdByAgent": "Evidence Review Agent",
+        },
+    )["candidate"]
+    transfer = team_workflow_orchestration_service.submit_transfer_request(
+        team["teamId"],
+        {
+            "candidateId": candidate["candidateId"],
+            "fromNode": "research_review",
+            "toNode": "algorithm_hypothesis",
+            "requestedByAgent": "Evidence Review Agent",
+            "reason": "Experiment plan is not testable enough for steward handoff.",
+            "metadata": {
+                "requiredChanges": ["Add dataset, metric, baseline, and smokePlan."],
+                "reasonCode": "experiment_plan_gap",
+            },
+        },
+    )["transfer"]
+
+    response = team_workflow_orchestration_service.decide_transfer_request(
+        team["teamId"],
+        transfer["transferId"],
+        {
+            "decision": "returned",
+            "decidedByAgent": workflow["ownerAgentId"],
+            "targetState": "hypothesis_needs_revision",
+            "decisionNote": "Return to the hypothesis agent for the smallest upstream fix.",
+        },
+    )
+
+    assert response["transfer"]["status"] == "returned"
+    assert response["transfer"]["targetState"] == "hypothesis_needs_revision"
+    assert response["candidate"]["currentWorkflowNode"] == "algorithm_hypothesis"
+    assert response["candidate"]["currentState"] == "hypothesis_needs_revision"
+    assert response["candidate"]["qualityStatus"] == "needs_revision"
+    assert response["candidate"]["transitionHistory"][-1]["toNode"] == "algorithm_hypothesis"
+    assert response["candidate"]["transitionHistory"][-1]["metadata"]["requiredChanges"] == [
+        "Add dataset, metric, baseline, and smokePlan."
+    ]
+    assert "pendingTransferId" not in response["candidate"]
+
+
+def test_transfer_rejected_archives_candidate_and_excludes_graph(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    workflow = team_workflow_orchestration_service.ensure_team_workflow_orchestration(
+        team["teamId"],
+        owner_agent_id="Research Coordination Agent",
+    )
+    candidate = team_workflow_orchestration_service.register_candidate_source(
+        team["teamId"],
+        {
+            "title": "Unsupported dopamine routing analogy",
+            "sourceKind": "paper",
+            "sourceUrl": "https://example.test/rejected",
+            "createdByAgent": "Evidence Review Agent",
+        },
+    )["candidate"]
+    transfer = team_workflow_orchestration_service.submit_transfer_request(
+        team["teamId"],
+        {
+            "candidateId": candidate["candidateId"],
+            "fromNode": "research_review",
+            "toNode": "rejection_archive",
+            "requestedByAgent": "Evidence Review Agent",
+            "reason": "The analogy is unsupported by the cited source.",
+            "evidenceRefs": [{"type": "review_record", "id": "review-unsupported", "label": "Unsupported analogy review"}],
+        },
+    )["transfer"]
+
+    rejected = team_workflow_orchestration_service.decide_transfer_request(
+        team["teamId"],
+        transfer["transferId"],
+        {
+            "decision": "rejected",
+            "decidedByAgent": workflow["ownerAgentId"],
+            "decisionNote": "Archive until a reopen reason is provided by the review gate.",
+        },
+    )
+    graph = team_workflow_orchestration_service.build_candidate_graph(team["teamId"], {})
+
+    assert rejected["transfer"]["status"] == "rejected"
+    assert rejected["candidate"]["currentWorkflowNode"] == "rejection_archive"
+    assert rejected["candidate"]["currentState"] == "rejected"
+    assert rejected["candidate"]["qualityStatus"] == "rejected"
+    assert rejected["candidate"]["metadata"]["rejectionArchive"]["status"] == "archived"
+    assert rejected["candidate"]["metadata"]["rejectionArchive"]["reopenRequiresTransfer"] is True
+    assert graph["graph"]["summary"]["archivedCandidateCount"] == 1
+    assert candidate["candidateId"] not in {node["candidateId"] for node in graph["graph"]["nodes"]}
+
+
 def test_local_research_model_task_and_output_records_candidate(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     team = team_service.create_team(name="挑战杯科研团队")
