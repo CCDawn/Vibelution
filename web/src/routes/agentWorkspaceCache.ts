@@ -24,6 +24,10 @@ export type AgentPurgeResponse = {
   purgeSummary?: { dataRetention?: string };
 };
 
+export type AgentUpdateResponse = AgentInstance & Partial<AgentConfigWorkspaceAgent> & {
+  archiveSummary?: AgentArchiveResponse["archiveSummary"];
+};
+
 const ARCHIVED_BOUNDARY: AgentBoundary = {
   type: "archived",
   label: "已归档 Agent",
@@ -36,7 +40,11 @@ const ARCHIVED_BOUNDARY: AgentBoundary = {
   requiresTeamMembership: "false",
 };
 
-function removeAgentFromModeBinding(binding: AgentModeBindingItem, agentId: string): AgentModeBindingItem {
+function removeAgentFromModeBinding(
+  binding: AgentModeBindingItem,
+  agentId: string,
+  options: { preserveExclusion: boolean },
+): AgentModeBindingItem {
   const availableAgentIds = (binding.availableAgentIds ?? []).filter((id) => String(id || "").trim() !== agentId);
   const defaultAgentId = String(binding.defaultAgentId || "").trim() === agentId ? "" : binding.defaultAgentId;
   const nextSlots = Object.fromEntries(
@@ -52,16 +60,22 @@ function removeAgentFromModeBinding(binding: AgentModeBindingItem, agentId: stri
     pool: (binding.pool ?? []).filter((id) => String(id || "").trim() !== agentId),
     flowBindings: nextFlowBindings,
     slots: nextSlots,
-    excludedAgentIds: Array.from(new Set([...(binding.excludedAgentIds ?? []), agentId])),
+    excludedAgentIds: options.preserveExclusion
+      ? Array.from(new Set([...(binding.excludedAgentIds ?? []), agentId]))
+      : (binding.excludedAgentIds ?? []).filter((id) => String(id || "").trim() !== agentId),
   };
 }
 
 function removeAgentFromModeBindings(
   modeBindings: AgentConfigWorkspace["modeBindings"],
   agentId: string,
+  options: { preserveExclusion: boolean },
 ): AgentConfigWorkspace["modeBindings"] {
   return Object.fromEntries(
-    Object.entries(modeBindings ?? {}).map(([mode, binding]) => [mode, removeAgentFromModeBinding(binding, agentId)]),
+    Object.entries(modeBindings ?? {}).map(([mode, binding]) => [
+      mode,
+      removeAgentFromModeBinding(binding, agentId, options),
+    ]),
   );
 }
 
@@ -275,7 +289,7 @@ export function archivedWorkspaceCache(
     return workspace;
   }
   const removedRoomIds = new Set((archivedAgent.archiveSummary?.removedFromRoomIds ?? []).map((id) => String(id || "").trim()));
-  const nextModeBindings = removeAgentFromModeBindings(workspace.modeBindings, agentId);
+  const nextModeBindings = removeAgentFromModeBindings(workspace.modeBindings, agentId, { preserveExclusion: true });
   const nextChatRooms = removeAgentFromChatRooms(workspace.chatRooms, agentId, removedRoomIds);
   const nextAgents = workspace.agents.map((agent) =>
     agent.agentId === agentId ? archiveAgentInWorkspace(agent, archivedAgent) : agent,
@@ -299,6 +313,36 @@ export function archivedWorkspaceCache(
   };
 }
 
+export function updatedAgentWorkspaceCache(
+  workspace: AgentConfigWorkspace | undefined,
+  updatedAgent: AgentUpdateResponse,
+): AgentConfigWorkspace | undefined {
+  if (!workspace) {
+    return workspace;
+  }
+  if (updatedAgent.status === "archived" && updatedAgent.archiveSummary) {
+    return archivedWorkspaceCache(workspace, updatedAgent);
+  }
+  const nextAgents = workspace.agents.map((agent) =>
+    agent.agentId === updatedAgent.agentId
+      ? {
+          ...agent,
+          ...updatedAgent,
+          references: updatedAgent.references ?? agent.references,
+          health: updatedAgent.health ?? agent.health,
+          runtimeStatus: updatedAgent.runtimeStatus ?? agent.runtimeStatus,
+          dialogueModel: updatedAgent.dialogueModel ?? agent.dialogueModel,
+          llmBindingModels: updatedAgent.llmBindingModels ?? agent.llmBindingModels,
+          promptTemplate: updatedAgent.promptTemplate ?? agent.promptTemplate,
+        }
+      : agent,
+  );
+  return {
+    ...workspace,
+    agents: nextAgents,
+  };
+}
+
 export function purgedWorkspaceCache(
   workspace: AgentConfigWorkspace | undefined,
   purgedAgentId: string,
@@ -310,7 +354,7 @@ export function purgedWorkspaceCache(
   if (!agentId) {
     return workspace;
   }
-  const nextModeBindings = removeAgentFromModeBindings(workspace.modeBindings, agentId);
+  const nextModeBindings = removeAgentFromModeBindings(workspace.modeBindings, agentId, { preserveExclusion: false });
   const nextChatRooms = removeAgentFromChatRooms(workspace.chatRooms, agentId, new Set());
   const nextReferences = { ...workspace.references };
   delete nextReferences[agentId];

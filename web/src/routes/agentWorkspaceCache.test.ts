@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import type { AgentConfigWorkspace, AgentConfigWorkspaceAgent } from "../api/types";
-import { archivedWorkspaceCache, purgedWorkspaceCache, type AgentArchiveResponse } from "./agentWorkspaceCache";
+import {
+  archivedWorkspaceCache,
+  purgedWorkspaceCache,
+  updatedAgentWorkspaceCache,
+  type AgentArchiveResponse,
+} from "./agentWorkspaceCache";
 
 function agent(agentId: string, overrides: Partial<AgentConfigWorkspaceAgent> = {}): AgentConfigWorkspaceAgent {
   return {
@@ -141,6 +146,7 @@ function workspace(): AgentConfigWorkspace {
         pool: ["agent-alpha"],
         flowBindings: { reviewer: "agent-alpha" },
         slots: { lead: "agent-alpha" },
+        excludedAgentIds: ["agent-legacy"],
         createdAt: "2026-06-01T00:00:00Z",
         updatedAt: "2026-06-01T00:00:00Z",
       },
@@ -207,6 +213,7 @@ describe("agent workspace cache patching", () => {
     expect(next?.modeBindings.chat.pool).toEqual([]);
     expect(next?.modeBindings.chat.flowBindings).toEqual({});
     expect(next?.modeBindings.chat.slots.lead).toBe("");
+    expect(next?.modeBindings.chat.excludedAgentIds).toEqual(["agent-legacy", "agent-alpha"]);
     expect(next?.chatRooms[0].agentIds).toEqual(["agent-beta"]);
     expect(next?.chatRooms[0].participantCount).toBe(1);
     expect(next?.health.status).toBe("warning");
@@ -229,12 +236,33 @@ describe("agent workspace cache patching", () => {
     });
   });
 
+  it("treats a PATCH status archive response like the archive mutation cache patch", () => {
+    const archived: AgentArchiveResponse = {
+      ...workspace().agents[0],
+      status: "archived",
+      archiveSummary: { removedFromRoomIds: ["room-a"], dataRetention: "archived_only", source: "patch_status" },
+    };
+
+    const next = updatedAgentWorkspaceCache(workspace(), archived);
+
+    expect(next?.modeBindings.chat.availableAgentIds).toEqual(["agent-beta"]);
+    expect(next?.chatRooms[0].agentIds).toEqual(["agent-beta"]);
+    expect(next?.groups.find((group) => group.id === "active")?.agentIds).toEqual(["agent-beta"]);
+    expect(next?.groups.find((group) => group.id === "archived")?.agentIds).toEqual(["agent-alpha"]);
+    expect(next?.summary).toMatchObject({
+      activeAgentCount: 1,
+      archivedAgentCount: 1,
+      healthIssueCount: 1,
+    });
+  });
+
   it("purges an Agent and keeps workspace counts and indexes aligned", () => {
     const next = purgedWorkspaceCache(workspace(), "agent-alpha");
 
     expect(next?.agents.map((item) => item.agentId)).toEqual(["agent-beta"]);
     expect(next?.references["agent-alpha"]).toBeUndefined();
     expect(next?.modeBindings.chat.availableAgentIds).toEqual(["agent-beta"]);
+    expect(next?.modeBindings.chat.excludedAgentIds).toEqual(["agent-legacy"]);
     expect(next?.chatRooms[0].agentIds).toEqual(["agent-beta"]);
     expect(next?.summary).toMatchObject({
       agentCount: 1,
