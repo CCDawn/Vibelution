@@ -25,6 +25,8 @@ USER_MANAGED_SOURCE_KIND = "user_managed_memory"
 USER_MANAGED_MEMORY_FILENAME = "user_memory_overrides.json"
 MANAGED_AUDIT_LIMIT = 200
 MANAGED_MEMORY_WRITE_LOCK = Lock()
+MEMORY_OVERVIEW_PERF_STATE_LOCK = Lock()
+MEMORY_OVERVIEW_WAS_SLOW = False
 MEMORY_OVERVIEW_SLOW_MS = 500.0
 SQLITE_APPEND_ONLY_TABLES = {"GitFileChange", "GitEntityChange"}
 
@@ -1716,7 +1718,13 @@ def _record_memory_overview_perf_event(
     duration_ms: float,
     section_timings: list[dict[str, Any]] | None = None,
 ) -> None:
-    if duration_ms < MEMORY_OVERVIEW_SLOW_MS:
+    global MEMORY_OVERVIEW_WAS_SLOW
+    slow = duration_ms >= MEMORY_OVERVIEW_SLOW_MS
+    recovered = False
+    with MEMORY_OVERVIEW_PERF_STATE_LOCK:
+        recovered = bool(MEMORY_OVERVIEW_WAS_SLOW and not slow)
+        MEMORY_OVERVIEW_WAS_SLOW = slow
+    if not slow and not recovered:
         return
     try:
         from core.web.services.runtime_scene_service import record_runtime_scene_event
@@ -1730,13 +1738,18 @@ def _record_memory_overview_perf_event(
             for section in sections
             if isinstance(section, dict)
         ]
+        event_code = "memory.overview.slow" if slow else "memory.overview.recovered"
         record_runtime_scene_event(
             "memory_service",
             "performance",
-            "memory.overview.slow",
-            message="Memory overview generation exceeded slow threshold",
-            level="warning",
-            outcome="observed",
+            event_code,
+            message=(
+                "Memory overview generation exceeded slow threshold"
+                if slow
+                else "Memory overview generation recovered below slow threshold"
+            ),
+            level="warning" if slow else "info",
+            outcome="observed" if slow else "recovered",
             fields={
                 "durationMs": round(float(duration_ms), 1),
                 "thresholdMs": MEMORY_OVERVIEW_SLOW_MS,
