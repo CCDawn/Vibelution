@@ -414,7 +414,7 @@
                 </div>
 <div class="service-row">
                   <b>data_processing_substrate</b>
-                  <span>待实施：通用数据处理底座，提供 DataPipelineProfile、DataProcessingRun、DataRecord、DataArtifact、ValidationReport、ReviewDecision、PublishTarget 和 ProcessingTrace；挑战杯通过 profile/adapter 复用。</span>
+                  <span>待实施：通用数据处理底座，提供 DataPipelineProfile、DataProcessingRun、DataRecord、DataArtifact、CollectionAssignment、SourceQualitySignal、ValidationReport、ReviewDecision、PublishTarget 和 ProcessingTrace；挑战杯通过 profile/adapter 复用。</span>
                 </div>
           </div>
         </div>
@@ -771,7 +771,7 @@
 <div class="blueprint-row compact">
               <b>通用数据处理底座计划</b>
               <strong>docs/plans/2026-06-07-general-data-processing-substrate.md</strong>
-              <span>下一步先实现通用 data-processing API/存储/状态机/适配器/UI，再把挑战杯科研流程作为 challenge_cup_research_ingestion profile 接入；不把通用能力写死到科研或神经学场景。</span>
+              <span>下一步先实现通用 data-processing API/存储/状态机/CollectionAssignment/适配器/UI，再把挑战杯科研流程作为 challenge_cup_research_ingestion profile 接入；不把数据搜集能力写死到科研或神经学场景。</span>
             </div>
 <div class="blueprint-row compact">
               <b>验证</b>
@@ -843,8 +843,8 @@
 <div class="blueprint-row">
               <b>M6.2</b>
               <strong>通用数据处理底座</strong>
-              <span>计划新增 domain-neutral data-processing substrate，把 intake、extract、transform、validate、review、publish 做成通用 pipeline/profile/adapter；挑战杯科研只是其中一个 profile。</span>
-              <span>通用层不写 challenge cup、神经学、steward 或 qwen 专名；正式 Team Knowledge/RAG/图谱写入通过 publish adapter 和审批门禁完成。</span>
+              <span>计划新增 domain-neutral data-processing substrate，把 intake、extract、transform、validate、review、publish 做成通用 pipeline/profile/adapter，并把数据搜集作为 Agent assignment 流程；挑战杯科研只是其中一个 profile。</span>
+              <span>通用层不写 challenge cup、神经学、steward 或 qwen 专名；数据搜集由 Data Intake Coordinator / Discovery / Acquisition / Extraction / Deduplication / Quality / Review 等功能 Agent 协作，正式 Team Knowledge/RAG/图谱写入通过 publish adapter 和审批门禁完成。</span>
             </div>
       </div>
       <div class="tag-row">
@@ -870,8 +870,8 @@
         <div class="agent-row">
         <b>01</b>
         <strong>Source Intake Agent</strong>
-        <span>可复用 research_broad / source-extraction 后端已接入</span>
-        <span>本地资料登记 / source_manifest 写入 / 文件路径/页码/来源可信度记录 / 本地 PDF sha256/pageAnchors/excerpt 抽取 / 可选 research_knowledge_query_tool 查重</span>
+        <span>现有 source-extraction 后端已接入；通用 CollectionAssignment Agent 分工待实现</span>
+        <span>Data Intake Coordinator 范围定义 / Data Discovery 候选发现 / Source Acquisition 原始 sourceRef/rawLocation 登记 / Content Extraction checksum/anchors/excerpt 抽取 / Source Deduplication 去重别名 / Source Quality 可信度/权限/风险信号 / source_manifest 写入</span>
         <span>确认资料允许分析、来源可信度和是否纳入本轮。</span>
       </div>
 <div class="agent-row">
