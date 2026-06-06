@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.10.35 - 2026-06-06
+
+- Moved the Launcher UI/API onto an independent control backend and port, so opening Launcher no longer auto-starts or focuses the Workbench.
+- Changed Workbench stop handling to preserve the Launcher control surface and avoid stopping the runtime manager through `--stop-manager`.
+- Added standalone Launcher `/api/health`, `/api/control-token`, and static shell serving so the Launcher can stay reachable while managing the project lifecycle.
+
+## 0.10.34 - 2026-06-06
+
+- Split the Launcher control-plane service into `core/launcher`, with Web `/api/launcher` routes acting as compatibility adapters.
+- Added active-work hard blocking for Launcher start/stop/restart flows so running chats, group rounds, evolution runs, and worktree tasks are not interrupted.
+- Added Launcher lifecycle evidence and status summaries for the managed Workbench bundle.
+
 ## 0.10.33 - 2026-06-06
 
 - Removed legacy `profileCards` and `profileCount` from the config workspace API contract, keeping Model Library access through `modelOptions`.

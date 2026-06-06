@@ -32,6 +32,7 @@ $frontendDepsStampPath = Join-Path $launcherDir "frontend-deps.stamp"
 $bindHost = "127.0.0.1"
 $configPath = Join-Path $projectDir "config.toml"
 $managedBackendMarkerArg = "--managed-by-launcher"
+$managedLauncherMarkerArg = "--managed-launcher-control"
 
 function Resolve-ConfiguredWorkbenchPort {
     param([int]$DefaultPort = 8000)
@@ -70,6 +71,62 @@ function Resolve-ConfiguredWorkbenchPort {
         if ([int]::TryParse($envPortValue, [ref]$envPort) -and $envPort -gt 0 -and $envPort -lt 65536) {
             $resolvedPort = $envPort
         }
+    }
+
+    return $resolvedPort
+}
+
+function Resolve-ConfiguredLauncherControlPort {
+    param(
+        [int]$DefaultPort = 8765,
+        [int]$WorkbenchPort = 8000
+    )
+
+    $resolvedPort = $DefaultPort
+    if (Test-Path $configPath) {
+        try {
+            $inLauncherBlock = $false
+            foreach ($line in Get-Content -LiteralPath $configPath -Encoding utf8) {
+                $trimmed = ([string]$line).Trim()
+                if ($trimmed -match '^\[(.+)\]$') {
+                    $inLauncherBlock = ($matches[1] -eq "launcher")
+                    continue
+                }
+                if (-not $inLauncherBlock) {
+                    continue
+                }
+                if ($trimmed -match '^control_port\s*=\s*"?([0-9]+)"?\s*(?:#.*)?$') {
+                    $candidate = 0
+                    if ([int]::TryParse($matches[1], [ref]$candidate) -and $candidate -gt 0 -and $candidate -lt 65536) {
+                        $resolvedPort = $candidate
+                    }
+                    break
+                }
+            }
+        } catch {
+        }
+    }
+
+    $envPortValue = $env:VIBELUTION_LAUNCHER_PORT
+    if (-not $envPortValue) {
+        $envPortValue = $env:AGENT_LAUNCHER_CONTROL_PORT
+    }
+    if ($envPortValue) {
+        $envPort = 0
+        if ([int]::TryParse($envPortValue, [ref]$envPort) -and $envPort -gt 0 -and $envPort -lt 65536) {
+            $resolvedPort = $envPort
+        }
+    }
+
+    if ($resolvedPort -eq $WorkbenchPort) {
+        $candidate = $DefaultPort
+        if ($candidate -eq $WorkbenchPort) {
+            $candidate = $WorkbenchPort + 1
+        }
+        while ($candidate -lt 65536 -and $candidate -eq $WorkbenchPort) {
+            $candidate += 1
+        }
+        $resolvedPort = $candidate
     }
 
     return $resolvedPort
@@ -115,9 +172,12 @@ function Resolve-ConfiguredWorkbenchWindowMode {
     return $resolvedMode
 }
 $port = Resolve-ConfiguredWorkbenchPort
+$launcherControlPort = Resolve-ConfiguredLauncherControlPort -WorkbenchPort $port
 $workbenchWindowMode = Resolve-ConfiguredWorkbenchWindowMode
 $url = "http://$bindHost`:$port"
 $healthUrl = "$url/api/health"
+$launcherControlUrl = "http://$bindHost`:$launcherControlPort"
+$launcherControlHealthUrl = "$launcherControlUrl/api/health"
 $mode = "single_service_bundled_edge_app"
 $mutexName = "Global\Vibelution.Workbench.Launcher"
 $selfProcessId = $PID
@@ -1858,6 +1918,34 @@ function Test-WebHealthy {
     }
 }
 
+function Test-LauncherControlHealthy {
+    try {
+        $response = Invoke-WebRequest -UseBasicParsing -Uri $launcherControlHealthUrl -TimeoutSec 2
+        return $response.StatusCode -eq 200
+    } catch {
+        return $false
+    }
+}
+
+function Wait-ForLauncherControlHealthy {
+    param(
+        [int]$ProcessId,
+        [int]$TimeoutSeconds = 25
+    )
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    while ((Get-Date) -lt $deadline) {
+        if (Test-LauncherControlHealthy) {
+            return $true
+        }
+        if ($ProcessId -gt 0 -and -not (Test-ProcessAlive $ProcessId)) {
+            return $false
+        }
+        Start-Sleep -Milliseconds 500
+    }
+    return $false
+}
+
 function Test-LauncherWorkRunStatusBlocksLifecycle {
     param([string]$Status)
 
@@ -3190,6 +3278,42 @@ function Get-ManagedBackendCandidatePids {
     return @($pids | Sort-Object -Unique)
 }
 
+function Get-ManagedLauncherControlCandidatePids {
+    $pids = New-Object System.Collections.Generic.List[int]
+    $state = Get-State
+    foreach ($propertyName in @("launcherBackendPid", "launcherBackendLaunchPid")) {
+        $trackedPid = [int](Get-ObjectPropertyValue -Object $state -Name $propertyName -Default 0)
+        if ($trackedPid -gt 0 -and (Test-ProcessAlive $trackedPid)) {
+            $process = Get-CimInstance Win32_Process -Filter "ProcessId = $trackedPid" -ErrorAction SilentlyContinue
+            $commandLine = [string](Get-LauncherProcessPropertyValue -Process $process -Name "CommandLine" -Default "")
+            if (Test-CommandLineLooksLikeManagedLauncherControl -CommandLine $commandLine) {
+                [void]$pids.Add($trackedPid)
+            }
+        }
+    }
+
+    $listenerPid = Get-ListeningPid $launcherControlPort
+    if ($listenerPid) {
+        $listenerProcess = Get-CimInstance Win32_Process -Filter "ProcessId = $listenerPid" -ErrorAction SilentlyContinue
+        $listenerCommandLine = [string](Get-LauncherProcessPropertyValue -Process $listenerProcess -Name "CommandLine" -Default "")
+        if (Test-CommandLineLooksLikeManagedLauncherControl -CommandLine $listenerCommandLine) {
+            [void]$pids.Add([int]$listenerPid)
+        }
+    }
+
+    $scanPids = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+        $_.CommandLine -and (Test-CommandLineLooksLikeManagedLauncherControl -CommandLine ([string]$_.CommandLine))
+    } | ForEach-Object {
+        [int]$_.ProcessId
+    })
+
+    foreach ($candidatePid in $scanPids) {
+        [void]$pids.Add($candidatePid)
+    }
+
+    return @($pids | Sort-Object -Unique)
+}
+
 function Test-ProcessLooksLikeManagedBackend {
     param([int]$ProcessId)
 
@@ -3281,6 +3405,29 @@ function Test-CommandLineMentionsWorkbenchScript {
         return $false
     }
     return [bool]((ConvertTo-LauncherComparableText -Value $CommandLine) -match "scripts[\\/]+web_workbench\.py")
+}
+
+function Test-CommandLineMentionsLauncherControlApp {
+    param([string]$CommandLine)
+
+    if (-not $CommandLine) {
+        return $false
+    }
+    return [bool]((ConvertTo-LauncherComparableText -Value $CommandLine) -match "core\.launcher\.app:app")
+}
+
+function Test-CommandLineLooksLikeManagedLauncherControl {
+    param([string]$CommandLine)
+
+    if (-not $CommandLine) {
+        return $false
+    }
+
+    return [bool](
+        (Test-CommandLineMentionsLauncherControlApp -CommandLine $CommandLine) -and
+        $CommandLine -match "(^|\s)--port\s+$launcherControlPort(\s|$)" -and
+        $CommandLine -match "(^|\s)$([regex]::Escape($managedLauncherMarkerArg))(\s|$)"
+    )
 }
 
 function Test-CommandLineUsesRelativeWorkbenchScript {
@@ -4159,6 +4306,101 @@ function Start-ManagedBackend {
     }
 }
 
+function Start-LauncherControlBackend {
+    param([pscustomobject]$PythonRuntime)
+
+    $launcherStdoutLog = if ($script:currentRuntimeSceneId) {
+        Get-CurrentRuntimeSceneFilePath "raw/launcher.backend.stdout.log"
+    } else {
+        Join-Path $launcherDir "launcher-backend.out.log"
+    }
+    $launcherStderrLog = if ($script:currentRuntimeSceneId) {
+        Get-CurrentRuntimeSceneFilePath "raw/launcher.backend.stderr.log"
+    } else {
+        Join-Path $launcherDir "launcher-backend.err.log"
+    }
+
+    Write-Note "Starting Launcher control service at $launcherControlUrl ..."
+    Write-Note "Python runtime: $($PythonRuntime.Label) -> $($PythonRuntime.FilePath)"
+    $backendNoConsolePath = Get-ObjectPropertyValue -Object $PythonRuntime -Name "NoConsoleFilePath" -Default ""
+    $backendCommandPath = if ($backendNoConsolePath) { [string]$backendNoConsolePath } else { [string]$PythonRuntime.FilePath }
+    if ($script:currentRuntimeSceneId) {
+        Update-RuntimeSceneManifest @{
+            launcherBackend = @{
+                pid = 0
+                health_status = "starting"
+                python_label = $PythonRuntime.Label
+                python_command = $PythonRuntime.FilePath
+                python_no_console_command = $backendCommandPath
+                managed_marker = $managedLauncherMarkerArg
+                port = $launcherControlPort
+                url = $launcherControlUrl
+            }
+        }
+        Write-RuntimeSceneEvent `
+            -Component "launcher" `
+            -Phase "control_backend" `
+            -EventCode "launcher.control_backend.start.requested" `
+            -Message "Starting standalone Launcher control backend." `
+            -Outcome "started" `
+            -Fields @{ host = $bindHost; port = $launcherControlPort; url = $launcherControlUrl; python_label = $PythonRuntime.Label; python_command = $PythonRuntime.FilePath; python_no_console_command = $backendCommandPath; console_window_suppressed = [bool]$backendNoConsolePath; managed_marker = $managedLauncherMarkerArg }
+    }
+
+    $proc = Start-RedirectedBackgroundProcess `
+        -CommandPath $backendCommandPath `
+        -ArgumentList @($PythonRuntime.PrefixArgs + @("-c", "import uvicorn; uvicorn.run('core.launcher.app:app', host='$bindHost', port=$launcherControlPort, reload=False)", $managedLauncherMarkerArg, "--port", "$launcherControlPort")) `
+        -WorkingDirectory $projectDir `
+        -StdoutPath $launcherStdoutLog `
+        -StderrPath $launcherStderrLog
+
+    if ($script:currentRuntimeSceneId) {
+        Update-RuntimeSceneManifest @{ launcherBackend = @{ pid = $proc.Id; health_status = "starting" } }
+        Write-RuntimeSceneEvent `
+            -Component "launcher" `
+            -Phase "control_backend" `
+            -EventCode "launcher.control_backend.process.started" `
+            -Message "Standalone Launcher control backend process started." `
+            -Outcome "started" `
+            -Fields @{ pid = $proc.Id; managed_marker = $managedLauncherMarkerArg; port = $launcherControlPort }
+    }
+
+    if (-not (Wait-ForLauncherControlHealthy -ProcessId $proc.Id)) {
+        Stop-ProcessesById @($proc.Id)
+        $tail = Get-LogTail -Path $launcherStderrLog
+        if ($script:currentRuntimeSceneId) {
+            Update-RuntimeSceneManifest @{ launcherBackend = @{ pid = $proc.Id; health_status = "failed" } }
+            Write-RuntimeSceneEvent `
+                -Component "launcher" `
+                -Phase "control_backend" `
+                -EventCode "launcher.control_backend.health.failed" `
+                -Message "Standalone Launcher control backend failed to become healthy." `
+                -Level "error" `
+                -Outcome "failed" `
+                -Fields @{ pid = $proc.Id; port = $launcherControlPort; url = $launcherControlUrl }
+        }
+        throw "Launcher control service failed to become healthy.$([Environment]::NewLine)$tail"
+    }
+
+    if ($script:currentRuntimeSceneId) {
+        Update-RuntimeSceneManifest @{ launcherBackend = @{ pid = $proc.Id; health_status = "healthy"; url = $launcherControlUrl; port = $launcherControlPort } }
+        Write-RuntimeSceneEvent `
+            -Component "launcher" `
+            -Phase "control_backend" `
+            -EventCode "launcher.control_backend.health.succeeded" `
+            -Message "Standalone Launcher control backend passed health checks." `
+            -Outcome "succeeded" `
+            -Fields @{ pid = $proc.Id; url = $launcherControlUrl; port = $launcherControlPort }
+    }
+
+    return [pscustomobject]@{
+        Id = $proc.Id
+        LauncherPid = $proc.Id
+        Process = $proc
+        Stdout = $launcherStdoutLog
+        Stderr = $launcherStderrLog
+    }
+}
+
 function Start-ManagedBrowser {
     param(
         [string]$BrowserExecutable,
@@ -4397,7 +4639,10 @@ function Save-LauncherControlWindowState {
         $payload["workbenchBrowserProfileDir"] = $workbenchBrowserProfileDir
         $payload["launcherBrowserLaunchPid"] = $BrowserLaunchPid
         $payload["launcherBrowserWindowPid"] = $BrowserWindowPid
-        $payload["launcherControlUrl"] = "$url/launcher"
+        $payload["launcherBackendPid"] = $BackendPid
+        $payload["launcherBackendLaunchPid"] = $BackendLaunchPid
+        $payload["launcherControlPort"] = $launcherControlPort
+        $payload["launcherControlUrl"] = "$launcherControlUrl/launcher"
         $payload["launcherControlStartedAt"] = (Get-Date).ToString("o")
         Save-State $payload
         return
@@ -4475,8 +4720,12 @@ function Save-SessionState {
         host = $bindHost
         port = $port
         url = $url
-        backendPid = $BackendPid
-        backendLaunchPid = $BackendLaunchPid
+        backendPid = if ($SessionRole -eq "launcher_control_surface") { 0 } else { $BackendPid }
+        backendLaunchPid = if ($SessionRole -eq "launcher_control_surface") { 0 } else { $BackendLaunchPid }
+        launcherBackendPid = if ($SessionRole -eq "launcher_control_surface") { $BackendPid } else { [int](Get-ObjectPropertyValue -Object $existingState -Name "launcherBackendPid" -Default 0) }
+        launcherBackendLaunchPid = if ($SessionRole -eq "launcher_control_surface") { $BackendLaunchPid } else { [int](Get-ObjectPropertyValue -Object $existingState -Name "launcherBackendLaunchPid" -Default 0) }
+        launcherControlPort = $launcherControlPort
+        launcherControlUrl = "$launcherControlUrl/launcher"
         backendStdout = if ($script:currentRuntimeSceneDir) { Get-CurrentRuntimeSceneFilePath $rawPaths.BackendStdout } else { $null }
         backendStderr = if ($script:currentRuntimeSceneDir) { Get-CurrentRuntimeSceneFilePath $rawPaths.BackendStderr } else { $null }
         pythonCommand = if ($PythonRuntime) { $PythonRuntime.FilePath } else { $null }
@@ -4501,6 +4750,69 @@ function Save-SessionState {
         startedAt = (Get-Date).ToString("o")
     }
     Save-State $statePayload
+}
+
+function Restore-LauncherControlStateAfterWorkbenchStop {
+    param($PreviousState)
+
+    if (-not $PreviousState) {
+        return $false
+    }
+
+    $launcherBackendPid = [int](Get-ObjectPropertyValue -Object $PreviousState -Name "launcherBackendPid" -Default 0)
+    $launcherBackendLaunchPid = [int](Get-ObjectPropertyValue -Object $PreviousState -Name "launcherBackendLaunchPid" -Default 0)
+    $launcherBrowserLaunchPid = [int](Get-ObjectPropertyValue -Object $PreviousState -Name "launcherBrowserLaunchPid" -Default 0)
+    $launcherBrowserWindowPid = [int](Get-ObjectPropertyValue -Object $PreviousState -Name "launcherBrowserWindowPid" -Default 0)
+    $hasLauncherBackend = [bool]($launcherBackendPid -gt 0 -and (Test-LauncherControlHealthy))
+    $hasLauncherBrowser = [bool](@(Get-ManagedBrowserPids -ProfileDir $launcherBrowserProfileDir -Role "launcher_control_surface").Count -gt 0)
+    if (-not ($hasLauncherBackend -or $hasLauncherBrowser)) {
+        return $false
+    }
+
+    $payload = @{}
+    foreach ($property in $PreviousState.PSObject.Properties) {
+        $payload[$property.Name] = $property.Value
+    }
+    $payload["sessionRole"] = "launcher_control_surface"
+    $payload["sessionId"] = [string](Get-ObjectPropertyValue -Object $PreviousState -Name "sessionId" -Default ([guid]::NewGuid().ToString()))
+    $payload["host"] = $bindHost
+    $payload["port"] = $port
+    $payload["url"] = $url
+    $payload["backendPid"] = 0
+    $payload["backendLaunchPid"] = 0
+    $payload["backendStdout"] = $null
+    $payload["backendStderr"] = $null
+    $payload["launcherBackendPid"] = $launcherBackendPid
+    $payload["launcherBackendLaunchPid"] = if ($launcherBackendLaunchPid -gt 0) { $launcherBackendLaunchPid } else { $launcherBackendPid }
+    $payload["launcherControlPort"] = $launcherControlPort
+    $payload["launcherControlUrl"] = "$launcherControlUrl/launcher"
+    $payload["browserManaged"] = $true
+    $payload["browserProfileDir"] = $launcherBrowserProfileDir
+    $payload["browserLaunchPid"] = $launcherBrowserLaunchPid
+    $payload["browserWindowPid"] = $launcherBrowserWindowPid
+    $payload["workbenchBrowserLaunchPid"] = 0
+    $payload["workbenchBrowserWindowPid"] = 0
+    $payload["launcherBrowserProfileDir"] = $launcherBrowserProfileDir
+    $payload["workbenchBrowserProfileDir"] = $workbenchBrowserProfileDir
+    $payload["launcherBrowserLaunchPid"] = $launcherBrowserLaunchPid
+    $payload["launcherBrowserWindowPid"] = $launcherBrowserWindowPid
+    $payload["supervisorPid"] = 0
+    $payload["supervisorStdout"] = $null
+    $payload["supervisorStderr"] = $null
+    $payload["runtimeSceneId"] = $null
+    $payload["runtimeSceneDir"] = $null
+    $payload["launcherControlStartedAt"] = [string](Get-ObjectPropertyValue -Object $PreviousState -Name "launcherControlStartedAt" -Default (Get-Date).ToString("o"))
+    $payload["startedAt"] = $payload["launcherControlStartedAt"]
+    Save-State $payload
+    Write-LauncherControlLog `
+        -Event "launcher.control_surface.state_preserved_after_workbench_stop" `
+        -Message "Workbench state was cleared while preserving Launcher control surface state." `
+        -Fields @{
+            launcher_backend_pid = $launcherBackendPid
+            launcher_browser_window_pid = $launcherBrowserWindowPid
+            launcher_control_url = "$launcherControlUrl/launcher"
+        }
+    return $true
 }
 
 function Get-SessionReferenceTime {
@@ -4663,18 +4975,21 @@ function Complete-HeadlessSessionWithBrowser {
 
 function Open-LauncherControlSurface {
     Ensure-Directories
-    $controlSurfaceUrl = "$url/launcher"
+    $controlSurfaceUrl = "$launcherControlUrl/launcher"
     $launcherSnapshot = Get-SessionSnapshot -BrowserRole "launcher_control_surface" -ProfileDir $launcherBrowserProfileDir
     $snapshot = Get-SessionSnapshot
+    $launcherBackendPids = @(Get-ManagedLauncherControlCandidatePids)
+    $launcherBackendPid = if ($launcherBackendPids.Count -gt 0) { [int]$launcherBackendPids[0] } else { 0 }
+    $launcherBackendHealthy = [bool]($launcherBackendPid -gt 0 -and (Test-LauncherControlHealthy))
     $startedControlBackend = $false
     $preserveExistingStateOnFailure = [bool]$snapshot.State
 
-    if ($launcherSnapshot.BackendHealthy -and $launcherSnapshot.BrowserWindowCount -gt 0) {
+    if ($launcherBackendHealthy -and $launcherSnapshot.BrowserWindowCount -gt 0) {
         Write-LauncherControlLog `
             -Event "launcher.control_surface.focus_existing_launcher" `
             -Message "Launcher control surface found an existing Launcher window." `
             -Fields @{
-                backend_pid = $launcherSnapshot.BackendPid
+                backend_pid = $launcherBackendPid
                 browser_window_pid = $launcherSnapshot.BrowserWindowPid
                 url = $controlSurfaceUrl
             }
@@ -4683,7 +4998,7 @@ function Open-LauncherControlSurface {
     }
 
     if ($launcherSnapshot.BrowserPids.Count -gt 0) {
-        if (-not ($launcherSnapshot.BackendHealthy -and $launcherSnapshot.BrowserWindowCount -eq 0)) {
+        if (-not ($launcherBackendHealthy -and $launcherSnapshot.BrowserWindowCount -eq 0)) {
             Write-Note "Found an incomplete launcher control surface session. Cleaning it up before opening Launcher."
             Stop-ManagedBrowserProcesses -ProfileDir $launcherBrowserProfileDir -Role "launcher_control_surface"
             $launcherSnapshot = Get-SessionSnapshot -BrowserRole "launcher_control_surface" -ProfileDir $launcherBrowserProfileDir
@@ -4701,23 +5016,23 @@ function Open-LauncherControlSurface {
         $pythonRuntime = $null
         $backendPid = 0
         $backendLaunchPid = 0
-        if ($snapshot.BackendHealthy -and $snapshot.BackendPid) {
-            $backendPid = [int]$snapshot.BackendPid
-            $backendLaunchPid = if ($snapshot.State -and $snapshot.State.backendLaunchPid) { [int]$snapshot.State.backendLaunchPid } else { $backendPid }
+        if ($launcherBackendHealthy -and $launcherBackendPid -gt 0) {
+            $backendPid = [int]$launcherBackendPid
+            $backendLaunchPid = [int](Get-ObjectPropertyValue -Object $snapshot.State -Name "launcherBackendLaunchPid" -Default $backendPid)
             Write-RuntimeSceneEvent `
                 -Component "launcher" `
                 -Phase "control_surface" `
                 -EventCode "launcher.control_surface.backend.reused" `
                 -Message "Reusing an existing healthy backend for the Launcher control surface." `
                 -Outcome "observed" `
-                -Fields @{ backend_pid = $backendPid; url = $controlSurfaceUrl }
+                -Fields @{ backend_pid = $backendPid; port = $launcherControlPort; url = $controlSurfaceUrl }
         } else {
-            $portPid = Get-ListeningPid $port
+            $portPid = Get-ListeningPid $launcherControlPort
             if ($portPid) {
-                throw "Port $port is already in use by PID=$portPid. Stop that process first."
+                throw "Launcher control port $launcherControlPort is already in use by PID=$portPid. Stop that process first."
             }
             $pythonRuntime = Resolve-PythonRuntime
-            $backendProc = Start-ManagedBackend -PythonRuntime $pythonRuntime
+            $backendProc = Start-LauncherControlBackend -PythonRuntime $pythonRuntime
             $backendPid = [int]$backendProc.Id
             $backendLaunchPid = [int]$backendProc.LauncherPid
             $startedControlBackend = $true
@@ -4730,24 +5045,21 @@ function Open-LauncherControlSurface {
         }
 
         if ($NoBrowser) {
-            Save-SessionState `
+            Save-LauncherControlWindowState `
                 -ManagedSessionId $managedSessionId `
                 -BackendPid $backendPid `
                 -BackendLaunchPid $backendLaunchPid `
                 -PythonRuntime $pythonRuntime `
                 -BrowserExecutable $null `
                 -BrowserLaunchPid 0 `
-                -BrowserWindowPid 0 `
-                -SupervisorPid 0 `
-                -BrowserManaged $false `
-                -SessionRole "launcher_control_surface"
+                -BrowserWindowPid 0
             Write-RuntimeSceneEvent `
                 -Component "launcher" `
                 -Phase "control_surface" `
                 -EventCode "launcher.control_surface.backend_live" `
                 -Message "Launcher control surface backend is live without opening a browser." `
                 -Outcome "succeeded" `
-                -Fields @{ url = $controlSurfaceUrl; backend_pid = $backendPid }
+                -Fields @{ url = $controlSurfaceUrl; backend_pid = $backendPid; port = $launcherControlPort }
             Write-Note "Vibelution Launcher backend is live at $controlSurfaceUrl"
             return
         }
@@ -4771,7 +5083,7 @@ function Open-LauncherControlSurface {
             -EventCode "launcher.control_surface.ready" `
             -Message "Launcher control surface is ready." `
             -Outcome "succeeded" `
-            -Fields @{ url = $controlSurfaceUrl; backend_pid = $backendPid; browser_window_pid = $browserInfo.WindowPid; supervisor_started = $false; focus_requested = $focusResult }
+            -Fields @{ url = $controlSurfaceUrl; backend_pid = $backendPid; port = $launcherControlPort; browser_window_pid = $browserInfo.WindowPid; supervisor_started = $false; focus_requested = $focusResult }
         Write-Note "Vibelution Launcher is live in a managed Edge app window at $controlSurfaceUrl"
     } catch {
         if ($script:currentRuntimeSceneId) {
@@ -4792,7 +5104,7 @@ function Open-LauncherControlSurface {
         }
         Stop-ManagedBrowserProcesses -ProfileDir $launcherBrowserProfileDir -Role "launcher_control_surface"
         if ($startedControlBackend) {
-            Stop-ManagedBackendProcesses
+            Stop-ProcessesById @($backendPid)
         }
         if (-not $preserveExistingStateOnFailure) {
             Remove-State
@@ -5135,6 +5447,7 @@ function Stop-ManagedSession {
     param([string]$Reason = "user requested stop")
 
     $snapshot = Get-SessionSnapshot
+    $previousState = $snapshot.State
     if ($snapshot.BackendPids.Count -eq 0 -and $snapshot.BrowserPids.Count -eq 0 -and -not $snapshot.State) {
         Write-Note "No managed Vibelution session is running."
         return
@@ -5212,7 +5525,9 @@ function Stop-ManagedSession {
     Write-ManagedSessionClosureRecord -Closure $closure -Reason $Reason -Source "launcher_stop" -Success (Test-ManagedSessionClosureSucceeded -Closure $closure -RequireManagerClosed $false)
 
     if (Test-ManagedSessionClosureSucceeded -Closure $closure -RequireManagerClosed $false) {
-        Remove-State
+        if (-not (Restore-LauncherControlStateAfterWorkbenchStop -PreviousState $previousState)) {
+            Remove-State
+        }
         Write-Note "Vibelution session stopped."
         return
     }
@@ -5342,7 +5657,14 @@ function Start-ManagedSession {
         }
     }
 
-    if ($snapshot.BackendPids.Count -gt 0 -or $snapshot.BrowserPids.Count -gt 0 -or $snapshot.State) {
+    $stateRole = if ($snapshot.State) { [string](Get-ObjectPropertyValue -Object $snapshot.State -Name "sessionRole" -Default "") } else { "" }
+    $onlyLauncherControlState = [bool](
+        $stateRole -eq "launcher_control_surface" `
+        -and $snapshot.BackendPids.Count -eq 0 `
+        -and $snapshot.BrowserPids.Count -eq 0
+    )
+
+    if ($snapshot.BackendPids.Count -gt 0 -or $snapshot.BrowserPids.Count -gt 0 -or ($snapshot.State -and -not $onlyLauncherControlState)) {
         Write-Note "Found an incomplete managed session. Cleaning it up before restart."
         Stop-ManagedSession -Reason "cleanup stale session"
     }
@@ -5737,7 +6059,7 @@ if ($runtimeManagerClientActions -contains $Action) {
             $clientExitCode = Invoke-RuntimeManagerClient -Mode "command" -CommandType "open_workbench" -Reason "launcher_start" -ForwardNoBrowser:$NoBrowser
         }
         "stop" {
-            $clientExitCode = Invoke-RuntimeManagerClient -Mode "command" -CommandType "close_workbench" -Reason "launcher_stop" -StopManager
+            $clientExitCode = Invoke-RuntimeManagerClient -Mode "command" -CommandType "close_workbench" -Reason "launcher_stop"
         }
         "restart" {
             if (Test-LauncherRestartActiveWorkBlocked) {
@@ -5760,7 +6082,7 @@ try {
     Sync-LauncherEndpointFromState
     switch ($Action) {
         "launcher" {
-            Open-LauncherAndEnsureWorkbench
+            Open-LauncherControlSurface
         }
         "toggle" {
             $snapshot = Get-SessionSnapshot
