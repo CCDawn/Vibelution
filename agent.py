@@ -1,10 +1,12 @@
 import os
 import copy
+import hashlib
 import json
 import sys
 import time
 import traceback
 import re
+from contextlib import nullcontext
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, List, Dict, Any
@@ -69,6 +71,7 @@ from core.orchestration.output_boundary import sanitize_assistant_visible_text
 
 from core.llm import get_llm_client, discover_model, doctor_llm_profile
 from core.llm.client import llm_cancel_context
+from core.llm.payload_builder import prompt_cache_partition_scope
 from core.llm.agent_runtime import (
     AGENT_LLM_SLOT_MENTAL_MODEL,
     AGENT_LLM_SLOT_SUBAGENT_EXECUTION,
@@ -254,6 +257,40 @@ def _runtime_agent_binding_from_env() -> Dict[str, str]:
         for target_key, env_key in key_map.items()
         if (value := str(os.environ.get(env_key) or "").strip())
     }
+
+
+def _turn_runtime_from_env() -> Dict[str, str]:
+    key_map = {
+        "mode": "VIBELUTION_TURN_MODE",
+        "runKind": "VIBELUTION_TURN_RUN_KIND",
+        "runId": "VIBELUTION_TURN_RUN_ID",
+        "sessionId": "VIBELUTION_TURN_SESSION_ID",
+        "agentId": "VIBELUTION_TURN_AGENT_ID",
+        "llmSlot": "VIBELUTION_TURN_LLM_SLOT",
+        "modelId": "VIBELUTION_TURN_MODEL_ID",
+        "cacheScope": "VIBELUTION_TURN_CACHE_SCOPE",
+        "promptCachePartition": "VIBELUTION_TURN_PROMPT_CACHE_PARTITION",
+    }
+    return {
+        target_key: value
+        for target_key, env_key in key_map.items()
+        if (value := str(os.environ.get(env_key) or "").strip())
+    }
+
+
+def _safe_turn_runtime_metadata(runtime: Dict[str, str]) -> Dict[str, Any]:
+    if not runtime:
+        return {}
+    metadata: Dict[str, Any] = {
+        key: value
+        for key in ("mode", "runKind", "runId", "sessionId", "agentId", "llmSlot", "modelId", "cacheScope")
+        if (value := str(runtime.get(key) or "").strip())
+    }
+    partition = str(runtime.get("promptCachePartition") or "").strip()
+    if partition:
+        metadata["promptCachePartitionHash"] = hashlib.sha256(partition.encode("utf-8", errors="ignore")).hexdigest()[:12]
+        metadata["promptCachePartitionChars"] = len(partition)
+    return metadata
 
 
 class TurnStopRequested(Exception):
@@ -2458,17 +2495,22 @@ class SelfEvolvingAgent:
         self._last_llm_failure_attempts = 0
         self._last_llm_failure_max_attempts = 0
         session = get_session_state()
+        turn_runtime = _turn_runtime_from_env()
+        turn_runtime_metadata = _safe_turn_runtime_metadata(turn_runtime)
         ok = False
         previous_force_disable_tools = bool(getattr(self, "_force_disable_tools_for_turn", False))
         try:
             self._single_turn_mode_active = True
             self._force_disable_tools_for_turn = bool(disable_tools)
             self._pending_supervised_case_id = case_id
-            ok = self.think_and_act(
-                user_prompt=initial_prompt,
-                goal_override=goal_override,
-                attachments=attachments,
-            )
+            cache_partition = str(turn_runtime.get("promptCachePartition") or "").strip()
+            cache_scope = prompt_cache_partition_scope(cache_partition) if cache_partition else nullcontext()
+            with cache_scope:
+                ok = self.think_and_act(
+                    user_prompt=initial_prompt,
+                    goal_override=goal_override,
+                    attachments=attachments,
+                )
             snapshot = session.get_attention_snapshot()
             latest_delegation = None
             if snapshot.get("delegation_findings"):
@@ -2530,6 +2572,8 @@ class SelfEvolvingAgent:
             if self._last_turn_metadata:
                 result.update(self._last_turn_metadata)
                 result["status"] = result.get("status") or status
+            if turn_runtime_metadata:
+                result["turn_runtime"] = turn_runtime_metadata
             if policy.mode == AgentMode.CHAT:
                 explicit_outcome = str(result.get("outcome") or result.get("task_outcome") or "").strip().lower()
                 result.update(build_chat_coding_result_contract(result))

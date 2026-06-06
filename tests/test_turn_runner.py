@@ -6,6 +6,12 @@ from core.orchestration.turn_runner import (
     run_agent_single_turn,
     run_existing_agent_single_turn,
 )
+from core.orchestration.turn_runtime import (
+    AgentTurnRuntimeRequest,
+    build_prompt_cache_partition,
+    prepare_agent_turn_runtime,
+    runtime_metadata_env,
+)
 
 
 class _FakePromptCachePartitionScope:
@@ -148,6 +154,108 @@ def test_run_agent_single_turn_seeds_context_and_exports_carryover():
     }
     assert result.result == {"status": "completed", "summary": "done"}
     assert result.carryover == {"next": "state"}
+
+
+def test_prepare_agent_turn_runtime_builds_stable_isolated_prompt_cache_partitions():
+    chat = prepare_agent_turn_runtime(
+        AgentTurnRuntimeRequest(
+            mode="chat",
+            run_kind="chat_turn",
+            run_id="turn-1",
+            session_id="session-a",
+            agent_id="agent-a",
+            llm_slot="dialogue",
+            model_id="model-a",
+        )
+    )
+    same_chat = prepare_agent_turn_runtime(
+        AgentTurnRuntimeRequest(
+            mode="chat",
+            run_kind="chat_turn",
+            run_id="turn-2",
+            session_id="session-a",
+            agent_id="agent-a",
+            llm_slot="dialogue",
+            model_id="model-a",
+        )
+    )
+    self_turn = prepare_agent_turn_runtime(
+        AgentTurnRuntimeRequest(
+            mode="self_evolution",
+            run_kind="self_evolution",
+            run_id="self-run-1",
+            session_id="session-a",
+            agent_id="agent-a",
+            llm_slot="dialogue",
+            model_id="model-a",
+        )
+    )
+
+    assert chat.prompt_cache_partition == same_chat.prompt_cache_partition
+    assert chat.prompt_cache_partition != self_turn.prompt_cache_partition
+    assert chat.metadata["runKind"] == "chat_turn"
+    assert chat.metadata["promptCachePartitionHash"]
+    assert chat.metadata["promptCachePartitionChars"] == len(chat.prompt_cache_partition)
+    assert "run:turn-1" not in chat.prompt_cache_partition
+
+
+def test_build_prompt_cache_partition_keeps_supervised_roles_isolated():
+    baseline = build_prompt_cache_partition(
+        mode="supervised_evolution",
+        run_kind="supervised_evaluation",
+        session_id="supervised-session",
+        agent_id="agent-supervised",
+        llm_slot="dialogue",
+        model_id="model-a",
+        cache_scope="baseline",
+    )
+    candidate = build_prompt_cache_partition(
+        mode="supervised_evolution",
+        run_kind="supervised_evaluation",
+        session_id="supervised-session",
+        agent_id="agent-supervised",
+        llm_slot="dialogue",
+        model_id="model-a",
+        cache_scope="candidate",
+    )
+
+    assert baseline != candidate
+    assert "mode:supervised_evolution" in baseline
+    assert "kind:supervised_evaluation" in baseline
+    assert "scope:baseline" in baseline
+    assert "scope:candidate" in candidate
+
+
+def test_runtime_metadata_env_exports_safe_facade_fields_only():
+    env = runtime_metadata_env(
+        prepare_agent_turn_runtime(
+            AgentTurnRuntimeRequest(
+                mode="supervised_evolution",
+                run_kind="supervised_evaluation",
+                run_id="harness-run-1",
+                session_id="session-baseline",
+                agent_id="agent-supervised-baseline",
+                llm_slot="dialogue",
+                model_id="model-a",
+                cache_scope="baseline",
+            )
+        )
+    )
+
+    assert env == {
+        "VIBELUTION_TURN_MODE": "supervised_evolution",
+        "VIBELUTION_TURN_RUN_KIND": "supervised_evaluation",
+        "VIBELUTION_TURN_RUN_ID": "harness-run-1",
+        "VIBELUTION_TURN_SESSION_ID": "session-baseline",
+        "VIBELUTION_TURN_AGENT_ID": "agent-supervised-baseline",
+        "VIBELUTION_TURN_LLM_SLOT": "dialogue",
+        "VIBELUTION_TURN_MODEL_ID": "model-a",
+        "VIBELUTION_TURN_CACHE_SCOPE": "baseline",
+        "VIBELUTION_TURN_PROMPT_CACHE_PARTITION": (
+            "mode:supervised_evolution|kind:supervised_evaluation|agent:agent-supervised-baseline|"
+            "session:session-baseline|slot:dialogue|model:model-a|scope:baseline"
+        ),
+    }
 
 
 def test_prepare_agent_turn_seeds_optional_supported_inputs():

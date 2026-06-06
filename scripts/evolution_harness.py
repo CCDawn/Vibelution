@@ -26,6 +26,12 @@ from datetime import datetime
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
+from core.orchestration.turn_runtime import (
+    AgentTurnRuntimeRequest,
+    prepare_agent_turn_runtime,
+    runtime_metadata_env,
+)
+
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 REPORT_DIR = PROJECT_ROOT / "log_info" / "harness_reports"
@@ -225,7 +231,7 @@ def stdout_tail_looks_like_idle_chat_ui(lines: List[str]) -> bool:
     return sum(1 for marker in idle_markers if marker in text) >= 3
 
 
-def supervised_agent_binding_env(agent_binding: Optional[Dict[str, Any]]) -> Dict[str, str]:
+def supervised_agent_binding_env(agent_binding: Optional[Dict[str, Any]], *, run_id: str = "") -> Dict[str, str]:
     """Return safe child-process env values for a supervised AgentInstance binding."""
 
     if not isinstance(agent_binding, dict):
@@ -251,6 +257,21 @@ def supervised_agent_binding_env(agent_binding: Optional[Dict[str, Any]]) -> Dic
                 f"Supervised Agent binding for {env['VIBELUTION_AGENT_ID']} is missing required llmSlot."
             )
         env["VIBELUTION_AGENT_LLM_SLOT"] = llm_slot
+        supervised_role = str(env.get("VIBELUTION_SUPERVISED_ROLE") or "").strip()
+        runtime = prepare_agent_turn_runtime(
+            AgentTurnRuntimeRequest(
+                mode="supervised_evolution",
+                run_kind="supervised_evaluation",
+                run_id=str(run_id or "").strip(),
+                session_id=str(env.get("VIBELUTION_AGENT_DIRECT_SESSION_ID") or "").strip(),
+                agent_id=str(env.get("VIBELUTION_AGENT_ID") or "").strip(),
+                llm_slot=llm_slot,
+                model_id=str(agent_binding.get("dialogueModelId") or "").strip(),
+                cache_scope=supervised_role,
+                workspace_path=str(env.get("VIBELUTION_AGENT_WORKSPACE_PATH") or "").strip(),
+            )
+        )
+        env.update(runtime_metadata_env(runtime))
     return env
 
 
@@ -2260,7 +2281,7 @@ def run_harness(
     env["PYTHONIOENCODING"] = "utf-8"
     env["VIBELUTION_HARNESS_ID"] = harness_id
     normalized_agent_binding = dict(agent_binding) if isinstance(agent_binding, dict) else {}
-    env.update(supervised_agent_binding_env(normalized_agent_binding))
+    env.update(supervised_agent_binding_env(normalized_agent_binding, run_id=harness_id))
 
     process = subprocess.Popen(
         command,

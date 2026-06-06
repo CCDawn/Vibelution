@@ -1574,6 +1574,63 @@ class TestToolMessageFlow:
         assert not any(item[0] == "debug_turn_end" for item in events)
         assert any(item[0] == "conv_end" and item[1]["mode"] == "single_turn" for item in events)
 
+    def test_run_single_turn_wraps_env_prompt_cache_partition_and_returns_runtime_metadata(self, monkeypatch):
+        events = []
+
+        class FakeScope:
+            def __init__(self, partition):
+                self.partition = partition
+
+            def __enter__(self):
+                events.append(("enter_cache", self.partition))
+
+            def __exit__(self, exc_type, exc, tb):
+                events.append(("exit_cache", self.partition))
+                return False
+
+        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent.name = "tester"
+        agent.config = SimpleNamespace(
+            llm=SimpleNamespace(model_name="demo"),
+            agent=SimpleNamespace(max_iterations=3, awake_interval=1),
+        )
+        agent._effective_max_token_limit = 1024
+        agent.key_tools = []
+        agent._last_turn_failed = False
+
+        def fake_think_and_act(user_prompt=None, goal_override=None, attachments=None, **kwargs):
+            events.append(("think", user_prompt))
+            agent._last_visible_response_text = "完成"
+            agent._last_response_tool_calls = 0
+            return True
+
+        agent.think_and_act = fake_think_and_act
+
+        monkeypatch.setattr(agent_module._debug_logger, "start_session", lambda session_id: events.append(("debug_start", session_id)))
+        monkeypatch.setattr(agent_module._debug_logger, "system", lambda *args, **kwargs: None)
+        monkeypatch.setattr(agent_module._debug_logger, "info", lambda *args, **kwargs: None)
+        monkeypatch.setattr(agent_module._debug_logger, "end_session", lambda: events.append(("debug_end",)))
+        monkeypatch.setattr(agent_module.logger, "start_session", lambda metadata=None, **kwargs: events.append(("conv_start", metadata, kwargs)))
+        monkeypatch.setattr(agent_module.logger, "end_session", lambda summary=None: events.append(("conv_end", summary)))
+        monkeypatch.setattr(agent_module, "get_session_state", lambda: SimpleNamespace(get_attention_snapshot=lambda: {}))
+        monkeypatch.setattr(agent_module, "prompt_cache_partition_scope", lambda partition: FakeScope(partition))
+        monkeypatch.setenv("VIBELUTION_TURN_MODE", "supervised_evolution")
+        monkeypatch.setenv("VIBELUTION_TURN_RUN_KIND", "supervised_evaluation")
+        monkeypatch.setenv("VIBELUTION_TURN_RUN_ID", "harness-run-1")
+        monkeypatch.setenv("VIBELUTION_TURN_PROMPT_CACHE_PARTITION", "mode:supervised_evolution|scope:baseline")
+        monkeypatch.setenv("VIBELUTION_TURN_PROMPT_CACHE_SECRET", "should-not-leak")
+
+        result = agent.run_single_turn(initial_prompt="probe")
+
+        assert events.index(("enter_cache", "mode:supervised_evolution|scope:baseline")) < events.index(("think", "probe"))
+        assert events.index(("think", "probe")) < events.index(("exit_cache", "mode:supervised_evolution|scope:baseline"))
+        assert result["turn_runtime"]["mode"] == "supervised_evolution"
+        assert result["turn_runtime"]["runKind"] == "supervised_evaluation"
+        assert result["turn_runtime"]["runId"] == "harness-run-1"
+        assert result["turn_runtime"]["promptCachePartitionChars"] == len("mode:supervised_evolution|scope:baseline")
+        assert result["turn_runtime"]["promptCachePartitionHash"]
+        assert "SECRET" not in json.dumps(result, ensure_ascii=False)
+
     def test_run_single_turn_enriches_chat_result_contract_from_tool_trace(self, monkeypatch):
         agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
         agent.name = "tester"
