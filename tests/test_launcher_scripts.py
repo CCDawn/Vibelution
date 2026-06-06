@@ -2048,6 +2048,8 @@ foreach ($required in @(
     '$controlSurfaceUrl = "$launcherControlUrl/launcher"',
     '$startedControlBackend = $false',
     '$preserveExistingStateOnFailure = [bool]$snapshot.State',
+    "Test-LauncherControlSourceCurrent",
+    "launcher.control_backend.source_changed",
     "Start-LauncherControlBackend",
     "Start-ManagedBrowser",
     '-ProfileDir $launcherBrowserProfileDir',
@@ -2116,6 +2118,75 @@ if ($entryText -match "restart_workbench") {
 }
 if ($scriptText -match '"launcher"\\s*\\{\\s*Open-LauncherAndEnsureWorkbench\\s*\\}') {
     throw "launcher action must not auto-start or focus the workbench."
+}
+
+Write-Output "ok"
+""",
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip().splitlines()[-1] == "ok"
+
+
+def test_launcher_control_source_signature_rejects_stale_backend(tmp_path):
+    result = _run_launcher_ast_harness(
+        tmp_path,
+        """
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$LauncherPath
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$source = Get-Content -Raw -LiteralPath $LauncherPath
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors -and $parseErrors.Count -gt 0) {
+    throw "Launcher script parse failed: $($parseErrors[0].Message)"
+}
+
+foreach ($functionName in @(
+    "Get-ObjectPropertyValue",
+    "Get-LauncherControlBackendSourceSignature",
+    "Test-LauncherControlSourceCurrent"
+)) {
+    $functionAst = $ast.Find({
+        param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+            $node.Name -eq $functionName
+    }, $true)
+    if ($null -eq $functionAst) {
+        throw "$functionName was not found."
+    }
+    . ([scriptblock]::Create($functionAst.Extent.Text))
+}
+
+$script:state = [pscustomobject]@{
+    launcherBackendPid = 1234
+    launcherBackendLaunchPid = 1234
+    launcherControlSourceSignature = "old-signature"
+}
+function Get-State { return $script:state }
+function Get-LauncherControlSourceSignature { return "new-signature" }
+
+if (Test-LauncherControlSourceCurrent -BackendPid 1234) {
+    throw "stale launcher control backend source was accepted."
+}
+
+$script:state.launcherControlSourceSignature = "new-signature"
+if (-not (Test-LauncherControlSourceCurrent -BackendPid 1234)) {
+    throw "current launcher control backend source was rejected."
+}
+
+if (Test-LauncherControlSourceCurrent -BackendPid 9999) {
+    throw "untracked launcher control backend source was accepted."
+}
+
+if (Test-LauncherControlSourceCurrent -BackendPid 0) {
+    throw "missing launcher control backend source was accepted."
 }
 
 Write-Output "ok"

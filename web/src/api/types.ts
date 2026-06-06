@@ -1938,6 +1938,8 @@ export type LauncherStatus = {
       independent: boolean;
       adapter: string;
       nextPhase: string;
+      url?: string;
+      port?: number;
     };
     message: string;
   };
