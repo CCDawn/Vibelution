@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.38 - 2026-06-07
+
+- Changed provider-driven Computer Use confirmation pauses to persist provider continuation data and resume through the same session after approval.
+- Added resume payload forwarding for provider continuation tokens, confirmation tokens, provider state, and resume payloads while keeping those fields out of public session responses.
+- Added regression coverage for provider confirmations that pause once or multiple times before completing.
+
 ## 0.10.37 - 2026-06-06
 
 - Added `computer_use_session_tool` so authorized Agents can read, confirm, or cancel existing Computer Use sandbox sessions after `computer_use_task_tool` returns a `sessionId`.
