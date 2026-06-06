@@ -174,6 +174,7 @@ def test_supervised_agent_binding_env_exports_safe_runtime_context_only():
             "workspacePath": "workspace/agents/agent-supervised-baseline",
             "role": "baseline",
             "llmSlot": "dialogue",
+            "dialogueModelId": "model-a",
             "displayName": "监督基线 Agent",
             "apiKey": "should-not-leak",
         }
@@ -186,6 +187,17 @@ def test_supervised_agent_binding_env_exports_safe_runtime_context_only():
         "VIBELUTION_AGENT_WORKSPACE_PATH": "workspace/agents/agent-supervised-baseline",
         "VIBELUTION_SUPERVISED_ROLE": "baseline",
         "VIBELUTION_AGENT_LLM_SLOT": "dialogue",
+        "VIBELUTION_TURN_MODE": "supervised_evolution",
+        "VIBELUTION_TURN_RUN_KIND": "supervised_evaluation",
+        "VIBELUTION_TURN_SESSION_ID": "session-baseline",
+        "VIBELUTION_TURN_AGENT_ID": "agent-supervised-baseline",
+        "VIBELUTION_TURN_LLM_SLOT": "dialogue",
+        "VIBELUTION_TURN_MODEL_ID": "model-a",
+        "VIBELUTION_TURN_CACHE_SCOPE": "baseline",
+        "VIBELUTION_TURN_PROMPT_CACHE_PARTITION": (
+            "mode:supervised_evolution|kind:supervised_evaluation|agent:agent-supervised-baseline|"
+            "session:session-baseline|slot:dialogue|model:model-a|scope:baseline"
+        ),
     }
     assert "apiKey" not in "".join(env)
 
@@ -202,6 +214,7 @@ def test_supervised_agent_binding_env_accepts_supervised_role_alias():
 
     assert env["VIBELUTION_SUPERVISED_ROLE"] == "candidate"
     assert env["VIBELUTION_AGENT_LLM_SLOT"] == "dialogue"
+    assert env["VIBELUTION_TURN_CACHE_SCOPE"] == "candidate"
 
 
 def test_supervised_agent_binding_env_requires_explicit_llm_slot():
@@ -225,6 +238,7 @@ def test_supervised_agent_binding_env_respects_explicit_llm_slot():
     )
 
     assert env["VIBELUTION_AGENT_LLM_SLOT"] == "subagentExecution"
+    assert env["VIBELUTION_TURN_LLM_SLOT"] == "subagentExecution"
 
 
 def test_create_harness_config_forces_supervised_agent_mode(tmp_path: Path):
@@ -550,6 +564,7 @@ def test_run_harness_returns_cancelled_when_cancel_checker_requests_stop(monkeyp
             "workspacePath": "workspace/agents/agent-supervised-baseline",
             "role": "baseline",
             "llmSlot": "dialogue",
+            "dialogueModelId": "model-a",
         },
         cancel_checker=lambda: "operator stop",
     )
@@ -566,6 +581,10 @@ def test_run_harness_returns_cancelled_when_cancel_checker_requests_stop(monkeyp
     assert env["VIBELUTION_AGENT_WORKSPACE_PATH"] == "workspace/agents/agent-supervised-baseline"
     assert env["VIBELUTION_SUPERVISED_ROLE"] == "baseline"
     assert env["VIBELUTION_AGENT_LLM_SLOT"] == "dialogue"
+    assert env["VIBELUTION_TURN_RUN_ID"] == env["VIBELUTION_HARNESS_ID"]
+    assert env["VIBELUTION_TURN_RUN_KIND"] == "supervised_evaluation"
+    assert env["VIBELUTION_TURN_CACHE_SCOPE"] == "baseline"
+    assert env["VIBELUTION_TURN_PROMPT_CACHE_PARTITION"].endswith("|scope:baseline")
     assert result.preserved_evidence_path
     evidence_dir = Path(result.preserved_evidence_path)
     assert (evidence_dir / "log_info" / "conversation_case.jsonl").exists()

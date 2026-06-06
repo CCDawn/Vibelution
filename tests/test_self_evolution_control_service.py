@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi.testclient import TestClient
 
+from core.orchestration.turn_runtime import prepare_agent_turn_runtime
 from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
 from core.web.routes import evolution as evolution_routes
@@ -734,6 +735,7 @@ def test_self_evolution_turn_uses_executor_context_engine_packet(tmp_path, monke
         content="你是自进化执行 Agent，只根据当前有界目标行动。",
     )
     captured: dict[str, str] = {}
+    scene_events: list[dict[str, object]] = []
 
     class FakeSelfEvolvingAgent:
         def __init__(self, *, mode=None, workspace_path=None, config=None):
@@ -762,6 +764,11 @@ def test_self_evolution_turn_uses_executor_context_engine_packet(tmp_path, monke
             return {}
 
     def fake_run_agent_single_turn(request):
+        captured["runtime_mode"] = request.runtime.mode if request.runtime else ""
+        captured["runtime_run_kind"] = request.runtime.run_kind if request.runtime else ""
+        captured["runtime_cache_scope"] = request.runtime.cache_scope if request.runtime else ""
+        captured["runtime_model_id"] = request.runtime.model_id if request.runtime else ""
+        runtime = prepare_agent_turn_runtime(request.runtime) if request.runtime else None
         agent = FakeSelfEvolvingAgent(
             mode=request.mode,
             workspace_path=request.workspace_path,
@@ -772,10 +779,19 @@ def test_self_evolution_turn_uses_executor_context_engine_packet(tmp_path, monke
         if request.interrupt_checker:
             agent.set_turn_interrupt_checker(request.interrupt_checker)
         result = agent.run_single_turn(initial_prompt=request.initial_prompt)
-        return SimpleNamespace(result=result, carryover=agent.export_turn_carryover())
+        if runtime is not None:
+            result = {**result, "turn_runtime": dict(runtime.metadata)}
+        return SimpleNamespace(result=result, carryover=agent.export_turn_carryover(), runtime=runtime)
 
     monkeypatch.setattr(service, "run_agent_single_turn", fake_run_agent_single_turn)
     monkeypatch.setattr(service._RUN_EXECUTOR, "submit", lambda fn, context: fn(context))
+    monkeypatch.setattr(
+        service,
+        "_record_self_scene_event",
+        lambda phase, event_code, **kwargs: scene_events.append(
+            {"phase": phase, "eventCode": event_code, **kwargs}
+        ),
+    )
 
     bindings = service.self_evolution_agent_bindings()
     agent_directory_service.update_agent_instance(
@@ -796,6 +812,10 @@ def test_self_evolution_turn_uses_executor_context_engine_packet(tmp_path, monke
     assert captured["workspace_path"] == executor["workspacePath"]
     assert captured["profile_id"] == "primary"
     assert captured["primary_model"] == "self-executor-runtime"
+    assert captured["runtime_mode"] == "self_evolution"
+    assert captured["runtime_run_kind"] == "self_evolution"
+    assert captured["runtime_cache_scope"] == "executor"
+    assert captured["runtime_model_id"] == "self-executor-runtime-model"
     assert "Agent Runtime Context" in captured["runtime_context"]
     assert "Agent Prompt Template" in captured["runtime_context"]
     assert "自进化执行 Agent" in captured["runtime_context"]
@@ -803,6 +823,13 @@ def test_self_evolution_turn_uses_executor_context_engine_packet(tmp_path, monke
     assert records[-1]["sessionId"] == executor["directSessionId"]
     assert records[-1]["status"] == "completed"
     assert records[-1]["toolCallCount"] == 1
+    completed_event = next(
+        item for item in scene_events if item["eventCode"] == "self_evolution_run.turn.completed"
+    )
+    turn_runtime = completed_event["fields"]["turnRuntime"]
+    assert turn_runtime["runKind"] == "self_evolution"
+    assert turn_runtime["cacheScope"] == "executor"
+    assert turn_runtime["promptCachePartitionHash"]
 
 
 def test_local_start_self_evolution_rejects_risky_write_goal_before_main_worktree(monkeypatch):
