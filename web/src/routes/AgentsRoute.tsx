@@ -56,7 +56,9 @@ import { agentDisplayInfo } from "./agentDisplay";
 import {
   archivedWorkspaceCache,
   purgedWorkspaceCache,
+  updatedAgentWorkspaceCache,
   type AgentArchiveResponse,
+  type AgentUpdateResponse,
   type AgentPurgeResponse,
 } from "./agentWorkspaceCache";
 import { createChatWorkspaceCache } from "./chatWorkspaceCache";
@@ -932,33 +934,6 @@ function draftSyncSourceFromAgent(
     memoryPolicy: memoryPolicyDraftFromAgent(agent),
     delegationPolicy: delegationPolicyDraftFromAgent(agent),
     supervisionPolicy: supervisionPolicyDraftFromAgent(agent),
-  };
-}
-
-function updatedAgentWorkspaceCache(
-  workspace: AgentConfigWorkspace | undefined,
-  updatedAgent: Partial<AgentConfigWorkspaceAgent> & Pick<AgentConfigWorkspaceAgent, "agentId">,
-): AgentConfigWorkspace | undefined {
-  if (!workspace) {
-    return workspace;
-  }
-  const nextAgents = workspace.agents.map((agent) =>
-    agent.agentId === updatedAgent.agentId
-      ? {
-          ...agent,
-          ...updatedAgent,
-          references: updatedAgent.references ?? agent.references,
-          health: updatedAgent.health ?? agent.health,
-          runtimeStatus: updatedAgent.runtimeStatus ?? agent.runtimeStatus,
-          dialogueModel: updatedAgent.dialogueModel ?? agent.dialogueModel,
-          llmBindingModels: updatedAgent.llmBindingModels ?? agent.llmBindingModels,
-          promptTemplate: updatedAgent.promptTemplate ?? agent.promptTemplate,
-        }
-      : agent,
-  );
-  return {
-    ...workspace,
-    agents: nextAgents,
   };
 }
 
@@ -3003,7 +2978,7 @@ export function AgentsRoute() {
 
   const updateAgentMutation = useMutation({
     mutationFn: (payload: { agentId: string; draft: AgentConfigDraft }) =>
-      fetchJson<AgentConfigWorkspaceAgent>(`/api/agents/${encodeURIComponent(payload.agentId)}`, {
+      fetchJson<AgentUpdateResponse>(`/api/agents/${encodeURIComponent(payload.agentId)}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -3016,6 +2991,7 @@ export function AgentsRoute() {
         }),
       }),
     onSuccess: (agent) => {
+      const archivedByStatusPatch = agent.status === "archived" && Boolean(agent.archiveSummary);
       queryClient.setQueryData<AgentConfigWorkspace | undefined>(
         queryKeys.agentConfigWorkspace(),
         (current) => updatedAgentWorkspaceCache(current, agent),
@@ -3024,7 +3000,11 @@ export function AgentsRoute() {
         tone: "success",
         text: lang === "zh" ? `已保存 ${agentLabel(agent)} 的 Agent 配置` : `Saved config for ${agentLabel(agent)}`,
       });
-      void chatWorkspaceCache.afterAgentWorkspaceChanged();
+      void (
+        archivedByStatusPatch
+          ? chatWorkspaceCache.afterAgentArchived()
+          : chatWorkspaceCache.afterAgentWorkspaceChanged()
+      );
     },
     onError: (error) => {
       setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
