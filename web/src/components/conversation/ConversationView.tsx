@@ -1748,7 +1748,7 @@ export function ConversationView({
           className={styles.operationSummary}
           aria-expanded={expanded}
           onClick={() => toggleSection(messageId, "feedback", defaultExpanded)}
-          title={expanded ? t("toolProcessVisible") : t("toolProcessHidden")}
+          title={expanded ? t("executionDetailsVisible") : t("executionDetailsHidden")}
         >
           {operationIcon(operations[0]?.kind ?? "tool", title)}
           <span>{title}</span>
