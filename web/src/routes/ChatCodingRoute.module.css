@@ -300,6 +300,80 @@
   word-break: normal;
 }
 
+.sessionDiagnosticsDetails {
+  display: grid;
+  gap: 0;
+  margin-top: 6px;
+  border: 1px solid color-mix(in srgb, var(--fg-tertiary) 12%, transparent);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--surface-card) 42%, transparent);
+}
+
+.sessionDiagnosticsSummary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 28px;
+  padding: 5px 6px;
+  color: var(--fg-secondary);
+  cursor: pointer;
+  font-size: 0.72rem;
+  list-style: none;
+}
+
+.sessionDiagnosticsSummary::-webkit-details-marker {
+  display: none;
+}
+
+.sessionDiagnosticsSummaryText {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  color: var(--fg-secondary);
+  font-weight: 720;
+}
+
+.sessionDiagnosticsSummaryText span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sessionDiagnosticsSummaryText svg {
+  flex: 0 0 auto;
+  transition: transform 140ms ease;
+}
+
+.sessionDiagnosticsDetails[open] .sessionDiagnosticsSummaryText svg {
+  transform: rotate(90deg);
+}
+
+.sessionDiagnosticsSnapshot {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-tertiary);
+  font-size: 0.68rem;
+  line-height: 1.1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sessionDiagnosticsBody {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 0 6px 7px;
+}
+
+.sessionResourceDiagnostics {
+  padding-top: 7px;
+  border-top: 1px solid color-mix(in srgb, var(--border-soft) 64%, transparent);
+}
+
 .featurePresetBlock {
   display: grid;
   gap: 6px;

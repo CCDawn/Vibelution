@@ -62,6 +62,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("styles.resourceSplit");
     expect(routeSource).toContain("styles.compressionFactGrid");
     expect(routeSource).toContain("styles.compressionFactWide");
+    expect(routeSource).toContain("styles.sessionDiagnosticsDetails");
+    expect(routeSource).toContain("styles.sessionResourceDiagnostics");
     expect(routeSource).toContain("styles.companionBlock");
     expect(routeSource).toContain("styles.companionCompact");
     expect(routeSource).toContain("styles.petMiniAvatar");
@@ -76,6 +78,11 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.compressionFactGrid).toBeTypeOf("string");
     expect(routeStyles.compressionFact).toBeTypeOf("string");
     expect(routeStyles.compressionFactWide).toBeTypeOf("string");
+    expect(routeStyles.sessionDiagnosticsDetails).toBeTypeOf("string");
+    expect(routeStyles.sessionDiagnosticsSummary).toBeTypeOf("string");
+    expect(routeStyles.sessionDiagnosticsSnapshot).toBeTypeOf("string");
+    expect(routeStyles.sessionDiagnosticsBody).toBeTypeOf("string");
+    expect(routeStyles.sessionResourceDiagnostics).toBeTypeOf("string");
     expect(routeStyles.companionBlock).toBeTypeOf("string");
     expect(routeStyles.companionCompact).toBeTypeOf("string");
     expect(routeStyles.petMiniAvatar).toBeTypeOf("string");
@@ -158,9 +165,14 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("cacheHitMissing");
   });
 
-  it("renders previous-turn context and cache composition inside the session status area", () => {
+  it("folds previous-turn context and cache composition into session diagnostics", () => {
     expect(routeSource).toContain("const lastContextComposition = detail?.lastContextComposition ?? null");
     expect(routeSource).toContain("const lastCacheComposition = detail?.lastCacheComposition ?? null");
+    expect(routeSource).toContain("<details className={styles.sessionDiagnosticsDetails}>");
+    expect(routeSource).toContain("<summary className={styles.sessionDiagnosticsSummary}>");
+    expect(routeSource).not.toContain("<details className={styles.sessionDiagnosticsDetails} open");
+    expect(routeSource).toContain("t(\"contextDiagnostics\")");
+    expect(routeSource).toContain("styles.sessionDiagnosticsSnapshot");
     expect(routeSource).toContain("styles.contextCompositionPanel");
     expect(routeSource).toContain("t(\"previousContextComposition\")");
     expect(routeSource).toContain("t(\"previousCacheHit\")");
@@ -173,9 +185,15 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("cacheCompositionSegmentClass(segment.key)");
     expect(routeSource).toContain("case \"cache_write\"");
     expect(routeSource).toContain("cacheCreationInputTokens");
-    expect(routeSource.indexOf("styles.contextCompositionPanel")).toBeGreaterThan(routeSource.indexOf("sessionCompactRows.map"));
+    expect(routeSource.indexOf("styles.sessionDiagnosticsDetails")).toBeGreaterThan(routeSource.indexOf("sessionCompactRows.map"));
+    expect(routeSource.indexOf("styles.contextCompositionPanel")).toBeGreaterThan(routeSource.indexOf("styles.sessionDiagnosticsBody"));
     expect(routeSource.indexOf("styles.contextCompositionPanel")).toBeLessThan(routeSource.indexOf("<aside className={rightPaneCollapsed"));
 
+    expect(routeStyles.sessionDiagnosticsDetails).toBeTypeOf("string");
+    expect(routeStyles.sessionDiagnosticsSummary).toBeTypeOf("string");
+    expect(routeStyles.sessionDiagnosticsSummaryText).toBeTypeOf("string");
+    expect(routeStyles.sessionDiagnosticsSnapshot).toBeTypeOf("string");
+    expect(routeStyles.sessionDiagnosticsBody).toBeTypeOf("string");
     expect(routeStyles.contextCompositionPanel).toBeTypeOf("string");
     expect(routeStyles.contextCompositionBar).toBeTypeOf("string");
     expect(routeStyles.contextCompositionLegend).toBeTypeOf("string");
