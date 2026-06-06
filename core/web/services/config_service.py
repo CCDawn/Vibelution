@@ -525,8 +525,8 @@ def _validate_required_llm_profiles(public_config: dict[str, Any], lang: str) ->
                 message="Optional legacy LLM profiles are unconfigured but no longer block config apply.",
                 outcome="allowed",
                 fields={
-                    "profileCount": len(optional_missing),
-                    "profileIds": optional_missing[:20],
+                    "legacyBindingCount": len(optional_missing),
+                    "legacyBindingIds": optional_missing[:20],
                     "primaryRequired": True,
                 },
                 lifecycle=True,
@@ -676,49 +676,6 @@ def _apply_image_input_capability_result_to_config(
             profile["capability_error"] = details["capability_error"]
         else:
             profile.pop("capability_error", None)
-
-
-def _list_profile_cards(public_config: dict[str, Any], draft_meta: dict | None, lang: str) -> list[dict[str, Any]]:
-    effective = build_effective_config(public_config)
-    llm = public_config.get("llm", {})
-    profiles = llm.get("profiles", {}) if isinstance(llm, dict) else {}
-    cards: list[dict[str, Any]] = []
-    for profile_id in effective.llm.profiles:
-        public_profile = profiles.get(profile_id, {}) if isinstance(profiles, dict) else {}
-        public_profile = public_profile if isinstance(public_profile, dict) else {}
-        selected = _selected_model_option(public_config, public_profile)
-        provider = effective.llm.get_provider(effective.llm.get_profile(profile_id=profile_id).provider_id)
-        profile = effective.llm.get_profile(profile_id=profile_id)
-        api_key_env = (
-            str(public_profile.get("api_key_env", "")).strip()
-            or str((selected or {}).get("api_key_env", "")).strip()
-            or str(getattr(provider, "api_key_env", "") or "").strip()
-        )
-        configured = bool(effective.get_api_key_for_profile(profile_id=profile_id))
-        resolved_configured, api_key_state = _api_key_display_state(api_key_env, configured, draft_meta)
-        api_key_source = effective.llm.get_api_key_source_label_for_profile(profile_id=profile_id)
-        if api_key_state == "pending":
-            api_key_source = f"pending-env:{api_key_env}"
-        elif api_key_state == "clear_pending":
-            api_key_source = f"pending-clear:{api_key_env}"
-        cards.append(
-            {
-                "profileId": str(profile_id),
-                "label": _profile_label(str(profile_id), lang, public_profile),
-                "modelRef": str(public_profile.get("model_ref", "")).strip(),
-                "selectedModelId": str((selected or {}).get("model_id", "")).strip(),
-                "selectedModelLabel": str((selected or {}).get("label", "")).strip() or profile.model,
-                "model": profile.model,
-                "providerKind": provider.kind,
-                "baseUrl": provider.base_url,
-                "apiKeyEnv": api_key_env,
-                "apiKeyConfigured": resolved_configured,
-                "apiKeyState": api_key_state,
-                "apiKeySource": api_key_source,
-                "requiredModelMissing": selected is None,
-            }
-        )
-    return cards
 
 
 def _run_draft_test_llm_connection(
@@ -1075,7 +1032,6 @@ def _build_workspace(
     contract = get_workbench_contract(public_config)
     llm_cfg = public_config.get("llm", {})
     model_library = llm_cfg.get("model_library", {}) if isinstance(llm_cfg, dict) else {}
-    profiles = llm_cfg.get("profiles", {}) if isinstance(llm_cfg, dict) else {}
     draft_hash = public_config_hash(public_config)
     blocking = diagnosis.get("blocking_issues") or []
     warnings = diagnosis.get("warnings") or []
@@ -1096,7 +1052,6 @@ def _build_workspace(
         "modeAvailability": contract["modeAvailability"],
         "domainAvailability": contract["domainAvailability"],
         "modelLibraryCount": len(model_library) if isinstance(model_library, dict) else 0,
-        "profileCount": len(profiles) if isinstance(profiles, dict) else 0,
         "blockingCount": len(blocking),
         "warningCount": len(warnings),
         "sections": _config_sections(lang, editor_sections),
@@ -1109,7 +1064,6 @@ def _build_workspace(
         "editorMeta": editor_meta,
         "modelPresetOptions": list_llm_model_preset_options(),
         "modelOptions": _decorate_model_options(public_config, normalized_meta),
-        "profileCards": _list_profile_cards(public_config, normalized_meta, lang),
     }
 
 
@@ -1143,7 +1097,6 @@ def get_config_summary() -> dict[str, Any]:
     contract = get_workbench_contract(public_config)
     llm_cfg = public_config.get("llm", {})
     model_library = llm_cfg.get("model_library", {})
-    profiles = llm_cfg.get("profiles", {})
     lang = _resolve_workspace_language(public_config)
 
     blocking = diagnosis.get("blocking_issues") or []
@@ -1159,7 +1112,6 @@ def get_config_summary() -> dict[str, Any]:
         "modeAvailability": contract["modeAvailability"],
         "domainAvailability": contract["domainAvailability"],
         "modelLibraryCount": len(model_library) if isinstance(model_library, dict) else 0,
-        "profileCount": len(profiles) if isinstance(profiles, dict) else 0,
         "blockingCount": len(blocking),
         "warningCount": len(warnings),
         "sections": _config_sections(lang, build_editor_sections(public_config, lang)),

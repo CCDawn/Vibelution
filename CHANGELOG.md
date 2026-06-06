@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.33 - 2026-06-06
+
+- Removed legacy `profileCards` and `profileCount` from the config workspace API contract, keeping Model Library access through `modelOptions`.
+- Hid the legacy Tools config editor section from the Config page so tool-specific configuration stays with Agent/tool management surfaces.
+- Changed direct Agent session renaming to update the Agent Directory display name, while child-session renaming updates only the task title and leaves Agent identity unchanged.
+
 ## 0.10.32 - 2026-06-06
 
 - Added lazy-loaded Memory Graph node details through `/api/memory/knowledge-graph/node-detail`, returning full formal knowledge bodies only for the selected node and within Team Knowledge ACL boundaries.
