@@ -148,13 +148,16 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(stylesSource).toContain(".supervisedMemberRowActive");
   });
 
-  it("shows immediate local feedback while a supervised start request is waiting for the backend", () => {
+  it("shows immediate local feedback while a supervised start command is waiting for the run record", () => {
     expect(routeSource).toContain("LOCAL_SUPERVISED_RUN_PREFIX");
     expect(routeSource).toContain("buildSupervisedStartPlaceholder");
     expect(routeSource).toContain("isLocalSupervisedStartPlaceholder");
+    expect(routeSource).toContain("isEvolutionRunCommandAccepted");
     expect(routeSource).toContain("onMutate: () =>");
-    expect(routeSource).toContain("启动请求已提交，正在等待后端返回真实运行记录。");
+    expect(routeSource).toContain("启动请求已提交，正在等待运行记录刷新。");
+    expect(routeSource).toContain("启动命令已排队，等待运行记录刷新。");
     expect(routeSource).toContain("setLiveActiveRun(buildSupervisedStartPlaceholder");
+    expect(routeSource).toContain("evolutionWorkspaceCache.refreshSupervisedActiveRun()");
     expect(routeSource).toContain("visibleLiveRunSnapshot");
     expect(routeSource).toContain("const streamLiveRun = isLocalSupervisedStartPlaceholder(liveActiveRun) ? null : liveActiveRun");
     expect(routeSource).toContain("setLiveActiveRun((current) => (isLocalSupervisedStartPlaceholder(current) ? null : current))");

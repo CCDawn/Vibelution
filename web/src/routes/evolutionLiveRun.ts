@@ -1,4 +1,4 @@
-import type { EvolutionActiveRun } from "../api/types";
+import type { EvolutionActiveRun, EvolutionRunCommandAccepted } from "../api/types";
 
 export function normalizedSupervisedRunStatus(status: string) {
   return String(status || "").trim().toLowerCase();
@@ -52,6 +52,16 @@ export function requireEvolutionRunSnapshot<T extends { runId?: string } | null 
     throw new Error(`${actionLabel} response did not include a runId.`);
   }
   return snapshot as Exclude<T, null | undefined>;
+}
+
+export function isEvolutionRunCommandAccepted(value: unknown): value is EvolutionRunCommandAccepted {
+  const payload = value as Partial<EvolutionRunCommandAccepted> | null | undefined;
+  return Boolean(
+    payload
+      && payload.accepted === true
+      && String(payload.commandId || "").trim()
+      && String(payload.commandType || "").trim(),
+  );
 }
 
 export function selectRunSnapshotWithRunId<T extends { runId?: string } | null | undefined>(

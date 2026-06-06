@@ -4002,15 +4002,28 @@ export type EvolutionActiveRunStreamEvent = {
   terminal?: boolean;
 };
 
-export type EvolutionRunDeleteResponse = {
-  deleted: boolean;
-  runId: string;
-  clearedActive: boolean;
-  clearedLatest: boolean;
-  activeRunId: string;
-  latestRunId: string;
+export type EvolutionRunCommandAccepted = {
+  accepted: true;
+  commandId: string;
+  commandType: string;
+  runId?: string;
+  status: "queued";
   summary: string;
+  completed?: boolean;
 };
+
+export type EvolutionRunStartResponse = EvolutionActiveRun | EvolutionRunCommandAccepted;
+
+export type EvolutionRunDeleteResponse = {
+  deleted?: boolean;
+  runId?: string;
+  clearedActive?: boolean;
+  clearedLatest?: boolean;
+  activeRunId?: string;
+  latestRunId?: string;
+  summary: string;
+} | EvolutionRunCommandAccepted;
+
 
 export type SupervisedWorktreeRun = {
   runId: string;
