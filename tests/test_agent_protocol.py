@@ -1253,14 +1253,17 @@ class TestToolMessageFlow:
             },
         )
 
-        input_tokens, output_tokens = controller.record_token_usage(
+        usage = controller.record_token_usage(
             response=response,
             round_state=round_state,
             current_turn=11,
         )
+        input_tokens, output_tokens = usage
 
         assert input_tokens == 120
         assert output_tokens == 18
+        assert usage.cache_creation_input_tokens == 24
+        assert usage.uncached_input_tokens == 48
         assert captured["tokens"][-1] == ((120, 18), {"cached_input_tokens": 72, "observed": True})
 
     def test_response_surface_controller_estimates_tokens_when_usage_is_missing(self):

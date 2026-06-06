@@ -274,6 +274,8 @@ function cacheCompositionSegmentClass(key: string) {
   switch (key) {
     case "cached":
       return styles.contextCompositionSegmentCached;
+    case "cache_write":
+      return styles.contextCompositionSegmentCacheWrite;
     case "uncached":
       return styles.contextCompositionSegmentUncached;
     case "missing":
@@ -2858,7 +2860,11 @@ export function ChatCodingRoute() {
     : t("cacheObservationPending");
   const cacheCompositionTitle = lastCacheComposition
     ? lastCacheComposition.source === "provider_usage"
-      ? `${t("previousCacheHit")} ${numberFormatter.format(lastCacheComposition.cachedInputTokens)} / ${numberFormatter.format(lastCacheComposition.inputTokens)} · ${cacheCompositionPercent}%`
+      ? [
+        `${t("previousCacheHit")} ${numberFormatter.format(lastCacheComposition.cachedInputTokens)} / ${numberFormatter.format(lastCacheComposition.inputTokens)} · ${cacheCompositionPercent}%`,
+        `write ${numberFormatter.format(lastCacheComposition.cacheCreationInputTokens ?? 0)}`,
+        `uncached ${numberFormatter.format(lastCacheComposition.uncachedInputTokens ?? 0)}`,
+      ].join(" · ")
       : t("cacheHitMissing")
     : t("cacheObservationPending");
   const activeDraft = activeSessionId ? sessionDrafts[activeSessionId] ?? "" : "";
@@ -3021,10 +3027,16 @@ export function ChatCodingRoute() {
     ? `${numberFormatter.format(sessionCacheUsage.turnCachedInputTokens)} / ${numberFormatter.format(sessionCacheUsage.turnInputTokens)} · ${cacheHitRatePercent}%`
     : t("cacheHitMissing");
   const llmUsageLine = hasProviderLlmUsage
-    ? `${numberFormatter.format(sessionLlmUsage.inputTokens)} tokens`
+    ? `${numberFormatter.format(sessionLlmUsage.inputTokens)} tokens · ${numberFormatter.format(sessionLlmUsage.cachedInputTokens)} cached`
     : t("llmUsageMissing");
   const llmUsageTitle = hasProviderLlmUsage
-    ? `${numberFormatter.format(sessionLlmUsage.inputTokens)} in · ${numberFormatter.format(sessionLlmUsage.outputTokens)} out · ${numberFormatter.format(sessionLlmUsage.cachedInputTokens)} cached`
+    ? [
+      `${numberFormatter.format(sessionLlmUsage.inputTokens)} in`,
+      `${numberFormatter.format(sessionLlmUsage.outputTokens)} out`,
+      `${numberFormatter.format(sessionLlmUsage.cachedInputTokens)} cached`,
+      `${numberFormatter.format(sessionLlmUsage.cacheCreationInputTokens ?? 0)} write`,
+      `${numberFormatter.format(sessionLlmUsage.uncachedInputTokens ?? 0)} uncached`,
+    ].join(" · ")
     : t("llmUsageMissing");
   const compression = runtimeMatchesSelectedSession ? runtime?.contextCompression : undefined;
   const compressionCurrentPercent = compression
