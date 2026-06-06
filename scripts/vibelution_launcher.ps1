@@ -3086,6 +3086,42 @@ function Get-WebBuildReason {
     return $null
 }
 
+function ConvertTo-WebRelativePath {
+    param([string]$Path)
+
+    try {
+        $fullPath = [System.IO.Path]::GetFullPath($Path)
+        $rootPath = [System.IO.Path]::GetFullPath($webDir)
+        if ($fullPath.StartsWith($rootPath, [System.StringComparison]::OrdinalIgnoreCase)) {
+            return $fullPath.Substring($rootPath.Length).TrimStart(
+                [System.IO.Path]::DirectorySeparatorChar,
+                [System.IO.Path]::AltDirectorySeparatorChar
+            )
+        }
+    } catch {
+        return $Path
+    }
+    return $Path
+}
+
+function Get-FrontendToolchainMissingPaths {
+    $nodeModulesDir = Join-Path $webDir "node_modules"
+    $requiredPaths = @(
+        (Join-Path $nodeModulesDir ".bin\tsc.cmd"),
+        (Join-Path $nodeModulesDir ".bin\vite.cmd"),
+        (Join-Path $nodeModulesDir "typescript\bin\tsc"),
+        (Join-Path $nodeModulesDir "vite\bin\vite.js")
+    )
+
+    $missing = @()
+    foreach ($path in $requiredPaths) {
+        if (-not (Test-Path -LiteralPath $path)) {
+            $missing += (ConvertTo-WebRelativePath -Path $path)
+        }
+    }
+    return @($missing)
+}
+
 function Ensure-FrontendDependencies {
     $packageJsonPath = Join-Path $webDir "package.json"
     $packageLockPath = Join-Path $webDir "package-lock.json"
@@ -3095,9 +3131,8 @@ function Ensure-FrontendDependencies {
     }
 
     $nodeModulesDir = Join-Path $webDir "node_modules"
-    $tscBinPath = Join-Path $nodeModulesDir ".bin\tsc.cmd"
-    $viteBinPath = Join-Path $nodeModulesDir ".bin\vite.cmd"
-    $toolchainReady = (Test-Path $tscBinPath) -and (Test-Path $viteBinPath)
+    $missingToolchainPaths = @(Get-FrontendToolchainMissingPaths)
+    $toolchainReady = $missingToolchainPaths.Count -eq 0
     $dependencyFingerprint = Get-FileFingerprint -Paths $dependencyFiles
     $storedFingerprint = Get-StoredStampValue -Path $frontendDepsStampPath
     if ((Test-Path $nodeModulesDir) -and $toolchainReady -and $storedFingerprint -eq $dependencyFingerprint) {
@@ -3135,7 +3170,7 @@ function Ensure-FrontendDependencies {
     $installReason = if (-not (Test-Path $nodeModulesDir)) {
         "node_modules is missing"
     } elseif (-not $toolchainReady) {
-        "frontend build tools are missing from node_modules"
+        "frontend build tools are missing from node_modules: $($missingToolchainPaths -join ', ')"
     } elseif (-not $storedFingerprint) {
         "dependency stamp is missing"
     } else {
@@ -3151,7 +3186,7 @@ function Ensure-FrontendDependencies {
             -EventCode "frontend.dependencies.install.started" `
             -Message "Installing frontend dependencies." `
             -Outcome "started" `
-            -Fields @{ reason = $installReason }
+            -Fields @{ reason = $installReason; missing_toolchain_paths = $missingToolchainPaths }
     }
     Push-Location $webDir
     try {

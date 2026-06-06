@@ -2197,6 +2197,71 @@ Write-Output "ok"
     assert result.stdout.strip().splitlines()[-1] == "ok"
 
 
+def test_frontend_toolchain_detection_requires_real_package_entries(tmp_path):
+    web_dir = tmp_path / "web"
+    (web_dir / "node_modules" / ".bin").mkdir(parents=True)
+    (web_dir / "node_modules" / "vite" / "bin").mkdir(parents=True)
+    (web_dir / "node_modules" / ".bin" / "tsc.cmd").write_text("", encoding="utf-8")
+    (web_dir / "node_modules" / ".bin" / "vite.cmd").write_text("", encoding="utf-8")
+    (web_dir / "node_modules" / "vite" / "bin" / "vite.js").write_text("", encoding="utf-8")
+    result = _run_launcher_ast_harness(
+        tmp_path,
+        f"""
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$LauncherPath
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$source = Get-Content -Raw -LiteralPath $LauncherPath
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors -and $parseErrors.Count -gt 0) {{
+    throw "Launcher script parse failed: $($parseErrors[0].Message)"
+}}
+
+foreach ($functionName in @(
+    "ConvertTo-WebRelativePath",
+    "Get-FrontendToolchainMissingPaths"
+)) {{
+    $functionAst = $ast.Find({{
+        param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+            $node.Name -eq $functionName
+    }}, $true)
+    if ($null -eq $functionAst) {{
+        throw "$functionName was not found."
+    }}
+    . ([scriptblock]::Create($functionAst.Extent.Text))
+}}
+
+Set-Variable -Name webDir -Value {json.dumps(str(web_dir))} -Scope Script
+$missing = @(Get-FrontendToolchainMissingPaths)
+if ($missing.Count -ne 1) {{
+    throw "Expected exactly one missing frontend toolchain path, got $($missing.Count): $($missing -join ', ')"
+}}
+if ($missing[0] -ne "node_modules\\typescript\\bin\\tsc") {{
+    throw "Unexpected missing frontend toolchain path: $($missing[0])"
+}}
+
+New-Item -ItemType Directory -Force -Path (Join-Path $webDir "node_modules\\typescript\\bin") | Out-Null
+New-Item -ItemType File -Force -Path (Join-Path $webDir "node_modules\\typescript\\bin\\tsc") | Out-Null
+$missing = @(Get-FrontendToolchainMissingPaths)
+if ($missing.Count -ne 0) {{
+    throw "Expected complete frontend toolchain after restoring tsc, got: $($missing -join ', ')"
+}}
+
+Write-Output "ok"
+""",
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip().splitlines()[-1] == "ok"
+
+
 def test_launcher_stop_preserves_control_surface_state(tmp_path):
     result = _run_launcher_ast_harness(
         tmp_path,
