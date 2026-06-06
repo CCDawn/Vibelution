@@ -27,6 +27,7 @@ from core.evaluation.self_evolution_reflection import (
 from core.infrastructure.agent_session import get_session_state
 from core.orchestration.context_engine import build_agent_context, record_agent_turn_result
 from core.orchestration.turn_runner import AgentSingleTurnRequest, run_agent_single_turn
+from core.orchestration.turn_runtime import AgentTurnRuntimeRequest
 from core.runtime_manager.command_queue import submit_command, wait_for_result
 from core.runtime_manager.evolution_store import (
     load_active_run_snapshot as load_manager_active_run_snapshot,
@@ -1509,6 +1510,17 @@ def _run_self_evolution_turn(context: dict[str, Any]) -> None:
             turn_id=run_id,
         )
         prompt = goal if carryover else _build_web_run_prompt(goal)
+        turn_runtime_request = AgentTurnRuntimeRequest(
+            mode="self_evolution",
+            run_kind="self_evolution",
+            run_id=run_id,
+            session_id=str(executor_binding.get("directSessionId") or ""),
+            agent_id=str(executor_binding.get("agentId") or ""),
+            llm_slot="dialogue",
+            model_id=str(executor_binding.get("dialogueModelId") or ""),
+            cache_scope="executor",
+            workspace_path=str(executor_binding.get("workspacePath") or ""),
+        )
         with runtime_context:
             turn_result = run_agent_single_turn(
                 AgentSingleTurnRequest(
@@ -1519,6 +1531,7 @@ def _run_self_evolution_turn(context: dict[str, Any]) -> None:
                     carryover=carryover if isinstance(carryover, dict) else None,
                     runtime_context=executor_context.context_block,
                     interrupt_checker=lambda: _current_run_control_reason(run_id),
+                    runtime=turn_runtime_request,
                 )
             )
         result = turn_result.result
@@ -1548,6 +1561,7 @@ def _run_self_evolution_turn(context: dict[str, Any]) -> None:
         )
         transcript_tool_calls = _tool_calls_from_result(result)
         last_tool_name = _last_tool_name_from_result(result)
+        turn_runtime_metadata = dict(turn_result.runtime.metadata) if turn_result.runtime is not None else {}
         _record_self_scene_event(
             "turn",
             "self_evolution_run.turn.completed",
@@ -1561,6 +1575,7 @@ def _run_self_evolution_turn(context: dict[str, Any]) -> None:
                 "totalToolCallCount": total_tool_call_count,
                 "lastToolName": last_tool_name,
                 "summaryPreview": (assistant_message or summary)[:320],
+                "turnRuntime": turn_runtime_metadata,
             },
             child_log_payload={
                 "resultStatus": result_status,
@@ -1568,6 +1583,7 @@ def _run_self_evolution_turn(context: dict[str, Any]) -> None:
                 "totalToolCallCount": total_tool_call_count,
                 "lastToolName": last_tool_name,
                 "summaryPreview": (assistant_message or summary)[:800],
+                "turnRuntime": turn_runtime_metadata,
                 "toolCalls": transcript_tool_calls,
             },
             lifecycle=True,
