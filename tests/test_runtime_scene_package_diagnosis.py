@@ -648,6 +648,290 @@ def test_runtime_scene_issue_state_treats_resource_lease_conflict_as_policy(tmp_
     assert "issueState.policyClusterCount" in diagnosis["agentNextStep"]
 
 
+def test_runtime_scene_treats_transient_agent_directory_slow_as_policy_observation(tmp_path, monkeypatch):
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+    scene_id = "scene-agent-directory-transient-slow"
+    slow_event = {
+        "runtime_scene_id": scene_id,
+        "component": "agent_directory",
+        "phase": "list_agents",
+        "event_code": "agent_directory.list_agents.slow",
+        "level": "warning",
+        "outcome": "observed",
+        "message": "Agent directory list_agents was slow.",
+        "fields": {
+            "rawAgentCount": 32,
+            "returnedAgentCount": 32,
+            "timingsMs": {"hydrate": 4917.4, "total": 5104.7},
+            "hydrationTimingsMs": {"group_context_events": 3233.7},
+            "slowestStage": "hydrate",
+            "slowestHydrationStage": "group_context_events",
+        },
+        "raw_refs": [{"path": "events/agent_directory.jsonl", "tail_lines": 80}],
+    }
+    _seed_scene(
+        tmp_path,
+        scene_id,
+        [
+            {**slow_event, "ts": "2026-05-18T12:00:01Z", "seq": 1},
+            {**slow_event, "ts": "2026-05-18T12:00:02Z", "seq": 2},
+        ],
+        status="running",
+    )
+
+    detail = runtime_scene_service.get_runtime_scene_detail(scene_id)
+
+    diagnosis = detail["packageDiagnosis"]
+    issue_state = diagnosis["issueState"]
+    assert diagnosis["severity"] == "warning"
+    assert issue_state["activeClusterCount"] == 0
+    assert issue_state["policyClusterCount"] == 1
+    assert issue_state["firstPolicyCluster"]["eventCode"] == "agent_directory.list_agents.slow"
+    assert "issueState.policyClusterCount" in diagnosis["agentNextStep"]
+    summary = json.loads(
+        (
+            tmp_path
+            / "logs"
+            / "runtime_scenes"
+            / f"20260518T120000Z__{scene_id}"
+            / "summary.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert summary["agent_brief"]["diagnosis_status"] == "policy_only"
+    assert summary["agent_brief"]["needs_action"] is False
+
+
+def test_runtime_scene_keeps_repeated_agent_directory_slow_actionable(tmp_path, monkeypatch):
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+    scene_id = "scene-agent-directory-repeated-slow"
+    rows = []
+    for index in range(3):
+        rows.append(
+            {
+                "runtime_scene_id": scene_id,
+                "ts": f"2026-05-18T12:00:0{index + 1}Z",
+                "seq": index + 1,
+                "component": "agent_directory",
+                "phase": "list_agents",
+                "event_code": "agent_directory.list_agents.slow",
+                "level": "warning",
+                "outcome": "observed",
+                "message": "Agent directory list_agents was slow.",
+                "fields": {
+                    "rawAgentCount": 32,
+                    "returnedAgentCount": 32,
+                    "timingsMs": {"hydrate": 4100.0, "total": 4300.0},
+                    "hydrationTimingsMs": {"group_context_events": 3000.0},
+                },
+                "raw_refs": [{"path": "events/agent_directory.jsonl", "tail_lines": 80}],
+            }
+        )
+    _seed_scene(tmp_path, scene_id, rows, status="running")
+
+    detail = runtime_scene_service.get_runtime_scene_detail(scene_id)
+
+    issue_state = detail["packageDiagnosis"]["issueState"]
+    assert issue_state["activeClusterCount"] == 1
+    assert issue_state["policyClusterCount"] == 0
+    assert issue_state["activeClusters"][0]["eventCode"] == "agent_directory.list_agents.slow"
+    assert issue_state["activeClusters"][0]["repeatCount"] == 3
+
+
+def test_runtime_scene_treats_runtime_status_probe_404_as_operational_noise(tmp_path, monkeypatch):
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+    scene_id = "scene-runtime-status-probe"
+    _seed_scene(
+        tmp_path,
+        scene_id,
+        [
+            {
+                "runtime_scene_id": scene_id,
+                "ts": "2026-05-18T12:00:01Z",
+                "seq": 1,
+                "component": "backend",
+                "phase": "api",
+                "event_code": "backend.api.request",
+                "level": "warning",
+                "outcome": "client_error",
+                "message": "GET /{full_path:path} -> 404",
+                "fields": {
+                    "method": "GET",
+                    "path": "/api/runtime/status",
+                    "pathTemplate": "/{full_path:path}",
+                    "statusCode": 404,
+                },
+                "raw_refs": [{"path": "raw/backend.api.log", "tail_lines": 80}],
+            }
+        ],
+        status="running",
+    )
+
+    detail = runtime_scene_service.get_runtime_scene_detail(scene_id)
+
+    diagnosis = detail["packageDiagnosis"]
+    assert diagnosis["severity"] == "info"
+    assert diagnosis["issueState"]["activeClusterCount"] == 0
+    assert diagnosis["issueState"]["policyClusterCount"] == 0
+
+
+def test_runtime_scene_treats_testclient_404_as_operational_noise(tmp_path, monkeypatch):
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+    scene_id = "scene-testclient-404"
+    _seed_scene(
+        tmp_path,
+        scene_id,
+        [
+            {
+                "runtime_scene_id": scene_id,
+                "ts": "2026-05-18T12:00:01Z",
+                "seq": 1,
+                "component": "backend",
+                "phase": "api",
+                "event_code": "backend.api.request",
+                "level": "warning",
+                "outcome": "client_error",
+                "message": "GET /api/memory/knowledge-graph/node-detail -> 404",
+                "fields": {
+                    "method": "GET",
+                    "path": "/api/memory/knowledge-graph/node-detail",
+                    "pathTemplate": "/api/memory/knowledge-graph/node-detail",
+                    "statusCode": 404,
+                    "client": "testclient",
+                },
+                "raw_refs": [{"path": "raw/backend.api.log", "tail_lines": 80}],
+            }
+        ],
+        status="running",
+    )
+
+    detail = runtime_scene_service.get_runtime_scene_detail(scene_id)
+
+    diagnosis = detail["packageDiagnosis"]
+    assert diagnosis["severity"] == "info"
+    assert diagnosis["issueState"]["activeClusterCount"] == 0
+    assert diagnosis["issueState"]["policyClusterCount"] == 0
+
+
+def test_runtime_scene_keeps_testclient_500_actionable(tmp_path, monkeypatch):
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+    scene_id = "scene-testclient-500"
+    _seed_scene(
+        tmp_path,
+        scene_id,
+        [
+            {
+                "runtime_scene_id": scene_id,
+                "ts": "2026-05-18T12:00:01Z",
+                "seq": 1,
+                "component": "backend",
+                "phase": "api",
+                "event_code": "backend.api.request",
+                "level": "error",
+                "outcome": "failed",
+                "message": "GET /api/memory/knowledge-graph/node-detail -> 500",
+                "fields": {
+                    "method": "GET",
+                    "path": "/api/memory/knowledge-graph/node-detail",
+                    "pathTemplate": "/api/memory/knowledge-graph/node-detail",
+                    "statusCode": 500,
+                    "client": "testclient",
+                },
+                "raw_refs": [{"path": "raw/backend.api.log", "tail_lines": 80}],
+            }
+        ],
+        status="running",
+    )
+
+    detail = runtime_scene_service.get_runtime_scene_detail(scene_id)
+
+    diagnosis = detail["packageDiagnosis"]
+    assert diagnosis["severity"] == "error"
+    assert diagnosis["issueState"]["activeClusterCount"] == 1
+    assert diagnosis["issueState"]["activeClusters"][0]["eventCode"] == "backend.api.request"
+
+
+def test_runtime_scene_component_fallback_evidence_path_matches_event_file_name(tmp_path, monkeypatch):
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+    scene_id = "scene-component-fallback-path"
+    _seed_scene(
+        tmp_path,
+        scene_id,
+        [
+            {
+                "runtime_scene_id": scene_id,
+                "ts": "2026-05-18T12:00:01Z",
+                "seq": 1,
+                "component": "evolution_service",
+                "phase": "workspace_snapshot",
+                "event_code": "evolution.workspace_snapshot.slow",
+                "level": "warning",
+                "outcome": "observed",
+                "message": "Evolution workspace snapshot was slow.",
+                "fields": {"timingsMs": {"total": 2000.0}},
+                "raw_refs": [],
+            }
+        ],
+        status="running",
+    )
+
+    detail = runtime_scene_service.get_runtime_scene_detail(scene_id)
+
+    diagnosis = detail["packageDiagnosis"]
+    assert diagnosis["firstSignal"]["rawRefs"] == [
+        {"path": "events/evolution_service.jsonl", "tail_lines": 80}
+    ]
+    assert diagnosis["evidencePaths"][0] == "events/evolution_service.jsonl"
+
+
+def test_runtime_scene_resolved_agent_model_references_clear_active_unresolved_warning(tmp_path, monkeypatch):
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+    scene_id = "scene-agent-model-reference-recovered"
+    _seed_scene(
+        tmp_path,
+        scene_id,
+        [
+            {
+                "runtime_scene_id": scene_id,
+                "ts": "2026-05-18T12:00:01Z",
+                "seq": 1,
+                "component": "agent_config",
+                "phase": "model_binding",
+                "event_code": "agent_config.unresolved_model_reference",
+                "level": "warning",
+                "outcome": "observed",
+                "message": "Agent LLM binding references a model id that is not present in the model library.",
+                "fields": {
+                    "agentId": "agent-knowledge-steward",
+                    "slot": "dialogue",
+                    "modelId": "generated_xiaomi_mimo_v2_5_cdff497b2d9b",
+                },
+            },
+            {
+                "runtime_scene_id": scene_id,
+                "ts": "2026-05-18T12:00:02Z",
+                "seq": 2,
+                "component": "agent_config",
+                "phase": "model_binding",
+                "event_code": "agent_config.model_references.resolved",
+                "level": "info",
+                "outcome": "resolved",
+                "message": "Agent LLM binding model references are resolved.",
+                "fields": {"unresolvedCount": 0},
+            },
+        ],
+        status="running",
+    )
+
+    detail = runtime_scene_service.get_runtime_scene_detail(scene_id)
+
+    diagnosis = detail["packageDiagnosis"]
+    issue_state = diagnosis["issueState"]
+    assert diagnosis["severity"] == "info"
+    assert issue_state["activeClusterCount"] == 0
+    assert issue_state["historicalClusterCount"] == 1
+    assert issue_state["historicalClusters"][0]["eventCode"] == "agent_config.unresolved_model_reference"
+
+
 def test_runtime_scene_issue_state_keeps_unknown_http_409_active(tmp_path, monkeypatch):
     monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
     scene_id = "scene-diagnosis-unknown-409"
