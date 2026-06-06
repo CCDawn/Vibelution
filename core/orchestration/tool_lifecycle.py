@@ -8,7 +8,8 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from concurrent.futures import ThreadPoolExecutor
+from typing import Any, Callable, ClassVar, Dict, List, Optional, Tuple
 
 from langchain_core.messages import AIMessage, ToolMessage
 
@@ -27,6 +28,38 @@ ToolResultObserverFn = Callable[[Dict[str, Any], Any, Optional[str]], None]
 
 class ToolLifecycleBridge:
     """负责工具调用的执行、结果回写与生命周期动作派生。"""
+
+    # 显式列出已知 read-only 的工具，让 execute_tools 把连续的 read-only 调用
+    # 用 threadpool 并发执行；mutating 工具仍走串行，且 read-only 与 mutating
+    # 之间保持原序边界。保守白名单 —— 不在表里的一律按 mutating 处理。
+    READONLY_TOOL_NAMES: ClassVar[set[str]] = {
+        "read_file_tool",
+        "grep_search_tool",
+        "glob_search_tool",
+        "list_directory_tool",
+        "list_files_tool",
+        "web_search_tool",
+        "web_fetch_tool",
+        "fetch_url_tool",
+        "get_git_status_summary_tool",
+        "get_recent_changes_tool",
+        "get_current_goal_tool",
+        "get_core_context_tool",
+        "get_memory_summary_tool",
+        "task_list_tool",
+        "code_symbol_tool",
+        "code_analysis_tool",
+        "codebase_analyzer_tool",
+        "conversation_log_inspect_tool",
+        "search_memory_tool",
+        "key_info_extractor_tool",
+    }
+
+    DEFAULT_PARALLEL_READONLY_WORKERS: ClassVar[int] = 4
+
+    @classmethod
+    def is_readonly_tool(cls, tool_name: Any) -> bool:
+        return str(tool_name or "").strip() in cls.READONLY_TOOL_NAMES
 
     def __init__(
         self,
@@ -176,16 +209,83 @@ class ToolLifecycleBridge:
         if truncated:
             _debug_logger.warning(f"[工具] {tool_call['name']} 结果过长，已截断", tag="TOOL")
 
-    def execute_tools(self, tool_calls: List[Dict[str, Any]], messages: list) -> Optional[str]:
-        """串行执行工具，并返回生命周期动作。"""
+    def execute_tools(
+        self,
+        tool_calls: List[Dict[str, Any]],
+        messages: list,
+        *,
+        max_parallel_readonly: Optional[int] = None,
+    ) -> Optional[str]:
+        """按原序执行工具，read-only 段并发，mutating 段串行；返回生命周期动作。
+
+        分批策略：连续 read-only 调用合成一个并行 batch；mutating 调用各自成串行
+        batch。这样保证 mutating 之间、mutating 与 read-only 之间的顺序不变，
+        只在已确认 read-only 的段内提升并发，避免误判副作用。
+        """
+
         if not tool_calls:
             return None
 
+        workers_cap = int(max_parallel_readonly or self.DEFAULT_PARALLEL_READONLY_WORKERS)
         lifecycle_action: Optional[str] = None
-        for tool_call in tool_calls:
-            result, action = self.execute_tool(tool_call, messages)
-            self.handle_tool_result(tool_call, result, action, messages)
-            if action in ("restart", "hibernated", "turn_complete"):
-                lifecycle_action = action
+        for batch in self._partition_tool_calls(tool_calls):
+            if len(batch) == 1:
+                tool_call = batch[0]
+                result, action = self.execute_tool(tool_call, messages)
+                self.handle_tool_result(tool_call, result, action, messages)
+                if action in ("restart", "hibernated", "turn_complete"):
+                    lifecycle_action = action
+                    break
+                continue
+            results = self._execute_readonly_batch(batch, messages, workers=workers_cap)
+            for tool_call, (result, action) in zip(batch, results):
+                self.handle_tool_result(tool_call, result, action, messages)
+                if action in ("restart", "hibernated", "turn_complete"):
+                    # read-only 工具理论上不应触发生命周期切换，但出现就尊重它。
+                    lifecycle_action = action
+                    break
+            if lifecycle_action:
                 break
         return lifecycle_action
+
+    def _partition_tool_calls(
+        self,
+        tool_calls: List[Dict[str, Any]],
+    ) -> List[List[Dict[str, Any]]]:
+        """把 tool_calls 切成保留原序的 batch 序列：read-only 连续段合一批，其余各自单批。"""
+
+        batches: List[List[Dict[str, Any]]] = []
+        readonly_buf: List[Dict[str, Any]] = []
+        for tc in tool_calls:
+            if self.is_readonly_tool(tc.get("name")):
+                readonly_buf.append(tc)
+                continue
+            if readonly_buf:
+                batches.append(readonly_buf)
+                readonly_buf = []
+            batches.append([tc])
+        if readonly_buf:
+            batches.append(readonly_buf)
+        return batches
+
+    def _execute_readonly_batch(
+        self,
+        batch: List[Dict[str, Any]],
+        messages: list,
+        *,
+        workers: int,
+    ) -> List[Tuple[Any, Optional[str]]]:
+        """并发执行 read-only batch，按 batch 原序返回结果。
+
+        每个 worker 独立调 execute_tool；只读工具不应改 messages，所以传给 execute_tool
+        的 messages 只在极端的 `trigger_self_restart_tool` 场景被读，而该工具不在
+        read-only 白名单内，所以不会落到这里。
+        """
+
+        worker_count = max(1, min(workers, len(batch)))
+        with ThreadPoolExecutor(
+            max_workers=worker_count,
+            thread_name_prefix="readonly-tool",
+        ) as pool:
+            futures = [pool.submit(self.execute_tool, tc, messages) for tc in batch]
+            return [f.result() for f in futures]

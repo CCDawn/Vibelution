@@ -20,6 +20,21 @@ from core.orchestration.output_boundary import strip_llm_protocol_artifacts
 
 
 @dataclass
+class ResponsePreview:
+    """LLM 响应的轻量预解析结果。
+
+    主循环用它判断 XML fast-path / 构造 state_block，再传给 finalize() 拿到
+    含 state_block 注入的完整结果。两步共享解析结果，避免重复 coerce/regex/XML parse。
+    """
+
+    raw_content: str
+    tool_calls: List[Dict[str, Any]]
+    xml_tool_calls: List[Dict[str, Any]]
+    tool_call_count: int
+    has_tool_calls: bool
+
+
+@dataclass
 class ResponseProcessingResult:
     raw_content: str
     raw_content_clean: str
@@ -104,14 +119,36 @@ class ResponseProcessor:
     def strip_active_components_echo(cls, raw_content: str) -> str:
         return strip_llm_protocol_artifacts(raw_content)
 
-    def process(self, response: Any, state_block_str: str = "") -> ResponseProcessingResult:
+    def preview(self, response: Any) -> ResponsePreview:
+        """轻量预解析：拿到 raw_content / tool_calls / XML fallback。
+
+        主循环用这个判断 XML fast-path 或构造 state_block，再把同一份 preview
+        传给 finalize() 拿完整结果，避免一轮 LLM 响应被解析两遍。
+        """
+
         raw_content = self.coerce_content_text(getattr(response, "content", ""))
         tool_calls = list(getattr(response, "tool_calls", []) or [])
         tool_call_count = len(tool_calls)
         has_tool_calls = tool_call_count > 0
         xml_tool_calls = [] if has_tool_calls else parse_xml_tool_calls(raw_content)
-        active_components = self.extract_active_components(raw_content)
+        return ResponsePreview(
+            raw_content=raw_content,
+            tool_calls=tool_calls,
+            xml_tool_calls=xml_tool_calls,
+            tool_call_count=tool_call_count,
+            has_tool_calls=has_tool_calls,
+        )
 
+    def finalize(
+        self,
+        response: Any,
+        preview: ResponsePreview,
+        state_block_str: str = "",
+    ) -> ResponseProcessingResult:
+        """基于已存在的 preview 完成重活：active_components / state_info / clean。"""
+
+        raw_content = preview.raw_content
+        active_components = self.extract_active_components(raw_content)
         raw_content_clean = self.strip_active_components_echo(self.strip_state_echo(raw_content))
         if state_block_str:
             raw_content_with_state = raw_content_clean + "\n\n" + state_block_str
@@ -119,15 +156,19 @@ class ResponseProcessor:
         else:
             raw_content_with_state = raw_content_clean
             state_info = parse_state_block(raw_content)
-
         return ResponseProcessingResult(
             raw_content=raw_content,
             raw_content_clean=raw_content_clean,
             raw_content_with_state=raw_content_with_state,
-            tool_calls=tool_calls,
-            xml_tool_calls=xml_tool_calls,
+            tool_calls=preview.tool_calls,
+            xml_tool_calls=preview.xml_tool_calls,
             active_components=active_components,
-            tool_call_count=tool_call_count,
-            has_tool_calls=has_tool_calls,
+            tool_call_count=preview.tool_call_count,
+            has_tool_calls=preview.has_tool_calls,
             state_info=state_info,
         )
+
+    def process(self, response: Any, state_block_str: str = "") -> ResponseProcessingResult:
+        """preview + finalize 的组合便捷入口，保留以兼容旧调用方。"""
+
+        return self.finalize(response, self.preview(response), state_block_str)

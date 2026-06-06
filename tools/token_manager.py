@@ -354,8 +354,7 @@ def estimate_tokens_precise(text: str) -> int:
     return int(base_tokens * 1.2) + 50  # 额外加50作为消息结构开销
 
 
-def estimate_messages_tokens(messages: list) -> int:
-    """估算消息列表的总 Token"""
+def _estimate_messages_tokens_uncached(messages: list) -> int:
     total = 0
     for msg in messages:
         if not hasattr(msg, 'content'):
@@ -377,6 +376,42 @@ def estimate_messages_tokens(messages: list) -> int:
             # 其他类型（尝试转为字符串估算）
             total += estimate_tokens_precise(str(content)[:10000])
     return total
+
+
+# 单槽缓存：典型 agent iteration 会连续 4 次询问同一个 messages 的 token 数
+# （UI 显示 / 压缩触发 / 压缩后回显 / 错误诊断），但消息列表整轮里通常不变。
+# 缓存指纹覆盖 append/pop/messages[0] 重写/_compress_messages 返回新列表这几条
+# 实际突变路径；极端的"中段就地替换"会被漏掉，但本仓库内无此模式。
+_estimate_cache_fingerprint: tuple = ()
+_estimate_cache_value: int = 0
+
+
+def _messages_token_fingerprint(messages: list) -> tuple:
+    if not messages:
+        return (id(messages), 0)
+    return (
+        id(messages),
+        len(messages),
+        id(messages[0]),
+        id(messages[-1]),
+    )
+
+
+def estimate_messages_tokens(messages: list) -> int:
+    """估算消息列表的总 Token（带单槽指纹缓存）。"""
+    global _estimate_cache_fingerprint, _estimate_cache_value
+    fingerprint = _messages_token_fingerprint(messages)
+    if fingerprint == _estimate_cache_fingerprint:
+        return _estimate_cache_value
+    value = _estimate_messages_tokens_uncached(messages)
+    _estimate_cache_fingerprint = fingerprint
+    _estimate_cache_value = value
+    return value
+
+
+def estimate_messages_tokens_uncached(messages: list) -> int:
+    """直接计算，跳过缓存。用于校验或测试。"""
+    return _estimate_messages_tokens_uncached(messages)
 
 
 def get_message_priority(msg: Any) -> MessagePriority:
