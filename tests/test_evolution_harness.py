@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """evolution_harness 协议与归因逻辑测试"""
 
+import json
 import os
 import sys
 from pathlib import Path
@@ -175,6 +176,7 @@ def test_supervised_agent_binding_env_exports_safe_runtime_context_only():
             "role": "baseline",
             "llmSlot": "dialogue",
             "dialogueModelId": "model-a",
+            "llmBindings": {"dialogue": {"modelId": "model-a"}},
             "displayName": "监督基线 Agent",
             "apiKey": "should-not-leak",
         }
@@ -187,6 +189,8 @@ def test_supervised_agent_binding_env_exports_safe_runtime_context_only():
         "VIBELUTION_AGENT_WORKSPACE_PATH": "workspace/agents/agent-supervised-baseline",
         "VIBELUTION_SUPERVISED_ROLE": "baseline",
         "VIBELUTION_AGENT_LLM_SLOT": "dialogue",
+        "VIBELUTION_AGENT_LLM_MODEL_ID": "model-a",
+        "VIBELUTION_AGENT_LLM_BINDINGS_JSON": '{"dialogue":{"modelId":"model-a"}}',
         "VIBELUTION_TURN_MODE": "supervised_evolution",
         "VIBELUTION_TURN_RUN_KIND": "supervised_evaluation",
         "VIBELUTION_TURN_SESSION_ID": "session-baseline",
@@ -209,6 +213,8 @@ def test_supervised_agent_binding_env_accepts_supervised_role_alias():
             "profileId": "supervised_candidate",
             "supervisedRole": "candidate",
             "llmSlot": "dialogue",
+            "dialogueModelId": "model-candidate",
+            "llmBindings": {"dialogue": {"modelId": "model-candidate"}},
         }
     )
 
@@ -223,6 +229,18 @@ def test_supervised_agent_binding_env_requires_explicit_llm_slot():
             {
                 "agentId": "agent-supervised-baseline",
                 "role": "baseline",
+                "dialogueModelId": "model-a",
+            }
+        )
+
+
+def test_supervised_agent_binding_env_requires_model_for_explicit_llm_slot():
+    with pytest.raises(SupervisedAgentBindingRuntimeError, match="missing required model binding"):
+        supervised_agent_binding_env(
+            {
+                "agentId": "agent-supervised-baseline",
+                "role": "baseline",
+                "llmSlot": "dialogue",
             }
         )
 
@@ -234,11 +252,55 @@ def test_supervised_agent_binding_env_respects_explicit_llm_slot():
             "profileId": "supervised_reviewer",
             "role": "reviewer",
             "llmSlot": "subagentExecution",
+            "dialogueModelId": "dialogue-model",
+            "llmBindings": {
+                "dialogue": {"modelId": "dialogue-model"},
+                "subagentExecution": {"modelId": "subagent-model"},
+            },
         }
     )
 
     assert env["VIBELUTION_AGENT_LLM_SLOT"] == "subagentExecution"
+    assert env["VIBELUTION_AGENT_LLM_MODEL_ID"] == "subagent-model"
     assert env["VIBELUTION_TURN_LLM_SLOT"] == "subagentExecution"
+    assert env["VIBELUTION_TURN_MODEL_ID"] == "subagent-model"
+
+
+def test_run_harness_returns_failed_result_when_agent_binding_model_is_missing(monkeypatch, tmp_path: Path):
+    popen_called = False
+
+    def fail_popen(*_args, **_kwargs):
+        nonlocal popen_called
+        popen_called = True
+        raise AssertionError("Popen should not run when supervised binding preflight fails")
+
+    monkeypatch.setattr(evolution_harness, "REPORT_DIR", tmp_path / "reports")
+    monkeypatch.setattr("scripts.evolution_harness.subprocess.Popen", fail_popen)
+
+    result = run_harness(
+        repo_root=tmp_path,
+        mode="single_turn",
+        prompt="probe",
+        timeout_seconds=30,
+        expect_restart=False,
+        post_restart_observe_seconds=1,
+        keep_worktree=False,
+        scenario="transaction",
+        agent_binding={
+            "agentId": "agent-supervised-baseline",
+            "profileId": "supervised_baseline",
+            "role": "baseline",
+            "llmSlot": "dialogue",
+        },
+    )
+
+    assert popen_called is False
+    assert result.status == "failed"
+    assert "模型绑定预检失败" in result.reason
+    assert result.evolution_summary["agent_binding_preflight"]["status"] == "failed"
+    assert result.command == []
+    assert result.worktree_path == ""
+    assert result.preserved_evidence_path
 
 
 def test_create_harness_config_forces_supervised_agent_mode(tmp_path: Path):
@@ -565,6 +627,7 @@ def test_run_harness_returns_cancelled_when_cancel_checker_requests_stop(monkeyp
             "role": "baseline",
             "llmSlot": "dialogue",
             "dialogueModelId": "model-a",
+            "llmBindings": {"dialogue": {"modelId": "model-a"}},
         },
         cancel_checker=lambda: "operator stop",
     )
@@ -581,14 +644,20 @@ def test_run_harness_returns_cancelled_when_cancel_checker_requests_stop(monkeyp
     assert env["VIBELUTION_AGENT_WORKSPACE_PATH"] == "workspace/agents/agent-supervised-baseline"
     assert env["VIBELUTION_SUPERVISED_ROLE"] == "baseline"
     assert env["VIBELUTION_AGENT_LLM_SLOT"] == "dialogue"
+    assert env["VIBELUTION_AGENT_LLM_MODEL_ID"] == "model-a"
+    assert json.loads(env["VIBELUTION_AGENT_LLM_BINDINGS_JSON"]) == {"dialogue": {"modelId": "model-a"}}
     assert env["VIBELUTION_TURN_RUN_ID"] == env["VIBELUTION_HARNESS_ID"]
     assert env["VIBELUTION_TURN_RUN_KIND"] == "supervised_evaluation"
+    assert env["VIBELUTION_TURN_MODEL_ID"] == "model-a"
     assert env["VIBELUTION_TURN_CACHE_SCOPE"] == "baseline"
     assert env["VIBELUTION_TURN_PROMPT_CACHE_PARTITION"].endswith("|scope:baseline")
+    assert result.agent_runtime_env["VIBELUTION_AGENT_LLM_MODEL_ID"] == "model-a"
     assert result.preserved_evidence_path
     evidence_dir = Path(result.preserved_evidence_path)
     assert (evidence_dir / "log_info" / "conversation_case.jsonl").exists()
     assert (evidence_dir / "log_info" / "debug_case.log").exists()
+    runtime_env = json.loads((evidence_dir / "agent_runtime_env.json").read_text(encoding="utf-8"))
+    assert runtime_env["VIBELUTION_AGENT_LLM_MODEL_ID"] == "model-a"
     assert "log_info/conversation_case.jsonl" in result.preserved_evidence_files
 
 

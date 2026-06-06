@@ -95,6 +95,8 @@ SAFE_MODIFY_PROBE_CONTENT = (
 )
 HARNESS_MANAGED_DIRTY_PATHS = {"config.harness.toml"}
 HARNESS_REQUIRED_PACKAGES = ("litellm", "ruff")
+AGENT_RUNTIME_ENV_PREFIXES = ("VIBELUTION_AGENT_", "VIBELUTION_SUPERVISED_", "VIBELUTION_TURN_")
+SENSITIVE_ENV_FRAGMENTS = ("KEY", "TOKEN", "SECRET", "PASSWORD", "COOKIE", "CREDENTIAL")
 
 
 def _subprocess_no_window_kwargs() -> Dict[str, int]:
@@ -214,6 +216,7 @@ class HarnessResult:
     launcher_returncode: Optional[int] = None
     agent_child_returncode: Optional[int] = None
     effective_returncode: Optional[int] = None
+    agent_runtime_env: Dict[str, str] = field(default_factory=dict)
 
 
 def stdout_tail_looks_like_idle_chat_ui(lines: List[str]) -> bool:
@@ -229,6 +232,41 @@ def stdout_tail_looks_like_idle_chat_ui(lines: List[str]) -> bool:
         "等待新的任务",
     )
     return sum(1 for marker in idle_markers if marker in text) >= 3
+
+
+def _normalize_supervised_llm_bindings(raw_bindings: Any) -> Dict[str, Dict[str, str]]:
+    bindings: Dict[str, Dict[str, str]] = {}
+    if not isinstance(raw_bindings, dict):
+        return bindings
+    for raw_slot, raw_binding in raw_bindings.items():
+        slot = str(raw_slot or "").strip()
+        if not slot or not isinstance(raw_binding, dict):
+            continue
+        model_id = str(raw_binding.get("modelId") or "").strip()
+        if model_id:
+            bindings[slot] = {"modelId": model_id}
+    return bindings
+
+
+def _supervised_llm_model_id_for_slot(agent_binding: Dict[str, Any], llm_slot: str) -> tuple[str, Dict[str, Dict[str, str]]]:
+    bindings = _normalize_supervised_llm_bindings(agent_binding.get("llmBindings"))
+    slot_model_id = str((bindings.get(llm_slot) or {}).get("modelId") or "").strip()
+    dialogue_model_id = str(agent_binding.get("dialogueModelId") or "").strip()
+    if not slot_model_id and llm_slot == "dialogue" and dialogue_model_id:
+        slot_model_id = dialogue_model_id
+        bindings.setdefault("dialogue", {"modelId": dialogue_model_id})
+    return slot_model_id, bindings
+
+
+def _safe_agent_runtime_env_snapshot(env: Dict[str, str]) -> Dict[str, str]:
+    snapshot: Dict[str, str] = {}
+    for key, value in env.items():
+        if not any(key.startswith(prefix) for prefix in AGENT_RUNTIME_ENV_PREFIXES):
+            continue
+        if any(fragment in key.upper() for fragment in SENSITIVE_ENV_FRAGMENTS):
+            continue
+        snapshot[key] = str(value)
+    return dict(sorted(snapshot.items()))
 
 
 def supervised_agent_binding_env(agent_binding: Optional[Dict[str, Any]], *, run_id: str = "") -> Dict[str, str]:
@@ -256,7 +294,21 @@ def supervised_agent_binding_env(agent_binding: Optional[Dict[str, Any]], *, run
             raise SupervisedAgentBindingRuntimeError(
                 f"Supervised Agent binding for {env['VIBELUTION_AGENT_ID']} is missing required llmSlot."
             )
+        slot_model_id, llm_bindings = _supervised_llm_model_id_for_slot(agent_binding, llm_slot)
+        if not slot_model_id:
+            raise SupervisedAgentBindingRuntimeError(
+                "Supervised Agent binding for "
+                f"{env['VIBELUTION_AGENT_ID']} is missing required model binding for llmSlot {llm_slot!r}."
+            )
         env["VIBELUTION_AGENT_LLM_SLOT"] = llm_slot
+        env["VIBELUTION_AGENT_LLM_MODEL_ID"] = slot_model_id
+        if llm_bindings:
+            env["VIBELUTION_AGENT_LLM_BINDINGS_JSON"] = json.dumps(
+                llm_bindings,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
         supervised_role = str(env.get("VIBELUTION_SUPERVISED_ROLE") or "").strip()
         runtime = prepare_agent_turn_runtime(
             AgentTurnRuntimeRequest(
@@ -266,7 +318,7 @@ def supervised_agent_binding_env(agent_binding: Optional[Dict[str, Any]], *, run
                 session_id=str(env.get("VIBELUTION_AGENT_DIRECT_SESSION_ID") or "").strip(),
                 agent_id=str(env.get("VIBELUTION_AGENT_ID") or "").strip(),
                 llm_slot=llm_slot,
-                model_id=str(agent_binding.get("dialogueModelId") or "").strip(),
+                model_id=slot_model_id,
                 cache_scope=supervised_role,
                 workspace_path=str(env.get("VIBELUTION_AGENT_WORKSPACE_PATH") or "").strip(),
             )
@@ -2170,42 +2222,56 @@ def preserve_harness_evidence(result: HarnessResult, report_path: Path) -> None:
     """Copy compact postmortem evidence out of the disposable worktree before cleanup."""
 
     worktree_path = Path(result.worktree_path)
-    if not worktree_path.exists():
-        return
     evidence_dir = report_path.with_suffix("")
     evidence_dir = evidence_dir.parent / f"{evidence_dir.name}_evidence"
     copied: List[str] = []
-    sources = [
-        ("log_info", worktree_path / "log_info"),
-        ("logs", worktree_path / "logs"),
-    ]
-    for label, source_dir in sources:
-        if not source_dir.exists() or not source_dir.is_dir():
-            continue
-        target_dir = evidence_dir / label
-        patterns = (
-            ("conversation_*.jsonl", "debug_*.log", "payloads/**")
-            if label == "log_info"
-            else ("agent_realtime.log", "runtime_scenes/**/timeline.jsonl", "runtime_scenes/**/lifecycle.jsonl")
+    worktree_exists = bool(str(result.worktree_path or "").strip()) and worktree_path.exists()
+    if worktree_exists:
+        harness_config = worktree_path / "config.harness.toml"
+        if harness_config.exists() and harness_config.is_file():
+            config_target = evidence_dir / "config.harness.toml"
+            config_target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(harness_config, config_target)
+            copied.append("config.harness.toml")
+        sources = [
+            ("log_info", worktree_path / "log_info"),
+            ("logs", worktree_path / "logs"),
+        ]
+        for label, source_dir in sources:
+            if not source_dir.exists() or not source_dir.is_dir():
+                continue
+            target_dir = evidence_dir / label
+            patterns = (
+                ("conversation_*.jsonl", "debug_*.log", "payloads/**")
+                if label == "log_info"
+                else ("agent_realtime.log", "runtime_scenes/**/timeline.jsonl", "runtime_scenes/**/lifecycle.jsonl")
+            )
+            for pattern in patterns:
+                for source in source_dir.glob(pattern):
+                    if source.is_dir():
+                        for child in source.rglob("*"):
+                            if child.is_file():
+                                rel = child.relative_to(source_dir)
+                                target = target_dir / rel
+                                target.parent.mkdir(parents=True, exist_ok=True)
+                                shutil.copy2(child, target)
+                                copied.append((Path(label) / rel).as_posix())
+                        continue
+                    if not source.is_file():
+                        continue
+                    rel = source.relative_to(source_dir)
+                    target = target_dir / rel
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(source, target)
+                    copied.append((Path(label) / rel).as_posix())
+    if result.agent_runtime_env:
+        runtime_env_path = evidence_dir / "agent_runtime_env.json"
+        runtime_env_path.parent.mkdir(parents=True, exist_ok=True)
+        runtime_env_path.write_text(
+            json.dumps(result.agent_runtime_env, ensure_ascii=False, indent=2, sort_keys=True),
+            encoding="utf-8",
         )
-        for pattern in patterns:
-            for source in source_dir.glob(pattern):
-                if source.is_dir():
-                    for child in source.rglob("*"):
-                        if child.is_file():
-                            rel = child.relative_to(source_dir)
-                            target = target_dir / rel
-                            target.parent.mkdir(parents=True, exist_ok=True)
-                            shutil.copy2(child, target)
-                            copied.append((Path(label) / rel).as_posix())
-                    continue
-                if not source.is_file():
-                    continue
-                rel = source.relative_to(source_dir)
-                target = target_dir / rel
-                target.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(source, target)
-                copied.append((Path(label) / rel).as_posix())
+        copied.append("agent_runtime_env.json")
     summary_path = evidence_dir / "harness_postmortem.json"
     summary_path.parent.mkdir(parents=True, exist_ok=True)
     summary_payload = {
@@ -2225,6 +2291,7 @@ def preserve_harness_evidence(result: HarnessResult, report_path: Path) -> None:
         "last_observation": result.last_observation,
         "post_restart_observation": result.post_restart_observation,
         "evolution_summary": result.evolution_summary,
+        "agent_runtime_env": result.agent_runtime_env,
         "stdout_tail": result.stdout_tail,
         "stderr_tail": result.stderr_tail,
     }
@@ -2252,6 +2319,63 @@ def run_harness(
 ) -> HarnessResult:
     harness_id = uuid.uuid4().hex
     started_at = now_iso()
+    normalized_agent_binding = dict(agent_binding) if isinstance(agent_binding, dict) else {}
+    try:
+        child_agent_env = supervised_agent_binding_env(normalized_agent_binding, run_id=harness_id)
+    except SupervisedAgentBindingRuntimeError as exc:
+        ended_at = now_iso()
+        if progress_callback is not None:
+            progress_callback(
+                {
+                    "phase": "agent_binding_preflight_failed",
+                    "error_type": type(exc).__name__,
+                    "error": str(exc),
+                }
+            )
+        result = HarnessResult(
+            harness_id=harness_id,
+            status="failed",
+            reason=f"监督 Agent 模型绑定预检失败：{exc}",
+            started_at=started_at,
+            ended_at=ended_at,
+            repo_root=str(repo_root),
+            worktree_path="",
+            base_head="",
+            checkpoint_commit="",
+            checkpoint_ref=None,
+            tracked_dirty=False,
+            untracked_files=[],
+            command=[],
+            returncode=None,
+            timeout_seconds=timeout_seconds,
+            restarts_observed=0,
+            normalized_restarts_observed=0,
+            restart_expected=expect_restart,
+            restart_reentered=False,
+            process_history=[],
+            process_summary={"preflight_error": type(exc).__name__},
+            new_conversation_files=[],
+            new_debug_files=[],
+            stdout_tail=[],
+            stderr_tail=[str(exc)],
+            agent_realtime_tail=[],
+            last_observation={},
+            post_restart_observation={},
+            evolution_summary={
+                "agent_binding_preflight": {
+                    "status": "failed",
+                    "error_type": type(exc).__name__,
+                    "reason": str(exc),
+                }
+            },
+            agent_binding=normalized_agent_binding,
+            agent_runtime_env={},
+        )
+        report_path = write_report(result)
+        preserve_harness_evidence(result, report_path)
+        if result.preserved_evidence_path:
+            write_report(result, report_path)
+        return result
     snapshot = create_checkpoint_snapshot(repo_root, harness_id)
     worktree_path = create_worktree(repo_root, snapshot, harness_id)
     harness_config = create_harness_config(worktree_path)
@@ -2280,8 +2404,8 @@ def run_harness(
     env = os.environ.copy()
     env["PYTHONIOENCODING"] = "utf-8"
     env["VIBELUTION_HARNESS_ID"] = harness_id
-    normalized_agent_binding = dict(agent_binding) if isinstance(agent_binding, dict) else {}
-    env.update(supervised_agent_binding_env(normalized_agent_binding, run_id=harness_id))
+    env.update(child_agent_env)
+    agent_runtime_env = _safe_agent_runtime_env_snapshot(child_agent_env)
 
     process = subprocess.Popen(
         command,
@@ -2601,6 +2725,7 @@ def run_harness(
         launcher_returncode=returncode_summary["launcher_returncode"],
         agent_child_returncode=returncode_summary["agent_child_returncode"],
         effective_returncode=returncode_summary["effective_returncode"],
+        agent_runtime_env=agent_runtime_env,
     )
 
     report_path = write_report(result)
