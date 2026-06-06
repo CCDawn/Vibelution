@@ -150,11 +150,13 @@ describe("ChatCodingRoute layout contract", () => {
   it("keeps prompt cache observation visible in the current session status strip", () => {
     expect(routeSource).toContain("const sessionCacheUsage = detail?.cacheUsage");
     expect(routeSource).toContain("sessionCacheUsage?.source === \"provider_usage\"");
+    expect(routeSource).toContain("sessionCacheUsage?.source === \"not_called\"");
     expect(routeSource).toContain("label: t(\"promptCache\")");
     expect(routeSource).toContain("turnCachedInputTokens");
     expect(routeSource).toContain("cacheCreationInputTokens");
     expect(routeSource).toContain("turnInputTokens");
     expect(routeSource).toContain("turnCacheHitRate");
+    expect(routeSource).toContain("cacheHitNotCalled");
     expect(routeSource).toContain("cacheHitMissing");
   });
 
@@ -173,6 +175,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("cacheCompositionSegmentClass(segment.key)");
     expect(routeSource).toContain("case \"cache_write\"");
     expect(routeSource).toContain("cacheCreationInputTokens");
+    expect(routeSource).toContain("lastCacheComposition.source === \"not_called\"");
     expect(routeSource.indexOf("styles.contextCompositionPanel")).toBeGreaterThan(routeSource.indexOf("sessionCompactRows.map"));
     expect(routeSource.indexOf("styles.contextCompositionPanel")).toBeLessThan(routeSource.indexOf("<aside className={rightPaneCollapsed"));
 
@@ -190,7 +193,9 @@ describe("ChatCodingRoute layout contract", () => {
   it("shows provider-observed LLM input separately from session context estimates", () => {
     expect(routeSource).toContain("const sessionLlmUsage = detail?.llmUsage ?? null");
     expect(routeSource).toContain("sessionLlmUsage?.source === \"provider_usage\"");
+    expect(routeSource).toContain("sessionLlmUsage?.source === \"not_called\"");
     expect(routeSource).toContain("label: t(\"llmInputTokens\")");
+    expect(routeSource).toContain("t(\"llmUsageNotCalled\")");
     expect(routeSource).toContain("t(\"llmUsageMissing\")");
     expect(routeSource).toContain("t(\"sessionContextEstimate\")");
   });

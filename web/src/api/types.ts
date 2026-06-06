@@ -3320,7 +3320,7 @@ export type SessionDetail = SessionSummary & {
 };
 
 export type SessionLlmUsage = {
-  source: "provider_usage" | "missing" | "estimated" | string;
+  source: "provider_usage" | "missing" | "not_called" | "estimated" | string;
   inputTokens: number;
   outputTokens: number;
   totalTokens: number;
