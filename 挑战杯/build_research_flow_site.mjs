@@ -449,7 +449,7 @@ const implementationBlueprint = {
     ["Team 编排状态机", "已新增 TeamWorkflowOrchestration 后端切片，首期启用 challenge_cup_research。"],
     ["候选资料工作区", "已新增 Team 级 CandidateStore 最小索引，保存正式平台尚不能表达的候选中间态。"],
     ["本地研究工作模型层", "接入 bossAGI-standard / qwen3.5-9b（OpenAI-compatible，32k）作为候选生成和预审模型，不作为最终裁决或正式入库模型。"],
-    ["团队沟通复用层", "复用 Team registry、Team canvas、linkedChatRoom、ChatRoom round 和 research_coordination purpose；本轮先落 API，不改前端。"],
+    ["团队沟通复用层", "复用 Team registry、Team canvas、linkedChatRoom、ChatRoom round 和 research_coordination purpose；Team 页面已新增科研流程只读面板。"],
     ["研究编排复用层", "复用 research_service、research flow canvas、prompt-research-* 和研究组织治理工具。"],
     ["候选状态机", "新增轻量校验脚本约束 source_registered -> official_synced，不替代现有 runtime 状态系统。"],
     ["记忆平台复用层", "复用 SourceArtifact、RefinementProposal、IngestionPackage、KnowledgeItem、Trace 和 agent-knowledge-steward。"],
@@ -457,6 +457,7 @@ const implementationBlueprint = {
   ],
   milestones: [
     ["M0", "Team 编排后端切片", "已新增 workflow_orchestration.json、candidate_store/index.json、transfer_records.jsonl 和 API。", "能创建 challenge_cup_research 编排、登记资料候选、提交转移请求，并由 Research Coordination Agent 裁决。"],
+    ["M0.1", "Team 页面科研流程面板", "已在 Teams 工作台为 research-team / 科研组织团队读取 TeamWorkflowOrchestration 和最近 CandidateStore 候选，展示当前阶段、候选数、活跃项、校验摘要和最近候选状态。", "只读展示，不触发状态转移、审批、正式 Team Knowledge/RAG/图谱写入；普通非科研团队不会被动初始化挑战杯 workflow。"],
     ["M0.5", "本地研究工作模型接线", "已新增 Local Research Worker Model 任务包、32k 上下文预算、JSON 输出校验、草稿记录和 invoke API；bossAGI-standard / qwen3.5-9b 通过临时 model_ref profile 调用，解析失败不写 CandidateStore。", "能为资料初筛、paper_note 草稿、neuro_mechanism 候选、algorithm_hypothesis 草稿和 review prefilter 构建任务包，调用本地模型，并把合格 JSON 草稿写入 CandidateStore。"],
     ["M1", "候选数据基座", "已新增 CandidateStore 列表查询、校验报告、source_manifest/PDF 最小字段校验和本地 PDF source-extraction API；PDF 缺路径、sha256、allowedForAnalysis=true 或抽取失败会进入 source_needs_confirmation。", "能登记 PDF source_manifest，按 candidateType/currentState/qualityStatus 查询候选，抽取 sha256/pageAnchors/excerpt，并查看 invalid/error/warning 统计；仍不写正式 Team Knowledge/RAG/知识图谱。"],
     ["M2", "paper_note 与 PDF 锚点", "已新增 paper_note 输出契约与 Citation Anchor 校验，并接入 sourceExtraction -> paper_note_draft 自动草稿桥：本地 PDF pageAnchors/excerpt 会被转为 sourceRefs/evidenceRefs/excerpt 后调用本地模型。", "合格本地模型输出进入 paper_note_draft；缺 citation/page anchor 时进入 paper_note_needs_revision，不能自然推进到 mechanism_candidate；长文拆分和多草稿合并仍待接。"],
@@ -478,6 +479,7 @@ const implementationBlueprint = {
   services: [
     ["team_workflow_orchestration_service", "已落地：Team 级 workflowOrchestration、CandidateStore、transfer request/decision。"],
     ["team_workflows API", "已落地：/api/teams/{team_id}/workflow-orchestration、candidates/source、candidates/{candidate_id}/source-extraction、candidates/{candidate_id}/paper-note-draft、candidates、candidates/validation、candidate-graph、transfers、decide。"],
+    ["TeamsRoute workflow panel", "已落地只读入口：research-team 右侧 inspector 展示 workflow 当前阶段、candidateStore 摘要、validationSummary 和最近候选，不做写操作。"],
     ["local_research_worker_model", "已落地任务包构建、32k 上下文预算、统一 LLMClient invoke、JSON 提取/校验和 CandidateStore 草稿记录；解析失败不入库。"],
     ["team_communication_binding", "复用 Research Organization 通信边、Team linkedChatRoom、round_robin/opportunistic 群聊轮次。"],
     ["candidate_store", "已落地 Team 级 index、候选列表查询、按类型/状态过滤、validationSummary，并接入 source_manifest、paper_note、neuro_mechanism、mechanism_mapping、algorithm_hypothesis、candidate_graph 最小校验。"],
@@ -611,6 +613,7 @@ const implementationBlueprint = {
     ["候选索引", "workspace/teams/<teamId>/candidate_store/index.json", "保存 source_manifest 等候选对象的最小元数据。"],
     ["候选查询", "/api/teams/{teamId}/workflow-orchestration/candidates", "按 candidateType、currentState、qualityStatus 查询 CandidateStore，并返回 validationSummary。"],
     ["候选校验", "/api/teams/{teamId}/workflow-orchestration/candidates/validation", "统计 CandidateStore valid/invalid/error/warning，并报告每个候选的结构化校验问题。"],
+    ["Team 前端入口", "/teams?team=research-team", "读取 /workflow-orchestration 和 /candidates?limit=8，展示科研流程状态、候选仓库和校验摘要；非科研团队显示占位，不初始化 workflow。"],
     ["转移记录", "workspace/teams/<teamId>/transfer_records.jsonl", "记录 transfer_request 和 decidedByAgent。"],
     ["本地模型 API", "/api/teams/{teamId}/workflow-orchestration/local-research-model/*", "构建任务包、调用 9B 本地模型、校验并记录 JSON 草稿；不直接写正式知识。"],
     ["paper_note 门禁", "CandidateStore paper_note validation", "paper_note_draft 必须含 keyFindings/methods/limitations/citations，关键发现缺 sourceRef/page/citation 时进入 paper_note_needs_revision。"],

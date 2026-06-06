@@ -40,6 +40,11 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("fetchJson<ChatRoomDetail>(`/api/chat-rooms/${encodeURIComponent(linkedChatRoomId)}`)");
     expect(routeSource).toContain("linkedRoomRefetchInterval(pageVisible");
     expect(routeSource).toContain("latestChatRoomRound(linkedRoomDetail)");
+    expect(routeSource).toContain("fetchJson<TeamWorkflowOrchestration>(`/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration`)");
+    expect(routeSource).toContain("fetchJson<TeamWorkflowCandidateListPayload>");
+    expect(routeSource).toContain("TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT");
+    expect(routeSource).toContain("isResearchWorkflowTeam(selectedTeam)");
+    expect(routeSource).toContain("researchWorkflowTeamSelected");
     expect(routeSource).toContain('source: "team_workspace"');
     expect(routeSource).toContain("teamId: payload.teamId");
     expect(routeSource).toContain("startTeamRoundMutation");
@@ -101,6 +106,18 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("styles.teamRoundCard");
     expect(routeSource).toContain("查看完整群聊");
     expect(routeSource).toContain("styles.teamTaskForm");
+    expect(routeSource).toContain("科研流程");
+    expect(routeSource).toContain("TeamWorkflowOrchestration");
+    expect(routeSource).toContain("teamWorkflowQuery");
+    expect(routeSource).toContain("teamWorkflowCandidatesQuery");
+    expect(routeSource).toContain("teamWorkflowValidationSummary");
+    expect(routeSource).toContain("workflowStateLabel");
+    expect(routeSource).toContain("workflowQualityTone");
+    expect(routeSource).toContain("styles.workflowPanel");
+    expect(routeSource).toContain("styles.workflowStats");
+    expect(routeSource).toContain("styles.workflowCandidateList");
+    expect(routeSource).toContain("styles.workflowValidation");
+    expect(routeSource).toContain("选择 research-team / 科研团队后显示挑战杯科研流程。");
     expect(routeSource).toContain("团队广播");
     expect(routeSource).toContain("发送给团队");
     expect(routeSource).toContain("最近团队广播");
@@ -122,6 +139,10 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.templatePreview).toBeTypeOf("string");
     expect(routeStyles.nodeBindingSection).toBeTypeOf("string");
     expect(routeStyles.nodeBindingPlaceholder).toBeTypeOf("string");
+    expect(routeStyles.workflowPanel).toBeTypeOf("string");
+    expect(routeStyles.workflowStats).toBeTypeOf("string");
+    expect(routeStyles.workflowCandidateList).toBeTypeOf("string");
+    expect(routeStyles.workflowValidation).toBeTypeOf("string");
   });
 
   it("keeps Team actions scoped to the selected Team or message event", () => {

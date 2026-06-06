@@ -331,7 +331,7 @@
                 </div>
 <div class="service-row">
                   <strong>团队沟通复用层</strong>
-                  <span>复用 Team registry、Team canvas、linkedChatRoom、ChatRoom round 和 research_coordination purpose；本轮先落 API，不改前端。</span>
+                  <span>复用 Team registry、Team canvas、linkedChatRoom、ChatRoom round 和 research_coordination purpose；Team 页面已新增科研流程只读面板。</span>
                 </div>
 <div class="service-row">
                   <strong>研究编排复用层</strong>
@@ -361,6 +361,10 @@
 <div class="service-row">
                   <b>team_workflows API</b>
                   <span>已落地：/api/teams/{team_id}/workflow-orchestration、candidates/source、candidates/{candidate_id}/source-extraction、candidates/{candidate_id}/paper-note-draft、candidates、candidates/validation、candidate-graph、transfers、decide。</span>
+                </div>
+<div class="service-row">
+                  <b>TeamsRoute workflow panel</b>
+                  <span>已落地只读入口：research-team 右侧 inspector 展示 workflow 当前阶段、candidateStore 摘要、validationSummary 和最近候选，不做写操作。</span>
                 </div>
 <div class="service-row">
                   <b>local_research_worker_model</b>
@@ -677,6 +681,11 @@
               <span>统计 CandidateStore valid/invalid/error/warning，并报告每个候选的结构化校验问题。</span>
             </div>
 <div class="blueprint-row compact">
+              <b>Team 前端入口</b>
+              <strong>/teams?team=research-team</strong>
+              <span>读取 /workflow-orchestration 和 /candidates?limit=8，展示科研流程状态、候选仓库和校验摘要；非科研团队显示占位，不初始化 workflow。</span>
+            </div>
+<div class="blueprint-row compact">
               <b>转移记录</b>
               <strong>workspace/teams/&lt;teamId&gt;/transfer_records.jsonl</strong>
               <span>记录 transfer_request 和 decidedByAgent。</span>
@@ -743,6 +752,12 @@
               <strong>Team 编排后端切片</strong>
               <span>已新增 workflow_orchestration.json、candidate_store/index.json、transfer_records.jsonl 和 API。</span>
               <span>能创建 challenge_cup_research 编排、登记资料候选、提交转移请求，并由 Research Coordination Agent 裁决。</span>
+            </div>
+<div class="blueprint-row">
+              <b>M0.1</b>
+              <strong>Team 页面科研流程面板</strong>
+              <span>已在 Teams 工作台为 research-team / 科研组织团队读取 TeamWorkflowOrchestration 和最近 CandidateStore 候选，展示当前阶段、候选数、活跃项、校验摘要和最近候选状态。</span>
+              <span>只读展示，不触发状态转移、审批、正式 Team Knowledge/RAG/图谱写入；普通非科研团队不会被动初始化挑战杯 workflow。</span>
             </div>
 <div class="blueprint-row">
               <b>M0.5</b>

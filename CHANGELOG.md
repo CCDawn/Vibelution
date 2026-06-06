@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.34 - 2026-06-06
+
+- Added a read-only Research Workflow panel to the Team workspace for `research-team` / research-organization teams, showing workflow stage, CandidateStore totals, active workflow items, validation summary, and recent candidate states.
+- Wired the panel to the existing TeamWorkflowOrchestration and candidate list APIs without adding transfer, approval, Team Knowledge, RAG, or graph write actions.
+- Updated the Challenge Cup flow HTML and technical plan to mark the Team workspace workflow panel as landed.
+
 ## 0.10.33 - 2026-06-06
 
 - Removed legacy `profileCards` and `profileCount` from the config workspace API contract, keeping Model Library access through `modelOptions`.
