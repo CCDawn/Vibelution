@@ -22,13 +22,13 @@ describe("launcher api helpers", () => {
   it("fetches launcher status as a read-only request", async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce({
       ok: true,
-      json: async () => ({ launcher: { mode: "runtime_manager_adapter" } }),
+      json: async () => ({ launcher: { mode: "standalone_control_plane" } }),
     });
     vi.stubGlobal("fetch", fetchMock);
 
     const payload = await getLauncherStatus();
 
-    expect(payload.launcher.mode).toBe("runtime_manager_adapter");
+    expect(payload.launcher.mode).toBe("standalone_control_plane");
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls[0][0]).toBe("/api/launcher/status");
   });
@@ -44,7 +44,7 @@ describe("launcher api helpers", () => {
       })
       .mockResolvedValueOnce({
         ok: true,
-        json: async () => ({ accepted: true, operation: "start", launcherMode: "runtime_manager_adapter" }),
+        json: async () => ({ accepted: true, operation: "start", launcherMode: "standalone_control_plane" }),
       });
     vi.stubGlobal("fetch", fetchMock);
 

@@ -1,27 +1,30 @@
-"""Launcher lifecycle routes."""
+"""FastAPI app for the standalone Vibelution Launcher control plane."""
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, FastAPI, HTTPException
 
-from core.launcher import service as launcher_service
-
-
-router = APIRouter(tags=["launcher"])
+from . import service as launcher_service
 
 
-@router.get("/launcher/status")
+router = APIRouter()
+
+
+@router.get("/api/launcher/status")
+@router.get("/api/project/status")
 def launcher_status() -> dict:
     return launcher_service.get_launcher_status()
 
 
-@router.post("/launcher/start", status_code=202)
-def launcher_start() -> dict:
+@router.post("/api/launcher/start", status_code=202)
+@router.post("/api/project/start", status_code=202)
+def project_start() -> dict:
     return launcher_service.request_launcher_start()
 
 
-@router.post("/launcher/stop", status_code=202)
-def launcher_stop() -> dict:
+@router.post("/api/launcher/stop", status_code=202)
+@router.post("/api/project/stop", status_code=202)
+def project_stop() -> dict:
     try:
         return launcher_service.request_launcher_stop()
     except launcher_service.LauncherActiveWorkBlocked as exc:
@@ -35,8 +38,9 @@ def launcher_stop() -> dict:
         ) from exc
 
 
-@router.post("/launcher/restart", status_code=202)
-def launcher_restart() -> dict:
+@router.post("/api/launcher/restart", status_code=202)
+@router.post("/api/project/restart", status_code=202)
+def project_restart() -> dict:
     try:
         return launcher_service.request_launcher_restart()
     except launcher_service.LauncherActiveWorkBlocked as exc:
@@ -50,6 +54,14 @@ def launcher_restart() -> dict:
         ) from exc
 
 
-@router.post("/launcher/supervisor/reattach", status_code=202)
-def launcher_supervisor_reattach() -> dict:
-    return launcher_service.request_launcher_supervisor_reattach()
+def create_launcher_app() -> FastAPI:
+    app = FastAPI(
+        title="Vibelution Launcher",
+        version="0.1.0",
+        description="Standalone lifecycle control plane for the Vibelution project bundle.",
+    )
+    app.include_router(router)
+    return app
+
+
+app = create_launcher_app()
