@@ -213,7 +213,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("const runtimeMatchesSelectedSession = Boolean(");
     expect(routeSource).toContain("runtimeActiveChatTurnSessionIds.has(activeSessionId)");
     expect(routeSource).toContain("const runtimeMismatchLine = runtimeActiveChatTurnSessionId && !runtimeMatchesSelectedSession");
-    expect(routeSource).toContain("detail?.title ?? directSessionActiveSummary?.title ?? t(\"loadingSession\")");
+    expect(routeSource).toContain("detail?.agentDisplayName ?? detail?.title ?? directSessionActiveSummary?.agentDisplayName ?? directSessionActiveSummary?.title ?? t(\"loadingSession\")");
     expect(routeSource).toContain("lastContextComposition?.totalTokens ?? sessionContextUsage?.used ?? 0");
     expect(routeSource).toContain("lastContextComposition?.limitTokens ?? sessionContextUsage?.limit ?? 0");
     expect(routeSource).toContain("const compression = runtimeMatchesSelectedSession ? runtime?.contextCompression : undefined");
@@ -750,11 +750,13 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("renameSessionInSummaries");
     expect(routeSource).toContain("renameSessionInConversations");
     expect(routeSource).toContain("renameSessionDetail");
-    expect(routeSource).toContain("title: String(session.title || session.agentDisplayName || session.id).trim()");
+    expect(routeSource).toContain("title: String(session.agentDisplayName || session.title || session.id).trim()");
     expect(routeSource).toContain("agentDisplayName: conversation.agentDisplayName");
     expect(routeSource).toContain("const sessionAgentName =");
     expect(routeSource).toContain("const sessionTitle =");
-    expect(routeSource).toContain("(sessionIsChild ? (session.taskTitle || session.resultCard?.title || session.title) : session.title)");
+    expect(routeSource).toContain("(sessionIsChild ? (session.taskTitle || session.resultCard?.title || session.title) : sessionDisplay.name)");
+    expect(routeSource).toContain("agentDisplayName: title");
+    expect(routeSource).toContain("targetSession");
     expect(routeSource).toContain("{sessionTitle}");
     expect(renameMutationSource).toContain("onMutate: (variables) =>");
     expect(renameMutationSource).toContain("setEditingSessionId(null)");

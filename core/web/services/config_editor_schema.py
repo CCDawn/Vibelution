@@ -23,7 +23,6 @@ SECTION_LABELS = {
         "llm.discovery": "模型发现",
         "agent": "智能体",
         "context_compression": "上下文压缩",
-        "tools": "工具",
         "security": "安全",
         "log": "日志",
         "network": "网络",
@@ -48,7 +47,6 @@ SECTION_LABELS = {
         "llm.discovery": "Model Discovery",
         "agent": "Agent",
         "context_compression": "Context Compression",
-        "tools": "Tools",
         "security": "Security",
         "log": "Logging",
         "network": "Network",
@@ -115,16 +113,6 @@ FIELD_LABELS = {
         "context_compression.preservation.keep_ai_messages": "保留 AI 消息数",
         "context_compression.preservation.preserve_errors": "保留错误",
         "context_compression.preservation.extract_key_decisions": "提取关键决策",
-        "tools.file.encoding_priority": "编码优先级",
-        "tools.file.editable_extensions": "可编辑扩展名",
-        "tools.shell.max_output_length": "最大输出长度",
-        "tools.shell.safety_check": "安全检查",
-        "tools.shell.dangerous_pattern_check": "危险模式检查",
-        "tools.shell.allowed_shells": "允许的 Shell",
-        "tools.search.max_matches_per_file": "单文件最大匹配数",
-        "tools.search.skip_directories": "跳过目录",
-        "tools.search.skip_extensions": "跳过扩展名",
-        "tools.image2.default_model_ref": "默认生图模型",
         "ui.language": "界面语言",
         "ui.theme": "主题",
         "ui.max_log_entries": "最大日志条目数",
@@ -198,16 +186,6 @@ FIELD_LABELS = {
         "context_compression.preservation.keep_ai_messages": "AI Messages to Keep",
         "context_compression.preservation.preserve_errors": "Preserve Errors",
         "context_compression.preservation.extract_key_decisions": "Extract Key Decisions",
-        "tools.file.encoding_priority": "Encoding Priority",
-        "tools.file.editable_extensions": "Editable Extensions",
-        "tools.shell.max_output_length": "Max Output Length",
-        "tools.shell.safety_check": "Safety Check",
-        "tools.shell.dangerous_pattern_check": "Dangerous Pattern Check",
-        "tools.shell.allowed_shells": "Allowed Shells",
-        "tools.search.max_matches_per_file": "Max Matches Per File",
-        "tools.search.skip_directories": "Skip Directories",
-        "tools.search.skip_extensions": "Skip Extensions",
-        "tools.image2.default_model_ref": "Default Image Model",
         "ui.language": "Interface Language",
         "ui.theme": "Theme",
         "ui.max_log_entries": "Max Log Entries",
@@ -349,9 +327,6 @@ FIELD_HINTS = {
         "agent.auto_restart_threshold": "达到阈值后触发热重启。",
         "context_compression.keep_recent_steps": "压缩后仍然保留的最近步骤数。",
         "context_compression.max_compressions_per_session": "单会话允许的最大压缩次数。",
-        "tools.shell.allowed_shells": "允许使用的 shell 类型，直接影响跨平台行为。",
-        "tools.shell.max_output_length": "终端输出截断上限，过小会影响诊断。",
-        "tools.image2.default_model_ref": "image2_generate_tool 默认使用的模型库条目；留空时回退到 VIBELUTION_IMAGE2_MODEL 或内置模型名。",
         "evolution.chat_dataset.source_modes": "哪些 agent mode 产生的对话可以被静默采样进入审核队列。",
         "evolution.chat_dataset.segmentation_strategy": "chat 采样如何切分连续多轮上下文。",
         "ui.refresh_rate": "终端工作台刷新频率。",
@@ -381,9 +356,6 @@ FIELD_HINTS = {
         "agent.auto_restart_threshold": "Threshold that triggers hot restart.",
         "context_compression.keep_recent_steps": "How many recent steps survive compression.",
         "context_compression.max_compressions_per_session": "Compression cap per session.",
-        "tools.shell.allowed_shells": "Allowed shell types. This directly affects cross-platform behavior.",
-        "tools.shell.max_output_length": "Terminal output cap. Too small will hide diagnostics.",
-        "tools.image2.default_model_ref": "Model library entry used by image2_generate_tool. Empty falls back to VIBELUTION_IMAGE2_MODEL or the built-in model name.",
         "evolution.chat_dataset.source_modes": "Which agent modes may silently contribute conversation samples to the review queue.",
         "evolution.chat_dataset.segmentation_strategy": "How chat capture segments contiguous multi-turn context.",
         "ui.refresh_rate": "Refresh cadence for the terminal workbench.",
@@ -407,7 +379,6 @@ EDITOR_SECTION_SPECS = [
     ("user-profile", "user_profile"),
     ("llm-discovery", "llm.discovery"),
     ("context-compression", "context_compression"),
-    ("tools", "tools"),
     ("security", "security"),
     ("log", "log"),
     ("network", "network"),
@@ -499,17 +470,6 @@ def _field_options(path: str, lang: str) -> list[dict[str, str]]:
 
 def _field_options_for_config(path: str, public_config: dict[str, Any], lang: str) -> list[dict[str, str]]:
     if path == "git.commit_message_model_ref":
-        llm = public_config.get("llm", {})
-        model_library = llm.get("model_library", {}) if isinstance(llm, dict) else {}
-        options = [{"value": "", "label": "未设置" if lang == "zh" else "Not set"}]
-        if isinstance(model_library, dict):
-            for model_id, item in model_library.items():
-                if not isinstance(item, dict):
-                    continue
-                label = str(item.get("label") or item.get("model") or model_id)
-                options.append({"value": str(model_id), "label": label})
-        return options
-    if path == "tools.image2.default_model_ref":
         llm = public_config.get("llm", {})
         model_library = llm.get("model_library", {}) if isinstance(llm, dict) else {}
         options = [{"value": "", "label": "未设置" if lang == "zh" else "Not set"}]

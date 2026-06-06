@@ -1,4 +1,4 @@
-import type { AgentInstance, ConfigDraftMeta, ConfigModelOption, ConfigModelPresetOption, ConfigProfileCard, ResearchAgentConfig } from "../api/types";
+import type { AgentInstance, ConfigDraftMeta, ConfigModelOption, ConfigModelPresetOption, ResearchAgentConfig } from "../api/types";
 
 export type PublicConfigShape = Record<string, unknown>;
 
@@ -52,28 +52,6 @@ export type ConfigLeaveGuardInput = {
 };
 
 export type ConfigInvalidationDomain = "config" | "runtime" | "sessions" | "reset" | "evolution";
-
-export type ProfileDisplayState = {
-  selectedModelId: string;
-  selectedModelLabel: string;
-  providerKind: string;
-  model: string;
-  baseUrl: string;
-  apiKeyEnv: string;
-  apiKeyState: string;
-  apiKeySource: string;
-  selectionDirty: boolean;
-};
-
-export type ConfigProfileModeGroupId = "chat" | "support" | "subagents" | "evolution" | "research" | "other";
-
-export type ConfigProfileModeGroupLabels = Record<ConfigProfileModeGroupId, string>;
-
-export type ConfigProfileModeGroup = {
-  id: ConfigProfileModeGroupId;
-  label: string;
-  profiles: ConfigProfileCard[];
-};
 
 export type ModelEditability = {
   editable: boolean;
@@ -334,78 +312,10 @@ export function configInvalidationDomainsForApply(config: PublicConfigShape | nu
   return [...domains];
 }
 
-export function resolveProfileDisplayState(
-  profile: ConfigProfileCard,
-  selectedModelId: string,
-  selectedModel: ConfigModelOption | null,
-  isEditingProfile: boolean,
-): ProfileDisplayState {
-  const selectionDirty = Boolean(isEditingProfile && selectedModelId && selectedModelId !== profile.selectedModelId);
-  const resolvedSelectedModel = selectionDirty ? selectedModel : null;
-  const providerKind = selectionDirty ? resolvedSelectedModel?.provider_kind ?? profile.providerKind : profile.providerKind;
-  const model = selectionDirty ? resolvedSelectedModel?.model ?? profile.model : profile.model;
-  const baseUrl = selectionDirty
-    ? getString(asRecord(resolvedSelectedModel?.provider).base_url) || profile.baseUrl
-    : profile.baseUrl;
-  const apiKeyEnv = selectionDirty ? resolvedSelectedModel?.api_key_env ?? profile.apiKeyEnv : profile.apiKeyEnv;
-  const apiKeyState = selectionDirty ? resolvedSelectedModel?.api_key_state ?? profile.apiKeyState : profile.apiKeyState;
-  const apiKeySource = selectionDirty ? apiKeyEnv || "-" : profile.apiKeySource || "-";
-  return {
-    selectedModelId,
-    selectedModelLabel: selectionDirty ? selectedModel?.label ?? profile.selectedModelLabel : profile.selectedModelLabel,
-    providerKind,
-    model,
-    baseUrl,
-    apiKeyEnv,
-    apiKeyState,
-    apiKeySource,
-    selectionDirty,
-  };
-}
-
 export function resolveModelEditability(option: ConfigModelOption): ModelEditability {
   return option.source === "model_library"
     ? { editable: true, deletable: true }
     : { editable: false, deletable: false };
-}
-
-export function profileModeGroupId(profileId: string): ConfigProfileModeGroupId {
-  const normalized = profileId.trim();
-  if (normalized === "primary") {
-    return "chat";
-  }
-  if (normalized === "mental_model" || normalized === "compression") {
-    return "support";
-  }
-  if (normalized === "subagent_worker" || normalized === "subagent_explorer") {
-    return "subagents";
-  }
-  if (normalized === "supervised_baseline" || normalized === "supervised_candidate") {
-    return "evolution";
-  }
-  if (normalized.startsWith("research_")) {
-    return "research";
-  }
-  return "other";
-}
-
-export function groupConfigProfileCards(
-  profiles: ConfigProfileCard[],
-  labels: ConfigProfileModeGroupLabels,
-): ConfigProfileModeGroup[] {
-  const groups: ConfigProfileModeGroup[] = [
-    { id: "chat", label: labels.chat, profiles: [] },
-    { id: "support", label: labels.support, profiles: [] },
-    { id: "subagents", label: labels.subagents, profiles: [] },
-    { id: "evolution", label: labels.evolution, profiles: [] },
-    { id: "research", label: labels.research, profiles: [] },
-    { id: "other", label: labels.other, profiles: [] },
-  ];
-  const groupById = new Map(groups.map((group) => [group.id, group]));
-  for (const profile of profiles) {
-    groupById.get(profileModeGroupId(profile.profileId))?.profiles.push(profile);
-  }
-  return groups.filter((group) => group.profiles.length);
 }
 
 export function presetCategory(preset: ConfigModelPresetOption): ModelPresetGroupId {

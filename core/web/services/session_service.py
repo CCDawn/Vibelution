@@ -1877,19 +1877,50 @@ def update_chat_session_title(session_id: str, title: str) -> dict:
         normalized_title = normalized_title[:120].rstrip()
 
     changed = False
+    agent_id_to_refresh = ""
     with _CHAT_STATE_LOCK:
         payload = load_chat_state(PROJECT_ROOT)
         conversation = _find_conversation_entry(payload, conversation_id)
         if conversation is None:
             raise SessionNotFoundError(text_for(lang, zh="未找到当前会话。", en="Session not found."))
-        if str(conversation.get("title") or "").strip() != normalized_title:
+
+        session_kind = str(conversation.get("session_kind") or conversation.get("sessionKind") or "main").strip().lower()
+        agent_id = str(conversation.get("agent_id") or conversation.get("agentId") or "").strip()
+        if session_kind == "child":
+            if str(conversation.get("task_title") or conversation.get("taskTitle") or "").strip() != normalized_title:
+                conversation["task_title"] = normalized_title
+                conversation["taskTitle"] = normalized_title
+                conversation["title"] = normalized_title
+                conversation["updated_at"] = _now_timestamp()
+                payload["updated_at"] = str(conversation.get("updated_at") or _now_timestamp())
+                save_chat_state(PROJECT_ROOT, payload)
+                changed = True
+        elif agent_id:
+            agent_id_to_refresh = agent_id
+            if str(conversation.get("title") or "").strip() != normalized_title:
+                conversation["title"] = normalized_title
+                conversation["updated_at"] = _now_timestamp()
+                payload["updated_at"] = str(conversation.get("updated_at") or _now_timestamp())
+                save_chat_state(PROJECT_ROOT, payload)
+                changed = True
+        elif str(conversation.get("title") or "").strip() != normalized_title:
             conversation["title"] = normalized_title
             conversation["updated_at"] = _now_timestamp()
             payload["updated_at"] = str(conversation.get("updated_at") or _now_timestamp())
             save_chat_state(PROJECT_ROOT, payload)
             changed = True
 
-    target = _load_conversation_detail_target(conversation_id, repair=False, agent_by_id={})
+    agent_by_id: dict[str, dict[str, Any]] = {}
+    if agent_id_to_refresh:
+        updated_agent = update_agent_instance(agent_id_to_refresh, display_name=normalized_title)
+        agent_by_id[agent_id_to_refresh] = updated_agent
+        changed = True
+
+    target = _load_conversation_detail_target(
+        conversation_id,
+        repair=False,
+        agent_by_id=agent_by_id if agent_by_id else None,
+    )
     detail = _build_lightweight_session_detail(target) if target is not None else {}
     if changed:
         _invalidate_session_list_cache()
@@ -4447,9 +4478,13 @@ def _build_session_summary(conversation: dict[str, Any], *, hydrate_agent: bool 
     agent_display_name = str((agent or {}).get("displayName") or "").strip()
     if agent_status["agentMissing"] and not agent_display_name:
         agent_display_name = text_for(get_web_language(), zh="缺少有效 Agent", en="Missing Agent")
+    raw_title = str(conversation["title"]).strip()
+    session_kind = str(conversation.get("sessionKind") or "main").strip() or "main"
+    task_title = str(conversation.get("taskTitle") or raw_title).strip() or raw_title
+    display_title = task_title if session_kind == "child" else (agent_display_name or raw_title)
     return {
         "id": conversation["id"],
-        "title": conversation["title"],
+        "title": display_title,
         "agentId": agent_id,
         "agentCode": agent_code,
         "agentDisplayName": agent_display_name or str(conversation["title"]).strip(),
@@ -4467,13 +4502,13 @@ def _build_session_summary(conversation: dict[str, Any], *, hydrate_agent: bool 
         "lastActive": updated_at,
         "updatedAt": updated_at,
         "currentPhase": status,
-        "sessionKind": str(conversation.get("sessionKind") or "main").strip() or "main",
+        "sessionKind": session_kind,
         "parentSessionId": str(conversation.get("parentSessionId") or "").strip(),
         "rootSessionId": str(conversation.get("rootSessionId") or conversation["id"]).strip() or conversation["id"],
         "childSessionIds": list(conversation.get("childSessionIds") or []),
         "activeChildSessionId": str(conversation.get("activeChildSessionId") or "").strip(),
         "childStatus": str(conversation.get("childStatus") or status).strip() or status,
-        "taskTitle": str(conversation.get("taskTitle") or conversation["title"]).strip() or conversation["title"],
+        "taskTitle": task_title,
         "resultCard": _normalize_child_result_card(conversation.get("resultCard")),
     }
 
