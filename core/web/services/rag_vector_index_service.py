@@ -19,20 +19,36 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 _LOCK = threading.RLock()
 
 
-def list_indexable_knowledge_items(*, agent_id: str = "") -> list[dict[str, Any]]:
+def list_indexable_knowledge_items(*, agent_id: str = "", internal: bool = False) -> list[dict[str, Any]]:
     """Return reviewed formal knowledge items eligible for vector indexing."""
 
     _sync_roots()
     items: list[dict[str, Any]] = []
-    overview = team_knowledge_service.list_knowledge_overview(agent_id=agent_id)
+    overview = team_knowledge_service.list_knowledge_overview(agent_id=agent_id, internal=internal)
     for base in list(overview.get("knowledgeBases") or []):
         if not isinstance(base, dict):
             continue
-        base_id = str(base.get("knowledgeBaseId") or "").strip()
+        base_id = str(base.get("scopedKnowledgeBaseId") or base.get("knowledgeBaseId") or "").strip()
         if not base_id:
             continue
         try:
-            payload = team_knowledge_service.list_knowledge_items(base_id, agent_id=agent_id)
+            if internal:
+                owner, knowledge_base = team_knowledge_service._require_base_with_owner(base_id)
+                raw_items = [
+                    item
+                    for item in team_knowledge_service._read_jsonl(team_knowledge_service._items_path_for_owner(owner))
+                    if str(item.get("knowledgeBaseId") or "") == str(knowledge_base.get("knowledgeBaseId") or "")
+                ]
+                payload = {
+                    "ownerType": owner["ownerType"],
+                    "ownerId": owner["ownerId"],
+                    "teamId": owner["ownerId"] if owner["ownerType"] == "team" else "",
+                    "agentId": owner["ownerId"] if owner["ownerType"] == "agent" else "",
+                    "knowledgeBase": team_knowledge_service._knowledge_base_to_api(knowledge_base, owner),
+                    "items": raw_items,
+                }
+            else:
+                payload = team_knowledge_service.list_knowledge_items(base_id, agent_id=agent_id)
         except team_knowledge_service.TeamKnowledgeError:
             continue
         team_id = str(payload.get("teamId") or base.get("teamId") or "").strip()
@@ -104,10 +120,10 @@ def write_index_record(
     return record
 
 
-def get_vector_index_health(*, agent_id: str = "") -> dict[str, Any]:
+def get_vector_index_health(*, agent_id: str = "", internal: bool = False) -> dict[str, Any]:
     """Return vector index readiness without exposing knowledge bodies."""
 
-    indexable_items = list_indexable_knowledge_items(agent_id=agent_id)
+    indexable_items = list_indexable_knowledge_items(agent_id=agent_id, internal=internal)
     records = {str(record.get("knowledgeItemId") or "").strip(): record for record in _load_all_index_records()}
     item_rows: list[dict[str, Any]] = []
     indexed_count = 0

@@ -60,7 +60,10 @@ def memory_knowledge_graph_node_detail(
 ) -> dict:
     if not str(nodeId or "").strip():
         raise HTTPException(status_code=422, detail="nodeId is required.")
-    payload = get_memory_knowledge_graph_node_detail(nodeId, agent_id=agentId, limit=limit)
+    normalized_agent_id = str(agentId or "").strip()
+    if not normalized_agent_id:
+        raise HTTPException(status_code=422, detail="agentId is required for memory graph node detail.")
+    payload = get_memory_knowledge_graph_node_detail(nodeId, agent_id=normalized_agent_id, limit=limit)
     if payload is None:
         raise HTTPException(status_code=404, detail="Memory graph node detail not found.")
     return payload

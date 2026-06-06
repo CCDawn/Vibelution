@@ -72,7 +72,9 @@ def vector_index_env(tmp_path, monkeypatch):
 def test_vector_index_lists_only_reviewed_formal_knowledge(vector_index_env):
     from core.web.services import rag_vector_index_service
 
-    items = rag_vector_index_service.list_indexable_knowledge_items()
+    assert rag_vector_index_service.list_indexable_knowledge_items() == []
+
+    items = rag_vector_index_service.list_indexable_knowledge_items(internal=True)
 
     assert [item["knowledgeItemId"] for item in items] == [vector_index_env["approvedItem"]["knowledgeItemId"]]
     indexable = items[0]
@@ -127,7 +129,9 @@ def test_vector_index_metadata_includes_agent_owner_partition(tmp_path, monkeypa
 def test_vector_index_health_counts_empty_index_as_missing(vector_index_env):
     from core.web.services import rag_vector_index_service
 
-    payload = rag_vector_index_service.get_vector_index_health()
+    assert rag_vector_index_service.get_vector_index_health()["indexableItemCount"] == 0
+
+    payload = rag_vector_index_service.get_vector_index_health(internal=True)
 
     assert payload["schemaVersion"] == 1
     assert payload["provider"] == "vector"
@@ -145,7 +149,7 @@ def test_vector_index_health_counts_empty_index_as_missing(vector_index_env):
 def test_vector_index_health_detects_indexed_and_stale_items(vector_index_env):
     from core.web.services import rag_vector_index_service
 
-    items = rag_vector_index_service.list_indexable_knowledge_items()
+    items = rag_vector_index_service.list_indexable_knowledge_items(internal=True)
     item = items[0]
     rag_vector_index_service.write_index_record(
         item,
@@ -153,7 +157,7 @@ def test_vector_index_health_detects_indexed_and_stale_items(vector_index_env):
         embedding_model="deterministic-v1",
     )
 
-    indexed = rag_vector_index_service.get_vector_index_health()
+    indexed = rag_vector_index_service.get_vector_index_health(internal=True)
 
     assert indexed["status"] == "ready"
     assert indexed["vectorEnabled"] is True
@@ -171,7 +175,7 @@ def test_vector_index_health_detects_indexed_and_stale_items(vector_index_env):
         embedding_model="deterministic-v1",
     )
 
-    stale = rag_vector_index_service.get_vector_index_health()
+    stale = rag_vector_index_service.get_vector_index_health(internal=True)
 
     assert stale["status"] == "degraded"
     assert stale["vectorEnabled"] is True
