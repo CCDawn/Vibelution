@@ -16,6 +16,8 @@ export const queryKeys = {
   agentRuns: (id: string) => ["agents", id, "runs"] as const,
   agentMessages: (id: string, status = "pending") => ["agents", id, "messages", status] as const,
   agentRuntimeEvidence: (id: string) => ["agents", id, "runtime-evidence"] as const,
+  agentProjectMemoryUpdates: (status = "pending", agentId = "", limit = 50) =>
+    ["agents", "project-memory-updates", status, agentId, limit] as const,
   promptTemplates: () => ["prompt-templates"] as const,
   agentModeBindings: () => ["agent-mode-bindings"] as const,
   conversations: () => ["conversations"] as const,
