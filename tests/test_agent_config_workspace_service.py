@@ -48,38 +48,6 @@ def _use_tmp_project_root(tmp_path, monkeypatch):
 
 def _fake_config_workspace():
     return {
-        "profileCards": [
-            {
-                "profileId": "primary",
-                "label": "Primary",
-                "modelRef": "model-primary",
-                "selectedModelId": "model-primary",
-                "selectedModelLabel": "Primary model",
-                "model": "gpt-test",
-                "providerKind": "openai",
-                "baseUrl": "https://example.invalid/v1",
-                "apiKeyEnv": "OPENAI_API_KEY",
-                "apiKeyConfigured": True,
-                "apiKeyState": "configured",
-                "apiKeySource": "env:OPENAI_API_KEY",
-                "requiredModelMissing": False,
-            },
-            {
-                "profileId": "research_missing_key",
-                "label": "Research missing key",
-                "modelRef": "model-research",
-                "selectedModelId": "model-research",
-                "selectedModelLabel": "Research model",
-                "model": "research-test",
-                "providerKind": "relay",
-                "baseUrl": "https://relay.invalid",
-                "apiKeyEnv": "RELAY_API_KEY",
-                "apiKeyConfigured": False,
-                "apiKeyState": "missing",
-                "apiKeySource": "env:RELAY_API_KEY",
-                "requiredModelMissing": False,
-            },
-        ],
         "modelOptions": [
             {
                 "model_id": "model-primary",

@@ -14,7 +14,6 @@ import {
   deriveConfigEditorSyncState,
   deriveModelCenterInventoryRows,
   deriveModelCenterSummary,
-  groupConfigProfileCards,
   groupModelPresets,
   hasPendingSecretChanges,
   listSupervisedAgentInstances,
@@ -26,7 +25,6 @@ import {
   PROVIDER_COMPAT_MODE_OPTIONS,
   presetCategory,
   resolveImageInputCapabilityStatus,
-  resolveProfileDisplayState,
   resolveConfigSectionUiStateOnSelect,
   resolveResearchAgentInstance,
   resolveModelEditability,
@@ -36,7 +34,7 @@ import {
   supervisedAgentRoleLabel,
   type PublicConfigShape,
 } from "./configRouteLogic";
-import type { AgentInstance, ConfigModelOption, ConfigModelPresetOption, ConfigProfileCard } from "../api/types";
+import type { AgentInstance, ConfigModelOption, ConfigModelPresetOption } from "../api/types";
 
 function preset(
   presetId: string,
@@ -171,49 +169,6 @@ describe("configRouteLogic", () => {
       protocolSource: "explicit_model",
       compatSummary: "streamUsageOptions=true · toolChoiceMode=auto",
     });
-  });
-
-  it("groups LLM configs by mode before rendering the settings table", () => {
-    const profiles = [
-      { profileId: "research_broad", label: "科研广搜" },
-      { profileId: "primary", label: "主智能体" },
-      { profileId: "supervised_candidate", label: "监督候选" },
-      { profileId: "subagent_worker", label: "子代理 Worker" },
-      { profileId: "compression", label: "压缩配置" },
-      { profileId: "custom_writer", label: "自定义" },
-    ].map((item) => ({
-      ...item,
-      modelRef: "",
-      selectedModelId: "",
-      selectedModelLabel: "",
-      model: "",
-      providerKind: "",
-      baseUrl: "",
-      apiKeyEnv: "",
-      apiKeyConfigured: false,
-      apiKeyState: "missing",
-      apiKeySource: "",
-      requiredModelMissing: false,
-    })) satisfies ConfigProfileCard[];
-
-    const groups = groupConfigProfileCards(profiles, {
-      chat: "对话模式",
-      support: "心智与压缩",
-      subagents: "子代理模式",
-      evolution: "进化模式",
-      research: "科研模型绑定",
-      other: "其他模型绑定",
-    });
-
-    expect(groups.map((group) => group.id)).toEqual(["chat", "support", "subagents", "evolution", "research", "other"]);
-    expect(groups.map((group) => group.profiles.map((profile) => profile.profileId))).toEqual([
-      ["primary"],
-      ["compression"],
-      ["subagent_worker"],
-      ["supervised_candidate"],
-      ["research_broad"],
-      ["custom_writer"],
-    ]);
   });
 
   it("resolves research agents to persistent AgentInstances by id or metadata key", () => {
@@ -351,50 +306,6 @@ describe("configRouteLogic", () => {
     const profile = (publicConfig.llm as Record<string, unknown>).profiles as Record<string, Record<string, unknown>>;
     expect(profile.primary.model_ref).toBe("relay_openai_gpt_5_5");
     expect(profile.primary.api_key_env).toBeUndefined();
-  });
-
-  it("shows the newly selected model details while a profile edit is staged", () => {
-    const profile: ConfigProfileCard = {
-      profileId: "primary",
-      label: "聊天模型",
-      modelRef: "old_model",
-      selectedModelId: "old_model",
-      selectedModelLabel: "Old label",
-      model: "old-model",
-      providerKind: "openai",
-      baseUrl: "https://api.openai.com/v1",
-      apiKeyEnv: "OLD_KEY",
-      apiKeyConfigured: true,
-      apiKeyState: "configured",
-      apiKeySource: "OLD_KEY",
-      requiredModelMissing: false,
-    };
-    const selected = option({
-      model_id: "relay_openai_gpt_5_5",
-      provider_kind: "relay",
-      model: "gpt-5.5",
-      label: "GPT-5.5 via relay",
-      api_key_env: "NEW_KEY",
-      api_key_state: "missing",
-      provider: {
-        kind: "relay",
-        base_url: "https://pixel.try-chatapi.com/v1",
-        compat_mode: "openai",
-        requires_api_key: true,
-      },
-    });
-
-    const view = resolveProfileDisplayState(profile, "relay_openai_gpt_5_5", selected, true);
-
-    expect(view.selectionDirty).toBe(true);
-    expect(view.selectedModelId).toBe("relay_openai_gpt_5_5");
-    expect(view.selectedModelLabel).toBe("GPT-5.5 via relay");
-    expect(view.providerKind).toBe("relay");
-    expect(view.model).toBe("gpt-5.5");
-    expect(view.baseUrl).toBe("https://pixel.try-chatapi.com/v1");
-    expect(view.apiKeyEnv).toBe("NEW_KEY");
-    expect(view.apiKeyState).toBe("missing");
-    expect(view.apiKeySource).toBe("NEW_KEY");
   });
 
   it("preserves a manually collapsed config section when it is selected again", () => {

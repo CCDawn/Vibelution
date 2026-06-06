@@ -4227,7 +4227,6 @@ export type ConfigSummary = {
   modeAvailability: ModeAvailability;
   domainAvailability: DomainAvailability;
   modelLibraryCount: number;
-  profileCount: number;
   blockingCount: number;
   warningCount: number;
   sections: Array<{
@@ -4319,22 +4318,6 @@ export type ConfigModelOption = {
   capability_error?: string;
 };
 
-export type ConfigProfileCard = {
-  profileId: string;
-  label: string;
-  modelRef: string;
-  selectedModelId: string;
-  selectedModelLabel: string;
-  model: string;
-  providerKind: string;
-  baseUrl: string;
-  apiKeyEnv: string;
-  apiKeyConfigured: boolean;
-  apiKeyState: string;
-  apiKeySource: string;
-  requiredModelMissing: boolean;
-};
-
 export type ConfigWorkspace = ConfigSummary & {
   message: string;
   baseHash: string;
@@ -4348,7 +4331,6 @@ export type ConfigWorkspace = ConfigSummary & {
   editorMeta: Record<string, ConfigEditorMeta>;
   modelPresetOptions: ConfigModelPresetOption[];
   modelOptions: ConfigModelOption[];
-  profileCards: ConfigProfileCard[];
 };
 
 export type ConfigLlmTestResult = {

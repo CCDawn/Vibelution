@@ -3849,6 +3849,80 @@ def test_update_session_title_persists_to_list_and_detail(tmp_path, monkeypatch)
     assert state["conversations"][0]["title"] == "重命名后的会话"
 
 
+def test_update_root_agent_session_title_syncs_agent_display_name(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    agent = agent_directory_service.create_agent_instance(
+        display_name="旧 Agent 名",
+        direct_session_id="session-live",
+        primary_mode="chat",
+    )
+    _seed_chat_state(
+        tmp_path,
+        conversations=[
+            {
+                "conversation_id": "session-live",
+                "title": "旧任务名",
+                "agent_id": agent["agentId"],
+                "agentId": agent["agentId"],
+                "updated_at": "2026-05-18T12:00:00",
+                "last_turn_status": "ready",
+                "messages": [],
+            }
+        ],
+    )
+
+    response = client.patch("/api/sessions/session-live", json={"title": "新 Agent 名"})
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["title"] == "新 Agent 名"
+    assert payload["agentDisplayName"] == "新 Agent 名"
+    assert agent_directory_service.get_agent(agent["agentId"])["displayName"] == "新 Agent 名"
+
+
+def test_update_child_session_title_keeps_agent_display_name_separate(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    agent = agent_directory_service.create_agent_instance(
+        display_name="根 Agent 名",
+        direct_session_id="session-test-root",
+        primary_mode="chat",
+    )
+    agent_display_name = agent["displayName"]
+    _seed_chat_state(
+        tmp_path,
+        conversations=[
+            {
+                "conversation_id": "session-child",
+                "title": "旧子任务",
+                "task_title": "旧子任务",
+                "taskTitle": "旧子任务",
+                "session_kind": "child",
+                "sessionKind": "child",
+                "parent_session_id": "session-test-root",
+                "parentSessionId": "session-test-root",
+                "root_session_id": "session-test-root",
+                "rootSessionId": "session-test-root",
+                "agent_id": agent["agentId"],
+                "agentId": agent["agentId"],
+                "updated_at": "2026-05-18T12:00:00",
+                "last_turn_status": "ready",
+                "messages": [],
+            }
+        ],
+    )
+
+    response = client.patch("/api/sessions/session-child", json={"title": "新子任务"})
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["title"] == "新子任务"
+    assert payload["taskTitle"] == "新子任务"
+    assert payload["agentDisplayName"] == agent_display_name
+    assert agent_directory_service.get_agent(agent["agentId"])["displayName"] == agent_display_name
+
+
 def test_update_session_agent_profile_payload_is_rejected(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
@@ -11652,13 +11726,8 @@ def test_config_workspace_exposes_unified_config_payload(monkeypatch):
     assert preset_options["deepseek_v4_flash"]["model"]["supports_image_input"] is False
     assert preset_options["deepseek_v4_flash"]["model"]["capability_status"] == "unsupported"
     assert "modelOptions" in payload
-    assert "profileCards" in payload
-    profile_cards = {item["profileId"]: item for item in payload["profileCards"]}
-    assert profile_cards["research_broad"]["label"] == "Research Broad Search"
-    assert profile_cards["research_deep"]["label"] == "Research Deep Search"
-    assert profile_cards["research_review"]["label"] == "Research Review"
-    assert profile_cards["research_themes"]["label"] == "Research Theme Generation"
-    assert profile_cards["research_card"]["label"] == "Research Theme Card"
+    assert "profileCards" not in payload
+    assert "profileCount" not in payload
 
 
 def test_config_workspace_exposes_full_editor_schema(monkeypatch):
@@ -11673,7 +11742,7 @@ def test_config_workspace_exposes_full_editor_schema(monkeypatch):
     editor_meta = payload["editorMeta"]
 
     assert "runtime" in editor_sections
-    assert "tools" in editor_sections
+    assert "tools" not in editor_sections
     assert "context-compression" in editor_sections
     assert "analysis" in editor_sections
     assert "prompt" not in editor_sections
@@ -11733,10 +11802,8 @@ def test_config_workspace_exposes_full_editor_schema(monkeypatch):
     assert editor_meta["network.proxy_url"]["kind"] == "url"
     assert editor_meta["network.proxy_url"]["label"] == "代理地址"
     assert "科研调研" in editor_meta["network.proxy_enabled"]["hint"]
-    assert editor_meta["tools.file.editable_extensions"]["kind"] == "string_list"
-    assert editor_meta["tools.image2.default_model_ref"]["kind"] == "select"
-    assert editor_meta["tools.image2.default_model_ref"]["label"] == "默认生图模型"
-    assert any(option["value"] == "relay_image2" for option in editor_meta["tools.image2.default_model_ref"]["options"])
+    assert "tools.file.editable_extensions" not in editor_meta
+    assert "tools.image2.default_model_ref" not in editor_meta
     assert "prompt.sections" not in editor_meta
     assert "llm.profiles.primary.model_ref" not in editor_meta
     assert "llm.profiles.primary.provider.kind" not in editor_meta
@@ -11899,7 +11966,7 @@ def test_config_workspace_draft_delete_model_marks_profiles_unconfigured(monkeyp
     assert response.status_code == 200
     payload = response.json()
     assert payload["publicConfig"]["llm"]["profiles"]["primary"]["model_ref"] == UNCONFIGURED_MODEL_REF
-    assert next(item for item in payload["profileCards"] if item["profileId"] == "primary")["requiredModelMissing"] is True
+    assert "profileCards" not in payload
 
 
 def test_config_workspace_apply_allows_deleted_non_primary_profile_model(monkeypatch):

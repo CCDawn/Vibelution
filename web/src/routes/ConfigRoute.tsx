@@ -404,7 +404,6 @@ export const CONFIG_COPY = {
     modelRequiredFieldsMissing: "请先填写模型名和基础地址。",
     deleteModel: "删除模型",
     cancelEditing: "清空表单",
-    profileCards: "当前模型",
     testConnection: "测试连接",
     modelTestSelect: "测试模型",
     modelTestPlaceholder: "选择一个模型",
@@ -657,7 +656,6 @@ export const CONFIG_COPY = {
     modelRequiredFieldsMissing: "Enter the model name and base URL first.",
     deleteModel: "Delete model",
     cancelEditing: "Clear form",
-    profileCards: "Current models",
     testConnection: "Test connection",
     modelTestSelect: "Test model",
     modelTestPlaceholder: "Choose a model",
@@ -827,7 +825,7 @@ function buildConfigSidebarGroups(copy: ConfigCopy): ConfigSidebarGroup[] {
       id: "tooling-diagnostics",
       title: copy.groupToolingTitle,
       summary: copy.groupToolingSummary,
-      memberSectionIds: ["health-diagnostics", "tools", "git-commit-model", "git-commit-prompt", "security", "network", "log", "parser", "debug"],
+      memberSectionIds: ["health-diagnostics", "git-commit-model", "git-commit-prompt", "security", "network", "log", "parser", "debug"],
     },
   ];
 }
@@ -2305,7 +2303,7 @@ export function ConfigRoute() {
     if (!activeSection?.memberSectionIds.includes(section.id)) {
       return false;
     }
-    return section.id !== "agent" && section.id !== "tools";
+    return section.id !== "agent";
   });
   const modelOptions = workspace?.modelOptions ?? [];
   const modelOptionsById = useMemo(() => new Map(modelOptions.map((option) => [option.model_id, option])), [modelOptions]);
