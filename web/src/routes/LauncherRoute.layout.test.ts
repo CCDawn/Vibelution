@@ -141,6 +141,16 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("diagnosticsGrid");
   });
 
+  it("promotes the final queued command result to the main notice", () => {
+    expect(routeSource).toContain("LauncherTrackedCommand");
+    expect(routeSource).toContain("trackedCommand");
+    expect(routeSource).toContain("trackedResult");
+    expect(routeSource).toContain("resultMessage");
+    expect(routeSource).toContain('tone: response.accepted ? "neutral" : "warning"');
+    expect(routeSource).toContain('setNotice({ tone, text: message })');
+    expect(routeSource).toContain("Restart preflight failed before closing the workbench");
+  });
+
   it("keeps lifecycle actions icon-backed and compact", () => {
     expect(routeSource).toContain("<Play size={15} />");
     expect(routeSource).toContain("<Square size={15} />");
