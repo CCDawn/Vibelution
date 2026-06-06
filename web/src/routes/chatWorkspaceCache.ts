@@ -130,7 +130,6 @@ export function createChatWorkspaceCache(queryClient: QueryClientLike) {
     },
     afterAgentArchived() {
       return invalidateAll(queryClient, [
-        queryKeys.agentConfigWorkspace(),
         queryKeys.agents(),
         queryKeys.agentModeBindings(),
         queryKeys.chatRooms(),

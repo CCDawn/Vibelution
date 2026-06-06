@@ -797,7 +797,7 @@ def list_agent_policy_options() -> dict[str, list[dict[str, Any]]]:
     }
 
 
-def archive_agent_instance(agent_id: str) -> dict[str, Any]:
+def archive_agent_instance(agent_id: str, *, cleanup_mode_bindings: bool = True) -> dict[str, Any]:
     with _STATE_LOCK:
         state = load_state()
         agent = _find_agent(state, agent_id)
@@ -809,9 +809,10 @@ def archive_agent_instance(agent_id: str) -> dict[str, Any]:
         agent["updatedAt"] = utc_now_iso()
         save_state(state)
     _record_agent_event("agent.archived", agent, lifecycle=True)
-    from .agent_mode_binding_service import remove_agent_from_mode_bindings
+    if cleanup_mode_bindings:
+        from .agent_mode_binding_service import remove_agent_from_mode_bindings
 
-    remove_agent_from_mode_bindings(agent_id)
+        remove_agent_from_mode_bindings(agent_id, include_payload=False)
     return _agent_to_api(agent)
 
 

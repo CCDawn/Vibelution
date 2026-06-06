@@ -83,4 +83,18 @@ describe("createChatWorkspaceCache", () => {
       queryKeys.conversations(),
     ]);
   });
+
+  it("does not refetch the heavy Agent config workspace after archive cache patching", async () => {
+    const { cache, queryKeysFromCalls } = makeCache();
+
+    await cache.afterAgentArchived();
+
+    expect(queryKeysFromCalls()).toEqual([
+      queryKeys.agents(),
+      queryKeys.agentModeBindings(),
+      queryKeys.chatRooms(),
+      queryKeys.sessions(),
+      queryKeys.conversations(),
+    ]);
+  });
 });
