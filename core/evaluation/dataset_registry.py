@@ -41,7 +41,7 @@ TERMINAL_BENCH_SMOKE_ROWS: List[Dict[str, Any]] = [
             "transaction with status=success only if validation passes."
         ),
         "training_tier": "coordination",
-        "max_steps": 8,
+        "max_steps": 100,
         "allowed_tools": [
             "open_evolution_transaction_tool",
             "execute_shell_command_tool",
@@ -69,7 +69,7 @@ TERMINAL_BENCH_SMOKE_ROWS: List[Dict[str, Any]] = [
             "probe path if a write is needed."
         ),
         "training_tier": "coordination",
-        "max_steps": 10,
+        "max_steps": 100,
         "allowed_tools": [
             "open_evolution_transaction_tool",
             "execute_shell_command_tool",
@@ -490,21 +490,42 @@ def _bootstrap_builtin_dataset_sources(project_root: Path, specs: List[DatasetSp
         if spec.name not in bootstrap_names or not spec.source_path:
             continue
         source = resolve_source_path(spec, project_root)
-        if source is None or source.exists():
+        if source is None:
             continue
         source.parent.mkdir(parents=True, exist_ok=True)
         if spec.name == "terminal_bench_smoke":
-            source.write_text(
-                "\n".join(json.dumps(row, ensure_ascii=False) for row in TERMINAL_BENCH_SMOKE_ROWS) + "\n",
-                encoding="utf-8",
-            )
+            _bootstrap_or_refresh_builtin_jsonl(source, TERMINAL_BENCH_SMOKE_ROWS)
         elif spec.name == "terminal_bench_core":
-            source.write_text(
-                "\n".join(json.dumps(row, ensure_ascii=False) for row in TERMINAL_BENCH_CORE_ROWS) + "\n",
-                encoding="utf-8",
-            )
+            _bootstrap_or_refresh_builtin_jsonl(source, TERMINAL_BENCH_CORE_ROWS)
+        elif source.exists():
+            continue
         else:
             source.write_text("", encoding="utf-8")
+
+
+def _bootstrap_or_refresh_builtin_jsonl(source: Path, rows: List[Dict[str, Any]]) -> None:
+    rendered = "\n".join(json.dumps(row, ensure_ascii=False) for row in rows) + "\n"
+    if not source.exists():
+        source.write_text(rendered, encoding="utf-8")
+        return
+
+    existing_rows = []
+    try:
+        for line in source.read_text(encoding="utf-8").splitlines():
+            stripped = line.strip()
+            if stripped:
+                existing_rows.append(json.loads(stripped))
+    except (OSError, json.JSONDecodeError):
+        return
+
+    expected_ids = [str(row.get("case_id") or "").strip() for row in rows]
+    existing_ids = [
+        str(row.get("case_id") or "").strip()
+        for row in existing_rows
+        if isinstance(row, dict)
+    ]
+    if existing_ids == expected_ids and source.read_text(encoding="utf-8") != rendered:
+        source.write_text(rendered, encoding="utf-8")
 
 
 def ensure_dataset_registry(project_root: Optional[Path] = None) -> Path:

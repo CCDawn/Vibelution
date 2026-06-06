@@ -272,6 +272,10 @@ _PUBLIC_NAME_GIVEN = (
     "念青",
 )
 _STATE_LOCK = threading.RLock()
+_REPAIRED_STATE_CACHE_SIGNATURE: tuple[str, bool, int, int] | None = None
+_REPAIRED_STATE_CACHE: dict[str, Any] | None = None
+_JSONL_RECENT_CACHE: dict[tuple[str, bool, int, int, int, str, bool], list[dict[str, Any]]] = {}
+_JSONL_COUNT_CACHE: dict[tuple[str, bool, int, int, str], int] = {}
 _CURRENT_AGENT_RUNTIME: ContextVar[dict[str, Any]] = ContextVar(
     "vibelution_current_agent_runtime",
     default={},
@@ -352,6 +356,17 @@ class AgentWorkspaceWriteDecision:
     agent_id: str = ""
 
 
+@dataclass(frozen=True)
+class AgentApiHydrationContext:
+    state: dict[str, Any]
+    tool_policies: dict[str, dict[str, Any]]
+    memory_policies: dict[str, dict[str, Any]]
+    tool_governance_requests_by_agent: dict[str, list[dict[str, Any]]]
+    group_context_events_by_agent: dict[str, list[dict[str, Any]]]
+    agent_inbox_messages_by_agent: dict[str, list[dict[str, Any]]]
+    agent_inbox_pending_count_by_agent: dict[str, int]
+
+
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -369,14 +384,41 @@ def default_state() -> dict[str, Any]:
 
 
 def list_agents(*, include_archived: bool = False) -> list[dict[str, Any]]:
+    started = time.perf_counter()
+    timings: dict[str, float] = {}
+    repair_cache_hit = False
+    lock_wait_started = time.perf_counter()
     with _STATE_LOCK:
-        state = repair_agent_directory()
-    agents = [
-        _agent_to_api(item)
+        timings["lock_wait"] = round((time.perf_counter() - lock_wait_started) * 1000, 1)
+        stage_started = time.perf_counter()
+        state, repair_cache_hit = _load_repaired_state_for_read()
+        timings["repair"] = round((time.perf_counter() - stage_started) * 1000, 1)
+    stage_started = time.perf_counter()
+    raw_agents = [
+        item
         for item in state.get("agents") or []
         if isinstance(item, dict) and (include_archived or str(item.get("status") or "active") != "archived")
     ]
+    timings["filter"] = round((time.perf_counter() - stage_started) * 1000, 1)
+    hydration_timings: dict[str, float] = {}
+    stage_started = time.perf_counter()
+    hydration = _build_agent_api_hydration_context(state, raw_agents, timings=hydration_timings)
+    timings["hydrate"] = round((time.perf_counter() - stage_started) * 1000, 1)
+    stage_started = time.perf_counter()
+    agents = [_agent_to_api(item, hydration=hydration) for item in raw_agents]
+    timings["to_api"] = round((time.perf_counter() - stage_started) * 1000, 1)
+    stage_started = time.perf_counter()
     agents.sort(key=lambda item: str(item.get("updatedAt") or item.get("createdAt") or ""), reverse=True)
+    timings["sort"] = round((time.perf_counter() - stage_started) * 1000, 1)
+    timings["total"] = round((time.perf_counter() - started) * 1000, 1)
+    _record_agent_list_loaded(
+        include_archived=include_archived,
+        raw_agent_count=len(raw_agents),
+        returned_agent_count=len(agents),
+        timings=timings,
+        hydration_timings=hydration_timings,
+        repair_cache_hit=repair_cache_hit,
+    )
     return agents
 
 
@@ -385,7 +427,7 @@ def get_agent(agent_id: str, *, include_archived: bool = True) -> dict[str, Any]
     if not normalized:
         return None
     with _STATE_LOCK:
-        state = repair_agent_directory()
+        state, _ = _load_repaired_state_for_read()
         agent = _find_agent(state, normalized)
     if not agent:
         return None
@@ -729,13 +771,19 @@ def update_agent_instance(
             agent["metadata"] = metadata_payload
         if persona_profile is not None:
             metadata_payload = dict(agent.get("metadata") or {})
-            updated_persona_profile = normalize_persona_profile(persona_profile)
-            metadata_payload["personaProfile"] = updated_persona_profile
+            if _is_profileless_session_agent(agent):
+                metadata_payload.pop("personaProfile", None)
+            else:
+                updated_persona_profile = normalize_persona_profile(persona_profile)
+                metadata_payload["personaProfile"] = updated_persona_profile
             agent["metadata"] = metadata_payload
         if task_profile is not None:
             metadata_payload = dict(agent.get("metadata") or {})
-            updated_task_profile = normalize_task_profile(task_profile)
-            metadata_payload["taskProfile"] = updated_task_profile
+            if _is_profileless_session_agent(agent):
+                metadata_payload.pop("taskProfile", None)
+            else:
+                updated_task_profile = normalize_task_profile(task_profile)
+                metadata_payload["taskProfile"] = updated_task_profile
             agent["metadata"] = metadata_payload
         _refresh_agent_onboarding_metadata(state, agent)
         _ensure_agent_default_avatar(agent)
@@ -763,8 +811,22 @@ def list_agent_policy_options() -> dict[str, list[dict[str, Any]]]:
     with _STATE_LOCK:
         state = repair_agent_directory()
     agents = [item for item in state.get("agents") or [] if isinstance(item, dict)]
-    tool_policies = _tool_policies(state)
-    memory_policies = _memory_policies(state)
+    return build_agent_policy_options(state=state, agents=agents)
+
+
+def build_agent_policy_options(
+    *,
+    state: dict[str, Any] | None = None,
+    agents: list[dict[str, Any]] | None = None,
+) -> dict[str, list[dict[str, Any]]]:
+    """Build lightweight policy options from an already-loaded Agent registry snapshot."""
+
+    source_state = state if isinstance(state, dict) else load_state()
+    source_agents = list(agents or [])
+    if not source_agents:
+        source_agents = [item for item in source_state.get("agents") or [] if isinstance(item, dict)]
+    tool_policies = _tool_policies(source_state)
+    memory_policies = _memory_policies(source_state)
     return {
         "toolPolicies": [
             {
@@ -797,7 +859,7 @@ def list_agent_policy_options() -> dict[str, list[dict[str, Any]]]:
     }
 
 
-def archive_agent_instance(agent_id: str) -> dict[str, Any]:
+def archive_agent_instance(agent_id: str, *, repair_mode_bindings: bool = True) -> dict[str, Any]:
     with _STATE_LOCK:
         state = load_state()
         agent = _find_agent(state, agent_id)
@@ -809,9 +871,10 @@ def archive_agent_instance(agent_id: str) -> dict[str, Any]:
         agent["updatedAt"] = utc_now_iso()
         save_state(state)
     _record_agent_event("agent.archived", agent, lifecycle=True)
-    from .agent_mode_binding_service import remove_agent_from_mode_bindings
+    if repair_mode_bindings:
+        from .agent_mode_binding_service import remove_agent_from_mode_bindings
 
-    remove_agent_from_mode_bindings(agent_id)
+        remove_agent_from_mode_bindings(agent_id)
     return _agent_to_api(agent)
 
 
@@ -831,6 +894,23 @@ def purge_archived_agent_instance(agent_id: str) -> dict[str, Any]:
         if _agent_archive_protected(agent):
             raise AgentDirectoryError("Protected core Agent cannot be purged.")
         agent_snapshot = dict(agent)
+        tool_policy_id = str(agent.get("toolPolicyId") or "").strip()
+        memory_policy_id = str(agent.get("memoryPolicyId") or "").strip()
+
+    workspace_result = _delete_purged_agent_workspace(agent_snapshot)
+    if list(workspace_result.get("skippedPaths") or []):
+        skipped = ", ".join(str(item) for item in list(workspace_result.get("skippedPaths") or [])[:3])
+        raise AgentDirectoryError(f"Agent workspace could not be fully deleted: {skipped}")
+
+    with _STATE_LOCK:
+        state = load_state()
+        agent = _find_agent(state, normalized_agent_id)
+        if agent is None:
+            raise AgentNotFoundError(f"Agent not found: {normalized_agent_id}")
+        if str(agent.get("status") or "active").strip() != "archived":
+            raise AgentDirectoryError("Only archived Agents can be permanently deleted.")
+        if _agent_archive_protected(agent):
+            raise AgentDirectoryError("Protected core Agent cannot be purged.")
         agents = [
             item
             for item in state.get("agents") or []
@@ -840,8 +920,6 @@ def purge_archived_agent_instance(agent_id: str) -> dict[str, Any]:
             )
         ]
         state["agents"] = agents
-        tool_policy_id = str(agent.get("toolPolicyId") or "").strip()
-        memory_policy_id = str(agent.get("memoryPolicyId") or "").strip()
         removed_tool_policy = False
         removed_memory_policy = False
         if tool_policy_id and tool_policy_id != DEFAULT_TOOL_POLICY_ID and _count_policy_refs(agents, "toolPolicyId", tool_policy_id) == 0:
@@ -854,7 +932,6 @@ def purge_archived_agent_instance(agent_id: str) -> dict[str, Any]:
             state["memoryPolicies"] = policies
         save_state(state)
 
-    workspace_result = _delete_purged_agent_workspace(agent_snapshot)
     result = {
         "agentId": normalized_agent_id,
         "status": "purged",
@@ -919,18 +996,25 @@ def reset_agent_instance(
         agent_snapshot = dict(agent)
         reset_summary["previousDirectSessionId"] = str(agent_snapshot.get("directSessionId") or "").strip()
         now = utc_now_iso()
+        profileless_session_agent = _is_profileless_session_agent(agent)
         if reset_persona_profile:
             metadata = dict(agent.get("metadata") or {})
-            updated_persona_profile = normalize_persona_profile({})
-            metadata["personaProfile"] = updated_persona_profile
+            if profileless_session_agent:
+                metadata.pop("personaProfile", None)
+            else:
+                updated_persona_profile = normalize_persona_profile({})
+                metadata["personaProfile"] = updated_persona_profile
+                reset_summary["resetPersonaProfile"] = True
             agent["metadata"] = metadata
-            reset_summary["resetPersonaProfile"] = True
         if reset_task_profile:
             metadata = dict(agent.get("metadata") or {})
-            updated_task_profile = normalize_task_profile({})
-            metadata["taskProfile"] = updated_task_profile
+            if profileless_session_agent:
+                metadata.pop("taskProfile", None)
+            else:
+                updated_task_profile = normalize_task_profile({})
+                metadata["taskProfile"] = updated_task_profile
+                reset_summary["resetTaskProfile"] = True
             agent["metadata"] = metadata
-            reset_summary["resetTaskProfile"] = True
         if reset_tool_policy:
             previous_policy_id = str(agent.get("toolPolicyId") or DEFAULT_TOOL_POLICY_ID).strip() or DEFAULT_TOOL_POLICY_ID
             policy_id = _default_tool_policy_id_for_agent(normalized_agent_id, str(agent.get("primaryMode") or ""))
@@ -1201,6 +1285,36 @@ def repair_agent_directory() -> dict[str, Any]:
         return state
 
 
+def _load_repaired_state_for_read() -> tuple[dict[str, Any], bool]:
+    """Return a repaired registry snapshot without repeating repair on every read."""
+
+    global _REPAIRED_STATE_CACHE
+    global _REPAIRED_STATE_CACHE_SIGNATURE
+    signature = _registry_state_signature()
+    if _REPAIRED_STATE_CACHE is not None and _REPAIRED_STATE_CACHE_SIGNATURE == signature:
+        return _REPAIRED_STATE_CACHE, True
+    state = repair_agent_directory()
+    _REPAIRED_STATE_CACHE = state
+    _REPAIRED_STATE_CACHE_SIGNATURE = _registry_state_signature()
+    return state, False
+
+
+def _invalidate_repaired_state_cache() -> None:
+    global _REPAIRED_STATE_CACHE
+    global _REPAIRED_STATE_CACHE_SIGNATURE
+    _REPAIRED_STATE_CACHE = None
+    _REPAIRED_STATE_CACHE_SIGNATURE = None
+
+
+def _registry_state_signature() -> tuple[str, bool, int, int]:
+    path = registry_path()
+    try:
+        stat = path.stat()
+    except OSError:
+        return (str(path), False, 0, 0)
+    return (str(path), True, int(stat.st_mtime_ns), int(stat.st_size))
+
+
 def current_agent_runtime() -> dict[str, Any]:
     context = _CURRENT_AGENT_RUNTIME.get({})
     if isinstance(context, dict) and context:
@@ -1216,7 +1330,7 @@ def _agent_runtime_from_env() -> dict[str, Any]:
     if not agent_id:
         return {}
     session_id = str(os.environ.get("VIBELUTION_AGENT_DIRECT_SESSION_ID") or "").strip()
-    agent = get_agent(agent_id) or {}
+    agent = _agent_from_runtime_env(agent_id)
     return {
         "agentId": agent_id,
         "sessionId": session_id,
@@ -1230,6 +1344,44 @@ def _agent_runtime_from_env() -> dict[str, Any]:
         "delegationPolicy": resolve_delegation_policy_for_agent(agent_id),
         "supervisionPolicy": resolve_supervision_policy_for_agent(agent_id),
     }
+
+
+def _agent_from_runtime_env(agent_id: str) -> dict[str, Any]:
+    agent = get_agent(agent_id) or {}
+    env_bindings = _agent_llm_bindings_from_runtime_env()
+    if not env_bindings:
+        return agent
+    payload = dict(agent) if isinstance(agent, dict) else {}
+    payload["agentId"] = str(payload.get("agentId") or agent_id or "").strip()
+    payload["llmBindings"] = {
+        **normalize_agent_llm_bindings(payload.get("llmBindings")),
+        **env_bindings,
+    }
+    payload.setdefault("directSessionId", str(os.environ.get("VIBELUTION_AGENT_DIRECT_SESSION_ID") or "").strip())
+    payload.setdefault("workspacePath", str(os.environ.get("VIBELUTION_AGENT_WORKSPACE_PATH") or "").strip())
+    metadata = dict(payload.get("metadata") or {})
+    supervised_role = str(os.environ.get("VIBELUTION_SUPERVISED_ROLE") or "").strip()
+    if supervised_role:
+        metadata.setdefault("supervisedRole", supervised_role)
+    if metadata:
+        payload["metadata"] = metadata
+    return payload
+
+
+def _agent_llm_bindings_from_runtime_env() -> dict[str, dict[str, str]]:
+    bindings: dict[str, dict[str, str]] = {}
+    raw_bindings = str(os.environ.get("VIBELUTION_AGENT_LLM_BINDINGS_JSON") or "").strip()
+    if raw_bindings:
+        try:
+            payload = json.loads(raw_bindings)
+        except json.JSONDecodeError as exc:
+            raise AgentDirectoryError("Runtime Agent LLM bindings env is not valid JSON.") from exc
+        bindings = normalize_agent_llm_bindings(payload)
+    model_id = str(os.environ.get("VIBELUTION_AGENT_LLM_MODEL_ID") or "").strip()
+    if model_id:
+        slot = str(os.environ.get("VIBELUTION_AGENT_LLM_SLOT") or DEFAULT_AGENT_LLM_SLOT).strip() or DEFAULT_AGENT_LLM_SLOT
+        bindings[slot] = {"modelId": model_id}
+    return bindings
 
 
 @contextmanager
@@ -2013,7 +2165,7 @@ def list_agent_inbox_messages_for_agent(
     if not agent:
         return []
     path = _agent_workspace_event_path(agent, "agent_inbox_messages.jsonl")
-    messages = _read_jsonl(path)
+    messages = _read_recent_jsonl(path, limit=max(1, int(limit or 1)), status=status)
     normalized_status = str(status or "").strip().lower()
     if normalized_status:
         messages = [
@@ -2030,15 +2182,7 @@ def count_agent_inbox_messages_for_agent(agent_id: str, *, status: str = "pendin
     agent = _find_agent(state, agent_id)
     if not agent:
         return 0
-    messages = _read_jsonl(_agent_workspace_event_path(agent, "agent_inbox_messages.jsonl"))
-    normalized_status = str(status or "").strip().lower()
-    if not normalized_status:
-        return len(messages)
-    return sum(
-        1
-        for item in messages
-        if str(item.get("status") or "pending").strip().lower() == normalized_status
-    )
+    return _count_jsonl_matching_status(_agent_workspace_event_path(agent, "agent_inbox_messages.jsonl"), status=status)
 
 
 def consume_agent_inbox_message(
@@ -2184,7 +2328,7 @@ def list_group_context_events_for_agent(agent_id: str, *, limit: int = 8, prompt
     if not agent:
         return []
     path = _resolve_project_path(str(agent.get("workspacePath") or "")) / "events" / "group_context_events.jsonl"
-    events = _read_jsonl(path)
+    events = _read_recent_jsonl(path, limit=max(1, int(limit or 1)))
     if prompt_eligible_only:
         events = [item for item in events if bool(item.get("promptEligible", True))]
     return events[-max(1, int(limit or 1)) :]
@@ -2307,6 +2451,12 @@ def _default_tool_policy_for_agent(policy_id: str, primary_mode: str) -> dict[st
 
 def _is_session_agent_primary_mode(primary_mode: str) -> bool:
     return str(primary_mode or "").strip() in {"", "chat"}
+
+
+def _is_profileless_session_agent(agent: dict[str, Any]) -> bool:
+    primary_mode = _normalize_primary_mode(agent.get("primaryMode") or _infer_agent_primary_mode(agent))
+    role_key = _normalize_role_key(agent.get("roleKey") or _infer_agent_role_key(agent))
+    return _is_session_agent_primary_mode(primary_mode) and not role_key
 
 
 def _ensure_session_agent_tool_policy(state: dict[str, Any], agent: dict[str, Any]) -> bool:
@@ -2485,6 +2635,13 @@ def _with_agent_creation_spec(
     payload = dict(metadata or {})
     persona_profile = normalize_persona_profile(payload.get("personaProfile") if isinstance(payload.get("personaProfile"), dict) else {})
     task_profile = normalize_task_profile(payload.get("taskProfile") if isinstance(payload.get("taskProfile"), dict) else {})
+    is_work_session = _is_session_agent_primary_mode(primary_mode)
+    if is_work_session:
+        payload.pop("personaProfile", None)
+        payload.pop("taskProfile", None)
+    else:
+        payload["personaProfile"] = persona_profile
+        payload["taskProfile"] = task_profile
     tool_policy = payload.get("toolPolicy") if isinstance(payload.get("toolPolicy"), dict) else {}
     metadata_memory_policy = payload.get("memoryPolicy") if isinstance(payload.get("memoryPolicy"), dict) else {}
     effective_memory_policy = memory_policy if isinstance(memory_policy, dict) else metadata_memory_policy
@@ -2501,10 +2658,15 @@ def _with_agent_creation_spec(
         memory_policy_id=memory_policy_id,
         memory_policy=effective_memory_policy,
     )
+    required_fields = [
+        field
+        for field in AGENT_CREATION_REQUIRED_FIELDS
+        if not is_work_session or field not in {"roleKey", "personaProfile", "taskProfile"}
+    ]
     payload["creationSpec"] = {
         "schemaVersion": 1,
         "source": str(created_by or "user").strip() or "user",
-        "requiredFields": list(AGENT_CREATION_REQUIRED_FIELDS),
+        "requiredFields": required_fields,
         "createdAt": created_at,
     }
     payload["onboardingStatus"] = "incomplete" if missing else "complete"
@@ -2585,6 +2747,11 @@ def _normalize_agent_record_for_storage(agent: dict[str, Any]) -> dict[str, Any]
     normalized = dict(agent or {})
     normalized["llmBindings"] = normalize_agent_llm_bindings(normalized.get("llmBindings"))
     metadata = dict(normalized.get("metadata") or {})
+    if _is_profileless_session_agent({**normalized, "metadata": metadata}):
+        if isinstance(metadata.get("personaProfile"), dict):
+            metadata.pop("personaProfile", None)
+        if isinstance(metadata.get("taskProfile"), dict):
+            metadata.pop("taskProfile", None)
     creation_spec = dict(metadata.get("creationSpec") or {})
     required_fields = list(creation_spec.get("requiredFields") or []) if isinstance(creation_spec.get("requiredFields"), list) else []
     if required_fields:
@@ -2600,7 +2767,7 @@ def _normalize_agent_record_for_storage(agent: dict[str, Any]) -> dict[str, Any]
         migration["legacyModelSourceId"] = legacy_profile_id
     if migration:
         metadata["llmBindingMigration"] = migration
-        normalized["metadata"] = metadata
+    normalized["metadata"] = metadata
     normalized.pop("profileId", None)
     normalized.pop("profile_id", None)
     normalized.pop("templateId", None)
@@ -2877,6 +3044,7 @@ def save_state(state: dict[str, Any]) -> dict[str, Any]:
         payload["toolPolicies"] = _tool_policies(payload)
         payload["memoryPolicies"] = _memory_policies(payload)
         _atomic_write_json(registry_path(), payload)
+        _invalidate_repaired_state_cache()
         return payload
 
 
@@ -3342,14 +3510,19 @@ def _agent_avatar_match_key(agent: dict[str, Any]) -> str:
     return " ".join(str(item or "").strip().lower() for item in parts if str(item or "").strip())
 
 
-def _agent_to_api(agent: dict[str, Any]) -> dict[str, Any]:
+def _agent_to_api(agent: dict[str, Any], *, hydration: AgentApiHydrationContext | None = None) -> dict[str, Any]:
     workspace = str(agent.get("workspacePath") or "").strip()
     metadata = dict(agent.get("metadata") or {})
     avatar_path = _agent_avatar_path_from_metadata(metadata)
-    persona_profile = _persona_profile_for_agent({**agent, "metadata": metadata})
-    task_profile = _task_profile_for_agent({**agent, "metadata": metadata})
+    profileless_session_agent = _is_profileless_session_agent({**agent, "metadata": metadata})
+    if profileless_session_agent:
+        metadata.pop("personaProfile", None)
+        metadata.pop("taskProfile", None)
+    persona_profile = {} if profileless_session_agent else _persona_profile_for_agent({**agent, "metadata": metadata})
+    task_profile = {} if profileless_session_agent else _task_profile_for_agent({**agent, "metadata": metadata})
+    agent_id = str(agent.get("agentId") or "").strip()
     return {
-        "agentId": str(agent.get("agentId") or "").strip(),
+        "agentId": agent_id,
         "agentCode": _normalize_agent_code(agent.get("agentCode"))
         or _fallback_agent_code(agent.get("agentId")),
         "displayName": str(agent.get("displayName") or "").strip(),
@@ -3374,23 +3547,188 @@ def _agent_to_api(agent: dict[str, Any]) -> dict[str, Any]:
         "metadata": metadata,
         "createdAt": str(agent.get("createdAt") or "").strip(),
         "updatedAt": str(agent.get("updatedAt") or "").strip(),
-        "memoryPolicy": resolve_memory_policy_for_agent(str(agent.get("agentId") or "").strip()),
-        "toolPolicy": resolve_tool_policy_for_agent(str(agent.get("agentId") or "").strip()),
-        "toolGovernanceRequests": _list_recent_tool_governance_requests_for_agent(
-            str(agent.get("agentId") or "").strip(),
-            limit=6,
-        ),
-        "groupContextEvents": list_group_context_events_for_agent(str(agent.get("agentId") or "").strip(), limit=8),
-        "agentInboxMessages": list_agent_inbox_messages_for_agent(
-            str(agent.get("agentId") or "").strip(),
+        "memoryPolicy": _memory_policy_for_agent(agent, hydration=hydration),
+        "toolPolicy": _tool_policy_for_agent(agent, hydration=hydration),
+        "toolGovernanceRequests": _tool_governance_requests_for_agent(agent_id, hydration=hydration, limit=6),
+        "groupContextEvents": _group_context_events_for_agent(agent, hydration=hydration, limit=8),
+        "agentInboxMessages": _agent_inbox_messages_for_agent(agent, hydration=hydration, limit=8, status="pending"),
+        "agentInboxPendingCount": _agent_inbox_pending_count_for_agent(agent, hydration=hydration, status="pending"),
+    }
+
+
+def _build_agent_api_hydration_context(
+    state: dict[str, Any],
+    agents: list[dict[str, Any]],
+    *,
+    timings: dict[str, float] | None = None,
+) -> AgentApiHydrationContext:
+    timings_ref = timings if timings is not None else {}
+    started = time.perf_counter()
+    tool_policies = _tool_policies(state)
+    timings_ref["tool_policies"] = round((time.perf_counter() - started) * 1000, 1)
+    started = time.perf_counter()
+    memory_policies = _memory_policies(state)
+    timings_ref["memory_policies"] = round((time.perf_counter() - started) * 1000, 1)
+    started = time.perf_counter()
+    tool_governance_requests_by_agent = _load_recent_tool_governance_requests_for_agents(agents, limit=6)
+    timings_ref["tool_governance_requests"] = round((time.perf_counter() - started) * 1000, 1)
+    started = time.perf_counter()
+    group_context_events_by_agent: dict[str, list[dict[str, Any]]] = {}
+    for agent in agents:
+        agent_id = str(agent.get("agentId") or "").strip()
+        if not agent_id:
+            continue
+        group_context_events_by_agent[agent_id] = _read_recent_jsonl(
+            _resolve_project_path(str(agent.get("workspacePath") or "")) / "events" / "group_context_events.jsonl",
+            limit=8,
+        )
+    timings_ref["group_context_events"] = round((time.perf_counter() - started) * 1000, 1)
+    started = time.perf_counter()
+    agent_inbox_messages_by_agent: dict[str, list[dict[str, Any]]] = {}
+    agent_inbox_pending_count_by_agent: dict[str, int] = {}
+    for agent in agents:
+        agent_id = str(agent.get("agentId") or "").strip()
+        if not agent_id:
+            continue
+        path = _agent_workspace_event_path(agent, "agent_inbox_messages.jsonl")
+        agent_inbox_messages_by_agent[agent_id] = _read_recent_jsonl(
+            path,
             limit=8,
             status="pending",
-        ),
-        "agentInboxPendingCount": count_agent_inbox_messages_for_agent(
-            str(agent.get("agentId") or "").strip(),
-            status="pending",
-        ),
-    }
+        )
+        agent_inbox_pending_count_by_agent[agent_id] = _count_jsonl_matching_status(path, status="pending")
+    timings_ref["agent_inbox_messages"] = round((time.perf_counter() - started) * 1000, 1)
+    return AgentApiHydrationContext(
+        state=state,
+        tool_policies=tool_policies,
+        memory_policies=memory_policies,
+        tool_governance_requests_by_agent=tool_governance_requests_by_agent,
+        group_context_events_by_agent=group_context_events_by_agent,
+        agent_inbox_messages_by_agent=agent_inbox_messages_by_agent,
+        agent_inbox_pending_count_by_agent=agent_inbox_pending_count_by_agent,
+    )
+
+
+def _memory_policy_for_agent(agent: dict[str, Any], *, hydration: AgentApiHydrationContext | None = None) -> dict[str, Any]:
+    agent_id = str(agent.get("agentId") or "").strip()
+    if hydration is None:
+        return resolve_memory_policy_for_agent(agent_id)
+    policy_id = str(agent.get("memoryPolicyId") or "").strip()
+    policy = hydration.memory_policies.get(policy_id)
+    workspace_path = str(agent.get("workspacePath") or _agent_workspace_relative_path(agent_id)).strip()
+    if isinstance(policy, dict):
+        return normalize_memory_policy(policy, policy_id, workspace_path)
+    return default_memory_policy(policy_id or f"memory-{agent_id}", workspace_path)
+
+
+def _tool_policy_for_agent(agent: dict[str, Any], *, hydration: AgentApiHydrationContext | None = None) -> dict[str, Any]:
+    agent_id = str(agent.get("agentId") or "").strip()
+    if hydration is None:
+        return resolve_tool_policy_for_agent(agent_id)
+    policy_id = str(agent.get("toolPolicyId") or DEFAULT_TOOL_POLICY_ID).strip() or DEFAULT_TOOL_POLICY_ID
+    policy = hydration.tool_policies.get(policy_id) or default_tool_policy(policy_id)
+    return normalize_tool_policy(policy, policy_id)
+
+
+def _tool_governance_requests_for_agent(
+    agent_id: str,
+    *,
+    hydration: AgentApiHydrationContext | None = None,
+    limit: int = 6,
+) -> list[dict[str, Any]]:
+    if hydration is None:
+        return _list_recent_tool_governance_requests_for_agent(agent_id, limit=limit)
+    return list(hydration.tool_governance_requests_by_agent.get(agent_id) or [])[: max(1, int(limit or 1))]
+
+
+def _group_context_events_for_agent(
+    agent: dict[str, Any],
+    *,
+    hydration: AgentApiHydrationContext | None = None,
+    limit: int = 8,
+) -> list[dict[str, Any]]:
+    agent_id = str(agent.get("agentId") or "").strip()
+    if hydration is None:
+        return list_group_context_events_for_agent(agent_id, limit=limit)
+    events = list(hydration.group_context_events_by_agent.get(agent_id) or [])
+    return events[-max(1, int(limit or 1)) :]
+
+
+def _agent_inbox_messages_for_agent(
+    agent: dict[str, Any],
+    *,
+    hydration: AgentApiHydrationContext | None = None,
+    limit: int = 8,
+    status: str = "pending",
+) -> list[dict[str, Any]]:
+    agent_id = str(agent.get("agentId") or "").strip()
+    if hydration is None:
+        return list_agent_inbox_messages_for_agent(agent_id, limit=limit, status=status)
+    messages = list(hydration.agent_inbox_messages_by_agent.get(agent_id) or [])
+    normalized_status = str(status or "").strip().lower()
+    if normalized_status:
+        messages = [
+            item for item in messages
+            if str(item.get("status") or "pending").strip().lower() == normalized_status
+        ]
+    return messages[-max(1, int(limit or 1)) :]
+
+
+def _agent_inbox_pending_count_for_agent(
+    agent: dict[str, Any],
+    *,
+    hydration: AgentApiHydrationContext | None = None,
+    status: str = "pending",
+) -> int:
+    agent_id = str(agent.get("agentId") or "").strip()
+    if hydration is None:
+        return count_agent_inbox_messages_for_agent(agent_id, status=status)
+    normalized_status = str(status or "").strip().lower()
+    if normalized_status == "pending" and agent_id in hydration.agent_inbox_pending_count_by_agent:
+        return hydration.agent_inbox_pending_count_by_agent[agent_id]
+    messages = list(hydration.agent_inbox_messages_by_agent.get(agent_id) or [])
+    if not normalized_status:
+        return len(messages)
+    count = sum(
+        1
+        for item in messages
+        if str(item.get("status") or "pending").strip().lower() == normalized_status
+    )
+    if normalized_status == "pending":
+        hydration.agent_inbox_pending_count_by_agent[agent_id] = count
+    return count
+
+
+def _load_recent_tool_governance_requests_for_agents(
+    agents: list[dict[str, Any]],
+    *,
+    limit: int = 6,
+) -> dict[str, list[dict[str, Any]]]:
+    result: dict[str, list[dict[str, Any]]] = {}
+    for agent in agents:
+        agent_id = str(agent.get("agentId") or "").strip()
+        if not agent_id:
+            continue
+        try:
+            requests = _read_tool_governance_requests_for_agent(agent, limit=limit)
+        except Exception:
+            requests = []
+        requests.sort(
+            key=lambda item: (
+                str(item.get("createdAt") or ""),
+                str(item.get("requestId") or item.get("eventId") or ""),
+            ),
+            reverse=True,
+        )
+        result[agent_id] = requests[: max(1, int(limit or 1))]
+    return result
+
+
+def _read_tool_governance_requests_for_agent(agent: dict[str, Any], *, limit: int | None = None) -> list[dict[str, Any]]:
+    path = _resolve_project_path(str(agent.get("workspacePath") or "")) / "events" / "tool_governance_requests.jsonl"
+    if limit is not None:
+        return _read_recent_jsonl(path, limit=max(1, int(limit or 1)))
+    return _read_jsonl(path)
 
 
 def _tool_policies(state: dict[str, Any]) -> dict[str, Any]:
@@ -3933,6 +4271,122 @@ def _read_jsonl(path: Path) -> list[dict[str, Any]]:
     return events
 
 
+def _read_recent_jsonl(
+    path: Path,
+    *,
+    limit: int,
+    status: str = "",
+    prompt_eligible_only: bool = False,
+) -> list[dict[str, Any]]:
+    """Read only the recent JSONL window needed for Agent Center previews."""
+
+    normalized_limit = max(1, int(limit or 1))
+    if not path.exists():
+        return []
+    normalized_status = str(status or "").strip().lower()
+    cache_key = (*_jsonl_signature(path), normalized_limit, normalized_status, bool(prompt_eligible_only))
+    cached = _JSONL_RECENT_CACHE.get(cache_key)
+    if cached is not None:
+        return [dict(item) for item in cached]
+    events: list[dict[str, Any]] = []
+    for line in _iter_text_lines_reverse(path):
+        if not line.strip():
+            continue
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        if normalized_status and str(payload.get("status") or "pending").strip().lower() != normalized_status:
+            continue
+        if prompt_eligible_only and not bool(payload.get("promptEligible", True)):
+            continue
+        events.append(payload)
+        if len(events) >= normalized_limit:
+            break
+    result = list(reversed(events))
+    _remember_jsonl_recent(cache_key, result)
+    return [dict(item) for item in result]
+
+
+def _iter_text_lines_reverse(path: Path) -> Iterable[str]:
+    """Yield text lines from a file newest-first without reading it all."""
+
+    chunk_size = 8192
+    remainder = b""
+    try:
+        with path.open("rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            position = handle.tell()
+            while position > 0:
+                read_size = min(chunk_size, position)
+                position -= read_size
+                handle.seek(position)
+                data = handle.read(read_size) + remainder
+                parts = data.split(b"\n")
+                remainder = parts[0]
+                for raw_line in reversed(parts[1:]):
+                    if raw_line.endswith(b"\r"):
+                        raw_line = raw_line[:-1]
+                    line = raw_line.decode("utf-8", errors="ignore")
+                    if line.strip():
+                        yield line
+            if remainder.strip():
+                yield remainder.decode("utf-8", errors="ignore")
+    except OSError:
+        return
+
+
+def _count_jsonl_matching_status(path: Path, *, status: str = "") -> int:
+    normalized_status = str(status or "").strip().lower()
+    if not path.exists():
+        return 0
+    cache_key = (*_jsonl_signature(path), normalized_status)
+    cached = _JSONL_COUNT_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+    count = 0
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                if not line.strip():
+                    continue
+                try:
+                    payload = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(payload, dict):
+                    continue
+                if normalized_status and str(payload.get("status") or "pending").strip().lower() != normalized_status:
+                    continue
+                count += 1
+    except OSError:
+        return 0
+    _remember_jsonl_count(cache_key, count)
+    return count
+
+
+def _jsonl_signature(path: Path) -> tuple[str, bool, int, int]:
+    try:
+        stat = path.stat()
+    except OSError:
+        return (str(path), False, 0, 0)
+    return (str(path), True, int(stat.st_mtime_ns), int(stat.st_size))
+
+
+def _remember_jsonl_recent(key: tuple[str, bool, int, int, int, str, bool], value: list[dict[str, Any]]) -> None:
+    if len(_JSONL_RECENT_CACHE) > 512:
+        _JSONL_RECENT_CACHE.clear()
+    _JSONL_RECENT_CACHE[key] = [dict(item) for item in value if isinstance(item, dict)]
+
+
+def _remember_jsonl_count(key: tuple[str, bool, int, int, str], value: int) -> None:
+    if len(_JSONL_COUNT_CACHE) > 512:
+        _JSONL_COUNT_CACHE.clear()
+    _JSONL_COUNT_CACHE[key] = int(value or 0)
+
+
 def _agent_workspace_event_path(agent: dict[str, Any], filename: str) -> Path:
     return _resolve_project_path(str(agent.get("workspacePath") or "")) / "events" / filename
 
@@ -4053,6 +4507,53 @@ def _record_agent_event(event_code: str, agent: dict[str, Any], *, lifecycle: bo
         )
     except Exception:
         return
+
+
+def _record_agent_list_loaded(
+    *,
+    include_archived: bool,
+    raw_agent_count: int,
+    returned_agent_count: int,
+    timings: dict[str, float],
+    hydration_timings: dict[str, float],
+    repair_cache_hit: bool = False,
+) -> None:
+    total_ms = float(timings.get("total") or 0)
+    lock_wait_ms = float(timings.get("lock_wait") or 0)
+    if total_ms < 1000 and lock_wait_ms < 250:
+        return
+    try:
+        record_runtime_scene_event(
+            "agent_directory",
+            "list_agents",
+            "agent_directory.list_agents.slow",
+            message="Agent directory list_agents was slow.",
+            level="warning" if total_ms >= 3000 or lock_wait_ms >= 1000 else "info",
+            outcome="observed",
+            fields={
+                "includeArchived": bool(include_archived),
+                "rawAgentCount": raw_agent_count,
+                "returnedAgentCount": returned_agent_count,
+                "repairCacheHit": bool(repair_cache_hit),
+                "timingsMs": dict(timings),
+                "hydrationTimingsMs": dict(hydration_timings),
+                "slowestStage": _slowest_timing_stage(timings),
+                "slowestHydrationStage": _slowest_timing_stage(hydration_timings),
+            },
+        )
+    except Exception:
+        return
+
+
+def _slowest_timing_stage(timings: dict[str, float]) -> str:
+    candidates = {
+        str(key): float(value or 0)
+        for key, value in dict(timings or {}).items()
+        if str(key) != "total"
+    }
+    if not candidates:
+        return ""
+    return max(candidates.items(), key=lambda item: item[1])[0]
 
 
 def _record_agent_avatar_defaults_event(agents: list[dict[str, Any]]) -> None:

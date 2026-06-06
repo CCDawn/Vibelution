@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
 
+// @ts-expect-error Vitest runs this contract in Node; the web project intentionally omits global Node types.
+import { readFileSync } from "node:fs";
 import { resolveLegacyTeamsRedirect } from "./LegacyTeamsRedirect";
 import routeSource from "./TeamsRoute.tsx?raw";
 import routeStyles from "./TeamsRoute.module.css";
 import routerSource from "../app/router.tsx?raw";
+
+const routeStylesSource = readFileSync(new URL("./TeamsRoute.module.css", import.meta.url), "utf-8");
 
 describe("TeamsRoute layout contract", () => {
   it("is mounted as the top-level Team workspace with legacy redirects", () => {
@@ -80,6 +84,10 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("teamList");
     expect(routeSource).toContain("canvasPanel");
     expect(routeSource).toContain("inspector");
+    expect(routeSource).toContain("hasTeams");
+    expect(routeSource).toContain("styles.workspaceEmpty");
+    expect(routeSource).toContain("styles.emptyCanvasPanel");
+    expect(routeSource).toContain("先创建团队，再进入组织画布");
     expect(routeSource).toContain("teamNameInputRef");
     expect(routeSource).toContain("从模板创建");
     expect(routeSource).toContain("创建 Demo 团队");
@@ -174,6 +182,10 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.workflowGraphBoundary).toBeTypeOf("string");
     expect(routeStyles.workflowCandidateList).toBeTypeOf("string");
     expect(routeStyles.workflowValidation).toBeTypeOf("string");
+    expect(routeStyles.workspaceEmpty).toBeTypeOf("string");
+    expect(routeStyles.emptyCanvasPanel).toBeTypeOf("string");
+    expect(routeStylesSource).toContain("height: 100%");
+    expect(routeStylesSource).toContain("overflow: hidden");
   });
 
   it("keeps Team actions scoped to the selected Team or message event", () => {

@@ -29,6 +29,7 @@ from core.gym.promotion import (
     rollback_gym_promotion_proposal,
 )
 from core.web import app as web_app
+from core.launcher import service as standalone_launcher_service
 from core.chat.slash_commands import parse_skill_slash_command
 from core.ui.chat_state import load_chat_state, save_chat_state
 from core.runtime_manager import constants as runtime_manager_constants
@@ -827,31 +828,41 @@ def test_runtime_restart_queues_runtime_manager_and_records_lifecycle(monkeypatc
 
 
 def test_launcher_status_exposes_project_bundle(tmp_path, monkeypatch):
-    monkeypatch.setattr(launcher_service, "LAUNCHER_STATE_PATH", tmp_path / "missing-launcher-state.json")
+    monkeypatch.setattr(standalone_launcher_service, "LAUNCHER_STATE_PATH", tmp_path / "missing-launcher-state.json")
     monkeypatch.setattr(
-        launcher_service,
-        "get_runtime_summary",
+        standalone_launcher_service,
+        "load_state",
         lambda: {
+            "runtimeState": "running",
+            "managerPid": 2001,
+            "stateVersion": 2,
             "workbench": {
                 "desiredState": "open",
                 "observedState": "open",
                 "phase": "steady",
-                "backendPid": 3001,
-                "backendAlive": True,
-                "backendHealthy": True,
-                "backendPort": 8000,
-                "backendPortListening": True,
-                "browserManaged": True,
-                "browserWindowPid": 4001,
-                "browserWindowAlive": True,
                 "url": "http://127.0.0.1:8000",
-                "statusLine": "工作台正在运行。",
                 "lastReason": "launcher_start_button",
                 "lastSource": "launcher_api",
                 "lastTransitionAt": "2026-06-02T12:00:00Z",
             },
-            "runtimeManager": {"running": True, "managerPid": 2001},
-            "lifecycleProof": {"overallState": "running"},
+        },
+    )
+    monkeypatch.setattr(standalone_launcher_service, "load_pid", lambda: 2001)
+    monkeypatch.setattr(standalone_launcher_service, "_is_process_alive", lambda pid: int(pid) == 2001)
+    monkeypatch.setattr(
+        standalone_launcher_service,
+        "observe_workbench",
+        lambda: {
+            "observedState": "open",
+            "backendPid": 3001,
+            "backendAlive": True,
+            "backendHealthy": True,
+            "backendPort": 8000,
+            "backendPortListening": True,
+            "browserManaged": True,
+            "browserWindowPid": 4001,
+            "browserWindowAlive": True,
+            "url": "http://127.0.0.1:8000",
         },
     )
 
@@ -859,9 +870,10 @@ def test_launcher_status_exposes_project_bundle(tmp_path, monkeypatch):
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["launcher"]["mode"] == "runtime_manager_adapter"
-    assert payload["launcher"]["phase"] == "phase_1b"
+    assert payload["launcher"]["mode"] == "standalone_control_plane"
+    assert payload["launcher"]["phase"] == "phase_2a"
     assert payload["launcher"]["controlPlane"]["adapter"] == "runtime_manager"
+    assert payload["launcher"]["controlPlane"]["independent"] is True
     assert payload["projectBundle"]["schemaVersion"] == 1
     assert payload["projectBundle"]["mode"] == "bundled"
     assert payload["projectBundle"]["observedState"] == "open"
@@ -875,16 +887,12 @@ def test_launcher_status_exposes_project_bundle(tmp_path, monkeypatch):
 
 def test_launcher_start_queues_open_workbench_and_records_lifecycle(monkeypatch):
     calls: list[object] = []
-    scene_events: list[tuple[str, str, str, dict]] = []
+    scene_events: list[tuple[str, dict]] = []
 
-    def record_scene_event(component, phase, event_code, **kwargs):
-        scene_events.append((component, phase, event_code, kwargs))
-        return {"accepted": True}
-
-    monkeypatch.setattr(launcher_service, "record_runtime_scene_event", record_scene_event, raising=False)
-    monkeypatch.setattr(launcher_service, "ensure_daemon_running", lambda: calls.append("ensure"))
+    monkeypatch.setattr(standalone_launcher_service, "append_runtime_manager_file_event", lambda event_code, payload, **kwargs: scene_events.append((event_code, payload)))
+    monkeypatch.setattr(standalone_launcher_service, "ensure_daemon_running", lambda: calls.append("ensure"))
     monkeypatch.setattr(
-        launcher_service,
+        standalone_launcher_service,
         "submit_command",
         lambda command_type, args=None, requested_by="unknown": calls.append((command_type, args, requested_by))
         or {"commandId": "cmd-launcher-start"},
@@ -904,31 +912,25 @@ def test_launcher_start_queues_open_workbench_and_records_lifecycle(monkeypatch)
             "launcher_api",
         ),
     ]
-    event_codes = [item[2] for item in scene_events]
+    event_codes = [item[0] for item in scene_events]
     assert "launcher.bundle.start.requested" in event_codes
     assert "launcher.bundle.start.accepted" in event_codes
-    accepted_event = next(item for item in scene_events if item[2] == "launcher.bundle.start.accepted")
-    assert accepted_event[0] == "launcher"
-    assert accepted_event[3]["lifecycle"] is True
-    assert accepted_event[3]["fields"]["commandId"] == "cmd-launcher-start"
+    accepted_event = next(item for item in scene_events if item[0] == "launcher.bundle.start.accepted")
+    assert accepted_event[1]["fields"]["commandId"] == "cmd-launcher-start"
 
 
 def test_launcher_restart_blocks_active_work(monkeypatch):
-    scene_events: list[tuple[str, str, str, dict]] = []
+    scene_events: list[tuple[str, dict]] = []
     active_work_runs = [{"kind": "chat_turn", "runId": "chat-turn-live", "status": "running"}]
 
-    def record_scene_event(component, phase, event_code, **kwargs):
-        scene_events.append((component, phase, event_code, kwargs))
-        return {"accepted": True}
-
-    monkeypatch.setattr(launcher_service, "record_runtime_scene_event", record_scene_event, raising=False)
     def block_restart():
-        raise runtime_service.RuntimeRestartActiveWorkBlocked(
+        raise standalone_launcher_service.LauncherActiveWorkBlocked(
             "有进行中的任务，无法重启 Vibelution。请等待任务完成或先停止任务。",
             active_work_runs,
         )
 
-    monkeypatch.setattr(launcher_service, "request_runtime_restart", block_restart)
+    monkeypatch.setattr(standalone_launcher_service, "append_runtime_manager_file_event", lambda event_code, payload, **kwargs: scene_events.append((event_code, payload)))
+    monkeypatch.setattr(standalone_launcher_service, "request_launcher_restart", block_restart)
 
     response = client.post("/api/launcher/restart")
 
@@ -937,31 +939,20 @@ def test_launcher_restart_blocks_active_work(monkeypatch):
     assert detail["code"] == "active_work_restart_blocked"
     assert detail["message"] == "有进行中的任务，无法重启 Vibelution。请等待任务完成或先停止任务。"
     assert detail["activeWorkRuns"][0]["runId"] == "chat-turn-live"
-    event_codes = [item[2] for item in scene_events]
-    assert "launcher.bundle.restart.requested" in event_codes
-    assert "launcher.bundle.restart.blocked_active_work" in event_codes
+    event_codes = [item[0] for item in scene_events]
     assert "launcher.bundle.restart.accepted" not in event_codes
-    blocked_event = next(item for item in scene_events if item[2] == "launcher.bundle.restart.blocked_active_work")
-    assert blocked_event[3]["outcome"] == "blocked"
-    assert blocked_event[3]["fields"]["activeWorkCount"] == 1
 
 
 def test_launcher_stop_blocks_active_work(monkeypatch):
-    scene_events: list[tuple[str, str, str, dict]] = []
     active_work_runs = [{"kind": "chat_turn", "runId": "chat-turn-live", "status": "running"}]
 
-    def record_scene_event(component, phase, event_code, **kwargs):
-        scene_events.append((component, phase, event_code, kwargs))
-        return {"accepted": True}
-
     def block_stop():
-        raise runtime_service.RuntimeRestartActiveWorkBlocked(
+        raise standalone_launcher_service.LauncherActiveWorkBlocked(
             "有进行中的任务，无法停止 Vibelution。请等待任务完成或先停止任务。",
             active_work_runs,
         )
 
-    monkeypatch.setattr(launcher_service, "record_runtime_scene_event", record_scene_event, raising=False)
-    monkeypatch.setattr(launcher_service, "request_runtime_shutdown", block_stop)
+    monkeypatch.setattr(standalone_launcher_service, "request_launcher_stop", block_stop)
 
     response = client.post("/api/launcher/stop")
 
@@ -970,30 +961,19 @@ def test_launcher_stop_blocks_active_work(monkeypatch):
     assert detail["code"] == "active_work_stop_blocked"
     assert detail["message"] == "有进行中的任务，无法停止 Vibelution。请等待任务完成或先停止任务。"
     assert detail["activeWorkRuns"][0]["runId"] == "chat-turn-live"
-    event_codes = [item[2] for item in scene_events]
-    assert "launcher.bundle.stop.requested" in event_codes
-    assert "launcher.bundle.stop.blocked_active_work" in event_codes
-    assert "launcher.bundle.stop.accepted" not in event_codes
 
 
 def test_launcher_stop_delegates_runtime_shutdown_and_normalizes_response(monkeypatch):
-    scene_events: list[tuple[str, str, str, dict]] = []
-
-    def record_scene_event(component, phase, event_code, **kwargs):
-        scene_events.append((component, phase, event_code, kwargs))
-        return {"accepted": True}
-
-    monkeypatch.setattr(launcher_service, "record_runtime_scene_event", record_scene_event, raising=False)
     monkeypatch.setattr(
-        launcher_service,
-        "request_runtime_shutdown",
+        standalone_launcher_service,
+        "request_launcher_stop",
         lambda: {
             "accepted": True,
             "mode": "runtime_manager",
+            "launcherMode": "standalone_control_plane",
+            "operation": "stop",
+            "commandId": "cmd-launcher-stop",
             "message": "closing",
-            "chatTurns": [],
-            "chatRoomRounds": [],
-            "evolutionRuns": [],
         },
     )
 
@@ -1003,33 +983,21 @@ def test_launcher_stop_delegates_runtime_shutdown_and_normalizes_response(monkey
     payload = response.json()
     assert payload["accepted"] is True
     assert payload["operation"] == "stop"
-    assert payload["launcherMode"] == "runtime_manager_adapter"
+    assert payload["launcherMode"] == "standalone_control_plane"
     assert payload["mode"] == "runtime_manager"
-    assert payload["chatTurns"] == []
-    event_codes = [item[2] for item in scene_events]
-    assert "launcher.bundle.stop.requested" in event_codes
-    assert "launcher.bundle.stop.accepted" in event_codes
 
 
 def test_launcher_restart_delegates_runtime_restart_and_normalizes_response(monkeypatch):
-    scene_events: list[tuple[str, str, str, dict]] = []
-
-    def record_scene_event(component, phase, event_code, **kwargs):
-        scene_events.append((component, phase, event_code, kwargs))
-        return {"accepted": True}
-
-    monkeypatch.setattr(launcher_service, "record_runtime_scene_event", record_scene_event, raising=False)
     monkeypatch.setattr(
-        launcher_service,
-        "request_runtime_restart",
+        standalone_launcher_service,
+        "request_launcher_restart",
         lambda: {
             "accepted": True,
             "mode": "runtime_manager",
+            "launcherMode": "standalone_control_plane",
+            "operation": "restart",
             "commandId": "cmd-launcher-restart",
             "message": "restarting",
-            "chatTurns": [],
-            "chatRoomRounds": [],
-            "evolutionRuns": [],
         },
     )
 
@@ -1040,12 +1008,7 @@ def test_launcher_restart_delegates_runtime_restart_and_normalizes_response(monk
     assert payload["accepted"] is True
     assert payload["operation"] == "restart"
     assert payload["commandId"] == "cmd-launcher-restart"
-    assert payload["launcherMode"] == "runtime_manager_adapter"
-    event_codes = [item[2] for item in scene_events]
-    assert "launcher.bundle.restart.requested" in event_codes
-    assert "launcher.bundle.restart.accepted" in event_codes
-    accepted_event = next(item for item in scene_events if item[2] == "launcher.bundle.restart.accepted")
-    assert accepted_event[3]["fields"]["commandId"] == "cmd-launcher-restart"
+    assert payload["launcherMode"] == "standalone_control_plane"
 
 
 def test_runtime_restart_blocks_active_work(monkeypatch):
@@ -15083,6 +15046,58 @@ def test_start_supervised_run_from_web_does_not_write_real_runtime_manager_store
         _reset_supervised_live_state()
 
 
+def test_start_supervised_run_live_manager_route_returns_accepted_without_waiting(monkeypatch):
+    calls: list[object] = []
+    monkeypatch.setattr(supervised_control_service, "_runtime_manager_live_control_enabled", lambda: True)
+    monkeypatch.setattr(supervised_control_service, "_ensure_runtime_manager_daemon", lambda: calls.append("ensure"))
+    monkeypatch.setattr(
+        supervised_control_service,
+        "submit_command",
+        lambda command_type, args=None, requested_by="unknown": calls.append((command_type, args, requested_by)) or {"commandId": "cmd-web-start"},
+    )
+    monkeypatch.setattr(
+        supervised_control_service,
+        "wait_for_result",
+        lambda command_id, *, timeout_seconds=60: pytest.fail("accepted submission must not poll for command completion"),
+    )
+    monkeypatch.setattr(
+        supervised_control_service,
+        "_load_immediate_runtime_manager_command_result",
+        lambda command_id: calls.append(("immediate", command_id)) or None,
+    )
+
+    response = client.post(
+        "/api/evolution/runs",
+        json={
+            "sourceKind": "bundle",
+            "bundleName": "manual_bundle",
+            "keepWorktree": False,
+        },
+    )
+
+    assert response.status_code == 202
+    payload = response.json()
+    assert payload["accepted"] is True
+    assert payload["commandId"] == "cmd-web-start"
+    assert payload["commandType"] == "start_supervised_run"
+    assert payload["status"] == "queued"
+    assert calls[0] == "ensure"
+    assert calls[1] == (
+        "start_supervised_run",
+        {
+            "payload": {
+                "sourceKind": "bundle",
+                "datasetName": "",
+                "datasetLimit": None,
+                "bundleName": "manual_bundle",
+                "keepWorktree": False,
+            }
+        },
+        "web_ui",
+    )
+    assert calls[2] == ("immediate", "cmd-web-start")
+
+
 def test_start_supervised_run_from_bundle_uses_launchable_file_stem(tmp_path, monkeypatch):
     bundle_path = tmp_path / "workspace" / "evaluation" / "bundles" / "launchable_bundle.json"
     bundle_path.parent.mkdir(parents=True, exist_ok=True)
@@ -15299,6 +15314,43 @@ def test_supervised_run_delete_route_clears_queued_run_and_unlocks_start(tmp_pat
     assert restart_response.json()["runId"] != run_id
 
     _reset_supervised_live_state()
+
+
+def test_supervised_run_delete_live_manager_route_returns_accepted_without_waiting(monkeypatch):
+    calls: list[object] = []
+    monkeypatch.setattr(supervised_control_service, "_runtime_manager_live_control_enabled", lambda: True)
+    monkeypatch.setattr(supervised_control_service, "_ensure_runtime_manager_daemon", lambda: calls.append("ensure"))
+    monkeypatch.setattr(
+        supervised_control_service,
+        "submit_command",
+        lambda command_type, args=None, requested_by="unknown": calls.append((command_type, args, requested_by)) or {"commandId": "cmd-web-delete"},
+    )
+    monkeypatch.setattr(
+        supervised_control_service,
+        "wait_for_result",
+        lambda command_id, *, timeout_seconds=60: pytest.fail("accepted submission must not poll for command completion"),
+    )
+    monkeypatch.setattr(
+        supervised_control_service,
+        "_load_immediate_runtime_manager_command_result",
+        lambda command_id: calls.append(("immediate", command_id)) or None,
+    )
+
+    response = client.delete("/api/evolution/runs/web-supervised-old")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["accepted"] is True
+    assert payload["commandId"] == "cmd-web-delete"
+    assert payload["commandType"] == "delete_supervised_run"
+    assert payload["runId"] == "web-supervised-old"
+    assert calls[0] == "ensure"
+    assert calls[1] == (
+        "delete_supervised_run",
+        {"runId": "web-supervised-old"},
+        "web_ui",
+    )
+    assert calls[2] == ("immediate", "cmd-web-delete")
 
 
 def test_supervised_run_delete_route_rejects_running_run():

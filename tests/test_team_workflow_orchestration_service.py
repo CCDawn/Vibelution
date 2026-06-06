@@ -1872,6 +1872,8 @@ def test_local_research_model_invoke_records_candidate_from_json_content(tmp_pat
     assert response["candidate"]["currentState"] == "paper_note_draft"
     assert response["modelResponse"]["jsonSource"] == "content"
     assert response["modelResponse"]["modelId"] == "houmo_qwen35_9b_agent"
+    assert response["modelResponse"]["modelProfileId"] == "__challenge_cup_local_research_model"
+    assert "profileId" not in response["modelResponse"]
     assert _FakeLocalResearchClient.captured_messages[0]["profile_id"] == "__challenge_cup_local_research_model"
     assert _FakeLocalResearchClient.captured_messages[0]["metadata"]["taskType"] == "paper_note_draft"
 

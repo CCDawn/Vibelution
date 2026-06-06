@@ -243,6 +243,7 @@ export type KnowledgeBasePermissions = {
 
 export type TeamKnowledgeBase = {
   knowledgeBaseId: string;
+  scopedKnowledgeBaseId?: string;
   ownerType?: "team" | "agent" | "shared" | string;
   ownerId?: string;
   teamId: string;
@@ -1124,6 +1125,7 @@ export type RuntimeSceneListItem = {
   researchLogCount: number;
   errorCount: number;
   warningCount: number;
+  diagnosisSummary?: RuntimeSceneDiagnosisSummary;
 };
 
 export type RuntimeSceneEvent = {
@@ -1288,6 +1290,22 @@ export type RuntimeScenePackageIndex = {
   summaryRef: string;
 };
 
+export type RuntimeSceneDiagnosisSummary = {
+  status: string;
+  severity: "error" | "warning" | "info" | string;
+  primaryIssue: string;
+  needsAction: boolean;
+  activeClusterCount: number;
+  activeErrorCount: number;
+  activeWarningCount: number;
+  policyClusterCount: number;
+  policySignalCount: number;
+  historicalClusterCount: number;
+  historicalErrorCount: number;
+  historicalWarningCount: number;
+  controlSignalCount: number;
+};
+
 export type RuntimeSceneDetail = {
   runtimeSceneId: string;
   directoryName: string;
@@ -1319,6 +1337,7 @@ export type RuntimeSceneDetail = {
   researchLogs: RuntimeSceneRawFile[];
   packageSummary: RuntimeScenePackageSummary;
   packageDiagnosis: RuntimeScenePackageDiagnosis;
+  diagnosisSummary?: RuntimeSceneDiagnosisSummary;
 };
 
 export type RuntimeSceneDeleteResponse = {
@@ -1401,7 +1420,6 @@ export type GitFileDiff = {
 export type GitCommitMessageResponse = {
   message: string;
   modelId: string;
-  profileId: string;
   prompt: string;
   files: string[];
   diffSummary: string;
@@ -1938,6 +1956,8 @@ export type LauncherStatus = {
       independent: boolean;
       adapter: string;
       nextPhase: string;
+      url?: string;
+      port?: number;
     };
     message: string;
   };
@@ -1965,9 +1985,12 @@ export type SessionSummary = {
   dialogueModelId?: string;
   workspacePath?: string;
   agentWorkspacePath?: string;
+  agentMissingId?: string;
   agentMissing?: boolean;
   agentStatusCode?: string;
   agentStatusMessage?: string;
+  agentDirectSessionMismatch?: boolean;
+  agentPrimaryDirectSessionId?: string;
   status: string;
   taskSummary: string;
   lastActive: string;
@@ -3810,6 +3833,52 @@ export type EvolutionCaseDiagnostic = {
   expectedInfeasibleOutcome?: Record<string, unknown>;
   dynamicEvents?: Array<Record<string, unknown>>;
   evaluationMetadata?: Record<string, unknown>;
+  harnessSummaries?: Partial<Record<"baseline" | "candidate", EvolutionHarnessRunSummary>>;
+};
+
+export type EvolutionHarnessRunSummary = {
+  caseId?: string;
+  caseType?: string;
+  role?: string;
+  status?: string;
+  reason?: string;
+  scenario?: string;
+  mode?: string;
+  durationSeconds?: number | null;
+  timeoutSeconds?: number | null;
+  maxSteps?: number | null;
+  validation?: {
+    passed?: number;
+    failed?: number;
+    last_tool?: string;
+  };
+  transaction?: {
+    opened?: boolean;
+    closed?: boolean;
+    status?: string;
+  };
+  restart?: {
+    expected?: boolean;
+    triggered?: boolean;
+    reentered?: boolean;
+  };
+  guardedTools?: number;
+  llmFailureDetected?: boolean;
+  llmFailureCategory?: string;
+  newLogs?: {
+    conversation?: number;
+    debug?: number;
+  };
+  process?: {
+    raw_count?: number;
+    normalized_reentered_agent_count?: number;
+    duplicate_families?: string[];
+  };
+  agent?: {
+    agentId?: string;
+    displayName?: string;
+    dialogueModelId?: string;
+  };
 };
 
 export type EvolutionDatasetOption = {
@@ -3890,7 +3959,6 @@ export type EvolutionActiveRunAgentBinding = {
   displayName?: string;
   primaryMode?: string;
   roleKey?: string;
-  profileId?: string;
   promptTemplateId?: string;
   directSessionId?: string;
   workspacePath?: string;
@@ -3953,15 +4021,28 @@ export type EvolutionActiveRunStreamEvent = {
   terminal?: boolean;
 };
 
-export type EvolutionRunDeleteResponse = {
-  deleted: boolean;
-  runId: string;
-  clearedActive: boolean;
-  clearedLatest: boolean;
-  activeRunId: string;
-  latestRunId: string;
+export type EvolutionRunCommandAccepted = {
+  accepted: true;
+  commandId: string;
+  commandType: string;
+  runId?: string;
+  status: "queued";
   summary: string;
+  completed?: boolean;
 };
+
+export type EvolutionRunStartResponse = EvolutionActiveRun | EvolutionRunCommandAccepted;
+
+export type EvolutionRunDeleteResponse = {
+  deleted?: boolean;
+  runId?: string;
+  clearedActive?: boolean;
+  clearedLatest?: boolean;
+  activeRunId?: string;
+  latestRunId?: string;
+  summary: string;
+} | EvolutionRunCommandAccepted;
+
 
 export type SupervisedWorktreeRun = {
   runId: string;
@@ -4375,6 +4456,14 @@ export type SelfEvolutionTransaction = {
   status: string;
   summary: string;
   isOpen: boolean;
+  goalPreview: string;
+  durationSeconds: number | null;
+  validationPassed: number;
+  validationFailed: number;
+  mutationsRecorded: number;
+  mutationsBlocked: number;
+  auditEventCount: number;
+  lastAuditEvent: string;
 };
 
 export type SelfEvolutionHistoryDeleteResponse = {
@@ -4692,8 +4781,8 @@ export type ConfigWorkspace = ConfigSummary & {
 export type ConfigLlmTestResult = {
   ok: boolean;
   message: string;
-  profile_id: string;
-  model_id?: string;
+  route_id: string;
+  model_id: string;
   provider_id: string;
   provider_kind: string;
   base_url: string;
@@ -4913,8 +5002,8 @@ export type ResearchAgentConfig = {
   label: string;
   promptFilename: string;
   templateId: string;
-  profileId?: string;
-  llmConfigId?: string;
+  dialogueModelId?: string;
+  llmBindings?: Record<string, { modelId?: string }>;
   roleKey?: string;
   promptTemplateId?: string;
   enabled: boolean;
@@ -4963,7 +5052,6 @@ export type ResearchFlowNode = {
   agentId?: string;
   agentKey: string;
   promptKey: string;
-  llmConfigId: string;
   description: string;
   routeCondition: string;
 };

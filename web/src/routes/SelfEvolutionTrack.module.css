@@ -131,6 +131,102 @@
   padding: 14px;
 }
 
+.loadingShell {
+  display: grid;
+  grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
+  gap: 12px;
+  height: 100%;
+  min-height: min(520px, 72vh);
+  align-content: stretch;
+  overflow: hidden;
+}
+
+.loadingRail,
+.loadingPanel {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-card);
+}
+
+.loadingRail {
+  display: grid;
+  align-content: start;
+  gap: 14px;
+  min-height: 0;
+  padding: 14px;
+}
+
+.loadingStatGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.loadingStatGrid span {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 7px;
+  color: var(--fg-tertiary);
+  font-size: 0.72rem;
+}
+
+.loadingStatGrid strong {
+  color: var(--fg-primary);
+  font-family: var(--font-mono);
+  font-size: 0.84rem;
+}
+
+.loadingBody {
+  display: grid;
+  grid-template-rows: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  min-height: 0;
+}
+
+.loadingPanel {
+  display: grid;
+  align-content: center;
+  gap: 11px;
+  min-height: 0;
+  padding: 16px;
+}
+
+.loadingPanel strong {
+  color: var(--fg-secondary);
+  font-size: 0.78rem;
+}
+
+.skeletonLineWide,
+.skeletonLine,
+.skeletonLineShort {
+  display: block;
+  height: 10px;
+  border-radius: 999px;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--fg-muted) 11%, transparent),
+    color-mix(in srgb, var(--accent-cool) 18%, transparent),
+    color-mix(in srgb, var(--fg-muted) 11%, transparent)
+  );
+  background-size: 220% 100%;
+  animation: skeletonPulse 1.8s ease-in-out infinite;
+}
+
+.skeletonLineWide {
+  width: min(100%, 620px);
+}
+
+.skeletonLine {
+  width: min(72%, 460px);
+}
+
+.skeletonLineShort {
+  width: min(42%, 260px);
+}
+
 .petCompanionSurface {
   display: grid;
   gap: 12px;
@@ -563,6 +659,120 @@
   flex-wrap: wrap;
 }
 
+.transactionFilterBar,
+.transactionDateFilterBar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.transactionDateFilterBar {
+  align-items: center;
+}
+
+.transactionDateFilterBar > span {
+  color: var(--fg-tertiary);
+  font-size: 0.76rem;
+  line-height: 1.35;
+}
+
+.transactionVisibleSummary {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  color: var(--fg-tertiary);
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  line-height: 1.35;
+  white-space: nowrap;
+}
+
+.transactionFilterButton {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 8px;
+  background: var(--surface-panel-strong);
+  color: var(--fg-secondary);
+  font: inherit;
+  cursor: pointer;
+}
+
+.transactionFilterButton strong {
+  min-width: 22px;
+  color: var(--fg-primary);
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+  text-align: right;
+}
+
+.transactionFilterButtonActive {
+  border-color: color-mix(in srgb, var(--accent-warm) 34%, transparent);
+  background: color-mix(in srgb, var(--accent-warm) 12%, transparent);
+  color: var(--accent-warm-2);
+}
+
+.transactionDetailsToggle {
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 9px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-panel-strong) 78%, transparent);
+  color: var(--fg-secondary);
+  font: inherit;
+  font-size: 0.78rem;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.transactionDetailsToggle[aria-expanded="true"] {
+  border-color: color-mix(in srgb, var(--accent-cool) 30%, transparent);
+  color: var(--accent-cool);
+}
+
+.transactionDateGroup {
+  display: grid;
+  gap: 8px;
+  padding-top: 2px;
+}
+
+.transactionDateGroup + .transactionDateGroup {
+  margin-top: 4px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(148, 163, 184, 0.12);
+}
+
+.transactionDateHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 30px;
+  padding: 0 2px;
+}
+
+.transactionDateHeader strong {
+  color: var(--fg-primary);
+  font-size: 0.82rem;
+}
+
+.transactionDateHeader span {
+  color: var(--fg-tertiary);
+  font-size: 0.74rem;
+  line-height: 1.35;
+}
+
+.transactionGroupList {
+  display: grid;
+  gap: 8px;
+}
+
 .selectionToggle {
   min-height: 32px;
   border-radius: 8px;
@@ -592,6 +802,74 @@
 .checkboxRow input {
   width: 15px;
   height: 15px;
+}
+
+.transactionTitleStack {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.transactionTitleStack span {
+  color: var(--fg-tertiary);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.transactionMetaGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.transactionMetaGrid span {
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--surface-panel-strong) 72%, transparent);
+  color: var(--fg-secondary);
+  font-size: 0.73rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.transactionGoalPreview {
+  margin: 0;
+  color: var(--fg-secondary);
+  font-size: 0.78rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.transactionDetailsPanel {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  padding: 9px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-panel-strong) 54%, transparent);
+}
+
+.transactionDetailRow {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.transactionDetailRow span {
+  color: var(--fg-tertiary);
+  font-size: 0.72rem;
+}
+
+.transactionDetailRow strong {
+  color: var(--fg-secondary);
+  font-size: 0.78rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
 }
 
 .messageBox {
@@ -674,6 +952,22 @@
   }
 }
 
+@keyframes skeletonPulse {
+  0% {
+    background-position: 160% 0;
+    opacity: 0.64;
+  }
+
+  50% {
+    opacity: 1;
+  }
+
+  100% {
+    background-position: -60% 0;
+    opacity: 0.64;
+  }
+}
+
 @keyframes petFloat {
   0%,
   100% {
@@ -688,6 +982,20 @@
 @media (max-width: 1180px) {
   .pageStack {
     overflow: visible;
+  }
+
+  .loadingShell {
+    grid-template-columns: minmax(0, 1fr);
+    min-height: 360px;
+    overflow: auto;
+  }
+
+  .transactionMetaGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .transactionDetailsPanel {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .workspaceLayout {
@@ -737,6 +1045,7 @@
   .sectionHeader,
   .detailRow,
   .paginationBar,
+  .transactionDateHeader,
   .subsurfaceHeader,
   .signalHeader {
     flex-direction: column;

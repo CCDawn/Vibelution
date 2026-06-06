@@ -187,6 +187,9 @@ def resolve_project_agent_bus_targets(
     elif matched_ids:
         target_ids = matched_ids
         normalized_scope = "agents"
+    elif mentioned_tokens:
+        target_ids = []
+        normalized_scope = "agents"
     else:
         target_ids = [str(agent.get("agentId") or "").strip() for agent in agents]
         normalized_scope = "all" if target_ids else "observe"
@@ -394,7 +397,8 @@ def _agent_matches_mention(agent: dict[str, Any], normalized_token: str) -> bool
         agent.get("agentCode"),
         agent.get("displayName"),
         agent.get("roleKey"),
-        agent.get("profileId"),
+        agent.get("dialogueModelId"),
+        agent.get("promptTemplateId"),
     ]
     return any(_normalize_mention_token(value) == normalized_token for value in values)
 

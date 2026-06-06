@@ -112,6 +112,181 @@ def test_agent_formal_knowledge_is_private_and_governed(tmp_path, monkeypatch):
     assert (tmp_path / "workspace" / "agents" / owner["agentId"] / "knowledge" / "knowledge_bases.json").exists()
 
 
+def test_duplicate_knowledge_base_ids_require_owner_scope(tmp_path, monkeypatch):
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(team_knowledge_service, "PROJECT_ROOT", tmp_path)
+    first_agent = agent_directory_service.create_agent_instance(display_name="First KB Owner")
+    second_agent = agent_directory_service.create_agent_instance(display_name="Second KB Owner")
+    viewer = agent_directory_service.create_agent_instance(display_name="Duplicate KB Viewer")
+    first_team = team_service.create_team(name="First KB Team", members=[{"agentId": first_agent["agentId"], "role": "lead"}])
+    second_team = team_service.create_team(name="Second KB Team", members=[{"agentId": second_agent["agentId"], "role": "lead"}])
+    first_base = team_knowledge_service.create_knowledge_base(
+        first_team["teamId"],
+        name="Duplicate KB",
+        actor_agent_id=first_agent["agentId"],
+        acl={"grants": {"read": [viewer["agentId"]]}},
+    )
+    second_base = team_knowledge_service.create_knowledge_base(
+        second_team["teamId"],
+        name="Duplicate KB",
+        actor_agent_id=second_agent["agentId"],
+        acl={"grants": {"read": [viewer["agentId"]]}},
+    )
+
+    assert first_base["knowledgeBaseId"] == second_base["knowledgeBaseId"]
+    assert first_base["scopedKnowledgeBaseId"] != second_base["scopedKnowledgeBaseId"]
+    with pytest.raises(team_knowledge_service.TeamKnowledgeAmbiguousKnowledgeBaseError):
+        team_knowledge_service.list_knowledge_items(first_base["knowledgeBaseId"], agent_id=first_agent["agentId"])
+    with pytest.raises(team_knowledge_service.TeamKnowledgeAmbiguousKnowledgeBaseError):
+        team_knowledge_service.search_knowledge_items(
+            agent_id=viewer["agentId"],
+            knowledge_base_id=first_base["knowledgeBaseId"],
+        )
+
+    proposal = team_knowledge_service.create_refinement_proposal(
+        first_base["scopedKnowledgeBaseId"],
+        source_artifact_ids=[],
+        proposed_by_agent_id=first_agent["agentId"],
+        title="First scoped item",
+        content="Only the scoped first knowledge base should receive this item.",
+    )
+    reviewed = team_knowledge_service.review_refinement_proposal(
+        first_base["scopedKnowledgeBaseId"],
+        proposal["proposalId"],
+        status="approved",
+        reviewed_by_agent_id=first_agent["agentId"],
+    )
+    scoped_items = team_knowledge_service.list_knowledge_items(
+        first_base["scopedKnowledgeBaseId"],
+        agent_id=first_agent["agentId"],
+    )
+    second_items = team_knowledge_service.list_knowledge_items(
+        second_base["scopedKnowledgeBaseId"],
+        agent_id=second_agent["agentId"],
+    )
+
+    assert scoped_items["summary"]["itemCount"] == 1
+    assert scoped_items["items"][0]["knowledgeItemId"] == reviewed["item"]["knowledgeItemId"]
+    assert second_items["summary"]["itemCount"] == 0
+
+
+def test_empty_actor_cannot_create_or_read_governed_knowledge_service(knowledge_env):
+    with pytest.raises(team_knowledge_service.TeamKnowledgePermissionError):
+        team_knowledge_service.create_knowledge_base(
+            knowledge_env["team"]["teamId"],
+            name="Anonymous Team KB",
+        )
+
+    with pytest.raises(team_knowledge_service.TeamKnowledgePermissionError):
+        team_knowledge_service.create_agent_knowledge_base(
+            knowledge_env["member"]["agentId"],
+            name="Anonymous Agent KB",
+        )
+
+    source = team_knowledge_service.create_source_artifact(
+        knowledge_env["base"]["knowledgeBaseId"],
+        source_type="manual_user_entry",
+        source_ref={"note": "empty actor service guard"},
+        title="Empty actor source",
+        actor_agent_id=knowledge_env["member"]["agentId"],
+    )
+    proposal = team_knowledge_service.create_refinement_proposal(
+        knowledge_env["base"]["knowledgeBaseId"],
+        source_artifact_ids=[source["sourceArtifactId"]],
+        proposed_by_agent_id=knowledge_env["member"]["agentId"],
+        title="Empty actor service guard",
+        content="Empty actor service calls must not read governed knowledge.",
+    )
+    reviewed = team_knowledge_service.review_refinement_proposal(
+        knowledge_env["base"]["knowledgeBaseId"],
+        proposal["proposalId"],
+        status="approved",
+        reviewed_by_agent_id=knowledge_env["lead"]["agentId"],
+    )
+
+    assert team_knowledge_service.list_knowledge_overview()["summary"]["knowledgeBaseCount"] == 0
+    assert team_knowledge_service.list_knowledge_governance_tasks(status="all")["summary"]["taskCount"] == 0
+    assert team_knowledge_service.get_knowledge_operations_health()["summary"]["knowledgeBaseCount"] == 0
+    assert team_knowledge_service.get_knowledge_governance_plan()["summary"]["actionCount"] == 0
+    assert team_knowledge_service.list_knowledge_steward_recommendations()["summary"]["recommendationCount"] == 0
+    assert team_knowledge_service.get_knowledge_steward_workbench()["summary"]["openTaskCount"] == 0
+    assert team_knowledge_service.get_knowledge_dashboard_snapshot()["overview"]["summary"]["knowledgeBaseCount"] == 0
+    assert team_knowledge_service.get_knowledge_steward_overview()["governance"]["summary"]["openTaskCount"] == 0
+    assert team_knowledge_service.search_knowledge_items(query="empty actor")["summary"]["resultCount"] == 0
+
+    with pytest.raises(team_knowledge_service.TeamKnowledgePermissionError):
+        team_knowledge_service.list_knowledge_items(knowledge_env["base"]["knowledgeBaseId"])
+    with pytest.raises(team_knowledge_service.TeamKnowledgePermissionError):
+        team_knowledge_service.get_knowledge_trace(
+            knowledge_env["base"]["knowledgeBaseId"],
+            reviewed["item"]["knowledgeItemId"],
+        )
+    with pytest.raises(team_knowledge_service.TeamKnowledgePermissionError):
+        team_knowledge_service.list_rating_suggestions(knowledge_env["base"]["knowledgeBaseId"])
+
+    internal_overview = team_knowledge_service.list_knowledge_overview(internal=True)
+    internal_health = team_knowledge_service.get_knowledge_operations_health(internal=True)
+
+    assert internal_overview["summary"]["knowledgeBaseCount"] == 1
+    assert internal_health["summary"]["knowledgeBaseCount"] == 1
+
+
+def test_team_knowledge_memory_section_summary_uses_lightweight_disk_counts(tmp_path, monkeypatch):
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(team_knowledge_service, "PROJECT_ROOT", tmp_path)
+    lead = agent_directory_service.create_agent_instance(display_name="Lead Agent")
+    team = team_service.create_team(name="Knowledge Team", members=[{"agentId": lead["agentId"], "role": "lead"}])
+    base = team_knowledge_service.create_knowledge_base(
+        team["teamId"],
+        name="Shared Decisions",
+        actor_agent_id=lead["agentId"],
+    )
+    source = team_knowledge_service.create_source_artifact(
+        base["knowledgeBaseId"],
+        source_type="manual_user_entry",
+        source_ref={"note": "summary source"},
+        title="Summary source",
+        actor_agent_id=lead["agentId"],
+    )
+    proposal = team_knowledge_service.create_refinement_proposal(
+        base["knowledgeBaseId"],
+        source_artifact_ids=[source["sourceArtifactId"]],
+        proposed_by_agent_id=lead["agentId"],
+        title="Pending summary proposal",
+        content="Pending proposal should be counted by the lightweight summary.",
+    )
+    team_knowledge_service.review_refinement_proposal(
+        base["knowledgeBaseId"],
+        proposal["proposalId"],
+        status="approved",
+        reviewed_by_agent_id=lead["agentId"],
+    )
+    team_knowledge_service.create_refinement_proposal(
+        base["knowledgeBaseId"],
+        source_artifact_ids=[],
+        proposed_by_agent_id=lead["agentId"],
+        title="Still pending",
+        content="This proposal remains pending.",
+    )
+
+    def fail_full_overview(**_kwargs):
+        raise AssertionError("memory summary must not call full list_knowledge_overview")
+
+    monkeypatch.setattr(team_knowledge_service, "list_knowledge_overview", fail_full_overview)
+
+    summary = team_knowledge_service.team_knowledge_memory_section_summary()
+
+    assert summary["knowledgeBaseCount"] == 1
+    assert summary["pendingProposalCount"] == 1
+    assert summary["itemCount"] == 1
+    assert summary["sourceArtifactCount"] == 1
+    assert summary["updatedAt"]
+
+
 def test_non_member_cannot_submit_proposal(knowledge_env):
     with pytest.raises(team_knowledge_service.TeamKnowledgePermissionError):
         team_knowledge_service.create_refinement_proposal(
@@ -544,8 +719,7 @@ def test_memory_knowledge_graph_node_detail_returns_acl_scoped_full_content(know
     assert item_detail is not None
     assert item_detail["contentItems"][0]["knowledgeItemId"] == reviewed["item"]["knowledgeItemId"]
     assert item_detail["contentItems"][0]["content"] == "NODE DETAIL FORMAL KNOWLEDGE BODY"
-    assert outsider_detail is not None
-    assert outsider_detail["contentItems"] == []
+    assert outsider_detail is None
 
 
 def test_memory_knowledge_graph_expands_official_research_trace_on_include(knowledge_env):

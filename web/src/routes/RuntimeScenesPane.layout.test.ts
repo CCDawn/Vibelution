@@ -77,6 +77,22 @@ describe("RuntimeScenesPane layout contract", () => {
     expect(paneSource).toContain("item.packageIndex?.searchText");
   });
 
+  it("uses diagnosis summaries instead of raw error counts for runtime scene list signals", () => {
+    expect(paneSource).toContain("function runtimeSceneListSignal");
+    expect(paneSource).toContain("if (scene.diagnosisSummary)");
+    expect(paneSource).toContain("scene.diagnosisSummary.activeClusterCount");
+    expect(paneSource).toContain("scene.diagnosisSummary.policyClusterCount");
+    expect(paneSource).toContain("return null;");
+  });
+
+  it("uses package diagnosis issue state for detail header signals before raw counts", () => {
+    expect(paneSource).toContain("function runtimeSceneSignal");
+    expect(paneSource).toContain("const issueState = scene.packageDiagnosis?.issueState");
+    expect(paneSource).toContain("issueState.activeClusterCount");
+    expect(paneSource).toContain("issueState.historicalClusterCount");
+    expect(paneSource).toContain("\"历史已恢复\"");
+  });
+
   it("counts research workflow logs as a separate package child section", () => {
     expect(paneSource).toContain("scene.packageSummary?.researchLogCount");
     expect(paneSource).toContain("scene.researchLogs?.length");

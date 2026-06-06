@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ExternalLink, LoaderCircle, Play, RefreshCw, Square } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import {
   getLauncherStatus,
@@ -18,6 +18,11 @@ import styles from "./LauncherRoute.module.css";
 type LauncherNotice = {
   tone: "neutral" | "success" | "warning" | "error";
   text: string;
+};
+
+type LauncherTrackedCommand = {
+  commandId: string;
+  operation: LauncherOperation;
 };
 
 type LauncherGuardianResponsibility = {
@@ -287,6 +292,28 @@ function isLauncherStatusNetworkDisconnect(error: unknown) {
 function isControlTokenError(error: unknown) {
   const message = error instanceof Error ? error.message : String(error ?? "");
   return /missing or invalid web control token|control token request failed|control token response was empty/i.test(message);
+}
+
+function resultMessage(result: LauncherControlPlaneResult, operation: LauncherOperation, lang: "zh" | "en") {
+  const fallback = lang === "zh"
+    ? `${humanCommandType(operation === "restart" ? "restart_workbench" : operation === "start" ? "open_workbench" : "close_workbench", lang)}${result.ok ? "已完成" : "失败"}`
+    : `${humanCommandType(operation === "restart" ? "restart_workbench" : operation === "start" ? "open_workbench" : "close_workbench", lang)} ${result.ok ? "completed" : "failed"}`;
+  const raw = String(result.message || result.errorType || fallback).trim();
+  if (result.ok) {
+    return raw || fallback;
+  }
+  const lower = raw.toLowerCase();
+  if (lower.includes("restart preflight failed before closing the workbench")) {
+    return lang === "zh"
+      ? "重启前检查失败，工作台未被关闭。请展开高级诊断查看依赖或构建错误。"
+      : "Restart preflight failed before closing the workbench. Expand diagnostics for dependency or build errors.";
+  }
+  if (lower.includes("typescript") && lower.includes("tsc")) {
+    return lang === "zh"
+      ? "前端 TypeScript 工具链不完整，Launcher 会尝试重新安装依赖。"
+      : "The frontend TypeScript toolchain is incomplete; Launcher will try to reinstall dependencies.";
+  }
+  return raw.length > 180 ? `${raw.slice(0, 177)}...` : raw;
 }
 
 function includesAny(value: string, needles: string[]) {
@@ -718,6 +745,7 @@ export function LauncherRoute() {
 
   const [notice, setNotice] = useState<LauncherNotice>({ tone: "neutral", text: "" });
   const [lastControlOperation, setLastControlOperation] = useState<LauncherOperation | null>(null);
+  const [trackedCommand, setTrackedCommand] = useState<LauncherTrackedCommand | null>(null);
   const statusQuery = useQuery({
     queryKey: queryKeys.launcherStatus(),
     queryFn: getLauncherStatus,
@@ -739,8 +767,9 @@ export function LauncherRoute() {
     },
     onSuccess: (response, operation) => {
       setLastControlOperation(operation === "stop" && response.accepted ? "stop" : null);
+      setTrackedCommand(response.accepted && response.commandId ? { commandId: response.commandId, operation } : null);
       setNotice({
-        tone: response.accepted ? "success" : "warning",
+        tone: response.accepted ? "neutral" : "warning",
         text: response.message || copy.commandDone,
       });
       void queryClient.invalidateQueries({ queryKey: queryKeys.launcherStatus() });
@@ -748,6 +777,7 @@ export function LauncherRoute() {
     },
     onError: (error) => {
       setLastControlOperation(null);
+      setTrackedCommand(null);
       setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
     },
   });
@@ -911,6 +941,22 @@ export function LauncherRoute() {
   const recentResults = (evidence?.results.recent ?? []).slice(0, 3);
   const recentEvents = (evidence?.events.recent ?? []).slice(0, 3);
   const expectedStopDisconnect = statusQuery.isError && (lastControlOperation === "stop" || launcherStatusDisconnected);
+  const trackedResult = trackedCommand
+    ? (evidence?.results.recent ?? []).find((item) => item.commandId === trackedCommand.commandId)
+    : undefined;
+
+  useEffect(() => {
+    if (!trackedCommand || !trackedResult) {
+      return;
+    }
+    const message = resultMessage(trackedResult, trackedCommand.operation, uiLang);
+    const tone = trackedResult.ok ? "success" : "error";
+    if (notice.text !== message || notice.tone !== tone) {
+      setNotice({ tone, text: message });
+    }
+    setTrackedCommand(null);
+    setLastControlOperation(null);
+  }, [notice.text, notice.tone, trackedCommand, trackedResult, uiLang]);
 
   return (
     <section className={styles.route} aria-label={copy.title}>

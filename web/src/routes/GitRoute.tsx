@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bot, CheckSquare, Clock3, FileText, GitBranch, GitCommitHorizontal, RefreshCw, Square } from "lucide-react";
+import { Bot, CheckSquare, Clock3, FileText, GitBranch, GitCommitHorizontal, RefreshCw, Save, Square } from "lucide-react";
 import { type CSSProperties, type KeyboardEvent, type PointerEvent, useEffect, useMemo, useState } from "react";
 
 import { fetchJson } from "../api/client";
@@ -24,6 +24,7 @@ import {
 } from "./gitCommitUx";
 import {
   configuredGitModelId,
+  configuredGitPrompt,
   displayGitPath,
   formatGitDateTime,
   gitFileName,
@@ -46,6 +47,7 @@ export function GitRoute() {
   const [activePath, setActivePath] = useState<string | null>(null);
   const [selectedPaths, setSelectedPaths] = useState<string[]>([]);
   const [selectedAiModelId, setSelectedAiModelId] = useState("");
+  const [aiPromptDraft, setAiPromptDraft] = useState("");
   const [commitMessage, setCommitMessage] = useState("");
   const [commitNotice, setCommitNotice] = useState<{ tone: "neutral" | "success" | "error"; text: string }>({
     tone: "neutral",
@@ -91,6 +93,7 @@ export function GitRoute() {
   );
   const aiModelOptions = configQuery.data?.modelOptions ?? [];
   const configuredModelId = configuredGitModelId(configQuery.data);
+  const configuredPrompt = configuredGitPrompt(configQuery.data);
   const activeAiModelId = selectedAiModelId || configuredModelId || aiModelOptions[0]?.model_id || "";
   const aiModelSelectOptions = useMemo(() => {
     if (!activeAiModelId || aiModelOptions.some((option) => option.model_id === activeAiModelId)) {
@@ -131,6 +134,10 @@ export function GitRoute() {
     window.localStorage.setItem(GIT_CHANGE_PANEL_WIDTH_KEY, String(changePanelWidth));
   }, [changePanelWidth]);
 
+  useEffect(() => {
+    setAiPromptDraft(configuredPrompt);
+  }, [configuredPrompt]);
+
   const generateMessageMutation = useMutation({
     mutationFn: (payload: { paths: string[]; modelId: string }) =>
       fetchJson<GitCommitMessageResponse>("/api/git/commit-message", {
@@ -141,6 +148,39 @@ export function GitRoute() {
     onSuccess: (payload) => {
       setCommitMessage(payload.message);
       setCommitNotice({ tone: "success", text: t("gitAiMessageReady") });
+    },
+    onError: (error) => {
+      setCommitNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
+    },
+  });
+  const saveDefaultModelMutation = useMutation({
+    mutationFn: (payload: { modelId: string }) =>
+      fetchJson<{ modelId: string; previousModelId: string }>("/api/git/commit-message/default-model", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      }),
+    onSuccess: () => {
+      setSelectedAiModelId("");
+      setCommitNotice({ tone: "success", text: t("gitAiDefaultModelSaved") });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.configWorkspace() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.configPublic() });
+    },
+    onError: (error) => {
+      setCommitNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
+    },
+  });
+  const savePromptMutation = useMutation({
+    mutationFn: (payload: { prompt: string }) =>
+      fetchJson<{ prompt: string; previousPromptChars: number; promptChars: number }>("/api/git/commit-message/prompt", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      }),
+    onSuccess: () => {
+      setCommitNotice({ tone: "success", text: t("gitAiPromptSaved") });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.configWorkspace() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.configPublic() });
     },
     onError: (error) => {
       setCommitNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
@@ -190,6 +230,16 @@ export function GitRoute() {
     generateMessageMutation.mutate({ paths: selectedPaths, modelId: activeAiModelId });
   };
 
+  const saveDefaultAiModel = () => {
+    setCommitNotice({ tone: "neutral", text: "" });
+    saveDefaultModelMutation.mutate({ modelId: activeAiModelId });
+  };
+
+  const saveAiPrompt = () => {
+    setCommitNotice({ tone: "neutral", text: "" });
+    savePromptMutation.mutate({ prompt: aiPromptDraft });
+  };
+
   const commitSelected = () => {
     setCommitNotice({ tone: "neutral", text: "" });
     commitMutation.mutate({ paths: selectedPaths, message: commitMessage });
@@ -207,6 +257,12 @@ export function GitRoute() {
   const aiDraftBlockReason = getGitAiDraftBlockReason(selectedCount, generateMessageMutation.isPending);
   const commitDisabled = commitBlockReason !== null;
   const aiDisabled = aiDraftBlockReason !== null;
+  const defaultModelSaveDisabled =
+    saveDefaultModelMutation.isPending ||
+    configQuery.isPending ||
+    !activeAiModelId ||
+    activeAiModelId === configuredModelId;
+  const promptSaveDisabled = savePromptMutation.isPending || configQuery.isPending || !aiPromptDraft.trim() || aiPromptDraft === configuredPrompt;
   const commitBlockReasonText =
     commitBlockReason === "no_selection"
       ? t("gitCommitBlockedNoSelection")
@@ -476,6 +532,39 @@ export function GitRoute() {
                 )}
               </select>
             </label>
+            <div className={styles.modelDefaultRow}>
+              <span>{configuredModelId ? `${t("gitAiCurrentDefault")} ${configuredModelId}` : t("gitAiNoDefaultModel")}</span>
+              <button
+                type="button"
+                className={styles.secondaryButton}
+                disabled={defaultModelSaveDisabled}
+                onClick={saveDefaultAiModel}
+              >
+                <Save size={14} />
+                {saveDefaultModelMutation.isPending ? t("gitAiSavingDefaultModel") : t("gitAiSaveDefaultModel")}
+              </button>
+            </div>
+            <label className={`${styles.messageField} ${styles.promptTemplateField}`}>
+              <span>{t("gitAiPromptTemplate")}</span>
+              <textarea
+                rows={5}
+                value={aiPromptDraft}
+                placeholder={t("gitAiPromptPlaceholder")}
+                onChange={(event) => setAiPromptDraft(event.target.value)}
+              />
+            </label>
+            <div className={styles.modelDefaultRow}>
+              <span>{t("gitAiPromptHint")}</span>
+              <button
+                type="button"
+                className={styles.secondaryButton}
+                disabled={promptSaveDisabled}
+                onClick={saveAiPrompt}
+              >
+                <Save size={14} />
+                {savePromptMutation.isPending ? t("gitAiPromptSaving") : t("gitAiPromptSave")}
+              </button>
+            </div>
             <label className={styles.messageField}>
               <span>{t("gitCommitMessage")}</span>
               <textarea

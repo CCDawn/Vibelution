@@ -2,7 +2,7 @@ const CONTROL_TOKEN_ENDPOINT = "/api/control-token";
 const CONTROL_TOKEN_HEADER_FALLBACK = "X-Vibelution-Control-Token";
 const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
-let controlTokenPromise: Promise<{ header: string; token: string }> | null = null;
+const controlTokenPromises = new Map<string, Promise<{ header: string; token: string }>>();
 let fetchJsonFailureReporter: ((report: FetchJsonFailureReport) => void) | null = null;
 
 export type FetchJsonFailureReport = {
@@ -14,22 +14,29 @@ export type FetchJsonFailureReport = {
 };
 
 export function resetControlTokenForTests() {
-  controlTokenPromise = null;
+  controlTokenPromises.clear();
 }
 
-export function clearControlToken() {
-  controlTokenPromise = null;
+export function clearControlToken(origin?: string) {
+  if (origin === undefined) {
+    controlTokenPromises.clear();
+    return;
+  }
+  controlTokenPromises.delete(controlTokenCacheKey(normalizeControlOrigin(origin)));
 }
 
 export function setFetchJsonFailureReporter(reporter: ((report: FetchJsonFailureReport) => void) | null) {
   fetchJsonFailureReporter = reporter;
 }
 
-export async function getControlToken(): Promise<{ header: string; token: string }> {
-  if (!controlTokenPromise) {
-    controlTokenPromise = fetch(CONTROL_TOKEN_ENDPOINT, {
+export async function getControlToken(origin = ""): Promise<{ header: string; token: string }> {
+  const controlOrigin = normalizeControlOrigin(origin);
+  const cacheKey = controlTokenCacheKey(controlOrigin);
+  if (!controlTokenPromises.has(cacheKey)) {
+    const endpoint = controlOrigin ? `${controlOrigin}${CONTROL_TOKEN_ENDPOINT}` : CONTROL_TOKEN_ENDPOINT;
+    const tokenPromise = fetch(endpoint, {
       headers: { Accept: "application/json" },
-      credentials: "same-origin",
+      credentials: controlOrigin ? "include" : "same-origin",
     })
       .then(async (response) => {
         if (!response.ok) {
@@ -46,15 +53,65 @@ export async function getControlToken(): Promise<{ header: string; token: string
         };
       })
       .catch((error) => {
-        controlTokenPromise = null;
+        controlTokenPromises.delete(cacheKey);
         throw error;
       });
+    controlTokenPromises.set(cacheKey, tokenPromise);
   }
-  return controlTokenPromise;
+  return controlTokenPromises.get(cacheKey)!;
 }
 
-function shouldAttachControlToken(input: string, method: string): boolean {
-  return MUTATING_METHODS.has(method) && input.startsWith("/api/");
+function normalizeControlOrigin(origin: string): string {
+  const raw = String(origin || "").trim();
+  if (!raw) {
+    return "";
+  }
+  try {
+    return new URL(raw).origin;
+  } catch {
+    return "";
+  }
+}
+
+function controlTokenCacheKey(origin: string): string {
+  return origin || "same-origin";
+}
+
+function localApiOriginForControl(input: string): string {
+  if (typeof window === "undefined") {
+    return "";
+  }
+  try {
+    const url = new URL(input, window.location.origin);
+    if (!url.pathname.startsWith("/api/") || url.origin === window.location.origin) {
+      return "";
+    }
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      return "";
+    }
+    if (!isLoopbackHost(url.hostname)) {
+      return "";
+    }
+    return url.origin;
+  } catch {
+    return "";
+  }
+}
+
+function isLoopbackHost(hostname: string): boolean {
+  const host = String(hostname || "").trim().toLowerCase();
+  return host === "localhost" || host === "127.0.0.1" || host === "::1";
+}
+
+function controlOriginForRequest(input: string, method: string): string | null {
+  if (!MUTATING_METHODS.has(method)) {
+    return null;
+  }
+  if (input.startsWith("/api/")) {
+    return "";
+  }
+  const controlOrigin = localApiOriginForControl(input);
+  return controlOrigin ? controlOrigin : null;
 }
 
 function apiEndpointForTelemetry(input: string): string {
@@ -94,8 +151,9 @@ export async function fetchJson<T>(input: string, init?: RequestInit): Promise<T
   const method = String(init?.method ?? "GET").toUpperCase();
   const headers = new Headers(init?.headers ?? {});
   headers.set("Accept", headers.get("Accept") ?? "application/json");
-  if (shouldAttachControlToken(input, method)) {
-    const control = await getControlToken();
+  const controlOrigin = controlOriginForRequest(input, method);
+  if (controlOrigin !== null) {
+    const control = await getControlToken(controlOrigin);
     headers.set(control.header, control.token);
   }
 
@@ -104,7 +162,7 @@ export async function fetchJson<T>(input: string, init?: RequestInit): Promise<T
     response = await fetch(input, {
       ...init,
       headers,
-      credentials: init?.credentials ?? "same-origin",
+      credentials: init?.credentials ?? (controlOrigin ? "include" : "same-origin"),
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -118,8 +176,8 @@ export async function fetchJson<T>(input: string, init?: RequestInit): Promise<T
   }
 
   if (!response.ok) {
-    if (response.status === 403 && shouldAttachControlToken(input, method)) {
-      clearControlToken();
+    if (response.status === 403 && controlOrigin !== null) {
+      clearControlToken(controlOrigin);
     }
     const contentType = response.headers.get("content-type") ?? "";
     let message = "";

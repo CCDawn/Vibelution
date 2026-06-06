@@ -13,7 +13,6 @@ from core.web.services.config_service import (
     ConfigConflictError,
     apply_config_workspace,
     draft_add_model,
-    draft_add_profile,
     draft_check_model_image_input_capabilities,
     draft_delete_model,
     discover_config_models,
@@ -71,14 +70,7 @@ class ConfigDraftDeleteModelPayload(ConfigDraftPayload):
     modelId: str = ""
 
 
-class ConfigDraftAddProfilePayload(ConfigDraftPayload):
-    profileId: str = ""
-    sourceProfileId: str = "primary"
-    modelId: str = ""
-
-
 class ConfigDraftTestPayload(ConfigDraftPayload):
-    profileId: str | None = None
     modelId: str = ""
     capability: str = "text"
 
@@ -208,28 +200,12 @@ def config_draft_delete_model(payload: ConfigDraftDeleteModelPayload) -> dict:
         _raise_config_http_error(exc)
 
 
-@router.post("/config/draft/add-profile")
-def config_draft_add_profile(payload: ConfigDraftAddProfilePayload) -> dict:
-    try:
-        return draft_add_profile(
-            payload.publicConfig,
-            draft_meta=payload.draftMeta,
-            base_hash=payload.baseHash,
-            profile_id=payload.profileId,
-            source_profile_id=payload.sourceProfileId,
-            model_id=payload.modelId,
-        )
-    except Exception as exc:  # pragma: no cover - routed below
-        _raise_config_http_error(exc)
-
-
 @router.post("/config/test-llm")
 def config_test_llm(payload: ConfigDraftTestPayload) -> dict:
     try:
         return run_draft_llm_test(
             payload.publicConfig,
             draft_meta=payload.draftMeta,
-            profile_id=payload.profileId,
             model_id=payload.modelId,
             capability=payload.capability,
         )

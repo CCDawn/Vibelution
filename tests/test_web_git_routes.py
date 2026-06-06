@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 
 from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
+from core.web.routes import git as git_routes
 from core.web.services import git_status_service
 
 
@@ -291,9 +292,59 @@ def test_git_commit_message_endpoint_generates_ai_draft(monkeypatch):
     payload = response.json()
     assert payload["message"] == "feat: add git commit controls"
     assert payload["modelId"] == "local_commit_model"
-    assert payload["profileId"] == git_status_service.GIT_COMMIT_MESSAGE_PROFILE_ID
+    assert "profileId" not in payload
     assert payload["files"] == ["web/src/routes/GitRoute.tsx"]
     assert captured_profiles == [git_status_service.GIT_COMMIT_MESSAGE_PROFILE_ID]
+
+
+def test_git_commit_message_default_model_endpoint_persists_selection(monkeypatch):
+    monkeypatch.setattr(
+        git_routes,
+        "update_git_commit_message_model",
+        lambda model_id: {"modelId": model_id, "previousModelId": "old_model"},
+    )
+
+    response = client.put("/api/git/commit-message/default-model", json={"modelId": "new_model"})
+
+    assert response.status_code == 200, response.json()
+    assert response.json() == {"modelId": "new_model", "previousModelId": "old_model"}
+
+
+def test_git_commit_message_default_model_endpoint_rejects_unknown_model(monkeypatch):
+    def fake_update(model_id):
+        raise ValueError(f"unknown Git commit message model: {model_id}")
+
+    monkeypatch.setattr(git_routes, "update_git_commit_message_model", fake_update)
+
+    response = client.put("/api/git/commit-message/default-model", json={"modelId": "missing_model"})
+
+    assert response.status_code == 422
+    assert "unknown Git commit message model" in response.json()["detail"]
+
+
+def test_git_commit_message_prompt_endpoint_updates_template(monkeypatch):
+    monkeypatch.setattr(
+        git_routes,
+        "update_git_commit_message_prompt",
+        lambda prompt: {"prompt": prompt, "previousPromptChars": 3, "promptChars": len(prompt)},
+    )
+
+    response = client.put("/api/git/commit-message/prompt", json={"prompt": "Summary: {summary}\nFiles: {files}\nDiff: {diff}"})
+
+    assert response.status_code == 200, response.json()
+    assert response.json()["promptChars"] == len("Summary: {summary}\nFiles: {files}\nDiff: {diff}")
+
+
+def test_git_commit_message_prompt_endpoint_rejects_invalid_template(monkeypatch):
+    def fake_update(prompt):
+        raise ValueError("Git commit message prompt must include: {diff}")
+
+    monkeypatch.setattr(git_routes, "update_git_commit_message_prompt", fake_update)
+
+    response = client.put("/api/git/commit-message/prompt", json={"prompt": "Summary: {summary}"})
+
+    assert response.status_code == 422
+    assert "{diff}" in response.json()["detail"]
 
 
 def test_git_commit_endpoint_rejects_empty_message():

@@ -10,6 +10,12 @@ def _use_tmp_project_root(tmp_path, monkeypatch):
     monkeypatch.setattr(prompt_template_service, "PROJECT_ROOT", tmp_path)
     with context_engine._RESEARCH_ORG_CONTEXT_CACHE_LOCK:
         context_engine._RESEARCH_ORG_CONTEXT_CACHE.clear()
+    with context_engine._PROJECT_RULES_CONTEXT_CACHE_LOCK:
+        context_engine._PROJECT_RULES_CONTEXT_CACHE.clear()
+    with context_engine._PROJECT_AGENT_REGISTRY_CACHE_LOCK:
+        context_engine._PROJECT_AGENT_REGISTRY_CACHE.clear()
+    with context_engine._ACTIVE_AGENT_DIRECTORY_CACHE_LOCK:
+        context_engine._ACTIVE_AGENT_DIRECTORY_CACHE.clear()
 
 
 class _FakeResearchWorkspace:
@@ -298,6 +304,68 @@ def test_build_agent_context_includes_project_memory_coordination_rules_from_age
         and "Session Agent Territory And Handoff" in item[1]["fields"]["section"]
         for item in events
     )
+
+
+def test_build_agent_context_reuses_project_rules_and_registry_file_cache(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    (tmp_path / "AGENTS.md").write_text(
+        "\n".join(
+            [
+                "## Session-Level Agent Memory Coordination",
+                "",
+                "- Project memory writes are serialized.",
+                "",
+                "## Session Agent Territory And Handoff",
+                "",
+                "- Recommend handoff for out-of-scope work.",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    registry_path = tmp_path / ".docs" / "project-memory" / "agent-registry.json"
+    registry_path.parent.mkdir(parents=True, exist_ok=True)
+    agent = agent_directory_service.create_agent_instance(
+        display_name="缓存 Agent",
+        llm_bindings={"dialogue": {"modelId": "model-primary"}},
+        primary_mode="chat",
+        direct_session_id="session-cache",
+    )
+    registry_path.write_text(
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "laneTerritories": {},
+                "agents": [
+                    {
+                        "agentId": agent["agentId"],
+                        "sessionId": "session-cache",
+                        "displayName": "缓存 Agent",
+                        "managementScope": {"summary": "负责缓存验证"},
+                        "status": "active",
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    events = []
+    monkeypatch.setattr(
+        context_engine,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: events.append((args, kwargs)) or {"accepted": True},
+    )
+
+    context_engine.build_agent_context(agent["agentId"], session_id="session-cache", run_id="turn-1")
+    context_engine.build_agent_context(agent["agentId"], session_id="session-cache", run_id="turn-2")
+
+    rule_events = [item for item in events if item[0][2] == "agent_runtime.project_rules_context_loaded"]
+    registry_events = [item for item in events if item[0][2] == "agent_runtime.project_agent_registry_context_loaded"]
+    assert [item[1]["fields"]["cacheHit"] for item in rule_events[-2:]] == [False, True]
+    assert [item[1]["fields"]["cacheHit"] for item in registry_events[-2:]] == [False, True]
+    assert [item[1]["fields"]["activeAgentDirectoryCacheHit"] for item in registry_events[-2:]] == [False, True]
 
 
 def test_build_agent_context_includes_project_agent_territory_registry(tmp_path, monkeypatch):

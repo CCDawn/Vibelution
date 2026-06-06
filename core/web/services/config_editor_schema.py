@@ -7,7 +7,6 @@ from typing import Any
 
 
 RUNTIME_PROFILE_OPTIONS = ["safe_local", "safe_remote", "debug", "ci"]
-AGENT_MODE_OPTIONS = ["chat", "self_evolution", "supervised_evolution"]
 SEGMENTATION_STRATEGY_OPTIONS = ["task_contiguous"]
 AVATAR_PRESET_OPTIONS = ["lobster", "shrimp", "crab", "cat", "chick", "bunny", "slime", "penguin", "moose"]
 USER_AVATAR_PRESET_OPTIONS = ["default", "circle", "spark", "codex", "minimal", "initial"]
@@ -17,48 +16,34 @@ SECTION_LABELS = {
     "zh": {
         "runtime": "运行时",
         "workbench": "工作台启动",
-        "avatar": "形象",
+        "avatar": "终端形象",
         "user_profile": "用户信息",
-        "llm.profiles": "模型绑定",
         "llm.discovery": "模型发现",
-        "agent": "智能体",
         "context_compression": "上下文压缩",
         "security": "安全",
         "log": "日志",
         "network": "网络",
         "evolution": "进化",
-        "memory": "记忆",
-        "strategy": "策略",
         "analysis": "分析",
         "ui": "界面",
         "parser": "解析器",
-        "prompt": "系统提示词",
-        "git.commit_message_model_ref": "Git 提交模型",
-        "git.commit_message_prompt": "Git 提交提示词",
         "debug": "调试",
         "pet": "宠物",
     },
     "en": {
         "runtime": "Runtime",
         "workbench": "Workbench Startup",
-        "avatar": "Avatar",
+        "avatar": "Terminal Avatar",
         "user_profile": "User Info",
-        "llm.profiles": "Model Bindings",
         "llm.discovery": "Model Discovery",
-        "agent": "Agent",
         "context_compression": "Context Compression",
         "security": "Security",
         "log": "Logging",
         "network": "Network",
         "evolution": "Evolution",
-        "memory": "Memory",
-        "strategy": "Strategy",
         "analysis": "Analysis",
         "ui": "UI",
         "parser": "Parser",
-        "prompt": "System Prompts",
-        "git.commit_message_model_ref": "Git Commit Model",
-        "git.commit_message_prompt": "Git Commit Prompt",
         "debug": "Debug",
         "pet": "Pet",
     },
@@ -72,41 +57,18 @@ FIELD_LABELS = {
         "workbench.backend_port": "后端服务端口",
         "workbench.frontend_port": "前端页面端口",
         "workbench.window_mode": "窗口模式",
-        "avatar.preset": "形象预设",
+        "avatar.preset": "终端形象预设",
         "user_profile.display_name": "用户显示名",
         "user_profile.bio": "用户背景",
         "user_profile.preferences": "用户偏好",
         "user_profile.avatar_preset": "用户头像",
         "user_profile.avatar_image_path": "本地头像图片",
-        "llm.profiles.primary.provider_id": "模型服务绑定",
-        "llm.profiles.primary.model": "模型名称",
-        "llm.profiles.primary.temperature": "温度",
-        "llm.profiles.primary.max_output_tokens": "最大输出令牌数",
-        "llm.profiles.primary.timeout": "API 超时（秒）",
-        "llm.profiles.primary.connect_timeout": "连接超时（秒）",
-        "llm.profiles.primary.streaming": "启用流式响应",
-        "llm.profiles.primary.tool_calling_mode": "工具调用模式",
         "llm.discovery.enabled": "启用模型发现",
         "llm.discovery.timeout": "发现超时（秒）",
         "llm.discovery.fallback_max_tokens": "回退最大令牌数",
         "llm.discovery.fallback_max_token_limit": "回退上下文上限",
         "llm.discovery.auto_adjust": "自动调整",
         "llm.discovery.output_reserve_ratio": "输出预留比例",
-        "agent.name": "智能体名称",
-        "agent.workspace": "工作目录",
-        "agent.awake_interval": "苏醒间隔（秒）",
-        "agent.max_iterations": "最大工具调用数",
-        "agent.max_runtime": "最大运行时长（秒）",
-        "agent.auto_backup": "自动备份",
-        "agent.backup_interval": "备份间隔（秒）",
-        "agent.auto_restart_threshold": "自动重启阈值",
-        "agent.exploration_mode": "探索模式",
-        "agent.default_mode": "默认运行模式",
-        "agent.modes.chat_enabled": "启用 chat 模式",
-        "agent.modes.self_evolution_enabled": "启用自进化模式",
-        "agent.modes.supervised_evolution_enabled": "启用监督进化模式",
-        "agent.modes.default_shell_mode": "工作台默认模式",
-        "agent.modes.default_headless_mode": "无交互默认模式",
         "context_compression.keep_recent_steps": "保留最近步骤数",
         "context_compression.max_compressions_per_session": "每会话最大压缩次数",
         "context_compression.effectiveness_threshold": "压缩有效性阈值",
@@ -119,9 +81,6 @@ FIELD_LABELS = {
         "ui.refresh_rate": "刷新频率",
         "ui.show_ascii_art": "显示 ASCII Art",
         "ui.show_welcome": "显示欢迎面板",
-        "prompt.default_components": "默认提示词组件",
-        "git.commit_message_model_ref": "Git 提交使用的模型",
-        "git.commit_message_prompt": "AI 提交说明提示词",
         "network.proxy_enabled": "启用代理",
         "network.proxy_url": "代理地址",
         "evolution.chat_dataset.enabled": "启用 chat 数据采样",
@@ -145,41 +104,18 @@ FIELD_LABELS = {
         "workbench.backend_port": "Backend Service Port",
         "workbench.frontend_port": "Frontend Page Port",
         "workbench.window_mode": "Workbench Window Mode",
-        "avatar.preset": "Avatar Preset",
+        "avatar.preset": "Terminal Avatar Preset",
         "user_profile.display_name": "User Display Name",
         "user_profile.bio": "User Background",
         "user_profile.preferences": "User Preferences",
         "user_profile.avatar_preset": "User Avatar",
         "user_profile.avatar_image_path": "Local Avatar Image",
-        "llm.profiles.primary.provider_id": "Provider Binding",
-        "llm.profiles.primary.model": "Model Name",
-        "llm.profiles.primary.temperature": "Temperature",
-        "llm.profiles.primary.max_output_tokens": "Max Output Tokens",
-        "llm.profiles.primary.timeout": "API Timeout (s)",
-        "llm.profiles.primary.connect_timeout": "Connect Timeout (s)",
-        "llm.profiles.primary.streaming": "Streaming",
-        "llm.profiles.primary.tool_calling_mode": "Tool Calling Mode",
         "llm.discovery.enabled": "Enable Discovery",
         "llm.discovery.timeout": "Discovery Timeout (s)",
         "llm.discovery.fallback_max_tokens": "Fallback Max Tokens",
         "llm.discovery.fallback_max_token_limit": "Fallback Token Limit",
         "llm.discovery.auto_adjust": "Auto Adjust",
         "llm.discovery.output_reserve_ratio": "Output Reserve Ratio",
-        "agent.name": "Agent Name",
-        "agent.workspace": "Workspace",
-        "agent.awake_interval": "Wake Interval (s)",
-        "agent.max_iterations": "Max Tool Calls",
-        "agent.max_runtime": "Max Runtime (s)",
-        "agent.auto_backup": "Auto Backup",
-        "agent.backup_interval": "Backup Interval (s)",
-        "agent.auto_restart_threshold": "Auto Restart Threshold",
-        "agent.exploration_mode": "Exploration Mode",
-        "agent.default_mode": "Default Agent Mode",
-        "agent.modes.chat_enabled": "Enable Chat Mode",
-        "agent.modes.self_evolution_enabled": "Enable Self Evolution",
-        "agent.modes.supervised_evolution_enabled": "Enable Supervised Evolution",
-        "agent.modes.default_shell_mode": "Default Workbench Mode",
-        "agent.modes.default_headless_mode": "Default Headless Mode",
         "context_compression.keep_recent_steps": "Recent Steps to Keep",
         "context_compression.max_compressions_per_session": "Max Compressions Per Session",
         "context_compression.effectiveness_threshold": "Compression Effectiveness Threshold",
@@ -192,9 +128,6 @@ FIELD_LABELS = {
         "ui.refresh_rate": "Refresh Rate",
         "ui.show_ascii_art": "Show ASCII Art",
         "ui.show_welcome": "Show Welcome Panel",
-        "prompt.default_components": "Default Prompt Components",
-        "git.commit_message_model_ref": "Git Commit Model",
-        "git.commit_message_prompt": "AI Commit Message Prompt",
         "network.proxy_enabled": "Enable Proxy",
         "network.proxy_url": "Proxy URL",
         "evolution.chat_dataset.enabled": "Enable Chat Dataset Capture",
@@ -318,21 +251,13 @@ FIELD_HINTS = {
         "workbench.backend_port": "后端服务监听的本地端口，修改后下次启动或重启生效。",
         "workbench.frontend_port": "前端页面使用的本地端口，修改后下次启动或重启生效。",
         "workbench.window_mode": "窗口化保留系统标题栏；沉浸全屏会隐藏原生标题栏，修改后重启工作台生效。",
-        "agent.awake_interval": "自主模式两次苏醒之间的间隔。",
-        "agent.max_iterations": "单轮最多允许多少次工具动作。",
-        "agent.max_runtime": "单轮可持续的最长运行时间。",
-        "agent.default_mode": "决定默认启动为 chat、自进化还是监督进化。",
-        "agent.modes.default_shell_mode": "工作台入口默认采用的 agent mode。",
-        "agent.modes.default_headless_mode": "命令行无交互运行时默认采用的 agent mode。",
-        "agent.auto_restart_threshold": "达到阈值后触发热重启。",
+        "avatar.preset": "用于终端/CLI 工作台和宠物陪伴体的内置形象；Web 用户头像在“用户信息”里维护。",
         "context_compression.keep_recent_steps": "压缩后仍然保留的最近步骤数。",
         "context_compression.max_compressions_per_session": "单会话允许的最大压缩次数。",
         "evolution.chat_dataset.source_modes": "哪些 agent mode 产生的对话可以被静默采样进入审核队列。",
         "evolution.chat_dataset.segmentation_strategy": "chat 采样如何切分连续多轮上下文。",
         "ui.refresh_rate": "终端工作台刷新频率。",
         "ui.max_log_entries": "UI 内部保留的日志条目数。",
-        "git.commit_message_model_ref": "Git 页面点击“AI 生成说明”时使用哪一个模型库条目。",
-        "git.commit_message_prompt": "Git 页面生成提交说明时使用的系统提示词模板。可使用 {summary}、{files}、{diff}、{branch} 占位符。",
         "network.proxy_enabled": "启用后，科研调研等真实公网请求会通过下方代理地址访问。",
         "network.proxy_url": "填写 HTTP/HTTPS 代理地址，例如 http://127.0.0.1:7890。",
         "user_profile.display_name": "用于工作台和对话消息的用户名称；为空时回退到系统用户名。",
@@ -347,21 +272,13 @@ FIELD_HINTS = {
         "workbench.backend_port": "Local port listened on by the backend service. Restart the workbench after changing it.",
         "workbench.frontend_port": "Local port used by the frontend page. Restart the workbench after changing it.",
         "workbench.window_mode": "Windowed mode keeps the native title bar; immersive fullscreen hides it. Restart the workbench after changing it.",
-        "agent.awake_interval": "Delay between autonomous wake cycles.",
-        "agent.max_iterations": "Maximum tool actions allowed in one round.",
-        "agent.max_runtime": "Maximum duration for a single round.",
-        "agent.default_mode": "Selects whether the agent defaults to chat, self-evolution, or supervised evolution.",
-        "agent.modes.default_shell_mode": "Agent mode used by default when entering the interactive workbench.",
-        "agent.modes.default_headless_mode": "Agent mode used by default for non-interactive CLI runs.",
-        "agent.auto_restart_threshold": "Threshold that triggers hot restart.",
+        "avatar.preset": "Built-in avatar used by the terminal/CLI workbench and companion pet. Manage the Web user avatar under User Info.",
         "context_compression.keep_recent_steps": "How many recent steps survive compression.",
         "context_compression.max_compressions_per_session": "Compression cap per session.",
         "evolution.chat_dataset.source_modes": "Which agent modes may silently contribute conversation samples to the review queue.",
         "evolution.chat_dataset.segmentation_strategy": "How chat capture segments contiguous multi-turn context.",
         "ui.refresh_rate": "Refresh cadence for the terminal workbench.",
         "ui.max_log_entries": "How many UI log entries are retained.",
-        "git.commit_message_model_ref": "Model library entry used by the AI commit message button on the Git page.",
-        "git.commit_message_prompt": "System prompt template for generated commit messages. Supports {summary}, {files}, {diff}, and {branch}.",
         "network.proxy_enabled": "When enabled, real public research requests use the proxy URL below.",
         "network.proxy_url": "HTTP/HTTPS proxy URL, for example http://127.0.0.1:7890.",
         "user_profile.display_name": "User name used by the workbench and chat messages. Falls back to the OS user name when empty.",
@@ -385,8 +302,6 @@ EDITOR_SECTION_SPECS = [
     ("analysis", "analysis"),
     ("ui", "ui"),
     ("parser", "parser"),
-    ("git-commit-model", "git.commit_message_model_ref"),
-    ("git-commit-prompt", "git.commit_message_prompt"),
     ("debug", "debug"),
     ("pet", "pet"),
 ]
@@ -461,32 +376,19 @@ def _field_options(path: str, lang: str) -> list[dict[str, str]]:
         return [{"value": value, "label": value} for value in AVATAR_PRESET_OPTIONS]
     if path == "user_profile.avatar_preset":
         return [{"value": value, "label": value} for value in USER_AVATAR_PRESET_OPTIONS]
-    if path in {"agent.default_mode", "agent.modes.default_shell_mode", "agent.modes.default_headless_mode"}:
-        return [{"value": value, "label": value} for value in AGENT_MODE_OPTIONS]
     if path == "evolution.chat_dataset.segmentation_strategy":
         return [{"value": value, "label": value} for value in SEGMENTATION_STRATEGY_OPTIONS]
     return []
 
 
 def _field_options_for_config(path: str, public_config: dict[str, Any], lang: str) -> list[dict[str, str]]:
-    if path == "git.commit_message_model_ref":
-        llm = public_config.get("llm", {})
-        model_library = llm.get("model_library", {}) if isinstance(llm, dict) else {}
-        options = [{"value": "", "label": "未设置" if lang == "zh" else "Not set"}]
-        if isinstance(model_library, dict):
-            for model_id, item in model_library.items():
-                if not isinstance(item, dict):
-                    continue
-                label = str(item.get("label") or item.get("model") or model_id)
-                options.append({"value": str(model_id), "label": label})
-        return options
     return _field_options(path, lang)
 
 
 def _field_kind(path: str, value: Any, options: list[dict[str, str]] | None = None) -> tuple[str, str]:
     if path == "user_profile.avatar_image_path":
         return "image", "Image"
-    if path in {"git.commit_message_prompt", "user_profile.bio"}:
+    if path in {"user_profile.bio"}:
         return "multiline", "Multiline"
     if isinstance(value, bool):
         return "boolean", "Toggle"

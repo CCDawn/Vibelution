@@ -51,6 +51,10 @@ export type ConfigLeaveGuardInput = {
   nextPathname: string;
 };
 
+export type ConfigEditableSectionPath = {
+  path: string;
+};
+
 export type ConfigInvalidationDomain = "config" | "runtime" | "sessions" | "reset" | "evolution";
 
 export type ModelEditability = {
@@ -76,20 +80,8 @@ export type ModelCenterAccount = {
   apiKeyState: string;
 };
 
-export type ModelCenterUsage = {
-  id: string;
-  kind: "profile" | "tool" | "feature";
-  modelId: string;
-  label: string;
-  groupLabel: string;
-  detail: string;
-};
-
 export type ModelCenterSummary = {
   accounts: ModelCenterAccount[];
-  usagesByModelId: Record<string, ModelCenterUsage[]>;
-  usageCountsByModelId: Record<string, number>;
-  unresolvedUsageCount: number;
 };
 
 export type ModelCenterInventoryRow = {
@@ -113,8 +105,6 @@ export type ModelCenterInventoryRow = {
   capabilityCheckedAt: string;
   capabilityError: string;
   source: ConfigModelOption["source"];
-  usages: ModelCenterUsage[];
-  usageCount: number;
   editable: boolean;
   deletable: boolean;
 };
@@ -256,24 +246,90 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
-function ensureRecord(target: Record<string, unknown>, key: string): Record<string, unknown> {
-  const current = target[key];
-  if (isRecord(current)) {
-    return current;
-  }
-  const created: Record<string, unknown> = {};
-  target[key] = created;
-  return created;
+function splitConfigPath(path: string): string[] {
+  return path.split(".").filter(Boolean);
 }
 
-export function collectModelDetailKeys(options: ConfigModelOption[]): string[] {
-  const keys = new Set<string>();
-  for (const option of options) {
-    for (const key of Object.keys(asRecord(option.details))) {
-      keys.add(key);
+function getValueAtConfigPath(root: unknown, path: string): unknown {
+  let current = root;
+  for (const token of splitConfigPath(path)) {
+    if (Array.isArray(current)) {
+      current = current[Number(token)];
+      continue;
     }
+    if (isRecord(current)) {
+      current = current[token];
+      continue;
+    }
+    return undefined;
   }
-  return Array.from(keys);
+  return current;
+}
+
+function setValueAtConfigPath<T>(root: T, path: string, nextValue: unknown): T {
+  if (!path) {
+    return clonePublicConfig(nextValue as T);
+  }
+  const cloned = clonePublicConfig(root);
+  const tokens = splitConfigPath(path);
+  let current: unknown = cloned;
+  for (let index = 0; index < tokens.length - 1; index += 1) {
+    const token = tokens[index];
+    if (Array.isArray(current)) {
+      current = current[Number(token)];
+      continue;
+    }
+    if (isRecord(current)) {
+      if (!isRecord(current[token]) && !Array.isArray(current[token])) {
+        current[token] = {};
+      }
+      current = current[token];
+      continue;
+    }
+    throw new Error(`Unknown config path: ${path}`);
+  }
+  const leaf = tokens[tokens.length - 1];
+  if (Array.isArray(current)) {
+    current[Number(leaf)] = clonePublicConfig(nextValue);
+  } else if (isRecord(current)) {
+    current[leaf] = clonePublicConfig(nextValue);
+  }
+  return cloned;
+}
+
+export function pickEditableConfigView(
+  publicConfig: PublicConfigShape,
+  sections: ConfigEditableSectionPath[],
+): PublicConfigShape {
+  return sections.reduce<PublicConfigShape>((view, section) => {
+    const path = section.path.trim();
+    if (!path) {
+      return view;
+    }
+    const value = getValueAtConfigPath(publicConfig, path);
+    if (value === undefined) {
+      return view;
+    }
+    return setValueAtConfigPath(view, path, value);
+  }, {});
+}
+
+export function mergeEditableConfigView(
+  baseConfig: PublicConfigShape,
+  editableView: PublicConfigShape,
+  sections: ConfigEditableSectionPath[],
+): PublicConfigShape {
+  return sections.reduce<PublicConfigShape>((merged, section) => {
+    const path = section.path.trim();
+    if (!path) {
+      return merged;
+    }
+    const value = getValueAtConfigPath(editableView, path);
+    if (value === undefined) {
+      return merged;
+    }
+    return setValueAtConfigPath(merged, path, value);
+  }, clonePublicConfig(baseConfig));
 }
 
 export function hasPendingSecretChanges(draftMeta: ConfigDraftMeta): boolean {
@@ -470,44 +526,6 @@ export function canDiscoverModelsForProvider(provider: Record<string, unknown>):
   return compatMode === "openai" || compatMode === "openai_compatible";
 }
 
-export function applyModelOptionToProfileDraft(
-  config: PublicConfigShape,
-  profileId: string,
-  option: ConfigModelOption,
-  modelDetailKeys: string[],
-): void {
-  const llm = ensureRecord(config, "llm");
-  const profiles = ensureRecord(llm, "profiles");
-  const profile = ensureRecord(profiles, profileId);
-
-  delete profile.overrides;
-  delete profile.provider_id;
-  for (const key of modelDetailKeys) {
-    delete profile[key];
-  }
-
-  if (option.source === "model_library") {
-    profile.model_ref = option.model_id;
-    profile.overrides = {};
-    delete profile.provider;
-    delete profile.model;
-    delete profile.api_key_env;
-    return;
-  }
-
-  delete profile.model_ref;
-  profile.provider = clonePublicConfig(asRecord(option.provider));
-  profile.model = option.model;
-  if (option.api_key_env) {
-    profile.api_key_env = option.api_key_env;
-  } else {
-    delete profile.api_key_env;
-  }
-  for (const [key, value] of Object.entries(asRecord(option.details))) {
-    profile[key] = clonePublicConfig(value);
-  }
-}
-
 function accountIdForModelOption(option: ConfigModelOption): string {
   const provider = asRecord(option.provider);
   const providerKind = option.provider_kind || getString(provider.kind) || "unknown";
@@ -575,15 +593,11 @@ export function deriveModelCenterSummary(input: {
 
   return {
     accounts,
-    usagesByModelId: {},
-    usageCountsByModelId: {},
-    unresolvedUsageCount: 0,
   };
 }
 
 export function deriveModelCenterInventoryRows(
   modelOptions: ConfigModelOption[],
-  summary: Pick<ModelCenterSummary, "usagesByModelId" | "usageCountsByModelId">,
 ): ModelCenterInventoryRow[] {
   return modelOptions.map((option) => {
     const provider = asRecord(option.provider);
@@ -618,10 +632,17 @@ export function deriveModelCenterInventoryRows(
       capabilityCheckedAt: option.capability_checked_at || getString(asRecord(option.details).capability_checked_at),
       capabilityError: option.capability_error || getString(asRecord(option.details).capability_error),
       source: option.source,
-      usages: summary.usagesByModelId[option.model_id] ?? [],
-      usageCount: summary.usageCountsByModelId[option.model_id] ?? 0,
       editable: editability.editable,
       deletable: editability.deletable,
     };
   });
+}
+
+export function countModelCenterHealthIssues(rows: ModelCenterInventoryRow[]): number {
+  return rows.filter(
+    (row) =>
+      row.apiKeyState === "missing" ||
+      row.apiKeyState === "clear_pending" ||
+      (row.capabilitySource === "runtime_probe" && row.imageInputStatus === "unknown" && Boolean(row.capabilityError.trim())),
+  ).length;
 }

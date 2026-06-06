@@ -27,6 +27,7 @@ from core.evaluation import (
     run_workbench_session,
     save_workbench_state,
 )
+from core.runtime_manager.constants import RESULTS_DIR
 from core.runtime_manager.command_queue import submit_command, wait_for_result
 from core.runtime_manager.evolution_store import (
     delete_run_snapshot as delete_manager_run_snapshot,
@@ -2731,6 +2732,89 @@ def _submit_supervised_runtime_manager_command(command_type: str, *, run_id: str
     raise SupervisedRunValidationError(missing_snapshot_message)
 
 
+def _load_immediate_runtime_manager_command_result(command_id: str) -> dict[str, Any] | None:
+    normalized = str(command_id or "").strip()
+    if not normalized:
+        return None
+    result_path = RESULTS_DIR / f"{normalized}.json"
+    if not result_path.exists():
+        return None
+    try:
+        payload = json.loads(result_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _submit_supervised_runtime_manager_command_accepted(
+    command_type: str,
+    *,
+    run_id: str = "",
+    payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    _ensure_runtime_manager_daemon()
+    args: dict[str, Any] = {}
+    if run_id:
+        args["runId"] = run_id
+    if payload is not None:
+        args["payload"] = payload
+    command = submit_command(command_type, args=args, requested_by="web_ui")
+    command_id = str(command.get("commandId") or "").strip()
+
+    immediate_result = _load_immediate_runtime_manager_command_result(command_id)
+    if immediate_result is not None and not bool(immediate_result.get("ok")):
+        _record_supervised_scene_event(
+            "runtime_manager",
+            f"supervised_run.manager.{command_type}.failed",
+            run_id=run_id,
+            message=str(immediate_result.get("message") or "Runtime manager command failed."),
+            level="error",
+            outcome="failed",
+            fields={
+                "commandType": command_type,
+                "commandId": command_id,
+                "errorType": str(immediate_result.get("errorType") or ""),
+                "accepted": bool(immediate_result.get("accepted")),
+                "completed": bool(immediate_result.get("completed")),
+            },
+            lifecycle=True,
+        )
+        raise _map_runtime_manager_error(
+            str(immediate_result.get("message") or "Runtime manager command failed."),
+            str(immediate_result.get("errorType") or ""),
+        )
+
+    accepted = {
+        "accepted": True,
+        "commandId": command_id,
+        "commandType": command_type,
+        "runId": str(run_id or "").strip(),
+        "status": "queued",
+        "summary": text_for(
+            get_web_language(),
+            zh="监督运行命令已提交，运行记录会稍后刷新。",
+            en="Supervised run command accepted; the run record will refresh shortly.",
+        ),
+    }
+    if immediate_result is not None:
+        accepted["completed"] = bool(immediate_result.get("completed"))
+    _record_supervised_scene_event(
+        "runtime_manager",
+        f"supervised_run.manager.{command_type}.accepted",
+        run_id=run_id,
+        message="Supervised runtime-manager command accepted.",
+        outcome="accepted",
+        fields={
+            "commandType": command_type,
+            "commandId": command_id,
+            "accepted": True,
+            "hasPayload": payload is not None,
+        },
+        lifecycle=True,
+    )
+    return accepted
+
+
 def get_supervised_workbench() -> dict[str, Any]:
     if _runtime_manager_live_control_enabled():
         datasets = [item for item in list_dataset_choices(PROJECT_ROOT) if item.get("visibility") == "primary"]
@@ -2746,7 +2830,7 @@ def get_supervised_workbench() -> dict[str, Any]:
 
 def start_supervised_run(payload: dict[str, Any]) -> dict[str, Any]:
     if _runtime_manager_live_control_enabled():
-        return _submit_supervised_runtime_manager_command("start_supervised_run", payload=payload)
+        return _submit_supervised_runtime_manager_command_accepted("start_supervised_run", payload=payload)
     snapshot = _LOCAL_START_SUPERVISED_RUN(payload)
     _record_supervised_scene_event(
         "control",
@@ -2870,7 +2954,7 @@ def request_stop_supervised_run(run_id: str) -> dict[str, Any]:
 
 def delete_supervised_run_snapshot(run_id: str) -> dict[str, Any]:
     if _runtime_manager_live_control_enabled():
-        return _submit_supervised_runtime_manager_command("delete_supervised_run", run_id=run_id)
+        return _submit_supervised_runtime_manager_command_accepted("delete_supervised_run", run_id=run_id)
     result = _LOCAL_DELETE_SUPERVISED_RUN_SNAPSHOT(run_id)
     _record_supervised_scene_event(
         "control",

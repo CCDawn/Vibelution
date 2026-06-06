@@ -398,16 +398,24 @@
 .emptyPreview {
   height: 100%;
   display: grid;
-  place-items: center;
-  align-content: center;
-  gap: 10px;
+  place-items: start;
+  align-content: start;
+  justify-items: start;
+  gap: 7px;
+  padding: 14px;
   color: var(--fg-secondary);
 }
 
 .emptyPreview strong {
   color: var(--fg-primary);
   font-family: var(--font-display);
-  font-size: 1.1rem;
+  font-size: 0.98rem;
+}
+
+.emptyPreview svg {
+  width: 18px;
+  height: 18px;
+  color: var(--accent-cool);
 }
 
 .commitItem {
@@ -558,10 +566,32 @@
   resize: vertical;
 }
 
+.promptTemplateField textarea {
+  min-height: 118px;
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+}
+
 .messageField select:focus,
 .messageField textarea:focus {
   border-color: color-mix(in srgb, var(--accent-warm) 42%, transparent);
   outline: none;
+}
+
+.modelDefaultRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.modelDefaultRow span {
+  min-width: 0;
+  color: var(--fg-tertiary);
+  font-size: 0.76rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .commitActions {
@@ -641,9 +671,9 @@
 
 @media (max-width: 1200px) {
   .workspace {
-    grid-template-columns: var(--git-change-panel-width, 330px) 10px minmax(520px, 1fr);
-    grid-template-rows: minmax(0, 1fr) minmax(240px, 40vh);
-    row-gap: 10px;
+    grid-template-columns: minmax(280px, var(--git-change-panel-width, 320px)) 8px minmax(420px, 1fr);
+    grid-template-rows: minmax(0, 1fr) minmax(210px, 34vh);
+    row-gap: 8px;
   }
 
   .commitPanel {

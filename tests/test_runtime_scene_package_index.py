@@ -486,7 +486,151 @@ def test_runtime_scene_list_uses_lightweight_package_summary_without_timeline_re
     assert scenes[0]["researchLogCount"] == 1
     assert scenes[0]["errorCount"] == 6
     assert scenes[0]["warningCount"] == 8
+    assert scenes[0]["diagnosisSummary"]["status"] == "active_issue"
+    assert scenes[0]["diagnosisSummary"]["severity"] == "error"
+    assert scenes[0]["diagnosisSummary"]["activeClusterCount"] == 1
     assert "diagnosis-active-issue" in scenes[0]["packageIndex"]["tags"]
+
+
+def test_runtime_scene_list_exposes_resolved_diagnosis_separate_from_raw_counts(tmp_path, monkeypatch):
+    scene_id = "resolved-list-scene"
+    scene_dir = tmp_path / "logs" / "runtime_scenes" / f"20260524T120002Z__{scene_id}"
+    scene_dir.mkdir(parents=True)
+    scene_dir.joinpath("manifest.json").write_text(
+        json.dumps(
+            {
+                "runtime_scene_id": scene_id,
+                "started_at": "2026-05-24T12:00:02Z",
+                "ended_at": "2026-05-24T12:00:12Z",
+                "status": "stopped",
+                "result": "success",
+                "trigger": "internal-start",
+                "project_root": str(tmp_path),
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    scene_dir.joinpath("summary.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "package_id": scene_id,
+                "event_counts": {
+                    "timeline_events": 9,
+                    "errors": 1,
+                    "warnings": 0,
+                },
+                "diagnosis": {
+                    "severity": "info",
+                    "userSummary": "historical error recovered",
+                    "agentNextStep": "no action needed",
+                    "issueState": {
+                        "activeErrorCount": 0,
+                        "activeWarningCount": 0,
+                        "activeClusterCount": 0,
+                        "policyClusterCount": 0,
+                        "historicalErrorCount": 1,
+                        "historicalWarningCount": 0,
+                        "historicalClusterCount": 1,
+                        "controlSignalCount": 0,
+                    },
+                },
+                "agent_brief": {
+                    "diagnosis_status": "resolved",
+                    "needs_action": False,
+                    "primary_issue": "none",
+                    "severity": "info",
+                    "active_cluster_count": 0,
+                    "policy_cluster_count": 0,
+                    "historical_cluster_count": 1,
+                },
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+
+    scenes = runtime_scene_service.list_runtime_scenes(limit=1)
+
+    assert scenes[0]["runtimeSceneId"] == scene_id
+    assert scenes[0]["errorCount"] == 1
+    assert scenes[0]["diagnosisSummary"] == {
+        "status": "resolved",
+        "severity": "info",
+        "primaryIssue": "none",
+        "needsAction": False,
+        "activeClusterCount": 0,
+        "activeErrorCount": 0,
+        "activeWarningCount": 0,
+        "policyClusterCount": 0,
+        "policySignalCount": 0,
+        "historicalClusterCount": 1,
+        "historicalErrorCount": 1,
+        "historicalWarningCount": 0,
+        "controlSignalCount": 0,
+    }
+
+def test_runtime_scene_list_rebuilds_search_text_without_cached_feedback_loop(tmp_path, monkeypatch):
+    scene_id = "search-text-feedback-scene"
+    scene_dir = tmp_path / "logs" / "runtime_scenes" / f"20260524T120001Z__{scene_id}"
+    scene_dir.mkdir(parents=True)
+    repeated = "cached diagnosis text " * 500
+    scene_dir.joinpath("manifest.json").write_text(
+        json.dumps(
+            {
+                "runtime_scene_id": scene_id,
+                "started_at": "2026-05-24T12:00:01Z",
+                "status": "running",
+                "trigger": "internal-start",
+                "project_root": str(tmp_path),
+                "package": {
+                    "search_text": repeated,
+                    "tags": ["runtime-scene", "diagnosis-active-issue"],
+                    "package_index_path": "package_index.json",
+                    "summary_path": "summary.json",
+                },
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    scene_dir.joinpath("package_index.json").write_text(
+        json.dumps({"schema_version": 2, "search_text": repeated, "tags": ["runtime-scene"]}),
+        encoding="utf-8",
+    )
+    scene_dir.joinpath("summary.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "package_id": scene_id,
+                "event_counts": {},
+                "diagnosis": {
+                    "severity": "warning",
+                    "userSummary": "cached diagnosis text",
+                    "agentNextStep": "read cached summary",
+                    "issueState": {
+                        "activeClusterCount": 1,
+                        "policyClusterCount": 0,
+                        "historicalClusterCount": 0,
+                        "controlSignalCount": 0,
+                    },
+                },
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+
+    scenes = runtime_scene_service.list_runtime_scenes(limit=1)
+
+    search_text = scenes[0]["packageIndex"]["searchText"]
+    assert len(search_text) < 1_000
+    assert search_text.count("cached diagnosis text") == 1
+    refreshed_index = json.loads(scene_dir.joinpath("package_index.json").read_text(encoding="utf-8"))
+    assert refreshed_index["search_text"] == search_text
 
 
 def test_runtime_scene_list_prunes_old_packages_to_retention_limit(tmp_path, monkeypatch):
@@ -610,6 +754,46 @@ def test_runtime_scene_detail_refreshes_stale_package_sidecars(tmp_path, monkeyp
     assert summary["display_name"] == detail["packageIndex"]["displayName"]
     assert summary["diagnosis"]["issueState"]["activeClusterCount"] == 0
     assert manifest["package"]["index_key"] == detail["packageIndex"]["indexKey"]
+
+
+def test_runtime_scene_detail_skips_locked_child_log_during_file_listing(tmp_path, monkeypatch):
+    scene_id = "locked-child-log-scene"
+    scene_dir = tmp_path / "logs" / "runtime_scenes" / f"20260524T120001Z__{scene_id}"
+    raw_dir = scene_dir / "raw"
+    raw_dir.mkdir(parents=True)
+    scene_dir.joinpath("manifest.json").write_text(
+        json.dumps(
+            {
+                "runtime_scene_id": scene_id,
+                "started_at": "2026-05-24T12:00:01Z",
+                "status": "running",
+                "trigger": "internal-start",
+                "project_root": str(tmp_path),
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (raw_dir / "ok.log").write_text("ok\n", encoding="utf-8")
+    locked_path = raw_dir / "locked.log"
+    locked_path.write_text("locked\n", encoding="utf-8")
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+
+    original_stat = runtime_scene_service.Path.stat
+
+    def locked_stat(self, *args, **kwargs):
+        if self == locked_path:
+            raise PermissionError("locked")
+        return original_stat(self, *args, **kwargs)
+
+    monkeypatch.setattr(runtime_scene_service.Path, "stat", locked_stat)
+
+    detail = runtime_scene_service.get_runtime_scene_detail(scene_id)
+
+    raw_paths = [item["path"] for item in detail["rawFiles"]]
+    assert "raw/ok.log" in raw_paths
+    assert "raw/locked.log" not in raw_paths
+    assert detail["packageSummary"]["rawLogCount"] == 1
 
 
 def test_runtime_scene_static_summary_distinguishes_recovered_issue_from_active_failure(tmp_path, monkeypatch):
