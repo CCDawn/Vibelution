@@ -634,11 +634,12 @@ def test_research_agent_binding_save_updates_unified_agent_stack(tmp_path, monke
     assert agent is not None
     assert agent["primaryMode"] == "research"
     assert agent["roleKey"] == "research_paper_reader"
-    assert agent["profileId"] == "research_broad"
+    assert agent["llmBindings"] == session_service.llm_bindings_for_profile_id("research_broad")
+    assert "profileId" not in agent
     assert agent["promptTemplateId"] == "prompt-research-paper_reader"
     assert prompt is not None
     assert prompt["sourcePath"] == "workspace/prompts/research/paper_reader.md"
-    assert created["profileId"] == agent["profileId"]
+    assert created["profileId"] == "research_broad"
     assert "llmConfigId" not in created
     stored_config = json.loads(workspace.get_research_agent_config_path().read_text(encoding="utf-8"))
     stored_agent = next(item for item in stored_config["agents"] if item["key"] == "paper_reader")
@@ -693,7 +694,7 @@ def test_research_agent_binding_save_does_not_reactivate_archived_agent(tmp_path
 
     archived = agent_directory_service.create_agent_instance(
         display_name="旧论文阅读 Agent",
-        profile_id="research_broad",
+        llm_bindings=session_service.llm_bindings_for_profile_id("research_broad"),
         primary_mode="research",
         role_key="research_paper_reader",
         prompt_template_id="prompt-research-paper_reader",
@@ -766,8 +767,7 @@ def test_research_agent_instance_sync_skips_current_direct_session_update(tmp_pa
     label = "广撒网探索 Agent"
     agent = agent_directory_service.create_agent_instance(
         display_name=label,
-        template_id="research_broad_explorer",
-        profile_id="primary",
+        llm_bindings=session_service.llm_bindings_for_profile_id("primary"),
         primary_mode="research",
         role_key="research_broad",
         prompt_template_id="prompt-research-broad",
@@ -853,7 +853,7 @@ def test_research_agent_instance_sync_disables_archived_mode_binding_ref(tmp_pat
 
     old_agent = agent_directory_service.create_agent_instance(
         display_name="旧广搜 Agent",
-        profile_id="research_broad",
+        llm_bindings=session_service.llm_bindings_for_profile_id("research_broad"),
         primary_mode="research",
         role_key="research_broad",
         prompt_template_id="prompt-research-broad",
@@ -1321,7 +1321,7 @@ def test_research_flow_canvas_save_syncs_agent_id_to_mode_binding(tmp_path, monk
     monkeypatch.setattr(research_service, "_record_research_config_event", lambda *args, **kwargs: events.append((args, kwargs)))
     agent = agent_directory_service.create_agent_instance(
         display_name="科研广搜 Agent",
-        profile_id="research_live_profile",
+        llm_bindings=session_service.llm_bindings_for_profile_id("research_live_profile"),
         primary_mode="research",
         role_key="research_broad",
         prompt_template_id="prompt-research-broad",

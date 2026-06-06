@@ -4,6 +4,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 
+from core.chatroom import store as chat_room_store
 from core.chatroom.scheduler import get_scheduler_registry
 from core.ui.chat_state import load_chat_state, save_chat_state
 from core.web.services import agent_directory_service, chat_room_service, session_service
@@ -76,6 +77,26 @@ def _capture_session_lifecycle_events(monkeypatch):
 
 def _lightweight_agent_context(*args, **kwargs):
     return SimpleNamespace(agent_id="", profile_id="", memory_policy={}, context_block="", timings={})
+
+
+def test_chat_room_store_retries_transient_permission_error(tmp_path, monkeypatch):
+    store = chat_room_store.ChatRoomStore(root=tmp_path)
+    real_replace = chat_room_store.os.replace
+    attempts: list[str] = []
+
+    def flaky_replace(source, target):
+        attempts.append(str(target))
+        if len(attempts) == 1:
+            raise PermissionError("locked")
+        return real_replace(source, target)
+
+    monkeypatch.setattr(chat_room_store.os, "replace", flaky_replace)
+
+    store.save({"rooms": [{"roomId": "room-a"}]})
+
+    assert len(attempts) == 2
+    assert store.state_path.exists()
+    assert store.load()["rooms"][0]["roomId"] == "room-a"
 
 
 def test_group_speaker_message_uses_completion_time_and_strips_self_prefix(monkeypatch):
@@ -376,10 +397,8 @@ def test_team_case_orchestration_keeps_heletech_health_case_in_intake_phase(tmp_
     assert case_state["userFacingMode"] == "direct_clarification"
     assert "年龄/月龄" in case_state["missingFacts"]
     assert "伴随症状" in case_state["missingFacts"]
-    assert [
-        message["speakerTitle"].split(" · ", 1)[-1]
-        for message in latest_round["messages"]
-    ] == ["方案主持 Agent"]
+    assert latest_round["messages"][0]["participantId"] == f"session-{sessions[0]['id']}"
+    assert latest_round["messages"][0]["content"] == "方案主持 先补齐关键信息。"
     assert latest_round["messages"][0]["messageKind"] == "user_clarification"
     assert latest_round["messages"][0]["audience"] == "user"
     assert len(captured_prompts) == 1
