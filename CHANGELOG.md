@@ -5,6 +5,7 @@
 - Sped up Agent Center archive and purge by using lightweight room and mode-binding cleanup paths instead of returning full workspace payloads during the mutation.
 - Avoided duplicate mode-binding cleanup on the Agent archive API while preserving cleanup for direct service callers such as team cascade archive.
 - Added archive-stage runtime scene timings and kept the Agent Center cache patched locally instead of immediately refetching the heavy config workspace.
+- Kept the local Agent config workspace cache consistent after archive or purge by patching derived mode, room, reference, health, boundary, group, and summary fields.
 
 ## 0.10.33 - 2026-06-06
 

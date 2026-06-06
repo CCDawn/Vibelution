@@ -53,6 +53,12 @@ import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy"
 import { useAppI18n } from "../i18n/useAppI18n";
 import { AgentManagementNav } from "./AgentManagementNav";
 import { agentDisplayInfo } from "./agentDisplay";
+import {
+  archivedWorkspaceCache,
+  purgedWorkspaceCache,
+  type AgentArchiveResponse,
+  type AgentPurgeResponse,
+} from "./agentWorkspaceCache";
 import { createChatWorkspaceCache } from "./chatWorkspaceCache";
 import styles from "./AgentsRoute.module.css";
 
@@ -314,7 +320,7 @@ function timestampValue(value: string) {
   return Number.isNaN(parsed.getTime()) ? 0 : parsed.getTime();
 }
 
-function agentLabel(agent: AgentConfigWorkspaceAgent | null | undefined) {
+function agentLabel(agent: Pick<AgentConfigWorkspaceAgent, "agentId" | "agentCode" | "displayName" | "metadata" | "primaryMode" | "roleKey" | "promptTemplateId" | "llmBindings"> | null | undefined) {
   if (!agent) {
     return "-";
   }
@@ -926,92 +932,6 @@ function draftSyncSourceFromAgent(
     memoryPolicy: memoryPolicyDraftFromAgent(agent),
     delegationPolicy: delegationPolicyDraftFromAgent(agent),
     supervisionPolicy: supervisionPolicyDraftFromAgent(agent),
-  };
-}
-
-function archivedWorkspaceCache(
-  workspace: AgentConfigWorkspace | undefined,
-  archivedAgent: AgentConfigWorkspaceAgent,
-): AgentConfigWorkspace | undefined {
-  if (!workspace) {
-    return workspace;
-  }
-  const agentId = archivedAgent.agentId;
-  const cachedAgent = workspace.agents.find((agent) => agent.agentId === agentId);
-  const wasActive = cachedAgent ? cachedAgent.status !== "archived" : false;
-  const nextAgents = workspace.agents.map((agent) =>
-    agent.agentId === agentId
-      ? {
-          ...agent,
-          ...archivedAgent,
-          status: "archived",
-          runtimeStatus: {
-            state: "archived",
-            label: archivedAgent.runtimeStatus?.label || "Archived",
-            reason: archivedAgent.runtimeStatus?.reason || "agent_archived",
-            runId: archivedAgent.runtimeStatus?.runId || agent.runtimeStatus?.runId || "",
-            runKind: archivedAgent.runtimeStatus?.runKind || agent.runtimeStatus?.runKind || "",
-            sessionId: archivedAgent.runtimeStatus?.sessionId || agent.runtimeStatus?.sessionId || agent.directSessionId || "",
-            summary: archivedAgent.runtimeStatus?.summary || "",
-            updatedAt: archivedAgent.runtimeStatus?.updatedAt || archivedAgent.updatedAt || agent.updatedAt || "",
-          },
-        }
-      : agent,
-  );
-  const nextGroups = workspace.groups.map((group) => {
-    const agentIds = group.id === "archived"
-      ? Array.from(new Set([...group.agentIds, agentId]))
-      : group.agentIds.filter((id) => id !== agentId);
-    return {
-      ...group,
-      agentIds,
-      count: agentIds.length,
-    };
-  });
-  return {
-    ...workspace,
-    agents: nextAgents,
-    groups: nextGroups,
-    summary: {
-      ...workspace.summary,
-      activeAgentCount: wasActive ? Math.max(0, workspace.summary.activeAgentCount - 1) : workspace.summary.activeAgentCount,
-      archivedAgentCount: wasActive ? workspace.summary.archivedAgentCount + 1 : workspace.summary.archivedAgentCount,
-    },
-  };
-}
-
-function purgedWorkspaceCache(
-  workspace: AgentConfigWorkspace | undefined,
-  purgedAgentId: string,
-): AgentConfigWorkspace | undefined {
-  if (!workspace) {
-    return workspace;
-  }
-  const agentId = String(purgedAgentId || "").trim();
-  if (!agentId) {
-    return workspace;
-  }
-  const cachedAgent = workspace.agents.find((agent) => agent.agentId === agentId);
-  const nextAgents = workspace.agents.filter((agent) => agent.agentId !== agentId);
-  const nextGroups = workspace.groups.map((group) => {
-    const agentIds = group.agentIds.filter((id) => id !== agentId);
-    return {
-      ...group,
-      agentIds,
-      count: agentIds.length,
-    };
-  });
-  const wasActive = cachedAgent ? cachedAgent.status !== "archived" : false;
-  const wasArchived = cachedAgent ? cachedAgent.status === "archived" : false;
-  return {
-    ...workspace,
-    agents: nextAgents,
-    groups: nextGroups,
-    summary: {
-      ...workspace.summary,
-      activeAgentCount: wasActive ? Math.max(0, workspace.summary.activeAgentCount - 1) : workspace.summary.activeAgentCount,
-      archivedAgentCount: wasArchived ? Math.max(0, workspace.summary.archivedAgentCount - 1) : workspace.summary.archivedAgentCount,
-    },
   };
 }
 
@@ -3161,7 +3081,7 @@ export function AgentsRoute() {
 
   const archiveAgentMutation = useMutation({
     mutationFn: (payload: { agentId: string }) =>
-      fetchJson<AgentConfigWorkspaceAgent>(`/api/agents/${encodeURIComponent(payload.agentId)}`, {
+      fetchJson<AgentArchiveResponse>(`/api/agents/${encodeURIComponent(payload.agentId)}`, {
         method: "DELETE",
       }),
     onSuccess: (agent) => {
@@ -3184,7 +3104,7 @@ export function AgentsRoute() {
 
   const purgeAgentMutation = useMutation({
     mutationFn: (payload: { agentId: string }) =>
-      fetchJson<{ agentId: string; status: string; deleted: boolean; purgeSummary?: { dataRetention?: string } }>(
+      fetchJson<AgentPurgeResponse>(
         `/api/agents/${encodeURIComponent(payload.agentId)}/purge`,
         { method: "DELETE" },
       ),
