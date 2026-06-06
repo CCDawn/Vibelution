@@ -251,6 +251,68 @@ def test_memory_knowledge_graph_endpoint_returns_read_only_project_structure(tmp
     assert "GRAPH API BODY MUST STAY OUT" not in str(payload)
 
 
+def test_memory_knowledge_graph_endpoint_requires_actor_agent(tmp_path, monkeypatch):
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(memory_graph_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(memory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(team_knowledge_service, "PROJECT_ROOT", tmp_path)
+    agent = agent_directory_service.create_agent_instance(display_name="Anonymous Graph Guard Agent")
+    team = team_service.create_team(name="Anonymous Graph Guard Team", members=[{"agentId": agent["agentId"], "role": "lead"}])
+    base = team_knowledge_service.create_knowledge_base(
+        team["teamId"],
+        name="Anonymous Graph Guard Knowledge",
+        actor_agent_id=agent["agentId"],
+    )
+    proposal = team_knowledge_service.create_refinement_proposal(
+        base["knowledgeBaseId"],
+        source_artifact_ids=[],
+        proposed_by_agent_id=agent["agentId"],
+        title="Anonymous graph guard proposal",
+        content="ANONYMOUS GRAPH BODY MUST STAY OUT",
+    )
+    team_knowledge_service.review_refinement_proposal(
+        base["knowledgeBaseId"],
+        proposal["proposalId"],
+        status="approved",
+        reviewed_by_agent_id=agent["agentId"],
+    )
+
+    response = client.get("/api/memory/knowledge-graph")
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "agentId is required for memory knowledge graph."
+
+
+def test_memory_knowledge_graph_scopes_structure_to_actor_visibility(tmp_path, monkeypatch):
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(memory_graph_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(memory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(team_knowledge_service, "PROJECT_ROOT", tmp_path)
+    lead = agent_directory_service.create_agent_instance(display_name="Scoped Graph Lead")
+    outsider = agent_directory_service.create_agent_instance(display_name="Scoped Graph Outsider")
+    hidden_agent = agent_directory_service.create_agent_instance(display_name="Scoped Hidden Agent")
+    team = team_service.create_team(name="Scoped Graph Team", members=[{"agentId": lead["agentId"], "role": "lead"}])
+    team_knowledge_service.create_knowledge_base(
+        team["teamId"],
+        name="Scoped Graph Knowledge",
+        actor_agent_id=lead["agentId"],
+    )
+
+    response = client.get("/api/memory/knowledge-graph", params={"agentId": outsider["agentId"]})
+    payload = response.json()
+
+    assert response.status_code == 200
+    assert "Scoped Graph Team" not in str(payload)
+    assert "Scoped Graph Lead" not in str(payload)
+    assert "Scoped Hidden Agent" not in str(payload)
+    agent_nodes = [node for node in payload["nodes"] if node["type"] == "agent"]
+    assert [node["metadata"]["agentId"] for node in agent_nodes] == [outsider["agentId"]]
+    assert payload["summary"]["nodeTypeCounts"].get("team", 0) == 0
+    assert payload["summary"]["nodeTypeCounts"].get("agent", 0) == 1
+
+
 def test_memory_knowledge_graph_node_detail_endpoint_returns_selected_node_content(tmp_path, monkeypatch):
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(memory_graph_service, "PROJECT_ROOT", tmp_path)
