@@ -7,6 +7,7 @@ import base64
 import json
 import os
 import re
+import shlex
 import time
 import uuid
 from datetime import datetime, timezone
@@ -19,9 +20,27 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 SESSION_ROOT = PROJECT_ROOT / "workspace" / "computer_use_sessions"
 ALLOWED_STATUSES = {"completed", "running", "need_confirmation", "blocked", "failed", "timeout", "cancelled"}
 HIGH_RISK_ACTIONS = {"submit", "send", "delete", "pay", "purchase", "download", "upload", "login", "confirm"}
+SUPPORTED_BROWSER_ACTIONS = {
+    "click",
+    "type",
+    "fill",
+    "press",
+    "scroll",
+    "wait",
+    "navigate",
+    "screenshot",
+    "wait_for_selector",
+}
+ACTION_ALIASES = {
+    "goto": "navigate",
+    "open": "navigate",
+    "sleep": "wait",
+    "input": "type",
+}
 MAX_STEPS_LIMIT = 30
 MAX_TIMEOUT_SECONDS = 300
 DEFAULT_TIMEOUT_SECONDS = 180
+MAX_ACTION_TEXT_CHARS = 2000
 _SAFE_TOKEN = re.compile(r"[^A-Za-z0-9_.-]+")
 
 
@@ -34,6 +53,7 @@ def start_computer_use_task(
     task: str,
     target_url: str = "",
     allowed_domains: str | list[str] = "",
+    actions: str | list[Any] | dict[str, Any] = "",
     max_steps: int = 20,
     require_confirmation: bool = True,
     mode: str = "browser",
@@ -46,6 +66,7 @@ def start_computer_use_task(
         task=task,
         target_url=target_url,
         allowed_domains=allowed_domains,
+        actions=actions,
         max_steps=max_steps,
         require_confirmation=require_confirmation,
         mode=mode,
@@ -73,6 +94,29 @@ def start_computer_use_task(
     _save_session(payload)
     _append_step(session_id, {"type": "start", "summary": "Computer Use sandbox task started.", "status": "running"})
     _record_event("computer_use.task.started", payload, outcome="started")
+
+    if normalized["requireConfirmation"] and _contains_high_risk_step(normalized.get("actions") or []):
+        ready_step = {
+            "index": 1,
+            "action": "confirmation",
+            "summary": "Explicit high-risk browser action requires user confirmation before provider execution.",
+            "status": "ready",
+            "requiresConfirmation": True,
+        }
+        payload.update(
+            {
+                "status": "need_confirmation",
+                "summary": "Computer Use task is waiting for user confirmation before executing a high-risk action.",
+                "steps": [ready_step],
+                "needsConfirmation": True,
+                "updatedAt": _now(),
+                "durationMs": _duration_ms(started),
+            }
+        )
+        _append_step(session_id, ready_step)
+        _save_session(payload)
+        _record_event("computer_use.task.confirmation_required", payload, outcome="confirmation_required", level="warning")
+        return _public_payload(payload)
 
     try:
         provider_payload = _call_open_computer_use(normalized, session_id=session_id)
@@ -172,6 +216,8 @@ def _normalize_request(**kwargs: Any) -> dict[str, Any]:
     if not domains:
         raise ComputerUseError("allowed_domains is required unless target_url contains a host.")
     max_steps = _bounded_int(kwargs.get("max_steps"), default=20, minimum=1, maximum=MAX_STEPS_LIMIT)
+    actions = _normalize_actions(kwargs.get("actions"), max_steps=max_steps)
+    _validate_action_domains(actions, domains)
     timeout_seconds = _bounded_int(
         kwargs.get("timeout_seconds"),
         default=DEFAULT_TIMEOUT_SECONDS,
@@ -182,6 +228,7 @@ def _normalize_request(**kwargs: Any) -> dict[str, Any]:
         "task": task,
         "targetUrl": target_url,
         "allowedDomains": domains,
+        "actions": actions,
         "maxSteps": max_steps,
         "requireConfirmation": bool(kwargs.get("require_confirmation", True)),
         "mode": mode,
@@ -211,6 +258,7 @@ def _call_open_computer_use(request: dict[str, Any], *, session_id: str) -> dict
             "task": request["task"],
             "target_url": request["targetUrl"],
             "allowed_domains": request["allowedDomains"],
+            "actions": request["actions"],
             "mode": request["mode"],
             "max_steps": request["maxSteps"],
             "require_confirmation": request["requireConfirmation"],
@@ -302,6 +350,8 @@ def _initial_session_payload(session_id: str, request: dict[str, Any], *, status
         "task": request["task"],
         "targetUrl": request["targetUrl"],
         "allowedDomains": request["allowedDomains"],
+        "actionCount": len(request.get("actions") or []),
+        "requestedActions": [_public_action_summary(action, index=index) for index, action in enumerate(request.get("actions") or [], start=1)],
         "mode": request["mode"],
         "maxSteps": request["maxSteps"],
         "timeoutSeconds": request["timeoutSeconds"],
@@ -334,6 +384,8 @@ def _public_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "mode": str(payload.get("mode") or "browser"),
         "targetUrl": str(payload.get("targetUrl") or ""),
         "allowedDomains": list(payload.get("allowedDomains") or []),
+        "actionCount": int(payload.get("actionCount") or 0),
+        "requestedActions": list(payload.get("requestedActions") or []),
         "createdAt": str(payload.get("createdAt") or ""),
         "updatedAt": str(payload.get("updatedAt") or ""),
         "durationMs": int(payload.get("durationMs") or 0),
@@ -425,6 +477,190 @@ def _normalize_allowed_domains(value: Any) -> list[str]:
     return domains
 
 
+def _normalize_actions(value: Any, *, max_steps: int) -> list[dict[str, Any]]:
+    parsed = _coerce_actions_input(value)
+    actions: list[dict[str, Any]] = []
+    for index, raw in enumerate(parsed[:max_steps], start=1):
+        action = _normalize_action(raw, index=index)
+        if action:
+            actions.append(action)
+    return actions
+
+
+def _coerce_actions_input(value: Any) -> list[Any]:
+    if value in (None, "", []):
+        return []
+    if isinstance(value, dict):
+        nested = value.get("actions")
+        if isinstance(nested, list):
+            return nested
+        return [value]
+    if isinstance(value, list):
+        return value
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return []
+        try:
+            parsed = json.loads(stripped)
+        except json.JSONDecodeError:
+            return [_parse_action_dsl_line(line) for line in re.split(r"[\r\n;]+", stripped) if line.strip()]
+        if isinstance(parsed, dict):
+            nested = parsed.get("actions")
+            return list(nested) if isinstance(nested, list) else [parsed]
+        if isinstance(parsed, list):
+            return parsed
+    raise ComputerUseError("actions must be a JSON list/object, a list, or a short action DSL string.")
+
+
+def _parse_action_dsl_line(line: str) -> dict[str, Any]:
+    try:
+        parts = shlex.split(line)
+    except ValueError as exc:
+        raise ComputerUseError(f"Invalid action DSL: {line[:80]}") from exc
+    if not parts:
+        return {}
+    result: dict[str, Any] = {"action": parts[0]}
+    positionals: list[str] = []
+    for part in parts[1:]:
+        if "=" in part:
+            key, raw_value = part.split("=", 1)
+            result[_camel_to_snake(key.strip())] = raw_value
+        else:
+            positionals.append(part)
+    action = _normalize_action_name(parts[0])
+    if action in {"click", "wait_for_selector"} and positionals:
+        result.setdefault("selector", positionals[0])
+    elif action in {"type", "fill"}:
+        if positionals:
+            result.setdefault("selector", positionals[0])
+        if len(positionals) > 1:
+            result.setdefault("text", " ".join(positionals[1:]))
+    elif action == "press" and positionals:
+        result.setdefault("key", positionals[0])
+    elif action == "scroll" and positionals:
+        result.setdefault("y", positionals[0])
+    elif action == "wait" and positionals:
+        result.setdefault("ms", positionals[0])
+    elif action == "navigate" and positionals:
+        result.setdefault("url", positionals[0])
+    return result
+
+
+def _normalize_action(raw: Any, *, index: int) -> dict[str, Any]:
+    if isinstance(raw, str):
+        raw = _parse_action_dsl_line(raw)
+    if not isinstance(raw, dict):
+        raise ComputerUseError(f"Action {index} must be an object or DSL line.")
+    action = _normalize_action_name(raw.get("action") or raw.get("type"))
+    if not action:
+        raise ComputerUseError(f"Action {index} is missing action.")
+    if action not in SUPPORTED_BROWSER_ACTIONS:
+        raise ComputerUseError(f"Unsupported browser action: {action}.")
+
+    result: dict[str, Any] = {"action": action}
+    selector = _trimmed(raw.get("selector") or raw.get("css") or raw.get("target"))
+    text = _trimmed(raw.get("text") or raw.get("value"), limit=MAX_ACTION_TEXT_CHARS)
+    url = _trimmed(raw.get("url") or raw.get("target_url") or raw.get("targetUrl"))
+    key = _trimmed(raw.get("key"))
+    if selector:
+        result["selector"] = selector
+    if text:
+        result["text"] = text
+    if url:
+        if not _is_http_url(url):
+            raise ComputerUseError(f"Action {index} url must start with http:// or https://.")
+        result["url"] = url
+    if key:
+        result["key"] = key
+    for source, target in (
+        ("x", "x"),
+        ("y", "y"),
+        ("delta_x", "deltaX"),
+        ("deltaX", "deltaX"),
+        ("delta_y", "deltaY"),
+        ("deltaY", "deltaY"),
+        ("ms", "ms"),
+        ("timeout_ms", "timeoutMs"),
+        ("timeoutMs", "timeoutMs"),
+    ):
+        if source in raw:
+            result[target] = _bounded_int(raw.get(source), default=0, minimum=-100000, maximum=100000)
+    if raw.get("requiresConfirmation") or raw.get("requires_confirmation"):
+        result["requiresConfirmation"] = True
+
+    _validate_action_shape(result, index=index)
+    return result
+
+
+def _normalize_action_name(value: Any) -> str:
+    raw = str(value or "").strip().lower().replace("-", "_")
+    return ACTION_ALIASES.get(raw, raw)
+
+
+def _validate_action_shape(action: dict[str, Any], *, index: int) -> None:
+    name = str(action.get("action") or "")
+    if name in {"click", "wait_for_selector"} and not action.get("selector") and not ("x" in action and "y" in action):
+        raise ComputerUseError(f"Action {index} ({name}) requires selector or x/y coordinates.")
+    if name in {"type", "fill"} and not action.get("text"):
+        raise ComputerUseError(f"Action {index} ({name}) requires text.")
+    if name == "press" and not action.get("key"):
+        raise ComputerUseError(f"Action {index} (press) requires key.")
+    if name == "navigate" and not action.get("url"):
+        raise ComputerUseError(f"Action {index} (navigate) requires url.")
+
+
+def _validate_action_domains(actions: list[dict[str, Any]], allowed_domains: list[str]) -> None:
+    for index, action in enumerate(actions, start=1):
+        if action.get("action") != "navigate":
+            continue
+        url = str(action.get("url") or "")
+        if not _is_allowed_action_url(url, allowed_domains):
+            raise ComputerUseError(f"Action {index} navigates outside allowed_domains.")
+
+
+def _is_allowed_action_url(url: str, allowed_domains: list[str]) -> bool:
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        return False
+    return parsed.hostname.lower() in set(allowed_domains)
+
+
+def _public_action_summary(action: dict[str, Any], *, index: int) -> dict[str, Any]:
+    name = str(action.get("action") or "")
+    summary: dict[str, Any] = {"index": index, "action": name}
+    if action.get("selector"):
+        summary["selector"] = str(action.get("selector"))
+    if action.get("url"):
+        summary["url"] = _safe_url_summary(str(action.get("url")))
+    if action.get("key"):
+        summary["key"] = str(action.get("key"))
+    if "text" in action:
+        summary["textLength"] = len(str(action.get("text") or ""))
+    for key in ("x", "y", "deltaX", "deltaY", "ms", "timeoutMs"):
+        if key in action:
+            summary[key] = action[key]
+    if action.get("requiresConfirmation"):
+        summary["requiresConfirmation"] = True
+    return summary
+
+
+def _safe_url_summary(value: str) -> str:
+    parsed = urlparse(value)
+    if not parsed.scheme or not parsed.hostname:
+        return ""
+    path = parsed.path or ""
+    return f"{parsed.scheme}://{parsed.hostname}{path}"
+
+
+def _trimmed(value: Any, *, limit: int = 500) -> str:
+    return str(value or "").strip()[:limit]
+
+
+def _camel_to_snake(value: str) -> str:
+    return re.sub(r"(?<!^)([A-Z])", r"_\1", value).lower()
+
+
 def _is_http_url(value: str) -> bool:
     parsed = urlparse(value)
     return parsed.scheme in {"http", "https"} and bool(parsed.hostname)
@@ -442,9 +678,11 @@ def _contains_high_risk_step(steps: list[dict[str, Any]]) -> bool:
     for step in steps:
         if step.get("requiresConfirmation"):
             return True
-        action = str(step.get("action") or "").lower()
-        summary = str(step.get("summary") or "").lower()
-        if any(token in action or token in summary for token in HIGH_RISK_ACTIONS):
+        haystack = " ".join(
+            str(step.get(key) or "").lower()
+            for key in ("action", "summary", "selector", "url", "key")
+        )
+        if any(token in haystack for token in HIGH_RISK_ACTIONS):
             return True
     return False
 
