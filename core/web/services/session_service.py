@@ -480,6 +480,13 @@ def _safe_session_workspace_token(session_id: str) -> str:
     return token
 
 
+def _short_hash(value: Any) -> str:
+    text = str(value or "")
+    if not text:
+        return ""
+    return hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest()[:16]
+
+
 def _session_workspace_relative_path(session_id: str) -> str:
     return f"workspace/sessions/{_safe_session_workspace_token(session_id)}"
 
@@ -2830,6 +2837,7 @@ def submit_session_message(
                 "agent_id": agent_id,
                 "leases": requested_leases,
                 "skill_invocation": skill_invocation,
+                "llm_slot": image_route_llm_slot,
                 "submit_timing_fields": dict(submit_timing_fields),
                 "submit_started_at_monotonic": submit_started_at,
             }
@@ -3315,6 +3323,7 @@ def edit_and_resubmit_session_message(
         "active_task": active_task,
         "agent_id": agent_id,
         "skill_invocation": skill_invocation,
+        "llm_slot": SESSION_LLM_SLOT_DIALOGUE,
     }
     _record_session_turn_scheduled_event(context)
     try:
@@ -4608,18 +4617,42 @@ def _build_session_cache_usage(llm_usage: dict[str, Any] | None) -> dict[str, An
         _coerce_nonnegative_int((usage or {}).get("cachedInputTokens") or 0),
         last_input_tokens,
     ) if last_input_tokens else 0
+    last_cache_creation_input_tokens = min(
+        _coerce_nonnegative_int((usage or {}).get("cacheCreationInputTokens") or 0),
+        last_input_tokens,
+    ) if last_input_tokens else 0
+    last_uncached_input_tokens = (
+        _coerce_nonnegative_int((usage or {}).get("uncachedInputTokens") or 0)
+        if observed
+        else 0
+    )
+    if observed and last_input_tokens:
+        last_uncached_input_tokens = max(0, last_input_tokens - last_cached_input_tokens)
     turn_input_tokens = last_input_tokens
     turn_cached_input_tokens = last_cached_input_tokens
+    turn_cache_creation_input_tokens = last_cache_creation_input_tokens
+    turn_uncached_input_tokens = last_uncached_input_tokens
     total_input_tokens = last_input_tokens
     total_cached_input_tokens = last_cached_input_tokens
+    total_cache_creation_input_tokens = last_cache_creation_input_tokens
+    total_uncached_input_tokens = last_uncached_input_tokens
     return {
         "lastInputTokens": last_input_tokens,
         "lastCachedInputTokens": last_cached_input_tokens,
+        "lastCacheReadInputTokens": last_cached_input_tokens,
+        "lastCacheCreationInputTokens": last_cache_creation_input_tokens,
+        "lastUncachedInputTokens": last_uncached_input_tokens,
         "turnInputTokens": turn_input_tokens,
         "turnCachedInputTokens": turn_cached_input_tokens,
+        "turnCacheReadInputTokens": turn_cached_input_tokens,
+        "turnCacheCreationInputTokens": turn_cache_creation_input_tokens,
+        "turnUncachedInputTokens": turn_uncached_input_tokens,
         "turnCacheHitRate": (turn_cached_input_tokens / turn_input_tokens) if turn_input_tokens > 0 else 0.0,
         "totalInputTokens": total_input_tokens,
         "totalCachedInputTokens": total_cached_input_tokens,
+        "totalCacheReadInputTokens": total_cached_input_tokens,
+        "totalCacheCreationInputTokens": total_cache_creation_input_tokens,
+        "totalUncachedInputTokens": total_uncached_input_tokens,
         "totalCacheHitRate": (total_cached_input_tokens / total_input_tokens) if total_input_tokens > 0 else 0.0,
         "updatedAt": str((usage or {}).get("recordedAt") or "").strip(),
         "source": "provider_usage" if observed else "missing",
@@ -4656,12 +4689,32 @@ def _normalize_turn_llm_usage(value: Any) -> dict[str, Any] | None:
         _coerce_nonnegative_int(value.get("cached_input_tokens") or value.get("cachedInputTokens") or 0),
         input_tokens,
     ) if input_tokens else 0
+    cache_creation_input_tokens = min(
+        _coerce_nonnegative_int(
+            value.get("cache_creation_input_tokens")
+            or value.get("cacheCreationInputTokens")
+            or value.get("cache_write_input_tokens")
+            or value.get("cacheWriteInputTokens")
+            or 0
+        ),
+        input_tokens,
+    ) if input_tokens else 0
+    uncached_input_tokens = _coerce_nonnegative_int(
+        value.get("uncached_input_tokens") or value.get("uncachedInputTokens") or 0
+    )
+    if input_tokens:
+        uncached_input_tokens = max(0, input_tokens - cached_input_tokens)
+    else:
+        uncached_input_tokens = 0
     return {
         "source": source,
         "inputTokens": input_tokens,
         "outputTokens": output_tokens,
         "totalTokens": total_tokens,
         "cachedInputTokens": cached_input_tokens,
+        "cacheReadInputTokens": cached_input_tokens,
+        "cacheCreationInputTokens": cache_creation_input_tokens,
+        "uncachedInputTokens": uncached_input_tokens,
         "cacheHitRate": (cached_input_tokens / input_tokens) if input_tokens > 0 else 0.0,
         "provider": str(value.get("provider") or "").strip(),
         "model": str(value.get("model") or "").strip(),
@@ -4781,6 +4834,17 @@ def _normalize_session_cache_composition(value: Any) -> dict[str, Any] | None:
         cached_tokens = min(cached_tokens, input_tokens)
     else:
         cached_tokens = 0
+    cache_creation_tokens = _coerce_nonnegative_int(
+        value.get("cacheCreationInputTokens")
+        or value.get("cache_creation_input_tokens")
+        or value.get("cacheWriteInputTokens")
+        or value.get("cache_write_input_tokens")
+        or 0
+    )
+    if input_tokens:
+        cache_creation_tokens = min(cache_creation_tokens, input_tokens)
+    else:
+        cache_creation_tokens = 0
     uncached_tokens = _coerce_nonnegative_int(value.get("uncachedInputTokens") or value.get("uncached_input_tokens") or 0)
     if not uncached_tokens and input_tokens:
         uncached_tokens = max(0, input_tokens - cached_tokens)
@@ -4804,6 +4868,7 @@ def _normalize_session_cache_composition(value: Any) -> dict[str, Any] | None:
         if input_tokens:
             segments = [
                 {"key": "cached", "label": "cached", "tokens": cached_tokens, "status": "hit"},
+                {"key": "cache_write", "label": "cache write", "tokens": cache_creation_tokens, "status": "write"},
                 {"key": "uncached", "label": "uncached", "tokens": uncached_tokens, "status": "miss"},
             ]
         elif source == "missing":
@@ -4814,6 +4879,8 @@ def _normalize_session_cache_composition(value: Any) -> dict[str, Any] | None:
         "source": source,
         "inputTokens": input_tokens,
         "cachedInputTokens": cached_tokens,
+        "cacheReadInputTokens": cached_tokens,
+        "cacheCreationInputTokens": cache_creation_tokens,
         "uncachedInputTokens": uncached_tokens,
         "cacheHitRate": (cached_tokens / input_tokens) if input_tokens > 0 else 0.0,
         "segments": segments,
@@ -4848,6 +4915,7 @@ def _build_session_cache_composition(turn_id: str, llm_usage: dict[str, Any] | N
         ) or {}
     input_tokens = _coerce_nonnegative_int(usage.get("inputTokens") or 0)
     cached_tokens = min(_coerce_nonnegative_int(usage.get("cachedInputTokens") or 0), input_tokens) if input_tokens else 0
+    cache_creation_tokens = min(_coerce_nonnegative_int(usage.get("cacheCreationInputTokens") or 0), input_tokens) if input_tokens else 0
     uncached_tokens = max(0, input_tokens - cached_tokens)
     return _normalize_session_cache_composition(
         {
@@ -4856,9 +4924,11 @@ def _build_session_cache_composition(turn_id: str, llm_usage: dict[str, Any] | N
             "source": "provider_usage",
             "inputTokens": input_tokens,
             "cachedInputTokens": cached_tokens,
+            "cacheCreationInputTokens": cache_creation_tokens,
             "uncachedInputTokens": uncached_tokens,
             "segments": [
                 {"key": "cached", "label": "cached", "tokens": cached_tokens, "status": "hit"},
+                {"key": "cache_write", "label": "cache write", "tokens": cache_creation_tokens, "status": "write"},
                 {"key": "uncached", "label": "uncached", "tokens": uncached_tokens, "status": "miss"},
             ],
         }
@@ -5602,6 +5672,26 @@ def _resolve_session_agent_llm(agent_instance: dict[str, Any] | None, llm_slot: 
 
 def _session_agent_config_for_llm_slot(agent_instance: dict[str, Any] | None, llm_slot: str) -> Any:
     return _resolve_session_agent_llm(agent_instance, llm_slot).config
+
+
+def _session_prompt_cache_partition(
+    *,
+    session_id: str,
+    agent_id: str,
+    llm_slot: str,
+    llm_model_id: str = "",
+) -> str:
+    normalized_session = str(session_id or "").strip()
+    normalized_agent = str(agent_id or "").strip() or "direct"
+    normalized_slot = str(llm_slot or "").strip() or SESSION_LLM_SLOT_DIALOGUE
+    normalized_model = str(llm_model_id or "").strip() or "default"
+    parts = [
+        f"agent:{normalized_agent}",
+        f"session:{normalized_session}",
+        f"slot:{normalized_slot}",
+        f"model:{normalized_model}",
+    ]
+    return "|".join(parts)
 
 
 def _is_session_busy_for_delete(conversation_id: str, conversation: dict[str, Any]) -> bool:
@@ -6718,6 +6808,16 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                 )
                 agent_create_ms = _elapsed_ms(stage_started_at)
                 attachments = _normalize_message_attachments(context.get("attachments") or [])
+                resolved_llm_model_id = str(getattr(resolved_agent_llm, "model_id", "") or "").strip() or _session_agent_llm_slot_model_id(
+                    agent_instance or historical_agent,
+                    llm_slot,
+                )
+                prompt_cache_partition = _session_prompt_cache_partition(
+                    session_id=session_id,
+                    agent_id=agent_id,
+                    llm_slot=llm_slot,
+                    llm_model_id=resolved_llm_model_id,
+                )
                 _record_session_turn_lifecycle_event(
                     session_id,
                     "agent_created",
@@ -6729,10 +6829,11 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                         "toolWorkspacePath": str(tool_workspace),
                         "dialogueModelId": agent_dialogue_model_id(agent_instance or historical_agent),
                         "llmSlot": llm_slot,
-                        "llmModelId": str(getattr(resolved_agent_llm, "model_id", "") or "")
-                        or _session_agent_llm_slot_model_id(agent_instance or historical_agent, llm_slot),
+                        "llmModelId": resolved_llm_model_id,
                         "agentId": agent_id,
                         "promptTemplateId": agent_prompt_template_id,
+                        "promptCachePartitionHash": _short_hash(prompt_cache_partition),
+                        "promptCachePartitionChars": len(prompt_cache_partition),
                         "attachmentCount": len(attachments),
                         "agentCreateMs": agent_create_ms,
                         **(resolved_agent_llm.log_fields() if resolved_agent_llm is not None else {}),
@@ -6883,6 +6984,7 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                         history_messages=history_messages,
                         attachments=llm_attachments,
                         user_message_source=str(context.get("user_message_source") or "").strip(),
+                        prompt_cache_partition=prompt_cache_partition,
                     )
                 if isinstance(result, dict):
                     result["context_composition"] = context_composition
@@ -7053,6 +7155,7 @@ def _run_session_continuation_loop(
     history_messages: list[dict[str, Any]],
     attachments: list[dict[str, Any]] | None = None,
     user_message_source: str = "",
+    prompt_cache_partition: str = "",
 ) -> Any:
     prompt = str(initial_prompt or "").strip()
     has_initial_attachments = bool(list(attachments or []))
@@ -7156,7 +7259,12 @@ def _run_session_continuation_loop(
         )
         turn_attachments = list(attachments or []) if turn_index == 1 else []
         llm_started_at = _perf_counter()
-        result = run_existing_agent_single_turn(agent, initial_prompt=prompt, attachments=turn_attachments)
+        result = run_existing_agent_single_turn(
+            agent,
+            initial_prompt=prompt,
+            attachments=turn_attachments,
+            prompt_cache_partition=prompt_cache_partition,
+        )
         llm_elapsed_ms = _elapsed_ms(llm_started_at)
         return_stop_reason = _get_turn_control_stop_reason(turn_control) or _get_session_stop_reason(session_id)
         if return_stop_reason:
@@ -8487,6 +8595,10 @@ def _record_session_llm_usage_event(
         "outputTokens": int((normalized or {}).get("outputTokens") or 0),
         "totalTokens": int((normalized or {}).get("totalTokens") or 0),
         "cachedInputTokens": int((normalized or {}).get("cachedInputTokens") or 0),
+        "cacheReadInputTokens": int((normalized or {}).get("cacheReadInputTokens") or (normalized or {}).get("cachedInputTokens") or 0),
+        "cacheCreationInputTokens": int((normalized or {}).get("cacheCreationInputTokens") or 0),
+        "uncachedInputTokens": int((normalized or {}).get("uncachedInputTokens") or 0),
+        "cacheHitRate": float((normalized or {}).get("cacheHitRate") or 0.0),
     }
     try:
         record_runtime_scene_event(
