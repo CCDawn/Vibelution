@@ -28,6 +28,7 @@ The product exposes a generic processing surface where the user can:
 
 - Create or select a processing pipeline profile.
 - Register input records from files, URLs, text notes, API payloads, or existing workspace artifacts.
+- Assign data collection work to functional Agents instead of expecting the user to manually gather every source.
 - Run extraction/transformation steps through tools, models, or manual actions.
 - Validate outputs against profile contracts.
 - Route invalid or incomplete records back to earlier stages.
@@ -45,6 +46,51 @@ The product exposes a generic processing surface where the user can:
 
 ---
 
+## Data Collection Agent Model
+
+Data collection is an Agent workflow, not just a form submission. The generic substrate should define functional Agent roles that can be bound to any profile:
+
+- `Data Intake Coordinator Agent`: owns the collection batch, scope, acceptance criteria, dedupe policy, and escalation path.
+- `Data Discovery Agent`: finds candidate sources from search tools, existing memory, workspace files, configured directories, URLs, or API catalogs.
+- `Source Acquisition Agent`: fetches or registers the raw source reference without rewriting the content.
+- `Content Extraction Agent`: turns files, pages, PDFs, or raw payloads into text, metadata, anchors, checksums, and excerpts.
+- `Source Deduplication Agent`: detects duplicate URLs, files, checksums, titles, DOI-like IDs, or near-duplicate excerpts.
+- `Source Quality Agent`: scores source relevance, credibility, freshness, completeness, permission, and risk.
+- `Intake Review Agent`: approves, returns, or rejects collected records before downstream transformation.
+
+These roles are profile-neutral. Challenge Cup can bind them to research-specific prompts and tools, but the core contract remains about data records and source quality.
+
+### Generic Collection Handoff
+
+Each collection Agent passes a structured handoff:
+
+- `runId`
+- `recordId`
+- `sourceType`
+- `sourceRef`
+- `acquisitionMethod`
+- `rawLocation`
+- `checksum`
+- `anchors`
+- `excerpt`
+- `metadata`
+- `qualitySignals`
+- `dedupeGroupId`
+- `permissionStatus`
+- `recommendedNextStage`
+- `blockingIssues`
+
+### Collection Boundaries
+
+- Discovery can propose sources, but cannot mark them trusted.
+- Acquisition can fetch/register sources, but cannot transform them into facts.
+- Extraction can produce excerpts and anchors, but cannot publish knowledge.
+- Deduplication can merge candidates only through trace-preserving aliases.
+- Source quality can score and recommend, but review/publish still needs a gate.
+- Profile-specific Agents may add domain fields, but must preserve the generic handoff.
+
+---
+
 ## Core Model
 
 Use neutral names:
@@ -58,6 +104,8 @@ Use neutral names:
 - `ReviewDecision`: approve, return, reject, hold.
 - `PublishTarget`: Team Knowledge, memory graph, dataset export, file export, API sink, or profile-specific adapter.
 - `ProcessingTrace`: source -> artifact -> validation -> review -> publish lineage.
+- `CollectionAssignment`: Agent-owned collection task for a run or record group.
+- `SourceQualitySignal`: relevance, credibility, freshness, permission, completeness, and risk signals.
 
 Challenge Cup mapping is only a profile:
 
@@ -202,7 +250,90 @@ git commit -m "feat: store generic data processing runs"
 
 ---
 
-## Task 3: Add Stage State Machine and Validation Reports
+## Task 3: Add Data Collection Agent Assignments
+
+**Files:**
+- Modify: `core/web/services/data_processing_service.py`
+- Modify: `core/web/routes/data_processing.py`
+- Test: `tests/test_data_processing_service.py`
+- Test: `tests/test_data_processing_routes.py`
+
+**Step 1: Write failing tests**
+
+Cover:
+
+- A run can create a `CollectionAssignment` for a functional Agent role.
+- Assignment roles are generic and profile-neutral.
+- Discovery output creates candidate records with `collectionTrace`.
+- Quality scoring updates `qualitySignals` but does not publish.
+- Returned assignments keep the record in `intake_needs_revision`.
+
+**Step 2: Run tests**
+
+```powershell
+C:\Users\17533\Desktop\Vibelution\.venv\Scripts\python.exe -m pytest tests/test_data_processing_service.py -k "collection_assignment" -v
+```
+
+Expected: fail.
+
+**Step 3: Implement assignment APIs**
+
+Add:
+
+```text
+POST /api/data-processing/runs/{run_id}/collection-assignments
+GET /api/data-processing/runs/{run_id}/collection-assignments
+POST /api/data-processing/runs/{run_id}/collection-assignments/{assignment_id}/outputs
+```
+
+Storage:
+
+```text
+workspace/data_processing/runs/<runId>/collection_assignments.jsonl
+workspace/data_processing/runs/<runId>/collection_outputs.jsonl
+```
+
+Assignment fields:
+
+- `assignmentId`
+- `runId`
+- `agentRole`
+- `agentId`
+- `scope`
+- `inputRefs`
+- `expectedRecordTypes`
+- `status`
+- `acceptance`
+- `createdAt`
+- `updatedAt`
+
+**Step 4: Add runtime event decision**
+
+Record count-only events:
+
+- `data_processing.collection_assignment.created`
+- `data_processing.collection_output.recorded`
+
+Do not log full source text or raw excerpts.
+
+**Step 5: Run tests**
+
+```powershell
+C:\Users\17533\Desktop\Vibelution\.venv\Scripts\python.exe -m pytest tests/test_data_processing_service.py tests/test_data_processing_routes.py
+```
+
+Expected: pass.
+
+**Step 6: Commit**
+
+```powershell
+git add core/web/services/data_processing_service.py core/web/routes/data_processing.py tests/test_data_processing_service.py tests/test_data_processing_routes.py
+git commit -m "feat: add data collection agent assignments"
+```
+
+---
+
+## Task 4: Add Stage State Machine and Validation Reports
 
 **Files:**
 - Modify: `core/web/services/data_processing_service.py`
@@ -253,7 +384,7 @@ git commit -m "feat: add data processing stage gates"
 
 ---
 
-## Task 4: Add Tool Adapter Contract
+## Task 5: Add Tool Adapter Contract
 
 **Files:**
 - Modify: `core/web/services/data_processing_service.py`
@@ -310,7 +441,7 @@ git commit -m "feat: add data processing tool adapters"
 
 ---
 
-## Task 5: Add Publish Adapter Boundary
+## Task 6: Add Publish Adapter Boundary
 
 **Files:**
 - Modify: `core/web/services/data_processing_service.py`
@@ -367,7 +498,7 @@ git commit -m "feat: add data processing publish adapters"
 
 ---
 
-## Task 6: Add Generic UI Surface
+## Task 7: Add Generic UI Surface
 
 **Files:**
 - Create: `web/src/routes/DataProcessingRoute.tsx`
@@ -410,6 +541,7 @@ Initial UI:
 
 - profile selector
 - run list
+- collection assignment board
 - record intake form
 - stage/status rail
 - records table
@@ -436,7 +568,7 @@ git commit -m "feat: add generic data processing workbench"
 
 ---
 
-## Task 7: Add Challenge Cup Profile Adapter
+## Task 8: Add Challenge Cup Profile Adapter
 
 **Files:**
 - Create: `core/web/services/data_processing_profiles/challenge_cup_research.py`
@@ -451,6 +583,7 @@ Cover:
 - Challenge Cup profile appears as a profile, not as core logic.
 - Its stages map to existing research ingestion concepts.
 - Its publish adapter uses Team Knowledge pending proposal boundary.
+- Its data collection roles bind to research-specific functional Agents without changing the generic core.
 - It can reference existing Team Workflow/CandidateStore IDs without copying their schema into the core.
 
 **Step 2: Run tests**
@@ -474,6 +607,7 @@ Profile owns only:
 - display labels
 - artifact contracts
 - stage mapping
+- collection role bindings
 - allowed tool adapters
 - allowed publish targets
 - bridge metadata to existing Team Workflow when needed
@@ -502,7 +636,7 @@ git commit -m "feat: add challenge cup data processing profile"
 
 ---
 
-## Task 8: Migration/Compatibility Decision
+## Task 9: Migration/Compatibility Decision
 
 **Files:**
 - Inspect: `core/web/services/team_workflow_orchestration_service.py`
