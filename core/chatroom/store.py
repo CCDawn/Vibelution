@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -12,6 +13,7 @@ from typing import Any
 
 
 CHAT_ROOM_STATE_VERSION = 1
+WRITE_RETRY_TIMEOUT_SECONDS = 5.0
 
 
 def utc_now_iso() -> str:
@@ -67,7 +69,17 @@ def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
     try:
         with os.fdopen(fd, "w", encoding="utf-8", newline="") as handle:
             json.dump(payload, handle, ensure_ascii=False, indent=2)
-        os.replace(temp_path, path)
+        deadline = time.monotonic() + WRITE_RETRY_TIMEOUT_SECONDS
+        attempt = 0
+        while True:
+            try:
+                os.replace(temp_path, path)
+                break
+            except PermissionError:
+                attempt += 1
+                if time.monotonic() >= deadline:
+                    raise
+                time.sleep(min(0.05 * attempt, 0.25))
     finally:
         if os.path.exists(temp_path):
             os.remove(temp_path)

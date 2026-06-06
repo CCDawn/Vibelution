@@ -28,6 +28,7 @@ def test_project_agent_bus_plain_message_defaults_to_all_active_agents(tmp_path,
     _use_tmp_project_root(tmp_path, monkeypatch)
     alpha = agent_directory_service.create_agent_instance(display_name="Alpha", direct_session_id="session-alpha")
     beta = agent_directory_service.create_agent_instance(display_name="Beta", direct_session_id="session-beta")
+    steward = agent_directory_service.get_agent(agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID)
     monkeypatch.setattr(
         project_agent_bus_service.session_service,
         "wake_agent_for_inbox_message",
@@ -46,14 +47,16 @@ def test_project_agent_bus_plain_message_defaults_to_all_active_agents(tmp_path,
 
     assert event["messageType"] == "user_guidance"
     assert event["targetScope"] == "all"
-    assert set(event["targetAgentIds"]) == {alpha["agentId"], beta["agentId"]}
-    assert [item["status"] for item in event["deliveries"]] == ["delivered", "delivered"]
+    assert set(event["targetAgentIds"]) == {alpha["agentId"], beta["agentId"], steward["agentId"]}
+    assert len(event["deliveries"]) == 3
+    assert all(item["status"] == "delivered" for item in event["deliveries"])
 
 
 def test_project_agent_bus_all_mention_delivers_to_active_agents_only(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     alpha = agent_directory_service.create_agent_instance(display_name="Alpha", direct_session_id="session-alpha")
     beta = agent_directory_service.create_agent_instance(display_name="Beta", direct_session_id="session-beta")
+    steward = agent_directory_service.get_agent(agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID)
     archived = agent_directory_service.create_agent_instance(display_name="Archived", direct_session_id="session-archived")
     agent_directory_service.archive_agent_instance(archived["agentId"])
     wake_calls = []
@@ -74,12 +77,14 @@ def test_project_agent_bus_all_mention_delivers_to_active_agents_only(tmp_path, 
     event = project_agent_bus_service.send_project_agent_bus_message(content="@全体成员 请同步当前判断")
 
     assert event["targetScope"] == "all"
-    assert set(event["targetAgentIds"]) == {alpha["agentId"], beta["agentId"]}
+    assert set(event["targetAgentIds"]) == {alpha["agentId"], beta["agentId"], steward["agentId"]}
     assert archived["agentId"] not in event["targetAgentIds"]
-    assert [item["status"] for item in event["deliveries"]] == ["delivered", "delivered"]
-    assert len(wake_calls) == 2
+    assert len(event["deliveries"]) == 3
+    assert all(item["status"] == "delivered" for item in event["deliveries"])
+    assert len(wake_calls) == 3
     assert agent_directory_service.count_agent_inbox_messages_for_agent(alpha["agentId"]) == 1
     assert agent_directory_service.count_agent_inbox_messages_for_agent(beta["agentId"]) == 1
+    assert agent_directory_service.count_agent_inbox_messages_for_agent(steward["agentId"]) == 1
     assert agent_directory_service.count_agent_inbox_messages_for_agent(archived["agentId"]) == 0
 
 

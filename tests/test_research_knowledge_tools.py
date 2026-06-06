@@ -131,12 +131,12 @@ def test_research_knowledge_tool_is_llm_facing_but_hidden_without_explicit_allow
     with agent_directory_service.active_agent_runtime(agent["agentId"], session_id="session-tools"):
         visible = agent_directory_service.filter_llm_tools_for_current_agent(tools)
 
-    assert [tool.name for tool in visible] == ["research_knowledge_query_tool"]
+    assert [tool.name for tool in visible] == ["agent_message_tool", "research_knowledge_query_tool"]
 
 
 def test_tool_policy_filtering_stays_structural_not_prompt_text(tmp_path, monkeypatch):
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
-    agent = agent_directory_service.create_agent_instance(display_name="受限工具 Agent")
+    agent = agent_directory_service.create_agent_instance(display_name="受限工具 Agent", primary_mode="general")
     agent_directory_service.update_agent_instance(
         agent["agentId"],
         tool_policy={"allowedTools": ["agent_message_tool"]},
