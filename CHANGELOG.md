@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.39 - 2026-06-06
+
+- Added a shared Agent Turn Runtime facade for chat, self-evolution, and supervised-evaluation runs, producing common runtime metadata and prompt-cache partitions.
+- Wired self-evolution executor turns to record safe `turnRuntime` diagnostics in lifecycle logs without changing run-state, carryover, or transaction semantics.
+- Propagated supervised Agent runtime metadata through harness child-process environment variables so baseline and candidate runs keep isolated cache scopes while reusing the shared turn contract.
+
 ## 0.10.38 - 2026-06-06
 
 - Split prompt-cache usage observation into cache read hits, cache writes, and uncached input tokens across LLM logs, session detail APIs, and the Chat/Coding status UI.
