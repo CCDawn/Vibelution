@@ -1635,20 +1635,25 @@ class SelfEvolvingAgent:
                         break
                     continue
 
-# 调试：打印原始 content 长度
-                processed = self._get_response_processor().process(response)
-                raw_content = processed.raw_content
+# 轻量预解析：先看 raw_content / tool_calls / xml_tool_calls，重活留给 finalize
+                response_preview = self._get_response_processor().preview(response)
+                raw_content = response_preview.raw_content
                 _debug_logger.debug(f"content 长度={len(raw_content)}", tag="RAW")
-                tool_call_count = processed.tool_call_count
-                has_tool_calls = processed.has_tool_calls
+                tool_call_count = response_preview.tool_call_count
+                has_tool_calls = response_preview.has_tool_calls
                 # 检测 XML 格式工具调用（模型有时输出 <invoke> 标签而非标准 tool_calls）
-                if processed.xml_tool_calls:
+                if response_preview.xml_tool_calls:
                     _debug_logger.info(
-                        f"[XML工具调用] 检测到 {len(processed.xml_tool_calls)} 个 XML 工具调用",
+                        f"[XML工具调用] 检测到 {len(response_preview.xml_tool_calls)} 个 XML 工具调用",
                         tag="LLM"
                     )
-                    round_state.add_xml_tool_calls(len(processed.xml_tool_calls))
-                    for xtc in processed.xml_tool_calls:
+                    round_state.add_xml_tool_calls(len(response_preview.xml_tool_calls))
+                    xml_tool_names = [
+                        str(xtc.get("name") or "").strip()
+                        for xtc in response_preview.xml_tool_calls
+                        if str(xtc.get("name") or "").strip()
+                    ]
+                    for xtc in response_preview.xml_tool_calls:
                         tool_name = str(xtc.get("name") or "").strip()
                         if tool_name:
                             turn_tool_names.append(tool_name)
@@ -1678,6 +1683,33 @@ class SelfEvolvingAgent:
                             continue
                         self.tool_lifecycle.execute_tool(xtc, messages)
                     messages.append(AIMessage(content=raw_content))
+                    # 补齐 round_state 的工具使用统计与 token usage telemetry，
+                    # 防止 XML fast-path 让 convergence/命中率统计成为盲区。
+                    round_state.note_response_tools(
+                        len(response_preview.xml_tool_calls),
+                        visible_text=raw_content,
+                        tool_names=xml_tool_names,
+                    )
+                    self._get_response_surface_controller().record_token_usage(
+                        response=response,
+                        round_state=round_state,
+                        current_turn=current_turn,
+                        messages=messages,
+                        raw_content=raw_content,
+                        estimate_output_tokens=estimate_tokens_precise,
+                    )
+                    xml_stop_reason = self._get_turn_outcome_controller().should_stop_for_convergence(
+                        iteration=iteration,
+                        no_new_evidence_steps=round_state.no_new_evidence_steps,
+                        consecutive_tool_only_steps=round_state.consecutive_tool_only_steps,
+                        consecutive_bookkeeping_tool_only_steps=round_state.consecutive_bookkeeping_tool_only_steps,
+                        delegation_failures=round_state.delegation_failures,
+                        total_tool_calls=round_state.total_tool_calls,
+                        substantive_tool_calls=round_state.substantive_tool_calls,
+                    )
+                    if xml_stop_reason:
+                        ui.add_log(xml_stop_reason, "WARN")
+                        break
                     continue
 
                 # ── 感知层触发 ──
@@ -1693,7 +1725,9 @@ class SelfEvolvingAgent:
                 )
 
 # <state> 注入：剥离模型输出中的回显，防止雪球效应
-                processed = self._get_response_processor().process(response, state_block_str)
+                processed = self._get_response_processor().finalize(
+                    response, response_preview, state_block_str
+                )
                 self._apply_active_components_request(processed)
                 self._get_response_surface_controller().apply_state_feedback(
                     processed=processed,

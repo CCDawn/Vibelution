@@ -197,6 +197,42 @@ class TestEstimateMessagesTokens:
         """测试空消息列表"""
         assert estimate_messages_tokens([]) == 0
 
+    def test_estimate_messages_tokens_uses_fingerprint_cache(self):
+        """同一 messages 连续调用应命中缓存（指纹相同），不重复遍历消息。"""
+        from tools import token_manager
+
+        calls = {"n": 0}
+        original = token_manager._estimate_messages_tokens_uncached
+
+        def counting(messages):
+            calls["n"] += 1
+            return original(messages)
+
+        token_manager._estimate_messages_tokens_uncached = counting
+        token_manager._estimate_cache_fingerprint = ()
+        token_manager._estimate_cache_value = 0
+        try:
+            messages = [FakeMessage("hello"), FakeMessage("world")]
+            v1 = estimate_messages_tokens(messages)
+            v2 = estimate_messages_tokens(messages)
+            v3 = estimate_messages_tokens(messages)
+            assert v1 == v2 == v3
+            assert calls["n"] == 1, "同一 messages 连续调用必须命中缓存"
+
+            # append 后指纹应变化（len 变），缓存失效
+            messages.append(FakeMessage("more"))
+            v4 = estimate_messages_tokens(messages)
+            assert calls["n"] == 2
+            assert v4 > v1
+
+            # messages[0] 重写后指纹变化，缓存失效
+            messages[0] = FakeMessage("replaced with much longer content for sure" * 10)
+            v5 = estimate_messages_tokens(messages)
+            assert calls["n"] == 3
+            assert v5 != v4
+        finally:
+            token_manager._estimate_messages_tokens_uncached = original
+
     def test_estimate_messages_with_none_content(self):
         """测试内容为 None 的消息"""
         msg = FakeMessage(None)

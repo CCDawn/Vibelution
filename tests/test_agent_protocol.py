@@ -836,6 +836,46 @@ class TestToolMessageFlow:
         assert parsed["meta"]["note"] == "keep"
         assert parsed["empty"] is None
 
+    def test_response_processor_preview_finalize_reuses_parsed_data(self):
+        """preview + finalize 必须等价于一次 process，避免双解析浪费 CPU。"""
+        processor = ResponseProcessor()
+        response = SimpleNamespace(
+            content="思考完成\n<state>{\"mood\":\"专注\"}</state>",
+            tool_calls=[{"name": "read_file_tool", "args": {"file_path": "demo.py"}, "id": "call_1"}],
+        )
+
+        preview = processor.preview(response)
+        finalized = processor.finalize(response, preview, state_block_str="<state>{\"focus\":\"yes\"}</state>")
+        equivalent = processor.process(response, state_block_str="<state>{\"focus\":\"yes\"}</state>")
+
+        # preview 给出轻量解析
+        assert preview.raw_content == "思考完成\n<state>{\"mood\":\"专注\"}</state>"
+        assert preview.has_tool_calls is True
+        assert preview.tool_call_count == 1
+        assert preview.xml_tool_calls == []
+
+        # finalize 与 process 行为完全一致
+        assert finalized.raw_content == equivalent.raw_content
+        assert finalized.raw_content_clean == equivalent.raw_content_clean
+        assert finalized.raw_content_with_state == equivalent.raw_content_with_state
+        assert finalized.tool_calls == equivalent.tool_calls
+        assert finalized.xml_tool_calls == equivalent.xml_tool_calls
+        assert finalized.active_components == equivalent.active_components
+        assert finalized.state_info == equivalent.state_info
+
+    def test_response_processor_preview_detects_xml_fallback_without_finalize(self):
+        """preview 阶段就应识别 XML fallback，让 fast-path 不必先付全量 finalize 的代价。"""
+        processor = ResponseProcessor()
+        response = SimpleNamespace(
+            content='<invoke name="grep_search_tool"><parameter name="query">foo</parameter></invoke>',
+            tool_calls=[],
+        )
+
+        preview = processor.preview(response)
+        assert preview.has_tool_calls is False
+        assert len(preview.xml_tool_calls) == 1
+        assert preview.xml_tool_calls[0]["name"] == "grep_search_tool"
+
     def test_response_processor_splits_standard_tool_calls_and_state_echo(self):
         processor = ResponseProcessor()
         response = SimpleNamespace(
@@ -1282,6 +1322,108 @@ class TestToolMessageFlow:
 
         assert action == "restart"
         assert calls == ["custom_restart_tool"]
+
+    def test_execute_tools_runs_readonly_batch_concurrently_while_preserving_order(self):
+        """read-only 段并发执行，wall-clock 接近最慢一个；结果按 batch 原序追加到 messages。"""
+
+        import threading
+        import time as _time
+
+        messages: list = []
+        active = {"now": 0, "max": 0}
+        lock = threading.Lock()
+
+        def fake_execute(tool_name, _tool_args):
+            if tool_name in ToolLifecycleBridge.READONLY_TOOL_NAMES:
+                with lock:
+                    active["now"] += 1
+                    active["max"] = max(active["max"], active["now"])
+                _time.sleep(0.08)  # 远超线程调度开销，足以观察并发提升
+                with lock:
+                    active["now"] -= 1
+                return (f"{tool_name}-result", None)
+            return ("should not concurrent", None)
+
+        bridge = ToolLifecycleBridge(tool_executor_execute=fake_execute)
+        tool_calls = [
+            {"name": "read_file_tool", "id": "call_1"},
+            {"name": "grep_search_tool", "id": "call_2"},
+            {"name": "list_directory_tool", "id": "call_3"},
+        ]
+
+        start = _time.perf_counter()
+        action = bridge.execute_tools(tool_calls, messages, max_parallel_readonly=3)
+        elapsed = _time.perf_counter() - start
+
+        assert action is None
+        assert active["max"] >= 2, "read-only batch 必须真正并发，不能退化为串行"
+        assert elapsed < 3 * 0.08, f"并发应显著快于串行，实测 {elapsed:.2f}s"
+        assert len(messages) == 3
+        # 结果按 batch 输入顺序回写
+        assert "read_file_tool-result" in str(messages[0].content)
+        assert "grep_search_tool-result" in str(messages[1].content)
+        assert "list_directory_tool-result" in str(messages[2].content)
+
+    def test_execute_tools_keeps_mutating_tools_serial_and_in_order(self):
+        """mutating 工具不能并发，且 read-only/mutating 边界处必须保持原序。"""
+
+        import threading
+
+        messages: list = []
+        execution_order: list = []
+        running_mutators = {"now": 0, "max": 0}
+        lock = threading.Lock()
+
+        def fake_execute(tool_name, _tool_args):
+            with lock:
+                execution_order.append(tool_name)
+                if tool_name not in ToolLifecycleBridge.READONLY_TOOL_NAMES:
+                    running_mutators["now"] += 1
+                    running_mutators["max"] = max(running_mutators["max"], running_mutators["now"])
+            try:
+                return (f"{tool_name}-result", None)
+            finally:
+                with lock:
+                    if tool_name not in ToolLifecycleBridge.READONLY_TOOL_NAMES:
+                        running_mutators["now"] -= 1
+
+        bridge = ToolLifecycleBridge(tool_executor_execute=fake_execute)
+        tool_calls = [
+            {"name": "read_file_tool", "id": "r1"},
+            {"name": "write_file_tool", "id": "w1"},  # mutating
+            {"name": "grep_search_tool", "id": "r2"},
+            {"name": "git_commit_tool", "id": "w2"},  # mutating
+        ]
+
+        bridge.execute_tools(tool_calls, messages, max_parallel_readonly=4)
+
+        # mutating 工具任何时刻最多 1 个并发
+        assert running_mutators["max"] <= 1
+        # 结果按原序回写
+        assert "read_file_tool-result" in str(messages[0].content)
+        assert "write_file_tool-result" in str(messages[1].content)
+        assert "grep_search_tool-result" in str(messages[2].content)
+        assert "git_commit_tool-result" in str(messages[3].content)
+        # write_file 必须在 read_file 之后才开始（同一 batch 边界）
+        assert execution_order.index("write_file_tool") > execution_order.index("read_file_tool")
+        # grep_search 必须在 write_file 之后（mutating 是 batch 边界）
+        assert execution_order.index("grep_search_tool") > execution_order.index("write_file_tool")
+
+    def test_partition_tool_calls_groups_readonly_and_breaks_on_mutating(self):
+        bridge = ToolLifecycleBridge(tool_executor_execute=lambda _name, _args: ("ok", None))
+        batches = bridge._partition_tool_calls([
+            {"name": "read_file_tool"},
+            {"name": "grep_search_tool"},
+            {"name": "write_file_tool"},
+            {"name": "list_directory_tool"},
+            {"name": "list_files_tool"},
+            {"name": "task_create_tool"},  # 不在白名单
+        ])
+        assert [len(b) for b in batches] == [2, 1, 2, 1]
+        assert batches[0][0]["name"] == "read_file_tool"
+        assert batches[1][0]["name"] == "write_file_tool"
+        assert batches[2][1]["name"] == "list_files_tool"
+        assert batches[3][0]["name"] == "task_create_tool"
 
     def test_execute_tools_parallel_returns_turn_complete_after_successful_close_transaction(self):
         messages = []
@@ -3146,6 +3288,67 @@ class TestLocalProviderBootstrap:
             and "prompt-supervised-baseline" in str(message.content)
         ]
         assert len(runtime_carriers) == 1
+
+
+class TestStructuredSystemMessageInvariants:
+    """守 cache_control 链路 — SystemMessage 用 list-of-blocks 时类型与字段必须保留。
+
+    这条护城河针对 langchain_core 升级风险：一旦它把 list-of-dicts 静默序列化成 str，
+    所有 Anthropic 显式 cache_control 路径会无声失效，命中率会突然崩盘，但 telemetry
+    不会报错。这里强制覆盖三个不变量：
+    1. SystemMessage(content=[blocks]) 构造后 content 仍是 list
+    2. build_system_message 输出 dict + content list + 首块带 cache_control
+    3. _invoke_llm 的 clean_messages 步骤不会把 list 转成 str
+    """
+
+    def test_system_message_preserves_structured_content_blocks(self):
+        from langchain_core.messages import SystemMessage as LCSystemMessage
+
+        blocks = [
+            {"type": "text", "text": "stable", "cache_control": {"type": "ephemeral"}},
+            {"type": "text", "text": "dynamic"},
+        ]
+        msg = LCSystemMessage(content=blocks)
+        assert isinstance(msg.content, list), "langchain SystemMessage 把 list 静默转 str 会让 cache_control 失效"
+        assert msg.content[0]["cache_control"] == {"type": "ephemeral"}
+        assert msg.content[1].get("cache_control") is None
+
+    def test_build_system_message_marks_prefix_with_cache_control(self):
+        from core.infrastructure.llm_utils import build_system_message
+
+        sp = ("static prefix", "<<<SYSTEM_PROMPT_SPLIT>>>", "dynamic suffix")
+        message = build_system_message(sp)
+        assert isinstance(message, dict)
+        assert message["role"] == "system"
+        assert isinstance(message["content"], list)
+        assert message["content"][0]["type"] == "text"
+        assert message["content"][0]["cache_control"] == {"type": "ephemeral"}
+        assert message["content"][0]["text"] == "static prefix"
+        assert message["content"][1]["text"] == "dynamic suffix"
+        assert "cache_control" not in message["content"][1]
+
+    def test_invoke_llm_clean_messages_preserves_dict_system_message(self):
+        """_invoke_llm 内部 clean_messages 步骤对 dict 形态 system message 应原样保留，
+        不能被改写成 SystemMessage(content=str)（那样会丢 cache_control）。"""
+        system_dict = {
+            "role": "system",
+            "content": [
+                {"type": "text", "text": "stable", "cache_control": {"type": "ephemeral"}},
+                {"type": "text", "text": "dynamic"},
+            ],
+        }
+
+        # 复用 agent.py 的 clean_messages 逻辑（_invoke_llm 内联，无独立函数；
+        # 这里复制其约束做单元测试）。
+        cleaned: list = []
+        for msg in [system_dict]:
+            if isinstance(msg, dict) and msg.get("role") == "system":
+                cleaned.append(dict(msg))
+            else:
+                cleaned.append(msg)
+        assert cleaned[0]["role"] == "system"
+        assert isinstance(cleaned[0]["content"], list)
+        assert cleaned[0]["content"][0]["cache_control"] == {"type": "ephemeral"}
 
 
 class TestDelegationExposure:

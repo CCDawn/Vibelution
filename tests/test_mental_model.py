@@ -470,6 +470,64 @@ class TestMentalModel:
         assert "timestamp" in diagnosis.__dict__ or hasattr(diagnosis, "timestamp")
 
 
+class TestMentalSoulCaching:
+    """守 _load_mental_soul 缓存 — sense_state 每轮调用都不应重读 MENTAL_SOUL.md。"""
+
+    @pytest.fixture
+    def temp_workspace(self, tmp_path):
+        workspace = tmp_path / "test_workspace"
+        workspace.mkdir()
+        (workspace / "mental_model").mkdir(parents=True)
+        return workspace
+
+    def test_load_mental_soul_caches_by_mtime(self, temp_workspace, tmp_path, monkeypatch):
+        """同一文件连续调用必须命中缓存；mtime/size 变化后必须失效重读。"""
+        from pathlib import Path
+        soul_dir = tmp_path / "core" / "core_prompt"
+        soul_dir.mkdir(parents=True)
+        soul_path = soul_dir / "MENTAL_SOUL.md"
+        soul_path.write_text("第一版灵魂", encoding="utf-8")
+
+        mental_model_module.reset_mental_model()
+        model = MentalModel(workspace_root=str(temp_workspace))
+        monkeypatch.setattr(model, "_find_project_root", lambda: tmp_path)
+
+        # 第一次读盘
+        v1 = model._load_mental_soul()
+        assert "第一版灵魂" in v1
+
+        # 用 stub 把 read_text 包起来计次，验证后续调用未触发 I/O
+        read_calls = {"n": 0}
+        original_read_text = Path.read_text
+
+        def counting_read_text(self_path, *args, **kwargs):
+            if str(self_path) == str(soul_path):
+                read_calls["n"] += 1
+            return original_read_text(self_path, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "read_text", counting_read_text)
+
+        v2 = model._load_mental_soul()
+        v3 = model._load_mental_soul()
+        assert v1 == v2 == v3
+        assert read_calls["n"] == 0, "缓存命中时不得重读盘"
+
+        # 修改文件触发 mtime/size 变化
+        soul_path.write_text("第二版灵魂内容大幅扩展" * 5, encoding="utf-8")
+        v4 = model._load_mental_soul()
+        assert "第二版" in v4
+        assert read_calls["n"] == 1
+        mental_model_module.reset_mental_model()
+
+    def test_load_mental_soul_returns_fallback_when_file_missing(self, temp_workspace, tmp_path, monkeypatch):
+        mental_model_module.reset_mental_model()
+        model = MentalModel(workspace_root=str(temp_workspace))
+        monkeypatch.setattr(model, "_find_project_root", lambda: tmp_path)  # tmp_path 内无 MENTAL_SOUL.md
+        text = model._load_mental_soul()
+        assert text == "你是意识的感知面向。输出 <state> JSON。"
+        mental_model_module.reset_mental_model()
+
+
 class TestMentalModelIntegration:
     """Integration tests for MentalModel"""
 

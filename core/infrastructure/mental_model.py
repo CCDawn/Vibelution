@@ -855,16 +855,25 @@ class MentalModel:
         """加载感知层系统提示词。
 
         若文件带有 front matter，仅保留正文，避免把文件注释带入感知层 prompt。
+        按 (path, mtime, size) 指纹缓存，避免每轮 sense_state 都重新读盘。
         """
         soul_path = self._find_project_root() / "core" / "core_prompt" / "MENTAL_SOUL.md"
-        if soul_path.exists():
-            content = soul_path.read_text(encoding="utf-8")
-            if content.startswith("---\n"):
-                idx = content.find("\n---\n", 4)
-                if idx != -1:
-                    content = content[idx + 5:].lstrip()
-            return content
-        return "你是意识的感知面向。输出 <state> JSON。"
+        try:
+            stat = soul_path.stat()
+            fingerprint = (str(soul_path), stat.st_mtime_ns, stat.st_size)
+        except FileNotFoundError:
+            return "你是意识的感知面向。输出 <state> JSON。"
+        cached_fp = getattr(self, "_mental_soul_cache_fingerprint", None)
+        if cached_fp == fingerprint:
+            return self._mental_soul_cache_value
+        content = soul_path.read_text(encoding="utf-8")
+        if content.startswith("---\n"):
+            idx = content.find("\n---\n", 4)
+            if idx != -1:
+                content = content[idx + 5:].lstrip()
+        self._mental_soul_cache_fingerprint = fingerprint
+        self._mental_soul_cache_value = content
+        return content
 
     def _extract_state_block(self, content: str) -> dict:
         """从 LLM 输出中提取 JSON"""
