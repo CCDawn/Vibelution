@@ -403,6 +403,8 @@ def _archive_team_in_state(state: dict[str, Any], team: dict[str, Any]) -> dict[
     agent_ids = _unique_active_member_agent_ids(team)
     _ensure_team_member_agents_can_archive(team, agent_ids)
 
+    room_cleanup = _remove_team_member_agents_from_chat_rooms(team, agent_ids)
+
     now = utc_now_iso()
     team["status"] = "archived"
     team["updatedAt"] = now
@@ -418,6 +420,9 @@ def _archive_team_in_state(state: dict[str, Any], team: dict[str, Any]) -> dict[
         fields={
             "archivedAgentIds": archived_agent_ids,
             "archivedAgentCount": len(archived_agent_ids),
+            "removedFromRoomIds": list(room_cleanup.get("changedRoomIds") or []),
+            "removedFromRoomCount": len(list(room_cleanup.get("changedRoomIds") or [])),
+            "roomCleanupByAgentId": dict(room_cleanup.get("removedByAgentId") or {}),
         },
     )
     return get_team(team_id)
@@ -996,6 +1001,24 @@ def _archive_team_member_agents(team: dict[str, Any], agent_ids: list[str], *, r
     return archived_agent_ids
 
 
+def _remove_team_member_agents_from_chat_rooms(team: dict[str, Any], agent_ids: list[str]) -> dict[str, Any]:
+    if not agent_ids:
+        return {"agentIds": [], "changedRoomIds": [], "removedByAgentId": {}}
+    try:
+        return chat_room_service.remove_agents_from_chat_rooms(
+            agent_ids,
+            allow_empty_rooms=True,
+            include_chat_rooms=False,
+            repair_participants=False,
+        )
+    except chat_room_service.ChatRoomBusyError as exc:
+        _record_team_archive_rejected(team, reason="chat_room_busy", error=exc)
+        raise TeamServiceError(str(exc)) from exc
+    except chat_room_service.ChatRoomValidationError as exc:
+        _record_team_archive_rejected(team, reason="chat_room_cleanup_rejected", error=exc)
+        raise TeamServiceError(str(exc)) from exc
+
+
 def _repair_archived_team_member_agents(state: dict[str, Any], *, reason: str, strict: bool) -> bool:
     changed = False
     for team in list(state.get("teams") or []):
@@ -1014,6 +1037,12 @@ def _repair_archived_team_member_agents_for_team(team: dict[str, Any], state: di
         return False
     try:
         _ensure_team_member_agents_can_archive(team, agent_ids)
+    except TeamServiceError:
+        if strict:
+            raise
+        return False
+    try:
+        _remove_team_member_agents_from_chat_rooms(team, agent_ids)
     except TeamServiceError:
         if strict:
             raise
