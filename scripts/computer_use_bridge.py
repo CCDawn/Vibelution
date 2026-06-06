@@ -12,6 +12,7 @@ import argparse
 import base64
 import json
 import os
+import shutil
 import shlex
 import socket
 import struct
@@ -293,9 +294,10 @@ def run_browser_task(payload: dict[str, Any], *, edge: Path, timeout: int) -> di
             actions=actions,
         )
 
-    with tempfile.TemporaryDirectory(prefix="vibelution-cu-") as tmp:
-        screenshot_path = Path(tmp) / "screenshot.png"
-        profile_dir = Path(tmp) / "profile"
+    tmp = Path(tempfile.mkdtemp(prefix="vibelution-cu-"))
+    try:
+        screenshot_path = tmp / "screenshot.png"
+        profile_dir = tmp / "profile"
         command = [
             str(edge),
             "--headless=new",
@@ -346,6 +348,8 @@ def run_browser_task(payload: dict[str, Any], *, edge: Path, timeout: int) -> di
             "durationMs": duration_ms,
             "bridgeSessionId": str(payload.get("session_id") or uuid.uuid4().hex),
         }
+    finally:
+        cleanup_temp_dir(tmp)
 
 
 def run_cdp_browser_task(
@@ -362,8 +366,9 @@ def run_cdp_browser_task(
     screenshot_b64 = ""
     browser: subprocess.Popen[str] | None = None
     require_confirmation = bool(payload.get("require_confirmation", payload.get("requireConfirmation", True)))
-    with tempfile.TemporaryDirectory(prefix="vibelution-cu-") as tmp:
-        profile_dir = Path(tmp) / "profile"
+    tmp = Path(tempfile.mkdtemp(prefix="vibelution-cu-"))
+    try:
+        profile_dir = tmp / "profile"
         remote_port = free_tcp_port()
         command = [
             str(edge),
@@ -434,6 +439,8 @@ def run_cdp_browser_task(
                 screenshot_b64 = capture_screenshot(cdp)
         finally:
             stop_browser_process(browser)
+    finally:
+        cleanup_temp_dir(tmp)
     steps.append({"action": "screenshot", "summary": "Captured sandbox browser screenshot.", "status": "completed"})
     return {
         "status": "completed",
@@ -794,6 +801,24 @@ def stop_browser_process(browser: subprocess.Popen[str] | None) -> None:
             browser.wait(timeout=5)
         except subprocess.TimeoutExpired:
             browser.kill()
+            try:
+                browser.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                pass
+
+
+def cleanup_temp_dir(path: Path) -> None:
+    for attempt in range(5):
+        try:
+            shutil.rmtree(path)
+            return
+        except FileNotFoundError:
+            return
+        except OSError:
+            if attempt == 4:
+                shutil.rmtree(path, ignore_errors=True)
+                return
+            time.sleep(0.1 * (attempt + 1))
 
 
 class Handler(BaseHTTPRequestHandler):

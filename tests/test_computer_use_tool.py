@@ -254,6 +254,119 @@ def test_computer_use_session_tool_reads_confirms_and_cancels_sessions(computer_
     assert cancelled["status"] == "cancelled"
 
 
+def test_computer_use_service_confirm_resumes_provider_confirmation_token(computer_use_tmp, monkeypatch):
+    monkeypatch.setenv("VIBELUTION_COMPUTER_USE_ENABLED", "1")
+    monkeypatch.setenv("VIBELUTION_COMPUTER_USE_BASE_URL", "https://computer-use.invalid")
+
+    calls = []
+
+    def fake_call(request, *, session_id):
+        calls.append(request)
+        if len(calls) == 1:
+            return {
+                "status": "need_confirmation",
+                "summary": "Provider paused before checkout.",
+                "steps": [{"action": "pay", "summary": "Review checkout", "status": "ready"}],
+                "continuation_token": "resume-token-1",
+                "provider_state": {"cursor": "checkout"},
+            }
+        assert request["requireConfirmation"] is False
+        assert request["confirmation"] == "approved_provider_resume"
+        assert request["providerContinuation"]["continuationToken"] == "resume-token-1"
+        assert request["providerContinuation"]["providerState"] == {"cursor": "checkout"}
+        return {
+            "status": "completed",
+            "summary": "Provider resumed after confirmation.",
+            "steps": [{"action": "pay", "summary": "Checkout confirmed", "status": "completed"}],
+            "screenshot_b64": base64.b64encode(PNG_BYTES).decode("ascii"),
+        }
+
+    monkeypatch.setattr(computer_use_service, "_call_open_computer_use", fake_call)
+
+    result = computer_use_service.start_computer_use_task(
+        task="Checkout on example",
+        target_url="https://example.com/cart",
+        allowed_domains="example.com",
+    )
+    stored = computer_use_service._load_session(result["sessionId"])
+    confirmed = computer_use_service.confirm_computer_use_session(
+        result["sessionId"],
+        confirmation="approved_provider_resume",
+    )
+
+    assert result["status"] == "need_confirmation"
+    assert stored["pendingExecution"]["kind"] == "provider_confirmation"
+    assert "resume-token-1" not in json.dumps(result, ensure_ascii=False)
+    assert len(calls) == 2
+    assert confirmed["status"] == "completed"
+    assert confirmed["needsConfirmation"] is False
+    assert confirmed["summary"] == "Provider resumed after confirmation."
+    assert confirmed["screenshotUrl"].startswith(f"/api/computer-use/sessions/{result['sessionId']}/screenshots/")
+    assert "pendingExecution" not in computer_use_service._load_session(result["sessionId"])
+
+
+def test_computer_use_service_provider_confirmation_can_pause_more_than_once(computer_use_tmp, monkeypatch):
+    monkeypatch.setenv("VIBELUTION_COMPUTER_USE_ENABLED", "1")
+    monkeypatch.setenv("VIBELUTION_COMPUTER_USE_BASE_URL", "https://computer-use.invalid")
+
+    calls = []
+
+    def fake_call(request, *, session_id):
+        calls.append(request)
+        if len(calls) == 1:
+            return {
+                "status": "need_confirmation",
+                "summary": "Provider paused before checkout.",
+                "steps": [{"action": "pay", "summary": "Review checkout", "status": "ready"}],
+                "continuation_token": "resume-token-1",
+            }
+        if len(calls) == 2:
+            assert request["confirmation"] == "approved_first_resume"
+            assert request["providerContinuation"]["continuationToken"] == "resume-token-1"
+            return {
+                "status": "need_confirmation",
+                "summary": "Provider paused for final review.",
+                "steps": [{"action": "pay", "summary": "Final review required", "status": "ready"}],
+                "continuation_token": "resume-token-2",
+            }
+        assert request["confirmation"] == "approved_second_resume"
+        assert request["providerContinuation"]["continuationToken"] == "resume-token-2"
+        return {
+            "status": "completed",
+            "summary": "Provider completed after second confirmation.",
+            "steps": [{"action": "pay", "summary": "Checkout confirmed", "status": "completed"}],
+        }
+
+    monkeypatch.setattr(computer_use_service, "_call_open_computer_use", fake_call)
+
+    result = computer_use_service.start_computer_use_task(
+        task="Checkout on example",
+        target_url="https://example.com/cart",
+        allowed_domains="example.com",
+    )
+    first_confirm = computer_use_service.confirm_computer_use_session(
+        result["sessionId"],
+        confirmation="approved_first_resume",
+    )
+    stored_after_first_confirm = computer_use_service._load_session(result["sessionId"])
+    second_confirm = computer_use_service.confirm_computer_use_session(
+        result["sessionId"],
+        confirmation="approved_second_resume",
+    )
+
+    assert result["status"] == "need_confirmation"
+    assert first_confirm["status"] == "need_confirmation"
+    assert first_confirm["needsConfirmation"] is True
+    assert stored_after_first_confirm["pendingExecution"]["kind"] == "provider_confirmation"
+    assert stored_after_first_confirm["pendingExecution"]["continuation"]["continuationToken"] == "resume-token-2"
+    assert "resume-token-1" not in json.dumps(first_confirm, ensure_ascii=False)
+    assert "resume-token-2" not in json.dumps(first_confirm, ensure_ascii=False)
+    assert len(calls) == 3
+    assert second_confirm["status"] == "completed"
+    assert second_confirm["needsConfirmation"] is False
+    assert "pendingExecution" not in computer_use_service._load_session(result["sessionId"])
+
+
 def test_computer_use_service_requires_confirmation_for_high_risk_step(computer_use_tmp, monkeypatch):
     monkeypatch.setenv("VIBELUTION_COMPUTER_USE_ENABLED", "1")
     monkeypatch.setenv("VIBELUTION_COMPUTER_USE_BASE_URL", "https://computer-use.invalid")
@@ -396,6 +509,22 @@ def test_computer_use_bridge_blocks_malformed_action_without_launching_edge():
 
     assert result["status"] == "blocked"
     assert "requires selector" in result["summary"]
+
+
+def test_computer_use_bridge_cleanup_retries_locked_temp_dir(monkeypatch, tmp_path):
+    calls = []
+
+    def fake_rmtree(path, ignore_errors=False):
+        calls.append((path, ignore_errors))
+        if len(calls) == 1:
+            raise PermissionError("locked")
+
+    monkeypatch.setattr(computer_use_bridge.shutil, "rmtree", fake_rmtree)
+    monkeypatch.setattr(computer_use_bridge.time, "sleep", lambda seconds: None)
+
+    computer_use_bridge.cleanup_temp_dir(tmp_path)
+
+    assert calls == [(tmp_path, False), (tmp_path, False)]
 
 
 def test_computer_use_tool_requires_explicit_tool_policy(computer_use_tmp, monkeypatch):

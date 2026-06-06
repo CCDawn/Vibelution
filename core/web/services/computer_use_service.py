@@ -178,8 +178,12 @@ def confirm_computer_use_session(session_id: str, confirmation: str = "approved"
         _append_step(normalized_id, confirmation_step)
         _save_session(payload)
         _record_event("computer_use.task.confirmed", payload, outcome="confirmed")
+        payload.pop("pendingExecution", None)
         try:
-            provider_payload = _call_open_computer_use(pending_request, session_id=normalized_id)
+            provider_payload = _call_open_computer_use(
+                _request_with_confirmation(pending_request, confirmation_text),
+                session_id=normalized_id,
+            )
             result = _normalize_provider_result(provider_payload, session_id=normalized_id, require_confirmation=False)
             combined_steps = list(payload.get("steps") or []) + list(result.get("steps") or [])
             payload.update(result)
@@ -194,7 +198,8 @@ def confirm_computer_use_session(session_id: str, confirmation: str = "approved"
                     "error": f"{type(exc).__name__}: {exc}",
                 }
             )
-        payload.pop("pendingExecution", None)
+        if str(payload.get("status") or "") != "need_confirmation" or not isinstance(payload.get("pendingExecution"), dict):
+            payload.pop("pendingExecution", None)
         payload["needsConfirmation"] = str(payload.get("status") or "") == "need_confirmation"
         payload["durationMs"] = _duration_ms(started)
         payload["updatedAt"] = _now()
@@ -323,6 +328,7 @@ def _call_open_computer_use(request: dict[str, Any], *, session_id: str) -> dict
             "max_steps": request["maxSteps"],
             "require_confirmation": request["requireConfirmation"],
             "session_id": session_id,
+            **_provider_resume_fields(request),
         },
         timeout=int(request["timeoutSeconds"]),
     )
@@ -349,7 +355,7 @@ def _normalize_provider_result(payload: dict[str, Any], *, session_id: str, requ
     if require_confirmation and (high_risk or bool(payload.get("needs_confirmation") or payload.get("needsConfirmation"))):
         status = "need_confirmation"
     image_id, screenshot_url = _store_provider_screenshot(session_id, payload)
-    return {
+    result = {
         "status": status,
         "summary": summary or _default_summary(status),
         "steps": steps,
@@ -359,6 +365,10 @@ def _normalize_provider_result(payload: dict[str, Any], *, session_id: str, requ
         "error": str(payload.get("error") or "").strip(),
         "updatedAt": _now(),
     }
+    pending = _provider_pending_execution_payload(payload, status=status)
+    if pending:
+        result["pendingExecution"] = pending
+    return result
 
 
 def _normalize_steps(value: Any) -> list[dict[str, Any]]:
@@ -446,23 +456,104 @@ def _pending_execution_payload(request: dict[str, Any], *, reason: str) -> dict[
     }
 
 
+def _provider_pending_execution_payload(payload: dict[str, Any], *, status: str) -> dict[str, Any]:
+    if status != "need_confirmation":
+        return {}
+    continuation = _coerce_provider_continuation(payload)
+    if not continuation:
+        return {}
+    return {
+        "kind": "provider_confirmation",
+        "reason": "provider_confirmation_required",
+        "createdAt": _now(),
+        "continuation": continuation,
+    }
+
+
 def _pending_request_for_resume(payload: dict[str, Any]) -> dict[str, Any]:
     pending = payload.get("pendingExecution")
-    if not isinstance(pending, dict) or pending.get("kind") != "explicit_actions":
+    if not isinstance(pending, dict):
         return {}
-    request = pending.get("request")
-    if not isinstance(request, dict):
+    kind = str(pending.get("kind") or "")
+    if kind == "explicit_actions":
+        request = pending.get("request")
+        if not isinstance(request, dict):
+            return {}
+        return _normalize_request(
+            task=request.get("task"),
+            target_url=request.get("targetUrl"),
+            allowed_domains=request.get("allowedDomains"),
+            actions=request.get("actions"),
+            max_steps=request.get("maxSteps"),
+            require_confirmation=False,
+            mode=request.get("mode"),
+            timeout_seconds=request.get("timeoutSeconds"),
+        )
+    if kind == "provider_confirmation":
+        continuation = pending.get("continuation")
+        if not isinstance(continuation, dict):
+            return {}
+        request = _normalize_request(
+            task=payload.get("task"),
+            target_url=payload.get("targetUrl"),
+            allowed_domains=payload.get("allowedDomains"),
+            actions=[],
+            max_steps=payload.get("maxSteps"),
+            require_confirmation=False,
+            mode=payload.get("mode"),
+            timeout_seconds=payload.get("timeoutSeconds"),
+        )
+        request["providerContinuation"] = continuation
+        return request
+    return {}
+
+
+def _coerce_provider_continuation(payload: dict[str, Any]) -> dict[str, Any]:
+    continuation: dict[str, Any] = {}
+    for source_key, target_key in (
+        ("continuation_token", "continuationToken"),
+        ("continuationToken", "continuationToken"),
+        ("confirmation_token", "confirmationToken"),
+        ("confirmationToken", "confirmationToken"),
+        ("provider_state", "providerState"),
+        ("providerState", "providerState"),
+        ("resume_payload", "resumePayload"),
+        ("resumePayload", "resumePayload"),
+    ):
+        if source_key not in payload:
+            continue
+        value = payload.get(source_key)
+        if isinstance(value, (str, int, float, bool)) or value is None:
+            continuation[target_key] = value
+        elif isinstance(value, (dict, list)):
+            continuation[target_key] = value
+    return continuation
+
+
+def _provider_resume_fields(request: dict[str, Any]) -> dict[str, Any]:
+    continuation = request.get("providerContinuation")
+    if not isinstance(continuation, dict) or not continuation:
         return {}
-    return _normalize_request(
-        task=request.get("task"),
-        target_url=request.get("targetUrl"),
-        allowed_domains=request.get("allowedDomains"),
-        actions=request.get("actions"),
-        max_steps=request.get("maxSteps"),
-        require_confirmation=False,
-        mode=request.get("mode"),
-        timeout_seconds=request.get("timeoutSeconds"),
-    )
+    fields: dict[str, Any] = {
+        "confirmed": True,
+        "confirmation": str(request.get("confirmation") or "approved"),
+        "provider_continuation": continuation,
+    }
+    for source, target in (
+        ("continuationToken", "continuation_token"),
+        ("confirmationToken", "confirmation_token"),
+        ("providerState", "provider_state"),
+        ("resumePayload", "resume_payload"),
+    ):
+        if source in continuation:
+            fields[target] = continuation[source]
+    return fields
+
+
+def _request_with_confirmation(request: dict[str, Any], confirmation: str) -> dict[str, Any]:
+    if not request:
+        return {}
+    return {**request, "confirmation": str(confirmation or "approved").strip() or "approved"}
 
 
 def _reindex_steps(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
