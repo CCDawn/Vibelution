@@ -227,6 +227,48 @@ def test_team_workflow_routes_list_and_validate_candidate_store(tmp_path, monkey
     assert validation_response.json()["summary"]["errorCount"] >= 2
 
 
+def test_team_workflow_route_returns_knowledge_ingestion_status(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+
+    def fake_status(team_id):
+        return {
+            "schemaVersion": 1,
+            "teamId": team_id,
+            "workflowId": "challenge-cup-research-flow",
+            "workflowKind": "challenge_cup_research",
+            "status": "needs_review",
+            "summary": {
+                "candidateCount": 2,
+                "pendingProposalCount": 1,
+                "formalKnowledgeItemCount": 0,
+                "actionItemCount": 1,
+            },
+            "stages": [{"stageId": "knowledge_review", "status": "needs_review"}],
+            "actionItems": [{"code": "knowledge_proposal_pending_review", "severity": "needs_review"}],
+            "officialBoundary": {
+                "candidateGraphWritesOfficialGraph": False,
+                "writesOfficialKnowledge": False,
+                "writesOfficialRag": False,
+                "writesOfficialGraph": False,
+            },
+            "knowledgeBases": [],
+        }
+
+    monkeypatch.setattr(team_workflows, "get_knowledge_ingestion_status", fake_status)
+    client = _client()
+    team = client.post("/api/teams", json={"name": "挑战杯科研团队"}).json()
+
+    response = client.get(f"/api/teams/{team['teamId']}/workflow-orchestration/knowledge-ingestion/status")
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["teamId"] == team["teamId"]
+    assert payload["status"] == "needs_review"
+    assert payload["summary"]["pendingProposalCount"] == 1
+    assert payload["actionItems"][0]["code"] == "knowledge_proposal_pending_review"
+    assert payload["officialBoundary"]["candidateGraphWritesOfficialGraph"] is False
+
+
 def test_team_workflow_routes_extract_candidate_source_pages(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     client = _client()
