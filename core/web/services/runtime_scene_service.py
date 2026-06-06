@@ -15,6 +15,7 @@ from core.web.services.log_diagnostics import analyze_log_content
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 LAUNCHER_STATE_PATH = PROJECT_ROOT / ".runtime" / "launcher" / "state.json"
 MAX_TEXT_CHARS = 200_000
+MAX_PACKAGE_INDEX_SEARCH_TEXT_CHARS = 6_000
 BROWSER_TELEMETRY_RAW_PATH = "raw/browser.telemetry.log"
 BROWSER_TELEMETRY_COMPONENT = "browser_page"
 BROWSER_MEMORY_INDEX_MIN_SECONDS = 300.0
@@ -23,6 +24,13 @@ BACKEND_API_RAW_PATH = "raw/backend.api.log"
 BACKEND_COMPONENT = "backend"
 CONFIG_MODEL_DISCOVERY_ENDPOINT = "/api/config/discover-models"
 OPERATIONAL_CLIENT_ERROR_PATHS = {CONFIG_MODEL_DISCOVERY_ENDPOINT}
+DIAGNOSTIC_PROBE_404_PATHS = {
+    "/api/runtime",
+    "/api/runtime/status",
+}
+TEST_CLIENT_HOSTS = {"testclient"}
+AGENT_DIRECTORY_TRANSIENT_SLOW_TOTAL_MS = 8_000.0
+AGENT_DIRECTORY_TRANSIENT_SLOW_REPEAT_LIMIT = 2
 TIMELINE_PATH = "timeline.jsonl"
 LIFECYCLE_PATH = "lifecycle.jsonl"
 PACKAGE_INDEX_PATH = "package_index.json"
@@ -607,7 +615,19 @@ def record_backend_api_event(payload: dict[str, Any]) -> dict[str, Any]:
     status_code = _coerce_int(payload.get("status_code"), default=0)
     duration_ms = _coerce_float(payload.get("duration_ms"), default=0.0)
     path_template = _truncate_text(str(payload.get("path_template") or path), 240)
-    is_operational_client_error = status_code >= 400 and path_template in OPERATIONAL_CLIENT_ERROR_PATHS
+    client = _truncate_text(str(payload.get("client") or ""), 160)
+    is_diagnostic_probe = _is_diagnostic_probe_404(
+        method=method,
+        path=path,
+        path_template=path_template,
+        status_code=status_code,
+    )
+    is_test_client_probe = _is_test_client_client_error(client=client, status_code=status_code)
+    is_operational_client_error = status_code >= 400 and (
+        path_template in OPERATIONAL_CLIENT_ERROR_PATHS
+        or is_diagnostic_probe
+        or is_test_client_probe
+    )
     level = "error" if status_code >= 500 else "info" if is_operational_client_error else "warning" if status_code >= 400 else "info"
     outcome = (
         "failed"
@@ -631,10 +651,12 @@ def record_backend_api_event(payload: dict[str, Any]) -> dict[str, Any]:
             "statusCode": status_code,
             "durationMs": round(duration_ms, 2),
             "query": _truncate_text(str(payload.get("query") or ""), 240),
-            "client": _truncate_text(str(payload.get("client") or ""), 160),
+            "client": client,
             "exceptionType": _truncate_text(str(payload.get("exception_type") or ""), 120),
             "exceptionMessage": _truncate_text(str(payload.get("exception_message") or ""), 320),
             "operationalClientError": is_operational_client_error,
+            "diagnosticProbe": is_diagnostic_probe,
+            "testClientProbe": is_test_client_probe,
         }
     )
 
@@ -1745,11 +1767,14 @@ def _runtime_scene_summary_counts(scene_dir: Path) -> dict[str, int]:
 
 def _count_runtime_scene_files(scene_dir: Path, relative_path: str) -> int:
     target = scene_dir / relative_path
-    if target.is_file():
-        return 1
-    if not target.is_dir():
+    try:
+        if target.is_file():
+            return 1
+        if not target.is_dir():
+            return 0
+        return sum(1 for item in _iter_runtime_scene_descendants(target) if _is_readable_file(item))
+    except OSError:
         return 0
-    return sum(1 for item in target.rglob("*") if item.is_file())
 
 
 def _runtime_scene_summary_sections() -> dict[str, dict[str, str]]:
@@ -1846,7 +1871,13 @@ def _runtime_scene_lightweight_package_index(
     package = manifest.get("package") if isinstance(manifest.get("package"), dict) else {}
     diagnosis = summary.get("diagnosis") if isinstance(summary.get("diagnosis"), dict) else None
     if isinstance(diagnosis, dict):
-        return _runtime_scene_package_index_from_diagnosis(scene_dir, manifest, scene_id, diagnosis)
+        return _runtime_scene_package_index_from_diagnosis(
+            scene_dir,
+            manifest,
+            scene_id,
+            diagnosis,
+            cached_package=package_sidecar if package_sidecar else package,
+        )
     return _runtime_scene_base_package_index(
         scene_dir,
         manifest,
@@ -1860,8 +1891,15 @@ def _runtime_scene_package_index_from_diagnosis(
     manifest: dict,
     scene_id: str,
     diagnosis: dict[str, Any],
+    *,
+    cached_package: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    package_index = _runtime_scene_base_package_index(scene_dir, manifest, scene_id)
+    package_index = _runtime_scene_base_package_index(
+        scene_dir,
+        manifest,
+        scene_id,
+        cached_package=cached_package,
+    )
     tags = list(package_index["tags"])
     diagnosis_tags = _runtime_scene_diagnosis_tags(diagnosis)
     tags = [*tags, *[tag for tag in diagnosis_tags if tag not in tags]]
@@ -1937,7 +1975,6 @@ def _runtime_scene_base_package_index(
             str(manifest.get("status") or ""),
             str(manifest.get("result") or ""),
             str(manifest.get("stop_reason") or ""),
-            str(cached.get("search_text") or ""),
             *tags,
         ]
     )
@@ -2055,7 +2092,21 @@ def _join_index_key_parts(parts: list[str]) -> str:
 
 
 def _join_search_text(parts: list[str]) -> str:
-    return " ".join(str(part or "").strip() for part in parts if str(part or "").strip())
+    chunks: list[str] = []
+    seen: set[str] = set()
+    for part in parts:
+        text = " ".join(str(part or "").strip().split())
+        if not text:
+            continue
+        key = text.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        chunks.append(text)
+    joined = " ".join(chunks)
+    if len(joined) <= MAX_PACKAGE_INDEX_SEARCH_TEXT_CHARS:
+        return joined
+    return joined[:MAX_PACKAGE_INDEX_SEARCH_TEXT_CHARS].rstrip() + " ..."
 
 
 def _slugify_index_token(value: str, *, default: str) -> str:
@@ -2314,21 +2365,48 @@ def _load_launcher_state() -> dict[str, Any]:
 def _list_raw_files(scene_dir: Path) -> list[dict]:
     raw_dir = scene_dir / "raw"
     items: list[dict] = []
-    if not raw_dir.exists() or not raw_dir.is_dir():
+    try:
+        if not raw_dir.exists() or not raw_dir.is_dir():
+            return items
+    except OSError:
         return items
-    for file_path in sorted(raw_dir.rglob("*")):
-        if not file_path.is_file():
+    for file_path in _iter_runtime_scene_descendants(raw_dir):
+        if not _is_readable_file(file_path):
             continue
         relative = file_path.relative_to(scene_dir).as_posix()
+        size = _runtime_scene_file_size(file_path)
+        if size is None:
+            continue
         items.append(
             {
                 "path": relative,
                 "label": RAW_LABELS.get(relative, file_path.name),
-                "size": file_path.stat().st_size,
+                "size": size,
                 "language": LANGUAGE_BY_SUFFIX.get(file_path.suffix.lower(), "text"),
             }
         )
     return items
+
+
+def _iter_runtime_scene_descendants(root: Path) -> list[Path]:
+    try:
+        return sorted(root.rglob("*"))
+    except OSError:
+        return []
+
+
+def _is_readable_file(path: Path) -> bool:
+    try:
+        return path.is_file()
+    except OSError:
+        return False
+
+
+def _runtime_scene_file_size(path: Path) -> int | None:
+    try:
+        return path.stat().st_size
+    except OSError:
+        return None
 
 
 def _list_conversation_logs(scene_dir: Path) -> list[dict[str, Any]]:
@@ -2438,17 +2516,23 @@ def _runtime_scene_research_summary_event(event: dict[str, Any] | None) -> dict[
 def _list_package_files(scene_dir: Path, relative_dir: str, *, label_prefix: str) -> list[dict[str, Any]]:
     root = scene_dir / relative_dir
     items: list[dict[str, Any]] = []
-    if not root.exists() or not root.is_dir():
+    try:
+        if not root.exists() or not root.is_dir():
+            return items
+    except OSError:
         return items
-    for file_path in sorted(root.rglob("*")):
-        if not file_path.is_file():
+    for file_path in _iter_runtime_scene_descendants(root):
+        if not _is_readable_file(file_path):
             continue
         relative = file_path.relative_to(scene_dir).as_posix()
+        size = _runtime_scene_file_size(file_path)
+        if size is None:
+            continue
         items.append(
             {
                 "path": relative,
                 "label": f"{label_prefix}: {file_path.stem}",
-                "size": file_path.stat().st_size,
+                "size": size,
                 "language": LANGUAGE_BY_SUFFIX.get(file_path.suffix.lower(), "text"),
                 "updatedAt": _file_timestamp(file_path),
             }
@@ -2823,6 +2907,7 @@ def _runtime_scene_issue_state(events: list[dict]) -> dict[str, Any]:
     wrapped_failure_context = _runtime_scene_wrapped_failure_context(events)
     browser_lifecycle_context = _runtime_scene_browser_lifecycle_context(events)
     resource_lease_context = _runtime_scene_resource_lease_conflict_context(events)
+    event_repeat_counts = _runtime_scene_event_repeat_counts(events)
     signals: list[dict[str, Any]] = []
     for index, event in enumerate(events):
         severity = _runtime_scene_event_severity(event)
@@ -2834,6 +2919,7 @@ def _runtime_scene_issue_state(events: list[dict]) -> dict[str, Any]:
             wrapped_failure_context=wrapped_failure_context,
             browser_lifecycle_context=browser_lifecycle_context,
             resource_lease_context=resource_lease_context,
+            event_repeat_counts=event_repeat_counts,
         )
         diagnosis_event = _runtime_scene_diagnosis_event(event, startup_context=startup_context)
         signals.append(
@@ -2937,6 +3023,14 @@ def _runtime_scene_issue_clusters(signals: list[dict[str, Any]]) -> list[dict[st
     clusters = [clusters_by_key[key] for key in cluster_order]
     clusters.sort(key=_runtime_scene_issue_cluster_sort_key)
     return clusters
+
+
+def _runtime_scene_event_repeat_counts(events: list[dict[str, Any]]) -> dict[tuple[str, ...], int]:
+    counts: dict[tuple[str, ...], int] = {}
+    for event in events:
+        key = _runtime_scene_issue_cluster_key(event)
+        counts[key] = counts.get(key, 0) + 1
+    return counts
 
 
 def _runtime_scene_issue_cluster_key(event: dict[str, Any]) -> tuple[str, ...]:
@@ -3320,6 +3414,7 @@ def _runtime_scene_signal_kind(
     wrapped_failure_context: dict[str, Any] | None = None,
     browser_lifecycle_context: dict[str, Any] | None = None,
     resource_lease_context: dict[str, Any] | None = None,
+    event_repeat_counts: dict[tuple[str, ...], int] | None = None,
 ) -> str:
     fields = event.get("fields") if isinstance(event.get("fields"), dict) else {}
     if str(event.get("eventCode") or "") == "conversation.next_state_signal.recorded":
@@ -3334,6 +3429,8 @@ def _runtime_scene_signal_kind(
         return "control"
     if _runtime_scene_is_expected_resource_lease_conflict(event, resource_lease_context=resource_lease_context):
         return "policy"
+    if _runtime_scene_is_transient_agent_directory_slow_event(event, event_repeat_counts=event_repeat_counts):
+        return "policy"
     if _runtime_scene_is_expected_runtime_manager_block(event):
         return "policy"
     if _runtime_scene_is_expected_work_run_manager_block(event):
@@ -3347,6 +3444,27 @@ def _runtime_scene_signal_kind(
         if str(fields.get("source") or "").strip().lower() == "built_in":
             return "policy"
     return "problem"
+
+
+def _runtime_scene_is_transient_agent_directory_slow_event(
+    event: dict[str, Any],
+    *,
+    event_repeat_counts: dict[tuple[str, ...], int] | None = None,
+) -> bool:
+    if str(event.get("component") or "").strip() != "agent_directory":
+        return False
+    if str(event.get("phase") or "").strip() != "list_agents":
+        return False
+    if str(event.get("eventCode") or "").strip() != "agent_directory.list_agents.slow":
+        return False
+    fields = event.get("fields") if isinstance(event.get("fields"), dict) else {}
+    timings = fields.get("timingsMs") if isinstance(fields.get("timingsMs"), dict) else {}
+    total_ms = _coerce_float(timings.get("total"), default=0.0)
+    if total_ms <= 0 or total_ms >= AGENT_DIRECTORY_TRANSIENT_SLOW_TOTAL_MS:
+        return False
+    repeat_counts = event_repeat_counts if isinstance(event_repeat_counts, dict) else {}
+    repeat_count = int(repeat_counts.get(_runtime_scene_issue_cluster_key(event)) or 1)
+    return repeat_count <= AGENT_DIRECTORY_TRANSIENT_SLOW_REPEAT_LIMIT
 
 
 def _runtime_scene_diagnosis_event(
@@ -3557,6 +3675,28 @@ def _runtime_scene_event_endpoint(event: dict[str, Any]) -> str:
     return ""
 
 
+def _is_diagnostic_probe_404(
+    *,
+    method: str,
+    path: str,
+    path_template: str,
+    status_code: int,
+) -> bool:
+    if int(status_code or 0) != 404:
+        return False
+    normalized_method = str(method or "").strip().upper()
+    if normalized_method not in {"GET", "HEAD"}:
+        return False
+    return _normalize_endpoint_path(path_template) in DIAGNOSTIC_PROBE_404_PATHS or _normalize_endpoint_path(path) in DIAGNOSTIC_PROBE_404_PATHS
+
+
+def _is_test_client_client_error(*, client: str, status_code: int) -> bool:
+    if not (400 <= int(status_code or 0) < 500):
+        return False
+    normalized_client = str(client or "").strip().lower()
+    return normalized_client in TEST_CLIENT_HOSTS
+
+
 def _normalize_endpoint_path(value: object) -> str:
     text = str(value or "").strip()
     if not text:
@@ -3687,8 +3827,16 @@ def _runtime_scene_component_evidence_path(component: str) -> str:
     if normalized in {"agent", "llm", "runtime_manager", "tool_executor", "work_run"}:
         return f"{EVENTS_DIR}/{normalized}.jsonl"
     if normalized:
-        return f"{EVENTS_DIR}/{_slugify_index_token(normalized, default='component')}.jsonl"
+        return f"{EVENTS_DIR}/{_runtime_scene_event_component_filename(normalized)}"
     return TIMELINE_PATH
+
+
+def _runtime_scene_event_component_filename(component: str) -> str:
+    token = str(component or "").strip().lower()
+    token = "".join(char if char.isalnum() or char in {"_", "-"} else "_" for char in token)
+    token = "_".join(part for part in token.split("_") if part)
+    token = token.strip("-_.")
+    return f"{token or 'component'}.jsonl"
 
 
 def _runtime_scene_signal_has_later_resolution(events: list[dict], signal: dict[str, Any]) -> bool:
@@ -3737,10 +3885,30 @@ def _runtime_scene_resolution_event_matches(
         return False
     if str(candidate.get("component") or "") != str(source.get("component") or ""):
         return False
+    if _runtime_scene_agent_model_reference_resolution_matches(candidate, source):
+        return True
     if identity:
         candidate_identity = _runtime_scene_event_identity(candidate)
         return any(candidate_identity.get(key) == value for key, value in identity.items())
     return str(candidate.get("phase") or "") == str(source.get("phase") or "")
+
+
+def _runtime_scene_agent_model_reference_resolution_matches(
+    candidate: dict[str, Any],
+    source: dict[str, Any],
+) -> bool:
+    if str(source.get("component") or "") != "agent_config":
+        return False
+    if str(source.get("phase") or "") != "model_binding":
+        return False
+    source_code = str(source.get("eventCode") or "").strip()
+    if source_code not in {
+        "agent_config.unresolved_model_reference",
+        "agent_config.unresolved_chat_room_participant_model_reference",
+        "agent_config.model_references.unresolved",
+    }:
+        return False
+    return str(candidate.get("eventCode") or "").strip() == "agent_config.model_references.resolved"
 
 
 def _runtime_scene_first_ranked_signal(signals: list[dict[str, Any]]) -> dict[str, Any] | None:
@@ -4450,7 +4618,19 @@ def _runtime_scene_is_operational_client_error_event(event: dict) -> bool:
         return False
     endpoint = _runtime_scene_event_endpoint(event)
     if endpoint not in OPERATIONAL_CLIENT_ERROR_PATHS:
-        return False
+        method = str(fields.get("method") or "").strip().upper()
+        path = str(fields.get("path") or "").strip()
+        path_template = str(fields.get("pathTemplate") or endpoint).strip()
+        status_code = _runtime_scene_event_status_code(event)
+        client = str(fields.get("client") or "").strip()
+        if _is_test_client_client_error(client=client, status_code=status_code):
+            return True
+        return _is_diagnostic_probe_404(
+            method=method,
+            path=path,
+            path_template=path_template,
+            status_code=status_code,
+        )
     status_code = _runtime_scene_event_status_code(event)
     return 400 <= status_code < 500
 
