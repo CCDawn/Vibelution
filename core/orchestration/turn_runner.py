@@ -7,8 +7,11 @@ running one Agent Turn without importing the top-level ``agent.py`` entrypoint.
 from __future__ import annotations
 
 import inspect
+from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import Any, Callable
+
+from core.llm.payload_builder import prompt_cache_partition_scope
 
 
 AgentFactory = Callable[..., Any]
@@ -104,6 +107,7 @@ def run_existing_agent_single_turn(
     initial_prompt: str,
     disable_tools: bool = False,
     attachments: list[dict[str, Any]] | None = None,
+    prompt_cache_partition: str = "",
 ) -> Any:
     """Run one Turn on an already-created Agent with optional feature probing."""
 
@@ -125,7 +129,10 @@ def run_existing_agent_single_turn(
         kwargs["attachments"] = normalized_attachments
     if disable_tools and signature is not None and "disable_tools" in signature.parameters:
         kwargs["disable_tools"] = True
-    return runner(**kwargs)
+    partition = str(prompt_cache_partition or "").strip()
+    scope = prompt_cache_partition_scope(partition) if partition else nullcontext()
+    with scope:
+        return runner(**kwargs)
 
 
 def run_agent_single_turn(
