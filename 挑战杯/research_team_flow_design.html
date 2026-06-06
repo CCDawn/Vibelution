@@ -347,7 +347,7 @@
                 </div>
 <div class="service-row">
                   <strong>图谱展示层</strong>
-                  <span>候选图谱只补 candidate_graph.json；正式图谱复用 /api/memory/knowledge-graph。</span>
+                  <span>候选图谱首版由 Teams 工作台读取 CandidateStore candidate_graph payload；正式图谱复用 /api/memory/knowledge-graph。</span>
                 </div>
           </div>
         </div>
@@ -388,7 +388,7 @@
                 </div>
 <div class="service-row">
                   <b>candidate_graph_builder</b>
-                  <span>已落地后端/API：生成 candidate_graph 候选快照、断链报告、未审节点清单和 candidate_only officialBoundary；前端图谱读取仍待接。</span>
+                  <span>已落地后端/API：生成 candidate_graph 候选快照、断链报告、未审节点清单和 candidate_only officialBoundary；Teams 工作台已接入首版候选图谱读取、刷新和 SVG 预览。</span>
                 </div>
 <div class="service-row">
                   <b>research_agent_binding</b>
@@ -786,7 +786,7 @@
 <div class="blueprint-row">
               <b>M4</b>
               <strong>证据复核与候选图谱</strong>
-              <span>candidate_graph builder 后端/API 已落地；review_prefilter 已补 review_record 候选门禁，必须含 candidateIds、checklist、comments、requiredChanges、needsDecision，且禁止写最终 decision。</span>
+              <span>candidate_graph builder 后端/API 已落地；Teams 科研流程面板已接入 latest candidate_graph SVG 预览；review_prefilter 已补 review_record 候选门禁，必须含 candidateIds、checklist、comments、requiredChanges、needsDecision，且禁止写最终 decision。</span>
               <span>candidate_graph_visible 和 review_prefiltered 都只进入 CandidateStore；断链进入 broken_links，带最终 decision 的 prefilter 进入 review_needs_revision，不进入正式知识库/RAG/图谱。</span>
             </div>
 <div class="blueprint-row">
@@ -868,8 +868,8 @@
 <div class="agent-row">
         <b>08</b>
         <strong>Candidate Graph Preview Agent</strong>
-        <span>后端/API 已可生成候选图谱快照；前端可视化读取仍待接</span>
-        <span>candidate_graph 候选快照生成 / 候选节点/边预览 payload / 断链报告 / 未审节点清单 / 候选/正式边界标识</span>
+        <span>后端/API 已可生成候选图谱快照；Teams 工作台科研流程面板已接入首版 SVG 可视化读取</span>
+        <span>candidate_graph 候选快照生成 / 候选节点/边预览 payload / 断链报告 / 未审节点清单 / 候选/正式边界标识 / Teams SVG 候选图谱面板 / 手动刷新 candidate_only 快照</span>
         <span>确认候选图谱只作预览，不作为正式知识证据使用。</span>
       </div>
 <div class="agent-row">
@@ -925,8 +925,8 @@
       </div>
 <div class="feature-row">
         <strong>候选图谱预览</strong>
-        <span>candidate_graph.json、断链报告、候选/正式边界显示；现有 Memory Graph 只能承接正式知识结构视图</span>
-        <b class="status-pill">需新设计</b>
+        <span>CandidateStore candidate_graph payload、断链报告、候选/正式边界显示；Teams 工作台已接入首版 SVG 读取面，现有 Memory Graph 只承接正式知识结构视图</span>
+        <b class="status-pill">已接入首版</b>
       </div>
 <div class="feature-row">
         <strong>正式图谱同步</strong>
@@ -982,7 +982,7 @@
         <strong>记忆知识图谱</strong>
         <span>/api/memory/knowledge-graph 和 MemoryRoute 知识图谱视图已存在</span>
         <b class="status-pill partial">部分匹配</b>
-        <span>适合展示正式 Team/Agent/KnowledgeBase/KnowledgeItem 结构；候选图谱 candidate_graph.json 仍需独立设计。</span>
+        <span>适合展示正式 Team/Agent/KnowledgeBase/KnowledgeItem 结构；候选图谱首版在 Teams 工作台读取 CandidateStore 快照，不混入正式 Memory Graph。</span>
       </div>
 <div class="alignment-row">
         <strong>PDF/本地资料解析</strong>
@@ -1402,7 +1402,7 @@
                 <span class="num">08</span>
                 <h3>候选图谱预览</h3>
                 <p>让团队先看到研究链路，但不污染正式知识图谱。</p>
-                <div class="tag-row"><span class="tag done">后端切片已落地</span><span class="tag">Candidate Graph Preview Agent</span></div>
+                <div class="tag-row"><span class="tag done">Teams 可视化已接入</span><span class="tag">Candidate Graph Preview Agent</span></div>
               </a>
 <a class="node-card" href="research_flow_pages/09-official-graph.html">
                 <span class="num">09</span>
