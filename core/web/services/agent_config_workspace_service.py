@@ -7,13 +7,14 @@ from datetime import datetime, timezone
 from time import perf_counter
 from typing import Any
 
-from core.orchestration.context_engine import list_agent_runs_for_agent
+from core.orchestration.context_engine import list_agent_runs_for_agents
 
 from . import chat_room_service, config_service
 from .agent_directory_service import agent_persona_profile_has_content
 from .agent_directory_service import agent_task_profile_has_content
 from .agent_directory_service import AGENT_LLM_BINDING_SLOTS
 from .agent_directory_service import agent_dialogue_model_id
+from .agent_directory_service import build_agent_policy_options
 from .agent_directory_service import list_agents
 from .agent_directory_service import list_agent_policy_options
 from .agent_directory_service import normalize_agent_llm_bindings
@@ -23,6 +24,7 @@ from .runtime_scene_service import record_runtime_scene_event
 
 
 SCHEMA_VERSION = 1
+RUNTIME_HISTORY_LOAD_ERROR_KEY = "__load_error__"
 AGENT_LLM_SLOT_DEFINITIONS = (
     {
         "slot": "dialogue",
@@ -87,7 +89,7 @@ def get_agent_config_workspace() -> dict[str, Any]:
     config_workspace = _timed_stage(timings, "model_config", _safe_config_workspace)
     chat_rooms = _timed_stage(timings, "chat_rooms", _safe_chat_rooms)
     teams = _timed_stage(timings, "teams", _safe_teams)
-    policy_options = _timed_stage(timings, "policy_options", _safe_policy_options)
+    policy_options = _timed_stage(timings, "policy_options", lambda: _safe_policy_options(agents=agents))
 
     agent_refs = {str(agent.get("agentId") or ""): agent for agent in agents if str(agent.get("agentId") or "")}
     active_agent_ids = {
@@ -133,7 +135,12 @@ def get_agent_config_workspace() -> dict[str, Any]:
         ),
     )
     issues_by_agent = _issues_by_agent(health["issues"])
-    runtime_status_by_agent = _timed_stage(timings, "runtime_statuses", lambda: _derive_runtime_statuses(agents))
+    runtime_histories = _timed_stage(timings, "runtime_histories", lambda: _load_runtime_histories(agents))
+    runtime_status_by_agent = _timed_stage(
+        timings,
+        "runtime_statuses",
+        lambda: _derive_runtime_statuses(agents, histories_by_agent=runtime_histories),
+    )
     enriched_agents = [
         {
             **agent,
@@ -181,8 +188,10 @@ def get_agent_config_workspace() -> dict[str, Any]:
         },
     }
     load_modes["chatRooms"] = "compact"
-    load_modes["teams"] = "compact"
+    load_modes["teams"] = "graph_references"
+    load_modes["runtimeStatuses"] = "batched"
     _record_workspace_loaded(summary, timings=timings, load_modes=load_modes)
+    _record_model_reference_resolution(health["issues"])
     return payload
 
 
@@ -436,22 +445,9 @@ def _derive_health(
                 )
             )
 
-    for warning in list(mode_bindings.get("repairWarnings") or []):
-        if not isinstance(warning, dict):
-            continue
-        issues.append(
-            {
-                "severity": "warning",
-                "code": "stale_mode_binding",
-                "agentId": str(warning.get("agentId") or "").strip(),
-                "title": "模式绑定引用了缺失 Agent",
-                "detail": f"{warning.get('mode') or '-'} / {warning.get('field') or '-'} 已在读取时修复。",
-                "source": "mode_binding",
-                "action": "检查 Agent Center 的模式归属并重新保存。",
-            }
-        )
-
     for room in chat_rooms:
+        if str(room.get("status") or "active").strip() == "archived":
+            continue
         for participant in list(room.get("participants") or []):
             if not isinstance(participant, dict):
                 continue
@@ -468,8 +464,17 @@ def _derive_health(
                         "action": "在群聊管理中替换或移除该成员。",
                     }
                 )
+            _extend_chat_room_participant_model_issues(
+                issues,
+                room=room,
+                participant=participant,
+                model_refs=model_refs,
+                active_agent_ids=active_agent_ids,
+            )
 
     for team in teams:
+        if str(team.get("status") or "active").strip() == "archived":
+            continue
         for member in list(team.get("members") or []):
             if not isinstance(member, dict):
                 continue
@@ -709,23 +714,62 @@ def _summary(
     }
 
 
-def _derive_runtime_statuses(agents: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+def _load_runtime_histories(agents: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    agent_ids = [
+        str(agent.get("agentId") or "").strip()
+        for agent in agents
+        if str(agent.get("agentId") or "").strip()
+        and str(agent.get("status") or "active").strip().lower() != "archived"
+    ]
+    if not agent_ids:
+        return {}
+    try:
+        payload = list_agent_runs_for_agents(agent_ids, limit=6)
+    except Exception as exc:
+        _record_workspace_error("agent_config.runtime_histories.load_failed", exc)
+        return {RUNTIME_HISTORY_LOAD_ERROR_KEY: {"errorType": type(exc).__name__}}
+    histories = payload.get("agents") if isinstance(payload, dict) else {}
+    return {str(agent_id): history for agent_id, history in dict(histories or {}).items() if isinstance(history, dict)}
+
+
+def _derive_runtime_statuses(
+    agents: list[dict[str, Any]],
+    *,
+    histories_by_agent: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, dict[str, Any]]:
     statuses: dict[str, dict[str, Any]] = {}
+    histories = dict(histories_by_agent or {})
+    load_error = histories.get(RUNTIME_HISTORY_LOAD_ERROR_KEY)
+    histories_provided = histories_by_agent is not None
     for agent in agents:
         agent_id = str(agent.get("agentId") or "").strip()
         if not agent_id:
             continue
-        statuses[agent_id] = _runtime_status_for_agent(agent)
+        if isinstance(load_error, dict) and str(agent.get("status") or "active").strip().lower() != "archived":
+            base = _default_runtime_status(agent)
+            statuses[agent_id] = {
+                **base,
+                "state": "unknown",
+                "label": "Unknown",
+                "reason": "run_history_unavailable",
+                "summary": str(load_error.get("errorType") or "RuntimeHistoryLoadError"),
+            }
+            continue
+        statuses[agent_id] = _runtime_status_for_agent(
+            agent,
+            history=histories.get(agent_id, {}) if histories_provided else None,
+        )
     return statuses
 
 
-def _runtime_status_for_agent(agent: dict[str, Any]) -> dict[str, Any]:
+def _runtime_status_for_agent(agent: dict[str, Any], *, history: dict[str, Any] | None = None) -> dict[str, Any]:
     base = _default_runtime_status(agent)
     agent_id = str(agent.get("agentId") or "").strip()
     if not agent_id or base["state"] == "archived":
         return base
     try:
-        history = list_agent_runs_for_agent(agent_id, limit=6)
+        if history is None:
+            history = list_agent_runs_for_agents([agent_id], limit=6).get("agents", {}).get(agent_id, {})
     except Exception as exc:
         return {
             **base,
@@ -891,6 +935,107 @@ def _record_unresolved_model_reference(agent: dict[str, Any], *, slot_key: str, 
     )
 
 
+def _extend_chat_room_participant_model_issues(
+    issues: list[dict[str, Any]],
+    *,
+    room: dict[str, Any],
+    participant: dict[str, Any],
+    model_refs: dict[str, dict[str, Any]],
+    active_agent_ids: set[str],
+) -> None:
+    seen: set[tuple[str, str]] = set()
+    reported_model_ids: set[str] = set()
+    room_label = str(room.get("title") or room.get("roomId") or "-").strip() or "-"
+    participant_id = str(participant.get("participantId") or "").strip()
+    agent_id = str(participant.get("agentId") or "").strip()
+    enabled = bool(participant.get("enabled", True))
+    bindings = normalize_agent_llm_bindings(participant.get("llmBindings"))
+    for slot_key, binding in bindings.items():
+        if not isinstance(binding, dict):
+            continue
+        model_id = str(binding.get("modelId") or "").strip()
+        if not model_id or model_id in model_refs:
+            continue
+        key = (slot_key, model_id)
+        if key in seen:
+            continue
+        seen.add(key)
+        reported_model_ids.add(model_id)
+        _record_unresolved_chat_room_model_reference(
+            room,
+            participant,
+            slot_key=slot_key,
+            model_id=model_id,
+        )
+        slot_label = str(AGENT_LLM_SLOT_REFS.get(slot_key, {}).get("label") or slot_key).strip() or slot_key
+        issues.append(
+            {
+                "severity": "blocking" if enabled and agent_id in active_agent_ids else "warning",
+                "code": "unresolved_chat_room_participant_model_reference",
+                "agentId": agent_id,
+                "title": "群聊成员模型不存在",
+                "detail": (
+                    f"{room_label} 中成员 {agent_id or participant_id or '-'} "
+                    f"缓存的 {slot_label} 模型库键 {model_id} 不存在或已被删除。"
+                ),
+                "source": "chat_room",
+                "action": "在群聊或 Agent Center 中重新选择该成员的对话模型。",
+            }
+        )
+
+    dialogue_model_id = str(participant.get("dialogueModelId") or "").strip()
+    if (
+        dialogue_model_id
+        and dialogue_model_id not in model_refs
+        and dialogue_model_id not in reported_model_ids
+        and ("dialogueModelId", dialogue_model_id) not in seen
+    ):
+        _record_unresolved_chat_room_model_reference(
+            room,
+            participant,
+            slot_key="dialogueModelId",
+            model_id=dialogue_model_id,
+        )
+        issues.append(
+            {
+                "severity": "blocking" if enabled and agent_id in active_agent_ids else "warning",
+                "code": "unresolved_chat_room_participant_model_reference",
+                "agentId": agent_id,
+                "title": "群聊成员模型不存在",
+                "detail": (
+                    f"{room_label} 中成员 {agent_id or participant_id or '-'} "
+                    f"缓存的 dialogueModelId 模型库键 {dialogue_model_id} 不存在或已被删除。"
+                ),
+                "source": "chat_room",
+                "action": "在群聊或 Agent Center 中重新选择该成员的对话模型。",
+            }
+        )
+
+
+def _record_unresolved_chat_room_model_reference(
+    room: dict[str, Any],
+    participant: dict[str, Any],
+    *,
+    slot_key: str,
+    model_id: str,
+) -> None:
+    record_runtime_scene_event(
+        "agent_config",
+        "model_binding",
+        "agent_config.unresolved_chat_room_participant_model_reference",
+        message="Chat room participant cache references a model id that is not present in the model library.",
+        level="warning",
+        fields={
+            "roomId": str(room.get("roomId") or "").strip(),
+            "participantId": str(participant.get("participantId") or "").strip(),
+            "agentId": str(participant.get("agentId") or "").strip(),
+            "agentCode": str(participant.get("agentCode") or "").strip(),
+            "slot": str(slot_key or "").strip(),
+            "modelId": str(model_id or "").strip(),
+        },
+    )
+
+
 def _compact_chat_rooms(rooms: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [
         {
@@ -949,6 +1094,9 @@ def _safe_config_workspace() -> dict[str, Any]:
 
 def _safe_chat_rooms() -> list[dict[str, Any]]:
     try:
+        from . import team_service
+
+        team_service.repair_archived_team_chat_rooms()
         return chat_room_service.list_chat_rooms_compact()
     except Exception as exc:
         _record_workspace_error("agent_config.chat_rooms.load_failed", exc)
@@ -959,14 +1107,16 @@ def _safe_teams() -> list[dict[str, Any]]:
     try:
         from . import team_service
 
-        return list(team_service.list_teams_compact(include_archived=True).get("teams") or [])
+        return list(team_service.list_team_graph_references(include_archived=True).get("teams") or [])
     except Exception as exc:
         _record_workspace_error("agent_config.teams.load_failed", exc)
         return []
 
 
-def _safe_policy_options() -> dict[str, list[dict[str, Any]]]:
+def _safe_policy_options(*, agents: list[dict[str, Any]] | None = None) -> dict[str, list[dict[str, Any]]]:
     try:
+        if agents is not None:
+            return build_agent_policy_options(agents=agents)
         return list_agent_policy_options()
     except Exception as exc:
         _record_workspace_error("agent_config.policies.load_failed", exc)
@@ -1231,6 +1381,35 @@ def _record_workspace_loaded(
                 "healthIssueCount": summary.get("healthIssueCount", 0),
                 "timingsMs": dict(timings or {}),
                 "loadModes": dict(load_modes or {}),
+            },
+            lifecycle=False,
+        )
+    except Exception:
+        return
+
+
+def _record_model_reference_resolution(issues: list[dict[str, Any]]) -> None:
+    unresolved = [
+        issue
+        for issue in issues
+        if str(issue.get("code") or "").strip().startswith("unresolved_model_reference")
+        or str(issue.get("code") or "").strip() == "unresolved_chat_room_participant_model_reference"
+    ]
+    try:
+        record_runtime_scene_event(
+            "agent_config",
+            "model_binding",
+            "agent_config.model_references.resolved" if not unresolved else "agent_config.model_references.unresolved",
+            message=(
+                "Agent LLM binding model references are resolved."
+                if not unresolved
+                else "Agent LLM binding model references still contain unresolved model ids."
+            ),
+            level="info" if not unresolved else "warning",
+            outcome="resolved" if not unresolved else "observed",
+            fields={
+                "unresolvedCount": len(unresolved),
+                "unresolvedCodes": [str(issue.get("code") or "").strip() for issue in unresolved[:20]],
             },
             lifecycle=False,
         )

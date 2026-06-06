@@ -7,6 +7,7 @@ import re
 import hashlib
 import threading
 import time
+import copy
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -21,6 +22,12 @@ SUB_AGENT_RUN_KIND = agent_run_store.SUB_AGENT_RUN_KIND
 _RESEARCH_ORG_CONTEXT_CACHE_TTL_SECONDS = 5.0
 _RESEARCH_ORG_CONTEXT_CACHE_LOCK = threading.Lock()
 _RESEARCH_ORG_CONTEXT_CACHE: dict[tuple[str, int, tuple[tuple[str, int, str], ...]], dict[str, Any]] = {}
+_PROJECT_RULES_CONTEXT_CACHE_LOCK = threading.Lock()
+_PROJECT_RULES_CONTEXT_CACHE: dict[tuple[str, int, int], str] = {}
+_PROJECT_AGENT_REGISTRY_CACHE_LOCK = threading.Lock()
+_PROJECT_AGENT_REGISTRY_CACHE: dict[tuple[str, int, int], dict[str, Any]] = {}
+_ACTIVE_AGENT_DIRECTORY_CACHE_LOCK = threading.Lock()
+_ACTIVE_AGENT_DIRECTORY_CACHE: dict[tuple[str, int, int], list[dict[str, Any]]] = {}
 
 
 def _perf_counter() -> float:
@@ -29,6 +36,14 @@ def _perf_counter() -> float:
 
 def _elapsed_ms(started_at: float) -> int:
     return max(0, int(round((_perf_counter() - started_at) * 1000)))
+
+
+def _file_signature(path: Path) -> tuple[str, int, int] | None:
+    try:
+        stat = Path(path).stat()
+    except OSError:
+        return None
+    return (str(Path(path)), int(stat.st_mtime_ns), int(stat.st_size))
 
 
 @dataclass(frozen=True)
@@ -483,6 +498,12 @@ def list_agent_runs_for_agent(agent_id: str, *, limit: int = 20) -> dict[str, An
     return agent_run_store.list_agent_runs_for_agent(agent_id, limit=limit)
 
 
+def list_agent_runs_for_agents(agent_ids: list[str], *, limit: int = 20) -> dict[str, Any]:
+    """Return recent bounded AgentRun/SubAgentRun snapshots for many persistent Agents."""
+
+    return agent_run_store.list_agent_runs_for_agents(agent_ids, limit=limit)
+
+
 def _append_agent_event(project_root: Path, workspace_path: str, filename: str, payload: dict[str, Any]) -> None:
     safe_workspace = str(workspace_path or "").strip()
     if not safe_workspace:
@@ -558,8 +579,27 @@ def _build_project_rules_context_block(
     run_id: str,
 ) -> str:
     agents_path = Path(project_root) / "AGENTS.md"
-    if not agents_path.exists():
+    signature = _file_signature(agents_path)
+    if signature is None:
         return ""
+    with _PROJECT_RULES_CONTEXT_CACHE_LOCK:
+        cached_block = _PROJECT_RULES_CONTEXT_CACHE.get(signature)
+    if cached_block is not None:
+        _record_context_event(
+            "agent_runtime.project_rules_context_loaded",
+            outcome="included",
+            fields={
+                "agentId": agent_id,
+                "sessionId": session_id,
+                "runId": run_id,
+                "sourcePath": str(agents_path),
+                "section": "Session-Level Agent Memory Coordination,Session Agent Territory And Handoff",
+                "characterCount": len(cached_block),
+                "cacheHit": True,
+                "source": "ContextEngine",
+            },
+        )
+        return cached_block
     try:
         content = agents_path.read_text(encoding="utf-8")
     except OSError as exc:
@@ -595,6 +635,9 @@ def _build_project_rules_context_block(
             ),
         ]
     ).strip()
+    with _PROJECT_RULES_CONTEXT_CACHE_LOCK:
+        _PROJECT_RULES_CONTEXT_CACHE.clear()
+        _PROJECT_RULES_CONTEXT_CACHE[signature] = block
     _record_context_event(
         "agent_runtime.project_rules_context_loaded",
         outcome="included",
@@ -605,6 +648,7 @@ def _build_project_rules_context_block(
             "sourcePath": str(agents_path),
             "section": ",".join(name for name, _section in included_sections),
             "characterCount": len(block),
+            "cacheHit": False,
             "source": "ContextEngine",
         },
     )
@@ -632,11 +676,7 @@ def _build_project_agent_registry_context_block(
         session_id=session_id,
         run_id=run_id,
     )
-    active_agents = [
-        item
-        for item in agent_directory_service.list_agents(include_archived=False)
-        if isinstance(item, dict) and str(item.get("agentId") or "").strip()
-    ]
+    active_agents, active_agent_cache_hit = _active_project_agents_from_directory(agent_directory_service)
     entries = _merge_project_agent_registry_entries(registry, active_agents)
     current_entry = _find_project_agent_registry_entry(
         entries,
@@ -681,12 +721,33 @@ def _build_project_agent_registry_context_block(
             "sourcePath": str(registry_path),
             "sourceExists": registry_path.exists(),
             "autoInitialized": bool(registry.get("_autoInitialized")),
+            "cacheHit": bool(registry.get("_cacheHit")),
+            "activeAgentDirectoryCacheHit": active_agent_cache_hit,
             "registryAgentCount": len(entries),
             "handoffTargetCount": len(handoff_entries),
             "source": "ContextEngine",
         },
     )
     return block
+
+
+def _active_project_agents_from_directory(agent_directory_service: Any) -> tuple[list[dict[str, Any]], bool]:
+    signature = _file_signature(agent_directory_service.registry_path())
+    if signature is not None:
+        with _ACTIVE_AGENT_DIRECTORY_CACHE_LOCK:
+            cached = _ACTIVE_AGENT_DIRECTORY_CACHE.get(signature)
+        if isinstance(cached, list):
+            return copy.deepcopy(cached), True
+    active_agents = [
+        item
+        for item in agent_directory_service.list_agents(include_archived=False)
+        if isinstance(item, dict) and str(item.get("agentId") or "").strip()
+    ]
+    if signature is not None:
+        with _ACTIVE_AGENT_DIRECTORY_CACHE_LOCK:
+            _ACTIVE_AGENT_DIRECTORY_CACHE.clear()
+            _ACTIVE_AGENT_DIRECTORY_CACHE[signature] = copy.deepcopy(active_agents)
+    return active_agents, False
 
 
 def _ensure_project_agent_registry(
@@ -752,8 +813,15 @@ def _read_project_agent_registry(
     session_id: str,
     run_id: str,
 ) -> dict[str, Any]:
-    if not registry_path.exists():
+    signature = _file_signature(registry_path)
+    if signature is None:
         return {}
+    with _PROJECT_AGENT_REGISTRY_CACHE_LOCK:
+        cached = _PROJECT_AGENT_REGISTRY_CACHE.get(signature)
+    if isinstance(cached, dict):
+        payload = copy.deepcopy(cached)
+        payload["_cacheHit"] = True
+        return payload
     try:
         payload = json.loads(registry_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
@@ -771,7 +839,13 @@ def _read_project_agent_registry(
             },
         )
         return {}
-    return payload if isinstance(payload, dict) else {}
+    if not isinstance(payload, dict):
+        return {}
+    with _PROJECT_AGENT_REGISTRY_CACHE_LOCK:
+        _PROJECT_AGENT_REGISTRY_CACHE.clear()
+        _PROJECT_AGENT_REGISTRY_CACHE[signature] = copy.deepcopy(payload)
+    payload["_cacheHit"] = False
+    return payload
 
 
 def _default_project_agent_registry(

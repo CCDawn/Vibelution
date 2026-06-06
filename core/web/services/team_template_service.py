@@ -48,7 +48,7 @@ def instantiate_team_template(template_id: str, *, name: str = "") -> dict[str, 
     for index, role in enumerate(template["roles"], start=1):
         session = session_service.create_chat_session(
             title=str(role["agentName"]),
-            llm_bindings=session_service.llm_bindings_for_profile_id("primary"),
+            llm_bindings=session_service.default_session_llm_bindings(),
             created_by="team_template",
         )
         agent_id = str(session.get("agentId") or "").strip()

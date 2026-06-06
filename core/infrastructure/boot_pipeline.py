@@ -37,12 +37,20 @@ def set_ui_test_mode(enabled: bool) -> None:
     UIManager._test_mode = enabled
 
 
-def initialize_ui_for_run(ui, *, test_mode: bool) -> None:
+def initialize_ui_for_run(ui, *, test_mode: bool, headless_mode: bool = False) -> None:
     """按运行模式初始化 UI。"""
-    if test_mode:
+    if test_mode or headless_mode:
         return
     ui.console.clear()
     ui.start_live()
+
+
+def emit_headless_startup_error(message: str, exc_info: str | None = None) -> None:
+    """Mirror startup failures to stderr when no live UI is running."""
+    sys.stderr.write(f"{message}\n")
+    if exc_info:
+        sys.stderr.write(str(exc_info).rstrip() + "\n")
+    sys.stderr.flush()
 
 
 def resolve_primary_model_name(config: AppConfig) -> str:
@@ -152,7 +160,14 @@ def run_agent_main(
             ui_error_fn(f"工作台启动异常: {type(e).__name__}: {e}", traceback.format_exc())
             sys.exit(1)
 
-    initialize_ui_for_run_fn(ui, test_mode=(test_mode or subagent_json_mode))
+    headless_mode = bool(
+        subagent_json_mode
+        or getattr(args, "single_turn", False)
+        or getattr(args, "auto", False)
+        or getattr(args, "no_shell", False)
+        or initial_prompt
+    )
+    initialize_ui_for_run_fn(ui, test_mode=test_mode, headless_mode=headless_mode)
 
     if test_mode:
         sys.__stdout__.write("=" * 60 + "\n  Self-Evolving Agent - Test Mode\n" + "=" * 60 + "\n")
@@ -187,6 +202,10 @@ def run_agent_main(
             agent.run_loop(initial_prompt=None)
 
     except Exception as e:
-        ui_error_fn(f"启动异常: {type(e).__name__}: {e}", traceback.format_exc())
+        error_message = f"启动异常: {type(e).__name__}: {e}"
+        formatted_traceback = traceback.format_exc()
+        ui_error_fn(error_message, formatted_traceback)
+        if headless_mode:
+            emit_headless_startup_error(error_message, formatted_traceback)
         ui.stop_live()
         sys.exit(1)

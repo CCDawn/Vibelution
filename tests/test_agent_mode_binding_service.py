@@ -33,6 +33,8 @@ def test_mode_binding_repairs_chat_and_research_agent_refs(tmp_path, monkeypatch
     assert chat_agent["agentId"] in payload["modes"]["chat"]["availableAgentIds"]
     assert research_agent["agentId"] in payload["modes"]["research"]["pool"]
     assert payload["agentRefs"][research_agent["agentId"]]["roleKey"] == "research_broad"
+    assert "profileId" not in payload["agentRefs"][research_agent["agentId"]]
+    assert payload["agentRefs"][research_agent["agentId"]]["llmBindings"]["dialogue"]["modelId"] == "model-research-broad"
 
 
 def test_mode_binding_payload_reuses_loaded_agent_options_without_per_reference_get_agent(tmp_path, monkeypatch):
@@ -89,6 +91,7 @@ def test_mode_binding_payload_reuses_loaded_agent_options_without_per_reference_
     assert payload["modes"]["chat"]["defaultAgentId"] == chat_agent["agentId"]
     assert research_agent["agentId"] in payload["modes"]["research"]["pool"]
     assert payload["agentRefs"][research_agent["agentId"]]["primaryMode"] == "research"
+    assert "profileId" not in payload["agentRefs"][research_agent["agentId"]]
 
 
 def test_mode_binding_repairs_supervised_slots_from_agent_instances(tmp_path, monkeypatch):

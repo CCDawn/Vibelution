@@ -1,8 +1,10 @@
 .route {
   display: flex;
+  height: 100%;
   min-height: 0;
   flex: 1;
   flex-direction: column;
+  overflow: hidden;
   color: var(--fg-primary);
 }
 
@@ -94,16 +96,22 @@
 
 .workspace {
   display: grid;
-  grid-template-columns: minmax(240px, 300px) minmax(420px, 1fr) minmax(270px, 340px);
-  gap: 10px;
+  grid-template-columns: minmax(226px, 286px) minmax(0, 1fr) minmax(252px, 318px);
+  gap: 8px;
   min-height: 0;
-  flex: 1;
-  padding: 10px 12px 12px;
+  flex: 1 1 0;
+  overflow: hidden;
+  padding: 8px 10px 10px;
+}
+
+.workspaceEmpty {
+  grid-template-columns: minmax(230px, 292px) minmax(0, 0.95fr) minmax(240px, 300px);
 }
 
 .teamPanel,
 .canvasPanel,
 .inspector {
+  height: 100%;
   min-height: 0;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
@@ -119,8 +127,8 @@
 
 .createForm {
   display: grid;
-  gap: 6px;
-  padding: 10px;
+  gap: 5px;
+  padding: 8px;
   border-bottom: 1px solid var(--border-soft);
 }
 
@@ -163,8 +171,8 @@
 
 .templatePanel {
   display: grid;
-  gap: 8px;
-  padding: 10px;
+  gap: 6px;
+  padding: 8px;
   border-bottom: 1px solid var(--border-soft);
   background: color-mix(in srgb, var(--surface-panel-strong) 58%, transparent);
 }
@@ -259,9 +267,9 @@
 
 .teamRow {
   display: grid;
-  gap: 3px;
+  gap: 2px;
   width: 100%;
-  padding: 10px;
+  padding: 8px;
   border: 0;
   border-bottom: 1px solid var(--border-soft);
   background: transparent;
@@ -300,9 +308,9 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  min-height: 44px;
-  padding: 8px 10px;
+  gap: 8px;
+  min-height: 38px;
+  padding: 6px 8px;
   border-bottom: 1px solid var(--border-soft);
 }
 
@@ -369,6 +377,69 @@
     linear-gradient(color-mix(in srgb, var(--border-soft) 55%, transparent) 1px, transparent 1px),
     linear-gradient(90deg, color-mix(in srgb, var(--border-soft) 55%, transparent) 1px, transparent 1px);
   background-size: 32px 32px;
+}
+
+.emptyCanvasPanel {
+  display: grid;
+  flex: 1;
+  min-height: 0;
+  padding: 10px;
+  background:
+    linear-gradient(color-mix(in srgb, var(--border-soft) 34%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in srgb, var(--border-soft) 34%, transparent) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+
+.emptyCanvasContent {
+  display: grid;
+  align-self: start;
+  gap: 7px;
+  max-width: 520px;
+  padding: 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-panel-strong) 84%, transparent);
+}
+
+.emptyCanvasKicker {
+  color: var(--fg-muted);
+  font-size: 0.66rem;
+  font-weight: 760;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.emptyCanvasContent strong {
+  color: var(--fg-primary);
+  font-size: 0.86rem;
+}
+
+.emptyCanvasContent p {
+  margin: 0;
+  color: var(--fg-secondary);
+  font-size: 0.74rem;
+  line-height: 1.34;
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.emptyCanvasSteps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.emptyCanvasSteps span {
+  min-width: 0;
+  padding: 4px 7px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 7px;
+  color: var(--fg-secondary);
+  font-size: 0.68rem;
+  font-weight: 720;
+  text-align: left;
 }
 
 .canvasViewport {
@@ -576,15 +647,15 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  min-height: 44px;
-  padding: 0 10px;
+  min-height: 38px;
+  padding: 0 8px;
   border-bottom: 1px solid var(--border-soft);
 }
 
 .inspectorBody {
   display: grid;
-  gap: 10px;
-  padding: 10px;
+  gap: 8px;
+  padding: 8px;
   overflow: auto;
 }
 
@@ -598,8 +669,8 @@
 
 .nodeBindingSection {
   display: grid;
-  gap: 10px;
-  min-height: 292px;
+  gap: 8px;
+  min-height: 220px;
   align-content: start;
 }
 
@@ -609,8 +680,8 @@
 
 .nodeBindingPlaceholder .empty {
   display: flex;
-  min-height: 190px;
-  align-items: center;
+  min-height: 76px;
+  align-items: flex-start;
 }
 
 .issueList {
@@ -636,8 +707,8 @@
 .teamMessageForm,
 .teamTaskForm {
   display: grid;
-  gap: 8px;
-  padding-top: 10px;
+  gap: 6px;
+  padding-top: 8px;
   border-top: 1px solid var(--border-soft);
 }
 
@@ -897,22 +968,28 @@
 }
 
 .empty {
-  padding: 12px;
+  padding: 8px;
   color: var(--fg-muted);
-  font-size: 0.8rem;
+  font-size: 0.74rem;
+  line-height: 1.35;
 }
 
 @media (max-width: 1100px) {
   .workspace {
     grid-template-columns: 1fr;
+    overflow: auto;
   }
 
   .teamPanel,
   .inspector {
-    min-height: 240px;
+    min-height: 220px;
   }
 
   .canvasPanel {
-    min-height: 520px;
+    min-height: 420px;
+  }
+
+  .emptyCanvasPanel {
+    min-height: 220px;
   }
 }

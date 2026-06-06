@@ -63,7 +63,6 @@ const baseCanvas = {
       agentId: "agent-research-broad",
       agentKey: "broad",
       promptKey: "broad",
-      llmConfigId: "",
       description: "从开放目标出发发现候选方向。",
       routeCondition: "输入开放目标后启动。",
     },
@@ -77,7 +76,6 @@ const baseCanvas = {
       agentId: "agent-research-deep",
       agentKey: "deep",
       promptKey: "deep",
-      llmConfigId: "",
       description: "围绕候选方向补充证据。",
       routeCondition: "广搜完成后继续。",
     },
@@ -142,7 +140,6 @@ describe("ResearchFlowCanvasRoute flow canvas rules", () => {
       type: "agent",
       agentKey: "broad",
       promptKey: "broad",
-      llmConfigId: "",
       x: 42,
       y: 84,
     });
@@ -154,7 +151,6 @@ describe("ResearchFlowCanvasRoute flow canvas rules", () => {
       type: "agent",
       agentKey: "deep",
       promptKey: "deep",
-      llmConfigId: "",
     });
 
     const edgeTemplate = findResearchEdgeTemplate("main_flow");
@@ -197,7 +193,7 @@ describe("ResearchFlowCanvasRoute flow canvas rules", () => {
       label: "广撒网 Agent",
       promptFilename: "broad.md",
       templateId: "broad",
-      llmConfigId: "research_broad_profile",
+      dialogueModelId: "research_broad_profile",
       enabled: true,
       agentId: "agent-research-broad",
     };
@@ -206,14 +202,13 @@ describe("ResearchFlowCanvasRoute flow canvas rules", () => {
       agentId: "agent-research-broad",
       agentKey: "broad",
       promptKey: "broad",
-      llmConfigId: "",
     });
     expect(normalizeResearchFlowNodesForSave([{ ...baseCanvas.nodes[0], llmConfigId: "stale_legacy_profile" }], [agent])[0]).toMatchObject({
       agentId: "agent-research-broad",
       agentKey: "broad",
       promptKey: "broad",
-      llmConfigId: "",
     });
+    expect(normalizeResearchFlowNodesForSave([{ ...baseCanvas.nodes[0], llmConfigId: "stale_legacy_profile" }], [agent])[0]).not.toHaveProperty("llmConfigId");
   });
 
   it("validates flow canvas structure before save", () => {

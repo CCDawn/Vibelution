@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from core.web.services import (
@@ -633,11 +635,35 @@ def test_archive_custom_team_cascades_member_agents(tmp_path, monkeypatch):
     archived = team_service.archive_team(team["teamId"])
 
     assert archived["status"] == "archived"
+    assert archived["linkedChatRoomId"] == ""
+    assert chat_room_service.get_chat_room_detail(team["linkedChatRoomId"]) is None
     assert agent_directory_service.get_agent(alpha["agentId"], include_archived=True)["status"] == "archived"
     assert agent_directory_service.get_agent(beta["agentId"], include_archived=True)["status"] == "archived"
     archived_events = [item for item in events if item[0][2] == "team.archived_with_agents"]
     assert archived_events[-1][1]["fields"]["archivedAgentIds"] == [alpha["agentId"], beta["agentId"]]
     assert archived_events[-1][1]["fields"]["archivedAgentCount"] == 2
+    assert archived_events[-1][1]["fields"]["deletedLinkedChatRoomIds"] == [team["linkedChatRoomId"]]
+    room_events = [item for item in events if item[0][2] == "team.chat_room.deleted_for_archive"]
+    assert room_events[-1][1]["fields"]["deletedLinkedChatRoomIds"] == [team["linkedChatRoomId"]]
+
+
+def test_repair_archived_team_chat_rooms_removes_historical_room_residue(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = agent_directory_service.create_agent_instance(display_name="Alpha", direct_session_id="session-alpha")
+    team = team_service.create_team(name="Residue Team", members=[{"agentId": agent["agentId"], "role": "lead"}])
+    room_id = team["linkedChatRoomId"]
+    teams_path = tmp_path / "workspace" / "teams" / "teams.json"
+    payload = json.loads(teams_path.read_text(encoding="utf-8"))
+    payload["teams"][0]["status"] = "archived"
+    payload["teams"][0]["updatedAt"] = "2026-06-06T00:00:00+00:00"
+    teams_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    result = team_service.repair_archived_team_chat_rooms()
+
+    assert result["deletedRoomIds"] == [room_id]
+    assert chat_room_service.get_chat_room_detail(room_id) is None
+    stored = json.loads(teams_path.read_text(encoding="utf-8"))
+    assert stored["teams"][0]["linkedChatRoomId"] == ""
 
 
 def test_archive_team_rejects_protected_member_without_partial_changes(tmp_path, monkeypatch):

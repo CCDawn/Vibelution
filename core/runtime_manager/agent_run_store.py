@@ -175,25 +175,63 @@ def persist_sub_agent_run_snapshot(
 
 def list_agent_runs_for_agent(agent_id: str, *, limit: int = 20) -> dict[str, Any]:
     normalized_agent_id = str(agent_id or "").strip()
+    payload = list_agent_runs_for_agents([normalized_agent_id], limit=limit)
+    return payload["agents"].get(
+        normalized_agent_id,
+        {
+            "agentId": normalized_agent_id,
+            "limit": payload["limit"],
+            "runs": [],
+            "subAgentRuns": [],
+        },
+    )
+
+
+def list_agent_runs_for_agents(agent_ids: list[str], *, limit: int = 20) -> dict[str, Any]:
+    normalized_agent_ids = {
+        str(agent_id or "").strip()
+        for agent_id in list(agent_ids or [])
+        if str(agent_id or "").strip()
+    }
     bounded_limit = _bounded_limit(limit)
-    agent_runs = [
-        _public_snapshot(item, _PUBLIC_AGENT_RUN_KEYS)
-        for item in _load_work_run_snapshots(AGENT_RUN_KIND)
-        if str(item.get("agentId") or "").strip() == normalized_agent_id
-    ]
-    sub_agent_runs = [
-        _public_snapshot(item, _PUBLIC_SUB_AGENT_RUN_KEYS)
-        for item in _load_work_run_snapshots(SUB_AGENT_RUN_KIND)
-        if str(item.get("parentAgentId") or "").strip() == normalized_agent_id
-        or str(item.get("agentId") or "").strip() == normalized_agent_id
-    ]
-    agent_runs.sort(key=_run_sort_key, reverse=True)
-    sub_agent_runs.sort(key=_run_sort_key, reverse=True)
+    agents = {
+        agent_id: {
+            "agentId": agent_id,
+            "limit": bounded_limit,
+            "runs": [],
+            "subAgentRuns": [],
+        }
+        for agent_id in normalized_agent_ids
+    }
+    if not agents:
+        return {"agentIds": [], "limit": bounded_limit, "agents": {}}
+
+    agent_snapshots = _load_work_run_snapshots(AGENT_RUN_KIND)
+    sub_agent_snapshots = _load_work_run_snapshots(SUB_AGENT_RUN_KIND)
+
+    for snapshot in agent_snapshots:
+        owner_agent_id = str(snapshot.get("agentId") or "").strip()
+        if owner_agent_id in agents:
+            agents[owner_agent_id]["runs"].append(_public_snapshot(snapshot, _PUBLIC_AGENT_RUN_KEYS))
+
+    for snapshot in sub_agent_snapshots:
+        owner_agent_ids = {
+            str(snapshot.get("parentAgentId") or "").strip(),
+            str(snapshot.get("agentId") or "").strip(),
+        }
+        for owner_agent_id in owner_agent_ids.intersection(agents):
+            agents[owner_agent_id]["subAgentRuns"].append(_public_snapshot(snapshot, _PUBLIC_SUB_AGENT_RUN_KEYS))
+
+    for payload in agents.values():
+        payload["runs"].sort(key=_run_sort_key, reverse=True)
+        payload["subAgentRuns"].sort(key=_run_sort_key, reverse=True)
+        payload["runs"] = payload["runs"][:bounded_limit]
+        payload["subAgentRuns"] = payload["subAgentRuns"][:bounded_limit]
+
     return {
-        "agentId": normalized_agent_id,
+        "agentIds": sorted(normalized_agent_ids),
         "limit": bounded_limit,
-        "runs": agent_runs[:bounded_limit],
-        "subAgentRuns": sub_agent_runs[:bounded_limit],
+        "agents": agents,
     }
 
 
