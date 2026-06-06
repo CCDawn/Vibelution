@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.35 - 2026-06-06
+
+- Fixed Launcher `status` so it remains read-only: it now reports missing or incomplete Python dependencies without creating `.venv` or running `pip install`.
+- Added an explicit `repair-deps` Launcher action for Python dependency bootstrap and kept mutating start/restart flows on the existing dependency repair path.
+- Added pip install override support through `VIBELUTION_PIP_INDEX_URL`, `PIP_INDEX_URL`, and `VIBELUTION_PIP_EXTRA_ARGS`, with structured dependency status logging.
+
 ## 0.10.34 - 2026-06-06
 
 - Added a read-only Research Workflow panel to the Team workspace for `research-team` / research-organization teams, showing workflow stage, CandidateStore totals, active workflow items, validation summary, and recent candidate states.
