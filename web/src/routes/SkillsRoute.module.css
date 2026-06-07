@@ -249,6 +249,31 @@
   color: var(--accent-warm-2);
 }
 
+.bulkActionBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  padding: 7px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-panel) 86%, var(--surface-card));
+}
+
+.bulkSummary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  color: var(--fg-secondary);
+  font-size: 0.75rem;
+}
+
+.bulkSummary strong {
+  color: var(--fg-primary);
+}
+
 .skillList {
   display: grid;
   align-content: start;
@@ -256,6 +281,39 @@
   min-height: 0;
   overflow: auto;
   padding-right: 4px;
+}
+
+.selectableRow {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.rowSelect {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 36px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-card);
+  color: var(--fg-secondary);
+  cursor: pointer;
+}
+
+.rowSelect:hover {
+  border-color: var(--border-strong);
+  color: var(--accent-warm-2);
+}
+
+.rowSelect input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
 }
 
 .skillButton,

@@ -674,4 +674,16 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("agentRoleTag_${display.tone}");
     expect(routeSource).toContain("display.functionLabel");
   });
+
+  it("supports bulk Agent selection with prompt editing and protected safe archive", () => {
+    expect(routeSource).toContain("selectedBulkAgentIds");
+    expect(routeSource).toContain("bulkApplyPromptTemplate");
+    expect(routeSource).toContain("bulkArchiveAgents");
+    expect(routeSource).toContain("agentArchiveProtected(agent)");
+    expect(routeSource).toContain("copy.bulkSkippedProtected");
+    expect(routeSource).toContain("body: JSON.stringify({ promptTemplateId: bulkPromptTemplateId })");
+    expect(routeSource).toContain('method: "DELETE"');
+    expect(routeSource).toContain("styles.bulkActionBar");
+    expect(routeSource).toContain("styles.agentRowShell");
+  });
 });

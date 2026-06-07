@@ -56,4 +56,16 @@ describe("PromptTemplatesRoute layout contract", () => {
     expect(routeSource).toContain("styles.contentField");
     expect(routeSource.indexOf("styles.contentField")).toBeLessThan(routeSource.indexOf("styles.bottomGrid"));
   });
+
+  it("supports bulk prompt selection with safe existing mutations", () => {
+    expect(routeSource).toContain("selectedTemplateIds");
+    expect(routeSource).toContain("bulkPatchTemplates({ category: bulkCategory }, copy.bulkCategoryResult)");
+    expect(routeSource).toContain("bulkPatchTemplates({ status: \"inactive\" }, copy.bulkDeactivateResult)");
+    expect(routeSource).toContain("bulkResetTemplates");
+    expect(routeSource).toContain("styles.bulkActionBar");
+    expect(routeSource).toContain("styles.selectableRow");
+    expect(routeSource).toContain('method: "PATCH"');
+    expect(routeSource).toContain('method: "POST"');
+    expect(routeSource).toContain("/reset`");
+  });
 });

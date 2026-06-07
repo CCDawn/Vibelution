@@ -1,8 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
+  Archive,
   Bot,
   Brain,
+  CheckSquare,
   CheckCircle2,
   Database,
   FolderTree,
@@ -12,6 +14,7 @@ import {
   RefreshCw,
   Search,
   ShieldCheck,
+  Square,
   ExternalLink,
   Trash2,
   UserRound,
@@ -2218,6 +2221,21 @@ function agentsRouteCopy(lang: "zh" | "en") {
         agentFilters: "Agent 筛选",
         allAgents: "全部 Agent",
         activeAgents: "活跃 Agent",
+        bulkSelected: "已选",
+        bulkSelectVisible: "选择当前列表",
+        bulkClear: "清空",
+        bulkPromptLabel: "批量提示词",
+        bulkPromptPlaceholder: "选择提示词",
+        bulkApplyPrompt: "批量应用",
+        bulkArchive: "批量归档",
+        bulkWorking: "批量处理中...",
+        bulkNoSelection: "请先选择 Agent。",
+        bulkNoPrompt: "请先选择要应用的提示词模板。",
+        bulkArchiveConfirm: "确认安全归档已选 Agent？受保护或已归档项会自动跳过。",
+        bulkSkippedArchived: "已归档，跳过",
+        bulkSkippedProtected: "受保护，跳过",
+        bulkArchiveResult: "批量归档完成",
+        bulkPromptResult: "批量提示词更新完成",
         filterSections: {
           status: "状态",
           boundary: "Agent 类型",
@@ -2559,6 +2577,21 @@ function agentsRouteCopy(lang: "zh" | "en") {
         agentFilters: "Agent filters",
         allAgents: "All Agents",
         activeAgents: "Active Agents",
+        bulkSelected: "Selected",
+        bulkSelectVisible: "Select visible",
+        bulkClear: "Clear",
+        bulkPromptLabel: "Bulk prompt",
+        bulkPromptPlaceholder: "Choose prompt",
+        bulkApplyPrompt: "Apply",
+        bulkArchive: "Bulk archive",
+        bulkWorking: "Working...",
+        bulkNoSelection: "Select Agents first.",
+        bulkNoPrompt: "Choose a prompt template first.",
+        bulkArchiveConfirm: "Archive the selected Agents? Protected or already archived items will be skipped.",
+        bulkSkippedArchived: "Already archived; skipped",
+        bulkSkippedProtected: "Protected; skipped",
+        bulkArchiveResult: "Bulk archive finished",
+        bulkPromptResult: "Bulk prompt update finished",
         filterSections: {
           status: "Status",
           boundary: "Agent type",
@@ -2891,6 +2924,14 @@ function agentsRouteCopy(lang: "zh" | "en") {
       };
 }
 
+function agentBulkActionSummary(action: string, success: number, skipped: number, failed: number, notes: string[], lang: "zh" | "en") {
+  const parts = lang === "zh"
+    ? [`成功 ${success}`, `跳过 ${skipped}`, `失败 ${failed}`]
+    : [`success ${success}`, `skipped ${skipped}`, `failed ${failed}`];
+  const preview = notes.slice(0, 3).join("；");
+  return preview ? `${action}: ${parts.join(" / ")}。${preview}` : `${action}: ${parts.join(" / ")}`;
+}
+
 export function AgentsRoute() {
   const { lang } = useAppI18n();
   const queryClient = useQueryClient();
@@ -2919,6 +2960,9 @@ export function AgentsRoute() {
   const [focusedMessageId, setFocusedMessageId] = useState("");
   const [avatarEditorOpen, setAvatarEditorOpen] = useState(false);
   const [notice, setNotice] = useState<{ tone: "success" | "error"; text: string } | null>(null);
+  const [selectedBulkAgentIds, setSelectedBulkAgentIds] = useState<Set<string>>(() => new Set());
+  const [bulkPromptTemplateId, setBulkPromptTemplateId] = useState("");
+  const [bulkAgentPending, setBulkAgentPending] = useState(false);
   const draftSyncSourceRef = useRef<AgentDraftSyncSource | null>(null);
 
   const workspaceQuery = useQuery({
@@ -2980,6 +3024,11 @@ export function AgentsRoute() {
     () => filterAgents(workspace, activeFilter, searchText),
     [activeFilter, searchText, workspace],
   );
+  const selectedBulkAgents = useMemo(
+    () => visibleAgents.filter((agent) => selectedBulkAgentIds.has(agent.agentId)),
+    [selectedBulkAgentIds, visibleAgents],
+  );
+  const allVisibleAgentsSelected = visibleAgents.length > 0 && selectedBulkAgents.length === visibleAgents.length;
   const visiblePolicyTools = useMemo(() => {
     const query = normalizeText(toolSearchText);
     return tools.filter((tool) => {
@@ -3113,6 +3162,14 @@ export function AgentsRoute() {
       return createDraftFromWorkspace(workspace, toolBundles);
     });
   }, [toolBundles, workspace]);
+
+  useEffect(() => {
+    setSelectedBulkAgentIds((current) => {
+      const visibleIds = new Set(visibleAgents.map((agent) => agent.agentId));
+      const next = new Set(Array.from(current).filter((agentId) => visibleIds.has(agentId)));
+      return next.size === current.size ? current : next;
+    });
+  }, [visibleAgents]);
 
   const configDirty = !draftEqualsAgent(configDraft, selectedAgent);
   const membershipDirty = !membershipDraftEqualsWorkspace(membershipDraft, workspace, selectedAgent);
@@ -3952,6 +4009,139 @@ export function AgentsRoute() {
     createAgentMutation.mutate(createDraft);
   };
 
+  const toggleBulkAgent = (agentId: string, selected: boolean) => {
+    setSelectedBulkAgentIds((current) => {
+      const next = new Set(current);
+      if (selected) {
+        next.add(agentId);
+      } else {
+        next.delete(agentId);
+      }
+      return next;
+    });
+  };
+
+  const selectVisibleBulkAgents = () => {
+    setSelectedBulkAgentIds(new Set(visibleAgents.map((agent) => agent.agentId)));
+  };
+
+  const clearBulkAgents = () => {
+    setSelectedBulkAgentIds(new Set());
+  };
+
+  const bulkApplyPromptTemplate = async () => {
+    if (bulkAgentPending) {
+      return;
+    }
+    if (!selectedBulkAgents.length) {
+      setNotice({ tone: "error", text: copy.bulkNoSelection });
+      return;
+    }
+    if (!bulkPromptTemplateId) {
+      setNotice({ tone: "error", text: copy.bulkNoPrompt });
+      return;
+    }
+
+    setBulkAgentPending(true);
+    let success = 0;
+    let skipped = 0;
+    let failed = 0;
+    const notes: string[] = [];
+
+    for (const agent of selectedBulkAgents) {
+      if (agent.status === "archived") {
+        skipped += 1;
+        notes.push(`${agentLabel(agent)}: ${copy.bulkSkippedArchived}`);
+        continue;
+      }
+      try {
+        const updatedAgent = await fetchJson<AgentConfigWorkspaceAgent>(`/api/agents/${encodeURIComponent(agent.agentId)}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ promptTemplateId: bulkPromptTemplateId }),
+        });
+        queryClient.setQueryData<AgentConfigWorkspace | undefined>(
+          queryKeys.agentConfigWorkspace(),
+          (current) => updatedAgentWorkspaceCache(current, updatedAgent),
+        );
+        success += 1;
+      } catch (error) {
+        failed += 1;
+        notes.push(`${agentLabel(agent)}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+
+    setBulkAgentPending(false);
+    setNotice({
+      tone: failed > 0 ? "error" : "success",
+      text: agentBulkActionSummary(copy.bulkPromptResult, success, skipped, failed, notes, lang),
+    });
+    clearBulkAgents();
+    void chatWorkspaceCache.afterAgentWorkspaceChanged();
+  };
+
+  const bulkArchiveAgents = async () => {
+    if (bulkAgentPending) {
+      return;
+    }
+    if (!selectedBulkAgents.length) {
+      setNotice({ tone: "error", text: copy.bulkNoSelection });
+      return;
+    }
+    const confirmed = window.confirm(copy.bulkArchiveConfirm);
+    if (!confirmed) {
+      return;
+    }
+
+    setBulkAgentPending(true);
+    let success = 0;
+    let skipped = 0;
+    let failed = 0;
+    const notes: string[] = [];
+    let archivedSelectedAgent = false;
+
+    for (const agent of selectedBulkAgents) {
+      if (agent.status === "archived") {
+        skipped += 1;
+        notes.push(`${agentLabel(agent)}: ${copy.bulkSkippedArchived}`);
+        continue;
+      }
+      if (agentArchiveProtected(agent)) {
+        skipped += 1;
+        notes.push(`${agentLabel(agent)}: ${copy.bulkSkippedProtected}`);
+        continue;
+      }
+      try {
+        const archivedAgent = await fetchJson<AgentConfigWorkspaceAgent>(`/api/agents/${encodeURIComponent(agent.agentId)}`, {
+          method: "DELETE",
+        });
+        queryClient.setQueryData<AgentConfigWorkspace | undefined>(
+          queryKeys.agentConfigWorkspace(),
+          (current) => archivedWorkspaceCache(current, archivedAgent),
+        );
+        if (agent.agentId === selectedAgent?.agentId) {
+          archivedSelectedAgent = true;
+        }
+        success += 1;
+      } catch (error) {
+        failed += 1;
+        notes.push(`${agentLabel(agent)}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+
+    if (archivedSelectedAgent) {
+      setSelectedAgentId("");
+      setActivePane("overview");
+    }
+    setBulkAgentPending(false);
+    setNotice({
+      tone: failed > 0 ? "error" : "success",
+      text: agentBulkActionSummary(copy.bulkArchiveResult, success, skipped, failed, notes, lang),
+    });
+    clearBulkAgents();
+    void chatWorkspaceCache.afterAgentArchived();
+  };
+
   const archiveSelectedAgent = () => {
     if (!selectedAgent || !canArchiveAgent || selectedAgentArchivePending) {
       return;
@@ -4362,6 +4552,56 @@ export function AgentsRoute() {
               </div>
             </section>
           ) : null}
+          {!createOpen ? (
+            <section className={styles.bulkActionBar} aria-label={copy.bulkSelected}>
+              <div className={styles.bulkSummary}>
+                <CheckSquare size={15} />
+                <strong>{copy.bulkSelected}</strong>
+                <span>{selectedBulkAgents.length} / {visibleAgents.length}</span>
+              </div>
+              <button
+                type="button"
+                className={styles.secondaryButton}
+                disabled={!visibleAgents.length || bulkAgentPending}
+                onClick={allVisibleAgentsSelected ? clearBulkAgents : selectVisibleBulkAgents}
+              >
+                {allVisibleAgentsSelected ? <Square size={14} /> : <CheckSquare size={14} />}
+                <span>{allVisibleAgentsSelected ? copy.bulkClear : copy.bulkSelectVisible}</span>
+              </button>
+              <button type="button" className={styles.secondaryButton} disabled={!selectedBulkAgents.length || bulkAgentPending} onClick={clearBulkAgents}>
+                <Square size={14} />
+                <span>{copy.bulkClear}</span>
+              </button>
+              <label className={styles.bulkPromptPicker}>
+                <span>{copy.bulkPromptLabel}</span>
+                <select
+                  value={bulkPromptTemplateId}
+                  disabled={bulkAgentPending}
+                  onChange={(event) => setBulkPromptTemplateId(event.target.value)}
+                >
+                  <option value="">{copy.bulkPromptPlaceholder}</option>
+                  {workspace?.promptTemplates.map((template) => (
+                    <option key={template.promptTemplateId || template.templateId} value={template.promptTemplateId || template.templateId || ""}>
+                      {promptTemplateOptionLabel(template, lang)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button
+                type="button"
+                className={styles.primaryButton}
+                disabled={!selectedBulkAgents.length || !bulkPromptTemplateId || bulkAgentPending}
+                onClick={bulkApplyPromptTemplate}
+              >
+                <CheckCircle2 size={14} />
+                <span>{bulkAgentPending ? copy.bulkWorking : copy.bulkApplyPrompt}</span>
+              </button>
+              <button type="button" className={styles.secondaryButton} disabled={!selectedBulkAgents.length || bulkAgentPending} onClick={bulkArchiveAgents}>
+                <Archive size={14} />
+                <span>{bulkAgentPending ? copy.bulkWorking : copy.bulkArchive}</span>
+              </button>
+            </section>
+          ) : null}
           {workspaceQuery.isError ? (
             <section className={styles.emptyState}>
               <AlertTriangle size={22} />
@@ -4393,43 +4633,54 @@ export function AgentsRoute() {
                 const tone = issueTone(agent.health);
                 const display = agentDisplayInfo(agent, lang);
                 const modelDisplay = agentDialogueModelDisplay(agent, lang);
+                const bulkSelected = selectedBulkAgentIds.has(agent.agentId);
                 return (
-                  <button
-                    key={agent.agentId}
-                    type="button"
-                    className={active ? `${styles.agentRow} ${styles.agentRowActive}` : styles.agentRow}
-                    onClick={() => setSelectedAgentId(agent.agentId)}
-                  >
-                    <span className={styles.agentIdentity}>
-                      {renderAgentAvatar(
-                        styles.agentAvatar,
-                        agent.avatarImageUrl,
-                        avatarInitials(agent.agentCode, display.name),
-                      )}
-                      <span className={styles.agentIdentityCopy}>
-                        <strong>{display.name}</strong>
-                        <em className={`${styles.agentRoleTag} ${styles[`agentRoleTag_${display.tone}`]}`}>
-                          {display.functionLabel}
-                        </em>
+                  <div key={agent.agentId} className={styles.agentRowShell}>
+                    <label className={styles.rowSelect} title={`${copy.bulkSelected}: ${display.name}`}>
+                      <input
+                        type="checkbox"
+                        checked={bulkSelected}
+                        aria-label={`${copy.bulkSelected}: ${display.name}`}
+                        onChange={(event) => toggleBulkAgent(agent.agentId, event.target.checked)}
+                      />
+                      {bulkSelected ? <CheckSquare size={15} /> : <Square size={15} />}
+                    </label>
+                    <button
+                      type="button"
+                      className={active ? `${styles.agentRow} ${styles.agentRowActive}` : styles.agentRow}
+                      onClick={() => setSelectedAgentId(agent.agentId)}
+                    >
+                      <span className={styles.agentIdentity}>
+                        {renderAgentAvatar(
+                          styles.agentAvatar,
+                          agent.avatarImageUrl,
+                          avatarInitials(agent.agentCode, display.name),
+                        )}
+                        <span className={styles.agentIdentityCopy}>
+                          <strong>{display.name}</strong>
+                          <em className={`${styles.agentRoleTag} ${styles[`agentRoleTag_${display.tone}`]}`}>
+                            {display.functionLabel}
+                          </em>
+                        </span>
                       </span>
-                    </span>
-                    <span title={modelDisplay.detail}>{modelDisplay.label}</span>
-                    <span>{promptTemplateDisplayName(agent.promptTemplate, agent.promptTemplateId, lang)}</span>
-                    <span className={`${styles.runtimePill} ${styles[`runtime_${runtimeStatusTone(agent)}`]}`}>
-                      {runtimeStatusLabel(agent, lang)}
-                    </span>
-                    <span className={styles.modeList}>
-                      {uniqueModes(agent).slice(0, 3).map((mode) => (
-                        <em key={`${agent.agentId}:${mode}`}>{modeLabel(mode, lang)}</em>
-                      ))}
-                    </span>
-                    <span className={styles.healthCell}>
-                      <span className={`${styles.issuePill} ${styles[`issue_${tone}`]}`}>
-                        {issueLabel(agent.health, lang)}
+                      <span title={modelDisplay.detail}>{modelDisplay.label}</span>
+                      <span>{promptTemplateDisplayName(agent.promptTemplate, agent.promptTemplateId, lang)}</span>
+                      <span className={`${styles.runtimePill} ${styles[`runtime_${runtimeStatusTone(agent)}`]}`}>
+                        {runtimeStatusLabel(agent, lang)}
                       </span>
-                      <small>{issueSummary(agent.health, lang)}</small>
-                    </span>
-                  </button>
+                      <span className={styles.modeList}>
+                        {uniqueModes(agent).slice(0, 3).map((mode) => (
+                          <em key={`${agent.agentId}:${mode}`}>{modeLabel(mode, lang)}</em>
+                        ))}
+                      </span>
+                      <span className={styles.healthCell}>
+                        <span className={`${styles.issuePill} ${styles[`issue_${tone}`]}`}>
+                          {issueLabel(agent.health, lang)}
+                        </span>
+                        <small>{issueSummary(agent.health, lang)}</small>
+                      </span>
+                    </button>
+                  </div>
                 );
               })}
             </div>

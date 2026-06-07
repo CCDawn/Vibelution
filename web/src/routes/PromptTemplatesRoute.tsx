@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { FileText, RefreshCw, RotateCcw, Save, Search, SquarePen } from "lucide-react";
+import { Archive, CheckCircle2, CheckSquare, FileText, RefreshCw, RotateCcw, Save, Search, Square, SquarePen, Tags } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
@@ -39,6 +39,19 @@ function copyFor(lang: string) {
         templates: "模板",
         linkedAgents: "引用 Agent",
         editor: "提示词编辑器",
+        bulkSelected: "已选",
+        bulkSelectVisible: "选择当前列表",
+        bulkClear: "清空",
+        bulkCategory: "批量分类",
+        bulkApplyCategory: "改分类",
+        bulkReset: "批量恢复默认",
+        bulkDeactivate: "批量停用",
+        bulkWorking: "批量处理中...",
+        bulkNoSelection: "请先选择提示词模板。",
+        bulkCategoryResult: "批量分类更新完成",
+        bulkResetResult: "批量恢复默认完成",
+        bulkDeactivateResult: "批量停用完成",
+        bulkSkippedNoDefault: "没有默认内容，跳过",
         emptyList: "没有匹配的提示词模板。",
         emptyEditor: "选择一个提示词模板后在这里编辑。",
         loading: "加载中...",
@@ -71,6 +84,19 @@ function copyFor(lang: string) {
         templates: "Templates",
         linkedAgents: "Linked Agents",
         editor: "Prompt editor",
+        bulkSelected: "Selected",
+        bulkSelectVisible: "Select visible",
+        bulkClear: "Clear",
+        bulkCategory: "Bulk category",
+        bulkApplyCategory: "Set category",
+        bulkReset: "Bulk reset",
+        bulkDeactivate: "Bulk deactivate",
+        bulkWorking: "Working...",
+        bulkNoSelection: "Select prompt templates first.",
+        bulkCategoryResult: "Bulk category update finished",
+        bulkResetResult: "Bulk reset finished",
+        bulkDeactivateResult: "Bulk deactivate finished",
+        bulkSkippedNoDefault: "No default content; skipped",
         emptyList: "No matching prompt templates.",
         emptyEditor: "Select a prompt template to edit it here.",
         loading: "Loading...",
@@ -140,6 +166,14 @@ function editorFromTemplate(template: PromptTemplate): PromptEditorState {
   };
 }
 
+function promptBulkActionSummary(action: string, success: number, skipped: number, failed: number, notes: string[], lang: string) {
+  const parts = lang === "zh"
+    ? [`成功 ${success}`, `跳过 ${skipped}`, `失败 ${failed}`]
+    : [`success ${success}`, `skipped ${skipped}`, `failed ${failed}`];
+  const preview = notes.slice(0, 3).join("；");
+  return preview ? `${action}: ${parts.join(" / ")}。${preview}` : `${action}: ${parts.join(" / ")}`;
+}
+
 export function PromptTemplatesRoute() {
   const { lang } = useAppI18n();
   const copy = useMemo(() => copyFor(lang), [lang]);
@@ -153,6 +187,9 @@ export function PromptTemplatesRoute() {
   const [activeTemplateId, setActiveTemplateId] = useState("");
   const [editor, setEditor] = useState<PromptEditorState | null>(null);
   const [notice, setNotice] = useState("");
+  const [selectedTemplateIds, setSelectedTemplateIds] = useState<Set<string>>(() => new Set());
+  const [bulkCategory, setBulkCategory] = useState("general");
+  const [bulkPromptPending, setBulkPromptPending] = useState(false);
 
   const templatesQuery = useQuery({
     queryKey: queryKeys.promptTemplates(),
@@ -184,6 +221,11 @@ export function PromptTemplatesRoute() {
       return !term || templateSearchText(template, agentsByTemplate.get(template.promptTemplateId) ?? []).includes(term);
     });
   }, [agentsByTemplate, categoryFilter, searchText, templates]);
+  const selectedTemplates = useMemo(
+    () => filteredTemplates.filter((template) => selectedTemplateIds.has(template.promptTemplateId)),
+    [filteredTemplates, selectedTemplateIds],
+  );
+  const allVisibleTemplatesSelected = filteredTemplates.length > 0 && selectedTemplates.length === filteredTemplates.length;
 
   useEffect(() => {
     const nextCategory = (searchParams.get("category") || "all") as PromptCategoryFilter;
@@ -201,6 +243,14 @@ export function PromptTemplatesRoute() {
     }
     setActiveTemplateId(filteredTemplates[0]?.promptTemplateId ?? "");
   }, [activeTemplateId, filteredTemplates]);
+
+  useEffect(() => {
+    setSelectedTemplateIds((current) => {
+      const visibleIds = new Set(filteredTemplates.map((template) => template.promptTemplateId));
+      const next = new Set(Array.from(current).filter((templateId) => visibleIds.has(templateId)));
+      return next.size === current.size ? current : next;
+    });
+  }, [filteredTemplates]);
 
   const activeTemplate = templates.find((template) => template.promptTemplateId === activeTemplateId) ?? null;
   const activeAgents = activeTemplate ? agentsByTemplate.get(activeTemplate.promptTemplateId) ?? [] : [];
@@ -265,6 +315,99 @@ export function PromptTemplatesRoute() {
   function selectCategory(filter: PromptCategoryFilter) {
     setCategoryFilter(filter);
     setNotice("");
+  }
+
+  function toggleTemplateSelection(templateId: string, selected: boolean) {
+    setSelectedTemplateIds((current) => {
+      const next = new Set(current);
+      if (selected) {
+        next.add(templateId);
+      } else {
+        next.delete(templateId);
+      }
+      return next;
+    });
+  }
+
+  function selectVisibleTemplates() {
+    setSelectedTemplateIds(new Set(filteredTemplates.map((template) => template.promptTemplateId)));
+  }
+
+  function clearSelectedTemplates() {
+    setSelectedTemplateIds(new Set());
+  }
+
+  async function bulkPatchTemplates(patch: Partial<Pick<PromptTemplate, "category" | "status">>, actionLabel: string) {
+    if (bulkPromptPending) {
+      return;
+    }
+    if (!selectedTemplates.length) {
+      setNotice(copy.bulkNoSelection);
+      return;
+    }
+    setBulkPromptPending(true);
+    let success = 0;
+    let failed = 0;
+    const notes: string[] = [];
+    for (const template of selectedTemplates) {
+      try {
+        await fetchJson<PromptTemplate>(`/api/prompt-templates/${encodeURIComponent(template.promptTemplateId)}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(patch),
+        });
+        success += 1;
+      } catch (error) {
+        failed += 1;
+        notes.push(`${template.name || template.promptTemplateId}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    setBulkPromptPending(false);
+    setNotice(promptBulkActionSummary(actionLabel, success, 0, failed, notes, lang));
+    clearSelectedTemplates();
+    await queryClient.invalidateQueries({ queryKey: queryKeys.promptTemplates() });
+    if (activeTemplateId) {
+      await queryClient.invalidateQueries({ queryKey: ["prompt-templates", activeTemplateId, "detail"] });
+    }
+  }
+
+  async function bulkResetTemplates() {
+    if (bulkPromptPending) {
+      return;
+    }
+    if (!selectedTemplates.length) {
+      setNotice(copy.bulkNoSelection);
+      return;
+    }
+    setBulkPromptPending(true);
+    let success = 0;
+    let skipped = 0;
+    let failed = 0;
+    const notes: string[] = [];
+    for (const template of selectedTemplates) {
+      if (!template.defaultContent?.trim()) {
+        skipped += 1;
+        notes.push(`${template.name || template.promptTemplateId}: ${copy.bulkSkippedNoDefault}`);
+        continue;
+      }
+      try {
+        await fetchJson<PromptTemplate>(`/api/prompt-templates/${encodeURIComponent(template.promptTemplateId)}/reset`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+        });
+        success += 1;
+      } catch (error) {
+        failed += 1;
+        notes.push(`${template.name || template.promptTemplateId}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    setBulkPromptPending(false);
+    setNotice(promptBulkActionSummary(copy.bulkResetResult, success, skipped, failed, notes, lang));
+    clearSelectedTemplates();
+    await queryClient.invalidateQueries({ queryKey: queryKeys.promptTemplates() });
+    if (activeTemplateId) {
+      await queryClient.invalidateQueries({ queryKey: ["prompt-templates", activeTemplateId, "detail"] });
+    }
   }
 
   return (
@@ -332,6 +475,56 @@ export function PromptTemplatesRoute() {
             ))}
           </div>
 
+          <section className={styles.bulkActionBar} aria-label={copy.bulkSelected}>
+            <div className={styles.bulkSummary}>
+              <CheckSquare size={15} />
+              <strong>{copy.bulkSelected}</strong>
+              <span>{selectedTemplates.length} / {filteredTemplates.length}</span>
+            </div>
+            <button
+              type="button"
+              className={styles.secondaryButton}
+              disabled={!filteredTemplates.length || bulkPromptPending}
+              onClick={allVisibleTemplatesSelected ? clearSelectedTemplates : selectVisibleTemplates}
+            >
+              {allVisibleTemplatesSelected ? <Square size={14} /> : <CheckSquare size={14} />}
+              <span>{allVisibleTemplatesSelected ? copy.bulkClear : copy.bulkSelectVisible}</span>
+            </button>
+            <label className={styles.bulkSelectField}>
+              <Tags size={14} />
+              <span>{copy.bulkCategory}</span>
+              <select value={bulkCategory} disabled={bulkPromptPending} onChange={(event) => setBulkCategory(event.target.value)}>
+                {CATEGORY_FILTERS.filter((filter) => filter !== "all").map((filter) => (
+                  <option key={filter} value={filter}>
+                    {categoryLabel(filter, lang)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="button"
+              className={styles.primaryButton}
+              disabled={!selectedTemplates.length || bulkPromptPending}
+              onClick={() => bulkPatchTemplates({ category: bulkCategory }, copy.bulkCategoryResult)}
+            >
+              <CheckCircle2 size={14} />
+              <span>{bulkPromptPending ? copy.bulkWorking : copy.bulkApplyCategory}</span>
+            </button>
+            <button type="button" className={styles.secondaryButton} disabled={!selectedTemplates.length || bulkPromptPending} onClick={bulkResetTemplates}>
+              <RotateCcw size={14} />
+              <span>{bulkPromptPending ? copy.bulkWorking : copy.bulkReset}</span>
+            </button>
+            <button
+              type="button"
+              className={styles.secondaryButton}
+              disabled={!selectedTemplates.length || bulkPromptPending}
+              onClick={() => bulkPatchTemplates({ status: "inactive" }, copy.bulkDeactivateResult)}
+            >
+              <Archive size={14} />
+              <span>{bulkPromptPending ? copy.bulkWorking : copy.bulkDeactivate}</span>
+            </button>
+          </section>
+
           <div className={styles.templateList}>
             {templatesQuery.isError ? (
               <p className={styles.emptyState}>{copy.loadFailed}</p>
@@ -342,26 +535,37 @@ export function PromptTemplatesRoute() {
             ) : (
               filteredTemplates.map((template) => {
                 const linkedCount = agentsByTemplate.get(template.promptTemplateId)?.length ?? 0;
+                const selected = selectedTemplateIds.has(template.promptTemplateId);
                 return (
-                  <button
-                    key={template.promptTemplateId}
-                    type="button"
-                    className={activeTemplateId === template.promptTemplateId ? styles.templateButtonActive : styles.templateButton}
-                    onClick={() => {
-                      setActiveTemplateId(template.promptTemplateId);
-                      setNotice("");
-                    }}
-                  >
-                    <span className={styles.templateMain}>
-                      <strong>{template.name || template.promptTemplateId}</strong>
-                      <span>{template.promptTemplateId}</span>
-                    </span>
-                    <span className={styles.templateMeta}>
-                      <span className={styles.categoryPill}>{categoryLabel(template.category, lang)}</span>
-                      <span>{copy.usage}: {linkedCount}</span>
-                      <span>{template.sourcePath || "-"}</span>
-                    </span>
-                  </button>
+                  <div key={template.promptTemplateId} className={styles.selectableRow}>
+                    <label className={styles.rowSelect} title={`${copy.bulkSelected}: ${template.name || template.promptTemplateId}`}>
+                      <input
+                        type="checkbox"
+                        checked={selected}
+                        aria-label={`${copy.bulkSelected}: ${template.name || template.promptTemplateId}`}
+                        onChange={(event) => toggleTemplateSelection(template.promptTemplateId, event.target.checked)}
+                      />
+                      {selected ? <CheckSquare size={15} /> : <Square size={15} />}
+                    </label>
+                    <button
+                      type="button"
+                      className={activeTemplateId === template.promptTemplateId ? styles.templateButtonActive : styles.templateButton}
+                      onClick={() => {
+                        setActiveTemplateId(template.promptTemplateId);
+                        setNotice("");
+                      }}
+                    >
+                      <span className={styles.templateMain}>
+                        <strong>{template.name || template.promptTemplateId}</strong>
+                        <span>{template.promptTemplateId}</span>
+                      </span>
+                      <span className={styles.templateMeta}>
+                        <span className={styles.categoryPill}>{categoryLabel(template.category, lang)}</span>
+                        <span>{copy.usage}: {linkedCount}</span>
+                        <span>{template.sourcePath || "-"}</span>
+                      </span>
+                    </button>
+                  </div>
                 );
               })
             )}
