@@ -220,7 +220,7 @@ def validate_llm_provider_target(provider: Any, *, context: str = "provider", re
             raise ValueError(f"{context}.{label}.base_url targets a non-public network address")
         raise ValueError(f"{context}.{label}.base_url for remote providers must use an approved provider host")
 
-    if kind == "openai_compatible":
+    if kind in {"openai_compatible", "relay"}:
         if resolve_dns:
             port = parsed.port or (443 if scheme == "https" else 80)
             _assert_resolved_host_is_public(host, port, context=f"{context}.{label}.base_url")

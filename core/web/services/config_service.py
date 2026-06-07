@@ -2218,7 +2218,7 @@ def discover_config_models(
     current_meta = _normalize_draft_meta(draft_meta)
     validate_llm_public_config(current)
     provider_input = copy.deepcopy(provider or {})
-    validate_llm_provider_target(provider_input, context="llm.model_discovery")
+    validate_llm_provider_target(provider_input, context="llm.model_discovery", resolve_dns=True)
     model_key_env = (
         str(api_key_env or "").strip()
         or _model_library_api_key_env(current, model_id)
