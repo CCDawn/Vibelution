@@ -416,6 +416,7 @@ function toolsBulkCopy(lang: string) {
         noSelection: "请先选择工具。",
         skippedToggle: "不是可启停的已验证生成工具，跳过",
         skippedDelete: "受保护或不可删除，跳过",
+        deleteConfirm: "确认批量删除已选工具？受保护或不可删除的工具会自动跳过。",
         enableResult: "批量启用完成",
         disableResult: "批量停用完成",
         deleteResult: "批量删除完成",
@@ -431,6 +432,7 @@ function toolsBulkCopy(lang: string) {
         noSelection: "Select tools first.",
         skippedToggle: "Not a toggleable validated generated tool; skipped",
         skippedDelete: "Protected or not deletable; skipped",
+        deleteConfirm: "Delete the selected tools? Protected or non-deletable tools will be skipped.",
         enableResult: "Bulk enable finished",
         disableResult: "Bulk disable finished",
         deleteResult: "Bulk delete finished",
@@ -832,6 +834,10 @@ export function ToolsRoute() {
     }
     if (!selectedTools.length) {
       setNotice({ tone: "error", text: bulkCopy.noSelection });
+      return;
+    }
+    const confirmed = window.confirm(bulkCopy.deleteConfirm);
+    if (!confirmed) {
       return;
     }
     setBulkToolPending(true);
@@ -1340,6 +1346,14 @@ export function ToolsRoute() {
                   disabled={!activeCanDelete}
                   onClick={() => {
                     if (activeTool) {
+                      const confirmed = window.confirm(
+                        lang === "zh"
+                          ? `确认删除工具 ${activeTool.name}？`
+                          : `Delete tool ${activeTool.name}?`,
+                      );
+                      if (!confirmed) {
+                        return;
+                      }
                       deleteMutation.mutate(activeTool.id);
                     }
                   }}

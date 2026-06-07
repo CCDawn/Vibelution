@@ -40,6 +40,7 @@ describe("SkillsRoute layout contract", () => {
     expect(routeSource).toContain("selectedSkillCommands");
     expect(routeSource).toContain("copySelectedSkillCommands");
     expect(routeSource).toContain("copy.bulkReadOnlyReason");
+    expect(routeSource).toContain("styles.bulkReadOnlyNote");
     expect(routeSource).toContain("styles.bulkActionBar");
     expect(routeSource).toContain("styles.selectableRow");
     expect(routeSource).not.toContain('method: "POST"');

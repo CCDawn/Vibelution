@@ -5,6 +5,7 @@
 - Fixed permanent Agent deletion so active Agents can be purged directly, including solo chat-room cleanup and direct-session tombstone preservation.
 - Preserved deleted-Agent session history without allowing session repair to recreate purged Agents.
 - Kept unresolved current LLM bindings visible in Agent model slot selectors and preserved structured `llmBindings` in runtime scene child logs.
+- Added management-center safeguards for bulk Agent purge, generated-tool deletion, and prompt-template reset/deactivation, while making Skill bulk edit/delete visibly read-only.
 
 ## 0.11.3 - 2026-06-07
 

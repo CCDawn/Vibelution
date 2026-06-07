@@ -2256,13 +2256,16 @@ function agentsRouteCopy(lang: "zh" | "en") {
         bulkPromptPlaceholder: "选择提示词",
         bulkApplyPrompt: "批量应用",
         bulkArchive: "批量归档",
+        bulkPurge: "批量彻底删除",
         bulkWorking: "批量处理中...",
         bulkNoSelection: "请先选择 Agent。",
         bulkNoPrompt: "请先选择要应用的提示词模板。",
         bulkArchiveConfirm: "确认安全归档已选 Agent？受保护或已归档项会自动跳过。",
+        bulkPurgeConfirm: "确认彻底删除已选 Agent？受保护项会自动跳过；该操作会删除 Agent 私有工作区，直连历史仅保留为已删除 Agent 历史。",
         bulkSkippedArchived: "已归档，跳过",
         bulkSkippedProtected: "受保护，跳过",
         bulkArchiveResult: "批量归档完成",
+        bulkPurgeResult: "批量彻底删除完成",
         bulkPromptResult: "批量提示词更新完成",
         filterSections: {
           status: "状态",
@@ -2612,13 +2615,16 @@ function agentsRouteCopy(lang: "zh" | "en") {
         bulkPromptPlaceholder: "Choose prompt",
         bulkApplyPrompt: "Apply",
         bulkArchive: "Bulk archive",
+        bulkPurge: "Bulk delete",
         bulkWorking: "Working...",
         bulkNoSelection: "Select Agents first.",
         bulkNoPrompt: "Choose a prompt template first.",
         bulkArchiveConfirm: "Archive the selected Agents? Protected or already archived items will be skipped.",
+        bulkPurgeConfirm: "Permanently delete the selected Agents? Protected Agents will be skipped; private workspaces are removed and direct-session history is kept as deleted-Agent history.",
         bulkSkippedArchived: "Already archived; skipped",
         bulkSkippedProtected: "Protected; skipped",
         bulkArchiveResult: "Bulk archive finished",
+        bulkPurgeResult: "Bulk delete finished",
         bulkPromptResult: "Bulk prompt update finished",
         filterSections: {
           status: "Status",
@@ -4170,6 +4176,64 @@ export function AgentsRoute() {
     void chatWorkspaceCache.afterAgentArchived();
   };
 
+  const bulkPurgeAgents = async () => {
+    if (bulkAgentPending) {
+      return;
+    }
+    if (!selectedBulkAgents.length) {
+      setNotice({ tone: "error", text: copy.bulkNoSelection });
+      return;
+    }
+    const confirmed = window.confirm(copy.bulkPurgeConfirm);
+    if (!confirmed) {
+      return;
+    }
+
+    setBulkAgentPending(true);
+    let success = 0;
+    let skipped = 0;
+    let failed = 0;
+    const notes: string[] = [];
+    let purgedSelectedAgent = false;
+
+    for (const agent of selectedBulkAgents) {
+      if (agentArchiveProtected(agent)) {
+        skipped += 1;
+        notes.push(`${agentLabel(agent)}: ${copy.bulkSkippedProtected}`);
+        continue;
+      }
+      try {
+        const result = await fetchJson<{ agentId: string; status: string; deleted: boolean; purgeSummary?: { dataRetention?: string } }>(
+          `/api/agents/${encodeURIComponent(agent.agentId)}/purge`,
+          { method: "DELETE" },
+        );
+        queryClient.setQueryData<AgentConfigWorkspace | undefined>(
+          queryKeys.agentConfigWorkspace(),
+          (current) => purgedWorkspaceCache(current, result.agentId),
+        );
+        if (agent.agentId === selectedAgent?.agentId) {
+          purgedSelectedAgent = true;
+        }
+        success += 1;
+      } catch (error) {
+        failed += 1;
+        notes.push(`${agentLabel(agent)}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+
+    if (purgedSelectedAgent) {
+      setSelectedAgentId("");
+      setActivePane("overview");
+    }
+    setBulkAgentPending(false);
+    setNotice({
+      tone: failed > 0 ? "error" : "success",
+      text: agentBulkActionSummary(copy.bulkPurgeResult, success, skipped, failed, notes, lang),
+    });
+    clearBulkAgents();
+    void chatWorkspaceCache.afterAgentArchived();
+  };
+
   const archiveSelectedAgent = () => {
     if (!selectedAgent || !canArchiveAgent || selectedAgentArchivePending) {
       return;
@@ -4627,6 +4691,10 @@ export function AgentsRoute() {
               <button type="button" className={styles.secondaryButton} disabled={!selectedBulkAgents.length || bulkAgentPending} onClick={bulkArchiveAgents}>
                 <Archive size={14} />
                 <span>{bulkAgentPending ? copy.bulkWorking : copy.bulkArchive}</span>
+              </button>
+              <button type="button" className={styles.dangerButton} disabled={!selectedBulkAgents.length || bulkAgentPending} onClick={bulkPurgeAgents}>
+                <Trash2 size={14} />
+                <span>{bulkAgentPending ? copy.bulkWorking : copy.bulkPurge}</span>
               </button>
             </section>
           ) : null}

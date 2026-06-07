@@ -694,10 +694,14 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("selectedBulkAgentIds");
     expect(routeSource).toContain("bulkApplyPromptTemplate");
     expect(routeSource).toContain("bulkArchiveAgents");
+    expect(routeSource).toContain("bulkPurgeAgents");
     expect(routeSource).toContain("agentArchiveProtected(agent)");
     expect(routeSource).toContain("copy.bulkSkippedProtected");
+    expect(routeSource).toContain("copy.bulkPurgeConfirm");
+    expect(routeSource).toContain("copy.bulkPurgeResult");
     expect(routeSource).toContain("body: JSON.stringify({ promptTemplateId: bulkPromptTemplateId })");
     expect(routeSource).toContain('method: "DELETE"');
+    expect(routeSource).toContain("onClick={bulkPurgeAgents}");
     expect(routeSource).toContain("styles.bulkActionBar");
     expect(routeSource).toContain("styles.agentRowShell");
   });
