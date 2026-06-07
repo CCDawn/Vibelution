@@ -187,6 +187,49 @@ def test_import_data_record_as_source_candidate_rejects_missing_record(tmp_path,
         raise AssertionError("Expected TeamWorkflowOrchestrationError")
 
 
+def test_start_source_collection_run_creates_generic_run_and_assignments(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+
+    response = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "title": "Neurology source batch",
+            "goal": "Collect sources about neural gating.",
+            "topic": "neural gating",
+            "requestedByAgent": "Research Coordination Agent",
+            "agentRoles": ["data_discovery", "source_acquisition", "content_extraction"],
+            "inputRefs": ["seed-query:neural gating"],
+        },
+    )
+    run_status = data_processing_service.get_processing_status(response["run"]["runId"])
+    assignments = data_processing_service.list_collection_assignments(response["run"]["runId"])
+
+    assert response["run"]["profileId"] == "generic_document_processing"
+    assert response["run"]["scope"]["teamId"] == team["teamId"]
+    assert response["run"]["scope"]["topic"] == "neural gating"
+    assert response["assignmentCount"] == 3
+    assert {item["agentRole"] for item in response["assignments"]} == {"data_discovery", "source_acquisition", "content_extraction"}
+    assert all(item["inputRefs"] == ["seed-query:neural gating"] for item in response["assignments"])
+    assert assignments["summary"]["assignmentCount"] == 3
+    assert run_status["boundaries"]["writesFormalKnowledge"] is False
+    assert response["workflow"]["activeWorkflowItems"][0]["candidateId"] == response["run"]["runId"]
+    assert response["workflow"]["activeWorkflowItems"][0]["status"] == "source_collection_started"
+
+
+def test_start_source_collection_run_ignores_invalid_collection_roles(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+
+    response = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {"agentRoles": ["data_discovery", "research_specific_role"]},
+    )
+
+    assert response["assignmentCount"] == 1
+    assert response["assignments"][0]["agentRole"] == "data_discovery"
+
+
 def test_transfer_decision_rejects_non_owner_agent(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     team = team_service.create_team(name="挑战杯科研团队")

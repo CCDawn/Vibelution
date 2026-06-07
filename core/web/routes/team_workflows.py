@@ -27,6 +27,7 @@ from core.web.services.team_workflow_orchestration_service import (
     record_local_research_model_output,
     register_candidate_source,
     review_steward_pack_knowledge_ingestion,
+    start_source_collection_run,
     submit_transfer_request,
     submit_steward_pack_to_knowledge_ingestion,
     validate_candidate_store,
@@ -70,6 +71,18 @@ class DataRecordSourceImportPayload(BaseModel):
     evidenceRefs: list[dict[str, Any]] = Field(default_factory=list, max_length=24)
     metadata: dict[str, Any] = Field(default_factory=dict)
     createdByAgent: str = Field("", max_length=160)
+
+
+class SourceCollectionRunStartPayload(BaseModel):
+    title: str = Field("", max_length=180)
+    goal: str = Field("", max_length=1000)
+    topic: str = Field("", max_length=500)
+    ownerAgentId: str = Field(DEFAULT_OWNER_AGENT_ID, max_length=160)
+    requestedByAgent: str = Field("", max_length=160)
+    agentRoles: list[str] = Field(default_factory=list, max_length=8)
+    agentIds: dict[str, str] = Field(default_factory=dict)
+    inputRefs: list[str] = Field(default_factory=list, max_length=120)
+    scope: dict[str, Any] = Field(default_factory=dict)
 
 
 class TransferRequestPayload(BaseModel):
@@ -188,6 +201,16 @@ def team_workflow_candidate_source_create(team_id: str, payload: CandidateSource
 def team_workflow_import_data_record_source_candidate(team_id: str, run_id: str, record_id: str, payload: DataRecordSourceImportPayload) -> dict:
     try:
         return import_data_record_as_source_candidate(team_id, run_id, record_id, payload.model_dump())
+    except TeamNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/teams/{team_id}/workflow-orchestration/source-collection-runs", status_code=status.HTTP_201_CREATED)
+def team_workflow_source_collection_run_start(team_id: str, payload: SourceCollectionRunStartPayload) -> dict:
+    try:
+        return start_source_collection_run(team_id, payload.model_dump())
     except TeamNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:

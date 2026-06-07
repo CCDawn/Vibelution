@@ -46,6 +46,11 @@ SOURCE_EXTRACTION_HARD_MAX_PAGES = 64
 SOURCE_EXTRACTION_DEFAULT_MAX_CHARS_PER_PAGE = 1800
 SOURCE_EXTRACTION_HARD_MAX_CHARS_PER_PAGE = 6000
 SOURCE_EXTRACTION_EXCERPT_MAX_CHARS = 12000
+SOURCE_COLLECTION_DEFAULT_AGENT_ROLES = (
+    "data_discovery",
+    "source_acquisition",
+    "content_extraction",
+)
 LOCAL_RESEARCH_OUTPUT_FIELDS = (
     "candidateType",
     "sourceRefs",
@@ -318,6 +323,97 @@ def import_data_record_as_source_candidate(team_id: str, run_id: str, record_id:
         "dataRecordRef": _data_record_ref(run, record),
         "validation": response["validation"],
         "workflow": response["workflow"],
+    }
+
+
+def start_source_collection_run(team_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
+    team_service.get_team(normalized_team_id)
+    request_payload = payload if isinstance(payload, dict) else {}
+    title = _trim_text(request_payload.get("title"), max_length=180) or "Challenge Cup source collection"
+    goal = _trim_text(request_payload.get("goal"), max_length=1000)
+    topic = _trim_text(request_payload.get("topic"), max_length=500)
+    owner_agent_id = _trim_text(request_payload.get("ownerAgentId"), max_length=160) or DEFAULT_OWNER_AGENT_ID
+    requested_by_agent = _trim_text(request_payload.get("requestedByAgent"), max_length=160) or owner_agent_id
+    input_refs = _normalize_text_list(request_payload.get("inputRefs"), max_items=120, max_length=240)
+    roles = _normalize_source_collection_roles(request_payload.get("agentRoles"))
+    scope = _normalize_metadata(request_payload.get("scope"))
+    if goal:
+        scope["goal"] = goal
+    if topic:
+        scope["topic"] = topic
+    scope["teamId"] = normalized_team_id
+    scope["workflowKind"] = WORKFLOW_KIND_CHALLENGE_CUP_RESEARCH
+    run = data_processing_service.create_processing_run(
+        data_processing_service.DEFAULT_PROFILE_ID,
+        title=title,
+        scope=scope,
+        metadata={
+            "startedFrom": "team_workflow_source_collection",
+            "teamId": normalized_team_id,
+            "requestedByAgent": requested_by_agent,
+            "ownerAgentId": owner_agent_id,
+        },
+    )
+    assignments = [
+        data_processing_service.create_collection_assignment(
+            run["runId"],
+            {
+                "agentRole": role,
+                "agentId": _source_collection_agent_id(role, request_payload),
+                "scope": _source_collection_assignment_scope(role, scope),
+                "inputRefs": input_refs,
+                "expectedRecordTypes": ["source_manifest", "paper", "dataset", "url", "file"],
+                "acceptance": {
+                    "output": "CollectionOutput.records",
+                    "handoff": "Import accepted DataRecord through Team workflow source-candidate bridge.",
+                    "noFormalKnowledgeWrite": True,
+                },
+            },
+        )
+        for role in roles
+    ]
+    with _WORKFLOW_LOCK:
+        workflow = _load_or_create_workflow(normalized_team_id)
+        workflow["ownerAgentId"] = owner_agent_id
+        workflow["routingPolicy"] = _sync_owner_policy(workflow.get("routingPolicy"), owner_agent_id)
+        workflow["transferPolicy"] = _sync_transfer_policy(workflow.get("transferPolicy"), owner_agent_id)
+        workflow["updatedAt"] = utc_now_iso()
+        workflow["activeWorkflowItems"] = _upsert_active_item(
+            workflow.get("activeWorkflowItems"),
+            candidate_id=run["runId"],
+            current_node="knowledge_collection",
+            status="source_collection_started",
+            transfer_id="",
+        )
+        _write_json(_workflow_path(normalized_team_id), workflow)
+        candidate_store = _load_candidate_store(normalized_team_id)
+    _record_workflow_event(
+        "source_collection.run_started",
+        normalized_team_id,
+        fields={
+            "workflowId": workflow["workflowId"],
+            "runId": run["runId"],
+            "assignmentCount": len(assignments),
+            "requestedByAgent": requested_by_agent,
+            "ownerAgentId": owner_agent_id,
+        },
+    )
+    return {
+        "run": data_processing_service.get_processing_run(run["runId"]),
+        "assignments": assignments,
+        "assignmentCount": len(assignments),
+        "workflow": _workflow_to_api(normalized_team_id, workflow, candidate_store),
+        "nextActions": [
+            "Functional data collection agents submit CollectionOutput records.",
+            "Accepted DataRecords are imported through source-candidate bridge.",
+            "Imported source_manifest candidates continue through source extraction and screening.",
+        ],
+        "boundaries": {
+            "writesFormalKnowledge": False,
+            "writesRag": False,
+            "writesKnowledgeGraph": False,
+        },
     }
 
 
@@ -3688,6 +3784,39 @@ def _source_kind_from_data_record(source_type: str, source_ref: str, raw_locatio
 def _looks_like_url(value: str) -> bool:
     text = str(value or "").strip().lower()
     return text.startswith("http://") or text.startswith("https://")
+
+
+def _normalize_source_collection_roles(value: Any) -> list[str]:
+    raw_roles = value if isinstance(value, list) else list(SOURCE_COLLECTION_DEFAULT_AGENT_ROLES)
+    roles: list[str] = []
+    for item in raw_roles[:8]:
+        role = _trim_text(item, max_length=80)
+        if role in data_processing_service.COLLECTION_AGENT_ROLES and role not in roles:
+            roles.append(role)
+    return roles or list(SOURCE_COLLECTION_DEFAULT_AGENT_ROLES)
+
+
+def _source_collection_agent_id(role: str, payload: dict[str, Any]) -> str:
+    agent_ids = payload.get("agentIds") if isinstance(payload.get("agentIds"), dict) else {}
+    explicit = _trim_text(agent_ids.get(role), max_length=160)
+    return explicit or role
+
+
+def _source_collection_assignment_scope(role: str, base_scope: dict[str, Any]) -> dict[str, Any]:
+    role_purposes = {
+        "data_intake_coordinator": "Coordinate source collection and handoff to source_manifest import.",
+        "data_discovery": "Find candidate source references under the run scope.",
+        "source_acquisition": "Acquire source handles, local paths, URLs, or API references.",
+        "content_extraction": "Extract readable content and metadata into DataRecords.",
+        "source_deduplication": "Detect duplicate or version-related source records.",
+        "source_quality": "Score reliability, completeness, and processing risk.",
+        "intake_review": "Review collected records before challenge-cup candidate import.",
+    }
+    return {
+        **base_scope,
+        "agentRole": role,
+        "rolePurpose": role_purposes.get(role, "Collect data records for downstream processing."),
+    }
 
 
 def _local_research_llm_client(model_id: str, *, llm_client_factory: Any = None) -> Any:

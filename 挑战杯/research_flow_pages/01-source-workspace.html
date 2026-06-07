@@ -93,7 +93,7 @@
         <div class="status-item"><b>审核门禁</b><span>确认资料允许分析、来源可信度和是否纳入本轮。</span></div>
       </div>
       <div class="plan-grid">
-        <article class="plan-card"><h2>本步操作</h2><p class="hint">先建立通用 DataProcessingRun，由 data_discovery/source_acquisition/content_extraction 等功能 Agent 领取 CollectionAssignment 并提交 CollectionOutput；再通过 Team workflow 导入桥把合格 DataRecord 幂等转成 source_manifest 候选。对本地 PDF 运行 source-extraction，计算 sha256、生成 pageAnchors/excerpt，不改写原文，不自动混入联网资料。</p></article>
+        <article class="plan-card"><h2>本步操作</h2><p class="hint">由 Research Coordination Agent 调用 source-collection-runs 启动批次，系统建立通用 DataProcessingRun，并让 data_discovery/source_acquisition/content_extraction 等功能 Agent 领取 CollectionAssignment、提交 CollectionOutput；再通过 Team workflow 导入桥把合格 DataRecord 幂等转成 source_manifest 候选。对本地 PDF 运行 source-extraction，计算 sha256、生成 pageAnchors/excerpt，不改写原文，不自动混入联网资料。</p></article>
         <article class="plan-card"><h2>本地研究模型用法</h2><p class="hint">本地 9B 模型适合做标题/摘要/片段初筛，输出 relevanceScore、topicTags、excludeReason，不直接决定正式纳入。</p></article>
         <article class="plan-card"><h2>所需功能</h2><ul><li>DataProcessingRun 建立</li>
 <li>CollectionAssignment 资料搜集任务</li>
@@ -103,13 +103,14 @@
 <li>文件路径/页码/来源可信度记录</li>
 <li>本地 PDF sha256/pageAnchors/excerpt 抽取</li>
 <li>可选 research_knowledge_query_tool 查重</li></ul></article>
-        <article class="plan-card"><h2>工具/平台能力</h2><ul><li>/api/data-processing/runs</li>
+        <article class="plan-card"><h2>工具/平台能力</h2><ul><li>/api/teams/{teamId}/workflow-orchestration/source-collection-runs</li>
+<li>/api/data-processing/runs</li>
 <li>/api/data-processing/runs/{runId}/collection-assignments</li>
 <li>/api/data-processing/runs/{runId}/collection-assignments/{assignmentId}/outputs</li>
 <li>/api/teams/{teamId}/workflow-orchestration/data-processing/runs/{runId}/records/{recordId}/source-candidate</li>
 <li>research_knowledge_query_tool</li>
 <li>/api/teams/{teamId}/workflow-orchestration/candidates/{candidateId}/source-extraction</li></ul></article>
-        <article class="plan-card"><h2>功能缺口</h2><p class="hint">通用资料搜集 assignment/output 已可落库，DataRecord 到 source_manifest 导入桥已接入；长 PDF 自动分批、章节识别和非 PDF 资料解析仍待补。</p></article>
+        <article class="plan-card"><h2>功能缺口</h2><p class="hint">资料搜集批次启动、通用资料搜集 assignment/output 和 DataRecord 到 source_manifest 导入桥已接入；长 PDF 自动分批、章节识别和非 PDF 资料解析仍待补。</p></article>
         <article class="plan-card"><h2>失败回退</h2><p class="hint">资料不足、路径缺失、来源不明、权限不清、抽取失败或解析器不可用时，assignment 标记 returned/partial，挑战杯候选停在 source_needs_confirmation。</p></article>
       </div>
     </section>
