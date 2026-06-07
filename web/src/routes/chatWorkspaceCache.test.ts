@@ -83,4 +83,23 @@ describe("createChatWorkspaceCache", () => {
       queryKeys.conversations(),
     ]);
   });
+
+  it("refreshes Agent and chat-room indexes after a Team archive cascades Agent archival", async () => {
+    const { cache, queryKeysFromCalls } = makeCache();
+
+    await cache.afterTeamArchived("team-a", "room-a");
+
+    expect(queryKeysFromCalls()).toEqual([
+      queryKeys.teams(),
+      queryKeys.team("team-a"),
+      queryKeys.agents(),
+      queryKeys.agentModeBindings(),
+      queryKeys.chatRooms(),
+      queryKeys.chatRoom("room-a"),
+      queryKeys.sessions(),
+      queryKeys.conversations(),
+      queryKeys.agentConfigWorkspace(),
+      queryKeys.projectAgentBus(),
+    ]);
+  });
 });

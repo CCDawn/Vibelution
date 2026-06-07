@@ -647,6 +647,35 @@ def test_archive_custom_team_cascades_member_agents(tmp_path, monkeypatch):
     assert room_events[-1][1]["fields"]["deletedLinkedChatRoomIds"] == [team["linkedChatRoomId"]]
 
 
+def test_archive_custom_team_removes_member_agents_from_extra_chat_rooms(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    events = []
+    monkeypatch.setattr(team_service, "record_runtime_scene_event", lambda *args, **kwargs: events.append((args, kwargs)))
+    alpha = session_service.create_chat_session(title="Alpha Session")
+    beta = session_service.create_chat_session(title="Beta Session")
+    team = team_service.create_team(
+        name="Cascade Room Team",
+        members=[{"agentId": alpha["agentId"], "role": "lead"}],
+    )
+    extra_room = chat_room_service.create_chat_room(
+        title="Extra Room",
+        participant_agent_ids=[alpha["agentId"], beta["agentId"]],
+    )
+
+    archived = team_service.archive_team(team["teamId"])
+
+    assert archived["status"] == "archived"
+    assert chat_room_service.get_chat_room_detail(team["linkedChatRoomId"]) is None
+    assert agent_directory_service.get_agent(alpha["agentId"], include_archived=True)["status"] == "archived"
+    extra_room_detail = chat_room_service.get_chat_room_detail(extra_room["roomId"])
+    assert [participant["agentId"] for participant in extra_room_detail["participants"]] == [beta["agentId"]]
+    archived_events = [item for item in events if item[0][2] == "team.archived_with_agents"]
+    assert archived_events[-1][1]["fields"]["removedFromRoomIds"] == [extra_room["roomId"]]
+    assert archived_events[-1][1]["fields"]["roomCleanupByAgentId"] == {
+        alpha["agentId"]: [extra_room["roomId"]]
+    }
+
+
 def test_repair_archived_team_chat_rooms_removes_historical_room_residue(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     agent = agent_directory_service.create_agent_instance(display_name="Alpha", direct_session_id="session-alpha")

@@ -421,6 +421,114 @@ def remove_agent_from_chat_rooms(agent_id: str, *, allow_empty_rooms: bool = Fal
     }
 
 
+def remove_agents_from_chat_rooms(
+    agent_ids: list[str] | None,
+    *,
+    allow_empty_rooms: bool = False,
+    include_chat_rooms: bool = True,
+    repair_participants: bool = True,
+) -> dict[str, Any]:
+    """Remove multiple Agents from all room participant lists in one atomic room update."""
+
+    lang = get_web_language()
+    requested = [str(item or "").strip() for item in list(agent_ids or []) if str(item or "").strip()]
+    normalized_agent_ids: list[str] = []
+    seen_agent_ids: set[str] = set()
+    for agent_id in requested:
+        if agent_id in seen_agent_ids:
+            continue
+        seen_agent_ids.add(agent_id)
+        normalized_agent_ids.append(agent_id)
+    if not normalized_agent_ids:
+        return {"agentIds": [], "changedRoomIds": [], "removedByAgentId": {}}
+
+    direct_session_ids_by_agent_id: dict[str, str] = {}
+    for agent_id in normalized_agent_ids:
+        agent = agent_directory_service.get_agent(agent_id, include_archived=True)
+        if isinstance(agent, dict):
+            direct_session_ids_by_agent_id[agent_id] = str(agent.get("directSessionId") or "").strip()
+        else:
+            direct_session_ids_by_agent_id[agent_id] = ""
+
+    changed_rooms: list[dict[str, Any]] = []
+    removed_by_agent_id: dict[str, list[str]] = {agent_id: [] for agent_id in normalized_agent_ids}
+    agent_id_set = set(normalized_agent_ids)
+    now = utc_now_iso()
+    session_summaries = _session_summary_index() if repair_participants or include_chat_rooms else None
+    with _CHAT_ROOM_LOCK:
+        state = _store().load()
+        if repair_participants and _repair_room_participants_in_state(state, session_summaries=session_summaries):
+            _store().save(state)
+            state = _store().load()
+        rooms = [item for item in list(state.get("rooms") or []) if isinstance(item, dict)]
+        planned_changes: list[tuple[dict[str, Any], list[dict[str, Any]], set[str]]] = []
+        for room in rooms:
+            participants = [dict(item) for item in list(room.get("participants") or []) if isinstance(item, dict)]
+            removed_agent_ids_for_room: set[str] = set()
+            next_participants: list[dict[str, Any]] = []
+            for participant in participants:
+                matched_agent_id = _matching_agent_id(
+                    participant,
+                    agent_id_set,
+                    direct_session_ids_by_agent_id,
+                )
+                if matched_agent_id:
+                    removed_agent_ids_for_room.add(matched_agent_id)
+                    continue
+                next_participants.append(participant)
+            if next_participants == participants:
+                continue
+            if not next_participants and not allow_empty_rooms:
+                raise ChatRoomValidationError(
+                    text_for(
+                        lang,
+                        zh="不能归档仍是某个群聊唯一成员的 Agent。请先删除该群聊或添加其他成员。",
+                        en="Cannot archive an Agent that is the only member of a group room. Delete the room or add another member first.",
+                    )
+                )
+            _raise_if_room_busy(room)
+            planned_changes.append((room, next_participants, removed_agent_ids_for_room))
+        for room, next_participants, removed_agent_ids_for_room in planned_changes:
+            room["participants"] = next_participants
+            room["updatedAt"] = now
+            changed_rooms.append(room)
+            room_id = str(room.get("roomId") or "").strip()
+            for removed_agent_id in removed_agent_ids_for_room:
+                removed_by_agent_id.setdefault(removed_agent_id, []).append(room_id)
+        if changed_rooms:
+            _store().save(state)
+
+    for room in changed_rooms:
+        room_id = str(room.get("roomId") or "").strip()
+        removed_agent_ids = [
+            agent_id
+            for agent_id, room_ids in removed_by_agent_id.items()
+            if room_id in set(room_ids)
+        ]
+        _record_room_event(
+            "membership",
+            "chat_room.agent_membership.removed",
+            room,
+            fields={
+                "agentIds": removed_agent_ids,
+                "agentCount": len(removed_agent_ids),
+                "participantCount": len(room.get("participants") or []),
+            },
+        )
+    result = {
+        "agentIds": normalized_agent_ids,
+        "changedRoomIds": [str(room.get("roomId") or "").strip() for room in changed_rooms],
+        "removedByAgentId": {
+            agent_id: list(room_ids)
+            for agent_id, room_ids in removed_by_agent_id.items()
+            if room_ids
+        },
+    }
+    if include_chat_rooms:
+        result["chatRooms"] = list_chat_rooms(session_summaries=session_summaries)
+    return result
+
+
 def delete_chat_room(room_id: str) -> dict[str, Any]:
     lang = get_web_language()
     normalized_room_id = str(room_id or "").strip()
@@ -2273,6 +2381,24 @@ def _participant_matches_agent(participant: dict[str, Any], agent_id: str, direc
         str(participant.get("directSessionId") or "").strip(),
     }
     return direct_session_id in participant_session_ids
+
+
+def _matching_agent_id(
+    participant: dict[str, Any],
+    agent_ids: set[str],
+    direct_session_ids_by_agent_id: dict[str, str],
+) -> str:
+    participant_agent_id = str(participant.get("agentId") or "").strip()
+    if participant_agent_id and participant_agent_id in agent_ids:
+        return participant_agent_id
+    participant_session_ids = {
+        str(participant.get("sessionId") or "").strip(),
+        str(participant.get("directSessionId") or "").strip(),
+    }
+    for agent_id, direct_session_id in direct_session_ids_by_agent_id.items():
+        if direct_session_id and direct_session_id in participant_session_ids:
+            return agent_id
+    return ""
 
 
 def _dedupe_room_ids(room_ids: list[str] | None) -> list[str]:

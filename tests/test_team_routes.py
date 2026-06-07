@@ -187,6 +187,29 @@ def test_team_delete_route_cascades_member_agent_archive(tmp_path, monkeypatch):
     assert agent_directory_service.get_agent(agent["agentId"], include_archived=True)["status"] == "archived"
 
 
+def test_team_delete_route_removes_archived_agent_from_extra_chat_rooms(tmp_path, monkeypatch):
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(project_agent_bus_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
+    alpha = session_service.create_chat_session(title="Alpha")
+    beta = session_service.create_chat_session(title="Beta")
+    client = _client()
+    team = client.post("/api/teams", json={"name": "删除团队", "members": [{"agentId": alpha["agentId"]}]}).json()
+    extra_room = chat_room_service.create_chat_room(
+        title="额外群聊",
+        participant_agent_ids=[alpha["agentId"], beta["agentId"]],
+    )
+
+    response = client.delete(f"/api/teams/{team['teamId']}")
+
+    assert response.status_code == 200, response.text
+    assert client.get(f"/api/chat-rooms/{team['linkedChatRoomId']}").status_code == 404
+    extra_room_detail = client.get(f"/api/chat-rooms/{extra_room['roomId']}").json()
+    assert [participant["agentId"] for participant in extra_room_detail["participants"]] == [beta["agentId"]]
+
+
 def test_team_delete_route_repairs_already_archived_team_members(tmp_path, monkeypatch):
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
