@@ -4120,6 +4120,65 @@ Write-Output "ok"
     assert result.stdout.strip().splitlines()[-1] == "ok"
 
 
+def test_launcher_managed_browser_launch_keeps_startup_alive_in_background(tmp_path):
+    result = _run_launcher_ast_harness(
+        tmp_path,
+        """
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$LauncherPath
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$source = Get-Content -Raw -LiteralPath $LauncherPath
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors -and $parseErrors.Count -gt 0) {
+    throw "Launcher script parse failed: $($parseErrors[0].Message)"
+}
+
+$functionAst = $ast.Find({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -eq "Start-ManagedBrowser"
+}, $true)
+if ($null -eq $functionAst) {
+    throw "Start-ManagedBrowser was not found."
+}
+$startBrowserText = $functionAst.Extent.Text
+
+foreach ($forbidden in @(
+    "--disable-background-networking",
+    "--disable-background-mode"
+)) {
+    if ($startBrowserText -match [regex]::Escape($forbidden)) {
+        throw "Start-ManagedBrowser still includes startup-blocking flag '$forbidden'."
+    }
+}
+
+foreach ($required in @(
+    "--disable-background-timer-throttling",
+    "--disable-renderer-backgrounding",
+    "CalculateNativeWinOcclusion",
+    "IntensiveWakeUpThrottling",
+    "launch_flags"
+)) {
+    if ($startBrowserText -notmatch [regex]::Escape($required)) {
+        throw "Start-ManagedBrowser is missing background startup flag or log field '$required'."
+    }
+}
+
+Write-Output "ok"
+""",
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip().splitlines()[-1] == "ok"
+
+
 def test_launcher_browser_candidates_include_tracked_launch_window_and_profile_pids(tmp_path):
     result = _run_launcher_ast_harness(
         tmp_path,
