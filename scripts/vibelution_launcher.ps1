@@ -2202,55 +2202,110 @@ function Get-LauncherLocalActiveWorkRunCount {
     return $count
 }
 
+function Get-LauncherStatusActiveWorkCount {
+    param($Payload)
+
+    $lifecycleProof = Get-ObjectPropertyValue -Object $Payload -Name "lifecycleProof" -Default $null
+    $activeWorkRuns = Get-ObjectPropertyValue -Object $lifecycleProof -Name "activeWorkRuns" -Default $null
+    $activeCount = Get-ObjectPropertyValue -Object $activeWorkRuns -Name "count" -Default 0
+    $count = 0
+    if (-not [int]::TryParse([string]$activeCount, [ref]$count)) {
+        $items = @(Get-ObjectPropertyValue -Object $activeWorkRuns -Name "items" -Default @())
+        $count = $items.Count
+    }
+    return $count
+}
+
+function Get-LauncherRestartActiveWorkProbeUrls {
+    param(
+        [bool]$IncludeLauncherControl = $true,
+        [bool]$IncludeWorkbench = $true
+    )
+
+    $urls = @()
+    $controlUrl = ""
+    try {
+        $controlUrl = [string]$launcherControlUrl
+    } catch {
+        $controlUrl = ""
+    }
+    $workbenchUrl = ""
+    try {
+        $workbenchUrl = [string]$url
+    } catch {
+        $workbenchUrl = ""
+    }
+
+    if ($IncludeLauncherControl -and $controlUrl) {
+        $urls += "$controlUrl/api/launcher/status"
+    }
+    if ($IncludeWorkbench -and $workbenchUrl) {
+        $workbenchStatusUrl = "$workbenchUrl/api/launcher/status"
+        if (@($urls | Where-Object { $_ -eq $workbenchStatusUrl }).Count -eq 0) {
+            $urls += $workbenchStatusUrl
+        }
+    }
+    return @($urls)
+}
+
 function Test-LauncherRestartActiveWorkBlocked {
-    if (-not (Test-WebHealthy)) {
+    $launcherControlHealthy = Test-LauncherControlHealthy
+    $webHealthy = Test-WebHealthy
+    if (-not $launcherControlHealthy -and -not $webHealthy) {
         return $false
     }
 
-    $statusUrl = "$url/api/launcher/status"
+    $probeErrors = @()
+    $probeUrls = @(Get-LauncherRestartActiveWorkProbeUrls -IncludeLauncherControl:$launcherControlHealthy -IncludeWorkbench:$webHealthy)
     try {
-        $response = Invoke-WebRequest -UseBasicParsing -Uri $statusUrl -TimeoutSec 3
-        if ($response.StatusCode -lt 200 -or $response.StatusCode -ge 300) {
-            return $false
-        }
-        $payload = $response.Content | ConvertFrom-Json -ErrorAction Stop
-        $lifecycleProof = Get-ObjectPropertyValue -Object $payload -Name "lifecycleProof" -Default $null
-        $activeWorkRuns = Get-ObjectPropertyValue -Object $lifecycleProof -Name "activeWorkRuns" -Default $null
-        $activeCount = Get-ObjectPropertyValue -Object $activeWorkRuns -Name "count" -Default 0
-        $count = 0
-        if (-not [int]::TryParse([string]$activeCount, [ref]$count)) {
-            $items = @(Get-ObjectPropertyValue -Object $activeWorkRuns -Name "items" -Default @())
-            $count = $items.Count
-        }
-        if ($count -le 0) {
-            return $false
+        foreach ($statusUrl in $probeUrls) {
+            try {
+                $response = Invoke-WebRequest -UseBasicParsing -Uri $statusUrl -TimeoutSec 3
+                if ($response.StatusCode -lt 200 -or $response.StatusCode -ge 300) {
+                    $probeErrors += "$statusUrl returned HTTP $($response.StatusCode)"
+                    continue
+                }
+                $payload = $response.Content | ConvertFrom-Json -ErrorAction Stop
+                $count = Get-LauncherStatusActiveWorkCount -Payload $payload
+                if ($count -le 0) {
+                    return $false
+                }
+
+                $message = "有进行中的任务，无法重启 Vibelution。请等待任务完成或先停止任务。"
+                Write-Note $message
+                Write-LauncherControlLog `
+                    -Event "launcher.restart.blocked_active_work" `
+                    -Message $message `
+                    -Level "warning" `
+                    -Fields @{ active_work_count = $count; status_url = $statusUrl; probe_urls = $probeUrls; launcher_control_healthy = [bool]$launcherControlHealthy; web_healthy = [bool]$webHealthy }
+                return $true
+            } catch {
+                $probeErrors += "$statusUrl :: $($_.Exception.Message)"
+                continue
+            }
         }
 
-        $message = "有进行中的任务，无法重启 Vibelution。请等待任务完成或先停止任务。"
-        Write-Note $message
-        Write-LauncherControlLog `
-            -Event "launcher.restart.blocked_active_work" `
-            -Message $message `
-            -Level "warning" `
-            -Fields @{ active_work_count = $count; status_url = $statusUrl }
-        return $true
+        if ($probeErrors.Count -eq 0) {
+            $probeErrors += "No Launcher status probe URLs were available."
+        }
+        throw ($probeErrors -join " | ")
     } catch {
         $localActiveCount = Get-LauncherLocalActiveWorkRunCount
         if ($localActiveCount -le 0) {
             Write-LauncherControlLog `
                 -Event "launcher.restart.active_work_probe_failed_local_clear" `
-                -Message "Launcher status active-work probe failed, but local runtime-manager work-run state has no active work." `
+                -Message "Launcher control active-work probe failed, but local runtime-manager work-run state has no active work." `
                 -Level "warning" `
-                -Fields @{ status_url = $statusUrl; error = $_.Exception.Message }
+                -Fields @{ probe_urls = $probeUrls; error = $_.Exception.Message; launcher_control_healthy = [bool]$launcherControlHealthy; web_healthy = [bool]$webHealthy }
             return $false
         }
         $message = "有进行中的任务，无法重启 Vibelution。请等待任务完成或先停止任务。"
         Write-Note $message
         Write-LauncherControlLog `
             -Event "launcher.restart.blocked_active_work_probe_failed" `
-            -Message "Launcher restart active-work probe failed while backend was healthy; blocking restart conservatively." `
+            -Message "Launcher restart active-work probe failed while backend was healthy; blocking restart conservatively because local work-run state is active." `
             -Level "warning" `
-            -Fields @{ status_url = $statusUrl; error = $_.Exception.Message; local_active_work_count = $localActiveCount }
+            -Fields @{ probe_urls = $probeUrls; error = $_.Exception.Message; local_active_work_count = $localActiveCount; launcher_control_healthy = [bool]$launcherControlHealthy; web_healthy = [bool]$webHealthy }
         return $true
     }
 }
@@ -5017,6 +5072,33 @@ function Start-Supervisor {
     return $proc.Id
 }
 
+function Wait-ForSupervisorSessionState {
+    param(
+        [string]$ManagedSessionId,
+        [int]$TimeoutSeconds = 6
+    )
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    $lastSessionId = ""
+    while ((Get-Date) -lt $deadline) {
+        $state = Get-State
+        if ($state) {
+            $lastSessionId = [string](Get-ObjectPropertyValue -Object $state -Name "sessionId" -Default "")
+            if ($lastSessionId -eq $ManagedSessionId) {
+                return $state
+            }
+        }
+        Start-Sleep -Milliseconds 200
+    }
+
+    Write-LauncherControlLog `
+        -Event "launcher.supervisor.state_wait_timeout" `
+        -Message "Supervisor did not observe a matching launcher state before its startup wait timeout." `
+        -Level "warning" `
+        -Fields @{ managed_session_id = $ManagedSessionId; last_session_id = $lastSessionId; timeout_seconds = $TimeoutSeconds }
+    return $null
+}
+
 function Get-SessionSnapshot {
     param(
         [string]$BrowserRole = "workbench",
@@ -5368,6 +5450,17 @@ function Adopt-Or-FocusSession {
             [int]$Snapshot.BackendPid
         }
         $managedSessionId = [guid]::NewGuid().ToString()
+        Save-SessionState `
+            -ManagedSessionId $managedSessionId `
+            -BackendPid $Snapshot.BackendPid `
+            -BackendLaunchPid $backendLaunchPid `
+            -PythonRuntime $null `
+            -BrowserExecutable $null `
+            -BrowserLaunchPid 0 `
+            -BrowserWindowPid $Snapshot.BrowserWindowPid `
+            -SupervisorPid 0 `
+            -BrowserManaged $true `
+            -SessionRole "workbench"
         $supervisorPid = Start-Supervisor -ManagedSessionId $managedSessionId
         Save-SessionState `
             -ManagedSessionId $managedSessionId `
@@ -5436,6 +5529,18 @@ function Complete-HeadlessSessionWithBrowser {
     } else {
         [int]$Snapshot.BackendPid
     }
+    Save-SessionState `
+        -ManagedSessionId $managedSessionId `
+        -BackendPid $Snapshot.BackendPid `
+        -BackendLaunchPid $backendLaunchPid `
+        -PythonRuntime $null `
+        -BrowserExecutable $browserExecutable `
+        -BrowserLaunchPid $browserInfo.LaunchPid `
+        -BrowserWindowPid $browserInfo.WindowPid `
+        -SupervisorPid 0 `
+        -BrowserManaged $true `
+        -SessionRole "workbench"
+
     $supervisorPid = Start-Supervisor -ManagedSessionId $managedSessionId
 
     Save-SessionState `
@@ -6386,12 +6491,30 @@ function Run-SupervisorLoop {
         $supervisorBrowserProfileDir = [string]$workbenchProfileVariable.Value
     }
 
+    $initialState = Wait-ForSupervisorSessionState -ManagedSessionId $ManagedSessionId
+    if (-not $initialState) {
+        Write-LauncherControlLog `
+            -Event "launcher.supervisor.exit_state_unavailable" `
+            -Message "Supervisor exited because it could not observe a matching launcher state." `
+            -Level "warning" `
+            -Fields @{ managed_session_id = $ManagedSessionId }
+        return
+    }
+
     while ($true) {
         $state = Get-State
         if (-not $state) {
+            Write-LauncherControlLog `
+                -Event "launcher.supervisor.exit_state_missing" `
+                -Message "Supervisor exited because launcher state was removed." `
+                -Fields @{ managed_session_id = $ManagedSessionId }
             return
         }
         if ($state.sessionId -ne $ManagedSessionId) {
+            Write-LauncherControlLog `
+                -Event "launcher.supervisor.exit_session_replaced" `
+                -Message "Supervisor exited because launcher state now belongs to a different session." `
+                -Fields @{ managed_session_id = $ManagedSessionId; current_session_id = [string]$state.sessionId }
             return
         }
 
