@@ -1645,15 +1645,37 @@ def test_agent_purge_api_deletes_archived_agent_workspace_and_registry_record(tm
     assert [member["agentId"] for member in team_detail["members"]] == [beta["agentId"]]
 
 
-def test_agent_purge_api_rejects_active_agent(tmp_path, monkeypatch):
+def test_agent_purge_api_allows_active_agent_and_marks_direct_session_tombstone(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     agent = session_service.create_chat_session(title="Active Agent")
+    room = chat_room_service.create_chat_room(
+        title="单成员待删除群聊",
+        participant_session_ids=[agent["id"]],
+    )
 
     response = client.delete(f"/api/agents/{agent['agentId']}/purge")
 
-    assert response.status_code == 422
-    assert "archived" in response.json()["detail"]
-    assert agent_directory_service.get_agent(agent["agentId"], include_archived=True)["status"] == "active"
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["status"] == "purged"
+    assert payload["previousStatus"] == "active"
+    assert payload["purgeSummary"]["removedFromRoomIds"] == [room["roomId"]]
+    assert payload["purgeSummary"]["directSession"]["agentStatusCode"] == "deleted_agent"
+    assert payload["purgeSummary"]["directSession"]["historyRetention"] == "preserved_tombstone"
+    assert agent_directory_service.get_agent(agent["agentId"], include_archived=True) is None
+    room_detail = chat_room_service.get_chat_room_detail(room["roomId"])
+    assert room_detail["participants"] == []
+    detail = session_service.get_session_detail(agent["id"])
+    assert detail["agentId"] == ""
+    assert detail["agentMissing"] is True
+    assert detail["agentMissingId"] == agent["agentId"]
+    assert detail["agentStatusCode"] == "deleted_agent"
+    before_agents = agent_directory_service.list_agents(include_archived=True)
+    assert all(item["agentId"] != agent["agentId"] for item in before_agents)
+    detail_again = session_service.get_session_detail(agent["id"])
+    after_agents = agent_directory_service.list_agents(include_archived=True)
+    assert detail_again["agentStatusCode"] == "deleted_agent"
+    assert before_agents == after_agents
 
 
 def test_agent_purge_api_rejects_protected_archived_agent_without_reference_cleanup(tmp_path, monkeypatch):

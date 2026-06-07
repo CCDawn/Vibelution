@@ -46,6 +46,7 @@ RUNTIME_SCENE_RETENTION_LIMIT = 30
 MAX_TELEMETRY_TEXT_CHARS = 4_000
 MAX_TELEMETRY_FIELD_TEXT_CHARS = 1_200
 MAX_TELEMETRY_FIELD_ITEMS = 24
+STRUCTURED_TELEMETRY_KEYS = {"llm_bindings", "llmbindings", "agent_binding", "agentbinding"}
 BROWSER_VISIBILITY_TIMELINE_MIN_SECONDS = 60.0
 WORK_RUN_SNAPSHOT_EVENT_CODE = "work_run.snapshot.persisted"
 WORK_RUN_SNAPSHOT_SUMMARY_EVENT_CODE = "work_run.snapshot.summary"
@@ -5286,6 +5287,9 @@ def _normalize_telemetry_fields(value: object) -> dict[str, Any]:
             if index >= MAX_TELEMETRY_FIELD_ITEMS:
                 break
             key_text = str(key)
+            if _is_structured_telemetry_key(key_text):
+                normalized[key_text] = _normalize_structured_telemetry_value(item)
+                continue
             normalized[key_text] = (
                 REDACTED_FIELD_VALUE
                 if _is_sensitive_telemetry_key(key_text)
@@ -5310,6 +5314,9 @@ def _normalize_telemetry_value(value: object, *, depth: int) -> Any:
             if index >= MAX_TELEMETRY_FIELD_ITEMS:
                 break
             key_text = str(key)
+            if _is_structured_telemetry_key(key_text):
+                normalized[key_text] = _normalize_structured_telemetry_value(item, depth=depth + 1)
+                continue
             normalized[key_text] = (
                 REDACTED_FIELD_VALUE
                 if _is_sensitive_telemetry_key(key_text)
@@ -5324,11 +5331,44 @@ def _normalize_telemetry_value(value: object, *, depth: int) -> Any:
     return _truncate_text(str(value), MAX_TELEMETRY_FIELD_TEXT_CHARS)
 
 
+def _normalize_structured_telemetry_value(value: object, *, depth: int = 0) -> Any:
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    if isinstance(value, str):
+        return _truncate_text(value, MAX_TELEMETRY_FIELD_TEXT_CHARS)
+    if depth >= 5:
+        return _truncate_text(str(value), MAX_TELEMETRY_FIELD_TEXT_CHARS)
+    if isinstance(value, dict):
+        normalized: dict[str, Any] = {}
+        for index, (key, item) in enumerate(value.items()):
+            if index >= MAX_TELEMETRY_FIELD_ITEMS:
+                break
+            key_text = str(key)
+            normalized[key_text] = (
+                REDACTED_FIELD_VALUE
+                if _is_sensitive_telemetry_key(key_text)
+                else _normalize_structured_telemetry_value(item, depth=depth + 1)
+            )
+        return normalized
+    if isinstance(value, (list, tuple)):
+        return [
+            _normalize_structured_telemetry_value(item, depth=depth + 1)
+            for item in list(value)[:MAX_TELEMETRY_FIELD_ITEMS]
+        ]
+    return _truncate_text(str(value), MAX_TELEMETRY_FIELD_TEXT_CHARS)
+
+
 def _is_sensitive_telemetry_key(key: str) -> bool:
     normalized = str(key or "").strip().lower().replace("-", "_")
     if _is_safe_usage_counter_key(normalized):
         return False
     return any(keyword in normalized for keyword in SENSITIVE_FIELD_KEYWORDS)
+
+
+def _is_structured_telemetry_key(key: str) -> bool:
+    normalized = str(key or "").strip().lower().replace("-", "_")
+    compact = normalized.replace("_", "")
+    return normalized in STRUCTURED_TELEMETRY_KEYS or compact in STRUCTURED_TELEMETRY_KEYS
 
 
 def _is_safe_usage_counter_key(normalized_key: str) -> bool:

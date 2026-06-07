@@ -220,6 +220,7 @@ type ModelProfileChoice = {
   modelId: string;
   label: string;
   modelLabel: string;
+  unresolved?: boolean;
 };
 type RuntimeFocusEvidenceResult = {
   match: AgentRuntimeEvidenceMatch | null;
@@ -508,6 +509,31 @@ function buildAgentSlotModelChoices(
       modelLabel: agentModelLabel(model),
     }))
     .sort((left, right) => left.label.localeCompare(right.label) || left.modelId.localeCompare(right.modelId));
+}
+
+function buildAgentSlotModelChoicesWithCurrent(
+  models: AgentModelChoice[],
+  slot: AgentLlmSlotDefinition | undefined,
+  currentModelId: string,
+  lang: "zh" | "en",
+): ModelProfileChoice[] {
+  const choices = buildAgentSlotModelChoices(models, slot);
+  const normalizedCurrent = String(currentModelId || "").trim();
+  if (!normalizedCurrent || choices.some((choice) => choice.modelId === normalizedCurrent)) {
+    return choices;
+  }
+  return [
+    {
+      key: `${slot?.slot ?? "slot"}:${normalizedCurrent}:unresolved`,
+      modelId: normalizedCurrent,
+      label: lang === "zh"
+        ? `${normalizedCurrent}（当前绑定，模型库未注册）`
+        : `${normalizedCurrent} (current binding, not in model library)`,
+      modelLabel: normalizedCurrent,
+      unresolved: true,
+    },
+    ...choices,
+  ];
 }
 
 function agentLlmSlots(workspace: AgentConfigWorkspace | undefined): AgentLlmSlotDefinition[] {
@@ -5034,7 +5060,13 @@ export function AgentsRoute() {
                     <small>{copy.llmSlotsHint}</small>
                     <div className={styles.llmSlotGrid}>
                       {llmSlots.map((slot) => {
-                        const slotChoices = buildAgentSlotModelChoices(workspace?.agentModelChoices ?? [], slot);
+                        const selectedSlotModelId = agentLlmSlotModelId(configDraft.llmBindings, slot);
+                        const slotChoices = buildAgentSlotModelChoicesWithCurrent(
+                          workspace?.agentModelChoices ?? [],
+                          slot,
+                          selectedSlotModelId,
+                          lang,
+                        );
                         return (
                           <label key={slot.slot} className={styles.llmSlotField}>
                             <span>
@@ -5042,7 +5074,7 @@ export function AgentsRoute() {
                               <small>{slot.required ? copy.requiredSlot : copy.optionalSlot}</small>
                             </span>
                             <select
-                              value={agentLlmSlotModelId(configDraft.llmBindings, slot)}
+                              value={selectedSlotModelId}
                               onChange={(event) => updateDraft({
                                 llmBindings: updateAgentLlmSlotBinding(configDraft.llmBindings, slot, event.target.value),
                               })}
