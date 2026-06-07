@@ -378,11 +378,11 @@
                 </div>
 <div class="service-row">
                   <b>team_workflow_orchestration_service</b>
-                  <span>已落地：Team 级 workflowOrchestration、CandidateStore、transfer request/decision、source-collection run 启动，以及 DataRecord -&gt; source_manifest 幂等导入桥。</span>
+                  <span>已落地：Team 级 workflowOrchestration、CandidateStore、transfer request/decision、source-collection run 启动、DataSearchPlan/query seed 契约，以及 DataRecord -&gt; source_manifest 幂等导入桥。</span>
                 </div>
 <div class="service-row">
                   <b>team_workflows API</b>
-                  <span>已落地：/api/teams/{team_id}/workflow-orchestration、source-collection-runs、candidates/source、data-processing/runs/{runId}/records/{recordId}/source-candidate、candidates/{candidate_id}/source-extraction、candidates/{candidate_id}/paper-note-draft、candidates、candidates/validation、candidate-graph、transfers、decide、knowledge-ingestion/status、coordination/status；coordination/status 返回 communicationBrief 但不发送消息。</span>
+                  <span>已落地：/api/teams/{team_id}/workflow-orchestration、source-collection-runs（含 searchPlan/querySeeds/assignedQueries/resultWritebackContract）、candidates/source、data-processing/runs/{runId}/records/{recordId}/source-candidate、candidates/{candidate_id}/source-extraction、candidates/{candidate_id}/paper-note-draft、candidates、candidates/validation、candidate-graph、transfers、decide、knowledge-ingestion/status、coordination/status；coordination/status 返回 communicationBrief 但不发送消息。</span>
                 </div>
 <div class="service-row">
                   <b>TeamsRoute workflow panel</b>
@@ -684,7 +684,12 @@
 <div class="blueprint-row compact">
               <b>资料搜集批次启动</b>
               <strong>/api/teams/{teamId}/workflow-orchestration/source-collection-runs</strong>
-              <span>Research Coordination Agent 可一次创建 DataProcessingRun 和 data_discovery/source_acquisition/content_extraction 等功能 Agent assignments。</span>
+              <span>Research Coordination Agent 可一次创建 DataProcessingRun、searchPlan 和 data_discovery/source_acquisition/content_extraction 等功能 Agent assignments。</span>
+            </div>
+<div class="blueprint-row compact">
+              <b>数据搜索计划契约</b>
+              <strong>DataSearchPlan / assignedQueries</strong>
+              <span>基于 topic/goal/scope/querySeeds 生成 planned 查询、角色分配输入和 resultWritebackContract；只做 contract_only 搜索计划，不触发真实外部搜索。</span>
             </div>
 <div class="blueprint-row compact">
               <b>DataRecord 导入桥</b>
@@ -799,7 +804,7 @@
 <div class="blueprint-row compact">
               <b>验证</b>
               <strong>tests/test_data_processing_service.py + tests/test_data_processing_routes.py + tests/test_team_workflow_orchestration_service.py + tests/test_team_workflow_routes.py</strong>
-              <span>覆盖通用数据处理首切、source-collection run 启动、DataRecord 导入 source_manifest、主路径、非 ownerAgent 不能写最终状态、本地模型任务包、输出校验和知识入库状态总览。</span>
+              <span>覆盖通用数据处理首切、source-collection run 启动、DataSearchPlan/query seed 契约、DataRecord 导入 source_manifest、主路径、非 ownerAgent 不能写最终状态、本地模型任务包、输出校验和知识入库状态总览。</span>
             </div>
       </div>
       <div class="agent-matrix" style="margin-top: 12px;">
@@ -881,10 +886,18 @@
               <span>新增 /api/teams/{teamId}/workflow-orchestration/source-collection-runs，一次创建 DataProcessingRun 和功能 Agent CollectionAssignment。</span>
               <span>Research Coordination Agent 可以启动可追踪资料搜集批次，默认分配 data_discovery、source_acquisition、content_extraction；功能 Agent 回写 DataRecord 后再导入 source_manifest。</span>
             </div>
+<div class="blueprint-row">
+              <b>M6.5</b>
+              <strong>数据搜索计划契约</strong>
+              <span>source-collection-runs 会生成 searchPlan、querySeeds、queries、roleAssignmentInputs 和 resultWritebackContract，并把 assignedQueries 写入各功能 Agent assignment scope。</span>
+              <span>Research Coordination Agent 可基于 topic/goal/scope 启动可追踪搜索计划；本轮只生成 contract_only planned 查询，不触发外部搜索，不写正式 Team Knowledge/RAG/official graph。</span>
+            </div>
       </div>
       <div class="tag-row">
         <span class="tag">DataProcessingRun</span>
 <span class="tag">DataRecord</span>
+<span class="tag">DataSearchPlan</span>
+<span class="tag">SearchQuerySeed</span>
 <span class="tag">CollectionAssignment</span>
 <span class="tag">CollectionOutput</span>
 <span class="tag">source_manifest</span>
@@ -910,7 +923,7 @@
         <b>01</b>
         <strong>Source Intake Agent</strong>
         <span>可复用通用 data-processing assignment / source-extraction 后端已接入</span>
-        <span>DataProcessingRun 建立 / CollectionAssignment 资料搜集任务 / DataRecord 通用记录 / 本地资料登记 / source_manifest 写入 / 文件路径/页码/来源可信度记录 / 本地 PDF sha256/pageAnchors/excerpt 抽取 / 可选 research_knowledge_query_tool 查重</span>
+        <span>DataProcessingRun 建立 / DataSearchPlan/querySeeds 搜索计划 / CollectionAssignment 资料搜集任务 / assignedQueries 角色分配 / DataRecord 通用记录 / 本地资料登记 / source_manifest 写入 / 文件路径/页码/来源可信度记录 / 本地 PDF sha256/pageAnchors/excerpt 抽取 / 可选 research_knowledge_query_tool 查重</span>
         <span>确认资料允许分析、来源可信度和是否纳入本轮。</span>
       </div>
 <div class="agent-row">
