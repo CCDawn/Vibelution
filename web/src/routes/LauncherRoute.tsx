@@ -8,10 +8,10 @@ import {
   restartLauncherBundle,
   startLauncherBundle,
   stopLauncherBundle,
-  updateWorkbenchWindowMode,
+  updateLauncherStartupSettings,
 } from "../api/launcher";
 import { queryKeys } from "../api/queryKeys";
-import type { LauncherComponentState, LauncherOperation, WorkbenchWindowMode } from "../api/types";
+import type { LauncherComponentState, LauncherOperation, LauncherStartupSettings, WorkbenchWindowMode } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { useAppI18n } from "../i18n/useAppI18n";
 import styles from "./LauncherRoute.module.css";
@@ -175,6 +175,18 @@ type LauncherCopy = {
   windowModeSaved: string;
   windowModeRestartRequired: string;
   windowModeEnvOverride: string;
+  startupSettings: string;
+  startupSettingsSaved: string;
+  runtimeProfile: string;
+  preflightDoctor: string;
+  requireVenv: string;
+  backendPort: string;
+  frontendPort: string;
+  interfaceLanguage: string;
+  languageZh: string;
+  languageEn: string;
+  saveStartupSettings: string;
+  portOverride: string;
 };
 
 type LifecycleDisplay = {
@@ -505,6 +517,211 @@ function responsibilityDetail(item: LauncherGuardianResponsibility, lang: "zh" |
   return (lang === "zh" ? zh : en)[item.id] || item.detail || "-";
 }
 
+function defaultStartupSettings(windowMode: WorkbenchWindowMode = "fullscreen"): LauncherStartupSettings {
+  return {
+    runtime: {
+      profile: "safe_remote",
+      preflightDoctor: true,
+      requireVenv: true,
+      profileOptions: ["safe_local", "safe_remote", "debug", "ci"],
+    },
+    workbench: {
+      backendPort: 8000,
+      frontendPort: 5173,
+      effectiveBackendPort: 8000,
+      effectiveFrontendPort: 5173,
+      backendPortEnvOverride: 0,
+      frontendPortEnvOverride: 0,
+      windowMode,
+      effectiveWindowMode: windowMode,
+      windowModeEnvOverride: "",
+      windowModeOptions: [],
+    },
+    interface: {
+      language: "zh",
+      languageOptions: ["zh", "en"],
+    },
+    configPath: "",
+    restartRequired: true,
+  };
+}
+
+function runtimeProfileLabel(profile: string, lang: "zh" | "en") {
+  const labels: Record<string, { zh: string; en: string }> = {
+    safe_local: { zh: "安全本地", en: "Safe local" },
+    safe_remote: { zh: "安全远程", en: "Safe remote" },
+    debug: { zh: "调试", en: "Debug" },
+    ci: { zh: "CI", en: "CI" },
+  };
+  return labels[profile]?.[lang] ?? profile;
+}
+
+function normalizePortDraft(value: string, fallback: number) {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 && parsed < 65536 ? parsed : fallback;
+}
+
+function LauncherStartupSettingsPanel({
+  copy,
+  uiLang,
+  setting,
+  configuredWindowMode,
+  effectiveWindowMode,
+  windowModeDetail,
+  backendPortOverride,
+  frontendPortOverride,
+  pending,
+  onSave,
+}: {
+  copy: LauncherCopy;
+  uiLang: "zh" | "en";
+  setting: LauncherStartupSettings | undefined;
+  configuredWindowMode: WorkbenchWindowMode;
+  effectiveWindowMode: string;
+  windowModeDetail: string;
+  backendPortOverride: number;
+  frontendPortOverride: number;
+  pending: boolean;
+  onSave: (setting: LauncherStartupSettings) => void;
+}) {
+  const current = useMemo(() => setting ?? defaultStartupSettings(configuredWindowMode), [configuredWindowMode, setting]);
+  const [draft, setDraft] = useState<LauncherStartupSettings>(() => current);
+  const [backendPortText, setBackendPortText] = useState(() => String(current.workbench.backendPort));
+  const [frontendPortText, setFrontendPortText] = useState(() => String(current.workbench.frontendPort));
+
+  useEffect(() => {
+    setDraft(current);
+    setBackendPortText(String(current.workbench.backendPort));
+    setFrontendPortText(String(current.workbench.frontendPort));
+  }, [current]);
+
+  function patchDraft(next: Partial<LauncherStartupSettings>) {
+    setDraft((prev) => ({
+      ...prev,
+      ...next,
+      runtime: { ...prev.runtime, ...next.runtime },
+      workbench: { ...prev.workbench, ...next.workbench },
+      interface: { ...prev.interface, ...next.interface },
+    }));
+  }
+
+  function saveDraft() {
+    onSave({
+      ...draft,
+      workbench: {
+        ...draft.workbench,
+        backendPort: normalizePortDraft(backendPortText, current.workbench.backendPort),
+        frontendPort: normalizePortDraft(frontendPortText, current.workbench.frontendPort),
+      },
+    });
+  }
+
+  return (
+    <div className={styles.settingsStrip} aria-label={copy.startupSettings}>
+      <div className={styles.settingsHeader}>
+        <span>{copy.startupSettings}</span>
+        <strong>{workbenchWindowModeLabel(effectiveWindowMode, copy)}</strong>
+        <small>{windowModeDetail}</small>
+      </div>
+      <label className={styles.settingField}>
+        <span>{copy.runtimeProfile}</span>
+        <select
+          value={draft.runtime.profile}
+          disabled={pending}
+          onChange={(event) => patchDraft({ runtime: { ...draft.runtime, profile: event.target.value } })}
+        >
+          {draft.runtime.profileOptions.map((profile) => (
+            <option key={profile} value={profile}>{runtimeProfileLabel(profile, uiLang)}</option>
+          ))}
+        </select>
+      </label>
+      <label className={styles.settingField}>
+        <span>{copy.backendPort}</span>
+        <input
+          type="number"
+          min={1}
+          max={65535}
+          value={backendPortText}
+          disabled={pending}
+          onChange={(event) => setBackendPortText(event.target.value)}
+        />
+        {backendPortOverride ? <small>{copy.portOverride}: {backendPortOverride}</small> : null}
+      </label>
+      <label className={styles.settingField}>
+        <span>{copy.frontendPort}</span>
+        <input
+          type="number"
+          min={1}
+          max={65535}
+          value={frontendPortText}
+          disabled={pending}
+          onChange={(event) => setFrontendPortText(event.target.value)}
+        />
+        {frontendPortOverride ? <small>{copy.portOverride}: {frontendPortOverride}</small> : null}
+      </label>
+      <label className={styles.settingField}>
+        <span>{copy.interfaceLanguage}</span>
+        <select
+          value={draft.interface.language}
+          disabled={pending}
+          onChange={(event) => patchDraft({ interface: { ...draft.interface, language: event.target.value } })}
+        >
+          <option value="zh">{copy.languageZh}</option>
+          <option value="en">{copy.languageEn}</option>
+        </select>
+      </label>
+      <label className={styles.settingToggle}>
+        <input
+          type="checkbox"
+          checked={draft.runtime.preflightDoctor}
+          disabled={pending}
+          onChange={(event) => patchDraft({ runtime: { ...draft.runtime, preflightDoctor: event.target.checked } })}
+        />
+        <span>{copy.preflightDoctor}</span>
+      </label>
+      <label className={styles.settingToggle}>
+        <input
+          type="checkbox"
+          checked={draft.runtime.requireVenv}
+          disabled={pending}
+          onChange={(event) => patchDraft({ runtime: { ...draft.runtime, requireVenv: event.target.checked } })}
+        />
+        <span>{copy.requireVenv}</span>
+      </label>
+      <div className={styles.segmentedControl} role="group" aria-label={copy.windowMode}>
+        <button
+          type="button"
+          data-active={draft.workbench.windowMode === "fullscreen"}
+          disabled={pending}
+          onClick={() => {
+            patchDraft({ workbench: { ...draft.workbench, windowMode: "fullscreen" } });
+          }}
+          title={copy.windowModeFullscreen}
+        >
+          <Maximize2 size={14} />
+          <span>{copy.windowModeFullscreen}</span>
+        </button>
+        <button
+          type="button"
+          data-active={draft.workbench.windowMode === "windowed"}
+          disabled={pending}
+          onClick={() => {
+            patchDraft({ workbench: { ...draft.workbench, windowMode: "windowed" } });
+          }}
+          title={copy.windowModeWindowed}
+        >
+          <Minimize2 size={14} />
+          <span>{copy.windowModeWindowed}</span>
+        </button>
+      </div>
+      <button type="button" className={styles.settingsSaveButton} disabled={pending} onClick={saveDraft}>
+        {pending ? <LoaderCircle size={14} className={styles.spin} /> : <RefreshCw size={14} />}
+        <span>{copy.saveStartupSettings}</span>
+      </button>
+    </div>
+  );
+}
+
 function isControlPlaneIdle(evidence: LauncherStatusWithGuardian["controlPlaneEvidence"] | undefined): boolean {
   if (!evidence) {
     return true;
@@ -654,6 +871,18 @@ export function LauncherRoute() {
         windowModeSaved: "启动窗口模式已保存",
         windowModeRestartRequired: "下次启动或重启工作台生效",
         windowModeEnvOverride: "环境变量正在覆盖配置",
+        startupSettings: "启动设置",
+        startupSettingsSaved: "启动设置已保存",
+        runtimeProfile: "运行档位",
+        preflightDoctor: "启动前自检",
+        requireVenv: "要求 .venv",
+        backendPort: "后端端口",
+        frontendPort: "前端端口",
+        interfaceLanguage: "界面语言",
+        languageZh: "中文",
+        languageEn: "英文",
+        saveStartupSettings: "保存启动设置",
+        portOverride: "端口被环境变量覆盖",
       }
     : {
         eyebrow: "Launcher",
@@ -785,6 +1014,18 @@ export function LauncherRoute() {
         windowModeSaved: "Launch window mode saved",
         windowModeRestartRequired: "Takes effect on next workbench start or restart",
         windowModeEnvOverride: "Environment override is active",
+        startupSettings: "Startup Settings",
+        startupSettingsSaved: "Startup settings saved",
+        runtimeProfile: "Runtime mode",
+        preflightDoctor: "Preflight doctor",
+        requireVenv: "Require .venv",
+        backendPort: "Backend port",
+        frontendPort: "Frontend port",
+        interfaceLanguage: "Interface language",
+        languageZh: "Chinese",
+        languageEn: "English",
+        saveStartupSettings: "Save startup settings",
+        portOverride: "Port is overridden by environment",
       };
 
   const [notice, setNotice] = useState<LauncherNotice>({ tone: "neutral", text: "" });
@@ -839,14 +1080,18 @@ export function LauncherRoute() {
       setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
     },
   });
-  const windowModeMutation = useMutation({
-    mutationFn: updateWorkbenchWindowMode,
+  const startupSettingsMutation = useMutation({
+    mutationFn: updateLauncherStartupSettings,
     onSuccess: (response) => {
+      const workbench = response.setting.workbench;
       setNotice({
-        tone: response.setting.envOverride ? "warning" : "success",
-        text: response.message || copy.windowModeSaved,
+        tone: workbench.windowModeEnvOverride || workbench.backendPortEnvOverride || workbench.frontendPortEnvOverride ? "warning" : "success",
+        text: response.message || copy.startupSettingsSaved,
       });
       void queryClient.invalidateQueries({ queryKey: queryKeys.launcherStatus() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.configPublic() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.configWorkspace() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.runtimeSummary() });
     },
     onError: (error) => {
       setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
@@ -890,10 +1135,13 @@ export function LauncherRoute() {
   const controlDetail = launcherControlLimited ? copy.controlLimitedDetail : copy.controlReadyDetail;
   const activeWorkCount = status?.lifecycleProof.activeWorkRuns.count ?? 0;
   const activeWorkKinds = status?.lifecycleProof.activeWorkRuns.kinds ?? [];
-  const workbenchWindowSetting = status?.settings?.workbenchWindow;
-  const configuredWindowMode = workbenchWindowSetting?.mode ?? "fullscreen";
-  const effectiveWindowMode = workbenchWindowSetting?.effectiveMode ?? configuredWindowMode;
-  const envOverrideMode = workbenchWindowSetting?.envOverride || "";
+  const startupSettings = status?.settings?.startup;
+  const fallbackWindowSetting = status?.settings?.workbenchWindow;
+  const configuredWindowMode = startupSettings?.workbench.windowMode ?? fallbackWindowSetting?.mode ?? "fullscreen";
+  const effectiveWindowMode = startupSettings?.workbench.effectiveWindowMode ?? fallbackWindowSetting?.effectiveMode ?? configuredWindowMode;
+  const envOverrideMode = startupSettings?.workbench.windowModeEnvOverride ?? fallbackWindowSetting?.envOverride ?? "";
+  const backendPortOverride = startupSettings?.workbench.backendPortEnvOverride || 0;
+  const frontendPortOverride = startupSettings?.workbench.frontendPortEnvOverride || 0;
   const windowModeDetail = envOverrideMode
     ? `${copy.windowModeEnvOverride}: ${workbenchWindowModeLabel(envOverrideMode, copy)} · ${copy.windowModeRestartRequired}`
     : copy.windowModeRestartRequired;
@@ -1080,33 +1328,18 @@ export function LauncherRoute() {
         />
       </div>
 
-      <div className={styles.settingsStrip} aria-label={copy.windowMode}>
-        <span>{copy.windowMode}</span>
-        <strong>{workbenchWindowModeLabel(effectiveWindowMode, copy)}</strong>
-        <div className={styles.segmentedControl} role="group" aria-label={copy.windowMode}>
-          <button
-            type="button"
-            data-active={configuredWindowMode === "fullscreen"}
-            disabled={windowModeMutation.isPending}
-            onClick={() => windowModeMutation.mutate("fullscreen")}
-            title={copy.windowModeFullscreen}
-          >
-            <Maximize2 size={14} />
-            <span>{copy.windowModeFullscreen}</span>
-          </button>
-          <button
-            type="button"
-            data-active={configuredWindowMode === "windowed"}
-            disabled={windowModeMutation.isPending}
-            onClick={() => windowModeMutation.mutate("windowed")}
-            title={copy.windowModeWindowed}
-          >
-            <Minimize2 size={14} />
-            <span>{copy.windowModeWindowed}</span>
-          </button>
-        </div>
-        <small>{windowModeDetail}</small>
-      </div>
+      <LauncherStartupSettingsPanel
+        copy={copy}
+        uiLang={uiLang}
+        setting={startupSettings}
+        configuredWindowMode={configuredWindowMode}
+        effectiveWindowMode={effectiveWindowMode}
+        windowModeDetail={windowModeDetail}
+        backendPortOverride={backendPortOverride}
+        frontendPortOverride={frontendPortOverride}
+        pending={startupSettingsMutation.isPending}
+        onSave={(nextSetting) => startupSettingsMutation.mutate(nextSetting)}
+      />
 
       {statusQuery.isError ? (
         <p className={styles.notice} data-tone={expectedStopDisconnect ? "success" : launcherControlLimited ? "warning" : "error"}>
