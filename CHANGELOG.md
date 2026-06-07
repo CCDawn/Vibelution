@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.40 - 2026-06-07
+
+- Blocked Computer Use targets and navigate actions that point to localhost, private, link-local, reserved, or metadata hosts in both the service and local bridge.
+- Hardened the local bridge so direct callers cannot bypass high-risk confirmation without the generated bridge token.
+- Added a session confirmation lock plus stale `resuming` recovery so duplicate confirms are rejected while abandoned resumes can be retried or cancelled.
+
 ## 0.10.39 - 2026-06-07
 
 - Hardened Computer Use confirmation policy so explicit high-risk actions cannot bypass approval even when a caller disables optional confirmation.

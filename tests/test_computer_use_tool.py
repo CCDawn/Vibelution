@@ -158,6 +158,119 @@ def test_computer_use_service_blocks_cross_domain_action(computer_use_tmp, monke
         )
 
 
+def test_computer_use_service_blocks_local_and_private_targets(computer_use_tmp, monkeypatch):
+    monkeypatch.setenv("VIBELUTION_COMPUTER_USE_ENABLED", "1")
+
+    for url in (
+        "http://127.0.0.1:8000/api/control-token",
+        "http://localhost:8000/api/control-token",
+        "http://10.0.0.1/admin",
+        "http://169.254.169.254/latest/meta-data",
+    ):
+        with pytest.raises(computer_use_service.ComputerUseError, match="public internet"):
+            computer_use_service.start_computer_use_task(
+                task="Open internal URL",
+                target_url=url,
+                allowed_domains="",
+            )
+
+
+def test_computer_use_service_blocks_local_and_private_allowed_domains(computer_use_tmp, monkeypatch):
+    monkeypatch.setenv("VIBELUTION_COMPUTER_USE_ENABLED", "1")
+
+    for domain in ("localhost", "localhost:8000", "127.0.0.1", "127.0.0.1:8000", "10.0.0.1", "10.0.0.1:443", "169.254.169.254", "*.example.com"):
+        with pytest.raises(computer_use_service.ComputerUseError, match="allowed_domains"):
+            computer_use_service.start_computer_use_task(
+                task="Open example",
+                target_url="https://example.com",
+                allowed_domains=domain,
+            )
+
+
+def test_computer_use_service_sends_bridge_token_only_to_loopback_bridge(computer_use_tmp, monkeypatch):
+    import requests
+
+    token_path = computer_use_tmp / ".runtime" / "computer-use" / "bridge.token"
+    token_path.parent.mkdir(parents=True)
+    token_path.write_text("local-bridge-token", encoding="utf-8")
+    monkeypatch.setattr(computer_use_service, "BRIDGE_TOKEN_PATH", token_path)
+    monkeypatch.delenv("VIBELUTION_COMPUTER_USE_BRIDGE_TOKEN", raising=False)
+    monkeypatch.setenv("VIBELUTION_COMPUTER_USE_BASE_URL", "http://127.0.0.1:8765")
+    captured = {}
+
+    class FakeResponse:
+        status_code = 200
+        text = "{}"
+
+        def json(self):
+            return {"status": "completed", "summary": "ok"}
+
+    def fake_post(endpoint, *, headers, json, timeout):
+        captured["endpoint"] = endpoint
+        captured["headers"] = headers
+        return FakeResponse()
+
+    monkeypatch.setattr(requests, "post", fake_post)
+
+    computer_use_service._call_open_computer_use(
+        {
+            "task": "Open example",
+            "targetUrl": "https://example.com",
+            "allowedDomains": ["example.com"],
+            "actions": [],
+            "mode": "browser",
+            "maxSteps": 1,
+            "requireConfirmation": True,
+            "timeoutSeconds": 5,
+        },
+        session_id="cu-test",
+    )
+
+    assert captured["endpoint"] == "http://127.0.0.1:8765/v1/predict"
+    assert captured["headers"][computer_use_service.BRIDGE_TOKEN_HEADER] == "local-bridge-token"
+
+
+def test_computer_use_service_does_not_send_bridge_token_to_remote_provider(computer_use_tmp, monkeypatch):
+    import requests
+
+    token_path = computer_use_tmp / ".runtime" / "computer-use" / "bridge.token"
+    token_path.parent.mkdir(parents=True)
+    token_path.write_text("local-bridge-token", encoding="utf-8")
+    monkeypatch.setattr(computer_use_service, "BRIDGE_TOKEN_PATH", token_path)
+    monkeypatch.setenv("VIBELUTION_COMPUTER_USE_BRIDGE_TOKEN", "env-bridge-token")
+    monkeypatch.setenv("VIBELUTION_COMPUTER_USE_BASE_URL", "https://computer-use.invalid")
+    captured = {}
+
+    class FakeResponse:
+        status_code = 200
+        text = "{}"
+
+        def json(self):
+            return {"status": "completed", "summary": "ok"}
+
+    def fake_post(endpoint, *, headers, json, timeout):
+        captured["headers"] = headers
+        return FakeResponse()
+
+    monkeypatch.setattr(requests, "post", fake_post)
+
+    computer_use_service._call_open_computer_use(
+        {
+            "task": "Open example",
+            "targetUrl": "https://example.com",
+            "allowedDomains": ["example.com"],
+            "actions": [],
+            "mode": "browser",
+            "maxSteps": 1,
+            "requireConfirmation": True,
+            "timeoutSeconds": 5,
+        },
+        session_id="cu-test",
+    )
+
+    assert computer_use_service.BRIDGE_TOKEN_HEADER not in captured["headers"]
+
+
 def test_computer_use_service_pauses_high_risk_explicit_action_before_provider(computer_use_tmp, monkeypatch):
     monkeypatch.setenv("VIBELUTION_COMPUTER_USE_ENABLED", "1")
     monkeypatch.setenv("VIBELUTION_COMPUTER_USE_BASE_URL", "https://computer-use.invalid")
@@ -292,6 +405,66 @@ def test_computer_use_service_rejects_duplicate_confirmation_while_resuming(comp
 
     assert confirmed["status"] == "completed"
     assert "already resuming" in str(nested_error)
+
+
+def test_computer_use_service_rejects_confirmation_when_lock_exists(computer_use_tmp, monkeypatch):
+    monkeypatch.setenv("VIBELUTION_COMPUTER_USE_ENABLED", "1")
+    monkeypatch.setenv("VIBELUTION_COMPUTER_USE_BASE_URL", "https://computer-use.invalid")
+    monkeypatch.setattr(
+        computer_use_service,
+        "_call_open_computer_use",
+        lambda request, *, session_id: {
+            "status": "completed",
+            "summary": "Confirmed actions completed.",
+            "steps": [{"action": "click", "summary": "Clicked submit", "status": "completed"}],
+        },
+    )
+
+    started = computer_use_service.start_computer_use_task(
+        task="Submit example",
+        target_url="https://example.com/form",
+        allowed_domains="example.com",
+        actions=[{"action": "click", "selector": "#submit"}],
+    )
+    lock_path = computer_use_service._session_lock_path(started["sessionId"])
+    lock_path.write_text("locked", encoding="utf-8")
+
+    with pytest.raises(computer_use_service.ComputerUseError, match="already resuming"):
+        computer_use_service.confirm_computer_use_session(started["sessionId"])
+
+
+def test_computer_use_service_recovers_stale_resuming_session(computer_use_tmp, monkeypatch):
+    monkeypatch.setenv("VIBELUTION_COMPUTER_USE_ENABLED", "1")
+    monkeypatch.setenv("VIBELUTION_COMPUTER_USE_BASE_URL", "https://computer-use.invalid")
+
+    calls = []
+
+    def fake_call(request, *, session_id):
+        calls.append(request)
+        return {
+            "status": "completed",
+            "summary": "Confirmed actions completed.",
+            "steps": [{"action": "click", "summary": "Clicked submit", "status": "completed"}],
+        }
+
+    monkeypatch.setattr(computer_use_service, "_call_open_computer_use", fake_call)
+
+    started = computer_use_service.start_computer_use_task(
+        task="Submit example",
+        target_url="https://example.com/form",
+        allowed_domains="example.com",
+        actions=[{"action": "click", "selector": "#submit"}],
+    )
+    payload = computer_use_service._load_session(started["sessionId"])
+    payload["status"] = "resuming"
+    payload["needsConfirmation"] = False
+    payload["resumingStartedAt"] = "2000-01-01T00:00:00+00:00"
+    computer_use_service._save_session(payload)
+
+    confirmed = computer_use_service.confirm_computer_use_session(started["sessionId"])
+
+    assert confirmed["status"] == "completed"
+    assert len(calls) == 1
 
 
 def test_computer_use_session_tool_reads_confirms_and_cancels_sessions(computer_use_tmp, monkeypatch):
@@ -674,6 +847,72 @@ def test_computer_use_bridge_blocks_malformed_action_without_launching_edge():
 
     assert result["status"] == "blocked"
     assert "requires selector" in result["summary"]
+
+
+def test_computer_use_bridge_forces_high_risk_confirmation_when_opted_out():
+    result = computer_use_bridge.run_browser_task(
+        {
+            "task": "Submit example form",
+            "target_url": "https://example.com/form",
+            "allowed_domains": ["example.com"],
+            "actions": [{"action": "click", "selector": "#submit"}],
+            "require_confirmation": False,
+        },
+        edge=computer_use_bridge.Path("C:/missing/msedge.exe"),
+        timeout=1,
+    )
+
+    assert result["status"] == "need_confirmation"
+    assert result["needsConfirmation"] is True
+
+
+def test_computer_use_bridge_blocks_local_and_private_targets():
+    for url in (
+        "http://127.0.0.1:8000/api/control-token",
+        "http://localhost:8000/api/control-token",
+        "http://10.0.0.1/admin",
+        "http://169.254.169.254/latest/meta-data",
+    ):
+        result = computer_use_bridge.run_browser_task(
+            {
+                "task": "Open internal URL",
+                "target_url": url,
+                "allowed_domains": [],
+            },
+            edge=computer_use_bridge.Path("C:/missing/msedge.exe"),
+            timeout=1,
+        )
+        assert result["status"] == "blocked"
+        assert result["error"] == "NETWORK_BOUNDARY_BLOCKED"
+
+
+def test_computer_use_bridge_blocks_local_and_wildcard_allowed_domains():
+    for domain in ("localhost:8000", "127.0.0.1:8000", "10.0.0.1:443", "*.example.com"):
+        result = computer_use_bridge.run_browser_task(
+            {
+                "task": "Open example",
+                "target_url": "https://example.com",
+                "allowed_domains": [domain],
+            },
+            edge=computer_use_bridge.Path("C:/missing/msedge.exe"),
+            timeout=1,
+        )
+        assert result["status"] == "blocked"
+        assert result["error"] == "NETWORK_BOUNDARY_BLOCKED"
+
+
+def test_computer_use_bridge_health_reports_auth_support(monkeypatch):
+    captured = {}
+    handler = computer_use_bridge.Handler.__new__(computer_use_bridge.Handler)
+    handler.path = "/health"
+    handler.edge_path = computer_use_bridge.Path("C:/Program Files/Microsoft/Edge/Application/msedge.exe")
+    monkeypatch.setattr(handler, "_json", lambda payload, status=200: captured.update({"payload": payload, "status": status}))
+
+    handler.do_GET()
+
+    assert captured["status"] == 200
+    assert captured["payload"]["status"] == "ok"
+    assert captured["payload"]["bridgeAuth"] is True
 
 
 def test_computer_use_bridge_cleanup_retries_locked_temp_dir(monkeypatch, tmp_path):
