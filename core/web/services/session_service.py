@@ -1301,6 +1301,8 @@ def _resolve_active_agent_for_turn(
 
 
 def _session_agent_visible_in_indexes(summary: dict[str, Any]) -> bool:
+    if str(summary.get("agentStatusCode") or "").strip() == "deleted_agent":
+        return True
     if bool(summary.get("agentMissing")):
         return False
     if not bool(str(summary.get("agentId") or "").strip()):

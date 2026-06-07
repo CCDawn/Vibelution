@@ -522,13 +522,15 @@ function buildAgentSlotModelChoicesWithCurrent(
   if (!normalizedCurrent || choices.some((choice) => choice.modelId === normalizedCurrent)) {
     return choices;
   }
+  const currentModel = models.find((model) => String(model.modelId || "").trim() === normalizedCurrent);
+  const unresolvedReason = currentModel
+    ? (lang === "zh" ? "当前绑定，当前槽位不可选" : "current binding, unavailable for this slot")
+    : (lang === "zh" ? "当前绑定，模型库未注册" : "current binding, not in model library");
   return [
     {
       key: `${slot?.slot ?? "slot"}:${normalizedCurrent}:unresolved`,
       modelId: normalizedCurrent,
-      label: lang === "zh"
-        ? `${normalizedCurrent}（当前绑定，模型库未注册）`
-        : `${normalizedCurrent} (current binding, not in model library)`,
+      label: lang === "zh" ? `${normalizedCurrent}（${unresolvedReason}）` : `${normalizedCurrent} (${unresolvedReason})`,
       modelLabel: normalizedCurrent,
       unresolved: true,
     },
@@ -2354,7 +2356,7 @@ function agentsRouteCopy(lang: "zh" | "en") {
         purgeAgent: "彻底删除",
         purgingAgent: "删除中...",
         purgeAgentTitle: "彻底删除",
-        purgeAgentHint: "只对已归档 Agent 开放；会从 AgentDirectory 删除记录，并移除该 Agent 的私有工作区、记忆、inbox 和事件文件。",
+        purgeAgentHint: "会从 AgentDirectory 删除记录，并移除该 Agent 的私有工作区、记忆、inbox 和事件文件；直连历史会保留为已删除 Agent 的历史记录。",
         purgeConfirm: "彻底删除 {name}？这个操作不可恢复，会删除该 Agent 的私有工作区和历史文件。",
         protectedAgent: "受保护 Agent 不能归档",
         archiveProtection: "归档保护",
@@ -2710,7 +2712,7 @@ function agentsRouteCopy(lang: "zh" | "en") {
         purgeAgent: "Permanently delete",
         purgingAgent: "Deleting...",
         purgeAgentTitle: "Permanent deletion",
-        purgeAgentHint: "Only archived Agents can be purged. This removes the AgentDirectory record plus its private workspace, memory, inbox, and event files.",
+        purgeAgentHint: "Removes the AgentDirectory record plus its private workspace, memory, inbox, and event files; direct-session history is kept as deleted-Agent history.",
         purgeConfirm: "Permanently delete {name}? This cannot be undone and will delete the Agent private workspace and history files.",
         protectedAgent: "Protected Agents cannot be archived",
         archiveProtection: "Archive protected",
@@ -3228,7 +3230,7 @@ export function AgentsRoute() {
   const selectedAgentResetPending = Boolean(selectedAgent?.agentId && resettingAgentIds.has(selectedAgent.agentId));
   const canResetAgent = Boolean(selectedAgent?.agentId && selectedAgent.status !== "archived");
   const canArchiveAgent = Boolean(selectedAgent?.agentId && selectedAgent.status !== "archived" && !selectedAgentProtected);
-  const canPurgeAgent = Boolean(selectedAgent?.agentId && selectedAgent.status === "archived" && !selectedAgentProtected);
+  const canPurgeAgent = Boolean(selectedAgent?.agentId && !selectedAgentProtected);
 
   const createAgentMutation = useMutation({
     mutationFn: (draft: AgentCreateDraft) => {
@@ -3423,7 +3425,7 @@ export function AgentsRoute() {
       setActivePane("overview");
       setNotice({
         tone: "success",
-        text: lang === "zh" ? "已彻底删除归档 Agent" : "Permanently deleted archived Agent",
+        text: lang === "zh" ? "已彻底删除 Agent" : "Permanently deleted Agent",
       });
       void chatWorkspaceCache.afterAgentArchived();
     },
@@ -5454,27 +5456,26 @@ export function AgentsRoute() {
                   <span className={styles.cleanPill}>{copy.protectedAgent}</span>
                 ) : (
                   <div className={styles.editorActions}>
-                    {selectedAgent.status === "archived" ? (
+                    {selectedAgent.status !== "archived" ? (
                       <button
                         type="button"
-                        className={styles.dangerButton}
-                        disabled={!canPurgeAgent || selectedAgentPurgePending}
-                        onClick={purgeSelectedAgent}
-                      >
-                        <Trash2 size={15} />
-                        {selectedAgentPurgePending ? copy.purgingAgent : copy.purgeAgent}
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        className={styles.dangerButton}
+                        className={styles.secondaryButton}
                         disabled={!canArchiveAgent || selectedAgentArchivePending}
                         onClick={archiveSelectedAgent}
                       >
-                        <Trash2 size={15} />
+                        <Archive size={15} />
                         {selectedAgentArchivePending ? copy.archivingAgent : copy.archiveAgent}
                       </button>
-                    )}
+                    ) : null}
+                    <button
+                      type="button"
+                      className={styles.dangerButton}
+                      disabled={!canPurgeAgent || selectedAgentPurgePending}
+                      onClick={purgeSelectedAgent}
+                    >
+                      <Trash2 size={15} />
+                      {selectedAgentPurgePending ? copy.purgingAgent : copy.purgeAgent}
+                    </button>
                   </div>
                 )}
               </section>
