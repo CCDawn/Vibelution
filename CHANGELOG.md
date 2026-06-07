@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.11.4 - 2026-06-08
+
+- Fixed permanent Agent deletion so active Agents can be purged directly, including solo chat-room cleanup and direct-session tombstone preservation.
+- Preserved deleted-Agent session history without allowing session repair to recreate purged Agents.
+- Kept unresolved current LLM bindings visible in Agent model slot selectors and preserved structured `llmBindings` in runtime scene child logs.
+
 ## 0.11.3 - 2026-06-07
 
 - Added a Team workflow source-collection run launcher that creates a generic DataProcessing run plus functional collection assignments for the AI research team.
