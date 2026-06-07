@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ExternalLink, LoaderCircle, Play, RefreshCw, Square } from "lucide-react";
+import { ExternalLink, LoaderCircle, Maximize2, Minimize2, Play, RefreshCw, Square } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import {
@@ -8,9 +8,10 @@ import {
   restartLauncherBundle,
   startLauncherBundle,
   stopLauncherBundle,
+  updateWorkbenchWindowMode,
 } from "../api/launcher";
 import { queryKeys } from "../api/queryKeys";
-import type { LauncherComponentState, LauncherOperation } from "../api/types";
+import type { LauncherComponentState, LauncherOperation, WorkbenchWindowMode } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { useAppI18n } from "../i18n/useAppI18n";
 import styles from "./LauncherRoute.module.css";
@@ -168,6 +169,12 @@ type LauncherCopy = {
   useCheckAction: string;
   useStartAction: string;
   useWaitAction: string;
+  windowMode: string;
+  windowModeFullscreen: string;
+  windowModeWindowed: string;
+  windowModeSaved: string;
+  windowModeRestartRequired: string;
+  windowModeEnvOverride: string;
 };
 
 type LifecycleDisplay = {
@@ -314,6 +321,10 @@ function resultMessage(result: LauncherControlPlaneResult, operation: LauncherOp
       : "The frontend TypeScript toolchain is incomplete; Launcher will try to reinstall dependencies.";
   }
   return raw.length > 180 ? `${raw.slice(0, 177)}...` : raw;
+}
+
+function workbenchWindowModeLabel(mode: string | undefined, copy: LauncherCopy) {
+  return String(mode || "").toLowerCase() === "windowed" ? copy.windowModeWindowed : copy.windowModeFullscreen;
 }
 
 function includesAny(value: string, needles: string[]) {
@@ -637,6 +648,12 @@ export function LauncherRoute() {
         waitOperationSummary: "Launcher 正在处理生命周期命令，请等待状态稳定。",
         checkDiagnosticsSummary: "关键状态无法确认时，展开高级诊断查看原因。",
         internalMigrationDetails: "内部迁移细节",
+        windowMode: "启动窗口",
+        windowModeFullscreen: "全屏",
+        windowModeWindowed: "窗口化",
+        windowModeSaved: "启动窗口模式已保存",
+        windowModeRestartRequired: "下次启动或重启工作台生效",
+        windowModeEnvOverride: "环境变量正在覆盖配置",
       }
     : {
         eyebrow: "Launcher",
@@ -762,6 +779,12 @@ export function LauncherRoute() {
         waitOperationSummary: "Launcher is processing a lifecycle command; wait for the state to settle.",
         checkDiagnosticsSummary: "If key status is unclear, expand diagnostics for the reason.",
         internalMigrationDetails: "Internal migration details",
+        windowMode: "Launch Window",
+        windowModeFullscreen: "Fullscreen",
+        windowModeWindowed: "Windowed",
+        windowModeSaved: "Launch window mode saved",
+        windowModeRestartRequired: "Takes effect on next workbench start or restart",
+        windowModeEnvOverride: "Environment override is active",
       };
 
   const [notice, setNotice] = useState<LauncherNotice>({ tone: "neutral", text: "" });
@@ -816,6 +839,19 @@ export function LauncherRoute() {
       setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
     },
   });
+  const windowModeMutation = useMutation({
+    mutationFn: updateWorkbenchWindowMode,
+    onSuccess: (response) => {
+      setNotice({
+        tone: response.setting.envOverride ? "warning" : "success",
+        text: response.message || copy.windowModeSaved,
+      });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.launcherStatus() });
+    },
+    onError: (error) => {
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
+    },
+  });
 
   const status = statusQuery.data as LauncherStatusWithGuardian | undefined;
   const bundle = status?.projectBundle;
@@ -854,6 +890,13 @@ export function LauncherRoute() {
   const controlDetail = launcherControlLimited ? copy.controlLimitedDetail : copy.controlReadyDetail;
   const activeWorkCount = status?.lifecycleProof.activeWorkRuns.count ?? 0;
   const activeWorkKinds = status?.lifecycleProof.activeWorkRuns.kinds ?? [];
+  const workbenchWindowSetting = status?.settings?.workbenchWindow;
+  const configuredWindowMode = workbenchWindowSetting?.mode ?? "fullscreen";
+  const effectiveWindowMode = workbenchWindowSetting?.effectiveMode ?? configuredWindowMode;
+  const envOverrideMode = workbenchWindowSetting?.envOverride || "";
+  const windowModeDetail = envOverrideMode
+    ? `${copy.windowModeEnvOverride}: ${workbenchWindowModeLabel(envOverrideMode, copy)} · ${copy.windowModeRestartRequired}`
+    : copy.windowModeRestartRequired;
   const restartQueue = evidence?.restartQueue;
   const restartQueueActive = Boolean(restartQueue?.active);
   const restartQueuePending = Boolean(restartQueue?.pending);
@@ -1035,6 +1078,34 @@ export function LauncherRoute() {
           helper={recovery?.active ? recovery.statusLine || humanCommandType(recovery.commandType, uiLang) : nextActionDetail}
           tone={recovery?.active ? (recovery.resultOk === false ? "warning" : "success") : projectIsOpen ? "success" : projectIsChanging ? "warning" : "neutral"}
         />
+      </div>
+
+      <div className={styles.settingsStrip} aria-label={copy.windowMode}>
+        <span>{copy.windowMode}</span>
+        <strong>{workbenchWindowModeLabel(effectiveWindowMode, copy)}</strong>
+        <div className={styles.segmentedControl} role="group" aria-label={copy.windowMode}>
+          <button
+            type="button"
+            data-active={configuredWindowMode === "fullscreen"}
+            disabled={windowModeMutation.isPending}
+            onClick={() => windowModeMutation.mutate("fullscreen")}
+            title={copy.windowModeFullscreen}
+          >
+            <Maximize2 size={14} />
+            <span>{copy.windowModeFullscreen}</span>
+          </button>
+          <button
+            type="button"
+            data-active={configuredWindowMode === "windowed"}
+            disabled={windowModeMutation.isPending}
+            onClick={() => windowModeMutation.mutate("windowed")}
+            title={copy.windowModeWindowed}
+          >
+            <Minimize2 size={14} />
+            <span>{copy.windowModeWindowed}</span>
+          </button>
+        </div>
+        <small>{windowModeDetail}</small>
       </div>
 
       {statusQuery.isError ? (

@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Literal, TypedDict
 
+from config.public_config import CONFIG_PATH, load_public_config, save_public_config
 from core.runtime_manager import ensure_daemon_running, submit_command
 from core.runtime_manager.constants import (
     EVENTS_PATH,
@@ -27,6 +29,7 @@ from core.runtime_manager.workbench_controller import _is_process_alive, observe
 
 LauncherOperation = Literal["start", "stop", "restart"]
 LauncherSupervisorOperation = Literal["supervisor_reattach"]
+WorkbenchWindowMode = Literal["fullscreen", "windowed"]
 
 ACTIVE_WORK_BLOCK_MESSAGE_RESTART = "有进行中的任务，无法重启 Vibelution。请等待任务完成或先停止任务。"
 ACTIVE_WORK_BLOCK_MESSAGE_STOP = "有进行中的任务，无法停止 Vibelution。请等待任务完成或先停止任务。"
@@ -69,6 +72,21 @@ _ACTIVE_WORK_KINDS = (
     "supervised_worktree_evolution_run",
 )
 _STALE_SNAPSHOT_GRACE = timedelta(hours=6)
+_WORKBENCH_WINDOW_MODES: tuple[WorkbenchWindowMode, ...] = ("fullscreen", "windowed")
+_WORKBENCH_WINDOW_MODE_LABELS = {
+    "fullscreen": {"zh": "全屏", "en": "Fullscreen"},
+    "windowed": {"zh": "窗口化", "en": "Windowed"},
+}
+_WORKBENCH_WINDOW_MODE_DETAILS = {
+    "fullscreen": {
+        "zh": "下次启动工作台时铺满屏幕。",
+        "en": "Open the workbench fullscreen on the next start.",
+    },
+    "windowed": {
+        "zh": "下次启动工作台时保留系统窗口边框。",
+        "en": "Open the workbench in a normal desktop window on the next start.",
+    },
+}
 
 
 class LauncherActiveWorkBlocked(Exception):
@@ -134,7 +152,104 @@ def get_launcher_status() -> dict[str, Any]:
         "guardianAdapter": _guardian_adapter_from_workbench(runtime_manager=runtime_manager, workbench=workbench),
         "runtimeManager": runtime_manager,
         "lifecycleProof": lifecycle_proof,
+        "settings": {
+            "workbenchWindow": get_workbench_window_mode_setting(),
+        },
     }
+
+
+def get_workbench_window_mode_setting() -> dict[str, Any]:
+    """Return the configured and effective Workbench window mode."""
+
+    configured = _read_configured_workbench_window_mode()
+    env_override = _read_workbench_window_mode_env_override() or ""
+    effective = env_override or configured
+    return {
+        "mode": configured,
+        "effectiveMode": effective,
+        "envOverride": env_override,
+        "configPath": str(CONFIG_PATH),
+        "restartRequired": True,
+        "options": [
+            {
+                "mode": mode,
+                "label": _WORKBENCH_WINDOW_MODE_LABELS[mode],
+                "detail": _WORKBENCH_WINDOW_MODE_DETAILS[mode],
+            }
+            for mode in _WORKBENCH_WINDOW_MODES
+        ],
+    }
+
+
+def update_workbench_window_mode(mode: str) -> dict[str, Any]:
+    """Persist the Workbench window mode used by subsequent Launcher starts."""
+
+    normalized = _parse_workbench_window_mode(mode)
+    public_config = load_public_config(CONFIG_PATH)
+    workbench = public_config.setdefault("workbench", {})
+    if not isinstance(workbench, dict):
+        workbench = {}
+        public_config["workbench"] = workbench
+    previous = _normalize_workbench_window_mode(workbench.get("window_mode"), default="fullscreen")
+    workbench["window_mode"] = normalized
+    save_public_config(public_config, CONFIG_PATH)
+    setting = get_workbench_window_mode_setting()
+    _record_launcher_event(
+        "launcher.settings.workbench_window_mode.updated",
+        phase="settings",
+        message="Launcher Workbench window mode setting updated.",
+        outcome="succeeded",
+        fields={
+            "previousMode": previous,
+            "mode": normalized,
+            "effectiveMode": setting["effectiveMode"],
+            "envOverride": setting["envOverride"],
+            "configPath": str(CONFIG_PATH),
+        },
+    )
+    return {
+        "ok": True,
+        "mode": normalized,
+        "setting": setting,
+        "message": "工作台启动窗口模式已保存；下次启动或重启工作台生效。",
+    }
+
+
+def _normalize_workbench_window_mode(value: object, *, default: WorkbenchWindowMode | str = "fullscreen") -> WorkbenchWindowMode:
+    normalized = str(value or "").strip().lower()
+    if normalized in _WORKBENCH_WINDOW_MODES:
+        return normalized  # type: ignore[return-value]
+    fallback = str(default or "fullscreen").strip().lower()
+    return fallback if fallback in _WORKBENCH_WINDOW_MODES else "fullscreen"  # type: ignore[return-value]
+
+
+def _parse_workbench_window_mode(value: object) -> WorkbenchWindowMode:
+    normalized = str(value or "").strip().lower()
+    if normalized in _WORKBENCH_WINDOW_MODES:
+        return normalized  # type: ignore[return-value]
+    allowed = ", ".join(_WORKBENCH_WINDOW_MODES)
+    raise ValueError(f"Unsupported Workbench window mode '{value}'. Allowed values: {allowed}.")
+
+
+def _read_configured_workbench_window_mode() -> WorkbenchWindowMode:
+    try:
+        public_config = load_public_config(CONFIG_PATH)
+    except Exception:
+        return "fullscreen"
+    workbench = public_config.get("workbench", {}) if isinstance(public_config, dict) else {}
+    raw_mode = workbench.get("window_mode") if isinstance(workbench, dict) else ""
+    return _normalize_workbench_window_mode(raw_mode)
+
+
+def _read_workbench_window_mode_env_override() -> WorkbenchWindowMode | None:
+    for env_name in ("VIBELUTION_WORKBENCH_WINDOW_MODE", "AGENT_WORKBENCH_WINDOW_MODE"):
+        raw_value = str(os.environ.get(env_name) or "").strip()
+        if not raw_value:
+            continue
+        normalized = raw_value.lower()
+        if normalized in _WORKBENCH_WINDOW_MODES:
+            return normalized  # type: ignore[return-value]
+    return None
 
 
 def launcher_active_work_runs() -> list[dict[str, str]]:

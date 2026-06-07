@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from pydantic import BaseModel
 from fastapi import APIRouter, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
@@ -25,6 +26,10 @@ INDEX_CACHE_HEADERS = {
 router = APIRouter()
 
 
+class WorkbenchWindowModePayload(BaseModel):
+    mode: str
+
+
 @router.get("/api/health")
 def launcher_health() -> dict:
     return {"status": "ok", "service": "launcher"}
@@ -39,6 +44,19 @@ def launcher_control_token() -> dict:
 @router.get("/api/project/status")
 def launcher_status() -> dict:
     return launcher_service.get_launcher_status()
+
+
+@router.get("/api/launcher/settings/workbench-window")
+def workbench_window_setting() -> dict:
+    return launcher_service.get_workbench_window_mode_setting()
+
+
+@router.put("/api/launcher/settings/workbench-window")
+def update_workbench_window_setting(payload: WorkbenchWindowModePayload) -> dict:
+    try:
+        return launcher_service.update_workbench_window_mode(payload.mode)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail={"code": "invalid_workbench_window_mode", "message": str(exc)}) from exc
 
 
 @router.post("/api/launcher/start", status_code=202)

@@ -1138,8 +1138,11 @@ if ($browserText -match '--kiosk') {
 if ($browserText -notmatch '--start-fullscreen' -or $browserText -notmatch 'fullscreenForced') {
     throw "Start-ManagedBrowser should request fullscreen through the managed window policy."
 }
-if ($browserText -notmatch 'fixed_workbench_fullscreen' -or $browserText -notmatch 'launcher_taskbar_windowed') {
-    throw "Start-ManagedBrowser should enforce separate Workbench fullscreen and Launcher taskbar window policies."
+if ($browserText -notmatch 'configured_workbench_window_mode' -or $browserText -notmatch 'launcher_taskbar_windowed') {
+    throw "Start-ManagedBrowser should enforce configurable Workbench mode and separate Launcher taskbar window policies."
+}
+if ($browserText -notmatch '\\$WindowPurpose -eq "launcher_control_surface"\\) \\{ "windowed" \\} else \\{ \\$configuredWindowMode \\}') {
+    throw "Start-ManagedBrowser should apply workbench.window_mode to the Workbench window while keeping Launcher windowed."
 }
 if ($browserText -notmatch 'configured_window_mode' -or $browserText -notmatch 'window_policy') {
     throw "Start-ManagedBrowser should log both configured and effective window policy values."
