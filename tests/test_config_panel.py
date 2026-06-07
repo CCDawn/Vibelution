@@ -856,7 +856,7 @@ def test_apply_custom_openai_compatible_relay_preset_accepts_user_base_url():
     build_effective_config(updated)
 
 
-def test_apply_custom_relay_responses_preset_accepts_approved_relay_host():
+def test_apply_custom_relay_responses_preset_accepts_custom_public_relay_host():
     public_config = load_public_config()
 
     updated = apply_llm_model_preset(
@@ -866,7 +866,7 @@ def test_apply_custom_relay_responses_preset_accepts_approved_relay_host():
         provider_id={
             "kind": "relay",
             "api_key_env": "OPENAI_API_KEY",
-            "base_url": "https://ai-pixel.online",
+            "base_url": "https://relay.example.com/v1",
             "compat_mode": "openai",
             "requires_api_key": True,
             "context_window": 1000000,
@@ -878,7 +878,7 @@ def test_apply_custom_relay_responses_preset_accepts_approved_relay_host():
     model = updated["llm"]["model_library"]["custom_relay_responses_model"]
 
     assert model["provider"]["kind"] == "relay"
-    assert model["provider"]["base_url"] == "https://ai-pixel.online"
+    assert model["provider"]["base_url"] == "https://relay.example.com/v1"
     assert model["transport"] == "responses"
     assert model["api_key_env"] == "VIBELUTION_LLM_MODEL_CUSTOM_RELAY_RESPONSES_MODEL_API_KEY"
     build_effective_config(updated)
