@@ -13682,11 +13682,11 @@ def test_config_workspace_draft_model_persists_manual_image_input_support(monkey
     assert model["capability_source"] == "manual"
 
 
-def test_config_workspace_draft_model_allows_approved_ai_pixel_relay_host(monkeypatch):
+def test_config_workspace_draft_model_allows_custom_public_relay_host(monkeypatch):
     public_config = copy.deepcopy(load_public_config())
     target = public_config["llm"]["model_library"]["relay_openai_gpt_5_5"]
     provider = copy.deepcopy(target["provider"])
-    provider["base_url"] = "https://ai-pixel.online"
+    provider["base_url"] = "https://relay.example.com/v1"
 
     monkeypatch.setattr(config_service, "load_public_config", lambda: copy.deepcopy(public_config))
 
@@ -13709,7 +13709,7 @@ def test_config_workspace_draft_model_allows_approved_ai_pixel_relay_host(monkey
     assert response.status_code == 200, response.json()
     payload = response.json()
     updated = payload["publicConfig"]["llm"]["model_library"]["relay_openai_gpt_5_5"]
-    assert updated["provider"]["base_url"] == "https://ai-pixel.online"
+    assert updated["provider"]["base_url"] == "https://relay.example.com/v1"
 
 
 def test_config_workspace_draft_model_allows_custom_openai_compatible_relay(monkeypatch):
@@ -13989,6 +13989,43 @@ def test_config_workspace_draft_model_rejects_custom_relay_localhost(monkeypatch
     assert "localhost" in response.json()["detail"] or "https" in response.json()["detail"]
 
 
+def test_config_workspace_draft_model_rejects_custom_responses_relay_localhost(monkeypatch):
+    public_config = copy.deepcopy(load_public_config())
+
+    monkeypatch.setattr(config_service, "load_public_config", lambda: copy.deepcopy(public_config))
+
+    response = client.post(
+        "/api/config/draft/add-model",
+        json={
+            "publicConfig": public_config,
+            "draftMeta": {},
+            "baseHash": public_config_hash(public_config),
+            "presetId": "custom_relay_responses",
+            "modelId": "custom_relay_responses_model",
+            "provider": {
+                "kind": "relay",
+                "api_key_env": "OPENAI_API_KEY",
+                "base_url": "https://127.0.0.1:11434/v1",
+                "compat_mode": "openai",
+                "requires_api_key": True,
+                "context_window": 1000000,
+            },
+            "model": "gpt-5.5",
+            "label": "Custom Relay Responses",
+            "details": {
+                "transport": "responses",
+                "contract": "tool_chat",
+                "streaming": True,
+            },
+            "apiKeyEnv": "VIBELUTION_LLM_MODEL_CUSTOM_RELAY_RESPONSES_MODEL_API_KEY",
+            "apiKey": "",
+        },
+    )
+
+    assert response.status_code == 422
+    assert "localhost" in response.json()["detail"]
+
+
 def test_config_workspace_draft_model_allows_private_lan_local_provider(monkeypatch):
     public_config = copy.deepcopy(load_public_config())
 
@@ -14103,11 +14140,19 @@ def test_config_workspace_draft_model_rejects_link_local_metadata_for_local_prov
     assert "localhost" in response.json()["detail"] or "private LAN" in response.json()["detail"]
 
 
+def _mock_model_discovery_public_dns(monkeypatch):
+    monkeypatch.setattr(
+        "config.llm_security.socket.getaddrinfo",
+        lambda host, port, type=None: [(None, None, None, None, ("8.8.8.8", port))],
+    )
+
+
 def test_config_workspace_discovers_custom_openai_compatible_models(monkeypatch):
     public_config = copy.deepcopy(load_public_config())
     seen = {}
 
     monkeypatch.setattr(config_service, "load_public_config", lambda: copy.deepcopy(public_config))
+    _mock_model_discovery_public_dns(monkeypatch)
 
     def fake_discover_model_list(api_base, *, api_key="", timeout=10, api_key_source=""):
         seen["api_base"] = api_base
@@ -14151,11 +14196,57 @@ def test_config_workspace_discovers_custom_openai_compatible_models(monkeypatch)
     }
 
 
+def test_config_workspace_discovers_custom_public_relay_models(monkeypatch):
+    public_config = copy.deepcopy(load_public_config())
+    seen = {}
+
+    monkeypatch.setattr(config_service, "load_public_config", lambda: copy.deepcopy(public_config))
+    _mock_model_discovery_public_dns(monkeypatch)
+
+    def fake_discover_model_list(api_base, *, api_key="", timeout=10, api_key_source=""):
+        seen["api_base"] = api_base
+        seen["api_key"] = api_key
+        seen["api_key_source"] = api_key_source
+        seen["timeout"] = timeout
+        return [{"id": "gpt-5.5", "label": "GPT-5.5", "context_window": 1000000}]
+
+    monkeypatch.setattr(config_service, "_discover_openai_compatible_model_list", fake_discover_model_list)
+
+    response = client.post(
+        "/api/config/discover-models",
+        json={
+            "publicConfig": public_config,
+            "draftMeta": {},
+            "provider": {
+                "kind": "relay",
+                "api_key_env": "OPENAI_API_KEY",
+                "base_url": "https://relay.example.com/v1",
+                "compat_mode": "openai",
+                "requires_api_key": True,
+                "context_window": 1000000,
+            },
+            "apiKey": "draft-secret",
+        },
+    )
+
+    assert response.status_code == 200, response.json()
+    assert response.json()["providerKind"] == "relay"
+    assert response.json()["baseUrl"] == "https://relay.example.com/v1"
+    assert response.json()["models"][0]["id"] == "gpt-5.5"
+    assert seen == {
+        "api_base": "https://relay.example.com/v1",
+        "api_key": "draft-secret",
+        "api_key_source": "手动输入",
+        "timeout": config_service._MODEL_DISCOVERY_DEFAULT_TIMEOUT_SECONDS,
+    }
+
+
 def test_config_workspace_model_discovery_uses_configured_environment_key(monkeypatch):
     public_config = copy.deepcopy(load_public_config())
     seen = {}
 
     monkeypatch.setattr(config_service, "load_public_config", lambda: copy.deepcopy(public_config))
+    _mock_model_discovery_public_dns(monkeypatch)
     monkeypatch.setenv("VIBELUTION_LLM_MODEL_CUSTOM_RELAY_API_KEY", "env-secret")
 
     def fake_discover_model_list(api_base, *, api_key="", timeout=10, api_key_source=""):
@@ -14210,6 +14301,7 @@ def test_config_workspace_model_discovery_prefers_model_key_env(monkeypatch):
         "api_key_env": "VIBELUTION_LLM_MODEL_CUSTOM_RELAY_API_KEY",
     }
     monkeypatch.setattr(config_service, "load_public_config", lambda: copy.deepcopy(public_config))
+    _mock_model_discovery_public_dns(monkeypatch)
     monkeypatch.setenv("OPENAI_API_KEY", "provider-secret")
     monkeypatch.setenv("VIBELUTION_LLM_MODEL_CUSTOM_RELAY_API_KEY", "model-secret")
 
@@ -14253,6 +14345,7 @@ def test_config_workspace_model_discovery_uses_submitted_model_key_env(monkeypat
     seen = {}
 
     monkeypatch.setattr(config_service, "load_public_config", lambda: copy.deepcopy(public_config))
+    _mock_model_discovery_public_dns(monkeypatch)
     monkeypatch.setenv("OPENAI_API_KEY", "provider-secret")
     monkeypatch.setenv("VIBELUTION_LLM_MODEL_NEW_RELAY_API_KEY", "new-model-secret")
 
