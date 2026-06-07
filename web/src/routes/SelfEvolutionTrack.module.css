@@ -133,11 +133,12 @@
 
 .loadingShell {
   display: grid;
-  grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
-  gap: 12px;
-  height: 100%;
-  min-height: min(520px, 72vh);
-  align-content: stretch;
+  grid-template-columns: minmax(240px, 300px) minmax(0, 1fr);
+  gap: 8px;
+  min-height: 148px;
+  max-height: 180px;
+  align-self: start;
+  align-content: start;
   overflow: hidden;
 }
 
@@ -151,9 +152,9 @@
 .loadingRail {
   display: grid;
   align-content: start;
-  gap: 14px;
+  gap: 10px;
   min-height: 0;
-  padding: 14px;
+  padding: 12px;
 }
 
 .loadingStatGrid {
@@ -164,9 +165,9 @@
 
 .loadingStatGrid span {
   display: grid;
-  gap: 4px;
+  gap: 3px;
   min-width: 0;
-  padding: 8px;
+  padding: 6px 7px;
   border: 1px solid var(--border-hairline);
   border-radius: 7px;
   color: var(--fg-tertiary);
@@ -181,17 +182,17 @@
 
 .loadingBody {
   display: grid;
-  grid-template-rows: repeat(3, minmax(0, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
   min-height: 0;
 }
 
 .loadingPanel {
   display: grid;
-  align-content: center;
-  gap: 11px;
+  align-content: start;
+  gap: 8px;
   min-height: 0;
-  padding: 16px;
+  padding: 12px;
 }
 
 .loadingPanel strong {
@@ -203,7 +204,7 @@
 .skeletonLine,
 .skeletonLineShort {
   display: block;
-  height: 10px;
+  height: 8px;
   border-radius: 999px;
   background: linear-gradient(
     90deg,
@@ -986,8 +987,13 @@
 
   .loadingShell {
     grid-template-columns: minmax(0, 1fr);
-    min-height: 360px;
-    overflow: auto;
+    min-height: 172px;
+    max-height: 210px;
+    overflow: hidden;
+  }
+
+  .loadingBody {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   .transactionMetaGrid {

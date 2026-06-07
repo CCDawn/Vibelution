@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
 from starlette.responses import StreamingResponse
@@ -22,11 +24,13 @@ from core.web.services.evolution_service import (
     EvolutionProposalNotFoundError,
     EvolutionProposalValidationError,
     get_evolution_overview,
+    get_evolution_workspace_dashboard,
     get_proposal_detail,
     get_self_evolution_candidate_review_queue,
     list_library_items,
     list_pending_library_items,
     list_runs,
+    record_evolution_workspace_snapshot_perf,
     delete_proposal,
     bulk_delete_proposals,
     update_proposal,
@@ -34,6 +38,7 @@ from core.web.services.evolution_service import (
 from core.web.services.self_evolution_service import (
     SelfEvolutionHistoryDeleteError,
     delete_self_evolution_history_groups,
+    get_self_evolution_light_overview,
     get_self_evolution_overview,
     list_self_evolution_audit_events,
     list_self_evolution_transactions,
@@ -179,24 +184,59 @@ def evolution_overview() -> dict:
 
 
 @router.get("/evolution/workspace-snapshot")
-def evolution_workspace_snapshot() -> dict:
-    library = {
-        "items": list_library_items(),
-        "pending": list_pending_library_items(),
+def evolution_workspace_snapshot(includeSelf: bool = False) -> dict:
+    started_at = time.perf_counter()
+    timings: dict[str, float] = {}
+
+    def timed(name: str, loader):
+        stage_started = time.perf_counter()
+        value = loader()
+        timings[name] = (time.perf_counter() - stage_started) * 1000
+        return value
+
+    dashboard = timed("dashboard", get_evolution_workspace_dashboard)
+    active_run = timed("active_run", get_active_supervised_run)
+    workbench = timed(
+        "workbench",
+        lambda: get_supervised_workbench(
+            active_run=active_run,
+            active_run_loaded=True,
+            include_catalog=False,
+            saved_state=dashboard.get("overview", {}).get("workbench") if isinstance(dashboard.get("overview"), dict) else None,
+        ),
+    )
+    active_run = workbench.get("activeRun") if isinstance(workbench, dict) else None
+    latest_run = timed("latest_run", lambda: get_latest_supervised_run(active_run=active_run, active_run_loaded=True))
+    self_overview = timed(
+        "self_overview",
+        get_self_evolution_overview if includeSelf else get_self_evolution_light_overview,
+    )
+    self_transactions = timed(
+        "self_transactions",
+        list_self_evolution_transactions if includeSelf else (lambda: []),
+    )
+    payload = {
+        "overview": dashboard["overview"],
+        "runs": dashboard["runs"],
+        "library": dashboard["library"],
+        "workbench": workbench,
+        "activeRun": active_run,
+        "latestRun": latest_run,
+        "worktreeActiveRun": timed("worktree_active_run", get_active_supervised_worktree_run),
+        "worktreeRuns": timed("worktree_runs", list_supervised_worktree_runs),
+        "selfOverview": self_overview,
+        "selfLatestRun": timed("self_latest_run", get_latest_self_evolution_run),
+        "selfTransactions": self_transactions,
     }
-    return {
-        "overview": get_evolution_overview(),
-        "runs": list_runs(),
-        "library": library,
-        "workbench": get_supervised_workbench(),
-        "activeRun": get_active_supervised_run(),
-        "latestRun": get_latest_supervised_run(),
-        "worktreeActiveRun": get_active_supervised_worktree_run(),
-        "worktreeRuns": list_supervised_worktree_runs(),
-        "selfOverview": get_self_evolution_overview(),
-        "selfLatestRun": get_latest_self_evolution_run(),
-        "selfTransactions": list_self_evolution_transactions(),
-    }
+    duration_ms = (time.perf_counter() - started_at) * 1000
+    timings["total"] = duration_ms
+    record_evolution_workspace_snapshot_perf(
+        duration_ms=duration_ms,
+        timings_ms=timings,
+        payload=payload,
+        include_self=includeSelf,
+    )
+    return payload
 
 
 @router.get("/evolution/runs")

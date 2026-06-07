@@ -261,9 +261,9 @@ def _config_agent_instances_present() -> bool:
 
 
 @router.get("/agents")
-def agent_list(includeArchived: bool = False) -> list[dict]:
+def agent_list(includeArchived: bool = False, detail: str = "full") -> list[dict]:
     _ensure_config_agent_instances()
-    return list_agents(include_archived=includeArchived)
+    return list_agents(include_archived=includeArchived, detail=detail)
 
 
 @router.get("/agents/avatar-image/{filename}")

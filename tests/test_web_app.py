@@ -14144,6 +14144,117 @@ def test_evolution_workspace_snapshot_combines_dashboard_payloads(tmp_path, monk
     assert payload["selfTransactions"] == []
 
 
+def test_evolution_workspace_snapshot_reuses_supervised_dashboard_scan(monkeypatch):
+    calls: list[str] = []
+
+    monkeypatch.setattr(
+        evolution_routes,
+        "get_evolution_workspace_dashboard",
+        lambda: calls.append("dashboard") or {
+            "overview": {"currentStatus": {"state": "idle"}, "recentRuns": []},
+            "runs": [],
+            "library": {"items": [], "pending": []},
+        },
+    )
+    def fake_get_supervised_workbench(**kwargs):
+        assert kwargs == {
+            "active_run": None,
+            "active_run_loaded": True,
+            "include_catalog": False,
+            "saved_state": None,
+        }
+        return {"bundles": [], "datasets": [], "activeRun": {"runId": "active-1", "status": "running"}}
+
+    monkeypatch.setattr(evolution_routes, "get_supervised_workbench", fake_get_supervised_workbench)
+    monkeypatch.setattr(evolution_routes, "get_active_supervised_run", lambda: calls.append("active") or None)
+    monkeypatch.setattr(evolution_routes, "get_latest_supervised_run", lambda **kwargs: kwargs.get("active_run"))
+    monkeypatch.setattr(evolution_routes, "get_active_supervised_worktree_run", lambda: None)
+    monkeypatch.setattr(evolution_routes, "list_supervised_worktree_runs", lambda: [])
+    monkeypatch.setattr(evolution_routes, "get_self_evolution_light_overview", lambda: {"enabled": True, "goal": "light"})
+    monkeypatch.setattr(evolution_routes, "get_self_evolution_overview", lambda: pytest.fail("default snapshot should be light"))
+    monkeypatch.setattr(evolution_routes, "get_latest_self_evolution_run", lambda: None)
+    monkeypatch.setattr(evolution_routes, "list_self_evolution_transactions", lambda: pytest.fail("default snapshot should not load transactions"))
+    monkeypatch.setattr(evolution_routes, "record_evolution_workspace_snapshot_perf", lambda **kwargs: None)
+
+    response = client.get("/api/evolution/workspace-snapshot")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["activeRun"]["runId"] == "active-1"
+    assert payload["latestRun"]["runId"] == "active-1"
+    assert calls == ["dashboard", "active"]
+
+
+def test_evolution_workspace_snapshot_can_include_full_self_payload(monkeypatch):
+    monkeypatch.setattr(
+        evolution_routes,
+        "get_evolution_workspace_dashboard",
+        lambda: {
+            "overview": {"currentStatus": {"state": "idle"}, "recentRuns": []},
+            "runs": [],
+            "library": {"items": [], "pending": []},
+        },
+    )
+    monkeypatch.setattr(evolution_routes, "get_supervised_workbench", lambda **kwargs: {"activeRun": None})
+    monkeypatch.setattr(evolution_routes, "get_active_supervised_run", lambda: None)
+    monkeypatch.setattr(evolution_routes, "get_latest_supervised_run", lambda **kwargs: None)
+    monkeypatch.setattr(evolution_routes, "get_active_supervised_worktree_run", lambda: None)
+    monkeypatch.setattr(evolution_routes, "list_supervised_worktree_runs", lambda: [])
+    monkeypatch.setattr(evolution_routes, "get_self_evolution_light_overview", lambda: pytest.fail("includeSelf should request full overview"))
+    monkeypatch.setattr(evolution_routes, "get_self_evolution_overview", lambda: {"enabled": True, "goal": "full"})
+    monkeypatch.setattr(evolution_routes, "get_latest_self_evolution_run", lambda: {"runId": "self-latest"})
+    monkeypatch.setattr(evolution_routes, "list_self_evolution_transactions", lambda: [{"txnId": "txn-1"}])
+    monkeypatch.setattr(evolution_routes, "record_evolution_workspace_snapshot_perf", lambda **kwargs: None)
+
+    response = client.get("/api/evolution/workspace-snapshot", params={"includeSelf": "true"})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["selfOverview"]["goal"] == "full"
+    assert payload["selfLatestRun"]["runId"] == "self-latest"
+    assert payload["selfTransactions"] == [{"txnId": "txn-1"}]
+
+
+def test_evolution_workspace_snapshot_slow_event_includes_stage_timings(monkeypatch):
+    recorded_events: list[dict] = []
+
+    def fake_record_runtime_scene_event(component, phase, event_code, **kwargs):
+        recorded_events.append(
+            {
+                "component": component,
+                "phase": phase,
+                "eventCode": event_code,
+                **kwargs,
+            }
+        )
+        return {"accepted": True}
+
+    monkeypatch.setattr(runtime_scene_service, "record_runtime_scene_event", fake_record_runtime_scene_event)
+    monkeypatch.setattr(evolution_service, "EVOLUTION_WORKSPACE_SNAPSHOT_WAS_SLOW", False)
+
+    evolution_service.record_evolution_workspace_snapshot_perf(
+        duration_ms=1500,
+        timings_ms={"dashboard": 400.4, "workbench": 700.2, "total": 1500.1},
+        payload={
+            "overview": {"recentRuns": [{}, {}]},
+            "runs": [{}],
+            "library": {"items": [{}, {}], "pending": [{}]},
+            "worktreeRuns": [{}],
+            "selfTransactions": [],
+        },
+        include_self=False,
+    )
+
+    assert recorded_events
+    event = recorded_events[-1]
+    assert event["component"] == "evolution_service"
+    assert event["phase"] == "workspace_snapshot"
+    assert event["eventCode"] == "evolution.workspace_snapshot.slow"
+    assert event["fields"]["timingsMs"]["workbench"] == 700.2
+    assert event["fields"]["libraryItemCount"] == 2
+    assert event["fields"]["includeSelf"] is False
+
+
 def test_evolution_library_exposes_self_evolution_candidates_as_pending_review_source(tmp_path, monkeypatch):
     append_candidate_record(
         {

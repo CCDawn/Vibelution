@@ -125,7 +125,7 @@ class TerminalBenchJsonlAdapter(DatasetAdapter):
             preflight = preflight_environment_contract(contract, project_root=project_root)
             reason = "可启动 Vibelution 自定义 harness 多步评测；结果不是 Terminal-Bench 官方成绩，官方 Harbor 判分器尚未接通。"
             if not preflight["available"]:
-                reason += " 当前任务路径预检未通过，运行时应按 environment_unavailable 失败关账。"
+                reason += " 当前任务环境预检未完全通过，运行时应按 environment_unavailable 失败关账。"
             return {
                 "usability_status": "custom_harness_ready",
                 "usability_reason": reason,
