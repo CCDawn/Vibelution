@@ -31,10 +31,12 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("startLauncherBundle");
     expect(routeSource).toContain("stopLauncherBundle");
     expect(routeSource).toContain("restartLauncherBundle()");
-    expect(routeSource).toContain("updateWorkbenchWindowMode");
+    expect(routeSource).toContain("updateLauncherStartupSettings");
     expect(routeSource).toContain("reattachLauncherSupervisor");
     expect(routeSource).toContain("queryKeys.launcherStatus()");
     expect(routeSource).toContain("queryKeys.runtimeSummary()");
+    expect(routeSource).toContain("queryKeys.configPublic()");
+    expect(routeSource).toContain("queryKeys.configWorkspace()");
   });
 
   it("keeps launcher controls fresh while the control surface is minimized", () => {
@@ -75,6 +77,9 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("diagnosticsBody");
     expect(routeSource).toContain("diagnosticSection");
     expect(routeSource).toContain("settingsStrip");
+    expect(routeSource).toContain("LauncherStartupSettingsPanel");
+    expect(routeSource).toContain("settingField");
+    expect(routeSource).toContain("settingsSaveButton");
     expect(routeSource).toContain("segmentedControl");
     expect(routeSource).toContain("guardian?.supervisor?.stdoutPath");
     expect(routeSource).toContain("guardian?.supervisor?.stderrPath");
@@ -82,6 +87,8 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).not.toContain("cardGrid");
     expect(styles.summaryStrip).toBeTypeOf("string");
     expect(styles.settingsStrip).toBeTypeOf("string");
+    expect(styles.settingField).toBeTypeOf("string");
+    expect(styles.settingsSaveButton).toBeTypeOf("string");
     expect(styles.segmentedControl).toBeTypeOf("string");
     expect(styles.guardStrip).toBeTypeOf("string");
     expect(styles.statusTable).toBeTypeOf("string");
@@ -182,22 +189,31 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain('controlMutation.mutate("start")');
     expect(routeSource).toContain('controlMutation.mutate("stop")');
     expect(routeSource).toContain('controlMutation.mutate("restart")');
-    expect(routeSource).toContain('windowModeMutation.mutate("fullscreen")');
-    expect(routeSource).toContain('windowModeMutation.mutate("windowed")');
+    expect(routeSource).toContain('windowMode: "fullscreen"');
+    expect(routeSource).toContain('windowMode: "windowed"');
+    expect(routeSource).toContain("startupSettingsMutation.mutate");
     expect(routeSource).toContain("supervisorMutation.mutate()");
   });
 
-  it("lets Launcher choose the Workbench launch window mode without restarting immediately", () => {
-    expect(routeSource).toContain("workbenchWindowSetting");
+  it("lets Launcher edit startup settings without restarting immediately", () => {
+    expect(routeSource).toContain("startupSettings");
     expect(routeSource).toContain("configuredWindowMode");
     expect(routeSource).toContain("effectiveWindowMode");
     expect(routeSource).toContain("envOverrideMode");
+    expect(routeSource).toContain("backendPortOverride");
+    expect(routeSource).toContain("frontendPortOverride");
     expect(routeSource).toContain("workbenchWindowModeLabel");
     expect(routeSource).toContain("windowModeRestartRequired");
     expect(routeSource).toContain("windowModeEnvOverride");
+    expect(routeSource).toContain("runtimeProfile");
+    expect(routeSource).toContain("preflightDoctor");
+    expect(routeSource).toContain("requireVenv");
+    expect(routeSource).toContain("interfaceLanguage");
+    expect(routeSource).toContain("saveStartupSettings");
+    expect(routeSource).toContain("settings?.startup");
     expect(routeSource).toContain("settings?.workbenchWindow");
-    expect(routeSource).toContain("mutationFn: updateWorkbenchWindowMode");
-    expect(routeSource).not.toContain("windowModeMutation.mutate(\"fullscreen\"); controlMutation.mutate(\"restart\")");
+    expect(routeSource).toContain("mutationFn: updateLauncherStartupSettings");
+    expect(routeSource).not.toContain('startupSettingsMutation.mutate(nextSetting); controlMutation.mutate("restart")');
   });
 
   it("treats status disconnect after stop as an expected closed state", () => {

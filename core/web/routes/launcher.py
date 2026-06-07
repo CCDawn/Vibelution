@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from fastapi import APIRouter, HTTPException
 
 from core.launcher import service as launcher_service
@@ -15,6 +15,12 @@ class WorkbenchWindowModePayload(BaseModel):
     mode: str
 
 
+class LauncherStartupSettingsPayload(BaseModel):
+    runtime: dict = Field(default_factory=dict)
+    workbench: dict = Field(default_factory=dict)
+    interface: dict = Field(default_factory=dict)
+
+
 @router.get("/launcher/status")
 def launcher_status() -> dict:
     return launcher_service.get_launcher_status()
@@ -23,6 +29,19 @@ def launcher_status() -> dict:
 @router.get("/launcher/settings/workbench-window")
 def launcher_workbench_window_setting() -> dict:
     return launcher_service.get_workbench_window_mode_setting()
+
+
+@router.get("/launcher/settings/startup")
+def launcher_startup_settings() -> dict:
+    return launcher_service.get_launcher_startup_settings()
+
+
+@router.put("/launcher/settings/startup")
+def launcher_update_startup_settings(payload: LauncherStartupSettingsPayload) -> dict:
+    try:
+        return launcher_service.update_launcher_startup_settings(payload.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail={"code": "invalid_launcher_startup_settings", "message": str(exc)}) from exc
 
 
 @router.put("/launcher/settings/workbench-window")

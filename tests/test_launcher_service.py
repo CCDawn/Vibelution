@@ -6,9 +6,14 @@ from fastapi.testclient import TestClient
 
 from core.launcher import app as launcher_app
 from core.launcher import service as launcher_service
+from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
 from core.web.routes import launcher as web_launcher_routes
 from core.runtime_manager import work_run_store
 from core.runtime_manager.work_run_store import WorkRunStore
+
+
+def launcher_test_client() -> TestClient:
+    return TestClient(launcher_app.create_launcher_app(), headers={CONTROL_TOKEN_HEADER: get_control_token()})
 
 
 def test_standalone_launcher_app_exposes_project_lifecycle_routes(monkeypatch):
@@ -18,7 +23,7 @@ def test_standalone_launcher_app_exposes_project_lifecycle_routes(monkeypatch):
         "request_launcher_start",
         lambda: calls.append("start") or {"accepted": True, "operation": "start", "launcherMode": "standalone_control_plane"},
     )
-    client = TestClient(launcher_app.create_launcher_app())
+    client = launcher_test_client()
 
     response = client.post("/api/project/start")
 
@@ -53,7 +58,7 @@ def test_standalone_launcher_app_exposes_workbench_window_setting(monkeypatch):
         "update_workbench_window_mode",
         lambda mode: calls.append(mode) or {"ok": True, "mode": mode, "setting": {"mode": mode}, "message": "saved"},
     )
-    client = TestClient(launcher_app.create_launcher_app())
+    client = launcher_test_client()
 
     current = client.get("/api/launcher/settings/workbench-window")
     updated = client.put("/api/launcher/settings/workbench-window", json={"mode": "windowed"})
@@ -71,12 +76,64 @@ def test_standalone_launcher_app_rejects_invalid_workbench_window_setting(monkey
         "update_workbench_window_mode",
         lambda _mode: (_ for _ in ()).throw(ValueError("bad mode")),
     )
-    client = TestClient(launcher_app.create_launcher_app())
+    client = launcher_test_client()
 
     response = client.put("/api/launcher/settings/workbench-window", json={"mode": "floating"})
 
     assert response.status_code == 400
     assert response.json()["detail"]["code"] == "invalid_workbench_window_mode"
+
+
+def test_standalone_launcher_app_rejects_settings_update_without_control_token(monkeypatch):
+    monkeypatch.setattr(
+        launcher_service,
+        "update_launcher_startup_settings",
+        lambda _payload: (_ for _ in ()).throw(AssertionError("must require token first")),
+    )
+    client = TestClient(launcher_app.create_launcher_app())
+
+    response = client.put("/api/launcher/settings/startup", json={"runtime": {"profile": "debug"}})
+
+    assert response.status_code == 403
+    assert "control token" in response.json()["detail"].lower()
+
+
+def test_standalone_launcher_app_exposes_startup_settings(monkeypatch):
+    calls = []
+    setting = {
+        "runtime": {"profile": "safe_remote", "preflightDoctor": True, "requireVenv": True, "profileOptions": ["safe_remote"]},
+        "workbench": {
+            "backendPort": 8000,
+            "frontendPort": 5173,
+            "effectiveBackendPort": 8000,
+            "effectiveFrontendPort": 5173,
+            "backendPortEnvOverride": 0,
+            "frontendPortEnvOverride": 0,
+            "windowMode": "fullscreen",
+            "effectiveWindowMode": "fullscreen",
+            "windowModeEnvOverride": "",
+            "windowModeOptions": [],
+        },
+        "interface": {"language": "zh", "languageOptions": ["zh", "en"]},
+        "configPath": "config.toml",
+        "restartRequired": True,
+    }
+    monkeypatch.setattr(launcher_service, "get_launcher_startup_settings", lambda: setting)
+    monkeypatch.setattr(
+        launcher_service,
+        "update_launcher_startup_settings",
+        lambda payload: calls.append(payload) or {"ok": True, "setting": setting, "message": "saved"},
+    )
+    client = launcher_test_client()
+
+    current = client.get("/api/launcher/settings/startup")
+    updated = client.put("/api/launcher/settings/startup", json={"runtime": {"profile": "debug"}})
+
+    assert current.status_code == 200
+    assert current.json()["runtime"]["profile"] == "safe_remote"
+    assert updated.status_code == 200
+    assert updated.json()["setting"]["workbench"]["backendPort"] == 8000
+    assert calls == [{"runtime": {"profile": "debug"}, "workbench": {}, "interface": {}}]
 
 
 def test_workbench_launcher_adapter_exposes_workbench_window_setting(monkeypatch):
@@ -103,6 +160,45 @@ def test_workbench_launcher_adapter_exposes_workbench_window_setting(monkeypatch
     assert updated.status_code == 200
     assert updated.json()["mode"] == "windowed"
     assert calls == ["windowed"]
+
+
+def test_workbench_launcher_adapter_exposes_startup_settings(monkeypatch):
+    calls = []
+    setting = {
+        "runtime": {"profile": "debug", "preflightDoctor": False, "requireVenv": True, "profileOptions": ["debug"]},
+        "workbench": {
+            "backendPort": 8010,
+            "frontendPort": 5174,
+            "effectiveBackendPort": 8010,
+            "effectiveFrontendPort": 5174,
+            "backendPortEnvOverride": 0,
+            "frontendPortEnvOverride": 0,
+            "windowMode": "windowed",
+            "effectiveWindowMode": "windowed",
+            "windowModeEnvOverride": "",
+            "windowModeOptions": [],
+        },
+        "interface": {"language": "en", "languageOptions": ["zh", "en"]},
+        "configPath": "config.toml",
+        "restartRequired": True,
+    }
+    monkeypatch.setattr(launcher_service, "get_launcher_startup_settings", lambda: setting)
+    monkeypatch.setattr(
+        launcher_service,
+        "update_launcher_startup_settings",
+        lambda payload: calls.append(payload) or {"ok": True, "setting": setting, "message": "saved"},
+    )
+    app = FastAPI()
+    app.include_router(web_launcher_routes.router, prefix="/api")
+    client = TestClient(app)
+
+    current = client.get("/api/launcher/settings/startup")
+    updated = client.put("/api/launcher/settings/startup", json={"workbench": {"backendPort": 8010}})
+
+    assert current.status_code == 200
+    assert current.json()["interface"]["language"] == "en"
+    assert updated.status_code == 200
+    assert calls == [{"runtime": {}, "workbench": {"backendPort": 8010}, "interface": {}}]
 
 
 def test_standalone_launcher_app_serves_health_token_and_launcher_shell(monkeypatch, tmp_path):
@@ -296,6 +392,62 @@ def test_launcher_workbench_window_mode_update_persists_config_and_logs(tmp_path
     assert response["setting"]["mode"] == "windowed"
     assert 'window_mode = "windowed"' in config_path.read_text(encoding="utf-8")
     assert "launcher.settings.workbench_window_mode.updated" in [event[0] for event in events]
+
+
+def test_launcher_startup_settings_update_persists_runtime_workbench_ui_and_logs(tmp_path, monkeypatch):
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        "[runtime]\nprofile = \"safe_remote\"\npreflight_doctor = true\nrequire_venv = true\n"
+        "[workbench]\nbackend_port = 8000\nfrontend_port = 5173\nwindow_mode = \"fullscreen\"\n"
+        "[ui]\nlanguage = \"zh\"\n",
+        encoding="utf-8",
+    )
+    events = []
+    monkeypatch.setattr(launcher_service, "CONFIG_PATH", config_path)
+    monkeypatch.delenv("VIBELUTION_WORKBENCH_WINDOW_MODE", raising=False)
+    monkeypatch.delenv("AGENT_WORKBENCH_WINDOW_MODE", raising=False)
+    monkeypatch.setattr(
+        launcher_service,
+        "append_runtime_manager_file_event",
+        lambda event_code, payload, **kwargs: events.append((event_code, payload)) or "2026-06-06T00:00:00+00:00",
+    )
+
+    response = launcher_service.update_launcher_startup_settings(
+        {
+            "runtime": {"profile": "debug", "preflightDoctor": False, "requireVenv": False},
+            "workbench": {"backendPort": 8010, "frontendPort": 5174, "windowMode": "windowed"},
+            "interface": {"language": "en"},
+        }
+    )
+
+    saved = config_path.read_text(encoding="utf-8")
+    assert response["ok"] is True
+    assert response["setting"]["runtime"]["profile"] == "debug"
+    assert response["setting"]["workbench"]["backendPort"] == 8010
+    assert response["setting"]["interface"]["language"] == "en"
+    assert 'profile = "debug"' in saved
+    assert "preflight_doctor = false" in saved
+    assert "require_venv = false" in saved
+    assert "backend_port = 8010" in saved
+    assert "frontend_port = 5174" in saved
+    assert 'window_mode = "windowed"' in saved
+    assert 'language = "en"' in saved
+    assert "launcher.settings.startup.updated" in [event[0] for event in events]
+
+
+def test_launcher_startup_settings_rejects_invalid_port(tmp_path, monkeypatch):
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("[workbench]\nbackend_port = 8000\n", encoding="utf-8")
+    monkeypatch.setattr(launcher_service, "CONFIG_PATH", config_path)
+
+    try:
+        launcher_service.update_launcher_startup_settings({"workbench": {"backendPort": 70000}})
+    except ValueError as exc:
+        error = str(exc)
+    else:
+        raise AssertionError("expected invalid port to fail")
+
+    assert "between 1 and 65535" in error
 
 
 def test_launcher_workbench_window_mode_reports_environment_override(tmp_path, monkeypatch):
