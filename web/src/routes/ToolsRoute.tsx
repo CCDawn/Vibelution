@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, CircleSlash, FlaskConical, Power, RefreshCw, Search, Trash2, Wrench } from "lucide-react";
+import { CheckCircle2, CheckSquare, CircleSlash, FlaskConical, Power, RefreshCw, Search, Square, Trash2, Wrench } from "lucide-react";
 import { type CSSProperties, type KeyboardEvent, type PointerEvent, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
@@ -403,8 +403,55 @@ function scopeLabel(scope: ToolAgentScopeSummary, lang: string, t: Translate) {
   return scope.label || (lang === "zh" ? "Agent" : "Agent");
 }
 
+function toolsBulkCopy(lang: string) {
+  return lang === "zh"
+    ? {
+        selected: "已选",
+        selectVisible: "选择当前列表",
+        clear: "清空",
+        enable: "批量启用",
+        disable: "批量停用",
+        delete: "批量删除",
+        working: "批量处理中...",
+        noSelection: "请先选择工具。",
+        skippedToggle: "不是可启停的已验证生成工具，跳过",
+        skippedDelete: "受保护或不可删除，跳过",
+        enableResult: "批量启用完成",
+        disableResult: "批量停用完成",
+        deleteResult: "批量删除完成",
+      }
+    : {
+        selected: "Selected",
+        selectVisible: "Select visible",
+        clear: "Clear",
+        enable: "Bulk enable",
+        disable: "Bulk disable",
+        delete: "Bulk delete",
+        working: "Working...",
+        noSelection: "Select tools first.",
+        skippedToggle: "Not a toggleable validated generated tool; skipped",
+        skippedDelete: "Protected or not deletable; skipped",
+        enableResult: "Bulk enable finished",
+        disableResult: "Bulk disable finished",
+        deleteResult: "Bulk delete finished",
+      };
+}
+
+function toolsBulkActionSummary(action: string, success: number, skipped: number, failed: number, notes: string[], lang: string) {
+  const parts = lang === "zh"
+    ? [`成功 ${success}`, `跳过 ${skipped}`, `失败 ${failed}`]
+    : [`success ${success}`, `skipped ${skipped}`, `failed ${failed}`];
+  const preview = notes.slice(0, 3).join("；");
+  return preview ? `${action}: ${parts.join(" / ")}。${preview}` : `${action}: ${parts.join(" / ")}`;
+}
+
+function canBulkToggleTool(tool: ToolRegistryItem) {
+  return tool.source === "generated" && Boolean(tool.validated) && tool.status === "validated";
+}
+
 export function ToolsRoute() {
   const { lang, t } = useAppI18n();
+  const bulkCopy = useMemo(() => toolsBulkCopy(lang), [lang]);
   const queryClient = useQueryClient();
   const [activeFilter, setActiveFilter] = useState<ToolFilter>("all");
   const [searchText, setSearchText] = useState("");
@@ -415,6 +462,8 @@ export function ToolsRoute() {
     storedPaneWidth(TOOLS_LEFT_PANEL_WIDTH_KEY, TOOLS_LEFT_PANEL_DEFAULT_WIDTH, TOOLS_LEFT_PANEL_BOUNDS),
   );
   const [leftPanelCollapsed, setLeftPanelCollapsed] = useState(false);
+  const [selectedToolIds, setSelectedToolIds] = useState<Set<string>>(() => new Set());
+  const [bulkToolPending, setBulkToolPending] = useState(false);
   const [notice, setNotice] = useState<{ tone: "neutral" | "success" | "error"; text: string }>({
     tone: "neutral",
     text: "",
@@ -492,6 +541,11 @@ export function ToolsRoute() {
     () => toolBundleGroups(visibleTools, toolBundles, lang),
     [lang, toolBundles, visibleTools],
   );
+  const selectedTools = useMemo(
+    () => visibleTools.filter((tool) => selectedToolIds.has(tool.id)),
+    [selectedToolIds, visibleTools],
+  );
+  const allVisibleToolsSelected = visibleTools.length > 0 && selectedTools.length === visibleTools.length;
   const activeTool = tools.find((tool) => tool.id === activeToolId) ?? visibleTools[0] ?? null;
   const activeToolBundleLabels = activeTool ? bundleLabelsForTool(activeTool, toolBundles, lang) : [];
   const activeScopeState = activeTool ? scopeStateForTool(activeTool, activeAgentScope.id) : null;
@@ -537,6 +591,14 @@ export function ToolsRoute() {
       setActiveToolId(visibleTools[0]?.id ?? null);
     }
   }, [activeToolId, visibleTools]);
+
+  useEffect(() => {
+    setSelectedToolIds((current) => {
+      const visibleIds = new Set(visibleTools.map((tool) => tool.id));
+      const next = new Set(Array.from(current).filter((toolId) => visibleIds.has(toolId)));
+      return next.size === current.size ? current : next;
+    });
+  }, [visibleTools]);
 
   useEffect(() => {
     window.localStorage.setItem(TOOLS_LEFT_PANEL_WIDTH_KEY, String(leftPanelWidth));
@@ -704,6 +766,111 @@ export function ToolsRoute() {
     setLeftPanelWidth(nextWidth);
   }
 
+  function toggleBulkTool(toolId: string, selected: boolean) {
+    setSelectedToolIds((current) => {
+      const next = new Set(current);
+      if (selected) {
+        next.add(toolId);
+      } else {
+        next.delete(toolId);
+      }
+      return next;
+    });
+  }
+
+  function selectVisibleBulkTools() {
+    setSelectedToolIds(new Set(visibleTools.map((tool) => tool.id)));
+  }
+
+  function clearBulkTools() {
+    setSelectedToolIds(new Set());
+  }
+
+  async function bulkSetToolsEnabled(enabled: boolean) {
+    if (bulkToolPending) {
+      return;
+    }
+    if (!selectedTools.length) {
+      setNotice({ tone: "error", text: bulkCopy.noSelection });
+      return;
+    }
+    setBulkToolPending(true);
+    let success = 0;
+    let skipped = 0;
+    let failed = 0;
+    const notes: string[] = [];
+    for (const tool of selectedTools) {
+      if (!canBulkToggleTool(tool)) {
+        skipped += 1;
+        notes.push(`${tool.name}: ${bulkCopy.skippedToggle}`);
+        continue;
+      }
+      try {
+        await fetchJson<ToolRegistryItem>(`/api/tools/generated/${encodeURIComponent(tool.id)}/enabled`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ enabled }),
+        });
+        success += 1;
+      } catch (error) {
+        failed += 1;
+        notes.push(`${tool.name}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    setBulkToolPending(false);
+    setNotice({
+      tone: failed > 0 ? "error" : "success",
+      text: toolsBulkActionSummary(enabled ? bulkCopy.enableResult : bulkCopy.disableResult, success, skipped, failed, notes, lang),
+    });
+    clearBulkTools();
+    refresh();
+  }
+
+  async function bulkDeleteTools() {
+    if (bulkToolPending) {
+      return;
+    }
+    if (!selectedTools.length) {
+      setNotice({ tone: "error", text: bulkCopy.noSelection });
+      return;
+    }
+    setBulkToolPending(true);
+    let success = 0;
+    let skipped = 0;
+    let failed = 0;
+    const notes: string[] = [];
+    let deletedActiveTool = false;
+    for (const tool of selectedTools) {
+      if (!tool.deleteAllowed) {
+        skipped += 1;
+        notes.push(`${tool.name}: ${bulkCopy.skippedDelete}`);
+        continue;
+      }
+      try {
+        await fetchJson<GeneratedToolDeleteResponse>(`/api/tools/${encodeURIComponent(tool.id)}`, {
+          method: "DELETE",
+        });
+        if (tool.id === activeToolId) {
+          deletedActiveTool = true;
+        }
+        success += 1;
+      } catch (error) {
+        failed += 1;
+        notes.push(`${tool.name}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    if (deletedActiveTool) {
+      setActiveToolId(null);
+    }
+    setBulkToolPending(false);
+    setNotice({
+      tone: failed > 0 ? "error" : "success",
+      text: toolsBulkActionSummary(bulkCopy.deleteResult, success, skipped, failed, notes, lang),
+    });
+    clearBulkTools();
+    refresh();
+  }
+
   return (
     <section className={styles.route}>
       <header className={styles.header}>
@@ -804,6 +971,34 @@ export function ToolsRoute() {
               </button>
             ))}
           </div>
+          <section className={styles.bulkActionBar} aria-label={bulkCopy.selected}>
+            <div className={styles.bulkSummary}>
+              <CheckSquare size={15} />
+              <strong>{bulkCopy.selected}</strong>
+              <span>{selectedTools.length} / {visibleTools.length}</span>
+            </div>
+            <button
+              type="button"
+              className={styles.secondaryButton}
+              disabled={!visibleTools.length || bulkToolPending}
+              onClick={allVisibleToolsSelected ? clearBulkTools : selectVisibleBulkTools}
+            >
+              {allVisibleToolsSelected ? <Square size={14} /> : <CheckSquare size={14} />}
+              <span>{allVisibleToolsSelected ? bulkCopy.clear : bulkCopy.selectVisible}</span>
+            </button>
+            <button type="button" className={styles.primaryButton} disabled={!selectedTools.length || bulkToolPending} onClick={() => bulkSetToolsEnabled(true)}>
+              <Power size={14} />
+              <span>{bulkToolPending ? bulkCopy.working : bulkCopy.enable}</span>
+            </button>
+            <button type="button" className={styles.secondaryButton} disabled={!selectedTools.length || bulkToolPending} onClick={() => bulkSetToolsEnabled(false)}>
+              <CircleSlash size={14} />
+              <span>{bulkToolPending ? bulkCopy.working : bulkCopy.disable}</span>
+            </button>
+            <button type="button" className={styles.secondaryButton} disabled={!selectedTools.length || bulkToolPending} onClick={bulkDeleteTools}>
+              <Trash2 size={14} />
+              <span>{bulkToolPending ? bulkCopy.working : bulkCopy.delete}</span>
+            </button>
+          </section>
           <div className={styles.toolList}>
             {visibleToolBundleGroups.map((group) => (
               <section key={group.bundleId} className={styles.toolBundleGroup}>
@@ -821,9 +1016,19 @@ export function ToolsRoute() {
                   {group.tools.map((tool) => {
                     const isActive = tool.id === activeTool?.id;
                     const policyMode = activePolicyAgent ? toolPolicyMode(activePolicy, tool) : "inherited";
+                    const bulkSelected = selectedToolIds.has(tool.id);
                     return (
-                      <button
-                        key={`${group.bundleId}-${tool.source}-${tool.id}`}
+                      <div key={`${group.bundleId}-${tool.source}-${tool.id}`} className={styles.selectableToolRow}>
+                        <label className={styles.rowSelect} title={`${bulkCopy.selected}: ${tool.name}`}>
+                          <input
+                            type="checkbox"
+                            checked={bulkSelected}
+                            aria-label={`${bulkCopy.selected}: ${tool.name}`}
+                            onChange={(event) => toggleBulkTool(tool.id, event.target.checked)}
+                          />
+                          {bulkSelected ? <CheckSquare size={15} /> : <Square size={15} />}
+                        </label>
+                        <button
                         type="button"
                         className={isActive ? styles.toolButtonActive : styles.toolButton}
                         onClick={() => setActiveToolId(tool.id)}
@@ -839,7 +1044,8 @@ export function ToolsRoute() {
                           </span>
                           <span className={styles.sourcePill}>{displaySource(tool.source, lang)}</span>
                         </span>
-                      </button>
+                        </button>
+                      </div>
                     );
                   })}
                 </div>

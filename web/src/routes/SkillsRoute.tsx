@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { BookOpen, Copy, FileText, RefreshCw, Search, Sparkles } from "lucide-react";
+import { Ban, BookOpen, CheckSquare, Copy, FileText, RefreshCw, Search, Sparkles, Square } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import { fetchJson } from "../api/client";
@@ -80,6 +80,14 @@ function copyFor(lang: string) {
         loadFailed: "加载失败",
         copied: "已复制",
         copyCommand: "复制指令",
+        bulkSelected: "已选",
+        bulkSelectVisible: "选择当前列表",
+        bulkClear: "清空",
+        bulkCopyCommands: "批量复制指令",
+        bulkEdit: "批量编辑",
+        bulkDelete: "批量删除",
+        bulkReadOnlyReason: "技能库当前是只读索引；本页不直接编辑或删除本机 SKILL.md。",
+        bulkNoSelection: "请先选择 skill。",
         readOnly: "只读",
         truncated: "内容已截断",
       }
@@ -105,6 +113,14 @@ function copyFor(lang: string) {
         loadFailed: "Load failed",
         copied: "Copied",
         copyCommand: "Copy command",
+        bulkSelected: "Selected",
+        bulkSelectVisible: "Select visible",
+        bulkClear: "Clear",
+        bulkCopyCommands: "Copy commands",
+        bulkEdit: "Bulk edit",
+        bulkDelete: "Bulk delete",
+        bulkReadOnlyReason: "The skill library is a read-only index; this page does not edit or delete local SKILL.md files.",
+        bulkNoSelection: "Select skills first.",
         readOnly: "Read-only",
         truncated: "Content truncated",
       };
@@ -117,6 +133,7 @@ export function SkillsRoute() {
   const [sourceFilter, setSourceFilter] = useState<SkillSourceFilter>("all");
   const [activeCommand, setActiveCommand] = useState("");
   const [copyState, setCopyState] = useState("");
+  const [selectedSkillCommands, setSelectedSkillCommands] = useState<Set<string>>(() => new Set());
 
   const libraryQuery = useQuery({
     queryKey: queryKeys.skills(),
@@ -132,6 +149,11 @@ export function SkillsRoute() {
       return !term || skillSearchText(skill).includes(term);
     });
   }, [searchText, skills, sourceFilter]);
+  const selectedSkills = useMemo(
+    () => filteredSkills.filter((skill) => selectedSkillCommands.has(skill.command)),
+    [filteredSkills, selectedSkillCommands],
+  );
+  const allVisibleSkillsSelected = filteredSkills.length > 0 && selectedSkills.length === filteredSkills.length;
 
   useEffect(() => {
     if (activeCommand && skills.some((skill) => skill.command === activeCommand)) {
@@ -139,6 +161,14 @@ export function SkillsRoute() {
     }
     setActiveCommand(filteredSkills[0]?.command ?? "");
   }, [activeCommand, filteredSkills, skills]);
+
+  useEffect(() => {
+    setSelectedSkillCommands((current) => {
+      const visibleCommands = new Set(filteredSkills.map((skill) => skill.command));
+      const next = new Set(Array.from(current).filter((command) => visibleCommands.has(command)));
+      return next.size === current.size ? current : next;
+    });
+  }, [filteredSkills]);
 
   const detailQuery = useQuery({
     queryKey: queryKeys.skill(activeCommand),
@@ -150,6 +180,40 @@ export function SkillsRoute() {
 
   async function copyCommand(command: string) {
     const text = `${command} `;
+    try {
+      await navigator.clipboard?.writeText(text);
+      setCopyState(copy.copied);
+    } catch {
+      setCopyState(text);
+    }
+  }
+
+  function toggleSkillSelection(command: string, selected: boolean) {
+    setSelectedSkillCommands((current) => {
+      const next = new Set(current);
+      if (selected) {
+        next.add(command);
+      } else {
+        next.delete(command);
+      }
+      return next;
+    });
+  }
+
+  function selectVisibleSkills() {
+    setSelectedSkillCommands(new Set(filteredSkills.map((skill) => skill.command)));
+  }
+
+  function clearSelectedSkills() {
+    setSelectedSkillCommands(new Set());
+  }
+
+  async function copySelectedSkillCommands() {
+    if (!selectedSkills.length) {
+      setCopyState(copy.bulkNoSelection);
+      return;
+    }
+    const text = selectedSkills.map((skill) => `${skill.command} `).join("\n");
     try {
       await navigator.clipboard?.writeText(text);
       setCopyState(copy.copied);
@@ -223,6 +287,40 @@ export function SkillsRoute() {
             ))}
           </div>
 
+          <section className={styles.bulkActionBar} aria-label={copy.bulkSelected}>
+            <div className={styles.bulkSummary}>
+              <CheckSquare size={15} />
+              <strong>{copy.bulkSelected}</strong>
+              <span>{selectedSkills.length} / {filteredSkills.length}</span>
+            </div>
+            <button
+              type="button"
+              className={styles.primaryButton}
+              disabled={!selectedSkills.length}
+              onClick={copySelectedSkillCommands}
+            >
+              <Copy size={14} />
+              <span>{copy.bulkCopyCommands}</span>
+            </button>
+            <button
+              type="button"
+              className={styles.filterButton}
+              disabled={!filteredSkills.length}
+              onClick={allVisibleSkillsSelected ? clearSelectedSkills : selectVisibleSkills}
+            >
+              {allVisibleSkillsSelected ? <Square size={14} /> : <CheckSquare size={14} />}
+              <span>{allVisibleSkillsSelected ? copy.bulkClear : copy.bulkSelectVisible}</span>
+            </button>
+            <button type="button" className={styles.filterButton} disabled title={copy.bulkReadOnlyReason}>
+              <Ban size={14} />
+              <span>{copy.bulkEdit}</span>
+            </button>
+            <button type="button" className={styles.filterButton} disabled title={copy.bulkReadOnlyReason}>
+              <Ban size={14} />
+              <span>{copy.bulkDelete}</span>
+            </button>
+          </section>
+
           <div className={styles.skillList}>
             {libraryQuery.isError ? (
               <p className={styles.emptyState}>{copy.loadFailed}</p>
@@ -231,21 +329,34 @@ export function SkillsRoute() {
             ) : filteredSkills.length === 0 ? (
               <p className={styles.emptyState}>{copy.emptyList}</p>
             ) : (
-              filteredSkills.map((skill) => (
-                <button
-                  key={`${skill.path}-${skill.hash}`}
-                  type="button"
-                  className={activeCommand === skill.command ? styles.skillButtonActive : styles.skillButton}
-                  onClick={() => setActiveCommand(skill.command)}
-                >
-                  <span className={styles.sourceDot} data-source={skill.source} />
-                  <span className={styles.skillCopy}>
-                    <strong>{skill.name}</strong>
-                    <span>{skill.description || skill.command}</span>
-                  </span>
-                  <span className={styles.sourcePill}>{sourceLabel(skill.source, lang)}</span>
-                </button>
-              ))
+              filteredSkills.map((skill) => {
+                const selected = selectedSkillCommands.has(skill.command);
+                return (
+                  <div key={`${skill.path}-${skill.hash}`} className={styles.selectableRow}>
+                    <label className={styles.rowSelect} title={`${copy.bulkSelected}: ${skill.name}`}>
+                      <input
+                        type="checkbox"
+                        checked={selected}
+                        aria-label={`${copy.bulkSelected}: ${skill.name}`}
+                        onChange={(event) => toggleSkillSelection(skill.command, event.target.checked)}
+                      />
+                      {selected ? <CheckSquare size={15} /> : <Square size={15} />}
+                    </label>
+                    <button
+                      type="button"
+                      className={activeCommand === skill.command ? styles.skillButtonActive : styles.skillButton}
+                      onClick={() => setActiveCommand(skill.command)}
+                    >
+                      <span className={styles.sourceDot} data-source={skill.source} />
+                      <span className={styles.skillCopy}>
+                        <strong>{skill.name}</strong>
+                        <span>{skill.description || skill.command}</span>
+                      </span>
+                      <span className={styles.sourcePill}>{sourceLabel(skill.source, lang)}</span>
+                    </button>
+                  </div>
+                );
+              })
             )}
           </div>
         </aside>

@@ -35,4 +35,16 @@ describe("SkillsRoute layout contract", () => {
     expect(routeSource).toContain("activeSkill.preview");
     expect(routeSource).toContain("activeSkill.aliases.join");
   });
+
+  it("adds bulk selection without breaking the read-only skill contract", () => {
+    expect(routeSource).toContain("selectedSkillCommands");
+    expect(routeSource).toContain("copySelectedSkillCommands");
+    expect(routeSource).toContain("copy.bulkReadOnlyReason");
+    expect(routeSource).toContain("styles.bulkActionBar");
+    expect(routeSource).toContain("styles.selectableRow");
+    expect(routeSource).not.toContain('method: "POST"');
+    expect(routeSource).not.toContain('method: "PUT"');
+    expect(routeSource).not.toContain('method: "PATCH"');
+    expect(routeSource).not.toContain('method: "DELETE"');
+  });
 });

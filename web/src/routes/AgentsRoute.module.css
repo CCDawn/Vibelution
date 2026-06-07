@@ -485,6 +485,51 @@
   font-size: 1rem;
 }
 
+.bulkActionBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  padding: 7px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-panel) 86%, var(--surface-card));
+}
+
+.bulkSummary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  color: var(--fg-secondary);
+  font-size: 0.76rem;
+}
+
+.bulkSummary strong {
+  color: var(--fg-primary);
+}
+
+.bulkPromptPicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: min(100%, 230px);
+  color: var(--fg-secondary);
+  font-size: 0.74rem;
+}
+
+.bulkPromptPicker select {
+  min-width: 0;
+  min-height: 28px;
+  flex: 1 1 138px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-input-strong);
+  color: var(--fg-primary);
+  font: inherit;
+}
+
 .detailSection h3 {
   font-size: 0.94rem;
 }
@@ -523,6 +568,39 @@
   font-size: 0.72rem;
   text-transform: uppercase;
   background: linear-gradient(180deg, var(--surface-panel) 74%, transparent);
+}
+
+.agentRowShell {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.rowSelect {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 36px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-card);
+  color: var(--fg-secondary);
+  cursor: pointer;
+}
+
+.rowSelect:hover {
+  border-color: var(--border-strong);
+  color: var(--accent-warm-2);
+}
+
+.rowSelect input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
 }
 
 .agentRow {

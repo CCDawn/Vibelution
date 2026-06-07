@@ -159,4 +159,16 @@ describe("ToolsRoute layout contract", () => {
     expect(routeSource).toContain("setLeftPanelCollapsed");
     expect(routeSource).toContain("--tools-left-panel-width");
   });
+
+  it("supports bulk selection while preserving tool registry safety rules", () => {
+    expect(routeSource).toContain("selectedToolIds");
+    expect(routeSource).toContain("bulkSetToolsEnabled");
+    expect(routeSource).toContain("bulkDeleteTools");
+    expect(routeSource).toContain("canBulkToggleTool(tool)");
+    expect(routeSource).toContain("tool.deleteAllowed");
+    expect(routeSource).toContain("fetchJson<ToolRegistryItem>(`/api/tools/generated/");
+    expect(routeSource).toContain("fetchJson<GeneratedToolDeleteResponse>(`/api/tools/");
+    expect(routeSource).toContain("styles.bulkActionBar");
+    expect(routeSource).toContain("styles.selectableToolRow");
+  });
 });
