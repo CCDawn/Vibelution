@@ -494,6 +494,19 @@ function responsibilityDetail(item: LauncherGuardianResponsibility, lang: "zh" |
   return (lang === "zh" ? zh : en)[item.id] || item.detail || "-";
 }
 
+function isControlPlaneIdle(evidence: LauncherStatusWithGuardian["controlPlaneEvidence"] | undefined): boolean {
+  if (!evidence) {
+    return true;
+  }
+  return (
+    !evidence.state.activeCommand?.commandId &&
+    evidence.queue.pendingCount === 0 &&
+    evidence.queue.processingCount === 0 &&
+    !evidence.restartQueue?.active &&
+    !evidence.restartQueue?.pending
+  );
+}
+
 export function LauncherRoute() {
   const { lang } = useAppI18n();
   const queryClient = useQueryClient();
@@ -509,7 +522,11 @@ export function LauncherRoute() {
         stop: "停止",
         restart: "重启",
         open: "打开",
-        startDisabled: "项目已在运行",
+        startDisabled: "启动暂不可用",
+        startDisabledBusy: "正在处理上一个生命周期操作",
+        startDisabledRunning: "项目已在运行",
+        startDisabledChanging: "项目正在切换",
+        lifecycleActionDisabledActiveWork: "有进行中的任务，无法停止或重启 Vibelution",
         projectStatus: "项目状态",
         launcherStatus: "Launcher 维护",
         lifecycleStatus: "生命周期",
@@ -630,7 +647,11 @@ export function LauncherRoute() {
         stop: "Stop",
         restart: "Restart",
         open: "Open",
-        startDisabled: "Project is already running",
+        startDisabled: "Start is temporarily unavailable",
+        startDisabledBusy: "A lifecycle command is still settling",
+        startDisabledRunning: "Project is already running",
+        startDisabledChanging: "Project lifecycle is changing",
+        lifecycleActionDisabledActiveWork: "Active work is running; Vibelution cannot stop or restart",
         projectStatus: "Project Status",
         launcherStatus: "Launcher Care",
         lifecycleStatus: "Lifecycle",
@@ -749,8 +770,8 @@ export function LauncherRoute() {
   const statusQuery = useQuery({
     queryKey: queryKeys.launcherStatus(),
     queryFn: getLauncherStatus,
-    refetchInterval: resolvePollingInterval(pageVisible, 4_000),
-    refetchIntervalInBackground: false,
+    refetchInterval: resolvePollingInterval(pageVisible, 4_000, { backgroundMs: 4_000 }),
+    refetchIntervalInBackground: true,
   });
   const controlMutation = useMutation({
     mutationFn: async (operation: LauncherOperation) => {
@@ -801,7 +822,6 @@ export function LauncherRoute() {
   const guardian = status?.guardianAdapter;
   const evidence = status?.controlPlaneEvidence;
   const componentRows = useMemo(() => sortComponents(bundle?.components ?? []), [bundle?.components]);
-  const busy = controlMutation.isPending || supervisorMutation.isPending;
   const headerTone = stateTone(bundle?.overallState ?? status?.launcher.phase ?? "", Boolean(bundle));
   const transitionAt = compactDate(bundle?.lastOperation.transitionAt ?? "", locale);
   const canRequestSupervisorReattach = Boolean(status && guardian?.supervisor && !guardian.supervisor.alive);
@@ -814,7 +834,18 @@ export function LauncherRoute() {
   const projectIsOpen = lifecycleDisplay.state === "running";
   const projectIsClosed = lifecycleDisplay.state === "closed";
   const projectIsChanging = ["starting", "stopping", "restarting"].includes(lifecycleDisplay.state);
-  const startDisabled = busy || projectIsOpen || projectIsChanging;
+  const lifecycleSettled = projectIsOpen || projectIsClosed;
+  const controlPlaneIdle = isControlPlaneIdle(evidence);
+  const controlBusy = controlMutation.isPending && !(controlPlaneIdle && lifecycleSettled);
+  const busy = controlBusy || supervisorMutation.isPending;
+  const startDisabled = busy || !controlPlaneIdle || projectIsOpen || projectIsChanging;
+  const startDisabledReason = busy || !controlPlaneIdle
+    ? copy.startDisabledBusy
+    : projectIsOpen
+      ? copy.startDisabledRunning
+      : projectIsChanging
+        ? copy.startDisabledChanging
+        : copy.startDisabled;
   const projectSummary = lifecycleDisplay.label;
   const launcherSummary = !status
     ? copy.launcherOffline
@@ -831,6 +862,8 @@ export function LauncherRoute() {
     : activeWorkCount > 0
       ? copy.restartProtected
       : copy.restartClear;
+  const destructiveActionDisabled = busy || activeWorkCount > 0;
+  const destructiveActionDisabledReason = activeWorkCount > 0 ? copy.lifecycleActionDisabledActiveWork : copy.startDisabledBusy;
   const activeWorkDetail = activeWorkCount > 0
     ? `${copy.activeTasks}: ${activeWorkCount}${activeWorkKinds.length ? ` · ${activeWorkKinds.join(", ")}` : ""}${restartQueue?.statusLine ? ` · ${restartQueue.statusLine}` : ""}`
     : restartQueue?.statusLine
@@ -971,15 +1004,15 @@ export function LauncherRoute() {
             {statusQuery.isFetching ? <LoaderCircle size={15} className={styles.spin} /> : <RefreshCw size={15} />}
             <span>{copy.refresh}</span>
           </button>
-          <button type="button" className={styles.primaryButton} onClick={() => controlMutation.mutate("start")} disabled={startDisabled} title={startDisabled ? copy.startDisabled : copy.start}>
+          <button type="button" className={styles.primaryButton} onClick={() => controlMutation.mutate("start")} disabled={startDisabled} title={startDisabled ? startDisabledReason : copy.start}>
             <Play size={15} />
             <span>{copy.start}</span>
           </button>
-          <button type="button" className={styles.iconButton} onClick={() => controlMutation.mutate("stop")} disabled={busy} title={copy.stop}>
+          <button type="button" className={styles.iconButton} onClick={() => controlMutation.mutate("stop")} disabled={destructiveActionDisabled} title={destructiveActionDisabled ? destructiveActionDisabledReason : copy.stop}>
             <Square size={15} />
             <span>{copy.stop}</span>
           </button>
-          <button type="button" className={styles.iconButton} onClick={() => controlMutation.mutate("restart")} disabled={busy} title={copy.restart}>
+          <button type="button" className={styles.iconButton} onClick={() => controlMutation.mutate("restart")} disabled={destructiveActionDisabled} title={destructiveActionDisabled ? destructiveActionDisabledReason : copy.restart}>
             <RefreshCw size={15} />
             <span>{copy.restart}</span>
           </button>

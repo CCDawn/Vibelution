@@ -733,10 +733,10 @@ def test_launcher_control_port_prefers_env_override(tmp_path):
     assert resolved == 8899
 
 
-def test_launcher_window_mode_defaults_to_windowed(tmp_path):
+def test_launcher_window_mode_defaults_to_fullscreen(tmp_path):
     resolved = _resolve_launcher_window_mode(tmp_path, config_text="[workbench]\n")
 
-    assert resolved == "windowed"
+    assert resolved == "fullscreen"
 
 
 def test_launcher_window_mode_reads_config_and_env_override(tmp_path):
@@ -767,7 +767,7 @@ def test_launcher_window_mode_ignores_invalid_values(tmp_path):
         env_overrides={"VIBELUTION_WORKBENCH_WINDOW_MODE": "floating"},
     )
 
-    assert resolved == "windowed"
+    assert resolved == "fullscreen"
 
 
 def test_launcher_state_save_uses_retrying_atomic_writer(tmp_path):
@@ -1136,7 +1136,13 @@ if ($browserText -match '--kiosk') {
     throw "Start-ManagedBrowser should not use kiosk mode for the workbench window."
 }
 if ($browserText -notmatch '--start-fullscreen' -or $browserText -notmatch 'fullscreenForced') {
-    throw "Start-ManagedBrowser should only request fullscreen through the configured fullscreen mode."
+    throw "Start-ManagedBrowser should request fullscreen through the managed window policy."
+}
+if ($browserText -notmatch 'fixed_workbench_fullscreen' -or $browserText -notmatch 'launcher_taskbar_windowed') {
+    throw "Start-ManagedBrowser should enforce separate Workbench fullscreen and Launcher taskbar window policies."
+}
+if ($browserText -notmatch 'configured_window_mode' -or $browserText -notmatch 'window_policy') {
+    throw "Start-ManagedBrowser should log both configured and effective window policy values."
 }
 if ($browserText -notmatch 'app_chrome_theme' -or $browserText -notmatch 'app_url' -or $browserText -notmatch 'window_purpose' -or $browserText -notmatch 'window_mode' -or $browserText -notmatch 'fullscreen_forced') {
     throw "Start-ManagedBrowser should log the managed app chrome strategy."
@@ -1869,6 +1875,20 @@ foreach ($required in @(
     }
 }
 
+$windowStateText = Get-LauncherFunctionText -Name "Set-ManagedBrowserWindowState"
+foreach ($required in @(
+    "launcher.browser.window_state.succeeded",
+    "launcher.browser.window_state.failed",
+    "target_state",
+    "show_window_code",
+    "minimized",
+    "window_not_found"
+)) {
+    if ($windowStateText -notmatch [regex]::Escape($required)) {
+        throw "Set-ManagedBrowserWindowState is missing trace field '$required'."
+    }
+}
+
 $adoptText = Get-LauncherFunctionText -Name "Adopt-Or-FocusSession"
 foreach ($required in @(
     "runtime.scene.focused",
@@ -1886,10 +1906,24 @@ $startText = Get-LauncherFunctionText -Name "Start-ManagedSession"
 foreach ($required in @(
     "runtime.scene.ready",
     "focus_requested",
-    "Focus-ManagedBrowserWindow"
+    "Focus-ManagedBrowserWindow",
+    "Test-ActionAllowsSessionRefresh",
+    "Write-SessionRefreshSkippedForOpen",
+    "allows_session_refresh"
 )) {
     if ($startText -notmatch [regex]::Escape($required)) {
         throw "Start-ManagedSession is missing trace field '$required'."
+    }
+}
+
+$refreshSkipText = Get-LauncherFunctionText -Name "Write-SessionRefreshSkippedForOpen"
+foreach ($required in @(
+    "launcher.session.refresh_skipped_for_open",
+    "restart_reason",
+    "use restart for code refresh"
+)) {
+    if ($refreshSkipText -notmatch [regex]::Escape($required)) {
+        throw "Write-SessionRefreshSkippedForOpen is missing trace field '$required'."
     }
 }
 
@@ -2392,20 +2426,61 @@ foreach ($required in @(
     "launcher.control_backend.source_change_preflight_succeeded",
     "Start-LauncherControlBackend",
     "Start-ManagedBrowser",
+    "Set-ManagedBrowserWindowState",
     '-ProfileDir $launcherBrowserProfileDir',
     "launcher_control_surface",
+    "launcher.control_surface.keep_in_taskbar",
     "launcher.control_surface.ready",
+    "taskbar_minimized",
     'supervisor_started = $false'
 )) {
     if ($controlText -notmatch [regex]::Escape($required)) {
         throw "Launcher control surface is missing '$required'."
     }
 }
+
+$signatureAst = $ast.Find({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -eq "Get-LauncherControlSourceSignature"
+}, $true)
+if ($null -eq $signatureAst) {
+    throw "Get-LauncherControlSourceSignature was not found."
+}
+$signatureText = $signatureAst.Extent.Text
+foreach ($requiredControlInput in @(
+    "web\\src\\routes\\LauncherRoute.tsx",
+    "web\\src\\routes\\LauncherRoute.module.css",
+    "web\\src\\app\\LauncherShell.tsx",
+    "web\\src\\app\\pollingPolicy.ts",
+    "web\\src\\api\\launcher.ts",
+    "web\\src\\api\\client.ts"
+)) {
+    if ($signatureText -notmatch [regex]::Escape($requiredControlInput)) {
+        throw "Launcher control source signature is missing '$requiredControlInput'."
+    }
+}
+
 if ($controlText -match "Start-Supervisor") {
     throw "Launcher control surface should not start the workbench supervisor."
 }
 if ($controlText -match "Invoke-RuntimeManagerClient" -or $controlText -match "open_workbench") {
     throw "Launcher control surface should not queue runtime manager open_workbench."
+}
+if ($source -notmatch 'internal-focus') {
+    throw "Launcher script should expose an internal-focus action for non-destructive workbench focus."
+}
+if ($source -notmatch 'Assert-RuntimeManagerInternalLauncherCall -RequestedAction \\$Action\\s+Start-ManagedSession') {
+    throw "internal-start should remain guarded before starting the managed session."
+}
+if ($source -notmatch 'Assert-RuntimeManagerInternalLauncherCall -RequestedAction \\$Action\\s+\\$snapshot = Get-SessionSnapshot') {
+    throw "internal-focus should remain guarded before reading the managed session snapshot."
+}
+if ($source -notmatch 'Adopt-Or-FocusSession -Snapshot \\$snapshot') {
+    throw "internal-focus should focus or adopt the existing workbench session."
+}
+if ($source -notmatch 'focus_unavailable') {
+    throw "internal-focus should log when no existing workbench window can be focused."
 }
 $ensureWebBuildIndex = $controlText.IndexOf("Ensure-WebBuild")
 $replaceBackendIndex = $controlText.IndexOf("launcher.control_backend.source_change_preflight_succeeded")
