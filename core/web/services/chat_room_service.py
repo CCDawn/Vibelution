@@ -360,16 +360,16 @@ def update_agent_chat_room_membership(agent_id: str, room_ids: list[str] | None)
     }
 
 
-def remove_agent_from_chat_rooms(agent_id: str, *, allow_empty_rooms: bool = False) -> dict[str, Any]:
+def remove_agent_from_chat_rooms(agent_id: str, *, allow_empty_rooms: bool = False, direct_session_id: str = "") -> dict[str, Any]:
     """Remove one Agent from all chat room participant lists before safe archival."""
 
     lang = get_web_language()
     normalized_agent_id = str(agent_id or "").strip()
     if not normalized_agent_id:
         raise ChatRoomValidationError(text_for(lang, zh="缺少 Agent。", en="Agent id is required."))
-    direct_session_id = ""
+    direct_session_id = str(direct_session_id or "").strip()
     agent = agent_directory_service.get_agent(normalized_agent_id, include_archived=True)
-    if isinstance(agent, dict):
+    if isinstance(agent, dict) and not direct_session_id:
         direct_session_id = str(agent.get("directSessionId") or "").strip()
 
     changed_rooms: list[dict[str, Any]] = []
