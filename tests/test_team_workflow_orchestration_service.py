@@ -208,9 +208,20 @@ def test_start_source_collection_run_creates_generic_run_and_assignments(tmp_pat
     assert response["run"]["profileId"] == "generic_document_processing"
     assert response["run"]["scope"]["teamId"] == team["teamId"]
     assert response["run"]["scope"]["topic"] == "neural gating"
+    assert response["run"]["scope"]["dataSearchPlanRef"]["queryCount"] == response["searchPlan"]["queryCount"]
+    assert response["searchPlan"]["planKind"] == "source_collection_data_search"
+    assert response["searchPlan"]["status"] == "planned"
+    assert response["searchPlan"]["runId"] == response["run"]["runId"]
+    assert response["searchPlan"]["querySeeds"] == ["neural gating"]
+    assert response["searchPlan"]["queryCount"] > 0
+    assert response["searchPlan"]["boundaries"]["externalSearchTriggered"] is False
+    assert response["searchPlan"]["resultWritebackContract"]["formalKnowledgeWrites"] is False
     assert response["assignmentCount"] == 3
     assert {item["agentRole"] for item in response["assignments"]} == {"data_discovery", "source_acquisition", "content_extraction"}
     assert all(item["inputRefs"] == ["seed-query:neural gating"] for item in response["assignments"])
+    assert all(item["scope"]["dataSearchPlanRef"]["planId"] == response["searchPlan"]["planId"] for item in response["assignments"])
+    assert all(item["scope"]["assignedQueries"] for item in response["assignments"])
+    assert all(item["scope"]["resultWritebackContract"]["ragWrites"] is False for item in response["assignments"])
     assert assignments["summary"]["assignmentCount"] == 3
     assert run_status["boundaries"]["writesFormalKnowledge"] is False
     assert response["workflow"]["activeWorkflowItems"][0]["candidateId"] == response["run"]["runId"]
@@ -228,6 +239,40 @@ def test_start_source_collection_run_ignores_invalid_collection_roles(tmp_path, 
 
     assert response["assignmentCount"] == 1
     assert response["assignments"][0]["agentRole"] == "data_discovery"
+
+
+def test_start_source_collection_run_accepts_traceable_query_seed_contract(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+
+    response = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "topic": "neural predictive coding",
+            "querySeeds": ["predictive coding cortical hierarchy"],
+            "searchLanguages": ["en"],
+            "sourceTypes": ["paper"],
+            "maxResultsPerQuery": 7,
+            "agentRoles": ["data_discovery", "source_quality"],
+            "agentIds": {"source_quality": "Source Quality Agent"},
+        },
+    )
+
+    search_plan = response["searchPlan"]
+    queries = search_plan["queries"]
+
+    assert search_plan["querySeeds"] == ["predictive coding cortical hierarchy", "neural predictive coding"]
+    assert search_plan["searchLanguages"] == ["en"]
+    assert search_plan["sourceTypes"] == ["paper"]
+    assert search_plan["maxResultsPerQuery"] == 7
+    assert search_plan["queryCount"] == 2
+    assert {item["assignedAgentRole"] for item in queries} == {"data_discovery", "source_quality"}
+    assert all(item["status"] == "planned" for item in queries)
+    assert all(item["execution"]["externalSearchTriggered"] is False for item in queries)
+    assert response["assignments"][1]["agentId"] == "Source Quality Agent"
+    assert response["assignments"][1]["scope"]["assignedQueries"][0]["assignedAgentRole"] == "source_quality"
+    assert response["assignments"][1]["acceptance"]["resultWritebackContract"]["candidateImport"]["targetCandidateType"] == "source_manifest"
+    assert response["assignments"][1]["acceptance"]["resultWritebackContract"]["officialGraphWrites"] is False
 
 
 def test_transfer_decision_rejects_non_owner_agent(tmp_path, monkeypatch):
