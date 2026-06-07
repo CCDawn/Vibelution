@@ -1556,6 +1556,46 @@ def test_runtime_scene_event_keeps_safe_token_usage_counters(tmp_path, monkeypat
     assert event["fields"]["accessToken"] == runtime_scene_service.REDACTED_FIELD_VALUE
 
 
+def test_runtime_scene_child_log_preserves_agent_llm_binding_shape(tmp_path, monkeypatch):
+    scene_dir = _seed_runtime_scene_bundle(tmp_path, scene_id="scene-agent-binding", status="running")
+    launcher_state_path = tmp_path / ".runtime" / "launcher" / "state.json"
+    launcher_state_path.parent.mkdir(parents=True, exist_ok=True)
+    launcher_state_path.write_text(
+        json.dumps(
+            {
+                "runtimeSceneId": "scene-agent-binding",
+                "runtimeSceneDir": str(scene_dir),
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(runtime_scene_service, "LAUNCHER_STATE_PATH", launcher_state_path)
+
+    result = runtime_scene_service.record_runtime_scene_event(
+        "supervision",
+        "progress",
+        "supervised.role_finish",
+        child_log_path="agent/supervised_runs/web-supervised-binding.jsonl",
+        child_log_payload={
+            "agentBinding": {
+                "agentId": "agent-a",
+                "llmBindings": {
+                    "dialogue": {
+                        "modelId": "model-a",
+                    },
+                },
+            },
+        },
+    )
+
+    assert result["accepted"] is True
+    child_log = scene_dir / "agent" / "supervised_runs" / "web-supervised-binding.jsonl"
+    child_event = json.loads(child_log.read_text(encoding="utf-8").splitlines()[-1])
+    assert child_event["agentBinding"]["llmBindings"]["dialogue"]["modelId"] == "model-a"
+
+
 def test_agent_runtime_evidence_api_returns_matching_runtime_scene_events(tmp_path, monkeypatch):
     scene_dir = _seed_runtime_scene_bundle(tmp_path, scene_id="scene-agent-evidence")
     monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)

@@ -695,6 +695,14 @@ def _timed_agent_delete_stage(timings: dict[str, float], stage: str, fn: Any) ->
         timings[stage] = round((perf_counter() - started_at) * 1000, 1)
 
 
+def _best_effort_agent_purge_cleanup(timings: dict[str, float], stage: str, fn: Any, errors: list[dict[str, str]]) -> Any:
+    try:
+        return _timed_agent_delete_stage(timings, stage, fn)
+    except Exception as exc:
+        errors.append({"stage": stage, "errorType": type(exc).__name__, "message": str(exc)})
+        return {}
+
+
 def _record_agent_delete_route_event(
     event_code: str,
     agent_id: str,
@@ -805,21 +813,46 @@ def agent_purge(agent_id: str) -> dict:
     timings: dict[str, float] = {}
     started_at = perf_counter()
     try:
-        _timed_agent_delete_stage(timings, "ensure_purge_allowed", lambda: ensure_agent_purge_allowed(agent_id))
-        team_cleanup = _timed_agent_delete_stage(timings, "remove_from_teams", lambda: remove_agent_from_teams(agent_id))
-        room_cleanup = _timed_agent_delete_stage(
+        agent_before_purge = _timed_agent_delete_stage(timings, "ensure_purge_allowed", lambda: ensure_agent_purge_allowed(agent_id))
+        direct_session_id = str(agent_before_purge.get("directSessionId") or "").strip()
+        previous_status = str(agent_before_purge.get("status") or "active").strip() or "active"
+        purge = _timed_agent_delete_stage(timings, "purge_agent", lambda: purge_archived_agent_instance(agent_id, allow_active=True))
+        cleanup_errors: list[dict[str, str]] = []
+        team_cleanup = _best_effort_agent_purge_cleanup(timings, "remove_from_teams", lambda: remove_agent_from_teams(agent_id), cleanup_errors)
+        room_cleanup = _best_effort_agent_purge_cleanup(
             timings,
             "remove_from_chat_rooms",
-            lambda: remove_agent_from_chat_rooms(agent_id, allow_empty_rooms=True),
+            lambda: remove_agent_from_chat_rooms(agent_id, allow_empty_rooms=True, direct_session_id=direct_session_id),
+            cleanup_errors,
         )
-        mode_cleanup = _timed_agent_delete_stage(timings, "remove_from_mode_bindings", lambda: remove_agent_from_mode_bindings(agent_id))
-        purge = _timed_agent_delete_stage(timings, "purge_agent", lambda: purge_archived_agent_instance(agent_id))
+        mode_cleanup = _best_effort_agent_purge_cleanup(
+            timings,
+            "remove_from_mode_bindings",
+            lambda: remove_agent_from_mode_bindings(agent_id, agent_snapshot=agent_before_purge),
+            cleanup_errors,
+        )
+        direct_session_cleanup = (
+            _timed_agent_delete_stage(
+                timings,
+                "mark_direct_session_deleted_agent",
+                lambda: session_service.mark_direct_session_agent_deleted(
+                    direct_session_id,
+                    agent_id=agent_id,
+                    agent_display_name=str(agent_before_purge.get("displayName") or "").strip(),
+                    previous_status=previous_status,
+                ),
+            )
+            if direct_session_id
+            else {"changed": False, "sessionId": "", "agentId": agent_id, "reason": "no_direct_session"}
+        )
         payload = {
             **purge,
             "purgeSummary": {
                 "modeBindingsRepaired": len(mode_cleanup.get("repairWarnings") or []),
                 "removedFromRoomIds": list(room_cleanup.get("changedRoomIds") or []),
                 "removedFromTeamIds": list(team_cleanup.get("changedTeamIds") or []),
+                "directSession": direct_session_cleanup,
+                "cleanupErrors": cleanup_errors,
                 "dataRetention": "purged",
             },
         }
@@ -835,6 +868,11 @@ def agent_purge(agent_id: str) -> dict:
                 "modeBindingRepairWarningCount": len(mode_cleanup.get("repairWarnings") or []),
                 "workspaceDeleted": bool(purge.get("workspaceDeleted")),
                 "skippedPathCount": len(purge.get("skippedPaths") or []),
+                "previousStatus": previous_status,
+                "directSessionId": direct_session_id,
+                "directSessionTombstoned": bool(direct_session_cleanup.get("changed")),
+                "cleanupErrorCount": len(cleanup_errors),
+                "cleanupErrors": cleanup_errors,
             },
         )
         return payload

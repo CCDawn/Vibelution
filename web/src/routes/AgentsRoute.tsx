@@ -220,6 +220,7 @@ type ModelProfileChoice = {
   modelId: string;
   label: string;
   modelLabel: string;
+  unresolved?: boolean;
 };
 type RuntimeFocusEvidenceResult = {
   match: AgentRuntimeEvidenceMatch | null;
@@ -508,6 +509,33 @@ function buildAgentSlotModelChoices(
       modelLabel: agentModelLabel(model),
     }))
     .sort((left, right) => left.label.localeCompare(right.label) || left.modelId.localeCompare(right.modelId));
+}
+
+function buildAgentSlotModelChoicesWithCurrent(
+  models: AgentModelChoice[],
+  slot: AgentLlmSlotDefinition | undefined,
+  currentModelId: string,
+  lang: "zh" | "en",
+): ModelProfileChoice[] {
+  const choices = buildAgentSlotModelChoices(models, slot);
+  const normalizedCurrent = String(currentModelId || "").trim();
+  if (!normalizedCurrent || choices.some((choice) => choice.modelId === normalizedCurrent)) {
+    return choices;
+  }
+  const currentModel = models.find((model) => String(model.modelId || "").trim() === normalizedCurrent);
+  const unresolvedReason = currentModel
+    ? (lang === "zh" ? "当前绑定，当前槽位不可选" : "current binding, unavailable for this slot")
+    : (lang === "zh" ? "当前绑定，模型库未注册" : "current binding, not in model library");
+  return [
+    {
+      key: `${slot?.slot ?? "slot"}:${normalizedCurrent}:unresolved`,
+      modelId: normalizedCurrent,
+      label: lang === "zh" ? `${normalizedCurrent}（${unresolvedReason}）` : `${normalizedCurrent} (${unresolvedReason})`,
+      modelLabel: normalizedCurrent,
+      unresolved: true,
+    },
+    ...choices,
+  ];
 }
 
 function agentLlmSlots(workspace: AgentConfigWorkspace | undefined): AgentLlmSlotDefinition[] {
@@ -2228,13 +2256,16 @@ function agentsRouteCopy(lang: "zh" | "en") {
         bulkPromptPlaceholder: "选择提示词",
         bulkApplyPrompt: "批量应用",
         bulkArchive: "批量归档",
+        bulkPurge: "批量彻底删除",
         bulkWorking: "批量处理中...",
         bulkNoSelection: "请先选择 Agent。",
         bulkNoPrompt: "请先选择要应用的提示词模板。",
         bulkArchiveConfirm: "确认安全归档已选 Agent？受保护或已归档项会自动跳过。",
+        bulkPurgeConfirm: "确认彻底删除已选 Agent？受保护项会自动跳过；该操作会删除 Agent 私有工作区，直连历史仅保留为已删除 Agent 历史。",
         bulkSkippedArchived: "已归档，跳过",
         bulkSkippedProtected: "受保护，跳过",
         bulkArchiveResult: "批量归档完成",
+        bulkPurgeResult: "批量彻底删除完成",
         bulkPromptResult: "批量提示词更新完成",
         filterSections: {
           status: "状态",
@@ -2328,7 +2359,7 @@ function agentsRouteCopy(lang: "zh" | "en") {
         purgeAgent: "彻底删除",
         purgingAgent: "删除中...",
         purgeAgentTitle: "彻底删除",
-        purgeAgentHint: "只对已归档 Agent 开放；会从 AgentDirectory 删除记录，并移除该 Agent 的私有工作区、记忆、inbox 和事件文件。",
+        purgeAgentHint: "会从 AgentDirectory 删除记录，并移除该 Agent 的私有工作区、记忆、inbox 和事件文件；直连历史会保留为已删除 Agent 的历史记录。",
         purgeConfirm: "彻底删除 {name}？这个操作不可恢复，会删除该 Agent 的私有工作区和历史文件。",
         protectedAgent: "受保护 Agent 不能归档",
         archiveProtection: "归档保护",
@@ -2584,13 +2615,16 @@ function agentsRouteCopy(lang: "zh" | "en") {
         bulkPromptPlaceholder: "Choose prompt",
         bulkApplyPrompt: "Apply",
         bulkArchive: "Bulk archive",
+        bulkPurge: "Bulk delete",
         bulkWorking: "Working...",
         bulkNoSelection: "Select Agents first.",
         bulkNoPrompt: "Choose a prompt template first.",
         bulkArchiveConfirm: "Archive the selected Agents? Protected or already archived items will be skipped.",
+        bulkPurgeConfirm: "Permanently delete the selected Agents? Protected Agents will be skipped; private workspaces are removed and direct-session history is kept as deleted-Agent history.",
         bulkSkippedArchived: "Already archived; skipped",
         bulkSkippedProtected: "Protected; skipped",
         bulkArchiveResult: "Bulk archive finished",
+        bulkPurgeResult: "Bulk delete finished",
         bulkPromptResult: "Bulk prompt update finished",
         filterSections: {
           status: "Status",
@@ -2684,7 +2718,7 @@ function agentsRouteCopy(lang: "zh" | "en") {
         purgeAgent: "Permanently delete",
         purgingAgent: "Deleting...",
         purgeAgentTitle: "Permanent deletion",
-        purgeAgentHint: "Only archived Agents can be purged. This removes the AgentDirectory record plus its private workspace, memory, inbox, and event files.",
+        purgeAgentHint: "Removes the AgentDirectory record plus its private workspace, memory, inbox, and event files; direct-session history is kept as deleted-Agent history.",
         purgeConfirm: "Permanently delete {name}? This cannot be undone and will delete the Agent private workspace and history files.",
         protectedAgent: "Protected Agents cannot be archived",
         archiveProtection: "Archive protected",
@@ -3202,7 +3236,7 @@ export function AgentsRoute() {
   const selectedAgentResetPending = Boolean(selectedAgent?.agentId && resettingAgentIds.has(selectedAgent.agentId));
   const canResetAgent = Boolean(selectedAgent?.agentId && selectedAgent.status !== "archived");
   const canArchiveAgent = Boolean(selectedAgent?.agentId && selectedAgent.status !== "archived" && !selectedAgentProtected);
-  const canPurgeAgent = Boolean(selectedAgent?.agentId && selectedAgent.status === "archived" && !selectedAgentProtected);
+  const canPurgeAgent = Boolean(selectedAgent?.agentId && !selectedAgentProtected);
 
   const createAgentMutation = useMutation({
     mutationFn: (draft: AgentCreateDraft) => {
@@ -3397,7 +3431,7 @@ export function AgentsRoute() {
       setActivePane("overview");
       setNotice({
         tone: "success",
-        text: lang === "zh" ? "已彻底删除归档 Agent" : "Permanently deleted archived Agent",
+        text: lang === "zh" ? "已彻底删除 Agent" : "Permanently deleted Agent",
       });
       void chatWorkspaceCache.afterAgentArchived();
     },
@@ -4142,6 +4176,64 @@ export function AgentsRoute() {
     void chatWorkspaceCache.afterAgentArchived();
   };
 
+  const bulkPurgeAgents = async () => {
+    if (bulkAgentPending) {
+      return;
+    }
+    if (!selectedBulkAgents.length) {
+      setNotice({ tone: "error", text: copy.bulkNoSelection });
+      return;
+    }
+    const confirmed = window.confirm(copy.bulkPurgeConfirm);
+    if (!confirmed) {
+      return;
+    }
+
+    setBulkAgentPending(true);
+    let success = 0;
+    let skipped = 0;
+    let failed = 0;
+    const notes: string[] = [];
+    let purgedSelectedAgent = false;
+
+    for (const agent of selectedBulkAgents) {
+      if (agentArchiveProtected(agent)) {
+        skipped += 1;
+        notes.push(`${agentLabel(agent)}: ${copy.bulkSkippedProtected}`);
+        continue;
+      }
+      try {
+        const result = await fetchJson<{ agentId: string; status: string; deleted: boolean; purgeSummary?: { dataRetention?: string } }>(
+          `/api/agents/${encodeURIComponent(agent.agentId)}/purge`,
+          { method: "DELETE" },
+        );
+        queryClient.setQueryData<AgentConfigWorkspace | undefined>(
+          queryKeys.agentConfigWorkspace(),
+          (current) => purgedWorkspaceCache(current, result.agentId),
+        );
+        if (agent.agentId === selectedAgent?.agentId) {
+          purgedSelectedAgent = true;
+        }
+        success += 1;
+      } catch (error) {
+        failed += 1;
+        notes.push(`${agentLabel(agent)}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+
+    if (purgedSelectedAgent) {
+      setSelectedAgentId("");
+      setActivePane("overview");
+    }
+    setBulkAgentPending(false);
+    setNotice({
+      tone: failed > 0 ? "error" : "success",
+      text: agentBulkActionSummary(copy.bulkPurgeResult, success, skipped, failed, notes, lang),
+    });
+    clearBulkAgents();
+    void chatWorkspaceCache.afterAgentArchived();
+  };
+
   const archiveSelectedAgent = () => {
     if (!selectedAgent || !canArchiveAgent || selectedAgentArchivePending) {
       return;
@@ -4600,6 +4692,10 @@ export function AgentsRoute() {
                 <Archive size={14} />
                 <span>{bulkAgentPending ? copy.bulkWorking : copy.bulkArchive}</span>
               </button>
+              <button type="button" className={styles.dangerButton} disabled={!selectedBulkAgents.length || bulkAgentPending} onClick={bulkPurgeAgents}>
+                <Trash2 size={14} />
+                <span>{bulkAgentPending ? copy.bulkWorking : copy.bulkPurge}</span>
+              </button>
             </section>
           ) : null}
           {workspaceQuery.isError ? (
@@ -5034,7 +5130,13 @@ export function AgentsRoute() {
                     <small>{copy.llmSlotsHint}</small>
                     <div className={styles.llmSlotGrid}>
                       {llmSlots.map((slot) => {
-                        const slotChoices = buildAgentSlotModelChoices(workspace?.agentModelChoices ?? [], slot);
+                        const selectedSlotModelId = agentLlmSlotModelId(configDraft.llmBindings, slot);
+                        const slotChoices = buildAgentSlotModelChoicesWithCurrent(
+                          workspace?.agentModelChoices ?? [],
+                          slot,
+                          selectedSlotModelId,
+                          lang,
+                        );
                         return (
                           <label key={slot.slot} className={styles.llmSlotField}>
                             <span>
@@ -5042,7 +5144,7 @@ export function AgentsRoute() {
                               <small>{slot.required ? copy.requiredSlot : copy.optionalSlot}</small>
                             </span>
                             <select
-                              value={agentLlmSlotModelId(configDraft.llmBindings, slot)}
+                              value={selectedSlotModelId}
                               onChange={(event) => updateDraft({
                                 llmBindings: updateAgentLlmSlotBinding(configDraft.llmBindings, slot, event.target.value),
                               })}
@@ -5422,27 +5524,26 @@ export function AgentsRoute() {
                   <span className={styles.cleanPill}>{copy.protectedAgent}</span>
                 ) : (
                   <div className={styles.editorActions}>
-                    {selectedAgent.status === "archived" ? (
+                    {selectedAgent.status !== "archived" ? (
                       <button
                         type="button"
-                        className={styles.dangerButton}
-                        disabled={!canPurgeAgent || selectedAgentPurgePending}
-                        onClick={purgeSelectedAgent}
-                      >
-                        <Trash2 size={15} />
-                        {selectedAgentPurgePending ? copy.purgingAgent : copy.purgeAgent}
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        className={styles.dangerButton}
+                        className={styles.secondaryButton}
                         disabled={!canArchiveAgent || selectedAgentArchivePending}
                         onClick={archiveSelectedAgent}
                       >
-                        <Trash2 size={15} />
+                        <Archive size={15} />
                         {selectedAgentArchivePending ? copy.archivingAgent : copy.archiveAgent}
                       </button>
-                    )}
+                    ) : null}
+                    <button
+                      type="button"
+                      className={styles.dangerButton}
+                      disabled={!canPurgeAgent || selectedAgentPurgePending}
+                      onClick={purgeSelectedAgent}
+                    >
+                      <Trash2 size={15} />
+                      {selectedAgentPurgePending ? copy.purgingAgent : copy.purgeAgent}
+                    </button>
                   </div>
                 )}
               </section>

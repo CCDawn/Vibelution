@@ -103,16 +103,20 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("function agentModelChoiceAllowed");
     expect(routeSource).toContain("!text.includes(\"image2\")");
     expect(routeSource).toContain("buildAgentModelChoices(workspace?.agentModelChoices ?? [])");
-    expect(routeSource).toContain("buildAgentSlotModelChoices(workspace?.agentModelChoices ?? [], slot)");
+    expect(routeSource).toContain("buildAgentSlotModelChoicesWithCurrent");
+    expect(routeSource).toContain("selectedSlotModelId");
     expect(routeSource).toContain("agentLlmSlots(workspace)");
     expect(routeSource).toContain("workspace?.agentLlmSlots?.length");
     expect(routeSource).toContain("key: model.modelId");
     expect(routeSource).toContain("agentDialogueModelDisplay(agent, lang)");
     expect(routeSource).toContain("unresolved_model_reference_dialogue");
     expect(routeSource).toContain("模型库未注册");
+    expect(routeSource).toContain("当前槽位不可选");
+    expect(routeSource).toContain("当前绑定，模型库未注册");
+    expect(routeSource).toContain("current binding, unavailable for this slot");
     expect(routeSource).toContain("agentModelChoices.map((model)");
     expect(routeSource).toContain("value={agentLlmSlotModelId(createDraft.llmBindings, FALLBACK_AGENT_LLM_SLOTS[0])}");
-    expect(routeSource).toContain("value={agentLlmSlotModelId(configDraft.llmBindings, slot)}");
+    expect(routeSource).toContain("value={selectedSlotModelId}");
     expect(routeSource).toContain("styles.llmSlotGrid");
     expect(routeSource).toContain("llmSlotsHint");
     expect(routeSource).toContain("按 Agent 自己配置对话、心智模型、摘要、子 Agent 和视觉等 LLM 槽位");
@@ -130,6 +134,17 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).not.toContain("title={profile.detail || profile.modelId}");
     expect(routeSource).not.toContain("{agent.modelProfile?.label || agent.profileId || \"-\"}");
     expect(routeSource).not.toContain("{profile.label || profile.profileId} · {profile.model || profile.providerKind || \"-\"}");
+  });
+
+  it("keeps permanent Agent deletion available before archival", () => {
+    expect(routeSource).toContain("const canPurgeAgent = Boolean(selectedAgent?.agentId && !selectedAgentProtected)");
+    expect(routeSource).toContain("selectedAgent.status !== \"archived\" ? (");
+    expect(routeSource).toContain("className={styles.secondaryButton}");
+    expect(routeSource).toContain("onClick={archiveSelectedAgent}");
+    expect(routeSource).toContain("onClick={purgeSelectedAgent}");
+    expect(routeSource).toContain("已彻底删除 Agent");
+    expect(routeSource).not.toContain("已彻底删除归档 Agent");
+    expect(routeSource).not.toContain("Only archived Agents can be purged");
   });
 
   it("routes membership guidance to the team surface and not just the config pane", () => {
@@ -679,10 +694,14 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("selectedBulkAgentIds");
     expect(routeSource).toContain("bulkApplyPromptTemplate");
     expect(routeSource).toContain("bulkArchiveAgents");
+    expect(routeSource).toContain("bulkPurgeAgents");
     expect(routeSource).toContain("agentArchiveProtected(agent)");
     expect(routeSource).toContain("copy.bulkSkippedProtected");
+    expect(routeSource).toContain("copy.bulkPurgeConfirm");
+    expect(routeSource).toContain("copy.bulkPurgeResult");
     expect(routeSource).toContain("body: JSON.stringify({ promptTemplateId: bulkPromptTemplateId })");
     expect(routeSource).toContain('method: "DELETE"');
+    expect(routeSource).toContain("onClick={bulkPurgeAgents}");
     expect(routeSource).toContain("styles.bulkActionBar");
     expect(routeSource).toContain("styles.agentRowShell");
   });

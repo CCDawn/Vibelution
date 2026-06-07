@@ -52,6 +52,8 @@ function copyFor(lang: string) {
         bulkResetResult: "批量恢复默认完成",
         bulkDeactivateResult: "批量停用完成",
         bulkSkippedNoDefault: "没有默认内容，跳过",
+        bulkResetConfirm: "确认把已选提示词模板恢复为默认内容？没有默认内容的模板会跳过。",
+        bulkDeactivateConfirm: "确认批量停用已选提示词模板？已绑定的 Agent 可能需要重新分配模板。",
         emptyList: "没有匹配的提示词模板。",
         emptyEditor: "选择一个提示词模板后在这里编辑。",
         loading: "加载中...",
@@ -97,6 +99,8 @@ function copyFor(lang: string) {
         bulkResetResult: "Bulk reset finished",
         bulkDeactivateResult: "Bulk deactivate finished",
         bulkSkippedNoDefault: "No default content; skipped",
+        bulkResetConfirm: "Restore selected prompt templates to their default content? Templates without defaults will be skipped.",
+        bulkDeactivateConfirm: "Deactivate selected prompt templates? Linked Agents may need a replacement template.",
         emptyList: "No matching prompt templates.",
         emptyEditor: "Select a prompt template to edit it here.",
         loading: "Loading...",
@@ -345,6 +349,12 @@ export function PromptTemplatesRoute() {
       setNotice(copy.bulkNoSelection);
       return;
     }
+    if (patch.status === "inactive") {
+      const confirmed = window.confirm(copy.bulkDeactivateConfirm);
+      if (!confirmed) {
+        return;
+      }
+    }
     setBulkPromptPending(true);
     let success = 0;
     let failed = 0;
@@ -377,6 +387,10 @@ export function PromptTemplatesRoute() {
     }
     if (!selectedTemplates.length) {
       setNotice(copy.bulkNoSelection);
+      return;
+    }
+    const confirmed = window.confirm(copy.bulkResetConfirm);
+    if (!confirmed) {
       return;
     }
     setBulkPromptPending(true);

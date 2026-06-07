@@ -950,6 +950,38 @@ def _ensure_conversation_agent_metadata(
     title = str(conversation.get("title") or DEFAULT_CHAT_CONVERSATION_TITLE).strip() or DEFAULT_CHAT_CONVERSATION_TITLE
     session_workspace = str(conversation.get("workspace_path") or _session_workspace_relative_path(conversation_id))
     existing_agent_id = str(conversation.get("agent_id") or conversation.get("agentId") or "").strip()
+    agent_status_code = str(conversation.get("agentStatusCode") or "").strip()
+    if agent_status_code == "deleted_agent":
+        deleted_agent_id = str(
+            conversation.get("agent_deleted_id")
+            or conversation.get("agentDeletedId")
+            or conversation.get("agent_missing_id")
+            or conversation.get("agentMissingId")
+            or existing_agent_id
+            or ""
+        ).strip()
+        changed = False
+        for key in ("agent_id", "agentId"):
+            if conversation.get(key) != "":
+                conversation[key] = ""
+                changed = True
+        for key in ("agent_deleted_id", "agentDeletedId", "agent_missing_id", "agentMissingId"):
+            if deleted_agent_id and conversation.get(key) != deleted_agent_id:
+                conversation[key] = deleted_agent_id
+                changed = True
+        if conversation.get("agentMissing") is not True:
+            conversation["agentMissing"] = True
+            changed = True
+        if conversation.get("agentStatusCode") != "deleted_agent":
+            conversation["agentStatusCode"] = "deleted_agent"
+            changed = True
+        if conversation.get("agentDirectSessionMismatch"):
+            conversation["agentDirectSessionMismatch"] = False
+            changed = True
+        if conversation.get("agentPrimaryDirectSessionId"):
+            conversation["agentPrimaryDirectSessionId"] = ""
+            changed = True
+        return changed
     existing_agent = _agent_from_lookup(agent_by_id, existing_agent_id) if existing_agent_id else None
     default_primary_mode = agent_directory_service.DEFAULT_AGENT_PRIMARY_MODE
     primary_mode = str((existing_agent or {}).get("primaryMode") or default_primary_mode).strip() or default_primary_mode
@@ -1190,8 +1222,19 @@ def _session_agent_status_payload(
     *,
     hydrate_agent: bool = True,
     agent_lookup_checked: bool = False,
+    persisted_status_code: str = "",
 ) -> dict[str, Any]:
     normalized_agent_id = str(agent_id or "").strip()
+    if str(persisted_status_code or "").strip() == "deleted_agent":
+        return {
+            "agentMissing": True,
+            "agentStatusCode": "deleted_agent",
+            "agentStatusMessage": text_for(
+                get_web_language(),
+                zh="缺少有效 Agent：当前会话绑定的 Agent 已被彻底删除，历史会话已保留但不会自动重建 Agent。",
+                en="Missing valid Agent: the Agent bound to this session was permanently deleted; history is preserved without recreating it.",
+            ),
+        }
     if not normalized_agent_id:
         return {
             "agentMissing": False,
@@ -1258,6 +1301,8 @@ def _resolve_active_agent_for_turn(
 
 
 def _session_agent_visible_in_indexes(summary: dict[str, Any]) -> bool:
+    if str(summary.get("agentStatusCode") or "").strip() == "deleted_agent":
+        return True
     if bool(summary.get("agentMissing")):
         return False
     if not bool(str(summary.get("agentId") or "").strip()):
@@ -3616,6 +3661,147 @@ def _agent_directory_conversation_record(agent: dict[str, Any], *, session_id: s
     return conversation
 
 
+def mark_direct_session_agent_deleted(
+    session_id: str,
+    *,
+    agent_id: str,
+    agent_display_name: str = "",
+    previous_status: str = "",
+) -> dict[str, Any]:
+    """Keep direct-session history while preventing Agent repair from recreating a purged Agent."""
+
+    normalized_session_id = str(session_id or "").strip()
+    normalized_agent_id = str(agent_id or "").strip()
+    if not normalized_session_id:
+        return {
+            "changed": False,
+            "sessionId": "",
+            "agentId": normalized_agent_id,
+            "reason": "no_direct_session",
+        }
+    changed = False
+    found = False
+    now = _now_timestamp()
+    try:
+        with _CHAT_STATE_LOCK:
+            payload = load_chat_state(PROJECT_ROOT)
+            conversations = payload.get("conversations")
+            if not isinstance(conversations, list):
+                conversations = []
+                payload["conversations"] = conversations
+            for raw in conversations:
+                if not isinstance(raw, dict):
+                    continue
+                if str(raw.get("conversation_id") or DEFAULT_CHAT_CONVERSATION_ID).strip() != normalized_session_id:
+                    continue
+                found = True
+                changed = _mark_conversation_agent_deleted(
+                    raw,
+                    session_id=normalized_session_id,
+                    agent_id=normalized_agent_id,
+                    agent_display_name=agent_display_name,
+                    previous_status=previous_status,
+                    timestamp=now,
+                ) or changed
+                break
+            if not found:
+                conversation = _make_empty_conversation(
+                    normalized_session_id,
+                    title=agent_display_name or normalized_session_id,
+                    timestamp=now,
+                )
+                _ensure_conversation_workspace_metadata(conversation)
+                _mark_conversation_agent_deleted(
+                    conversation,
+                    session_id=normalized_session_id,
+                    agent_id=normalized_agent_id,
+                    agent_display_name=agent_display_name,
+                    previous_status=previous_status,
+                    timestamp=now,
+                )
+                conversations.append(conversation)
+                changed = True
+            if changed:
+                payload["version"] = int(payload.get("version") or CHAT_STATE_VERSION)
+                payload["updated_at"] = now
+                save_chat_state(PROJECT_ROOT, payload)
+    except Exception as exc:
+        result = {
+            "changed": False,
+            "sessionId": normalized_session_id,
+            "agentId": normalized_agent_id,
+            "agentStatusCode": "",
+            "historyRetention": "unknown",
+            "reason": "tombstone_failed",
+            "errorType": type(exc).__name__,
+        }
+        _record_direct_session_agent_deleted_event(result, previous_status=previous_status, created_tombstone=False, level="error")
+        return result
+    if changed:
+        _invalidate_session_list_cache()
+    result = {
+        "changed": changed,
+        "sessionId": normalized_session_id,
+        "agentId": normalized_agent_id,
+        "agentStatusCode": "deleted_agent",
+        "historyRetention": "preserved_tombstone",
+        "reason": "agent_purged",
+    }
+    _record_direct_session_agent_deleted_event(result, previous_status=previous_status, created_tombstone=not found)
+    return result
+
+
+def _mark_conversation_agent_deleted(
+    conversation: dict[str, Any],
+    *,
+    session_id: str,
+    agent_id: str,
+    agent_display_name: str,
+    previous_status: str,
+    timestamp: str,
+) -> bool:
+    changed = False
+    deleted_agent_id = str(agent_id or "").strip()
+    for key in ("agent_id", "agentId"):
+        if conversation.get(key) != "":
+            conversation[key] = ""
+            changed = True
+    for key in ("agent_deleted_id", "agentDeletedId", "agent_missing_id", "agentMissingId"):
+        if deleted_agent_id and conversation.get(key) != deleted_agent_id:
+            conversation[key] = deleted_agent_id
+            changed = True
+    display_name = trim_lines(agent_display_name, max_lines=1).strip()
+    if display_name and conversation.get("agentDeletedDisplayName") != display_name:
+        conversation["agentDeletedDisplayName"] = display_name
+        changed = True
+    if conversation.get("agentMissing") is not True:
+        conversation["agentMissing"] = True
+        changed = True
+    if conversation.get("agentStatusCode") != "deleted_agent":
+        conversation["agentStatusCode"] = "deleted_agent"
+        changed = True
+    if conversation.get("agentDirectSessionMismatch"):
+        conversation["agentDirectSessionMismatch"] = False
+        changed = True
+    if conversation.get("agentPrimaryDirectSessionId"):
+        conversation["agentPrimaryDirectSessionId"] = ""
+        changed = True
+    next_tombstone = {
+        "agentId": deleted_agent_id,
+        "sessionId": str(session_id or "").strip(),
+        "deletedAt": str(timestamp or "").strip(),
+        "previousStatus": str(previous_status or "").strip(),
+        "historyRetention": "preserved_tombstone",
+    }
+    if dict(conversation.get("agentDeletedTombstone") or {}) != next_tombstone:
+        conversation["agentDeletedTombstone"] = next_tombstone
+        changed = True
+    if str(timestamp or "").strip() and conversation.get("updated_at") != timestamp:
+        conversation["updated_at"] = timestamp
+        changed = True
+    return changed
+
+
 def _agent_directory_conversation_stub(agent: dict[str, Any], *, session_id: str) -> dict[str, Any]:
     display_name = str(agent.get("displayName") or agent.get("agentCode") or session_id).strip() or session_id
     return {
@@ -4597,6 +4783,7 @@ def _build_session_summary(conversation: dict[str, Any], *, hydrate_agent: bool 
         agent,
         hydrate_agent=hydrate_agent,
         agent_lookup_checked=agent_lookup_checked,
+        persisted_status_code=str(conversation.get("agentStatusCode") or "").strip(),
     )
     if not agent_status["agentMissing"] and bool(conversation.get("agentMissing")):
         agent_status = {
@@ -9070,6 +9257,38 @@ def _record_session_delete_event(
                 "phase": normalized_phase,
                 "outcome": outcome,
                 **(fields or {}),
+            },
+            lifecycle=True,
+        )
+    except Exception:
+        return
+
+
+def _record_direct_session_agent_deleted_event(
+    result: dict[str, Any],
+    *,
+    previous_status: str,
+    created_tombstone: bool,
+    level: str = "warning",
+) -> None:
+    outcome = "failed" if str(result.get("reason") or "") == "tombstone_failed" else "persisted"
+    try:
+        record_runtime_scene_event(
+            "conversation",
+            "agent_binding",
+            "conversation.agent_deleted_tombstone.persisted",
+            message="Direct session was preserved with a deleted-Agent tombstone after Agent purge.",
+            level=level,
+            outcome=outcome,
+            fields={
+                "sessionId": str(result.get("sessionId") or "").strip(),
+                "agentId": str(result.get("agentId") or "").strip(),
+                "agentStatusCode": str(result.get("agentStatusCode") or "").strip(),
+                "previousStatus": str(previous_status or "").strip(),
+                "historyRetention": str(result.get("historyRetention") or "").strip(),
+                "createdTombstoneConversation": bool(created_tombstone),
+                "reason": str(result.get("reason") or "").strip(),
+                "errorType": str(result.get("errorType") or "").strip(),
             },
             lifecycle=True,
         )

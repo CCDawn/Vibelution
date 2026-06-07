@@ -62,6 +62,10 @@ describe("PromptTemplatesRoute layout contract", () => {
     expect(routeSource).toContain("bulkPatchTemplates({ category: bulkCategory }, copy.bulkCategoryResult)");
     expect(routeSource).toContain("bulkPatchTemplates({ status: \"inactive\" }, copy.bulkDeactivateResult)");
     expect(routeSource).toContain("bulkResetTemplates");
+    expect(routeSource).toContain("copy.bulkDeactivateConfirm");
+    expect(routeSource).toContain("copy.bulkResetConfirm");
+    expect(routeSource).toContain("window.confirm(copy.bulkDeactivateConfirm)");
+    expect(routeSource).toContain("window.confirm(copy.bulkResetConfirm)");
     expect(routeSource).toContain("styles.bulkActionBar");
     expect(routeSource).toContain("styles.selectableRow");
     expect(routeSource).toContain('method: "PATCH"');
