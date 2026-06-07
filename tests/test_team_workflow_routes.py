@@ -6,6 +6,7 @@ from core.web.routes import team_workflows
 from core.web.services import (
     agent_directory_service,
     chat_room_service,
+    data_processing_service,
     project_agent_bus_service,
     session_service,
     team_knowledge_service,
@@ -21,6 +22,7 @@ def _client() -> TestClient:
 def _use_tmp_project_root(tmp_path, monkeypatch):
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(data_processing_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(project_agent_bus_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(team_knowledge_service, "PROJECT_ROOT", tmp_path)
@@ -63,6 +65,44 @@ def test_team_workflow_routes_run_candidate_transfer_slice(tmp_path, monkeypatch
     assert decision_response.status_code == 200, decision_response.text
     assert decision_response.json()["transfer"]["decidedByAgent"] == "Research Coordination Agent"
     assert decision_response.json()["candidate"]["currentWorkflowNode"] == "source_screening"
+
+
+def test_team_workflow_route_imports_data_record_as_source_candidate(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    client = _client()
+    team = client.post("/api/teams", json={"name": "挑战杯科研团队"}).json()
+    run = client.post("/api/data-processing/runs", json={"title": "Source collection"}).json()
+    record = client.post(
+        f"/api/data-processing/runs/{run['runId']}/records",
+        json={
+            "sourceType": "url",
+            "sourceRef": "https://example.test/source",
+            "title": "Imported source",
+            "metadata": {"allowedForAnalysis": True},
+        },
+    ).json()
+
+    response = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/data-processing/runs/{run['runId']}/records/{record['recordId']}/source-candidate",
+        json={"createdByAgent": "data_intake_coordinator", "tags": ["source"]},
+    )
+    duplicate_response = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/data-processing/runs/{run['runId']}/records/{record['recordId']}/source-candidate",
+        json={"createdByAgent": "data_intake_coordinator"},
+    )
+    list_response = client.get(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/candidates",
+        params={"candidateType": "source_manifest"},
+    )
+
+    assert response.status_code == 201, response.text
+    assert response.json()["created"] is True
+    assert response.json()["candidate"]["sourceUrl"] == "https://example.test/source"
+    assert response.json()["candidate"]["metadata"]["importedFromDataRecord"]["recordId"] == record["recordId"]
+    assert duplicate_response.status_code == 201, duplicate_response.text
+    assert duplicate_response.json()["created"] is False
+    assert duplicate_response.json()["candidate"]["candidateId"] == response.json()["candidate"]["candidateId"]
+    assert list_response.json()["candidateCount"] == 1
 
 
 def test_team_workflow_route_blocks_non_owner_transfer_decision(tmp_path, monkeypatch):

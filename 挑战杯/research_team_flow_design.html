@@ -378,11 +378,11 @@
                 </div>
 <div class="service-row">
                   <b>team_workflow_orchestration_service</b>
-                  <span>已落地：Team 级 workflowOrchestration、CandidateStore、transfer request/decision。</span>
+                  <span>已落地：Team 级 workflowOrchestration、CandidateStore、transfer request/decision，以及 DataRecord -&gt; source_manifest 幂等导入桥。</span>
                 </div>
 <div class="service-row">
                   <b>team_workflows API</b>
-                  <span>已落地：/api/teams/{team_id}/workflow-orchestration、candidates/source、candidates/{candidate_id}/source-extraction、candidates/{candidate_id}/paper-note-draft、candidates、candidates/validation、candidate-graph、transfers、decide、knowledge-ingestion/status、coordination/status；coordination/status 返回 communicationBrief 但不发送消息。</span>
+                  <span>已落地：/api/teams/{team_id}/workflow-orchestration、candidates/source、data-processing/runs/{runId}/records/{recordId}/source-candidate、candidates/{candidate_id}/source-extraction、candidates/{candidate_id}/paper-note-draft、candidates、candidates/validation、candidate-graph、transfers、decide、knowledge-ingestion/status、coordination/status；coordination/status 返回 communicationBrief 但不发送消息。</span>
                 </div>
 <div class="service-row">
                   <b>TeamsRoute workflow panel</b>
@@ -682,14 +682,19 @@
               <span>提供 /api/data-processing profiles/runs 创建/列表/详情/records/collection-assignments/outputs/status；供 Agent 领取资料搜集任务和提交输出。</span>
             </div>
 <div class="blueprint-row compact">
+              <b>DataRecord 导入桥</b>
+              <strong>/api/teams/{teamId}/workflow-orchestration/data-processing/runs/{runId}/records/{recordId}/source-candidate</strong>
+              <span>把通用 DataRecord 幂等导入为 source_manifest 候选，保留 run/record/quality/collection trace；不写正式知识。</span>
+            </div>
+<div class="blueprint-row compact">
               <b>服务文件</b>
               <strong>core/web/services/team_workflow_orchestration_service.py</strong>
-              <span>Team 编排、候选登记、转移请求、协调 Agent 裁决和轻量运行事件日志。</span>
+              <span>Team 编排、候选登记、DataRecord 导入、转移请求、协调 Agent 裁决和轻量运行事件日志。</span>
             </div>
 <div class="blueprint-row compact">
               <b>路由文件</b>
               <strong>core/web/routes/team_workflows.py</strong>
-              <span>提供工作流查询/确保、候选资料登记、转移提交、转移裁决 API。</span>
+              <span>提供工作流查询/确保、候选资料登记、DataRecord 导入、转移提交、转移裁决 API。</span>
             </div>
 <div class="blueprint-row compact">
               <b>路由注册</b>
@@ -789,7 +794,7 @@
 <div class="blueprint-row compact">
               <b>验证</b>
               <strong>tests/test_data_processing_service.py + tests/test_data_processing_routes.py + tests/test_team_workflow_orchestration_service.py + tests/test_team_workflow_routes.py</strong>
-              <span>覆盖通用数据处理首切、主路径、非 ownerAgent 不能写最终状态、本地模型任务包、输出校验和知识入库状态总览。</span>
+              <span>覆盖通用数据处理首切、DataRecord 导入 source_manifest、主路径、非 ownerAgent 不能写最终状态、本地模型任务包、输出校验和知识入库状态总览。</span>
             </div>
       </div>
       <div class="agent-matrix" style="margin-top: 12px;">
@@ -858,6 +863,12 @@
               <strong>通用数据处理底座首切</strong>
               <span>新增 /api/data-processing profiles/runs/list/records/collection-assignments/outputs/status，以及 workspace/data_processing/runs/&lt;runId&gt; 文件落库。</span>
               <span>资料搜集 Agent 可以先创建/查询 DataProcessingRun、领取 CollectionAssignment、提交 CollectionOutput 并生成 DataRecord；该层不写正式 Team Knowledge、不写 RAG、不写知识图谱，后续由挑战杯流程把 DataRecord 转为候选知识。</span>
+            </div>
+<div class="blueprint-row">
+              <b>M6.3</b>
+              <strong>DataRecord 导入 source_manifest</strong>
+              <span>新增 Team workflow 导入桥：/api/teams/{teamId}/workflow-orchestration/data-processing/runs/{runId}/records/{recordId}/source-candidate。</span>
+              <span>通用 DataRecord 可被幂等导入 CandidateStore source_manifest，并保留 importedFromDataRecord、dataProcessingQualitySignals、collectionTrace 和 data_record/data_processing_run evidenceRefs；仍不写正式知识/RAG/正式图谱。</span>
             </div>
       </div>
       <div class="tag-row">
