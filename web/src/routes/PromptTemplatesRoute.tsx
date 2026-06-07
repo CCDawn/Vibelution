@@ -197,7 +197,7 @@ export function PromptTemplatesRoute() {
   });
   const agentsQuery = useQuery({
     queryKey: queryKeys.agents(),
-    queryFn: () => fetchJson<AgentInstance[]>("/api/agents"),
+    queryFn: () => fetchJson<AgentInstance[]>("/api/agents?detail=summary"),
   });
   const templates = templatesQuery.data?.templates ?? [];
   const agents = agentsQuery.data ?? [];

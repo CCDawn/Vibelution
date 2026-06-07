@@ -1651,6 +1651,25 @@ def _environment_unavailable_evidence(text: str) -> str:
     return ""
 
 
+def _environment_unavailable_reason(
+    evolution_summary: Optional[Dict[str, Any]],
+    *,
+    fallback: str = "",
+) -> str:
+    if not isinstance(evolution_summary, dict):
+        return fallback
+    environment = evolution_summary.get("environment")
+    if not isinstance(environment, dict) or not environment.get("unavailable"):
+        return fallback
+    evidence = str(environment.get("evidence") or "").strip()
+    if not evidence:
+        return "任务环境不可用"
+    compact = " ".join(evidence.split())
+    if len(compact) > 160:
+        compact = f"{compact[:157]}..."
+    return f"任务环境不可用：{compact}"
+
+
 def _safe_modify_probe_summary(worktree_path: Path, allowed_dirty_paths: Optional[Iterable[str]] = None) -> Dict[str, Any]:
     """采集安全修改探针的文件证据，只观察 disposable worktree。"""
     probe_path = worktree_path / SAFE_MODIFY_PROBE_PATH
@@ -2164,14 +2183,20 @@ def infer_result_status(
                     and stdout_tail_looks_like_idle_chat_ui(stdout_tail or [])
                 ):
                     return "failed", "agent 单轮入口失败：子进程落入空闲 Chat UI，未消费 prompt 或进入事务循环"
+                environment_reason = _environment_unavailable_reason(evolution_summary)
+                if environment_reason:
+                    return "failed", f"{environment_reason}，事务探针未开账"
                 return "failed", "事务探针未开账"
             transaction_status = str(transaction.get("status") or "")
             if not transaction.get("closed"):
+                environment_reason = _environment_unavailable_reason(evolution_summary)
+                if environment_reason:
+                    return "failed", f"{environment_reason}，事务探针未关账"
                 return "failed", "事务探针未关账"
             if transaction_status == "failed":
-                environment = evolution_summary.get("environment") if isinstance(evolution_summary, dict) else {}
-                if isinstance(environment, dict) and environment.get("unavailable"):
-                    return "failed", "任务环境不可用，事务探针已按失败状态关账"
+                environment_reason = _environment_unavailable_reason(evolution_summary)
+                if environment_reason:
+                    return "failed", f"{environment_reason}，事务探针已按失败状态关账"
                 last_validation = validation.get("last") if isinstance(validation, dict) else {}
                 validation_summary = str((last_validation or {}).get("summary") or "").lower()
                 if _environment_unavailable_evidence(validation_summary):

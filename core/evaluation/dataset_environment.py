@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import os
+import shutil
+import subprocess
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
@@ -11,6 +13,8 @@ from typing import Any, Dict, Iterable, List, Optional
 TERMINAL_BENCH_CORE_REPO = "https://github.com/harbor-framework/terminal-bench-2"
 TERMINAL_BENCH_CORE_REVISION = "2fd12b88aafdd04a52c298e3940bcb189f9766d6"
 TERMINAL_BENCH_WINDOWS_APP_ALIAS = "C:\\app"
+_TOOL_REQUIREMENT_NAMES = {"uv", "docker"}
+_DOCKER_DAEMON_REQUIREMENT_NAME = "docker daemon"
 
 
 def terminal_bench_environment_contract(*, official_seed: bool) -> Dict[str, Any]:
@@ -95,6 +99,93 @@ def _candidate_paths(path_text: str, aliases: Iterable[str], *, project_root: Op
     return deduped
 
 
+def _subprocess_no_window_kwargs() -> Dict[str, int]:
+    flags = int(getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    return {"creationflags": flags} if flags else {}
+
+
+def _tool_requirement_status(name: str) -> Dict[str, Any]:
+    executable = shutil.which(name)
+    return {
+        "name": name,
+        "available": bool(executable),
+        "evidence": executable or "not_found",
+    }
+
+
+def _docker_daemon_requirement_status(*, project_root: Optional[Path] = None) -> Dict[str, Any]:
+    docker = shutil.which("docker")
+    if not docker:
+        return {
+            "name": _DOCKER_DAEMON_REQUIREMENT_NAME,
+            "available": False,
+            "evidence": "docker_cli_not_found",
+        }
+    try:
+        proc = subprocess.run(
+            [docker, "version", "--format", "{{.Server.Version}}"],
+            cwd=str(project_root or Path.cwd()),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=5,
+            check=False,
+            **_subprocess_no_window_kwargs(),
+        )
+    except Exception as exc:
+        return {
+            "name": _DOCKER_DAEMON_REQUIREMENT_NAME,
+            "available": False,
+            "evidence": f"{type(exc).__name__}: {exc}",
+        }
+    output = (proc.stdout or "").strip()
+    error = (proc.stderr or "").strip()
+    return {
+        "name": _DOCKER_DAEMON_REQUIREMENT_NAME,
+        "available": proc.returncode == 0 and bool(output),
+        "evidence": output or error or f"returncode={proc.returncode}",
+    }
+
+
+def _verifier_requirement_status(requirement: str, *, project_root: Optional[Path] = None) -> Dict[str, Any]:
+    name = str(requirement or "").strip().lower()
+    if name in _TOOL_REQUIREMENT_NAMES:
+        return _tool_requirement_status(name)
+    if name == _DOCKER_DAEMON_REQUIREMENT_NAME:
+        return _docker_daemon_requirement_status(project_root=project_root)
+    return {
+        "name": str(requirement or "").strip(),
+        "available": False,
+        "evidence": "unsupported_requirement",
+    }
+
+
+def _preflight_official_verifier(
+    contract: Dict[str, Any],
+    *,
+    project_root: Optional[Path] = None,
+) -> Dict[str, Any]:
+    verifier = contract.get("official_verifier") if isinstance(contract.get("official_verifier"), dict) else {}
+    requirements: List[Dict[str, Any]] = []
+    seen: set[str] = set()
+    for raw in verifier.get("requires") or []:
+        requirement = str(raw or "").strip()
+        key = requirement.lower()
+        if not requirement or key in seen:
+            continue
+        seen.add(key)
+        requirements.append(_verifier_requirement_status(requirement, project_root=project_root))
+    missing = [item for item in requirements if not bool(item.get("available"))]
+    return {
+        "required": bool(requirements),
+        "status": str(verifier.get("status") or "").strip(),
+        "requirements": requirements,
+        "missing": missing,
+        "available": not missing,
+    }
+
+
 def preflight_environment_contract(
     contract: Dict[str, Any],
     *,
@@ -118,9 +209,19 @@ def preflight_environment_contract(
         checked.append(payload)
         if not existing:
             missing.append(payload)
+    verifier = _preflight_official_verifier(contract, project_root=project_root)
+    missing_verifier = list(verifier.get("missing") or [])
+    available = not missing and not missing_verifier
+    if missing:
+        status = "missing"
+    elif missing_verifier:
+        status = "missing_verifier_dependency"
+    else:
+        status = "available"
     return {
-        "status": "available" if not missing else "missing",
-        "available": not missing,
+        "status": status,
+        "available": available,
         "checked": checked,
         "missing": missing,
+        "official_verifier": verifier,
     }

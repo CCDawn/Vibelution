@@ -136,9 +136,8 @@ def _environment_preflight_failure_result(
     agent_binding: Dict[str, Any],
 ) -> HarnessResult:
     now = _now_iso()
-    missing = [str(item.get("path") or "").strip() for item in preflight.get("missing") or [] if isinstance(item, dict)]
-    missing_text = ", ".join(item for item in missing if item) or "required task environment"
-    reason = f"数据集环境预检失败：缺少 {missing_text}，未启动 agent。"
+    missing_text = _environment_preflight_missing_text(preflight)
+    reason = f"数据集环境预检失败：缺少/不可用 {missing_text}，未启动 agent。"
     return HarnessResult(
         harness_id=f"preflight_{role}_{_safe_report_file_stem(case_id)}",
         status="failed",
@@ -185,6 +184,22 @@ def _environment_preflight_failure_result(
         },
         agent_binding=agent_binding,
     )
+
+
+def _environment_preflight_missing_text(preflight: Dict[str, Any]) -> str:
+    missing_paths = [
+        str(item.get("path") or "").strip()
+        for item in preflight.get("missing") or []
+        if isinstance(item, dict) and str(item.get("path") or "").strip()
+    ]
+    verifier = preflight.get("official_verifier") if isinstance(preflight.get("official_verifier"), dict) else {}
+    missing_requirements = [
+        str(item.get("name") or "").strip()
+        for item in verifier.get("missing") or []
+        if isinstance(item, dict) and str(item.get("name") or "").strip()
+    ]
+    items = [*missing_paths, *missing_requirements]
+    return ", ".join(dict.fromkeys(items)) or "required task environment"
 
 
 @dataclass
@@ -474,6 +489,8 @@ def _extract_run_metrics(item: SupervisedEvolutionRun) -> Dict[str, Any]:
     transaction = summary.get("transaction") or {}
     git = summary.get("git") or {}
     llm_failure = summary.get("llm_failure") if isinstance(summary.get("llm_failure"), dict) else {}
+    environment = summary.get("environment") if isinstance(summary.get("environment"), dict) else {}
+    environment_preflight = environment.get("preflight") if isinstance(environment.get("preflight"), dict) else {}
     started_at = _parse_iso_timestamp(item.started_at)
     ended_at = _parse_iso_timestamp(item.ended_at)
     wall_clock_seconds = 0.0
@@ -500,6 +517,10 @@ def _extract_run_metrics(item: SupervisedEvolutionRun) -> Dict[str, Any]:
         "llm_failure_error_type": str(llm_failure.get("error_type") or ""),
         "llm_failure_message": str(llm_failure.get("message") or ""),
         "llm_failure_retryable": bool(llm_failure.get("retryable")),
+        "environment_unavailable": bool(environment.get("unavailable")),
+        "environment_preflight_status": str(environment_preflight.get("status") or ""),
+        "environment_missing_requirements": _environment_preflight_missing_items(environment_preflight),
+        "environment_evidence": str(environment.get("evidence") or ""),
     }
 
 
@@ -1008,6 +1029,9 @@ def _build_failure_taxonomy(
         "transaction_issues_reduced": "candidate_transaction_improvement",
         "llm_failures_increased": "candidate_llm_failure_regression",
         "llm_failures_reduced": "candidate_llm_failure_improvement",
+        "candidate_environment_unavailable": "candidate_environment_unavailable",
+        "baseline_environment_unavailable": "baseline_environment_unavailable",
+        "shared_environment_unavailable": "shared_environment_unavailable",
         "candidate_transaction_issue": "candidate_transaction_issue",
         "baseline_transaction_issue": "baseline_transaction_issue",
         "shared_transaction_issue": "shared_transaction_issue",
@@ -1065,6 +1089,8 @@ def _build_case_difference_diagnostic(
 
     baseline_transaction_issue = _has_transaction_issue(baseline_metrics)
     candidate_transaction_issue = _has_transaction_issue(candidate_metrics)
+    baseline_environment_unavailable = _has_environment_unavailable(baseline_metrics)
+    candidate_environment_unavailable = _has_environment_unavailable(candidate_metrics)
     baseline_restart_miss = _has_restart_miss(baseline_metrics)
     candidate_restart_miss = _has_restart_miss(candidate_metrics)
     baseline_llm_failure = bool(baseline_metrics.get("llm_failure_detected"))
@@ -1082,8 +1108,15 @@ def _build_case_difference_diagnostic(
         "restart_miss_delta": int(candidate_restart_miss) - int(baseline_restart_miss),
         "transaction_issue_delta": int(candidate_transaction_issue) - int(baseline_transaction_issue),
         "llm_failure_delta": int(candidate_llm_failure) - int(baseline_llm_failure),
+        "environment_unavailable_delta": int(candidate_environment_unavailable) - int(baseline_environment_unavailable),
         "baseline_transaction_issue": baseline_transaction_issue,
         "candidate_transaction_issue": candidate_transaction_issue,
+        "baseline_environment_unavailable": baseline_environment_unavailable,
+        "candidate_environment_unavailable": candidate_environment_unavailable,
+        "baseline_environment_preflight_status": str(baseline_metrics.get("environment_preflight_status") or ""),
+        "candidate_environment_preflight_status": str(candidate_metrics.get("environment_preflight_status") or ""),
+        "baseline_environment_missing_requirements": list(baseline_metrics.get("environment_missing_requirements") or []),
+        "candidate_environment_missing_requirements": list(candidate_metrics.get("environment_missing_requirements") or []),
         "baseline_restart_miss": baseline_restart_miss,
         "candidate_restart_miss": candidate_restart_miss,
         "baseline_llm_failure": baseline_llm_failure,
@@ -1105,6 +1138,8 @@ def _build_case_difference_diagnostic(
 def _has_transaction_issue(metrics: Dict[str, Any]) -> bool:
     if not metrics:
         return False
+    if _has_environment_unavailable(metrics):
+        return False
     if not bool(metrics.get("transaction_required")):
         return False
     if (
@@ -1118,6 +1153,30 @@ def _has_transaction_issue(metrics: Dict[str, Any]) -> bool:
         or not bool(metrics.get("transaction_closed"))
         or str(metrics.get("transaction_status") or "") not in {"", "success"}
     )
+
+
+def _has_environment_unavailable(metrics: Dict[str, Any]) -> bool:
+    if not metrics:
+        return False
+    return bool(metrics.get("environment_unavailable"))
+
+
+def _environment_preflight_missing_items(preflight: Dict[str, Any]) -> List[str]:
+    items: List[str] = []
+    for item in preflight.get("missing") or []:
+        if not isinstance(item, dict):
+            continue
+        label = str(item.get("path") or "").strip()
+        if label and label not in items:
+            items.append(label)
+    verifier = preflight.get("official_verifier") if isinstance(preflight.get("official_verifier"), dict) else {}
+    for item in verifier.get("missing") or []:
+        if not isinstance(item, dict):
+            continue
+        label = str(item.get("name") or "").strip()
+        if label and label not in items:
+            items.append(label)
+    return items
 
 
 def _llm_failure_reason(metrics_items: List[Dict[str, Any]]) -> str:
@@ -1146,6 +1205,24 @@ def _llm_failure_reason(metrics_items: List[Dict[str, Any]]) -> str:
     if "provider_transport_error" in categories or "transport" in categories or "connection" in joined or "network" in joined:
         return "LLM provider 传输异常，当前监督评测不可判定"
     return "LLM 调用失败，当前监督评测不可判定"
+
+
+def _environment_unavailable_reason(metrics_items: List[Dict[str, Any]]) -> str:
+    missing: List[str] = []
+    statuses: List[str] = []
+    for item in metrics_items:
+        if not _has_environment_unavailable(item):
+            continue
+        status = str(item.get("environment_preflight_status") or "").strip()
+        if status and status not in statuses:
+            statuses.append(status)
+        for label in item.get("environment_missing_requirements") or []:
+            text = str(label or "").strip()
+            if text and text not in missing:
+                missing.append(text)
+    missing_text = f" 缺少/不可用：{', '.join(missing)}。" if missing else ""
+    status_text = f" 预检状态：{', '.join(statuses)}。" if statuses else ""
+    return f"数据集任务环境不可用，当前监督评测不可判定。{missing_text}{status_text}".strip()
 
 
 def _has_restart_miss(metrics: Dict[str, Any]) -> bool:
@@ -1198,6 +1275,13 @@ def _build_difference_reasons(
         reasons.append("candidate_transaction_issue")
     elif metrics["baseline_transaction_issue"]:
         reasons.append("baseline_transaction_issue")
+
+    if metrics["baseline_environment_unavailable"] and metrics["candidate_environment_unavailable"]:
+        reasons.append("shared_environment_unavailable")
+    elif metrics["candidate_environment_unavailable"]:
+        reasons.append("candidate_environment_unavailable")
+    elif metrics["baseline_environment_unavailable"]:
+        reasons.append("baseline_environment_unavailable")
 
     if metrics["baseline_restart_miss"] and metrics["candidate_restart_miss"]:
         reasons.append("shared_restart_miss")
@@ -1277,6 +1361,13 @@ def _format_count_delta(value: int) -> str:
 
 def _format_difference_issue_parts(metrics: Dict[str, Any]) -> List[str]:
     parts: List[str] = []
+    if metrics["baseline_environment_unavailable"] and metrics["candidate_environment_unavailable"]:
+        parts.append("baseline 与 candidate 都因数据集环境不可用未启动 agent，当前评测不可判定")
+    elif metrics["candidate_environment_unavailable"]:
+        parts.append("candidate 因数据集环境不可用未启动 agent")
+    elif metrics["baseline_environment_unavailable"]:
+        parts.append("baseline 因数据集环境不可用未启动 agent")
+
     if metrics["baseline_transaction_issue"] and metrics["candidate_transaction_issue"]:
         parts.append("baseline 与 candidate 都存在事务边界异常，无法证明候选退化")
     elif metrics["candidate_transaction_issue"]:
@@ -1317,6 +1408,55 @@ def _evaluate_gates(
         for item in [*baseline_metrics, *candidate_metrics]
         if item["llm_failure_category"] == "provider_transport_error"
     )
+    baseline_environment_unavailable = sum(1 for item in baseline_metrics if _has_environment_unavailable(item))
+    candidate_environment_unavailable = sum(1 for item in candidate_metrics if _has_environment_unavailable(item))
+    if baseline_environment_unavailable or candidate_environment_unavailable:
+        environment_reason = _environment_unavailable_reason([*baseline_metrics, *candidate_metrics])
+        gates.append(
+            DecisionGate(
+                name="infrastructure",
+                status="fail",
+                reason="数据集任务环境不可用，监督评测未启动 agent",
+                metrics={
+                    "baseline_environment_unavailable": baseline_environment_unavailable,
+                    "candidate_environment_unavailable": candidate_environment_unavailable,
+                    "failure_reason": environment_reason,
+                },
+            )
+        )
+        gates.append(
+            DecisionGate(
+                name="legality",
+                status="skipped",
+                reason="数据集任务环境不可用，跳过事务行为合规判断",
+                metrics={"score_delta": score_delta},
+            )
+        )
+        gates.append(
+            DecisionGate(
+                name="safety",
+                status="skipped",
+                reason="数据集任务环境不可用，跳过安全退化判断",
+                metrics={"score_delta": score_delta},
+            )
+        )
+        gates.append(
+            DecisionGate(
+                name="survival",
+                status="skipped",
+                reason="数据集任务环境不可用，跳过生存门判断",
+                metrics={"score_delta": score_delta},
+            )
+        )
+        gates.append(
+            DecisionGate(
+                name="cost",
+                status="skipped",
+                reason="数据集任务环境不可用，跳过成本门",
+                metrics={},
+            )
+        )
+        return gates, "INCONCLUSIVE", environment_reason, score_delta
     if baseline_llm_failures or candidate_llm_failures:
         llm_reason = _llm_failure_reason([*baseline_metrics, *candidate_metrics])
         gates.append(

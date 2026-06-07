@@ -218,16 +218,22 @@ class _SupervisedRunController:
             self.condition.notify_all()
 
 
-def get_supervised_workbench() -> dict[str, Any]:
+def get_supervised_workbench(
+    *,
+    active_run: dict[str, Any] | None = None,
+    active_run_loaded: bool = False,
+    include_catalog: bool = True,
+    saved_state: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Return workbench defaults, datasets, and current live run when present."""
 
-    datasets = [item for item in list_dataset_choices(PROJECT_ROOT) if item.get("visibility") == "primary"]
+    datasets = [item for item in list_dataset_choices(PROJECT_ROOT) if item.get("visibility") == "primary"] if include_catalog else []
     return {
         "defaultBundleName": default_bundle_name(),
-        "savedState": get_workbench_state_payload(project_root=PROJECT_ROOT),
-        "bundles": list_available_workbench_bundles(PROJECT_ROOT),
+        "savedState": saved_state if saved_state is not None else get_workbench_state_payload(project_root=PROJECT_ROOT),
+        "bundles": list_available_workbench_bundles(PROJECT_ROOT) if include_catalog else [],
         "datasets": [_dataset_payload(item) for item in datasets],
-        "activeRun": get_active_supervised_run(),
+        "activeRun": active_run if active_run_loaded else get_active_supervised_run(),
     }
 
 
@@ -1508,10 +1514,13 @@ def _handle_progress_event(run_id: str, event: dict[str, Any]) -> None:
             state["currentCasePrompt"] = str(event.get("prompt") or state.get("currentCasePrompt") or "")
             state["currentAgentBinding"] = _agent_binding_snapshot(event.get("agent_binding") or state.get("currentAgentBinding"))
             state["currentCaseIo"] = _case_io_payload(event)
+            phase = str(event.get("phase") or "").strip()
             latest_output = str(((state.get("currentCaseIo") or {}).get("latestOutput")) or "").strip()
             latest_label = str(((state.get("currentCaseIo") or {}).get("latestOutputLabel")) or "").strip()
             if latest_output:
                 state["latestMessage"] = latest_output
+            elif phase == "environment_preflight":
+                state["latestMessage"] = _event_summary(event)
             state["runtimeStatus"] = "stopping" if stop_requested else "waiting" if pause_requested else "running"
             if stop_requested:
                 state["currentTask"] = text_for(
@@ -1524,6 +1533,15 @@ def _handle_progress_event(run_id: str, event: dict[str, Any]) -> None:
                     lang,
                     zh="已请求暂停，当前 case 结束后会停下。",
                     en="Pause requested. The run will pause after the current case finishes.",
+                )
+            elif phase == "environment_preflight":
+                state["currentTask"] = text_for(
+                    lang,
+                    zh=f"正在预检 case {state['currentCaseIndex']}/{state['caseTotal']} 的任务环境。",
+                    en=(
+                        f"Checking the task environment for case {state['currentCaseIndex']}/"
+                        f"{state['caseTotal']}."
+                    ),
                 )
             elif latest_label:
                 state["currentTask"] = text_for(
@@ -1546,6 +1564,8 @@ def _handle_progress_event(run_id: str, event: dict[str, Any]) -> None:
                         f"for the {state['currentRole']} role."
                     ),
                 )
+            if phase == "environment_preflight":
+                scene_event = _event_tail_entry(event, timestamp=state["updatedAt"])
         elif event_type in {"role_finish", "role_reused"}:
             if status not in {"paused", "stopping", "cancelled"}:
                 state["status"] = "running"
@@ -1616,6 +1636,8 @@ def _handle_progress_event(run_id: str, event: dict[str, Any]) -> None:
             )
         if event_type != "role_live":
             scene_event = _event_tail_entry(event, timestamp=state["updatedAt"])
+            _append_event_locked(state, scene_event)
+        elif scene_event is not None:
             _append_event_locked(state, scene_event)
     if scene_event is not None:
         _record_supervised_progress_scene_event(run_id, scene_event)
@@ -2310,7 +2332,7 @@ def _queued_summary(context: dict[str, Any]) -> str:
 
 
 def _event_tail_entry(event: dict[str, Any], *, timestamp: str) -> dict[str, Any]:
-    return {
+    item = {
         "timestamp": timestamp,
         "event": str(event.get("event") or "").strip(),
         "title": _event_title(event),
@@ -2331,10 +2353,22 @@ def _event_tail_entry(event: dict[str, Any], *, timestamp: str) -> dict[str, Any
         "resultStatus": str(event.get("status") or ""),
         "agentBinding": _agent_binding_snapshot(event.get("agent_binding")),
     }
+    phase = str(event.get("phase") or "").strip()
+    if phase:
+        item["phase"] = phase
+    environment_preflight = event.get("environment_preflight")
+    if isinstance(environment_preflight, dict):
+        item["environmentPreflight"] = environment_preflight
+    environment_contract_kind = str(event.get("environment_contract_kind") or "").strip()
+    if environment_contract_kind:
+        item["environmentContractKind"] = environment_contract_kind
+    return item
 
 
 def _record_supervised_progress_scene_event(run_id: str, item: dict[str, Any]) -> None:
     event_name = str(item.get("event") or "").strip() or "progress"
+    phase = str(item.get("phase") or "").strip()
+    event_code_suffix = f"{event_name}.{phase}" if phase else event_name
     status = str(item.get("status") or "").strip().lower()
     level = "error" if event_name == "session_error" else "info"
     outcome = (
@@ -2370,10 +2404,15 @@ def _record_supervised_progress_scene_event(run_id: str, item: dict[str, Any]) -
         "elapsedSeconds": _optional_float(item.get("elapsedSeconds")),
         "agentId": str(((item.get("agentBinding") or {}).get("agentId")) or ""),
         "agentProfileId": str(((item.get("agentBinding") or {}).get("profileId")) or ""),
+        "phase": phase,
+        "environmentContractKind": str(item.get("environmentContractKind") or ""),
     }
+    if isinstance(item.get("environmentPreflight"), dict):
+        fields["environmentPreflightStatus"] = str((item.get("environmentPreflight") or {}).get("status") or "")
+        fields["environmentPreflightAvailable"] = bool((item.get("environmentPreflight") or {}).get("available"))
     _record_supervised_scene_event(
         "progress",
-        f"supervised_run.progress.{event_name}",
+        f"supervised_run.progress.{event_code_suffix}",
         run_id=run_id,
         message=str(item.get("summary") or item.get("title") or event_name),
         level=level,
@@ -2385,6 +2424,9 @@ def _record_supervised_progress_scene_event(run_id: str, item: dict[str, Any]) -
             "title": str(item.get("title") or ""),
             "summary": str(item.get("summary") or ""),
             "agentBinding": dict(item.get("agentBinding") or {}),
+            "environmentPreflight": dict(item.get("environmentPreflight") or {})
+            if isinstance(item.get("environmentPreflight"), dict)
+            else {},
         },
         lifecycle=lifecycle,
     )
@@ -2453,6 +2495,12 @@ def _event_summary(event: dict[str, Any]) -> str:
         )
     if event_type == "session_finish":
         return f"decision={event.get('decision')} reason={event.get('reason')}"
+    if event_type == "role_live" and str(event.get("phase") or "").strip() == "environment_preflight":
+        preflight = event.get("environment_preflight") if isinstance(event.get("environment_preflight"), dict) else {}
+        return (
+            f"{event.get('case_id')} {event.get('role')} environment_preflight "
+            f"status={preflight.get('status') or '-'} available={preflight.get('available')}"
+        )
     return json.dumps(event, ensure_ascii=False)
 
 
@@ -2815,17 +2863,28 @@ def _submit_supervised_runtime_manager_command_accepted(
     return accepted
 
 
-def get_supervised_workbench() -> dict[str, Any]:
+def get_supervised_workbench(
+    *,
+    active_run: dict[str, Any] | None = None,
+    active_run_loaded: bool = False,
+    include_catalog: bool = True,
+    saved_state: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     if _runtime_manager_live_control_enabled():
-        datasets = [item for item in list_dataset_choices(PROJECT_ROOT) if item.get("visibility") == "primary"]
+        datasets = [item for item in list_dataset_choices(PROJECT_ROOT) if item.get("visibility") == "primary"] if include_catalog else []
         return {
             "defaultBundleName": default_bundle_name(),
-            "savedState": get_workbench_state_payload(project_root=PROJECT_ROOT),
-            "bundles": list_available_workbench_bundles(PROJECT_ROOT),
+            "savedState": saved_state if saved_state is not None else get_workbench_state_payload(project_root=PROJECT_ROOT),
+            "bundles": list_available_workbench_bundles(PROJECT_ROOT) if include_catalog else [],
             "datasets": [_dataset_payload(item) for item in datasets],
-            "activeRun": get_active_supervised_run(),
+            "activeRun": active_run if active_run_loaded else get_active_supervised_run(),
         }
-    return _LOCAL_GET_SUPERVISED_WORKBENCH()
+    return _LOCAL_GET_SUPERVISED_WORKBENCH(
+        active_run=active_run,
+        active_run_loaded=active_run_loaded,
+        include_catalog=include_catalog,
+        saved_state=saved_state,
+    )
 
 
 def start_supervised_run(payload: dict[str, Any]) -> dict[str, Any]:
@@ -2876,11 +2935,15 @@ def get_active_supervised_run() -> dict[str, Any] | None:
     return _LOCAL_GET_ACTIVE_SUPERVISED_RUN()
 
 
-def get_latest_supervised_run() -> dict[str, Any] | None:
+def get_latest_supervised_run(
+    *,
+    active_run: dict[str, Any] | None = None,
+    active_run_loaded: bool = False,
+) -> dict[str, Any] | None:
     if _runtime_manager_live_control_enabled():
-        active = get_active_supervised_run()
+        active = active_run if active_run_loaded else get_active_supervised_run()
         if active is not None:
-            return active
+            return _decorate_supervised_snapshot(_clone_locked(active))
         snapshot = load_manager_latest_run_snapshot("supervised")
         if snapshot is None:
             return None

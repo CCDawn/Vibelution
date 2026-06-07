@@ -503,6 +503,7 @@ def test_agent_directory_list_agents_logs_slow_hydration_breakdown(monkeypatch):
 
     agent_directory_service._record_agent_list_loaded(
         include_archived=True,
+        detail="full",
         raw_agent_count=49,
         returned_agent_count=49,
         timings={
@@ -529,12 +530,55 @@ def test_agent_directory_list_agents_logs_slow_hydration_breakdown(monkeypatch):
     assert kwargs["level"] == "warning"
     fields = kwargs["fields"]
     assert fields["includeArchived"] is True
+    assert fields["detail"] == "full"
     assert fields["rawAgentCount"] == 49
     assert fields["returnedAgentCount"] == 49
     assert fields["timingsMs"]["hydrate"] == 3600.0
     assert fields["hydrationTimingsMs"]["tool_governance_requests"] == 2100.0
     assert fields["slowestStage"] == "hydrate"
     assert fields["slowestHydrationStage"] == "tool_governance_requests"
+
+
+def test_agent_directory_summary_list_skips_heavy_hydration(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    created = agent_directory_service.create_agent_instance(display_name="Summary Agent", primary_mode="chat")
+    hydration_calls = 0
+
+    def fail_hydration(*args, **kwargs):
+        nonlocal hydration_calls
+        hydration_calls += 1
+        raise AssertionError("summary agent list should not hydrate policies or activity")
+
+    monkeypatch.setattr(agent_directory_service, "_build_agent_api_hydration_context", fail_hydration)
+
+    agents = agent_directory_service.list_agents(detail="summary")
+
+    assert hydration_calls == 0
+    agent = next(item for item in agents if item["agentId"] == created["agentId"])
+    assert agent["displayName"] == created["displayName"]
+    assert "toolPolicy" not in agent
+    assert "memoryPolicy" not in agent
+    assert "toolGovernanceRequests" not in agent
+    assert "groupContextEvents" not in agent
+    assert "agentInboxMessages" not in agent
+    assert "agentInboxPendingCount" not in agent
+
+
+def test_agents_api_summary_detail_returns_light_payload(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    created = agent_directory_service.create_agent_instance(display_name="Summary Route Agent", primary_mode="chat")
+
+    response = client.get("/api/agents", params={"detail": "summary"})
+
+    assert response.status_code == 200, response.json()
+    payload = response.json()
+    agent = next(item for item in payload if item["agentId"] == created["agentId"])
+    assert agent["displayName"] == created["displayName"]
+    assert "toolPolicy" not in agent
+    assert "memoryPolicy" not in agent
+    assert "toolGovernanceRequests" not in agent
+    assert "groupContextEvents" not in agent
+    assert "agentInboxMessages" not in agent
 
 
 def test_agent_config_workspace_batches_agent_api_hydration(tmp_path, monkeypatch):

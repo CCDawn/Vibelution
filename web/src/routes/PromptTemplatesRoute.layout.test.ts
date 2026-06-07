@@ -20,7 +20,7 @@ describe("PromptTemplatesRoute layout contract", () => {
     expect(routeSource).toContain('queryKeys.promptTemplates()');
     expect(routeSource).toContain('fetchJson<PromptTemplateWorkspace>("/api/prompt-templates")');
     expect(routeSource).toContain('queryKeys.agents()');
-    expect(routeSource).toContain('fetchJson<AgentInstance[]>("/api/agents")');
+    expect(routeSource).toContain('fetchJson<AgentInstance[]>("/api/agents?detail=summary")');
     expect(routeSource).toContain("agentsByTemplate");
   });
 

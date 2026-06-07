@@ -67,6 +67,13 @@ _SOURCE_SIGNATURE_PATHS = (
     Path("core/runtime_manager/workbench_controller.py"),
     Path("core/web/services/self_evolution_control_service.py"),
     Path("core/web/services/supervised_control_service.py"),
+    Path("core/evaluation/dataset_adapters.py"),
+    Path("core/evaluation/dataset_environment.py"),
+    Path("core/evaluation/supervised_evolution.py"),
+    Path("core/evaluation/supervised_workbench.py"),
+    Path("core/evaluation/dataset_registry.py"),
+    Path("core/orchestration/turn_runtime.py"),
+    Path("scripts/evolution_harness.py"),
 )
 _ACTIVE_COMMAND_RESTART_GRACE_SECONDS = 300.0
 _OPEN_VERIFICATION_TIMEOUT_SECONDS = 60.0
@@ -88,6 +95,21 @@ _ACTIVE_WORK_RUNNING_STATUSES = {
     "resuming",
     "force_stopping",
 }
+
+
+class RuntimeManagerStaleSourceError(RuntimeError):
+    """Raised when the daemon process has stale source for a managed command."""
+
+
+class ActiveWorkProbeFailed(RuntimeError):
+    """Raised when destructive lifecycle commands cannot prove active work is clear."""
+
+    def __init__(self, *, source: str, error_type: str, message: str) -> None:
+        super().__init__(message)
+        self.source = source
+        self.error_type = error_type
+
+
 _ACTIVE_WORK_NON_BLOCKING_STATUSES = {
     "cancelled",
     "closed",
@@ -219,11 +241,12 @@ def _runtime_manager_active_work_runs() -> list[dict[str, str]]:
     try:
         summary = build_evolution_summary()
     except Exception as exc:
+        source = "evolution_summary"
         _append_event(
             "workbench.lifecycle.active_work_probe_failed",
-            {"source": "evolution_summary", "errorType": type(exc).__name__, "message": str(exc)},
+            {"source": source, "errorType": type(exc).__name__, "message": str(exc)},
         )
-        summary = {}
+        raise ActiveWorkProbeFailed(source=source, error_type=type(exc).__name__, message=str(exc)) from exc
     if isinstance(summary, dict):
         for kind, payload in (
             ("self_evolution_run", summary.get("self") if isinstance(summary.get("self"), dict) else {}),
@@ -250,15 +273,16 @@ def _runtime_manager_active_work_runs() -> list[dict[str, str]]:
                 from core.web.services.chat_room_service import list_active_chat_room_work_runs as loader
             payloads = loader()
         except Exception as exc:
+            source = loader_name
             _append_event(
                 "workbench.lifecycle.active_work_probe_failed",
                 {
-                    "source": loader_name,
+                    "source": source,
                     "errorType": type(exc).__name__,
                     "message": str(exc),
                 },
             )
-            continue
+            raise ActiveWorkProbeFailed(source=source, error_type=type(exc).__name__, message=str(exc)) from exc
         for payload in payloads if isinstance(payloads, list) else []:
             _append_active_work_run(items, seen, kind=kind, payload=payload)
 
@@ -267,11 +291,12 @@ def _runtime_manager_active_work_runs() -> list[dict[str, str]]:
 
         worktree_run = get_active_supervised_worktree_run()
     except Exception as exc:
+        source = "get_active_supervised_worktree_run"
         _append_event(
             "workbench.lifecycle.active_work_probe_failed",
-            {"source": "get_active_supervised_worktree_run", "errorType": type(exc).__name__, "message": str(exc)},
+            {"source": source, "errorType": type(exc).__name__, "message": str(exc)},
         )
-        worktree_run = None
+        raise ActiveWorkProbeFailed(source=source, error_type=type(exc).__name__, message=str(exc)) from exc
     _append_active_work_run(
         items,
         seen,
@@ -300,9 +325,41 @@ def _process_source_signature() -> str:
     return _PROCESS_SOURCE_SIGNATURE
 
 
+def _disk_source_signature() -> str:
+    return _runtime_manager_source_signature()
+
+
 def _state_source_signature(state: dict[str, Any]) -> str:
     payload = state.get("runtimeManager") if isinstance(state.get("runtimeManager"), dict) else {}
     return str(payload.get("sourceSignature") or "").strip()
+
+
+def _source_freshness_payload() -> dict[str, Any]:
+    process_signature = _process_source_signature()
+    disk_signature = _disk_source_signature()
+    return {
+        "processSourceSignature": process_signature,
+        "diskSourceSignature": disk_signature,
+        "sourceFresh": process_signature == disk_signature,
+        "signaturePathsCount": len(_SOURCE_SIGNATURE_PATHS),
+    }
+
+
+def _require_fresh_source_for_supervised_run() -> dict[str, Any]:
+    freshness = _source_freshness_payload()
+    if bool(freshness.get("sourceFresh")):
+        record_runtime_manager_scene_event(
+            "supervised_run.preflight.source_fresh",
+            freshness,
+            phase="supervised_preflight",
+        )
+        return freshness
+    record_runtime_manager_scene_event(
+        "supervised_run.preflight.stale_runtime_manager_source",
+        freshness,
+        phase="supervised_preflight",
+    )
+    raise RuntimeManagerStaleSourceError("运行管理器源码已过期，请重启后再开始监督进化。")
 
 
 def _active_command_is_recent(state: dict[str, Any]) -> bool:
@@ -362,7 +419,13 @@ def _exit_current_process(exit_code: int = 0) -> None:
 def _workbench_failure_should_stick(state: dict[str, Any], *, desired_state: str, observed_state: str) -> bool:
     if observed_state == desired_state:
         return False
-    last_error = state.get("lastError") if isinstance(state.get("lastError"), dict) else {}
+    raw_last_error = state.get("lastError")
+    if isinstance(raw_last_error, dict):
+        last_error = raw_last_error
+        if not any(str(last_error.get(key) or "").strip() for key in ("scope", "message", "at")):
+            return False
+    else:
+        last_error = {}
     scope = str(last_error.get("scope") or "").strip()
     return not scope or _command_affects_workbench_lifecycle(scope)
 
@@ -1535,7 +1598,45 @@ class RuntimeManagerDaemon:
         command_type: str,
         args: dict[str, Any],
     ) -> dict[str, Any] | None:
-        active_work_runs = _runtime_manager_active_work_runs()
+        try:
+            active_work_runs = _runtime_manager_active_work_runs()
+        except ActiveWorkProbeFailed as exc:
+            event_verb = {
+                "close_workbench": "close",
+                "restart_workbench": "restart",
+                "hot_restart_workbench": "hot_restart",
+                "toggle_workbench": "toggle",
+            }.get(command_type, "lifecycle")
+            _append_event(
+                f"workbench.{event_verb}.blocked_active_work_probe_failed",
+                {
+                    "commandId": command_id,
+                    "commandType": command_type,
+                    "reason": str(args.get("reason") or "").strip(),
+                    "source": str(args.get("source") or "").strip(),
+                    "probeSource": exc.source,
+                    "errorType": exc.error_type,
+                    "message": str(exc),
+                },
+            )
+            return self._finish_command(
+                command_id,
+                ok=False,
+                message=_ACTIVE_WORK_LIFECYCLE_BLOCKED_MESSAGE,
+                error_scope="active_work",
+                failure_message="",
+                error_type="ActiveWorkProbeFailed",
+                result_data={
+                    "activeWorkRuns": {
+                        "count": 0,
+                        "items": [],
+                        "allowedItems": [],
+                        "probeFailed": True,
+                        "probeSource": exc.source,
+                        "probeErrorType": exc.error_type,
+                    }
+                },
+            )
         blocked_active_work_runs, allowed_active_work_runs = _filter_active_work_for_lifecycle_command(
             active_work_runs,
             command_type=command_type,
@@ -2619,23 +2720,25 @@ class RuntimeManagerDaemon:
         )
 
     def _handle_start_supervised_run(self, *, command_id: str, args: dict[str, Any]) -> dict[str, Any]:
+        freshness = _require_fresh_source_for_supervised_run()
         payload = args.get("payload") if isinstance(args.get("payload"), dict) else {}
         snapshot = supervised_control_service._LOCAL_START_SUPERVISED_RUN(payload)
         return self._finish_command(
             command_id,
             ok=True,
             message="Supervised run started.",
-            result_data={"runId": str(snapshot.get("runId") or ""), "snapshot": snapshot},
+            result_data={"runId": str(snapshot.get("runId") or ""), "snapshot": snapshot, "sourceFreshness": freshness},
         )
 
     def _handle_retry_supervised_run(self, *, command_id: str, args: dict[str, Any]) -> dict[str, Any]:
+        freshness = _require_fresh_source_for_supervised_run()
         run_id = str(args.get("runId") or "").strip()
         snapshot = supervised_control_service._LOCAL_RETRY_SUPERVISED_RUN(run_id)
         return self._finish_command(
             command_id,
             ok=True,
             message="Supervised run retry started.",
-            result_data={"runId": str(snapshot.get("runId") or ""), "snapshot": snapshot},
+            result_data={"runId": str(snapshot.get("runId") or ""), "snapshot": snapshot, "sourceFreshness": freshness},
         )
 
     def _handle_pause_supervised_run(self, *, command_id: str, args: dict[str, Any]) -> dict[str, Any]:

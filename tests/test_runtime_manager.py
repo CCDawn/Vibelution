@@ -2,6 +2,7 @@ import json
 import http.client
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -166,12 +167,18 @@ def test_backend_health_probe_treats_http_protocol_error_as_unhealthy(monkeypatc
 
 def test_launcher_action_passes_runtime_manager_process_protection(monkeypatch, tmp_path):
     calls = []
+    events: list[tuple[str, dict]] = []
 
     monkeypatch.setattr(workbench_controller, "LAUNCHER_SCRIPT_PATH", tmp_path / "launcher.ps1")
     monkeypatch.setattr(workbench_controller, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(workbench_controller, "configured_backend_port", lambda: 8000)
     monkeypatch.setattr(workbench_controller.os, "getpid", lambda: 29960)
     monkeypatch.setattr(workbench_controller.os, "getppid", lambda: 31096)
+    monkeypatch.setattr(
+        workbench_controller,
+        "append_runtime_manager_file_event",
+        lambda event_type, payload, **kwargs: events.append((event_type, payload)) or "2026-05-19T09:00:00+00:00",
+    )
 
     def fake_run(*args, **kwargs):
         calls.append({"args": args, "kwargs": kwargs})
@@ -189,6 +196,15 @@ def test_launcher_action_passes_runtime_manager_process_protection(monkeypatch, 
     assert calls
     env = calls[0]["kwargs"]["env"]
     assert env["VIBELUTION_PROTECTED_PROCESS_IDS"] == "29960;31096"
+    assert env["VIBELUTION_RUNTIME_MANAGER_INTERNAL_LAUNCHER"] == "1"
+    assert [event_type for event_type, _payload in events] == [
+        "launcher.action.requested",
+        "launcher.action.completed",
+    ]
+    assert events[0][1]["internalAction"] is True
+    assert events[0][1]["internalLauncherEnvSet"] is True
+    assert events[0][1]["protectedProcessIdsSet"] is True
+    assert events[1][1]["returnCode"] == 0
 
 
 def test_launcher_command_uses_python_adapter_on_posix(monkeypatch, tmp_path):
@@ -271,6 +287,65 @@ def test_python_launcher_discovers_lan_address_from_udp_route(monkeypatch):
     monkeypatch.setattr(launcher.socket, "socket", lambda *_args, **_kwargs: FakeSocket())
 
     assert launcher._local_lan_addresses() == ["192.168.20.30"]
+
+
+def test_python_launcher_rejects_unauthorized_internal_action(monkeypatch):
+    import importlib.util
+
+    launcher_path = constants.PROJECT_ROOT / "scripts" / "vibelution_launcher.py"
+    spec = importlib.util.spec_from_file_location("vibelution_launcher_for_internal_auth_test", launcher_path)
+    assert spec and spec.loader
+    launcher = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(launcher)
+
+    monkeypatch.delenv("VIBELUTION_RUNTIME_MANAGER_INTERNAL_LAUNCHER", raising=False)
+
+    with pytest.raises(RuntimeError, match="Runtime Manager"):
+        launcher._assert_internal_action_authorized("internal-stop")
+
+    launcher._assert_internal_action_authorized("stop")
+
+
+def test_python_launcher_allows_authorized_internal_action(monkeypatch):
+    import importlib.util
+
+    launcher_path = constants.PROJECT_ROOT / "scripts" / "vibelution_launcher.py"
+    spec = importlib.util.spec_from_file_location("vibelution_launcher_for_internal_allowed_test", launcher_path)
+    assert spec and spec.loader
+    launcher = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(launcher)
+
+    monkeypatch.setenv("VIBELUTION_RUNTIME_MANAGER_INTERNAL_LAUNCHER", "1")
+
+    launcher._assert_internal_action_authorized("internal-restart")
+
+
+def test_python_launcher_main_rejects_unauthorized_internal_stop_before_action(monkeypatch, tmp_path, capsys):
+    import importlib.util
+
+    launcher_path = constants.PROJECT_ROOT / "scripts" / "vibelution_launcher.py"
+    spec = importlib.util.spec_from_file_location("vibelution_launcher_for_internal_main_test", launcher_path)
+    assert spec and spec.loader
+    launcher = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(launcher)
+
+    writes: list[dict] = []
+    stop_calls: list[str] = []
+    monkeypatch.delenv("VIBELUTION_RUNTIME_MANAGER_INTERNAL_LAUNCHER", raising=False)
+    monkeypatch.setattr(launcher, "STATE_PATH", tmp_path / "state.json")
+    monkeypatch.setattr(launcher, "RUNTIME_DIR", tmp_path)
+    monkeypatch.setattr(launcher, "_read_state", lambda: {})
+    monkeypatch.setattr(launcher, "_write_state", lambda state: writes.append(state))
+    monkeypatch.setattr(launcher, "_stop_backend", lambda: stop_calls.append("stop") or {})
+
+    exit_code = launcher.main(["--action", "internal-stop"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "Runtime Manager" in captured.err
+    assert stop_calls == []
+    assert writes[-1]["phase"] == "failed"
+    assert "Runtime Manager" in writes[-1]["failureMessage"]
 
 
 def test_python_launcher_frontend_build_defaults_to_npm(monkeypatch, tmp_path):
@@ -575,6 +650,57 @@ def test_load_runtime_snapshot_preserves_failed_close_state(monkeypatch):
     assert snapshot["workbench"]["failureMessage"] == "stop failed"
 
 
+def test_load_runtime_snapshot_clears_stale_failed_close_after_successful_reopen(monkeypatch):
+    monkeypatch.setattr(
+        daemon,
+        "load_state",
+        lambda: {
+            "stateVersion": 8,
+            "workbench": {
+                "desiredState": "closed",
+                "observedState": "open",
+                "phase": "failed",
+                "failureMessage": "stop failed",
+            },
+            "command": {"activeCommandId": ""},
+            "lastError": {"scope": "", "message": "", "at": ""},
+        },
+    )
+    monkeypatch.setattr(
+        daemon,
+        "observe_workbench",
+        lambda: {
+            "observedState": "open",
+            "backendPid": 3200,
+            "browserLaunchPid": 0,
+            "browserWindowPid": 4500,
+            "browserManaged": True,
+            "backendAlive": True,
+            "backendHealthy": True,
+            "backendObserved": True,
+            "backendPort": 8000,
+            "backendPortListening": True,
+            "backendPortOwnerPid": 3200,
+            "backendPortOwnerTrusted": True,
+            "backendPortConflict": False,
+            "browserWindowAlive": True,
+            "sessionId": "managed-session",
+            "url": "http://127.0.0.1:8000",
+        },
+    )
+    monkeypatch.setattr(daemon, "is_daemon_running", lambda: True)
+    monkeypatch.setattr(daemon, "load_pid", lambda: 9912)
+    monkeypatch.setattr(daemon, "_process_source_signature", lambda: "sig-current")
+
+    snapshot = daemon.load_runtime_snapshot()
+
+    assert snapshot["workbench"]["desiredState"] == "open"
+    assert snapshot["workbench"]["observedState"] == "open"
+    assert snapshot["workbench"]["phase"] == "steady"
+    assert snapshot["workbench"]["failureMessage"] == ""
+    assert "Workbench is open" in snapshot["workbench"]["statusLine"]
+
+
 def test_load_runtime_snapshot_recovers_failed_non_lifecycle_error_when_observation_matches(monkeypatch):
     monkeypatch.setattr(
         daemon,
@@ -621,11 +747,19 @@ def test_load_runtime_snapshot_recovers_failed_non_lifecycle_error_when_observat
 
 def test_handle_start_supervised_run_returns_snapshot(monkeypatch):
     runtime_daemon = daemon.RuntimeManagerDaemon()
+    scene_events: list[tuple[str, dict]] = []
     monkeypatch.setattr(daemon, "load_state", lambda: {"command": {}, "workbench": {}})
     monkeypatch.setattr(daemon, "save_state", lambda state: state)
     monkeypatch.setattr(daemon, "now_iso", lambda: "2026-05-19T08:00:00+00:00")
     monkeypatch.setattr(daemon, "observe_workbench", lambda: {"observedState": "closed"})
     monkeypatch.setattr(daemon, "build_evolution_summary", lambda: {"self": {}, "supervised": {}})
+    monkeypatch.setattr(daemon, "_process_source_signature", lambda: "sig-current")
+    monkeypatch.setattr(daemon, "_disk_source_signature", lambda: "sig-current")
+    monkeypatch.setattr(
+        daemon,
+        "record_runtime_manager_scene_event",
+        lambda event_type, payload, **kwargs: scene_events.append((event_type, payload)),
+    )
     monkeypatch.setattr(
         daemon.supervised_control_service,
         "_LOCAL_START_SUPERVISED_RUN",
@@ -640,6 +774,65 @@ def test_handle_start_supervised_run_returns_snapshot(monkeypatch):
     assert result["ok"] is True
     assert result["runId"] == "web-supervised-managed"
     assert result["snapshot"]["status"] == "queued"
+    assert result["sourceFreshness"]["sourceFresh"] is True
+    assert scene_events == [
+        (
+            "supervised_run.preflight.source_fresh",
+            {
+                "processSourceSignature": "sig-current",
+                "diskSourceSignature": "sig-current",
+                "sourceFresh": True,
+                "signaturePathsCount": len(daemon._SOURCE_SIGNATURE_PATHS),
+            },
+        )
+    ]
+
+
+def test_runtime_manager_source_signature_includes_supervised_harness_files():
+    paths = set(daemon._SOURCE_SIGNATURE_PATHS)
+
+    assert Path("scripts/evolution_harness.py") in paths
+    assert Path("core/evaluation/dataset_adapters.py") in paths
+    assert Path("core/evaluation/dataset_environment.py") in paths
+    assert Path("core/evaluation/supervised_evolution.py") in paths
+    assert Path("core/evaluation/supervised_workbench.py") in paths
+    assert Path("core/evaluation/dataset_registry.py") in paths
+    assert Path("core/orchestration/turn_runtime.py") in paths
+
+
+def test_handle_start_supervised_run_blocks_stale_supervised_source(monkeypatch):
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    scene_events: list[tuple[str, dict]] = []
+    monkeypatch.setattr(daemon, "_process_source_signature", lambda: "sig-old")
+    monkeypatch.setattr(daemon, "_disk_source_signature", lambda: "sig-new")
+    monkeypatch.setattr(
+        daemon,
+        "record_runtime_manager_scene_event",
+        lambda event_type, payload, **kwargs: scene_events.append((event_type, payload)),
+    )
+
+    def fail_if_called(payload):
+        raise AssertionError("_LOCAL_START_SUPERVISED_RUN should not run with stale runtime manager source")
+
+    monkeypatch.setattr(daemon.supervised_control_service, "_LOCAL_START_SUPERVISED_RUN", fail_if_called)
+
+    with pytest.raises(daemon.RuntimeManagerStaleSourceError, match="源码已过期"):
+        runtime_daemon._handle_start_supervised_run(
+            command_id="cmd-stale",
+            args={"payload": {"sourceKind": "bundle", "bundleName": "managed_bundle"}},
+        )
+
+    assert scene_events == [
+        (
+            "supervised_run.preflight.stale_runtime_manager_source",
+            {
+                "processSourceSignature": "sig-old",
+                "diskSourceSignature": "sig-new",
+                "sourceFresh": False,
+                "signaturePathsCount": len(daemon._SOURCE_SIGNATURE_PATHS),
+            },
+        )
+    ]
 
 
 def test_runtime_manager_active_work_runs_collects_destructive_guard_sources(monkeypatch):
@@ -732,11 +925,19 @@ def test_runtime_manager_active_work_runs_ignores_needs_continue_chat_turn(monke
 
 def test_handle_retry_supervised_run_returns_new_snapshot(monkeypatch):
     runtime_daemon = daemon.RuntimeManagerDaemon()
+    scene_events: list[tuple[str, dict]] = []
     monkeypatch.setattr(daemon, "load_state", lambda: {"command": {}, "workbench": {}})
     monkeypatch.setattr(daemon, "save_state", lambda state: state)
     monkeypatch.setattr(daemon, "now_iso", lambda: "2026-05-19T08:00:00+00:00")
     monkeypatch.setattr(daemon, "observe_workbench", lambda: {"observedState": "closed"})
     monkeypatch.setattr(daemon, "build_evolution_summary", lambda: {"self": {}, "supervised": {}})
+    monkeypatch.setattr(daemon, "_process_source_signature", lambda: "sig-current")
+    monkeypatch.setattr(daemon, "_disk_source_signature", lambda: "sig-current")
+    monkeypatch.setattr(
+        daemon,
+        "record_runtime_manager_scene_event",
+        lambda event_type, payload, **kwargs: scene_events.append((event_type, payload)),
+    )
     monkeypatch.setattr(
         daemon.supervised_control_service,
         "_LOCAL_RETRY_SUPERVISED_RUN",
@@ -751,6 +952,43 @@ def test_handle_retry_supervised_run_returns_new_snapshot(monkeypatch):
     assert result["ok"] is True
     assert result["runId"] == "web-supervised-retry"
     assert result["snapshot"]["retryOfRunId"] == "web-supervised-old"
+    assert result["sourceFreshness"]["sourceFresh"] is True
+    assert [event_type for event_type, _payload in scene_events] == ["supervised_run.preflight.source_fresh"]
+
+
+def test_handle_retry_supervised_run_blocks_stale_supervised_source(monkeypatch):
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    scene_events: list[tuple[str, dict]] = []
+    monkeypatch.setattr(daemon, "_process_source_signature", lambda: "sig-old")
+    monkeypatch.setattr(daemon, "_disk_source_signature", lambda: "sig-new")
+    monkeypatch.setattr(
+        daemon,
+        "record_runtime_manager_scene_event",
+        lambda event_type, payload, **kwargs: scene_events.append((event_type, payload)),
+    )
+
+    def fail_if_called(run_id):
+        raise AssertionError("_LOCAL_RETRY_SUPERVISED_RUN should not run with stale runtime manager source")
+
+    monkeypatch.setattr(daemon.supervised_control_service, "_LOCAL_RETRY_SUPERVISED_RUN", fail_if_called)
+
+    with pytest.raises(daemon.RuntimeManagerStaleSourceError, match="源码已过期"):
+        runtime_daemon._handle_retry_supervised_run(
+            command_id="cmd-retry-stale",
+            args={"runId": "web-supervised-old"},
+        )
+
+    assert scene_events == [
+        (
+            "supervised_run.preflight.stale_runtime_manager_source",
+            {
+                "processSourceSignature": "sig-old",
+                "diskSourceSignature": "sig-new",
+                "sourceFresh": False,
+                "signaturePathsCount": len(daemon._SOURCE_SIGNATURE_PATHS),
+            },
+        )
+    ]
 
 
 def test_run_forever_refreshes_manager_started_at(monkeypatch):
@@ -1089,6 +1327,59 @@ def test_reconcile_observation_keeps_daemon_running_true_and_preserves_stopping(
     assert state["runtimeState"] == "stopping"
     assert state["daemonRunning"] is True
     assert state["managerPid"] == runtime_daemon._pid
+
+
+def test_reconcile_observation_clears_stale_failed_close_after_successful_reopen(monkeypatch):
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+
+    monkeypatch.setattr(
+        daemon,
+        "observe_workbench",
+        lambda: {
+            "observedState": "open",
+            "backendPid": 3200,
+            "browserLaunchPid": 4500,
+            "browserWindowPid": 4500,
+            "backendAlive": True,
+            "backendHealthy": True,
+            "backendObserved": True,
+            "backendPort": 8000,
+            "backendPortListening": True,
+            "backendPortOwnerPid": 3200,
+            "backendPortOwnerTrusted": True,
+            "backendPortConflict": False,
+            "browserWindowAlive": True,
+            "browserManaged": True,
+            "sessionId": "managed-session",
+            "url": "http://127.0.0.1:8000",
+            "lifecycleConsistency": "consistent",
+        },
+    )
+    monkeypatch.setattr(daemon, "residual_process_payload", lambda **kwargs: {"count": 0, "items": []})
+    monkeypatch.setattr(daemon, "build_evolution_summary", lambda: {"self": {}, "supervised": {}})
+    monkeypatch.setattr(daemon, "_process_source_signature", lambda: "sig-current")
+
+    state = runtime_daemon._reconcile_observation(
+        {
+            "runtimeState": "running",
+            "daemonRunning": True,
+            "command": {"activeCommandId": ""},
+            "lastError": {"scope": "", "message": "", "at": ""},
+            "workbench": {
+                "desiredState": "closed",
+                "observedState": "open",
+                "phase": "failed",
+                "failureMessage": "stop failed",
+            },
+        }
+    )
+
+    workbench = state["workbench"]
+    assert workbench["desiredState"] == "open"
+    assert workbench["observedState"] == "open"
+    assert workbench["phase"] == "steady"
+    assert workbench["failureMessage"] == ""
+    assert "Workbench is open" in workbench["statusLine"]
 
 
 def test_reconcile_observation_cleans_up_orphaned_browser(monkeypatch):
@@ -3703,6 +3994,7 @@ def test_handle_open_workbench_logs_focus_failure_for_existing_browser_session(m
 
 def test_run_launcher_action_uses_devnull_stdio(monkeypatch):
     captured = {}
+    events: list[tuple[str, dict]] = []
 
     def fake_run(*args, **kwargs):
         captured["args"] = args
@@ -3714,6 +4006,11 @@ def test_run_launcher_action_uses_devnull_stdio(monkeypatch):
         return subprocess.CompletedProcess(args=args[0], returncode=0)
 
     monkeypatch.setattr(workbench_controller.subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        workbench_controller,
+        "append_runtime_manager_file_event",
+        lambda event_type, payload, **kwargs: events.append((event_type, payload)) or "2026-05-19T09:00:00+00:00",
+    )
 
     result = workbench_controller.run_launcher_action("internal-start", no_browser=True)
 
@@ -3726,6 +4023,9 @@ def test_run_launcher_action_uses_devnull_stdio(monkeypatch):
     assert "text" not in captured["kwargs"]
     assert captured["kwargs"]["stdout"] is not None
     assert captured["kwargs"]["stderr"] is not None
+    assert events[-1][0] == "launcher.action.completed"
+    assert events[-1][1]["stdoutTail"] == "launcher stdout\n"
+    assert events[-1][1]["stderrTail"] == "launcher stderr\n"
 
 
 def test_handle_restart_workbench_surfaces_launcher_error(monkeypatch):
@@ -3790,7 +4090,10 @@ def test_handle_restart_workbench_surfaces_launcher_error(monkeypatch):
     )
 
     with pytest.raises(RuntimeError, match="launcher failed"):
-        runtime_daemon._handle_restart_workbench(command_id="cmd-restart", args={})
+        runtime_daemon._handle_restart_workbench(
+            command_id="cmd-restart",
+            args={"skipFrontendBuildPreflight": True},
+        )
 
 
 def test_handle_restart_workbench_blocks_active_chat_turn_before_close(monkeypatch):
@@ -3842,6 +4145,73 @@ def test_handle_restart_workbench_blocks_active_chat_turn_before_close(monkeypat
             "activeWorkRuns": [
                 {"kind": "chat_turn", "runId": "chat-live", "status": "running", "sessionId": "session-a"}
             ],
+        },
+    )
+    assert state["lastError"]["scope"] == "active_work"
+    assert state["workbench"]["phase"] != "failed"
+
+
+def test_handle_restart_workbench_blocks_when_active_work_probe_fails(monkeypatch):
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    state = {
+        "command": {"activeCommandId": "cmd-restart"},
+        "workbench": {
+            "desiredState": "open",
+            "observedState": "open",
+            "phase": "steady",
+        },
+    }
+    events: list[tuple[str, dict]] = []
+    close_calls: list[str] = []
+
+    monkeypatch.setattr(daemon, "load_state", lambda: state)
+    monkeypatch.setattr(daemon, "save_state", lambda next_state: next_state)
+    monkeypatch.setattr(daemon, "observe_workbench", lambda: {"observedState": "open"})
+    monkeypatch.setattr(
+        daemon,
+        "_runtime_manager_active_work_runs",
+        lambda: (_ for _ in ()).throw(
+            daemon.ActiveWorkProbeFailed(
+                source="list_active_session_work_runs",
+                error_type="RuntimeError",
+                message="session store unavailable",
+            )
+        ),
+    )
+    monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: events.append((event_type, payload)))
+    monkeypatch.setattr(
+        daemon,
+        "close_workbench",
+        lambda: close_calls.append("close") or subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
+    )
+
+    result = runtime_daemon._handle_restart_workbench(
+        command_id="cmd-restart",
+        args={"reason": "launcher_restart", "source": "launcher_ps"},
+    )
+
+    assert result["ok"] is False
+    assert result["errorType"] == "ActiveWorkProbeFailed"
+    assert result["message"] == "有进行中的任务，无法重启 Vibelution。请等待任务完成或先停止任务。"
+    assert result["activeWorkRuns"] == {
+        "count": 0,
+        "items": [],
+        "allowedItems": [],
+        "probeFailed": True,
+        "probeSource": "list_active_session_work_runs",
+        "probeErrorType": "RuntimeError",
+    }
+    assert close_calls == []
+    assert events[0] == (
+        "workbench.restart.blocked_active_work_probe_failed",
+        {
+            "commandId": "cmd-restart",
+            "commandType": "restart_workbench",
+            "reason": "launcher_restart",
+            "source": "launcher_ps",
+            "probeSource": "list_active_session_work_runs",
+            "errorType": "RuntimeError",
+            "message": "session store unavailable",
         },
     )
     assert state["lastError"]["scope"] == "active_work"

@@ -35,6 +35,7 @@ $bindHost = "127.0.0.1"
 $configPath = Join-Path $projectDir "config.toml"
 $managedBackendMarkerArg = "--managed-by-launcher"
 $managedLauncherMarkerArg = "--managed-launcher-control"
+$runtimeManagerInternalLauncherEnv = "VIBELUTION_RUNTIME_MANAGER_INTERNAL_LAUNCHER"
 
 function Resolve-ConfiguredWorkbenchPort {
     param([int]$DefaultPort = 8000)
@@ -201,6 +202,75 @@ $script:protectedProcessIds = @(
         } |
         Sort-Object -Unique
 )
+
+function Test-LauncherProtectedProcessLooksLikeRuntimeManager {
+    param([int]$ProcessId)
+
+    if ($ProcessId -le 0) {
+        return $false
+    }
+    if (-not (Test-ProcessAlive $ProcessId)) {
+        return $false
+    }
+
+    try {
+        $process = Get-CimInstance Win32_Process -Filter "ProcessId = $ProcessId" -ErrorAction SilentlyContinue
+        if ($null -eq $process) {
+            return $false
+        }
+        $commandLine = [string](Get-LauncherProcessPropertyValue -Process $process -Name "CommandLine" -Default "")
+        $normalizedCommandLine = ConvertTo-LauncherComparableText -Value $commandLine
+        return (
+            $normalizedCommandLine -match "core\.runtime_manager\.cli" -and
+            $normalizedCommandLine -match "\bdaemon\b"
+        )
+    } catch {
+        return $false
+    }
+}
+
+function Test-RuntimeManagerInternalLauncherCall {
+    $actualValue = [Environment]::GetEnvironmentVariable($runtimeManagerInternalLauncherEnv)
+    if ($null -ne $actualValue -and ([string]$actualValue).Trim() -eq "1") {
+        return $true
+    }
+
+    foreach ($protectedProcessId in @($script:protectedProcessIds)) {
+        if (Test-LauncherProtectedProcessLooksLikeRuntimeManager -ProcessId ([int]$protectedProcessId)) {
+            return $true
+        }
+    }
+    return $false
+}
+
+function Assert-RuntimeManagerInternalLauncherCall {
+    param([string]$RequestedAction)
+
+    $rawActualValue = [Environment]::GetEnvironmentVariable($runtimeManagerInternalLauncherEnv)
+    $actualValue = ""
+    if ($null -ne $rawActualValue) {
+        $actualValue = [string]$rawActualValue
+    }
+    $normalizedValue = $actualValue.Trim()
+    if (Test-RuntimeManagerInternalLauncherCall) {
+        return
+    }
+
+    $message = "Launcher internal action '$RequestedAction' can only be called by Runtime Manager. Use -Action start, -Action stop, or -Action restart instead."
+    Write-LauncherControlLog `
+        -Event "launcher.internal_action.rejected" `
+        -Message $message `
+        -Level "warning" `
+        -Fields @{
+            action = $RequestedAction
+            required_env = $runtimeManagerInternalLauncherEnv
+            actual_env_present = [bool]$actualValue
+            actual_env_length = $actualValue.Length
+            actual_env_value_is_one = ($normalizedValue -eq "1")
+            protected_process_ids = @($script:protectedProcessIds)
+        }
+    throw $message
+}
 
 function Set-LauncherEndpoint {
     param(
@@ -5249,25 +5319,18 @@ function Open-LauncherControlSurface {
     $launcherBackendPid = if ($launcherBackendPids.Count -gt 0) { [int]$launcherBackendPids[0] } else { 0 }
     $launcherBackendHealthy = [bool]($launcherBackendPid -gt 0 -and (Test-LauncherControlHealthy))
     $launcherBackendSourceCurrent = [bool]($launcherBackendHealthy -and (Test-LauncherControlSourceCurrent -BackendPid $launcherBackendPid))
-    if ($launcherBackendHealthy -and -not $launcherBackendSourceCurrent) {
-        Write-Note "Launcher control service changed. Restarting Launcher control surface ..."
+    $launcherBackendNeedsReplacement = [bool]($launcherBackendHealthy -and -not $launcherBackendSourceCurrent)
+    if ($launcherBackendNeedsReplacement) {
         Write-LauncherControlLog `
-            -Event "launcher.control_backend.source_changed" `
-            -Message "Launcher control backend source changed; restarting the standalone control backend." `
+            -Event "launcher.control_backend.source_change_detected" `
+            -Message "Launcher control backend source changed; preserving the current control surface until startup preflight succeeds." `
             -Fields @{
                 backend_pid = $launcherBackendPid
                 port = $launcherControlPort
             }
-        Stop-ManagedBrowserProcesses -ProfileDir $launcherBrowserProfileDir -Role "launcher_control_surface"
-        Stop-ProcessesById -ProcessIds $launcherBackendPids
-        $launcherSnapshot = Get-SessionSnapshot -BrowserRole "launcher_control_surface" -ProfileDir $launcherBrowserProfileDir
-        $snapshot = Get-SessionSnapshot
-        $launcherBackendPids = @()
-        $launcherBackendPid = 0
-        $launcherBackendHealthy = $false
-        $launcherBackendSourceCurrent = $false
     }
     $startedControlBackend = $false
+    $replacedExistingLauncherControl = $false
     $preserveExistingStateOnFailure = [bool]$snapshot.State
 
     if ($launcherBackendHealthy -and $launcherBackendSourceCurrent -and $launcherSnapshot.BrowserWindowCount -gt 0) {
@@ -5284,7 +5347,16 @@ function Open-LauncherControlSurface {
     }
 
     if ($launcherSnapshot.BrowserPids.Count -gt 0) {
-        if (-not ($launcherBackendHealthy -and $launcherBackendSourceCurrent -and $launcherSnapshot.BrowserWindowCount -eq 0)) {
+        if ($launcherBackendNeedsReplacement) {
+            Write-LauncherControlLog `
+                -Event "launcher.control_surface.stale_browser_preserved_until_preflight" `
+                -Message "A stale Launcher control browser exists; cleanup is delayed until startup preflight succeeds." `
+                -Fields @{
+                    backend_pid = $launcherBackendPid
+                    browser_pids = @($launcherSnapshot.BrowserPids)
+                    browser_window_count = [int]$launcherSnapshot.BrowserWindowCount
+                }
+        } elseif (-not ($launcherBackendHealthy -and $launcherBackendSourceCurrent -and $launcherSnapshot.BrowserWindowCount -eq 0)) {
             Write-Note "Found an incomplete launcher control surface session. Cleaning it up before opening Launcher."
             Stop-ManagedBrowserProcesses -ProfileDir $launcherBrowserProfileDir -Role "launcher_control_surface"
             $launcherSnapshot = Get-SessionSnapshot -BrowserRole "launcher_control_surface" -ProfileDir $launcherBrowserProfileDir
@@ -5298,6 +5370,27 @@ function Open-LauncherControlSurface {
         Assert-LauncherSystemPrerequisites -BrowserRequired (-not $NoBrowser)
         Ensure-ProjectPythonDependencies
         Ensure-WebBuild
+
+        if ($launcherBackendNeedsReplacement) {
+            Write-Note "Launcher control service changed. Startup preflight succeeded; replacing Launcher control surface ..."
+            Write-LauncherControlLog `
+                -Event "launcher.control_backend.source_change_preflight_succeeded" `
+                -Message "Launcher control backend source changed and startup preflight succeeded; replacing the standalone control backend." `
+                -Fields @{
+                    backend_pid = $launcherBackendPid
+                    backend_pids = @($launcherBackendPids)
+                    port = $launcherControlPort
+                }
+            Stop-ManagedBrowserProcesses -ProfileDir $launcherBrowserProfileDir -Role "launcher_control_surface"
+            Stop-ProcessesById -ProcessIds $launcherBackendPids
+            $replacedExistingLauncherControl = $true
+            $launcherSnapshot = Get-SessionSnapshot -BrowserRole "launcher_control_surface" -ProfileDir $launcherBrowserProfileDir
+            $snapshot = Get-SessionSnapshot
+            $launcherBackendPids = @()
+            $launcherBackendPid = 0
+            $launcherBackendHealthy = $false
+            $launcherBackendSourceCurrent = $false
+        }
 
         $pythonRuntime = $null
         $backendPid = 0
@@ -5388,7 +5481,9 @@ function Open-LauncherControlSurface {
                 ended_at = (Get-Date).ToUniversalTime().ToString("o")
             }
         }
-        Stop-ManagedBrowserProcesses -ProfileDir $launcherBrowserProfileDir -Role "launcher_control_surface"
+        if ($startedControlBackend -or $replacedExistingLauncherControl) {
+            Stop-ManagedBrowserProcesses -ProfileDir $launcherBrowserProfileDir -Role "launcher_control_surface"
+        }
         if ($startedControlBackend) {
             Stop-ProcessesById @($backendPid)
         }
@@ -6415,18 +6510,21 @@ try {
             }
         }
         "internal-start" {
+            Assert-RuntimeManagerInternalLauncherCall -RequestedAction $Action
             Start-ManagedSession
         }
         "start" {
             Start-ManagedSession
         }
         "internal-stop" {
+            Assert-RuntimeManagerInternalLauncherCall -RequestedAction $Action
             Stop-ManagedSession -Reason "runtime manager stop"
         }
         "stop" {
             Stop-ManagedSession -Reason "explicit stop"
         }
         "internal-restart" {
+            Assert-RuntimeManagerInternalLauncherCall -RequestedAction $Action
             Stop-ManagedSession -Reason "runtime manager restart"
             Start-ManagedSession
         }

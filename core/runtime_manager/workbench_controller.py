@@ -26,6 +26,10 @@ from .constants import (
     PYTHON_LAUNCHER_SCRIPT_PATH,
 )
 from .process_inventory import list_repo_runtime_processes, managed_browser_process_payload
+from .scene_logging import append_runtime_manager_file_event, truncate_event_text
+
+INTERNAL_LAUNCHER_ENV = "VIBELUTION_RUNTIME_MANAGER_INTERNAL_LAUNCHER"
+INTERNAL_LAUNCHER_VALUE = "1"
 
 
 def _is_process_alive_windows(pid: int) -> bool:
@@ -387,37 +391,105 @@ def run_launcher_action(action: str, *, no_browser: bool = False) -> subprocess.
     args = _launcher_command_args(action, no_browser=no_browser)
     env = os.environ.copy()
     env["VIBELUTION_PORT"] = str(configured_backend_port())
+    env[INTERNAL_LAUNCHER_ENV] = INTERNAL_LAUNCHER_VALUE
     env["VIBELUTION_PROTECTED_PROCESS_IDS"] = ";".join(
         str(pid)
         for pid in (os.getpid(), os.getppid())
         if int(pid or 0) > 0
     )
+    _record_launcher_action_event(
+        "launcher.action.requested",
+        action=action,
+        no_browser=no_browser,
+        env=env,
+    )
     stdout_fd, stdout_path = tempfile.mkstemp(prefix="vibelution-launcher-stdout-", suffix=".log")
     stderr_fd, stderr_path = tempfile.mkstemp(prefix="vibelution-launcher-stderr-", suffix=".log")
     try:
         with os.fdopen(stdout_fd, "w+b") as stdout_handle, os.fdopen(stderr_fd, "w+b") as stderr_handle:
-            result = subprocess.run(
-                args,
-                cwd=str(PROJECT_ROOT),
-                stdin=subprocess.DEVNULL,
-                stdout=stdout_handle,
-                stderr=stderr_handle,
-                creationflags=_creation_flags(),
-                env=env,
-                check=False,
-            )
-        return subprocess.CompletedProcess(
+            try:
+                result = subprocess.run(
+                    args,
+                    cwd=str(PROJECT_ROOT),
+                    stdin=subprocess.DEVNULL,
+                    stdout=stdout_handle,
+                    stderr=stderr_handle,
+                    creationflags=_creation_flags(),
+                    env=env,
+                    check=False,
+                )
+            except Exception as exc:
+                _record_launcher_action_event(
+                    "launcher.action.failed",
+                    action=action,
+                    no_browser=no_browser,
+                    env=env,
+                    error_type=type(exc).__name__,
+                    message=str(exc),
+                )
+                raise
+        completed = subprocess.CompletedProcess(
             args=result.args,
             returncode=result.returncode,
             stdout=_read_capture_file(stdout_path),
             stderr=_read_capture_file(stderr_path),
         )
+        _record_launcher_action_event(
+            "launcher.action.completed",
+            action=action,
+            no_browser=no_browser,
+            env=env,
+            return_code=completed.returncode,
+            stdout=completed.stdout,
+            stderr=completed.stderr,
+        )
+        return completed
     finally:
         for capture_path in (stdout_path, stderr_path):
             try:
                 os.remove(capture_path)
             except OSError:
                 pass
+
+
+def _record_launcher_action_event(
+    event_type: str,
+    *,
+    action: str,
+    no_browser: bool,
+    env: dict[str, str],
+    return_code: int | None = None,
+    stdout: str = "",
+    stderr: str = "",
+    error_type: str = "",
+    message: str = "",
+) -> None:
+    internal_action = str(action or "").startswith("internal-")
+    payload: dict[str, Any] = {
+        "action": str(action or ""),
+        "adapter": "powershell" if os.name == "nt" else "python",
+        "noBrowser": bool(no_browser),
+        "internalAction": internal_action,
+        "internalLauncherEnvName": INTERNAL_LAUNCHER_ENV,
+        "internalLauncherEnvSet": str(env.get(INTERNAL_LAUNCHER_ENV) or "") == INTERNAL_LAUNCHER_VALUE,
+        "protectedProcessIdsSet": bool(str(env.get("VIBELUTION_PROTECTED_PROCESS_IDS") or "").strip()),
+        "portSet": bool(str(env.get("VIBELUTION_PORT") or "").strip()),
+    }
+    if return_code is not None:
+        payload["returnCode"] = int(return_code)
+        payload["ok"] = int(return_code) == 0
+    if stdout:
+        payload["stdoutTail"] = truncate_event_text(stdout[-800:], limit=800)
+    if stderr:
+        payload["stderrTail"] = truncate_event_text(stderr[-800:], limit=800)
+    if error_type:
+        payload["errorType"] = truncate_event_text(error_type, limit=120)
+    if message:
+        payload["message"] = truncate_event_text(message, limit=400)
+    try:
+        append_runtime_manager_file_event(event_type, payload, suppress_io_errors=True)
+    except Exception:
+        pass
 
 
 def open_workbench(*, no_browser: bool = False) -> subprocess.CompletedProcess[str]:

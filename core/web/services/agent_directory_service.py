@@ -383,9 +383,12 @@ def default_state() -> dict[str, Any]:
     }
 
 
-def list_agents(*, include_archived: bool = False) -> list[dict[str, Any]]:
+def list_agents(*, include_archived: bool = False, detail: str = "full") -> list[dict[str, Any]]:
     started = time.perf_counter()
     timings: dict[str, float] = {}
+    normalized_detail = str(detail or "full").strip().lower()
+    if normalized_detail not in {"full", "summary"}:
+        normalized_detail = "full"
     repair_cache_hit = False
     lock_wait_started = time.perf_counter()
     with _STATE_LOCK:
@@ -401,18 +404,25 @@ def list_agents(*, include_archived: bool = False) -> list[dict[str, Any]]:
     ]
     timings["filter"] = round((time.perf_counter() - stage_started) * 1000, 1)
     hydration_timings: dict[str, float] = {}
-    stage_started = time.perf_counter()
-    hydration = _build_agent_api_hydration_context(state, raw_agents, timings=hydration_timings)
-    timings["hydrate"] = round((time.perf_counter() - stage_started) * 1000, 1)
-    stage_started = time.perf_counter()
-    agents = [_agent_to_api(item, hydration=hydration) for item in raw_agents]
-    timings["to_api"] = round((time.perf_counter() - stage_started) * 1000, 1)
+    if normalized_detail == "summary":
+        timings["hydrate"] = 0.0
+        stage_started = time.perf_counter()
+        agents = [_agent_to_api_summary(item) for item in raw_agents]
+        timings["to_api"] = round((time.perf_counter() - stage_started) * 1000, 1)
+    else:
+        stage_started = time.perf_counter()
+        hydration = _build_agent_api_hydration_context(state, raw_agents, timings=hydration_timings)
+        timings["hydrate"] = round((time.perf_counter() - stage_started) * 1000, 1)
+        stage_started = time.perf_counter()
+        agents = [_agent_to_api(item, hydration=hydration) for item in raw_agents]
+        timings["to_api"] = round((time.perf_counter() - stage_started) * 1000, 1)
     stage_started = time.perf_counter()
     agents.sort(key=lambda item: str(item.get("updatedAt") or item.get("createdAt") or ""), reverse=True)
     timings["sort"] = round((time.perf_counter() - stage_started) * 1000, 1)
     timings["total"] = round((time.perf_counter() - started) * 1000, 1)
     _record_agent_list_loaded(
         include_archived=include_archived,
+        detail=normalized_detail,
         raw_agent_count=len(raw_agents),
         returned_agent_count=len(agents),
         timings=timings,
@@ -3556,6 +3566,44 @@ def _agent_to_api(agent: dict[str, Any], *, hydration: AgentApiHydrationContext 
     }
 
 
+def _agent_to_api_summary(agent: dict[str, Any]) -> dict[str, Any]:
+    workspace = str(agent.get("workspacePath") or "").strip()
+    metadata = dict(agent.get("metadata") or {})
+    avatar_path = _agent_avatar_path_from_metadata(metadata)
+    profileless_session_agent = _is_profileless_session_agent({**agent, "metadata": metadata})
+    if profileless_session_agent:
+        metadata.pop("personaProfile", None)
+        metadata.pop("taskProfile", None)
+    agent_id = str(agent.get("agentId") or "").strip()
+    return {
+        "agentId": agent_id,
+        "agentCode": _normalize_agent_code(agent.get("agentCode"))
+        or _fallback_agent_code(agent.get("agentId")),
+        "displayName": str(agent.get("displayName") or "").strip(),
+        "kind": str(agent.get("kind") or DEFAULT_AGENT_KIND).strip() or DEFAULT_AGENT_KIND,
+        "primaryMode": _normalize_primary_mode(agent.get("primaryMode") or _infer_agent_primary_mode(agent)),
+        "roleKey": _normalize_role_key(agent.get("roleKey") or _infer_agent_role_key(agent)),
+        "llmBindings": normalize_agent_llm_bindings(agent.get("llmBindings")),
+        "promptTemplateId": _normalize_prompt_template_id(
+            agent.get("promptTemplateId") or _infer_agent_prompt_template_id(agent)
+        ),
+        "directSessionId": str(agent.get("directSessionId") or "").strip(),
+        "workspacePath": workspace,
+        "workspaceTerritory": _agent_workspace_territory(agent),
+        "toolPolicyId": str(agent.get("toolPolicyId") or DEFAULT_TOOL_POLICY_ID).strip() or DEFAULT_TOOL_POLICY_ID,
+        "memoryPolicyId": str(agent.get("memoryPolicyId") or "").strip(),
+        "avatarImagePath": avatar_path,
+        "avatarImageUrl": agent_avatar_image_url(avatar_path),
+        "personaProfile": {} if profileless_session_agent else _persona_profile_for_agent({**agent, "metadata": metadata}),
+        "taskProfile": {} if profileless_session_agent else _task_profile_for_agent({**agent, "metadata": metadata}),
+        "createdBy": str(agent.get("createdBy") or "").strip(),
+        "status": str(agent.get("status") or "active").strip() or "active",
+        "metadata": metadata,
+        "createdAt": str(agent.get("createdAt") or "").strip(),
+        "updatedAt": str(agent.get("updatedAt") or "").strip(),
+    }
+
+
 def _build_agent_api_hydration_context(
     state: dict[str, Any],
     agents: list[dict[str, Any]],
@@ -4512,6 +4560,7 @@ def _record_agent_event(event_code: str, agent: dict[str, Any], *, lifecycle: bo
 def _record_agent_list_loaded(
     *,
     include_archived: bool,
+    detail: str,
     raw_agent_count: int,
     returned_agent_count: int,
     timings: dict[str, float],
@@ -4532,6 +4581,7 @@ def _record_agent_list_loaded(
             outcome="observed",
             fields={
                 "includeArchived": bool(include_archived),
+                "detail": str(detail or "full"),
                 "rawAgentCount": raw_agent_count,
                 "returnedAgentCount": returned_agent_count,
                 "repairCacheHit": bool(repair_cache_hit),

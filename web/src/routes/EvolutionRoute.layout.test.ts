@@ -99,9 +99,28 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("latestSupervisedRunSnapshot");
     expect(routeSource).toContain("const monitoredRun = effectiveActiveRunSnapshot");
     expect(routeSource).toContain("?? visibleLiveRunSnapshot;");
-    expect(routeSource).not.toContain("?? latestSupervisedRunSnapshot");
+    expect(routeSource).not.toContain("const monitoredRun = effectiveActiveRunSnapshot\n    ?? visibleLiveRunSnapshot\n    ?? latestSupervisedRunSnapshot;");
     expect(routeSource).not.toContain("setLiveActiveRun(latestSupervisedRunSnapshot)");
+    expect(routeSource).toContain("const supervisedMembersRun = monitoredRun");
+    expect(routeSource).toContain("?? latestSupervisedRunSnapshot;");
     expect(routeSource).toContain("styles.latestSupervisedResult");
+  });
+
+  it("loads self-evolution from dedicated endpoints before falling back to the workspace snapshot", () => {
+    expect(routeSource).toContain("queryKeys.evolutionSelfOverview()");
+    expect(routeSource).toContain('"/api/evolution/self/overview"');
+    expect(routeSource).toContain("queryKeys.evolutionSelfLatestRun()");
+    expect(routeSource).toContain('"/api/evolution/self/latest-run"');
+    expect(routeSource).toContain("queryKeys.evolutionSelfTransactions()");
+    expect(routeSource).toContain('"/api/evolution/self/transactions"');
+    expect(routeSource).toContain("const selfOverview = selfOverviewQuery.data ?? workspaceSnapshot?.selfOverview");
+    expect(routeSource).toContain("selfLatestRunQuery.data ?? workspaceSnapshot?.selfLatestRun");
+    expect(routeSource).toContain("const selfTransactions = selfTransactionsQuery.data ?? workspaceSnapshot?.selfTransactions ?? []");
+    expect(routeSource).toContain("const selfTrackLoading = selfTrackQueriesEnabled");
+    expect(routeSource).toContain("overview={selfOverview}");
+    expect(routeSource).toContain("transactions={selfTransactions}");
+    expect(routeSource).toContain("loading={selfTrackLoading}");
+    expect(routeSource).not.toContain("loading={workspaceSnapshotQuery.isLoading}");
   });
 
   it("labels supervised retry as rerunning failed items", () => {
@@ -140,8 +159,8 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("SUPERVISED_MEMBER_ROLES");
     expect(routeSource).toContain('["baseline", "candidate", "reviewer", "auditor", "judge"]');
     expect(routeSource).toContain("supervisedRunMembers");
-    expect(routeSource).toContain("monitoredRun?.agentBindings");
-    expect(routeSource).toContain("monitoredRun?.currentAgentBinding?.agentId");
+    expect(routeSource).toContain("supervisedMembersRun?.agentBindings");
+    expect(routeSource).toContain("supervisedMembersRun?.currentAgentBinding?.agentId");
     expect(routeSource).toContain("styles.supervisedMembersPanel");
     expect(routeSource).toContain("本轮监督成员");
     expect(stylesSource).toContain(".supervisedMembersPanel");
