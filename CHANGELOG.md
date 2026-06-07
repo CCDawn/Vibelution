@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.46 - 2026-06-07
+
+- Added bulk selection bars to the Agent, Prompt Template, Tool, and Skill management pages.
+- Added safe bulk actions for Agent prompt assignment/archive, prompt category/reset/deactivate, and generated-tool enable/disable/delete while preserving existing per-item protection rules.
+- Kept the Skill library read-only while adding bulk command copy and disabled edit/delete controls with explicit read-only guidance.
+
 ## 0.10.45 - 2026-06-07
 
 - Added read-only communication briefs to the Challenge Cup workflow coordination status API, mapping queue items to target functional Agent roles and suggested delivery channels without sending messages automatically.
