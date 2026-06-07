@@ -315,12 +315,12 @@
       <div class="runbook-card" style="margin-bottom: 12px;">
         <h2>当前团队绑定</h2>
         <div class="artifact-table">
-          <div class="service-row"><b>团队</b><span>科研团队 / research-team</span></div>
+          <div class="service-row"><b>团队</b><span>ai科学研究团队 / research-team</span></div>
           <div class="service-row"><b>分类</b><span>科研组织团队 · research_organization</span></div>
           <div class="service-row"><b>团队群聊</b><span>room-20260529-090009-757107-6a747d62 · research_coordination</span></div>
           <div class="service-row"><b>流程文件</b><span>workspace/teams/research-team/workflow_orchestration.json</span></div>
           <div class="service-row"><b>候选仓库</b><span>workspace/teams/research-team/candidate_store/index.json</span></div>
-          <div class="service-row"><b>策略</b><span>挑战杯科研流程直接绑定当前 Vibelution 科研团队，不另建新团队；团队成员仍来自现有科研组织架构。</span></div>
+          <div class="service-row"><b>策略</b><span>挑战杯科研流程直接绑定当前 Vibelution ai科学研究团队，不另建新团队；团队成员仍来自现有科研组织架构。</span></div>
         </div>
       </div>
       <div class="runbook-grid">
@@ -328,6 +328,10 @@
           <h2>实施架构</h2>
           <div class="artifact-table">
             <div class="service-row">
+                  <strong>通用数据处理底座</strong>
+                  <span>新增 data_processing_service 首切，提供 profile/run/record/collection assignment/output/status；用于资料搜集与筛选前置，不绑定科研特定 schema。</span>
+                </div>
+<div class="service-row">
                   <strong>Team 编排状态机</strong>
                   <span>已新增 TeamWorkflowOrchestration 后端切片，首期启用 challenge_cup_research。</span>
                 </div>
@@ -365,6 +369,14 @@
           <h2>服务边界</h2>
           <div class="artifact-table">
             <div class="service-row">
+                  <b>data_processing_service</b>
+                  <span>已落地首切：通用 profile/run/record/collection assignment/output/status，数据落到 workspace/data_processing/runs/&lt;runId&gt;；只做通用资料处理，不直接写正式知识。</span>
+                </div>
+<div class="service-row">
+                  <b>data_processing API</b>
+                  <span>已落地：/api/data-processing/profiles、runs 创建/列表/详情、records、collection-assignments、outputs、status；供数据搜集类 Agent 领取任务和回写结果。</span>
+                </div>
+<div class="service-row">
                   <b>team_workflow_orchestration_service</b>
                   <span>已落地：Team 级 workflowOrchestration、CandidateStore、transfer request/decision。</span>
                 </div>
@@ -660,6 +672,16 @@
       </div>
       <div class="agent-matrix" style="margin-top: 12px;">
         <div class="blueprint-row compact">
+              <b>通用数据处理服务</b>
+              <strong>core/web/services/data_processing_service.py</strong>
+              <span>新增 DataProcessingRun、DataRecord、CollectionAssignment、CollectionOutput 文件落库和安全运行事件计数。</span>
+            </div>
+<div class="blueprint-row compact">
+              <b>通用数据处理路由</b>
+              <strong>core/web/routes/data_processing.py</strong>
+              <span>提供 /api/data-processing profiles/runs 创建/列表/详情/records/collection-assignments/outputs/status；供 Agent 领取资料搜集任务和提交输出。</span>
+            </div>
+<div class="blueprint-row compact">
               <b>服务文件</b>
               <strong>core/web/services/team_workflow_orchestration_service.py</strong>
               <span>Team 编排、候选登记、转移请求、协调 Agent 裁决和轻量运行事件日志。</span>
@@ -766,8 +788,8 @@
             </div>
 <div class="blueprint-row compact">
               <b>验证</b>
-              <strong>tests/test_team_workflow_orchestration_service.py + tests/test_team_workflow_routes.py</strong>
-              <span>覆盖主路径、非 ownerAgent 不能写最终状态、本地模型任务包、输出校验和知识入库状态总览。</span>
+              <strong>tests/test_data_processing_service.py + tests/test_data_processing_routes.py + tests/test_team_workflow_orchestration_service.py + tests/test_team_workflow_routes.py</strong>
+              <span>覆盖通用数据处理首切、主路径、非 ownerAgent 不能写最终状态、本地模型任务包、输出校验和知识入库状态总览。</span>
             </div>
       </div>
       <div class="agent-matrix" style="margin-top: 12px;">
@@ -831,9 +853,19 @@
               <span>coordination/status 只读聚合 API 和 Teams 工作台协调队列已接入，把 pendingTransfers、needsRework、stewardship、blocked、active 汇成队列、summary、actionItems、coordinationPolicy 和 communicationBrief。</span>
               <span>Research Coordination Agent/组织层可集中看到待决转移、返工候选、治理待审、阻塞项、目标功能 Agent 与建议通道；本轮不自动调转，不自动发送消息，不提供审批按钮。</span>
             </div>
+<div class="blueprint-row">
+              <b>M6.2</b>
+              <strong>通用数据处理底座首切</strong>
+              <span>新增 /api/data-processing profiles/runs/list/records/collection-assignments/outputs/status，以及 workspace/data_processing/runs/&lt;runId&gt; 文件落库。</span>
+              <span>资料搜集 Agent 可以先创建/查询 DataProcessingRun、领取 CollectionAssignment、提交 CollectionOutput 并生成 DataRecord；该层不写正式 Team Knowledge、不写 RAG、不写知识图谱，后续由挑战杯流程把 DataRecord 转为候选知识。</span>
+            </div>
       </div>
       <div class="tag-row">
-        <span class="tag">source_manifest</span>
+        <span class="tag">DataProcessingRun</span>
+<span class="tag">DataRecord</span>
+<span class="tag">CollectionAssignment</span>
+<span class="tag">CollectionOutput</span>
+<span class="tag">source_manifest</span>
 <span class="tag">paper_note</span>
 <span class="tag">neuro_mechanism</span>
 <span class="tag">mechanism_mapping</span>
@@ -855,8 +887,8 @@
         <div class="agent-row">
         <b>01</b>
         <strong>Source Intake Agent</strong>
-        <span>可复用 research_broad / source-extraction 后端已接入</span>
-        <span>本地资料登记 / source_manifest 写入 / 文件路径/页码/来源可信度记录 / 本地 PDF sha256/pageAnchors/excerpt 抽取 / 可选 research_knowledge_query_tool 查重</span>
+        <span>可复用通用 data-processing assignment / source-extraction 后端已接入</span>
+        <span>DataProcessingRun 建立 / CollectionAssignment 资料搜集任务 / DataRecord 通用记录 / 本地资料登记 / source_manifest 写入 / 文件路径/页码/来源可信度记录 / 本地 PDF sha256/pageAnchors/excerpt 抽取 / 可选 research_knowledge_query_tool 查重</span>
         <span>确认资料允许分析、来源可信度和是否纳入本轮。</span>
       </div>
 <div class="agent-row">

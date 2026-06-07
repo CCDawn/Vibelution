@@ -22,6 +22,7 @@ from .routes.agents import router as agents_router
 from .routes.chat_rooms import router as chat_rooms_router
 from .routes.computer_use import router as computer_use_router
 from .routes.conversations import router as conversations_router
+from .routes.data_processing import router as data_processing_router
 from .routes.diagnostics import router as diagnostics_router
 from .routes.evolution import router as evolution_router
 from .routes.files import router as files_router
@@ -228,6 +229,7 @@ def create_app() -> FastAPI:
     app.include_router(computer_use_router, prefix="/api")
     app.include_router(files_router, prefix="/api")
     app.include_router(git_router, prefix="/api")
+    app.include_router(data_processing_router, prefix="/api")
     app.include_router(knowledge_router, prefix="/api")
     app.include_router(logs_router, prefix="/api")
     app.include_router(memory_router, prefix="/api")

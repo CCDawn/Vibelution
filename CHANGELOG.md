@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.11.0 - 2026-06-07
+
+- Added the generic data-processing substrate with profiles, runs, records, collection assignments, collection outputs, and status APIs under `/api/data-processing`.
+- Persisted data-processing runs under `workspace/data_processing/runs/<runId>` so agent-driven source collection can be tracked before any domain-specific knowledge publication.
+- Recorded safe runtime scene events for data-processing run, record, assignment, and output activity while keeping raw source content out of lifecycle logs.
+- Updated the Challenge Cup flow HTML to position data processing as the generic source-collection layer feeding the AI research team workflow.
+
 ## 0.10.46 - 2026-06-07
 
 - Added bulk selection bars to the Agent, Prompt Template, Tool, and Skill management pages.
