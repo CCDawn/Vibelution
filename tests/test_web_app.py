@@ -11960,7 +11960,7 @@ def test_config_workspace_exposes_full_editor_schema(monkeypatch):
     assert editor_sections["user-profile"]["title"] == "用户信息"
     assert payload["publicConfig"]["workbench"]["backend_port"] == 8000
     assert payload["publicConfig"]["workbench"]["frontend_port"] == 5173
-    assert payload["publicConfig"]["workbench"]["window_mode"] == "windowed"
+    assert payload["publicConfig"]["workbench"]["window_mode"] == "fullscreen"
     assert editor_meta["runtime.profile"]["kind"] == "select"
     assert editor_meta["runtime.profile"]["badge"] == "选项"
     assert editor_meta["workbench.backend_port"]["kind"] == "number"

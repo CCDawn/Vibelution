@@ -14,7 +14,7 @@ require_venv = true
 [workbench]
 backend_port = 8000
 frontend_port = 5173
-window_mode = "windowed"
+window_mode = "fullscreen"
 
 [avatar]
 preset = "lobster"
