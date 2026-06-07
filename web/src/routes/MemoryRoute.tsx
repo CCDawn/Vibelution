@@ -1730,7 +1730,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
 
   const agentsQuery = useQuery({
     queryKey: queryKeys.agents(),
-    queryFn: () => fetchJson<AgentInstance[]>("/api/agents"),
+    queryFn: () => fetchJson<AgentInstance[]>("/api/agents?detail=summary"),
     enabled: forcedView === "knowledge" || forcedView === "graph",
     refetchInterval: resolvePollingInterval(pageVisible, 60_000),
     refetchIntervalInBackground: false,

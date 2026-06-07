@@ -64,6 +64,46 @@ def get_self_evolution_overview() -> dict[str, Any]:
     }
 
 
+def get_self_evolution_light_overview() -> dict[str, Any]:
+    """Return a shape-compatible self-evolution summary for aggregate dashboards."""
+
+    contract = get_workbench_contract()
+    enabled = _self_evolution_enabled(contract)
+    lang = get_web_language()
+    snapshot = _empty_snapshot()
+    recent_transactions = []
+    readiness = _build_readiness(
+        lang,
+        enabled=enabled,
+        worktree=snapshot.get("worktree", {}),
+        recent_transactions=recent_transactions,
+    )
+    return {
+        "enabled": enabled,
+        "goal": DEFAULT_SELF_EVOLUTION_GOAL,
+        "readiness": readiness,
+        "sceneSemantics": _scene_semantics(readiness),
+        "runSemantics": _overview_run_semantics(recent_transactions, lang=lang),
+        "actionStates": {
+            "start": _start_action_state(enabled=enabled, lang=lang),
+        },
+        "guardrails": _guardrails(lang),
+        "metrics": _build_metrics(
+            snapshot.get("advisory", {}),
+            snapshot.get("worktree", {}),
+            snapshot.get("fitness", {}),
+            recent_transactions,
+        ),
+        "advisory": _advisory_payload(snapshot.get("advisory", {})),
+        "gitStatus": _git_status_payload(snapshot.get("git_status", {}), lang),
+        "recentChanges": [],
+        "fitness": _fitness_payload(snapshot.get("fitness", {})),
+        "worktree": _worktree_payload(snapshot.get("worktree", {})),
+        "recentTransactions": [],
+        "auditTail": [],
+    }
+
+
 def list_self_evolution_transactions() -> list[dict[str, Any]]:
     if not _self_evolution_enabled():
         return []

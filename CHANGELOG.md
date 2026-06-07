@@ -5,6 +5,9 @@
 - Added bulk selection bars to the Agent, Prompt Template, Tool, and Skill management pages.
 - Added safe bulk actions for Agent prompt assignment/archive, prompt category/reset/deactivate, and generated-tool enable/disable/delete while preserving existing per-item protection rules.
 - Kept the Skill library read-only while adding bulk command copy and disabled edit/delete controls with explicit read-only guidance.
+- Hardened supervised-evolution startup with runtime-manager source freshness checks and safer active-work probe failures.
+- Added guarded restart frontend build preflight and Launcher desktop-entry validation before closing a running workbench.
+- Improved supervised evaluation environment handling, memory detail surfaces, and related workbench UI affordances.
 
 ## 0.10.45 - 2026-06-07
 

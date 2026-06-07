@@ -1305,6 +1305,18 @@ def test_run_supervised_evolution_session_fails_environment_preflight_without_st
     assert [run.status for run in decision.candidate_runs] == ["failed"]
     assert "数据集环境预检失败" in decision.baseline_runs[0].reason
     assert "未启动 agent" in decision.candidate_runs[0].reason
+    assert decision.decision == "INCONCLUSIVE"
+    assert "数据集任务环境不可用" in decision.reason
+    assert decision.gates[0].name == "infrastructure"
+    assert decision.gates[0].status == "fail"
+    assert decision.gates[1].name == "legality"
+    assert decision.gates[1].status == "skipped"
+    assert decision.case_summaries[0].difference_metrics["baseline_environment_unavailable"] is True
+    assert decision.case_summaries[0].difference_metrics["candidate_environment_unavailable"] is True
+    assert decision.case_summaries[0].difference_metrics["baseline_transaction_issue"] is False
+    assert decision.case_summaries[0].difference_metrics["candidate_transaction_issue"] is False
+    assert "shared_environment_unavailable" in decision.case_summaries[0].difference_reasons
+    assert "shared_environment_unavailable" in decision.case_summaries[0].failure_taxonomy
 
     reports = [Path(run.report_path or "") for run in [*decision.baseline_runs, *decision.candidate_runs]]
     assert all(report.exists() for report in reports)
@@ -1316,6 +1328,98 @@ def test_run_supervised_evolution_session_fails_environment_preflight_without_st
     live_events = [event for event in events if event["event"] == "role_live"]
     assert [event["phase"] for event in live_events] == ["environment_preflight", "environment_preflight"]
     assert live_events[0]["environment_contract_kind"] == "terminal_bench_task_environment"
+    finish_events = [event for event in events if event["event"] == "role_finish"]
+    assert [event["status"] for event in finish_events] == ["failed", "failed"]
+
+
+def test_run_supervised_evolution_session_fails_verifier_preflight_without_starting_runner(
+    monkeypatch,
+    tmp_path: Path,
+):
+    app_dir = tmp_path / "app"
+    app_dir.mkdir()
+    monkeypatch.setattr(
+        "core.evaluation.dataset_environment.shutil.which",
+        lambda name: "C:/tools/uv.exe" if name == "uv" else None,
+    )
+    bundle_dir = tmp_path / "workspace" / "evaluation" / "bundles"
+    bundle_dir.mkdir(parents=True, exist_ok=True)
+    bundle_path = bundle_dir / f"{DEFAULT_BUNDLE_NAME}.json"
+    bundle_path.write_text(
+        json.dumps(
+            {
+                "benchmark": "terminal_bench",
+                "bundle_name": DEFAULT_BUNDLE_NAME,
+                "default_timeout_seconds": 321,
+                "cases": [
+                    {
+                        "case_id": "missing_verifier_probe",
+                        "scenario": "transaction",
+                        "mode": "multi_step_react",
+                        "baseline_prompt": "baseline",
+                        "candidate_prompt": "candidate",
+                        "environment_contract": {
+                            "kind": "terminal_bench_task_environment",
+                            "preflight": {"required": True, "strategy": "path_alias"},
+                            "required_paths": [
+                                {
+                                    "path": "/app",
+                                    "aliases": [str(app_dir)],
+                                    "required_for": "custom_harness_task_files",
+                                }
+                            ],
+                            "official_verifier": {
+                                "status": "harbor_pending",
+                                "requires": ["uv", "docker", "docker daemon"],
+                            },
+                        },
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    events = []
+    runner_calls = []
+
+    def fake_runner(**kwargs):
+        runner_calls.append(kwargs)
+        raise AssertionError("runner should not start when verifier preflight fails")
+
+    decision = run_supervised_evolution_session(
+        bundle_name=DEFAULT_BUNDLE_NAME,
+        project_root=tmp_path,
+        harness_runner=fake_runner,
+        progress_callback=events.append,
+    )
+
+    assert runner_calls == []
+    assert [run.status for run in decision.baseline_runs] == ["failed"]
+    assert [run.status for run in decision.candidate_runs] == ["failed"]
+    assert "docker" in decision.baseline_runs[0].reason
+    assert decision.gates[0].name == "infrastructure"
+    assert decision.gates[0].status == "fail"
+    assert decision.gates[0].metrics["baseline_environment_unavailable"] == 1
+    assert decision.gates[0].metrics["candidate_environment_unavailable"] == 1
+    assert "数据集任务环境不可用" in decision.reason
+    assert "docker" in decision.reason
+    assert decision.case_summaries[0].difference_metrics["baseline_transaction_issue"] is False
+    assert decision.case_summaries[0].difference_metrics["candidate_transaction_issue"] is False
+    report_payload = json.loads(Path(decision.baseline_runs[0].report_path or "").read_text(encoding="utf-8"))
+    preflight = report_payload["evolution_summary"]["environment"]["preflight"]
+    assert preflight["status"] == "missing_verifier_dependency"
+    assert preflight["checked"][0]["available"] is True
+    assert [item["name"] for item in preflight["official_verifier"]["missing"]] == [
+        "docker",
+        "docker daemon",
+    ]
+
+    live_events = [event for event in events if event["event"] == "role_live"]
+    assert [event["environment_preflight"]["status"] for event in live_events] == [
+        "missing_verifier_dependency",
+        "missing_verifier_dependency",
+    ]
     finish_events = [event for event in events if event["event"] == "role_finish"]
     assert [event["status"] for event in finish_events] == ["failed", "failed"]
 

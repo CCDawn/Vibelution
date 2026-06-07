@@ -3,6 +3,7 @@
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -63,7 +64,11 @@ def test_default_dataset_registry_lists_builtin_and_swe(tmp_path: Path):
     assert "不是 Terminal-Bench 官方成绩" in by_name["terminal_bench_core"]["usability_reason"]
     assert by_name["terminal_bench_core"]["case_count"] >= 5
     assert by_name["terminal_bench_core"]["environment_contract"]["kind"] == "terminal_bench_task_environment"
-    assert by_name["terminal_bench_core"]["environment_preflight"]["status"] in {"available", "missing"}
+    assert by_name["terminal_bench_core"]["environment_preflight"]["status"] in {
+        "available",
+        "missing",
+        "missing_verifier_dependency",
+    }
     assert by_name["swe_bench_lite"]["runnable"] is False
     assert by_name["swe_bench_lite"]["adapter_status"] == "requires_swe_harness"
 
@@ -590,17 +595,45 @@ def test_materialize_terminal_bench_core_preserves_official_metadata(tmp_path: P
     assert "Do not keep retrying" in case["baseline_prompt"]
 
 
-def test_terminal_bench_environment_preflight_accepts_windows_alias(tmp_path: Path):
+def test_terminal_bench_environment_preflight_accepts_windows_alias(monkeypatch, tmp_path: Path):
     app_dir = tmp_path / "app"
     app_dir.mkdir()
     contract = terminal_bench_environment_contract(official_seed=True)
     contract["required_paths"][0]["aliases"] = [str(app_dir)]
+    monkeypatch.setattr(
+        "core.evaluation.dataset_environment.shutil.which",
+        lambda name: f"C:/tools/{name}.exe",
+    )
+    monkeypatch.setattr(
+        "core.evaluation.dataset_environment.subprocess.run",
+        lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout="24.0.0", stderr=""),
+    )
 
     result = preflight_environment_contract(contract, project_root=tmp_path)
 
     assert result["status"] == "available"
     assert result["checked"][0]["path"] == "/app"
     assert str(app_dir) in result["checked"][0]["existing"]
+    assert result["official_verifier"]["available"] is True
+
+
+def test_terminal_bench_environment_preflight_blocks_missing_verifier_dependency(monkeypatch, tmp_path: Path):
+    app_dir = tmp_path / "app"
+    app_dir.mkdir()
+    contract = terminal_bench_environment_contract(official_seed=True)
+    contract["required_paths"][0]["aliases"] = [str(app_dir)]
+    monkeypatch.setattr(
+        "core.evaluation.dataset_environment.shutil.which",
+        lambda name: "C:/tools/uv.exe" if name == "uv" else None,
+    )
+
+    result = preflight_environment_contract(contract, project_root=tmp_path)
+
+    assert result["status"] == "missing_verifier_dependency"
+    assert result["available"] is False
+    assert result["missing"] == []
+    missing = [item["name"] for item in result["official_verifier"]["missing"]]
+    assert missing == ["docker", "docker daemon"]
 
 
 def test_materialize_missing_dataset_source_fails_clearly(tmp_path: Path):

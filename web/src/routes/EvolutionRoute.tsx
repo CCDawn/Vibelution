@@ -44,6 +44,8 @@ import {
   EvolutionWorkspaceSnapshot,
   SupervisedWorktreeRun,
   SelfEvolutionActiveRun,
+  SelfEvolutionOverview,
+  SelfEvolutionTransaction,
   SelfEvolutionHistoryDeleteResponse,
   SelfEvolutionHandoffResponse,
   SelfEvolutionRunStreamEvent,
@@ -510,6 +512,27 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     refetchIntervalInBackground: false,
     enabled: supervisedTrackQueriesEnabled || selfTrackQueriesEnabled,
   });
+  const selfOverviewQuery = useQuery({
+    queryKey: queryKeys.evolutionSelfOverview(),
+    queryFn: () => fetchJson<SelfEvolutionOverview>("/api/evolution/self/overview"),
+    refetchInterval: resolvePollingInterval(pageVisible, 4_000),
+    refetchIntervalInBackground: false,
+    enabled: selfTrackQueriesEnabled,
+  });
+  const selfLatestRunQuery = useQuery({
+    queryKey: queryKeys.evolutionSelfLatestRun(),
+    queryFn: () => fetchJson<SelfEvolutionActiveRun | null>("/api/evolution/self/latest-run"),
+    refetchInterval: resolvePollingInterval(pageVisible, 4_000),
+    refetchIntervalInBackground: false,
+    enabled: selfTrackQueriesEnabled,
+  });
+  const selfTransactionsQuery = useQuery({
+    queryKey: queryKeys.evolutionSelfTransactions(),
+    queryFn: () => fetchJson<SelfEvolutionTransaction[]>("/api/evolution/self/transactions"),
+    refetchInterval: resolvePollingInterval(pageVisible, 8_000),
+    refetchIntervalInBackground: false,
+    enabled: selfTrackQueriesEnabled,
+  });
   const selectedDatasetLimit = useMemo(
     () => (
       sourceKind === "dataset" && datasetLimitInput.trim()
@@ -847,7 +870,12 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const highlightedReviewPending = isSelfEvolutionWorktreeRun(reviewCandidateWorktree)
     && Boolean(reviewCandidateGate?.required)
     && String(reviewCandidateGate?.status || "").trim().toLowerCase() !== "approved";
-  const latestSelfRunSnapshot = selectRunSnapshotWithRunId(workspaceSnapshot?.selfLatestRun);
+  const selfOverview = selfOverviewQuery.data ?? workspaceSnapshot?.selfOverview;
+  const latestSelfRunSnapshot = selectRunSnapshotWithRunId(selfLatestRunQuery.data ?? workspaceSnapshot?.selfLatestRun);
+  const selfTransactions = selfTransactionsQuery.data ?? workspaceSnapshot?.selfTransactions ?? [];
+  const selfTrackLoading = selfTrackQueriesEnabled
+    && !selfOverview
+    && (selfOverviewQuery.isLoading || workspaceSnapshotQuery.isLoading);
   const latestRun = runs[0] ?? null;
   const selfTrackEnabled = configQuery.data?.modeAvailability.self_evolution ?? false;
   const supervisedTrackEnabled = configQuery.data?.modeAvailability.supervised_evolution ?? true;
@@ -886,6 +914,8 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     : null;
   const monitoredRun = effectiveActiveRunSnapshot
     ?? visibleLiveRunSnapshot;
+  const supervisedMembersRun = monitoredRun
+    ?? latestSupervisedRunSnapshot;
   const runningRun = effectiveActiveRunSnapshot ?? (liveActiveRun && isLiveSupervisedRunStatus(liveActiveRun.status)
     ? liveActiveRun
     : null);
@@ -936,9 +966,9 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     ? decisionLabel(monitoredRun.decision)
     : statusLabel(monitoredRun?.status || "");
   const supervisedRunMembers = useMemo<SupervisedRunMember[]>(() => {
-    const bindings = monitoredRun?.agentBindings ?? {};
-    const currentRole = String(monitoredRun?.currentRole || "").trim().toLowerCase();
-    const currentAgentId = String(monitoredRun?.currentAgentBinding?.agentId || "").trim();
+    const bindings = supervisedMembersRun?.agentBindings ?? {};
+    const currentRole = String(supervisedMembersRun?.currentRole || "").trim().toLowerCase();
+    const currentAgentId = String(supervisedMembersRun?.currentAgentBinding?.agentId || "").trim();
     return SUPERVISED_MEMBER_ROLES.map((role) => {
       const binding = bindings[role] ?? {};
       const agentId = String(binding.agentId || "").trim();
@@ -956,10 +986,13 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
         status: isActive ? "active" : agentId ? "configured" : "missing",
       };
     });
-  }, [lang, monitoredRun?.agentBindings, monitoredRun?.currentAgentBinding?.agentId, monitoredRun?.currentRole]);
+  }, [lang, supervisedMembersRun?.agentBindings, supervisedMembersRun?.currentAgentBinding?.agentId, supervisedMembersRun?.currentRole]);
   const latestRunStatusLabel = latestRun?.decision
     ? decisionLabel(latestRun.decision)
     : statusLabel(latestRun?.status || "");
+  const supervisedMembersRunStatusLabel = supervisedMembersRun?.decision === "INCONCLUSIVE"
+    ? decisionLabel(supervisedMembersRun.decision)
+    : statusLabel(supervisedMembersRun?.status || "");
   const monitoredControlSummary = monitoredRun
     ? buildSupervisedRunControlSummary(monitoredRun, lang, {
       statusLabel,
@@ -2317,7 +2350,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
 
       {activeTrack === "self" ? (
         <SelfEvolutionTrack
-          overview={workspaceSnapshot?.selfOverview}
+          overview={selfOverview}
           latestRun={monitoredSelfRun}
           goalInput={selfGoalInput}
           onGoalInputChange={setSelfGoalInput}
@@ -2348,8 +2381,8 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
           actionFeedback={selfActionFeedback}
           runLocked={selfRunLocked}
           worktreeRunLocked={worktreeRunLocked}
-          transactions={workspaceSnapshot?.selfTransactions ?? []}
-          loading={workspaceSnapshotQuery.isLoading}
+          transactions={selfTransactions}
+          loading={selfTrackLoading}
         />
       ) : null}
 
@@ -2529,7 +2562,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                   <h2 className={styles.sectionTitle}>{lang === "zh" ? "本轮监督成员" : "Supervised members"}</h2>
                 </div>
                 <span className={styles.secondaryPill}>
-                  {monitoredRun ? monitoredStatusLabel : lang === "zh" ? "等待启动" : "Waiting"}
+                  {supervisedMembersRun ? supervisedMembersRunStatusLabel : lang === "zh" ? "等待启动" : "Waiting"}
                 </span>
               </div>
               <div className={styles.supervisedMembersList}>
@@ -2557,7 +2590,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                   </article>
                 ))}
               </div>
-              {!monitoredRun ? (
+              {!supervisedMembersRun ? (
                 <p className={styles.noticeTextCompact}>
                   {lang === "zh" ? "启动监督运行后，这里会显示本轮实际绑定的 Agent 和模型。" : "Start a supervised run to show the bound agents and models for that run."}
                 </p>

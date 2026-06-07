@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -28,10 +29,12 @@ from .workbench_contract_service import get_workbench_contract
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 LIST_RECORD_LIMIT = 24
 DETAIL_RECORD_LIMIT = 400
+EVOLUTION_WORKSPACE_SNAPSHOT_SLOW_MS = 1000.0
 BLOCKED_DELETE_STATUSES = {"active", "applied"}
 MANUAL_GOVERNANCE_MODE = "manual_review"
 BLOCKED_EDIT_STATUSES = {"applied", "active", "rolled_back", "superseded", "promoted"}
 SELF_EVOLUTION_CANDIDATE_STATUS = "self_candidate_pending"
+EVOLUTION_WORKSPACE_SNAPSHOT_WAS_SLOW = False
 
 
 class EvolutionProposalNotFoundError(Exception):
@@ -153,9 +156,48 @@ def get_evolution_overview() -> dict[str, Any]:
     """Return overview payloads sourced from supervised evolution records."""
 
     lang = get_web_language()
-    runs = list_runs()
-    library_items = list_library_items()
-    pending_items = list_pending_library_items()
+    records = _load_records(PROJECT_ROOT, limit=LIST_RECORD_LIMIT)
+    runs = _run_payloads(records)
+    library_items = _library_items_from_records(records, lang=lang)
+    pending_items = _pending_items_from_records(records, lang=lang)
+    return _overview_from_dashboard(
+        runs,
+        library_items=library_items,
+        pending_items=pending_items,
+        lang=lang,
+    )
+
+
+def get_evolution_workspace_dashboard() -> dict[str, Any]:
+    """Return the dashboard payloads that share one supervised-record scan."""
+
+    lang = get_web_language()
+    records = _load_records(PROJECT_ROOT, limit=LIST_RECORD_LIMIT)
+    runs = _run_payloads(records)
+    library_items = _library_items_from_records(records, lang=lang)
+    pending_items = _pending_items_from_records(records, lang=lang)
+    return {
+        "overview": _overview_from_dashboard(
+            runs,
+            library_items=library_items,
+            pending_items=pending_items,
+            lang=lang,
+        ),
+        "runs": runs,
+        "library": {
+            "items": library_items,
+            "pending": pending_items,
+        },
+    }
+
+
+def _overview_from_dashboard(
+    runs: list[dict[str, Any]],
+    *,
+    library_items: list[dict[str, Any]],
+    pending_items: list[dict[str, Any]],
+    lang: str,
+) -> dict[str, Any]:
     latest_run = runs[0] if runs else None
     workbench_state = _build_workbench_state()
     current_status = _build_current_status(latest_run, lang)
@@ -189,7 +231,7 @@ def list_runs() -> list[dict[str, Any]]:
     """Return supervised run summaries for the web surface."""
 
     records = _load_records(PROJECT_ROOT, limit=LIST_RECORD_LIMIT)
-    return [_run_payload(record) for record in records]
+    return _run_payloads(records)
 
 
 def get_run(session_id: str, *, project_root: Path | None = None) -> dict[str, Any] | None:
@@ -209,11 +251,25 @@ def list_library_items() -> list[dict[str, Any]]:
     root = PROJECT_ROOT.resolve()
     lang = get_web_language()
     records = _load_records(root, limit=LIST_RECORD_LIMIT)
+    return _library_items_from_records(records, root=root, lang=lang)
+
+
+def _run_payloads(records: list[Any]) -> list[dict[str, Any]]:
+    return [_run_payload(record) for record in records]
+
+
+def _library_items_from_records(
+    records: list[Any],
+    *,
+    root: Path | None = None,
+    lang: str,
+) -> list[dict[str, Any]]:
+    active_root = (root or PROJECT_ROOT).resolve()
     items: list[dict[str, Any]] = []
     for record in records:
         if record.gym_proposal_status not in {"active", "superseded", "rolled_back", "promoted", "expired"}:
             continue
-        items.append(_library_item_payload(record, root=root, lang=lang))
+        items.append(_library_item_payload(record, root=active_root, lang=lang))
     return items
 
 
@@ -223,12 +279,22 @@ def list_pending_library_items() -> list[dict[str, Any]]:
     root = PROJECT_ROOT.resolve()
     lang = get_web_language()
     records = _load_records(root, limit=LIST_RECORD_LIMIT)
+    return _pending_items_from_records(records, root=root, lang=lang)
+
+
+def _pending_items_from_records(
+    records: list[Any],
+    *,
+    root: Path | None = None,
+    lang: str,
+) -> list[dict[str, Any]]:
+    active_root = (root or PROJECT_ROOT).resolve()
     pending: list[dict[str, Any]] = []
     for record in records:
         status = record.gym_proposal_status
         if status in {"proposed", "applied", "observing"} or (record.decision == "PROMOTE" and status == "missing"):
-            pending.append(_pending_item_payload(record, root=root, lang=lang))
-    pending.extend(list_self_evolution_candidate_pending_items(project_root=root, lang=lang))
+            pending.append(_pending_item_payload(record, root=active_root, lang=lang))
+    pending.extend(list_self_evolution_candidate_pending_items(project_root=active_root, lang=lang))
     return sorted(pending, key=lambda item: str(item.get("updatedAt") or ""), reverse=True)
 
 
@@ -1518,6 +1584,62 @@ def _score(value: float) -> int:
 def _load_records(root: Path, *, limit: int) -> list[Any]:
     records, _ = load_dashboard_records(project_root=root, limit=limit)
     return records
+
+
+def record_evolution_workspace_snapshot_perf(
+    *,
+    duration_ms: float,
+    timings_ms: dict[str, float],
+    payload: dict[str, Any],
+    include_self: bool,
+) -> None:
+    """Record slow/recovered workspace snapshot generation without storing large payloads."""
+
+    global EVOLUTION_WORKSPACE_SNAPSHOT_WAS_SLOW
+    slow = duration_ms >= EVOLUTION_WORKSPACE_SNAPSHOT_SLOW_MS
+    recovered = False
+    recovered_duration_ms = EVOLUTION_WORKSPACE_SNAPSHOT_SLOW_MS * 0.75
+    if EVOLUTION_WORKSPACE_SNAPSHOT_WAS_SLOW and duration_ms <= recovered_duration_ms:
+        recovered = True
+    EVOLUTION_WORKSPACE_SNAPSHOT_WAS_SLOW = slow
+    if not slow and not recovered:
+        return
+    try:
+        from core.web.services.runtime_scene_service import record_runtime_scene_event
+
+        library = payload.get("library") if isinstance(payload.get("library"), dict) else {}
+        overview = payload.get("overview") if isinstance(payload.get("overview"), dict) else {}
+        recent_runs = overview.get("recentRuns") if isinstance(overview.get("recentRuns"), list) else []
+        record_runtime_scene_event(
+            "evolution_service",
+            "workspace_snapshot",
+            "evolution.workspace_snapshot.slow" if slow else "evolution.workspace_snapshot.recovered",
+            message=(
+                "Evolution workspace snapshot exceeded slow threshold."
+                if slow
+                else "Evolution workspace snapshot recovered below slow threshold."
+            ),
+            level="warning" if slow else "info",
+            outcome="observed" if slow else "recovered",
+            fields={
+                "durationMs": round(float(duration_ms), 1),
+                "thresholdMs": EVOLUTION_WORKSPACE_SNAPSHOT_SLOW_MS,
+                "includeSelf": bool(include_self),
+                "timingsMs": {
+                    key: round(float(value), 1)
+                    for key, value in timings_ms.items()
+                },
+                "runCount": len(payload.get("runs") or []),
+                "recentRunCount": len(recent_runs),
+                "libraryItemCount": len(library.get("items") or []),
+                "pendingLibraryItemCount": len(library.get("pending") or []),
+                "worktreeRunCount": len(payload.get("worktreeRuns") or []),
+                "selfTransactionCount": len(payload.get("selfTransactions") or []),
+            },
+            lifecycle=True,
+        )
+    except Exception:
+        pass
 
 
 def _find_record(session_id: str, *, root: Path, limit: int) -> Any | None:

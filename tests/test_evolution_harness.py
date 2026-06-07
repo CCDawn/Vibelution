@@ -1654,6 +1654,34 @@ def test_infer_result_status_rejects_unclosed_transaction_probe():
     assert "未关账" in reason
 
 
+def test_infer_result_status_includes_environment_evidence_for_unclosed_transaction_probe():
+    status, reason = infer_result_status(
+        timed_out=False,
+        restart_expected=False,
+        restart_reentered=False,
+        primary_returncode=0,
+        last_observation={"phase": "session_end"},
+        scenario="transaction",
+        evolution_summary={
+            "environment": {
+                "unavailable": True,
+                "evidence": "ls: cannot access '/app': No such file or directory",
+            },
+            "validation": {"passed": 0, "failed": 0},
+            "transaction": {
+                "opened": True,
+                "closed": False,
+                "status": None,
+            },
+        },
+    )
+
+    assert status == "failed"
+    assert "任务环境不可用" in reason
+    assert "/app" in reason
+    assert "未关账" in reason
+
+
 def test_infer_result_status_rejects_transaction_probe_without_tool_activity():
     status, reason = infer_result_status(
         timed_out=False,
