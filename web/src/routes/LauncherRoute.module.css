@@ -109,6 +109,80 @@
   padding: 10px 12px 0;
 }
 
+.settingsStrip {
+  display: grid;
+  grid-template-columns: max-content max-content max-content minmax(0, 1fr);
+  align-items: center;
+  gap: 7px 10px;
+  min-width: 0;
+  margin: 8px 12px 0;
+  padding: 7px 9px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-panel) 78%, transparent);
+}
+
+.settingsStrip > span {
+  color: var(--fg-tertiary);
+  font-size: 0.66rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.settingsStrip > strong,
+.settingsStrip > small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settingsStrip > strong {
+  color: var(--fg-primary);
+  font-size: 0.8rem;
+}
+
+.settingsStrip > small {
+  color: var(--fg-secondary);
+  font-size: 0.74rem;
+}
+
+.segmentedControl {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  padding: 2px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--surface-card) 82%, transparent);
+}
+
+.segmentedControl button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 25px;
+  padding: 3px 7px;
+  border: 0;
+  border-radius: calc(var(--radius-control) - 2px);
+  color: var(--fg-secondary);
+  background: transparent;
+  font-size: 0.76rem;
+  line-height: 1;
+}
+
+.segmentedControl button[data-active="true"] {
+  color: var(--fg-primary);
+  background: color-mix(in srgb, var(--accent-primary) 22%, var(--surface-panel));
+}
+
+.segmentedControl button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 .metric,
 .panel {
   border: 1px solid var(--border-soft);
@@ -569,6 +643,14 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .settingsStrip {
+    grid-template-columns: max-content max-content minmax(0, 1fr);
+  }
+
+  .settingsStrip > small {
+    grid-column: 1 / -1;
+  }
+
   .workspace {
     display: flex;
     flex-direction: column;
@@ -588,6 +670,14 @@
 
   .actions {
     justify-content: flex-start;
+  }
+
+  .settingsStrip {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .segmentedControl {
+    justify-self: flex-start;
   }
 
   .header > div:first-child {

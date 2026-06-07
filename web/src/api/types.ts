@@ -1909,6 +1909,26 @@ export type ShutdownResponse = RuntimeControlResponse;
 export type RuntimeRestartResponse = RuntimeControlResponse;
 
 export type LauncherOperation = "start" | "stop" | "restart";
+export type WorkbenchWindowMode = "fullscreen" | "windowed";
+
+export type WorkbenchWindowModeSetting = {
+  mode: WorkbenchWindowMode;
+  effectiveMode: WorkbenchWindowMode;
+  envOverride: WorkbenchWindowMode | "";
+  configPath: string;
+  restartRequired: boolean;
+  options: Array<{
+    mode: WorkbenchWindowMode;
+    label: {
+      zh: string;
+      en: string;
+    };
+    detail: {
+      zh: string;
+      en: string;
+    };
+  }>;
+};
 
 export type LauncherComponentState = {
   id: "backend" | "frontend" | "browser" | string;
@@ -1975,11 +1995,21 @@ export type LauncherStatus = {
   projectBundle: LauncherProjectBundleState;
   runtimeManager: RuntimeSummary["runtimeManager"];
   lifecycleProof: RuntimeLifecycleProof;
+  settings?: {
+    workbenchWindow?: WorkbenchWindowModeSetting;
+  };
 };
 
 export type LauncherControlResponse = RuntimeControlResponse & {
   launcherMode: string;
   operation: LauncherOperation;
+};
+
+export type WorkbenchWindowModeUpdateResponse = {
+  ok: boolean;
+  mode: WorkbenchWindowMode;
+  setting: WorkbenchWindowModeSetting;
+  message: string;
 };
 
 export type SessionSummary = {

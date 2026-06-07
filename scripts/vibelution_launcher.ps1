@@ -4858,8 +4858,8 @@ function Start-ManagedBrowser {
     }
 
     $configuredWindowMode = if ($script:workbenchWindowMode) { [string]$script:workbenchWindowMode } else { "fullscreen" }
-    $windowMode = if ($WindowPurpose -eq "launcher_control_surface") { "windowed" } else { "fullscreen" }
-    $windowPolicy = if ($WindowPurpose -eq "launcher_control_surface") { "launcher_taskbar_windowed" } else { "fixed_workbench_fullscreen" }
+    $windowMode = if ($WindowPurpose -eq "launcher_control_surface") { "windowed" } else { $configuredWindowMode }
+    $windowPolicy = if ($WindowPurpose -eq "launcher_control_surface") { "launcher_taskbar_windowed" } else { "configured_workbench_window_mode" }
     $fullscreenForced = ($windowMode -eq "fullscreen")
     $browserArgs = @(
         "--user-data-dir=$ProfileDir",

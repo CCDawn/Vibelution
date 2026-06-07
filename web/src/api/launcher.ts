@@ -1,5 +1,5 @@
 import { fetchJson } from "./client";
-import type { LauncherControlResponse, LauncherStatus } from "./types";
+import type { LauncherControlResponse, LauncherStatus, WorkbenchWindowMode, WorkbenchWindowModeUpdateResponse } from "./types";
 
 export const LAUNCHER_ENDPOINT = "/api/launcher";
 export const DEFAULT_LAUNCHER_CONTROL_PORT = 8765;
@@ -112,6 +112,14 @@ export function stopLauncherBundle() {
 export function restartLauncherBundle() {
   return fetchLauncherJson<LauncherControlResponse>("restart", {
     method: "POST",
+  });
+}
+
+export function updateWorkbenchWindowMode(mode: WorkbenchWindowMode) {
+  return fetchLauncherJson<WorkbenchWindowModeUpdateResponse>("settings/workbench-window", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ mode }),
   });
 }
 
