@@ -82,6 +82,10 @@ class SourceCollectionRunStartPayload(BaseModel):
     agentRoles: list[str] = Field(default_factory=list, max_length=8)
     agentIds: dict[str, str] = Field(default_factory=dict)
     inputRefs: list[str] = Field(default_factory=list, max_length=120)
+    querySeeds: list[str] = Field(default_factory=list, max_length=40)
+    searchLanguages: list[str] = Field(default_factory=list, max_length=8)
+    sourceTypes: list[str] = Field(default_factory=list, max_length=16)
+    maxResultsPerQuery: int = Field(10, ge=1, le=100)
     scope: dict[str, Any] = Field(default_factory=dict)
 
 

@@ -51,6 +51,10 @@ SOURCE_COLLECTION_DEFAULT_AGENT_ROLES = (
     "source_acquisition",
     "content_extraction",
 )
+SOURCE_COLLECTION_DEFAULT_SEARCH_LANGUAGES = ("en", "zh")
+SOURCE_COLLECTION_DEFAULT_SOURCE_TYPES = ("paper", "review", "dataset", "preprint")
+SOURCE_COLLECTION_DEFAULT_MAX_RESULTS_PER_QUERY = 10
+SOURCE_COLLECTION_MAX_QUERIES = 48
 LOCAL_RESEARCH_OUTPUT_FIELDS = (
     "candidateType",
     "sourceRefs",
@@ -344,6 +348,15 @@ def start_source_collection_run(team_id: str, payload: dict[str, Any] | None = N
         scope["topic"] = topic
     scope["teamId"] = normalized_team_id
     scope["workflowKind"] = WORKFLOW_KIND_CHALLENGE_CUP_RESEARCH
+    preliminary_search_plan = _build_source_collection_search_plan(
+        team_id=normalized_team_id,
+        run_id="",
+        payload=request_payload,
+        scope=scope,
+        input_refs=input_refs,
+        roles=roles,
+    )
+    scope["dataSearchPlanRef"] = _source_collection_search_plan_ref(preliminary_search_plan)
     run = data_processing_service.create_processing_run(
         data_processing_service.DEFAULT_PROFILE_ID,
         title=title,
@@ -353,7 +366,19 @@ def start_source_collection_run(team_id: str, payload: dict[str, Any] | None = N
             "teamId": normalized_team_id,
             "requestedByAgent": requested_by_agent,
             "ownerAgentId": owner_agent_id,
+            "searchPlanId": preliminary_search_plan["planId"],
+            "queryCount": preliminary_search_plan["queryCount"],
+            "querySeedCount": len(preliminary_search_plan["querySeeds"]),
         },
+    )
+    search_plan = _build_source_collection_search_plan(
+        team_id=normalized_team_id,
+        run_id=run["runId"],
+        payload=request_payload,
+        scope=scope,
+        input_refs=input_refs,
+        roles=roles,
+        plan_id=preliminary_search_plan["planId"],
     )
     assignments = [
         data_processing_service.create_collection_assignment(
@@ -361,12 +386,13 @@ def start_source_collection_run(team_id: str, payload: dict[str, Any] | None = N
             {
                 "agentRole": role,
                 "agentId": _source_collection_agent_id(role, request_payload),
-                "scope": _source_collection_assignment_scope(role, scope),
+                "scope": _source_collection_assignment_scope(role, scope, search_plan=search_plan),
                 "inputRefs": input_refs,
                 "expectedRecordTypes": ["source_manifest", "paper", "dataset", "url", "file"],
                 "acceptance": {
                     "output": "CollectionOutput.records",
                     "handoff": "Import accepted DataRecord through Team workflow source-candidate bridge.",
+                    "resultWritebackContract": search_plan["resultWritebackContract"],
                     "noFormalKnowledgeWrite": True,
                 },
             },
@@ -397,10 +423,14 @@ def start_source_collection_run(team_id: str, payload: dict[str, Any] | None = N
             "assignmentCount": len(assignments),
             "requestedByAgent": requested_by_agent,
             "ownerAgentId": owner_agent_id,
+            "searchPlanId": search_plan["planId"],
+            "queryCount": search_plan["queryCount"],
+            "querySeedCount": len(search_plan["querySeeds"]),
         },
     )
     return {
         "run": data_processing_service.get_processing_run(run["runId"]),
+        "searchPlan": search_plan,
         "assignments": assignments,
         "assignmentCount": len(assignments),
         "workflow": _workflow_to_api(normalized_team_id, workflow, candidate_store),
@@ -3802,7 +3832,7 @@ def _source_collection_agent_id(role: str, payload: dict[str, Any]) -> str:
     return explicit or role
 
 
-def _source_collection_assignment_scope(role: str, base_scope: dict[str, Any]) -> dict[str, Any]:
+def _source_collection_assignment_scope(role: str, base_scope: dict[str, Any], *, search_plan: dict[str, Any] | None = None) -> dict[str, Any]:
     role_purposes = {
         "data_intake_coordinator": "Coordinate source collection and handoff to source_manifest import.",
         "data_discovery": "Find candidate source references under the run scope.",
@@ -3812,11 +3842,258 @@ def _source_collection_assignment_scope(role: str, base_scope: dict[str, Any]) -
         "source_quality": "Score reliability, completeness, and processing risk.",
         "intake_review": "Review collected records before challenge-cup candidate import.",
     }
-    return {
+    scope = {
         **base_scope,
         "agentRole": role,
         "rolePurpose": role_purposes.get(role, "Collect data records for downstream processing."),
     }
+    if isinstance(search_plan, dict):
+        assigned_queries = _source_collection_queries_for_role(search_plan, role)
+        scope["dataSearchPlanRef"] = _source_collection_search_plan_ref(search_plan)
+        scope["assignedQueries"] = assigned_queries
+        scope["queryCount"] = len(assigned_queries)
+        scope["resultWritebackContract"] = search_plan.get("resultWritebackContract", {})
+    return scope
+
+
+def _build_source_collection_search_plan(
+    *,
+    team_id: str,
+    run_id: str,
+    payload: dict[str, Any],
+    scope: dict[str, Any],
+    input_refs: list[str],
+    roles: list[str],
+    plan_id: str = "",
+) -> dict[str, Any]:
+    normalized_plan_id = _trim_text(plan_id, max_length=128) or _new_record_id("searchplan")
+    topic = _trim_text(scope.get("topic") or payload.get("topic"), max_length=500)
+    goal = _trim_text(scope.get("goal") or payload.get("goal"), max_length=1000)
+    query_seeds = _source_collection_query_seeds(payload, scope, input_refs, topic=topic, goal=goal)
+    languages = _source_collection_search_languages(payload.get("searchLanguages"))
+    source_types = _source_collection_source_types(payload.get("sourceTypes"))
+    max_results = _normalize_int(
+        payload.get("maxResultsPerQuery"),
+        default=SOURCE_COLLECTION_DEFAULT_MAX_RESULTS_PER_QUERY,
+        minimum=1,
+        maximum=100,
+    )
+    role_cycle = roles or list(SOURCE_COLLECTION_DEFAULT_AGENT_ROLES)
+    queries: list[dict[str, Any]] = []
+    for seed in query_seeds:
+        for source_type in source_types:
+            for language in languages:
+                if len(queries) >= SOURCE_COLLECTION_MAX_QUERIES:
+                    break
+                assigned_role = role_cycle[len(queries) % len(role_cycle)]
+                query_id = f"{normalized_plan_id}-q{len(queries) + 1:03d}"
+                queries.append(
+                    {
+                        "queryId": query_id,
+                        "query": _source_collection_query_text(seed, source_type=source_type, language=language),
+                        "seed": seed,
+                        "language": language,
+                        "sourceType": source_type,
+                        "assignedAgentRole": assigned_role,
+                        "maxResults": max_results,
+                        "status": "planned",
+                        "execution": {
+                            "mode": "contract_only",
+                            "externalSearchTriggered": False,
+                        },
+                        "writeback": {
+                            "target": "CollectionOutput.records",
+                            "recordStatus": "collected",
+                            "candidateImportTarget": "source_manifest",
+                        },
+                    }
+                )
+            if len(queries) >= SOURCE_COLLECTION_MAX_QUERIES:
+                break
+        if len(queries) >= SOURCE_COLLECTION_MAX_QUERIES:
+            break
+    writeback_contract = _source_collection_writeback_contract(team_id, run_id)
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "planId": normalized_plan_id,
+        "planKind": "source_collection_data_search",
+        "status": "planned",
+        "teamId": team_id,
+        "runId": run_id,
+        "topic": topic,
+        "goal": goal,
+        "querySeeds": query_seeds,
+        "queryCount": len(queries),
+        "sourceTypes": source_types,
+        "searchLanguages": languages,
+        "maxResultsPerQuery": max_results,
+        "queries": queries,
+        "roleAssignmentInputs": _source_collection_role_assignment_inputs(queries, roles, payload),
+        "resultWritebackContract": writeback_contract,
+        "boundaries": {
+            "externalSearchTriggered": False,
+            "writesFormalKnowledge": False,
+            "writesRag": False,
+            "writesKnowledgeGraph": False,
+        },
+    }
+
+
+def _source_collection_search_plan_ref(search_plan: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "planId": _trim_text(search_plan.get("planId"), max_length=128),
+        "planKind": _trim_text(search_plan.get("planKind"), max_length=120) or "source_collection_data_search",
+        "status": _trim_text(search_plan.get("status"), max_length=80) or "planned",
+        "queryCount": _normalize_int(search_plan.get("queryCount"), default=0, minimum=0, maximum=SOURCE_COLLECTION_MAX_QUERIES),
+        "externalSearchTriggered": False,
+    }
+
+
+def _source_collection_writeback_contract(team_id: str, run_id: str) -> dict[str, Any]:
+    run_ref = _trim_text(run_id, max_length=128) or "{runId}"
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "target": "data_processing.collection_output.records",
+        "recordContract": {
+            "requiredAnyOf": ["sourceRef", "rawLocation", "title"],
+            "recordFields": ["sourceType", "sourceRef", "rawLocation", "title", "summary", "metadata", "qualitySignals", "collectionTrace"],
+            "collectionTraceFields": ["planId", "queryId", "assignmentId", "agentRole"],
+        },
+        "candidateImport": {
+            "targetCandidateType": "source_manifest",
+            "route": f"/api/teams/{team_id}/workflow-orchestration/data-processing/runs/{run_ref}/records/{{recordId}}/source-candidate",
+            "idempotencyKey": "metadata.importedFromDataRecord.recordId",
+        },
+        "formalKnowledgeWrites": False,
+        "ragWrites": False,
+        "officialGraphWrites": False,
+    }
+
+
+def _source_collection_role_assignment_inputs(queries: list[dict[str, Any]], roles: list[str], payload: dict[str, Any]) -> list[dict[str, Any]]:
+    assignments: list[dict[str, Any]] = []
+    for role in roles:
+        role_queries = _source_collection_queries_for_role({"queries": queries}, role)
+        assignments.append(
+            {
+                "agentRole": role,
+                "agentId": _source_collection_agent_id(role, payload),
+                "queryIds": [item["queryId"] for item in role_queries],
+                "queryCount": len(role_queries),
+                "expectedAction": _source_collection_expected_action(role),
+            }
+        )
+    return assignments
+
+
+def _source_collection_queries_for_role(search_plan: dict[str, Any], role: str) -> list[dict[str, Any]]:
+    queries = search_plan.get("queries")
+    if not isinstance(queries, list):
+        return []
+    return [item for item in queries if isinstance(item, dict) and item.get("assignedAgentRole") == role]
+
+
+def _source_collection_expected_action(role: str) -> str:
+    actions = {
+        "data_intake_coordinator": "Coordinate planned query execution and ensure outputs follow the writeback contract.",
+        "data_discovery": "Use assigned query seeds to identify candidate academic, dataset, or source references.",
+        "source_acquisition": "Turn discovered references into retrievable URLs, files, API refs, or local handles.",
+        "content_extraction": "Extract title, summary, metadata, quality signals, and trace fields into DataRecords.",
+        "source_deduplication": "Compare collected records and flag duplicate or version-related sources.",
+        "source_quality": "Score source reliability, completeness, and downstream processing risk.",
+        "intake_review": "Review collected DataRecords before importing accepted records as source_manifest candidates.",
+    }
+    return actions.get(role, "Collect data records under the source-collection run contract.")
+
+
+def _source_collection_query_seeds(payload: dict[str, Any], scope: dict[str, Any], input_refs: list[str], *, topic: str, goal: str) -> list[str]:
+    seeds: list[str] = []
+    for value in _normalize_text_list(payload.get("querySeeds"), max_items=40, max_length=220):
+        _append_source_collection_seed(seeds, value)
+    _append_source_collection_seed(seeds, topic)
+    for key in ("researchQuestion", "domain", "dataset", "benchmark", "organism", "method"):
+        _append_source_collection_seed(seeds, scope.get(key))
+    for value in _metadata_text_values(scope.get("keywords")):
+        _append_source_collection_seed(seeds, value)
+    for value in _metadata_text_values(scope.get("seedQueries")):
+        _append_source_collection_seed(seeds, value)
+    for ref in input_refs:
+        _append_source_collection_seed(seeds, _source_collection_seed_from_input_ref(ref))
+    if not seeds:
+        _append_source_collection_seed(seeds, goal)
+    if not seeds:
+        _append_source_collection_seed(seeds, "challenge cup research source collection")
+    return seeds[:12]
+
+
+def _append_source_collection_seed(seeds: list[str], value: Any) -> None:
+    text = _trim_text(value, max_length=220)
+    if not text:
+        return
+    normalized = re.sub(r"\s+", " ", text).strip()
+    if not normalized:
+        return
+    seen = {item.lower() for item in seeds}
+    if normalized.lower() not in seen:
+        seeds.append(normalized)
+
+
+def _source_collection_seed_from_input_ref(value: Any) -> str:
+    text = _trim_text(value, max_length=220)
+    lowered = text.lower()
+    for prefix in ("seed-query:", "query:", "keyword:", "topic:"):
+        if lowered.startswith(prefix):
+            return text[len(prefix) :].strip()
+    return text
+
+
+def _metadata_text_values(value: Any) -> list[str]:
+    if isinstance(value, str):
+        return [_trim_text(value, max_length=220)] if _trim_text(value, max_length=220) else []
+    if isinstance(value, list):
+        results: list[str] = []
+        for item in value[:24]:
+            results.extend(_metadata_text_values(item))
+        return results
+    if isinstance(value, dict):
+        results: list[str] = []
+        for item in value.values():
+            results.extend(_metadata_text_values(item))
+        return results
+    return []
+
+
+def _source_collection_search_languages(value: Any) -> list[str]:
+    languages = _normalize_text_list(value, max_items=8, max_length=16)
+    return languages or list(SOURCE_COLLECTION_DEFAULT_SEARCH_LANGUAGES)
+
+
+def _source_collection_source_types(value: Any) -> list[str]:
+    source_types = _normalize_text_list(value, max_items=16, max_length=40)
+    return source_types or list(SOURCE_COLLECTION_DEFAULT_SOURCE_TYPES)
+
+
+def _source_collection_query_text(seed: str, *, source_type: str, language: str) -> str:
+    normalized_seed = _trim_text(seed, max_length=220)
+    normalized_source_type = _trim_text(source_type, max_length=40).lower()
+    normalized_language = _trim_text(language, max_length=16).lower()
+    if normalized_language.startswith("zh") or normalized_language in {"cn", "chinese"}:
+        suffixes = {
+            "paper": "论文",
+            "review": "综述",
+            "dataset": "数据集",
+            "preprint": "预印本",
+        }
+        suffix = suffixes.get(normalized_source_type, normalized_source_type or "资料")
+        return _trim_text(f"{normalized_seed} {suffix}", max_length=260)
+    suffixes = {
+        "paper": "peer reviewed paper",
+        "review": "review",
+        "dataset": "dataset",
+        "preprint": "preprint",
+    }
+    suffix = suffixes.get(normalized_source_type, normalized_source_type or "source")
+    return _trim_text(f"{normalized_seed} {suffix}", max_length=260)
 
 
 def _local_research_llm_client(model_id: str, *, llm_client_factory: Any = None) -> Any:
