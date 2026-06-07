@@ -118,6 +118,10 @@ def test_team_workflow_route_starts_source_collection_run(tmp_path, monkeypatch)
             "requestedByAgent": "Research Coordination Agent",
             "agentRoles": ["data_discovery", "source_acquisition"],
             "inputRefs": ["seed-query:neural gating"],
+            "querySeeds": ["thalamic gating"],
+            "searchLanguages": ["en"],
+            "sourceTypes": ["paper"],
+            "maxResultsPerQuery": 5,
         },
     )
     run_id = response.json()["run"]["runId"]
@@ -126,7 +130,12 @@ def test_team_workflow_route_starts_source_collection_run(tmp_path, monkeypatch)
 
     assert response.status_code == 201, response.text
     assert response.json()["assignmentCount"] == 2
+    assert response.json()["searchPlan"]["querySeeds"] == ["thalamic gating", "neural gating"]
+    assert response.json()["searchPlan"]["queryCount"] == 2
+    assert response.json()["searchPlan"]["boundaries"]["externalSearchTriggered"] is False
+    assert response.json()["searchPlan"]["resultWritebackContract"]["ragWrites"] is False
     assert {item["agentRole"] for item in response.json()["assignments"]} == {"data_discovery", "source_acquisition"}
+    assert all(item["scope"]["assignedQueries"] for item in response.json()["assignments"])
     assert response.json()["workflow"]["activeWorkflowItems"][0]["candidateId"] == run_id
     assert assignments_response.json()["summary"]["assignmentCount"] == 2
     assert status_response.json()["boundaries"]["writesFormalKnowledge"] is False

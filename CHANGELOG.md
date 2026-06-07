@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.11.4 - 2026-06-08
+
+- Added a traceable Challenge Cup data-search plan contract to source-collection run startup, including query seeds, planned queries, role assignment inputs, and result writeback boundaries.
+- Extended `/api/teams/{team_id}/workflow-orchestration/source-collection-runs` with query seed, language, source type, and max-results inputs while keeping the slice contract-only with no external search execution.
+- Updated the Challenge Cup flow HTML to show M6.5 data-search planning as the next step in the source-collection Agent workflow.
+
 ## 0.11.3 - 2026-06-07
 
 - Added a Team workflow source-collection run launcher that creates a generic DataProcessing run plus functional collection assignments for the AI research team.
