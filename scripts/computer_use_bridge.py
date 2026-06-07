@@ -10,8 +10,10 @@ from __future__ import annotations
 
 import argparse
 import base64
+import ipaddress
 import json
 import os
+import re
 import shutil
 import shlex
 import socket
@@ -35,6 +37,8 @@ DEFAULT_EDGE_CANDIDATES = (
 HIGH_RISK_ACTION_TOKENS = {"submit", "send", "delete", "pay", "purchase", "download", "upload", "login", "confirm"}
 SUPPORTED_ACTIONS = {"click", "type", "fill", "press", "scroll", "wait", "navigate", "screenshot", "wait_for_selector"}
 ACTION_ALIASES = {"goto": "navigate", "open": "navigate", "sleep": "wait", "input": "type"}
+BRIDGE_TOKEN_ENV = "VIBELUTION_COMPUTER_USE_BRIDGE_TOKEN"
+BRIDGE_TOKEN_HEADER = "X-Vibelution-Computer-Use-Token"
 
 
 def resolve_edge() -> Path:
@@ -51,11 +55,9 @@ def normalize_domains(value: Any) -> list[str]:
         items = str(value or "").replace(";", ",").split(",")
     domains: list[str] = []
     for item in items:
-        domain = str(item or "").strip().lower()
+        domain = normalize_host_token(str(item or ""))
         if not domain:
             continue
-        if "://" in domain:
-            domain = str(urlparse(domain).hostname or "").lower()
         if domain and domain not in domains:
             domains.append(domain)
     return domains
@@ -67,6 +69,54 @@ def is_allowed_url(url: str, allowed_domains: list[str]) -> bool:
         return False
     host = parsed.hostname.lower()
     return host in allowed_domains
+
+
+def is_public_internet_url(url: str) -> bool:
+    parsed = urlparse(str(url or ""))
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        return False
+    return is_public_internet_host(parsed.hostname)
+
+
+def is_public_internet_host(hostname: str) -> bool:
+    host = normalize_host_token(hostname)
+    if not host:
+        return False
+    if any(char.isspace() for char in host) or any(char in host for char in "*/\\"):
+        return False
+    if host in {"localhost", "localhost.localdomain"} or host.endswith(".localhost"):
+        return False
+    if host == "metadata.google.internal":
+        return False
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return True
+    return not (
+        address.is_private
+        or address.is_loopback
+        or address.is_link_local
+        or address.is_multicast
+        or address.is_reserved
+        or address.is_unspecified
+    )
+    labels = host.split(".")
+    if len(labels) < 2 or all(label.isdigit() for label in labels):
+        return False
+    hostname_label = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
+    return all(bool(hostname_label.match(label)) for label in labels)
+
+
+def normalize_host_token(value: str) -> str:
+    raw = str(value or "").strip().lower().strip("/")
+    if not raw:
+        return ""
+    try:
+        parsed = urlparse(raw if "://" in raw else f"//{raw}")
+        host = parsed.hostname or raw
+    except ValueError:
+        host = raw
+    return str(host or "").strip().strip("[]").lower().rstrip(".")
 
 
 def normalize_action_name(value: Any) -> str:
@@ -190,8 +240,12 @@ def validate_action_domains(actions: list[dict[str, Any]], allowed_domains: list
         shape_error = validate_action_shape(action, index=index)
         if shape_error:
             return shape_error
-        if action.get("action") == "navigate" and not is_allowed_url(str(action.get("url") or ""), allowed_domains):
-            return "Action navigates outside allowed_domains."
+        if action.get("action") == "navigate":
+            url = str(action.get("url") or "")
+            if not is_public_internet_url(url):
+                return "Action navigates outside public internet boundaries."
+            if not is_allowed_url(url, allowed_domains):
+                return "Action navigates outside allowed_domains."
     return ""
 
 
@@ -266,6 +320,20 @@ def run_browser_task(payload: dict[str, Any], *, edge: Path, timeout: int) -> di
         host = str(urlparse(target_url).hostname or "").lower()
         if host and host not in allowed_domains:
             allowed_domains.append(host)
+    if target_url and not is_public_internet_url(target_url):
+        return {
+            "status": "blocked",
+            "summary": "target_url is outside public internet boundaries.",
+            "steps": [],
+            "error": "NETWORK_BOUNDARY_BLOCKED",
+        }
+    if any(not is_public_internet_host(domain) for domain in allowed_domains):
+        return {
+            "status": "blocked",
+            "summary": "allowed_domains contains a local or private host.",
+            "steps": [],
+            "error": "NETWORK_BOUNDARY_BLOCKED",
+        }
     if not task:
         return {"status": "failed", "summary": "task is required.", "steps": [], "error": "MISSING_TASK"}
     if not target_url or not is_allowed_url(target_url, allowed_domains):
@@ -282,6 +350,22 @@ def run_browser_task(payload: dict[str, Any], *, edge: Path, timeout: int) -> di
             "summary": action_domain_error,
             "steps": [],
             "error": "DOMAIN_BLOCKED",
+            "requestedActions": [public_action_summary(action, index=index) for index, action in enumerate(actions, start=1)],
+        }
+    if contains_high_risk_action(actions) and not bool(payload.get("confirmed") and payload.get("_bridge_authenticated")):
+        return {
+            "status": "need_confirmation",
+            "summary": "Sandbox browser paused before a high-risk action.",
+            "steps": [
+                {
+                    "index": 1,
+                    "action": "confirmation",
+                    "summary": "High-risk browser action requires authenticated confirmation before execution.",
+                    "status": "ready",
+                    "requiresConfirmation": True,
+                }
+            ],
+            "needsConfirmation": True,
             "requestedActions": [public_action_summary(action, index=index) for index, action in enumerate(actions, start=1)],
         }
     if actions:
@@ -365,7 +449,7 @@ def run_cdp_browser_task(
     steps: list[dict[str, Any]] = []
     screenshot_b64 = ""
     browser: subprocess.Popen[str] | None = None
-    require_confirmation = bool(payload.get("require_confirmation", payload.get("requireConfirmation", True)))
+    require_confirmation = not bool(payload.get("confirmed") and payload.get("_bridge_authenticated"))
     tmp = Path(tempfile.mkdtemp(prefix="vibelution-cu-"))
     try:
         profile_dir = tmp / "profile"
@@ -827,7 +911,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         if self.path == "/health":
-            self._json({"status": "ok", "edge": str(self.edge_path)})
+            self._json({"status": "ok", "edge": str(self.edge_path), "bridgeAuth": True})
             return
         self._json({"detail": "Not Found"}, status=404)
 
@@ -840,6 +924,7 @@ class Handler(BaseHTTPRequestHandler):
             payload = json.loads(self.rfile.read(length).decode("utf-8")) if length > 0 else {}
             if not isinstance(payload, dict):
                 payload = {}
+            payload["_bridge_authenticated"] = bridge_request_authenticated(self.headers.get(BRIDGE_TOKEN_HEADER, ""))
             result = run_browser_task(payload, edge=self.edge_path, timeout=self.task_timeout)
             self._json(result)
         except subprocess.TimeoutExpired:
@@ -857,6 +942,11 @@ class Handler(BaseHTTPRequestHandler):
 
     def log_message(self, format: str, *args: Any) -> None:
         return
+
+
+def bridge_request_authenticated(submitted: str) -> bool:
+    expected = str(os.environ.get(BRIDGE_TOKEN_ENV) or "").strip()
+    return bool(expected and str(submitted or "").strip() == expected)
 
 
 def main() -> None:

@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import base64
+import contextlib
+import ipaddress
 import json
 import os
 import re
@@ -40,7 +42,10 @@ ACTION_ALIASES = {
 MAX_STEPS_LIMIT = 30
 MAX_TIMEOUT_SECONDS = 300
 DEFAULT_TIMEOUT_SECONDS = 180
+RESUMING_STALE_SECONDS = 300
 MAX_ACTION_TEXT_CHARS = 2000
+BRIDGE_TOKEN_HEADER = "X-Vibelution-Computer-Use-Token"
+BRIDGE_TOKEN_PATH = PROJECT_ROOT / ".runtime" / "computer-use" / "bridge.token"
 _SAFE_TOKEN = re.compile(r"[^A-Za-z0-9_.-]+")
 
 
@@ -155,73 +160,88 @@ def confirm_computer_use_session(session_id: str, confirmation: str = "approved"
     normalized_id = _normalize_session_id(session_id)
     payload = _load_session(normalized_id)
     if str(payload.get("status") or "") == "resuming":
-        raise ComputerUseError("Computer Use session is already resuming after confirmation.")
+        if not _resuming_is_stale(payload):
+            raise ComputerUseError("Computer Use session is already resuming after confirmation.")
+        payload["status"] = "need_confirmation"
+        payload["needsConfirmation"] = True
+        payload.pop("resumingStartedAt", None)
+        _save_session(payload)
+        _release_session_lock(normalized_id)
     if str(payload.get("status") or "") != "need_confirmation":
         raise ComputerUseError("Only sessions waiting for confirmation can be confirmed.")
     confirmation_text = str(confirmation or "approved").strip() or "approved"
     pending_request = _pending_request_for_resume(payload)
     if pending_request:
-        started = time.perf_counter()
-        confirmation_step = {
-            "action": "confirmation",
-            "summary": "Computer Use task confirmed by user; resuming pending browser actions.",
-            "status": "completed",
-        }
-        payload.update(
-            {
-                "status": "running",
-                "needsConfirmation": False,
-                "confirmation": confirmation_text,
-                "summary": "Computer Use task confirmed by user; resuming pending browser actions.",
-                "updatedAt": _now(),
-            }
-        )
-        payload["steps"] = list(payload.get("steps") or []) + [confirmation_step]
-        _append_step(normalized_id, confirmation_step)
-        payload["status"] = "resuming"
-        _save_session(payload)
-        _record_event("computer_use.task.confirmed", payload, outcome="confirmed")
-        payload["status"] = "running"
-        payload.pop("pendingExecution", None)
+        lock_acquired = False
         try:
-            provider_payload = _call_open_computer_use(
-                _request_with_confirmation(pending_request, confirmation_text),
-                session_id=normalized_id,
-            )
-            result = _normalize_provider_result(provider_payload, session_id=normalized_id, require_confirmation=False)
-            combined_steps = list(payload.get("steps") or []) + list(result.get("steps") or [])
-            payload.update(result)
-            payload["steps"] = _reindex_steps(combined_steps)
-        except TimeoutError as exc:
-            payload.update({"status": "timeout", "summary": "Computer Use task timed out after confirmation.", "error": str(exc)})
-        except Exception as exc:
+            _acquire_session_lock(normalized_id)
+            lock_acquired = True
+            started = time.perf_counter()
+            confirmation_step = {
+                "action": "confirmation",
+                "summary": "Computer Use task confirmed by user; resuming pending browser actions.",
+                "status": "completed",
+            }
             payload.update(
                 {
-                    "status": "failed",
-                    "summary": "Computer Use task failed after confirmation.",
-                    "error": f"{type(exc).__name__}: {exc}",
+                    "status": "running",
+                    "needsConfirmation": False,
+                    "confirmation": confirmation_text,
+                    "summary": "Computer Use task confirmed by user; resuming pending browser actions.",
+                    "resumingStartedAt": _now(),
+                    "updatedAt": _now(),
                 }
             )
-        if str(payload.get("status") or "") != "need_confirmation" or not isinstance(payload.get("pendingExecution"), dict):
+            payload["steps"] = list(payload.get("steps") or []) + [confirmation_step]
+            _append_step(normalized_id, confirmation_step)
+            payload["status"] = "resuming"
+            _save_session(payload)
+            _record_event("computer_use.task.confirmed", payload, outcome="confirmed")
+            payload["status"] = "running"
             payload.pop("pendingExecution", None)
-        payload["needsConfirmation"] = str(payload.get("status") or "") == "need_confirmation"
-        payload["durationMs"] = _duration_ms(started)
-        payload["updatedAt"] = _now()
-        _save_session(payload)
-        event_code = {
-            "completed": "computer_use.task.confirmed_resumed",
-            "need_confirmation": "computer_use.task.confirmation_required",
-            "blocked": "computer_use.task.blocked",
-            "timeout": "computer_use.task.timeout",
-            "cancelled": "computer_use.task.cancelled",
-        }.get(str(payload.get("status") or ""), "computer_use.task.failed")
-        _record_event(
-            event_code,
-            payload,
-            outcome=str(payload.get("status") or "failed"),
-            level="warning" if payload.get("status") in {"need_confirmation", "blocked", "timeout", "failed"} else "info",
-        )
-        return _public_payload(payload)
+            try:
+                provider_payload = _call_open_computer_use(
+                    _request_with_confirmation(pending_request, confirmation_text),
+                    session_id=normalized_id,
+                )
+                result = _normalize_provider_result(provider_payload, session_id=normalized_id, require_confirmation=False)
+                combined_steps = list(payload.get("steps") or []) + list(result.get("steps") or [])
+                payload.update(result)
+                payload["steps"] = _reindex_steps(combined_steps)
+            except TimeoutError as exc:
+                payload.update({"status": "timeout", "summary": "Computer Use task timed out after confirmation.", "error": str(exc)})
+            except Exception as exc:
+                payload.update(
+                    {
+                        "status": "failed",
+                        "summary": "Computer Use task failed after confirmation.",
+                        "error": f"{type(exc).__name__}: {exc}",
+                    }
+                )
+            if str(payload.get("status") or "") != "need_confirmation" or not isinstance(payload.get("pendingExecution"), dict):
+                payload.pop("pendingExecution", None)
+            payload["needsConfirmation"] = str(payload.get("status") or "") == "need_confirmation"
+            payload["durationMs"] = _duration_ms(started)
+            payload["updatedAt"] = _now()
+            payload.pop("resumingStartedAt", None)
+            _save_session(payload)
+            event_code = {
+                "completed": "computer_use.task.confirmed_resumed",
+                "need_confirmation": "computer_use.task.confirmation_required",
+                "blocked": "computer_use.task.blocked",
+                "timeout": "computer_use.task.timeout",
+                "cancelled": "computer_use.task.cancelled",
+            }.get(str(payload.get("status") or ""), "computer_use.task.failed")
+            _record_event(
+                event_code,
+                payload,
+                outcome=str(payload.get("status") or "failed"),
+                level="warning" if payload.get("status") in {"need_confirmation", "blocked", "timeout", "failed"} else "info",
+            )
+            return _public_payload(payload)
+        finally:
+            if lock_acquired:
+                _release_session_lock(normalized_id)
 
     payload["status"] = "blocked"
     payload["needsConfirmation"] = False
@@ -230,6 +250,7 @@ def confirm_computer_use_session(session_id: str, confirmation: str = "approved"
     payload["error"] = "CONFIRMATION_CONTINUATION_MISSING"
     payload["updatedAt"] = _now()
     payload.pop("pendingExecution", None)
+    payload.pop("resumingStartedAt", None)
     _append_step(normalized_id, {"type": "confirmation", "summary": payload["summary"], "status": "blocked"})
     _save_session(payload)
     _record_event("computer_use.task.blocked", payload, outcome="confirmation_continuation_missing", level="warning")
@@ -244,6 +265,8 @@ def cancel_computer_use_session(session_id: str, reason: str = "cancelled_by_use
     payload["status"] = "cancelled"
     payload["needsConfirmation"] = False
     payload.pop("pendingExecution", None)
+    payload.pop("resumingStartedAt", None)
+    _release_session_lock(normalized_id)
     payload["summary"] = "Computer Use task cancelled."
     payload["error"] = str(reason or "cancelled_by_user").strip() or "cancelled_by_user"
     payload["updatedAt"] = _now()
@@ -279,6 +302,8 @@ def _normalize_request(**kwargs: Any) -> dict[str, Any]:
     target_url = str(kwargs.get("target_url") or "").strip()
     if target_url and not _is_http_url(target_url):
         raise ComputerUseError("target_url must start with http:// or https://.")
+    if target_url and not _is_public_internet_url(target_url):
+        raise ComputerUseError("target_url must use a public internet host; local, private, link-local, and metadata hosts are blocked.")
     domains = _normalize_allowed_domains(kwargs.get("allowed_domains"))
     if target_url:
         host = str(urlparse(target_url).hostname or "").lower()
@@ -286,6 +311,7 @@ def _normalize_request(**kwargs: Any) -> dict[str, Any]:
             domains.append(host)
     if not domains:
         raise ComputerUseError("allowed_domains is required unless target_url contains a host.")
+    _validate_allowed_domains_public(domains)
     max_steps = _bounded_int(kwargs.get("max_steps"), default=20, minimum=1, maximum=MAX_STEPS_LIMIT)
     actions = _normalize_actions(kwargs.get("actions"), max_steps=max_steps)
     _validate_action_domains(actions, domains)
@@ -322,6 +348,9 @@ def _call_open_computer_use(request: dict[str, Any], *, session_id: str) -> dict
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
         headers["X-API-Key"] = api_key
+    bridge_token = _bridge_token_for_base_url(base_url)
+    if bridge_token:
+        headers[BRIDGE_TOKEN_HEADER] = bridge_token
     response = requests.post(
         endpoint,
         headers=headers,
@@ -664,15 +693,17 @@ def _normalize_allowed_domains(value: Any) -> list[str]:
         raw_items = re.split(r"[,;\s]+", str(value or ""))
     domains: list[str] = []
     for item in raw_items:
-        domain = str(item or "").strip().lower()
+        domain = _normalize_host_token(str(item or ""))
         if not domain:
             continue
-        if "://" in domain:
-            domain = str(urlparse(domain).hostname or "").lower()
-        domain = domain.strip("/")
         if domain and domain not in domains:
             domains.append(domain)
     return domains
+
+
+def _validate_allowed_domains_public(domains: list[str]) -> None:
+    if any(not _is_public_internet_host(domain) for domain in domains):
+        raise ComputerUseError("allowed_domains must contain public internet hosts only.")
 
 
 def _normalize_actions(value: Any, *, max_steps: int) -> list[dict[str, Any]]:
@@ -813,6 +844,8 @@ def _validate_action_domains(actions: list[dict[str, Any]], allowed_domains: lis
         if action.get("action") != "navigate":
             continue
         url = str(action.get("url") or "")
+        if not _is_public_internet_url(url):
+            raise ComputerUseError(f"Action {index} navigates outside public internet boundaries.")
         if not _is_allowed_action_url(url, allowed_domains):
             raise ComputerUseError(f"Action {index} navigates outside allowed_domains.")
 
@@ -864,6 +897,83 @@ def _is_http_url(value: str) -> bool:
     return parsed.scheme in {"http", "https"} and bool(parsed.hostname)
 
 
+def _bridge_token_for_base_url(base_url: str) -> str:
+    if not _is_loopback_url(base_url):
+        return ""
+    token = str(os.environ.get("VIBELUTION_COMPUTER_USE_BRIDGE_TOKEN") or "").strip()
+    if token:
+        return token
+    try:
+        return BRIDGE_TOKEN_PATH.read_text(encoding="utf-8-sig").strip()
+    except OSError:
+        return ""
+
+
+def _is_loopback_url(value: str) -> bool:
+    parsed = urlparse(str(value or ""))
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        return False
+    return _is_loopback_host(parsed.hostname)
+
+
+def _is_loopback_host(hostname: str) -> bool:
+    host = _normalize_host_token(hostname)
+    if host in {"localhost", "localhost.localdomain"} or host.endswith(".localhost"):
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def _is_public_internet_url(value: str) -> bool:
+    parsed = urlparse(str(value or ""))
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        return False
+    return _is_public_internet_host(parsed.hostname)
+
+
+def _is_public_internet_host(hostname: str) -> bool:
+    host = _normalize_host_token(hostname)
+    if not host:
+        return False
+    if any(char.isspace() for char in host) or any(char in host for char in "*/\\"):
+        return False
+    if host in {"localhost", "localhost.localdomain"} or host.endswith(".localhost"):
+        return False
+    if host == "metadata.google.internal":
+        return False
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return True
+    return not (
+        address.is_private
+        or address.is_loopback
+        or address.is_link_local
+        or address.is_multicast
+        or address.is_reserved
+        or address.is_unspecified
+    )
+    labels = host.split(".")
+    if len(labels) < 2 or all(label.isdigit() for label in labels):
+        return False
+    hostname_label = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
+    return all(bool(hostname_label.match(label)) for label in labels)
+
+
+def _normalize_host_token(value: str) -> str:
+    raw = str(value or "").strip().lower().strip("/")
+    if not raw:
+        return ""
+    try:
+        parsed = urlparse(raw if "://" in raw else f"//{raw}")
+        host = parsed.hostname or raw
+    except ValueError:
+        host = raw
+    return str(host or "").strip().strip("[]").lower().rstrip(".")
+
+
 def _bounded_int(value: Any, *, default: int, minimum: int, maximum: int) -> int:
     try:
         number = int(value)
@@ -907,6 +1017,39 @@ def _default_summary(status: str) -> str:
 
 def _session_dir(session_id: str) -> Path:
     return SESSION_ROOT / _normalize_session_id(session_id)
+
+
+def _session_lock_path(session_id: str) -> Path:
+    return _session_dir(session_id) / "confirm.lock"
+
+
+def _acquire_session_lock(session_id: str) -> bool:
+    path = _session_lock_path(session_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with path.open("x", encoding="utf-8") as handle:
+            handle.write(_now())
+    except FileExistsError as exc:
+        raise ComputerUseError("Computer Use session is already resuming after confirmation.") from exc
+    return True
+
+
+def _release_session_lock(session_id: str) -> None:
+    with contextlib.suppress(FileNotFoundError):
+        _session_lock_path(session_id).unlink()
+
+
+def _resuming_is_stale(payload: dict[str, Any]) -> bool:
+    started_at = str(payload.get("resumingStartedAt") or "").strip()
+    if not started_at:
+        return True
+    try:
+        started = datetime.fromisoformat(started_at)
+    except ValueError:
+        return True
+    if started.tzinfo is None:
+        started = started.replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - started).total_seconds() > RESUMING_STALE_SECONDS
 
 
 def _normalize_session_id(value: Any) -> str:
