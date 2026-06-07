@@ -38,7 +38,7 @@ import {
   type SystemStatusTone,
 } from "./systemStatus";
 import { applyWorkbenchDocumentLanguage } from "./documentLanguage";
-import { resolvePollingInterval } from "./pollingPolicy";
+import { resolvePollingInterval, useStartupWarmup } from "./pollingPolicy";
 import { recoverFromBuiltAssetResourceError } from "./routeChunkRecovery";
 import { nextWorkbenchTheme, readStoredWorkbenchTheme, writeStoredWorkbenchTheme } from "./themePreference";
 import { isWorkbenchDomainEnabled, isWorkbenchModeEnabled } from "./workbenchContract";
@@ -375,6 +375,7 @@ export function AppShell() {
   const [frontendOnline, setFrontendOnline] = useState(
     () => (typeof navigator === "undefined" ? true : navigator.onLine),
   );
+  const [shellStartupDataReady, setShellStartupDataReady] = useState(false);
   const shutdownPromiseRef = useRef<Promise<void> | null>(null);
   const restartPromiseRef = useRef<Promise<void> | null>(null);
   const utilityMenuRef = useRef<HTMLDivElement | null>(null);
@@ -393,21 +394,23 @@ export function AppShell() {
     queryKey: queryKeys.configPublic(),
     queryFn: () => fetchJson<ConfigSummary>("/api/config/public"),
   });
+  const shellStartupWarmupActive = useStartupWarmup(shellStartupDataReady);
+  const shellPollingVisible = frontendVisible || shellStartupWarmupActive;
   const lifecycleControlActive = shutdownOpen || shutdownRequested || restartRequested;
   const runtimeRefetchInterval = resolvePollingInterval(
-    frontendVisible,
+    shellPollingVisible,
     lifecycleControlActive ? 1_000 : 5_000,
     {
       backgroundMs: lifecycleControlActive ? 1_000 : 30_000,
       force: lifecycleControlActive,
     },
   );
-  const gitRefetchInterval = resolvePollingInterval(frontendVisible, 6_000, { backgroundMs: 60_000 });
+  const gitRefetchInterval = resolvePollingInterval(shellPollingVisible, 6_000, { backgroundMs: 60_000 });
   const runtimeQuery = useQuery({
     queryKey: queryKeys.runtimeSummary(),
     queryFn: () => fetchJson<RuntimeSummary>("/api/runtime/summary"),
     refetchInterval: runtimeRefetchInterval,
-    refetchIntervalInBackground: false,
+    refetchIntervalInBackground: shellStartupWarmupActive,
   });
   const backendHealthQuery = useQuery({
     queryKey: queryKeys.backendHealth(),
@@ -416,7 +419,7 @@ export function AppShell() {
         cache: "no-store",
       }),
     refetchInterval: runtimeRefetchInterval,
-    refetchIntervalInBackground: false,
+    refetchIntervalInBackground: shellStartupWarmupActive,
     staleTime: 0,
     retry: false,
   });
@@ -424,7 +427,7 @@ export function AppShell() {
     queryKey: queryKeys.gitStatus(),
     queryFn: () => fetchJson<GitStatusSummary>("/api/git/status"),
     refetchInterval: gitRefetchInterval,
-    refetchIntervalInBackground: false,
+    refetchIntervalInBackground: shellStartupWarmupActive,
   });
   const fileTreeQuery = useQuery({
     queryKey: queryKeys.fileTree(),
@@ -432,6 +435,11 @@ export function AppShell() {
     enabled: utilityOpen,
     staleTime: 8_000,
   });
+  useEffect(() => {
+    if (configQuery.data && runtimeQuery.data && backendHealthQuery.data) {
+      setShellStartupDataReady(true);
+    }
+  }, [backendHealthQuery.data, configQuery.data, runtimeQuery.data]);
 
   const workbench = runtimeQuery.data?.workbench;
   const lifecycleProof = runtimeQuery.data?.lifecycleProof;
@@ -611,6 +619,22 @@ export function AppShell() {
       options,
     );
   }, []);
+
+  useEffect(() => {
+    emitBrowserTelemetry({
+      phase: "startup",
+      eventCode: shellStartupWarmupActive
+        ? "browser.startup_background_warmup.active"
+        : "browser.startup_background_warmup.inactive",
+      message: shellStartupWarmupActive
+        ? "Startup background warmup is keeping shell polling alive."
+        : "Startup background warmup is inactive.",
+      fields: {
+        startupDataReady: shellStartupDataReady,
+        frontendVisible,
+      },
+    });
+  }, [emitBrowserTelemetry, frontendVisible, shellStartupDataReady, shellStartupWarmupActive]);
 
   const beginShutdown = useCallback(() => {
     if (restartPromiseRef.current || restartRequested) {

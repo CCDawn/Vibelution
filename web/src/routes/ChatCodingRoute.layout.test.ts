@@ -512,15 +512,17 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("sessionStreamRouteSwitchGraceActive");
     expect(routeSource).toContain("requestedSessionId !== activeSessionId");
     expect(routeSource).toContain("&& sessionStreamRouteTargetMatches");
-    expect(routeSource).toContain("pageVisible || sessionStreamRouteSwitchGraceActive");
+    expect(routeSource).toContain("const chatStartupWarmupActive = useStartupWarmup(chatStartupDataReady)");
+    expect(routeSource).toContain("const chatPollingVisible = pageVisible || chatStartupWarmupActive");
+    expect(routeSource).toContain("chatPollingVisible || sessionStreamRouteSwitchGraceActive");
     expect(routeSource).not.toContain("pageVisible || directSessionBackgroundSyncActive || sessionStreamRouteSwitchGraceActive");
-    expect(routeSource).toContain("&& (pageVisible || groupBackgroundSyncActive)");
+    expect(routeSource).toContain("&& (chatPollingVisible || groupBackgroundSyncActive)");
     expect(routeSource).toContain("if (!sessionStreamShouldConnect || typeof EventSource === \"undefined\")");
     expect(routeSource).toContain("if (!groupStreamShouldConnect || typeof EventSource === \"undefined\")");
     expect(routeSource).toContain("backgroundMs: directSessionBackgroundSyncActive && !sessionStreamConnected ? ACTIVE_BACKGROUND_SYNC_POLL_MS : false");
     expect(routeSource).toContain("backgroundMs: groupBackgroundSyncActive && !groupStreamConnected ? ACTIVE_BACKGROUND_SYNC_POLL_MS : false");
-    expect(routeSource).toContain("refetchIntervalInBackground: directSessionBackgroundSyncActive");
-    expect(routeSource).toContain("refetchIntervalInBackground: groupBackgroundSyncActive");
+    expect(routeSource).toContain("refetchIntervalInBackground: chatStartupWarmupActive || directSessionBackgroundSyncActive");
+    expect(routeSource).toContain("refetchIntervalInBackground: chatStartupWarmupActive || groupBackgroundSyncActive");
   });
 
   it("updates active direct session before pushing the route", () => {
@@ -539,6 +541,8 @@ describe("ChatCodingRoute layout contract", () => {
   it("logs direct session stream connect decisions with visibility inputs", () => {
     expect(routeSource).toContain("browser.session_stream.effect_started");
     expect(routeSource).toContain("browser.session_stream.skipped");
+    expect(routeSource).toContain("chatStartupWarmupActive");
+    expect(routeSource).toContain("chatPollingVisible");
     expect(routeSource).toContain("routeTargetMatches");
     expect(routeSource).toContain("routeSettling");
     expect(routeSource).toContain("routeSwitchGraceActive");
