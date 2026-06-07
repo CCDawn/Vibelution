@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.11.2 - 2026-06-07
+
+- Removed archived Team member Agents from extra group rooms during Team archive cascade, while preserving the existing linked Team room deletion behavior.
+- Added Team archive cleanup evidence with removed room ids and per-Agent room cleanup mapping in runtime scene events.
+- Refreshed Team archive frontend caches for Agents, mode bindings, chat rooms, sessions, conversations, config workspace, and project bus state.
+
 ## 0.11.1 - 2026-06-07
 
 - Added a Team workflow bridge that imports generic DataProcessing records into Challenge Cup `source_manifest` candidates while preserving run, record, quality, and collection-trace metadata.
