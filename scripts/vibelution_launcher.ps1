@@ -136,7 +136,7 @@ function Resolve-ConfiguredLauncherControlPort {
 }
 
 function Resolve-ConfiguredWorkbenchWindowMode {
-    $resolvedMode = "windowed"
+    $resolvedMode = "fullscreen"
     if (Test-Path $configPath) {
         try {
             $inWorkbenchBlock = $false
@@ -4756,7 +4756,14 @@ function Start-ManagedBrowser {
         $resolvedAppUrl = $url
     }
 
-    $windowMode = if ($script:workbenchWindowMode) { [string]$script:workbenchWindowMode } else { "windowed" }
+    $configuredWindowMode = if ($script:workbenchWindowMode) { [string]$script:workbenchWindowMode } else { "fullscreen" }
+    if ($WindowPurpose -eq "launcher_control_surface") {
+        $windowMode = "windowed"
+        $windowPolicy = "launcher_taskbar_windowed"
+    } else {
+        $windowMode = $configuredWindowMode
+        $windowPolicy = "configured_workbench_window_mode"
+    }
     $fullscreenForced = ($windowMode -eq "fullscreen")
     $browserArgs = @(
         "--user-data-dir=$ProfileDir",
@@ -4778,10 +4785,10 @@ function Start-ManagedBrowser {
         $browserArgs += "--start-fullscreen"
     }
 
-    Write-Note "Starting managed Edge app window ($windowMode mode) ..."
+    Write-Note "Starting managed Edge app window ($windowMode mode, $windowPolicy policy) ..."
     if ($script:currentRuntimeSceneId) {
-        Update-RuntimeSceneManifest @{ browser = @{ status = "launching"; executable = $BrowserExecutable; window_mode = $windowMode; fullscreen_forced = $fullscreenForced; profile_dir = $ProfileDir; app_url = $resolvedAppUrl; window_purpose = $WindowPurpose } }
-        Append-RuntimeSceneRawLog -RelativePath (Get-RuntimeSceneRelativePaths).Browser -Message "Launching managed browser window ($windowMode mode)."
+        Update-RuntimeSceneManifest @{ browser = @{ status = "launching"; executable = $BrowserExecutable; configured_window_mode = $configuredWindowMode; window_mode = $windowMode; window_policy = $windowPolicy; fullscreen_forced = $fullscreenForced; profile_dir = $ProfileDir; app_url = $resolvedAppUrl; window_purpose = $WindowPurpose } }
+        Append-RuntimeSceneRawLog -RelativePath (Get-RuntimeSceneRelativePaths).Browser -Message "Launching managed browser window ($windowMode mode, $windowPolicy policy)."
         Write-RuntimeSceneEvent `
             -Component "browser" `
             -Phase "window" `
@@ -4795,7 +4802,9 @@ function Start-ManagedBrowser {
                 app_chrome_theme = "dark"
                 app_url = $resolvedAppUrl
                 window_purpose = $WindowPurpose
+                configured_window_mode = $configuredWindowMode
                 window_mode = $windowMode
+                window_policy = $windowPolicy
                 fullscreen_forced = $fullscreenForced
                 profile_dir = $ProfileDir
                 launch_flags = @($browserArgs | Where-Object { $_ -notlike "--app=*" -and $_ -notlike "--user-data-dir=*" })
@@ -4810,7 +4819,7 @@ function Start-ManagedBrowser {
     if (-not $windowProcess) {
         Stop-ProcessesById (Get-ManagedBrowserPids -ProfileDir $ProfileDir -Role $WindowPurpose)
         if ($script:currentRuntimeSceneId) {
-            Update-RuntimeSceneManifest @{ browser = @{ status = "failed"; executable = $BrowserExecutable; launch_pid = $proc.Id; window_pid = 0; window_mode = $windowMode; fullscreen_forced = $fullscreenForced; profile_dir = $ProfileDir; app_url = $resolvedAppUrl; window_purpose = $WindowPurpose } }
+            Update-RuntimeSceneManifest @{ browser = @{ status = "failed"; executable = $BrowserExecutable; launch_pid = $proc.Id; window_pid = 0; configured_window_mode = $configuredWindowMode; window_mode = $windowMode; window_policy = $windowPolicy; fullscreen_forced = $fullscreenForced; profile_dir = $ProfileDir; app_url = $resolvedAppUrl; window_purpose = $WindowPurpose } }
             Append-RuntimeSceneRawLog -RelativePath (Get-RuntimeSceneRelativePaths).Browser -Message "Managed browser window did not open successfully."
             Write-RuntimeSceneEvent `
                 -Component "browser" `
@@ -4826,7 +4835,9 @@ function Start-ManagedBrowser {
                     console_window_suppressed = $true
                     app_url = $resolvedAppUrl
                     window_purpose = $WindowPurpose
+                    configured_window_mode = $configuredWindowMode
                     window_mode = $windowMode
+                    window_policy = $windowPolicy
                     fullscreen_forced = $fullscreenForced
                     profile_dir = $ProfileDir
                 }
@@ -4835,7 +4846,7 @@ function Start-ManagedBrowser {
     }
 
     if ($script:currentRuntimeSceneId) {
-        Update-RuntimeSceneManifest @{ browser = @{ status = "open"; executable = $BrowserExecutable; launch_pid = $proc.Id; window_pid = $windowProcess.Id; window_mode = $windowMode; fullscreen_forced = $fullscreenForced; profile_dir = $ProfileDir; app_url = $resolvedAppUrl; window_purpose = $WindowPurpose } }
+        Update-RuntimeSceneManifest @{ browser = @{ status = "open"; executable = $BrowserExecutable; launch_pid = $proc.Id; window_pid = $windowProcess.Id; configured_window_mode = $configuredWindowMode; window_mode = $windowMode; window_policy = $windowPolicy; fullscreen_forced = $fullscreenForced; profile_dir = $ProfileDir; app_url = $resolvedAppUrl; window_purpose = $WindowPurpose } }
         Append-RuntimeSceneRawLog -RelativePath (Get-RuntimeSceneRelativePaths).Browser -Message "Managed browser window opened (launch PID=$($proc.Id), window PID=$($windowProcess.Id))."
         Write-RuntimeSceneEvent `
             -Component "browser" `
@@ -4851,7 +4862,9 @@ function Start-ManagedBrowser {
                 console_window_suppressed = $true
                 app_url = $resolvedAppUrl
                 window_purpose = $WindowPurpose
+                configured_window_mode = $configuredWindowMode
                 window_mode = $windowMode
+                window_policy = $windowPolicy
                 fullscreen_forced = $fullscreenForced
                 profile_dir = $ProfileDir
             }
@@ -4864,6 +4877,10 @@ function Start-ManagedBrowser {
         WindowPid = $windowProcess.Id
         AppUrl = $resolvedAppUrl
         WindowPurpose = $WindowPurpose
+        ConfiguredWindowMode = $configuredWindowMode
+        WindowMode = $windowMode
+        WindowPolicy = $windowPolicy
+        FullscreenForced = $fullscreenForced
         ProfileDir = $ProfileDir
     }
 }

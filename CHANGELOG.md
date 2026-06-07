@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.11.4 - 2026-06-08
+
+- Hardened Config model deletion so primary LLM and Git commit-message model references must be rebound before removing model-library entries.
+- Validated Git commit-message model references and prompt placeholders through Config apply, with lifecycle log events for rejected unsafe drafts.
+- Made profile-targeted LLM tests report the referenced model-library id and made Workbench `window_mode` control the actual managed browser launch mode.
+- Updated the Launcher window policy evidence so runtime scene logs include both the configured Workbench mode and the actual launch policy.
+
 ## 0.11.3 - 2026-06-07
 
 - Added a Team workflow source-collection run launcher that creates a generic DataProcessing run plus functional collection assignments for the AI research team.

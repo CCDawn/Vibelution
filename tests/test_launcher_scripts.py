@@ -733,16 +733,20 @@ def test_launcher_control_port_prefers_env_override(tmp_path):
     assert resolved == 8899
 
 
-def test_launcher_window_mode_defaults_to_windowed(tmp_path):
+def test_launcher_window_mode_defaults_to_fullscreen(tmp_path):
     resolved = _resolve_launcher_window_mode(tmp_path, config_text="[workbench]\n")
 
-    assert resolved == "windowed"
+    assert resolved == "fullscreen"
 
 
 def test_launcher_window_mode_reads_config_and_env_override(tmp_path):
     resolved = _resolve_launcher_window_mode(
         tmp_path,
         config_text="[workbench]\nwindow_mode = \"fullscreen\"\n",
+    )
+    windowed = _resolve_launcher_window_mode(
+        tmp_path,
+        config_text="[workbench]\nwindow_mode = \"windowed\"\n",
     )
     overridden = _resolve_launcher_window_mode(
         tmp_path,
@@ -756,6 +760,7 @@ def test_launcher_window_mode_reads_config_and_env_override(tmp_path):
     )
 
     assert resolved == "fullscreen"
+    assert windowed == "windowed"
     assert overridden == "windowed"
     assert agent_alias == "fullscreen"
 
@@ -767,7 +772,7 @@ def test_launcher_window_mode_ignores_invalid_values(tmp_path):
         env_overrides={"VIBELUTION_WORKBENCH_WINDOW_MODE": "floating"},
     )
 
-    assert resolved == "windowed"
+    assert resolved == "fullscreen"
 
 
 def test_launcher_state_save_uses_retrying_atomic_writer(tmp_path):
@@ -1138,7 +1143,19 @@ if ($browserText -match '--kiosk') {
 if ($browserText -notmatch '--start-fullscreen' -or $browserText -notmatch 'fullscreenForced') {
     throw "Start-ManagedBrowser should only request fullscreen through the configured fullscreen mode."
 }
-if ($browserText -notmatch 'app_chrome_theme' -or $browserText -notmatch 'app_url' -or $browserText -notmatch 'window_purpose' -or $browserText -notmatch 'window_mode' -or $browserText -notmatch 'fullscreen_forced') {
+if ($browserText -notmatch '\\$configuredWindowMode' -or $browserText -notmatch '\\$WindowPurpose -eq "launcher_control_surface"') {
+    throw "Start-ManagedBrowser should distinguish configured Workbench mode from Launcher control-surface mode."
+}
+if ($browserText -notmatch '\\$windowMode\\s*=\\s*\\$configuredWindowMode') {
+    throw "Start-ManagedBrowser should apply the configured Workbench window mode to the managed Workbench window."
+}
+if ($browserText -notmatch '\\$fullscreenForced\\s*=\\s*\\(\\$windowMode -eq "fullscreen"\\)') {
+    throw "Start-ManagedBrowser should derive fullscreen launch flags from the actual window mode."
+}
+if ($browserText -notmatch 'launcher_taskbar_windowed' -or $browserText -notmatch 'configured_workbench_window_mode') {
+    throw "Start-ManagedBrowser should name the actual window policy in logs."
+}
+if ($browserText -notmatch 'app_chrome_theme' -or $browserText -notmatch 'app_url' -or $browserText -notmatch 'window_purpose' -or $browserText -notmatch 'configured_window_mode' -or $browserText -notmatch 'window_mode' -or $browserText -notmatch 'window_policy' -or $browserText -notmatch 'fullscreen_forced') {
     throw "Start-ManagedBrowser should log the managed app chrome strategy."
 }
 
