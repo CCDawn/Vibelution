@@ -3557,7 +3557,12 @@ if ($parseErrors -and $parseErrors.Count -gt 0) {
     throw "Launcher script parse failed: $($parseErrors[0].Message)"
 }
 
-foreach ($functionName in @("Get-ObjectPropertyValue", "Test-LauncherRestartActiveWorkBlocked")) {
+foreach ($functionName in @(
+    "Get-ObjectPropertyValue",
+    "Get-LauncherStatusActiveWorkCount",
+    "Get-LauncherRestartActiveWorkProbeUrls",
+    "Test-LauncherRestartActiveWorkBlocked"
+)) {
     $functionAst = $ast.Find({
         param($node)
         $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
@@ -3570,9 +3575,11 @@ foreach ($functionName in @("Get-ObjectPropertyValue", "Test-LauncherRestartActi
 }
 
 $script:url = "http://127.0.0.1:8000"
+$script:launcherControlUrl = "http://127.0.0.1:8765"
 $script:notes = @()
 $script:events = @()
 function Test-WebHealthy { return $true }
+function Test-LauncherControlHealthy { return $true }
 function Write-Note { param([string]$Message) $script:notes += $Message }
 function Write-LauncherControlLog {
     param([string]$Event, [string]$Message, [string]$Level = "info", [hashtable]$Fields = @{})
@@ -3580,7 +3587,7 @@ function Write-LauncherControlLog {
 }
 function Invoke-WebRequest {
     param([string]$Uri, [int]$TimeoutSec, [switch]$UseBasicParsing)
-    if ($Uri -ne "http://127.0.0.1:8000/api/launcher/status") {
+    if ($Uri -ne "http://127.0.0.1:8765/api/launcher/status") {
         throw "unexpected status uri $Uri"
     }
     return [pscustomobject]@{
@@ -3633,6 +3640,7 @@ if ($null -eq $functionAst) {
 . ([scriptblock]::Create($functionAst.Extent.Text))
 
 $script:url = "http://127.0.0.1:8000"
+function Test-LauncherControlHealthy { return $false }
 function Test-WebHealthy { return $false }
 function Invoke-WebRequest { throw "status endpoint should not be queried when backend is unhealthy." }
 
@@ -3676,6 +3684,8 @@ foreach ($functionName in @(
     "Get-ObjectPropertyValue",
     "Test-LauncherWorkRunStatusBlocksLifecycle",
     "Get-LauncherLocalActiveWorkRunCount",
+    "Get-LauncherStatusActiveWorkCount",
+    "Get-LauncherRestartActiveWorkProbeUrls",
     "Test-LauncherRestartActiveWorkBlocked"
 )) {
     $functionAst = $ast.Find({
@@ -3690,6 +3700,7 @@ foreach ($functionName in @(
 }
 
 $script:url = "http://127.0.0.1:8000"
+$script:launcherControlUrl = "http://127.0.0.1:8765"
 $script:projectDir = Join-Path ([System.IO.Path]::GetTempPath()) ("vibelution-launcher-active-work-" + [guid]::NewGuid().ToString("N"))
 $kindDir = Join-Path $script:projectDir ".runtime\\runtime-manager\\work_runs\\chat_turn"
 $runDir = Join-Path $kindDir "runs"
@@ -3701,6 +3712,7 @@ New-Item -ItemType Directory -Path $runDir -Force | Out-Null
 $script:notes = @()
 $script:events = @()
 function Test-WebHealthy { return $true }
+function Test-LauncherControlHealthy { return $true }
 function Write-Note { param([string]$Message) $script:notes += $Message }
 function Write-LauncherControlLog {
     param([string]$Event, [string]$Message, [string]$Level = "info", [hashtable]$Fields = @{})
@@ -3749,6 +3761,8 @@ foreach ($functionName in @(
     "Get-ObjectPropertyValue",
     "Test-LauncherWorkRunStatusBlocksLifecycle",
     "Get-LauncherLocalActiveWorkRunCount",
+    "Get-LauncherStatusActiveWorkCount",
+    "Get-LauncherRestartActiveWorkProbeUrls",
     "Test-LauncherRestartActiveWorkBlocked"
 )) {
     $functionAst = $ast.Find({
@@ -3763,6 +3777,7 @@ foreach ($functionName in @(
 }
 
 $script:url = "http://127.0.0.1:8000"
+$script:launcherControlUrl = "http://127.0.0.1:8765"
 $script:projectDir = Join-Path ([System.IO.Path]::GetTempPath()) ("vibelution-launcher-clear-work-" + [guid]::NewGuid().ToString("N"))
 $runDir = Join-Path $script:projectDir ".runtime\\runtime-manager\\work_runs\\chat_turn\\runs"
 New-Item -ItemType Directory -Path $runDir -Force | Out-Null
@@ -3773,6 +3788,7 @@ New-Item -ItemType Directory -Path $runDir -Force | Out-Null
 $script:notes = @()
 $script:events = @()
 function Test-WebHealthy { return $true }
+function Test-LauncherControlHealthy { return $true }
 function Write-Note { param([string]$Message) $script:notes += $Message }
 function Write-LauncherControlLog {
     param([string]$Event, [string]$Message, [string]$Level = "info", [hashtable]$Fields = @{})
@@ -4880,22 +4896,28 @@ if ($parseErrors -and $parseErrors.Count -gt 0) {
     throw "Launcher script parse failed: $($parseErrors[0].Message)"
 }
 
-$functionAst = $ast.Find({
-    param($node)
-    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
-        $node.Name -eq "Run-SupervisorLoop"
-}, $true)
-if ($null -eq $functionAst) {
-    throw "Run-SupervisorLoop was not found."
+foreach ($functionName in @(
+    "Get-ObjectPropertyValue",
+    "Wait-ForSupervisorSessionState",
+    "Run-SupervisorLoop"
+)) {
+    $functionAst = $ast.Find({
+        param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+            $node.Name -eq $functionName
+    }, $true)
+    if ($null -eq $functionAst) {
+        throw "$functionName was not found."
+    }
+    . ([scriptblock]::Create($functionAst.Extent.Text))
 }
-. ([scriptblock]::Create($functionAst.Extent.Text))
 
 $script:getStateCalls = 0
 $script:stops = @()
 $script:controlEvents = @()
 function Get-State {
     $script:getStateCalls += 1
-    if ($script:getStateCalls -gt 1) {
+    if ($script:getStateCalls -gt 2) {
         return $null
     }
     return [pscustomobject]@{
@@ -4942,8 +4964,104 @@ Write-Output $payload
     assert result.returncode == 0, result.stderr or result.stdout
     payload = json.loads(result.stdout.strip().splitlines()[-1])
     assert payload["stops"] == []
-    assert payload["getStateCalls"] == 2
+    assert payload["getStateCalls"] == 3
     assert "launcher.supervisor.backend_pid.reconciled" in payload["controlEvents"]
+
+
+def test_launcher_supervisor_waits_for_matching_state_before_monitoring(tmp_path):
+    result = _run_launcher_ast_harness(
+        tmp_path,
+        """
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$LauncherPath
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$source = Get-Content -Raw -LiteralPath $LauncherPath
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors -and $parseErrors.Count -gt 0) {
+    throw "Launcher script parse failed: $($parseErrors[0].Message)"
+}
+
+foreach ($functionName in @(
+    "Get-ObjectPropertyValue",
+    "Wait-ForSupervisorSessionState",
+    "Run-SupervisorLoop"
+)) {
+    $functionAst = $ast.Find({
+        param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+            $node.Name -eq $functionName
+    }, $true)
+    if ($null -eq $functionAst) {
+        throw "$functionName was not found."
+    }
+    . ([scriptblock]::Create($functionAst.Extent.Text))
+}
+
+$script:getStateCalls = 0
+$script:stops = @()
+$script:controlEvents = @()
+function Get-State {
+    $script:getStateCalls += 1
+    if ($script:getStateCalls -eq 1) {
+        return $null
+    }
+    if ($script:getStateCalls -gt 3) {
+        return $null
+    }
+    return [pscustomobject]@{
+        sessionId = "session-1"
+        backendPid = 1111
+        browserManaged = $true
+    }
+}
+function Get-ManagedBackendLiveness {
+    param([int]$TrackedPid = 0)
+    return [pscustomobject]@{
+        Alive = $true
+        Healthy = $true
+        TrackedPid = $TrackedPid
+        TrackedPidAlive = $true
+        CandidatePids = @(1111)
+    }
+}
+function Get-ManagedBrowserWindowProcesses {
+    return @([pscustomobject]@{ Id = 3333; MainWindowHandle = 1 })
+}
+function Write-LauncherControlLog {
+    param([string]$Event, [string]$Message, [string]$Level = "info", [hashtable]$Fields = @{})
+    $script:controlEvents += $Event
+}
+function Stop-ManagedSession {
+    param([string]$Reason = "")
+    $script:stops += $Reason
+}
+function Write-Note { param([string]$Message) }
+function Start-Sleep { param([int]$Milliseconds, [int]$Seconds) }
+
+Run-SupervisorLoop -ManagedSessionId "session-1"
+
+$payload = @{
+    stops = @($script:stops)
+    controlEvents = @($script:controlEvents)
+    getStateCalls = $script:getStateCalls
+} | ConvertTo-Json -Depth 8 -Compress
+Write-Output $payload
+""",
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    payload = json.loads(result.stdout.strip().splitlines()[-1])
+    assert payload["stops"] == []
+    assert payload["getStateCalls"] == 4
+    assert "launcher.supervisor.state_wait_timeout" not in payload["controlEvents"]
+    assert "launcher.supervisor.exit_state_missing" in payload["controlEvents"]
 
 
 def test_launcher_supervisor_preserves_requested_shutdown_reason_on_backend_exit(tmp_path):
@@ -4970,6 +5088,7 @@ foreach ($functionName in @(
     "ConvertTo-PlainHashtable",
     "Get-ObjectPropertyValue",
     "Get-RuntimeManagerWorkbenchReason",
+    "Wait-ForSupervisorSessionState",
     "Run-SupervisorLoop"
 )) {
     $functionAst = $ast.Find({
@@ -4988,7 +5107,7 @@ $script:stops = @()
 $script:notes = @()
 function Get-State {
     $script:getStateCalls += 1
-    if ($script:getStateCalls -gt 1) {
+    if ($script:getStateCalls -gt 2) {
         return $null
     }
     return [pscustomobject]@{
@@ -5047,7 +5166,7 @@ Write-Output $payload
     payload = json.loads(result.stdout.strip().splitlines()[-1])
     assert payload["stops"] == ["web_close_button"]
     assert "backend exited unexpectedly" not in json.dumps(payload, ensure_ascii=False)
-    assert payload["getStateCalls"] == 1
+    assert payload["getStateCalls"] == 2
 
 
 def test_desktop_entry_maps_open_to_launcher_without_monitor(tmp_path):
