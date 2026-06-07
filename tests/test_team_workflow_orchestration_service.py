@@ -1,6 +1,7 @@
 from core.web.services import (
     agent_directory_service,
     chat_room_service,
+    data_processing_service,
     project_agent_bus_service,
     session_service,
     team_knowledge_service,
@@ -31,6 +32,7 @@ class _FakeLocalResearchClient:
 def _use_tmp_project_root(tmp_path, monkeypatch):
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(data_processing_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(project_agent_bus_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(team_knowledge_service, "PROJECT_ROOT", tmp_path)
@@ -125,6 +127,64 @@ def test_challenge_cup_workflow_registers_candidate_and_decides_transfer(tmp_pat
     assert decision_response["candidate"]["currentWorkflowNode"] == "source_screening"
     assert decision_response["candidate"]["currentState"] == "screening_ready"
     assert decision_response["workflow"]["candidateStore"]["candidateCount"] == 1
+
+
+def test_import_data_record_as_source_candidate_preserves_trace_and_is_idempotent(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    run = data_processing_service.create_processing_run(title="Source collection")
+    record = data_processing_service.add_record(
+        run["runId"],
+        {
+            "sourceType": "url",
+            "sourceRef": "https://example.test/neuro-paper",
+            "title": "Neurology source",
+            "summary": "A useful candidate source.",
+            "qualitySignals": {"confidence": 0.82},
+            "metadata": {"allowedForAnalysis": True, "pageScope": "1-3"},
+        },
+    )
+
+    response = team_workflow_orchestration_service.import_data_record_as_source_candidate(
+        team["teamId"],
+        run["runId"],
+        record["recordId"],
+        {"createdByAgent": "data_intake_coordinator", "tags": ["neuro"]},
+    )
+    duplicate = team_workflow_orchestration_service.import_data_record_as_source_candidate(
+        team["teamId"],
+        run["runId"],
+        record["recordId"],
+        {"createdByAgent": "data_intake_coordinator"},
+    )
+    source_list = team_workflow_orchestration_service.list_candidate_store(team["teamId"], candidate_type="source_manifest")
+
+    candidate = response["candidate"]
+    assert response["created"] is True
+    assert duplicate["created"] is False
+    assert duplicate["candidate"]["candidateId"] == candidate["candidateId"]
+    assert source_list["candidateCount"] == 1
+    assert candidate["candidateType"] == "source_manifest"
+    assert candidate["sourceUrl"] == "https://example.test/neuro-paper"
+    assert candidate["allowedForAnalysis"] is True
+    assert candidate["pageScope"] == "1-3"
+    assert candidate["metadata"]["importedFromDataRecord"]["runId"] == run["runId"]
+    assert candidate["metadata"]["importedFromDataRecord"]["recordId"] == record["recordId"]
+    assert candidate["metadata"]["dataProcessingQualitySignals"]["confidence"] == 0.82
+    assert {item["type"] for item in candidate["evidenceRefs"]} >= {"data_record", "data_processing_run"}
+
+
+def test_import_data_record_as_source_candidate_rejects_missing_record(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    run = data_processing_service.create_processing_run(title="Source collection")
+
+    try:
+        team_workflow_orchestration_service.import_data_record_as_source_candidate(team["teamId"], run["runId"], "missing-record", {})
+    except team_workflow_orchestration_service.TeamWorkflowOrchestrationError as exc:
+        assert "Data processing record not found" in str(exc)
+    else:
+        raise AssertionError("Expected TeamWorkflowOrchestrationError")
 
 
 def test_transfer_decision_rejects_non_owner_agent(tmp_path, monkeypatch):

@@ -13,7 +13,7 @@ from typing import Any
 
 from config.public_config import build_effective_config, load_public_config
 from core.llm import LLMClient
-from core.web.services import team_knowledge_service, team_service
+from core.web.services import data_processing_service, team_knowledge_service, team_service
 from core.web.services.runtime_scene_service import record_runtime_scene_event
 
 
@@ -274,6 +274,50 @@ def register_candidate_source(team_id: str, payload: dict[str, Any]) -> dict[str
         "candidate": candidate,
         "validation": validation,
         "workflow": _workflow_to_api(normalized_team_id, workflow, candidate_store),
+    }
+
+
+def import_data_record_as_source_candidate(team_id: str, run_id: str, record_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
+    normalized_run_id = _trim_text(run_id, max_length=128)
+    normalized_record_id = _trim_text(record_id, max_length=128)
+    if not normalized_run_id or not normalized_record_id:
+        raise TeamWorkflowOrchestrationError("Data processing runId and recordId are required.")
+    team_service.get_team(normalized_team_id)
+    import_payload = payload if isinstance(payload, dict) else {}
+    run, record = _load_data_processing_record(normalized_run_id, normalized_record_id)
+    with _WORKFLOW_LOCK:
+        workflow = _load_or_create_workflow(normalized_team_id)
+        candidate_store = _load_candidate_store(normalized_team_id)
+        existing = _find_candidate_imported_from_data_record(candidate_store, normalized_run_id, normalized_record_id)
+        if existing is not None:
+            return {
+                "created": False,
+                "candidate": existing,
+                "dataRecordRef": _data_record_ref(run, record),
+                "validation": existing.get("validation") if isinstance(existing.get("validation"), dict) else validate_candidate_record(existing),
+                "workflow": _workflow_to_api(normalized_team_id, workflow, candidate_store),
+            }
+    candidate_payload = _source_candidate_payload_from_data_record(run, record, import_payload)
+    response = register_candidate_source(normalized_team_id, candidate_payload)
+    candidate = response["candidate"]
+    _record_workflow_event(
+        "candidate.imported_from_data_record",
+        normalized_team_id,
+        fields={
+            "workflowId": candidate.get("workflowId", ""),
+            "candidateId": candidate.get("candidateId", ""),
+            "runId": normalized_run_id,
+            "recordId": normalized_record_id,
+            "sourceKind": candidate.get("sourceKind", ""),
+        },
+    )
+    return {
+        "created": True,
+        "candidate": candidate,
+        "dataRecordRef": _data_record_ref(run, record),
+        "validation": response["validation"],
+        "workflow": response["workflow"],
     }
 
 
@@ -3535,6 +3579,115 @@ def _normalize_local_research_task_type(value: Any) -> str:
     if normalized not in LOCAL_RESEARCH_TASKS:
         raise TeamWorkflowOrchestrationError("Local research model task type is invalid.")
     return normalized
+
+
+def _load_data_processing_record(run_id: str, record_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    try:
+        run = data_processing_service.get_processing_run(run_id)
+        records = data_processing_service.list_records(run_id).get("records", [])
+    except data_processing_service.DataProcessingNotFoundError as exc:
+        raise TeamWorkflowOrchestrationError(str(exc)) from exc
+    except data_processing_service.DataProcessingError as exc:
+        raise TeamWorkflowOrchestrationError(str(exc)) from exc
+    record = next((item for item in records if isinstance(item, dict) and str(item.get("recordId") or "") == record_id), None)
+    if record is None:
+        raise TeamWorkflowOrchestrationError(f"Data processing record not found: {record_id}")
+    return run, record
+
+
+def _find_candidate_imported_from_data_record(candidate_store: dict[str, Any], run_id: str, record_id: str) -> dict[str, Any] | None:
+    for candidate in list(candidate_store.get("candidates") or []):
+        if not isinstance(candidate, dict):
+            continue
+        metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {}
+        imported_from = metadata.get("importedFromDataRecord") if isinstance(metadata.get("importedFromDataRecord"), dict) else {}
+        if str(imported_from.get("runId") or "") == run_id and str(imported_from.get("recordId") or "") == record_id:
+            return candidate
+    return None
+
+
+def _source_candidate_payload_from_data_record(run: dict[str, Any], record: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+    source_type = _trim_text(record.get("sourceType"), max_length=80) or "unknown"
+    source_ref = _trim_text(record.get("sourceRef"), max_length=2000)
+    raw_location = _trim_text(record.get("rawLocation"), max_length=2000)
+    source_kind = _trim_text(payload.get("sourceKind"), max_length=80) or _source_kind_from_data_record(source_type, source_ref, raw_location)
+    source_url = _trim_text(payload.get("sourceUrl"), max_length=2000)
+    source_path = _trim_text(payload.get("sourcePath"), max_length=2000)
+    if not source_url and _looks_like_url(source_ref):
+        source_url = source_ref
+    if not source_path and not source_url:
+        source_path = raw_location or (source_ref if source_type in {"file", "paper", "dataset"} else "")
+    title = _trim_text(payload.get("title"), max_length=240) or _trim_text(record.get("title"), max_length=240) or source_ref or raw_location
+    if not title and not source_url and not source_path:
+        raise TeamWorkflowOrchestrationError("Data processing record cannot be imported without title, sourceRef, or rawLocation.")
+    metadata = _normalize_metadata(payload.get("metadata"))
+    record_metadata = record.get("metadata") if isinstance(record.get("metadata"), dict) else {}
+    quality_signals = record.get("qualitySignals") if isinstance(record.get("qualitySignals"), dict) else {}
+    collection_trace = record.get("collectionTrace") if isinstance(record.get("collectionTrace"), dict) else {}
+    metadata.update(
+        {
+            "importedFromDataRecord": _data_record_ref(run, record),
+            "dataProcessingQualitySignals": _normalize_metadata(quality_signals),
+            "dataProcessingCollectionTrace": _normalize_metadata(collection_trace),
+            "dataProcessingRecordMetadata": _normalize_metadata(record_metadata),
+        }
+    )
+    return {
+        "candidateType": "source_manifest",
+        "title": title,
+        "sourceUrl": source_url,
+        "sourcePath": source_path,
+        "sourceKind": source_kind,
+        "sha256": _trim_text(payload.get("sha256") or record_metadata.get("sha256"), max_length=128),
+        "allowedForAnalysis": _normalize_optional_bool(payload.get("allowedForAnalysis")) if "allowedForAnalysis" in payload else _normalize_optional_bool(record_metadata.get("allowedForAnalysis")),
+        "pageScope": _trim_text(payload.get("pageScope") or record_metadata.get("pageScope"), max_length=160),
+        "summary": _trim_text(payload.get("summary"), max_length=4000) or _trim_text(record.get("summary"), max_length=4000),
+        "tags": _normalize_text_list(payload.get("tags"), max_items=24, max_length=80),
+        "evidenceRefs": _data_record_evidence_refs(run, record, payload),
+        "metadata": metadata,
+        "createdByAgent": _trim_text(payload.get("createdByAgent"), max_length=160) or "data_intake_coordinator",
+    }
+
+
+def _data_record_ref(run: dict[str, Any], record: dict[str, Any]) -> dict[str, str]:
+    return {
+        "runId": _trim_text(run.get("runId"), max_length=128),
+        "recordId": _trim_text(record.get("recordId"), max_length=128),
+        "profileId": _trim_text(run.get("profileId"), max_length=128),
+        "sourceType": _trim_text(record.get("sourceType"), max_length=80),
+        "sourceRef": _trim_text(record.get("sourceRef") or record.get("rawLocation"), max_length=240),
+        "title": _trim_text(record.get("title"), max_length=240),
+    }
+
+
+def _data_record_evidence_refs(run: dict[str, Any], record: dict[str, Any], payload: dict[str, Any]) -> list[dict[str, str]]:
+    refs = _normalize_ref_list(payload.get("evidenceRefs"), max_items=20)
+    refs.append(
+        {
+            "type": "data_record",
+            "id": _trim_text(record.get("recordId"), max_length=240),
+            "label": _trim_text(record.get("title"), max_length=240) or _trim_text(record.get("sourceRef"), max_length=240) or "DataRecord",
+        }
+    )
+    run_id = _trim_text(run.get("runId"), max_length=240)
+    if run_id:
+        refs.append({"type": "data_processing_run", "id": run_id, "label": _trim_text(run.get("title"), max_length=240) or run_id})
+    return refs[:24]
+
+
+def _source_kind_from_data_record(source_type: str, source_ref: str, raw_location: str) -> str:
+    if source_type in {"paper", "dataset", "file", "url", "api", "note", "manual"}:
+        return source_type
+    if _looks_like_url(source_ref):
+        return "url"
+    if raw_location or source_ref:
+        return "file"
+    return "unknown"
+
+
+def _looks_like_url(value: str) -> bool:
+    text = str(value or "").strip().lower()
+    return text.startswith("http://") or text.startswith("https://")
 
 
 def _local_research_llm_client(model_id: str, *, llm_client_factory: Any = None) -> Any:

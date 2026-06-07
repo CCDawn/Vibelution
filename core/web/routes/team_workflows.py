@@ -21,6 +21,7 @@ from core.web.services.team_workflow_orchestration_service import (
     build_local_research_model_task,
     draft_paper_note_from_source_candidate,
     extract_candidate_source_pages,
+    import_data_record_as_source_candidate,
     invoke_local_research_model,
     list_candidate_store,
     record_local_research_model_output,
@@ -42,6 +43,21 @@ class WorkflowEnsurePayload(BaseModel):
 
 class CandidateSourcePayload(BaseModel):
     candidateType: str = Field("source_manifest", max_length=80)
+    title: str = Field("", max_length=240)
+    sourceUrl: str = Field("", max_length=2000)
+    sourcePath: str = Field("", max_length=2000)
+    sourceKind: str = Field("", max_length=80)
+    sha256: str = Field("", max_length=128)
+    allowedForAnalysis: bool | None = None
+    pageScope: str = Field("", max_length=160)
+    summary: str = Field("", max_length=4000)
+    tags: list[str] = Field(default_factory=list, max_length=24)
+    evidenceRefs: list[dict[str, Any]] = Field(default_factory=list, max_length=24)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    createdByAgent: str = Field("", max_length=160)
+
+
+class DataRecordSourceImportPayload(BaseModel):
     title: str = Field("", max_length=240)
     sourceUrl: str = Field("", max_length=2000)
     sourcePath: str = Field("", max_length=2000)
@@ -159,6 +175,19 @@ def team_workflow_ensure(team_id: str, payload: WorkflowEnsurePayload) -> dict:
 def team_workflow_candidate_source_create(team_id: str, payload: CandidateSourcePayload) -> dict:
     try:
         return register_candidate_source(team_id, payload.model_dump())
+    except TeamNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post(
+    "/teams/{team_id}/workflow-orchestration/data-processing/runs/{run_id}/records/{record_id}/source-candidate",
+    status_code=status.HTTP_201_CREATED,
+)
+def team_workflow_import_data_record_source_candidate(team_id: str, run_id: str, record_id: str, payload: DataRecordSourceImportPayload) -> dict:
+    try:
+        return import_data_record_as_source_candidate(team_id, run_id, record_id, payload.model_dump())
     except TeamNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:

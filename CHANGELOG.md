@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.11.1 - 2026-06-07
+
+- Added a Team workflow bridge that imports generic DataProcessing records into Challenge Cup `source_manifest` candidates while preserving run, record, quality, and collection-trace metadata.
+- Exposed the bridge through `/api/teams/{team_id}/workflow-orchestration/data-processing/runs/{run_id}/records/{record_id}/source-candidate` with idempotent duplicate handling.
+- Updated the Challenge Cup flow HTML to mark DataRecord-to-source-manifest import as the handoff from generic collection to the AI research team candidate workflow.
+
 ## 0.11.0 - 2026-06-07
 
 - Added the generic data-processing substrate with profiles, runs, records, collection assignments, collection outputs, and status APIs under `/api/data-processing`.
