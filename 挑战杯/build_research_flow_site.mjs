@@ -456,14 +456,14 @@ const implementationBlueprint = {
   target: "复用 Vibelution 现有 Research、Team Knowledge、RAG、Knowledge Steward 和 Memory Graph 能力，把 01-09 做成可运行 MVP。",
   activeTeam: {
     teamId: "research-team",
-    teamName: "科研团队",
+    teamName: "ai科学研究团队",
     teamCategory: "科研组织团队",
     teamSource: "research_organization",
     linkedChatRoomId: "room-20260529-090009-757107-6a747d62",
     chatRoomPurpose: "research_coordination",
     workflowPath: "workspace/teams/research-team/workflow_orchestration.json",
     candidateStorePath: "workspace/teams/research-team/candidate_store/index.json",
-    note: "挑战杯科研流程直接绑定当前 Vibelution 科研团队，不另建新团队；团队成员仍来自现有科研组织架构。",
+    note: "挑战杯科研流程直接绑定当前 Vibelution ai科学研究团队，不另建新团队；团队成员仍来自现有科研组织架构。",
   },
   architecture: [
     ["Team 编排状态机", "已新增 TeamWorkflowOrchestration 后端切片，首期启用 challenge_cup_research。"],
