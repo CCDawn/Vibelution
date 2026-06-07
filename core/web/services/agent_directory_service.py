@@ -888,8 +888,8 @@ def archive_agent_instance(agent_id: str, *, repair_mode_bindings: bool = True) 
     return _agent_to_api(agent)
 
 
-def purge_archived_agent_instance(agent_id: str) -> dict[str, Any]:
-    """Physically remove an archived AgentInstance and its private workspace."""
+def purge_archived_agent_instance(agent_id: str, *, allow_active: bool = False) -> dict[str, Any]:
+    """Physically remove an AgentInstance and its private workspace."""
 
     normalized_agent_id = str(agent_id or "").strip()
     if not normalized_agent_id:
@@ -899,11 +899,13 @@ def purge_archived_agent_instance(agent_id: str) -> dict[str, Any]:
         agent = _find_agent(state, normalized_agent_id)
         if agent is None:
             raise AgentNotFoundError(f"Agent not found: {normalized_agent_id}")
-        if str(agent.get("status") or "active").strip() != "archived":
+        previous_status = str(agent.get("status") or "active").strip() or "active"
+        if previous_status != "archived" and not allow_active:
             raise AgentDirectoryError("Only archived Agents can be permanently deleted.")
         if _agent_archive_protected(agent):
             raise AgentDirectoryError("Protected core Agent cannot be purged.")
         agent_snapshot = dict(agent)
+        agent_snapshot["status"] = previous_status
         tool_policy_id = str(agent.get("toolPolicyId") or "").strip()
         memory_policy_id = str(agent.get("memoryPolicyId") or "").strip()
 
@@ -917,7 +919,8 @@ def purge_archived_agent_instance(agent_id: str) -> dict[str, Any]:
         agent = _find_agent(state, normalized_agent_id)
         if agent is None:
             raise AgentNotFoundError(f"Agent not found: {normalized_agent_id}")
-        if str(agent.get("status") or "active").strip() != "archived":
+        current_status = str(agent.get("status") or "active").strip() or "active"
+        if current_status != "archived" and not allow_active:
             raise AgentDirectoryError("Only archived Agents can be permanently deleted.")
         if _agent_archive_protected(agent):
             raise AgentDirectoryError("Protected core Agent cannot be purged.")
@@ -945,6 +948,7 @@ def purge_archived_agent_instance(agent_id: str) -> dict[str, Any]:
     result = {
         "agentId": normalized_agent_id,
         "status": "purged",
+        "previousStatus": str(agent_snapshot.get("status") or "").strip(),
         "deleted": True,
         "workspaceDeleted": bool(workspace_result.get("deleted")),
         "deletedPaths": list(workspace_result.get("deletedPaths") or []),
@@ -1100,8 +1104,6 @@ def ensure_agent_purge_allowed(agent_id: str) -> dict[str, Any]:
         agent = _find_agent(state, normalized_agent_id)
         if agent is None:
             raise AgentNotFoundError(f"Agent not found: {normalized_agent_id}")
-        if str(agent.get("status") or "active").strip() != "archived":
-            raise AgentDirectoryError("Only archived Agents can be permanently deleted.")
         if _agent_archive_protected(agent):
             raise AgentDirectoryError("Protected core Agent cannot be purged.")
         return _agent_to_api(agent)

@@ -219,13 +219,14 @@ def update_agent_mode_membership(
     return get_mode_bindings_payload()
 
 
-def remove_agent_from_mode_bindings(agent_id: str) -> dict[str, Any]:
+def remove_agent_from_mode_bindings(agent_id: str, *, agent_snapshot: dict[str, Any] | None = None) -> dict[str, Any]:
     """Remove one Agent from all mode binding references before safe archival."""
 
     normalized_agent_id = str(agent_id or "").strip()
     if not normalized_agent_id:
         raise AgentModeBindingError("Agent id is required.")
-    agent_snapshot = get_agent(normalized_agent_id, include_archived=True)
+    if not isinstance(agent_snapshot, dict):
+        agent_snapshot = get_agent(normalized_agent_id, include_archived=True)
     tombstone_slot_by_mode = _fixed_role_tombstone_slots(agent_snapshot)
     payload = repair_mode_bindings()
     bindings = list(payload.get("bindings") or [])

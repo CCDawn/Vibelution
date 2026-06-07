@@ -5,6 +5,10 @@
 - Added a traceable Challenge Cup data-search plan contract to source-collection run startup, including query seeds, planned queries, role assignment inputs, and result writeback boundaries.
 - Extended `/api/teams/{team_id}/workflow-orchestration/source-collection-runs` with query seed, language, source type, and max-results inputs while keeping the slice contract-only with no external search execution.
 - Updated the Challenge Cup flow HTML to show M6.5 data-search planning as the next step in the source-collection Agent workflow.
+- Fixed permanent Agent deletion so active Agents can be purged directly, including solo chat-room cleanup and direct-session tombstone preservation.
+- Preserved deleted-Agent session history without allowing session repair to recreate purged Agents.
+- Kept unresolved current LLM bindings visible in Agent model slot selectors and preserved structured `llmBindings` in runtime scene child logs.
+- Added management-center safeguards for bulk Agent purge, generated-tool deletion, and prompt-template reset/deactivation, while making Skill bulk edit/delete visibly read-only.
 
 ## 0.11.3 - 2026-06-07
 

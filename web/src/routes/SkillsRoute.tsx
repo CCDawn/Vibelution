@@ -311,6 +311,7 @@ export function SkillsRoute() {
               {allVisibleSkillsSelected ? <Square size={14} /> : <CheckSquare size={14} />}
               <span>{allVisibleSkillsSelected ? copy.bulkClear : copy.bulkSelectVisible}</span>
             </button>
+            <span className={styles.bulkReadOnlyNote}>{copy.bulkReadOnlyReason}</span>
             <button type="button" className={styles.filterButton} disabled title={copy.bulkReadOnlyReason}>
               <Ban size={14} />
               <span>{copy.bulkEdit}</span>

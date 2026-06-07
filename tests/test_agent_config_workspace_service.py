@@ -1645,15 +1645,40 @@ def test_agent_purge_api_deletes_archived_agent_workspace_and_registry_record(tm
     assert [member["agentId"] for member in team_detail["members"]] == [beta["agentId"]]
 
 
-def test_agent_purge_api_rejects_active_agent(tmp_path, monkeypatch):
+def test_agent_purge_api_allows_active_agent_and_marks_direct_session_tombstone(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     agent = session_service.create_chat_session(title="Active Agent")
+    room = chat_room_service.create_chat_room(
+        title="单成员待删除群聊",
+        participant_session_ids=[agent["id"]],
+    )
 
     response = client.delete(f"/api/agents/{agent['agentId']}/purge")
 
-    assert response.status_code == 422
-    assert "archived" in response.json()["detail"]
-    assert agent_directory_service.get_agent(agent["agentId"], include_archived=True)["status"] == "active"
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["status"] == "purged"
+    assert payload["previousStatus"] == "active"
+    assert payload["purgeSummary"]["removedFromRoomIds"] == [room["roomId"]]
+    assert payload["purgeSummary"]["directSession"]["agentStatusCode"] == "deleted_agent"
+    assert payload["purgeSummary"]["directSession"]["historyRetention"] == "preserved_tombstone"
+    assert agent_directory_service.get_agent(agent["agentId"], include_archived=True) is None
+    room_detail = chat_room_service.get_chat_room_detail(room["roomId"])
+    assert room_detail["participants"] == []
+    detail = session_service.get_session_detail(agent["id"])
+    assert detail["agentId"] == ""
+    assert detail["agentMissing"] is True
+    assert detail["agentMissingId"] == agent["agentId"]
+    assert detail["agentStatusCode"] == "deleted_agent"
+    listed_session = next(item for item in session_service.list_sessions() if item["id"] == agent["id"])
+    assert listed_session["agentStatusCode"] == "deleted_agent"
+    assert listed_session["agentMissingId"] == agent["agentId"]
+    before_agents = agent_directory_service.list_agents(include_archived=True)
+    assert all(item["agentId"] != agent["agentId"] for item in before_agents)
+    detail_again = session_service.get_session_detail(agent["id"])
+    after_agents = agent_directory_service.list_agents(include_archived=True)
+    assert detail_again["agentStatusCode"] == "deleted_agent"
+    assert before_agents == after_agents
 
 
 def test_agent_purge_api_rejects_protected_archived_agent_without_reference_cleanup(tmp_path, monkeypatch):
@@ -1706,7 +1731,20 @@ def test_agent_purge_api_allows_archived_agent_that_was_only_room_member(tmp_pat
 def test_agent_purge_api_reports_workspace_delete_failure_without_server_error(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     agent = session_service.create_chat_session(title="Locked Workspace Agent")
-    agent_directory_service.archive_agent_instance(agent["agentId"])
+    peer = session_service.create_chat_session(title="Peer Agent")
+    room = chat_room_service.create_chat_room(
+        title="锁定工作区群聊",
+        participant_session_ids=[agent["id"], peer["id"]],
+    )
+    team = team_service.create_team(
+        name="锁定工作区团队",
+        members=[{"agentId": agent["agentId"], "role": "lead"}],
+    )
+    agent_mode_binding_service.update_mode_binding(
+        "chat",
+        default_agent_id=agent["agentId"],
+        available_agent_ids=[agent["agentId"], peer["agentId"]],
+    )
     workspace_path = tmp_path / agent["workspacePath"]
     workspace_path.mkdir(parents=True, exist_ok=True)
 
@@ -1719,8 +1757,39 @@ def test_agent_purge_api_reports_workspace_delete_failure_without_server_error(t
 
     assert response.status_code == 422, response.text
     assert "PermissionError" in response.json()["detail"]
-    assert agent_directory_service.get_agent(agent["agentId"], include_archived=True)["status"] == "archived"
+    assert agent_directory_service.get_agent(agent["agentId"], include_archived=True)["status"] == "active"
     assert workspace_path.exists()
+    room_detail = chat_room_service.get_chat_room_detail(room["roomId"])
+    assert [participant["agentId"] for participant in room_detail["participants"]] == [agent["agentId"], peer["agentId"]]
+    team_detail = team_service.get_team(team["teamId"])
+    assert [member["agentId"] for member in team_detail["members"]] == [agent["agentId"]]
+    bindings = agent_mode_binding_service.get_mode_bindings_payload()["modes"]
+    assert bindings["chat"]["defaultAgentId"] == agent["agentId"]
+    assert agent["agentId"] in bindings["chat"]["availableAgentIds"]
+
+
+def test_agent_purge_api_reports_post_purge_cleanup_failure_as_summary(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = session_service.create_chat_session(title="Cleanup Failure Agent")
+    agent_record = agent_directory_service.get_agent(agent["agentId"])
+    workspace_path = tmp_path / agent_record["workspacePath"]
+    workspace_path.mkdir(parents=True, exist_ok=True)
+
+    def _fail_room_cleanup(*args, **kwargs):
+        raise chat_room_service.ChatRoomValidationError("cleanup blocked")
+
+    monkeypatch.setattr(agents_route, "remove_agent_from_chat_rooms", _fail_room_cleanup)
+
+    response = client.delete(f"/api/agents/{agent['agentId']}/purge")
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["status"] == "purged"
+    assert agent_directory_service.get_agent(agent["agentId"], include_archived=True) is None
+    assert not workspace_path.exists()
+    assert payload["purgeSummary"]["cleanupErrors"] == [
+        {"stage": "remove_from_chat_rooms", "errorType": "ChatRoomValidationError", "message": "cleanup blocked"}
+    ]
 
 
 def test_agent_reset_api_clears_runtime_state_without_removing_bindings_or_memory(tmp_path, monkeypatch):
