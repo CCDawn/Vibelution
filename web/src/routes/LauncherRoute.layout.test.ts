@@ -36,6 +36,22 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("queryKeys.runtimeSummary()");
   });
 
+  it("keeps launcher controls fresh while the control surface is minimized", () => {
+    expect(routeSource).toContain("isControlPlaneIdle");
+    expect(routeSource).toContain("refetchInterval: resolvePollingInterval(pageVisible, 4_000, { backgroundMs: 4_000 })");
+    expect(routeSource).toContain("refetchIntervalInBackground: true");
+    expect(routeSource).toContain("const controlPlaneIdle = isControlPlaneIdle(evidence)");
+    expect(routeSource).toContain("const controlBusy = controlMutation.isPending && !(controlPlaneIdle && lifecycleSettled)");
+    expect(routeSource).toContain("const busy = controlBusy || supervisorMutation.isPending");
+    expect(routeSource).toContain("startDisabledReason");
+    expect(routeSource).toContain("startDisabledBusy");
+    expect(routeSource).toContain("title={startDisabled ? startDisabledReason : copy.start}");
+    expect(routeSource).toContain("const destructiveActionDisabled = busy || activeWorkCount > 0");
+    expect(routeSource).toContain("lifecycleActionDisabledActiveWork");
+    expect(routeSource).toContain("title={destructiveActionDisabled ? destructiveActionDisabledReason : copy.stop}");
+    expect(routeSource).toContain("title={destructiveActionDisabled ? destructiveActionDisabledReason : copy.restart}");
+  });
+
   it("renders a dense lifecycle console rather than a landing page", () => {
     expect(routeSource).toContain("summaryStrip");
     expect(routeSource).toContain("guardStrip");

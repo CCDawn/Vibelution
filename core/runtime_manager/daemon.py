@@ -44,7 +44,7 @@ from .process_inventory import (
     terminate_process_descendants,
     terminate_unmanaged_workbench_processes,
 )
-from .workbench_controller import close_workbench, observe_workbench, open_workbench, restart_workbench
+from .workbench_controller import close_workbench, focus_workbench, observe_workbench, open_workbench, restart_workbench
 
 
 _WORKBENCH_LIFECYCLE_COMMANDS = {
@@ -1948,7 +1948,7 @@ class RuntimeManagerDaemon:
                 _open_already_satisfied_event_payload(observation, command_id=command_id, no_browser=no_browser),
             )
             if not no_browser:
-                result = open_workbench(no_browser=False)
+                result = focus_workbench()
                 if result.returncode != 0:
                     _append_event(
                         "workbench.open.focus_failed",

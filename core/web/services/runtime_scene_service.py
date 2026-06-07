@@ -186,6 +186,7 @@ LANGUAGE_BY_SUFFIX = {
 DISPLAY_NAME_TRIGGER_LABELS = {
     "start": "工作台启动",
     "internal-start": "工作台启动",
+    "internal-focus": "工作台聚焦",
     "internal-restart": "工作台重启",
     "restart": "工作台重启",
     "open": "打开工作台",
@@ -217,6 +218,7 @@ DISPLAY_NAME_RESULT_LABELS = {
 PACKAGE_INDEX_TRIGGER_TOKENS = {
     "start": "workbench-start",
     "internal-start": "workbench-start",
+    "internal-focus": "workbench-focus",
     "internal-restart": "workbench-restart",
     "restart": "workbench-restart",
     "open": "workbench-open",

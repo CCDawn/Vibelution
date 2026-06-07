@@ -496,6 +496,10 @@ def open_workbench(*, no_browser: bool = False) -> subprocess.CompletedProcess[s
     return run_launcher_action("internal-start", no_browser=no_browser)
 
 
+def focus_workbench() -> subprocess.CompletedProcess[str]:
+    return run_launcher_action("internal-focus", no_browser=False)
+
+
 def close_workbench() -> subprocess.CompletedProcess[str]:
     return run_launcher_action("internal-stop")
 

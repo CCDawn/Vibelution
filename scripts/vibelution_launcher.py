@@ -27,7 +27,7 @@ DEFAULT_HOST = "127.0.0.1"
 TRUSTED_WEB_HOSTS_ENV = "VIBELUTION_TRUSTED_WEB_HOSTS"
 FRONTEND_PACKAGE_MANAGER_ENV = "VIBELUTION_FRONTEND_PM"
 INTERNAL_LAUNCHER_ENV = "VIBELUTION_RUNTIME_MANAGER_INTERNAL_LAUNCHER"
-INTERNAL_ACTIONS = {"internal-start", "internal-stop", "internal-restart"}
+INTERNAL_ACTIONS = {"internal-start", "internal-focus", "internal-stop", "internal-restart"}
 
 
 def _now_iso() -> str:
@@ -38,6 +38,7 @@ def _normalize_action(action: str) -> str:
     value = str(action or "start").strip().lower()
     aliases = {
         "internal-start": "start",
+        "internal-focus": "focus",
         "internal-stop": "stop",
         "internal-restart": "restart",
         "open": "start",
@@ -285,6 +286,14 @@ def _stop_backend() -> dict:
     return next_state
 
 
+def _focus_backend(port: int, host: str) -> dict:
+    state = _read_state()
+    pid = int(state.get("backendPid") or 0)
+    if pid > 0 and _pid_alive(pid) and _backend_healthy(port, host):
+        return state
+    raise RuntimeError("Workbench focus requested but no running workbench backend is available.")
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Vibelution cross-platform launcher adapter")
     parser.add_argument("-Action", "--action", default="start")
@@ -311,6 +320,10 @@ def main(argv: list[str] | None = None) -> int:
         if action == "stop":
             _stop_backend()
             print("Workbench stopped.")
+            return 0
+        if action == "focus":
+            _focus_backend(args.port, args.host)
+            print("Workbench already running.")
             return 0
         if action == "restart":
             _stop_backend()

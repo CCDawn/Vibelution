@@ -244,6 +244,21 @@ def test_launcher_command_keeps_powershell_adapter_on_windows(monkeypatch, tmp_p
     ]
 
 
+def test_focus_workbench_uses_non_destructive_internal_focus(monkeypatch):
+    calls: list[dict[str, object]] = []
+
+    def fake_run_launcher_action(action: str, *, no_browser: bool):
+        calls.append({"action": action, "no_browser": no_browser})
+        return subprocess.CompletedProcess(args=[], returncode=0, stdout="focused", stderr="")
+
+    monkeypatch.setattr(workbench_controller, "run_launcher_action", fake_run_launcher_action)
+
+    result = workbench_controller.focus_workbench()
+
+    assert result.returncode == 0
+    assert calls == [{"action": "internal-focus", "no_browser": False}]
+
+
 def test_python_launcher_allows_lan_hosts_when_binding_wildcard(monkeypatch):
     import importlib.util
 
@@ -318,6 +333,32 @@ def test_python_launcher_allows_authorized_internal_action(monkeypatch):
     monkeypatch.setenv("VIBELUTION_RUNTIME_MANAGER_INTERNAL_LAUNCHER", "1")
 
     launcher._assert_internal_action_authorized("internal-restart")
+    launcher._assert_internal_action_authorized("internal-focus")
+
+
+def test_python_launcher_internal_focus_is_non_destructive(monkeypatch, capsys):
+    import importlib.util
+
+    launcher_path = constants.PROJECT_ROOT / "scripts" / "vibelution_launcher.py"
+    spec = importlib.util.spec_from_file_location("vibelution_launcher_for_focus_test", launcher_path)
+    assert spec and spec.loader
+    launcher = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(launcher)
+
+    calls: list[str] = []
+    monkeypatch.setenv("VIBELUTION_RUNTIME_MANAGER_INTERNAL_LAUNCHER", "1")
+    monkeypatch.setattr(launcher, "_read_state", lambda: {"backendPid": 24680})
+    monkeypatch.setattr(launcher, "_pid_alive", lambda pid: int(pid) == 24680)
+    monkeypatch.setattr(launcher, "_backend_healthy", lambda port, host: port == 8000 and host == "127.0.0.1")
+    monkeypatch.setattr(launcher, "_start_backend", lambda *_args, **_kwargs: calls.append("start") or {})
+    monkeypatch.setattr(launcher, "_stop_backend", lambda: calls.append("stop") or {})
+
+    exit_code = launcher.main(["--action", "internal-focus"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "already running" in captured.out
+    assert calls == []
 
 
 def test_python_launcher_main_rejects_unauthorized_internal_stop_before_action(monkeypatch, tmp_path, capsys):
@@ -3888,21 +3929,21 @@ def test_handle_open_workbench_refocuses_existing_browser_session(monkeypatch):
         },
     )
 
-    opened = {}
+    focused = {}
     events: list[tuple[str, dict]] = []
 
-    def fake_open_workbench(*, no_browser: bool):
-        opened["no_browser"] = no_browser
+    def fake_focus_workbench():
+        focused["called"] = True
         return subprocess.CompletedProcess(args=[], returncode=0, stdout="Focused existing workbench.\n", stderr="")
 
-    monkeypatch.setattr(daemon, "open_workbench", fake_open_workbench)
+    monkeypatch.setattr(daemon, "focus_workbench", fake_focus_workbench)
     monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: events.append((event_type, payload)))
 
     result = runtime_daemon._handle_open_workbench(command_id="cmd-open", args={})
 
     assert result["ok"] is True
     assert result["message"] == "Workbench is already open."
-    assert opened == {"no_browser": False}
+    assert focused == {"called": True}
     assert events == [
         (
             "workbench.open.already_satisfied",
@@ -3969,8 +4010,8 @@ def test_handle_open_workbench_logs_focus_failure_for_existing_browser_session(m
     monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: events.append((event_type, payload)))
     monkeypatch.setattr(
         daemon,
-        "open_workbench",
-        lambda *, no_browser: subprocess.CompletedProcess(
+        "focus_workbench",
+        lambda: subprocess.CompletedProcess(
             args=[],
             returncode=1,
             stdout="",
