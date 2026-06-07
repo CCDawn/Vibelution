@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.11.4 - 2026-06-08
+
+- Kept Workbench shell and Chat startup data loading alive while the managed window is hidden, using a bounded startup warmup instead of permanent high-frequency background polling.
+- Allowed Chat session streams to connect during startup warmup and logged warmup state in browser telemetry.
+- Adjusted managed Edge launch flags to avoid background networking and timer throttling during startup.
+
 ## 0.11.3 - 2026-06-07
 
 - Added a Team workflow source-collection run launcher that creates a generic DataProcessing run plus functional collection assignments for the AI research team.

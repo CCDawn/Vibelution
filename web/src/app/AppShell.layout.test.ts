@@ -94,6 +94,18 @@ describe("AppShell layout contract", () => {
     expect(shellSource).toContain("frontendVisible, location.pathname, queryClient");
   });
 
+  it("keeps startup data loading alive while the managed window is hidden", () => {
+    expect(shellSource).toContain("const shellStartupWarmupActive = useStartupWarmup(shellStartupDataReady)");
+    expect(shellSource).toContain("const shellPollingVisible = frontendVisible || shellStartupWarmupActive");
+    expect(shellSource).toContain("resolvePollingInterval(\n    shellPollingVisible");
+    expect(shellSource).toContain("refetchIntervalInBackground: shellStartupWarmupActive");
+    expect(shellSource).toContain("if (configQuery.data && runtimeQuery.data && backendHealthQuery.data)");
+    expect(shellSource).toContain("setShellStartupDataReady(true)");
+    expect(shellSource).toContain("browser.startup_background_warmup.active");
+    expect(shellSource).toContain("browser.startup_background_warmup.inactive");
+    expect(shellSource).toContain("startupDataReady: shellStartupDataReady");
+  });
+
   it("treats locally completed shutdown as a settled state rather than a failed state", () => {
     expect(shellSource).toContain("shutdownSettled");
     expect(shellSource).toContain("aria-busy={!shutdownSettled}");
