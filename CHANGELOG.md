@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.11.3 - 2026-06-07
+
+- Added a Team workflow source-collection run launcher that creates a generic DataProcessing run plus functional collection assignments for the AI research team.
+- Exposed `/api/teams/{team_id}/workflow-orchestration/source-collection-runs` so the research coordinator can start a traceable source batch before DataRecord import.
+- Updated the Challenge Cup flow HTML to show source-collection run startup as the entry into the data-gathering Agent workflow.
+
 ## 0.11.2 - 2026-06-07
 
 - Removed archived Team member Agents from extra group rooms during Team archive cascade, while preserving the existing linked Team room deletion behavior.

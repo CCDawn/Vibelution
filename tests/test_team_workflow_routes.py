@@ -105,6 +105,33 @@ def test_team_workflow_route_imports_data_record_as_source_candidate(tmp_path, m
     assert list_response.json()["candidateCount"] == 1
 
 
+def test_team_workflow_route_starts_source_collection_run(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    client = _client()
+    team = client.post("/api/teams", json={"name": "挑战杯科研团队"}).json()
+
+    response = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/source-collection-runs",
+        json={
+            "title": "Neurology source batch",
+            "topic": "neural gating",
+            "requestedByAgent": "Research Coordination Agent",
+            "agentRoles": ["data_discovery", "source_acquisition"],
+            "inputRefs": ["seed-query:neural gating"],
+        },
+    )
+    run_id = response.json()["run"]["runId"]
+    assignments_response = client.get(f"/api/data-processing/runs/{run_id}/collection-assignments")
+    status_response = client.get(f"/api/data-processing/runs/{run_id}/status")
+
+    assert response.status_code == 201, response.text
+    assert response.json()["assignmentCount"] == 2
+    assert {item["agentRole"] for item in response.json()["assignments"]} == {"data_discovery", "source_acquisition"}
+    assert response.json()["workflow"]["activeWorkflowItems"][0]["candidateId"] == run_id
+    assert assignments_response.json()["summary"]["assignmentCount"] == 2
+    assert status_response.json()["boundaries"]["writesFormalKnowledge"] is False
+
+
 def test_team_workflow_route_blocks_non_owner_transfer_decision(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     client = _client()
