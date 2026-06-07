@@ -26,6 +26,8 @@ FRONTEND_BUILD_LOG_PATH = RUNTIME_DIR / "frontend-build.log"
 DEFAULT_HOST = "127.0.0.1"
 TRUSTED_WEB_HOSTS_ENV = "VIBELUTION_TRUSTED_WEB_HOSTS"
 FRONTEND_PACKAGE_MANAGER_ENV = "VIBELUTION_FRONTEND_PM"
+INTERNAL_LAUNCHER_ENV = "VIBELUTION_RUNTIME_MANAGER_INTERNAL_LAUNCHER"
+INTERNAL_ACTIONS = {"internal-start", "internal-stop", "internal-restart"}
 
 
 def _now_iso() -> str:
@@ -42,6 +44,21 @@ def _normalize_action(action: str) -> str:
         "close": "stop",
     }
     return aliases.get(value, value)
+
+
+def _is_internal_action(action: str) -> bool:
+    return str(action or "").strip().lower() in INTERNAL_ACTIONS
+
+
+def _assert_internal_action_authorized(action: str) -> None:
+    if not _is_internal_action(action):
+        return
+    if os.environ.get(INTERNAL_LAUNCHER_ENV, "").strip() == "1":
+        return
+    raise RuntimeError(
+        f"Launcher internal action '{action}' can only be called by Runtime Manager. "
+        "Use start, stop, or restart instead."
+    )
 
 
 def _read_state() -> dict:
@@ -279,8 +296,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
-    action = _normalize_action(args.action)
     try:
+        _assert_internal_action_authorized(args.action)
+        action = _normalize_action(args.action)
         if action == "start":
             current = _read_state()
             current_pid = int(current.get("backendPid") or 0)

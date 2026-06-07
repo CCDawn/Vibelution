@@ -9,6 +9,7 @@ import sqlite3
 import subprocess
 import time
 import uuid
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import Lock
@@ -29,14 +30,12 @@ MANAGED_MEMORY_WRITE_LOCK = Lock()
 MEMORY_OVERVIEW_PERF_STATE_LOCK = Lock()
 MEMORY_OVERVIEW_WAS_SLOW = False
 MEMORY_OVERVIEW_SLOW_MS = 500.0
+MEMORY_OVERVIEW_SUBTIMING_LIMIT = 12
 MEMORY_OVERVIEW_SECTION_CACHE_TTL_SECONDS = 3.0
 MEMORY_OVERVIEW_SECTION_CACHE_LOCK = Lock()
 MEMORY_OVERVIEW_SECTION_CACHE: dict[str, Any] = {
     "root": "",
-    "expiresAt": 0.0,
-    "sections": None,
-    "timings": None,
-    "warnings": None,
+    "sections": {},
 }
 GIT_SNAPSHOT_CACHE_TTL_SECONDS = 3.0
 GIT_SNAPSHOT_CACHE_LOCK = Lock()
@@ -50,9 +49,16 @@ def get_memory_overview(*, include_content: bool = True) -> dict[str, Any]:
     started_at = time.perf_counter()
     root = PROJECT_ROOT.resolve()
     warnings: list[str] = []
+    phase_timings: list[dict[str, Any]] = []
+    phase_started_at = time.perf_counter()
     managed_memory = _load_managed_memory(root, warnings=warnings)
+    _append_memory_overview_phase_timing(phase_timings, "managed_memory.load", phase_started_at)
+    phase_started_at = time.perf_counter()
     base_sections, section_timings = _timed_base_memory_sections(root, warnings)
+    _append_memory_overview_phase_timing(phase_timings, "base_sections.load_or_cache", phase_started_at, count=len(base_sections))
+    phase_started_at = time.perf_counter()
     sections = _apply_managed_memory(root, base_sections, managed_memory)
+    _append_memory_overview_phase_timing(phase_timings, "managed_memory.apply", phase_started_at, count=len(sections))
     item_count = sum(len(section["items"]) for section in sections)
     agent_visible_count = sum(
         1 for section in sections for item in section["items"] if bool(item.get("agentVisible"))
@@ -74,12 +80,15 @@ def get_memory_overview(*, include_content: bool = True) -> dict[str, Any]:
         "sections": sections,
     }
     if not include_content:
+        phase_started_at = time.perf_counter()
         overview["sections"] = _defer_memory_overview_content(sections)
+        _append_memory_overview_phase_timing(phase_timings, "content.defer", phase_started_at, count=len(sections))
     _record_memory_overview_perf_event(
         root,
         overview,
         duration_ms=(time.perf_counter() - started_at) * 1000,
         section_timings=section_timings,
+        phase_timings=phase_timings,
     )
     return overview
 
@@ -92,7 +101,13 @@ def get_memory_item_detail(section_id: str, item_id: str) -> dict[str, Any] | No
     item_id = str(item_id or "").strip()
     warnings: list[str] = []
     managed_memory = _load_managed_memory(root, warnings=warnings)
-    sections = _apply_managed_memory(root, _base_memory_sections(root, warnings), managed_memory)
+    if section_id == USER_MANAGED_SECTION_ID:
+        sections = [_user_managed_memory_section(root, managed_memory)]
+    else:
+        base_section = _load_base_memory_section(root, section_id, warnings)
+        if base_section is None:
+            return None
+        sections = _apply_managed_memory(root, [base_section], managed_memory)
     for section in sections:
         if str(section.get("id") or "") != section_id:
             continue
@@ -424,73 +439,118 @@ def _base_memory_sections(root: Path, warnings: list[str]) -> list[dict[str, Any
 def _timed_base_memory_sections(root: Path, warnings: list[str]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     cache_root = str(root.resolve())
     now = time.monotonic()
-    with MEMORY_OVERVIEW_SECTION_CACHE_LOCK:
-        cached_sections = MEMORY_OVERVIEW_SECTION_CACHE.get("sections")
-        cached_timings = MEMORY_OVERVIEW_SECTION_CACHE.get("timings")
-        cached_warnings = MEMORY_OVERVIEW_SECTION_CACHE.get("warnings")
-        if (
-            MEMORY_OVERVIEW_SECTION_CACHE.get("root") == cache_root
-            and cached_sections is not None
-            and cached_timings is not None
-            and cached_warnings is not None
-            and float(MEMORY_OVERVIEW_SECTION_CACHE.get("expiresAt") or 0.0) > now
-        ):
-            warnings.extend(copy.deepcopy(cached_warnings))
-            return copy.deepcopy(cached_sections), copy.deepcopy(cached_timings)
+    sections: list[dict[str, Any]] = []
+    timings: list[dict[str, Any]] = []
+    for fallback_section_id, load_section in _base_memory_section_specs(root, warnings):
+        cached = None
+        with MEMORY_OVERVIEW_SECTION_CACHE_LOCK:
+            if MEMORY_OVERVIEW_SECTION_CACHE.get("root") == cache_root:
+                cache_sections = MEMORY_OVERVIEW_SECTION_CACHE.get("sections")
+                cached = (cache_sections or {}).get(fallback_section_id) if isinstance(cache_sections, dict) else None
+            elif MEMORY_OVERVIEW_SECTION_CACHE.get("root"):
+                MEMORY_OVERVIEW_SECTION_CACHE.update({"root": cache_root, "sections": {}})
+        if isinstance(cached, dict) and float(cached.get("expiresAt") or 0.0) > now:
+            warnings.extend(copy.deepcopy(cached.get("warnings") or []))
+            section = copy.deepcopy(cached.get("section") or {})
+            timing = copy.deepcopy(cached.get("timing") or {})
+            cached_duration_ms = timing.get("durationMs") if isinstance(timing, dict) else None
+            if isinstance(cached_duration_ms, (int, float)):
+                timing["cachedLoadDurationMs"] = round(float(cached_duration_ms), 1)
+            timing["durationMs"] = 0.0
+            if isinstance(timing.get("subTimingsMs"), list):
+                timing["cachedSubTimingsMs"] = timing.pop("subTimingsMs")
+            timing["cacheHit"] = True
+            sections.append(section)
+            timings.append(timing)
+            continue
 
-    warning_count = len(warnings)
-    sections, timings = _load_timed_base_memory_sections(root, warnings)
-    added_warnings = warnings[warning_count:]
-    with MEMORY_OVERVIEW_SECTION_CACHE_LOCK:
-        MEMORY_OVERVIEW_SECTION_CACHE.update(
-            {
-                "root": cache_root,
+        section_warnings: list[str] = []
+        started_at = time.perf_counter()
+        sub_timings: list[dict[str, Any]] = []
+        section = load_section(section_warnings, sub_timings)
+        duration_ms = round((time.perf_counter() - started_at) * 1000, 1)
+        section_id = str(section.get("id") or fallback_section_id).strip() if isinstance(section, dict) else fallback_section_id
+        timing = {
+            "sectionId": section_id,
+            "durationMs": duration_ms,
+            "itemCount": len(section.get("items") or []) if isinstance(section, dict) else 0,
+            "cacheHit": False,
+        }
+        if sub_timings:
+            timing["subTimingsMs"] = _normalize_memory_overview_subtimings(sub_timings)
+        warnings.extend(section_warnings)
+        sections.append(section)
+        timings.append(timing)
+        with MEMORY_OVERVIEW_SECTION_CACHE_LOCK:
+            if MEMORY_OVERVIEW_SECTION_CACHE.get("root") != cache_root:
+                MEMORY_OVERVIEW_SECTION_CACHE.update({"root": cache_root, "sections": {}})
+            cache_sections = MEMORY_OVERVIEW_SECTION_CACHE.setdefault("sections", {})
+            cache_sections[fallback_section_id] = {
                 "expiresAt": time.monotonic() + MEMORY_OVERVIEW_SECTION_CACHE_TTL_SECONDS,
-                "sections": copy.deepcopy(sections),
-                "timings": copy.deepcopy(timings),
-                "warnings": copy.deepcopy(added_warnings),
+                "section": copy.deepcopy(section),
+                "timing": copy.deepcopy(timing),
+                "warnings": copy.deepcopy(section_warnings),
             }
-        )
     return sections, timings
 
 
 def _clear_memory_overview_section_cache() -> None:
     with MEMORY_OVERVIEW_SECTION_CACHE_LOCK:
-        MEMORY_OVERVIEW_SECTION_CACHE.update(
-            {"root": "", "expiresAt": 0.0, "sections": None, "timings": None, "warnings": None}
-        )
+        MEMORY_OVERVIEW_SECTION_CACHE.update({"root": "", "sections": {}})
 
 
 def _load_timed_base_memory_sections(root: Path, warnings: list[str]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    specs = [
-        ("project-memory", lambda: _project_memory_section(root, warnings)),
-        ("runtime-memory", lambda: _runtime_memory_section(root)),
-        ("prompt-memory", lambda: _prompt_memory_section(root)),
-        ("workspace-database", lambda: _workspace_database_section(root)),
-        ("research-memory", lambda: _research_memory_section(root)),
-        ("team-knowledge", lambda: _team_knowledge_memory_section(root)),
-        ("git-memory", lambda: _git_memory_section(root)),
-        ("chat-session-memory", lambda: _chat_session_memory_section(root)),
-        ("self-evolution-memory", lambda: _self_evolution_memory_section(root)),
-        ("supervised-evolution-memory", lambda: _supervised_evolution_memory_section(root)),
-        ("runtime-scene-evidence", lambda: _runtime_scene_memory_section(root)),
-    ]
     sections: list[dict[str, Any]] = []
     timings: list[dict[str, Any]] = []
-    for fallback_section_id, load_section in specs:
+    for fallback_section_id, load_section in _base_memory_section_specs(root, warnings):
         started_at = time.perf_counter()
-        section = load_section()
+        sub_timings: list[dict[str, Any]] = []
+        section_warnings: list[str] = []
+        section = load_section(section_warnings, sub_timings)
+        warnings.extend(section_warnings)
         duration_ms = round((time.perf_counter() - started_at) * 1000, 1)
         section_id = str(section.get("id") or fallback_section_id).strip() if isinstance(section, dict) else fallback_section_id
         sections.append(section)
-        timings.append(
-            {
-                "sectionId": section_id,
-                "durationMs": duration_ms,
-                "itemCount": len(section.get("items") or []) if isinstance(section, dict) else 0,
-            }
-        )
+        timing = {
+            "sectionId": section_id,
+            "durationMs": duration_ms,
+            "itemCount": len(section.get("items") or []) if isinstance(section, dict) else 0,
+            "cacheHit": False,
+        }
+        if sub_timings:
+            timing["subTimingsMs"] = _normalize_memory_overview_subtimings(sub_timings)
+        timings.append(timing)
     return sections, timings
+
+
+def _base_memory_section_specs(root: Path, warnings: list[str]):
+    return [
+        ("project-memory", lambda section_warnings, sub_timings: _project_memory_section(root, section_warnings)),
+        ("runtime-memory", lambda section_warnings, sub_timings: _runtime_memory_section(root)),
+        ("prompt-memory", lambda section_warnings, sub_timings: _prompt_memory_section(root)),
+        ("workspace-database", lambda section_warnings, sub_timings: _workspace_database_section(root, sub_timings=sub_timings)),
+        ("research-memory", lambda section_warnings, sub_timings: _research_memory_section(root)),
+        ("team-knowledge", lambda section_warnings, sub_timings: _team_knowledge_memory_section(root, sub_timings=sub_timings)),
+        ("git-memory", lambda section_warnings, sub_timings: _git_memory_section(root, sub_timings=sub_timings)),
+        ("chat-session-memory", lambda section_warnings, sub_timings: _chat_session_memory_section(root, sub_timings=sub_timings)),
+        ("self-evolution-memory", lambda section_warnings, sub_timings: _self_evolution_memory_section(root, sub_timings=sub_timings)),
+        ("supervised-evolution-memory", lambda section_warnings, sub_timings: _supervised_evolution_memory_section(root, sub_timings=sub_timings)),
+        ("runtime-scene-evidence", lambda section_warnings, sub_timings: _runtime_scene_memory_section(root, sub_timings=sub_timings)),
+    ]
+
+
+def _load_base_memory_section(root: Path, section_id: str, warnings: list[str]) -> dict[str, Any] | None:
+    target = str(section_id or "").strip()
+    if not target:
+        return None
+    for fallback_section_id, load_section in _base_memory_section_specs(root, warnings):
+        if fallback_section_id != target:
+            continue
+        section_warnings: list[str] = []
+        section = load_section(section_warnings, [])
+        warnings.extend(section_warnings)
+        return section if isinstance(section, dict) else None
+    return None
 
 
 def _project_memory_section(root: Path, warnings: list[str]) -> dict[str, Any]:
@@ -758,7 +818,7 @@ def _prompt_memory_section(root: Path) -> dict[str, Any]:
     )
 
 
-def _workspace_database_section(root: Path) -> dict[str, Any]:
+def _workspace_database_section(root: Path, sub_timings: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     db_path = root / "workspace" / "agent_brain.db"
     table_specs = [
         ("LongTermMemory", "long_term_memory", "长期记忆", ["record_learning_tool", "search_memory_tool"]),
@@ -769,7 +829,11 @@ def _workspace_database_section(root: Path) -> dict[str, Any]:
     ]
     items = []
     for table, kind, title, used_by in table_specs:
-        payload = _sqlite_table_snapshot(db_path, table)
+        payload = _time_memory_overview_step(
+            sub_timings,
+            f"sqlite.{table}",
+            lambda table=table: _sqlite_table_snapshot(db_path, table),
+        )
         items.append(
             _data_item(
                 root,
@@ -861,11 +925,15 @@ def _research_memory_section(root: Path) -> dict[str, Any]:
     )
 
 
-def _team_knowledge_memory_section(root: Path) -> dict[str, Any]:
+def _team_knowledge_memory_section(root: Path, sub_timings: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     try:
         from core.web.services.team_knowledge_service import team_knowledge_memory_section_summary
 
-        summary_payload = team_knowledge_memory_section_summary()
+        summary_payload = _time_memory_overview_step(
+            sub_timings,
+            "team_knowledge.summary",
+            lambda: team_knowledge_memory_section_summary(),
+        )
     except Exception:
         summary_payload = {
             "knowledgeBaseCount": 0,
@@ -920,14 +988,30 @@ def _team_knowledge_memory_section(root: Path) -> dict[str, Any]:
     )
 
 
-def _git_memory_section(root: Path) -> dict[str, Any]:
+def _git_memory_section(root: Path, sub_timings: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     db_path = root / "workspace" / "agent_brain.db"
-    git_snapshot = _git_snapshot(root)
+    git_snapshot = _time_memory_overview_step(sub_timings, "git.snapshot", lambda: _git_snapshot(root))
     git_db = {
-        "attentionCache": _sqlite_table_snapshot(db_path, "GitAttentionCache", limit=5),
-        "fileChanges": _sqlite_table_snapshot(db_path, "GitFileChange", limit=10),
-        "entityChanges": _sqlite_table_snapshot(db_path, "GitEntityChange", limit=10),
-        "worktreeSnapshots": _sqlite_table_snapshot(db_path, "GitWorkingTreeSnapshot", limit=5),
+        "attentionCache": _time_memory_overview_step(
+            sub_timings,
+            "sqlite.GitAttentionCache",
+            lambda: _sqlite_table_snapshot(db_path, "GitAttentionCache", limit=5),
+        ),
+        "fileChanges": _time_memory_overview_step(
+            sub_timings,
+            "sqlite.GitFileChange",
+            lambda: _sqlite_table_snapshot(db_path, "GitFileChange", limit=10),
+        ),
+        "entityChanges": _time_memory_overview_step(
+            sub_timings,
+            "sqlite.GitEntityChange",
+            lambda: _sqlite_table_snapshot(db_path, "GitEntityChange", limit=10),
+        ),
+        "worktreeSnapshots": _time_memory_overview_step(
+            sub_timings,
+            "sqlite.GitWorkingTreeSnapshot",
+            lambda: _sqlite_table_snapshot(db_path, "GitWorkingTreeSnapshot", limit=5),
+        ),
     }
     items = [
         _data_item(
@@ -976,10 +1060,14 @@ def _git_memory_section(root: Path) -> dict[str, Any]:
     )
 
 
-def _chat_session_memory_section(root: Path) -> dict[str, Any]:
+def _chat_session_memory_section(root: Path, sub_timings: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     chat_state = root / "workspace" / "chat" / "chat_state.json"
     session_root = root / "workspace" / "sessions"
-    sessions_payload = _session_memory_summary(root, session_root)
+    sessions_payload = _time_memory_overview_step(
+        sub_timings,
+        "session_workspace.summary",
+        lambda: _session_memory_summary(root, session_root),
+    )
     items = [
         _file_item(
             root,
@@ -1027,11 +1115,15 @@ def _chat_session_memory_section(root: Path) -> dict[str, Any]:
     )
 
 
-def _self_evolution_memory_section(root: Path) -> dict[str, Any]:
+def _self_evolution_memory_section(root: Path, sub_timings: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     db_path = root / "workspace" / "agent_brain.db"
     active_promotions = root / "workspace" / "gym" / "active_promotions.json"
     audit_path = root / "workspace" / "evolution" / "audit.jsonl"
-    transaction_payload = _sqlite_table_snapshot(db_path, "EvolutionTransaction", limit=10)
+    transaction_payload = _time_memory_overview_step(
+        sub_timings,
+        "sqlite.EvolutionTransaction",
+        lambda: _sqlite_table_snapshot(db_path, "EvolutionTransaction", limit=10),
+    )
     items = [
         _file_item(
             root,
@@ -1089,11 +1181,41 @@ def _self_evolution_memory_section(root: Path) -> dict[str, Any]:
     )
 
 
-def _supervised_evolution_memory_section(root: Path) -> dict[str, Any]:
+def _supervised_evolution_memory_section(root: Path, sub_timings: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     supervised_root = root / "workspace" / "supervised_evolution"
-    decisions = _latest_files(supervised_root / "decisions", "*.json", limit=10)
-    policies = _latest_files(supervised_root / "policy", "*.json", limit=10)
-    bundles = _latest_files(root / "workspace" / "evaluation" / "bundles", "*.json", limit=10)
+    decisions = _time_memory_overview_step(
+        sub_timings,
+        "latest_files.supervised_decisions",
+        lambda: _latest_files(supervised_root / "decisions", "*.json", limit=10),
+    )
+    policies = _time_memory_overview_step(
+        sub_timings,
+        "latest_files.supervised_policy",
+        lambda: _latest_files(supervised_root / "policy", "*.json", limit=10),
+    )
+    bundles = _time_memory_overview_step(
+        sub_timings,
+        "latest_files.evaluation_bundles",
+        lambda: _latest_files(root / "workspace" / "evaluation" / "bundles", "*.json", limit=10),
+    )
+    decision_payload = _time_memory_overview_step(
+        sub_timings,
+        "file_payload.supervised_decisions",
+        lambda: _file_list_payload(root, decisions),
+        count=lambda payload: int(payload.get("count") or 0) if isinstance(payload, dict) else 0,
+    )
+    policy_payload = _time_memory_overview_step(
+        sub_timings,
+        "file_payload.supervised_policy",
+        lambda: _file_list_payload(root, policies),
+        count=lambda payload: int(payload.get("count") or 0) if isinstance(payload, dict) else 0,
+    )
+    bundle_payload = _time_memory_overview_step(
+        sub_timings,
+        "file_payload.evaluation_bundles",
+        lambda: _file_list_payload(root, bundles),
+        count=lambda payload: int(payload.get("count") or 0) if isinstance(payload, dict) else 0,
+    )
     items = [
         _file_item(
             root,
@@ -1134,7 +1256,7 @@ def _supervised_evolution_memory_section(root: Path) -> dict[str, Any]:
             used_by=["evolution_service", "proposal library", "显式读取"],
             channels=["supervised_evolution", "explicit_read"],
             summary=f"最近 {len(decisions)} 条监督决策记录。",
-            content=_file_list_payload(root, decisions),
+            content=decision_payload,
             content_type="json",
         ),
         _data_item(
@@ -1150,7 +1272,7 @@ def _supervised_evolution_memory_section(root: Path) -> dict[str, Any]:
             used_by=["evolution_service", "policy/action review"],
             channels=["supervised_evolution", "explicit_read"],
             summary=f"最近 {len(policies)} 条监督策略记录。",
-            content=_file_list_payload(root, policies),
+            content=policy_payload,
             content_type="json",
         ),
         _data_item(
@@ -1166,7 +1288,7 @@ def _supervised_evolution_memory_section(root: Path) -> dict[str, Any]:
             used_by=["run_supervised_evolution_session", "scripts.evolution_harness"],
             channels=["supervised_evolution"],
             summary=f"监督 harness 会把 bundle case prompt 交给 baseline/candidate agent；当前列出最近 {len(bundles)} 个文件。",
-            content=_file_list_payload(root, bundles),
+            content=bundle_payload,
             content_type="json",
         ),
     ]
@@ -1183,15 +1305,26 @@ def _supervised_evolution_memory_section(root: Path) -> dict[str, Any]:
     )
 
 
-def _runtime_scene_memory_section(root: Path) -> dict[str, Any]:
+def _runtime_scene_memory_section(root: Path, sub_timings: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     scene_root = root / "logs" / "runtime_scenes"
     scene_dirs = []
     if scene_root.exists():
-        scene_dirs = sorted(
-            [path for path in scene_root.iterdir() if path.is_dir()],
-            key=lambda path: path.stat().st_mtime,
-            reverse=True,
-        )[:LIST_LIMIT]
+        scene_dirs = _time_memory_overview_step(
+            sub_timings,
+            "runtime_scene.list_dirs",
+            lambda: sorted(
+                [path for path in scene_root.iterdir() if path.is_dir()],
+                key=lambda path: path.stat().st_mtime,
+                reverse=True,
+            )[:LIST_LIMIT],
+            count=lambda paths: len(paths),
+        )
+    scene_summaries = _time_memory_overview_step(
+        sub_timings,
+        "runtime_scene.summaries",
+        lambda: [_runtime_scene_summary(root, path) for path in scene_dirs],
+        count=lambda summaries: len(summaries),
+    )
     items = [
         _data_item(
             root,
@@ -1211,7 +1344,7 @@ def _runtime_scene_memory_section(root: Path) -> dict[str, Any]:
                 "问题簇和下一步摘要注入 prompt，不注入 raw 日志全文。"
             ),
             content={
-                "scenes": [_runtime_scene_summary(root, path) for path in scene_dirs],
+                "scenes": scene_summaries,
             },
             content_type="json",
         )
@@ -1749,12 +1882,12 @@ def _find_user_managed_item(managed_memory: dict[str, Any], item_id: str) -> dic
 
 def _find_base_memory_item(root: Path, section_id: str, item_id: str) -> dict[str, Any] | None:
     warnings: list[str] = []
-    for section in _base_memory_sections(root, warnings):
-        if str(section.get("id") or "") != section_id:
-            continue
-        for item in section.get("items") or []:
-            if isinstance(item, dict) and str(item.get("id") or "") == item_id:
-                return dict(item)
+    section = _load_base_memory_section(root, section_id, warnings)
+    if section is None:
+        return None
+    for item in section.get("items") or []:
+        if isinstance(item, dict) and str(item.get("id") or "") == item_id:
+            return dict(item)
     return None
 
 
@@ -1804,12 +1937,86 @@ def _record_memory_management_event(action: str, section_id: str, item_id: str, 
         pass
 
 
+def _append_memory_overview_phase_timing(
+    timings: list[dict[str, Any]],
+    phase: str,
+    started_at: float,
+    *,
+    count: int | None = None,
+) -> None:
+    timing = {
+        "phase": _clip(str(phase or "unknown"), 120),
+        "durationMs": round((time.perf_counter() - started_at) * 1000, 1),
+    }
+    if count is not None:
+        timing["count"] = int(count)
+    timings.append(timing)
+
+
+def _time_memory_overview_step(
+    timings: list[dict[str, Any]] | None,
+    step: str,
+    callback: Callable[[], Any],
+    *,
+    count: Callable[[Any], int] | None = None,
+) -> Any:
+    started_at = time.perf_counter()
+    result = callback()
+    if timings is not None:
+        timing = {
+            "step": _clip(str(step or "unknown"), 120),
+            "durationMs": round((time.perf_counter() - started_at) * 1000, 1),
+        }
+        try:
+            value_count = count(result) if count is not None else _memory_overview_result_count(result)
+            if value_count is not None:
+                timing["count"] = int(value_count)
+        except Exception:
+            pass
+        timings.append(timing)
+    return result
+
+
+def _memory_overview_result_count(result: Any) -> int | None:
+    if isinstance(result, dict):
+        for key in ("count", "sessionCount", "fileCount", "knowledgeBaseCount", "itemCount"):
+            value = result.get(key)
+            if isinstance(value, int):
+                return value
+        rows = result.get("rows")
+        if isinstance(rows, list):
+            return len(rows)
+    if isinstance(result, (list, tuple, set)):
+        return len(result)
+    return None
+
+
+def _normalize_memory_overview_subtimings(timings: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    normalized = [
+        {
+            key: value
+            for key, value in {
+                "step": _clip(str(timing.get("step") or "unknown"), 120),
+                "durationMs": round(float(timing.get("durationMs") or 0.0), 1),
+                "count": timing.get("count") if isinstance(timing.get("count"), int) else None,
+            }.items()
+            if value is not None
+        }
+        for timing in timings
+        if isinstance(timing, dict)
+    ]
+    return sorted(normalized, key=lambda timing: float(timing.get("durationMs") or 0.0), reverse=True)[
+        :MEMORY_OVERVIEW_SUBTIMING_LIMIT
+    ]
+
+
 def _record_memory_overview_perf_event(
     root: Path,
     overview: dict[str, Any],
     *,
     duration_ms: float,
     section_timings: list[dict[str, Any]] | None = None,
+    phase_timings: list[dict[str, Any]] | None = None,
 ) -> None:
     global MEMORY_OVERVIEW_WAS_SLOW
     slow = duration_ms >= MEMORY_OVERVIEW_SLOW_MS
@@ -1850,6 +2057,7 @@ def _record_memory_overview_perf_event(
                 "sectionCount": len(section_metrics),
                 "itemCount": int((overview.get("summary") or {}).get("itemCount") or 0),
                 "sections": section_metrics,
+                "phaseTimingsMs": list(phase_timings or []),
                 "sectionTimingsMs": list(section_timings or []),
             },
             lifecycle=True,

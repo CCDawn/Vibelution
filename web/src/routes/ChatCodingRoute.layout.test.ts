@@ -311,7 +311,7 @@ describe("ChatCodingRoute layout contract", () => {
   it("exposes dynamic group creation from the unified conversation list", () => {
     expect(routeSource).toContain("handleToggleGroupComposer");
     expect(routeSource).toContain("handleCreateGroupRoom");
-    expect(routeSource).toContain("fetchJson<AgentInstance[]>(\"/api/agents\")");
+    expect(routeSource).toContain("fetchJson<AgentInstance[]>(\"/api/agents?detail=summary\")");
     expect(routeSource).toContain("body: JSON.stringify({ title, agentIds, mode, purpose })");
     expect(routeSource).toContain("styles.groupComposerPanel");
     expect(routeSource).toContain("styles.groupAgentPicker");

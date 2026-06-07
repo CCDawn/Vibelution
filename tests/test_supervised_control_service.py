@@ -679,6 +679,45 @@ def test_handle_progress_event_updates_current_case_io_snapshot():
     assert snapshot["eventTail"][-1]["event"] == "role_start"
 
 
+def test_handle_progress_event_records_environment_preflight_live_event():
+    run_id = _seed_running_run()
+
+    service._handle_progress_event(
+        run_id,
+        {
+            "event": "role_live",
+            "case_index": 1,
+            "case_total": 1,
+            "case_id": "tb2",
+            "role": "baseline",
+            "scenario": "transaction",
+            "mode": "multi_step_react",
+            "prompt": "run tb case",
+            "phase": "environment_preflight",
+            "environment_contract_kind": "terminal_bench_task_environment",
+            "environment_preflight": {
+                "status": "missing_verifier_dependency",
+                "available": False,
+                "missing": [],
+                "official_verifier": {
+                    "missing": [
+                        {"name": "docker", "available": False, "evidence": "not_found"},
+                    ],
+                },
+            },
+        },
+    )
+
+    snapshot = service.get_supervised_run_snapshot(run_id)
+
+    assert snapshot["eventTail"][-1]["event"] == "role_live"
+    assert snapshot["eventTail"][-1]["phase"] == "environment_preflight"
+    assert snapshot["eventTail"][-1]["environmentPreflight"]["status"] == "missing_verifier_dependency"
+    assert snapshot["eventTail"][-1]["environmentContractKind"] == "terminal_bench_task_environment"
+    assert snapshot["latestMessage"] == "tb2 baseline environment_preflight status=missing_verifier_dependency available=False"
+    assert snapshot["currentTask"] == "正在预检 case 1/1 的任务环境。"
+
+
 def _checkpoint_in_thread(run_id: str, result: dict[str, object]) -> None:
     try:
         service._checkpoint_supervised_run(run_id, {"phase": "case_boundary", "case_id": "case_1"})
@@ -809,6 +848,57 @@ def test_runtime_manager_get_active_supervised_run_reads_store(monkeypatch):
     assert result["runId"] == snapshot["runId"]
     assert result["status"] == snapshot["status"]
     assert result["actionStates"]["pause"]["enabled"] is True
+
+
+def test_runtime_manager_latest_supervised_run_reuses_loaded_active_snapshot(monkeypatch):
+    active = {
+        "runId": "web-supervised-active",
+        "status": "running",
+        "runtimeManagerControl": {
+            "ownerPid": 222,
+            "kind": "supervised",
+            "claimedAt": "2026-05-18T12:00:00Z",
+        },
+    }
+    active_loads = 0
+
+    def fail_active_load(kind):
+        nonlocal active_loads
+        active_loads += 1
+        raise AssertionError("loaded active snapshot should be reused")
+
+    monkeypatch.setattr(service, "_runtime_manager_live_control_enabled", lambda: True)
+    monkeypatch.setattr(service, "_current_runtime_manager_owner_pid", lambda: 222)
+    monkeypatch.setattr(service, "load_manager_active_run_snapshot", fail_active_load)
+    monkeypatch.setattr(service, "load_manager_latest_run_snapshot", lambda kind: pytest.fail("active snapshot should satisfy latest"))
+
+    result = service.get_latest_supervised_run(active_run=active, active_run_loaded=True)
+
+    assert active_loads == 0
+    assert result is not None
+    assert result["runId"] == active["runId"]
+    assert result["actionStates"]["pause"]["enabled"] is True
+
+
+def test_runtime_manager_workbench_can_skip_catalog_scan(monkeypatch):
+    monkeypatch.setattr(service, "_runtime_manager_live_control_enabled", lambda: True)
+    monkeypatch.setattr(service, "default_bundle_name", lambda: "default_bundle")
+    monkeypatch.setattr(service, "get_workbench_state_payload", lambda **kwargs: pytest.fail("provided saved state should be reused"))
+    monkeypatch.setattr(service, "list_dataset_choices", lambda project_root: pytest.fail("catalog-light workbench should not scan datasets"))
+    monkeypatch.setattr(service, "list_available_workbench_bundles", lambda project_root: pytest.fail("catalog-light workbench should not scan bundles"))
+
+    payload = service.get_supervised_workbench(
+        active_run={"runId": "active-1"},
+        active_run_loaded=True,
+        include_catalog=False,
+        saved_state={"source": "bundle"},
+    )
+
+    assert payload["defaultBundleName"] == "default_bundle"
+    assert payload["savedState"] == {"source": "bundle"}
+    assert payload["bundles"] == []
+    assert payload["datasets"] == []
+    assert payload["activeRun"]["runId"] == "active-1"
 
 
 def test_runtime_manager_active_supervised_run_closes_stale_locked_snapshot(monkeypatch):

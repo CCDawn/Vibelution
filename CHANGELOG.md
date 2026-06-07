@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.46 - 2026-06-07
+
+- Hardened supervised-evolution startup with runtime-manager source freshness checks and safer active-work probe failures.
+- Added guarded restart frontend build preflight and Launcher desktop-entry validation before closing a running workbench.
+- Improved supervised evaluation environment handling, memory detail surfaces, and related workbench UI affordances.
+
 ## 0.10.45 - 2026-06-07
 
 - Added read-only communication briefs to the Challenge Cup workflow coordination status API, mapping queue items to target functional Agent roles and suggested delivery channels without sending messages automatically.

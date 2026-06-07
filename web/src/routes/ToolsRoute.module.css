@@ -472,10 +472,10 @@
 .toolButtonActive {
   display: grid;
   grid-template-columns: 10px minmax(0, 1fr) minmax(76px, 104px);
-  align-items: center;
-  gap: 8px;
+  align-items: start;
+  gap: 7px;
   width: 100%;
-  padding: 8px;
+  padding: 7px 8px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   background: var(--surface-panel-muted, rgba(21, 24, 27, 0.82));
@@ -519,9 +519,13 @@
 }
 
 .toolCopy span {
+  display: -webkit-box;
+  max-height: 2.6em;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .toolBadges {

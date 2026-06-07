@@ -235,6 +235,30 @@ def test_memory_overview_can_defer_item_content_to_detail_endpoint(tmp_path, mon
     assert detail_payload["item"]["content"] == "Full prompt memory body."
 
 
+def test_memory_item_detail_loads_only_requested_base_section(tmp_path, monkeypatch):
+    calls: list[str] = []
+
+    def fake_load_base_memory_section(root, section_id, warnings):
+        calls.append(section_id)
+        if section_id == "prompt-memory":
+            return {
+                "id": "prompt-memory",
+                "title": "Prompt",
+                "items": [{"id": "target", "title": "Target", "content": "detail"}],
+            }
+        return {"id": section_id, "items": []}
+
+    monkeypatch.setattr(memory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(memory_service, "_load_base_memory_section", fake_load_base_memory_section)
+    memory_service._clear_memory_overview_section_cache()
+
+    detail = memory_service.get_memory_item_detail("prompt-memory", "target")
+
+    assert detail is not None
+    assert detail["item"]["content"] == "detail"
+    assert calls == ["prompt-memory"]
+
+
 def test_memory_knowledge_graph_endpoint_returns_read_only_project_structure(tmp_path, monkeypatch):
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(memory_graph_service, "PROJECT_ROOT", tmp_path)
@@ -816,14 +840,19 @@ def test_memory_overview_base_sections_reuse_recent_cache(tmp_path, monkeypatch)
     monkeypatch.setattr(memory_service, "_project_memory_section", fake_project_memory_section)
     monkeypatch.setattr(memory_service, "_runtime_memory_section", lambda root: {"id": "runtime-memory", "items": []})
     monkeypatch.setattr(memory_service, "_prompt_memory_section", lambda root: {"id": "prompt-memory", "items": []})
-    monkeypatch.setattr(memory_service, "_workspace_database_section", lambda root: {"id": "workspace-database", "items": []})
+    monkeypatch.setattr(memory_service, "_workspace_database_section", lambda root, sub_timings=None: {"id": "workspace-database", "items": []})
     monkeypatch.setattr(memory_service, "_research_memory_section", lambda root: {"id": "research-memory", "items": []})
-    monkeypatch.setattr(memory_service, "_team_knowledge_memory_section", lambda root: {"id": "team-knowledge", "items": []})
-    monkeypatch.setattr(memory_service, "_git_memory_section", lambda root: {"id": "git-memory", "items": []})
-    monkeypatch.setattr(memory_service, "_chat_session_memory_section", lambda root: {"id": "chat-session-memory", "items": []})
-    monkeypatch.setattr(memory_service, "_self_evolution_memory_section", lambda root: {"id": "self-evolution-memory", "items": []})
-    monkeypatch.setattr(memory_service, "_supervised_evolution_memory_section", lambda root: {"id": "supervised-evolution-memory", "items": []})
-    monkeypatch.setattr(memory_service, "_runtime_scene_memory_section", lambda root: {"id": "runtime-scene-evidence", "items": []})
+    monkeypatch.setattr(memory_service, "_team_knowledge_memory_section", lambda root, sub_timings=None: {"id": "team-knowledge", "items": []})
+    def fake_git_memory_section(root, sub_timings=None):
+        if sub_timings is not None:
+            sub_timings.append({"step": "git.snapshot", "durationMs": 7.0, "count": 1})
+        return {"id": "git-memory", "items": []}
+
+    monkeypatch.setattr(memory_service, "_git_memory_section", fake_git_memory_section)
+    monkeypatch.setattr(memory_service, "_chat_session_memory_section", lambda root, sub_timings=None: {"id": "chat-session-memory", "items": []})
+    monkeypatch.setattr(memory_service, "_self_evolution_memory_section", lambda root, sub_timings=None: {"id": "self-evolution-memory", "items": []})
+    monkeypatch.setattr(memory_service, "_supervised_evolution_memory_section", lambda root, sub_timings=None: {"id": "supervised-evolution-memory", "items": []})
+    monkeypatch.setattr(memory_service, "_runtime_scene_memory_section", lambda root, sub_timings=None: {"id": "runtime-scene-evidence", "items": []})
 
     memory_service._clear_memory_overview_section_cache()
     first_warnings: list[str] = []
@@ -836,15 +865,74 @@ def test_memory_overview_base_sections_reuse_recent_cache(tmp_path, monkeypatch)
     assert first_sections[0]["items"][0]["updatedAt"] == "call-1"
     assert first_warnings == ["warning-1"]
     assert second_warnings == ["warning-1"]
-    assert second_timings == first_timings
+    assert all(timing["cacheHit"] is False for timing in first_timings)
+    assert all(timing["cacheHit"] is True for timing in second_timings)
+    assert all(timing["durationMs"] == 0.0 for timing in second_timings)
+    assert [
+        timing.get("cachedLoadDurationMs")
+        for timing in second_timings
+    ] == [
+        timing.get("durationMs")
+        for timing in first_timings
+    ]
+    second_git_timing = next(timing for timing in second_timings if timing["sectionId"] == "git-memory")
+    assert "subTimingsMs" not in second_git_timing
+    assert second_git_timing["cachedSubTimingsMs"] == [
+        {"step": "git.snapshot", "durationMs": 7.0, "count": 1}
+    ]
 
     now["value"] = 24.0
     third_warnings: list[str] = []
-    third_sections, _third_timings = memory_service._timed_base_memory_sections(tmp_path, third_warnings)
+    third_sections, third_timings = memory_service._timed_base_memory_sections(tmp_path, third_warnings)
 
     assert calls["count"] == 2
     assert third_sections[0]["items"][0]["updatedAt"] == "call-2"
     assert third_warnings == ["warning-2"]
+    assert all(timing["cacheHit"] is False for timing in third_timings)
+    memory_service._clear_memory_overview_section_cache()
+
+
+def test_memory_overview_section_cache_refreshes_only_expired_section(tmp_path, monkeypatch):
+    calls = {"project-memory": 0, "runtime-memory": 0}
+    now = {"value": 100.0}
+
+    def fake_monotonic():
+        return now["value"]
+
+    def fake_project(root, warnings):
+        calls["project-memory"] += 1
+        return {"id": "project-memory", "items": [{"id": f"project-{calls['project-memory']}"}]}
+
+    def fake_runtime(root):
+        calls["runtime-memory"] += 1
+        return {"id": "runtime-memory", "items": [{"id": f"runtime-{calls['runtime-memory']}"}]}
+
+    monkeypatch.setattr(memory_service.time, "monotonic", fake_monotonic)
+    monkeypatch.setattr(memory_service, "MEMORY_OVERVIEW_SECTION_CACHE_TTL_SECONDS", 3.0)
+    monkeypatch.setattr(memory_service, "_project_memory_section", fake_project)
+    monkeypatch.setattr(memory_service, "_runtime_memory_section", fake_runtime)
+    monkeypatch.setattr(memory_service, "_prompt_memory_section", lambda root: {"id": "prompt-memory", "items": []})
+    monkeypatch.setattr(memory_service, "_workspace_database_section", lambda root, sub_timings=None: {"id": "workspace-database", "items": []})
+    monkeypatch.setattr(memory_service, "_research_memory_section", lambda root: {"id": "research-memory", "items": []})
+    monkeypatch.setattr(memory_service, "_team_knowledge_memory_section", lambda root, sub_timings=None: {"id": "team-knowledge", "items": []})
+    monkeypatch.setattr(memory_service, "_git_memory_section", lambda root, sub_timings=None: {"id": "git-memory", "items": []})
+    monkeypatch.setattr(memory_service, "_chat_session_memory_section", lambda root, sub_timings=None: {"id": "chat-session-memory", "items": []})
+    monkeypatch.setattr(memory_service, "_self_evolution_memory_section", lambda root, sub_timings=None: {"id": "self-evolution-memory", "items": []})
+    monkeypatch.setattr(memory_service, "_supervised_evolution_memory_section", lambda root, sub_timings=None: {"id": "supervised-evolution-memory", "items": []})
+    monkeypatch.setattr(memory_service, "_runtime_scene_memory_section", lambda root, sub_timings=None: {"id": "runtime-scene-evidence", "items": []})
+
+    memory_service._clear_memory_overview_section_cache()
+    first_sections, _ = memory_service._timed_base_memory_sections(tmp_path, [])
+    with memory_service.MEMORY_OVERVIEW_SECTION_CACHE_LOCK:
+        memory_service.MEMORY_OVERVIEW_SECTION_CACHE["sections"]["project-memory"]["expiresAt"] = 99.0
+    second_sections, _ = memory_service._timed_base_memory_sections(tmp_path, [])
+
+    first_by_id = {section["id"]: section for section in first_sections}
+    second_by_id = {section["id"]: section for section in second_sections}
+    assert calls["project-memory"] == 2
+    assert calls["runtime-memory"] == 1
+    assert first_by_id["runtime-memory"]["items"][0]["id"] == second_by_id["runtime-memory"]["items"][0]["id"]
+    assert second_by_id["project-memory"]["items"][0]["id"] == "project-2"
     memory_service._clear_memory_overview_section_cache()
 
 
@@ -907,9 +995,22 @@ def test_memory_overview_slow_event_includes_section_timings(tmp_path, monkeypat
             ],
         },
         duration_ms=900,
+        phase_timings=[
+            {"phase": "managed_memory.load", "durationMs": 2.0},
+            {"phase": "base_sections.load_or_cache", "durationMs": 80.0, "count": 2},
+        ],
         section_timings=[
-            {"sectionId": "project-memory", "durationMs": 12.3, "itemCount": 1},
-            {"sectionId": "runtime-memory", "durationMs": 45.6, "itemCount": 1},
+            {"sectionId": "project-memory", "durationMs": 12.3, "itemCount": 1, "cacheHit": False},
+            {
+                "sectionId": "runtime-memory",
+                "durationMs": 45.6,
+                "itemCount": 1,
+                "cacheHit": True,
+                "subTimingsMs": [
+                    {"step": "runtime.fast", "durationMs": 1.2, "count": 2},
+                    {"step": "runtime.slow", "durationMs": 32.1, "count": 1},
+                ],
+            },
         ],
     )
 
@@ -917,10 +1018,36 @@ def test_memory_overview_slow_event_includes_section_timings(tmp_path, monkeypat
     event = recorded_events[-1]
     assert event["eventCode"] == "memory.overview.slow"
     assert event["fields"]["durationMs"] == 900
-    assert event["fields"]["sectionTimingsMs"] == [
-        {"sectionId": "project-memory", "durationMs": 12.3, "itemCount": 1},
-        {"sectionId": "runtime-memory", "durationMs": 45.6, "itemCount": 1},
+    assert event["fields"]["phaseTimingsMs"] == [
+        {"phase": "managed_memory.load", "durationMs": 2.0},
+        {"phase": "base_sections.load_or_cache", "durationMs": 80.0, "count": 2},
     ]
+    assert event["fields"]["sectionTimingsMs"] == [
+        {"sectionId": "project-memory", "durationMs": 12.3, "itemCount": 1, "cacheHit": False},
+        {
+            "sectionId": "runtime-memory",
+            "durationMs": 45.6,
+            "itemCount": 1,
+            "cacheHit": True,
+            "subTimingsMs": [
+                {"step": "runtime.fast", "durationMs": 1.2, "count": 2},
+                {"step": "runtime.slow", "durationMs": 32.1, "count": 1},
+            ],
+        },
+    ]
+
+
+def test_memory_overview_subtimings_are_bounded_and_sorted():
+    timings = [
+        {"step": f"step-{index}", "durationMs": float(index), "count": index}
+        for index in range(memory_service.MEMORY_OVERVIEW_SUBTIMING_LIMIT + 4)
+    ]
+
+    normalized = memory_service._normalize_memory_overview_subtimings(timings)
+
+    assert len(normalized) == memory_service.MEMORY_OVERVIEW_SUBTIMING_LIMIT
+    assert normalized[0]["step"] == f"step-{memory_service.MEMORY_OVERVIEW_SUBTIMING_LIMIT + 3}"
+    assert normalized[-1]["durationMs"] > 0
 
 
 def test_git_snapshot_reuses_recent_subprocess_result(tmp_path, monkeypatch):

@@ -1273,7 +1273,7 @@ export function ChatCodingRoute() {
   });
   const agentsQuery = useQuery({
     queryKey: queryKeys.agents(),
-    queryFn: () => fetchJson<AgentInstance[]>("/api/agents"),
+    queryFn: () => fetchJson<AgentInstance[]>("/api/agents?detail=summary"),
     enabled: groupComposerOpen || Boolean(activeSessionId),
   });
   const chatRoomModesQuery = useQuery({

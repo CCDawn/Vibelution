@@ -458,7 +458,20 @@ Add-Content -LiteralPath (Join-Path $logDir "fake-vbs-entry-calls.jsonl") -Value
     while time.time() < deadline and not calls_path.exists():
         time.sleep(0.05)
     assert calls_path.exists()
-    calls = [json.loads(line) for line in calls_path.read_text(encoding="utf-8-sig").splitlines() if line.strip()]
+    calls_text = ""
+    last_permission_error: PermissionError | None = None
+    deadline = time.time() + 5
+    while time.time() < deadline:
+        try:
+            calls_text = calls_path.read_text(encoding="utf-8-sig")
+            last_permission_error = None
+            break
+        except PermissionError as exc:
+            last_permission_error = exc
+            time.sleep(0.05)
+    if last_permission_error is not None:
+        raise last_permission_error
+    calls = [json.loads(line) for line in calls_text.splitlines() if line.strip()]
     log_path = project_dir / ".runtime" / "launcher" / "desktop-entry-vbs.log"
     events = [
         _loads_json_line_allowing_control_chars(line)
@@ -498,6 +511,163 @@ def _run_desktop_entry_ast_harness(tmp_path: Path, harness_source: str) -> subpr
         str(DESKTOP_ENTRY_SCRIPT),
     ]
     return subprocess.run(command, capture_output=True, text=True, check=False, timeout=30)
+
+
+def test_launcher_internal_action_rejection_logs_env_diagnostics(tmp_path):
+    result = _run_launcher_ast_harness(
+        tmp_path,
+        """
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$LauncherPath
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$source = Get-Content -Raw -LiteralPath $LauncherPath
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors -and $parseErrors.Count -gt 0) {
+    throw "Launcher script parse failed: $($parseErrors[0].Message)"
+}
+
+$testFunctionAst = $ast.Find({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -eq "Test-RuntimeManagerInternalLauncherCall"
+}, $true)
+if ($null -eq $testFunctionAst) {
+    throw "Test-RuntimeManagerInternalLauncherCall was not found."
+}
+$assertFunctionAst = $ast.Find({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -eq "Assert-RuntimeManagerInternalLauncherCall"
+}, $true)
+if ($null -eq $assertFunctionAst) {
+    throw "Assert-RuntimeManagerInternalLauncherCall was not found."
+}
+. ([scriptblock]::Create($testFunctionAst.Extent.Text))
+. ([scriptblock]::Create($assertFunctionAst.Extent.Text))
+
+$script:events = @()
+$script:runtimeManagerInternalLauncherEnv = "VIBELUTION_RUNTIME_MANAGER_INTERNAL_LAUNCHER"
+$script:protectedProcessIds = @()
+function Test-LauncherProtectedProcessLooksLikeRuntimeManager {
+    param([int]$ProcessId)
+    return $false
+}
+function Write-LauncherControlLog {
+    param([string]$Event, [string]$Message, [string]$Level = "info", [hashtable]$Fields = @{})
+    $script:events += ,@{ event = $Event; level = $Level; message = $Message; fields = $Fields }
+}
+
+[Environment]::SetEnvironmentVariable($script:runtimeManagerInternalLauncherEnv, $null, "Process")
+$message = ""
+try {
+    Assert-RuntimeManagerInternalLauncherCall -RequestedAction "internal-stop"
+} catch {
+    $message = $_.Exception.Message
+}
+
+if ($message -notmatch "internal-stop") {
+    throw "Internal action rejection did not name the requested action: $message"
+}
+if (@($script:events).Count -ne 1) {
+    throw "Internal action rejection did not write exactly one control log event."
+}
+$event = $script:events[0]
+if ($event.event -ne "launcher.internal_action.rejected") {
+    throw "Unexpected rejection event: $($event.event)"
+}
+if ($event.fields.required_env -ne $script:runtimeManagerInternalLauncherEnv) {
+    throw "Required env name was not logged."
+}
+if ($event.fields.actual_env_present) {
+    throw "Missing internal env was logged as present."
+}
+if ($event.fields.actual_env_length -ne 0) {
+    throw "Missing internal env length was not logged as zero."
+}
+if ($event.fields.actual_env_value_is_one) {
+    throw "Missing internal env was logged as authorized."
+}
+
+[Environment]::SetEnvironmentVariable($script:runtimeManagerInternalLauncherEnv, "1", "Process")
+Assert-RuntimeManagerInternalLauncherCall -RequestedAction "internal-stop"
+[Environment]::SetEnvironmentVariable($script:runtimeManagerInternalLauncherEnv, $null, "Process")
+Write-Output "ok"
+""",
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip().splitlines()[-1] == "ok"
+
+
+def test_launcher_internal_action_allows_legacy_runtime_manager_protected_process(tmp_path):
+    result = _run_launcher_ast_harness(
+        tmp_path,
+        """
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$LauncherPath
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$source = Get-Content -Raw -LiteralPath $LauncherPath
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors -and $parseErrors.Count -gt 0) {
+    throw "Launcher script parse failed: $($parseErrors[0].Message)"
+}
+
+$testFunctionAst = $ast.Find({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -eq "Test-RuntimeManagerInternalLauncherCall"
+}, $true)
+$assertFunctionAst = $ast.Find({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -eq "Assert-RuntimeManagerInternalLauncherCall"
+}, $true)
+if ($null -eq $testFunctionAst -or $null -eq $assertFunctionAst) {
+    throw "Internal launcher authorization functions were not found."
+}
+. ([scriptblock]::Create($testFunctionAst.Extent.Text))
+. ([scriptblock]::Create($assertFunctionAst.Extent.Text))
+
+$script:runtimeManagerInternalLauncherEnv = "VIBELUTION_RUNTIME_MANAGER_INTERNAL_LAUNCHER"
+$script:protectedProcessIds = @(24680)
+$script:events = @()
+function Test-LauncherProtectedProcessLooksLikeRuntimeManager {
+    param([int]$ProcessId)
+    return $ProcessId -eq 24680
+}
+function Write-LauncherControlLog {
+    param([string]$Event, [string]$Message, [string]$Level = "info", [hashtable]$Fields = @{})
+    $script:events += ,@{ event = $Event; level = $Level; message = $Message; fields = $Fields }
+}
+
+[Environment]::SetEnvironmentVariable($script:runtimeManagerInternalLauncherEnv, $null, "Process")
+if (-not (Test-RuntimeManagerInternalLauncherCall)) {
+    throw "Legacy runtime manager protected process evidence was not accepted."
+}
+Assert-RuntimeManagerInternalLauncherCall -RequestedAction "internal-restart"
+if (@($script:events).Count -ne 0) {
+    throw "Authorized legacy runtime manager internal action wrote a rejection event."
+}
+Write-Output "ok"
+""",
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip().splitlines()[-1] == "ok"
 
 
 def test_launcher_backend_port_accepts_agent_env_alias(tmp_path):
@@ -2213,9 +2383,13 @@ $controlText = $controlAst.Extent.Text
 foreach ($required in @(
     '$controlSurfaceUrl = "$launcherControlUrl/launcher"',
     '$startedControlBackend = $false',
+    '$launcherBackendNeedsReplacement',
+    '$replacedExistingLauncherControl = $false',
     '$preserveExistingStateOnFailure = [bool]$snapshot.State',
     "Test-LauncherControlSourceCurrent",
-    "launcher.control_backend.source_changed",
+    "launcher.control_backend.source_change_detected",
+    "launcher.control_surface.stale_browser_preserved_until_preflight",
+    "launcher.control_backend.source_change_preflight_succeeded",
     "Start-LauncherControlBackend",
     "Start-ManagedBrowser",
     '-ProfileDir $launcherBrowserProfileDir',
@@ -2233,8 +2407,20 @@ if ($controlText -match "Start-Supervisor") {
 if ($controlText -match "Invoke-RuntimeManagerClient" -or $controlText -match "open_workbench") {
     throw "Launcher control surface should not queue runtime manager open_workbench."
 }
+$ensureWebBuildIndex = $controlText.IndexOf("Ensure-WebBuild")
+$replaceBackendIndex = $controlText.IndexOf("launcher.control_backend.source_change_preflight_succeeded")
+$stopBackendIndex = $controlText.IndexOf('Stop-ProcessesById -ProcessIds $launcherBackendPids')
+if ($ensureWebBuildIndex -lt 0 -or $replaceBackendIndex -lt 0 -or $stopBackendIndex -lt 0) {
+    throw "Launcher control source replacement preflight markers were not found."
+}
+if ($replaceBackendIndex -lt $ensureWebBuildIndex -or $stopBackendIndex -lt $ensureWebBuildIndex) {
+    throw "Launcher control backend replacement must happen after Ensure-WebBuild succeeds."
+}
 if ($controlText -notmatch 'if\\s*\\(\\s*\\$startedControlBackend\\s*\\)\\s*\\{\\s*Stop-ProcessesById\\s+@\\(\\$backendPid\\)\\s*\\}') {
     throw "Launcher control surface failure cleanup must only stop the launcher control backend it started."
+}
+if ($controlText -notmatch 'if\\s*\\(\\s*\\$startedControlBackend\\s+-or\\s+\\$replacedExistingLauncherControl\\s*\\)\\s*\\{\\s*Stop-ManagedBrowserProcesses\\s+-ProfileDir\\s+\\$launcherBrowserProfileDir\\s+-Role\\s+"launcher_control_surface"\\s*\\}') {
+    throw "Launcher control surface failure cleanup must not close a preserved stale browser before replacement."
 }
 if ($controlText -match 'if\\s*\\(\\s*\\$startedControlBackend\\s*\\)\\s*\\{\\s*Stop-ManagedBackendProcesses\\s*\\}') {
     throw "Launcher control surface failure cleanup must not stop the workbench backend helper."

@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 
+// @ts-expect-error Vitest runs this contract in Node; the web project intentionally omits global Node types.
+import { readFileSync } from "node:fs";
 import routeSource from "./ToolsRoute.tsx?raw";
 import routerSource from "../app/router.tsx?raw";
+
+const stylesSource = readFileSync(new URL("./ToolsRoute.module.css", import.meta.url), "utf-8");
 
 describe("ToolsRoute layout contract", () => {
   it("lives inside Agent management navigation", () => {
@@ -158,5 +162,13 @@ describe("ToolsRoute layout contract", () => {
     expect(routeSource).toContain("leftPanelCollapsed");
     expect(routeSource).toContain("setLeftPanelCollapsed");
     expect(routeSource).toContain("--tools-left-panel-width");
+  });
+
+  it("keeps long tool descriptions readable in the dense tool browser", () => {
+    expect(stylesSource).toContain(".toolCopy span");
+    expect(stylesSource).toContain("display: -webkit-box");
+    expect(stylesSource).toContain("-webkit-line-clamp: 2");
+    expect(stylesSource).toContain("white-space: normal");
+    expect(stylesSource).toContain("align-items: start");
   });
 });
