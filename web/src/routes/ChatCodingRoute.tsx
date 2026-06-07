@@ -80,7 +80,7 @@ import { isAgentInboxMessage, isTurnErrorMessage } from "../components/conversat
 import { LazyFilePreview } from "../components/preview/LazyFilePreview";
 import { collectBrowserPageSnapshot, postBrowserTelemetry } from "../app/browserTelemetry";
 import { getPageInstanceId } from "../app/pageInstance";
-import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
+import { resolvePollingInterval, usePageVisibility, useStartupWarmup } from "../app/pollingPolicy";
 import type { TranslationKey } from "../i18n/dictionary";
 import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
 import { petAvatarPresetLabel } from "../i18n/petLabels";
@@ -1155,6 +1155,9 @@ export function ChatCodingRoute() {
     return new URLSearchParams(location.search).get("room") ?? "";
   }, [location.search]);
   const pageVisible = usePageVisibility();
+  const [chatStartupDataReady, setChatStartupDataReady] = useState(false);
+  const chatStartupWarmupActive = useStartupWarmup(chatStartupDataReady);
+  const chatPollingVisible = pageVisible || chatStartupWarmupActive;
   const projectBusActive = activeGroupRoomId === "__project_agent_bus__";
   const groupPanelActive = Boolean(activeGroupRoomId);
   const legacyGroupRoomActive = groupPanelActive && !projectBusActive;
@@ -1209,12 +1212,12 @@ export function ChatCodingRoute() {
   const sessionStreamShouldConnect = Boolean(
     activeSessionId
     && sessionStreamRouteTargetMatches
-    && (pageVisible || sessionStreamRouteSwitchGraceActive),
+    && (chatPollingVisible || sessionStreamRouteSwitchGraceActive),
   );
   const groupStreamShouldConnect = Boolean(
     legacyGroupRoomActive
     && activeGroupRoomId
-    && (pageVisible || groupBackgroundSyncActive),
+    && (chatPollingVisible || groupBackgroundSyncActive),
   );
   useEffect(() => {
     if (!legacyGroupRoomActive && rightIndexPanel === "members") {
@@ -1225,14 +1228,14 @@ export function ChatCodingRoute() {
   const runtimeQuery = useQuery({
     queryKey: queryKeys.runtimeSummary(),
     queryFn: () => fetchJson<RuntimeSummary>("/api/runtime/summary"),
-    refetchInterval: resolvePollingInterval(pageVisible, 5_000),
-    refetchIntervalInBackground: false,
+    refetchInterval: resolvePollingInterval(chatPollingVisible, 5_000),
+    refetchIntervalInBackground: chatStartupWarmupActive,
   });
   const petQuery = useQuery({
     queryKey: queryKeys.petSummary(),
     queryFn: () => fetchJson<PetSummary>("/api/pet/summary"),
-    refetchInterval: resolvePollingInterval(pageVisible, 10_000),
-    refetchIntervalInBackground: false,
+    refetchInterval: resolvePollingInterval(chatPollingVisible, 10_000),
+    refetchIntervalInBackground: chatStartupWarmupActive,
   });
   const sessionsQuery = useQuery({
     queryKey: queryKeys.sessions(),
@@ -1241,17 +1244,17 @@ export function ChatCodingRoute() {
       return sessions.filter(isVisibleDirectSession);
     },
     refetchInterval: resolvePollingInterval(
-      pageVisible,
+      chatPollingVisible,
       sessionStreamConnected && directSessionPanelActive ? false : ACTIVE_INDEX_POLL_MS,
       { backgroundMs: directSessionBackgroundSyncActive && !sessionStreamConnected ? ACTIVE_BACKGROUND_SYNC_POLL_MS : false },
     ),
-    refetchIntervalInBackground: directSessionBackgroundSyncActive,
+    refetchIntervalInBackground: chatStartupWarmupActive || directSessionBackgroundSyncActive,
   });
   const conversationsQuery = useQuery({
     queryKey: queryKeys.conversations(),
     queryFn: () => fetchJson<ConversationSummary[]>("/api/conversations"),
     refetchInterval: resolvePollingInterval(
-      pageVisible,
+      chatPollingVisible,
       (sessionStreamConnected && directSessionPanelActive) || (groupStreamConnected && legacyGroupRoomActive)
         ? false
         : ACTIVE_INDEX_POLL_MS,
@@ -1263,13 +1266,13 @@ export function ChatCodingRoute() {
             : false,
       },
     ),
-    refetchIntervalInBackground: directSessionBackgroundSyncActive || groupBackgroundSyncActive,
+    refetchIntervalInBackground: chatStartupWarmupActive || directSessionBackgroundSyncActive || groupBackgroundSyncActive,
   });
   const teamsQuery = useQuery({
     queryKey: queryKeys.teams(),
     queryFn: () => fetchJson<TeamListPayload>("/api/teams"),
-    refetchInterval: resolvePollingInterval(pageVisible, directSessionPanelActive ? false : ACTIVE_INDEX_POLL_MS),
-    refetchIntervalInBackground: false,
+    refetchInterval: resolvePollingInterval(chatPollingVisible, directSessionPanelActive ? false : ACTIVE_INDEX_POLL_MS),
+    refetchIntervalInBackground: chatStartupWarmupActive,
   });
   const agentsQuery = useQuery({
     queryKey: queryKeys.agents(),
@@ -1292,19 +1295,19 @@ export function ChatCodingRoute() {
     enabled: legacyGroupRoomActive,
     refetchInterval: legacyGroupRoomActive
       ? resolvePollingInterval(
-          pageVisible,
+          chatPollingVisible,
           groupStreamConnected ? false : 3_000,
           { backgroundMs: groupBackgroundSyncActive && !groupStreamConnected ? ACTIVE_BACKGROUND_SYNC_POLL_MS : false },
         )
       : false,
-    refetchIntervalInBackground: groupBackgroundSyncActive,
+    refetchIntervalInBackground: chatStartupWarmupActive || groupBackgroundSyncActive,
   });
   const projectAgentBusQuery = useQuery({
     queryKey: queryKeys.projectAgentBus(),
     queryFn: () => listProjectAgentBusTimeline(),
     enabled: projectBusActive,
-    refetchInterval: projectBusActive ? resolvePollingInterval(pageVisible, 3_000) : false,
-    refetchIntervalInBackground: false,
+    refetchInterval: projectBusActive ? resolvePollingInterval(chatPollingVisible, 3_000) : false,
+    refetchIntervalInBackground: chatStartupWarmupActive,
   });
   const expandedGroupAgentDetailQueries = useQueries({
     queries: expandedGroupAgentSessionIds.map((sessionId) => ({
@@ -1313,12 +1316,12 @@ export function ChatCodingRoute() {
       enabled: legacyGroupRoomActive && Boolean(sessionId),
       refetchInterval: legacyGroupRoomActive && sessionId
         ? resolvePollingInterval(
-            pageVisible,
+            chatPollingVisible,
             3_000,
             { backgroundMs: groupBackgroundSyncActive && !groupStreamConnected ? ACTIVE_BACKGROUND_SYNC_POLL_MS : false },
           )
         : false,
-      refetchIntervalInBackground: groupBackgroundSyncActive,
+      refetchIntervalInBackground: chatStartupWarmupActive || groupBackgroundSyncActive,
     })),
   });
   const syncSessionDetail = useCallback(
@@ -1425,13 +1428,29 @@ export function ChatCodingRoute() {
     queryFn: () => fetchJson<SessionDetail>(`/api/sessions/${activeSessionId}`),
     refetchInterval: activeSessionId
       ? resolvePollingInterval(
-          pageVisible,
+          chatPollingVisible,
           sessionStreamConnected ? false : 3_000,
           { backgroundMs: directSessionBackgroundSyncActive && !sessionStreamConnected ? ACTIVE_BACKGROUND_SYNC_POLL_MS : false },
         )
       : false,
-    refetchIntervalInBackground: directSessionBackgroundSyncActive,
+    refetchIntervalInBackground: chatStartupWarmupActive || directSessionBackgroundSyncActive,
   });
+  useEffect(() => {
+    const directReady = Boolean(activeSessionId ? sessionDetailQuery.data : sessionsQuery.data);
+    const groupReady = !legacyGroupRoomActive || Boolean(activeGroupRoomQuery.data);
+    if (runtimeQuery.data && sessionsQuery.data && conversationsQuery.data && teamsQuery.data && directReady && groupReady) {
+      setChatStartupDataReady(true);
+    }
+  }, [
+    activeGroupRoomQuery.data,
+    activeSessionId,
+    conversationsQuery.data,
+    legacyGroupRoomActive,
+    runtimeQuery.data,
+    sessionDetailQuery.data,
+    sessionsQuery.data,
+    teamsQuery.data,
+  ]);
   useEffect(() => {
     setDirectSessionBackgroundSyncActive(Boolean(
       activeSessionId
@@ -2156,6 +2175,8 @@ export function ChatCodingRoute() {
           sessionId: activeSessionId || "",
           shouldConnect: sessionStreamShouldConnect,
           pageVisible,
+          chatStartupWarmupActive,
+          chatPollingVisible,
           directSessionBackgroundSyncActive,
           routeTargetMatches: sessionStreamRouteTargetMatches,
           routeSettling: sessionStreamRouteSettling,
@@ -2187,6 +2208,8 @@ export function ChatCodingRoute() {
         sessionId: streamSessionId,
         shouldConnect: sessionStreamShouldConnect,
         pageVisible,
+        chatStartupWarmupActive,
+        chatPollingVisible,
         directSessionBackgroundSyncActive,
         routeTargetMatches: sessionStreamRouteTargetMatches,
         routeSettling: sessionStreamRouteSettling,
@@ -2414,6 +2437,8 @@ export function ChatCodingRoute() {
     };
   }, [
     activeSessionId,
+    chatPollingVisible,
+    chatStartupWarmupActive,
     directSessionBackgroundSyncActive,
     pageVisible,
     sessionStreamRouteSettling,
