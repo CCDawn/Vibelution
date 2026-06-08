@@ -623,6 +623,20 @@ def test_public_config_canonicalizes_model_key_env_from_model_id(monkeypatch):
     assert "LEGACY_CUSTOM_CODEX_API_KEY" not in saved
 
 
+def test_public_config_canonicalizes_repeated_model_key_env_tokens():
+    public_config = load_public_config()
+    public_config["llm"]["model_library"]["gpt_5_5_gpt_5_5"] = {
+        "provider": _provider("openai", "https://share-api.com/v1", "OPENAI_API_KEY"),
+        "model": "gpt-5.5",
+        "label": "GPT-5.5",
+        "api_key_env": "LEGACY_GPT_5_5_KEY",
+    }
+
+    normalized = build_effective_config(public_config).llm.model_library["gpt_5_5_gpt_5_5"]
+
+    assert normalized["api_key_env"] == "VIBELUTION_LLM_MODEL_GPT_5_5_API_KEY"
+
+
 def test_public_config_model_key_env_uses_ascii_safe_model_id_token():
     public_config = load_public_config()
     public_config["llm"]["model_library"]["小米模型"] = {
