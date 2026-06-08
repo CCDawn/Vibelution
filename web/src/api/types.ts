@@ -1909,6 +1909,22 @@ export type ShutdownResponse = RuntimeControlResponse;
 export type RuntimeRestartResponse = RuntimeControlResponse;
 
 export type LauncherOperation = "start" | "stop" | "restart";
+export type RuntimeLifecycleCancelOperation = "restart" | "stop" | "close" | "shutdown";
+export type RuntimeLifecycleCancelRequest = {
+  commandId?: string;
+  operation?: RuntimeLifecycleCancelOperation | "";
+  source?: string;
+};
+
+export type RuntimeLifecycleCancelResponse = {
+  cancelled: boolean;
+  status: "cancelled" | "not_found" | "already_active" | "invalid_request" | string;
+  commandId: string;
+  operation: RuntimeLifecycleCancelOperation | "";
+  message: string;
+  stateVersion?: number;
+};
+
 export type WorkbenchWindowMode = "fullscreen" | "windowed";
 
 export type WorkbenchWindowModeSetting = {
