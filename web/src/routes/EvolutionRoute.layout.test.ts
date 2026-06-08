@@ -227,6 +227,35 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(stylesSource).not.toContain("min-height: 220px");
   });
 
+  it("uses denser supervised launch and member panels at narrow workbench widths", () => {
+    expect(stylesSource).toContain("minmax(300px, var(--evolution-live-launch-width, 348px))");
+    expect(stylesSource).toContain("minmax(300px, var(--evolution-live-run-width, 360px))");
+    expect(stylesSource).toContain("grid-template-rows: minmax(0, auto) minmax(0, 1fr)");
+    expect(stylesSource).toContain("max-height: min(470px, 46vh)");
+    expect(stylesSource).toContain("align-self: stretch");
+    expect(stylesSource).toContain("min-height: 40px");
+    expect(stylesSource).toContain("font-family: var(--font-mono)");
+    expect(stylesSource).not.toContain("align-self: end");
+  });
+
+  it("switches the supervised live grid to a single-column flow below tablet width", () => {
+    const tabletBreakpoint = stylesSource.slice(
+      stylesSource.indexOf("@media (max-width: 900px)"),
+      stylesSource.indexOf("@media (max-width: 640px)"),
+    );
+
+    expect(tabletBreakpoint).toContain("grid-template-rows: max-content max-content max-content");
+    expect(tabletBreakpoint).toContain('grid-template-areas:\n      "io"\n      "launch"\n      "run"');
+    expect(tabletBreakpoint).toContain("align-content: start");
+    expect(tabletBreakpoint).toContain("height: auto");
+    expect(tabletBreakpoint).toContain("overflow: auto");
+    expect(tabletBreakpoint).toContain("grid-auto-rows: max-content");
+    expect(tabletBreakpoint).toContain("height: max-content");
+    expect(tabletBreakpoint).toContain("min-height: max-content");
+    expect(tabletBreakpoint).toContain("overflow: visible");
+    expect(tabletBreakpoint).toContain("grid-template-columns: repeat(2, minmax(0, 1fr))");
+  });
+
   it("lets the supervised case transcript fill the lower vertical space", () => {
     expect(routeSource).toContain("styles.transcriptSection");
     expect(routeSource).toContain("styles.caseRawEvidence");
@@ -247,7 +276,7 @@ describe("EvolutionRoute library user flow contract", () => {
 
     expect(launchStackRule).toContain("overflow: auto");
     expect(stylesSource).toContain(".liveLaunchStack > .launchSurface");
-    expect(stylesSource).toContain("max-height: min(520px, 48vh)");
+    expect(stylesSource).toContain("max-height: min(470px, 46vh)");
     expect(stylesSource).not.toContain(".worktreeReviewSurface");
     expect(worktreeReviewStylesSource).toContain(".worktreeReviewSurface");
   });
