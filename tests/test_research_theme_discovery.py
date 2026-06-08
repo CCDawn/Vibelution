@@ -9,7 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from core.research.knowledge_base import ResearchKnowledgeBase
-from core.research.models import CandidateTheme, EvidenceRecord, ResearchDiscoverySession, new_id
+from core.research.models import CandidateTheme, EvidenceRecord, ResearchDiscoverySession, ResearchSource, new_id
 from core.research import providers
 from core.research.providers import DeterministicResearchSearchProvider, PublicResearchSearchProvider
 from core.research.repository import ResearchRepository
@@ -2182,6 +2182,125 @@ def test_llm_research_agent_runner_requires_search_tool_calls(tmp_path, monkeypa
 
     with pytest.raises(ValueError, match="did not call any search tools"):
         runner.run_search(phase="broad", session=session, suggested_queries=["ai scientist"], existing_sources=[])
+
+
+def test_llm_research_agent_runner_partitions_prompt_cache_by_session_and_stage(tmp_path, monkeypatch):
+    class FakeWorkspace:
+        def read_research_agent_config(self):
+            return {
+                "agents": [
+                    {
+                        "key": "broad",
+                        "promptFilename": "broad.md",
+                        "templateId": "research_broad_explorer",
+                        "llmConfigId": "research_broad",
+                        "enabled": True,
+                    }
+                ]
+            }
+
+        def read_research_prompt(self, filename):
+            return "Use search tools."
+
+    captured: list[str] = []
+
+    class FakeClient:
+        def invoke(self, messages, tools=None, metadata=None):
+            from core.llm.payload_builder import _prompt_cache_partition
+
+            captured.append((metadata or {}).get("promptCachePartition") or "")
+            assert _prompt_cache_partition.get() == "research:research-session-cache-a:broad:broad"
+
+            class Response:
+                content = '{"summary":"done"}'
+                tool_calls = []
+
+            return Response()
+
+    monkeypatch.setattr("core.research.agent_runner.get_workspace", lambda: FakeWorkspace())
+    monkeypatch.setattr("core.research.agent_runner.get_llm_client", lambda profile_id=None: FakeClient())
+    runner = LLMResearchAgentRunner(search_provider=DeterministicResearchSearchProvider())
+    session = ResearchDiscoverySession(
+        session_id="research-session-cache-a",
+        open_goal="Find a theme",
+        constraints="public sources",
+        preferences="novel",
+    )
+
+    with pytest.raises(ValueError, match="did not call any search tools"):
+        runner.run_search(phase="broad", session=session, suggested_queries=["ai scientist"], existing_sources=[])
+
+    assert captured == ["research:research-session-cache-a:broad:broad"]
+
+
+def test_llm_research_json_agent_partitions_prompt_cache_by_session_and_agent(tmp_path, monkeypatch):
+    class FakeWorkspace:
+        def read_research_agent_config(self):
+            return {
+                "agents": [
+                    {
+                        "key": "review",
+                        "promptFilename": "review.md",
+                        "templateId": "research_evidence_reviewer",
+                        "llmConfigId": "research_review",
+                        "enabled": True,
+                    }
+                ]
+            }
+
+        def read_research_prompt(self, filename):
+            return "Extract evidence."
+
+    captured: dict[str, Any] = {}
+
+    class FakeClient:
+        def invoke(self, messages, tools=None, metadata=None):
+            from core.llm.payload_builder import _prompt_cache_partition
+
+            captured["partition"] = (metadata or {}).get("promptCachePartition") or ""
+            captured["context_partition"] = _prompt_cache_partition.get()
+            captured["user_payload"] = json.loads(messages[1]["content"])
+
+            class Response:
+                content = (
+                    '{"evidence":[{"sourceId":"source-a","claim":"Claim A",'
+                    '"evidenceType":"background","confidence":"medium","note":"Note A"}]}'
+                )
+                tool_calls = []
+
+            return Response()
+
+    monkeypatch.setattr("core.research.agent_runner.get_workspace", lambda: FakeWorkspace())
+    monkeypatch.setattr("core.research.agent_runner.get_llm_client", lambda profile_id=None: FakeClient())
+    runner = LLMResearchAgentRunner(search_provider=DeterministicResearchSearchProvider())
+    session = ResearchDiscoverySession(
+        session_id="research-session-cache-b",
+        open_goal="Find a theme",
+        constraints="public sources",
+        preferences="novel",
+    )
+
+    result = runner.extract_evidence(
+        session=session,
+        sources=[
+            ResearchSource(
+                source_id="source-a",
+                session_id=session.session_id,
+                search_run_id="run-a",
+                kind="paper",
+                title="Source A",
+                url="https://example.test/source-a",
+                snippet="Snippet A",
+                reliability="normal",
+            )
+        ],
+        existing_evidence=[],
+    )
+
+    assert captured["partition"] == "research:research-session-cache-b:review:json"
+    assert captured["context_partition"] == "research:research-session-cache-b:review:json"
+    assert captured["user_payload"]["sessionId"] == "research-session-cache-b"
+    assert result.evidence[0].source_id == "source-a"
 
 
 def test_llm_research_agent_runner_resolves_model_and_prompt_from_agent_instance(tmp_path, monkeypatch):

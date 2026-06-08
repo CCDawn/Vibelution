@@ -28,6 +28,7 @@ def _config_with_agent_models():
             "model": "summary-fast",
             "streaming": True,
             "tool_calling_mode": "disabled",
+            "prompt_cache": {"mode": "automatic", "key": "summary-agent-cache", "retention": "24h"},
         },
         "vision-model": {
             "provider_id": "default",
@@ -104,3 +105,15 @@ def test_resolve_agent_llm_rejects_unregistered_model_before_runtime_call():
 
     with pytest.raises(AgentLlmResolutionError, match="Agent dialogue model not found in model library: missing-model-id"):
         resolve_agent_llm(agent, "dialogue", config=config)
+
+
+def test_resolve_agent_llm_inherits_prompt_cache_config_from_model_library():
+    config = _config_with_agent_models()
+    agent = {"agentId": "agent-a", "llmBindings": {"summary": {"modelId": "summary-model"}}}
+
+    resolved = resolve_agent_llm(agent, "summary", config=config, fallback_to_dialogue=False)
+
+    prompt_cache = resolved.config.llm.profiles["primary"].prompt_cache
+    assert prompt_cache.mode == "automatic"
+    assert prompt_cache.key == "summary-agent-cache"
+    assert prompt_cache.retention == "24h"
