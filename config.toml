@@ -14,7 +14,7 @@ require_venv = true
 [workbench]
 backend_port = 8000
 frontend_port = 5173
-window_mode = "fullscreen"
+window_mode = "windowed"
 
 [avatar]
 preset = "moose"
@@ -254,7 +254,7 @@ streaming = true
 tool_calling_mode = "auto"
 discovery_enabled = true
 prompt_cache = { mode = "automatic" }
-api_key_env = "VIBELUTION_LLM_RELAY_OPENAI_GPT_5_5_API_KEY"
+api_key_env = "VIBELUTION_LLM_MODEL_RELAY_OPENAI_GPT_5_5_API_KEY"
 capability_status = "unknown"
 capability_source = "runtime_probe"
 capability_checked_at = "2026-05-30T07:24:14Z"
@@ -294,6 +294,30 @@ base_url = "https://ai-pixel.online"
 compat_mode = "openai"
 requires_api_key = true
 context_window = 128000
+
+[llm.model_library.gpt_5_5_gpt_5_5]
+model = "gpt-5.5"
+label = "gpt-5.5-share"
+transport = "chat_completions"
+contract = "tool_chat"
+strict_compatibility = false
+temperature = 0.7
+max_output_tokens = 128000
+timeout = 120
+connect_timeout = 20
+streaming = true
+tool_calling_mode = "auto"
+discovery_enabled = true
+api_key_env = "VIBELUTION_LLM_MODEL_GPT_5_5_GPT_5_5_API_KEY"
+
+[llm.model_library.gpt_5_5_gpt_5_5.provider]
+kind = "openai_compatible"
+api = ""
+api_key_env = "OPENAI_API_KEY"
+base_url = "https://share-api.com/"
+compat_mode = "openai"
+requires_api_key = true
+context_window = 1050000
 
 [llm.model_library.claude_opus_4_7_atpify]
 model = "claude-opus-4-7"
