@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import copy
+import threading
+import time
 from dataclasses import asdict, is_dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -17,6 +19,8 @@ from core.web.services.runtime_scene_service import record_runtime_scene_event
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_STATUS_LIMIT = 80
 MAX_STATUS_LIMIT = 500
+GIT_STATUS_SNAPSHOT_CACHE_TTL_SECONDS = 1.5
+GIT_STATUS_METADATA_CACHE_TTL_SECONDS = 30.0
 DEFAULT_COMMIT_LIMIT = 20
 MAX_COMMIT_LIMIT = 60
 MAX_DIFF_CHARS = 180_000
@@ -25,6 +29,9 @@ MAX_AI_FILE_DIFF_CHARS = 8_000
 MAX_COMMIT_MESSAGE_CHARS = 5_000
 DEFAULT_GIT_COMMIT_PROFILE = "primary"
 GIT_COMMIT_MESSAGE_PROFILE_ID = "__git_commit_message__"
+_GIT_STATUS_CACHE_LOCK = threading.Lock()
+_GIT_STATUS_SNAPSHOT_CACHE: dict[str, Any] = {}
+_GIT_STATUS_METADATA_CACHE: dict[str, Any] = {}
 DEFAULT_COMMIT_MESSAGE_PROMPT = """你是这个仓库的提交说明助手。根据用户选中的 git 改动，写一条清晰、简洁、行为导向的提交说明。
 
 要求：
@@ -68,6 +75,71 @@ def _record_git_scene_event(
         )
     except Exception:
         return
+
+
+def _monotonic() -> float:
+    return time.monotonic()
+
+
+def _clear_git_status_cache() -> None:
+    with _GIT_STATUS_CACHE_LOCK:
+        _GIT_STATUS_SNAPSHOT_CACHE.clear()
+        _GIT_STATUS_METADATA_CACHE.clear()
+
+
+def _cached_working_tree_snapshot(service: Any) -> Any:
+    cache_key = str(id(service))
+    now = _monotonic()
+    with _GIT_STATUS_CACHE_LOCK:
+        cached_key = _GIT_STATUS_SNAPSHOT_CACHE.get("key")
+        cached_at = float(_GIT_STATUS_SNAPSHOT_CACHE.get("cached_at") or 0.0)
+        cached_snapshot = _GIT_STATUS_SNAPSHOT_CACHE.get("snapshot")
+        if cached_key == cache_key and cached_snapshot is not None and now - cached_at <= GIT_STATUS_SNAPSHOT_CACHE_TTL_SECONDS:
+            return copy.deepcopy(cached_snapshot)
+
+    snapshot = service.scan_working_tree(store=False)
+    with _GIT_STATUS_CACHE_LOCK:
+        _GIT_STATUS_SNAPSHOT_CACHE.clear()
+        _GIT_STATUS_SNAPSHOT_CACHE.update(
+            {
+                "key": cache_key,
+                "cached_at": now,
+                "snapshot": copy.deepcopy(snapshot),
+            }
+        )
+    return snapshot
+
+
+def _cached_git_status_metadata(service: Any, snapshot: Any) -> dict[str, Any]:
+    if not bool(getattr(snapshot, "available", False)):
+        return {"branch": "", "headRev": "", "upstream": _empty_upstream()}
+
+    head_rev = str(getattr(snapshot, "base_rev", "") or "").strip()
+    cache_key = "|".join([str(id(service)), head_rev])
+    now = _monotonic()
+    with _GIT_STATUS_CACHE_LOCK:
+        cached_key = _GIT_STATUS_METADATA_CACHE.get("key")
+        cached_at = float(_GIT_STATUS_METADATA_CACHE.get("cached_at") or 0.0)
+        cached_payload = _GIT_STATUS_METADATA_CACHE.get("payload")
+        if cached_key == cache_key and isinstance(cached_payload, dict) and now - cached_at <= GIT_STATUS_METADATA_CACHE_TTL_SECONDS:
+            return copy.deepcopy(cached_payload)
+
+    branch = _current_branch(service)
+    payload = {
+        "branch": branch,
+        "headRev": head_rev,
+        "upstream": _upstream_payload(service, branch),
+    }
+    with _GIT_STATUS_CACHE_LOCK:
+        _GIT_STATUS_METADATA_CACHE.clear()
+        _GIT_STATUS_METADATA_CACHE.update(
+            {
+                "key": cache_key,
+                "cached_at": now,
+                "payload": copy.deepcopy(payload),
+            }
+        )
+    return payload
 
 
 def default_git_config() -> dict[str, str]:
@@ -237,9 +309,10 @@ def get_git_status(limit: int | None = DEFAULT_STATUS_LIMIT) -> dict[str, Any]:
     """Return a compact, read-only view of the current repository state."""
 
     service = get_git_memory_service()
-    snapshot = service.scan_working_tree(store=False)
-    head_rev = service._git_head_rev() if snapshot.available else None
-    branch = _current_branch(service) if snapshot.available else ""
+    snapshot = _cached_working_tree_snapshot(service)
+    metadata = _cached_git_status_metadata(service, snapshot)
+    head_rev = str(metadata.get("headRev") or getattr(snapshot, "base_rev", "") or "").strip()
+    branch = str(metadata.get("branch") or "").strip()
     files = [_file_payload(_object_payload(item)) for item in snapshot.files]
     counts = _status_counts(files)
     dirty = bool(files)
@@ -251,7 +324,7 @@ def get_git_status(limit: int | None = DEFAULT_STATUS_LIMIT) -> dict[str, Any]:
         "branch": branch,
         "headRev": head_rev or snapshot.base_rev or "",
         "headRevShort": _short_rev(head_rev or snapshot.base_rev),
-        "upstream": _upstream_payload(service, branch) if snapshot.available else _empty_upstream(),
+        "upstream": metadata.get("upstream") if isinstance(metadata.get("upstream"), dict) else _empty_upstream(),
         "snapshotId": snapshot.snapshot_id,
         "createdAt": snapshot.created_at,
         "dirty": dirty,
@@ -506,6 +579,7 @@ def commit_git_changes(paths: list[str], message: str) -> dict[str, Any]:
         raise
     head_result = _run_git_or_raise(service, ["rev-parse", "HEAD"], "git rev-parse failed")
     commit_sha = head_result.stdout.strip()
+    _clear_git_status_cache()
     _record_git_scene_event(
         "commit",
         "git.commit.succeeded",
