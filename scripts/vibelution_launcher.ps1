@@ -6618,7 +6618,8 @@ function Write-ManagedSessionClosureRecord {
         [pscustomobject]$Closure,
         [string]$Reason,
         [string]$Source,
-        [bool]$Success
+        [bool]$Success,
+        [hashtable]$Timings = @{}
     )
 
     $fields = @{
@@ -6637,6 +6638,9 @@ function Write-ManagedSessionClosureRecord {
         phase = [string]$Closure.Phase
         failure_message = [string]$Closure.FailureMessage
         control_log_path = $launcherControlLogPath
+    }
+    if ($Timings -and $Timings.Count -gt 0) {
+        $fields.timings_ms = $Timings
     }
 
     if ($script:currentRuntimeSceneId) {
@@ -6699,6 +6703,9 @@ function Write-ManagedSessionClosureRecord {
             }
             runtime_manager = $manifestRuntimeManager
         }
+        if ($Timings -and $Timings.Count -gt 0) {
+            $manifestChanges.launcher.shutdown_timings_ms = $Timings
+        }
         if ($Success -and $finalState.status -eq "stopped") {
             $manifestChanges.supervisor = @{
                 status = "stopped"
@@ -6717,6 +6724,15 @@ function Write-ManagedSessionClosureRecord {
 
 function Stop-ManagedSession {
     param([string]$Reason = "user requested stop")
+
+    $stopStartedAt = Get-Date
+    $elapsedMs = {
+        param($StartedAt, $EndedAt)
+        if (-not $StartedAt -or -not $EndedAt) {
+            return 0
+        }
+        return [int][Math]::Round((New-TimeSpan -Start $StartedAt -End $EndedAt).TotalMilliseconds)
+    }
 
     $snapshot = Get-SessionSnapshot
     $previousState = $snapshot.State
@@ -6751,11 +6767,19 @@ function Stop-ManagedSession {
             }
         }
     }
+    $backendStopStartedAt = Get-Date
     $backendStopTrace = Stop-ManagedBackendProcesses
+    $backendStopEndedAt = Get-Date
+    $portWaitStartedAt = Get-Date
     $backendStopped = Wait-ForPortClosed -Port $port
+    $portWaitEndedAt = Get-Date
 
+    $supervisorStopStartedAt = $null
+    $supervisorStopEndedAt = $null
     if ($supervisorPid -and $supervisorPid -ne $selfProcessId) {
+        $supervisorStopStartedAt = Get-Date
         Stop-ProcessesById @($supervisorPid)
+        $supervisorStopEndedAt = Get-Date
     }
 
     if (-not $backendStopped) {
@@ -6768,12 +6792,32 @@ function Stop-ManagedSession {
                 port = $port
                 port_owner_pid = Get-ListeningPid $port
                 backend_stop_trace = $backendStopTrace
+                timings_ms = @{
+                    backend_stop_ms = & $elapsedMs $backendStopStartedAt $backendStopEndedAt
+                    port_wait_ms = & $elapsedMs $portWaitStartedAt $portWaitEndedAt
+                }
             }
     }
+    $browserStopStartedAt = Get-Date
     Stop-ManagedBrowserProcesses -ProfileDir $workbenchBrowserProfileDir -Role "workbench"
+    $browserStopEndedAt = Get-Date
+    $browserWaitStartedAt = Get-Date
     $browserStopped = Wait-ForBrowserStopped -TimeoutSeconds 20 -ProfileDir $workbenchBrowserProfileDir -Role "workbench"
+    $browserWaitEndedAt = Get-Date
 
+    $closureSnapshotStartedAt = Get-Date
     $closure = Get-ManagedSessionClosureSnapshot
+    $closureSnapshotEndedAt = Get-Date
+    $stopEndedAt = Get-Date
+    $shutdownTimings = @{
+        total_ms = & $elapsedMs $stopStartedAt $stopEndedAt
+        backend_stop_ms = & $elapsedMs $backendStopStartedAt $backendStopEndedAt
+        port_wait_ms = & $elapsedMs $portWaitStartedAt $portWaitEndedAt
+        supervisor_stop_ms = & $elapsedMs $supervisorStopStartedAt $supervisorStopEndedAt
+        browser_stop_ms = & $elapsedMs $browserStopStartedAt $browserStopEndedAt
+        browser_wait_ms = & $elapsedMs $browserWaitStartedAt $browserWaitEndedAt
+        closure_snapshot_ms = & $elapsedMs $closureSnapshotStartedAt $closureSnapshotEndedAt
+    }
     if ($script:currentRuntimeSceneId) {
         Write-RuntimeSceneEvent `
             -Component "launcher" `
@@ -6792,9 +6836,10 @@ function Stop-ManagedSession {
                 browser_pids = @($closure.BrowserPids)
                 manager_closed = [bool]$closure.ManagerClosed
                 port_owner_pid = $closure.PortOwnerPid
+                timings_ms = $shutdownTimings
             }
     }
-    Write-ManagedSessionClosureRecord -Closure $closure -Reason $Reason -Source "launcher_stop" -Success (Test-ManagedSessionClosureSucceeded -Closure $closure -RequireManagerClosed $false)
+    Write-ManagedSessionClosureRecord -Closure $closure -Reason $Reason -Source "launcher_stop" -Success (Test-ManagedSessionClosureSucceeded -Closure $closure -RequireManagerClosed $false) -Timings $shutdownTimings
 
     if (Test-ManagedSessionClosureSucceeded -Closure $closure -RequireManagerClosed $false) {
         if (-not (Restore-LauncherControlStateAfterWorkbenchStop -PreviousState $previousState)) {
