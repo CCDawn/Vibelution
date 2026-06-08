@@ -21,7 +21,7 @@ from core.orchestration.output_boundary import sanitize_assistant_visible_text
 from core.orchestration.turn_runner import prepare_agent_turn, run_existing_agent_single_turn
 from core.runtime_manager import work_run_store
 from core.runtime_manager.work_run_leases import READONLY_CHAT_LEASE
-from core.ui.chat_state import load_chat_state, normalize_chat_messages, save_chat_state
+from core.ui.chat_state import chat_state_path, load_chat_state, normalize_chat_messages, save_chat_state
 
 from . import agent_directory_service, session_service
 from .agent_directory_service import active_agent_runtime, evaluate_agent_workspace_write, write_group_context_event
@@ -103,6 +103,8 @@ _PARTICIPANT_CONTEXT_FIELDS = (
 AgentRunner = Callable[[dict[str, Any], str, dict[str, Any]], dict[str, Any]]
 _CHAT_ROOM_ROUND_CONTROLS_LOCK = threading.Lock()
 _CHAT_ROOM_ROUND_CONTROLS: dict[str, dict[str, str]] = {}
+_CHAT_ROOM_PARTICIPANT_INDEX_CACHE_LOCK = threading.Lock()
+_CHAT_ROOM_PARTICIPANT_INDEX_CACHE: dict[str, Any] = {}
 _MISSING_SESSION_STATUS_MESSAGE = "缺少有效 Agent：当前会话引用的 Agent 已不存在或不可用。"
 
 
@@ -192,20 +194,32 @@ def get_chat_room_detail(room_id: str) -> dict[str, Any] | None:
     state = _store().load()
     room = _find_room(state, room_id)
     if not room:
-        _record_chat_room_detail_loaded("", started_at, repaired=False, found=False)
+        _record_chat_room_detail_loaded(
+            "",
+            started_at,
+            repaired=False,
+            found=False,
+            participant_index_cache_hit=False,
+        )
         return None
-    session_summaries = _session_summary_index()
-    active_agent_indexes = _active_agent_participant_indexes()
+    participant_indexes, participant_index_cache_hit = _participant_refresh_indexes()
     repaired = _repair_room_participants(
         room,
-        session_summaries=session_summaries,
-        active_agents_by_id=active_agent_indexes["by_id"],
-        active_agents_by_session_id=active_agent_indexes["by_session_id"],
+        session_summaries=participant_indexes["session_summaries"],
+        active_agents_by_id=participant_indexes["active_agents_by_id"],
+        active_agents_by_session_id=participant_indexes["active_agents_by_session_id"],
     )
     if repaired:
+        _clear_participant_refresh_index_cache()
         _store().save(state)
     detail = _room_to_api(room)
-    _record_chat_room_detail_loaded(str(detail.get("roomId") or room_id), started_at, repaired=repaired, found=True)
+    _record_chat_room_detail_loaded(
+        str(detail.get("roomId") or room_id),
+        started_at,
+        repaired=repaired,
+        found=True,
+        participant_index_cache_hit=participant_index_cache_hit,
+    )
     return detail
 
 
@@ -2427,12 +2441,15 @@ def _participant_from_session(
     *,
     include_recent_messages: bool = False,
     recent_messages: list[dict[str, str]] | None = None,
+    active_agent: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     session_id = str(summary.get("id") or "").strip()
     title = str(summary.get("title") or session_id).strip() or session_id
     detail = (session_service.get_session_detail(session_id) or {}) if include_recent_messages else {}
     agent_id = str(summary.get("agentId") or detail.get("agentId") or "").strip()
-    agent = agent_directory_service.get_agent(agent_id, include_archived=False) if agent_id else None
+    agent = active_agent if isinstance(active_agent, dict) else None
+    if agent is None and agent_id:
+        agent = agent_directory_service.get_agent(agent_id, include_archived=False)
     llm_bindings = agent_directory_service.normalize_agent_llm_bindings((agent or {}).get("llmBindings"))
     dialogue_model_id = agent_directory_service.agent_dialogue_model_id({"llmBindings": llm_bindings})
     agent_missing = bool(summary.get("agentMissing") or detail.get("agentMissing"))
@@ -2491,6 +2508,7 @@ def _refresh_participants(
                 summary,
                 include_recent_messages=include_recent_messages,
                 recent_messages=list(item.get("recentMessages") or []),
+                active_agent=active_agent,
             )
             participant["participantId"] = str(item.get("participantId") or participant["participantId"])
             participant["enabled"] = False if participant.get("agentMissing") else bool(item.get("enabled", True))
@@ -2588,7 +2606,7 @@ def _active_agent_for_participant(
 
 def _active_agent_participant_indexes() -> dict[str, dict[str, dict[str, Any]]]:
     try:
-        agents = agent_directory_service.list_agents(include_archived=False)
+        agents = agent_directory_service.list_agents(include_archived=False, detail="summary")
     except Exception:
         agents = []
     by_id: dict[str, dict[str, Any]] = {}
@@ -2603,6 +2621,70 @@ def _active_agent_participant_indexes() -> dict[str, dict[str, dict[str, Any]]]:
         if session_id:
             by_session_id[session_id] = dict(agent)
     return {"by_id": by_id, "by_session_id": by_session_id}
+
+
+def _participant_refresh_indexes() -> tuple[dict[str, dict[str, dict[str, Any]]], bool]:
+    signature = _participant_refresh_index_signature()
+    with _CHAT_ROOM_PARTICIPANT_INDEX_CACHE_LOCK:
+        if _CHAT_ROOM_PARTICIPANT_INDEX_CACHE.get("signature") == signature:
+            cached = _CHAT_ROOM_PARTICIPANT_INDEX_CACHE.get("indexes")
+            if isinstance(cached, dict):
+                return _copy_participant_refresh_indexes(cached), True
+    indexes = {
+        "session_summaries": _session_summary_index(),
+        "active_agents_by_id": {},
+        "active_agents_by_session_id": {},
+    }
+    active_agent_indexes = _active_agent_participant_indexes()
+    indexes["active_agents_by_id"] = active_agent_indexes["by_id"]
+    indexes["active_agents_by_session_id"] = active_agent_indexes["by_session_id"]
+    with _CHAT_ROOM_PARTICIPANT_INDEX_CACHE_LOCK:
+        _CHAT_ROOM_PARTICIPANT_INDEX_CACHE.clear()
+        _CHAT_ROOM_PARTICIPANT_INDEX_CACHE.update(
+            {
+                "signature": signature,
+                "indexes": _copy_participant_refresh_indexes(indexes),
+            }
+        )
+    return _copy_participant_refresh_indexes(indexes), False
+
+
+def _clear_participant_refresh_index_cache() -> None:
+    with _CHAT_ROOM_PARTICIPANT_INDEX_CACHE_LOCK:
+        _CHAT_ROOM_PARTICIPANT_INDEX_CACHE.clear()
+
+
+def _participant_refresh_index_signature() -> tuple[tuple[str, int, int], tuple[str, int, int]]:
+    return (
+        _file_signature(chat_state_path(PROJECT_ROOT)),
+        _file_signature(agent_directory_service.registry_path()),
+    )
+
+
+def _file_signature(path: Path) -> tuple[str, int, int]:
+    try:
+        stat = path.stat()
+    except OSError:
+        return (str(path), -1, -1)
+    return (str(path), int(stat.st_mtime_ns), int(stat.st_size))
+
+
+def _copy_participant_refresh_indexes(
+    indexes: dict[str, dict[str, dict[str, Any]]],
+) -> dict[str, dict[str, dict[str, Any]]]:
+    return {
+        "session_summaries": _copy_index(indexes.get("session_summaries")),
+        "active_agents_by_id": _copy_index(indexes.get("active_agents_by_id")),
+        "active_agents_by_session_id": _copy_index(indexes.get("active_agents_by_session_id")),
+    }
+
+
+def _copy_index(index: dict[str, dict[str, Any]] | None) -> dict[str, dict[str, Any]]:
+    return {
+        str(key): dict(value)
+        for key, value in dict(index or {}).items()
+        if str(key) and isinstance(value, dict)
+    }
 
 
 def _repair_room_participants(
@@ -3075,7 +3157,14 @@ def _record_room_event(
         return
 
 
-def _record_chat_room_detail_loaded(room_id: str, started_at: float, *, repaired: bool, found: bool) -> None:
+def _record_chat_room_detail_loaded(
+    room_id: str,
+    started_at: float,
+    *,
+    repaired: bool,
+    found: bool,
+    participant_index_cache_hit: bool,
+) -> None:
     try:
         record_runtime_scene_event(
             "chat_room",
@@ -3088,6 +3177,7 @@ def _record_chat_room_detail_loaded(room_id: str, started_at: float, *, repaired
                 "elapsedMs": _elapsed_ms(started_at),
                 "participantRepair": bool(repaired),
                 "found": bool(found),
+                "participantIndexCacheHit": bool(participant_index_cache_hit),
             },
         )
     except Exception:
