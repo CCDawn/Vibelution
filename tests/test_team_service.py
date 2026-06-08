@@ -132,6 +132,7 @@ def test_ensure_research_team_from_organization_uses_stable_team_id(tmp_path, mo
 
     assert first["teamId"] == "research-team"
     assert second["teamId"] == "research-team"
+    assert second["name"] == "ai科学研究团队"
     assert second["teamKind"] == "research"
     assert second["teamCategory"] == "科研组织团队"
     assert second["teamSource"] == "research_organization"
