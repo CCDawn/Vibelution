@@ -189,6 +189,97 @@ def test_session_failed_result_sanitizes_provider_upstream_error(tmp_path, monke
     assert payload["currentPhase"] == "failed"
 
 
+def test_session_llm_runtime_diagnostics_fill_provider_failure_metadata():
+    result = {
+        "status": "failed",
+        "llm_failure": {
+            "category": "server_error",
+            "provider": "",
+            "model": "",
+        },
+    }
+
+    session_service._attach_session_llm_runtime_diagnostics(
+        result,
+        {
+            "llmModelId": "gpt_5_5_gpt_5_5",
+            "runtimeProfileId": "primary",
+            "providerId": "inline_model_gpt_5_5_gpt_5_5",
+            "providerKind": "openai_compatible",
+            "model": "gpt-5.5",
+            "llmWarnings": ["ignored"],
+        },
+    )
+
+    assert result["metadata"]["llmModelId"] == "gpt_5_5_gpt_5_5"
+    assert result["metadata"]["providerId"] == "inline_model_gpt_5_5_gpt_5_5"
+    assert "llmWarnings" not in result["metadata"]
+    assert result["llm_failure"]["provider"] == "inline_model_gpt_5_5_gpt_5_5"
+    assert result["llm_failure"]["providerId"] == "inline_model_gpt_5_5_gpt_5_5"
+    assert result["llm_failure"]["providerKind"] == "openai_compatible"
+    assert result["llm_failure"]["model"] == "gpt-5.5"
+    assert result["llm_failure"]["llmModelId"] == "gpt_5_5_gpt_5_5"
+    assert result["llm_failure"]["runtimeProfileId"] == "primary"
+
+
+def test_session_detail_dedupes_same_turn_error_messages(tmp_path, monkeypatch):
+    save_chat_state(
+        tmp_path,
+        {
+            "version": CHAT_STATE_VERSION,
+            "active_conversation_id": "session-live",
+            "updated_at": "2026-06-08T14:19:02",
+            "conversations": [
+                {
+                    "conversation_id": "session-live",
+                    "title": "Agent 会话",
+                    "updated_at": "2026-06-08T14:19:02",
+                    "last_turn_status": "failed",
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": "审查主对话和子对话",
+                            "timestamp": "2026-06-08T14:14:10",
+                        },
+                        {
+                            "role": "assistant",
+                            "content": "模型服务上游暂时失败，本轮没有完成。",
+                            "timestamp": "2026-06-08T14:19:02",
+                            "metadata": {
+                                "kind": "turn_error",
+                                "turnId": "turn-1",
+                                "providerFailure": True,
+                            },
+                        },
+                        {
+                            "role": "assistant",
+                            "content": "模型服务上游暂时失败，本轮没有完成。",
+                            "timestamp": "2026-06-08T14:19:02",
+                            "metadata": {
+                                "kind": "turn_error",
+                                "turnId": "turn-1",
+                                "providerFailure": True,
+                            },
+                        },
+                    ],
+                    "active_task": None,
+                }
+            ],
+        },
+    )
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+
+    payload = session_service.get_session_detail("session-live")
+
+    turn_error_messages = [
+        message
+        for message in payload["messages"]
+        if message.get("metadata", {}).get("kind") == "turn_error"
+    ]
+    assert len(turn_error_messages) == 1
+    assert payload["messages"][-1]["content"] == "模型服务上游暂时失败，本轮没有完成。"
+
+
 def test_session_provider_failure_circuit_breaker_stops_continuation_and_logs_event(tmp_path, monkeypatch):
     _seed_session(tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)

@@ -4262,7 +4262,27 @@ def _normalize_messages(conversation_id: str, items: Any) -> list[dict[str, Any]
             if role == "assistant" and str(metadata.get("kind") or "").strip() == "turn_error":
                 entry["content"] = _complete_turn_error_visible_content(entry["content"], metadata)
         messages.append(entry)
-    return messages
+    return _dedupe_turn_error_messages(messages)
+
+
+def _dedupe_turn_error_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    seen_turn_errors: set[str] = set()
+    deduped: list[dict[str, Any]] = []
+    for message in messages:
+        metadata = message.get("metadata")
+        if (
+            isinstance(metadata, dict)
+            and str(message.get("role") or "").strip().lower() == "assistant"
+            and str(metadata.get("kind") or "").strip() == "turn_error"
+        ):
+            turn_id = str(metadata.get("turnId") or metadata.get("turn_id") or "").strip()
+            if turn_id:
+                dedupe_key = f"turn_error:{turn_id}"
+                if dedupe_key in seen_turn_errors:
+                    continue
+                seen_turn_errors.add(dedupe_key)
+        deduped.append(message)
+    return deduped
 
 
 def _normalize_latest_preview_messages(conversation_id: str, items: Any, *, scan_limit: int = 12) -> list[dict[str, Any]]:
@@ -7123,6 +7143,11 @@ def _run_session_turn(context: dict[str, Any]) -> None:
         agent_instance or historical_agent,
         llm_slot,
     )
+    llm_runtime_diagnostics = (
+        resolved_agent_llm.log_fields()
+        if resolved_agent_llm is not None
+        else {"llmModelId": llm_model_id_for_turn}
+    )
     prompt_cache_partition = _session_prompt_cache_partition(
         session_id=session_id,
         agent_id=agent_id,
@@ -7473,6 +7498,7 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                     )
                 if isinstance(result, dict):
                     result["context_composition"] = context_composition
+                    result = _attach_session_llm_runtime_diagnostics(result, llm_runtime_diagnostics)
             result = _attach_turn_capture_to_result(
                 result,
                 turn_capture,
@@ -7657,6 +7683,47 @@ def _attach_session_prompt_cache_metadata(
         usage.setdefault("promptCacheScope", metadata.get("promptCacheScope") or "")
         usage.setdefault("promptCachePartition", metadata.get("promptCachePartition") or "")
         usage.setdefault("llmModelId", metadata.get("llmModelId") or "")
+    return result
+
+
+def _attach_session_llm_runtime_diagnostics(result: Any, diagnostics: dict[str, Any] | None) -> Any:
+    if not isinstance(result, dict) or not isinstance(diagnostics, dict) or not diagnostics:
+        return result
+    allowed_keys = {
+        "llmModelId",
+        "runtimeProfileId",
+        "providerId",
+        "providerKind",
+        "model",
+    }
+    sanitized = {
+        str(key): str(value).strip()
+        for key, value in diagnostics.items()
+        if str(key or "").strip() in allowed_keys and str(value or "").strip()
+    }
+    if not sanitized:
+        return result
+    metadata = dict(result.get("metadata") or {}) if isinstance(result.get("metadata"), dict) else {}
+    for key, value in sanitized.items():
+        metadata.setdefault(key, value)
+    result["metadata"] = metadata
+    llm_failure = dict(result.get("llm_failure") or {}) if isinstance(result.get("llm_failure"), dict) else {}
+
+    def fill_empty(key: str, value: str) -> None:
+        if value and not str(llm_failure.get(key) or "").strip():
+            llm_failure[key] = value
+
+    fill_empty("provider", sanitized.get("providerId") or sanitized.get("provider") or "")
+    fill_empty("provider_id", sanitized.get("providerId") or "")
+    fill_empty("providerId", sanitized.get("providerId") or "")
+    fill_empty("provider_kind", sanitized.get("providerKind") or "")
+    fill_empty("providerKind", sanitized.get("providerKind") or "")
+    fill_empty("model", sanitized.get("model") or "")
+    fill_empty("llm_model_id", sanitized.get("llmModelId") or "")
+    fill_empty("llmModelId", sanitized.get("llmModelId") or "")
+    fill_empty("runtime_profile_id", sanitized.get("runtimeProfileId") or "")
+    fill_empty("runtimeProfileId", sanitized.get("runtimeProfileId") or "")
+    result["llm_failure"] = llm_failure
     return result
 
 
