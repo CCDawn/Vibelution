@@ -547,6 +547,7 @@ LLM_MODEL_PRESETS = {
             "streaming": True,
             "tool_calling_mode": "auto",
             "discovery_enabled": True,
+            "prompt_cache": {"mode": "explicit_cache_control"},
         },
     },
     "siliconflow_glm_4_7": {

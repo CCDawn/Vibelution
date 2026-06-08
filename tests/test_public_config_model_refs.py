@@ -6,7 +6,7 @@ LLM 模型模板引用结构测试
 from pathlib import Path
 
 from config import ConfigLoader
-from config.public_config import build_effective_config, delete_llm_model, list_llm_model_options, load_public_config
+from config.public_config import LLM_MODEL_PRESETS, build_effective_config, delete_llm_model, list_llm_model_options, load_public_config
 from core.web.services.config_service import _decorate_model_options
 
 
@@ -121,6 +121,13 @@ def test_current_prompt_cache_modes_follow_model_library_config():
 
     assert profile.model == "gpt-5.5"
     assert profile.prompt_cache.mode == "automatic"
+
+
+def test_dashscope_qwen_preset_uses_explicit_cache_control():
+    model = LLM_MODEL_PRESETS["dashscope_qwen3_6_plus"]["model"]
+
+    assert model["model"] == "qwen3.6-plus"
+    assert model["prompt_cache"] == {"mode": "explicit_cache_control"}
 
 
 def test_prompt_cache_override_can_change_referenced_model_mode():
