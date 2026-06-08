@@ -17,11 +17,13 @@ class FakeGitService:
         self.files = list(files)
         self.results = dict(results or {})
         self.calls: list[list[str]] = []
+        self.scan_calls = 0
 
     def is_git_available(self):
         return True, None
 
     def scan_working_tree(self, store=False):
+        self.scan_calls += 1
         return SimpleNamespace(
             available=True,
             error=None,
@@ -37,6 +39,13 @@ class FakeGitService:
         if key in self.results:
             return self.results[key]
         raise AssertionError(args)
+
+
+@pytest.fixture(autouse=True)
+def clear_git_status_cache():
+    git_status_service._clear_git_status_cache()
+    yield
+    git_status_service._clear_git_status_cache()
 
 
 def changed_file(path: str, status: str = " M", **overrides):
@@ -59,6 +68,75 @@ def ok(stdout: str = "", stderr: str = ""):
 
 def failed(stderr: str):
     return SimpleNamespace(returncode=1, stdout="", stderr=stderr)
+
+
+def test_get_git_status_reuses_cached_snapshot_and_metadata_within_ttl(monkeypatch):
+    service = FakeGitService(
+        [
+            changed_file("web/src/routes/GitRoute.tsx"),
+            changed_file("core/web/services/git_status_service.py"),
+        ],
+        results={
+            ("branch", "--show-current"): ok("codex/git-status-cache\n"),
+            ("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"): ok("origin/codex/git-status-cache\n"),
+            ("rev-list", "--left-right", "--count", "origin/codex/git-status-cache...HEAD"): ok("0\t1\n"),
+        },
+    )
+    monkeypatch.setattr(git_status_service, "get_git_memory_service", lambda: service)
+    monkeypatch.setattr(git_status_service, "_monotonic", lambda: 100.0)
+
+    first = git_status_service.get_git_status(limit=1)
+    second = git_status_service.get_git_status(limit=500)
+
+    assert service.scan_calls == 1
+    assert service.calls == [
+        ["branch", "--show-current"],
+        ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
+        ["rev-list", "--left-right", "--count", "origin/codex/git-status-cache...HEAD"],
+    ]
+    assert first["totalFiles"] == 2
+    assert first["truncated"] is True
+    assert len(first["files"]) == 1
+    assert second["totalFiles"] == 2
+    assert second["truncated"] is False
+    assert len(second["files"]) == 2
+    assert second["upstream"] == {
+        "name": "origin/codex/git-status-cache",
+        "remote": "origin",
+        "ahead": 1,
+        "behind": 0,
+        "hasUpstream": True,
+    }
+
+
+def test_get_git_status_refreshes_working_tree_after_ttl_without_repeating_metadata(monkeypatch):
+    service = FakeGitService(
+        [changed_file("web/src/routes/GitRoute.tsx")],
+        results={
+            ("branch", "--show-current"): ok("codex/git-status-cache\n"),
+            ("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"): ok("origin/codex/git-status-cache\n"),
+            ("rev-list", "--left-right", "--count", "origin/codex/git-status-cache...HEAD"): ok("0\t1\n"),
+        },
+    )
+    ticks = iter([100.0, 100.0, 102.0, 102.0])
+    monkeypatch.setattr(git_status_service, "get_git_memory_service", lambda: service)
+    monkeypatch.setattr(git_status_service, "_monotonic", lambda: next(ticks))
+
+    first = git_status_service.get_git_status()
+    service.files = [
+        changed_file("web/src/routes/GitRoute.tsx"),
+        changed_file("core/web/services/git_status_service.py"),
+    ]
+    second = git_status_service.get_git_status()
+
+    assert service.scan_calls == 2
+    assert service.calls == [
+        ["branch", "--show-current"],
+        ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
+        ["rev-list", "--left-right", "--count", "origin/codex/git-status-cache...HEAD"],
+    ]
+    assert first["totalFiles"] == 1
+    assert second["totalFiles"] == 2
 
 
 def test_commit_git_changes_rejects_windows_absolute_paths(monkeypatch):
