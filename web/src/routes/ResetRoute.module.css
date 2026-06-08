@@ -485,9 +485,99 @@
   background: color-mix(in srgb, var(--surface-card-subtle) 72%, transparent);
 }
 
+.ledgerEmptyState {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(86px, 0.36fr);
+  gap: 8px;
+  align-items: start;
+  min-height: 58px;
+  padding: 8px;
+  border: 1px dashed var(--border-soft);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-card-subtle) 78%, transparent);
+}
+
+.ledgerEmptyState > div:first-child {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.ledgerEmptyState span {
+  color: var(--fg-tertiary);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.ledgerEmptyState strong {
+  color: var(--fg-primary);
+  font-size: 0.82rem;
+  line-height: 1.24;
+}
+
+.ledgerEmptyState p {
+  margin: 0;
+  color: var(--fg-secondary);
+  font-size: 0.76rem;
+  line-height: 1.34;
+}
+
+.ledgerEmptyRows {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.ledgerEmptyRows span {
+  display: block;
+  min-height: 10px;
+  border-radius: 999px;
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--surface-card-subtle) 78%, transparent),
+      color-mix(in srgb, var(--surface-panel-hover) 74%, transparent),
+      color-mix(in srgb, var(--surface-card-subtle) 78%, transparent)
+    );
+}
+
+.ledgerEmptyRows span:nth-child(2) {
+  width: 76%;
+}
+
+.ledgerEmptyRows span:nth-child(3) {
+  width: 58%;
+}
+
+.ledgerEmptyState[data-state-tone="error"] {
+  border-color: color-mix(in srgb, var(--state-error) 30%, transparent);
+}
+
+.ledgerEmptyState[data-state-tone="loading"] {
+  border-style: solid;
+}
+
 @media (max-width: 1120px) {
   .workspace {
     grid-template-columns: 1fr;
+  }
+
+  .inventoryPanel {
+    overflow: hidden;
+  }
+
+  .itemList {
+    max-height: min(46vh, 340px);
+    overflow: auto;
+  }
+
+  .sidePanel {
+    position: relative;
+    z-index: 1;
+    padding-top: 2px;
+    background: color-mix(in srgb, var(--surface-page) 94%, transparent);
   }
 
   .itemRow {
@@ -520,6 +610,10 @@
   .workspace {
     min-width: 0;
     padding: 14px;
+  }
+
+  .ledgerEmptyState {
+    grid-template-columns: 1fr;
   }
 
   .headerActions,

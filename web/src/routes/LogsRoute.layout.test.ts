@@ -23,4 +23,12 @@ describe("LogsRoute layout contract", () => {
     expect(routeSource).toContain("initialSceneId={initialRuntimeSceneId}");
     expect(routeSource).toContain("initialPath={initialRuntimeScenePath}");
   });
+
+  it("uses dense structured states for log index and preview loading or empty states", () => {
+    expect(routeSource).toContain("function renderLogIndexState");
+    expect(routeSource).toContain("function renderLogPreviewState");
+    expect(routeSource).toContain("styles.stateSkeletonStack");
+    expect(routeSource).toContain("styles.previewStateFlow");
+    expect(routeSource).not.toContain('<div className={styles.emptySurface}>{t("loadingLogs")}</div>');
+  });
 });

@@ -243,6 +243,78 @@ function renderDiagnosticsPanel(diagnostics: LogDiagnostics, lang: "zh" | "en") 
   );
 }
 
+function renderLogIndexState({
+  title,
+  detail,
+  lang,
+  tone = "empty",
+}: {
+  title: string;
+  detail: string;
+  lang: "zh" | "en";
+  tone?: "loading" | "empty" | "error" | "missing";
+}) {
+  return (
+    <div className={`${styles.panelState} ${styles.logIndexState}`} data-state-tone={tone}>
+      <span className={styles.stateKicker}>{lang === "zh" ? "索引状态" : "Index state"}</span>
+      <strong>{title}</strong>
+      <span>{detail}</span>
+      {tone === "loading" ? (
+        <div className={styles.stateSkeletonStack} aria-hidden="true">
+          <span />
+          <span />
+          <span />
+        </div>
+      ) : (
+        <div className={styles.stateFactRow}>
+          <span>{lang === "zh" ? "根目录" : "Root"}</span>
+          <span>{lang === "zh" ? "日志包" : "Packages"}</span>
+          <span>{lang === "zh" ? "文件" : "Files"}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function renderLogPreviewState({
+  title,
+  detail,
+  lang,
+  tone = "empty",
+}: {
+  title: string;
+  detail: string;
+  lang: "zh" | "en";
+  tone?: "loading" | "empty" | "error" | "missing" | "select";
+}) {
+  const stepLabels =
+    lang === "zh"
+      ? ["选日志包", "选文件", "看原文", "折叠诊断"]
+      : ["Pick package", "Pick file", "Read raw", "Fold diagnostics"];
+  return (
+    <div className={`${styles.emptySurface} ${styles.previewStateSurface}`} data-state-tone={tone}>
+      <div className={styles.previewStateCard}>
+        <div className={styles.previewStateHeader}>
+          <span className={styles.stateKicker}>{lang === "zh" ? "预览工作区" : "Preview workspace"}</span>
+          <strong>{title}</strong>
+          <span>{detail}</span>
+        </div>
+        <div className={styles.previewStateFlow} aria-hidden="true">
+          {stepLabels.map((label) => (
+            <span key={label}>{label}</span>
+          ))}
+        </div>
+        <div className={styles.previewStateSkeleton} aria-hidden="true">
+          <span />
+          <span />
+          <span />
+          <span />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 async function copyText(text: string) {
   if (navigator.clipboard?.writeText) {
     await navigator.clipboard.writeText(text);
@@ -1099,21 +1171,60 @@ export function LogsRoute() {
 
               <div className={styles.packageList}>
                 {rootsQuery.isError ? (
-                  <div className={styles.panelState}>{describeError(rootsQuery.error, t("loadFailed"))}</div>
+                  renderLogIndexState({
+                    title: describeError(rootsQuery.error, t("loadFailed")),
+                    detail: lang === "zh" ? "日志根目录读取失败，先确认运行现场日志是否可访问。" : "Log roots failed to load. Check runtime scene access first.",
+                    lang,
+                    tone: "error",
+                  })
                 ) : rootsQuery.isPending && !rootsQuery.data ? (
-                  <div className={styles.panelState}>{t("loadingLogs")}</div>
+                  renderLogIndexState({
+                    title: t("loadingLogs"),
+                    detail: lang === "zh" ? "正在整理根目录、日志包和最近文件。" : "Indexing roots, packages, and latest files.",
+                    lang,
+                    tone: "loading",
+                  })
                 ) : !activeRoot ? (
-                  <div className={styles.panelState}>{t("loadingLogs")}</div>
+                  renderLogIndexState({
+                    title: t("loadingLogs"),
+                    detail: lang === "zh" ? "等待选择可用日志根目录。" : "Waiting for an available log root.",
+                    lang,
+                    tone: "loading",
+                  })
                 ) : !activeRoot.exists ? (
-                  <div className={styles.panelState}>{t("logsRootMissing")}</div>
+                  renderLogIndexState({
+                    title: t("logsRootMissing"),
+                    detail: activeRoot.path,
+                    lang,
+                    tone: "missing",
+                  })
                 ) : treeQuery.isError ? (
-                  <div className={styles.panelState}>{describeError(treeQuery.error, t("loadFailed"))}</div>
+                  renderLogIndexState({
+                    title: describeError(treeQuery.error, t("loadFailed")),
+                    detail: lang === "zh" ? "当前日志树无法展开，右侧根目录导航仍可切换。" : "The log tree cannot expand. Root navigation remains available.",
+                    lang,
+                    tone: "error",
+                  })
                 ) : treeQuery.isPending && !treeQuery.data ? (
-                  <div className={styles.panelState}>{t("loadingLogs")}</div>
+                  renderLogIndexState({
+                    title: t("loadingLogs"),
+                    detail: lang === "zh" ? "正在生成包索引和文件计数。" : "Building package index and file counts.",
+                    lang,
+                    tone: "loading",
+                  })
                 ) : logPackages.length === 0 ? (
-                  <div className={styles.panelState}>
-                    {fileFilter.trim() ? t("noLogMatches") : t("noLogsInGroup")}
-                  </div>
+                  renderLogIndexState({
+                    title: fileFilter.trim() ? t("noLogMatches") : t("noLogsInGroup"),
+                    detail: fileFilter.trim()
+                      ? lang === "zh"
+                        ? "清空搜索词可恢复完整包索引。"
+                        : "Clear the search term to restore the full package index."
+                      : lang === "zh"
+                        ? "当前根目录没有可读日志包。"
+                        : "This root has no readable log packages.",
+                    lang,
+                    tone: "empty",
+                  })
                 ) : (
                   logPackages.map((item) => {
                     const isActive = activePackage?.id === item.id;
@@ -1164,17 +1275,53 @@ export function LogsRoute() {
 
             <section className={styles.previewPane}>
               {!activeRoot ? (
-                <div className={styles.emptySurface}>{t("loadingLogs")}</div>
+                renderLogPreviewState({
+                  title: t("loadingLogs"),
+                  detail: lang === "zh" ? "工作区会保留包索引、原文预览和诊断折叠顺序。" : "The workspace preserves package index, raw preview, and folded diagnostics order.",
+                  lang,
+                  tone: "loading",
+                })
               ) : !activeRoot.exists ? (
-                <div className={styles.emptySurface}>{t("logsRootMissing")}</div>
+                renderLogPreviewState({
+                  title: t("logsRootMissing"),
+                  detail: activeRoot.path,
+                  lang,
+                  tone: "missing",
+                })
               ) : !activePackage ? (
-                <div className={styles.emptySurface}>{fileFilter.trim() ? t("noLogMatches") : t("noLogsInGroup")}</div>
+                renderLogPreviewState({
+                  title: fileFilter.trim() ? t("noLogMatches") : t("noLogsInGroup"),
+                  detail: fileFilter.trim()
+                    ? lang === "zh"
+                      ? "搜索条件没有命中包或包内文件。"
+                      : "The search did not match packages or files."
+                    : lang === "zh"
+                      ? "从左侧选择一个日志包后，这里会显示文件条、原文和诊断。"
+                      : "Select a package on the left to show file strip, raw content, and diagnostics.",
+                  lang,
+                  tone: "empty",
+                })
               ) : activePackage.files.length === 0 || !activeFilePath ? (
-                <div className={styles.emptySurface}>{t("selectLogFile")}</div>
+                renderLogPreviewState({
+                  title: t("selectLogFile"),
+                  detail: lang === "zh" ? "包已选中，继续选择文件即可查看原始日志。" : "Package selected. Pick a file to inspect raw logs.",
+                  lang,
+                  tone: "select",
+                })
               ) : contentQuery.isError ? (
-                <div className={styles.emptySurface}>{describeError(contentQuery.error, t("loadFailed"))}</div>
+                renderLogPreviewState({
+                  title: describeError(contentQuery.error, t("loadFailed")),
+                  detail: lang === "zh" ? "文件预览失败，但包索引和选择状态会保留。" : "File preview failed, while package index and selection remain available.",
+                  lang,
+                  tone: "error",
+                })
               ) : contentQuery.isPending && !contentQuery.data ? (
-                <div className={styles.emptySurface}>{t("loadingFilePreview")}</div>
+                renderLogPreviewState({
+                  title: t("loadingFilePreview"),
+                  detail: lang === "zh" ? "正在装载原文、行数、错误计数和诊断摘要。" : "Loading raw text, line counts, error counts, and diagnostics summary.",
+                  lang,
+                  tone: "loading",
+                })
               ) : contentQuery.data ? (
                 <div className={styles.logPreviewStack}>
                   <section className={styles.packageFilesPanel}>
@@ -1237,12 +1384,22 @@ export function LogsRoute() {
                     headerActions={previewActions}
                     highlightAsLog
                     severityFilter={severityFilter}
-                    fallback={<div className={styles.emptySurface}>{t("loadingFilePreview")}</div>}
+                    fallback={renderLogPreviewState({
+                      title: t("loadingFilePreview"),
+                      detail: lang === "zh" ? "预览组件正在载入。" : "Preview component is loading.",
+                      lang,
+                      tone: "loading",
+                    })}
                   />
                   {renderDiagnosticsPanel(contentQuery.data.diagnostics, lang)}
                 </div>
               ) : (
-                <div className={styles.emptySurface}>{t("loadingFilePreview")}</div>
+                renderLogPreviewState({
+                  title: t("loadingFilePreview"),
+                  detail: lang === "zh" ? "等待可展示的日志内容。" : "Waiting for displayable log content.",
+                  lang,
+                  tone: "loading",
+                })
               )}
             </section>
           </div>
