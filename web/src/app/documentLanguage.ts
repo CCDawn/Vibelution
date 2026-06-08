@@ -1,4 +1,4 @@
-import type { Language } from "../i18n/dictionary";
+import type { Language } from "../i18n/shellDictionary";
 
 type DocumentLanguageTarget = Pick<Document, "body" | "documentElement">;
 

@@ -5082,27 +5082,48 @@ try {
         -ArgumentList @("-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-EncodedCommand", $encodedSupervisorCommand) `
         -WorkingDirectory $projectDir
 
-    $deadline = (Get-Date).AddSeconds(8)
+    $startupWaitTimeoutMs = 8000
+    $startupPollMilliseconds = 250
+    $startupSettleMilliseconds = 250
+    $startupWaitStartedAt = Get-Date
+    $deadline = $startupWaitStartedAt.AddMilliseconds($startupWaitTimeoutMs)
     $supervisorProcess = Get-Process -Id $proc.Id -ErrorAction SilentlyContinue
+    $startupWaitExitReason = "timeout"
+    $startupPollCount = 0
+    $lastStateSessionId = ""
+    $lastBackendAlive = $null
+    $lastBackendHealthy = $null
+    $lastBackendCandidatePids = @()
     while ((Get-Date) -lt $deadline) {
         $supervisorProcess = Get-Process -Id $proc.Id -ErrorAction SilentlyContinue
         if (-not $supervisorProcess -or $supervisorProcess.HasExited) {
+            $startupWaitExitReason = "process_exited"
             break
         }
+        $startupPollCount += 1
         $state = Get-State
         $stateSessionId = ""
         if ($state) {
             $stateSessionId = [string](Get-ObjectPropertyValue -Object $state -Name "sessionId" -Default "")
         }
+        $lastStateSessionId = $stateSessionId
         $backendLiveness = Get-ManagedBackendLiveness
+        if ($backendLiveness) {
+            $lastBackendAlive = [bool]$backendLiveness.Alive
+            $lastBackendHealthy = [bool]$backendLiveness.Healthy
+            $lastBackendCandidatePids = @($backendLiveness.CandidatePids)
+        }
         if ($stateSessionId -eq $ManagedSessionId -and [bool]$backendLiveness.Alive) {
+            $startupWaitExitReason = "state_matched_backend_alive"
             break
         }
-        Start-Sleep -Milliseconds 250
+        Start-Sleep -Milliseconds $startupPollMilliseconds
     }
-    Start-Sleep -Milliseconds 250
+    Start-Sleep -Milliseconds $startupSettleMilliseconds
     $supervisorProcess = Get-Process -Id $proc.Id -ErrorAction SilentlyContinue
     if (-not $supervisorProcess -or $supervisorProcess.HasExited) {
+        $failureObservedAt = Get-Date
+        $startupWaitElapsedMs = [int][Math]::Round(($failureObservedAt - $startupWaitStartedAt).TotalMilliseconds)
         $stdoutTail = ""
         $stderrTail = ""
         $controlTail = ""
@@ -5123,11 +5144,143 @@ try {
                 $_ -match "launcher\.supervisor"
             }) -join "`n")
         }
+
+        $processHasExited = $null
+        $processExitCode = $null
+        if ($supervisorProcess) {
+            try {
+                $processHasExited = [bool]$supervisorProcess.HasExited
+                if ($supervisorProcess.HasExited) {
+                    $processExitCode = [int]$supervisorProcess.ExitCode
+                }
+            } catch {
+                $processHasExited = $null
+                $processExitCode = $null
+            }
+        }
+
+        $launchObjectHasExited = $null
+        $launchObjectExitCode = $null
+        try {
+            if ($proc -and $proc.PSObject.Properties["HasExited"]) {
+                $launchObjectHasExited = [bool]$proc.HasExited
+            }
+            if ($proc -and $proc.PSObject.Properties["ExitCode"]) {
+                $launchObjectExitCode = [int]$proc.ExitCode
+            }
+        } catch {
+            $launchObjectHasExited = $null
+            $launchObjectExitCode = $null
+        }
+
+        $stateAtFailure = $null
+        $stateSessionIdAtFailure = ""
+        try {
+            $stateAtFailure = Get-State
+            if ($stateAtFailure) {
+                $stateSessionIdAtFailure = [string](Get-ObjectPropertyValue -Object $stateAtFailure -Name "sessionId" -Default "")
+            }
+        } catch {
+            $stateAtFailure = $null
+            $stateSessionIdAtFailure = ""
+        }
+
+        $backendLivenessAtFailure = $null
+        try {
+            $backendLivenessAtFailure = Get-ManagedBackendLiveness
+        } catch {
+            $backendLivenessAtFailure = $null
+        }
+        $backendCandidatePidsAtFailure = @()
+        $backendAliveAtFailure = $null
+        $backendHealthyAtFailure = $null
+        if ($backendLivenessAtFailure) {
+            $backendCandidatePidsAtFailure = @($backendLivenessAtFailure.CandidatePids)
+            $backendAliveAtFailure = [bool]$backendLivenessAtFailure.Alive
+            $backendHealthyAtFailure = [bool]$backendLivenessAtFailure.Healthy
+        }
+
+        $backendPortOwnerPid = $null
+        try {
+            $backendPortOwnerPid = Get-ListeningPid $port
+        } catch {
+            $backendPortOwnerPid = $null
+        }
+
+        $browserWindowPids = @()
+        try {
+            $browserWindowPids = @(Get-ManagedBrowserWindowProcesses | ForEach-Object { [int]$_.Id })
+        } catch {
+            $browserWindowPids = @()
+        }
+
+        $failureFields = @{
+            managed_session_id = $ManagedSessionId
+            pid = $proc.Id
+            supervisor_action = "supervise"
+            supervisor_launch_api = "hidden_encoded_powershell"
+            supervisor_command_logged = $false
+            script_path = $PSCommandPath
+            argument_count = 6
+            startup_wait_timeout_ms = $startupWaitTimeoutMs
+            startup_wait_elapsed_ms = $startupWaitElapsedMs
+            startup_poll_milliseconds = $startupPollMilliseconds
+            startup_settle_milliseconds = $startupSettleMilliseconds
+            startup_poll_count = $startupPollCount
+            startup_wait_exit_reason = $startupWaitExitReason
+            last_state_session_id = $lastStateSessionId
+            last_backend_alive = $lastBackendAlive
+            last_backend_healthy = $lastBackendHealthy
+            last_backend_candidate_pids = @($lastBackendCandidatePids)
+            process_record_found = [bool]$supervisorProcess
+            process_has_exited = $processHasExited
+            process_exit_code = $processExitCode
+            launch_object_has_exited = $launchObjectHasExited
+            launch_object_exit_code = $launchObjectExitCode
+            state_present = [bool]$stateAtFailure
+            state_session_id = $stateSessionIdAtFailure
+            state_session_matches = ($stateSessionIdAtFailure -eq $ManagedSessionId)
+            backend_alive = $backendAliveAtFailure
+            backend_healthy = $backendHealthyAtFailure
+            backend_candidate_pids = @($backendCandidatePidsAtFailure)
+            backend_candidate_count = $backendCandidatePidsAtFailure.Count
+            backend_port = $port
+            backend_port_owner_pid = $backendPortOwnerPid
+            browser_window_count = $browserWindowPids.Count
+            browser_window_pids = @($browserWindowPids)
+            stdout_empty = [string]::IsNullOrWhiteSpace($stdoutTail)
+            stderr_empty = [string]::IsNullOrWhiteSpace($stderrTail)
+            supervisor_control_tail_empty = [string]::IsNullOrWhiteSpace($controlTail)
+            stdout_tail_length = $stdoutTail.Length
+            stderr_tail_length = $stderrTail.Length
+            stdout_tail = $stdoutTail
+            stderr_tail = $stderrTail
+            supervisor_control_tail = $controlTail
+            stdout_path = $supervisorStdoutLog
+            stderr_path = $supervisorStderrLog
+        }
+
         Write-LauncherControlLog `
             -Event "launcher.supervisor.start_failed" `
             -Message "Supervisor process exited during startup." `
             -Level "error" `
-            -Fields @{ managed_session_id = $ManagedSessionId; pid = $proc.Id; stdout_tail = $stdoutTail; stderr_tail = $stderrTail; supervisor_control_tail = $controlTail; stdout_path = $supervisorStdoutLog; stderr_path = $supervisorStderrLog }
+            -Fields $failureFields
+        if ($script:currentRuntimeSceneId) {
+            Update-RuntimeSceneManifest @{ supervisor = @{ pid = $proc.Id; status = "failed"; failure = "exited_during_startup" } }
+            Write-RuntimeSceneEvent `
+                -Component "supervisor" `
+                -Phase "startup" `
+                -EventCode "supervisor.start.failed" `
+                -Message "Supervisor process exited during startup." `
+                -Level "error" `
+                -Outcome "failed" `
+                -Fields $failureFields `
+                -RawRefs @(
+                    (New-RuntimeSceneRawRef -RelativePath (Get-RuntimeSceneRelativePaths).Supervisor -TailLines 20),
+                    (New-RuntimeSceneRawRef -RelativePath (Get-RuntimeSceneRelativePaths).SupervisorStderr -TailLines 20),
+                    (New-RuntimeSceneRawRef -RelativePath (Get-RuntimeSceneRelativePaths).LauncherControl -TailLines 80)
+                )
+        }
         throw "Supervisor process exited during startup. See $supervisorStderrLog for details."
     }
 

@@ -195,6 +195,55 @@ TERMINAL_BENCH_CORE_ROWS: List[Dict[str, Any]] = [
         },
     },
 ]
+TERMINAL_BENCH_AGENT_JUDGED_ROWS: List[Dict[str, Any]] = [
+    {
+        "case_id": "tb_agent_local_registry_probe",
+        "task_slug": "local-registry-probe",
+        "instruction": (
+            "Run a repository-local multi-step harness probe. Open an evolution transaction, "
+            "inspect core/evaluation/dataset_registry.py and core/evaluation/dataset_adapters.py, "
+            "confirm how terminal_bench_agent_judged is registered and materialized, run the "
+            "focused dataset registry tests, then close the transaction with status=success only "
+            "if the evidence and validation support completion. Do not commit or publish changes."
+        ),
+        "training_tier": "coordination",
+        "difficulty": "smoke",
+        "category": "software-engineering",
+        "tags": ["coding", "dataset-registry", "agent-judged", "local-harness"],
+        "max_steps": 100,
+        "agent_timeout_seconds": 900,
+        "allowed_tools": [
+            "open_evolution_transaction_tool",
+            "execute_shell_command_tool",
+            "python_lint_tool",
+            "close_evolution_transaction_tool",
+        ],
+        "verifier": {
+            "kind": "agent_judgment",
+            "local_validation": "python -m pytest tests/test_dataset_registry.py -q",
+            "success_marker": "SUPERVISED_AGENT_JUDGMENT",
+        },
+        "expected": {
+            "kind": "agent_judged_terminal_harness",
+            "requires_transaction": True,
+            "requires_validation": True,
+            "requires_multi_step_trace": True,
+            "judge_scores": True,
+        },
+        "rubric": {
+            "basis": "agent_judgment",
+            "scale": "0..1",
+            "dimensions": [
+                "task_understanding",
+                "tool_trace_quality",
+                "validation_evidence",
+                "safety_and_scope",
+                "final_answer_quality",
+            ],
+            "pass_threshold": 0.70,
+        },
+    }
+]
 
 
 @dataclass
@@ -362,6 +411,27 @@ def _default_registry_payload() -> Dict[str, Any]:
                 "raw_chat_direct_training_allowed": False,
             },
             {
+                "name": "terminal_bench_agent_judged",
+                "kind": "terminal_bench_jsonl",
+                "description": (
+                    "Terminal-Bench 风格本地纯 agent 评分数据集：baseline/candidate 先跑多步 ReAct，"
+                    "再由监督 judge agent 按 rubric 给分和裁决；不接 Harbor、Docker 或官方 verifier。"
+                ),
+                "source_path": "workspace/evaluation/datasets/terminal_bench_agent_judged.jsonl",
+                "bundle_name": "terminal_bench_agent_judged_v1",
+                "scenario": "transaction",
+                "mode": "multi_step_react",
+                "timeout_seconds": 900,
+                "runnable": True,
+                "adapter_status": "agent_harness_ready",
+                "official_verifier_status": "not_required",
+                "tags": ["terminal-bench", "react", "agent-judged", "harness"],
+                "source_track": "benchmark",
+                "allowed_downstream_uses": ["supervised_evaluation", "regression_observation"],
+                "holdout_allowed": False,
+                "raw_chat_direct_training_allowed": False,
+            },
+            {
                 "name": "generated_cases",
                 "kind": "generated_case_jsonl",
                 "description": "Gym 依据 Trace、Harness Gap 或 Improvement Episode 生成的训练压力，不可自动进入 holdout。",
@@ -485,7 +555,13 @@ def _merge_registry_payload(existing: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _bootstrap_builtin_dataset_sources(project_root: Path, specs: List[DatasetSpec]) -> None:
-    bootstrap_names = {"generated_cases", "chat_reviewed_multiturn", "terminal_bench_smoke", "terminal_bench_core"}
+    bootstrap_names = {
+        "generated_cases",
+        "chat_reviewed_multiturn",
+        "terminal_bench_smoke",
+        "terminal_bench_core",
+        "terminal_bench_agent_judged",
+    }
     for spec in specs:
         if spec.name not in bootstrap_names or not spec.source_path:
             continue
@@ -497,6 +573,8 @@ def _bootstrap_builtin_dataset_sources(project_root: Path, specs: List[DatasetSp
             _bootstrap_or_refresh_builtin_jsonl(source, TERMINAL_BENCH_SMOKE_ROWS)
         elif spec.name == "terminal_bench_core":
             _bootstrap_or_refresh_builtin_jsonl(source, TERMINAL_BENCH_CORE_ROWS)
+        elif spec.name == "terminal_bench_agent_judged":
+            _bootstrap_or_refresh_builtin_jsonl(source, TERMINAL_BENCH_AGENT_JUDGED_ROWS)
         elif source.exists():
             continue
         else:
@@ -524,7 +602,10 @@ def _bootstrap_or_refresh_builtin_jsonl(source: Path, rows: List[Dict[str, Any]]
         for row in existing_rows
         if isinstance(row, dict)
     ]
-    if existing_ids == expected_ids and source.read_text(encoding="utf-8") != rendered:
+    if (
+        existing_ids == expected_ids
+        or {item for item in existing_ids if item}.issubset({"tb_agent_fix_git"})
+    ) and source.read_text(encoding="utf-8") != rendered:
         source.write_text(rendered, encoding="utf-8")
 
 
@@ -649,8 +730,24 @@ def list_dataset_status(project_root: Optional[Path] = None) -> List[Dict[str, A
             visibility_reason = "当前不可运行，已从主选择器隐藏。"
         elif usability_status == "custom_harness_ready":
             visibility_reason = "可用于 Vibelution 自定义监督评测，但官方判分器未接通。"
+        elif usability_status == "agent_harness_ready":
+            visibility_reason = "可用于纯 agent 监督评分，不依赖官方判分器。"
         else:
             visibility_reason = "可直接用于监督进化运行。"
+        evaluation_mode = (
+            "agent_judged"
+            if spec.adapter_status == "agent_harness_ready"
+            else "custom_harness"
+            if spec.official_verifier_status == "harbor_pending"
+            else "official_or_not_required"
+        )
+        score_label = (
+            "Agent-judged score (non-official)"
+            if evaluation_mode == "agent_judged"
+            else "Vibelution custom score (non-official)"
+            if spec.official_verifier_status == "harbor_pending"
+            else "official_or_local_score"
+        )
         boundary = dataset_intake_boundary(
             name=spec.name,
             kind=spec.kind,
@@ -672,13 +769,12 @@ def list_dataset_status(project_root: Optional[Path] = None) -> List[Dict[str, A
                 "usability_status": usability_status,
                 "usability_reason": usability_reason,
                 "official_verifier_status": spec.official_verifier_status,
-                "evaluation_mode": "custom_harness" if spec.official_verifier_status == "harbor_pending" else "official_or_not_required",
-                "score_label": (
-                    "Vibelution custom score (non-official)"
-                    if spec.official_verifier_status == "harbor_pending"
-                    else "official_or_local_score"
+                "evaluation_mode": evaluation_mode,
+                "score_label": score_label,
+                "official_score_available": (
+                    spec.official_verifier_status != "harbor_pending"
+                    and evaluation_mode != "agent_judged"
                 ),
-                "official_score_available": spec.official_verifier_status != "harbor_pending",
                 "visibility": visibility,
                 "visibility_reason": visibility_reason,
                 "selectable": effective,
@@ -734,23 +830,20 @@ def materialize_dataset_bundle(
 ) -> DatasetMaterialization:
     root = (project_root or get_workspace().project_root).resolve()
     spec = get_dataset_spec(dataset_name, project_root=root)
-    bundle_path = root / "workspace" / "evaluation" / "bundles" / f"{spec.bundle_name}.json"
+    materialized_bundle_name = spec.bundle_name
+    materialization_limit = limit
+    bundle_path = root / "workspace" / "evaluation" / "bundles" / f"{materialized_bundle_name}.json"
+    if limit is not None:
+        limit_count = max(1, int(limit))
+        materialization_limit = limit_count
+        materialized_bundle_name = f"{spec.bundle_name}_limit_{limit_count}"
+        bundle_path = root / "workspace" / "evaluation" / "bundles" / f"{materialized_bundle_name}.json"
 
     if spec.kind == "supervised_bundle":
         source_bundle = resolve_supervised_bundle_path(spec.bundle_name, project_root=root)
         payload = json.loads(source_bundle.read_text(encoding="utf-8"))
         cases = list(payload.get("cases") or [])
-        materialized_bundle_name = spec.bundle_name
         if limit is not None:
-            limit_count = max(1, int(limit))
-            materialized_bundle_name = f"{spec.bundle_name}_limit_{limit_count}"
-            bundle_path = (
-                root
-                / "workspace"
-                / "evaluation"
-                / "bundles"
-                / f"{materialized_bundle_name}.json"
-            )
             payload["bundle_name"] = materialized_bundle_name
             payload["cases"] = cases[:limit_count]
         if source_bundle != bundle_path or limit is not None:
@@ -773,12 +866,12 @@ def materialize_dataset_bundle(
         raise FileNotFoundError(f"数据集源文件不存在: {source or spec.source_path}")
 
     cases: List[Dict[str, Any]] = []
-    for index, row in enumerate(_iter_jsonl(source, limit=limit), start=1):
+    for index, row in enumerate(_iter_jsonl(source, limit=materialization_limit), start=1):
         cases.append(materialize_adapter_case(spec, row, index))
 
     bundle = {
         "benchmark": f"dataset::{spec.name}",
-        "bundle_name": spec.bundle_name,
+        "bundle_name": materialized_bundle_name,
         "dataset": adapter_bundle_dataset_metadata(spec, source),
         "default_timeout_seconds": spec.timeout_seconds,
         "cases": cases,
@@ -787,7 +880,7 @@ def materialize_dataset_bundle(
     bundle_path.write_text(json.dumps(bundle, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return DatasetMaterialization(
         dataset_name=spec.name,
-        bundle_name=spec.bundle_name,
+        bundle_name=materialized_bundle_name,
         bundle_path=str(bundle_path),
         case_count=len(cases),
         runnable=spec.runnable,

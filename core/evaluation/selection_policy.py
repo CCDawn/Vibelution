@@ -251,7 +251,7 @@ def _case_evaluation_metadata(case_summary: Any) -> Dict[str, Any]:
         metadata["score_label"] = score_label
     if official_status:
         metadata["official_verifier_status"] = official_status
-    if evaluation_mode == "custom_harness" or official_status == "harbor_pending":
+    if evaluation_mode in {"custom_harness", "agent_judged"} or official_status == "harbor_pending":
         metadata["official_score"] = None
         metadata["official_score_available"] = False
     return metadata

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.12.0 - 2026-06-08
+
+- Added lightweight runtime-manager live-control probes for evolution control surfaces, reducing expensive process inventory work during polling while preserving lifecycle evidence.
+- Added agent-judged Terminal-Bench-style supervised evaluation support with explicit non-official score labeling, limited bundle materialization, and judge-artifact tests.
+- Split heavy shell surfaces into lazy AppShell utility/status panels and tightened topbar responsive behavior for dense launcher/workbench layouts.
+- Added chat-review candidate detail loading and self-evolution overview caching so review and evolution surfaces stay responsive.
+- Switched the default Workbench window mode to fullscreen across product defaults, example config, and launcher-facing tests.
+
 ## 0.11.4 - 2026-06-08
 
 - Added a traceable Challenge Cup data-search plan contract to source-collection run startup, including query seeds, planned queries, role assignment inputs, and result writeback boundaries.

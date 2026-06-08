@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 // @ts-expect-error Vitest runs this contract in Node; the web project intentionally omits global Node types.
 import { readFileSync } from "node:fs";
 import routeSource from "./AgentsRoute.tsx?raw";
+import agentManagementNavSource from "./AgentManagementNav.tsx?raw";
 import styles from "./AgentsRoute.module.css";
 import routerSource from "../app/router.tsx?raw";
 import shellSource from "../app/AppShell.tsx?raw";
@@ -13,6 +14,14 @@ describe("AgentsRoute layout contract", () => {
   it("loads the read-only Agent config workspace endpoint", () => {
     expect(routeSource).toContain("fetchJson<AgentConfigWorkspace>(\"/api/agents/config-workspace\")");
     expect(routeSource).toContain("queryKeys.agentConfigWorkspace()");
+  });
+
+  it("uses the lightweight shell language source instead of the full app dictionary", () => {
+    expect(routeSource).toContain("useShellI18n");
+    expect(routeSource).toContain("const { lang } = useShellI18n()");
+    expect(routeSource).not.toContain("useAppI18n");
+    expect(agentManagementNavSource).toContain("useShellI18n");
+    expect(agentManagementNavSource).not.toContain("useAppI18n");
   });
 
   it("keeps Agent management as a first-class top navigation route", () => {
@@ -352,6 +361,9 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("toolCategoryLabel");
     expect(routeSource).toContain("toolTierLabel");
     expect(routeSource).toContain("copy.toolCategoryCount");
+    expect(routeSource).toContain("const toolsWorkspaceNeeded = createOpen || activePane === \"config\"");
+    expect(routeSource).toContain("enabled: toolsWorkspaceNeeded");
+    expect(routeSource).toContain("refetchInterval: toolsWorkspaceNeeded ? resolvePollingInterval(pageVisible, 15_000) : false");
     expect(routeSource).toContain("按工具包配置");
     expect(routeSource).toContain("同一工具只会保存一份授权状态");
     expect(routeSource).toContain("copy.capabilityPreviewTitle");
@@ -685,5 +697,8 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain('method: "DELETE"');
     expect(routeSource).toContain("styles.bulkActionBar");
     expect(routeSource).toContain("styles.agentRowShell");
+    expect(stylesSource).toContain("grid-template-rows: auto auto minmax(0, 1fr)");
+    expect(stylesSource).toContain("grid-template-columns: auto auto auto minmax(140px, 1fr)");
+    expect(stylesSource).toContain("min-height: 26px");
   });
 });

@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 
+// @ts-expect-error Vitest runs this contract in Node; the web project intentionally omits global Node types.
+import { readFileSync } from "node:fs";
 import routerSource from "../app/router.tsx?raw";
 import routeSource from "./PromptTemplatesRoute.tsx?raw";
+
+const stylesSource = readFileSync(new URL("./PromptTemplatesRoute.module.css", import.meta.url), "utf-8");
 
 describe("PromptTemplatesRoute layout contract", () => {
   it("lives inside Agent management navigation with the shared nav row", () => {
@@ -14,6 +18,12 @@ describe("PromptTemplatesRoute layout contract", () => {
     expect(routeSource.indexOf('<AgentManagementNav active="prompts" className={styles.managementNav} />')).toBeLessThan(
       routeSource.indexOf("styles.summaryGrid"),
     );
+  });
+
+  it("uses shell language state without loading the full app dictionary", () => {
+    expect(routeSource).toContain("useShellI18n");
+    expect(routeSource).toContain("const { lang } = useShellI18n()");
+    expect(routeSource).not.toContain("useAppI18n");
   });
 
   it("loads prompt templates and linked Agents through the existing APIs", () => {
@@ -67,5 +77,13 @@ describe("PromptTemplatesRoute layout contract", () => {
     expect(routeSource).toContain('method: "PATCH"');
     expect(routeSource).toContain('method: "POST"');
     expect(routeSource).toContain("/reset`");
+  });
+
+  it("keeps bulk prompt controls in their own compact row above the list", () => {
+    expect(stylesSource).toContain("grid-template-rows: auto auto auto auto minmax(0, 1fr)");
+    expect(stylesSource).toContain(".bulkActionBar");
+    expect(stylesSource).toContain("display: grid");
+    expect(stylesSource).toContain("grid-template-columns: auto auto minmax(118px, 1fr)");
+    expect(stylesSource).toContain("min-height: 26px");
   });
 });

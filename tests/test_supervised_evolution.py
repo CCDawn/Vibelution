@@ -311,6 +311,127 @@ def test_run_supervised_evolution_session_persists_decision_record(tmp_path: Pat
     assert "policy:" in rendered
 
 
+def test_run_supervised_evolution_session_uses_agent_judge_scores(tmp_path: Path):
+    bundle_dir = tmp_path / "workspace" / "evaluation" / "bundles"
+    bundle_dir.mkdir(parents=True, exist_ok=True)
+    bundle_path = bundle_dir / f"{DEFAULT_BUNDLE_NAME}.json"
+    bundle_path.write_text(
+        json.dumps(
+            {
+                "benchmark": "agent_judged",
+                "bundle_name": DEFAULT_BUNDLE_NAME,
+                "dataset": {
+                    "evaluation_mode": "agent_judged",
+                    "score_label": "Agent-judged score (non-official)",
+                    "official_verifier_status": "not_required",
+                },
+                "cases": [
+                    {
+                        "case_id": "agent_score_probe",
+                        "scenario": "transaction",
+                        "mode": "single_turn",
+                        "baseline_prompt": "baseline",
+                        "candidate_prompt": "candidate",
+                        "agent_judged": True,
+                        "judge_required": True,
+                        "rubric": {"basis": "agent_judgment"},
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    calls: list[tuple[str, str]] = []
+
+    def fake_runner(**kwargs):
+        calls.append((kwargs["scenario"], kwargs["prompt"]))
+        if kwargs["scenario"] == "strategy":
+            return _fake_result_with_summary(
+                "success",
+                "judge ok",
+                "judge",
+                agent_judgment={
+                    "decision": "PROMOTE",
+                    "baseline_score": 0.45,
+                    "candidate_score": 0.82,
+                    "reason": "candidate evidence is stronger",
+                    "improvement_summary": "better validation trace",
+                    "risks": ["needs one more sample"],
+                    "evidence_refs": ["candidate_report_path"],
+                },
+            )
+        return _fake_result("success", f"{kwargs['prompt']} ok", kwargs["prompt"])
+
+    decision = run_supervised_evolution_session(
+        bundle_name=DEFAULT_BUNDLE_NAME,
+        project_root=tmp_path,
+        harness_runner=fake_runner,
+        promotion_gate_runner=lambda **kwargs: _fake_promotion_gate("PROMOTE"),
+    )
+
+    assert [item[0] for item in calls] == ["transaction", "transaction", "strategy"]
+    assert decision.decision == "PROMOTE"
+    assert decision.score_delta == 0.37
+    assert len(decision.judge_runs) == 1
+    case = decision.case_summaries[0]
+    assert case.agent_judgment["status"] == "scored"
+    assert case.agent_judgment["decision"] == "PROMOTE"
+    assert case.score_breakdown["basis"]["source"] == "agent_judgment"
+    assert case.score_breakdown["baseline"]["overall_score"] == 0.45
+    assert case.score_breakdown["candidate"]["overall_score"] == 0.82
+    assert case.evidence_paths["judge_report_path"]
+    assert case.intake_provenance["agent_judgment"]["score_delta"] == 0.37
+    assert decision.gates[0].name == "agent_judgment"
+    assert decision.gates[0].metrics["candidate_agent_score"] == 0.82
+    persisted = json.loads(Path(decision.decision_path or "").read_text(encoding="utf-8"))
+    assert persisted["judge_runs"][0]["role"] == "judge"
+    assert persisted["case_summaries"][0]["agent_judgment"]["decision"] == "PROMOTE"
+    assert persisted["summary"]["evaluation_mode"] == "agent_judged"
+
+
+def test_agent_judged_session_is_inconclusive_when_judge_marker_missing(tmp_path: Path):
+    bundle_dir = tmp_path / "workspace" / "evaluation" / "bundles"
+    bundle_dir.mkdir(parents=True, exist_ok=True)
+    (bundle_dir / f"{DEFAULT_BUNDLE_NAME}.json").write_text(
+        json.dumps(
+            {
+                "benchmark": "agent_judged",
+                "bundle_name": DEFAULT_BUNDLE_NAME,
+                "dataset": {"evaluation_mode": "agent_judged"},
+                "cases": [
+                    {
+                        "case_id": "missing_judge_marker",
+                        "scenario": "transaction",
+                        "mode": "single_turn",
+                        "baseline_prompt": "baseline",
+                        "candidate_prompt": "candidate",
+                        "agent_judged": True,
+                        "judge_required": True,
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    def fake_runner(**kwargs):
+        return _fake_result("success", "ok", str(kwargs["scenario"]))
+
+    decision = run_supervised_evolution_session(
+        bundle_name=DEFAULT_BUNDLE_NAME,
+        project_root=tmp_path,
+        harness_runner=fake_runner,
+    )
+
+    assert decision.decision == "INCONCLUSIVE"
+    assert decision.gates[0].name == "agent_judgment"
+    assert decision.gates[0].status == "fail"
+    assert decision.case_summaries[0].agent_judgment["status"] == "missing"
+    assert "SUPERVISED_AGENT_JUDGMENT" in decision.case_summaries[0].agent_judgment["reason"]
+
+
 def test_run_supervised_evolution_session_reuses_successful_roles_when_retrying(tmp_path: Path):
     bundle_dir = tmp_path / "workspace" / "evaluation" / "bundles"
     bundle_dir.mkdir(parents=True, exist_ok=True)

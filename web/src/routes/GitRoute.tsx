@@ -14,7 +14,7 @@ import {
 } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
-import { useAppI18n } from "../i18n/useAppI18n";
+import { useShellI18n } from "../i18n/useShellI18n";
 import { GitDiffView } from "./GitDiffView";
 import {
   getGitAiDraftBlockReason,
@@ -41,7 +41,7 @@ const GIT_CHANGE_PANEL_BOUNDS = { min: 260, max: 520 };
 const GIT_CHANGE_PANEL_DEFAULT_WIDTH = 340;
 
 export function GitRoute() {
-  const { lang, t } = useAppI18n();
+  const { lang, t } = useShellI18n();
   const queryClient = useQueryClient();
   const [activeFilter, setActiveFilter] = useState<GitFilter>("all");
   const [activePath, setActivePath] = useState<string | null>(null);

@@ -21,7 +21,7 @@ import {
   Wrench,
   X,
 } from "lucide-react";
-import { type CSSProperties, type KeyboardEvent, type PointerEvent, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, lazy, type CSSProperties, type KeyboardEvent, type PointerEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
 import { fetchJson } from "../api/client";
@@ -55,7 +55,6 @@ import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy"
 import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
 import { useAppI18n } from "../i18n/useAppI18n";
 import { useShellStore } from "../store/shellStore";
-import { SelfEvolutionTrack } from "./SelfEvolutionTrack";
 import { SupervisedWorkspaceControls } from "./SupervisedWorkspaceControls";
 import { isSelfEvolutionWorktreeRun } from "./supervisedWorktreeReview";
 import {
@@ -158,6 +157,9 @@ const EVOLUTION_LIVE_IO_HEIGHT_BOUNDS = { min: 260, max: 780 };
 const EVOLUTION_LIVE_IO_DEFAULT_HEIGHT = 340;
 const SUPERVISED_MEMBER_ROLES: SupervisedMemberRole[] = ["baseline", "candidate", "reviewer", "auditor", "judge"];
 const LOCAL_SUPERVISED_RUN_PREFIX = "local-supervised-start-";
+const LazySelfEvolutionTrack = lazy(() =>
+  import("./SelfEvolutionTrack").then((module) => ({ default: module.SelfEvolutionTrack })),
+);
 
 type ProposalEditDraft = {
   improvementType: string;
@@ -421,8 +423,6 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const rawEvolutionView = useShellStore((state) => state.evolutionView);
   const setEvolutionView = useShellStore((state) => state.setEvolutionView);
   const evolutionView = forcedView ?? (rawEvolutionView === "overview" ? "live" : rawEvolutionView);
-  const selfTrackQueriesEnabled = forcedTrack === "self" || forcedTrack === undefined;
-  const supervisedTrackQueriesEnabled = forcedTrack !== "self";
   const pageVisible = usePageVisibility();
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [runFilter, setRunFilter] = useState<RunFilter>("all");
@@ -504,6 +504,19 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     refetchInterval: resolvePollingInterval(pageVisible, 8_000),
     refetchIntervalInBackground: false,
   });
+  const selfTrackEnabled = forcedTrack === "self" || (configQuery.data?.modeAvailability.self_evolution ?? false);
+  const supervisedTrackEnabled = forcedTrack === "supervised" || (configQuery.data?.modeAvailability.supervised_evolution ?? true);
+  const activeTrack = forcedTrack ?? (
+    evolutionTrack === "self" && selfTrackEnabled
+      ? "self"
+      : supervisedTrackEnabled
+        ? "supervised"
+        : selfTrackEnabled
+          ? "self"
+          : "supervised"
+  );
+  const selfTrackQueriesEnabled = activeTrack === "self";
+  const supervisedTrackQueriesEnabled = activeTrack === "supervised";
 
   const workspaceSnapshotQuery = useQuery({
     queryKey: queryKeys.evolutionWorkspaceSnapshot(),
@@ -511,6 +524,13 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     refetchInterval: resolvePollingInterval(pageVisible, 4_000),
     refetchIntervalInBackground: false,
     enabled: supervisedTrackQueriesEnabled || selfTrackQueriesEnabled,
+  });
+  const workbenchCatalogQuery = useQuery({
+    queryKey: queryKeys.evolutionWorkbench(),
+    queryFn: () => fetchJson<EvolutionWorkbench>("/api/evolution/workbench"),
+    refetchInterval: resolvePollingInterval(pageVisible, 8_000),
+    refetchIntervalInBackground: false,
+    enabled: supervisedTrackQueriesEnabled,
   });
   const selfOverviewQuery = useQuery({
     queryKey: queryKeys.evolutionSelfOverview(),
@@ -720,6 +740,8 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     mutationFn: () => {
       const fallbackBundleName =
         bundleNameInput.trim()
+        || workbenchCatalogQuery.data?.defaultBundleName
+        || workbenchCatalogQuery.data?.bundles?.[0]?.name
         || workspaceSnapshotQuery.data?.workbench?.defaultBundleName
         || workspaceSnapshotQuery.data?.workbench?.bundles?.[0]?.name
         || "";
@@ -859,7 +881,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const libraryItems = workspaceSnapshot?.library?.items ?? EMPTY_LIBRARY_ENTRIES;
   const pendingItems = workspaceSnapshot?.library?.pending ?? EMPTY_LIBRARY_ENTRIES;
   const overview = workspaceSnapshot?.overview;
-  const workbenchControl = workspaceSnapshot?.workbench;
+  const workbenchControl = workbenchCatalogQuery.data ?? workspaceSnapshot?.workbench;
   const workbenchState = overview?.workbench ?? workbenchControl?.savedState;
   const activeRunSnapshot = selectRunSnapshotWithRunId(workspaceSnapshot?.activeRun);
   const latestSupervisedRunSnapshot = selectRunSnapshotWithRunId(workspaceSnapshot?.latestRun);
@@ -877,17 +899,6 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     && !selfOverview
     && (selfOverviewQuery.isLoading || workspaceSnapshotQuery.isLoading);
   const latestRun = runs[0] ?? null;
-  const selfTrackEnabled = configQuery.data?.modeAvailability.self_evolution ?? false;
-  const supervisedTrackEnabled = configQuery.data?.modeAvailability.supervised_evolution ?? true;
-  const activeTrack = forcedTrack ?? (
-    evolutionTrack === "self" && selfTrackEnabled
-      ? "self"
-      : supervisedTrackEnabled
-        ? "supervised"
-        : selfTrackEnabled
-          ? "self"
-          : "supervised"
-  );
   const showTrackToggle = !forcedTrack && selfTrackEnabled && supervisedTrackEnabled;
   const routeEyebrow = activeTrack === "self" ? t("navSelfEvolution") : t("navSupervisedEvolution");
   const routeTitle =
@@ -1084,22 +1095,30 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     ? sourceKindLabel("dataset")
     : sourceKindLabel("bundle");
   const selectedSourceCaseText = `${selectedSourceOption?.caseCount ?? "--"} cases`;
+  const selectedSourceDataset = selectedSourceOption?.kind === "dataset" ? selectedSourceOption.dataset : null;
+  const selectedSourceBundle = selectedSourceOption?.kind === "bundle" ? selectedSourceOption.bundle : null;
   const selectedSourceStatusText =
-    selectedSourceOption?.kind === "dataset"
-      ? (selectedSourceOption.dataset.usabilityReason || selectedSourceOption.dataset.description || "--")
-      : (selectedSourceOption?.bundle.benchmark || selectedSourceOption?.bundle.declaredName || "--");
+    selectedSourceDataset
+      ? (selectedSourceDataset.usabilityReason || selectedSourceDataset.description || "--")
+      : (selectedSourceBundle?.benchmark || selectedSourceBundle?.declaredName || "--");
+  const selectedSourceEvaluationMode = selectedSourceDataset
+    ? String(selectedSourceDataset.evaluationMode || "").trim()
+    : "";
   const selectedSourceEvaluationText =
-    selectedSourceOption?.kind === "dataset"
-      && String(selectedSourceOption.dataset.evaluationMode || "").trim() === "custom_harness"
+    selectedSourceEvaluationMode === "agent_judged"
       ? (lang === "zh"
-        ? `${selectedSourceOption.dataset.scoreLabel || "Vibelution 自定义分数"}；非官方 Terminal-Bench 成绩`
-        : `${selectedSourceOption.dataset.scoreLabel || "Vibelution custom score"}; not an official Terminal-Bench score`)
-      : "";
+        ? `${selectedSourceDataset?.scoreLabel || "纯 agent 裁决分数"}；不需要官方 Harbor/Docker 判分器`
+        : `${selectedSourceDataset?.scoreLabel || "Agent-judged score"}; no official Harbor/Docker verifier required`)
+      : selectedSourceEvaluationMode === "custom_harness"
+        ? (lang === "zh"
+          ? `${selectedSourceDataset?.scoreLabel || "Vibelution 自定义分数"}；非官方 Terminal-Bench 成绩`
+          : `${selectedSourceDataset?.scoreLabel || "Vibelution custom score"}; not an official Terminal-Bench score`)
+        : "";
   const selectedSourceOfficialWarning =
-    selectedSourceOption?.kind === "dataset"
+    selectedSourceDataset
       && (
-        String(selectedSourceOption.dataset.evaluationMode || "").trim() === "custom_harness"
-        || String(selectedSourceOption.dataset.officialVerifierStatus || "").trim() === "harbor_pending"
+        String(selectedSourceDataset.evaluationMode || "").trim() === "custom_harness"
+        || String(selectedSourceDataset.officialVerifierStatus || "").trim() === "harbor_pending"
       )
       ? t("sourceOfficialVerifierWarning")
       : "";
@@ -2349,41 +2368,51 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       </section>
 
       {activeTrack === "self" ? (
-        <SelfEvolutionTrack
-          overview={selfOverview}
-          latestRun={monitoredSelfRun}
-          goalInput={selfGoalInput}
-          onGoalInputChange={setSelfGoalInput}
-          onStartRun={() => startSelfRunMutation.mutate()}
-          onStartWorktreeRun={() => startSelfWorktreeRunMutation.mutate()}
-          onPauseRun={() => monitoredSelfRun && pauseSelfRunMutation.mutate(monitoredSelfRun.runId)}
-          onResumeRun={() => monitoredSelfRun && resumeSelfRunMutation.mutate(monitoredSelfRun.runId)}
-          onTerminateRun={() => monitoredSelfRun && stopSelfRunMutation.mutate(monitoredSelfRun.runId)}
-          onRollbackRun={() => monitoredSelfRun && rollbackSelfRunMutation.mutate(monitoredSelfRun.runId)}
-          onHandoffRun={() => monitoredSelfRun && handoffSelfRunMutation.mutate(monitoredSelfRun.runId)}
-          onDeleteHistoryGroups={(txnIds) => deleteSelfHistoryMutation.mutate(txnIds)}
-          startPending={startSelfRunMutation.isPending}
-          startWorktreePending={startSelfWorktreeRunMutation.isPending}
-          pausePending={pauseSelfRunMutation.isPending}
-          resumePending={resumeSelfRunMutation.isPending}
-          terminatePending={stopSelfRunMutation.isPending}
-          rollbackPending={rollbackSelfRunMutation.isPending}
-          handoffPending={handoffSelfRunMutation.isPending}
-          deleteHistoryPending={deleteSelfHistoryMutation.isPending}
-          startError={startSelfRunMutation.error?.message ?? ""}
-          startWorktreeError={startSelfWorktreeRunMutation.error?.message ?? ""}
-          pauseError={pauseSelfRunMutation.error?.message ?? ""}
-          resumeError={resumeSelfRunMutation.error?.message ?? ""}
-          terminateError={stopSelfRunMutation.error?.message ?? ""}
-          rollbackError={rollbackSelfRunMutation.error?.message ?? ""}
-          handoffError={handoffSelfRunMutation.error?.message ?? ""}
-          deleteHistoryError={deleteSelfHistoryMutation.error?.message ?? ""}
-          actionFeedback={selfActionFeedback}
-          runLocked={selfRunLocked}
-          worktreeRunLocked={worktreeRunLocked}
-          transactions={selfTransactions}
-          loading={selfTrackLoading}
-        />
+        <Suspense fallback={(
+          <section className={`${styles.surface} ${styles.structuredEmptyState}`}>
+            <LoaderCircle size={18} className={styles.spinIcon} aria-hidden="true" />
+            <div>
+              <h3>{lang === "zh" ? "正在加载自进化工作台" : "Loading self-evolution workspace"}</h3>
+              <p>{lang === "zh" ? "监督进化工作台已先保持可用，自进化面板正在按需载入。" : "The supervised workspace stays available while the self-evolution panel loads on demand."}</p>
+            </div>
+          </section>
+        )}>
+          <LazySelfEvolutionTrack
+            overview={selfOverview}
+            latestRun={monitoredSelfRun}
+            goalInput={selfGoalInput}
+            onGoalInputChange={setSelfGoalInput}
+            onStartRun={() => startSelfRunMutation.mutate()}
+            onStartWorktreeRun={() => startSelfWorktreeRunMutation.mutate()}
+            onPauseRun={() => monitoredSelfRun && pauseSelfRunMutation.mutate(monitoredSelfRun.runId)}
+            onResumeRun={() => monitoredSelfRun && resumeSelfRunMutation.mutate(monitoredSelfRun.runId)}
+            onTerminateRun={() => monitoredSelfRun && stopSelfRunMutation.mutate(monitoredSelfRun.runId)}
+            onRollbackRun={() => monitoredSelfRun && rollbackSelfRunMutation.mutate(monitoredSelfRun.runId)}
+            onHandoffRun={() => monitoredSelfRun && handoffSelfRunMutation.mutate(monitoredSelfRun.runId)}
+            onDeleteHistoryGroups={(txnIds) => deleteSelfHistoryMutation.mutate(txnIds)}
+            startPending={startSelfRunMutation.isPending}
+            startWorktreePending={startSelfWorktreeRunMutation.isPending}
+            pausePending={pauseSelfRunMutation.isPending}
+            resumePending={resumeSelfRunMutation.isPending}
+            terminatePending={stopSelfRunMutation.isPending}
+            rollbackPending={rollbackSelfRunMutation.isPending}
+            handoffPending={handoffSelfRunMutation.isPending}
+            deleteHistoryPending={deleteSelfHistoryMutation.isPending}
+            startError={startSelfRunMutation.error?.message ?? ""}
+            startWorktreeError={startSelfWorktreeRunMutation.error?.message ?? ""}
+            pauseError={pauseSelfRunMutation.error?.message ?? ""}
+            resumeError={resumeSelfRunMutation.error?.message ?? ""}
+            terminateError={stopSelfRunMutation.error?.message ?? ""}
+            rollbackError={rollbackSelfRunMutation.error?.message ?? ""}
+            handoffError={handoffSelfRunMutation.error?.message ?? ""}
+            deleteHistoryError={deleteSelfHistoryMutation.error?.message ?? ""}
+            actionFeedback={selfActionFeedback}
+            runLocked={selfRunLocked}
+            worktreeRunLocked={worktreeRunLocked}
+            transactions={selfTransactions}
+            loading={selfTrackLoading}
+          />
+        </Suspense>
       ) : null}
 
       {activeTrack === "supervised" && evolutionView === "live" ? (

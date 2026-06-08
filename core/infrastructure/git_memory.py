@@ -406,8 +406,8 @@ class GitMemoryService:
         return {"available": True, "indexed_commits": indexed, "error": None}
 
     def scan_working_tree(self, store: bool = True) -> WorkingTreeSnapshot:
-        available, error = self.is_git_available()
-        if not available:
+        result = self._run_git(["status", "--porcelain=1"])
+        if result.returncode != 0:
             return WorkingTreeSnapshot(
                 snapshot_id="unavailable",
                 created_at=_utcnow_iso(),
@@ -417,21 +417,7 @@ class GitMemoryService:
                 has_untracked=False,
                 files=[],
                 available=False,
-                error=error,
-            )
-
-        result = self._run_git(["status", "--porcelain=1"])
-        if result.returncode != 0:
-            return WorkingTreeSnapshot(
-                snapshot_id="error",
-                created_at=_utcnow_iso(),
-                base_rev=self._git_head_rev(),
-                has_staged=False,
-                has_unstaged=False,
-                has_untracked=False,
-                files=[],
-                available=False,
-                error=(result.stderr or result.stdout).strip(),
+                error=(result.stderr or result.stdout or "git unavailable").strip(),
             )
 
         files: List[WorkingTreeFile] = []
@@ -722,6 +708,33 @@ class GitMemoryService:
             ],
         }
         return json.dumps(payload, ensure_ascii=False, indent=2)
+
+    def build_worktree_status_bundle(self, limit: int = 5) -> Dict[str, str]:
+        """Build status summary and worktree snapshot from one working-tree scan."""
+
+        normalized_limit = max(1, min(int(limit or 5), 10))
+        session = get_session_state()
+        snapshot = self._last_snapshot or self.scan_working_tree(store=False)
+        attention = session.get_attention_snapshot()
+        recent_changes = self.get_recent_project_changes(limit=normalized_limit)
+        status_payload = {
+            "dirty_summary": self._dirty_summary(snapshot),
+            "modified_paths": attention["modified_paths"],
+            "modified_entities": attention["modified_entities"],
+            "last_validation_summary": attention.get("last_validation_summary"),
+            "recent_changes": [
+                {
+                    "path": change.path,
+                    "change_type": change.change_type,
+                    "subject": _short_subject(change.subject),
+                }
+                for change in recent_changes
+            ],
+        }
+        return {
+            "git_status_summary": json.dumps(status_payload, ensure_ascii=False, indent=2),
+            "worktree_snapshot": json.dumps(asdict(snapshot), ensure_ascii=False, indent=2),
+        }
 
     def explain_current_worktree(self) -> str:
         snapshot = self._last_snapshot or self.scan_working_tree(store=False)

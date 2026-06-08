@@ -35,6 +35,11 @@ SUPERVISED_AGENT_ROLES: tuple[SupervisedAgentRole, ...] = (
     SupervisedAgentRole("judge", "监督进化裁决 Agent"),
 )
 CORE_SUPERVISED_AGENT_ROLES = {"judge"}
+PREFERRED_SUPERVISED_MODEL_IDS = (
+    "xiaomi_mimo_v2_5_pro_token_plan",
+    "generated_xiaomi_mimo_v2_5_cdff497b2d9b",
+    "xiaomi_mimo_v2_5_multimodal",
+)
 
 
 def ensure_supervised_agent_instances() -> list[dict[str, Any]]:
@@ -93,6 +98,66 @@ def ensure_supervised_agent_instances() -> list[dict[str, Any]]:
         agent_directory_service.PROJECT_ROOT = previous_agent_root
         agent_mode_binding_service.PROJECT_ROOT = previous_binding_root
     return ensured
+
+
+def _supervised_role_llm_bindings(role: str) -> dict[str, dict[str, str]]:
+    model_id = _supervised_role_model_id(role)
+    if model_id:
+        return {"dialogue": {"modelId": model_id}}
+    return session_service.default_session_llm_bindings()
+
+
+def _supervised_role_model_id(role: str) -> str:
+    normalized_role = str(role or "").strip()
+    config = _current_config()
+    profile_ids = []
+    if normalized_role:
+        profile_ids.append(f"supervised_{normalized_role}")
+    for profile_id in profile_ids:
+        try:
+            profile = config.llm.get_profile(profile_id=profile_id)
+            model_id, _entry = config.llm.get_model_library_entry_for_profile(profile)
+        except Exception:
+            continue
+        normalized_model_id = str(model_id or "").strip()
+        if normalized_model_id:
+            return normalized_model_id
+    preferred_model_id = _preferred_supervised_model_id(config)
+    if preferred_model_id:
+        return preferred_model_id
+    try:
+        profile = config.llm.get_profile(profile_id="primary")
+        model_id, _entry = config.llm.get_model_library_entry_for_profile(profile)
+    except Exception:
+        return ""
+    return str(model_id or "").strip()
+
+
+def _preferred_supervised_model_id(config: Any) -> str:
+    try:
+        model_library = getattr(config.llm, "model_library", {}) or {}
+    except Exception:
+        return ""
+    if not isinstance(model_library, dict):
+        return ""
+    for model_id in PREFERRED_SUPERVISED_MODEL_IDS:
+        if model_id in model_library:
+            return model_id
+    try:
+        providers = getattr(config.llm, "providers", {}) or {}
+    except Exception:
+        providers = {}
+    if not isinstance(providers, dict):
+        providers = {}
+    for model_id, item in model_library.items():
+        if not isinstance(item, dict):
+            continue
+        provider_id = str(item.get("provider_id") or "").strip()
+        provider = providers.get(provider_id)
+        provider_kind = str(getattr(provider, "kind", "") or "").strip().lower()
+        if provider_kind == "xiaomi":
+            return str(model_id or "").strip()
+    return ""
 
 
 def supervised_agent_bindings() -> dict[str, dict[str, Any]]:
@@ -410,21 +475,44 @@ def _sync_supervised_mode_binding(agents: list[dict[str, Any]], *, preserve_exis
     if not active_agent_ids:
         return
     try:
+        existing_mode: dict[str, Any] = {}
+        try:
+            existing_payload = agent_mode_binding_service.get_mode_bindings_payload()
+            existing_mode = (existing_payload.get("modes") or {}).get("supervised_evolution") or {}
+        except Exception:
+            existing_mode = {}
+        active_agent_id_set = set(active_agent_ids)
+        excluded_agent_ids = []
+        for raw_agent_id in list(existing_mode.get("excludedAgentIds") or []):
+            agent_id = str(raw_agent_id or "").strip()
+            if not agent_id or agent_id in active_agent_id_set:
+                continue
+            if not agent_directory_service.get_agent(agent_id, include_archived=False):
+                continue
+            excluded_agent_ids.append(agent_id)
         agent_mode_binding_service.update_mode_binding(
             "supervised_evolution",
             default_agent_id=active_agent_ids[0],
             available_agent_ids=active_agent_ids,
             slots=slots,
+            excluded_agent_ids=excluded_agent_ids,
             excluded_slots=excluded_slots,
         )
-    except Exception:
+    except Exception as exc:
+        _record_supervised_agent_event(
+            "supervised.agent_instance.mode_binding_sync_failed",
+            role=SupervisedAgentRole("multi", "监督进化成员"),
+            level="error",
+            outcome="failed",
+            fields={"errorType": type(exc).__name__, "message": str(exc)},
+        )
         return
 
 
 def _ensure_supervised_role(role: SupervisedAgentRole) -> tuple[dict[str, Any] | None, bool]:
     existing = _find_agent_by_supervised_role(role.role)
     changed = False
-    seed_llm_bindings = session_service.default_session_llm_bindings()
+    seed_llm_bindings = _supervised_role_llm_bindings(role.role)
     if role.role not in CORE_SUPERVISED_AGENT_ROLES and _supervised_role_slot_excluded(role.role):
         _record_supervised_agent_event(
             "supervised.agent_instance.sync_skipped_excluded_slot",
@@ -483,7 +571,7 @@ def _ensure_supervised_role(role: SupervisedAgentRole) -> tuple[dict[str, Any] |
 
     metadata = dict(existing.get("metadata") or {})
     existing_llm_bindings = agent_directory_service.normalize_agent_llm_bindings(existing.get("llmBindings"))
-    existing_dialogue_model_id = agent_directory_service.agent_dialogue_model_id({"llmBindings": existing_llm_bindings})
+    expected_llm_bindings = agent_directory_service.normalize_agent_llm_bindings(seed_llm_bindings)
     expected_metadata = {
         "agentMode": "supervised_evolution",
         "configSurface": "model_config",
@@ -502,6 +590,12 @@ def _ensure_supervised_role(role: SupervisedAgentRole) -> tuple[dict[str, Any] |
             prompt_template_id=f"prompt-supervised-{role.role}",
             metadata=expected_metadata,
             status="active",
+        )
+        changed = True
+    if expected_llm_bindings and existing_llm_bindings != expected_llm_bindings:
+        existing = agent_directory_service.update_agent_instance(
+            str(existing.get("agentId") or ""),
+            llm_bindings=expected_llm_bindings,
         )
         changed = True
 

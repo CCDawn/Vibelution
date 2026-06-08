@@ -103,6 +103,7 @@ export function SupervisedReviewRoute() {
       setActionFeedback(payload.summary);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.evolutionChatReview() }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.evolutionChatReviewCandidate(selectedCandidate?.candidateId ?? "") }),
         queryClient.invalidateQueries({ queryKey: queryKeys.evolutionWorkbench() }),
       ]);
     },
@@ -187,6 +188,19 @@ export function SupervisedReviewRoute() {
     visibleItems.find((item) => item.candidateId === selectedCandidateId)
     ?? visibleItems[0]
     ?? null;
+  const candidateDetailQuery = useQuery({
+    queryKey: queryKeys.evolutionChatReviewCandidate(selectedCandidate?.candidateId ?? ""),
+    queryFn: () => fetchJson<EvolutionChatReviewCandidate>(
+      `/api/evolution/chat-review/${encodeURIComponent(selectedCandidate?.candidateId ?? "")}`,
+    ),
+    enabled: Boolean(selectedCandidate?.candidateId),
+    refetchInterval: false,
+    refetchIntervalInBackground: false,
+  });
+  const selectedCandidateDetail = candidateDetailQuery.data?.candidateId === selectedCandidate?.candidateId
+    ? candidateDetailQuery.data
+    : null;
+  const detailCandidate = selectedCandidateDetail ?? selectedCandidate;
   const reviewTabSummaries = {
     review: {
       status: lang === "zh"
@@ -205,13 +219,13 @@ export function SupervisedReviewRoute() {
     return visiblePendingItems.map((item) => item.candidateId);
   }, [visiblePendingItems]);
   const evidenceTurns = useMemo(() => {
-    if (!selectedCandidate) {
+    if (!detailCandidate) {
       return [];
     }
-    const highlightSet = new Set(selectedCandidate.reviewProfile.evidenceTurnNumbers);
-    const matching = selectedCandidate.conversationTurns.filter((turn) => highlightSet.has(turn.turnNumber));
-    return matching.length > 0 ? matching : selectedCandidate.conversationTurns.slice(0, 3);
-  }, [selectedCandidate]);
+    const highlightSet = new Set(detailCandidate.reviewProfile.evidenceTurnNumbers);
+    const matching = detailCandidate.conversationTurns.filter((turn) => highlightSet.has(turn.turnNumber));
+    return matching.length > 0 ? matching : detailCandidate.conversationTurns.slice(0, 3);
+  }, [detailCandidate]);
 
   useEffect(() => {
     if (!visibleItems.some((item) => item.candidateId === selectedCandidateId)) {
@@ -225,7 +239,7 @@ export function SupervisedReviewRoute() {
   }, [visiblePendingIds]);
 
   useEffect(() => {
-    if (!selectedCandidate) {
+    if (!detailCandidate) {
       setDraftDecision("positive");
       setReviewerNote("");
       setReasonCode("");
@@ -234,13 +248,13 @@ export function SupervisedReviewRoute() {
       setIdealBehavior("");
       return;
     }
-    setDraftDecision((selectedCandidate.reviewProfile.suggestedDecision as ReviewDecision) || "positive");
-    setReviewerNote(selectedCandidate.reviewerNote || "");
-    setReasonCode(selectedCandidate.reviewDecision.reasonCode || "");
-    setErrorType(selectedCandidate.reviewDecision.errorType || "");
-    setCorrectPrinciple(selectedCandidate.reviewDecision.correctPrinciple || "");
-    setIdealBehavior(selectedCandidate.reviewDecision.idealBehavior || "");
-  }, [selectedCandidate?.candidateId]);
+    setDraftDecision((detailCandidate.reviewProfile.suggestedDecision as ReviewDecision) || "positive");
+    setReviewerNote(detailCandidate.reviewerNote || "");
+    setReasonCode(detailCandidate.reviewDecision.reasonCode || "");
+    setErrorType(detailCandidate.reviewDecision.errorType || "");
+    setCorrectPrinciple(detailCandidate.reviewDecision.correctPrinciple || "");
+    setIdealBehavior(detailCandidate.reviewDecision.idealBehavior || "");
+  }, [detailCandidate?.candidateId]);
 
   useEffect(() => {
     window.localStorage.setItem(REVIEW_QUEUE_WIDTH_KEY, String(queuePanelWidth));
@@ -311,7 +325,7 @@ export function SupervisedReviewRoute() {
   }
 
   function submitCurrentDecision() {
-    if (!selectedCandidate || selectedCandidate.status !== "pending") {
+    if (!detailCandidate || detailCandidate.status !== "pending") {
       return;
     }
     decisionMutation.mutate();
@@ -647,45 +661,45 @@ export function SupervisedReviewRoute() {
         />
 
         <section className={styles.detailPanel}>
-          {selectedCandidate ? (
+          {detailCandidate ? (
             <>
               <div className={styles.detailHeader}>
                 <div>
                   <p className={styles.eyebrow}>{lang === "zh" ? "当前裁决样本" : "Current review case"}</p>
-                  <h2 className={styles.detailTitle}>{selectedCandidate.topicSummary || selectedCandidate.candidateId}</h2>
-                  <p className={styles.detailLead}>{selectedCandidate.reviewProfile.suggestedReason}</p>
+                  <h2 className={styles.detailTitle}>{detailCandidate.topicSummary || detailCandidate.candidateId}</h2>
+                  <p className={styles.detailLead}>{detailCandidate.reviewProfile.suggestedReason}</p>
                 </div>
                 <div className={styles.detailHeaderActions}>
-                  <span className={`${styles.statusBadge} ${statusTone(selectedCandidate.status)}`}>{statusLabel(selectedCandidate.status)}</span>
-                  <span className={styles.secondaryPill}>{decisionLabel((selectedCandidate.reviewProfile.suggestedDecision as ReviewDecision) || "positive")}</span>
+                  <span className={`${styles.statusBadge} ${statusTone(detailCandidate.status)}`}>{statusLabel(detailCandidate.status)}</span>
+                  <span className={styles.secondaryPill}>{decisionLabel((detailCandidate.reviewProfile.suggestedDecision as ReviewDecision) || "positive")}</span>
                 </div>
               </div>
 
               <div className={styles.factGrid}>
                 <article className={styles.factCard}>
                   <span>{lang === "zh" ? "学习重点" : "Learning focus"}</span>
-                  <strong>{selectedCandidate.reviewProfile.learningFocus}</strong>
+                  <strong>{detailCandidate.reviewProfile.learningFocus}</strong>
                 </article>
                 <article className={styles.factCard}>
                   <span>{lang === "zh" ? "轮次范围" : "Turn range"}</span>
-                  <strong>{`T${selectedCandidate.startTurn}-${selectedCandidate.endTurn}`}</strong>
+                  <strong>{`T${detailCandidate.startTurn}-${detailCandidate.endTurn}`}</strong>
                 </article>
                 <article className={styles.factCard}>
                   <span>{lang === "zh" ? "来源会话" : "Source session"}</span>
-                  <strong>{selectedCandidate.sessionId || "--"}</strong>
+                  <strong>{detailCandidate.sessionId || "--"}</strong>
                 </article>
                 <article className={styles.factCard}>
                   <span>{lang === "zh" ? "训练层级" : "Training tier"}</span>
-                  <strong>{selectedCandidate.structuredSample.trainingTier || "--"}</strong>
+                  <strong>{detailCandidate.structuredSample.trainingTier || "--"}</strong>
                 </article>
               </div>
 
               <div className={styles.metricGrid}>
                 {[
-                  { label: lang === "zh" ? "任务清晰度" : "Task clarity", item: selectedCandidate.reviewProfile.taskClarity },
-                  { label: lang === "zh" ? "目标稳定性" : "Goal stability", item: selectedCandidate.reviewProfile.goalStability },
-                  { label: lang === "zh" ? "输出可学性" : "Learning value", item: selectedCandidate.reviewProfile.assistantLearningValue },
-                  { label: lang === "zh" ? "反模式风险" : "Anti-pattern risk", item: selectedCandidate.reviewProfile.antiPatternRisk },
+                  { label: lang === "zh" ? "任务清晰度" : "Task clarity", item: detailCandidate.reviewProfile.taskClarity },
+                  { label: lang === "zh" ? "目标稳定性" : "Goal stability", item: detailCandidate.reviewProfile.goalStability },
+                  { label: lang === "zh" ? "输出可学性" : "Learning value", item: detailCandidate.reviewProfile.assistantLearningValue },
+                  { label: lang === "zh" ? "反模式风险" : "Anti-pattern risk", item: detailCandidate.reviewProfile.antiPatternRisk },
                 ].map((metric) => (
                   <article key={metric.label} className={styles.metricCard}>
                     <span>{metric.label}</span>
@@ -699,7 +713,7 @@ export function SupervisedReviewRoute() {
                 <section className={styles.signalSection}>
                   <h3>{lang === "zh" ? "正向信号" : "Positive signals"}</h3>
                   <ul>
-                    {selectedCandidate.reviewProfile.positiveSignals.map((signal) => (
+                    {detailCandidate.reviewProfile.positiveSignals.map((signal) => (
                       <li key={signal}>{signal}</li>
                     ))}
                   </ul>
@@ -707,7 +721,7 @@ export function SupervisedReviewRoute() {
                 <section className={styles.signalSection}>
                   <h3>{lang === "zh" ? "反向信号" : "Negative signals"}</h3>
                   <ul>
-                    {selectedCandidate.reviewProfile.negativeSignals.map((signal) => (
+                    {detailCandidate.reviewProfile.negativeSignals.map((signal) => (
                       <li key={signal}>{signal}</li>
                     ))}
                   </ul>
@@ -724,7 +738,7 @@ export function SupervisedReviewRoute() {
                 </div>
                 <div className={styles.evidenceList}>
                   {evidenceTurns.map((turn) => (
-                    <article key={`${selectedCandidate.candidateId}-${turn.turnNumber}`} className={styles.evidenceCard}>
+                    <article key={`${detailCandidate.candidateId}-${turn.turnNumber}`} className={styles.evidenceCard}>
                       <div className={styles.evidenceTop}>
                         <strong>{`Turn ${turn.turnNumber}`}</strong>
                         <span>{turn.toolCalls.join(", ") || "--"}</span>
@@ -742,7 +756,7 @@ export function SupervisedReviewRoute() {
                     <p className={styles.eyebrow}>{lang === "zh" ? "裁决" : "Decision"}</p>
                     <h3>{lang === "zh" ? "把样本归进正例、负例或丢弃" : "Send the sample to positive, negative, or discard"}</h3>
                   </div>
-                  {selectedCandidate.status !== "pending" ? (
+                  {detailCandidate.status !== "pending" ? (
                     <span className={styles.secondaryPill}>{lang === "zh" ? "已处理" : "Already reviewed"}</span>
                   ) : null}
                 </div>
@@ -753,7 +767,7 @@ export function SupervisedReviewRoute() {
                       key={value}
                       type="button"
                       className={draftDecision === value ? `${styles.decisionButton} ${styles.decisionButtonActive}` : styles.decisionButton}
-                      disabled={selectedCandidate.status !== "pending"}
+                      disabled={detailCandidate.status !== "pending"}
                       onClick={() => setDraftDecision(value)}
                     >
                       {value === "positive" ? <CheckCircle2 size={15} /> : value === "negative" ? <TriangleAlert size={15} /> : <Trash2 size={15} />}
@@ -767,7 +781,7 @@ export function SupervisedReviewRoute() {
                     <span>{lang === "zh" ? "原因分类" : "Reason code"}</span>
                     <select
                       value={reasonCode}
-                      disabled={selectedCandidate.status !== "pending"}
+                      disabled={detailCandidate.status !== "pending"}
                       onChange={(event) => setReasonCode(event.target.value)}
                     >
                       <option value="">{lang === "zh" ? "未填写" : "Not set"}</option>
@@ -783,7 +797,7 @@ export function SupervisedReviewRoute() {
                       <input
                         type="text"
                         value={errorType}
-                        disabled={selectedCandidate.status !== "pending"}
+                        disabled={detailCandidate.status !== "pending"}
                         onChange={(event) => setErrorType(event.target.value)}
                         placeholder={lang === "zh" ? "例如：ungrounded_inference" : "For example: ungrounded_inference"}
                       />
@@ -796,7 +810,7 @@ export function SupervisedReviewRoute() {
                       <input
                         type="text"
                         value={correctPrinciple}
-                        disabled={selectedCandidate.status !== "pending"}
+                        disabled={detailCandidate.status !== "pending"}
                         onChange={(event) => setCorrectPrinciple(event.target.value)}
                         placeholder={lang === "zh" ? "例如：先查日志再下判断" : "For example: inspect logs before concluding"}
                       />
@@ -809,7 +823,7 @@ export function SupervisedReviewRoute() {
                       <input
                         type="text"
                         value={idealBehavior}
-                        disabled={selectedCandidate.status !== "pending"}
+                        disabled={detailCandidate.status !== "pending"}
                         onChange={(event) => setIdealBehavior(event.target.value)}
                         placeholder={lang === "zh" ? "补一句理想的处理方式" : "Describe the better behavior"}
                       />
@@ -821,7 +835,7 @@ export function SupervisedReviewRoute() {
                   <span>{lang === "zh" ? "评审备注" : "Reviewer note"}</span>
                   <textarea
                     value={reviewerNote}
-                    disabled={selectedCandidate.status !== "pending"}
+                    disabled={detailCandidate.status !== "pending"}
                     onChange={(event) => setReviewerNote(event.target.value)}
                     placeholder={lang === "zh" ? "给未来的 agent 留一句人话提醒" : "Leave one human-readable reminder for the future agent"}
                   />
@@ -831,7 +845,7 @@ export function SupervisedReviewRoute() {
                   <button
                     type="button"
                     className={styles.primaryAction}
-                    disabled={selectedCandidate.status !== "pending" || decisionMutation.isPending}
+                    disabled={detailCandidate.status !== "pending" || decisionMutation.isPending}
                     onClick={submitCurrentDecision}
                   >
                     {decisionMutation.isPending ? <LoaderCircle size={15} className={styles.spin} /> : <LibraryBig size={15} />}
@@ -861,7 +875,7 @@ export function SupervisedReviewRoute() {
                 <div className={styles.transcriptMeta}>
                   <article className={styles.metaRow}>
                     <strong>{lang === "zh" ? "来源日志" : "Source log"}</strong>
-                    <span>{selectedCandidate.sourceLogPath || "--"}</span>
+                    <span>{detailCandidate.sourceLogPath || "--"}</span>
                   </article>
                   <article className={styles.metaRow}>
                     <strong>{lang === "zh" ? "正例数据集" : "Positive dataset"}</strong>
@@ -873,8 +887,8 @@ export function SupervisedReviewRoute() {
                   </article>
                 </div>
                 <div className={styles.transcriptList}>
-                  {selectedCandidate.conversationTurns.map((turn) => (
-                    <article key={`${selectedCandidate.candidateId}-transcript-${turn.turnNumber}`} className={styles.transcriptCard}>
+                  {detailCandidate.conversationTurns.map((turn) => (
+                    <article key={`${detailCandidate.candidateId}-transcript-${turn.turnNumber}`} className={styles.transcriptCard}>
                       <div className={styles.evidenceTop}>
                         <strong>{`Turn ${turn.turnNumber}`}</strong>
                         <span>{turn.toolCalls.join(", ") || "--"}</span>

@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 
 import sqlite3
+import subprocess
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -75,6 +76,40 @@ def _init_git_repo(tmp_path: Path) -> Path:
 
 
 class TestGitMemoryService:
+    def test_scan_working_tree_skips_git_dir_preflight(self, tmp_path, monkeypatch):
+        repo = _init_git_repo(tmp_path)
+        db_path = tmp_path / "brain.db"
+        fake_workspace = FakeWorkspace(repo, db_path)
+
+        class FakeBus:
+            def publish(self, name, data=None, source=None):
+                return None
+
+            def subscribe(self, name, handler, priority=0):
+                return True
+
+        monkeypatch.setattr("core.infrastructure.git_memory.get_workspace", lambda: fake_workspace)
+        monkeypatch.setattr("core.infrastructure.git_memory.get_event_bus", lambda: FakeBus())
+
+        service = GitMemoryService()
+        calls = []
+
+        def fake_run_git(args):
+            calls.append(args)
+            if args == ["status", "--porcelain=1"]:
+                return subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr="")
+            if args == ["rev-parse", "HEAD"]:
+                return subprocess.CompletedProcess(args=args, returncode=0, stdout="abcdef\n", stderr="")
+            raise AssertionError(f"unexpected git command: {args}")
+
+        monkeypatch.setattr(service, "_run_git", fake_run_git)
+
+        snapshot = service.scan_working_tree(store=False)
+
+        assert snapshot.available is True
+        assert snapshot.base_rev == "abcdef"
+        assert calls == [["status", "--porcelain=1"], ["rev-parse", "HEAD"]]
+
     def test_refresh_indexes_commits_and_worktree(self, tmp_path, monkeypatch):
         repo = _init_git_repo(tmp_path)
         db_path = tmp_path / "brain.db"

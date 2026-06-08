@@ -453,6 +453,18 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.effectiveGrid .overviewPanel {
+  max-height: min(260px, 36vh);
+  overflow: auto;
+}
+
+.effectiveGrid .panelLead {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
 .reviewQueuePanel,
 .overviewPanel,
 .manageFormPanel,
@@ -1912,6 +1924,10 @@
   display: block;
   color: var(--fg-secondary);
   font-size: 0.7rem;
+}
+
+.effectiveGrid .compactMemoryList {
+  max-height: 148px;
 }
 
 .manageItemPrimary,

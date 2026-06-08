@@ -1,8 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import * as THREE from "three";
 
 import type { MemoryKnowledgeGraphEdge, MemoryKnowledgeGraphNode } from "../api/types";
 import styles from "./MemoryRoute.module.css";
+
+type ThreeModule = typeof import("three");
+type ThreeMaterial = import("three").Material;
+type ThreeMesh = import("three").Mesh;
+type ThreeWebGLRenderer = import("three").WebGLRenderer;
 
 type GraphPosition = {
   id: string;
@@ -10,6 +14,8 @@ type GraphPosition = {
   y: number;
   z: number;
 };
+
+type GraphPoint = Omit<GraphPosition, "id">;
 
 type MemoryGraphCanvasProps = {
   nodes: MemoryKnowledgeGraphNode[];
@@ -108,11 +114,11 @@ function pickVisibleLabelIds(nodes: MemoryKnowledgeGraphNode[], edges: MemoryKno
   return visible;
 }
 
-function tintColor(color: number, tint: number) {
+function tintColor(THREE: ThreeModule, color: number, tint: number) {
   return new THREE.Color(color).lerp(new THREE.Color(0xf8fafc), tint);
 }
 
-function shadeColor(color: number, shade: number) {
+function shadeColor(THREE: ThreeModule, color: number, shade: number) {
   return new THREE.Color(color).lerp(new THREE.Color(0x020617), shade);
 }
 
@@ -145,7 +151,7 @@ export function MemoryGraphCanvas({ nodes, edges, selectedNodeId, onSelectNode, 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const labelLayerRef = useRef<HTMLDivElement | null>(null);
   const [webglReady, setWebglReady] = useState(true);
-  const [positions, setPositions] = useState<Map<string, THREE.Vector3>>(new Map());
+  const [positions, setPositions] = useState<Map<string, GraphPoint>>(new Map());
   const degree = useMemo(() => buildDegreeMap(edges), [edges]);
   const visibleLabelIds = useMemo(() => pickVisibleLabelIds(nodes, edges, selectedNodeId), [nodes, edges, selectedNodeId]);
   const searchSizedLabels = nodes.length <= SEARCH_LABEL_LIMIT;
@@ -164,7 +170,11 @@ export function MemoryGraphCanvas({ nodes, edges, selectedNodeId, onSelectNode, 
         new Map(
           event.data.positions.map((item) => [
             item.id,
-            new THREE.Vector3(Number(item.x) || 0, Number(item.y) || 0, Number(item.z) || 0),
+            {
+              x: Number(item.x) || 0,
+              y: Number(item.y) || 0,
+              z: Number(item.z) || 0,
+            },
           ]),
         ),
       );
@@ -178,42 +188,63 @@ export function MemoryGraphCanvas({ nodes, edges, selectedNodeId, onSelectNode, 
     if (!container || !nodes.length) {
       return;
     }
-    let renderer: THREE.WebGLRenderer;
-    try {
-      renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: "high-performance" });
-    } catch {
-      setWebglReady(false);
-      return;
-    }
-    setWebglReady(true);
-    const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(52, 1, 0.1, 1000);
-    camera.position.set(0, 12, 46);
-    camera.lookAt(0, 0, 0);
-    const root = new THREE.Group();
-    root.position.set(0, 2.4, 0);
-    scene.add(root);
-    scene.add(new THREE.AmbientLight(0xffffff, 0.74));
-    const light = new THREE.DirectionalLight(0xffffff, 0.82);
-    light.position.set(12, 18, 16);
-    scene.add(light);
+    let disposed = false;
+    let cleanup: (() => void) | undefined;
+    void import("three").then((THREE) => {
+      if (disposed) {
+        return;
+      }
+      const cleanupRenderer = mountThreeGraph(THREE);
+      if (disposed) {
+        cleanupRenderer?.();
+        return;
+      }
+      cleanup = cleanupRenderer;
+    }).catch(() => {
+      if (!disposed) {
+        setWebglReady(false);
+      }
+    });
 
-    renderer.setPixelRatio(1);
-    renderer.setClearColor(0x000000, 0);
-    renderer.domElement.style.width = "100%";
-    renderer.domElement.style.height = "100%";
-    container.replaceChildren(renderer.domElement);
+    const mountThreeGraph = (THREE: ThreeModule) => {
+      const toVector = (position: GraphPoint | undefined) =>
+        new THREE.Vector3(position?.x ?? 0, position?.y ?? 0, position?.z ?? 0);
+      let renderer: ThreeWebGLRenderer;
+      try {
+        renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: "high-performance" });
+      } catch {
+        setWebglReady(false);
+        return;
+      }
+      setWebglReady(true);
+      const scene = new THREE.Scene();
+      const camera = new THREE.PerspectiveCamera(52, 1, 0.1, 1000);
+      camera.position.set(0, 12, 46);
+      camera.lookAt(0, 0, 0);
+      const root = new THREE.Group();
+      root.position.set(0, 2.4, 0);
+      scene.add(root);
+      scene.add(new THREE.AmbientLight(0xffffff, 0.74));
+      const light = new THREE.DirectionalLight(0xffffff, 0.82);
+      light.position.set(12, 18, 16);
+      scene.add(light);
 
-    const nodeMaterials: THREE.Material[] = [];
-    const hitObjects = new Map<string, THREE.Mesh>();
-    const planetGeometry = new THREE.SphereGeometry(0.3, 12, 10);
-    const planetSurfaceGeometry = new THREE.SphereGeometry(0.305, 10, 8);
-    const starGeometry = new THREE.IcosahedronGeometry(0.42, 1);
-    const starFacetGeometry = new THREE.IcosahedronGeometry(0.428, 1);
-    const satelliteGeometry = new THREE.DodecahedronGeometry(0.28, 0);
-    const satelliteFacetGeometry = new THREE.DodecahedronGeometry(0.286, 0);
-    const hitSphere = new THREE.SphereGeometry(1, 8, 8);
-    const trackMaterial = <T extends THREE.Material>(material: T) => {
+      renderer.setPixelRatio(1);
+      renderer.setClearColor(0x000000, 0);
+      renderer.domElement.style.width = "100%";
+      renderer.domElement.style.height = "100%";
+      container.replaceChildren(renderer.domElement);
+
+      const nodeMaterials: ThreeMaterial[] = [];
+      const hitObjects = new Map<string, ThreeMesh>();
+      const planetGeometry = new THREE.SphereGeometry(0.3, 12, 10);
+      const planetSurfaceGeometry = new THREE.SphereGeometry(0.305, 10, 8);
+      const starGeometry = new THREE.IcosahedronGeometry(0.42, 1);
+      const starFacetGeometry = new THREE.IcosahedronGeometry(0.428, 1);
+      const satelliteGeometry = new THREE.DodecahedronGeometry(0.28, 0);
+      const satelliteFacetGeometry = new THREE.DodecahedronGeometry(0.286, 0);
+      const hitSphere = new THREE.SphereGeometry(1, 8, 8);
+      const trackMaterial = <T extends ThreeMaterial>(material: T) => {
       nodeMaterials.push(material);
       return material;
     };
@@ -222,7 +253,7 @@ export function MemoryGraphCanvas({ nodes, edges, selectedNodeId, onSelectNode, 
       const core = new THREE.Mesh(
         starGeometry,
         trackMaterial(new THREE.MeshStandardMaterial({
-          color: tintColor(color, selected ? 0.24 : 0.14),
+          color: tintColor(THREE, color, selected ? 0.24 : 0.14),
           emissive: color,
           emissiveIntensity: selected ? 0.26 : 0.14,
           flatShading: true,
@@ -233,7 +264,7 @@ export function MemoryGraphCanvas({ nodes, edges, selectedNodeId, onSelectNode, 
       const facets = new THREE.Mesh(
         starFacetGeometry,
         trackMaterial(new THREE.MeshBasicMaterial({
-          color: tintColor(color, 0.42),
+          color: tintColor(THREE, color, 0.42),
           transparent: true,
           opacity: selected ? 0.28 : 0.18,
           wireframe: true,
@@ -249,7 +280,7 @@ export function MemoryGraphCanvas({ nodes, edges, selectedNodeId, onSelectNode, 
         planetGeometry,
         trackMaterial(new THREE.MeshStandardMaterial({
           color,
-          emissive: shadeColor(color, 0.62),
+          emissive: shadeColor(THREE, color, 0.62),
           emissiveIntensity: selected ? 0.08 : 0.018,
           roughness: 0.82,
           metalness: 0.03,
@@ -258,7 +289,7 @@ export function MemoryGraphCanvas({ nodes, edges, selectedNodeId, onSelectNode, 
       const surface = new THREE.Mesh(
         planetSurfaceGeometry,
         trackMaterial(new THREE.MeshBasicMaterial({
-          color: tintColor(color, 0.34),
+          color: tintColor(THREE, color, 0.34),
           transparent: true,
           opacity: selected ? 0.22 : 0.14,
           wireframe: true,
@@ -274,8 +305,8 @@ export function MemoryGraphCanvas({ nodes, edges, selectedNodeId, onSelectNode, 
       const rock = new THREE.Mesh(
         satelliteGeometry,
         trackMaterial(new THREE.MeshStandardMaterial({
-          color: shadeColor(color, 0.12),
-          emissive: shadeColor(color, 0.7),
+          color: shadeColor(THREE, color, 0.12),
+          emissive: shadeColor(THREE, color, 0.7),
           emissiveIntensity: selected ? 0.06 : 0.01,
           flatShading: true,
           roughness: 0.96,
@@ -285,7 +316,7 @@ export function MemoryGraphCanvas({ nodes, edges, selectedNodeId, onSelectNode, 
       const facets = new THREE.Mesh(
         satelliteFacetGeometry,
         trackMaterial(new THREE.MeshBasicMaterial({
-          color: tintColor(color, 0.24),
+          color: tintColor(THREE, color, 0.24),
           transparent: true,
           opacity: selected ? 0.2 : 0.11,
           wireframe: true,
@@ -314,7 +345,7 @@ export function MemoryGraphCanvas({ nodes, edges, selectedNodeId, onSelectNode, 
       const size = nodeSize(node, nodeDegree);
       const selectedScale = selected ? 1.16 : 1;
       body.scale.setScalar(size * selectedScale);
-      const position = positions.get(node.id) ?? new THREE.Vector3();
+      const position = toVector(positions.get(node.id));
       body.position.copy(position);
       body.rotation.set(nodeDegree * 0.13, nodeDegree * 0.19, nodeDegree * 0.07);
       body.userData.nodeId = node.id;
@@ -405,7 +436,7 @@ export function MemoryGraphCanvas({ nodes, edges, selectedNodeId, onSelectNode, 
           label.style.opacity = "0";
           continue;
         }
-        projected.copy(position).applyMatrix4(root.matrixWorld).project(camera);
+        projected.copy(toVector(position)).applyMatrix4(root.matrixWorld).project(camera);
         const x = (projected.x * 0.5 + 0.5) * rect.width;
         const y = (-projected.y * 0.5 + 0.5) * rect.height;
         label.style.transform = `translate3d(${x}px, ${y}px, 0) translate(-50%, calc(-100% - 20px)) scale(${selectedNodeId === nodeId ? 1.08 : 1})`;
@@ -554,13 +585,18 @@ export function MemoryGraphCanvas({ nodes, edges, selectedNodeId, onSelectNode, 
       lineGeometry.dispose();
       nodeMaterials.forEach((material) => material.dispose());
       for (const object of hitObjects.values()) {
-        (object.material as THREE.Material).dispose();
+        (object.material as ThreeMaterial).dispose();
       }
       if (labelLayer) {
         labelLayer.replaceChildren();
       }
       renderer.dispose();
       container.replaceChildren();
+    };
+    };
+    return () => {
+      disposed = true;
+      cleanup?.();
     };
   }, [nodes, edges, positions, selectedNodeId, onSelectNode, degree, visibleLabelIds, searchSizedLabels]);
 
@@ -589,7 +625,7 @@ function deterministicPositions(nodes: MemoryKnowledgeGraphNode[], edges: Memory
     nodes.map((node, index) => {
       const angle = (index / Math.max(1, nodes.length)) * Math.PI * 2;
       const radius = 7 + Math.sqrt(degree.get(node.id) ?? 1) * 2.2 + (index % 7);
-      return [node.id, new THREE.Vector3(Math.cos(angle) * radius, ((index % 9) - 4) * 1.3, Math.sin(angle) * radius)];
+      return [node.id, { x: Math.cos(angle) * radius, y: ((index % 9) - 4) * 1.3, z: Math.sin(angle) * radius }];
     }),
   );
 }

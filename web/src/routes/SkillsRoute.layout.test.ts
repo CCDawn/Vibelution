@@ -20,6 +20,12 @@ describe("SkillsRoute layout contract", () => {
     expect(appShellSource).not.toContain('to="/skills"');
   });
 
+  it("uses shell language state without loading the full app dictionary", () => {
+    expect(routeSource).toContain("useShellI18n");
+    expect(routeSource).toContain("const { lang } = useShellI18n()");
+    expect(routeSource).not.toContain("useAppI18n");
+  });
+
   it("uses read-only skill library APIs", () => {
     expect(routeSource).toContain('fetchJson<SkillLibraryPayload>("/api/skills")');
     expect(routeSource).toContain("fetchJson<SkillLibraryDetail>(`/api/skills/");

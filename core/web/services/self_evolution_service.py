@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +22,11 @@ from .workbench_contract_service import get_workbench_contract
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
+SELF_EVOLUTION_OVERVIEW_CACHE_TTL_SECONDS = 2.0
+SELF_EVOLUTION_OVERVIEW_SLOW_MS = 1000.0
+_OVERVIEW_CACHE_LOCK = threading.Lock()
+_OVERVIEW_CACHE: dict[str, Any] = {}
+_SELF_OVERVIEW_WAS_SLOW = False
 
 
 class SelfEvolutionHistoryDeleteError(ValueError):
@@ -29,9 +36,19 @@ class SelfEvolutionHistoryDeleteError(ValueError):
 def get_self_evolution_overview() -> dict[str, Any]:
     """Return current self-evolution evidence for the web surface."""
 
+    started_at = time.perf_counter()
     contract = get_workbench_contract()
     enabled = _self_evolution_enabled(contract)
     lang = get_web_language()
+    cache_key = _self_overview_cache_key(lang=lang, enabled=enabled)
+    cached = _get_self_overview_cache(cache_key)
+    if cached is not None:
+        _record_self_overview_perf(
+            duration_ms=(time.perf_counter() - started_at) * 1000,
+            cache_hit=True,
+            enabled=enabled,
+        )
+        return cached
     snapshot = (
         build_self_evolution_snapshot(project_root=PROJECT_ROOT, transaction_limit=6, recent_limit=4)
         if enabled
@@ -43,7 +60,7 @@ def get_self_evolution_overview() -> dict[str, Any]:
     recent_transactions = snapshot.get("recent_transactions", [])
     readiness = _build_readiness(lang, enabled=enabled, worktree=worktree, recent_transactions=recent_transactions)
 
-    return {
+    payload = {
         "enabled": enabled,
         "goal": str(snapshot.get("goal") or DEFAULT_SELF_EVOLUTION_GOAL),
         "readiness": readiness,
@@ -62,6 +79,98 @@ def get_self_evolution_overview() -> dict[str, Any]:
         "recentTransactions": _transaction_payloads(recent_transactions[:4]),
         "auditTail": _audit_payloads(load_self_evolution_audit_records(PROJECT_ROOT, limit=6)),
     }
+    _set_self_overview_cache(cache_key, payload)
+    _record_self_overview_perf(
+        duration_ms=(time.perf_counter() - started_at) * 1000,
+        cache_hit=False,
+        enabled=enabled,
+        recent_transaction_count=len(recent_transactions),
+        dirty_file_count=int((worktree or {}).get("dirty_file_count") or 0),
+    )
+    return json.loads(json.dumps(payload))
+
+
+def invalidate_self_evolution_overview_cache() -> None:
+    with _OVERVIEW_CACHE_LOCK:
+        _OVERVIEW_CACHE.clear()
+
+
+def _self_overview_cache_key(*, lang: str, enabled: bool) -> str:
+    return "|".join(
+        (
+            str(PROJECT_ROOT.resolve()),
+            str(lang or "").strip(),
+            "enabled" if enabled else "disabled",
+        )
+    )
+
+
+def _get_self_overview_cache(cache_key: str) -> dict[str, Any] | None:
+    now = time.monotonic()
+    with _OVERVIEW_CACHE_LOCK:
+        cached_key = str(_OVERVIEW_CACHE.get("key") or "")
+        if cached_key != cache_key:
+            return None
+        cached_at = _OVERVIEW_CACHE.get("cached_at")
+        try:
+            age_seconds = now - float(cached_at)
+        except (TypeError, ValueError):
+            return None
+        if age_seconds < 0 or age_seconds > SELF_EVOLUTION_OVERVIEW_CACHE_TTL_SECONDS:
+            return None
+        payload = _OVERVIEW_CACHE.get("payload")
+        if not isinstance(payload, dict):
+            return None
+        return json.loads(json.dumps(payload))
+
+
+def _set_self_overview_cache(cache_key: str, payload: dict[str, Any]) -> None:
+    with _OVERVIEW_CACHE_LOCK:
+        _OVERVIEW_CACHE.clear()
+        _OVERVIEW_CACHE.update(
+            {
+                "key": cache_key,
+                "cached_at": time.monotonic(),
+                "payload": json.loads(json.dumps(payload)),
+            }
+        )
+
+
+def _record_self_overview_perf(
+    *,
+    duration_ms: float,
+    cache_hit: bool,
+    enabled: bool,
+    recent_transaction_count: int = 0,
+    dirty_file_count: int = 0,
+) -> None:
+    global _SELF_OVERVIEW_WAS_SLOW
+    is_slow = duration_ms >= SELF_EVOLUTION_OVERVIEW_SLOW_MS
+    should_record = is_slow or (_SELF_OVERVIEW_WAS_SLOW and not is_slow)
+    _SELF_OVERVIEW_WAS_SLOW = is_slow
+    if not should_record:
+        return
+    try:
+        from core.web.services.runtime_scene_service import record_runtime_scene_event
+
+        record_runtime_scene_event(
+            "self_evolution",
+            "overview",
+            "self_evolution.overview.perf",
+            message="Self-evolution overview request performance changed.",
+            level="warning" if is_slow else "info",
+            outcome="slow" if is_slow else "recovered",
+            fields={
+                "durationMs": round(float(duration_ms), 1),
+                "cacheHit": bool(cache_hit),
+                "enabled": bool(enabled),
+                "recentTransactionCount": int(recent_transaction_count),
+                "dirtyFileCount": int(dirty_file_count),
+                "cacheTtlMs": int(round(SELF_EVOLUTION_OVERVIEW_CACHE_TTL_SECONDS * 1000)),
+            },
+        )
+    except Exception:
+        return
 
 
 def get_self_evolution_light_overview() -> dict[str, Any]:
@@ -168,6 +277,7 @@ def delete_self_evolution_history_groups(txn_ids: list[str]) -> dict[str, Any]:
     deleted_group_count = _delete_transaction_groups(PROJECT_ROOT, normalized_ids)
     deleted_audit_count = _delete_audit_groups(PROJECT_ROOT, normalized_ids)
     deleted_txn_ids = [txn_id for txn_id in normalized_ids if txn_id not in blocked_ids]
+    invalidate_self_evolution_overview_cache()
     return {
         "requestedCount": len(normalized_ids),
         "deletedGroupCount": deleted_group_count,
