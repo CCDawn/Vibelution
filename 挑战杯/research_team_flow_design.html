@@ -71,7 +71,7 @@
       <path marker-end="url(#arrow-main)" d="M 1035 500 H 1200"></path>
       <path class="dashed" marker-end="url(#arrow-draft)" d="M 1310 540 V 585"></path>
     </svg>
-    <a class="graph-node done" style="--x:160px; --y:150px;" href="research_flow_pages/01-source-workspace.html">
+    <a class="graph-node active" style="--x:160px; --y:150px;" href="research_flow_pages/01-source-workspace.html">
     <span class="graph-id">01</span>
     <h3>资料进入工作区</h3>
   </a>
@@ -83,11 +83,11 @@
     <span class="graph-id">03</span>
     <h3>提取 neuro_mechanism</h3>
   </a>
-    <a class="graph-node draft" style="--x:1310px; --y:150px;" href="research_flow_pages/04-mechanism-mapping.html">
+    <a class="graph-node active" style="--x:1310px; --y:150px;" href="research_flow_pages/04-mechanism-mapping.html">
     <span class="graph-id">04</span>
     <h3>机制到计算抽象</h3>
   </a>
-    <a class="graph-node done" style="--x:1700px; --y:150px;" href="research_flow_pages/05-algorithm-hypothesis.html">
+    <a class="graph-node active" style="--x:1700px; --y:150px;" href="research_flow_pages/05-algorithm-hypothesis.html">
     <span class="graph-id">05</span>
     <h3>生成 algorithm_hypothesis</h3>
   </a>
@@ -95,7 +95,7 @@
     <span class="graph-id">06</span>
     <h3>科研审稿</h3>
   </a>
-    <a class="graph-node done" style="--x:1090px; --y:320px;" href="research_flow_pages/07-steward-ingestion.html">
+    <a class="graph-node active" style="--x:1090px; --y:320px;" href="research_flow_pages/07-steward-ingestion.html">
     <span class="graph-id">07</span>
     <h3>知识治理入库</h3>
   </a>
@@ -309,6 +309,153 @@
 
     <section class="section">
       <div class="section-head">
+        <h2>当前运行状态</h2>
+        <p class="hint">候选搜集与首轮提炼已完成，等待筛选/治理 · 2026-06-08 09:30 CST</p>
+      </div>
+      <div class="runbook-card" style="margin-bottom: 12px;">
+        <h2>神经学启发神经网络算法 第一轮知识搜集</h2>
+        <div class="artifact-table">
+          <div class="service-row"><b>团队</b><span>ai科学研究团队 / research-team</span></div>
+          <div class="service-row"><b>runId</b><span>dprun-20260608011547474702-cd912a0c</span></div>
+          <div class="service-row"><b>searchPlanId</b><span>searchplan-20260608011547-b004500d</span></div>
+        </div>
+      </div>
+      <div class="agent-matrix">
+        <div class="feature-row">
+              <strong>DataProcessingRun</strong>
+              <b class="status-pill partial">4 个 assignment 完成</b>
+              <span>data_discovery、source_acquisition、content_extraction、source_quality 均已提交输出。</span>
+            </div>
+<div class="feature-row">
+              <strong>DataRecord</strong>
+              <b class="status-pill partial">10 条 collected</b>
+              <span>全部带 sourceRef、summary、qualitySignals、collectionTrace。</span>
+            </div>
+<div class="feature-row">
+              <strong>source_manifest</strong>
+              <b class="status-pill partial">10 个 source_registered</b>
+              <span>全部为 candidate-only，qualityStatus=pending_screening。</span>
+            </div>
+<div class="feature-row">
+              <strong>mechanism_mapping</strong>
+              <b class="status-pill partial">1 个 mechanism_mapping_candidate</b>
+              <span>服务层校验通过，qualityStatus=prefiltered。</span>
+            </div>
+<div class="feature-row">
+              <strong>algorithm_hypothesis</strong>
+              <b class="status-pill partial">1 个 hypothesis_candidate</b>
+              <span>PER-NN v0 草稿，含 baseline、成本、实验计划。</span>
+            </div>
+<div class="feature-row">
+              <strong>candidate_graph</strong>
+              <b class="status-pill partial">1 个 candidate_graph_visible</b>
+              <span>12 nodes / 1 edge / 6 missing links，qualityStatus=broken_links。</span>
+            </div>
+<div class="feature-row">
+              <strong>knowledge_ingestion_status</strong>
+              <b class="status-pill partial">needs_review</b>
+              <span>正式知识、RAG、正式图谱均未写入。</span>
+            </div>
+      </div>
+      <div class="runbook-grid" style="margin-top: 12px;">
+        <div class="runbook-card">
+          <h2>候选来源</h2>
+          <div class="artifact-table">
+            <div class="artifact-row">
+                  <code>predictive_coding</code>
+                  <b>Predictive coding in the visual cortex</b>
+                  <span>https://www.nature.com/articles/nn0199_79</span>
+                </div>
+<div class="artifact-row">
+                  <code>STDP</code>
+                  <b>Regulation of synaptic efficacy by coincidence of postsynaptic APs and EPSPs</b>
+                  <span>https://pure.mpg.de/pubman/faces/ViewItemFullPage.jsp?itemId=item_2095157_1</span>
+                </div>
+<div class="artifact-row">
+                  <code>dendritic_credit_assignment</code>
+                  <b>Dendritic cortical microcircuits approximate the backpropagation algorithm</b>
+                  <span>https://papers.nips.cc/paper/8089-dendritic-cortical-microcircuits-approximate-the-backpropagation-algorithm</span>
+                </div>
+<div class="artifact-row">
+                  <code>hippocampal_replay</code>
+                  <b>Prioritized memory access explains planning and hippocampal replay</b>
+                  <span>https://www.nature.com/articles/s41593-018-0232-z</span>
+                </div>
+<div class="artifact-row">
+                  <code>spiking_recurrent_eligibility</code>
+                  <b>A solution to the learning dilemma for recurrent networks of spiking neurons</b>
+                  <span>https://www.nature.com/articles/s41467-020-17236-y</span>
+                </div>
+<div class="artifact-row">
+                  <code>surrogate_gradient_spiking_learning</code>
+                  <b>SuperSpike: Supervised Learning in Multilayer Spiking Neural Networks</b>
+                  <span>https://pmc.ncbi.nlm.nih.gov/articles/PMC6118408/</span>
+                </div>
+<div class="artifact-row">
+                  <code>neuromodulation_metalearning</code>
+                  <b>Metalearning and neuromodulation</b>
+                  <span>https://www.sciencedirect.com/science/article/pii/S0893608002000448</span>
+                </div>
+<div class="artifact-row">
+                  <code>feedback_alignment</code>
+                  <b>Random synaptic feedback weights support error backpropagation for deep learning</b>
+                  <span>https://www.nature.com/articles/ncomms13276</span>
+                </div>
+<div class="artifact-row">
+                  <code>predictive_coding_review</code>
+                  <b>Predictive Coding Theories of Cortical Function</b>
+                  <span>https://arxiv.org/abs/2112.10048</span>
+                </div>
+<div class="artifact-row">
+                  <code>neuroscience_to_ai_review</code>
+                  <b>Neuroscience-Inspired Artificial Intelligence</b>
+                  <span>https://www.cell.com/neuron/abstract/S0896-6273(17)30509-3</span>
+                </div>
+          </div>
+        </div>
+        <div class="runbook-card">
+          <h2>候选提炼</h2>
+          <div class="artifact-table">
+            <div class="artifact-row">
+                  <code>local-model-output-20260608013004-519ff308</code>
+                  <b>神经机制到算法计算抽象候选映射 v0.1</b>
+                  <span>mechanism_mapping_candidate</span>
+                </div>
+<div class="artifact-row">
+                  <code>local-model-output-20260608013004-ee7b3a0e</code>
+                  <b>PER-NN 神经启发网络算法假设草稿 v0.1</b>
+                  <span>hypothesis_candidate</span>
+                </div>
+<div class="artifact-row">
+                  <code>candidate-graph-20260608013548-7a180786</code>
+                  <b>First source collection candidate graph preview</b>
+                  <span>candidate_graph_visible / broken_links</span>
+                </div>
+          </div>
+          <h2 style="margin-top: 14px;">正式边界</h2>
+          <div class="checklist">
+            <span>candidateStoreOfficialState=candidate_only_until_steward_approval</span>
+<span>formalKnowledgeItemCreated=false</span>
+<span>writesOfficialKnowledge=false</span>
+<span>writesOfficialRag=false</span>
+<span>writesOfficialGraph=false</span>
+<span>graphStatus=candidate_graph_preview_only</span>
+          </div>
+          <h2 style="margin-top: 14px;">下一步</h2>
+          <div class="checklist">
+            <span>资料质量评估 Agent 对 10 条 source_manifest 做可靠性、可访问性、相关性筛选。</span>
+<span>内容抽取 Agent 为通过筛选的来源补 page/citation anchors，生成 paper_note 草稿。</span>
+<span>候选图谱需要修复 missing links；当前 status actionItems 指向 repair_candidate_graph_links 与 run_review_prefilter。</span>
+<span>知识治理 Agent 只能在 review/steward pack 完成后生成待审入库包，不能直接正式入库。</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+
+
+    <section class="section">
+      <div class="section-head">
         <h2>可实施技术蓝图</h2>
         <p class="hint">复用 Vibelution 现有 Research、Team Knowledge、RAG、Knowledge Steward 和 Memory Graph 能力，把 01-09 做成可运行 MVP。 详细方案见 <a href="technical_implementation_plan.md">technical_implementation_plan.md</a>。</p>
       </div>
@@ -320,7 +467,7 @@
           <div class="service-row"><b>团队群聊</b><span>room-20260529-090009-757107-6a747d62 · research_coordination</span></div>
           <div class="service-row"><b>流程文件</b><span>workspace/teams/research-team/workflow_orchestration.json</span></div>
           <div class="service-row"><b>候选仓库</b><span>workspace/teams/research-team/candidate_store/index.json</span></div>
-          <div class="service-row"><b>策略</b><span>挑战杯科研流程直接绑定当前 Vibelution ai科学研究团队，不另建新团队；团队成员仍来自现有科研组织架构。</span></div>
+          <div class="service-row"><b>策略</b><span>挑战杯科研流程直接绑定当前 Vibelution ai科学研究团队，不另建新团队；团队页面对 research-team 使用科研流程索引优先布局，组织画布仅作为附属结构视图。</span></div>
         </div>
       </div>
       <div class="runbook-grid">
@@ -345,7 +492,7 @@
                 </div>
 <div class="service-row">
                   <strong>团队沟通复用层</strong>
-                  <span>复用 Team registry、Team canvas、linkedChatRoom、ChatRoom round 和 research_coordination purpose；Team 页面已新增科研流程只读面板。</span>
+                  <span>复用 Team registry、Team canvas、linkedChatRoom、ChatRoom round 和 research_coordination purpose；research-team 团队页面已改为科研流程索引优先，组织画布作为附属节点进入。</span>
                 </div>
 <div class="service-row">
                   <strong>研究编排复用层</strong>
@@ -385,8 +532,8 @@
                   <span>已落地：/api/teams/{team_id}/workflow-orchestration、source-collection-runs（含 searchPlan/querySeeds/assignedQueries/resultWritebackContract）、candidates/source、data-processing/runs/{runId}/records/{recordId}/source-candidate、candidates/{candidate_id}/source-extraction、candidates/{candidate_id}/paper-note-draft、candidates、candidates/validation、candidate-graph、transfers、decide、knowledge-ingestion/status、coordination/status；coordination/status 返回 communicationBrief 但不发送消息。</span>
                 </div>
 <div class="service-row">
-                  <b>TeamsRoute workflow panel</b>
-                  <span>已落地只读入口：research-team 右侧 inspector 展示 workflow 当前阶段、candidateStore 摘要、coordination queue、communicationBrief、knowledge ingestion status、validationSummary、候选图谱和最近候选，不做状态写操作。</span>
+                  <b>TeamsRoute workflow workspace</b>
+                  <span>已落地只读入口：research-team 使用科研流程索引优先布局，主区域展示 workflow 当前阶段、candidateStore 摘要、coordination queue、communicationBrief、knowledge ingestion status、validationSummary、候选图谱、最近候选和团队沟通；组织画布仅在点击索引后作为附属视图显示，不做状态写操作。</span>
                 </div>
 <div class="service-row">
                   <b>local_research_worker_model</b>
@@ -816,9 +963,9 @@
             </div>
 <div class="blueprint-row">
               <b>M0.1</b>
-              <strong>Team 页面科研流程面板</strong>
-              <span>已在 Teams 工作台为 research-team / 科研组织团队读取 TeamWorkflowOrchestration、最近 CandidateStore 候选和知识入库状态，展示当前阶段、候选数、活跃项、校验摘要、最近候选、入库状态漏斗、actionItems 和 officialBoundary。</span>
-              <span>只读展示，不触发状态转移、审批、正式 Team Knowledge/RAG/图谱写入；普通非科研团队不会被动初始化挑战杯 workflow。</span>
+              <strong>Team 页面科研流程入口</strong>
+              <span>已在 Teams 工作台为 research-team / 科研组织团队读取 TeamWorkflowOrchestration、最近 CandidateStore 候选和知识入库状态；当前改为科研流程索引优先，默认展示流程总览、协调队列、入库漏斗、候选图谱、候选资料和团队沟通，组织画布作为附属索引视图。</span>
+              <span>只读展示，不触发状态转移、审批、正式 Team Knowledge/RAG/图谱写入；普通非科研团队保持原画布优先布局，不被动初始化挑战杯 workflow。</span>
             </div>
 <div class="blueprint-row">
               <b>M0.5</b>
@@ -1490,7 +1637,7 @@
                 <span class="num">01</span>
                 <h3>资料进入工作区</h3>
                 <p>建立稳定证据源，并把本地 PDF 转成可引用的页码锚点。</p>
-                <div class="tag-row"><span class="tag done">source-extraction 已落地</span><span class="tag">Source Intake Agent</span></div>
+                <div class="tag-row"><span class="tag active">第一轮资料搜集已跑通</span><span class="tag">Source Intake Agent</span></div>
               </a>
 <a class="node-card" href="research_flow_pages/02-paper-note.html">
                 <span class="num">02</span>
@@ -1508,13 +1655,13 @@
                 <span class="num">04</span>
                 <h3>机制到计算抽象</h3>
                 <p>把神经机制转为工程上能讨论的抽象层。</p>
-                <div class="tag-row"><span class="tag draft">半规划</span><span class="tag">Mechanism Mapping Agent</span></div>
+                <div class="tag-row"><span class="tag active">首版候选映射已生成</span><span class="tag">Mechanism Mapping Agent</span></div>
               </a>
 <a class="node-card" href="research_flow_pages/05-algorithm-hypothesis.html">
                 <span class="num">05</span>
                 <h3>生成 algorithm_hypothesis</h3>
                 <p>把机制启发收束为可验证算法假设。</p>
-                <div class="tag-row"><span class="tag done">已规划</span><span class="tag">Algorithm Hypothesis Agent</span></div>
+                <div class="tag-row"><span class="tag active">首版算法假设已生成</span><span class="tag">Algorithm Hypothesis Agent</span></div>
               </a>
 <a class="node-card" href="research_flow_pages/06-research-review.html">
                 <span class="num">06</span>
@@ -1526,7 +1673,7 @@
                 <span class="num">07</span>
                 <h3>知识治理入库</h3>
                 <p>steward_pack_draft 可提交到 Team Knowledge 待审队列，且团队可读取知识入库状态漏斗。</p>
-                <div class="tag-row"><span class="tag done">M6 状态总览与协调队列已落地</span><span class="tag">Knowledge Steward Agent · agent-knowledge-steward</span></div>
+                <div class="tag-row"><span class="tag active">待知识治理审查</span><span class="tag">Knowledge Steward Agent · agent-knowledge-steward</span></div>
               </a>
 <a class="node-card" href="research_flow_pages/08-candidate-graph.html">
                 <span class="num">08</span>

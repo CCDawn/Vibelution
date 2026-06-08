@@ -11,8 +11,8 @@ const nodes = [
     id: "01",
     slug: "source-workspace",
     title: "资料进入工作区",
-    status: "source-extraction 已落地",
-    statusKind: "done",
+    status: "第一轮资料搜集已跑通",
+    statusKind: "active",
     role: "Source Intake Agent",
     summary: "建立稳定证据源，并把本地 PDF 转成可引用的页码锚点。",
     objective: "把用户提供的论文、PDF、赛题文件和补充资料登记为可追溯输入。",
@@ -76,8 +76,8 @@ const nodes = [
     id: "04",
     slug: "mechanism-mapping",
     title: "机制到计算抽象",
-    status: "半规划",
-    statusKind: "draft",
+    status: "首版候选映射已生成",
+    statusKind: "active",
     role: "Mechanism Mapping Agent",
     summary: "把神经机制转为工程上能讨论的抽象层。",
     objective: "建立从神经科学机制到神经网络设计空间的可审查映射。",
@@ -97,8 +97,8 @@ const nodes = [
     id: "05",
     slug: "algorithm-hypothesis",
     title: "生成 algorithm_hypothesis",
-    status: "已规划",
-    statusKind: "done",
+    status: "首版算法假设已生成",
+    statusKind: "active",
     role: "Algorithm Hypothesis Agent",
     summary: "把机制启发收束为可验证算法假设。",
     objective: "生成包含 baseline、实验计划、风险和计算成本的算法候选。",
@@ -141,8 +141,8 @@ const nodes = [
     id: "07",
     slug: "steward-ingestion",
     title: "知识治理入库",
-    status: "M6 状态总览与协调队列已落地",
-    statusKind: "done",
+    status: "待知识治理审查",
+    statusKind: "active",
     role: "Knowledge Steward Agent · agent-knowledge-steward",
     summary: "steward_pack_draft 可提交到 Team Knowledge 待审队列，且团队可读取知识入库状态漏斗。",
     objective: "把待治理候选整理为可审查的 SourceArtifact、pending RefinementProposal 和可选 pending ratingSuggestion。",
@@ -457,14 +457,17 @@ const implementationBlueprint = {
     chatRoomPurpose: "research_coordination",
     workflowPath: "workspace/teams/research-team/workflow_orchestration.json",
     candidateStorePath: "workspace/teams/research-team/candidate_store/index.json",
-    note: "挑战杯科研流程直接绑定当前 Vibelution ai科学研究团队，不另建新团队；团队成员仍来自现有科研组织架构。",
+    note: "挑战杯科研流程直接绑定当前 Vibelution ai科学研究团队，不另建新团队；团队页面对 research-team 使用科研流程索引优先布局，组织画布仅作为附属结构视图。",
+    workspaceEntry: "/teams?team=research-team",
+    defaultView: "科研流程索引优先：科研总览、团队协调、知识入库、候选图谱、候选资料、团队沟通。",
+    canvasView: "组织画布保留可编辑能力，但只有点击“组织画布”索引后显示；普通团队仍保持画布优先布局。",
   },
   architecture: [
     ["通用数据处理底座", "新增 data_processing_service 首切，提供 profile/run/record/collection assignment/output/status；用于资料搜集与筛选前置，不绑定科研特定 schema。"],
     ["Team 编排状态机", "已新增 TeamWorkflowOrchestration 后端切片，首期启用 challenge_cup_research。"],
     ["候选资料工作区", "已新增 Team 级 CandidateStore 最小索引，保存正式平台尚不能表达的候选中间态。"],
     ["本地研究工作模型层", "接入 bossAGI-standard / qwen3.5-9b（OpenAI-compatible，32k）作为候选生成和预审模型，不作为最终裁决或正式入库模型。"],
-    ["团队沟通复用层", "复用 Team registry、Team canvas、linkedChatRoom、ChatRoom round 和 research_coordination purpose；Team 页面已新增科研流程只读面板。"],
+    ["团队沟通复用层", "复用 Team registry、Team canvas、linkedChatRoom、ChatRoom round 和 research_coordination purpose；research-team 团队页面已改为科研流程索引优先，组织画布作为附属节点进入。"],
     ["研究编排复用层", "复用 research_service、research flow canvas、prompt-research-* 和研究组织治理工具。"],
     ["候选状态机", "新增轻量校验脚本约束 source_registered -> official_synced，不替代现有 runtime 状态系统。"],
     ["记忆平台复用层", "复用 SourceArtifact、RefinementProposal、IngestionPackage、KnowledgeItem、Trace 和 agent-knowledge-steward。"],
@@ -472,7 +475,7 @@ const implementationBlueprint = {
   ],
   milestones: [
     ["M0", "Team 编排后端切片", "已新增 workflow_orchestration.json、candidate_store/index.json、transfer_records.jsonl 和 API。", "能创建 challenge_cup_research 编排、登记资料候选、提交转移请求，并由 Research Coordination Agent 裁决。"],
-    ["M0.1", "Team 页面科研流程面板", "已在 Teams 工作台为 research-team / 科研组织团队读取 TeamWorkflowOrchestration、最近 CandidateStore 候选和知识入库状态，展示当前阶段、候选数、活跃项、校验摘要、最近候选、入库状态漏斗、actionItems 和 officialBoundary。", "只读展示，不触发状态转移、审批、正式 Team Knowledge/RAG/图谱写入；普通非科研团队不会被动初始化挑战杯 workflow。"],
+    ["M0.1", "Team 页面科研流程入口", "已在 Teams 工作台为 research-team / 科研组织团队读取 TeamWorkflowOrchestration、最近 CandidateStore 候选和知识入库状态；当前改为科研流程索引优先，默认展示流程总览、协调队列、入库漏斗、候选图谱、候选资料和团队沟通，组织画布作为附属索引视图。", "只读展示，不触发状态转移、审批、正式 Team Knowledge/RAG/图谱写入；普通非科研团队保持原画布优先布局，不被动初始化挑战杯 workflow。"],
     ["M0.5", "本地研究工作模型接线", "已新增 Local Research Worker Model 任务包、32k 上下文预算、JSON 输出校验、草稿记录和 invoke API；bossAGI-standard / qwen3.5-9b 通过临时 model_ref profile 调用，解析失败不写 CandidateStore。", "能为资料初筛、paper_note 草稿、neuro_mechanism 候选、algorithm_hypothesis 草稿和 review prefilter 构建任务包，调用本地模型，并把合格 JSON 草稿写入 CandidateStore。"],
     ["M1", "候选数据基座", "已新增 CandidateStore 列表查询、校验报告、source_manifest/PDF 最小字段校验和本地 PDF source-extraction API；PDF 缺路径、sha256、allowedForAnalysis=true 或抽取失败会进入 source_needs_confirmation。", "能登记 PDF source_manifest，按 candidateType/currentState/qualityStatus 查询候选，抽取 sha256/pageAnchors/excerpt，并查看 invalid/error/warning 统计；仍不写正式 Team Knowledge/RAG/知识图谱。"],
     ["M2", "paper_note 与 PDF 锚点", "已新增 paper_note 输出契约与 Citation Anchor 校验，并接入 sourceExtraction -> paper_note_draft 自动草稿桥：本地 PDF pageAnchors/excerpt 会被转为 sourceRefs/evidenceRefs/excerpt 后调用本地模型。", "合格本地模型输出进入 paper_note_draft；缺 citation/page anchor 时进入 paper_note_needs_revision，不能自然推进到 mechanism_candidate；长文拆分和多草稿合并仍待接。"],
@@ -508,7 +511,7 @@ const implementationBlueprint = {
     ["data_processing API", "已落地：/api/data-processing/profiles、runs 创建/列表/详情、records、collection-assignments、outputs、status；供数据搜集类 Agent 领取任务和回写结果。"],
     ["team_workflow_orchestration_service", "已落地：Team 级 workflowOrchestration、CandidateStore、transfer request/decision、source-collection run 启动、DataSearchPlan/query seed 契约，以及 DataRecord -> source_manifest 幂等导入桥。"],
     ["team_workflows API", "已落地：/api/teams/{team_id}/workflow-orchestration、source-collection-runs（含 searchPlan/querySeeds/assignedQueries/resultWritebackContract）、candidates/source、data-processing/runs/{runId}/records/{recordId}/source-candidate、candidates/{candidate_id}/source-extraction、candidates/{candidate_id}/paper-note-draft、candidates、candidates/validation、candidate-graph、transfers、decide、knowledge-ingestion/status、coordination/status；coordination/status 返回 communicationBrief 但不发送消息。"],
-    ["TeamsRoute workflow panel", "已落地只读入口：research-team 右侧 inspector 展示 workflow 当前阶段、candidateStore 摘要、coordination queue、communicationBrief、knowledge ingestion status、validationSummary、候选图谱和最近候选，不做状态写操作。"],
+    ["TeamsRoute workflow workspace", "已落地只读入口：research-team 使用科研流程索引优先布局，主区域展示 workflow 当前阶段、candidateStore 摘要、coordination queue、communicationBrief、knowledge ingestion status、validationSummary、候选图谱、最近候选和团队沟通；组织画布仅在点击索引后作为附属视图显示，不做状态写操作。"],
     ["local_research_worker_model", "已落地任务包构建、32k 上下文预算、统一 LLMClient invoke、JSON 提取/校验和 CandidateStore 草稿记录；解析失败不入库。"],
     ["team_communication_binding", "复用 Research Organization 通信边、Team linkedChatRoom、round_robin/opportunistic 群聊轮次。"],
     ["candidate_store", "已落地 Team 级 index、候选列表查询、按类型/状态过滤、validationSummary，并接入 source_manifest、paper_note、neuro_mechanism、mechanism_mapping、algorithm_hypothesis、candidate_graph 最小校验；rejected 候选保留在 CandidateStore metadata.rejectionArchive，但不进入候选图谱推进节点。"],
@@ -663,6 +666,55 @@ const implementationBlueprint = {
     ["知识入库状态总览", "/api/teams/{teamId}/workflow-orchestration/knowledge-ingestion/status", "只读聚合 source_collection、candidate_screening、steward_pack、knowledge_review、official_sync 状态；Teams 工作台已展示漏斗、actionItems 与 officialBoundary；不写正式知识、不写 RAG、不生成候选图快照。"],
     ["candidate_graph 预览", "CandidateStore candidate_graph snapshot", "POST candidate-graph 会从当前未归档候选重建 candidate_only 图谱，输出 nodes/edges/missingLinks/unreviewedNodes/archivedCandidateCount/officialBoundary；断链时 qualityStatus=broken_links。"],
     ["验证", "tests/test_data_processing_service.py + tests/test_data_processing_routes.py + tests/test_team_workflow_orchestration_service.py + tests/test_team_workflow_routes.py", "覆盖通用数据处理首切、source-collection run 启动、DataSearchPlan/query seed 契约、DataRecord 导入 source_manifest、主路径、非 ownerAgent 不能写最终状态、本地模型任务包、输出校验和知识入库状态总览。"],
+  ],
+};
+
+const currentResearchRun = {
+  title: "神经学启发神经网络算法 第一轮知识搜集",
+  runId: "dprun-20260608011547474702-cd912a0c",
+  searchPlanId: "searchplan-20260608011547-b004500d",
+  status: "候选搜集与首轮提炼已完成，等待筛选/治理",
+  updatedAt: "2026-06-08 09:30 CST",
+  team: "ai科学研究团队 / research-team",
+  flowState: [
+    ["DataProcessingRun", "4 个 assignment 完成", "data_discovery、source_acquisition、content_extraction、source_quality 均已提交输出。"],
+    ["DataRecord", "10 条 collected", "全部带 sourceRef、summary、qualitySignals、collectionTrace。"],
+    ["source_manifest", "10 个 source_registered", "全部为 candidate-only，qualityStatus=pending_screening。"],
+    ["mechanism_mapping", "1 个 mechanism_mapping_candidate", "服务层校验通过，qualityStatus=prefiltered。"],
+    ["algorithm_hypothesis", "1 个 hypothesis_candidate", "PER-NN v0 草稿，含 baseline、成本、实验计划。"],
+    ["candidate_graph", "1 个 candidate_graph_visible", "12 nodes / 1 edge / 6 missing links，qualityStatus=broken_links。"],
+    ["knowledge_ingestion_status", "needs_review", "正式知识、RAG、正式图谱均未写入。"],
+  ],
+  sources: [
+    ["Predictive coding in the visual cortex", "predictive_coding", "https://www.nature.com/articles/nn0199_79"],
+    ["Regulation of synaptic efficacy by coincidence of postsynaptic APs and EPSPs", "STDP", "https://pure.mpg.de/pubman/faces/ViewItemFullPage.jsp?itemId=item_2095157_1"],
+    ["Dendritic cortical microcircuits approximate the backpropagation algorithm", "dendritic_credit_assignment", "https://papers.nips.cc/paper/8089-dendritic-cortical-microcircuits-approximate-the-backpropagation-algorithm"],
+    ["Prioritized memory access explains planning and hippocampal replay", "hippocampal_replay", "https://www.nature.com/articles/s41593-018-0232-z"],
+    ["A solution to the learning dilemma for recurrent networks of spiking neurons", "spiking_recurrent_eligibility", "https://www.nature.com/articles/s41467-020-17236-y"],
+    ["SuperSpike: Supervised Learning in Multilayer Spiking Neural Networks", "surrogate_gradient_spiking_learning", "https://pmc.ncbi.nlm.nih.gov/articles/PMC6118408/"],
+    ["Metalearning and neuromodulation", "neuromodulation_metalearning", "https://www.sciencedirect.com/science/article/pii/S0893608002000448"],
+    ["Random synaptic feedback weights support error backpropagation for deep learning", "feedback_alignment", "https://www.nature.com/articles/ncomms13276"],
+    ["Predictive Coding Theories of Cortical Function", "predictive_coding_review", "https://arxiv.org/abs/2112.10048"],
+    ["Neuroscience-Inspired Artificial Intelligence", "neuroscience_to_ai_review", "https://www.cell.com/neuron/abstract/S0896-6273(17)30509-3"],
+  ],
+  extractedDrafts: [
+    ["local-model-output-20260608013004-519ff308", "神经机制到算法计算抽象候选映射 v0.1", "mechanism_mapping_candidate"],
+    ["local-model-output-20260608013004-ee7b3a0e", "PER-NN 神经启发网络算法假设草稿 v0.1", "hypothesis_candidate"],
+    ["candidate-graph-20260608013548-7a180786", "First source collection candidate graph preview", "candidate_graph_visible / broken_links"],
+  ],
+  officialBoundary: [
+    "candidateStoreOfficialState=candidate_only_until_steward_approval",
+    "formalKnowledgeItemCreated=false",
+    "writesOfficialKnowledge=false",
+    "writesOfficialRag=false",
+    "writesOfficialGraph=false",
+    "graphStatus=candidate_graph_preview_only",
+  ],
+  nextActions: [
+    "资料质量评估 Agent 对 10 条 source_manifest 做可靠性、可访问性、相关性筛选。",
+    "内容抽取 Agent 为通过筛选的来源补 page/citation anchors，生成 paper_note 草稿。",
+    "候选图谱需要修复 missing links；当前 status actionItems 指向 repair_candidate_graph_links 与 run_review_prefilter。",
+    "知识治理 Agent 只能在 review/steward pack 完成后生成待审入库包，不能直接正式入库。",
   ],
 };
 
@@ -1267,6 +1319,74 @@ function projectAlignmentHtml() {
     .join("\n");
 }
 
+function currentResearchRunHtml() {
+  return `
+    <section class="section">
+      <div class="section-head">
+        <h2>当前运行状态</h2>
+        <p class="hint">${escapeHtml(currentResearchRun.status)} · ${escapeHtml(currentResearchRun.updatedAt)}</p>
+      </div>
+      <div class="runbook-card" style="margin-bottom: 12px;">
+        <h2>${escapeHtml(currentResearchRun.title)}</h2>
+        <div class="artifact-table">
+          <div class="service-row"><b>团队</b><span>${escapeHtml(currentResearchRun.team)}</span></div>
+          <div class="service-row"><b>runId</b><span>${escapeHtml(currentResearchRun.runId)}</span></div>
+          <div class="service-row"><b>searchPlanId</b><span>${escapeHtml(currentResearchRun.searchPlanId)}</span></div>
+        </div>
+      </div>
+      <div class="agent-matrix">
+        ${currentResearchRun.flowState
+          .map(
+            ([name, state, detail]) => `<div class="feature-row">
+              <strong>${escapeHtml(name)}</strong>
+              <b class="status-pill partial">${escapeHtml(state)}</b>
+              <span>${escapeHtml(detail)}</span>
+            </div>`,
+          )
+          .join("\n")}
+      </div>
+      <div class="runbook-grid" style="margin-top: 12px;">
+        <div class="runbook-card">
+          <h2>候选来源</h2>
+          <div class="artifact-table">
+            ${currentResearchRun.sources
+              .map(
+                ([title, mechanism, url]) => `<div class="artifact-row">
+                  <code>${escapeHtml(mechanism)}</code>
+                  <b>${escapeHtml(title)}</b>
+                  <span>${escapeHtml(url)}</span>
+                </div>`,
+              )
+              .join("\n")}
+          </div>
+        </div>
+        <div class="runbook-card">
+          <h2>候选提炼</h2>
+          <div class="artifact-table">
+            ${currentResearchRun.extractedDrafts
+              .map(
+                ([id, title, state]) => `<div class="artifact-row">
+                  <code>${escapeHtml(id)}</code>
+                  <b>${escapeHtml(title)}</b>
+                  <span>${escapeHtml(state)}</span>
+                </div>`,
+              )
+              .join("\n")}
+          </div>
+          <h2 style="margin-top: 14px;">正式边界</h2>
+          <div class="checklist">
+            ${currentResearchRun.officialBoundary.map((item) => `<span>${escapeHtml(item)}</span>`).join("\n")}
+          </div>
+          <h2 style="margin-top: 14px;">下一步</h2>
+          <div class="checklist">
+            ${currentResearchRun.nextActions.map((item) => `<span>${escapeHtml(item)}</span>`).join("\n")}
+          </div>
+        </div>
+      </div>
+    </section>
+  `;
+}
+
 function implementationBlueprintHtml() {
   return `
     <section class="section">
@@ -1499,6 +1619,8 @@ function knowledgeRunbookHtml() {
         </div>
       </div>
       </section>
+
+      ${currentResearchRunHtml()}
 
       ${implementationBlueprintHtml()}
 
