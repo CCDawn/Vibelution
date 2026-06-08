@@ -1,6 +1,6 @@
 .route {
   display: grid;
-  grid-template-rows: auto auto auto minmax(0, 1fr);
+  grid-template-rows: auto auto auto auto minmax(0, 1fr);
   height: 100%;
   min-height: 0;
   background: color-mix(in srgb, var(--surface-page) 95%, var(--bg-canvas));
@@ -109,6 +109,65 @@
   padding: 10px 12px 0;
 }
 
+.userGuide {
+  display: grid;
+  grid-template-columns: max-content minmax(132px, max-content) minmax(0, 1fr) max-content;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin: 8px 12px 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-panel) 82%, transparent);
+}
+
+.userGuide span {
+  color: var(--fg-tertiary);
+  font-size: 0.66rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.userGuide strong,
+.userGuide small,
+.userGuide em {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.userGuide strong {
+  color: var(--fg-primary);
+  font-size: 0.86rem;
+}
+
+.userGuide small {
+  color: var(--fg-secondary);
+  font-size: 0.78rem;
+  font-style: normal;
+  line-height: 1.25;
+}
+
+.userGuide em {
+  color: var(--fg-secondary);
+  font-size: 0.74rem;
+  font-style: normal;
+}
+
+.userGuide[data-tone="success"] {
+  border-color: color-mix(in srgb, var(--state-success) 38%, var(--border-soft));
+}
+
+.userGuide[data-tone="warning"] {
+  border-color: color-mix(in srgb, var(--state-warning) 42%, var(--border-soft));
+}
+
+.userGuide[data-tone="error"] {
+  border-color: color-mix(in srgb, var(--state-error) 42%, var(--border-soft));
+}
+
 .settingsStrip {
   display: grid;
   grid-template-columns:
@@ -124,6 +183,7 @@
   align-items: end;
   gap: 8px;
   min-width: 0;
+  align-self: start;
   margin: 8px 12px 0;
   padding: 8px 9px;
   border: 1px solid var(--border-soft);
@@ -726,6 +786,14 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .userGuide {
+    grid-template-columns: max-content minmax(132px, max-content) minmax(0, 1fr);
+  }
+
+  .userGuide em {
+    grid-column: 2 / -1;
+  }
+
   .settingsStrip {
     grid-template-columns: max-content max-content minmax(0, 1fr);
   }
@@ -761,6 +829,22 @@
 
   .segmentedControl {
     justify-self: flex-start;
+  }
+
+  .userGuide {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .userGuide small,
+  .userGuide em {
+    overflow: visible;
+    overflow-wrap: anywhere;
+    text-overflow: clip;
+    white-space: normal;
+  }
+
+  .userGuide em {
+    grid-column: auto;
   }
 
   .header > div:first-child {
@@ -810,6 +894,7 @@
   .guardianRow,
   .compactItem,
   .commandLine,
+  .userGuide,
   .guardStrip,
   .diagnosticsBody {
     grid-template-columns: minmax(0, 1fr);
