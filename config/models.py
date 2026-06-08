@@ -1647,6 +1647,7 @@ class WorkbenchConfig(BaseModel):
     backend_port: int = Field(default=8000, ge=1, le=65535, description="后端服务端口")
     frontend_port: int = Field(default=5173, ge=1, le=65535, description="前端开发服务端口")
     window_mode: str = Field(default="fullscreen", description="工作台窗口模式：windowed / fullscreen")
+    window_size: str = Field(default="auto", description="工作台窗口化启动尺寸：auto 或 WIDTHxHEIGHT")
 
     @field_validator("window_mode")
     @classmethod
@@ -1655,6 +1656,24 @@ class WorkbenchConfig(BaseModel):
         if value not in {"windowed", "fullscreen"}:
             raise ValueError("window_mode must be one of: windowed, fullscreen")
         return value
+
+    @field_validator("window_size")
+    @classmethod
+    def normalize_window_size(cls, v: str) -> str:
+        value = (v or "auto").strip().lower()
+        if value == "auto":
+            return value
+        if "x" not in value:
+            raise ValueError("window_size must be 'auto' or WIDTHxHEIGHT")
+        width_text, height_text = value.split("x", 1)
+        try:
+            width = int(width_text)
+            height = int(height_text)
+        except ValueError as exc:
+            raise ValueError("window_size must be 'auto' or WIDTHxHEIGHT") from exc
+        if not (320 <= width <= 7680 and 240 <= height <= 4320):
+            raise ValueError("window_size must be between 320x240 and 7680x4320")
+        return f"{width}x{height}"
 
 
 # ============================================================================

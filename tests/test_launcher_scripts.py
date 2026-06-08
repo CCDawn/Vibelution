@@ -343,6 +343,69 @@ Write-Output ([string](Resolve-ConfiguredWorkbenchWindowMode))
     return result.stdout.strip().splitlines()[-1]
 
 
+def _resolve_launcher_window_size(
+    tmp_path: Path,
+    *,
+    config_text: str,
+    env_overrides: dict[str, str] | None = None,
+) -> str:
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(config_text, encoding="utf-8")
+
+    harness_path = tmp_path / "resolve-launcher-window-size.ps1"
+    harness_path.write_text(
+        """
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$LauncherPath,
+    [Parameter(Mandatory = $true)]
+    [string]$ConfigPath
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$source = Get-Content -Raw -LiteralPath $LauncherPath
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors -and $parseErrors.Count -gt 0) {
+    throw "Launcher script parse failed: $($parseErrors[0].Message)"
+}
+
+foreach ($functionName in @("Test-WorkbenchWindowSizeValue", "ConvertTo-EdgeWindowSizeArgument", "Resolve-ConfiguredWorkbenchWindowSize")) {
+    $functionAst = $ast.Find({
+        param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+            $node.Name -eq $functionName
+    }, $true)
+    if ($null -eq $functionAst) {
+        throw "$functionName was not found."
+    }
+    . ([scriptblock]::Create($functionAst.Extent.Text))
+}
+
+Set-Variable -Name configPath -Value $ConfigPath -Scope Script
+$size = [string](Resolve-ConfiguredWorkbenchWindowSize)
+$argument = [string](ConvertTo-EdgeWindowSizeArgument -Value $size)
+Write-Output "$size|$argument"
+""".strip(),
+        encoding="utf-8",
+    )
+
+    command = [_powershell_exe(), "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(harness_path)]
+    command += ["-LauncherPath", str(LAUNCHER_SCRIPT), "-ConfigPath", str(config_path)]
+    env = os.environ.copy()
+    env.pop("VIBELUTION_WORKBENCH_WINDOW_SIZE", None)
+    env.pop("AGENT_WORKBENCH_WINDOW_SIZE", None)
+    if env_overrides:
+        env.update(env_overrides)
+
+    result = subprocess.run(command, capture_output=True, text=True, env=env, check=False, timeout=20)
+    assert result.returncode == 0, result.stderr or result.stdout
+    return result.stdout.strip().splitlines()[-1]
+
+
 def _run_desktop_entry_with_fake_launcher(
     tmp_path: Path,
     *,
@@ -770,6 +833,43 @@ def test_launcher_window_mode_ignores_invalid_values(tmp_path):
     assert resolved == "fullscreen"
 
 
+def test_launcher_window_size_defaults_to_auto(tmp_path):
+    resolved = _resolve_launcher_window_size(tmp_path, config_text="[workbench]\n")
+
+    assert resolved == "auto|"
+
+
+def test_launcher_window_size_reads_config_and_env_override(tmp_path):
+    resolved = _resolve_launcher_window_size(
+        tmp_path,
+        config_text="[workbench]\nwindow_size = \"1600x900\"\n",
+    )
+    overridden = _resolve_launcher_window_size(
+        tmp_path,
+        config_text="[workbench]\nwindow_size = \"1600x900\"\n",
+        env_overrides={"VIBELUTION_WORKBENCH_WINDOW_SIZE": "1280x800"},
+    )
+    agent_alias = _resolve_launcher_window_size(
+        tmp_path,
+        config_text="[workbench]\nwindow_size = \"auto\"\n",
+        env_overrides={"AGENT_WORKBENCH_WINDOW_SIZE": "1920x1080"},
+    )
+
+    assert resolved == "1600x900|1600,900"
+    assert overridden == "1280x800|1280,800"
+    assert agent_alias == "1920x1080|1920,1080"
+
+
+def test_launcher_window_size_ignores_invalid_values(tmp_path):
+    resolved = _resolve_launcher_window_size(
+        tmp_path,
+        config_text="[workbench]\nwindow_size = \"100x100\"\n",
+        env_overrides={"VIBELUTION_WORKBENCH_WINDOW_SIZE": "giant"},
+    )
+
+    assert resolved == "auto|"
+
+
 def test_launcher_state_save_uses_retrying_atomic_writer(tmp_path):
     result = _run_launcher_ast_harness(
         tmp_path,
@@ -1163,6 +1263,9 @@ if ($browserText -match '--kiosk') {
 if ($browserText -notmatch '--start-fullscreen' -or $browserText -notmatch 'fullscreenForced') {
     throw "Start-ManagedBrowser should request fullscreen through the managed window policy."
 }
+if ($browserText -notmatch '--window-size=\\$windowSizeArgument' -or $browserText -notmatch 'ConvertTo-EdgeWindowSizeArgument') {
+    throw "Start-ManagedBrowser should apply a persisted window_size when the workbench is windowed."
+}
 if ($browserText -notmatch 'configured_workbench_window_mode' -or $browserText -notmatch 'launcher_taskbar_windowed') {
     throw "Start-ManagedBrowser should enforce configurable Workbench mode and separate Launcher taskbar window policies."
 }
@@ -1171,6 +1274,9 @@ if ($browserText -notmatch '\\$WindowPurpose -eq "launcher_control_surface"\\) \
 }
 if ($browserText -notmatch 'configured_window_mode' -or $browserText -notmatch 'window_policy') {
     throw "Start-ManagedBrowser should log both configured and effective window policy values."
+}
+if ($browserText -notmatch 'window_size' -or $browserText -notmatch 'configured_window_size' -or $browserText -notmatch 'window_size_argument') {
+    throw "Start-ManagedBrowser should log both configured and effective window size values."
 }
 if ($browserText -notmatch 'app_chrome_theme' -or $browserText -notmatch 'app_url' -or $browserText -notmatch 'window_purpose' -or $browserText -notmatch 'window_mode' -or $browserText -notmatch 'fullscreen_forced') {
     throw "Start-ManagedBrowser should log the managed app chrome strategy."
