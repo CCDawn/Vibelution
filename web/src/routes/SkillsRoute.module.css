@@ -502,5 +502,16 @@
 
   .workspace {
     overflow: auto;
+    align-content: start;
+  }
+
+  .listPanel,
+  .detailPanel {
+    min-height: 0;
+  }
+
+  .emptyDetail {
+    min-height: 96px;
+    padding: 12px;
   }
 }

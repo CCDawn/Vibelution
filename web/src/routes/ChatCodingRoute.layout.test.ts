@@ -98,6 +98,14 @@ describe("ChatCodingRoute layout contract", () => {
     expect(conversationCssSource).toContain(".surfaceCompact .composer {\n  gap: 8px;\n  padding: 7px 11px 9px;");
   });
 
+  it("clamps responsive side panes so the center conversation remains visible near 1024px", () => {
+    expect(routeCssSource).toContain("@media (max-width: 980px)");
+    expect(routeCssSource).toContain("minmax(0, min(var(--chat-left-pane-width, 0px), 24vw))");
+    expect(routeCssSource).toContain("minmax(360px, 1fr)");
+    expect(routeCssSource).toContain("minmax(0, min(var(--chat-right-pane-width, 0px), 22vw))");
+    expect(routeCssSource).toContain("minmax(280px, 1fr)");
+  });
+
   it("compresses the left rail into primary controls plus auxiliary status groups", () => {
     expect(routeSource).toContain("styles.resourceBlock");
     expect(routeSource).toContain("styles.resourceSplit");
