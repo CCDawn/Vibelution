@@ -275,10 +275,12 @@
 
 .researchIndexPanel {
   display: grid;
-  gap: 7px;
-  padding: 8px;
-  border-top: 1px solid var(--border-soft);
-  background: color-mix(in srgb, var(--surface-panel-strong) 58%, transparent);
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border-soft);
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--accent-cool) 9%, transparent), transparent 58%),
+    color-mix(in srgb, var(--surface-panel-strong) 70%, transparent);
 }
 
 .researchIndexHeader {
@@ -288,26 +290,42 @@
   gap: 8px;
 }
 
+.researchIndexHeader div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
 .researchIndexHeader strong {
   color: var(--fg-primary);
   font-size: 0.78rem;
 }
 
-.researchIndexHeader span {
+.researchIndexHeader span,
+.researchIndexHeader small {
   color: var(--fg-muted);
   font-size: 0.66rem;
   font-weight: 740;
 }
 
+.researchIndexHeader small {
+  flex: 0 0 auto;
+}
+
 .researchIndexList {
-  display: grid;
-  gap: 5px;
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+  overflow-x: auto;
+  padding-bottom: 1px;
 }
 
 .researchIndexItem {
   display: grid;
   gap: 2px;
-  min-width: 0;
+  flex: 1 0 118px;
+  min-width: 118px;
+  max-width: 178px;
   padding: 7px 8px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
@@ -337,9 +355,9 @@
 .researchIndexItemActive {
   border-color: color-mix(in srgb, var(--accent-cool) 48%, var(--border-soft));
   background:
-    linear-gradient(90deg, color-mix(in srgb, var(--accent-cool) 14%, transparent), transparent 60%),
+    linear-gradient(180deg, color-mix(in srgb, var(--accent-cool) 14%, transparent), transparent 68%),
     color-mix(in srgb, var(--surface-panel-strong) 76%, transparent);
-  box-shadow: inset 3px 0 0 var(--accent-cool);
+  box-shadow: inset 0 -3px 0 var(--accent-cool);
 }
 
 .teamRow {
@@ -746,6 +764,10 @@
 .researchInspector .inspectorBody {
   gap: 10px;
   padding: 10px;
+}
+
+.researchInspector > .researchIndexPanel {
+  flex: 0 0 auto;
 }
 
 .inspectorBody label {
