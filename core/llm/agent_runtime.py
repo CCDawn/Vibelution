@@ -204,6 +204,7 @@ def config_for_agent_llm_model(
                     "streaming",
                     "tool_calling_mode",
                     "discovery_enabled",
+                    "prompt_cache",
                     "thinking_type",
                     "thinking_display",
                     "supports_image_input",

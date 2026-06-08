@@ -13,6 +13,7 @@ from langchain_core.messages import ToolMessage
 from core.infrastructure.workspace_manager import get_workspace
 from core.llm import get_llm_client
 from core.llm.agent_runtime import AgentLlmResolutionError, resolve_agent_llm
+from core.llm.payload_builder import prompt_cache_partition_scope
 from config.settings import get_config
 from core.web.services import agent_directory_service, agent_mode_binding_service, prompt_template_service
 
@@ -168,8 +169,18 @@ class LLMResearchAgentRunner(ResearchAgentRunner):
         client = resolved_llm["client"]
         final_payload: dict[str, Any] | None = None
         tool_call_count = 0
+        cache_partition = _research_prompt_cache_partition(session.session_id, agent_key, phase)
         for _turn in range(6):
-            response = client.invoke(messages, tools=tools, metadata={"researchAgent": agent_key, "phase": phase})
+            with prompt_cache_partition_scope(cache_partition):
+                response = client.invoke(
+                    messages,
+                    tools=tools,
+                    metadata={
+                        "researchAgent": agent_key,
+                        "phase": phase,
+                        "promptCachePartition": cache_partition,
+                    },
+                )
             calls = list(getattr(response, "tool_calls", []) or [])
             messages.append(response)
             if calls:
@@ -235,6 +246,7 @@ class LLMResearchAgentRunner(ResearchAgentRunner):
         payload, trace, profile = self._invoke_json_agent(
             "review",
             {
+                "sessionId": session.session_id,
                 "task": "Review sources and extract evidence records. Return JSON only.",
                 "openGoal": session.open_goal,
                 "constraints": session.constraints,
@@ -303,6 +315,7 @@ class LLMResearchAgentRunner(ResearchAgentRunner):
         payload, trace, profile = self._invoke_json_agent(
             "themes",
             {
+                "sessionId": session.session_id,
                 "task": f"Generate {session.candidate_count} candidate themes. Return JSON only.",
                 "openGoal": session.open_goal,
                 "constraints": session.constraints,
@@ -367,6 +380,7 @@ class LLMResearchAgentRunner(ResearchAgentRunner):
         payload, trace, profile = self._invoke_json_agent(
             "card",
             {
+                "sessionId": session.session_id,
                 "task": "Create a concept-level research theme card. Return JSON only.",
                 "openGoal": session.open_goal,
                 "constraints": session.constraints,
@@ -425,13 +439,16 @@ class LLMResearchAgentRunner(ResearchAgentRunner):
         _append_trace(trace, _trace("prompt", "读取阶段提示词", f"载入 `{profile.get('promptFilename') or ''}`，并附加结构化 JSON 输出契约。"), trace_sink)
         _append_trace(trace, _trace("input", "整理阶段输入", _payload_summary(payload)), trace_sink)
         client = resolved_llm["client"]
-        response = client.invoke(
-            [
-                {"role": "system", "content": self._system_prompt(agent_key, contract)},
-                {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
-            ],
-            metadata={"researchAgent": agent_key},
-        )
+        session_id = str(payload.get("sessionId") or "").strip()
+        cache_partition = _research_prompt_cache_partition(session_id, agent_key, "json")
+        with prompt_cache_partition_scope(cache_partition):
+            response = client.invoke(
+                [
+                    {"role": "system", "content": self._system_prompt(agent_key, contract)},
+                    {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+                ],
+                metadata={"researchAgent": agent_key, "promptCachePartition": cache_partition},
+            )
         result = _extract_json_object(str(getattr(response, "content", "") or ""))
         _append_trace(trace, _trace("agent", "Agent 输出结构化结果", _compact_json(result)), trace_sink)
         return result, trace, {
@@ -576,6 +593,16 @@ def _research_agent_profile_id(profile: dict[str, Any]) -> str:
     """Resolve the runtime LLM profile from the unified Agent profile shape."""
 
     return str(profile.get("profileId") or profile.get("llmConfigId") or "primary").strip() or "primary"
+
+
+def _research_prompt_cache_partition(session_id: str, agent_key: str, phase: str) -> str:
+    parts = [
+        "research",
+        str(session_id or "session").strip() or "session",
+        str(agent_key or "agent").strip() or "agent",
+        str(phase or "stage").strip() or "stage",
+    ]
+    return ":".join(parts)
 
 
 def _resolve_research_agent_llm(profile: dict[str, Any]) -> dict[str, Any]:
