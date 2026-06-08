@@ -228,11 +228,14 @@ h2 { margin: 0; font: 700 29px/1.15 var(--serif); }
 .workbench-grid .graph-lane.top-lane { top: 44px; }
 .workbench-grid .graph-lane.mid-lane { top: 196px; }
 .workbench-grid .graph-lane.bottom-lane { top: 354px; }
+.compact-map .graph-lane.top-lane { top: 50px; }
+.compact-map .graph-lane.mid-lane { top: 220px; }
+.compact-map .graph-lane.bottom-lane { top: 384px; }
 .graph-lane-band {
   position: absolute;
-  left: 26px;
-  right: 26px;
-  height: 116px;
+  left: 24px;
+  right: 24px;
+  height: 128px;
   background: rgba(235, 244, 240, 0.62);
   border: 1px solid rgba(46, 63, 61, 0.10);
   pointer-events: none;
@@ -240,6 +243,9 @@ h2 { margin: 0; font: 700 29px/1.15 var(--serif); }
 .graph-lane-band.top-lane { top: 38px; }
 .graph-lane-band.mid-lane { top: 190px; }
 .graph-lane-band.bottom-lane { top: 348px; }
+.compact-map .graph-lane-band.top-lane { top: 72px; height: 126px; }
+.compact-map .graph-lane-band.mid-lane { top: 242px; height: 126px; }
+.compact-map .graph-lane-band.bottom-lane { top: 404px; height: 176px; }
 .graph-lane-band.bottom-lane {
   background: rgba(250, 243, 231, 0.72);
 }
@@ -645,6 +651,10 @@ body {
 .flow-board-shell {
   min-width: 0;
 }
+.flow-board-shell.compact-map {
+  display: grid;
+  gap: 10px;
+}
 .flow-toolbar {
   justify-content: space-between;
   margin-bottom: 8px;
@@ -667,20 +677,86 @@ body {
   border-color: #a9d6c7;
 }
 .flow-board {
-  height: 560px;
-  min-height: 560px;
+  min-height: 660px;
+  padding: 14px;
   background:
     linear-gradient(90deg, rgba(21, 83, 72, 0.08) 1px, transparent 1px),
     linear-gradient(180deg, rgba(21, 83, 72, 0.06) 1px, transparent 1px),
     #fbfdf9;
   background-size: 24px 24px;
   border-color: rgba(46, 63, 61, 0.16);
+  overflow: visible;
+  cursor: default;
 }
 .flow-stage,
 .flow-graph {
-  width: 1640px;
-  height: 560px;
-  min-height: 560px;
+  width: 100%;
+  min-height: 630px;
+}
+.flow-map {
+  position: relative;
+  min-height: 630px;
+  background: rgba(255, 255, 252, 0.72);
+  border: 1px solid rgba(46, 63, 61, 0.12);
+  overflow: hidden;
+}
+.flow-map .graph-node {
+  position: absolute;
+  left: var(--x);
+  top: var(--y);
+  transform: translate(-50%, -50%);
+}
+.flow-map-lines {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 2;
+}
+.flow-map-lines path {
+  fill: none;
+  stroke: rgba(21, 83, 72, 0.54);
+  stroke-width: 3.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+.flow-map-lines path.turn {
+  stroke: rgba(21, 83, 72, 0.46);
+}
+.flow-map-lines path.dashed {
+  stroke: rgba(184, 127, 35, 0.78);
+  stroke-width: 2.8;
+  stroke-dasharray: 8 7;
+}
+.flow-arrow-tip {
+  position: absolute;
+  left: var(--x);
+  top: var(--y);
+  z-index: 2;
+  width: 0;
+  height: 0;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+.flow-arrow-tip.right {
+  border-top: 7px solid transparent;
+  border-bottom: 7px solid transparent;
+  border-left: 12px solid rgba(21, 83, 72, 0.68);
+}
+.flow-arrow-tip.left {
+  border-top: 7px solid transparent;
+  border-bottom: 7px solid transparent;
+  border-right: 12px solid rgba(21, 83, 72, 0.68);
+}
+.flow-arrow-tip.down {
+  border-left: 7px solid transparent;
+  border-right: 7px solid transparent;
+  border-top: 12px solid rgba(21, 83, 72, 0.68);
+}
+.flow-arrow-tip.dashed.left {
+  border-right-color: rgba(184, 127, 35, 0.82);
 }
 .graph-svg > path {
   stroke: rgba(21, 83, 72, 0.72);
@@ -698,16 +774,35 @@ body {
   background: rgba(255, 255, 252, 0.98);
   box-shadow: 0 10px 24px rgba(25, 41, 38, 0.13);
 }
+.flow-map .graph-node {
+  z-index: 3;
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  width: clamp(172px, 13.8vw, 210px);
+  min-height: 76px;
+}
 .graph-node .graph-id {
-  width: 34px;
-  height: 26px;
+  width: 32px;
+  height: 24px;
   margin-right: 10px;
   background: #155348;
   font-size: 12px;
 }
+.flow-map .graph-node .graph-id {
+  margin-right: 0;
+}
 .graph-node h3 {
   font-size: 17px;
   line-height: 1.34;
+}
+.flow-map .graph-node h3 {
+  display: block;
+  font-size: clamp(14px, 0.96vw, 16px);
+  line-height: 1.28;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
 }
 .graph-node.active {
   border-left-color: #155348;
@@ -719,7 +814,7 @@ body {
   border-left-color: #b87922;
 }
 .graph-node.maintenance {
-  width: 240px;
+  width: clamp(184px, 14.5vw, 220px);
   border-left-color: #555e89;
   background: #f4f5fb;
 }
@@ -906,8 +1001,7 @@ body {
     grid-template-columns: 1fr;
   }
   .flow-board {
-    height: 390px;
-    min-height: 390px;
+    min-height: 620px;
   }
   .node-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -942,6 +1036,7 @@ body {
     display: block;
   }
   .flow-board-shell,
+  .flow-board-shell.compact-map,
   .graph-legend {
     display: none;
   }

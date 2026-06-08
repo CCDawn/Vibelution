@@ -54,110 +54,107 @@
       <section id="flow-board" class="section">
         <div class="section-head">
           <h2>流程图结构</h2>
-          <p class="hint">默认用 100% 阅读模式，节点更大、泳道更清晰；横向拖动画板查看全链路，也可点击“适配全图”快速总览。</p>
+          <p class="hint">一屏展示 13 个节点、3 条泳道和返工/维护线；不需要缩放或横向拖动，点击节点进入独立计划页。</p>
         </div>
         <div class="workbench-grid">
-          <div class="flow-board-shell">
-  <div class="flow-toolbar" aria-label="画板缩放控制">
-    <div class="flow-toolbar-group">
-      <button type="button" data-zoom-out title="缩小">-</button>
-      <button type="button" data-zoom-in title="放大">+</button>
-      <button type="button" data-zoom-reset title="重置缩放">100%</button>
-      <button type="button" data-zoom-fit title="适配全图">适配全图</button>
-    </div>
-    <span class="zoom-readout" data-zoom-readout>100%</span>
-  </div>
-  <div class="flow-board" data-draggable-board aria-label="可拖动科研流程画板">
-    <div class="flow-stage" data-flow-stage>
-    <div class="flow-graph" data-flow-graph aria-label="科研流程图结构">
-    <svg class="graph-svg" viewBox="0 0 1640 560" preserveAspectRatio="none" aria-hidden="true">
-      <defs>
-        <marker id="arrow-main" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
-          <path d="M 0 0 L 10 5 L 0 10 z" fill="rgba(21, 83, 72, 0.72)"></path>
-        </marker>
-        <marker id="arrow-draft" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
-          <path d="M 0 0 L 10 5 L 0 10 z" fill="rgba(185, 129, 34, 0.8)"></path>
-        </marker>
-      </defs>
-      <path marker-end="url(#arrow-main)" d="M 265 104 H 372"></path>
-      <path marker-end="url(#arrow-main)" d="M 602 104 H 709"></path>
-      <path marker-end="url(#arrow-main)" d="M 939 104 H 1046"></path>
-      <path marker-end="url(#arrow-main)" d="M 1276 104 H 1374 V 250 H 1276"></path>
-      <path marker-end="url(#arrow-main)" d="M 1046 256 H 939"></path>
-      <path marker-end="url(#arrow-main)" d="M 709 256 H 602"></path>
-      <path marker-end="url(#arrow-main)" d="M 372 256 H 300 V 384 H 372"></path>
-      <path marker-end="url(#arrow-main)" d="M 602 414 H 709"></path>
-      <path marker-end="url(#arrow-main)" d="M 939 414 H 1046"></path>
-      <path marker-end="url(#arrow-main)" d="M 1161 456 V 499"></path>
-      <path class="dashed" marker-end="url(#arrow-draft)" d="M 1276 414 H 1458 V 146 H 1276"></path>
+          <div class="flow-board-shell compact-map">
+  <div class="flow-board" aria-label="科研流程图">
+    <div class="flow-map" aria-label="一屏完整科研流程图结构">
+    <svg class="flow-map-lines" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+      <path d="M 18.2 19 H 21.8"></path>
+      <path d="M 38.2 19 H 41.8"></path>
+      <path d="M 58.2 19 H 61.8"></path>
+      <path d="M 78.2 19 H 81.8"></path>
+      <path class="turn" d="M 90 25 V 46 H 77.8"></path>
+      <path d="M 62.2 46 H 57.8"></path>
+      <path d="M 42.2 46 H 37.8"></path>
+      <path d="M 22.2 46 H 17.8"></path>
+      <path class="turn" d="M 10 52 V 72 H 21.8"></path>
+      <path d="M 38.2 72 H 41.8"></path>
+      <path d="M 58.2 72 H 61.8"></path>
+      <path class="turn" d="M 70 78 V 82"></path>
+      <path class="dashed" d="M 79 72 H 94 V 29"></path>
+      <path class="dashed" d="M 92.5 29 H 82.8"></path>
     </svg>
+    <span class="flow-arrow-tip right" style="--x:21.8%; --y:19%;"></span>
+    <span class="flow-arrow-tip right" style="--x:41.8%; --y:19%;"></span>
+    <span class="flow-arrow-tip right" style="--x:61.8%; --y:19%;"></span>
+    <span class="flow-arrow-tip right" style="--x:81.8%; --y:19%;"></span>
+    <span class="flow-arrow-tip left" style="--x:77.8%; --y:46%;"></span>
+    <span class="flow-arrow-tip left" style="--x:57.8%; --y:46%;"></span>
+    <span class="flow-arrow-tip left" style="--x:37.8%; --y:46%;"></span>
+    <span class="flow-arrow-tip left" style="--x:17.8%; --y:46%;"></span>
+    <span class="flow-arrow-tip right" style="--x:21.8%; --y:72%;"></span>
+    <span class="flow-arrow-tip right" style="--x:41.8%; --y:72%;"></span>
+    <span class="flow-arrow-tip right" style="--x:61.8%; --y:72%;"></span>
+    <span class="flow-arrow-tip down" style="--x:70%; --y:82%;"></span>
+    <span class="flow-arrow-tip dashed left" style="--x:82.8%; --y:29%;"></span>
     <span class="graph-lane-band top-lane"></span>
     <span class="graph-lane-band mid-lane"></span>
     <span class="graph-lane-band bottom-lane"></span>
     <span class="graph-lane top-lane">资料到假设</span>
     <span class="graph-lane mid-lane">治理与图谱</span>
     <span class="graph-lane bottom-lane">实验与交付</span>
-    <a class="graph-node active" style="--x:150px; --y:104px;" href="research_flow_pages/01-source-workspace.html">
+    <a class="graph-node active" style="--x:10%; --y:19%;" href="research_flow_pages/01-source-workspace.html">
     <span class="graph-id">01</span>
-    <h3>资料进入工作区</h3>
+    <h3>资料入工作区</h3>
   </a>
-    <a class="graph-node active" style="--x:487px; --y:104px;" href="research_flow_pages/02-paper-note.html">
+    <a class="graph-node active" style="--x:30%; --y:19%;" href="research_flow_pages/02-paper-note.html">
     <span class="graph-id">02</span>
-    <h3>生成 paper_note</h3>
+    <h3>生成论文笔记</h3>
   </a>
-    <a class="graph-node done" style="--x:824px; --y:104px;" href="research_flow_pages/03-neuro-mechanism.html">
+    <a class="graph-node done" style="--x:50%; --y:19%;" href="research_flow_pages/03-neuro-mechanism.html">
     <span class="graph-id">03</span>
-    <h3>提取 neuro_mechanism</h3>
+    <h3>提取机制</h3>
   </a>
-    <a class="graph-node active" style="--x:1161px; --y:104px;" href="research_flow_pages/04-mechanism-mapping.html">
+    <a class="graph-node active" style="--x:70%; --y:19%;" href="research_flow_pages/04-mechanism-mapping.html">
     <span class="graph-id">04</span>
-    <h3>机制到计算抽象</h3>
+    <h3>机制计算抽象</h3>
   </a>
-    <a class="graph-node active" style="--x:1498px; --y:104px;" href="research_flow_pages/05-algorithm-hypothesis.html">
+    <a class="graph-node active" style="--x:90%; --y:19%;" href="research_flow_pages/05-algorithm-hypothesis.html">
     <span class="graph-id">05</span>
-    <h3>生成 algorithm_hypothesis</h3>
+    <h3>生成算法假设</h3>
   </a>
-    <a class="graph-node done" style="--x:1161px; --y:256px;" href="research_flow_pages/06-research-review.html">
-    <span class="graph-id">06</span>
-    <h3>科研审稿</h3>
+    <a class="graph-node done" style="--x:10%; --y:46%;" href="research_flow_pages/09-official-graph.html">
+    <span class="graph-id">09</span>
+    <h3>正式图谱同步</h3>
   </a>
-    <a class="graph-node active" style="--x:824px; --y:256px;" href="research_flow_pages/07-steward-ingestion.html">
+    <a class="graph-node done" style="--x:30%; --y:46%;" href="research_flow_pages/08-candidate-graph.html">
+    <span class="graph-id">08</span>
+    <h3>候选图谱</h3>
+  </a>
+    <a class="graph-node active" style="--x:50%; --y:46%;" href="research_flow_pages/07-steward-ingestion.html">
     <span class="graph-id">07</span>
     <h3>知识治理入库</h3>
   </a>
-    <a class="graph-node done" style="--x:487px; --y:256px;" href="research_flow_pages/08-candidate-graph.html">
-    <span class="graph-id">08</span>
-    <h3>候选图谱预览</h3>
+    <a class="graph-node done" style="--x:70%; --y:46%;" href="research_flow_pages/06-research-review.html">
+    <span class="graph-id">06</span>
+    <h3>科研审稿</h3>
   </a>
-    <a class="graph-node done" style="--x:150px; --y:256px;" href="research_flow_pages/09-official-graph.html">
-    <span class="graph-id">09</span>
-    <h3>正式知识图谱同步</h3>
-  </a>
-    <a class="graph-node pending" style="--x:487px; --y:414px;" href="research_flow_pages/10-experiment-loop.html">
+    <a class="graph-node pending" style="--x:30%; --y:72%;" href="research_flow_pages/10-experiment-loop.html">
     <span class="graph-id">10</span>
-    <h3>实验验证闭环</h3>
+    <h3>实验验证</h3>
   </a>
-    <a class="graph-node pending" style="--x:824px; --y:414px;" href="research_flow_pages/11-iteration-versioning.html">
+    <a class="graph-node pending" style="--x:50%; --y:72%;" href="research_flow_pages/11-iteration-versioning.html">
     <span class="graph-id">11</span>
-    <h3>持续迭代与版本化</h3>
+    <h3>迭代与版本化</h3>
   </a>
-    <a class="graph-node pending" style="--x:1161px; --y:414px;" href="research_flow_pages/12-challenge-cup-delivery.html">
+    <a class="graph-node pending" style="--x:70%; --y:72%;" href="research_flow_pages/12-challenge-cup-delivery.html">
     <span class="graph-id">12</span>
-    <h3>挑战杯交付计划</h3>
+    <h3>挑战杯交付</h3>
   </a>
-    <a class="graph-node done maintenance" style="--x:1161px; --y:528px;" href="research_flow_pages/13-flow-html-maintenance.html">
+    <a class="graph-node done maintenance" style="--x:70%; --y:88%;" href="research_flow_pages/13-flow-html-maintenance.html">
     <span class="graph-id">13</span>
-    <h3>流程 HTML 维护门禁</h3>
+    <h3>HTML 维护门禁</h3>
   </a>
-    </div>
-    </div>
   </div>
   </div>
   <div class="graph-legend">
     <span class="legend-chip"><span class="legend-line"></span>主流程依赖</span>
     <span class="legend-chip"><span class="legend-line dashed"></span>维护/迭代回写</span>
-    <span class="legend-chip">可缩放、可拖动，点击节点进入独立计划页</span>
+    <span class="legend-chip">一屏完整流程图，点击节点进入独立计划页</span>
   </div>
+</div>
           <div class="mobile-flow-list" aria-label="移动端科研流程索引">
     <a class="active" href="research_flow_pages/01-source-workspace.html">
           <b>01</b>
@@ -1847,91 +1844,5 @@
         </details>
       </section>
     </main>
-    <script>
-      (() => {
-        const board = document.querySelector("[data-draggable-board]");
-        const stage = document.querySelector("[data-flow-stage]");
-        const graph = document.querySelector("[data-flow-graph]");
-        const readout = document.querySelector("[data-zoom-readout]");
-        if (!board || !stage || !graph || !readout) return;
-        const naturalWidth = 1640;
-        const naturalHeight = 560;
-        const minZoom = 0.45;
-        const maxZoom = 1.55;
-        let zoom = 1;
-        const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
-        const renderZoom = () => {
-          stage.style.width = String(naturalWidth * zoom) + "px";
-          stage.style.height = String(naturalHeight * zoom) + "px";
-          graph.style.setProperty("--zoom", String(zoom));
-          readout.textContent = String(Math.round(zoom * 100)) + "%";
-        };
-        const setZoom = (nextZoom, anchorX = board.clientWidth / 2, anchorY = board.clientHeight / 2) => {
-          const oldZoom = zoom;
-          zoom = clamp(nextZoom, minZoom, maxZoom);
-          const worldX = (board.scrollLeft + anchorX) / oldZoom;
-          const worldY = (board.scrollTop + anchorY) / oldZoom;
-          renderZoom();
-          board.scrollLeft = worldX * zoom - anchorX;
-          board.scrollTop = worldY * zoom - anchorY;
-        };
-        const fitAll = () => {
-          const availableWidth = Math.max(1, board.clientWidth - 28);
-          const availableHeight = Math.max(1, board.clientHeight - 28);
-          setZoom(Math.min(availableWidth / naturalWidth, availableHeight / naturalHeight));
-          board.scrollLeft = 0;
-          board.scrollTop = 0;
-        };
-        document.querySelector("[data-zoom-in]")?.addEventListener("click", () => setZoom(zoom + 0.12));
-        document.querySelector("[data-zoom-out]")?.addEventListener("click", () => setZoom(zoom - 0.12));
-        document.querySelector("[data-zoom-reset]")?.addEventListener("click", () => {
-          setZoom(1);
-          board.scrollLeft = 0;
-          board.scrollTop = 0;
-        });
-        document.querySelector("[data-zoom-fit]")?.addEventListener("click", fitAll);
-        board.addEventListener("wheel", (event) => {
-          if (!event.ctrlKey && !event.metaKey) return;
-          event.preventDefault();
-          const rect = board.getBoundingClientRect();
-          const anchorX = event.clientX - rect.left;
-          const anchorY = event.clientY - rect.top;
-          setZoom(zoom + (event.deltaY < 0 ? 0.08 : -0.08), anchorX, anchorY);
-        }, { passive: false });
-        renderZoom();
-        board.scrollLeft = 0;
-        board.scrollTop = 0;
-        let dragging = false;
-        let startX = 0;
-        let startY = 0;
-        let startLeft = 0;
-        let startTop = 0;
-        board.addEventListener("pointerdown", (event) => {
-          if (event.target.closest("a")) return;
-          dragging = true;
-          startX = event.clientX;
-          startY = event.clientY;
-          startLeft = board.scrollLeft;
-          startTop = board.scrollTop;
-          board.classList.add("dragging");
-          board.setPointerCapture(event.pointerId);
-        });
-        board.addEventListener("pointermove", (event) => {
-          if (!dragging) return;
-          board.scrollLeft = startLeft - (event.clientX - startX);
-          board.scrollTop = startTop - (event.clientY - startY);
-        });
-        const stop = (event) => {
-          if (!dragging) return;
-          dragging = false;
-          board.classList.remove("dragging");
-          if (board.hasPointerCapture(event.pointerId)) {
-            board.releasePointerCapture(event.pointerId);
-          }
-        };
-        board.addEventListener("pointerup", stop);
-        board.addEventListener("pointercancel", stop);
-      })();
-    </script>
   </body>
 </html>
