@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Literal, TypedDict
 
-from config.public_config import CONFIG_PATH, load_public_config, save_public_config
+from config.public_config import CONFIG_PATH, load_public_config, public_config_hash, save_public_config
 from core.runtime_manager import ensure_daemon_running, submit_command
 from core.runtime_manager.constants import (
     EVENTS_PATH,
@@ -29,6 +29,8 @@ from core.runtime_manager.workbench_controller import _is_process_alive, observe
 
 LauncherOperation = Literal["start", "stop", "restart"]
 LauncherSupervisorOperation = Literal["supervisor_reattach"]
+RuntimeProfile = Literal["safe_local", "safe_remote", "debug", "ci"]
+UiLanguage = Literal["zh", "en"]
 WorkbenchWindowMode = Literal["fullscreen", "windowed"]
 
 ACTIVE_WORK_BLOCK_MESSAGE_RESTART = "有进行中的任务，无法重启 Vibelution。请等待任务完成或先停止任务。"
@@ -72,6 +74,8 @@ _ACTIVE_WORK_KINDS = (
     "supervised_worktree_evolution_run",
 )
 _STALE_SNAPSHOT_GRACE = timedelta(hours=6)
+_RUNTIME_PROFILES: tuple[RuntimeProfile, ...] = ("safe_local", "safe_remote", "debug", "ci")
+_UI_LANGUAGES: tuple[UiLanguage, ...] = ("zh", "en")
 _WORKBENCH_WINDOW_MODES: tuple[WorkbenchWindowMode, ...] = ("fullscreen", "windowed")
 _WORKBENCH_WINDOW_MODE_LABELS = {
     "fullscreen": {"zh": "全屏", "en": "Fullscreen"},
@@ -96,6 +100,10 @@ class LauncherActiveWorkBlocked(Exception):
         super().__init__(message)
         self.message = message
         self.active_work_runs = active_work_runs
+
+
+class LauncherSettingsConflict(ValueError):
+    """Raised when Launcher startup settings are saved from a stale config snapshot."""
 
 
 class LauncherCommandResponse(TypedDict, total=False):
@@ -153,8 +161,58 @@ def get_launcher_status() -> dict[str, Any]:
         "runtimeManager": runtime_manager,
         "lifecycleProof": lifecycle_proof,
         "settings": {
+            "startup": get_launcher_startup_settings(),
             "workbenchWindow": get_workbench_window_mode_setting(),
         },
+    }
+
+
+def get_launcher_startup_settings() -> dict[str, Any]:
+    """Return Launcher-owned startup settings that affect the next workbench start."""
+
+    public_config = _load_launcher_public_config()
+    runtime = _read_config_section(public_config, "runtime")
+    workbench = _read_config_section(public_config, "workbench")
+    ui = _read_config_section(public_config, "ui")
+    configured_window_mode = _normalize_workbench_window_mode(workbench.get("window_mode"), default="fullscreen")
+    window_env_override = _read_workbench_window_mode_env_override() or ""
+    configured_backend_port = _normalize_port(workbench.get("backend_port"), default=8000)
+    configured_frontend_port = _normalize_port(workbench.get("frontend_port"), default=5173)
+    backend_port_override = _read_port_env_override(("VIBELUTION_PORT", "AGENT_WORKBENCH_BACKEND_PORT"))
+    frontend_port_override = _read_port_env_override(("VIBELUTION_FRONTEND_PORT", "AGENT_WORKBENCH_FRONTEND_PORT"))
+    return {
+        "runtime": {
+            "profile": _normalize_runtime_profile(runtime.get("profile")),
+            "preflightDoctor": bool(runtime.get("preflight_doctor", True)),
+            "requireVenv": bool(runtime.get("require_venv", True)),
+            "profileOptions": list(_RUNTIME_PROFILES),
+        },
+        "workbench": {
+            "backendPort": configured_backend_port,
+            "frontendPort": configured_frontend_port,
+            "effectiveBackendPort": backend_port_override or configured_backend_port,
+            "effectiveFrontendPort": frontend_port_override or configured_frontend_port,
+            "backendPortEnvOverride": backend_port_override or 0,
+            "frontendPortEnvOverride": frontend_port_override or 0,
+            "windowMode": configured_window_mode,
+            "effectiveWindowMode": window_env_override or configured_window_mode,
+            "windowModeEnvOverride": window_env_override,
+            "windowModeOptions": [
+                {
+                    "mode": mode,
+                    "label": _WORKBENCH_WINDOW_MODE_LABELS[mode],
+                    "detail": _WORKBENCH_WINDOW_MODE_DETAILS[mode],
+                }
+                for mode in _WORKBENCH_WINDOW_MODES
+            ],
+        },
+        "interface": {
+            "language": _normalize_ui_language(ui.get("language")),
+            "languageOptions": list(_UI_LANGUAGES),
+        },
+        "configPath": str(CONFIG_PATH),
+        "configHash": public_config_hash(public_config),
+        "restartRequired": True,
     }
 
 
@@ -215,6 +273,65 @@ def update_workbench_window_mode(mode: str) -> dict[str, Any]:
     }
 
 
+def update_launcher_startup_settings(payload: dict[str, Any]) -> dict[str, Any]:
+    """Persist Launcher startup settings used by subsequent workbench starts."""
+
+    if not isinstance(payload, dict):
+        raise ValueError("startup settings payload must be an object")
+    public_config = load_public_config(CONFIG_PATH)
+    current_hash = public_config_hash(public_config)
+    base_hash = str(payload.get("baseHash") or "").strip()
+    if base_hash and base_hash != current_hash:
+        raise LauncherSettingsConflict("启动设置保存前配置已被其他页面或进程改动，请刷新 Launcher 后重试。")
+
+    runtime = _ensure_config_section(public_config, "runtime")
+    workbench = _ensure_config_section(public_config, "workbench")
+    ui = _ensure_config_section(public_config, "ui")
+
+    runtime_payload = payload.get("runtime", {})
+    workbench_payload = payload.get("workbench", {})
+    interface_payload = payload.get("interface", {})
+    if not isinstance(runtime_payload, dict) or not isinstance(workbench_payload, dict) or not isinstance(interface_payload, dict):
+        raise ValueError("startup settings groups must be objects")
+
+    previous = get_launcher_startup_settings()
+    if "profile" in runtime_payload:
+        runtime["profile"] = _parse_runtime_profile(runtime_payload.get("profile"))
+    if "preflightDoctor" in runtime_payload:
+        runtime["preflight_doctor"] = _parse_bool(runtime_payload.get("preflightDoctor"), label="runtime.preflightDoctor")
+    if "requireVenv" in runtime_payload:
+        runtime["require_venv"] = _parse_bool(runtime_payload.get("requireVenv"), label="runtime.requireVenv")
+    if "backendPort" in workbench_payload:
+        workbench["backend_port"] = _parse_port(workbench_payload.get("backendPort"), label="workbench.backendPort")
+    if "frontendPort" in workbench_payload:
+        workbench["frontend_port"] = _parse_port(workbench_payload.get("frontendPort"), label="workbench.frontendPort")
+    if "windowMode" in workbench_payload:
+        workbench["window_mode"] = _parse_workbench_window_mode(workbench_payload.get("windowMode"))
+    if "language" in interface_payload:
+        ui["language"] = _parse_ui_language(interface_payload.get("language"))
+
+    save_public_config(public_config, CONFIG_PATH)
+    setting = get_launcher_startup_settings()
+    _record_launcher_event(
+        "launcher.settings.startup.updated",
+        phase="settings",
+        message="Launcher startup settings updated.",
+        outcome="succeeded",
+        fields={
+            "previous": _startup_settings_event_fields(previous),
+            "current": _startup_settings_event_fields(setting),
+            "configPath": str(CONFIG_PATH),
+            "previousHash": current_hash,
+            "configHash": setting.get("configHash"),
+        },
+    )
+    return {
+        "ok": True,
+        "setting": setting,
+        "message": "启动设置已保存；下次启动或重启工作台生效。",
+    }
+
+
 def _normalize_workbench_window_mode(value: object, *, default: WorkbenchWindowMode | str = "fullscreen") -> WorkbenchWindowMode:
     normalized = str(value or "").strip().lower()
     if normalized in _WORKBENCH_WINDOW_MODES:
@@ -229,6 +346,112 @@ def _parse_workbench_window_mode(value: object) -> WorkbenchWindowMode:
         return normalized  # type: ignore[return-value]
     allowed = ", ".join(_WORKBENCH_WINDOW_MODES)
     raise ValueError(f"Unsupported Workbench window mode '{value}'. Allowed values: {allowed}.")
+
+
+def _normalize_runtime_profile(value: object) -> RuntimeProfile:
+    normalized = str(value or "safe_remote").strip().lower()
+    return normalized if normalized in _RUNTIME_PROFILES else "safe_remote"  # type: ignore[return-value]
+
+
+def _parse_runtime_profile(value: object) -> RuntimeProfile:
+    normalized = str(value or "").strip().lower()
+    if normalized in _RUNTIME_PROFILES:
+        return normalized  # type: ignore[return-value]
+    allowed = ", ".join(_RUNTIME_PROFILES)
+    raise ValueError(f"Unsupported runtime profile '{value}'. Allowed values: {allowed}.")
+
+
+def _normalize_ui_language(value: object) -> UiLanguage:
+    normalized = str(value or "zh").strip().lower()
+    return normalized if normalized in _UI_LANGUAGES else "zh"  # type: ignore[return-value]
+
+
+def _parse_ui_language(value: object) -> UiLanguage:
+    normalized = str(value or "").strip().lower()
+    if normalized in _UI_LANGUAGES:
+        return normalized  # type: ignore[return-value]
+    allowed = ", ".join(_UI_LANGUAGES)
+    raise ValueError(f"Unsupported interface language '{value}'. Allowed values: {allowed}.")
+
+
+def _parse_bool(value: object, *, label: str) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+    raise ValueError(f"{label} must be a boolean")
+
+
+def _normalize_port(value: object, *, default: int) -> int:
+    try:
+        port = int(value)
+    except (TypeError, ValueError):
+        return default
+    return port if 0 < port < 65536 else default
+
+
+def _parse_port(value: object, *, label: str) -> int:
+    try:
+        port = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{label} must be an integer port") from exc
+    if not 0 < port < 65536:
+        raise ValueError(f"{label} must be between 1 and 65535")
+    return port
+
+
+def _read_config_section(public_config: dict[str, Any], section: str) -> dict[str, Any]:
+    value = public_config.get(section) if isinstance(public_config, dict) else {}
+    return value if isinstance(value, dict) else {}
+
+
+def _ensure_config_section(public_config: dict[str, Any], section: str) -> dict[str, Any]:
+    value = public_config.get(section)
+    if isinstance(value, dict):
+        return value
+    value = {}
+    public_config[section] = value
+    return value
+
+
+def _load_launcher_public_config() -> dict[str, Any]:
+    try:
+        public_config = load_public_config(CONFIG_PATH)
+    except Exception:
+        return {}
+    return public_config if isinstance(public_config, dict) else {}
+
+
+def _read_port_env_override(env_names: tuple[str, ...]) -> int | None:
+    for env_name in env_names:
+        raw_value = str(os.environ.get(env_name) or "").strip()
+        if not raw_value:
+            continue
+        try:
+            port = _parse_port(raw_value, label=env_name)
+        except ValueError:
+            continue
+        return port
+    return None
+
+
+def _startup_settings_event_fields(setting: dict[str, Any]) -> dict[str, Any]:
+    runtime = _read_config_section(setting, "runtime")
+    workbench = _read_config_section(setting, "workbench")
+    interface = _read_config_section(setting, "interface")
+    return {
+        "runtimeProfile": runtime.get("profile"),
+        "preflightDoctor": runtime.get("preflightDoctor"),
+        "requireVenv": runtime.get("requireVenv"),
+        "backendPort": workbench.get("backendPort"),
+        "frontendPort": workbench.get("frontendPort"),
+        "windowMode": workbench.get("windowMode"),
+        "language": interface.get("language"),
+    }
 
 
 def _read_configured_workbench_window_mode() -> WorkbenchWindowMode:
