@@ -84,6 +84,20 @@ DEFAULT_TRANSACTION_PROMPT = (
     "3) 根据 lint 结果调用 close_evolution_transaction_tool 关账，成功则 status=success；"
     "4) 只做事务和验证探针，不要修改文件，不要提交 git，不要触发重启。"
 )
+TRANSACTION_HARNESS_CLOSURE_CONTRACT = (
+    "\n\n[Harness transaction closure contract]\n"
+    "- 当前任务必须完整收口：已经调用 open_evolution_transaction_tool 后，"
+    "无论验证成功、验证失败、命令不可用、工具警告还是任务不可完成，都必须调用 "
+    "close_evolution_transaction_tool 关账。\n"
+    "- 只有验证证据明确通过时，close_evolution_transaction_tool 的 status 才能是 success；"
+    "否则用 status=failed，并在 summary 中写清失败证据。\n"
+    "- 不要因为某个验证工具返回 warning/error 就直接结束回复；先关账，再给最终结论。\n"
+    "- Windows 命令必须使用当前 harness worktree 兼容的形式。优先使用 python_lint_tool，"
+    "或使用单条 pytest 命令：python -m pytest tests/test_dataset_registry.py -q。\n"
+    "- 不要使用 POSIX-only shell 片段，例如 `cd ... && ...`、`| head`、`sed`、`grep`、"
+    "`tail` 或把重定向/管道拼进验证命令。\n"
+    "- 不要提交 git，不要触发重启，不要发布或推送。"
+)
 SAFE_MODIFY_TOOL_PATH_PLACEHOLDER = "{SAFE_MODIFY_ABSOLUTE_PATH}"
 SAFE_MODIFY_PROBE_PATH = "tests/harness_safe_modify_probe.py"
 SAFE_MODIFY_MARKER = "HARNESS_SAFE_MODIFY_MARKER"
@@ -931,6 +945,10 @@ def materialize_scenario_prompt(scenario: str, prompt: Optional[str], worktree_p
     """把需要临时 worktree 绝对路径的场景 prompt 实体化。"""
     if prompt is None:
         return None
+    if scenario == "transaction":
+        if TRANSACTION_HARNESS_CLOSURE_CONTRACT in prompt:
+            return prompt
+        return f"{prompt.rstrip()}{TRANSACTION_HARNESS_CLOSURE_CONTRACT}"
     if scenario not in {"modify_rollback", "full_evolution"}:
         return prompt
     probe_path = worktree_path / SAFE_MODIFY_PROBE_PATH
