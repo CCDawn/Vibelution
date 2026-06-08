@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 import { describe, expect, it } from "vitest";
 
 import routeSource from "./LauncherRoute.tsx?raw";
@@ -8,6 +10,8 @@ import shellSource from "../app/AppShell.tsx?raw";
 import utilityMenuSource from "../app/AppShellUtilityMenu.tsx?raw";
 import launcherShellSource from "../app/LauncherShell.tsx?raw";
 import launcherShellStyles from "../app/LauncherShell.module.css";
+
+const routeStylesSource = readFileSync(new URL("./LauncherRoute.module.css", import.meta.url), "utf8");
 
 describe("LauncherRoute layout contract", () => {
   it("uses shell language state without loading the full app dictionary", () => {
@@ -65,6 +69,7 @@ describe("LauncherRoute layout contract", () => {
 
   it("renders a dense lifecycle console rather than a landing page", () => {
     expect(routeSource).toContain("summaryStrip");
+    expect(routeSource).toContain("userGuide");
     expect(routeSource).toContain("guardStrip");
     expect(routeSource).toContain("statusTable");
     expect(routeSource).toContain("matrixPanel");
@@ -95,6 +100,7 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).not.toContain("hero");
     expect(routeSource).not.toContain("cardGrid");
     expect(styles.summaryStrip).toBeTypeOf("string");
+    expect(styles.userGuide).toBeTypeOf("string");
     expect(styles.settingsStrip).toBeTypeOf("string");
     expect(styles.settingsHeader).toBeTypeOf("string");
     expect(styles.settingField).toBeTypeOf("string");
@@ -132,6 +138,11 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("controlLimited");
     expect(routeSource).toContain("controlReady");
     expect(routeSource).toContain("safeToUse");
+    expect(routeSource).toContain("userGuideTitle");
+    expect(routeSource).toContain("userGuideDetail");
+    expect(routeSource).toContain("actionLockLabel");
+    expect(routeSource).toContain("actionsLocked");
+    expect(routeSource).toContain("actionsAvailable");
     expect(routeSource).toContain("nextActionDetail");
     expect(routeSource).toContain("openWorkbenchSummary");
     expect(routeSource).toContain("componentLabel");
@@ -150,12 +161,25 @@ describe("LauncherRoute layout contract", () => {
     expect(styles.metric).toBeTypeOf("string");
   });
 
+  it("keeps the current guidance strip readable on narrow screens", () => {
+    expect(routeStylesSource).toContain(".userGuide small");
+    expect(routeStylesSource).toContain(".userGuide em");
+    expect(routeStylesSource).toContain("overflow-wrap: anywhere");
+    expect(routeStylesSource).toContain("white-space: normal");
+    expect(routeStylesSource).toContain("grid-column: auto");
+  });
+
   it("keeps internal lifecycle fields out of the first-read labels", () => {
     expect(routeSource).toContain('matrix: "项目组成"');
     expect(routeSource).toContain('keyStatus: "关键状态"');
     expect(routeSource).toContain('controlPlane: "维护范围"');
     expect(routeSource).toContain('guardian: "托管明细"');
     expect(routeSource).toContain('advancedDiagnostics: "高级诊断"');
+    expect(routeSource).toContain('userGuide: "当前建议"');
+    expect(routeSource).toContain('userGuideReady: "可以继续使用"');
+    expect(routeSource).toContain('userGuideBlocked: "先等任务完成"');
+    expect(routeSource).toContain('actionsLocked: "停止/重启已保护"');
+    expect(routeSource).toContain('diagnosticsCollapsedHint: "排查时展开"');
     expect(routeSource).toContain("后台守护检查未运行，不影响当前项目使用。");
     expect(routeSource).toContain("Launcher 正在维护项目启动、停止、重启、后端、窗口和日志证据。");
     expect(routeSource).toContain("有任务运行时，Launcher 会拒绝停止或重启");
@@ -173,6 +197,7 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("<details className={`${styles.panel} ${styles.diagnosticsPanel}`}>");
     expect(routeSource).not.toContain("<details open");
     expect(routeSource).toContain("queueAndEvents");
+    expect(routeSource).toContain("diagnosticsCollapsedHint");
     expect(routeSource).toContain("recoveryIdle");
     expect(routeSource).toContain("recovery.statusLine");
     expect(routeSource).toContain("maintenanceDetails");
