@@ -1,5 +1,5 @@
 import type { ConfigWorkspace, GitStatusFile } from "../api/types";
-import type { ShellTranslationKey } from "../i18n/shellDictionary";
+import type { GitRouteTranslationKey } from "./gitRouteI18n";
 
 export type GitFilter = "all" | "staged" | "unstaged" | "untracked" | "deleted";
 
@@ -11,7 +11,7 @@ export const GIT_FILTER_LABEL_KEYS = {
   unstaged: "gitFilterUnstaged",
   untracked: "gitFilterUntracked",
   deleted: "gitFilterDeleted",
-} as const satisfies Record<GitFilter, ShellTranslationKey>;
+} as const satisfies Record<GitFilter, GitRouteTranslationKey>;
 
 export function gitFilterMatches(file: GitStatusFile, filter: GitFilter) {
   if (filter === "all") {

@@ -2235,6 +2235,59 @@ def _read_scene_timeline(scene_dir: Path) -> list[dict]:
     return _fold_repeated_work_run_snapshots(timeline)
 
 
+def _runtime_scene_diagnosis_events(scene_dir: Path, timeline: list[dict]) -> list[dict]:
+    """Add low-noise component events needed only to prove recovery."""
+
+    events = list(timeline)
+    seen = {_runtime_scene_event_dedupe_key(event) for event in events}
+    for event in _runtime_scene_recovery_evidence_events(scene_dir):
+        key = _runtime_scene_event_dedupe_key(event)
+        if key in seen:
+            continue
+        seen.add(key)
+        events.append(event)
+    events.sort(key=lambda item: (item["timestamp"], item["component"], item["seq"]))
+    return events
+
+
+def _runtime_scene_recovery_evidence_events(scene_dir: Path) -> list[dict]:
+    browser_events_path = scene_dir / EVENTS_DIR / "browser_page.jsonl"
+    events: list[dict] = []
+    for entry in _read_jsonl_file(browser_events_path):
+        event = _event_payload_to_client_item(entry, scene_dir, BROWSER_TELEMETRY_COMPONENT)
+        if _runtime_scene_is_recovery_evidence_event(event):
+            events.append(event)
+    return events
+
+
+def _runtime_scene_is_recovery_evidence_event(event: dict[str, Any]) -> bool:
+    if str(event.get("component") or "") != BROWSER_TELEMETRY_COMPONENT:
+        return False
+    event_code = str(event.get("eventCode") or "").strip()
+    if event_code in {
+        "browser.session_stream.opened",
+        "browser.session_stream.snapshot_applied",
+    }:
+        return True
+    return False
+
+
+def _runtime_scene_event_dedupe_key(event: dict[str, Any]) -> tuple[str, str, str, int, str]:
+    fields = event.get("fields") if isinstance(event.get("fields"), dict) else {}
+    identity = (
+        str(fields.get("pageInstanceId") or "")
+        or str(fields.get("sessionId") or "")
+        or _runtime_scene_signal_message_signature(str(event.get("message") or ""))
+    )
+    return (
+        str(event.get("timestamp") or ""),
+        str(event.get("component") or ""),
+        str(event.get("eventCode") or ""),
+        int(event.get("seq") or 0),
+        identity,
+    )
+
+
 def _fold_repeated_work_run_snapshots(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
     folded: list[dict[str, Any]] = []
     pending: dict[str, Any] | None = None
@@ -2747,11 +2800,12 @@ def _runtime_scene_package_diagnosis(
     event_logs: list[dict],
 ) -> dict[str, Any]:
     severity_summary = _runtime_scene_severity_summary(timeline)
-    issue_state = _runtime_scene_issue_state(timeline)
+    diagnosis_events = _runtime_scene_diagnosis_events(scene_dir, timeline)
+    issue_state = _runtime_scene_issue_state(diagnosis_events)
     severity = str(issue_state.get("severity") or "info")
-    first_signal = _runtime_scene_first_signal(timeline, issue_state=issue_state)
+    first_signal = _runtime_scene_first_signal(diagnosis_events, issue_state=issue_state)
     if first_signal is None:
-        first_signal = _runtime_scene_first_key_event(lifecycle, timeline)
+        first_signal = _runtime_scene_first_key_event(lifecycle, diagnosis_events)
     startup_trace = _runtime_scene_startup_trace(scene_dir=scene_dir, manifest=manifest, timeline=timeline)
     work_run_summary = _runtime_scene_work_run_summary(scene_dir, timeline)
     recommended_order = _runtime_scene_recommended_reading_order(
@@ -3244,6 +3298,9 @@ def _runtime_scene_is_conversation_failure_wrapper(
 
 
 BROWSER_UNLOAD_NETWORK_FAILURE_WINDOW_SECONDS = 2.5
+BROWSER_STALE_CHUNK_RELOAD_MATCH_WINDOW_SECONDS = 2.5
+BROWSER_STALE_CHUNK_RECOVERY_WINDOW_SECONDS = 12.0
+BROWSER_SESSION_STREAM_RECOVERY_WINDOW_SECONDS = 12.0
 RESOURCE_LEASE_CONFLICT_MATCH_WINDOW_SECONDS = 5.0
 RESOURCE_LEASE_TOKENS = {
     "readonly_chat",
@@ -3895,6 +3952,10 @@ def _runtime_scene_signal_has_later_resolution(events: list[dict], signal: dict[
     index = int(signal.get("index") or 0)
     if not isinstance(event, dict):
         return False
+    if _runtime_scene_browser_stale_chunk_signal_has_later_recovery(events, index, event):
+        return True
+    if _runtime_scene_browser_session_stream_signal_has_later_recovery(events, index, event):
+        return True
     identity = _runtime_scene_event_identity(event)
     for later in events[index + 1 :]:
         if not _runtime_scene_resolution_event_matches(later, event, identity):
@@ -3960,6 +4021,190 @@ def _runtime_scene_agent_model_reference_resolution_matches(
     }:
         return False
     return str(candidate.get("eventCode") or "").strip() == "agent_config.model_references.resolved"
+
+
+def _runtime_scene_browser_stale_chunk_signal_has_later_recovery(
+    events: list[dict],
+    source_index: int,
+    source: dict[str, Any],
+) -> bool:
+    if not _runtime_scene_is_browser_stale_chunk_signal(source):
+        return False
+    if not _runtime_scene_has_related_chunk_reload_request(events, source_index, source):
+        return False
+
+    source_fields = source.get("fields") if isinstance(source.get("fields"), dict) else {}
+    source_page_instance_id = str(source_fields.get("pageInstanceId") or "").strip()
+    source_path = _runtime_scene_browser_event_path(source)
+    source_timestamp = _runtime_scene_event_epoch_seconds(source)
+    saw_old_page_hide = False
+
+    for later in events[source_index + 1 :]:
+        if str(later.get("component") or "") != BROWSER_TELEMETRY_COMPONENT:
+            continue
+        later_timestamp = _runtime_scene_event_epoch_seconds(later)
+        if (
+            source_timestamp is not None
+            and later_timestamp is not None
+            and later_timestamp - source_timestamp > BROWSER_STALE_CHUNK_RECOVERY_WINDOW_SECONDS
+        ):
+            break
+
+        later_fields = later.get("fields") if isinstance(later.get("fields"), dict) else {}
+        later_page_instance_id = str(later_fields.get("pageInstanceId") or "").strip()
+        later_code = str(later.get("eventCode") or "").strip()
+        if source_page_instance_id and later_page_instance_id == source_page_instance_id and later_code == "browser.page.hide":
+            saw_old_page_hide = True
+            continue
+        if not saw_old_page_hide:
+            continue
+        if not source_page_instance_id or not later_page_instance_id or later_page_instance_id == source_page_instance_id:
+            continue
+        if _runtime_scene_browser_event_is_usable_page_after_reload(later, source_path):
+            return True
+    return False
+
+
+def _runtime_scene_is_browser_stale_chunk_signal(event: dict[str, Any]) -> bool:
+    if str(event.get("component") or "") != BROWSER_TELEMETRY_COMPONENT:
+        return False
+    event_code = str(event.get("eventCode") or "").strip()
+    fields = event.get("fields") if isinstance(event.get("fields"), dict) else {}
+    reason = str(fields.get("reason") or "").strip()
+    if event_code == "browser.route_chunk_recovery.reload_requested":
+        return reason in {"built_asset_resource_error", "dynamic_import_fetch_error"}
+    if event_code == "browser.resource.error":
+        return _runtime_scene_browser_event_mentions_built_asset(event)
+    if event_code in {"browser.console.error", "browser.promise.rejected", "browser.page.error"}:
+        return _runtime_scene_browser_event_mentions_built_asset(event) or "dynamically imported module" in _runtime_scene_browser_event_failure_text(event).lower()
+    return False
+
+
+def _runtime_scene_has_related_chunk_reload_request(
+    events: list[dict],
+    source_index: int,
+    source: dict[str, Any],
+) -> bool:
+    if str(source.get("eventCode") or "").strip() == "browser.route_chunk_recovery.reload_requested":
+        return True
+
+    source_fields = source.get("fields") if isinstance(source.get("fields"), dict) else {}
+    source_page_instance_id = str(source_fields.get("pageInstanceId") or "").strip()
+    source_path = _runtime_scene_browser_event_path(source)
+    source_timestamp = _runtime_scene_event_epoch_seconds(source)
+    for candidate in events[max(0, source_index - 12) : min(len(events), source_index + 13)]:
+        if str(candidate.get("component") or "") != BROWSER_TELEMETRY_COMPONENT:
+            continue
+        if str(candidate.get("eventCode") or "").strip() != "browser.route_chunk_recovery.reload_requested":
+            continue
+        candidate_fields = candidate.get("fields") if isinstance(candidate.get("fields"), dict) else {}
+        reason = str(candidate_fields.get("reason") or "").strip()
+        if reason not in {"built_asset_resource_error", "dynamic_import_fetch_error"}:
+            continue
+        candidate_timestamp = _runtime_scene_event_epoch_seconds(candidate)
+        if (
+            source_timestamp is not None
+            and candidate_timestamp is not None
+            and abs(candidate_timestamp - source_timestamp) > BROWSER_STALE_CHUNK_RELOAD_MATCH_WINDOW_SECONDS
+        ):
+            continue
+        candidate_page_instance_id = str(candidate_fields.get("pageInstanceId") or "").strip()
+        if source_page_instance_id and candidate_page_instance_id and candidate_page_instance_id != source_page_instance_id:
+            continue
+        candidate_path = _runtime_scene_browser_event_path(candidate)
+        if source_path and candidate_path and source_path != candidate_path:
+            continue
+        return True
+    return False
+
+
+def _runtime_scene_browser_event_is_usable_page_after_reload(event: dict[str, Any], source_path: str) -> bool:
+    event_code = str(event.get("eventCode") or "").strip()
+    if event_code not in {"browser.route.changed", "browser.page.snapshot", "browser.memory.sampled"}:
+        return False
+    event_path = _runtime_scene_browser_event_path(event)
+    if source_path and event_path and source_path != event_path:
+        return False
+    fields = event.get("fields") if isinstance(event.get("fields"), dict) else {}
+    if event_code == "browser.memory.sampled":
+        return str(fields.get("reason") or "").strip() == "route_settled"
+    if event_code == "browser.page.snapshot":
+        ready_state = str(fields.get("readyState") or "").strip().lower()
+        return ready_state in {"", "complete", "interactive"}
+    return True
+
+
+def _runtime_scene_browser_session_stream_signal_has_later_recovery(
+    events: list[dict],
+    source_index: int,
+    source: dict[str, Any],
+) -> bool:
+    if str(source.get("component") or "") != BROWSER_TELEMETRY_COMPONENT:
+        return False
+    if str(source.get("eventCode") or "").strip() != "browser.session_stream.error":
+        return False
+    session_id = _runtime_scene_event_session_id(source)
+    if not session_id:
+        return False
+    source_timestamp = _runtime_scene_event_epoch_seconds(source)
+    for later in events[source_index + 1 :]:
+        if str(later.get("component") or "") != BROWSER_TELEMETRY_COMPONENT:
+            continue
+        later_timestamp = _runtime_scene_event_epoch_seconds(later)
+        if (
+            source_timestamp is not None
+            and later_timestamp is not None
+            and later_timestamp - source_timestamp > BROWSER_SESSION_STREAM_RECOVERY_WINDOW_SECONDS
+        ):
+            break
+        if _runtime_scene_event_session_id(later) != session_id:
+            continue
+        if str(later.get("eventCode") or "").strip() in {"browser.session_stream.opened", "browser.session_stream.snapshot_applied"}:
+            return True
+    return False
+
+
+def _runtime_scene_browser_event_mentions_built_asset(event: dict[str, Any]) -> bool:
+    text = _runtime_scene_browser_event_failure_text(event).lower()
+    return "/assets/" in text and (".js" in text or ".css" in text)
+
+
+def _runtime_scene_browser_event_failure_text(event: dict[str, Any]) -> str:
+    fields = event.get("fields") if isinstance(event.get("fields"), dict) else {}
+    return " ".join(
+        str(value or "")
+        for value in (
+            event.get("message"),
+            fields.get("argsPreview"),
+            fields.get("resourceUrl"),
+            fields.get("errorMessage"),
+            fields.get("failureMessage"),
+        )
+    ).strip()
+
+
+def _runtime_scene_browser_event_path(event: dict[str, Any]) -> str:
+    fields = event.get("fields") if isinstance(event.get("fields"), dict) else {}
+    for key in ("pathname", "routeTarget", "href"):
+        path = _normalize_browser_route_path(fields.get(key))
+        if path:
+            return path
+    return ""
+
+
+def _normalize_browser_route_path(value: object) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    lowered = text.lower()
+    if lowered.startswith("http://") or lowered.startswith("https://"):
+        scheme_index = text.find("://")
+        path_index = text.find("/", scheme_index + 3)
+        text = text[path_index:] if path_index >= 0 else "/"
+    text = text.split("?", 1)[0].split("#", 1)[0].strip()
+    if not text.startswith("/"):
+        return ""
+    return text or "/"
 
 
 def _runtime_scene_first_ranked_signal(signals: list[dict[str, Any]]) -> dict[str, Any] | None:
