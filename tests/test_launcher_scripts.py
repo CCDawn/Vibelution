@@ -1080,6 +1080,85 @@ Write-Output "ok"
     assert result.stdout.strip().splitlines()[-1] == "ok"
 
 
+def test_launcher_frontend_commands_avoid_cmd_wrappers(tmp_path):
+    result = _run_launcher_ast_harness(
+        tmp_path,
+        """
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$LauncherPath
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$source = Get-Content -Raw -LiteralPath $LauncherPath
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors -and $parseErrors.Count -gt 0) {
+    throw "Launcher script parse failed: $($parseErrors[0].Message)"
+}
+
+function Get-FunctionText {
+    param([string]$Name)
+    $functionAst = $ast.Find({
+        param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+            $node.Name -eq $Name
+    }, $true)
+    if ($null -eq $functionAst) {
+        throw "$Name was not found."
+    }
+    return $functionAst.Extent.Text
+}
+
+$nodeText = Get-FunctionText -Name "Resolve-NodeCommand"
+$npmCliText = Get-FunctionText -Name "Resolve-NpmCliScript"
+$npmInvocationText = Get-FunctionText -Name "Resolve-NpmCliInvocation"
+$frontendScriptText = Get-FunctionText -Name "Resolve-FrontendPackageScript"
+$toolchainText = Get-FunctionText -Name "Get-FrontendToolchainMissingPaths"
+$dependenciesText = Get-FunctionText -Name "Ensure-FrontendDependencies"
+$buildText = Get-FunctionText -Name "Ensure-WebBuild"
+
+if ($nodeText -notmatch "node.exe") {
+    throw "Resolve-NodeCommand does not prefer node.exe."
+}
+if ($npmCliText -notmatch "npm-cli.js") {
+    throw "Resolve-NpmCliScript does not locate npm-cli.js."
+}
+if ($npmInvocationText -notmatch "Resolve-NodeCommand" -or $npmInvocationText -notmatch "Resolve-NpmCliScript") {
+    throw "Resolve-NpmCliInvocation does not pair node.exe with npm-cli.js."
+}
+if ($frontendScriptText -notmatch "ConvertTo-WebRelativePath") {
+    throw "Resolve-FrontendPackageScript does not produce actionable missing-script errors."
+}
+if ($toolchainText -match "\\.cmd") {
+    throw "Frontend toolchain detection still requires cmd shims."
+}
+if ($dependenciesText -notmatch "Resolve-NpmCliInvocation") {
+    throw "Frontend dependency install does not use the node/npm-cli invocation."
+}
+if ($dependenciesText -match "Resolve-NpmCommand" -or $dependenciesText -match '\\$npmCommand') {
+    throw "Frontend dependency install still targets npm.cmd directly."
+}
+if ($buildText -notmatch "Resolve-NodeCommand" -or $buildText -notmatch "Resolve-FrontendPackageScript") {
+    throw "Frontend build does not resolve direct node package scripts."
+}
+if ($buildText -match "Resolve-NpmCommand" -or $buildText -match '\\$npmCommand' -or $buildText -match '"run",\\s*"build"') {
+    throw "Frontend build still uses npm run build."
+}
+if ($buildText -notmatch "node_modules\\\\typescript\\\\bin\\\\tsc" -or $buildText -notmatch "node_modules\\\\vite\\\\bin\\\\vite.js") {
+    throw "Frontend build does not call the real TypeScript and Vite package entries."
+}
+Write-Output "ok"
+""",
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip().splitlines()[-1] == "ok"
+
+
 def test_launcher_background_processes_are_started_without_windows(tmp_path):
     result = _run_launcher_ast_harness(
         tmp_path,
@@ -1669,7 +1748,7 @@ $startText = Get-FunctionText -Name "Start-ManagedSession"
 
 foreach ($required in @(
     "Get-Command\\s+python",
-    "Resolve-NpmCommand",
+    "Resolve-NpmCliInvocation",
     "Resolve-EdgeExecutable",
     "bootstrap.prerequisite",
     "system_prerequisites",
@@ -2771,10 +2850,7 @@ Write-Output "ok"
 
 def test_frontend_toolchain_detection_requires_real_package_entries(tmp_path):
     web_dir = tmp_path / "web"
-    (web_dir / "node_modules" / ".bin").mkdir(parents=True)
     (web_dir / "node_modules" / "vite" / "bin").mkdir(parents=True)
-    (web_dir / "node_modules" / ".bin" / "tsc.cmd").write_text("", encoding="utf-8")
-    (web_dir / "node_modules" / ".bin" / "vite.cmd").write_text("", encoding="utf-8")
     (web_dir / "node_modules" / "vite" / "bin" / "vite.js").write_text("", encoding="utf-8")
     result = _run_launcher_ast_harness(
         tmp_path,
