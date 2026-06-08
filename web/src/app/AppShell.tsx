@@ -4,7 +4,7 @@ import { NavLink, Outlet, useLocation, useNavigationType } from "react-router-do
 import { ChevronDown, LoaderCircle, Moon, Power, RefreshCw, Settings, Sun, Wrench } from "lucide-react";
 
 import { fetchJson, setFetchJsonFailureReporter, type FetchJsonFailureReport } from "../api/client";
-import { restartLauncherBundle, stopLauncherBundle } from "../api/launcher";
+import { cancelRuntimeLifecycleCommand, restartLauncherBundle, stopLauncherBundle } from "../api/launcher";
 import { queryKeys } from "../api/queryKeys";
 import {
   BackendHealth,
@@ -241,6 +241,22 @@ export function restartActiveWorkBlockedMessage(lang: string, activeWorkDetails:
   ].filter(Boolean).join("\n\n");
 }
 
+export function shutdownActiveWorkBlockedMessage(lang: string, activeWorkDetails: string): string {
+  const details = activeWorkDetails.trim();
+  if (lang === "en") {
+    return [
+      "Vibelution cannot close while work is still running.",
+      details ? `Running now: ${details}` : "",
+      "Wait for the task to finish or stop it first.",
+    ].filter(Boolean).join("\n\n");
+  }
+  return [
+    "有进行中的任务，无法关闭 Vibelution。",
+    details ? `正在运行：${details}` : "",
+    "请等待任务完成，或先停止任务。",
+  ].filter(Boolean).join("\n\n");
+}
+
 function runtimeBlockedDetail(error: unknown): RuntimeControlBlockedDetail | null {
   if (!(error instanceof Error)) {
     return null;
@@ -327,6 +343,9 @@ export function AppShell() {
   const [shutdownSettled, setShutdownSettled] = useState(false);
   const [shutdownRequested, setShutdownRequested] = useState(false);
   const [restartRequested, setRestartRequested] = useState(false);
+  const [lifecycleAction, setLifecycleAction] = useState<"shutdown" | "restart" | "">("");
+  const [lifecycleCommandId, setLifecycleCommandId] = useState("");
+  const [lifecycleCancelPending, setLifecycleCancelPending] = useState(false);
   const [utilityOpen, setUtilityOpen] = useState(false);
   const [lifecycleMenuOpen, setLifecycleMenuOpen] = useState(false);
   const [statusGuideOpen, setStatusGuideOpen] = useState(false);
@@ -341,6 +360,8 @@ export function AppShell() {
   const [shellStartupDataReady, setShellStartupDataReady] = useState(false);
   const shutdownPromiseRef = useRef<Promise<void> | null>(null);
   const restartPromiseRef = useRef<Promise<void> | null>(null);
+  const lifecycleRequestSeqRef = useRef(0);
+  const lifecycleOverlayDismissedRef = useRef(false);
   const utilityMenuRef = useRef<HTMLDivElement | null>(null);
   const lifecycleMenuRef = useRef<HTMLDivElement | null>(null);
   const shutdownLocalCompletionLoggedRef = useRef(false);
@@ -396,6 +417,9 @@ export function AppShell() {
   const lifecycleMenuLabel = lang === "en" ? "Workbench power actions" : "工作台电源操作";
   const closeWorkbenchLabel = lang === "en" ? "Close workbench" : "关闭工作台";
   const restartWorkbenchLabel = lang === "en" ? "Restart workbench" : "重启工作台";
+  const cancelShutdownLabel = lang === "en" ? "Cancel close" : "取消关闭";
+  const cancelRestartLabel = lang === "en" ? "Cancel restart" : "取消重启";
+  const cancellingLifecycleLabel = lang === "en" ? "Cancelling..." : "正在取消...";
   const themeToggleLabel = theme === "dark" ? t("switchToLightTheme") : t("switchToDarkTheme");
   const shutdownHeading = lang === "en" ? "Closing workbench" : "正在关闭工作台";
   const shutdownBody = lang === "en"
@@ -533,6 +557,52 @@ export function AppShell() {
     );
   }, []);
 
+  const cancelSupersededLifecycleCommand = useCallback((commandId: string, action: "shutdown" | "restart") => {
+    const normalizedCommandId = commandId.trim();
+    if (!normalizedCommandId) {
+      return;
+    }
+    void cancelRuntimeLifecycleCommand({
+      commandId: normalizedCommandId,
+      operation: action === "restart" ? "restart" : "stop",
+      source: "app_shell_superseded_request",
+    })
+      .then((payload) => {
+        emitBrowserTelemetry(
+          {
+            phase: action === "restart" ? "restart" : "shutdown",
+            eventCode: "browser.user_action.lifecycle_wait_cancel_superseded_command",
+            message: "A lifecycle command returned after the overlay was cancelled and was cancelled through the queue.",
+            fields: {
+              action,
+              source: "app_shell",
+              commandId: normalizedCommandId,
+              cancelledBackendCommand: payload.cancelled,
+              cancelStatus: payload.status,
+            },
+          },
+          { preferBeacon: true },
+        );
+      })
+      .catch((error) => {
+        emitBrowserTelemetry(
+          {
+            phase: action === "restart" ? "restart" : "shutdown",
+            eventCode: "browser.user_action.lifecycle_wait_cancel_superseded_failed",
+            message: "A superseded lifecycle command could not be cancelled through the queue.",
+            level: "warning",
+            fields: {
+              action,
+              source: "app_shell",
+              commandId: normalizedCommandId,
+              errorMessage: error instanceof Error ? error.message : String(error || ""),
+            },
+          },
+          { preferBeacon: true },
+        );
+      });
+  }, [emitBrowserTelemetry]);
+
   useEffect(() => {
     emitBrowserTelemetry({
       phase: "startup",
@@ -557,24 +627,77 @@ export function AppShell() {
       return shutdownPromiseRef.current;
     }
 
+    lifecycleRequestSeqRef.current += 1;
+    const requestSeq = lifecycleRequestSeqRef.current;
     const task = (async () => {
+      lifecycleOverlayDismissedRef.current = false;
       setShutdownRequested(true);
+      setRestartRequested(false);
       setShutdownSettled(false);
       setShutdownOpen(true);
+      setLifecycleAction("shutdown");
+      setLifecycleCommandId("");
+      setLifecycleCancelPending(false);
       setShutdownTitle(shutdownHeading);
       setShutdownDetail(shutdownBody);
       shutdownLocalCompletionLoggedRef.current = false;
       emitBrowserTelemetry(buildShutdownRequestedTelemetry(), { preferBeacon: true });
 
       const payload = await stopLauncherBundle();
+      if (requestSeq !== lifecycleRequestSeqRef.current) {
+        if (payload.commandId) {
+          cancelSupersededLifecycleCommand(payload.commandId, "shutdown");
+        }
+        return;
+      }
+      if (payload.commandId) {
+        setLifecycleCommandId(payload.commandId);
+      }
       if (payload.message) {
         setShutdownDetail(payload.message);
       }
     })().catch((error) => {
       const errorMessage = error instanceof Error ? error.message : String(error || "");
+      if (requestSeq !== lifecycleRequestSeqRef.current) {
+        return;
+      }
+      const blocked = runtimeBlockedDetail(error);
+      if (blocked?.code === "active_work_stop_blocked" || blocked?.code === "active_work_requires_confirmation") {
+        lifecycleOverlayDismissedRef.current = false;
+        const blockedDetails = blocked.activeWorkRuns
+          ?.map((item) => [item.kind, item.status, item.runId || item.sessionId].filter(Boolean).join(" · "))
+          .filter(Boolean)
+          .join(" · ") ?? "";
+        setShutdownRequested(false);
+        setRestartRequested(false);
+        setShutdownOpen(true);
+        setShutdownSettled(false);
+        setLifecycleAction("shutdown");
+        setLifecycleCommandId("");
+        setLifecycleCancelPending(false);
+        setShutdownTitle(shutdownHeading);
+        setShutdownDetail(shutdownActiveWorkBlockedMessage(lang, blockedDetails || activeWorkDetailsTitle));
+        emitBrowserTelemetry(
+          {
+            phase: "shutdown",
+            eventCode: "browser.user_action.shutdown_blocked_active_work",
+            message: "Shutdown was blocked because active work is running.",
+            level: "warning",
+            fields: {
+              action: "shutdown",
+              source: "app_shell",
+              activeWorkCount: blocked.activeWorkRuns?.length ?? 0,
+            },
+          },
+          { preferBeacon: true },
+        );
+        return;
+      }
       setShutdownRequested(true);
+      setRestartRequested(false);
       setShutdownOpen(true);
       setShutdownSettled(false);
+      setLifecycleAction("shutdown");
       setShutdownTitle(shutdownHeading);
       setShutdownDetail(shutdownUnconfirmedBody);
       emitBrowserTelemetry(buildShutdownRequestUnconfirmedTelemetry(errorMessage), { preferBeacon: true });
@@ -584,7 +707,16 @@ export function AppShell() {
 
     shutdownPromiseRef.current = task;
     return task;
-  }, [emitBrowserTelemetry, restartRequested, shutdownBody, shutdownHeading, shutdownUnconfirmedBody]);
+  }, [
+    activeWorkDetailsTitle,
+    cancelSupersededLifecycleCommand,
+    emitBrowserTelemetry,
+    lang,
+    restartRequested,
+    shutdownBody,
+    shutdownHeading,
+    shutdownUnconfirmedBody,
+  ]);
 
   const beginRestart = useCallback(() => {
     if (shutdownPromiseRef.current || shutdownRequested) {
@@ -594,27 +726,54 @@ export function AppShell() {
       return restartPromiseRef.current;
     }
 
+    lifecycleRequestSeqRef.current += 1;
+    const requestSeq = lifecycleRequestSeqRef.current;
     const task = (async () => {
+      lifecycleOverlayDismissedRef.current = false;
       setRestartRequested(true);
       setShutdownRequested(false);
       setShutdownSettled(false);
       setShutdownOpen(true);
+      setLifecycleAction("restart");
+      setLifecycleCommandId("");
+      setLifecycleCancelPending(false);
       setShutdownTitle(restartHeading);
       setShutdownDetail(restartBody);
       emitBrowserTelemetry(buildRestartRequestedTelemetry(), { preferBeacon: true });
 
       const payload = await restartLauncherBundle();
+      if (requestSeq !== lifecycleRequestSeqRef.current) {
+        if (payload.commandId) {
+          cancelSupersededLifecycleCommand(payload.commandId, "restart");
+        }
+        return;
+      }
+      if (payload.commandId) {
+        setLifecycleCommandId(payload.commandId);
+      }
       if (payload.message) {
         setShutdownDetail(payload.message);
       }
     })().catch((error) => {
+      if (requestSeq !== lifecycleRequestSeqRef.current) {
+        return;
+      }
       const blocked = runtimeBlockedDetail(error);
       if (blocked?.code === "active_work_restart_blocked" || blocked?.code === "active_work_requires_confirmation") {
+        lifecycleOverlayDismissedRef.current = false;
+        const blockedDetails = blocked.activeWorkRuns
+          ?.map((item) => [item.kind, item.status, item.runId || item.sessionId].filter(Boolean).join(" · "))
+          .filter(Boolean)
+          .join(" · ") ?? "";
         setRestartRequested(false);
-        setShutdownOpen(false);
+        setShutdownRequested(false);
+        setShutdownOpen(true);
         setShutdownSettled(false);
-        setShutdownTitle("");
-        setShutdownDetail("");
+        setLifecycleAction("restart");
+        setLifecycleCommandId("");
+        setLifecycleCancelPending(false);
+        setShutdownTitle(restartHeading);
+        setShutdownDetail(restartActiveWorkBlockedMessage(lang, blockedDetails || activeWorkDetailsTitle));
         emitBrowserTelemetry(
           {
             phase: "restart",
@@ -633,8 +792,10 @@ export function AppShell() {
       }
       const errorMessage = error instanceof Error ? error.message : String(error || "");
       setRestartRequested(true);
+      setShutdownRequested(false);
       setShutdownOpen(true);
       setShutdownSettled(false);
+      setLifecycleAction("restart");
       setShutdownTitle(restartHeading);
       setShutdownDetail(restartUnconfirmedBody);
       emitBrowserTelemetry(buildRestartRequestUnconfirmedTelemetry(errorMessage), { preferBeacon: true });
@@ -644,7 +805,121 @@ export function AppShell() {
 
     restartPromiseRef.current = task;
     return task;
-  }, [emitBrowserTelemetry, restartBody, restartHeading, restartUnconfirmedBody, shutdownRequested]);
+  }, [
+    activeWorkDetailsTitle,
+    cancelSupersededLifecycleCommand,
+    emitBrowserTelemetry,
+    lang,
+    restartBody,
+    restartHeading,
+    restartUnconfirmedBody,
+    shutdownRequested,
+  ]);
+
+  const cancelLifecycleWait = useCallback(() => {
+    if (lifecycleCancelPending) {
+      return;
+    }
+    const action = lifecycleAction || (restartRequested ? "restart" : "shutdown");
+    const commandId = lifecycleCommandId.trim();
+    lifecycleRequestSeqRef.current += 1;
+    setLifecycleCancelPending(true);
+    emitBrowserTelemetry(
+      {
+        phase: action === "restart" ? "restart" : "shutdown",
+        eventCode: "browser.user_action.lifecycle_wait_cancel_requested",
+        message: "User cancelled the current lifecycle wait overlay.",
+        fields: {
+          action,
+          source: "app_shell",
+          commandId,
+          hadQueuedCommand: Boolean(commandId),
+        },
+      },
+      { preferBeacon: true },
+    );
+
+    const resetOverlay = () => {
+      lifecycleOverlayDismissedRef.current = true;
+      shutdownPromiseRef.current = null;
+      restartPromiseRef.current = null;
+      setShutdownRequested(false);
+      setRestartRequested(false);
+      setShutdownOpen(false);
+      setShutdownSettled(false);
+      setShutdownTitle("");
+      setShutdownDetail("");
+      setLifecycleAction("");
+      setLifecycleCommandId("");
+      setLifecycleCancelPending(false);
+    };
+
+    if (!commandId) {
+      emitBrowserTelemetry(
+        {
+          phase: action === "restart" ? "restart" : "shutdown",
+          eventCode: "browser.user_action.lifecycle_wait_cancel_completed",
+          message: "Lifecycle wait overlay was cancelled locally.",
+          fields: {
+            action,
+            source: "app_shell",
+            cancelledBackendCommand: false,
+          },
+        },
+        { preferBeacon: true },
+      );
+      resetOverlay();
+      return;
+    }
+
+    const cancellation = cancelRuntimeLifecycleCommand({
+      commandId,
+      operation: action === "restart" ? "restart" : "stop",
+      source: "app_shell",
+    })
+      .then((payload) => {
+        emitBrowserTelemetry(
+          {
+            phase: action === "restart" ? "restart" : "shutdown",
+            eventCode: "browser.user_action.lifecycle_wait_cancel_completed",
+            message: "Lifecycle wait cancellation request completed.",
+            fields: {
+              action,
+              source: "app_shell",
+              commandId,
+              cancelledBackendCommand: payload.cancelled,
+              cancelStatus: payload.status,
+            },
+          },
+          { preferBeacon: true },
+        );
+      })
+      .catch((error) => {
+        emitBrowserTelemetry(
+          {
+            phase: action === "restart" ? "restart" : "shutdown",
+            eventCode: "browser.user_action.lifecycle_wait_cancel_failed",
+            message: "Lifecycle wait cancellation request failed.",
+            level: "warning",
+            fields: {
+              action,
+              source: "app_shell",
+              commandId,
+              errorMessage: error instanceof Error ? error.message : String(error || ""),
+            },
+          },
+          { preferBeacon: true },
+        );
+      });
+    resetOverlay();
+    void cancellation;
+  }, [
+    emitBrowserTelemetry,
+    lifecycleAction,
+    lifecycleCancelPending,
+    lifecycleCommandId,
+    restartRequested,
+  ]);
 
   const refreshFrontend = useCallback(() => {
     emitBrowserTelemetry(
@@ -1048,6 +1323,9 @@ export function AppShell() {
       || isFrontendOrphanedWorkbench(workbench);
 
     if (failed) {
+      if (lifecycleOverlayDismissedRef.current) {
+        return;
+      }
       setShutdownRequested(false);
       setShutdownOpen(true);
       setShutdownSettled(true);
@@ -1057,6 +1335,9 @@ export function AppShell() {
     }
 
     if (closing) {
+      if (lifecycleOverlayDismissedRef.current) {
+        return;
+      }
       setShutdownOpen(true);
       setShutdownSettled(false);
       setShutdownTitle(shutdownHeading);
@@ -1069,6 +1350,9 @@ export function AppShell() {
     }
 
     if (workbench.desiredState === "closed" && workbench.observedState === "closed") {
+      if (lifecycleOverlayDismissedRef.current) {
+        return;
+      }
       setShutdownOpen(true);
       setShutdownSettled(false);
       setShutdownTitle(shutdownHeading);
@@ -1098,6 +1382,9 @@ export function AppShell() {
       && workbench.browserWindowAlive;
 
     if (failed) {
+      if (lifecycleOverlayDismissedRef.current) {
+        return;
+      }
       setRestartRequested(false);
       setShutdownOpen(true);
       setShutdownSettled(true);
@@ -1107,6 +1394,7 @@ export function AppShell() {
     }
 
     if (ready) {
+      lifecycleOverlayDismissedRef.current = false;
       setRestartRequested(false);
       setShutdownOpen(true);
       setShutdownSettled(true);
@@ -1118,6 +1406,9 @@ export function AppShell() {
       return () => window.clearTimeout(timer);
     }
 
+    if (lifecycleOverlayDismissedRef.current) {
+      return;
+    }
     setShutdownOpen(true);
     setShutdownSettled(false);
     setShutdownTitle(restartHeading);
@@ -1194,6 +1485,20 @@ export function AppShell() {
             <div className={styles.shutdownCopy}>
               <strong>{shutdownTitle}</strong>
               <p>{shutdownDetail}</p>
+              {!shutdownSettled ? (
+                <button
+                  type="button"
+                  className={styles.shutdownCancelButton}
+                  onClick={cancelLifecycleWait}
+                  disabled={lifecycleCancelPending}
+                >
+                  {lifecycleCancelPending
+                    ? cancellingLifecycleLabel
+                    : lifecycleAction === "restart"
+                      ? cancelRestartLabel
+                      : cancelShutdownLabel}
+                </button>
+              ) : null}
             </div>
           </div>
         </div>
@@ -1459,7 +1764,11 @@ export function AppShell() {
                     if (activeWorkIndicator) {
                       setShutdownOpen(true);
                       setShutdownSettled(false);
+                      setShutdownRequested(false);
                       setRestartRequested(false);
+                      setLifecycleAction("restart");
+                      setLifecycleCommandId("");
+                      setLifecycleCancelPending(false);
                       setShutdownTitle(restartHeading);
                       setShutdownDetail(restartActiveWorkBlockedMessage(lang, activeWorkDetailsTitle));
                       emitBrowserTelemetry(
