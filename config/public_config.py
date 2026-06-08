@@ -31,6 +31,7 @@ from .settings import (
     PROFILE_REFERENCE_OVERRIDE_FIELDS,
     PUBLIC_INLINE_PROVIDER_FIELDS,
     UNCONFIGURED_MODEL_REF,
+    _compact_repeated_token_halves,
     denormalize_config_dict,
     normalize_public_config_dict,
 )
@@ -834,7 +835,8 @@ def build_effective_config(public_config: dict) -> AppConfig:
 
 def _model_library_id(provider_id: str, model: str) -> str:
     raw = f"{provider_id}-{model}".strip("-").lower()
-    return "".join(char if char.isalnum() else "_" for char in raw).strip("_") or "model"
+    token = "".join(char if char.isalnum() else "_" for char in raw).strip("_")
+    return _compact_repeated_token_halves(token) or "model"
 
 
 def _unique_model_library_id(model_library: dict, model_id: str) -> str:
@@ -853,6 +855,7 @@ def _default_model_api_key_env(model_id: str) -> str:
         char if ("A" <= char <= "Z" or "0" <= char <= "9") else "_"
         for char in raw.upper()
     ).strip("_")
+    token = _compact_repeated_token_halves(token)
     if not token and raw:
         token = f"ID_{hashlib.sha1(raw.encode('utf-8')).hexdigest()[:12].upper()}"
     if len(token) > 48:
