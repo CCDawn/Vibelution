@@ -162,9 +162,11 @@ def list_chat_rooms(
 
 
 def list_chat_rooms_compact() -> list[dict[str, Any]]:
-    """Return room references without session repair or full room hydration."""
+    """Return room references without scanning sessions or full room hydration."""
 
     state = _store().load()
+    if _repair_room_participants_in_state(state, session_summaries={}):
+        _store().save(state)
     rooms = [
         _room_to_compact_reference(item)
         for item in list(state.get("rooms") or [])
@@ -2518,8 +2520,17 @@ def _refresh_participants(
                 fallback["agentId"] = str(active_agent.get("agentId") or fallback.get("agentId") or "").strip()
                 fallback["agentCode"] = str(active_agent.get("agentCode") or fallback.get("agentCode") or "").strip()
                 fallback["agentAvatarImageUrl"] = str(active_agent.get("avatarImageUrl") or fallback.get("agentAvatarImageUrl") or "").strip()
+                llm_bindings = agent_directory_service.normalize_agent_llm_bindings(active_agent.get("llmBindings"))
+                dialogue_model_id = agent_directory_service.agent_dialogue_model_id({"llmBindings": llm_bindings})
+                fallback["dialogueModelId"] = dialogue_model_id
+                fallback["llmBindings"] = llm_bindings
+                fallback["agentTemplateLabel"] = dialogue_model_id
+                fallback["agentMissing"] = False
+                fallback["agentStatusCode"] = ""
+                fallback["agentStatusMessage"] = ""
+                fallback["enabled"] = bool(item.get("enabled", True))
             session_id = str(fallback.get("sessionId") or fallback.get("directSessionId") or "").strip()
-            if session_id and str(fallback.get("agentId") or "").strip():
+            if not active_agent and session_id and str(fallback.get("agentId") or "").strip():
                 archived_agent = agent_directory_service.get_agent(str(fallback.get("agentId") or "").strip(), include_archived=True)
                 archived_status = str((archived_agent or {}).get("status") or "").strip().lower()
                 fallback["agentMissing"] = True

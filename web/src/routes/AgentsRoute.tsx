@@ -35,6 +35,7 @@ import {
   AgentRuntimeEvidenceMatch,
   AgentRunHistory,
   AgentConfigHealthIssue,
+  AgentModeBindings,
   AgentPersonaProfile,
   AgentTaskProfile,
   AgentToolGovernanceRequest,
@@ -2261,8 +2262,9 @@ function agentsRouteCopy(lang: "zh" | "en") {
         bulkNoSelection: "请先选择 Agent。",
         bulkNoPrompt: "请先选择要应用的提示词模板。",
         bulkArchiveConfirm: "确认安全归档已选 Agent？受保护或已归档项会自动跳过。",
-        bulkPurgeConfirm: "确认彻底删除已选 Agent？受保护项会自动跳过；该操作会删除 Agent 私有工作区，直连历史仅保留为已删除 Agent 历史。",
+        bulkPurgeConfirm: "确认彻底删除已选的已归档 Agent？活跃或受保护项会自动跳过；该操作会删除 Agent 私有工作区，直连历史仅保留为已删除 Agent 历史。",
         bulkSkippedArchived: "已归档，跳过",
+        bulkSkippedActive: "仍是活跃状态，请先安全归档",
         bulkSkippedProtected: "受保护，跳过",
         bulkArchiveResult: "批量归档完成",
         bulkPurgeResult: "批量彻底删除完成",
@@ -2620,8 +2622,9 @@ function agentsRouteCopy(lang: "zh" | "en") {
         bulkNoSelection: "Select Agents first.",
         bulkNoPrompt: "Choose a prompt template first.",
         bulkArchiveConfirm: "Archive the selected Agents? Protected or already archived items will be skipped.",
-        bulkPurgeConfirm: "Permanently delete the selected Agents? Protected Agents will be skipped; private workspaces are removed and direct-session history is kept as deleted-Agent history.",
+        bulkPurgeConfirm: "Permanently delete the selected archived Agents? Active or protected Agents will be skipped; private workspaces are removed and direct-session history is kept as deleted-Agent history.",
         bulkSkippedArchived: "Already archived; skipped",
+        bulkSkippedActive: "Still active; archive safely first",
         bulkSkippedProtected: "Protected; skipped",
         bulkArchiveResult: "Bulk archive finished",
         bulkPurgeResult: "Bulk delete finished",
@@ -3238,7 +3241,7 @@ export function AgentsRoute() {
   const selectedAgentResetPending = Boolean(selectedAgent?.agentId && resettingAgentIds.has(selectedAgent.agentId));
   const canResetAgent = Boolean(selectedAgent?.agentId && selectedAgent.status !== "archived");
   const canArchiveAgent = Boolean(selectedAgent?.agentId && selectedAgent.status !== "archived" && !selectedAgentProtected);
-  const canPurgeAgent = Boolean(selectedAgent?.agentId && !selectedAgentProtected);
+  const canPurgeAgent = Boolean(selectedAgent?.agentId && selectedAgent.status === "archived" && !selectedAgentProtected);
 
   const createAgentMutation = useMutation({
     mutationFn: (draft: AgentCreateDraft) => {
@@ -3433,7 +3436,7 @@ export function AgentsRoute() {
       setActivePane("overview");
       setNotice({
         tone: "success",
-        text: lang === "zh" ? "已彻底删除 Agent" : "Permanently deleted Agent",
+        text: lang === "zh" ? "已彻底删除归档 Agent" : "Permanently deleted archived Agent",
       });
       void chatWorkspaceCache.afterAgentArchived();
     },
@@ -3530,12 +3533,22 @@ export function AgentsRoute() {
 
   const updateMembershipMutation = useMutation({
     mutationFn: (payload: { agentId: string; draft: AgentModeMembershipDraft }) =>
-      fetchJson(`/api/agents/${encodeURIComponent(payload.agentId)}/mode-membership`, {
+      fetchJson<AgentModeBindings>(`/api/agents/${encodeURIComponent(payload.agentId)}/mode-membership`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload.draft),
       }),
-    onSuccess: () => {
+    onSuccess: (payload, variables) => {
+      queryClient.setQueryData<AgentConfigWorkspace | undefined>(
+        queryKeys.agentConfigWorkspace(),
+        (current) => current
+          ? {
+              ...current,
+              modeBindings: payload.modes ?? current.modeBindings,
+            }
+          : current,
+      );
+      setMembershipDraft(variables.draft);
       setNotice({
         tone: "success",
         text: lang === "zh" ? "已保存 Agent 使用位置" : "Saved Agent mode membership",
@@ -4202,6 +4215,11 @@ export function AgentsRoute() {
       if (agentArchiveProtected(agent)) {
         skipped += 1;
         notes.push(`${agentLabel(agent)}: ${copy.bulkSkippedProtected}`);
+        continue;
+      }
+      if (agent.status !== "archived") {
+        skipped += 1;
+        notes.push(`${agentLabel(agent)}: ${copy.bulkSkippedActive}`);
         continue;
       }
       try {
