@@ -274,4 +274,16 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("This is a stale frontend page and does not mean the project is still running.");
     expect(routeSource).toContain("A valid control token is missing; refresh before start, stop, or restart.");
   });
+
+  it("blocks direct Launcher window closes while preserving controlled stop and restart", () => {
+    expect(routeSource).toContain("launcherCloseBlocked");
+    expect(routeSource).toContain("controlledCloseOperationInFlight");
+    expect(routeSource).toContain('lastControlOperation === "stop" || lastControlOperation === "restart"');
+    expect(routeSource).toContain("trackedCommand?.operation === \"stop\"");
+    expect(routeSource).toContain("trackedCommand?.operation === \"restart\"");
+    expect(routeSource).toContain("buildProjectWindowCloseBlockedTelemetry");
+    expect(routeSource).toContain("markControlledProjectLifecycleOperation(operation)");
+    expect(routeSource).toContain("clearControlledProjectLifecycleOperation()");
+    expect(routeSource).toContain('window.addEventListener("beforeunload", handleBeforeUnload)');
+  });
 });

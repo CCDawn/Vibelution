@@ -39,6 +39,13 @@ import { recoverFromBuiltAssetResourceError, recoverFromDynamicImportFetchError 
 import { nextWorkbenchTheme, readStoredWorkbenchTheme, writeStoredWorkbenchTheme } from "./themePreference";
 import { isWorkbenchDomainEnabled, isWorkbenchModeEnabled } from "./workbenchContract";
 import { requestWorkbenchExitGuard } from "./workbenchExitGuard";
+import {
+  applyBeforeUnloadProjectCloseGuard,
+  buildProjectWindowCloseBlockedTelemetry,
+  hasRecentControlledProjectLifecycleOperation,
+  projectWindowCloseGuardMessage,
+  shouldBlockWorkbenchWindowClose,
+} from "./projectCloseGuard";
 import { getPageInstanceId } from "./pageInstance";
 import styles from "./AppShell.module.css";
 import packageJson from "../../package.json";
@@ -357,6 +364,7 @@ export function AppShell() {
   const [frontendOnline, setFrontendOnline] = useState(
     () => (typeof navigator === "undefined" ? true : navigator.onLine),
   );
+  const [frontendRefreshRequested, setFrontendRefreshRequested] = useState(false);
   const [shellStartupDataReady, setShellStartupDataReady] = useState(false);
   const shutdownPromiseRef = useRef<Promise<void> | null>(null);
   const restartPromiseRef = useRef<Promise<void> | null>(null);
@@ -443,6 +451,7 @@ export function AppShell() {
     ? "The runtime manager could not restart the workbench. Check the launcher and runtime-manager logs."
     : "运行时管理器没有成功重启工作台。请检查 launcher 和 runtime-manager 日志。";
   const restartUnconfirmedBody = restartRequestUnconfirmedBody(lang);
+  const workbenchCloseGuardMessage = projectWindowCloseGuardMessage(lang, "workbench");
   const locale = lang === "zh" ? "zh-CN" : "en-US";
   const timezone = useMemo(
     () => Intl.DateTimeFormat().resolvedOptions().timeZone || (lang === "en" ? "Local time" : "本地时间"),
@@ -922,6 +931,7 @@ export function AppShell() {
   ]);
 
   const refreshFrontend = useCallback(() => {
+    setFrontendRefreshRequested(true);
     emitBrowserTelemetry(
       {
         phase: "refresh",
@@ -935,6 +945,43 @@ export function AppShell() {
     );
     window.setTimeout(() => window.location.reload(), 0);
   }, [emitBrowserTelemetry]);
+
+  useEffect(() => {
+    const closeBlocked = shouldBlockWorkbenchWindowClose({
+      controlledLifecycleOperationInFlight: hasRecentControlledProjectLifecycleOperation(),
+      frontendRefreshRequested,
+      restartRequested,
+      runtimeControllerState,
+      shutdownRequested,
+    });
+    if (!closeBlocked) {
+      return;
+    }
+
+    function handleBeforeUnload(event: BeforeUnloadEvent) {
+      if (hasRecentControlledProjectLifecycleOperation()) {
+        return;
+      }
+      emitBrowserTelemetry(
+        buildProjectWindowCloseBlockedTelemetry({
+          surface: "workbench",
+          runtimeControllerState,
+        }),
+        { preferBeacon: true },
+      );
+      applyBeforeUnloadProjectCloseGuard(event, workbenchCloseGuardMessage);
+    }
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [
+    emitBrowserTelemetry,
+    frontendRefreshRequested,
+    restartRequested,
+    runtimeControllerState,
+    shutdownRequested,
+    workbenchCloseGuardMessage,
+  ]);
 
   const toggleTheme = useCallback(() => {
     setTheme((current) => {

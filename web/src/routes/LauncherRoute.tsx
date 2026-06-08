@@ -12,7 +12,16 @@ import {
 } from "../api/launcher";
 import { queryKeys } from "../api/queryKeys";
 import type { LauncherComponentState, LauncherOperation, LauncherStartupSettings, WorkbenchWindowMode } from "../api/types";
+import { collectBrowserPageSnapshot, postBrowserTelemetry } from "../app/browserTelemetry";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
+import {
+  applyBeforeUnloadProjectCloseGuard,
+  buildProjectWindowCloseBlockedTelemetry,
+  clearControlledProjectLifecycleOperation,
+  markControlledProjectLifecycleOperation,
+  projectWindowCloseGuardMessage,
+  shouldBlockProjectWindowClose,
+} from "../app/projectCloseGuard";
 import { useShellI18n } from "../i18n/useShellI18n";
 import styles from "./LauncherRoute.module.css";
 
@@ -1120,8 +1129,12 @@ export function LauncherRoute() {
     },
     onMutate: (operation) => {
       setLastControlOperation(operation);
+      markControlledProjectLifecycleOperation(operation);
     },
     onSuccess: (response, operation) => {
+      if (!response.accepted) {
+        clearControlledProjectLifecycleOperation();
+      }
       setLastControlOperation(operation === "stop" && response.accepted ? "stop" : null);
       setTrackedCommand(response.accepted && response.commandId ? { commandId: response.commandId, operation } : null);
       setNotice({
@@ -1132,6 +1145,7 @@ export function LauncherRoute() {
       void queryClient.invalidateQueries({ queryKey: queryKeys.runtimeSummary() });
     },
     onError: (error) => {
+      clearControlledProjectLifecycleOperation();
       setLastControlOperation(null);
       setTrackedCommand(null);
       setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
@@ -1361,6 +1375,14 @@ export function LauncherRoute() {
   const trackedResult = trackedCommand
     ? (evidence?.results.recent ?? []).find((item) => item.commandId === trackedCommand.commandId)
     : undefined;
+  const launcherCloseGuardMessage = projectWindowCloseGuardMessage(lang, "launcher");
+  const controlledCloseOperationInFlight =
+    (controlMutation.isPending && (lastControlOperation === "stop" || lastControlOperation === "restart"))
+    || trackedCommand?.operation === "stop"
+    || trackedCommand?.operation === "restart";
+  const launcherCloseBlocked = shouldBlockProjectWindowClose(status, {
+    lifecycleOperationInFlight: controlledCloseOperationInFlight,
+  });
 
   useEffect(() => {
     if (!trackedCommand || !trackedResult) {
@@ -1373,7 +1395,35 @@ export function LauncherRoute() {
     }
     setTrackedCommand(null);
     setLastControlOperation(null);
+    clearControlledProjectLifecycleOperation();
   }, [notice.text, notice.tone, trackedCommand, trackedResult, uiLang]);
+
+  useEffect(() => {
+    if (!launcherCloseBlocked) {
+      return;
+    }
+
+    function handleBeforeUnload(event: BeforeUnloadEvent) {
+      const telemetry = buildProjectWindowCloseBlockedTelemetry({
+        surface: "launcher",
+        status,
+      });
+      postBrowserTelemetry(
+        {
+          ...telemetry,
+          fields: {
+            ...collectBrowserPageSnapshot(),
+            ...(telemetry.fields ?? {}),
+          },
+        },
+        { preferBeacon: true },
+      );
+      applyBeforeUnloadProjectCloseGuard(event, launcherCloseGuardMessage);
+    }
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [launcherCloseBlocked, launcherCloseGuardMessage, status]);
 
   return (
     <section className={styles.route} aria-label={copy.title}>
