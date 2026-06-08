@@ -95,6 +95,77 @@ def test_work_run_store_lists_snapshots_for_kind(tmp_path):
     assert [item["runId"] for item in snapshots] == ["chat_1", "chat_2"]
 
 
+def test_work_run_store_lists_recent_snapshots_from_index_without_full_scan(tmp_path, monkeypatch):
+    store = WorkRunStore(root=tmp_path / ".runtime" / "work_runs")
+
+    for index in range(5):
+        store.persist_snapshot(
+            "chat_turn",
+            {
+                "runId": f"chat_{index}",
+                "status": "completed",
+                "updatedAt": f"2026-06-08T00:0{index}:00Z",
+            },
+        )
+    stale_path = store.runs_dir("chat_turn") / "chat_0.json"
+    stale_path.unlink()
+    scanned = []
+    original_load_json = work_run_store._load_json
+
+    def capture_load(path):
+        scanned.append(path.name)
+        return original_load_json(path)
+
+    monkeypatch.setattr(work_run_store, "_load_json", capture_load)
+
+    snapshots = store.list_snapshots("chat_turn", limit=3)
+
+    assert [item["runId"] for item in snapshots] == ["chat_4", "chat_3", "chat_2"]
+    assert set(scanned) <= {"index.json", "chat_4.json", "chat_3.json", "chat_2.json"}
+
+
+def test_work_run_store_repairs_recent_index_for_existing_identical_snapshot(tmp_path):
+    store = WorkRunStore(root=tmp_path / ".runtime" / "work_runs")
+    snapshot = {
+        "runId": "chat_recent_repair",
+        "runKind": "chat_turn",
+        "status": "completed",
+        "updatedAt": "2026-06-08T00:00:00Z",
+    }
+    snapshot_path = store.runs_dir("chat_turn") / "chat_recent_repair.json"
+    snapshot_path.parent.mkdir(parents=True, exist_ok=True)
+    snapshot_path.write_text(json.dumps(snapshot, ensure_ascii=False), encoding="utf-8")
+    store.index_path("chat_turn").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "updatedAt": "2026-06-08T00:00:00Z",
+                "activeRunId": "",
+                "latestRunId": "chat_recent_repair",
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    store.persist_snapshot("chat_turn", snapshot)
+
+    assert store.load_run_index("chat_turn")["recentRunIds"] == ["chat_recent_repair"]
+
+
+def test_work_run_store_delete_snapshot_removes_recent_run_id(tmp_path):
+    store = WorkRunStore(root=tmp_path / ".runtime" / "work_runs")
+
+    store.persist_snapshot("chat_turn", {"runId": "chat_1", "status": "completed", "updatedAt": "2026-06-08T00:01:00Z"})
+    store.persist_snapshot("chat_turn", {"runId": "chat_2", "status": "completed", "updatedAt": "2026-06-08T00:02:00Z"})
+
+    store.delete_snapshot("chat_turn", "chat_2")
+
+    index = store.load_run_index("chat_turn")
+    assert index["latestRunId"] == "chat_1"
+    assert index["recentRunIds"] == ["chat_1"]
+
+
 def test_work_run_store_rejects_unsafe_kind_and_run_id(tmp_path):
     store = WorkRunStore(root=tmp_path / ".runtime" / "work_runs")
 
