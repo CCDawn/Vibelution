@@ -191,6 +191,7 @@ class PromptManager:
         "RUNTIME_LOG_INDEX",
         "SESSION_CHILD_ROUTING",
         "LANGUAGE_AWARENESS",
+        "DELEGATION_RULES",
     ]
     _FALLBACK_DEFAULT_SECTIONS = [
         "COMMON",
@@ -202,6 +203,7 @@ class PromptManager:
         "RUNTIME_LOG_INDEX",
         "SESSION_CHILD_ROUTING",
         "DELEGATION_RULES",
+        "DELEGATION_STATE",
         "MEMORY",
         "LANGUAGE_AWARENESS",
         "CONFIG_AWARENESS",
@@ -217,6 +219,7 @@ class PromptManager:
         "GIT_MEMORY",
         "RUNTIME_LOG_INDEX",
         "DELEGATION_RULES",
+        "DELEGATION_STATE",
         "CONFIG_AWARENESS",
         "LANGUAGE_AWARENESS",
         "SESSION_CHILD_ROUTING",

@@ -1160,6 +1160,7 @@ def test_stream_records_usage_and_cache_hit_rate(monkeypatch):
     assert fields["cachedInputTokens"] == 64
     assert fields["cacheHitRate"] == pytest.approx(0.64)
     assert fields["usageObserved"] is True
+    assert fields["usageMissingReason"] == ""
     assert fields["payloadShape"]["messageTextCharsByRole"] == {"user": len("ping")}
     assert fields["payloadShape"]["toolSchemaHash"] == ""
 
@@ -1341,6 +1342,7 @@ def test_stream_retries_without_usage_options_when_provider_rejects_them(monkeyp
     assert "llm.stream.usage_options_downgraded" in event_codes
     success_event = next(item for item in recorded if item[0][1] == "llm.stream.succeeded")
     assert success_event[1]["fields"]["usageObserved"] is False
+    assert success_event[1]["fields"]["usageMissingReason"] == "provider_usage_missing"
     assert success_event[1]["fields"]["protocol"]
     assert success_event[1]["fields"]["selectedProtocol"] == success_event[1]["fields"]["protocol"]
     assert success_event[1]["fields"]["payloadValidationResult"] == "passed"

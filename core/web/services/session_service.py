@@ -129,7 +129,7 @@ _SESSION_UI_CAPTURE_CONTEXT: ContextVar[dict[str, Any]] = ContextVar(
 )
 _SESSION_LIST_CACHE_LOCK = threading.Lock()
 _SESSION_LIST_CACHE_CONDITION = threading.Condition(_SESSION_LIST_CACHE_LOCK)
-_SESSION_LIST_CACHE_TTL_SECONDS = 1.5
+_SESSION_LIST_CACHE_TTL_SECONDS = 4.0
 _SESSION_LIST_CACHE: dict[str, Any] = {}
 _UNSET = object()
 _WORK_RUN_STORE = WorkRunStore()
@@ -157,6 +157,8 @@ _SESSION_IMAGE_ARTIFACT_CONTENT_TYPES = {
 }
 _SESSION_USER_IMAGE_MAX_BYTES = 8 * 1024 * 1024
 SESSION_USER_IMAGE_MAX_BYTES = _SESSION_USER_IMAGE_MAX_BYTES
+SESSION_PROMPT_CACHE_SCOPE_AGENT_STATIC = "chat_agent_static"
+SESSION_PROMPT_CACHE_SCOPE_SESSION_FALLBACK = "chat_session_fallback"
 
 
 def _perf_counter() -> float:
@@ -6052,21 +6054,53 @@ def _session_prompt_cache_partition(
     llm_slot: str = SESSION_LLM_SLOT_DIALOGUE,
     llm_model_id: str = "",
     model_id: str = "",
+    prompt_template_id: str = "",
 ) -> str:
     """Build a short stable provider cache shard for the ordinary chat flow."""
 
     normalized_model = str(llm_model_id or model_id or "").strip()
+    normalized_agent_id = str(agent_id or "").strip()
+    normalized_slot = str(llm_slot or SESSION_LLM_SLOT_DIALOGUE).strip() or SESSION_LLM_SLOT_DIALOGUE
+    normalized_template = str(prompt_template_id or "").strip()
+    if normalized_agent_id:
+        raw_parts = [
+            SESSION_PROMPT_CACHE_SCOPE_AGENT_STATIC,
+            normalized_agent_id,
+            normalized_slot,
+            normalized_model,
+            normalized_template,
+        ]
+        raw = "|".join(raw_parts)
+        digest = hashlib.sha256(raw.encode("utf-8", errors="replace")).hexdigest()[:16]
+        return f"chat-agent-static-{digest}"
+
     raw_parts = [
-        "chat",
+        SESSION_PROMPT_CACHE_SCOPE_SESSION_FALLBACK,
         str(session_id or "").strip(),
-        str(agent_id or "").strip(),
-        str(llm_slot or SESSION_LLM_SLOT_DIALOGUE).strip() or SESSION_LLM_SLOT_DIALOGUE,
+        normalized_slot,
         normalized_model,
     ]
     raw = "|".join(raw_parts)
     digest = hashlib.sha256(raw.encode("utf-8", errors="replace")).hexdigest()[:16]
-    session_token = _safe_session_workspace_token(session_id)[:24].strip("._-") or "session"
-    return f"chat-{session_token}-{digest}"
+    return f"chat-session-{digest}"
+
+
+def _session_prompt_cache_scope(*, agent_id: str = "") -> str:
+    if str(agent_id or "").strip():
+        return SESSION_PROMPT_CACHE_SCOPE_AGENT_STATIC
+    return SESSION_PROMPT_CACHE_SCOPE_SESSION_FALLBACK
+
+
+def _session_prompt_cache_log_fields(*, scope: str, partition: str) -> dict[str, Any]:
+    normalized_scope = str(scope or "").strip()
+    normalized_partition = str(partition or "").strip()
+    return {
+        "promptCacheScope": normalized_scope,
+        "promptCachePartition": normalized_partition,
+        "promptCachePartitionHash": _short_hash(normalized_partition),
+        "promptCachePartitionChars": len(normalized_partition),
+        "promptCacheSessionFallback": normalized_scope == SESSION_PROMPT_CACHE_SCOPE_SESSION_FALLBACK,
+    }
 
 
 def _is_session_busy_for_delete(conversation_id: str, conversation: dict[str, Any]) -> bool:
@@ -7094,7 +7128,9 @@ def _run_session_turn(context: dict[str, Any]) -> None:
         agent_id=agent_id,
         llm_slot=llm_slot,
         model_id=llm_model_id_for_turn,
+        prompt_template_id=str((agent_instance or {}).get("promptTemplateId") or "").strip(),
     )
+    prompt_cache_scope = _session_prompt_cache_scope(agent_id=agent_id)
     _record_session_turn_lifecycle_event(
         session_id,
         "worker_started",
@@ -7111,8 +7147,7 @@ def _run_session_turn(context: dict[str, Any]) -> None:
             "agentMemoryRoot": memory_root,
             "toolWorkspacePath": str(tool_workspace),
             "toolWorkspaceScope": str(getattr(workspace_decision, "scope", "") or ""),
-            "promptCacheScope": "chat_session",
-            "promptCachePartition": prompt_cache_partition,
+            **_session_prompt_cache_log_fields(scope=prompt_cache_scope, partition=prompt_cache_partition),
             "executorWaitMs": _elapsed_ms_between(context.get("_executor_submitted_at_monotonic"), prepare_started_at),
             "schedulerToWorkerStartedMs": _elapsed_ms_between(
                 context.get("_scheduler_started_at_monotonic") or context.get("_scheduler_scheduled_at_monotonic"),
@@ -7137,8 +7172,7 @@ def _run_session_turn(context: dict[str, Any]) -> None:
             "promptTemplateId": str((agent_instance or {}).get("promptTemplateId") or "").strip(),
             "roleKey": str((agent_instance or {}).get("roleKey") or "").strip(),
             "source": "AgentLlmBindings" if agent_instance else "missing_agent",
-            "promptCacheScope": "chat_session",
-            "promptCachePartition": prompt_cache_partition,
+            **_session_prompt_cache_log_fields(scope=prompt_cache_scope, partition=prompt_cache_partition),
             **(resolved_agent_llm.log_fields() if resolved_agent_llm is not None else {}),
         },
     )
@@ -7148,8 +7182,8 @@ def _run_session_turn(context: dict[str, Any]) -> None:
         turn_id=turn_id,
         outcome="bound",
         fields={
-            "scope": "chat_session",
-            "promptCachePartition": prompt_cache_partition,
+            "scope": prompt_cache_scope,
+            **_session_prompt_cache_log_fields(scope=prompt_cache_scope, partition=prompt_cache_partition),
             "agentId": agent_id,
             "llmSlot": llm_slot,
             "llmModelId": llm_model_id_for_turn,
@@ -7262,7 +7296,9 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                     agent_id=agent_id,
                     llm_slot=llm_slot,
                     llm_model_id=resolved_llm_model_id,
+                    prompt_template_id=agent_prompt_template_id,
                 )
+                prompt_cache_scope = _session_prompt_cache_scope(agent_id=agent_id)
                 _record_session_turn_lifecycle_event(
                     session_id,
                     "agent_created",
@@ -7277,8 +7313,7 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                         "llmModelId": resolved_llm_model_id,
                         "agentId": agent_id,
                         "promptTemplateId": agent_prompt_template_id,
-                        "promptCachePartitionHash": _short_hash(prompt_cache_partition),
-                        "promptCachePartitionChars": len(prompt_cache_partition),
+                        **_session_prompt_cache_log_fields(scope=prompt_cache_scope, partition=prompt_cache_partition),
                         "attachmentCount": len(attachments),
                         "agentCreateMs": agent_create_ms,
                         **(resolved_agent_llm.log_fields() if resolved_agent_llm is not None else {}),
@@ -7431,7 +7466,7 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                         attachments=llm_attachments,
                         user_message_source=str(context.get("user_message_source") or "").strip(),
                         prompt_cache_partition=prompt_cache_partition,
-                        prompt_cache_scope="chat_session",
+                        prompt_cache_scope=prompt_cache_scope,
                         agent_id=agent_id,
                         llm_slot=llm_slot,
                         llm_model_id=llm_model_id_for_turn,
@@ -7609,6 +7644,12 @@ def _attach_session_prompt_cache_metadata(
     metadata = dict(result.get("metadata") or {}) if isinstance(result.get("metadata"), dict) else {}
     metadata.setdefault("promptCacheScope", str(prompt_cache_scope or "").strip())
     metadata.setdefault("promptCachePartition", str(prompt_cache_partition or "").strip())
+    metadata.setdefault("promptCachePartitionHash", _short_hash(prompt_cache_partition))
+    metadata.setdefault("promptCachePartitionChars", len(str(prompt_cache_partition or "").strip()))
+    metadata.setdefault(
+        "promptCacheSessionFallback",
+        str(prompt_cache_scope or "").strip() == SESSION_PROMPT_CACHE_SCOPE_SESSION_FALLBACK,
+    )
     metadata.setdefault("llmModelId", str(llm_model_id or "").strip())
     result["metadata"] = metadata
     usage = result.get("llm_usage")
