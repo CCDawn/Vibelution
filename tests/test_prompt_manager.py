@@ -1271,6 +1271,7 @@ class TestFallbackDefaults:
             "RUNTIME_LOG_INDEX",
             "SESSION_CHILD_ROUTING",
             "DELEGATION_RULES",
+            "DELEGATION_STATE",
             "MEMORY",
             "LANGUAGE_AWARENESS",
             "CONFIG_AWARENESS",
