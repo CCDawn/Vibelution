@@ -237,6 +237,53 @@ def test_launcher_status_exposes_configured_control_plane_url(tmp_path, monkeypa
 
     assert payload["launcher"]["controlPlane"]["url"] == "http://127.0.0.1:8899/launcher"
     assert payload["launcher"]["controlPlane"]["port"] == 8899
+    assert payload["launcher"]["controlPlane"]["source"] == "state"
+
+
+def test_launcher_status_recovers_control_plane_url_when_control_surface_state_lost_url(tmp_path, monkeypatch):
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("[workbench]\nbackend_port = 8000\n[launcher]\ncontrol_port = 8899\n", encoding="utf-8")
+    launcher_state_path = tmp_path / ".runtime" / "launcher" / "state.json"
+    launcher_state_path.parent.mkdir(parents=True, exist_ok=True)
+    launcher_state_path.write_text(
+        json.dumps(
+            {
+                "sessionRole": "launcher_control_surface",
+                "launcherBackendPid": 87650,
+                "launcherBrowserWindowPid": 4567,
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(launcher_service, "CONFIG_PATH", config_path)
+    monkeypatch.setattr(launcher_service, "STATE_PATH", tmp_path / ".runtime" / "runtime-manager" / "state.json")
+    monkeypatch.setattr(launcher_service, "INBOX_DIR", tmp_path / ".runtime" / "runtime-manager" / "inbox")
+    monkeypatch.setattr(launcher_service, "PROCESSING_DIR", tmp_path / ".runtime" / "runtime-manager" / "processing")
+    monkeypatch.setattr(launcher_service, "RESULTS_DIR", tmp_path / ".runtime" / "runtime-manager" / "results")
+    monkeypatch.setattr(launcher_service, "EVENTS_PATH", tmp_path / ".runtime" / "runtime-manager" / "events.jsonl")
+    monkeypatch.setattr(launcher_service, "LAUNCHER_STATE_PATH", launcher_state_path)
+    monkeypatch.setattr(launcher_service, "load_state", lambda: {})
+    monkeypatch.setattr(launcher_service, "load_pid", lambda: 0)
+    monkeypatch.setattr(launcher_service, "_is_process_alive", lambda pid: int(pid) in {4567, 87650})
+    monkeypatch.setattr(
+        launcher_service,
+        "observe_workbench",
+        lambda: {
+            "observedState": "closed",
+            "sessionRole": "launcher_control_surface",
+            "backendAlive": False,
+            "backendHealthy": False,
+            "browserWindowAlive": False,
+            "browserManaged": False,
+            "url": "http://127.0.0.1:8000",
+        },
+    )
+
+    payload = launcher_service.get_launcher_status()
+
+    assert payload["launcher"]["controlPlane"]["url"] == "http://127.0.0.1:8899/launcher"
+    assert payload["launcher"]["controlPlane"]["port"] == 8899
+    assert payload["launcher"]["controlPlane"]["source"] == "config_recovered"
 
 
 def test_launcher_status_exposes_workbench_window_mode_setting(tmp_path, monkeypatch):

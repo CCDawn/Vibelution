@@ -2745,9 +2745,16 @@ $script:workbenchBrowserProfileDir = "workbench-profile"
 $script:savedState = $null
 $script:events = @()
 function Test-LauncherControlHealthy { return $true }
+function Test-ProcessAlive { param([int]$ProcessId) return $ProcessId -in @(87650, 4500) }
+function Get-PrimaryManagedLauncherControlPid { param([int]$FallbackPid = 0) return $FallbackPid }
 function Get-ManagedBrowserPids {
     param([string]$ProfileDir = "", [string]$Role = "workbench")
     if ($Role -eq "launcher_control_surface") { return @(4500) }
+    return @()
+}
+function Get-ManagedBrowserWindowProcesses {
+    param([string]$ProfileDir = "", [string]$Role = "workbench")
+    if ($Role -eq "launcher_control_surface") { return @([pscustomobject]@{ Id = 4500 }) }
     return @()
 }
 function Save-State { param($Payload) $script:savedState = $Payload }
@@ -2788,6 +2795,97 @@ Write-Output "ok"
     assert result.stdout.strip().splitlines()[-1] == "ok"
 
 
+def test_launcher_stop_rediscovers_control_surface_state_when_recorded_pids_are_lost(tmp_path):
+    result = _run_launcher_ast_harness(
+        tmp_path,
+        """
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$LauncherPath
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$source = Get-Content -Raw -LiteralPath $LauncherPath
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors -and $parseErrors.Count -gt 0) {
+    throw "Launcher script parse failed: $($parseErrors[0].Message)"
+}
+
+foreach ($functionName in @("Get-ObjectPropertyValue", "Restore-LauncherControlStateAfterWorkbenchStop")) {
+    $functionAst = $ast.Find({
+        param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+            $node.Name -eq $functionName
+    }, $true)
+    if ($null -eq $functionAst) {
+        throw "$functionName was not found."
+    }
+    . ([scriptblock]::Create($functionAst.Extent.Text))
+}
+
+$script:bindHost = "127.0.0.1"
+$script:port = 8000
+$script:url = "http://127.0.0.1:8000"
+$script:launcherControlPort = 8765
+$script:launcherControlUrl = "http://127.0.0.1:8765"
+$script:launcherBrowserProfileDir = "launcher-profile"
+$script:workbenchBrowserProfileDir = "workbench-profile"
+$script:savedState = $null
+$script:events = @()
+function Test-LauncherControlHealthy { return $true }
+function Test-ProcessAlive { param([int]$ProcessId) return $ProcessId -in @(87650, 4567) }
+function Get-PrimaryManagedLauncherControlPid { param([int]$FallbackPid = 0) return 87650 }
+function Get-ManagedBrowserPids {
+    param([string]$ProfileDir = "", [string]$Role = "workbench")
+    if ($Role -eq "launcher_control_surface") { return @(4567) }
+    return @()
+}
+function Get-ManagedBrowserWindowProcesses {
+    param([string]$ProfileDir = "", [string]$Role = "workbench")
+    if ($Role -eq "launcher_control_surface") { return @([pscustomobject]@{ Id = 4567 }) }
+    return @()
+}
+function Save-State { param($Payload) $script:savedState = $Payload }
+function Write-LauncherControlLog {
+    param([string]$Event, [string]$Message, [string]$Level = "info", [hashtable]$Fields = @{})
+    $script:events += ,@{ event = $Event; message = $Message; fields = $Fields }
+}
+
+$previousState = [pscustomobject]@{
+    sessionRole = "workbench"
+    sessionId = "session-1"
+    backendPid = 3001
+    backendLaunchPid = 3001
+    launcherBackendPid = 0
+    launcherBackendLaunchPid = 0
+    launcherBrowserLaunchPid = 0
+    launcherBrowserWindowPid = 0
+    workbenchBrowserLaunchPid = 3200
+    workbenchBrowserWindowPid = 3200
+}
+
+$restored = Restore-LauncherControlStateAfterWorkbenchStop -PreviousState $previousState
+if (-not $restored) { throw "control surface state was not restored from live probes." }
+if ($script:savedState.sessionRole -ne "launcher_control_surface") { throw "session role was not restored as launcher control surface." }
+if ($script:savedState.launcherBackendPid -ne 87650) { throw "live launcher backend pid was not discovered." }
+if ($script:savedState.launcherBackendLaunchPid -ne 87650) { throw "live launcher backend launch pid was not recovered." }
+if ($script:savedState.launcherBrowserLaunchPid -ne 4567) { throw "live launcher browser launch pid was not discovered." }
+if ($script:savedState.launcherBrowserWindowPid -ne 4567) { throw "live launcher browser window pid was not discovered." }
+if ($script:savedState.browserWindowPid -ne 4567) { throw "compat browser window pid should point at Launcher control surface." }
+if ($script:events[0].fields.launcher_backend_pid_source -ne "runtime_probe") { throw "state restoration should log runtime probe source." }
+
+Write-Output "ok"
+""",
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip().splitlines()[-1] == "ok"
+
+
 def test_launcher_runtime_manager_client_failure_exits_launcher(tmp_path):
     result = _run_launcher_ast_harness(
         tmp_path,
@@ -2818,6 +2916,48 @@ $scriptText = $ast.EndBlock.Extent.Text
     if ($scriptText -notmatch 'exit\\s+\\$clientExitCode') {
         throw "Runtime-manager client non-zero return code is not propagated."
     }
+Write-Output "ok"
+""",
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip().splitlines()[-1] == "ok"
+
+
+def test_launcher_start_action_is_labeled_as_workbench_start_not_control_surface_start(tmp_path):
+    result = _run_launcher_ast_harness(
+        tmp_path,
+        """
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$LauncherPath
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$source = Get-Content -Raw -LiteralPath $LauncherPath
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors -and $parseErrors.Count -gt 0) {
+    throw "Launcher script parse failed: $($parseErrors[0].Message)"
+}
+
+$scriptText = $ast.EndBlock.Extent.Text
+if ($scriptText -notmatch '"launcher"\\s*\\{\\s*Open-LauncherControlSurface\\s*\\}') {
+    throw "launcher action must open only the Launcher control surface."
+}
+if ($scriptText -notmatch '"start"\\s*\\{\\s*Write-LauncherControlLog[\\s\\S]*launcher\\.workbench\\.start\\.requested[\\s\\S]*CommandType "open_workbench"') {
+    throw "start action should be logged and routed as Workbench startup."
+}
+if ($scriptText -notmatch 'control_surface_action\\s*=\\s*"launcher"') {
+    throw "start action log should point users to launcher action for opening the control surface."
+}
+if ($scriptText -match '"start"\\s*\\{\\s*Open-LauncherControlSurface') {
+    throw "start action must not open the Launcher control surface directly."
+}
+
 Write-Output "ok"
 """,
     )

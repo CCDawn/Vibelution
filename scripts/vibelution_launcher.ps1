@@ -3663,6 +3663,19 @@ function Get-ManagedLauncherControlCandidatePids {
     return @($pids | Sort-Object -Unique)
 }
 
+function Get-PrimaryManagedLauncherControlPid {
+    param([int]$FallbackPid = 0)
+
+    $candidatePids = @(Get-ManagedLauncherControlCandidatePids)
+    if ($candidatePids.Count -gt 0) {
+        return [int]$candidatePids[0]
+    }
+    if ($FallbackPid -gt 0 -and (Test-ProcessAlive $FallbackPid)) {
+        return $FallbackPid
+    }
+    return 0
+}
+
 function Test-ProcessLooksLikeManagedBackend {
     param([int]$ProcessId)
 
@@ -5205,12 +5218,25 @@ function Restore-LauncherControlStateAfterWorkbenchStop {
         return $false
     }
 
-    $launcherBackendPid = [int](Get-ObjectPropertyValue -Object $PreviousState -Name "launcherBackendPid" -Default 0)
-    $launcherBackendLaunchPid = [int](Get-ObjectPropertyValue -Object $PreviousState -Name "launcherBackendLaunchPid" -Default 0)
+    $recordedLauncherBackendPid = [int](Get-ObjectPropertyValue -Object $PreviousState -Name "launcherBackendPid" -Default 0)
+    $recordedLauncherBackendLaunchPid = [int](Get-ObjectPropertyValue -Object $PreviousState -Name "launcherBackendLaunchPid" -Default 0)
+    $launcherBackendPid = Get-PrimaryManagedLauncherControlPid -FallbackPid $recordedLauncherBackendPid
+    $launcherBackendPidSource = if ($recordedLauncherBackendPid -gt 0 -and $launcherBackendPid -eq $recordedLauncherBackendPid) { "state" } elseif ($launcherBackendPid -gt 0) { "runtime_probe" } else { "none" }
+    $launcherBackendLaunchPid = if ($recordedLauncherBackendLaunchPid -gt 0 -and (Test-ProcessAlive $recordedLauncherBackendLaunchPid)) { $recordedLauncherBackendLaunchPid } else { $launcherBackendPid }
+    $launcherBrowserPids = @(Get-ManagedBrowserPids -ProfileDir $launcherBrowserProfileDir -Role "launcher_control_surface")
+    $launcherBrowserWindowProcesses = @(Get-ManagedBrowserWindowProcesses -ProfileDir $launcherBrowserProfileDir -Role "launcher_control_surface")
     $launcherBrowserLaunchPid = [int](Get-ObjectPropertyValue -Object $PreviousState -Name "launcherBrowserLaunchPid" -Default 0)
+    if ($launcherBrowserLaunchPid -le 0 -and $launcherBrowserPids.Count -gt 0) {
+        $launcherBrowserLaunchPid = [int]$launcherBrowserPids[0]
+    }
     $launcherBrowserWindowPid = [int](Get-ObjectPropertyValue -Object $PreviousState -Name "launcherBrowserWindowPid" -Default 0)
+    if ($launcherBrowserWindowPid -le 0 -and $launcherBrowserWindowProcesses.Count -gt 0) {
+        $launcherBrowserWindowPid = [int]$launcherBrowserWindowProcesses[0].Id
+    } elseif ($launcherBrowserWindowPid -le 0 -and $launcherBrowserPids.Count -gt 0) {
+        $launcherBrowserWindowPid = [int]$launcherBrowserPids[0]
+    }
     $hasLauncherBackend = [bool]($launcherBackendPid -gt 0 -and (Test-LauncherControlHealthy))
-    $hasLauncherBrowser = [bool](@(Get-ManagedBrowserPids -ProfileDir $launcherBrowserProfileDir -Role "launcher_control_surface").Count -gt 0)
+    $hasLauncherBrowser = [bool]($launcherBrowserPids.Count -gt 0)
     if (-not ($hasLauncherBackend -or $hasLauncherBrowser)) {
         return $false
     }
@@ -5255,7 +5281,9 @@ function Restore-LauncherControlStateAfterWorkbenchStop {
         -Message "Workbench state was cleared while preserving Launcher control surface state." `
         -Fields @{
             launcher_backend_pid = $launcherBackendPid
+            launcher_backend_pid_source = $launcherBackendPidSource
             launcher_browser_window_pid = $launcherBrowserWindowPid
+            launcher_browser_pid_count = [int]$launcherBrowserPids.Count
             launcher_control_url = "$launcherControlUrl/launcher"
         }
     return $true
@@ -6633,6 +6661,10 @@ if ($runtimeManagerClientActions -contains $Action) {
             $clientExitCode = Invoke-RuntimeManagerClient -Mode "command" -CommandType "toggle_workbench" -Reason "launcher_toggle" -ForwardNoBrowser:$NoBrowser
         }
         "start" {
+            Write-LauncherControlLog `
+                -Event "launcher.workbench.start.requested" `
+                -Message "Launcher CLI start requested Workbench startup through Runtime Manager." `
+                -Fields @{ action = $Action; command_type = "open_workbench"; control_surface_action = "launcher" }
             $clientExitCode = Invoke-RuntimeManagerClient -Mode "command" -CommandType "open_workbench" -Reason "launcher_start" -ForwardNoBrowser:$NoBrowser
         }
         "stop" {

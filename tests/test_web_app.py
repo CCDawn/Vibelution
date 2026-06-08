@@ -914,10 +914,12 @@ def test_launcher_start_queues_open_workbench_and_records_lifecycle(monkeypatch)
         ),
     ]
     event_codes = [item[0] for item in scene_events]
-    assert "launcher.bundle.start.requested" in event_codes
-    assert "launcher.bundle.start.accepted" in event_codes
-    accepted_event = next(item for item in scene_events if item[0] == "launcher.bundle.start.accepted")
+    assert "launcher.workbench.start.requested" in event_codes
+    assert "launcher.workbench.start.accepted" in event_codes
+    accepted_event = next(item for item in scene_events if item[0] == "launcher.workbench.start.accepted")
     assert accepted_event[1]["fields"]["commandId"] == "cmd-launcher-start"
+    assert accepted_event[1]["fields"]["commandType"] == "open_workbench"
+    assert payload["message"] == "正在通过 Launcher 启动 Workbench 工作台。"
 
 
 def test_launcher_restart_blocks_active_work(monkeypatch):

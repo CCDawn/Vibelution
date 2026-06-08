@@ -7,6 +7,7 @@ import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Literal, TypedDict
+from urllib.parse import urlparse
 
 from config.public_config import CONFIG_PATH, load_public_config, save_public_config
 from core.runtime_manager import ensure_daemon_running, submit_command
@@ -124,6 +125,7 @@ def get_launcher_status() -> dict[str, Any]:
 
     runtime_state = _runtime_manager_state()
     launcher_state = _load_launcher_state()
+    control_plane = _control_plane_payload(launcher_state)
     observed_workbench = _observed_workbench()
     workbench = _workbench_payload(runtime_state=runtime_state, observed_workbench=observed_workbench)
     active_work_runs = launcher_active_work_runs()
@@ -142,8 +144,9 @@ def get_launcher_status() -> dict[str, Any]:
                 "independent": True,
                 "adapter": "runtime_manager",
                 "nextPhase": "standalone_launcher_frontend",
-                "url": str(launcher_state.get("launcherControlUrl") or "").strip(),
-                "port": int(launcher_state.get("launcherControlPort") or 0),
+                "url": control_plane["url"],
+                "port": control_plane["port"],
+                "source": control_plane["source"],
             },
             "message": "Launcher 已作为独立控制面运行；项目工作台前后端现在是被管理对象。",
         },
@@ -252,6 +255,80 @@ def _read_workbench_window_mode_env_override() -> WorkbenchWindowMode | None:
     return None
 
 
+def _control_plane_payload(launcher_state: dict[str, Any]) -> dict[str, Any]:
+    state_url = str(launcher_state.get("launcherControlUrl") or "").strip()
+    state_port = _parse_control_port(launcher_state.get("launcherControlPort"))
+    if state_url and not state_port:
+        state_port = _port_from_url(state_url)
+    if state_url or state_port:
+        return {
+            "url": state_url or f"http://127.0.0.1:{state_port}/launcher",
+            "port": state_port,
+            "source": "state",
+        }
+
+    if str(launcher_state.get("sessionRole") or "").strip() != "launcher_control_surface":
+        return {"url": "", "port": 0, "source": "missing"}
+
+    configured_port = _read_configured_launcher_control_port()
+    return {
+        "url": f"http://127.0.0.1:{configured_port}/launcher",
+        "port": configured_port,
+        "source": "config_recovered",
+    }
+
+
+def _read_configured_launcher_control_port(default: int = 8765) -> int:
+    try:
+        public_config = load_public_config(CONFIG_PATH)
+    except Exception:
+        public_config = {}
+    launcher = public_config.get("launcher", {}) if isinstance(public_config, dict) else {}
+    configured_port = _parse_control_port(launcher.get("control_port") if isinstance(launcher, dict) else None)
+
+    for env_name in ("VIBELUTION_LAUNCHER_PORT", "AGENT_LAUNCHER_CONTROL_PORT"):
+        env_port = _parse_control_port(os.environ.get(env_name))
+        if env_port:
+            return _avoid_workbench_port_collision(env_port, default=default)
+
+    return _avoid_workbench_port_collision(configured_port or default, default=default)
+
+
+def _avoid_workbench_port_collision(port: int, *, default: int = 8765) -> int:
+    try:
+        public_config = load_public_config(CONFIG_PATH)
+    except Exception:
+        public_config = {}
+    workbench = public_config.get("workbench", {}) if isinstance(public_config, dict) else {}
+    workbench_port = _parse_control_port(workbench.get("backend_port") if isinstance(workbench, dict) else None) or 8000
+    for env_name in ("VIBELUTION_PORT", "AGENT_WORKBENCH_BACKEND_PORT"):
+        env_port = _parse_control_port(os.environ.get(env_name))
+        if env_port:
+            workbench_port = env_port
+            break
+    if port != workbench_port:
+        return port
+    candidate = default if default != workbench_port else workbench_port + 1
+    while candidate < 65536 and candidate == workbench_port:
+        candidate += 1
+    return candidate if candidate < 65536 else port
+
+
+def _parse_control_port(value: object) -> int:
+    try:
+        port = int(str(value or "").strip())
+    except (TypeError, ValueError):
+        return 0
+    return port if 0 < port < 65536 else 0
+
+
+def _port_from_url(value: str) -> int:
+    try:
+        return _parse_control_port(urlparse(value).port)
+    except ValueError:
+        return 0
+
+
 def launcher_active_work_runs() -> list[dict[str, str]]:
     """Return active project work from runtime-manager-owned files only."""
 
@@ -283,13 +360,13 @@ def launcher_active_work_runs() -> list[dict[str, str]]:
 
 
 def request_launcher_start() -> LauncherCommandResponse:
-    """Request the managed project bundle to start."""
+    """Request the managed Workbench bundle to start."""
 
     _record_launcher_event(
-        "launcher.bundle.start.requested",
+        "launcher.workbench.start.requested",
         phase="start",
-        message="Launcher project bundle start requested.",
-        fields={"source": "launcher_api"},
+        message="Launcher requested Workbench startup.",
+        fields={"source": "launcher_api", "commandType": "open_workbench", "controlSurfaceAction": "launcher"},
     )
     try:
         ensure_daemon_running()
@@ -300,9 +377,9 @@ def request_launcher_start() -> LauncherCommandResponse:
         )
     except Exception as exc:
         _record_launcher_event(
-            "launcher.bundle.start.failed",
+            "launcher.workbench.start.failed",
             phase="start",
-            message="Launcher project bundle start could not be queued.",
+            message="Workbench startup could not be queued.",
             outcome="failed",
             level="error",
             fields={"mode": "standalone_control_plane", "errorType": type(exc).__name__, "errorMessage": str(exc)},
@@ -311,11 +388,11 @@ def request_launcher_start() -> LauncherCommandResponse:
 
     command_id = str(command.get("commandId") or "")
     _record_launcher_event(
-        "launcher.bundle.start.accepted",
+        "launcher.workbench.start.accepted",
         phase="start",
-        message="Launcher project bundle start queued.",
+        message="Workbench startup queued through Runtime Manager.",
         outcome="accepted",
-        fields={"mode": "standalone_control_plane", "commandId": command_id},
+        fields={"mode": "standalone_control_plane", "commandId": command_id, "commandType": "open_workbench"},
     )
     return {
         "accepted": True,
@@ -323,7 +400,7 @@ def request_launcher_start() -> LauncherCommandResponse:
         "launcherMode": "standalone_control_plane",
         "operation": "start",
         "commandId": command_id,
-        "message": "正在通过 Launcher 启动项目整体。",
+        "message": "正在通过 Launcher 启动 Workbench 工作台。",
     }
 
 

@@ -187,6 +187,15 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("supervisorMutation.mutate()");
   });
 
+  it("labels start as Workbench startup instead of opening the Launcher control surface", () => {
+    expect(routeSource).toContain('useStartAction: "启动工作台"');
+    expect(routeSource).toContain('useStartAction: "Start Workbench"');
+    expect(routeSource).toContain("工作台未运行时，从这里启动后端、前端资源和工作台窗口。");
+    expect(routeSource).toContain("When the Workbench is closed, start backend, frontend assets, and the workbench window from here.");
+    expect(routeSource).not.toContain('useStartAction: "启动项目"');
+    expect(routeSource).not.toContain('useStartAction: "Start project"');
+  });
+
   it("lets Launcher choose the Workbench launch window mode without restarting immediately", () => {
     expect(routeSource).toContain("workbenchWindowSetting");
     expect(routeSource).toContain("configuredWindowMode");
