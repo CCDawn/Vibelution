@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.2 - 2026-06-08
+
+- Blocked direct Launcher and Workbench window closes while the managed project is still running, using browser beforeunload confirmation plus lifecycle telemetry.
+- Preserved controlled Launcher stop/restart flows by sharing a short-lived lifecycle-operation marker with the Workbench window.
+- Added regression coverage for running, partial, closed, and controlled lifecycle close-guard states.
+
 ## 1.0.1 - 2026-06-08
 
 - Fixed supervised-evolution judge marker extraction so prompt examples cannot override the real final judge response.
