@@ -75,6 +75,7 @@ function renderUtilityFileTree(
 export function AppShellUtilityMenu({ lang, t, frontendVisible, onClose }: AppShellUtilityMenuProps) {
   const navigate = useNavigate();
   const [utilityFileFilter, setUtilityFileFilter] = useState("");
+  const [fileTreeRequested, setFileTreeRequested] = useState(false);
   const activeSessionId = useChatWorkbenchStore((state) => state.activeSessionId);
   const activeSessionWorkspace = useChatWorkbenchStore((state) =>
     state.activeSessionId ? state.sessionWorkspaces[state.activeSessionId] : undefined,
@@ -90,7 +91,10 @@ export function AppShellUtilityMenu({ lang, t, frontendVisible, onClose }: AppSh
   const fileTreeQuery = useQuery({
     queryKey: queryKeys.fileTree(),
     queryFn: () => fetchJson<FileTreeNode[]>("/api/files/tree"),
-    staleTime: 8_000,
+    enabled: fileTreeRequested,
+    refetchOnWindowFocus: false,
+    staleTime: 30_000,
+    gcTime: 120_000,
   });
 
   const gitStatus = gitStatusQuery.data;
@@ -115,6 +119,9 @@ export function AppShellUtilityMenu({ lang, t, frontendVisible, onClose }: AppSh
   const gitTitle = gitAvailable
     ? `${t("gitStatus")}: ${gitStatus?.summary ?? ""}`
     : gitStatus?.error || t("gitUnavailable");
+  const requestUtilityFileTree = useCallback(() => {
+    setFileTreeRequested(true);
+  }, []);
   const handleUtilityOpenFile = useCallback((path: string) => {
     if (!activeSessionId) {
       navigate("/chat");
@@ -153,7 +160,10 @@ export function AppShellUtilityMenu({ lang, t, frontendVisible, onClose }: AppSh
           type="button"
           className={styles.utilityButton}
           role="menuitem"
-          onClick={() => document.getElementById("utility-file-navigator")?.scrollIntoView({ block: "nearest" })}
+          onClick={() => {
+            requestUtilityFileTree();
+            window.requestAnimationFrame(() => document.getElementById("utility-file-navigator")?.scrollIntoView({ block: "nearest" }));
+          }}
         >
           <FolderTree size={16} />
           <span>{t("files")}</span>
@@ -174,12 +184,20 @@ export function AppShellUtilityMenu({ lang, t, frontendVisible, onClose }: AppSh
           <Search size={14} />
           <input
             value={utilityFileFilter}
-            onChange={(event) => setUtilityFileFilter(event.target.value)}
+            onFocus={requestUtilityFileTree}
+            onChange={(event) => {
+              requestUtilityFileTree();
+              setUtilityFileFilter(event.target.value);
+            }}
             placeholder={t("searchFilesPlaceholder")}
           />
         </div>
         <div className={styles.utilityFileTree}>
-          {fileTreeQuery.isError ? (
+          {!fileTreeRequested ? (
+            <p className={styles.utilityFileState}>
+              {lang === "zh" ? "项目文件未载入。" : "Project files not loaded."}
+            </p>
+          ) : fileTreeQuery.isError ? (
             <p className={styles.utilityFileState}>{t("loadFailed")}</p>
           ) : fileTreeQuery.isPending && !fileTreeQuery.data ? (
             <p className={styles.utilityFileState}>{t("loadingFiles")}</p>
