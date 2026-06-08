@@ -1885,7 +1885,7 @@ function Get-WebDistTimeUtc {
 }
 
 function Acquire-LauncherMutex {
-    if ($Action -eq "supervise" -or $Action -eq "monitor") {
+    if ($Action -eq "supervise" -or $Action -eq "monitor" -or $Action.StartsWith("internal-")) {
         return
     }
 
@@ -1897,7 +1897,7 @@ function Acquire-LauncherMutex {
 }
 
 function Release-LauncherMutex {
-    if ($Action -eq "supervise" -or $Action -eq "monitor") {
+    if ($Action -eq "supervise" -or $Action -eq "monitor" -or $Action.StartsWith("internal-")) {
         return
     }
 
