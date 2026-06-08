@@ -9,6 +9,7 @@ import {
   reattachLauncherSupervisor,
   resetLauncherControlOriginForTests,
   restartLauncherBundle,
+  saveLauncherWorkbenchWindowMode,
   startLauncherBundle,
 } from "./launcher";
 
@@ -232,6 +233,45 @@ describe("launcher api helpers", () => {
     expect(fetchMock.mock.calls[1][0]).toBe("http://127.0.0.1:8765/api/launcher/supervisor/reattach");
     const requestInit = fetchMock.mock.calls[1][1] as RequestInit;
     expect(requestInit.method).toBe("POST");
+  });
+
+  it("saves workbench window mode through the launcher settings endpoint", async () => {
+    vi.stubGlobal("window", {
+      location: {
+        href: "http://127.0.0.1:8765/launcher",
+        origin: "http://127.0.0.1:8765",
+      },
+    });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          header: "X-Vibelution-Control-Token",
+          controlToken: "test-token",
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          ok: true,
+          mode: "windowed",
+          setting: { mode: "windowed", effectiveMode: "windowed", envOverride: "" },
+        }),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const payload = await saveLauncherWorkbenchWindowMode("windowed");
+
+    expect(payload.mode).toBe("windowed");
+    expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
+      "/api/control-token",
+      "/api/launcher/settings/workbench-window",
+    ]);
+    const requestInit = fetchMock.mock.calls[1][1] as RequestInit;
+    expect(requestInit.method).toBe("PUT");
+    expect((requestInit.headers as Headers).get("Content-Type")).toBe("application/json");
+    expect((requestInit.headers as Headers).get("X-Vibelution-Control-Token")).toBe("test-token");
+    expect(JSON.parse(String(requestInit.body))).toEqual({ mode: "windowed" });
   });
 
   it("cancels pending lifecycle commands through the workbench runtime API", async () => {
