@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.11.6 - 2026-06-08
+
+- Kept the Launcher control surface visible in status after Workbench stop/start failures by rediscovering live control-plane backend and browser processes when recorded PIDs were lost.
+- Clarified Launcher start semantics so `start` is logged and shown as Workbench startup, while `launcher` remains the control-surface entrypoint.
+- Added control-plane status source reporting so missing, state-derived, and config-recovered Launcher URLs can be distinguished.
+
 ## 0.11.5 - 2026-06-08
 
 - Kept Workbench shell and Chat startup data loading alive while the managed window is hidden, using a bounded startup warmup instead of permanent high-frequency background polling.

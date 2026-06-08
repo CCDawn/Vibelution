@@ -1989,6 +1989,7 @@ export type LauncherStatus = {
       nextPhase: string;
       url?: string;
       port?: number;
+      source?: "state" | "config_recovered" | "missing" | string;
     };
     message: string;
   };
