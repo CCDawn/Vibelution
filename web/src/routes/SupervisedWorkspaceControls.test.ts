@@ -5,6 +5,8 @@ import { getEffectiveIntakeMode } from "./SupervisedWorkspaceControls";
 
 const tabsSource = readFileSync(new URL("./SupervisedWorkspaceTabs.tsx", import.meta.url), "utf-8");
 const tabsStylesSource = readFileSync(new URL("./SupervisedWorkspaceTabs.module.css", import.meta.url), "utf-8");
+const controlsStylesSource = readFileSync(new URL("./SupervisedWorkspaceControls.module.css", import.meta.url), "utf-8");
+const evolutionStylesSource = readFileSync(new URL("./EvolutionRoute.module.css", import.meta.url), "utf-8");
 const evolutionRouteSource = readFileSync(new URL("./EvolutionRoute.tsx", import.meta.url), "utf-8");
 const dictionarySource = readFileSync(new URL("../i18n/dictionary.ts", import.meta.url), "utf-8");
 
@@ -38,6 +40,23 @@ describe("supervised workspace controls", () => {
     expect(tabsStylesSource).toContain("grid-template-columns: repeat(4");
     expect(tabsStylesSource).toContain(".stepHint");
     expect(tabsStylesSource).not.toContain(".segmentButton");
+  });
+
+  it("keeps the supervised flow rail on one dense row before mobile overflow", () => {
+    const compactBreakpoint = tabsStylesSource.slice(
+      tabsStylesSource.indexOf("@media (max-width: 1120px)"),
+      tabsStylesSource.indexOf("@media (max-width: 760px)"),
+    );
+
+    expect(tabsStylesSource).toContain("grid-template-columns: repeat(4, minmax(92px, 1fr))");
+    expect(tabsStylesSource).toContain("min-height: 38px");
+    expect(tabsStylesSource).toContain("display: none");
+    expect(compactBreakpoint).toContain("grid-template-columns: repeat(4, minmax(88px, 1fr))");
+    expect(compactBreakpoint).not.toContain("repeat(2");
+    expect(controlsStylesSource).toContain("min-height: 34px");
+    expect(controlsStylesSource).toContain("min-height: 26px");
+    expect(evolutionStylesSource).toContain("flex-wrap: nowrap");
+    expect(evolutionStylesSource).toContain("overflow-x: auto");
   });
 
   it("feeds live run, history, library, and review counts into the supervised flow tabs", () => {
