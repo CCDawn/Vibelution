@@ -427,6 +427,7 @@ def remove_agents_from_chat_rooms(
     agent_ids: list[str] | None,
     *,
     allow_empty_rooms: bool = False,
+    direct_session_ids_by_agent_id: dict[str, str] | None = None,
     include_chat_rooms: bool = True,
     repair_participants: bool = True,
 ) -> dict[str, Any]:
@@ -444,8 +445,14 @@ def remove_agents_from_chat_rooms(
     if not normalized_agent_ids:
         return {"agentIds": [], "changedRoomIds": [], "removedByAgentId": {}}
 
-    direct_session_ids_by_agent_id: dict[str, str] = {}
+    direct_session_ids_by_agent_id = {
+        str(agent_id or "").strip(): str(direct_session_id or "").strip()
+        for agent_id, direct_session_id in dict(direct_session_ids_by_agent_id or {}).items()
+        if str(agent_id or "").strip()
+    }
     for agent_id in normalized_agent_ids:
+        if agent_id in direct_session_ids_by_agent_id:
+            continue
         agent = agent_directory_service.get_agent(agent_id, include_archived=True)
         if isinstance(agent, dict):
             direct_session_ids_by_agent_id[agent_id] = str(agent.get("directSessionId") or "").strip()

@@ -8,6 +8,7 @@ from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
 from core.orchestration import context_engine
 from core.web.routes import agents as agents_route
 from core.web.services import (
+    agent_bulk_delete_service,
     agent_config_workspace_service,
     agent_directory_service,
     agent_tool_governance_service,
@@ -37,6 +38,7 @@ def _raw_mode_binding(mode: str):
 
 def _use_tmp_project_root(tmp_path, monkeypatch):
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_bulk_delete_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_mode_binding_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(prompt_template_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
@@ -1639,6 +1641,81 @@ def test_agent_purge_api_deletes_archived_agent_workspace_and_registry_record(tm
     assert [participant["agentId"] for participant in room_detail["participants"]] == [beta["agentId"]]
     team_detail = team_service.get_team(team["teamId"])
     assert [member["agentId"] for member in team_detail["members"]] == [beta["agentId"]]
+
+
+def test_agent_bulk_purge_api_removes_many_agents_with_one_reference_cleanup(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
+    alpha = session_service.create_chat_session(title="Bulk Alpha")
+    beta = session_service.create_chat_session(title="Bulk Beta")
+    gamma = session_service.create_chat_session(title="Bulk Gamma")
+    active = session_service.create_chat_session(title="Bulk Active")
+    agent_mode_binding_service.update_mode_binding(
+        "chat",
+        default_agent_id=alpha["agentId"],
+        available_agent_ids=[alpha["agentId"], beta["agentId"], gamma["agentId"], active["agentId"]],
+    )
+    room = chat_room_service.create_chat_room(
+        title="批量删除群聊",
+        participant_agent_ids=[alpha["agentId"], beta["agentId"], gamma["agentId"], active["agentId"]],
+    )
+    team = team_service.create_team(
+        name="批量删除团队",
+        members=[
+            {"agentId": alpha["agentId"], "role": "alpha"},
+            {"agentId": beta["agentId"], "role": "beta"},
+            {"agentId": active["agentId"], "role": "active"},
+        ],
+    )
+    for item in (alpha, beta, gamma):
+        agent_directory_service.archive_agent_instance(item["agentId"], repair_mode_bindings=False)
+
+    cleanup_calls = []
+    real_remove_agents_from_chat_rooms = agent_bulk_delete_service.remove_agents_from_chat_rooms
+
+    def tracked_remove_agents_from_chat_rooms(agent_ids, *, allow_empty_rooms=False, direct_session_ids_by_agent_id=None, **kwargs):
+        cleanup_calls.append(list(agent_ids))
+        return real_remove_agents_from_chat_rooms(
+            agent_ids,
+            allow_empty_rooms=allow_empty_rooms,
+            direct_session_ids_by_agent_id=direct_session_ids_by_agent_id,
+            **kwargs,
+        )
+
+    monkeypatch.setattr(agent_bulk_delete_service, "remove_agents_from_chat_rooms", tracked_remove_agents_from_chat_rooms)
+
+    response = client.post(
+        "/api/agents/bulk-purge",
+        json={"agentIds": [alpha["agentId"], beta["agentId"], active["agentId"], gamma["agentId"]]},
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["status"] == "completed"
+    assert payload["summary"]["requestedCount"] == 4
+    assert payload["summary"]["successCount"] == 3
+    assert payload["summary"]["skippedCount"] == 1
+    assert payload["summary"]["failedCount"] == 0
+    assert cleanup_calls == [[alpha["agentId"], beta["agentId"], gamma["agentId"]]]
+    assert [item["agentId"] for item in payload["success"]] == [alpha["agentId"], beta["agentId"], gamma["agentId"]]
+    assert payload["skipped"] == [
+        {"agentId": active["agentId"], "reason": "not_archived", "message": "Only archived Agents can be permanently deleted."}
+    ]
+    assert payload["cleanupSummary"]["removedFromRoomIds"] == [room["roomId"]]
+    assert payload["cleanupSummary"]["removedFromTeamIds"] == [team["teamId"]]
+    assert payload["timingsMs"]["remove_from_chat_rooms"] >= 0
+    for item in (alpha, beta, gamma):
+        assert agent_directory_service.get_agent(item["agentId"], include_archived=True) is None
+        detail = session_service.get_session_detail(item["id"])
+        assert detail["agentStatusCode"] == "deleted_agent"
+    assert agent_directory_service.get_agent(active["agentId"], include_archived=True)["status"] == "active"
+    room_detail = chat_room_service.get_chat_room_detail(room["roomId"])
+    assert [participant["agentId"] for participant in room_detail["participants"]] == [active["agentId"]]
+    team_detail = team_service.get_team(team["teamId"])
+    assert [member["agentId"] for member in team_detail["members"]] == [active["agentId"]]
+    bindings = agent_mode_binding_service.get_mode_bindings_payload()["modes"]
+    assert bindings["chat"]["defaultAgentId"] == active["agentId"]
+    assert bindings["chat"]["availableAgentIds"] == [active["agentId"]]
 
 
 def test_agent_purge_api_rejects_active_agent_without_reference_cleanup(tmp_path, monkeypatch):

@@ -216,6 +216,31 @@ type AgentActivityTimelineItem = {
   canOpenLogs: boolean;
   evidence: AgentRuntimeEvidenceMatch | null;
 };
+type AgentBulkActionItem = {
+  agentId: string;
+  reason?: string;
+  message?: string;
+  status?: string;
+  deleted?: boolean;
+  archiveSummary?: Record<string, unknown>;
+  purgeSummary?: Record<string, unknown>;
+};
+type AgentBulkActionResponse = {
+  status: string;
+  requestedAgentIds: string[];
+  success: AgentBulkActionItem[];
+  skipped: AgentBulkActionItem[];
+  failed: AgentBulkActionItem[];
+  summary: {
+    requestedCount: number;
+    successCount: number;
+    skippedCount: number;
+    failedCount: number;
+  };
+  cleanupSummary?: Record<string, unknown>;
+  timingsMs?: Record<string, number>;
+  durationMs?: number;
+};
 type ModelProfileChoice = {
   key: string;
   modelId: string;
@@ -1073,6 +1098,44 @@ function purgedWorkspaceCache(
       ...workspace.summary,
       activeAgentCount: wasActive ? Math.max(0, workspace.summary.activeAgentCount - 1) : workspace.summary.activeAgentCount,
       archivedAgentCount: wasArchived ? Math.max(0, workspace.summary.archivedAgentCount - 1) : workspace.summary.archivedAgentCount,
+    },
+  };
+}
+
+function bulkPurgeWorkspaceCache(
+  workspace: AgentConfigWorkspace | undefined,
+  bulkResponse: AgentBulkActionResponse,
+): AgentConfigWorkspace | undefined {
+  if (!workspace) {
+    return workspace;
+  }
+  const purgedAgentIds = new Set(
+    bulkResponse.success
+      .map((item) => String(item.agentId || "").trim())
+      .filter(Boolean),
+  );
+  if (!purgedAgentIds.size) {
+    return workspace;
+  }
+  const removedAgents = workspace.agents.filter((agent) => purgedAgentIds.has(agent.agentId));
+  const removedActiveCount = removedAgents.filter((agent) => agent.status !== "archived").length;
+  const removedArchivedCount = removedAgents.filter((agent) => agent.status === "archived").length;
+  const nextGroups = workspace.groups.map((group) => {
+    const agentIds = group.agentIds.filter((id) => !purgedAgentIds.has(id));
+    return {
+      ...group,
+      agentIds,
+      count: agentIds.length,
+    };
+  });
+  return {
+    ...workspace,
+    agents: workspace.agents.filter((agent) => !purgedAgentIds.has(agent.agentId)),
+    groups: nextGroups,
+    summary: {
+      ...workspace.summary,
+      activeAgentCount: Math.max(0, workspace.summary.activeAgentCount - removedActiveCount),
+      archivedAgentCount: Math.max(0, workspace.summary.archivedAgentCount - removedArchivedCount),
     },
   };
 }
@@ -2969,6 +3032,17 @@ function agentBulkActionSummary(action: string, success: number, skipped: number
   return preview ? `${action}: ${parts.join(" / ")}。${preview}` : `${action}: ${parts.join(" / ")}`;
 }
 
+function agentBulkActionItemNote(
+  item: AgentBulkActionItem,
+  agentsById: Map<string, AgentConfigWorkspaceAgent>,
+  fallback: string,
+) {
+  const agentId = String(item.agentId || "").trim();
+  const label = agentLabel(agentsById.get(agentId)) || agentId || "-";
+  const message = String(item.message || item.reason || fallback || "").trim();
+  return message ? `${label}: ${message}` : label;
+}
+
 export function AgentsRoute() {
   const { lang } = useShellI18n();
   const queryClient = useQueryClient();
@@ -4143,42 +4217,49 @@ export function AgentsRoute() {
     }
 
     setBulkAgentPending(true);
-    let success = 0;
-    let skipped = 0;
-    let failed = 0;
     const notes: string[] = [];
+    const archivedAgents = selectedBulkAgents.filter((agent) => agent.status === "archived");
+    const protectedAgents = selectedBulkAgents.filter((agent) => agent.status !== "archived" && agentArchiveProtected(agent));
+    const archiveAgents = selectedBulkAgents.filter((agent) => agent.status !== "archived" && !agentArchiveProtected(agent));
+    archivedAgents.forEach((agent) => notes.push(`${agentLabel(agent)}: ${copy.bulkSkippedArchived}`));
+    protectedAgents.forEach((agent) => notes.push(`${agentLabel(agent)}: ${copy.bulkSkippedProtected}`));
+    const agentsById = new Map(selectedBulkAgents.map((agent) => [agent.agentId, agent]));
+    let success = 0;
+    let skipped = archivedAgents.length + protectedAgents.length;
+    let failed = 0;
     let archivedSelectedAgent = false;
 
-    for (const agent of selectedBulkAgents) {
-      if (agent.status === "archived") {
-        skipped += 1;
-        notes.push(`${agentLabel(agent)}: ${copy.bulkSkippedArchived}`);
-        continue;
-      }
-      if (agentArchiveProtected(agent)) {
-        skipped += 1;
-        notes.push(`${agentLabel(agent)}: ${copy.bulkSkippedProtected}`);
-        continue;
-      }
-      try {
-        const archivedAgent = await fetchJson<AgentConfigWorkspaceAgent>(`/api/agents/${encodeURIComponent(agent.agentId)}`, {
-          method: "DELETE",
+    try {
+      if (archiveAgents.length) {
+        const response = await fetchJson<AgentBulkActionResponse>("/api/agents/bulk-archive", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ agentIds: archiveAgents.map((agent) => agent.agentId) }),
         });
-        queryClient.setQueryData<AgentConfigWorkspace | undefined>(
-          queryKeys.agentConfigWorkspace(),
-          (current) => archivedWorkspaceCache(current, archivedAgent),
-        );
-        if (agent.agentId === selectedAgent?.agentId) {
-          archivedSelectedAgent = true;
-        }
-        success += 1;
-      } catch (error) {
-        failed += 1;
-        notes.push(`${agentLabel(agent)}: ${error instanceof Error ? error.message : String(error)}`);
+        response.success.forEach((item) => {
+          const archivedAgent = item as AgentConfigWorkspaceAgent;
+          if (archivedAgent.agentId === selectedAgent?.agentId) {
+            archivedSelectedAgent = true;
+          }
+          if (archivedAgent.agentId) {
+            queryClient.setQueryData<AgentConfigWorkspace | undefined>(
+              queryKeys.agentConfigWorkspace(),
+              (current) => archivedWorkspaceCache(current, archivedAgent),
+            );
+          }
+        });
+        response.skipped.forEach((item) => notes.push(agentBulkActionItemNote(item, agentsById, copy.bulkSkippedArchived)));
+        response.failed.forEach((item) => notes.push(agentBulkActionItemNote(item, agentsById, "")));
+        success += response.summary.successCount;
+        skipped += response.summary.skippedCount;
+        failed += response.summary.failedCount;
       }
+    } catch (error) {
+      failed += archiveAgents.length;
+      notes.push(error instanceof Error ? error.message : String(error));
     }
 
-    if (archivedSelectedAgent) {
+    if (archivedSelectedAgent && success > 0) {
       setSelectedAgentId("");
       setActivePane("overview");
     }
@@ -4205,43 +4286,42 @@ export function AgentsRoute() {
     }
 
     setBulkAgentPending(true);
-    let success = 0;
-    let skipped = 0;
-    let failed = 0;
     const notes: string[] = [];
+    const protectedAgents = selectedBulkAgents.filter((agent) => agentArchiveProtected(agent));
+    const activeAgents = selectedBulkAgents.filter((agent) => !agentArchiveProtected(agent) && agent.status !== "archived");
+    const purgeAgents = selectedBulkAgents.filter((agent) => !agentArchiveProtected(agent) && agent.status === "archived");
+    protectedAgents.forEach((agent) => notes.push(`${agentLabel(agent)}: ${copy.bulkSkippedProtected}`));
+    activeAgents.forEach((agent) => notes.push(`${agentLabel(agent)}: ${copy.bulkSkippedActive}`));
+    const agentsById = new Map(selectedBulkAgents.map((agent) => [agent.agentId, agent]));
+    let success = 0;
+    let skipped = protectedAgents.length + activeAgents.length;
+    let failed = 0;
     let purgedSelectedAgent = false;
 
-    for (const agent of selectedBulkAgents) {
-      if (agentArchiveProtected(agent)) {
-        skipped += 1;
-        notes.push(`${agentLabel(agent)}: ${copy.bulkSkippedProtected}`);
-        continue;
-      }
-      if (agent.status !== "archived") {
-        skipped += 1;
-        notes.push(`${agentLabel(agent)}: ${copy.bulkSkippedActive}`);
-        continue;
-      }
-      try {
-        const result = await fetchJson<{ agentId: string; status: string; deleted: boolean; purgeSummary?: { dataRetention?: string } }>(
-          `/api/agents/${encodeURIComponent(agent.agentId)}/purge`,
-          { method: "DELETE" },
-        );
+    try {
+      if (purgeAgents.length) {
+        const response = await fetchJson<AgentBulkActionResponse>("/api/agents/bulk-purge", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ agentIds: purgeAgents.map((agent) => agent.agentId) }),
+        });
         queryClient.setQueryData<AgentConfigWorkspace | undefined>(
           queryKeys.agentConfigWorkspace(),
-          (current) => purgedWorkspaceCache(current, result.agentId),
+          (current) => bulkPurgeWorkspaceCache(current, response),
         );
-        if (agent.agentId === selectedAgent?.agentId) {
-          purgedSelectedAgent = true;
-        }
-        success += 1;
-      } catch (error) {
-        failed += 1;
-        notes.push(`${agentLabel(agent)}: ${error instanceof Error ? error.message : String(error)}`);
+        purgedSelectedAgent = response.success.some((item) => item.agentId === selectedAgent?.agentId);
+        response.skipped.forEach((item) => notes.push(agentBulkActionItemNote(item, agentsById, copy.bulkSkippedActive)));
+        response.failed.forEach((item) => notes.push(agentBulkActionItemNote(item, agentsById, "")));
+        success += response.summary.successCount;
+        skipped += response.summary.skippedCount;
+        failed += response.summary.failedCount;
       }
+    } catch (error) {
+      failed += purgeAgents.length;
+      notes.push(error instanceof Error ? error.message : String(error));
     }
 
-    if (purgedSelectedAgent) {
+    if (purgedSelectedAgent && success > 0) {
       setSelectedAgentId("");
       setActivePane("overview");
     }
