@@ -108,9 +108,53 @@ def _wait_for_health(port: int, host: str, timeout_seconds: float = 45.0) -> boo
     return False
 
 
+def _windows_creation_flags() -> int:
+    if os.name != "nt":
+        return 0
+    flags = 0
+    for name in ("DETACHED_PROCESS", "CREATE_NEW_PROCESS_GROUP", "CREATE_NO_WINDOW"):
+        flags |= int(getattr(subprocess, name, 0))
+    return flags
+
+
+def _hidden_startup_info() -> subprocess.STARTUPINFO | None:
+    if os.name != "nt" or not hasattr(subprocess, "STARTUPINFO"):
+        return None
+    startupinfo = subprocess.STARTUPINFO()
+    startupinfo.dwFlags |= int(getattr(subprocess, "STARTF_USESHOWWINDOW", 0))
+    startupinfo.wShowWindow = int(getattr(subprocess, "SW_HIDE", 0))
+    return startupinfo
+
+
+def _process_output_tail(value: str, *, max_lines: int = 20, max_chars: int = 4000) -> str:
+    lines = [line.rstrip() for line in str(value or "").splitlines() if line.strip()]
+    text = "\n".join(lines[-max_lines:])
+    if len(text) > max_chars:
+        return text[-max_chars:]
+    return text
+
+
 def _run_checked(args: list[str], *, cwd: Path, label: str) -> None:
-    result = subprocess.run(args, cwd=str(cwd), check=False)
+    result = subprocess.run(
+        args,
+        cwd=str(cwd),
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        creationflags=_windows_creation_flags(),
+        startupinfo=_hidden_startup_info(),
+        check=False,
+    )
     if result.returncode != 0:
+        _append_frontend_build_log(
+            {
+                "event": "frontend_build.command_failed",
+                "command": label,
+                "exitCode": int(result.returncode),
+                "stdoutTail": _process_output_tail(result.stdout),
+                "stderrTail": _process_output_tail(result.stderr),
+            }
+        )
         raise RuntimeError(f"{label} failed with exit code {result.returncode}.")
 
 
@@ -163,6 +207,40 @@ def _frontend_package_manager() -> str:
     return "bun" if value == "bun" else "npm"
 
 
+def _select_no_console_python(executable: str) -> dict[str, object]:
+    raw = str(executable or "").strip()
+    result: dict[str, object] = {
+        "pythonExecutable": raw,
+        "sourcePythonExecutable": raw,
+        "consoleWindowSuppressed": False,
+        "consoleFallbackReason": "empty_python_executable",
+    }
+    if not raw:
+        return result
+    if os.name != "nt":
+        result["consoleFallbackReason"] = "non_windows"
+        return result
+
+    candidate = Path(raw)
+    if candidate.name.lower() == "pythonw.exe":
+        result["pythonExecutable"] = str(candidate.resolve()) if candidate.exists() else raw
+        result["consoleWindowSuppressed"] = True
+        result["consoleFallbackReason"] = ""
+        return result
+
+    sibling = candidate.with_name("pythonw.exe")
+    if sibling.exists():
+        result["pythonExecutable"] = str(sibling.resolve())
+        result["consoleWindowSuppressed"] = True
+        result["consoleFallbackReason"] = ""
+        return result
+
+    if candidate.exists():
+        result["pythonExecutable"] = str(candidate.resolve())
+    result["consoleFallbackReason"] = "pythonw_sibling_missing"
+    return result
+
+
 def _ensure_frontend_build() -> None:
     web_dir = PROJECT_ROOT / "web"
     if not web_dir.exists():
@@ -193,8 +271,10 @@ def _start_backend(port: int, host: str, *, no_browser: bool) -> dict:
     _ensure_frontend_build()
     stdout = BACKEND_STDOUT_PATH.open("ab")
     stderr = BACKEND_STDERR_PATH.open("ab")
+    python_runtime = _select_no_console_python(sys.executable)
+    python_command = str(python_runtime["pythonExecutable"])
     args = [
-        sys.executable,
+        python_command,
         str(PROJECT_ROOT / "scripts" / "web_workbench.py"),
         "--host",
         host,
@@ -214,6 +294,8 @@ def _start_backend(port: int, host: str, *, no_browser: bool) -> dict:
         stdout=stdout,
         stderr=stderr,
         start_new_session=True,
+        creationflags=_windows_creation_flags(),
+        startupinfo=_hidden_startup_info(),
     )
     stdout.close()
     stderr.close()
@@ -238,6 +320,10 @@ def _start_backend(port: int, host: str, *, no_browser: bool) -> dict:
         "failureMessage": "",
         "lastReason": "python_launcher_start",
         "lastSource": "python_launcher",
+        "pythonExecutable": python_command,
+        "sourcePythonExecutable": str(python_runtime["sourcePythonExecutable"]),
+        "consoleWindowSuppressed": bool(python_runtime["consoleWindowSuppressed"]),
+        "consoleFallbackReason": str(python_runtime["consoleFallbackReason"]),
         "updatedAt": _now_iso(),
     }
     _write_state(state)
