@@ -2070,11 +2070,10 @@ function Wait-ForBackendHealthy {
 
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     while ((Get-Date) -lt $deadline) {
-        $liveness = Get-ManagedBackendLiveness -TrackedPid $ProcessId
-        if ($liveness.Healthy) {
+        if (Test-WebHealthy) {
             return $true
         }
-        Start-Sleep -Milliseconds 500
+        Start-Sleep -Milliseconds 250
     }
     return $false
 }
