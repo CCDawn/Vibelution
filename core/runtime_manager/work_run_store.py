@@ -16,6 +16,7 @@ from .constants import RUNTIME_MANAGER_DIR
 
 
 WORK_RUNS_DIR = RUNTIME_MANAGER_DIR / "work_runs"
+RECENT_RUN_IDS_LIMIT = 100
 WRITE_RETRY_TIMEOUT_SECONDS = 5.0
 READ_RETRY_ATTEMPTS = 5
 READ_RETRY_DELAY_SECONDS = 0.05
@@ -80,6 +81,7 @@ def _default_index() -> dict[str, Any]:
         "updatedAt": now,
         "activeRunId": "",
         "latestRunId": "",
+        "recentRunIds": [],
     }
 
 
@@ -172,6 +174,35 @@ def _snapshot_blocks_active_index(payload: dict[str, Any]) -> bool:
     return bool(status)
 
 
+def _bounded_recent_run_ids(values: Any, latest_run_id: str = "") -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    raw_values = values if isinstance(values, list) else []
+    for raw_run_id in [latest_run_id, *raw_values]:
+        run_id = str(raw_run_id or "").strip()
+        if not run_id or run_id in seen:
+            continue
+        try:
+            normalized = normalize_run_id(run_id)
+        except ValueError:
+            continue
+        seen.add(normalized)
+        result.append(normalized)
+        if len(result) >= RECENT_RUN_IDS_LIMIT:
+            break
+    return result
+
+
+def _bounded_snapshot_limit(limit: int | None) -> int | None:
+    if limit is None:
+        return None
+    try:
+        value = int(limit)
+    except (TypeError, ValueError):
+        value = 1
+    return max(1, value)
+
+
 def _record_work_run_event(
     phase: str,
     event_code: str,
@@ -239,14 +270,21 @@ class WorkRunStore:
         *,
         active_run_id: str = "",
         latest_run_id: str = "",
+        recent_run_ids: Iterable[str] | None = None,
         emit_event: bool = True,
     ) -> dict[str, Any]:
         payload = self.load_run_index(run_kind)
+        next_latest_run_id = str(latest_run_id or "").strip()
+        next_recent_run_ids = _bounded_recent_run_ids(
+            payload.get("recentRunIds") if recent_run_ids is None else recent_run_ids,
+            latest_run_id=next_latest_run_id,
+        )
         payload.update(
             {
                 "updatedAt": _now_iso(),
                 "activeRunId": str(active_run_id or "").strip(),
-                "latestRunId": str(latest_run_id or "").strip(),
+                "latestRunId": next_latest_run_id,
+                "recentRunIds": next_recent_run_ids,
             }
         )
         self.ensure_kind_dirs(run_kind)
@@ -259,7 +297,8 @@ class WorkRunStore:
                 run_id=str(latest_run_id or active_run_id or "").strip(),
                 fields={
                     "activeRunId": str(active_run_id or "").strip(),
-                    "latestRunId": str(latest_run_id or "").strip(),
+                    "latestRunId": next_latest_run_id,
+                    "recentRunCount": len(next_recent_run_ids),
                     "indexPath": str(self.index_path(run_kind)),
                 },
                 message="Work run index saved.",
@@ -314,9 +353,12 @@ class WorkRunStore:
         )
         current_signature = _snapshot_lifecycle_signature(payload, active_run_id=effective_active_run_id)
         current_index = self.load_run_index(run_kind)
+        current_recent_run_ids = _bounded_recent_run_ids(current_index.get("recentRunIds"))
         index_already_current = (
             str(current_index.get("activeRunId") or "").strip() == effective_active_run_id
             and str(current_index.get("latestRunId") or "").strip() == run_id
+            and bool(current_recent_run_ids)
+            and current_recent_run_ids[0] == run_id
         )
         if previous_payload == payload:
             if not index_already_current:
@@ -329,7 +371,7 @@ class WorkRunStore:
             return payload
         self.ensure_kind_dirs(run_kind)
         _atomic_write_json(self.runs_dir(run_kind) / f"{run_id}.json", payload)
-        self.save_run_index(run_kind, active_run_id=effective_active_run_id, latest_run_id=run_id, emit_event=False)
+        saved_index = self.save_run_index(run_kind, active_run_id=effective_active_run_id, latest_run_id=run_id, emit_event=False)
         status = str(payload.get("status") or "").strip()
         phase = str(payload.get("phase") or payload.get("currentPhase") or "").strip()
         lifecycle_status = status in {
@@ -367,6 +409,7 @@ class WorkRunStore:
                 "finishedAt": str(payload.get("finishedAt") or "").strip(),
                 "errorType": str(payload.get("errorType") or "").strip(),
                 "error": str(payload.get("error") or "").strip(),
+                "recentRunCount": len(saved_index.get("recentRunIds") or []),
                 "snapshotPath": str(self.runs_dir(run_kind) / f"{run_id}.json"),
             },
             message=f"Work run snapshot persisted: {run_kind}/{run_id} {status or 'unknown'}",
@@ -402,16 +445,30 @@ class WorkRunStore:
             return None
         return max(candidates, key=_run_sort_key)
 
-    def list_snapshots(self, run_kind: str) -> list[dict[str, Any]]:
+    def list_snapshots(self, run_kind: str, *, limit: int | None = None) -> list[dict[str, Any]]:
         runs_dir = self.runs_dir(run_kind)
         if not runs_dir.exists():
             return []
+        bounded_limit = _bounded_snapshot_limit(limit)
+        if bounded_limit is not None:
+            index = self.load_run_index(run_kind)
+            raw_recent_run_ids = index.get("recentRunIds")
+            index_recent_run_ids = _bounded_recent_run_ids(raw_recent_run_ids)[:bounded_limit]
+            if index_recent_run_ids:
+                snapshots: list[dict[str, Any]] = []
+                for run_id in index_recent_run_ids:
+                    payload = self.load_snapshot(run_kind, run_id)
+                    if payload:
+                        snapshots.append(payload)
+                return snapshots[:bounded_limit]
         snapshots: list[dict[str, Any]] = []
         for path in sorted(runs_dir.glob("*.json")):
             payload = _load_json(path)
             if payload:
                 snapshots.append(payload)
-        return snapshots
+        if bounded_limit is None:
+            return snapshots
+        return sorted(snapshots, key=_run_sort_key, reverse=True)[:bounded_limit]
 
     def delete_snapshot(self, run_kind: str, run_id: str) -> dict[str, Any]:
         normalized = normalize_run_id(run_id)
@@ -432,6 +489,11 @@ class WorkRunStore:
         cleared_latest = latest_run_id == normalized
         next_active_id = "" if cleared_active else active_run_id
         next_latest_id = latest_run_id
+        next_recent_run_ids = [
+            run_id
+            for run_id in _bounded_recent_run_ids(index.get("recentRunIds"))
+            if run_id != normalized
+        ]
 
         if cleared_latest:
             candidates: list[dict[str, Any]] = []
@@ -444,7 +506,12 @@ class WorkRunStore:
             next_latest_id = str(max(candidates, key=_run_sort_key).get("runId") or "") if candidates else ""
 
         if existed or cleared_active or cleared_latest:
-            self.save_run_index(run_kind, active_run_id=next_active_id, latest_run_id=next_latest_id)
+            self.save_run_index(
+                run_kind,
+                active_run_id=next_active_id,
+                latest_run_id=next_latest_id,
+                recent_run_ids=next_recent_run_ids,
+            )
 
         _record_work_run_event(
             "state",
