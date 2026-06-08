@@ -1069,21 +1069,24 @@ h2 { margin: 0; font: 700 29px/1.15 var(--serif); }
 .graph-lane.top-lane { top: 36px; }
 .graph-lane.mid-lane { top: 260px; }
 .graph-lane.bottom-lane { top: 640px; }
+.workbench-grid .graph-lane.top-lane { top: 20px; }
+.workbench-grid .graph-lane.mid-lane { top: 154px; }
+.workbench-grid .graph-lane.bottom-lane { top: 281px; }
 .graph-legend {
   display: flex;
   flex-wrap: wrap;
   gap: 7px;
-  margin-top: 10px;
+  margin-top: 8px;
 }
 .legend-chip {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 9px;
+  padding: 5px 8px;
   color: var(--muted);
-  background: #fbf7ee;
+  background: #fbfdf9;
   border: 1px solid var(--line);
-  font: 12px var(--mono);
+  font: 11px var(--mono);
 }
 .legend-line {
   width: 28px;
@@ -1243,6 +1246,563 @@ h2 { margin: 0; font: 700 29px/1.15 var(--serif); }
   .section-head { align-items: start; flex-direction: column; }
   h1 { font-size: 34px; }
 }
+
+/* Review workbench redesign for the Challenge Cup index page. */
+body {
+  background:
+    linear-gradient(90deg, rgba(31, 39, 40, 0.045) 1px, transparent 1px),
+    linear-gradient(180deg, rgba(31, 39, 40, 0.035) 1px, transparent 1px),
+    #edf2f1;
+  background-size: 28px 28px;
+}
+.shell {
+  width: min(1520px, calc(100vw - 28px));
+  padding: 18px 0 40px;
+}
+.section,
+.hero,
+.panel,
+.plan-hero,
+.plan-card,
+.runbook-card,
+.node-card,
+.nav-rail,
+.status-panel {
+  border-color: rgba(46, 63, 61, 0.16);
+  box-shadow: 0 16px 42px rgba(23, 37, 35, 0.10);
+}
+.section {
+  margin-top: 12px;
+  padding: 16px;
+  background: rgba(253, 254, 250, 0.96);
+}
+.section-head {
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+  align-items: center;
+}
+.section-head h2,
+.plan-card h2,
+.runbook-card h2 {
+  font-family: var(--sans);
+  letter-spacing: 0;
+}
+.section-head h2 {
+  font-size: 22px;
+}
+.hint,
+.subtitle {
+  color: #56615f;
+}
+.review-dashboard {
+  display: grid;
+  grid-template-columns: minmax(0, 1.16fr) minmax(360px, 0.84fr);
+  gap: 12px;
+  min-height: 310px;
+}
+.dashboard-hero {
+  position: relative;
+  overflow: hidden;
+  padding: 18px;
+  background:
+    linear-gradient(135deg, rgba(21, 83, 72, 0.92), rgba(29, 54, 65, 0.95)),
+    #1f3f43;
+  color: #f7fbf6;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  box-shadow: 0 20px 46px rgba(18, 44, 42, 0.22);
+}
+.dashboard-hero::after {
+  content: "";
+  position: absolute;
+  right: 22px;
+  bottom: 22px;
+  width: 340px;
+  height: 150px;
+  opacity: 0.18;
+  background:
+    linear-gradient(90deg, transparent 0 28px, #d9f5ea 28px 31px, transparent 31px 56px),
+    linear-gradient(180deg, transparent 0 28px, #d9f5ea 28px 31px, transparent 31px 56px);
+  background-size: 56px 56px;
+  pointer-events: none;
+}
+.dashboard-hero > * {
+  position: relative;
+  z-index: 1;
+}
+.dashboard-hero h1 {
+  max-width: 780px;
+  margin: 8px 0 10px;
+  font: 800 clamp(28px, 3.8vw, 46px)/1.04 var(--sans);
+}
+.dashboard-hero .subtitle {
+  max-width: 820px;
+  color: rgba(246, 251, 246, 0.78);
+  font-size: 14px;
+  line-height: 1.6;
+}
+.dashboard-hero .kicker {
+  color: #9be3cd;
+}
+.dashboard-hero .tag {
+  color: rgba(246, 251, 246, 0.82);
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.18);
+}
+.dashboard-hero .tag.done {
+  color: #092c24;
+  background: #a9ead5;
+  border-color: #a9ead5;
+}
+.hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+.hero-actions a,
+.quick-nav a,
+.node-card .open-link,
+.plan-drawer summary {
+  text-decoration: none;
+}
+.hero-actions a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 0 12px;
+  color: #0d352c;
+  background: #bff0df;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  font: 700 12px var(--sans);
+}
+.hero-actions a.secondary {
+  color: #eefbf6;
+  background: rgba(255, 255, 255, 0.10);
+}
+.dashboard-panel {
+  padding: 14px;
+  background: rgba(253, 254, 250, 0.98);
+  border: 1px solid rgba(46, 63, 61, 0.16);
+  box-shadow: 0 16px 42px rgba(23, 37, 35, 0.10);
+}
+.dashboard-panel h2 {
+  margin: 0 0 10px;
+  font: 800 18px/1.25 var(--sans);
+}
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.kpi {
+  min-height: 74px;
+  padding: 10px;
+  background: #f5f8f5;
+  border: 1px solid rgba(46, 63, 61, 0.13);
+}
+.kpi b {
+  display: block;
+  margin-bottom: 6px;
+  color: #62706c;
+  font: 700 11px var(--mono);
+  text-transform: uppercase;
+}
+.kpi strong {
+  display: block;
+  color: #173833;
+  font: 800 20px/1.08 var(--sans);
+}
+.kpi span {
+  display: block;
+  margin-top: 5px;
+  color: #60706b;
+  font-size: 12px;
+  line-height: 1.42;
+}
+.focus-list {
+  display: grid;
+  gap: 7px;
+  margin-top: 10px;
+}
+.focus-item {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr);
+  gap: 7px;
+  align-items: start;
+  padding: 7px;
+  background: #f8faf7;
+  border: 1px solid rgba(46, 63, 61, 0.12);
+}
+.focus-item b {
+  color: #1f6656;
+  font: 700 11px var(--mono);
+}
+.focus-item span {
+  color: #56615f;
+  font-size: 11px;
+  line-height: 1.45;
+}
+.quick-nav {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  gap: 6px;
+  padding: 8px 0;
+  background: linear-gradient(180deg, #edf2f1 70%, rgba(237, 242, 241, 0));
+}
+.quick-nav a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 0 10px;
+  color: #25433e;
+  background: rgba(253, 254, 250, 0.88);
+  border: 1px solid rgba(46, 63, 61, 0.16);
+  font: 700 12px var(--sans);
+}
+.quick-nav a.primary {
+  color: #f6fbf8;
+  background: #155348;
+}
+.workbench-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 250px;
+  gap: 12px;
+  align-items: start;
+}
+.flow-board-shell {
+  min-width: 0;
+}
+.flow-toolbar {
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.flow-toolbar-group {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+.flow-toolbar button {
+  min-width: 34px;
+  height: 30px;
+  color: #24413c;
+  background: #f8faf7;
+  border-color: rgba(46, 63, 61, 0.16);
+}
+.zoom-readout {
+  color: #155348;
+  background: #e7f5ef;
+  border-color: #a9d6c7;
+}
+.flow-board {
+  height: 360px;
+  min-height: 360px;
+  background:
+    linear-gradient(90deg, rgba(21, 83, 72, 0.08) 1px, transparent 1px),
+    linear-gradient(180deg, rgba(21, 83, 72, 0.06) 1px, transparent 1px),
+    #fbfdf9;
+  background-size: 24px 24px;
+  border-color: rgba(46, 63, 61, 0.16);
+}
+.flow-stage,
+.flow-graph {
+  width: 1080px;
+  height: 410px;
+  min-height: 410px;
+}
+.graph-svg > path {
+  stroke: rgba(21, 83, 72, 0.72);
+  stroke-width: 3.5;
+}
+.graph-svg > path.dashed {
+  stroke: rgba(184, 127, 35, 0.86);
+}
+.graph-node {
+  width: 174px;
+  min-height: 58px;
+  padding: 10px 11px;
+  border-left-width: 4px;
+  border-color: rgba(46, 63, 61, 0.18);
+  background: rgba(255, 255, 252, 0.98);
+  box-shadow: 0 10px 24px rgba(25, 41, 38, 0.13);
+}
+.graph-node .graph-id {
+  width: 28px;
+  height: 22px;
+  margin-right: 7px;
+  background: #155348;
+}
+.graph-node h3 {
+  font-size: 14px;
+  line-height: 1.34;
+}
+.graph-node.active {
+  border-left-color: #155348;
+}
+.graph-node.done {
+  border-left-color: #2f7e67;
+}
+.graph-node.pending {
+  border-left-color: #b87922;
+}
+.graph-node.maintenance {
+  width: 190px;
+  border-left-color: #555e89;
+  background: #f4f5fb;
+}
+.flow-review-panel {
+  min-width: 0;
+  padding: 12px;
+  background: #f7faf6;
+  border: 1px solid rgba(46, 63, 61, 0.16);
+}
+.flow-review-panel h3 {
+  margin: 0 0 8px;
+  font-size: 16px;
+}
+.flow-review-panel p {
+  margin: 0 0 10px;
+  color: #56615f;
+  font-size: 12px;
+  line-height: 1.55;
+}
+.review-stack {
+  display: grid;
+  gap: 7px;
+}
+.review-stack div {
+  padding: 8px;
+  background: #fffefb;
+  border: 1px solid rgba(46, 63, 61, 0.12);
+}
+.review-stack b {
+  display: block;
+  margin-bottom: 4px;
+  color: #1f6656;
+  font: 700 11px var(--mono);
+}
+.review-stack span {
+  color: #56615f;
+  font-size: 12px;
+  line-height: 1.45;
+}
+.mobile-flow-list {
+  display: none;
+}
+.plan-library {
+  padding: 14px;
+}
+.plan-library-intro {
+  display: grid;
+  grid-template-columns: 1.2fr 0.8fr;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.plan-summary {
+  display: grid;
+  gap: 8px;
+}
+.plan-summary .service-row {
+  background: #f8faf7;
+}
+.plan-drawer {
+  margin-top: 8px;
+  background: #f8faf7;
+  border: 1px solid rgba(46, 63, 61, 0.15);
+}
+.plan-drawer summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 42px;
+  padding: 0 12px;
+  cursor: pointer;
+  color: #183a34;
+  font: 800 14px var(--sans);
+}
+.plan-drawer summary::after {
+  content: "+";
+  color: #1f6656;
+  font: 800 18px var(--sans);
+}
+.plan-drawer[open] summary::after {
+  content: "-";
+}
+.drawer-body {
+  padding: 0 12px 12px;
+}
+.drawer-body > .section {
+  margin-top: 8px;
+  box-shadow: none;
+}
+.node-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+.node-card {
+  min-height: 138px;
+  padding: 12px;
+  border-left-width: 4px;
+}
+.node-card p {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.node-card .tag-row {
+  margin-top: 10px;
+}
+.node-card .tag {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-row,
+.feature-row,
+.alignment-row,
+.blueprint-row,
+.service-row,
+.transfer-row,
+.artifact-row,
+.state-row {
+  min-width: 0;
+  background: #fbfdf9;
+  border-color: rgba(46, 63, 61, 0.13);
+}
+.runbook-grid,
+.artifact-table,
+.agent-matrix,
+.status-grid,
+.gate-grid,
+.role-grid,
+.plan-grid {
+  min-width: 0;
+}
+.runbook-grid > *,
+.artifact-table > *,
+.agent-matrix > *,
+.status-grid > *,
+.gate-grid > *,
+.role-grid > *,
+.plan-grid > * {
+  min-width: 0;
+}
+.artifact-row *,
+.service-row *,
+.blueprint-row *,
+.transfer-row *,
+.state-row *,
+.agent-row *,
+.feature-row *,
+.alignment-row *,
+.checklist span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.checklist {
+  display: grid;
+  gap: 7px;
+}
+.checklist span {
+  display: block;
+  padding: 8px 9px;
+  color: #56615f;
+  background: #fbfdf9;
+  border: 1px solid rgba(46, 63, 61, 0.12);
+  font-size: 12px;
+  line-height: 1.45;
+}
+@media (max-width: 1180px) {
+  .review-dashboard,
+  .workbench-grid,
+  .plan-library-intro {
+    grid-template-columns: 1fr;
+  }
+  .flow-board {
+    height: 390px;
+    min-height: 390px;
+  }
+  .node-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 760px) {
+  .shell {
+    width: min(100vw - 16px, 1520px);
+    padding-top: 8px;
+  }
+  .quick-nav {
+    overflow-x: auto;
+    padding-bottom: 7px;
+  }
+  .quick-nav a {
+    white-space: nowrap;
+  }
+  .dashboard-hero,
+  .dashboard-panel,
+  .section,
+  .plan-library {
+    padding: 12px;
+  }
+  .dashboard-hero h1 {
+    font-size: 30px;
+  }
+  .kpi-grid,
+  .node-grid {
+    grid-template-columns: 1fr;
+  }
+  .workbench-grid {
+    display: block;
+  }
+  .flow-board-shell,
+  .graph-legend {
+    display: none;
+  }
+  .mobile-flow-list {
+    display: grid;
+    gap: 8px;
+  }
+  .mobile-flow-list a {
+    display: grid;
+    grid-template-columns: 42px minmax(0, 1fr);
+    gap: 8px;
+    align-items: center;
+    min-height: 46px;
+    padding: 8px;
+    color: #183a34;
+    text-decoration: none;
+    background: #fbfdf9;
+    border: 1px solid rgba(46, 63, 61, 0.14);
+    border-left: 4px solid #155348;
+  }
+  .mobile-flow-list a.pending {
+    border-left-color: #b87922;
+  }
+  .mobile-flow-list a.maintenance {
+    border-left-color: #555e89;
+  }
+  .mobile-flow-list b {
+    display: grid;
+    place-items: center;
+    height: 28px;
+    color: #fff;
+    background: #155348;
+    font: 700 11px var(--mono);
+  }
+  .mobile-flow-list span {
+    min-width: 0;
+    font-weight: 800;
+    font-size: 13px;
+    line-height: 1.3;
+  }
+  .flow-review-panel {
+    margin-top: 10px;
+  }
+}
 `;
 
 function pageName(node) {
@@ -1324,7 +1884,7 @@ function projectAlignmentHtml() {
 
 function currentResearchRunHtml() {
   return `
-    <section class="section">
+    <section id="run-state" class="section">
       <div class="section-head">
         <h2>当前运行状态</h2>
         <p class="hint">${escapeHtml(currentResearchRun.status)} · ${escapeHtml(currentResearchRun.updatedAt)}</p>
@@ -1623,10 +2183,6 @@ function knowledgeRunbookHtml() {
       </div>
       </section>
 
-      ${currentResearchRunHtml()}
-
-      ${implementationBlueprintHtml()}
-
     <section class="section">
       <div class="section-head">
         <h2>功能岗位编排矩阵</h2>
@@ -1820,53 +2376,73 @@ function graphNode(id, x, y, extraClass = "") {
   </a>`;
 }
 
+function mobileFlowList() {
+  return `<div class="mobile-flow-list" aria-label="移动端科研流程索引">
+    ${nodes
+      .map((node) => {
+        const extraClass = node.id === "13" ? " maintenance" : node.statusKind === "pending" ? " pending" : "";
+        return `<a class="${node.statusKind}${extraClass}" href="research_flow_pages/${pageName(node)}">
+          <b>${escapeHtml(node.id)}</b>
+          <span>${escapeHtml(node.title)}</span>
+        </a>`;
+      })
+      .join("\n")}
+  </div>`;
+}
+
 function flowGraph() {
   return `<div class="flow-board-shell">
   <div class="flow-toolbar" aria-label="画板缩放控制">
-    <button type="button" data-zoom-out title="缩小">-</button>
-    <button type="button" data-zoom-in title="放大">+</button>
-    <button type="button" data-zoom-reset title="重置缩放">100%</button>
-    <button type="button" data-zoom-fit title="适配全图">适配全图</button>
+    <div class="flow-toolbar-group">
+      <button type="button" data-zoom-out title="缩小">-</button>
+      <button type="button" data-zoom-in title="放大">+</button>
+      <button type="button" data-zoom-reset title="重置缩放">100%</button>
+      <button type="button" data-zoom-fit title="适配全图">适配全图</button>
+    </div>
     <span class="zoom-readout" data-zoom-readout>100%</span>
   </div>
   <div class="flow-board" data-draggable-board aria-label="可拖动科研流程画板">
     <div class="flow-stage" data-flow-stage>
     <div class="flow-graph" data-flow-graph aria-label="科研流程图结构">
-    <svg class="graph-svg" viewBox="0 0 1900 640" preserveAspectRatio="none" aria-hidden="true">
+    <svg class="graph-svg" viewBox="0 0 1080 410" preserveAspectRatio="none" aria-hidden="true">
       <defs>
         <marker id="arrow-main" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
-          <path d="M 0 0 L 10 5 L 0 10 z" fill="rgba(49, 95, 125, 0.68)"></path>
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="rgba(21, 83, 72, 0.72)"></path>
         </marker>
         <marker id="arrow-draft" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
           <path d="M 0 0 L 10 5 L 0 10 z" fill="rgba(185, 129, 34, 0.8)"></path>
         </marker>
       </defs>
-      <path marker-end="url(#arrow-main)" d="M 265 150 H 430"></path>
-      <path marker-end="url(#arrow-main)" d="M 650 150 H 815"></path>
-      <path marker-end="url(#arrow-main)" d="M 1035 150 H 1200"></path>
-      <path marker-end="url(#arrow-main)" d="M 1420 150 H 1585"></path>
-      <path marker-end="url(#arrow-main)" d="M 1700 190 V 290 H 1585"></path>
-      <path marker-end="url(#arrow-main)" d="M 1365 320 H 1200"></path>
-      <path marker-end="url(#arrow-main)" d="M 980 320 H 815"></path>
-      <path marker-end="url(#arrow-main)" d="M 595 320 H 430"></path>
-      <path marker-end="url(#arrow-main)" d="M 320 360 V 470 H 430"></path>
-      <path marker-end="url(#arrow-main)" d="M 650 500 H 815"></path>
-      <path marker-end="url(#arrow-main)" d="M 1035 500 H 1200"></path>
-      <path class="dashed" marker-end="url(#arrow-draft)" d="M 1310 540 V 585"></path>
+      <path marker-end="url(#arrow-main)" d="M 148 92 H 220"></path>
+      <path marker-end="url(#arrow-main)" d="M 330 92 H 402"></path>
+      <path marker-end="url(#arrow-main)" d="M 512 92 H 584"></path>
+      <path marker-end="url(#arrow-main)" d="M 694 92 H 766"></path>
+      <path marker-end="url(#arrow-main)" d="M 876 92 H 945 V 183 H 882"></path>
+      <path marker-end="url(#arrow-main)" d="M 772 188 H 694"></path>
+      <path marker-end="url(#arrow-main)" d="M 584 188 H 512"></path>
+      <path marker-end="url(#arrow-main)" d="M 402 188 H 330"></path>
+      <path marker-end="url(#arrow-main)" d="M 238 212 V 295 H 310"></path>
+      <path marker-end="url(#arrow-main)" d="M 420 314 H 492"></path>
+      <path marker-end="url(#arrow-main)" d="M 602 314 H 674"></path>
+      <path marker-end="url(#arrow-main)" d="M 784 336 V 368"></path>
+      <path class="dashed" marker-end="url(#arrow-draft)" d="M 876 314 H 956 V 120 H 876"></path>
     </svg>
-    ${graphNode("01", 160, 150)}
-    ${graphNode("02", 540, 150)}
-    ${graphNode("03", 925, 150)}
-    ${graphNode("04", 1310, 150)}
-    ${graphNode("05", 1700, 150)}
-    ${graphNode("06", 1475, 320)}
-    ${graphNode("07", 1090, 320)}
-    ${graphNode("08", 705, 320)}
-    ${graphNode("09", 320, 320)}
-    ${graphNode("10", 540, 500)}
-    ${graphNode("11", 925, 500)}
-    ${graphNode("12", 1310, 500)}
-    ${graphNode("13", 1310, 610, "maintenance")}
+    <span class="graph-lane top-lane">资料到假设</span>
+    <span class="graph-lane mid-lane">治理与图谱</span>
+    <span class="graph-lane bottom-lane">实验与交付</span>
+    ${graphNode("01", 82, 92)}
+    ${graphNode("02", 275, 92)}
+    ${graphNode("03", 457, 92)}
+    ${graphNode("04", 639, 92)}
+    ${graphNode("05", 821, 92)}
+    ${graphNode("06", 821, 188)}
+    ${graphNode("07", 639, 188)}
+    ${graphNode("08", 457, 188)}
+    ${graphNode("09", 275, 188)}
+    ${graphNode("10", 365, 314)}
+    ${graphNode("11", 547, 314)}
+    ${graphNode("12", 729, 314)}
+    ${graphNode("13", 729, 386, "maintenance")}
     </div>
     </div>
   </div>
@@ -1957,42 +2533,70 @@ function indexHtml() {
   </head>
   <body>
     <main class="shell">
-      <section class="top">
-        <div class="hero">
+      <nav class="quick-nav" aria-label="页面快速索引">
+        <a class="primary" href="#overview">总览</a>
+        <a href="#flow-board">流程图</a>
+        <a href="#node-index">节点页</a>
+        <a href="#run-state">运行状态</a>
+        <a href="#plan-library">计划库</a>
+      </nav>
+
+      <section id="overview" class="review-dashboard">
+        <div class="dashboard-hero">
           <div>
-            <div class="kicker">Challenge Cup Research Flow Index</div>
-            <h1>神经科学启发算法发现科研流程索引</h1>
-            <p class="subtitle">每个节点都是独立计划页。点击索引卡进入对应页面，查看当前节点的目标、输入、动作、输出、记忆平台边界和图谱同步规则。</p>
+            <div class="kicker">Challenge Cup Research Flow Workbench</div>
+            <h1>神经科学启发算法发现科研流程审核台</h1>
+            <p class="subtitle">首页只承载审核判断：现在能跑到哪里、哪些边界不能越过、哪些节点需要继续规划。完整说明仍保留在节点页和计划库中。</p>
           </div>
           <div class="tag-row">
-            <span class="tag done">候选知识审核流</span>
-            <span class="tag">Knowledge Steward Agent · agent-knowledge-steward</span>
-            <span class="tag">Candidate Graph</span>
-            <span class="tag">Team Knowledge</span>
+            <span class="tag done">ai科学研究团队</span>
+            <span class="tag">candidate-only until approval</span>
+            <span class="tag">Knowledge Steward Agent</span>
+            <span class="tag">Candidate Graph Preview</span>
+          </div>
+          <div class="hero-actions">
+            <a href="#flow-board">查看流程图</a>
+            <a class="secondary" href="research_flow_pages/01-source-workspace.html">进入 01 资料搜集</a>
+            <a class="secondary" href="technical_implementation_plan.md">技术方案</a>
           </div>
         </div>
-        <aside class="panel">
-          <div class="label">流程约束</div>
-          <div class="fact-grid">
-            <div class="fact"><b>输入</b><span>第一版只处理用户给定资料，不自动联网扩展。</span></div>
-            <div class="fact"><b>落库</b><span>科研功能 Agent 只产出候选；知识治理 Agent 负责治理建议。</span></div>
-            <div class="fact"><b>图谱</b><span>候选只进候选图谱；ingested 后进入正式图谱。</span></div>
-            <div class="fact"><b>实验</b><span>实验验证闭环先占位，未来接训练 runner。</span></div>
+        <aside class="dashboard-panel">
+          <h2>审核摘要</h2>
+          <div class="kpi-grid">
+            <div class="kpi"><b>当前阶段</b><strong>M6.6</strong><span>资料搜集执行台已接入，等待筛选/治理推进。</span></div>
+            <div class="kpi"><b>流程节点</b><strong>${nodes.length}</strong><span>1-9 为知识入库主线，10-13 保留占位与维护节点。</span></div>
+            <div class="kpi"><b>候选资料</b><strong>${currentResearchRun.sources.length}</strong><span>第一轮 source_manifest 已进入 candidate-only 工作区。</span></div>
+            <div class="kpi"><b>正式写入</b><strong>0</strong><span>未写正式 Team Knowledge、RAG 或 official graph。</span></div>
+          </div>
+          <div class="focus-list">
+            <div class="focus-item"><b>优先看</b><span>资料搜集、候选图谱和知识入库边界是否能支撑下一轮科研提炼。</span></div>
+            <div class="focus-item"><b>不能做</b><span>本页面不触发真实搜索、不审批入库、不把候选图谱当作正式事实。</span></div>
+            <div class="focus-item"><b>下一步</b><span>补资料质量评估、paper_note 页码锚点和 missing links 修复队列。</span></div>
           </div>
         </aside>
       </section>
 
       <section id="flow-board" class="section">
         <div class="section-head">
-          <h2>可视化流程图</h2>
-          <p class="hint">节点仅显示名称。默认适配全图，可放大查看细节，按住空白区域拖动画板。</p>
+          <h2>流程图结构</h2>
+          <p class="hint">这里只显示节点名和转移方向。点击节点进入独立计划页；桌面端可缩放拖动，移动端显示纵向流程索引。</p>
         </div>
-        ${flowGraph()}
+        <div class="workbench-grid">
+          ${flowGraph()}
+          ${mobileFlowList()}
+          <aside class="flow-review-panel">
+            <h3>图结构阅读方式</h3>
+            <p>主路径先完成资料到假设，再进入审稿、知识治理和图谱同步；实验和交付先保持占位，维护节点负责把后续开发回写到本站。</p>
+            <div class="review-stack">
+              <div><b>01-05</b><span>资料搜集、笔记、机制、计算映射、算法假设。</span></div>
+              <div><b>06-09</b><span>审稿、知识治理、候选图谱、正式同步边界。</span></div>
+              <div><b>10-13</b><span>实验验证、版本化、挑战杯交付和 HTML 维护门禁。</span></div>
+            </div>
+          </aside>
+        </div>
       </section>
 
-      ${knowledgeRunbookHtml()}
-
-      <section class="section">
+      <section id="node-index" class="section">
         <div class="section-head">
           <h2>节点页面索引</h2>
           <p class="hint">已规划、半规划、待规划都保留为可点击页面，便于后续逐页补全。</p>
@@ -2010,6 +2614,38 @@ function indexHtml() {
             .join("\n")}
         </div>
       </section>
+
+      ${currentResearchRunHtml()}
+
+      <section id="plan-library" class="section plan-library">
+        <div class="section-head">
+          <h2>完整计划库</h2>
+          <p class="hint">下面保留全部规划内容，但默认折叠；审核时先看总览和流程图，需要细节时再展开。</p>
+        </div>
+        <div class="plan-library-intro">
+          <div class="plan-summary">
+            <div class="service-row"><strong>知识搜集主线</strong><span>${escapeHtml(knowledgeRunbook.scope)}</span></div>
+            <div class="service-row"><strong>实施目标</strong><span>${escapeHtml(implementationBlueprint.target)}</span></div>
+            <div class="service-row"><strong>团队入口</strong><span>${escapeHtml(implementationBlueprint.activeTeam.workspaceEntry)} · ${escapeHtml(implementationBlueprint.activeTeam.defaultView)}</span></div>
+          </div>
+          <div class="dashboard-panel">
+            <h2>边界提醒</h2>
+            <div class="focus-list">
+              <div class="focus-item"><b>候选</b><span>科研功能 Agent 只能写 CandidateStore。</span></div>
+              <div class="focus-item"><b>治理</b><span>Knowledge Steward Agent 只提交建议与待审对象。</span></div>
+              <div class="focus-item"><b>正式</b><span>审批通过后才进入 Team Knowledge/RAG/official graph。</span></div>
+            </div>
+          </div>
+        </div>
+        <details class="plan-drawer">
+          <summary>知识搜集与筛选入库 MVP 全量规划</summary>
+          <div class="drawer-body">${knowledgeRunbookHtml()}</div>
+        </details>
+        <details class="plan-drawer">
+          <summary>可实施技术蓝图</summary>
+          <div class="drawer-body">${implementationBlueprintHtml()}</div>
+        </details>
+      </section>
     </main>
     <script>
       (() => {
@@ -2018,9 +2654,9 @@ function indexHtml() {
         const graph = document.querySelector("[data-flow-graph]");
         const readout = document.querySelector("[data-zoom-readout]");
         if (!board || !stage || !graph || !readout) return;
-        const naturalWidth = 1900;
-        const naturalHeight = 640;
-        const minZoom = 0.28;
+        const naturalWidth = 1080;
+        const naturalHeight = 410;
+        const minZoom = 0.48;
         const maxZoom = 1.8;
         let zoom = 1;
         const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
