@@ -2958,7 +2958,7 @@
 @media (max-width: 1040px) {
   .workspace {
     grid-template-columns: minmax(220px, 270px) minmax(0, 1fr);
-    grid-auto-rows: minmax(260px, auto);
+    grid-auto-rows: minmax(180px, auto);
     overflow: auto;
   }
 
@@ -2977,7 +2977,7 @@
 
   .detailPanel {
     grid-column: 1 / -1;
-    min-height: 360px;
+    min-height: 220px;
     max-height: none;
   }
 
@@ -3039,11 +3039,15 @@
   }
 
   .filterPanel {
-    min-height: 220px;
+    min-height: 150px;
   }
 
   .agentPanel {
-    min-height: 360px;
+    min-height: 240px;
+  }
+
+  .detailPanel {
+    min-height: 180px;
   }
 
   .title,

@@ -3851,11 +3851,11 @@ a.teamTreeChild:focus-visible {
 @media (max-width: 980px) {
   .layoutCenterFirst {
     grid-template-columns:
-      var(--chat-left-pane-width, 0)
+      minmax(0, min(var(--chat-left-pane-width, 0px), 24vw))
       8px
-      minmax(0, 1fr)
+      minmax(360px, 1fr)
       8px
-      var(--chat-right-pane-width, 0);
+      minmax(0, min(var(--chat-right-pane-width, 0px), 22vw));
   }
 
   .layoutCenterFirst .leftRail:not(.paneCollapsed) {
@@ -3880,11 +3880,11 @@ a.teamTreeChild:focus-visible {
 @media (max-width: 640px) {
   .layoutCenterFirst {
     grid-template-columns:
-      var(--chat-left-pane-width, 0)
+      minmax(0, min(var(--chat-left-pane-width, 0px), 22vw))
       8px
-      minmax(0, 1fr)
+      minmax(280px, 1fr)
       8px
-      var(--chat-right-pane-width, 0);
+      minmax(0, min(var(--chat-right-pane-width, 0px), 20vw));
   }
 
   .resizeHandle::before {
