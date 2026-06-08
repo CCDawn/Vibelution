@@ -37,6 +37,10 @@ MEMORY_OVERVIEW_SECTION_CACHE: dict[str, Any] = {
     "root": "",
     "sections": {},
 }
+MEMORY_USAGE_CONTRACT_CACHE_TTL_SECONDS = 8.0
+MEMORY_USAGE_CONTRACT_CACHE_LOCK = Lock()
+MEMORY_USAGE_CONTRACT_CACHE: dict[str, Any] = {"root": "", "expiresAt": 0.0, "payload": None}
+MEMORY_USAGE_CONTRACT_SLOW_MS = 250.0
 GIT_SNAPSHOT_CACHE_TTL_SECONDS = 3.0
 GIT_SNAPSHOT_CACHE_LOCK = Lock()
 GIT_SNAPSHOT_CACHE: dict[str, Any] = {"root": "", "expiresAt": 0.0, "payload": None}
@@ -127,7 +131,21 @@ def get_memory_item_detail(section_id: str, item_id: str) -> dict[str, Any] | No
 def get_memory_usage_contract() -> dict[str, Any]:
     """Return the cross-system contract for using Agent and Team memory."""
 
+    started_at = time.perf_counter()
     root = PROJECT_ROOT.resolve()
+    cache_root = str(root)
+    now = time.monotonic()
+    with MEMORY_USAGE_CONTRACT_CACHE_LOCK:
+        cached_payload = MEMORY_USAGE_CONTRACT_CACHE.get("payload")
+        if (
+            MEMORY_USAGE_CONTRACT_CACHE.get("root") == cache_root
+            and cached_payload is not None
+            and float(MEMORY_USAGE_CONTRACT_CACHE.get("expiresAt") or 0.0) > now
+        ):
+            contract = copy.deepcopy(cached_payload)
+            _record_memory_contract_viewed_event(contract, cache_hit=True, duration_ms=(time.perf_counter() - started_at) * 1000)
+            return contract
+
     try:
         from core.web.services.team_knowledge_service import (
             get_knowledge_governance_plan,
@@ -274,7 +292,15 @@ def get_memory_usage_contract() -> dict[str, Any]:
             "operatingBoundary": governance_plan.get("operatingBoundary") or {},
         },
     }
-    _record_memory_contract_viewed_event(contract)
+    with MEMORY_USAGE_CONTRACT_CACHE_LOCK:
+        MEMORY_USAGE_CONTRACT_CACHE.update(
+            {
+                "root": cache_root,
+                "expiresAt": time.monotonic() + MEMORY_USAGE_CONTRACT_CACHE_TTL_SECONDS,
+                "payload": copy.deepcopy(contract),
+            }
+        )
+    _record_memory_contract_viewed_event(contract, cache_hit=False, duration_ms=(time.perf_counter() - started_at) * 1000)
     return contract
 
 
@@ -304,6 +330,7 @@ def create_user_memory_item(payload: dict[str, Any]) -> dict[str, Any]:
         managed_memory["items"].insert(0, item)
         _append_managed_audit(managed_memory, "create", USER_MANAGED_SECTION_ID, item["id"], item)
         _save_managed_memory(root, managed_memory)
+    _clear_memory_usage_contract_cache()
     response_item = _user_managed_item(root, item)
     _record_memory_management_event("create", USER_MANAGED_SECTION_ID, item["id"], response_item)
     return {
@@ -349,6 +376,7 @@ def update_memory_item(section_id: str, item_id: str, payload: dict[str, Any]) -
             _append_managed_audit(managed_memory, "override", section_id, item_id, {**base_item, **patch})
             _save_managed_memory(root, managed_memory)
             updated_item = _apply_item_override(dict(base_item), current)
+    _clear_memory_usage_contract_cache()
     _record_memory_management_event("update", section_id, item_id, updated_item)
     return {
         "ok": True,
@@ -391,6 +419,7 @@ def delete_memory_item(section_id: str, item_id: str) -> dict[str, Any]:
             _save_managed_memory(root, managed_memory)
             action = "disable"
             item_payload = _apply_item_override(dict(base_item), current)
+    _clear_memory_usage_contract_cache()
     _record_memory_management_event(action, section_id, item_id, item_payload)
     return {
         "ok": True,
@@ -421,6 +450,7 @@ def restore_memory_item(section_id: str, item_id: str) -> dict[str, Any]:
         removed = overrides.pop(key)
         _append_managed_audit(managed_memory, "restore", section_id, item_id, {**base_item, **removed})
         _save_managed_memory(root, managed_memory)
+    _clear_memory_usage_contract_cache()
     _record_memory_management_event("restore", section_id, item_id, base_item)
     return {
         "ok": True,
@@ -497,6 +527,11 @@ def _timed_base_memory_sections(root: Path, warnings: list[str]) -> tuple[list[d
 def _clear_memory_overview_section_cache() -> None:
     with MEMORY_OVERVIEW_SECTION_CACHE_LOCK:
         MEMORY_OVERVIEW_SECTION_CACHE.update({"root": "", "sections": {}})
+
+
+def _clear_memory_usage_contract_cache() -> None:
+    with MEMORY_USAGE_CONTRACT_CACHE_LOCK:
+        MEMORY_USAGE_CONTRACT_CACHE.update({"root": "", "expiresAt": 0.0, "payload": None})
 
 
 def _load_timed_base_memory_sections(root: Path, warnings: list[str]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -2066,7 +2101,8 @@ def _record_memory_overview_perf_event(
         pass
 
 
-def _record_memory_contract_viewed_event(contract: dict[str, Any]) -> None:
+def _record_memory_contract_viewed_event(contract: dict[str, Any], *, cache_hit: bool, duration_ms: float) -> None:
+    level = "warning" if duration_ms >= MEMORY_USAGE_CONTRACT_SLOW_MS and not cache_hit else "info"
     try:
         from core.web.services.runtime_scene_service import record_runtime_scene_event
 
@@ -2075,8 +2111,13 @@ def _record_memory_contract_viewed_event(contract: dict[str, Any]) -> None:
             "memory_contract",
             "memory.usage_contract.viewed",
             message="Memory usage contract viewed",
+            level=level,
             outcome="observed",
             fields={
+                "cacheHit": cache_hit,
+                "durationMs": round(float(duration_ms), 1),
+                "cacheTtlSeconds": MEMORY_USAGE_CONTRACT_CACHE_TTL_SECONDS,
+                "slowThresholdMs": MEMORY_USAGE_CONTRACT_SLOW_MS,
                 "domainCount": len(contract.get("domains") or []),
                 "forbiddenActionCount": len(contract.get("forbiddenActions") or []),
                 "knowledgeBaseCount": int(((contract.get("currentState") or {}).get("knowledge") or {}).get("knowledgeBaseCount") or 0),
