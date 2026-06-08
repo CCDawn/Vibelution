@@ -38,12 +38,16 @@ Inside its own worktree, an Agent should:
 The session currently closing work into `main` should:
 
 - keep the main workspace clean before each merge;
+- refuse to merge any claim that is not in `ready_for_merge`;
+- abort and restore `main` immediately if a blocked branch is accidentally merged and produces conflicts;
 - merge one task branch at a time;
 - run targeted validation after each merge;
 - handle semantic conflicts instead of letting Agents resolve them blindly;
 - push `main` after successful validation;
 - serialize project-memory updates after code merges;
 - clean merged task worktrees.
+
+When a branch cannot merge cleanly, leave the task in its own worktree and mark the claim `blocked` with the conflicting files and next action. Do not keep conflict markers, staged partial resolutions, or an in-progress merge in the main integration workspace. The owning Agent should rebase or create a new conflict-resolved commit against current `origin/main`, then re-enter the queue as a fresh `ready_for_merge` claim.
 
 ## Cleanup
 
@@ -63,6 +67,8 @@ git push origin --delete codex/<task-slug>
 ```
 
 Do not auto-delete a worktree that is unmerged, dirty, failing validation, conflicted, or possibly still used by an active Agent. If a dirty worktree must be discarded, first save status, unstaged diff, staged diff, and untracked files as a backup.
+
+Do not retry a blocked merge directly from `main`. If a blocked worktree needs another integration attempt, first confirm its claim has been updated back to `ready_for_merge` with a new commit or explicit conflict-resolution note.
 
 ## Shared Files
 
