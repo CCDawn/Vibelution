@@ -5272,7 +5272,7 @@ try {
             Write-LauncherControlLog `
                 -Event "launcher.supervisor.clean_exit_adopted" `
                 -Message "Supervisor wrapper exited cleanly after the managed session became live; preserving the healthy workbench." `
-                -Level "warning" `
+                -Level "info" `
                 -Fields $failureFields
             if ($script:currentRuntimeSceneId) {
                 Update-RuntimeSceneManifest @{ supervisor = @{ pid = $proc.Id; status = "clean_exit_adopted"; failure = "" } }
@@ -5281,7 +5281,7 @@ try {
                     -Phase "startup" `
                     -EventCode "supervisor.clean_exit_adopted" `
                     -Message "Supervisor wrapper exited cleanly after startup, but backend and browser are live." `
-                    -Level "warning" `
+                    -Level "info" `
                     -Outcome "adopted" `
                     -Fields $failureFields `
                     -RawRefs @(

@@ -4837,6 +4837,8 @@ def _runtime_scene_event_severity(event: dict) -> str:
     outcome = str(event.get("outcome") or "").strip().lower()
     status = str(event.get("status") or "").strip().lower()
     fields = event.get("fields") if isinstance(event.get("fields"), dict) else {}
+    if _runtime_scene_is_supervisor_clean_exit_adopted_event(event):
+        return "info"
     if _runtime_scene_is_operational_client_error_event(event):
         return "info"
     if _runtime_scene_is_diagnostic_mirror_event(event):
@@ -4882,6 +4884,19 @@ def _runtime_scene_event_severity(event: dict) -> str:
     }:
         return "warning"
     return "info"
+
+
+def _runtime_scene_is_supervisor_clean_exit_adopted_event(event: dict) -> bool:
+    event_code = str(event.get("eventCode") or event.get("event_code") or "").strip()
+    if event_code != "supervisor.clean_exit_adopted":
+        return False
+    fields = event.get("fields") if isinstance(event.get("fields"), dict) else {}
+    return (
+        str(event.get("component") or "").strip() == "supervisor"
+        and bool(fields.get("backend_alive"))
+        and bool(fields.get("backend_healthy"))
+        and int(fields.get("browser_window_count") or 0) > 0
+    )
 
 
 def _runtime_scene_is_diagnostic_mirror_event(event: dict) -> bool:
