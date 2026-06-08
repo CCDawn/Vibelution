@@ -1069,9 +1069,31 @@ h2 { margin: 0; font: 700 29px/1.15 var(--serif); }
 .graph-lane.top-lane { top: 36px; }
 .graph-lane.mid-lane { top: 260px; }
 .graph-lane.bottom-lane { top: 640px; }
-.workbench-grid .graph-lane.top-lane { top: 20px; }
-.workbench-grid .graph-lane.mid-lane { top: 154px; }
-.workbench-grid .graph-lane.bottom-lane { top: 281px; }
+.workbench-grid .graph-lane {
+  left: 42px;
+  z-index: 2;
+  color: #21423c;
+  background: rgba(255, 255, 252, 0.92);
+  border-color: rgba(46, 63, 61, 0.18);
+}
+.workbench-grid .graph-lane.top-lane { top: 44px; }
+.workbench-grid .graph-lane.mid-lane { top: 196px; }
+.workbench-grid .graph-lane.bottom-lane { top: 354px; }
+.graph-lane-band {
+  position: absolute;
+  left: 26px;
+  right: 26px;
+  height: 116px;
+  background: rgba(235, 244, 240, 0.62);
+  border: 1px solid rgba(46, 63, 61, 0.10);
+  pointer-events: none;
+}
+.graph-lane-band.top-lane { top: 38px; }
+.graph-lane-band.mid-lane { top: 190px; }
+.graph-lane-band.bottom-lane { top: 348px; }
+.graph-lane-band.bottom-lane {
+  background: rgba(250, 243, 231, 0.72);
+}
 .graph-legend {
   display: flex;
   flex-wrap: wrap;
@@ -1467,7 +1489,7 @@ body {
 }
 .workbench-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 250px;
+  grid-template-columns: minmax(0, 1fr);
   gap: 12px;
   align-items: start;
 }
@@ -1496,8 +1518,8 @@ body {
   border-color: #a9d6c7;
 }
 .flow-board {
-  height: 360px;
-  min-height: 360px;
+  height: 560px;
+  min-height: 560px;
   background:
     linear-gradient(90deg, rgba(21, 83, 72, 0.08) 1px, transparent 1px),
     linear-gradient(180deg, rgba(21, 83, 72, 0.06) 1px, transparent 1px),
@@ -1507,9 +1529,9 @@ body {
 }
 .flow-stage,
 .flow-graph {
-  width: 1080px;
-  height: 410px;
-  min-height: 410px;
+  width: 1640px;
+  height: 560px;
+  min-height: 560px;
 }
 .graph-svg > path {
   stroke: rgba(21, 83, 72, 0.72);
@@ -1519,22 +1541,23 @@ body {
   stroke: rgba(184, 127, 35, 0.86);
 }
 .graph-node {
-  width: 174px;
-  min-height: 58px;
-  padding: 10px 11px;
+  width: 230px;
+  min-height: 72px;
+  padding: 13px 15px;
   border-left-width: 4px;
   border-color: rgba(46, 63, 61, 0.18);
   background: rgba(255, 255, 252, 0.98);
   box-shadow: 0 10px 24px rgba(25, 41, 38, 0.13);
 }
 .graph-node .graph-id {
-  width: 28px;
-  height: 22px;
-  margin-right: 7px;
+  width: 34px;
+  height: 26px;
+  margin-right: 10px;
   background: #155348;
+  font-size: 12px;
 }
 .graph-node h3 {
-  font-size: 14px;
+  font-size: 17px;
   line-height: 1.34;
 }
 .graph-node.active {
@@ -1547,7 +1570,7 @@ body {
   border-left-color: #b87922;
 }
 .graph-node.maintenance {
-  width: 190px;
+  width: 240px;
   border-left-color: #555e89;
   background: #f4f5fb;
 }
@@ -1557,22 +1580,29 @@ body {
   background: #f7faf6;
   border: 1px solid rgba(46, 63, 61, 0.16);
 }
+.flow-review-panel {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
 .flow-review-panel h3 {
-  margin: 0 0 8px;
+  margin: 0 0 6px;
   font-size: 16px;
 }
 .flow-review-panel p {
-  margin: 0 0 10px;
+  margin: 0;
   color: #56615f;
   font-size: 12px;
-  line-height: 1.55;
+  line-height: 1.45;
 }
 .review-stack {
   display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 7px;
 }
 .review-stack div {
-  padding: 8px;
+  padding: 7px 8px;
   background: #fffefb;
   border: 1px solid rgba(46, 63, 61, 0.12);
 }
@@ -1720,6 +1750,10 @@ body {
   .review-dashboard,
   .workbench-grid,
   .plan-library-intro {
+    grid-template-columns: 1fr;
+  }
+  .flow-review-panel,
+  .review-stack {
     grid-template-columns: 1fr;
   }
   .flow-board {
@@ -2404,7 +2438,7 @@ function flowGraph() {
   <div class="flow-board" data-draggable-board aria-label="可拖动科研流程画板">
     <div class="flow-stage" data-flow-stage>
     <div class="flow-graph" data-flow-graph aria-label="科研流程图结构">
-    <svg class="graph-svg" viewBox="0 0 1080 410" preserveAspectRatio="none" aria-hidden="true">
+    <svg class="graph-svg" viewBox="0 0 1640 560" preserveAspectRatio="none" aria-hidden="true">
       <defs>
         <marker id="arrow-main" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
           <path d="M 0 0 L 10 5 L 0 10 z" fill="rgba(21, 83, 72, 0.72)"></path>
@@ -2413,36 +2447,37 @@ function flowGraph() {
           <path d="M 0 0 L 10 5 L 0 10 z" fill="rgba(185, 129, 34, 0.8)"></path>
         </marker>
       </defs>
-      <path marker-end="url(#arrow-main)" d="M 148 92 H 220"></path>
-      <path marker-end="url(#arrow-main)" d="M 330 92 H 402"></path>
-      <path marker-end="url(#arrow-main)" d="M 512 92 H 584"></path>
-      <path marker-end="url(#arrow-main)" d="M 694 92 H 766"></path>
-      <path marker-end="url(#arrow-main)" d="M 876 92 H 945 V 183 H 882"></path>
-      <path marker-end="url(#arrow-main)" d="M 772 188 H 694"></path>
-      <path marker-end="url(#arrow-main)" d="M 584 188 H 512"></path>
-      <path marker-end="url(#arrow-main)" d="M 402 188 H 330"></path>
-      <path marker-end="url(#arrow-main)" d="M 238 212 V 295 H 310"></path>
-      <path marker-end="url(#arrow-main)" d="M 420 314 H 492"></path>
-      <path marker-end="url(#arrow-main)" d="M 602 314 H 674"></path>
-      <path marker-end="url(#arrow-main)" d="M 784 336 V 368"></path>
-      <path class="dashed" marker-end="url(#arrow-draft)" d="M 876 314 H 956 V 120 H 876"></path>
+      <path marker-end="url(#arrow-main)" d="M 265 104 H 372"></path>
+      <path marker-end="url(#arrow-main)" d="M 602 104 H 709"></path>
+      <path marker-end="url(#arrow-main)" d="M 939 104 H 1046"></path>
+      <path marker-end="url(#arrow-main)" d="M 1276 104 H 1374 V 250 H 1276"></path>
+      <path marker-end="url(#arrow-main)" d="M 1046 256 H 939"></path>
+      <path marker-end="url(#arrow-main)" d="M 709 256 H 602"></path>
+      <path marker-end="url(#arrow-main)" d="M 372 256 H 300 V 384 H 372"></path>
+      <path marker-end="url(#arrow-main)" d="M 602 414 H 709"></path>
+      <path marker-end="url(#arrow-main)" d="M 939 414 H 1046"></path>
+      <path marker-end="url(#arrow-main)" d="M 1161 456 V 499"></path>
+      <path class="dashed" marker-end="url(#arrow-draft)" d="M 1276 414 H 1458 V 146 H 1276"></path>
     </svg>
+    <span class="graph-lane-band top-lane"></span>
+    <span class="graph-lane-band mid-lane"></span>
+    <span class="graph-lane-band bottom-lane"></span>
     <span class="graph-lane top-lane">资料到假设</span>
     <span class="graph-lane mid-lane">治理与图谱</span>
     <span class="graph-lane bottom-lane">实验与交付</span>
-    ${graphNode("01", 82, 92)}
-    ${graphNode("02", 275, 92)}
-    ${graphNode("03", 457, 92)}
-    ${graphNode("04", 639, 92)}
-    ${graphNode("05", 821, 92)}
-    ${graphNode("06", 821, 188)}
-    ${graphNode("07", 639, 188)}
-    ${graphNode("08", 457, 188)}
-    ${graphNode("09", 275, 188)}
-    ${graphNode("10", 365, 314)}
-    ${graphNode("11", 547, 314)}
-    ${graphNode("12", 729, 314)}
-    ${graphNode("13", 729, 386, "maintenance")}
+    ${graphNode("01", 150, 104)}
+    ${graphNode("02", 487, 104)}
+    ${graphNode("03", 824, 104)}
+    ${graphNode("04", 1161, 104)}
+    ${graphNode("05", 1498, 104)}
+    ${graphNode("06", 1161, 256)}
+    ${graphNode("07", 824, 256)}
+    ${graphNode("08", 487, 256)}
+    ${graphNode("09", 150, 256)}
+    ${graphNode("10", 487, 414)}
+    ${graphNode("11", 824, 414)}
+    ${graphNode("12", 1161, 414)}
+    ${graphNode("13", 1161, 528, "maintenance")}
     </div>
     </div>
   </div>
@@ -2579,7 +2614,7 @@ function indexHtml() {
       <section id="flow-board" class="section">
         <div class="section-head">
           <h2>流程图结构</h2>
-          <p class="hint">这里只显示节点名和转移方向。点击节点进入独立计划页；桌面端可缩放拖动，移动端显示纵向流程索引。</p>
+          <p class="hint">默认用 100% 阅读模式，节点更大、泳道更清晰；横向拖动画板查看全链路，也可点击“适配全图”快速总览。</p>
         </div>
         <div class="workbench-grid">
           ${flowGraph()}
@@ -2654,10 +2689,10 @@ function indexHtml() {
         const graph = document.querySelector("[data-flow-graph]");
         const readout = document.querySelector("[data-zoom-readout]");
         if (!board || !stage || !graph || !readout) return;
-        const naturalWidth = 1080;
-        const naturalHeight = 410;
-        const minZoom = 0.48;
-        const maxZoom = 1.8;
+        const naturalWidth = 1640;
+        const naturalHeight = 560;
+        const minZoom = 0.45;
+        const maxZoom = 1.55;
         let zoom = 1;
         const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
         const renderZoom = () => {
@@ -2698,7 +2733,9 @@ function indexHtml() {
           const anchorY = event.clientY - rect.top;
           setZoom(zoom + (event.deltaY < 0 ? 0.08 : -0.08), anchorX, anchorY);
         }, { passive: false });
-        fitAll();
+        renderZoom();
+        board.scrollLeft = 0;
+        board.scrollTop = 0;
         let dragging = false;
         let startX = 0;
         let startY = 0;
