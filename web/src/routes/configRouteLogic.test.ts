@@ -110,18 +110,22 @@ describe("configRouteLogic", () => {
     const config: PublicConfigShape = {
       runtime: { profile: "safe_local" },
       workbench: { backend_port: 8000 },
+      avatar: { preset: "ember" },
+      log: { max_entries: 300 },
       agent: { name: "Should stay hidden" },
       tools: { image2: { default_model_ref: "relay_image2" } },
       memory: { enabled: true },
     };
-    const sections = [{ path: "runtime" }, { path: "workbench" }];
+    const sections = [{ path: "avatar" }, { path: "log" }];
 
     const view = pickEditableConfigView(config, sections);
 
     expect(view).toEqual({
-      runtime: { profile: "safe_local" },
-      workbench: { backend_port: 8000 },
+      avatar: { preset: "ember" },
+      log: { max_entries: 300 },
     });
+    expect(view.runtime).toBeUndefined();
+    expect(view.workbench).toBeUndefined();
     expect(view.agent).toBeUndefined();
     expect(view.tools).toBeUndefined();
     expect(view.memory).toBeUndefined();
@@ -131,20 +135,22 @@ describe("configRouteLogic", () => {
     const config: PublicConfigShape = {
       runtime: { profile: "safe_local" },
       workbench: { backend_port: 8000 },
+      avatar: { preset: "ember" },
       agent: { name: "Persistent Agent" },
       tools: { image2: { default_model_ref: "relay_image2" } },
       memory: { enabled: true },
     };
     const editorView: PublicConfigShape = {
-      runtime: { profile: "debug" },
+      avatar: { preset: "ocean" },
       tools: { image2: { default_model_ref: "hijacked" } },
     };
 
-    const merged = mergeEditableConfigView(config, editorView, [{ path: "runtime" }, { path: "workbench" }]);
+    const merged = mergeEditableConfigView(config, editorView, [{ path: "avatar" }]);
 
     expect(merged).toEqual({
-      runtime: { profile: "debug" },
+      runtime: { profile: "safe_local" },
       workbench: { backend_port: 8000 },
+      avatar: { preset: "ocean" },
       agent: { name: "Persistent Agent" },
       tools: { image2: { default_model_ref: "relay_image2" } },
       memory: { enabled: true },
@@ -643,6 +649,20 @@ describe("config route copy", () => {
     expect(visibleCopy.en).not.toMatch(/\bdrafts?\b/i);
     expect(visibleCopy.en).not.toMatch(/\bJSON\b/i);
     expect(visibleCopy.en).not.toMatch(/\bJSON editor\b/i);
+  });
+
+  it("points startup settings to Launcher instead of generic config", () => {
+    const zhCopy = Object.values(CONFIG_COPY.zh).join("\n");
+    const enCopy = Object.values(CONFIG_COPY.en).join("\n");
+
+    expect(CONFIG_COPY.zh.subtitle).toContain("启动设置在 Launcher 面板维护");
+    expect(CONFIG_COPY.en.subtitle).toContain("Startup settings are maintained in Launcher");
+    expect(CONFIG_COPY.zh.groupWorkbenchSummary).toContain("启动设置移到 Launcher");
+    expect(CONFIG_COPY.en.groupWorkbenchSummary).toContain("Startup settings moved to Launcher");
+    expect(zhCopy).not.toContain("唯一配置网页入口");
+    expect(enCopy).not.toContain("single config web entry");
+    expect(CONFIG_COPY.zh.groupWorkbenchSummary).not.toContain("前后端端口");
+    expect(CONFIG_COPY.en.groupWorkbenchSummary).not.toContain("frontend/backend ports");
   });
 
   it("splits model assets and git tooling into separate areas", () => {

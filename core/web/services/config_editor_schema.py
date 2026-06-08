@@ -302,8 +302,6 @@ FIELD_HINTS = {
 }
 
 EDITOR_SECTION_SPECS = [
-    ("runtime", "runtime"),
-    ("workbench", "workbench"),
     ("avatar", "avatar"),
     ("user-profile", "user_profile"),
     ("llm-discovery", "llm.discovery"),
@@ -319,6 +317,10 @@ EDITOR_SECTION_SPECS = [
     ("debug", "debug"),
     ("pet", "pet"),
 ]
+
+LAUNCHER_OWNED_FIELD_PATHS = {
+    "ui.language",
+}
 
 
 def _humanize_token(token: str) -> str:
@@ -458,6 +460,29 @@ def _lookup_path_value(payload: dict[str, Any], path: str) -> Any:
     return current
 
 
+def _without_launcher_owned_fields(value: Any, path: str) -> Any:
+    if path in LAUNCHER_OWNED_FIELD_PATHS:
+        return None
+    if isinstance(value, dict):
+        filtered: dict[str, Any] = {}
+        for key, child in value.items():
+            child_path = f"{path}.{key}" if path else str(key)
+            if child_path in LAUNCHER_OWNED_FIELD_PATHS:
+                continue
+            filtered_child = _without_launcher_owned_fields(child, child_path)
+            if filtered_child is not None:
+                filtered[key] = filtered_child
+        return filtered
+    if isinstance(value, list):
+        return [
+            filtered_child
+            for index, child in enumerate(value)
+            for filtered_child in [_without_launcher_owned_fields(child, f"{path}.{index}")]
+            if filtered_child is not None
+        ]
+    return value
+
+
 def _count_leaf_fields(value: Any) -> int:
     if isinstance(value, dict):
         return sum(_count_leaf_fields(item) for item in value.values())
@@ -514,7 +539,10 @@ def build_editor_meta(public_config: dict[str, Any], lang: str) -> dict[str, dic
             section_value = _lookup_path_value(public_config, path)
         except KeyError:
             continue
-        _walk_editor_meta(copy.deepcopy(section_value), path, lang, meta, public_config)
+        filtered = _without_launcher_owned_fields(copy.deepcopy(section_value), path)
+        if filtered in ({}, [], None):
+            continue
+        _walk_editor_meta(filtered, path, lang, meta, public_config)
     return meta
 
 
@@ -524,6 +552,9 @@ def build_editor_sections(public_config: dict[str, Any], lang: str) -> list[dict
         try:
             value = _lookup_path_value(public_config, path)
         except KeyError:
+            continue
+        filtered = _without_launcher_owned_fields(copy.deepcopy(value), path)
+        if filtered in ({}, [], None):
             continue
         title = localize_section_label(path, path.split(".")[-1], lang)
         sections.append(
@@ -537,7 +568,7 @@ def build_editor_sections(public_config: dict[str, Any], lang: str) -> list[dict
                     if lang == "zh"
                     else "Edit and confirm this config block before the global apply step."
                 ),
-                "fieldCount": _count_leaf_fields(value),
+                "fieldCount": _count_leaf_fields(filtered),
             }
         )
     return sections
