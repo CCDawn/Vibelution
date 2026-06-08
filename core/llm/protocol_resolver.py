@@ -142,6 +142,7 @@ def _protocol_from_contract(provider_kind: str, provider: ProviderConfig, profil
     thinking_enabled = _thinking_enabled(profile)
     compat_mode = _read_optional_string(provider, "compat_mode")
     model_family = _model_family(_read_optional_string(profile, "model"))
+    localish = provider_kind in {"local", "llamacpp", "ollama"} or _base_url_is_localish(_read_optional_string(provider, "base_url"))
     if transport == "responses":
         return ModelProtocol.RELAY_RESPONSES if provider_kind == "relay" else ModelProtocol.OPENAI_RESPONSES
     if provider_kind == "anthropic":
@@ -152,8 +153,8 @@ def _protocol_from_contract(provider_kind: str, provider: ProviderConfig, profil
         return ModelProtocol.MINIMAX_CHAT
     if contract == "basic_chat":
         return ModelProtocol.BASIC_CHAT_NO_TOOLS
-    if contract == "tool_chat" and thinking_enabled and model_family == "qwen":
-        return None
+    if contract == "tool_chat" and model_family == "qwen" and not localish:
+        return ModelProtocol.QWEN_THINKING_NO_PREFILL if thinking_enabled else ModelProtocol.QWEN_OPENAI_COMPAT
     if contract == "tool_chat" and _is_openai_compatible_provider(provider_kind, compat_mode):
         return ModelProtocol.OPENAI_CHAT_TOOLS
     return None
