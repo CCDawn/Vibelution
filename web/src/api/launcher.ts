@@ -140,6 +140,10 @@ export function updateWorkbenchWindowMode(mode: WorkbenchWindowMode) {
   });
 }
 
+export function saveLauncherWorkbenchWindowMode(mode: WorkbenchWindowMode) {
+  return updateWorkbenchWindowMode(mode);
+}
+
 export function updateLauncherStartupSettings(setting: LauncherStartupSettings) {
   return fetchLauncherJson<LauncherStartupSettingsUpdateResponse>("settings/startup", {
     method: "PUT",

@@ -6,6 +6,7 @@ import {
   getLauncherStatus,
   reattachLauncherSupervisor,
   restartLauncherBundle,
+  saveLauncherWorkbenchWindowMode,
   startLauncherBundle,
   stopLauncherBundle,
   updateLauncherStartupSettings,
@@ -421,7 +422,9 @@ function LauncherStartupSettingsPanel({
   backendPortOverride,
   frontendPortOverride,
   pending,
+  pendingWindowMode,
   onSave,
+  onWindowModeChange,
 }: {
   copy: LauncherCopy;
   uiLang: "zh" | "en";
@@ -432,10 +435,12 @@ function LauncherStartupSettingsPanel({
   backendPortOverride: number;
   frontendPortOverride: number;
   pending: boolean;
+  pendingWindowMode: WorkbenchWindowMode | "";
   onSave: (setting: LauncherStartupSettings) => void;
+  onWindowModeChange: (mode: WorkbenchWindowMode) => void;
 }) {
   const current = setting ?? defaultStartupSettings(configuredWindowMode);
-  const controlsDisabled = pending || !setting?.configHash;
+  const controlsDisabled = pending || Boolean(pendingWindowMode) || !setting?.configHash;
   const currentSignature = setting
     ? [
         setting.configHash,
@@ -491,6 +496,15 @@ function LauncherStartupSettingsPanel({
     });
   }
 
+  function saveWindowMode(next: { windowMode: WorkbenchWindowMode }) {
+    const mode = next.windowMode;
+    patchDraft({ workbench: { ...draft.workbench, windowMode: mode } });
+    setValidationError("");
+    if (mode !== current.workbench.windowMode) {
+      onWindowModeChange(mode);
+    }
+  }
+
   return (
     <div className={styles.settingsStrip} aria-label={copy.startupSettings}>
       <div className={styles.settingsHeader}>
@@ -539,20 +553,20 @@ function LauncherStartupSettingsPanel({
           type="button"
           data-active={draft.workbench.windowMode === "fullscreen"}
           disabled={controlsDisabled}
-          onClick={() => patchDraft({ workbench: { ...draft.workbench, windowMode: "fullscreen" } })}
+          onClick={() => saveWindowMode({ windowMode: "fullscreen" })}
           title={copy.windowModeFullscreen}
         >
-          <Maximize2 size={14} />
+          {pendingWindowMode === "fullscreen" ? <LoaderCircle size={14} className={styles.spin} /> : <Maximize2 size={14} />}
           <span>{copy.windowModeFullscreen}</span>
         </button>
         <button
           type="button"
           data-active={draft.workbench.windowMode === "windowed"}
           disabled={controlsDisabled}
-          onClick={() => patchDraft({ workbench: { ...draft.workbench, windowMode: "windowed" } })}
+          onClick={() => saveWindowMode({ windowMode: "windowed" })}
           title={copy.windowModeWindowed}
         >
-          <Minimize2 size={14} />
+          {pendingWindowMode === "windowed" ? <LoaderCircle size={14} className={styles.spin} /> : <Minimize2 size={14} />}
           <span>{copy.windowModeWindowed}</span>
         </button>
       </div>
@@ -1182,6 +1196,29 @@ export function LauncherRoute() {
       setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
     },
   });
+  const [pendingWindowMode, setPendingWindowMode] = useState<WorkbenchWindowMode | "">("");
+  const workbenchWindowSaveMutation = useMutation({
+    mutationFn: saveLauncherWorkbenchWindowMode,
+    onMutate: (mode) => {
+      setPendingWindowMode(mode);
+    },
+    onSuccess: (response) => {
+      setNotice({
+        tone: response.setting.envOverride ? "warning" : "success",
+        text: response.message || copy.windowModeSaved,
+      });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.launcherStatus() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.configPublic() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.configWorkspace() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.runtimeSummary() });
+    },
+    onError: (error) => {
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
+    },
+    onSettled: () => {
+      setPendingWindowMode("");
+    },
+  });
 
   const status = statusQuery.data as LauncherStatusWithGuardian | undefined;
   const bundle = status?.projectBundle;
@@ -1487,8 +1524,10 @@ export function LauncherRoute() {
         windowModeDetail={windowModeDetail}
         backendPortOverride={backendPortOverride}
         frontendPortOverride={frontendPortOverride}
-        pending={startupSettingsMutation.isPending}
+        pending={startupSettingsMutation.isPending || workbenchWindowSaveMutation.isPending}
+        pendingWindowMode={pendingWindowMode}
         onSave={(nextSetting) => startupSettingsMutation.mutate(nextSetting)}
+        onWindowModeChange={(mode) => workbenchWindowSaveMutation.mutate(mode)}
       />
 
       {statusQuery.isError ? (
