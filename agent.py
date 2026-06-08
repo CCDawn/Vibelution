@@ -1623,17 +1623,20 @@ class SelfEvolvingAgent:
         pending_runtime_context_blocks = list(getattr(self, "_pending_runtime_context_blocks", []) or [])
         self._pending_runtime_context_blocks = []
         if pending_runtime_context_blocks:
-            insert_at = 1 if messages else 0
-            for block in reversed(pending_runtime_context_blocks):
-                messages.insert(insert_at, SystemMessage(content=block))
+            context_messages = [SystemMessage(content=block) for block in pending_runtime_context_blocks]
+            messages = TurnOutcomeController.insert_volatile_context_before_current_user(
+                messages=messages,
+                context_messages=context_messages,
+            )
             _record_agent_scene_event(
                 "prompt",
                 "agent.runtime_context_inserted_as_system",
-                message="Agent runtime context inserted as independent system messages.",
+                message="Agent runtime context inserted before the current user message.",
                 fields={
                     "runtimeContextBlockCount": len(pending_runtime_context_blocks),
                     "runtimeContextChars": sum(len(str(b or "")) for b in pending_runtime_context_blocks),
                     "systemMessageKind": "independent_system_message",
+                    "insertionPolicy": "before_current_user",
                 },
             )
         try:
