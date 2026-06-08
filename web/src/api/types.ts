@@ -2963,6 +2963,236 @@ export type TeamWorkflowOrchestration = {
   updatedAt: string;
 };
 
+export type DataProcessingRecord = {
+  schemaVersion: number;
+  recordId: string;
+  runId: string;
+  sourceType: string;
+  sourceRef: string;
+  rawLocation: string;
+  title: string;
+  summary: string;
+  status: string;
+  metadata: Record<string, unknown>;
+  qualitySignals: Record<string, unknown>;
+  collectionTrace: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type DataProcessingRun = {
+  schemaVersion: number;
+  runId: string;
+  profileId: string;
+  title: string;
+  status: string;
+  scope: Record<string, unknown> & {
+    teamId?: string;
+    workflowKind?: string;
+    topic?: string;
+    goal?: string;
+    dataSearchPlanRef?: {
+      planId?: string;
+      planKind?: string;
+      status?: string;
+      queryCount?: number;
+      externalSearchTriggered?: boolean;
+    };
+  };
+  metadata: Record<string, unknown> & {
+    startedFrom?: string;
+    teamId?: string;
+    requestedByAgent?: string;
+    ownerAgentId?: string;
+    searchPlanId?: string;
+    queryCount?: number;
+    querySeedCount?: number;
+  };
+  summary?: DataProcessingStatus["summary"];
+  storage: {
+    runPath: string;
+    recordsPath: string;
+    collectionAssignmentsPath: string;
+    collectionOutputsPath: string;
+    eventsPath: string;
+  };
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type DataProcessingRunListPayload = {
+  schemaVersion: number;
+  runs: DataProcessingRun[];
+  summary: {
+    runCount: number;
+    returnedCount: number;
+  };
+};
+
+export type DataProcessingStatus = {
+  schemaVersion: number;
+  runId: string;
+  profileId: string;
+  runStatus: string;
+  summary: {
+    recordCount: number;
+    assignmentCount: number;
+    openAssignmentCount: number;
+    outputCount: number;
+    recordStatusCounts: Record<string, number>;
+    sourceTypeCounts: Record<string, number>;
+    assignmentStatusCounts: Record<string, number>;
+  };
+  nextActions: Array<{
+    action: string;
+    reason: string;
+  }>;
+  boundaries: {
+    generic: boolean;
+    writesFormalKnowledge: boolean;
+    writesRag: boolean;
+    writesKnowledgeGraph: boolean;
+    requiresDownstreamPublisher: boolean;
+  };
+};
+
+export type DataProcessingCollectionAssignment = {
+  schemaVersion: number;
+  assignmentId: string;
+  runId: string;
+  agentRole: string;
+  agentId: string;
+  status: string;
+  scope: Record<string, unknown> & {
+    assignedQueries?: TeamWorkflowSourceCollectionQuery[];
+    queryCount?: number;
+    dataSearchPlanRef?: DataProcessingRun["scope"]["dataSearchPlanRef"];
+    resultWritebackContract?: TeamWorkflowSourceCollectionWritebackContract;
+  };
+  inputRefs: string[];
+  expectedRecordTypes: string[];
+  acceptance: Record<string, unknown> & {
+    resultWritebackContract?: TeamWorkflowSourceCollectionWritebackContract;
+    noFormalKnowledgeWrite?: boolean;
+  };
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type DataProcessingCollectionAssignmentListPayload = {
+  schemaVersion: number;
+  runId: string;
+  assignments: DataProcessingCollectionAssignment[];
+  summary: {
+    assignmentCount: number;
+    assignmentStatusCounts: Record<string, number>;
+  };
+};
+
+export type DataProcessingCollectionOutputPayload = {
+  output: {
+    schemaVersion: number;
+    outputId: string;
+    runId: string;
+    assignmentId: string;
+    agentRole: string;
+    agentId: string;
+    status: string;
+    recordIds: string[];
+    notes: string;
+    qualitySignals: Record<string, unknown>;
+    blockingIssues: string[];
+    createdAt: string;
+  };
+  createdRecords: DataProcessingRecord[];
+};
+
+export type TeamWorkflowSourceCollectionQuery = {
+  queryId: string;
+  query: string;
+  seed: string;
+  language: string;
+  sourceType: string;
+  assignedAgentRole: string;
+  maxResults: number;
+  status: string;
+  execution: {
+    mode: string;
+    externalSearchTriggered: boolean;
+  };
+  writeback: {
+    target: string;
+    recordStatus: string;
+    candidateImportTarget: string;
+  };
+};
+
+export type TeamWorkflowSourceCollectionWritebackContract = {
+  schemaVersion: number;
+  target: string;
+  recordContract: {
+    requiredAnyOf: string[];
+    recordFields: string[];
+    collectionTraceFields: string[];
+  };
+  candidateImport: {
+    targetCandidateType: string;
+    route: string;
+    idempotencyKey: string;
+  };
+  formalKnowledgeWrites: boolean;
+  ragWrites: boolean;
+  officialGraphWrites: boolean;
+};
+
+export type TeamWorkflowSourceCollectionSearchPlan = {
+  schemaVersion: number;
+  planId: string;
+  planKind: string;
+  status: string;
+  teamId: string;
+  runId: string;
+  topic: string;
+  goal: string;
+  querySeeds: string[];
+  queryCount: number;
+  sourceTypes: string[];
+  searchLanguages: string[];
+  maxResultsPerQuery: number;
+  queries: TeamWorkflowSourceCollectionQuery[];
+  roleAssignmentInputs: Array<{
+    agentRole: string;
+    agentId: string;
+    queryIds: string[];
+    queryCount: number;
+    expectedAction: string;
+  }>;
+  resultWritebackContract: TeamWorkflowSourceCollectionWritebackContract;
+  boundaries: {
+    externalSearchTriggered: boolean;
+    writesFormalKnowledge: boolean;
+    writesRag: boolean;
+    writesKnowledgeGraph: boolean;
+  };
+};
+
+export type TeamWorkflowSourceCollectionRunStartPayload = {
+  run: DataProcessingRun;
+  searchPlan: TeamWorkflowSourceCollectionSearchPlan;
+  assignments: DataProcessingCollectionAssignment[];
+  assignmentCount: number;
+  workflow: TeamWorkflowOrchestration;
+  nextActions: string[];
+};
+
+export type TeamWorkflowDataRecordSourceCandidateImportPayload = {
+  created: boolean;
+  candidate: TeamWorkflowCandidate;
+  dataRecordRef: Record<string, unknown>;
+  validation: TeamWorkflowCandidateValidation;
+  workflow: TeamWorkflowOrchestration;
+};
+
 export type TeamWorkflowCandidateValidationIssue = {
   severity: "error" | "warning" | string;
   code: string;
