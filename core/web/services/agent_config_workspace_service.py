@@ -87,7 +87,7 @@ def get_agent_config_workspace() -> dict[str, Any]:
     )
     prompt_workspace = _timed_stage(timings, "prompt_templates", _safe_prompt_workspace)
     config_workspace = _timed_stage(timings, "model_config", _safe_config_workspace)
-    chat_rooms = _timed_stage(timings, "chat_rooms", _safe_chat_rooms)
+    chat_rooms = _timed_stage(timings, "chat_rooms", lambda: _safe_chat_rooms_for_agents(agents))
     teams = _timed_stage(timings, "teams", _safe_teams)
     policy_options = _timed_stage(timings, "policy_options", lambda: _safe_policy_options(agents=agents))
 
@@ -1092,12 +1092,30 @@ def _safe_config_workspace() -> dict[str, Any]:
         return {"modelOptions": []}
 
 
-def _safe_chat_rooms() -> list[dict[str, Any]]:
+def _safe_chat_rooms_for_agents(agents: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    try:
+        return _safe_chat_rooms(agents=agents)
+    except TypeError as exc:
+        if "unexpected keyword argument" not in str(exc):
+            raise
+        return _safe_chat_rooms()
+
+
+def _safe_chat_rooms(*, agents: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
     try:
         from . import team_service
 
         team_service.repair_archived_team_chat_rooms()
-        return [_compact_chat_room_for_workspace(room) for room in chat_room_service.list_chat_rooms_compact()]
+        agent_refs = _agent_refs_by_id(agents or [])
+        agents_by_session_id = _agent_refs_by_direct_session_id(agents or [])
+        return [
+            _compact_chat_room_for_workspace(
+                room,
+                agent_refs=agent_refs,
+                agents_by_session_id=agents_by_session_id,
+            )
+            for room in chat_room_service.list_chat_rooms_compact()
+        ]
     except Exception as exc:
         _record_workspace_error("agent_config.chat_rooms.load_failed", exc)
         return []
@@ -1113,7 +1131,12 @@ def _safe_teams() -> list[dict[str, Any]]:
         return []
 
 
-def _compact_chat_room_for_workspace(room: dict[str, Any]) -> dict[str, Any]:
+def _compact_chat_room_for_workspace(
+    room: dict[str, Any],
+    *,
+    agent_refs: dict[str, dict[str, Any]] | None = None,
+    agents_by_session_id: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     participants = [item for item in list(room.get("participants") or []) if isinstance(item, dict)]
     return {
         "roomId": str(room.get("roomId") or "").strip(),
@@ -1126,25 +1149,84 @@ def _compact_chat_room_for_workspace(room: dict[str, Any]) -> dict[str, Any]:
             for participant in participants
             if str(participant.get("agentId") or "").strip()
         ],
-        "participants": [_compact_chat_room_participant_for_workspace(participant) for participant in participants],
+        "participants": [
+            _compact_chat_room_participant_for_workspace(
+                participant,
+                agent_refs=agent_refs,
+                agents_by_session_id=agents_by_session_id,
+            )
+            for participant in participants
+        ],
         "participantCount": len(participants),
         "roundCount": len(list(room.get("rounds") or [])),
         "updatedAt": str(room.get("updatedAt") or "").strip(),
     }
 
 
-def _compact_chat_room_participant_for_workspace(participant: dict[str, Any]) -> dict[str, Any]:
+def _compact_chat_room_participant_for_workspace(
+    participant: dict[str, Any],
+    *,
+    agent_refs: dict[str, dict[str, Any]] | None = None,
+    agents_by_session_id: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    agent = _workspace_participant_agent(
+        participant,
+        agent_refs=agent_refs,
+        agents_by_session_id=agents_by_session_id,
+    )
     llm_bindings = participant.get("llmBindings") if isinstance(participant.get("llmBindings"), dict) else {}
+    if agent:
+        llm_bindings = normalize_agent_llm_bindings(agent.get("llmBindings"))
     return {
         "participantId": str(participant.get("participantId") or "").strip(),
         "sessionId": str(participant.get("sessionId") or "").strip(),
-        "agentId": str(participant.get("agentId") or "").strip(),
-        "agentCode": str(participant.get("agentCode") or "").strip(),
+        "agentId": str((agent or {}).get("agentId") or participant.get("agentId") or "").strip(),
+        "agentCode": str((agent or {}).get("agentCode") or participant.get("agentCode") or "").strip(),
         "displayName": str(participant.get("displayName") or "").strip(),
         "enabled": bool(participant.get("enabled", True)),
-        "dialogueModelId": str(participant.get("dialogueModelId") or "").strip(),
+        "dialogueModelId": str(agent_dialogue_model_id(agent) if agent else participant.get("dialogueModelId") or "").strip(),
         "llmBindings": llm_bindings,
     }
+
+
+def _agent_refs_by_id(agents: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    return {
+        str(agent.get("agentId") or "").strip(): agent
+        for agent in agents
+        if isinstance(agent, dict) and str(agent.get("agentId") or "").strip()
+    }
+
+
+def _agent_refs_by_direct_session_id(agents: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    return {
+        str(agent.get("directSessionId") or "").strip(): agent
+        for agent in agents
+        if isinstance(agent, dict) and str(agent.get("directSessionId") or "").strip()
+    }
+
+
+def _workspace_participant_agent(
+    participant: dict[str, Any],
+    *,
+    agent_refs: dict[str, dict[str, Any]] | None = None,
+    agents_by_session_id: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, Any] | None:
+    agent_id = str(participant.get("agentId") or "").strip()
+    if agent_id and agent_refs:
+        agent = agent_refs.get(agent_id)
+        if isinstance(agent, dict):
+            return agent
+    session_ids = {
+        str(participant.get("sessionId") or "").strip(),
+        str(participant.get("directSessionId") or "").strip(),
+    }
+    session_ids.discard("")
+    if agents_by_session_id:
+        for session_id in session_ids:
+            agent = agents_by_session_id.get(session_id)
+            if isinstance(agent, dict):
+                return agent
+    return None
 
 
 def _safe_policy_options(*, agents: list[dict[str, Any]] | None = None) -> dict[str, list[dict[str, Any]]]:

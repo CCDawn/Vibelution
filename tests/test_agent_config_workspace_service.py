@@ -1098,14 +1098,17 @@ def test_agent_config_workspace_repairs_stale_chat_room_participant_model_snapsh
     participant["llmBindings"] = {"dialogue": {"modelId": "missing-room-model"}}
     room_path.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
 
-    compact = chat_room_service.list_chat_rooms_compact()
     payload = agent_config_workspace_service.get_agent_config_workspace()
     issues = payload["health"]["byAgent"][agent["agentId"]]
 
-    compact_room = next(item for item in compact if item["roomId"] == room["roomId"])
-    compact_participant = compact_room["participants"][0]
-    assert compact_participant["dialogueModelId"] == "model-primary"
-    assert compact_participant["llmBindings"]["dialogue"]["modelId"] == "model-primary"
+    workspace_room = next(
+        item
+        for item in agent_config_workspace_service._safe_chat_rooms(agents=[agent, peer])
+        if item["roomId"] == room["roomId"]
+    )
+    workspace_participant = next(item for item in workspace_room["participants"] if item["agentId"] == agent["agentId"])
+    assert workspace_participant["dialogueModelId"] == "model-primary"
+    assert workspace_participant["llmBindings"]["dialogue"]["modelId"] == "model-primary"
     assert not any(
         item["code"] == "unresolved_chat_room_participant_model_reference"
         and "missing-room-model" in item["detail"]
