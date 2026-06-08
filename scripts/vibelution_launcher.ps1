@@ -252,6 +252,7 @@ $launcherControlPort = Resolve-ConfiguredLauncherControlPort -WorkbenchPort $por
 $workbenchWindowMode = Resolve-ConfiguredWorkbenchWindowMode
 $workbenchWindowSize = Resolve-ConfiguredWorkbenchWindowSize
 $url = "http://$bindHost`:$port"
+$backendReadyUrl = $url
 $healthUrl = "$url/api/health"
 $launcherControlUrl = "http://$bindHost`:$launcherControlPort"
 $launcherControlHealthUrl = "$launcherControlUrl/api/health"
@@ -365,6 +366,7 @@ function Set-LauncherEndpoint {
     }
 
     $script:url = $normalizedUrl
+    $script:backendReadyUrl = $normalizedUrl
     $script:healthUrl = "$normalizedUrl/api/health"
 }
 
@@ -2117,12 +2119,25 @@ function Get-FrontendBuildFailureSummary {
 }
 
 function Test-WebHealthy {
-    try {
-        $response = Invoke-WebRequest -UseBasicParsing -Uri $healthUrl -TimeoutSec 2
-        return $response.StatusCode -eq 200
-    } catch {
-        return $false
+    $probeUrls = @()
+    if ($script:backendReadyUrl) {
+        $probeUrls += [string]$script:backendReadyUrl
     }
+    $hasHealthProbe = @($probeUrls | Where-Object { $_ -eq $script:healthUrl }).Count -gt 0
+    if ($script:healthUrl -and -not $hasHealthProbe) {
+        $probeUrls += [string]$script:healthUrl
+    }
+
+    foreach ($probeUrl in $probeUrls) {
+        try {
+            $response = Invoke-WebRequest -UseBasicParsing -Uri $probeUrl -TimeoutSec 1
+            if ($response.StatusCode -eq 200) {
+                return $true
+            }
+        } catch {
+        }
+    }
+    return $false
 }
 
 function Test-LauncherControlHealthy {
@@ -4352,6 +4367,52 @@ function Write-ManagedBrowserProcessMemorySnapshot {
     }
 }
 
+function Write-ManagedBrowserProcessMemoryStartupSkip {
+    param(
+        [string]$Reason = "browser_opened",
+        [string]$ProfileDir = ""
+    )
+
+    if (-not $script:currentRuntimeSceneId) {
+        return
+    }
+
+    if (-not $ProfileDir) {
+        $profileDirVariable = Get-Variable -Scope Script -Name "browserProfileDir" -ErrorAction SilentlyContinue
+        if ($profileDirVariable) {
+            $ProfileDir = [string]$profileDirVariable.Value
+        }
+    }
+
+    $fields = @{
+        reason = $Reason
+        profileDir = $ProfileDir
+        skipped = $true
+        skipReason = "startup_critical_path"
+    }
+
+    Append-RuntimeSceneRawLog `
+        -RelativePath (Get-RuntimeSceneRelativePaths).BrowserProcessMemory `
+        -Message ("Managed browser process memory ({0}) skipped during startup ready path." -f $Reason)
+    Write-RuntimeSceneEvent `
+        -Component "browser" `
+        -Phase "memory" `
+        -EventCode "browser.process_memory.sample_skipped_startup" `
+        -Message "Managed browser process memory sampling skipped during startup ready path." `
+        -Outcome "skipped" `
+        -Fields $fields `
+        -RawRefs @(New-RuntimeSceneRawRef -RelativePath (Get-RuntimeSceneRelativePaths).BrowserProcessMemory -TailLines 40)
+    Update-RuntimeSceneManifest @{
+        browser = @{
+            process_memory = @{
+                startup_blocking_sample_skipped = $true
+                last_sample_reason = "startup_skipped"
+                skip_reason = "startup_critical_path"
+            }
+        }
+    }
+}
+
 function Invoke-ManagedBrowserRenderCacheCleanup {
     param([string]$ProfileDir = "")
 
@@ -5220,7 +5281,7 @@ function Start-ManagedBrowser {
             }
     }
 
-    Write-ManagedBrowserProcessMemorySnapshot -Reason "browser_opened" -ProfileDir $ProfileDir
+    Write-ManagedBrowserProcessMemoryStartupSkip -Reason "browser_opened" -ProfileDir $ProfileDir
 
     return [pscustomobject]@{
         LaunchPid = $proc.Id

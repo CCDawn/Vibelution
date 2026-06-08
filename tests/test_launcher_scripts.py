@@ -4405,6 +4405,146 @@ Write-Output "ok"
     assert result.stdout.strip().splitlines()[-1] == "ok"
 
 
+def test_launcher_browser_open_skips_startup_blocking_process_memory_sample(tmp_path):
+    result = _run_launcher_ast_harness(
+        tmp_path,
+        """
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$LauncherPath
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$source = Get-Content -Raw -LiteralPath $LauncherPath
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors -and $parseErrors.Count -gt 0) {
+    throw "Launcher script parse failed: $($parseErrors[0].Message)"
+}
+
+function Get-FunctionText {
+    param([string]$Name)
+    $functionAst = $ast.Find({
+        param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+            $node.Name -eq $Name
+    }, $true)
+    if ($null -eq $functionAst) {
+        throw "$Name was not found."
+    }
+    return $functionAst.Extent.Text
+}
+
+$startBrowserText = Get-FunctionText -Name "Start-ManagedBrowser"
+$skipText = Get-FunctionText -Name "Write-ManagedBrowserProcessMemoryStartupSkip"
+
+if ($startBrowserText -match [regex]::Escape('Write-ManagedBrowserProcessMemorySnapshot -Reason "browser_opened"')) {
+    throw "Start-ManagedBrowser still samples browser process memory on the startup ready path."
+}
+if ($startBrowserText -notmatch [regex]::Escape('Write-ManagedBrowserProcessMemoryStartupSkip -Reason "browser_opened"')) {
+    throw "Start-ManagedBrowser does not record the startup process-memory skip event."
+}
+foreach ($required in @(
+    "browser.process_memory.sample_skipped_startup",
+    "startup_blocking_sample_skipped",
+    "startup_critical_path"
+)) {
+    if ($skipText -notmatch [regex]::Escape($required)) {
+        throw "Browser process memory startup skip logging is missing '$required'."
+    }
+}
+
+Write-Output "ok"
+""",
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip().splitlines()[-1] == "ok"
+
+
+def test_launcher_web_health_prefers_root_ready_probe_then_health_fallback(tmp_path):
+    result = _run_launcher_ast_harness(
+        tmp_path,
+        """
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$LauncherPath
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$source = Get-Content -Raw -LiteralPath $LauncherPath
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors -and $parseErrors.Count -gt 0) {
+    throw "Launcher script parse failed: $($parseErrors[0].Message)"
+}
+
+$functionAst = $ast.Find({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -eq "Test-WebHealthy"
+}, $true)
+if ($null -eq $functionAst) {
+    throw "Test-WebHealthy was not found."
+}
+. ([scriptblock]::Create($functionAst.Extent.Text))
+
+$script:backendReadyUrl = "http://127.0.0.1:8000"
+$script:healthUrl = "http://127.0.0.1:8000/api/health"
+$script:probes = @()
+$script:failRootProbe = $false
+function Invoke-WebRequest {
+    param(
+        [switch]$UseBasicParsing,
+        [string]$Uri,
+        [int]$TimeoutSec
+    )
+    $script:probes += [pscustomobject]@{
+        Uri = $Uri
+        TimeoutSec = $TimeoutSec
+    }
+    if ($Uri -eq $script:backendReadyUrl -and $script:failRootProbe) {
+        throw "root probe unavailable"
+    }
+    return [pscustomobject]@{ StatusCode = 200 }
+}
+
+if (-not (Test-WebHealthy)) {
+    throw "Expected root ready probe to be healthy."
+}
+if ($script:probes.Count -ne 1 -or $script:probes[0].Uri -ne $script:backendReadyUrl) {
+    throw "Expected Test-WebHealthy to probe the root ready URL first."
+}
+if ($script:probes[0].TimeoutSec -ne 1) {
+    throw "Expected root ready probe timeout to stay at one second."
+}
+
+$script:probes = @()
+$script:failRootProbe = $true
+if (-not (Test-WebHealthy)) {
+    throw "Expected /api/health fallback to report healthy."
+}
+if ($script:probes.Count -ne 2) {
+    throw "Expected root probe plus /api/health fallback, got $($script:probes.Count)."
+}
+if ($script:probes[0].Uri -ne $script:backendReadyUrl -or $script:probes[1].Uri -ne $script:healthUrl) {
+    throw "Expected root ready probe before /api/health fallback."
+}
+
+Write-Output "ok"
+""",
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip().splitlines()[-1] == "ok"
+
+
 def test_launcher_browser_candidates_include_tracked_launch_window_and_profile_pids(tmp_path):
     result = _run_launcher_ast_harness(
         tmp_path,
