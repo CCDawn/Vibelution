@@ -5261,6 +5261,38 @@ try {
             stderr_path = $supervisorStderrLog
         }
 
+        $sessionLooksLiveAfterCleanSupervisorExit = [bool](
+            $launchObjectExitCode -eq 0 `
+            -and $stateSessionIdAtFailure -eq $ManagedSessionId `
+            -and [bool]$backendAliveAtFailure `
+            -and [bool]$backendHealthyAtFailure `
+            -and $browserWindowPids.Count -gt 0
+        )
+        if ($sessionLooksLiveAfterCleanSupervisorExit) {
+            Write-LauncherControlLog `
+                -Event "launcher.supervisor.clean_exit_adopted" `
+                -Message "Supervisor wrapper exited cleanly after the managed session became live; preserving the healthy workbench." `
+                -Level "warning" `
+                -Fields $failureFields
+            if ($script:currentRuntimeSceneId) {
+                Update-RuntimeSceneManifest @{ supervisor = @{ pid = $proc.Id; status = "clean_exit_adopted"; failure = "" } }
+                Write-RuntimeSceneEvent `
+                    -Component "supervisor" `
+                    -Phase "startup" `
+                    -EventCode "supervisor.clean_exit_adopted" `
+                    -Message "Supervisor wrapper exited cleanly after startup, but backend and browser are live." `
+                    -Level "warning" `
+                    -Outcome "adopted" `
+                    -Fields $failureFields `
+                    -RawRefs @(
+                        (New-RuntimeSceneRawRef -RelativePath (Get-RuntimeSceneRelativePaths).Supervisor -TailLines 20),
+                        (New-RuntimeSceneRawRef -RelativePath (Get-RuntimeSceneRelativePaths).SupervisorStderr -TailLines 20),
+                        (New-RuntimeSceneRawRef -RelativePath (Get-RuntimeSceneRelativePaths).LauncherControl -TailLines 80)
+                    )
+            }
+            return 0
+        }
+
         Write-LauncherControlLog `
             -Event "launcher.supervisor.start_failed" `
             -Message "Supervisor process exited during startup." `
