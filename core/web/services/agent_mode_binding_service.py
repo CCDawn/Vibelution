@@ -225,59 +225,99 @@ def remove_agent_from_mode_bindings(agent_id: str, *, agent_snapshot: dict[str, 
     normalized_agent_id = str(agent_id or "").strip()
     if not normalized_agent_id:
         raise AgentModeBindingError("Agent id is required.")
-    if not isinstance(agent_snapshot, dict):
-        agent_snapshot = get_agent(normalized_agent_id, include_archived=True)
-    tombstone_slot_by_mode = _fixed_role_tombstone_slots(agent_snapshot)
+    return remove_agents_from_mode_bindings(
+        [normalized_agent_id],
+        agent_snapshots_by_agent_id={normalized_agent_id: agent_snapshot} if isinstance(agent_snapshot, dict) else None,
+    )
+
+
+def remove_agents_from_mode_bindings(
+    agent_ids: list[str] | None,
+    *,
+    agent_snapshots_by_agent_id: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Remove multiple Agents from all mode binding references in one binding update."""
+
+    requested = [str(item or "").strip() for item in list(agent_ids or []) if str(item or "").strip()]
+    normalized_agent_ids: list[str] = []
+    seen_agent_ids: set[str] = set()
+    for agent_id in requested:
+        if agent_id in seen_agent_ids:
+            continue
+        seen_agent_ids.add(agent_id)
+        normalized_agent_ids.append(agent_id)
+    if not normalized_agent_ids:
+        payload = get_mode_bindings_payload()
+        payload["removedAgentIds"] = []
+        return payload
+
+    snapshots = {
+        str(agent_id or "").strip(): dict(snapshot)
+        for agent_id, snapshot in dict(agent_snapshots_by_agent_id or {}).items()
+        if str(agent_id or "").strip() and isinstance(snapshot, dict)
+    }
+    for agent_id in normalized_agent_ids:
+        if agent_id not in snapshots:
+            agent = get_agent(agent_id, include_archived=True)
+            if isinstance(agent, dict):
+                snapshots[agent_id] = agent
+    tombstone_slot_by_agent_and_mode = {
+        agent_id: _fixed_role_tombstone_slots(snapshots.get(agent_id))
+        for agent_id in normalized_agent_ids
+    }
     payload = repair_mode_bindings()
     bindings = list(payload.get("bindings") or [])
     changed_modes: list[str] = []
     removal_warnings: list[dict[str, str]] = []
     next_bindings: list[dict[str, Any]] = []
+    agent_id_set = set(normalized_agent_ids)
     for binding in bindings:
         if not isinstance(binding, dict):
             continue
         record = _normalize_binding(binding)
         mode = str(record.get("mode") or "").strip()
         changed = False
-        exclude_agent_from_reseed = False
-        if str(record.get("defaultAgentId") or "").strip() == normalized_agent_id:
+        exclude_agent_ids_from_reseed: set[str] = set()
+        default_agent_id = str(record.get("defaultAgentId") or "").strip()
+        if default_agent_id in agent_id_set:
             record["defaultAgentId"] = ""
             changed = True
-            exclude_agent_from_reseed = True
-            removal_warnings.append({"mode": mode, "field": "defaultAgentId", "agentId": normalized_agent_id})
+            exclude_agent_ids_from_reseed.add(default_agent_id)
+            removal_warnings.append({"mode": mode, "field": "defaultAgentId", "agentId": default_agent_id})
         for field in ("availableAgentIds", "pool", "excludedAgentIds"):
             if field == "excludedAgentIds":
-                values = [item for item in list(record.get(field) or []) if str(item or "").strip() != normalized_agent_id]
+                values = [item for item in list(record.get(field) or []) if str(item or "").strip() not in agent_id_set]
             else:
-                removed = [item for item in list(record.get(field) or []) if str(item or "").strip() == normalized_agent_id]
-                for _ in removed:
-                    removal_warnings.append({"mode": mode, "field": field, "agentId": normalized_agent_id})
-                values = [item for item in list(record.get(field) or []) if str(item or "").strip() != normalized_agent_id]
+                removed = [str(item or "").strip() for item in list(record.get(field) or []) if str(item or "").strip() in agent_id_set]
+                for removed_agent_id in removed:
+                    removal_warnings.append({"mode": mode, "field": field, "agentId": removed_agent_id})
+                    exclude_agent_ids_from_reseed.add(removed_agent_id)
+                values = [item for item in list(record.get(field) or []) if str(item or "").strip() not in agent_id_set]
             if values != list(record.get(field) or []):
                 record[field] = values
                 changed = True
-                if field != "excludedAgentIds":
-                    exclude_agent_from_reseed = True
         flow_bindings = {
             key: value
             for key, value in dict(record.get("flowBindings") or {}).items()
-            if str(value or "").strip() != normalized_agent_id
+            if str(value or "").strip() not in agent_id_set
         }
         if flow_bindings != dict(record.get("flowBindings") or {}):
             for key, value in dict(record.get("flowBindings") or {}).items():
-                if str(value or "").strip() == normalized_agent_id:
-                    removal_warnings.append({"mode": mode, "field": f"flowBindings.{key}", "agentId": normalized_agent_id})
+                removed_agent_id = str(value or "").strip()
+                if removed_agent_id in agent_id_set:
+                    removal_warnings.append({"mode": mode, "field": f"flowBindings.{key}", "agentId": removed_agent_id})
+                    exclude_agent_ids_from_reseed.add(removed_agent_id)
             record["flowBindings"] = flow_bindings
             changed = True
-            exclude_agent_from_reseed = True
         excluded_slots = set(_safe_key_list(record.get("excludedSlots") or []))
         slots = {}
         for key, value in dict(record.get("slots") or {}).items():
             normalized_key = _safe_key(key)
-            if str(value or "").strip() == normalized_agent_id:
+            removed_agent_id = str(value or "").strip()
+            if removed_agent_id in agent_id_set:
                 slots[key] = ""
-                exclude_agent_from_reseed = True
-                removal_warnings.append({"mode": mode, "field": f"slots.{key}", "agentId": normalized_agent_id})
+                exclude_agent_ids_from_reseed.add(removed_agent_id)
+                removal_warnings.append({"mode": mode, "field": f"slots.{key}", "agentId": removed_agent_id})
                 if normalized_key:
                     excluded_slots.add(normalized_key)
             else:
@@ -286,20 +326,22 @@ def remove_agent_from_mode_bindings(agent_id: str, *, agent_snapshot: dict[str, 
             record["slots"] = slots
             record["excludedSlots"] = sorted(excluded_slots)
             changed = True
-        tombstone_slot = tombstone_slot_by_mode.get(str(record.get("mode") or "").strip())
-        if tombstone_slot:
+        for removed_agent_id, tombstone_slot_by_mode in tombstone_slot_by_agent_and_mode.items():
+            tombstone_slot = tombstone_slot_by_mode.get(str(record.get("mode") or "").strip())
+            if not tombstone_slot:
+                continue
             before = set(_safe_key_list(record.get("excludedSlots") or []))
             before.add(tombstone_slot)
             next_excluded_slots = sorted(before)
             if next_excluded_slots != list(record.get("excludedSlots") or []):
                 record["excludedSlots"] = next_excluded_slots
                 changed = True
-            if str(record.get("slots", {}).get(tombstone_slot) or "").strip() == normalized_agent_id:
+            if str(record.get("slots", {}).get(tombstone_slot) or "").strip() == removed_agent_id:
                 record["slots"][tombstone_slot] = ""
                 changed = True
-            exclude_agent_from_reseed = True
-        if exclude_agent_from_reseed:
-            record["excludedAgentIds"] = _dedupe([*list(record.get("excludedAgentIds") or []), normalized_agent_id])
+            exclude_agent_ids_from_reseed.add(removed_agent_id)
+        if exclude_agent_ids_from_reseed:
+            record["excludedAgentIds"] = _dedupe([*list(record.get("excludedAgentIds") or []), *sorted(exclude_agent_ids_from_reseed)])
         if not record["defaultAgentId"] and record["availableAgentIds"]:
             record["defaultAgentId"] = record["availableAgentIds"][0]
         if changed:
@@ -317,9 +359,11 @@ def remove_agent_from_mode_bindings(agent_id: str, *, agent_snapshot: dict[str, 
             "mode_binding.agent_removed",
             "multi",
             outcome="updated",
-            fields={"agentId": normalized_agent_id, "changedModes": changed_modes},
+            fields={"agentIds": normalized_agent_ids, "agentCount": len(normalized_agent_ids), "changedModes": changed_modes},
         )
-    return get_mode_bindings_payload()
+    result = get_mode_bindings_payload()
+    result["removedAgentIds"] = normalized_agent_ids
+    return result
 
 
 def _fixed_role_tombstone_slots(agent: dict[str, Any] | None) -> dict[str, str]:
