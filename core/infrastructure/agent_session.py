@@ -718,9 +718,9 @@ class AgentSessionState:
             if len(self.delegation_failures) > 8:
                 self.delegation_failures = self.delegation_failures[-8:]
 
-    def render_delegation_rules(self) -> str:
-        with self._lock:
-            lines = [
+    def render_delegation_static_rules(self) -> str:
+        return "\n".join(
+            [
                 "## 委派规则",
                 "- 主 agent 优先负责目标裁决、任务拆分、结果验收与最终决策。",
                 "- 子 agent 第一版仅用于只读分析：日志、单文件、配置、prompt、测试归因、循环诊断。",
@@ -728,6 +728,11 @@ class AgentSessionState:
                 "- 子 agent 输出必须是结构化摘要；原始长输出不能直接回灌主上下文。",
                 "- 子 agent 失败后由主 agent 接管，不自动重试，不级联委派。",
             ]
+        )
+
+    def render_delegation_state(self) -> str:
+        with self._lock:
+            lines: List[str] = []
             if self.active_delegation:
                 lines.append("- 当前委派中:")
                 lines.append(
@@ -745,7 +750,18 @@ class AgentSessionState:
                 latest_failure = self.delegation_failures[-1]
                 lines.append("- 最近委派失败:")
                 lines.append(f"  - {latest_failure.get('reason', '')}")
-        return "\n".join(lines)
+        if not lines:
+            return ""
+        return "\n".join(["## 委派状态", *lines])
+
+    def render_delegation_rules(self) -> str:
+        return "\n".join(
+            part for part in [
+                self.render_delegation_static_rules(),
+                self.render_delegation_state(),
+            ]
+            if part
+        )
 
     def render_runtime_constraints(self) -> str:
         """生成当前轮短期约束摘要。"""

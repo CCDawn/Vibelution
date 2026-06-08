@@ -531,6 +531,21 @@ def _usage_observation_metadata(usage: UsageStats) -> Dict[str, Any]:
     }
 
 
+def _usage_missing_reason(usage: UsageStats) -> str:
+    if not isinstance(getattr(usage, "provider_raw_usage", None), dict) or not usage.provider_raw_usage:
+        return "provider_usage_missing"
+    observed = (
+        int(getattr(usage, "input_tokens", 0) or 0) > 0
+        or int(getattr(usage, "output_tokens", 0) or 0) > 0
+        or int(getattr(usage, "total_tokens", 0) or 0) > 0
+        or int(getattr(usage, "cached_input_tokens", 0) or 0) > 0
+        or int(getattr(usage, "cache_creation_input_tokens", 0) or 0) > 0
+    )
+    if observed:
+        return ""
+    return "provider_usage_without_token_counts"
+
+
 def _strip_cache_control_from_content(value: Any) -> Any:
     if not isinstance(value, list):
         return value
@@ -1488,6 +1503,7 @@ class LLMClient:
                     )
                 )
                 cache_observation_fields = _usage_cache_observation_fields(usage_observation)
+                usage_missing_reason = "" if usage_observed else _usage_missing_reason(usage_observation)
                 _record_llm_scene_event(
                     "stream",
                     "llm.stream.succeeded",
@@ -1499,6 +1515,7 @@ class LLMClient:
                         "provider": self.provider.kind,
                         "model": self.profile.model,
                         "usageObserved": usage_observed,
+                        "usageMissingReason": usage_missing_reason,
                         "inputTokens": usage_observation.input_tokens,
                         "outputTokens": usage_observation.output_tokens,
                         "totalTokens": usage_observation.total_tokens,
