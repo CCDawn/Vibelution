@@ -200,6 +200,15 @@ describe("ToolsRoute layout contract", () => {
     expect(stylesSource).toContain("align-items: start");
   });
 
+  it("keeps bulk controls in compact document flow instead of covering tool rows", () => {
+    expect(stylesSource).toContain(".listPanel {\n  grid-template-rows: auto auto auto auto minmax(0, 1fr);\n  overflow: hidden;");
+    expect(stylesSource).toContain(".bulkActionBar {\n  display: grid;");
+    expect(stylesSource).toContain("grid-template-columns: minmax(0, 1fr) auto auto");
+    expect(stylesSource).toContain(".toolList {\n  display: grid;\n  align-content: start;\n  gap: 7px;");
+    expect(stylesSource).toContain("@media (max-width: 980px)");
+    expect(stylesSource).toContain(".bulkActionBar .dangerButton");
+  });
+
   it("reflows Agent permission summary before desktop narrow widths squeeze labels vertical", () => {
     expect(stylesSource).toContain(".permissionSummaryGrid");
     expect(stylesSource).toContain("grid-template-columns: minmax(220px, 0.55fr) minmax(0, 1fr) auto");

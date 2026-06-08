@@ -4,6 +4,11 @@ import appShellSource from "../app/AppShell.tsx?raw";
 import routerSource from "../app/router.tsx?raw";
 import routeSource from "./SkillsRoute.tsx?raw";
 
+// @ts-expect-error Vitest runs this contract in Node; the web project intentionally omits global Node types.
+import { readFileSync } from "node:fs";
+
+const stylesSource = readFileSync(new URL("./SkillsRoute.module.css", import.meta.url), "utf-8");
+
 describe("SkillsRoute layout contract", () => {
   it("is mounted as an Agent management section", () => {
     expect(routerSource).toContain('path: "agents/skills"');
@@ -53,5 +58,13 @@ describe("SkillsRoute layout contract", () => {
     expect(routeSource).not.toContain('method: "PUT"');
     expect(routeSource).not.toContain('method: "PATCH"');
     expect(routeSource).not.toContain('method: "DELETE"');
+  });
+
+  it("keeps the narrow skill workspace in normal document flow with compact empty details", () => {
+    const breakpoint = stylesSource.slice(stylesSource.indexOf("@media (max-width: 920px)"));
+
+    expect(breakpoint).toContain(".workspace {\n    overflow: auto;\n    align-content: start;");
+    expect(breakpoint).toContain(".listPanel,\n  .detailPanel {\n    min-height: 0;");
+    expect(breakpoint).toContain(".emptyDetail {\n    min-height: 96px;\n    padding: 12px;");
   });
 });
