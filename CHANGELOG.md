@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.5 - 2026-06-08
+
+- Removed the startup-ready-path browser process memory snapshot so opening the managed Workbench window no longer waits on an unsupported multi-second process scan.
+- Changed Launcher backend readiness checks to probe the Workbench root URL first, with `/api/health` retained as a fallback, reducing startup wait time while preserving API health semantics.
+- Added Launcher regression coverage for the non-blocking browser memory evidence path and root-first readiness probe.
+
 ## 1.0.4 - 2026-06-08
 
 - Marked managed Workbench sessions ready before attaching the desktop supervisor so Launcher restart/open commands finish after the backend and window are live.
