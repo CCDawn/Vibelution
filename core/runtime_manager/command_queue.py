@@ -121,7 +121,10 @@ def submit_command(
     if joined_command_id:
         command["commandId"] = joined_command_id
         command_type = str(command.get("type") or "")
-        event_type = "command_queue.restart_joined" if command_type == "restart_workbench" else "command_queue.open_joined"
+        event_type = {
+            "close_workbench": "command_queue.close_joined",
+            "restart_workbench": "command_queue.restart_joined",
+        }.get(command_type, "command_queue.open_joined")
         _append_queue_event(
             event_type,
             {
@@ -129,6 +132,7 @@ def submit_command(
                 "type": command_type,
                 "requestedBy": str(command.get("requestedBy") or ""),
                 "noBrowser": bool((command.get("args") or {}).get("noBrowser")),
+                "stopManager": bool((command.get("args") or {}).get("stopManager")),
             },
         )
         return command
@@ -597,6 +601,8 @@ def _joinable_lifecycle_command_id(command: dict[str, Any]) -> str:
         return _joinable_open_command_id(command)
     if command_type == "restart_workbench":
         return _joinable_restart_command_id(command)
+    if command_type == "close_workbench":
+        return _joinable_close_command_id(command)
     return ""
 
 
@@ -673,6 +679,33 @@ def _joinable_restart_command_id(command: dict[str, Any]) -> str:
             existing_no_browser=bool(existing_args.get("noBrowser")),
             requested_no_browser=requested_no_browser,
         ):
+            continue
+        return str(payload.get("commandId") or path.stem).strip() or path.stem
+    return ""
+
+
+def _joinable_close_command_id(command: dict[str, Any]) -> str:
+    command_type = str(command.get("type") or "").strip()
+    if command_type != "close_workbench":
+        return ""
+    manager_pid = load_pid()
+    if not _process_is_alive(manager_pid):
+        return ""
+    state = load_state()
+    if not isinstance(state, dict) or not _state_belongs_to_current_manager(state, manager_pid):
+        return ""
+    active = state.get("command") if isinstance(state.get("command"), dict) else {}
+    active_command_id = str(active.get("activeCommandId") or "").strip()
+    if active_command_id and str(active.get("activeType") or "").strip() == "close_workbench":
+        return active_command_id
+    for path in sorted(INBOX_DIR.glob("*.json")):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+        if str(payload.get("type") or "").strip() != "close_workbench":
             continue
         return str(payload.get("commandId") or path.stem).strip() or path.stem
     return ""
