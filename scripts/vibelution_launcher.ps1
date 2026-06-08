@@ -2395,6 +2395,66 @@ function Resolve-NpmCommand {
     return $npm.Source
 }
 
+function Resolve-NodeCommand {
+    $node = Get-Command node.exe -ErrorAction SilentlyContinue
+    if (-not $node) {
+        $node = Get-Command node -ErrorAction SilentlyContinue
+    }
+    if (-not $node) {
+        throw "Node.js is not available on PATH."
+    }
+    return $node.Source
+}
+
+function Resolve-NpmCliScript {
+    $npmCommand = Resolve-NpmCommand
+    $nodeCommand = Resolve-NodeCommand
+    $candidateDirs = @()
+    foreach ($commandPath in @($npmCommand, $nodeCommand)) {
+        if ($commandPath) {
+            $candidateDirs += (Split-Path -Parent $commandPath)
+        }
+    }
+    $candidateDirs = @($candidateDirs | Where-Object { $_ } | Sort-Object -Unique)
+
+    $candidates = @()
+    foreach ($candidateDir in $candidateDirs) {
+        $candidates += (Join-Path $candidateDir "node_modules\npm\bin\npm-cli.js")
+    }
+    if ($env:APPDATA) {
+        $candidates += (Join-Path $env:APPDATA "npm\node_modules\npm\bin\npm-cli.js")
+    }
+
+    foreach ($candidate in @($candidates | Where-Object { $_ } | Sort-Object -Unique)) {
+        if (Test-Path -LiteralPath $candidate) {
+            return (Resolve-Path -LiteralPath $candidate).Path
+        }
+    }
+
+    throw "npm CLI script was not found. Expected npm-cli.js next to the Node.js/npm installation."
+}
+
+function Resolve-NpmCliInvocation {
+    return [pscustomobject]@{
+        CommandPath = Resolve-NodeCommand
+        ArgumentPrefix = @((Resolve-NpmCliScript))
+        DisplayCommand = "npm"
+    }
+}
+
+function Resolve-FrontendPackageScript {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$PackageRelativePath
+    )
+
+    $scriptPath = Join-Path $webDir $PackageRelativePath
+    if (-not (Test-Path -LiteralPath $scriptPath)) {
+        throw "Frontend package script is missing: $(ConvertTo-WebRelativePath -Path $scriptPath)"
+    }
+    return (Resolve-Path -LiteralPath $scriptPath).Path
+}
+
 function Write-BootstrapPrerequisiteEvent {
     param(
         [string]$Name,
@@ -2461,12 +2521,17 @@ function Assert-LauncherSystemPrerequisites {
 
     if ($FrontendRequired) {
         try {
-            $npmCommand = Resolve-NpmCommand
+            $npmInvocation = Resolve-NpmCliInvocation
             Write-BootstrapPrerequisiteEvent `
                 -Name "npm" `
                 -Status "available" `
-                -Message "npm is available for frontend dependency install and build." `
-                -Fields @{ path = $npmCommand; required_for = "web dependencies and build" }
+                -Message "Node.js and npm CLI are available for frontend dependency install and build." `
+                -Fields @{
+                    path = [string]$npmInvocation.CommandPath
+                    npm_cli_script = [string]@($npmInvocation.ArgumentPrefix)[0]
+                    required_for = "web dependencies and build"
+                    console_wrapper_avoided = $true
+                }
         } catch {
             [void]$missing.Add("Node.js/npm on PATH")
             Write-BootstrapPrerequisiteEvent `
@@ -3518,8 +3583,6 @@ function ConvertTo-WebRelativePath {
 function Get-FrontendToolchainMissingPaths {
     $nodeModulesDir = Join-Path $webDir "node_modules"
     $requiredPaths = @(
-        (Join-Path $nodeModulesDir ".bin\tsc.cmd"),
-        (Join-Path $nodeModulesDir ".bin\vite.cmd"),
         (Join-Path $nodeModulesDir "typescript\bin\tsc"),
         (Join-Path $nodeModulesDir "vite\bin\vite.js")
     )
@@ -3572,7 +3635,7 @@ function Ensure-FrontendDependencies {
         return
     }
 
-    $npmCommand = Resolve-NpmCommand
+    $npmInvocation = Resolve-NpmCliInvocation
     $installCommandName = if ((-not (Test-Path $nodeModulesDir)) -and (Test-Path $packageLockPath)) {
         "ci"
     } else {
@@ -3597,7 +3660,13 @@ function Ensure-FrontendDependencies {
             -EventCode "frontend.dependencies.install.started" `
             -Message "Installing frontend dependencies." `
             -Outcome "started" `
-            -Fields @{ reason = $installReason; missing_toolchain_paths = $missingToolchainPaths }
+            -Fields @{
+                reason = $installReason
+                missing_toolchain_paths = $missingToolchainPaths
+                command = "$($npmInvocation.DisplayCommand) $installCommandName"
+                command_path = [string]$npmInvocation.CommandPath
+                npm_cli_script = [string]@($npmInvocation.ArgumentPrefix)[0]
+            }
     }
     Push-Location $webDir
     try {
@@ -3605,8 +3674,8 @@ function Ensure-FrontendDependencies {
         if ($script:currentRuntimeSceneId) {
             $frontendBuildLogPath = Get-CurrentRuntimeSceneFilePath (Get-RuntimeSceneRelativePaths).FrontendBuild
         }
-        $installArgs = @($installCommandName)
-        $exitCode = Invoke-NativeCommand -CommandPath $npmCommand -ArgumentList $installArgs -RedirectPath $frontendBuildLogPath
+        $installArgs = @($npmInvocation.ArgumentPrefix) + @($installCommandName)
+        $exitCode = Invoke-NativeCommand -CommandPath $npmInvocation.CommandPath -ArgumentList $installArgs -RedirectPath $frontendBuildLogPath
         if ($exitCode -ne 0) {
             if ($script:currentRuntimeSceneId) {
                 Write-RuntimeSceneEvent `
@@ -3616,7 +3685,13 @@ function Ensure-FrontendDependencies {
                     -Message "Installing frontend dependencies failed." `
                     -Level "error" `
                     -Outcome "failed" `
-                    -Fields @{ reason = $installReason; exit_code = $exitCode } `
+                    -Fields @{
+                        reason = $installReason
+                        exit_code = $exitCode
+                        command = "$($npmInvocation.DisplayCommand) $installCommandName"
+                        command_path = [string]$npmInvocation.CommandPath
+                        npm_cli_script = [string]@($npmInvocation.ArgumentPrefix)[0]
+                    } `
                     -RawRefs @(New-RuntimeSceneRawRef -RelativePath (Get-RuntimeSceneRelativePaths).FrontendBuild -TailLines 80)
             }
             throw "npm $installCommandName failed with exit code $exitCode."
@@ -3633,7 +3708,12 @@ function Ensure-FrontendDependencies {
             -EventCode "frontend.dependencies.install.succeeded" `
             -Message "Frontend dependencies installed successfully." `
             -Outcome "succeeded" `
-            -Fields @{ reason = $installReason; command = $installCommandName }
+            -Fields @{
+                reason = $installReason
+                command = "$($npmInvocation.DisplayCommand) $installCommandName"
+                command_path = [string]$npmInvocation.CommandPath
+                npm_cli_script = [string]@($npmInvocation.ArgumentPrefix)[0]
+            }
     }
 }
 
@@ -3655,10 +3735,16 @@ function Ensure-WebBuild {
         return
     }
 
-    $npmCommand = Resolve-NpmCommand
+    $nodeCommand = Resolve-NodeCommand
+    $typescriptBuildScript = Resolve-FrontendPackageScript -PackageRelativePath "node_modules\typescript\bin\tsc"
+    $viteBuildScript = Resolve-FrontendPackageScript -PackageRelativePath "node_modules\vite\bin\vite.js"
     Push-Location $webDir
     try {
         Write-Note "Building frontend bundle ($buildReason)..."
+        $frontendBuildLogPath = ""
+        if ($script:currentRuntimeSceneId) {
+            $frontendBuildLogPath = Get-CurrentRuntimeSceneFilePath (Get-RuntimeSceneRelativePaths).FrontendBuild
+        }
         if ($script:currentRuntimeSceneId) {
             Update-RuntimeSceneManifest @{ frontend = @{ build_status = "running"; build_reason = $buildReason } }
             Write-RuntimeSceneEvent `
@@ -3667,13 +3753,24 @@ function Ensure-WebBuild {
                 -EventCode "frontend.build.started" `
                 -Message "Starting frontend build." `
                 -Outcome "started" `
-                -Fields @{ reason = $buildReason }
+                -Fields @{
+                    reason = $buildReason
+                    command = "node tsc -b; node vite build"
+                    command_path = $nodeCommand
+                    tsc_script = $typescriptBuildScript
+                    vite_script = $viteBuildScript
+                }
+        }
+
+        $exitCode = Invoke-NativeCommand `
+            -CommandPath $nodeCommand `
+            -ArgumentList @($typescriptBuildScript, "-b") `
+            -RedirectPath $frontendBuildLogPath
+        if ($exitCode -eq 0) {
             $exitCode = Invoke-NativeCommand `
-                -CommandPath $npmCommand `
-                -ArgumentList @("run", "build") `
-                -RedirectPath (Get-CurrentRuntimeSceneFilePath (Get-RuntimeSceneRelativePaths).FrontendBuild)
-        } else {
-            $exitCode = Invoke-NativeCommand -CommandPath $npmCommand -ArgumentList @("run", "build")
+                -CommandPath $nodeCommand `
+                -ArgumentList @($viteBuildScript, "build") `
+                -RedirectPath $frontendBuildLogPath
         }
         if ($exitCode -ne 0) {
             if ($script:currentRuntimeSceneId) {
@@ -3685,7 +3782,14 @@ function Ensure-WebBuild {
                     -Message "Frontend build failed." `
                     -Level "error" `
                     -Outcome "failed" `
-                    -Fields @{ reason = $buildReason; exit_code = $exitCode } `
+                    -Fields @{
+                        reason = $buildReason
+                        exit_code = $exitCode
+                        command = "node tsc -b; node vite build"
+                        command_path = $nodeCommand
+                        tsc_script = $typescriptBuildScript
+                        vite_script = $viteBuildScript
+                    } `
                     -RawRefs @(New-RuntimeSceneRawRef -RelativePath (Get-RuntimeSceneRelativePaths).FrontendBuild -TailLines 120)
             }
             throw (Get-FrontendBuildFailureSummary -ExitCode $exitCode)
