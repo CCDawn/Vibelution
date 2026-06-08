@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { NavLink, Outlet, useLocation, useNavigate, useNavigationType } from "react-router-dom";
-import { ChevronDown, ExternalLink, FolderTree, GitBranch, LoaderCircle, Moon, Power, RefreshCw, ScrollText, Search, Settings, Sun, Wrench } from "lucide-react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { NavLink, Outlet, useLocation, useNavigationType } from "react-router-dom";
+import { ChevronDown, LoaderCircle, Moon, Power, RefreshCw, Settings, Sun, Wrench } from "lucide-react";
 
 import { fetchJson, setFetchJsonFailureReporter, type FetchJsonFailureReport } from "../api/client";
 import { restartLauncherBundle, stopLauncherBundle } from "../api/launcher";
@@ -9,12 +9,10 @@ import { queryKeys } from "../api/queryKeys";
 import {
   BackendHealth,
   ConfigSummary,
-  FileTreeNode,
-  GitStatusSummary,
   RuntimeControlBlockedDetail,
   RuntimeSummary,
 } from "../api/types";
-import { useAppI18n } from "../i18n/useAppI18n";
+import { useShellI18n } from "../i18n/useShellI18n";
 import {
   collectBrowserMemorySnapshot,
   collectBrowserPageSnapshot,
@@ -32,21 +30,40 @@ import {
   deriveStartupLoadingState,
   deriveStartupProgressState,
   frontendSystemTone,
-  lifecycleStateLabel,
-  lifecycleStateTone,
   runtimeControllerTone,
   type SystemStatusTone,
 } from "./systemStatus";
 import { applyWorkbenchDocumentLanguage } from "./documentLanguage";
 import { resolvePollingInterval, useStartupWarmup } from "./pollingPolicy";
-import { recoverFromBuiltAssetResourceError } from "./routeChunkRecovery";
+import { recoverFromBuiltAssetResourceError, recoverFromDynamicImportFetchError } from "./routeChunkRecovery";
 import { nextWorkbenchTheme, readStoredWorkbenchTheme, writeStoredWorkbenchTheme } from "./themePreference";
 import { isWorkbenchDomainEnabled, isWorkbenchModeEnabled } from "./workbenchContract";
 import { requestWorkbenchExitGuard } from "./workbenchExitGuard";
-import { useChatWorkbenchStore } from "../store/chatWorkbenchStore";
 import { getPageInstanceId } from "./pageInstance";
 import styles from "./AppShell.module.css";
 import packageJson from "../../package.json";
+
+const LazyAppShellUtilityMenu = lazy(() =>
+  import("./AppShellUtilityMenu")
+    .then((module) => ({ default: module.AppShellUtilityMenu }))
+    .catch((error) => {
+      if (recoverFromDynamicImportFetchError(error, globalThis.window, postBrowserTelemetry)) {
+        return new Promise<{ default: typeof import("./AppShellUtilityMenu").AppShellUtilityMenu }>(() => undefined);
+      }
+      throw error;
+    }),
+);
+
+const LazyAppShellStatusGuidePanel = lazy(() =>
+  import("./AppShellStatusGuidePanel")
+    .then((module) => ({ default: module.AppShellStatusGuidePanel }))
+    .catch((error) => {
+      if (recoverFromDynamicImportFetchError(error, globalThis.window, postBrowserTelemetry)) {
+        return new Promise<{ default: typeof import("./AppShellStatusGuidePanel").AppShellStatusGuidePanel }>(() => undefined);
+      }
+      throw error;
+    }),
+);
 
 function linkClassName({ isActive }: { isActive: boolean }) {
   return isActive ? `${styles.navLink} ${styles.navLinkActive}` : styles.navLink;
@@ -57,59 +74,6 @@ const API_FAILURE_BACKGROUND_METHODS = new Set(["GET", "HEAD"]);
 const APP_VERSION = packageJson.version;
 const BROWSER_MEMORY_SAMPLE_INTERVAL_MS = 30_000;
 const PAGEHIDE_NETWORK_FAILURE_SUPPRESSION_MS = 2_500;
-
-function filterUtilityFileTree(nodes: FileTreeNode[], query: string): FileTreeNode[] {
-  const term = query.trim().toLowerCase();
-  if (!term) {
-    return nodes;
-  }
-  return nodes.flatMap((node) => {
-    const matches = node.name.toLowerCase().includes(term) || node.path.toLowerCase().includes(term);
-    if (node.type === "directory") {
-      const filteredChildren = filterUtilityFileTree(node.children ?? [], query);
-      if (matches) {
-        return [{ ...node, children: node.children ?? [] }];
-      }
-      if (filteredChildren.length > 0) {
-        return [{ ...node, children: filteredChildren }];
-      }
-      return [];
-    }
-    return matches ? [node] : [];
-  });
-}
-
-function renderUtilityFileTree(
-  nodes: FileTreeNode[],
-  onOpenFile: (path: string) => void,
-  activeFilePath: string,
-) {
-  return nodes.map((node) => {
-    if (node.type === "directory") {
-      return (
-        <details key={node.path} className={styles.utilityFileDir} open>
-          <summary>{node.name}</summary>
-          <div className={styles.utilityFileChildren}>
-            {renderUtilityFileTree(node.children ?? [], onOpenFile, activeFilePath)}
-          </div>
-        </details>
-      );
-    }
-    const active = activeFilePath === node.path;
-    return (
-      <button
-        key={node.path}
-        type="button"
-        className={active ? `${styles.utilityFileButton} ${styles.utilityFileButtonActive}` : styles.utilityFileButton}
-        onClick={() => onOpenFile(node.path)}
-        title={node.path}
-      >
-        <span>{node.name}</span>
-        <small>{node.path}</small>
-      </button>
-    );
-  });
-}
 
 export function shouldSuppressApiFailureTelemetry(
   failure: FetchJsonFailureReport,
@@ -353,10 +317,9 @@ export function shouldTreatShutdownAsLocallyComplete({
 }
 
 export function AppShell() {
-  const { lang, t, statusLabel } = useAppI18n();
+  const { lang, t, statusLabel } = useShellI18n();
   const queryClient = useQueryClient();
   const location = useLocation();
-  const navigate = useNavigate();
   const navigationType = useNavigationType();
   const [shutdownOpen, setShutdownOpen] = useState(false);
   const [shutdownTitle, setShutdownTitle] = useState("");
@@ -366,7 +329,7 @@ export function AppShell() {
   const [restartRequested, setRestartRequested] = useState(false);
   const [utilityOpen, setUtilityOpen] = useState(false);
   const [lifecycleMenuOpen, setLifecycleMenuOpen] = useState(false);
-  const [utilityFileFilter, setUtilityFileFilter] = useState("");
+  const [statusGuideOpen, setStatusGuideOpen] = useState(false);
   const [clockNow, setClockNow] = useState(() => Date.now());
   const [theme, setTheme] = useState(() => readStoredWorkbenchTheme());
   const [frontendVisible, setFrontendVisible] = useState(
@@ -385,11 +348,6 @@ export function AppShell() {
   const pageInstanceIdRef = useRef(getPageInstanceId());
   const apiFailureTelemetrySeenRef = useRef(new Map<string, number>());
   const pagehideAtMsRef = useRef(0);
-  const activeSessionId = useChatWorkbenchStore((state) => state.activeSessionId);
-  const activeSessionWorkspace = useChatWorkbenchStore((state) =>
-    state.activeSessionId ? state.sessionWorkspaces[state.activeSessionId] : undefined,
-  );
-  const openPreviewTab = useChatWorkbenchStore((state) => state.openPreviewTab);
   const configQuery = useQuery({
     queryKey: queryKeys.configPublic(),
     queryFn: () => fetchJson<ConfigSummary>("/api/config/public"),
@@ -405,7 +363,6 @@ export function AppShell() {
       force: lifecycleControlActive,
     },
   );
-  const gitRefetchInterval = resolvePollingInterval(shellPollingVisible, 6_000, { backgroundMs: 60_000 });
   const runtimeQuery = useQuery({
     queryKey: queryKeys.runtimeSummary(),
     queryFn: () => fetchJson<RuntimeSummary>("/api/runtime/summary"),
@@ -422,18 +379,6 @@ export function AppShell() {
     refetchIntervalInBackground: shellStartupWarmupActive,
     staleTime: 0,
     retry: false,
-  });
-  const gitStatusQuery = useQuery({
-    queryKey: queryKeys.gitStatus(),
-    queryFn: () => fetchJson<GitStatusSummary>("/api/git/status"),
-    refetchInterval: gitRefetchInterval,
-    refetchIntervalInBackground: shellStartupWarmupActive,
-  });
-  const fileTreeQuery = useQuery({
-    queryKey: queryKeys.fileTree(),
-    queryFn: () => fetchJson<FileTreeNode[]>("/api/files/tree"),
-    enabled: utilityOpen,
-    staleTime: 8_000,
   });
   useEffect(() => {
     if (configQuery.data && runtimeQuery.data && backendHealthQuery.data) {
@@ -548,41 +493,9 @@ export function AppShell() {
   const activeWorkDetailsTitle = activeWorkIndicator?.items.map((item) => item.detail).join(" · ") ?? "";
   const currentTime = clockFormatter.format(clockNow);
   const buildId = __VIBELUTION_BUILD_ID__;
-  const gitStatus = gitStatusQuery.data;
-  const utilityFilteredFileTree = useMemo(
-    () => filterUtilityFileTree(fileTreeQuery.data ?? [], utilityFileFilter),
-    [fileTreeQuery.data, utilityFileFilter],
-  );
-  const utilityActiveFilePath = activeSessionWorkspace?.activeTab && activeSessionWorkspace.activeTab !== "agent"
-    ? activeSessionWorkspace.activeTab
-    : "";
-  const gitAvailable = Boolean(gitStatus?.available);
-  const gitDirty = Boolean(gitStatus?.dirty);
-  const gitTone: SystemStatusTone = gitAvailable ? (gitDirty ? "caution" : "running") : "idle";
-  const gitBranch = gitStatus?.branch || gitStatus?.headRevShort || "-";
-  const gitValue = gitAvailable
-    ? gitDirty
-      ? `${gitStatus?.counts.total ?? 0}`
-      : t("gitClean")
-    : gitStatusQuery.isPending
-      ? t("gitChecking")
-      : t("gitUnavailable");
-  const gitTitle = gitAvailable
-    ? `${t("gitStatus")}: ${gitStatus?.summary ?? ""}`
-    : gitStatus?.error || t("gitUnavailable");
   const closeUtilityMenu = useCallback(() => {
     setUtilityOpen(false);
   }, []);
-  const handleUtilityOpenFile = useCallback((path: string) => {
-    if (!activeSessionId) {
-      navigate("/chat");
-      closeUtilityMenu();
-      return;
-    }
-    openPreviewTab(activeSessionId, path);
-    navigate("/chat");
-    closeUtilityMenu();
-  }, [activeSessionId, closeUtilityMenu, navigate, openPreviewTab]);
 
   const frontendStateLabel = {
     connected: t("systemFrontend_connected"),
@@ -1219,119 +1132,31 @@ export function AppShell() {
     workbench,
   ]);
 
-  const systemStatusCards: Array<{
-    id: string;
+  const rightStatusCards: Array<{
+    id: "frontend" | "backend" | "runtime";
     label: string;
     value: string;
     tone: SystemStatusTone;
-    note: string;
-    states: Array<{ label: string; tone: SystemStatusTone; detail: string }>;
   }> = [
     {
       id: "frontend",
       label: t("systemFrontend"),
       value: frontendStateLabel,
       tone: frontendSystemTone(frontendState),
-      note: `${t("systemFrontendHint")} · ${t("frontendBuild")} ${buildId}`,
-      states: [
-        {
-          label: t("systemFrontend_connected"),
-          tone: frontendSystemTone("connected"),
-          detail: t("systemFrontendPossible_connected"),
-        },
-        {
-          label: t("systemFrontend_background"),
-          tone: frontendSystemTone("background"),
-          detail: t("systemFrontendPossible_background"),
-        },
-        {
-          label: t("systemFrontend_offline"),
-          tone: frontendSystemTone("offline"),
-          detail: t("systemFrontendPossible_offline"),
-        },
-      ],
     },
     {
       id: "backend",
       label: t("systemBackend"),
       value: backendStateLabel,
       tone: backendSystemTone(backendState),
-      note:
-        backendState === "healthy"
-          ? t("backendReachable")
-          : backendState === "checking"
-            ? t("backendNeverReached")
-            : backendState === "offline"
-              ? t("backendNoResponse")
-              : t("systemBackendHint"),
-      states: [
-        {
-          label: t("backendHealthy"),
-          tone: backendSystemTone("healthy"),
-          detail: t("systemBackendPossible_healthy"),
-        },
-        {
-          label: t("backendChecking"),
-          tone: backendSystemTone("checking"),
-          detail: t("systemBackendPossible_checking"),
-        },
-        {
-          label: t("backendOffline"),
-          tone: backendSystemTone("offline"),
-          detail: t("systemBackendPossible_offline"),
-        },
-        {
-          label: t("backendUnhealthy"),
-          tone: backendSystemTone("unhealthy"),
-          detail: t("systemBackendPossible_unhealthy"),
-        },
-      ],
     },
     {
       id: "runtime",
       label: t("systemRuntime"),
       value: runtimeControllerLabel,
       tone: runtimeControllerTone(runtimeControllerState),
-      note: lifecycleProof?.summary || workbench?.statusLine || t("systemRuntimeHint"),
-      states: [
-        {
-          label: t("systemRuntime_managed"),
-          tone: runtimeControllerTone("managed"),
-          detail: t("systemRuntimePossible_managed"),
-        },
-        {
-          label: t("systemRuntime_closing"),
-          tone: runtimeControllerTone("closing"),
-          detail: t("systemRuntimePossible_closing"),
-        },
-        {
-          label: t("systemRuntime_unmanaged"),
-          tone: runtimeControllerTone("unmanaged"),
-          detail: t("systemRuntimePossible_unmanaged"),
-        },
-        {
-          label: t("systemRuntime_failed"),
-          tone: runtimeControllerTone("failed"),
-          detail: t("systemRuntimePossible_failed"),
-        },
-      ],
-    },
-    {
-      id: "time",
-      label: t("systemTime"),
-      value: currentTime,
-      tone: "idle",
-      note: timezone,
-      states: [
-        {
-          label: t("systemTimeLive"),
-          tone: "idle",
-          detail: t("systemTimePossible_live"),
-        },
-      ],
     },
   ];
-  const rightStatusCards = systemStatusCards.filter((item) => item.id !== "time");
   const statusPriority = { failed: 0, caution: 1, running: 2, idle: 3 } satisfies Record<SystemStatusTone, number>;
   const primaryStatusCard = rightStatusCards.reduce((selected, item) =>
     statusPriority[item.tone] < statusPriority[selected.tone] ? item : selected,
@@ -1506,126 +1331,38 @@ export function AppShell() {
             >
               <Wrench size={15} />
               <span className={styles.utilityTriggerLabel}>{t("topUtilityMenuShort")}</span>
-              <span className={`${styles.statusDot} ${styles[`status_${gitTone}`]}`} />
+              <span className={`${styles.statusDot} ${styles.status_idle}`} />
               <ChevronDown size={13} className={styles.utilityChevron} />
             </button>
-            <div
-              className={styles.utilityPanel}
-              role="menu"
-              aria-label={t("topUtilityMenu")}
-              hidden={!utilityOpen}
-            >
-              <div className={styles.utilityPanelHeader}>
-                <strong>{t("topUtilityMenu")}</strong>
-                <span>{t("topUtilityMenuHint")}</span>
-              </div>
-              <div className={styles.utilityButtonGrid}>
-                <a href="/launcher" target="_blank" rel="noreferrer" className={styles.utilityButton} role="menuitem" onClick={closeUtilityMenu}>
-                  <ExternalLink size={16} />
-                  <span>{lang === "zh" ? "启动器" : "Launcher"}</span>
-                </a>
-                <NavLink to="/logs" className={({ isActive }) => isActive ? `${styles.utilityButton} ${styles.utilityButtonActive}` : styles.utilityButton} role="menuitem" onClick={closeUtilityMenu}>
-                  <ScrollText size={16} />
-                  <span>{t("navLogs")}</span>
-                </NavLink>
-                <NavLink to="/git" className={({ isActive }) => isActive ? `${styles.utilityButton} ${styles.utilityButtonActive}` : styles.utilityButton} role="menuitem" onClick={closeUtilityMenu}>
-                  <GitBranch size={16} />
-                  <span>{t("navGit")}</span>
-                </NavLink>
-                <button
-                  type="button"
-                  className={styles.utilityButton}
-                  role="menuitem"
-                  onClick={() => document.getElementById("utility-file-navigator")?.scrollIntoView({ block: "nearest" })}
-                >
-                  <FolderTree size={16} />
-                  <span>{t("files")}</span>
-                </button>
-              </div>
-              <section id="utility-file-navigator" className={styles.utilityFilePanel} aria-label={t("files")}>
-                <div className={styles.utilityFileHeader}>
-                  <div>
-                    <strong>{t("files")}</strong>
-                    <span>
-                      {activeSessionId
-                        ? (lang === "zh" ? "点击文件会在当前会话工作区打开预览。" : "Click a file to open it in the current chat workspace.")
-                        : (lang === "zh" ? "先进入会话后可打开文件预览。" : "Open a chat first to preview files.")}
-                    </span>
-                  </div>
-                </div>
-                <div className={styles.utilityFileSearch}>
-                  <Search size={14} />
-                  <input
-                    value={utilityFileFilter}
-                    onChange={(event) => setUtilityFileFilter(event.target.value)}
-                    placeholder={t("searchFilesPlaceholder")}
-                  />
-                </div>
-                <div className={styles.utilityFileTree}>
-                  {fileTreeQuery.isError ? (
-                    <p className={styles.utilityFileState}>{t("loadFailed")}</p>
-                  ) : fileTreeQuery.isPending && !fileTreeQuery.data ? (
-                    <p className={styles.utilityFileState}>{t("loadingFiles")}</p>
-                  ) : utilityFilteredFileTree.length === 0 ? (
-                    <p className={styles.utilityFileState}>{t("noFileMatches")}</p>
-                  ) : (
-                    renderUtilityFileTree(utilityFilteredFileTree, handleUtilityOpenFile, utilityActiveFilePath)
-                  )}
-                </div>
-              </section>
-              <div className={styles.gitMiniPanel} aria-label={t("gitStatusGuide")} title={gitTitle}>
-                <div className={styles.gitMiniHeader}>
-                  <div className={styles.gitChip}>
-                    <GitBranch size={14} />
-                    <span className={`${styles.statusDot} ${styles[`status_${gitTone}`]}`} />
-                    <span className={styles.gitBranchName}>{gitBranch}</span>
-                    <strong className={styles.gitCount}>{gitValue}</strong>
-                  </div>
-                  <span>{gitStatus?.summary || t("gitStatusGuideHint")}</span>
-                </div>
-                <div className={styles.gitMetaGrid}>
-                  <span>{t("gitBranch")}</span>
-                  <strong>{gitBranch}</strong>
-                  <span>{t("gitUpstream")}</span>
-                  <strong>{gitStatus?.upstream?.name || gitStatus?.upstream?.remote || t("gitNoUpstream")}</strong>
-                </div>
-                <div className={styles.gitCountGrid}>
-                  <span>
-                    <strong>{gitStatus?.counts.staged ?? 0}</strong>
-                    {t("gitStaged")}
-                  </span>
-                  <span>
-                    <strong>{gitStatus?.counts.unstaged ?? 0}</strong>
-                    {t("gitUnstaged")}
-                  </span>
-                  <span>
-                    <strong>{gitStatus?.counts.untracked ?? 0}</strong>
-                    {t("gitUntracked")}
-                  </span>
-                  <span>
-                    <strong>{gitStatus?.counts.deleted ?? 0}</strong>
-                    {t("gitDeleted")}
-                  </span>
-                </div>
-                <div className={styles.gitFileList}>
-                  {(gitStatus?.files ?? []).slice(0, 6).map((file) => (
-                    <div key={`${file.status}-${file.path}`} className={styles.gitFileItem}>
-                      <code>{file.status}</code>
-                      <span>{file.path}</span>
-                    </div>
-                  ))}
-                  {gitStatus?.truncated ? <p>{t("gitTruncated")}</p> : null}
-                  {gitStatus && gitStatus.available && !gitStatus.files.length ? <p>{t("gitNoChanges")}</p> : null}
-                  {gitStatus && !gitStatus.available ? <p>{gitStatus.error || t("gitUnavailable")}</p> : null}
-                </div>
-              </div>
-            </div>
+            {utilityOpen ? (
+              <Suspense fallback={null}>
+                <LazyAppShellUtilityMenu
+                  lang={lang}
+                  t={t}
+                  frontendVisible={frontendVisible}
+                  onClose={closeUtilityMenu}
+                />
+              </Suspense>
+            ) : null}
           </div>
           <div
             className={styles.statusCluster}
             tabIndex={0}
             aria-label={t("systemStatusGuide")}
             title={statusSummaryTitle}
+            onMouseEnter={() => setStatusGuideOpen(true)}
+            onMouseLeave={(event) => {
+              if (!event.currentTarget.contains(document.activeElement)) {
+                setStatusGuideOpen(false);
+              }
+            }}
+            onFocus={() => setStatusGuideOpen(true)}
+            onBlur={(event) => {
+              const nextTarget = event.relatedTarget;
+              if (!(nextTarget instanceof Node) || !event.currentTarget.contains(nextTarget)) {
+                setStatusGuideOpen(false);
+              }
+            }}
           >
             <div className={styles.statusSummaryChip}>
               <span className={`${styles.statusDot} ${styles[`status_${primaryStatusCard.tone}`]}`} />
@@ -1633,70 +1370,21 @@ export function AppShell() {
               <strong className={styles.statusBadgeValue}>{primaryStatusCard.value}</strong>
               <span className={styles.statusSummaryCount}>{rightStatusCards.length}</span>
             </div>
-            <div className={styles.statusGuidePanel} role="note" aria-live="polite">
-              <div className={styles.statusGuideHeader}>
-                <strong>{t("systemStatusGuide")}</strong>
-                <span>{t("systemStatusGuideHint")}</span>
-              </div>
-              <div className={styles.statusGuideGrid}>
-                {rightStatusCards.map((item) => (
-                  <section key={item.id} className={styles.statusGuideCard}>
-                    <div className={styles.statusGuideCardHeader}>
-                      <span>{item.label}</span>
-                      <strong>{item.value}</strong>
-                    </div>
-                    <p className={styles.statusGuideNote}>{item.note}</p>
-                    <ul className={styles.statusGuideList}>
-                      {item.states.map((state) => (
-                        <li key={`${item.id}-${state.label}`} className={styles.statusGuideListItem}>
-                          <span className={`${styles.statusDot} ${styles[`status_${state.tone}`]}`} />
-                          <span className={styles.statusGuideStateLabel}>{state.label}</span>
-                          <span className={styles.statusGuideStateDetail}>{state.detail}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </section>
-                ))}
-              </div>
-              <section className={styles.lifecycleProofCard}>
-                <div className={styles.lifecycleProofHeader}>
-                  <span>{t("lifecycleProofTitle")}</span>
-                  <strong>
-                    <span
-                      className={`${styles.statusDot} ${styles[`status_${lifecycleStateTone(lifecycleProof?.overallState)}`]}`}
-                    />
-                    {lifecycleProof?.overallLabel || t("lifecycleProofUnavailable")}
-                  </strong>
-                </div>
-                <p className={styles.statusGuideNote}>
-                  {lifecycleProof?.summary || t("lifecycleProofUnavailable")}
-                </p>
-                {lifecycleProof ? (
-                  <>
-                    <div className={styles.lifecycleProofMeta}>
-                      <span>{t("lifecycleProofDesiredObserved")}</span>
-                      <strong>
-                        {lifecycleProof.desiredState} / {lifecycleProof.observedState}
-                      </strong>
-                      <span>{t("lifecycleProofVerifiedAt")}</span>
-                      <strong>{lifecycleProof.verifiedAt || "-"}</strong>
-                    </div>
-                    <ul className={styles.lifecycleProofList}>
-                      {lifecycleProof.components.map((component) => (
-                        <li key={component.id} className={styles.lifecycleProofItem}>
-                          <span
-                            className={`${styles.statusDot} ${styles[`status_${lifecycleStateTone(component.state)}`]}`}
-                          />
-                          <span className={styles.lifecycleProofName}>{component.label}</span>
-                          <strong>{lifecycleStateLabel(component.state, lang)}</strong>
-                          <span>{component.detail}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </>
-                ) : null}
-              </section>
-            </div>
+            {statusGuideOpen ? (
+              <Suspense fallback={null}>
+                <LazyAppShellStatusGuidePanel
+                  lang={lang}
+                  t={t}
+                  cards={rightStatusCards}
+                  frontendState={frontendState}
+                  backendState={backendState}
+                  runtimeControllerState={runtimeControllerState}
+                  lifecycleProof={lifecycleProof}
+                  workbench={workbench}
+                  buildId={buildId}
+                />
+              </Suspense>
+            ) : null}
           </div>
           <button
             type="button"

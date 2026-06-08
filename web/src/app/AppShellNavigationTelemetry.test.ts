@@ -2,6 +2,7 @@ import ts from "typescript";
 import { describe, expect, it } from "vitest";
 
 import appShellSource from "./AppShell.tsx?raw";
+import utilityMenuSource from "./AppShellUtilityMenu.tsx?raw";
 
 function isWindowHistoryExpression(node: ts.Expression): boolean {
   return ts.isPropertyAccessExpression(node)
@@ -100,11 +101,14 @@ describe("AppShell navigation telemetry", () => {
   });
 
   it("keeps file navigation inside the workbench utility menu", () => {
-    expect(appShellSource).toContain("filterUtilityFileTree");
-    expect(appShellSource).toContain("renderUtilityFileTree");
-    expect(appShellSource).toContain("utility-file-navigator");
-    expect(appShellSource).toContain("openPreviewTab(activeSessionId, path)");
-    expect(appShellSource).toContain('navigate("/chat")');
+    expect(appShellSource).toContain("LazyAppShellUtilityMenu");
+    expect(appShellSource).not.toContain("filterUtilityFileTree");
+    expect(appShellSource).not.toContain("renderUtilityFileTree");
+    expect(utilityMenuSource).toContain("filterUtilityFileTree");
+    expect(utilityMenuSource).toContain("renderUtilityFileTree");
+    expect(utilityMenuSource).toContain("utility-file-navigator");
+    expect(utilityMenuSource).toContain("openPreviewTab(activeSessionId, path)");
+    expect(utilityMenuSource).toContain('navigate("/chat")');
   });
 
   it("keeps Agent management top-level while memory is a separate primary surface", () => {

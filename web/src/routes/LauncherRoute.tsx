@@ -13,7 +13,7 @@ import {
 import { queryKeys } from "../api/queryKeys";
 import type { LauncherComponentState, LauncherOperation, WorkbenchWindowMode } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
-import { useAppI18n } from "../i18n/useAppI18n";
+import { useShellI18n } from "../i18n/useShellI18n";
 import styles from "./LauncherRoute.module.css";
 
 type LauncherNotice = {
@@ -519,7 +519,7 @@ function isControlPlaneIdle(evidence: LauncherStatusWithGuardian["controlPlaneEv
 }
 
 export function LauncherRoute() {
-  const { lang } = useAppI18n();
+  const { lang } = useShellI18n();
   const queryClient = useQueryClient();
   const pageVisible = usePageVisibility();
   const locale = lang === "zh" ? "zh-CN" : "en-US";

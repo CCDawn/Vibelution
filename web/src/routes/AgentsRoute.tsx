@@ -53,7 +53,7 @@ import {
   ToolRegistryPayload,
 } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
-import { useAppI18n } from "../i18n/useAppI18n";
+import { useShellI18n } from "../i18n/useShellI18n";
 import { AgentManagementNav } from "./AgentManagementNav";
 import { agentDisplayInfo } from "./agentDisplay";
 import { createChatWorkspaceCache } from "./chatWorkspaceCache";
@@ -2967,7 +2967,7 @@ function agentBulkActionSummary(action: string, success: number, skipped: number
 }
 
 export function AgentsRoute() {
-  const { lang } = useAppI18n();
+  const { lang } = useShellI18n();
   const queryClient = useQueryClient();
   const chatWorkspaceCache = useMemo(() => createChatWorkspaceCache(queryClient), [queryClient]);
   const navigate = useNavigate();
@@ -3006,10 +3006,12 @@ export function AgentsRoute() {
     refetchIntervalInBackground: false,
   });
 
+  const toolsWorkspaceNeeded = createOpen || activePane === "config";
   const toolsQuery = useQuery({
     queryKey: queryKeys.tools(),
     queryFn: () => fetchJson<ToolRegistryPayload>("/api/tools"),
-    refetchInterval: resolvePollingInterval(pageVisible, 15_000),
+    enabled: toolsWorkspaceNeeded,
+    refetchInterval: toolsWorkspaceNeeded ? resolvePollingInterval(pageVisible, 15_000) : false,
     refetchIntervalInBackground: false,
   });
   const toolBundles = toolsQuery.data?.toolBundles ?? [];

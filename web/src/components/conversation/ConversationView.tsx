@@ -32,6 +32,7 @@ import {
 import { fetchJson } from "../../api/client";
 import { useAppI18n } from "../../i18n/useAppI18n";
 import { shouldSubmitComposerOnKeydown } from "./composerShortcuts";
+import { COMPOSER_SESSION_REFERENCE_MIME } from "./conversationConstants";
 import {
   buildConversationOperationGroups,
   ConversationOperation,
@@ -66,7 +67,7 @@ type ComposerDragData = {
   getData?: (format: string) => string;
 } | null | undefined;
 
-export const COMPOSER_SESSION_REFERENCE_MIME = "application/vnd.vibelution.session-reference+json";
+export { COMPOSER_SESSION_REFERENCE_MIME } from "./conversationConstants";
 
 export function extractComposerImageDropFiles(data: ComposerDragData): File[] {
   const files = data?.files;
@@ -459,7 +460,7 @@ export function safeConversationMarkdownUrl(rawUrl: string): string | null {
   return scheme === "http" || scheme === "https" ? trimmed : null;
 }
 
-type ConversationViewProps = {
+export type ConversationViewProps = {
   sessionId: string;
   title: string;
   phase: string;

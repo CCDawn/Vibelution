@@ -30,7 +30,7 @@ import {
   SelfEvolutionTransaction,
 } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
-import { ConversationView } from "../components/conversation/ConversationView";
+import { LazyConversationView } from "../components/conversation/LazyConversationView";
 import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
 import { TranslationKey } from "../i18n/dictionary";
 import { petAvatarPresetLabel } from "../i18n/petLabels";
@@ -1087,7 +1087,7 @@ export function SelfEvolutionTrack({
 
           <main className={styles.centerColumn}>
             <div className={styles.conversationShell}>
-              <ConversationView
+              <LazyConversationView
                 sessionId={latestRun?.runId || "self-evolution"}
                 density="compact"
                 eyebrowLabel={t("selfEvolutionMode")}
@@ -1194,6 +1194,7 @@ export function SelfEvolutionTrack({
                 submitPendingLabel={t("loading")}
                 onComposerChange={onGoalInputChange}
                 onSubmit={onStartRun}
+                fallback={<div className={styles.loadingShell}>{t("loadingSession")}</div>}
               />
             </div>
           </main>

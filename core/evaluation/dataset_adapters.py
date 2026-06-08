@@ -132,6 +132,11 @@ class TerminalBenchJsonlAdapter(DatasetAdapter):
                 "environment_contract": contract,
                 "environment_preflight": preflight,
             }
+        if _is_agent_judged_terminal_bench(spec):
+            return {
+                "usability_status": "agent_harness_ready",
+                "usability_reason": "可启动纯 agent 监督评分；分数由 judge agent 基于轨迹和证据裁决，不依赖官方判分器。",
+            }
         return {"usability_status": "ready", "usability_reason": "数据集已有可运行 case。"}
 
 
@@ -410,12 +415,25 @@ def _is_terminal_bench_official_seed(spec: Any) -> bool:
     return str(spec.name or "") == "terminal_bench_core"
 
 
+def _is_agent_judged_terminal_bench(spec: Any) -> bool:
+    return (
+        str(getattr(spec, "adapter_status", "") or "").strip() == "agent_harness_ready"
+        or str(getattr(spec, "name", "") or "").strip() == "terminal_bench_agent_judged"
+    )
+
+
 def _terminal_bench_max_steps(row: Dict[str, Any], *, official_seed: bool = False) -> int:
     default_max_steps = TERMINAL_BENCH_CORE_DEFAULT_MAX_STEPS if official_seed else TERMINAL_BENCH_SMOKE_DEFAULT_MAX_STEPS
     return int(row.get("max_steps") or default_max_steps)
 
 
-def _build_terminal_bench_prompt(row: Dict[str, Any], *, case_id: str, official_seed: bool = False) -> str:
+def _build_terminal_bench_prompt(
+    row: Dict[str, Any],
+    *,
+    case_id: str,
+    official_seed: bool = False,
+    agent_judged: bool = False,
+) -> str:
     instruction = _prompt_from_row(row)
     verifier = row.get("verifier") if isinstance(row.get("verifier"), dict) else {}
     allowed_tools = _text_list(row.get("allowed_tools"))
@@ -434,12 +452,22 @@ def _build_terminal_bench_prompt(row: Dict[str, Any], *, case_id: str, official_
         official_lines.append(f"- Official dataset: {TERMINAL_BENCH_CORE_REPO}@{TERMINAL_BENCH_CORE_REVISION}")
     official_block = "\n".join(official_lines)
     verifier_lines = []
-    if verifier_command:
+    if agent_judged:
+        verifier_lines.append("- Scoring: a supervised judge agent will score the final trace and evidence.")
+        verifier_lines.append("- Required marker from judge: SUPERVISED_AGENT_JUDGMENT")
+    elif verifier_command:
         verifier_lines.append(f"- Verifier command: {verifier_command}")
-    if success_marker:
+    if success_marker and not agent_judged:
         verifier_lines.append(f"- Success marker: {success_marker}")
     verifier_block = "\n".join(verifier_lines) or "- Verifier: use the dataset row verifier metadata."
     environment_block = render_environment_contract_prompt(terminal_bench_environment_contract(official_seed=official_seed))
+    close_contract = (
+        "5. Run the local validation you can justify for the task, then close the transaction.\n"
+        "6. Close the transaction with status=success only when your evidence supports completion; otherwise close with status=failed.\n"
+        if agent_judged
+        else "5. Run the verifier before closing the transaction.\n"
+        "6. Close the transaction with status=success only when verification passes; otherwise close with status=failed.\n"
+    )
     return (
         "Run this Terminal-Bench-style local smoke case through the full agent harness.\n"
         f"Case: {case_id}\n\n"
@@ -451,8 +479,7 @@ def _build_terminal_bench_prompt(row: Dict[str, Any], *, case_id: str, official_
         "2. Use a multi-step ReAct loop: inspect evidence, choose a tool action, observe, adjust, then verify.\n"
         f"3. Use only these intended tool classes unless the local runtime requires an equivalent: {tool_line}.\n"
         f"4. Keep the loop within roughly {max_steps} meaningful tool steps.\n"
-        "5. Run the verifier before closing the transaction.\n"
-        "6. Close the transaction with status=success only when verification passes; otherwise close with status=failed.\n"
+        f"{close_contract}"
         "7. Do not commit or publish changes."
         f"{environment_block}\n\n"
         "Verifier:\n"
@@ -463,10 +490,16 @@ def _build_terminal_bench_prompt(row: Dict[str, Any], *, case_id: str, official_
 def _build_terminal_bench_case(spec: Any, row: Dict[str, Any], index: int) -> Dict[str, Any]:
     case_id = _case_id_from_row(row, index)
     official_seed = _is_terminal_bench_official_seed(spec)
-    adapter = "official_seed" if official_seed else "local_smoke"
+    agent_judged = _is_agent_judged_terminal_bench(spec)
+    adapter = "agent_judged" if agent_judged else "official_seed" if official_seed else "local_smoke"
     prompt = str(row.get("baseline_prompt") or row.get("candidate_prompt") or "").strip()
     if not prompt:
-        prompt = _build_terminal_bench_prompt(row, case_id=case_id, official_seed=official_seed)
+        prompt = _build_terminal_bench_prompt(
+            row,
+            case_id=case_id,
+            official_seed=official_seed,
+            agent_judged=agent_judged,
+        )
     verifier = row.get("verifier") if isinstance(row.get("verifier"), dict) else {}
     allowed_tools = _text_list(row.get("allowed_tools"))
     max_steps = _terminal_bench_max_steps(row, official_seed=official_seed)
@@ -486,14 +519,16 @@ def _build_terminal_bench_case(spec: Any, row: Dict[str, Any], index: int) -> Di
         "terminal_bench_adapter": adapter,
         "requires_react_trace": True,
         "requires_terminal_harness": True,
-        "official_runner": "harbor_pending" if official_seed else "pending",
+        "official_runner": "agent_judged" if agent_judged else "harbor_pending" if official_seed else "pending",
         "requires_official_task_environment": False,
         "official_task_environment_required_for": "official_verifier" if official_seed else "",
         "required_task_paths": ["/app"] if official_seed else [],
         "environment_contract": environment_contract,
-        "evaluation_mode": "custom_harness" if official_seed else "local_harness",
+        "evaluation_mode": "agent_judged" if agent_judged else "custom_harness" if official_seed else "local_harness",
         "score_label": (
-            "Vibelution custom score (non-official Terminal-Bench score)"
+            "Agent-judged score (non-official Terminal-Bench score)"
+            if agent_judged
+            else "Vibelution custom score (non-official Terminal-Bench score)"
             if official_seed
             else "Vibelution local smoke score"
         ),
@@ -523,26 +558,40 @@ def _build_terminal_bench_case(spec: Any, row: Dict[str, Any], index: int) -> Di
     }
     if "rubric" in row:
         case["rubric"] = row["rubric"]
+    if agent_judged:
+        case["agent_judged"] = True
+        case["judge_required"] = True
+        case["judge_marker"] = "SUPERVISED_AGENT_JUDGMENT"
     if "dataset_splits" in row:
         case["dataset_splits"] = _normalize_dataset_splits(row["dataset_splits"])
     return case
 
 
 def _base_dataset_metadata(spec: Any, source: Optional[Path]) -> Dict[str, Any]:
+    evaluation_mode = (
+        "agent_judged"
+        if _is_agent_judged_terminal_bench(spec)
+        else "custom_harness"
+        if spec.official_verifier_status == "harbor_pending"
+        else "official_or_not_required"
+    )
+    score_label = (
+        "Agent-judged score (non-official Terminal-Bench score)"
+        if evaluation_mode == "agent_judged"
+        else "Vibelution custom score (non-official Terminal-Bench score)"
+        if spec.official_verifier_status == "harbor_pending"
+        else "official_or_local_score"
+    )
     return {
         "name": spec.name,
         "kind": spec.kind,
         "source_path": str(source) if source is not None else "",
         "adapter_status": spec.adapter_status,
         "official_verifier_status": spec.official_verifier_status,
-        "evaluation_mode": "custom_harness" if spec.official_verifier_status == "harbor_pending" else "official_or_not_required",
-        "score_label": (
-            "Vibelution custom score (non-official Terminal-Bench score)"
-            if spec.official_verifier_status == "harbor_pending"
-            else "official_or_local_score"
-        ),
+        "evaluation_mode": evaluation_mode,
+        "score_label": score_label,
         "official_score": None,
-        "official_score_available": spec.official_verifier_status != "harbor_pending",
+        "official_score_available": spec.official_verifier_status != "harbor_pending" and evaluation_mode != "agent_judged",
         "runnable": spec.runnable,
         "review_required": spec.review_required,
         "source_track": spec.source_track,

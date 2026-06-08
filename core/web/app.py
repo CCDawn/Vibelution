@@ -8,6 +8,7 @@ import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qsl, urlparse
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -56,6 +57,19 @@ INDEX_CACHE_HEADERS = {
     "Pragma": "no-cache",
     "Expires": "0",
 }
+SENSITIVE_QUERY_KEYWORDS = (
+    "authorization",
+    "api_key",
+    "apikey",
+    "access_key",
+    "private_key",
+    "password",
+    "passwd",
+    "secret",
+    "token",
+    "cookie",
+    "bearer",
+)
 
 
 class UTF8JSONResponse(JSONResponse):
@@ -147,21 +161,139 @@ def _record_api_runtime_event(
         route = request.scope.get("route")
         path_template = str(getattr(route, "path", "") or request.url.path)
         client = request.client.host if request.client else ""
+        query_diagnostics = _request_query_diagnostics(request)
         record_backend_api_event(
             {
                 "method": request.method.upper(),
                 "path": str(request.url.path or ""),
                 "path_template": path_template,
-                "query": str(request.url.query or ""),
+                "query": query_diagnostics["summary"],
+                "query_keys": query_diagnostics["keys"],
+                "query_param_count": query_diagnostics["param_count"],
+                "query_length": query_diagnostics["length"],
+                "sensitive_query_key_count": query_diagnostics["sensitive_key_count"],
                 "status_code": int(status_code or 0),
                 "duration_ms": duration_ms,
                 "client": client,
+                "referer_path": _safe_referer_path(request),
+                "request_origin": _request_origin_summary(request),
+                "user_agent_family": _user_agent_family(request),
                 "exception_type": type(exception).__name__ if exception else "",
                 "exception_message": str(exception or ""),
             }
         )
     except Exception:
         pass
+
+
+def _request_query_diagnostics(request: Request) -> dict[str, Any]:
+    raw_query = str(request.url.query or "")
+    if not raw_query:
+        return {
+            "summary": "",
+            "keys": [],
+            "param_count": 0,
+            "length": 0,
+            "sensitive_key_count": 0,
+        }
+
+    parsed_pairs = parse_qsl(raw_query, keep_blank_values=True)
+    if not parsed_pairs:
+        parsed_pairs = [(item.split("=", 1)[0], "") for item in raw_query.split("&") if item]
+    safe_keys: list[str] = []
+    sensitive_key_count = 0
+    seen_keys: set[str] = set()
+    for key, _ in parsed_pairs:
+        key_text = str(key or "").strip()
+        if not key_text:
+            continue
+        if _is_sensitive_query_key(key_text):
+            sensitive_key_count += 1
+            continue
+        safe_key = _safe_query_key(key_text)
+        if safe_key and safe_key not in seen_keys:
+            safe_keys.append(safe_key)
+            seen_keys.add(safe_key)
+        if len(safe_keys) >= 12:
+            break
+
+    summary_parts = [
+        f"params={len(parsed_pairs)}",
+        f"length={len(raw_query)}",
+    ]
+    if safe_keys:
+        summary_parts.append(f"keys={','.join(safe_keys)}")
+    if sensitive_key_count:
+        summary_parts.append(f"sensitiveKeys={sensitive_key_count}")
+    return {
+        "summary": ";".join(summary_parts),
+        "keys": safe_keys,
+        "param_count": len(parsed_pairs),
+        "length": len(raw_query),
+        "sensitive_key_count": sensitive_key_count,
+    }
+
+
+def _is_sensitive_query_key(value: str) -> bool:
+    lowered = str(value or "").strip().lower().replace("-", "_")
+    return any(keyword in lowered for keyword in SENSITIVE_QUERY_KEYWORDS)
+
+
+def _safe_query_key(value: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    return text[:80]
+
+
+def _safe_referer_path(request: Request) -> str:
+    referer = str(request.headers.get("referer") or "").strip()
+    if not referer:
+        return ""
+    parsed = urlparse(referer)
+    if parsed.scheme and parsed.netloc:
+        return (parsed.path or "/")[:240]
+    if referer.startswith("/"):
+        return referer.split("?", 1)[0].split("#", 1)[0][:240]
+    return ""
+
+
+def _request_origin_summary(request: Request) -> str:
+    origin = str(request.headers.get("origin") or "").strip()
+    if origin:
+        parsed_origin = urlparse(origin)
+        if parsed_origin.scheme and parsed_origin.netloc:
+            return f"{parsed_origin.scheme}://{parsed_origin.netloc}"[:160]
+        return origin[:80]
+
+    referer = str(request.headers.get("referer") or "").strip()
+    parsed_referer = urlparse(referer)
+    if parsed_referer.scheme and parsed_referer.netloc:
+        return f"{parsed_referer.scheme}://{parsed_referer.netloc}"[:160]
+    return ""
+
+
+def _user_agent_family(request: Request) -> str:
+    user_agent = str(request.headers.get("user-agent") or "").lower()
+    if not user_agent:
+        return ""
+    if "testclient" in user_agent:
+        return "testclient"
+    if "edg/" in user_agent or "edge/" in user_agent:
+        return "edge"
+    if "chrome/" in user_agent or "chromium/" in user_agent:
+        return "chrome"
+    if "firefox/" in user_agent:
+        return "firefox"
+    if "safari/" in user_agent:
+        return "safari"
+    if "python" in user_agent:
+        return "python"
+    if "curl/" in user_agent:
+        return "curl"
+    if "playwright" in user_agent:
+        return "playwright"
+    return "other"
 
 
 @asynccontextmanager

@@ -46,6 +46,7 @@ from core.runtime_manager.work_run_leases import (
 
 from .i18n import get_web_language, text_for
 from . import agent_directory_service, agent_mode_binding_service, session_service
+from .runtime_manager_control_service import runtime_manager_live_control_enabled
 from .runtime_scene_service import record_runtime_scene_event
 from .session_service import (
     SessionBusyError,
@@ -161,21 +162,7 @@ class SelfEvolutionRunNotFoundError(LookupError):
 
 
 def _runtime_manager_live_control_enabled() -> bool:
-    try:
-        from core.runtime_manager.daemon import load_runtime_snapshot
-
-        snapshot = load_runtime_snapshot()
-    except Exception:
-        return False
-    if not bool((snapshot or {}).get("daemonRunning")):
-        return False
-    snapshot_root = str((snapshot or {}).get("projectRoot") or "").strip()
-    if not snapshot_root:
-        return False
-    try:
-        return Path(snapshot_root).resolve() == PROJECT_ROOT.resolve()
-    except OSError:
-        return False
+    return runtime_manager_live_control_enabled(PROJECT_ROOT)
 
 
 def _ensure_runtime_manager_daemon() -> None:

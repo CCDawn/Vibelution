@@ -6,7 +6,7 @@ import { useSearchParams } from "react-router-dom";
 import { fetchJson } from "../api/client";
 import { queryKeys } from "../api/queryKeys";
 import { AgentInstance, PromptTemplate, PromptTemplateWorkspace } from "../api/types";
-import { useAppI18n } from "../i18n/useAppI18n";
+import { useShellI18n } from "../i18n/useShellI18n";
 import { AgentManagementNav } from "./AgentManagementNav";
 import styles from "./PromptTemplatesRoute.module.css";
 
@@ -179,7 +179,7 @@ function promptBulkActionSummary(action: string, success: number, skipped: numbe
 }
 
 export function PromptTemplatesRoute() {
-  const { lang } = useAppI18n();
+  const { lang } = useShellI18n();
   const copy = useMemo(() => copyFor(lang), [lang]);
   const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();

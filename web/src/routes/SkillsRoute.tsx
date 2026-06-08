@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { fetchJson } from "../api/client";
 import { queryKeys } from "../api/queryKeys";
 import { SkillLibraryDetail, SkillLibraryItem, SkillLibraryPayload } from "../api/types";
-import { useAppI18n } from "../i18n/useAppI18n";
+import { useShellI18n } from "../i18n/useShellI18n";
 import { AgentManagementNav } from "./AgentManagementNav";
 import styles from "./SkillsRoute.module.css";
 
@@ -127,7 +127,7 @@ function copyFor(lang: string) {
 }
 
 export function SkillsRoute() {
-  const { lang } = useAppI18n();
+  const { lang } = useShellI18n();
   const copy = useMemo(() => copyFor(lang), [lang]);
   const [searchText, setSearchText] = useState("");
   const [sourceFilter, setSourceFilter] = useState<SkillSourceFilter>("all");

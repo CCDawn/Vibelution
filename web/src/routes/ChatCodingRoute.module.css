@@ -1,11 +1,11 @@
 .layout {
   display: grid;
   grid-template-columns:
-    var(--chat-left-pane-width, 248px)
+    var(--chat-left-pane-width, 220px)
     8px
     minmax(0, 1fr)
     8px
-    var(--chat-right-pane-width, 320px);
+    var(--chat-right-pane-width, 284px);
   height: 100%;
   min-height: 0;
   overflow: hidden;
@@ -21,8 +21,8 @@
 .leftRail {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 8px;
+  gap: 5px;
+  padding: 6px;
   background: color-mix(in srgb, var(--surface-panel-muted) 86%, transparent);
   overflow: auto;
 }
@@ -35,7 +35,7 @@
 }
 
 .leftBlock {
-  padding: 8px;
+  padding: 7px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   background: var(--surface-panel);
@@ -51,7 +51,7 @@
 
 .sectionHeader {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 6px;
 }
@@ -65,8 +65,8 @@
 .sectionTitle {
   margin: 0;
   font-family: var(--font-display);
-  font-size: 0.84rem;
-  line-height: 1.2;
+  font-size: 0.8rem;
+  line-height: 1.15;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -83,11 +83,11 @@
 }
 
 .contextLineCompact {
-  margin: 4px 0 0;
+  margin: 3px 0 0;
   color: var(--fg-secondary);
-  font-size: 0.74rem;
-  line-height: 1.32;
-  -webkit-line-clamp: 3;
+  font-size: 0.7rem;
+  line-height: 1.24;
+  -webkit-line-clamp: 2;
 }
 
 .sectionMetaLine {
@@ -99,10 +99,10 @@
 }
 
 .oneLineValue {
-  margin: 4px 0 0;
+  margin: 3px 0 0;
   color: var(--fg-primary);
-  font-size: 0.74rem;
-  line-height: 1.32;
+  font-size: 0.71rem;
+  line-height: 1.24;
   -webkit-line-clamp: 2;
 }
 
@@ -303,7 +303,7 @@
 .sessionDiagnosticsDetails {
   display: grid;
   gap: 0;
-  margin-top: 6px;
+  margin-top: 4px;
   border: 1px solid color-mix(in srgb, var(--fg-tertiary) 12%, transparent);
   border-radius: 7px;
   background: color-mix(in srgb, var(--surface-card) 42%, transparent);
@@ -315,8 +315,8 @@
   align-items: center;
   gap: 6px;
   min-width: 0;
-  min-height: 28px;
-  padding: 5px 6px;
+  min-height: 25px;
+  padding: 4px 6px;
   color: var(--fg-secondary);
   cursor: pointer;
   font-size: 0.72rem;
@@ -364,9 +364,9 @@
 
 .sessionDiagnosticsBody {
   display: grid;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
-  padding: 0 6px 7px;
+  padding: 0 6px 6px;
 }
 
 .sessionResourceDiagnostics {
@@ -376,7 +376,7 @@
 
 .featurePresetBlock {
   display: grid;
-  gap: 6px;
+  gap: 5px;
 }
 
 .featurePresetScope {
@@ -399,7 +399,7 @@
 .featureChipRow {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 4px;
+  gap: 3px;
   min-width: 0;
 }
 
@@ -409,8 +409,8 @@
   gap: 5px;
   align-items: center;
   min-width: 0;
-  min-height: 34px;
-  padding: 6px 7px;
+  min-height: 30px;
+  padding: 5px 6px;
   border: 1px solid var(--border-soft);
   border-radius: 7px;
   background: color-mix(in srgb, var(--surface-card) 74%, transparent);
@@ -1447,8 +1447,8 @@
 
 .tabStrip {
   display: flex;
-  gap: 6px;
-  padding: 10px 12px 0;
+  gap: 5px;
+  padding: 8px 10px 0;
   overflow-x: auto;
   align-items: flex-end;
 }
@@ -1457,7 +1457,7 @@
   flex: 0 0 auto;
   border: 1px solid transparent;
   border-radius: 7px 7px 0 0;
-  padding: 8px 12px;
+  padding: 7px 10px;
   background: transparent;
   color: var(--fg-secondary);
   white-space: nowrap;
@@ -1472,7 +1472,7 @@
 .agentSessionTabGroup {
   display: inline-flex;
   align-items: stretch;
-  gap: 6px;
+  gap: 5px;
   flex: 1 1 auto;
   min-width: 0;
   overflow-x: auto;
@@ -1480,16 +1480,16 @@
 
 .agentSessionTab {
   display: inline-grid;
-  grid-template-columns: auto minmax(92px, 1fr) auto;
+  grid-template-columns: auto minmax(80px, 1fr) auto;
   align-items: center;
-  gap: 7px;
-  flex: 0 1 240px;
-  min-width: 156px;
-  max-width: 280px;
-  min-height: 39px;
+  gap: 6px;
+  flex: 0 1 218px;
+  min-width: 140px;
+  max-width: 248px;
+  min-height: 34px;
   border: 1px solid transparent;
   border-radius: 7px 7px 0 0;
-  padding: 5px 9px;
+  padding: 4px 8px;
   background: transparent;
   color: var(--fg-secondary);
   cursor: pointer;
@@ -1546,8 +1546,8 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
+  width: 20px;
+  height: 20px;
   border-radius: 999px;
   color: var(--accent-cool-2);
   background: color-mix(in srgb, var(--accent-cool) 12%, transparent);
@@ -1627,7 +1627,7 @@
 
 .agentSessionTabMeta {
   min-width: 0;
-  max-width: 96px;
+  max-width: 82px;
   overflow: hidden;
   color: var(--fg-tertiary);
   font-size: 0.66rem;
@@ -1685,14 +1685,14 @@
 .sessionAgentStatusControl {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  flex: 0 1 380px;
-  min-width: 220px;
-  max-width: min(44%, 420px);
-  min-height: 31px;
+  gap: 5px;
+  flex: 0 1 300px;
+  min-width: 180px;
+  max-width: min(38%, 340px);
+  min-height: 28px;
   margin-left: auto;
   margin-bottom: 1px;
-  padding: 3px 6px;
+  padding: 2px 6px;
   border: 1px solid color-mix(in srgb, var(--border-soft) 78%, transparent);
   border-radius: 7px 7px 0 0;
   background: color-mix(in srgb, var(--surface-panel-strong) 82%, transparent);
@@ -1705,13 +1705,13 @@
 }
 
 .sessionAgentStatusSelect {
-  min-width: 110px;
+  min-width: 88px;
   flex: 1 1 auto;
   border: 0;
   background: transparent;
   color: var(--fg-primary);
   font: inherit;
-  font-size: 0.78rem;
+  font-size: 0.74rem;
   line-height: 1.2;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1724,9 +1724,9 @@
 
 .sessionAgentStatusMeta {
   min-width: 0;
-  flex: 0 1 128px;
+  flex: 0 1 96px;
   color: var(--fg-tertiary);
-  font-size: 0.7rem;
+  font-size: 0.66rem;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1847,8 +1847,8 @@
 .rightPane {
   display: grid;
   grid-template-rows: auto auto 1fr;
-  padding: 8px;
-  gap: 7px;
+  padding: 6px;
+  gap: 6px;
   background: color-mix(in srgb, var(--surface-panel-muted) 90%, transparent);
   overflow: hidden;
 }
@@ -2099,9 +2099,9 @@
 .panelSearch {
   display: flex;
   align-items: center;
-  gap: 7px;
-  min-height: 30px;
-  padding: 0 9px;
+  gap: 6px;
+  min-height: 28px;
+  padding: 0 8px;
   border: 1px solid transparent;
   border-radius: var(--radius-panel);
   background: color-mix(in srgb, var(--surface-card) 86%, transparent);
@@ -2123,29 +2123,29 @@
   overflow: auto;
   display: grid;
   align-content: start;
-  gap: 6px;
+  gap: 5px;
   padding-right: 2px;
 }
 
 .sessionActionRow {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 6px;
+  gap: 5px;
 }
 
 .newSessionButton {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  min-height: 30px;
-  padding: 5px 9px;
+  gap: 5px;
+  min-height: 28px;
+  padding: 4px 8px;
   border: 1px solid color-mix(in srgb, var(--fg-primary) 10%, var(--border-soft));
   border-radius: var(--radius-control);
   background: var(--surface-panel);
   color: var(--fg-primary);
   font: inherit;
-  font-size: 0.78rem;
+  font-size: 0.74rem;
   cursor: pointer;
   box-shadow: none;
 }
@@ -2159,15 +2159,15 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  min-height: 30px;
-  padding: 5px 9px;
+  gap: 5px;
+  min-height: 28px;
+  padding: 4px 8px;
   border: 1px solid color-mix(in srgb, var(--accent-cool) 24%, transparent);
   border-radius: var(--radius-control);
   background: color-mix(in srgb, var(--accent-cool) 12%, transparent);
   color: var(--accent-cool-2);
   font: inherit;
-  font-size: 0.78rem;
+  font-size: 0.74rem;
   cursor: pointer;
 }
 
@@ -2336,25 +2336,25 @@
 
 .conversationGroup {
   display: grid;
-  gap: 5px;
+  gap: 4px;
 }
 
 .systemEntryGroup {
   display: grid;
-  gap: 4px;
-  margin-top: 4px;
-  padding-bottom: 4px;
+  gap: 3px;
+  margin-top: 3px;
+  padding-bottom: 3px;
   border-bottom: 1px solid color-mix(in srgb, var(--border-soft) 58%, transparent);
 }
 
 .systemEntryButton {
   display: grid;
-  grid-template-columns: 28px minmax(0, 1fr);
+  grid-template-columns: 25px minmax(0, 1fr);
   align-items: center;
-  gap: 8px;
+  gap: 7px;
   min-width: 0;
-  min-height: 42px;
-  padding: 6px 8px;
+  min-height: 36px;
+  padding: 5px 7px;
   border: 1px solid transparent;
   border-radius: 7px;
   background: transparent;
@@ -2380,8 +2380,8 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 25px;
+  height: 25px;
   border: 1px solid color-mix(in srgb, var(--accent-cool) 24%, var(--border-soft));
   border-radius: 8px;
   color: var(--accent-cool-2);
@@ -2404,7 +2404,7 @@
 .systemEntryTitle {
   overflow: hidden;
   color: var(--fg-primary);
-  font-size: 0.84rem;
+  font-size: 0.79rem;
   font-weight: 780;
   line-height: 1.2;
   text-overflow: ellipsis;
@@ -2414,27 +2414,27 @@
 .systemEntryMeta {
   overflow: hidden;
   color: var(--fg-tertiary);
-  font-size: 0.72rem;
+  font-size: 0.68rem;
   line-height: 1.25;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .conversationGroup + .conversationGroup {
-  margin-top: 4px;
+  margin-top: 3px;
 }
 
 .conversationTreeRootHeader {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: 8px;
-  min-height: 28px;
-  padding: 4px 7px;
+  gap: 7px;
+  min-height: 25px;
+  padding: 3px 7px;
   border-radius: var(--radius-control);
   color: var(--fg-secondary);
   background: color-mix(in srgb, var(--surface-card) 58%, transparent);
-  font-size: 0.76rem;
+  font-size: 0.72rem;
   font-weight: 780;
 }
 
@@ -2459,16 +2459,16 @@
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  gap: 7px;
-  min-height: 28px;
-  padding: 4px 7px;
+  gap: 6px;
+  min-height: 25px;
+  padding: 3px 7px;
   border: 0;
   border-radius: var(--radius-control);
   background: transparent;
   color: var(--fg-tertiary);
   cursor: pointer;
   font: inherit;
-  font-size: 0.76rem;
+  font-size: 0.72rem;
   font-weight: 760;
   text-align: left;
 }
@@ -2509,11 +2509,11 @@
 
 .conversationGroupList {
   display: grid;
-  gap: 2px;
+  gap: 1px;
 }
 
 .teamTreeGroup {
-  margin-top: 8px;
+  margin-top: 6px;
 }
 
 .teamTreeItem {
@@ -2602,7 +2602,7 @@ a.teamTreeChild:focus-visible {
   grid-template-columns: minmax(0, 1fr);
   gap: 0;
   text-align: left;
-  padding: 3px;
+  padding: 2px;
   border-radius: var(--radius-panel);
   border: 1px solid transparent;
   background: transparent;
@@ -2648,12 +2648,12 @@ a.teamTreeChild:focus-visible {
 
 .sessionItemMain {
   display: grid;
-  grid-template-columns: 38px minmax(0, 1fr);
+  grid-template-columns: 32px minmax(0, 1fr);
   align-items: center;
-  gap: 9px;
+  gap: 7px;
   min-width: 0;
-  min-height: 54px;
-  padding: 3px 0;
+  min-height: 46px;
+  padding: 2px 0;
   border: 0;
   background: transparent;
   color: inherit;
@@ -2685,7 +2685,7 @@ a.teamTreeChild:focus-visible {
   min-width: 0;
   overflow: hidden;
   color: var(--fg-primary);
-  font-size: 0.86rem;
+  font-size: 0.8rem;
   font-weight: 760;
   line-height: 1.2;
   text-overflow: ellipsis;
@@ -2695,12 +2695,12 @@ a.teamTreeChild:focus-visible {
 .conversationAvatar {
   display: grid;
   place-items: center;
-  width: 38px;
-  height: 38px;
+  width: 32px;
+  height: 32px;
   border-radius: 50%;
   color: var(--fg-primary);
   font-family: var(--font-body);
-  font-size: 0.8rem;
+  font-size: 0.72rem;
   font-weight: 800;
   letter-spacing: 0.02em;
   box-shadow: inset 0 0 0 1px color-mix(in srgb, white 12%, transparent);
@@ -2719,7 +2719,7 @@ a.teamTreeChild:focus-visible {
 .conversationCopy {
   display: grid;
   min-width: 0;
-  gap: 3px;
+  gap: 2px;
 }
 
 .conversationTitleRow {
@@ -2733,11 +2733,11 @@ a.teamTreeChild:focus-visible {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 18px;
-  padding: 0 5px;
+  min-height: 16px;
+  padding: 0 4px;
   border: 1px solid var(--border-soft);
   border-radius: 999px;
-  font-size: 0.64rem;
+  font-size: 0.6rem;
   font-weight: 700;
   line-height: 1;
   white-space: nowrap;
@@ -2765,12 +2765,12 @@ a.teamTreeChild:focus-visible {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 18px;
+  min-height: 16px;
   max-width: 100%;
-  padding: 0 6px;
+  padding: 0 5px;
   border: 1px solid var(--border-soft);
   border-radius: 999px;
-  font-size: 0.66rem;
+  font-size: 0.61rem;
   font-weight: 740;
   line-height: 1;
   overflow: hidden;
@@ -2814,14 +2814,14 @@ a.teamTreeChild:focus-visible {
   display: inline-flex;
   align-items: center;
   min-width: 0;
-  max-width: 168px;
-  min-height: 18px;
-  padding: 0 6px;
+  max-width: 124px;
+  min-height: 16px;
+  padding: 0 5px;
   border: 1px solid color-mix(in srgb, var(--accent-cool) 24%, var(--border-soft));
   border-radius: 999px;
   background: color-mix(in srgb, var(--accent-cool) 8%, transparent);
   color: var(--fg-secondary);
-  font-size: 0.64rem;
+  font-size: 0.6rem;
   font-weight: 650;
   line-height: 1;
   overflow: hidden;
@@ -2844,12 +2844,12 @@ a.teamTreeChild:focus-visible {
 .sessionCurrentBadge {
   display: inline-flex;
   align-items: center;
-  padding: 2px 6px;
+  padding: 1px 5px;
   border: 1px solid color-mix(in srgb, var(--accent-warm) 28%, transparent);
   border-radius: 999px;
   background: color-mix(in srgb, var(--accent-warm) 12%, transparent);
   color: var(--accent-warm-2);
-  font-size: 0.72rem;
+  font-size: 0.64rem;
   font-weight: 700;
   white-space: nowrap;
 }
@@ -2868,7 +2868,7 @@ a.teamTreeChild:focus-visible {
 .sessionState {
   flex: 0 0 auto;
   color: var(--fg-tertiary);
-  font-size: 0.7rem;
+  font-size: 0.66rem;
 }
 
 .sessionItemSummary,
@@ -2881,8 +2881,8 @@ a.teamTreeChild:focus-visible {
   display: block;
   overflow: hidden;
   color: var(--fg-secondary);
-  font-size: 0.76rem;
-  line-height: 1.22;
+  font-size: 0.7rem;
+  line-height: 1.18;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -2905,10 +2905,10 @@ a.teamTreeChild:focus-visible {
   display: flex;
   align-items: center;
   min-width: 0;
-  gap: 5px;
+  gap: 4px;
   color: var(--fg-tertiary);
-  font-size: 0.72rem;
-  line-height: 1.2;
+  font-size: 0.66rem;
+  line-height: 1.15;
 }
 
 .conversationMetaRow span:not(.conversationKindBadge),
@@ -2940,7 +2940,7 @@ a.teamTreeChild:focus-visible {
 }
 
 .directSessionItem:has(.sessionActionStack) {
-  padding-right: 62px;
+  padding-right: 56px;
 }
 
 .sessionIconButton,
@@ -3823,20 +3823,20 @@ a.teamTreeChild:focus-visible {
 @media (max-width: 1180px) {
   .layout {
     grid-template-columns:
-      minmax(220px, var(--chat-left-pane-width, 240px))
+      minmax(192px, var(--chat-left-pane-width, 220px))
       8px
       minmax(0, 1fr)
       8px
-      minmax(260px, var(--chat-right-pane-width, 300px));
+      minmax(244px, var(--chat-right-pane-width, 284px));
   }
 
   .leftRail {
-    padding: 8px;
+    padding: 6px;
   }
 
   .rightPane {
-    padding: 8px;
-    gap: 7px;
+    padding: 6px;
+    gap: 6px;
   }
 
   .companionCompact {
@@ -3859,12 +3859,12 @@ a.teamTreeChild:focus-visible {
   }
 
   .layoutCenterFirst .leftRail:not(.paneCollapsed) {
-    padding: 8px;
+    padding: 6px;
     visibility: visible;
   }
 
   .layoutCenterFirst .rightPane:not(.paneCollapsed) {
-    padding: 8px;
+    padding: 6px;
     visibility: visible;
   }
 
@@ -3873,7 +3873,7 @@ a.teamTreeChild:focus-visible {
   }
 
   .tabStrip {
-    padding: 10px 12px 0;
+    padding: 8px 10px 0;
   }
 }
 

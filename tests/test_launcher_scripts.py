@@ -5167,6 +5167,7 @@ if ($parseErrors -and $parseErrors.Count -gt 0) {
 
 foreach ($functionName in @(
     "ConvertTo-PowerShellSingleQuotedLiteral",
+    "Get-ObjectPropertyValue",
     "Start-Supervisor"
 )) {
     $functionAst = $ast.Find({
@@ -5185,6 +5186,7 @@ $script:events = @()
 $script:launcherDir = Join-Path ([System.IO.Path]::GetTempPath()) ("vibelution-supervisor-start-" + [guid]::NewGuid().ToString("N"))
 $script:projectDir = $script:launcherDir
 $script:PSCommandPath = $LauncherPath
+$script:port = 8000
 New-Item -ItemType Directory -Path $script:launcherDir -Force | Out-Null
 function Start-HiddenBackgroundProcess {
     param(
@@ -5193,6 +5195,25 @@ function Start-HiddenBackgroundProcess {
         [string]$WorkingDirectory = ""
     )
     return [pscustomobject]@{ Id = 999999 }
+}
+function Get-State {
+    return [pscustomobject]@{
+        sessionId = "session-1"
+    }
+}
+function Get-ManagedBackendLiveness {
+    return [pscustomobject]@{
+        Alive = $true
+        Healthy = $true
+        CandidatePids = @(1111, 2222)
+    }
+}
+function Get-ListeningPid {
+    param([int]$Port)
+    return 1111
+}
+function Get-ManagedBrowserWindowProcesses {
+    return @([pscustomobject]@{ Id = 3333 })
 }
 function Write-LauncherControlLog {
     param([string]$Event, [string]$Message, [string]$Level = "info", [hashtable]$Fields = @{})
@@ -5219,8 +5240,27 @@ Write-Output $payload
     payload = json.loads(result.stdout.strip().splitlines()[-1])
     assert "Supervisor process exited during startup" in payload["errorMessage"]
     assert payload["events"][0]["event"] == "launcher.supervisor.start_failed"
-    assert payload["events"][0]["fields"]["stdout_path"]
-    assert payload["events"][0]["fields"]["stderr_path"]
+    fields = payload["events"][0]["fields"]
+    assert fields["stdout_path"]
+    assert fields["stderr_path"]
+    assert fields["supervisor_action"] == "supervise"
+    assert fields["supervisor_launch_api"] == "hidden_encoded_powershell"
+    assert fields["supervisor_command_logged"] is False
+    assert fields["startup_wait_timeout_ms"] == 8000
+    assert fields["startup_settle_milliseconds"] == 250
+    assert fields["startup_wait_exit_reason"] == "process_exited"
+    assert fields["argument_count"] == 6
+    assert fields["state_present"] is True
+    assert fields["state_session_matches"] is True
+    assert fields["backend_alive"] is True
+    assert fields["backend_healthy"] is True
+    assert fields["backend_candidate_count"] == 2
+    assert fields["backend_port"] == 8000
+    assert fields["backend_port_owner_pid"] == 1111
+    assert fields["browser_window_count"] == 1
+    assert fields["stdout_empty"] is True
+    assert fields["stderr_empty"] is True
+    assert "EncodedCommand" not in json.dumps(fields, ensure_ascii=False)
 
 
 def test_launcher_powershell_single_quoted_literal_escapes_quotes(tmp_path):

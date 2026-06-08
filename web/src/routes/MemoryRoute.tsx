@@ -56,7 +56,7 @@ import {
   TeamKnowledgeBase,
 } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
-import { useAppI18n } from "../i18n/useAppI18n";
+import { useShellI18n } from "../i18n/useShellI18n";
 import styles from "./MemoryRoute.module.css";
 
 const MemoryGraphCanvas = lazy(() => import("./MemoryGraphCanvas").then((module) => ({ default: module.MemoryGraphCanvas })));
@@ -1672,7 +1672,7 @@ function invalidateMemoryQueries(queryClient: ReturnType<typeof useQueryClient>)
 }
 
 export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
-  const { lang } = useAppI18n();
+  const { lang } = useShellI18n();
   const copy = COPY[lang];
   const queryClient = useQueryClient();
   const pageVisible = usePageVisibility();

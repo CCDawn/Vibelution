@@ -127,6 +127,7 @@ DEFAULT_FULL_EVOLUTION_PROMPT = (
 )
 SUPERVISED_FINAL_STATE_MARKER = "SUPERVISED_FINAL_STATE:"
 SUPERVISED_INFEASIBLE_OUTCOME_MARKER = "SUPERVISED_INFEASIBLE_OUTCOME:"
+SUPERVISED_AGENT_JUDGMENT_MARKER = "SUPERVISED_AGENT_JUDGMENT:"
 DEFAULT_DYNAMIC_REPLANNING_FIXTURE_PROMPT = (
     "执行监督进化 dynamic_replanning fixture："
     "场景是用户原本要求安排 10:00 的同步会，但环境中 10:00 已被占用，需要重规划到 10:30 并完成适配后验证。"
@@ -1589,17 +1590,25 @@ def _extract_supervised_fixture_markers(
         combined_lines,
         SUPERVISED_INFEASIBLE_OUTCOME_MARKER,
     )
+    agent_judgment, agent_judgment_error = _extract_supervised_marker_payload(
+        combined_lines,
+        SUPERVISED_AGENT_JUDGMENT_MARKER,
+    )
 
     markers: Dict[str, Any] = {}
     if final_state:
         markers["final_state"] = final_state
     if infeasible_outcome:
         markers["infeasible_outcome"] = infeasible_outcome
+    if agent_judgment:
+        markers["agent_judgment"] = agent_judgment
     errors: Dict[str, str] = {}
     if final_state_error:
         errors["final_state"] = final_state_error
     if infeasible_error:
         errors["infeasible_outcome"] = infeasible_error
+    if agent_judgment_error:
+        errors["agent_judgment"] = agent_judgment_error
     if errors:
         markers["marker_errors"] = errors
     return markers
@@ -1896,6 +1905,8 @@ def infer_evolution_summary(
             summary["final_state"] = supervised_markers["final_state"]
         if "infeasible_outcome" in supervised_markers:
             summary["infeasible_outcome"] = supervised_markers["infeasible_outcome"]
+        if "agent_judgment" in supervised_markers:
+            summary["agent_judgment"] = supervised_markers["agent_judgment"]
         if "marker_errors" in supervised_markers:
             summary["supervised_marker_errors"] = supervised_markers["marker_errors"]
     if safe_modify_summary is not None:

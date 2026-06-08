@@ -43,10 +43,11 @@ class ChatReviewDecisionValidationError(ValueError):
     """Raised when the submitted review decision payload is invalid."""
 
 
-def get_chat_review_queue(*, project_root: Path | None = None) -> dict[str, Any]:
+def get_chat_review_queue(*, project_root: Path | None = None, include_details: bool = False) -> dict[str, Any]:
     root = (project_root or PROJECT_ROOT).resolve()
     paths = resolve_chat_dataset_paths(project_root=root)
     items = list_review_items(paths.review_queue_path)
+    lang = get_web_language()
     pending_count = sum(1 for item in items if _status(item) == "pending")
     positive_count = sum(1 for item in items if _status(item) == "positive")
     negative_count = sum(1 for item in items if _status(item) == "negative")
@@ -79,8 +80,19 @@ def get_chat_review_queue(*, project_root: Path | None = None) -> dict[str, Any]
         "approvedCount": positive_count,
         "rejectedCount": discard_count,
         "lifecycle": chat_case_lifecycle_payload(),
-        "items": [_review_item_payload(item) for item in items],
+        "items": [_review_item_payload(item, include_details=include_details, lang=lang) for item in items],
     }
+
+
+def get_chat_review_candidate(candidate_id: str, *, project_root: Path | None = None) -> dict[str, Any]:
+    root = (project_root or PROJECT_ROOT).resolve()
+    paths = resolve_chat_dataset_paths(project_root=root)
+    item = get_review_item(str(candidate_id or "").strip(), paths.review_queue_path)
+    if item is None:
+        raise ChatReviewCandidateNotFoundError(
+            text_for(get_web_language(), zh="未找到该对话候选。", en="Chat review candidate not found.")
+        )
+    return _review_item_payload(item, include_details=True, lang=get_web_language())
 
 
 def submit_chat_review_decision(
@@ -384,21 +396,23 @@ def _status(item: dict[str, Any]) -> str:
     return normalize_review_status(item.get("status"))
 
 
-def _review_item_payload(item: dict[str, Any]) -> dict[str, Any]:
+def _review_item_payload(item: dict[str, Any], *, include_details: bool = False, lang: str | None = None) -> dict[str, Any]:
+    language = lang or get_web_language()
     segment = item.get("segment") if isinstance(item.get("segment"), dict) else {}
     sample = item.get("structured_sample_preview") if isinstance(item.get("structured_sample_preview"), dict) else {}
     conversation_turns = []
-    for raw_turn in list(segment.get("conversation_turns") or []):
-        if not isinstance(raw_turn, dict):
-            continue
-        conversation_turns.append(
-            {
-                "turnNumber": int(raw_turn.get("turn_number") or 0),
-                "userMessage": str(raw_turn.get("user_message") or "").strip(),
-                "assistantMessage": str(raw_turn.get("assistant_message") or "").strip(),
-                "toolCalls": [str(name).strip() for name in list(raw_turn.get("tool_calls") or []) if str(name).strip()],
-            }
-        )
+    if include_details:
+        for raw_turn in list(segment.get("conversation_turns") or []):
+            if not isinstance(raw_turn, dict):
+                continue
+            conversation_turns.append(
+                {
+                    "turnNumber": int(raw_turn.get("turn_number") or 0),
+                    "userMessage": str(raw_turn.get("user_message") or "").strip(),
+                    "assistantMessage": str(raw_turn.get("assistant_message") or "").strip(),
+                    "toolCalls": [str(name).strip() for name in list(raw_turn.get("tool_calls") or []) if str(name).strip()],
+                }
+            )
     quality_signals = [str(name).strip() for name in list(item.get("quality_signals") or []) if str(name).strip()]
     prompt_preview = str(sample.get("prompt") or "").strip()
     if len(prompt_preview) > PROMPT_PREVIEW_LIMIT:
@@ -416,7 +430,7 @@ def _review_item_payload(item: dict[str, Any]) -> dict[str, Any]:
         "rawExcerptPath": str(item.get("raw_excerpt_path") or "").strip(),
         "reviewerNote": str(item.get("reviewer_note") or "").strip(),
         "reviewedAt": str(item.get("reviewed_at") or "").strip(),
-        "conversationTurns": conversation_turns,
+        "conversationTurns": conversation_turns if include_details else [],
         "structuredSample": {
             "caseId": str(sample.get("case_id") or "").strip(),
             "mode": str(sample.get("mode") or "").strip(),
@@ -429,6 +443,7 @@ def _review_item_payload(item: dict[str, Any]) -> dict[str, Any]:
             item=item,
             conversation_turns=conversation_turns,
             quality_signals=quality_signals,
+            lang=language,
         ),
         "reviewDecision": {
             "reasonCode": str(item.get("reason_code") or "").strip(),
@@ -444,6 +459,7 @@ def _build_review_profile(
     item: dict[str, Any],
     conversation_turns: list[dict[str, Any]],
     quality_signals: list[str],
+    lang: str,
 ) -> dict[str, Any]:
     signal_set = {signal.strip().lower() for signal in quality_signals if signal.strip()}
     turn_count = int(item.get("turn_count") or len(conversation_turns))
@@ -458,54 +474,54 @@ def _build_review_profile(
 
     if has_tool:
         positive_signals.append(
-            text_for(get_web_language(), zh="有真实工具链参与，可学习何时读取、搜索或验证。", en="Uses real tools, so it can teach when to read, search, or verify.")
+            text_for(lang, zh="有真实工具链参与，可学习何时读取、搜索或验证。", en="Uses real tools, so it can teach when to read, search, or verify.")
         )
     if has_analysis:
         positive_signals.append(
-            text_for(get_web_language(), zh="显式展示分析过程，不只是给结论。", en="Shows explicit analysis instead of only dropping a conclusion.")
+            text_for(lang, zh="显式展示分析过程，不只是给结论。", en="Shows explicit analysis instead of only dropping a conclusion.")
         )
     if has_conclusion:
         positive_signals.append(
-            text_for(get_web_language(), zh="能明确收束结论，适合作为完成态示例。", en="Closes with a concrete conclusion, which is useful as a completion example.")
+            text_for(lang, zh="能明确收束结论，适合作为完成态示例。", en="Closes with a concrete conclusion, which is useful as a completion example.")
         )
     if has_next_action:
         positive_signals.append(
-            text_for(get_web_language(), zh="给出了下一步建议，具备可执行性。", en="Includes a next action, which makes it operational.")
+            text_for(lang, zh="给出了下一步建议，具备可执行性。", en="Includes a next action, which makes it operational.")
         )
     if has_delegation:
         positive_signals.append(
-            text_for(get_web_language(), zh="包含 delegation 语境，可沉淀协作经验。", en="Contains delegation context and can preserve collaboration habits.")
+            text_for(lang, zh="包含 delegation 语境，可沉淀协作经验。", en="Contains delegation context and can preserve collaboration habits.")
         )
     if turn_count >= 3:
         positive_signals.append(
-            text_for(get_web_language(), zh="至少包含三轮上下文，能体现多轮承接。", en="Includes at least three turns and captures multi-turn continuity.")
+            text_for(lang, zh="至少包含三轮上下文，能体现多轮承接。", en="Includes at least three turns and captures multi-turn continuity.")
         )
 
     if not has_tool:
         negative_signals.append(
-            text_for(get_web_language(), zh="没有真实工具证据，容易把猜测包装成结论。", en="There is no tool evidence, so it may teach guessing instead of grounded work.")
+            text_for(lang, zh="没有真实工具证据，容易把猜测包装成结论。", en="There is no tool evidence, so it may teach guessing instead of grounded work.")
         )
     if not has_analysis:
         negative_signals.append(
-            text_for(get_web_language(), zh="缺少清晰分析链路，容易让 agent 学到跳步回答。", en="The analysis chain is thin, so it may teach the agent to skip reasoning.")
+            text_for(lang, zh="缺少清晰分析链路，容易让 agent 学到跳步回答。", en="The analysis chain is thin, so it may teach the agent to skip reasoning.")
         )
     if not has_conclusion and not has_next_action:
         negative_signals.append(
-            text_for(get_web_language(), zh="没有收口或下一步，学习价值偏弱。", en="There is no closure or next action, so the learning value is weak.")
+            text_for(lang, zh="没有收口或下一步，学习价值偏弱。", en="There is no closure or next action, so the learning value is weak.")
         )
     if turn_count <= 2:
         negative_signals.append(
-            text_for(get_web_language(), zh="轮次偏短，更像片段而不是稳定工作流。", en="The excerpt is very short, so it behaves more like a fragment than a stable workflow.")
+            text_for(lang, zh="轮次偏短，更像片段而不是稳定工作流。", en="The excerpt is very short, so it behaves more like a fragment than a stable workflow.")
         )
 
     suggestion = "discard"
     suggestion_reason = text_for(
-        get_web_language(),
+        lang,
         zh="这条样本更适合先丢弃，因为有效工作信号偏弱。",
         en="This sample is better discarded first because the working signals are too weak.",
     )
     learning_focus = text_for(
-        get_web_language(),
+        lang,
         zh="重点看它为什么不足以成为可复用经验。",
         en="Focus on why it is not strong enough to become reusable experience.",
     )
@@ -513,24 +529,24 @@ def _build_review_profile(
     if len(positive_signals) >= 4 and len(negative_signals) <= 2:
         suggestion = "positive"
         suggestion_reason = text_for(
-            get_web_language(),
+            lang,
             zh="这条样本具备较完整的任务推进、分析与收束信号，适合作为正例。",
             en="This sample carries a complete task progression, analysis, and closure signal, so it fits the positive dataset.",
         )
         learning_focus = text_for(
-            get_web_language(),
+            lang,
             zh="重点学习它如何在多轮上下文里推进任务并留下可执行下一步。",
             en="Learn how it advances a task through multi-turn context and leaves an actionable next step.",
         )
     elif turn_count >= 3 and len(negative_signals) >= 2:
         suggestion = "negative"
         suggestion_reason = text_for(
-            get_web_language(),
+            lang,
             zh="这条样本有明确上下文，但同时暴露出可命名的坏模式，适合作为负例。",
             en="This sample has enough context but also exposes named bad patterns, so it fits the negative dataset.",
         )
         learning_focus = text_for(
-            get_web_language(),
+            lang,
             zh="重点把坏模式翻译成“别这样做”的经验，而不是简单丢弃。",
             en="Turn the bad pattern into a concrete 'do not do this' lesson instead of merely discarding it.",
         )
@@ -546,7 +562,7 @@ def _build_review_profile(
         "taskClarity": {
             "level": "high" if turn_count >= 3 else "medium" if turn_count == 2 else "low",
             "note": text_for(
-                get_web_language(),
+                lang,
                 zh="轮次越完整，越能看出任务目标是否稳定。",
                 en="More turns make it easier to judge whether the task stays stable.",
             ),
@@ -554,7 +570,7 @@ def _build_review_profile(
         "goalStability": {
             "level": "high" if has_conclusion or has_next_action else "medium" if has_analysis else "low",
             "note": text_for(
-                get_web_language(),
+                lang,
                 zh="看用户目标是否一路延续到结论或下一步。",
                 en="Check whether the user goal survives through to the conclusion or next step.",
             ),
@@ -562,7 +578,7 @@ def _build_review_profile(
         "assistantLearningValue": {
             "level": "high" if len(positive_signals) >= 4 else "medium" if len(positive_signals) >= 2 else "low",
             "note": text_for(
-                get_web_language(),
+                lang,
                 zh="这项衡量 assistant 响应本身是否值得重复学习。",
                 en="This measures whether the assistant response is worth repeating in training.",
             ),
@@ -570,7 +586,7 @@ def _build_review_profile(
         "antiPatternRisk": {
             "level": "high" if len(negative_signals) >= 3 else "medium" if len(negative_signals) >= 1 else "low",
             "note": text_for(
-                get_web_language(),
+                lang,
                 zh="这项衡量样本是否会把坏习惯带进训练集。",
                 en="This measures how likely the sample is to inject bad habits into the dataset.",
             ),
@@ -587,6 +603,7 @@ __all__ = [
     "ChatReviewDecisionValidationError",
     "approve_chat_review_candidate",
     "bulk_discard_chat_review_candidates",
+    "get_chat_review_candidate",
     "get_chat_review_queue",
     "reject_chat_review_candidate",
     "submit_chat_review_decision",
