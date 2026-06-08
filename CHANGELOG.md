@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.4 - 2026-06-08
+
+- Marked managed Workbench sessions ready before attaching the desktop supervisor so Launcher restart/open commands finish after the backend and window are live.
+- Started supervisor attachment as a non-blocking hidden background step with runtime-scene evidence for ready, attach-started, and attach-failed paths.
+- Added launcher regression coverage for the ready-before-supervisor lifecycle order and preserved full Launcher script test coverage.
+
 ## 1.0.3 - 2026-06-08
 
 - Prevented the PowerShell Launcher frontend dependency and build paths from invoking npm `.cmd` wrappers, avoiding transient Windows cmd flashes during startup.
