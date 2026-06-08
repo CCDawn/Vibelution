@@ -17,8 +17,9 @@ describe("SupervisedReviewRoute layout contract", () => {
   });
 
   it("keeps review empty states compact enough for the first viewport", () => {
-    expect(stylesSource).toContain("min-height: 118px");
-    expect(stylesSource).toContain("padding: 8px 12px 12px");
+    expect(stylesSource).toContain("min-height: 82px");
+    expect(stylesSource).toContain("padding: 9px 11px");
+    expect(stylesSource).not.toContain("min-height: 118px");
   });
 
   it("hosts candidate worktree review inside the sample review workspace", () => {
