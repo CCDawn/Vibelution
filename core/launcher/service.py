@@ -545,17 +545,18 @@ def _observed_workbench() -> dict[str, Any]:
 def _workbench_payload(*, runtime_state: dict[str, Any], observed_workbench: dict[str, Any]) -> dict[str, Any]:
     state_workbench = runtime_state.get("workbench") if isinstance(runtime_state.get("workbench"), dict) else {}
     observed = observed_workbench if isinstance(observed_workbench, dict) else {}
+    has_observation = bool(observed)
+
+    def observed_or_state(key: str, default: Any = None) -> Any:
+        if has_observation and key in observed:
+            return observed.get(key)
+        return state_workbench.get(key, default)
+
     desired_state = str(state_workbench.get("desiredState") or "closed").strip() or "closed"
-    observed_state = str(observed.get("observedState") or state_workbench.get("observedState") or "closed").strip() or "closed"
+    observed_state = str(observed_or_state("observedState", "closed") or "closed").strip() or "closed"
     phase = str(state_workbench.get("phase") or "steady").strip() or "steady"
-    if observed_state == desired_state and phase != "failed":
-        phase = "steady"
-    elif desired_state == "open" and observed_state != "open" and phase != "failed":
-        phase = "opening"
-    elif desired_state == "closed" and observed_state != "closed" and phase != "failed":
-        phase = "closing"
-    raw_session_role = str(observed.get("sessionRole") or state_workbench.get("sessionRole") or "workbench").strip() or "workbench"
-    project_window_alive = bool(observed.get("browserWindowAlive"))
+    raw_session_role = str(observed_or_state("sessionRole", "workbench") or "workbench").strip() or "workbench"
+    project_window_alive = bool(observed_or_state("browserWindowAlive", False))
     session_role = "workbench" if raw_session_role == "launcher_control_surface" and project_window_alive else raw_session_role
     if raw_session_role == "launcher_control_surface":
         if project_window_alive:
@@ -563,10 +564,31 @@ def _workbench_payload(*, runtime_state: dict[str, Any], observed_workbench: dic
             desired_state = "open"
         elif desired_state == "open" and phase not in {"opening", "failed"}:
             desired_state = "closed"
+    manager_running = bool(runtime_state.get("daemonRunning"))
+    runtime_command = runtime_state.get("command") if isinstance(runtime_state.get("command"), dict) else {}
+    active_command_id = str(runtime_command.get("activeCommandId") or "").strip()
+    stale_open_state_reconciled = False
+    if (
+        has_observation
+        and not manager_running
+        and not active_command_id
+        and observed_state == "closed"
+        and desired_state == "open"
+        and phase != "failed"
+    ):
+        desired_state = "closed"
+        phase = "steady"
+        stale_open_state_reconciled = True
+    if observed_state == desired_state and phase != "failed":
+        phase = "steady"
+    elif desired_state == "open" and observed_state != "open" and phase != "failed":
+        phase = "opening"
+    elif desired_state == "closed" and observed_state != "closed" and phase != "failed":
+        phase = "closing"
     failure_message = str(state_workbench.get("failureMessage") or "").strip()
-    frontend_orphaned = bool(observed.get("frontendOrphaned") or state_workbench.get("frontendOrphaned"))
+    frontend_orphaned = bool(observed_or_state("frontendOrphaned", False))
     lifecycle_consistency = str(
-        observed.get("lifecycleConsistency") or state_workbench.get("lifecycleConsistency") or "consistent"
+        observed_or_state("lifecycleConsistency", "consistent") or "consistent"
     ).strip() or "consistent"
     if frontend_orphaned:
         status_line = failure_message or "前端窗口仍在，但后端服务已经离线。"
@@ -588,26 +610,27 @@ def _workbench_payload(*, runtime_state: dict[str, Any], observed_workbench: dic
         "observedState": observed_state,
         "sessionRole": session_role,
         "phase": phase,
-        "backendPid": int(observed.get("backendPid") or state_workbench.get("backendPid") or 0),
-        "browserWindowPid": int(observed.get("browserWindowPid") or state_workbench.get("browserWindowPid") or 0),
-        "backendAlive": bool(observed.get("backendAlive")),
-        "backendHealthy": bool(observed.get("backendHealthy")),
-        "backendObserved": bool(observed.get("backendObserved")),
-        "backendPort": int(observed.get("backendPort") or state_workbench.get("backendPort") or 0),
-        "backendPortListening": bool(observed.get("backendPortListening") or state_workbench.get("backendPortListening")),
-        "backendPortOwnerPid": int(observed.get("backendPortOwnerPid") or 0),
-        "backendPortConflict": bool(observed.get("backendPortConflict")),
-        "browserWindowAlive": bool(observed.get("browserWindowAlive")),
-        "browserManaged": bool(observed.get("browserManaged", state_workbench.get("browserManaged", True))),
-        "backendMissing": bool(observed.get("backendMissing")),
+        "backendPid": int(observed_or_state("backendPid", 0) or 0),
+        "browserWindowPid": int(observed_or_state("browserWindowPid", 0) or 0),
+        "backendAlive": bool(observed_or_state("backendAlive", False)),
+        "backendHealthy": bool(observed_or_state("backendHealthy", False)),
+        "backendObserved": bool(observed_or_state("backendObserved", False)),
+        "backendPort": int(observed_or_state("backendPort", 0) or 0),
+        "backendPortListening": bool(observed_or_state("backendPortListening", False)),
+        "backendPortOwnerPid": int(observed_or_state("backendPortOwnerPid", 0) or 0),
+        "backendPortConflict": bool(observed_or_state("backendPortConflict", False)),
+        "browserWindowAlive": bool(observed_or_state("browserWindowAlive", False)),
+        "browserManaged": bool(observed_or_state("browserManaged", True)),
+        "backendMissing": bool(observed_or_state("backendMissing", False)),
         "frontendOrphaned": frontend_orphaned,
         "lifecycleConsistency": lifecycle_consistency,
-        "url": str(observed.get("url") or state_workbench.get("url") or "").strip(),
+        "url": str(observed_or_state("url", "") or "").strip(),
         "lastReason": str(state_workbench.get("lastReason") or "").strip(),
         "lastSource": str(state_workbench.get("lastSource") or "").strip(),
         "lastTransitionAt": str(state_workbench.get("lastTransitionAt") or "").strip(),
         "statusLine": status_line,
         "failureMessage": failure_message,
+        "staleRuntimeStateReconciled": stale_open_state_reconciled,
     }
 
 
