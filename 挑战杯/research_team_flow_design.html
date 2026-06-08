@@ -54,7 +54,7 @@
       <section id="flow-board" class="section">
         <div class="section-head">
           <h2>流程图结构</h2>
-          <p class="hint">这里只显示节点名和转移方向。点击节点进入独立计划页；桌面端可缩放拖动，移动端显示纵向流程索引。</p>
+          <p class="hint">默认用 100% 阅读模式，节点更大、泳道更清晰；横向拖动画板查看全链路，也可点击“适配全图”快速总览。</p>
         </div>
         <div class="workbench-grid">
           <div class="flow-board-shell">
@@ -70,7 +70,7 @@
   <div class="flow-board" data-draggable-board aria-label="可拖动科研流程画板">
     <div class="flow-stage" data-flow-stage>
     <div class="flow-graph" data-flow-graph aria-label="科研流程图结构">
-    <svg class="graph-svg" viewBox="0 0 1080 410" preserveAspectRatio="none" aria-hidden="true">
+    <svg class="graph-svg" viewBox="0 0 1640 560" preserveAspectRatio="none" aria-hidden="true">
       <defs>
         <marker id="arrow-main" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
           <path d="M 0 0 L 10 5 L 0 10 z" fill="rgba(21, 83, 72, 0.72)"></path>
@@ -79,72 +79,73 @@
           <path d="M 0 0 L 10 5 L 0 10 z" fill="rgba(185, 129, 34, 0.8)"></path>
         </marker>
       </defs>
-      <path marker-end="url(#arrow-main)" d="M 148 92 H 220"></path>
-      <path marker-end="url(#arrow-main)" d="M 330 92 H 402"></path>
-      <path marker-end="url(#arrow-main)" d="M 512 92 H 584"></path>
-      <path marker-end="url(#arrow-main)" d="M 694 92 H 766"></path>
-      <path marker-end="url(#arrow-main)" d="M 876 92 H 945 V 183 H 882"></path>
-      <path marker-end="url(#arrow-main)" d="M 772 188 H 694"></path>
-      <path marker-end="url(#arrow-main)" d="M 584 188 H 512"></path>
-      <path marker-end="url(#arrow-main)" d="M 402 188 H 330"></path>
-      <path marker-end="url(#arrow-main)" d="M 238 212 V 295 H 310"></path>
-      <path marker-end="url(#arrow-main)" d="M 420 314 H 492"></path>
-      <path marker-end="url(#arrow-main)" d="M 602 314 H 674"></path>
-      <path marker-end="url(#arrow-main)" d="M 784 336 V 368"></path>
-      <path class="dashed" marker-end="url(#arrow-draft)" d="M 876 314 H 956 V 120 H 876"></path>
+      <path marker-end="url(#arrow-main)" d="M 265 104 H 372"></path>
+      <path marker-end="url(#arrow-main)" d="M 602 104 H 709"></path>
+      <path marker-end="url(#arrow-main)" d="M 939 104 H 1046"></path>
+      <path marker-end="url(#arrow-main)" d="M 1276 104 H 1374 V 250 H 1276"></path>
+      <path marker-end="url(#arrow-main)" d="M 1046 256 H 939"></path>
+      <path marker-end="url(#arrow-main)" d="M 709 256 H 602"></path>
+      <path marker-end="url(#arrow-main)" d="M 372 256 H 300 V 384 H 372"></path>
+      <path marker-end="url(#arrow-main)" d="M 602 414 H 709"></path>
+      <path marker-end="url(#arrow-main)" d="M 939 414 H 1046"></path>
+      <path marker-end="url(#arrow-main)" d="M 1161 456 V 499"></path>
+      <path class="dashed" marker-end="url(#arrow-draft)" d="M 1276 414 H 1458 V 146 H 1276"></path>
     </svg>
+    <span class="graph-lane-band top-lane"></span>
+    <span class="graph-lane-band mid-lane"></span>
+    <span class="graph-lane-band bottom-lane"></span>
     <span class="graph-lane top-lane">资料到假设</span>
     <span class="graph-lane mid-lane">治理与图谱</span>
     <span class="graph-lane bottom-lane">实验与交付</span>
-    <a class="graph-node active" style="--x:82px; --y:92px;" href="research_flow_pages/01-source-workspace.html">
+    <a class="graph-node active" style="--x:150px; --y:104px;" href="research_flow_pages/01-source-workspace.html">
     <span class="graph-id">01</span>
     <h3>资料进入工作区</h3>
   </a>
-    <a class="graph-node active" style="--x:275px; --y:92px;" href="research_flow_pages/02-paper-note.html">
+    <a class="graph-node active" style="--x:487px; --y:104px;" href="research_flow_pages/02-paper-note.html">
     <span class="graph-id">02</span>
     <h3>生成 paper_note</h3>
   </a>
-    <a class="graph-node done" style="--x:457px; --y:92px;" href="research_flow_pages/03-neuro-mechanism.html">
+    <a class="graph-node done" style="--x:824px; --y:104px;" href="research_flow_pages/03-neuro-mechanism.html">
     <span class="graph-id">03</span>
     <h3>提取 neuro_mechanism</h3>
   </a>
-    <a class="graph-node active" style="--x:639px; --y:92px;" href="research_flow_pages/04-mechanism-mapping.html">
+    <a class="graph-node active" style="--x:1161px; --y:104px;" href="research_flow_pages/04-mechanism-mapping.html">
     <span class="graph-id">04</span>
     <h3>机制到计算抽象</h3>
   </a>
-    <a class="graph-node active" style="--x:821px; --y:92px;" href="research_flow_pages/05-algorithm-hypothesis.html">
+    <a class="graph-node active" style="--x:1498px; --y:104px;" href="research_flow_pages/05-algorithm-hypothesis.html">
     <span class="graph-id">05</span>
     <h3>生成 algorithm_hypothesis</h3>
   </a>
-    <a class="graph-node done" style="--x:821px; --y:188px;" href="research_flow_pages/06-research-review.html">
+    <a class="graph-node done" style="--x:1161px; --y:256px;" href="research_flow_pages/06-research-review.html">
     <span class="graph-id">06</span>
     <h3>科研审稿</h3>
   </a>
-    <a class="graph-node active" style="--x:639px; --y:188px;" href="research_flow_pages/07-steward-ingestion.html">
+    <a class="graph-node active" style="--x:824px; --y:256px;" href="research_flow_pages/07-steward-ingestion.html">
     <span class="graph-id">07</span>
     <h3>知识治理入库</h3>
   </a>
-    <a class="graph-node done" style="--x:457px; --y:188px;" href="research_flow_pages/08-candidate-graph.html">
+    <a class="graph-node done" style="--x:487px; --y:256px;" href="research_flow_pages/08-candidate-graph.html">
     <span class="graph-id">08</span>
     <h3>候选图谱预览</h3>
   </a>
-    <a class="graph-node done" style="--x:275px; --y:188px;" href="research_flow_pages/09-official-graph.html">
+    <a class="graph-node done" style="--x:150px; --y:256px;" href="research_flow_pages/09-official-graph.html">
     <span class="graph-id">09</span>
     <h3>正式知识图谱同步</h3>
   </a>
-    <a class="graph-node pending" style="--x:365px; --y:314px;" href="research_flow_pages/10-experiment-loop.html">
+    <a class="graph-node pending" style="--x:487px; --y:414px;" href="research_flow_pages/10-experiment-loop.html">
     <span class="graph-id">10</span>
     <h3>实验验证闭环</h3>
   </a>
-    <a class="graph-node pending" style="--x:547px; --y:314px;" href="research_flow_pages/11-iteration-versioning.html">
+    <a class="graph-node pending" style="--x:824px; --y:414px;" href="research_flow_pages/11-iteration-versioning.html">
     <span class="graph-id">11</span>
     <h3>持续迭代与版本化</h3>
   </a>
-    <a class="graph-node pending" style="--x:729px; --y:314px;" href="research_flow_pages/12-challenge-cup-delivery.html">
+    <a class="graph-node pending" style="--x:1161px; --y:414px;" href="research_flow_pages/12-challenge-cup-delivery.html">
     <span class="graph-id">12</span>
     <h3>挑战杯交付计划</h3>
   </a>
-    <a class="graph-node done maintenance" style="--x:729px; --y:386px;" href="research_flow_pages/13-flow-html-maintenance.html">
+    <a class="graph-node done maintenance" style="--x:1161px; --y:528px;" href="research_flow_pages/13-flow-html-maintenance.html">
     <span class="graph-id">13</span>
     <h3>流程 HTML 维护门禁</h3>
   </a>
@@ -1853,10 +1854,10 @@
         const graph = document.querySelector("[data-flow-graph]");
         const readout = document.querySelector("[data-zoom-readout]");
         if (!board || !stage || !graph || !readout) return;
-        const naturalWidth = 1080;
-        const naturalHeight = 410;
-        const minZoom = 0.48;
-        const maxZoom = 1.8;
+        const naturalWidth = 1640;
+        const naturalHeight = 560;
+        const minZoom = 0.45;
+        const maxZoom = 1.55;
         let zoom = 1;
         const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
         const renderZoom = () => {
@@ -1897,7 +1898,9 @@
           const anchorY = event.clientY - rect.top;
           setZoom(zoom + (event.deltaY < 0 ? 0.08 : -0.08), anchorX, anchorY);
         }, { passive: false });
-        fitAll();
+        renderZoom();
+        board.scrollLeft = 0;
+        board.scrollTop = 0;
         let dragging = false;
         let startX = 0;
         let startY = 0;
