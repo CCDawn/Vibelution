@@ -13358,9 +13358,9 @@ def test_config_workspace_draft_model_auto_generates_custom_relay_model_id(monke
 
     assert response.status_code == 200, response.json()
     model_library = response.json()["publicConfig"]["llm"]["model_library"]
-    assert "gpt_5_5_gpt_5_5" in model_library
+    assert "gpt_5_5" in model_library
     assert "custom_openai_compatible_relay" not in model_library
-    assert model_library["gpt_5_5_gpt_5_5"]["api_key_env"] == "VIBELUTION_LLM_MODEL_GPT_5_5_GPT_5_5_API_KEY"
+    assert model_library["gpt_5_5"]["api_key_env"] == "VIBELUTION_LLM_MODEL_GPT_5_5_API_KEY"
 
 
 def test_config_workspace_draft_model_rejects_custom_relay_localhost(monkeypatch):

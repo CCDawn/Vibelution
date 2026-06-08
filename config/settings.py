@@ -105,12 +105,34 @@ PROFILE_REFERENCE_OVERRIDE_FIELDS = (
 UNCONFIGURED_MODEL_REF = "__unconfigured__"
 
 
+def _compact_repeated_token_halves(token: str) -> str:
+    parts = [part for part in str(token or "").split("_") if part]
+    for size in range(len(parts) // 2, 0, -1):
+        compacted: list[str] = []
+        index = 0
+        changed = False
+        while index < len(parts):
+            chunk = parts[index : index + size]
+            next_chunk = parts[index + size : index + (size * 2)]
+            if len(chunk) == size and chunk == next_chunk and (size > 1 or not chunk[0].isdigit()):
+                compacted.extend(chunk)
+                index += size * 2
+                changed = True
+            else:
+                compacted.append(parts[index])
+                index += 1
+        if changed:
+            return "_".join(compacted)
+    return "_".join(parts)
+
+
 def _default_model_api_key_env(model_id: str) -> str:
     raw = str(model_id or "")
     token = "".join(
         char if ("A" <= char <= "Z" or "0" <= char <= "9") else "_"
         for char in raw.upper()
     ).strip("_")
+    token = _compact_repeated_token_halves(token)
     if not token and raw:
         import hashlib
 

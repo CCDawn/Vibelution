@@ -442,19 +442,44 @@ export function selectModelScenarioPresetId(
 }
 
 export function defaultModelApiKeyEnv(modelId: string): string {
-  const token = modelId
+  const token = compactRepeatedTokenHalves(modelId
     .toUpperCase()
     .replace(/[^A-Z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "");
+    .replace(/^_+|_+$/g, ""));
   return token ? `VIBELUTION_LLM_MODEL_${token}_API_KEY` : "VIBELUTION_LLM_MODEL_API_KEY";
+}
+
+function compactRepeatedTokenHalves(token: string): string {
+  const parts = token.split("_").filter(Boolean);
+  for (let size = Math.floor(parts.length / 2); size > 0; size -= 1) {
+    const compacted: string[] = [];
+    let index = 0;
+    let changed = false;
+    while (index < parts.length) {
+      const chunk = parts.slice(index, index + size);
+      const nextChunk = parts.slice(index + size, index + size * 2);
+      if (chunk.length === size && chunk.every((part, offset) => part === nextChunk[offset]) && (size > 1 || !/^\d+$/.test(chunk[0]))) {
+        compacted.push(...chunk);
+        index += size * 2;
+        changed = true;
+      } else {
+        compacted.push(parts[index]);
+        index += 1;
+      }
+    }
+    if (changed) {
+      return compacted.join("_");
+    }
+  }
+  return parts.join("_");
 }
 
 export function modelLibraryIdFromParts(label: string, model: string): string {
   const raw = `${label}-${model}`.trim();
-  const token = raw
+  const token = compactRepeatedTokenHalves(raw
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "");
+    .replace(/^_+|_+$/g, ""));
   return token || "custom_model";
 }
 
