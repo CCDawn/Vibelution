@@ -1963,6 +1963,92 @@ def test_automatic_prompt_cache_logs_design_even_when_payload_strips_cache_contr
     assert fields["cachedInputTokens"] == 40
 
 
+def test_invoke_logs_prompt_cache_order_with_history_before_volatile_context(monkeypatch):
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "relay",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://ai-pixel.online",
+            "llm.providers.default.compat_mode": "openai",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "gpt-5.5",
+            "llm.profiles.primary.transport": "responses",
+            "llm.profiles.primary.prompt_cache.mode": "automatic",
+        }
+    )
+    recorded = []
+
+    def backend(_payload):
+        return {
+            "choices": [{"message": {"role": "assistant", "content": "ok"}}],
+            "usage": {"input_tokens": 100, "output_tokens": 5},
+        }
+
+    monkeypatch.setattr("core.llm.client._record_llm_scene_event", lambda *args, **kwargs: recorded.append((args, kwargs)))
+
+    client = LLMClient(config=config, backend=backend)
+    client.invoke(
+        [
+            {"role": "system", "content": "stable-system"},
+            {"role": "user", "content": "history-user"},
+            {"role": "assistant", "content": "history-assistant"},
+            {"role": "system", "content": "## Agent Runtime Context\nvolatile"},
+            {"role": "user", "content": "current-user"},
+        ]
+    )
+
+    fields = next(item for item in recorded if item[0][1] == "llm.invoke.succeeded")[1]["fields"]
+    diagnostics = fields["promptCacheOrderDiagnostics"]
+    assert diagnostics["firstVolatileContextIndex"] == 3
+    assert diagnostics["lastUserIndex"] == 4
+    assert diagnostics["stableHistoryBeforeVolatileChars"] == len("history-user") + len("history-assistant")
+    assert diagnostics["volatileContextBeforeHistory"] is False
+    assert fields["messageOrderProfile"][3]["role"] == "user"
+    assert fields["messageOrderProfile"][3]["volatileContext"] is True
+
+
+def test_invoke_logs_prompt_cache_order_regression_when_volatile_precedes_history(monkeypatch):
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "relay",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://ai-pixel.online",
+            "llm.providers.default.compat_mode": "openai",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "gpt-5.5",
+            "llm.profiles.primary.transport": "responses",
+            "llm.profiles.primary.prompt_cache.mode": "automatic",
+        }
+    )
+    recorded = []
+
+    def backend(_payload):
+        return {
+            "choices": [{"message": {"role": "assistant", "content": "ok"}}],
+            "usage": {"input_tokens": 100, "output_tokens": 5},
+        }
+
+    monkeypatch.setattr("core.llm.client._record_llm_scene_event", lambda *args, **kwargs: recorded.append((args, kwargs)))
+
+    client = LLMClient(config=config, backend=backend)
+    client.invoke(
+        [
+            {"role": "system", "content": "stable-system"},
+            {"role": "system", "content": "## Agent Runtime Context\nvolatile"},
+            {"role": "user", "content": "history-user"},
+            {"role": "assistant", "content": "history-assistant"},
+            {"role": "user", "content": "current-user"},
+        ]
+    )
+
+    fields = next(item for item in recorded if item[0][1] == "llm.invoke.succeeded")[1]["fields"]
+    diagnostics = fields["promptCacheOrderDiagnostics"]
+    assert diagnostics["firstVolatileContextIndex"] == 1
+    assert diagnostics["lastUserIndex"] == 4
+    assert diagnostics["volatileContextBeforeHistoryChars"] == len("## Agent Runtime Context\nvolatile")
+    assert diagnostics["volatileContextBeforeHistory"] is True
+
+
 def test_openai_compatible_payload_preserves_image_blocks_for_chat_completions():
     config = make_config(
         **{

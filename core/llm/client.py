@@ -339,6 +339,79 @@ def _safe_message_role_summary(messages: List[Any]) -> Dict[str, Any]:
     }
 
 
+def _message_role_and_content(message: Any) -> tuple[str, Any]:
+    def normalize_role(value: str) -> str:
+        role = str(value or "user").strip().lower() or "user"
+        return "user" if role == "human" else role
+
+    if isinstance(message, SystemMessage):
+        return "system", getattr(message, "content", None)
+    if isinstance(message, ToolMessage):
+        return "tool", getattr(message, "content", None)
+    if isinstance(message, AIMessage):
+        return "assistant", getattr(message, "content", None)
+    if isinstance(message, dict):
+        return normalize_role(str(message.get("role") or "user")), message.get("content")
+    if isinstance(message, BaseMessage):
+        return normalize_role(str(getattr(message, "type", "") or "user")), getattr(message, "content", None)
+    return "user", str(message or "")
+
+
+def _is_volatile_context_content(text: str) -> bool:
+    normalized = str(text or "").strip()
+    return normalized.startswith(
+        (
+            "## Agent Runtime Context",
+            "## Runtime Context",
+            "## Recent Operator Guidance",
+            "## Slash Skill Context",
+        )
+    )
+
+
+def _safe_message_order_cache_summary(messages: List[Any]) -> Dict[str, Any]:
+    entries: List[Dict[str, Any]] = []
+    first_volatile_index = -1
+    last_user_index = -1
+    stable_history_chars_before_volatile = 0
+    volatile_chars_before_history = 0
+    seen_history = False
+    for index, message in enumerate(list(messages or [])):
+        role, content = _message_role_and_content(message)
+        text = extract_text_content(content)
+        chars = len(text)
+        volatile = _is_volatile_context_content(text)
+        if role == "user":
+            last_user_index = index
+        is_history = role in {"user", "assistant", "tool"} and not volatile
+        if index > 0 and is_history:
+            seen_history = True
+        if index > 0 and first_volatile_index < 0 and is_history:
+            stable_history_chars_before_volatile += chars
+        if volatile and not seen_history:
+            volatile_chars_before_history += chars
+        if volatile and first_volatile_index < 0:
+            first_volatile_index = index
+        entries.append(
+            {
+                "index": index,
+                "role": role,
+                "chars": chars,
+                "volatileContext": volatile,
+            }
+        )
+    return {
+        "messageOrderProfile": entries[:48],
+        "promptCacheOrderDiagnostics": {
+            "firstVolatileContextIndex": first_volatile_index,
+            "lastUserIndex": last_user_index,
+            "stableHistoryBeforeVolatileChars": stable_history_chars_before_volatile,
+            "volatileContextBeforeHistoryChars": volatile_chars_before_history,
+            "volatileContextBeforeHistory": bool(volatile_chars_before_history > 0),
+        },
+    }
+
+
 def _safe_capability_source_summary(resolved_spec: Any) -> Dict[str, Any]:
     details = getattr(resolved_spec, "provider_details", None)
     if not isinstance(details, dict):
@@ -969,6 +1042,7 @@ class LLMClient:
         start = time.time()
         payload = self._build_payload(messages, tools=tools, stream=False)
         message_role_summary = _safe_message_role_summary(payload.get("messages") or messages)
+        message_order_summary = _safe_message_order_cache_summary(payload.get("messages") or messages)
         route_summary = _safe_payload_route_summary(payload, self.profile, self.provider)
         payload_shape_summary = _safe_payload_shape_summary(payload)
         prompt_cache_design_summary = _safe_prompt_cache_design_summary(
@@ -988,6 +1062,7 @@ class LLMClient:
             metadata={
                 **(metadata or {}),
                 **message_role_summary,
+                **message_order_summary,
                 **route_summary,
                 **payload_shape_summary,
                 **prompt_cache_design_summary,
@@ -1022,6 +1097,7 @@ class LLMClient:
                 "toolCallCount": len(tool_calls),
                 **route_summary,
                 **message_role_summary,
+                **message_order_summary,
                 **payload_shape_summary,
                 **prompt_cache_design_summary,
                 **prompt_cache_payload_summary,
@@ -1378,6 +1454,7 @@ class LLMClient:
         message_count = len(messages or [])
         tool_count = len(tools or self.bound_tools or [])
         message_role_summary = _safe_message_role_summary(payload.get("messages") or messages)
+        message_order_summary = _safe_message_order_cache_summary(payload.get("messages") or messages)
         route_summary = _safe_payload_route_summary(payload, self.profile, self.provider)
         payload_shape_summary = _safe_payload_shape_summary(payload)
         prompt_cache_design_summary = _safe_prompt_cache_design_summary(
@@ -1390,6 +1467,7 @@ class LLMClient:
         capability_source_summary = _safe_capability_source_summary(self._resolved_spec)
         event_metadata = {
             **message_role_summary,
+            **message_order_summary,
             **route_summary,
             **payload_shape_summary,
             **prompt_cache_design_summary,

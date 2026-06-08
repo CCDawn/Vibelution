@@ -276,6 +276,32 @@ class TurnOutcomeController:
         ], False
 
     @staticmethod
+    def insert_volatile_context_before_current_user(*, messages: list, context_messages: list) -> list:
+        """Keep stable chat history before volatile runtime context.
+
+        Chat turns append the current user message last.  Inserting per-turn
+        runtime/guidance/skill context immediately before that current user
+        keeps the older history as part of the stable provider-cache prefix
+        while still making volatile context available to the current turn.
+        """
+
+        if not context_messages:
+            return list(messages or [])
+        normalized = list(messages or [])
+        insert_at = 1 if normalized else 0
+        for index in range(len(normalized) - 1, -1, -1):
+            item = normalized[index]
+            role = ""
+            if isinstance(item, dict):
+                role = str(item.get("role") or "").strip().lower()
+            else:
+                role = str(getattr(item, "type", "") or "").strip().lower()
+            if role in {"user", "human"}:
+                insert_at = index
+                break
+        return normalized[:insert_at] + list(context_messages or []) + normalized[insert_at:]
+
+    @staticmethod
     def finish_turn_message_carryover(
         *,
         messages: list,
