@@ -660,6 +660,40 @@ def test_memory_usage_contract_aligns_team_agent_and_evolution_boundaries(tmp_pa
     assert items["summary"]["itemCount"] == 0
 
 
+def test_memory_usage_contract_reuses_recent_aggregate(tmp_path, monkeypatch):
+    monkeypatch.setattr(memory_service, "PROJECT_ROOT", tmp_path)
+    memory_service._clear_memory_usage_contract_cache()
+    calls = {"overview": 0, "health": 0, "plan": 0}
+
+    def fake_overview(*, internal=False):
+        calls["overview"] += 1
+        return {"summary": {"knowledgeBaseCount": 1, "pendingProposalCount": 2}}
+
+    def fake_health(*, internal=False):
+        calls["health"] += 1
+        return {"summary": {"knowledgeBaseCount": 1, "findingCount": 0}}
+
+    def fake_plan(*, limit=8, internal=False):
+        calls["plan"] += 1
+        return {
+            "summary": {"actionCount": 3},
+            "operatingBoundary": {"formalKnowledgeRequiresReviewer": True},
+        }
+
+    monkeypatch.setattr(team_knowledge_service, "list_knowledge_overview", fake_overview)
+    monkeypatch.setattr(team_knowledge_service, "get_knowledge_operations_health", fake_health)
+    monkeypatch.setattr(team_knowledge_service, "get_knowledge_governance_plan", fake_plan)
+
+    first = memory_service.get_memory_usage_contract()
+    first["currentState"]["knowledge"]["knowledgeBaseCount"] = 999
+    second = memory_service.get_memory_usage_contract()
+
+    assert calls == {"overview": 1, "health": 1, "plan": 1}
+    assert second["currentState"]["knowledge"]["knowledgeBaseCount"] == 1
+    assert second["currentState"]["knowledge"]["pendingProposalCount"] == 2
+    assert second["currentState"]["operatingBoundary"]["formalKnowledgeRequiresReviewer"] is True
+
+
 def test_git_entity_change_snapshot_uses_insert_order_for_append_only_table(tmp_path):
     db_path = tmp_path / "agent_brain.db"
     with sqlite3.connect(db_path) as conn:
