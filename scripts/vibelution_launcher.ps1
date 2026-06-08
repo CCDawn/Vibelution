@@ -5524,6 +5524,128 @@ try {
     return $proc.Id
 }
 
+function Start-SupervisorDetached {
+    param([string]$ManagedSessionId)
+
+    $supervisorStdoutLog = ""
+    $supervisorStderrLog = ""
+    try {
+        $powershellExe = Join-Path $PSHOME "powershell.exe"
+        if (-not (Test-Path $powershellExe)) {
+            $fields = @{ managed_session_id = $ManagedSessionId; powershell_path = $powershellExe }
+            Write-LauncherControlLog `
+                -Event "launcher.supervisor.attach.failed" `
+                -Message "PowerShell executable was not found; continuing with the managed workbench without supervisor attachment." `
+                -Level "warning" `
+                -Fields $fields
+            if ($script:currentRuntimeSceneId) {
+                Update-RuntimeSceneManifest @{ supervisor = @{ pid = 0; status = "attach_failed"; failure = "powershell_not_found" } }
+                Write-RuntimeSceneEvent `
+                    -Component "supervisor" `
+                    -Phase "startup" `
+                    -EventCode "supervisor.attach.failed" `
+                    -Message "PowerShell executable was not found; continuing with the managed workbench without supervisor attachment." `
+                    -Level "warning" `
+                    -Outcome "failed" `
+                    -Fields $fields
+            }
+            return 0
+        }
+
+        $supervisorStdoutLog = if ($script:currentRuntimeSceneId) {
+            Get-CurrentRuntimeSceneFilePath (Get-RuntimeSceneRelativePaths).Supervisor
+        } else {
+            Join-Path $launcherDir "supervisor.log"
+        }
+        $supervisorStderrLog = if ($script:currentRuntimeSceneId) {
+            Get-CurrentRuntimeSceneFilePath (Get-RuntimeSceneRelativePaths).SupervisorStderr
+        } else {
+            Join-Path $launcherDir "supervisor.stderr.log"
+        }
+
+        Set-Content -LiteralPath $supervisorStdoutLog -Value "" -Encoding UTF8
+        Set-Content -LiteralPath $supervisorStderrLog -Value "" -Encoding UTF8
+
+        $scriptPathLiteral = ConvertTo-PowerShellSingleQuotedLiteral -Value $PSCommandPath
+        $sessionIdLiteral = ConvertTo-PowerShellSingleQuotedLiteral -Value $ManagedSessionId
+        $stdoutLiteral = ConvertTo-PowerShellSingleQuotedLiteral -Value $supervisorStdoutLog
+        $stderrLiteral = ConvertTo-PowerShellSingleQuotedLiteral -Value $supervisorStderrLog
+        $supervisorCommand = @"
+`$ErrorActionPreference = 'Stop'
+try {
+    & $scriptPathLiteral -Action supervise -SessionId $sessionIdLiteral 1>> $stdoutLiteral 2>> $stderrLiteral 3>> $stdoutLiteral 4>> $stdoutLiteral 5>> $stdoutLiteral 6>> $stdoutLiteral
+} catch {
+    `$errorText = (`$_ | Out-String)
+    if (`$errorText) {
+        Add-Content -LiteralPath $stderrLiteral -Value `$errorText -Encoding UTF8
+    }
+    exit 1
+}
+"@
+        $encodedSupervisorCommand = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($supervisorCommand))
+        $proc = Start-HiddenBackgroundProcess `
+            -FilePath $powershellExe `
+            -ArgumentList @("-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-EncodedCommand", $encodedSupervisorCommand) `
+            -WorkingDirectory $projectDir
+
+        $fields = @{
+            pid = $proc.Id
+            managed_session_id = $ManagedSessionId
+            supervisor_launch_api = "hidden_background_powershell"
+            console_window_suppressed = $true
+            startup_wait_skipped = $true
+            stdout_path = $supervisorStdoutLog
+            stderr_path = $supervisorStderrLog
+        }
+        Write-LauncherControlLog `
+            -Event "launcher.supervisor.attach.started" `
+            -Message "Supervisor attachment was started without blocking the managed workbench ready signal." `
+            -Fields $fields
+        if ($script:currentRuntimeSceneId) {
+            Update-RuntimeSceneManifest @{ supervisor = @{ pid = $proc.Id; status = "attaching" } }
+            Write-RuntimeSceneEvent `
+                -Component "supervisor" `
+                -Phase "startup" `
+                -EventCode "supervisor.attach.started" `
+                -Message "Supervisor attachment was started without blocking the managed workbench ready signal." `
+                -Outcome "started" `
+                -Fields $fields
+        }
+        return $proc.Id
+    } catch {
+        $fields = @{
+            managed_session_id = $ManagedSessionId
+            supervisor_launch_api = "hidden_background_powershell"
+            console_window_suppressed = $true
+            stdout_path = $supervisorStdoutLog
+            stderr_path = $supervisorStderrLog
+            error = $_.Exception.Message
+        }
+        Write-LauncherControlLog `
+            -Event "launcher.supervisor.attach.failed" `
+            -Message "Supervisor attachment failed after the managed workbench was already made live." `
+            -Level "warning" `
+            -Fields $fields
+        if ($script:currentRuntimeSceneId) {
+            Update-RuntimeSceneManifest @{ supervisor = @{ pid = 0; status = "attach_failed"; failure = $_.Exception.Message } }
+            Write-RuntimeSceneEvent `
+                -Component "supervisor" `
+                -Phase "startup" `
+                -EventCode "supervisor.attach.failed" `
+                -Message "Supervisor attachment failed after the managed workbench was already made live." `
+                -Level "warning" `
+                -Outcome "failed" `
+                -Fields $fields `
+                -RawRefs @(
+                    (New-RuntimeSceneRawRef -RelativePath (Get-RuntimeSceneRelativePaths).Supervisor -TailLines 20),
+                    (New-RuntimeSceneRawRef -RelativePath (Get-RuntimeSceneRelativePaths).SupervisorStderr -TailLines 20),
+                    (New-RuntimeSceneRawRef -RelativePath (Get-RuntimeSceneRelativePaths).LauncherControl -TailLines 80)
+                )
+        }
+        return 0
+    }
+}
+
 function Wait-ForSupervisorSessionState {
     param(
         [string]$ManagedSessionId,
@@ -5913,7 +6035,7 @@ function Adopt-Or-FocusSession {
             -SupervisorPid 0 `
             -BrowserManaged $true `
             -SessionRole "workbench"
-        $supervisorPid = Start-Supervisor -ManagedSessionId $managedSessionId
+        $supervisorPid = Start-SupervisorDetached -ManagedSessionId $managedSessionId
         Save-SessionState `
             -ManagedSessionId $managedSessionId `
             -BackendPid $Snapshot.BackendPid `
@@ -5993,7 +6115,7 @@ function Complete-HeadlessSessionWithBrowser {
         -BrowserManaged $true `
         -SessionRole "workbench"
 
-    $supervisorPid = Start-Supervisor -ManagedSessionId $managedSessionId
+    $supervisorPid = Start-SupervisorDetached -ManagedSessionId $managedSessionId
 
     Save-SessionState `
         -ManagedSessionId $managedSessionId `
@@ -6882,7 +7004,16 @@ function Start-ManagedSession {
             -BrowserManaged $true `
             -SessionRole "workbench"
 
-        $supervisorPid = Start-Supervisor -ManagedSessionId $managedSessionId
+        $focusResult = [bool](Focus-ManagedBrowserWindow -ProfileDir $workbenchBrowserProfileDir -Role "workbench")
+        Write-RuntimeSceneEvent `
+            -Component "launcher" `
+            -Phase "session" `
+            -EventCode "runtime.scene.ready" `
+            -Message "Managed runtime scene is ready." `
+            -Outcome "succeeded" `
+            -Fields @{ url = $url; backend_pid = $backendProc.Id; browser_window_pid = $browserInfo.WindowPid; supervisor_pid = 0; supervisor_attach_mode = "non_blocking"; focus_requested = $focusResult }
+
+        $supervisorPid = Start-SupervisorDetached -ManagedSessionId $managedSessionId
 
         Save-SessionState `
             -ManagedSessionId $managedSessionId `
@@ -6896,14 +7027,6 @@ function Start-ManagedSession {
             -BrowserManaged $true `
             -SessionRole "workbench"
 
-        $focusResult = [bool](Focus-ManagedBrowserWindow -ProfileDir $workbenchBrowserProfileDir -Role "workbench")
-        Write-RuntimeSceneEvent `
-            -Component "launcher" `
-            -Phase "session" `
-            -EventCode "runtime.scene.ready" `
-            -Message "Managed runtime scene is ready." `
-            -Outcome "succeeded" `
-            -Fields @{ url = $url; backend_pid = $backendProc.Id; browser_window_pid = $browserInfo.WindowPid; supervisor_pid = $supervisorPid; focus_requested = $focusResult }
         Write-Note "Vibelution is live in a managed Edge app window at $url"
     } catch {
         if ($script:currentRuntimeSceneId) {
