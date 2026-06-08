@@ -962,6 +962,35 @@ def tail_lines(path: Path, limit: int = 40) -> List[str]:
     return lines[-limit:]
 
 
+def _resolve_conversation_payload_ref(base_dir: Path, value: Any) -> Optional[Path]:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    candidate = (base_dir / raw).resolve()
+    try:
+        candidate.relative_to(base_dir.resolve())
+    except ValueError:
+        return None
+    return candidate if candidate.is_file() else None
+
+
+def _hydrate_conversation_payload_refs(event: Dict[str, Any], *, base_dir: Path) -> Dict[str, Any]:
+    hydrated = dict(event)
+    for field_name in ("content", "raw_response", "tool_result"):
+        inline_value = hydrated.get(field_name)
+        if isinstance(inline_value, str) and inline_value.strip():
+            continue
+        ref_path = _resolve_conversation_payload_ref(base_dir, hydrated.get(f"{field_name}_ref"))
+        if ref_path is None:
+            continue
+        try:
+            hydrated[field_name] = ref_path.read_text(encoding="utf-8", errors="replace")
+            hydrated[f"{field_name}_hydrated_from_ref"] = str(ref_path)
+        except OSError:
+            continue
+    return hydrated
+
+
 def read_conversation_events(path: Path) -> List[Dict[str, Any]]:
     """读取 conversation JSONL，忽略损坏行，供摘要与阶段检测共用。"""
     if not path.exists():
@@ -977,7 +1006,7 @@ def read_conversation_events(path: Path) -> List[Dict[str, Any]]:
         except json.JSONDecodeError:
             continue
         if isinstance(payload, dict):
-            events.append(payload)
+            events.append(_hydrate_conversation_payload_refs(payload, base_dir=path.parent))
     return events
 
 
@@ -1602,22 +1631,26 @@ def _extract_supervised_fixture_markers(
     stdout_lines: List[str],
 ) -> Dict[str, Any]:
     event_line_groups = _supervised_marker_event_line_groups(events)
-    combined_lines = [
+    general_lines = [
         *debug_lines,
         *stdout_lines,
         *event_line_groups["tool_result"],
         *event_line_groups["llm_response"],
     ]
     final_state, final_state_error = _extract_supervised_marker_payload(
-        combined_lines,
+        general_lines,
         SUPERVISED_FINAL_STATE_MARKER,
     )
     infeasible_outcome, infeasible_error = _extract_supervised_marker_payload(
-        combined_lines,
+        general_lines,
         SUPERVISED_INFEASIBLE_OUTCOME_MARKER,
     )
+    agent_judgment_lines = [
+        *event_line_groups["tool_result"],
+        *event_line_groups["llm_response"],
+    ]
     agent_judgment, agent_judgment_error = _extract_supervised_marker_payload(
-        combined_lines,
+        agent_judgment_lines,
         SUPERVISED_AGENT_JUDGMENT_MARKER,
     )
 

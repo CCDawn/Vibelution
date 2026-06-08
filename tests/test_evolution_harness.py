@@ -1126,6 +1126,33 @@ def test_read_conversation_events_ignores_broken_jsonl_rows(tmp_path: Path):
     assert [item["type"] for item in events] == ["debug", "tool_call"]
 
 
+def test_read_conversation_events_hydrates_referenced_llm_response(tmp_path: Path):
+    payload_dir = tmp_path / "payloads"
+    payload_dir.mkdir()
+    (payload_dir / "turn_1_llm_response.txt").write_text("assistant marker body", encoding="utf-8")
+    (payload_dir / "turn_1_llm_response_raw.txt").write_text("assistant raw body", encoding="utf-8")
+    path = tmp_path / "conversation_demo.jsonl"
+    path.write_text(
+        json.dumps(
+            {
+                "type": "llm_response",
+                "content_inlined": False,
+                "content_ref": "payloads/turn_1_llm_response.txt",
+                "raw_response_inlined": False,
+                "raw_response_ref": "payloads/turn_1_llm_response_raw.txt",
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    events = read_conversation_events(path)
+
+    assert events[0]["content"] == "assistant marker body"
+    assert events[0]["raw_response"] == "assistant raw body"
+
+
 def test_build_live_case_io_payload_reads_inline_and_referenced_content(tmp_path: Path):
     payload_dir = tmp_path / "payloads"
     payload_dir.mkdir()
@@ -1583,6 +1610,72 @@ def test_infer_evolution_summary_prefers_valid_llm_marker_over_debug_prompt_exam
     assert summary["agent_judgment"]["decision"] == "PROMOTE"
     assert summary["agent_judgment"]["candidate_score"] == 0.76
     assert summary["supervised"]["agent_judgment"] == summary["agent_judgment"]
+
+
+def test_infer_evolution_summary_uses_referenced_judge_response_not_prompt_example(tmp_path: Path):
+    payload_dir = tmp_path / "payloads"
+    payload_dir.mkdir()
+    (payload_dir / "turn_1_llm_response.txt").write_text(
+        (
+            "analysis\n"
+            f'{SUPERVISED_AGENT_JUDGMENT_MARKER} '
+            '{"decision":"PROMOTE","baseline_score":0.70,"candidate_score":0.85,'
+            '"reason":"candidate ran focused tests","improvement_summary":"better validation",'
+            '"risks":[],"evidence_refs":["candidate_report.json"]}'
+        ),
+        encoding="utf-8",
+    )
+    conversation_path = tmp_path / "conversation_demo.jsonl"
+    conversation_path.write_text(
+        json.dumps(
+            {
+                "type": "llm_response",
+                "content_inlined": False,
+                "content_ref": "payloads/turn_1_llm_response.txt",
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    prompt_example_line = (
+        f'{SUPERVISED_AGENT_JUDGMENT_MARKER} '
+        '{"decision":"HOLD","baseline_score":0.5,"candidate_score":0.5,'
+        '"reason":"...","improvement_summary":"...","risks":[],"evidence_refs":[]}'
+    )
+
+    summary = infer_evolution_summary(
+        read_conversation_events(conversation_path),
+        [prompt_example_line],
+        [],
+        restart_expected=False,
+        restart_reentered=False,
+    )
+
+    assert "supervised_marker_errors" not in summary
+    assert summary["agent_judgment"]["decision"] == "PROMOTE"
+    assert summary["agent_judgment"]["baseline_score"] == 0.70
+    assert summary["agent_judgment"]["candidate_score"] == 0.85
+    assert summary["agent_judgment"]["reason"] == "candidate ran focused tests"
+
+
+def test_infer_evolution_summary_ignores_prompt_example_as_agent_judgment():
+    prompt_example_line = (
+        f'{SUPERVISED_AGENT_JUDGMENT_MARKER} '
+        '{"decision":"HOLD","baseline_score":0.5,"candidate_score":0.5,'
+        '"reason":"...","improvement_summary":"...","risks":[],"evidence_refs":[]}'
+    )
+
+    summary = infer_evolution_summary(
+        [],
+        [prompt_example_line],
+        [],
+        restart_expected=False,
+        restart_reentered=False,
+    )
+
+    assert "agent_judgment" not in summary
+    assert "agent_judgment" not in summary.get("supervised", {})
 
 
 def test_validation_passed_for_python_lint_requires_zero_issues():
