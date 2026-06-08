@@ -476,14 +476,8 @@ export function ToolsRoute() {
   const toolsQuery = useQuery({
     queryKey: queryKeys.tools(),
     queryFn: () => fetchJson<ToolRegistryPayload>("/api/tools"),
-    refetchInterval: resolvePollingInterval(pageVisible, 8_000),
-    refetchIntervalInBackground: false,
-  });
-
-  const agentsQuery = useQuery({
-    queryKey: queryKeys.agents(),
-    queryFn: () => fetchJson<AgentInstance[]>("/api/agents"),
-    refetchInterval: resolvePollingInterval(pageVisible, 12_000),
+    staleTime: 30_000,
+    refetchInterval: false,
     refetchIntervalInBackground: false,
   });
 
@@ -496,6 +490,7 @@ export function ToolsRoute() {
 
   const refresh = () => {
     void queryClient.invalidateQueries({ queryKey: queryKeys.tools() });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.agents() });
     void queryClient.invalidateQueries({ queryKey: queryKeys.toolImage2Models() });
     void queryClient.invalidateQueries({ queryKey: queryKeys.toolWebSearchHealth() });
   };
@@ -549,8 +544,18 @@ export function ToolsRoute() {
   );
   const allVisibleToolsSelected = visibleTools.length > 0 && selectedTools.length === visibleTools.length;
   const activeTool = tools.find((tool) => tool.id === activeToolId) ?? visibleTools[0] ?? null;
+  const agentPolicyWorkspaceNeeded = Boolean(activeTool);
   const activeToolBundleLabels = activeTool ? bundleLabelsForTool(activeTool, toolBundles, lang) : [];
   const activeScopeState = activeTool ? scopeStateForTool(activeTool, activeAgentScope.id) : null;
+
+  const agentsQuery = useQuery({
+    queryKey: queryKeys.agents(),
+    queryFn: () => fetchJson<AgentInstance[]>("/api/agents"),
+    enabled: agentPolicyWorkspaceNeeded,
+    staleTime: 30_000,
+    refetchInterval: false,
+    refetchIntervalInBackground: false,
+  });
   const activeAgents = useMemo(
     () => (agentsQuery.data ?? []).filter((agent) => agent.status !== "archived"),
     [agentsQuery.data],
