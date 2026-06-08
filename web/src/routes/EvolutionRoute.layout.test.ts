@@ -228,10 +228,18 @@ describe("EvolutionRoute library user flow contract", () => {
   });
 
   it("uses denser supervised launch and member panels at narrow workbench widths", () => {
+    const middleBreakpoint = stylesSource.slice(
+      stylesSource.indexOf("@media (min-width: 901px) and (max-width: 1200px)"),
+      stylesSource.indexOf("@media (max-width: 900px)"),
+    );
+
     expect(stylesSource).toContain("minmax(300px, var(--evolution-live-launch-width, 348px))");
     expect(stylesSource).toContain("minmax(300px, var(--evolution-live-run-width, 360px))");
     expect(stylesSource).toContain("grid-template-rows: minmax(0, auto) minmax(0, 1fr)");
-    expect(stylesSource).toContain("max-height: min(470px, 46vh)");
+    expect(stylesSource).toContain("max-height: min(430px, 60vh)");
+    expect(middleBreakpoint).toContain(".liveLaunchStack > .launchSurface > .noticeText");
+    expect(middleBreakpoint).toContain(".liveLaunchStack > .launchSurface .formHint");
+    expect(middleBreakpoint).toContain("display: none");
     expect(stylesSource).toContain("align-self: stretch");
     expect(stylesSource).toContain("min-height: 40px");
     expect(stylesSource).toContain("font-family: var(--font-mono)");
@@ -276,7 +284,7 @@ describe("EvolutionRoute library user flow contract", () => {
 
     expect(launchStackRule).toContain("overflow: auto");
     expect(stylesSource).toContain(".liveLaunchStack > .launchSurface");
-    expect(stylesSource).toContain("max-height: min(470px, 46vh)");
+    expect(stylesSource).toContain("max-height: min(430px, 60vh)");
     expect(stylesSource).not.toContain(".worktreeReviewSurface");
     expect(worktreeReviewStylesSource).toContain(".worktreeReviewSurface");
   });

@@ -12,7 +12,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--route-topbar-gap);
+  gap: 8px 12px;
   flex-wrap: wrap;
   min-width: 0;
 }
@@ -56,7 +56,10 @@
   align-items: center;
   justify-content: flex-end;
   gap: 6px;
-  flex-wrap: wrap;
+  flex: 1 1 620px;
+  min-width: min(540px, 100%);
+  flex-wrap: nowrap;
+  overflow: hidden;
 }
 
 .segmented,
@@ -65,7 +68,7 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 4px;
+  padding: 3px;
   border-radius: var(--radius-panel);
   border: 1px solid var(--border-soft);
   background: var(--surface-panel);
@@ -74,8 +77,8 @@
 .segmentButton,
 .intakeButton,
 .filterButton {
-  min-height: 28px;
-  padding: 0 9px;
+  min-height: 26px;
+  padding: 0 8px;
   border: 0;
   border-radius: var(--radius-control);
   background: transparent;
@@ -157,7 +160,7 @@
 
 .liveLaunchStack > .launchSurface {
   height: auto;
-  max-height: min(470px, 46vh);
+  max-height: min(430px, 60vh);
   overflow: auto;
 }
 
@@ -596,11 +599,13 @@
   grid-template-columns: minmax(0, 1.52fr) minmax(108px, 0.68fr);
   align-items: start;
   gap: 8px;
+  min-width: 0;
 }
 
 .formField {
   display: grid;
   gap: 3px;
+  min-width: 0;
 }
 
 .proposalEditGrid {
@@ -626,6 +631,8 @@
 .textInput,
 .selectInput,
 .textArea {
+  width: 100%;
+  min-width: 0;
   min-height: 31px;
   padding: 0 9px;
   border: 1px solid rgba(236, 230, 220, 0.08);
@@ -664,6 +671,7 @@
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+  min-width: 0;
 }
 
 .noticeText,
@@ -739,6 +747,7 @@
   flex-wrap: wrap;
   gap: 6px 10px;
   padding: 4px 8px;
+  min-width: 0;
 }
 
 .sourceInventoryBar span {
@@ -759,6 +768,7 @@
   grid-template-columns: minmax(0, 1fr) minmax(96px, auto);
   align-items: center;
   gap: 8px;
+  min-width: 0;
   padding: 7px 10px;
 }
 
@@ -961,11 +971,12 @@
 .controlFooter {
   display: grid;
   gap: 6px;
+  min-width: 0;
 }
 
 .closedLoopLaunchBlock {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) minmax(92px, auto);
   align-items: center;
   gap: 8px;
   min-width: 0;
@@ -996,6 +1007,12 @@
   color: var(--fg-tertiary);
   font-size: 0.74rem;
   line-height: 1.3;
+}
+
+.closedLoopLaunchBlock .inlineAction {
+  justify-self: end;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .monitorSummary {
@@ -2455,6 +2472,19 @@
 }
 
 @media (max-width: 1200px) {
+  .toolbar {
+    align-items: flex-start;
+  }
+
+  .toolbarIntro {
+    min-width: 220px;
+    max-width: min(390px, 100%);
+  }
+
+  .toolbarControls {
+    min-width: min(500px, 100%);
+  }
+
   .overviewGrid {
     grid-template-columns: minmax(0, 1fr) minmax(292px, 0.82fr);
     grid-template-rows: minmax(180px, 0.58fr) minmax(300px, 1fr);
@@ -2508,7 +2538,57 @@
   }
 }
 
+@media (min-width: 901px) and (max-width: 1200px) {
+  .liveLaunchStack > .launchSurface {
+    gap: 6px;
+    padding: 9px 10px;
+  }
+
+  .liveLaunchStack > .launchSurface > .noticeText,
+  .liveLaunchStack > .launchSurface .sourceInventoryBar,
+  .liveLaunchStack > .launchSurface .sourceMetaCompact,
+  .liveLaunchStack > .launchSurface .sourceWarningStrip,
+  .liveLaunchStack > .launchSurface .formHint {
+    display: none;
+  }
+
+  .liveLaunchStack > .launchSurface .compactFieldGrid {
+    gap: 6px;
+  }
+
+  .liveLaunchStack > .launchSurface .controlFooter {
+    gap: 6px;
+  }
+
+  .liveLaunchStack > .launchSurface .closedLoopLaunchBlock {
+    padding: 6px 8px;
+  }
+}
+
 @media (max-width: 900px) {
+  .page {
+    gap: 6px;
+  }
+
+  .toolbar {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+
+  .toolbarIntro {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .toolbarControls {
+    justify-content: stretch;
+    min-width: 0;
+    width: 100%;
+    overflow-x: auto;
+    scrollbar-width: thin;
+  }
+
   .overviewGrid {
     grid-template-columns: 1fr;
     grid-template-rows: max-content max-content max-content;
