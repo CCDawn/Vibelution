@@ -96,3 +96,32 @@ def test_agent_run_store_lists_many_agents_with_one_snapshot_scan(tmp_path, monk
     assert payload["agents"]["agent-alpha"]["subAgentRuns"][0]["parentAgentId"] == "agent-alpha"
     assert payload["agents"]["agent-beta"]["runs"][0]["status"] == "failed"
     assert payload["agents"]["agent-beta"]["subAgentRuns"] == []
+
+
+def test_agent_run_store_uses_bounded_recent_work_run_reads(monkeypatch):
+    calls = []
+
+    class FakeStore:
+        def list_snapshots(self, run_kind, *, limit=None):
+            calls.append((run_kind, limit))
+            if run_kind == agent_run_store.AGENT_RUN_KIND:
+                return [
+                    {
+                        "runId": "agentrun-alpha",
+                        "runKind": agent_run_store.AGENT_RUN_KIND,
+                        "agentId": "agent-alpha",
+                        "status": "completed",
+                        "updatedAt": "2026-06-08T00:00:00Z",
+                    }
+                ]
+            return []
+
+    monkeypatch.setattr(agent_run_store, "_store", lambda: FakeStore())
+
+    payload = agent_run_store.list_agent_runs_for_agents(["agent-alpha", "agent-beta"], limit=6)
+
+    assert payload["agents"]["agent-alpha"]["runs"][0]["runId"] == "agentrun-alpha"
+    assert calls == [
+        (agent_run_store.AGENT_RUN_KIND, 48),
+        (agent_run_store.SUB_AGENT_RUN_KIND, 48),
+    ]

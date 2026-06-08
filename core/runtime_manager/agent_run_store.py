@@ -206,8 +206,9 @@ def list_agent_runs_for_agents(agent_ids: list[str], *, limit: int = 20) -> dict
     if not agents:
         return {"agentIds": [], "limit": bounded_limit, "agents": {}}
 
-    agent_snapshots = _load_work_run_snapshots(AGENT_RUN_KIND)
-    sub_agent_snapshots = _load_work_run_snapshots(SUB_AGENT_RUN_KIND)
+    scan_limit = _work_run_scan_limit(len(normalized_agent_ids), bounded_limit)
+    agent_snapshots = _load_work_run_snapshots(AGENT_RUN_KIND, limit=scan_limit)
+    sub_agent_snapshots = _load_work_run_snapshots(SUB_AGENT_RUN_KIND, limit=scan_limit)
 
     for snapshot in agent_snapshots:
         owner_agent_id = str(snapshot.get("agentId") or "").strip()
@@ -239,8 +240,8 @@ def _store() -> work_run_store.WorkRunStore:
     return work_run_store.WorkRunStore(root=work_run_store.WORK_RUNS_DIR)
 
 
-def _load_work_run_snapshots(run_kind: str) -> list[dict[str, Any]]:
-    return _store().list_snapshots(run_kind)
+def _load_work_run_snapshots(run_kind: str, *, limit: int | None = None) -> list[dict[str, Any]]:
+    return _store().list_snapshots(run_kind, limit=limit)
 
 
 def _public_snapshot(snapshot: dict[str, Any], allowed_keys: set[str]) -> dict[str, Any]:
@@ -319,6 +320,18 @@ def _bounded_limit(limit: int) -> int:
     except (TypeError, ValueError):
         value = 20
     return max(1, min(value, 100))
+
+
+def _work_run_scan_limit(agent_count: int, per_agent_limit: int) -> int:
+    try:
+        agents = max(1, int(agent_count or 1))
+    except (TypeError, ValueError):
+        agents = 1
+    try:
+        per_agent = max(1, int(per_agent_limit or 1))
+    except (TypeError, ValueError):
+        per_agent = 20
+    return min(work_run_store.RECENT_RUN_IDS_LIMIT, max(per_agent, agents * per_agent * 4))
 
 
 def _safe_int(value: Any) -> int:
