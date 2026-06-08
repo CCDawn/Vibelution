@@ -201,6 +201,7 @@
 .shutdownCopy {
   display: grid;
   gap: 6px;
+  min-width: 0;
 }
 
 .shutdownCopy strong {
@@ -211,6 +212,32 @@
   margin: 0;
   color: var(--fg-secondary);
   line-height: 1.5;
+  white-space: pre-line;
+}
+
+.shutdownCancelButton {
+  justify-self: start;
+  min-height: 32px;
+  margin-top: 8px;
+  padding: 0 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--shell-card);
+  color: var(--fg-primary);
+  font: inherit;
+  font-size: 0.88rem;
+  cursor: pointer;
+}
+
+.shutdownCancelButton:hover:not(:disabled),
+.shutdownCancelButton:focus-visible:not(:disabled) {
+  border-color: var(--accent-warm-2);
+  color: var(--accent-warm-2);
+}
+
+.shutdownCancelButton:disabled {
+  cursor: wait;
+  opacity: 0.64;
 }
 
 .shutdownIconSpin,

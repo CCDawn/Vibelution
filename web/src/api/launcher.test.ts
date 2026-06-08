@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { resetControlTokenForTests } from "./client";
 import {
+  cancelRuntimeLifecycleCommand,
   getLauncherStatus,
   launcherEndpoint,
   launcherRestartEndpoint,
@@ -231,5 +232,53 @@ describe("launcher api helpers", () => {
     expect(fetchMock.mock.calls[1][0]).toBe("http://127.0.0.1:8765/api/launcher/supervisor/reattach");
     const requestInit = fetchMock.mock.calls[1][1] as RequestInit;
     expect(requestInit.method).toBe("POST");
+  });
+
+  it("cancels pending lifecycle commands through the workbench runtime API", async () => {
+    vi.stubGlobal("window", {
+      location: {
+        href: "http://127.0.0.1:8000/chat",
+        origin: "http://127.0.0.1:8000",
+      },
+    });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          header: "X-Vibelution-Control-Token",
+          controlToken: "test-token",
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          cancelled: true,
+          status: "cancelled",
+          commandId: "cmd-queued",
+          operation: "restart",
+          message: "Lifecycle command was cancelled before execution.",
+        }),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const payload = await cancelRuntimeLifecycleCommand({
+      commandId: "cmd-queued",
+      operation: "restart",
+      source: "app_shell",
+    });
+
+    expect(payload.cancelled).toBe(true);
+    expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
+      "/api/control-token",
+      "/api/runtime/lifecycle-command/cancel",
+    ]);
+    const requestInit = fetchMock.mock.calls[1][1] as RequestInit;
+    expect(requestInit.method).toBe("POST");
+    expect((requestInit.headers as Headers).get("X-Vibelution-Control-Token")).toBe("test-token");
+    expect(JSON.parse(String(requestInit.body))).toEqual({
+      commandId: "cmd-queued",
+      operation: "restart",
+      source: "app_shell",
+    });
   });
 });

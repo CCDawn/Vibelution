@@ -4,6 +4,8 @@ import type {
   LauncherStartupSettings,
   LauncherStartupSettingsUpdateResponse,
   LauncherStatus,
+  RuntimeLifecycleCancelRequest,
+  RuntimeLifecycleCancelResponse,
   WorkbenchWindowMode,
   WorkbenchWindowModeUpdateResponse,
 } from "./types";
@@ -119,6 +121,14 @@ export function stopLauncherBundle() {
 export function restartLauncherBundle() {
   return fetchLauncherJson<LauncherControlResponse>("restart", {
     method: "POST",
+  });
+}
+
+export function cancelRuntimeLifecycleCommand(request: RuntimeLifecycleCancelRequest) {
+  return fetchJson<RuntimeLifecycleCancelResponse>("/api/runtime/lifecycle-command/cancel", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
   });
 }
 

@@ -30,6 +30,12 @@ from .restart_coordinator import create_restart_intent
 
 
 DEFERRED_COMMAND_POLL_SECONDS = 10.0
+LIFECYCLE_CANCEL_TYPES = {
+    "restart": {"restart_workbench"},
+    "stop": {"close_workbench"},
+    "close": {"close_workbench"},
+    "shutdown": {"close_workbench"},
+}
 
 
 def _command_timestamp() -> str:
@@ -235,6 +241,135 @@ def defer_processing_command_for_active_work(
     )
 
 
+def cancel_lifecycle_command(
+    *,
+    command_id: str = "",
+    operation: str = "",
+    requested_by: str = "unknown",
+) -> dict[str, Any]:
+    ensure_runtime_manager_dirs()
+    normalized_id = str(command_id or "").strip()
+    normalized_operation = str(operation or "").strip().lower()
+    allowed_types = LIFECYCLE_CANCEL_TYPES.get(normalized_operation, set())
+    if not normalized_id:
+        return _lifecycle_cancel_response(
+            cancelled=False,
+            status="invalid_request",
+            command_id="",
+            operation=normalized_operation,
+            message="Lifecycle cancel requires a commandId.",
+        )
+    if not _safe_command_id(normalized_id):
+        return _lifecycle_cancel_response(
+            cancelled=False,
+            status="invalid_request",
+            command_id="",
+            operation=normalized_operation,
+            message="Lifecycle cancel commandId is invalid.",
+        )
+    if not allowed_types:
+        return _lifecycle_cancel_response(
+            cancelled=False,
+            status="invalid_request",
+            command_id=normalized_id,
+            operation=normalized_operation,
+            message="Lifecycle cancel operation is invalid.",
+        )
+
+    inbox_path = INBOX_DIR / f"{normalized_id}.json"
+    cancel_claim_path = RESULTS_DIR / f".{normalized_id}.cancel"
+    try:
+        os.replace(inbox_path, cancel_claim_path)
+    except OSError:
+        cancel_claim_path = None
+    if cancel_claim_path is not None:
+        command = _load_command_file(cancel_claim_path)
+        command["commandId"] = str(command.get("commandId") or normalized_id).strip() or normalized_id
+        command_type = str(command.get("type") or "").strip()
+        if allowed_types and command_type not in allowed_types:
+            try:
+                os.replace(cancel_claim_path, inbox_path)
+            except OSError:
+                pass
+            return _lifecycle_cancel_response(
+                cancelled=False,
+                status="not_found",
+                command_id=normalized_id,
+                operation=normalized_operation,
+                message="Lifecycle command did not match the requested operation.",
+            )
+        state = load_state()
+        state_version = int(state.get("stateVersion") or 0) if isinstance(state, dict) else 0
+        result = {
+            "commandId": normalized_id,
+            "accepted": True,
+            "completed": True,
+            "ok": False,
+            "cancelled": True,
+            "message": "Lifecycle command was cancelled before execution.",
+            "errorType": "LifecycleCommandCancelled",
+            "stateVersion": state_version,
+        }
+        complete_command(cancel_claim_path, result)
+        _append_queue_event(
+            "command_queue.lifecycle_command_cancelled",
+            {
+                "commandId": normalized_id,
+                "type": command_type,
+                "operation": normalized_operation,
+                "requestedBy": str(requested_by or "unknown"),
+                "queuePath": inbox_path.name,
+                "stateVersion": state_version,
+            },
+        )
+        return _lifecycle_cancel_response(
+            cancelled=True,
+            status="cancelled",
+            command_id=normalized_id,
+            operation=normalized_operation,
+            message="Lifecycle command was cancelled before execution.",
+            state_version=state_version,
+        )
+
+    processing_path = PROCESSING_DIR / f"{normalized_id}.json"
+    if processing_path.exists():
+        command = _load_command_file(processing_path)
+        command_type = str(command.get("type") or "").strip()
+        if allowed_types and command_type not in allowed_types:
+            return _lifecycle_cancel_response(
+                cancelled=False,
+                status="not_found",
+                command_id=normalized_id,
+                operation=normalized_operation,
+                message="Lifecycle command did not match the requested operation.",
+            )
+        _append_queue_event(
+            "command_queue.lifecycle_command_cancel_active_skipped",
+            {
+                "commandId": normalized_id,
+                "type": command_type,
+                "operation": normalized_operation,
+                "requestedBy": str(requested_by or "unknown"),
+                "queuePath": processing_path.name,
+            },
+        )
+        return _lifecycle_cancel_response(
+            cancelled=False,
+            status="already_active",
+            command_id=normalized_id,
+            operation=normalized_operation,
+            message="Lifecycle command is already running and cannot be cancelled safely.",
+        )
+
+    return _lifecycle_cancel_response(
+        cancelled=False,
+        status="not_found",
+        command_id=normalized_id,
+        operation=normalized_operation,
+        message="Lifecycle command is no longer pending.",
+    )
+
+
 def _should_defer_open_during_shutdown(command: dict[str, Any]) -> bool:
     return str(command.get("type") or "").strip() == "open_workbench"
 
@@ -245,6 +380,31 @@ def _load_command_file(path: Path) -> dict[str, Any]:
     except (OSError, json.JSONDecodeError):
         return {}
     return payload if isinstance(payload, dict) else {}
+
+
+def _lifecycle_cancel_response(
+    *,
+    cancelled: bool,
+    status: str,
+    command_id: str,
+    operation: str,
+    message: str,
+    state_version: int | None = None,
+) -> dict[str, Any]:
+    response: dict[str, Any] = {
+        "cancelled": cancelled,
+        "status": status,
+        "commandId": command_id,
+        "operation": operation,
+        "message": message,
+    }
+    if state_version is not None:
+        response["stateVersion"] = state_version
+    return response
+
+
+def _safe_command_id(command_id: str) -> bool:
+    return bool(command_id) and all(char.isalnum() or char in {"_", "-"} for char in command_id)
 
 
 def _complete_recovered_satisfied_stop_manager_close(path: Path, command: dict[str, Any]) -> bool:
