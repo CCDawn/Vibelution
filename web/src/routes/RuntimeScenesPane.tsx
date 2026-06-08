@@ -598,6 +598,17 @@ function runtimeSceneStartedLabel(scene: RuntimeSceneListItem | RuntimeSceneDeta
   return formatTimestamp(scene.startedAt, lang);
 }
 
+function runtimeSceneIsLive(scene: RuntimeSceneListItem | RuntimeSceneDetail | undefined): boolean {
+  if (!scene) {
+    return false;
+  }
+  const status = String(scene.status || "").trim().toLowerCase();
+  if (status && !["running", "starting", "queued", "opening", "stopping", "closing"].includes(status)) {
+    return false;
+  }
+  return !String(scene.endedAt || "").trim();
+}
+
 function formatDuration(seconds: number | null | undefined, lang: "zh" | "en") {
   if (typeof seconds !== "number" || !Number.isFinite(seconds)) {
     return lang === "zh" ? "未结束" : "Open";
@@ -895,6 +906,10 @@ export function RuntimeScenesPane({ activeRoot, lang, t, statusLabel, initialSce
   );
   const visibleSceneIds = useMemo(() => filteredScenes.map((item) => item.runtimeSceneId), [filteredScenes]);
   const selectedSceneIdSet = useMemo(() => new Set(selectedSceneIds), [selectedSceneIds]);
+  const activeSceneListItem = useMemo(
+    () => (runtimeScenesQuery.data ?? []).find((item) => item.runtimeSceneId === activeSceneId),
+    [activeSceneId, runtimeScenesQuery.data],
+  );
 
   useEffect(() => {
     if (!initialSceneId) {
@@ -919,9 +934,13 @@ export function RuntimeScenesPane({ activeRoot, lang, t, statusLabel, initialSce
     queryKey: queryKeys.runtimeScene(activeSceneId),
     enabled: Boolean(activeSceneId),
     queryFn: () => fetchJson<RuntimeSceneDetail>(`/api/logs/runtime-scenes/${encodeURIComponent(activeSceneId)}`),
-    refetchInterval: resolvePollingInterval(pageVisible, 5_000),
+    refetchInterval: (query) => {
+      const detail = query.state.data as RuntimeSceneDetail | undefined;
+      return runtimeSceneIsLive(detail ?? activeSceneListItem) ? resolvePollingInterval(pageVisible, 5_000) : false;
+    },
     refetchIntervalInBackground: false,
   });
+  const activeSceneLive = runtimeSceneIsLive(sceneDetailQuery.data ?? activeSceneListItem);
 
   const activeRawLogPath =
     (activeSceneId ? openRawLogByScene[activeSceneId] : "") ||
@@ -951,7 +970,7 @@ export function RuntimeScenesPane({ activeRoot, lang, t, statusLabel, initialSce
       fetchJson<LogFileContent>(
         `/api/logs/runtime-scenes/${encodeURIComponent(activeSceneId)}/content?path=${encodeURIComponent(activeRawLogPath)}`,
       ),
-    refetchInterval: resolvePollingInterval(pageVisible, 5_000),
+    refetchInterval: activeSceneLive ? resolvePollingInterval(pageVisible, 5_000) : false,
     refetchIntervalInBackground: false,
   });
 
