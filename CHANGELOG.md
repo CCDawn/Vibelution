@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.0 - 2026-06-08
+
+- Promoted Vibelution to the stable 1.0.0 line across the canonical backend version source and frontend package metadata.
+- Recorded the stable mainline contract after the Launcher lifecycle, runtime-scene diagnostics, supervised evolution surfaces, and multi-agent worktree workflow became inspectable as one product baseline.
+- Kept this release bump scoped to version metadata and changelog documentation; no runtime behavior, API contract, or evaluation harness code changed in this release commit.
+
 ## 0.12.1 - 2026-06-08
 
 - Added the Challenge Cup AI research team source-collection execution panel to the Teams surface, with run startup, assignment/query visibility, and manual result writeback into candidate source records.
