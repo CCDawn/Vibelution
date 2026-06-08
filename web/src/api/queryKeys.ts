@@ -36,6 +36,10 @@ export const queryKeys = {
   teamWorkflowCandidateGraph: (id: string) => ["teams", id, "workflow-orchestration", "candidate-graph"] as const,
   teamWorkflowCoordinationStatus: (id: string) => ["teams", id, "workflow-orchestration", "coordination", "status"] as const,
   teamWorkflowKnowledgeIngestionStatus: (id: string) => ["teams", id, "workflow-orchestration", "knowledge-ingestion", "status"] as const,
+  teamWorkflowSourceCollectionRuns: (id: string, limit = 6) =>
+    ["teams", id, "workflow-orchestration", "source-collection-runs", limit] as const,
+  dataProcessingRunStatus: (id: string) => ["data-processing", "runs", id, "status"] as const,
+  dataProcessingCollectionAssignments: (id: string) => ["data-processing", "runs", id, "collection-assignments"] as const,
   fileTree: () => ["files", "tree"] as const,
   fileContent: (path: string) => ["files", "content", path] as const,
   memoryOverview: () => ["memory", "overview"] as const,

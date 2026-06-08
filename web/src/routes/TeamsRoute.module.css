@@ -1063,6 +1063,211 @@
     color-mix(in srgb, var(--surface-panel-strong) 68%, transparent);
 }
 
+.workflowSourceCollectionPanel {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid color-mix(in srgb, var(--accent-success) 26%, var(--border-soft));
+  border-radius: 8px;
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--accent-success) 7%, transparent), transparent 48%),
+    color-mix(in srgb, var(--surface-panel-strong) 70%, transparent);
+}
+
+.workflowSourceCollectionForm,
+.workflowSourceCollectionOutputForm {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  min-width: 0;
+}
+
+.workflowSourceCollectionForm label,
+.workflowSourceCollectionRuns label,
+.workflowSourceCollectionOutputForm label {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  color: var(--fg-muted);
+  font-size: 0.66rem;
+  font-weight: 720;
+}
+
+.workflowSourceCollectionForm input,
+.workflowSourceCollectionForm textarea,
+.workflowSourceCollectionForm select,
+.workflowSourceCollectionRuns select,
+.workflowSourceCollectionOutputForm input,
+.workflowSourceCollectionOutputForm textarea,
+.workflowSourceCollectionOutputForm select {
+  min-height: 26px;
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--surface-panel) 86%, transparent);
+  color: var(--fg-primary);
+  font: inherit;
+  font-size: 0.72rem;
+}
+
+.workflowSourceCollectionForm textarea,
+.workflowSourceCollectionOutputForm textarea {
+  resize: vertical;
+}
+
+.workflowSourceCollectionWide {
+  grid-column: span 2;
+}
+
+.workflowSourceCollectionForm button,
+.workflowSourceCollectionOutputForm button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 28px;
+  align-self: end;
+  border: 1px solid color-mix(in srgb, var(--accent-success) 38%, var(--border-soft));
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--accent-success) 12%, var(--surface-panel-strong));
+  color: var(--fg-primary);
+  font-size: 0.74rem;
+  font-weight: 760;
+}
+
+.workflowSourceCollectionForm button:disabled,
+.workflowSourceCollectionOutputForm button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.workflowSourceCollectionRuns,
+.workflowSourceCollectionStats,
+.workflowSourceCollectionPlan,
+.workflowSourceCollectionAssignments,
+.workflowSourceCollectionQueries {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.workflowSourceCollectionRuns {
+  grid-template-columns: minmax(220px, 0.72fr) minmax(0, 1fr);
+}
+
+.workflowSourceCollectionStats {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.workflowSourceCollectionStats span,
+.workflowSourceCollectionPlan > div,
+.workflowSourceCollectionQueries span {
+  min-width: 0;
+  border: 1px solid var(--border-soft);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--surface-card) 70%, transparent);
+}
+
+.workflowSourceCollectionStats span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  min-height: 25px;
+  padding: 0 6px;
+  color: var(--fg-muted);
+  font-size: 0.66rem;
+  font-weight: 720;
+}
+
+.workflowSourceCollectionStats strong {
+  color: var(--fg-primary);
+  font-size: 0.76rem;
+}
+
+.workflowSourceCollectionPlan {
+  grid-template-columns: minmax(150px, 0.6fr) minmax(0, 1fr) minmax(220px, 0.9fr);
+}
+
+.workflowSourceCollectionPlan > div,
+.workflowSourceCollectionQueries span {
+  display: grid;
+  gap: 2px;
+  padding: 6px;
+}
+
+.workflowSourceCollectionPlan span,
+.workflowSourceCollectionQueries small,
+.workflowSourceCollectionOutputHeader span {
+  color: var(--fg-muted);
+  font-size: 0.66rem;
+}
+
+.workflowSourceCollectionPlan strong,
+.workflowSourceCollectionQueries strong,
+.workflowSourceCollectionOutputHeader strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-primary);
+  font-size: 0.72rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workflowSourceCollectionAssignments {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.workflowSourceCollectionAssignments button {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  min-height: 42px;
+  padding: 6px;
+  border: 1px solid var(--border-soft);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--surface-card) 70%, transparent);
+  color: var(--fg-secondary);
+  text-align: left;
+}
+
+.workflowSourceCollectionAssignments button strong,
+.workflowSourceCollectionAssignments button span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workflowSourceCollectionAssignments button strong {
+  color: var(--fg-primary);
+  font-size: 0.72rem;
+}
+
+.workflowSourceCollectionAssignments button span {
+  color: var(--fg-muted);
+  font-size: 0.66rem;
+}
+
+.workflowSourceCollectionAssignmentActive {
+  border-color: color-mix(in srgb, var(--accent-success) 46%, var(--border-soft)) !important;
+  background: color-mix(in srgb, var(--accent-success) 11%, var(--surface-panel)) !important;
+}
+
+.workflowSourceCollectionQueries {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.workflowSourceCollectionOutputHeader {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  grid-column: span 2;
+  align-self: center;
+}
+
 .workflowCoordinationStats,
 .workflowCoordinationQueues,
 .workflowCoordinationBriefSummary {
