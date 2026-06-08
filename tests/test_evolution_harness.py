@@ -59,6 +59,7 @@ from scripts.evolution_harness import (
     SupervisedAgentBindingRuntimeError,
     supervised_agent_binding_env,
     run_harness,
+    SUPERVISED_AGENT_JUDGMENT_MARKER,
     SUPERVISED_FINAL_STATE_MARKER,
     SUPERVISED_INFEASIBLE_OUTCOME_MARKER,
     stdout_tail_looks_like_idle_chat_ui,
@@ -1548,6 +1549,40 @@ def test_infer_evolution_summary_records_invalid_supervised_marker_error():
 
     assert summary["supervised_marker_errors"] == {"final_state": "invalid_json"}
     assert summary["supervised"]["marker_errors"] == {"final_state": "invalid_json"}
+
+
+def test_infer_evolution_summary_prefers_valid_llm_marker_over_debug_prompt_example():
+    summary = infer_evolution_summary(
+        [
+            {
+                "type": "llm_response",
+                "content": (
+                    "analysis\n"
+                    f'{SUPERVISED_AGENT_JUDGMENT_MARKER} '
+                    '{"decision":"PROMOTE","baseline_score":0.44,"candidate_score":0.76,'
+                    '"reason":"candidate validated","improvement_summary":"better validation",'
+                    '"risks":[],"evidence_refs":["candidate_report.json"]}'
+                ),
+            }
+        ],
+        [
+            (
+                "prompt example: "
+                f'{SUPERVISED_AGENT_JUDGMENT_MARKER} '
+                '{"decision":"HOLD","baseline_score":0.5,"candidate_score":0.5,'
+                '"reason":"...","improvement_summary":"...","risks":[],"evidence_refs":[]}'
+                ' | scope={"goal":"prompt text"}'
+            )
+        ],
+        [],
+        restart_expected=False,
+        restart_reentered=False,
+    )
+
+    assert "supervised_marker_errors" not in summary
+    assert summary["agent_judgment"]["decision"] == "PROMOTE"
+    assert summary["agent_judgment"]["candidate_score"] == 0.76
+    assert summary["supervised"]["agent_judgment"] == summary["agent_judgment"]
 
 
 def test_validation_passed_for_python_lint_requires_zero_issues():
