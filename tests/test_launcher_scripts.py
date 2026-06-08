@@ -1069,7 +1069,7 @@ if ($redirectedText -notmatch 'distinct stdout and stderr log paths') {
     throw "Redirected background process does not guard against same-file stdout/stderr redirection."
 }
 
-foreach ($functionName in @("Start-ManagedBackend", "Start-Supervisor")) {
+foreach ($functionName in @("Start-ManagedBackend")) {
 $functionAst = $ast.Find({
     param($node)
     $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
@@ -1085,6 +1085,28 @@ $functionAst = $ast.Find({
     if ($functionText -notmatch "Start-RedirectedBackgroundProcess") {
         throw "$functionName does not use the redirected no-window helper."
     }
+}
+
+$supervisorAst = $ast.Find({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -eq "Start-Supervisor"
+}, $true)
+if ($null -eq $supervisorAst) {
+    throw "Start-Supervisor was not found."
+}
+$supervisorText = $supervisorAst.Extent.Text
+if ($supervisorText -match "Start-Process") {
+    throw "Start-Supervisor still uses Start-Process."
+}
+if ($supervisorText -notmatch "Start-HiddenBackgroundProcess") {
+    throw "Start-Supervisor should use a hidden background PowerShell host."
+}
+if ($supervisorText -notmatch "-EncodedCommand") {
+    throw "Start-Supervisor should use an encoded command for stable supervisor logging."
+}
+if ($supervisorText -notmatch "ConvertTo-PowerShellSingleQuotedLiteral") {
+    throw "Start-Supervisor should quote paths and session ids inside the encoded command."
 }
 
 $managedBackendAst = $ast.Find({
@@ -5062,6 +5084,125 @@ Write-Output $payload
     assert payload["getStateCalls"] == 4
     assert "launcher.supervisor.state_wait_timeout" not in payload["controlEvents"]
     assert "launcher.supervisor.exit_state_missing" in payload["controlEvents"]
+
+
+def test_launcher_supervisor_start_fails_fast_when_process_exits(tmp_path):
+    result = _run_launcher_ast_harness(
+        tmp_path,
+        """
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$LauncherPath
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$source = Get-Content -Raw -LiteralPath $LauncherPath
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors -and $parseErrors.Count -gt 0) {
+    throw "Launcher script parse failed: $($parseErrors[0].Message)"
+}
+
+foreach ($functionName in @(
+    "ConvertTo-PowerShellSingleQuotedLiteral",
+    "Start-Supervisor"
+)) {
+    $functionAst = $ast.Find({
+        param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+            $node.Name -eq $functionName
+    }, $true)
+    if ($null -eq $functionAst) {
+        throw "$functionName was not found."
+    }
+    . ([scriptblock]::Create($functionAst.Extent.Text))
+}
+
+$script:currentRuntimeSceneId = $null
+$script:events = @()
+$script:launcherDir = Join-Path ([System.IO.Path]::GetTempPath()) ("vibelution-supervisor-start-" + [guid]::NewGuid().ToString("N"))
+$script:projectDir = $script:launcherDir
+$script:PSCommandPath = $LauncherPath
+New-Item -ItemType Directory -Path $script:launcherDir -Force | Out-Null
+function Start-HiddenBackgroundProcess {
+    param(
+        [string]$FilePath,
+        [string[]]$ArgumentList = @(),
+        [string]$WorkingDirectory = ""
+    )
+    return [pscustomobject]@{ Id = 999999 }
+}
+function Write-LauncherControlLog {
+    param([string]$Event, [string]$Message, [string]$Level = "info", [hashtable]$Fields = @{})
+    $script:events += [pscustomobject]@{ event = $Event; message = $Message; level = $Level; fields = $Fields }
+}
+function Start-Sleep { param([int]$Milliseconds, [int]$Seconds) }
+
+$errorMessage = ""
+try {
+    Start-Supervisor -ManagedSessionId "session-1" | Out-Null
+} catch {
+    $errorMessage = $_.Exception.Message
+}
+
+$payload = @{
+    errorMessage = $errorMessage
+    events = @($script:events)
+} | ConvertTo-Json -Depth 8 -Compress
+Write-Output $payload
+""",
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    payload = json.loads(result.stdout.strip().splitlines()[-1])
+    assert "Supervisor process exited during startup" in payload["errorMessage"]
+    assert payload["events"][0]["event"] == "launcher.supervisor.start_failed"
+    assert payload["events"][0]["fields"]["stdout_path"]
+    assert payload["events"][0]["fields"]["stderr_path"]
+
+
+def test_launcher_powershell_single_quoted_literal_escapes_quotes(tmp_path):
+    result = _run_launcher_ast_harness(
+        tmp_path,
+        """
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$LauncherPath
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$source = Get-Content -Raw -LiteralPath $LauncherPath
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors -and $parseErrors.Count -gt 0) {
+    throw "Launcher script parse failed: $($parseErrors[0].Message)"
+}
+
+$functionAst = $ast.Find({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -eq "ConvertTo-PowerShellSingleQuotedLiteral"
+}, $true)
+if ($null -eq $functionAst) {
+    throw "ConvertTo-PowerShellSingleQuotedLiteral was not found."
+}
+. ([scriptblock]::Create($functionAst.Extent.Text))
+
+$literal = ConvertTo-PowerShellSingleQuotedLiteral -Value "C:\\tmp\\user's file.ps1"
+$payload = @{ literal = $literal } | ConvertTo-Json -Compress
+Write-Output $payload
+""",
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    payload = json.loads(result.stdout.strip().splitlines()[-1])
+    assert payload["literal"] == "'C:\\tmp\\user''s file.ps1'"
 
 
 def test_launcher_supervisor_preserves_requested_shutdown_reason_on_backend_exit(tmp_path):
