@@ -16,4 +16,13 @@ describe("ResetRoute layout contract", () => {
     expect(routeSource).toContain('fetchJson<ResetExecuteResponse>("/api/reset/execute"');
     expect(routeSource).toContain('method: "POST"');
   });
+
+  it("renders cleanup empty and loading states as compact ledger rows", () => {
+    expect(routeSource).toContain("function ResetLedgerEmptyState");
+    expect(routeSource).toContain("styles.ledgerEmptyState");
+    expect(routeSource).toContain("styles.ledgerEmptyRows");
+    expect(routeSource).toContain("resetQuery.isLoading && !summary");
+    expect(routeSource).not.toContain("<p className={styles.emptyState}>{copy.noPreview}</p>");
+    expect(routeSource).not.toContain("<p className={styles.emptyState}>{copy.noResult}</p>");
+  });
 });

@@ -136,6 +136,33 @@ function previewSignature(itemIds: string[]) {
   return [...itemIds].sort().join("|");
 }
 
+function ResetLedgerEmptyState({
+  label,
+  detail,
+  stateLabel,
+  tone = "idle",
+}: {
+  label: string;
+  detail: string;
+  stateLabel: string;
+  tone?: "idle" | "loading" | "error";
+}) {
+  return (
+    <div className={styles.ledgerEmptyState} data-state-tone={tone}>
+      <div>
+        <span>{stateLabel}</span>
+        <strong>{label}</strong>
+        <p>{detail}</p>
+      </div>
+      <div className={styles.ledgerEmptyRows} aria-hidden="true">
+        <span />
+        <span />
+        <span />
+      </div>
+    </div>
+  );
+}
+
 export function ResetRoute() {
   const { lang } = useShellI18n();
   const copy = COPY[lang];
@@ -322,7 +349,27 @@ export function ResetRoute() {
           </div>
 
           <div className={styles.itemList}>
-            {groupedItems.map((group) => {
+            {resetQuery.isError ? (
+              <ResetLedgerEmptyState
+                label={describeError(resetQuery.error, copy.refresh)}
+                detail={lang === "zh" ? "清理盘点读取失败，先刷新后再选择清理项。" : "Cleanup inventory failed to load. Refresh before selecting items."}
+                stateLabel={lang === "zh" ? "错误" : "error"}
+                tone="error"
+              />
+            ) : resetQuery.isLoading && !summary ? (
+              <ResetLedgerEmptyState
+                label={copy.refresh}
+                detail={lang === "zh" ? "正在读取白名单、风险等级、候选路径和保护边界。" : "Reading allow-list items, risk levels, candidate paths, and protected boundaries."}
+                stateLabel={lang === "zh" ? "读取中" : "loading"}
+                tone="loading"
+              />
+            ) : groupedItems.length === 0 ? (
+              <ResetLedgerEmptyState
+                label={copy.inventory}
+                detail={lang === "zh" ? "当前没有后端返回的可审查清理项。" : "The backend returned no cleanup items to review."}
+                stateLabel={lang === "zh" ? "空状态" : "empty"}
+              />
+            ) : groupedItems.map((group) => {
               const groupSelected = group.items.filter((item) => selectedIds.includes(item.id)).length;
               return (
                 <section key={group.key} className={styles.itemGroup}>
@@ -404,9 +451,15 @@ export function ResetRoute() {
                 }))}
                 truncatedLabel={copy.truncated}
                 emptyLabel={copy.noPreview}
+                emptyDetail={lang === "zh" ? "本次预览没有返回任何路径条目。" : "This preview returned no path entries."}
+                emptyStateLabel={lang === "zh" ? "空结果" : "empty"}
               />
             ) : (
-              <p className={styles.emptyState}>{copy.noPreview}</p>
+              <ResetLedgerEmptyState
+                label={copy.noPreview}
+                detail={lang === "zh" ? "选择清理项并运行预览后，这里会列出将处理、保护和跳过的路径。" : "Select cleanup items and run preview to list handled, protected, and skipped paths."}
+                stateLabel={lang === "zh" ? "待预览" : "pending"}
+              />
             )}
           </section>
 
@@ -433,9 +486,15 @@ export function ResetRoute() {
                 }))}
                 truncatedLabel={copy.truncated}
                 emptyLabel={copy.noResult}
+                emptyDetail={lang === "zh" ? "本次执行没有返回任何路径条目。" : "This execution returned no path entries."}
+                emptyStateLabel={lang === "zh" ? "空结果" : "empty"}
               />
             ) : (
-              <p className={styles.emptyState}>{copy.noResult}</p>
+              <ResetLedgerEmptyState
+                label={copy.noResult}
+                detail={lang === "zh" ? "执行前需要一次匹配当前选择的预览结果。" : "Execution requires a preview that matches the current selection."}
+                stateLabel={lang === "zh" ? "待执行" : "pending"}
+              />
             )}
           </section>
 
@@ -466,6 +525,8 @@ function ResultContent({
   items,
   truncatedLabel,
   emptyLabel,
+  emptyDetail,
+  emptyStateLabel,
 }: {
   mode: "preview" | "result";
   summary: string;
@@ -478,9 +539,17 @@ function ResultContent({
   }>;
   truncatedLabel: string;
   emptyLabel: string;
+  emptyDetail: string;
+  emptyStateLabel: string;
 }) {
   if (items.length === 0) {
-    return <p className={styles.emptyState}>{emptyLabel}</p>;
+    return (
+      <ResetLedgerEmptyState
+        label={emptyLabel}
+        detail={emptyDetail}
+        stateLabel={emptyStateLabel}
+      />
+    );
   }
   return (
     <div className={styles.resultContent}>
