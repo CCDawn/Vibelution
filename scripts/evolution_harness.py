@@ -1557,6 +1557,7 @@ def _extract_supervised_marker_payload(
     lines: Iterable[str],
     marker: str,
 ) -> tuple[Dict[str, Any], Optional[str]]:
+    last_error: Optional[str] = None
     for line in reversed(list(lines)):
         text = str(line or "").strip()
         marker_index = text.find(marker)
@@ -1564,15 +1565,17 @@ def _extract_supervised_marker_payload(
             continue
         raw_payload = text[marker_index + len(marker) :].strip()
         if not raw_payload:
-            return {}, "empty_payload"
+            last_error = last_error or "empty_payload"
+            continue
         try:
             payload = json.loads(raw_payload)
         except json.JSONDecodeError:
-            return {}, "invalid_json"
+            last_error = last_error or "invalid_json"
+            continue
         if isinstance(payload, dict) and payload:
             return payload, None
-        return {}, "non_object_payload"
-    return {}, None
+        last_error = last_error or "non_object_payload"
+    return {}, last_error
 
 
 def _extract_supervised_fixture_markers(
@@ -1580,8 +1583,13 @@ def _extract_supervised_fixture_markers(
     debug_lines: List[str],
     stdout_lines: List[str],
 ) -> Dict[str, Any]:
-    event_lines = _supervised_marker_event_lines(events)
-    combined_lines = [*event_lines, *debug_lines, *stdout_lines]
+    event_line_groups = _supervised_marker_event_line_groups(events)
+    combined_lines = [
+        *debug_lines,
+        *stdout_lines,
+        *event_line_groups["tool_result"],
+        *event_line_groups["llm_response"],
+    ]
     final_state, final_state_error = _extract_supervised_marker_payload(
         combined_lines,
         SUPERVISED_FINAL_STATE_MARKER,
@@ -1615,19 +1623,24 @@ def _extract_supervised_fixture_markers(
 
 
 def _supervised_marker_event_lines(events: List[Dict[str, Any]]) -> List[str]:
-    lines: List[str] = []
+    groups = _supervised_marker_event_line_groups(events)
+    return [*groups["llm_response"], *groups["tool_result"]]
+
+
+def _supervised_marker_event_line_groups(events: List[Dict[str, Any]]) -> Dict[str, List[str]]:
+    groups: Dict[str, List[str]] = {"llm_response": [], "tool_result": []}
     for event in events:
         event_type = str(event.get("type") or "").strip()
         if event_type == "llm_response":
             for key in ("content", "raw_response", "message"):
                 value = event.get(key)
                 if isinstance(value, str) and value.strip():
-                    lines.append(value)
+                    groups["llm_response"].append(value)
         elif event_type == "tool_call":
             value = event.get("tool_result")
             if isinstance(value, str) and value.strip():
-                lines.append(value)
-    return lines
+                groups["tool_result"].append(value)
+    return groups
 
 
 def _validation_passed_for_tool(

@@ -104,6 +104,14 @@
   padding: 8px 10px 10px;
 }
 
+.workspaceResearch {
+  grid-template-columns: minmax(250px, 320px) minmax(0, 0) minmax(720px, 1fr);
+}
+
+.workspaceResearchCanvas {
+  grid-template-columns: minmax(250px, 320px) minmax(520px, 1fr) minmax(300px, 380px);
+}
+
 .workspaceEmpty {
   grid-template-columns: minmax(230px, 292px) minmax(0, 0.95fr) minmax(240px, 300px);
 }
@@ -265,6 +273,75 @@
   overflow: auto;
 }
 
+.researchIndexPanel {
+  display: grid;
+  gap: 7px;
+  padding: 8px;
+  border-top: 1px solid var(--border-soft);
+  background: color-mix(in srgb, var(--surface-panel-strong) 58%, transparent);
+}
+
+.researchIndexHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.researchIndexHeader strong {
+  color: var(--fg-primary);
+  font-size: 0.78rem;
+}
+
+.researchIndexHeader span {
+  color: var(--fg-muted);
+  font-size: 0.66rem;
+  font-weight: 740;
+}
+
+.researchIndexList {
+  display: grid;
+  gap: 5px;
+}
+
+.researchIndexItem {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 7px 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-card) 56%, transparent);
+  color: var(--fg-secondary);
+  text-align: left;
+}
+
+.researchIndexItem strong,
+.researchIndexItem span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.researchIndexItem strong {
+  color: var(--fg-primary);
+  font-size: 0.75rem;
+}
+
+.researchIndexItem span {
+  color: var(--fg-muted);
+  font-size: 0.65rem;
+}
+
+.researchIndexItemActive {
+  border-color: color-mix(in srgb, var(--accent-cool) 48%, var(--border-soft));
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--accent-cool) 14%, transparent), transparent 60%),
+    color-mix(in srgb, var(--surface-panel-strong) 76%, transparent);
+  box-shadow: inset 3px 0 0 var(--accent-cool);
+}
+
 .teamRow {
   display: grid;
   gap: 2px;
@@ -302,6 +379,13 @@
 .canvasPanel {
   display: flex;
   flex-direction: column;
+}
+
+.researchCanvasPanelHidden {
+  border: 0;
+  background: transparent;
+  pointer-events: none;
+  visibility: hidden;
 }
 
 .canvasToolbar {
@@ -659,6 +743,11 @@
   overflow: auto;
 }
 
+.researchInspector .inspectorBody {
+  gap: 10px;
+  padding: 10px;
+}
+
 .inspectorBody label {
   display: grid;
   gap: 5px;
@@ -711,6 +800,12 @@
   gap: 6px;
   padding-top: 8px;
   border-top: 1px solid var(--border-soft);
+}
+
+.researchInspector .workflowPanel {
+  gap: 10px;
+  border-top: 0;
+  padding-top: 0;
 }
 
 .sectionTitle {
@@ -1009,6 +1104,10 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.researchInspector .workflowCoordinationQueues {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
 .workflowCoordinationQueue {
   display: grid;
   gap: 3px;
@@ -1122,6 +1221,10 @@
   grid-template-columns: repeat(5, minmax(58px, 1fr));
   gap: 4px;
   min-width: 0;
+}
+
+.researchInspector .workflowIngestionStages {
+  grid-template-columns: repeat(5, minmax(120px, 1fr));
 }
 
 .workflowIngestionStage {
@@ -1269,6 +1372,10 @@
   overflow: auto;
 }
 
+.researchInspector .workflowGraphFrame {
+  min-height: max(250px, var(--workflow-graph-height));
+}
+
 .workflowGraphSvg {
   position: absolute;
   inset: 0;
@@ -1346,6 +1453,17 @@
 .workflowCandidateList {
   display: grid;
   gap: 7px;
+  min-width: 0;
+}
+
+.researchInspector .workflowCandidateList,
+.researchInspector .teamHistoryList {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.researchDiscussionPanel {
+  display: grid;
+  gap: 10px;
   min-width: 0;
 }
 
