@@ -481,7 +481,8 @@ def make_delegation_rules_section() -> SystemPromptSection:
     def compute() -> Optional[str]:
         try:
             from core.infrastructure.agent_session import get_session_state
-            return get_session_state().render_delegation_rules()
+            text = get_session_state().render_delegation_static_rules()
+            return text if isinstance(text, str) and text.strip() else None
         except Exception:
             return None
 
@@ -492,6 +493,26 @@ def make_delegation_rules_section() -> SystemPromptSection:
         cache_prefix=True,
         priority=36,
         description="主脑调度、子代理边界、结果回收与失败接管规则",
+    )
+
+
+def make_delegation_state_section() -> SystemPromptSection:
+    """委派状态章节 — 当前委派、最近证据和失败状态。"""
+
+    def compute() -> Optional[str]:
+        try:
+            from core.infrastructure.agent_session import get_session_state
+            text = get_session_state().render_delegation_state()
+            return text if isinstance(text, str) and text.strip() else None
+        except Exception:
+            return None
+
+    return SystemPromptSection(
+        name="DELEGATION_STATE",
+        compute=compute,
+        cache_break=True,
+        priority=36,
+        description="当前委派状态、最近回收证据与失败提示",
     )
 
 
@@ -650,6 +671,7 @@ def create_default_sections(
     sections.append(make_git_memory_section())
     sections.append(make_runtime_log_index_section())
     sections.append(make_delegation_rules_section())
+    sections.append(make_delegation_state_section())
     sections.append(make_config_awareness_section())
     sections.append(make_language_awareness_section())
     sections.append(make_session_child_routing_section())
