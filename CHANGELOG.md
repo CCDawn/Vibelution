@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.3 - 2026-06-08
+
+- Prevented the PowerShell Launcher frontend dependency and build paths from invoking npm `.cmd` wrappers, avoiding transient Windows cmd flashes during startup.
+- Switched Launcher frontend build execution to direct Node.js package entrypoints for TypeScript and Vite while preserving runtime-scene build logs.
+- Added launcher regression coverage so frontend build and dependency flows cannot silently return to cmd shim execution.
+
 ## 1.0.2 - 2026-06-08
 
 - Blocked direct Launcher and Workbench window closes while the managed project is still running, using browser beforeunload confirmation plus lifecycle telemetry.
