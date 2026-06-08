@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Literal, TypedDict
@@ -32,6 +33,7 @@ LauncherSupervisorOperation = Literal["supervisor_reattach"]
 RuntimeProfile = Literal["safe_local", "safe_remote", "debug", "ci"]
 UiLanguage = Literal["zh", "en"]
 WorkbenchWindowMode = Literal["fullscreen", "windowed"]
+WorkbenchWindowSize = str
 
 ACTIVE_WORK_BLOCK_MESSAGE_RESTART = "有进行中的任务，无法重启 Vibelution。请等待任务完成或先停止任务。"
 ACTIVE_WORK_BLOCK_MESSAGE_STOP = "有进行中的任务，无法停止 Vibelution。请等待任务完成或先停止任务。"
@@ -77,6 +79,9 @@ _STALE_SNAPSHOT_GRACE = timedelta(hours=6)
 _RUNTIME_PROFILES: tuple[RuntimeProfile, ...] = ("safe_local", "safe_remote", "debug", "ci")
 _UI_LANGUAGES: tuple[UiLanguage, ...] = ("zh", "en")
 _WORKBENCH_WINDOW_MODES: tuple[WorkbenchWindowMode, ...] = ("fullscreen", "windowed")
+_WORKBENCH_WINDOW_SIZE_DEFAULT = "auto"
+_WORKBENCH_WINDOW_SIZE_RE = re.compile(r"^([1-9][0-9]{2,4})x([1-9][0-9]{2,4})$", re.IGNORECASE)
+_WORKBENCH_WINDOW_SIZE_PRESETS: tuple[str, ...] = ("auto", "1280x800", "1600x900", "1920x1080")
 _WORKBENCH_WINDOW_MODE_LABELS = {
     "fullscreen": {"zh": "全屏", "en": "Fullscreen"},
     "windowed": {"zh": "窗口化", "en": "Windowed"},
@@ -176,6 +181,8 @@ def get_launcher_startup_settings() -> dict[str, Any]:
     ui = _read_config_section(public_config, "ui")
     configured_window_mode = _normalize_workbench_window_mode(workbench.get("window_mode"), default="fullscreen")
     window_env_override = _read_workbench_window_mode_env_override() or ""
+    configured_window_size = _normalize_workbench_window_size(workbench.get("window_size"))
+    window_size_env_override = _read_workbench_window_size_env_override() or ""
     configured_backend_port = _normalize_port(workbench.get("backend_port"), default=8000)
     configured_frontend_port = _normalize_port(workbench.get("frontend_port"), default=5173)
     backend_port_override = _read_port_env_override(("VIBELUTION_PORT", "AGENT_WORKBENCH_BACKEND_PORT"))
@@ -197,6 +204,10 @@ def get_launcher_startup_settings() -> dict[str, Any]:
             "windowMode": configured_window_mode,
             "effectiveWindowMode": window_env_override or configured_window_mode,
             "windowModeEnvOverride": window_env_override,
+            "windowSize": configured_window_size,
+            "effectiveWindowSize": window_size_env_override or configured_window_size,
+            "windowSizeEnvOverride": window_size_env_override,
+            "windowSizeOptions": _workbench_window_size_options(),
             "windowModeOptions": [
                 {
                     "mode": mode,
@@ -307,6 +318,8 @@ def update_launcher_startup_settings(payload: dict[str, Any]) -> dict[str, Any]:
         workbench["frontend_port"] = _parse_port(workbench_payload.get("frontendPort"), label="workbench.frontendPort")
     if "windowMode" in workbench_payload:
         workbench["window_mode"] = _parse_workbench_window_mode(workbench_payload.get("windowMode"))
+    if "windowSize" in workbench_payload:
+        workbench["window_size"] = _parse_workbench_window_size(workbench_payload.get("windowSize"))
     if "language" in interface_payload:
         ui["language"] = _parse_ui_language(interface_payload.get("language"))
 
@@ -346,6 +359,61 @@ def _parse_workbench_window_mode(value: object) -> WorkbenchWindowMode:
         return normalized  # type: ignore[return-value]
     allowed = ", ".join(_WORKBENCH_WINDOW_MODES)
     raise ValueError(f"Unsupported Workbench window mode '{value}'. Allowed values: {allowed}.")
+
+
+def _normalize_workbench_window_size(value: object, *, default: str = _WORKBENCH_WINDOW_SIZE_DEFAULT) -> WorkbenchWindowSize:
+    raw = str(value or "").strip().lower()
+    if raw == "auto":
+        return "auto"
+    match = _WORKBENCH_WINDOW_SIZE_RE.match(raw)
+    if match:
+        width = int(match.group(1))
+        height = int(match.group(2))
+        if _workbench_window_size_in_range(width, height):
+            return f"{width}x{height}"
+    fallback = str(default or _WORKBENCH_WINDOW_SIZE_DEFAULT).strip().lower()
+    if fallback == "auto":
+        return "auto"
+    fallback_match = _WORKBENCH_WINDOW_SIZE_RE.match(fallback)
+    if fallback_match:
+        width = int(fallback_match.group(1))
+        height = int(fallback_match.group(2))
+        if _workbench_window_size_in_range(width, height):
+            return f"{width}x{height}"
+    return _WORKBENCH_WINDOW_SIZE_DEFAULT
+
+
+def _parse_workbench_window_size(value: object) -> WorkbenchWindowSize:
+    raw = str(value or "").strip().lower()
+    if raw == "auto":
+        return "auto"
+    match = _WORKBENCH_WINDOW_SIZE_RE.match(raw)
+    if match:
+        width = int(match.group(1))
+        height = int(match.group(2))
+        if _workbench_window_size_in_range(width, height):
+            return f"{width}x{height}"
+    raise ValueError("workbench.windowSize must be 'auto' or a size like '1600x900'")
+
+
+def _workbench_window_size_in_range(width: int, height: int) -> bool:
+    return 320 <= width <= 7680 and 240 <= height <= 4320
+
+
+def _workbench_window_size_options() -> list[dict[str, Any]]:
+    return [
+        {
+            "size": size,
+            "label": {"zh": _workbench_window_size_label(size, "zh"), "en": _workbench_window_size_label(size, "en")},
+        }
+        for size in _WORKBENCH_WINDOW_SIZE_PRESETS
+    ]
+
+
+def _workbench_window_size_label(size: str, lang: UiLanguage) -> str:
+    if size == "auto":
+        return "自动" if lang == "zh" else "Auto"
+    return size
 
 
 def _normalize_runtime_profile(value: object) -> RuntimeProfile:
@@ -439,6 +507,18 @@ def _read_port_env_override(env_names: tuple[str, ...]) -> int | None:
     return None
 
 
+def _read_workbench_window_size_env_override() -> WorkbenchWindowSize | None:
+    for env_name in ("VIBELUTION_WORKBENCH_WINDOW_SIZE", "AGENT_WORKBENCH_WINDOW_SIZE"):
+        raw_value = str(os.environ.get(env_name) or "").strip()
+        if not raw_value:
+            continue
+        try:
+            return _parse_workbench_window_size(raw_value)
+        except ValueError:
+            continue
+    return None
+
+
 def _startup_settings_event_fields(setting: dict[str, Any]) -> dict[str, Any]:
     runtime = _read_config_section(setting, "runtime")
     workbench = _read_config_section(setting, "workbench")
@@ -450,6 +530,8 @@ def _startup_settings_event_fields(setting: dict[str, Any]) -> dict[str, Any]:
         "backendPort": workbench.get("backendPort"),
         "frontendPort": workbench.get("frontendPort"),
         "windowMode": workbench.get("windowMode"),
+        "windowSize": workbench.get("windowSize"),
+        "effectiveWindowSize": workbench.get("effectiveWindowSize"),
         "language": interface.get("language"),
     }
 

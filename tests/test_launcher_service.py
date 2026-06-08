@@ -312,6 +312,59 @@ def test_launcher_workbench_window_mode_reports_environment_override(tmp_path, m
     assert setting["envOverride"] == "fullscreen"
 
 
+def test_launcher_startup_settings_persist_workbench_window_size(tmp_path, monkeypatch):
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("[workbench]\nwindow_mode = \"windowed\"\nwindow_size = \"auto\"\n", encoding="utf-8")
+    events = []
+    monkeypatch.setattr(launcher_service, "CONFIG_PATH", config_path)
+    monkeypatch.delenv("VIBELUTION_WORKBENCH_WINDOW_SIZE", raising=False)
+    monkeypatch.delenv("AGENT_WORKBENCH_WINDOW_SIZE", raising=False)
+    monkeypatch.setattr(
+        launcher_service,
+        "append_runtime_manager_file_event",
+        lambda event_code, payload, **kwargs: events.append((event_code, payload)) or "2026-06-06T00:00:00+00:00",
+    )
+
+    response = launcher_service.update_launcher_startup_settings({"workbench": {"windowSize": "1600x900"}})
+
+    text = config_path.read_text(encoding="utf-8")
+    assert response["ok"] is True
+    assert response["setting"]["workbench"]["windowSize"] == "1600x900"
+    assert response["setting"]["workbench"]["effectiveWindowSize"] == "1600x900"
+    assert 'window_size = "1600x900"' in text
+    assert events[-1][0] == "launcher.settings.startup.updated"
+    assert events[-1][1]["fields"]["current"]["windowSize"] == "1600x900"
+
+
+def test_launcher_startup_settings_reports_workbench_window_size_env_override(tmp_path, monkeypatch):
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("[workbench]\nwindow_size = \"1600x900\"\n", encoding="utf-8")
+    monkeypatch.setattr(launcher_service, "CONFIG_PATH", config_path)
+    monkeypatch.setenv("VIBELUTION_WORKBENCH_WINDOW_SIZE", "1280x800")
+    monkeypatch.delenv("AGENT_WORKBENCH_WINDOW_SIZE", raising=False)
+
+    setting = launcher_service.get_launcher_startup_settings()
+
+    assert setting["workbench"]["windowSize"] == "1600x900"
+    assert setting["workbench"]["effectiveWindowSize"] == "1280x800"
+    assert setting["workbench"]["windowSizeEnvOverride"] == "1280x800"
+
+
+def test_launcher_startup_settings_rejects_invalid_workbench_window_size(tmp_path, monkeypatch):
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("[workbench]\n", encoding="utf-8")
+    monkeypatch.setattr(launcher_service, "CONFIG_PATH", config_path)
+
+    try:
+        launcher_service.update_launcher_startup_settings({"workbench": {"windowSize": "tiny"}})
+    except ValueError as exc:
+        error = str(exc)
+    else:
+        raise AssertionError("expected invalid window size to be rejected")
+
+    assert "workbench.windowSize" in error
+
+
 def test_standalone_launcher_active_work_guard_reads_runtime_manager_store(tmp_path, monkeypatch):
     work_runs_dir = tmp_path / ".runtime" / "runtime-manager" / "work_runs"
     store = WorkRunStore(root=work_runs_dir)
