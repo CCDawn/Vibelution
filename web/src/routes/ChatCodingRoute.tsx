@@ -74,8 +74,9 @@ import {
   ConversationMessage,
   ConversationAttachment,
 } from "../api/types";
-import { COMPOSER_SESSION_REFERENCE_MIME, ConversationView } from "../components/conversation/ConversationView";
 import type { TurnAvatarResolution } from "../components/conversation/ConversationView";
+import { COMPOSER_SESSION_REFERENCE_MIME } from "../components/conversation/conversationConstants";
+import { LazyConversationView } from "../components/conversation/LazyConversationView";
 import { isAgentInboxMessage, isTurnErrorMessage } from "../components/conversation/messageSections";
 import { LazyFilePreview } from "../components/preview/LazyFilePreview";
 import { collectBrowserPageSnapshot, postBrowserTelemetry } from "../app/browserTelemetry";
@@ -339,11 +340,11 @@ async function uploadSessionImageAttachment(sessionId: string, attachment: Compo
 }
 
 const RESIZE_HANDLE_WIDTH = 10;
-const MIN_LEFT_PANEL_WIDTH = 220;
+const MIN_LEFT_PANEL_WIDTH = 192;
 const MAX_LEFT_PANEL_WIDTH = 520;
-const MIN_RIGHT_PANEL_WIDTH = 280;
+const MIN_RIGHT_PANEL_WIDTH = 244;
 const MAX_RIGHT_PANEL_WIDTH = 560;
-const TARGET_CENTER_PANE_WIDTH = 420;
+const TARGET_CENTER_PANE_WIDTH = 520;
 const KEYBOARD_RESIZE_STEP = 24;
 const MENTAL_MODEL_TOGGLE_STORAGE_KEY = "vibelution.chat.mentalModelEnabled";
 const MAX_COMPOSER_IMAGE_ATTACHMENTS = 4;
@@ -5608,7 +5609,7 @@ export function ChatCodingRoute() {
                     ))}
                   </div>
                 ) : null}
-                <ConversationView
+                <LazyConversationView
                   sessionId={activeSessionId ?? detail.id}
                   title={detail.title}
                   phase={detail.currentPhase}
@@ -5668,6 +5669,7 @@ export function ChatCodingRoute() {
                   onStop={handleStopTurn}
                   onSafeGuidance={() => handleSubmitGuidance("safe")}
                   onInterruptGuidance={() => handleSubmitGuidance("interrupt")}
+                  fallback={<div className={styles.emptySurface}>{t("loadingSession")}</div>}
                 />
               </div>
             ) : (

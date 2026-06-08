@@ -189,4 +189,13 @@ describe("ToolsRoute layout contract", () => {
     expect(stylesSource).toContain("white-space: normal");
     expect(stylesSource).toContain("align-items: start");
   });
+
+  it("reflows Agent permission summary before desktop narrow widths squeeze labels vertical", () => {
+    expect(stylesSource).toContain(".permissionSummaryGrid");
+    expect(stylesSource).toContain("grid-template-columns: minmax(220px, 0.55fr) minmax(0, 1fr) auto");
+    expect(stylesSource).toContain("@media (max-width: 1180px)");
+    expect(stylesSource).toContain("grid-template-columns: minmax(0, 1fr) auto");
+    expect(stylesSource).toContain("grid-column: 1 / -1");
+    expect(stylesSource).toContain("grid-template-columns: repeat(5, minmax(52px, 1fr))");
+  });
 });

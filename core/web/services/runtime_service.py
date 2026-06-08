@@ -15,17 +15,19 @@ from config.public_config import load_public_config
 from config import get_config
 from core.infrastructure.mental_model import get_mental_model
 from core.mental_model_flags import is_mental_model_enabled
-from core.runtime_manager import ensure_daemon_running, load_runtime_snapshot, submit_command
+from core.runtime_manager import ensure_daemon_running, submit_command
 from core.runtime_manager.evolution_store import (
     load_active_run_snapshot as load_evolution_active_run_snapshot,
     load_latest_run_snapshot as load_evolution_latest_run_snapshot,
 )
+from core.runtime_manager.state_store import load_state as load_runtime_manager_state
 from core.runtime_manager.work_run_leases import leases_for_snapshot
 
 from .i18n import get_web_language, text_for
 from .avatar_image_service import avatar_image_url
+from .runtime_manager_control_service import current_runtime_manager_pid
 from .session_service import (
-    get_active_session_detail,
+    get_active_session_summary,
     list_active_session_work_runs,
     load_chat_turn_work_run_summary,
     request_stop_session_turn,
@@ -116,7 +118,7 @@ def get_runtime_summary() -> dict:
     except Exception:
         pass
 
-    active_session = get_active_session_detail() or {}
+    active_session = get_active_session_summary() or {}
     model_identity = _safe_active_session_model_identity(active_session)
     if model_identity.get("model"):
         model_ref = str(model_identity.get("model") or "").strip()
@@ -628,11 +630,24 @@ def _load_runtime_state() -> dict:
 
 
 def _load_runtime_manager_snapshot() -> dict:
+    """Return a shell-safe runtime-manager summary without live process inventory."""
+
     try:
-        payload = load_runtime_snapshot()
+        state = load_runtime_manager_state()
     except Exception:
-        return {}
-    return payload if isinstance(payload, dict) else {}
+        state = {}
+    if not isinstance(state, dict):
+        state = {}
+    payload = json.loads(json.dumps(state)) if state else {}
+    manager_pid = current_runtime_manager_pid(PROJECT_ROOT)
+    payload["daemonRunning"] = manager_pid > 0
+    payload["managerPid"] = manager_pid
+    payload["runtimeState"] = "running" if manager_pid > 0 else str(payload.get("runtimeState") or "idle")
+    payload["projectRoot"] = str(PROJECT_ROOT)
+    payload.setdefault("workbench", {})
+    payload.setdefault("runtimeManager", {})
+    payload.setdefault("residualProcesses", {"count": 0, "items": [], "mode": "not_scanned_for_summary"})
+    return payload
 
 
 def _local_user_name() -> str:

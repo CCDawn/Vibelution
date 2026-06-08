@@ -86,6 +86,7 @@ export const queryKeys = {
   evolutionWorktreeRuns: () => ["evolution", "worktree-runs"] as const,
   evolutionWorktreeActiveRun: () => ["evolution", "worktree-runs", "active"] as const,
   evolutionChatReview: () => ["evolution", "chat-review"] as const,
+  evolutionChatReviewCandidate: (candidateId: string) => ["evolution", "chat-review", candidateId] as const,
   evolutionActiveRun: () => ["evolution", "active-run"] as const,
   evolutionLatestRun: () => ["evolution", "latest-run"] as const,
   evolutionSelfOverview: () => ["evolution", "self", "overview"] as const,

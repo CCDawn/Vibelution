@@ -555,10 +555,7 @@ def _repair_agent_references(
         key: keep(value, f"slots.{key}")
         for key, value in dict(next_binding.get("slots") or {}).items()
     }
-    next_binding["excludedAgentIds"] = [
-        agent_id for agent_id in (keep(item, "excludedAgentIds") for item in next_binding.get("excludedAgentIds") or [])
-        if agent_id
-    ]
+    next_binding["excludedAgentIds"] = _dedupe(next_binding.get("excludedAgentIds") or [])
     next_binding["excludedSlots"] = _safe_key_list(next_binding.get("excludedSlots") or [])
     if warnings:
         next_binding["excludedAgentIds"] = _dedupe(
@@ -567,12 +564,24 @@ def _repair_agent_references(
     if not next_binding["defaultAgentId"] and next_binding["availableAgentIds"]:
         next_binding["defaultAgentId"] = next_binding["availableAgentIds"][0]
     if warnings:
+        field_counts: dict[str, int] = {}
+        unique_agent_ids = _dedupe(item["agentId"] for item in warnings)
+        for item in warnings:
+            field = str(item.get("field") or "").strip()
+            field_counts[field] = field_counts.get(field, 0) + 1
         _record_mode_binding_event(
             "mode_binding.missing_agent",
             mode,
             level="warning",
             outcome="repaired",
-            fields={"warningCount": len(warnings), "agentIds": [item["agentId"] for item in warnings[:12]]},
+            fields={
+                "warningCount": len(warnings),
+                "uniqueAgentCount": len(unique_agent_ids),
+                "agentIds": unique_agent_ids[:12],
+                "fieldCounts": field_counts,
+                "activeAgentCount": len(active_agent_ids),
+                "storagePath": _relative_project_path(mode_binding_path()),
+            },
         )
     return next_binding, warnings
 

@@ -32,7 +32,7 @@ import {
   TeamWorkflowCandidateListPayload,
   TeamWorkflowOrchestration,
 } from "../api/types";
-import { useAppI18n } from "../i18n/useAppI18n";
+import { useShellI18n } from "../i18n/useShellI18n";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { agentDisplayInfo } from "./agentDisplay";
 import { createChatWorkspaceCache } from "./chatWorkspaceCache";
@@ -612,7 +612,7 @@ function workflowGraphNodeTone(node: TeamWorkflowCandidateGraphNode) {
 }
 
 export function TeamsRoute() {
-  const { lang } = useAppI18n();
+  const { lang } = useShellI18n();
   const queryClient = useQueryClient();
   const chatWorkspaceCache = useMemo(() => createChatWorkspaceCache(queryClient), [queryClient]);
   const [searchParams, setSearchParams] = useSearchParams();

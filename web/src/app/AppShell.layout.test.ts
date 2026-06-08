@@ -6,19 +6,35 @@ import styles from "./AppShell.module.css";
 import indexHtml from "../../index.html?raw";
 import manifestSource from "../../public/manifest.webmanifest?raw";
 import shellSource from "./AppShell.tsx?raw";
+import launcherShellSource from "./LauncherShell.tsx?raw";
+import documentLanguageSource from "./documentLanguage.ts?raw";
+import useShellI18nSource from "../i18n/useShellI18n.ts?raw";
+import utilityMenuSource from "./AppShellUtilityMenu.tsx?raw";
+import statusGuideSource from "./AppShellStatusGuidePanel.tsx?raw";
 
 const shellStyles = readFileSync(fileURLToPath(new URL("./AppShell.module.css", import.meta.url)), "utf8");
 
 describe("AppShell layout contract", () => {
   it("renders one compact status summary chip while keeping the detailed guide panel", () => {
     expect(shellSource).toContain("statusSummaryChip");
-    expect(shellSource).toContain("statusGuidePanel");
+    expect(shellSource).toContain("LazyAppShellStatusGuidePanel");
+    expect(shellSource).toContain("statusGuideOpen ? (");
+    expect(shellSource).not.toContain("statusGuidePanel");
+    expect(statusGuideSource).toContain("statusGuidePanel");
+    expect(statusGuideSource).toContain("lifecycleProofCard");
+    expect(statusGuideSource).toContain("lifecycleStateLabel");
+    expect(statusGuideSource).toContain("systemFrontendPossible_connected");
     expect(shellSource).not.toContain("rightStatusCards.map((item) => (\n                <span key={item.id} className={styles.statusBadge}>");
   });
 
   it("keeps the global shell top bar compact", () => {
     expect(styles.statusSummaryChip).toBeTypeOf("string");
     expect(styles.statusSummaryCount).toBeTypeOf("string");
+    expect(shellStyles).toContain("flex-wrap: nowrap");
+    expect(shellStyles).toContain("@media (max-width: 1180px)");
+    expect(shellStyles).toContain(".topClock span:last-child");
+    expect(shellStyles).toContain("@media (max-width: 980px)");
+    expect(shellStyles).toContain("overscroll-behavior-x: contain");
   });
 
   it("keeps the global shell background in the layered starfield treatment", () => {
@@ -35,6 +51,21 @@ describe("AppShell layout contract", () => {
     expect(shellSource).toContain("packageJson.version");
     expect(shellSource).toContain("versionPill");
     expect(styles.versionPill).toBeTypeOf("string");
+  });
+
+  it("uses the lightweight shell dictionary instead of the full route dictionary", () => {
+    expect(shellSource).toContain("useShellI18n");
+    expect(shellSource).not.toContain("useAppI18n");
+    expect(shellSource).not.toContain("../i18n/dictionary");
+    expect(shellSource).not.toContain("../i18n/useAppI18n");
+    expect(launcherShellSource).toContain("useShellI18n");
+    expect(launcherShellSource).not.toContain("useAppI18n");
+    expect(launcherShellSource).not.toContain("../i18n/dictionary");
+    expect(launcherShellSource).not.toContain("../i18n/useAppI18n");
+    expect(documentLanguageSource).toContain("../i18n/shellDictionary");
+    expect(documentLanguageSource).not.toContain("../i18n/dictionary");
+    expect(useShellI18nSource).toContain("shellDictionary");
+    expect(useShellI18nSource).not.toContain("./dictionary");
   });
 
   it("exposes Teams from the primary navigation", () => {
@@ -59,17 +90,21 @@ describe("AppShell layout contract", () => {
     expect(primaryNav).not.toContain('to="/git"');
     expect(shellSource).toContain("utilityCluster");
     expect(shellSource).toContain("utilityClusterOpen");
-    expect(shellSource).toContain("utilityPanel");
     expect(shellSource).toContain("aria-expanded={utilityOpen}");
-    expect(shellSource).toContain("hidden={!utilityOpen}");
+    expect(shellSource).toContain("LazyAppShellUtilityMenu");
+    expect(shellSource).toContain("utilityOpen ? (");
+    expect(shellSource).not.toContain("queryKeys.gitStatus()");
+    expect(shellSource).not.toContain("queryKeys.fileTree()");
+    expect(utilityMenuSource).toContain("utilityPanel");
+    expect(utilityMenuSource).not.toContain("hidden={!utilityOpen}");
     expect(shellSource).toContain('event.key === "Escape"');
-    expect(shellSource).toContain('to="/logs"');
+    expect(utilityMenuSource).toContain('to="/logs"');
     expect(shellSource).not.toContain('to="/agents/tools"');
     expect(shellSource).not.toContain('to="/tools"');
     expect(shellSource).toContain("Wrench");
-    expect(shellSource).toContain('to="/git"');
-    expect(shellSource).toContain('href="/launcher"');
-    expect(shellSource).toContain('target="_blank"');
+    expect(utilityMenuSource).toContain('to="/git"');
+    expect(utilityMenuSource).toContain('href="/launcher"');
+    expect(utilityMenuSource).toContain('target="_blank"');
     expect(shellSource).toContain('data-browser-role="workbench"');
     expect(styles.utilityTrigger).toBeTypeOf("string");
     expect(styles.utilityPanel).toBeTypeOf("string");

@@ -20,7 +20,7 @@ import {
   ResetPreviewResponse,
   ResetSummary,
 } from "../api/types";
-import { useAppI18n } from "../i18n/useAppI18n";
+import { useShellI18n } from "../i18n/useShellI18n";
 import styles from "./ResetRoute.module.css";
 
 type Notice = {
@@ -137,7 +137,7 @@ function previewSignature(itemIds: string[]) {
 }
 
 export function ResetRoute() {
-  const { lang } = useAppI18n();
+  const { lang } = useShellI18n();
   const copy = COPY[lang];
   const queryClient = useQueryClient();
   const location = useLocation();

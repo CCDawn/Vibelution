@@ -1712,6 +1712,72 @@ def get_active_session_detail() -> dict | None:
     return _build_session_detail(conversations[0])
 
 
+def get_active_session_summary() -> dict | None:
+    """Return the current active conversation summary for shell-level polling."""
+
+    agent_by_id = _agent_lookup_for_conversations()
+    active_id, conversations = _load_conversations(repair=False, agent_by_id=agent_by_id, lightweight=True)
+    conversations = _append_agent_directory_conversations(conversations, agent_by_id=agent_by_id)
+    if not conversations:
+        return None
+    target_id = str(active_id or "").strip()
+    target = next(
+        (
+            item
+            for item in conversations
+            if isinstance(item, dict) and str(item.get("id") or "").strip() == target_id
+        ),
+        None,
+    )
+    if target is None:
+        target = next((item for item in conversations if isinstance(item, dict)), None)
+    if target is None:
+        return None
+    target = _with_direct_session_agent_for_summary(target, agent_by_id=agent_by_id)
+    return _build_session_summary(target, hydrate_agent=False)
+
+
+def _with_direct_session_agent_for_summary(
+    conversation: dict[str, Any],
+    *,
+    agent_by_id: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    """Attach a direct-session Agent to a lightweight summary copy without repairing state."""
+
+    session_id = str(conversation.get("id") or conversation.get("conversation_id") or "").strip()
+    if not session_id:
+        return conversation
+    existing_agent_id = str(conversation.get("agentId") or conversation.get("agent_id") or "").strip()
+    existing_agent = _agent_from_lookup(agent_by_id, existing_agent_id) if existing_agent_id else None
+    if existing_agent is not None:
+        updated = dict(conversation)
+        updated["_agent"] = dict(existing_agent)
+        updated["_agentLookupChecked"] = True
+        return updated
+    if existing_agent_id:
+        return conversation
+    for agent in agent_by_id.values():
+        if not isinstance(agent, dict):
+            continue
+        if str(agent.get("status") or "active").strip().lower() == "archived":
+            continue
+        agent_id = str(agent.get("agentId") or "").strip()
+        if not agent_id or str(agent.get("directSessionId") or "").strip() != session_id:
+            continue
+        updated = dict(conversation)
+        updated["agent_id"] = agent_id
+        updated["agentId"] = agent_id
+        updated["_agent"] = dict(agent)
+        updated["_agentLookupChecked"] = True
+        updated["agentMissingId"] = ""
+        updated["agentMissing"] = False
+        updated["agentStatusCode"] = ""
+        updated["agentDirectSessionMismatch"] = False
+        updated["agentPrimaryDirectSessionId"] = ""
+        return updated
+    return conversation
+
+
 def create_chat_session(
     *,
     title: str = "",

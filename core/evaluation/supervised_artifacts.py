@@ -266,7 +266,7 @@ def _case_evaluation_metadata(intake_provenance: dict[str, Any]) -> dict[str, An
         metadata["scoreLabel"] = score_label
     if official_status:
         metadata["officialVerifierStatus"] = official_status
-    if evaluation_mode == "custom_harness" or official_status == "harbor_pending":
+    if evaluation_mode in {"custom_harness", "agent_judged"} or official_status == "harbor_pending":
         metadata["officialScore"] = None
         metadata["officialScoreAvailable"] = False
     return metadata

@@ -251,7 +251,7 @@ def _case_evaluation_metadata(case_summary: Any) -> Dict[str, Any]:
         metadata["score_label"] = score_label
     if official_status:
         metadata["official_verifier_status"] = official_status
-    if evaluation_mode == "custom_harness" or official_status == "harbor_pending":
+    if evaluation_mode in {"custom_harness", "agent_judged"} or official_status == "harbor_pending":
         metadata["official_score"] = None
         metadata["official_score_available"] = False
     return metadata
@@ -276,8 +276,8 @@ def _write_proposal(
         observation_count += 1
         if observation_count > observation_budget:
             status = "expired"
-            expired_at = decision.ended_at
-            expiration_reason = "observation_budget_exhausted"
+            expired_at = expired_at or decision.ended_at
+            expiration_reason = expiration_reason or "observation_budget_exhausted"
     elif observation_count <= 0:
         observation_count = 1
     supervision_boundary = _supervision_boundary_payload(

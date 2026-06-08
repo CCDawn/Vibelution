@@ -19,6 +19,7 @@ from core.evaluation.chat_next_state_signals import append_chat_next_state_signa
 from core.evaluation.chat_dataset_capture import ChatDatasetCaptureService, resolve_chat_dataset_paths
 from core.evaluation.dataset_registry import list_dataset_status
 from core.evaluation.chat_segmenter import ChatTurnRecord
+from core.evaluation import self_evolution_workbench
 from core.evaluation.self_evolution_candidate_pool import append_candidate_record
 from config import public_config as public_config_module
 from config.models import LLMProfile, ProviderConfig
@@ -135,6 +136,7 @@ def disable_runtime_manager_live_control(monkeypatch: pytest.MonkeyPatch):
 
 @pytest.fixture(autouse=True)
 def isolate_evolution_live_state():
+    self_evolution_service.invalidate_self_evolution_overview_cache()
     with supervised_control_service._RUN_STATE_LOCK:
         supervised_control_service._RUN_STATES.clear()
         supervised_control_service._RUN_CONTROLLERS.clear()
@@ -148,6 +150,7 @@ def isolate_evolution_live_state():
     with self_evolution_control_service._RUN_SUBSCRIBERS_LOCK:
         self_evolution_control_service._RUN_SUBSCRIBERS.clear()
     yield
+    self_evolution_service.invalidate_self_evolution_overview_cache()
     with supervised_control_service._RUN_STATE_LOCK:
         supervised_control_service._RUN_STATES.clear()
         supervised_control_service._RUN_CONTROLLERS.clear()
@@ -569,6 +572,33 @@ def test_runtime_summary_uses_active_session_agent_dialogue_model(tmp_path, monk
     assert payload["profileSource"] == "active_session_agent_dialogue_provider"
 
 
+def test_runtime_summary_uses_light_active_session_summary(monkeypatch):
+    monkeypatch.setattr(
+        runtime_service,
+        "get_active_session_summary",
+        lambda: {
+            "id": "session-light",
+            "title": "Light session",
+            "agentId": "",
+            "currentPhase": "running",
+            "taskSummary": "light task",
+            "updatedAt": "2026-06-07T09:30:00+00:00",
+        },
+    )
+    monkeypatch.setattr(
+        runtime_service,
+        "get_active_session_detail",
+        lambda: (_ for _ in ()).throw(AssertionError("runtime summary must not hydrate full session detail")),
+        raising=False,
+    )
+
+    payload = runtime_service.get_runtime_summary()
+
+    assert payload["sessionTitle"] == "Light session"
+    assert payload["taskSummary"] == "light task"
+    assert payload["currentPhase"] == "running"
+
+
 def test_runtime_summary_falls_back_when_agent_model_identity_fails(monkeypatch):
     public_config = copy.deepcopy(load_public_config())
     expected_profile = str(public_config["runtime"]["profile"])
@@ -583,7 +613,7 @@ def test_runtime_summary_falls_back_when_agent_model_identity_fails(monkeypatch)
     monkeypatch.setattr(runtime_service, "load_public_config", lambda: copy.deepcopy(public_config))
     monkeypatch.setattr(
         runtime_service,
-        "get_active_session_detail",
+        "get_active_session_summary",
         lambda: {"agentId": "agent-model-broken", "currentPhase": "ready"},
     )
     monkeypatch.setattr(
@@ -655,7 +685,7 @@ def test_runtime_summary_ignores_unsafe_user_avatar_path(monkeypatch):
 
 
 def test_runtime_summary_exposes_real_context_compression_snapshot(monkeypatch):
-    monkeypatch.setattr(runtime_service, "get_active_session_detail", lambda: {})
+    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda: {})
     monkeypatch.setattr(
         runtime_service,
         "_load_runtime_state",
@@ -2564,6 +2594,60 @@ def test_backend_api_runtime_event_records_mutating_request(tmp_path, monkeypatc
     manifest = json.loads((scene_dir / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["backend"]["api_log_path"] == "raw/backend.api.log"
     assert manifest["backend"]["last_api_path"] == "/api/runtime/shutdown"
+
+
+def test_backend_api_runtime_event_records_request_source_summary(tmp_path, monkeypatch):
+    scene_dir = _seed_runtime_scene_bundle(tmp_path, scene_id="scene-api-source", status="running")
+    launcher_state_path = tmp_path / ".runtime" / "launcher" / "state.json"
+    launcher_state_path.parent.mkdir(parents=True, exist_ok=True)
+    launcher_state_path.write_text(
+        json.dumps(
+            {
+                "runtimeSceneId": "scene-api-source",
+                "runtimeSceneDir": str(scene_dir),
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(runtime_scene_service, "LAUNCHER_STATE_PATH", launcher_state_path)
+
+    response = client.get(
+        "/api/source-probe-missing?tab=runs&secret=hidden&token=abc123",
+        headers={
+            "referer": "http://testserver/supervised-evolution?tab=runs&secret=hidden#detail",
+            "origin": "http://testserver",
+            "user-agent": "Mozilla/5.0 AppleWebKit/537.36 Chrome/125.0 Safari/537.36 Edg/125.0",
+        },
+    )
+
+    assert response.status_code == 404
+    backend_raw = (scene_dir / "raw" / "backend.api.log").read_text(encoding="utf-8")
+    assert "/api/source-probe-missing" in backend_raw
+    assert "/supervised-evolution" in backend_raw
+    assert "tab=runs" not in backend_raw
+    assert "secret=hidden" not in backend_raw
+    assert "token=abc123" not in backend_raw
+    assert "Mozilla/5.0" not in backend_raw
+    assert "Chrome/125.0" not in backend_raw
+
+    backend_events = [
+        json.loads(line)
+        for line in (scene_dir / "events" / "backend.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    api_event = backend_events[-1]
+    assert api_event["event_code"] == "backend.api.request"
+    assert api_event["fields"]["path"] == "/api/source-probe-missing"
+    assert api_event["fields"]["statusCode"] == 404
+    assert api_event["fields"]["query"] == "params=3;length=35;keys=tab;sensitiveKeys=2"
+    assert api_event["fields"]["queryParamCount"] == 3
+    assert api_event["fields"]["queryKeys"] == ["tab"]
+    assert api_event["fields"]["queryLength"] == 35
+    assert api_event["fields"]["sensitiveQueryKeyCount"] == 2
+    assert api_event["fields"]["refererPath"] == "/supervised-evolution"
+    assert api_event["fields"]["requestOrigin"] == "http://testserver"
+    assert api_event["fields"]["userAgentFamily"] == "edge"
 
 
 def test_backend_api_runtime_event_marks_model_discovery_client_error_operational(tmp_path, monkeypatch):
@@ -7419,7 +7503,7 @@ def test_shutdown_stops_queued_same_agent_turn_before_it_starts(tmp_path, monkey
 def test_runtime_summary_exposes_parallel_chat_turn_active_items(tmp_path, monkeypatch):
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(runtime_service, "get_active_session_detail", lambda: {})
+    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda: {})
     monkeypatch.setattr(runtime_service, "_load_runtime_state", lambda: {})
     monkeypatch.setattr(runtime_service, "_load_runtime_manager_snapshot", lambda: {})
     alpha = session_service.create_chat_session(title="Alpha Agent")
@@ -7477,7 +7561,7 @@ def test_runtime_summary_exposes_queued_chat_turn_active_item(tmp_path, monkeypa
         "build_agent_context",
         lambda agent_id, **kwargs: SimpleNamespace(memory_policy={}, context_block="", timings={}),
     )
-    monkeypatch.setattr(runtime_service, "get_active_session_detail", lambda: {})
+    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda: {})
     monkeypatch.setattr(runtime_service, "_load_runtime_state", lambda: {})
     monkeypatch.setattr(runtime_service, "_load_runtime_manager_snapshot", lambda: {})
     _install_session_turn_scheduler(monkeypatch, max_active_per_agent=1)
@@ -7729,7 +7813,7 @@ def test_run_session_turn_records_agent_started_scene_event(tmp_path, monkeypatc
 
 
 def test_runtime_summary_exposes_work_run_kinds(monkeypatch):
-    monkeypatch.setattr(runtime_service, "get_active_session_detail", lambda: {})
+    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda: {})
     monkeypatch.setattr(runtime_service, "_load_runtime_state", lambda: {})
     self_evolution_control_service.persist_manager_run_snapshot(
         "self",
@@ -11062,7 +11146,7 @@ def test_submit_session_message_restores_prior_mental_snapshot_for_agent(tmp_pat
 def test_runtime_summary_prefers_current_phase_over_stale_task_progress(monkeypatch):
     monkeypatch.setattr(
         runtime_service,
-        "get_active_session_detail",
+        "get_active_session_summary",
         lambda: {
             "title": "真实会话",
             "taskSummary": "继续前端开发",
@@ -11079,7 +11163,7 @@ def test_runtime_summary_prefers_current_phase_over_stale_task_progress(monkeypa
 
 
 def test_runtime_summary_exposes_runtime_manager_workbench_state(monkeypatch):
-    monkeypatch.setattr(runtime_service, "get_active_session_detail", lambda: {})
+    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda: {})
     monkeypatch.setattr(runtime_service, "_load_runtime_state", lambda: {})
     monkeypatch.setattr(
         runtime_service,
@@ -11113,8 +11197,45 @@ def test_runtime_summary_exposes_runtime_manager_workbench_state(monkeypatch):
     assert payload["workbench"]["backendPid"] == 3001
 
 
+def test_runtime_summary_uses_light_runtime_manager_snapshot(monkeypatch):
+    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda: {})
+    monkeypatch.setattr(runtime_service, "_load_runtime_state", lambda: {})
+    monkeypatch.setattr(
+        runtime_service,
+        "load_runtime_manager_state",
+        lambda: {
+            "runtimeState": "running",
+            "managerPid": 9912,
+            "stateVersion": 17,
+            "workbench": {
+                "desiredState": "open",
+                "observedState": "open",
+                "phase": "steady",
+                "backendPid": 3001,
+                "browserWindowPid": 4002,
+                "browserManaged": True,
+                "url": "http://127.0.0.1:8000",
+            },
+        },
+    )
+    monkeypatch.setattr(runtime_service, "current_runtime_manager_pid", lambda project_root: 9912)
+    monkeypatch.setattr(
+        runtime_service,
+        "load_runtime_snapshot",
+        lambda: (_ for _ in ()).throw(AssertionError("runtime summary must not perform full runtime snapshot observation")),
+        raising=False,
+    )
+
+    payload = runtime_service.get_runtime_summary()
+
+    assert payload["runtimeManager"]["running"] is True
+    assert payload["runtimeManager"]["managerPid"] == 9912
+    assert payload["workbench"]["observedState"] == "open"
+    assert payload["lifecycleProof"]["projectRootMatches"] is True
+
+
 def test_runtime_summary_labels_launcher_control_surface_separately(monkeypatch):
-    monkeypatch.setattr(runtime_service, "get_active_session_detail", lambda: {})
+    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda: {})
     monkeypatch.setattr(runtime_service, "_load_runtime_state", lambda: {})
     monkeypatch.setattr(
         runtime_service,
@@ -11150,7 +11271,7 @@ def test_runtime_summary_labels_launcher_control_surface_separately(monkeypatch)
 
 
 def test_runtime_summary_exposes_orphaned_browser_status(monkeypatch):
-    monkeypatch.setattr(runtime_service, "get_active_session_detail", lambda: {})
+    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda: {})
     monkeypatch.setattr(runtime_service, "_load_runtime_state", lambda: {})
     monkeypatch.setattr(
         runtime_service,
@@ -11190,7 +11311,7 @@ def test_runtime_summary_exposes_orphaned_browser_status(monkeypatch):
 
 
 def test_runtime_lifecycle_proof_marks_ready_when_components_agree(monkeypatch):
-    monkeypatch.setattr(runtime_service, "get_active_session_detail", lambda: {})
+    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda: {})
     monkeypatch.setattr(runtime_service, "_load_runtime_state", lambda: {})
     monkeypatch.setattr(
         runtime_service,
@@ -11248,7 +11369,7 @@ def test_runtime_lifecycle_proof_marks_ready_when_components_agree(monkeypatch):
 
 
 def test_runtime_lifecycle_proof_keeps_advisory_source_staleness_non_blocking(monkeypatch):
-    monkeypatch.setattr(runtime_service, "get_active_session_detail", lambda: {})
+    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda: {})
     monkeypatch.setattr(runtime_service, "_load_runtime_state", lambda: {})
     monkeypatch.setattr(
         runtime_service,
@@ -11309,7 +11430,7 @@ def test_runtime_lifecycle_proof_keeps_advisory_source_staleness_non_blocking(mo
 
 
 def test_runtime_lifecycle_proof_does_not_mark_closed_with_active_work_runs(monkeypatch):
-    monkeypatch.setattr(runtime_service, "get_active_session_detail", lambda: {})
+    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda: {})
     monkeypatch.setattr(runtime_service, "_load_runtime_state", lambda: {})
     monkeypatch.setattr(
         runtime_service,
@@ -11363,7 +11484,7 @@ def test_runtime_lifecycle_proof_does_not_mark_closed_with_active_work_runs(monk
 
 
 def test_runtime_lifecycle_proof_ignores_finished_needs_continue_work_run(monkeypatch):
-    monkeypatch.setattr(runtime_service, "get_active_session_detail", lambda: {})
+    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda: {})
     monkeypatch.setattr(runtime_service, "_load_runtime_state", lambda: {})
     monkeypatch.setattr(runtime_service, "list_active_session_work_runs", lambda: [])
     finished_run = {
@@ -11428,7 +11549,7 @@ def test_runtime_lifecycle_proof_ignores_finished_needs_continue_work_run(monkey
 
 
 def test_runtime_lifecycle_proof_does_not_mark_closed_when_backend_port_is_still_owned(monkeypatch):
-    monkeypatch.setattr(runtime_service, "get_active_session_detail", lambda: {})
+    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda: {})
     monkeypatch.setattr(runtime_service, "_load_runtime_state", lambda: {})
     monkeypatch.setattr(
         runtime_service,
@@ -11491,7 +11612,7 @@ def test_runtime_lifecycle_proof_does_not_mark_closed_when_backend_port_is_still
 
 
 def test_runtime_lifecycle_proof_does_not_mark_closed_with_residual_repo_processes(monkeypatch):
-    monkeypatch.setattr(runtime_service, "get_active_session_detail", lambda: {})
+    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda: {})
     monkeypatch.setattr(runtime_service, "_load_runtime_state", lambda: {})
     monkeypatch.setattr(
         runtime_service,
@@ -11566,7 +11687,7 @@ def test_runtime_lifecycle_proof_does_not_mark_closed_with_residual_repo_process
 
 
 def test_runtime_lifecycle_proof_detects_unmanaged_frontend_dev_server(monkeypatch):
-    monkeypatch.setattr(runtime_service, "get_active_session_detail", lambda: {})
+    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda: {})
     monkeypatch.setattr(runtime_service, "_load_runtime_state", lambda: {})
     monkeypatch.setattr(
         runtime_service,
@@ -11644,7 +11765,7 @@ def test_runtime_lifecycle_proof_detects_unmanaged_frontend_dev_server(monkeypat
 def test_runtime_summary_exposes_tool_call_session_state(monkeypatch):
     monkeypatch.setattr(
         runtime_service,
-        "get_active_session_detail",
+        "get_active_session_summary",
         lambda: {
             "title": "真实会话",
             "taskSummary": "继续前端开发",
@@ -11672,7 +11793,7 @@ def test_runtime_summary_exposes_tool_call_session_state(monkeypatch):
 def test_runtime_summary_exposes_thinking_session_state(monkeypatch):
     monkeypatch.setattr(
         runtime_service,
-        "get_active_session_detail",
+        "get_active_session_summary",
         lambda: {
             "title": "真实会话",
             "taskSummary": "继续前端开发",
@@ -11699,7 +11820,7 @@ def test_runtime_summary_exposes_thinking_session_state(monkeypatch):
 def test_runtime_summary_exposes_answering_session_state(monkeypatch):
     monkeypatch.setattr(
         runtime_service,
-        "get_active_session_detail",
+        "get_active_session_summary",
         lambda: {
             "title": "真实会话",
             "taskSummary": "继续前端开发",
@@ -11726,7 +11847,7 @@ def test_runtime_summary_exposes_answering_session_state(monkeypatch):
 def test_runtime_summary_treats_stopping_session_as_active(monkeypatch):
     monkeypatch.setattr(
         runtime_service,
-        "get_active_session_detail",
+        "get_active_session_summary",
         lambda: {
             "title": "真实会话",
             "taskSummary": "正在收束当前轮。",
@@ -11745,7 +11866,7 @@ def test_runtime_summary_treats_stopping_session_as_active(monkeypatch):
 def test_runtime_summary_marks_ready_session_as_needing_response(monkeypatch):
     monkeypatch.setattr(
         runtime_service,
-        "get_active_session_detail",
+        "get_active_session_summary",
         lambda: {
             "title": "真实会话",
             "taskSummary": "继续前端开发",
@@ -11764,7 +11885,7 @@ def test_runtime_summary_marks_ready_session_as_needing_response(monkeypatch):
 def test_runtime_summary_marks_failed_session_as_needing_response(monkeypatch):
     monkeypatch.setattr(
         runtime_service,
-        "get_active_session_detail",
+        "get_active_session_summary",
         lambda: {
             "title": "真实会话",
             "taskSummary": "测试失败，需要你决定先修测试还是先回退。",
@@ -11792,7 +11913,7 @@ def test_runtime_summary_marks_failed_session_as_needing_response(monkeypatch):
 def test_runtime_summary_ready_session_ignores_stale_runtime_error(monkeypatch):
     monkeypatch.setattr(
         runtime_service,
-        "get_active_session_detail",
+        "get_active_session_summary",
         lambda: {
             "title": "真实会话",
             "taskSummary": "继续前端开发",
@@ -11818,7 +11939,7 @@ def test_runtime_summary_ready_session_ignores_stale_runtime_error(monkeypatch):
 
 
 def test_runtime_summary_exposes_latest_mental_state(monkeypatch):
-    monkeypatch.setattr(runtime_service, "get_active_session_detail", lambda: {})
+    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda: {})
     monkeypatch.setattr(runtime_service, "_load_runtime_state", lambda: {})
 
     class DummyMentalModel:
@@ -11857,7 +11978,7 @@ def test_runtime_summary_reports_disabled_mental_model(monkeypatch):
     public_config["mental_model"] = {"enabled": False}
 
     monkeypatch.setattr(runtime_service, "load_public_config", lambda: copy.deepcopy(public_config))
-    monkeypatch.setattr(runtime_service, "get_active_session_detail", lambda: {})
+    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda: {})
     monkeypatch.setattr(runtime_service, "_load_runtime_state", lambda: {})
     monkeypatch.setattr(runtime_service, "_load_runtime_manager_snapshot", lambda: {})
 
@@ -11868,7 +11989,7 @@ def test_runtime_summary_reports_disabled_mental_model(monkeypatch):
 
 
 def test_runtime_summary_falls_back_to_mental_diagnosis_when_state_is_empty(monkeypatch):
-    monkeypatch.setattr(runtime_service, "get_active_session_detail", lambda: {})
+    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda: {})
     monkeypatch.setattr(runtime_service, "_load_runtime_state", lambda: {})
 
     class DummyMentalModel:
@@ -12000,7 +12121,7 @@ def test_config_workspace_exposes_full_editor_schema(monkeypatch):
     assert editor_sections["user-profile"]["title"] == "用户信息"
     assert payload["publicConfig"]["workbench"]["backend_port"] == 8000
     assert payload["publicConfig"]["workbench"]["frontend_port"] == 5173
-    assert payload["publicConfig"]["workbench"]["window_mode"] == "windowed"
+    assert payload["publicConfig"]["workbench"]["window_mode"] == "fullscreen"
     assert editor_meta["runtime.profile"]["kind"] == "select"
     assert editor_meta["runtime.profile"]["badge"] == "选项"
     assert editor_meta["workbench.backend_port"]["kind"] == "number"
@@ -14768,6 +14889,17 @@ def test_chat_review_routes_list_and_approve_candidate(tmp_path, monkeypatch):
     assert queue_payload["lifecycle"]["negativeTarget"] == "chat_negative_multiturn"
     assert "supervised_evaluation" in queue_payload["lifecycle"]["allowedDownstreamUses"]
     candidate_id = queue_payload["items"][0]["candidateId"]
+    assert queue_payload["items"][0]["conversationTurns"] == []
+
+    detail_response = client.get(f"/api/evolution/chat-review/{candidate_id}")
+    assert detail_response.status_code == 200
+    detail_payload = detail_response.json()
+    assert detail_payload["candidateId"] == candidate_id
+    assert len(detail_payload["conversationTurns"]) == 2
+
+    full_queue_response = client.get("/api/evolution/chat-review", params={"includeDetails": "true"})
+    assert full_queue_response.status_code == 200
+    assert len(full_queue_response.json()["items"][0]["conversationTurns"]) == 2
 
     decision_response = client.post(
         f"/api/evolution/chat-review/{candidate_id}/decision",
@@ -16174,6 +16306,191 @@ def test_self_evolution_routes_expose_read_only_evidence(monkeypatch):
     assert overview_payload["auditTail"][0]["event"] == "validation_completed"
     assert transactions_response.json()[0]["baseRevShort"] == "abcdef123456"
     assert audit_response.json()[0]["summary"].startswith("2026-05-18T12:00:00Z")
+
+
+def test_self_evolution_snapshot_uses_worktree_status_bundle(monkeypatch, tmp_path):
+    bundle_calls = {"count": 0}
+    status_summary = json.dumps(
+        {
+            "dirty_summary": "工作区干净",
+            "modified_paths": [],
+            "modified_entities": [],
+            "last_validation_summary": None,
+            "recent_changes": [],
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
+    worktree_snapshot = json.dumps(
+        {
+            "snapshot_id": "bundle-snap",
+            "created_at": "2026-06-08T00:00:00",
+            "base_rev": "abcdef",
+            "has_staged": False,
+            "has_unstaged": False,
+            "has_untracked": False,
+            "files": [],
+            "available": True,
+            "error": None,
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
+
+    def build_bundle(limit=5):
+        bundle_calls["count"] += 1
+        assert limit == 5
+        return json.dumps(
+            {
+                "git_status_summary": status_summary,
+                "worktree_snapshot": worktree_snapshot,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+
+    monkeypatch.setattr(self_evolution_workbench, "get_worktree_status_bundle_tool", build_bundle)
+    monkeypatch.setattr(
+        self_evolution_workbench,
+        "get_git_status_summary_tool",
+        lambda limit=5: pytest.fail("snapshot should use the shared worktree status bundle"),
+    )
+    monkeypatch.setattr(
+        self_evolution_workbench,
+        "explain_current_worktree_tool",
+        lambda: pytest.fail("snapshot should not load a second worktree snapshot"),
+    )
+    monkeypatch.setattr(self_evolution_workbench, "get_recent_changes_tool", lambda limit=3: "[]")
+    monkeypatch.setattr(self_evolution_workbench, "get_evolution_fitness_tool", lambda recent_limit=3: "{}")
+    monkeypatch.setattr(
+        self_evolution_workbench,
+        "build_active_advisory_snapshot",
+        lambda project_root, limit=3: {"active_count": 0, "entries": []},
+    )
+    monkeypatch.setattr(
+        self_evolution_workbench,
+        "list_recent_self_evolution_transaction_payloads",
+        lambda project_root, limit=3: [],
+    )
+
+    payload = self_evolution_workbench.build_self_evolution_snapshot(project_root=tmp_path)
+
+    assert bundle_calls["count"] == 1
+    assert payload["git_status"]["summary"] == status_summary
+    assert payload["worktree"]["snapshot_id"] == "bundle-snap"
+
+
+def test_self_evolution_overview_uses_short_ttl_cache(monkeypatch):
+    calls = {"snapshot": 0, "audit": 0}
+    now = {"monotonic": 10.0, "perf": 100.0}
+
+    monkeypatch.setattr(self_evolution_service, "get_web_language", lambda: "zh")
+    monkeypatch.setattr(self_evolution_service.time, "monotonic", lambda: now["monotonic"])
+    monkeypatch.setattr(self_evolution_service.time, "perf_counter", lambda: now["perf"])
+    monkeypatch.setattr(
+        self_evolution_service,
+        "get_workbench_contract",
+        lambda: {
+            "modeAvailability": {
+                "chat": True,
+                "self_evolution": True,
+                "supervised_evolution": True,
+            }
+        },
+    )
+
+    def build_snapshot(project_root=None, transaction_limit=6, recent_limit=4):
+        calls["snapshot"] += 1
+        return {
+            "goal": "cache test",
+            "advisory": {"active_count": 0, "entries": []},
+            "git_status": {"summary": "clean", "lines": ["clean"]},
+            "recent_changes": [],
+            "fitness": {},
+            "worktree": {
+                "available": True,
+                "dirty_file_count": calls["snapshot"],
+                "files": [],
+            },
+            "recent_transactions": [],
+        }
+
+    monkeypatch.setattr(self_evolution_service, "build_self_evolution_snapshot", build_snapshot)
+    monkeypatch.setattr(
+        self_evolution_service,
+        "load_self_evolution_audit_records",
+        lambda project_root, limit=6: calls.__setitem__("audit", calls["audit"] + 1) or [],
+    )
+
+    first = self_evolution_service.get_self_evolution_overview()
+    second = self_evolution_service.get_self_evolution_overview()
+    now["monotonic"] += self_evolution_service.SELF_EVOLUTION_OVERVIEW_CACHE_TTL_SECONDS + 0.1
+    third = self_evolution_service.get_self_evolution_overview()
+
+    assert calls["snapshot"] == 2
+    assert calls["audit"] == 2
+    assert first == second
+    assert third["metrics"]["dirtyFiles"] == 2
+
+
+def test_self_evolution_history_delete_invalidates_overview_cache(tmp_path, monkeypatch):
+    _seed_self_evolution_history(tmp_path)
+    calls = {"snapshot": 0}
+    monkeypatch.setattr(self_evolution_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(self_evolution_service, "get_web_language", lambda: "zh")
+    monkeypatch.setattr(
+        self_evolution_service,
+        "get_workbench_contract",
+        lambda: {
+            "modeAvailability": {
+                "chat": True,
+                "self_evolution": True,
+                "supervised_evolution": True,
+            }
+        },
+    )
+
+    def build_snapshot(project_root=None, transaction_limit=6, recent_limit=4):
+        calls["snapshot"] += 1
+        return {
+            "goal": "delete cache test",
+            "advisory": {"active_count": 0, "entries": []},
+            "git_status": {"summary": "clean", "lines": ["clean"]},
+            "recent_changes": [],
+            "fitness": {},
+            "worktree": {
+                "available": True,
+                "dirty_file_count": calls["snapshot"],
+                "files": [],
+            },
+            "recent_transactions": [
+                {
+                    "txn_id": "txn-delete-a",
+                    "opened_at": "2026-05-18T11:55:00Z",
+                    "closed_at": "2026-05-18T12:00:00Z",
+                    "base_rev": "abcdef1234567890",
+                    "base_rev_short": "abcdef123456",
+                    "status": "success",
+                    "summary": "delete me",
+                    "is_open": False,
+                }
+            ],
+        }
+
+    monkeypatch.setattr(self_evolution_service, "build_self_evolution_snapshot", build_snapshot)
+    monkeypatch.setattr(self_evolution_service, "load_self_evolution_audit_records", lambda project_root, limit=6: [])
+
+    before = client.get("/api/evolution/self/overview")
+    delete_response = client.post(
+        "/api/evolution/self/history/delete",
+        json={"txnIds": ["txn-delete-a"]},
+    )
+    after = client.get("/api/evolution/self/overview")
+
+    assert before.status_code == 200
+    assert delete_response.status_code == 200
+    assert after.status_code == 200
+    assert calls["snapshot"] == 2
 
 
 def test_start_self_evolution_run_from_web_exposes_active_snapshot(monkeypatch):

@@ -14,6 +14,7 @@ from core.web.services.chat_review_service import (
     ChatReviewDecisionValidationError,
     approve_chat_review_candidate,
     bulk_discard_chat_review_candidates,
+    get_chat_review_candidate,
     get_chat_review_queue,
     reject_chat_review_candidate,
     submit_chat_review_decision,
@@ -310,8 +311,16 @@ def evolution_workbench() -> dict:
 
 
 @router.get("/evolution/chat-review")
-def evolution_chat_review() -> dict:
-    return get_chat_review_queue()
+def evolution_chat_review(includeDetails: bool = False) -> dict:
+    return get_chat_review_queue(include_details=includeDetails)
+
+
+@router.get("/evolution/chat-review/{candidate_id}")
+def evolution_chat_review_candidate(candidate_id: str) -> dict:
+    try:
+        return get_chat_review_candidate(candidate_id)
+    except ChatReviewCandidateNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.get("/evolution/self/candidates")

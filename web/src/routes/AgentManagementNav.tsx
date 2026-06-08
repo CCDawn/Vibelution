@@ -1,6 +1,6 @@
 import { NavLink } from "react-router-dom";
 
-import { useAppI18n } from "../i18n/useAppI18n";
+import { useShellI18n } from "../i18n/useShellI18n";
 import styles from "./AgentManagementNav.module.css";
 
 type AgentManagementSection = "agents" | "prompts" | "tools" | "skills";
@@ -34,7 +34,7 @@ type AgentManagementNavProps = {
 };
 
 export function AgentManagementNav({ active, className = "" }: AgentManagementNavProps) {
-  const { lang } = useAppI18n();
+  const { lang } = useShellI18n();
   const label = lang === "zh" ? "Agent 管理导航" : "Agent management navigation";
 
   return (

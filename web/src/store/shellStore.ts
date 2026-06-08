@@ -19,8 +19,8 @@ type ShellState = {
 };
 
 const DEFAULT_CHAT_PANEL_WIDTHS: ChatPanelWidths = {
-  leftPanelWidth: 264,
-  rightPanelWidth: 340,
+  leftPanelWidth: 220,
+  rightPanelWidth: 284,
 };
 
 export const useShellStore = create<ShellState>()(
