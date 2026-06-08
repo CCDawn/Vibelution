@@ -5269,6 +5269,120 @@ Write-Output $payload
     assert "EncodedCommand" not in json.dumps(fields, ensure_ascii=False)
 
 
+
+def test_launcher_supervisor_start_accepts_clean_wrapper_exit_when_session_is_live(tmp_path):
+    result = _run_launcher_ast_harness(
+        tmp_path,
+        """
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$LauncherPath
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$source = Get-Content -Raw -LiteralPath $LauncherPath
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors -and $parseErrors.Count -gt 0) {
+    throw "Launcher script parse failed: $($parseErrors[0].Message)"
+}
+
+foreach ($functionName in @(
+    "ConvertTo-PowerShellSingleQuotedLiteral",
+    "Get-ObjectPropertyValue",
+    "Start-Supervisor"
+)) {
+    $functionAst = $ast.Find({
+        param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+            $node.Name -eq $functionName
+    }, $true)
+    if ($null -eq $functionAst) {
+        throw "$functionName was not found."
+    }
+    . ([scriptblock]::Create($functionAst.Extent.Text))
+}
+
+$script:currentRuntimeSceneId = $null
+$script:events = @()
+$script:launcherDir = Join-Path ([System.IO.Path]::GetTempPath()) ("vibelution-supervisor-clean-exit-" + [guid]::NewGuid().ToString("N"))
+$script:projectDir = $script:launcherDir
+$script:PSCommandPath = $LauncherPath
+$script:port = 8000
+New-Item -ItemType Directory -Path $script:launcherDir -Force | Out-Null
+function Start-RedirectedBackgroundProcess {
+    param(
+        [string]$CommandPath,
+        [string[]]$ArgumentList = @(),
+        [string]$StdoutPath = "",
+        [string]$StderrPath = "",
+        [string]$WorkingDirectory = ""
+    )
+    Set-Content -LiteralPath $StdoutPath -Value "" -Encoding UTF8
+    Set-Content -LiteralPath $StderrPath -Value "" -Encoding UTF8
+    return [pscustomobject]@{ Id = 999999; HasExited = $true; ExitCode = 0 }
+}
+function Get-Process {
+    param([int]$Id, [string]$ErrorAction)
+    return [pscustomobject]@{ Id = $Id; HasExited = $true; ExitCode = 0 }
+}
+function Get-State {
+    return [pscustomobject]@{
+        sessionId = "session-1"
+    }
+}
+function Get-ManagedBackendLiveness {
+    return [pscustomobject]@{
+        Alive = $true
+        Healthy = $true
+        CandidatePids = @(1111, 2222)
+    }
+}
+function Get-ListeningPid {
+    param([int]$Port)
+    return 1111
+}
+function Get-ManagedBrowserWindowProcesses {
+    return @([pscustomobject]@{ Id = 3333 })
+}
+function Write-LauncherControlLog {
+    param([string]$Event, [string]$Message, [string]$Level = "info", [hashtable]$Fields = @{})
+    $script:events += [pscustomobject]@{ event = $Event; message = $Message; level = $Level; fields = $Fields }
+}
+function Start-Sleep { param([int]$Milliseconds, [int]$Seconds) }
+
+$errorMessage = ""
+$supervisorPid = 0
+try {
+    $supervisorPid = Start-Supervisor -ManagedSessionId "session-1"
+} catch {
+    $errorMessage = $_.Exception.Message
+}
+
+$payload = @{
+    errorMessage = $errorMessage
+    supervisorPid = $supervisorPid
+    events = @($script:events)
+} | ConvertTo-Json -Depth 8 -Compress
+Write-Output $payload
+""",
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    payload = json.loads(result.stdout.strip().splitlines()[-1])
+    assert payload["errorMessage"] == ""
+    assert payload["supervisorPid"] == 0
+    assert payload["events"][0]["event"] == "launcher.supervisor.clean_exit_adopted"
+    fields = payload["events"][0]["fields"]
+    assert fields["state_session_matches"] is True
+    assert fields["backend_alive"] is True
+    assert fields["backend_healthy"] is True
+    assert fields["browser_window_count"] == 1
+
+
 def test_launcher_powershell_single_quoted_literal_escapes_quotes(tmp_path):
     result = _run_launcher_ast_harness(
         tmp_path,
