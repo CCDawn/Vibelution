@@ -3405,11 +3405,12 @@ class TestLocalProviderBootstrap:
         pending = list(agent._pending_runtime_context_blocks)
         assert pending == ["## Agent Runtime Context\nPromptTemplateId: prompt-supervised-baseline"]
 
-        # 模拟 _run_one_turn 起点：把 pending 作为独立 SystemMessage 插到 messages[1]。
+        # 模拟 _run_one_turn 起点：把 pending 作为独立 SystemMessage 插到当前 user 前。
         agent._pending_runtime_context_blocks = []
-        insert_at = 1 if messages else 0
-        for block in reversed(pending):
-            messages.insert(insert_at, SystemMessage(content=block))
+        messages = TurnOutcomeController.insert_volatile_context_before_current_user(
+            messages=messages,
+            context_messages=[SystemMessage(content=block) for block in pending],
+        )
 
         assert resumed is False
         # 关键不变量：cacheable 系统块的文本不得被运行时上下文污染。
@@ -4189,6 +4190,30 @@ class TestRuntimeStateMemoryFlow:
         assert messages[1:] == previous[1:] + [build_chat_user_message("第二句")]
         assert messages[-1]["role"] == "user"
         assert "对话用户输入" in messages[-1]["content"]
+
+    def test_insert_volatile_context_keeps_history_before_current_user(self):
+        messages = [
+            {"role": "system", "content": "system"},
+            build_chat_user_message("第一句"),
+            AIMessage(content="第一轮回复"),
+            build_chat_user_message("第二句"),
+        ]
+
+        inserted = TurnOutcomeController.insert_volatile_context_before_current_user(
+            messages=messages,
+            context_messages=[
+                SystemMessage(content="runtime context"),
+                SystemMessage(content="operator guidance"),
+            ],
+        )
+
+        assert inserted is not messages
+        assert inserted[1:3] == messages[1:3]
+        assert isinstance(inserted[3], SystemMessage)
+        assert inserted[3].content == "runtime context"
+        assert isinstance(inserted[4], SystemMessage)
+        assert inserted[4].content == "operator guidance"
+        assert inserted[-1] == messages[-1]
 
     def test_finish_turn_message_carryover_keeps_unfinished_context_and_clears_after_close(self):
         messages = [
