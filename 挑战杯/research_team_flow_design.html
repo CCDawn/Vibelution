@@ -881,7 +881,12 @@
 <div class="blueprint-row compact">
               <b>Team 前端入口</b>
               <strong>/teams?team=research-team</strong>
-              <span>读取 /workflow-orchestration、/candidates?limit=8 和 /knowledge-ingestion/status，展示科研流程状态、候选仓库、校验摘要、知识入库漏斗、actionItems 和 officialBoundary；非科研团队显示占位，不初始化 workflow。</span>
+              <span>读取 /workflow-orchestration、/candidates?limit=8、/knowledge-ingestion/status 和通用 data-processing run/status/assignment，展示科研流程状态、资料搜集执行台、候选仓库、校验摘要、知识入库漏斗、actionItems 和 officialBoundary；非科研团队显示占位，不初始化 workflow。</span>
+            </div>
+<div class="blueprint-row compact">
+              <b>资料搜集执行台</b>
+              <strong>TeamsRoute source collection panel</strong>
+              <span>可在 research-team 页面启动 source collection run、查看 DataSearchPlan/querySeeds/assignment/assignedQueries，并手工提交一条 CollectionOutput；提交后自动导入 source_manifest 候选。</span>
             </div>
 <div class="blueprint-row compact">
               <b>转移记录</b>
@@ -950,8 +955,8 @@
             </div>
 <div class="blueprint-row compact">
               <b>验证</b>
-              <strong>tests/test_data_processing_service.py + tests/test_data_processing_routes.py + tests/test_team_workflow_orchestration_service.py + tests/test_team_workflow_routes.py</strong>
-              <span>覆盖通用数据处理首切、source-collection run 启动、DataSearchPlan/query seed 契约、DataRecord 导入 source_manifest、主路径、非 ownerAgent 不能写最终状态、本地模型任务包、输出校验和知识入库状态总览。</span>
+              <strong>tests/test_data_processing_service.py + tests/test_data_processing_routes.py + tests/test_team_workflow_orchestration_service.py + tests/test_team_workflow_routes.py + TeamsRoute.layout.test.ts</strong>
+              <span>覆盖通用数据处理首切、source-collection run 启动、DataSearchPlan/query seed 契约、DataRecord 导入 source_manifest、Teams 资料搜集执行台契约、主路径、非 ownerAgent 不能写最终状态、本地模型任务包、输出校验和知识入库状态总览。</span>
             </div>
       </div>
       <div class="agent-matrix" style="margin-top: 12px;">
@@ -1039,6 +1044,12 @@
               <span>source-collection-runs 会生成 searchPlan、querySeeds、queries、roleAssignmentInputs 和 resultWritebackContract，并把 assignedQueries 写入各功能 Agent assignment scope。</span>
               <span>Research Coordination Agent 可基于 topic/goal/scope 启动可追踪搜索计划；本轮只生成 contract_only planned 查询，不触发外部搜索，不写正式 Team Knowledge/RAG/official graph。</span>
             </div>
+<div class="blueprint-row">
+              <b>M6.6</b>
+              <strong>Teams 资料搜集执行台</strong>
+              <span>research-team 页面新增资料搜集执行面板，可启动 source collection run、查看最近批次、run status、assignment、assignedQueries，并手工提交 CollectionOutput。</span>
+              <span>手工回写会先写入 DataRecord，再通过 Team workflow 导入桥转成 source_manifest 候选；仍不触发真实外部搜索，不写正式 Team Knowledge/RAG/official graph。</span>
+            </div>
       </div>
       <div class="tag-row">
         <span class="tag">DataProcessingRun</span>
@@ -1069,8 +1080,8 @@
         <div class="agent-row">
         <b>01</b>
         <strong>Source Intake Agent</strong>
-        <span>可复用通用 data-processing assignment / source-extraction 后端已接入</span>
-        <span>DataProcessingRun 建立 / DataSearchPlan/querySeeds 搜索计划 / CollectionAssignment 资料搜集任务 / assignedQueries 角色分配 / DataRecord 通用记录 / 本地资料登记 / source_manifest 写入 / 文件路径/页码/来源可信度记录 / 本地 PDF sha256/pageAnchors/excerpt 抽取 / 可选 research_knowledge_query_tool 查重</span>
+        <span>可复用通用 data-processing assignment / source-extraction 后端已接入；Teams 资料搜集执行台已接入</span>
+        <span>DataProcessingRun 建立 / DataSearchPlan/querySeeds 搜索计划 / CollectionAssignment 资料搜集任务 / assignedQueries 角色分配 / Teams 启动搜集批次 / Teams 查看 run/assignment/query 状态 / 手工 CollectionOutput 回写 / DataRecord 通用记录 / DataRecord 自动导入 source_manifest / 本地资料登记 / source_manifest 写入 / 文件路径/页码/来源可信度记录 / 本地 PDF sha256/pageAnchors/excerpt 抽取 / 可选 research_knowledge_query_tool 查重</span>
         <span>确认资料允许分析、来源可信度和是否纳入本轮。</span>
       </div>
 <div class="agent-row">
