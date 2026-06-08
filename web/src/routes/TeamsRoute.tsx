@@ -95,6 +95,11 @@ function researchWorkspaceAnchorId(view: ResearchWorkspaceView) {
   return ids[view];
 }
 
+function researchWorkspaceViewLabel(view: ResearchWorkspaceView, lang: "zh" | "en") {
+  const item = RESEARCH_WORKSPACE_NAV_ITEMS.find((entry) => entry.view === view);
+  return item ? (lang === "zh" ? item.zh : item.en) : view;
+}
+
 type TeamDraft = {
   name: string;
   purpose: string;
@@ -1259,6 +1264,36 @@ export function TeamsRoute() {
     });
   }
 
+  function renderResearchWorkspaceNav() {
+    if (!researchWorkflowTeamSelected) {
+      return null;
+    }
+    return (
+      <nav className={styles.researchIndexPanel} aria-label={lang === "zh" ? "科研流程索引" : "Research workflow index"}>
+        <div className={styles.researchIndexHeader}>
+          <div>
+            <strong>{lang === "zh" ? "科研流程索引" : "Research index"}</strong>
+            <span>{lang === "zh" ? "团队内二级导航" : "Team-level workflow navigation"}</span>
+          </div>
+          <small>{lang === "zh" ? "流程优先" : "flow first"}</small>
+        </div>
+        <div className={styles.researchIndexList}>
+          {RESEARCH_WORKSPACE_NAV_ITEMS.map((item) => (
+            <button
+              key={item.view}
+              type="button"
+              className={researchWorkspaceView === item.view ? `${styles.researchIndexItem} ${styles.researchIndexItemActive}` : styles.researchIndexItem}
+              onClick={() => selectResearchWorkspaceView(item.view)}
+            >
+              <strong>{lang === "zh" ? item.zh : item.en}</strong>
+              <span>{lang === "zh" ? item.zhDetail : item.enDetail}</span>
+            </button>
+          ))}
+        </div>
+      </nav>
+    );
+  }
+
   function addNode() {
     if (!canvas) {
       return;
@@ -1684,30 +1719,10 @@ export function TeamsRoute() {
               </button>
             ))}
           </div>
-          {researchWorkflowTeamSelected ? (
-            <nav className={styles.researchIndexPanel} aria-label={lang === "zh" ? "科研流程索引" : "Research workflow index"}>
-              <div className={styles.researchIndexHeader}>
-                <strong>{lang === "zh" ? "科研流程索引" : "Research index"}</strong>
-                <span>{lang === "zh" ? "流程优先" : "flow first"}</span>
-              </div>
-              <div className={styles.researchIndexList}>
-                {RESEARCH_WORKSPACE_NAV_ITEMS.map((item) => (
-                  <button
-                    key={item.view}
-                    type="button"
-                    className={researchWorkspaceView === item.view ? `${styles.researchIndexItem} ${styles.researchIndexItemActive}` : styles.researchIndexItem}
-                    onClick={() => selectResearchWorkspaceView(item.view)}
-                  >
-                    <strong>{lang === "zh" ? item.zh : item.en}</strong>
-                    <span>{lang === "zh" ? item.zhDetail : item.enDetail}</span>
-                  </button>
-                ))}
-              </div>
-            </nav>
-          ) : null}
         </aside>
 
         <main className={canvasPanelClassName} id="research-organization-canvas">
+          {researchCanvasVisible ? renderResearchWorkspaceNav() : null}
           <div className={styles.canvasToolbar}>
             <div>
               <strong>{selectedTeam?.name ?? (lang === "zh" ? "暂无团队" : "No team")}</strong>
@@ -1862,11 +1877,12 @@ export function TeamsRoute() {
           <div className={styles.inspectorHeader}>
             <strong>
               {researchWorkflowTeamSelected && !researchCanvasVisible
-                ? (lang === "zh" ? "ai科学研究团队流程" : "AI research team workflow")
+                ? `${lang === "zh" ? "ai科学研究团队" : "AI research team"} · ${researchWorkspaceViewLabel(researchWorkspaceView, lang)}`
                 : (lang === "zh" ? "节点绑定" : "Node binding")}
             </strong>
             {validation && !validation.valid ? <AlertTriangle size={16} /> : <Link2 size={16} />}
           </div>
+          {!researchCanvasVisible ? renderResearchWorkspaceNav() : null}
           <div className={styles.inspectorBody}>
             {showNodeBindingPanel && !selectedTeam ? (
               <section className={`${styles.nodeBindingSection} ${styles.nodeBindingPlaceholder}`}>
