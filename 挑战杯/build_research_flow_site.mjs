@@ -1079,11 +1079,14 @@ h2 { margin: 0; font: 700 29px/1.15 var(--serif); }
 .workbench-grid .graph-lane.top-lane { top: 44px; }
 .workbench-grid .graph-lane.mid-lane { top: 196px; }
 .workbench-grid .graph-lane.bottom-lane { top: 354px; }
+.compact-map .graph-lane.top-lane { top: 50px; }
+.compact-map .graph-lane.mid-lane { top: 220px; }
+.compact-map .graph-lane.bottom-lane { top: 384px; }
 .graph-lane-band {
   position: absolute;
-  left: 26px;
-  right: 26px;
-  height: 116px;
+  left: 24px;
+  right: 24px;
+  height: 128px;
   background: rgba(235, 244, 240, 0.62);
   border: 1px solid rgba(46, 63, 61, 0.10);
   pointer-events: none;
@@ -1091,6 +1094,9 @@ h2 { margin: 0; font: 700 29px/1.15 var(--serif); }
 .graph-lane-band.top-lane { top: 38px; }
 .graph-lane-band.mid-lane { top: 190px; }
 .graph-lane-band.bottom-lane { top: 348px; }
+.compact-map .graph-lane-band.top-lane { top: 72px; height: 126px; }
+.compact-map .graph-lane-band.mid-lane { top: 242px; height: 126px; }
+.compact-map .graph-lane-band.bottom-lane { top: 404px; height: 176px; }
 .graph-lane-band.bottom-lane {
   background: rgba(250, 243, 231, 0.72);
 }
@@ -1496,6 +1502,10 @@ body {
 .flow-board-shell {
   min-width: 0;
 }
+.flow-board-shell.compact-map {
+  display: grid;
+  gap: 10px;
+}
 .flow-toolbar {
   justify-content: space-between;
   margin-bottom: 8px;
@@ -1518,20 +1528,86 @@ body {
   border-color: #a9d6c7;
 }
 .flow-board {
-  height: 560px;
-  min-height: 560px;
+  min-height: 660px;
+  padding: 14px;
   background:
     linear-gradient(90deg, rgba(21, 83, 72, 0.08) 1px, transparent 1px),
     linear-gradient(180deg, rgba(21, 83, 72, 0.06) 1px, transparent 1px),
     #fbfdf9;
   background-size: 24px 24px;
   border-color: rgba(46, 63, 61, 0.16);
+  overflow: visible;
+  cursor: default;
 }
 .flow-stage,
 .flow-graph {
-  width: 1640px;
-  height: 560px;
-  min-height: 560px;
+  width: 100%;
+  min-height: 630px;
+}
+.flow-map {
+  position: relative;
+  min-height: 630px;
+  background: rgba(255, 255, 252, 0.72);
+  border: 1px solid rgba(46, 63, 61, 0.12);
+  overflow: hidden;
+}
+.flow-map .graph-node {
+  position: absolute;
+  left: var(--x);
+  top: var(--y);
+  transform: translate(-50%, -50%);
+}
+.flow-map-lines {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 2;
+}
+.flow-map-lines path {
+  fill: none;
+  stroke: rgba(21, 83, 72, 0.54);
+  stroke-width: 3.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+.flow-map-lines path.turn {
+  stroke: rgba(21, 83, 72, 0.46);
+}
+.flow-map-lines path.dashed {
+  stroke: rgba(184, 127, 35, 0.78);
+  stroke-width: 2.8;
+  stroke-dasharray: 8 7;
+}
+.flow-arrow-tip {
+  position: absolute;
+  left: var(--x);
+  top: var(--y);
+  z-index: 2;
+  width: 0;
+  height: 0;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+.flow-arrow-tip.right {
+  border-top: 7px solid transparent;
+  border-bottom: 7px solid transparent;
+  border-left: 12px solid rgba(21, 83, 72, 0.68);
+}
+.flow-arrow-tip.left {
+  border-top: 7px solid transparent;
+  border-bottom: 7px solid transparent;
+  border-right: 12px solid rgba(21, 83, 72, 0.68);
+}
+.flow-arrow-tip.down {
+  border-left: 7px solid transparent;
+  border-right: 7px solid transparent;
+  border-top: 12px solid rgba(21, 83, 72, 0.68);
+}
+.flow-arrow-tip.dashed.left {
+  border-right-color: rgba(184, 127, 35, 0.82);
 }
 .graph-svg > path {
   stroke: rgba(21, 83, 72, 0.72);
@@ -1549,16 +1625,35 @@ body {
   background: rgba(255, 255, 252, 0.98);
   box-shadow: 0 10px 24px rgba(25, 41, 38, 0.13);
 }
+.flow-map .graph-node {
+  z-index: 3;
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  width: clamp(172px, 13.8vw, 210px);
+  min-height: 76px;
+}
 .graph-node .graph-id {
-  width: 34px;
-  height: 26px;
+  width: 32px;
+  height: 24px;
   margin-right: 10px;
   background: #155348;
   font-size: 12px;
 }
+.flow-map .graph-node .graph-id {
+  margin-right: 0;
+}
 .graph-node h3 {
   font-size: 17px;
   line-height: 1.34;
+}
+.flow-map .graph-node h3 {
+  display: block;
+  font-size: clamp(14px, 0.96vw, 16px);
+  line-height: 1.28;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
 }
 .graph-node.active {
   border-left-color: #155348;
@@ -1570,7 +1665,7 @@ body {
   border-left-color: #b87922;
 }
 .graph-node.maintenance {
-  width: 240px;
+  width: clamp(184px, 14.5vw, 220px);
   border-left-color: #555e89;
   background: #f4f5fb;
 }
@@ -1757,8 +1852,7 @@ body {
     grid-template-columns: 1fr;
   }
   .flow-board {
-    height: 390px;
-    min-height: 390px;
+    min-height: 620px;
   }
   .node-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1793,6 +1887,7 @@ body {
     display: block;
   }
   .flow-board-shell,
+  .flow-board-shell.compact-map,
   .graph-legend {
     display: none;
   }
@@ -2410,6 +2505,51 @@ function graphNode(id, x, y, extraClass = "") {
   </a>`;
 }
 
+const mapPositions = {
+  "01": ["10%", "19%"],
+  "02": ["30%", "19%"],
+  "03": ["50%", "19%"],
+  "04": ["70%", "19%"],
+  "05": ["90%", "19%"],
+  "06": ["70%", "46%"],
+  "07": ["50%", "46%"],
+  "08": ["30%", "46%"],
+  "09": ["10%", "46%"],
+  "10": ["30%", "72%"],
+  "11": ["50%", "72%"],
+  "12": ["70%", "72%"],
+  "13": ["70%", "88%"],
+};
+
+const flowMapLabels = {
+  "01": "资料入工作区",
+  "02": "生成论文笔记",
+  "03": "提取机制",
+  "04": "机制计算抽象",
+  "05": "生成算法假设",
+  "08": "候选图谱",
+  "09": "正式图谱同步",
+  "10": "实验验证",
+  "11": "迭代与版本化",
+  "12": "挑战杯交付",
+  "13": "HTML 维护门禁",
+};
+
+function mapNode(id, extraClass = "") {
+  const node = nodes.find((item) => item.id === id);
+  const classes = ["graph-node", node.statusKind, extraClass].filter(Boolean).join(" ");
+  const [x, y] = mapPositions[id];
+  const label = flowMapLabels[id] || node.title;
+  return `<a class="${classes}" style="--x:${x}; --y:${y};" href="research_flow_pages/${pageName(node)}">
+    <span class="graph-id">${node.id}</span>
+    <h3>${escapeHtml(label)}</h3>
+  </a>`;
+}
+
+function arrowTip(kind, x, y) {
+  return `<span class="flow-arrow-tip ${kind}" style="--x:${x}; --y:${y};"></span>`;
+}
+
 function mobileFlowList() {
   return `<div class="mobile-flow-list" aria-label="移动端科研流程索引">
     ${nodes
@@ -2425,68 +2565,65 @@ function mobileFlowList() {
 }
 
 function flowGraph() {
-  return `<div class="flow-board-shell">
-  <div class="flow-toolbar" aria-label="画板缩放控制">
-    <div class="flow-toolbar-group">
-      <button type="button" data-zoom-out title="缩小">-</button>
-      <button type="button" data-zoom-in title="放大">+</button>
-      <button type="button" data-zoom-reset title="重置缩放">100%</button>
-      <button type="button" data-zoom-fit title="适配全图">适配全图</button>
-    </div>
-    <span class="zoom-readout" data-zoom-readout>100%</span>
-  </div>
-  <div class="flow-board" data-draggable-board aria-label="可拖动科研流程画板">
-    <div class="flow-stage" data-flow-stage>
-    <div class="flow-graph" data-flow-graph aria-label="科研流程图结构">
-    <svg class="graph-svg" viewBox="0 0 1640 560" preserveAspectRatio="none" aria-hidden="true">
-      <defs>
-        <marker id="arrow-main" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
-          <path d="M 0 0 L 10 5 L 0 10 z" fill="rgba(21, 83, 72, 0.72)"></path>
-        </marker>
-        <marker id="arrow-draft" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
-          <path d="M 0 0 L 10 5 L 0 10 z" fill="rgba(185, 129, 34, 0.8)"></path>
-        </marker>
-      </defs>
-      <path marker-end="url(#arrow-main)" d="M 265 104 H 372"></path>
-      <path marker-end="url(#arrow-main)" d="M 602 104 H 709"></path>
-      <path marker-end="url(#arrow-main)" d="M 939 104 H 1046"></path>
-      <path marker-end="url(#arrow-main)" d="M 1276 104 H 1374 V 250 H 1276"></path>
-      <path marker-end="url(#arrow-main)" d="M 1046 256 H 939"></path>
-      <path marker-end="url(#arrow-main)" d="M 709 256 H 602"></path>
-      <path marker-end="url(#arrow-main)" d="M 372 256 H 300 V 384 H 372"></path>
-      <path marker-end="url(#arrow-main)" d="M 602 414 H 709"></path>
-      <path marker-end="url(#arrow-main)" d="M 939 414 H 1046"></path>
-      <path marker-end="url(#arrow-main)" d="M 1161 456 V 499"></path>
-      <path class="dashed" marker-end="url(#arrow-draft)" d="M 1276 414 H 1458 V 146 H 1276"></path>
+  return `<div class="flow-board-shell compact-map">
+  <div class="flow-board" aria-label="科研流程图">
+    <div class="flow-map" aria-label="一屏完整科研流程图结构">
+    <svg class="flow-map-lines" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+      <path d="M 18.2 19 H 21.8"></path>
+      <path d="M 38.2 19 H 41.8"></path>
+      <path d="M 58.2 19 H 61.8"></path>
+      <path d="M 78.2 19 H 81.8"></path>
+      <path class="turn" d="M 90 25 V 46 H 77.8"></path>
+      <path d="M 62.2 46 H 57.8"></path>
+      <path d="M 42.2 46 H 37.8"></path>
+      <path d="M 22.2 46 H 17.8"></path>
+      <path class="turn" d="M 10 52 V 72 H 21.8"></path>
+      <path d="M 38.2 72 H 41.8"></path>
+      <path d="M 58.2 72 H 61.8"></path>
+      <path class="turn" d="M 70 78 V 82"></path>
+      <path class="dashed" d="M 79 72 H 94 V 29"></path>
+      <path class="dashed" d="M 92.5 29 H 82.8"></path>
     </svg>
+    ${arrowTip("right", "21.8%", "19%")}
+    ${arrowTip("right", "41.8%", "19%")}
+    ${arrowTip("right", "61.8%", "19%")}
+    ${arrowTip("right", "81.8%", "19%")}
+    ${arrowTip("left", "77.8%", "46%")}
+    ${arrowTip("left", "57.8%", "46%")}
+    ${arrowTip("left", "37.8%", "46%")}
+    ${arrowTip("left", "17.8%", "46%")}
+    ${arrowTip("right", "21.8%", "72%")}
+    ${arrowTip("right", "41.8%", "72%")}
+    ${arrowTip("right", "61.8%", "72%")}
+    ${arrowTip("down", "70%", "82%")}
+    ${arrowTip("dashed left", "82.8%", "29%")}
     <span class="graph-lane-band top-lane"></span>
     <span class="graph-lane-band mid-lane"></span>
     <span class="graph-lane-band bottom-lane"></span>
     <span class="graph-lane top-lane">资料到假设</span>
     <span class="graph-lane mid-lane">治理与图谱</span>
     <span class="graph-lane bottom-lane">实验与交付</span>
-    ${graphNode("01", 150, 104)}
-    ${graphNode("02", 487, 104)}
-    ${graphNode("03", 824, 104)}
-    ${graphNode("04", 1161, 104)}
-    ${graphNode("05", 1498, 104)}
-    ${graphNode("06", 1161, 256)}
-    ${graphNode("07", 824, 256)}
-    ${graphNode("08", 487, 256)}
-    ${graphNode("09", 150, 256)}
-    ${graphNode("10", 487, 414)}
-    ${graphNode("11", 824, 414)}
-    ${graphNode("12", 1161, 414)}
-    ${graphNode("13", 1161, 528, "maintenance")}
-    </div>
-    </div>
+    ${mapNode("01")}
+    ${mapNode("02")}
+    ${mapNode("03")}
+    ${mapNode("04")}
+    ${mapNode("05")}
+    ${mapNode("09")}
+    ${mapNode("08")}
+    ${mapNode("07")}
+    ${mapNode("06")}
+    ${mapNode("10")}
+    ${mapNode("11")}
+    ${mapNode("12")}
+    ${mapNode("13", "maintenance")}
   </div>
   </div>
   <div class="graph-legend">
     <span class="legend-chip"><span class="legend-line"></span>主流程依赖</span>
     <span class="legend-chip"><span class="legend-line dashed"></span>维护/迭代回写</span>
-    <span class="legend-chip">可缩放、可拖动，点击节点进入独立计划页</span>
-  </div>`;
+    <span class="legend-chip">一屏完整流程图，点击节点进入独立计划页</span>
+  </div>
+</div>`;
 }
 
 function pageFor(node, index) {
@@ -2614,7 +2751,7 @@ function indexHtml() {
       <section id="flow-board" class="section">
         <div class="section-head">
           <h2>流程图结构</h2>
-          <p class="hint">默认用 100% 阅读模式，节点更大、泳道更清晰；横向拖动画板查看全链路，也可点击“适配全图”快速总览。</p>
+          <p class="hint">一屏展示 13 个节点、3 条泳道和返工/维护线；不需要缩放或横向拖动，点击节点进入独立计划页。</p>
         </div>
         <div class="workbench-grid">
           ${flowGraph()}
@@ -2682,92 +2819,6 @@ function indexHtml() {
         </details>
       </section>
     </main>
-    <script>
-      (() => {
-        const board = document.querySelector("[data-draggable-board]");
-        const stage = document.querySelector("[data-flow-stage]");
-        const graph = document.querySelector("[data-flow-graph]");
-        const readout = document.querySelector("[data-zoom-readout]");
-        if (!board || !stage || !graph || !readout) return;
-        const naturalWidth = 1640;
-        const naturalHeight = 560;
-        const minZoom = 0.45;
-        const maxZoom = 1.55;
-        let zoom = 1;
-        const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
-        const renderZoom = () => {
-          stage.style.width = String(naturalWidth * zoom) + "px";
-          stage.style.height = String(naturalHeight * zoom) + "px";
-          graph.style.setProperty("--zoom", String(zoom));
-          readout.textContent = String(Math.round(zoom * 100)) + "%";
-        };
-        const setZoom = (nextZoom, anchorX = board.clientWidth / 2, anchorY = board.clientHeight / 2) => {
-          const oldZoom = zoom;
-          zoom = clamp(nextZoom, minZoom, maxZoom);
-          const worldX = (board.scrollLeft + anchorX) / oldZoom;
-          const worldY = (board.scrollTop + anchorY) / oldZoom;
-          renderZoom();
-          board.scrollLeft = worldX * zoom - anchorX;
-          board.scrollTop = worldY * zoom - anchorY;
-        };
-        const fitAll = () => {
-          const availableWidth = Math.max(1, board.clientWidth - 28);
-          const availableHeight = Math.max(1, board.clientHeight - 28);
-          setZoom(Math.min(availableWidth / naturalWidth, availableHeight / naturalHeight));
-          board.scrollLeft = 0;
-          board.scrollTop = 0;
-        };
-        document.querySelector("[data-zoom-in]")?.addEventListener("click", () => setZoom(zoom + 0.12));
-        document.querySelector("[data-zoom-out]")?.addEventListener("click", () => setZoom(zoom - 0.12));
-        document.querySelector("[data-zoom-reset]")?.addEventListener("click", () => {
-          setZoom(1);
-          board.scrollLeft = 0;
-          board.scrollTop = 0;
-        });
-        document.querySelector("[data-zoom-fit]")?.addEventListener("click", fitAll);
-        board.addEventListener("wheel", (event) => {
-          if (!event.ctrlKey && !event.metaKey) return;
-          event.preventDefault();
-          const rect = board.getBoundingClientRect();
-          const anchorX = event.clientX - rect.left;
-          const anchorY = event.clientY - rect.top;
-          setZoom(zoom + (event.deltaY < 0 ? 0.08 : -0.08), anchorX, anchorY);
-        }, { passive: false });
-        renderZoom();
-        board.scrollLeft = 0;
-        board.scrollTop = 0;
-        let dragging = false;
-        let startX = 0;
-        let startY = 0;
-        let startLeft = 0;
-        let startTop = 0;
-        board.addEventListener("pointerdown", (event) => {
-          if (event.target.closest("a")) return;
-          dragging = true;
-          startX = event.clientX;
-          startY = event.clientY;
-          startLeft = board.scrollLeft;
-          startTop = board.scrollTop;
-          board.classList.add("dragging");
-          board.setPointerCapture(event.pointerId);
-        });
-        board.addEventListener("pointermove", (event) => {
-          if (!dragging) return;
-          board.scrollLeft = startLeft - (event.clientX - startX);
-          board.scrollTop = startTop - (event.clientY - startY);
-        });
-        const stop = (event) => {
-          if (!dragging) return;
-          dragging = false;
-          board.classList.remove("dragging");
-          if (board.hasPointerCapture(event.pointerId)) {
-            board.releasePointerCapture(event.pointerId);
-          }
-        };
-        board.addEventListener("pointerup", stop);
-        board.addEventListener("pointercancel", stop);
-      })();
-    </script>
   </body>
 </html>
 `;
