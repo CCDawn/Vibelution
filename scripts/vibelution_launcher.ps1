@@ -2480,6 +2480,12 @@ function ConvertTo-ProcessArgumentString {
     return (@($ArgumentList) | ForEach-Object { ConvertTo-ProcessArgument -Value $_ }) -join " "
 }
 
+function ConvertTo-PowerShellSingleQuotedLiteral {
+    param([AllowNull()][string]$Value)
+
+    return "'" + ([string]$Value).Replace("'", "''") + "'"
+}
+
 function Invoke-HiddenProcessCapture {
     param(
         [Parameter(Mandatory = $true)]
@@ -5051,12 +5057,79 @@ function Start-Supervisor {
         Join-Path $launcherDir "supervisor.stderr.log"
     }
 
-    $proc = Start-RedirectedBackgroundProcess `
-        -CommandPath $powershellExe `
-        -ArgumentList @("-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $PSCommandPath, "-Action", "supervise", "-SessionId", $ManagedSessionId) `
-        -WorkingDirectory $projectDir `
-        -StdoutPath $supervisorStdoutLog `
-        -StderrPath $supervisorStderrLog
+    Set-Content -LiteralPath $supervisorStdoutLog -Value "" -Encoding UTF8
+    Set-Content -LiteralPath $supervisorStderrLog -Value "" -Encoding UTF8
+
+    $scriptPathLiteral = ConvertTo-PowerShellSingleQuotedLiteral -Value $PSCommandPath
+    $sessionIdLiteral = ConvertTo-PowerShellSingleQuotedLiteral -Value $ManagedSessionId
+    $stdoutPathLiteral = ConvertTo-PowerShellSingleQuotedLiteral -Value $supervisorStdoutLog
+    $stderrPathLiteral = ConvertTo-PowerShellSingleQuotedLiteral -Value $supervisorStderrLog
+    $supervisorCommand = @"
+`$ErrorActionPreference = 'Stop'
+try {
+    & $scriptPathLiteral -Action supervise -SessionId $sessionIdLiteral *>> $stdoutPathLiteral
+} catch {
+    `$errorText = (`$_ | Out-String)
+    if (`$errorText) {
+        Add-Content -LiteralPath $stderrPathLiteral -Value `$errorText -Encoding UTF8
+    }
+    exit 1
+}
+"@
+    $encodedSupervisorCommand = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($supervisorCommand))
+    $proc = Start-HiddenBackgroundProcess `
+        -FilePath $powershellExe `
+        -ArgumentList @("-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-EncodedCommand", $encodedSupervisorCommand) `
+        -WorkingDirectory $projectDir
+
+    $deadline = (Get-Date).AddSeconds(8)
+    $supervisorProcess = Get-Process -Id $proc.Id -ErrorAction SilentlyContinue
+    while ((Get-Date) -lt $deadline) {
+        $supervisorProcess = Get-Process -Id $proc.Id -ErrorAction SilentlyContinue
+        if (-not $supervisorProcess -or $supervisorProcess.HasExited) {
+            break
+        }
+        $state = Get-State
+        $stateSessionId = ""
+        if ($state) {
+            $stateSessionId = [string](Get-ObjectPropertyValue -Object $state -Name "sessionId" -Default "")
+        }
+        $backendLiveness = Get-ManagedBackendLiveness
+        if ($stateSessionId -eq $ManagedSessionId -and [bool]$backendLiveness.Alive) {
+            break
+        }
+        Start-Sleep -Milliseconds 250
+    }
+    Start-Sleep -Milliseconds 250
+    $supervisorProcess = Get-Process -Id $proc.Id -ErrorAction SilentlyContinue
+    if (-not $supervisorProcess -or $supervisorProcess.HasExited) {
+        $stdoutTail = ""
+        $stderrTail = ""
+        $controlTail = ""
+        if (Test-Path -LiteralPath $supervisorStdoutLog) {
+            $stdoutTail = ((Get-Content -LiteralPath $supervisorStdoutLog -Tail 20 -ErrorAction SilentlyContinue) -join "`n")
+        }
+        if (Test-Path -LiteralPath $supervisorStderrLog) {
+            $stderrTail = ((Get-Content -LiteralPath $supervisorStderrLog -Tail 20 -ErrorAction SilentlyContinue) -join "`n")
+        }
+        $controlLogPathForTail = ""
+        try {
+            $controlLogPathForTail = [string]$launcherControlLogPath
+        } catch {
+            $controlLogPathForTail = ""
+        }
+        if ($controlLogPathForTail -and (Test-Path -LiteralPath $controlLogPathForTail)) {
+            $controlTail = ((Get-Content -LiteralPath $controlLogPathForTail -Tail 80 -ErrorAction SilentlyContinue | Where-Object {
+                $_ -match "launcher\.supervisor"
+            }) -join "`n")
+        }
+        Write-LauncherControlLog `
+            -Event "launcher.supervisor.start_failed" `
+            -Message "Supervisor process exited during startup." `
+            -Level "error" `
+            -Fields @{ managed_session_id = $ManagedSessionId; pid = $proc.Id; stdout_tail = $stdoutTail; stderr_tail = $stderrTail; supervisor_control_tail = $controlTail; stdout_path = $supervisorStdoutLog; stderr_path = $supervisorStderrLog }
+        throw "Supervisor process exited during startup. See $supervisorStderrLog for details."
+    }
 
     if ($script:currentRuntimeSceneId) {
         Update-RuntimeSceneManifest @{ supervisor = @{ pid = $proc.Id; status = "running" } }
