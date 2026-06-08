@@ -6236,6 +6236,201 @@ Write-Output "ok"
     assert result.stdout.strip().splitlines()[-1] == "ok"
 
 
+def test_launcher_start_marks_ready_before_nonblocking_supervisor_attach(tmp_path):
+    result = _run_launcher_ast_harness(
+        tmp_path,
+        """
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$LauncherPath
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$source = Get-Content -Raw -LiteralPath $LauncherPath
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors -and $parseErrors.Count -gt 0) {
+    throw "Launcher script parse failed: $($parseErrors[0].Message)"
+}
+
+function Get-LauncherFunctionText {
+    param([string]$Name)
+
+    $functionAst = $ast.Find({
+        param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+            $node.Name -eq $Name
+    }, $true)
+    if ($null -eq $functionAst) {
+        throw "$Name was not found."
+    }
+    return $functionAst.Extent.Text
+}
+
+$startText = Get-LauncherFunctionText -Name "Start-ManagedSession"
+$readyIndex = $startText.IndexOf("runtime.scene.ready")
+$supervisorAttachIndex = $startText.IndexOf("Start-SupervisorDetached")
+if ($readyIndex -lt 0) {
+    throw "Start-ManagedSession should mark the runtime scene ready."
+}
+if ($supervisorAttachIndex -lt 0) {
+    throw "Start-ManagedSession should attach supervision through Start-SupervisorDetached."
+}
+if ($readyIndex -gt $supervisorAttachIndex) {
+    throw "Start-ManagedSession should mark ready before nonblocking supervisor attachment."
+}
+foreach ($required in @(
+    "supervisor_attach_mode",
+    "non_blocking",
+    "supervisor_pid = 0"
+)) {
+    if ($startText -notmatch [regex]::Escape($required)) {
+        throw "Start-ManagedSession ready event is missing '$required'."
+    }
+}
+
+$detachedText = Get-LauncherFunctionText -Name "Start-SupervisorDetached"
+foreach ($required in @(
+    "Start-HiddenBackgroundProcess",
+    "startup_wait_skipped",
+    "launcher.supervisor.attach.started",
+    "supervisor.attach.started",
+    "hidden_background_powershell",
+    "console_window_suppressed"
+)) {
+    if ($detachedText -notmatch [regex]::Escape($required)) {
+        throw "Start-SupervisorDetached is missing '$required'."
+    }
+}
+if ($detachedText -match "Start-RedirectedBackgroundProcess") {
+    throw "Start-SupervisorDetached should not use the wait-prone redirected starter."
+}
+if ($detachedText -notmatch "-EncodedCommand") {
+    throw "Start-SupervisorDetached should still use an encoded supervisor command."
+}
+
+Write-Output "ok"
+""",
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip().splitlines()[-1] == "ok"
+
+
+def test_launcher_detached_supervisor_attach_failure_is_best_effort(tmp_path):
+    result = _run_launcher_ast_harness(
+        tmp_path,
+        """
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$LauncherPath
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$source = Get-Content -Raw -LiteralPath $LauncherPath
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors -and $parseErrors.Count -gt 0) {
+    throw "Launcher script parse failed: $($parseErrors[0].Message)"
+}
+
+foreach ($functionName in @(
+    "ConvertTo-PowerShellSingleQuotedLiteral",
+    "Start-SupervisorDetached"
+)) {
+    $functionAst = $ast.Find({
+        param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+            $node.Name -eq $functionName
+    }, $true)
+    if ($null -eq $functionAst) {
+        throw "$functionName was not found."
+    }
+    . ([scriptblock]::Create($functionAst.Extent.Text))
+}
+
+$script:currentRuntimeSceneId = "scene-1"
+$script:events = @()
+$script:manifestUpdates = @()
+$script:rawRefs = @()
+$script:projectDir = [System.IO.Path]::GetTempPath()
+$script:launcherDir = [System.IO.Path]::GetTempPath()
+$script:PSCommandPath = $LauncherPath
+
+function Get-RuntimeSceneRelativePaths {
+    return [pscustomobject]@{
+        Supervisor = "raw/supervisor.log"
+        SupervisorStderr = "raw/supervisor.stderr.log"
+        LauncherControl = "raw/launcher-control.jsonl"
+    }
+}
+function Get-CurrentRuntimeSceneFilePath {
+    param([string]$RelativePath)
+    return (Join-Path ([System.IO.Path]::GetTempPath()) ("missing-parent-" + [guid]::NewGuid().ToString("N") + "\\" + $RelativePath))
+}
+function Write-LauncherControlLog {
+    param([string]$Event, [string]$Message, [string]$Level = "info", [hashtable]$Fields = @{})
+    $script:events += [pscustomobject]@{ event = $Event; message = $Message; level = $Level; fields = $Fields }
+}
+function Update-RuntimeSceneManifest {
+    param([hashtable]$Patch)
+    $script:manifestUpdates += $Patch
+}
+function Write-RuntimeSceneEvent {
+    param(
+        [string]$Component,
+        [string]$Phase,
+        [string]$EventCode,
+        [string]$Message,
+        [string]$Level = "info",
+        [string]$Outcome = "",
+        [hashtable]$Fields = @{},
+        [object[]]$RawRefs = @()
+    )
+    $script:events += [pscustomobject]@{
+        component = $Component
+        phase = $Phase
+        eventCode = $EventCode
+        message = $Message
+        level = $Level
+        outcome = $Outcome
+        fields = $Fields
+    }
+    $script:rawRefs += @($RawRefs)
+}
+function New-RuntimeSceneRawRef {
+    param([string]$RelativePath, [int]$TailLines)
+    return [pscustomobject]@{ relativePath = $RelativePath; tailLines = $TailLines }
+}
+
+$pidResult = Start-SupervisorDetached -ManagedSessionId "session-1"
+$payload = @{
+    pid = $pidResult
+    events = @($script:events)
+    manifestUpdates = @($script:manifestUpdates)
+    rawRefCount = $script:rawRefs.Count
+} | ConvertTo-Json -Depth 8 -Compress
+Write-Output $payload
+""",
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    payload = json.loads(result.stdout.strip().splitlines()[-1])
+    assert payload["pid"] == 0
+    assert payload["events"][0]["event"] == "launcher.supervisor.attach.failed"
+    assert payload["events"][0]["level"] == "warning"
+    assert payload["events"][1]["eventCode"] == "supervisor.attach.failed"
+    assert payload["events"][1]["outcome"] == "failed"
+    assert payload["manifestUpdates"][0]["supervisor"]["status"] == "attach_failed"
+    assert payload["rawRefCount"] == 3
+
+
 def test_desktop_entry_maps_close_to_stop_without_monitor(tmp_path):
     calls = _run_desktop_entry_with_fake_launcher(tmp_path, action="close")
 
