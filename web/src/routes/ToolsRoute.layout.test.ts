@@ -78,6 +78,8 @@ describe("ToolsRoute layout contract", () => {
 
   it("keeps Agent ToolPolicy state lightweight and routes configuration to Agent Center", () => {
     expect(routeSource).toContain("fetchJson<AgentInstance[]>(\"/api/agents\")");
+    expect(routeSource).toContain("const agentPolicyWorkspaceNeeded = Boolean(activeTool)");
+    expect(routeSource).toContain("enabled: agentPolicyWorkspaceNeeded");
     expect(routeSource).toContain("这里用于测试工具，不在这里配置 Agent");
     expect(routeSource).toContain("Test tools here, configure Agents in Agent Center");
     expect(routeSource).toContain("styles.agentPermissionSummaryPanel");
@@ -90,6 +92,14 @@ describe("ToolsRoute layout contract", () => {
     expect(routeSource).toContain("编辑 Agent 策略");
     expect(routeSource).not.toContain("toolPolicyMutation");
     expect(routeSource).not.toContain("body: JSON.stringify({ toolPolicy: payload.policy })");
+  });
+
+  it("avoids fixed registry and Agent polling on the Tools workspace", () => {
+    expect(routeSource).toContain("fetchJson<ToolRegistryPayload>(\"/api/tools\")");
+    expect(routeSource).toContain("void queryClient.invalidateQueries({ queryKey: queryKeys.agents() })");
+    expect(routeSource).toContain("activeIsWebSearchTool ? resolvePollingInterval(pageVisible, 15_000) : false");
+    expect(routeSource).not.toContain("resolvePollingInterval(pageVisible, 8_000)");
+    expect(routeSource).not.toContain("resolvePollingInterval(pageVisible, 12_000)");
   });
 
   it("calls out tools that require explicit Agent allow-list permission", () => {
