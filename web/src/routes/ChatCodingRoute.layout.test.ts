@@ -659,15 +659,27 @@ describe("ChatCodingRoute layout contract", () => {
 
   it("hides direct sessions whose Agent is no longer active in Agent Center", () => {
     expect(routeSource).toContain("function isVisibleDirectSession");
-    expect(routeSource).toContain("return !session.agentMissing");
+    expect(routeSource).toContain("if (session.agentMissing)");
+    expect(routeSource).toContain("return false;");
+    expect(routeSource.indexOf("if (session.agentMissing)")).toBeLessThan(
+      routeSource.indexOf("if (!String(session.agentId ?? \"\").trim())"),
+    );
     expect(routeSource).toContain("function isVisibleConversation");
-    expect(routeSource).toContain("return !conversation.agentMissing");
-    expect(routeSource).toContain("return sessions.filter(isVisibleDirectSession)");
+    expect(routeSource).toContain("if (conversation.agentMissing)");
+    expect(routeSource.indexOf("if (conversation.agentMissing)")).toBeLessThan(
+      routeSource.indexOf("if (!String(conversation.agentId ?? \"\").trim())"),
+    );
+    expect(routeSource).toContain("const rawSessionsQuery = useQuery");
+    expect(routeSource).toContain("const visibleSessionsData = useMemo");
+    expect(routeSource).toContain("data: visibleSessionsData");
+    expect(routeSource).toContain("const rawSessionsById = useMemo");
+    expect(routeSource).toContain("if (!isVisibleConversation(conversation, rawSessionsById))");
+    expect(routeSource).toContain("if (rawSession && !session)");
     expect(routeSource).toContain("const allVisibleSessions = useMemo");
     expect(routeSource).toContain("const rightIndexSessions = useMemo");
     expect(routeSource).toContain("mergeVisibleSessionsIntoConversations(conversationsQuery.data, rightIndexSessions)");
     expect(routeSource).toContain("conversation.type !== \"group_room\"");
-    expect(routeSource).toContain("if (!isVisibleConversation(conversation, sessionsById))");
+    expect(routeSource).toContain("if (!isVisibleConversation(conversation, rawSessionsById))");
   });
 
   it("renders child sessions in the top Agent session strip instead of the right conversation index", () => {
@@ -817,11 +829,16 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("renameSessionInSummaries");
     expect(routeSource).toContain("renameSessionInConversations");
     expect(routeSource).toContain("renameSessionDetail");
-    expect(routeSource).toContain("title: String(session.agentDisplayName || session.title || session.id).trim()");
+    expect(routeSource).toContain('function sessionListTitle(session: Pick<SessionSummary, "id" | "title" | "taskTitle" | "resultCard">)');
+    expect(routeSource).toContain("title: sessionListTitle(session)");
     expect(routeSource).toContain("agentDisplayName: conversation.agentDisplayName");
-    expect(routeSource).toContain("const sessionAgentName =");
+    expect(routeSource).toContain("const sessionAgentMeta = sessionAgentMetaLabel(session)");
+    expect(routeSource).toContain("function sessionAgentMetaLabel");
+    expect(routeSource).toContain("return `Agent ${code}`;");
+    expect(routeSource).toContain("function showSessionFunctionLabel");
+    expect(routeSource).toContain('label === "会话入口"');
     expect(routeSource).toContain("const sessionTitle =");
-    expect(routeSource).toContain("(sessionIsChild ? (session.taskTitle || session.resultCard?.title || session.title) : sessionDisplay.name)");
+    expect(routeSource).toContain("const sessionTitle = sessionListTitle(session) || sessionDisplay.name");
     expect(routeSource).toContain("agentDisplayName: title");
     expect(routeSource).toContain("targetSession");
     expect(routeSource).toContain("{sessionTitle}");
