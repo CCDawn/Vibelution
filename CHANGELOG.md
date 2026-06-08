@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.7 - 2026-06-08
+
+- Made the Challenge Cup research team surface show one selected workflow node at a time, with Source Collection, Coordination, Ingestion, Candidate Graph, Candidates, Discussion, and Canvas separated behind the team-level index.
+- Unified the synced research team display name to `ai科学研究团队` and kept the canvas as an auxiliary view instead of the default right-panel content.
+- Bound source-collection run assignments to functional team Agents from the Team canvas when available, while preserving the contract-only boundary with no external search, formal Team Knowledge, RAG, or official graph writes.
+
 ## 1.0.6 - 2026-06-08
 
 - Switched the backend ready wait loop to a direct HTTP ready probe instead of full backend liveness scans on every startup poll.

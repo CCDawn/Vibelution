@@ -77,7 +77,7 @@ class SourceCollectionRunStartPayload(BaseModel):
     title: str = Field("", max_length=180)
     goal: str = Field("", max_length=1000)
     topic: str = Field("", max_length=500)
-    ownerAgentId: str = Field(DEFAULT_OWNER_AGENT_ID, max_length=160)
+    ownerAgentId: str = Field("", max_length=160)
     requestedByAgent: str = Field("", max_length=160)
     agentRoles: list[str] = Field(default_factory=list, max_length=8)
     agentIds: dict[str, str] = Field(default_factory=dict)

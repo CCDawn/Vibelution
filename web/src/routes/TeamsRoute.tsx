@@ -64,7 +64,7 @@ const WORKFLOW_GRAPH_MARGIN_Y = 28;
 const SOURCE_COLLECTION_RUN_PREVIEW_LIMIT = 20;
 const SOURCE_COLLECTION_DEFAULT_ROLES = ["data_discovery", "source_acquisition", "content_extraction", "source_quality"];
 
-type ResearchWorkspaceView = "overview" | "coordination" | "ingestion" | "graph" | "candidates" | "discussion" | "canvas";
+type ResearchWorkspaceView = "overview" | "source_collection" | "coordination" | "ingestion" | "graph" | "candidates" | "discussion" | "canvas";
 
 const RESEARCH_WORKSPACE_NAV_ITEMS: Array<{
   view: ResearchWorkspaceView;
@@ -74,6 +74,7 @@ const RESEARCH_WORKSPACE_NAV_ITEMS: Array<{
   enDetail: string;
 }> = [
   { view: "overview", zh: "科研总览", en: "Overview", zhDetail: "阶段、候选和流程边界", enDetail: "Stage, candidates, and boundaries" },
+  { view: "source_collection", zh: "资料搜集", en: "Source collection", zhDetail: "启动批次与回写结果", enDetail: "Runs, assignments, and writeback" },
   { view: "coordination", zh: "团队协调", en: "Coordination", zhDetail: "调转、返工与沟通队列", enDetail: "Transfers, rework, and briefs" },
   { view: "ingestion", zh: "知识入库", en: "Ingestion", zhDetail: "候选层到共享记忆前置审查", enDetail: "Candidate review before shared memory" },
   { view: "graph", zh: "候选图谱", en: "Candidate graph", zhDetail: "候选关系、缺边和预览边界", enDetail: "Relations, missing links, and boundary" },
@@ -85,6 +86,7 @@ const RESEARCH_WORKSPACE_NAV_ITEMS: Array<{
 function researchWorkspaceAnchorId(view: ResearchWorkspaceView) {
   const ids: Record<ResearchWorkspaceView, string> = {
     overview: "research-workflow-overview",
+    source_collection: "research-workflow-source-collection",
     coordination: "research-workflow-coordination",
     ingestion: "research-workflow-ingestion",
     graph: "research-workflow-graph",
@@ -228,6 +230,28 @@ function canvasFromTeam(team: Team | null): TeamOrganizationCanvas | null {
     return null;
   }
   return team.canvas as TeamOrganizationCanvas;
+}
+
+function sourceCollectionAgentIdsFromCanvas(canvas: TeamOrganizationCanvas | null) {
+  const agentIds: Record<string, string> = {};
+  const roleSet = new Set(SOURCE_COLLECTION_DEFAULT_ROLES);
+  for (const node of canvas?.nodes ?? []) {
+    if (roleSet.has(node.role) && node.agentId && !agentIds[node.role]) {
+      agentIds[node.role] = node.agentId;
+    }
+  }
+  return agentIds;
+}
+
+function sourceCollectionOwnerAgentIdFromCanvas(canvas: TeamOrganizationCanvas | null) {
+  const preferredRoles = ["research_coordination", "data_intake_coordinator", "ceo", "organization_coordinator"];
+  for (const role of preferredRoles) {
+    const node = canvas?.nodes.find((item) => item.role === role && item.agentId);
+    if (node?.agentId) {
+      return node.agentId;
+    }
+  }
+  return "";
 }
 
 function canvasViewStyle(nodes: TeamCanvasNode[], frameSize?: CanvasFrameSize): CanvasViewportStyle {
@@ -888,6 +912,8 @@ export function TeamsRoute() {
     () => sourceCollectionRunsForTeam(sourceCollectionRunsQuery.data, effectiveTeamId),
     [effectiveTeamId, sourceCollectionRunsQuery.data],
   );
+  const sourceCollectionAgentIds = useMemo(() => sourceCollectionAgentIdsFromCanvas(canvas), [canvas]);
+  const sourceCollectionOwnerAgentId = useMemo(() => sourceCollectionOwnerAgentIdFromCanvas(canvas), [canvas]);
   const selectedSourceCollectionRun =
     sourceCollectionRuns.find((run) => run.runId === selectedSourceCollectionRunId) ?? sourceCollectionRuns[0] ?? null;
   const selectedSourceCollectionRunEffectiveId = selectedSourceCollectionRun?.runId ?? "";
@@ -1122,9 +1148,10 @@ export function TeamsRoute() {
             title: payload.draft.title.trim() || "Challenge Cup source collection",
             topic: payload.draft.topic.trim(),
             goal: payload.draft.goal.trim(),
-            ownerAgentId: "Research Coordination Agent",
-            requestedByAgent: "Research Coordination Agent",
+            ownerAgentId: sourceCollectionOwnerAgentId,
+            requestedByAgent: sourceCollectionOwnerAgentId,
             agentRoles: SOURCE_COLLECTION_DEFAULT_ROLES,
+            agentIds: sourceCollectionAgentIds,
             inputRefs: splitDraftList(payload.draft.inputRefs, 24),
             querySeeds,
             searchLanguages: splitDraftList(payload.draft.searchLanguages, 8),
@@ -1193,7 +1220,7 @@ export function TeamsRoute() {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
-                createdByAgent: "Research Coordination Agent",
+                createdByAgent: sourceCollectionOwnerAgentId,
                 tags: ["source_collection", "manual_writeback"],
                 metadata: {
                   sourceCollectionPanel: true,
@@ -1256,12 +1283,14 @@ export function TeamsRoute() {
 
   function selectResearchWorkspaceView(view: ResearchWorkspaceView) {
     setResearchWorkspaceView(view);
-    window.requestAnimationFrame(() => {
-      document.getElementById(researchWorkspaceAnchorId(view))?.scrollIntoView({
-        behavior: "smooth",
-        block: "start",
+    if (view === "canvas") {
+      window.requestAnimationFrame(() => {
+        document.getElementById(researchWorkspaceAnchorId(view))?.scrollIntoView({
+          behavior: "smooth",
+          block: "start",
+        });
       });
-    });
+    }
   }
 
   function renderResearchWorkspaceNav() {
@@ -1589,8 +1618,14 @@ export function TeamsRoute() {
     researchWorkflowTeamSelected ? styles.researchInspector : "",
   ].filter(Boolean).join(" ");
   const showNodeBindingPanel = !researchWorkflowTeamSelected || researchCanvasVisible;
-  const showWorkflowPanel = !researchWorkflowTeamSelected || !researchCanvasVisible;
-  const showTeamCommunicationPanel = !researchWorkflowTeamSelected || !researchCanvasVisible;
+  const showWorkflowPanel = !researchWorkflowTeamSelected || (!researchCanvasVisible && researchWorkspaceView !== "discussion");
+  const showTeamCommunicationPanel = !researchWorkflowTeamSelected || (!researchCanvasVisible && researchWorkspaceView === "discussion");
+  const showResearchOverview = researchWorkflowTeamSelected && researchWorkspaceView === "overview";
+  const showResearchSourceCollection = researchWorkflowTeamSelected && researchWorkspaceView === "source_collection";
+  const showResearchCoordination = researchWorkflowTeamSelected && researchWorkspaceView === "coordination";
+  const showResearchIngestion = researchWorkflowTeamSelected && researchWorkspaceView === "ingestion";
+  const showResearchGraph = researchWorkflowTeamSelected && researchWorkspaceView === "graph";
+  const showResearchCandidates = researchWorkflowTeamSelected && researchWorkspaceView === "candidates";
 
   return (
     <section className={styles.route}>
@@ -1985,26 +2020,31 @@ export function TeamsRoute() {
                     <div className={styles.empty}>{lang === "zh" ? "正在读取 TeamWorkflowOrchestration..." : "Loading TeamWorkflowOrchestration..."}</div>
                   ) : teamWorkflow ? (
                     <>
-                      <div className={styles.workflowStats}>
-                        <div>
-                          <span>{lang === "zh" ? "当前阶段" : "Stage"}</span>
-                          <strong>{workflowStateLabel(teamWorkflow.stateMachine.currentStage, lang)}</strong>
-                        </div>
-                        <div>
-                          <span>{lang === "zh" ? "候选" : "Candidates"}</span>
-                          <strong>{teamWorkflow.candidateStore.candidateCount}</strong>
-                        </div>
-                        <div>
-                          <span>{lang === "zh" ? "活跃项" : "Active"}</span>
-                          <strong>{activeWorkflowItemCount}</strong>
-                        </div>
-                      </div>
-                      <div className={styles.workflowMeta}>
-                        <span>{teamWorkflow.workflowKind}</span>
-                        <span>{teamWorkflow.ownerAgentId}</span>
-                        <span>{teamWorkflow.candidateStore.storagePath}</span>
-                      </div>
-                      <div className={styles.workflowSourceCollectionPanel}>
+                      {showResearchOverview ? (
+                        <>
+                          <div className={styles.workflowStats}>
+                            <div>
+                              <span>{lang === "zh" ? "当前阶段" : "Stage"}</span>
+                              <strong>{workflowStateLabel(teamWorkflow.stateMachine.currentStage, lang)}</strong>
+                            </div>
+                            <div>
+                              <span>{lang === "zh" ? "候选" : "Candidates"}</span>
+                              <strong>{teamWorkflow.candidateStore.candidateCount}</strong>
+                            </div>
+                            <div>
+                              <span>{lang === "zh" ? "活跃项" : "Active"}</span>
+                              <strong>{activeWorkflowItemCount}</strong>
+                            </div>
+                          </div>
+                          <div className={styles.workflowMeta}>
+                            <span>{teamWorkflow.workflowKind}</span>
+                            <span>{teamWorkflow.ownerAgentId}</span>
+                            <span>{teamWorkflow.candidateStore.storagePath}</span>
+                          </div>
+                        </>
+                      ) : null}
+                      {showResearchSourceCollection ? (
+                      <div className={styles.workflowSourceCollectionPanel} id="research-workflow-source-collection">
                         <div className={styles.workflowIngestionHeader}>
                           <div>
                             <strong>{lang === "zh" ? "资料搜集执行" : "Source collection"}</strong>
@@ -2242,6 +2282,14 @@ export function TeamsRoute() {
                               placeholder="https://doi.org/... / local path / dataset id"
                             />
                           </label>
+                          <label>
+                            <span>{lang === "zh" ? "原始位置" : "Raw location"}</span>
+                            <input
+                              value={sourceCollectionOutputDraft.rawLocation}
+                              onChange={(event) => setSourceCollectionOutputDraft((current) => ({ ...current, rawLocation: event.target.value }))}
+                              placeholder={lang === "zh" ? "页码、文件路径、段落或采集位置" : "Page range, file path, section, or capture location"}
+                            />
+                          </label>
                           <label className={styles.workflowSourceCollectionWide}>
                             <span>{lang === "zh" ? "摘要" : "Summary"}</span>
                             <textarea
@@ -2284,6 +2332,8 @@ export function TeamsRoute() {
                           </div>
                         ) : null}
                       </div>
+                      ) : null}
+                      {showResearchCoordination ? (
                       <div className={styles.workflowCoordinationPanel} id="research-workflow-coordination">
                         <div className={styles.workflowIngestionHeader}>
                           <div>
@@ -2387,6 +2437,8 @@ export function TeamsRoute() {
                           <div className={styles.messageError}>{teamWorkflowCoordinationStatusQuery.error.message}</div>
                         ) : null}
                       </div>
+                      ) : null}
+                      {showResearchIngestion ? (
                       <div className={styles.workflowIngestionPanel} id="research-workflow-ingestion">
                         <div className={styles.workflowIngestionHeader}>
                           <div>
@@ -2459,6 +2511,9 @@ export function TeamsRoute() {
                           <div className={styles.messageError}>{teamWorkflowKnowledgeIngestionStatusQuery.error.message}</div>
                         ) : null}
                       </div>
+                      ) : null}
+                      {showResearchOverview ? (
+                        <>
                       <div className={styles.workflowStageList}>
                         {teamWorkflow.stateMachine.nodes.map((node) => (
                           <span
@@ -2481,6 +2536,9 @@ export function TeamsRoute() {
                       ) : teamWorkflowCandidatesQuery.isPending ? (
                         <div className={styles.empty}>{lang === "zh" ? "正在读取候选校验摘要..." : "Loading candidate validation summary..."}</div>
                       ) : null}
+                        </>
+                      ) : null}
+                      {showResearchGraph ? (
                       <div className={styles.workflowGraphPanel} id="research-workflow-graph">
                         <div className={styles.workflowGraphHeader}>
                           <div>
@@ -2592,6 +2650,9 @@ export function TeamsRoute() {
                           <div className={styles.messageError}>{selectedTeamBuildCandidateGraphError.message}</div>
                         ) : null}
                       </div>
+                      ) : null}
+                      {showResearchCandidates ? (
+                        <>
                       {teamWorkflowCandidates.length ? (
                         <div className={styles.workflowCandidateList} id="research-workflow-candidates">
                           {teamWorkflowCandidates.map((candidate) => (
@@ -2616,13 +2677,15 @@ export function TeamsRoute() {
                           {lang === "zh" ? "候选仓库还没有资料、笔记或机制候选。" : "No sources, notes, or mechanism candidates yet."}
                         </div>
                       )}
+                        </>
+                      ) : null}
                     </>
                   ) : (
                     <div className={styles.empty}>{lang === "zh" ? "科研流程尚未初始化。" : "Research workflow is not initialized yet."}</div>
                   )
                 ) : (
                   <div className={styles.empty}>
-                    {lang === "zh" ? "选择 research-team / 科研团队后显示挑战杯科研流程。" : "Select research-team to view the Challenge Cup workflow."}
+                    {lang === "zh" ? "选择 research-team / ai科学研究团队后显示挑战杯科研流程。" : "Select research-team to view the Challenge Cup workflow."}
                   </div>
                 )}
                 {teamWorkflowQuery.error instanceof Error ? (

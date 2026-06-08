@@ -241,6 +241,41 @@ def test_start_source_collection_run_ignores_invalid_collection_roles(tmp_path, 
     assert response["assignments"][0]["agentRole"] == "data_discovery"
 
 
+def test_start_source_collection_run_maps_roles_to_team_canvas_agents(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    coordinator = agent_directory_service.create_agent_instance(display_name="Coordinator", direct_session_id="session-coordinator")
+    discovery = agent_directory_service.create_agent_instance(display_name="Discovery", direct_session_id="session-discovery")
+    acquisition = agent_directory_service.create_agent_instance(display_name="Acquisition", direct_session_id="session-acquisition")
+    extraction = agent_directory_service.create_agent_instance(display_name="Extraction", direct_session_id="session-extraction")
+    organization = {
+        "agents": [
+            {"nodeId": "coordinator", "agentId": coordinator["agentId"], "displayName": "Coordinator", "role": "ceo", "status": "active"},
+            {"nodeId": "discovery", "agentId": discovery["agentId"], "displayName": "Discovery", "role": "data_discovery", "status": "active"},
+            {"nodeId": "acquisition", "agentId": acquisition["agentId"], "displayName": "Acquisition", "role": "source_acquisition", "status": "active"},
+            {"nodeId": "extraction", "agentId": extraction["agentId"], "displayName": "Extraction", "role": "content_extraction", "status": "active"},
+        ],
+        "edges": [],
+    }
+    team = team_service.ensure_research_team_from_organization(organization)
+
+    response = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "topic": "predictive coding",
+            "agentRoles": ["data_discovery", "source_acquisition", "content_extraction"],
+        },
+    )
+
+    role_to_agent_id = {item["agentRole"]: item["agentId"] for item in response["assignments"]}
+    assert response["run"]["metadata"]["ownerAgentId"] == coordinator["agentId"]
+    assert response["searchPlan"]["roleAssignmentInputs"][0]["agentId"] == discovery["agentId"]
+    assert role_to_agent_id == {
+        "data_discovery": discovery["agentId"],
+        "source_acquisition": acquisition["agentId"],
+        "content_extraction": extraction["agentId"],
+    }
+
+
 def test_start_source_collection_run_accepts_traceable_query_seed_contract(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     team = team_service.create_team(name="挑战杯科研团队")
