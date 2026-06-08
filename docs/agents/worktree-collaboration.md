@@ -2,10 +2,11 @@
 
 This document defines the default collaboration protocol for multiple Agents working on Vibelution in parallel.
 
-## Roles
+## Work Surfaces
 
-- `C:\Users\17533\Desktop\Vibelution` is the coordinator workspace. Use it for syncing `main`, merging, final validation, project-memory serialization, and publishing.
+- `C:\Users\17533\Desktop\Vibelution` is the main integration workspace. Use it for syncing `main`, merging, final validation, project-memory serialization, and publishing.
 - Development Agents use task-specific worktrees under `C:\Users\17533\Desktop\Vibelution-worktrees\`.
+- If that external worktree root is unavailable, use `.claude/worktrees\<task-slug>` or another explicit task worktree path and record the actual path in preflight/claim evidence.
 - Each active task gets one worktree and one branch. Do not reuse an old task worktree for a new goal.
 
 ## Starting A Task
@@ -32,9 +33,9 @@ Inside its own worktree, an Agent should:
 - commit and push its task branch;
 - report the worktree path, branch, commit SHA, changed files, validation result, Launcher refresh need, and project-memory update proposal.
 
-## Coordinator Responsibilities
+## Main Integration Responsibilities
 
-The coordinator should:
+The session currently closing work into `main` should:
 
 - keep the main workspace clean before each merge;
 - merge one task branch at a time;
@@ -65,7 +66,7 @@ Do not auto-delete a worktree that is unmerged, dirty, failing validation, confl
 
 ## Shared Files
 
-Avoid concurrent edits to shared hot files unless the coordinator explicitly orders the work:
+Avoid concurrent edits to shared hot files unless the current main integration session has explicitly serialized the work:
 
 - `agent.py`
 - `core/web/app.py`
@@ -77,7 +78,7 @@ Avoid concurrent edits to shared hot files unless the coordinator explicitly ord
 - `.docs/project-memory/*`
 - `PROJECT_MEMORY.html`
 
-Project memory is single-writer state. Parallel Agents should write append-only memory proposals or report lane/update payloads; the coordinator applies them after code merges.
+Project memory is single-writer state. Parallel Agents should write append-only memory proposals or report lane/update payloads; the current memory-sync step applies them after code merges.
 
 ## User Involvement
 
