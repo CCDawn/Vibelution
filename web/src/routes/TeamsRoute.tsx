@@ -56,6 +56,37 @@ const WORKFLOW_GRAPH_NODE_GAP = 18;
 const WORKFLOW_GRAPH_MARGIN_X = 22;
 const WORKFLOW_GRAPH_MARGIN_Y = 28;
 
+type ResearchWorkspaceView = "overview" | "coordination" | "ingestion" | "graph" | "candidates" | "discussion" | "canvas";
+
+const RESEARCH_WORKSPACE_NAV_ITEMS: Array<{
+  view: ResearchWorkspaceView;
+  zh: string;
+  en: string;
+  zhDetail: string;
+  enDetail: string;
+}> = [
+  { view: "overview", zh: "科研总览", en: "Overview", zhDetail: "阶段、候选和流程边界", enDetail: "Stage, candidates, and boundaries" },
+  { view: "coordination", zh: "团队协调", en: "Coordination", zhDetail: "调转、返工与沟通队列", enDetail: "Transfers, rework, and briefs" },
+  { view: "ingestion", zh: "知识入库", en: "Ingestion", zhDetail: "候选层到共享记忆前置审查", enDetail: "Candidate review before shared memory" },
+  { view: "graph", zh: "候选图谱", en: "Candidate graph", zhDetail: "候选关系、缺边和预览边界", enDetail: "Relations, missing links, and boundary" },
+  { view: "candidates", zh: "候选资料", en: "Candidates", zhDetail: "资料、草稿与机制候选", enDetail: "Sources, drafts, and mechanisms" },
+  { view: "discussion", zh: "团队沟通", en: "Team discussion", zhDetail: "团队任务、广播和群聊记录", enDetail: "Tasks, broadcast, and room history" },
+  { view: "canvas", zh: "组织画布", en: "Canvas", zhDetail: "附属团队结构图", enDetail: "Supporting organization map" },
+];
+
+function researchWorkspaceAnchorId(view: ResearchWorkspaceView) {
+  const ids: Record<ResearchWorkspaceView, string> = {
+    overview: "research-workflow-overview",
+    coordination: "research-workflow-coordination",
+    ingestion: "research-workflow-ingestion",
+    graph: "research-workflow-graph",
+    candidates: "research-workflow-candidates",
+    discussion: "research-workflow-discussion",
+    canvas: "research-organization-canvas",
+  };
+  return ids[view];
+}
+
 type TeamDraft = {
   name: string;
   purpose: string;
@@ -627,6 +658,7 @@ export function TeamsRoute() {
   const [teamInterrupt, setTeamInterrupt] = useState(false);
   const [teamTaskTopic, setTeamTaskTopic] = useState("");
   const [showCommunicationEdges, setShowCommunicationEdges] = useState(false);
+  const [researchWorkspaceView, setResearchWorkspaceView] = useState<ResearchWorkspaceView>("overview");
   const [nodePositionDrafts, setNodePositionDrafts] = useState<Record<string, { x: number; y: number }>>({});
   const [canvasFrameSize, setCanvasFrameSize] = useState<CanvasFrameSize>({ width: CANVAS_VIEWPORT_WIDTH, height: CANVAS_VIEWPORT_HEIGHT });
   const [lockedCanvasViewportStyle, setLockedCanvasViewportStyle] = useState<CanvasViewportStyle | null>(null);
@@ -998,6 +1030,16 @@ export function TeamsRoute() {
     saveCanvasMutation.mutate(nextCanvas);
   }
 
+  function selectResearchWorkspaceView(view: ResearchWorkspaceView) {
+    setResearchWorkspaceView(view);
+    window.requestAnimationFrame(() => {
+      document.getElementById(researchWorkspaceAnchorId(view))?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    });
+  }
+
   function addNode() {
     if (!canvas) {
       return;
@@ -1244,6 +1286,23 @@ export function TeamsRoute() {
       ? buildCandidateGraphMutation.error
       : null;
   const activeWorkflowItemCount = teamWorkflow?.activeWorkflowItems.length ?? 0;
+  const researchCanvasVisible = researchWorkflowTeamSelected && researchWorkspaceView === "canvas";
+  const workspaceClassName = [
+    hasTeams ? styles.workspace : `${styles.workspace} ${styles.workspaceEmpty}`,
+    researchWorkflowTeamSelected ? styles.workspaceResearch : "",
+    researchCanvasVisible ? styles.workspaceResearchCanvas : "",
+  ].filter(Boolean).join(" ");
+  const canvasPanelClassName = [
+    styles.canvasPanel,
+    researchWorkflowTeamSelected && !researchCanvasVisible ? styles.researchCanvasPanelHidden : "",
+  ].filter(Boolean).join(" ");
+  const inspectorClassName = [
+    styles.inspector,
+    researchWorkflowTeamSelected ? styles.researchInspector : "",
+  ].filter(Boolean).join(" ");
+  const showNodeBindingPanel = !researchWorkflowTeamSelected || researchCanvasVisible;
+  const showWorkflowPanel = !researchWorkflowTeamSelected || !researchCanvasVisible;
+  const showTeamCommunicationPanel = !researchWorkflowTeamSelected || !researchCanvasVisible;
 
   return (
     <section className={styles.route}>
@@ -1264,7 +1323,7 @@ export function TeamsRoute() {
         <span>{lang === "zh" ? "成员源" : "Member source"} <strong>Agent Center</strong></span>
       </div>
 
-      <div className={hasTeams ? styles.workspace : `${styles.workspace} ${styles.workspaceEmpty}`}>
+      <div className={workspaceClassName}>
         <aside className={styles.teamPanel}>
           <form
             className={styles.createForm}
@@ -1372,9 +1431,30 @@ export function TeamsRoute() {
               </button>
             ))}
           </div>
+          {researchWorkflowTeamSelected ? (
+            <nav className={styles.researchIndexPanel} aria-label={lang === "zh" ? "科研流程索引" : "Research workflow index"}>
+              <div className={styles.researchIndexHeader}>
+                <strong>{lang === "zh" ? "科研流程索引" : "Research index"}</strong>
+                <span>{lang === "zh" ? "流程优先" : "flow first"}</span>
+              </div>
+              <div className={styles.researchIndexList}>
+                {RESEARCH_WORKSPACE_NAV_ITEMS.map((item) => (
+                  <button
+                    key={item.view}
+                    type="button"
+                    className={researchWorkspaceView === item.view ? `${styles.researchIndexItem} ${styles.researchIndexItemActive}` : styles.researchIndexItem}
+                    onClick={() => selectResearchWorkspaceView(item.view)}
+                  >
+                    <strong>{lang === "zh" ? item.zh : item.en}</strong>
+                    <span>{lang === "zh" ? item.zhDetail : item.enDetail}</span>
+                  </button>
+                ))}
+              </div>
+            </nav>
+          ) : null}
         </aside>
 
-        <main className={styles.canvasPanel}>
+        <main className={canvasPanelClassName} id="research-organization-canvas">
           <div className={styles.canvasToolbar}>
             <div>
               <strong>{selectedTeam?.name ?? (lang === "zh" ? "暂无团队" : "No team")}</strong>
@@ -1525,13 +1605,17 @@ export function TeamsRoute() {
           )}
         </main>
 
-        <aside className={styles.inspector}>
+        <aside className={inspectorClassName}>
           <div className={styles.inspectorHeader}>
-            <strong>{lang === "zh" ? "节点绑定" : "Node binding"}</strong>
+            <strong>
+              {researchWorkflowTeamSelected && !researchCanvasVisible
+                ? (lang === "zh" ? "ai科学研究团队流程" : "AI research team workflow")
+                : (lang === "zh" ? "节点绑定" : "Node binding")}
+            </strong>
             {validation && !validation.valid ? <AlertTriangle size={16} /> : <Link2 size={16} />}
           </div>
           <div className={styles.inspectorBody}>
-            {!selectedTeam ? (
+            {showNodeBindingPanel && !selectedTeam ? (
               <section className={`${styles.nodeBindingSection} ${styles.nodeBindingPlaceholder}`}>
                 <div className={styles.empty}>
                   {lang === "zh"
@@ -1539,7 +1623,7 @@ export function TeamsRoute() {
                     : "No team yet. Create one or use a template from the left rail."}
                 </div>
               </section>
-            ) : selectedNode ? (
+            ) : showNodeBindingPanel && selectedNode ? (
               <section className={styles.nodeBindingSection}>
               <label>
                 <span>{lang === "zh" ? "节点名称" : "Node label"}</span>
@@ -1608,7 +1692,7 @@ export function TeamsRoute() {
                 )}
               </div>
               </section>
-            ) : (
+            ) : showNodeBindingPanel ? (
               <section className={`${styles.nodeBindingSection} ${styles.nodeBindingPlaceholder}`} aria-busy={teamDetailQuery.isPending || workspaceQuery.isPending}>
                 <div className={styles.empty}>
                   {teamDetailQuery.isPending || workspaceQuery.isPending
@@ -1616,8 +1700,9 @@ export function TeamsRoute() {
                     : (lang === "zh" ? "创建或选择一个团队节点。" : "Create or select a team node.")}
                 </div>
               </section>
-            )}
-              <section className={styles.workflowPanel}>
+            ) : null}
+            {showWorkflowPanel ? (
+              <section className={styles.workflowPanel} id="research-workflow-overview">
                 <div className={styles.sectionTitle}>
                   <strong>{lang === "zh" ? "科研流程" : "Research workflow"}</strong>
                   <span>
@@ -1650,7 +1735,7 @@ export function TeamsRoute() {
                         <span>{teamWorkflow.ownerAgentId}</span>
                         <span>{teamWorkflow.candidateStore.storagePath}</span>
                       </div>
-                      <div className={styles.workflowCoordinationPanel}>
+                      <div className={styles.workflowCoordinationPanel} id="research-workflow-coordination">
                         <div className={styles.workflowIngestionHeader}>
                           <div>
                             <strong>{lang === "zh" ? "团队协调队列" : "Coordination queue"}</strong>
@@ -1753,7 +1838,7 @@ export function TeamsRoute() {
                           <div className={styles.messageError}>{teamWorkflowCoordinationStatusQuery.error.message}</div>
                         ) : null}
                       </div>
-                      <div className={styles.workflowIngestionPanel}>
+                      <div className={styles.workflowIngestionPanel} id="research-workflow-ingestion">
                         <div className={styles.workflowIngestionHeader}>
                           <div>
                             <strong>{lang === "zh" ? "知识入库状态" : "Knowledge ingestion"}</strong>
@@ -1847,7 +1932,7 @@ export function TeamsRoute() {
                       ) : teamWorkflowCandidatesQuery.isPending ? (
                         <div className={styles.empty}>{lang === "zh" ? "正在读取候选校验摘要..." : "Loading candidate validation summary..."}</div>
                       ) : null}
-                      <div className={styles.workflowGraphPanel}>
+                      <div className={styles.workflowGraphPanel} id="research-workflow-graph">
                         <div className={styles.workflowGraphHeader}>
                           <div>
                             <strong>{lang === "zh" ? "候选图谱" : "Candidate graph"}</strong>
@@ -1959,7 +2044,7 @@ export function TeamsRoute() {
                         ) : null}
                       </div>
                       {teamWorkflowCandidates.length ? (
-                        <div className={styles.workflowCandidateList}>
+                        <div className={styles.workflowCandidateList} id="research-workflow-candidates">
                           {teamWorkflowCandidates.map((candidate) => (
                             <article key={candidate.candidateId} className={styles.workflowCandidateItem}>
                               <div className={styles.workflowCandidateHeader}>
@@ -1998,6 +2083,9 @@ export function TeamsRoute() {
                   <div className={styles.messageError}>{teamWorkflowCandidatesQuery.error.message}</div>
                 ) : null}
               </section>
+            ) : null}
+            {showTeamCommunicationPanel ? (
+              <div className={styles.researchDiscussionPanel} id="research-workflow-discussion">
               <form
                 className={styles.teamTaskForm}
                 onSubmit={(event) => {
@@ -2183,6 +2271,8 @@ export function TeamsRoute() {
                   <div className={styles.messageError}>{revokeTeamMessageMutation.error.message}</div>
                 ) : null}
               </section>
+              </div>
+            ) : null}
             </div>
         </aside>
       </div>
