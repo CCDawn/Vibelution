@@ -962,6 +962,33 @@ def purge_archived_agent_instance(agent_id: str, *, allow_active: bool = False) 
     return result
 
 
+def ensure_agent_purge_workspace_deletable(agent: dict[str, Any]) -> dict[str, Any]:
+    """Validate the purge workspace boundary before callers mutate external references."""
+
+    agent_id = str(agent.get("agentId") or "").strip()
+    workspace_path = str(agent.get("workspacePath") or _agent_workspace_relative_path(agent_id)).strip()
+    if not agent_id or not workspace_path:
+        return {"deletable": True, "workspacePath": workspace_path, "reason": "no_workspace_path"}
+    try:
+        resolved = _resolve_project_path(workspace_path)
+        agents_root = (_project_root() / "workspace" / "agents").resolve()
+        expected_private = _resolve_project_path(_agent_workspace_relative_path(agent_id))
+    except Exception as exc:
+        raise AgentDirectoryError(f"Agent workspace path could not be resolved: {type(exc).__name__}") from exc
+    if resolved != expected_private:
+        raise AgentDirectoryError(f"Agent workspace path is not the expected private workspace: {_relative_project_path(resolved)}")
+    try:
+        if not resolved.is_relative_to(agents_root):
+            raise AgentDirectoryError(f"Agent workspace path is outside the agents root: {_relative_project_path(resolved)}")
+    except ValueError as exc:
+        raise AgentDirectoryError(f"Agent workspace path is outside the agents root: {_relative_project_path(resolved)}") from exc
+    if not resolved.exists():
+        return {"deletable": True, "workspacePath": _relative_project_path(resolved), "reason": "workspace_absent"}
+    if not resolved.is_dir():
+        raise AgentDirectoryError(f"Agent workspace path is not a directory: {_relative_project_path(resolved)}")
+    return {"deletable": True, "workspacePath": _relative_project_path(resolved), "reason": "workspace_present"}
+
+
 def reset_agent_instance(
     agent_id: str,
     *,
@@ -1104,6 +1131,8 @@ def ensure_agent_purge_allowed(agent_id: str) -> dict[str, Any]:
         agent = _find_agent(state, normalized_agent_id)
         if agent is None:
             raise AgentNotFoundError(f"Agent not found: {normalized_agent_id}")
+        if str(agent.get("status") or "active").strip() != "archived":
+            raise AgentDirectoryError("Only archived Agents can be permanently deleted.")
         if _agent_archive_protected(agent):
             raise AgentDirectoryError("Protected core Agent cannot be purged.")
         return _agent_to_api(agent)
