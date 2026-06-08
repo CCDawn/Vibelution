@@ -145,15 +145,23 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).not.toContain("{profile.label || profile.profileId} · {profile.model || profile.providerKind || \"-\"}");
   });
 
-  it("keeps permanent Agent deletion available before archival", () => {
-    expect(routeSource).toContain("const canPurgeAgent = Boolean(selectedAgent?.agentId && !selectedAgentProtected)");
+  it("keeps permanent Agent deletion behind the archived-state safety gate", () => {
+    expect(routeSource).toContain('const canPurgeAgent = Boolean(selectedAgent?.agentId && selectedAgent.status === "archived" && !selectedAgentProtected)');
+    expect(routeSource).toContain('agent.status !== "archived"');
+    expect(routeSource).toContain("copy.bulkSkippedActive");
     expect(routeSource).toContain("selectedAgent.status !== \"archived\" ? (");
     expect(routeSource).toContain("className={styles.secondaryButton}");
     expect(routeSource).toContain("onClick={archiveSelectedAgent}");
     expect(routeSource).toContain("onClick={purgeSelectedAgent}");
-    expect(routeSource).toContain("已彻底删除 Agent");
-    expect(routeSource).not.toContain("已彻底删除归档 Agent");
-    expect(routeSource).not.toContain("Only archived Agents can be purged");
+    expect(routeSource).toContain("已彻底删除归档 Agent");
+    expect(routeSource).not.toContain("const canPurgeAgent = Boolean(selectedAgent?.agentId && !selectedAgentProtected)");
+  });
+
+  it("updates mode membership locally after saving so bindings stay aligned", () => {
+    expect(routeSource).toContain("fetchJson<AgentModeBindings>");
+    expect(routeSource).toContain("queryClient.setQueryData<AgentConfigWorkspace | undefined>");
+    expect(routeSource).toContain("modeBindings: payload.modes ?? current.modeBindings");
+    expect(routeSource).toContain("setMembershipDraft(variables.draft)");
   });
 
   it("routes membership guidance to the team surface and not just the config pane", () => {

@@ -1097,7 +1097,7 @@ def _safe_chat_rooms() -> list[dict[str, Any]]:
         from . import team_service
 
         team_service.repair_archived_team_chat_rooms()
-        return chat_room_service.list_chat_rooms_compact()
+        return [_compact_chat_room_for_workspace(room) for room in chat_room_service.list_chat_rooms_compact()]
     except Exception as exc:
         _record_workspace_error("agent_config.chat_rooms.load_failed", exc)
         return []
@@ -1111,6 +1111,40 @@ def _safe_teams() -> list[dict[str, Any]]:
     except Exception as exc:
         _record_workspace_error("agent_config.teams.load_failed", exc)
         return []
+
+
+def _compact_chat_room_for_workspace(room: dict[str, Any]) -> dict[str, Any]:
+    participants = [item for item in list(room.get("participants") or []) if isinstance(item, dict)]
+    return {
+        "roomId": str(room.get("roomId") or "").strip(),
+        "title": str(room.get("title") or "").strip(),
+        "mode": str(room.get("mode") or "").strip(),
+        "status": str(room.get("status") or "").strip(),
+        "activeRoundId": str(room.get("activeRoundId") or "").strip(),
+        "agentIds": [
+            str(participant.get("agentId") or "").strip()
+            for participant in participants
+            if str(participant.get("agentId") or "").strip()
+        ],
+        "participants": [_compact_chat_room_participant_for_workspace(participant) for participant in participants],
+        "participantCount": len(participants),
+        "roundCount": len(list(room.get("rounds") or [])),
+        "updatedAt": str(room.get("updatedAt") or "").strip(),
+    }
+
+
+def _compact_chat_room_participant_for_workspace(participant: dict[str, Any]) -> dict[str, Any]:
+    llm_bindings = participant.get("llmBindings") if isinstance(participant.get("llmBindings"), dict) else {}
+    return {
+        "participantId": str(participant.get("participantId") or "").strip(),
+        "sessionId": str(participant.get("sessionId") or "").strip(),
+        "agentId": str(participant.get("agentId") or "").strip(),
+        "agentCode": str(participant.get("agentCode") or "").strip(),
+        "displayName": str(participant.get("displayName") or "").strip(),
+        "enabled": bool(participant.get("enabled", True)),
+        "dialogueModelId": str(participant.get("dialogueModelId") or "").strip(),
+        "llmBindings": llm_bindings,
+    }
 
 
 def _safe_policy_options(*, agents: list[dict[str, Any]] | None = None) -> dict[str, list[dict[str, Any]]]:
