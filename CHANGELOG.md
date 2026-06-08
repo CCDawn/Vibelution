@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.12.1 - 2026-06-08
+
+- Added the Challenge Cup AI research team source-collection execution panel to the Teams surface, with run startup, assignment/query visibility, and manual result writeback into candidate source records.
+- Kept the source-collection UI on the candidate side of the knowledge boundary: no external search execution, no formal Team Knowledge writes, no RAG writes, and no official graph publication.
+- Hardened Launcher/workbench state reconciliation and supervised-evolution transaction closure so merged development rounds refresh and close more reliably.
+
 ## 0.12.0 - 2026-06-08
 
 - Added lightweight runtime-manager live-control probes for evolution control surfaces, reducing expensive process inventory work during polling while preserving lifecycle evidence.
