@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.1 - 2026-06-08
+
+- Fixed supervised-evolution judge marker extraction so prompt examples cannot override the real final judge response.
+- Hydrated referenced conversation payload files before summarizing supervised Agent judgments, preserving real PROMOTE/HOLD decisions and scores in persisted reports.
+- Added regression coverage for referenced LLM responses and prompt-example marker noise.
+
 ## 1.0.0 - 2026-06-08
 
 - Promoted Vibelution to the stable 1.0.0 line across the canonical backend version source and frontend package metadata.
