@@ -20,6 +20,7 @@ from .team_conversation_contract import build_team_conversation_projection
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 SCHEMA_VERSION = 1
 CANVAS_KIND = "team_organization_canvas"
+RESEARCH_TEAM_DISPLAY_NAME = "ai科学研究团队"
 DEFAULT_TEAM_STATUS = "active"
 TEAM_STATUSES = {"active", "archived"}
 NODE_TYPES = {"role", "agent", "group", "user", "external"}
@@ -255,7 +256,7 @@ def ensure_research_team_from_organization(organization: dict[str, Any]) -> dict
         if team is None:
             team = {
                 "teamId": team_id,
-                "name": "科研团队",
+                "name": RESEARCH_TEAM_DISPLAY_NAME,
                 "description": "由科研组织架构自动同步的系统团队。",
                 "purpose": "实时展示科研团队成员、职能与组织通信关系。",
                 "status": DEFAULT_TEAM_STATUS,
@@ -268,7 +269,7 @@ def ensure_research_team_from_organization(organization: dict[str, Any]) -> dict
             _apply_team_contract(team, team_kind="research", team_source="research_organization")
             state.setdefault("teams", []).append(team)
         else:
-            team["name"] = "科研团队"
+            team["name"] = RESEARCH_TEAM_DISPLAY_NAME
             team["description"] = "由科研组织架构自动同步的系统团队。"
             team["purpose"] = "实时展示科研团队成员、职能与组织通信关系。"
             team["status"] = DEFAULT_TEAM_STATUS

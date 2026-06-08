@@ -464,7 +464,7 @@
           <div class="plan-summary">
             <div class="service-row"><strong>知识搜集主线</strong><span>只跑通知识搜集、筛选、候选入库、知识治理 Agent 和图谱同步设计；不进入训练实验、算法实现或比赛交付。</span></div>
             <div class="service-row"><strong>实施目标</strong><span>复用 Vibelution 现有 Research、Team Knowledge、RAG、Knowledge Steward 和 Memory Graph 能力，把 01-09 做成可运行 MVP。</span></div>
-            <div class="service-row"><strong>团队入口</strong><span>/teams?team=research-team · 选中 ai科学研究团队后，主工作区顶部显示科研流程二级导航：科研总览、团队协调、知识入库、候选图谱、候选资料、团队沟通。</span></div>
+            <div class="service-row"><strong>团队入口</strong><span>/teams?team=research-team · 选中 ai科学研究团队后，主工作区顶部显示科研流程二级导航：科研总览、资料搜集、团队协调、知识入库、候选图谱、候选资料、团队沟通。</span></div>
           </div>
           <div class="dashboard-panel">
             <h2>边界提醒</h2>
@@ -1646,12 +1646,12 @@
 <div class="blueprint-row compact">
               <b>Team 前端入口</b>
               <strong>/teams?team=research-team</strong>
-              <span>读取 /workflow-orchestration、/candidates?limit=8、/knowledge-ingestion/status 和通用 data-processing run/status/assignment；左侧只做团队选择/创建，research-team 主工作区顶部提供科研流程二级导航，展示科研流程状态、资料搜集执行台、候选仓库、校验摘要、知识入库漏斗、actionItems 和 officialBoundary；非科研团队显示占位，不初始化 workflow。</span>
+              <span>读取 /workflow-orchestration、/candidates?limit=8、/knowledge-ingestion/status 和通用 data-processing run/status/assignment；左侧只做团队选择/创建，research-team 主工作区顶部提供科研流程二级导航，并按当前索引节点单页展示科研总览、资料搜集执行台、候选仓库、校验摘要、知识入库漏斗、actionItems 和 officialBoundary；非科研团队显示占位，不初始化 workflow。</span>
             </div>
 <div class="blueprint-row compact">
               <b>资料搜集执行台</b>
               <strong>TeamsRoute source collection panel</strong>
-              <span>可在 research-team 页面启动 source collection run、查看 DataSearchPlan/querySeeds/assignment/assignedQueries，并手工提交一条 CollectionOutput；提交后自动导入 source_manifest 候选。</span>
+              <span>可在 research-team 页面独立打开资料搜集索引页，启动 source collection run、查看 DataSearchPlan/querySeeds/assignment/assignedQueries，并手工提交一条含 rawLocation 的 CollectionOutput；启动时优先使用 Team canvas 中各功能角色绑定的团队 agentId，提交后自动导入 source_manifest 候选。</span>
             </div>
 <div class="blueprint-row compact">
               <b>转移记录</b>
@@ -1734,14 +1734,14 @@
 <div class="blueprint-row">
               <b>M0.1</b>
               <strong>Team 页面科研流程入口</strong>
-              <span>已在 Teams 工作台为 research-team / 科研组织团队读取 TeamWorkflowOrchestration、最近 CandidateStore 候选和知识入库状态；当前改为科研流程索引优先，默认展示流程总览、协调队列、入库漏斗、候选图谱、候选资料和团队沟通，组织画布作为附属索引视图。</span>
+              <span>已在 Teams 工作台为 research-team / 科研组织团队读取 TeamWorkflowOrchestration、最近 CandidateStore 候选和知识入库状态；当前改为科研流程索引优先，默认只展示当前索引节点的规划内容，流程总览、资料搜集、协调队列、入库漏斗、候选图谱、候选资料和团队沟通互相隔离，组织画布作为附属索引视图。</span>
               <span>只读展示，不触发状态转移、审批、正式 Team Knowledge/RAG/图谱写入；普通非科研团队保持原画布优先布局，不被动初始化挑战杯 workflow。</span>
             </div>
 <div class="blueprint-row">
               <b>M0.2</b>
               <strong>Teams 科研流程二级导航</strong>
               <span>左侧团队栏降级为团队创建、模板和团队列表；科研流程索引不再与团队同级，而是进入 ai科学研究团队主工作区顶部作为二级导航。</span>
-              <span>用户先选团队，再在选中团队内部切换科研总览、资料搜集执行、团队协调、知识入库、候选图谱、候选资料、团队沟通和组织画布；组织画布仍可编辑但属于附属视图。</span>
+              <span>用户先选团队，再在选中团队内部切换科研总览、资料搜集、团队协调、知识入库、候选图谱、候选资料、团队沟通和组织画布；点击索引只切换当前节点页面，组织画布仍可编辑但属于附属视图。</span>
             </div>
 <div class="blueprint-row">
               <b>M0.5</b>
@@ -1818,8 +1818,8 @@
 <div class="blueprint-row">
               <b>M6.6</b>
               <strong>Teams 资料搜集执行台</strong>
-              <span>research-team 页面新增资料搜集执行面板，可启动 source collection run、查看最近批次、run status、assignment、assignedQueries，并手工提交 CollectionOutput。</span>
-              <span>手工回写会先写入 DataRecord，再通过 Team workflow 导入桥转成 source_manifest 候选；仍不触发真实外部搜索，不写正式 Team Knowledge/RAG/official graph。</span>
+              <span>research-team 页面新增独立资料搜集索引页，可启动 source collection run、查看最近批次、run status、assignment、assignedQueries，并手工提交 CollectionOutput。</span>
+              <span>启动批次会从 Team canvas 读取 data_discovery/source_acquisition/content_extraction/source_quality 等角色绑定的团队 agentId；手工回写会先写入 DataRecord，再通过 Team workflow 导入桥转成 source_manifest 候选；仍不触发真实外部搜索，不写正式 Team Knowledge/RAG/official graph。</span>
             </div>
       </div>
       <div class="tag-row">

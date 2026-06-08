@@ -50,6 +50,7 @@ SOURCE_COLLECTION_DEFAULT_AGENT_ROLES = (
     "data_discovery",
     "source_acquisition",
     "content_extraction",
+    "source_quality",
 )
 SOURCE_COLLECTION_DEFAULT_SEARCH_LANGUAGES = ("en", "zh")
 SOURCE_COLLECTION_DEFAULT_SOURCE_TYPES = ("paper", "review", "dataset", "preprint")
@@ -332,15 +333,17 @@ def import_data_record_as_source_candidate(team_id: str, run_id: str, record_id:
 
 def start_source_collection_run(team_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
     normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
-    team_service.get_team(normalized_team_id)
-    request_payload = payload if isinstance(payload, dict) else {}
+    team = team_service.get_team(normalized_team_id)
+    request_payload = dict(payload) if isinstance(payload, dict) else {}
     title = _trim_text(request_payload.get("title"), max_length=180) or "Challenge Cup source collection"
     goal = _trim_text(request_payload.get("goal"), max_length=1000)
     topic = _trim_text(request_payload.get("topic"), max_length=500)
-    owner_agent_id = _trim_text(request_payload.get("ownerAgentId"), max_length=160) or DEFAULT_OWNER_AGENT_ID
-    requested_by_agent = _trim_text(request_payload.get("requestedByAgent"), max_length=160) or owner_agent_id
     input_refs = _normalize_text_list(request_payload.get("inputRefs"), max_items=120, max_length=240)
     roles = _normalize_source_collection_roles(request_payload.get("agentRoles"))
+    request_payload["agentIds"] = _source_collection_team_agent_ids(team, roles, request_payload)
+    default_owner_agent_id = _source_collection_owner_agent_id(team, request_payload)
+    owner_agent_id = _trim_text(request_payload.get("ownerAgentId"), max_length=160) or default_owner_agent_id
+    requested_by_agent = _trim_text(request_payload.get("requestedByAgent"), max_length=160) or owner_agent_id
     scope = _normalize_metadata(request_payload.get("scope"))
     if goal:
         scope["goal"] = goal
@@ -426,6 +429,7 @@ def start_source_collection_run(team_id: str, payload: dict[str, Any] | None = N
             "searchPlanId": search_plan["planId"],
             "queryCount": search_plan["queryCount"],
             "querySeedCount": len(search_plan["querySeeds"]),
+            "teamAgentBindingCount": sum(1 for item in assignments if str(item.get("agentId") or "") != str(item.get("agentRole") or "")),
         },
     )
     return {
@@ -3824,6 +3828,43 @@ def _normalize_source_collection_roles(value: Any) -> list[str]:
         if role in data_processing_service.COLLECTION_AGENT_ROLES and role not in roles:
             roles.append(role)
     return roles or list(SOURCE_COLLECTION_DEFAULT_AGENT_ROLES)
+
+
+def _source_collection_team_agent_ids(team: dict[str, Any], roles: list[str], payload: dict[str, Any]) -> dict[str, str]:
+    explicit_agent_ids = payload.get("agentIds") if isinstance(payload.get("agentIds"), dict) else {}
+    mapped: dict[str, str] = {}
+    for role in roles:
+        explicit = _trim_text(explicit_agent_ids.get(role), max_length=160)
+        if explicit:
+            mapped[role] = explicit
+    canvas = team.get("canvas") if isinstance(team.get("canvas"), dict) else {}
+    nodes = canvas.get("nodes") if isinstance(canvas.get("nodes"), list) else []
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        role = _trim_text(node.get("role"), max_length=80)
+        agent_id = _trim_text(node.get("agentId"), max_length=160)
+        if role in roles and agent_id and role not in mapped:
+            mapped[role] = agent_id
+    return mapped
+
+
+def _source_collection_owner_agent_id(team: dict[str, Any], payload: dict[str, Any]) -> str:
+    explicit = _trim_text(payload.get("ownerAgentId"), max_length=160)
+    if explicit:
+        return explicit
+    canvas = team.get("canvas") if isinstance(team.get("canvas"), dict) else {}
+    nodes = canvas.get("nodes") if isinstance(canvas.get("nodes"), list) else []
+    preferred_roles = ("research_coordination", "data_intake_coordinator", "ceo", "organization_coordinator")
+    for preferred_role in preferred_roles:
+        for node in nodes:
+            if not isinstance(node, dict):
+                continue
+            role = _trim_text(node.get("role"), max_length=80)
+            agent_id = _trim_text(node.get("agentId"), max_length=160)
+            if role == preferred_role and agent_id:
+                return agent_id
+    return DEFAULT_OWNER_AGENT_ID
 
 
 def _source_collection_agent_id(role: str, payload: dict[str, Any]) -> str:
