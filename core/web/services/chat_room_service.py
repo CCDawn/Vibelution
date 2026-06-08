@@ -167,8 +167,6 @@ def list_chat_rooms_compact() -> list[dict[str, Any]]:
     """Return room references without scanning sessions or full room hydration."""
 
     state = _store().load()
-    if _repair_room_participants_in_state(state, session_summaries={}):
-        _store().save(state)
     rooms = [
         _room_to_compact_reference(item)
         for item in list(state.get("rooms") or [])

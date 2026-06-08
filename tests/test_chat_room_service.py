@@ -283,6 +283,35 @@ def test_create_chat_room_defaults_to_existing_sessions(tmp_path, monkeypatch):
     assert room["rounds"] == []
 
 
+def test_list_chat_rooms_compact_does_not_hydrate_sessions_or_agents(tmp_path, monkeypatch):
+    _seed_chat_sessions(tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    room = chat_room_service.create_chat_room(title="Compact room")
+
+    monkeypatch.setattr(
+        session_service,
+        "list_sessions",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("compact list should not scan sessions")),
+    )
+    monkeypatch.setattr(
+        agent_directory_service,
+        "list_agents",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("compact list should not scan agents")),
+    )
+    monkeypatch.setattr(
+        agent_directory_service,
+        "get_agent",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("compact list should not hydrate agents")),
+    )
+
+    rooms = chat_room_service.list_chat_rooms_compact()
+
+    assert [item["roomId"] for item in rooms] == [room["roomId"]]
+    assert [item["sessionId"] for item in rooms[0]["participants"]] == ["session-alpha", "session-beta"]
+
+
 def test_medical_consultation_mode_prioritizes_host_risk_and_intake():
     scheduler = get_scheduler_registry().get("medical_consultation_panel")
 
