@@ -123,6 +123,7 @@ import {
   loadPendingSelfEvolutionHandoff,
 } from "./selfEvolutionHandoff";
 import {
+  type AgentDisplayInfo,
   agentDisplayInfo,
   participantAgentDisplayInfo,
   sessionAgentDisplayInfo,
@@ -756,11 +757,51 @@ function isAvailableGroupParticipant(participant: ChatRoomParticipant) {
   return !participant.agentMissing && participant.enabled !== false;
 }
 
+function sessionListTitle(session: Pick<SessionSummary, "id" | "title" | "taskTitle" | "resultCard">) {
+  return String(
+    session.taskTitle
+    || session.resultCard?.title
+    || session.title
+    || session.id
+    || "",
+  ).trim();
+}
+
+function compactAgentIdentifier(value: unknown) {
+  const raw = String(value ?? "").trim();
+  if (!raw) {
+    return "";
+  }
+  const withoutPrefix = raw.replace(/^agent[-_]/i, "");
+  if (withoutPrefix.length <= 18) {
+    return withoutPrefix;
+  }
+  return withoutPrefix.slice(-12);
+}
+
+function sessionAgentMetaLabel(session: Pick<SessionSummary, "agentCode" | "agentId">) {
+  const code = String(session.agentCode ?? "").trim();
+  if (code) {
+    return `Agent ${code}`;
+  }
+  const compactId = compactAgentIdentifier(session.agentId);
+  return compactId ? `Agent ${compactId}` : "";
+}
+
+function showSessionFunctionLabel(display: AgentDisplayInfo) {
+  const label = String(display.functionLabel ?? "").trim();
+  if (!label) {
+    return false;
+  }
+  const normalized = label.toLowerCase();
+  return !(display.tone === "chat" && (label === "会话入口" || normalized === "chat entry"));
+}
+
 function sessionToConversationSummary(session: SessionSummary): ConversationSummary {
   return {
     conversationId: session.id,
     type: "direct_agent",
-    title: String(session.agentDisplayName || session.title || session.id).trim(),
+    title: sessionListTitle(session),
     agentId: session.agentId,
     agentCode: session.agentCode,
     agentDisplayName: session.agentDisplayName,
@@ -783,10 +824,13 @@ function isVisibleDirectSession(session: SessionSummary | undefined | null) {
   if (!session) {
     return false;
   }
+  if (session.agentMissing) {
+    return false;
+  }
   if (!String(session.agentId ?? "").trim()) {
     return true;
   }
-  return !session.agentMissing;
+  return true;
 }
 
 function isChildSession(session: SessionSummary | undefined | null) {
@@ -827,10 +871,13 @@ function isVisibleConversation(
   if (session) {
     return isVisibleDirectSession(session);
   }
+  if (conversation.agentMissing) {
+    return false;
+  }
   if (!String(conversation.agentId ?? "").trim()) {
     return true;
   }
-  return !conversation.agentMissing;
+  return true;
 }
 
 function removeDeletedSessionFromConversations(
@@ -1238,12 +1285,9 @@ export function ChatCodingRoute() {
     refetchInterval: resolvePollingInterval(chatPollingVisible, 10_000),
     refetchIntervalInBackground: chatStartupWarmupActive,
   });
-  const sessionsQuery = useQuery({
+  const rawSessionsQuery = useQuery({
     queryKey: queryKeys.sessions(),
-    queryFn: async () => {
-      const sessions = await fetchJson<SessionSummary[]>("/api/sessions");
-      return sessions.filter(isVisibleDirectSession);
-    },
+    queryFn: () => fetchJson<SessionSummary[]>("/api/sessions"),
     refetchInterval: resolvePollingInterval(
       chatPollingVisible,
       sessionStreamConnected && directSessionPanelActive ? false : ACTIVE_INDEX_POLL_MS,
@@ -1251,6 +1295,14 @@ export function ChatCodingRoute() {
     ),
     refetchIntervalInBackground: chatStartupWarmupActive || directSessionBackgroundSyncActive,
   });
+  const visibleSessionsData = useMemo(
+    () => rawSessionsQuery.data?.filter(isVisibleDirectSession),
+    [rawSessionsQuery.data],
+  );
+  const sessionsQuery = {
+    ...rawSessionsQuery,
+    data: visibleSessionsData,
+  };
   const conversationsQuery = useQuery({
     queryKey: queryKeys.conversations(),
     queryFn: () => fetchJson<ConversationSummary[]>("/api/conversations"),
@@ -3305,6 +3357,10 @@ export function ChatCodingRoute() {
     return new Map(allVisibleSessions.map((session) => [session.id, session]));
   }, [allVisibleSessions]);
 
+  const rawSessionsById = useMemo(() => {
+    return new Map((rawSessionsQuery.data ?? []).map((session) => [session.id, session]));
+  }, [rawSessionsQuery.data]);
+
   const contextMenuSession = useMemo(() => {
     if (!sessionContextMenu) {
       return undefined;
@@ -3412,10 +3468,14 @@ export function ChatCodingRoute() {
       .filter((conversation) => {
         const sessionId = conversation.directSessionId || conversation.conversationId;
         const session = sessionId ? sessionsById.get(sessionId) : undefined;
+        const rawSession = sessionId ? rawSessionsById.get(sessionId) : undefined;
         if (isRepresentedInAgentSessionTabs(session)) {
           return false;
         }
-        if (!isVisibleConversation(conversation, sessionsById)) {
+        if (!isVisibleConversation(conversation, rawSessionsById)) {
+          return false;
+        }
+        if (rawSession && !session) {
           return false;
         }
         return true;
@@ -3442,7 +3502,7 @@ export function ChatCodingRoute() {
         String(value ?? "").toLowerCase().includes(term),
       );
     });
-  }, [conversationsQuery.data, rightIndexSessions, sessionFilter, sessionsById]);
+  }, [conversationsQuery.data, rawSessionsById, rightIndexSessions, sessionFilter, sessionsById]);
   const filteredStandaloneGroupConversations = useMemo(() => {
     const term = sessionFilter.trim().toLowerCase();
     const conversations = conversationsQuery.data ?? [];
@@ -6154,16 +6214,14 @@ export function ChatCodingRoute() {
                 const sessionAgent = session.agentId ? agentsById.get(session.agentId) : undefined;
                 const sessionDisplay = sessionAgentDisplayInfo(session, sessionAgent, lang);
                 const sessionAvatarImageUrl = avatarImageUrlFrom(sessionAgent, session);
-                const sessionAgentName =
-                  sessionDisplay.name && sessionDisplay.name !== session.title ? sessionDisplay.name : "";
+                const sessionAgentMeta = sessionAgentMetaLabel(session);
+                const sessionFunctionVisible = showSessionFunctionLabel(sessionDisplay);
                 const missingAgentMessage = session.agentMissing
                   ? session.agentStatusMessage || (lang === "zh" ? "缺少有效 Agent，当前会话缺少可运行内容。" : "Missing valid Agent. This session has no runnable Agent content.")
                   : "";
                 const sessionIsChild = isChildSession(session);
                 const sessionStatus = sessionIsChild ? (session.childStatus || session.currentPhase || session.status) : session.status;
-                const sessionTitle =
-                  (sessionIsChild ? (session.taskTitle || session.resultCard?.title || session.title) : sessionDisplay.name)
-                  || sessionDisplay.name;
+                const sessionTitle = sessionListTitle(session) || sessionDisplay.name;
                 const sessionSummary =
                   (sessionIsChild ? (session.resultCard?.summary || session.taskSummary) : session.taskSummary)
                   || (sessionIsChild
@@ -6185,7 +6243,7 @@ export function ChatCodingRoute() {
                         {renderAgentAvatar(
                           `${styles.conversationAvatar} ${styles.conversationAvatarDirect}`,
                           sessionAvatarImageUrl,
-                          avatarInitials(session.agentCode, session.agentDisplayName || session.title),
+                          avatarInitials(session.agentCode, sessionTitle),
                         )}
                         <span className={styles.conversationCopy}>
                           <span className={styles.conversationTitleRow}>
@@ -6219,10 +6277,12 @@ export function ChatCodingRoute() {
                             <span className={`${styles.conversationKindBadge} ${sessionIsChild ? styles.conversationKindBadgeChild : styles.conversationKindBadgeDirect}`}>
                               {sessionIsChild ? (lang === "zh" ? "子对话" : "Child") : (lang === "zh" ? "会话" : "Chat")}
                             </span>
-                            {sessionAgentName ? <span>{sessionAgentName}</span> : null}
-                            <span className={`${styles.agentRoleTag} ${styles[agentRoleClass(sessionDisplay.tone)]}`}>
-                              {sessionDisplay.functionLabel}
-                            </span>
+                            {sessionAgentMeta ? <span>{sessionAgentMeta}</span> : null}
+                            {sessionFunctionVisible ? (
+                              <span className={`${styles.agentRoleTag} ${styles[agentRoleClass(sessionDisplay.tone)]}`}>
+                                {sessionDisplay.functionLabel}
+                              </span>
+                            ) : null}
                             {sessionDisplay.modelLabel ? (
                               <span className={styles.agentModelTag} title={sessionDisplay.modelLabel}>
                                 {sessionDisplay.modelLabel}
@@ -6243,7 +6303,7 @@ export function ChatCodingRoute() {
                         onDragStart={(event) =>
                           startSessionReferenceDrag(
                             event,
-                            buildSessionReferencePayload(session, sessionDisplay.name, sessionSummary),
+                            buildSessionReferencePayload(session, sessionAgentMeta || sessionDisplay.name, sessionSummary),
                           )}
                         onClick={() => handleOpenDirectSession(session.id)}
                         aria-current={!groupPanelActive && activeSessionId === session.id ? "true" : undefined}
@@ -6251,7 +6311,7 @@ export function ChatCodingRoute() {
                         {renderAgentAvatar(
                           `${styles.conversationAvatar} ${styles.conversationAvatarDirect}`,
                           sessionAvatarImageUrl,
-                          avatarInitials(session.agentCode, session.agentDisplayName || session.title),
+                          avatarInitials(session.agentCode, sessionTitle),
                         )}
                         <span className={styles.conversationCopy}>
                           <span className={styles.conversationTitleRow}>
@@ -6270,10 +6330,12 @@ export function ChatCodingRoute() {
                             <span className={`${styles.conversationKindBadge} ${sessionIsChild ? styles.conversationKindBadgeChild : styles.conversationKindBadgeDirect}`}>
                               {sessionIsChild ? (lang === "zh" ? "子对话" : "Child") : (lang === "zh" ? "会话" : "Chat")}
                             </span>
-                            {sessionAgentName ? <span>{sessionAgentName}</span> : null}
-                            <span className={`${styles.agentRoleTag} ${styles[agentRoleClass(sessionDisplay.tone)]}`}>
-                              {sessionDisplay.functionLabel}
-                            </span>
+                            {sessionAgentMeta ? <span>{sessionAgentMeta}</span> : null}
+                            {sessionFunctionVisible ? (
+                              <span className={`${styles.agentRoleTag} ${styles[agentRoleClass(sessionDisplay.tone)]}`}>
+                                {sessionDisplay.functionLabel}
+                              </span>
+                            ) : null}
                             {sessionDisplay.modelLabel ? (
                               <span className={styles.agentModelTag} title={sessionDisplay.modelLabel}>
                                 {sessionDisplay.modelLabel}
