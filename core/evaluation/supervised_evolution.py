@@ -29,6 +29,7 @@ DEFAULT_BUNDLE_NAME = "supervised_evolution_dry_run_v1"
 DEFAULT_BUNDLE_PATH = Path("workspace/evaluation/bundles") / f"{DEFAULT_BUNDLE_NAME}.json"
 DEFAULT_BUNDLE_TEMPLATE_DIR = Path(__file__).resolve().parent / "bundles"
 TRANSACTION_REQUIRED_SCENARIOS = {"transaction", "modify_rollback", "full_evolution"}
+AGENT_JUDGMENT_MARKER = "SUPERVISED_AGENT_JUDGMENT:"
 ProgressCallback = Callable[[Dict[str, Any]], None]
 CheckpointCallback = Callable[[Dict[str, Any]], None]
 CancelChecker = Callable[[], object]
@@ -262,6 +263,7 @@ class CaseDecisionSummary:
     failure_taxonomy: List[str] = field(default_factory=list)
     evidence_paths: Dict[str, Any] = field(default_factory=dict)
     intake_provenance: Dict[str, Any] = field(default_factory=dict)
+    agent_judgment: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -282,6 +284,7 @@ class SupervisedEvolutionDecision:
     baseline_success_rate: float
     candidate_success_rate: float
     score_delta: float
+    judge_runs: List[SupervisedEvolutionRun] = field(default_factory=list)
     advisory_context: Dict[str, Any] = field(default_factory=dict)
     agent_bindings: Dict[str, Any] = field(default_factory=dict)
     summary: Dict[str, Any] = field(default_factory=dict)
@@ -399,7 +402,7 @@ def _load_resume_runs(decision_path: Optional[Path]) -> Dict[tuple[str, str], Su
     if not isinstance(payload, dict):
         raise ValueError("续跑来源 decision 格式错误：根节点必须是对象")
     reusable: Dict[tuple[str, str], SupervisedEvolutionRun] = {}
-    for key in ("baseline_runs", "candidate_runs"):
+    for key in ("baseline_runs", "candidate_runs", "judge_runs"):
         for item in list(payload.get(key) or []):
             run = _supervised_run_from_payload(item)
             if run is None or run.status != "success":
@@ -416,6 +419,136 @@ def _materialized_prompt_from_result(result: HarnessResult) -> str:
         if str(item) == "--prompt" and index + 1 < len(command):
             return str(command[index + 1] or "").strip()
     return ""
+
+
+def _case_requires_agent_judgment(case: Dict[str, Any]) -> bool:
+    return (
+        str(case.get("evaluation_mode") or "").strip() == "agent_judged"
+        or bool(case.get("agent_judged"))
+        or bool(case.get("judge_required"))
+    )
+
+
+def _agent_judged_bundle(bundle: Dict[str, Any]) -> bool:
+    dataset = bundle.get("dataset") if isinstance(bundle.get("dataset"), dict) else {}
+    return str(dataset.get("evaluation_mode") or "").strip() == "agent_judged"
+
+
+def _json_safe_preview(value: Any, *, limit: int = 4000) -> str:
+    try:
+        text = json.dumps(value, ensure_ascii=False, sort_keys=True)
+    except TypeError:
+        text = str(value)
+    text = text.strip()
+    if len(text) <= limit:
+        return text
+    return text[: max(0, limit - 3)].rstrip() + "..."
+
+
+def _run_evidence_for_judge(run: Optional[SupervisedEvolutionRun]) -> Dict[str, Any]:
+    if run is None:
+        return {"status": "missing"}
+    return {
+        "role": run.role,
+        "case_id": run.case_id,
+        "status": run.status,
+        "reason": run.reason,
+        "scenario": run.scenario,
+        "mode": run.mode,
+        "report_path": run.report_path or "",
+        "worktree_path": run.worktree_path,
+        "restarts_observed": run.restarts_observed,
+        "evolution_summary": run.evolution_summary or {},
+        "agent_binding": run.agent_binding or {},
+    }
+
+
+def _build_agent_judge_prompt(
+    *,
+    case: Dict[str, Any],
+    baseline_run: Optional[SupervisedEvolutionRun],
+    candidate_run: Optional[SupervisedEvolutionRun],
+) -> str:
+    case_id = str(case.get("case_id") or "").strip() or "case"
+    rubric = case.get("rubric") if isinstance(case.get("rubric"), dict) else {}
+    payload = {
+        "case_id": case_id,
+        "task": {
+            "benchmark_family": case.get("benchmark_family"),
+            "dataset_ref": case.get("dataset_ref"),
+            "expected": case.get("expected"),
+            "rubric": rubric,
+        },
+        "baseline": _run_evidence_for_judge(baseline_run),
+        "candidate": _run_evidence_for_judge(candidate_run),
+    }
+    return (
+        "你是监督进化的纯 agent 裁决者。请只基于下面的 case、baseline/candidate 轨迹摘要、"
+        "report 路径和证据字段评分；不要调用官方 Harbor/Docker verifier，也不要修改文件。\n\n"
+        "评分要求：\n"
+        "- baseline_score 与 candidate_score 必须是 0 到 1 的数字。\n"
+        "- decision 只能是 PROMOTE、HOLD、REJECT、ROLLBACK、INCONCLUSIVE。\n"
+        "- 如果证据不足或 judge 无法判断，decision=INCONCLUSIVE。\n"
+        "- 最终必须单独输出一行 marker，格式：\n"
+        f"{AGENT_JUDGMENT_MARKER} "
+        "{\"decision\":\"HOLD\",\"baseline_score\":0.5,\"candidate_score\":0.5,"
+        "\"reason\":\"...\",\"improvement_summary\":\"...\",\"risks\":[],\"evidence_refs\":[]}\n\n"
+        "待裁决证据 JSON:\n"
+        f"{_json_safe_preview(payload, limit=12000)}"
+    )
+
+
+def _agent_judgment_from_summary(summary: Dict[str, Any]) -> Dict[str, Any]:
+    supervised = summary.get("supervised") if isinstance(summary.get("supervised"), dict) else {}
+    judgment = summary.get("agent_judgment")
+    if not isinstance(judgment, dict) or not judgment:
+        judgment = supervised.get("agent_judgment") if isinstance(supervised.get("agent_judgment"), dict) else {}
+    return dict(judgment or {})
+
+
+def _coerce_score(value: Any) -> Optional[float]:
+    try:
+        score = float(value)
+    except (TypeError, ValueError):
+        return None
+    if score < 0.0:
+        return 0.0
+    if score > 1.0:
+        return 1.0
+    return round(score, 3)
+
+
+def _normalize_agent_judgment(judgment: Dict[str, Any], *, judge_run: Optional[SupervisedEvolutionRun] = None) -> Dict[str, Any]:
+    if not isinstance(judgment, dict) or not judgment:
+        return {
+            "status": "missing",
+            "decision": "INCONCLUSIVE",
+            "reason": "judge agent 没有输出 SUPERVISED_AGENT_JUDGMENT marker",
+        }
+    decision = str(judgment.get("decision") or "").strip().upper()
+    if decision not in {"PROMOTE", "HOLD", "REJECT", "ROLLBACK", "INCONCLUSIVE"}:
+        decision = "INCONCLUSIVE"
+    baseline_score = _coerce_score(judgment.get("baseline_score"))
+    candidate_score = _coerce_score(judgment.get("candidate_score"))
+    if baseline_score is None or candidate_score is None:
+        decision = "INCONCLUSIVE"
+    normalized = {
+        "status": "scored" if baseline_score is not None and candidate_score is not None else "invalid",
+        "decision": decision,
+        "baseline_score": baseline_score,
+        "candidate_score": candidate_score,
+        "score_delta": round((candidate_score or 0.0) - (baseline_score or 0.0), 3),
+        "reason": str(judgment.get("reason") or "").strip() or "judge agent 未提供 reason",
+        "improvement_summary": str(judgment.get("improvement_summary") or "").strip(),
+        "risks": [str(item) for item in list(judgment.get("risks") or [])],
+        "evidence_refs": [str(item) for item in list(judgment.get("evidence_refs") or [])],
+        "raw": dict(judgment),
+    }
+    if judge_run is not None:
+        normalized["judge_report_path"] = judge_run.report_path or ""
+        normalized["judge_status"] = judge_run.status
+        normalized["judge_reason"] = judge_run.reason
+    return normalized
 
 
 def _normalize_supervised_agent_bindings(bindings: Optional[Dict[str, Any]]) -> Dict[str, Any]:
@@ -548,10 +681,12 @@ def _build_run_aggregate(items: List[SupervisedEvolutionRun]) -> RunAggregate:
 def _build_case_summaries(
     baseline_runs: List[SupervisedEvolutionRun],
     candidate_runs: List[SupervisedEvolutionRun],
+    judge_runs: Optional[List[SupervisedEvolutionRun]] = None,
     cases: Optional[List[Dict[str, Any]]] = None,
 ) -> List[CaseDecisionSummary]:
     baseline_by_case = {item.case_id: item for item in baseline_runs}
     candidate_by_case = {item.case_id: item for item in candidate_runs}
+    judge_by_case = {item.case_id: item for item in list(judge_runs or [])}
     case_payloads = {
         str(item.get("case_id") or "").strip(): item
         for item in list(cases or [])
@@ -562,6 +697,7 @@ def _build_case_summaries(
     for case_id in case_ids:
         baseline = baseline_by_case.get(case_id)
         candidate = candidate_by_case.get(case_id)
+        judge = judge_by_case.get(case_id)
         baseline_status = baseline.status if baseline else "missing"
         candidate_status = candidate.status if candidate else "missing"
         signal = "tie"
@@ -593,6 +729,9 @@ def _build_case_summaries(
             difference_metrics=difference_metrics,
             expected_outcome_verification=expected_outcome_verification,
         )
+        agent_judgment = _agent_judgment_for_case(case_payload, judge)
+        if agent_judgment:
+            _apply_agent_judgment_to_score_breakdown(score_breakdown, agent_judgment)
         schema_taxonomy = _build_case_schema_taxonomy(
             case_payload,
             case_type,
@@ -604,12 +743,16 @@ def _build_case_summaries(
             schema_taxonomy=schema_taxonomy,
         )
         evidence_paths = _build_case_evidence_paths(baseline=baseline, candidate=candidate)
+        if judge is not None:
+            evidence_paths["judge_report_path"] = judge.report_path or ""
         intake_provenance = _build_case_intake_provenance(case_payload)
         if expected_outcome_verification:
             intake_provenance["expected_outcome_verification"] = expected_outcome_verification
             evidence_paths["expected_outcome_verification_sources"] = _expected_outcome_verification_sources(
                 expected_outcome_verification
             )
+        if agent_judgment:
+            intake_provenance["agent_judgment"] = agent_judgment
         summaries.append(
             CaseDecisionSummary(
                 case_id=case_id,
@@ -626,6 +769,7 @@ def _build_case_summaries(
                 failure_taxonomy=failure_taxonomy,
                 evidence_paths=evidence_paths,
                 intake_provenance=intake_provenance,
+                agent_judgment=agent_judgment,
             )
         )
     return summaries
@@ -835,6 +979,51 @@ def _expected_outcome_verification_sources(verification: Dict[str, Any]) -> Dict
     return sources
 
 
+def _agent_judgment_for_case(
+    case_payload: Dict[str, Any],
+    judge_run: Optional[SupervisedEvolutionRun],
+) -> Dict[str, Any]:
+    if not _case_requires_agent_judgment(case_payload):
+        return {}
+    if judge_run is None:
+        return _normalize_agent_judgment({})
+    judgment = _agent_judgment_from_summary(judge_run.evolution_summary or {})
+    return _normalize_agent_judgment(judgment, judge_run=judge_run)
+
+
+def _apply_agent_judgment_to_score_breakdown(
+    score_breakdown: Dict[str, Any],
+    agent_judgment: Dict[str, Any],
+) -> None:
+    if not isinstance(score_breakdown, dict) or not isinstance(agent_judgment, dict):
+        return
+    baseline_score = agent_judgment.get("baseline_score")
+    candidate_score = agent_judgment.get("candidate_score")
+    if baseline_score is None or candidate_score is None:
+        score_breakdown.setdefault("basis", {})["source"] = "agent_judgment_missing"
+        return
+    baseline = score_breakdown.setdefault("baseline", {})
+    candidate = score_breakdown.setdefault("candidate", {})
+    baseline["agent_judgment_score"] = float(baseline_score)
+    candidate["agent_judgment_score"] = float(candidate_score)
+    baseline["semantic_score"] = float(baseline_score)
+    candidate["semantic_score"] = float(candidate_score)
+    baseline["overall_score"] = float(baseline_score)
+    candidate["overall_score"] = float(candidate_score)
+    keys = sorted(set(baseline) | set(candidate))
+    score_breakdown["delta"] = {
+        key: round(float(candidate.get(key, 0.0)) - float(baseline.get(key, 0.0)), 3)
+        for key in keys
+        if isinstance(baseline.get(key, 0.0), (int, float)) and isinstance(candidate.get(key, 0.0), (int, float))
+    }
+    score_breakdown["basis"] = {
+        "source": "agent_judgment",
+        "marker": AGENT_JUDGMENT_MARKER.rstrip(":"),
+        "decision": str(agent_judgment.get("decision") or "INCONCLUSIVE"),
+        "reason": str(agent_judgment.get("reason") or ""),
+    }
+
+
 def _build_case_intake_provenance(case_payload: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(case_payload, dict) or not case_payload:
         return {}
@@ -919,6 +1108,8 @@ def _bundle_evaluation_metadata(bundle: Dict[str, Any]) -> Dict[str, Any]:
     score_label = str(dataset.get("score_label") or "").strip()
     if not evaluation_mode and official_status == "harbor_pending":
         evaluation_mode = "custom_harness"
+    if not score_label and evaluation_mode == "agent_judged":
+        score_label = "Agent-judged score (non-official Terminal-Bench score)"
     if not score_label and evaluation_mode == "custom_harness":
         score_label = "Vibelution custom score (non-official Terminal-Bench score)"
     metadata: Dict[str, Any] = {}
@@ -928,7 +1119,7 @@ def _bundle_evaluation_metadata(bundle: Dict[str, Any]) -> Dict[str, Any]:
         metadata["score_label"] = score_label
     if official_status:
         metadata["official_verifier_status"] = official_status
-    if evaluation_mode == "custom_harness" or official_status == "harbor_pending":
+    if evaluation_mode in {"custom_harness", "agent_judged"} or official_status == "harbor_pending":
         metadata["official_score"] = None
         metadata["official_score_available"] = False
     return metadata
@@ -1394,7 +1585,12 @@ def _format_difference_issue_parts(metrics: Dict[str, Any]) -> List[str]:
 def _evaluate_gates(
     baseline_runs: List[SupervisedEvolutionRun],
     candidate_runs: List[SupervisedEvolutionRun],
+    *,
+    case_summaries: Optional[List[CaseDecisionSummary]] = None,
+    evaluation_mode: str = "",
 ) -> tuple[List[DecisionGate], str, str, float]:
+    if str(evaluation_mode or "").strip() == "agent_judged":
+        return _evaluate_agent_judged_gates(case_summaries or [])
     baseline_success = _success_rate(baseline_runs)
     candidate_success = _success_rate(candidate_runs)
     score_delta = round(candidate_success - baseline_success, 3)
@@ -1708,6 +1904,76 @@ def _evaluate_gates(
     return gates, "HOLD", "baseline 与 candidate 表现持平，保留观察", score_delta
 
 
+def _evaluate_agent_judged_gates(
+    case_summaries: List[CaseDecisionSummary],
+) -> tuple[List[DecisionGate], str, str, float]:
+    judgments = [
+        dict(case.agent_judgment or {})
+        for case in case_summaries
+        if isinstance(case.agent_judgment, dict) and case.agent_judgment
+    ]
+    gates: List[DecisionGate] = []
+    missing_or_invalid = [
+        case.case_id
+        for case in case_summaries
+        if str((case.agent_judgment or {}).get("status") or "") not in {"scored"}
+    ]
+    scored = [item for item in judgments if str(item.get("status") or "") == "scored"]
+    if not scored or missing_or_invalid:
+        reason = (
+            "agent judge 未产出完整结构化评分"
+            if missing_or_invalid
+            else "agent_judged 模式没有可用 judge 评分"
+        )
+        gates.append(
+            DecisionGate(
+                name="agent_judgment",
+                status="fail",
+                reason=reason,
+                metrics={
+                    "case_count": len(case_summaries),
+                    "scored_count": len(scored),
+                    "missing_or_invalid_case_ids": missing_or_invalid,
+                },
+            )
+        )
+        return gates, "INCONCLUSIVE", reason, 0.0
+
+    baseline_avg = round(sum(float(item.get("baseline_score") or 0.0) for item in scored) / len(scored), 3)
+    candidate_avg = round(sum(float(item.get("candidate_score") or 0.0) for item in scored) / len(scored), 3)
+    score_delta = round(candidate_avg - baseline_avg, 3)
+    decisions = [str(item.get("decision") or "").strip().upper() for item in scored]
+    priority = ["ROLLBACK", "REJECT", "INCONCLUSIVE", "PROMOTE", "HOLD"]
+    decision = "HOLD"
+    for item in priority:
+        if item in decisions:
+            decision = item
+            break
+    if decision == "PROMOTE" and score_delta <= 0:
+        decision = "HOLD"
+    if decision == "HOLD" and score_delta < -0.05:
+        decision = "REJECT"
+    reason = "; ".join(str(item.get("reason") or "").strip() for item in scored if str(item.get("reason") or "").strip())
+    if not reason:
+        reason = f"agent judge 平均分 baseline={baseline_avg} candidate={candidate_avg}"
+    gates.append(
+        DecisionGate(
+            name="agent_judgment",
+            status="pass" if decision in {"PROMOTE", "HOLD"} else "fail" if decision in {"ROLLBACK", "REJECT"} else "hold",
+            reason=reason,
+            metrics={
+                "baseline_agent_score": baseline_avg,
+                "candidate_agent_score": candidate_avg,
+                "score_delta": score_delta,
+                "case_count": len(case_summaries),
+                "scored_count": len(scored),
+                "case_decisions": decisions,
+            },
+        )
+    )
+    return gates, decision, reason, score_delta
+
+
 def _apply_promotion_gate(
     *,
     decision: str,
@@ -1887,6 +2153,7 @@ def run_supervised_evolution_session(
 
     baseline_runs: List[SupervisedEvolutionRun] = []
     candidate_runs: List[SupervisedEvolutionRun] = []
+    judge_runs: List[SupervisedEvolutionRun] = []
     cases = bundle["cases"]
     _apply_bundle_evaluation_metadata(cases, bundle)
     reusable_runs = _load_resume_runs(resume_from_decision_path)
@@ -2146,6 +2413,204 @@ def run_supervised_evolution_session(
                     "agent_binding": role_agent_binding,
                 },
             )
+        if _case_requires_agent_judgment(case):
+            baseline_run = next((item for item in reversed(baseline_runs) if item.case_id == case_id), None)
+            candidate_run = next((item for item in reversed(candidate_runs) if item.case_id == case_id), None)
+            role = "judge"
+            role_agent_binding = dict(normalized_agent_bindings.get(role) or {})
+            reusable = reusable_runs.get((role, case_id))
+            if reusable is not None:
+                judge_runs.append(reusable)
+                _emit_progress(
+                    progress_callback,
+                    {
+                        "event": "role_reused",
+                        "session_id": session_id,
+                        "case_index": case_index,
+                        "case_total": len(cases),
+                        "case_id": case_id,
+                        "role": role,
+                        "status": reusable.status,
+                        "reason": "复用上一次成功 judge 评分，跳过重跑。",
+                        "report_path": reusable.report_path or "",
+                        "worktree_path": reusable.worktree_path,
+                        "agent_binding": reusable.agent_binding or role_agent_binding,
+                        "evaluation_mode": "agent_judged",
+                    },
+                )
+                _run_checkpoint(
+                    checkpoint_callback,
+                    {
+                        "phase": "role_boundary",
+                        "session_id": session_id,
+                        "bundle_name": str(bundle.get("bundle_name") or bundle_name),
+                        "case_index": case_index,
+                        "case_total": len(cases),
+                        "case_id": case_id,
+                        "role": role,
+                        "reused": True,
+                        "agent_binding": reusable.agent_binding or role_agent_binding,
+                        "evaluation_mode": "agent_judged",
+                    },
+                )
+                _run_checkpoint(
+                    checkpoint_callback,
+                    {
+                        "phase": "case_boundary",
+                        "session_id": session_id,
+                        "bundle_name": str(bundle.get("bundle_name") or bundle_name),
+                        "case_index": case_index,
+                        "case_total": len(cases),
+                        "case_id": case_id,
+                    },
+                )
+                continue
+            prompt = _build_agent_judge_prompt(
+                case=case,
+                baseline_run=baseline_run,
+                candidate_run=candidate_run,
+            )
+            _run_checkpoint(
+                checkpoint_callback,
+                {
+                    "phase": "role_start_boundary",
+                    "session_id": session_id,
+                    "bundle_name": str(bundle.get("bundle_name") or bundle_name),
+                    "case_index": case_index,
+                    "case_total": len(cases),
+                    "case_id": case_id,
+                    "role": role,
+                    "agent_binding": role_agent_binding,
+                    "evaluation_mode": "agent_judged",
+                },
+            )
+            _emit_progress(
+                progress_callback,
+                {
+                    "event": "role_start",
+                    "session_id": session_id,
+                    "case_index": case_index,
+                    "case_total": len(cases),
+                    "case_id": case_id,
+                    "role": role,
+                    "scenario": "strategy",
+                    "mode": "single_turn",
+                    "prompt": prompt,
+                    "timeout_seconds": min(timeout_seconds, 600),
+                    "max_steps": max_steps,
+                    "keep_worktree": keep_worktree,
+                    "agent_binding": role_agent_binding,
+                    "evaluation_mode": "agent_judged",
+                },
+            )
+            try:
+                def emit_live_judge_progress(payload: Dict[str, Any]) -> None:
+                    _emit_progress(
+                        progress_callback,
+                        {
+                            "event": "role_live",
+                            "session_id": session_id,
+                            "case_index": case_index,
+                            "case_total": len(cases),
+                            "case_id": case_id,
+                            "role": role,
+                            "scenario": "strategy",
+                            "mode": "single_turn",
+                            "prompt": prompt,
+                            "agent_binding": role_agent_binding,
+                            "evaluation_mode": "agent_judged",
+                            **payload,
+                        },
+                    )
+
+                result = runner(
+                    repo_root=root,
+                    mode="single_turn",
+                    prompt=prompt,
+                    scenario="strategy",
+                    timeout_seconds=min(timeout_seconds, 600),
+                    max_steps=max_steps or None,
+                    expect_restart=False,
+                    post_restart_observe_seconds=post_restart_observe_seconds,
+                    keep_worktree=keep_worktree,
+                    agent_binding=role_agent_binding,
+                    progress_callback=emit_live_judge_progress,
+                    cancel_checker=cancel_checker,
+                )
+            except Exception as exc:
+                if isinstance(exc, SupervisedEvolutionCancelled):
+                    raise
+                _emit_progress(
+                    progress_callback,
+                    {
+                        "event": "session_error",
+                        "session_id": session_id,
+                        "case_index": case_index,
+                        "case_total": len(cases),
+                        "case_id": case_id,
+                        "role": role,
+                        "scenario": "strategy",
+                        "mode": "single_turn",
+                        "error_type": type(exc).__name__,
+                        "error": str(exc),
+                        "agent_binding": role_agent_binding,
+                        "evaluation_mode": "agent_judged",
+                    },
+                )
+                raise
+            session_dir = dirs["sessions"] / session_id
+            session_dir.mkdir(parents=True, exist_ok=True)
+            report_name = f"{_safe_report_file_stem(f'{case_id}_{role}')}.json"
+            report_path = session_dir / report_name
+            report_path.write_text(json.dumps(asdict(result), ensure_ascii=False, indent=2), encoding="utf-8")
+            _emit_progress(
+                progress_callback,
+                {
+                    "event": "role_finish",
+                    "session_id": session_id,
+                    "case_index": case_index,
+                    "case_total": len(cases),
+                    "case_id": case_id,
+                    "role": role,
+                    "status": result.status,
+                    "reason": result.reason,
+                    "elapsed_seconds": _elapsed_seconds(result.started_at, result.ended_at),
+                    "worktree_path": result.worktree_path,
+                    "report_path": str(report_path),
+                    "drift_warning": _has_drift_warning(status=result.status, reason=result.reason),
+                    "agent_binding": role_agent_binding,
+                    "evaluation_mode": "agent_judged",
+                    "agent_judgment": _normalize_agent_judgment(
+                        _agent_judgment_from_summary(result.evolution_summary or {})
+                    ),
+                },
+            )
+            judge_runs.append(
+                _to_supervised_run(
+                    role=role,
+                    case_id=case_id,
+                    prompt=prompt,
+                    scenario="strategy",
+                    mode="single_turn",
+                    result=result,
+                    report_path=report_path,
+                    agent_binding=role_agent_binding,
+                )
+            )
+            _run_checkpoint(
+                checkpoint_callback,
+                {
+                    "phase": "role_boundary",
+                    "session_id": session_id,
+                    "bundle_name": str(bundle.get("bundle_name") or bundle_name),
+                    "case_index": case_index,
+                    "case_total": len(cases),
+                    "case_id": case_id,
+                    "role": role,
+                    "agent_binding": role_agent_binding,
+                    "evaluation_mode": "agent_judged",
+                },
+            )
         _run_checkpoint(
             checkpoint_callback,
             {
@@ -2160,8 +2625,13 @@ def run_supervised_evolution_session(
 
     baseline_summary = _build_run_aggregate(baseline_runs)
     candidate_summary = _build_run_aggregate(candidate_runs)
-    case_summaries = _build_case_summaries(baseline_runs, candidate_runs, cases)
-    gates, decision, reason, score_delta = _evaluate_gates(baseline_runs, candidate_runs)
+    case_summaries = _build_case_summaries(baseline_runs, candidate_runs, judge_runs=judge_runs, cases=cases)
+    gates, decision, reason, score_delta = _evaluate_gates(
+        baseline_runs,
+        candidate_runs,
+        case_summaries=case_summaries,
+        evaluation_mode=str(evaluation_metadata.get("evaluation_mode") or ""),
+    )
     decision, reason, gates = _apply_promotion_gate(
         decision=decision,
         reason=reason,
@@ -2188,6 +2658,7 @@ def run_supervised_evolution_session(
         baseline_success_rate=_success_rate(baseline_runs),
         candidate_success_rate=_success_rate(candidate_runs),
         score_delta=score_delta,
+        judge_runs=judge_runs,
         advisory_context=advisory_context,
         agent_bindings=normalized_agent_bindings,
         summary={

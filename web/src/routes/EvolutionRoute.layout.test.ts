@@ -65,6 +65,10 @@ describe("EvolutionRoute library user flow contract", () => {
   });
 
   it("merges supervised datasets and bundles into one source picker", () => {
+    expect(routeSource).toContain("workbenchCatalogQuery");
+    expect(routeSource).toContain("queryKeys.evolutionWorkbench()");
+    expect(routeSource).toContain('"/api/evolution/workbench"');
+    expect(routeSource).toContain("const workbenchControl = workbenchCatalogQuery.data ?? workspaceSnapshot?.workbench");
     expect(routeSource).toContain("primaryDatasets");
     expect(routeSource).toContain("item.selectable !== false && item.effective");
     expect(routeSource).toContain("hiddenDatasetCount");
@@ -121,6 +125,21 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("transactions={selfTransactions}");
     expect(routeSource).toContain("loading={selfTrackLoading}");
     expect(routeSource).not.toContain("loading={workspaceSnapshotQuery.isLoading}");
+  });
+
+  it("does not poll self-evolution detail endpoints while the supervised track is active", () => {
+    expect(routeSource).toContain('const selfTrackQueriesEnabled = activeTrack === "self"');
+    expect(routeSource).toContain('const supervisedTrackQueriesEnabled = activeTrack === "supervised"');
+    expect(routeSource).toContain("enabled: selfTrackQueriesEnabled");
+    expect(routeSource).not.toContain('const selfTrackQueriesEnabled = forcedTrack === "self" || forcedTrack === undefined');
+  });
+
+  it("loads the self-evolution track only after that track is shown", () => {
+    expect(routeSource).toContain("LazySelfEvolutionTrack");
+    expect(routeSource).toContain('import("./SelfEvolutionTrack")');
+    expect(routeSource).toContain("<Suspense");
+    expect(routeSource).not.toContain('import { SelfEvolutionTrack } from "./SelfEvolutionTrack";');
+    expect(routeSource).toContain("正在加载自进化工作台");
   });
 
   it("labels supervised retry as rerunning failed items", () => {
@@ -199,6 +218,13 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(stylesSource).toContain("@media (max-width: 1360px)");
     expect(desktopBreakpoint).toContain('"launch resize-launch io resize-run run"');
     expect(desktopBreakpoint).not.toContain('"io io"\n      "launch run"');
+  });
+
+  it("keeps supervised run empty states compact for first-viewport scanning", () => {
+    expect(stylesSource).toContain(".structuredEmptyState");
+    expect(stylesSource).toContain("min-height: 86px");
+    expect(stylesSource).toContain("padding: 10px 12px");
+    expect(stylesSource).not.toContain("min-height: 220px");
   });
 
   it("lets the supervised case transcript fill the lower vertical space", () => {

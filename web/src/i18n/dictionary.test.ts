@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { dictionary } from "./dictionary";
 import { petAvatarPresetLabel } from "./petLabels";
+import { shellDictionary } from "./shellDictionary";
 
 describe("dictionary", () => {
   it("keeps the pet area readable in Chinese", () => {
@@ -48,5 +49,16 @@ describe("dictionary", () => {
     expect(petAvatarPresetLabel(t, "penguin")).toBe("企鹅");
     expect(petAvatarPresetLabel(t, "")).toBe("未选择形象");
     expect(petAvatarPresetLabel(t, "custom_preset")).toBe("custom_preset");
+  });
+
+  it("keeps the lightweight shell dictionary aligned with the full route dictionary", () => {
+    const shellKeys = Object.keys(shellDictionary.zh) as Array<keyof typeof shellDictionary.zh>;
+
+    for (const key of shellKeys) {
+      const routeKey = key as keyof typeof dictionary.zh;
+
+      expect(shellDictionary.zh[key]).toBe(dictionary.zh[routeKey]);
+      expect(shellDictionary.en[key]).toBe(dictionary.en[routeKey]);
+    }
   });
 });

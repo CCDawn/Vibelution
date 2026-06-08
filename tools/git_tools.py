@@ -32,6 +32,17 @@ def get_git_status_summary_tool(limit: int = 5) -> str:
     return get_git_memory_service().get_git_status_summary(limit=normalized_limit)
 
 
+def get_worktree_status_bundle_tool(limit: int = 5) -> str:
+    """一次性获取 Git 状态摘要与详细 working tree 快照。"""
+    try:
+        normalized_limit = int(limit)
+    except (TypeError, ValueError):
+        normalized_limit = 5
+    normalized_limit = max(1, min(normalized_limit, 10))
+    payload = get_git_memory_service().build_worktree_status_bundle(limit=normalized_limit)
+    return json.dumps(payload, ensure_ascii=False, indent=2)
+
+
 def get_recent_changes_tool(limit: int = 10) -> str:
     """获取最近提交变化摘要。"""
     changes = get_git_memory_service().get_recent_project_changes(limit=limit)
@@ -113,6 +124,7 @@ def get_evolution_fitness_tool(recent_limit: int = 5) -> str:
 
 __all__ = [
     "get_git_status_summary_tool",
+    "get_worktree_status_bundle_tool",
     "get_recent_changes_tool",
     "get_entity_history_tool",
     "explain_current_worktree_tool",

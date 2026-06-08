@@ -655,7 +655,17 @@ def record_backend_api_event(payload: dict[str, Any]) -> dict[str, Any]:
             "statusCode": status_code,
             "durationMs": round(duration_ms, 2),
             "query": _truncate_text(str(payload.get("query") or ""), 240),
+            "queryParamCount": _coerce_int(payload.get("query_param_count"), default=0),
+            "queryKeys": [
+                _truncate_text(str(item or ""), 80)
+                for item in list(payload.get("query_keys") or [])[:12]
+            ],
+            "queryLength": _coerce_int(payload.get("query_length"), default=0),
+            "sensitiveQueryKeyCount": _coerce_int(payload.get("sensitive_query_key_count"), default=0),
             "client": client,
+            "refererPath": _truncate_text(str(payload.get("referer_path") or ""), 240),
+            "requestOrigin": _truncate_text(str(payload.get("request_origin") or ""), 160),
+            "userAgentFamily": _truncate_text(str(payload.get("user_agent_family") or ""), 40),
             "exceptionType": _truncate_text(str(payload.get("exception_type") or ""), 120),
             "exceptionMessage": _truncate_text(str(payload.get("exception_message") or ""), 320),
             "operationalClientError": is_operational_client_error,

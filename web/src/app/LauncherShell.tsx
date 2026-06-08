@@ -1,14 +1,14 @@
 import { useEffect, useState } from "react";
 import { Outlet } from "react-router-dom";
 
-import { useAppI18n } from "../i18n/useAppI18n";
+import { useShellI18n } from "../i18n/useShellI18n";
 import { collectBrowserPageSnapshot, postBrowserTelemetry } from "./browserTelemetry";
 import { applyWorkbenchDocumentLanguage } from "./documentLanguage";
 import { readStoredWorkbenchTheme } from "./themePreference";
 import styles from "./LauncherShell.module.css";
 
 export function LauncherShell() {
-  const { lang } = useAppI18n();
+  const { lang } = useShellI18n();
   const [theme] = useState(() => readStoredWorkbenchTheme());
 
   useEffect(() => {

@@ -125,11 +125,49 @@ def test_mode_binding_drops_archived_agent_with_repair_warning(tmp_path, monkeyp
     agent_mode_binding_service.save_mode_binding_state(state)
     agent_directory_service.archive_agent_instance(agent["agentId"])
 
-    payload = agent_mode_binding_service.get_mode_bindings_payload()
+    payload = agent_mode_binding_service.get_mode_bindings_payload(agent_options=[])
 
     assert payload["modes"]["chat"]["defaultAgentId"] == ""
     assert payload["modes"]["chat"]["availableAgentIds"] == []
     assert any(item["agentId"] == agent["agentId"] for item in payload["repairWarnings"])
+
+
+def test_mode_binding_repair_logs_missing_active_reference_context(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    events = []
+    monkeypatch.setattr(agent_mode_binding_service, "record_runtime_scene_event", lambda *args, **kwargs: events.append((args, kwargs)))
+    state = agent_mode_binding_service.default_mode_binding_state()
+    state["modes"]["chat"]["defaultAgentId"] = "agent-missing"
+    state["modes"]["chat"]["availableAgentIds"] = ["agent-missing"]
+    agent_mode_binding_service.save_mode_binding_state(state)
+
+    payload = agent_mode_binding_service.get_mode_bindings_payload(agent_options=[])
+
+    assert payload["modes"]["chat"]["defaultAgentId"] == ""
+    missing_events = [event for event in events if event[0][2] == "mode_binding.missing_agent"]
+    assert len(missing_events) == 1
+    fields = missing_events[0][1]["fields"]
+    assert fields["mode"] == "chat"
+    assert fields["warningCount"] == 2
+    assert fields["uniqueAgentCount"] == 1
+    assert fields["agentIds"] == ["agent-missing"]
+    assert fields["fieldCounts"] == {"defaultAgentId": 1, "availableAgentIds": 1}
+    assert fields["activeAgentCount"] == 0
+    assert fields["storagePath"] == "workspace/agent_config/mode_bindings.json"
+
+
+def test_mode_binding_repair_keeps_excluded_agent_tombstones_quiet(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    events = []
+    monkeypatch.setattr(agent_mode_binding_service, "record_runtime_scene_event", lambda *args, **kwargs: events.append((args, kwargs)))
+    state = agent_mode_binding_service.default_mode_binding_state()
+    state["modes"]["chat"]["excludedAgentIds"] = ["agent-removed"]
+    agent_mode_binding_service.save_mode_binding_state(state)
+
+    payload = agent_mode_binding_service.get_mode_bindings_payload()
+
+    assert payload["modes"]["chat"]["excludedAgentIds"] == ["agent-removed"]
+    assert not any(event[0][2] == "mode_binding.missing_agent" for event in events)
 
 
 def test_mode_binding_update_rejects_archived_agent(tmp_path, monkeypatch):

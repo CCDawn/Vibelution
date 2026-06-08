@@ -33,6 +33,14 @@ describe("SupervisedReviewRoute layout contract", () => {
     expect(routeSource).toContain("mergeWorktreeConfirm");
   });
 
+  it("loads chat review queue summaries and selected candidate details separately", () => {
+    expect(routeSource).toContain('fetchJson<EvolutionChatReviewQueue>("/api/evolution/chat-review")');
+    expect(routeSource).toContain("queryKeys.evolutionChatReviewCandidate");
+    expect(routeSource).toContain("fetchJson<EvolutionChatReviewCandidate>");
+    expect(routeSource).toContain('`/api/evolution/chat-review/${encodeURIComponent(selectedCandidate?.candidateId ?? "")}`');
+    expect(routeSource).not.toContain("includeDetails=true");
+  });
+
   it("keeps worktree review actions explicit in the shared panel", () => {
     expect(worktreePanelSource).toContain("WORKTREE_ACTION_ITEMS");
     expect(worktreePanelSource).toContain('action: "analyze_merge"');

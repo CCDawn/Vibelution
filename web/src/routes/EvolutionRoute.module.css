@@ -1927,9 +1927,9 @@
 .structuredEmptyState {
   display: grid;
   align-content: start;
-  gap: 10px;
-  min-height: 220px;
-  padding: 16px;
+  gap: 8px;
+  min-height: 86px;
+  padding: 10px 12px;
   border-radius: 8px;
   border: 1px dashed rgba(236, 230, 220, 0.08);
   background: var(--surface-card-subtle);
@@ -1937,13 +1937,14 @@
 
 .structuredEmptyState h3 {
   margin: 0;
-  font-size: 1.02rem;
+  font-size: 0.94rem;
 }
 
 .structuredEmptyState p {
   margin: 0;
   color: var(--fg-secondary);
-  line-height: 1.55;
+  font-size: 0.78rem;
+  line-height: 1.36;
 }
 
 .masterDetail {

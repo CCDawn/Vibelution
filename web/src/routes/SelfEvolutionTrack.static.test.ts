@@ -58,6 +58,12 @@ describe("SelfEvolutionTrack static assets", () => {
     expect(selfEvolutionSource).toContain('density="compact"');
   });
 
+  it("loads the heavy conversation renderer through the shared lazy bridge", () => {
+    expect(selfEvolutionSource).toContain("LazyConversationView");
+    expect(selfEvolutionSource).toContain("fallback={<div className={styles.loadingShell}>{t(\"loadingSession\")}</div>}");
+    expect(selfEvolutionSource).not.toContain('import { ConversationView } from "../components/conversation/ConversationView"');
+  });
+
   it("uses a structured loading shell instead of a blank loading canvas", () => {
     expect(selfEvolutionSource).toContain("renderLoadingShell");
     expect(selfEvolutionSource).toContain("styles.loadingShell");

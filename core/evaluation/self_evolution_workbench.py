@@ -16,6 +16,7 @@ from tools.git_tools import (
     get_evolution_fitness_tool,
     get_git_status_summary_tool,
     get_recent_changes_tool,
+    get_worktree_status_bundle_tool,
 )
 
 
@@ -45,20 +46,17 @@ def build_self_evolution_snapshot(
     """Collect a structured self-evolution snapshot for web or other read-only surfaces."""
 
     root = _resolve_project_root(project_root)
-    status_summary = _safe_tool_call(
-        lambda: get_git_status_summary_tool(limit=status_limit),
-        fallback="git 状态暂不可用",
+    worktree_bundle = _load_worktree_status_bundle(
+        status_limit=status_limit,
     )
+    status_summary = worktree_bundle["git_status_summary"]
+    worktree_snapshot_json = worktree_bundle["worktree_snapshot"]
     recent_changes_json = _safe_tool_call(
         lambda: get_recent_changes_tool(limit=change_limit),
         fallback="[]",
     )
     fitness_json = _safe_tool_call(
         lambda: get_evolution_fitness_tool(recent_limit=recent_limit),
-        fallback="{}",
-    )
-    worktree_snapshot_json = _safe_tool_call(
-        explain_current_worktree_tool,
         fallback="{}",
     )
     return {
@@ -391,6 +389,23 @@ def _safe_tool_call(fn, *, fallback: str) -> str:
         return f"{fallback} ({type(exc).__name__}: {exc})"
     text = str(result or "").strip()
     return text or fallback
+
+
+def _load_worktree_status_bundle(*, status_limit: int) -> dict[str, str]:
+    raw_bundle = _safe_tool_call(
+        lambda: get_worktree_status_bundle_tool(limit=status_limit),
+        fallback="{}",
+    )
+    payload = _load_json_value(raw_bundle, fallback={})
+    if not isinstance(payload, dict):
+        payload = {}
+
+    status_summary = str(payload.get("git_status_summary") or "").strip()
+    worktree_snapshot = str(payload.get("worktree_snapshot") or "").strip()
+    return {
+        "git_status_summary": status_summary or "git 状态暂不可用",
+        "worktree_snapshot": worktree_snapshot or "{}",
+    }
 
 
 def _resolve_project_root(project_root: Path | None) -> Path:

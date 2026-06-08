@@ -10,6 +10,12 @@ import routerSource from "../app/router.tsx?raw";
 const routeStylesSource = readFileSync(new URL("./TeamsRoute.module.css", import.meta.url), "utf-8");
 
 describe("TeamsRoute layout contract", () => {
+  it("uses shell language state without loading the full app dictionary", () => {
+    expect(routeSource).toContain("useShellI18n");
+    expect(routeSource).toContain("const { lang } = useShellI18n()");
+    expect(routeSource).not.toContain("useAppI18n");
+  });
+
   it("is mounted as the top-level Team workspace with legacy redirects", () => {
     expect(routerSource).toContain('path: "teams"');
     expect(routerSource).toContain("lazyElement(<TeamsRoute />)");

@@ -900,8 +900,8 @@
 .permissionSummaryGrid {
   display: grid;
   grid-template-columns: minmax(220px, 0.55fr) minmax(0, 1fr) auto;
-  align-items: end;
-  gap: 10px;
+  align-items: center;
+  gap: 8px;
   min-width: 0;
 }
 
@@ -917,13 +917,14 @@
   display: grid;
   gap: 2px;
   min-width: 0;
-  min-height: 38px;
-  padding: 6px 7px;
+  min-height: 36px;
+  padding: 5px 7px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   background: var(--surface-input-strong, rgba(14, 17, 20, 0.68));
   color: var(--fg-tertiary);
   font-size: 0.7rem;
+  line-height: 1.15;
 }
 
 .permissionSummaryCards strong {
@@ -1091,6 +1092,18 @@
   .workspace {
     grid-template-columns: minmax(280px, 360px) minmax(420px, 1fr);
     gap: 14px;
+  }
+
+  .permissionSummaryGrid {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .agentPolicySelect {
+    grid-column: 1 / -1;
+  }
+
+  .permissionSummaryCards {
+    grid-template-columns: repeat(5, minmax(52px, 1fr));
   }
 
   .resizeHandle {

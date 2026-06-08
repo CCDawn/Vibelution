@@ -1,8 +1,13 @@
 import { describe, expect, it } from "vitest";
 
+import { readFileSync } from "node:fs";
 import conversationStyles from "../components/conversation/ConversationView.module.css";
+import shellStoreSource from "../store/shellStore.ts?raw";
 import routeSource from "./ChatCodingRoute.tsx?raw";
 import routeStyles from "./ChatCodingRoute.module.css";
+
+const routeCssSource = readFileSync(new URL("./ChatCodingRoute.module.css", import.meta.url), "utf-8");
+const conversationCssSource = readFileSync(new URL("../components/conversation/ConversationView.module.css", import.meta.url), "utf-8");
 
 describe("ChatCodingRoute layout contract", () => {
   it("keeps the center conversation readable and the composer as a stable bottom layer", () => {
@@ -26,12 +31,19 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("styles.runtimeNoticeStack");
     expect(routeSource).toContain("styles.runtimeNoticeMessage");
     expect(routeSource.indexOf("styles.runtimeNoticeStack")).toBeLessThan(
-      routeSource.indexOf("<ConversationView"),
+      routeSource.indexOf("<LazyConversationView"),
     );
     expect(routeStyles.runtimeNoticeStack).toBeTypeOf("string");
     expect(routeStyles.runtimeNotice).toBeTypeOf("string");
     expect(routeStyles.runtimeNotice_warning).toBeTypeOf("string");
     expect(routeStyles.runtimeNoticeMessage).toBeTypeOf("string");
+  });
+
+  it("loads the heavy conversation renderer through a lazy bridge", () => {
+    expect(routeSource).toContain("LazyConversationView");
+    expect(routeSource).toContain("conversationConstants");
+    expect(routeSource).toContain("fallback={<div className={styles.emptySurface}>{t(\"loadingSession\")}</div>}");
+    expect(routeSource).not.toContain('import { COMPOSER_SESSION_REFERENCE_MIME, ConversationView } from "../components/conversation/ConversationView"');
   });
 
   it("passes agent avatar context into the conversation timeline", () => {
@@ -48,6 +60,9 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("centerFirstLayout");
     expect(routeSource).toContain("centerFirstAutoCollapseRef");
     expect(routeSource).toContain("window.matchMedia(CHAT_CENTER_FIRST_MEDIA_QUERY)");
+    expect(routeSource).toContain("const MIN_LEFT_PANEL_WIDTH = 192");
+    expect(routeSource).toContain("const MIN_RIGHT_PANEL_WIDTH = 244");
+    expect(routeSource).toContain("const TARGET_CENTER_PANE_WIDTH = 520");
     expect(routeSource).toContain("styles.layoutCenterFirst");
     expect(routeStyles.layout).toBeTypeOf("string");
     expect(routeStyles.layoutCenterFirst).toBeTypeOf("string");
@@ -55,6 +70,32 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.rightPane).toBeTypeOf("string");
     expect(routeStyles.resizeHandle).toBeTypeOf("string");
     expect(routeStyles.centerPane).toBeTypeOf("string");
+    expect(routeCssSource).toContain("var(--chat-left-pane-width, 220px)");
+    expect(routeCssSource).toContain("var(--chat-right-pane-width, 284px)");
+  });
+
+  it("defaults Chat to dense side panes so the center conversation has priority", () => {
+    expect(shellStoreSource).toContain("leftPanelWidth: 220");
+    expect(shellStoreSource).toContain("rightPanelWidth: 284");
+    expect(routeSource).toContain('"--chat-left-pane-width": leftRailCollapsed ? "0px" : `${leftPanelWidth}px`');
+    expect(routeSource).toContain('"--chat-right-pane-width": rightPaneCollapsed ? "0px" : `${rightPanelWidth}px`');
+    expect(routeCssSource).toContain(".leftRail {\n  display: flex;\n  flex-direction: column;\n  gap: 5px;\n  padding: 6px;");
+    expect(routeCssSource).toContain(".rightPane {\n  display: grid;\n  grid-template-rows: auto auto 1fr;\n  padding: 6px;");
+    expect(routeCssSource).toContain("padding: 8px 10px 0");
+    expect(routeCssSource).toContain("min-width: 180px");
+    expect(routeCssSource).toContain("max-width: min(38%, 340px)");
+  });
+
+  it("keeps the conversation index compact enough for 1024px workbench use", () => {
+    expect(routeCssSource).toContain("grid-template-columns: 32px minmax(0, 1fr)");
+    expect(routeCssSource).toContain("min-height: 46px");
+    expect(routeCssSource).toContain("width: 32px");
+    expect(routeCssSource).toContain("height: 32px");
+    expect(routeCssSource).toContain("font-size: 0.7rem");
+    expect(routeCssSource).toContain("font-size: 0.66rem");
+    expect(routeCssSource).toContain("max-width: 124px");
+    expect(conversationCssSource).toContain(".surfaceCompact .timeline {\n  padding: 10px 14px 12px;");
+    expect(conversationCssSource).toContain(".surfaceCompact .composer {\n  gap: 8px;\n  padding: 7px 11px 9px;");
   });
 
   it("compresses the left rail into primary controls plus auxiliary status groups", () => {

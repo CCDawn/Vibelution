@@ -69,6 +69,14 @@ def test_default_dataset_registry_lists_builtin_and_swe(tmp_path: Path):
         "missing",
         "missing_verifier_dependency",
     }
+    assert by_name["terminal_bench_agent_judged"]["runnable"] is True
+    assert by_name["terminal_bench_agent_judged"]["adapter_status"] == "agent_harness_ready"
+    assert by_name["terminal_bench_agent_judged"]["evaluation_mode"] == "agent_judged"
+    assert by_name["terminal_bench_agent_judged"]["official_score_available"] is False
+    assert by_name["terminal_bench_agent_judged"]["effective"] is True
+    assert by_name["terminal_bench_agent_judged"]["usability_status"] == "agent_harness_ready"
+    assert by_name["terminal_bench_agent_judged"]["visibility"] == "primary"
+    assert "纯 agent" in by_name["terminal_bench_agent_judged"]["usability_reason"]
     assert by_name["swe_bench_lite"]["runnable"] is False
     assert by_name["swe_bench_lite"]["adapter_status"] == "requires_swe_harness"
 
@@ -103,6 +111,7 @@ def test_ensure_dataset_registry_backfills_missing_builtin_datasets(tmp_path: Pa
     assert "chat_reviewed_multiturn" in names
     assert "terminal_bench_smoke" in names
     assert "terminal_bench_core" in names
+    assert "terminal_bench_agent_judged" in names
     assert "custom_prompt_jsonl" in names
 
 
@@ -549,17 +558,36 @@ def test_materialize_terminal_bench_smoke_preserves_harness_contract(tmp_path: P
     assert "Close the transaction" in case["baseline_prompt"] or "close the transaction" in case["baseline_prompt"]
 
 
+def test_materialize_terminal_bench_smoke_limit_uses_separate_bundle(tmp_path: Path):
+    ensure_dataset_registry(tmp_path)
+
+    full = materialize_dataset_bundle("terminal_bench_smoke", project_root=tmp_path)
+    limited = materialize_dataset_bundle("terminal_bench_smoke", project_root=tmp_path, limit=1)
+    full_bundle = json.loads(Path(full.bundle_path).read_text(encoding="utf-8"))
+    limited_bundle = json.loads(Path(limited.bundle_path).read_text(encoding="utf-8"))
+
+    assert full.bundle_name == "terminal_bench_smoke_v1"
+    assert full.case_count >= 2
+    assert limited.bundle_name == "terminal_bench_smoke_v1_limit_1"
+    assert Path(limited.bundle_path).stem == limited.bundle_name
+    assert limited.bundle_path != full.bundle_path
+    assert limited.case_count == 1
+    assert limited_bundle["bundle_name"] == limited.bundle_name
+    assert len(limited_bundle["cases"]) == 1
+    assert len(full_bundle["cases"]) >= 2
+
+
 def test_materialize_terminal_bench_core_preserves_official_metadata(tmp_path: Path):
     ensure_dataset_registry(tmp_path)
 
-    result = materialize_dataset_bundle("terminal_bench_core", project_root=tmp_path, limit=2)
+    result = materialize_dataset_bundle("terminal_bench_core", project_root=tmp_path)
     bundle = json.loads(Path(result.bundle_path).read_text(encoding="utf-8"))
     case = bundle["cases"][0]
 
     assert result.bundle_name == "terminal_bench_core_v1"
     assert result.runnable is True
     assert result.adapter_status == "custom_harness_ready"
-    assert result.case_count == 2
+    assert result.case_count >= 5
     assert bundle["dataset"]["name"] == "terminal_bench_core"
     assert bundle["dataset"]["official_verifier_status"] == "harbor_pending"
     assert bundle["dataset"]["evaluation_mode"] == "custom_harness"
@@ -593,6 +621,34 @@ def test_materialize_terminal_bench_core_preserves_official_metadata(tmp_path: P
     assert "declared alias" in case["baseline_prompt"]
     assert "close the transaction with status=failed" in case["baseline_prompt"]
     assert "Do not keep retrying" in case["baseline_prompt"]
+
+
+def test_materialize_terminal_bench_agent_judged_uses_agent_scoring(tmp_path: Path):
+    ensure_dataset_registry(tmp_path)
+
+    result = materialize_dataset_bundle("terminal_bench_agent_judged", project_root=tmp_path)
+    bundle = json.loads(Path(result.bundle_path).read_text(encoding="utf-8"))
+    case = bundle["cases"][0]
+
+    assert result.bundle_name == "terminal_bench_agent_judged_v1"
+    assert result.runnable is True
+    assert result.adapter_status == "agent_harness_ready"
+    assert result.case_count >= 1
+    assert bundle["dataset"]["name"] == "terminal_bench_agent_judged"
+    assert bundle["dataset"]["evaluation_mode"] == "agent_judged"
+    assert bundle["dataset"]["official_verifier_status"] == "not_required"
+    assert bundle["dataset"]["official_score_available"] is False
+    assert case["terminal_bench_adapter"] == "agent_judged"
+    assert case["official_runner"] == "agent_judged"
+    assert case["agent_judged"] is True
+    assert case["judge_required"] is True
+    assert case["judge_marker"] == "SUPERVISED_AGENT_JUDGMENT"
+    assert case["environment_contract"]["preflight"]["required"] is False
+    assert case["evaluation_mode"] == "agent_judged"
+    assert case["verifier"]["kind"] == "agent_judgment"
+    assert "supervised judge agent" in case["baseline_prompt"]
+    assert "SUPERVISED_AGENT_JUDGMENT" in case["baseline_prompt"]
+    assert "Harbor" not in case["baseline_prompt"]
 
 
 def test_terminal_bench_environment_preflight_accepts_windows_alias(monkeypatch, tmp_path: Path):

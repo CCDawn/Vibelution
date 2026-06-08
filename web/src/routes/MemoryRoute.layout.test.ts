@@ -11,6 +11,12 @@ const memoryCssSource = readFileSync(new URL("./MemoryRoute.module.css", import.
 const graphWorkerSource = readFileSync(new URL("./memoryGraphLayout.worker.ts", import.meta.url), "utf-8");
 
 describe("MemoryRoute layout contract", () => {
+  it("uses shell language state without loading the full app dictionary", () => {
+    expect(routeSource).toContain("useShellI18n");
+    expect(routeSource).toContain("const { lang } = useShellI18n()");
+    expect(routeSource).not.toContain("useAppI18n");
+  });
+
   it("reads the read-only memory overview endpoint through the shared query key", () => {
     expect(routeSource).toContain("queryKeys.memoryOverview()");
     expect(routeSource).toContain('fetchJson<MemoryOverview>("/api/memory/overview?includeContent=false")');
@@ -156,6 +162,8 @@ describe("MemoryRoute layout contract", () => {
     expect(graphCanvasSource).toContain("translate(-50%, calc(-100% - 20px))");
     expect(graphCanvasSource).toContain("trimText(node.summary");
     expect(graphCanvasSource).toContain("hitObjects");
+    expect(graphCanvasSource).toContain('import("three")');
+    expect(graphCanvasSource).not.toContain('import * as THREE from "three"');
     expect(graphWorkerSource).toContain("layerSpread");
     expect(graphWorkerSource).toContain("runtime_scene: 34");
     expect(memoryCssSource).toContain(".graphCanvasShell");
@@ -474,6 +482,16 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource.indexOf("{renderSubnav()}")).toBeLessThan(routeSource.indexOf("styles.viewStack"));
     expect(appShellSource).toContain('to="/memory"');
     expect(appShellSource).toContain('t("navMemory")');
+  });
+
+  it("keeps effective memory panels scrollable instead of clipping dense narrow content", () => {
+    expect(memoryCssSource).toContain(".effectiveGrid .overviewPanel");
+    expect(memoryCssSource).toContain("max-height: min(260px, 36vh)");
+    expect(memoryCssSource).toContain("overflow: auto");
+    expect(memoryCssSource).toContain(".effectiveGrid .panelLead");
+    expect(memoryCssSource).toContain("-webkit-line-clamp: 2");
+    expect(memoryCssSource).toContain(".effectiveGrid .compactMemoryList");
+    expect(memoryCssSource).toContain("max-height: 148px");
   });
 
   it("visualizes the P1 team knowledge pipeline and prompt boundary", () => {

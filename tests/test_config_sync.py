@@ -163,7 +163,7 @@ def test_workbench_ports_have_defaults_and_validate_range():
 
     assert config.workbench.backend_port == 8000
     assert config.workbench.frontend_port == 5173
-    assert config.workbench.window_mode == "windowed"
+    assert config.workbench.window_mode == "fullscreen"
 
     with pytest.raises(ValueError):
         AppConfig.model_validate({"workbench": {"backend_port": 0, "frontend_port": 5173}})
@@ -318,6 +318,6 @@ def test_main_and_example_configs_load_through_entrypoints():
     assert example_loader.tools.restart_enabled is True
     assert example_loader.workbench.backend_port == 8000
     assert example_loader.workbench.frontend_port == 5173
-    assert example_loader.workbench.window_mode == "windowed"
+    assert example_loader.workbench.window_mode == "fullscreen"
     assert main_loader.pet_heart.enabled is True
     assert settings_primary_provider_kind == main_primary_provider_kind

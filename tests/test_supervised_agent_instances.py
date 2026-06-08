@@ -3,6 +3,7 @@ import json
 from fastapi.testclient import TestClient
 import pytest
 
+from config.models import AppConfig
 from core.ui.chat_state import load_chat_state, save_chat_state
 from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
@@ -22,6 +23,7 @@ def _use_tmp_project_root(tmp_path, monkeypatch):
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_mode_binding_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(supervised_agent_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(supervised_agent_service, "_current_config", lambda: _model_config())
     monkeypatch.setattr(
         supervised_agent_service,
         "_configured_model_library_ids",
@@ -31,6 +33,60 @@ def _use_tmp_project_root(tmp_path, monkeypatch):
             "xiaomi_mimo_v2_5_pro_token_plan",
             "generated_xiaomi_mimo_v2_5_cdff497b2d9b",
         },
+    )
+
+
+def _model_config(*, include_supervised_profiles: bool = True) -> AppConfig:
+    profiles = {
+        "primary": {
+            "profile_id": "primary",
+            "provider_id": "deepseek",
+            "model": "deepseek-chat",
+        }
+    }
+    if include_supervised_profiles:
+        for role in ("baseline", "candidate"):
+            profiles[f"supervised_{role}"] = {
+                "profile_id": f"supervised_{role}",
+                "provider_id": "xiaomi",
+                "model": "mimo-v2.5-pro",
+            }
+    return AppConfig.model_validate(
+        {
+            "llm": {
+                "providers": {
+                    "deepseek": {
+                        "provider_id": "deepseek",
+                        "kind": "deepseek",
+                        "api_key_env": "DEEPSEEK_API_KEY",
+                        "base_url": "https://api.deepseek.com",
+                        "requires_api_key": False,
+                    },
+                    "xiaomi": {
+                        "provider_id": "xiaomi",
+                        "kind": "xiaomi",
+                        "api_key_env": "MIMO_API_KEY",
+                        "base_url": "https://token-plan-cn.xiaomimimo.com/v1",
+                        "requires_api_key": False,
+                    },
+                },
+                "profiles": profiles,
+                "model_library": {
+                    "deepseek_v4_pro": {
+                        "provider_id": "deepseek",
+                        "model": "deepseek-chat",
+                        "label": "DeepSeek",
+                        "api_key_env": "DEEPSEEK_API_KEY",
+                    },
+                    "xiaomi_mimo_v2_5_pro_token_plan": {
+                        "provider_id": "xiaomi",
+                        "model": "mimo-v2.5-pro",
+                        "label": "小米 MiMo",
+                        "api_key_env": "MIMO_API_KEY",
+                    },
+                },
+            }
+        }
     )
 
 
@@ -55,6 +111,7 @@ def _seed_active_chat(root):
 
 def test_ensure_supervised_agent_instances_creates_fixed_role_agents_without_stealing_active_session(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(supervised_agent_service, "_current_config", lambda: _model_config())
     _seed_active_chat(tmp_path)
 
     agents = supervised_agent_service.ensure_supervised_agent_instances()
@@ -63,6 +120,8 @@ def test_ensure_supervised_agent_instances_creates_fixed_role_agents_without_ste
     assert set(by_role) == {"baseline", "candidate", "reviewer", "auditor", "judge"}
     assert "profileId" not in by_role["baseline"]
     assert by_role["baseline"]["llmBindings"]["dialogue"]["modelId"]
+    assert by_role["baseline"]["llmBindings"]["dialogue"]["modelId"] == "xiaomi_mimo_v2_5_pro_token_plan"
+    assert by_role["candidate"]["llmBindings"]["dialogue"]["modelId"] == "xiaomi_mimo_v2_5_pro_token_plan"
     assert by_role["baseline"]["primaryMode"] == "supervised_evolution"
     assert by_role["baseline"]["roleKey"] == "baseline"
     assert by_role["baseline"]["promptTemplateId"] == "prompt-supervised-baseline"
@@ -80,6 +139,7 @@ def test_ensure_supervised_agent_instances_creates_fixed_role_agents_without_ste
 
 def test_ensure_supervised_agent_instances_is_idempotent_and_repairs_active_metadata(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(supervised_agent_service, "_current_config", lambda: _model_config())
     events = []
     monkeypatch.setattr(
         agent_directory_service,
@@ -106,7 +166,55 @@ def test_ensure_supervised_agent_instances_is_idempotent_and_repairs_active_meta
     assert repaired["status"] == "active"
     assert repaired["metadata"]["supervisedRoleLabel"] == "监督进化基线 Agent"
     assert repaired["metadata"]["functionalDisplayName"] == "监督进化基线 Agent"
-    assert repaired["llmBindings"]["dialogue"]["modelId"] == "model-primary"
+    assert repaired["llmBindings"]["dialogue"]["modelId"] == "xiaomi_mimo_v2_5_pro_token_plan"
+
+
+def test_ensure_supervised_agent_instances_prefers_xiaomi_when_role_profile_missing(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        supervised_agent_service,
+        "_current_config",
+        lambda: _model_config(include_supervised_profiles=False),
+    )
+
+    agents = supervised_agent_service.ensure_supervised_agent_instances()
+
+    assert {
+        agent["llmBindings"]["dialogue"]["modelId"]
+        for agent in agents
+    } == {"xiaomi_mimo_v2_5_pro_token_plan"}
+
+
+def test_ensure_supervised_agent_instances_cleans_stale_exclusions_before_slot_sync(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+
+    agents = supervised_agent_service.ensure_supervised_agent_instances()
+    mode = agent_mode_binding_service.get_mode_bindings_payload()["modes"]["supervised_evolution"]
+    mode["slots"] = {role.role: "" for role in supervised_agent_service.SUPERVISED_AGENT_ROLES}
+    mode["excludedAgentIds"] = [
+        *(agent["agentId"] for agent in agents),
+        "agent-missing-supervised",
+    ]
+    agent_mode_binding_service.save_mode_binding_state(
+        {
+            "schemaVersion": 1,
+            "modes": {"supervised_evolution": mode},
+        }
+    )
+
+    repaired = supervised_agent_service.ensure_supervised_agent_instances()
+    repaired_mode = agent_mode_binding_service.get_mode_bindings_payload()["modes"]["supervised_evolution"]
+
+    assert {
+        role: agent_id
+        for role, agent_id in repaired_mode["slots"].items()
+        if role in {item.role for item in supervised_agent_service.SUPERVISED_AGENT_ROLES}
+    } == {
+        agent["metadata"]["supervisedRole"]: agent["agentId"]
+        for agent in repaired
+    }
+    assert all(agent["agentId"] not in repaired_mode["excludedAgentIds"] for agent in repaired)
+    assert "agent-missing-supervised" not in repaired_mode["excludedAgentIds"]
 
 
 def test_ensure_supervised_agent_instances_does_not_reactivate_archived_fixed_role(tmp_path, monkeypatch):

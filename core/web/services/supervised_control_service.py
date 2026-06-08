@@ -49,6 +49,7 @@ from .evolution_service import (
     manual_governance_enabled,
 )
 from .i18n import get_web_language, text_for
+from .runtime_manager_control_service import runtime_manager_live_control_enabled
 from .runtime_scene_service import record_runtime_scene_event
 from .session_service import list_active_session_work_runs
 from .supervised_agent_service import supervised_agent_bindings
@@ -98,21 +99,7 @@ class _SupervisedRunInterrupted(RuntimeError):
 
 
 def _runtime_manager_live_control_enabled() -> bool:
-    try:
-        from core.runtime_manager.daemon import load_runtime_snapshot
-
-        snapshot = load_runtime_snapshot()
-    except Exception:
-        return False
-    if not bool((snapshot or {}).get("daemonRunning")):
-        return False
-    snapshot_root = str((snapshot or {}).get("projectRoot") or "").strip()
-    if not snapshot_root:
-        return False
-    try:
-        return Path(snapshot_root).resolve() == PROJECT_ROOT.resolve()
-    except OSError:
-        return False
+    return runtime_manager_live_control_enabled(PROJECT_ROOT)
 
 
 def _ensure_runtime_manager_daemon() -> None:
@@ -297,6 +284,18 @@ def _custom_harness_evaluation_notice(bundle_path: Path, *, lang: str) -> dict[s
     dataset = payload.get("dataset") if isinstance(payload.get("dataset"), dict) else {}
     official_status = str(dataset.get("official_verifier_status") or "").strip()
     evaluation_mode = str(dataset.get("evaluation_mode") or "").strip()
+    if evaluation_mode == "agent_judged":
+        return {
+            "evaluationMode": "agent_judged",
+            "officialVerifierStatus": official_status or "not_required",
+            "officialScoreAvailable": False,
+            "scoreLabel": str(dataset.get("score_label") or "Agent-judged score (non-official)").strip(),
+            "message": text_for(
+                lang,
+                zh="将使用纯 agent 裁决评分；不需要官方 Harbor/Docker 判分器，结果不是官方 Terminal-Bench 成绩。",
+                en="This run will use pure agent judgment; no official Harbor/Docker verifier is required, and results are not official Terminal-Bench scores.",
+            ),
+        }
     if official_status != "harbor_pending" and evaluation_mode != "custom_harness":
         return {}
     return {

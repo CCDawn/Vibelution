@@ -4,19 +4,27 @@ import routeSource from "./LauncherRoute.tsx?raw";
 import styles from "./LauncherRoute.module.css";
 import routerSource from "../app/router.tsx?raw";
 import shellSource from "../app/AppShell.tsx?raw";
+import utilityMenuSource from "../app/AppShellUtilityMenu.tsx?raw";
 import launcherShellSource from "../app/LauncherShell.tsx?raw";
 import launcherShellStyles from "../app/LauncherShell.module.css";
 
 describe("LauncherRoute layout contract", () => {
+  it("uses shell language state without loading the full app dictionary", () => {
+    expect(routeSource).toContain("useShellI18n");
+    expect(routeSource).toContain("const { lang } = useShellI18n()");
+    expect(routeSource).not.toContain("useAppI18n");
+  });
+
   it("mounts the Launcher as an independent top-level control surface", () => {
     expect(routerSource).toContain("const LauncherRoute = lazyRoute");
     expect(routerSource).toContain('path: "/launcher"');
     expect(routerSource).toContain("element: <LauncherShell />");
     expect(routerSource).toContain("lazyElement(<LauncherRoute />)");
     expect(routerSource).not.toContain('{ path: "launcher", element: lazyElement(<LauncherRoute />) }');
-    expect(shellSource).toContain('href="/launcher"');
-    expect(shellSource).toContain('target="_blank"');
-    expect(shellSource).toContain('lang === "zh" ? "启动器" : "Launcher"');
+    expect(shellSource).toContain("LazyAppShellUtilityMenu");
+    expect(utilityMenuSource).toContain('href="/launcher"');
+    expect(utilityMenuSource).toContain('target="_blank"');
+    expect(utilityMenuSource).toContain('lang === "zh" ? "启动器" : "Launcher"');
     expect(launcherShellSource).toContain('data-shell="launcher"');
     expect(launcherShellSource).toContain('data-browser-role="launcher_control_surface"');
     expect(launcherShellSource).toContain('reason: "launcher_shell_mounted"');
