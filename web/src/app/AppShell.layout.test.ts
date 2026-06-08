@@ -158,19 +158,43 @@ describe("AppShell layout contract", () => {
     expect(shellSource).toContain("lifecycleMenuOpen");
     expect(shellSource).toContain("restartLauncherBundle");
     expect(shellSource).toContain("stopLauncherBundle");
+    expect(shellSource).toContain("cancelRuntimeLifecycleCommand");
     expect(shellSource).not.toContain('"/api/runtime/restart"');
     expect(shellSource).not.toContain('"/api/runtime/shutdown"');
     expect(shellSource).toContain("restartWorkbenchLabel");
     expect(shellSource).toContain("beginRestart");
     expect(shellSource).toContain("restartActiveWorkBlockedMessage");
+    expect(shellSource).toContain("shutdownActiveWorkBlockedMessage");
     expect(shellSource).not.toContain("confirmedActiveWork");
     expect(shellSource).toContain("restart_blocked_active_work");
+    expect(shellSource).toContain("shutdown_blocked_active_work");
     expect(shellSource).toContain("requestWorkbenchExitGuard");
     expect(shellSource).toContain('requestWorkbenchExitGuard("restart"');
     expect(shellSource).toContain('requestWorkbenchExitGuard("shutdown"');
     expect(styles.lifecycleMenuCluster).toBeTypeOf("string");
     expect(styles.lifecycleMenuPanel).toBeTypeOf("string");
     expect(styles.lifecycleMenuItem).toBeTypeOf("string");
+  });
+
+  it("lets lifecycle wait overlays be cancelled without stopping active work", () => {
+    expect(shellSource).toContain("cancelLifecycleWait");
+    expect(shellSource).toContain("cancelSupersededLifecycleCommand");
+    expect(shellSource).toContain("lifecycleRequestSeqRef");
+    expect(shellSource).toContain("lifecycleOverlayDismissedRef");
+    expect(shellSource).toContain("setLifecycleAction(\"restart\")");
+    expect(shellSource).toContain("setLifecycleAction(\"shutdown\")");
+    expect(shellSource).toContain("cancelRestartLabel");
+    expect(shellSource).toContain("cancelShutdownLabel");
+    expect(shellSource).toContain("browser.user_action.lifecycle_wait_cancel_requested");
+    expect(shellSource).toContain("browser.user_action.lifecycle_wait_cancel_completed");
+    expect(shellSource).toContain("browser.user_action.lifecycle_wait_cancel_failed");
+    expect(shellSource).toContain("browser.user_action.lifecycle_wait_cancel_superseded_command");
+    expect(shellSource).toContain("cancelledBackendCommand");
+    expect(shellSource).not.toContain("confirmedActiveWork");
+
+    expect(styles.shutdownCancelButton).toBeTypeOf("string");
+    expect(shellStyles).toContain(".shutdownCancelButton:hover:not(:disabled)");
+    expect(shellStyles).toContain("white-space: pre-line");
   });
 
   it("renders a startup progress overlay from loading and lifecycle state", () => {
