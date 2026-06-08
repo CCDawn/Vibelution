@@ -7007,8 +7007,33 @@ function Invoke-DesktopLifecycleMonitor {
     }
 }
 
+function Ensure-LauncherControlSurfaceForRuntimeCommand {
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateSet("toggle", "start", "stop", "restart")]
+        [string]$RequestedAction
+    )
+
+    Acquire-LauncherMutex
+    try {
+        Sync-LauncherEndpointFromState
+        Write-LauncherControlLog `
+            -Event "launcher.lifecycle.runtime_command.control_surface.ensure" `
+            -Message "Ensuring Launcher control surface before forwarding a lifecycle command to Runtime Manager." `
+            -Level "info" `
+            -Fields @{
+                action = $RequestedAction
+                no_browser = [bool]$NoBrowser
+            }
+        Open-LauncherControlSurface
+    } finally {
+        Release-LauncherMutex
+    }
+}
+
 $runtimeManagerClientActions = @("toggle", "start", "stop", "restart")
 if ($runtimeManagerClientActions -contains $Action) {
+    Ensure-LauncherControlSurfaceForRuntimeCommand -RequestedAction $Action
     $clientExitCode = 0
     switch ($Action) {
         "toggle" {
