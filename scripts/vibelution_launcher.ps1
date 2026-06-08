@@ -5062,24 +5062,24 @@ function Start-Supervisor {
 
     $scriptPathLiteral = ConvertTo-PowerShellSingleQuotedLiteral -Value $PSCommandPath
     $sessionIdLiteral = ConvertTo-PowerShellSingleQuotedLiteral -Value $ManagedSessionId
-    $stdoutPathLiteral = ConvertTo-PowerShellSingleQuotedLiteral -Value $supervisorStdoutLog
-    $stderrPathLiteral = ConvertTo-PowerShellSingleQuotedLiteral -Value $supervisorStderrLog
     $supervisorCommand = @"
 `$ErrorActionPreference = 'Stop'
 try {
-    & $scriptPathLiteral -Action supervise -SessionId $sessionIdLiteral *>> $stdoutPathLiteral
+    & $scriptPathLiteral -Action supervise -SessionId $sessionIdLiteral
 } catch {
     `$errorText = (`$_ | Out-String)
     if (`$errorText) {
-        Add-Content -LiteralPath $stderrPathLiteral -Value `$errorText -Encoding UTF8
+        [Console]::Error.WriteLine(`$errorText)
     }
     exit 1
 }
 "@
     $encodedSupervisorCommand = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($supervisorCommand))
-    $proc = Start-HiddenBackgroundProcess `
-        -FilePath $powershellExe `
+    $proc = Start-RedirectedBackgroundProcess `
+        -CommandPath $powershellExe `
         -ArgumentList @("-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-EncodedCommand", $encodedSupervisorCommand) `
+        -StdoutPath $supervisorStdoutLog `
+        -StderrPath $supervisorStderrLog `
         -WorkingDirectory $projectDir
 
     $startupWaitTimeoutMs = 8000
@@ -5218,7 +5218,8 @@ try {
             managed_session_id = $ManagedSessionId
             pid = $proc.Id
             supervisor_action = "supervise"
-            supervisor_launch_api = "hidden_encoded_powershell"
+            supervisor_launch_api = "hidden_redirected_powershell"
+            console_window_suppressed = $true
             supervisor_command_logged = $false
             script_path = $PSCommandPath
             argument_count = 6
@@ -5292,7 +5293,7 @@ try {
             -EventCode "supervisor.started" `
             -Message "Supervisor process started." `
             -Outcome "started" `
-            -Fields @{ pid = $proc.Id; managed_session_id = $ManagedSessionId }
+            -Fields @{ pid = $proc.Id; managed_session_id = $ManagedSessionId; supervisor_launch_api = "hidden_redirected_powershell"; console_window_suppressed = $true }
     }
 
     return $proc.Id
