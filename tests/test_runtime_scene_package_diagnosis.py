@@ -470,6 +470,242 @@ def test_runtime_scene_issue_state_treats_pagehide_get_network_failures_as_contr
     assert "browser.api.network_error" not in diagnosis["agentNextStep"]
 
 
+def test_runtime_scene_issue_state_treats_recovered_route_chunk_errors_as_historical(tmp_path, monkeypatch):
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+    scene_id = "scene-diagnosis-route-chunk-recovered"
+    _seed_scene(
+        tmp_path,
+        scene_id,
+        [
+            {
+                "runtime_scene_id": scene_id,
+                "ts": "2026-05-18T12:00:01.000Z",
+                "seq": 1,
+                "component": "browser_page",
+                "phase": "recovery",
+                "event_code": "browser.route_chunk_recovery.reload_requested",
+                "level": "warning",
+                "outcome": "observed",
+                "message": "Stale route chunk detected; requesting a page reload.",
+                "fields": {
+                    "pageInstanceId": "page-old",
+                    "pathname": "/chat",
+                    "routeTarget": "/chat",
+                    "reason": "built_asset_resource_error",
+                    "resourceUrl": "http://127.0.0.1:8000/assets/old-route.js",
+                    "reloadRequested": True,
+                },
+                "raw_refs": [{"path": "raw/browser.telemetry.log", "tail_lines": 80}],
+            },
+            {
+                "runtime_scene_id": scene_id,
+                "ts": "2026-05-18T12:00:01.010Z",
+                "seq": 2,
+                "component": "browser_page",
+                "phase": "error",
+                "event_code": "browser.resource.error",
+                "level": "error",
+                "outcome": "observed",
+                "message": "Resource failed to load: http://127.0.0.1:8000/assets/old-route.js",
+                "fields": {
+                    "pageInstanceId": "page-old",
+                    "pathname": "/chat",
+                    "resourceUrl": "http://127.0.0.1:8000/assets/old-route.js",
+                    "tagName": "link",
+                },
+                "raw_refs": [{"path": "raw/browser.telemetry.log", "tail_lines": 80}],
+            },
+            {
+                "runtime_scene_id": scene_id,
+                "ts": "2026-05-18T12:00:01.030Z",
+                "seq": 3,
+                "component": "browser_page",
+                "phase": "error",
+                "event_code": "browser.resource.error",
+                "level": "error",
+                "outcome": "observed",
+                "message": "Resource failed to load: http://127.0.0.1:8000/assets/old-panel.js",
+                "fields": {
+                    "pageInstanceId": "page-old",
+                    "pathname": "/chat",
+                    "resourceUrl": "http://127.0.0.1:8000/assets/old-panel.js",
+                    "tagName": "script",
+                },
+                "raw_refs": [{"path": "raw/browser.telemetry.log", "tail_lines": 80}],
+            },
+            {
+                "runtime_scene_id": scene_id,
+                "ts": "2026-05-18T12:00:01.100Z",
+                "seq": 4,
+                "component": "browser_page",
+                "phase": "console",
+                "event_code": "browser.console.error",
+                "level": "error",
+                "outcome": "observed",
+                "message": "Error handled by React Router default ErrorBoundary: | TypeError: Failed to fetch dynamically imported module: http://127.0.0.1:8000/assets/old-route.js",
+                "fields": {
+                    "pageInstanceId": "page-old",
+                    "pathname": "/chat",
+                    "argsPreview": "TypeError: Failed to fetch dynamically imported module: http://127.0.0.1:8000/assets/old-route.js",
+                },
+                "raw_refs": [{"path": "raw/browser.telemetry.log", "tail_lines": 80}],
+            },
+            {
+                "runtime_scene_id": scene_id,
+                "ts": "2026-05-18T12:00:01.200Z",
+                "seq": 5,
+                "component": "browser_page",
+                "phase": "lifecycle",
+                "event_code": "browser.page.hide",
+                "level": "info",
+                "outcome": "observed",
+                "message": "Page hide at /chat",
+                "fields": {"pageInstanceId": "page-old", "pathname": "/chat"},
+                "raw_refs": [{"path": "raw/browser.telemetry.log", "tail_lines": 80}],
+            },
+            {
+                "runtime_scene_id": scene_id,
+                "ts": "2026-05-18T12:00:01.800Z",
+                "seq": 6,
+                "component": "browser_page",
+                "phase": "navigation",
+                "event_code": "browser.route.changed",
+                "level": "info",
+                "outcome": "observed",
+                "message": "React route changed to /chat",
+                "fields": {
+                    "pageInstanceId": "page-new",
+                    "pathname": "/chat",
+                    "readyState": "complete",
+                    "mainTextLength": 900,
+                },
+                "raw_refs": [{"path": "raw/browser.telemetry.log", "tail_lines": 80}],
+            },
+            {
+                "runtime_scene_id": scene_id,
+                "ts": "2026-05-18T12:00:02.300Z",
+                "seq": 7,
+                "component": "browser_page",
+                "phase": "page",
+                "event_code": "browser.page.snapshot",
+                "level": "info",
+                "outcome": "observed",
+                "message": "Page snapshot for /chat",
+                "fields": {
+                    "pageInstanceId": "page-new",
+                    "pathname": "/chat",
+                    "readyState": "complete",
+                    "mainTextLength": 1200,
+                },
+                "raw_refs": [{"path": "raw/browser.telemetry.log", "tail_lines": 80}],
+            },
+        ],
+        status="running",
+    )
+
+    detail = runtime_scene_service.get_runtime_scene_detail(scene_id)
+
+    diagnosis = detail["packageDiagnosis"]
+    issue_state = diagnosis["issueState"]
+    assert diagnosis["severity"] == "info"
+    assert issue_state["activeErrorCount"] == 0
+    assert issue_state["activeWarningCount"] == 0
+    assert issue_state["activeClusterCount"] == 0
+    assert issue_state["historicalErrorCount"] == 3
+    assert issue_state["historicalWarningCount"] == 1
+    assert issue_state["historicalClusterCount"] == 3
+    assert issue_state["historicalClusters"][0]["eventCode"] == "browser.resource.error"
+    assert issue_state["historicalClusters"][0]["repeatCount"] == 2
+    assert {cluster["eventCode"] for cluster in issue_state["historicalClusters"]} >= {
+        "browser.console.error",
+        "browser.resource.error",
+        "browser.route_chunk_recovery.reload_requested",
+    }
+
+    summary = json.loads((tmp_path / "logs" / "runtime_scenes" / f"20260518T120000Z__{scene_id}" / "summary.json").read_text(encoding="utf-8"))
+    assert summary["agent_brief"]["diagnosis_status"] == "resolved"
+    assert summary["agent_brief"]["primary_issue"] == "none"
+
+
+def test_runtime_scene_issue_state_treats_reopened_session_stream_error_as_historical(tmp_path, monkeypatch):
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+    scene_id = "scene-diagnosis-session-stream-recovered"
+    scene_dir = _seed_scene(
+        tmp_path,
+        scene_id,
+        [
+            {
+                "runtime_scene_id": scene_id,
+                "ts": "2026-05-18T12:00:01.000Z",
+                "seq": 1,
+                "component": "browser_page",
+                "phase": "session_stream",
+                "event_code": "browser.session_stream.error",
+                "level": "warning",
+                "outcome": "observed",
+                "message": "Session detail stream reported an error.",
+                "fields": {"sessionId": "session-a", "readyState": 2},
+                "raw_refs": [{"path": "raw/browser.telemetry.log", "tail_lines": 80}],
+            }
+        ],
+        status="running",
+    )
+    _write_jsonl(
+        scene_dir / "events" / "browser_page.jsonl",
+        [
+            {
+                "runtime_scene_id": scene_id,
+                "ts": "2026-05-18T12:00:01.000Z",
+                "seq": 1,
+                "component": "browser_page",
+                "phase": "session_stream",
+                "event_code": "browser.session_stream.error",
+                "level": "warning",
+                "outcome": "observed",
+                "message": "Session detail stream reported an error.",
+                "fields": {"sessionId": "session-a", "readyState": 2},
+                "raw_refs": [{"path": "raw/browser.telemetry.log", "tail_lines": 80}],
+            },
+            {
+                "runtime_scene_id": scene_id,
+                "ts": "2026-05-18T12:00:02.000Z",
+                "seq": 2,
+                "component": "browser_page",
+                "phase": "session_stream",
+                "event_code": "browser.session_stream.opened",
+                "level": "info",
+                "outcome": "observed",
+                "message": "Session detail stream opened.",
+                "fields": {"sessionId": "session-a"},
+                "raw_refs": [{"path": "raw/browser.telemetry.log", "tail_lines": 80}],
+            },
+            {
+                "runtime_scene_id": scene_id,
+                "ts": "2026-05-18T12:00:02.200Z",
+                "seq": 3,
+                "component": "browser_page",
+                "phase": "session_stream",
+                "event_code": "browser.session_stream.snapshot_applied",
+                "level": "info",
+                "outcome": "observed",
+                "message": "Session detail stream snapshot was applied to the UI cache.",
+                "fields": {"sessionId": "session-a", "reason": "final", "appliedCount": 1},
+                "raw_refs": [{"path": "raw/browser.telemetry.log", "tail_lines": 80}],
+            },
+        ],
+    )
+
+    detail = runtime_scene_service.get_runtime_scene_detail(scene_id)
+
+    issue_state = detail["packageDiagnosis"]["issueState"]
+    assert detail["packageDiagnosis"]["severity"] == "info"
+    assert issue_state["activeWarningCount"] == 0
+    assert issue_state["activeClusterCount"] == 0
+    assert issue_state["historicalWarningCount"] == 1
+    assert issue_state["historicalClusterCount"] == 1
+    assert issue_state["historicalClusters"][0]["eventCode"] == "browser.session_stream.error"
+
+
 def test_runtime_scene_issue_state_keeps_foreground_post_network_failures_active(tmp_path, monkeypatch):
     monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
     scene_id = "scene-diagnosis-post-network"

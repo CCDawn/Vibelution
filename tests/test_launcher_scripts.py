@@ -1099,14 +1099,17 @@ $supervisorText = $supervisorAst.Extent.Text
 if ($supervisorText -match "Start-Process") {
     throw "Start-Supervisor still uses Start-Process."
 }
-if ($supervisorText -notmatch "Start-HiddenBackgroundProcess") {
-    throw "Start-Supervisor should use a hidden background PowerShell host."
+if ($supervisorText -notmatch "Start-RedirectedBackgroundProcess") {
+    throw "Start-Supervisor should use the Win32 no-window redirected starter."
 }
 if ($supervisorText -notmatch "-EncodedCommand") {
     throw "Start-Supervisor should use an encoded command for stable supervisor logging."
 }
 if ($supervisorText -notmatch "ConvertTo-PowerShellSingleQuotedLiteral") {
     throw "Start-Supervisor should quote paths and session ids inside the encoded command."
+}
+if ($supervisorText -notmatch "hidden_redirected_powershell" -or $supervisorText -notmatch "console_window_suppressed") {
+    throw "Start-Supervisor should log the no-console supervisor launch strategy."
 }
 
 $managedBackendAst = $ast.Find({
@@ -5188,10 +5191,12 @@ $script:projectDir = $script:launcherDir
 $script:PSCommandPath = $LauncherPath
 $script:port = 8000
 New-Item -ItemType Directory -Path $script:launcherDir -Force | Out-Null
-function Start-HiddenBackgroundProcess {
+function Start-RedirectedBackgroundProcess {
     param(
-        [string]$FilePath,
+        [string]$CommandPath,
         [string[]]$ArgumentList = @(),
+        [string]$StdoutPath = "",
+        [string]$StderrPath = "",
         [string]$WorkingDirectory = ""
     )
     return [pscustomobject]@{ Id = 999999 }
@@ -5244,7 +5249,8 @@ Write-Output $payload
     assert fields["stdout_path"]
     assert fields["stderr_path"]
     assert fields["supervisor_action"] == "supervise"
-    assert fields["supervisor_launch_api"] == "hidden_encoded_powershell"
+    assert fields["supervisor_launch_api"] == "hidden_redirected_powershell"
+    assert fields["console_window_suppressed"] is True
     assert fields["supervisor_command_logged"] is False
     assert fields["startup_wait_timeout_ms"] == 8000
     assert fields["startup_settle_milliseconds"] == 250

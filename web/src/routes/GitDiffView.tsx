@@ -2,8 +2,8 @@ import type { ReactNode } from "react";
 import { useMemo } from "react";
 
 import { GitFileDiff } from "../api/types";
-import { useShellI18n } from "../i18n/useShellI18n";
 import { buildGitDiffRows } from "./gitDiffRows";
+import { useGitRouteI18n } from "./gitRouteI18n";
 import styles from "./GitDiffView.module.css";
 
 type GitDiffViewProps = {
@@ -16,7 +16,7 @@ type GitDiffViewProps = {
 };
 
 export function GitDiffView({ path, diff, loading, changed, sourceLabel, headerActions }: GitDiffViewProps) {
-  const { t } = useShellI18n();
+  const { t } = useGitRouteI18n();
   const rows = useMemo(
     () =>
       buildGitDiffRows({
