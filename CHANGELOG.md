@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.6 - 2026-06-08
+
+- Switched the backend ready wait loop to a direct HTTP ready probe instead of full backend liveness scans on every startup poll.
+- Tightened Launcher backend ready polling from 500ms to 250ms while still requiring a successful Workbench HTTP response before reporting the runtime scene ready.
+- Added Launcher regression coverage for the faster HTTP-ready wait contract.
+
 ## 1.0.5 - 2026-06-08
 
 - Removed the startup-ready-path browser process memory snapshot so opening the managed Workbench window no longer waits on an unsupported multi-second process scan.

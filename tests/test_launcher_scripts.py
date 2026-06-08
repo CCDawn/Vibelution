@@ -5222,7 +5222,7 @@ Write-Output $payload
     assert payload["events"][1]["fields"]["port_owner_cleanup_reason"] == "repo_workbench_ancestor"
 
 
-def test_launcher_wait_for_backend_healthy_does_not_abort_on_wrapper_pid_exit(tmp_path):
+def test_launcher_wait_for_backend_healthy_uses_fast_http_ready_probe(tmp_path):
     result = _run_launcher_ast_harness(
         tmp_path,
         """
@@ -5252,26 +5252,30 @@ if ($null -eq $functionAst) {
 }
 . ([scriptblock]::Create($functionAst.Extent.Text))
 
-$script:livenessCalls = 0
+$script:webHealthyCalls = 0
+$script:sleepIntervals = @()
 function Get-ManagedBackendLiveness {
     param([int]$TrackedPid = 0)
-    $script:livenessCalls += 1
-    return [pscustomobject]@{
-        Alive = $false
-        Healthy = ($script:livenessCalls -ge 2)
-        TrackedPid = $TrackedPid
-        TrackedPidAlive = $false
-        CandidatePids = @()
-    }
+    throw "Wait-ForBackendHealthy should not run full backend liveness scans."
 }
-function Start-Sleep { param([int]$Milliseconds, [int]$Seconds) }
+function Test-WebHealthy {
+    $script:webHealthyCalls += 1
+    return ($script:webHealthyCalls -ge 2)
+}
+function Start-Sleep {
+    param([int]$Milliseconds, [int]$Seconds)
+    $script:sleepIntervals += $Milliseconds
+}
 
 $healthy = Wait-ForBackendHealthy -ProcessId 1111 -TimeoutSeconds 5
 if (-not $healthy) {
-    throw "Wait-ForBackendHealthy aborted before the delayed healthy probe."
+    throw "Wait-ForBackendHealthy aborted before the delayed HTTP ready probe."
 }
-if ($script:livenessCalls -ne 2) {
-    throw "Expected two liveness probes, got $script:livenessCalls."
+if ($script:webHealthyCalls -ne 2) {
+    throw "Expected two HTTP ready probes, got $script:webHealthyCalls."
+}
+if ($script:sleepIntervals.Count -ne 1 -or $script:sleepIntervals[0] -ne 250) {
+    throw "Expected one 250ms wait between ready probes."
 }
 
 Write-Output "ok"
