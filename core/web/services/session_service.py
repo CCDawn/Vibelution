@@ -189,6 +189,7 @@ def _get_session_list_cache(
     *,
     now: float,
     signature: tuple[tuple[str, int, int], tuple[str, int, int]],
+    allow_stale_matching_signature: bool = False,
 ) -> tuple[list[dict[str, Any]], int, int, int] | None:
     with _SESSION_LIST_CACHE_LOCK:
         snapshot = _SESSION_LIST_CACHE.get("sessions")
@@ -201,7 +202,9 @@ def _get_session_list_cache(
             cache_age_seconds = now - float(cached_at)
         except (TypeError, ValueError):
             return None
-        if cache_age_seconds < 0 or cache_age_seconds > _SESSION_LIST_CACHE_TTL_SECONDS:
+        if cache_age_seconds < 0:
+            return None
+        if not allow_stale_matching_signature and cache_age_seconds > _SESSION_LIST_CACHE_TTL_SECONDS:
             return None
         return (
             _copy_session_list_snapshot(snapshot),
@@ -215,6 +218,7 @@ def _get_session_list_cache_locked(
     *,
     now: float,
     signature: tuple[tuple[str, int, int], tuple[str, int, int]],
+    allow_stale_matching_signature: bool = False,
 ) -> tuple[list[dict[str, Any]], int, int, int] | None:
     snapshot = _SESSION_LIST_CACHE.get("sessions")
     if not isinstance(snapshot, list):
@@ -226,7 +230,9 @@ def _get_session_list_cache_locked(
         cache_age_seconds = now - float(cached_at)
     except (TypeError, ValueError):
         return None
-    if cache_age_seconds < 0 or cache_age_seconds > _SESSION_LIST_CACHE_TTL_SECONDS:
+    if cache_age_seconds < 0:
+        return None
+    if not allow_stale_matching_signature and cache_age_seconds > _SESSION_LIST_CACHE_TTL_SECONDS:
         return None
     return (
         _copy_session_list_snapshot(snapshot),
@@ -240,18 +246,27 @@ def _begin_session_list_cache_build(
     *,
     now: float,
     signature: tuple[tuple[str, int, int], tuple[str, int, int]],
+    allow_stale_matching_signature: bool = False,
 ) -> tuple[tuple[list[dict[str, Any]], int, int, int] | None, bool, bool]:
     """Return cached sessions or reserve this caller as the index builder."""
 
     waited_for_inflight = False
     with _SESSION_LIST_CACHE_CONDITION:
-        cached = _get_session_list_cache_locked(now=now, signature=signature)
+        cached = _get_session_list_cache_locked(
+            now=now,
+            signature=signature,
+            allow_stale_matching_signature=allow_stale_matching_signature,
+        )
         if cached is not None:
             return cached, False, waited_for_inflight
         while _SESSION_LIST_CACHE.get("inflight_signature") == signature:
             waited_for_inflight = True
             _SESSION_LIST_CACHE_CONDITION.wait(timeout=10.0)
-            cached = _get_session_list_cache_locked(now=_perf_counter(), signature=signature)
+            cached = _get_session_list_cache_locked(
+                now=_perf_counter(),
+                signature=signature,
+                allow_stale_matching_signature=allow_stale_matching_signature,
+            )
             if cached is not None:
                 return cached, False, waited_for_inflight
             if _SESSION_LIST_CACHE.get("inflight_signature") != signature:
@@ -1627,7 +1642,11 @@ def list_sessions() -> list[dict]:
 
     started_at = _perf_counter()
     signature = _session_list_source_signature()
-    cached, should_build, waited_for_inflight = _begin_session_list_cache_build(now=started_at, signature=signature)
+    cached, should_build, waited_for_inflight = _begin_session_list_cache_build(
+        now=started_at,
+        signature=signature,
+        allow_stale_matching_signature=True,
+    )
     if cached is not None:
         sessions, cache_age_ms, conversation_count, agent_count = cached
         _record_session_list_loaded_event(
@@ -9651,6 +9670,7 @@ def _record_session_list_loaded_event(
                 "cacheHit": bool(cache_hit),
                 "cacheAgeMs": max(0, int(cache_age_ms)),
                 "cacheTtlMs": max(0, int(cache_ttl_ms)),
+                "cacheExpired": bool(cache_hit and cache_ttl_ms > 0 and cache_age_ms > cache_ttl_ms),
                 "waitedForInflight": bool(waited_for_inflight),
             },
             lifecycle=False,
