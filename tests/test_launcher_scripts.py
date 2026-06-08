@@ -3622,7 +3622,7 @@ $closingSnapshot = [pscustomobject]@{
     FailureMessage = ""
 }
 
-Write-ManagedSessionClosureRecord -Closure $closingSnapshot -Reason "runtime manager stop" -Source "launcher_stop" -Success $true
+Write-ManagedSessionClosureRecord -Closure $closingSnapshot -Reason "runtime manager stop" -Source "launcher_stop" -Success $true -Timings @{ total_ms = 123; browser_wait_ms = 45 }
 Write-ManagedSessionClosureRecord -Closure $closingSnapshot -Reason "launcher_start" -Source "desktop_monitor" -Success $true
 Write-ManagedSessionClosureRecord -Closure $closingSnapshot -Reason "desktop monitor shutdown timeout" -Source "desktop_monitor" -Success $false
 Write-ManagedSessionClosureRecord -Closure $closingSnapshot -Reason "startup failure" -Source "launcher_stop" -Success $true
@@ -3647,6 +3647,8 @@ $payload = @{
     controlLogBackendHealthy = $script:controlFields[0].backend_healthy
     controlLogPhase = $script:controlFields[0].phase
     controlLogObservedState = $script:controlFields[0].observed_state
+    manifestTimingTotal = $script:manifestUpdates[0].launcher.shutdown_timings_ms.total_ms
+    controlTimingBrowserWait = $script:controlFields[0].timings_ms.browser_wait_ms
 } | ConvertTo-Json -Depth 8 -Compress
 Write-Output $payload
 """,
@@ -3675,6 +3677,8 @@ Write-Output $payload
     assert payload["controlLogBackendHealthy"] is False
     assert payload["controlLogObservedState"] == "open"
     assert payload["controlLogPhase"] == "closing"
+    assert payload["manifestTimingTotal"] == 123
+    assert payload["controlTimingBrowserWait"] == 45
 
 
 def test_launcher_backend_liveness_accepts_reconciled_backend(tmp_path):
@@ -4971,7 +4975,7 @@ function Test-ManagedSessionClosureSucceeded {
     return $false
 }
 function Write-ManagedSessionClosureRecord {
-    param([pscustomobject]$Closure, [string]$Reason, [string]$Source, [bool]$Success)
+    param([pscustomobject]$Closure, [string]$Reason, [string]$Source, [bool]$Success, [hashtable]$Timings = @{})
 }
 function Remove-State { $script:removedState = $true }
 function Get-ListeningPid { param([int]$Port) return 14916 }
@@ -5017,6 +5021,174 @@ Write-Output $payload
     assert "browser did not stop" not in payload["errorMessage"]
     assert "launcher.browser.stop.with_backend_unconfirmed" in [item["event"] for item in payload["controlEvents"]]
     assert any("browser was closed" in note for note in payload["notes"])
+
+
+def test_launcher_stop_session_records_shutdown_timings(tmp_path):
+    result = _run_launcher_ast_harness(
+        tmp_path,
+        """
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$LauncherPath
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$source = Get-Content -Raw -LiteralPath $LauncherPath
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors -and $parseErrors.Count -gt 0) {
+    throw "Launcher script parse failed: $($parseErrors[0].Message)"
+}
+
+$functionAst = $ast.Find({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -eq "Stop-ManagedSession"
+}, $true)
+if ($null -eq $functionAst) {
+    throw "Stop-ManagedSession was not found."
+}
+. ([scriptblock]::Create($functionAst.Extent.Text))
+
+$script:port = 8000
+$script:selfProcessId = 123
+$script:currentRuntimeSceneId = "scene-1"
+$script:workbenchBrowserProfileDir = "C:\\Users\\17533\\Desktop\\Vibelution\\.runtime\\launcher\\workbench-app-profile"
+$script:runtimeEvents = @()
+$script:controlEvents = @()
+$script:closureRecords = @()
+$script:removedState = $false
+$script:restored = $false
+
+function Get-SessionSnapshot {
+    return [pscustomobject]@{
+        BackendPids = @(6544)
+        BackendPid = 6544
+        BrowserPids = @(40736)
+        BrowserWindowCount = 1
+        State = [pscustomobject]@{
+            supervisorPid = 7777
+            runtimeSceneId = "scene-1"
+            runtimeSceneDir = "C:\\runtime\\scene-1"
+        }
+    }
+}
+function Set-CurrentRuntimeSceneContext { param([string]$SceneId, [string]$SceneDir) }
+function Write-RuntimeSceneEvent {
+    param(
+        [string]$Component,
+        [string]$Phase,
+        [string]$EventCode,
+        [string]$Message,
+        [string]$Level = "info",
+        [string]$Outcome = "",
+        [hashtable]$Fields = @{}
+    )
+    $script:runtimeEvents += ,@{ event = $EventCode; level = $Level; outcome = $Outcome; fields = $Fields }
+}
+function Update-RuntimeSceneManifest { param([hashtable]$Changes) }
+function Stop-ManagedBackendProcesses {
+    Start-Sleep -Milliseconds 2
+    return [pscustomobject]@{
+        CandidatePids = @(6544)
+        RemainingPortPid = $null
+        RemainingLooksManaged = $false
+        RemainingHealthy = $false
+        PortOwnerStopped = $true
+    }
+}
+function Wait-ForPortClosed {
+    param([int]$Port)
+    Start-Sleep -Milliseconds 2
+    return $true
+}
+function Stop-ProcessesById {
+    param([int[]]$ProcessIds)
+    Start-Sleep -Milliseconds 2
+}
+function Stop-ManagedBrowserProcesses {
+    param([string]$ProfileDir = "", [string]$Role = "workbench")
+    Start-Sleep -Milliseconds 2
+}
+function Wait-ForBrowserStopped {
+    param([int]$TimeoutSeconds, [string]$ProfileDir = "", [string]$Role = "workbench")
+    Start-Sleep -Milliseconds 2
+    return $true
+}
+function Get-ManagedSessionClosureSnapshot {
+    Start-Sleep -Milliseconds 2
+    return [pscustomobject]@{
+        BackendStopped = $true
+        BrowserStopped = $true
+        ManagerClosed = $false
+        BackendPids = @()
+        BackendHealthy = $false
+        BrowserPids = @()
+        BrowserWindowCount = 0
+        PortOwnerPid = $null
+        DesiredState = "closed"
+        ObservedState = "closed"
+        Phase = "steady"
+        FailureMessage = ""
+    }
+}
+function Test-ManagedSessionClosureSucceeded {
+    param([pscustomobject]$Closure, [bool]$RequireManagerClosed = $true)
+    return $true
+}
+function Write-ManagedSessionClosureRecord {
+    param([pscustomobject]$Closure, [string]$Reason, [string]$Source, [bool]$Success, [hashtable]$Timings = @{})
+    $script:closureRecords += ,@{ reason = $Reason; source = $Source; success = $Success; timings = $Timings }
+}
+function Restore-LauncherControlStateAfterWorkbenchStop {
+    param($PreviousState)
+    $script:restored = $true
+    return $true
+}
+function Remove-State { $script:removedState = $true }
+function Write-LauncherControlLog {
+    param([string]$Event, [string]$Message, [string]$Level = "info", [hashtable]$Fields = @{})
+    $script:controlEvents += ,@{ event = $Event; level = $Level; fields = $Fields }
+}
+function Write-Note { param([string]$Message) }
+
+Stop-ManagedSession -Reason "web_close_button"
+
+$stoppedEvent = $script:runtimeEvents | Where-Object { $_.event -eq "runtime.scene.stopped" } | Select-Object -First 1
+$payload = @{
+    stoppedTimings = $stoppedEvent.fields.timings_ms
+    closureTimings = $script:closureRecords[0].timings
+    restored = $script:restored
+    removedState = $script:removedState
+} | ConvertTo-Json -Depth 10 -Compress
+Write-Output $payload
+""",
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    payload = json.loads(result.stdout.strip().splitlines()[-1])
+    stopped_timings = payload["stoppedTimings"]
+    closure_timings = payload["closureTimings"]
+    for key in [
+        "total_ms",
+        "backend_stop_ms",
+        "port_wait_ms",
+        "supervisor_stop_ms",
+        "browser_stop_ms",
+        "browser_wait_ms",
+        "closure_snapshot_ms",
+    ]:
+        assert key in stopped_timings
+        assert key in closure_timings
+        assert isinstance(stopped_timings[key], int)
+        assert isinstance(closure_timings[key], int)
+    assert stopped_timings["total_ms"] >= stopped_timings["backend_stop_ms"]
+    assert closure_timings["total_ms"] == stopped_timings["total_ms"]
+    assert payload["restored"] is True
+    assert payload["removedState"] is False
 
 
 def test_launcher_stop_backend_logs_traceable_candidates_and_port_owner(tmp_path):

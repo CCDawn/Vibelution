@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.8 - 2026-06-08
+
+- Coalesced duplicate Launcher close requests so repeated stop clicks join the in-flight close instead of queueing extra shutdowns.
+- Skipped residual process cleanup for already-closed clean Workbench observations while preserving strict cleanup for manager shutdowns and real residual evidence.
+- Added segmented Launcher shutdown timing evidence to runtime-scene and control logs so slow stops identify the backend, port wait, browser, or closure-snapshot phase.
+
 ## 1.0.7 - 2026-06-08
 
 - Made the Challenge Cup research team surface show one selected workflow node at a time, with Source Collection, Coordination, Ingestion, Candidate Graph, Candidates, Discussion, and Canvas separated behind the team-level index.

@@ -717,6 +717,15 @@ def _close_request_already_satisfied(observation: dict[str, Any]) -> bool:
     return not live_backend_evidence and not live_browser_evidence
 
 
+def _closed_observation_has_residual_evidence(observation: dict[str, Any]) -> bool:
+    if str(observation.get("observedState") or "closed") != "closed":
+        return False
+    return bool(observation.get("backendPortOwnerResidual")) or str(observation.get("lifecycleConsistency") or "") in {
+        "residual_backend",
+        "orphaned_browser",
+    }
+
+
 def _close_verification_failure_message(observation: dict[str, Any]) -> str:
     parts = [
         "Workbench launcher exited successfully, but the workbench is not fully stopped.",
@@ -2093,7 +2102,9 @@ class RuntimeManagerDaemon:
             workbench["phase"] = "steady"
             workbench["failureMessage"] = ""
             save_state(self._reconcile_observation(state))
-            cleanup_result = self._cleanup_residual_workbench_processes()
+            cleanup_result = {"supported": True, "requested": [], "terminated": [], "remaining": [], "skipped": "already_closed_no_residual"}
+            if bool(args.get("stopManager")) or _closed_observation_has_residual_evidence(observation):
+                cleanup_result = self._cleanup_residual_workbench_processes()
             reopen_intent = _claim_workbench_reopen_intent() if bool(args.get("stopManager")) else None
             if bool(args.get("stopManager")):
                 if reopen_intent:

@@ -2065,6 +2065,101 @@ def test_submit_command_treats_duplicate_stop_manager_close_as_idempotent(tmp_pa
     assert result["message"] == "Runtime manager shutdown is already in progress."
 
 
+def test_submit_command_joins_active_close_workbench_without_stop_manager(tmp_path, monkeypatch):
+    inbox_dir = tmp_path / "inbox"
+    processing_dir = tmp_path / "processing"
+    results_dir = tmp_path / "results"
+    events_path = tmp_path / "events.jsonl"
+    for path in (inbox_dir, processing_dir, results_dir):
+        path.mkdir(parents=True)
+
+    monkeypatch.setattr(command_queue, "INBOX_DIR", inbox_dir)
+    monkeypatch.setattr(command_queue, "PROCESSING_DIR", processing_dir)
+    monkeypatch.setattr(command_queue, "RESULTS_DIR", results_dir)
+    monkeypatch.setattr(command_queue, "EVENTS_PATH", events_path)
+    monkeypatch.setattr(command_queue, "ensure_runtime_manager_dirs", lambda: None)
+    monkeypatch.setattr(command_queue, "load_pid", lambda: 9912)
+    monkeypatch.setattr(command_queue, "_process_is_alive", lambda pid: True)
+    monkeypatch.setattr(
+        command_queue,
+        "load_state",
+        lambda: {
+            "stateVersion": 44,
+            "runtimeState": "running",
+            "managerPid": 9912,
+            "command": {
+                "activeCommandId": "cmd-active-close",
+                "activeType": "close_workbench",
+                "stopManager": False,
+            },
+        },
+    )
+
+    command = command_queue.submit_command(
+        "close_workbench",
+        args={"reason": "launcher_stop_button", "stopManager": False},
+        requested_by="launcher_api",
+    )
+
+    assert command["commandId"] == "cmd-active-close"
+    assert list(inbox_dir.glob("*.json")) == []
+    assert list(results_dir.glob("*.json")) == []
+    event = json.loads(events_path.read_text(encoding="utf-8").splitlines()[-1])
+    assert event["type"] == "command_queue.close_joined"
+    assert event["payload"]["commandId"] == "cmd-active-close"
+
+
+def test_submit_command_joins_pending_close_workbench_without_stop_manager(tmp_path, monkeypatch):
+    inbox_dir = tmp_path / "inbox"
+    processing_dir = tmp_path / "processing"
+    results_dir = tmp_path / "results"
+    events_path = tmp_path / "events.jsonl"
+    for path in (inbox_dir, processing_dir, results_dir):
+        path.mkdir(parents=True)
+    (inbox_dir / "cmd-pending-close.json").write_text(
+        json.dumps(
+            {
+                "commandId": "cmd-pending-close",
+                "type": "close_workbench",
+                "requestedBy": "launcher_api",
+                "args": {"reason": "launcher_stop_button", "stopManager": False},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(command_queue, "INBOX_DIR", inbox_dir)
+    monkeypatch.setattr(command_queue, "PROCESSING_DIR", processing_dir)
+    monkeypatch.setattr(command_queue, "RESULTS_DIR", results_dir)
+    monkeypatch.setattr(command_queue, "EVENTS_PATH", events_path)
+    monkeypatch.setattr(command_queue, "ensure_runtime_manager_dirs", lambda: None)
+    monkeypatch.setattr(command_queue, "load_pid", lambda: 9912)
+    monkeypatch.setattr(command_queue, "_process_is_alive", lambda pid: True)
+    monkeypatch.setattr(
+        command_queue,
+        "load_state",
+        lambda: {
+            "stateVersion": 45,
+            "runtimeState": "running",
+            "managerPid": 9912,
+            "command": {},
+        },
+    )
+
+    command = command_queue.submit_command(
+        "close_workbench",
+        args={"reason": "launcher_stop_button", "stopManager": False},
+        requested_by="launcher_api",
+    )
+
+    assert command["commandId"] == "cmd-pending-close"
+    assert len(list(inbox_dir.glob("*.json"))) == 1
+    assert list(results_dir.glob("*.json")) == []
+    event = json.loads(events_path.read_text(encoding="utf-8").splitlines()[-1])
+    assert event["type"] == "command_queue.close_joined"
+    assert event["payload"]["commandId"] == "cmd-pending-close"
+
+
 def test_submit_command_joins_active_open_workbench(tmp_path, monkeypatch):
     inbox_dir = tmp_path / "inbox"
     processing_dir = tmp_path / "processing"
@@ -5500,7 +5595,60 @@ def test_handle_close_workbench_fails_when_post_close_verification_still_sees_br
     assert failed_payload["attempts"] == 1
 
 
-def test_handle_close_workbench_cleans_residual_processes_when_already_closed(monkeypatch):
+def test_handle_close_workbench_skips_residual_cleanup_for_plain_close_when_already_closed_without_residual(monkeypatch):
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    state = {
+        "command": {"activeCommandId": "cmd-close"},
+        "workbench": {
+            "desiredState": "closed",
+            "observedState": "closed",
+            "phase": "steady",
+        },
+    }
+    close_calls = []
+
+    monkeypatch.setattr(daemon, "load_state", lambda: state)
+    monkeypatch.setattr(daemon, "save_state", lambda next_state: next_state)
+    monkeypatch.setattr(
+        daemon,
+        "observe_workbench",
+        lambda: {
+            "observedState": "closed",
+            "backendAlive": False,
+            "backendHealthy": False,
+            "backendObserved": False,
+            "backendPortListening": False,
+            "backendPortOwnerPid": 0,
+            "backendPortOwnerResidual": False,
+            "lifecycleConsistency": "consistent",
+            "browserWindowAlive": False,
+        },
+    )
+    monkeypatch.setattr(daemon, "build_evolution_summary", lambda: {"self": {}, "supervised": {}})
+    monkeypatch.setattr(
+        daemon,
+        "close_workbench",
+        lambda: close_calls.append("close") or subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
+    )
+    monkeypatch.setattr(
+        runtime_daemon,
+        "_cleanup_residual_workbench_processes",
+        lambda: (_ for _ in ()).throw(AssertionError("already-closed clean path should not scan residual processes")),
+    )
+
+    result = runtime_daemon._handle_close_workbench(
+        command_id="cmd-close",
+        args={"stopManager": False},
+    )
+
+    assert result["ok"] is True
+    assert result["message"] == "Workbench is already closed."
+    assert result["stopDaemon"] is False
+    assert result["residualCleanup"]["skipped"] == "already_closed_no_residual"
+    assert close_calls == []
+
+
+def test_handle_close_workbench_cleans_residual_processes_when_already_closed_with_residual(monkeypatch):
     runtime_daemon = daemon.RuntimeManagerDaemon()
     state = {
         "command": {"activeCommandId": "cmd-close"},
@@ -5525,6 +5673,8 @@ def test_handle_close_workbench_cleans_residual_processes_when_already_closed(mo
             "backendObserved": False,
             "backendPortListening": False,
             "backendPortOwnerPid": 0,
+            "backendPortOwnerResidual": True,
+            "lifecycleConsistency": "residual_backend",
             "browserWindowAlive": False,
         },
     )
