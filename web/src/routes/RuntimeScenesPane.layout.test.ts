@@ -93,6 +93,15 @@ describe("RuntimeScenesPane layout contract", () => {
     expect(paneSource).toContain("\"历史已恢复\"");
   });
 
+  it("polls scene detail and raw content only while the active scene is live", () => {
+    expect(paneSource).toContain("function runtimeSceneIsLive");
+    expect(paneSource).toContain("const activeSceneListItem = useMemo(");
+    expect(paneSource).toContain("runtimeSceneIsLive(detail ?? activeSceneListItem)");
+    expect(paneSource).toContain("const activeSceneLive = runtimeSceneIsLive(sceneDetailQuery.data ?? activeSceneListItem)");
+    expect(paneSource).toContain("refetchInterval: activeSceneLive ? resolvePollingInterval(pageVisible, 5_000) : false");
+    expect(paneSource).not.toContain("refetchInterval: resolvePollingInterval(pageVisible, 5_000),");
+  });
+
   it("counts research workflow logs as a separate package child section", () => {
     expect(paneSource).toContain("scene.packageSummary?.researchLogCount");
     expect(paneSource).toContain("scene.researchLogs?.length");
