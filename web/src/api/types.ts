@@ -1930,6 +1930,34 @@ export type WorkbenchWindowModeSetting = {
   }>;
 };
 
+export type LauncherStartupSettings = {
+  runtime: {
+    profile: string;
+    preflightDoctor: boolean;
+    requireVenv: boolean;
+    profileOptions: string[];
+  };
+  workbench: {
+    backendPort: number;
+    frontendPort: number;
+    effectiveBackendPort: number;
+    effectiveFrontendPort: number;
+    backendPortEnvOverride: number;
+    frontendPortEnvOverride: number;
+    windowMode: WorkbenchWindowMode;
+    effectiveWindowMode: WorkbenchWindowMode;
+    windowModeEnvOverride: WorkbenchWindowMode | "";
+    windowModeOptions: WorkbenchWindowModeSetting["options"];
+  };
+  interface: {
+    language: "zh" | "en" | string;
+    languageOptions: Array<"zh" | "en" | string>;
+  };
+  configPath: string;
+  configHash: string;
+  restartRequired: boolean;
+};
+
 export type LauncherComponentState = {
   id: "backend" | "frontend" | "browser" | string;
   ok: boolean;
@@ -1996,6 +2024,7 @@ export type LauncherStatus = {
   runtimeManager: RuntimeSummary["runtimeManager"];
   lifecycleProof: RuntimeLifecycleProof;
   settings?: {
+    startup?: LauncherStartupSettings;
     workbenchWindow?: WorkbenchWindowModeSetting;
   };
 };
@@ -2009,6 +2038,12 @@ export type WorkbenchWindowModeUpdateResponse = {
   ok: boolean;
   mode: WorkbenchWindowMode;
   setting: WorkbenchWindowModeSetting;
+  message: string;
+};
+
+export type LauncherStartupSettingsUpdateResponse = {
+  ok: boolean;
+  setting: LauncherStartupSettings;
   message: string;
 };
 

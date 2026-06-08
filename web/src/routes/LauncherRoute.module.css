@@ -111,39 +111,122 @@
 
 .settingsStrip {
   display: grid;
-  grid-template-columns: max-content max-content max-content minmax(0, 1fr);
-  align-items: center;
-  gap: 7px 10px;
+  grid-template-columns:
+    minmax(148px, 1.2fr)
+    minmax(112px, 0.9fr)
+    minmax(96px, 0.7fr)
+    minmax(96px, 0.7fr)
+    max-content
+    minmax(112px, 0.8fr)
+    max-content
+    max-content
+    max-content;
+  align-items: end;
+  gap: 8px;
   min-width: 0;
   margin: 8px 12px 0;
-  padding: 7px 9px;
+  padding: 8px 9px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   background: color-mix(in srgb, var(--surface-panel) 78%, transparent);
 }
 
-.settingsStrip > span {
+.settingsHeader,
+.settingField,
+.settingToggle {
+  min-width: 0;
+}
+
+.settingsHeader {
+  display: grid;
+  gap: 2px;
+  align-self: center;
+}
+
+.settingsHeader > span,
+.settingField > span,
+.settingToggle > span {
   color: var(--fg-tertiary);
   font-size: 0.66rem;
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
 
-.settingsStrip > strong,
-.settingsStrip > small {
+.settingsHeader > strong,
+.settingsHeader > small,
+.settingField > small {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.settingsStrip > strong {
+.settingsHeader > strong {
   color: var(--fg-primary);
   font-size: 0.8rem;
 }
 
-.settingsStrip > small {
+.settingsHeader > small,
+.settingField > small {
   color: var(--fg-secondary);
+  font-size: 0.74rem;
+}
+
+.settingField {
+  display: grid;
+  gap: 3px;
+}
+
+.settingField input,
+.settingField select {
+  width: 100%;
+  min-width: 0;
+  min-height: 28px;
+  padding: 3px 7px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  color: var(--fg-primary);
+  background: color-mix(in srgb, var(--surface-card) 82%, transparent);
+  font-size: 0.78rem;
+}
+
+.settingToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding-bottom: 1px;
+  white-space: nowrap;
+}
+
+.settingToggle input {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+}
+
+.settingsSaveButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 28px;
+  padding: 3px 8px;
+  border: 1px solid color-mix(in srgb, var(--accent-primary) 54%, var(--border-soft));
+  border-radius: var(--radius-control);
+  color: var(--fg-primary);
+  background: color-mix(in srgb, var(--accent-primary) 17%, var(--surface-card));
+  font-size: 0.76rem;
+}
+
+.settingsSaveButton:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.settingError {
+  grid-column: 1 / -1;
+  color: var(--state-error);
   font-size: 0.74rem;
 }
 
