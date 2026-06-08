@@ -11,6 +11,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from fastapi.responses import StreamingResponse
 
+from core.runtime_manager.command_queue import cancel_lifecycle_command
 from core.web.services.runtime_service import (
     RuntimeRestartActiveWorkBlocked,
     get_runtime_summary,
@@ -29,6 +30,12 @@ class BrowserTelemetryPayload(BaseModel):
     message: str = ""
     level: str = Field(default="info", min_length=1)
     fields: dict[str, Any] = Field(default_factory=dict)
+
+
+class RuntimeLifecycleCancelPayload(BaseModel):
+    commandId: str = ""
+    operation: str = ""
+    source: str = "web_ui"
 
 
 @router.get("/runtime/summary")
@@ -64,6 +71,15 @@ def runtime_restart() -> dict:
                 "activeWorkRuns": exc.active_work_runs,
             },
         ) from exc
+
+
+@router.post("/runtime/lifecycle-command/cancel")
+def runtime_lifecycle_command_cancel(payload: RuntimeLifecycleCancelPayload) -> dict:
+    return cancel_lifecycle_command(
+        command_id=payload.commandId,
+        operation=payload.operation,
+        requested_by=payload.source or "web_ui",
+    )
 
 
 @router.post("/runtime/browser-telemetry", status_code=202)
