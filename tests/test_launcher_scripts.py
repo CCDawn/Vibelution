@@ -6075,6 +6075,91 @@ Write-Output "ok"
     assert result.stdout.strip().splitlines()[-1] == "ok"
 
 
+def test_launcher_internal_actions_skip_outer_mutex(tmp_path):
+    harness_path = tmp_path / "launcher-internal-mutex.ps1"
+    harness_path.write_text(
+        """
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$LauncherPath
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$source = Get-Content -Raw -LiteralPath $LauncherPath
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors -and $parseErrors.Count -gt 0) {
+    throw "Launcher script parse failed: $($parseErrors[0].Message)"
+}
+
+foreach ($functionName in @("Acquire-LauncherMutex", "Release-LauncherMutex")) {
+    $functionAst = $ast.Find({
+        param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+            $node.Name -eq $functionName
+    }, $true)
+    if ($null -eq $functionAst) {
+        throw "$functionName was not found."
+    }
+    . ([scriptblock]::Create($functionAst.Extent.Text))
+}
+
+$acquireText = ($ast.Find({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -eq "Acquire-LauncherMutex"
+}, $true)).Extent.Text
+$releaseText = ($ast.Find({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -eq "Release-LauncherMutex"
+}, $true)).Extent.Text
+
+foreach ($text in @($acquireText, $releaseText)) {
+    if ($text -notmatch 'StartsWith\\("internal-"\\)') {
+        throw "Internal launcher actions should skip the outer process mutex."
+    }
+}
+
+$script:launcherMutex = $null
+$script:mutexName = "Global\\Vibelution.Test.Launcher.InternalMutex.$PID"
+$script:Action = "internal-start"
+Acquire-LauncherMutex
+if ($null -ne $script:launcherMutex) {
+    throw "internal-start should not acquire the outer launcher mutex."
+}
+Release-LauncherMutex
+
+$script:Action = "start"
+Acquire-LauncherMutex
+try {
+    if ($null -eq $script:launcherMutex) {
+        throw "start should still acquire the outer launcher mutex."
+    }
+} finally {
+    Release-LauncherMutex
+}
+
+Write-Output "ok"
+""".strip(),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [_powershell_exe(), "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(harness_path), "-LauncherPath", str(LAUNCHER_SCRIPT)],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=20,
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip().splitlines()[-1] == "ok"
+
+
 def test_desktop_entry_maps_close_to_stop_without_monitor(tmp_path):
     calls = _run_desktop_entry_with_fake_launcher(tmp_path, action="close")
 
