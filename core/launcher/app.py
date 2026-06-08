@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pydantic import BaseModel
 from fastapi import APIRouter, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
+from pydantic import BaseModel, Field
 
 from core.version import get_product_version
 from core.web.control import CONTROL_TOKEN_HEADER, control_token_payload, trusted_control_origins
@@ -30,6 +30,13 @@ class WorkbenchWindowModePayload(BaseModel):
     mode: str
 
 
+class LauncherStartupSettingsPayload(BaseModel):
+    runtime: dict = Field(default_factory=dict)
+    workbench: dict = Field(default_factory=dict)
+    interface: dict = Field(default_factory=dict)
+    baseHash: str = ""
+
+
 @router.get("/api/health")
 def launcher_health() -> dict:
     return {"status": "ok", "service": "launcher"}
@@ -49,6 +56,21 @@ def launcher_status() -> dict:
 @router.get("/api/launcher/settings/workbench-window")
 def workbench_window_setting() -> dict:
     return launcher_service.get_workbench_window_mode_setting()
+
+
+@router.get("/api/launcher/settings/startup")
+def launcher_startup_settings() -> dict:
+    return launcher_service.get_launcher_startup_settings()
+
+
+@router.put("/api/launcher/settings/startup")
+def update_launcher_startup_settings(payload: LauncherStartupSettingsPayload) -> dict:
+    try:
+        return launcher_service.update_launcher_startup_settings(payload.model_dump())
+    except launcher_service.LauncherSettingsConflict as exc:
+        raise HTTPException(status_code=409, detail={"code": "launcher_startup_settings_conflict", "message": str(exc)}) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail={"code": "invalid_launcher_startup_settings", "message": str(exc)}) from exc
 
 
 @router.put("/api/launcher/settings/workbench-window")

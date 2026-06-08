@@ -5,7 +5,6 @@ import {
   Database,
   ExternalLink,
   Image as ImageIcon,
-  Languages,
   Pencil,
   Play,
   Plus,
@@ -231,13 +230,13 @@ function defaultSectionUiState(): ConfigSectionUiState {
 export const CONFIG_COPY = {
   zh: {
     pageTitle: "统一配置工作台",
-    subtitle: "这里是唯一配置网页入口。结构化编辑、完整配置检查和最终保存，都收口到同一份 config.toml。",
+    subtitle: "这里是高级配置网页入口。启动设置在 Launcher 面板维护；结构化编辑、完整配置检查和最终保存仍收口到同一份 config.toml。",
     loading: "正在加载统一配置工作区...",
     loadFailed: "配置工作区加载失败",
     sourceTitle: "保存与生效",
     sourceBody: "这里显示当前修改是否已经保存，以及哪些系统级设置需要重启后才会生效。",
     runtimeTitle: "运行时与界面",
-    runtimeBody: "语言、默认入口和治理模式可以在这里修改，确认后页面会立即展示本次修改。",
+    runtimeBody: "启动设置在 Launcher 面板维护；这里保留非启动类界面、治理和高级配置。",
     modelsTitle: "模型库",
     modelsBody: "这里只管理模型资产：服务商、模型名、密钥状态、能力检测和连通性测试。每个 Agent 的具体模型选择请到 Agent 管理中维护。",
     draftTitle: "高级配置检查",
@@ -265,14 +264,11 @@ export const CONFIG_COPY = {
     leaveGuardSaving: "保存后离开中",
     leaveGuardDiscard: "不保存离开",
     leaveGuardCancel: "取消",
-    interfaceLanguage: "界面语言",
     intakeMode: "进化审核",
-    languageChinese: "中文",
-    languageEnglish: "English",
     groupOverviewSaveTitle: "总览与保存",
     groupOverviewSaveSummary: "查看保存状态、重新读取配置，并处理系统环境变量。",
-    groupWorkbenchTitle: "工作台与界面",
-    groupWorkbenchSummary: "默认入口、语言、前后端端口与重启后生效的工作台设置。",
+    groupWorkbenchTitle: "界面与高级配置",
+    groupWorkbenchSummary: "启动设置移到 Launcher；这里保留 shell、非启动类界面和配置检查。",
     groupAvatarPetTitle: "用户、终端形象与陪伴体",
     groupAvatarPetSummary: "统一管理用户信息、终端形象、宠物与陪伴体相关配置；Web 用户头像在用户信息里维护。",
     groupModelingTitle: "模型库",
@@ -449,13 +445,13 @@ export const CONFIG_COPY = {
   },
   en: {
     pageTitle: "Unified Config Workbench",
-    subtitle: "This is the single config web entry. Structured editing, full-config checks, and final writes converge on one config.toml.",
+    subtitle: "This is the advanced config web entry. Startup settings are maintained in Launcher; structured editing, full-config checks, and final writes still converge on one config.toml.",
     loading: "Loading unified config workspace...",
     loadFailed: "Failed to load config workspace",
     sourceTitle: "Save and Apply",
     sourceBody: "Shows whether current changes are saved and which system-level settings take effect after restart.",
     runtimeTitle: "Runtime and Interface",
-    runtimeBody: "Language, default route, and governance mode changes are shown here immediately after confirmation.",
+    runtimeBody: "Startup settings are maintained in Launcher. This page keeps non-startup interface, governance, and advanced config.",
     modelsTitle: "Model Library",
     modelsBody: "This section manages model assets only: provider routes, model names, key state, capability checks, and connection tests. Edit each Agent's model choices in Agent management.",
     draftTitle: "Advanced Config Check",
@@ -483,14 +479,11 @@ export const CONFIG_COPY = {
     leaveGuardSaving: "Saving before leaving",
     leaveGuardDiscard: "Leave without saving",
     leaveGuardCancel: "Cancel",
-    interfaceLanguage: "Interface language",
     intakeMode: "Review intake",
-    languageChinese: "Chinese",
-    languageEnglish: "English",
     groupOverviewSaveTitle: "Overview and Save",
     groupOverviewSaveSummary: "Review save status, reload config, and open system environment variables.",
-    groupWorkbenchTitle: "Workbench and Interface",
-    groupWorkbenchSummary: "Default entry, language, frontend/backend ports, and workbench settings that apply after restart.",
+    groupWorkbenchTitle: "Interface and Advanced Config",
+    groupWorkbenchSummary: "Startup settings moved to Launcher; this group keeps shell, non-startup interface, and config checks.",
     groupAvatarPetTitle: "User, Terminal Avatar, and Companion",
     groupAvatarPetSummary: "Manage user info, terminal avatar, pet, and companion-facing settings together. The Web user avatar lives under User Info.",
     groupModelingTitle: "Model Library",
@@ -733,7 +726,7 @@ function buildConfigSidebarGroups(copy: ConfigCopy): ConfigSidebarGroup[] {
       id: "workbench-interface",
       title: copy.groupWorkbenchTitle,
       summary: copy.groupWorkbenchSummary,
-      memberSectionIds: ["shell", "runtime", "workbench", "ui"],
+      memberSectionIds: ["shell", "ui"],
     },
     {
       id: "avatar-pet",
@@ -3183,37 +3176,6 @@ export function ConfigRoute() {
           </div>
           <p className={styles.sectionText}>{copy.runtimeBody}</p>
           <div className={styles.matrixGrid}>
-            <article className={styles.matrixCard}>
-              <p className={styles.matrixTitle}>{copy.interfaceLanguage}</p>
-              <div className={styles.segmented}>
-                {([
-                  { value: "zh" as const, label: copy.languageChinese },
-                  { value: "en" as const, label: copy.languageEnglish },
-                ]).map((item) => (
-                  <button
-                    key={item.value}
-                    type="button"
-                    className={
-                      getDraftLanguage(draftConfig, workspace.language) === item.value
-                        ? `${styles.segmentButton} ${styles.segmentButtonActive}`
-                        : styles.segmentButton
-                    }
-                    disabled={structuredActionsDisabled}
-                    onClick={() =>
-                      updateSimpleDraft((next) => {
-                        const ui = asRecord(next.ui);
-                        ui.language = item.value;
-                        next.ui = ui;
-                      })
-                    }
-                  >
-                    <Languages size={14} />
-                    {item.label}
-                  </button>
-                ))}
-              </div>
-            </article>
-
             <article className={styles.matrixCard}>
               <p className={styles.matrixTitle}>{copy.intakeMode}</p>
               <div className={styles.segmented}>
