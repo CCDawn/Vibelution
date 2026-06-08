@@ -188,6 +188,20 @@ type LauncherCopy = {
   saveStartupSettings: string;
   portOverride: string;
   invalidPort: string;
+  userGuide: string;
+  userGuideReady: string;
+  userGuideReadyDetail: string;
+  userGuideBlocked: string;
+  userGuideBlockedDetail: string;
+  userGuideClosed: string;
+  userGuideClosedDetail: string;
+  userGuideChanging: string;
+  userGuideChangingDetail: string;
+  userGuideProblem: string;
+  userGuideProblemDetail: string;
+  actionsLocked: string;
+  actionsAvailable: string;
+  diagnosticsCollapsedHint: string;
 };
 
 type LifecycleDisplay = {
@@ -911,6 +925,20 @@ export function LauncherRoute() {
         saveStartupSettings: "保存启动设置",
         portOverride: "端口被环境变量覆盖",
         invalidPort: "端口必须是 1-65535 的整数",
+        userGuide: "当前建议",
+        userGuideReady: "可以继续使用",
+        userGuideReadyDetail: "项目已就绪；打开工作台继续使用。需要重启前，先确认没有进行中的任务。",
+        userGuideBlocked: "先等任务完成",
+        userGuideBlockedDetail: "有任务正在运行，停止和重启已自动锁定，避免打断当前会话或进化任务。",
+        userGuideClosed: "可以启动项目",
+        userGuideClosedDetail: "项目当前关闭；点击启动会统一拉起后端、前端资源和工作台窗口。",
+        userGuideChanging: "等待操作完成",
+        userGuideChangingDetail: "Launcher 正在处理生命周期操作；完成后状态会自动刷新。",
+        userGuideProblem: "需要查看诊断",
+        userGuideProblemDetail: "当前状态证据不完整或异常；展开高级诊断查看最近命令和现场日志。",
+        actionsLocked: "停止/重启已保护",
+        actionsAvailable: "停止/重启可用",
+        diagnosticsCollapsedHint: "排查时展开",
       }
     : {
         eyebrow: "Launcher",
@@ -1055,6 +1083,20 @@ export function LauncherRoute() {
         saveStartupSettings: "Save startup settings",
         portOverride: "Port is overridden by environment",
         invalidPort: "Ports must be integers from 1 to 65535",
+        userGuide: "Current guidance",
+        userGuideReady: "Keep working",
+        userGuideReadyDetail: "The project is ready. Open the workbench and continue. Before restarting, make sure no task is running.",
+        userGuideBlocked: "Wait for work to finish",
+        userGuideBlockedDetail: "A task is running, so stop and restart are locked to avoid interrupting chat or evolution work.",
+        userGuideClosed: "Start the project",
+        userGuideClosedDetail: "The project is closed. Start will bring up backend, frontend assets, and the workbench window together.",
+        userGuideChanging: "Wait for completion",
+        userGuideChangingDetail: "Launcher is processing a lifecycle operation. The state will refresh when it settles.",
+        userGuideProblem: "Check diagnostics",
+        userGuideProblemDetail: "The current evidence is incomplete or abnormal. Expand diagnostics for recent commands and scene logs.",
+        actionsLocked: "Stop/restart protected",
+        actionsAvailable: "Stop/restart available",
+        diagnosticsCollapsedHint: "Open when troubleshooting",
       };
 
   const [notice, setNotice] = useState<LauncherNotice>({ tone: "neutral", text: "" });
@@ -1207,6 +1249,28 @@ export function LauncherRoute() {
       : projectIsClosed
         ? copy.startProjectSummary
         : lifecycleDisplay.detail || copy.checkDiagnosticsSummary;
+  const userGuideTone = activeWorkCount > 0 || restartQueuePending
+    ? "warning"
+    : lifecycleDisplay.tone;
+  const userGuideTitle = activeWorkCount > 0
+    ? copy.userGuideBlocked
+    : restartQueueActive || projectIsChanging
+      ? copy.userGuideChanging
+      : projectIsOpen
+        ? copy.userGuideReady
+        : projectIsClosed
+          ? copy.userGuideClosed
+          : copy.userGuideProblem;
+  const userGuideDetail = activeWorkCount > 0
+    ? copy.userGuideBlockedDetail
+    : restartQueueActive || projectIsChanging
+      ? restartQueue?.statusLine || copy.userGuideChangingDetail
+      : projectIsOpen
+        ? copy.userGuideReadyDetail
+        : projectIsClosed
+          ? copy.userGuideClosedDetail
+          : lifecycleDisplay.detail || copy.userGuideProblemDetail;
+  const actionLockLabel = destructiveActionDisabled ? copy.actionsLocked : copy.actionsAvailable;
   const guardianProgress = `${guardian?.ownedCount ?? 0}/${guardian?.adapterCount ?? 0}`;
   const statusRows = useMemo<StatusRow[]>(() => {
     const componentById = new Map(componentRows.map((component) => [component.id, component]));
@@ -1357,6 +1421,13 @@ export function LauncherRoute() {
         />
       </div>
 
+      <div className={styles.userGuide} data-tone={userGuideTone}>
+        <span>{copy.userGuide}</span>
+        <strong>{userGuideTitle}</strong>
+        <small>{userGuideDetail}</small>
+        <em>{actionLockLabel}</em>
+      </div>
+
       <LauncherStartupSettingsPanel
         copy={copy}
         uiLang={uiLang}
@@ -1414,7 +1485,7 @@ export function LauncherRoute() {
         <details className={`${styles.panel} ${styles.diagnosticsPanel}`}>
           <summary>
             <span>{copy.advancedDiagnostics}</span>
-            <strong>{status?.lifecycleProof.overallLabel || "-"}</strong>
+            <strong>{copy.diagnosticsCollapsedHint}</strong>
           </summary>
           <div className={styles.diagnosticsBody}>
             <section className={styles.diagnosticSection}>
