@@ -1796,6 +1796,7 @@ def test_openai_compatible_automatic_prompt_cache_strips_cache_control_and_keeps
         {"type": "text", "text": "stable"},
         {"type": "text", "text": "dynamic"},
     ]
+    assert client._last_payload_protocol_summary["promptCacheProviderStrategy"] == "openai_automatic_key"
 
 
 def test_automatic_prompt_cache_uses_stable_default_cache_key_when_not_configured():
@@ -1817,6 +1818,63 @@ def test_automatic_prompt_cache_uses_stable_default_cache_key_when_not_configure
 
     assert payload_one["prompt_cache_key"].startswith("vibelution:xiaomi:primary:")
     assert payload_two["prompt_cache_key"] == payload_one["prompt_cache_key"]
+    assert client._last_payload_protocol_summary["promptCacheProviderStrategy"] == "openai_compatible_automatic_key"
+
+
+def test_dashscope_qwen_explicit_prompt_cache_preserves_cache_control_without_key():
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "aliyun",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            "llm.providers.default.compat_mode": "openai",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "qwen3.6-plus",
+            "llm.profiles.primary.prompt_cache.mode": "explicit_cache_control",
+        }
+    )
+
+    content = [
+        {"type": "text", "text": "stable", "cache_control": {"type": "ephemeral"}},
+        {"type": "text", "text": "dynamic"},
+    ]
+    client = LLMClient(config=config, backend=lambda payload: payload)
+    payload = client._build_payload([{"role": "system", "content": content}])
+
+    assert payload["model"] == "openai/qwen3.6-plus"
+    assert "prompt_cache_key" not in payload
+    assert payload["messages"][0]["content"][0]["cache_control"] == {"type": "ephemeral"}
+    assert payload["messages"][0]["content"][1] == {"type": "text", "text": "dynamic"}
+    assert client._last_payload_protocol_summary["selectedProtocol"] == "qwen_openai_compat"
+    assert client._last_payload_protocol_summary["promptCacheProviderStrategy"] == "qwen_explicit_cache_control"
+
+
+def test_local_qwen_disabled_cache_does_not_preserve_cache_control():
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "local",
+            "llm.providers.default.requires_api_key": False,
+            "llm.providers.default.base_url": "http://127.0.0.1:8081/v1",
+            "llm.providers.default.compat_mode": "openai",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "qwen3-local",
+            "llm.profiles.primary.prompt_cache.mode": "disabled",
+        }
+    )
+
+    content = [
+        {"type": "text", "text": "stable", "cache_control": {"type": "ephemeral"}},
+        {"type": "text", "text": "dynamic"},
+    ]
+    client = LLMClient(config=config, backend=lambda payload: payload)
+    payload = client._build_payload([{"role": "system", "content": content}])
+
+    assert "prompt_cache_key" not in payload
+    assert payload["messages"][0]["content"] == [
+        {"type": "text", "text": "stable"},
+        {"type": "text", "text": "dynamic"},
+    ]
+    assert client._last_payload_protocol_summary["promptCacheProviderStrategy"] == "disabled"
 
 
 def test_default_prompt_cache_key_partitions_by_agent_and_context():

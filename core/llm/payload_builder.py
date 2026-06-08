@@ -28,6 +28,7 @@ class PayloadPolicyActions:
     empty_assistant_prefill_removed: int = 0
     qwen_thinking_parameter: str = ""
     minimal_tool_schema: bool = False
+    prompt_cache_provider_strategy: str = "disabled"
 
     def to_log_dict(self) -> Dict[str, Any]:
         return {
@@ -37,6 +38,7 @@ class PayloadPolicyActions:
             "payloadPolicyEmptyAssistantPrefillRemoved": self.empty_assistant_prefill_removed,
             "payloadPolicyQwenThinkingParameter": self.qwen_thinking_parameter,
             "payloadPolicyMinimalToolSchema": self.minimal_tool_schema,
+            "promptCacheProviderStrategy": self.prompt_cache_provider_strategy,
         }
 
 
@@ -108,6 +110,35 @@ def _default_prompt_cache_key(build_input: PayloadBuildInput) -> str:
     suffix_parts.append(digest)
     label = _PROMPT_CACHE_KEY_SAFE_RE.sub("-", "vibelution:" + ":".join(suffix_parts)).strip("-")
     return label[:80] or f"vibelution:{digest}"
+
+
+def _prompt_cache_provider_strategy(build_input: PayloadBuildInput, prompt_cache_mode: str) -> str:
+    mode = str(prompt_cache_mode or "").strip().lower()
+    if mode in {"", "disabled", "unsupported"}:
+        return mode or "disabled"
+    provider_kind = str(getattr(build_input.provider, "kind", "") or "").strip().lower()
+    provider_api = str(getattr(build_input.provider, "api", "") or "").strip().lower().replace("_", "-")
+    compat_mode = str(getattr(build_input.provider, "compat_mode", "") or "").strip().lower().replace("-", "_")
+    model = str(getattr(build_input.profile, "model", "") or "").strip().lower()
+    route_protocol = str(getattr(getattr(build_input.route, "protocol", None), "value", "") or "").strip().lower()
+    route_transport = str(getattr(getattr(build_input.route, "policy", None), "transport", "") or "").strip().lower()
+    host = str(getattr(build_input.provider, "base_url", "") or "").strip().lower()
+    is_qwen = "qwen" in model or route_protocol.startswith("qwen_") or "dashscope.aliyuncs.com" in host
+    if mode == "explicit_cache_control":
+        if is_qwen:
+            return "qwen_explicit_cache_control"
+        if provider_kind == "anthropic":
+            return "anthropic_explicit_cache_control"
+        return "explicit_cache_control"
+    if mode == "automatic":
+        if provider_kind in {"openai", "relay"} or provider_api in {"openai-responses", "responses"} or route_transport == "responses":
+            return "openai_automatic_key"
+        if is_qwen:
+            return "qwen_automatic_key"
+        if provider_kind in {"openai_compatible", "relay", "xiaomi", "aliyun", "siliconflow", "google"} or compat_mode in {"openai", "openai_compatible"}:
+            return "openai_compatible_automatic_key"
+        return "automatic_key"
+    return mode
 
 
 def _apply_system_message_policy(
@@ -272,6 +303,10 @@ def build_llm_payload(
     prompt_cache_mode = str(
         getattr(getattr(profile, "prompt_cache", None), "mode", "") or "disabled"
     ).strip().lower()
+    policy_actions.prompt_cache_provider_strategy = _prompt_cache_provider_strategy(
+        build_input,
+        prompt_cache_mode,
+    )
     has_prompt_cache_control = messages_have_prompt_cache_control(messages)
     if has_prompt_cache_control and prompt_cache_mode == "unsupported":
         raise LLMError(
