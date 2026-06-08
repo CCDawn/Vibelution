@@ -39,6 +39,10 @@ from core.web.services.agent_directory_service import (
     write_agent_inbox_message,
     write_project_memory_update_proposal,
 )
+from core.web.services.agent_bulk_delete_service import (
+    bulk_archive_agents,
+    bulk_purge_agents,
+)
 from core.web.services.agent_mode_binding_service import (
     AgentModeBindingError,
     get_mode_bindings_payload,
@@ -123,6 +127,12 @@ class AgentResetPayload(BaseModel):
     resetToolPolicy: bool = False
     resetMemoryPolicy: bool = False
     resetRuntimePolicy: bool = False
+
+
+class AgentBulkActionPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    agentIds: list[str] = Field(default_factory=list)
 
 
 class AgentAvatarUploadPayload(BaseModel):
@@ -752,6 +762,26 @@ def agent_reset(agent_id: str, payload: AgentResetPayload) -> dict:
     except Exception as exc:
         _record_agent_reset_route_event("agent.reset.failed", agent_id, payload, outcome="failed", level="error", error=exc)
         raise
+
+
+@router.post("/agents/bulk-archive")
+def agent_bulk_archive(payload: AgentBulkActionPayload) -> dict:
+    try:
+        return bulk_archive_agents(payload.agentIds)
+    except ChatRoomBusyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except (AgentDirectoryError, AgentModeBindingError, ChatRoomValidationError, TeamServiceError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/agents/bulk-purge")
+def agent_bulk_purge(payload: AgentBulkActionPayload) -> dict:
+    try:
+        return bulk_purge_agents(payload.agentIds)
+    except ChatRoomBusyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except (AgentDirectoryError, AgentModeBindingError, ChatRoomValidationError, TeamServiceError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.delete("/agents/{agent_id}")

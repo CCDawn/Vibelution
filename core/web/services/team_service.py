@@ -403,7 +403,29 @@ def remove_agent_from_teams(agent_id: str) -> dict[str, Any]:
     normalized_agent_id = str(agent_id or "").strip()
     if not normalized_agent_id:
         raise TeamServiceError("Agent id is required.")
+    cleanup = remove_agents_from_teams([normalized_agent_id])
+    return {
+        "agentId": normalized_agent_id,
+        "changedTeamIds": list(cleanup.get("changedTeamIds") or []),
+    }
+
+
+def remove_agents_from_teams(agent_ids: list[str] | None) -> dict[str, Any]:
+    """Remove multiple unavailable Agents from active Team membership in one index update."""
+
+    requested = [str(item or "").strip() for item in list(agent_ids or []) if str(item or "").strip()]
+    normalized_agent_ids: list[str] = []
+    seen_agent_ids: set[str] = set()
+    for agent_id in requested:
+        if agent_id in seen_agent_ids:
+            continue
+        seen_agent_ids.add(agent_id)
+        normalized_agent_ids.append(agent_id)
+    if not normalized_agent_ids:
+        return {"agentIds": [], "changedTeamIds": [], "removedByAgentId": {}}
     changed_team_ids: list[str] = []
+    removed_by_agent_id: dict[str, list[str]] = {agent_id: [] for agent_id in normalized_agent_ids}
+    agent_id_set = set(normalized_agent_ids)
     with _TEAM_LOCK:
         state = _load_index()
         teams = [item for item in list(state.get("teams") or []) if isinstance(item, dict)]
@@ -412,32 +434,50 @@ def remove_agent_from_teams(agent_id: str) -> dict[str, Any]:
             if str(team.get("status") or DEFAULT_TEAM_STATUS).strip() == "archived":
                 continue
             members = [dict(item) for item in list(team.get("members") or []) if isinstance(item, dict)]
+            removed_agent_ids_for_team = {
+                str(member.get("agentId") or "").strip()
+                for member in members
+                if str(member.get("agentId") or "").strip() in agent_id_set
+            }
             next_members = [
                 member
                 for member in members
-                if str(member.get("agentId") or "").strip() != normalized_agent_id
+                if str(member.get("agentId") or "").strip() not in agent_id_set
             ]
             if next_members == members:
                 continue
+            team_id = str(team.get("teamId") or "").strip()
             team["members"] = next_members
             team["updatedAt"] = now
-            team["canvasPath"] = _relative_path(_team_canvas_path(str(team.get("teamId") or "").strip()))
-            _remove_agent_from_team_canvas(team, normalized_agent_id)
+            team["canvasPath"] = _relative_path(_team_canvas_path(team_id))
+            for removed_agent_id in sorted(removed_agent_ids_for_team):
+                _remove_agent_from_team_canvas(team, removed_agent_id)
+                removed_by_agent_id.setdefault(removed_agent_id, []).append(team_id)
             _sync_chat_room_root()
             _ensure_team_chat_room_link(team)
-            changed_team_ids.append(str(team.get("teamId") or "").strip())
+            changed_team_ids.append(team_id)
         if changed_team_ids:
             state["updatedAt"] = now
             _save_index(state)
     for team_id in changed_team_ids:
+        removed_agent_ids = [
+            agent_id
+            for agent_id, team_ids in removed_by_agent_id.items()
+            if team_id in set(team_ids)
+        ]
         _record_team_event(
             "team.agent_membership.removed",
             {"teamId": team_id, "status": DEFAULT_TEAM_STATUS},
-            fields={"agentId": normalized_agent_id},
+            fields={"agentIds": removed_agent_ids, "agentCount": len(removed_agent_ids)},
         )
     return {
-        "agentId": normalized_agent_id,
+        "agentIds": normalized_agent_ids,
         "changedTeamIds": changed_team_ids,
+        "removedByAgentId": {
+            agent_id: list(team_ids)
+            for agent_id, team_ids in removed_by_agent_id.items()
+            if team_ids
+        },
     }
 
 
