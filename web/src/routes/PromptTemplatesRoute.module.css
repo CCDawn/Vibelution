@@ -592,5 +592,16 @@
 
   .workspace {
     overflow: auto;
+    align-content: start;
+  }
+
+  .listPanel,
+  .editorPanel {
+    min-height: 0;
+  }
+
+  .editorPanel {
+    grid-template-rows: auto auto minmax(180px, 0.8fr) auto auto;
+    overflow: auto;
   }
 }

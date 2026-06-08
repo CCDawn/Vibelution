@@ -90,4 +90,12 @@ describe("PromptTemplatesRoute layout contract", () => {
     expect(stylesSource).toContain("grid-template-columns: auto auto minmax(118px, 1fr)");
     expect(stylesSource).toContain("min-height: 26px");
   });
+
+  it("keeps the narrow prompt workspace scrollable without oversized editor panels", () => {
+    const breakpoint = stylesSource.slice(stylesSource.indexOf("@media (max-width: 980px)"));
+
+    expect(breakpoint).toContain(".workspace {\n    overflow: auto;\n    align-content: start;");
+    expect(breakpoint).toContain(".listPanel,\n  .editorPanel {\n    min-height: 0;");
+    expect(breakpoint).toContain("grid-template-rows: auto auto minmax(180px, 0.8fr) auto auto");
+  });
 });

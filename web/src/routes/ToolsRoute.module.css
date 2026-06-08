@@ -304,7 +304,8 @@
 }
 
 .listPanel {
-  grid-template-rows: auto auto auto minmax(0, 1fr);
+  grid-template-rows: auto auto auto auto minmax(0, 1fr);
+  overflow: hidden;
 }
 
 .paneCollapsed {
@@ -409,12 +410,12 @@
 }
 
 .bulkActionBar {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: center;
-  gap: 7px;
+  gap: 5px;
   min-width: 0;
-  padding: 7px;
+  padding: 5px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   background: color-mix(in srgb, var(--surface-panel) 86%, var(--surface-card));
@@ -424,9 +425,13 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  min-height: 28px;
+  min-width: 0;
+  min-height: 24px;
   color: var(--fg-secondary);
   font-size: 0.75rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .bulkSummary strong {
@@ -436,7 +441,7 @@
 .toolList {
   display: grid;
   align-content: start;
-  gap: 10px;
+  gap: 7px;
   min-height: 0;
   overflow: auto;
   padding-right: 4px;
@@ -444,8 +449,8 @@
 
 .toolBundleGroup {
   display: grid;
-  gap: 6px;
-  padding-bottom: 8px;
+  gap: 5px;
+  padding-bottom: 7px;
   border-bottom: 1px solid var(--border-soft);
 }
 
@@ -490,7 +495,7 @@
 
 .toolBundleItems {
   display: grid;
-  gap: 6px;
+  gap: 5px;
 }
 
 .selectableToolRow {
@@ -529,11 +534,11 @@
 .toolButton,
 .toolButtonActive {
   display: grid;
-  grid-template-columns: 10px minmax(0, 1fr) minmax(76px, 104px);
+  grid-template-columns: 9px minmax(0, 1fr) minmax(62px, 82px);
   align-items: start;
-  gap: 7px;
+  gap: 6px;
   width: 100%;
-  padding: 7px 8px;
+  padding: 6px 7px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   background: var(--surface-panel-muted, rgba(21, 24, 27, 0.82));
@@ -1108,6 +1113,22 @@
 
   .resizeHandle {
     display: none;
+  }
+}
+
+@media (max-width: 980px) {
+  .bulkActionBar {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .bulkActionBar .dangerButton {
+    grid-column: 1 / -1;
+    justify-self: start;
+  }
+
+  .toolButton,
+  .toolButtonActive {
+    grid-template-columns: 9px minmax(0, 1fr) auto;
   }
 }
 

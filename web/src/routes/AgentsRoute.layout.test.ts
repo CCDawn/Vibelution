@@ -689,10 +689,20 @@ describe("AgentsRoute layout contract", () => {
     expect(stylesSource).toContain("grid-template-columns: minmax(214px, 268px) minmax(430px, 1.08fr) minmax(330px, 0.86fr)");
     expect(stylesSource).toContain("@media (max-width: 1040px)");
     expect(stylesSource).not.toContain("@media (max-width: 1280px)");
-    expect(stylesSource).toContain("grid-auto-rows: minmax(260px, auto)");
+    expect(stylesSource).toContain("grid-auto-rows: minmax(180px, auto)");
     expect(stylesSource).toContain("grid-template-rows: auto auto minmax(0, 1fr)");
     expect(stylesSource).toContain("overflow: auto");
-    expect(stylesSource).toContain("min-height: 420px");
+    expect(stylesSource).toContain("min-height: 220px");
+  });
+
+  it("keeps the 1024px Agent management stack compact enough to show list and detail context", () => {
+    const narrowBreakpoint = stylesSource.slice(stylesSource.indexOf("@media (max-width: 860px)"));
+
+    expect(narrowBreakpoint).toContain("grid-auto-rows: auto");
+    expect(narrowBreakpoint).toContain("align-content: start");
+    expect(narrowBreakpoint).toContain(".filterPanel {\n    min-height: 150px;");
+    expect(narrowBreakpoint).toContain(".agentPanel {\n    min-height: 240px;");
+    expect(narrowBreakpoint).toContain(".detailPanel {\n    min-height: 180px;");
   });
 
   it("keeps Agent empty states compact and left-aligned for dense workbench scanning", () => {
