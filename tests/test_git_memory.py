@@ -180,6 +180,38 @@ class TestGitMemoryService:
         assert payload["transaction_status"] == "failed"
         assert session.get_active_evolution_txn() is None
 
+    def test_close_evolution_transaction_recreates_missing_table_and_reports_missing_txn(self, tmp_path, monkeypatch):
+        repo = _init_git_repo(tmp_path)
+        db_path = tmp_path / "brain.db"
+        fake_workspace = FakeWorkspace(repo, db_path)
+
+        class FakeBus:
+            def publish(self, name, data=None, source=None):
+                return None
+
+        monkeypatch.setattr("core.infrastructure.git_memory.get_workspace", lambda: fake_workspace)
+        monkeypatch.setattr("core.infrastructure.git_memory.get_event_bus", lambda: FakeBus())
+
+        service = GitMemoryService()
+        txn_id = service.open_evolution_transaction("schema loss probe")
+        with fake_workspace.get_db_connection() as conn:
+            conn.execute("DROP TABLE EvolutionTransaction")
+
+        try:
+            service.close_evolution_transaction(txn_id=txn_id, status="success", summary="should diagnose")
+        except ValueError as exc:
+            assert txn_id in str(exc)
+            assert "not found" in str(exc)
+        else:
+            raise AssertionError("missing transaction close should be diagnosed")
+
+        with fake_workspace.get_db_connection() as conn:
+            row = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'EvolutionTransaction'"
+            ).fetchone()
+
+        assert row is not None
+
     def test_validation_event_does_not_auto_close_active_evolution_transaction(self, tmp_path, monkeypatch):
         repo = _init_git_repo(tmp_path)
         db_path = tmp_path / "brain.db"

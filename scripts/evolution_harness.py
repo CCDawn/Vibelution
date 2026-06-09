@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import os
 import queue
@@ -1577,6 +1578,105 @@ def classify_tool_event_phase(event: Dict[str, Any]) -> str:
     return f"tool:{tool_name}:{status}"
 
 
+def _parse_debug_tool_args(raw_args: str) -> Dict[str, Any]:
+    raw = str(raw_args or "").strip()
+    if not raw:
+        return {}
+    try:
+        payload = ast.literal_eval(raw)
+    except (SyntaxError, ValueError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _debug_tool_result_text(tool_name: str, status: str, tool_args: Dict[str, Any]) -> str:
+    if status != "success":
+        return f"[debug] {tool_name} failed"
+    if tool_name == "python_lint_tool":
+        return json.dumps({"status": "ok", "issue_count": 0}, ensure_ascii=False)
+    if tool_name == "run_test_for_tool":
+        return "[debug] validation passed"
+    if tool_name == "open_evolution_transaction_tool":
+        payload = {"status": "success"}
+        txn_id = str(tool_args.get("txn_id") or "").strip()
+        if txn_id:
+            payload["txn_id"] = txn_id
+        return json.dumps(payload, ensure_ascii=False)
+    if tool_name == "close_evolution_transaction_tool":
+        payload = {
+            "status": "success",
+            "transaction_status": str(tool_args.get("status") or "success"),
+        }
+        txn_id = str(tool_args.get("txn_id") or "").strip()
+        if txn_id:
+            payload["txn_id"] = txn_id
+        return json.dumps(payload, ensure_ascii=False)
+    return "[debug] tool completed"
+
+
+def _debug_tool_events_from_lines(lines: List[str]) -> List[Dict[str, Any]]:
+    """Recover compact tool events from debug logs when conversation JSONL is truncated."""
+
+    events: List[Dict[str, Any]] = []
+    pending: Dict[str, Dict[str, Any]] = {}
+    for line in lines:
+        text = str(line or "")
+        if "[TOOL] START " in text:
+            rest = text.split("[TOOL] START ", 1)[1]
+            tool_name, _, raw_args = rest.partition(" args=")
+            tool_name = tool_name.strip()
+            if not tool_name:
+                continue
+            pending[tool_name] = {
+                "type": "tool_call",
+                "tool_name": tool_name,
+                "tool_args": _parse_debug_tool_args(raw_args),
+                "source": "debug_log",
+            }
+            continue
+        if "[TOOL] RESULT " not in text:
+            continue
+        rest = text.split("[TOOL] RESULT ", 1)[1]
+        parts = rest.split()
+        if len(parts) < 2:
+            continue
+        tool_name = parts[0].strip()
+        status_token = parts[1].strip().upper()
+        status = "success" if status_token == "OK" else "error" if status_token == "FAIL" else "unknown"
+        event = pending.pop(tool_name, {"type": "tool_call", "tool_name": tool_name, "tool_args": {}, "source": "debug_log"})
+        tool_args = event.get("tool_args") if isinstance(event.get("tool_args"), dict) else {}
+        event["status"] = status
+        event["tool_result"] = _debug_tool_result_text(tool_name, status, tool_args)
+        events.append(event)
+    return events
+
+
+def _tool_event_dedupe_key(event: Dict[str, Any]) -> tuple[str, str, str]:
+    tool_name = str(event.get("tool_name") or "").strip()
+    status = str(event.get("status") or "").strip()
+    tool_args = event.get("tool_args") if isinstance(event.get("tool_args"), dict) else {}
+    txn_id = str(tool_args.get("txn_id") or "").strip()
+    return (tool_name, status, txn_id)
+
+
+def _recover_missing_debug_tool_events(
+    events: List[Dict[str, Any]],
+    debug_lines: List[str],
+) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    debug_tool_events = _debug_tool_events_from_lines(debug_lines)
+    conversation_keys = {
+        _tool_event_dedupe_key(event)
+        for event in events
+        if event.get("type") == "tool_call"
+    }
+    recovered = [
+        event
+        for event in debug_tool_events
+        if _tool_event_dedupe_key(event) not in conversation_keys
+    ]
+    return debug_tool_events, recovered
+
+
 def _is_guarded_tool_result(result_text: str) -> bool:
     markers = (
         "[短路]",
@@ -1830,8 +1930,11 @@ def infer_evolution_summary(
     guarded_tool_count = 0
     restart_guarded_tool_count = 0
     environment_unavailable_evidence = ""
+    conversation_tool_count = sum(1 for event in events if event.get("type") == "tool_call")
+    debug_tool_events, recovered_debug_events = _recover_missing_debug_tool_events(events, debug_lines)
+    effective_events = [*events, *recovered_debug_events]
 
-    for event in events:
+    for event in effective_events:
         if event.get("type") != "tool_call":
             continue
 
@@ -1864,18 +1967,21 @@ def infer_evolution_summary(
         if tool_name in {"open_evolution_transaction_tool", "close_evolution_transaction_tool"}:
             if tool_name == "open_evolution_transaction_tool" and event.get("status") == "success":
                 transaction_opened = True
-                transaction_id = str(result_payload.get("txn_id") or transaction_id or "")
+                transaction_id = str(result_payload.get("txn_id") or tool_args.get("txn_id") or transaction_id or "")
             elif tool_name == "close_evolution_transaction_tool" and event.get("status") == "success":
                 transaction_closed = True
-                transaction_id = str(result_payload.get("txn_id") or transaction_id or "")
+                transaction_id = str(result_payload.get("txn_id") or tool_args.get("txn_id") or transaction_id or "")
                 transaction_status = str(result_payload.get("transaction_status") or tool_args.get("status") or "success")
+            elif tool_name == "close_evolution_transaction_tool":
+                transaction_id = str(result_payload.get("txn_id") or tool_args.get("txn_id") or transaction_id or "")
 
-        if tool_name in {"cli_tool", "run_powershell_tool", "run_batch_tool", "execute_shell_command_tool", "python_lint_tool"}:
+        if tool_name in {"cli_tool", "run_powershell_tool", "run_batch_tool", "execute_shell_command_tool", "python_lint_tool", "run_test_for_tool"}:
             lower_command = command_text.lower()
             is_validation = (
                 "pytest" in lower_command
                 or "py_compile" in lower_command
                 or tool_name == "python_lint_tool"
+                or tool_name == "run_test_for_tool"
                 or "ruff" in lower_command
                 or "mypy" in lower_command
             )
@@ -1957,6 +2063,12 @@ def infer_evolution_summary(
             "restart_guarded": restart_guarded_tool_count,
         },
         "llm_failure": llm_failure,
+        "evidence": {
+            "conversation_tool_events": conversation_tool_count,
+            "debug_tool_events": len(debug_tool_events),
+            "debug_tool_events_recovered": bool(recovered_debug_events),
+            "recovered_debug_tool_events": len(recovered_debug_events),
+        },
     }
     if environment_unavailable_evidence:
         summary["environment"] = {
