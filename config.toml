@@ -364,9 +364,8 @@ api_key_env = "VIBELUTION_LLM_MODEL_HOUMO_QWEN35_9B_AGENT_API_KEY"
 
 [llm.model_library.houmo_qwen35_9b_agent.provider]
 kind = "llamacpp"
-api_key = "not-needed"
 api_key_env = ""
-base_url = "http://192.168.20.30:8081/v1"
+base_url = "http://127.0.0.1:8081/v1"
 compat_mode = "openai"
 requires_api_key = false
 context_window = 32768
