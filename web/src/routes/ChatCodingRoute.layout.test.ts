@@ -7,6 +7,7 @@ import routeSource from "./ChatCodingRoute.tsx?raw";
 import conversationIndexSectionSource from "./ConversationIndexSection.tsx?raw";
 import directSessionIndexItemSource from "./DirectSessionIndexItem.tsx?raw";
 import groupSessionIndexItemsSource from "./GroupSessionIndexItems.tsx?raw";
+import sessionContextMenuSource from "./SessionContextMenu.tsx?raw";
 import routeStyles from "./ChatCodingRoute.module.css";
 
 const routeCssSource = readFileSync(new URL("./ChatCodingRoute.module.css", import.meta.url), "utf-8");
@@ -632,14 +633,22 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("function openSessionContextMenu");
     expect(routeSource).toContain("onContextMenu={(event) => openSessionContextMenu(event, session)}");
     expect(routeSource).toContain("contextMenuSession");
-    expect(routeSource).toContain("styles.sessionContextMenu");
-    expect(routeSource).toContain("handleAddSessionToReview(contextMenuSession)");
-    expect(routeSource).toContain("beginRenameSession(contextMenuSession)");
-    expect(routeSource).toContain("handleDeleteSession(contextMenuSession)");
+    expect(routeSource).toContain("<SessionContextMenu");
+    expect(routeSource).toContain("onAddToReview={handleAddSessionToReview}");
+    expect(routeSource).toContain("onRename={beginRenameSession}");
+    expect(routeSource).toContain("onDelete={handleDeleteSession}");
     expect(routeSource).toContain("event.key === \"Escape\"");
+    expect(routeSource).not.toContain("const sessionContextMenuStyle: CSSProperties | undefined");
     expect(routeSource).not.toContain("onClick={() => handleAddSessionToReview(session)}");
     expect(routeSource).not.toContain("onClick={() => beginRenameSession(session)}");
     expect(routeSource).not.toContain("onClick={() => handleDeleteSession(session)}");
+    expect(sessionContextMenuSource).toContain("styles.sessionContextMenu");
+    expect(sessionContextMenuSource).toContain("styles.sessionContextMenuItem");
+    expect(sessionContextMenuSource).toContain("styles.sessionContextMenuDanger");
+    expect(sessionContextMenuSource).toContain("role=\"menu\"");
+    expect(sessionContextMenuSource).toContain("role=\"menuitem\"");
+    expect(sessionContextMenuSource).toContain("sessionContextMenuStyle");
+    expect(sessionContextMenuSource).toContain("window.innerWidth");
 
     expect(routeStyles.sessionContextMenu).toBeTypeOf("string");
     expect(routeStyles.sessionContextMenuItem).toBeTypeOf("string");
