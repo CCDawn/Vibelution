@@ -325,6 +325,99 @@ def terminate_unmanaged_workbench_processes(
     }
 
 
+def terminate_workbench_processes(
+    *,
+    project_root: Path | str = PROJECT_ROOT,
+    browser_profile_dir: Path | str = "",
+    exclude_pids: Iterable[int] | None = None,
+    timeout_seconds: float = 5.0,
+) -> dict[str, Any]:
+    """Terminate repo-owned workbench backend/frontend processes and managed browser profile processes."""
+
+    if psutil is None:
+        return {
+            "supported": False,
+            "requested": [],
+            "terminated": [],
+            "remaining": [],
+            "repoCandidates": [],
+            "browserCandidates": [],
+        }
+
+    excluded = {int(pid) for pid in (exclude_pids or []) if int(pid) > 0}
+    repo_candidates = [
+        item
+        for item in list_repo_runtime_processes(project_root=project_root)
+        if item.kind in {"managed_workbench_backend", "unmanaged_workbench", "unmanaged_frontend_dev_server"}
+        and item.pid not in excluded
+    ]
+    target_pids = _target_process_tree_pids(repo_candidates, excluded=excluded)
+
+    browser_candidates: list[dict[str, Any]] = []
+    profile_text = str(browser_profile_dir or "").strip()
+    if profile_text:
+        browser_payload = managed_browser_process_payload(profile_dir=profile_text, command_preview_chars=220)
+        browser_candidates = [
+            item
+            for item in list(browser_payload.get("items") or [])
+            if isinstance(item, dict) and int(item.get("pid") or 0) > 0
+        ]
+        target_pids.update(int(item.get("pid") or 0) for item in browser_candidates if int(item.get("pid") or 0) not in excluded)
+
+    if not target_pids:
+        return {
+            "supported": True,
+            "requested": [],
+            "terminated": [],
+            "remaining": [],
+            "repoCandidates": [item.to_dict() for item in repo_candidates],
+            "browserCandidates": browser_candidates,
+        }
+
+    target_processes = _live_processes(target_pids)
+    for proc in sorted(target_processes, key=lambda item: _process_depth(item), reverse=True):
+        try:
+            proc.terminate()
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+
+    _, alive = psutil.wait_procs(target_processes, timeout=max(0.1, float(timeout_seconds)))
+    for proc in alive:
+        try:
+            proc.kill()
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+    if alive:
+        psutil.wait_procs(alive, timeout=1.0)
+
+    time.sleep(0.05)
+    remaining_repo = [
+        item
+        for item in list_repo_runtime_processes(project_root=project_root)
+        if item.kind in {"managed_workbench_backend", "unmanaged_workbench", "unmanaged_frontend_dev_server"}
+        and item.pid not in excluded
+    ]
+    remaining_browser: list[dict[str, Any]] = []
+    if profile_text:
+        browser_payload = managed_browser_process_payload(profile_dir=profile_text, command_preview_chars=220)
+        remaining_browser = [
+            item
+            for item in list(browser_payload.get("items") or [])
+            if isinstance(item, dict) and int(item.get("pid") or 0) > 0
+        ]
+    remaining_pids = {item.pid for item in remaining_repo}
+    remaining_pids.update(int(item.get("pid") or 0) for item in remaining_browser)
+    return {
+        "supported": True,
+        "requested": sorted(target_pids),
+        "terminated": sorted(pid for pid in target_pids if pid not in remaining_pids),
+        "remaining": [item.to_dict() for item in remaining_repo] + remaining_browser,
+        "repoCandidates": [item.to_dict() for item in repo_candidates],
+        "browserCandidates": browser_candidates,
+        "browserProfileDir": profile_text,
+    }
+
+
 def terminate_unmanaged_workbench_backends(
     *,
     project_root: Path | str = PROJECT_ROOT,

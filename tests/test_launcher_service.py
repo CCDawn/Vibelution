@@ -27,6 +27,22 @@ def test_standalone_launcher_app_exposes_project_lifecycle_routes(monkeypatch):
     assert calls == ["start"]
 
 
+def test_standalone_launcher_app_exposes_force_stop_route(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        launcher_service,
+        "request_launcher_force_stop",
+        lambda: calls.append("force-stop") or {"accepted": True, "operation": "force-stop", "launcherMode": "standalone_control_plane"},
+    )
+    client = TestClient(launcher_app.create_launcher_app())
+
+    response = client.post("/api/project/force-stop")
+
+    assert response.status_code == 202
+    assert response.json()["operation"] == "force-stop"
+    assert calls == ["force-stop"]
+
+
 def test_standalone_launcher_app_exposes_project_status_route(monkeypatch):
     monkeypatch.setattr(
         launcher_service,
@@ -117,6 +133,24 @@ def test_workbench_launcher_adapter_exposes_workbench_window_setting(monkeypatch
     assert updated.status_code == 200
     assert updated.json()["mode"] == "windowed"
     assert calls == [("windowed", "hash-current")]
+
+
+def test_workbench_launcher_adapter_exposes_force_stop_route(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        launcher_service,
+        "request_launcher_force_stop",
+        lambda: calls.append("force-stop") or {"accepted": True, "operation": "force-stop", "launcherMode": "standalone_control_plane"},
+    )
+    app = FastAPI()
+    app.include_router(web_launcher_routes.router, prefix="/api")
+    client = TestClient(app)
+
+    response = client.post("/api/launcher/force-stop")
+
+    assert response.status_code == 202
+    assert response.json()["operation"] == "force-stop"
+    assert calls == ["force-stop"]
 
 
 def test_standalone_launcher_app_serves_health_token_and_launcher_shell(monkeypatch, tmp_path):
@@ -450,6 +484,65 @@ def test_standalone_launcher_active_work_guard_reads_runtime_manager_store(tmp_p
         }
     ]
     assert "launcher.bundle.restart.blocked_active_work" in [event[0] for event in events]
+
+
+def test_launcher_force_stop_queues_command_with_active_work_details(tmp_path, monkeypatch):
+    work_runs_dir = tmp_path / ".runtime" / "runtime-manager" / "work_runs"
+    store = WorkRunStore(root=work_runs_dir)
+    store.persist_snapshot(
+        "chat_turn",
+        {
+            "runId": "chat-turn-live",
+            "runKind": "chat_turn",
+            "sessionId": "session-live",
+            "status": "running",
+        },
+        active_run_id="chat-turn-live",
+    )
+    events = []
+    commands = []
+    monkeypatch.setattr(work_run_store, "WORK_RUNS_DIR", work_runs_dir)
+    monkeypatch.setattr(launcher_service, "ensure_daemon_running", lambda: None)
+    monkeypatch.setattr(
+        launcher_service,
+        "submit_command",
+        lambda command_type, *, args=None, requested_by="unknown": commands.append((command_type, args, requested_by))
+        or {"commandId": "cmd-force-close"},
+    )
+    monkeypatch.setattr(
+        launcher_service,
+        "_raise_if_active_work",
+        lambda _operation: (_ for _ in ()).throw(AssertionError("force stop must not use active-work guard")),
+    )
+    monkeypatch.setattr(
+        launcher_service,
+        "append_runtime_manager_file_event",
+        lambda event_code, payload, **kwargs: events.append((event_code, payload)) or "2026-06-06T00:00:00+00:00",
+    )
+
+    response = launcher_service.request_launcher_force_stop()
+
+    assert response["operation"] == "force-stop"
+    assert response["commandId"] == "cmd-force-close"
+    assert response["activeWorkRuns"] == [
+        {
+            "kind": "chat_turn",
+            "runId": "chat-turn-live",
+            "status": "running",
+            "sessionId": "session-live",
+        }
+    ]
+    assert commands == [
+        (
+            "force_close_workbench",
+            {"reason": "launcher_force_stop_button", "source": "launcher_api", "stopManager": False},
+            "launcher_api",
+        )
+    ]
+    requested_event = next(event for event in events if event[0] == "launcher.bundle.force_stop.requested")
+    accepted_event = next(event for event in events if event[0] == "launcher.bundle.force_stop.accepted")
+    assert requested_event[1]["fields"]["activeWorkCount"] == 1
+    assert accepted_event[1]["fields"]["commandId"] == "cmd-force-close"
 
 
 def test_launcher_active_work_guard_scans_parallel_chat_turn_snapshots(tmp_path, monkeypatch):

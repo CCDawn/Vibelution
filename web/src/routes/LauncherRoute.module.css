@@ -89,11 +89,22 @@
   background: var(--surface-card, rgba(20, 23, 26, 0.72));
 }
 
+.dangerButton {
+  border-color: color-mix(in srgb, var(--danger, #ef6b73) 55%, var(--border-soft));
+  color: color-mix(in srgb, var(--danger, #ef6b73) 78%, var(--fg-primary));
+}
+
 .primaryButton:hover,
 .iconButton:hover {
   border-color: var(--border-strong);
   color: var(--fg-primary);
   background: var(--surface-panel-hover, rgba(34, 39, 44, 0.9));
+}
+
+.dangerButton:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--danger, #ef6b73) 80%, var(--border-strong));
+  color: var(--fg-primary);
+  background: color-mix(in srgb, var(--danger, #ef6b73) 22%, var(--surface-panel-hover));
 }
 
 .primaryButton:disabled,

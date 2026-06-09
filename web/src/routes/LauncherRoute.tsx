@@ -1,9 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ExternalLink, LoaderCircle, Maximize2, Minimize2, Play, RefreshCw, Square } from "lucide-react";
+import { ExternalLink, LoaderCircle, Maximize2, Minimize2, Play, Power, RefreshCw, Square } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import {
   getLauncherStatus,
+  forceStopLauncherBundle,
   reattachLauncherSupervisor,
   restartLauncherBundle,
   saveLauncherWorkbenchWindowMode,
@@ -182,6 +183,8 @@ type LauncherCopy = {
   openWorkbenchSummary: string;
   safeToUse: string;
   startProjectSummary: string;
+  forceStop: string;
+  forceStopDisabledClosed: string;
   useCheckAction: string;
   useStartAction: string;
   useWaitAction: string;
@@ -321,12 +324,14 @@ function humanCommandType(value: string | undefined, lang: "zh" | "en") {
   const normalized = String(value || "").trim();
   const zh: Record<string, string> = {
     close_workbench: "关闭项目",
+    force_close_workbench: "强制关闭项目",
     open_workbench: "打开项目",
     restart_workbench: "重启项目",
     start_supervised_run: "启动监督运行",
   };
   const en: Record<string, string> = {
     close_workbench: "Close project",
+    force_close_workbench: "Force close project",
     open_workbench: "Open project",
     restart_workbench: "Restart project",
     start_supervised_run: "Start supervised run",
@@ -345,9 +350,16 @@ function isControlTokenError(error: unknown) {
 }
 
 function resultMessage(result: LauncherControlPlaneResult, operation: LauncherOperation, lang: "zh" | "en") {
+  const commandType = operation === "force-stop"
+    ? "force_close_workbench"
+    : operation === "restart"
+      ? "restart_workbench"
+      : operation === "start"
+        ? "open_workbench"
+        : "close_workbench";
   const fallback = lang === "zh"
-    ? `${humanCommandType(operation === "restart" ? "restart_workbench" : operation === "start" ? "open_workbench" : "close_workbench", lang)}${result.ok ? "已完成" : "失败"}`
-    : `${humanCommandType(operation === "restart" ? "restart_workbench" : operation === "start" ? "open_workbench" : "close_workbench", lang)} ${result.ok ? "completed" : "failed"}`;
+    ? `${humanCommandType(commandType, lang)}${result.ok ? "已完成" : "失败"}`
+    : `${humanCommandType(commandType, lang)} ${result.ok ? "completed" : "failed"}`;
   const raw = String(result.message || result.errorType || fallback).trim();
   if (result.ok) {
     return raw || fallback;
@@ -818,6 +830,7 @@ export function LauncherRoute() {
         refresh: "刷新",
         start: "启动",
         stop: "停止",
+        forceStop: "强制关闭",
         restart: "重启",
         open: "打开",
         startDisabled: "启动暂不可用",
@@ -825,6 +838,7 @@ export function LauncherRoute() {
         startDisabledRunning: "项目已在运行",
         startDisabledChanging: "项目正在切换",
         lifecycleActionDisabledActiveWork: "有进行中的任务，无法停止或重启 Vibelution",
+        forceStopDisabledClosed: "工作台已经关闭",
         projectStatus: "项目状态",
         launcherStatus: "Launcher 维护",
         lifecycleStatus: "生命周期",
@@ -976,6 +990,7 @@ export function LauncherRoute() {
         refresh: "Refresh",
         start: "Start",
         stop: "Stop",
+        forceStop: "Force close",
         restart: "Restart",
         open: "Open",
         startDisabled: "Start is temporarily unavailable",
@@ -983,6 +998,7 @@ export function LauncherRoute() {
         startDisabledRunning: "Project is already running",
         startDisabledChanging: "Project lifecycle is changing",
         lifecycleActionDisabledActiveWork: "Active work is running; Vibelution cannot stop or restart",
+        forceStopDisabledClosed: "Workbench is already closed",
         projectStatus: "Project Status",
         launcherStatus: "Launcher Care",
         lifecycleStatus: "Lifecycle",
@@ -1145,6 +1161,9 @@ export function LauncherRoute() {
       if (operation === "stop") {
         return stopLauncherBundle();
       }
+      if (operation === "force-stop") {
+        return forceStopLauncherBundle();
+      }
       return restartLauncherBundle();
     },
     onMutate: (operation) => {
@@ -1155,7 +1174,7 @@ export function LauncherRoute() {
       if (!response.accepted) {
         clearControlledProjectLifecycleOperation();
       }
-      setLastControlOperation(operation === "stop" && response.accepted ? "stop" : null);
+      setLastControlOperation((operation === "stop" || operation === "force-stop") && response.accepted ? operation : null);
       setTrackedCommand(response.accepted && response.commandId ? { commandId: response.commandId, operation } : null);
       setNotice({
         tone: response.accepted ? "neutral" : "warning",
@@ -1284,6 +1303,8 @@ export function LauncherRoute() {
       : copy.restartClear;
   const destructiveActionDisabled = busy || activeWorkCount > 0;
   const destructiveActionDisabledReason = activeWorkCount > 0 ? copy.lifecycleActionDisabledActiveWork : copy.startDisabledBusy;
+  const forceStopDisabled = busy || projectIsClosed;
+  const forceStopDisabledReason = projectIsClosed ? copy.forceStopDisabledClosed : copy.startDisabledBusy;
   const activeWorkDetail = activeWorkCount > 0
     ? `${copy.activeTasks}: ${activeWorkCount}${activeWorkKinds.length ? ` · ${activeWorkKinds.join(", ")}` : ""}${restartQueue?.statusLine ? ` · ${restartQueue.statusLine}` : ""}`
     : restartQueue?.statusLine
@@ -1415,14 +1436,15 @@ export function LauncherRoute() {
   const recovery = evidence?.recovery;
   const recentResults = (evidence?.results.recent ?? []).slice(0, 3);
   const recentEvents = (evidence?.events.recent ?? []).slice(0, 3);
-  const expectedStopDisconnect = statusQuery.isError && (lastControlOperation === "stop" || launcherStatusDisconnected);
+  const expectedStopDisconnect = statusQuery.isError && (lastControlOperation === "stop" || lastControlOperation === "force-stop" || launcherStatusDisconnected);
   const trackedResult = trackedCommand
     ? (evidence?.results.recent ?? []).find((item) => item.commandId === trackedCommand.commandId)
     : undefined;
   const launcherCloseGuardMessage = projectWindowCloseGuardMessage(lang, "launcher");
   const controlledCloseOperationInFlight =
-    (controlMutation.isPending && (lastControlOperation === "stop" || lastControlOperation === "restart"))
+    (controlMutation.isPending && (lastControlOperation === "stop" || lastControlOperation === "force-stop" || lastControlOperation === "restart"))
     || trackedCommand?.operation === "stop"
+    || trackedCommand?.operation === "force-stop"
     || trackedCommand?.operation === "restart";
   const launcherCloseBlocked = shouldBlockProjectWindowClose(status, {
     lifecycleOperationInFlight: controlledCloseOperationInFlight,
@@ -1489,6 +1511,10 @@ export function LauncherRoute() {
           <button type="button" className={styles.iconButton} onClick={() => controlMutation.mutate("stop")} disabled={destructiveActionDisabled} title={destructiveActionDisabled ? destructiveActionDisabledReason : copy.stop}>
             <Square size={15} />
             <span>{copy.stop}</span>
+          </button>
+          <button type="button" className={`${styles.iconButton} ${styles.dangerButton}`} onClick={() => controlMutation.mutate("force-stop")} disabled={forceStopDisabled} title={forceStopDisabled ? forceStopDisabledReason : copy.forceStop}>
+            <Power size={15} />
+            <span>{copy.forceStop}</span>
           </button>
           <button type="button" className={styles.iconButton} onClick={() => controlMutation.mutate("restart")} disabled={destructiveActionDisabled} title={destructiveActionDisabled ? destructiveActionDisabledReason : copy.restart}>
             <RefreshCw size={15} />
