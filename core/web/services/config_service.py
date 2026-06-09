@@ -520,6 +520,18 @@ def _decorate_model_options(public_config: dict[str, Any], draft_meta: dict | No
     return options
 
 
+def _model_label_map(public_config: dict[str, Any]) -> dict[str, str]:
+    labels: dict[str, str] = {}
+    for option in list_llm_model_options(public_config):
+        model_id = str(option.get("model_id") or "").strip()
+        if not model_id:
+            continue
+        label = str(option.get("label") or option.get("model") or model_id).strip()
+        if label:
+            labels[model_id] = label
+    return labels
+
+
 def _image_input_capability_result_details(result: dict[str, Any]) -> dict[str, Any]:
     status = str(result.get("capability_status") or "").strip().lower()
     if status not in {"supported", "unsupported", "unknown"}:
@@ -1288,6 +1300,7 @@ def get_config_summary() -> dict[str, Any]:
         "modeAvailability": contract["modeAvailability"],
         "domainAvailability": contract["domainAvailability"],
         "modelLibraryCount": len(model_library) if isinstance(model_library, dict) else 0,
+        "modelLabels": _model_label_map(public_config),
         "blockingCount": len(blocking),
         "warningCount": len(warnings),
         "sections": _config_sections(lang, build_editor_sections(public_config, lang)),

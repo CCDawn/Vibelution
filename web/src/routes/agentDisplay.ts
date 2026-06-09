@@ -132,11 +132,23 @@ export function compactModelLabel(value: unknown): string {
     .replace(/[_\s]+/g, "-");
 }
 
+export type ModelLabelResolver = (modelId: string) => string | undefined;
+
+export function modelDisplayLabel(value: unknown, resolveModelLabel?: ModelLabelResolver): string {
+  const modelId = clean(value);
+  if (!modelId) {
+    return "";
+  }
+  const configuredLabel = clean(resolveModelLabel?.(modelId));
+  return configuredLabel || compactModelLabel(modelId);
+}
+
 function dialogueModelLabel(
   session: SessionLike | undefined | null,
   agent: AgentLike | undefined | null,
+  resolveModelLabel?: ModelLabelResolver,
 ): string {
-  return compactModelLabel(session?.dialogueModelId || agent?.llmBindings?.dialogue?.modelId);
+  return modelDisplayLabel(session?.dialogueModelId || agent?.llmBindings?.dialogue?.modelId, resolveModelLabel);
 }
 
 function modeTone(mode: string, role = "", prompt = ""): AgentDisplayTone {
@@ -209,6 +221,7 @@ export function agentDisplayInfo(
     name?: string;
     templateLabel?: string;
     templateId?: string;
+    resolveModelLabel?: ModelLabelResolver;
   },
 ): AgentDisplayInfo {
   const role = agentRoleLabel(agent, lang, fallback);
@@ -217,7 +230,7 @@ export function agentDisplayInfo(
     || clean(agent?.agentId)
     || (lang === "zh" ? "未命名 Agent" : "Unnamed Agent");
   const code = clean(agent?.agentCode);
-  const modelLabel = dialogueModelLabel(null, agent);
+  const modelLabel = dialogueModelLabel(null, agent, fallback?.resolveModelLabel);
   return {
     name,
     functionLabel: role.label,
@@ -231,15 +244,17 @@ export function sessionAgentDisplayInfo(
   session: SessionLike,
   agent: AgentLike | undefined | null,
   lang: "zh" | "en",
+  resolveModelLabel?: ModelLabelResolver,
 ): AgentDisplayInfo {
   const info = agentDisplayInfo(
     agent,
     lang,
     {
       name: clean(session.agentDisplayName) || clean(session.title) || clean(session.id),
+      resolveModelLabel,
     },
   );
-  const modelLabel = dialogueModelLabel(session, agent);
+  const modelLabel = dialogueModelLabel(session, agent, resolveModelLabel);
   return {
     ...info,
     modelLabel,
@@ -251,6 +266,7 @@ export function participantAgentDisplayInfo(
   participant: ParticipantLike,
   agent: AgentLike | undefined | null,
   lang: "zh" | "en",
+  resolveModelLabel?: ModelLabelResolver,
 ): AgentDisplayInfo {
   const teamRole = clean(participant.teamMemberPurpose) || clean(participant.teamRole);
   if (teamRole) {
@@ -258,6 +274,7 @@ export function participantAgentDisplayInfo(
     const code = clean(participant.agentCode || agent?.agentCode);
     const base = agentDisplayInfo(agent, lang, {
       name,
+      resolveModelLabel,
     });
     return {
       name: base.name,
@@ -272,6 +289,7 @@ export function participantAgentDisplayInfo(
     lang,
     {
       name: clean(agent?.displayName) || clean(participant.title) || clean(participant.participantId),
+      resolveModelLabel,
     },
   );
 }

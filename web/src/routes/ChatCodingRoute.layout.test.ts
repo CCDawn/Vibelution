@@ -643,15 +643,19 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("shows each visible agent with a functional role label, not only a person name", () => {
-    expect(routeSource).toContain("agentDisplayInfo(agent, lang)");
-    expect(routeSource).toContain("sessionAgentDisplayInfo(session, sessionAgent, lang)");
-    expect(routeSource).toContain("participantAgentDisplayInfo(participantLike, participantAgent, lang)");
+    expect(routeSource).toContain("fetchJson<ConfigSummary>(\"/api/config/public\")");
+    expect(routeSource).toContain("queryKeys.configPublic()");
+    expect(routeSource).toContain("const modelLabelsById = useMemo");
+    expect(routeSource).toContain("const resolveModelLabel = useCallback");
+    expect(routeSource).toContain("agentDisplayInfo(agent, lang, { resolveModelLabel })");
+    expect(routeSource).toContain("sessionAgentDisplayInfo(session, sessionAgent, lang, resolveModelLabel)");
+    expect(routeSource).toContain("participantAgentDisplayInfo(participantLike, participantAgent, lang, resolveModelLabel)");
     expect(routeSource).toContain("dialogueModelId: session.dialogueModelId");
     expect(routeSource).toContain("sessionDisplay.modelLabel");
     expect(routeSource).toContain("participantDisplay.modelLabel");
     expect(routeSource).toContain("display.modelLabel");
     expect(routeSource).toContain("const sessionAgent = session.agentId ? agentsById.get(session.agentId) : undefined");
-    expect(routeSource).toContain("const sessionDisplay = sessionAgentDisplayInfo(session, sessionAgent, lang)");
+    expect(routeSource).toContain("const sessionDisplay = sessionAgentDisplayInfo(session, sessionAgent, lang, resolveModelLabel)");
     expect(routeSource).toContain("const participantDisplay = groupParticipantIdentity(participant)");
     expect(routeSource).toContain("identityLabel: formatAgentIdentityWithRole");
     expect(routeSource).toContain("styles.groupMemberCopy");
@@ -833,11 +837,23 @@ describe("ChatCodingRoute layout contract", () => {
     const renameStart = routeSource.indexOf("const renameSessionMutation");
     const renameEnd = routeSource.indexOf("const updateSessionAgentMutation", renameStart);
     const renameMutationSource = routeSource.slice(renameStart, renameEnd);
+    const titleHelperStart = routeSource.indexOf("function sessionListTitle");
+    const titleHelperEnd = routeSource.indexOf("function compactAgentIdentifier", titleHelperStart);
+    const titleHelperSource = routeSource.slice(titleHelperStart, titleHelperEnd);
+    const titleHelperChildEnd = titleHelperSource.indexOf(").trim();", titleHelperSource.indexOf('if (sessionKind === "child")'));
+    const titleHelperRootSource = titleHelperSource.slice(titleHelperChildEnd + 1);
     expect(routeSource).toContain("mergeSessionDetailIntoConversations");
     expect(routeSource).toContain("renameSessionInSummaries");
     expect(routeSource).toContain("renameSessionInConversations");
     expect(routeSource).toContain("renameSessionDetail");
-    expect(routeSource).toContain('function sessionListTitle(session: Pick<SessionSummary, "id" | "title" | "taskTitle" | "resultCard">)');
+    expect(routeSource).toContain('function sessionListTitle(session: Pick<SessionSummary, "id" | "title" | "agentDisplayName" | "taskTitle" | "resultCard" | "sessionKind">)');
+    expect(titleHelperSource).toContain('if (sessionKind === "child")');
+    expect(titleHelperSource).toContain("session.taskTitle");
+    expect(titleHelperSource).toContain("session.resultCard?.title");
+    expect(titleHelperRootSource).toContain("session.title");
+    expect(titleHelperRootSource).toContain("session.agentDisplayName");
+    expect(titleHelperRootSource).not.toContain("session.taskTitle");
+    expect(titleHelperRootSource.indexOf("session.title")).toBeLessThan(titleHelperRootSource.indexOf("session.agentDisplayName"));
     expect(routeSource).toContain("title: sessionListTitle(session)");
     expect(routeSource).toContain("agentDisplayName: conversation.agentDisplayName");
     expect(routeSource).toContain("const sessionAgentMeta = sessionAgentMetaLabel(session)");
