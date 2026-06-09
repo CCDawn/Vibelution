@@ -5,6 +5,7 @@ import conversationStyles from "../components/conversation/ConversationView.modu
 import shellStoreSource from "../store/shellStore.ts?raw";
 import routeSource from "./ChatCodingRoute.tsx?raw";
 import directSessionIndexItemSource from "./DirectSessionIndexItem.tsx?raw";
+import groupSessionIndexItemsSource from "./GroupSessionIndexItems.tsx?raw";
 import routeStyles from "./ChatCodingRoute.module.css";
 
 const routeCssSource = readFileSync(new URL("./ChatCodingRoute.module.css", import.meta.url), "utf-8");
@@ -603,13 +604,13 @@ describe("ChatCodingRoute layout contract", () => {
   it("visually distinguishes direct sessions from group chats in the conversation list", () => {
     expect(routeSource).toContain("avatarInitials");
     expect(directSessionIndexItemSource).toContain("styles.conversationAvatarDirect");
-    expect(routeSource).toContain("styles.conversationAvatarGroup");
+    expect(groupSessionIndexItemsSource).toContain("styles.conversationAvatarGroup");
     expect(directSessionIndexItemSource).toContain("styles.directSessionItem");
-    expect(routeSource).toContain("styles.groupSessionItem");
+    expect(groupSessionIndexItemsSource).toContain("styles.groupSessionItem");
     expect(routeSource).toContain("navigate(`/chat?session=${encodeURIComponent(sessionId)}`, { replace: false })");
     expect(directSessionIndexItemSource).toContain("styles.conversationKindBadgeDirect");
     expect(directSessionIndexItemSource).toContain("styles.conversationKindBadgeChild");
-    expect(routeSource).toContain("styles.conversationKindBadgeGroup");
+    expect(groupSessionIndexItemsSource).toContain("styles.conversationKindBadgeGroup");
 
     expect(routeStyles.conversationAvatar).toBeTypeOf("string");
     expect(routeStyles.conversationAvatarDirect).toBeTypeOf("string");
@@ -750,19 +751,21 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("linkedTeamRoomIds");
     expect(routeSource).toContain("filteredTeams");
     expect(routeSource).toContain("filteredStandaloneGroupConversations");
-    expect(routeSource).toContain("function teamStatusLabel");
-    expect(routeSource).toContain("teamStatusLabel(team.status, lang, statusLabel)");
-    expect(routeSource).toContain("team.linkedChatRoom?.title");
-    expect(routeSource).toContain("team.members ?? []");
-    expect(routeSource).toContain("team.teamCategory");
-    expect(routeSource).toContain("team.teamKind");
+    expect(routeSource).toContain("TeamConversationIndexItem");
+    expect(routeSource).toContain("GroupConversationIndexItem");
+    expect(groupSessionIndexItemsSource).toContain("export function teamStatusLabel");
+    expect(groupSessionIndexItemsSource).toContain("teamStatusLabel(team.status, lang, statusLabel)");
+    expect(groupSessionIndexItemsSource).toContain("team.linkedChatRoom?.title");
+    expect(groupSessionIndexItemsSource).toContain("team.members ?? []");
+    expect(groupSessionIndexItemsSource).toContain("team.teamCategory");
+    expect(groupSessionIndexItemsSource).toContain("team.teamKind");
     expect(routeSource).toContain("team.teamSource");
     expect(routeSource).toContain("team.teamTemplateId");
-    expect(routeSource).toContain("群成员");
-    expect(routeSource).toContain("团队分类");
-    expect(routeSource).toContain("团队群聊");
-    expect(routeSource).toContain("待绑定");
-    expect(routeSource).toContain("styles.teamTreeLabelRow");
+    expect(groupSessionIndexItemsSource).toContain("群成员");
+    expect(groupSessionIndexItemsSource).toContain("团队分类");
+    expect(groupSessionIndexItemsSource).toContain("团队群聊");
+    expect(groupSessionIndexItemsSource).toContain("待绑定");
+    expect(groupSessionIndexItemsSource).toContain("styles.teamTreeLabelRow");
     expect(routeSource).toContain("`/teams?team=${encodeURIComponent(team.teamId)}`");
     expect(routeSource).toContain("未归属群聊");
     expect(routeSource).toContain("toggleConversationGroup(\"teams\")");
@@ -772,8 +775,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("conversationGroupLabel(\"teams\"");
     expect(routeSource).toContain("conversationGroupLabel(\"standaloneGroups\"");
     expect(routeSource).toContain("styles.teamTreeGroup");
-    expect(routeSource).toContain("styles.teamTreeChildren");
-    expect(routeSource).toContain("styles.teamTreeChild");
+    expect(groupSessionIndexItemsSource).toContain("styles.teamTreeChildren");
+    expect(groupSessionIndexItemsSource).toContain("styles.teamTreeChild");
 
     expect(routeStyles.conversationGroupHeader).toBeTypeOf("string");
     expect(routeStyles.teamTreeGroup).toBeTypeOf("string");
