@@ -3217,9 +3217,10 @@ class TestLocalProviderBootstrap:
                 "llm.profiles.primary.model": "global-primary-model",
             },
         ).config
+        provider_id = config.llm.get_profile(profile_id="primary").provider_id
         config.llm.model_library = {
             "supervised-dialogue-model-id": {
-                "provider_id": "default",
+                "provider_id": provider_id,
                 "model": "supervised-dialogue-model",
                 "tool_calling_mode": "auto",
             },
@@ -3253,6 +3254,10 @@ class TestLocalProviderBootstrap:
 
         assert agent.runtime_agent_binding["llmBindings"]["dialogue"]["modelId"] == "supervised-dialogue-model-id"
         assert agent.config.llm.get_profile(profile_id="primary").model == "supervised-dialogue-model"
+        provider = agent.config.llm.get_provider(role="primary")
+        assert provider.provider_id == provider_id
+        assert provider.kind == "local"
+        assert provider.requires_api_key is False
         assert agent._runtime_agent_llm_resolution.agent_id == "agent-supervised-worktree"
 
     def test_runtime_agent_llm_slot_binding_failure_is_fatal(self, monkeypatch):
