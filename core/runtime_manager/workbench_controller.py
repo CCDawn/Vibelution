@@ -126,6 +126,7 @@ def _listening_pid_for_port_windows(port: int) -> int:
             text=True,
             timeout=2.0,
             creationflags=_creation_flags(),
+            startupinfo=_hidden_startup_info(),
             check=False,
         )
     except (OSError, subprocess.TimeoutExpired):
@@ -344,11 +345,26 @@ def observe_workbench() -> dict[str, Any]:
     }
 
 
+def _creation_flag_names() -> tuple[str, ...]:
+    if os.name != "nt":
+        return ()
+    return ("CREATE_NEW_PROCESS_GROUP", "CREATE_NO_WINDOW")
+
+
 def _creation_flags() -> int:
     flags = 0
-    for name in ("CREATE_NEW_PROCESS_GROUP", "CREATE_NO_WINDOW"):
+    for name in _creation_flag_names():
         flags |= int(getattr(subprocess, name, 0))
     return flags
+
+
+def _hidden_startup_info() -> subprocess.STARTUPINFO | None:
+    if os.name != "nt" or not hasattr(subprocess, "STARTUPINFO"):
+        return None
+    startupinfo = subprocess.STARTUPINFO()
+    startupinfo.dwFlags |= int(getattr(subprocess, "STARTF_USESHOWWINDOW", 0))
+    startupinfo.wShowWindow = int(getattr(subprocess, "SW_HIDE", 0))
+    return startupinfo
 
 
 def _read_capture_file(path: str) -> str:
@@ -415,6 +431,7 @@ def run_launcher_action(action: str, *, no_browser: bool = False) -> subprocess.
                     stdout=stdout_handle,
                     stderr=stderr_handle,
                     creationflags=_creation_flags(),
+                    startupinfo=_hidden_startup_info(),
                     env=env,
                     check=False,
                 )
@@ -474,6 +491,9 @@ def _record_launcher_action_event(
         "internalLauncherEnvSet": str(env.get(INTERNAL_LAUNCHER_ENV) or "") == INTERNAL_LAUNCHER_VALUE,
         "protectedProcessIdsSet": bool(str(env.get("VIBELUTION_PROTECTED_PROCESS_IDS") or "").strip()),
         "portSet": bool(str(env.get("VIBELUTION_PORT") or "").strip()),
+        "consoleWindowSuppressed": os.name == "nt",
+        "creationFlagNames": list(_creation_flag_names()),
+        "hiddenStartupInfo": os.name == "nt" and hasattr(subprocess, "STARTUPINFO"),
     }
     if return_code is not None:
         payload["returnCode"] = int(return_code)

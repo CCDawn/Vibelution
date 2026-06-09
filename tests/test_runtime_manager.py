@@ -3295,8 +3295,13 @@ def test_run_launcher_action_passes_configured_port_to_launcher_env(monkeypatch)
     assert captured["kwargs"]["env"]["VIBELUTION_PORT"] == "9101"
 
 
-def test_run_launcher_action_uses_no_window_flags_without_detaching_powershell(monkeypatch):
+def test_run_launcher_action_hides_powershell_adapter_without_detaching(monkeypatch):
     captured = {}
+
+    class DummyStartupInfo:
+        def __init__(self):
+            self.dwFlags = 0
+            self.wShowWindow = -1
 
     def fake_run(*args, **kwargs):
         captured["kwargs"] = kwargs
@@ -3304,9 +3309,13 @@ def test_run_launcher_action_uses_no_window_flags_without_detaching_powershell(m
         kwargs["stdout"].flush()
         return subprocess.CompletedProcess(args=args[0], returncode=0)
 
+    monkeypatch.setattr(workbench_controller.os, "name", "nt", raising=False)
     monkeypatch.setattr(workbench_controller.subprocess, "DETACHED_PROCESS", 0x00000008, raising=False)
     monkeypatch.setattr(workbench_controller.subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200, raising=False)
     monkeypatch.setattr(workbench_controller.subprocess, "CREATE_NO_WINDOW", 0x08000000, raising=False)
+    monkeypatch.setattr(workbench_controller.subprocess, "STARTF_USESHOWWINDOW", 0x00000001, raising=False)
+    monkeypatch.setattr(workbench_controller.subprocess, "SW_HIDE", 0, raising=False)
+    monkeypatch.setattr(workbench_controller.subprocess, "STARTUPINFO", DummyStartupInfo, raising=False)
     monkeypatch.setattr(workbench_controller.subprocess, "run", fake_run)
 
     result = workbench_controller.run_launcher_action("internal-start")
@@ -3315,6 +3324,10 @@ def test_run_launcher_action_uses_no_window_flags_without_detaching_powershell(m
     assert not captured["kwargs"]["creationflags"] & 0x00000008
     assert captured["kwargs"]["creationflags"] & 0x00000200
     assert captured["kwargs"]["creationflags"] & 0x08000000
+    startupinfo = captured["kwargs"]["startupinfo"]
+    assert isinstance(startupinfo, DummyStartupInfo)
+    assert startupinfo.dwFlags & 0x00000001
+    assert startupinfo.wShowWindow == 0
 
 
 def test_handle_open_workbench_restarts_headless_session(monkeypatch):
