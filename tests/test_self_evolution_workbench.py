@@ -270,8 +270,35 @@ def test_build_self_evolution_run_prompt_uses_advisory_and_fitness(monkeypatch):
 
 def test_build_self_evolution_snapshot_returns_structured_payload(monkeypatch):
     monkeypatch.setattr(
-        "core.evaluation.self_evolution_workbench.get_git_status_summary_tool",
-        lambda limit=5: f"status-limit={limit}",
+        "core.evaluation.self_evolution_workbench.get_worktree_status_bundle_tool",
+        lambda limit=5: json.dumps(
+            {
+                "git_status_summary": f"status-limit={limit}",
+                "worktree_snapshot": json.dumps(
+                    {
+                        "snapshot_id": "snap-7",
+                        "created_at": "2026-05-01T00:00:00",
+                        "base_rev": "abc",
+                        "has_staged": False,
+                        "has_unstaged": True,
+                        "has_untracked": False,
+                        "available": True,
+                        "files": [
+                            {
+                                "path": "agent.py",
+                                "status": "M",
+                                "staged": False,
+                                "unstaged": True,
+                                "untracked": False,
+                                "deleted": False,
+                            }
+                        ],
+                    },
+                    ensure_ascii=False,
+                ),
+            },
+            ensure_ascii=False,
+        ),
     )
     monkeypatch.setattr(
         "core.evaluation.self_evolution_workbench.get_recent_changes_tool",
@@ -283,31 +310,6 @@ def test_build_self_evolution_snapshot_returns_structured_payload(monkeypatch):
             '{"transactions":{"opened":1,"closed":1,"successful":1,"failed":0,"success_rate":1.0,"recent":[]},'
             '"validation":{"passed":1,"failed":0,"pass_rate":1.0},'
             '"mutations":{"recorded":1,"successful":1,"failed":0,"blocked":0}}'
-        ),
-    )
-    monkeypatch.setattr(
-        "core.evaluation.self_evolution_workbench.explain_current_worktree_tool",
-        lambda: json.dumps(
-            {
-                "snapshot_id": "snap-7",
-                "created_at": "2026-05-01T00:00:00",
-                "base_rev": "abc",
-                "has_staged": False,
-                "has_unstaged": True,
-                "has_untracked": False,
-                "available": True,
-                "files": [
-                    {
-                        "path": "agent.py",
-                        "status": "M",
-                        "staged": False,
-                        "unstaged": True,
-                        "untracked": False,
-                        "deleted": False,
-                    }
-                ],
-            },
-            ensure_ascii=False,
         ),
     )
     monkeypatch.setattr(
