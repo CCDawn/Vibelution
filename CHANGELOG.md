@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.9 - 2026-06-09
+
+- Extended the Launcher runtime-manager restart wait window so guarded rebuild/close/open transactions can finish without the outer `-Action restart` call timing out near completion.
+- Added Launcher regression coverage for the explicit `restart_workbench` wait timeout and forwarded command flags.
+
 ## 1.0.8 - 2026-06-08
 
 - Coalesced duplicate Launcher close requests so repeated stop clicks join the in-flight close instead of queueing extra shutdowns.

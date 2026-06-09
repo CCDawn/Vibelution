@@ -2411,22 +2411,30 @@ function Set-LauncherWindowTitle {}
 
 Invoke-RuntimeManagerClient -Mode "command" -CommandType "open_workbench" -Reason "launcher_start" -ForwardNoBrowser
 Invoke-RuntimeManagerClient -Mode "command" -CommandType "close_workbench" -Reason "launcher_stop"
+Invoke-RuntimeManagerClient -Mode "command" -CommandType "restart_workbench" -Reason "launcher_restart"
 Invoke-RuntimeManagerClient -Mode "status"
 
 $openArgs = @($script:calls[0].argumentList)
 $closeArgs = @($script:calls[1].argumentList)
-$statusArgs = @($script:calls[2].argumentList)
+$restartArgs = @($script:calls[2].argumentList)
+$statusArgs = @($script:calls[3].argumentList)
 
 if ($script:calls[0].commandPath -ne "pythonw-test") { throw "open_workbench did not use the no-console runtime." }
 if ($script:calls[1].commandPath -ne "pythonw-test") { throw "close_workbench did not use the no-console runtime." }
-if ($script:calls[2].commandPath -ne "pythonw-status") { throw "status did not use the read-only no-console runtime." }
+if ($script:calls[2].commandPath -ne "pythonw-test") { throw "restart_workbench did not use the no-console runtime." }
+if ($script:calls[3].commandPath -ne "pythonw-status") { throw "status did not use the read-only no-console runtime." }
 if ($openArgs -notcontains "--no-browser") { throw "open_workbench did not forward --no-browser." }
 if ($openArgs -contains "--stop-manager") { throw "open_workbench forwarded --stop-manager unexpectedly." }
 if ($closeArgs -contains "--stop-manager") { throw "close_workbench should stop the workbench without stopping the Launcher control manager." }
 if ($closeArgs -contains "--no-browser") { throw "close_workbench forwarded --no-browser unexpectedly." }
+if ($restartArgs -contains "--no-browser") { throw "restart_workbench forwarded --no-browser unexpectedly." }
+if ($restartArgs -contains "--stop-manager") { throw "restart_workbench forwarded --stop-manager unexpectedly." }
+if ($restartArgs -notcontains "--timeout") { throw "restart_workbench did not pass an explicit wait timeout." }
+$restartTimeoutIndex = [array]::IndexOf($restartArgs, "--timeout")
+if ($restartTimeoutIndex -lt 0 -or $restartArgs[$restartTimeoutIndex + 1] -ne "180") { throw "restart_workbench should wait 180 seconds for guarded restart completion." }
 if ($statusArgs -contains "command") { throw "status used command mode unexpectedly." }
 if ($statusArgs -notcontains "status") { throw "status did not invoke runtime manager status." }
-if ($script:dependencyCalls -ne 2) { throw "runtime manager client should repair dependencies only for mutating commands." }
+if ($script:dependencyCalls -ne 3) { throw "runtime manager client should repair dependencies only for mutating commands." }
 Write-Output "ok"
 """,
     )

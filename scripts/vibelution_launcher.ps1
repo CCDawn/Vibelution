@@ -525,7 +525,7 @@ function Invoke-RuntimeManagerClient {
     $timeoutSeconds = switch ($CommandType) {
         "open_workbench" { 90 }
         "close_workbench" { 60 }
-        "restart_workbench" { 120 }
+        "restart_workbench" { 180 }
         default { 45 }
     }
 
