@@ -22,6 +22,7 @@ import {
   modelLibraryIdFromParts,
   mergeEditableConfigView,
   MODEL_CONTRACT_OPTIONS,
+  MODEL_PROMPT_CACHE_MODE_OPTIONS,
   MODEL_TOOL_CALLING_MODE_OPTIONS,
   MODEL_TRANSPORT_OPTIONS,
   PROVIDER_KIND_OPTIONS,
@@ -291,6 +292,12 @@ describe("configRouteLogic", () => {
       "responses_agent",
     ]);
     expect(MODEL_TOOL_CALLING_MODE_OPTIONS.map((item) => item.value)).toEqual(["disabled", "auto", "parallel"]);
+    expect(MODEL_PROMPT_CACHE_MODE_OPTIONS.map((item) => item.value)).toEqual([
+      "automatic",
+      "explicit_cache_control",
+      "disabled",
+      "unsupported",
+    ]);
     expect(PROVIDER_COMPAT_MODE_OPTIONS.map((item) => item.value)).toEqual(["openai", "openai_compatible", "native"]);
   });
 

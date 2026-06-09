@@ -123,6 +123,72 @@ def test_current_prompt_cache_modes_follow_model_library_config():
     assert profile.prompt_cache.mode == "automatic"
 
 
+def test_openai_compatible_model_without_prompt_cache_defaults_to_automatic():
+    public_config = load_public_config()
+    public_config["llm"].setdefault("model_library", {})["gpt_5_5_gpt_5_5"] = {
+        "model": "gpt-5.5",
+        "label": "gpt-5.5-share",
+        "transport": "chat_completions",
+        "contract": "tool_chat",
+        "strict_compatibility": False,
+        "temperature": 0.7,
+        "max_output_tokens": 128000,
+        "timeout": 120,
+        "connect_timeout": 20,
+        "streaming": True,
+        "tool_calling_mode": "auto",
+        "discovery_enabled": True,
+        "provider": {
+            "kind": "openai_compatible",
+            "api_key_env": "OPENAI_API_KEY",
+            "base_url": "https://share-api.com/v1",
+            "compat_mode": "openai",
+            "requires_api_key": True,
+            "context_window": 1050000,
+        },
+    }
+    public_config["llm"]["profiles"]["primary"] = {
+        "model_ref": "gpt_5_5_gpt_5_5",
+        "overrides": {},
+    }
+
+    effective = build_effective_config(public_config)
+    profile = effective.llm.get_profile("primary")
+
+    assert public_config["llm"]["model_library"]["gpt_5_5_gpt_5_5"].get("prompt_cache") is None
+    assert profile.model == "gpt-5.5"
+    assert profile.prompt_cache.mode == "automatic"
+
+
+def test_deepseek_model_without_prompt_cache_stays_disabled_by_default():
+    public_config = load_public_config()
+    public_config["llm"].setdefault("model_library", {})["deepseek_prompt_cache_probe"] = {
+        "model": "deepseek-v4-pro",
+        "label": "DeepSeek V4 Pro",
+        "transport": "chat_completions",
+        "contract": "reasoning_chat",
+        "reasoning_state_field": "reasoning_content",
+        "provider": {
+            "kind": "deepseek",
+            "api_key_env": "DEEPSEEK_API_KEY",
+            "base_url": "https://api.deepseek.com",
+            "compat_mode": "openai",
+            "requires_api_key": True,
+            "context_window": 1000000,
+        },
+    }
+    public_config["llm"]["profiles"]["primary"] = {
+        "model_ref": "deepseek_prompt_cache_probe",
+        "overrides": {},
+    }
+
+    effective = build_effective_config(public_config)
+    profile = effective.llm.get_profile("primary")
+
+    assert profile.model == "deepseek-v4-pro"
+    assert profile.prompt_cache.mode == "disabled"
+
+
 def test_dashscope_qwen_preset_uses_explicit_cache_control():
     model = LLM_MODEL_PRESETS["dashscope_qwen3_6_plus"]["model"]
 

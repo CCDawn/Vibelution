@@ -57,6 +57,7 @@ import {
   pickEditableConfigView,
   canDiscoverModelsForProvider,
   MODEL_CONTRACT_OPTIONS,
+  MODEL_PROMPT_CACHE_MODE_OPTIONS,
   MODEL_TOOL_CALLING_MODE_OPTIONS,
   MODEL_TRANSPORT_OPTIONS,
   PROVIDER_KIND_OPTIONS,
@@ -99,6 +100,8 @@ type ModelDetailsDraft = {
   connect_timeout: string;
   streaming: boolean;
   tool_calling_mode: string;
+  prompt_cache_mode: string;
+  prompt_cache_configured: boolean;
   discovery_enabled: boolean;
   supports_image_input: "unknown" | "supported" | "unsupported";
 };
@@ -426,6 +429,7 @@ export const CONFIG_COPY = {
     contract: "交互契约",
     reasoningStateField: "推理状态字段",
     toolCallingMode: "工具调用",
+    promptCacheMode: "Prompt cache",
     strictCompatibility: "严格兼容",
     streaming: "流式",
     discoveryEnabled: "发现能力",
@@ -645,6 +649,7 @@ export const CONFIG_COPY = {
     contract: "Contract",
     reasoningStateField: "Reasoning state field",
     toolCallingMode: "Tool calling",
+    promptCacheMode: "Prompt cache",
     strictCompatibility: "Strict compatibility",
     streaming: "Streaming",
     discoveryEnabled: "Discovery enabled",
@@ -756,6 +761,8 @@ function emptyModelDetailsDraft(): ModelDetailsDraft {
     connect_timeout: "",
     streaming: true,
     tool_calling_mode: "auto",
+    prompt_cache_mode: "disabled",
+    prompt_cache_configured: false,
     discovery_enabled: true,
     supports_image_input: "unknown",
   };
@@ -879,6 +886,7 @@ function buildProviderDraft(providerInput: Record<string, unknown>): ProviderDra
 }
 
 function buildModelDetailsDraft(detailsInput: Record<string, unknown>): ModelDetailsDraft {
+  const promptCache = asRecord(detailsInput.prompt_cache);
   const supportsImageInput =
     typeof detailsInput.supports_image_input === "boolean"
       ? detailsInput.supports_image_input
@@ -898,6 +906,8 @@ function buildModelDetailsDraft(detailsInput: Record<string, unknown>): ModelDet
     connect_timeout: getString(detailsInput.connect_timeout),
     streaming: getBoolean(detailsInput.streaming, true),
     tool_calling_mode: getString(detailsInput.tool_calling_mode) || "auto",
+    prompt_cache_mode: getString(promptCache.mode) || "disabled",
+    prompt_cache_configured: Boolean(promptCache.mode),
     discovery_enabled: getBoolean(detailsInput.discovery_enabled, true),
     supports_image_input: supportsImageInput,
   };
@@ -969,6 +979,9 @@ function buildModelDetailsPayload(draft: ModelDetailsDraft): Record<string, unkn
   }
   if (draft.tool_calling_mode.trim()) {
     payload.tool_calling_mode = draft.tool_calling_mode.trim();
+  }
+  if (draft.prompt_cache_configured || draft.prompt_cache_mode.trim() !== "disabled") {
+    payload.prompt_cache = { mode: draft.prompt_cache_mode.trim() };
   }
   if (draft.temperature.trim()) {
     payload.temperature = Number(draft.temperature.trim());
@@ -3656,6 +3669,28 @@ export function ConfigRoute() {
                         }
                       >
                         {MODEL_TOOL_CALLING_MODE_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className={styles.field}>
+                      <span>{copy.promptCacheMode}</span>
+                      <select
+                        value={modelEditor.details.prompt_cache_mode}
+                        onChange={(event) =>
+                          setModelEditor((current) => ({
+                            ...current,
+                            details: {
+                              ...current.details,
+                              prompt_cache_mode: event.target.value,
+                              prompt_cache_configured: true,
+                            },
+                          }))
+                        }
+                      >
+                        {MODEL_PROMPT_CACHE_MODE_OPTIONS.map((option) => (
                           <option key={option.value} value={option.value}>
                             {option.label}
                           </option>
