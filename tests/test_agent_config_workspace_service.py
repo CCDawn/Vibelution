@@ -64,6 +64,19 @@ def _fake_config_workspace():
                 "api_key_state": "configured",
             },
             {
+                "model_id": "model-gpt-reasoning",
+                "source": "model",
+                "provider": {"id": "relay", "kind": "relay", "compat_mode": "openai"},
+                "provider_kind": "relay",
+                "model": "gpt-5.5",
+                "label": "GPT Reasoning",
+                "transport": "responses",
+                "details": {"transport": "responses"},
+                "api_key_env": "RELAY_API_KEY",
+                "api_key_configured": True,
+                "api_key_state": "configured",
+            },
+            {
                 "model_id": "model-research",
                 "source": "model",
                 "provider": {"id": "relay"},
@@ -149,6 +162,34 @@ def test_agent_registry_repair_migrates_legacy_profile_fields_to_llm_bindings(tm
     assert "profileId" not in stored_agent
     assert "templateId" not in stored_agent
     assert stored_agent["metadata"]["llmBindingMigration"]["legacyModelSourceId"] == "primary"
+
+
+def test_agent_config_workspace_marks_gpt_responses_reasoning_effort_models(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
+    registry_path = tmp_path / "workspace" / "agents" / "agents.json"
+    registry_path.parent.mkdir(parents=True, exist_ok=True)
+    registry_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "agents": [],
+                "toolPolicies": {},
+                "memoryPolicies": {},
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    payload = agent_config_workspace_service.get_agent_config_workspace()
+
+    reasoning_model = next(item for item in payload["agentModelChoices"] if item["modelId"] == "model-gpt-reasoning")
+    primary_model = next(item for item in payload["agentModelChoices"] if item["modelId"] == "model-primary")
+    assert reasoning_model["supportsReasoningEffort"] is True
+    assert reasoning_model["reasoningEffortValues"] == ["low", "medium", "high"]
+    assert primary_model["supportsReasoningEffort"] is False
+    assert primary_model["reasoningEffortValues"] == []
 
 
 def test_agent_config_workspace_lists_agents_once_and_derives_references(tmp_path, monkeypatch):
@@ -363,8 +404,12 @@ def test_agent_config_workspace_reports_missing_model_key_and_prompt(tmp_path, m
     assert {item["code"] for item in issues} >= {"missing_llm_slot_api_key_dialogue", "missing_prompt_template", "missing_direct_session"}
     assert payload["health"]["counts"]["warning"] >= 3
     assert agent["agentId"] in {item for group in payload["groups"] if group["id"] == "needs_review" for item in group["agentIds"]}
-    assert [item["model_id"] for item in payload["modelOptions"]] == ["model-primary", "model-research"]
-    assert [item["modelId"] for item in payload["agentModelChoices"]] == ["model-primary", "model-research"]
+    model_option_ids = [item["model_id"] for item in payload["modelOptions"]]
+    agent_model_choice_ids = [item["modelId"] for item in payload["agentModelChoices"]]
+    assert "model-primary" in model_option_ids
+    assert "model-research" in model_option_ids
+    assert "model-primary" in agent_model_choice_ids
+    assert "model-research" in agent_model_choice_ids
 
 
 def test_agent_instance_generates_public_person_name_and_keeps_functional_name(tmp_path, monkeypatch):

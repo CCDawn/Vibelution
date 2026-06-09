@@ -65,6 +65,7 @@ type FilterId = string;
 type AgentConfigDraft = {
   displayName: string;
   llmBindings: AgentLlmBindings;
+  reasoningEffortBySlot: Record<string, string>;
   promptTemplateId: string;
   toolPolicyId: string;
   memoryPolicyId: string;
@@ -568,6 +569,25 @@ function agentLlmSlots(workspace: AgentConfigWorkspace | undefined): AgentLlmSlo
   return workspace?.agentLlmSlots?.length ? workspace.agentLlmSlots : FALLBACK_AGENT_LLM_SLOTS;
 }
 
+const AGENT_REASONING_EFFORT_VALUES = ["low", "medium", "high"] as const;
+
+function normalizeAgentReasoningEffort(value: unknown) {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  return AGENT_REASONING_EFFORT_VALUES.includes(normalized as typeof AGENT_REASONING_EFFORT_VALUES[number]) ? normalized : "";
+}
+
+function agentModelSupportsReasoningEffort(model: AgentModelChoice | null | undefined) {
+  return Boolean((model as Record<string, unknown> | null | undefined)?.supportsReasoningEffort);
+}
+
+function agentModelById(models: AgentModelChoice[] | null | undefined, modelId: string) {
+  const normalizedModelId = String(modelId || "").trim();
+  if (!normalizedModelId) {
+    return undefined;
+  }
+  return (models ?? []).find((model) => String(model.modelId || "").trim() === normalizedModelId);
+}
+
 function normalizeAgentLlmBindings(bindings: AgentLlmBindings | null | undefined): AgentLlmBindings {
   return Object.fromEntries(
     Object.entries(bindings ?? {})
@@ -605,6 +625,67 @@ function sameAgentLlmBindings(left: AgentLlmBindings | null | undefined, right: 
     const slot = key as keyof AgentLlmBindings;
     return String(normalizedLeft[slot]?.modelId ?? "") === String(normalizedRight[slot]?.modelId ?? "");
   });
+}
+
+function normalizeAgentReasoningEffortBySlot(value: unknown): Record<string, string> {
+  if (!value || typeof value !== "object") {
+    return {};
+  }
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .map(([slot, effort]) => [String(slot || "").trim(), normalizeAgentReasoningEffort(effort)])
+      .filter(([slot, effort]) => slot && effort),
+  );
+}
+
+function agentReasoningEffortBySlot(agent: AgentConfigWorkspaceAgent | null | undefined): Record<string, string> {
+  const metadata = agent?.metadata && typeof agent.metadata === "object"
+    ? agent.metadata as Record<string, unknown>
+    : {};
+  return normalizeAgentReasoningEffortBySlot(metadata.llmReasoningEffort);
+}
+
+function pruneAgentReasoningEffortBySlot(
+  efforts: Record<string, string>,
+  bindings: AgentLlmBindings,
+  models: AgentModelChoice[] | null | undefined,
+) {
+  const normalizedBindings = normalizeAgentLlmBindings(bindings);
+  return Object.fromEntries(
+    Object.entries(efforts)
+      .map(([slot, effort]) => {
+        const slotKey = slot as keyof AgentLlmBindings;
+        const modelId = String(normalizedBindings[slotKey]?.modelId || "").trim();
+        const model = agentModelById(models, modelId);
+        return [slot, agentModelSupportsReasoningEffort(model) ? normalizeAgentReasoningEffort(effort) : ""];
+      })
+      .filter(([slot, effort]) => slot && effort),
+  );
+}
+
+function updateAgentReasoningEffortBySlot(efforts: Record<string, string>, slot: string, effort: string) {
+  const next = { ...normalizeAgentReasoningEffortBySlot(efforts) };
+  const normalizedEffort = normalizeAgentReasoningEffort(effort);
+  if (normalizedEffort) {
+    next[slot] = normalizedEffort;
+  } else {
+    delete next[slot];
+  }
+  return next;
+}
+
+function sameAgentReasoningEffortBySlot(left: Record<string, string>, right: Record<string, string>) {
+  const normalizedLeft = normalizeAgentReasoningEffortBySlot(left);
+  const normalizedRight = normalizeAgentReasoningEffortBySlot(right);
+  const keys = Array.from(new Set([...Object.keys(normalizedLeft), ...Object.keys(normalizedRight)])).sort();
+  return keys.every((key) => normalizedLeft[key] === normalizedRight[key]);
+}
+
+function agentMetadataWithReasoningEffort(draft: AgentConfigDraft, models: AgentModelChoice[] | null | undefined) {
+  const metadata: Record<string, unknown> = {};
+  const pruned = pruneAgentReasoningEffortBySlot(draft.reasoningEffortBySlot, draft.llmBindings, models);
+  metadata.llmReasoningEffort = pruned;
+  return metadata;
 }
 
 function issueTone(issues: AgentConfigHealthIssue[]) {
@@ -1201,6 +1282,7 @@ function draftFromAgent(agent: AgentConfigWorkspaceAgent | null | undefined): Ag
   return {
     displayName: agent?.displayName ?? "",
     llmBindings: normalizeAgentLlmBindings(agent?.llmBindings),
+    reasoningEffortBySlot: agentReasoningEffortBySlot(agent),
     promptTemplateId: agent?.promptTemplateId ?? "",
     toolPolicyId: agent?.toolPolicyId ?? "",
     memoryPolicyId: agent?.memoryPolicyId ?? "",
@@ -1216,6 +1298,7 @@ function draftEqualsAgent(draft: AgentConfigDraft, agent: AgentConfigWorkspaceAg
   return (
     draft.displayName === base.displayName
     && sameAgentLlmBindings(draft.llmBindings, base.llmBindings)
+    && sameAgentReasoningEffortBySlot(draft.reasoningEffortBySlot, base.reasoningEffortBySlot)
     && draft.promptTemplateId === base.promptTemplateId
     && draft.toolPolicyId === base.toolPolicyId
     && draft.memoryPolicyId === base.memoryPolicyId
@@ -1601,6 +1684,7 @@ function configDraftEqualsDraft(left: AgentConfigDraft, right: AgentConfigDraft)
   return (
     left.displayName === right.displayName
     && sameAgentLlmBindings(left.llmBindings, right.llmBindings)
+    && sameAgentReasoningEffortBySlot(left.reasoningEffortBySlot, right.reasoningEffortBySlot)
     && left.promptTemplateId === right.promptTemplateId
     && left.toolPolicyId === right.toolPolicyId
     && left.memoryPolicyId === right.memoryPolicyId
@@ -2445,6 +2529,11 @@ function agentsRouteCopy(lang: "zh" | "en") {
         requiredSlot: "必填",
         optionalSlot: "可选",
         inheritDialogueModel: "未单独指定",
+        reasoningEffort: "思考强度",
+        reasoningEffortDefault: "默认",
+        reasoningEffortLow: "低",
+        reasoningEffortMedium: "中",
+        reasoningEffortHigh: "高",
         prompt: "提示词",
         tools: "工具能力",
         memory: "记忆设置",
@@ -2805,6 +2894,11 @@ function agentsRouteCopy(lang: "zh" | "en") {
         requiredSlot: "Required",
         optionalSlot: "Optional",
         inheritDialogueModel: "Not separately assigned",
+        reasoningEffort: "Reasoning effort",
+        reasoningEffortDefault: "Default",
+        reasoningEffortLow: "Low",
+        reasoningEffortMedium: "Medium",
+        reasoningEffortHigh: "High",
         prompt: "Prompt",
         tools: "Tool policy",
         memory: "Memory policy",
@@ -3395,7 +3489,7 @@ export function AgentsRoute() {
   });
 
   const updateAgentMutation = useMutation({
-    mutationFn: (payload: { agentId: string; draft: AgentConfigDraft }) =>
+    mutationFn: (payload: { agentId: string; agent: AgentConfigWorkspaceAgent; draft: AgentConfigDraft; modelChoices: AgentModelChoice[] }) =>
       fetchJson<AgentConfigWorkspaceAgent>(`/api/agents/${encodeURIComponent(payload.agentId)}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -3405,6 +3499,7 @@ export function AgentsRoute() {
           promptTemplateId: payload.draft.promptTemplateId,
           toolPolicyId: payload.draft.toolPolicyId,
           memoryPolicyId: payload.draft.memoryPolicyId,
+          metadata: agentMetadataWithReasoningEffort(payload.draft, payload.modelChoices),
           status: payload.draft.status,
         }),
       }),
@@ -4041,7 +4136,12 @@ export function AgentsRoute() {
     if (!selectedAgent || !canSaveConfig || selectedAgentConfigPending) {
       return;
     }
-    updateAgentMutation.mutate({ agentId: selectedAgent.agentId, draft: configDraft });
+    updateAgentMutation.mutate({
+      agentId: selectedAgent.agentId,
+      agent: selectedAgent,
+      draft: configDraft,
+      modelChoices: workspace?.agentModelChoices ?? [],
+    });
   };
 
   const saveModeMembership = () => {
@@ -5231,6 +5331,8 @@ export function AgentsRoute() {
                     <div className={styles.llmSlotGrid}>
                       {llmSlots.map((slot) => {
                         const selectedSlotModelId = agentLlmSlotModelId(configDraft.llmBindings, slot);
+                        const selectedSlotModel = agentModelById(workspace?.agentModelChoices ?? [], selectedSlotModelId);
+                        const supportsReasoningEffort = agentModelSupportsReasoningEffort(selectedSlotModel);
                         const slotChoices = buildAgentSlotModelChoicesWithCurrent(
                           workspace?.agentModelChoices ?? [],
                           slot,
@@ -5245,9 +5347,17 @@ export function AgentsRoute() {
                             </span>
                             <select
                               value={selectedSlotModelId}
-                              onChange={(event) => updateDraft({
-                                llmBindings: updateAgentLlmSlotBinding(configDraft.llmBindings, slot, event.target.value),
-                              })}
+                              onChange={(event) => {
+                                const nextBindings = updateAgentLlmSlotBinding(configDraft.llmBindings, slot, event.target.value);
+                                updateDraft({
+                                  llmBindings: nextBindings,
+                                  reasoningEffortBySlot: pruneAgentReasoningEffortBySlot(
+                                    configDraft.reasoningEffortBySlot,
+                                    nextBindings,
+                                    workspace?.agentModelChoices ?? [],
+                                  ),
+                                });
+                              }}
                             >
                               {!slot.required ? <option value="">{copy.inheritDialogueModel}</option> : null}
                               {slotChoices.map((model) => (
@@ -5256,6 +5366,24 @@ export function AgentsRoute() {
                                 </option>
                               ))}
                             </select>
+                            {supportsReasoningEffort ? (
+                              <select
+                                value={normalizeAgentReasoningEffort(configDraft.reasoningEffortBySlot[slot.slot])}
+                                aria-label={`${slot.label} ${copy.reasoningEffort}`}
+                                onChange={(event) => updateDraft({
+                                  reasoningEffortBySlot: updateAgentReasoningEffortBySlot(
+                                    configDraft.reasoningEffortBySlot,
+                                    slot.slot,
+                                    event.target.value,
+                                  ),
+                                })}
+                              >
+                                <option value="">{copy.reasoningEffort}: {copy.reasoningEffortDefault}</option>
+                                <option value="low">{copy.reasoningEffort}: {copy.reasoningEffortLow}</option>
+                                <option value="medium">{copy.reasoningEffort}: {copy.reasoningEffortMedium}</option>
+                                <option value="high">{copy.reasoningEffort}: {copy.reasoningEffortHigh}</option>
+                              </select>
+                            ) : null}
                             <small>{slot.description}</small>
                           </label>
                         );

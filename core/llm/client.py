@@ -722,16 +722,23 @@ def _safe_payload_route_summary(payload: Dict[str, Any], profile: Any, provider:
 
 def _safe_payload_thinking_summary(payload: Dict[str, Any]) -> Dict[str, Any]:
     thinking = payload.get("thinking")
+    reasoning = payload.get("reasoning")
+    reasoning_summary = {
+        "reasoningEffortRequested": isinstance(reasoning, dict) and bool(str(reasoning.get("effort") or "").strip()),
+        "reasoningEffort": str(reasoning.get("effort") or "").strip() if isinstance(reasoning, dict) else "",
+    }
     if not isinstance(thinking, dict):
         return {
             "thinkingRequested": False,
             "thinkingType": "",
             "thinkingDisplay": "",
+            **reasoning_summary,
         }
     return {
         "thinkingRequested": True,
         "thinkingType": str(thinking.get("type") or "").strip(),
         "thinkingDisplay": str(thinking.get("display") or "").strip(),
+        **reasoning_summary,
     }
 
 

@@ -15,6 +15,7 @@ from urllib.parse import urlparse
 
 from config import LLMProfile, ProviderConfig
 
+from .reasoning_effort import model_supports_gpt_reasoning_effort, normalize_reasoning_effort
 from .schema import sanitize_tool_schema
 from .streaming import LiteLLMStreamNormalizer
 from .types import LLMCapabilities
@@ -156,11 +157,18 @@ class ProviderAdapter:
         prompt_cache_mode = str(
             getattr(getattr(self.profile, "prompt_cache", None), "mode", "") or "disabled"
         ).strip().lower()
+        supports_reasoning_effort = model_supports_gpt_reasoning_effort(
+            model=self.profile.model,
+            provider_kind=self.kind,
+            transport=transport,
+            compat_mode=self.compat_mode,
+            provider_api=getattr(self.provider, "api", ""),
+        )
         return replace(
             base,
             supports_image_input=bool(getattr(self.profile, "supports_image_input", None) is True),
             supports_prompt_cache=prompt_cache_mode not in {"", "disabled", "unsupported"},
-            supports_thinking=bool(str(getattr(self.profile, "thinking_type", "") or "").strip()),
+            supports_thinking=bool(str(getattr(self.profile, "thinking_type", "") or "").strip()) or supports_reasoning_effort,
             supports_reasoning_roundtrip=bool(self.should_preserve_reasoning_content()),
             supports_explicit_tool_choice=bool(self.supports_explicit_tool_choice()),
             supports_stream_usage=bool(self.supports_stream_usage_options()),
@@ -198,6 +206,15 @@ class ProviderAdapter:
         return {"temperature": self.payload_temperature()}
 
     def payload_thinking_parameters(self) -> Dict[str, Any]:
+        effort = normalize_reasoning_effort(getattr(self.profile, "reasoning_effort", ""))
+        if effort and model_supports_gpt_reasoning_effort(
+            model=self.profile.model,
+            provider_kind=self.kind,
+            transport=getattr(self.profile, "transport", ""),
+            compat_mode=self.compat_mode,
+            provider_api=getattr(self.provider, "api", ""),
+        ):
+            return {"reasoning": {"effort": effort}}
         return {}
 
     def supports_explicit_tool_choice(self) -> bool:

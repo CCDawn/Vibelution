@@ -117,3 +117,37 @@ def test_resolve_agent_llm_inherits_prompt_cache_config_from_model_library():
     assert prompt_cache.mode == "automatic"
     assert prompt_cache.key == "summary-agent-cache"
     assert prompt_cache.retention == "24h"
+
+
+def test_resolve_agent_llm_applies_reasoning_effort_for_supported_gpt_slot():
+    config = _config_with_agent_models()
+    config.llm.providers["default"].kind = "relay"
+    config.llm.providers["default"].compat_mode = "openai"
+    config.llm.model_library["dialogue-model"].update({
+        "model": "gpt-5.5",
+        "transport": "responses",
+        "contract": "tool_chat",
+    })
+    agent = {
+        "agentId": "agent-a",
+        "llmBindings": {"dialogue": {"modelId": "dialogue-model"}},
+        "metadata": {"llmReasoningEffort": {"dialogue": "high"}},
+    }
+
+    resolved = resolve_agent_llm(agent, "dialogue", config=config)
+
+    assert resolved.config.llm.profiles["primary"].reasoning_effort == "high"
+    assert resolved.capabilities.supports_thinking is True
+
+
+def test_resolve_agent_llm_ignores_reasoning_effort_for_unsupported_slot_model():
+    config = _config_with_agent_models()
+    agent = {
+        "agentId": "agent-a",
+        "llmBindings": {"dialogue": {"modelId": "dialogue-model"}},
+        "metadata": {"llmReasoningEffort": {"dialogue": "high"}},
+    }
+
+    resolved = resolve_agent_llm(agent, "dialogue", config=config)
+
+    assert resolved.config.llm.profiles["primary"].reasoning_effort == ""

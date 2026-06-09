@@ -67,6 +67,7 @@ MODEL_LIBRARY_DETAIL_FIELDS = (
     "discovery_enabled",
     "thinking_type",
     "thinking_display",
+    "reasoning_effort",
     "supports_image_input",
     "capability_status",
     "capability_source",

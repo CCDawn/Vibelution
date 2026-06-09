@@ -16,6 +16,7 @@ from config import AppConfig
 from config.models import LLMProfile
 
 from .discovery import discover_model
+from .reasoning_effort import model_supports_gpt_reasoning_effort, normalize_reasoning_effort
 from .types import LLMCapabilities, ResolvedModelSpec
 
 
@@ -143,6 +144,7 @@ def resolve_agent_llm(
     )
     profile = runtime_config.llm.get_profile(profile_id=runtime_profile_id)
     provider = runtime_config.llm.get_provider(profile.provider_id)
+    _apply_agent_reasoning_effort_override(agent, effective_slot, profile, provider)
     spec = discover_model(runtime_config, runtime_profile_id)
     return ResolvedAgentLlm(
         agent_id=str((agent or {}).get("agentId") or "").strip() if isinstance(agent, dict) else "",
@@ -207,6 +209,7 @@ def config_for_agent_llm_model(
                     "prompt_cache",
                     "thinking_type",
                     "thinking_display",
+                    "reasoning_effort",
                     "supports_image_input",
                 )
                 if key in entry
@@ -219,6 +222,32 @@ def config_for_agent_llm_model(
     )
     runtime_config.llm.profiles[runtime_profile_id] = selected
     return runtime_config
+
+
+def _apply_agent_reasoning_effort_override(
+    agent: dict[str, Any] | None,
+    slot: str,
+    profile: LLMProfile,
+    provider: Any,
+) -> None:
+    if not isinstance(agent, dict):
+        return
+    metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+    effort_by_slot = metadata.get("llmReasoningEffort") if isinstance(metadata, dict) else {}
+    if not isinstance(effort_by_slot, dict):
+        return
+    effort = normalize_reasoning_effort(effort_by_slot.get(slot))
+    if not effort:
+        return
+    if not model_supports_gpt_reasoning_effort(
+        model=profile.model,
+        provider_kind=getattr(provider, "kind", ""),
+        transport=profile.transport,
+        compat_mode=getattr(provider, "compat_mode", ""),
+        provider_api=getattr(provider, "api", ""),
+    ):
+        return
+    profile.reasoning_effort = effort
 
 
 def capability_log_fields(capabilities: LLMCapabilities | None) -> dict[str, Any]:

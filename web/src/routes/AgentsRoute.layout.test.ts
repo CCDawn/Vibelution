@@ -145,6 +145,17 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).not.toContain("{profile.label || profile.profileId} · {profile.model || profile.providerKind || \"-\"}");
   });
 
+  it("shows GPT reasoning effort only for Agent slots whose bound model supports it", () => {
+    expect(routeSource).toContain("reasoningEffortBySlot: Record<string, string>");
+    expect(routeSource).toContain("agentModelSupportsReasoningEffort");
+    expect(routeSource).toContain("supportsReasoningEffort");
+    expect(routeSource).toContain("metadata.llmReasoningEffort = pruned");
+    expect(routeSource).toContain("pruneAgentReasoningEffortBySlot");
+    expect(routeSource).toContain("copy.reasoningEffort");
+    expect(routeSource).toContain('value={normalizeAgentReasoningEffort(configDraft.reasoningEffortBySlot[slot.slot])}');
+    expect(routeSource).toContain("<option value=\"high\">{copy.reasoningEffort}: {copy.reasoningEffortHigh}</option>");
+  });
+
   it("keeps permanent Agent deletion behind the archived-state safety gate", () => {
     expect(routeSource).toContain('const canPurgeAgent = Boolean(selectedAgent?.agentId && selectedAgent.status === "archived" && !selectedAgentProtected)');
     expect(routeSource).toContain('agent.status !== "archived"');
