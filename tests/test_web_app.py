@@ -13,6 +13,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import httpx
 
 from config import models as config_models
 from core.evaluation.chat_next_state_signals import append_chat_next_state_signal, list_chat_next_state_signals
@@ -1823,6 +1824,30 @@ def test_runtime_scene_event_helper_keeps_noisy_observations_out_of_timeline(tmp
     ]
     assert "session.list.loaded" not in {event["event_code"] for event in timeline_events}
     assert "image2.generate.failed" in {event["event_code"] for event in timeline_events}
+
+
+def test_session_list_loaded_event_marks_stale_matching_signature(monkeypatch):
+    events = []
+    monkeypatch.setattr(
+        session_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: events.append((args, kwargs)),
+    )
+
+    session_service._record_session_list_loaded_event(
+        session_count=3,
+        conversation_count=4,
+        agent_count=2,
+        elapsed_ms=5,
+        cache_hit=True,
+        cache_age_ms=5000,
+        cache_ttl_ms=4000,
+        waited_for_inflight=False,
+    )
+
+    fields = events[-1][1]["fields"]
+    assert fields["cacheExpired"] is True
+    assert fields["servedStaleMatchingSignature"] is True
 
 
 def test_runtime_scene_reconciliation_closes_running_package(tmp_path, monkeypatch):
@@ -13723,6 +13748,78 @@ def test_config_workspace_model_discovery_url_candidates_do_not_duplicate_v1():
     assert config_service._model_discovery_urls("https://ai-pixel.online/v1/models") == [
         "https://ai-pixel.online/v1/models",
     ]
+
+
+def test_config_workspace_model_discovery_uses_fast_fail_timeout(monkeypatch):
+    public_config = copy.deepcopy(load_public_config())
+    seen = {}
+
+    monkeypatch.setattr(config_service, "load_public_config", lambda: copy.deepcopy(public_config))
+
+    def fake_discover_model_list(api_base, *, api_key="", timeout=10, api_key_source=""):
+        seen["timeout"] = timeout
+        return [{"id": "fast-model", "label": "Fast Model"}]
+
+    monkeypatch.setattr(config_service, "_discover_openai_compatible_model_list", fake_discover_model_list)
+
+    response = client.post(
+        "/api/config/discover-models",
+        json={
+            "publicConfig": public_config,
+            "draftMeta": {},
+            "provider": {
+                "kind": "openai_compatible",
+                "api_key_env": "OPENAI_API_KEY",
+                "base_url": "https://example.com/v1",
+                "compat_mode": "openai",
+                "requires_api_key": True,
+                "context_window": 65536,
+            },
+            "apiKey": "draft-secret",
+        },
+    )
+
+    assert response.status_code == 200, response.json()
+    assert seen["timeout"] == config_service._MODEL_DISCOVERY_DEFAULT_TIMEOUT_SECONDS
+
+
+def test_config_workspace_model_discovery_caches_recent_failures(monkeypatch):
+    calls = []
+    events = []
+
+    config_service._MODEL_DISCOVERY_NEGATIVE_CACHE.clear()
+    monkeypatch.setattr(config_service, "_model_discovery_urls", lambda api_base: ["https://example.com/models"])
+    monkeypatch.setattr(config_service, "record_runtime_scene_event", lambda *args, **kwargs: events.append((args, kwargs)))
+
+    def fake_discover_model_url(url, *, headers, timeout):
+        calls.append((url, timeout))
+        return url, 404, 12, [], httpx.HTTPStatusError(
+            "not found",
+            request=httpx.Request("GET", url),
+            response=httpx.Response(404, request=httpx.Request("GET", url)),
+        )
+
+    monkeypatch.setattr(config_service, "_discover_model_url", fake_discover_model_url)
+
+    with pytest.raises(ValueError) as first_error:
+        config_service._discover_openai_compatible_model_list(
+            "https://example.com",
+            api_key="secret",
+            timeout=10,
+            api_key_source="手动输入",
+        )
+    with pytest.raises(ValueError) as second_error:
+        config_service._discover_openai_compatible_model_list(
+            "https://example.com",
+            api_key="secret",
+            timeout=10,
+            api_key_source="手动输入",
+        )
+
+    assert len(calls) == 1
+    assert calls[0][1] == config_service._MODEL_DISCOVERY_DEFAULT_TIMEOUT_SECONDS
+    assert str(first_error.value) == str(second_error.value)
+    assert any(args[2] == "config.model_discovery.cached_failure" for args, _ in events)
 
 
 def test_config_workspace_model_discovery_rejects_localhost(monkeypatch):

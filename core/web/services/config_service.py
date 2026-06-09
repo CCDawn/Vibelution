@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import copy
 import ctypes
+import hashlib
 import os
 import secrets
 import subprocess
+import threading
 import time
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urljoin, urlparse
@@ -73,6 +76,10 @@ PROFILE_LABELS = {
 _PENDING_SECRET_PREFIX = "pending-secret:"
 _PENDING_API_KEY_SECRETS: dict[str, tuple[str, str]] = {}
 _PENDING_CLEAR_ENVS: set[str] = set()
+_MODEL_DISCOVERY_DEFAULT_TIMEOUT_SECONDS = 3.0
+_MODEL_DISCOVERY_NEGATIVE_CACHE_TTL_SECONDS = 45.0
+_MODEL_DISCOVERY_NEGATIVE_CACHE: dict[str, tuple[float, str, list[dict[str, Any]]]] = {}
+_MODEL_DISCOVERY_CACHE_LOCK = threading.Lock()
 
 
 def _model_option_protocol_route_summary(option: dict[str, Any], details: dict[str, Any]) -> dict[str, Any]:
@@ -1735,32 +1742,238 @@ def _http_status_hint(error: Exception) -> str:
     return str(error)
 
 
+def _model_discovery_cache_key(api_base: str, *, api_key: str, api_key_source: str) -> str:
+    normalized_base = str(api_base or "").strip().rstrip("/")
+    source = str(api_key_source or "").strip()
+    key_digest = hashlib.sha256(str(api_key or "").encode("utf-8")).hexdigest()[:16] if api_key else "no-key"
+    return "|".join((normalized_base, source, key_digest))
+
+
+def _model_discovery_safe_url(url: str) -> str:
+    parsed = urlparse(str(url or "").strip())
+    if not parsed.scheme or not parsed.netloc:
+        return str(url or "").strip()
+    return f"{parsed.scheme}://{parsed.netloc}{parsed.path or ''}"
+
+
+def _record_model_discovery_event(
+    event_code: str,
+    *,
+    outcome: str,
+    api_base: str,
+    attempted: list[dict[str, Any]],
+    elapsed_ms: int,
+    cache_hit: bool = False,
+    model_count: int = 0,
+    error_type: str = "",
+    error_hint: str = "",
+) -> None:
+    try:
+        record_runtime_scene_event(
+            "config",
+            "model_discovery",
+            event_code,
+            level="warning" if outcome == "failed" else "info",
+            outcome=outcome,
+            message="Config model discovery completed.",
+            fields={
+                "apiBase": _model_discovery_safe_url(api_base),
+                "attempted": attempted[:4],
+                "attemptCount": len(attempted),
+                "elapsedMs": elapsed_ms,
+                "cacheHit": cache_hit,
+                "modelCount": model_count,
+                "errorType": error_type,
+                "errorHint": trim_lines(error_hint, max_lines=2),
+            },
+        )
+    except Exception:
+        return
+
+
+def _get_cached_model_discovery_failure(cache_key: str) -> tuple[str, list[dict[str, Any]]] | None:
+    now = time.monotonic()
+    with _MODEL_DISCOVERY_CACHE_LOCK:
+        cached = _MODEL_DISCOVERY_NEGATIVE_CACHE.get(cache_key)
+        if cached is None:
+            return None
+        expires_at, message, attempted = cached
+        if expires_at > now:
+            return message, copy.deepcopy(attempted)
+        _MODEL_DISCOVERY_NEGATIVE_CACHE.pop(cache_key, None)
+    return None
+
+
+def _set_cached_model_discovery_failure(cache_key: str, message: str, attempted: list[dict[str, Any]]) -> None:
+    with _MODEL_DISCOVERY_CACHE_LOCK:
+        _MODEL_DISCOVERY_NEGATIVE_CACHE[cache_key] = (
+            time.monotonic() + _MODEL_DISCOVERY_NEGATIVE_CACHE_TTL_SECONDS,
+            message,
+            copy.deepcopy(attempted),
+        )
+
+
+def _clear_cached_model_discovery_failure(cache_key: str) -> None:
+    with _MODEL_DISCOVERY_CACHE_LOCK:
+        _MODEL_DISCOVERY_NEGATIVE_CACHE.pop(cache_key, None)
+
+
+def _discover_model_url(
+    url: str,
+    *,
+    headers: dict[str, str],
+    timeout: float,
+) -> tuple[str, int | None, int, list[dict[str, Any]], Exception | None]:
+    started_at = time.monotonic()
+    try:
+        with httpx.Client(timeout=timeout, headers=headers) as client:
+            response = client.get(url)
+            response.raise_for_status()
+            return (
+                url,
+                response.status_code,
+                int((time.monotonic() - started_at) * 1000),
+                _normalize_discovered_models(response.json()),
+                None,
+            )
+    except Exception as exc:
+        status_code = exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else None
+        return url, status_code, int((time.monotonic() - started_at) * 1000), [], exc
+
+
 def _discover_openai_compatible_model_list(
     api_base: str,
     *,
     api_key: str = "",
-    timeout: int = 10,
+    timeout: float = _MODEL_DISCOVERY_DEFAULT_TIMEOUT_SECONDS,
     api_key_source: str = "",
 ) -> list[dict[str, Any]]:
+    started_at = time.monotonic()
+    effective_timeout = max(
+        0.5,
+        min(float(timeout or _MODEL_DISCOVERY_DEFAULT_TIMEOUT_SECONDS), _MODEL_DISCOVERY_DEFAULT_TIMEOUT_SECONDS),
+    )
+    cache_key = _model_discovery_cache_key(api_base, api_key=api_key, api_key_source=api_key_source)
+    cached_failure = _get_cached_model_discovery_failure(cache_key)
+    if cached_failure is not None:
+        message, attempted = cached_failure
+        _record_model_discovery_event(
+            "config.model_discovery.cached_failure",
+            outcome="failed",
+            api_base=api_base,
+            attempted=attempted,
+            elapsed_ms=int((time.monotonic() - started_at) * 1000),
+            cache_hit=True,
+            error_type="cached_failure",
+            error_hint=message,
+        )
+        raise ValueError(message)
+
     last_error: Exception | None = None
     attempted_urls = _model_discovery_urls(api_base)
+    attempted: list[dict[str, Any]] = []
     headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
-    with httpx.Client(timeout=timeout, headers=headers) as client:
-        for url in attempted_urls:
-            try:
-                response = client.get(url)
-                response.raise_for_status()
-                models = _normalize_discovered_models(response.json())
-                if models:
-                    return models
-            except Exception as exc:
-                last_error = exc
-                continue
+    if attempted_urls:
+        executor = ThreadPoolExecutor(max_workers=min(len(attempted_urls), 3), thread_name_prefix="model-discovery")
+        try:
+            futures = {
+                executor.submit(
+                    _discover_model_url,
+                    url,
+                    headers=headers,
+                    timeout=effective_timeout,
+                ): url
+                for url in attempted_urls
+            }
+            pending = set(futures)
+            while pending:
+                done, pending = wait(pending, timeout=effective_timeout, return_when=FIRST_COMPLETED)
+                if not done:
+                    for pending_future in pending:
+                        pending_future.cancel()
+                    break
+                for future in done:
+                    url, status_code, elapsed_ms, models, exc = future.result()
+                    if exc is None and models:
+                        attempted.append({
+                            "url": _model_discovery_safe_url(url),
+                            "statusCode": status_code,
+                            "elapsedMs": elapsed_ms,
+                            "outcome": "succeeded",
+                        })
+                        for pending_future in pending:
+                            pending_future.cancel()
+                            attempted.append({
+                                "url": _model_discovery_safe_url(futures[pending_future]),
+                                "statusCode": None,
+                                "elapsedMs": int((time.monotonic() - started_at) * 1000),
+                                "outcome": "cancelled",
+                                "errorType": "ShortCircuited",
+                            })
+                        _clear_cached_model_discovery_failure(cache_key)
+                        _record_model_discovery_event(
+                            "config.model_discovery.succeeded",
+                            outcome="succeeded",
+                            api_base=api_base,
+                            attempted=attempted,
+                            elapsed_ms=int((time.monotonic() - started_at) * 1000),
+                            model_count=len(models),
+                        )
+                        return models
+                    if exc is None:
+                        attempted.append({
+                            "url": _model_discovery_safe_url(url),
+                            "statusCode": status_code,
+                            "elapsedMs": elapsed_ms,
+                            "outcome": "empty",
+                        })
+                    else:
+                        last_error = exc
+                        attempted.append({
+                            "url": _model_discovery_safe_url(url),
+                            "statusCode": status_code,
+                            "elapsedMs": elapsed_ms,
+                            "outcome": "failed",
+                            "errorType": type(exc).__name__,
+                        })
+            for future in pending:
+                url = futures[future]
+                attempted.append({
+                    "url": _model_discovery_safe_url(url),
+                    "statusCode": None,
+                    "elapsedMs": int(effective_timeout * 1000),
+                    "outcome": "cancelled",
+                    "errorType": "Timeout",
+                })
+        finally:
+            executor.shutdown(wait=False, cancel_futures=True)
     if last_error is not None:
         attempted_text = ", ".join(attempted_urls) if attempted_urls else "(无)"
         key_source = api_key_source or ("已提供密钥" if api_key else "未提供密钥")
-        raise ValueError(f"{_http_status_hint(last_error)} 已尝试：{attempted_text}。密钥来源：{key_source}。") from last_error
-    raise ValueError("模型发现没有返回可用模型。")
+        message = f"{_http_status_hint(last_error)} 已尝试：{attempted_text}。密钥来源：{key_source}。"
+        _set_cached_model_discovery_failure(cache_key, message, attempted)
+        _record_model_discovery_event(
+            "config.model_discovery.failed",
+            outcome="failed",
+            api_base=api_base,
+            attempted=attempted,
+            elapsed_ms=int((time.monotonic() - started_at) * 1000),
+            error_type=type(last_error).__name__,
+            error_hint=message,
+        )
+        raise ValueError(message) from last_error
+    message = "模型发现没有返回可用模型。"
+    _set_cached_model_discovery_failure(cache_key, message, attempted)
+    _record_model_discovery_event(
+        "config.model_discovery.failed",
+        outcome="failed",
+        api_base=api_base,
+        attempted=attempted,
+        elapsed_ms=int((time.monotonic() - started_at) * 1000),
+        error_type="empty_response",
+        error_hint=message,
+    )
+    raise ValueError(message)
 
 
 def discover_config_models(
@@ -1792,7 +2005,7 @@ def discover_config_models(
     models = _normalize_discovered_models(_discover_openai_compatible_model_list(
         str(provider_input.get("base_url", "") or "").strip(),
         api_key=resolved_api_key,
-        timeout=10,
+        timeout=_MODEL_DISCOVERY_DEFAULT_TIMEOUT_SECONDS,
         api_key_source=api_key_source,
     ))
     return {
