@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from time import perf_counter
 from typing import Any
 
+from core.llm.reasoning_effort import GPT_REASONING_EFFORT_VALUES, model_supports_gpt_reasoning_effort
 from core.orchestration.context_engine import list_agent_runs_for_agents
 
 from . import chat_room_service, config_service
@@ -1269,11 +1270,19 @@ def _agent_model_choices(model_options: list[Any]) -> list[dict[str, Any]]:
         provider_kind = str(option.get("provider_kind") or provider.get("kind") or "").strip()
         api_key_configured = bool(option.get("api_key_configured", False))
         requires_api_key = bool(provider.get("requires_api_key", provider_kind != "local"))
+        supports_reasoning_effort = model_supports_gpt_reasoning_effort(
+            model=option.get("model"),
+            provider_kind=provider_kind,
+            transport=option.get("transport"),
+            compat_mode=provider.get("compat_mode"),
+            provider_api=option.get("resolved_provider_api") or option.get("provider_api") or provider.get("api"),
+        )
         choice = {
             "modelId": model_id,
             "label": str(option.get("label") or option.get("model") or model_id).strip() or model_id,
             "model": str(option.get("model") or "").strip(),
             "providerKind": provider_kind,
+            "transport": str(option.get("transport") or "").strip(),
             "providerBaseUrl": str(provider.get("base_url") or "").strip(),
             "source": str(option.get("source") or "").strip(),
             "apiKeyEnv": str(option.get("api_key_env") or "").strip(),
@@ -1282,6 +1291,8 @@ def _agent_model_choices(model_options: list[Any]) -> list[dict[str, Any]]:
             "requiresApiKey": requires_api_key,
             "missingApiKey": requires_api_key and not api_key_configured,
             "supportsImageInput": option.get("supports_image_input"),
+            "supportsReasoningEffort": supports_reasoning_effort,
+            "reasoningEffortValues": list(GPT_REASONING_EFFORT_VALUES) if supports_reasoning_effort else [],
             "capabilityStatus": str(option.get("capability_status") or "").strip(),
             "capabilitySource": str(option.get("capability_source") or "").strip(),
         }

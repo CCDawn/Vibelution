@@ -266,6 +266,10 @@ class LLMProfile(BaseModel):
         default="",
         description="Provider-specific thinking display mode, for example summarized or omitted.",
     )
+    reasoning_effort: str = Field(
+        default="",
+        description="OpenAI Responses reasoning effort for GPT reasoning-capable models.",
+    )
     supports_image_input: Optional[bool] = Field(
         default=None,
         description="Whether this profile is confirmed to accept image inputs in chat turns.",
@@ -313,6 +317,14 @@ class LLMProfile(BaseModel):
         value = (v or "").strip().lower()
         if value not in {"", "summarized", "omitted"}:
             raise ValueError("thinking_display must be one of: summarized, omitted")
+        return value
+
+    @field_validator("reasoning_effort")
+    @classmethod
+    def normalize_reasoning_effort(cls, v: str) -> str:
+        value = (v or "").strip().lower()
+        if value not in {"", "low", "medium", "high"}:
+            raise ValueError("reasoning_effort must be one of: low, medium, high")
         return value
 
     @model_validator(mode="after")
