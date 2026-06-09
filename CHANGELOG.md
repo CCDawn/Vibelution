@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.11 - 2026-06-09
+
+- Changed Config apply to merge only the fields changed from the setting page's original baseline, preventing stale drafts from overwriting unrelated current settings.
+- Added path-level conflict detection so concurrent edits to the same config field are blocked while unrelated current changes are preserved.
+- Added config apply logs for apply mode, changed paths, and touched model IDs, plus regression coverage for patch merge behavior and ConfigRoute apply payload baselines.
+
 ## 1.0.10 - 2026-06-09
 
 - Guarded supervised worktree candidate cleanup so discard actions only remove owned candidate worktrees or legacy harness temp worktrees, never arbitrary development worktree paths.
