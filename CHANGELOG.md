@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.14 - 2026-06-09
+
+- Slimmed ordinary short chat turns by skipping heavy runtime context and tool binding only when the message is clearly low-intent dialogue.
+- Hardened lightweight chat intent detection with token-aware English markers so incidental substrings do not disable the lightweight path.
+- Added server-registry support to the local model monitor so operators can switch monitored model hosts with `-ServerId`.
+- Documented the local model monitor registry shape and replaced the example local-model entries with portable server A/B placeholders.
+- Added regression coverage for monitor script parsing, registry resolution, and personal-path hygiene.
+
 ## 1.0.13 - 2026-06-09
 
 - Recovered supervised-evolution harness evidence so run summaries include task, command, output, and workspace artifacts even when evidence tables are initialized late.

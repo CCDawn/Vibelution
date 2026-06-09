@@ -4549,6 +4549,21 @@ def _compact_lightweight_chat_text(text: Any) -> str:
     return re.sub(r"[，,。.!！?？、；;：:]+", "", compact)
 
 
+def _lightweight_chat_has_tool_intent_marker(message: str, compact: str) -> bool:
+    lowered = str(message or "").strip().lower()
+    for marker in _LIGHTWEIGHT_CHAT_TOOL_INTENT_MARKERS:
+        value = str(marker or "").strip().lower()
+        if not value:
+            continue
+        if re.fullmatch(r"[a-z0-9_]+", value):
+            if re.search(rf"(?<![a-z0-9_]){re.escape(value)}(?![a-z0-9_])", lowered):
+                return True
+            continue
+        if value in compact:
+            return True
+    return False
+
+
 def _lightweight_chat_payload_decision(
     context: dict[str, Any],
     *,
@@ -4579,7 +4594,7 @@ def _lightweight_chat_payload_decision(
     compact = _compact_lightweight_chat_text(message)
     if not compact:
         return False, "empty_compact_message"
-    if any(marker in compact for marker in _LIGHTWEIGHT_CHAT_TOOL_INTENT_MARKERS):
+    if _lightweight_chat_has_tool_intent_marker(message, compact):
         return False, "tool_intent_marker"
     if compact in _LIGHTWEIGHT_CHAT_EXACT_MESSAGES:
         return True, "exact_short_dialogue"
