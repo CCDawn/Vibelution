@@ -130,11 +130,17 @@ import {
   loadPendingSelfEvolutionHandoff,
 } from "./selfEvolutionHandoff";
 import {
-  type AgentDisplayInfo,
   agentDisplayInfo,
   participantAgentDisplayInfo,
   sessionAgentDisplayInfo,
 } from "./agentDisplay";
+import {
+  DirectSessionIndexItem,
+  isAgentRootSession,
+  isChildSession,
+  sessionAgentMetaLabel,
+  sessionListTitle,
+} from "./DirectSessionIndexItem";
 import {
   buildChatMentionTargets,
   tokenizeChatMentions,
@@ -764,55 +770,6 @@ function isAvailableGroupParticipant(participant: ChatRoomParticipant) {
   return !participant.agentMissing && participant.enabled !== false;
 }
 
-function sessionListTitle(session: Pick<SessionSummary, "id" | "title" | "agentDisplayName" | "taskTitle" | "resultCard" | "sessionKind">) {
-  const sessionKind = String(session.sessionKind ?? "").trim();
-  if (sessionKind === "child") {
-    return String(
-      session.taskTitle
-      || session.resultCard?.title
-      || session.title
-      || session.id
-      || "",
-    ).trim();
-  }
-  return String(
-    session.title
-    || session.agentDisplayName
-    || session.id
-    || "",
-  ).trim();
-}
-
-function compactAgentIdentifier(value: unknown) {
-  const raw = String(value ?? "").trim();
-  if (!raw) {
-    return "";
-  }
-  const withoutPrefix = raw.replace(/^agent[-_]/i, "");
-  if (withoutPrefix.length <= 18) {
-    return withoutPrefix;
-  }
-  return withoutPrefix.slice(-12);
-}
-
-function sessionAgentMetaLabel(session: Pick<SessionSummary, "agentCode" | "agentId">) {
-  const code = String(session.agentCode ?? "").trim();
-  if (code) {
-    return `Agent ${code}`;
-  }
-  const compactId = compactAgentIdentifier(session.agentId);
-  return compactId ? `Agent ${compactId}` : "";
-}
-
-function showSessionFunctionLabel(display: AgentDisplayInfo) {
-  const label = String(display.functionLabel ?? "").trim();
-  if (!label) {
-    return false;
-  }
-  const normalized = label.toLowerCase();
-  return !(display.tone === "chat" && (label === "会话入口" || normalized === "chat entry"));
-}
-
 function sessionToConversationSummary(session: SessionSummary): ConversationSummary {
   return {
     conversationId: session.id,
@@ -847,14 +804,6 @@ function isVisibleDirectSession(session: SessionSummary | undefined | null) {
     return true;
   }
   return true;
-}
-
-function isChildSession(session: SessionSummary | undefined | null) {
-  return String(session?.sessionKind ?? "").trim() === "child";
-}
-
-function isAgentRootSession(session: SessionSummary | undefined | null) {
-  return Boolean(String(session?.agentId ?? "").trim()) && !isChildSession(session);
 }
 
 function rootSessionIdFor(session: SessionSummary | undefined | null) {
@@ -6133,7 +6082,7 @@ export function ChatCodingRoute() {
                   );
                 }
                 const sessionId = conversation.directSessionId || conversation.conversationId;
-  const session: SessionSummary = sessionsById.get(sessionId) ?? {
+                const session: SessionSummary = sessionsById.get(sessionId) ?? {
                   id: sessionId,
                   title: conversation.title,
                   agentId: conversation.agentId,
@@ -6164,12 +6113,10 @@ export function ChatCodingRoute() {
                 const sessionDisplay = sessionAgentDisplayInfo(session, sessionAgent, lang, resolveModelLabel);
                 const sessionAvatarImageUrl = avatarImageUrlFrom(sessionAgent, session);
                 const sessionAgentMeta = sessionAgentMetaLabel(session);
-                const sessionFunctionVisible = showSessionFunctionLabel(sessionDisplay);
                 const missingAgentMessage = session.agentMissing
                   ? session.agentStatusMessage || (lang === "zh" ? "缺少有效 Agent，当前会话缺少可运行内容。" : "Missing valid Agent. This session has no runnable Agent content.")
                   : "";
                 const sessionIsChild = isChildSession(session);
-                const sessionStatus = sessionIsChild ? (session.childStatus || session.currentPhase || session.status) : session.status;
                 const sessionTitle = sessionListTitle(session) || sessionDisplay.name;
                 const sessionSummary =
                   (sessionIsChild ? (session.resultCard?.summary || session.taskSummary) : session.taskSummary)
@@ -6177,157 +6124,36 @@ export function ChatCodingRoute() {
                     ? (lang === "zh" ? "子对话独立工作中" : "Independent child session")
                     : (lang === "zh" ? "暂无摘要" : "No summary yet"));
                 return (
-                  <div
+                  <DirectSessionIndexItem
                     key={session.id}
-                    aria-current={!groupPanelActive && activeSessionId === session.id ? "true" : undefined}
-                    onContextMenu={(event) => openSessionContextMenu(event, session)}
-                    className={
-                      !groupPanelActive && activeSessionId === session.id
-                        ? `${styles.sessionItem} ${styles.directSessionItem} ${sessionIsChild ? styles.childTopLevelSessionItem : ""} ${styles.sessionItemActive}`
-                        : `${styles.sessionItem} ${styles.directSessionItem} ${sessionIsChild ? styles.childTopLevelSessionItem : ""}`
-                    }
-                  >
-                    {isEditingTitle ? (
-                      <div className={styles.sessionItemMain}>
-                        {renderAgentAvatar(
-                          `${styles.conversationAvatar} ${styles.conversationAvatarDirect}`,
-                          sessionAvatarImageUrl,
-                          avatarInitials(session.agentCode, sessionTitle),
-                        )}
-                        <span className={styles.conversationCopy}>
-                          <span className={styles.conversationTitleRow}>
-                            <input
-                              className={styles.sessionTitleInput}
-                              value={editingSessionTitle}
-                              maxLength={120}
-                              autoFocus
-                              onChange={(event) => setEditingSessionTitle(event.target.value)}
-                              onKeyDown={(event) => {
-                                if (event.key === "Enter") {
-                                  event.preventDefault();
-                                  submitRenameSession(session);
-                                }
-                                if (event.key === "Escape") {
-                                  event.preventDefault();
-                                  cancelRenameSession();
-                                }
-                              }}
-                              aria-label={t(sessionIsChild ? "renameTask" : isAgentRootSession(session) ? "renameAgent" : "renameSession")}
-                            />
-                            {!groupPanelActive && activeSessionId === session.id ? (
-                              <span className={styles.sessionCurrentBadge}>{t("currentSession")}</span>
-                            ) : null}
-                            <span className={styles.sessionState}>{statusLabel(sessionStatus)}</span>
-                          </span>
-                          <span className={styles.sessionItemSummary} title={sessionSummary}>
-                            {sessionSummary}
-                          </span>
-                          <span className={styles.conversationMetaRow}>
-                            <span className={`${styles.conversationKindBadge} ${sessionIsChild ? styles.conversationKindBadgeChild : styles.conversationKindBadgeDirect}`}>
-                              {sessionIsChild ? (lang === "zh" ? "子对话" : "Child") : (lang === "zh" ? "会话" : "Chat")}
-                            </span>
-                            {sessionAgentMeta ? <span>{sessionAgentMeta}</span> : null}
-                            {sessionFunctionVisible ? (
-                              <span className={`${styles.agentRoleTag} ${styles[agentRoleClass(sessionDisplay.tone)]}`}>
-                                {sessionDisplay.functionLabel}
-                              </span>
-                            ) : null}
-                            {sessionDisplay.modelLabel ? (
-                              <span className={styles.agentModelTag} title={sessionDisplay.modelLabel}>
-                                {sessionDisplay.modelLabel}
-                              </span>
-                            ) : null}
-                            <time>{formatTime(session.updatedAt || session.lastActive)}</time>
-                          </span>
-                          {missingAgentMessage ? (
-                            <span className={styles.agentMissingLine}>{missingAgentMessage}</span>
-                          ) : null}
-                        </span>
-                      </div>
-                    ) : (
-                      <button
-                        type="button"
-                        className={styles.sessionItemMain}
-                        draggable
-                        onDragStart={(event) =>
-                          startSessionReferenceDrag(
-                            event,
-                            buildSessionReferencePayload(session, sessionAgentMeta || sessionDisplay.name, sessionSummary),
-                          )}
-                        onClick={() => handleOpenDirectSession(session.id)}
-                        aria-current={!groupPanelActive && activeSessionId === session.id ? "true" : undefined}
-                      >
-                        {renderAgentAvatar(
-                          `${styles.conversationAvatar} ${styles.conversationAvatarDirect}`,
-                          sessionAvatarImageUrl,
-                          avatarInitials(session.agentCode, sessionTitle),
-                        )}
-                        <span className={styles.conversationCopy}>
-                          <span className={styles.conversationTitleRow}>
-                            <span className={styles.sessionItemTitle}>
-                              {sessionTitle}
-                            </span>
-                            {!groupPanelActive && activeSessionId === session.id ? (
-                              <span className={styles.sessionCurrentBadge}>{t("currentSession")}</span>
-                            ) : null}
-                            <span className={styles.sessionState}>{statusLabel(sessionStatus)}</span>
-                          </span>
-                          <span className={styles.sessionItemSummary} title={sessionSummary}>
-                            {sessionSummary}
-                          </span>
-                          <span className={styles.conversationMetaRow}>
-                            <span className={`${styles.conversationKindBadge} ${sessionIsChild ? styles.conversationKindBadgeChild : styles.conversationKindBadgeDirect}`}>
-                              {sessionIsChild ? (lang === "zh" ? "子对话" : "Child") : (lang === "zh" ? "会话" : "Chat")}
-                            </span>
-                            {sessionAgentMeta ? <span>{sessionAgentMeta}</span> : null}
-                            {sessionFunctionVisible ? (
-                              <span className={`${styles.agentRoleTag} ${styles[agentRoleClass(sessionDisplay.tone)]}`}>
-                                {sessionDisplay.functionLabel}
-                              </span>
-                            ) : null}
-                            {sessionDisplay.modelLabel ? (
-                              <span className={styles.agentModelTag} title={sessionDisplay.modelLabel}>
-                                {sessionDisplay.modelLabel}
-                              </span>
-                            ) : null}
-                            <time>{formatTime(session.updatedAt || session.lastActive)}</time>
-                          </span>
-                          {missingAgentMessage ? (
-                            <span className={styles.agentMissingLine}>{missingAgentMessage}</span>
-                          ) : null}
-                        </span>
-                      </button>
-                    )}
-                    {isEditingTitle ? (
-                      <div className={styles.sessionActionStack}>
-                        <button
-                          type="button"
-                          className={styles.sessionIconButton}
-                          onClick={() => submitRenameSession(session)}
-                          disabled={renamePending}
-                          title={t(sessionIsChild ? "saveTaskName" : isAgentRootSession(session) ? "saveAgentName" : "saveSessionName")}
-                          aria-label={`${t(sessionIsChild ? "saveTaskName" : isAgentRootSession(session) ? "saveAgentName" : "saveSessionName")} ${sessionTitle}`}
-                        >
-                          <Check size={15} />
-                        </button>
-                        <button
-                          type="button"
-                          className={styles.sessionIconButton}
-                          onClick={cancelRenameSession}
-                          disabled={renamePending}
-                          title={t("cancelRenameSession")}
-                          aria-label={t("cancelRenameSession")}
-                        >
-                          <X size={15} />
-                        </button>
-                      </div>
-                    ) : null}
-                    {itemMessage ? (
-                      <p className={itemIsNotice ? styles.sessionItemNotice : styles.sessionItemError}>
-                        {itemMessage}
-                      </p>
-                    ) : null}
-                  </div>
+                    active={!groupPanelActive && activeSessionId === session.id}
+                    editing={isEditingTitle}
+                    editingTitle={editingSessionTitle}
+                    itemMessage={itemMessage}
+                    itemIsNotice={itemIsNotice}
+                    missingAgentMessage={missingAgentMessage}
+                    renamePending={renamePending}
+                    session={session}
+                    sessionAvatarFallback={avatarInitials(session.agentCode, sessionTitle)}
+                    sessionAvatarImageUrl={sessionAvatarImageUrl}
+                    sessionDisplay={sessionDisplay}
+                    sessionSummary={sessionSummary}
+                    sessionTitle={sessionTitle}
+                    lang={lang}
+                    statusLabel={statusLabel}
+                    formatTime={formatTime}
+                    t={t}
+                    onCancelRename={cancelRenameSession}
+                    onContextMenu={openSessionContextMenu}
+                    onDragStart={(event) =>
+                      startSessionReferenceDrag(
+                        event,
+                        buildSessionReferencePayload(session, sessionAgentMeta || sessionDisplay.name, sessionSummary),
+                      )}
+                    onOpen={handleOpenDirectSession}
+                    onRenameTitleChange={setEditingSessionTitle}
+                    onSubmitRename={submitRenameSession}
+                  />
                 );
               })}
                       </div>
