@@ -796,44 +796,35 @@
   white-space: nowrap;
 }
 
-.operationLiveLocator {
+.operationStatusLine {
   display: flex;
   align-items: center;
-  gap: 9px;
+  flex-wrap: wrap;
+  gap: 5px 10px;
   min-width: 0;
   max-width: 100%;
   overflow: hidden;
   color: var(--fg-tertiary);
-  font-size: 0.71rem;
+  font-size: 0.72rem;
   line-height: 1.35;
-  white-space: nowrap;
 }
 
-.operationLiveLocation {
-  flex: 0 1 auto;
-  min-width: 0;
-  max-width: min(42vw, 360px);
-  overflow: hidden;
-  color: color-mix(in srgb, var(--accent-cool-2) 82%, var(--fg-secondary));
-  font-weight: 700;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.operationStatusLine span + span::before {
+  content: "·";
+  margin-right: 10px;
+  color: color-mix(in srgb, var(--fg-tertiary) 54%, transparent);
 }
 
-.operationLiveMetrics {
+.operationStatusLead {
   flex: 0 0 auto;
-  color: color-mix(in srgb, var(--fg-tertiary) 80%, transparent);
-  font-family: var(--font-mono);
-  font-size: 0.66rem;
+  min-width: 0;
+  color: color-mix(in srgb, var(--accent-cool-2) 82%, var(--fg-secondary));
+  font-weight: 650;
 }
 
-.operationLiveSummary {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  color: color-mix(in srgb, var(--fg-tertiary) 88%, var(--fg-secondary));
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.operationStatusMeta {
+  color: color-mix(in srgb, var(--fg-tertiary) 80%, transparent);
+  font-weight: 500;
 }
 
 .operationProgressRail {
@@ -855,8 +846,8 @@
   min-width: 0;
   max-width: 128px;
   color: var(--fg-tertiary);
-  font-size: 0.68rem;
-  font-weight: 560;
+  font-size: 0.66rem;
+  font-weight: 500;
 }
 
 .operationRailDot {
@@ -874,18 +865,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.operationRailBadge {
-  flex: 0 0 auto;
-  margin-left: 5px;
-  padding: 1px 4px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--surface-card) 62%, transparent);
-  color: inherit;
-  font-size: 0.58rem;
-  font-weight: 760;
-  line-height: 1.25;
 }
 
 .operationRailConnector {
@@ -910,10 +889,6 @@
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-cool-2) 14%, transparent);
 }
 
-.operationRailStep_running .operationRailBadge {
-  background: color-mix(in srgb, var(--accent-cool-2) 13%, transparent);
-}
-
 .operationRailStep_failed {
   color: color-mix(in srgb, var(--danger) 86%, var(--fg-secondary));
 }
@@ -921,10 +896,6 @@
 .operationRailStep_failed .operationRailDot {
   border-color: color-mix(in srgb, var(--danger) 68%, transparent);
   background: color-mix(in srgb, var(--danger) 72%, transparent);
-}
-
-.operationRailStep_failed .operationRailBadge {
-  background: color-mix(in srgb, var(--danger) 12%, transparent);
 }
 
 .operationTableWrap {
