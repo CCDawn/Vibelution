@@ -4700,6 +4700,11 @@ def test_handle_restart_workbench_preserves_visible_browser_when_no_browser_was_
     monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: events.append((event_type, payload)))
     monkeypatch.setattr(
         daemon,
+        "_preflight_frontend_build_for_restart",
+        lambda command_id: {"ok": True, "commandId": command_id, "completedSteps": ["mock"]},
+    )
+    monkeypatch.setattr(
+        daemon,
         "close_workbench",
         lambda: close_calls.append("close") or subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
     )
@@ -4850,6 +4855,11 @@ def test_handle_restart_workbench_accepts_trusted_backend_when_health_probe_lags
     monkeypatch.setattr(daemon, "observe_workbench", observations)
     monkeypatch.setattr(daemon, "build_evolution_summary", lambda: {"self": {}, "supervised": {}})
     monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: events.append((event_type, payload)))
+    monkeypatch.setattr(
+        daemon,
+        "_preflight_frontend_build_for_restart",
+        lambda command_id: {"ok": True, "commandId": command_id, "completedSteps": ["mock"]},
+    )
     monkeypatch.setattr(daemon.RuntimeManagerDaemon, "_cleanup_residual_workbench_processes", lambda self: {"count": 0, "items": []})
     monkeypatch.setattr(
         daemon,
