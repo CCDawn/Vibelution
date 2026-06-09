@@ -5633,7 +5633,7 @@ function Start-SupervisorDetached {
         $supervisorCommand = @"
 `$ErrorActionPreference = 'Stop'
 try {
-    & $scriptPathLiteral -Action supervise -SessionId $sessionIdLiteral 1>> $stdoutLiteral 2>> $stderrLiteral 3>> $stdoutLiteral 4>> $stdoutLiteral 5>> $stdoutLiteral 6>> $stdoutLiteral
+    & $scriptPathLiteral -Action supervise -SessionId $sessionIdLiteral 3>&1 4>&1 5>&1 6>&1 1>> $stdoutLiteral 2>> $stderrLiteral
 } catch {
     `$errorText = (`$_ | Out-String)
     if (`$errorText) {
