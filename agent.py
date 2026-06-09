@@ -1259,13 +1259,7 @@ class SelfEvolvingAgent:
         text = str(content or "").strip()
         if not text:
             return
-        if self._get_mode_policy().mode != AgentMode.CHAT:
-            self._pending_runtime_context_blocks.append(text)
-            return
-        if not self._active_turn_messages:
-            self._active_turn_messages = [SystemMessage(content="")]
-        self._active_turn_messages.insert(1, SystemMessage(content=text))
-        self._active_turn_goal = "__chat_session__"
+        self._pending_runtime_context_blocks.append(text)
 
     def mark_runtime_context_seeded_by_host(self) -> None:
         """Mark that the embedding host already injected this turn's runtime context."""
