@@ -40,6 +40,7 @@ class LanguageUpdateRequest(BaseModel):
 
 class ConfigDraftPayload(BaseModel):
     publicConfig: dict[str, Any] = Field(default_factory=dict)
+    baseConfig: dict[str, Any] | None = None
     draftMeta: dict[str, Any] = Field(default_factory=dict)
     baseHash: str = ""
 
@@ -248,6 +249,7 @@ def config_apply(payload: ConfigDraftPayload) -> dict:
     try:
         return apply_config_workspace(
             payload.publicConfig,
+            base_config=payload.baseConfig,
             draft_meta=payload.draftMeta,
             base_hash=payload.baseHash,
         )
