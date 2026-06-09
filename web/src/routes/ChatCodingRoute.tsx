@@ -65,7 +65,6 @@ import {
   SessionGuidanceMode,
   ConversationSummary,
   SessionDetail,
-  SessionQueryResponse,
   SessionRuntimeNotice,
   SessionSummary,
   SessionStreamEvent,
@@ -109,6 +108,12 @@ import {
   removeOptimisticUserMessage,
   shouldAcceptSessionStreamEvent,
 } from "./chatSessionState";
+import {
+  captureSessionIndexCacheSnapshots,
+  restoreSessionIndexCacheSnapshots,
+  updateSessionSummaryCaches,
+  useSessionIndexQuery,
+} from "./chatSessionIndexQuery";
 import {
   latestUserMessageId as deriveLatestUserMessageId,
   resolveComposerDraftValue,
@@ -1310,18 +1315,9 @@ export function ChatCodingRoute() {
     (modelId: string) => modelLabelsById.get(modelId),
     [modelLabelsById],
   );
-  const rawSessionsQuery = useQuery({
-    queryKey: queryKeys.sessionQuery(sessionQueryText, 50, ""),
-    queryFn: async () => {
-      const params = new URLSearchParams();
-      params.set("limit", "50");
-      if (sessionQueryText) {
-        params.set("q", sessionQueryText);
-      }
-      const payload = await fetchJson<SessionQueryResponse>(`/api/sessions/query?${params.toString()}`);
-      queryClient.setQueryData<SessionSummary[]>(queryKeys.sessions(), payload.items);
-      return payload.items;
-    },
+  const rawSessionsQuery = useSessionIndexQuery({
+    queryClient,
+    queryText: sessionQueryText,
     refetchInterval: resolvePollingInterval(
       chatPollingVisible,
       sessionStreamConnected && directSessionPanelActive ? false : ACTIVE_INDEX_POLL_MS,
@@ -1424,7 +1420,7 @@ export function ChatCodingRoute() {
       if (!shouldSyncSummaries) {
         return;
       }
-      queryClient.setQueryData<SessionSummary[]>(queryKeys.sessions(), (sessions) =>
+      updateSessionSummaryCaches(queryClient, (sessions) =>
         mergeSessionDetailIntoSummaries(sessions, detail),
       );
       queryClient.setQueryData<ConversationSummary[]>(queryKeys.conversations(), (conversations) =>
@@ -1609,7 +1605,7 @@ export function ChatCodingRoute() {
       queryClient.setQueryData<SessionDetail>(queryKeys.session(variables.sessionId), (detail) =>
         markSessionDetailRunning(appendOptimisticUserMessage(detail, variables)),
       );
-      queryClient.setQueryData<SessionSummary[]>(queryKeys.sessions(), (sessions) =>
+      updateSessionSummaryCaches(queryClient, (sessions) =>
         markSessionSummaryRunning(sessions, variables.sessionId),
       );
     },
@@ -1685,7 +1681,7 @@ export function ChatCodingRoute() {
       }),
     onMutate: async (variables) => {
       queryClient.setQueryData<SessionDetail>(queryKeys.session(variables.sessionId), markSessionDetailRunning);
-      queryClient.setQueryData<SessionSummary[]>(queryKeys.sessions(), (sessions) =>
+      updateSessionSummaryCaches(queryClient, (sessions) =>
         markSessionSummaryRunning(sessions, variables.sessionId),
       );
     },
@@ -2037,7 +2033,7 @@ export function ChatCodingRoute() {
           : remaining;
       });
       queryClient.removeQueries({ queryKey: queryKeys.session(variables.sessionId), exact: true });
-      queryClient.setQueryData<SessionSummary[]>(queryKeys.sessions(), (sessions) =>
+      updateSessionSummaryCaches(queryClient, (sessions) =>
         sessions?.filter((session) => session.id !== variables.sessionId),
       );
       queryClient.setQueryData<ConversationSummary[]>(queryKeys.conversations(), (conversations) =>
@@ -2074,6 +2070,7 @@ export function ChatCodingRoute() {
     onMutate: (variables) => {
       const updatedAt = new Date().toISOString();
       const previousSessions = queryClient.getQueryData<SessionSummary[]>(queryKeys.sessions());
+      const previousSessionIndexCaches = captureSessionIndexCacheSnapshots(queryClient);
       const previousConversations = queryClient.getQueryData<ConversationSummary[]>(queryKeys.conversations());
       const previousDetail = queryClient.getQueryData<SessionDetail>(queryKeys.session(variables.sessionId));
       const targetSession = previousDetail ?? previousSessions?.find((session) => session.id === variables.sessionId);
@@ -2083,7 +2080,7 @@ export function ChatCodingRoute() {
         ...current,
         [variables.sessionId]: "",
       }));
-      queryClient.setQueryData<SessionSummary[]>(queryKeys.sessions(), (sessions) =>
+      updateSessionSummaryCaches(queryClient, (sessions) =>
         renameSessionInSummaries(sessions, variables.sessionId, variables.title, updatedAt),
       );
       queryClient.setQueryData<ConversationSummary[]>(queryKeys.conversations(), (conversations) =>
@@ -2092,7 +2089,7 @@ export function ChatCodingRoute() {
       queryClient.setQueryData<SessionDetail>(queryKeys.session(variables.sessionId), (detail) =>
         renameSessionDetail(detail, variables.sessionId, variables.title, updatedAt),
       );
-      return { previousSessions, previousConversations, previousDetail };
+      return { previousSessions, previousSessionIndexCaches, previousConversations, previousDetail };
     },
     onSuccess: (nextDetail, variables) => {
       setSessionComposerErrors((current) => ({
@@ -2101,7 +2098,7 @@ export function ChatCodingRoute() {
       }));
       const confirmedTitle = String(nextDetail.title || variables.title).trim() || variables.title;
       const confirmedUpdatedAt = String(nextDetail.updatedAt || new Date().toISOString()).trim();
-      queryClient.setQueryData<SessionSummary[]>(queryKeys.sessions(), (sessions) =>
+      updateSessionSummaryCaches(queryClient, (sessions) =>
         renameSessionInSummaries(sessions, variables.sessionId, confirmedTitle, confirmedUpdatedAt),
       );
       queryClient.setQueryData<ConversationSummary[]>(queryKeys.conversations(), (conversations) =>
@@ -2119,6 +2116,7 @@ export function ChatCodingRoute() {
       if (context?.previousSessions) {
         queryClient.setQueryData(queryKeys.sessions(), context.previousSessions);
       }
+      restoreSessionIndexCacheSnapshots(queryClient, context?.previousSessionIndexCaches);
       if (context?.previousConversations) {
         queryClient.setQueryData(queryKeys.conversations(), context.previousConversations);
       }
@@ -3552,6 +3550,16 @@ export function ChatCodingRoute() {
       .filter((group) => group.items.length > 0);
   }, [filteredConversations, lang]);
   const searchHasTerm = sessionFilter.trim().length > 0;
+  const sessionIndexLoadedCount = rawSessionsQuery.loadedCount;
+  const sessionIndexTotalEstimate = rawSessionsQuery.totalEstimate;
+  const sessionIndexHasMore = rawSessionsQuery.hasMore;
+  const sessionIndexLoadMoreLabel = rawSessionsQuery.isLoadingMore
+    ? (lang === "zh" ? "加载中" : "Loading")
+    : (lang === "zh" ? "加载更多" : "Load more");
+  const sessionIndexProgressLabel =
+    sessionIndexTotalEstimate > sessionIndexLoadedCount
+      ? `${numberFormatter.format(sessionIndexLoadedCount)} / ${numberFormatter.format(sessionIndexTotalEstimate)}`
+      : numberFormatter.format(sessionIndexLoadedCount);
 
   function formatTime(value: string) {
     if (!value) {
@@ -6472,6 +6480,18 @@ export function ChatCodingRoute() {
                     </div>
                   ) : null}
                 </section>
+              ) : null}
+              {sessionIndexHasMore ? (
+                <button
+                  type="button"
+                  className={styles.sessionLoadMoreButton}
+                  onClick={() => rawSessionsQuery.loadMore()}
+                  disabled={rawSessionsQuery.isLoadingMore}
+                  aria-label={sessionIndexLoadMoreLabel}
+                >
+                  <span>{sessionIndexLoadMoreLabel}</span>
+                  <strong>{sessionIndexProgressLabel}</strong>
+                </button>
               ) : null}
               {sessionContextMenu && contextMenuSession && sessionContextMenuStyle ? (
                 <div
