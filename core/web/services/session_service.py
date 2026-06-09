@@ -159,6 +159,93 @@ _SESSION_USER_IMAGE_MAX_BYTES = 8 * 1024 * 1024
 SESSION_USER_IMAGE_MAX_BYTES = _SESSION_USER_IMAGE_MAX_BYTES
 SESSION_PROMPT_CACHE_SCOPE_AGENT_STATIC = "chat_agent_static"
 SESSION_PROMPT_CACHE_SCOPE_SESSION_FALLBACK = "chat_session_fallback"
+_LIGHTWEIGHT_CHAT_HISTORY_MESSAGE_LIMIT = 6
+_LIGHTWEIGHT_CHAT_MAX_COMPACT_CHARS = 24
+_LIGHTWEIGHT_CHAT_EXACT_MESSAGES = {
+    "hello",
+    "hey",
+    "hi",
+    "ok",
+    "thanks",
+    "thankyou",
+    "你好",
+    "您好",
+    "嗨",
+    "哈喽",
+    "在吗",
+    "谢谢",
+    "感谢",
+    "辛苦了",
+    "收到",
+}
+_LIGHTWEIGHT_CHAT_TOOL_INTENT_MARKERS = (
+    "agent",
+    "api",
+    "backend",
+    "branch",
+    "bug",
+    "build",
+    "codex",
+    "commit",
+    "config",
+    "debug",
+    "diagnose",
+    "error",
+    "fix",
+    "frontend",
+    "git",
+    "implement",
+    "log",
+    "merge",
+    "performance",
+    "profile",
+    "push",
+    "review",
+    "run",
+    "test",
+    "tool",
+    "vibelution",
+    "worktree",
+    "上线",
+    "修改",
+    "修复",
+    "优化",
+    "分支",
+    "分析",
+    "前端",
+    "后端",
+    "合并",
+    "启动",
+    "审查",
+    "工具",
+    "性能",
+    "执行",
+    "提交",
+    "接口",
+    "排查",
+    "推送",
+    "改动",
+    "文件",
+    "日志",
+    "权限",
+    "测试",
+    "生成",
+    "看一下",
+    "确认",
+    "继续",
+    "规划",
+    "解决",
+    "诊断",
+    "记忆",
+    "配置",
+    "部署",
+    "错误",
+    "问题",
+    "项目",
+    "验证",
+    "慢",
+    "卡",
+)
 
 
 def _perf_counter() -> float:
@@ -4457,6 +4544,57 @@ def _history_messages_for_agent_seed(items: Any) -> list[dict[str, Any]]:
     return filtered
 
 
+def _compact_lightweight_chat_text(text: Any) -> str:
+    compact = re.sub(r"\s+", "", str(text or "").strip().lower())
+    return re.sub(r"[，,。.!！?？、；;：:]+", "", compact)
+
+
+def _lightweight_chat_payload_decision(
+    context: dict[str, Any],
+    *,
+    attachments: list[dict[str, Any]] | None = None,
+) -> tuple[bool, str]:
+    if list(attachments or []):
+        return False, "attachments"
+    if list(context.get("session_references") or []):
+        return False, "session_references"
+    if context.get("skill_invocation"):
+        return False, "skill_invocation"
+    user_message_source = str(context.get("user_message_source") or "").strip()
+    if user_message_source == "agent_inbox":
+        return False, "agent_inbox"
+
+    raw_message = str(context.get("raw_user_message") or "").strip()
+    effective_message = str(context.get("user_message") or "").strip()
+    message = raw_message or effective_message
+    if not message:
+        return False, "empty_message"
+    if _looks_like_agent_inbox_protocol_message(message):
+        return False, "agent_inbox_protocol"
+    if _is_continue_request(message):
+        return False, "continue_request"
+    if _is_contextual_confirmation_message(message):
+        return False, "contextual_confirmation"
+
+    compact = _compact_lightweight_chat_text(message)
+    if not compact:
+        return False, "empty_compact_message"
+    if any(marker in compact for marker in _LIGHTWEIGHT_CHAT_TOOL_INTENT_MARKERS):
+        return False, "tool_intent_marker"
+    if compact in _LIGHTWEIGHT_CHAT_EXACT_MESSAGES:
+        return True, "exact_short_dialogue"
+    if len(compact) <= _LIGHTWEIGHT_CHAT_MAX_COMPACT_CHARS:
+        return True, "short_dialogue"
+    return False, "message_too_long"
+
+
+def _trim_lightweight_chat_history(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    normalized = list(messages or [])
+    if len(normalized) <= _LIGHTWEIGHT_CHAT_HISTORY_MESSAGE_LIMIT:
+        return normalized
+    return normalized[-_LIGHTWEIGHT_CHAT_HISTORY_MESSAGE_LIMIT:]
+
+
 def _should_omit_message_from_agent_history(message: dict[str, Any]) -> bool:
     role = str(message.get("role") or "").strip().lower()
     content = str(message.get("content") or "").strip()
@@ -7053,12 +7191,22 @@ def _run_session_turn(context: dict[str, Any]) -> None:
     historical_agent = None if agent_instance else (get_agent(agent_id, include_archived=True) if agent_id else None)
     prepare_timings["agentLookupMs"] = _elapsed_ms(stage_started_at)
     stage_started_at = _perf_counter()
+    turn_attachments = _normalize_message_attachments(context.get("attachments") or [])
+    lightweight_chat_payload, lightweight_chat_payload_reason = _lightweight_chat_payload_decision(
+        context,
+        attachments=turn_attachments,
+    )
+    prepare_timings["lightweightChatDecisionMs"] = _elapsed_ms(stage_started_at)
+    prepare_timings["lightweightChatPayload"] = lightweight_chat_payload
+    prepare_timings["lightweightChatPayloadReason"] = lightweight_chat_payload_reason
+    stage_started_at = _perf_counter()
     agent_context_packet = (
         build_agent_context(agent_id, session_id=session_id, run_id=turn_id)
-        if agent_id
+        if agent_id and not lightweight_chat_payload
         else None
     )
     prepare_timings["agentContextBuildMs"] = _elapsed_ms(stage_started_at)
+    prepare_timings["agentContextBuildSkipped"] = bool(agent_id and lightweight_chat_payload)
     agent_context_timings = (
         dict(getattr(agent_context_packet, "timings", {}) or {})
         if agent_context_packet is not None
@@ -7198,6 +7346,9 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                 _perf_counter(),
             ),
             "hasAgentContextPacket": agent_context_packet is not None,
+            "lightweightChatPayload": lightweight_chat_payload,
+            "lightweightChatPayloadReason": lightweight_chat_payload_reason,
+            "disableTools": lightweight_chat_payload,
             **prepare_timings,
         },
     )
@@ -7360,6 +7511,9 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                         **_session_prompt_cache_log_fields(scope=prompt_cache_scope, partition=prompt_cache_partition),
                         "attachmentCount": len(attachments),
                         "agentCreateMs": agent_create_ms,
+                        "lightweightChatPayload": lightweight_chat_payload,
+                        "lightweightChatPayloadReason": lightweight_chat_payload_reason,
+                        "disableTools": lightweight_chat_payload,
                         **(resolved_agent_llm.log_fields() if resolved_agent_llm is not None else {}),
                     },
                 )
@@ -7371,7 +7525,11 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                 stop_configurer = getattr(runtime_agent, "set_turn_interrupt_checker", None)
                 if callable(stop_configurer):
                     stop_configurer(lambda: _get_turn_control_stop_reason(turn_control))
-                history_messages = _history_messages_for_agent_seed(context.get("history_messages") or [])
+                raw_history_messages = list(context.get("history_messages") or [])
+                history_messages = _history_messages_for_agent_seed(raw_history_messages)
+                full_history_message_count = len(history_messages)
+                if lightweight_chat_payload:
+                    history_messages = _trim_lightweight_chat_history(history_messages)
                 runtime_context_block = agent_context_packet.context_block if agent_context_packet is not None else ""
                 guidance_context_block = _recent_session_guidance_context_block(session_id)
                 skill_invocation = context.get("skill_invocation")
@@ -7384,10 +7542,12 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                     stage_started_at = _perf_counter()
                     restore(history_messages)
                     history_seed_ms = _elapsed_ms(stage_started_at)
-                if callable(runtime_context_seed) and runtime_context_block:
+                host_context_marker = getattr(runtime_agent, "mark_runtime_context_seeded_by_host", None)
+                if lightweight_chat_payload and callable(host_context_marker):
+                    host_context_marker()
+                elif callable(runtime_context_seed) and runtime_context_block:
                     stage_started_at = _perf_counter()
                     runtime_context_seed(runtime_context_block)
-                    host_context_marker = getattr(runtime_agent, "mark_runtime_context_seeded_by_host", None)
                     if callable(host_context_marker):
                         host_context_marker()
                     runtime_context_seed_ms = _elapsed_ms(stage_started_at)
@@ -7403,6 +7563,22 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                         invocation=skill_invocation,
                         outcome="routed",
                     )
+                if lightweight_chat_payload:
+                    _record_session_turn_lifecycle_event(
+                        session_id,
+                        "lightweight_chat_payload",
+                        turn_id=turn_id,
+                        outcome="enabled",
+                        fields={
+                            "reason": lightweight_chat_payload_reason,
+                            "disableTools": True,
+                            "runtimeContextSkipped": True,
+                            "rawHistoryMessageCount": len(raw_history_messages),
+                            "fullSeedableHistoryMessageCount": full_history_message_count,
+                            "seededHistoryMessageCount": len(history_messages),
+                            "historyLimit": _LIGHTWEIGHT_CHAT_HISTORY_MESSAGE_LIMIT,
+                        },
+                    )
                 _record_session_turn_lifecycle_event(
                     session_id,
                     "history_seeded",
@@ -7410,10 +7586,15 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                     outcome="running",
                     fields={
                         "rawHistoryMessageCount": len(list(context.get("history_messages") or [])),
+                        "fullSeedableHistoryMessageCount": full_history_message_count,
                         "seededHistoryMessageCount": len(history_messages),
                         "agentRuntimeContextIncluded": bool(runtime_context_block),
+                        "agentRuntimeContextSkipped": bool(lightweight_chat_payload),
                         "guidanceContextIncluded": bool(guidance_context_block),
                         "skillRuntimeContextIncluded": bool(skill_runtime_context_block),
+                        "lightweightChatPayload": lightweight_chat_payload,
+                        "lightweightChatPayloadReason": lightweight_chat_payload_reason,
+                        "disableTools": lightweight_chat_payload,
                         "restoreAvailable": callable(restore),
                         "historySeedMs": history_seed_ms,
                         "runtimeContextSeedMs": runtime_context_seed_ms,
@@ -7514,6 +7695,7 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                         agent_id=agent_id,
                         llm_slot=llm_slot,
                         llm_model_id=llm_model_id_for_turn,
+                        disable_tools=lightweight_chat_payload,
                     )
                 if isinstance(result, dict):
                     result["context_composition"] = context_composition
@@ -7760,6 +7942,7 @@ def _run_session_continuation_loop(
     agent_id: str = "",
     llm_slot: str = SESSION_LLM_SLOT_DIALOGUE,
     llm_model_id: str = "",
+    disable_tools: bool = False,
 ) -> Any:
     prompt = str(initial_prompt or "").strip()
     has_initial_attachments = bool(list(attachments or []))
@@ -7841,6 +8024,7 @@ def _run_session_continuation_loop(
                 "agentId": str(agent_id or "").strip(),
                 "llmSlot": str(llm_slot or "").strip(),
                 "llmModelId": str(llm_model_id or "").strip(),
+                "disableTools": bool(disable_tools),
             },
         )
         _record_session_execution_registry_event(
@@ -7851,6 +8035,7 @@ def _run_session_continuation_loop(
             details={
                 "turnIndex": turn_index,
                 "promptLength": len(prompt),
+                "disableTools": bool(disable_tools),
             },
         )
         _record_session_turn_trace_event(
@@ -7869,7 +8054,12 @@ def _run_session_continuation_loop(
         turn_attachments = list(attachments or []) if turn_index == 1 else []
         llm_started_at = _perf_counter()
         with prompt_cache_partition_scope(prompt_cache_partition):
-            result = run_existing_agent_single_turn(agent, initial_prompt=prompt, attachments=turn_attachments)
+            result = run_existing_agent_single_turn(
+                agent,
+                initial_prompt=prompt,
+                attachments=turn_attachments,
+                disable_tools=disable_tools,
+            )
         result = _attach_session_prompt_cache_metadata(
             result,
             prompt_cache_scope=prompt_cache_scope,
