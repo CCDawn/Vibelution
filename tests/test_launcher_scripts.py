@@ -546,7 +546,7 @@ Add-Content -LiteralPath (Join-Path $logDir "fake-vbs-entry-calls.jsonl") -Value
 
 def _run_launcher_ast_harness(tmp_path: Path, harness_source: str) -> subprocess.CompletedProcess[str]:
     harness_path = tmp_path / "launcher-ast-harness.ps1"
-    harness_path.write_text(harness_source.strip(), encoding="utf-8")
+    harness_path.write_text(_normalize_ast_harness_source(harness_source), encoding="utf-8")
     command = [
         _powershell_exe(),
         "-NoProfile",
@@ -562,7 +562,7 @@ def _run_launcher_ast_harness(tmp_path: Path, harness_source: str) -> subprocess
 
 def _run_desktop_entry_ast_harness(tmp_path: Path, harness_source: str) -> subprocess.CompletedProcess[str]:
     harness_path = tmp_path / "desktop-entry-ast-harness.ps1"
-    harness_path.write_text(harness_source.strip(), encoding="utf-8")
+    harness_path.write_text(_normalize_ast_harness_source(harness_source), encoding="utf-8")
     command = [
         _powershell_exe(),
         "-NoProfile",
@@ -574,6 +574,23 @@ def _run_desktop_entry_ast_harness(tmp_path: Path, harness_source: str) -> subpr
         str(DESKTOP_ENTRY_SCRIPT),
     ]
     return subprocess.run(command, capture_output=True, text=True, check=False, timeout=30)
+
+
+def _normalize_ast_harness_source(harness_source: str) -> str:
+    source = harness_source.strip()
+    # Windows PowerShell 5.1 defaults Get-Content to the local ANSI code page.
+    # The launcher scripts contain UTF-8 display labels, so AST harnesses must
+    # read them explicitly as UTF-8 before feeding them to Parser.ParseInput.
+    return (
+        source.replace(
+            "Get-Content -Raw -LiteralPath $LauncherPath",
+            "Get-Content -Raw -Encoding UTF8 -LiteralPath $LauncherPath",
+        )
+        .replace(
+            "Get-Content -Raw -LiteralPath $DesktopEntryPath",
+            "Get-Content -Raw -Encoding UTF8 -LiteralPath $DesktopEntryPath",
+        )
+    )
 
 
 def test_launcher_internal_action_rejection_logs_env_diagnostics(tmp_path):
