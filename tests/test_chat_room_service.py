@@ -1298,7 +1298,7 @@ def test_chat_room_participant_waits_for_active_direct_turn_on_same_agent(tmp_pa
         def run_single_turn(self, initial_prompt=None, disable_tools=False):
             prompt = str(initial_prompt or "")
             prompts.append(prompt)
-            if not disable_tools:
+            if "群聊也想让 alpha 发言" not in prompt and prompt.strip() == "alpha direct turn":
                 direct_started.set()
                 assert release_direct.wait(10.0)
                 return {
@@ -1397,7 +1397,7 @@ def test_chat_room_waiting_speaker_keeps_fifo_before_later_direct_turn(tmp_path,
 
         def run_single_turn(self, initial_prompt=None, disable_tools=False):
             prompt = str(initial_prompt or "")
-            if disable_tools:
+            if "群聊排在第二个" in prompt:
                 run_order.append("room")
                 room_started.set()
                 assert release_room.wait(10.0)
@@ -1512,7 +1512,8 @@ def test_force_stop_chat_room_round_cancels_waiting_agent_slot(tmp_path, monkeyp
             self.checker = checker
 
         def run_single_turn(self, initial_prompt=None, disable_tools=False):
-            if disable_tools:
+            prompt = str(initial_prompt or "")
+            if "等待 direct 后发言" in prompt or prompt.strip() != "alpha direct":
                 room_started.set()
                 return {"status": "completed", "summary": "room should not run", "raw_output": "room should not run"}
             direct_started.set()
