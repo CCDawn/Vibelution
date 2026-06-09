@@ -230,7 +230,9 @@ def get_launcher_startup_settings() -> dict[str, Any]:
 def get_workbench_window_mode_setting() -> dict[str, Any]:
     """Return the configured and effective Workbench window mode."""
 
-    configured = _read_configured_workbench_window_mode()
+    public_config = _load_launcher_public_config()
+    workbench = _read_config_section(public_config, "workbench")
+    configured = _normalize_workbench_window_mode(workbench.get("window_mode"), default="fullscreen")
     env_override = _read_workbench_window_mode_env_override() or ""
     effective = env_override or configured
     return {
@@ -238,6 +240,7 @@ def get_workbench_window_mode_setting() -> dict[str, Any]:
         "effectiveMode": effective,
         "envOverride": env_override,
         "configPath": str(CONFIG_PATH),
+        "configHash": public_config_hash(public_config),
         "restartRequired": True,
         "options": [
             {
@@ -250,11 +253,43 @@ def get_workbench_window_mode_setting() -> dict[str, Any]:
     }
 
 
-def update_workbench_window_mode(mode: str) -> dict[str, Any]:
+def update_workbench_window_mode(mode: str, *, base_hash: str = "") -> dict[str, Any]:
     """Persist the Workbench window mode used by subsequent Launcher starts."""
 
     normalized = _parse_workbench_window_mode(mode)
     public_config = load_public_config(CONFIG_PATH)
+    current_hash = public_config_hash(public_config)
+    expected_hash = str(base_hash or "").strip()
+    if not expected_hash:
+        _record_launcher_event(
+            "launcher.settings.workbench_window_mode.conflict",
+            phase="settings",
+            message="Launcher Workbench window mode update missing config base hash.",
+            outcome="conflict",
+            level="warning",
+            fields={
+                "requestedMode": normalized,
+                "baseHash": "",
+                "currentHash": current_hash,
+                "configPath": str(CONFIG_PATH),
+            },
+        )
+        raise LauncherSettingsConflict("窗口模式保存请求缺少配置版本，请刷新 Launcher 后重试。")
+    if expected_hash != current_hash:
+        _record_launcher_event(
+            "launcher.settings.workbench_window_mode.conflict",
+            phase="settings",
+            message="Launcher Workbench window mode update rejected because the config snapshot is stale.",
+            outcome="conflict",
+            level="warning",
+            fields={
+                "requestedMode": normalized,
+                "baseHash": expected_hash,
+                "currentHash": current_hash,
+                "configPath": str(CONFIG_PATH),
+            },
+        )
+        raise LauncherSettingsConflict("窗口模式保存前配置已被其他页面或进程改动，请刷新 Launcher 后重试。")
     workbench = public_config.setdefault("workbench", {})
     if not isinstance(workbench, dict):
         workbench = {}
@@ -274,6 +309,8 @@ def update_workbench_window_mode(mode: str) -> dict[str, Any]:
             "effectiveMode": setting["effectiveMode"],
             "envOverride": setting["envOverride"],
             "configPath": str(CONFIG_PATH),
+            "previousHash": current_hash,
+            "configHash": setting.get("configHash"),
         },
     )
     return {

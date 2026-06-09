@@ -28,6 +28,7 @@ router = APIRouter()
 
 class WorkbenchWindowModePayload(BaseModel):
     mode: str
+    baseHash: str = ""
 
 
 class LauncherStartupSettingsPayload(BaseModel):
@@ -76,7 +77,9 @@ def update_launcher_startup_settings(payload: LauncherStartupSettingsPayload) ->
 @router.put("/api/launcher/settings/workbench-window")
 def update_workbench_window_setting(payload: WorkbenchWindowModePayload) -> dict:
     try:
-        return launcher_service.update_workbench_window_mode(payload.mode)
+        return launcher_service.update_workbench_window_mode(payload.mode, base_hash=payload.baseHash)
+    except launcher_service.LauncherSettingsConflict as exc:
+        raise HTTPException(status_code=409, detail={"code": "launcher_workbench_window_mode_conflict", "message": str(exc)}) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail={"code": "invalid_workbench_window_mode", "message": str(exc)}) from exc
 
