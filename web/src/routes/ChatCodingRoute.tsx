@@ -132,17 +132,12 @@ import {
   participantAgentDisplayInfo,
   sessionAgentDisplayInfo,
 } from "./agentDisplay";
-import { ConversationIndexSection } from "./ConversationIndexSection";
+import { ConversationIndexTree } from "./ConversationIndexTree";
 import {
   isAgentRootSession,
   isChildSession,
   sessionListTitle,
 } from "./DirectSessionIndexItem";
-import { DirectSessionIndexList } from "./DirectSessionIndexList";
-import {
-  GroupConversationIndexItem,
-  TeamConversationIndexItem,
-} from "./GroupSessionIndexItems";
 import { SessionContextMenu } from "./SessionContextMenu";
 import {
   buildChatMentionTargets,
@@ -6003,119 +5998,44 @@ export function ChatCodingRoute() {
               </div>
             ) : (
               <>
-              {filteredConversations.length ? groupedConversations.map((group) => {
-                const collapsed = !searchHasTerm && collapsedConversationGroups[group.groupKey];
-                const groupRoomConversations = group.items.filter((conversation) => conversation.type === "group_room");
-                const directSessionConversations = group.items.filter((conversation) => conversation.type !== "group_room");
-                return (
-                  <ConversationIndexSection
-                    key={group.groupKey}
-                    count={group.items.length}
-                    expanded={!collapsed}
-                    label={group.label}
-                    onToggle={() => toggleConversationGroup(group.groupKey)}
-                  >
-                    {groupRoomConversations.map((conversation) => {
-                  const roomId = conversation.roomId || conversation.conversationId;
-                  return (
-                    <GroupConversationIndexItem
-                      key={`group-${roomId}`}
-                      active={activeGroupRoomId === roomId}
-                      conversation={conversation}
-                      kindLabel={lang === "zh" ? "群聊" : "Group"}
-                      fallbackSummary={lang === "zh" ? "群聊会话" : "Group conversation"}
-                      lang={lang}
-                      roomId={roomId}
-                      statusLabel={statusLabel}
-                      formatTime={formatTime}
-                      onOpen={handleOpenGroupRoom}
-                    />
-                  );
-              })}
-                    <DirectSessionIndexList
-                      activeSessionId={activeSessionId}
-                      addToReviewSucceededLabel={t("addSessionToReviewSucceeded")}
-                      agentsById={agentsById}
-                      avatarImageUrlFrom={avatarImageUrlFrom}
-                      avatarInitials={avatarInitials}
-                      buildSessionReferencePayload={buildSessionReferencePayload}
-                      conversations={directSessionConversations}
-                      deleteBusyLabel={t("deleteSessionBusy")}
-                      editingSessionId={editingSessionId}
-                      editingSessionTitle={editingSessionTitle}
-                      formatTime={formatTime}
-                      groupPanelActive={groupPanelActive}
-                      isBusyPhase={isBusyPhase}
-                      lang={lang}
-                      renamePending={renameSessionMutation.isPending}
-                      renameSessionId={renameSessionMutation.variables?.sessionId ?? ""}
-                      resolveModelLabel={resolveModelLabel}
-                      sessionComposerErrors={sessionComposerErrors}
-                      sessionsById={sessionsById}
-                      statusLabel={statusLabel}
-                      t={t}
-                      onCancelRename={cancelRenameSession}
-                      onContextMenu={openSessionContextMenu}
-                      onDragReference={startSessionReferenceDrag}
-                      onOpen={handleOpenDirectSession}
-                      onRenameTitleChange={setEditingSessionTitle}
-                      onSubmitRename={submitRenameSession}
-                    />
-                  </ConversationIndexSection>
-                );
-              }) : null}
-              {filteredTeams.length ? (
-                <ConversationIndexSection
-                  className={styles.teamTreeGroup}
-                  count={filteredTeams.length}
-                  expanded={searchHasTerm || !collapsedConversationGroups.teams}
-                  label={conversationGroupLabel("teams", lang === "zh" ? "zh" : "en")}
-                  onToggle={() => toggleConversationGroup("teams")}
-                >
-                  {filteredTeams.map((team) => {
-                      const roomId = String(team.linkedChatRoomId ?? "").trim();
-                      const teamRoute = `/teams?team=${encodeURIComponent(team.teamId)}`;
-                      return (
-                        <TeamConversationIndexItem
-                          key={team.teamId}
-                          active={Boolean(roomId && activeGroupRoomId === roomId)}
-                          lang={lang}
-                          roomId={roomId}
-                          team={team}
-                          teamRoute={teamRoute}
-                          statusLabel={statusLabel}
-                          onOpen={handleOpenGroupRoom}
-                        />
-                      );
-                    })}
-                </ConversationIndexSection>
-              ) : null}
-              {filteredStandaloneGroupConversations.length ? (
-                <ConversationIndexSection
-                  count={filteredStandaloneGroupConversations.length}
-                  expanded={searchHasTerm || !collapsedConversationGroups.standaloneGroups}
-                  label={conversationGroupLabel("standaloneGroups", lang === "zh" ? "zh" : "en")}
-                  onToggle={() => toggleConversationGroup("standaloneGroups")}
-                >
-                  {filteredStandaloneGroupConversations.map((conversation) => {
-                      const roomId = conversation.roomId || conversation.conversationId;
-                      return (
-                        <GroupConversationIndexItem
-                          key={`standalone-group-${roomId}`}
-                          active={activeGroupRoomId === roomId}
-                          conversation={conversation}
-                          kindLabel={lang === "zh" ? "群" : "Group"}
-                          fallbackSummary={lang === "zh" ? "未绑定团队的群聊" : "Group without a Team"}
-                          lang={lang}
-                          roomId={roomId}
-                          statusLabel={statusLabel}
-                          formatTime={formatTime}
-                          onOpen={handleOpenGroupRoom}
-                        />
-                      );
-                    })}
-                </ConversationIndexSection>
-              ) : null}
+              <ConversationIndexTree
+                activeGroupRoomId={activeGroupRoomId}
+                activeSessionId={activeSessionId}
+                addToReviewSucceededLabel={t("addSessionToReviewSucceeded")}
+                agentsById={agentsById}
+                avatarImageUrlFrom={avatarImageUrlFrom}
+                avatarInitials={avatarInitials}
+                buildSessionReferencePayload={buildSessionReferencePayload}
+                collapsedConversationGroups={collapsedConversationGroups}
+                conversationGroupLabel={conversationGroupLabel}
+                deleteBusyLabel={t("deleteSessionBusy")}
+                editingSessionId={editingSessionId}
+                editingSessionTitle={editingSessionTitle}
+                filteredConversationsCount={filteredConversations.length}
+                filteredStandaloneGroupConversations={filteredStandaloneGroupConversations}
+                filteredTeams={filteredTeams}
+                formatTime={formatTime}
+                groupPanelActive={groupPanelActive}
+                groupedConversations={groupedConversations}
+                isBusyPhase={isBusyPhase}
+                lang={lang}
+                renamePending={renameSessionMutation.isPending}
+                renameSessionId={renameSessionMutation.variables?.sessionId ?? ""}
+                resolveModelLabel={resolveModelLabel}
+                searchHasTerm={searchHasTerm}
+                sessionComposerErrors={sessionComposerErrors}
+                sessionsById={sessionsById}
+                statusLabel={statusLabel}
+                t={t}
+                onCancelRename={cancelRenameSession}
+                onContextMenu={openSessionContextMenu}
+                onDragReference={startSessionReferenceDrag}
+                onOpenDirectSession={handleOpenDirectSession}
+                onOpenGroupRoom={handleOpenGroupRoom}
+                onRenameTitleChange={setEditingSessionTitle}
+                onSubmitRename={submitRenameSession}
+                onToggleConversationGroup={toggleConversationGroup}
+              />
               {sessionIndexHasMore ? (
                 <button
                   type="button"
