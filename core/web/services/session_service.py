@@ -1837,10 +1837,11 @@ def query_sessions(
             state=normalized_state,
         )
     ]
-    filtered.sort(
-        key=_session_query_sort_key(normalized_sort),
-        reverse=normalized_sort.endswith("_desc"),
-    )
+    if normalized_sort != "updatedAt_desc":
+        filtered.sort(
+            key=_session_query_sort_key(normalized_sort),
+            reverse=normalized_sort.endswith("_desc"),
+        )
 
     total = len(filtered)
     start = min(normalized_cursor, total)
