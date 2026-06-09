@@ -22,6 +22,7 @@ from core.web.services.session_service import (
     get_session_detail,
     list_child_sessions,
     list_sessions,
+    query_sessions,
     request_stop_session_turn,
     resolve_session_image_artifact,
     store_session_user_image_attachment,
@@ -147,6 +148,27 @@ class ChildSessionCreatePayload(BaseModel):
 @router.get("/sessions")
 def sessions() -> list[dict]:
     return list_sessions()
+
+
+@router.get("/sessions/query")
+def session_query(
+    limit: int = Query(default=50, ge=1, le=100),
+    cursor: str = "",
+    q: str = "",
+    agentId: str = "",
+    sessionKind: str = "",
+    state: str = "",
+    sort: str = "updatedAt_desc",
+) -> dict:
+    return query_sessions(
+        limit=limit,
+        cursor=cursor,
+        q=q,
+        agent_id=agentId,
+        session_kind=sessionKind,
+        state=state,
+        sort=sort,
+    )
 
 
 @router.post("/sessions", status_code=status.HTTP_201_CREATED)

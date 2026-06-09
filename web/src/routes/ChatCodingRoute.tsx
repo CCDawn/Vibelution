@@ -65,6 +65,7 @@ import {
   SessionGuidanceMode,
   ConversationSummary,
   SessionDetail,
+  SessionQueryResponse,
   SessionRuntimeNotice,
   SessionSummary,
   SessionStreamEvent,
@@ -1220,6 +1221,7 @@ export function ChatCodingRoute() {
   const groupPanelActive = Boolean(activeGroupRoomId);
   const legacyGroupRoomActive = groupPanelActive && !projectBusActive;
   const directSessionPanelActive = Boolean(activeSessionId) && !groupPanelActive;
+  const sessionQueryText = sessionFilter.trim();
   const [directSessionBackgroundSyncActive, setDirectSessionBackgroundSyncActive] = useState(false);
   const [groupBackgroundSyncActive, setGroupBackgroundSyncActive] = useState(false);
   const sessionStreamRouteTargetMatches = Boolean(
@@ -1309,8 +1311,17 @@ export function ChatCodingRoute() {
     [modelLabelsById],
   );
   const rawSessionsQuery = useQuery({
-    queryKey: queryKeys.sessions(),
-    queryFn: () => fetchJson<SessionSummary[]>("/api/sessions"),
+    queryKey: queryKeys.sessionQuery(sessionQueryText, 50, ""),
+    queryFn: async () => {
+      const params = new URLSearchParams();
+      params.set("limit", "50");
+      if (sessionQueryText) {
+        params.set("q", sessionQueryText);
+      }
+      const payload = await fetchJson<SessionQueryResponse>(`/api/sessions/query?${params.toString()}`);
+      queryClient.setQueryData<SessionSummary[]>(queryKeys.sessions(), payload.items);
+      return payload.items;
+    },
     refetchInterval: resolvePollingInterval(
       chatPollingVisible,
       sessionStreamConnected && directSessionPanelActive ? false : ACTIVE_INDEX_POLL_MS,

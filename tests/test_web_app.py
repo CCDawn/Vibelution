@@ -2886,6 +2886,71 @@ def test_session_detail_exists(tmp_path, monkeypatch):
     assert payload["contextUsage"]["limit"] > 0
 
 
+def test_session_query_paginates_searches_and_filters(tmp_path, monkeypatch):
+    conversations = [
+        {
+            "conversation_id": "session-alpha",
+            "title": "Alpha planning",
+            "agent_id": "agent-a",
+            "agentId": "agent-a",
+            "session_kind": "main",
+            "updated_at": "2026-05-18T12:00:00",
+            "messages": [{"role": "assistant", "content": "Alpha summary", "timestamp": "2026-05-18T12:00:00"}],
+        },
+        {
+            "conversation_id": "session-beta",
+            "title": "Beta research",
+            "agent_id": "agent-b",
+            "agentId": "agent-b",
+            "session_kind": "child",
+            "parent_session_id": "session-alpha",
+            "root_session_id": "session-alpha",
+            "updated_at": "2026-05-18T13:00:00",
+            "messages": [{"role": "assistant", "content": "Beta summary", "timestamp": "2026-05-18T13:00:00"}],
+        },
+        {
+            "conversation_id": "session-gamma",
+            "title": "Gamma coding",
+            "agent_id": "agent-a",
+            "agentId": "agent-a",
+            "session_kind": "main",
+            "updated_at": "2026-05-18T14:00:00",
+            "messages": [{"role": "assistant", "content": "Gamma summary", "timestamp": "2026-05-18T14:00:00"}],
+        },
+    ]
+    _seed_chat_state(tmp_path, conversations=conversations)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    agent_directory_service.save_state(
+        {
+            "agents": [
+                {"agentId": "agent-a", "displayName": "Agent Alpha", "status": "active", "directSessionId": "session-alpha"},
+                {"agentId": "agent-b", "displayName": "Agent Beta", "status": "active", "directSessionId": "session-beta"},
+            ]
+        }
+    )
+
+    first_page = client.get("/api/sessions/query?limit=2")
+    assert first_page.status_code == 200
+    first_payload = first_page.json()
+    assert [item["id"] for item in first_payload["items"]] == ["session-gamma", "session-beta"]
+    assert first_payload["nextCursor"] == "2"
+    assert first_payload["totalEstimate"] == 3
+
+    second_page = client.get(f"/api/sessions/query?limit=2&cursor={first_payload['nextCursor']}")
+    assert second_page.status_code == 200
+    assert [item["id"] for item in second_page.json()["items"]] == ["session-alpha"]
+    assert second_page.json()["nextCursor"] == ""
+
+    search_response = client.get("/api/sessions/query?q=beta")
+    assert search_response.status_code == 200
+    assert [item["id"] for item in search_response.json()["items"]] == ["session-beta"]
+
+    filtered_response = client.get("/api/sessions/query?agentId=agent-a&sessionKind=main&sort=title_asc")
+    assert filtered_response.status_code == 200
+    assert {item["id"] for item in filtered_response.json()["items"]} == {"session-alpha", "session-gamma"}
+
+
 def test_session_summary_exposes_dialogue_model_id(tmp_path, monkeypatch):
     _seed_chat_state(
         tmp_path,
