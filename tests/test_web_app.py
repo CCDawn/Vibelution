@@ -2951,6 +2951,45 @@ def test_session_query_paginates_searches_and_filters(tmp_path, monkeypatch):
     assert {item["id"] for item in filtered_response.json()["items"]} == {"session-alpha", "session-gamma"}
 
 
+def test_session_query_keeps_active_session_on_default_first_page(tmp_path, monkeypatch):
+    conversations = []
+    for index in range(60):
+        session_id = f"session-{index:02d}"
+        conversations.append(
+            {
+                "conversation_id": session_id,
+                "title": f"Session {index:02d}",
+                "updated_at": f"2026-05-18T14:{index:02d}:00",
+                "messages": [{"role": "assistant", "content": f"Summary {index:02d}", "timestamp": "2026-05-18T14:00:00"}],
+            }
+        )
+    conversations.append(
+        {
+            "conversation_id": "session-active",
+            "title": "Active old session",
+            "updated_at": "2026-05-18T09:00:00",
+            "messages": [{"role": "assistant", "content": "Active summary", "timestamp": "2026-05-18T09:00:00"}],
+        }
+    )
+    save_chat_state(
+        tmp_path,
+        {
+            "version": 1,
+            "active_conversation_id": "session-active",
+            "updated_at": "2026-05-18T15:00:00",
+            "conversations": conversations,
+        },
+    )
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+
+    response = client.get("/api/sessions/query?limit=10")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["items"][0]["id"] == "session-active"
+    assert payload["nextCursor"] == "10"
+
+
 def test_session_summary_exposes_dialogue_model_id(tmp_path, monkeypatch):
     _seed_chat_state(
         tmp_path,
