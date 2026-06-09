@@ -114,14 +114,14 @@ def test_create_chat_session_creates_persistent_agent_and_direct_conversation(tm
 
     conversations = conversation_service.list_conversations()
     direct = [item for item in conversations if item["type"] == "direct_agent"]
-    assert direct[0]["conversationId"] == detail["id"]
-    assert direct[0]["title"] == agent["displayName"]
-    assert direct[0]["agentId"] == detail["agentId"]
-    assert direct[0]["agentCode"] == agent["agentCode"]
-    assert direct[0]["agentDisplayName"] == agent["displayName"]
-    assert direct[0]["agentPrimaryMode"] == "chat"
-    assert direct[0]["agentRoleKey"] == ""
-    assert direct[0]["agentPromptTemplateId"] == "prompt-chat-default"
+    created_direct = next(item for item in direct if item["conversationId"] == detail["id"])
+    assert created_direct["title"] == agent["displayName"]
+    assert created_direct["agentId"] == detail["agentId"]
+    assert created_direct["agentCode"] == agent["agentCode"]
+    assert created_direct["agentDisplayName"] == agent["displayName"]
+    assert created_direct["agentPrimaryMode"] == "chat"
+    assert created_direct["agentRoleKey"] == ""
+    assert created_direct["agentPromptTemplateId"] == "prompt-chat-default"
 
 
 def test_legacy_session_list_is_read_only_until_detail_repairs_agent_binding(tmp_path, monkeypatch):
