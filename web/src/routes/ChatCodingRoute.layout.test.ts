@@ -798,6 +798,19 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.conversationGroupList).toBeTypeOf("string");
   });
 
+  it("loads session index pages through the paginated query endpoint", () => {
+    const rawSessionsQuerySource = routeSource.slice(
+      routeSource.indexOf("const rawSessionsQuery = useQuery"),
+      routeSource.indexOf("const visibleSessionsData", routeSource.indexOf("const rawSessionsQuery = useQuery")),
+    );
+    expect(rawSessionsQuerySource).toContain("queryKeys.sessionQuery(sessionQueryText, 50, \"\")");
+    expect(rawSessionsQuerySource).toContain("new URLSearchParams()");
+    expect(rawSessionsQuerySource).toContain("params.set(\"limit\", \"50\")");
+    expect(rawSessionsQuerySource).toContain("params.set(\"q\", sessionQueryText)");
+    expect(rawSessionsQuerySource).toContain("fetchJson<SessionQueryResponse>(`/api/sessions/query?${params.toString()}`)");
+    expect(rawSessionsQuerySource).toContain("queryClient.setQueryData<SessionSummary[]>(queryKeys.sessions(), payload.items)");
+  });
+
   it("asks for confirmation before deleting conversations", () => {
     expect(routeSource).toContain("t(\"deleteSessionConfirm\").replace(\"{title}\"");
     expect(routeSource).toContain("t(\"deleteGroupConfirm\").replace(\"{title}\"");
