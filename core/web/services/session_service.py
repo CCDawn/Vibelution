@@ -4017,6 +4017,7 @@ def mark_direct_session_agent_deleted(
     agent_id: str,
     agent_display_name: str = "",
     previous_status: str = "",
+    include_restore_token: bool = False,
 ) -> dict[str, Any]:
     """Keep direct-session history while preventing Agent repair from recreating a purged Agent."""
 
@@ -4031,6 +4032,7 @@ def mark_direct_session_agent_deleted(
         }
     changed = False
     found = False
+    restore_token: dict[str, Any] | None = None
     now = _now_timestamp()
     try:
         with _CHAT_STATE_LOCK:
@@ -4039,12 +4041,23 @@ def mark_direct_session_agent_deleted(
             if not isinstance(conversations, list):
                 conversations = []
                 payload["conversations"] = conversations
+            if include_restore_token:
+                restore_token = {
+                    "sessionId": normalized_session_id,
+                    "agentId": normalized_agent_id,
+                    "previousConversation": None,
+                    "previousActiveConversationId": str(payload.get("active_conversation_id") or "").strip(),
+                    "previousUpdatedAt": str(payload.get("updated_at") or "").strip(),
+                    "previousVersion": payload.get("version"),
+                }
             for raw in conversations:
                 if not isinstance(raw, dict):
                     continue
                 if str(raw.get("conversation_id") or DEFAULT_CHAT_CONVERSATION_ID).strip() != normalized_session_id:
                     continue
                 found = True
+                if restore_token is not None:
+                    restore_token["previousConversation"] = copy.deepcopy(raw)
                 changed = _mark_conversation_agent_deleted(
                     raw,
                     session_id=normalized_session_id,
@@ -4097,8 +4110,98 @@ def mark_direct_session_agent_deleted(
         "historyRetention": "preserved_tombstone",
         "reason": "agent_purged",
     }
+    if restore_token is not None:
+        restore_token["createdConversation"] = not found
+        result["restoreToken"] = restore_token
     _record_direct_session_agent_deleted_event(result, previous_status=previous_status, created_tombstone=not found)
     return result
+
+
+def restore_direct_session_agent_deleted_tombstone(restore_token: dict[str, Any] | None) -> dict[str, Any]:
+    """Restore a direct-session conversation after a failed pre-purge tombstone."""
+
+    token = restore_token if isinstance(restore_token, dict) else {}
+    normalized_session_id = str(token.get("sessionId") or "").strip()
+    normalized_agent_id = str(token.get("agentId") or "").strip()
+    if not normalized_session_id:
+        return {"changed": False, "sessionId": "", "agentId": normalized_agent_id, "reason": "missing_restore_session"}
+    changed = False
+    try:
+        with _CHAT_STATE_LOCK:
+            payload = load_chat_state(PROJECT_ROOT)
+            conversations = payload.get("conversations")
+            if not isinstance(conversations, list):
+                conversations = []
+                payload["conversations"] = conversations
+            current_index = -1
+            for index, raw in enumerate(conversations):
+                if not isinstance(raw, dict):
+                    continue
+                if str(raw.get("conversation_id") or DEFAULT_CHAT_CONVERSATION_ID).strip() == normalized_session_id:
+                    current_index = index
+                    break
+            previous_conversation = token.get("previousConversation")
+            if isinstance(previous_conversation, dict):
+                restored = copy.deepcopy(previous_conversation)
+                if current_index >= 0:
+                    if conversations[current_index] != restored:
+                        conversations[current_index] = restored
+                        changed = True
+                else:
+                    conversations.append(restored)
+                    changed = True
+            elif current_index >= 0 and _conversation_agent_deleted_tombstone_matches(
+                conversations[current_index],
+                agent_id=normalized_agent_id,
+            ):
+                conversations.pop(current_index)
+                changed = True
+            previous_active = str(token.get("previousActiveConversationId") or "").strip()
+            if previous_active and payload.get("active_conversation_id") != previous_active:
+                payload["active_conversation_id"] = previous_active
+                changed = True
+            if changed:
+                previous_updated_at = str(token.get("previousUpdatedAt") or "").strip()
+                if previous_updated_at:
+                    payload["updated_at"] = previous_updated_at
+                else:
+                    payload["updated_at"] = _now_timestamp()
+                previous_version = token.get("previousVersion")
+                if isinstance(previous_version, int):
+                    payload["version"] = previous_version
+                else:
+                    payload["version"] = int(payload.get("version") or CHAT_STATE_VERSION)
+                save_chat_state(PROJECT_ROOT, payload)
+    except Exception as exc:
+        result = {
+            "changed": False,
+            "sessionId": normalized_session_id,
+            "agentId": normalized_agent_id,
+            "reason": "restore_failed",
+            "errorType": type(exc).__name__,
+        }
+        _record_direct_session_agent_deleted_rollback_event(result, level="error")
+        return result
+    if changed:
+        _invalidate_session_list_cache()
+    result = {
+        "changed": changed,
+        "sessionId": normalized_session_id,
+        "agentId": normalized_agent_id,
+        "reason": "restored",
+    }
+    _record_direct_session_agent_deleted_rollback_event(result)
+    return result
+
+
+def _conversation_agent_deleted_tombstone_matches(conversation: dict[str, Any], *, agent_id: str) -> bool:
+    if not isinstance(conversation, dict):
+        return False
+    normalized_agent_id = str(agent_id or "").strip()
+    tombstone = conversation.get("agentDeletedTombstone") if isinstance(conversation.get("agentDeletedTombstone"), dict) else {}
+    tombstone_agent_id = str(tombstone.get("agentId") or "").strip()
+    deleted_agent_id = str(conversation.get("agentDeletedId") or conversation.get("agent_deleted_id") or "").strip()
+    return bool(normalized_agent_id and (tombstone_agent_id == normalized_agent_id or deleted_agent_id == normalized_agent_id))
 
 
 def _mark_conversation_agent_deleted(
@@ -9859,6 +9962,32 @@ def _record_direct_session_agent_deleted_event(
                 "previousStatus": str(previous_status or "").strip(),
                 "historyRetention": str(result.get("historyRetention") or "").strip(),
                 "createdTombstoneConversation": bool(created_tombstone),
+                "reason": str(result.get("reason") or "").strip(),
+                "errorType": str(result.get("errorType") or "").strip(),
+            },
+            lifecycle=True,
+        )
+    except Exception:
+        return
+
+
+def _record_direct_session_agent_deleted_rollback_event(
+    result: dict[str, Any],
+    *,
+    level: str = "info",
+) -> None:
+    try:
+        record_runtime_scene_event(
+            "conversation",
+            "agent_binding",
+            "conversation.agent_deleted_tombstone.rollback",
+            message="Direct-session deleted-Agent tombstone was rolled back after Agent purge failed.",
+            level=level,
+            outcome="failed" if str(result.get("reason") or "") == "restore_failed" else "rolled_back",
+            fields={
+                "sessionId": str(result.get("sessionId") or "").strip(),
+                "agentId": str(result.get("agentId") or "").strip(),
+                "changed": bool(result.get("changed")),
                 "reason": str(result.get("reason") or "").strip(),
                 "errorType": str(result.get("errorType") or "").strip(),
             },
