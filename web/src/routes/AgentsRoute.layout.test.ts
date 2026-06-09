@@ -740,11 +740,14 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("copy.bulkSkippedProtected");
     expect(routeSource).toContain("copy.bulkPurgeConfirm");
     expect(routeSource).toContain("copy.bulkPurgeResult");
-    expect(routeSource).toContain("body: JSON.stringify({ promptTemplateId: bulkPromptTemplateId })");
+    expect(routeSource).toContain('"/api/agents/bulk-prompt-template"');
+    expect(routeSource).toContain("body: JSON.stringify({ agentIds: selectedBulkAgents.map((agent) => agent.agentId), promptTemplateId: bulkPromptTemplateId })");
+    expect(routeSource).toContain("bulkUpdatedAgentWorkspaceCache");
     expect(routeSource).toContain('"/api/agents/bulk-archive"');
     expect(routeSource).toContain('"/api/agents/bulk-purge"');
     expect(routeSource).toContain("bulkPurgeWorkspaceCache");
     expect(routeSource).not.toContain("const archivedAgent = await fetchJson<AgentConfigWorkspaceAgent>(`/api/agents/${encodeURIComponent(agent.agentId)}`");
+    expect(routeSource).not.toContain("const updatedAgent = await fetchJson<AgentConfigWorkspaceAgent>(`/api/agents/${encodeURIComponent(agent.agentId)}`");
     expect(routeSource).not.toContain("for (const agent of selectedBulkAgents) {\n      if (agentArchiveProtected(agent))");
     expect(routeSource).not.toContain("`/api/agents/${encodeURIComponent(agent.agentId)}/purge`");
     expect(routeSource).toContain('method: "DELETE"');
