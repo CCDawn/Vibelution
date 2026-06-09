@@ -206,7 +206,7 @@ if ($null -eq $functionAst) {
 Set-Variable -Name configPath -Value $ConfigPath -Scope Script
 Write-Output ([string](Resolve-ConfiguredWorkbenchPort))
 """.strip(),
-        encoding="utf-8",
+        encoding="utf-8-sig",
     )
 
     command = [_powershell_exe(), "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(harness_path)]
@@ -268,7 +268,7 @@ if ($null -eq $functionAst) {
 Set-Variable -Name configPath -Value $ConfigPath -Scope Script
 Write-Output ([string](Resolve-ConfiguredLauncherControlPort -WorkbenchPort $WorkbenchPort))
 """.strip(),
-        encoding="utf-8",
+        encoding="utf-8-sig",
     )
 
     command = [_powershell_exe(), "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(harness_path)]
@@ -327,7 +327,7 @@ if ($null -eq $functionAst) {
 Set-Variable -Name configPath -Value $ConfigPath -Scope Script
 Write-Output ([string](Resolve-ConfiguredWorkbenchWindowMode))
 """.strip(),
-        encoding="utf-8",
+        encoding="utf-8-sig",
     )
 
     command = [_powershell_exe(), "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(harness_path)]
@@ -390,7 +390,7 @@ $size = [string](Resolve-ConfiguredWorkbenchWindowSize)
 $argument = [string](ConvertTo-EdgeWindowSizeArgument -Value $size)
 Write-Output "$size|$argument"
 """.strip(),
-        encoding="utf-8",
+        encoding="utf-8-sig",
     )
 
     command = [_powershell_exe(), "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(harness_path)]
@@ -546,7 +546,7 @@ Add-Content -LiteralPath (Join-Path $logDir "fake-vbs-entry-calls.jsonl") -Value
 
 def _run_launcher_ast_harness(tmp_path: Path, harness_source: str) -> subprocess.CompletedProcess[str]:
     harness_path = tmp_path / "launcher-ast-harness.ps1"
-    harness_path.write_text(_normalize_ast_harness_source(harness_source), encoding="utf-8")
+    harness_path.write_text(_normalize_ast_harness_source(harness_source), encoding="utf-8-sig")
     command = [
         _powershell_exe(),
         "-NoProfile",
@@ -562,7 +562,7 @@ def _run_launcher_ast_harness(tmp_path: Path, harness_source: str) -> subprocess
 
 def _run_desktop_entry_ast_harness(tmp_path: Path, harness_source: str) -> subprocess.CompletedProcess[str]:
     harness_path = tmp_path / "desktop-entry-ast-harness.ps1"
-    harness_path.write_text(_normalize_ast_harness_source(harness_source), encoding="utf-8")
+    harness_path.write_text(_normalize_ast_harness_source(harness_source), encoding="utf-8-sig")
     command = [
         _powershell_exe(),
         "-NoProfile",
@@ -6091,7 +6091,7 @@ def test_desktop_entry_launcher_action_times_out_and_logs_failure(tmp_path):
 param([string]$Action = "")
 Start-Sleep -Seconds 30
 """.strip(),
-        encoding="utf-8",
+        encoding="utf-8-sig",
     )
 
     env = os.environ.copy()
