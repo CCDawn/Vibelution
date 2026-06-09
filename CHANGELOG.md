@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.10 - 2026-06-09
+
+- Guarded supervised worktree candidate cleanup so discard actions only remove owned candidate worktrees or legacy harness temp worktrees, never arbitrary development worktree paths.
+- Added cleanup audit evidence for skipped or failed candidate deletion into the run snapshot and runtime-scene logs.
+- Added regression coverage for owned candidate deletion, unowned path skip behavior, and legacy harness temp-path bounds.
+
 ## 1.0.9 - 2026-06-09
 
 - Extended the Launcher runtime-manager restart wait window so guarded rebuild/close/open transactions can finish without the outer `-Action restart` call timing out near completion.

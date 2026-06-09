@@ -407,6 +407,112 @@ def test_self_origin_merge_requires_review_even_when_forced(tmp_path):
     assert "# candidate edit" in (project_root / "agent.py").read_text(encoding="utf-8")
 
 
+def test_discard_removes_owned_candidate_worktree(tmp_path, monkeypatch):
+    scene_events: list[dict] = []
+    project_root = tmp_path / "project"
+    _init_repo(project_root)
+    (project_root / "agent.py").write_text("print('base')\n", encoding="utf-8")
+    _run_git(project_root, "add", ".")
+    _run_git(project_root, "commit", "-m", "init")
+    candidate = tmp_path / "vibelution-harness-swte-rem-owned"
+    candidate.mkdir()
+
+    def fake_remove_worktree(root: Path, path: Path) -> None:
+        assert root == project_root.resolve()
+        assert path == candidate
+        candidate.rmdir()
+
+    def record_scene_event(*args, **kwargs):
+        scene_events.append({"args": args, "kwargs": kwargs})
+        return {"accepted": True}
+
+    monkeypatch.setattr(service, "remove_worktree", fake_remove_worktree)
+    monkeypatch.setattr(service, "record_runtime_scene_event", record_scene_event)
+    snapshot = {
+        "runId": "swte-rem-owned",
+        "runKind": service.RUN_KIND,
+        "status": "done",
+        "projectRoot": str(project_root),
+        "candidateWorktree": {
+            "path": str(candidate),
+            "preserved": True,
+            "cleanupOwner": service.RUN_KIND,
+            "cleanupRunId": "swte-rem-owned",
+        },
+    }
+    service._persist_snapshot(snapshot, active_run_id="")
+
+    updated = service.execute_supervised_worktree_action("swte-rem-owned", "discard")
+
+    assert updated["outcome"] == "discarded"
+    assert updated["candidateWorktree"]["preserved"] is False
+    assert updated["candidateWorktree"]["cleanup"]["status"] == "removed"
+    assert not candidate.exists()
+    assert scene_events == []
+
+
+def test_discard_skips_unowned_candidate_path_without_rmtree(tmp_path, monkeypatch):
+    scene_events: list[dict] = []
+    project_root = tmp_path / "project"
+    _init_repo(project_root)
+    (project_root / "agent.py").write_text("print('base')\n", encoding="utf-8")
+    _run_git(project_root, "add", ".")
+    _run_git(project_root, "commit", "-m", "init")
+    external_worktree = tmp_path / "ordinary-dev-worktree"
+    external_worktree.mkdir()
+    sentinel = external_worktree / "sentinel.txt"
+    sentinel.write_text("keep me", encoding="utf-8")
+
+    def forbidden_remove_worktree(*_: object) -> None:
+        raise AssertionError("unowned worktree must not reach git worktree remove")
+
+    def forbidden_rmtree(*_: object, **__: object) -> None:
+        raise AssertionError("unowned worktree must not be recursively deleted")
+
+    def record_scene_event(*args, **kwargs):
+        scene_events.append({"args": args, "kwargs": kwargs})
+        return {"accepted": True}
+
+    monkeypatch.setattr(service, "remove_worktree", forbidden_remove_worktree)
+    monkeypatch.setattr(service.shutil, "rmtree", forbidden_rmtree)
+    monkeypatch.setattr(service, "record_runtime_scene_event", record_scene_event)
+    snapshot = {
+        "runId": "swte-skip-unowned",
+        "runKind": service.RUN_KIND,
+        "status": "done",
+        "projectRoot": str(project_root),
+        "candidateWorktree": {"path": str(external_worktree), "preserved": True},
+    }
+    service._persist_snapshot(snapshot, active_run_id="")
+
+    updated = service.execute_supervised_worktree_action("swte-skip-unowned", "discard")
+
+    assert updated["outcome"] == "discard_skipped"
+    assert updated["candidateWorktree"]["preserved"] is True
+    assert updated["candidateWorktree"]["cleanup"]["status"] == "skipped"
+    assert updated["candidateWorktree"]["cleanup"]["reason"] == "unowned_candidate_path"
+    assert updated["actionStates"]["discard"]["enabled"] is False
+    assert sentinel.read_text(encoding="utf-8") == "keep me"
+    assert scene_events
+    assert scene_events[0]["args"][2] == "supervised_worktree_run.candidate_cleanup_skipped"
+    assert scene_events[0]["kwargs"]["fields"]["cleanupReason"] == "unowned_candidate_path"
+
+
+def test_legacy_harness_name_must_live_under_temp_dir(tmp_path):
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    candidate = tmp_path / "vibelution-harness-swte-legacy-owned"
+    candidate.mkdir()
+    plan = service._candidate_worktree_cleanup_plan(
+        {"runId": "swte-legacy-owned"},
+        project_root=project_root,
+        worktree={"path": str(candidate)},
+    )
+
+    assert plan["status"] == "skipped"
+    assert plan["reason"] == "unowned_candidate_path"
+
+
 def test_real_llm_mode_requires_explicit_cost_confirmation(tmp_path):
     project_root = tmp_path / "project"
     _write_bundle(project_root)

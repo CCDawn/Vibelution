@@ -7,6 +7,7 @@ import json
 import queue
 import shutil
 import subprocess
+import tempfile
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -836,6 +837,8 @@ def _default_worktree_factory(project_root: Path, run_id: str) -> dict[str, Any]
     worktree_path = create_worktree(project_root, snapshot, run_id)
     return {
         "path": str(worktree_path),
+        "cleanupOwner": RUN_KIND,
+        "cleanupRunId": run_id,
         "baseHead": snapshot.base_head,
         "checkpointCommit": snapshot.commit,
         "checkpointRef": snapshot.ref_name or "",
@@ -994,9 +997,13 @@ def _build_decision(snapshot: dict[str, Any], options: dict[str, Any]) -> dict[s
 def _finish_by_decision(snapshot: dict[str, Any], decision: dict[str, Any], options: dict[str, Any]) -> None:
     recommended = str(decision.get("recommendedAction") or "")
     if recommended == "discard":
-        _cleanup_candidate_worktree(snapshot)
-        outcome = "discarded"
-        message = "候选未优于基线或未过闸门，已丢弃候选工作树。"
+        cleanup = _cleanup_candidate_worktree(snapshot)
+        if cleanup.get("status") == "removed":
+            outcome = "discarded"
+            message = "候选未优于基线或未过闸门，已丢弃候选工作树。"
+        else:
+            outcome = "discard_skipped"
+            message = "候选未过闸门，但候选工作树路径未通过安全校验，已跳过删除。"
     elif recommended == "preserve":
         outcome = "preserved"
         message = "候选优于基线，已保留候选工作树和合并分析。"
@@ -1268,28 +1275,127 @@ def _mark_preserved(snapshot: dict[str, Any]) -> dict[str, Any]:
 
 def _discard_candidate(snapshot: dict[str, Any]) -> dict[str, Any]:
     updated = _clone(snapshot)
-    _cleanup_candidate_worktree(updated)
-    updated["outcome"] = "discarded"
+    cleanup = _cleanup_candidate_worktree(updated)
+    updated["outcome"] = "discarded" if cleanup.get("status") == "removed" else "discard_skipped"
     updated["updatedAt"] = _now_iso()
     _persist_snapshot(updated, active_run_id="")
     return updated
 
 
-def _cleanup_candidate_worktree(snapshot: dict[str, Any]) -> None:
+def _cleanup_candidate_worktree(snapshot: dict[str, Any]) -> dict[str, Any]:
     project_root = _snapshot_project_root(snapshot)
     worktree = snapshot.get("candidateWorktree") if isinstance(snapshot.get("candidateWorktree"), dict) else {}
     raw_path = str(worktree.get("path") or "").strip()
     checkpoint_ref = str(worktree.get("checkpointRef") or "").strip() or None
+    cleanup: dict[str, Any] = {"status": "skipped", "reason": "missing_path", "path": raw_path}
     if raw_path:
-        try:
-            remove_worktree(project_root, Path(raw_path))
-        except Exception:
-            shutil.rmtree(raw_path, ignore_errors=True)
+        cleanup = _candidate_worktree_cleanup_plan(snapshot, project_root=project_root, worktree=worktree)
+        if cleanup["status"] == "allowed":
+            try:
+                remove_worktree(project_root, Path(raw_path))
+                cleanup = {**cleanup, "status": "removed", "removedAt": _now_iso()}
+            except Exception as exc:
+                cleanup = {
+                    **cleanup,
+                    "status": "failed",
+                    "reason": type(exc).__name__,
+                    "message": str(exc)[:300],
+                    "failedAt": _now_iso(),
+                }
+        else:
+            cleanup = {**cleanup, "skippedAt": _now_iso()}
+        if cleanup["status"] in {"skipped", "failed"}:
+            _record_candidate_cleanup_event(snapshot, cleanup)
     try:
         delete_checkpoint_ref(project_root, checkpoint_ref)
     except Exception:
         pass
-    snapshot["candidateWorktree"] = {**worktree, "preserved": False, "removedAt": _now_iso()}
+    removed = cleanup.get("status") == "removed"
+    snapshot["candidateWorktree"] = {
+        **worktree,
+        "preserved": not removed,
+        "cleanup": cleanup,
+        **({"removedAt": cleanup.get("removedAt") or _now_iso()} if removed else {}),
+    }
+    return cleanup
+
+
+def _candidate_worktree_cleanup_plan(
+    snapshot: dict[str, Any],
+    *,
+    project_root: Path,
+    worktree: dict[str, Any],
+) -> dict[str, Any]:
+    raw_path = str(worktree.get("path") or "").strip()
+    run_id = str(snapshot.get("runId") or "").strip()
+    if not raw_path:
+        return {"status": "skipped", "reason": "missing_path", "path": raw_path}
+    try:
+        candidate_path = Path(raw_path).expanduser().resolve()
+    except Exception:
+        return {"status": "skipped", "reason": "invalid_path", "path": raw_path}
+
+    project_root = project_root.resolve()
+    if candidate_path == project_root:
+        return {"status": "skipped", "reason": "candidate_is_project_root", "path": str(candidate_path)}
+    try:
+        candidate_path.relative_to(project_root)
+        return {"status": "skipped", "reason": "candidate_inside_project_root", "path": str(candidate_path)}
+    except ValueError:
+        pass
+
+    cleanup_owner = str(worktree.get("cleanupOwner") or "").strip()
+    cleanup_run_id = str(worktree.get("cleanupRunId") or "").strip()
+    if cleanup_owner == RUN_KIND and cleanup_run_id == run_id:
+        return {"status": "allowed", "reason": "owned_candidate_worktree", "path": str(candidate_path)}
+
+    temp_root = Path(tempfile.gettempdir()).resolve()
+    try:
+        candidate_path.relative_to(temp_root)
+        is_temp_path = True
+    except ValueError:
+        is_temp_path = False
+    if is_temp_path and candidate_path.name.startswith(f"vibelution-harness-{run_id[:8]}-"):
+        return {"status": "allowed", "reason": "legacy_harness_candidate_worktree", "path": str(candidate_path)}
+
+    return {"status": "skipped", "reason": "unowned_candidate_path", "path": str(candidate_path)}
+
+
+def _record_candidate_cleanup_event(snapshot: dict[str, Any], cleanup: dict[str, Any]) -> None:
+    run_id = str(snapshot.get("runId") or "")
+    status = str(cleanup.get("status") or "")
+    reason = str(cleanup.get("reason") or "")
+    message = (
+        f"候选工作树清理已跳过：{reason}"
+        if status == "skipped"
+        else f"候选工作树清理失败：{reason}"
+    )
+    events = snapshot.setdefault("events", [])
+    if isinstance(events, list):
+        events.append(
+            {
+                "type": "candidate_cleanup",
+                "message": message,
+                "timestamp": _now_iso(),
+                "cleanup": cleanup,
+            }
+        )
+    _record_worktree_scene_event(
+        "candidate_cleanup",
+        f"supervised_worktree_run.candidate_cleanup_{status}",
+        run_id=run_id,
+        message=message,
+        level="warning",
+        outcome=status or "observed",
+        fields={
+            **_snapshot_event_fields(snapshot),
+            "cleanupStatus": status,
+            "cleanupReason": reason,
+            "candidatePath": str(cleanup.get("path") or ""),
+        },
+        child_log_payload={"cleanup": cleanup},
+        lifecycle=True,
+    )
 
 
 def _candidate_changed_files(
@@ -1674,7 +1780,7 @@ def _action_states(snapshot: dict[str, Any]) -> dict[str, Any]:
     review_gate = snapshot.get("reviewGate") if isinstance(snapshot.get("reviewGate"), dict) else {}
     return {
         "preserve": {"enabled": done and has_worktree and outcome not in {"preserved", "merged"}},
-        "discard": {"enabled": done and has_worktree and outcome not in {"discarded", "merged"}},
+        "discard": {"enabled": done and has_worktree and outcome not in {"discarded", "discard_skipped", "merged"}},
         "analyzeMerge": {"enabled": done and has_worktree},
         "approveReview": {
             "enabled": done and has_worktree and bool(review_gate.get("required")) and review_pending,
