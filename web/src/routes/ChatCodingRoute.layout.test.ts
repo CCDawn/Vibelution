@@ -837,7 +837,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("if (!window.confirm(sessionConfirmMessage))");
     expect(routeSource).toContain("if (!window.confirm(groupConfirmMessage))");
     expect(routeSource).toContain("[session.id]: t(\"deleteSessionBusy\")");
-    expect(routeSource).toContain("const deleteBusyReason = sessionIsBusy ? t(\"deleteSessionBusy\") : \"\"");
+    expect(routeSource).toContain("deleteBusyLabel: t(\"deleteSessionBusy\")");
+    expect(directSessionIndexItemSource).toContain("const deleteBusyReason = sessionBusy ? deleteBusyLabel : \"\"");
     expect(routeSource.indexOf("window.confirm(sessionConfirmMessage)")).toBeLessThan(
       routeSource.indexOf("deleteSessionMutation.mutate({ sessionId: session.id })"),
     );
@@ -893,13 +894,14 @@ describe("ChatCodingRoute layout contract", () => {
     expect(titleHelperRootSource.indexOf("session.title")).toBeLessThan(titleHelperRootSource.indexOf("session.agentDisplayName"));
     expect(routeSource).toContain("title: sessionListTitle(session)");
     expect(routeSource).toContain("agentDisplayName: conversation.agentDisplayName");
-    expect(routeSource).toContain("const sessionAgentMeta = sessionAgentMetaLabel(session)");
+    expect(routeSource).toContain("buildDirectSessionIndexViewModel");
+    expect(routeSource).toContain("const sessionView = buildDirectSessionIndexViewModel");
+    expect(directSessionIndexItemSource).toContain("const sessionAgentMeta = sessionAgentMetaLabel(session)");
     expect(directSessionIndexItemSource).toContain("export function sessionAgentMetaLabel");
     expect(directSessionIndexItemSource).toContain("return `Agent ${code}`;");
     expect(directSessionIndexItemSource).toContain("export function showSessionFunctionLabel");
     expect(directSessionIndexItemSource).toContain('label === "会话入口"');
-    expect(routeSource).toContain("const sessionTitle =");
-    expect(routeSource).toContain("const sessionTitle = sessionListTitle(session) || sessionDisplay.name");
+    expect(directSessionIndexItemSource).toContain("const sessionTitle = sessionListTitle(session) || sessionDisplay.name");
     expect(routeSource).toContain("agentDisplayName: title");
     expect(routeSource).toContain("targetSession");
     expect(directSessionIndexItemSource).toContain("{sessionTitle}");

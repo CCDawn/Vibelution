@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { SessionSummary } from "../api/types";
 import type { AgentDisplayInfo } from "./agentDisplay";
 import {
+  buildDirectSessionIndexViewModel,
   isAgentRootSession,
   isChildSession,
   sessionAgentMetaLabel,
@@ -68,5 +69,89 @@ describe("DirectSessionIndexItem helpers", () => {
     expect(isChildSession(root)).toBe(false);
     expect(isAgentRootSession(child)).toBe(false);
     expect(isChildSession(child)).toBe(true);
+  });
+
+  it("builds the compact direct session item view model for normal sessions", () => {
+    const view = buildDirectSessionIndexViewModel({
+      addToReviewSucceededLabel: "已加入评审",
+      agent: undefined,
+      deleteBusyLabel: "会话运行中",
+      itemError: "",
+      lang: "zh",
+      session: makeSession({
+        agentCode: "A030",
+        agentDisplayName: "顾明澈",
+        taskSummary: "",
+        title: "小米2.5pro",
+      }),
+      sessionBusy: false,
+    });
+
+    expect(view.sessionTitle).toBe("小米2.5pro");
+    expect(view.sessionSummary).toBe("暂无摘要");
+    expect(view.sessionAgentMeta).toBe("Agent A030");
+    expect(view.itemMessage).toBe("");
+    expect(view.itemIsNotice).toBe(false);
+    expect(view.missingAgentMessage).toBe("");
+  });
+
+  it("uses child session result summaries before generic fallback copy", () => {
+    const view = buildDirectSessionIndexViewModel({
+      addToReviewSucceededLabel: "Added",
+      agent: undefined,
+      deleteBusyLabel: "Busy",
+      itemError: "",
+      lang: "en",
+      session: makeSession({
+        resultCard: { title: "Child title", summary: "Report summary" },
+        sessionKind: "child",
+        taskSummary: "Task summary",
+        title: "Inherited title",
+      }),
+      sessionBusy: false,
+    });
+
+    expect(view.sessionTitle).toBe("Child title");
+    expect(view.sessionSummary).toBe("Report summary");
+  });
+
+  it("marks busy delete reasons and review success messages as notices", () => {
+    const busy = buildDirectSessionIndexViewModel({
+      addToReviewSucceededLabel: "已加入评审",
+      agent: undefined,
+      deleteBusyLabel: "会话运行中",
+      itemError: "",
+      lang: "zh",
+      session: makeSession({}),
+      sessionBusy: true,
+    });
+    const success = buildDirectSessionIndexViewModel({
+      addToReviewSucceededLabel: "已加入评审",
+      agent: undefined,
+      deleteBusyLabel: "会话运行中",
+      itemError: "已加入评审队列",
+      lang: "zh",
+      session: makeSession({}),
+      sessionBusy: false,
+    });
+
+    expect(busy.itemMessage).toBe("会话运行中");
+    expect(busy.itemIsNotice).toBe(true);
+    expect(success.itemMessage).toBe("已加入评审队列");
+    expect(success.itemIsNotice).toBe(true);
+  });
+
+  it("keeps missing Agent copy near the direct session view model", () => {
+    const view = buildDirectSessionIndexViewModel({
+      addToReviewSucceededLabel: "Added",
+      agent: undefined,
+      deleteBusyLabel: "Busy",
+      itemError: "",
+      lang: "en",
+      session: makeSession({ agentMissing: true, agentStatusMessage: "" }),
+      sessionBusy: false,
+    });
+
+    expect(view.missingAgentMessage).toBe("Missing valid Agent. This session has no runnable Agent content.");
   });
 });
