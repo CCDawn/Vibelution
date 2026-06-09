@@ -13061,13 +13061,21 @@ def test_config_workspace_batch_image_capability_persists_model_and_profile(monk
         "streaming": True,
         "tool_calling_mode": "auto",
         "discovery_enabled": True,
+        "supports_image_input": False,
     }
     public_config["llm"]["profiles"]["primary"] = {"model_ref": "local_vision_probe"}
     monkeypatch.setattr(config_service, "load_public_config", lambda: copy.deepcopy(public_config))
 
     class FakeClient:
         def __init__(self, *args, **kwargs):
-            pass
+            config = kwargs["config"]
+            profile_id = kwargs["profile_id"]
+            profile = config.llm.get_profile(profile_id=profile_id)
+            assert config.llm.get_provider(profile.provider_id).provider_id
+            assert profile.supports_image_input is True
+            model_entry = config.llm.get_model_library_entry_for_profile(profile)[1]
+            assert model_entry["model"] == "local-vision"
+            assert model_entry["supports_image_input"] is True
 
         def invoke(self, messages, tools=None, metadata=None):
             assert metadata == {"probeCapability": "image_input"}
@@ -13175,6 +13183,40 @@ def test_config_workspace_draft_model_ignores_submitted_api_key_env(monkeypatch)
     assert updated["api_key_env"] == "VIBELUTION_LLM_MODEL_DEEPSEEK_V4_PRO_API_KEY"
     assert "PATH" not in payload["draftMeta"]["pending_api_keys"]
     assert "VIBELUTION_LLM_MODEL_DEEPSEEK_V4_PRO_API_KEY" in payload["draftMeta"]["pending_api_keys"]
+
+
+def test_config_workspace_draft_model_persists_manual_image_input_support(monkeypatch):
+    public_config = copy.deepcopy(load_public_config())
+    target = public_config["llm"]["model_library"]["deepseek_v4_pro"]
+
+    monkeypatch.setattr(config_service, "load_public_config", lambda: copy.deepcopy(public_config))
+
+    response = client.post(
+        "/api/config/draft/update-model",
+        json={
+            "publicConfig": public_config,
+            "draftMeta": {},
+            "baseHash": public_config_hash(public_config),
+            "modelId": "deepseek_v4_pro",
+            "provider": target["provider"],
+            "model": "deepseek-v4-pro",
+            "label": "DeepSeek V4 Pro",
+            "details": {
+                **target,
+                "supports_image_input": True,
+                "capability_status": "supported",
+                "capability_source": "manual",
+            },
+            "apiKeyEnv": "VIBELUTION_LLM_MODEL_DEEPSEEK_V4_PRO_API_KEY",
+            "apiKey": "",
+        },
+    )
+
+    assert response.status_code == 200, response.json()
+    model = response.json()["publicConfig"]["llm"]["model_library"]["deepseek_v4_pro"]
+    assert model["supports_image_input"] is True
+    assert model["capability_status"] == "supported"
+    assert model["capability_source"] == "manual"
 
 
 def test_config_workspace_draft_model_allows_approved_ai_pixel_relay_host(monkeypatch):
