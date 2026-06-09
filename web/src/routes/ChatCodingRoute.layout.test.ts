@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import conversationStyles from "../components/conversation/ConversationView.module.css";
 import shellStoreSource from "../store/shellStore.ts?raw";
 import routeSource from "./ChatCodingRoute.tsx?raw";
+import conversationIndexSectionSource from "./ConversationIndexSection.tsx?raw";
 import directSessionIndexItemSource from "./DirectSessionIndexItem.tsx?raw";
 import groupSessionIndexItemsSource from "./GroupSessionIndexItems.tsx?raw";
 import routeStyles from "./ChatCodingRoute.module.css";
@@ -770,11 +771,11 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("未归属群聊");
     expect(routeSource).toContain("toggleConversationGroup(\"teams\")");
     expect(routeSource).toContain("toggleConversationGroup(\"standaloneGroups\")");
-    expect(routeSource).toContain("aria-expanded={searchHasTerm || !collapsedConversationGroups.teams}");
-    expect(routeSource).toContain("aria-expanded={searchHasTerm || !collapsedConversationGroups.standaloneGroups}");
+    expect(routeSource).toContain("expanded={searchHasTerm || !collapsedConversationGroups.teams}");
+    expect(routeSource).toContain("expanded={searchHasTerm || !collapsedConversationGroups.standaloneGroups}");
     expect(routeSource).toContain("conversationGroupLabel(\"teams\"");
     expect(routeSource).toContain("conversationGroupLabel(\"standaloneGroups\"");
-    expect(routeSource).toContain("styles.teamTreeGroup");
+    expect(routeSource).toContain("className={styles.teamTreeGroup}");
     expect(groupSessionIndexItemsSource).toContain("styles.teamTreeChildren");
     expect(groupSessionIndexItemsSource).toContain("styles.teamTreeChild");
 
@@ -793,8 +794,12 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("conversationGroupLabel");
     expect(routeSource).toContain("groupedConversations.map");
     expect(routeSource).toContain("toggleConversationGroup");
-    expect(routeSource).toContain("styles.conversationGroupHeader");
-    expect(routeSource).toContain("aria-expanded={!collapsed}");
+    expect(routeSource).toContain("ConversationIndexSection");
+    expect(routeSource).toContain("expanded={!collapsed}");
+    expect(conversationIndexSectionSource).toContain("styles.conversationGroupHeader");
+    expect(conversationIndexSectionSource).toContain("styles.conversationGroupList");
+    expect(conversationIndexSectionSource).toContain("aria-expanded={expanded}");
+    expect(conversationIndexSectionSource).toContain("<ChevronRight size={14} aria-hidden=\"true\" />");
     expect(routeSource).toContain("searchHasTerm");
 
     expect(routeStyles.conversationGroup).toBeTypeOf("string");
