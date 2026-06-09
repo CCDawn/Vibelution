@@ -42,13 +42,13 @@ import {
   asRecord,
   avatarCropSourceRect,
   clonePublicConfig,
+  buildConfigApplyPayload,
   configInvalidationDomainsForApply,
   defaultModelApiKeyEnv,
   deriveConfigEditorSyncState,
   deriveModelCenterInventoryRows,
   deriveModelCenterSummary,
   countModelCenterHealthIssues,
-  mergeEditableConfigView,
   getString,
   clampAvatarCropOffset,
   groupModelPresets,
@@ -2156,6 +2156,7 @@ export function ConfigRoute() {
   });
 
   const [draftConfig, setDraftConfig] = useState<PublicConfigShape | null>(null);
+  const [baseConfig, setBaseConfig] = useState<PublicConfigShape | null>(null);
   const [draftMeta, setDraftMeta] = useState<ConfigDraftMeta>(emptyDraftMeta());
   const [baseHash, setBaseHash] = useState("");
   const [draftHash, setDraftHash] = useState("");
@@ -2185,9 +2186,12 @@ export function ConfigRoute() {
     );
   });
 
-  function syncWorkspace(workspace: ConfigWorkspace, tone: NoticeTone = "neutral") {
+  function syncWorkspace(workspace: ConfigWorkspace, tone: NoticeTone = "neutral", options: { resetBase?: boolean } = {}) {
     setActiveWorkspace(clonePublicConfig(workspace));
     setDraftConfig(clonePublicConfig(workspace.publicConfig));
+    if (options.resetBase !== false) {
+      setBaseConfig(clonePublicConfig(workspace.publicConfig));
+    }
     setDraftMeta(clonePublicConfig(workspace.draftMeta));
     setBaseHash(workspace.baseHash);
     setDraftHash(workspace.hash);
@@ -2452,14 +2456,16 @@ export function ConfigRoute() {
   }
 
   function resolveDraftForSubmission(): PublicConfigShape {
-    if (!draftConfig) {
-      throw new Error(copy.loadFailed);
-    }
-    if (!hasEditorChanges) {
-      return draftConfig;
-    }
-    const editorView = JSON.parse(jsonText) as PublicConfigShape;
-    return mergeEditableConfigView(draftConfig, editorView, workspace?.editorSections ?? []);
+    return buildConfigApplyPayload({
+      draftConfig,
+      draftMeta,
+      baseHash,
+      baseConfig,
+      editorText: jsonText,
+      hasEditorChanges,
+      editorSections: workspace?.editorSections ?? [],
+      loadFailedMessage: copy.loadFailed,
+    }).publicConfig;
   }
 
   async function previewDraft(nextConfig: PublicConfigShape, nextMeta: ConfigDraftMeta, pendingLabel: string) {
@@ -2470,7 +2476,7 @@ export function ConfigRoute() {
         draftMeta: nextMeta,
         baseHash,
       });
-      syncWorkspace(response, "success");
+      syncWorkspace(response, "success", { resetBase: false });
       return true;
     } catch (error) {
       markError(error);
@@ -2510,13 +2516,19 @@ export function ConfigRoute() {
     setBusyAction(pendingLabel);
     try {
       const nextConfig = resolveDraftForSubmission();
+      const payload = buildConfigApplyPayload({
+        draftConfig,
+        draftMeta,
+        baseHash,
+        baseConfig,
+        editorText: jsonText,
+        hasEditorChanges,
+        editorSections: workspace?.editorSections ?? [],
+        loadFailedMessage: copy.loadFailed,
+      });
       const response = await requestJson<ConfigWorkspace>(
         "/api/config/apply",
-        {
-          publicConfig: nextConfig,
-          draftMeta,
-          baseHash,
-        },
+        payload,
         "PUT",
       );
       syncWorkspace(response, "success");
@@ -2555,7 +2567,16 @@ export function ConfigRoute() {
 
   async function handleValidateEditorDraft() {
     try {
-      const parsed = mergeEditableConfigView(draftConfig ?? {}, JSON.parse(jsonText) as PublicConfigShape, workspace?.editorSections ?? []);
+      const parsed = buildConfigApplyPayload({
+        draftConfig: draftConfig ?? {},
+        draftMeta,
+        baseHash,
+        baseConfig,
+        editorText: jsonText,
+        hasEditorChanges: true,
+        editorSections: workspace?.editorSections ?? [],
+        loadFailedMessage: copy.loadFailed,
+      }).publicConfig;
       await previewDraft(parsed, draftMeta, copy.validationPending);
     } catch (error) {
       markError(error);
@@ -2811,7 +2832,7 @@ export function ConfigRoute() {
         apiKey: modelEditor.api_key,
         clearApiKey: modelEditor.clear_api_key,
       });
-      syncWorkspace(response, "success");
+      syncWorkspace(response, "success", { resetBase: false });
       setModelEditorExpanded(false);
     } catch (error) {
       setModelEditorError(markError(error));
@@ -2836,7 +2857,7 @@ export function ConfigRoute() {
         baseHash,
         modelId,
       });
-      syncWorkspace(response, "success");
+      syncWorkspace(response, "success", { resetBase: false });
     } catch (error) {
       markError(error);
     } finally {
@@ -2883,7 +2904,7 @@ export function ConfigRoute() {
         baseHash,
         modelIds,
       });
-      syncWorkspace(response, "success");
+      syncWorkspace(response, "success", { resetBase: false });
     } catch (error) {
       markError(error);
     } finally {

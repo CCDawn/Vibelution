@@ -62,6 +62,24 @@ export type ModelEditability = {
   deletable: boolean;
 };
 
+export type ConfigApplyPayload = {
+  publicConfig: PublicConfigShape;
+  draftMeta: ConfigDraftMeta;
+  baseHash: string;
+  baseConfig: PublicConfigShape;
+};
+
+export type BuildConfigApplyPayloadInput = {
+  draftConfig: PublicConfigShape | null;
+  draftMeta: ConfigDraftMeta;
+  baseHash: string;
+  baseConfig: PublicConfigShape | null;
+  editorText: string;
+  hasEditorChanges: boolean;
+  editorSections: ConfigEditableSectionPath[];
+  loadFailedMessage: string;
+};
+
 export type ModelScenarioId = "chat" | "relay" | "image" | "local" | "manual";
 
 export const MODEL_SCENARIOS: ModelScenarioId[] = ["chat", "relay", "image", "local", "manual"];
@@ -330,6 +348,21 @@ export function mergeEditableConfigView(
     }
     return setValueAtConfigPath(merged, path, value);
   }, clonePublicConfig(baseConfig));
+}
+
+export function buildConfigApplyPayload(input: BuildConfigApplyPayloadInput): ConfigApplyPayload {
+  if (!input.draftConfig) {
+    throw new Error(input.loadFailedMessage);
+  }
+  const publicConfig = input.hasEditorChanges
+    ? mergeEditableConfigView(input.draftConfig, JSON.parse(input.editorText) as PublicConfigShape, input.editorSections)
+    : input.draftConfig;
+  return {
+    publicConfig,
+    draftMeta: input.draftMeta,
+    baseHash: input.baseHash,
+    baseConfig: input.baseConfig ?? input.draftConfig,
+  };
 }
 
 export function hasPendingSecretChanges(draftMeta: ConfigDraftMeta): boolean {
