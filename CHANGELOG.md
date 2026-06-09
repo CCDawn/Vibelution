@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.12 - 2026-06-09
+
+- Densified the Memory workbench layout so operational memory panels use tighter spacing, better clipping, and verified layout coverage.
+- Improved prompt cache hit stability by preserving history-before-volatile-context ordering and reusing fresh Memory overview section cache entries when signatures remain unchanged.
+- Added regression coverage for prompt-cache ordering, Memory overview cache reuse, and Memory route layout density.
+
 ## 1.0.11 - 2026-06-09
 
 - Changed Config apply to merge only the fields changed from the setting page's original baseline, preventing stale drafts from overwriting unrelated current settings.
