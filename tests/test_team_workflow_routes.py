@@ -141,6 +141,34 @@ def test_team_workflow_route_starts_source_collection_run(tmp_path, monkeypatch)
     assert status_response.json()["boundaries"]["writesFormalKnowledge"] is False
 
 
+def test_team_workflow_route_starts_research_stage_round(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    client = _client()
+    team = client.post("/api/teams", json={"name": "ai科学研究团队"}).json()
+
+    response = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/stage-rounds/start",
+        json={
+            "stageType": "knowledge_collection",
+            "topic": "predictive coding",
+            "querySeeds": ["cortical predictive coding"],
+            "agentRoles": ["data_discovery", "source_quality"],
+        },
+    )
+    status_response = client.get(f"/api/teams/{team['teamId']}/workflow-orchestration/stage-rounds/status")
+
+    assert response.status_code == 201, response.text
+    assert response.json()["created"] is True
+    assert response.json()["stageRound"]["status"] == "running"
+    assert response.json()["stageRound"]["sourceRunIds"] == [response.json()["run"]["runId"]]
+    assert response.json()["stageRound"]["teamMemoryRecord"]["recordKind"] == "team_workflow_stage_record"
+    assert response.json()["stageRound"]["coordinationContract"]["autoStarted"] is False
+    assert response.json()["searchPlan"]["boundaries"]["externalSearchTriggered"] is False
+    assert status_response.status_code == 200, status_response.text
+    assert status_response.json()["phases"][0]["activeRoundId"] == response.json()["stageRound"]["stageRoundId"]
+    assert status_response.json()["boundaries"]["writesFormalKnowledge"] is False
+
+
 def test_team_workflow_route_blocks_non_owner_transfer_decision(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     client = _client()

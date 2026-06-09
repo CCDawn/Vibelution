@@ -60,6 +60,11 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("researchWorkflowTeamSelected");
     expect(routeSource).toContain("teamWorkflowKnowledgeIngestionStatusQuery");
     expect(routeSource).toContain("/workflow-orchestration/knowledge-ingestion/status");
+    expect(routeSource).toContain("ResearchStageRoundStatusPayload");
+    expect(routeSource).toContain("researchStageRoundStatusQuery");
+    expect(routeSource).toContain("/workflow-orchestration/stage-rounds/status");
+    expect(routeSource).toContain("/workflow-orchestration/stage-rounds/start");
+    expect(routeSource).toContain("startResearchStageRoundMutation");
     expect(routeSource).toContain("startSourceCollectionRunMutation");
     expect(routeSource).toContain("recordSourceCollectionOutputMutation");
     expect(routeSource).toContain("/workflow-orchestration/source-collection-runs");
@@ -162,6 +167,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("researchWorkspaceView");
     expect(routeSource).toContain("selectResearchWorkspaceView");
     expect(routeSource).toContain("renderResearchWorkspaceNav");
+    expect(routeSource).toContain("renderResearchStageLauncher");
     expect(routeSource).toContain("researchWorkspaceViewLabel");
     expect(routeSource).toContain("styles.workspaceResearch");
     expect(routeSource).toContain("styles.workspaceResearchCanvas");
@@ -174,6 +180,11 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("组织画布");
     expect(routeSource).toContain("附属团队结构图");
     expect(routeSource).toContain("资料搜集");
+    expect(routeSource).toContain("科研三阶段启动台");
+    expect(routeSource).toContain("启动知识搜集");
+    expect(routeSource).toContain("启动实验规划");
+    expect(routeSource).toContain("启动迭代");
+    expect(routeSource).toContain("{!researchCanvasVisible ? renderResearchStageLauncher() : null}");
     expect(routeSource).toContain("启动批次与回写结果");
     expect(routeSource).toContain("{researchCanvasVisible ? renderResearchWorkspaceNav() : null}");
     expect(routeSource).toContain("{!researchCanvasVisible ? renderResearchWorkspaceNav() : null}");
