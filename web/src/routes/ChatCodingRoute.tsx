@@ -134,9 +134,19 @@ import {
 } from "./agentDisplay";
 import { ConversationIndexTree } from "./ConversationIndexTree";
 import {
-  isAgentRootSession,
+  DEFAULT_COLLAPSED_CONVERSATION_GROUPS,
+  conversationGroupLabel,
+  hasInvalidChildSessionLink,
+  isRepresentedInAgentSessionTabs,
+  isVisibleDirectSession,
+  rootSessionIdFor,
+  sessionToConversationSummary,
+  useConversationIndexModel,
+  type ConversationIndexGroupKey,
+} from "./conversationIndexModel";
+import {
   isChildSession,
-  sessionListTitle,
+  isAgentRootSession,
 } from "./DirectSessionIndexItem";
 import { SessionContextMenu } from "./SessionContextMenu";
 import {
@@ -371,15 +381,6 @@ type ResizableSide = "left" | "right";
 type PetInteractionAction = "feed" | "talk" | "care";
 type FeaturePresetKey = "planningMode" | "goalMode" | "toolBoost";
 type RightIndexPanel = "conversations" | "members";
-type ConversationGroupKey =
-  | "user"
-  | "group"
-  | "research"
-  | "selfEvolution"
-  | "supervisedEvolution"
-  | "teams"
-  | "standaloneGroups"
-  | "other";
 type ComposerImageAttachment = {
   id: string;
   file: File;
@@ -430,26 +431,6 @@ const DEFAULT_CHAT_FEATURE_PRESETS: Record<FeaturePresetKey, boolean> = {
   goalMode: false,
   toolBoost: false,
 };
-
-const DEFAULT_COLLAPSED_CONVERSATION_GROUPS: Record<ConversationGroupKey, boolean> = {
-  user: false,
-  group: false,
-  research: true,
-  selfEvolution: true,
-  supervisedEvolution: true,
-  teams: false,
-  standaloneGroups: true,
-  other: true,
-};
-
-const CONVERSATION_GROUP_ORDER: ConversationGroupKey[] = [
-  "user",
-  "group",
-  "research",
-  "selfEvolution",
-  "supervisedEvolution",
-  "other",
-];
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
@@ -768,81 +749,6 @@ function isAvailableGroupParticipant(participant: ChatRoomParticipant) {
   return !participant.agentMissing && participant.enabled !== false;
 }
 
-function sessionToConversationSummary(session: SessionSummary): ConversationSummary {
-  return {
-    conversationId: session.id,
-    type: "direct_agent",
-    title: sessionListTitle(session),
-    agentId: session.agentId,
-    agentCode: session.agentCode,
-    agentDisplayName: session.agentDisplayName,
-    agentAvatarImagePath: session.agentAvatarImagePath,
-    agentAvatarImageUrl: session.agentAvatarImageUrl,
-    directSessionId: session.id,
-    roomId: "",
-    status: session.status,
-    summary: session.taskSummary,
-    updatedAt: session.updatedAt || session.lastActive,
-    workspacePath: session.agentWorkspacePath || session.workspacePath || "",
-    agentPrimaryMode: session.agentPrimaryMode,
-    agentRoleKey: session.agentRoleKey,
-    agentPromptTemplateId: session.agentPromptTemplateId,
-    dialogueModelId: session.dialogueModelId,
-  };
-}
-
-function isVisibleDirectSession(session: SessionSummary | undefined | null) {
-  if (!session) {
-    return false;
-  }
-  if (session.agentMissing) {
-    return false;
-  }
-  if (!String(session.agentId ?? "").trim()) {
-    return true;
-  }
-  return true;
-}
-
-function rootSessionIdFor(session: SessionSummary | undefined | null) {
-  if (!session) {
-    return "";
-  }
-  if (isChildSession(session)) {
-    return String(session.rootSessionId || session.parentSessionId || "").trim();
-  }
-  return String(session.rootSessionId || session.id || "").trim();
-}
-
-function isRepresentedInAgentSessionTabs(session: SessionSummary | undefined | null) {
-  return isChildSession(session);
-}
-
-function hasInvalidChildSessionLink(session: SessionSummary | undefined | null) {
-  return isChildSession(session) && !rootSessionIdFor(session);
-}
-
-function isVisibleConversation(
-  conversation: ConversationSummary,
-  sessionsById?: Map<string, SessionSummary>,
-) {
-  if (conversation.type !== "direct_agent") {
-    return true;
-  }
-  const sessionId = conversation.directSessionId || conversation.conversationId;
-  const session = sessionId && sessionsById ? sessionsById.get(sessionId) : undefined;
-  if (session) {
-    return isVisibleDirectSession(session);
-  }
-  if (conversation.agentMissing) {
-    return false;
-  }
-  if (!String(conversation.agentId ?? "").trim()) {
-    return true;
-  }
-  return true;
-}
-
 function removeDeletedSessionFromConversations(
   conversations: ConversationSummary[] | undefined,
   deletedSessionId: string,
@@ -914,29 +820,6 @@ function renameSessionInConversations(
       updatedAt,
     };
   });
-}
-
-function mergeVisibleSessionsIntoConversations(
-  conversations: ConversationSummary[] | undefined,
-  sessions: SessionSummary[],
-): ConversationSummary[] {
-  const merged = [...(conversations ?? [])];
-  const directSessionIds = new Set(
-    merged
-      .filter((conversation) => conversation.type === "direct_agent")
-      .map((conversation) => String(conversation.directSessionId || conversation.conversationId || "").trim())
-      .filter(Boolean),
-  );
-  for (const session of sessions) {
-    if (directSessionIds.has(session.id)) {
-      continue;
-    }
-    merged.push(sessionToConversationSummary(session));
-    directSessionIds.add(session.id);
-  }
-  return merged.sort((left, right) =>
-    String(right.updatedAt || "").localeCompare(String(left.updatedAt || "")),
-  );
 }
 
 function latestSessionMessageId(detail: SessionDetail): string {
@@ -1024,54 +907,6 @@ function mergeAssistantDeltaIntoSessionDetail(
   };
 }
 
-function classifyConversation(conversation: ConversationSummary): ConversationGroupKey {
-  if (conversation.type === "group_room") {
-    return "group";
-  }
-  const primaryMode = String(conversation.agentPrimaryMode ?? "").trim().toLowerCase();
-  const roleKey = String(conversation.agentRoleKey ?? "").trim().toLowerCase();
-  const promptTemplateId = String(conversation.agentPromptTemplateId ?? "").trim().toLowerCase();
-  const title = String(conversation.title ?? "").trim().toLowerCase();
-  const combined = `${primaryMode} ${roleKey} ${promptTemplateId} ${title}`;
-  if (
-    primaryMode === "research"
-    || roleKey.startsWith("research_")
-    || promptTemplateId.startsWith("prompt-research-")
-    || combined.includes("research")
-    || combined.includes("广撒网 agent")
-    || combined.includes("定向深搜 agent")
-    || combined.includes("证据审查 agent")
-    || combined.includes("主题生成 agent")
-    || combined.includes("主题卡 agent")
-  ) {
-    return "research";
-  }
-  if (combined.includes("self_evolution") || combined.includes("自进化")) {
-    return "selfEvolution";
-  }
-  if (combined.includes("supervised") || combined.includes("监督进化")) {
-    return "supervisedEvolution";
-  }
-  if (title.includes("agent")) {
-    return "other";
-  }
-  return "user";
-}
-
-function conversationGroupLabel(groupKey: ConversationGroupKey, lang: "zh" | "en") {
-  const labels: Record<ConversationGroupKey, { zh: string; en: string }> = {
-    user: { zh: "用户会话", en: "User chats" },
-    group: { zh: "群聊", en: "Group chats" },
-    research: { zh: "科研 Agent", en: "Research agents" },
-    selfEvolution: { zh: "自进化 Agent", en: "Self-evolution agents" },
-    supervisedEvolution: { zh: "监督进化 Agent", en: "Supervised agents" },
-    teams: { zh: "团队", en: "Teams" },
-    standaloneGroups: { zh: "未归属群聊", en: "Standalone groups" },
-    other: { zh: "其他 Agent", en: "Other agents" },
-  };
-  return labels[groupKey][lang];
-}
-
 function latestMentalSnapshot(messages: ConversationMessage[] | undefined): MentalStateSnapshot | undefined {
   return [...(messages ?? [])].reverse().find((message) => message.role === "assistant" && message.mentalSnapshot)?.mentalSnapshot;
 }
@@ -1127,7 +962,7 @@ export function ChatCodingRoute() {
   const [groupModeDraft, setGroupModeDraft] = useState("round_robin");
   const [groupPurposeDraft, setGroupPurposeDraft] = useState("discussion");
   const [groupSelectedAgentIds, setGroupSelectedAgentIds] = useState<string[]>([]);
-  const [collapsedConversationGroups, setCollapsedConversationGroups] = useState<Record<ConversationGroupKey, boolean>>(
+  const [collapsedConversationGroups, setCollapsedConversationGroups] = useState<Record<ConversationIndexGroupKey, boolean>>(
     DEFAULT_COLLAPSED_CONVERSATION_GROUPS,
   );
   const [rightIndexPanel, setRightIndexPanel] = useState<RightIndexPanel>("conversations");
@@ -3285,10 +3120,6 @@ export function ChatCodingRoute() {
     return new Map(allVisibleSessions.map((session) => [session.id, session]));
   }, [allVisibleSessions]);
 
-  const rawSessionsById = useMemo(() => {
-    return new Map((rawSessionsQuery.data ?? []).map((session) => [session.id, session]));
-  }, [rawSessionsQuery.data]);
-
   const contextMenuSession = useMemo(() => {
     if (!sessionContextMenu) {
       return undefined;
@@ -3388,104 +3219,22 @@ export function ChatCodingRoute() {
     },
     [activeGroupTeamMemberByAgentId, agentsById, lang, resolveModelLabel],
   );
-  const filteredConversations = useMemo(() => {
-    const term = sessionFilter.trim().toLowerCase();
-    const conversations = mergeVisibleSessionsIntoConversations(conversationsQuery.data, rightIndexSessions);
-    const visibleConversations = conversations
-      .filter((conversation) => conversation.type !== "group_room")
-      .filter((conversation) => {
-        const sessionId = conversation.directSessionId || conversation.conversationId;
-        const session = sessionId ? sessionsById.get(sessionId) : undefined;
-        const rawSession = sessionId ? rawSessionsById.get(sessionId) : undefined;
-        if (isRepresentedInAgentSessionTabs(session)) {
-          return false;
-        }
-        if (!isVisibleConversation(conversation, rawSessionsById)) {
-          return false;
-        }
-        if (rawSession && !session) {
-          return false;
-        }
-        return true;
-      });
-    if (!term) {
-      return visibleConversations;
-    }
-    return visibleConversations.filter((conversation) => {
-      const sessionId = conversation.directSessionId || conversation.conversationId;
-      const session = sessionsById.get(sessionId);
-      const sessionSearchValues = session ? [
-        session.title,
-        session.taskTitle ?? "",
-        session.taskSummary,
-        session.status,
-        session.currentPhase ?? "",
-        session.childStatus ?? "",
-        session.resultCard?.summary ?? "",
-        session.resultCard?.status ?? "",
-        session.parentSessionId ?? "",
-        session.rootSessionId ?? "",
-      ] : [];
-      return [conversation.title, conversation.summary, conversation.status, conversation.type, conversation.agentCode ?? "", conversation.agentDisplayName ?? "", conversation.agentPrimaryMode ?? "", conversation.agentRoleKey ?? "", conversation.agentPromptTemplateId ?? "", ...sessionSearchValues].some((value) =>
-        String(value ?? "").toLowerCase().includes(term),
-      );
-    });
-  }, [conversationsQuery.data, rawSessionsById, rightIndexSessions, sessionFilter, sessionsById]);
-  const filteredStandaloneGroupConversations = useMemo(() => {
-    const term = sessionFilter.trim().toLowerCase();
-    const conversations = conversationsQuery.data ?? [];
-    const groups = conversations.filter((conversation) => {
-      if (conversation.type !== "group_room") {
-        return false;
-      }
-      const roomId = String(conversation.roomId || conversation.conversationId || "").trim();
-      return Boolean(roomId) && !linkedTeamRoomIds.has(roomId);
-    });
-    if (!term) {
-      return groups;
-    }
-    return groups.filter((conversation) =>
-      [conversation.title, conversation.summary, conversation.status, conversation.type].some((value) =>
-        String(value ?? "").toLowerCase().includes(term),
-      ),
-    );
-  }, [conversationsQuery.data, linkedTeamRoomIds, sessionFilter]);
-  const filteredTeams = useMemo(() => {
-    const term = sessionFilter.trim().toLowerCase();
-    if (!term) {
-      return teams;
-    }
-    return teams.filter((team) =>
-      [
-        team.name,
-        team.purpose,
-        team.status,
-        team.teamKind,
-        team.teamCategory,
-        team.teamSource,
-        team.teamTemplateId,
-        team.linkedChatRoom?.title ?? "",
-        ...(team.members ?? []).flatMap((member) => [member.agentName, member.agentCode, member.role, member.purpose]),
-      ].some((value) => String(value ?? "").toLowerCase().includes(term)),
-    );
-  }, [sessionFilter, teams]);
-  const groupedConversations = useMemo(() => {
-    const buckets = new Map<ConversationGroupKey, ConversationSummary[]>(
-      CONVERSATION_GROUP_ORDER.map((groupKey) => [groupKey, []]),
-    );
-    filteredConversations.forEach((conversation) => {
-      const groupKey = classifyConversation(conversation);
-      buckets.get(groupKey)?.push(conversation);
-    });
-    return CONVERSATION_GROUP_ORDER
-      .map((groupKey) => ({
-        groupKey,
-        label: conversationGroupLabel(groupKey, lang === "zh" ? "zh" : "en"),
-        items: buckets.get(groupKey) ?? [],
-      }))
-      .filter((group) => group.items.length > 0);
-  }, [filteredConversations, lang]);
-  const searchHasTerm = sessionFilter.trim().length > 0;
+  const {
+    filteredConversations,
+    filteredStandaloneGroupConversations,
+    filteredTeams,
+    groupedConversations,
+    searchHasTerm,
+  } = useConversationIndexModel({
+    conversations: conversationsQuery.data,
+    lang,
+    linkedTeamRoomIds,
+    rawSessions: rawSessionsQuery.data,
+    rightIndexSessions,
+    sessionFilter,
+    sessionsById,
+    teams,
+  });
   const sessionIndexLoadedCount = rawSessionsQuery.loadedCount;
   const sessionIndexTotalEstimate = rawSessionsQuery.totalEstimate;
   const sessionIndexHasMore = rawSessionsQuery.hasMore;
@@ -3508,7 +3257,7 @@ export function ChatCodingRoute() {
     return timeFormatter.format(parsed);
   }
 
-  function toggleConversationGroup(groupKey: ConversationGroupKey) {
+  function toggleConversationGroup(groupKey: ConversationIndexGroupKey) {
     setCollapsedConversationGroups((current) => ({
       ...current,
       [groupKey]: !current[groupKey],
