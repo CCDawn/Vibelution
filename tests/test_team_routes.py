@@ -149,7 +149,7 @@ def test_team_routes_sync_linked_chat_room(tmp_path, monkeypatch):
     assert room["config"]["teamId"] == team["teamId"]
 
 
-def test_archived_team_room_is_hidden_from_conversation_index(tmp_path, monkeypatch):
+def test_archived_team_room_is_hidden_from_conversation_index_and_deleted(tmp_path, monkeypatch):
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(project_agent_bus_service, "PROJECT_ROOT", tmp_path)
@@ -166,8 +166,7 @@ def test_archived_team_room_is_hidden_from_conversation_index(tmp_path, monkeypa
     assert archive_response.status_code == 200, archive_response.text
     assert archive_response.json()["status"] == "archived"
     assert all(item.get("roomId") != room_id for item in conversations)
-    assert room_response.status_code == 200
-    assert room_response.json()["roomId"] == room_id
+    assert room_response.status_code == 404
 
 
 def test_team_delete_route_cascades_member_agent_archive(tmp_path, monkeypatch):
