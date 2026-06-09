@@ -43,6 +43,7 @@ from .process_inventory import (
     residual_process_payload,
     terminate_process_descendants,
     terminate_unmanaged_workbench_processes,
+    terminate_workbench_processes,
 )
 from .workbench_controller import close_workbench, focus_workbench, observe_workbench, open_workbench, restart_workbench
 
@@ -50,6 +51,7 @@ from .workbench_controller import close_workbench, focus_workbench, observe_work
 _WORKBENCH_LIFECYCLE_COMMANDS = {
     "open_workbench",
     "close_workbench",
+    "force_close_workbench",
     "restart_workbench",
     "hot_restart_workbench",
     "toggle_workbench",
@@ -304,6 +306,103 @@ def _runtime_manager_active_work_runs() -> list[dict[str, str]]:
         payload=worktree_run,
     )
     return items
+
+
+def _persistent_active_work_run_snapshots() -> list[dict[str, Any]]:
+    """Return active work-run snapshots that survive backend process restarts."""
+
+    try:
+        from . import work_run_store as work_run_store_module
+    except Exception:
+        return []
+
+    store = work_run_store_module.WorkRunStore(root=work_run_store_module.WORK_RUNS_DIR)
+    active: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for kind in (
+        "chat_turn",
+        "chat_room_round",
+        "self_evolution_run",
+        "supervised_evolution_run",
+        "supervised_worktree_evolution_run",
+    ):
+        try:
+            payloads = store.list_snapshots(kind)
+        except Exception:
+            payloads = []
+        for payload in payloads if isinstance(payloads, list) else []:
+            if not isinstance(payload, dict):
+                continue
+            if str(payload.get("finishedAt") or payload.get("endedAt") or "").strip():
+                continue
+            item = _active_work_run_item(kind, payload)
+            if not item["kind"] or not _active_work_status_blocks_lifecycle(item["status"]):
+                continue
+            key = (item["kind"], item["runId"] or item["sessionId"])
+            if key in seen:
+                continue
+            seen.add(key)
+            active.append(payload)
+    return active
+
+
+def _mark_persistent_active_work_runs_force_stopped(reason: str) -> list[dict[str, Any]]:
+    """Mark persisted active work runs as force-stopped for post-shutdown observability."""
+
+    try:
+        from . import work_run_store as work_run_store_module
+    except Exception as exc:
+        return [
+            {
+                "kind": "",
+                "runId": "",
+                "status": "failed",
+                "error": f"{type(exc).__name__}: {exc}",
+            }
+        ]
+
+    store = work_run_store_module.WorkRunStore(root=work_run_store_module.WORK_RUNS_DIR)
+    stopped_at = now_iso()
+    stopped: list[dict[str, Any]] = []
+    for snapshot in _persistent_active_work_run_snapshots():
+        kind = str(snapshot.get("runKind") or snapshot.get("kind") or "").strip()
+        run_id = str(snapshot.get("runId") or snapshot.get("roundId") or snapshot.get("sessionId") or "").strip()
+        if not kind or not run_id:
+            continue
+        next_snapshot = dict(snapshot)
+        next_snapshot.update(
+            {
+                "runId": run_id,
+                "runKind": kind,
+                "status": "stopped_by_user" if kind == "chat_turn" else "stopped",
+                "currentPhase": "stopped_by_user" if kind == "chat_turn" else "stopped",
+                "runtimeStatus": "force_stopped",
+                "forceStoppedAt": stopped_at,
+                "forceStopReason": str(reason or "").strip(),
+                "finishedAt": str(next_snapshot.get("finishedAt") or stopped_at),
+                "updatedAt": stopped_at,
+            }
+        )
+        try:
+            store.persist_snapshot(kind, next_snapshot, active_run_id="")
+        except Exception as exc:
+            stopped.append(
+                {
+                    "kind": kind,
+                    "runId": run_id,
+                    "status": "failed",
+                    "error": f"{type(exc).__name__}: {exc}",
+                }
+            )
+            continue
+        stopped.append(
+            {
+                "kind": kind,
+                "runId": run_id,
+                "status": str(next_snapshot.get("status") or ""),
+            }
+        )
+    return stopped
 
 
 def _runtime_manager_source_signature() -> str:
@@ -1185,6 +1284,8 @@ def _build_workbench_status_line(
         if lifecycle_consistency == "orphaned_browser":
             return "Workbench frontend is orphaned: browser window is open but backend is stopped."
         return "Workbench hit a lifecycle error."
+    if phase == "force_stopping":
+        return "Runtime manager is force-closing the workbench."
     if desired_state == "closed" and observed_state != "closed":
         return "Runtime manager is closing the workbench."
     if desired_state == "open" and observed_state != "open":
@@ -1829,7 +1930,7 @@ class RuntimeManagerDaemon:
             elif observed_state == desired_state and phase != "failed":
                 phase = "steady"
 
-        if desired_state == "closed" and observed_state != "closed" and phase != "failed":
+        if desired_state == "closed" and observed_state != "closed" and phase not in {"failed", "force_stopping"}:
             phase = "closing"
         elif desired_state == "open" and observed_state != "open" and phase != "failed":
             phase = "opening"
@@ -2191,6 +2292,118 @@ class RuntimeManagerDaemon:
                 _append_event("daemon.stop_requested", {"commandId": command_id, "reason": "close_workbench"})
         return final_result
 
+    def _handle_force_close_workbench(self, *, command_id: str, args: dict[str, Any]) -> dict[str, Any]:
+        reason = str(args.get("reason") or "explicit_force_close").strip() or "explicit_force_close"
+        source = str(args.get("source") or "").strip()
+        state = load_state()
+        workbench = state.setdefault("workbench", {})
+        initial_observation = observe_workbench()
+        active_work_runs = _persistent_active_work_run_snapshots()
+        closed_runs = _close_active_evolution_runs_for_shutdown()
+        force_stopped_runs = _mark_persistent_active_work_runs_force_stopped(reason)
+
+        workbench.update(
+            {
+                "desiredState": "closed",
+                "phase": "force_stopping",
+                "lastReason": reason,
+                "lastSource": source,
+                "lastTransitionAt": now_iso(),
+                "failureMessage": "",
+            }
+        )
+        save_state(self._reconcile_observation(state))
+        _append_event(
+            "workbench.force_close.requested",
+            _close_verification_event_payload(
+                initial_observation,
+                command_id=command_id,
+                message="Force close requested for the managed workbench.",
+            )
+            | {
+                "reason": reason,
+                "source": source,
+                "activeWorkCount": len(active_work_runs),
+                "activeWorkRuns": [
+                    {
+                        "kind": str(item.get("runKind") or item.get("kind") or ""),
+                        "runId": str(item.get("runId") or item.get("roundId") or item.get("sessionId") or ""),
+                        "status": str(item.get("status") or item.get("currentPhase") or ""),
+                        "sessionId": str(item.get("sessionId") or ""),
+                    }
+                    for item in active_work_runs[:8]
+                    if isinstance(item, dict)
+                ],
+            },
+        )
+
+        cleanup_result = self._force_cleanup_workbench_processes(initial_observation)
+        closed, verification, verification_attempts = _wait_for_close_verification()
+        if not closed:
+            cleanup_retry_result = self._force_cleanup_workbench_processes(verification)
+            closed, verification, retry_attempts = _wait_for_close_verification()
+            verification_attempts += retry_attempts
+            cleanup_result = {
+                "first": cleanup_result,
+                "retry": cleanup_retry_result,
+            }
+
+        if not closed:
+            message = _close_verification_failure_message(verification)
+            _append_event(
+                "workbench.force_close.verification_failed",
+                _close_verification_event_payload(
+                    verification,
+                    command_id=command_id,
+                    message=message,
+                    cleanup_result=cleanup_result,
+                )
+                | {"attempts": verification_attempts},
+            )
+            return self._finish_command(
+                command_id,
+                ok=False,
+                message=message,
+                error_scope="force_close_workbench",
+                failure_message=message,
+                error_type="ForceCloseVerificationFailed",
+                result_data={
+                    "residualCleanup": cleanup_result,
+                    "closedEvolutionRuns": closed_runs,
+                    "forceStoppedWorkRuns": force_stopped_runs,
+                },
+            )
+
+        _append_event(
+            "workbench.force_close.verification_succeeded",
+            _close_verification_event_payload(
+                verification,
+                command_id=command_id,
+                cleanup_result=cleanup_result,
+            )
+            | {"attempts": verification_attempts},
+        )
+        state = load_state()
+        workbench = state.setdefault("workbench", {})
+        workbench.update(
+            {
+                "desiredState": "closed",
+                "phase": "steady",
+                "failureMessage": "",
+            }
+        )
+        save_state(self._reconcile_observation(state))
+        return self._finish_command(
+            command_id,
+            ok=True,
+            message="Workbench force closed.",
+            result_data={
+                "residualCleanup": cleanup_result,
+                "closedEvolutionRuns": closed_runs,
+                "forceStoppedWorkRuns": force_stopped_runs,
+            },
+        )
+
     def _run_deferred_workbench_open(self, result: dict[str, Any]) -> None:
         intent = result.get("restartIntent") if isinstance(result.get("restartIntent"), dict) else {}
         intent_id = str(intent.get("intentId") or "").strip()
@@ -2229,6 +2442,14 @@ class RuntimeManagerDaemon:
         return terminate_unmanaged_workbench_processes(
             project_root=PROJECT_ROOT,
             exclude_pids=_snapshot_residual_excluded_pids(observe_workbench(), self._pid, include_workbench=False),
+        )
+
+    def _force_cleanup_workbench_processes(self, observation: dict[str, Any] | None = None) -> dict[str, Any]:
+        observed = observation if isinstance(observation, dict) else observe_workbench()
+        return terminate_workbench_processes(
+            project_root=PROJECT_ROOT,
+            browser_profile_dir=str(observed.get("browserProfileDir") or ""),
+            exclude_pids={os.getpid(), self._pid},
         )
 
     def _perform_restart_workbench(self, *, command_id: str, args: dict[str, Any]) -> dict[str, Any]:

@@ -1908,7 +1908,7 @@ export type ShutdownResponse = RuntimeControlResponse;
 
 export type RuntimeRestartResponse = RuntimeControlResponse;
 
-export type LauncherOperation = "start" | "stop" | "restart";
+export type LauncherOperation = "start" | "stop" | "restart" | "force-stop";
 export type RuntimeLifecycleCancelOperation = "restart" | "stop" | "close" | "shutdown";
 export type RuntimeLifecycleCancelRequest = {
   commandId?: string;

@@ -35,6 +35,7 @@ LIFECYCLE_CANCEL_TYPES = {
     "stop": {"close_workbench"},
     "close": {"close_workbench"},
     "shutdown": {"close_workbench"},
+    "force-stop": {"force_close_workbench"},
 }
 
 
@@ -517,15 +518,19 @@ def reject_pending_commands_for_shutdown(*, shutdown_state: dict[str, Any] | Non
 
 def _supersede_pending_open_commands_for_close(command: dict[str, Any]) -> list[dict[str, Any]]:
     command_type = str(command.get("type") or "").strip()
-    if command_type != "close_workbench":
+    if command_type not in {"close_workbench", "force_close_workbench"}:
         return []
+    pending_types = {"open_workbench", "restart_workbench"}
+    if command_type == "force_close_workbench":
+        pending_types.add("close_workbench")
+    error_type = "SupersededByForceCloseWorkbench" if command_type == "force_close_workbench" else "SupersededByCloseWorkbench"
     superseded: list[dict[str, Any]] = []
     state = load_state()
     state_version = int(state.get("stateVersion") or 0) if isinstance(state, dict) else 0
     for path in sorted(INBOX_DIR.glob("*.json")):
         payload = _load_command_file(path)
         pending_type = str(payload.get("type") or "").strip()
-        if pending_type not in {"open_workbench", "restart_workbench"}:
+        if pending_type not in pending_types:
             continue
         command_id = str(payload.get("commandId") or path.stem).strip() or path.stem
         payload["commandId"] = command_id
@@ -534,8 +539,8 @@ def _supersede_pending_open_commands_for_close(command: dict[str, Any]) -> list[
             "accepted": True,
             "completed": True,
             "ok": False,
-            "message": "Command superseded by a close_workbench request.",
-            "errorType": "SupersededByCloseWorkbench",
+            "message": f"Command superseded by a {command_type} request.",
+            "errorType": error_type,
             "supersededByCommandId": str(command.get("commandId") or ""),
             "stateVersion": state_version,
         }
@@ -553,8 +558,13 @@ def _supersede_pending_open_commands_for_close(command: dict[str, Any]) -> list[
             continue
         superseded.append({"commandId": command_id, "type": pending_type, "status": "superseded"})
     if superseded:
+        event_type = (
+            "command_queue.pending_lifecycle_superseded_by_force_close"
+            if command_type == "force_close_workbench"
+            else "command_queue.pending_open_superseded_by_close"
+        )
         _append_queue_event(
-            "command_queue.pending_open_superseded_by_close",
+            event_type,
             {
                 "commandId": str(command.get("commandId") or ""),
                 "count": len(superseded),

@@ -1408,6 +1408,16 @@
   color: var(--fg-primary);
 }
 
+.lifecycleMenuDangerItem {
+  color: color-mix(in srgb, var(--state-error) 78%, var(--fg-secondary));
+}
+
+.lifecycleMenuDangerItem:hover:not(:disabled),
+.lifecycleMenuDangerItem:focus-visible {
+  border-color: color-mix(in srgb, var(--state-error) 48%, var(--border-soft));
+  color: color-mix(in srgb, var(--state-error) 84%, var(--fg-primary));
+}
+
 .lifecycleMenuItem:disabled {
   opacity: 0.55;
   cursor: default;

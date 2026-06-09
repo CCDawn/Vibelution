@@ -118,6 +118,12 @@ export function stopLauncherBundle() {
   });
 }
 
+export function forceStopLauncherBundle() {
+  return fetchLauncherJson<LauncherControlResponse>("force-stop", {
+    method: "POST",
+  });
+}
+
 export function restartLauncherBundle() {
   return fetchLauncherJson<LauncherControlResponse>("restart", {
     method: "POST",
