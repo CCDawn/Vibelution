@@ -64,6 +64,8 @@ const WORKFLOW_GRAPH_MARGIN_Y = 28;
 const SOURCE_COLLECTION_RUN_PREVIEW_LIMIT = 20;
 const SOURCE_COLLECTION_DEFAULT_ROLES = ["data_discovery", "source_acquisition", "content_extraction", "source_quality"];
 
+const researchStageRoundStatusQueryKey = (id: string) => ["teams", id, "workflow-orchestration", "stage-rounds", "status"] as const;
+
 type ResearchWorkspaceView = "overview" | "source_collection" | "coordination" | "ingestion" | "graph" | "candidates" | "discussion" | "canvas";
 
 const RESEARCH_WORKSPACE_NAV_ITEMS: Array<{
@@ -133,6 +135,76 @@ type SourceCollectionOutputDraft = {
   rawLocation: string;
   summary: string;
   notes: string;
+};
+
+type ResearchStageType = "knowledge_collection" | "experiment" | "iteration";
+
+type ResearchStageRound = {
+  stageRoundId: string;
+  stageType: ResearchStageType;
+  roundNumber: number;
+  status: string;
+  topic: string;
+  goal: string;
+  sourceRunIds?: string[];
+  querySeeds?: string[];
+  teamMemoryRecordId?: string;
+  coordinationContract?: {
+    linkedChatRoomId?: string;
+    autoStarted?: boolean;
+    expectedAction?: string;
+  };
+  warnings?: Array<{ code?: string; severity?: string; message?: string }>;
+};
+
+type ResearchStagePhaseStatus = {
+  stageType: ResearchStageType;
+  label: string;
+  status: string;
+  roundCount: number;
+  activeRoundId: string;
+  latestRound?: ResearchStageRound | null;
+  primaryAction: string;
+  secondaryAction: string;
+  canStart: boolean;
+  canContinue: boolean;
+  canNewRound: boolean;
+  requiresUserDecision: boolean;
+  readiness?: {
+    ready?: boolean;
+    reason?: string;
+  };
+};
+
+type ResearchStageRoundStatusPayload = {
+  schemaVersion: number;
+  teamId: string;
+  status: string;
+  currentStage: string;
+  phases: ResearchStagePhaseStatus[];
+  activeRounds: ResearchStageRound[];
+  latestRound?: ResearchStageRound | null;
+  roundCount: number;
+  boundaries: {
+    externalSearchTriggered: boolean;
+    writesFormalKnowledge: boolean;
+    writesRag: boolean;
+    writesOfficialGraph: boolean;
+    autoTransitionsNextStage: boolean;
+    stageRecordsOnly: boolean;
+  };
+};
+
+type ResearchStageRoundStartPayload = {
+  created: boolean;
+  stageRound: ResearchStageRound;
+  phase: ResearchStagePhaseStatus;
+  status: ResearchStageRoundStatusPayload;
+  workflow: TeamWorkflowOrchestration;
+  run?: TeamWorkflowSourceCollectionRunStartPayload["run"];
+  searchPlan?: TeamWorkflowSourceCollectionRunStartPayload["searchPlan"];
+  assignments?: TeamWorkflowSourceCollectionRunStartPayload["assignments"];
+  boundaries: ResearchStageRoundStatusPayload["boundaries"];
 };
 
 type NodeDragState = {
@@ -864,6 +936,14 @@ export function TeamsRoute() {
       ),
     enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && teamWorkflowQuery.data),
   });
+  const researchStageRoundStatusQuery = useQuery({
+    queryKey: researchStageRoundStatusQueryKey(effectiveTeamId || "none"),
+    queryFn: () =>
+      fetchJson<ResearchStageRoundStatusPayload>(
+        `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/stage-rounds/status`,
+      ),
+    enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && teamWorkflowQuery.data),
+  });
   const sourceCollectionRunsQuery = useQuery({
     queryKey: queryKeys.teamWorkflowSourceCollectionRuns(effectiveTeamId || "none", SOURCE_COLLECTION_RUN_PREVIEW_LIMIT),
     queryFn: () => fetchJson<DataProcessingRunListPayload>(`/api/data-processing/runs?limit=${SOURCE_COLLECTION_RUN_PREVIEW_LIMIT}`),
@@ -1181,6 +1261,57 @@ export function TeamsRoute() {
     },
   });
 
+  const startResearchStageRoundMutation = useMutation({
+    mutationFn: (payload: { teamId: string; stageType: ResearchStageType; mode?: "continue_or_start" | "new_round"; draft: SourceCollectionDraft }) => {
+      const querySeeds = compactSourceCollectionQuerySeeds(payload.draft.topic, payload.draft.querySeeds);
+      return fetchJson<ResearchStageRoundStartPayload>(
+        `/api/teams/${encodeURIComponent(payload.teamId)}/workflow-orchestration/stage-rounds/start`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            stageType: payload.stageType,
+            mode: payload.mode || "continue_or_start",
+            title: payload.draft.title.trim() || "",
+            topic: payload.draft.topic.trim(),
+            goal: payload.draft.goal.trim(),
+            ownerAgentId: sourceCollectionOwnerAgentId,
+            requestedByAgent: sourceCollectionOwnerAgentId,
+            agentRoles: SOURCE_COLLECTION_DEFAULT_ROLES,
+            agentIds: sourceCollectionAgentIds,
+            inputRefs: splitDraftList(payload.draft.inputRefs, 24),
+            querySeeds,
+            searchLanguages: splitDraftList(payload.draft.searchLanguages, 8),
+            sourceTypes: splitDraftList(payload.draft.sourceTypes, 12),
+            maxResultsPerQuery: payload.draft.maxResultsPerQuery,
+            scope: {
+              domain: "neuroscience-inspired algorithm discovery",
+              workflowStage: payload.stageType,
+              uiEntry: "teams_research_stage_launcher",
+            },
+          }),
+        },
+      );
+    },
+    onSuccess: (payload, variables) => {
+      queryClient.setQueryData(researchStageRoundStatusQueryKey(variables.teamId), payload.status);
+      queryClient.setQueryData(queryKeys.teamWorkflow(variables.teamId), payload.workflow);
+      const sourceRunId = payload.run?.runId || payload.stageRound.sourceRunIds?.[0] || "";
+      if (sourceRunId) {
+        setSelectedSourceCollectionRunId(sourceRunId);
+        setResearchWorkspaceView("source_collection");
+        void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowSourceCollectionRuns(variables.teamId, SOURCE_COLLECTION_RUN_PREVIEW_LIMIT) });
+        void queryClient.invalidateQueries({ queryKey: queryKeys.dataProcessingRunStatus(sourceRunId) });
+        void queryClient.invalidateQueries({ queryKey: queryKeys.dataProcessingCollectionAssignments(sourceRunId) });
+        void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowKnowledgeIngestionStatus(variables.teamId) });
+      } else if (variables.stageType === "experiment") {
+        setResearchWorkspaceView("coordination");
+      } else if (variables.stageType === "iteration") {
+        setResearchWorkspaceView("overview");
+      }
+    },
+  });
+
   const recordSourceCollectionOutputMutation = useMutation({
     mutationFn: async (payload: { teamId: string; runId: string; draft: SourceCollectionOutputDraft }) => {
       const output = await fetchJson<DataProcessingCollectionOutputPayload>(
@@ -1291,6 +1422,116 @@ export function TeamsRoute() {
         });
       });
     }
+  }
+
+  function launchResearchStage(stageType: ResearchStageType, mode: "continue_or_start" | "new_round" = "continue_or_start") {
+    if (!selectedTeam?.teamId || selectedTeamStartResearchStagePending) {
+      return;
+    }
+    if (stageType === "knowledge_collection" && !researchStageCanLaunch) {
+      return;
+    }
+    startResearchStageRoundMutation.mutate({
+      teamId: selectedTeam.teamId,
+      stageType,
+      mode,
+      draft: sourceCollectionDraft,
+    });
+  }
+
+  function renderResearchStageLauncher() {
+    if (!researchWorkflowTeamSelected) {
+      return null;
+    }
+    const phaseOrder: ResearchStageType[] = ["knowledge_collection", "experiment", "iteration"];
+    const phaseFallback: Record<ResearchStageType, { label: string; primaryAction: string; secondaryAction: string }> = {
+      knowledge_collection: {
+        label: lang === "zh" ? "知识搜集" : "Knowledge",
+        primaryAction: lang === "zh" ? "启动知识搜集" : "Start knowledge",
+        secondaryAction: lang === "zh" ? "开启新一轮" : "New round",
+      },
+      experiment: {
+        label: lang === "zh" ? "实验" : "Experiment",
+        primaryAction: lang === "zh" ? "启动实验规划" : "Plan experiment",
+        secondaryAction: lang === "zh" ? "重新规划" : "Replan",
+      },
+      iteration: {
+        label: lang === "zh" ? "迭代" : "Iteration",
+        primaryAction: lang === "zh" ? "启动迭代" : "Start iteration",
+        secondaryAction: lang === "zh" ? "新一轮迭代" : "New iteration",
+      },
+    };
+    return (
+      <section className={styles.researchStageLauncher} aria-label={lang === "zh" ? "科研三阶段启动台" : "Research stage launcher"}>
+        <div className={styles.researchStageLauncherHeader}>
+          <div>
+            <strong>{lang === "zh" ? "科研三阶段启动台" : "Research stage launcher"}</strong>
+            <span>
+              {researchStageRoundStatus
+                ? `${lang === "zh" ? "当前" : "Current"} ${researchStageRoundStatus.currentStage || "knowledge_collection"}`
+                : researchStageRoundStatusQuery.isPending
+                ? (lang === "zh" ? "读取阶段状态中" : "Loading stage status")
+                : (lang === "zh" ? "等待阶段启动" : "Waiting for stage start")}
+            </span>
+          </div>
+          <button type="button" onClick={() => void researchStageRoundStatusQuery.refetch()} disabled={researchStageRoundStatusQuery.isFetching}>
+            <RefreshCw size={13} />
+          </button>
+        </div>
+        <label className={styles.researchStageTopicInput}>
+          <span>{lang === "zh" ? "研究主题" : "Research topic"}</span>
+          <input
+            value={sourceCollectionDraft.topic}
+            onChange={(event) => setSourceCollectionDraft((current) => ({ ...current, topic: event.target.value }))}
+            placeholder={lang === "zh" ? "例如：predictive coding" : "e.g. predictive coding"}
+          />
+        </label>
+        <div className={styles.researchStageGrid}>
+          {phaseOrder.map((stageType) => {
+            const phase = researchStagePhases.find((item) => item.stageType === stageType);
+            const fallback = phaseFallback[stageType];
+            const latestRound = phase?.latestRound;
+            const active = Boolean(phase?.activeRoundId);
+            const disabled = selectedTeamStartResearchStagePending || (stageType === "knowledge_collection" && !researchStageCanLaunch);
+            return (
+              <article key={stageType} className={active ? `${styles.researchStageCard} ${styles.researchStageCardActive}` : styles.researchStageCard}>
+                <div>
+                  <strong>{phase?.label || fallback.label}</strong>
+                  <span>
+                    {active
+                      ? (lang === "zh" ? "运行中" : "running")
+                      : latestRound
+                      ? `${lang === "zh" ? "最近" : "latest"} ${latestRound.status}`
+                      : (lang === "zh" ? "未启动" : "not started")}
+                  </span>
+                </div>
+                <small>{phase?.readiness?.reason || (lang === "zh" ? "由用户决定是否进入本阶段。" : "User decides when to enter this stage.")}</small>
+                <div className={styles.researchStageActions}>
+                  <button type="button" onClick={() => launchResearchStage(stageType)} disabled={disabled}>
+                    <Play size={13} />
+                    {phase?.primaryAction || fallback.primaryAction}
+                  </button>
+                  <button type="button" onClick={() => launchResearchStage(stageType, "new_round")} disabled={disabled}>
+                    <Plus size={13} />
+                    {phase?.secondaryAction || fallback.secondaryAction}
+                  </button>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+        {selectedTeamStartResearchStageError ? (
+          <div className={styles.workflowError}>{selectedTeamStartResearchStageError.message}</div>
+        ) : null}
+        {selectedTeamStartResearchStageResult?.stageRound ? (
+          <div className={styles.workflowSuccess}>
+            {lang === "zh"
+              ? `已进入 ${selectedTeamStartResearchStageResult.stageRound.stageType} 第 ${selectedTeamStartResearchStageResult.stageRound.roundNumber} 轮`
+              : `Entered ${selectedTeamStartResearchStageResult.stageRound.stageType} round ${selectedTeamStartResearchStageResult.stageRound.roundNumber}`}
+          </div>
+        ) : null}
+      </section>
+    );
   }
 
   function renderResearchWorkspaceNav() {
@@ -1562,6 +1803,8 @@ export function TeamsRoute() {
   const teamWorkflowCandidateGraphLayout = teamWorkflowCandidateGraph ? workflowGraphLayout(teamWorkflowCandidateGraph) : null;
   const teamWorkflowCoordinationStatus = teamWorkflowCoordinationStatusQuery.data ?? null;
   const teamWorkflowKnowledgeIngestionStatus = teamWorkflowKnowledgeIngestionStatusQuery.data ?? null;
+  const researchStageRoundStatus = researchStageRoundStatusQuery.data ?? null;
+  const researchStagePhases = researchStageRoundStatus?.phases ?? [];
   const sourceCollectionAssignments = sourceCollectionAssignmentsQuery.data?.assignments ?? [];
   const sourceCollectionRunStatus = sourceCollectionRunStatusQuery.data ?? null;
   const sourceCollectionSearchPlanRef = selectedSourceCollectionRun?.scope?.dataSearchPlanRef ?? null;
@@ -1571,6 +1814,15 @@ export function TeamsRoute() {
     ?? null;
   const selectedSourceCollectionQueries = selectedSourceCollectionAssignment?.scope?.assignedQueries ?? [];
   const sourceCollectionCanStart = Boolean(selectedTeam?.teamId && sourceCollectionDraft.topic.trim());
+  const researchStageCanLaunch = Boolean(selectedTeam?.teamId && sourceCollectionDraft.topic.trim());
+  const selectedTeamStartResearchStagePending =
+    startResearchStageRoundMutation.isPending && startResearchStageRoundMutation.variables?.teamId === selectedTeam?.teamId;
+  const selectedTeamStartResearchStageError =
+    startResearchStageRoundMutation.variables?.teamId === selectedTeam?.teamId && startResearchStageRoundMutation.error instanceof Error
+      ? startResearchStageRoundMutation.error
+      : null;
+  const selectedTeamStartResearchStageResult =
+    startResearchStageRoundMutation.variables?.teamId === selectedTeam?.teamId ? startResearchStageRoundMutation.data : undefined;
   const selectedTeamStartSourceCollectionPending =
     startSourceCollectionRunMutation.isPending && startSourceCollectionRunMutation.variables?.teamId === selectedTeam?.teamId;
   const selectedTeamStartSourceCollectionError =
@@ -1917,6 +2169,7 @@ export function TeamsRoute() {
             </strong>
             {validation && !validation.valid ? <AlertTriangle size={16} /> : <Link2 size={16} />}
           </div>
+          {!researchCanvasVisible ? renderResearchStageLauncher() : null}
           {!researchCanvasVisible ? renderResearchWorkspaceNav() : null}
           <div className={styles.inspectorBody}>
             {showNodeBindingPanel && !selectedTeam ? (
