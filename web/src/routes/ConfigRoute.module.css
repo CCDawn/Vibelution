@@ -1985,6 +1985,131 @@
   place-items: start;
 }
 
+.loadingShell {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: minmax(240px, var(--sidebar-width, 306px)) minmax(0, 1fr);
+  gap: 6px;
+  min-height: 0;
+  height: 100%;
+}
+
+.loadingNavPanel,
+.loadingBoard {
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-panel);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--surface-panel-strong) 78%, transparent), var(--surface-panel)),
+    var(--surface-panel);
+}
+
+.loadingNavPanel {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  padding: 10px;
+  min-height: 0;
+}
+
+.loadingNavList {
+  display: grid;
+  gap: 5px;
+  margin-top: 4px;
+}
+
+.loadingNavList span {
+  display: flex;
+  align-items: center;
+  min-height: 27px;
+  padding: 0 8px;
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--control-radius);
+  color: var(--fg-secondary);
+  font-size: 0.8rem;
+  background: var(--surface-card-subtle);
+}
+
+.loadingNavList .loadingNavActive {
+  border-color: color-mix(in srgb, var(--accent-cool) 32%, transparent);
+  background: color-mix(in srgb, var(--accent-cool) 10%, transparent);
+  color: var(--accent-warm-2);
+}
+
+.loadingBoard {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  align-content: start;
+  gap: 8px;
+  padding: 10px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.loadingBoardHeader {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.9fr) minmax(100px, 0.32fr) minmax(100px, 0.32fr);
+  gap: 7px;
+}
+
+.loadingBoardHeader span,
+.loadingMetricGrid strong,
+.loadingSpecGrid span {
+  display: block;
+  border-radius: 6px;
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--surface-card-subtle) 76%, transparent),
+      color-mix(in srgb, var(--surface-panel-hover) 72%, transparent),
+      color-mix(in srgb, var(--surface-card-subtle) 76%, transparent)
+    );
+}
+
+.loadingBoardHeader span {
+  min-height: 32px;
+}
+
+.loadingMetricGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.loadingMetricGrid span {
+  display: grid;
+  gap: 5px;
+  min-height: 54px;
+  padding: 8px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 8px;
+  background: var(--surface-card-subtle);
+}
+
+.loadingMetricGrid small {
+  color: var(--fg-tertiary);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+}
+
+.loadingMetricGrid strong {
+  min-height: 16px;
+}
+
+.loadingSpecGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.loadingSpecGrid span {
+  min-height: 76px;
+}
+
+.loadingShellError .loadingNavPanel,
+.loadingShellError .loadingBoard {
+  border-color: color-mix(in srgb, var(--state-error) 28%, transparent);
+}
+
 @media (max-width: 1400px) {
   .hashGrid,
   .matrixGrid,
@@ -1999,6 +2124,10 @@
 
 @media (max-width: 1120px) {
   .page {
+    grid-template-columns: 1fr;
+  }
+
+  .loadingShell {
     grid-template-columns: 1fr;
   }
 

@@ -227,6 +227,58 @@ function defaultSectionUiState(): ConfigSectionUiState {
   };
 }
 
+function ConfigWorkspacePlaceholder({
+  title,
+  subtitle,
+  tone = "loading",
+}: {
+  title: string;
+  subtitle?: string;
+  tone?: "loading" | "error";
+}) {
+  const navLabels = ["Source", "Runtime", "Models", "Diagnostics", "Tools"];
+  const matrixLabels = ["config.toml", "providers", "models", "runtime"];
+  return (
+    <div className={`${styles.loadingShell} ${tone === "error" ? styles.loadingShellError : ""}`}>
+      <aside className={styles.loadingNavPanel}>
+        <p className={styles.eyebrow}>Config</p>
+        <h1 className={styles.title}>{title}</h1>
+        {subtitle ? <p className={styles.subtitle}>{subtitle}</p> : null}
+        <div className={styles.loadingNavList} aria-hidden="true">
+          {navLabels.map((label, index) => (
+            <span key={label} className={index === 0 ? styles.loadingNavActive : undefined}>
+              {label}
+            </span>
+          ))}
+        </div>
+      </aside>
+      <section className={styles.loadingBoard} aria-hidden="true">
+        <div className={styles.loadingBoardHeader}>
+          <span />
+          <span />
+          <span />
+        </div>
+        <div className={styles.loadingMetricGrid}>
+          {matrixLabels.map((label) => (
+            <span key={label}>
+              <small>{label}</small>
+              <strong />
+            </span>
+          ))}
+        </div>
+        <div className={styles.loadingSpecGrid}>
+          <span />
+          <span />
+          <span />
+          <span />
+          <span />
+          <span />
+        </div>
+      </section>
+    </div>
+  );
+}
+
 export const CONFIG_COPY = {
   zh: {
     pageTitle: "统一配置工作台",
@@ -2917,10 +2969,7 @@ export function ConfigRoute() {
   if (!draftConfig && workspaceQuery.isLoading) {
     return (
       <div className={styles.page}>
-        <section className={styles.loadingSurface}>
-          <p className={styles.eyebrow}>Config</p>
-          <h1 className={styles.title}>{copy.loading}</h1>
-        </section>
+        <ConfigWorkspacePlaceholder title={copy.loading} />
       </div>
     );
   }
@@ -2928,11 +2977,11 @@ export function ConfigRoute() {
   if (!draftConfig || !workspace) {
     return (
       <div className={styles.page}>
-        <section className={styles.loadingSurface}>
-          <p className={styles.eyebrow}>Config</p>
-          <h1 className={styles.title}>{copy.loadFailed}</h1>
-          <p className={styles.subtitle}>{workspaceQuery.error instanceof Error ? workspaceQuery.error.message : ""}</p>
-        </section>
+        <ConfigWorkspacePlaceholder
+          title={copy.loadFailed}
+          subtitle={workspaceQuery.error instanceof Error ? workspaceQuery.error.message : ""}
+          tone="error"
+        />
       </div>
     );
   }
