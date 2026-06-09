@@ -51,6 +51,7 @@ import {
   ChatRoomRoundAcceptedResponse,
   ChatRoomMode,
   ChatRoomPurpose,
+  ConfigSummary,
   ChatRoomStreamEvent,
   FileContent,
   MentalStateSnapshot,
@@ -757,11 +758,20 @@ function isAvailableGroupParticipant(participant: ChatRoomParticipant) {
   return !participant.agentMissing && participant.enabled !== false;
 }
 
-function sessionListTitle(session: Pick<SessionSummary, "id" | "title" | "taskTitle" | "resultCard">) {
+function sessionListTitle(session: Pick<SessionSummary, "id" | "title" | "agentDisplayName" | "taskTitle" | "resultCard" | "sessionKind">) {
+  const sessionKind = String(session.sessionKind ?? "").trim();
+  if (sessionKind === "child") {
+    return String(
+      session.taskTitle
+      || session.resultCard?.title
+      || session.title
+      || session.id
+      || "",
+    ).trim();
+  }
   return String(
-    session.taskTitle
-    || session.resultCard?.title
-    || session.title
+    session.title
+    || session.agentDisplayName
     || session.id
     || "",
   ).trim();
@@ -1285,6 +1295,19 @@ export function ChatCodingRoute() {
     refetchInterval: resolvePollingInterval(chatPollingVisible, 10_000),
     refetchIntervalInBackground: chatStartupWarmupActive,
   });
+  const configSummaryQuery = useQuery({
+    queryKey: queryKeys.configPublic(),
+    queryFn: () => fetchJson<ConfigSummary>("/api/config/public"),
+    staleTime: 30_000,
+  });
+  const modelLabelsById = useMemo(
+    () => new Map(Object.entries(configSummaryQuery.data?.modelLabels ?? {})),
+    [configSummaryQuery.data?.modelLabels],
+  );
+  const resolveModelLabel = useCallback(
+    (modelId: string) => modelLabelsById.get(modelId),
+    [modelLabelsById],
+  );
   const rawSessionsQuery = useQuery({
     queryKey: queryKeys.sessions(),
     queryFn: () => fetchJson<SessionSummary[]>("/api/sessions"),
@@ -2975,7 +2998,7 @@ export function ChatCodingRoute() {
   const activeAgentId = detail?.agentId || "";
   const activeSessionAgent = sessionAgentOptions.find((agent) => agent.agentId === activeAgentId);
   const activeAgentDisplay = detail
-    ? sessionAgentDisplayInfo(detail, activeSessionAgent, lang)
+    ? sessionAgentDisplayInfo(detail, activeSessionAgent, lang, resolveModelLabel)
     : { name: pet?.name || "Agent", functionLabel: "", tone: "chat" as const, meta: "" };
   const activeAgentFunctionLabel = activeAgentDisplay.functionLabel;
   const activeAgentDisplayName = activeAgentDisplay.name;
@@ -3439,7 +3462,7 @@ export function ChatCodingRoute() {
         status: "",
       };
       const participantAgent = agentId ? agentsById.get(agentId) : undefined;
-      const display = participantAgentDisplayInfo(participantLike, participantAgent, lang);
+      const display = participantAgentDisplayInfo(participantLike, participantAgent, lang, resolveModelLabel);
       const member = agentId ? activeGroupTeamMemberByAgentId.get(agentId) : undefined;
       const participantTeamRole = String(participant?.teamMemberPurpose || participant?.teamRole || "").trim();
       const role = String(participantTeamRole || member?.purpose || member?.role || display.functionLabel || "").trim();
@@ -3458,7 +3481,7 @@ export function ChatCodingRoute() {
         ].filter(Boolean).join(" · "),
       };
     },
-    [activeGroupTeamMemberByAgentId, agentsById, lang],
+    [activeGroupTeamMemberByAgentId, agentsById, lang, resolveModelLabel],
   );
   const filteredConversations = useMemo(() => {
     const term = sessionFilter.trim().toLowerCase();
@@ -4601,7 +4624,7 @@ export function ChatCodingRoute() {
                   {(sessionsQuery.data ?? []).map((session) => {
                     const selected = groupManageSessionSet.has(session.id);
                     const sessionAgent = session.agentId ? agentsById.get(session.agentId) : undefined;
-                    const display = sessionAgentDisplayInfo(session, sessionAgent, lang);
+                    const display = sessionAgentDisplayInfo(session, sessionAgent, lang, resolveModelLabel);
                     const sessionAvatarImageUrl = avatarImageUrlFrom(sessionAgent, session);
                     const missingMessage = session.agentMissing
                       ? session.agentStatusMessage || (lang === "zh" ? "缺少有效 Agent" : "Missing valid Agent")
@@ -5020,7 +5043,7 @@ export function ChatCodingRoute() {
               {agentSessionTabs.map((session) => {
                 const sessionIsChild = isChildSession(session);
                 const sessionAgent = session.agentId ? agentsById.get(session.agentId) : undefined;
-                const sessionDisplay = sessionAgentDisplayInfo(session, sessionAgent, lang);
+                const sessionDisplay = sessionAgentDisplayInfo(session, sessionAgent, lang, resolveModelLabel);
                 const sessionStatus = sessionIsChild ? (session.childStatus || session.currentPhase || session.status) : session.status;
                 const sessionTitle =
                   (sessionIsChild ? (session.taskTitle || session.resultCard?.title || session.title) : sessionDisplay.name)
@@ -5190,7 +5213,7 @@ export function ChatCodingRoute() {
               >
                 {sessionAgentOptions.length ? (
                   sessionAgentOptions.map((agent) => {
-                    const display = agentDisplayInfo(agent, lang);
+                    const display = agentDisplayInfo(agent, lang, { resolveModelLabel });
                     return (
                       <option key={agent.agentId} value={agent.agentId}>
                         {display.name} · {display.functionLabel}
@@ -6065,7 +6088,7 @@ export function ChatCodingRoute() {
                   ) : groupCandidateAgents.length ? (
                     groupCandidateAgents.map((agent) => {
                       const selected = groupSelectedAgentIds.includes(agent.agentId);
-                      const display = agentDisplayInfo(agent, lang);
+                      const display = agentDisplayInfo(agent, lang, { resolveModelLabel });
                       return (
                         <label key={agent.agentId} className={selected ? `${styles.groupAgentOption} ${styles.groupAgentOptionSelected}` : styles.groupAgentOption}>
                           <input
@@ -6212,7 +6235,7 @@ export function ChatCodingRoute() {
                   ? itemError.startsWith(t("addSessionToReviewSucceeded"))
                   : Boolean(deleteBusyReason);
                 const sessionAgent = session.agentId ? agentsById.get(session.agentId) : undefined;
-                const sessionDisplay = sessionAgentDisplayInfo(session, sessionAgent, lang);
+                const sessionDisplay = sessionAgentDisplayInfo(session, sessionAgent, lang, resolveModelLabel);
                 const sessionAvatarImageUrl = avatarImageUrlFrom(sessionAgent, session);
                 const sessionAgentMeta = sessionAgentMetaLabel(session);
                 const sessionFunctionVisible = showSessionFunctionLabel(sessionDisplay);

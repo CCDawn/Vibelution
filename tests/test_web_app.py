@@ -12060,6 +12060,30 @@ def test_config_summary_exposes_language():
     assert payload["language"] in {"zh", "en"}
 
 
+def test_config_summary_exposes_model_labels(monkeypatch):
+    public_config = copy.deepcopy(load_public_config())
+    public_config.setdefault("llm", {})["model_library"] = {
+        "gpt_5_5_gpt_5_5": {
+            "provider": {"kind": "relay", "api": "openai", "base_url": "https://example.test/v1"},
+            "model": "gpt-5.5",
+            "label": "gpt-5.5-share",
+        },
+        "raw_model": {
+            "provider": {"kind": "relay", "api": "openai", "base_url": "https://example.test/v1"},
+            "model": "raw-model",
+        },
+    }
+
+    monkeypatch.setattr(config_service, "load_public_config", lambda: copy.deepcopy(public_config))
+
+    response = client.get("/api/config/public")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["modelLabels"]["gpt_5_5_gpt_5_5"] == "gpt-5.5-share"
+    assert payload["modelLabels"]["raw_model"] == "raw-model"
+
+
 def test_config_workspace_exposes_unified_config_payload(monkeypatch):
     public_config = copy.deepcopy(load_public_config())
     public_config.setdefault("ui", {})["language"] = "en"

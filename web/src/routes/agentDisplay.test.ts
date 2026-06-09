@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { agentDisplayInfo, compactModelLabel, participantAgentDisplayInfo, sessionAgentDisplayInfo } from "./agentDisplay";
+import { agentDisplayInfo, compactModelLabel, modelDisplayLabel, participantAgentDisplayInfo, sessionAgentDisplayInfo } from "./agentDisplay";
 
 describe("agent display helpers", () => {
   it("keeps person names while replacing noisy session labels with clear chat roles", () => {
@@ -27,6 +27,15 @@ describe("agent display helpers", () => {
   it("compacts provider-prefixed model ids for dense chat surfaces", () => {
     expect(compactModelLabel("openai/gpt-5.1")).toBe("gpt-5.1");
     expect(compactModelLabel("HiModel_xh2_qwen3-2507_30b.gguf")).toBe("HiModel-xh2-qwen3-2507-30b");
+  });
+
+  it("prefers configured model labels before compacting raw ids", () => {
+    const resolveModelLabel = (modelId: string) => {
+      return modelId === "gpt_5_5_gpt_5_5" ? "gpt-5.5-share" : undefined;
+    };
+
+    expect(modelDisplayLabel("gpt_5_5_gpt_5_5", resolveModelLabel)).toBe("gpt-5.5-share");
+    expect(modelDisplayLabel("openai/gpt-5.1", resolveModelLabel)).toBe("gpt-5.1");
   });
 
   it("derives research roles from role keys and prompt templates", () => {
@@ -80,11 +89,12 @@ describe("agent display helpers", () => {
         metadata: { functionalDisplayName: "新会话" },
       },
       "zh",
+      (modelId) => modelId === "session_locked_model" ? "Session Locked Model" : undefined,
     );
 
     expect(info.name).toBe("夏映白");
     expect(info.functionLabel).toBe("会话入口");
-    expect(info.modelLabel).toBe("session-locked-model");
+    expect(info.modelLabel).toBe("Session Locked Model");
   });
 
   it("uses team participant role context before direct session role labels", () => {
@@ -104,11 +114,12 @@ describe("agent display helpers", () => {
         llmBindings: { dialogue: { modelId: "claude-opus-4-7" } },
       },
       "zh",
+      (modelId) => modelId === "claude-opus-4-7" ? "Claude Opus 4.7" : undefined,
     );
 
     expect(info.name).toBe("Alpha");
     expect(info.functionLabel).toBe("科研负责人");
-    expect(info.modelLabel).toBe("claude-opus-4-7");
-    expect(info.meta).toBe("科研负责人 · claude-opus-4-7 · A011");
+    expect(info.modelLabel).toBe("Claude Opus 4.7");
+    expect(info.meta).toBe("科研负责人 · Claude Opus 4.7 · A011");
   });
 });

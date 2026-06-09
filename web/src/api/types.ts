@@ -5000,6 +5000,7 @@ export type ConfigSummary = {
   modeAvailability: ModeAvailability;
   domainAvailability: DomainAvailability;
   modelLibraryCount: number;
+  modelLabels: Record<string, string>;
   blockingCount: number;
   warningCount: number;
   sections: Array<{
