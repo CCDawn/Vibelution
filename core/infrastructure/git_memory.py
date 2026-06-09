@@ -741,6 +741,7 @@ class GitMemoryService:
         return json.dumps(asdict(snapshot), ensure_ascii=False, indent=2)
 
     def open_evolution_transaction(self, summary: str = "") -> str:
+        self._ensure_tables()
         head_rev = self._git_head_rev()
         txn_id = f"txn-{uuid.uuid4().hex[:12]}"
         with self._workspace.get_db_connection() as conn:
@@ -755,8 +756,10 @@ class GitMemoryService:
         return txn_id
 
     def close_evolution_transaction(self, txn_id: str, status: str, summary: str = "") -> None:
+        self._ensure_tables()
         with self._workspace.get_db_connection() as conn:
-            conn.cursor().execute(
+            cursor = conn.cursor()
+            cursor.execute(
                 """
                 UPDATE EvolutionTransaction
                 SET closed_at = ?, status = ?, summary = ?
@@ -764,6 +767,8 @@ class GitMemoryService:
                 """,
                 (_utcnow_iso(), status, summary, txn_id),
             )
+            if cursor.rowcount == 0:
+                raise ValueError(f"Evolution transaction not found: {txn_id}")
         self._bus.publish(EventNames.EVOLUTION_TXN_CLOSED, {"txn_id": txn_id, "status": status}, source="GitMemoryService")
 
 
