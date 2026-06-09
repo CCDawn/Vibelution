@@ -77,7 +77,7 @@ describe("ToolsRoute layout contract", () => {
   });
 
   it("keeps Agent ToolPolicy state lightweight and routes configuration to Agent Center", () => {
-    expect(routeSource).toContain("fetchJson<AgentInstance[]>(\"/api/agents\")");
+    expect(routeSource).toContain("fetchJson<AgentInstance[]>(\"/api/agents?detail=summary\")");
     expect(routeSource).toContain("const agentPolicyWorkspaceNeeded = Boolean(activeTool)");
     expect(routeSource).toContain("enabled: agentPolicyWorkspaceNeeded");
     expect(routeSource).toContain("这里用于测试工具，不在这里配置 Agent");
