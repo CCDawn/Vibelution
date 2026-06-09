@@ -4,7 +4,7 @@ import { NavLink, Outlet, useLocation, useNavigationType } from "react-router-do
 import { ChevronDown, LoaderCircle, Moon, Power, RefreshCw, Settings, Sun, Wrench } from "lucide-react";
 
 import { fetchJson, setFetchJsonFailureReporter, type FetchJsonFailureReport } from "../api/client";
-import { cancelRuntimeLifecycleCommand, restartLauncherBundle, stopLauncherBundle } from "../api/launcher";
+import { cancelRuntimeLifecycleCommand, forceStopLauncherBundle, restartLauncherBundle, stopLauncherBundle } from "../api/launcher";
 import { queryKeys } from "../api/queryKeys";
 import {
   BackendHealth,
@@ -424,6 +424,7 @@ export function AppShell() {
   const refreshFrontendLabel = lang === "en" ? "Refresh frontend" : "刷新前端";
   const lifecycleMenuLabel = lang === "en" ? "Workbench power actions" : "工作台电源操作";
   const closeWorkbenchLabel = lang === "en" ? "Close workbench" : "关闭工作台";
+  const forceCloseWorkbenchLabel = lang === "en" ? "Force close workbench" : "强制关闭工作台";
   const restartWorkbenchLabel = lang === "en" ? "Restart workbench" : "重启工作台";
   const cancelShutdownLabel = lang === "en" ? "Cancel close" : "取消关闭";
   const cancelRestartLabel = lang === "en" ? "Cancel restart" : "取消重启";
@@ -436,6 +437,10 @@ export function AppShell() {
   const shutdownErrorBody = lang === "en"
     ? "The runtime manager could not close the workbench. Check the launcher and runtime-manager logs."
     : "运行时管理器没有成功关闭工作台。请检查 launcher 和 runtime-manager 日志。";
+  const forceShutdownHeading = lang === "en" ? "Force closing workbench" : "正在强制关闭工作台";
+  const forceShutdownBody = lang === "en"
+    ? "The runtime manager is terminating the managed backend and app window."
+    : "运行时管理器正在终止受管后端和工作台窗口。";
   const shutdownUnconfirmedBody = shutdownRequestUnconfirmedBody(lang);
   const shutdownLocallyCompleteTitle = lang === "en" ? "Workbench backend stopped" : "工作台后端已停止";
   const shutdownLocallyCompleteDetail = shutdownLocallyCompleteBody(lang);
@@ -522,6 +527,11 @@ export function AppShell() {
     runtimeSummaryUnavailable: runtimeQuery.isError || runtimeQuery.isRefetchError,
     workbench,
   });
+  const forceCloseVisible =
+    runtimeControllerState === "failed"
+    || shutdownInFlight
+    || String(workbench?.observedState ?? "").toLowerCase() === "open"
+    || String(workbench?.lifecycleConsistency ?? "").toLowerCase() !== "consistent";
   const activeWorkIndicator = deriveActiveWorkIndicator(runtimeQuery.data, lang);
   const activeWorkDetailsTitle = activeWorkIndicator?.items.map((item) => item.detail).join(" · ") ?? "";
   const currentTime = clockFormatter.format(clockNow);
@@ -725,6 +735,94 @@ export function AppShell() {
     shutdownBody,
     shutdownHeading,
     shutdownUnconfirmedBody,
+  ]);
+
+  const beginForceShutdown = useCallback(() => {
+    if (restartPromiseRef.current || restartRequested) {
+      return restartPromiseRef.current ?? Promise.resolve();
+    }
+
+    lifecycleRequestSeqRef.current += 1;
+    const requestSeq = lifecycleRequestSeqRef.current;
+    shutdownPromiseRef.current = null;
+    const task = (async () => {
+      lifecycleOverlayDismissedRef.current = false;
+      setShutdownRequested(true);
+      setRestartRequested(false);
+      setShutdownSettled(false);
+      setShutdownOpen(true);
+      setLifecycleAction("shutdown");
+      setLifecycleCommandId("");
+      setLifecycleCancelPending(false);
+      setShutdownTitle(forceShutdownHeading);
+      setShutdownDetail(forceShutdownBody);
+      shutdownLocalCompletionLoggedRef.current = false;
+      emitBrowserTelemetry(
+        {
+          phase: "shutdown",
+          eventCode: "browser.user_action.force_shutdown_requested",
+          message: "User requested a force close for the managed workbench.",
+          level: "warning",
+          fields: {
+            action: "force_shutdown",
+            source: "app_shell",
+            activeWorkCount: activeWorkIndicator?.count ?? 0,
+          },
+        },
+        { preferBeacon: true },
+      );
+
+      const payload = await forceStopLauncherBundle();
+      if (requestSeq !== lifecycleRequestSeqRef.current) {
+        return;
+      }
+      if (payload.commandId) {
+        setLifecycleCommandId(payload.commandId);
+      }
+      if (payload.message) {
+        setShutdownDetail(payload.message);
+      }
+    })().catch((error) => {
+      if (requestSeq !== lifecycleRequestSeqRef.current) {
+        return;
+      }
+      const errorMessage = error instanceof Error ? error.message : String(error || "");
+      setShutdownRequested(true);
+      setRestartRequested(false);
+      setShutdownOpen(true);
+      setShutdownSettled(false);
+      setLifecycleAction("shutdown");
+      setShutdownTitle(forceShutdownHeading);
+      setShutdownDetail(errorMessage || shutdownErrorBody);
+      emitBrowserTelemetry(
+        {
+          phase: "shutdown",
+          eventCode: "browser.user_action.force_shutdown_unconfirmed",
+          message: "Force shutdown request could not be confirmed by the launcher API.",
+          level: "error",
+          fields: {
+            action: "force_shutdown",
+            source: "app_shell",
+            errorMessage,
+          },
+        },
+        { preferBeacon: true },
+      );
+    }).finally(() => {
+      if (shutdownPromiseRef.current === task) {
+        shutdownPromiseRef.current = null;
+      }
+    });
+
+    shutdownPromiseRef.current = task;
+    return task;
+  }, [
+    activeWorkIndicator?.count,
+    emitBrowserTelemetry,
+    forceShutdownBody,
+    forceShutdownHeading,
+    restartRequested,
+    shutdownErrorBody,
   ]);
 
   const beginRestart = useCallback(() => {
@@ -1801,6 +1899,21 @@ export function AppShell() {
                 <Power size={15} />
                 <span>{closeWorkbenchLabel}</span>
               </button>
+              {forceCloseVisible ? (
+                <button
+                  type="button"
+                  className={`${styles.lifecycleMenuItem} ${styles.lifecycleMenuDangerItem}`}
+                  role="menuitem"
+                  onClick={() => {
+                    setLifecycleMenuOpen(false);
+                    void beginForceShutdown();
+                  }}
+                  disabled={restartRequested}
+                >
+                  <Power size={15} />
+                  <span>{forceCloseWorkbenchLabel}</span>
+                </button>
+              ) : null}
               <button
                 type="button"
                 className={styles.lifecycleMenuItem}

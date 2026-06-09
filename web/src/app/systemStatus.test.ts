@@ -155,6 +155,37 @@ describe("systemStatus", () => {
           running: true,
           runtimeState: "running",
           managerPid: 1001,
+          stateVersion: 4,
+        },
+        workbench: {
+          ...runtimeWorkbenchBase,
+          backendAlive: false,
+          backendHealthy: false,
+          backendObserved: false,
+          backendPortListening: false,
+          backendPortOwnerPid: 0,
+          backendPortOwnerTrusted: false,
+          browserWindowAlive: false,
+          desiredState: "closed",
+          observedState: "closed",
+          phase: "steady",
+          backendPid: 0,
+          browserWindowPid: 0,
+          browserManaged: false,
+          url: "http://127.0.0.1:8000",
+          lastReason: "launcher_stop",
+          statusLine: "Workbench is closed.",
+          failureMessage: "",
+        },
+      }),
+    ).toBe("unmanaged");
+
+    expect(
+      deriveRuntimeControllerState({
+        runtimeManager: {
+          running: true,
+          runtimeState: "running",
+          managerPid: 1001,
           stateVersion: 3,
         },
         workbench: {

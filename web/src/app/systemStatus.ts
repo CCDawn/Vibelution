@@ -121,10 +121,13 @@ export function deriveRuntimeControllerState(runtime: RuntimeSnapshot | null | u
   if (frontendOrphaned || phase === "failed" || failureMessage) {
     return "failed";
   }
+  if (desiredState === "closed" && observedState === "closed") {
+    return "unmanaged";
+  }
   if (desiredState === "closed" && observedState !== "closed") {
     return "closing";
   }
-  if (managerRunning && browserManaged) {
+  if (managerRunning && browserManaged && observedState === "open") {
     return "managed";
   }
   return "unmanaged";

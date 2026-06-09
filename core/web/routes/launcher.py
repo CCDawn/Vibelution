@@ -78,6 +78,11 @@ def launcher_stop() -> dict:
         ) from exc
 
 
+@router.post("/launcher/force-stop", status_code=202)
+def launcher_force_stop() -> dict:
+    return launcher_service.request_launcher_force_stop()
+
+
 @router.post("/launcher/restart", status_code=202)
 def launcher_restart() -> dict:
     try:

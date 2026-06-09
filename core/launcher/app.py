@@ -106,6 +106,12 @@ def project_stop() -> dict:
         ) from exc
 
 
+@router.post("/api/launcher/force-stop", status_code=202)
+@router.post("/api/project/force-stop", status_code=202)
+def project_force_stop() -> dict:
+    return launcher_service.request_launcher_force_stop()
+
+
 @router.post("/api/launcher/restart", status_code=202)
 @router.post("/api/project/restart", status_code=202)
 def project_restart() -> dict:

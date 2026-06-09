@@ -14,7 +14,9 @@ from core.runtime_manager import evolution_store
 from core.runtime_manager import process_inventory
 from core.runtime_manager import scene_logging
 from core.runtime_manager import state_store
+from core.runtime_manager import work_run_store
 from core.runtime_manager import workbench_controller
+from core.runtime_manager.work_run_store import WorkRunStore
 
 
 def _repeat_last(items):
@@ -2468,6 +2470,65 @@ def test_close_workbench_supersedes_pending_restart_workbench(tmp_path, monkeypa
     assert superseded_result["stateVersion"] == 62
     event_types = [json.loads(line)["type"] for line in events_path.read_text(encoding="utf-8").splitlines()]
     assert "command_queue.pending_open_superseded_by_close" in event_types
+
+
+def test_force_close_workbench_supersedes_pending_lifecycle_commands(tmp_path, monkeypatch):
+    inbox_dir = tmp_path / "inbox"
+    processing_dir = tmp_path / "processing"
+    results_dir = tmp_path / "results"
+    events_path = tmp_path / "events.jsonl"
+    for path in (inbox_dir, processing_dir, results_dir):
+        path.mkdir(parents=True)
+    for command_id, command_type in (
+        ("cmd-pending-open", "open_workbench"),
+        ("cmd-pending-restart", "restart_workbench"),
+        ("cmd-pending-close", "close_workbench"),
+    ):
+        (inbox_dir / f"{command_id}.json").write_text(
+            json.dumps(
+                {
+                    "commandId": command_id,
+                    "type": command_type,
+                    "requestedBy": "web_ui",
+                    "args": {"reason": command_type},
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    monkeypatch.setattr(command_queue, "INBOX_DIR", inbox_dir)
+    monkeypatch.setattr(command_queue, "PROCESSING_DIR", processing_dir)
+    monkeypatch.setattr(command_queue, "RESULTS_DIR", results_dir)
+    monkeypatch.setattr(command_queue, "EVENTS_PATH", events_path)
+    monkeypatch.setattr(command_queue, "ensure_runtime_manager_dirs", lambda: None)
+    monkeypatch.setattr(command_queue, "load_pid", lambda: 0)
+    monkeypatch.setattr(command_queue, "_process_is_alive", lambda pid: False)
+    monkeypatch.setattr(command_queue, "load_state", lambda: {"stateVersion": 63})
+
+    force_command = command_queue.submit_command(
+        "force_close_workbench",
+        args={"reason": "launcher_force_stop_button", "stopManager": False},
+        requested_by="launcher_api",
+    )
+
+    assert sorted(path.name for path in inbox_dir.glob("*.json")) == [f"{force_command['commandId']}.json"]
+    for command_id in ("cmd-pending-open", "cmd-pending-restart", "cmd-pending-close"):
+        superseded_result = json.loads((results_dir / f"{command_id}.json").read_text(encoding="utf-8"))
+        assert superseded_result["ok"] is False
+        assert superseded_result["completed"] is True
+        assert superseded_result["errorType"] == "SupersededByForceCloseWorkbench"
+        assert superseded_result["supersededByCommandId"] == force_command["commandId"]
+        assert superseded_result["stateVersion"] == 63
+    events = [json.loads(line) for line in events_path.read_text(encoding="utf-8").splitlines()]
+    supersede_event = next(event for event in events if event["type"] == "command_queue.pending_lifecycle_superseded_by_force_close")
+    queued_event = next(event for event in events if event["type"] == "command_queue.command_queued")
+    assert supersede_event["payload"]["commandId"] == force_command["commandId"]
+    assert {item["type"] for item in supersede_event["payload"]["commands"]} == {
+        "open_workbench",
+        "restart_workbench",
+        "close_workbench",
+    }
+    assert queued_event["payload"]["supersededPendingCommands"] == supersede_event["payload"]["commands"]
 
 
 def test_reject_pending_commands_for_shutdown_removes_stale_open_from_inbox(tmp_path, monkeypatch):
@@ -4959,6 +5020,176 @@ def test_handle_close_workbench_records_shutdown_source(monkeypatch):
     assert closed_calls == ["closed"]
     assert saved_states[0]["workbench"]["lastReason"] == "web_close_button"
     assert saved_states[0]["workbench"]["lastSource"] == "web_ui"
+
+
+def test_handle_force_close_workbench_marks_work_runs_and_verifies_close(monkeypatch):
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    saved_states: list[dict] = []
+    events: list[tuple[str, dict]] = []
+    cleanup_calls: list[dict] = []
+    state_holder = {
+        "value": {
+            "command": {"activeCommandId": "cmd-force"},
+            "workbench": {
+                "desiredState": "open",
+                "observedState": "open",
+                "phase": "steady",
+            },
+        },
+    }
+    open_observation = {
+        "observedState": "open",
+        "launcherStatePresent": True,
+        "browserManaged": True,
+        "browserWindowAlive": True,
+        "backendPid": 28888,
+        "browserLaunchPid": 29999,
+        "browserWindowPid": 29999,
+        "backendAlive": True,
+        "backendHealthy": True,
+        "backendObserved": True,
+        "backendPortListening": True,
+        "backendPortOwnerPid": 28888,
+        "sessionId": "managed-session",
+        "url": "http://127.0.0.1:8000",
+        "browserProfileDir": "C:/tmp/vibelution-workbench-profile",
+    }
+    closed_observation = {
+        "observedState": "closed",
+        "launcherStatePresent": False,
+        "browserManaged": True,
+        "browserWindowAlive": False,
+        "backendPid": 0,
+        "browserLaunchPid": 0,
+        "browserWindowPid": 0,
+        "backendAlive": False,
+        "backendHealthy": False,
+        "backendObserved": False,
+        "backendPortListening": False,
+        "backendPortOwnerPid": 0,
+        "sessionId": "",
+        "url": "http://127.0.0.1:8000",
+        "browserProfileDir": "C:/tmp/vibelution-workbench-profile",
+    }
+
+    monkeypatch.setattr(daemon, "load_state", lambda: json.loads(json.dumps(state_holder["value"])))
+
+    def fake_save_state(next_state):
+        persisted = json.loads(json.dumps(next_state))
+        state_holder["value"] = persisted
+        saved_states.append(persisted)
+        return persisted
+
+    monkeypatch.setattr(daemon, "save_state", fake_save_state)
+    monkeypatch.setattr(daemon, "now_iso", lambda: "2026-06-09T08:00:00+00:00")
+    monkeypatch.setattr(daemon, "observe_workbench", _repeat_last([open_observation, closed_observation, closed_observation]))
+    monkeypatch.setattr(daemon, "build_evolution_summary", lambda: {"self": {}, "supervised": {}})
+    monkeypatch.setattr(
+        daemon,
+        "_runtime_manager_active_work_runs",
+        lambda: (_ for _ in ()).throw(AssertionError("force close must not use regular active-work block")),
+    )
+    monkeypatch.setattr(
+        daemon,
+        "_persistent_active_work_run_snapshots",
+        lambda: [{"runKind": "chat_turn", "runId": "chat-live", "status": "running", "sessionId": "session-live"}],
+    )
+    monkeypatch.setattr(
+        daemon,
+        "_mark_persistent_active_work_runs_force_stopped",
+        lambda reason: [{"kind": "chat_turn", "runId": "chat-live", "status": "stopped_by_user", "reason": reason}],
+    )
+    monkeypatch.setattr(
+        daemon,
+        "_close_active_evolution_runs_for_shutdown",
+        lambda: [{"kind": "self_evolution_run", "runId": "self-live", "status": "cancelled"}],
+    )
+    monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: events.append((event_type, payload)))
+    monkeypatch.setattr(
+        daemon,
+        "_wait_for_close_verification",
+        lambda: (True, dict(closed_observation), 1),
+    )
+
+    def fake_cleanup(self, observation=None):
+        cleanup_calls.append(dict(observation or {}))
+        return {"supported": True, "requested": [28888, 29999], "terminated": [28888, 29999], "remaining": []}
+
+    monkeypatch.setattr(daemon.RuntimeManagerDaemon, "_force_cleanup_workbench_processes", fake_cleanup)
+
+    result = runtime_daemon._handle_force_close_workbench(
+        command_id="cmd-force",
+        args={"reason": "launcher_force_stop_button", "source": "launcher_api"},
+    )
+
+    assert result["ok"] is True
+    assert result["message"] == "Workbench force closed."
+    assert result["residualCleanup"]["terminated"] == [28888, 29999]
+    assert result["closedEvolutionRuns"] == [{"kind": "self_evolution_run", "runId": "self-live", "status": "cancelled"}]
+    assert result["forceStoppedWorkRuns"] == [
+        {"kind": "chat_turn", "runId": "chat-live", "status": "stopped_by_user", "reason": "launcher_force_stop_button"}
+    ]
+    assert cleanup_calls[0]["browserWindowPid"] == 29999
+    assert saved_states[0]["workbench"]["desiredState"] == "closed"
+    assert saved_states[0]["workbench"]["phase"] == "force_stopping"
+    assert saved_states[0]["workbench"]["lastReason"] == "launcher_force_stop_button"
+    assert saved_states[0]["workbench"]["lastSource"] == "launcher_api"
+    assert saved_states[-1]["workbench"]["desiredState"] == "closed"
+    assert saved_states[-1]["workbench"]["phase"] == "steady"
+    requested_event = next(payload for event_type, payload in events if event_type == "workbench.force_close.requested")
+    succeeded_event = next(payload for event_type, payload in events if event_type == "workbench.force_close.verification_succeeded")
+    assert requested_event["activeWorkCount"] == 1
+    assert succeeded_event["attempts"] == 1
+
+
+def test_force_close_marks_parallel_persistent_work_runs(tmp_path, monkeypatch):
+    work_runs_dir = tmp_path / ".runtime" / "runtime-manager" / "work_runs"
+    store = WorkRunStore(root=work_runs_dir)
+    store.persist_snapshot(
+        "chat_turn",
+        {
+            "runId": "chat-alpha",
+            "runKind": "chat_turn",
+            "sessionId": "session-alpha",
+            "status": "running",
+        },
+        active_run_id="chat-alpha",
+    )
+    store.persist_snapshot(
+        "chat_turn",
+        {
+            "runId": "chat-beta",
+            "runKind": "chat_turn",
+            "sessionId": "session-beta",
+            "status": "queued",
+        },
+        active_run_id="chat-alpha",
+    )
+    store.persist_snapshot(
+        "chat_turn",
+        {
+            "runId": "chat-done",
+            "runKind": "chat_turn",
+            "sessionId": "session-done",
+            "status": "completed",
+            "finishedAt": "2026-06-09T08:00:00+00:00",
+        },
+        active_run_id="chat-alpha",
+    )
+    monkeypatch.setattr(work_run_store, "WORK_RUNS_DIR", work_runs_dir)
+
+    stopped = daemon._mark_persistent_active_work_runs_force_stopped("launcher_force_stop_button")
+
+    assert {item["runId"] for item in stopped} == {"chat-alpha", "chat-beta"}
+    alpha = store.load_snapshot("chat_turn", "chat-alpha")
+    beta = store.load_snapshot("chat_turn", "chat-beta")
+    done = store.load_snapshot("chat_turn", "chat-done")
+    assert alpha and alpha["status"] == "stopped_by_user"
+    assert beta and beta["status"] == "stopped_by_user"
+    assert alpha["runtimeStatus"] == "force_stopped"
+    assert beta["forceStopReason"] == "launcher_force_stop_button"
+    assert done and done["status"] == "completed"
+    assert store.load_run_index("chat_turn")["activeRunId"] == ""
 
 
 def test_handle_close_workbench_blocks_active_chat_turn_before_close(monkeypatch):
