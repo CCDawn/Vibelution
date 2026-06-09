@@ -149,6 +149,8 @@ _SESSION_INDEX_EVENT_DEDUPE_LOCK = threading.Lock()
 _SESSION_MISSING_INDEX_EVENT_KEYS: set[tuple[str, str, str, str, str]] = set()
 _SESSION_MISSING_INDEX_BATCH_EVENT_KEYS: set[tuple[Any, ...]] = set()
 _AGENT_DIRECTORY_INDEX_EVENT_KEYS: set[tuple[str, str, str]] = set()
+_DIRECT_SESSION_COLLISION_REPAIR_LOCK = threading.Lock()
+_DIRECT_SESSION_COLLISION_REPAIR_SIGNATURE: tuple[tuple[str, int, int], tuple[str, int, int]] | None = None
 _SESSION_IMAGE_ARTIFACT_CONTENT_TYPES = {
     "png": "image/png",
     "jpg": "image/jpeg",
@@ -409,9 +411,12 @@ def _set_session_list_cache(
 
 
 def _invalidate_session_list_cache() -> None:
+    global _DIRECT_SESSION_COLLISION_REPAIR_SIGNATURE
     with _SESSION_LIST_CACHE_CONDITION:
         _SESSION_LIST_CACHE.clear()
         _SESSION_LIST_CACHE_CONDITION.notify_all()
+    with _DIRECT_SESSION_COLLISION_REPAIR_LOCK:
+        _DIRECT_SESSION_COLLISION_REPAIR_SIGNATURE = None
 
 
 def _elapsed_ms(started_at: float) -> int:
@@ -1728,7 +1733,10 @@ def list_sessions() -> list[dict]:
     """Return summarized sessions sourced from persisted chat state."""
 
     started_at = _perf_counter()
+    _sync_agent_directory_project_root()
     signature = _session_list_source_signature()
+    if _repair_agent_direct_session_collisions(source_signature=signature):
+        signature = _session_list_source_signature()
     cached, should_build, waited_for_inflight = _begin_session_list_cache_build(
         now=started_at,
         signature=signature,
@@ -3744,6 +3752,174 @@ def _load_conversation_detail_target(
             save_chat_state(PROJECT_ROOT, payload)
         return conversation
     return None
+
+
+def _repair_agent_direct_session_collisions(
+    *,
+    source_signature: tuple[tuple[str, int, int], tuple[str, int, int]] | None = None,
+) -> bool:
+    global _DIRECT_SESSION_COLLISION_REPAIR_SIGNATURE
+    _sync_agent_directory_project_root()
+    signature = source_signature or _session_list_source_signature()
+    with _DIRECT_SESSION_COLLISION_REPAIR_LOCK:
+        if _DIRECT_SESSION_COLLISION_REPAIR_SIGNATURE == signature:
+            return False
+    with _CHAT_STATE_LOCK:
+        payload = load_chat_state(PROJECT_ROOT)
+        conversations = payload.get("conversations")
+        if not isinstance(conversations, list):
+            conversations = []
+            payload["conversations"] = conversations
+        state = agent_directory_service.load_state()
+        raw_agents = list(state.get("agents") or []) if isinstance(state.get("agents"), list) else []
+        agents = [item for item in raw_agents if isinstance(item, dict)]
+        session_to_agents: dict[str, list[dict[str, Any]]] = {}
+        for agent in agents:
+            if str(agent.get("status") or "active").strip().lower() == "archived":
+                continue
+            session_id = str(agent.get("directSessionId") or "").strip()
+            agent_id = str(agent.get("agentId") or "").strip()
+            if not session_id or not agent_id:
+                continue
+            session_to_agents.setdefault(session_id, []).append(agent)
+        duplicate_groups = {
+            session_id: items
+            for session_id, items in session_to_agents.items()
+            if len(items) > 1
+        }
+        if not duplicate_groups:
+            with _DIRECT_SESSION_COLLISION_REPAIR_LOCK:
+                _DIRECT_SESSION_COLLISION_REPAIR_SIGNATURE = signature
+            return False
+
+        existing_session_ids = {
+            str(item.get("conversation_id") or "").strip()
+            for item in conversations
+            if isinstance(item, dict) and str(item.get("conversation_id") or "").strip()
+        }
+        existing_session_ids.update(
+            str(agent.get("directSessionId") or "").strip()
+            for agent in agents
+            if str(agent.get("directSessionId") or "").strip()
+        )
+        conversations_by_id = {
+            str(item.get("conversation_id") or "").strip(): item
+            for item in conversations
+            if isinstance(item, dict) and str(item.get("conversation_id") or "").strip()
+        }
+        now = _now_timestamp()
+        repaired: list[dict[str, str]] = []
+        preserved_session_ids: set[str] = set()
+        for session_id, colliding_agents in sorted(duplicate_groups.items()):
+            owner = _select_direct_session_collision_owner(
+                session_id,
+                colliding_agents,
+                conversations_by_id.get(session_id),
+            )
+            owner_id = str(owner.get("agentId") or "").strip()
+            preserved_session_ids.add(session_id)
+            conversation = conversations_by_id.get(session_id)
+            if conversation is not None and owner_id:
+                if conversation.get("agent_id") != owner_id:
+                    conversation["agent_id"] = owner_id
+                if conversation.get("agentId") != owner_id:
+                    conversation["agentId"] = owner_id
+            for agent in sorted(colliding_agents, key=_agent_direct_session_collision_repair_sort_key):
+                agent_id = str(agent.get("agentId") or "").strip()
+                if not agent_id or agent_id == owner_id:
+                    continue
+                replacement_session_id = _new_conversation_id(existing_session_ids)
+                existing_session_ids.add(replacement_session_id)
+                previous_metadata = dict(agent.get("metadata") or {})
+                metadata = dict(previous_metadata)
+                metadata["previousDirectSessionId"] = session_id
+                metadata["directSessionCollisionRepairedAt"] = now
+                agent["metadata"] = metadata
+                agent["directSessionId"] = replacement_session_id
+                agent["updatedAt"] = now
+                conversation = _agent_directory_conversation_record(agent, session_id=replacement_session_id)
+                conversations.append(conversation)
+                conversations_by_id[replacement_session_id] = conversation
+                repaired.append(
+                    {
+                        "agentId": agent_id,
+                        "agentCode": str(agent.get("agentCode") or "").strip(),
+                        "previousSessionId": session_id,
+                        "replacementSessionId": replacement_session_id,
+                    }
+                )
+        if not repaired:
+            return False
+        payload["version"] = int(payload.get("version") or CHAT_STATE_VERSION)
+        payload["updated_at"] = now
+        if str(payload.get("active_conversation_id") or "").strip() not in existing_session_ids:
+            payload["active_conversation_id"] = str(conversations[0].get("conversation_id") or "").strip() if conversations else ""
+        state["agents"] = raw_agents
+        agent_directory_service.save_state(state)
+        save_chat_state(PROJECT_ROOT, payload)
+    _invalidate_session_list_cache()
+    with _DIRECT_SESSION_COLLISION_REPAIR_LOCK:
+        _DIRECT_SESSION_COLLISION_REPAIR_SIGNATURE = _session_list_source_signature()
+    _record_agent_direct_session_collision_repaired_event(
+        preserved_session_ids=sorted(preserved_session_ids),
+        repaired=repaired,
+    )
+    return True
+
+
+def _select_direct_session_collision_owner(
+    session_id: str,
+    agents: list[dict[str, Any]],
+    conversation: dict[str, Any] | None,
+) -> dict[str, Any]:
+    for agent in agents:
+        if (
+            str(agent.get("agentId") or "").strip() == agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID
+            and str(session_id or "").strip() == agent_directory_service.KNOWLEDGE_STEWARD_DIRECT_SESSION_ID
+        ):
+            return agent
+    protected_agents = [agent for agent in agents if _agent_direct_session_collision_owner_protected(agent)]
+    if protected_agents:
+        return sorted(protected_agents, key=_agent_direct_session_collision_owner_sort_key)[0]
+    bound_agent_id = str((conversation or {}).get("agent_id") or (conversation or {}).get("agentId") or "").strip()
+    if bound_agent_id:
+        for agent in agents:
+            if str(agent.get("agentId") or "").strip() == bound_agent_id:
+                return agent
+    direct_match = [
+        agent
+        for agent in agents
+        if str(agent.get("directSessionId") or "").strip() == str(session_id or "").strip()
+    ]
+    candidates = direct_match or list(agents)
+    return sorted(candidates, key=_agent_direct_session_collision_owner_sort_key)[0]
+
+
+def _agent_direct_session_collision_owner_protected(agent: dict[str, Any]) -> bool:
+    metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+    system_role = str(metadata.get("systemRole") or metadata.get("researchOrgRole") or "").strip()
+    return bool(metadata.get("protected")) or system_role in {
+        "ceo",
+        "organization_advisor",
+        agent_directory_service.KNOWLEDGE_STEWARD_ROLE_KEY,
+    }
+
+
+def _agent_direct_session_collision_owner_sort_key(agent: dict[str, Any]) -> tuple[int, str, str]:
+    metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+    previous_direct_session_id = str(metadata.get("previousDirectSessionId") or "").strip()
+    return (
+        1 if previous_direct_session_id else 0,
+        str(agent.get("updatedAt") or agent.get("createdAt") or ""),
+        str(agent.get("agentId") or ""),
+    )
+
+
+def _agent_direct_session_collision_repair_sort_key(agent: dict[str, Any]) -> tuple[str, str]:
+    return (
+        str(agent.get("updatedAt") or agent.get("createdAt") or ""),
+        str(agent.get("agentId") or ""),
+    )
 
 
 def _append_agent_directory_conversations(
@@ -9981,6 +10157,43 @@ def _record_agent_directory_conversation_index_event(
                 "primaryMode": str(agent.get("primaryMode") or "").strip(),
                 "roleKey": str(agent.get("roleKey") or "").strip(),
                 "promptTemplateId": str(agent.get("promptTemplateId") or "").strip(),
+            },
+            lifecycle=True,
+        )
+    except Exception:
+        return
+
+
+def _record_agent_direct_session_collision_repaired_event(
+    *,
+    preserved_session_ids: list[str],
+    repaired: list[dict[str, str]],
+) -> None:
+    cleaned = [
+        {
+            "agentId": str(item.get("agentId") or "").strip(),
+            "agentCode": str(item.get("agentCode") or "").strip(),
+            "previousSessionId": str(item.get("previousSessionId") or "").strip(),
+            "replacementSessionId": str(item.get("replacementSessionId") or "").strip(),
+        }
+        for item in list(repaired or [])
+        if str(item.get("agentId") or "").strip()
+    ]
+    if not cleaned:
+        return
+    try:
+        record_runtime_scene_event(
+            "conversation",
+            "agent_direct_session_collision",
+            "session.agent_direct_session_collision.repaired",
+            level="warning",
+            outcome="repaired",
+            message="Duplicate active Agent directSessionId bindings were repaired before building the session index.",
+            fields={
+                "preservedSessionId": str((preserved_session_ids or [""])[0] or "").strip(),
+                "preservedSessionIds": [str(item or "").strip() for item in list(preserved_session_ids or []) if str(item or "").strip()],
+                "repairedCount": len(cleaned),
+                "repairedAgents": cleaned[:12],
             },
             lifecycle=True,
         )
