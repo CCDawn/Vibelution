@@ -682,7 +682,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource.indexOf("if (conversation.agentMissing)")).toBeLessThan(
       routeSource.indexOf("if (!String(conversation.agentId ?? \"\").trim())"),
     );
-    expect(routeSource).toContain("const rawSessionsQuery = useQuery");
+    expect(routeSource).toContain("const rawSessionsQuery = useSessionIndexQuery");
     expect(routeSource).toContain("const visibleSessionsData = useMemo");
     expect(routeSource).toContain("data: visibleSessionsData");
     expect(routeSource).toContain("const rawSessionsById = useMemo");
@@ -799,16 +799,18 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("loads session index pages through the paginated query endpoint", () => {
-    const rawSessionsQuerySource = routeSource.slice(
-      routeSource.indexOf("const rawSessionsQuery = useQuery"),
-      routeSource.indexOf("const visibleSessionsData", routeSource.indexOf("const rawSessionsQuery = useQuery")),
-    );
-    expect(rawSessionsQuerySource).toContain("queryKeys.sessionQuery(sessionQueryText, 50, \"\")");
-    expect(rawSessionsQuerySource).toContain("new URLSearchParams()");
-    expect(rawSessionsQuerySource).toContain("params.set(\"limit\", \"50\")");
-    expect(rawSessionsQuerySource).toContain("params.set(\"q\", sessionQueryText)");
-    expect(rawSessionsQuerySource).toContain("fetchJson<SessionQueryResponse>(`/api/sessions/query?${params.toString()}`)");
-    expect(rawSessionsQuerySource).toContain("queryClient.setQueryData<SessionSummary[]>(queryKeys.sessions(), payload.items)");
+    expect(routeSource).toContain("useSessionIndexQuery");
+    expect(routeSource).toContain("queryText: sessionQueryText");
+    expect(routeSource).toContain("sessionIndexHasMore");
+    expect(routeSource).toContain("rawSessionsQuery.loadMore()");
+    expect(routeSource).toContain("styles.sessionLoadMoreButton");
+    expect(routeStyles.sessionLoadMoreButton).toBeTypeOf("string");
+  });
+
+  it("keeps paginated session query caches synchronized with optimistic list mutations", () => {
+    expect(routeSource).toContain("updateSessionSummaryCaches(queryClient");
+    expect(routeSource).toContain("captureSessionIndexCacheSnapshots(queryClient)");
+    expect(routeSource).toContain("restoreSessionIndexCacheSnapshots(queryClient, context?.previousSessionIndexCaches)");
   });
 
   it("asks for confirmation before deleting conversations", () => {
@@ -829,11 +831,11 @@ describe("ChatCodingRoute layout contract", () => {
   it("removes deleted direct sessions from cached lists before refetch", () => {
     const deleteMutationSource = routeSource.slice(routeSource.indexOf("const deleteSessionMutation"));
     expect(routeSource).toContain("removeDeletedSessionFromConversations");
-    expect(deleteMutationSource).toContain("queryClient.setQueryData<SessionSummary[]>(queryKeys.sessions()");
+    expect(deleteMutationSource).toContain("updateSessionSummaryCaches(queryClient");
     expect(deleteMutationSource).toContain("queryClient.setQueryData<ConversationSummary[]>(queryKeys.conversations()");
     expect(routeSource).toContain("conversation.type !== \"direct_agent\"");
     expect(routeSource).toContain("conversation.directSessionId !== deletedSessionId && conversation.conversationId !== deletedSessionId");
-    expect(deleteMutationSource.indexOf("queryClient.setQueryData<SessionSummary[]>(queryKeys.sessions()")).toBeLessThan(
+    expect(deleteMutationSource.indexOf("updateSessionSummaryCaches(queryClient")).toBeLessThan(
       deleteMutationSource.indexOf("void chatWorkspaceCache.afterChatRoomsChanged()"),
     );
     expect(deleteMutationSource.indexOf("queryClient.setQueryData<ConversationSummary[]>(queryKeys.conversations()")).toBeLessThan(
@@ -882,11 +884,16 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("{sessionTitle}");
     expect(renameMutationSource).toContain("onMutate: (variables) =>");
     expect(renameMutationSource).toContain("setEditingSessionId(null)");
-    expect(renameMutationSource).toContain("queryClient.setQueryData<SessionSummary[]>(queryKeys.sessions()");
+    expect(renameMutationSource).toContain("updateSessionSummaryCaches(queryClient");
+    expect(renameMutationSource).toContain("captureSessionIndexCacheSnapshots(queryClient)");
+    expect(renameMutationSource).toContain("restoreSessionIndexCacheSnapshots(queryClient, context?.previousSessionIndexCaches)");
     expect(renameMutationSource).toContain("queryClient.setQueryData<ConversationSummary[]>(queryKeys.conversations()");
     expect(renameMutationSource).toContain("queryClient.setQueryData<SessionDetail>(queryKeys.session(variables.sessionId)");
     expect(renameMutationSource).toContain("setEditingSessionId(variables.sessionId)");
     expect(renameMutationSource).toContain("setEditingSessionTitle(variables.title)");
+    expect(renameMutationSource.indexOf("updateSessionSummaryCaches(queryClient")).toBeLessThan(
+      renameMutationSource.indexOf("queryClient.setQueryData<ConversationSummary[]>(queryKeys.conversations()"),
+    );
     expect(renameMutationSource.indexOf("queryClient.setQueryData<ConversationSummary[]>(queryKeys.conversations()")).toBeLessThan(
       renameMutationSource.indexOf("onError:"),
     );
