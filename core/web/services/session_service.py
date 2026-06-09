@@ -1800,6 +1800,141 @@ def list_sessions() -> list[dict]:
         raise
 
 
+_SESSION_QUERY_MAX_LIMIT = 100
+_SESSION_QUERY_DEFAULT_LIMIT = 50
+
+
+def query_sessions(
+    *,
+    limit: int = _SESSION_QUERY_DEFAULT_LIMIT,
+    cursor: str = "",
+    q: str = "",
+    agent_id: str = "",
+    session_kind: str = "",
+    state: str = "",
+    sort: str = "updatedAt_desc",
+) -> dict[str, Any]:
+    """Return a paginated, filtered session summary payload."""
+
+    started_at = _perf_counter()
+    sessions = list_sessions()
+    normalized_limit = _coerce_session_query_limit(limit)
+    normalized_cursor = _coerce_nonnegative_int(cursor)
+    normalized_query = str(q or "").strip().lower()
+    normalized_agent_id = str(agent_id or "").strip()
+    normalized_session_kind = str(session_kind or "").strip().lower()
+    normalized_state = str(state or "").strip().lower()
+    normalized_sort = _normalize_session_query_sort(sort)
+
+    filtered = [
+        item
+        for item in sessions
+        if _session_query_matches(
+            item,
+            query=normalized_query,
+            agent_id=normalized_agent_id,
+            session_kind=normalized_session_kind,
+            state=normalized_state,
+        )
+    ]
+    filtered.sort(
+        key=_session_query_sort_key(normalized_sort),
+        reverse=normalized_sort.endswith("_desc"),
+    )
+
+    total = len(filtered)
+    start = min(normalized_cursor, total)
+    end = min(start + normalized_limit, total)
+    page_items = filtered[start:end]
+    next_cursor = str(end) if end < total else ""
+    _record_session_list_query_event(
+        result_count=len(page_items),
+        matched_count=total,
+        total_count=len(sessions),
+        limit=normalized_limit,
+        cursor=start,
+        elapsed_ms=_elapsed_ms(started_at),
+        has_query=bool(normalized_query),
+        has_agent_filter=bool(normalized_agent_id),
+        has_kind_filter=bool(normalized_session_kind),
+        has_state_filter=bool(normalized_state),
+        sort=normalized_sort,
+    )
+    return {
+        "items": page_items,
+        "nextCursor": next_cursor,
+        "totalEstimate": total,
+        "filters": {
+            "q": str(q or "").strip(),
+            "agentId": normalized_agent_id,
+            "sessionKind": normalized_session_kind,
+            "state": normalized_state,
+            "sort": normalized_sort,
+            "limit": normalized_limit,
+            "cursor": str(start) if start > 0 else "",
+        },
+    }
+
+
+def _coerce_session_query_limit(value: Any) -> int:
+    limit = _coerce_nonnegative_int(value)
+    if limit <= 0:
+        return _SESSION_QUERY_DEFAULT_LIMIT
+    return min(limit, _SESSION_QUERY_MAX_LIMIT)
+
+
+def _normalize_session_query_sort(value: str) -> str:
+    normalized = str(value or "").strip()
+    return normalized if normalized in {"updatedAt_desc", "updatedAt_asc", "title_asc", "title_desc"} else "updatedAt_desc"
+
+
+def _session_query_sort_key(sort: str):
+    if sort.startswith("title"):
+        return lambda item: str(item.get("title") or "").strip().lower()
+    return lambda item: _timestamp_sort_key(item.get("updatedAt") or item.get("lastActive") or "")
+
+
+def _session_query_matches(
+    item: dict[str, Any],
+    *,
+    query: str,
+    agent_id: str,
+    session_kind: str,
+    state: str,
+) -> bool:
+    if agent_id and str(item.get("agentId") or "").strip() != agent_id:
+        return False
+    if session_kind and str(item.get("sessionKind") or "").strip().lower() != session_kind:
+        return False
+    if state:
+        values = {
+            str(item.get("status") or "").strip().lower(),
+            str(item.get("currentPhase") or "").strip().lower(),
+            str(item.get("childStatus") or "").strip().lower(),
+        }
+        if state not in values:
+            return False
+    if not query:
+        return True
+    haystack = " ".join(
+        str(item.get(key) or "")
+        for key in (
+            "id",
+            "title",
+            "taskTitle",
+            "taskSummary",
+            "agentId",
+            "agentCode",
+            "agentDisplayName",
+            "dialogueModelId",
+            "sessionKind",
+            "status",
+            "currentPhase",
+        )
+    ).lower()
+    return query in haystack
+
+
 def get_session_detail(session_id: str) -> dict | None:
     """Return a session detail payload by persisted conversation id."""
 
@@ -10182,6 +10317,49 @@ def _record_session_list_loaded_event(
                 "cacheExpired": cache_expired,
                 "servedStaleMatchingSignature": cache_expired,
                 "waitedForInflight": bool(waited_for_inflight),
+            },
+            lifecycle=False,
+        )
+    except Exception:
+        return
+
+
+def _record_session_list_query_event(
+    *,
+    result_count: int,
+    matched_count: int,
+    total_count: int,
+    limit: int,
+    cursor: int,
+    elapsed_ms: int,
+    has_query: bool,
+    has_agent_filter: bool,
+    has_kind_filter: bool,
+    has_state_filter: bool,
+    sort: str,
+) -> None:
+    try:
+        record_runtime_scene_event(
+            "conversation",
+            "session_list",
+            "session.list.query",
+            level="info",
+            outcome="observed",
+            message="Session list query served a paginated lightweight index page.",
+            fields={
+                "resultCount": int(result_count),
+                "matchedCount": int(matched_count),
+                "totalCount": int(total_count),
+                "limit": int(limit),
+                "cursor": int(cursor),
+                "elapsedMs": int(elapsed_ms),
+                "hasQuery": bool(has_query),
+                "hasAgentFilter": bool(has_agent_filter),
+                "hasKindFilter": bool(has_kind_filter),
+                "hasStateFilter": bool(has_state_filter),
+                "sort": str(sort or "").strip(),
+                "readOnly": True,
+                "hydrateAgent": False,
             },
             lifecycle=False,
         )

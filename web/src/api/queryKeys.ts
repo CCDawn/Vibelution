@@ -20,6 +20,7 @@ export const queryKeys = {
   agentModeBindings: () => ["agent-mode-bindings"] as const,
   conversations: () => ["conversations"] as const,
   sessions: () => ["sessions"] as const,
+  sessionQuery: (q = "", limit = 50, cursor = "") => ["sessions", "query", q, limit, cursor] as const,
   sessionAgentTemplates: () => ["sessions", "agent-templates"] as const,
   session: (id: string) => ["sessions", id] as const,
   chatRooms: () => ["chat-rooms"] as const,

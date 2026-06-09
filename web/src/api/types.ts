@@ -2110,6 +2110,21 @@ export type SessionSummary = {
   } | null;
 };
 
+export type SessionQueryResponse = {
+  items: SessionSummary[];
+  nextCursor: string;
+  totalEstimate?: number;
+  filters: {
+    q: string;
+    agentId: string;
+    sessionKind: string;
+    state: string;
+    sort: string;
+    limit: number;
+    cursor: string;
+  };
+};
+
 export type SessionChildHandoffContext = {
   source: string;
   parentSessionId: string;
