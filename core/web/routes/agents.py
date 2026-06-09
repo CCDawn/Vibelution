@@ -43,6 +43,7 @@ from core.web.services.agent_bulk_delete_service import (
     bulk_archive_agents,
     bulk_purge_agents,
 )
+from core.web.services.agent_bulk_edit_service import bulk_update_agent_prompt_template
 from core.web.services.agent_mode_binding_service import (
     AgentModeBindingError,
     get_mode_bindings_payload,
@@ -133,6 +134,13 @@ class AgentBulkActionPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     agentIds: list[str] = Field(default_factory=list)
+
+
+class AgentBulkPromptTemplatePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    agentIds: list[str] = Field(default_factory=list)
+    promptTemplateId: str = ""
 
 
 class AgentAvatarUploadPayload(BaseModel):
@@ -789,6 +797,14 @@ def agent_bulk_purge(payload: AgentBulkActionPayload) -> dict:
     except ChatRoomBusyError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except (AgentDirectoryError, AgentModeBindingError, ChatRoomValidationError, TeamServiceError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/agents/bulk-prompt-template")
+def agent_bulk_prompt_template(payload: AgentBulkPromptTemplatePayload) -> dict:
+    try:
+        return bulk_update_agent_prompt_template(payload.agentIds, payload.promptTemplateId)
+    except AgentDirectoryError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 

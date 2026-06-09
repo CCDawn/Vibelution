@@ -242,6 +242,10 @@ type AgentBulkActionResponse = {
   timingsMs?: Record<string, number>;
   durationMs?: number;
 };
+type AgentBulkPromptTemplateResponse = Omit<AgentBulkActionResponse, "success"> & {
+  success: AgentConfigWorkspaceAgent[];
+  promptTemplateId?: string;
+};
 type ModelProfileChoice = {
   key: string;
   modelId: string;
@@ -1246,6 +1250,16 @@ function updatedAgentWorkspaceCache(
     ...workspace,
     agents: nextAgents,
   };
+}
+
+function bulkUpdatedAgentWorkspaceCache(
+  workspace: AgentConfigWorkspace | undefined,
+  updatedAgents: Array<Partial<AgentConfigWorkspaceAgent> & Pick<AgentConfigWorkspaceAgent, "agentId">>,
+): AgentConfigWorkspace | undefined {
+  return updatedAgents.reduce(
+    (current, updatedAgent) => updatedAgentWorkspaceCache(current, updatedAgent),
+    workspace,
+  );
 }
 
 function groupDisplayLabel(group: { id: string; label?: string } | undefined, copy: ReturnType<typeof agentsRouteCopy>) {
@@ -4270,28 +4284,26 @@ export function AgentsRoute() {
     let skipped = 0;
     let failed = 0;
     const notes: string[] = [];
+    const agentsById = new Map(selectedBulkAgents.map((agent) => [agent.agentId, agent]));
 
-    for (const agent of selectedBulkAgents) {
-      if (agent.status === "archived") {
-        skipped += 1;
-        notes.push(`${agentLabel(agent)}: ${copy.bulkSkippedArchived}`);
-        continue;
-      }
-      try {
-        const updatedAgent = await fetchJson<AgentConfigWorkspaceAgent>(`/api/agents/${encodeURIComponent(agent.agentId)}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ promptTemplateId: bulkPromptTemplateId }),
-        });
-        queryClient.setQueryData<AgentConfigWorkspace | undefined>(
-          queryKeys.agentConfigWorkspace(),
-          (current) => updatedAgentWorkspaceCache(current, updatedAgent),
-        );
-        success += 1;
-      } catch (error) {
-        failed += 1;
-        notes.push(`${agentLabel(agent)}: ${error instanceof Error ? error.message : String(error)}`);
-      }
+    try {
+      const response = await fetchJson<AgentBulkPromptTemplateResponse>("/api/agents/bulk-prompt-template", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ agentIds: selectedBulkAgents.map((agent) => agent.agentId), promptTemplateId: bulkPromptTemplateId }),
+      });
+      queryClient.setQueryData<AgentConfigWorkspace | undefined>(
+        queryKeys.agentConfigWorkspace(),
+        (current) => bulkUpdatedAgentWorkspaceCache(current, response.success),
+      );
+      success = response.summary.successCount;
+      skipped = response.summary.skippedCount;
+      failed = response.summary.failedCount;
+      response.skipped.forEach((item) => notes.push(agentBulkActionItemNote(item, agentsById, copy.bulkSkippedArchived)));
+      response.failed.forEach((item) => notes.push(agentBulkActionItemNote(item, agentsById, copy.bulkSkippedActive)));
+    } catch (error) {
+      failed = selectedBulkAgents.length;
+      notes.push(error instanceof Error ? error.message : String(error));
     }
 
     setBulkAgentPending(false);
