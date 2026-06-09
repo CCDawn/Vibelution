@@ -47,6 +47,67 @@ GIT_SNAPSHOT_CACHE: dict[str, Any] = {"root": "", "expiresAt": 0.0, "payload": N
 SQLITE_APPEND_ONLY_TABLES = {"GitFileChange", "GitEntityChange"}
 
 
+def _path_signature(path: Path) -> str:
+    try:
+        stat = Path(path).stat()
+    except OSError:
+        return "missing"
+    return f"{int(stat.st_mtime_ns)}:{int(stat.st_size)}"
+
+
+def _dir_signature(path: Path) -> str:
+    root = Path(path)
+    if not root.exists():
+        return "missing"
+    try:
+        entries = []
+        for item in root.iterdir():
+            try:
+                stat = item.stat()
+            except OSError:
+                continue
+            entries.append(f"{item.name}:{int(stat.st_mtime_ns)}:{int(stat.st_size)}")
+        return "|".join(sorted(entries))
+    except OSError:
+        return "unavailable"
+
+
+def _memory_overview_section_signature(root: Path, section_id: str) -> str | None:
+    normalized = str(section_id or "").strip()
+    if normalized == "project-memory":
+        memory_dir = root / ".docs" / "project-memory"
+        lanes_dir = memory_dir / "lanes"
+        return "|".join(
+            [
+                _path_signature(memory_dir / "memory.json"),
+                _path_signature(memory_dir / "INDEX.md"),
+                _dir_signature(lanes_dir),
+            ]
+        )
+    if normalized == "runtime-memory":
+        return _path_signature(root / "workspace" / "runtime_state.json")
+    if normalized == "prompt-memory":
+        return _dir_signature(root / "workspace" / "prompts")
+    if normalized in {"workspace-database", "git-memory", "self-evolution-memory"}:
+        return _path_signature(root / "workspace" / "agent_brain.db")
+    if normalized == "research-memory":
+        return _dir_signature(root / "workspace" / "research")
+    if normalized == "team-knowledge":
+        return _dir_signature(root / "workspace" / "teams")
+    if normalized == "chat-session-memory":
+        return "|".join(
+            [
+                _path_signature(root / "workspace" / "chat" / "chat_state.json"),
+                _dir_signature(root / "workspace" / "sessions"),
+            ]
+        )
+    if normalized == "supervised-evolution-memory":
+        return _dir_signature(root / "workspace" / "supervised_evolution")
+    if normalized == "runtime-scene-evidence":
+        return _dir_signature(root / "logs" / "runtime_scenes")
+    return None
+
+
 def get_memory_overview(*, include_content: bool = True) -> dict[str, Any]:
     """Return a snapshot of every known agent-memory source plus user management state."""
 
@@ -473,13 +534,17 @@ def _timed_base_memory_sections(root: Path, warnings: list[str]) -> tuple[list[d
     timings: list[dict[str, Any]] = []
     for fallback_section_id, load_section in _base_memory_section_specs(root, warnings):
         cached = None
+        signature = _memory_overview_section_signature(root, fallback_section_id)
         with MEMORY_OVERVIEW_SECTION_CACHE_LOCK:
             if MEMORY_OVERVIEW_SECTION_CACHE.get("root") == cache_root:
                 cache_sections = MEMORY_OVERVIEW_SECTION_CACHE.get("sections")
                 cached = (cache_sections or {}).get(fallback_section_id) if isinstance(cache_sections, dict) else None
             elif MEMORY_OVERVIEW_SECTION_CACHE.get("root"):
                 MEMORY_OVERVIEW_SECTION_CACHE.update({"root": cache_root, "sections": {}})
-        if isinstance(cached, dict) and float(cached.get("expiresAt") or 0.0) > now:
+        cache_expired = not (isinstance(cached, dict) and float(cached.get("expiresAt") or 0.0) > now)
+        cached_signature = cached.get("signature") if isinstance(cached, dict) else None
+        signature_matches = bool(signature is not None and cached_signature == signature)
+        if isinstance(cached, dict) and (not cache_expired or signature_matches):
             warnings.extend(copy.deepcopy(cached.get("warnings") or []))
             section = copy.deepcopy(cached.get("section") or {})
             timing = copy.deepcopy(cached.get("timing") or {})
@@ -490,6 +555,7 @@ def _timed_base_memory_sections(root: Path, warnings: list[str]) -> tuple[list[d
             if isinstance(timing.get("subTimingsMs"), list):
                 timing["cachedSubTimingsMs"] = timing.pop("subTimingsMs")
             timing["cacheHit"] = True
+            timing["cacheExpired"] = bool(cache_expired)
             sections.append(section)
             timings.append(timing)
             continue
@@ -505,6 +571,14 @@ def _timed_base_memory_sections(root: Path, warnings: list[str]) -> tuple[list[d
             "durationMs": duration_ms,
             "itemCount": len(section.get("items") or []) if isinstance(section, dict) else 0,
             "cacheHit": False,
+            "cacheExpired": bool(isinstance(cached, dict) and cache_expired),
+            "cacheSignatureChanged": bool(
+                isinstance(cached, dict)
+                and cache_expired
+                and signature is not None
+                and cached_signature is not None
+                and cached_signature != signature
+            ),
         }
         if sub_timings:
             timing["subTimingsMs"] = _normalize_memory_overview_subtimings(sub_timings)
@@ -517,6 +591,7 @@ def _timed_base_memory_sections(root: Path, warnings: list[str]) -> tuple[list[d
             cache_sections = MEMORY_OVERVIEW_SECTION_CACHE.setdefault("sections", {})
             cache_sections[fallback_section_id] = {
                 "expiresAt": time.monotonic() + MEMORY_OVERVIEW_SECTION_CACHE_TTL_SECONDS,
+                "signature": signature,
                 "section": copy.deepcopy(section),
                 "timing": copy.deepcopy(timing),
                 "warnings": copy.deepcopy(section_warnings),

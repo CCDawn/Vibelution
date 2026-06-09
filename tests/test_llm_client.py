@@ -1799,6 +1799,28 @@ def test_openai_compatible_automatic_prompt_cache_strips_cache_control_and_keeps
     assert client._last_payload_protocol_summary["promptCacheProviderStrategy"] == "openai_automatic_key"
 
 
+def test_openai_automatic_prompt_cache_defaults_to_in_memory_retention_when_unset():
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "openai",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://api.openai.com/v1",
+            "llm.providers.default.compat_mode": "openai",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "gpt-4o",
+            "llm.profiles.primary.transport": "responses",
+            "llm.profiles.primary.prompt_cache.mode": "automatic",
+        }
+    )
+
+    client = LLMClient(config=config, backend=lambda payload: payload)
+    payload = client._build_payload([{"role": "system", "content": "stable"}])
+
+    assert payload["prompt_cache_key"].startswith("vibelution:openai:primary:")
+    assert payload["prompt_cache_retention"] == "in_memory"
+    assert client._last_payload_protocol_summary["promptCacheProviderStrategy"] == "openai_automatic_key"
+
+
 def test_automatic_prompt_cache_uses_stable_default_cache_key_when_not_configured():
     config = make_config(
         **{
@@ -1818,6 +1840,7 @@ def test_automatic_prompt_cache_uses_stable_default_cache_key_when_not_configure
 
     assert payload_one["prompt_cache_key"].startswith("vibelution:xiaomi:primary:")
     assert payload_two["prompt_cache_key"] == payload_one["prompt_cache_key"]
+    assert payload_one["prompt_cache_retention"] == "in_memory"
     assert client._last_payload_protocol_summary["promptCacheProviderStrategy"] == "openai_compatible_automatic_key"
 
 
@@ -1847,6 +1870,82 @@ def test_dashscope_qwen_explicit_prompt_cache_preserves_cache_control_without_ke
     assert payload["messages"][0]["content"][1] == {"type": "text", "text": "dynamic"}
     assert client._last_payload_protocol_summary["selectedProtocol"] == "qwen_openai_compat"
     assert client._last_payload_protocol_summary["promptCacheProviderStrategy"] == "qwen_explicit_cache_control"
+
+
+def test_dashscope_qwen_explicit_prompt_cache_adds_rolling_user_marker():
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "aliyun",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            "llm.providers.default.compat_mode": "openai",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "qwen3.6-plus",
+            "llm.profiles.primary.prompt_cache.mode": "explicit_cache_control",
+        }
+    )
+
+    system_content = [
+        {"type": "text", "text": "stable system", "cache_control": {"type": "ephemeral"}},
+        {"type": "text", "text": "dynamic system"},
+    ]
+    client = LLMClient(config=config, backend=lambda payload: payload)
+    payload = client._build_payload(
+        [
+            {"role": "system", "content": system_content},
+            {"role": "user", "content": "history question"},
+            {"role": "assistant", "content": "history answer"},
+            {"role": "user", "content": "current question"},
+        ]
+    )
+
+    assert payload["messages"][-1]["role"] == "user"
+    assert payload["messages"][-1]["content"] == [
+        {"type": "text", "text": "current question", "cache_control": {"type": "ephemeral"}},
+    ]
+    cache_marker_count = sum(
+        1
+        for message in payload["messages"]
+        for block in (message.get("content") if isinstance(message.get("content"), list) else [])
+        if isinstance(block, dict) and block.get("cache_control")
+    )
+    assert cache_marker_count == 2
+    assert client._last_payload_protocol_summary["payloadPolicyQwenPromptCacheMarkersAdded"] == 1
+
+
+def test_dashscope_qwen_explicit_prompt_cache_respects_four_marker_limit():
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "aliyun",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            "llm.providers.default.compat_mode": "openai",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "qwen3.6-plus",
+            "llm.profiles.primary.prompt_cache.mode": "explicit_cache_control",
+        }
+    )
+    marker = {"type": "ephemeral"}
+    messages = [
+        {"role": "system", "content": [{"type": "text", "text": "system", "cache_control": marker}]},
+        {"role": "user", "content": [{"type": "text", "text": "turn 1", "cache_control": marker}]},
+        {"role": "assistant", "content": [{"type": "text", "text": "turn 1 answer", "cache_control": marker}]},
+        {"role": "user", "content": [{"type": "text", "text": "turn 2", "cache_control": marker}]},
+        {"role": "user", "content": "current question"},
+    ]
+
+    client = LLMClient(config=config, backend=lambda payload: payload)
+    payload = client._build_payload(messages)
+
+    assert payload["messages"][-1]["content"] == "current question"
+    cache_marker_count = sum(
+        1
+        for message in payload["messages"]
+        for block in (message.get("content") if isinstance(message.get("content"), list) else [])
+        if isinstance(block, dict) and block.get("cache_control")
+    )
+    assert cache_marker_count == 4
+    assert client._last_payload_protocol_summary["payloadPolicyQwenPromptCacheMarkersAdded"] == 0
 
 
 def test_local_qwen_disabled_cache_does_not_preserve_cache_control():

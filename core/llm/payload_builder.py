@@ -29,6 +29,7 @@ class PayloadPolicyActions:
     qwen_thinking_parameter: str = ""
     minimal_tool_schema: bool = False
     prompt_cache_provider_strategy: str = "disabled"
+    qwen_prompt_cache_markers_added: int = 0
 
     def to_log_dict(self) -> Dict[str, Any]:
         return {
@@ -39,6 +40,7 @@ class PayloadPolicyActions:
             "payloadPolicyQwenThinkingParameter": self.qwen_thinking_parameter,
             "payloadPolicyMinimalToolSchema": self.minimal_tool_schema,
             "promptCacheProviderStrategy": self.prompt_cache_provider_strategy,
+            "payloadPolicyQwenPromptCacheMarkersAdded": self.qwen_prompt_cache_markers_added,
         }
 
 
@@ -139,6 +141,17 @@ def _prompt_cache_provider_strategy(build_input: PayloadBuildInput, prompt_cache
             return "openai_compatible_automatic_key"
         return "automatic_key"
     return mode
+
+
+def _default_prompt_cache_retention(strategy: str) -> str:
+    normalized = str(strategy or "").strip().lower()
+    if normalized in {
+        "openai_automatic_key",
+        "openai_compatible_automatic_key",
+        "automatic_key",
+    }:
+        return "in_memory"
+    return ""
 
 
 def _apply_system_message_policy(
@@ -284,6 +297,89 @@ def _payload_thinking_parameters(
     return {}
 
 
+def _content_cache_marker_count(content: Any) -> int:
+    if not isinstance(content, list):
+        return 0
+    return sum(
+        1
+        for block in content
+        if isinstance(block, dict) and bool(block.get("cache_control"))
+    )
+
+
+def _message_cache_marker_count(message: Dict[str, Any]) -> int:
+    return _content_cache_marker_count(message.get("content"))
+
+
+def _content_has_image_block(content: Any) -> bool:
+    if not isinstance(content, list):
+        return False
+    for block in content:
+        if not isinstance(block, dict):
+            continue
+        block_type = str(block.get("type") or "").strip().lower()
+        if block_type in {"image_url", "input_image"}:
+            return True
+        if block.get("image_url") or block.get("imageUrl"):
+            return True
+    return False
+
+
+def _append_cache_control_to_content(content: Any) -> Any:
+    if isinstance(content, str):
+        text = content.strip()
+        if not text:
+            return content
+        return [{"type": "text", "text": text, "cache_control": {"type": "ephemeral"}}]
+    if not isinstance(content, list):
+        return content
+    normalized = [dict(block) if isinstance(block, dict) else block for block in content]
+    for index in range(len(normalized) - 1, -1, -1):
+        block = normalized[index]
+        if not isinstance(block, dict):
+            continue
+        if str(block.get("type") or "text").strip().lower() not in {"", "text", "input_text"}:
+            continue
+        if not str(block.get("text") or block.get("content") or "").strip():
+            continue
+        if not block.get("cache_control"):
+            block["cache_control"] = {"type": "ephemeral"}
+        normalized[index] = block
+        return normalized
+    return content
+
+
+def _apply_qwen_explicit_prompt_cache_markers(
+    messages: List[Dict[str, Any]],
+    actions: PayloadPolicyActions,
+    *,
+    marker_limit: int = 4,
+) -> List[Dict[str, Any]]:
+    if actions.prompt_cache_provider_strategy != "qwen_explicit_cache_control":
+        return [dict(item) for item in messages]
+    normalized = [dict(item) for item in messages]
+    marker_count = sum(_message_cache_marker_count(item) for item in normalized)
+    if marker_count >= marker_limit:
+        return normalized
+    if not normalized:
+        return normalized
+    index = len(normalized) - 1
+    message = normalized[index]
+    role = str(message.get("role") or "").strip().lower()
+    if role not in {"user", "assistant"}:
+        return normalized
+    content = message.get("content")
+    if _content_has_image_block(content) or _content_cache_marker_count(content):
+        return normalized
+    updated_content = _append_cache_control_to_content(content)
+    if updated_content is content:
+        return normalized
+    message["content"] = updated_content
+    normalized[index] = message
+    actions.qwen_prompt_cache_markers_added += 1
+    return normalized
+
+
 def build_llm_payload(
     build_input: PayloadBuildInput,
     *,
@@ -363,6 +459,11 @@ def build_llm_payload(
         policy_actions,
         has_image_content=has_image_content,
     )
+    if preserve_cache_control and not has_image_content:
+        normalized_messages = _apply_qwen_explicit_prompt_cache_markers(
+            normalized_messages,
+            policy_actions,
+        )
 
     payload = {
         "model": adapter.litellm_model_name(),
@@ -383,6 +484,8 @@ def build_llm_payload(
         prompt_cache_retention = str(getattr(prompt_cache, "retention", "") or "").strip()
         if not prompt_cache_key:
             prompt_cache_key = _default_prompt_cache_key(build_input)
+        if not prompt_cache_retention:
+            prompt_cache_retention = _default_prompt_cache_retention(policy_actions.prompt_cache_provider_strategy)
         if prompt_cache_key:
             payload["prompt_cache_key"] = prompt_cache_key
         if prompt_cache_retention:

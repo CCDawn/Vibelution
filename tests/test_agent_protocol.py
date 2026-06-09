@@ -4215,6 +4215,59 @@ class TestRuntimeStateMemoryFlow:
         assert inserted[4].content == "operator guidance"
         assert inserted[-1] == messages[-1]
 
+    def test_chat_runtime_context_seed_is_deferred_until_current_user_is_known(self):
+        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent.mode_policy = ModePolicy(
+            mode=AgentMode.CHAT,
+            orchestrator_kind="chat",
+            keep_multi_turn_context=True,
+            allow_auto_loop=False,
+            capture_chat_dataset_candidates=False,
+            reset_context_before_turn=False,
+            reset_context_between_cases=False,
+            allow_direct_supervised_payload=False,
+            finish_after_direct_response=False,
+            runtime_input_builder=build_chat_user_message,
+        )
+        agent._active_turn_messages = [
+            SystemMessage(content="old system"),
+            build_chat_user_message("第一句"),
+            AIMessage(content="第一轮回复"),
+        ]
+        agent._active_turn_goal = "__chat_session__"
+        agent._pending_runtime_context_blocks = []
+
+        agent.seed_runtime_context("## Agent Runtime Context\nvolatile")
+
+        assert [getattr(item, "type", "") if not isinstance(item, dict) else item.get("role") for item in agent._active_turn_messages] == [
+            "system",
+            "user",
+            "ai",
+        ]
+        assert agent._pending_runtime_context_blocks == ["## Agent Runtime Context\nvolatile"]
+
+        messages, resumed = TurnOutcomeController.prepare_turn_messages(
+            system_prompt="new system",
+            user_prompt="第二句",
+            effective_goal="第二句",
+            active_turn_messages=agent._active_turn_messages,
+            active_turn_goal=agent._active_turn_goal,
+            build_system_message=agent_module.build_system_message,
+            build_external_request_message=build_chat_user_message,
+            allow_append_user_message=True,
+        )
+        inserted = TurnOutcomeController.insert_volatile_context_before_current_user(
+            messages=messages,
+            context_messages=[SystemMessage(content=block) for block in agent._pending_runtime_context_blocks],
+        )
+
+        assert resumed is True
+        assert inserted[1:3] == agent._active_turn_messages[1:]
+        assert isinstance(inserted[3], SystemMessage)
+        assert inserted[3].content.startswith("## Agent Runtime Context")
+        assert inserted[-1]["role"] == "user"
+        assert "第二句" in inserted[-1]["content"]
+
     def test_finish_turn_message_carryover_keeps_unfinished_context_and_clears_after_close(self):
         messages = [
             SystemMessage(content="system"),
