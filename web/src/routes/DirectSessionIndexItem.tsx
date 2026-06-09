@@ -1,9 +1,13 @@
 import { Check, X } from "lucide-react";
 import type { DragEvent, KeyboardEvent, MouseEvent } from "react";
 
-import type { SessionSummary } from "../api/types";
+import type { AgentInstance, SessionSummary } from "../api/types";
 import type { TranslationKey } from "../i18n/dictionary";
-import type { AgentDisplayInfo } from "./agentDisplay";
+import {
+  sessionAgentDisplayInfo,
+  type AgentDisplayInfo,
+  type ModelLabelResolver,
+} from "./agentDisplay";
 import styles from "./ChatCodingRoute.module.css";
 
 export function sessionListTitle(
@@ -63,6 +67,66 @@ export function isChildSession(session: SessionSummary | undefined | null) {
 
 export function isAgentRootSession(session: SessionSummary | undefined | null) {
   return Boolean(String(session?.agentId ?? "").trim()) && !isChildSession(session);
+}
+
+export type DirectSessionIndexViewModel = {
+  itemIsNotice: boolean;
+  itemMessage: string;
+  missingAgentMessage: string;
+  sessionAgentMeta: string;
+  sessionDisplay: AgentDisplayInfo;
+  sessionSummary: string;
+  sessionTitle: string;
+};
+
+type DirectSessionIndexViewModelOptions = {
+  addToReviewSucceededLabel: string;
+  agent: AgentInstance | undefined;
+  deleteBusyLabel: string;
+  itemError: string;
+  lang: "zh" | "en";
+  resolveModelLabel?: ModelLabelResolver;
+  session: SessionSummary;
+  sessionBusy: boolean;
+};
+
+export function buildDirectSessionIndexViewModel({
+  addToReviewSucceededLabel,
+  agent,
+  deleteBusyLabel,
+  itemError,
+  lang,
+  resolveModelLabel,
+  session,
+  sessionBusy,
+}: DirectSessionIndexViewModelOptions): DirectSessionIndexViewModel {
+  const deleteBusyReason = sessionBusy ? deleteBusyLabel : "";
+  const itemMessage = itemError || deleteBusyReason;
+  const itemIsNotice = itemError
+    ? itemError.startsWith(addToReviewSucceededLabel)
+    : Boolean(deleteBusyReason);
+  const sessionDisplay = sessionAgentDisplayInfo(session, agent, lang, resolveModelLabel);
+  const sessionAgentMeta = sessionAgentMetaLabel(session);
+  const missingAgentMessage = session.agentMissing
+    ? session.agentStatusMessage || (lang === "zh" ? "缺少有效 Agent，当前会话缺少可运行内容。" : "Missing valid Agent. This session has no runnable Agent content.")
+    : "";
+  const sessionIsChild = isChildSession(session);
+  const sessionTitle = sessionListTitle(session) || sessionDisplay.name;
+  const sessionSummary =
+    (sessionIsChild ? (session.resultCard?.summary || session.taskSummary) : session.taskSummary)
+    || (sessionIsChild
+      ? (lang === "zh" ? "子对话独立工作中" : "Independent child session")
+      : (lang === "zh" ? "暂无摘要" : "No summary yet"));
+
+  return {
+    itemIsNotice,
+    itemMessage,
+    missingAgentMessage,
+    sessionAgentMeta,
+    sessionDisplay,
+    sessionSummary,
+    sessionTitle,
+  };
 }
 
 function agentRoleClass(tone: string) {

@@ -134,10 +134,10 @@ import {
 } from "./agentDisplay";
 import { ConversationIndexSection } from "./ConversationIndexSection";
 import {
+  buildDirectSessionIndexViewModel,
   DirectSessionIndexItem,
   isAgentRootSession,
   isChildSession,
-  sessionAgentMetaLabel,
   sessionListTitle,
 } from "./DirectSessionIndexItem";
 import {
@@ -6055,41 +6055,34 @@ export function ChatCodingRoute() {
                   renameSessionMutation.variables?.sessionId === session.id;
                 const isEditingTitle = editingSessionId === session.id;
                 const itemError = sessionComposerErrors[session.id] ?? "";
-                const deleteBusyReason = sessionIsBusy ? t("deleteSessionBusy") : "";
-                const itemMessage = itemError || deleteBusyReason;
-                const itemIsNotice = itemError
-                  ? itemError.startsWith(t("addSessionToReviewSucceeded"))
-                  : Boolean(deleteBusyReason);
                 const sessionAgent = session.agentId ? agentsById.get(session.agentId) : undefined;
-                const sessionDisplay = sessionAgentDisplayInfo(session, sessionAgent, lang, resolveModelLabel);
                 const sessionAvatarImageUrl = avatarImageUrlFrom(sessionAgent, session);
-                const sessionAgentMeta = sessionAgentMetaLabel(session);
-                const missingAgentMessage = session.agentMissing
-                  ? session.agentStatusMessage || (lang === "zh" ? "缺少有效 Agent，当前会话缺少可运行内容。" : "Missing valid Agent. This session has no runnable Agent content.")
-                  : "";
-                const sessionIsChild = isChildSession(session);
-                const sessionTitle = sessionListTitle(session) || sessionDisplay.name;
-                const sessionSummary =
-                  (sessionIsChild ? (session.resultCard?.summary || session.taskSummary) : session.taskSummary)
-                  || (sessionIsChild
-                    ? (lang === "zh" ? "子对话独立工作中" : "Independent child session")
-                    : (lang === "zh" ? "暂无摘要" : "No summary yet"));
+                const sessionView = buildDirectSessionIndexViewModel({
+                  addToReviewSucceededLabel: t("addSessionToReviewSucceeded"),
+                  agent: sessionAgent,
+                  deleteBusyLabel: t("deleteSessionBusy"),
+                  itemError,
+                  lang,
+                  resolveModelLabel,
+                  session,
+                  sessionBusy: sessionIsBusy,
+                });
                 return (
                   <DirectSessionIndexItem
                     key={session.id}
                     active={!groupPanelActive && activeSessionId === session.id}
                     editing={isEditingTitle}
                     editingTitle={editingSessionTitle}
-                    itemMessage={itemMessage}
-                    itemIsNotice={itemIsNotice}
-                    missingAgentMessage={missingAgentMessage}
+                    itemMessage={sessionView.itemMessage}
+                    itemIsNotice={sessionView.itemIsNotice}
+                    missingAgentMessage={sessionView.missingAgentMessage}
                     renamePending={renamePending}
                     session={session}
-                    sessionAvatarFallback={avatarInitials(session.agentCode, sessionTitle)}
+                    sessionAvatarFallback={avatarInitials(session.agentCode, sessionView.sessionTitle)}
                     sessionAvatarImageUrl={sessionAvatarImageUrl}
-                    sessionDisplay={sessionDisplay}
-                    sessionSummary={sessionSummary}
-                    sessionTitle={sessionTitle}
+                    sessionDisplay={sessionView.sessionDisplay}
+                    sessionSummary={sessionView.sessionSummary}
+                    sessionTitle={sessionView.sessionTitle}
                     lang={lang}
                     statusLabel={statusLabel}
                     formatTime={formatTime}
@@ -6099,7 +6092,7 @@ export function ChatCodingRoute() {
                     onDragStart={(event) =>
                       startSessionReferenceDrag(
                         event,
-                        buildSessionReferencePayload(session, sessionAgentMeta || sessionDisplay.name, sessionSummary),
+                        buildSessionReferencePayload(session, sessionView.sessionAgentMeta || sessionView.sessionDisplay.name, sessionView.sessionSummary),
                       )}
                     onOpen={handleOpenDirectSession}
                     onRenameTitleChange={setEditingSessionTitle}
