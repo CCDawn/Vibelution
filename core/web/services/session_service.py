@@ -7393,11 +7393,11 @@ def _run_session_turn(context: dict[str, Any]) -> None:
     stage_started_at = _perf_counter()
     agent_context_packet = (
         build_agent_context(agent_id, session_id=session_id, run_id=turn_id)
-        if agent_id and not lightweight_chat_payload
+        if agent_id
         else None
     )
     prepare_timings["agentContextBuildMs"] = _elapsed_ms(stage_started_at)
-    prepare_timings["agentContextBuildSkipped"] = bool(agent_id and lightweight_chat_payload)
+    prepare_timings["agentContextBuildSkipped"] = bool(agent_id and agent_context_packet is None)
     agent_context_timings = (
         dict(getattr(agent_context_packet, "timings", {}) or {})
         if agent_context_packet is not None
@@ -7734,9 +7734,7 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                     restore(history_messages)
                     history_seed_ms = _elapsed_ms(stage_started_at)
                 host_context_marker = getattr(runtime_agent, "mark_runtime_context_seeded_by_host", None)
-                if lightweight_chat_payload and callable(host_context_marker):
-                    host_context_marker()
-                elif callable(runtime_context_seed) and runtime_context_block:
+                if callable(runtime_context_seed) and runtime_context_block:
                     stage_started_at = _perf_counter()
                     runtime_context_seed(runtime_context_block)
                     if callable(host_context_marker):
@@ -7763,7 +7761,7 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                         fields={
                             "reason": lightweight_chat_payload_reason,
                             "disableTools": True,
-                            "runtimeContextSkipped": True,
+                            "runtimeContextSkipped": not bool(runtime_context_block),
                             "rawHistoryMessageCount": len(raw_history_messages),
                             "fullSeedableHistoryMessageCount": full_history_message_count,
                             "seededHistoryMessageCount": len(history_messages),
