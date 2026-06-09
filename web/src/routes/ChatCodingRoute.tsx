@@ -134,12 +134,11 @@ import {
 } from "./agentDisplay";
 import { ConversationIndexSection } from "./ConversationIndexSection";
 import {
-  buildDirectSessionIndexViewModel,
-  DirectSessionIndexItem,
   isAgentRootSession,
   isChildSession,
   sessionListTitle,
 } from "./DirectSessionIndexItem";
+import { DirectSessionIndexList } from "./DirectSessionIndexList";
 import {
   GroupConversationIndexItem,
   TeamConversationIndexItem,
@@ -6006,6 +6005,8 @@ export function ChatCodingRoute() {
               <>
               {filteredConversations.length ? groupedConversations.map((group) => {
                 const collapsed = !searchHasTerm && collapsedConversationGroups[group.groupKey];
+                const groupRoomConversations = group.items.filter((conversation) => conversation.type === "group_room");
+                const directSessionConversations = group.items.filter((conversation) => conversation.type !== "group_room");
                 return (
                   <ConversationIndexSection
                     key={group.groupKey}
@@ -6014,8 +6015,7 @@ export function ChatCodingRoute() {
                     label={group.label}
                     onToggle={() => toggleConversationGroup(group.groupKey)}
                   >
-                    {group.items.map((conversation) => {
-                if (conversation.type === "group_room") {
+                    {groupRoomConversations.map((conversation) => {
                   const roomId = conversation.roomId || conversation.conversationId;
                   return (
                     <GroupConversationIndexItem
@@ -6031,75 +6031,36 @@ export function ChatCodingRoute() {
                       onOpen={handleOpenGroupRoom}
                     />
                   );
-                }
-                const sessionId = conversation.directSessionId || conversation.conversationId;
-                const session: SessionSummary = sessionsById.get(sessionId) ?? {
-                  id: sessionId,
-                  title: conversation.title,
-                  agentId: conversation.agentId,
-                  agentCode: conversation.agentCode,
-                  agentPrimaryMode: conversation.agentPrimaryMode,
-                  agentRoleKey: conversation.agentRoleKey,
-                  agentPromptTemplateId: conversation.agentPromptTemplateId,
-                  agentDisplayName: conversation.agentDisplayName,
-                  workspacePath: conversation.workspacePath,
-                  status: conversation.status,
-                  taskSummary: conversation.summary,
-                  lastActive: conversation.updatedAt,
-                  updatedAt: conversation.updatedAt,
-                  currentPhase: conversation.status,
-                };
-                const sessionIsBusy = isBusyPhase(session.currentPhase || session.status);
-                const renamePending =
-                  renameSessionMutation.isPending &&
-                  renameSessionMutation.variables?.sessionId === session.id;
-                const isEditingTitle = editingSessionId === session.id;
-                const itemError = sessionComposerErrors[session.id] ?? "";
-                const sessionAgent = session.agentId ? agentsById.get(session.agentId) : undefined;
-                const sessionAvatarImageUrl = avatarImageUrlFrom(sessionAgent, session);
-                const sessionView = buildDirectSessionIndexViewModel({
-                  addToReviewSucceededLabel: t("addSessionToReviewSucceeded"),
-                  agent: sessionAgent,
-                  deleteBusyLabel: t("deleteSessionBusy"),
-                  itemError,
-                  lang,
-                  resolveModelLabel,
-                  session,
-                  sessionBusy: sessionIsBusy,
-                });
-                return (
-                  <DirectSessionIndexItem
-                    key={session.id}
-                    active={!groupPanelActive && activeSessionId === session.id}
-                    editing={isEditingTitle}
-                    editingTitle={editingSessionTitle}
-                    itemMessage={sessionView.itemMessage}
-                    itemIsNotice={sessionView.itemIsNotice}
-                    missingAgentMessage={sessionView.missingAgentMessage}
-                    renamePending={renamePending}
-                    session={session}
-                    sessionAvatarFallback={avatarInitials(session.agentCode, sessionView.sessionTitle)}
-                    sessionAvatarImageUrl={sessionAvatarImageUrl}
-                    sessionDisplay={sessionView.sessionDisplay}
-                    sessionSummary={sessionView.sessionSummary}
-                    sessionTitle={sessionView.sessionTitle}
-                    lang={lang}
-                    statusLabel={statusLabel}
-                    formatTime={formatTime}
-                    t={t}
-                    onCancelRename={cancelRenameSession}
-                    onContextMenu={openSessionContextMenu}
-                    onDragStart={(event) =>
-                      startSessionReferenceDrag(
-                        event,
-                        buildSessionReferencePayload(session, sessionView.sessionAgentMeta || sessionView.sessionDisplay.name, sessionView.sessionSummary),
-                      )}
-                    onOpen={handleOpenDirectSession}
-                    onRenameTitleChange={setEditingSessionTitle}
-                    onSubmitRename={submitRenameSession}
-                  />
-                );
               })}
+                    <DirectSessionIndexList
+                      activeSessionId={activeSessionId}
+                      addToReviewSucceededLabel={t("addSessionToReviewSucceeded")}
+                      agentsById={agentsById}
+                      avatarImageUrlFrom={avatarImageUrlFrom}
+                      avatarInitials={avatarInitials}
+                      buildSessionReferencePayload={buildSessionReferencePayload}
+                      conversations={directSessionConversations}
+                      deleteBusyLabel={t("deleteSessionBusy")}
+                      editingSessionId={editingSessionId}
+                      editingSessionTitle={editingSessionTitle}
+                      formatTime={formatTime}
+                      groupPanelActive={groupPanelActive}
+                      isBusyPhase={isBusyPhase}
+                      lang={lang}
+                      renamePending={renameSessionMutation.isPending}
+                      renameSessionId={renameSessionMutation.variables?.sessionId ?? ""}
+                      resolveModelLabel={resolveModelLabel}
+                      sessionComposerErrors={sessionComposerErrors}
+                      sessionsById={sessionsById}
+                      statusLabel={statusLabel}
+                      t={t}
+                      onCancelRename={cancelRenameSession}
+                      onContextMenu={openSessionContextMenu}
+                      onDragReference={startSessionReferenceDrag}
+                      onOpen={handleOpenDirectSession}
+                      onRenameTitleChange={setEditingSessionTitle}
+                      onSubmitRename={submitRenameSession}
+                    />
                   </ConversationIndexSection>
                 );
               }) : null}
