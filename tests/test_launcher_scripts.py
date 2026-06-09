@@ -185,7 +185,7 @@ param(
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
-$source = Get-Content -Raw -LiteralPath $LauncherPath
+$source = Get-Content -Raw -Encoding UTF8 -LiteralPath $LauncherPath
 $tokens = $null
 $parseErrors = $null
 $ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
@@ -247,7 +247,7 @@ param(
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
-$source = Get-Content -Raw -LiteralPath $LauncherPath
+$source = Get-Content -Raw -Encoding UTF8 -LiteralPath $LauncherPath
 $tokens = $null
 $parseErrors = $null
 $ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
@@ -306,7 +306,7 @@ param(
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
-$source = Get-Content -Raw -LiteralPath $LauncherPath
+$source = Get-Content -Raw -Encoding UTF8 -LiteralPath $LauncherPath
 $tokens = $null
 $parseErrors = $null
 $ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
@@ -365,7 +365,7 @@ param(
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
-$source = Get-Content -Raw -LiteralPath $LauncherPath
+$source = Get-Content -Raw -Encoding UTF8 -LiteralPath $LauncherPath
 $tokens = $null
 $parseErrors = $null
 $ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
@@ -605,7 +605,7 @@ param(
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
-$source = Get-Content -Raw -LiteralPath $LauncherPath
+$source = Get-Content -Raw -Encoding UTF8 -LiteralPath $LauncherPath
 $tokens = $null
 $parseErrors = $null
 $ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
@@ -6504,7 +6504,7 @@ param(
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
-$source = Get-Content -Raw -LiteralPath $LauncherPath
+$source = Get-Content -Raw -Encoding UTF8 -LiteralPath $LauncherPath
 $tokens = $null
 $parseErrors = $null
 $ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
