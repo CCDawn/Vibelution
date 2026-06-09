@@ -479,6 +479,12 @@ def create_agent_instance(
         normalized_primary_mode = _normalize_primary_mode(primary_mode)
         normalized_role_key = _normalize_role_key(role_key)
         normalized_prompt_template_id = _normalize_prompt_template_id(prompt_template_id)
+        normalized_direct_session_id = str(direct_session_id or "").strip()
+        _ensure_active_direct_session_available(
+            state,
+            normalized_direct_session_id,
+            agent_id=agent_id,
+        )
         agent_workspace = workspace_path or _agent_workspace_relative_path(agent_id)
         _ensure_agent_workspace(agent_workspace)
         tool_policy_id = _default_tool_policy_id_for_agent(agent_id, normalized_primary_mode)
@@ -506,7 +512,7 @@ def create_agent_instance(
             "roleKey": normalized_role_key,
             "llmBindings": normalized_llm_bindings,
             "promptTemplateId": normalized_prompt_template_id,
-            "directSessionId": str(direct_session_id or "").strip(),
+            "directSessionId": normalized_direct_session_id,
             "workspacePath": agent_workspace,
             "toolPolicyId": tool_policy_id,
             "memoryPolicyId": memory_policy_id,
@@ -574,6 +580,11 @@ def ensure_agent_for_session(
             )
             changed = True
         if str(agent.get("directSessionId") or "").strip() != normalized_session_id:
+            _ensure_active_direct_session_available(
+                state,
+                normalized_session_id,
+                agent_id=str(agent.get("agentId") or "").strip(),
+            )
             agent["directSessionId"] = normalized_session_id
             changed = True
         normalized_primary_mode = _normalize_primary_mode(primary_mode or agent.get("primaryMode") or DEFAULT_AGENT_PRIMARY_MODE)
@@ -707,7 +718,13 @@ def update_agent_instance(
         if llm_bindings is not None:
             agent["llmBindings"] = normalize_agent_llm_bindings(llm_bindings)
         if direct_session_id is not None:
-            agent["directSessionId"] = str(direct_session_id or "").strip()
+            normalized_direct_session_id = str(direct_session_id or "").strip()
+            _ensure_active_direct_session_available(
+                state,
+                normalized_direct_session_id,
+                agent_id=str(agent.get("agentId") or "").strip(),
+            )
+            agent["directSessionId"] = normalized_direct_session_id
         if primary_mode is not None:
             agent["primaryMode"] = _normalize_primary_mode(primary_mode)
         if role_key is not None:
@@ -3910,6 +3927,50 @@ def _find_agent_by_direct_session(state: dict[str, Any], session_id: str) -> dic
     return None
 
 
+def _active_agent_for_direct_session(
+    state: dict[str, Any],
+    session_id: str,
+    *,
+    exclude_agent_id: str = "",
+) -> dict[str, Any] | None:
+    normalized = str(session_id or "").strip()
+    excluded = str(exclude_agent_id or "").strip()
+    if not normalized:
+        return None
+    for item in state.get("agents") or []:
+        if not isinstance(item, dict):
+            continue
+        agent_id = str(item.get("agentId") or "").strip()
+        if excluded and agent_id == excluded:
+            continue
+        if str(item.get("status") or "active").strip().lower() == "archived":
+            continue
+        if str(item.get("directSessionId") or "").strip() == normalized:
+            return item
+    return None
+
+
+def _ensure_active_direct_session_available(
+    state: dict[str, Any],
+    session_id: str,
+    *,
+    agent_id: str,
+) -> None:
+    normalized = str(session_id or "").strip()
+    if not normalized:
+        return
+    existing = _active_agent_for_direct_session(state, normalized, exclude_agent_id=agent_id)
+    if existing is None:
+        return
+    _record_agent_direct_session_collision_rejected(
+        session_id=normalized,
+        agent_id=str(agent_id or "").strip(),
+        existing_agent=existing,
+    )
+    existing_agent_id = str(existing.get("agentId") or "").strip()
+    raise AgentDirectoryError(f"Agent direct session is already bound to another active Agent: {existing_agent_id}")
+
+
 def _new_agent_id(existing_ids: set[str] | None = None) -> str:
     existing = set(existing_ids or set())
     base = f"agent-{datetime.now().strftime('%Y%m%d-%H%M%S-%f')}"
@@ -4583,6 +4644,33 @@ def _record_agent_event(event_code: str, agent: dict[str, Any], *, lifecycle: bo
                 "status": str(agent.get("status") or "").strip(),
             },
             lifecycle=lifecycle,
+        )
+    except Exception:
+        return
+
+
+def _record_agent_direct_session_collision_rejected(
+    *,
+    session_id: str,
+    agent_id: str,
+    existing_agent: dict[str, Any],
+) -> None:
+    try:
+        record_runtime_scene_event(
+            "agent_directory",
+            "agent_direct_session_collision",
+            "agent.direct_session_collision.rejected",
+            message="Agent directSessionId collision was rejected before saving.",
+            level="warning",
+            outcome="rejected",
+            fields={
+                "sessionId": str(session_id or "").strip(),
+                "agentId": str(agent_id or "").strip(),
+                "existingAgentId": str(existing_agent.get("agentId") or "").strip(),
+                "existingAgentCode": _normalize_agent_code(existing_agent.get("agentCode")),
+                "existingStatus": str(existing_agent.get("status") or "active").strip() or "active",
+            },
+            lifecycle=True,
         )
     except Exception:
         return
