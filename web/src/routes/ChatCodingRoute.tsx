@@ -2123,32 +2123,6 @@ export function ChatCodingRoute() {
     },
   });
 
-  const updateSessionAgentMutation = useMutation({
-    mutationFn: async ({ sessionId, agentId }: { sessionId: string; agentId: string }) =>
-      fetchJson<SessionDetail>(`/api/sessions/${sessionId}`, {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ agentId }),
-      }),
-    onSuccess: (nextDetail, variables) => {
-      setSessionComposerErrors((current) => ({
-        ...current,
-        [variables.sessionId]: "",
-      }));
-      syncSessionDetail(nextDetail);
-      void chatWorkspaceCache.afterSessionAgentChanged(variables.sessionId);
-    },
-    onError: (error, variables) => {
-      setSessionComposerErrors((current) => ({
-        ...current,
-        [variables.sessionId]: describeError(error, lang === "zh" ? "保存会话 Agent 配置失败" : "Save session agent config failed"),
-      }));
-      void chatWorkspaceCache.refreshSessionRuntime(variables.sessionId);
-    },
-  });
-
   const addSessionToReviewMutation = useMutation({
     mutationFn: async ({ sessionId }: { sessionId: string }) =>
       fetchJson<SessionChatReviewCandidateResponse>(
@@ -2985,24 +2959,12 @@ export function ChatCodingRoute() {
   const activeImageAttachments = activeSessionId ? sessionImageAttachments[activeSessionId] ?? [] : [];
   const activeReferenceAttachments = activeSessionId ? sessionReferenceAttachments[activeSessionId] ?? [] : [];
   const activeImageUploadPending = activeSessionId ? Boolean(sessionImageUploadPending[activeSessionId]) : false;
-  const sessionAgentOptions = useMemo(() => {
-    return (agentsQuery.data ?? []).filter((agent) => {
-      const mode = String(agent.primaryMode ?? "").trim();
-      return (
-        String(agent.kind ?? "").trim() === "persistent"
-        && String(agent.status ?? "").trim() !== "archived"
-        && (mode === "chat" || mode === "general")
-      );
-    });
-  }, [agentsQuery.data]);
   const activeAgentId = detail?.agentId || "";
-  const activeSessionAgent = sessionAgentOptions.find((agent) => agent.agentId === activeAgentId);
+  const activeSessionAgent = activeAgentId ? (agentsQuery.data ?? []).find((agent) => agent.agentId === activeAgentId) : undefined;
   const activeAgentDisplay = detail
     ? sessionAgentDisplayInfo(detail, activeSessionAgent, lang, resolveModelLabel)
     : { name: pet?.name || "Agent", functionLabel: "", tone: "chat" as const, meta: "" };
-  const activeAgentFunctionLabel = activeAgentDisplay.functionLabel;
   const activeAgentDisplayName = activeAgentDisplay.name;
-  const activeAgentMetaLabel = activeAgentDisplay.meta || activeAgentFunctionLabel || activeAgentDisplayName;
   const activeAgentAvatarImageUrl = avatarImageUrlFrom(activeSessionAgent, detail);
   const activeAgentAvatarFallback = avatarInitials(detail?.agentCode, activeAgentDisplayName);
   const activeAgentStatusMessage = detail?.agentMissing
@@ -3013,8 +2975,6 @@ export function ChatCodingRoute() {
       .filter((notice) => String(notice.message ?? "").trim())
       .slice(-1);
   }, [detail?.runtimeNotices]);
-  const agentBindingSavePending =
-    updateSessionAgentMutation.isPending && updateSessionAgentMutation.variables?.sessionId === activeSessionId;
   const latestUserMessageId = useMemo(() => deriveLatestUserMessageId(detail?.messages), [detail?.messages]);
   const resolvedEditTarget = resolveLatestEditTarget(activeEditTarget, latestUserMessageId);
   const activeDraftEffective = resolveComposerDraftValue(activeDraft, activeEditTarget, resolvedEditTarget);
@@ -4350,18 +4310,6 @@ export function ChatCodingRoute() {
     renameSessionMutation.mutate({ sessionId: session.id, title });
   }
 
-  function handleAgentTemplateChange(agentId: string) {
-    if (!activeSessionId || !agentId || agentId === activeAgentId) {
-      return;
-    }
-    setSessionComposerErrors((current) => ({
-      ...current,
-      [activeSessionId]: "",
-      __sessions__: "",
-    }));
-    updateSessionAgentMutation.mutate({ sessionId: activeSessionId, agentId });
-  }
-
   function handleResizeStart(side: ResizableSide, event: PointerEvent<HTMLDivElement>) {
     if (event.button !== 0) {
       return;
@@ -5201,47 +5149,6 @@ export function ChatCodingRoute() {
               </button>
             </div>
           ))}
-          {detail && !groupPanelActive ? (
-            <div className={styles.sessionAgentStatusControl} aria-label={lang === "zh" ? "会话 Agent 配置" : "Session agent config"}>
-              <Bot size={14} className={styles.sessionAgentStatusIcon} aria-hidden="true" />
-              <select
-                className={styles.sessionAgentStatusSelect}
-                value={activeAgentId}
-                disabled={agentsQuery.isPending || updateSessionAgentMutation.isPending || sessionBusy}
-                onChange={(event) => handleAgentTemplateChange(event.target.value)}
-                aria-label={lang === "zh" ? "选择当前会话绑定的 Agent" : "Choose the Agent bound to this session"}
-              >
-                {sessionAgentOptions.length ? (
-                  sessionAgentOptions.map((agent) => {
-                    const display = agentDisplayInfo(agent, lang, { resolveModelLabel });
-                    return (
-                      <option key={agent.agentId} value={agent.agentId}>
-                        {display.name} · {display.functionLabel}
-                      </option>
-                    );
-                  })
-                ) : (
-                  <option value={activeAgentId}>
-                    {activeAgentDisplayName ?? activeAgentId} · {activeAgentFunctionLabel}
-                  </option>
-                )}
-              </select>
-              <span
-                className={agentBindingSavePending ? `${styles.sessionAgentStatusMeta} ${styles.sessionAgentStatusSaving}` : styles.sessionAgentStatusMeta}
-                title={
-                  activeSessionAgent
-                    ? `${activeSessionAgent.primaryMode || "chat"} · ${activeSessionAgent.roleKey || (lang === "zh" ? "通用会话" : "general chat")}`
-                    : activeAgentMetaLabel
-                }
-              >
-                {agentBindingSavePending
-                  ? (lang === "zh" ? "保存中" : "Saving")
-                  : activeSessionAgent
-                    ? `${activeSessionAgent.primaryMode || "chat"} · ${activeSessionAgent.roleKey || (lang === "zh" ? "通用会话" : "general chat")}`
-                    : activeAgentMetaLabel}
-              </span>
-            </div>
-          ) : null}
         </div>
 
         <div className={styles.centerSurface}>
