@@ -53,6 +53,9 @@ class ConfigConflictError(ValueError):
     """Raised when a saved config changed since the draft was loaded."""
 
 
+_MISSING = object()
+
+
 PROFILE_LABELS = {
     "primary": {"zh": "主智能体", "en": "Primary"},
     "mental_model": {"zh": "心智模型", "en": "Mental Model"},
@@ -1053,6 +1056,147 @@ def _prepare_submitted_public_config(public_config: dict[str, Any] | None, old_p
     return with_git_config_defaults(preserve_secret_blanks(submitted, old_with_defaults))
 
 
+def _normalize_apply_base_config(base_config: dict[str, Any] | None, old_public: dict[str, Any]) -> dict[str, Any] | None:
+    if not isinstance(base_config, dict):
+        return None
+    old_with_defaults = with_git_config_defaults(old_public)
+    return with_git_config_defaults(preserve_secret_blanks(copy.deepcopy(base_config), old_with_defaults))
+
+
+def _config_values_equal(left: Any, right: Any) -> bool:
+    return left == right
+
+
+def _iter_config_changed_paths(base: Any, submitted: Any, prefix: tuple[str, ...] = ()) -> list[tuple[str, ...]]:
+    if isinstance(base, dict) and isinstance(submitted, dict):
+        paths: list[tuple[str, ...]] = []
+        keys = sorted(set(base.keys()) | set(submitted.keys()), key=str)
+        for key in keys:
+            key_path = (*prefix, str(key))
+            if key not in base or key not in submitted:
+                paths.append(key_path)
+                continue
+            paths.extend(_iter_config_changed_paths(base[key], submitted[key], key_path))
+        return paths
+    if _config_values_equal(base, submitted):
+        return []
+    return [prefix]
+
+
+def _get_config_path(root: Any, path: tuple[str, ...]) -> Any:
+    current = root
+    for token in path:
+        if isinstance(current, dict) and token in current:
+            current = current[token]
+            continue
+        return _MISSING
+    return current
+
+
+def _set_config_path(root: dict[str, Any], path: tuple[str, ...], value: Any) -> None:
+    current: dict[str, Any] = root
+    for token in path[:-1]:
+        next_value = current.get(token)
+        if not isinstance(next_value, dict):
+            next_value = {}
+            current[token] = next_value
+        current = next_value
+    current[path[-1]] = copy.deepcopy(value)
+
+
+def _delete_config_path(root: dict[str, Any], path: tuple[str, ...]) -> None:
+    current: Any = root
+    for token in path[:-1]:
+        if not isinstance(current, dict) or token not in current:
+            return
+        current = current[token]
+    if isinstance(current, dict):
+        current.pop(path[-1], None)
+
+
+def _format_config_path(path: tuple[str, ...]) -> str:
+    return ".".join(path)
+
+
+def _model_library_ids(public_config: dict[str, Any]) -> set[str]:
+    llm_config = public_config.get("llm", {}) if isinstance(public_config.get("llm", {}), dict) else {}
+    model_library = llm_config.get("model_library", {}) if isinstance(llm_config, dict) else {}
+    if not isinstance(model_library, dict):
+        return set()
+    return {str(model_id) for model_id in model_library.keys()}
+
+
+def _changed_model_ids_from_paths(changed_paths: list[tuple[str, ...]], base_config: dict[str, Any], submitted: dict[str, Any]) -> list[str]:
+    base_ids = _model_library_ids(base_config)
+    submitted_ids = _model_library_ids(submitted)
+    touched = {
+        path[2]
+        for path in changed_paths
+        if len(path) >= 3 and path[0] == "llm" and path[1] == "model_library"
+    }
+    return sorted(str(model_id) for model_id in touched if model_id in base_ids and model_id in submitted_ids)
+
+
+def _added_model_ids_from_paths(changed_paths: list[tuple[str, ...]], base_config: dict[str, Any], submitted: dict[str, Any]) -> list[str]:
+    base_ids = _model_library_ids(base_config)
+    submitted_ids = _model_library_ids(submitted)
+    touched = {
+        path[2]
+        for path in changed_paths
+        if len(path) >= 3 and path[0] == "llm" and path[1] == "model_library"
+    }
+    return sorted(str(model_id) for model_id in touched if model_id in submitted_ids and model_id not in base_ids)
+
+
+def _removed_model_ids_from_paths(changed_paths: list[tuple[str, ...]], base_config: dict[str, Any], submitted: dict[str, Any]) -> list[str]:
+    base_ids = _model_library_ids(base_config)
+    submitted_ids = _model_library_ids(submitted)
+    touched = {
+        path[2]
+        for path in changed_paths
+        if len(path) >= 3 and path[0] == "llm" and path[1] == "model_library"
+    }
+    return sorted(str(model_id) for model_id in touched if model_id in base_ids and model_id not in submitted_ids)
+
+
+def _merge_submitted_config_changes(
+    *,
+    base_config: dict[str, Any] | None,
+    submitted: dict[str, Any],
+    old_public: dict[str, Any],
+    lang: str,
+) -> tuple[dict[str, Any], list[tuple[str, ...]], list[tuple[str, ...]]]:
+    if base_config is None:
+        changed_paths = _iter_config_changed_paths(old_public, submitted)
+        return submitted, changed_paths, []
+
+    changed_paths = _iter_config_changed_paths(base_config, submitted)
+    merged = copy.deepcopy(old_public)
+    conflicted_paths: list[tuple[str, ...]] = []
+    for path in changed_paths:
+        base_value = _get_config_path(base_config, path)
+        current_value = _get_config_path(old_public, path)
+        if not _config_values_equal(base_value, current_value):
+            conflicted_paths.append(path)
+            continue
+        submitted_value = _get_config_path(submitted, path)
+        if submitted_value is _MISSING:
+            _delete_config_path(merged, path)
+        else:
+            _set_config_path(merged, path, submitted_value)
+
+    if conflicted_paths:
+        preview = ", ".join(_format_config_path(path) for path in conflicted_paths[:8])
+        raise ConfigConflictError(
+            text_for(
+                lang,
+                zh=f"当前配置中的这些字段已被其他页面或进程改动，请重新加载后再保存：{preview}",
+                en=f"These config fields changed in another page or process. Reload before saving: {preview}",
+            )
+        )
+    return merged, changed_paths, []
+
+
 def _assert_base_hash_matches(base_hash: str, old_public: dict[str, Any], lang: str) -> str:
     current_hash = public_config_hash(with_git_config_defaults(old_public))
     raw_current_hash = public_config_hash(old_public)
@@ -1066,6 +1210,20 @@ def _assert_base_hash_matches(base_hash: str, old_public: dict[str, Any], lang: 
             )
         )
     return current_hash
+
+
+def _assert_apply_base_hash_matches(base_hash: str, base_config: dict[str, Any], lang: str) -> str:
+    base_hash_value = public_config_hash(with_git_config_defaults(base_config))
+    expected_hash = str(base_hash or "").strip()
+    if expected_hash and expected_hash != base_hash_value:
+        raise ConfigConflictError(
+            text_for(
+                lang,
+                zh="设置页的配置基线已过期，请重新加载后再保存这次修改",
+                en="The config edit baseline is stale. Reload before saving these changes.",
+            )
+        )
+    return base_hash_value
 
 
 def get_config_summary() -> dict[str, Any]:
@@ -1771,15 +1929,27 @@ def open_system_environment_settings() -> dict[str, object]:
 def apply_config_workspace(
     public_config: dict[str, Any] | None,
     *,
+    base_config: dict[str, Any] | None = None,
     draft_meta: dict | None = None,
     base_hash: str = "",
 ) -> dict[str, Any]:
     old_public = load_public_config()
+    current_public = with_git_config_defaults(old_public)
     submitted = _prepare_submitted_public_config(public_config, old_public)
+    submitted_base = _normalize_apply_base_config(base_config, old_public)
     lang = _resolve_workspace_language(submitted)
-    _assert_base_hash_matches(base_hash, old_public, lang)
-    validate_llm_public_config(submitted)
-    optional_unconfigured_profile_ids = _optional_unconfigured_profile_ids(submitted)
+    if submitted_base is None:
+        _assert_base_hash_matches(base_hash, old_public, lang)
+    else:
+        _assert_apply_base_hash_matches(base_hash, submitted_base, lang)
+    merged, changed_paths, _ = _merge_submitted_config_changes(
+        base_config=submitted_base,
+        submitted=submitted,
+        old_public=current_public,
+        lang=lang,
+    )
+    validate_llm_public_config(merged)
+    optional_unconfigured_profile_ids = _optional_unconfigured_profile_ids(merged)
     if optional_unconfigured_profile_ids:
         _record_config_scene_event(
             "validate",
@@ -1792,8 +1962,8 @@ def apply_config_workspace(
             },
             lifecycle=True,
         )
-    build_effective_config(submitted)
-    save_public_config(submitted)
+    build_effective_config(merged)
+    save_public_config(merged)
 
     normalized_meta = _normalize_draft_meta(draft_meta)
     cleared_envs = [str(env_name) for env_name in normalized_meta.get("pending_cleared_api_keys", [])]
@@ -1825,6 +1995,7 @@ def apply_config_workspace(
             en="Config saved to config.toml.",
         ),
     )
+    base_for_summary = submitted_base or current_public
     _record_config_scene_event(
         "persist",
         "config.workspace.applied",
@@ -1839,6 +2010,12 @@ def apply_config_workspace(
             "pendingApiKeyEnvs": updated_envs,
             "clearedApiKeyEnvCount": len(cleared_envs),
             "clearedApiKeyEnvs": cleared_envs,
+            "applyMode": "patch" if submitted_base is not None else "snapshot",
+            "changedPathCount": len(changed_paths),
+            "changedPaths": [_format_config_path(path) for path in changed_paths[:50]],
+            "addedModelIds": _added_model_ids_from_paths(changed_paths, base_for_summary, submitted),
+            "removedModelIds": _removed_model_ids_from_paths(changed_paths, base_for_summary, submitted),
+            "changedModelIds": _changed_model_ids_from_paths(changed_paths, base_for_summary, submitted),
             "runtimeConfigReloaded": True,
             "primaryProviderKind": primary_provider.kind,
             "primaryModel": primary_profile.model,

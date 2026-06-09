@@ -5,6 +5,7 @@ import {
 } from "./ConfigRoute";
 import {
   avatarCropSourceRect,
+  buildConfigApplyPayload,
   canDiscoverModelsForProvider,
   clampAvatarCropOffset,
   configInvalidationDomainsForApply,
@@ -155,6 +156,87 @@ describe("configRouteLogic", () => {
       tools: { image2: { default_model_ref: "relay_image2" } },
       memory: { enabled: true },
     });
+  });
+
+  it("builds config apply payload with the original edit baseline", () => {
+    const baseConfig: PublicConfigShape = {
+      llm: {
+        model_library: {
+          relay: {
+            provider: { base_url: "https://old.example/v1" },
+            model: "gpt-5.5",
+          },
+          deleted: { model: "claude-opus-4-7" },
+        },
+      },
+    };
+    const draftConfig: PublicConfigShape = {
+      llm: {
+        model_library: {
+          relay: {
+            provider: { base_url: "https://old.example/v1" },
+            model: "gpt-5.5",
+          },
+        },
+      },
+    };
+
+    const payload = buildConfigApplyPayload({
+      draftConfig,
+      draftMeta: { pending_api_keys: {}, pending_cleared_api_keys: [] },
+      baseHash: "base-hash",
+      baseConfig,
+      editorText: "{}",
+      hasEditorChanges: false,
+      editorSections: [],
+      loadFailedMessage: "load failed",
+    });
+
+    expect(payload.baseConfig).toEqual(baseConfig);
+    expect(payload.publicConfig).toEqual(draftConfig);
+  });
+
+  it("limits advanced editor apply payload to editable section diffs", () => {
+    const draftConfig: PublicConfigShape = {
+      avatar: { preset: "ember" },
+      llm: {
+        model_library: {
+          relay: { provider: { base_url: "https://draft.example/v1" } },
+        },
+      },
+    };
+    const baseConfig: PublicConfigShape = {
+      avatar: { preset: "ember" },
+      llm: {
+        model_library: {
+          relay: { provider: { base_url: "https://base.example/v1" } },
+        },
+      },
+    };
+
+    const payload = buildConfigApplyPayload({
+      draftConfig,
+      draftMeta: { pending_api_keys: {}, pending_cleared_api_keys: [] },
+      baseHash: "base-hash",
+      baseConfig,
+      editorText: JSON.stringify({
+        avatar: { preset: "ocean" },
+        llm: { model_library: { relay: { provider: { base_url: "https://hijack.example/v1" } } } },
+      }),
+      hasEditorChanges: true,
+      editorSections: [{ path: "avatar" }],
+      loadFailedMessage: "load failed",
+    });
+
+    expect(payload.publicConfig).toEqual({
+      avatar: { preset: "ocean" },
+      llm: {
+        model_library: {
+          relay: { provider: { base_url: "https://draft.example/v1" } },
+        },
+      },
+    });
+    expect(payload.baseConfig).toEqual(baseConfig);
   });
 
   it("classifies model presets from explicit category before provider heuristics", () => {
