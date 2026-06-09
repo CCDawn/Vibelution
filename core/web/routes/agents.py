@@ -706,6 +706,14 @@ def _timed_agent_delete_stage(timings: dict[str, float], stage: str, fn: Any) ->
         timings[stage] = round((perf_counter() - started_at) * 1000, 1)
 
 
+def _public_direct_session_cleanup(cleanup: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(cleanup, dict):
+        return {}
+    public = dict(cleanup)
+    public.pop("restoreToken", None)
+    return public
+
+
 def _record_agent_delete_route_event(
     event_code: str,
     agent_id: str,
@@ -835,23 +843,12 @@ def agent_archive(agent_id: str) -> dict:
 def agent_purge(agent_id: str) -> dict:
     timings: dict[str, float] = {}
     started_at = perf_counter()
+    direct_session_restore_token: dict[str, Any] | None = None
     try:
         agent_before_purge = _timed_agent_delete_stage(timings, "ensure_purge_allowed", lambda: ensure_agent_purge_allowed(agent_id))
         direct_session_id = str(agent_before_purge.get("directSessionId") or "").strip()
         previous_status = str(agent_before_purge.get("status") or "active").strip() or "active"
         _timed_agent_delete_stage(timings, "ensure_workspace_deletable", lambda: ensure_agent_purge_workspace_deletable(agent_before_purge))
-        team_cleanup = _timed_agent_delete_stage(timings, "remove_from_teams", lambda: remove_agent_from_teams(agent_id))
-        room_cleanup = _timed_agent_delete_stage(
-            timings,
-            "remove_from_chat_rooms",
-            lambda: remove_agent_from_chat_rooms(agent_id, allow_empty_rooms=True, direct_session_id=direct_session_id),
-        )
-        mode_cleanup = _timed_agent_delete_stage(
-            timings,
-            "remove_from_mode_bindings",
-            lambda: remove_agent_from_mode_bindings(agent_id, agent_snapshot=agent_before_purge),
-        )
-        purge = _timed_agent_delete_stage(timings, "purge_agent", lambda: purge_archived_agent_instance(agent_id))
         direct_session_cleanup = (
             _timed_agent_delete_stage(
                 timings,
@@ -861,20 +858,45 @@ def agent_purge(agent_id: str) -> dict:
                     agent_id=agent_id,
                     agent_display_name=str(agent_before_purge.get("displayName") or "").strip(),
                     previous_status=previous_status,
+                    include_restore_token=True,
                 ),
             )
             if direct_session_id
             else {"changed": False, "sessionId": "", "agentId": agent_id, "reason": "no_direct_session"}
         )
         if str(direct_session_cleanup.get("reason") or "").strip() == "tombstone_failed":
-            raise AgentDirectoryError("Agent direct-session tombstone failed after permanent delete; direct-session history may need repair.")
+            raise AgentDirectoryError("Agent direct-session tombstone failed before permanent delete; no Agent data was deleted.")
+        restore_token = direct_session_cleanup.get("restoreToken")
+        direct_session_restore_token = restore_token if isinstance(restore_token, dict) else None
+        try:
+            team_cleanup = _timed_agent_delete_stage(timings, "remove_from_teams", lambda: remove_agent_from_teams(agent_id))
+            room_cleanup = _timed_agent_delete_stage(
+                timings,
+                "remove_from_chat_rooms",
+                lambda: remove_agent_from_chat_rooms(agent_id, allow_empty_rooms=True, direct_session_id=direct_session_id),
+            )
+            mode_cleanup = _timed_agent_delete_stage(
+                timings,
+                "remove_from_mode_bindings",
+                lambda: remove_agent_from_mode_bindings(agent_id, agent_snapshot=agent_before_purge),
+            )
+            purge = _timed_agent_delete_stage(timings, "purge_agent", lambda: purge_archived_agent_instance(agent_id))
+        except Exception:
+            if direct_session_restore_token is not None:
+                _timed_agent_delete_stage(
+                    timings,
+                    "rollback_direct_session_deleted_agent",
+                    lambda: session_service.restore_direct_session_agent_deleted_tombstone(direct_session_restore_token),
+                )
+            raise
+        public_direct_session_cleanup = _public_direct_session_cleanup(direct_session_cleanup)
         payload = {
             **purge,
             "purgeSummary": {
                 "modeBindingsRepaired": len(mode_cleanup.get("repairWarnings") or []),
                 "removedFromRoomIds": list(room_cleanup.get("changedRoomIds") or []),
                 "removedFromTeamIds": list(team_cleanup.get("changedTeamIds") or []),
-                "directSession": direct_session_cleanup,
+                "directSession": public_direct_session_cleanup,
                 "dataRetention": "purged",
             },
         }
@@ -892,7 +914,7 @@ def agent_purge(agent_id: str) -> dict:
                 "skippedPathCount": len(purge.get("skippedPaths") or []),
                 "previousStatus": previous_status,
                 "directSessionId": direct_session_id,
-                "directSessionTombstoned": bool(direct_session_cleanup.get("changed")),
+                "directSessionTombstoned": bool(public_direct_session_cleanup.get("changed")),
             },
         )
         return payload
