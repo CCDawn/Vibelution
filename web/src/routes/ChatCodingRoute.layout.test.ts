@@ -6,6 +6,7 @@ import shellStoreSource from "../store/shellStore.ts?raw";
 import routeSource from "./ChatCodingRoute.tsx?raw";
 import conversationIndexSectionSource from "./ConversationIndexSection.tsx?raw";
 import directSessionIndexItemSource from "./DirectSessionIndexItem.tsx?raw";
+import directSessionIndexListSource from "./DirectSessionIndexList.tsx?raw";
 import groupSessionIndexItemsSource from "./GroupSessionIndexItems.tsx?raw";
 import sessionContextMenuSource from "./SessionContextMenu.tsx?raw";
 import routeStyles from "./ChatCodingRoute.module.css";
@@ -837,7 +838,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("if (!window.confirm(sessionConfirmMessage))");
     expect(routeSource).toContain("if (!window.confirm(groupConfirmMessage))");
     expect(routeSource).toContain("[session.id]: t(\"deleteSessionBusy\")");
-    expect(routeSource).toContain("deleteBusyLabel: t(\"deleteSessionBusy\")");
+    expect(routeSource).toContain('deleteBusyLabel={t("deleteSessionBusy")}');
+    expect(directSessionIndexListSource).toContain("deleteBusyLabel");
     expect(directSessionIndexItemSource).toContain("const deleteBusyReason = sessionBusy ? deleteBusyLabel : \"\"");
     expect(routeSource.indexOf("window.confirm(sessionConfirmMessage)")).toBeLessThan(
       routeSource.indexOf("deleteSessionMutation.mutate({ sessionId: session.id })"),
@@ -881,8 +883,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("renameSessionInSummaries");
     expect(routeSource).toContain("renameSessionInConversations");
     expect(routeSource).toContain("renameSessionDetail");
-    expect(routeSource).toContain("DirectSessionIndexItem");
-    expect(routeSource).toContain("<DirectSessionIndexItem");
+    expect(routeSource).toContain("DirectSessionIndexList");
+    expect(routeSource).toContain("<DirectSessionIndexList");
     expect(directSessionIndexItemSource).toContain('export function sessionListTitle(');
     expect(directSessionIndexItemSource).toContain('"id" | "title" | "agentDisplayName" | "taskTitle" | "resultCard" | "sessionKind"');
     expect(titleHelperSource).toContain('if (sessionKind === "child")');
@@ -892,10 +894,12 @@ describe("ChatCodingRoute layout contract", () => {
     expect(titleHelperRootSource).toContain("session.agentDisplayName");
     expect(titleHelperRootSource).not.toContain("session.taskTitle");
     expect(titleHelperRootSource.indexOf("session.title")).toBeLessThan(titleHelperRootSource.indexOf("session.agentDisplayName"));
-    expect(routeSource).toContain("title: sessionListTitle(session)");
-    expect(routeSource).toContain("agentDisplayName: conversation.agentDisplayName");
-    expect(routeSource).toContain("buildDirectSessionIndexViewModel");
-    expect(routeSource).toContain("const sessionView = buildDirectSessionIndexViewModel");
+    expect(directSessionIndexListSource).toContain("title: conversation.title");
+    expect(directSessionIndexListSource).toContain("agentDisplayName: conversation.agentDisplayName");
+    expect(directSessionIndexListSource).toContain("buildDirectSessionIndexViewModel");
+    expect(directSessionIndexListSource).toContain("const sessionView = buildDirectSessionIndexViewModel");
+    expect(directSessionIndexListSource).toContain("conversationToSessionSummary");
+    expect(directSessionIndexListSource).toContain("sessionComposerErrors[session.id]");
     expect(directSessionIndexItemSource).toContain("const sessionAgentMeta = sessionAgentMetaLabel(session)");
     expect(directSessionIndexItemSource).toContain("export function sessionAgentMetaLabel");
     expect(directSessionIndexItemSource).toContain("return `Agent ${code}`;");
