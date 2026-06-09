@@ -2458,6 +2458,41 @@
   gap: 1px;
 }
 
+.sessionLoadMoreButton {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 30px;
+  width: 100%;
+  padding: 5px 9px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 22%, var(--border-soft));
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--surface-panel) 82%, transparent);
+  color: var(--fg-secondary);
+  font: inherit;
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+
+.sessionLoadMoreButton strong {
+  color: var(--fg-tertiary);
+  font-size: 0.68rem;
+  font-weight: 740;
+  white-space: nowrap;
+}
+
+.sessionLoadMoreButton:hover,
+.sessionLoadMoreButton:focus-visible {
+  border-color: color-mix(in srgb, var(--accent-cool) 42%, var(--border-soft));
+  color: var(--fg-primary);
+}
+
+.sessionLoadMoreButton:disabled {
+  cursor: wait;
+  opacity: 0.62;
+}
+
 .teamTreeGroup {
   margin-top: 6px;
 }
