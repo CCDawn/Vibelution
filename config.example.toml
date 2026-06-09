@@ -337,7 +337,6 @@ api_key_env = "VIBELUTION_LLM_MODEL_LOCAL_MODEL_SERVER_A_API_KEY"
 
 [llm.model_library.local_model_server_a.provider]
 kind = "llamacpp"
-api_key = "not-needed"
 api_key_env = ""
 base_url = "http://127.0.0.1:8081/v1"
 compat_mode = "openai"
@@ -364,7 +363,6 @@ api_key_env = "VIBELUTION_LLM_MODEL_LOCAL_MODEL_SERVER_B_API_KEY"
 
 [llm.model_library.local_model_server_b.provider]
 kind = "llamacpp"
-api_key = "not-needed"
 api_key_env = ""
 base_url = "http://127.0.0.1:8082/v1"
 compat_mode = "openai"
