@@ -76,6 +76,32 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain('forcedView === "graph"');
   });
 
+  it("keeps dense Memory workspaces bounded with internal scrolling", () => {
+    expect(memoryCssSource).toContain("grid-template-rows: minmax(0, 1fr)");
+    expect(memoryCssSource).toContain("grid-template-columns: minmax(210px, 260px) minmax(320px, 0.95fr) minmax(390px, 1.08fr)");
+    expect(memoryCssSource).toContain("grid-template-columns: minmax(430px, 1.08fr) minmax(300px, 0.72fr) minmax(330px, 0.72fr)");
+    expect(memoryCssSource).toContain("grid-template-rows: auto auto minmax(0, 1fr)");
+    expect(memoryCssSource).toContain(".reviewQueueList");
+    expect(memoryCssSource).toContain("overflow: auto");
+    expect(memoryCssSource).toContain("grid-template-columns: 22px minmax(170px, 0.62fr) minmax(180px, 0.72fr) minmax(108px, 0.34fr) auto auto");
+    expect(memoryCssSource).toContain(".overviewPanel");
+    expect(memoryCssSource).toContain("grid-template-rows: auto minmax(0, 1fr)");
+  });
+
+  it("preserves a compact narrow Memory layout without turning every detail pane full width", () => {
+    expect(memoryCssSource).toContain("@media (max-width: 1180px)");
+    expect(memoryCssSource).toContain("grid-template-columns: minmax(300px, 0.76fr) minmax(0, 1fr)");
+    expect(memoryCssSource).toContain("grid-template-rows: minmax(210px, 0.58fr) minmax(260px, 1fr)");
+    expect(memoryCssSource).toContain(".manageWorkspace .manageListPanel");
+    expect(memoryCssSource).toContain("grid-row: 1 / 3");
+    expect(memoryCssSource).toContain(".manageWorkspace .detailPanel");
+    expect(memoryCssSource).toContain("grid-column: 2");
+    expect(memoryCssSource).toContain("grid-row: 2");
+    expect(memoryCssSource).toContain("max-height: none");
+    expect(memoryCssSource).toContain(".reviewReasonList");
+    expect(memoryCssSource).toContain("display: none");
+  });
+
   it("wires the read-only 3D memory knowledge graph API and canvas shell", () => {
     expect(routeSource).toContain("queryKeys.memoryKnowledgeGraph(fallbackKnowledgeActorAgentId)");
     expect(routeSource).toContain('appendAgentParam(new URLSearchParams({ include: "officialResearchGraph" }), fallbackKnowledgeActorAgentId)');
