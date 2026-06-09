@@ -6652,6 +6652,12 @@ if ($detachedText -match "Start-RedirectedBackgroundProcess") {
 if ($detachedText -notmatch "-EncodedCommand") {
     throw "Start-SupervisorDetached should still use an encoded supervisor command."
 }
+if ($detachedText -notmatch "3>&1 4>&1 5>&1 6>&1 1>>") {
+    throw "Start-SupervisorDetached should merge non-error streams before writing supervisor stdout."
+}
+if ($detachedText -match "3>> `$stdoutLiteral" -or $detachedText -match "4>> `$stdoutLiteral" -or $detachedText -match "5>> `$stdoutLiteral" -or $detachedText -match "6>> `$stdoutLiteral") {
+    throw "Start-SupervisorDetached should not open competing redirected writers to supervisor stdout."
+}
 
 Write-Output "ok"
 """,
