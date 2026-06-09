@@ -1032,6 +1032,31 @@ def test_update_llm_model_rejects_unknown_model_id():
         )
 
 
+def test_update_llm_model_persists_manual_image_input_support():
+    public_config = load_public_config()
+    target = public_config["llm"]["model_library"]["deepseek_v4_pro"]
+
+    updated = update_llm_model(
+        public_config,
+        "deepseek_v4_pro",
+        target["provider"],
+        "deepseek-v4-pro",
+        "DeepSeek V4 Pro",
+        {
+            **target,
+            "supports_image_input": True,
+            "capability_status": "supported",
+            "capability_source": "manual",
+        },
+    )
+
+    model = updated["llm"]["model_library"]["deepseek_v4_pro"]
+    assert model["supports_image_input"] is True
+    assert model["capability_status"] == "supported"
+    assert model["capability_source"] == "manual"
+    build_effective_config(updated)
+
+
 def test_delete_generated_profile_model_leaves_matching_profiles_unchanged():
     public_config = load_public_config()
     provider = _provider("openai", "https://api.openai.com/v1", "OPENAI_API_KEY")

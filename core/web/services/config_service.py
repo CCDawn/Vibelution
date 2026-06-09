@@ -827,6 +827,44 @@ def _image_input_probe_status(error_text: str) -> tuple[bool | None, str]:
     return None, "unknown"
 
 
+def _build_image_input_probe_config(
+    public_config: dict[str, Any],
+    *,
+    model_id: str,
+    route_id: str,
+    provider: Any,
+    profile: Any,
+    api_key: str | None,
+) -> Any:
+    probe_config = build_effective_config(public_config)
+    probe_provider = copy.deepcopy(provider)
+    probe_profile = _build_image_input_probe_profile(profile)
+    probe_provider.provider_id = str(provider.provider_id or "").strip()
+    probe_profile.profile_id = route_id
+    probe_profile.provider_id = probe_provider.provider_id
+    probe_profile.supports_image_input = True
+    probe_config.llm.providers[probe_provider.provider_id] = probe_provider
+    probe_config.llm.profiles[route_id] = probe_profile
+    model_entry = probe_config.llm.model_library.get(str(model_id or "").strip())
+    if isinstance(model_entry, dict):
+        model_entry["supports_image_input"] = True
+
+    class _ProbeConfig:
+        def __init__(self, wrapped: Any) -> None:
+            self._wrapped = wrapped
+            self.llm = wrapped.llm
+
+        def __getattr__(self, name: str) -> Any:
+            return getattr(self._wrapped, name)
+
+        def get_api_key_for_profile(self, profile_id=None, role="primary"):
+            if str(profile_id or "").strip() == route_id:
+                return api_key
+            return self._wrapped.get_api_key_for_profile(profile_id=profile_id, role=role)
+
+    return _ProbeConfig(probe_config)
+
+
 def _run_draft_test_llm_image_input(
     public_config: dict[str, Any],
     model_id: str,
@@ -905,21 +943,14 @@ def _run_draft_test_llm_image_input(
                 "config_scope": _llm_test_config_scope(public_config, draft_meta),
                 "requires_api_key": bool(provider.requires_api_key),
             }
-        probe_profile = _build_image_input_probe_profile(profile)
-
-        class _ProbeConfig:
-            llm = type(
-                "_ProbeLlm",
-                (),
-                {
-                    "get_role_profile_id": lambda self, role="primary": profile.profile_id,
-                    "get_profile": lambda self, profile_id=None, role="primary": probe_profile,
-                    "get_provider": lambda self, provider_id=None, role="primary": provider,
-                },
-            )()
-
-            def get_api_key_for_profile(self, profile_id=None, role="primary"):
-                return api_key
+        probe_config = _build_image_input_probe_config(
+            public_config,
+            model_id=model_id,
+            route_id=route_id,
+            provider=provider,
+            profile=profile,
+            api_key=api_key,
+        )
 
         messages = [
             {
@@ -933,7 +964,7 @@ def _run_draft_test_llm_image_input(
         try:
             from core.llm import LLMClient
 
-            client = LLMClient(config=_ProbeConfig(), profile_id=profile.profile_id)
+            client = LLMClient(config=probe_config, profile_id=route_id)
             client.invoke(messages, tools=[], metadata={"probeCapability": "image_input"})
             result = {
                 "ok": True,

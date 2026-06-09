@@ -100,6 +100,7 @@ type ModelDetailsDraft = {
   streaming: boolean;
   tool_calling_mode: string;
   discovery_enabled: boolean;
+  supports_image_input: "unknown" | "supported" | "unsupported";
 };
 
 type ModelEditorState = {
@@ -417,6 +418,10 @@ export const CONFIG_COPY = {
     modelCompat: "兼容策略对象",
     contextWindow: "上下文窗口",
     requiresApiKey: "需要 API Key",
+    imageInputSupport: "图像输入",
+    imageInputSupportUnknown: "未声明",
+    imageInputSupportSupported: "支持",
+    imageInputSupportUnsupported: "不支持",
     transport: "传输协议",
     contract: "交互契约",
     reasoningStateField: "推理状态字段",
@@ -632,6 +637,10 @@ export const CONFIG_COPY = {
     modelCompat: "Compat policy object",
     contextWindow: "Context window",
     requiresApiKey: "Requires API key",
+    imageInputSupport: "Image input",
+    imageInputSupportUnknown: "Undeclared",
+    imageInputSupportSupported: "Supported",
+    imageInputSupportUnsupported: "Unsupported",
     transport: "Transport",
     contract: "Contract",
     reasoningStateField: "Reasoning state field",
@@ -748,6 +757,7 @@ function emptyModelDetailsDraft(): ModelDetailsDraft {
     streaming: true,
     tool_calling_mode: "auto",
     discovery_enabled: true,
+    supports_image_input: "unknown",
   };
 }
 
@@ -869,6 +879,12 @@ function buildProviderDraft(providerInput: Record<string, unknown>): ProviderDra
 }
 
 function buildModelDetailsDraft(detailsInput: Record<string, unknown>): ModelDetailsDraft {
+  const supportsImageInput =
+    typeof detailsInput.supports_image_input === "boolean"
+      ? detailsInput.supports_image_input
+        ? "supported"
+        : "unsupported"
+      : "unknown";
   return {
     transport: getString(detailsInput.transport) || "chat_completions",
     contract: getString(detailsInput.contract) || "tool_chat",
@@ -883,6 +899,7 @@ function buildModelDetailsDraft(detailsInput: Record<string, unknown>): ModelDet
     streaming: getBoolean(detailsInput.streaming, true),
     tool_calling_mode: getString(detailsInput.tool_calling_mode) || "auto",
     discovery_enabled: getBoolean(detailsInput.discovery_enabled, true),
+    supports_image_input: supportsImageInput,
   };
 }
 
@@ -964,6 +981,15 @@ function buildModelDetailsPayload(draft: ModelDetailsDraft): Record<string, unkn
   }
   if (draft.connect_timeout.trim()) {
     payload.connect_timeout = Number(draft.connect_timeout.trim());
+  }
+  if (draft.supports_image_input === "supported") {
+    payload.supports_image_input = true;
+    payload.capability_status = "supported";
+    payload.capability_source = "manual";
+  } else if (draft.supports_image_input === "unsupported") {
+    payload.supports_image_input = false;
+    payload.capability_status = "unsupported";
+    payload.capability_source = "manual";
   }
   return payload;
 }
@@ -2145,6 +2171,7 @@ async function createCroppedAvatarFile(draft: AvatarCropDraft): Promise<File> {
 export function ConfigRoute() {
   const queryClient = useQueryClient();
   const pageRef = useRef<HTMLDivElement | null>(null);
+  const modelEditorRef = useRef<HTMLDivElement | null>(null);
   const sidebarResizeCleanupRef = useRef<(() => void) | null>(null);
   const workspaceQuery = useQuery({
     queryKey: queryKeys.configWorkspace(),
@@ -2865,6 +2892,16 @@ export function ConfigRoute() {
     }
   }
 
+  function focusModelEditor() {
+    window.setTimeout(() => {
+      modelEditorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      const firstInput = modelEditorRef.current?.querySelector<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>(
+        "input:not([disabled]), select:not([disabled]), textarea:not([disabled])",
+      );
+      firstInput?.focus({ preventScroll: true });
+    }, 0);
+  }
+
   async function handleTestSelectedLibraryModel() {
     if (structuredActionsDisabled) {
       return;
@@ -3330,7 +3367,7 @@ export function ConfigRoute() {
               {busyAction === copy.imageCapabilityCheckPending ? copy.imageCapabilityCheckPending : copy.checkSavedImageCapabilities}
             </button>
           </div>
-          <div className={styles.formSurface} onChange={() => (modelEditorError ? setModelEditorError("") : undefined)}>
+          <div ref={modelEditorRef} className={styles.formSurface} onChange={() => (modelEditorError ? setModelEditorError("") : undefined)}>
             <div className={styles.formHeader}>
               <div className={styles.formHeaderIntro}>
                 <Pencil size={16} />
@@ -3702,6 +3739,25 @@ export function ConfigRoute() {
                     />
                     <span>{copy.requiresApiKey}</span>
                   </label>
+                  <label className={styles.field}>
+                    <span>{copy.imageInputSupport}</span>
+                    <select
+                      value={modelEditor.details.supports_image_input}
+                      onChange={(event) =>
+                        setModelEditor((current) => ({
+                          ...current,
+                          details: {
+                            ...current.details,
+                            supports_image_input: event.target.value as ModelDetailsDraft["supports_image_input"],
+                          },
+                        }))
+                      }
+                    >
+                      <option value="unknown">{copy.imageInputSupportUnknown}</option>
+                      <option value="supported">{copy.imageInputSupportSupported}</option>
+                      <option value="unsupported">{copy.imageInputSupportUnsupported}</option>
+                    </select>
+                  </label>
                   <label className={styles.toggleField}>
                     <input
                       type="checkbox"
@@ -3871,6 +3927,7 @@ export function ConfigRoute() {
                               setModelEditorError("");
                               setModelEditor(hydrateModelEditorFromOption(option));
                               setModelEditorExpanded(true);
+                              focusModelEditor();
                             }}
                           >
                             <Pencil size={14} />
