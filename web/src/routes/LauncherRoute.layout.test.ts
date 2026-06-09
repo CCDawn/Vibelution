@@ -235,8 +235,12 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("LauncherStartupSettingsPanel");
     expect(routeSource).toContain("startupSettingsMutation");
     expect(routeSource).toContain("mutationFn: updateLauncherStartupSettings");
+    expect(routeSource).toContain("WorkbenchWindowModeUpdateRequest");
     expect(routeSource).toContain("settings?.startup");
     expect(launcherApiSource).toContain("baseHash: setting.configHash");
+    expect(launcherApiSource).toContain("WorkbenchWindowModeUpdateRequest");
+    expect(routeSource).toContain("onWindowModeChange({ mode, baseHash: current.configHash })");
+    expect(routeSource).toContain('onError: (error) => {\n      setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });\n      void queryClient.invalidateQueries({ queryKey: queryKeys.launcherStatus() });');
     expect(routeSource).toContain("configHash");
     expect(routeSource).toContain("runtimeProfile");
     expect(routeSource).toContain("backendPort");

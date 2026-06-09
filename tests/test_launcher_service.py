@@ -46,37 +46,51 @@ def test_standalone_launcher_app_exposes_workbench_window_setting(monkeypatch):
     monkeypatch.setattr(
         launcher_service,
         "get_workbench_window_mode_setting",
-        lambda: {"mode": "fullscreen", "effectiveMode": "fullscreen", "envOverride": "", "options": []},
+        lambda: {"mode": "fullscreen", "effectiveMode": "fullscreen", "envOverride": "", "configHash": "hash-current", "options": []},
     )
     monkeypatch.setattr(
         launcher_service,
         "update_workbench_window_mode",
-        lambda mode: calls.append(mode) or {"ok": True, "mode": mode, "setting": {"mode": mode}, "message": "saved"},
+        lambda mode, *, base_hash="": calls.append((mode, base_hash)) or {"ok": True, "mode": mode, "setting": {"mode": mode}, "message": "saved"},
     )
     client = TestClient(launcher_app.create_launcher_app())
 
     current = client.get("/api/launcher/settings/workbench-window")
-    updated = client.put("/api/launcher/settings/workbench-window", json={"mode": "windowed"})
+    updated = client.put("/api/launcher/settings/workbench-window", json={"mode": "windowed", "baseHash": "hash-current"})
 
     assert current.status_code == 200
     assert current.json()["mode"] == "fullscreen"
     assert updated.status_code == 200
     assert updated.json()["mode"] == "windowed"
-    assert calls == ["windowed"]
+    assert calls == [("windowed", "hash-current")]
 
 
 def test_standalone_launcher_app_rejects_invalid_workbench_window_setting(monkeypatch):
     monkeypatch.setattr(
         launcher_service,
         "update_workbench_window_mode",
-        lambda _mode: (_ for _ in ()).throw(ValueError("bad mode")),
+        lambda _mode, *, base_hash="": (_ for _ in ()).throw(ValueError("bad mode")),
     )
     client = TestClient(launcher_app.create_launcher_app())
 
-    response = client.put("/api/launcher/settings/workbench-window", json={"mode": "floating"})
+    response = client.put("/api/launcher/settings/workbench-window", json={"mode": "floating", "baseHash": "hash-current"})
 
     assert response.status_code == 400
     assert response.json()["detail"]["code"] == "invalid_workbench_window_mode"
+
+
+def test_standalone_launcher_app_rejects_stale_workbench_window_setting(monkeypatch):
+    monkeypatch.setattr(
+        launcher_service,
+        "update_workbench_window_mode",
+        lambda _mode, *, base_hash="": (_ for _ in ()).throw(launcher_service.LauncherSettingsConflict("stale config")),
+    )
+    client = TestClient(launcher_app.create_launcher_app())
+
+    response = client.put("/api/launcher/settings/workbench-window", json={"mode": "windowed", "baseHash": "stale-hash"})
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "launcher_workbench_window_mode_conflict"
 
 
 def test_workbench_launcher_adapter_exposes_workbench_window_setting(monkeypatch):
@@ -84,25 +98,25 @@ def test_workbench_launcher_adapter_exposes_workbench_window_setting(monkeypatch
     monkeypatch.setattr(
         launcher_service,
         "get_workbench_window_mode_setting",
-        lambda: {"mode": "fullscreen", "effectiveMode": "fullscreen", "envOverride": "", "options": []},
+        lambda: {"mode": "fullscreen", "effectiveMode": "fullscreen", "envOverride": "", "configHash": "hash-current", "options": []},
     )
     monkeypatch.setattr(
         launcher_service,
         "update_workbench_window_mode",
-        lambda mode: calls.append(mode) or {"ok": True, "mode": mode, "setting": {"mode": mode}, "message": "saved"},
+        lambda mode, *, base_hash="": calls.append((mode, base_hash)) or {"ok": True, "mode": mode, "setting": {"mode": mode}, "message": "saved"},
     )
     app = FastAPI()
     app.include_router(web_launcher_routes.router, prefix="/api")
     client = TestClient(app)
 
     current = client.get("/api/launcher/settings/workbench-window")
-    updated = client.put("/api/launcher/settings/workbench-window", json={"mode": "windowed"})
+    updated = client.put("/api/launcher/settings/workbench-window", json={"mode": "windowed", "baseHash": "hash-current"})
 
     assert current.status_code == 200
     assert current.json()["mode"] == "fullscreen"
     assert updated.status_code == 200
     assert updated.json()["mode"] == "windowed"
-    assert calls == ["windowed"]
+    assert calls == [("windowed", "hash-current")]
 
 
 def test_standalone_launcher_app_serves_health_token_and_launcher_shell(monkeypatch, tmp_path):
@@ -274,6 +288,7 @@ def test_launcher_status_exposes_workbench_window_mode_setting(tmp_path, monkeyp
     assert setting["mode"] == "windowed"
     assert setting["effectiveMode"] == "windowed"
     assert setting["envOverride"] == ""
+    assert setting["configHash"]
     assert {item["mode"] for item in setting["options"]} == {"fullscreen", "windowed"}
 
 
@@ -290,12 +305,43 @@ def test_launcher_workbench_window_mode_update_persists_config_and_logs(tmp_path
         lambda event_code, payload, **kwargs: events.append((event_code, payload)) or "2026-06-06T00:00:00+00:00",
     )
 
-    response = launcher_service.update_workbench_window_mode("windowed")
+    base_hash = launcher_service.get_workbench_window_mode_setting()["configHash"]
+    response = launcher_service.update_workbench_window_mode("windowed", base_hash=base_hash)
 
     assert response["ok"] is True
     assert response["setting"]["mode"] == "windowed"
+    assert response["setting"]["configHash"] != base_hash
     assert 'window_mode = "windowed"' in config_path.read_text(encoding="utf-8")
     assert "launcher.settings.workbench_window_mode.updated" in [event[0] for event in events]
+
+
+def test_launcher_workbench_window_mode_rejects_stale_config_hash(tmp_path, monkeypatch):
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("[workbench]\nbackend_port = 8000\nwindow_mode = \"fullscreen\"\n", encoding="utf-8")
+    events = []
+    monkeypatch.setattr(launcher_service, "CONFIG_PATH", config_path)
+    monkeypatch.delenv("VIBELUTION_WORKBENCH_WINDOW_MODE", raising=False)
+    monkeypatch.delenv("AGENT_WORKBENCH_WINDOW_MODE", raising=False)
+    monkeypatch.setattr(
+        launcher_service,
+        "append_runtime_manager_file_event",
+        lambda event_code, payload, **kwargs: events.append((event_code, payload)) or "2026-06-06T00:00:00+00:00",
+    )
+
+    base_hash = launcher_service.get_workbench_window_mode_setting()["configHash"]
+    launcher_service.update_workbench_window_mode("windowed", base_hash=base_hash)
+
+    try:
+        launcher_service.update_workbench_window_mode("fullscreen", base_hash=base_hash)
+    except launcher_service.LauncherSettingsConflict as exc:
+        error = str(exc)
+    else:
+        raise AssertionError("expected stale window mode update to be rejected")
+
+    assert "配置" in error
+    assert 'window_mode = "windowed"' in config_path.read_text(encoding="utf-8")
+    assert events[-1][0] == "launcher.settings.workbench_window_mode.conflict"
+    assert events[-1][1]["fields"]["requestedMode"] == "fullscreen"
 
 
 def test_launcher_workbench_window_mode_reports_environment_override(tmp_path, monkeypatch):

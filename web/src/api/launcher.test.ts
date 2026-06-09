@@ -255,12 +255,12 @@ describe("launcher api helpers", () => {
         json: async () => ({
           ok: true,
           mode: "windowed",
-          setting: { mode: "windowed", effectiveMode: "windowed", envOverride: "" },
+          setting: { mode: "windowed", effectiveMode: "windowed", envOverride: "", configHash: "hash-next" },
         }),
       });
     vi.stubGlobal("fetch", fetchMock);
 
-    const payload = await saveLauncherWorkbenchWindowMode("windowed");
+    const payload = await saveLauncherWorkbenchWindowMode({ mode: "windowed", baseHash: "hash-current" });
 
     expect(payload.mode).toBe("windowed");
     expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
@@ -271,7 +271,7 @@ describe("launcher api helpers", () => {
     expect(requestInit.method).toBe("PUT");
     expect((requestInit.headers as Headers).get("Content-Type")).toBe("application/json");
     expect((requestInit.headers as Headers).get("X-Vibelution-Control-Token")).toBe("test-token");
-    expect(JSON.parse(String(requestInit.body))).toEqual({ mode: "windowed" });
+    expect(JSON.parse(String(requestInit.body))).toEqual({ mode: "windowed", baseHash: "hash-current" });
   });
 
   it("cancels pending lifecycle commands through the workbench runtime API", async () => {

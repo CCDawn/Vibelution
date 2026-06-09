@@ -12,7 +12,13 @@ import {
   updateLauncherStartupSettings,
 } from "../api/launcher";
 import { queryKeys } from "../api/queryKeys";
-import type { LauncherComponentState, LauncherOperation, LauncherStartupSettings, WorkbenchWindowMode } from "../api/types";
+import type {
+  LauncherComponentState,
+  LauncherOperation,
+  LauncherStartupSettings,
+  WorkbenchWindowMode,
+  WorkbenchWindowModeUpdateRequest,
+} from "../api/types";
 import { collectBrowserPageSnapshot, postBrowserTelemetry } from "../app/browserTelemetry";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import {
@@ -437,7 +443,7 @@ function LauncherStartupSettingsPanel({
   pending: boolean;
   pendingWindowMode: WorkbenchWindowMode | "";
   onSave: (setting: LauncherStartupSettings) => void;
-  onWindowModeChange: (mode: WorkbenchWindowMode) => void;
+  onWindowModeChange: (request: WorkbenchWindowModeUpdateRequest) => void;
 }) {
   const current = setting ?? defaultStartupSettings(configuredWindowMode);
   const controlsDisabled = pending || Boolean(pendingWindowMode) || !setting?.configHash;
@@ -501,7 +507,7 @@ function LauncherStartupSettingsPanel({
     patchDraft({ workbench: { ...draft.workbench, windowMode: mode } });
     setValidationError("");
     if (mode !== current.workbench.windowMode) {
-      onWindowModeChange(mode);
+      onWindowModeChange({ mode, baseHash: current.configHash });
     }
   }
 
@@ -1199,8 +1205,8 @@ export function LauncherRoute() {
   const [pendingWindowMode, setPendingWindowMode] = useState<WorkbenchWindowMode | "">("");
   const workbenchWindowSaveMutation = useMutation({
     mutationFn: saveLauncherWorkbenchWindowMode,
-    onMutate: (mode) => {
-      setPendingWindowMode(mode);
+    onMutate: (request) => {
+      setPendingWindowMode(request.mode);
     },
     onSuccess: (response) => {
       setNotice({
@@ -1214,6 +1220,7 @@ export function LauncherRoute() {
     },
     onError: (error) => {
       setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.launcherStatus() });
     },
     onSettled: () => {
       setPendingWindowMode("");
@@ -1527,7 +1534,7 @@ export function LauncherRoute() {
         pending={startupSettingsMutation.isPending || workbenchWindowSaveMutation.isPending}
         pendingWindowMode={pendingWindowMode}
         onSave={(nextSetting) => startupSettingsMutation.mutate(nextSetting)}
-        onWindowModeChange={(mode) => workbenchWindowSaveMutation.mutate(mode)}
+        onWindowModeChange={(request) => workbenchWindowSaveMutation.mutate(request)}
       />
 
       {statusQuery.isError ? (

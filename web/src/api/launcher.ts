@@ -6,7 +6,7 @@ import type {
   LauncherStatus,
   RuntimeLifecycleCancelRequest,
   RuntimeLifecycleCancelResponse,
-  WorkbenchWindowMode,
+  WorkbenchWindowModeUpdateRequest,
   WorkbenchWindowModeUpdateResponse,
 } from "./types";
 
@@ -132,16 +132,16 @@ export function cancelRuntimeLifecycleCommand(request: RuntimeLifecycleCancelReq
   });
 }
 
-export function updateWorkbenchWindowMode(mode: WorkbenchWindowMode) {
+export function updateWorkbenchWindowMode(request: WorkbenchWindowModeUpdateRequest) {
   return fetchLauncherJson<WorkbenchWindowModeUpdateResponse>("settings/workbench-window", {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ mode }),
+    body: JSON.stringify(request),
   });
 }
 
-export function saveLauncherWorkbenchWindowMode(mode: WorkbenchWindowMode) {
-  return updateWorkbenchWindowMode(mode);
+export function saveLauncherWorkbenchWindowMode(request: WorkbenchWindowModeUpdateRequest) {
+  return updateWorkbenchWindowMode(request);
 }
 
 export function updateLauncherStartupSettings(setting: LauncherStartupSettings) {

@@ -1932,6 +1932,7 @@ export type WorkbenchWindowModeSetting = {
   effectiveMode: WorkbenchWindowMode;
   envOverride: WorkbenchWindowMode | "";
   configPath: string;
+  configHash: string;
   restartRequired: boolean;
   options: Array<{
     mode: WorkbenchWindowMode;
@@ -1944,6 +1945,11 @@ export type WorkbenchWindowModeSetting = {
       en: string;
     };
   }>;
+};
+
+export type WorkbenchWindowModeUpdateRequest = {
+  mode: WorkbenchWindowMode;
+  baseHash: string;
 };
 
 export type LauncherStartupSettings = {
