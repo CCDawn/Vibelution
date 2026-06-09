@@ -540,7 +540,13 @@ def test_agent_and_conversation_api_create_direct_agent(tmp_path, monkeypatch):
 
     assert conversations_response.status_code == 200
     conversations = conversations_response.json()
-    direct = next(item for item in conversations if item["type"] == "direct_agent")
+    direct = next(
+        item
+        for item in conversations
+        if item["type"] == "direct_agent"
+        and item["agentId"] == agent["agentId"]
+        and item["directSessionId"] == agent["directSessionId"]
+    )
     assert direct["agentId"] == agent["agentId"]
     assert direct["directSessionId"] == agent["directSessionId"]
     assert direct["agentPrimaryMode"] == "chat"
