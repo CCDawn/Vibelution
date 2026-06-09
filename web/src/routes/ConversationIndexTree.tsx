@@ -9,6 +9,7 @@ import type {
 } from "../api/types";
 import type { TranslationKey } from "../i18n/dictionary";
 import type { ModelLabelResolver } from "./agentDisplay";
+import type { ConversationIndexGroup, ConversationIndexGroupKey } from "./conversationIndexModel";
 import { ConversationIndexSection } from "./ConversationIndexSection";
 import { DirectSessionIndexList } from "./DirectSessionIndexList";
 import {
@@ -16,22 +17,6 @@ import {
   TeamConversationIndexItem,
 } from "./GroupSessionIndexItems";
 import styles from "./ChatCodingRoute.module.css";
-
-export type ConversationIndexGroupKey =
-  | "user"
-  | "group"
-  | "research"
-  | "selfEvolution"
-  | "supervisedEvolution"
-  | "teams"
-  | "standaloneGroups"
-  | "other";
-
-export type ConversationIndexGroup = {
-  groupKey: ConversationIndexGroupKey;
-  label: string;
-  items: ConversationSummary[];
-};
 
 type ConversationIndexTreeProps = {
   activeGroupRoomId: string;

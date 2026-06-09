@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import conversationStyles from "../components/conversation/ConversationView.module.css";
 import shellStoreSource from "../store/shellStore.ts?raw";
 import routeSource from "./ChatCodingRoute.tsx?raw";
+import conversationIndexModelSource from "./conversationIndexModel.ts?raw";
 import conversationIndexTreeSource from "./ConversationIndexTree.tsx?raw";
 import conversationIndexSectionSource from "./ConversationIndexSection.tsx?raw";
 import directSessionIndexItemSource from "./DirectSessionIndexItem.tsx?raw";
@@ -665,7 +666,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("agentDisplayInfo(agent, lang, { resolveModelLabel })");
     expect(routeSource).toContain("sessionAgentDisplayInfo(session, sessionAgent, lang, resolveModelLabel)");
     expect(routeSource).toContain("participantAgentDisplayInfo(participantLike, participantAgent, lang, resolveModelLabel)");
-    expect(routeSource).toContain("dialogueModelId: session.dialogueModelId");
+    expect(conversationIndexModelSource).toContain("dialogueModelId: session.dialogueModelId");
     expect(routeSource).toContain("sessionDisplay.modelLabel");
     expect(routeSource).toContain("participantDisplay.modelLabel");
     expect(routeSource).toContain("display.modelLabel");
@@ -685,42 +686,42 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("hides direct sessions whose Agent is no longer active in Agent Center", () => {
-    expect(routeSource).toContain("function isVisibleDirectSession");
-    expect(routeSource).toContain("if (session.agentMissing)");
-    expect(routeSource).toContain("return false;");
-    expect(routeSource.indexOf("if (session.agentMissing)")).toBeLessThan(
-      routeSource.indexOf("if (!String(session.agentId ?? \"\").trim())"),
+    expect(conversationIndexModelSource).toContain("export function isVisibleDirectSession");
+    expect(conversationIndexModelSource).toContain("if (session.agentMissing)");
+    expect(conversationIndexModelSource).toContain("return false;");
+    expect(conversationIndexModelSource.indexOf("if (session.agentMissing)")).toBeLessThan(
+      conversationIndexModelSource.indexOf("if (!String(session.agentId ?? \"\").trim())"),
     );
-    expect(routeSource).toContain("function isVisibleConversation");
-    expect(routeSource).toContain("if (conversation.agentMissing)");
-    expect(routeSource.indexOf("if (conversation.agentMissing)")).toBeLessThan(
-      routeSource.indexOf("if (!String(conversation.agentId ?? \"\").trim())"),
+    expect(conversationIndexModelSource).toContain("export function isVisibleConversation");
+    expect(conversationIndexModelSource).toContain("if (conversation.agentMissing)");
+    expect(conversationIndexModelSource.indexOf("if (conversation.agentMissing)")).toBeLessThan(
+      conversationIndexModelSource.indexOf("if (!String(conversation.agentId ?? \"\").trim())"),
     );
     expect(routeSource).toContain("const rawSessionsQuery = useSessionIndexQuery");
     expect(routeSource).toContain("const visibleSessionsData = useMemo");
     expect(routeSource).toContain("data: visibleSessionsData");
-    expect(routeSource).toContain("const rawSessionsById = useMemo");
-    expect(routeSource).toContain("if (!isVisibleConversation(conversation, rawSessionsById))");
-    expect(routeSource).toContain("if (rawSession && !session)");
+    expect(conversationIndexModelSource).toContain("const rawSessionsById = new Map");
+    expect(conversationIndexModelSource).toContain("if (!isVisibleConversation(conversation, rawSessionsById))");
+    expect(conversationIndexModelSource).toContain("if (rawSession && !session)");
     expect(routeSource).toContain("const allVisibleSessions = useMemo");
     expect(routeSource).toContain("const rightIndexSessions = useMemo");
-    expect(routeSource).toContain("mergeVisibleSessionsIntoConversations(conversationsQuery.data, rightIndexSessions)");
-    expect(routeSource).toContain("conversation.type !== \"group_room\"");
-    expect(routeSource).toContain("if (!isVisibleConversation(conversation, rawSessionsById))");
+    expect(conversationIndexModelSource).toContain("mergeVisibleSessionsIntoConversations(conversations, rightIndexSessions)");
+    expect(conversationIndexModelSource).toContain("conversation.type !== \"group_room\"");
+    expect(conversationIndexModelSource).toContain("if (!isVisibleConversation(conversation, rawSessionsById))");
   });
 
   it("renders child sessions in the top Agent session strip instead of the right conversation index", () => {
     expect(directSessionIndexItemSource).toContain("export function isChildSession");
-    expect(routeSource).toContain("function rootSessionIdFor");
-    expect(routeSource).toContain("function isRepresentedInAgentSessionTabs");
-    expect(routeSource).toContain("function hasInvalidChildSessionLink");
-    expect(routeSource).toContain("function mergeVisibleSessionsIntoConversations");
+    expect(conversationIndexModelSource).toContain("export function rootSessionIdFor");
+    expect(conversationIndexModelSource).toContain("export function isRepresentedInAgentSessionTabs");
+    expect(conversationIndexModelSource).toContain("export function hasInvalidChildSessionLink");
+    expect(conversationIndexModelSource).toContain("export function mergeVisibleSessionsIntoConversations");
     expect(routeSource).toContain("const rightIndexSessions = useMemo");
     expect(routeSource).toContain("return allVisibleSessions.filter((session) => !isRepresentedInAgentSessionTabs(session))");
     expect(routeSource).toContain("const agentSessionTabs = useMemo");
     expect(routeSource).toContain("rootSessionIdFor(session) === activeRootSessionId");
-    expect(routeSource).toContain("mergeVisibleSessionsIntoConversations(conversationsQuery.data, rightIndexSessions)");
-    expect(routeSource).toContain("if (isRepresentedInAgentSessionTabs(session))");
+    expect(conversationIndexModelSource).toContain("mergeVisibleSessionsIntoConversations(conversations, rightIndexSessions)");
+    expect(conversationIndexModelSource).toContain("if (isRepresentedInAgentSessionTabs(session))");
     expect(routeSource).toContain("const invalidChildSessionLinkMessage = hasInvalidChildSessionLink(directSessionActiveSummary)");
     expect(routeSource).toContain("child_session_link_invalid");
     expect(routeSource).toContain("子对话缺少 parentSessionId/rootSessionId");
@@ -771,8 +772,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(groupSessionIndexItemsSource).toContain("team.members ?? []");
     expect(groupSessionIndexItemsSource).toContain("team.teamCategory");
     expect(groupSessionIndexItemsSource).toContain("team.teamKind");
-    expect(routeSource).toContain("team.teamSource");
-    expect(routeSource).toContain("team.teamTemplateId");
+    expect(conversationIndexModelSource).toContain("team.teamSource");
+    expect(conversationIndexModelSource).toContain("team.teamTemplateId");
     expect(groupSessionIndexItemsSource).toContain("群成员");
     expect(groupSessionIndexItemsSource).toContain("团队分类");
     expect(groupSessionIndexItemsSource).toContain("团队群聊");
@@ -799,10 +800,11 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("groups the unified conversation list like expandable contact folders", () => {
-    expect(routeSource).toContain("DEFAULT_COLLAPSED_CONVERSATION_GROUPS");
-    expect(routeSource).toContain("CONVERSATION_GROUP_ORDER");
-    expect(routeSource).toContain("classifyConversation");
-    expect(routeSource).toContain("conversationGroupLabel");
+    expect(conversationIndexModelSource).toContain("DEFAULT_COLLAPSED_CONVERSATION_GROUPS");
+    expect(conversationIndexModelSource).toContain("CONVERSATION_GROUP_ORDER");
+    expect(conversationIndexModelSource).toContain("classifyConversation");
+    expect(conversationIndexModelSource).toContain("conversationGroupLabel");
+    expect(routeSource).toContain("useConversationIndexModel");
     expect(conversationIndexTreeSource).toContain("groupedConversations.map");
     expect(routeSource).toContain("toggleConversationGroup");
     expect(routeSource).toContain("ConversationIndexTree");
@@ -937,11 +939,11 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("classifies direct conversations from Agent Center role metadata", () => {
-    expect(routeSource).toContain("agentPrimaryMode: session.agentPrimaryMode");
-    expect(routeSource).toContain("agentRoleKey: session.agentRoleKey");
-    expect(routeSource).toContain("agentPromptTemplateId: session.agentPromptTemplateId");
-    expect(routeSource).toContain("primaryMode === \"research\"");
-    expect(routeSource).toContain("roleKey.startsWith(\"research_\")");
-    expect(routeSource).toContain("promptTemplateId.startsWith(\"prompt-research-\")");
+    expect(conversationIndexModelSource).toContain("agentPrimaryMode: session.agentPrimaryMode");
+    expect(conversationIndexModelSource).toContain("agentRoleKey: session.agentRoleKey");
+    expect(conversationIndexModelSource).toContain("agentPromptTemplateId: session.agentPromptTemplateId");
+    expect(conversationIndexModelSource).toContain("primaryMode === \"research\"");
+    expect(conversationIndexModelSource).toContain("roleKey.startsWith(\"research_\")");
+    expect(conversationIndexModelSource).toContain("promptTemplateId.startsWith(\"prompt-research-\")");
   });
 });
