@@ -3,7 +3,8 @@ import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it } from "vitest";
 
 import type { ConversationSummary, SessionReferenceAttachment, SessionSummary, Team } from "../api/types";
-import { ConversationIndexTree, type ConversationIndexGroup } from "./ConversationIndexTree";
+import { ConversationIndexTree } from "./ConversationIndexTree";
+import type { ConversationIndexGroup } from "./conversationIndexModel";
 
 function directConversation(overrides: Partial<ConversationSummary> = {}): ConversationSummary {
   return {
