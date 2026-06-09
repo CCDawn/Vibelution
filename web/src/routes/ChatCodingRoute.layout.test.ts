@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import conversationStyles from "../components/conversation/ConversationView.module.css";
 import shellStoreSource from "../store/shellStore.ts?raw";
 import routeSource from "./ChatCodingRoute.tsx?raw";
+import directSessionIndexItemSource from "./DirectSessionIndexItem.tsx?raw";
 import routeStyles from "./ChatCodingRoute.module.css";
 
 const routeCssSource = readFileSync(new URL("./ChatCodingRoute.module.css", import.meta.url), "utf-8");
@@ -601,13 +602,13 @@ describe("ChatCodingRoute layout contract", () => {
 
   it("visually distinguishes direct sessions from group chats in the conversation list", () => {
     expect(routeSource).toContain("avatarInitials");
-    expect(routeSource).toContain("styles.conversationAvatarDirect");
+    expect(directSessionIndexItemSource).toContain("styles.conversationAvatarDirect");
     expect(routeSource).toContain("styles.conversationAvatarGroup");
-    expect(routeSource).toContain("styles.directSessionItem");
+    expect(directSessionIndexItemSource).toContain("styles.directSessionItem");
     expect(routeSource).toContain("styles.groupSessionItem");
     expect(routeSource).toContain("navigate(`/chat?session=${encodeURIComponent(sessionId)}`, { replace: false })");
-    expect(routeSource).toContain("styles.conversationKindBadgeDirect");
-    expect(routeSource).toContain("styles.conversationKindBadgeChild");
+    expect(directSessionIndexItemSource).toContain("styles.conversationKindBadgeDirect");
+    expect(directSessionIndexItemSource).toContain("styles.conversationKindBadgeChild");
     expect(routeSource).toContain("styles.conversationKindBadgeGroup");
 
     expect(routeStyles.conversationAvatar).toBeTypeOf("string");
@@ -696,7 +697,7 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("renders child sessions in the top Agent session strip instead of the right conversation index", () => {
-    expect(routeSource).toContain("function isChildSession");
+    expect(directSessionIndexItemSource).toContain("export function isChildSession");
     expect(routeSource).toContain("function rootSessionIdFor");
     expect(routeSource).toContain("function isRepresentedInAgentSessionTabs");
     expect(routeSource).toContain("function hasInvalidChildSessionLink");
@@ -853,16 +854,19 @@ describe("ChatCodingRoute layout contract", () => {
     const renameStart = routeSource.indexOf("const renameSessionMutation");
     const renameEnd = routeSource.indexOf("const addSessionToReviewMutation", renameStart);
     const renameMutationSource = routeSource.slice(renameStart, renameEnd);
-    const titleHelperStart = routeSource.indexOf("function sessionListTitle");
-    const titleHelperEnd = routeSource.indexOf("function compactAgentIdentifier", titleHelperStart);
-    const titleHelperSource = routeSource.slice(titleHelperStart, titleHelperEnd);
+    const titleHelperStart = directSessionIndexItemSource.indexOf("export function sessionListTitle");
+    const titleHelperEnd = directSessionIndexItemSource.indexOf("function compactAgentIdentifier", titleHelperStart);
+    const titleHelperSource = directSessionIndexItemSource.slice(titleHelperStart, titleHelperEnd);
     const titleHelperChildEnd = titleHelperSource.indexOf(").trim();", titleHelperSource.indexOf('if (sessionKind === "child")'));
     const titleHelperRootSource = titleHelperSource.slice(titleHelperChildEnd + 1);
     expect(routeSource).toContain("mergeSessionDetailIntoConversations");
     expect(routeSource).toContain("renameSessionInSummaries");
     expect(routeSource).toContain("renameSessionInConversations");
     expect(routeSource).toContain("renameSessionDetail");
-    expect(routeSource).toContain('function sessionListTitle(session: Pick<SessionSummary, "id" | "title" | "agentDisplayName" | "taskTitle" | "resultCard" | "sessionKind">)');
+    expect(routeSource).toContain("DirectSessionIndexItem");
+    expect(routeSource).toContain("<DirectSessionIndexItem");
+    expect(directSessionIndexItemSource).toContain('export function sessionListTitle(');
+    expect(directSessionIndexItemSource).toContain('"id" | "title" | "agentDisplayName" | "taskTitle" | "resultCard" | "sessionKind"');
     expect(titleHelperSource).toContain('if (sessionKind === "child")');
     expect(titleHelperSource).toContain("session.taskTitle");
     expect(titleHelperSource).toContain("session.resultCard?.title");
@@ -873,15 +877,15 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("title: sessionListTitle(session)");
     expect(routeSource).toContain("agentDisplayName: conversation.agentDisplayName");
     expect(routeSource).toContain("const sessionAgentMeta = sessionAgentMetaLabel(session)");
-    expect(routeSource).toContain("function sessionAgentMetaLabel");
-    expect(routeSource).toContain("return `Agent ${code}`;");
-    expect(routeSource).toContain("function showSessionFunctionLabel");
-    expect(routeSource).toContain('label === "会话入口"');
+    expect(directSessionIndexItemSource).toContain("export function sessionAgentMetaLabel");
+    expect(directSessionIndexItemSource).toContain("return `Agent ${code}`;");
+    expect(directSessionIndexItemSource).toContain("export function showSessionFunctionLabel");
+    expect(directSessionIndexItemSource).toContain('label === "会话入口"');
     expect(routeSource).toContain("const sessionTitle =");
     expect(routeSource).toContain("const sessionTitle = sessionListTitle(session) || sessionDisplay.name");
     expect(routeSource).toContain("agentDisplayName: title");
     expect(routeSource).toContain("targetSession");
-    expect(routeSource).toContain("{sessionTitle}");
+    expect(directSessionIndexItemSource).toContain("{sessionTitle}");
     expect(renameMutationSource).toContain("onMutate: (variables) =>");
     expect(renameMutationSource).toContain("setEditingSessionId(null)");
     expect(renameMutationSource).toContain("updateSessionSummaryCaches(queryClient");
