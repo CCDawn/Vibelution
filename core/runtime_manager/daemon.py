@@ -9,6 +9,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -97,6 +98,12 @@ _ACTIVE_WORK_RUNNING_STATUSES = {
     "resuming",
     "force_stopping",
 }
+
+
+def _start_background_thread(*, name: str, target: Any) -> threading.Thread:
+    thread = threading.Thread(target=target, name=name, daemon=True)
+    thread.start()
+    return thread
 
 
 class RuntimeManagerStaleSourceError(RuntimeError):
@@ -614,6 +621,18 @@ def _open_request_already_satisfied(observation: dict[str, Any], *, no_browser: 
     if not _open_request_ready(observation, no_browser=no_browser):
         return False
     return bool(observation.get("launcherStatePresent"))
+
+
+def _open_should_probe_before_launch(workbench: dict[str, Any], *, no_browser: bool) -> bool:
+    if str(workbench.get("phase") or "").strip() == "failed":
+        return True
+    observed_state = str(workbench.get("observedState") or "closed").strip()
+    desired_state = str(workbench.get("desiredState") or "closed").strip()
+    if observed_state == "open" or desired_state == "open":
+        return True
+    if bool(workbench.get("backendPortOwnerResidual")) or bool(workbench.get("frontendOrphaned")):
+        return True
+    return False
 
 
 def _open_backend_ready(observation: dict[str, Any], *, launcher_confirmed: bool = False) -> bool:
@@ -1601,8 +1620,22 @@ class RuntimeManagerDaemon:
                 "noBrowser": command_type in {"open_workbench", "restart_workbench"} and bool(args.get("noBrowser")),
             }
         )
-        state = self._reconcile_observation(state)
-        state = save_state(state)
+        if command_type == "open_workbench":
+            state["runtimeState"] = "running"
+            state["managerPid"] = self._pid
+            state["daemonRunning"] = True
+            state = save_state(state)
+            _append_event(
+                "command.active_marked_fast_path",
+                {
+                    "commandId": command_id,
+                    "type": command_type,
+                    "reason": "open_workbench_avoids_prelaunch_reconcile",
+                },
+            )
+        else:
+            state = self._reconcile_observation(state)
+            state = save_state(state)
 
         handler = getattr(self, f"_handle_{command_type}", None)
         if handler is None:
@@ -1662,6 +1695,7 @@ class RuntimeManagerDaemon:
         failure_message: str = "",
         error_type: str = "",
         result_data: dict[str, Any] | None = None,
+        reconcile: bool = True,
     ) -> dict[str, Any]:
         state = load_state()
         state.setdefault("command", {}).update(
@@ -1685,7 +1719,8 @@ class RuntimeManagerDaemon:
             if _command_affects_workbench_lifecycle(error_scope):
                 state.setdefault("workbench", {})["phase"] = "failed"
                 state["workbench"]["failureMessage"] = failure_message or message
-        state = self._reconcile_observation(state)
+        if reconcile:
+            state = self._reconcile_observation(state)
         state = save_state(state)
         result = {
             "commandId": command_id,
@@ -1700,6 +1735,66 @@ class RuntimeManagerDaemon:
         if isinstance(result_data, dict):
             result.update(result_data)
         return result
+
+    def _finish_successful_open_command(
+        self,
+        command_id: str,
+        *,
+        message: str,
+        verification: dict[str, Any],
+        stable_backup: dict[str, Any],
+    ) -> dict[str, Any]:
+        state = load_state()
+        workbench = state.setdefault("workbench", {})
+        workbench.update(
+            {
+                "desiredState": "open",
+                "observedState": "open",
+                "phase": "steady",
+                "failureMessage": "",
+                "sessionId": str(verification.get("sessionId") or "").strip(),
+                "sessionRole": str(verification.get("sessionRole") or "workbench").strip() or "workbench",
+                "backendPid": int(verification.get("backendPid") or 0),
+                "browserLaunchPid": int(verification.get("browserLaunchPid") or 0),
+                "browserWindowPid": int(verification.get("browserWindowPid") or 0),
+                "backendAlive": bool(verification.get("backendAlive")),
+                "backendHealthy": bool(verification.get("backendHealthy")),
+                "backendObserved": bool(verification.get("backendObserved")),
+                "backendPort": int(verification.get("backendPort") or 0),
+                "backendPortListening": bool(verification.get("backendPortListening")),
+                "backendPortOwnerPid": int(verification.get("backendPortOwnerPid") or 0),
+                "backendPortOwnerKind": str(verification.get("backendPortOwnerKind") or ""),
+                "backendPortOwnerTrusted": bool(verification.get("backendPortOwnerTrusted")),
+                "backendPortOwnerResidual": bool(verification.get("backendPortOwnerResidual")),
+                "backendPortConflict": bool(verification.get("backendPortConflict")),
+                "browserWindowAlive": bool(verification.get("browserWindowAlive")),
+                "browserWindowRecoverySource": str(verification.get("browserWindowRecoverySource") or ""),
+                "browserManaged": bool(verification.get("browserManaged", True)),
+                "backendMissing": False,
+                "frontendOrphaned": False,
+                "lifecycleConsistency": str(verification.get("lifecycleConsistency") or "consistent"),
+                "url": str(verification.get("url") or workbench.get("url") or "").strip(),
+                "statusLine": _build_workbench_status_line(
+                    desired_state="open",
+                    observed_state="open",
+                    phase="steady",
+                    backend_pid=int(verification.get("backendPid") or 0),
+                    browser_pid=int(verification.get("browserWindowPid") or 0),
+                    lifecycle_consistency=str(verification.get("lifecycleConsistency") or "consistent"),
+                ),
+            }
+        )
+        state["runtimeState"] = "running"
+        state["managerPid"] = self._pid
+        state["daemonRunning"] = True
+        save_state(state)
+        return self._finish_command(
+            command_id,
+            ok=True,
+            message=message,
+            result_data={"stableBackup": stable_backup},
+            reconcile=False,
+        )
 
     def _block_lifecycle_command_if_active_work(
         self,
@@ -2043,12 +2138,36 @@ class RuntimeManagerDaemon:
         )
         return backup
 
+    def _queue_stable_backup_after_successful_open(self, *, command_id: str, reason: str) -> dict[str, Any]:
+        _append_event(
+            "workbench.stable_backup.queued",
+            {
+                "commandId": command_id,
+                "reason": reason,
+                "mode": "background",
+            },
+        )
+
+        def run_backup() -> None:
+            self._create_stable_backup_after_successful_open(command_id=command_id, reason=reason)
+
+        _start_background_thread(
+            name=f"vibelution-stable-backup-{command_id or 'open'}",
+            target=run_backup,
+        )
+        return {
+            "status": "queued",
+            "mode": "background",
+            "reason": reason,
+        }
+
     def _handle_open_workbench(self, *, command_id: str, args: dict[str, Any]) -> dict[str, Any]:
         state = load_state()
         workbench = state.setdefault("workbench", {})
         no_browser = bool(args.get("noBrowser"))
-        observation = observe_workbench()
-        if _open_request_already_satisfied(observation, no_browser=no_browser) and str(workbench.get("phase") or "") != "failed":
+        should_probe_before_launch = _open_should_probe_before_launch(workbench, no_browser=no_browser)
+        observation = observe_workbench() if should_probe_before_launch else {}
+        if observation and _open_request_already_satisfied(observation, no_browser=no_browser) and str(workbench.get("phase") or "") != "failed":
             workbench["desiredState"] = "open"
             workbench["phase"] = "steady"
             workbench["failureMessage"] = ""
@@ -2095,7 +2214,20 @@ class RuntimeManagerDaemon:
                 "failureMessage": "",
             }
         )
-        save_state(self._reconcile_observation(state))
+        state["runtimeState"] = "running"
+        state["managerPid"] = self._pid
+        state["daemonRunning"] = True
+        save_state(state)
+        _append_event(
+            "workbench.open.fast_path_started",
+            {
+                "commandId": command_id,
+                "noBrowser": no_browser,
+                "prelaunchProbeSkipped": not should_probe_before_launch,
+                "initialObservedState": str(observation.get("observedState") or "closed"),
+                "initialLifecycleConsistency": str(observation.get("lifecycleConsistency") or "consistent"),
+            },
+        )
         if bool(observation.get("backendPortOwnerResidual")):
             cleanup_result = self._cleanup_residual_workbench_processes()
             _append_event(
@@ -2142,15 +2274,15 @@ class RuntimeManagerDaemon:
                         )
                         | {"attempts": verification_attempts, "retry": "stale_session_cleanup"},
                     )
-                    stable_backup = self._create_stable_backup_after_successful_open(
+                    stable_backup = self._queue_stable_backup_after_successful_open(
                         command_id=command_id,
                         reason="launcher_open_retry_success",
                     )
-                    return self._finish_command(
+                    return self._finish_successful_open_command(
                         command_id,
-                        ok=True,
                         message="Workbench opened.",
-                        result_data={"stableBackup": stable_backup},
+                        verification=verification,
+                        stable_backup=stable_backup,
                     )
             message = _open_verification_failure_message(verification, no_browser=no_browser)
             _append_event(
@@ -2174,15 +2306,15 @@ class RuntimeManagerDaemon:
             )
             | {"attempts": verification_attempts},
         )
-        stable_backup = self._create_stable_backup_after_successful_open(
+        stable_backup = self._queue_stable_backup_after_successful_open(
             command_id=command_id,
             reason="launcher_open_success",
         )
-        return self._finish_command(
+        return self._finish_successful_open_command(
             command_id,
-            ok=True,
             message="Workbench opened.",
-            result_data={"stableBackup": stable_backup},
+            verification=verification,
+            stable_backup=stable_backup,
         )
 
     def _handle_close_workbench(self, *, command_id: str, args: dict[str, Any]) -> dict[str, Any]:
