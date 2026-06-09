@@ -1329,8 +1329,70 @@ def _frontend_build_preflight_commands() -> list[tuple[str, list[str]]]:
     ]
 
 
+def _latest_mtime(paths: list[Path]) -> float:
+    latest = 0.0
+    for path in paths:
+        try:
+            if not path.exists():
+                continue
+            if path.is_dir():
+                for child in path.rglob("*"):
+                    if child.is_file():
+                        latest = max(latest, child.stat().st_mtime)
+            elif path.is_file():
+                latest = max(latest, path.stat().st_mtime)
+        except OSError:
+            continue
+    return latest
+
+
+def _frontend_build_current() -> tuple[bool, str, dict[str, Any]]:
+    web_dir = PROJECT_ROOT / "web"
+    dist_index = web_dir / "dist" / "index.html"
+    if not dist_index.is_file():
+        return False, "web/dist is missing", {"distIndex": str(dist_index), "distMtime": 0.0, "inputMtime": 0.0}
+
+    input_paths = [
+        web_dir / "src",
+        web_dir / "public",
+        web_dir / "package.json",
+        web_dir / "package-lock.json",
+        web_dir / "tsconfig.json",
+        web_dir / "tsconfig.app.json",
+        web_dir / "tsconfig.node.json",
+        web_dir / "vite.config.ts",
+        web_dir / "vite.config.js",
+    ]
+    try:
+        dist_mtime = dist_index.stat().st_mtime
+    except OSError:
+        return False, "web/dist/index.html is unreadable", {"distIndex": str(dist_index), "distMtime": 0.0, "inputMtime": 0.0}
+    input_mtime = _latest_mtime(input_paths)
+    if input_mtime > dist_mtime:
+        return (
+            False,
+            "frontend sources changed",
+            {"distIndex": str(dist_index), "distMtime": dist_mtime, "inputMtime": input_mtime},
+        )
+    return True, "frontend build is current", {"distIndex": str(dist_index), "distMtime": dist_mtime, "inputMtime": input_mtime}
+
+
 def _preflight_frontend_build_for_restart(command_id: str) -> dict[str, Any]:
     started_at = now_iso()
+    current, reason, freshness = _frontend_build_current()
+    if current:
+        payload = {
+            "commandId": command_id,
+            "ok": True,
+            "skipped": True,
+            "reason": reason,
+            "startedAt": started_at,
+            "completedSteps": [],
+            "freshness": freshness,
+        }
+        _append_event("workbench.restart.build_preflight_skipped_current", payload)
+        return payload
+
     stdout_parts: list[str] = []
     stderr_parts: list[str] = []
     completed_steps: list[str] = []
