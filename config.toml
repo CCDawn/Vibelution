@@ -295,29 +295,31 @@ compat_mode = "openai"
 requires_api_key = true
 context_window = 128000
 
-[llm.model_library.gpt_5_5_gpt_5_5]
-model = "gpt-5.5"
-label = "gpt-5.5-share"
+[llm.model_library.local_model_server_a]
+model = "active-local-model"
+label = "Local Model / Server A"
 transport = "chat_completions"
 contract = "tool_chat"
 strict_compatibility = false
 temperature = 0.7
-max_output_tokens = 128000
+max_output_tokens = 4096
 timeout = 120
 connect_timeout = 20
 streaming = true
 tool_calling_mode = "auto"
 discovery_enabled = true
-api_key_env = "VIBELUTION_LLM_MODEL_GPT_5_5_GPT_5_5_API_KEY"
+supports_image_input = false
+capability_status = "unknown"
+capability_source = "server_runtime_discovery"
+api_key_env = "VIBELUTION_LLM_MODEL_LOCAL_MODEL_SERVER_A_API_KEY"
 
-[llm.model_library.gpt_5_5_gpt_5_5.provider]
-kind = "openai_compatible"
-api = ""
-api_key_env = "OPENAI_API_KEY"
-base_url = "https://share-api.com/"
+[llm.model_library.local_model_server_a.provider]
+kind = "llamacpp"
+api_key_env = ""
+base_url = "http://127.0.0.1:8081/v1"
 compat_mode = "openai"
-requires_api_key = true
-context_window = 1050000
+requires_api_key = false
+context_window = 32768
 
 [llm.model_library.claude_opus_4_7_atpify]
 model = "claude-opus-4-7"
@@ -343,9 +345,9 @@ compat_mode = "native"
 requires_api_key = true
 context_window = 200000
 
-[llm.model_library.houmo_qwen35_9b_agent]
-model = "HiModel_xh2_qwen3.5_9b_256_256k_b1_1chip_2cores_v1.3.0_20260429.gguf"
-label = "bossAGI-standard / qwen3.5-9b"
+[llm.model_library.local_model_server_b]
+model = "active-local-model"
+label = "Local Model / Server B"
 transport = "chat_completions"
 contract = "tool_chat"
 strict_compatibility = false
@@ -357,15 +359,14 @@ streaming = true
 tool_calling_mode = "auto"
 discovery_enabled = true
 supports_image_input = false
-capability_status = "supported"
-capability_source = "manual_runtime_verified"
-capability_checked_at = "2026-06-05T13:35:00+08:00"
-api_key_env = "VIBELUTION_LLM_MODEL_HOUMO_QWEN35_9B_AGENT_API_KEY"
+capability_status = "unknown"
+capability_source = "server_runtime_discovery"
+api_key_env = "VIBELUTION_LLM_MODEL_LOCAL_MODEL_SERVER_B_API_KEY"
 
-[llm.model_library.houmo_qwen35_9b_agent.provider]
+[llm.model_library.local_model_server_b.provider]
 kind = "llamacpp"
 api_key_env = ""
-base_url = "http://127.0.0.1:8081/v1"
+base_url = "http://127.0.0.1:8082/v1"
 compat_mode = "openai"
 requires_api_key = false
 context_window = 32768
