@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 import {
   CONFIG_COPY,
@@ -37,6 +39,8 @@ import {
   type PublicConfigShape,
 } from "./configRouteLogic";
 import type { AgentInstance, ConfigModelOption, ConfigModelPresetOption } from "../api/types";
+
+const configRouteSource = readFileSync(fileURLToPath(new URL("./ConfigRoute.tsx", import.meta.url)), "utf8");
 
 function preset(
   presetId: string,
@@ -566,6 +570,15 @@ describe("configRouteLogic", () => {
     ]);
 
     expect(countModelCenterHealthIssues(rows)).toBe(2);
+  });
+
+  it("exposes manual image input support in the model editor payload", () => {
+    expect(CONFIG_COPY.zh.imageInputSupport).toBe("图像输入");
+    expect(CONFIG_COPY.en.imageInputSupport).toBe("Image input");
+    expect(configRouteSource).toContain('supports_image_input: "unknown"');
+    expect(configRouteSource).toContain("payload.supports_image_input = true");
+    expect(configRouteSource).toContain("payload.supports_image_input = false");
+    expect(configRouteSource).toContain("modelEditorRef.current?.scrollIntoView");
   });
 
   it("maps model creation scenarios to extensible preset defaults", () => {
