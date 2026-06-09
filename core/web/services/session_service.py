@@ -2566,6 +2566,178 @@ def delete_chat_session_lightweight(session_id: str, *, activate_replacement: bo
     }
 
 
+def reset_agent_direct_session_lightweight(
+    session_id: str,
+    *,
+    agent_id: str,
+    title: str = "",
+) -> dict[str, Any]:
+    """Create and bind a replacement direct session before deleting the old one."""
+
+    lang = get_web_language()
+    old_session_id = str(session_id or "").strip()
+    normalized_agent_id = str(agent_id or "").strip()
+    if not old_session_id:
+        raise SessionNotFoundError(text_for(lang, zh="未找到当前会话。", en="Session not found."))
+    if not normalized_agent_id:
+        raise SessionValidationError(text_for(lang, zh="缺少 Agent ID。", en="Agent id is required."))
+
+    replacement_session_id = ""
+    created_at = _now_timestamp()
+    normalized_title = trim_lines(title or "", max_lines=1).strip() or text_for(lang, zh="新会话", en="New session")
+    try:
+        with _CHAT_STATE_LOCK:
+            payload = load_chat_state(PROJECT_ROOT)
+            conversations = payload.get("conversations")
+            if not isinstance(conversations, list):
+                conversations = []
+                payload["conversations"] = conversations
+            _materialize_agent_directory_conversation_locked(payload, old_session_id, source="agent_reset_direct_session")
+            payload = _repair_stale_running_conversations(payload)
+            conversations = payload.get("conversations")
+            if not isinstance(conversations, list):
+                conversations = []
+                payload["conversations"] = conversations
+            old_conversation = _find_conversation_entry(payload, old_session_id)
+            if old_conversation is None:
+                raise SessionNotFoundError(text_for(lang, zh="未找到当前会话。", en="Session not found."))
+            normalized_old = _normalize_conversation(old_conversation) or {}
+            old_phase = _conversation_phase(old_session_id, normalized_old)
+            _record_session_delete_event(
+                "agent_reset_replacement_requested",
+                session_id=old_session_id,
+                outcome="requested",
+                fields={"agentId": normalized_agent_id, "phase": old_phase},
+            )
+            if old_phase in {"running", "stopping"}:
+                raise SessionBusyError(
+                    text_for(
+                        lang,
+                        zh="当前会话仍在运行或停止中，请先等待这一轮收束后再重置 Agent。",
+                        en="This session is still running or stopping. Wait for the current turn to close before resetting the Agent.",
+                    )
+                )
+            existing_ids = {
+                str(item.get("conversation_id") or "").strip()
+                for item in conversations
+                if isinstance(item, dict)
+            }
+            replacement_session_id = _new_conversation_id(existing_ids | {old_session_id})
+            replacement_conversation = _make_empty_conversation(
+                replacement_session_id,
+                title=normalized_title,
+                timestamp=created_at,
+            )
+            _ensure_conversation_workspace_metadata(replacement_conversation)
+            replacement_conversation["agent_id"] = normalized_agent_id
+            replacement_conversation["agentId"] = normalized_agent_id
+            conversations.append(replacement_conversation)
+            payload["version"] = int(payload.get("version") or CHAT_STATE_VERSION)
+            payload["active_conversation_id"] = replacement_session_id
+            payload["updated_at"] = created_at
+            payload["conversations"] = conversations
+            save_chat_state(PROJECT_ROOT, payload)
+        _invalidate_session_list_cache()
+
+        agent_directory_service.update_agent_instance(
+            normalized_agent_id,
+            direct_session_id=replacement_session_id,
+            metadata={"previousDirectSessionId": old_session_id},
+        )
+        delete_result = _delete_chat_session_state(old_session_id, activate_replacement=True)
+        _record_session_delete_event(
+            "agent_reset_replacement_bound",
+            session_id=old_session_id,
+            outcome="bound",
+            fields={
+                "agentId": normalized_agent_id,
+                "replacementDirectSessionId": replacement_session_id,
+                "nextActiveSessionId": str(delete_result.get("nextActiveSessionId") or "").strip(),
+            },
+        )
+        return {
+            "deleted": True,
+            "deletedSessionId": old_session_id,
+            "nextActiveSessionId": str(delete_result.get("nextActiveSessionId") or replacement_session_id).strip(),
+            "replacementDirectSessionId": replacement_session_id,
+        }
+    except Exception as exc:
+        if replacement_session_id:
+            _remove_replacement_direct_session_after_failed_agent_reset(
+                replacement_session_id,
+                agent_id=normalized_agent_id,
+                fallback_active_session_id=old_session_id,
+            )
+        try:
+            agent_directory_service.update_agent_instance(
+                normalized_agent_id,
+                direct_session_id=old_session_id,
+                metadata={"previousDirectSessionId": replacement_session_id},
+            )
+        except Exception:
+            pass
+        _record_session_delete_event(
+            "agent_reset_replacement_failed",
+            session_id=old_session_id,
+            outcome="failed",
+            level="error",
+            fields={
+                "agentId": normalized_agent_id,
+                "replacementDirectSessionId": replacement_session_id,
+                "errorType": type(exc).__name__,
+            },
+        )
+        raise
+
+
+def _remove_replacement_direct_session_after_failed_agent_reset(
+    session_id: str,
+    *,
+    agent_id: str,
+    fallback_active_session_id: str,
+) -> None:
+    normalized_session_id = str(session_id or "").strip()
+    if not normalized_session_id:
+        return
+    with _CHAT_STATE_LOCK:
+        payload = load_chat_state(PROJECT_ROOT)
+        conversations = payload.get("conversations")
+        if not isinstance(conversations, list):
+            return
+        remaining = []
+        changed = False
+        for item in conversations:
+            if not isinstance(item, dict):
+                continue
+            if str(item.get("conversation_id") or "").strip() == normalized_session_id:
+                changed = True
+                continue
+            remaining.append(item)
+        if not changed:
+            return
+        fallback_id = str(fallback_active_session_id or "").strip()
+        existing_ids = {
+            str(item.get("conversation_id") or "").strip()
+            for item in remaining
+            if isinstance(item, dict)
+        }
+        if fallback_id and fallback_id in existing_ids:
+            payload["active_conversation_id"] = fallback_id
+        elif payload.get("active_conversation_id") == normalized_session_id:
+            payload["active_conversation_id"] = next(iter(existing_ids), "")
+        payload["version"] = int(payload.get("version") or CHAT_STATE_VERSION)
+        payload["updated_at"] = _now_timestamp()
+        payload["conversations"] = remaining
+        save_chat_state(PROJECT_ROOT, payload)
+    _invalidate_session_list_cache()
+    _record_session_delete_event(
+        "agent_reset_replacement_rolled_back",
+        session_id=normalized_session_id,
+        outcome="rolled_back",
+        fields={"agentId": str(agent_id or "").strip(), "fallbackActiveSessionId": str(fallback_active_session_id or "").strip()},
+    )
+
+
 def create_chat_review_candidate_from_session(session_id: str) -> dict:
     """Create a pending supervised review candidate from a persisted chat session."""
 

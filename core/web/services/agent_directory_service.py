@@ -4323,27 +4323,18 @@ def _reset_agent_direct_session(agent: dict[str, Any]) -> dict[str, Any]:
     try:
         from . import session_service
 
-        result = session_service.delete_chat_session_lightweight(session_id, activate_replacement=True)
+        result = session_service.reset_agent_direct_session_lightweight(
+            session_id,
+            agent_id=str(agent.get("agentId") or "").strip(),
+            title=str(agent.get("displayName") or "").strip(),
+        )
     except Exception as exc:
-        return {
-            "resetDirectSession": False,
-            "replacementDirectSessionId": "",
-            "skippedPaths": [f"direct_session:{session_id} ({type(exc).__name__})"],
-        }
+        raise AgentDirectoryError(f"Agent direct session reset failed: {type(exc).__name__}: {exc}") from exc
     replacement_direct_session_id = str(result.get("replacementDirectSessionId") or result.get("nextActiveSessionId") or "").strip()
-    skipped_paths: list[str] = []
-    if replacement_direct_session_id:
-        try:
-            update_agent_instance(
-                str(agent.get("agentId") or "").strip(),
-                direct_session_id=replacement_direct_session_id,
-            )
-        except Exception as exc:
-            skipped_paths.append(f"direct_session_bind:{replacement_direct_session_id} ({type(exc).__name__})")
     return {
         "resetDirectSession": True,
         "replacementDirectSessionId": replacement_direct_session_id,
-        "skippedPaths": skipped_paths,
+        "skippedPaths": [],
     }
 
 
