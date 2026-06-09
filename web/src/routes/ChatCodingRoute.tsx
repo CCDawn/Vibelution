@@ -134,6 +134,7 @@ import {
   participantAgentDisplayInfo,
   sessionAgentDisplayInfo,
 } from "./agentDisplay";
+import { ConversationIndexSection } from "./ConversationIndexSection";
 import {
   DirectSessionIndexItem,
   isAgentRootSession,
@@ -6020,20 +6021,14 @@ export function ChatCodingRoute() {
               {filteredConversations.length ? groupedConversations.map((group) => {
                 const collapsed = !searchHasTerm && collapsedConversationGroups[group.groupKey];
                 return (
-                  <section key={group.groupKey} className={styles.conversationGroup}>
-                    <button
-                      type="button"
-                      className={styles.conversationGroupHeader}
-                      onClick={() => toggleConversationGroup(group.groupKey)}
-                      aria-expanded={!collapsed}
-                    >
-                      <ChevronRight size={14} aria-hidden="true" />
-                      <span>{group.label}</span>
-                      <strong>{group.items.length}</strong>
-                    </button>
-                    {!collapsed ? (
-                      <div className={styles.conversationGroupList}>
-                        {group.items.map((conversation) => {
+                  <ConversationIndexSection
+                    key={group.groupKey}
+                    count={group.items.length}
+                    expanded={!collapsed}
+                    label={group.label}
+                    onToggle={() => toggleConversationGroup(group.groupKey)}
+                  >
+                    {group.items.map((conversation) => {
                 if (conversation.type === "group_room") {
                   const roomId = conversation.roomId || conversation.conversationId;
                   return (
@@ -6126,26 +6121,18 @@ export function ChatCodingRoute() {
                   />
                 );
               })}
-                      </div>
-                    ) : null}
-                  </section>
+                  </ConversationIndexSection>
                 );
               }) : null}
               {filteredTeams.length ? (
-                <section className={`${styles.conversationGroup} ${styles.teamTreeGroup}`}>
-                  <button
-                    type="button"
-                    className={styles.conversationGroupHeader}
-                    onClick={() => toggleConversationGroup("teams")}
-                    aria-expanded={searchHasTerm || !collapsedConversationGroups.teams}
-                  >
-                    <ChevronRight size={14} aria-hidden="true" />
-                    <span>{conversationGroupLabel("teams", lang === "zh" ? "zh" : "en")}</span>
-                    <strong>{filteredTeams.length}</strong>
-                  </button>
-                  {searchHasTerm || !collapsedConversationGroups.teams ? (
-                    <div className={styles.conversationGroupList}>
-                    {filteredTeams.map((team) => {
+                <ConversationIndexSection
+                  className={styles.teamTreeGroup}
+                  count={filteredTeams.length}
+                  expanded={searchHasTerm || !collapsedConversationGroups.teams}
+                  label={conversationGroupLabel("teams", lang === "zh" ? "zh" : "en")}
+                  onToggle={() => toggleConversationGroup("teams")}
+                >
+                  {filteredTeams.map((team) => {
                       const roomId = String(team.linkedChatRoomId ?? "").trim();
                       const teamRoute = `/teams?team=${encodeURIComponent(team.teamId)}`;
                       return (
@@ -6161,25 +6148,16 @@ export function ChatCodingRoute() {
                         />
                       );
                     })}
-                    </div>
-                  ) : null}
-                </section>
+                </ConversationIndexSection>
               ) : null}
               {filteredStandaloneGroupConversations.length ? (
-                <section className={styles.conversationGroup}>
-                  <button
-                    type="button"
-                    className={styles.conversationGroupHeader}
-                    onClick={() => toggleConversationGroup("standaloneGroups")}
-                    aria-expanded={searchHasTerm || !collapsedConversationGroups.standaloneGroups}
-                  >
-                    <ChevronRight size={14} aria-hidden="true" />
-                    <span>{conversationGroupLabel("standaloneGroups", lang === "zh" ? "zh" : "en")}</span>
-                    <strong>{filteredStandaloneGroupConversations.length}</strong>
-                  </button>
-                  {searchHasTerm || !collapsedConversationGroups.standaloneGroups ? (
-                    <div className={styles.conversationGroupList}>
-                    {filteredStandaloneGroupConversations.map((conversation) => {
+                <ConversationIndexSection
+                  count={filteredStandaloneGroupConversations.length}
+                  expanded={searchHasTerm || !collapsedConversationGroups.standaloneGroups}
+                  label={conversationGroupLabel("standaloneGroups", lang === "zh" ? "zh" : "en")}
+                  onToggle={() => toggleConversationGroup("standaloneGroups")}
+                >
+                  {filteredStandaloneGroupConversations.map((conversation) => {
                       const roomId = conversation.roomId || conversation.conversationId;
                       return (
                         <GroupConversationIndexItem
@@ -6196,9 +6174,7 @@ export function ChatCodingRoute() {
                         />
                       );
                     })}
-                    </div>
-                  ) : null}
-                </section>
+                </ConversationIndexSection>
               ) : null}
               {sessionIndexHasMore ? (
                 <button
