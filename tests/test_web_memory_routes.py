@@ -919,10 +919,11 @@ def test_memory_overview_base_sections_reuse_recent_cache(tmp_path, monkeypatch)
     third_warnings: list[str] = []
     third_sections, third_timings = memory_service._timed_base_memory_sections(tmp_path, third_warnings)
 
-    assert calls["count"] == 2
-    assert third_sections[0]["items"][0]["updatedAt"] == "call-2"
-    assert third_warnings == ["warning-2"]
-    assert all(timing["cacheHit"] is False for timing in third_timings)
+    assert calls["count"] == 1
+    assert third_sections[0]["items"][0]["updatedAt"] == "call-1"
+    assert third_warnings == ["warning-1"]
+    assert all(timing["cacheHit"] is True for timing in third_timings)
+    assert all(timing["cacheExpired"] is True for timing in third_timings)
     memory_service._clear_memory_overview_section_cache()
 
 
@@ -954,11 +955,17 @@ def test_memory_overview_section_cache_refreshes_only_expired_section(tmp_path, 
     monkeypatch.setattr(memory_service, "_self_evolution_memory_section", lambda root, sub_timings=None: {"id": "self-evolution-memory", "items": []})
     monkeypatch.setattr(memory_service, "_supervised_evolution_memory_section", lambda root, sub_timings=None: {"id": "supervised-evolution-memory", "items": []})
     monkeypatch.setattr(memory_service, "_runtime_scene_memory_section", lambda root, sub_timings=None: {"id": "runtime-scene-evidence", "items": []})
+    monkeypatch.setattr(
+        memory_service,
+        "_memory_overview_section_signature",
+        lambda root, section_id: f"{section_id}:v1" if section_id == "runtime-memory" else None,
+    )
 
     memory_service._clear_memory_overview_section_cache()
     first_sections, _ = memory_service._timed_base_memory_sections(tmp_path, [])
     with memory_service.MEMORY_OVERVIEW_SECTION_CACHE_LOCK:
         memory_service.MEMORY_OVERVIEW_SECTION_CACHE["sections"]["project-memory"]["expiresAt"] = 99.0
+        memory_service.MEMORY_OVERVIEW_SECTION_CACHE["sections"]["runtime-memory"]["expiresAt"] = 99.0
     second_sections, _ = memory_service._timed_base_memory_sections(tmp_path, [])
 
     first_by_id = {section["id"]: section for section in first_sections}
@@ -967,6 +974,50 @@ def test_memory_overview_section_cache_refreshes_only_expired_section(tmp_path, 
     assert calls["runtime-memory"] == 1
     assert first_by_id["runtime-memory"]["items"][0]["id"] == second_by_id["runtime-memory"]["items"][0]["id"]
     assert second_by_id["project-memory"]["items"][0]["id"] == "project-2"
+    memory_service._clear_memory_overview_section_cache()
+
+
+def test_memory_overview_section_cache_refreshes_expired_section_when_signature_changes(tmp_path, monkeypatch):
+    calls = {"project-memory": 0}
+    now = {"value": 200.0}
+    signature = {"project-memory": "project:v1"}
+
+    monkeypatch.setattr(memory_service.time, "monotonic", lambda: now["value"])
+    monkeypatch.setattr(memory_service, "MEMORY_OVERVIEW_SECTION_CACHE_TTL_SECONDS", 3.0)
+    monkeypatch.setattr(
+        memory_service,
+        "_memory_overview_section_signature",
+        lambda root, section_id: signature.get(section_id),
+    )
+
+    def fake_project_memory_section(root, warnings):
+        calls["project-memory"] += 1
+        return {"id": "project-memory", "items": [{"id": f"project-{calls['project-memory']}"}]}
+
+    monkeypatch.setattr(memory_service, "_project_memory_section", fake_project_memory_section)
+    monkeypatch.setattr(memory_service, "_runtime_memory_section", lambda root: {"id": "runtime-memory", "items": []})
+    monkeypatch.setattr(memory_service, "_prompt_memory_section", lambda root: {"id": "prompt-memory", "items": []})
+    monkeypatch.setattr(memory_service, "_workspace_database_section", lambda root, sub_timings=None: {"id": "workspace-database", "items": []})
+    monkeypatch.setattr(memory_service, "_research_memory_section", lambda root: {"id": "research-memory", "items": []})
+    monkeypatch.setattr(memory_service, "_team_knowledge_memory_section", lambda root, sub_timings=None: {"id": "team-knowledge", "items": []})
+    monkeypatch.setattr(memory_service, "_git_memory_section", lambda root, sub_timings=None: {"id": "git-memory", "items": []})
+    monkeypatch.setattr(memory_service, "_chat_session_memory_section", lambda root, sub_timings=None: {"id": "chat-session-memory", "items": []})
+    monkeypatch.setattr(memory_service, "_self_evolution_memory_section", lambda root, sub_timings=None: {"id": "self-evolution-memory", "items": []})
+    monkeypatch.setattr(memory_service, "_supervised_evolution_memory_section", lambda root, sub_timings=None: {"id": "supervised-evolution-memory", "items": []})
+    monkeypatch.setattr(memory_service, "_runtime_scene_memory_section", lambda root, sub_timings=None: {"id": "runtime-scene-evidence", "items": []})
+
+    memory_service._clear_memory_overview_section_cache()
+    first_sections, _first_timings = memory_service._timed_base_memory_sections(tmp_path, [])
+    with memory_service.MEMORY_OVERVIEW_SECTION_CACHE_LOCK:
+        memory_service.MEMORY_OVERVIEW_SECTION_CACHE["sections"]["project-memory"]["expiresAt"] = 199.0
+    signature["project-memory"] = "project:v2"
+    second_sections, second_timings = memory_service._timed_base_memory_sections(tmp_path, [])
+
+    assert first_sections[0]["items"][0]["id"] == "project-1"
+    assert second_sections[0]["items"][0]["id"] == "project-2"
+    assert second_timings[0]["cacheHit"] is False
+    assert second_timings[0]["cacheExpired"] is True
+    assert second_timings[0]["cacheSignatureChanged"] is True
     memory_service._clear_memory_overview_section_cache()
 
 
