@@ -9856,6 +9856,7 @@ def _record_session_list_loaded_event(
     cache_ttl_ms: int = 0,
     waited_for_inflight: bool = False,
 ) -> None:
+    cache_expired = bool(cache_hit and cache_ttl_ms > 0 and cache_age_ms > cache_ttl_ms)
     try:
         record_runtime_scene_event(
             "conversation",
@@ -9875,7 +9876,8 @@ def _record_session_list_loaded_event(
                 "cacheHit": bool(cache_hit),
                 "cacheAgeMs": max(0, int(cache_age_ms)),
                 "cacheTtlMs": max(0, int(cache_ttl_ms)),
-                "cacheExpired": bool(cache_hit and cache_ttl_ms > 0 and cache_age_ms > cache_ttl_ms),
+                "cacheExpired": cache_expired,
+                "servedStaleMatchingSignature": cache_expired,
                 "waitedForInflight": bool(waited_for_inflight),
             },
             lifecycle=False,

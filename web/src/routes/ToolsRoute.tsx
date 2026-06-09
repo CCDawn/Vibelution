@@ -550,7 +550,7 @@ export function ToolsRoute() {
 
   const agentsQuery = useQuery({
     queryKey: queryKeys.agents(),
-    queryFn: () => fetchJson<AgentInstance[]>("/api/agents"),
+    queryFn: () => fetchJson<AgentInstance[]>("/api/agents?detail=summary"),
     enabled: agentPolicyWorkspaceNeeded,
     staleTime: 30_000,
     refetchInterval: false,
