@@ -1203,20 +1203,6 @@ export function ConversationView({
     return lang === "zh" ? `${count} 步` : `${count} steps`;
   }
 
-  function runningOperationPhrase(operation: ConversationOperation | undefined) {
-    if (!operation) {
-      return "";
-    }
-    const label = operationLabel(operation);
-    if (lang === "zh") {
-      if (label.endsWith("中")) {
-        return label;
-      }
-      return `${label}中`;
-    }
-    return label;
-  }
-
   function compactOperationLabel(operation: ConversationOperation) {
     const label = operationLabel(operation).trim();
     if (!label) {
@@ -1262,50 +1248,30 @@ export function ConversationView({
     const latestFailed = [...operations].reverse().find((operation) => operation.status.trim().toLowerCase() === "failed");
     const latestEvent = [...operations].reverse().find((operation) => operation.timestamp);
     const completedCount = operations.filter((operation) => operationStatusTone(operation) === "done").length;
-    const phase = latestActive
-      ? runningOperationPhrase(latestActive)
-      : latestFailed
-        ? lang === "zh"
-          ? `${operationLabel(latestFailed)}失败`
-          : `${operationLabel(latestFailed)} failed`
-        : statusLabel("done");
+    const currentOperation = latestActive ?? latestFailed;
     return {
       latestActive,
       latestFailed,
       latestEvent,
       completedCount,
-      phase,
+      currentLabel: currentOperation ? operationLabel(currentOperation) : "",
       currentSummary: latestActive?.kind === "status" ? "" : latestActive?.summary || latestFailed?.summary || "",
     };
   }
 
-  function operationProgressLocation(progress: ReturnType<typeof operationProgressMeta>) {
+  function operationProgressSummaryItems(progress: ReturnType<typeof operationProgressMeta>, total: number) {
     const operation = progress.latestActive ?? progress.latestFailed;
-    if (!operation) {
-      return "";
-    }
-    const label = operationLabel(operation);
-    const status = statusLabel(operation.status);
-    if (lang === "zh") {
-      return `${progress.latestActive ? "当前位置" : "最近停靠"}: ${label} · ${status}`;
-    }
-    return `${progress.latestActive ? "Current" : "Latest"}: ${label} · ${status}`;
-  }
-
-  function operationProgressMetricItems(progress: ReturnType<typeof operationProgressMeta>) {
-    const operation = progress.latestActive ?? progress.latestFailed;
-    if (!operation) {
-      return [];
-    }
-    const elapsed = operation.durationSeconds ?? elapsedSinceTimestampSeconds(operation.timestamp);
+    const elapsed = operation ? operation.durationSeconds ?? elapsedSinceTimestampSeconds(operation.timestamp) : null;
+    const stateLabel = progress.latestActive
+      ? lang === "zh" ? "执行中" : "Running"
+      : progress.latestFailed
+        ? lang === "zh" ? "执行失败" : "Failed"
+        : lang === "zh" ? "已完成" : "Done";
     return [
-      elapsed !== null ? (lang === "zh" ? `已持续 ${formatDuration(elapsed)}` : `running ${formatDuration(elapsed)}`) : "",
-      operation.timeoutSeconds !== undefined
-        ? (lang === "zh" ? `超时阈值 ${formatDuration(operation.timeoutSeconds)}` : `timeout ${formatDuration(operation.timeoutSeconds)}`)
-        : "",
-      progress.latestEvent?.timestamp
-        ? (lang === "zh" ? `最后事件 ${formatOperationTimestamp(progress.latestEvent.timestamp)}` : `last event ${formatOperationTimestamp(progress.latestEvent.timestamp)}`)
-        : "",
+      stateLabel,
+      progress.currentLabel,
+      `${progress.completedCount}/${total}`,
+      elapsed !== null ? formatDuration(elapsed) : "",
     ].filter(Boolean);
   }
 
@@ -1570,11 +1536,6 @@ export function ConversationView({
             >
               <span className={styles.operationRailDot} aria-hidden="true" />
               <span className={styles.operationRailLabel}>{compactOperationLabel(operation)}</span>
-              {tone === "running" ? (
-                <span className={styles.operationRailBadge}>{lang === "zh" ? "当前" : "now"}</span>
-              ) : tone === "failed" ? (
-                <span className={styles.operationRailBadge}>{lang === "zh" ? "失败" : "failed"}</span>
-              ) : null}
               {index < progressOperations.length - 1 ? <span className={styles.operationRailConnector} aria-hidden="true" /> : null}
             </span>
           );
@@ -1735,13 +1696,8 @@ export function ConversationView({
     const expanded = getExpansionState(messageId, "feedback", defaultExpanded);
     const title = operationTimelineTitle(operations);
     const progress = operationProgressMeta(operations);
-    const counts = [
-      operationStepCountLabel(operations.length),
-      progress.phase,
-      `${progress.completedCount}/${operations.length}`,
-    ].filter(Boolean).join(" · ");
-    const location = operationProgressLocation(progress);
-    const metricItems = operationProgressMetricItems(progress);
+    const summaryItems = operationProgressSummaryItems(progress, operations.length);
+    const stepCount = operationStepCountLabel(operations.length);
     return (
       <section className={`${styles.operationGroup} ${styles.executionTraceGroup}`}>
         <button
@@ -1753,21 +1709,19 @@ export function ConversationView({
         >
           {operationIcon(operations[0]?.kind ?? "tool", title)}
           <span>{title}</span>
-          {counts ? <span className={styles.operationSummaryCount}>{counts}</span> : null}
-          {expanded && progress.currentSummary ? (
-            <span className={styles.operationSummaryPreview}>{progress.currentSummary}</span>
-          ) : null}
+          {stepCount ? <span className={styles.operationSummaryCount}>{stepCount}</span> : null}
           {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
         </button>
-        {location || progress.currentSummary ? (
-          <div className={styles.operationLiveLocator} aria-live="polite">
-            {location ? <span className={styles.operationLiveLocation}>{location}</span> : null}
-            {metricItems.length > 0 ? (
-              <span className={styles.operationLiveMetrics}>{metricItems.join(" · ")}</span>
-            ) : null}
-            {progress.currentSummary ? (
-              <span className={styles.operationLiveSummary}>{progress.currentSummary}</span>
-            ) : null}
+        {summaryItems.length > 0 ? (
+          <div className={styles.operationStatusLine} aria-live="polite">
+            {summaryItems.map((item, index) => (
+              <span
+                key={`${messageId}-operation-status-${index}`}
+                className={index === 0 ? styles.operationStatusLead : styles.operationStatusMeta}
+              >
+                {item}
+              </span>
+            ))}
           </div>
         ) : null}
         {renderOperationProgressRail(operations)}
@@ -1962,6 +1916,17 @@ export function ConversationView({
         )}
       </section>
     );
+  }
+
+  function shouldShowResponseBlock(message: ConversationMessage, hasFeedbackTimeline: boolean) {
+    if (!hasResponseBlock(message)) {
+      return false;
+    }
+    if (!hasFeedbackTimeline) {
+      return true;
+    }
+    const segments = parseResponseSegments(message.content);
+    return segments.some((segment) => segment.kind !== "status");
   }
 
   function renderResponseText(content: string, duplicateImageUrls?: Set<string>) {
@@ -2462,14 +2427,15 @@ export function ConversationView({
             const operationGroups = buildConversationOperationGroups(message, operationLabels);
             const hasRunningTools = hasRunningOperation(operationGroups.tools);
             const hasFeedbackTimeline = (message.feedbackEvents?.length ?? 0) > 0;
+            const showResponseBlock = shouldShowResponseBlock(message, hasFeedbackTimeline);
             const turnErrorMessage = isTurnErrorMessage(message);
             const agentInboxMessage = isAgentInboxMessage(message);
             const groupTranscriptMessage = isGroupRoomTranscriptMessage(message);
             const userAuthoredMessage = message.role === "user" && !agentInboxMessage;
-            const isResponseStreaming = Boolean(message.streaming) && hasResponseBlock(message) && !hasRunningTools;
+            const isResponseStreaming = Boolean(message.streaming) && showResponseBlock && !hasRunningTools;
             const defaultResponseExpanded = Boolean(message.streaming) || defaultExpandedResponseIds.has(message.id);
             const responseExpanded = getExpansionState(message.id, "response", defaultResponseExpanded);
-            const responseSegments = responseExpanded ? parseResponseSegments(message.content) : [];
+            const responseSegments = showResponseBlock && responseExpanded ? parseResponseSegments(message.content) : [];
             const isEditingMessage = userAuthoredMessage && message.id === editingMessageId;
             const agentInboxExpanded = getExpansionState(message.id, "agentInbox", false);
             const agentInboxPreview = agentInboxMessage ? compactPreview(agentInboxSummary(message), 140) : "";
@@ -2622,7 +2588,7 @@ export function ConversationView({
                   ) : null}
                   {renderImageArtifact(message)}
 
-                  {hasResponseBlock(message) ? (
+                  {showResponseBlock ? (
                     <section className={styles.responseSection}>
                       <button
                         type="button"

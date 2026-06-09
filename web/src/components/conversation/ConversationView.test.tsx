@@ -314,7 +314,9 @@ describe("ConversationView edit resend affordance", () => {
       },
     ]);
 
-    expect(html).toContain("40 步 · 已完成 · 40/40");
+    expect(html).toContain("40 步");
+    expect(html).toContain("已完成");
+    expect(html).toContain("40/40");
     expect(html).not.toContain("+33");
     expect(html).toContain("tool_40");
     expect(html).not.toContain("已折叠更早 4 步执行记录");
@@ -406,7 +408,7 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).toContain('title="绑定 Agent · 已完成"');
     expect(html).toContain('title="请求模型 · 已完成"');
     expect(html.match(/title="命令 · 失败"/g)?.length ?? 0).toBe(1);
-    expect(html.match(/>失败<\/span>/g)?.length ?? 0).toBe(1);
+    expect(html.match(/title=".*?· 失败"/g)?.length ?? 0).toBe(1);
   });
 
   it("renders group-room transcripts as sync records instead of assistant answers", () => {
@@ -1439,7 +1441,9 @@ describe("ConversationView edit resend affordance", () => {
     ]);
 
     expect(html).toContain("执行过程");
-    expect(html).toContain("3 步 · 已完成 · 3/3");
+    expect(html).toContain("3 步");
+    expect(html).toContain("已完成");
+    expect(html).toContain("3/3");
     expect(html).toContain("思考过程");
     expect(html).toContain("读取");
     expect(html).toContain('title="展开执行明细"');
@@ -1473,7 +1477,9 @@ describe("ConversationView edit resend affordance", () => {
 
     expect(html).toContain("执行过程");
     expect(html).toContain("模型思考");
-    expect(html).toContain("1 步 · 模型思考中 · 0/1");
+    expect(html).toContain("1 步");
+    expect(html).toContain("执行中");
+    expect(html).toContain("0/1");
     expect(html).not.toContain("reasoning 已开始返回");
     expect(html).not.toContain('title="展开工具详情"');
     expect(html).not.toContain("正在思考，已收到思考片段");
@@ -1516,17 +1522,20 @@ describe("ConversationView edit resend affordance", () => {
     ]);
 
     expect(html).toContain("执行过程");
-    expect(html).toContain("3 步 · 请求模型中 · 2/3");
+    expect(html).toContain("执行中");
+    expect(html).toContain("2/3");
     expect(html).toContain("准备上下文");
     expect(html).toContain("绑定 Agent");
     expect(html).toContain("请求模型");
+    expect(html).not.toContain("当前位置");
+    expect(html).not.toContain("请求模型中");
     expect(html).not.toContain("首个响应片段等待中");
     expect(html).not.toContain("运行状态 3");
     expect(html).not.toContain("回答</span>");
     expect((html.match(new RegExp(fullModelStatus, "g")) ?? [])).toHaveLength(0);
   });
 
-  it("shows where an active execution trace is currently working", () => {
+  it("keeps the active execution trace compact while preserving expandable details", () => {
     const html = renderConversation([
       {
         id: "message-active-location",
@@ -1557,12 +1566,15 @@ describe("ConversationView edit resend affordance", () => {
       },
     ]);
 
-    expect(html).toContain("当前位置: 命令 · 运行中");
-    expect(html).toContain("已持续 1m 15s");
-    expect(html).toContain("超时阈值 2m");
-    expect(html).toContain("最后事件");
-    expect(html).toContain("正在搜索最新运行日志");
-    expect(html).toContain(">当前</span>");
+    expect(html).toContain("执行中");
+    expect(html).toContain("命令");
+    expect(html).toContain("1/2");
+    expect(html).toContain("1m 15s");
+    expect(html).not.toContain("当前位置");
+    expect(html).not.toContain("最后事件");
+    expect(html).not.toContain("超时阈值");
+    expect(html).not.toContain("正在搜索最新运行日志");
+    expect(html).not.toContain(">当前</span>");
   });
 
   it("shows display tool labels while preserving raw names in expandable details", () => {
@@ -1586,7 +1598,9 @@ describe("ConversationView edit resend affordance", () => {
     ]);
 
     expect(html).toContain("搜索");
-    expect(html).toContain("1 步 · 已完成 · 1/1");
+    expect(html).toContain("1 步");
+    expect(html).toContain("已完成");
+    expect(html).toContain("1/1");
     expect(html).not.toContain('title="展开工具详情"');
     expect(html).not.toContain("grep_search_tool raw result");
   });
