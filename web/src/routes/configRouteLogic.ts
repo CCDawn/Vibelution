@@ -563,6 +563,13 @@ export const MODEL_TOOL_CALLING_MODE_OPTIONS: SelectOption[] = [
   { value: "parallel", label: "parallel" },
 ];
 
+export const MODEL_PROMPT_CACHE_MODE_OPTIONS: SelectOption[] = [
+  { value: "automatic", label: "automatic" },
+  { value: "explicit_cache_control", label: "explicit_cache_control" },
+  { value: "disabled", label: "disabled" },
+  { value: "unsupported", label: "unsupported" },
+];
+
 export const PROVIDER_COMPAT_MODE_OPTIONS: SelectOption[] = [
   { value: "openai", label: "openai" },
   { value: "openai_compatible", label: "openai_compatible" },

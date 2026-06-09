@@ -43,6 +43,7 @@ NetworkConfig,
     SoundConfig,
     PromptConfig,
 get_provider_api_key_env,)
+from .llm_security import is_llm_local_network_base_url
 from .providers import (
     MODEL_PRESETS,
     get_model_preset,
@@ -226,6 +227,61 @@ def _model_library_entry(
     return entry
 
 
+def _recommended_prompt_cache_mode(provider: Dict[str, Any], details: Dict[str, Any] | None = None) -> str:
+    provider = _public_inline_provider_payload(provider)
+    details = details if isinstance(details, dict) else {}
+    provider_kind = str(provider.get("kind", "") or "").strip().lower()
+    provider_api = str(provider.get("api", "") or "").strip().lower().replace("_", "-")
+    compat_mode = str(provider.get("compat_mode", "") or "").strip().lower().replace("-", "_")
+    transport = str(details.get("transport", "") or "").strip().lower()
+    model = str(details.get("model", "") or "").strip().lower()
+    protocol = str(details.get("protocol", "") or "").strip().lower()
+    base_url = str(provider.get("base_url", "") or "").strip()
+    host = base_url.lower()
+
+    if provider_kind in {"local", "ollama", "llamacpp"} or is_llm_local_network_base_url(base_url):
+        return ""
+
+    is_dashscope_qwen = (
+        provider_kind == "aliyun"
+        and ("qwen" in model or protocol.startswith("qwen_") or "dashscope.aliyuncs.com" in host)
+    )
+    if provider_kind == "anthropic" and compat_mode not in {"openai", "openai_compatible"}:
+        return "explicit_cache_control"
+    if is_dashscope_qwen:
+        return "explicit_cache_control"
+    if (
+        provider_kind in {"openai", "relay"}
+        or (provider_kind == "openai_compatible" and compat_mode in {"openai", "openai_compatible"})
+        or (
+            provider_kind in {"openai", "relay", "openai_compatible"}
+            and (provider_api in {"openai-responses", "responses"} or transport == "responses")
+        )
+    ):
+        return "automatic"
+    return ""
+
+
+def _ensure_model_library_prompt_cache_defaults(public_config: Dict[str, Any]) -> Dict[str, Any]:
+    updated = copy.deepcopy(public_config)
+    llm = updated.get("llm", {})
+    if not isinstance(llm, dict):
+        return updated
+    model_library = llm.get("model_library", {})
+    if not isinstance(model_library, dict):
+        return updated
+    for item in model_library.values():
+        if not isinstance(item, dict) or "prompt_cache" in item:
+            continue
+        provider = _inline_provider_payload(item.get("provider"))
+        if not provider:
+            continue
+        mode = _recommended_prompt_cache_mode(provider, item)
+        if mode:
+            item["prompt_cache"] = {"mode": mode}
+    return updated
+
+
 def _unique_model_library_id(model_library: Dict[str, Any], model_id: str) -> str:
     base = (model_id or "model").strip("_") or "model"
     if base not in model_library:
@@ -292,7 +348,8 @@ def _canonicalize_model_library_api_key_envs(public_config: Dict[str, Any]) -> D
 
 def _canonicalize_runtime_public_config(public_config: Dict[str, Any]) -> Dict[str, Any]:
     repaired = _repair_legacy_model_library_shape(public_config)
-    return _ensure_profile_model_library_entries(repaired)
+    with_profile_models = _ensure_profile_model_library_entries(repaired)
+    return _ensure_model_library_prompt_cache_defaults(with_profile_models)
 
 
 def _materialize_role_bound_profiles(llm_section: Dict[str, Any]) -> None:
