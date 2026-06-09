@@ -1442,6 +1442,47 @@ def test_infer_evolution_summary_extracts_transaction_validation_and_restart():
     assert summary["guarded_tools"]["total"] == 0
 
 
+def test_infer_evolution_summary_recovers_tool_events_from_debug_lines_when_conversation_is_partial():
+    events = [
+        {
+            "type": "tool_call",
+            "tool_name": "close_evolution_transaction_tool",
+            "status": "error",
+            "tool_args": {"txn_id": "txn-74f4facf3488", "status": "success"},
+            "tool_result": "[错误] OperationalError: no such table: EvolutionTransaction",
+        },
+    ]
+    debug_lines = [
+        "[09:15:26.707] [TOOL] START open_evolution_transaction_tool args={'summary': 'probe'}",
+        "[09:15:26.789] [TOOL] RESULT open_evolution_transaction_tool OK len=219",
+        "[09:18:31.624] [TOOL] START run_test_for_tool args={'source_path': 'core/evaluation/dataset_registry.py', 'timeout': 120}",
+        "[09:18:34.643] [TOOL] RESULT run_test_for_tool OK len=3066",
+        "[09:18:50.909] [TOOL] START python_lint_tool args={'target': 'core/evaluation/dataset_registry.py'}",
+        "[09:18:51.301] [TOOL] RESULT python_lint_tool OK len=170",
+        "[09:19:13.648] [TOOL] START close_evolution_transaction_tool args={'txn_id': 'txn-74f4facf3488', 'status': 'success'}",
+        "[09:19:13.664] [TOOL] RESULT close_evolution_transaction_tool FAIL len=58",
+    ]
+
+    summary = infer_evolution_summary(
+        events,
+        debug_lines,
+        [],
+        restart_expected=False,
+        restart_reentered=False,
+    )
+
+    assert summary["transaction"]["opened"] is True
+    assert summary["transaction"]["closed"] is False
+    assert summary["transaction"]["txn_id"] == "txn-74f4facf3488"
+    assert summary["validation"]["passed"] >= 2
+    assert summary["validation"]["failed"] == 0
+    assert summary["evidence"]["debug_tool_events_recovered"] is True
+    assert summary["evidence"]["conversation_tool_events"] == 1
+    assert summary["evidence"]["debug_tool_events"] == 4
+    assert "open_evolution_transaction_tool:success" in summary["tool_sequence_tail"]
+    assert "close_evolution_transaction_tool:error" in summary["tool_sequence_tail"]
+
+
 def test_infer_evolution_summary_counts_guarded_tool_phases():
     events = [
         {
