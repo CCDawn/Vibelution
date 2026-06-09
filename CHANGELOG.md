@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.13 - 2026-06-09
+
+- Recovered supervised-evolution harness evidence so run summaries include task, command, output, and workspace artifacts even when evidence tables are initialized late.
+- Hardened Git memory transaction-table initialization so missing evidence containers are recreated without misclassifying existing state.
+- Added regression coverage for supervised harness evidence recovery and Git memory transaction table repair.
+
 ## 1.0.12 - 2026-06-09
 
 - Densified the Memory workbench layout so operational memory panels use tighter spacing, better clipping, and verified layout coverage.
