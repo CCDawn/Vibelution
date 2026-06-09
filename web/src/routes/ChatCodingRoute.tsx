@@ -3,14 +3,12 @@ import {
   Apple,
   ArrowUpRight,
   BellRing,
-  BookPlus,
   Bot,
   Check,
   ChevronRight,
   CircleDot,
   HeartHandshake,
   MessageCircleHeart,
-  Pencil,
   Plus,
   Search,
   Sparkles,
@@ -146,6 +144,7 @@ import {
   GroupConversationIndexItem,
   TeamConversationIndexItem,
 } from "./GroupSessionIndexItems";
+import { SessionContextMenu } from "./SessionContextMenu";
 import {
   buildChatMentionTargets,
   tokenizeChatMentions,
@@ -4359,19 +4358,6 @@ export function ChatCodingRoute() {
   );
   const contextMenuDeleteDisabled = contextMenuDeletePending || contextMenuSessionIsBusy;
   const contextMenuAddToReviewDisabled = contextMenuAddToReviewPending || contextMenuSessionIsBusy;
-  const sessionContextMenuStyle: CSSProperties | undefined =
-    sessionContextMenu && contextMenuSession
-      ? {
-          left: Math.min(
-            sessionContextMenu.x,
-            typeof window === "undefined" ? sessionContextMenu.x : Math.max(12, window.innerWidth - 188),
-          ),
-          top: Math.min(
-            sessionContextMenu.y,
-            typeof window === "undefined" ? sessionContextMenu.y : Math.max(12, window.innerHeight - 132),
-          ),
-        }
-      : undefined;
 
   return (
     <div
@@ -6188,52 +6174,19 @@ export function ChatCodingRoute() {
                   <strong>{sessionIndexProgressLabel}</strong>
                 </button>
               ) : null}
-              {sessionContextMenu && contextMenuSession && sessionContextMenuStyle ? (
-                <div
-                  className={styles.sessionContextMenu}
-                  style={sessionContextMenuStyle}
-                  role="menu"
-                  aria-label={lang === "zh" ? "会话操作" : "Session actions"}
-                  onPointerDown={(event) => event.stopPropagation()}
-                >
-                  <button
-                    type="button"
-                    role="menuitem"
-                    className={styles.sessionContextMenuItem}
-                    onClick={() => handleAddSessionToReview(contextMenuSession)}
-                    disabled={contextMenuAddToReviewDisabled}
-                    title={
-                      contextMenuAddToReviewPending
-                        ? t("addingSessionToReview")
-                        : contextMenuAddToReviewDisabled
-                          ? t("addSessionToReviewBusy")
-                          : t("addSessionToReview")
-                    }
-                  >
-                    <BookPlus size={14} />
-                    <span>{contextMenuAddToReviewPending ? t("addingSessionToReview") : t("addSessionToReview")}</span>
-                  </button>
-                  <button
-                    type="button"
-                    role="menuitem"
-                    className={styles.sessionContextMenuItem}
-                    onClick={() => beginRenameSession(contextMenuSession)}
-                  >
-                    <Pencil size={14} />
-                    <span>{t("renameSession")}</span>
-                  </button>
-                  <button
-                    type="button"
-                    role="menuitem"
-                    className={`${styles.sessionContextMenuItem} ${styles.sessionContextMenuDanger}`}
-                    onClick={() => handleDeleteSession(contextMenuSession)}
-                    disabled={contextMenuDeleteDisabled}
-                    title={contextMenuDeleteDisabled ? t("deleteSessionBusy") : t("deleteSession")}
-                  >
-                    <Trash2 size={14} />
-                    <span>{t("deleteSession")}</span>
-                  </button>
-                </div>
+              {sessionContextMenu && contextMenuSession ? (
+                <SessionContextMenu
+                  addToReviewDisabled={contextMenuAddToReviewDisabled}
+                  addToReviewPending={contextMenuAddToReviewPending}
+                  deleteDisabled={contextMenuDeleteDisabled}
+                  lang={lang}
+                  position={sessionContextMenu}
+                  session={contextMenuSession}
+                  t={t}
+                  onAddToReview={handleAddSessionToReview}
+                  onDelete={handleDeleteSession}
+                  onRename={beginRenameSession}
+                />
               ) : null}
               </>
             )}
