@@ -4529,6 +4529,41 @@ def test_handle_restart_workbench_build_preflight_fails_before_close(monkeypatch
     assert state["workbench"]["observedState"] == "open"
 
 
+def test_restart_build_preflight_skips_when_frontend_build_is_current(monkeypatch):
+    events: list[tuple[str, dict]] = []
+
+    def fail_run(*args, **kwargs):
+        raise AssertionError("frontend preflight should not run node commands when dist is current")
+
+    monkeypatch.setattr(
+        daemon,
+        "_frontend_build_current",
+        lambda: (True, "frontend build is current", {"distIndex": "web/dist/index.html", "distMtime": 20.0, "inputMtime": 10.0}),
+    )
+    monkeypatch.setattr(daemon.subprocess, "run", fail_run)
+    monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: events.append((event_type, payload)))
+
+    result = daemon._preflight_frontend_build_for_restart("cmd-restart")
+
+    assert result["ok"] is True
+    assert result["skipped"] is True
+    assert result["completedSteps"] == []
+    assert events == [
+        (
+            "workbench.restart.build_preflight_skipped_current",
+            {
+                "commandId": "cmd-restart",
+                "ok": True,
+                "skipped": True,
+                "reason": "frontend build is current",
+                "startedAt": result["startedAt"],
+                "completedSteps": [],
+                "freshness": {"distIndex": "web/dist/index.html", "distMtime": 20.0, "inputMtime": 10.0},
+            },
+        )
+    ]
+
+
 def test_restart_build_preflight_uses_hidden_node_entrypoints_on_windows(monkeypatch):
     calls: list[dict[str, object]] = []
     events: list[tuple[str, dict]] = []
@@ -4552,6 +4587,11 @@ def test_restart_build_preflight_uses_hidden_node_entrypoints_on_windows(monkeyp
     monkeypatch.setattr(daemon.subprocess, "STARTUPINFO", DummyStartupInfo, raising=False)
     monkeypatch.setattr(daemon.subprocess, "run", fake_run)
     monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: events.append((event_type, payload)))
+    monkeypatch.setattr(
+        daemon,
+        "_frontend_build_current",
+        lambda: (False, "frontend sources changed", {"distIndex": "web/dist/index.html", "distMtime": 10.0, "inputMtime": 20.0}),
+    )
 
     result = daemon._preflight_frontend_build_for_restart("cmd-restart")
 
