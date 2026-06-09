@@ -43,6 +43,7 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("getLauncherStatus");
     expect(routeSource).toContain("startLauncherBundle");
     expect(routeSource).toContain("stopLauncherBundle");
+    expect(routeSource).toContain("forceStopLauncherBundle");
     expect(routeSource).toContain("restartLauncherBundle()");
     expect(routeSource).toContain("updateLauncherStartupSettings");
     expect(routeSource).not.toContain("updateWorkbenchWindowMode");
@@ -65,6 +66,9 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("lifecycleActionDisabledActiveWork");
     expect(routeSource).toContain("title={destructiveActionDisabled ? destructiveActionDisabledReason : copy.stop}");
     expect(routeSource).toContain("title={destructiveActionDisabled ? destructiveActionDisabledReason : copy.restart}");
+    expect(routeSource).toContain("const forceStopDisabled = busy || projectIsClosed");
+    expect(routeSource).toContain("forceStopDisabledReason");
+    expect(routeSource).toContain("title={forceStopDisabled ? forceStopDisabledReason : copy.forceStop}");
   });
 
   it("renders a dense lifecycle console rather than a landing page", () => {
@@ -117,6 +121,7 @@ describe("LauncherRoute layout contract", () => {
     expect(styles.diagnosticSection).toBeTypeOf("string");
     expect(styles.recoveryLine).toBeTypeOf("string");
     expect(styles.specGrid).toBeTypeOf("string");
+    expect(styles.dangerButton).toBeTypeOf("string");
   });
 
   it("puts user-readable launcher status before technical diagnostics", () => {
@@ -211,6 +216,8 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("trackedCommand");
     expect(routeSource).toContain("trackedResult");
     expect(routeSource).toContain("resultMessage");
+    expect(routeSource).toContain('operation === "force-stop"');
+    expect(routeSource).toContain("force_close_workbench");
     expect(routeSource).toContain('tone: response.accepted ? "neutral" : "warning"');
     expect(routeSource).toContain('setNotice({ tone, text: message })');
     expect(routeSource).toContain("Restart preflight failed before closing the workbench");
@@ -219,12 +226,14 @@ describe("LauncherRoute layout contract", () => {
   it("keeps lifecycle actions icon-backed and compact", () => {
     expect(routeSource).toContain("<Play size={15} />");
     expect(routeSource).toContain("<Square size={15} />");
+    expect(routeSource).toContain("<Power size={15} />");
     expect(routeSource).toContain("<RefreshCw size={15} />");
     expect(routeSource).toContain("<ExternalLink size={15} />");
     expect(routeSource).toContain("<Maximize2 size={14} />");
     expect(routeSource).toContain("<Minimize2 size={14} />");
     expect(routeSource).toContain('controlMutation.mutate("start")');
     expect(routeSource).toContain('controlMutation.mutate("stop")');
+    expect(routeSource).toContain('controlMutation.mutate("force-stop")');
     expect(routeSource).toContain('controlMutation.mutate("restart")');
     expect(routeSource).toContain('windowMode: "fullscreen"');
     expect(routeSource).toContain('windowMode: "windowed"');
@@ -267,8 +276,8 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("launcherControlLimited");
     expect(routeSource).toContain("launcherStatusDisconnected");
     expect(routeSource).toContain("lastControlOperation");
-    expect(routeSource).toContain('setLastControlOperation(operation === "stop" && response.accepted ? "stop" : null)');
-    expect(routeSource).toContain('statusQuery.isError && (lastControlOperation === "stop" || launcherStatusDisconnected)');
+    expect(routeSource).toContain('setLastControlOperation((operation === "stop" || operation === "force-stop") && response.accepted ? operation : null)');
+    expect(routeSource).toContain('statusQuery.isError && (lastControlOperation === "stop" || lastControlOperation === "force-stop" || launcherStatusDisconnected)');
     expect(routeSource).toContain('data-tone={expectedStopDisconnect ? "success" : launcherControlLimited ? "warning" : "error"}');
     expect(routeSource).toContain("工作台已关闭，Launcher 后端连接已断开。重新启动后会恢复状态。");
     expect(routeSource).toContain("当前看到的是旧前端页面，不代表项目仍在运行。");
@@ -279,11 +288,12 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("A valid control token is missing; refresh before start, stop, or restart.");
   });
 
-  it("blocks direct Launcher window closes while preserving controlled stop and restart", () => {
+  it("blocks direct Launcher window closes while preserving controlled stop force-stop and restart", () => {
     expect(routeSource).toContain("launcherCloseBlocked");
     expect(routeSource).toContain("controlledCloseOperationInFlight");
-    expect(routeSource).toContain('lastControlOperation === "stop" || lastControlOperation === "restart"');
+    expect(routeSource).toContain('lastControlOperation === "stop" || lastControlOperation === "force-stop" || lastControlOperation === "restart"');
     expect(routeSource).toContain("trackedCommand?.operation === \"stop\"");
+    expect(routeSource).toContain("trackedCommand?.operation === \"force-stop\"");
     expect(routeSource).toContain("trackedCommand?.operation === \"restart\"");
     expect(routeSource).toContain("buildProjectWindowCloseBlockedTelemetry");
     expect(routeSource).toContain("markControlledProjectLifecycleOperation(operation)");

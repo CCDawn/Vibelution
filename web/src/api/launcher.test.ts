@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { resetControlTokenForTests } from "./client";
 import {
   cancelRuntimeLifecycleCommand,
+  forceStopLauncherBundle,
   getLauncherStatus,
   launcherEndpoint,
   launcherRestartEndpoint,
@@ -163,6 +164,36 @@ describe("launcher api helpers", () => {
 
     expect(payload.commandId).toBe("cmd-1");
     expect(fetchMock.mock.calls[1][0]).toBe("http://127.0.0.1:8765/api/launcher/restart");
+  });
+
+  it("force closes the bundle through the guarded launcher endpoint", async () => {
+    vi.stubGlobal("window", {
+      location: {
+        href: "http://127.0.0.1:8000/chat",
+        origin: "http://127.0.0.1:8000",
+      },
+    });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          header: "X-Vibelution-Control-Token",
+          controlToken: "test-token",
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ accepted: true, operation: "force-stop", commandId: "cmd-force" }),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const payload = await forceStopLauncherBundle();
+
+    expect(payload.operation).toBe("force-stop");
+    expect(payload.commandId).toBe("cmd-force");
+    expect(fetchMock.mock.calls[1][0]).toBe("http://127.0.0.1:8765/api/launcher/force-stop");
+    const requestInit = fetchMock.mock.calls[1][1] as RequestInit;
+    expect(requestInit.method).toBe("POST");
   });
 
   it("falls back to the workbench launcher adapter when direct launcher control is unreachable", async () => {

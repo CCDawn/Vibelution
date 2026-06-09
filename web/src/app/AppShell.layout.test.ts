@@ -158,22 +158,28 @@ describe("AppShell layout contract", () => {
     expect(shellSource).toContain("lifecycleMenuOpen");
     expect(shellSource).toContain("restartLauncherBundle");
     expect(shellSource).toContain("stopLauncherBundle");
+    expect(shellSource).toContain("forceStopLauncherBundle");
     expect(shellSource).toContain("cancelRuntimeLifecycleCommand");
     expect(shellSource).not.toContain('"/api/runtime/restart"');
     expect(shellSource).not.toContain('"/api/runtime/shutdown"');
     expect(shellSource).toContain("restartWorkbenchLabel");
+    expect(shellSource).toContain("forceCloseWorkbenchLabel");
     expect(shellSource).toContain("beginRestart");
+    expect(shellSource).toContain("beginForceShutdown");
     expect(shellSource).toContain("restartActiveWorkBlockedMessage");
     expect(shellSource).toContain("shutdownActiveWorkBlockedMessage");
     expect(shellSource).not.toContain("confirmedActiveWork");
     expect(shellSource).toContain("restart_blocked_active_work");
     expect(shellSource).toContain("shutdown_blocked_active_work");
+    expect(shellSource).toContain("browser.user_action.force_shutdown_requested");
+    expect(shellSource).toContain("browser.user_action.force_shutdown_unconfirmed");
     expect(shellSource).toContain("requestWorkbenchExitGuard");
     expect(shellSource).toContain('requestWorkbenchExitGuard("restart"');
     expect(shellSource).toContain('requestWorkbenchExitGuard("shutdown"');
     expect(styles.lifecycleMenuCluster).toBeTypeOf("string");
     expect(styles.lifecycleMenuPanel).toBeTypeOf("string");
     expect(styles.lifecycleMenuItem).toBeTypeOf("string");
+    expect(styles.lifecycleMenuDangerItem).toBeTypeOf("string");
   });
 
   it("lets lifecycle wait overlays be cancelled without stopping active work", () => {

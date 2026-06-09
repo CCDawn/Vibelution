@@ -28,7 +28,7 @@ from core.runtime_manager.work_run_store import WorkRunStore
 from core.runtime_manager.workbench_controller import _is_process_alive, observe_workbench
 
 
-LauncherOperation = Literal["start", "stop", "restart"]
+LauncherOperation = Literal["start", "stop", "restart", "force-stop"]
 LauncherSupervisorOperation = Literal["supervisor_reattach"]
 RuntimeProfile = Literal["safe_local", "safe_remote", "debug", "ci"]
 UiLanguage = Literal["zh", "en"]
@@ -712,6 +712,61 @@ def request_launcher_stop() -> LauncherCommandResponse:
         "operation": "stop",
         "commandId": command_id,
         "message": "正在关闭项目工作台，Launcher 控制面会保持可再次启动。",
+    }
+
+
+def request_launcher_force_stop() -> LauncherCommandResponse:
+    """Request a force close for the managed workbench without stopping the Launcher control plane."""
+
+    active_work_runs = launcher_active_work_runs()
+    _record_launcher_event(
+        "launcher.bundle.force_stop.requested",
+        phase="stop",
+        message="Launcher project bundle force-stop requested.",
+        fields={
+            "source": "launcher_api",
+            "activeWorkCount": len(active_work_runs),
+            "activeWorkRuns": active_work_runs[:8],
+        },
+    )
+    try:
+        ensure_daemon_running()
+        command = submit_command(
+            "force_close_workbench",
+            args={"reason": "launcher_force_stop_button", "source": "launcher_api", "stopManager": False},
+            requested_by="launcher_api",
+        )
+    except Exception as exc:
+        _record_launcher_event(
+            "launcher.bundle.force_stop.failed",
+            phase="stop",
+            message="Launcher project bundle force-stop could not be queued.",
+            outcome="failed",
+            level="error",
+            fields={"mode": "standalone_control_plane", "errorType": type(exc).__name__, "errorMessage": str(exc)},
+        )
+        raise
+
+    command_id = str(command.get("commandId") or "")
+    _record_launcher_event(
+        "launcher.bundle.force_stop.accepted",
+        phase="stop",
+        message="Launcher project bundle force-stop queued through runtime manager.",
+        outcome="accepted",
+        fields={
+            "mode": "standalone_control_plane",
+            "commandId": command_id,
+            "activeWorkCount": len(active_work_runs),
+        },
+    )
+    return {
+        "accepted": True,
+        "mode": "runtime_manager",
+        "launcherMode": "standalone_control_plane",
+        "operation": "force-stop",
+        "commandId": command_id,
+        "message": "正在强制关闭项目工作台，Launcher 控制面会保持可再次启动。",
+        "activeWorkRuns": active_work_runs[:8],
     }
 
 
