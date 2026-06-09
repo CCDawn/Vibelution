@@ -6223,6 +6223,18 @@ def test_submit_session_message_preserves_short_dialogue_prompt_without_task_fal
     assert "conversation.user_message_filtered" not in event_codes
 
 
+def test_lightweight_chat_tool_intent_uses_token_aware_english_markers():
+    enabled, reason = session_service._lightweight_chat_payload_decision(
+        {"raw_user_message": "Capital ok?", "user_message": "Capital ok?"}
+    )
+    assert (enabled, reason) == (True, "short_dialogue")
+
+    enabled, reason = session_service._lightweight_chat_payload_decision(
+        {"raw_user_message": "API ok?", "user_message": "API ok?"}
+    )
+    assert (enabled, reason) == (False, "tool_intent_marker")
+
+
 def test_submit_session_message_continue_preserves_raw_prompt_and_dialogue_history(tmp_path, monkeypatch):
     (tmp_path / "core" / "web" / "services").mkdir(parents=True, exist_ok=True)
     (tmp_path / "core" / "web" / "services" / "session_service.py").write_text("pass\n", encoding="utf-8")

@@ -1,5 +1,7 @@
 [CmdletBinding()]
 param(
+    [string]$ServerId = "",
+    [string]$RegistryPath = "",
     [string]$ServerHost = "192.168.20.30",
     [string]$SshHost = "bossai-server",
     [int]$Port = 8081,
@@ -14,6 +16,60 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+function Resolve-ServerRegistryPath {
+    param([string]$Path)
+
+    $candidates = New-Object System.Collections.Generic.List[string]
+    if ($Path) { [void]$candidates.Add($Path) }
+    if ($env:VIBELUTION_SERVER_REGISTRY) { [void]$candidates.Add($env:VIBELUTION_SERVER_REGISTRY) }
+
+    $scriptPath = if ($PSCommandPath) { $PSCommandPath } else { $MyInvocation.MyCommand.Path }
+    if ($scriptPath) {
+        $scriptRoot = Split-Path -Parent $scriptPath
+        $projectRoot = Split-Path -Parent $scriptRoot
+        [void]$candidates.Add((Join-Path $projectRoot ".runtime\servers.json"))
+        [void]$candidates.Add((Join-Path $projectRoot "config\servers.local.json"))
+    }
+
+    foreach ($candidate in $candidates) {
+        if ($candidate -and (Test-Path -LiteralPath $candidate)) {
+            return (Resolve-Path -LiteralPath $candidate).Path
+        }
+    }
+    if ($Path) { return $Path }
+    return ""
+}
+
+if ($ServerId) {
+    $resolvedRegistryPath = Resolve-ServerRegistryPath $RegistryPath
+    if (-not $resolvedRegistryPath) {
+        throw "ServerId requires a server registry. Pass -RegistryPath or set VIBELUTION_SERVER_REGISTRY."
+    }
+    if (-not (Test-Path -LiteralPath $resolvedRegistryPath)) {
+        throw "Server registry not found: $resolvedRegistryPath"
+    }
+
+    $registry = Get-Content -LiteralPath $resolvedRegistryPath -Raw | ConvertFrom-Json
+    if ($null -eq $registry.servers) {
+        throw "Server registry is missing a 'servers' object: $resolvedRegistryPath"
+    }
+    $entryProperty = $registry.servers.PSObject.Properties[$ServerId]
+    if ($null -eq $entryProperty) {
+        $known = $registry.servers.PSObject.Properties.Name -join ", "
+        throw "Unknown server '$ServerId'. Known servers: $known"
+    }
+
+    $entry = $entryProperty.Value
+    if ($entry.PSObject.Properties["configured"] -and -not [bool]$entry.configured) {
+        throw "Server '$ServerId' is not configured yet. Fill $resolvedRegistryPath first."
+    }
+    if ($entry.host) { $ServerHost = [string]$entry.host }
+    if ($entry.sshAlias) { $SshHost = [string]$entry.sshAlias }
+    if ($entry.ports -and $entry.ports.model) { $Port = [int]$entry.ports.model }
+    if ($entry.model -and $entry.model.logFile) { $LogFile = [string]$entry.model.logFile }
+}
+
 $BaseUrl = "http://$ServerHost`:$Port"
 
 function Get-Prop {
@@ -83,10 +139,12 @@ function Invoke-RemoteSnapshot {
     }
 
     $safeLogFile = $LogFile.Replace("'", "'\''")
+    $modelPort = [string]$Port
     $remote = @'
 set -u
+MODEL_PORT='__MODEL_PORT__'
 echo "[PROCESS]"
-pid="$(pgrep -f 'llama-server.*--port[ =]8081' | head -1 || true)"
+pid="$(pgrep -f "llama-server.*--port[ =]$MODEL_PORT" | head -1 || true)"
 if [ -z "$pid" ]; then pid="$(pgrep -f 'llama-server' | head -1 || true)"; fi
 if [ -z "$pid" ]; then
   echo "llama-server: not found"
@@ -102,7 +160,7 @@ free -h 2>/dev/null | awk '/^Mem|^内存/ {print "memory: used=" $3 " free=" $4 
 if command -v vmstat >/dev/null 2>&1; then
   vmstat 1 2 2>/dev/null | tail -1 | awk '{printf "cpu: user=%s%% system=%s%% idle=%s%% wait=%s%%\n", $13, $14, $15, $16}'
 fi
-ss -ltnp 2>/dev/null | awk '/:3001/ {api="up"} /:5173/ {web="up"} /:7901/ {hlie="up"} /:8081/ {model="up"} END {printf "ports: api=%s web=%s model=%s hlie=%s\n", (api?api:"down"), (web?web:"down"), (model?model:"down"), (hlie?hlie:"down")}'
+ss -ltnp 2>/dev/null | awk -v model_port=":$MODEL_PORT" '/:3001/ {api="up"} /:5173/ {web="up"} /:7901/ {hlie="up"} index($0, model_port) {model="up"} END {printf "ports: api=%s web=%s model=%s hlie=%s\n", (api?api:"down"), (web?web:"down"), (model?model:"down"), (hlie?hlie:"down")}'
 
 echo "[ACCELERATOR]"
 houmo_monitor="/home/kylin/BossAI-dev/BossAI/tools/houmo-xh2-monitor"
@@ -134,7 +192,7 @@ else
   fi
 fi
 '@
-    $remote = $remote.Replace("__LOG_FILE__", $safeLogFile).Replace("__LOG_LINES__", [string]$LogLines)
+    $remote = $remote.Replace("__MODEL_PORT__", $modelPort).Replace("__LOG_FILE__", $safeLogFile).Replace("__LOG_LINES__", [string]$LogLines)
 
     try {
         $encoded = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($remote))
