@@ -1682,60 +1682,6 @@
   color: var(--fg-primary);
 }
 
-.sessionAgentStatusControl {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  flex: 0 1 300px;
-  min-width: 180px;
-  max-width: min(38%, 340px);
-  min-height: 28px;
-  margin-left: auto;
-  margin-bottom: 1px;
-  padding: 2px 6px;
-  border: 1px solid color-mix(in srgb, var(--border-soft) 78%, transparent);
-  border-radius: 7px 7px 0 0;
-  background: color-mix(in srgb, var(--surface-panel-strong) 82%, transparent);
-  color: var(--fg-secondary);
-}
-
-.sessionAgentStatusIcon {
-  flex: 0 0 auto;
-  color: var(--accent-cool-2);
-}
-
-.sessionAgentStatusSelect {
-  min-width: 88px;
-  flex: 1 1 auto;
-  border: 0;
-  background: transparent;
-  color: var(--fg-primary);
-  font: inherit;
-  font-size: 0.74rem;
-  line-height: 1.2;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.sessionAgentStatusSelect:disabled {
-  cursor: not-allowed;
-  opacity: 0.58;
-}
-
-.sessionAgentStatusMeta {
-  min-width: 0;
-  flex: 0 1 96px;
-  color: var(--fg-tertiary);
-  font-size: 0.66rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.sessionAgentStatusSaving {
-  color: var(--accent-warm-2);
-}
-
 .centerSurface {
   display: grid;
   height: 100%;

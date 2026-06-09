@@ -82,8 +82,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeCssSource).toContain(".leftRail {\n  display: flex;\n  flex-direction: column;\n  gap: 5px;\n  padding: 6px;");
     expect(routeCssSource).toContain(".rightPane {\n  display: grid;\n  grid-template-rows: auto auto 1fr;\n  padding: 6px;");
     expect(routeCssSource).toContain("padding: 8px 10px 0");
-    expect(routeCssSource).toContain("min-width: 180px");
-    expect(routeCssSource).toContain("max-width: min(38%, 340px)");
+    expect(routeCssSource).not.toContain(".sessionAgentStatusControl");
   });
 
   it("keeps the conversation index compact enough for 1024px workbench use", () => {
@@ -378,18 +377,20 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.createGroupButton).toBeTypeOf("string");
   });
 
-  it("binds chat sessions through AgentInstance ids instead of model-profile templates", () => {
-    expect(routeSource).toContain("body: JSON.stringify({ agentId })");
-    expect(routeSource).toContain("sessionAgentOptions");
-    expect(routeSource).toContain("value={activeAgentId}");
-    expect(routeSource).toContain("styles.sessionAgentStatusControl");
-    expect(routeSource).toContain("styles.sessionAgentStatusSelect");
+  it("keeps Agent rebinding out of the chat conversation surface", () => {
+    expect(routeSource).not.toContain("body: JSON.stringify({ agentId })");
+    expect(routeSource).not.toContain("updateSessionAgentMutation");
+    expect(routeSource).not.toContain("sessionAgentOptions");
+    expect(routeSource).not.toContain("handleAgentTemplateChange");
+    expect(routeSource).not.toContain("agentBindingSavePending");
+    expect(routeSource).not.toContain("styles.sessionAgentStatusControl");
+    expect(routeSource).not.toContain("styles.sessionAgentStatusSelect");
     expect(routeSource).not.toContain("styles.agentTemplatePanel");
     expect(routeSource).not.toContain("fetchJson<SessionAgentTemplate[]>");
     expect(routeSource).not.toContain("body: JSON.stringify({ agentProfileId })");
-    expect(routeStyles.sessionAgentStatusControl).toBeTypeOf("string");
-    expect(routeStyles.sessionAgentStatusSelect).toBeTypeOf("string");
-    expect(routeStyles.sessionAgentStatusMeta).toBeTypeOf("string");
+    expect(routeCssSource).not.toContain(".sessionAgentStatusControl");
+    expect(routeCssSource).not.toContain(".sessionAgentStatusSelect");
+    expect(routeCssSource).not.toContain(".sessionAgentStatusMeta");
   });
 
   it("opens group conversations inside the chat page instead of navigating away", () => {
@@ -835,7 +836,7 @@ describe("ChatCodingRoute layout contract", () => {
 
   it("keeps renamed direct session titles visible before conversation refetch finishes", () => {
     const renameStart = routeSource.indexOf("const renameSessionMutation");
-    const renameEnd = routeSource.indexOf("const updateSessionAgentMutation", renameStart);
+    const renameEnd = routeSource.indexOf("const addSessionToReviewMutation", renameStart);
     const renameMutationSource = routeSource.slice(renameStart, renameEnd);
     const titleHelperStart = routeSource.indexOf("function sessionListTitle");
     const titleHelperEnd = routeSource.indexOf("function compactAgentIdentifier", titleHelperStart);
