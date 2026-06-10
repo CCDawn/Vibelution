@@ -251,9 +251,9 @@ const nodes = [
     role: "Challenge Cup Delivery Agent",
     summary: "把研究流程产物转为比赛材料。",
     objective: "将候选知识、算法假设和实验计划转成技术方案、演示和提交材料。",
-    inputs: ["ingested 知识", "algorithm_hypothesis", "experiment_result", "赛题要求"],
-    actions: ["待规划：技术方案 PDF。", "待规划：演示视频脚本。", "待规划：前端演示与源代码包。"],
-    outputs: ["技术方案大纲", "演示脚本", "材料清单"],
+    inputs: ["ingested 知识", "algorithm_hypothesis", "experiment_result", "赛题要求", "赛题对齐方案"],
+    actions: ["待规划：技术方案 PDF。", "待规划：演示视频脚本。", "待规划：前端演示与源代码包。", "已补充：赛题对齐方案作为赛道选择、评分映射和提交闭环依据。"],
+    outputs: ["技术方案大纲", "演示脚本", "材料清单", "赛题对齐方案"],
     memory: "交付材料可引用正式知识，但不把材料草稿反向污染知识库。",
     graph: "未来边：KnowledgeItem supports DeliverableSection。",
     risks: ["比赛材料与正式知识不一致", "缺阿里云百炼凭证", "时间节点遗漏"],
@@ -447,6 +447,7 @@ const knowledgeRunbook = {
 
 const implementationBlueprint = {
   doc: "technical_implementation_plan.md",
+  alignmentDoc: "赛题对齐方案.md",
   target: "复用 Vibelution 现有 Research、Team Knowledge、RAG、Knowledge Steward 和 Memory Graph 能力，把 01-09 做成可运行 MVP。",
   activeTeam: {
     teamId: "research-team",
@@ -2730,6 +2731,7 @@ function indexHtml() {
             <a href="#flow-board">查看流程图</a>
             <a class="secondary" href="research_flow_pages/01-source-workspace.html">进入 01 资料搜集</a>
             <a class="secondary" href="technical_implementation_plan.md">技术方案</a>
+            <a class="secondary" href="${escapeHtml(implementationBlueprint.alignmentDoc)}">赛题对齐方案</a>
           </div>
         </div>
         <aside class="dashboard-panel">
