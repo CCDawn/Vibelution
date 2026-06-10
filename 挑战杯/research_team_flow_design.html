@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>神经科学启发算法发现科研流程索引</title>
+    <title>神经学机制启发神经网络算法发现科研流程索引</title>
     <link rel="stylesheet" href="research_flow_pages/flow_pages.css" />
   </head>
   <body>
@@ -20,7 +20,7 @@
         <div class="dashboard-hero">
           <div>
             <div class="kicker">Challenge Cup Research Flow Workbench</div>
-            <h1>神经科学启发算法发现科研流程审核台</h1>
+            <h1>神经学机制启发神经网络算法发现科研流程审核台</h1>
             <p class="subtitle">首页只承载审核判断：现在能跑到哪里、哪些边界不能越过、哪些节点需要继续规划。完整说明仍保留在节点页和计划库中。</p>
           </div>
           <div class="tag-row">
@@ -465,7 +465,7 @@
           <div class="plan-summary">
             <div class="service-row"><strong>知识搜集主线</strong><span>只跑通知识搜集、筛选、候选入库、知识治理 Agent 和图谱同步设计；不进入训练实验、算法实现或比赛交付。</span></div>
             <div class="service-row"><strong>实施目标</strong><span>复用 Vibelution 现有 Research、Team Knowledge、RAG、Knowledge Steward 和 Memory Graph 能力，把 01-09 做成可运行 MVP。</span></div>
-            <div class="service-row"><strong>团队入口</strong><span>/teams?team=research-team · 选中 ai科学研究团队后，主工作区右侧优先显示科研三阶段启动台：知识搜集、实验、迭代；其下再显示科研流程二级导航。</span></div>
+            <div class="service-row"><strong>团队入口</strong><span>/teams?team=research-team · 选中 ai科学研究团队后，页面顶部显示科研流程二级索引条；当前节点内容区优先展示科研三阶段启动台：知识搜集、实验、迭代。</span></div>
           </div>
           <div class="dashboard-panel">
             <h2>边界提醒</h2>
@@ -1303,7 +1303,7 @@
                 </div>
 <div class="service-row">
                   <b>TeamsRoute workflow workspace</b>
-                  <span>已落地入口：research-team 右侧顶部优先展示科研三阶段启动台；其下是科研流程索引和单页工作区，主区域展示 workflow 当前阶段、candidateStore 摘要、coordination queue、communicationBrief、knowledge ingestion status、validationSummary、候选图谱、最近候选和团队沟通；组织画布仅在点击索引后作为附属视图显示。</span>
+                  <span>已落地入口：research-team 页面顶部显示科研流程二级索引条；当前节点内容区优先展示科研三阶段启动台，并按索引展示 workflow 当前阶段、candidateStore 摘要、coordination queue、communicationBrief、knowledge ingestion status、validationSummary、候选图谱、最近候选和团队沟通；组织画布仅在点击索引后作为附属视图显示。</span>
                 </div>
 <div class="service-row">
                   <b>local_research_worker_model</b>
@@ -1671,7 +1671,7 @@
 <div class="blueprint-row compact">
               <b>Team 前端入口</b>
               <strong>/teams?team=research-team</strong>
-              <span>读取 /workflow-orchestration、/stage-rounds/status、/candidates?limit=8、/knowledge-ingestion/status 和通用 data-processing run/status/assignment；左侧只做团队选择/创建，research-team 右侧顶部优先展示科研三阶段启动台，其下提供科研流程二级导航，并按当前索引节点单页展示科研总览、资料搜集执行台、候选仓库、校验摘要、知识入库漏斗、actionItems 和 officialBoundary；非科研团队显示占位，不初始化 workflow。</span>
+              <span>读取 /workflow-orchestration、/stage-rounds/status、/candidates?limit=8、/knowledge-ingestion/status 和通用 data-processing run/status/assignment；左侧只做团队选择/创建，research-team 页面顶部提供科研流程二级索引条，当前节点内容区优先展示科研三阶段启动台，并按索引节点单页展示科研总览、资料搜集执行台、候选仓库、校验摘要、知识入库漏斗、actionItems 和 officialBoundary；非科研团队显示占位，不初始化 workflow。</span>
             </div>
 <div class="blueprint-row compact">
               <b>资料搜集执行台</b>
