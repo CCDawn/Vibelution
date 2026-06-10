@@ -1643,6 +1643,12 @@ def _run_participant_agent(participant: dict[str, Any], prompt: str, context: di
                 interrupt_checker=lambda: _chat_room_round_stop_reason(round_id),
                 chat_history=participant.get("recentMessages") or [],
                 runtime_context=agent_context.context_block if agent_context is not None else "",
+                static_runtime_context=(
+                    getattr(agent_context, "static_context_block", "") if agent_context is not None else ""
+                ),
+                dynamic_runtime_context=(
+                    getattr(agent_context, "dynamic_context_block", "") if agent_context is not None else ""
+                ),
             )
             timings["agentSeedMs"] = _elapsed_ms(stage_started_at)
             timings["totalPrepareMs"] = _elapsed_ms(prepare_started_at)

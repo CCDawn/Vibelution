@@ -230,11 +230,28 @@ class TestToolMessageFlow:
         assert result is not None
         assert captured["cancel_reason"] == "操作者请求停止当前轮。"
 
-    def test_runtime_context_stays_out_of_cacheable_system_prefix(self):
-        """运行时上下文不得拼进带 cache_control 的系统块，否则破坏 prompt cache 前缀稳定性。"""
+    def test_static_runtime_context_extends_cacheable_system_prefix(self):
+        """稳定 Agent 上下文应进入 cacheable system 前缀，动态块仍留给后续 volatile 插入。"""
 
-        assert not hasattr(agent_module, "_merge_runtime_context_into_cacheable_system_message")
-        assert not hasattr(agent_module, "_runtime_context_cache_prefix_text")
+        from core.infrastructure.llm_utils import extend_system_message_cacheable_prefix
+
+        system_message = {
+            "role": "system",
+            "content": [
+                {"type": "text", "text": "static prefix", "cache_control": {"type": "ephemeral"}},
+                {"type": "text", "text": "dynamic suffix"},
+            ],
+        }
+
+        updated, merged = extend_system_message_cacheable_prefix(
+            system_message,
+            ["## Agent Static Context\nstable"],
+        )
+
+        assert merged is True
+        assert updated["content"][0]["cache_control"] == {"type": "ephemeral"}
+        assert updated["content"][0]["text"] == "static prefix\n\n## Agent Static Context\nstable"
+        assert updated["content"][1] == {"type": "text", "text": "dynamic suffix"}
 
     def test_invoke_llm_returns_none_for_exhausted_llmerror(self, monkeypatch):
         calls = {"count": 0}
@@ -4273,7 +4290,7 @@ class TestRuntimeStateMemoryFlow:
         assert inserted[-1]["role"] == "user"
         assert "第二句" in inserted[-1]["content"]
 
-    def test_static_runtime_context_is_inserted_after_system_before_history(self):
+    def test_static_runtime_context_is_merged_into_cacheable_system_prefix(self):
         agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
         agent._pending_static_context_blocks = []
         agent._pending_runtime_context_blocks = []
@@ -4287,7 +4304,7 @@ class TestRuntimeStateMemoryFlow:
             AIMessage(content="第一轮回复"),
         ]
         messages, resumed = TurnOutcomeController.prepare_turn_messages(
-            system_prompt="new system",
+            system_prompt=("new static system", "<<<SYSTEM_PROMPT_SPLIT>>>", "new dynamic system"),
             user_prompt="第二句",
             effective_goal="第二句",
             active_turn_messages=history,
@@ -4296,24 +4313,27 @@ class TestRuntimeStateMemoryFlow:
             build_external_request_message=build_chat_user_message,
             allow_append_user_message=True,
         )
-        static_context = [SystemMessage(content=block) for block in agent._pending_static_context_blocks]
-        dynamic_context = [SystemMessage(content=block) for block in agent._pending_runtime_context_blocks]
-        inserted = TurnOutcomeController.insert_static_context_after_system(
-            messages=messages,
-            context_messages=static_context,
+        from core.infrastructure.llm_utils import extend_system_message_cacheable_prefix
+
+        messages[0], merged = extend_system_message_cacheable_prefix(
+            messages[0],
+            agent._pending_static_context_blocks,
         )
+        dynamic_context = [SystemMessage(content=block) for block in agent._pending_runtime_context_blocks]
         inserted = TurnOutcomeController.insert_volatile_context_before_current_user(
-            messages=inserted,
+            messages=messages,
             context_messages=dynamic_context,
         )
 
         assert resumed is True
+        assert merged is True
         assert isinstance(inserted[0], dict)
-        assert isinstance(inserted[1], SystemMessage)
-        assert inserted[1].content.startswith("## Agent Static Context")
-        assert inserted[2:4] == history[1:]
-        assert isinstance(inserted[4], SystemMessage)
-        assert inserted[4].content.startswith("## Agent Runtime Context")
+        assert inserted[0]["content"][0]["cache_control"] == {"type": "ephemeral"}
+        assert inserted[0]["content"][0]["text"].endswith("## Agent Static Context\nstable")
+        assert inserted[0]["content"][1]["text"] == "new dynamic system"
+        assert inserted[1:3] == history[1:]
+        assert isinstance(inserted[3], SystemMessage)
+        assert inserted[3].content.startswith("## Agent Runtime Context")
         assert inserted[-1]["role"] == "user"
         assert "第二句" in inserted[-1]["content"]
 

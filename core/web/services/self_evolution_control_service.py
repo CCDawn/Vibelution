@@ -1517,6 +1517,8 @@ def _run_self_evolution_turn(context: dict[str, Any]) -> None:
                     initial_prompt=prompt,
                     carryover=carryover if isinstance(carryover, dict) else None,
                     runtime_context=executor_context.context_block,
+                    static_runtime_context=executor_context.static_context_block,
+                    dynamic_runtime_context=executor_context.dynamic_context_block,
                     interrupt_checker=lambda: _current_run_control_reason(run_id),
                     runtime=turn_runtime_request,
                 )

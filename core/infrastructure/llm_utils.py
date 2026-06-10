@@ -146,6 +146,68 @@ def build_system_message(sp) -> Any:
     return {"role": "system", "content": content_blocks}
 
 
+def _normalized_static_context_text(static_context_blocks: Any) -> str:
+    if isinstance(static_context_blocks, str):
+        blocks = [static_context_blocks]
+    else:
+        try:
+            blocks = list(static_context_blocks or [])
+        except TypeError:
+            blocks = [static_context_blocks]
+    return "\n\n".join(str(block or "").strip() for block in blocks if str(block or "").strip())
+
+
+def _is_text_content_block(block: Any) -> bool:
+    if not isinstance(block, dict):
+        return False
+    block_type = str(block.get("type") or "text").strip().lower()
+    return block_type in {"", "text", "input_text"}
+
+
+def _append_to_text_content_block(block: dict[str, Any], text: str) -> dict[str, Any]:
+    updated = dict(block)
+    text_key = "text" if "text" in updated or "content" not in updated else "content"
+    existing = str(updated.get(text_key) or "").rstrip()
+    updated[text_key] = f"{existing}\n\n{text}" if existing else text
+    return updated
+
+
+def extend_system_message_cacheable_prefix(
+    message: Any,
+    static_context_blocks: Any,
+) -> tuple[Any, bool]:
+    """Append stable Agent context to an existing cacheable system prefix block.
+
+    The helper is intentionally conservative: it only merges into a structured
+    system message that already has a text block with cache_control. If the main
+    system message has no explicit cacheable boundary, callers should keep using
+    the older independent-system fallback instead of accidentally caching a
+    dynamic system suffix.
+    """
+
+    context_text = _normalized_static_context_text(static_context_blocks)
+    if not context_text:
+        return message, False
+    if not isinstance(message, dict):
+        return message, False
+    if str(message.get("role") or "").strip().lower() != "system":
+        return message, False
+    content = message.get("content")
+    if not isinstance(content, list):
+        return message, False
+    updated_blocks = [dict(block) if isinstance(block, dict) else block for block in content]
+    for index, block in enumerate(updated_blocks):
+        if not _is_text_content_block(block):
+            continue
+        if not block.get("cache_control"):
+            continue
+        updated_blocks[index] = _append_to_text_content_block(block, context_text)
+        updated_message = dict(message)
+        updated_message["content"] = updated_blocks
+        return updated_message, True
+    return message, False
+
+
 def parse_xml_tool_calls(content: str) -> list:
     """解析 LLM 响应中的 XML 格式工具调用。
 
