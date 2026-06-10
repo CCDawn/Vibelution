@@ -13,7 +13,7 @@ from typing import Any
 
 from config.public_config import build_effective_config, load_public_config
 from core.llm import LLMClient
-from core.web.services import data_processing_service, team_knowledge_service, team_service
+from core.web.services import chat_room_service, data_processing_service, team_knowledge_service, team_service
 from core.web.services.runtime_scene_service import record_runtime_scene_event
 
 
@@ -590,11 +590,26 @@ def start_research_stage_round(team_id: str, payload: dict[str, Any] | None = No
             )
             workflow["updatedAt"] = utc_now_iso()
             _write_json(_workflow_path(normalized_team_id), workflow)
-        round_payload["status"] = status
         round_payload["warnings"] = warnings
         round_payload["teamMemoryRecord"] = _stage_memory_record(round_payload, workflow)
         round_payload["teamMemoryRecordId"] = round_payload["teamMemoryRecord"]["recordId"]
-        round_payload["coordinationContract"] = _stage_coordination_contract(team, round_payload)
+        coordination_contract = _stage_coordination_contract(team, round_payload)
+        coordination_result = _try_start_stage_coordination_round(team, coordination_contract)
+        coordination_contract["startResult"] = coordination_result
+        round_payload["coordinationContract"] = coordination_contract
+        if not coordination_result.get("started"):
+            warnings.append(
+                {
+                    "code": "coordination_round_not_started",
+                    "severity": "warning",
+                    "message": _trim_text(coordination_result.get("reason"), max_length=240) or "Coordination round was not started.",
+                }
+            )
+            status = "needs_attention"
+        else:
+            round_payload["coordinationRoundId"] = str(coordination_result.get("roundId") or "")
+            round_payload["coordinationRoomId"] = str(coordination_result.get("roomId") or "")
+        round_payload["status"] = status
         now = utc_now_iso()
         round_payload["updatedAt"] = now
         store["rounds"] = rounds + [round_payload]
@@ -612,6 +627,10 @@ def start_research_stage_round(team_id: str, payload: dict[str, Any] | None = No
             "sourceRunCount": len(list(round_payload.get("sourceRunIds") or [])),
             "querySeedCount": len(list(round_payload.get("querySeeds") or [])),
             "warningCount": len(warnings),
+            "coordinationStarted": bool(coordination_result.get("started")),
+            "coordinationRoomId": str(coordination_result.get("roomId") or ""),
+            "coordinationRoundId": str(coordination_result.get("roundId") or ""),
+            "coordinationErrorType": str(coordination_result.get("errorType") or ""),
             "requestedByAgent": requested_by_agent,
         },
     )
@@ -637,8 +656,34 @@ def retry_research_stage_round_coordination(team_id: str, stage_round_id: str) -
         stage_round = _find_stage_round(rounds, normalized_round_id)
         if stage_round is None:
             raise TeamWorkflowOrchestrationError("Stage round not found.")
-        stage_round["coordinationContract"] = _stage_coordination_contract(team, stage_round)
-        stage_round["status"] = "running" if str(stage_round.get("stageType") or "") == "knowledge_collection" else "planning"
+        coordination_contract = _stage_coordination_contract(team, stage_round)
+        coordination_result = _try_start_stage_coordination_round(team, coordination_contract)
+        coordination_contract["startResult"] = coordination_result
+        stage_round["coordinationContract"] = coordination_contract
+        if coordination_result.get("started"):
+            stage_round["coordinationRoundId"] = str(coordination_result.get("roundId") or "")
+            stage_round["coordinationRoomId"] = str(coordination_result.get("roomId") or "")
+            stage_round["status"] = "running" if str(stage_round.get("stageType") or "") == "knowledge_collection" else "planning"
+            stage_round["warnings"] = [
+                item
+                for item in list(stage_round.get("warnings") or [])
+                if isinstance(item, dict) and str(item.get("code") or "") != "coordination_round_not_started"
+            ]
+        else:
+            stage_round["status"] = "needs_attention"
+            warnings = [
+                item
+                for item in list(stage_round.get("warnings") or [])
+                if isinstance(item, dict) and str(item.get("code") or "") != "coordination_round_not_started"
+            ]
+            warnings.append(
+                {
+                    "code": "coordination_round_not_started",
+                    "severity": "warning",
+                    "message": _trim_text(coordination_result.get("reason"), max_length=240) or "Coordination round was not started.",
+                }
+            )
+            stage_round["warnings"] = warnings
         stage_round["updatedAt"] = utc_now_iso()
         store["rounds"] = rounds
         store["updatedAt"] = stage_round["updatedAt"]
@@ -646,7 +691,15 @@ def retry_research_stage_round_coordination(team_id: str, stage_round_id: str) -
     _record_workflow_event(
         "research_stage_round.coordination_retry_recorded",
         normalized_team_id,
-        fields={"stageRoundId": normalized_round_id, "stageType": stage_round.get("stageType", "")},
+        fields={
+            "stageRoundId": normalized_round_id,
+            "stageType": stage_round.get("stageType", ""),
+            "status": stage_round.get("status", ""),
+            "coordinationStarted": bool(coordination_result.get("started")),
+            "coordinationRoomId": str(coordination_result.get("roomId") or ""),
+            "coordinationRoundId": str(coordination_result.get("roundId") or ""),
+            "coordinationErrorType": str(coordination_result.get("errorType") or ""),
+        },
     )
     return {
         "stageRound": stage_round,
@@ -4610,6 +4663,8 @@ def _stage_coordination_contract(team: dict[str, Any], stage_round: dict[str, An
     linked_room_id = _trim_text(team.get("linkedChatRoomId"), max_length=160)
     stage_type = str(stage_round.get("stageType") or "")
     topic = str(stage_round.get("topic") or "")
+    linked_room = chat_room_service.get_chat_room_compact(linked_room_id) if linked_room_id else None
+    room_mode = _trim_text((linked_room or {}).get("mode"), max_length=80) or "round_robin"
     return {
         "contractKind": "team_coordination_round_contract",
         "linkedChatRoomId": linked_room_id,
@@ -4617,15 +4672,48 @@ def _stage_coordination_contract(team: dict[str, Any], stage_round: dict[str, An
         "stageType": stage_type,
         "topic": f"{_stage_label(stage_type)}：{topic}",
         "purpose": _stage_coordination_purpose(stage_type),
-        "mode": "collaborative",
-        "autoStarted": False,
-        "expectedAction": "User may start or continue team discussion from the team communication view.",
+        "mode": room_mode,
+        "autoStarted": True,
+        "expectedAction": "Start a lightweight background team coordination round for this stage.",
         "config": {
             "source": "research_stage_launcher",
             "teamId": team.get("teamId", ""),
             "stageRoundId": stage_round.get("stageRoundId", ""),
             "sourceRunIds": list(stage_round.get("sourceRunIds") or []),
         },
+    }
+
+
+def _try_start_stage_coordination_round(team: dict[str, Any], contract: dict[str, Any]) -> dict[str, Any]:
+    linked_room_id = _trim_text(contract.get("linkedChatRoomId"), max_length=160)
+    if not linked_room_id:
+        return {
+            "started": False,
+            "reason": "Team has no linked chat room.",
+            "errorType": "missing_linked_chat_room",
+        }
+    try:
+        round_payload = chat_room_service.start_chat_room_round(
+            linked_room_id,
+            str(contract.get("topic") or ""),
+            mode=str(contract.get("mode") or ""),
+            purpose=str(contract.get("purpose") or ""),
+            config=contract.get("config") if isinstance(contract.get("config"), dict) else {},
+            background=True,
+            lightweight_response=True,
+        )
+    except Exception as exc:
+        return {
+            "started": False,
+            "roomId": linked_room_id,
+            "reason": _trim_text(str(exc), max_length=500),
+            "errorType": type(exc).__name__,
+        }
+    return {
+        "started": True,
+        "roomId": str(round_payload.get("roomId") or linked_room_id),
+        "roundId": str(round_payload.get("roundId") or round_payload.get("activeRoundId") or ""),
+        "status": str(round_payload.get("status") or ""),
     }
 
 
