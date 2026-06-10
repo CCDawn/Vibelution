@@ -1295,15 +1295,15 @@
                 </div>
 <div class="service-row">
                   <b>team_workflow_orchestration_service</b>
-                  <span>已落地：Team 级 workflowOrchestration、ResearchStageRound、CandidateStore、transfer request/decision、source-collection run 启动、DataSearchPlan/query seed 契约，以及 DataRecord -&gt; source_manifest 幂等导入桥。</span>
+                  <span>已落地：Team 级 workflowOrchestration、ResearchStageRound、CandidateStore、transfer request/decision、source-collection run 启动、DataSearchPlan/query seed 契约、DataRecord -&gt; source_manifest 幂等导入桥，以及 official_model_evidence 证据登记/status。</span>
                 </div>
 <div class="service-row">
                   <b>team_workflows API</b>
-                  <span>已落地：/api/teams/{team_id}/workflow-orchestration、stage-rounds/status、stage-rounds/start、stage-rounds/{stageRoundId}/coordination/retry、stage-rounds/{stageRoundId}/memory-record/retry、source-collection-runs（含 searchPlan/querySeeds/assignedQueries/resultWritebackContract）、candidates/source、data-processing/runs/{runId}/records/{recordId}/source-candidate、candidates/{candidate_id}/source-extraction、candidates/{candidate_id}/paper-note-draft、candidates、candidates/validation、candidate-graph、transfers、decide、knowledge-ingestion/status、coordination/status；coordination/status 返回 communicationBrief。</span>
+                  <span>已落地：/api/teams/{team_id}/workflow-orchestration、stage-rounds/status、stage-rounds/start、stage-rounds/{stageRoundId}/coordination/retry、stage-rounds/{stageRoundId}/memory-record/retry、source-collection-runs（含 searchPlan/querySeeds/assignedQueries/resultWritebackContract）、candidates/source、data-processing/runs/{runId}/records/{recordId}/source-candidate、candidates/{candidate_id}/source-extraction、candidates/{candidate_id}/paper-note-draft、candidates、candidates/validation、candidate-graph、transfers、decide、knowledge-ingestion/status、coordination/status、official-model-evidence/status、official-model-evidence；coordination/status 返回 communicationBrief。</span>
                 </div>
 <div class="service-row">
                   <b>TeamsRoute workflow workspace</b>
-                  <span>已落地入口：research-team 页面顶部显示科研流程二级索引条；当前节点内容区优先展示科研三阶段启动台，并按索引展示 workflow 当前阶段、candidateStore 摘要、coordination queue、communicationBrief、knowledge ingestion status、validationSummary、候选图谱、最近候选和团队沟通；组织画布仅在点击索引后作为附属视图显示。</span>
+                  <span>已落地入口：research-team 页面顶部显示科研流程二级索引条；当前节点内容区优先展示科研三阶段启动台，并按索引展示 workflow 当前阶段、candidateStore 摘要、模型调用证据链、coordination queue、communicationBrief、knowledge ingestion status、validationSummary、候选图谱、最近候选和团队沟通；组织画布仅在点击索引后作为附属视图显示。</span>
                 </div>
 <div class="service-row">
                   <b>local_research_worker_model</b>
@@ -1340,6 +1340,10 @@
 <div class="service-row">
                   <b>knowledge_ingestion_status</b>
                   <span>已新增只读状态聚合：输出 summary/stages/actionItems/candidateBreakdown/candidateGraphSummary/knowledgeBases/officialBoundary，并记录 knowledge_ingestion.status_viewed 运行事件计数。</span>
+                </div>
+<div class="service-row">
+                  <b>official_model_evidence_status</b>
+                  <span>已新增只读模型证据聚合：读取 official_model_evidence store 和 CandidateStore 派生模型输出，汇总 coverage/providerCounts/actionItems/officialBoundary，并记录 official_model_evidence.status_viewed。</span>
                 </div>
           </div>
         </div>
@@ -1629,14 +1633,24 @@
               <span>把通用 DataRecord 幂等导入为 source_manifest 候选，保留 run/record/quality/collection trace；不写正式知识。</span>
             </div>
 <div class="blueprint-row compact">
+              <b>模型调用证据链</b>
+              <strong>/api/teams/{teamId}/workflow-orchestration/official-model-evidence/status</strong>
+              <span>只读聚合 Qwen/百炼/本地模型调用证据覆盖；本地模型 invoke 自动登记 invocation_log，已有 local_model_output 可折算为候选输出证据；不写正式知识/RAG/图谱。</span>
+            </div>
+<div class="blueprint-row compact">
+              <b>模型证据登记</b>
+              <strong>/api/teams/{teamId}/workflow-orchestration/official-model-evidence</strong>
+              <span>允许登记 invocation_log、sample_output、screenshot、config 或 manual_attestation，要求绑定 taskType/workflowNode/candidateId 之一，用于审计而非自动入库。</span>
+            </div>
+<div class="blueprint-row compact">
               <b>服务文件</b>
               <strong>core/web/services/team_workflow_orchestration_service.py</strong>
-              <span>Team 编排、资料搜集批次启动、候选登记、DataRecord 导入、转移请求、协调 Agent 裁决和轻量运行事件日志。</span>
+              <span>Team 编排、资料搜集批次启动、候选登记、DataRecord 导入、模型证据登记、转移请求、协调 Agent 裁决和轻量运行事件日志。</span>
             </div>
 <div class="blueprint-row compact">
               <b>路由文件</b>
               <strong>core/web/routes/team_workflows.py</strong>
-              <span>提供工作流查询/确保、资料搜集批次启动、候选资料登记、DataRecord 导入、转移提交、转移裁决 API。</span>
+              <span>提供工作流查询/确保、资料搜集批次启动、候选资料登记、DataRecord 导入、模型证据状态/登记、转移提交、转移裁决 API。</span>
             </div>
 <div class="blueprint-row compact">
               <b>路由注册</b>
@@ -1659,6 +1673,11 @@
               <span>保存 source_manifest 等候选对象的最小元数据。</span>
             </div>
 <div class="blueprint-row compact">
+              <b>模型证据索引</b>
+              <strong>workspace/teams/&lt;teamId&gt;/official_model_evidence/index.json</strong>
+              <span>保存模型调用证据、artifact/log/screenshot 引用、覆盖节点和 officialBoundary；只做证据审计，不做正式知识写入。</span>
+            </div>
+<div class="blueprint-row compact">
               <b>候选查询</b>
               <strong>/api/teams/{teamId}/workflow-orchestration/candidates</strong>
               <span>按 candidateType、currentState、qualityStatus 查询 CandidateStore，并返回 validationSummary。</span>
@@ -1671,7 +1690,7 @@
 <div class="blueprint-row compact">
               <b>Team 前端入口</b>
               <strong>/teams?team=research-team</strong>
-              <span>读取 /workflow-orchestration、/stage-rounds/status、/candidates?limit=8、/knowledge-ingestion/status 和通用 data-processing run/status/assignment；左侧只做团队选择/创建，research-team 页面顶部提供科研流程二级索引条，当前节点内容区优先展示科研三阶段启动台，并按索引节点单页展示科研总览、资料搜集执行台、候选仓库、校验摘要、知识入库漏斗、actionItems 和 officialBoundary；非科研团队显示占位，不初始化 workflow。</span>
+              <span>读取 /workflow-orchestration、/stage-rounds/status、/official-model-evidence/status、/candidates?limit=8、/knowledge-ingestion/status 和通用 data-processing run/status/assignment；左侧只做团队选择/创建，research-team 页面顶部提供科研流程二级索引条，当前节点内容区优先展示科研三阶段启动台，并按索引节点单页展示科研总览、模型证据链、资料搜集执行台、候选仓库、校验摘要、知识入库漏斗、actionItems 和 officialBoundary；非科研团队显示占位，不初始化 workflow。</span>
             </div>
 <div class="blueprint-row compact">
               <b>资料搜集执行台</b>
@@ -1746,7 +1765,7 @@
 <div class="blueprint-row compact">
               <b>验证</b>
               <strong>tests/test_data_processing_service.py + tests/test_data_processing_routes.py + tests/test_team_workflow_orchestration_service.py + tests/test_team_workflow_routes.py + TeamsRoute.layout.test.ts</strong>
-              <span>覆盖通用数据处理首切、ResearchStageRound 三阶段启动/续做/新一轮、source-collection run 启动、DataSearchPlan/query seed 契约、DataRecord 导入 source_manifest、Teams 资料搜集执行台契约、主路径、非 ownerAgent 不能写最终状态、本地模型任务包、输出校验和知识入库状态总览。</span>
+              <span>覆盖通用数据处理首切、ResearchStageRound 三阶段启动/续做/新一轮、source-collection run 启动、DataSearchPlan/query seed 契约、DataRecord 导入 source_manifest、Teams 资料搜集执行台契约、主路径、非 ownerAgent 不能写最终状态、本地模型任务包、输出校验、知识入库状态总览和模型证据链前端契约。</span>
             </div>
       </div>
       <div class="agent-matrix" style="margin-top: 12px;">
@@ -1858,6 +1877,12 @@
               <span>stage-rounds/start 会尝试基于 linkedChatRoom 启动轻量后台团队协调 round，并把 roomId/roundId 写回 ResearchStageRound。</span>
               <span>如果群聊缺失、忙碌或没有可发言成员，不回滚阶段轮次，状态进入 needs_attention，并保留 coordination_round_not_started warning；可通过 coordination/retry 重试。</span>
             </div>
+<div class="blueprint-row">
+              <b>M6.9</b>
+              <strong>模型调用证据链</strong>
+              <span>新增 official-model-evidence status/register API 和 Teams 科研总览证据面板；本地 qwen3.5 invoke 会自动登记 invocation_log，已有 local_model_output 也会只读折算为候选输出证据。</span>
+              <span>团队可以看到 source_screening、paper_note、neuro_mechanism、mechanism_mapping、algorithm_hypothesis、review_prefilter 的 Qwen/百炼/本地模型证据覆盖；证据 store 不写正式 Team Knowledge/RAG/official graph。</span>
+            </div>
       </div>
       <div class="tag-row">
         <span class="tag">DataProcessingRun</span>
@@ -1875,6 +1900,7 @@
 <span class="tag">candidate_graph</span>
 <span class="tag">steward_ingestion_pack</span>
 <span class="tag">official_sync_record</span>
+<span class="tag">official_model_evidence</span>
       </div>
     </section>
   </div>

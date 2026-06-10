@@ -94,7 +94,7 @@
       </div>
       <div class="plan-grid">
         <article class="plan-card"><h2>本步操作</h2><p class="hint">用户在 ai科学研究团队右侧顶部点击“启动知识搜集”或“开启新一轮”，stage-rounds/start 创建或续用 ResearchStageRound，并复用 source-collection run 建立 DataProcessingRun；随后尝试基于 linkedChatRoom 启动轻量团队协调 round。系统基于 topic/goal/scope/querySeeds 生成 searchPlan、queries、roleAssignmentInputs 和 resultWritebackContract，让 data_discovery/source_acquisition/content_extraction/source_quality 等功能 Agent 领取带 assignedQueries 的 CollectionAssignment、提交 CollectionOutput。执行台支持手工回写一条 CollectionOutput，随后自动通过 Team workflow 导入桥把新 DataRecord 幂等转成 source_manifest 候选。对本地 PDF 运行 source-extraction，计算 sha256、生成 pageAnchors/excerpt，不改写原文，不自动混入联网资料。</p></article>
-        <article class="plan-card"><h2>本地研究模型用法</h2><p class="hint">本地 9B 模型适合做标题/摘要/片段初筛，输出 relevanceScore、topicTags、excludeReason，不直接决定正式纳入。</p></article>
+        <article class="plan-card"><h2>本地研究模型用法</h2><p class="hint">本地 9B 模型适合做标题/摘要/片段初筛，输出 relevanceScore、topicTags、excludeReason；调用证据进入 official_model_evidence 状态面板，不直接决定正式纳入。</p></article>
         <article class="plan-card"><h2>所需功能</h2><ul><li>ResearchStageRound 建立</li>
 <li>三阶段启动台一键进入知识搜集</li>
 <li>自动启动团队协调 round</li>
@@ -121,6 +121,7 @@
 <li>/api/data-processing/runs/{runId}/collection-assignments</li>
 <li>/api/data-processing/runs/{runId}/collection-assignments/{assignmentId}/outputs</li>
 <li>/api/teams/{teamId}/workflow-orchestration/data-processing/runs/{runId}/records/{recordId}/source-candidate</li>
+<li>/api/teams/{teamId}/workflow-orchestration/official-model-evidence/status</li>
 <li>research_knowledge_query_tool</li>
 <li>/api/teams/{teamId}/workflow-orchestration/candidates/{candidateId}/source-extraction</li></ul></article>
         <article class="plan-card"><h2>功能缺口</h2><p class="hint">科研三阶段启动台、资料搜集阶段轮次、资料搜集批次启动、DataSearchPlan/query seed 契约、通用资料搜集 assignment/output、Teams 执行台和 DataRecord 到 source_manifest 导入桥已接入；真实外部搜索执行器、长 PDF 自动分批、章节识别和非 PDF 资料解析仍待补。</p></article>

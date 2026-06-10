@@ -41,6 +41,15 @@ LOCAL_RESEARCH_MODEL_ROLE = "Local Research Worker Model"
 LOCAL_RESEARCH_CONTEXT_WINDOW = 32_000
 LOCAL_RESEARCH_EVIDENCE_TOKEN_TARGET = "18k-22k"
 LOCAL_RESEARCH_INVOKE_PROFILE_ID = "__challenge_cup_local_research_model"
+OFFICIAL_MODEL_EVIDENCE_KINDS = {"config", "invocation_log", "sample_output", "screenshot", "candidate_output", "manual_attestation"}
+OFFICIAL_MODEL_EVIDENCE_REQUIRED_TASKS = (
+    {"taskType": "source_screening", "workflowNode": "knowledge_collection", "label": "资料初筛"},
+    {"taskType": "paper_note_draft", "workflowNode": "paper_note", "label": "论文笔记草稿"},
+    {"taskType": "neuro_mechanism_extract", "workflowNode": "neuro_mechanism", "label": "神经机制抽取"},
+    {"taskType": "mechanism_mapping", "workflowNode": "mechanism_mapping", "label": "机制映射"},
+    {"taskType": "algorithm_hypothesis_draft", "workflowNode": "algorithm_hypothesis", "label": "算法假设"},
+    {"taskType": "review_prefilter", "workflowNode": "review_record", "label": "预审筛选"},
+)
 SOURCE_EXTRACTION_DEFAULT_MAX_PAGES = 24
 SOURCE_EXTRACTION_HARD_MAX_PAGES = 64
 SOURCE_EXTRACTION_DEFAULT_MAX_CHARS_PER_PAGE = 1800
@@ -1142,6 +1151,114 @@ def get_knowledge_ingestion_status(team_id: str) -> dict[str, Any]:
     return payload
 
 
+def get_official_model_evidence_status(team_id: str) -> dict[str, Any]:
+    """Return a read-only model-call evidence coverage view for the research workflow."""
+
+    normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
+    team_service.get_team(normalized_team_id)
+    with _WORKFLOW_LOCK:
+        workflow = _load_or_create_workflow(normalized_team_id)
+        evidence_store = _load_official_model_evidence_store(normalized_team_id)
+        candidate_store = _load_candidate_store(normalized_team_id)
+        stored_evidence = _official_model_evidence_entries(evidence_store)
+        candidate_evidence = _official_model_evidence_from_candidates(candidate_store, workflow)
+    evidence = _dedupe_official_model_evidence([*stored_evidence, *candidate_evidence])
+    coverage = _official_model_evidence_coverage(evidence)
+    missing_nodes = [item for item in coverage if item["status"] == "missing"]
+    provider_counts = _count_by_field(evidence, "modelProvider")
+    evidence_kind_counts = _count_by_field(evidence, "evidenceKind")
+    linked_candidate_count = len({str(item.get("candidateId") or "") for item in evidence if item.get("candidateId")})
+    linked_stage_count = len({str(item.get("stageRoundId") or "") for item in evidence if item.get("stageRoundId")})
+    summary = {
+        "evidenceCount": len(evidence),
+        "storedEvidenceCount": len(stored_evidence),
+        "candidateOutputEvidenceCount": len(candidate_evidence),
+        "requiredNodeCount": len(OFFICIAL_MODEL_EVIDENCE_REQUIRED_TASKS),
+        "coveredNodeCount": len(coverage) - len(missing_nodes),
+        "missingNodeCount": len(missing_nodes),
+        "qwenEvidenceCount": sum(
+            count for provider, count in provider_counts.items() if "qwen" in provider.lower() or provider.lower() in {"dashscope", "bailian"}
+        ),
+        "bailianEvidenceCount": sum(count for provider, count in provider_counts.items() if "bailian" in provider.lower() or "百炼" in provider),
+        "localEvidenceCount": sum(count for provider, count in provider_counts.items() if provider.lower().startswith("local")),
+        "linkedCandidateCount": linked_candidate_count,
+        "linkedStageRoundCount": linked_stage_count,
+    }
+    status = "empty" if not evidence else ("ready" if not missing_nodes else "needs_evidence")
+    action_items = _official_model_evidence_action_items(missing_nodes, summary)
+    payload = {
+        "schemaVersion": SCHEMA_VERSION,
+        "teamId": normalized_team_id,
+        "workflowId": workflow["workflowId"],
+        "workflowKind": workflow["workflowKind"],
+        "status": status,
+        "summary": {**summary, "actionItemCount": len(action_items)},
+        "coverage": coverage,
+        "providerCounts": provider_counts,
+        "evidenceKindCounts": evidence_kind_counts,
+        "recentEvidence": sorted(evidence, key=lambda item: str(item.get("createdAt") or ""), reverse=True)[:12],
+        "actionItems": action_items,
+        "officialBoundary": _official_model_evidence_boundary(),
+        "storage": {
+            "workflowPath": _relative_path(_workflow_path(normalized_team_id)),
+            "candidateStorePath": _relative_path(_candidate_store_path(normalized_team_id)),
+            "evidenceStorePath": _relative_path(_official_model_evidence_store_path(normalized_team_id)),
+        },
+        "updatedAt": utc_now_iso(),
+    }
+    _record_workflow_event(
+        "official_model_evidence.status_viewed",
+        normalized_team_id,
+        fields={
+            "workflowId": workflow["workflowId"],
+            "status": status,
+            "evidenceCount": summary["evidenceCount"],
+            "coveredNodeCount": summary["coveredNodeCount"],
+            "missingNodeCount": summary["missingNodeCount"],
+            "actionItemCount": len(action_items),
+        },
+    )
+    return payload
+
+
+def register_official_model_evidence(team_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Register a model-call evidence record without promoting it to formal knowledge."""
+
+    normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
+    team_service.get_team(normalized_team_id)
+    request_payload = dict(payload) if isinstance(payload, dict) else {}
+    with _WORKFLOW_LOCK:
+        workflow = _load_or_create_workflow(normalized_team_id)
+        candidate_store = _load_candidate_store(normalized_team_id)
+        evidence_store = _load_official_model_evidence_store(normalized_team_id)
+        evidence = _build_official_model_evidence_record(
+            normalized_team_id,
+            workflow,
+            candidate_store,
+            request_payload,
+        )
+        evidence_store.setdefault("evidence", []).append(evidence)
+        evidence_store["updatedAt"] = evidence["createdAt"]
+        _write_json(_official_model_evidence_store_path(normalized_team_id), evidence_store)
+    _record_workflow_event(
+        "official_model_evidence.recorded",
+        normalized_team_id,
+        fields={
+            "workflowId": workflow["workflowId"],
+            "evidenceId": evidence["evidenceId"],
+            "taskType": evidence["taskType"],
+            "workflowNode": evidence["workflowNode"],
+            "modelProvider": evidence["modelProvider"],
+            "evidenceKind": evidence["evidenceKind"],
+            "candidateId": evidence.get("candidateId", ""),
+        },
+    )
+    return {
+        "evidence": evidence,
+        "status": get_official_model_evidence_status(normalized_team_id),
+    }
+
+
 def get_team_workflow_coordination_status(team_id: str) -> dict[str, Any]:
     """Return a read-only coordination queue for the Challenge Cup research workflow."""
 
@@ -1665,6 +1782,39 @@ def invoke_local_research_model(team_id: str, payload: dict[str, Any], *, llm_cl
         "modelProfileId": LOCAL_RESEARCH_INVOKE_PROFILE_ID,
         "modelId": model_id,
     }
+    try:
+        evidence_response = register_official_model_evidence(
+            normalized_team_id,
+            {
+                "taskType": task["taskType"],
+                "workflowNode": task["workflowNode"],
+                "candidateId": record_response["candidate"]["candidateId"],
+                "taskId": task["taskId"],
+                "modelProvider": "local_qwen",
+                "modelId": model_id,
+                "modelName": task["model"]["name"],
+                "modelProfileId": LOCAL_RESEARCH_INVOKE_PROFILE_ID,
+                "evidenceKind": "invocation_log",
+                "logRef": "runtime_scene_event:local_model.invoke_recorded",
+                "promptSummary": f"{task['taskType']} task with {len(task['sourceRefs'])} sourceRefs, {len(task['evidenceRefs'])} evidenceRefs, {len(task['candidateRefs'])} candidateRefs.",
+                "outputSummary": record_response["candidate"].get("summary", ""),
+                "sourceRefs": task["sourceRefs"],
+                "evidenceRefs": task["evidenceRefs"],
+                "recordedByAgent": payload.get("createdByAgent") or "",
+                "metadata": {
+                    "contentChars": len(raw_content),
+                    "reasoningChars": len(reasoning_content),
+                    "jsonSource": parse_source,
+                    "autoRecordedFromInvoke": True,
+                },
+            },
+        )
+        record_response["modelEvidence"] = evidence_response["evidence"]
+    except TeamWorkflowOrchestrationError as exc:
+        record_response["modelEvidence"] = {
+            "status": "not_recorded",
+            "reason": _trim_text(str(exc), max_length=500),
+        }
     _record_workflow_event(
         "local_model.invoke_recorded",
         normalized_team_id,
@@ -4845,6 +4995,271 @@ def _stage_coordination_purpose(stage_type: str) -> str:
     return "围绕实验反馈、缺口、改动范围和下一轮目标进行团队规划，不自动进入下一轮。"
 
 
+def _load_official_model_evidence_store(team_id: str) -> dict[str, Any]:
+    path = _official_model_evidence_store_path(team_id)
+    store = _read_json(path)
+    if store.get("storeKind") == "official_model_evidence_store" and isinstance(store.get("evidence"), list):
+        return store
+    now = utc_now_iso()
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "storeKind": "official_model_evidence_store",
+        "teamId": team_id,
+        "evidence": [],
+        "createdAt": now,
+        "updatedAt": now,
+    }
+
+
+def _official_model_evidence_entries(store: dict[str, Any]) -> list[dict[str, Any]]:
+    return [item for item in list(store.get("evidence") or []) if isinstance(item, dict)]
+
+
+def _build_official_model_evidence_record(
+    team_id: str,
+    workflow: dict[str, Any],
+    candidate_store: dict[str, Any],
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    candidate_id = _trim_text(payload.get("candidateId"), max_length=128)
+    candidate = _find_candidate_by_id(candidate_store, candidate_id) if candidate_id else None
+    candidate_metadata = candidate.get("metadata") if isinstance((candidate or {}).get("metadata"), dict) else {}
+    candidate_output = candidate_metadata.get("output") if isinstance(candidate_metadata.get("output"), dict) else {}
+    task_type = _normalize_official_model_task_type(payload.get("taskType") or candidate_metadata.get("taskType"))
+    workflow_node = _trim_text(payload.get("workflowNode"), max_length=120)
+    if not workflow_node and task_type:
+        workflow_node = str((LOCAL_RESEARCH_TASKS.get(task_type) or {}).get("workflowNode") or "")
+    if not workflow_node and candidate:
+        workflow_node = _trim_text(candidate.get("currentWorkflowNode"), max_length=120)
+    if not task_type and workflow_node:
+        task_type = _official_model_task_type_from_node(workflow_node)
+    if not (task_type or workflow_node or candidate_id):
+        raise TeamWorkflowOrchestrationError("Model evidence requires taskType, workflowNode, or candidateId.")
+
+    model_id = _trim_text(payload.get("modelId") or candidate_metadata.get("modelId"), max_length=160) or LOCAL_RESEARCH_MODEL_ID
+    now = utc_now_iso()
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "evidenceId": _new_record_id("model-evidence"),
+        "teamId": team_id,
+        "workflowId": workflow["workflowId"],
+        "workflowKind": workflow["workflowKind"],
+        "taskType": task_type,
+        "workflowNode": workflow_node or str((LOCAL_RESEARCH_TASKS.get(task_type) or {}).get("workflowNode") or ""),
+        "candidateId": candidate_id,
+        "stageRoundId": _trim_text(payload.get("stageRoundId"), max_length=128),
+        "sourceRunId": _trim_text(payload.get("sourceRunId"), max_length=128),
+        "taskId": _trim_text(payload.get("taskId"), max_length=128),
+        "modelProvider": _infer_official_model_provider(payload.get("modelProvider") or payload.get("provider"), model_id),
+        "modelId": model_id,
+        "modelName": _trim_text(payload.get("modelName") or LOCAL_RESEARCH_MODEL_NAME, max_length=240),
+        "modelProfileId": _trim_text(payload.get("modelProfileId"), max_length=160),
+        "evidenceKind": _normalize_official_model_evidence_kind(payload.get("evidenceKind")),
+        "artifactPath": _trim_text(payload.get("artifactPath"), max_length=500),
+        "screenshotPath": _trim_text(payload.get("screenshotPath"), max_length=500),
+        "logRef": _trim_text(payload.get("logRef"), max_length=500),
+        "promptSummary": _trim_text(payload.get("promptSummary"), max_length=1200),
+        "outputSummary": _trim_text(payload.get("outputSummary") or candidate_output.get("nextAction") or (candidate or {}).get("summary"), max_length=1200),
+        "sourceRefs": _normalize_ref_list(payload.get("sourceRefs") or (candidate or {}).get("sourceRefs"), max_items=32),
+        "evidenceRefs": _normalize_ref_list(payload.get("evidenceRefs") or (candidate or {}).get("evidenceRefs"), max_items=32),
+        "status": _trim_text(payload.get("status"), max_length=80) or "registered",
+        "recordedByAgent": _trim_text(payload.get("recordedByAgent") or payload.get("createdByAgent"), max_length=160),
+        "metadata": _normalize_metadata(payload.get("metadata")),
+        "officialBoundary": _official_model_evidence_boundary(),
+        "createdAt": now,
+        "updatedAt": now,
+    }
+
+
+def _official_model_evidence_from_candidates(candidate_store: dict[str, Any], workflow: dict[str, Any]) -> list[dict[str, Any]]:
+    evidence: list[dict[str, Any]] = []
+    for candidate in [item for item in list(candidate_store.get("candidates") or []) if isinstance(item, dict)]:
+        metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {}
+        task_type = _normalize_official_model_task_type(metadata.get("taskType"))
+        model_id = _trim_text(metadata.get("modelId"), max_length=160)
+        team_id = str(candidate.get("teamId") or "")
+        if not task_type or not model_id or not team_id:
+            continue
+        evidence.append(
+            {
+                "schemaVersion": SCHEMA_VERSION,
+                "evidenceId": f"candidate-output:{candidate.get('candidateId')}",
+                "teamId": team_id,
+                "workflowId": workflow["workflowId"],
+                "workflowKind": workflow["workflowKind"],
+                "taskType": task_type,
+                "workflowNode": str(candidate.get("currentWorkflowNode") or (LOCAL_RESEARCH_TASKS.get(task_type) or {}).get("workflowNode") or ""),
+                "candidateId": str(candidate.get("candidateId") or ""),
+                "stageRoundId": "",
+                "sourceRunId": "",
+                "taskId": "",
+                "modelProvider": _infer_official_model_provider(metadata.get("modelProvider"), model_id),
+                "modelId": model_id,
+                "modelName": LOCAL_RESEARCH_MODEL_NAME,
+                "modelProfileId": "",
+                "evidenceKind": "candidate_output",
+                "artifactPath": "",
+                "screenshotPath": "",
+                "logRef": _relative_path(_candidate_store_path(team_id)),
+                "promptSummary": "",
+                "outputSummary": _trim_text(candidate.get("summary"), max_length=1200),
+                "sourceRefs": _normalize_ref_list(candidate.get("sourceRefs"), max_items=32),
+                "evidenceRefs": _normalize_ref_list(candidate.get("evidenceRefs"), max_items=32),
+                "status": "derived_from_candidate_store",
+                "recordedByAgent": str(candidate.get("createdByAgent") or ""),
+                "metadata": {"derived": True},
+                "officialBoundary": _official_model_evidence_boundary(),
+                "createdAt": str(candidate.get("createdAt") or ""),
+                "updatedAt": str(candidate.get("updatedAt") or candidate.get("createdAt") or ""),
+            }
+        )
+    return evidence
+
+
+def _dedupe_official_model_evidence(evidence: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    seen: set[str] = set()
+    result: list[dict[str, Any]] = []
+    for item in evidence:
+        key = str(item.get("evidenceId") or "")
+        if not key:
+            key = "|".join(
+                [
+                    str(item.get("taskType") or ""),
+                    str(item.get("workflowNode") or ""),
+                    str(item.get("candidateId") or ""),
+                    str(item.get("modelId") or ""),
+                    str(item.get("evidenceKind") or ""),
+                ]
+            )
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(item)
+    return result
+
+
+def _official_model_evidence_coverage(evidence: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    coverage: list[dict[str, Any]] = []
+    for spec in OFFICIAL_MODEL_EVIDENCE_REQUIRED_TASKS:
+        task_type = str(spec["taskType"])
+        workflow_node = str(spec["workflowNode"])
+        matches = [
+            item
+            for item in evidence
+            if str(item.get("taskType") or "") == task_type or str(item.get("workflowNode") or "") == workflow_node
+        ]
+        latest_evidence_id = ""
+        if matches:
+            latest_evidence_id = str(sorted(matches, key=lambda item: str(item.get("createdAt") or ""), reverse=True)[0].get("evidenceId") or "")
+        coverage.append(
+            {
+                "taskType": task_type,
+                "workflowNode": workflow_node,
+                "label": spec["label"],
+                "status": "covered" if matches else "missing",
+                "evidenceCount": len(matches),
+                "providers": _count_by_field(matches, "modelProvider"),
+                "latestEvidenceId": latest_evidence_id,
+            }
+        )
+    return coverage
+
+
+def _official_model_evidence_action_items(missing_nodes: list[dict[str, Any]], summary: dict[str, int]) -> list[dict[str, Any]]:
+    action_items = [
+        {
+            "code": "model_evidence_missing_node",
+            "severity": "needs_evidence",
+            "message": f"{item['label']} 缺少 Qwen/百炼/本地模型调用证据。",
+            "nextAction": "登记 invocation_log、sample_output 或截图证据；不要直接写正式知识。",
+            "workflowNode": item["workflowNode"],
+            "taskType": item["taskType"],
+        }
+        for item in missing_nodes
+    ]
+    if summary.get("storedEvidenceCount", 0) == 0 and summary.get("candidateOutputEvidenceCount", 0) > 0:
+        action_items.append(
+            {
+                "code": "model_evidence_only_derived",
+                "severity": "pending",
+                "message": "当前只有 CandidateStore 派生输出证据，还缺真实调用日志、配置或百炼截图证据。",
+                "nextAction": "把模型调用日志、百炼任务截图或配置证明登记到 official_model_evidence store。",
+                "workflowNode": "knowledge_collection",
+                "taskType": "source_screening",
+            }
+        )
+    return action_items[:12]
+
+
+def _official_model_evidence_boundary() -> dict[str, bool | str]:
+    return {
+        "candidateOnly": True,
+        "writesFormalKnowledge": False,
+        "writesRag": False,
+        "writesOfficialGraph": False,
+        "requiresStewardApproval": True,
+        "boundary": "model_evidence_only_not_formal_knowledge",
+    }
+
+
+def _normalize_official_model_task_type(value: Any) -> str:
+    normalized = _trim_text(value, max_length=80)
+    if not normalized:
+        return ""
+    if normalized in LOCAL_RESEARCH_TASKS:
+        return normalized
+    aliases = {
+        "paper_note": "paper_note_draft",
+        "neuro_mechanism": "neuro_mechanism_extract",
+        "algorithm_hypothesis": "algorithm_hypothesis_draft",
+        "review_record": "review_prefilter",
+        "steward_pack": "steward_pack_draft",
+    }
+    return aliases.get(normalized, normalized)
+
+
+def _official_model_task_type_from_node(value: Any) -> str:
+    normalized = _trim_text(value, max_length=120)
+    for task_type, spec in LOCAL_RESEARCH_TASKS.items():
+        if str(spec.get("workflowNode") or "") == normalized:
+            return task_type
+    return _normalize_official_model_task_type(normalized)
+
+
+def _normalize_official_model_evidence_kind(value: Any) -> str:
+    normalized = _trim_text(value, max_length=80)
+    return normalized if normalized in OFFICIAL_MODEL_EVIDENCE_KINDS else "invocation_log"
+
+
+def _infer_official_model_provider(value: Any, model_id: str) -> str:
+    explicit = _trim_text(value, max_length=120)
+    if explicit:
+        return explicit
+    key = model_id.lower()
+    if model_id == LOCAL_RESEARCH_MODEL_ID or "qwen" in key:
+        return "local_qwen"
+    if "bailian" in key or "百炼" in model_id:
+        return "bailian"
+    if "dashscope" in key:
+        return "dashscope"
+    return "model_runtime"
+
+
+def _find_candidate_by_id(candidate_store: dict[str, Any], candidate_id: str) -> dict[str, Any] | None:
+    for candidate in [item for item in list(candidate_store.get("candidates") or []) if isinstance(item, dict)]:
+        if str(candidate.get("candidateId") or "") == candidate_id:
+            return candidate
+    return None
+
+
+def _count_by_field(items: list[dict[str, Any]], field: str) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for item in items:
+        key = _trim_text(item.get(field), max_length=120) or "unknown"
+        counts[key] = counts.get(key, 0) + 1
+    return dict(sorted(counts.items()))
+
+
 def _local_research_llm_client(model_id: str, *, llm_client_factory: Any = None) -> Any:
     normalized_model_id = _trim_text(model_id, max_length=160) or LOCAL_RESEARCH_MODEL_ID
     public_config = load_public_config()
@@ -5071,6 +5486,10 @@ def _transfer_records_path(team_id: str) -> Path:
 
 def _stage_round_store_path(team_id: str) -> Path:
     return _team_workflow_root(team_id) / "research_stage_rounds" / "index.json"
+
+
+def _official_model_evidence_store_path(team_id: str) -> Path:
+    return _team_workflow_root(team_id) / "official_model_evidence" / "index.json"
 
 
 def _team_workflow_root(team_id: str) -> Path:
