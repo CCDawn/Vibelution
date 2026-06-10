@@ -4322,6 +4322,12 @@ def test_update_session_agent_id_persists_as_primary_binding(tmp_path, monkeypat
     assert rebound_agent is not None
     assert rebound_agent["directSessionId"] == "session-live"
     assert rebound_agent["llmBindings"]["dialogue"]["modelId"] == "model-backup"
+    directory_state = agent_directory_service.load_state()
+    assert [
+        item["agentId"]
+        for item in directory_state.get("agents", [])
+        if item.get("status") == "active" and item.get("directSessionId") == "session-live"
+    ] == [agent["agentId"]]
 
 
 def test_session_agent_templates_endpoint_removed():
@@ -5107,6 +5113,13 @@ def test_submit_session_message_runs_turn_and_persists_reply(tmp_path, monkeypat
     (tmp_path / "core" / "web" / "services" / "session_service.py").write_text("pass\n", encoding="utf-8")
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    agent_directory_service.ensure_agent_for_session(
+        "session-live",
+        display_name="真实会话",
+        llm_bindings=session_service.default_session_llm_bindings(),
+        prompt_template_id="prompt-chat-default",
+    )
     recorded_scene_events: list[tuple[tuple, dict]] = []
     monkeypatch.setattr(
         session_service,
