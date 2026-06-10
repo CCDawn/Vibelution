@@ -46,6 +46,97 @@ def _file_signature(path: Path) -> tuple[str, int, int] | None:
     return (str(Path(path)), int(stat.st_mtime_ns), int(stat.st_size))
 
 
+def _context_hash(value: str) -> str:
+    text = str(value or "")
+    if not text:
+        return ""
+    return hashlib.sha256(text.encode("utf-8", errors="ignore")).hexdigest()[:16]
+
+
+def _context_segment(
+    key: str,
+    block: str,
+    *,
+    placement: str,
+    stability: str,
+    cache_hit: bool | None = None,
+) -> dict[str, Any] | None:
+    text = str(block or "").strip()
+    if not text:
+        return None
+    return asdict(
+        AgentContextSegment(
+            key=str(key or "").strip(),
+            block=text,
+            placement=str(placement or "").strip(),
+            stability=str(stability or "").strip(),
+            chars=len(text),
+            hash=_context_hash(text),
+            cache_hit=cache_hit,
+        )
+    )
+
+
+def _join_context_segments(segments: list[dict[str, Any]], placement: str) -> str:
+    normalized_placement = str(placement or "").strip()
+    return "\n\n".join(
+        str(segment.get("block") or "").strip()
+        for segment in list(segments or [])
+        if str(segment.get("placement") or "").strip() == normalized_placement
+        and str(segment.get("block") or "").strip()
+    ).strip()
+
+
+def _join_context_blocks(*blocks: str) -> str:
+    return "\n\n".join(str(block or "").strip() for block in blocks if str(block or "").strip()).strip()
+
+
+def _split_agent_runtime_context_block(block: str) -> tuple[str, str]:
+    text = str(block or "").strip()
+    if not text:
+        return "", ""
+    lines = text.splitlines()
+    dynamic_markers = ("GroupContextEvents:", "AgentInboxMessages:")
+    dynamic_start: int | None = None
+    for index, line in enumerate(lines):
+        stripped = str(line or "").strip()
+        if any(stripped.startswith(marker) for marker in dynamic_markers):
+            dynamic_start = index
+            break
+    if dynamic_start is None:
+        return text, ""
+    return "\n".join(lines[:dynamic_start]).strip(), "\n".join(lines[dynamic_start:]).strip()
+
+
+def _context_segment_log_summary(segments: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    summaries: list[dict[str, Any]] = []
+    for segment in list(segments or []):
+        if not isinstance(segment, dict):
+            continue
+        summary = {
+            "key": str(segment.get("key") or "").strip(),
+            "placement": str(segment.get("placement") or "").strip(),
+            "stability": str(segment.get("stability") or "").strip(),
+            "chars": _safe_int(segment.get("chars")),
+            "hash": str(segment.get("hash") or "").strip(),
+        }
+        if segment.get("cache_hit") is not None:
+            summary["cacheHit"] = bool(segment.get("cache_hit"))
+        summaries.append(summary)
+    return summaries
+
+
+@dataclass(frozen=True)
+class AgentContextSegment:
+    key: str
+    block: str
+    placement: str
+    stability: str
+    chars: int = 0
+    hash: str = ""
+    cache_hit: bool | None = None
+
+
 @dataclass(frozen=True)
 class AgentContextPacket:
     agent_id: str
@@ -61,6 +152,9 @@ class AgentContextPacket:
     tool_policy: dict[str, Any] = field(default_factory=dict)
     group_context_events: list[dict[str, Any]] = field(default_factory=list)
     inbox_messages: list[dict[str, Any]] = field(default_factory=list)
+    static_context_block: str = ""
+    dynamic_context_block: str = ""
+    context_segments: list[dict[str, Any]] = field(default_factory=list)
     context_block: str = ""
     timings: dict[str, Any] = field(default_factory=dict)
 
@@ -133,8 +227,9 @@ def build_agent_context(agent_id: str, *, session_id: str = "", run_id: str = ""
     )
     timings["inboxMessagesMs"] = _elapsed_ms(stage_started_at)
     stage_started_at = _perf_counter()
-    runtime_context_block = agent_directory_service.build_agent_runtime_context_block(normalized_agent_id, limit=limit)
+    raw_runtime_context_block = agent_directory_service.build_agent_runtime_context_block(normalized_agent_id, limit=limit)
     timings["runtimeContextBlockMs"] = _elapsed_ms(stage_started_at)
+    agent_static_context_block, agent_dynamic_context_block = _split_agent_runtime_context_block(raw_runtime_context_block)
     research_org_context_block = ""
     if _agent_needs_research_organization_context(agent):
         stage_started_at = _perf_counter()
@@ -175,23 +270,63 @@ def build_agent_context(agent_id: str, *, session_id: str = "", run_id: str = ""
         run_id=str(run_id or "").strip(),
     )
     timings["projectAgentRegistryContextMs"] = _elapsed_ms(stage_started_at)
-    runtime_context_block = "\n\n".join(
-        part
-        for part in (
-            runtime_context_block,
-            research_org_context_block,
-            prompt_context_block,
-            project_rules_context_block,
-            project_agent_registry_context_block,
+    context_segments = [
+        segment
+        for segment in (
+            _context_segment(
+                "agent_runtime",
+                agent_static_context_block,
+                placement="cache_prefix",
+                stability="agent_static",
+            ),
+            _context_segment(
+                "research_organization",
+                research_org_context_block,
+                placement="cache_prefix",
+                stability="project_static",
+                cache_hit=timings.get("researchOrgContextCacheHit") if "researchOrgContextCacheHit" in timings else None,
+            ),
+            _context_segment(
+                "prompt_template",
+                prompt_context_block,
+                placement="cache_prefix",
+                stability="agent_static",
+            ),
+            _context_segment(
+                "project_rules",
+                project_rules_context_block,
+                placement="cache_prefix",
+                stability="project_static",
+            ),
+            _context_segment(
+                "project_agent_registry",
+                project_agent_registry_context_block,
+                placement="cache_prefix",
+                stability="session_static",
+            ),
+            _context_segment(
+                "agent_messages",
+                agent_dynamic_context_block,
+                placement="volatile_turn",
+                stability="turn_dynamic",
+            ),
         )
-        if str(part or "").strip()
-    )
+        if segment is not None
+    ]
+    static_context_block = _join_context_segments(context_segments, "cache_prefix")
+    dynamic_context_block = _join_context_segments(context_segments, "volatile_turn")
+    runtime_context_block = _join_context_blocks(static_context_block, dynamic_context_block)
     stage_started_at = _perf_counter()
     memory_policy = agent_directory_service.resolve_memory_policy_for_agent(normalized_agent_id)
     timings["memoryPolicyMs"] = _elapsed_ms(stage_started_at)
     stage_started_at = _perf_counter()
     tool_policy = agent_directory_service.resolve_tool_policy_for_agent(normalized_agent_id)
     timings["toolPolicyMs"] = _elapsed_ms(stage_started_at)
+    timings["staticContextChars"] = len(static_context_block)
+    timings["dynamicContextChars"] = len(dynamic_context_block)
+    timings["staticContextHash"] = _context_hash(static_context_block)
+    timings["dynamicContextHash"] = _context_hash(dynamic_context_block)
+    timings["contextSegmentCount"] = len(context_segments)
     timings["totalDurationMs"] = _elapsed_ms(context_started_at)
     packet = AgentContextPacket(
         agent_id=normalized_agent_id,
@@ -207,6 +342,9 @@ def build_agent_context(agent_id: str, *, session_id: str = "", run_id: str = ""
         tool_policy=tool_policy,
         group_context_events=group_events,
         inbox_messages=inbox_messages,
+        static_context_block=static_context_block,
+        dynamic_context_block=dynamic_context_block,
+        context_segments=context_segments,
         context_block=runtime_context_block,
         timings=dict(timings),
     )
@@ -228,6 +366,12 @@ def build_agent_context(agent_id: str, *, session_id: str = "", run_id: str = ""
             "researchOrgContextCacheAgeMs": timings.get("researchOrgContextCacheAgeMs", 0),
             "projectRulesContextIncluded": bool(project_rules_context_block),
             "projectAgentRegistryContextIncluded": bool(project_agent_registry_context_block),
+            "staticContextChars": timings["staticContextChars"],
+            "dynamicContextChars": timings["dynamicContextChars"],
+            "staticContextHash": timings["staticContextHash"],
+            "dynamicContextHash": timings["dynamicContextHash"],
+            "contextSegmentCount": timings["contextSegmentCount"],
+            "contextSegments": _context_segment_log_summary(context_segments),
             "source": "ContextEngine",
         },
     )
