@@ -13,7 +13,7 @@ from typing import Any
 
 from config.public_config import build_effective_config, load_public_config
 from core.llm import LLMClient
-from core.web.services import data_processing_service, team_knowledge_service, team_service
+from core.web.services import chat_room_service, data_processing_service, team_knowledge_service, team_service
 from core.web.services.runtime_scene_service import record_runtime_scene_event
 
 
@@ -56,6 +56,31 @@ SOURCE_COLLECTION_DEFAULT_SEARCH_LANGUAGES = ("en", "zh")
 SOURCE_COLLECTION_DEFAULT_SOURCE_TYPES = ("paper", "review", "dataset", "preprint")
 SOURCE_COLLECTION_DEFAULT_MAX_RESULTS_PER_QUERY = 10
 SOURCE_COLLECTION_MAX_QUERIES = 48
+RESEARCH_STAGE_TYPES = ("knowledge_collection", "experiment", "iteration")
+RESEARCH_STAGE_ACTIVE_STATUSES = {"running", "planning", "needs_attention"}
+RESEARCH_STAGE_DEFAULTS = {
+    "knowledge_collection": {
+        "title": "Knowledge collection round",
+        "currentNode": "knowledge_collection",
+        "primaryActionZh": "启动知识搜集",
+        "continueActionZh": "继续知识搜集",
+        "newRoundActionZh": "开启新一轮知识搜集",
+    },
+    "experiment": {
+        "title": "Experiment planning round",
+        "currentNode": "experiment_planning",
+        "primaryActionZh": "启动实验规划",
+        "continueActionZh": "继续实验规划",
+        "newRoundActionZh": "重新规划实验",
+    },
+    "iteration": {
+        "title": "Iteration planning round",
+        "currentNode": "iteration_planning",
+        "primaryActionZh": "启动迭代",
+        "continueActionZh": "继续迭代",
+        "newRoundActionZh": "开启新一轮迭代",
+    },
+}
 LOCAL_RESEARCH_OUTPUT_FIELDS = (
     "candidateType",
     "sourceRefs",
@@ -448,6 +473,267 @@ def start_source_collection_run(team_id: str, payload: dict[str, Any] | None = N
             "writesRag": False,
             "writesKnowledgeGraph": False,
         },
+    }
+
+
+def get_research_stage_round_status(team_id: str) -> dict[str, Any]:
+    normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
+    team = team_service.get_team(normalized_team_id)
+    with _WORKFLOW_LOCK:
+        workflow = _load_or_create_workflow(normalized_team_id)
+        store = _load_stage_round_store(normalized_team_id)
+    rounds = _stage_rounds(store)
+    phases = [
+        _stage_phase_status(
+            normalized_team_id,
+            stage_type,
+            rounds,
+            workflow=workflow,
+            team=team,
+        )
+        for stage_type in RESEARCH_STAGE_TYPES
+    ]
+    active_rounds = [item for item in rounds if str(item.get("status") or "") in RESEARCH_STAGE_ACTIVE_STATUSES]
+    latest_round = _latest_stage_round(rounds)
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "teamId": normalized_team_id,
+        "status": "active" if active_rounds else "idle",
+        "currentStage": _current_research_stage(phases, workflow),
+        "phases": phases,
+        "activeRounds": active_rounds,
+        "latestRound": latest_round,
+        "roundCount": len(rounds),
+        "storagePath": _relative_path(_stage_round_store_path(normalized_team_id)),
+        "boundaries": _research_stage_boundaries(),
+        "updatedAt": str(store.get("updatedAt") or ""),
+    }
+
+
+def start_research_stage_round(team_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
+    team = team_service.get_team(normalized_team_id)
+    request_payload = dict(payload) if isinstance(payload, dict) else {}
+    stage_type = _normalize_stage_type(request_payload.get("stageType"))
+    start_mode = _normalize_stage_start_mode(request_payload.get("mode") or request_payload.get("startMode"))
+    requested_by_agent = _trim_text(request_payload.get("requestedByAgent"), max_length=160) or _source_collection_owner_agent_id(team, request_payload)
+    with _WORKFLOW_LOCK:
+        workflow = _load_or_create_workflow(normalized_team_id)
+        store = _load_stage_round_store(normalized_team_id)
+        rounds = _stage_rounds(store)
+        active_round = _active_stage_round(rounds, stage_type)
+        if active_round and start_mode != "new_round":
+            _record_workflow_event(
+                "research_stage_round.continued",
+                normalized_team_id,
+                fields={
+                    "workflowId": workflow["workflowId"],
+                    "stageRoundId": active_round.get("stageRoundId", ""),
+                    "stageType": stage_type,
+                    "status": active_round.get("status", ""),
+                    "sourceRunCount": len(list(active_round.get("sourceRunIds") or [])),
+                },
+            )
+            status_payload = _stage_phase_status(normalized_team_id, stage_type, rounds, workflow=workflow, team=team)
+            return {
+                "created": False,
+                "stageRound": active_round,
+                "phase": status_payload,
+                "workflow": _workflow_to_api(normalized_team_id, workflow, _load_candidate_store(normalized_team_id)),
+                "status": get_research_stage_round_status(normalized_team_id),
+                "nextActions": _stage_next_actions(stage_type, reused=True),
+                "boundaries": _research_stage_boundaries(),
+            }
+        previous_round = _latest_stage_round([item for item in rounds if str(item.get("stageType") or "") == stage_type])
+        round_payload = _build_stage_round(
+            normalized_team_id,
+            stage_type,
+            request_payload,
+            rounds,
+            previous_round=previous_round,
+            requested_by_agent=requested_by_agent,
+            team=team,
+        )
+        result_payload: dict[str, Any] = {}
+        status = "running"
+        warnings: list[dict[str, str]] = []
+        if stage_type == "knowledge_collection":
+            source_payload = _stage_source_collection_payload(round_payload, request_payload, team)
+            source_result = start_source_collection_run(normalized_team_id, source_payload)
+            result_payload["sourceCollectionRun"] = source_result
+            result_payload["run"] = source_result["run"]
+            result_payload["searchPlan"] = source_result["searchPlan"]
+            result_payload["assignments"] = source_result["assignments"]
+            round_payload["sourceRunIds"] = [source_result["run"]["runId"]]
+            round_payload["dataSearchPlanRef"] = _source_collection_search_plan_ref(source_result["searchPlan"])
+            round_payload["assignmentIds"] = [str(item.get("assignmentId") or "") for item in source_result["assignments"] if item.get("assignmentId")]
+            round_payload["agentRoleAssignments"] = [
+                {
+                    "agentRole": str(item.get("agentRole") or ""),
+                    "agentId": str(item.get("agentId") or ""),
+                    "assignmentId": str(item.get("assignmentId") or ""),
+                }
+                for item in source_result["assignments"]
+            ]
+            warnings.extend(_stage_agent_binding_warnings(source_result["assignments"]))
+            round_payload["workflowItemRef"] = {"candidateId": source_result["run"]["runId"], "currentNode": "knowledge_collection"}
+            workflow = _load_or_create_workflow(normalized_team_id)
+        else:
+            status = "planning"
+            round_payload["planningContract"] = _stage_planning_contract(stage_type, round_payload)
+            workflow["activeWorkflowItems"] = _upsert_active_item(
+                workflow.get("activeWorkflowItems"),
+                candidate_id=round_payload["stageRoundId"],
+                current_node=RESEARCH_STAGE_DEFAULTS[stage_type]["currentNode"],
+                status=f"{stage_type}_planning_started",
+                transfer_id="",
+            )
+            workflow["updatedAt"] = utc_now_iso()
+            _write_json(_workflow_path(normalized_team_id), workflow)
+        round_payload["warnings"] = warnings
+        round_payload["teamMemoryRecord"] = _stage_memory_record(round_payload, workflow)
+        round_payload["teamMemoryRecordId"] = round_payload["teamMemoryRecord"]["recordId"]
+        coordination_contract = _stage_coordination_contract(team, round_payload)
+        coordination_result = _try_start_stage_coordination_round(team, coordination_contract)
+        coordination_contract["startResult"] = coordination_result
+        round_payload["coordinationContract"] = coordination_contract
+        if not coordination_result.get("started"):
+            warnings.append(
+                {
+                    "code": "coordination_round_not_started",
+                    "severity": "warning",
+                    "message": _trim_text(coordination_result.get("reason"), max_length=240) or "Coordination round was not started.",
+                }
+            )
+            status = "needs_attention"
+        else:
+            round_payload["coordinationRoundId"] = str(coordination_result.get("roundId") or "")
+            round_payload["coordinationRoomId"] = str(coordination_result.get("roomId") or "")
+        round_payload["status"] = status
+        now = utc_now_iso()
+        round_payload["updatedAt"] = now
+        store["rounds"] = rounds + [round_payload]
+        store["updatedAt"] = now
+        _write_json(_stage_round_store_path(normalized_team_id), store)
+        candidate_store = _load_candidate_store(normalized_team_id)
+    _record_workflow_event(
+        "research_stage_round.started",
+        normalized_team_id,
+        fields={
+            "workflowId": workflow["workflowId"],
+            "stageRoundId": round_payload["stageRoundId"],
+            "stageType": stage_type,
+            "status": round_payload["status"],
+            "sourceRunCount": len(list(round_payload.get("sourceRunIds") or [])),
+            "querySeedCount": len(list(round_payload.get("querySeeds") or [])),
+            "warningCount": len(warnings),
+            "coordinationStarted": bool(coordination_result.get("started")),
+            "coordinationRoomId": str(coordination_result.get("roomId") or ""),
+            "coordinationRoundId": str(coordination_result.get("roundId") or ""),
+            "coordinationErrorType": str(coordination_result.get("errorType") or ""),
+            "requestedByAgent": requested_by_agent,
+        },
+    )
+    return {
+        "created": True,
+        "stageRound": round_payload,
+        "phase": _stage_phase_status(normalized_team_id, stage_type, store["rounds"], workflow=workflow, team=team),
+        "workflow": _workflow_to_api(normalized_team_id, workflow, candidate_store),
+        "status": get_research_stage_round_status(normalized_team_id),
+        "nextActions": _stage_next_actions(stage_type, reused=False),
+        "boundaries": _research_stage_boundaries(),
+        **result_payload,
+    }
+
+
+def retry_research_stage_round_coordination(team_id: str, stage_round_id: str) -> dict[str, Any]:
+    normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
+    normalized_round_id = _normalize_required_id(stage_round_id, "Stage round id is required.")
+    team = team_service.get_team(normalized_team_id)
+    with _WORKFLOW_LOCK:
+        store = _load_stage_round_store(normalized_team_id)
+        rounds = _stage_rounds(store)
+        stage_round = _find_stage_round(rounds, normalized_round_id)
+        if stage_round is None:
+            raise TeamWorkflowOrchestrationError("Stage round not found.")
+        coordination_contract = _stage_coordination_contract(team, stage_round)
+        coordination_result = _try_start_stage_coordination_round(team, coordination_contract)
+        coordination_contract["startResult"] = coordination_result
+        stage_round["coordinationContract"] = coordination_contract
+        if coordination_result.get("started"):
+            stage_round["coordinationRoundId"] = str(coordination_result.get("roundId") or "")
+            stage_round["coordinationRoomId"] = str(coordination_result.get("roomId") or "")
+            stage_round["status"] = "running" if str(stage_round.get("stageType") or "") == "knowledge_collection" else "planning"
+            stage_round["warnings"] = [
+                item
+                for item in list(stage_round.get("warnings") or [])
+                if isinstance(item, dict) and str(item.get("code") or "") != "coordination_round_not_started"
+            ]
+        else:
+            stage_round["status"] = "needs_attention"
+            warnings = [
+                item
+                for item in list(stage_round.get("warnings") or [])
+                if isinstance(item, dict) and str(item.get("code") or "") != "coordination_round_not_started"
+            ]
+            warnings.append(
+                {
+                    "code": "coordination_round_not_started",
+                    "severity": "warning",
+                    "message": _trim_text(coordination_result.get("reason"), max_length=240) or "Coordination round was not started.",
+                }
+            )
+            stage_round["warnings"] = warnings
+        stage_round["updatedAt"] = utc_now_iso()
+        store["rounds"] = rounds
+        store["updatedAt"] = stage_round["updatedAt"]
+        _write_json(_stage_round_store_path(normalized_team_id), store)
+    _record_workflow_event(
+        "research_stage_round.coordination_retry_recorded",
+        normalized_team_id,
+        fields={
+            "stageRoundId": normalized_round_id,
+            "stageType": stage_round.get("stageType", ""),
+            "status": stage_round.get("status", ""),
+            "coordinationStarted": bool(coordination_result.get("started")),
+            "coordinationRoomId": str(coordination_result.get("roomId") or ""),
+            "coordinationRoundId": str(coordination_result.get("roundId") or ""),
+            "coordinationErrorType": str(coordination_result.get("errorType") or ""),
+        },
+    )
+    return {
+        "stageRound": stage_round,
+        "coordinationContract": stage_round["coordinationContract"],
+        "status": get_research_stage_round_status(normalized_team_id),
+    }
+
+
+def retry_research_stage_round_memory_record(team_id: str, stage_round_id: str) -> dict[str, Any]:
+    normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
+    normalized_round_id = _normalize_required_id(stage_round_id, "Stage round id is required.")
+    team_service.get_team(normalized_team_id)
+    with _WORKFLOW_LOCK:
+        workflow = _load_or_create_workflow(normalized_team_id)
+        store = _load_stage_round_store(normalized_team_id)
+        rounds = _stage_rounds(store)
+        stage_round = _find_stage_round(rounds, normalized_round_id)
+        if stage_round is None:
+            raise TeamWorkflowOrchestrationError("Stage round not found.")
+        stage_round["teamMemoryRecord"] = _stage_memory_record(stage_round, workflow)
+        stage_round["teamMemoryRecordId"] = stage_round["teamMemoryRecord"]["recordId"]
+        stage_round["updatedAt"] = utc_now_iso()
+        store["rounds"] = rounds
+        store["updatedAt"] = stage_round["updatedAt"]
+        _write_json(_stage_round_store_path(normalized_team_id), store)
+    _record_workflow_event(
+        "research_stage_round.memory_retry_recorded",
+        normalized_team_id,
+        fields={"stageRoundId": normalized_round_id, "stageType": stage_round.get("stageType", "")},
+    )
+    return {
+        "stageRound": stage_round,
+        "teamMemoryRecord": stage_round["teamMemoryRecord"],
+        "status": get_research_stage_round_status(normalized_team_id),
     }
 
 
@@ -4137,6 +4423,428 @@ def _source_collection_query_text(seed: str, *, source_type: str, language: str)
     return _trim_text(f"{normalized_seed} {suffix}", max_length=260)
 
 
+def _normalize_stage_type(value: Any) -> str:
+    normalized = _trim_text(value, max_length=80)
+    if normalized not in RESEARCH_STAGE_TYPES:
+        raise TeamWorkflowOrchestrationError("Unsupported research stage type.")
+    return normalized
+
+
+def _normalize_stage_start_mode(value: Any) -> str:
+    normalized = _trim_text(value, max_length=80)
+    return "new_round" if normalized in {"new_round", "new", "restart"} else "continue_or_start"
+
+
+def _load_stage_round_store(team_id: str) -> dict[str, Any]:
+    path = _stage_round_store_path(team_id)
+    if path.exists():
+        payload = _read_json(path)
+        if isinstance(payload.get("rounds"), list):
+            return payload
+    now = utc_now_iso()
+    payload = {
+        "schemaVersion": SCHEMA_VERSION,
+        "teamId": team_id,
+        "storeKind": "research_stage_round_store",
+        "rounds": [],
+        "createdAt": now,
+        "updatedAt": now,
+    }
+    _write_json(path, payload)
+    return payload
+
+
+def _stage_rounds(store: dict[str, Any]) -> list[dict[str, Any]]:
+    return [item for item in list(store.get("rounds") or []) if isinstance(item, dict)]
+
+
+def _find_stage_round(rounds: list[dict[str, Any]], stage_round_id: str) -> dict[str, Any] | None:
+    for item in rounds:
+        if str(item.get("stageRoundId") or "") == stage_round_id:
+            return item
+    return None
+
+
+def _active_stage_round(rounds: list[dict[str, Any]], stage_type: str) -> dict[str, Any] | None:
+    candidates = [
+        item
+        for item in rounds
+        if str(item.get("stageType") or "") == stage_type and str(item.get("status") or "") in RESEARCH_STAGE_ACTIVE_STATUSES
+    ]
+    return _latest_stage_round(candidates)
+
+
+def _latest_stage_round(rounds: list[dict[str, Any]]) -> dict[str, Any] | None:
+    if not rounds:
+        return None
+    return sorted(rounds, key=lambda item: str(item.get("updatedAt") or item.get("createdAt") or ""), reverse=True)[0]
+
+
+def _stage_round_number(rounds: list[dict[str, Any]], stage_type: str) -> int:
+    return 1 + sum(1 for item in rounds if str(item.get("stageType") or "") == stage_type)
+
+
+def _build_stage_round(
+    team_id: str,
+    stage_type: str,
+    payload: dict[str, Any],
+    rounds: list[dict[str, Any]],
+    *,
+    previous_round: dict[str, Any] | None,
+    requested_by_agent: str,
+    team: dict[str, Any],
+) -> dict[str, Any]:
+    now = utc_now_iso()
+    round_number = _stage_round_number(rounds, stage_type)
+    topic = _trim_text(payload.get("topic"), max_length=500) or _trim_text(previous_round.get("topic") if previous_round else "", max_length=500)
+    goal = _trim_text(payload.get("goal"), max_length=1000) or _trim_text(previous_round.get("goal") if previous_round else "", max_length=1000)
+    if stage_type == "knowledge_collection" and not topic:
+        raise TeamWorkflowOrchestrationError("Research topic is required to start knowledge collection.")
+    if not topic:
+        topic = _stage_default_topic(stage_type, previous_round)
+    if not goal:
+        goal = _stage_default_goal(stage_type, previous_round)
+    query_seeds = _stage_query_seeds(payload, previous_round, topic=topic, goal=goal)
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "stageRoundId": _new_record_id("stage"),
+        "teamId": team_id,
+        "stageType": stage_type,
+        "roundNumber": round_number,
+        "status": "initializing",
+        "title": _trim_text(payload.get("title"), max_length=180) or f"{RESEARCH_STAGE_DEFAULTS[stage_type]['title']} {round_number}",
+        "topic": topic,
+        "goal": goal,
+        "requestedByAgent": requested_by_agent,
+        "ownerAgentId": _source_collection_owner_agent_id(team, payload),
+        "upstreamRoundIds": _stage_upstream_round_ids(payload, rounds, stage_type, previous_round),
+        "sourceRunIds": [],
+        "assignmentIds": [],
+        "agentRoleAssignments": [],
+        "querySeeds": query_seeds,
+        "suggestedQuerySeeds": _suggest_stage_query_seeds(previous_round, topic=topic, goal=goal),
+        "inputRefs": _normalize_text_list(payload.get("inputRefs"), max_items=120, max_length=240),
+        "searchLanguages": _source_collection_search_languages(payload.get("searchLanguages")),
+        "sourceTypes": _source_collection_source_types(payload.get("sourceTypes")),
+        "maxResultsPerQuery": _normalize_int(
+            payload.get("maxResultsPerQuery"),
+            default=SOURCE_COLLECTION_DEFAULT_MAX_RESULTS_PER_QUERY,
+            minimum=1,
+            maximum=100,
+        ),
+        "workflowItemRef": {},
+        "dataSearchPlanRef": {},
+        "teamMemoryRecordId": "",
+        "teamMemoryRecord": {},
+        "coordinationContract": {},
+        "planningContract": {},
+        "warnings": [],
+        "boundaries": _research_stage_boundaries(),
+        "createdAt": now,
+        "updatedAt": now,
+    }
+
+
+def _stage_source_collection_payload(stage_round: dict[str, Any], payload: dict[str, Any], team: dict[str, Any]) -> dict[str, Any]:
+    scope = _normalize_metadata(payload.get("scope"))
+    scope.update(
+        {
+            "workflowStage": "knowledge_collection",
+            "researchStageRoundId": stage_round["stageRoundId"],
+            "researchStageRoundNumber": stage_round["roundNumber"],
+            "uiEntry": _trim_text(scope.get("uiEntry"), max_length=120) or "teams_research_stage_launcher",
+            "upstreamRoundIds": list(stage_round.get("upstreamRoundIds") or []),
+        }
+    )
+    roles = _normalize_source_collection_roles(payload.get("agentRoles"))
+    return {
+        "title": stage_round["title"],
+        "topic": stage_round["topic"],
+        "goal": stage_round["goal"],
+        "ownerAgentId": stage_round["ownerAgentId"],
+        "requestedByAgent": stage_round["requestedByAgent"],
+        "agentRoles": payload.get("agentRoles") or list(SOURCE_COLLECTION_DEFAULT_AGENT_ROLES),
+        "agentIds": payload.get("agentIds") if isinstance(payload.get("agentIds"), dict) else _source_collection_team_agent_ids(team, roles, payload),
+        "inputRefs": list(stage_round.get("inputRefs") or []),
+        "querySeeds": list(stage_round.get("querySeeds") or []),
+        "searchLanguages": list(stage_round.get("searchLanguages") or []),
+        "sourceTypes": list(stage_round.get("sourceTypes") or []),
+        "maxResultsPerQuery": int(stage_round.get("maxResultsPerQuery") or SOURCE_COLLECTION_DEFAULT_MAX_RESULTS_PER_QUERY),
+        "scope": scope,
+    }
+
+
+def _stage_query_seeds(payload: dict[str, Any], previous_round: dict[str, Any] | None, *, topic: str, goal: str) -> list[str]:
+    seeds = _normalize_text_list(payload.get("querySeeds"), max_items=40, max_length=220)
+    if seeds:
+        return seeds
+    suggested = _suggest_stage_query_seeds(previous_round, topic=topic, goal=goal)
+    if suggested:
+        return suggested[:8]
+    return [item for item in [topic, goal] if item][:2]
+
+
+def _suggest_stage_query_seeds(previous_round: dict[str, Any] | None, *, topic: str, goal: str) -> list[str]:
+    seeds: list[str] = []
+    if previous_round:
+        for warning in list(previous_round.get("warnings") or []):
+            if isinstance(warning, dict):
+                _append_source_collection_seed(seeds, warning.get("message"))
+        for item in list(previous_round.get("suggestedQuerySeeds") or [])[:6]:
+            _append_source_collection_seed(seeds, item)
+        for item in list(previous_round.get("querySeeds") or [])[:6]:
+            _append_source_collection_seed(seeds, f"{item} missing evidence")
+    _append_source_collection_seed(seeds, topic)
+    if goal:
+        _append_source_collection_seed(seeds, goal)
+    return seeds[:10]
+
+
+def _stage_upstream_round_ids(
+    payload: dict[str, Any],
+    rounds: list[dict[str, Any]],
+    stage_type: str,
+    previous_round: dict[str, Any] | None,
+) -> list[str]:
+    explicit = _normalize_text_list(payload.get("upstreamRoundIds"), max_items=24, max_length=160)
+    if explicit:
+        return explicit
+    if stage_type == "knowledge_collection":
+        return [str(previous_round.get("stageRoundId"))] if previous_round and previous_round.get("stageRoundId") else []
+    if stage_type == "experiment":
+        latest_collection = _latest_stage_round([item for item in rounds if str(item.get("stageType") or "") == "knowledge_collection"])
+        return [str(latest_collection.get("stageRoundId"))] if latest_collection and latest_collection.get("stageRoundId") else []
+    latest_experiment = _latest_stage_round([item for item in rounds if str(item.get("stageType") or "") == "experiment"])
+    return [str(latest_experiment.get("stageRoundId"))] if latest_experiment and latest_experiment.get("stageRoundId") else []
+
+
+def _stage_default_topic(stage_type: str, previous_round: dict[str, Any] | None) -> str:
+    if previous_round:
+        inherited = _trim_text(previous_round.get("topic"), max_length=500)
+        if inherited:
+            return inherited
+    return {
+        "experiment": "challenge cup experiment planning",
+        "iteration": "challenge cup iteration planning",
+    }.get(stage_type, "challenge cup research")
+
+
+def _stage_default_goal(stage_type: str, previous_round: dict[str, Any] | None) -> str:
+    if previous_round:
+        inherited = _trim_text(previous_round.get("goal"), max_length=1000)
+        if inherited:
+            return inherited
+    if stage_type == "experiment":
+        return "Plan experiments from accepted knowledge-collection candidates without executing them automatically."
+    if stage_type == "iteration":
+        return "Plan the next improvement round from experiment evidence and unresolved risks."
+    return "Collect traceable research sources for neuroscience-inspired algorithm discovery."
+
+
+def _stage_memory_record(stage_round: dict[str, Any], workflow: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "recordId": _new_record_id("stagemem"),
+        "recordKind": "team_workflow_stage_record",
+        "workflowId": workflow.get("workflowId", DEFAULT_WORKFLOW_ID),
+        "stageRoundId": stage_round.get("stageRoundId", ""),
+        "stageType": stage_round.get("stageType", ""),
+        "roundNumber": stage_round.get("roundNumber", 0),
+        "status": stage_round.get("status", ""),
+        "topic": stage_round.get("topic", ""),
+        "goal": stage_round.get("goal", ""),
+        "sourceRunIds": list(stage_round.get("sourceRunIds") or []),
+        "upstreamRoundIds": list(stage_round.get("upstreamRoundIds") or []),
+        "boundary": "runtime_stage_record_only_not_formal_team_knowledge",
+        "createdAt": utc_now_iso(),
+    }
+
+
+def _stage_coordination_contract(team: dict[str, Any], stage_round: dict[str, Any]) -> dict[str, Any]:
+    linked_room_id = _trim_text(team.get("linkedChatRoomId"), max_length=160)
+    stage_type = str(stage_round.get("stageType") or "")
+    topic = str(stage_round.get("topic") or "")
+    linked_room = chat_room_service.get_chat_room_compact(linked_room_id) if linked_room_id else None
+    room_mode = _trim_text((linked_room or {}).get("mode"), max_length=80) or "round_robin"
+    return {
+        "contractKind": "team_coordination_round_contract",
+        "linkedChatRoomId": linked_room_id,
+        "stageRoundId": stage_round.get("stageRoundId", ""),
+        "stageType": stage_type,
+        "topic": f"{_stage_label(stage_type)}：{topic}",
+        "purpose": _stage_coordination_purpose(stage_type),
+        "mode": room_mode,
+        "autoStarted": True,
+        "expectedAction": "Start a lightweight background team coordination round for this stage.",
+        "config": {
+            "source": "research_stage_launcher",
+            "teamId": team.get("teamId", ""),
+            "stageRoundId": stage_round.get("stageRoundId", ""),
+            "sourceRunIds": list(stage_round.get("sourceRunIds") or []),
+        },
+    }
+
+
+def _try_start_stage_coordination_round(team: dict[str, Any], contract: dict[str, Any]) -> dict[str, Any]:
+    linked_room_id = _trim_text(contract.get("linkedChatRoomId"), max_length=160)
+    if not linked_room_id:
+        return {
+            "started": False,
+            "reason": "Team has no linked chat room.",
+            "errorType": "missing_linked_chat_room",
+        }
+    try:
+        round_payload = chat_room_service.start_chat_room_round(
+            linked_room_id,
+            str(contract.get("topic") or ""),
+            mode=str(contract.get("mode") or ""),
+            purpose=str(contract.get("purpose") or ""),
+            config=contract.get("config") if isinstance(contract.get("config"), dict) else {},
+            background=True,
+            lightweight_response=True,
+        )
+    except Exception as exc:
+        return {
+            "started": False,
+            "roomId": linked_room_id,
+            "reason": _trim_text(str(exc), max_length=500),
+            "errorType": type(exc).__name__,
+        }
+    return {
+        "started": True,
+        "roomId": str(round_payload.get("roomId") or linked_room_id),
+        "roundId": str(round_payload.get("roundId") or round_payload.get("activeRoundId") or ""),
+        "status": str(round_payload.get("status") or ""),
+    }
+
+
+def _stage_planning_contract(stage_type: str, stage_round: dict[str, Any]) -> dict[str, Any]:
+    if stage_type == "experiment":
+        expected_outputs = ["experiment_plan", "baseline_selection", "success_metrics", "risk_controls"]
+    elif stage_type == "iteration":
+        expected_outputs = ["iteration_goal", "change_list", "evidence_to_compare", "next_round_entry"]
+    else:
+        expected_outputs = ["source_manifest_candidates"]
+    return {
+        "contractKind": f"{stage_type}_planning_contract",
+        "stageRoundId": stage_round.get("stageRoundId", ""),
+        "expectedOutputs": expected_outputs,
+        "autoExecution": False,
+        "requiresUserDecision": True,
+    }
+
+
+def _stage_agent_binding_warnings(assignments: list[dict[str, Any]]) -> list[dict[str, str]]:
+    warnings: list[dict[str, str]] = []
+    for item in assignments:
+        agent_role = str(item.get("agentRole") or "")
+        agent_id = str(item.get("agentId") or "")
+        if agent_role and agent_id == agent_role:
+            warnings.append(
+                {
+                    "code": "agent_binding_missing",
+                    "severity": "warning",
+                    "message": f"{agent_role} has no concrete team agent binding.",
+                }
+            )
+    return warnings
+
+
+def _stage_phase_status(
+    team_id: str,
+    stage_type: str,
+    rounds: list[dict[str, Any]],
+    *,
+    workflow: dict[str, Any],
+    team: dict[str, Any],
+) -> dict[str, Any]:
+    stage_rounds = [item for item in rounds if str(item.get("stageType") or "") == stage_type]
+    active_round = _active_stage_round(rounds, stage_type)
+    latest_round = active_round or _latest_stage_round(stage_rounds)
+    defaults = RESEARCH_STAGE_DEFAULTS[stage_type]
+    return {
+        "stageType": stage_type,
+        "label": _stage_label(stage_type),
+        "status": str(latest_round.get("status") if latest_round else "not_started"),
+        "roundCount": len(stage_rounds),
+        "activeRoundId": str(active_round.get("stageRoundId") if active_round else ""),
+        "latestRound": latest_round,
+        "primaryAction": defaults["continueActionZh"] if active_round else defaults["primaryActionZh"],
+        "secondaryAction": defaults["newRoundActionZh"],
+        "canStart": True,
+        "canContinue": bool(active_round),
+        "canNewRound": bool(stage_rounds),
+        "requiresUserDecision": stage_type in {"experiment", "iteration"},
+        "readiness": _stage_readiness(stage_type, rounds),
+        "coordinationRoomId": str(team.get("linkedChatRoomId") or ""),
+        "storagePath": _relative_path(_stage_round_store_path(team_id)),
+    }
+
+
+def _stage_readiness(stage_type: str, rounds: list[dict[str, Any]]) -> dict[str, Any]:
+    if stage_type == "knowledge_collection":
+        return {"ready": True, "reason": "知识搜集可随时多轮启动。"}
+    if stage_type == "experiment":
+        latest_collection = _latest_stage_round([item for item in rounds if str(item.get("stageType") or "") == "knowledge_collection"])
+        return {
+            "ready": bool(latest_collection),
+            "reason": "已有知识搜集轮次，可由用户决定进入实验规划。" if latest_collection else "需要先启动至少一轮知识搜集。",
+        }
+    latest_experiment = _latest_stage_round([item for item in rounds if str(item.get("stageType") or "") == "experiment"])
+    return {
+        "ready": bool(latest_experiment),
+        "reason": "已有实验规划轮次，可进入迭代规划。" if latest_experiment else "需要先启动实验规划。",
+    }
+
+
+def _current_research_stage(phases: list[dict[str, Any]], workflow: dict[str, Any]) -> str:
+    for phase in phases:
+        if phase.get("activeRoundId"):
+            return str(phase.get("stageType") or "")
+    state_machine = workflow.get("stateMachine") if isinstance(workflow.get("stateMachine"), dict) else {}
+    return str(state_machine.get("currentStage") or "knowledge_collection")
+
+
+def _stage_next_actions(stage_type: str, *, reused: bool) -> list[str]:
+    if reused:
+        return ["Continue the active stage round instead of creating a duplicate.", "Open the matching research workspace view."]
+    if stage_type == "knowledge_collection":
+        return [
+            "Open Source collection to inspect query seeds, assignments, and writeback contract.",
+            "Functional agents submit CollectionOutput records before candidate import.",
+            "User decides whether to start experiment after screening.",
+        ]
+    if stage_type == "experiment":
+        return ["Review upstream knowledge-collection evidence.", "Draft experiment plan; do not auto-run experiments."]
+    return ["Review experiment evidence.", "Plan the next iteration round; do not auto-apply changes."]
+
+
+def _research_stage_boundaries() -> dict[str, bool]:
+    return {
+        "externalSearchTriggered": False,
+        "writesFormalKnowledge": False,
+        "writesRag": False,
+        "writesOfficialGraph": False,
+        "autoTransitionsNextStage": False,
+        "stageRecordsOnly": True,
+    }
+
+
+def _stage_label(stage_type: str) -> str:
+    return {
+        "knowledge_collection": "知识搜集",
+        "experiment": "实验",
+        "iteration": "迭代",
+    }.get(stage_type, stage_type)
+
+
+def _stage_coordination_purpose(stage_type: str) -> str:
+    if stage_type == "knowledge_collection":
+        return "围绕资料搜集范围、query seeds、角色分工和结果回写合同进行团队协调。"
+    if stage_type == "experiment":
+        return "围绕实验目标、baseline、指标和风险控制进行团队规划，不自动执行实验。"
+    return "围绕实验反馈、缺口、改动范围和下一轮目标进行团队规划，不自动进入下一轮。"
+
+
 def _local_research_llm_client(model_id: str, *, llm_client_factory: Any = None) -> Any:
     normalized_model_id = _trim_text(model_id, max_length=160) or LOCAL_RESEARCH_MODEL_ID
     public_config = load_public_config()
@@ -4359,6 +5067,10 @@ def _candidate_store_path(team_id: str) -> Path:
 
 def _transfer_records_path(team_id: str) -> Path:
     return _team_workflow_root(team_id) / "transfer_records.jsonl"
+
+
+def _stage_round_store_path(team_id: str) -> Path:
+    return _team_workflow_root(team_id) / "research_stage_rounds" / "index.json"
 
 
 def _team_workflow_root(team_id: str) -> Path:
