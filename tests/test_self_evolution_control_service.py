@@ -734,7 +734,7 @@ def test_self_evolution_turn_uses_executor_context_engine_packet(tmp_path, monke
         source_path="workspace/prompts/self/executor.md",
         content="你是自进化执行 Agent，只根据当前有界目标行动。",
     )
-    captured: dict[str, str] = {}
+    captured: dict[str, object] = {}
     scene_events: list[dict[str, object]] = []
 
     class FakeSelfEvolvingAgent:
@@ -744,8 +744,14 @@ def test_self_evolution_turn_uses_executor_context_engine_packet(tmp_path, monke
             captured["profile_id"] = config.llm.get_profile(role="primary").profile_id if config else ""
             captured["primary_model"] = config.llm.get_profile(role="primary").model if config else ""
 
+        def seed_static_runtime_context(self, content):
+            captured["static_runtime_context"] = str(content or "")
+
         def seed_runtime_context(self, content):
-            captured["runtime_context"] = str(content or "")
+            captured.setdefault("runtime_contexts", []).append(str(content or ""))
+
+        def mark_runtime_context_seeded_by_host(self):
+            captured["runtime_context_seeded_by_host"] = True
 
         def set_turn_interrupt_checker(self, checker):
             self.checker = checker
@@ -768,14 +774,27 @@ def test_self_evolution_turn_uses_executor_context_engine_packet(tmp_path, monke
         captured["runtime_run_kind"] = request.runtime.run_kind if request.runtime else ""
         captured["runtime_cache_scope"] = request.runtime.cache_scope if request.runtime else ""
         captured["runtime_model_id"] = request.runtime.model_id if request.runtime else ""
+        captured["request_runtime_context"] = request.runtime_context
+        captured["request_static_runtime_context"] = request.static_runtime_context
+        captured["request_dynamic_runtime_context"] = request.dynamic_runtime_context
         runtime = prepare_agent_turn_runtime(request.runtime) if request.runtime else None
         agent = FakeSelfEvolvingAgent(
             mode=request.mode,
             workspace_path=request.workspace_path,
             config=request.config,
         )
-        if request.runtime_context:
+        seeded_context = False
+        if request.static_runtime_context:
+            agent.seed_static_runtime_context(request.static_runtime_context)
+            seeded_context = True
+        if request.dynamic_runtime_context:
+            agent.seed_runtime_context(request.dynamic_runtime_context)
+            seeded_context = True
+        if request.runtime_context and not request.static_runtime_context and not request.dynamic_runtime_context:
             agent.seed_runtime_context(request.runtime_context)
+            seeded_context = True
+        if seeded_context:
+            agent.mark_runtime_context_seeded_by_host()
         if request.interrupt_checker:
             agent.set_turn_interrupt_checker(request.interrupt_checker)
         result = agent.run_single_turn(initial_prompt=request.initial_prompt)
@@ -816,9 +835,12 @@ def test_self_evolution_turn_uses_executor_context_engine_packet(tmp_path, monke
     assert captured["runtime_run_kind"] == "self_evolution"
     assert captured["runtime_cache_scope"] == "executor"
     assert captured["runtime_model_id"] == "self-executor-runtime-model"
-    assert "Agent Runtime Context" in captured["runtime_context"]
-    assert "Agent Prompt Template" in captured["runtime_context"]
-    assert "自进化执行 Agent" in captured["runtime_context"]
+    assert "Agent Runtime Context" in captured["static_runtime_context"]
+    assert "Agent Prompt Template" in captured["static_runtime_context"]
+    assert "自进化执行 Agent" in captured["static_runtime_context"]
+    assert captured["request_runtime_context"]
+    assert captured["request_static_runtime_context"] == captured["static_runtime_context"]
+    assert captured["runtime_context_seeded_by_host"] is True
     assert records[-1]["agentId"] == executor["agentId"]
     assert records[-1]["sessionId"] == executor["directSessionId"]
     assert records[-1]["status"] == "completed"

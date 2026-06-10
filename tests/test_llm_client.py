@@ -1913,7 +1913,7 @@ def test_dashscope_qwen_explicit_prompt_cache_preserves_cache_control_without_ke
     assert client._last_payload_protocol_summary["promptCacheProviderStrategy"] == "qwen_explicit_cache_control"
 
 
-def test_dashscope_qwen_explicit_prompt_cache_adds_rolling_user_marker():
+def test_dashscope_qwen_explicit_prompt_cache_adds_history_checkpoint_marker():
     config = make_config(
         **{
             "llm.providers.default.kind": "aliyun",
@@ -1940,10 +1940,11 @@ def test_dashscope_qwen_explicit_prompt_cache_adds_rolling_user_marker():
         ]
     )
 
-    assert payload["messages"][-1]["role"] == "user"
-    assert payload["messages"][-1]["content"] == [
-        {"type": "text", "text": "current question", "cache_control": {"type": "ephemeral"}},
+    assert payload["messages"][-2]["role"] == "assistant"
+    assert payload["messages"][-2]["content"] == [
+        {"type": "text", "text": "history answer", "cache_control": {"type": "ephemeral"}},
     ]
+    assert payload["messages"][-1] == {"role": "user", "content": "current question"}
     cache_marker_count = sum(
         1
         for message in payload["messages"]

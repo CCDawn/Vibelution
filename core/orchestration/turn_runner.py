@@ -27,6 +27,8 @@ class AgentSingleTurnRequest:
     config: Any = None
     carryover: dict[str, Any] | None = None
     runtime_context: str = ""
+    static_runtime_context: str = ""
+    dynamic_runtime_context: str = ""
     interrupt_checker: InterruptChecker | None = None
     runtime: AgentTurnRuntimeRequest | None = None
     prompt_cache_partition: str = ""
@@ -83,6 +85,8 @@ def prepare_agent_turn(
     *,
     carryover: dict[str, Any] | None = None,
     runtime_context: str = "",
+    static_runtime_context: str = "",
+    dynamic_runtime_context: str = "",
     interrupt_checker: InterruptChecker | None = None,
     chat_history: list[dict[str, Any]] | None = None,
 ) -> None:
@@ -92,9 +96,28 @@ def prepare_agent_turn(
     if callable(seed_turn_carryover) and carryover:
         seed_turn_carryover(carryover)
 
+    host_seeded_runtime_context = False
+    static_context_text = str(static_runtime_context or "").strip()
+    dynamic_context_text = str(dynamic_runtime_context or "").strip()
+    legacy_context_text = str(runtime_context or "").strip()
+    seed_static_runtime_context = getattr(agent, "seed_static_runtime_context", None)
     seed_runtime_context = getattr(agent, "seed_runtime_context", None)
-    if callable(seed_runtime_context) and runtime_context:
-        seed_runtime_context(runtime_context)
+    if static_context_text:
+        if callable(seed_static_runtime_context):
+            seed_static_runtime_context(static_context_text)
+            host_seeded_runtime_context = True
+        elif callable(seed_runtime_context):
+            seed_runtime_context(static_context_text)
+            host_seeded_runtime_context = True
+    if callable(seed_runtime_context) and dynamic_context_text:
+        seed_runtime_context(dynamic_context_text)
+        host_seeded_runtime_context = True
+    if callable(seed_runtime_context) and legacy_context_text and not static_context_text and not dynamic_context_text:
+        seed_runtime_context(legacy_context_text)
+        host_seeded_runtime_context = True
+    host_context_marker = getattr(agent, "mark_runtime_context_seeded_by_host", None)
+    if callable(host_context_marker) and host_seeded_runtime_context:
+        host_context_marker()
 
     stop_configurer = getattr(agent, "set_turn_interrupt_checker", None)
     if callable(stop_configurer) and interrupt_checker:
@@ -162,6 +185,8 @@ def run_agent_single_turn(
         agent,
         carryover=request.carryover,
         runtime_context=request.runtime_context,
+        static_runtime_context=request.static_runtime_context,
+        dynamic_runtime_context=request.dynamic_runtime_context,
         interrupt_checker=request.interrupt_checker,
     )
 

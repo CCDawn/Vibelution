@@ -1116,8 +1116,14 @@ def test_chat_room_participant_runner_reuses_session_workspace_and_agent_llm_bin
         def seed_chat_history(self, messages):
             captured["history"] = list(messages)
 
+        def seed_static_runtime_context(self, content):
+            captured["static_runtime_context"] = str(content or "")
+
         def seed_runtime_context(self, content):
-            captured["runtime_context"] = str(content or "")
+            captured.setdefault("runtime_contexts", []).append(str(content or ""))
+
+        def mark_runtime_context_seeded_by_host(self):
+            captured["runtime_context_seeded_by_host"] = True
 
         def run_single_turn(self, initial_prompt=None, disable_tools=False):
             return {
@@ -1144,7 +1150,8 @@ def test_chat_room_participant_runner_reuses_session_workspace_and_agent_llm_bin
     ]
     assert captured["workspace_path"] == str((tmp_path / "workspace" / "agents" / agent_id).resolve())
     assert captured["primary_model"] == "explorer-model"
-    assert f"AgentId: {agent_id}" in captured["runtime_context"]
+    assert f"AgentId: {agent_id}" in captured["static_runtime_context"]
+    assert captured["runtime_context_seeded_by_host"] is True
     assert captured["history"]
     assert turn_results[-1]["agentId"] == agent_id
     assert turn_results[-1]["status"] == "completed"
