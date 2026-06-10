@@ -154,21 +154,56 @@ def test_cli_command_forwards_run_id(monkeypatch):
 
 
 def test_backend_health_probe_treats_connection_reset_as_unhealthy(monkeypatch):
-    def fake_urlopen(*args, **kwargs):
+    def fake_open_backend_health_url(*args, **kwargs):
         raise ConnectionResetError(10054, "An existing connection was forcibly closed")
 
-    monkeypatch.setattr(workbench_controller.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(workbench_controller, "_open_backend_health_url", fake_open_backend_health_url)
 
     assert workbench_controller._is_backend_healthy("http://127.0.0.1:8000") is False
 
 
 def test_backend_health_probe_treats_http_protocol_error_as_unhealthy(monkeypatch):
-    def fake_urlopen(*args, **kwargs):
+    def fake_open_backend_health_url(*args, **kwargs):
         raise workbench_controller.http.client.HTTPException("bad status line")
 
-    monkeypatch.setattr(workbench_controller.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(workbench_controller, "_open_backend_health_url", fake_open_backend_health_url)
 
     assert workbench_controller._is_backend_healthy("http://127.0.0.1:8000") is False
+
+
+def test_backend_health_probe_bypasses_environment_proxies(monkeypatch):
+    calls = []
+
+    class FakeResponse:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+    class FakeOpener:
+        def open(self, url, *, timeout):
+            calls.append(("open", url, timeout))
+            return FakeResponse()
+
+    def fake_build_opener(*handlers):
+        calls.append(("build_opener", handlers))
+        return FakeOpener()
+
+    monkeypatch.setenv("HTTP_PROXY", "http://127.0.0.1:7890")
+    monkeypatch.setenv("ALL_PROXY", "socks5://127.0.0.1:7890")
+    monkeypatch.setattr(workbench_controller.urllib.request, "build_opener", fake_build_opener)
+
+    assert workbench_controller._is_backend_healthy("http://127.0.0.1:8000") is True
+
+    assert calls[0][0] == "build_opener"
+    handlers = calls[0][1]
+    assert len(handlers) == 1
+    assert isinstance(handlers[0], workbench_controller.urllib.request.ProxyHandler)
+    assert handlers[0].proxies == {}
+    assert calls[1] == ("open", "http://127.0.0.1:8000/api/health", 2.0)
 
 
 def test_launcher_action_passes_runtime_manager_process_protection(monkeypatch, tmp_path):
@@ -7043,6 +7078,6 @@ def test_backend_health_probe_treats_low_level_http_errors_as_unhealthy(monkeypa
     def raise_http_exception(*_args, **_kwargs):
         raise http.client.HTTPException("connection closed")
 
-    monkeypatch.setattr(workbench_controller.urllib.request, "urlopen", raise_http_exception)
+    monkeypatch.setattr(workbench_controller, "_open_backend_health_url", raise_http_exception)
 
     assert workbench_controller._is_backend_healthy("http://127.0.0.1:8766") is False
