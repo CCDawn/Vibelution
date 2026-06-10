@@ -561,6 +561,11 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("keeps active chat streams stable during direct session route switches", () => {
+    const sessionStreamEffectSource = routeSource.slice(
+      routeSource.indexOf("const stream = new EventSource(`/api/sessions/${streamSessionId}/events`);"),
+      routeSource.indexOf("useEffect(() => {\n    if (!groupStreamShouldConnect"),
+    );
+
     expect(routeSource).toContain("const ACTIVE_BACKGROUND_SYNC_POLL_MS = 5_000");
     expect(routeSource).toContain("const SESSION_STREAM_ROUTE_SWITCH_GRACE_MS = 4_000");
     expect(routeSource).toContain("directSessionBackgroundSyncActive");
@@ -576,6 +581,11 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).not.toContain("pageVisible || directSessionBackgroundSyncActive || sessionStreamRouteSwitchGraceActive");
     expect(routeSource).toContain("&& (chatPollingVisible || groupBackgroundSyncActive)");
     expect(routeSource).toContain("if (!sessionStreamShouldConnect || typeof EventSource === \"undefined\")");
+    expect(routeSource).toContain("sessionStreamDecisionSnapshotRef");
+    expect(sessionStreamEffectSource).not.toContain("sessionStreamRouteSwitchGraceActive,");
+    expect(sessionStreamEffectSource).not.toContain("chatStartupWarmupActive,");
+    expect(sessionStreamEffectSource).not.toContain("directSessionBackgroundSyncActive,");
+    expect(sessionStreamEffectSource).not.toContain("pageVisible,");
     expect(routeSource).toContain("if (!groupStreamShouldConnect || typeof EventSource === \"undefined\")");
     expect(routeSource).toContain("backgroundMs: directSessionBackgroundSyncActive && !sessionStreamConnected ? ACTIVE_BACKGROUND_SYNC_POLL_MS : false");
     expect(routeSource).toContain("backgroundMs: groupBackgroundSyncActive && !groupStreamConnected ? ACTIVE_BACKGROUND_SYNC_POLL_MS : false");
