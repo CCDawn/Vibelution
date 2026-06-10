@@ -460,7 +460,7 @@ const implementationBlueprint = {
     candidateStorePath: "workspace/teams/research-team/candidate_store/index.json",
     note: "挑战杯科研流程直接绑定当前 Vibelution ai科学研究团队，不另建新团队；团队页面左侧只承担团队选择/创建，research-team 的科研流程索引进入团队主工作区作为二级导航，组织画布仅作为附属结构视图。",
     workspaceEntry: "/teams?team=research-team",
-    defaultView: "选中 ai科学研究团队后，主工作区右侧优先显示科研三阶段启动台：知识搜集、实验、迭代；其下再显示科研流程二级导航。",
+    defaultView: "选中 ai科学研究团队后，页面顶部显示科研流程二级索引条；当前节点内容区优先展示科研三阶段启动台：知识搜集、实验、迭代。",
     canvasView: "组织画布保留可编辑能力，但只有点击主工作区二级导航的“组织画布”后显示；普通团队仍保持画布优先布局。",
   },
   architecture: [
@@ -517,7 +517,7 @@ const implementationBlueprint = {
     ["data_processing API", "已落地：/api/data-processing/profiles、runs 创建/列表/详情、records、collection-assignments、outputs、status；供数据搜集类 Agent 领取任务和回写结果。"],
     ["team_workflow_orchestration_service", "已落地：Team 级 workflowOrchestration、ResearchStageRound、CandidateStore、transfer request/decision、source-collection run 启动、DataSearchPlan/query seed 契约，以及 DataRecord -> source_manifest 幂等导入桥。"],
     ["team_workflows API", "已落地：/api/teams/{team_id}/workflow-orchestration、stage-rounds/status、stage-rounds/start、stage-rounds/{stageRoundId}/coordination/retry、stage-rounds/{stageRoundId}/memory-record/retry、source-collection-runs（含 searchPlan/querySeeds/assignedQueries/resultWritebackContract）、candidates/source、data-processing/runs/{runId}/records/{recordId}/source-candidate、candidates/{candidate_id}/source-extraction、candidates/{candidate_id}/paper-note-draft、candidates、candidates/validation、candidate-graph、transfers、decide、knowledge-ingestion/status、coordination/status；coordination/status 返回 communicationBrief。"],
-    ["TeamsRoute workflow workspace", "已落地入口：research-team 右侧顶部优先展示科研三阶段启动台；其下是科研流程索引和单页工作区，主区域展示 workflow 当前阶段、candidateStore 摘要、coordination queue、communicationBrief、knowledge ingestion status、validationSummary、候选图谱、最近候选和团队沟通；组织画布仅在点击索引后作为附属视图显示。"],
+    ["TeamsRoute workflow workspace", "已落地入口：research-team 页面顶部显示科研流程二级索引条；当前节点内容区优先展示科研三阶段启动台，并按索引展示 workflow 当前阶段、candidateStore 摘要、coordination queue、communicationBrief、knowledge ingestion status、validationSummary、候选图谱、最近候选和团队沟通；组织画布仅在点击索引后作为附属视图显示。"],
     ["local_research_worker_model", "已落地任务包构建、32k 上下文预算、统一 LLMClient invoke、JSON 提取/校验和 CandidateStore 草稿记录；解析失败不入库。"],
     ["team_communication_binding", "复用 Research Organization 通信边、Team linkedChatRoom、round_robin/opportunistic 群聊轮次。"],
     ["candidate_store", "已落地 Team 级 index、候选列表查询、按类型/状态过滤、validationSummary，并接入 source_manifest、paper_note、neuro_mechanism、mechanism_mapping、algorithm_hypothesis、candidate_graph 最小校验；rejected 候选保留在 CandidateStore metadata.rejectionArchive，但不进入候选图谱推进节点。"],
@@ -661,7 +661,7 @@ const implementationBlueprint = {
     ["候选索引", "workspace/teams/<teamId>/candidate_store/index.json", "保存 source_manifest 等候选对象的最小元数据。"],
     ["候选查询", "/api/teams/{teamId}/workflow-orchestration/candidates", "按 candidateType、currentState、qualityStatus 查询 CandidateStore，并返回 validationSummary。"],
     ["候选校验", "/api/teams/{teamId}/workflow-orchestration/candidates/validation", "统计 CandidateStore valid/invalid/error/warning，并报告每个候选的结构化校验问题。"],
-    ["Team 前端入口", "/teams?team=research-team", "读取 /workflow-orchestration、/stage-rounds/status、/candidates?limit=8、/knowledge-ingestion/status 和通用 data-processing run/status/assignment；左侧只做团队选择/创建，research-team 右侧顶部优先展示科研三阶段启动台，其下提供科研流程二级导航，并按当前索引节点单页展示科研总览、资料搜集执行台、候选仓库、校验摘要、知识入库漏斗、actionItems 和 officialBoundary；非科研团队显示占位，不初始化 workflow。"],
+    ["Team 前端入口", "/teams?team=research-team", "读取 /workflow-orchestration、/stage-rounds/status、/candidates?limit=8、/knowledge-ingestion/status 和通用 data-processing run/status/assignment；左侧只做团队选择/创建，research-team 页面顶部提供科研流程二级索引条，当前节点内容区优先展示科研三阶段启动台，并按索引节点单页展示科研总览、资料搜集执行台、候选仓库、校验摘要、知识入库漏斗、actionItems 和 officialBoundary；非科研团队显示占位，不初始化 workflow。"],
     ["资料搜集执行台", "TeamsRoute source collection panel", "可在 research-team 页面独立打开资料搜集索引页，启动 source collection run、查看 DataSearchPlan/querySeeds/assignment/assignedQueries，并手工提交一条含 rawLocation 的 CollectionOutput；启动时优先使用 Team canvas 中各功能角色绑定的团队 agentId，提交后自动导入 source_manifest 候选。"],
     ["转移记录", "workspace/teams/<teamId>/transfer_records.jsonl", "记录 transfer_request 和 decidedByAgent。"],
     ["本地模型 API", "/api/teams/{teamId}/workflow-orchestration/local-research-model/*", "构建任务包、调用 9B 本地模型、校验并记录 JSON 草稿；不直接写正式知识。"],
@@ -2708,7 +2708,7 @@ function indexHtml() {
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>神经科学启发算法发现科研流程索引</title>
+    <title>神经学机制启发神经网络算法发现科研流程索引</title>
     <link rel="stylesheet" href="research_flow_pages/flow_pages.css" />
   </head>
   <body>
@@ -2725,7 +2725,7 @@ function indexHtml() {
         <div class="dashboard-hero">
           <div>
             <div class="kicker">Challenge Cup Research Flow Workbench</div>
-            <h1>神经科学启发算法发现科研流程审核台</h1>
+            <h1>神经学机制启发神经网络算法发现科研流程审核台</h1>
             <p class="subtitle">首页只承载审核判断：现在能跑到哪里、哪些边界不能越过、哪些节点需要继续规划。完整说明仍保留在节点页和计划库中。</p>
           </div>
           <div class="tag-row">
