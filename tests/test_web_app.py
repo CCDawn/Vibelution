@@ -7080,6 +7080,10 @@ def test_edit_resubmit_session_message_truncates_following_history_and_starts_tu
     state = load_chat_state(tmp_path)
     stored_messages = state["conversations"][0]["messages"]
     assert [item["content"] for item in stored_messages] == ["原始需求", "原始回答", "编辑后的需求"]
+    assert stored_messages[:2] == [
+        {"role": "user", "content": "原始需求", "timestamp": "2026-05-18T12:00:00"},
+        {"role": "assistant", "content": "原始回答", "timestamp": "2026-05-18T12:01:00"},
+    ]
     assert any(event["eventCode"] == "conversation.message_edited_resubmitted" for event in events)
     signals = _read_next_state_signals(tmp_path, session_id="session-live")
     assert any(item["kind"] == "assistant_output_edited" and item["turnId"] for item in signals)
