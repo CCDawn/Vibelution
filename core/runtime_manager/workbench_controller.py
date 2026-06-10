@@ -9,6 +9,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -419,6 +420,7 @@ def run_launcher_action(action: str, *, no_browser: bool = False) -> subprocess.
         no_browser=no_browser,
         env=env,
     )
+    started_at = time.monotonic()
     stdout_fd, stdout_path = tempfile.mkstemp(prefix="vibelution-launcher-stdout-", suffix=".log")
     stderr_fd, stderr_path = tempfile.mkstemp(prefix="vibelution-launcher-stderr-", suffix=".log")
     try:
@@ -441,6 +443,7 @@ def run_launcher_action(action: str, *, no_browser: bool = False) -> subprocess.
                     action=action,
                     no_browser=no_browser,
                     env=env,
+                    duration_ms=(time.monotonic() - started_at) * 1000,
                     error_type=type(exc).__name__,
                     message=str(exc),
                 )
@@ -459,6 +462,7 @@ def run_launcher_action(action: str, *, no_browser: bool = False) -> subprocess.
             return_code=completed.returncode,
             stdout=completed.stdout,
             stderr=completed.stderr,
+            duration_ms=(time.monotonic() - started_at) * 1000,
         )
         return completed
     finally:
@@ -478,6 +482,7 @@ def _record_launcher_action_event(
     return_code: int | None = None,
     stdout: str = "",
     stderr: str = "",
+    duration_ms: float | None = None,
     error_type: str = "",
     message: str = "",
 ) -> None:
@@ -498,6 +503,8 @@ def _record_launcher_action_event(
     if return_code is not None:
         payload["returnCode"] = int(return_code)
         payload["ok"] = int(return_code) == 0
+    if duration_ms is not None:
+        payload["durationMs"] = round(max(0.0, float(duration_ms)), 1)
     if stdout:
         payload["stdoutTail"] = truncate_event_text(stdout[-800:], limit=800)
     if stderr:
