@@ -3,7 +3,6 @@ import {
   Apple,
   ArrowUpRight,
   BellRing,
-  Bot,
   Check,
   ChevronRight,
   CircleDot,
@@ -132,6 +131,7 @@ import {
   participantAgentDisplayInfo,
   sessionAgentDisplayInfo,
 } from "./agentDisplay";
+import { AgentSessionTabStrip } from "./AgentSessionTabStrip";
 import { ConversationIndexTree } from "./ConversationIndexTree";
 import {
   DEFAULT_COLLAPSED_CONVERSATION_GROUPS,
@@ -4678,130 +4678,28 @@ export function ChatCodingRoute() {
               {projectBusActive ? (lang === "zh" ? "通知流" : "Notice stream") : (lang === "zh" ? "群聊" : "Group")}
             </button>
           ) : agentSessionTabs.length > 1 ? (
-            <div className={styles.agentSessionTabGroup} aria-label={lang === "zh" ? "Agent 会话" : "Agent sessions"}>
-              {agentSessionTabs.map((session) => {
-                const sessionIsChild = isChildSession(session);
-                const sessionAgent = session.agentId ? agentsById.get(session.agentId) : undefined;
-                const sessionDisplay = sessionAgentDisplayInfo(session, sessionAgent, lang, resolveModelLabel);
-                const sessionStatus = sessionIsChild ? (session.childStatus || session.currentPhase || session.status) : session.status;
-                const sessionTitle =
-                  (sessionIsChild ? (session.taskTitle || session.resultCard?.title || session.title) : sessionDisplay.name)
-                  || sessionDisplay.name
-                  || t("agentSession");
-                const sessionSummary =
-                  (sessionIsChild ? (session.resultCard?.summary || session.taskSummary) : session.taskSummary)
-                  || sessionDisplay.modelLabel
-                  || "";
-                const tabActive = activeSessionId === session.id && workspace.activeTab === "agent";
-                const tabEditing = editingSessionId === session.id;
-                const tabClassName = [
-                  styles.agentSessionTab,
-                  sessionIsChild ? styles.agentSessionTabChild : styles.agentSessionTabRoot,
-                  tabActive ? styles.agentSessionTabActive : "",
-                  tabEditing ? styles.agentSessionTabEditing : "",
-                ].filter(Boolean).join(" ");
-                if (tabEditing) {
-                  const renamePending =
-                    renameSessionMutation.isPending &&
-                    renameSessionMutation.variables?.sessionId === session.id;
-                  return (
-                    <div
-                      key={session.id}
-                      className={tabClassName}
-                      aria-current={tabActive ? "true" : undefined}
-                      onContextMenu={(event) => openSessionContextMenu(event, session)}
-                      title={[sessionTitle, sessionSummary].filter(Boolean).join(" · ")}
-                    >
-                      <span className={styles.agentSessionTabIcon} aria-hidden="true">
-                        {sessionIsChild ? <MessageCircleHeart size={14} /> : <Bot size={14} />}
-                      </span>
-                      <span className={styles.agentSessionTabCopy}>
-                        <span className={styles.agentSessionTabKicker}>
-                          {sessionIsChild ? (lang === "zh" ? "子对话" : "Child") : t("agentSession")}
-                        </span>
-                        <input
-                          className={styles.agentSessionTabTitleInput}
-                          value={editingSessionTitle}
-                          maxLength={120}
-                          autoFocus
-                          onChange={(event) => setEditingSessionTitle(event.target.value)}
-                          onKeyDown={(event) => {
-                            if (event.key === "Enter") {
-                              event.preventDefault();
-                              submitRenameSession(session);
-                            }
-                            if (event.key === "Escape") {
-                              event.preventDefault();
-                              cancelRenameSession();
-                            }
-                          }}
-                          aria-label={t(sessionIsChild ? "renameTask" : "renameAgent")}
-                        />
-                      </span>
-                      <span className={styles.agentSessionTabEditActions}>
-                        <button
-                          type="button"
-                          className={styles.agentSessionTabEditButton}
-                          onClick={() => submitRenameSession(session)}
-                          disabled={renamePending}
-                          title={t(sessionIsChild ? "saveTaskName" : "saveAgentName")}
-                          aria-label={`${t(sessionIsChild ? "saveTaskName" : "saveAgentName")} ${sessionTitle}`}
-                        >
-                          <Check size={13} />
-                        </button>
-                        <button
-                          type="button"
-                          className={styles.agentSessionTabEditButton}
-                          onClick={cancelRenameSession}
-                          disabled={renamePending}
-                          title={t("cancelRenameSession")}
-                          aria-label={t("cancelRenameSession")}
-                        >
-                          <X size={13} />
-                        </button>
-                      </span>
-                    </div>
-                  );
-                }
-                return (
-                  <button
-                    key={session.id}
-                    type="button"
-                    className={tabClassName}
-                    aria-current={tabActive ? "true" : undefined}
-                    draggable
-                    onDragStart={(event) =>
-                      startSessionReferenceDrag(
-                        event,
-                        buildSessionReferencePayload(session, sessionDisplay.name, sessionSummary),
-                      )}
-                    onContextMenu={(event) => openSessionContextMenu(event, session)}
-                    onClick={() => {
-                      if (activeSessionId === session.id) {
-                        setActiveTab(session.id, "agent");
-                        return;
-                      }
-                      handleOpenDirectSession(session.id);
-                    }}
-                    title={[sessionTitle, sessionSummary].filter(Boolean).join(" · ")}
-                  >
-                    <span className={styles.agentSessionTabIcon} aria-hidden="true">
-                      {sessionIsChild ? <MessageCircleHeart size={14} /> : <Bot size={14} />}
-                    </span>
-                    <span className={styles.agentSessionTabCopy}>
-                      <span className={styles.agentSessionTabKicker}>
-                        {sessionIsChild ? (lang === "zh" ? "子对话" : "Child") : t("agentSession")}
-                      </span>
-                      <span className={styles.agentSessionTabTitle}>{sessionTitle}</span>
-                    </span>
-                    <span className={styles.agentSessionTabMeta}>
-                      {statusLabel(sessionStatus)}
-                      {sessionDisplay.modelLabel ? ` · ${sessionDisplay.modelLabel}` : ""}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
+            <AgentSessionTabStrip
+              activeSessionId={activeSessionId}
+              agentsById={agentsById}
+              buildSessionReferencePayload={buildSessionReferencePayload}
+              editingSessionId={editingSessionId}
+              editingSessionTitle={editingSessionTitle}
+              lang={lang}
+              renamePending={renameSessionMutation.isPending}
+              renameSessionId={renameSessionMutation.variables?.sessionId ?? ""}
+              resolveModelLabel={resolveModelLabel}
+              sessions={agentSessionTabs}
+              statusLabel={statusLabel}
+              t={t}
+              workspaceActiveTab={workspace.activeTab}
+              onCancelRename={cancelRenameSession}
+              onContextMenu={openSessionContextMenu}
+              onDragReference={startSessionReferenceDrag}
+              onOpenDirectSession={handleOpenDirectSession}
+              onRenameTitleChange={setEditingSessionTitle}
+              onSetActiveTab={setActiveTab}
+              onSubmitRename={submitRenameSession}
+            />
           ) : (
             <button
               type="button"
