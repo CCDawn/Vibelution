@@ -66,6 +66,7 @@ const SOURCE_COLLECTION_DEFAULT_ROLES = ["data_discovery", "source_acquisition",
 
 const researchStageRoundStatusQueryKey = (id: string) => ["teams", id, "workflow-orchestration", "stage-rounds", "status"] as const;
 const officialModelEvidenceStatusQueryKey = (id: string) => ["teams", id, "workflow-orchestration", "official-model-evidence", "status"] as const;
+const paperNoteChunkStatusQueryKey = (id: string) => ["teams", id, "workflow-orchestration", "paper-note-chunks", "status"] as const;
 
 type ResearchWorkspaceView = "overview" | "source_collection" | "coordination" | "ingestion" | "graph" | "candidates" | "discussion" | "canvas";
 
@@ -274,6 +275,81 @@ type TeamWorkflowOfficialModelEvidenceStatus = {
     evidenceStorePath: string;
   };
   updatedAt: string;
+};
+
+type TeamWorkflowPaperNoteChunkStatus = {
+  schemaVersion: number;
+  teamId: string;
+  workflowId: string;
+  workflowKind: string;
+  status: "empty" | "needs_plan" | "in_progress" | "ready" | string;
+  summary: {
+    sourceCandidateCount: number;
+    readySourceCandidateCount: number;
+    plannedSourceCandidateCount: number;
+    missingPlanSourceCandidateCount: number;
+    planCount: number;
+    chunkCount: number;
+    draftedChunkCount: number;
+    needsRevisionChunkCount: number;
+    openChunkCount: number;
+    actionItemCount: number;
+  };
+  plans: Array<{
+    planId: string;
+    status: string;
+    sourceCandidateId: string;
+    sourceTitle: string;
+    chunkCount: number;
+    draftedChunkCount: number;
+    needsRevisionChunkCount: number;
+    openChunkCount: number;
+    pageScope: string;
+    chunks: Array<{
+      chunkId: string;
+      chunkIndex: number;
+      status: string;
+      pageScope: string;
+      excerptChars: number;
+      paperNoteCandidateId: string;
+      taskId: string;
+    }>;
+    createdAt: string;
+    updatedAt: string;
+  }>;
+  missingPlanSources: Array<{
+    candidateId: string;
+    title: string;
+    pageScope: string;
+  }>;
+  actionItems: Array<{
+    code: string;
+    severity: string;
+    message: string;
+    nextAction: string;
+    candidateId: string;
+  }>;
+  officialBoundary: {
+    writesFormalKnowledge: boolean;
+    writesRag: boolean;
+    writesOfficialGraph: boolean;
+    candidateOnly: boolean;
+  };
+  storage: {
+    candidateStorePath: string;
+  };
+  updatedAt: string;
+};
+
+type TeamWorkflowPaperNoteChunkPlanPayload = {
+  candidate: TeamWorkflowCandidate;
+  chunkPlan: {
+    planId: string;
+    status: string;
+    chunkCount: number;
+  };
+  workflow: TeamWorkflowOrchestration;
+  nextActions: string[];
 };
 
 type NodeDragState = {
@@ -684,22 +760,26 @@ function workflowIngestionStatusLabel(value: string, lang: "zh" | "en") {
   const zh: Record<string, string> = {
     empty: "空",
     blocked: "阻塞",
+    needs_plan: "待规划",
     needs_revision: "需修订",
     needs_evidence: "补证据",
     needs_review: "待审核",
     in_progress: "推进中",
     pending: "待启动",
     ready: "已跑通",
+    planned: "已规划",
   };
   const en: Record<string, string> = {
     empty: "empty",
     blocked: "blocked",
+    needs_plan: "needs plan",
     needs_revision: "revision",
     needs_evidence: "evidence",
     needs_review: "review",
     in_progress: "in progress",
     pending: "pending",
     ready: "ready",
+    planned: "planned",
   };
   return (lang === "zh" ? zh : en)[normalized] ?? (normalized || "-");
 }
@@ -783,6 +863,27 @@ function isWorkflowCandidateGraphPayload(value: unknown): value is TeamWorkflowC
 function workflowCandidateGraphFromCandidate(candidate: TeamWorkflowCandidate | null | undefined) {
   const graph = candidate?.metadata?.graph;
   return isWorkflowCandidateGraphPayload(graph) ? graph : null;
+}
+
+function sourceCandidateHasCompletedExtraction(candidate: TeamWorkflowCandidate) {
+  const metadata = isRecord(candidate.metadata) ? candidate.metadata : {};
+  const extraction = isRecord(metadata.sourceExtraction) ? metadata.sourceExtraction : {};
+  return candidate.candidateType === "source_manifest" && extraction.status === "extracted" && Array.isArray(extraction.pageAnchors);
+}
+
+function candidatePaperNoteChunkPlanSummary(candidate: TeamWorkflowCandidate) {
+  const metadata = isRecord(candidate.metadata) ? candidate.metadata : {};
+  const plan = isRecord(metadata.paperNoteChunkPlan) ? metadata.paperNoteChunkPlan : null;
+  if (!plan) {
+    return null;
+  }
+  return {
+    planId: String(plan.planId || ""),
+    status: String(plan.status || ""),
+    chunkCount: Number(plan.chunkCount || 0),
+    completedChunkCount: Number(plan.completedChunkCount || 0),
+    needsRevisionChunkCount: Number(plan.needsRevisionChunkCount || 0),
+  };
 }
 
 function latestWorkflowCandidate(candidates: TeamWorkflowCandidate[]) {
@@ -1010,6 +1111,14 @@ export function TeamsRoute() {
     queryFn: () =>
       fetchJson<TeamWorkflowOfficialModelEvidenceStatus>(
         `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/official-model-evidence/status`,
+      ),
+    enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && teamWorkflowQuery.data),
+  });
+  const teamWorkflowPaperNoteChunkStatusQuery = useQuery({
+    queryKey: paperNoteChunkStatusQueryKey(effectiveTeamId || "none"),
+    queryFn: () =>
+      fetchJson<TeamWorkflowPaperNoteChunkStatus>(
+        `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/paper-note-chunks/status`,
       ),
     enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && teamWorkflowQuery.data),
   });
@@ -1335,6 +1444,7 @@ export function TeamsRoute() {
       void queryClient.invalidateQueries({ queryKey: queryKeys.dataProcessingRunStatus(payload.run.runId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.dataProcessingCollectionAssignments(payload.run.runId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowKnowledgeIngestionStatus(variables.teamId) });
+      void queryClient.invalidateQueries({ queryKey: paperNoteChunkStatusQueryKey(variables.teamId) });
     },
   });
 
@@ -1458,6 +1568,30 @@ export function TeamsRoute() {
       void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowCandidates(variables.teamId, TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowKnowledgeIngestionStatus(variables.teamId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowCoordinationStatus(variables.teamId) });
+      void queryClient.invalidateQueries({ queryKey: paperNoteChunkStatusQueryKey(variables.teamId) });
+    },
+  });
+
+  const planPaperNoteChunksMutation = useMutation({
+    mutationFn: (payload: { teamId: string; candidateId: string }) =>
+      fetchJson<TeamWorkflowPaperNoteChunkPlanPayload>(
+        `/api/teams/${encodeURIComponent(payload.teamId)}/workflow-orchestration/candidates/${encodeURIComponent(payload.candidateId)}/paper-note-chunks/plan`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            createdByAgent: sourceCollectionOwnerAgentId,
+            maxPagesPerChunk: 4,
+            maxCharsPerChunk: 12000,
+          }),
+        },
+      ),
+    onSuccess: (payload, variables) => {
+      queryClient.setQueryData(queryKeys.teamWorkflow(variables.teamId), payload.workflow);
+      void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowCandidates(variables.teamId, TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowKnowledgeIngestionStatus(variables.teamId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowCoordinationStatus(variables.teamId) });
+      void queryClient.invalidateQueries({ queryKey: paperNoteChunkStatusQueryKey(variables.teamId) });
     },
   });
 
@@ -1881,6 +2015,7 @@ export function TeamsRoute() {
   const teamWorkflowCoordinationStatus = teamWorkflowCoordinationStatusQuery.data ?? null;
   const teamWorkflowKnowledgeIngestionStatus = teamWorkflowKnowledgeIngestionStatusQuery.data ?? null;
   const teamWorkflowOfficialModelEvidenceStatus = teamWorkflowOfficialModelEvidenceStatusQuery.data ?? null;
+  const teamWorkflowPaperNoteChunkStatus = teamWorkflowPaperNoteChunkStatusQuery.data ?? null;
   const researchStageRoundStatus = researchStageRoundStatusQuery.data ?? null;
   const researchStagePhases = researchStageRoundStatus?.phases ?? [];
   const sourceCollectionAssignments = sourceCollectionAssignmentsQuery.data?.assignments ?? [];
@@ -1931,6 +2066,12 @@ export function TeamsRoute() {
   const selectedTeamBuildCandidateGraphError =
     buildCandidateGraphMutation.variables === selectedTeam?.teamId && buildCandidateGraphMutation.error instanceof Error
       ? buildCandidateGraphMutation.error
+      : null;
+  const selectedTeamPlanPaperNoteChunksPending =
+    planPaperNoteChunksMutation.isPending && planPaperNoteChunksMutation.variables?.teamId === selectedTeam?.teamId;
+  const selectedTeamPlanPaperNoteChunksError =
+    planPaperNoteChunksMutation.variables?.teamId === selectedTeam?.teamId && planPaperNoteChunksMutation.error instanceof Error
+      ? planPaperNoteChunksMutation.error
       : null;
   const activeWorkflowItemCount = teamWorkflow?.activeWorkflowItems.length ?? 0;
   const researchCanvasVisible = researchWorkflowTeamSelected && researchWorkspaceView === "canvas";
@@ -3048,24 +3189,136 @@ export function TeamsRoute() {
                       ) : null}
                       {showResearchCandidates ? (
                         <>
+                      <div className={styles.workflowPaperNoteChunkPanel}>
+                        <div className={styles.workflowIngestionHeader}>
+                          <div>
+                            <strong>{lang === "zh" ? "paper_note 分块计划" : "paper_note chunk plan"}</strong>
+                            <span>
+                              {teamWorkflowPaperNoteChunkStatus
+                                ? `${teamWorkflowPaperNoteChunkStatus.summary.planCount} plans / ${teamWorkflowPaperNoteChunkStatus.summary.chunkCount} chunks`
+                                : teamWorkflowPaperNoteChunkStatusQuery.isPending
+                                ? (lang === "zh" ? "读取中" : "loading")
+                                : (lang === "zh" ? "等待 source extraction" : "waiting for source extraction")}
+                            </span>
+                          </div>
+                          <span className={`${styles.workflowTag} ${workflowIngestionTone(teamWorkflowPaperNoteChunkStatus?.status || "")}`}>
+                            {teamWorkflowPaperNoteChunkStatus
+                              ? workflowIngestionStatusLabel(teamWorkflowPaperNoteChunkStatus.status, lang)
+                              : (lang === "zh" ? "未读取" : "not loaded")}
+                          </span>
+                        </div>
+                        {teamWorkflowPaperNoteChunkStatus ? (
+                          <>
+                            <div className={styles.workflowPaperNoteChunkStats}>
+                              <span>{lang === "zh" ? "可分块来源" : "ready sources"} <strong>{teamWorkflowPaperNoteChunkStatus.summary.readySourceCandidateCount}</strong></span>
+                              <span>{lang === "zh" ? "已规划来源" : "planned sources"} <strong>{teamWorkflowPaperNoteChunkStatus.summary.plannedSourceCandidateCount}</strong></span>
+                              <span>{lang === "zh" ? "缺计划" : "missing plans"} <strong>{teamWorkflowPaperNoteChunkStatus.summary.missingPlanSourceCandidateCount}</strong></span>
+                              <span>{lang === "zh" ? "待 draft" : "open chunks"} <strong>{teamWorkflowPaperNoteChunkStatus.summary.openChunkCount}</strong></span>
+                            </div>
+                            {teamWorkflowPaperNoteChunkStatus.plans.length ? (
+                              <div className={styles.workflowPaperNoteChunkPlans}>
+                                {teamWorkflowPaperNoteChunkStatus.plans.slice(0, 4).map((plan) => (
+                                  <span key={plan.planId}>
+                                    <strong>{plan.sourceTitle || plan.sourceCandidateId}</strong>
+                                    <small>{workflowIngestionStatusLabel(plan.status, lang)} · {plan.draftedChunkCount}/{plan.chunkCount} · {plan.pageScope || "-"}</small>
+                                  </span>
+                                ))}
+                              </div>
+                            ) : (
+                              <div className={styles.empty}>
+                                {lang === "zh" ? "还没有分块计划。对已完成内容提取的 source 生成计划后，才能按 chunk 产出 paper_note。" : "No chunk plan yet. Generate plans for extracted sources before drafting paper_notes by chunk."}
+                              </div>
+                            )}
+                            {teamWorkflowPaperNoteChunkStatus.actionItems.length ? (
+                              <div className={styles.workflowIngestionActions}>
+                                {teamWorkflowPaperNoteChunkStatus.actionItems.slice(0, 3).map((item) => (
+                                  <span key={`${item.code}-${item.candidateId}`} className={workflowIngestionTone(item.severity)}>
+                                    {workflowIngestionStatusLabel(item.severity, lang)} · {item.message}
+                                  </span>
+                                ))}
+                              </div>
+                            ) : null}
+                            <div className={styles.workflowIngestionBoundary}>
+                              <span>{lang === "zh" ? "CandidateStore 计划" : "CandidateStore plan"}</span>
+                              <span>{lang === "zh" ? "不写正式知识/RAG/图谱" : "no formal Knowledge/RAG/Graph writes"}</span>
+                              <span>{lang === "zh" ? "后续 paper_note draft 需带 chunkId" : "paper_note draft should use chunkId"}</span>
+                            </div>
+                          </>
+                        ) : (
+                          <div className={styles.empty}>
+                            {teamWorkflowPaperNoteChunkStatusQuery.isPending
+                              ? (lang === "zh" ? "正在汇总 source extraction 与 paper_note chunk 计划..." : "Aggregating source extraction and paper_note chunk plans...")
+                              : (lang === "zh" ? "暂无 paper_note 分块状态。" : "No paper_note chunk status yet.")}
+                          </div>
+                        )}
+                        {teamWorkflowPaperNoteChunkStatusQuery.error instanceof Error ? (
+                          <div className={styles.messageError}>{teamWorkflowPaperNoteChunkStatusQuery.error.message}</div>
+                        ) : null}
+                        {selectedTeamPlanPaperNoteChunksError ? (
+                          <div className={styles.messageError}>{selectedTeamPlanPaperNoteChunksError.message}</div>
+                        ) : null}
+                      </div>
                       {teamWorkflowCandidates.length ? (
                         <div className={styles.workflowCandidateList} id="research-workflow-candidates">
-                          {teamWorkflowCandidates.map((candidate) => (
-                            <article key={candidate.candidateId} className={styles.workflowCandidateItem}>
-                              <div className={styles.workflowCandidateHeader}>
-                                <strong>{candidate.title || candidate.candidateId}</strong>
-                                <span className={`${styles.workflowTag} ${workflowQualityTone(candidate.qualityStatus)}`}>
-                                  {workflowStateLabel(candidate.currentState, lang)}
-                                </span>
-                              </div>
-                              <p>{candidate.summary || candidate.candidateType}</p>
-                              <div className={styles.workflowCandidateMeta}>
-                                <span>{candidate.candidateType}</span>
-                                <span>{candidate.qualityStatus}</span>
-                                <span>{formatTime(candidate.updatedAt, lang)}</span>
-                              </div>
-                            </article>
-                          ))}
+                          {teamWorkflowCandidates.map((candidate) => {
+                            const chunkPlanSummary = candidatePaperNoteChunkPlanSummary(candidate);
+                            const canPlanPaperNoteChunks = sourceCandidateHasCompletedExtraction(candidate);
+                            const candidatePlanPending =
+                              selectedTeamPlanPaperNoteChunksPending
+                              && planPaperNoteChunksMutation.variables?.candidateId === candidate.candidateId;
+                            return (
+                              <article key={candidate.candidateId} className={styles.workflowCandidateItem}>
+                                <div className={styles.workflowCandidateHeader}>
+                                  <strong>{candidate.title || candidate.candidateId}</strong>
+                                  <span className={`${styles.workflowTag} ${workflowQualityTone(candidate.qualityStatus)}`}>
+                                    {workflowStateLabel(candidate.currentState, lang)}
+                                  </span>
+                                </div>
+                                <p>{candidate.summary || candidate.candidateType}</p>
+                                <div className={styles.workflowCandidateMeta}>
+                                  <span>{candidate.candidateType}</span>
+                                  <span>{candidate.qualityStatus}</span>
+                                  <span>{formatTime(candidate.updatedAt, lang)}</span>
+                                  {chunkPlanSummary ? (
+                                    <span>
+                                      paper_note chunks {chunkPlanSummary.completedChunkCount}/{chunkPlanSummary.chunkCount}
+                                    </span>
+                                  ) : canPlanPaperNoteChunks ? (
+                                    <span>{lang === "zh" ? "可生成 paper_note 分块" : "ready for paper_note chunks"}</span>
+                                  ) : null}
+                                </div>
+                                {candidate.candidateType === "source_manifest" ? (
+                                  <div className={styles.workflowCandidateActions}>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        if (!selectedTeam?.teamId || !canPlanPaperNoteChunks || planPaperNoteChunksMutation.isPending) {
+                                          return;
+                                        }
+                                        planPaperNoteChunksMutation.mutate({
+                                          teamId: selectedTeam.teamId,
+                                          candidateId: candidate.candidateId,
+                                        });
+                                      }}
+                                      disabled={!selectedTeam?.teamId || !canPlanPaperNoteChunks || planPaperNoteChunksMutation.isPending}
+                                      title={
+                                        canPlanPaperNoteChunks
+                                          ? (lang === "zh" ? "生成或重建 paper_note 分块计划" : "Generate or rebuild the paper_note chunk plan")
+                                          : (lang === "zh" ? "需要先完成 source extraction" : "Complete source extraction first")
+                                      }
+                                    >
+                                      {chunkPlanSummary ? <RefreshCw size={13} /> : <Plus size={13} />}
+                                      {candidatePlanPending
+                                        ? (lang === "zh" ? "规划中" : "Planning")
+                                        : chunkPlanSummary
+                                        ? (lang === "zh" ? "重建分块计划" : "Rebuild chunk plan")
+                                        : (lang === "zh" ? "生成分块计划" : "Generate chunk plan")}
+                                    </button>
+                                  </div>
+                                ) : null}
+                              </article>
+                            );
+                          })}
                         </div>
                       ) : (
                         <div className={styles.empty}>

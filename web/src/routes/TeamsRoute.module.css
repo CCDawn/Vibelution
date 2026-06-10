@@ -1700,6 +1700,72 @@
   color: var(--workflow-tag-fg, var(--fg-muted));
 }
 
+.workflowPaperNoteChunkPanel {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 24%, var(--border-soft));
+  border-radius: 8px;
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--accent-cool) 6%, transparent), transparent 46%),
+    color-mix(in srgb, var(--surface-panel-strong) 68%, transparent);
+}
+
+.workflowPaperNoteChunkStats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(86px, 1fr));
+  gap: 5px;
+  min-width: 0;
+}
+
+.workflowPaperNoteChunkStats span,
+.workflowPaperNoteChunkPlans span {
+  min-width: 0;
+  padding: 5px 7px;
+  border: 1px solid color-mix(in srgb, var(--border-soft) 82%, transparent);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--surface-card) 68%, transparent);
+  color: var(--fg-muted);
+  font-size: 0.67rem;
+}
+
+.workflowPaperNoteChunkStats strong {
+  color: var(--fg-primary);
+  font-size: 0.8rem;
+}
+
+.workflowPaperNoteChunkPlans {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px;
+  min-width: 0;
+}
+
+.workflowPaperNoteChunkPlans span {
+  display: grid;
+  gap: 2px;
+}
+
+.workflowPaperNoteChunkPlans strong,
+.workflowPaperNoteChunkPlans small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workflowPaperNoteChunkPlans strong {
+  color: var(--fg-primary);
+  font-size: 0.7rem;
+}
+
+.workflowPaperNoteChunkPlans small {
+  color: var(--fg-muted);
+  font-size: 0.62rem;
+  font-weight: 720;
+}
+
 .workflowGraphPanel {
   display: grid;
   gap: 7px;
@@ -1918,6 +1984,37 @@
   overflow-wrap: anywhere;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
+}
+
+.workflowCandidateActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  min-width: 0;
+}
+
+.workflowCandidateActions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 24px;
+  max-width: 100%;
+  padding: 0 8px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 30%, var(--border-soft));
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--accent-cool) 8%, var(--surface-panel-strong));
+  color: var(--fg-primary);
+  font-size: 0.68rem;
+  font-weight: 760;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workflowCandidateActions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.54;
 }
 
 .workflowTag {

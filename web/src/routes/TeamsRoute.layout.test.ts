@@ -63,6 +63,13 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("/workflow-orchestration/knowledge-ingestion/status");
     expect(routeSource).toContain("teamWorkflowOfficialModelEvidenceStatusQuery");
     expect(routeSource).toContain("/workflow-orchestration/official-model-evidence/status");
+    expect(routeSource).toContain("TeamWorkflowPaperNoteChunkStatus");
+    expect(routeSource).toContain("teamWorkflowPaperNoteChunkStatusQuery");
+    expect(routeSource).toContain("/workflow-orchestration/paper-note-chunks/status");
+    expect(routeSource).toContain("/paper-note-chunks/plan");
+    expect(routeSource).toContain("planPaperNoteChunksMutation");
+    expect(routeSource).toContain("sourceCandidateHasCompletedExtraction");
+    expect(routeSource).toContain("candidatePaperNoteChunkPlanSummary");
     expect(routeSource).toContain("ResearchStageRoundStatusPayload");
     expect(routeSource).toContain("researchStageRoundStatusQuery");
     expect(routeSource).toContain("/workflow-orchestration/stage-rounds/status");
@@ -213,6 +220,10 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("候选图谱");
     expect(routeSource).toContain("刷新图谱");
     expect(routeSource).toContain("CandidateStore 快照 · 正式知识/RAG/图谱写入关闭");
+    expect(routeSource).toContain("paper_note 分块计划");
+    expect(routeSource).toContain("生成分块计划");
+    expect(routeSource).toContain("重建分块计划");
+    expect(routeSource).toContain("后续 paper_note draft 需带 chunkId");
     expect(routeSource).toContain("选择 research-team / ai科学研究团队后显示挑战杯科研流程。");
     expect(routeSource).toContain("团队广播");
     expect(routeSource).toContain("发送给团队");
@@ -240,6 +251,9 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.workflowIngestionPanel).toBeTypeOf("string");
     expect(routeStyles.workflowIngestionStages).toBeTypeOf("string");
     expect(routeStyles.workflowIngestionBoundary).toBeTypeOf("string");
+    expect(routeStyles.workflowPaperNoteChunkPanel).toBeTypeOf("string");
+    expect(routeStyles.workflowPaperNoteChunkStats).toBeTypeOf("string");
+    expect(routeStyles.workflowPaperNoteChunkPlans).toBeTypeOf("string");
     expect(routeStyles.workflowModelEvidencePanel).toBeTypeOf("string");
     expect(routeStyles.workflowModelEvidenceStats).toBeTypeOf("string");
     expect(routeStyles.workflowModelEvidenceCoverage).toBeTypeOf("string");
@@ -254,6 +268,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.workflowGraphEdge).toBeTypeOf("string");
     expect(routeStyles.workflowGraphBoundary).toBeTypeOf("string");
     expect(routeStyles.workflowCandidateList).toBeTypeOf("string");
+    expect(routeStyles.workflowCandidateActions).toBeTypeOf("string");
     expect(routeStyles.workflowValidation).toBeTypeOf("string");
     expect(routeStyles.workspaceResearch).toBeTypeOf("string");
     expect(routeStyles.workspaceResearchCanvas).toBeTypeOf("string");

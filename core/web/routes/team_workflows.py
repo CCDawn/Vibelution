@@ -17,6 +17,7 @@ from core.web.services.team_workflow_orchestration_service import (
     ensure_team_workflow_orchestration,
     get_knowledge_ingestion_status,
     get_official_model_evidence_status,
+    get_paper_note_chunk_status,
     get_research_stage_round_status,
     get_team_workflow_coordination_status,
     get_team_workflow_orchestration,
@@ -26,6 +27,7 @@ from core.web.services.team_workflow_orchestration_service import (
     import_data_record_as_source_candidate,
     invoke_local_research_model,
     list_candidate_store,
+    plan_paper_note_chunks_from_source_candidate,
     record_local_research_model_output,
     register_official_model_evidence,
     register_candidate_source,
@@ -199,6 +201,13 @@ class PaperNoteAutodraftPayload(BaseModel):
     title: str = Field("", max_length=240)
     summary: str = Field("", max_length=4000)
     excerpt: str = Field("", max_length=24000)
+    chunkId: str = Field("", max_length=128)
+
+
+class PaperNoteChunkPlanPayload(BaseModel):
+    createdByAgent: str = Field("", max_length=160)
+    maxPagesPerChunk: int = Field(4, ge=1, le=12)
+    maxCharsPerChunk: int = Field(12000, ge=2000, le=24000)
 
 
 class StewardPackKnowledgeIngestionPayload(BaseModel):
@@ -386,6 +395,26 @@ def team_workflow_candidate_source_extract(team_id: str, candidate_id: str, payl
 def team_workflow_candidate_paper_note_autodraft(team_id: str, candidate_id: str, payload: PaperNoteAutodraftPayload) -> dict:
     try:
         return draft_paper_note_from_source_candidate(team_id, candidate_id, payload.model_dump())
+    except TeamNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/teams/{team_id}/workflow-orchestration/paper-note-chunks/status")
+def team_workflow_paper_note_chunk_status(team_id: str) -> dict:
+    try:
+        return get_paper_note_chunk_status(team_id)
+    except TeamNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/teams/{team_id}/workflow-orchestration/candidates/{candidate_id}/paper-note-chunks/plan", status_code=status.HTTP_201_CREATED)
+def team_workflow_candidate_paper_note_chunks_plan(team_id: str, candidate_id: str, payload: PaperNoteChunkPlanPayload) -> dict:
+    try:
+        return plan_paper_note_chunks_from_source_candidate(team_id, candidate_id, payload.model_dump())
     except TeamNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
