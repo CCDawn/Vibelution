@@ -981,6 +981,18 @@ export function ChatCodingRoute() {
   const sessionStreamErrorLoggedRef = useRef<Record<string, boolean>>({});
   const sessionStreamPayloadErrorLoggedRef = useRef<Record<string, boolean>>({});
   const sessionStreamApplyStatsRef = useRef<Record<string, { received: number; applied: number; dropped: number }>>({});
+  const sessionStreamDecisionSnapshotRef = useRef({
+    sessionId: "",
+    shouldConnect: false,
+    pageVisible: false,
+    chatStartupWarmupActive: false,
+    chatPollingVisible: false,
+    directSessionBackgroundSyncActive: false,
+    routeTargetMatches: false,
+    routeSettling: false,
+    routeSwitchGraceActive: false,
+    routeSwitchGraceMsRemaining: 0,
+  });
   const groupStreamErrorLoggedRef = useRef<Record<string, boolean>>({});
   const groupStreamPayloadErrorLoggedRef = useRef<Record<string, boolean>>({});
   const requestedSessionId = useMemo(() => {
@@ -1050,6 +1062,18 @@ export function ChatCodingRoute() {
     && sessionStreamRouteTargetMatches
     && (chatPollingVisible || sessionStreamRouteSwitchGraceActive),
   );
+  sessionStreamDecisionSnapshotRef.current = {
+    sessionId: activeSessionId || "",
+    shouldConnect: sessionStreamShouldConnect,
+    pageVisible,
+    chatStartupWarmupActive,
+    chatPollingVisible,
+    directSessionBackgroundSyncActive,
+    routeTargetMatches: sessionStreamRouteTargetMatches,
+    routeSettling: sessionStreamRouteSettling,
+    routeSwitchGraceActive: sessionStreamRouteSwitchGraceActive,
+    routeSwitchGraceMsRemaining: Math.max(0, sessionStreamGraceUntilRef.current - Date.now()),
+  };
   const groupStreamShouldConnect = Boolean(
     legacyGroupRoomActive
     && activeGroupRoomId
@@ -1995,6 +2019,7 @@ export function ChatCodingRoute() {
 
   useEffect(() => {
     if (!sessionStreamShouldConnect || typeof EventSource === "undefined") {
+      const decisionSnapshot = sessionStreamDecisionSnapshotRef.current;
       setSessionStreamConnected(false);
       postBrowserTelemetry({
         phase: "session_stream",
@@ -2002,15 +2027,15 @@ export function ChatCodingRoute() {
         message: "Session detail stream connection was skipped.",
         level: "info",
         fields: {
-          sessionId: activeSessionId || "",
-          shouldConnect: sessionStreamShouldConnect,
-          pageVisible,
-          chatStartupWarmupActive,
-          chatPollingVisible,
-          directSessionBackgroundSyncActive,
-          routeTargetMatches: sessionStreamRouteTargetMatches,
-          routeSettling: sessionStreamRouteSettling,
-          routeSwitchGraceActive: sessionStreamRouteSwitchGraceActive,
+          sessionId: decisionSnapshot.sessionId,
+          shouldConnect: decisionSnapshot.shouldConnect,
+          pageVisible: decisionSnapshot.pageVisible,
+          chatStartupWarmupActive: decisionSnapshot.chatStartupWarmupActive,
+          chatPollingVisible: decisionSnapshot.chatPollingVisible,
+          directSessionBackgroundSyncActive: decisionSnapshot.directSessionBackgroundSyncActive,
+          routeTargetMatches: decisionSnapshot.routeTargetMatches,
+          routeSettling: decisionSnapshot.routeSettling,
+          routeSwitchGraceActive: decisionSnapshot.routeSwitchGraceActive,
           visibilityState: typeof document === "undefined" ? "unknown" : document.visibilityState,
           eventSourceAvailable: typeof EventSource !== "undefined",
           pageInstanceId: getPageInstanceId(),
@@ -2029,6 +2054,7 @@ export function ChatCodingRoute() {
       setSessionStreamConnected(false);
       return;
     }
+    const decisionSnapshot = sessionStreamDecisionSnapshotRef.current;
     postBrowserTelemetry({
       phase: "session_stream",
       eventCode: "browser.session_stream.effect_started",
@@ -2036,15 +2062,15 @@ export function ChatCodingRoute() {
       level: "info",
       fields: {
         sessionId: streamSessionId,
-        shouldConnect: sessionStreamShouldConnect,
-        pageVisible,
-        chatStartupWarmupActive,
-        chatPollingVisible,
-        directSessionBackgroundSyncActive,
-        routeTargetMatches: sessionStreamRouteTargetMatches,
-        routeSettling: sessionStreamRouteSettling,
-        routeSwitchGraceActive: sessionStreamRouteSwitchGraceActive,
-        routeSwitchGraceMsRemaining: Math.max(0, sessionStreamGraceUntilRef.current - Date.now()),
+        shouldConnect: decisionSnapshot.shouldConnect,
+        pageVisible: decisionSnapshot.pageVisible,
+        chatStartupWarmupActive: decisionSnapshot.chatStartupWarmupActive,
+        chatPollingVisible: decisionSnapshot.chatPollingVisible,
+        directSessionBackgroundSyncActive: decisionSnapshot.directSessionBackgroundSyncActive,
+        routeTargetMatches: decisionSnapshot.routeTargetMatches,
+        routeSettling: decisionSnapshot.routeSettling,
+        routeSwitchGraceActive: decisionSnapshot.routeSwitchGraceActive,
+        routeSwitchGraceMsRemaining: decisionSnapshot.routeSwitchGraceMsRemaining,
         visibilityState: typeof document === "undefined" ? "unknown" : document.visibilityState,
         pageInstanceId: getPageInstanceId(),
         ...collectBrowserPageSnapshot(),
@@ -2267,13 +2293,6 @@ export function ChatCodingRoute() {
     };
   }, [
     activeSessionId,
-    chatPollingVisible,
-    chatStartupWarmupActive,
-    directSessionBackgroundSyncActive,
-    pageVisible,
-    sessionStreamRouteSettling,
-    sessionStreamRouteSwitchGraceActive,
-    sessionStreamRouteTargetMatches,
     sessionStreamShouldConnect,
     syncSessionDetail,
   ]);
