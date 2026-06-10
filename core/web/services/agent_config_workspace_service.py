@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import datetime, timezone
 from time import perf_counter
-from typing import Any
+from typing import Any, Iterable
 
 from core.llm.reasoning_effort import GPT_REASONING_EFFORT_VALUES, model_supports_gpt_reasoning_effort
 from core.orchestration.context_engine import list_agent_runs_for_agents
@@ -340,7 +340,6 @@ def _derive_health(
                     )
                 continue
             if model_id not in model_refs:
-                _record_unresolved_model_reference(agent, slot_key=slot_key, model_id=model_id)
                 issues.append(
                     _agent_issue(
                         agent,
@@ -920,22 +919,6 @@ def _record_stale_runtime_snapshot_ignored(agent: dict[str, Any], snapshot: dict
     )
 
 
-def _record_unresolved_model_reference(agent: dict[str, Any], *, slot_key: str, model_id: str) -> None:
-    record_runtime_scene_event(
-        "agent_config",
-        "model_binding",
-        "agent_config.unresolved_model_reference",
-        message="Agent LLM binding references a model id that is not present in the model library.",
-        level="warning",
-        fields={
-            "agentId": str(agent.get("agentId") or "").strip(),
-            "agentCode": str(agent.get("agentCode") or "").strip(),
-            "slot": str(slot_key or "").strip(),
-            "modelId": str(model_id or "").strip(),
-        },
-    )
-
-
 def _extend_chat_room_participant_model_issues(
     issues: list[dict[str, Any]],
     *,
@@ -962,12 +945,6 @@ def _extend_chat_room_participant_model_issues(
             continue
         seen.add(key)
         reported_model_ids.add(model_id)
-        _record_unresolved_chat_room_model_reference(
-            room,
-            participant,
-            slot_key=slot_key,
-            model_id=model_id,
-        )
         slot_label = str(AGENT_LLM_SLOT_REFS.get(slot_key, {}).get("label") or slot_key).strip() or slot_key
         issues.append(
             {
@@ -991,12 +968,6 @@ def _extend_chat_room_participant_model_issues(
         and dialogue_model_id not in reported_model_ids
         and ("dialogueModelId", dialogue_model_id) not in seen
     ):
-        _record_unresolved_chat_room_model_reference(
-            room,
-            participant,
-            slot_key="dialogueModelId",
-            model_id=dialogue_model_id,
-        )
         issues.append(
             {
                 "severity": "blocking" if enabled and agent_id in active_agent_ids else "warning",
@@ -1011,30 +982,6 @@ def _extend_chat_room_participant_model_issues(
                 "action": "在群聊或 Agent Center 中重新选择该成员的对话模型。",
             }
         )
-
-
-def _record_unresolved_chat_room_model_reference(
-    room: dict[str, Any],
-    participant: dict[str, Any],
-    *,
-    slot_key: str,
-    model_id: str,
-) -> None:
-    record_runtime_scene_event(
-        "agent_config",
-        "model_binding",
-        "agent_config.unresolved_chat_room_participant_model_reference",
-        message="Chat room participant cache references a model id that is not present in the model library.",
-        level="warning",
-        fields={
-            "roomId": str(room.get("roomId") or "").strip(),
-            "participantId": str(participant.get("participantId") or "").strip(),
-            "agentId": str(participant.get("agentId") or "").strip(),
-            "agentCode": str(participant.get("agentCode") or "").strip(),
-            "slot": str(slot_key or "").strip(),
-            "modelId": str(model_id or "").strip(),
-        },
-    )
 
 
 def _compact_chat_rooms(rooms: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -1522,6 +1469,9 @@ def _record_model_reference_resolution(issues: list[dict[str, Any]]) -> None:
         if str(issue.get("code") or "").strip().startswith("unresolved_model_reference")
         or str(issue.get("code") or "").strip() == "unresolved_chat_room_participant_model_reference"
     ]
+    unresolved_codes = _dedupe_string_values(str(issue.get("code") or "").strip() for issue in unresolved)
+    unresolved_agent_ids = _dedupe_string_values(str(issue.get("agentId") or "").strip() for issue in unresolved)
+    unresolved_model_ids = _dedupe_unresolved_model_ids(unresolved)
     try:
         record_runtime_scene_event(
             "agent_config",
@@ -1536,12 +1486,42 @@ def _record_model_reference_resolution(issues: list[dict[str, Any]]) -> None:
             outcome="resolved" if not unresolved else "observed",
             fields={
                 "unresolvedCount": len(unresolved),
-                "unresolvedCodes": [str(issue.get("code") or "").strip() for issue in unresolved[:20]],
+                "unresolvedCodeCount": len(unresolved_codes),
+                "unresolvedAgentCount": len(unresolved_agent_ids),
+                "unresolvedModelCount": len(unresolved_model_ids),
+                "unresolvedCodes": unresolved_codes[:20],
+                "unresolvedAgentIds": unresolved_agent_ids[:20],
+                "unresolvedModelIds": unresolved_model_ids[:20],
             },
             lifecycle=False,
         )
     except Exception:
         return
+
+
+def _dedupe_unresolved_model_ids(issues: list[dict[str, Any]]) -> list[str]:
+    values: list[str] = []
+    for issue in issues:
+        detail = str(issue.get("detail") or "")
+        marker = "模型库键 "
+        if marker not in detail:
+            continue
+        tail = detail.split(marker, 1)[1]
+        model_id = tail.split(" ", 1)[0].strip(" 。.")
+        if model_id:
+            values.append(model_id)
+    return _dedupe_string_values(values)
+
+
+def _dedupe_string_values(values: Iterable[str]) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        item = str(value or "").strip()
+        if item and item not in seen:
+            seen.add(item)
+            result.append(item)
+    return result
 
 
 def _record_workspace_error(event_code: str, exc: Exception) -> None:
