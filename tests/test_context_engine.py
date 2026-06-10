@@ -88,6 +88,14 @@ def test_build_chat_agent_context_skips_research_org_context(tmp_path, monkeypat
     assert len(packet.inbox_messages) == 1
     assert "Agent Runtime Context" in packet.context_block
     assert "检查 ModeBinding 旧字段" in packet.context_block
+    assert "Agent Runtime Context" in packet.static_context_block
+    assert "检查 ModeBinding 旧字段" not in packet.static_context_block
+    assert "检查 ModeBinding 旧字段" in packet.dynamic_context_block
+    segments_by_key = {segment["key"]: segment for segment in packet.context_segments}
+    assert segments_by_key["agent_runtime"]["placement"] == "cache_prefix"
+    assert segments_by_key["agent_messages"]["placement"] == "volatile_turn"
+    assert segments_by_key["agent_messages"]["chars"] > 0
+    assert segments_by_key["agent_messages"]["hash"]
     assert "Research Organization Context" not in packet.context_block
     assert packet.timings["totalDurationMs"] >= 0
     assert "runtimeContextBlockMs" in packet.timings
@@ -291,12 +299,19 @@ def test_build_agent_context_includes_project_memory_coordination_rules_from_age
     packet = context_engine.build_agent_context(agent["agentId"], session_id="session-parallel-memory", run_id="turn-1")
 
     assert "Project Operating Rules" in packet.context_block
+    assert "Project Operating Rules" in packet.static_context_block
+    assert "Project Operating Rules" not in packet.dynamic_context_block
     assert "Session-level Agents may process project work in parallel." in packet.context_block
     assert "Project memory is a single-writer shared record." in packet.context_block
     assert "AGENTS.md is the default contract for this behavior." in packet.context_block
     assert "Session Agent Territory And Handoff" in packet.context_block
     assert "recommend a matching handoff target" in packet.context_block
     assert "This line must not enter the runtime context." not in packet.context_block
+    segments_by_key = {segment["key"]: segment for segment in packet.context_segments}
+    assert segments_by_key["project_rules"]["placement"] == "cache_prefix"
+    assert segments_by_key["project_rules"]["stability"] == "project_static"
+    assert segments_by_key["project_rules"]["chars"] == len(segments_by_key["project_rules"]["block"])
+    assert segments_by_key["project_rules"]["hash"]
     assert "projectRulesContextMs" in packet.timings
     assert any(
         item[0][:3] == ("agent_context", "context_engine", "agent_runtime.project_rules_context_loaded")
@@ -366,6 +381,61 @@ def test_build_agent_context_reuses_project_rules_and_registry_file_cache(tmp_pa
     assert [item[1]["fields"]["cacheHit"] for item in rule_events[-2:]] == [False, True]
     assert [item[1]["fields"]["cacheHit"] for item in registry_events[-2:]] == [False, True]
     assert [item[1]["fields"]["activeAgentDirectoryCacheHit"] for item in registry_events[-2:]] == [False, True]
+
+
+def test_build_agent_context_records_static_and_dynamic_segment_hashes(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    (tmp_path / "AGENTS.md").write_text(
+        "\n".join(
+            [
+                "## Session-Level Agent Memory Coordination",
+                "",
+                "- Project memory writes are serialized.",
+                "",
+                "## Session Agent Territory And Handoff",
+                "",
+                "- Recommend handoff for out-of-scope work.",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    events = []
+    monkeypatch.setattr(
+        context_engine,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: events.append((args, kwargs)) or {"accepted": True},
+    )
+    agent = agent_directory_service.create_agent_instance(
+        display_name="分段 Agent",
+        llm_bindings={"dialogue": {"modelId": "model-primary"}},
+        primary_mode="chat",
+        direct_session_id="session-segments",
+    )
+    agent_directory_service.write_agent_inbox_message(
+        agent["agentId"],
+        content="动态 inbox 消息",
+        summary="动态 inbox",
+        created_by="test",
+    )
+
+    packet = context_engine.build_agent_context(agent["agentId"], session_id="session-segments", run_id="turn-1")
+
+    assert packet.static_context_block
+    assert packet.dynamic_context_block
+    assert packet.context_block == "\n\n".join([packet.static_context_block, packet.dynamic_context_block])
+    assert packet.timings["staticContextChars"] == len(packet.static_context_block)
+    assert packet.timings["dynamicContextChars"] == len(packet.dynamic_context_block)
+    assert packet.timings["staticContextHash"]
+    assert packet.timings["dynamicContextHash"]
+    resolved_events = [item for item in events if item[0][2] == "agent_runtime.resolved"]
+    assert resolved_events
+    fields = resolved_events[-1][1]["fields"]
+    assert fields["staticContextChars"] == len(packet.static_context_block)
+    assert fields["dynamicContextChars"] == len(packet.dynamic_context_block)
+    assert fields["staticContextHash"] == packet.timings["staticContextHash"]
+    assert fields["dynamicContextHash"] == packet.timings["dynamicContextHash"]
+    assert fields["contextSegmentCount"] == len(packet.context_segments)
 
 
 def test_build_agent_context_includes_project_agent_territory_registry(tmp_path, monkeypatch):

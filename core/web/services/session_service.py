@@ -8123,6 +8123,7 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                 if callable(mental_override_configurer):
                     mental_override_configurer(mental_model_enabled)
                 restore = getattr(runtime_agent, "seed_chat_history", None)
+                static_runtime_context_seed = getattr(runtime_agent, "seed_static_runtime_context", None)
                 runtime_context_seed = getattr(runtime_agent, "seed_runtime_context", None)
                 stop_configurer = getattr(runtime_agent, "set_turn_interrupt_checker", None)
                 if callable(stop_configurer):
@@ -8132,12 +8133,39 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                 full_history_message_count = len(history_messages)
                 if lightweight_chat_payload:
                     history_messages = _trim_lightweight_chat_history(history_messages)
-                runtime_context_block = agent_context_packet.context_block if agent_context_packet is not None else ""
+                static_runtime_context_block = (
+                    str(getattr(agent_context_packet, "static_context_block", "") or "").strip()
+                    if agent_context_packet is not None
+                    else ""
+                )
+                dynamic_runtime_context_block = (
+                    str(getattr(agent_context_packet, "dynamic_context_block", "") or "").strip()
+                    if agent_context_packet is not None
+                    else ""
+                )
+                runtime_context_block = (
+                    str(getattr(agent_context_packet, "context_block", "") or "").strip()
+                    if agent_context_packet is not None
+                    else ""
+                )
+                if runtime_context_block and not static_runtime_context_block and not dynamic_runtime_context_block:
+                    dynamic_runtime_context_block = runtime_context_block
+                runtime_context_block = "\n\n".join(
+                    part
+                    for part in (static_runtime_context_block, dynamic_runtime_context_block)
+                    if str(part or "").strip()
+                ).strip()
+                runtime_context_segments = (
+                    list(getattr(agent_context_packet, "context_segments", []) or [])
+                    if agent_context_packet is not None
+                    else []
+                )
                 guidance_context_block = _recent_session_guidance_context_block(session_id)
                 skill_invocation = context.get("skill_invocation")
                 skill_runtime_context_block = _skill_runtime_context_from_invocation(skill_invocation)
                 seed_started_at = _perf_counter()
                 history_seed_ms = 0
+                static_runtime_context_seed_ms = 0
                 runtime_context_seed_ms = 0
                 skill_context_seed_ms = 0
                 if callable(restore) and history_messages:
@@ -8145,12 +8173,23 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                     restore(history_messages)
                     history_seed_ms = _elapsed_ms(stage_started_at)
                 host_context_marker = getattr(runtime_agent, "mark_runtime_context_seeded_by_host", None)
-                if callable(runtime_context_seed) and runtime_context_block:
+                host_seeded_agent_context = False
+                if static_runtime_context_block:
+                    static_stage_started_at = _perf_counter()
+                    if callable(static_runtime_context_seed):
+                        static_runtime_context_seed(static_runtime_context_block)
+                        host_seeded_agent_context = True
+                    elif callable(runtime_context_seed):
+                        runtime_context_seed(static_runtime_context_block)
+                        host_seeded_agent_context = True
+                    static_runtime_context_seed_ms = _elapsed_ms(static_stage_started_at)
+                if callable(runtime_context_seed) and dynamic_runtime_context_block:
                     stage_started_at = _perf_counter()
-                    runtime_context_seed(runtime_context_block)
-                    if callable(host_context_marker):
-                        host_context_marker()
+                    runtime_context_seed(dynamic_runtime_context_block)
+                    host_seeded_agent_context = True
                     runtime_context_seed_ms = _elapsed_ms(stage_started_at)
+                if host_seeded_agent_context and callable(host_context_marker):
+                    host_context_marker()
                 if callable(runtime_context_seed) and guidance_context_block:
                     runtime_context_seed(guidance_context_block)
                 if callable(runtime_context_seed) and skill_runtime_context_block:
@@ -8173,6 +8212,8 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                             "reason": lightweight_chat_payload_reason,
                             "disableTools": True,
                             "runtimeContextSkipped": not bool(runtime_context_block),
+                            "staticRuntimeContextSkipped": not bool(static_runtime_context_block),
+                            "dynamicRuntimeContextSkipped": not bool(dynamic_runtime_context_block),
                             "rawHistoryMessageCount": len(raw_history_messages),
                             "fullSeedableHistoryMessageCount": full_history_message_count,
                             "seededHistoryMessageCount": len(history_messages),
@@ -8189,6 +8230,9 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                         "fullSeedableHistoryMessageCount": full_history_message_count,
                         "seededHistoryMessageCount": len(history_messages),
                         "agentRuntimeContextIncluded": bool(runtime_context_block),
+                        "staticRuntimeContextIncluded": bool(static_runtime_context_block),
+                        "dynamicRuntimeContextIncluded": bool(dynamic_runtime_context_block),
+                        "runtimeContextSegmentCount": len(runtime_context_segments),
                         "agentRuntimeContextSkipped": bool(lightweight_chat_payload),
                         "guidanceContextIncluded": bool(guidance_context_block),
                         "skillRuntimeContextIncluded": bool(skill_runtime_context_block),
@@ -8196,7 +8240,10 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                         "lightweightChatPayloadReason": lightweight_chat_payload_reason,
                         "disableTools": lightweight_chat_payload,
                         "restoreAvailable": callable(restore),
+                        "staticRuntimeContextSeedAvailable": callable(static_runtime_context_seed),
+                        "runtimeContextSeedAvailable": callable(runtime_context_seed),
                         "historySeedMs": history_seed_ms,
+                        "staticRuntimeContextSeedMs": static_runtime_context_seed_ms,
                         "runtimeContextSeedMs": runtime_context_seed_ms,
                         "skillContextSeedMs": skill_context_seed_ms,
                         "totalSeedMs": _elapsed_ms(seed_started_at),

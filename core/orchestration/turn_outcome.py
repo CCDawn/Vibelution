@@ -302,6 +302,29 @@ class TurnOutcomeController:
         return normalized[:insert_at] + list(context_messages or []) + normalized[insert_at:]
 
     @staticmethod
+    def insert_static_context_after_system(*, messages: list, context_messages: list) -> list:
+        """Place stable runtime context after the primary system prompt.
+
+        This keeps the durable system prompt and stable Agent/project context
+        ahead of chat history, while per-turn volatile context can still be
+        inserted later immediately before the current user message.
+        """
+
+        if not context_messages:
+            return list(messages or [])
+        normalized = list(messages or [])
+        insert_at = 0
+        if normalized:
+            first = normalized[0]
+            if isinstance(first, dict):
+                role = str(first.get("role") or "").strip().lower()
+            else:
+                role = str(getattr(first, "type", "") or "").strip().lower()
+            if role in {"system"}:
+                insert_at = 1
+        return normalized[:insert_at] + list(context_messages or []) + normalized[insert_at:]
+
+    @staticmethod
     def finish_turn_message_carryover(
         *,
         messages: list,
