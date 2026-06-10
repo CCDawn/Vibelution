@@ -60,6 +60,10 @@ PAPER_NOTE_CHUNK_HARD_MAX_PAGES = 12
 PAPER_NOTE_CHUNK_DEFAULT_MAX_CHARS = 12000
 PAPER_NOTE_CHUNK_HARD_MAX_CHARS = 24000
 PAPER_NOTE_CHUNK_MAX_CHUNKS = 24
+SOURCE_QUALITY_DECISIONS = {"approved", "needs_revision", "rejected"}
+SOURCE_QUALITY_APPROVED_STATUSES = {"source_quality_approved", "source_manifest_ready"}
+SOURCE_QUALITY_NEEDS_REVISION_STATUSES = {"source_quality_needs_revision", "source_manifest_invalid"}
+SOURCE_QUALITY_REJECTED_STATUSES = {"source_quality_rejected", "rejected"}
 SOURCE_COLLECTION_DEFAULT_AGENT_ROLES = (
     "data_discovery",
     "source_acquisition",
@@ -1178,6 +1182,189 @@ def get_paper_note_chunk_status(team_id: str) -> dict[str, Any]:
             "chunkCount": chunk_count,
             "openChunkCount": open_count,
             "missingPlanSourceCandidateCount": len(missing_plan_sources),
+        },
+    )
+    return payload
+
+
+def assess_source_candidate_quality(team_id: str, candidate_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
+    normalized_candidate_id = _normalize_required_id(candidate_id, "Candidate id is required.")
+    team_service.get_team(normalized_team_id)
+    payload = payload if isinstance(payload, dict) else {}
+    assessed_by_agent = _trim_text(payload.get("assessedByAgent"), max_length=160) or "Source Quality Assessment Agent"
+    requested_decision = _trim_text(payload.get("decision"), max_length=80)
+    if requested_decision and requested_decision not in SOURCE_QUALITY_DECISIONS:
+        raise TeamWorkflowOrchestrationError("Source quality decision must be approved, needs_revision, or rejected.")
+    notes = _trim_text(payload.get("notes"), max_length=4000)
+    required_fixes = _normalize_text_list(payload.get("requiredFixes"), max_items=12, max_length=240)
+    risk_flags = _normalize_text_list(payload.get("riskFlags"), max_items=12, max_length=120)
+    evidence_refs = _normalize_ref_list(payload.get("evidenceRefs"), max_items=24)
+    now = utc_now_iso()
+    with _WORKFLOW_LOCK:
+        workflow = _load_or_create_workflow(normalized_team_id)
+        candidate_store = _load_candidate_store(normalized_team_id)
+        candidate = _find_candidate(candidate_store, normalized_candidate_id)
+        if candidate is None:
+            raise TeamWorkflowOrchestrationError("Candidate not found.")
+        if str(candidate.get("candidateType") or "") != "source_manifest":
+            raise TeamWorkflowOrchestrationError("Source quality assessment only supports source_manifest candidates.")
+        validation = validate_candidate_record(candidate)
+        scores = _source_quality_scores(candidate, payload, validation)
+        decision = requested_decision or _default_source_quality_decision(scores, validation)
+        if decision == "approved" and not validation.get("valid"):
+            decision = "needs_revision"
+            if not required_fixes:
+                required_fixes = ["修复 source_manifest 校验错误后再通过质量筛选。"]
+        source_label = _source_manifest_label(candidate)
+        assessment = {
+            "schemaVersion": SCHEMA_VERSION,
+            "assessmentId": _new_record_id("source-quality"),
+            "assessmentKind": "source_quality_assessment",
+            "candidateId": normalized_candidate_id,
+            "sourceLabel": source_label,
+            "decision": decision,
+            "status": decision,
+            "scores": scores,
+            "requiredFixes": required_fixes,
+            "riskFlags": risk_flags,
+            "notes": notes,
+            "evidenceRefs": evidence_refs,
+            "assessedByAgent": assessed_by_agent,
+            "assessedAt": now,
+            "officialBoundary": {
+                "writesFormalKnowledge": False,
+                "writesRag": False,
+                "writesOfficialGraph": False,
+                "candidateOnly": True,
+            },
+        }
+        metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {}
+        history = metadata.get("sourceQualityAssessments") if isinstance(metadata.get("sourceQualityAssessments"), list) else []
+        metadata["sourceQualityAssessment"] = assessment
+        metadata["sourceQualityAssessments"] = [*history[-11:], assessment]
+        candidate["metadata"] = metadata
+        candidate["validation"] = validation
+        if decision == "approved":
+            candidate["currentWorkflowNode"] = "knowledge_collection"
+            candidate["currentState"] = "source_screened"
+            candidate["qualityStatus"] = "source_quality_approved"
+        elif decision == "rejected":
+            candidate["currentWorkflowNode"] = "rejection_archive"
+            candidate["currentState"] = "rejected"
+            candidate["qualityStatus"] = "source_quality_rejected"
+            metadata["rejectionArchive"] = {
+                "reason": notes or "Source Quality Assessment Agent rejected this source candidate.",
+                "rejectedByAgent": assessed_by_agent,
+                "rejectedAt": now,
+                "assessmentId": assessment["assessmentId"],
+            }
+        else:
+            candidate["currentWorkflowNode"] = "knowledge_collection"
+            candidate["currentState"] = "source_needs_quality_revision"
+            candidate["qualityStatus"] = "source_quality_needs_revision"
+        candidate["updatedAt"] = now
+        candidate_store["updatedAt"] = now
+        _write_json(_candidate_store_path(normalized_team_id), candidate_store)
+        workflow["updatedAt"] = now
+        workflow["activeWorkflowItems"] = _upsert_active_item(
+            workflow.get("activeWorkflowItems"),
+            candidate_id=normalized_candidate_id,
+            current_node=str(candidate.get("currentWorkflowNode") or "knowledge_collection"),
+            status=str(candidate.get("currentState") or ""),
+            transfer_id=str(candidate.get("pendingTransferId") or ""),
+        )
+        _write_json(_workflow_path(normalized_team_id), workflow)
+    _record_workflow_event(
+        "candidate.source_quality_assessed",
+        normalized_team_id,
+        fields={
+            "workflowId": workflow["workflowId"],
+            "candidateId": normalized_candidate_id,
+            "decision": decision,
+            "overallScore": scores["overall"],
+            "assessedByAgent": assessed_by_agent,
+        },
+    )
+    return {
+        "candidate": candidate,
+        "assessment": assessment,
+        "status": get_source_quality_status(normalized_team_id),
+        "workflow": _workflow_to_api(normalized_team_id, workflow, candidate_store),
+        "nextActions": _source_quality_next_actions(decision),
+    }
+
+
+def get_source_quality_status(team_id: str) -> dict[str, Any]:
+    normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
+    team_service.get_team(normalized_team_id)
+    with _WORKFLOW_LOCK:
+        workflow = _load_or_create_workflow(normalized_team_id)
+        candidate_store = _load_candidate_store(normalized_team_id)
+        candidates = [item for item in list(candidate_store.get("candidates") or []) if isinstance(item, dict)]
+    source_candidates = [item for item in candidates if str(item.get("candidateType") or "") == "source_manifest"]
+    assessed = [item for item in source_candidates if _candidate_source_quality_assessment(item) is not None]
+    approved = [item for item in source_candidates if _source_quality_bucket(item) == "approved"]
+    needs_revision = [item for item in source_candidates if _source_quality_bucket(item) == "needs_revision"]
+    rejected = [item for item in source_candidates if _source_quality_bucket(item) == "rejected"]
+    unassessed = [item for item in source_candidates if _source_quality_bucket(item) == "pending"]
+    extraction_ready = [item for item in source_candidates if _source_candidate_has_ready_extraction(item)]
+    candidate_summaries = [_source_quality_candidate_summary(item) for item in source_candidates]
+    action_items = _source_quality_action_items(source_candidates, unassessed, needs_revision)
+    status = "empty"
+    if source_candidates:
+        status = "ready" if approved else "needs_screening"
+        if needs_revision or unassessed:
+            status = "in_progress" if approved else "needs_screening"
+        if len(rejected) == len(source_candidates):
+            status = "blocked"
+    payload = {
+        "schemaVersion": SCHEMA_VERSION,
+        "teamId": normalized_team_id,
+        "workflowId": workflow["workflowId"],
+        "workflowKind": workflow["workflowKind"],
+        "status": status,
+        "summary": {
+            "sourceCandidateCount": len(source_candidates),
+            "assessedSourceCandidateCount": len(assessed),
+            "approvedSourceCandidateCount": len(approved),
+            "needsRevisionSourceCandidateCount": len(needs_revision),
+            "rejectedSourceCandidateCount": len(rejected),
+            "unassessedSourceCandidateCount": len(unassessed),
+            "extractionReadySourceCandidateCount": len(extraction_ready),
+            "actionItemCount": len(action_items),
+        },
+        "candidates": sorted(candidate_summaries, key=lambda item: str(item.get("updatedAt") or ""), reverse=True)[:16],
+        "actionItems": action_items,
+        "screeningContract": {
+            "agentRole": "Source Quality Assessment Agent",
+            "targetCandidateType": "source_manifest",
+            "decisions": sorted(SOURCE_QUALITY_DECISIONS),
+            "writesCandidateStore": True,
+            "writesFormalKnowledge": False,
+            "writesRag": False,
+            "writesOfficialGraph": False,
+        },
+        "officialBoundary": {
+            "writesFormalKnowledge": False,
+            "writesRag": False,
+            "writesOfficialGraph": False,
+            "candidateOnly": True,
+        },
+        "storage": {
+            "candidateStorePath": _relative_path(_candidate_store_path(normalized_team_id)),
+        },
+        "updatedAt": utc_now_iso(),
+    }
+    _record_workflow_event(
+        "source_quality.status_viewed",
+        normalized_team_id,
+        fields={
+            "workflowId": workflow["workflowId"],
+            "status": status,
+            "sourceCandidateCount": len(source_candidates),
+            "approvedSourceCandidateCount": len(approved),
+            "unassessedSourceCandidateCount": len(unassessed),
         },
     )
     return payload
@@ -2626,8 +2813,8 @@ def _knowledge_ingestion_candidate_summary(
     source_ready = [
         item
         for item in source_candidates
-        if str(item.get("qualityStatus") or "") == "source_manifest_ready"
-        or str(item.get("currentState") or "") in {"source_registered", "screening_ready"}
+        if str(item.get("qualityStatus") or "") in SOURCE_QUALITY_APPROVED_STATUSES
+        or str(item.get("currentState") or "") in {"source_registered", "screening_ready", "source_screened"}
     ]
     local_candidates = [
         item
@@ -3543,6 +3730,191 @@ def _paper_note_chunk_action_items(
                 }
             )
     return items[:12]
+
+
+def _candidate_source_quality_assessment(candidate: dict[str, Any]) -> dict[str, Any] | None:
+    metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {}
+    assessment = metadata.get("sourceQualityAssessment") if isinstance(metadata.get("sourceQualityAssessment"), dict) else None
+    return assessment
+
+
+def _source_quality_bucket(candidate: dict[str, Any]) -> str:
+    assessment = _candidate_source_quality_assessment(candidate)
+    decision = str((assessment or {}).get("decision") or "")
+    quality_status = str(candidate.get("qualityStatus") or "")
+    current_state = str(candidate.get("currentState") or "")
+    if assessment is None and quality_status == "pending_screening":
+        return "pending"
+    if decision == "approved" or quality_status in SOURCE_QUALITY_APPROVED_STATUSES or current_state == "source_screened":
+        return "approved"
+    if decision == "rejected" or quality_status in SOURCE_QUALITY_REJECTED_STATUSES or current_state == "rejected":
+        return "rejected"
+    if decision == "needs_revision" or quality_status in SOURCE_QUALITY_NEEDS_REVISION_STATUSES or current_state in {"source_needs_confirmation", "source_needs_quality_revision"}:
+        return "needs_revision"
+    return "pending"
+
+
+def _source_quality_scores(candidate: dict[str, Any], payload: dict[str, Any], validation: dict[str, Any]) -> dict[str, int]:
+    defaults = _default_source_quality_scores(candidate, validation)
+    scores = {
+        "relevance": _payload_score(payload, "relevanceScore", defaults["relevance"]),
+        "reliability": _payload_score(payload, "reliabilityScore", defaults["reliability"]),
+        "accessibility": _payload_score(payload, "accessibilityScore", defaults["accessibility"]),
+        "extractionReadiness": _payload_score(payload, "extractionReadinessScore", defaults["extractionReadiness"]),
+    }
+    scores["overall"] = int(round(sum(scores.values()) / len(scores)))
+    return scores
+
+
+def _default_source_quality_scores(candidate: dict[str, Any], validation: dict[str, Any]) -> dict[str, int]:
+    metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {}
+    source_kind = _trim_text(candidate.get("sourceKind"), max_length=80).lower()
+    source_url = _trim_text(candidate.get("sourceUrl"), max_length=2000)
+    source_path = _trim_text(candidate.get("sourcePath") or metadata.get("sourcePath") or metadata.get("path"), max_length=2000)
+    summary = _trim_text(candidate.get("summary") or metadata.get("summary"), max_length=4000)
+    title = _trim_text(candidate.get("title"), max_length=240)
+    tags = " ".join(_normalize_text_list(candidate.get("tags"), max_items=24, max_length=80)).lower()
+    search_text = f"{title} {summary} {tags}".lower()
+    neuroscience_terms = ("neuro", "brain", "synaptic", "cortical", "dendritic", "spike", "predictive coding", "神经", "脑", "突触", "皮层")
+    algorithm_terms = ("network", "learning", "attention", "memory", "prediction", "algorithm", "模型", "算法", "学习", "注意力", "记忆")
+    relevance = 48
+    if any(term in search_text for term in neuroscience_terms):
+        relevance += 26
+    if any(term in search_text for term in algorithm_terms):
+        relevance += 16
+    if summary:
+        relevance += 8
+    reliability = 42
+    if source_kind in {"pdf", "paper", "review", "preprint", "dataset"}:
+        reliability += 18
+    if _trim_text(candidate.get("sha256") or metadata.get("sha256") or metadata.get("hash"), max_length=128):
+        reliability += 22
+    if validation.get("valid"):
+        reliability += 16
+    accessibility = 35
+    if source_url or source_path:
+        accessibility += 22
+    if candidate.get("allowedForAnalysis") is True or metadata.get("allowedForAnalysis") is True:
+        accessibility += 24
+    if source_path:
+        accessibility += 8
+    extraction = metadata.get("sourceExtraction") if isinstance(metadata.get("sourceExtraction"), dict) else {}
+    extraction_readiness = 36
+    if extraction.get("status") == "extracted" and isinstance(extraction.get("pageAnchors"), list) and extraction.get("pageAnchors"):
+        extraction_readiness = 92
+    elif extraction.get("status") == "failed":
+        extraction_readiness = 18
+    elif source_kind and source_kind != "pdf":
+        extraction_readiness = 58
+    elif source_path:
+        extraction_readiness = 46
+    return {
+        "relevance": _clamp_score(relevance),
+        "reliability": _clamp_score(reliability),
+        "accessibility": _clamp_score(accessibility),
+        "extractionReadiness": _clamp_score(extraction_readiness),
+    }
+
+
+def _payload_score(payload: dict[str, Any], key: str, default: int) -> int:
+    if key not in payload or payload.get(key) is None:
+        return _clamp_score(default)
+    return _clamp_score(_normalize_int(payload.get(key), default=default, minimum=0, maximum=100))
+
+
+def _clamp_score(value: int) -> int:
+    return max(0, min(int(value or 0), 100))
+
+
+def _default_source_quality_decision(scores: dict[str, int], validation: dict[str, Any]) -> str:
+    if not validation.get("valid"):
+        return "needs_revision"
+    if scores["overall"] >= 70 and min(scores["relevance"], scores["reliability"], scores["accessibility"]) >= 55:
+        return "approved"
+    return "needs_revision"
+
+
+def _source_quality_candidate_summary(candidate: dict[str, Any]) -> dict[str, Any]:
+    assessment = _candidate_source_quality_assessment(candidate) or {}
+    scores = assessment.get("scores") if isinstance(assessment.get("scores"), dict) else {}
+    return {
+        "candidateId": str(candidate.get("candidateId") or ""),
+        "title": str(candidate.get("title") or _source_manifest_label(candidate)),
+        "sourceKind": str(candidate.get("sourceKind") or ""),
+        "currentState": str(candidate.get("currentState") or ""),
+        "qualityStatus": str(candidate.get("qualityStatus") or ""),
+        "bucket": _source_quality_bucket(candidate),
+        "decision": str(assessment.get("decision") or ""),
+        "overallScore": int(scores.get("overall") or 0),
+        "scores": {
+            "relevance": int(scores.get("relevance") or 0),
+            "reliability": int(scores.get("reliability") or 0),
+            "accessibility": int(scores.get("accessibility") or 0),
+            "extractionReadiness": int(scores.get("extractionReadiness") or 0),
+        },
+        "hasReadyExtraction": _source_candidate_has_ready_extraction(candidate),
+        "requiredFixes": _normalize_text_list(assessment.get("requiredFixes"), max_items=12, max_length=240),
+        "riskFlags": _normalize_text_list(assessment.get("riskFlags"), max_items=12, max_length=120),
+        "updatedAt": str(candidate.get("updatedAt") or candidate.get("createdAt") or ""),
+        "assessedAt": str(assessment.get("assessedAt") or ""),
+    }
+
+
+def _source_quality_action_items(
+    source_candidates: list[dict[str, Any]],
+    unassessed: list[dict[str, Any]],
+    needs_revision: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if not source_candidates:
+        return [
+            {
+                "code": "source_quality_no_sources",
+                "severity": "blocked",
+                "message": "还没有 source_manifest 可供资料质量评估。",
+                "nextAction": "先启动资料搜集或手工回写 DataRecord 并导入 source_manifest。",
+                "candidateId": "",
+            }
+        ]
+    items: list[dict[str, Any]] = [
+        {
+            "code": "source_quality_pending_assessment",
+            "severity": "needs_review",
+            "message": f"{item.get('title') or _source_manifest_label(item)} 等待 Source Quality Assessment Agent 筛选。",
+            "nextAction": "调用 source-quality/assess，给出 approved 或 needs_revision。",
+            "candidateId": str(item.get("candidateId") or ""),
+        }
+        for item in unassessed[:6]
+    ]
+    for item in needs_revision[:6]:
+        assessment = _candidate_source_quality_assessment(item) or {}
+        required_fixes = _normalize_text_list(assessment.get("requiredFixes"), max_items=3, max_length=160)
+        items.append(
+            {
+                "code": "source_quality_needs_revision",
+                "severity": "needs_revision",
+                "message": f"{item.get('title') or _source_manifest_label(item)} 需要补充资料质量信息。",
+                "nextAction": "；".join(required_fixes) if required_fixes else "补来源、权限、sha256、摘要、页码锚点或相关性说明后重新评估。",
+                "candidateId": str(item.get("candidateId") or ""),
+            }
+        )
+    return items[:12]
+
+
+def _source_quality_next_actions(decision: str) -> list[str]:
+    if decision == "approved":
+        return [
+            "Content Extraction Agent can run source-extraction or paper_note chunk planning for this source.",
+            "Paper Note Extraction Agent should preserve sourceQualityAssessment as candidate-only evidence.",
+        ]
+    if decision == "rejected":
+        return [
+            "Keep this source in rejection_archive and do not use it for paper_note drafting.",
+            "Collect replacement sources before continuing the knowledge collection round.",
+        ]
+    return [
+        "Return the source to Source Intake Agent or Source Acquisition Agent for repair.",
+        "Re-run source-quality/assess after source path, permission, citation, or relevance gaps are fixed.",
+    ]
 
 
 def _resolve_source_path(source_path: str) -> Path:

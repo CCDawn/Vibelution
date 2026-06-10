@@ -39,7 +39,7 @@
         <aside class="dashboard-panel">
           <h2>审核摘要</h2>
           <div class="kpi-grid">
-            <div class="kpi"><b>当前阶段</b><strong>M6.10</strong><span>资料搜集执行台、模型证据链和 paper_note 分块计划已接入。</span></div>
+            <div class="kpi"><b>当前阶段</b><strong>M6.11</strong><span>资料搜集执行台、资料质量筛选、模型证据链和 paper_note 分块计划已接入。</span></div>
             <div class="kpi"><b>流程节点</b><strong>13</strong><span>1-9 为知识入库主线，10-13 保留占位与维护节点。</span></div>
             <div class="kpi"><b>候选资料</b><strong>10</strong><span>第一轮 source_manifest 已进入 candidate-only 工作区。</span></div>
             <div class="kpi"><b>正式写入</b><strong>0</strong><span>未写正式 Team Knowledge、RAG 或 official graph。</span></div>
@@ -47,7 +47,7 @@
           <div class="focus-list">
             <div class="focus-item"><b>优先看</b><span>资料搜集、候选图谱和知识入库边界是否能支撑下一轮科研提炼。</span></div>
             <div class="focus-item"><b>不能做</b><span>本页面不触发真实搜索、不审批入库、不把候选图谱当作正式事实。</span></div>
-            <div class="focus-item"><b>下一步</b><span>补资料质量评估、按 chunkId 执行 paper_note 提炼，以及多 chunk 草稿合并策略。</span></div>
+            <div class="focus-item"><b>下一步</b><span>按 chunkId 执行 paper_note 提炼，补多 chunk 草稿合并策略和机制提炼执行台。</span></div>
           </div>
         </aside>
       </section>
@@ -336,8 +336,8 @@
             </div>
 <div class="feature-row">
               <strong>source_manifest</strong>
-              <b class="status-pill partial">10 个 source_registered</b>
-              <span>全部为 candidate-only，qualityStatus=pending_screening。</span>
+              <b class="status-pill partial">10 个 source_registered / source_quality_*</b>
+              <span>全部为 candidate-only；可由 Source Quality Assessment Agent 写回 sourceQualityAssessment。</span>
             </div>
 <div class="feature-row">
               <strong>mechanism_mapping</strong>
@@ -446,8 +446,8 @@
           </div>
           <h2 style="margin-top: 14px;">下一步</h2>
           <div class="checklist">
-            <span>资料质量评估 Agent 对 10 条 source_manifest 做可靠性、可访问性、相关性筛选。</span>
-<span>内容抽取 Agent 为通过筛选的来源补 page/citation anchors；Paper Note Extraction Agent 先生成 paperNoteChunkPlan，再按 chunkId 生成 paper_note 草稿。</span>
+            <span>Source Quality Assessment Agent 对 source_manifest 做可靠性、可访问性、相关性和抽取风险筛选。</span>
+<span>内容抽取 Agent 为 source_quality_approved 来源补 page/citation anchors；Paper Note Extraction Agent 先生成 paperNoteChunkPlan，再按 chunkId 生成 paper_note 草稿。</span>
 <span>候选图谱需要修复 missing links；当前 status actionItems 指向 repair_candidate_graph_links 与 run_review_prefilter。</span>
 <span>知识治理 Agent 只能在 review/steward pack 完成后生成待审入库包，不能直接正式入库。</span>
           </div>
@@ -659,8 +659,8 @@
         <div class="agent-row">
         <b>01</b>
         <strong>Source Intake Agent</strong>
-        <span>可复用通用 data-processing assignment / source-extraction 后端已接入；Teams 资料搜集执行台和三阶段启动台已接入</span>
-        <span>ResearchStageRound 建立 / 三阶段启动台一键进入知识搜集 / 自动启动团队协调 round / DataProcessingRun 建立 / DataSearchPlan/querySeeds 搜索计划 / CollectionAssignment 资料搜集任务 / assignedQueries 角色分配 / Teams 启动搜集批次 / Teams 查看 run/assignment/query 状态 / 手工 CollectionOutput 回写 / DataRecord 通用记录 / DataRecord 自动导入 source_manifest / 本地资料登记 / source_manifest 写入 / 文件路径/页码/来源可信度记录 / 本地 PDF sha256/pageAnchors/excerpt 抽取 / 可选 research_knowledge_query_tool 查重</span>
+        <span>可复用通用 data-processing assignment / source-extraction / source-quality 后端已接入；Teams 资料搜集执行台、候选资料筛选台和三阶段启动台已接入</span>
+        <span>ResearchStageRound 建立 / 三阶段启动台一键进入知识搜集 / 自动启动团队协调 round / DataProcessingRun 建立 / DataSearchPlan/querySeeds 搜索计划 / CollectionAssignment 资料搜集任务 / assignedQueries 角色分配 / Teams 启动搜集批次 / Teams 查看 run/assignment/query 状态 / 手工 CollectionOutput 回写 / DataRecord 通用记录 / DataRecord 自动导入 source_manifest / 本地资料登记 / source_manifest 写入 / 文件路径/页码/来源可信度记录 / 本地 PDF sha256/pageAnchors/excerpt 抽取 / sourceQualityAssessment 筛选 / 可选 research_knowledge_query_tool 查重</span>
         <span>确认资料允许分析、来源可信度和是否纳入本轮。</span>
       </div>
 <div class="agent-row">
@@ -766,6 +766,11 @@
 <div class="feature-row">
         <strong>团队协调队列</strong>
         <span>coordination/status 聚合 pendingTransfers、needsRework、stewardship、blocked、active 队列，并输出 communicationBrief；Teams 科研流程面板已显示协调状态、目标 Agent、建议通道与只读策略边界</span>
+        <b class="status-pill">已接入前端/API</b>
+      </div>
+<div class="feature-row">
+        <strong>资料质量筛选</strong>
+        <span>source-quality/status 与 source-quality/assess 聚合/写回 source_manifest 质量评估；Teams 候选资料页可通过筛选或退回补资料</span>
         <b class="status-pill">已接入前端/API</b>
       </div>
 <div class="feature-row">
@@ -1201,6 +1206,10 @@
               <p>登记资料，不做正式入库。</p>
             </article>
 <article class="role-card">
+              <h3>Source Quality Assessment Agent</h3>
+              <p>筛选 source_manifest 的可靠性、可访问性、相关性和抽取风险，只写 CandidateStore。</p>
+            </article>
+<article class="role-card">
               <h3>Paper Note Extraction Agent</h3>
               <p>生成 paper_note，保留页码、引用和不确定性。</p>
             </article>
@@ -1310,11 +1319,11 @@
                 </div>
 <div class="service-row">
                   <b>team_workflow_orchestration_service</b>
-                  <span>已落地：Team 级 workflowOrchestration、ResearchStageRound、CandidateStore、transfer request/decision、source-collection run 启动、DataSearchPlan/query seed 契约、DataRecord -&gt; source_manifest 幂等导入桥、paper_note chunk planning，以及 official_model_evidence 证据登记/status。</span>
+                  <span>已落地：Team 级 workflowOrchestration、ResearchStageRound、CandidateStore、transfer request/decision、source-collection run 启动、DataSearchPlan/query seed 契约、DataRecord -&gt; source_manifest 幂等导入桥、source_quality assessment、paper_note chunk planning，以及 official_model_evidence 证据登记/status。</span>
                 </div>
 <div class="service-row">
                   <b>team_workflows API</b>
-                  <span>已落地：/api/teams/{team_id}/workflow-orchestration、stage-rounds/status、stage-rounds/start、stage-rounds/{stageRoundId}/coordination/retry、stage-rounds/{stageRoundId}/memory-record/retry、source-collection-runs（含 searchPlan/querySeeds/assignedQueries/resultWritebackContract）、candidates/source、data-processing/runs/{runId}/records/{recordId}/source-candidate、candidates/{candidate_id}/source-extraction、paper-note-chunks/status、candidates/{candidate_id}/paper-note-chunks/plan、candidates/{candidate_id}/paper-note-draft（支持 chunkId）、candidates、candidates/validation、candidate-graph、transfers、decide、knowledge-ingestion/status、coordination/status、official-model-evidence/status、official-model-evidence；coordination/status 返回 communicationBrief。</span>
+                  <span>已落地：/api/teams/{team_id}/workflow-orchestration、stage-rounds/status、stage-rounds/start、stage-rounds/{stageRoundId}/coordination/retry、stage-rounds/{stageRoundId}/memory-record/retry、source-collection-runs（含 searchPlan/querySeeds/assignedQueries/resultWritebackContract）、candidates/source、data-processing/runs/{runId}/records/{recordId}/source-candidate、candidates/{candidate_id}/source-extraction、source-quality/status、candidates/{candidate_id}/source-quality/assess、paper-note-chunks/status、candidates/{candidate_id}/paper-note-chunks/plan、candidates/{candidate_id}/paper-note-draft（支持 chunkId）、candidates、candidates/validation、candidate-graph、transfers、decide、knowledge-ingestion/status、coordination/status、official-model-evidence/status、official-model-evidence；coordination/status 返回 communicationBrief。</span>
                 </div>
 <div class="service-row">
                   <b>TeamsRoute workflow workspace</b>
@@ -1335,6 +1344,10 @@
 <div class="service-row">
                   <b>source_parser</b>
                   <span>已接入后端/API：本地 PDF source_manifest 可计算 sha256、抽取 pageAnchors/excerpt 并回写 CandidateStore；缺文件、非 PDF、解析器不可用或无文本时记录 failed extraction。</span>
+                </div>
+<div class="service-row">
+                  <b>source_quality_assessment</b>
+                  <span>已接入后端/API/Teams 候选资料页：对 source_manifest 记录 relevance/reliability/accessibility/extractionReadiness/overall 分数和 approved/needs_revision/rejected 决策。</span>
                 </div>
 <div class="service-row">
                   <b>paper_note_chunk_planner</b>
@@ -1662,6 +1675,16 @@
               <span>允许登记 invocation_log、sample_output、screenshot、config 或 manual_attestation，要求绑定 taskType/workflowNode/candidateId 之一，用于审计而非自动入库。</span>
             </div>
 <div class="blueprint-row compact">
+              <b>资料质量筛选状态</b>
+              <strong>/api/teams/{teamId}/workflow-orchestration/source-quality/status</strong>
+              <span>只读聚合 source_manifest 的 assessed/approved/needs_revision/rejected/unassessed、actionItems、screeningContract 和 officialBoundary。</span>
+            </div>
+<div class="blueprint-row compact">
+              <b>资料质量筛选写回</b>
+              <strong>/api/teams/{teamId}/workflow-orchestration/candidates/{candidateId}/source-quality/assess</strong>
+              <span>Source Quality Assessment Agent 对 source_manifest 写入 metadata.sourceQualityAssessment，并更新 source_quality_approved/source_quality_needs_revision/source_quality_rejected；不写正式知识/RAG/图谱。</span>
+            </div>
+<div class="blueprint-row compact">
               <b>paper_note 分块状态</b>
               <strong>/api/teams/{teamId}/workflow-orchestration/paper-note-chunks/status</strong>
               <span>只读聚合 sourceExtraction 就绪来源、paperNoteChunkPlan、chunk draft 进度、缺计划来源和 actionItems；不写正式知识/RAG/图谱。</span>
@@ -1674,12 +1697,12 @@
 <div class="blueprint-row compact">
               <b>服务文件</b>
               <strong>core/web/services/team_workflow_orchestration_service.py</strong>
-              <span>Team 编排、资料搜集批次启动、候选登记、DataRecord 导入、paper_note 分块计划、模型证据登记、转移请求、协调 Agent 裁决和轻量运行事件日志。</span>
+              <span>Team 编排、资料搜集批次启动、候选登记、DataRecord 导入、资料质量筛选、paper_note 分块计划、模型证据登记、转移请求、协调 Agent 裁决和轻量运行事件日志。</span>
             </div>
 <div class="blueprint-row compact">
               <b>路由文件</b>
               <strong>core/web/routes/team_workflows.py</strong>
-              <span>提供工作流查询/确保、资料搜集批次启动、候选资料登记、DataRecord 导入、paper_note 分块状态/计划、模型证据状态/登记、转移提交、转移裁决 API。</span>
+              <span>提供工作流查询/确保、资料搜集批次启动、候选资料登记、DataRecord 导入、资料质量筛选状态/写回、paper_note 分块状态/计划、模型证据状态/登记、转移提交、转移裁决 API。</span>
             </div>
 <div class="blueprint-row compact">
               <b>路由注册</b>
@@ -1794,7 +1817,7 @@
 <div class="blueprint-row compact">
               <b>验证</b>
               <strong>tests/test_data_processing_service.py + tests/test_data_processing_routes.py + tests/test_team_workflow_orchestration_service.py + tests/test_team_workflow_routes.py + TeamsRoute.layout.test.ts</strong>
-              <span>覆盖通用数据处理首切、ResearchStageRound 三阶段启动/续做/新一轮、source-collection run 启动、DataSearchPlan/query seed 契约、DataRecord 导入 source_manifest、Teams 资料搜集执行台契约、主路径、非 ownerAgent 不能写最终状态、本地模型任务包、输出校验、知识入库状态总览、模型证据链和 paper_note 分块计划前端契约。</span>
+              <span>覆盖通用数据处理首切、ResearchStageRound 三阶段启动/续做/新一轮、source-collection run 启动、DataSearchPlan/query seed 契约、DataRecord 导入 source_manifest、Teams 资料搜集执行台契约、主路径、非 ownerAgent 不能写最终状态、本地模型任务包、输出校验、知识入库状态总览、模型证据链、资料质量筛选和 paper_note 分块计划前端契约。</span>
             </div>
       </div>
       <div class="agent-matrix" style="margin-top: 12px;">
@@ -1918,6 +1941,12 @@
               <span>新增 paper-note-chunks/status 与 paper-note-chunks/plan；Teams 候选资料页可对已完成 sourceExtraction 的 source_manifest 生成/重建 paperNoteChunkPlan。</span>
               <span>分块计划只写 CandidateStore metadata，按 pageAnchors 生成 chunk seeds；paper-note-draft 可带 chunkId 逐块草稿化并回写 chunk 进度，不写正式 Team Knowledge/RAG/official graph。</span>
             </div>
+<div class="blueprint-row">
+              <b>M6.11</b>
+              <strong>资料质量筛选执行台</strong>
+              <span>新增 source-quality/status 与 source-quality/assess；Teams 候选资料页可由 Source Quality Assessment Agent 对 source_manifest 标记通过筛选或退回补资料。</span>
+              <span>评估结果写入 CandidateStore metadata.sourceQualityAssessment/sourceQualityAssessments，并更新 source_quality_approved/source_quality_needs_revision/source_quality_rejected；不写正式 Team Knowledge/RAG/official graph。</span>
+            </div>
       </div>
       <div class="tag-row">
         <span class="tag">DataProcessingRun</span>
@@ -1936,6 +1965,7 @@
 <span class="tag">steward_ingestion_pack</span>
 <span class="tag">official_sync_record</span>
 <span class="tag">official_model_evidence</span>
+<span class="tag">source_quality_assessment</span>
       </div>
     </section>
   </div>

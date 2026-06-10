@@ -67,6 +67,7 @@ const SOURCE_COLLECTION_DEFAULT_ROLES = ["data_discovery", "source_acquisition",
 const researchStageRoundStatusQueryKey = (id: string) => ["teams", id, "workflow-orchestration", "stage-rounds", "status"] as const;
 const officialModelEvidenceStatusQueryKey = (id: string) => ["teams", id, "workflow-orchestration", "official-model-evidence", "status"] as const;
 const paperNoteChunkStatusQueryKey = (id: string) => ["teams", id, "workflow-orchestration", "paper-note-chunks", "status"] as const;
+const sourceQualityStatusQueryKey = (id: string) => ["teams", id, "workflow-orchestration", "source-quality", "status"] as const;
 
 type ResearchWorkspaceView = "overview" | "source_collection" | "coordination" | "ingestion" | "graph" | "candidates" | "discussion" | "canvas";
 
@@ -348,6 +349,89 @@ type TeamWorkflowPaperNoteChunkPlanPayload = {
     status: string;
     chunkCount: number;
   };
+  workflow: TeamWorkflowOrchestration;
+  nextActions: string[];
+};
+
+type TeamWorkflowSourceQualityStatus = {
+  schemaVersion: number;
+  teamId: string;
+  workflowId: string;
+  workflowKind: string;
+  status: "empty" | "needs_screening" | "in_progress" | "ready" | "blocked" | string;
+  summary: {
+    sourceCandidateCount: number;
+    assessedSourceCandidateCount: number;
+    approvedSourceCandidateCount: number;
+    needsRevisionSourceCandidateCount: number;
+    rejectedSourceCandidateCount: number;
+    unassessedSourceCandidateCount: number;
+    extractionReadySourceCandidateCount: number;
+    actionItemCount: number;
+  };
+  candidates: Array<{
+    candidateId: string;
+    title: string;
+    sourceKind: string;
+    currentState: string;
+    qualityStatus: string;
+    bucket: string;
+    decision: string;
+    overallScore: number;
+    scores: {
+      relevance: number;
+      reliability: number;
+      accessibility: number;
+      extractionReadiness: number;
+    };
+    hasReadyExtraction: boolean;
+    requiredFixes: string[];
+    riskFlags: string[];
+    updatedAt: string;
+    assessedAt: string;
+  }>;
+  actionItems: Array<{
+    code: string;
+    severity: string;
+    message: string;
+    nextAction: string;
+    candidateId: string;
+  }>;
+  screeningContract: {
+    agentRole: string;
+    targetCandidateType: string;
+    decisions: string[];
+    writesCandidateStore: boolean;
+    writesFormalKnowledge: boolean;
+    writesRag: boolean;
+    writesOfficialGraph: boolean;
+  };
+  officialBoundary: {
+    writesFormalKnowledge: boolean;
+    writesRag: boolean;
+    writesOfficialGraph: boolean;
+    candidateOnly: boolean;
+  };
+  storage: {
+    candidateStorePath: string;
+  };
+  updatedAt: string;
+};
+
+type TeamWorkflowSourceQualityAssessmentPayload = {
+  candidate: TeamWorkflowCandidate;
+  assessment: {
+    assessmentId: string;
+    decision: string;
+    scores: {
+      relevance: number;
+      reliability: number;
+      accessibility: number;
+      extractionReadiness: number;
+      overall: number;
+    };
+  };
+  status: TeamWorkflowSourceQualityStatus;
   workflow: TeamWorkflowOrchestration;
   nextActions: string[];
 };
@@ -760,6 +844,7 @@ function workflowIngestionStatusLabel(value: string, lang: "zh" | "en") {
   const zh: Record<string, string> = {
     empty: "空",
     blocked: "阻塞",
+    needs_screening: "待筛选",
     needs_plan: "待规划",
     needs_revision: "需修订",
     needs_evidence: "补证据",
@@ -768,10 +853,13 @@ function workflowIngestionStatusLabel(value: string, lang: "zh" | "en") {
     pending: "待启动",
     ready: "已跑通",
     planned: "已规划",
+    approved: "已通过",
+    rejected: "已拒绝",
   };
   const en: Record<string, string> = {
     empty: "empty",
     blocked: "blocked",
+    needs_screening: "screening",
     needs_plan: "needs plan",
     needs_revision: "revision",
     needs_evidence: "evidence",
@@ -780,6 +868,8 @@ function workflowIngestionStatusLabel(value: string, lang: "zh" | "en") {
     pending: "pending",
     ready: "ready",
     planned: "planned",
+    approved: "approved",
+    rejected: "rejected",
   };
   return (lang === "zh" ? zh : en)[normalized] ?? (normalized || "-");
 }
@@ -836,7 +926,7 @@ function workflowIngestionTone(value: string) {
   if (normalized === "blocked" || normalized === "needs_revision") {
     return styles.workflowTagDanger;
   }
-  if (normalized === "needs_review" || normalized === "needs_evidence" || normalized === "pending") {
+  if (normalized === "needs_review" || normalized === "needs_evidence" || normalized === "needs_screening" || normalized === "pending") {
     return styles.workflowTagWarning;
   }
   return styles.workflowTagNeutral;
@@ -883,6 +973,20 @@ function candidatePaperNoteChunkPlanSummary(candidate: TeamWorkflowCandidate) {
     chunkCount: Number(plan.chunkCount || 0),
     completedChunkCount: Number(plan.completedChunkCount || 0),
     needsRevisionChunkCount: Number(plan.needsRevisionChunkCount || 0),
+  };
+}
+
+function candidateSourceQualityAssessmentSummary(candidate: TeamWorkflowCandidate) {
+  const metadata = isRecord(candidate.metadata) ? candidate.metadata : {};
+  const assessment = isRecord(metadata.sourceQualityAssessment) ? metadata.sourceQualityAssessment : null;
+  if (!assessment) {
+    return null;
+  }
+  const scores = isRecord(assessment.scores) ? assessment.scores : {};
+  return {
+    assessmentId: String(assessment.assessmentId || ""),
+    decision: String(assessment.decision || ""),
+    overallScore: Number(scores.overall || 0),
   };
 }
 
@@ -1111,6 +1215,14 @@ export function TeamsRoute() {
     queryFn: () =>
       fetchJson<TeamWorkflowOfficialModelEvidenceStatus>(
         `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/official-model-evidence/status`,
+      ),
+    enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && teamWorkflowQuery.data),
+  });
+  const teamWorkflowSourceQualityStatusQuery = useQuery({
+    queryKey: sourceQualityStatusQueryKey(effectiveTeamId || "none"),
+    queryFn: () =>
+      fetchJson<TeamWorkflowSourceQualityStatus>(
+        `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/source-quality/status`,
       ),
     enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && teamWorkflowQuery.data),
   });
@@ -1444,6 +1556,7 @@ export function TeamsRoute() {
       void queryClient.invalidateQueries({ queryKey: queryKeys.dataProcessingRunStatus(payload.run.runId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.dataProcessingCollectionAssignments(payload.run.runId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowKnowledgeIngestionStatus(variables.teamId) });
+      void queryClient.invalidateQueries({ queryKey: sourceQualityStatusQueryKey(variables.teamId) });
       void queryClient.invalidateQueries({ queryKey: paperNoteChunkStatusQueryKey(variables.teamId) });
     },
   });
@@ -1565,6 +1678,36 @@ export function TeamsRoute() {
       }
       void queryClient.invalidateQueries({ queryKey: queryKeys.dataProcessingRunStatus(variables.runId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.dataProcessingCollectionAssignments(variables.runId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowCandidates(variables.teamId, TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowKnowledgeIngestionStatus(variables.teamId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowCoordinationStatus(variables.teamId) });
+      void queryClient.invalidateQueries({ queryKey: sourceQualityStatusQueryKey(variables.teamId) });
+      void queryClient.invalidateQueries({ queryKey: paperNoteChunkStatusQueryKey(variables.teamId) });
+    },
+  });
+
+  const assessSourceQualityMutation = useMutation({
+    mutationFn: (payload: { teamId: string; candidateId: string; decision: "approved" | "needs_revision" }) =>
+      fetchJson<TeamWorkflowSourceQualityAssessmentPayload>(
+        `/api/teams/${encodeURIComponent(payload.teamId)}/workflow-orchestration/candidates/${encodeURIComponent(payload.candidateId)}/source-quality/assess`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            assessedByAgent: sourceCollectionOwnerAgentId,
+            decision: payload.decision,
+            notes: payload.decision === "approved"
+              ? "Source Quality Assessment Agent approved this source for downstream paper_note extraction."
+              : "Source Quality Assessment Agent returned this source for repair before downstream extraction.",
+            requiredFixes: payload.decision === "needs_revision"
+              ? ["补充来源路径/权限/sha256/摘要/页码锚点或相关性说明后重新筛选。"]
+              : [],
+          }),
+        },
+      ),
+    onSuccess: (payload, variables) => {
+      queryClient.setQueryData(queryKeys.teamWorkflow(variables.teamId), payload.workflow);
+      queryClient.setQueryData(sourceQualityStatusQueryKey(variables.teamId), payload.status);
       void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowCandidates(variables.teamId, TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowKnowledgeIngestionStatus(variables.teamId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowCoordinationStatus(variables.teamId) });
@@ -2015,6 +2158,7 @@ export function TeamsRoute() {
   const teamWorkflowCoordinationStatus = teamWorkflowCoordinationStatusQuery.data ?? null;
   const teamWorkflowKnowledgeIngestionStatus = teamWorkflowKnowledgeIngestionStatusQuery.data ?? null;
   const teamWorkflowOfficialModelEvidenceStatus = teamWorkflowOfficialModelEvidenceStatusQuery.data ?? null;
+  const teamWorkflowSourceQualityStatus = teamWorkflowSourceQualityStatusQuery.data ?? null;
   const teamWorkflowPaperNoteChunkStatus = teamWorkflowPaperNoteChunkStatusQuery.data ?? null;
   const researchStageRoundStatus = researchStageRoundStatusQuery.data ?? null;
   const researchStagePhases = researchStageRoundStatus?.phases ?? [];
@@ -2072,6 +2216,12 @@ export function TeamsRoute() {
   const selectedTeamPlanPaperNoteChunksError =
     planPaperNoteChunksMutation.variables?.teamId === selectedTeam?.teamId && planPaperNoteChunksMutation.error instanceof Error
       ? planPaperNoteChunksMutation.error
+      : null;
+  const selectedTeamAssessSourceQualityPending =
+    assessSourceQualityMutation.isPending && assessSourceQualityMutation.variables?.teamId === selectedTeam?.teamId;
+  const selectedTeamAssessSourceQualityError =
+    assessSourceQualityMutation.variables?.teamId === selectedTeam?.teamId && assessSourceQualityMutation.error instanceof Error
+      ? assessSourceQualityMutation.error
       : null;
   const activeWorkflowItemCount = teamWorkflow?.activeWorkflowItems.length ?? 0;
   const researchCanvasVisible = researchWorkflowTeamSelected && researchWorkspaceView === "canvas";
@@ -3189,6 +3339,74 @@ export function TeamsRoute() {
                       ) : null}
                       {showResearchCandidates ? (
                         <>
+                      <div className={styles.workflowSourceQualityPanel}>
+                        <div className={styles.workflowIngestionHeader}>
+                          <div>
+                            <strong>{lang === "zh" ? "资料质量筛选" : "Source quality screening"}</strong>
+                            <span>
+                              {teamWorkflowSourceQualityStatus
+                                ? `${teamWorkflowSourceQualityStatus.summary.approvedSourceCandidateCount} approved / ${teamWorkflowSourceQualityStatus.summary.sourceCandidateCount} sources`
+                                : teamWorkflowSourceQualityStatusQuery.isPending
+                                ? (lang === "zh" ? "读取中" : "loading")
+                                : (lang === "zh" ? "等待 source_manifest" : "waiting for source_manifest")}
+                            </span>
+                          </div>
+                          <span className={`${styles.workflowTag} ${workflowIngestionTone(teamWorkflowSourceQualityStatus?.status || "")}`}>
+                            {teamWorkflowSourceQualityStatus
+                              ? workflowIngestionStatusLabel(teamWorkflowSourceQualityStatus.status, lang)
+                              : (lang === "zh" ? "未读取" : "not loaded")}
+                          </span>
+                        </div>
+                        {teamWorkflowSourceQualityStatus ? (
+                          <>
+                            <div className={styles.workflowSourceQualityStats}>
+                              <span>{lang === "zh" ? "来源" : "sources"} <strong>{teamWorkflowSourceQualityStatus.summary.sourceCandidateCount}</strong></span>
+                              <span>{lang === "zh" ? "已筛选" : "assessed"} <strong>{teamWorkflowSourceQualityStatus.summary.assessedSourceCandidateCount}</strong></span>
+                              <span>{lang === "zh" ? "通过" : "approved"} <strong>{teamWorkflowSourceQualityStatus.summary.approvedSourceCandidateCount}</strong></span>
+                              <span>{lang === "zh" ? "待修订" : "revision"} <strong>{teamWorkflowSourceQualityStatus.summary.needsRevisionSourceCandidateCount}</strong></span>
+                              <span>{lang === "zh" ? "未筛选" : "pending"} <strong>{teamWorkflowSourceQualityStatus.summary.unassessedSourceCandidateCount}</strong></span>
+                            </div>
+                            {teamWorkflowSourceQualityStatus.candidates.length ? (
+                              <div className={styles.workflowSourceQualityQueue}>
+                                {teamWorkflowSourceQualityStatus.candidates.slice(0, 5).map((item) => (
+                                  <span key={item.candidateId} className={workflowIngestionTone(item.bucket === "approved" ? "ready" : item.bucket)}>
+                                    <strong>{item.title}</strong>
+                                    <small>
+                                      {workflowIngestionStatusLabel(item.bucket, lang)} · {item.overallScore ? `${item.overallScore}/100` : "-"} · {item.sourceKind || "source"}
+                                    </small>
+                                  </span>
+                                ))}
+                              </div>
+                            ) : null}
+                            {teamWorkflowSourceQualityStatus.actionItems.length ? (
+                              <div className={styles.workflowIngestionActions}>
+                                {teamWorkflowSourceQualityStatus.actionItems.slice(0, 3).map((item) => (
+                                  <span key={`${item.code}-${item.candidateId}`} className={workflowIngestionTone(item.severity)}>
+                                    {workflowIngestionStatusLabel(item.severity, lang)} · {item.message}
+                                  </span>
+                                ))}
+                              </div>
+                            ) : null}
+                            <div className={styles.workflowIngestionBoundary}>
+                              <span>{lang === "zh" ? "Source Quality Assessment Agent" : "Source Quality Assessment Agent"}</span>
+                              <span>{lang === "zh" ? "只写 CandidateStore" : "CandidateStore only"}</span>
+                              <span>{lang === "zh" ? "不写正式知识/RAG/图谱" : "no formal Knowledge/RAG/Graph writes"}</span>
+                            </div>
+                          </>
+                        ) : (
+                          <div className={styles.empty}>
+                            {teamWorkflowSourceQualityStatusQuery.isPending
+                              ? (lang === "zh" ? "正在汇总 source_manifest 质量筛选状态..." : "Aggregating source quality screening status...")
+                              : (lang === "zh" ? "暂无资料质量筛选状态。" : "No source quality status yet.")}
+                          </div>
+                        )}
+                        {teamWorkflowSourceQualityStatusQuery.error instanceof Error ? (
+                          <div className={styles.messageError}>{teamWorkflowSourceQualityStatusQuery.error.message}</div>
+                        ) : null}
+                        {selectedTeamAssessSourceQualityError ? (
+                          <div className={styles.messageError}>{selectedTeamAssessSourceQualityError.message}</div>
+                        ) : null}
+                      </div>
                       <div className={styles.workflowPaperNoteChunkPanel}>
                         <div className={styles.workflowIngestionHeader}>
                           <div>
@@ -3262,7 +3480,11 @@ export function TeamsRoute() {
                         <div className={styles.workflowCandidateList} id="research-workflow-candidates">
                           {teamWorkflowCandidates.map((candidate) => {
                             const chunkPlanSummary = candidatePaperNoteChunkPlanSummary(candidate);
+                            const sourceQualitySummary = candidateSourceQualityAssessmentSummary(candidate);
                             const canPlanPaperNoteChunks = sourceCandidateHasCompletedExtraction(candidate);
+                            const candidateQualityPending =
+                              selectedTeamAssessSourceQualityPending
+                              && assessSourceQualityMutation.variables?.candidateId === candidate.candidateId;
                             const candidatePlanPending =
                               selectedTeamPlanPaperNoteChunksPending
                               && planPaperNoteChunksMutation.variables?.candidateId === candidate.candidateId;
@@ -3279,6 +3501,13 @@ export function TeamsRoute() {
                                   <span>{candidate.candidateType}</span>
                                   <span>{candidate.qualityStatus}</span>
                                   <span>{formatTime(candidate.updatedAt, lang)}</span>
+                                  {sourceQualitySummary ? (
+                                    <span>
+                                      source quality {workflowIngestionStatusLabel(sourceQualitySummary.decision, lang)} · {sourceQualitySummary.overallScore}/100
+                                    </span>
+                                  ) : candidate.candidateType === "source_manifest" ? (
+                                    <span>{lang === "zh" ? "待资料质量筛选" : "pending source quality"}</span>
+                                  ) : null}
                                   {chunkPlanSummary ? (
                                     <span>
                                       paper_note chunks {chunkPlanSummary.completedChunkCount}/{chunkPlanSummary.chunkCount}
@@ -3289,6 +3518,46 @@ export function TeamsRoute() {
                                 </div>
                                 {candidate.candidateType === "source_manifest" ? (
                                   <div className={styles.workflowCandidateActions}>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        if (!selectedTeam?.teamId || assessSourceQualityMutation.isPending) {
+                                          return;
+                                        }
+                                        assessSourceQualityMutation.mutate({
+                                          teamId: selectedTeam.teamId,
+                                          candidateId: candidate.candidateId,
+                                          decision: "approved",
+                                        });
+                                      }}
+                                      disabled={!selectedTeam?.teamId || assessSourceQualityMutation.isPending}
+                                      title={lang === "zh" ? "由 Source Quality Assessment Agent 标记为通过筛选" : "Mark this source as approved by Source Quality Assessment Agent"}
+                                    >
+                                      <CheckCircle2 size={13} />
+                                      {candidateQualityPending && assessSourceQualityMutation.variables?.decision === "approved"
+                                        ? (lang === "zh" ? "筛选中" : "Assessing")
+                                        : (lang === "zh" ? "通过筛选" : "Approve source")}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        if (!selectedTeam?.teamId || assessSourceQualityMutation.isPending) {
+                                          return;
+                                        }
+                                        assessSourceQualityMutation.mutate({
+                                          teamId: selectedTeam.teamId,
+                                          candidateId: candidate.candidateId,
+                                          decision: "needs_revision",
+                                        });
+                                      }}
+                                      disabled={!selectedTeam?.teamId || assessSourceQualityMutation.isPending}
+                                      title={lang === "zh" ? "退回 Source Intake / Acquisition Agent 补资料" : "Return this source for quality repair"}
+                                    >
+                                      <AlertTriangle size={13} />
+                                      {candidateQualityPending && assessSourceQualityMutation.variables?.decision === "needs_revision"
+                                        ? (lang === "zh" ? "退回中" : "Returning")
+                                        : (lang === "zh" ? "退回补资料" : "Needs repair")}
+                                    </button>
                                     <button
                                       type="button"
                                       onClick={() => {
