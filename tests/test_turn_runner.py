@@ -265,8 +265,14 @@ def test_prepare_agent_turn_seeds_optional_supported_inputs():
         def seed_turn_carryover(self, carryover):
             captured["carryover"] = carryover
 
+        def seed_static_runtime_context(self, context):
+            captured["static_runtime_context"] = context
+
         def seed_runtime_context(self, context):
-            captured["runtime_context"] = context
+            captured.setdefault("runtime_contexts", []).append(context)
+
+        def mark_runtime_context_seeded_by_host(self):
+            captured["runtime_context_seeded_by_host"] = True
 
         def set_turn_interrupt_checker(self, checker):
             captured["interrupt_reason"] = checker()
@@ -277,14 +283,18 @@ def test_prepare_agent_turn_seeds_optional_supported_inputs():
     prepare_agent_turn(
         FakeAgent(),
         carryover={"previous": "state"},
-        runtime_context="Runtime Context",
+        runtime_context="Legacy Runtime Context",
+        static_runtime_context="Static Runtime Context",
+        dynamic_runtime_context="Dynamic Runtime Context",
         interrupt_checker=lambda: "stop_requested",
         chat_history=[{"role": "assistant", "content": "hello"}],
     )
 
     assert captured == {
         "carryover": {"previous": "state"},
-        "runtime_context": "Runtime Context",
+        "static_runtime_context": "Static Runtime Context",
+        "runtime_contexts": ["Dynamic Runtime Context"],
+        "runtime_context_seeded_by_host": True,
         "interrupt_reason": "stop_requested",
         "chat_history": [{"role": "assistant", "content": "hello"}],
     }

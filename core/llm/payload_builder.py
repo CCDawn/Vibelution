@@ -349,6 +349,35 @@ def _append_cache_control_to_content(content: Any) -> Any:
     return content
 
 
+def _message_accepts_qwen_prompt_cache_marker(message: Dict[str, Any]) -> bool:
+    role = str(message.get("role") or "").strip().lower()
+    if role not in {"user", "assistant"}:
+        return False
+    content = message.get("content")
+    if _content_has_image_block(content) or _content_cache_marker_count(content):
+        return False
+    return _append_cache_control_to_content(content) is not content
+
+
+def _select_qwen_prompt_cache_marker_index(messages: List[Dict[str, Any]]) -> int:
+    if not messages:
+        return -1
+    current_user_index = -1
+    for index in range(len(messages) - 1, -1, -1):
+        if str(messages[index].get("role") or "").strip().lower() == "user":
+            current_user_index = index
+            break
+    history_end = len(messages) - 1
+    if current_user_index == len(messages) - 1:
+        history_end = current_user_index - 1
+    for index in range(history_end, -1, -1):
+        if _message_accepts_qwen_prompt_cache_marker(messages[index]):
+            return index
+    if current_user_index >= 0 and _message_accepts_qwen_prompt_cache_marker(messages[current_user_index]):
+        return current_user_index
+    return -1
+
+
 def _apply_qwen_explicit_prompt_cache_markers(
     messages: List[Dict[str, Any]],
     actions: PayloadPolicyActions,
@@ -361,16 +390,11 @@ def _apply_qwen_explicit_prompt_cache_markers(
     marker_count = sum(_message_cache_marker_count(item) for item in normalized)
     if marker_count >= marker_limit:
         return normalized
-    if not normalized:
+    index = _select_qwen_prompt_cache_marker_index(normalized)
+    if index < 0:
         return normalized
-    index = len(normalized) - 1
     message = normalized[index]
-    role = str(message.get("role") or "").strip().lower()
-    if role not in {"user", "assistant"}:
-        return normalized
     content = message.get("content")
-    if _content_has_image_block(content) or _content_cache_marker_count(content):
-        return normalized
     updated_content = _append_cache_control_to_content(content)
     if updated_content is content:
         return normalized

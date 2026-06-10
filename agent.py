@@ -42,6 +42,7 @@ from core.infrastructure.tool_executor import get_tool_executor
 from core.infrastructure.git_memory import get_git_memory_service
 from core.infrastructure.llm_utils import (
     build_system_message,
+    extend_system_message_cacheable_prefix,
     MAX_CONSECUTIVE_FAILURES,
     parse_tool_args,
     plan_llm_recovery,
@@ -1636,20 +1637,36 @@ class SelfEvolvingAgent:
         pending_static_context_blocks = list(getattr(self, "_pending_static_context_blocks", []) or [])
         self._pending_static_context_blocks = []
         if pending_static_context_blocks:
-            context_messages = [SystemMessage(content=block) for block in pending_static_context_blocks]
-            messages = TurnOutcomeController.insert_static_context_after_system(
-                messages=messages,
-                context_messages=context_messages,
-            )
+            cacheable_prefix_merged = False
+            if messages:
+                merged_message, cacheable_prefix_merged = extend_system_message_cacheable_prefix(
+                    messages[0],
+                    pending_static_context_blocks,
+                )
+                if cacheable_prefix_merged:
+                    messages[0] = merged_message
+            if not cacheable_prefix_merged:
+                context_messages = [SystemMessage(content=block) for block in pending_static_context_blocks]
+                messages = TurnOutcomeController.insert_static_context_after_system(
+                    messages=messages,
+                    context_messages=context_messages,
+                )
             _record_agent_scene_event(
                 "prompt",
                 "agent.static_runtime_context_inserted_as_system",
-                message="Stable Agent runtime context inserted after the primary system prompt.",
+                message="Stable Agent runtime context inserted into the turn system prefix.",
                 fields={
                     "staticContextBlockCount": len(pending_static_context_blocks),
                     "staticContextChars": sum(len(str(b or "")) for b in pending_static_context_blocks),
-                    "systemMessageKind": "independent_system_message",
-                    "insertionPolicy": "after_system_before_history",
+                    "systemMessageKind": (
+                        "cacheable_system_prefix" if cacheable_prefix_merged else "independent_system_message"
+                    ),
+                    "insertionPolicy": (
+                        "system_cacheable_prefix"
+                        if cacheable_prefix_merged
+                        else "after_system_before_history"
+                    ),
+                    "cacheableSystemPrefixMerged": cacheable_prefix_merged,
                 },
             )
         pending_runtime_context_blocks = list(getattr(self, "_pending_runtime_context_blocks", []) or [])
