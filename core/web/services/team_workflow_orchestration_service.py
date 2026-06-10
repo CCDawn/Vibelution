@@ -55,6 +55,11 @@ SOURCE_EXTRACTION_HARD_MAX_PAGES = 64
 SOURCE_EXTRACTION_DEFAULT_MAX_CHARS_PER_PAGE = 1800
 SOURCE_EXTRACTION_HARD_MAX_CHARS_PER_PAGE = 6000
 SOURCE_EXTRACTION_EXCERPT_MAX_CHARS = 12000
+PAPER_NOTE_CHUNK_DEFAULT_MAX_PAGES = 4
+PAPER_NOTE_CHUNK_HARD_MAX_PAGES = 12
+PAPER_NOTE_CHUNK_DEFAULT_MAX_CHARS = 12000
+PAPER_NOTE_CHUNK_HARD_MAX_CHARS = 24000
+PAPER_NOTE_CHUNK_MAX_CHUNKS = 24
 SOURCE_COLLECTION_DEFAULT_AGENT_ROLES = (
     "data_discovery",
     "source_acquisition",
@@ -884,6 +889,7 @@ def draft_paper_note_from_source_candidate(
     title_override = _trim_text(payload.get("title"), max_length=240)
     summary_override = _trim_text(payload.get("summary"), max_length=4000)
     excerpt_override = _trim_text(payload.get("excerpt"), max_length=24_000)
+    chunk_id = _trim_text(payload.get("chunkId"), max_length=128)
     with _WORKFLOW_LOCK:
         candidate_store = _load_candidate_store(normalized_team_id)
         source_candidate = _find_candidate(candidate_store, normalized_candidate_id)
@@ -892,11 +898,23 @@ def draft_paper_note_from_source_candidate(
         if str(source_candidate.get("candidateType") or "") != "source_manifest":
             raise TeamWorkflowOrchestrationError("Paper note autodraft requires a source_manifest candidate.")
         extraction = _ready_source_extraction(source_candidate)
-        excerpt = excerpt_override or _trim_text(extraction.get("excerpt"), max_length=24_000)
+        chunk = _paper_note_chunk_by_id(source_candidate, chunk_id) if chunk_id else None
+        if chunk_id and chunk is None:
+            raise TeamWorkflowOrchestrationError("Paper note chunkId was not found on this source candidate.")
+        chunk_anchors = _page_anchors_for_paper_note_chunk(source_candidate, extraction, chunk) if chunk else []
+        excerpt = excerpt_override or (
+            _excerpt_from_page_anchors(chunk_anchors, max_chars=24_000)
+            if chunk_anchors
+            else _trim_text(extraction.get("excerpt"), max_length=24_000)
+        )
         if not excerpt:
             raise TeamWorkflowOrchestrationError("Source extraction does not include excerpt text for paper_note drafting.")
         source_refs = [_source_manifest_source_ref(source_candidate)]
-        evidence_refs = _source_extraction_evidence_refs(source_candidate, extraction)
+        evidence_refs = _source_extraction_evidence_refs(
+            source_candidate,
+            extraction,
+            anchor_ids=set(_normalize_id_values(chunk.get("anchorIds"))) if chunk else None,
+        )
         if not evidence_refs:
             raise TeamWorkflowOrchestrationError("Source extraction does not include page anchors for paper_note drafting.")
         candidate_refs = [
@@ -906,8 +924,17 @@ def draft_paper_note_from_source_candidate(
                 "label": _source_manifest_label(source_candidate),
             }
         ]
-        paper_note_title = title_override or f"paper_note draft - {_source_manifest_label(source_candidate)}"
-        paper_note_summary = summary_override or f"Autodrafted from sourceExtraction pageScope {extraction.get('pageScope') or source_candidate.get('pageScope') or ''}".strip()
+        if chunk:
+            candidate_refs.append(
+                {
+                    "type": "paper_note_chunk",
+                    "id": chunk_id,
+                    "label": str(chunk.get("pageScope") or chunk_id),
+                }
+            )
+        page_scope = str((chunk or {}).get("pageScope") or extraction.get("pageScope") or source_candidate.get("pageScope") or "")
+        paper_note_title = title_override or f"paper_note draft - {_source_manifest_label(source_candidate)}{f' - {page_scope}' if page_scope else ''}"
+        paper_note_summary = summary_override or f"Autodrafted from sourceExtraction pageScope {page_scope}".strip()
 
     invoke_response = invoke_local_research_model(
         normalized_team_id,
@@ -942,9 +969,19 @@ def draft_paper_note_from_source_candidate(
                 "createdByAgent": created_by_agent,
                 "createdAt": now,
                 "sourceExtractionSha256": str(extraction.get("sha256") or source_candidate.get("sha256") or ""),
-                "pageScope": str(extraction.get("pageScope") or source_candidate.get("pageScope") or ""),
+                "pageScope": page_scope,
+                "chunkId": chunk_id,
             }
             metadata["paperNoteDrafts"] = [*drafts[-23:], draft_record]
+            if chunk_id:
+                metadata["paperNoteChunkPlan"] = _update_paper_note_chunk_plan_progress(
+                    metadata.get("paperNoteChunkPlan"),
+                    chunk_id=chunk_id,
+                    paper_note_candidate_id=str(paper_note_candidate.get("candidateId") or ""),
+                    task_id=str(task.get("taskId") or ""),
+                    valid=validation.get("valid") is True,
+                    updated_at=now,
+                )
             source_candidate["metadata"] = metadata
             source_candidate["updatedAt"] = now
             candidate_store["updatedAt"] = now
@@ -965,6 +1002,185 @@ def draft_paper_note_from_source_candidate(
     invoke_response["sourceCandidate"] = source_candidate
     invoke_response["workflow"] = _workflow_to_api(normalized_team_id, workflow, candidate_store)
     return invoke_response
+
+
+def plan_paper_note_chunks_from_source_candidate(team_id: str, candidate_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
+    normalized_candidate_id = _normalize_required_id(candidate_id, "Candidate id is required.")
+    team_service.get_team(normalized_team_id)
+    payload = payload if isinstance(payload, dict) else {}
+    created_by_agent = _trim_text(payload.get("createdByAgent"), max_length=160) or "Paper Note Extraction Agent"
+    max_pages_per_chunk = _normalize_int(
+        payload.get("maxPagesPerChunk"),
+        default=PAPER_NOTE_CHUNK_DEFAULT_MAX_PAGES,
+        minimum=1,
+        maximum=PAPER_NOTE_CHUNK_HARD_MAX_PAGES,
+    )
+    max_chars_per_chunk = _normalize_int(
+        payload.get("maxCharsPerChunk"),
+        default=PAPER_NOTE_CHUNK_DEFAULT_MAX_CHARS,
+        minimum=2000,
+        maximum=PAPER_NOTE_CHUNK_HARD_MAX_CHARS,
+    )
+    now = utc_now_iso()
+    with _WORKFLOW_LOCK:
+        workflow = _load_or_create_workflow(normalized_team_id)
+        candidate_store = _load_candidate_store(normalized_team_id)
+        source_candidate = _find_candidate(candidate_store, normalized_candidate_id)
+        if source_candidate is None:
+            raise TeamWorkflowOrchestrationError("Candidate not found.")
+        if str(source_candidate.get("candidateType") or "") != "source_manifest":
+            raise TeamWorkflowOrchestrationError("Paper note chunk planning requires a source_manifest candidate.")
+        extraction = _ready_source_extraction(source_candidate)
+        chunks = _build_paper_note_chunks(
+            source_candidate,
+            extraction,
+            max_pages_per_chunk=max_pages_per_chunk,
+            max_chars_per_chunk=max_chars_per_chunk,
+        )
+        if not chunks:
+            raise TeamWorkflowOrchestrationError("Source extraction does not contain usable page anchors for paper_note chunks.")
+        metadata = source_candidate.get("metadata") if isinstance(source_candidate.get("metadata"), dict) else {}
+        chunk_plan = {
+            "schemaVersion": SCHEMA_VERSION,
+            "planId": _new_record_id("paper-note-plan"),
+            "planKind": "paper_note_chunk_plan",
+            "status": "planned",
+            "sourceCandidateId": normalized_candidate_id,
+            "sourceLabel": _source_manifest_label(source_candidate),
+            "sourceSha256": str(extraction.get("sha256") or source_candidate.get("sha256") or ""),
+            "pageScope": str(extraction.get("pageScope") or source_candidate.get("pageScope") or ""),
+            "targetTaskType": "paper_note_draft",
+            "targetWorkflowNode": "paper_note",
+            "chunkStrategy": "page_anchor_window",
+            "maxPagesPerChunk": max_pages_per_chunk,
+            "maxCharsPerChunk": max_chars_per_chunk,
+            "chunkCount": len(chunks),
+            "completedChunkCount": 0,
+            "needsRevisionChunkCount": 0,
+            "chunks": chunks,
+            "createdByAgent": created_by_agent,
+            "createdAt": now,
+            "updatedAt": now,
+            "officialBoundary": {
+                "writesFormalKnowledge": False,
+                "writesRag": False,
+                "writesOfficialGraph": False,
+                "requiresPaperNoteReview": True,
+            },
+        }
+        metadata["paperNoteChunkPlan"] = chunk_plan
+        source_candidate["metadata"] = metadata
+        source_candidate["updatedAt"] = now
+        candidate_store["updatedAt"] = now
+        _write_json(_candidate_store_path(normalized_team_id), candidate_store)
+        workflow["updatedAt"] = now
+        workflow["activeWorkflowItems"] = _upsert_active_item(
+            workflow.get("activeWorkflowItems"),
+            candidate_id=normalized_candidate_id,
+            current_node=str(source_candidate.get("currentWorkflowNode") or "knowledge_collection"),
+            status=str(source_candidate.get("currentState") or "source_registered"),
+            transfer_id=str(source_candidate.get("pendingTransferId") or ""),
+        )
+        _write_json(_workflow_path(normalized_team_id), workflow)
+    _record_workflow_event(
+        "candidate.paper_note_chunk_plan_created",
+        normalized_team_id,
+        fields={
+            "workflowId": workflow["workflowId"],
+            "sourceCandidateId": normalized_candidate_id,
+            "planId": chunk_plan["planId"],
+            "chunkCount": chunk_plan["chunkCount"],
+            "maxPagesPerChunk": max_pages_per_chunk,
+        },
+    )
+    return {
+        "candidate": source_candidate,
+        "chunkPlan": chunk_plan,
+        "workflow": _workflow_to_api(normalized_team_id, workflow, candidate_store),
+        "nextActions": [
+            "Paper Note Extraction Agent should draft one paper_note per planned chunk.",
+            "Use chunkId when calling paper-note-draft to keep page anchors and plan progress traceable.",
+            "Do not promote chunk drafts to formal Team Knowledge without steward approval.",
+        ],
+    }
+
+
+def get_paper_note_chunk_status(team_id: str) -> dict[str, Any]:
+    normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
+    team_service.get_team(normalized_team_id)
+    with _WORKFLOW_LOCK:
+        workflow = _load_or_create_workflow(normalized_team_id)
+        candidate_store = _load_candidate_store(normalized_team_id)
+        candidates = [item for item in list(candidate_store.get("candidates") or []) if isinstance(item, dict)]
+    source_candidates = [item for item in candidates if str(item.get("candidateType") or "") == "source_manifest"]
+    ready_sources = [item for item in source_candidates if _source_candidate_has_ready_extraction(item)]
+    plans = [_paper_note_chunk_plan_summary(item) for item in source_candidates]
+    plans = [item for item in plans if item is not None]
+    chunk_count = sum(int(item.get("chunkCount") or 0) for item in plans)
+    drafted_count = sum(int(item.get("draftedChunkCount") or 0) for item in plans)
+    needs_revision_count = sum(int(item.get("needsRevisionChunkCount") or 0) for item in plans)
+    open_count = max(0, chunk_count - drafted_count - needs_revision_count)
+    missing_plan_sources = [
+        {
+            "candidateId": str(item.get("candidateId") or ""),
+            "title": str(item.get("title") or _source_manifest_label(item)),
+            "pageScope": str(((item.get("metadata") if isinstance(item.get("metadata"), dict) else {}).get("sourceExtraction") or {}).get("pageScope") or item.get("pageScope") or ""),
+        }
+        for item in ready_sources
+        if _candidate_paper_note_chunk_plan(item) is None
+    ]
+    action_items = _paper_note_chunk_action_items(missing_plan_sources, plans, open_count)
+    status = "empty"
+    if plans:
+        status = "ready" if open_count == 0 and needs_revision_count == 0 else "in_progress"
+    elif missing_plan_sources:
+        status = "needs_plan"
+    payload = {
+        "schemaVersion": SCHEMA_VERSION,
+        "teamId": normalized_team_id,
+        "workflowId": workflow["workflowId"],
+        "workflowKind": workflow["workflowKind"],
+        "status": status,
+        "summary": {
+            "sourceCandidateCount": len(source_candidates),
+            "readySourceCandidateCount": len(ready_sources),
+            "plannedSourceCandidateCount": len(plans),
+            "missingPlanSourceCandidateCount": len(missing_plan_sources),
+            "planCount": len(plans),
+            "chunkCount": chunk_count,
+            "draftedChunkCount": drafted_count,
+            "needsRevisionChunkCount": needs_revision_count,
+            "openChunkCount": open_count,
+            "actionItemCount": len(action_items),
+        },
+        "plans": sorted(plans, key=lambda item: str(item.get("updatedAt") or item.get("createdAt") or ""), reverse=True)[:12],
+        "missingPlanSources": missing_plan_sources[:12],
+        "actionItems": action_items,
+        "officialBoundary": {
+            "writesFormalKnowledge": False,
+            "writesRag": False,
+            "writesOfficialGraph": False,
+            "candidateOnly": True,
+        },
+        "storage": {
+            "candidateStorePath": _relative_path(_candidate_store_path(normalized_team_id)),
+        },
+        "updatedAt": utc_now_iso(),
+    }
+    _record_workflow_event(
+        "paper_note_chunks.status_viewed",
+        normalized_team_id,
+        fields={
+            "workflowId": workflow["workflowId"],
+            "status": status,
+            "planCount": len(plans),
+            "chunkCount": chunk_count,
+            "openChunkCount": open_count,
+            "missingPlanSourceCandidateCount": len(missing_plan_sources),
+        },
+    )
+    return payload
 
 
 def list_candidate_store(
@@ -3086,14 +3302,16 @@ def _ready_source_extraction(candidate: dict[str, Any]) -> dict[str, Any]:
     return extraction
 
 
-def _source_extraction_evidence_refs(candidate: dict[str, Any], extraction: dict[str, Any]) -> list[dict[str, str]]:
+def _source_extraction_evidence_refs(candidate: dict[str, Any], extraction: dict[str, Any], *, anchor_ids: set[str] | None = None) -> list[dict[str, str]]:
     source_label = _source_manifest_label(candidate)
     refs: list[dict[str, str]] = []
     for anchor in list(extraction.get("pageAnchors") or [])[:32]:
         if not isinstance(anchor, dict):
             continue
         page = int(anchor.get("page") or 0)
-        anchor_id = _trim_text(anchor.get("id"), max_length=240) or f"{candidate.get('candidateId')}-p{page}"
+        anchor_id = _source_extraction_anchor_id(candidate, anchor)
+        if anchor_ids is not None and anchor_id not in anchor_ids:
+            continue
         label = _trim_text(anchor.get("label"), max_length=120) or (f"p. {page}" if page else "page anchor")
         if anchor_id or label:
             refs.append(
@@ -3104,6 +3322,227 @@ def _source_extraction_evidence_refs(candidate: dict[str, Any], extraction: dict
                 }
             )
     return refs
+
+
+def _build_paper_note_chunks(
+    candidate: dict[str, Any],
+    extraction: dict[str, Any],
+    *,
+    max_pages_per_chunk: int,
+    max_chars_per_chunk: int,
+) -> list[dict[str, Any]]:
+    anchors = [
+        item
+        for item in list(extraction.get("pageAnchors") or [])
+        if isinstance(item, dict) and _trim_text(item.get("text"), max_length=max_chars_per_chunk)
+    ]
+    anchors = sorted(anchors, key=lambda item: int(item.get("page") or 0))
+    chunks: list[list[dict[str, Any]]] = []
+    current: list[dict[str, Any]] = []
+    current_chars = 0
+    for anchor in anchors:
+        text_chars = len(_trim_text(anchor.get("text"), max_length=max_chars_per_chunk))
+        if current and (len(current) >= max_pages_per_chunk or current_chars + text_chars > max_chars_per_chunk):
+            chunks.append(current)
+            current = []
+            current_chars = 0
+            if len(chunks) >= PAPER_NOTE_CHUNK_MAX_CHUNKS:
+                break
+        current.append(anchor)
+        current_chars += text_chars
+    if current and len(chunks) < PAPER_NOTE_CHUNK_MAX_CHUNKS:
+        chunks.append(current)
+
+    source_token = _safe_token(candidate.get("candidateId"), default="source", max_length=48)
+    planned_chunks: list[dict[str, Any]] = []
+    for index, chunk_anchors in enumerate(chunks, start=1):
+        pages = [int(anchor.get("page") or 0) for anchor in chunk_anchors if int(anchor.get("page") or 0) > 0]
+        page_scope = _page_scope_from_anchors(chunk_anchors)
+        anchor_ids = [_source_extraction_anchor_id(candidate, anchor) for anchor in chunk_anchors]
+        excerpt = _excerpt_from_page_anchors(chunk_anchors, max_chars=min(max_chars_per_chunk, 2000))
+        planned_chunks.append(
+            {
+                "chunkId": f"{source_token}-chunk-{index:02d}",
+                "chunkIndex": index,
+                "status": "planned",
+                "taskType": "paper_note_draft",
+                "workflowNode": "paper_note",
+                "pageStart": min(pages) if pages else 0,
+                "pageEnd": max(pages) if pages else 0,
+                "pageScope": page_scope,
+                "anchorIds": anchor_ids,
+                "evidenceRefs": _source_extraction_evidence_refs(candidate, {"pageAnchors": chunk_anchors}),
+                "excerptChars": sum(len(_trim_text(anchor.get("text"), max_length=max_chars_per_chunk)) for anchor in chunk_anchors),
+                "excerptPreview": _trim_text(excerpt, max_length=700),
+                "paperNoteCandidateId": "",
+                "taskId": "",
+                "updatedAt": "",
+            }
+        )
+    return planned_chunks
+
+
+def _source_extraction_anchor_id(candidate: dict[str, Any], anchor: dict[str, Any]) -> str:
+    page = int(anchor.get("page") or 0)
+    source_token = _safe_token(candidate.get("candidateId"), default="source", max_length=48)
+    return _trim_text(anchor.get("id"), max_length=240) or f"{source_token}-p{page}"
+
+
+def _paper_note_chunk_by_id(candidate: dict[str, Any], chunk_id: str) -> dict[str, Any] | None:
+    plan = _candidate_paper_note_chunk_plan(candidate)
+    if plan is None:
+        return None
+    for chunk in list(plan.get("chunks") or []):
+        if isinstance(chunk, dict) and str(chunk.get("chunkId") or "") == chunk_id:
+            return chunk
+    return None
+
+
+def _page_anchors_for_paper_note_chunk(candidate: dict[str, Any], extraction: dict[str, Any], chunk: dict[str, Any] | None) -> list[dict[str, Any]]:
+    if not chunk:
+        return []
+    anchor_ids = set(_normalize_id_values(chunk.get("anchorIds")))
+    return [
+        anchor
+        for anchor in list(extraction.get("pageAnchors") or [])
+        if isinstance(anchor, dict) and (_source_extraction_anchor_id(candidate, anchor) in anchor_ids)
+    ]
+
+
+def _update_paper_note_chunk_plan_progress(
+    value: Any,
+    *,
+    chunk_id: str,
+    paper_note_candidate_id: str,
+    task_id: str,
+    valid: bool,
+    updated_at: str,
+) -> dict[str, Any]:
+    plan = value if isinstance(value, dict) else {}
+    chunks: list[dict[str, Any]] = []
+    for item in list(plan.get("chunks") or []):
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("chunkId") or "") == chunk_id:
+            item = {
+                **item,
+                "status": "drafted" if valid else "needs_revision",
+                "paperNoteCandidateId": paper_note_candidate_id,
+                "taskId": task_id,
+                "updatedAt": updated_at,
+            }
+        chunks.append(item)
+    drafted_count = sum(1 for item in chunks if str(item.get("status") or "") == "drafted")
+    needs_revision_count = sum(1 for item in chunks if str(item.get("status") or "") == "needs_revision")
+    next_plan = {
+        **plan,
+        "chunks": chunks,
+        "chunkCount": len(chunks),
+        "completedChunkCount": drafted_count,
+        "needsRevisionChunkCount": needs_revision_count,
+        "status": _paper_note_chunk_plan_status(chunks),
+        "updatedAt": updated_at,
+    }
+    return next_plan
+
+
+def _paper_note_chunk_plan_status(chunks: list[dict[str, Any]]) -> str:
+    if not chunks:
+        return "empty"
+    statuses = {str(item.get("status") or "") for item in chunks}
+    if statuses <= {"drafted"}:
+        return "drafted"
+    if "needs_revision" in statuses:
+        return "needs_revision"
+    if "drafted" in statuses:
+        return "drafting"
+    return "planned"
+
+
+def _source_candidate_has_ready_extraction(candidate: dict[str, Any]) -> bool:
+    metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {}
+    extraction = metadata.get("sourceExtraction") if isinstance(metadata.get("sourceExtraction"), dict) else {}
+    return extraction.get("status") == "extracted" and isinstance(extraction.get("pageAnchors"), list) and bool(extraction.get("pageAnchors"))
+
+
+def _candidate_paper_note_chunk_plan(candidate: dict[str, Any]) -> dict[str, Any] | None:
+    metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {}
+    plan = metadata.get("paperNoteChunkPlan") if isinstance(metadata.get("paperNoteChunkPlan"), dict) else None
+    return plan
+
+
+def _paper_note_chunk_plan_summary(candidate: dict[str, Any]) -> dict[str, Any] | None:
+    plan = _candidate_paper_note_chunk_plan(candidate)
+    if plan is None:
+        return None
+    chunks = [item for item in list(plan.get("chunks") or []) if isinstance(item, dict)]
+    drafted_count = sum(1 for item in chunks if str(item.get("status") or "") == "drafted")
+    needs_revision_count = sum(1 for item in chunks if str(item.get("status") or "") == "needs_revision")
+    return {
+        "planId": str(plan.get("planId") or ""),
+        "status": _paper_note_chunk_plan_status(chunks),
+        "sourceCandidateId": str(candidate.get("candidateId") or ""),
+        "sourceTitle": str(candidate.get("title") or _source_manifest_label(candidate)),
+        "sourceSha256": str(plan.get("sourceSha256") or ""),
+        "chunkCount": len(chunks),
+        "draftedChunkCount": drafted_count,
+        "needsRevisionChunkCount": needs_revision_count,
+        "openChunkCount": max(0, len(chunks) - drafted_count - needs_revision_count),
+        "pageScope": str(plan.get("pageScope") or ""),
+        "chunks": [
+            {
+                "chunkId": str(item.get("chunkId") or ""),
+                "chunkIndex": int(item.get("chunkIndex") or 0),
+                "status": str(item.get("status") or ""),
+                "pageScope": str(item.get("pageScope") or ""),
+                "excerptChars": int(item.get("excerptChars") or 0),
+                "paperNoteCandidateId": str(item.get("paperNoteCandidateId") or ""),
+                "taskId": str(item.get("taskId") or ""),
+            }
+            for item in chunks[:12]
+        ],
+        "createdAt": str(plan.get("createdAt") or ""),
+        "updatedAt": str(plan.get("updatedAt") or plan.get("createdAt") or ""),
+    }
+
+
+def _paper_note_chunk_action_items(
+    missing_plan_sources: list[dict[str, Any]],
+    plans: list[dict[str, Any]],
+    open_count: int,
+) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = [
+        {
+            "code": "paper_note_chunk_plan_missing",
+            "severity": "needs_plan",
+            "message": f"{item['title']} 已完成 sourceExtraction，但还没有 paper_note 分块计划。",
+            "nextAction": "调用 paper-note-chunks/plan 生成章节或页码窗口计划。",
+            "candidateId": item["candidateId"],
+        }
+        for item in missing_plan_sources[:6]
+    ]
+    if open_count > 0:
+        items.append(
+            {
+                "code": "paper_note_chunks_waiting_draft",
+                "severity": "pending",
+                "message": f"还有 {open_count} 个 paper_note chunk 等待 Paper Note Extraction Agent 逐块草稿。",
+                "nextAction": "对每个 chunkId 调用 paper-note-draft，保留 page anchors 和模型证据。",
+                "candidateId": "",
+            }
+        )
+    for plan in plans:
+        if int(plan.get("needsRevisionChunkCount") or 0) > 0:
+            items.append(
+                {
+                    "code": "paper_note_chunk_needs_revision",
+                    "severity": "needs_revision",
+                    "message": f"{plan.get('sourceTitle') or plan.get('sourceCandidateId')} 有 chunk 草稿需要修订。",
+                    "nextAction": "重新对 needs_revision chunk 调用 paper-note-draft 或退回补 citation。",
+                    "candidateId": str(plan.get("sourceCandidateId") or ""),
+                }
+            )
+    return items[:12]
 
 
 def _resolve_source_path(source_path: str) -> Path:

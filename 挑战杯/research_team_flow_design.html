@@ -39,7 +39,7 @@
         <aside class="dashboard-panel">
           <h2>审核摘要</h2>
           <div class="kpi-grid">
-            <div class="kpi"><b>当前阶段</b><strong>M6.6</strong><span>资料搜集执行台已接入，等待筛选/治理推进。</span></div>
+            <div class="kpi"><b>当前阶段</b><strong>M6.10</strong><span>资料搜集执行台、模型证据链和 paper_note 分块计划已接入。</span></div>
             <div class="kpi"><b>流程节点</b><strong>13</strong><span>1-9 为知识入库主线，10-13 保留占位与维护节点。</span></div>
             <div class="kpi"><b>候选资料</b><strong>10</strong><span>第一轮 source_manifest 已进入 candidate-only 工作区。</span></div>
             <div class="kpi"><b>正式写入</b><strong>0</strong><span>未写正式 Team Knowledge、RAG 或 official graph。</span></div>
@@ -47,7 +47,7 @@
           <div class="focus-list">
             <div class="focus-item"><b>优先看</b><span>资料搜集、候选图谱和知识入库边界是否能支撑下一轮科研提炼。</span></div>
             <div class="focus-item"><b>不能做</b><span>本页面不触发真实搜索、不审批入库、不把候选图谱当作正式事实。</span></div>
-            <div class="focus-item"><b>下一步</b><span>补资料质量评估、paper_note 页码锚点和 missing links 修复队列。</span></div>
+            <div class="focus-item"><b>下一步</b><span>补资料质量评估、按 chunkId 执行 paper_note 提炼，以及多 chunk 草稿合并策略。</span></div>
           </div>
         </aside>
       </section>
@@ -238,7 +238,7 @@
                 <span class="num">02</span>
                 <h3>生成 paper_note</h3>
                 <p>把资料转成可审查的论文/资料笔记候选。</p>
-                <div class="tag-row"><span class="tag active">自动草稿桥已接入</span><span class="tag">Paper Note Extraction Agent</span></div>
+                <div class="tag-row"><span class="tag active">自动草稿桥与分块计划已接入</span><span class="tag">Paper Note Extraction Agent</span></div>
               </a>
 <a class="node-card" href="research_flow_pages/03-neuro-mechanism.html">
                 <span class="num">03</span>
@@ -447,7 +447,7 @@
           <h2 style="margin-top: 14px;">下一步</h2>
           <div class="checklist">
             <span>资料质量评估 Agent 对 10 条 source_manifest 做可靠性、可访问性、相关性筛选。</span>
-<span>内容抽取 Agent 为通过筛选的来源补 page/citation anchors，生成 paper_note 草稿。</span>
+<span>内容抽取 Agent 为通过筛选的来源补 page/citation anchors；Paper Note Extraction Agent 先生成 paperNoteChunkPlan，再按 chunkId 生成 paper_note 草稿。</span>
 <span>候选图谱需要修复 missing links；当前 status actionItems 指向 repair_candidate_graph_links 与 run_review_prefilter。</span>
 <span>知识治理 Agent 只能在 review/steward pack 完成后生成待审入库包，不能直接正式入库。</span>
           </div>
@@ -666,8 +666,8 @@
 <div class="agent-row">
         <b>02</b>
         <strong>Paper Note Extraction Agent</strong>
-        <span>自动草稿桥已接入 / 长文 chunk 策略待规划</span>
-        <span>PDF/资料摘录 / paper_note 候选 JSON 生成 / citation anchors / uncertainty 字段</span>
+        <span>自动草稿桥已接入 / 长文 chunk plan 已接入</span>
+        <span>PDF/资料摘录 / paperNoteChunkPlan / paper_note 候选 JSON 生成 / citation anchors / uncertainty 字段 / chunkId 草稿追踪</span>
         <span>必要时确认摘要是否保守、是否遗漏关键章节。</span>
       </div>
 <div class="agent-row">
@@ -769,6 +769,11 @@
         <b class="status-pill">已接入前端/API</b>
       </div>
 <div class="feature-row">
+        <strong>paper_note 分块计划</strong>
+        <span>paper-note-chunks/status 与 paper-note-chunks/plan 聚合/生成长论文 chunk seeds；Teams 候选资料页可生成或重建分块计划</span>
+        <b class="status-pill">已接入前端/API</b>
+      </div>
+<div class="feature-row">
         <strong>评级建议</strong>
         <span>knowledge_rating_suggestion_tool 只提交 reviewable rating suggestion</span>
         <b class="status-pill ready">已有能力</b>
@@ -850,7 +855,7 @@
         <strong>PDF/本地资料解析</strong>
         <span>Team Workflow 已新增 source-extraction API；知识 ingestion 工具仍要求传入已有 excerpt/source_ref，不负责解析 PDF</span>
         <b class="status-pill">已接入首版</b>
-        <span>01 已能把本地 PDF 解析成 sourceExtraction.pageAnchors/excerpt；02 已能基于该摘录自动生成 paper_note_draft，长文拆分仍待接。</span>
+        <span>01 已能把本地 PDF 解析成 sourceExtraction.pageAnchors/excerpt；02 已能基于 pageAnchors 生成 paperNoteChunkPlan，并允许 paper-note-draft 按 chunkId 草稿化。</span>
       </div>
 <div class="alignment-row">
         <strong>候选 schema 与工作区</strong>
@@ -1128,9 +1133,19 @@
               <span>对本地 PDF source_manifest 计算 sha256、抽取 pageAnchors/excerpt，并回写候选校验状态；失败时停在 source_needs_confirmation。</span>
             </div>
 <div class="blueprint-row compact">
+              <b>GET</b>
+              <strong>/api/teams/{team_id}/workflow-orchestration/paper-note-chunks/status</strong>
+              <span>只读聚合 sourceExtraction 就绪、paperNoteChunkPlan、open/drafted/needsRevision chunk 和 actionItems；不写正式知识/RAG/图谱。</span>
+            </div>
+<div class="blueprint-row compact">
+              <b>POST</b>
+              <strong>/api/teams/{team_id}/workflow-orchestration/candidates/{candidate_id}/paper-note-chunks/plan</strong>
+              <span>把已完成 sourceExtraction 的 source_manifest 切成可追踪 paper_note chunk seeds，并写回 CandidateStore metadata.paperNoteChunkPlan。</span>
+            </div>
+<div class="blueprint-row compact">
               <b>POST</b>
               <strong>/api/teams/{team_id}/workflow-orchestration/candidates/{candidate_id}/paper-note-draft</strong>
-              <span>把已完成的 sourceExtraction.excerpt/pageAnchors 组装成本地模型 paper_note_draft 任务，落 CandidateStore，并回写 source candidate 的 paperNoteDrafts trace。</span>
+              <span>把已完成的 sourceExtraction.excerpt/pageAnchors 或指定 chunkId 组装成本地模型 paper_note_draft 任务，落 CandidateStore，并回写 source candidate 的 paperNoteDrafts trace 与 chunk 进度。</span>
             </div>
 <div class="blueprint-row compact">
               <b>POST</b>
@@ -1295,11 +1310,11 @@
                 </div>
 <div class="service-row">
                   <b>team_workflow_orchestration_service</b>
-                  <span>已落地：Team 级 workflowOrchestration、ResearchStageRound、CandidateStore、transfer request/decision、source-collection run 启动、DataSearchPlan/query seed 契约、DataRecord -&gt; source_manifest 幂等导入桥，以及 official_model_evidence 证据登记/status。</span>
+                  <span>已落地：Team 级 workflowOrchestration、ResearchStageRound、CandidateStore、transfer request/decision、source-collection run 启动、DataSearchPlan/query seed 契约、DataRecord -&gt; source_manifest 幂等导入桥、paper_note chunk planning，以及 official_model_evidence 证据登记/status。</span>
                 </div>
 <div class="service-row">
                   <b>team_workflows API</b>
-                  <span>已落地：/api/teams/{team_id}/workflow-orchestration、stage-rounds/status、stage-rounds/start、stage-rounds/{stageRoundId}/coordination/retry、stage-rounds/{stageRoundId}/memory-record/retry、source-collection-runs（含 searchPlan/querySeeds/assignedQueries/resultWritebackContract）、candidates/source、data-processing/runs/{runId}/records/{recordId}/source-candidate、candidates/{candidate_id}/source-extraction、candidates/{candidate_id}/paper-note-draft、candidates、candidates/validation、candidate-graph、transfers、decide、knowledge-ingestion/status、coordination/status、official-model-evidence/status、official-model-evidence；coordination/status 返回 communicationBrief。</span>
+                  <span>已落地：/api/teams/{team_id}/workflow-orchestration、stage-rounds/status、stage-rounds/start、stage-rounds/{stageRoundId}/coordination/retry、stage-rounds/{stageRoundId}/memory-record/retry、source-collection-runs（含 searchPlan/querySeeds/assignedQueries/resultWritebackContract）、candidates/source、data-processing/runs/{runId}/records/{recordId}/source-candidate、candidates/{candidate_id}/source-extraction、paper-note-chunks/status、candidates/{candidate_id}/paper-note-chunks/plan、candidates/{candidate_id}/paper-note-draft（支持 chunkId）、candidates、candidates/validation、candidate-graph、transfers、decide、knowledge-ingestion/status、coordination/status、official-model-evidence/status、official-model-evidence；coordination/status 返回 communicationBrief。</span>
                 </div>
 <div class="service-row">
                   <b>TeamsRoute workflow workspace</b>
@@ -1320,6 +1335,10 @@
 <div class="service-row">
                   <b>source_parser</b>
                   <span>已接入后端/API：本地 PDF source_manifest 可计算 sha256、抽取 pageAnchors/excerpt 并回写 CandidateStore；缺文件、非 PDF、解析器不可用或无文本时记录 failed extraction。</span>
+                </div>
+<div class="service-row">
+                  <b>paper_note_chunk_planner</b>
+                  <span>已接入后端/API/Teams 候选资料页：对已完成 sourceExtraction 的 source_manifest 生成 paperNoteChunkPlan，并支持按 chunkId 调用 paper-note-draft。</span>
                 </div>
 <div class="service-row">
                   <b>candidate_validator</b>
@@ -1643,14 +1662,24 @@
               <span>允许登记 invocation_log、sample_output、screenshot、config 或 manual_attestation，要求绑定 taskType/workflowNode/candidateId 之一，用于审计而非自动入库。</span>
             </div>
 <div class="blueprint-row compact">
+              <b>paper_note 分块状态</b>
+              <strong>/api/teams/{teamId}/workflow-orchestration/paper-note-chunks/status</strong>
+              <span>只读聚合 sourceExtraction 就绪来源、paperNoteChunkPlan、chunk draft 进度、缺计划来源和 actionItems；不写正式知识/RAG/图谱。</span>
+            </div>
+<div class="blueprint-row compact">
+              <b>paper_note 分块计划</b>
+              <strong>/api/teams/{teamId}/workflow-orchestration/candidates/{candidateId}/paper-note-chunks/plan</strong>
+              <span>对已完成 sourceExtraction 的 source_manifest 生成或重建 page_anchor_window chunk seeds，写回 CandidateStore metadata.paperNoteChunkPlan。</span>
+            </div>
+<div class="blueprint-row compact">
               <b>服务文件</b>
               <strong>core/web/services/team_workflow_orchestration_service.py</strong>
-              <span>Team 编排、资料搜集批次启动、候选登记、DataRecord 导入、模型证据登记、转移请求、协调 Agent 裁决和轻量运行事件日志。</span>
+              <span>Team 编排、资料搜集批次启动、候选登记、DataRecord 导入、paper_note 分块计划、模型证据登记、转移请求、协调 Agent 裁决和轻量运行事件日志。</span>
             </div>
 <div class="blueprint-row compact">
               <b>路由文件</b>
               <strong>core/web/routes/team_workflows.py</strong>
-              <span>提供工作流查询/确保、资料搜集批次启动、候选资料登记、DataRecord 导入、模型证据状态/登记、转移提交、转移裁决 API。</span>
+              <span>提供工作流查询/确保、资料搜集批次启动、候选资料登记、DataRecord 导入、paper_note 分块状态/计划、模型证据状态/登记、转移提交、转移裁决 API。</span>
             </div>
 <div class="blueprint-row compact">
               <b>路由注册</b>
@@ -1710,7 +1739,7 @@
 <div class="blueprint-row compact">
               <b>paper_note 门禁</b>
               <strong>CandidateStore paper_note validation</strong>
-              <span>paper_note_draft 必须含 keyFindings/methods/limitations/citations，关键发现缺 sourceRef/page/citation 时进入 paper_note_needs_revision。</span>
+              <span>paper_note_draft 必须含 keyFindings/methods/limitations/citations，关键发现缺 sourceRef/page/citation 时进入 paper_note_needs_revision；可通过 chunkId 限定长文分块草稿范围。</span>
             </div>
 <div class="blueprint-row compact">
               <b>neuro_mechanism 门禁</b>
@@ -1765,7 +1794,7 @@
 <div class="blueprint-row compact">
               <b>验证</b>
               <strong>tests/test_data_processing_service.py + tests/test_data_processing_routes.py + tests/test_team_workflow_orchestration_service.py + tests/test_team_workflow_routes.py + TeamsRoute.layout.test.ts</strong>
-              <span>覆盖通用数据处理首切、ResearchStageRound 三阶段启动/续做/新一轮、source-collection run 启动、DataSearchPlan/query seed 契约、DataRecord 导入 source_manifest、Teams 资料搜集执行台契约、主路径、非 ownerAgent 不能写最终状态、本地模型任务包、输出校验、知识入库状态总览和模型证据链前端契约。</span>
+              <span>覆盖通用数据处理首切、ResearchStageRound 三阶段启动/续做/新一轮、source-collection run 启动、DataSearchPlan/query seed 契约、DataRecord 导入 source_manifest、Teams 资料搜集执行台契约、主路径、非 ownerAgent 不能写最终状态、本地模型任务包、输出校验、知识入库状态总览、模型证据链和 paper_note 分块计划前端契约。</span>
             </div>
       </div>
       <div class="agent-matrix" style="margin-top: 12px;">
@@ -1802,8 +1831,8 @@
 <div class="blueprint-row">
               <b>M2</b>
               <strong>paper_note 与 PDF 锚点</strong>
-              <span>已新增 paper_note 输出契约与 Citation Anchor 校验，并接入 sourceExtraction -&gt; paper_note_draft 自动草稿桥：本地 PDF pageAnchors/excerpt 会被转为 sourceRefs/evidenceRefs/excerpt 后调用本地模型。</span>
-              <span>合格本地模型输出进入 paper_note_draft；缺 citation/page anchor 时进入 paper_note_needs_revision，不能自然推进到 mechanism_candidate；长文拆分和多草稿合并仍待接。</span>
+              <span>已新增 paper_note 输出契约与 Citation Anchor 校验，并接入 sourceExtraction -&gt; paper_note_draft 自动草稿桥：本地 PDF pageAnchors/excerpt 会被转为 sourceRefs/evidenceRefs/excerpt 后调用本地模型；paperNoteChunkPlan 可把长文切成可追踪 chunk seeds。</span>
+              <span>合格本地模型输出进入 paper_note_draft；缺 citation/page anchor 时进入 paper_note_needs_revision，不能自然推进到 mechanism_candidate；多 chunk 草稿合并仍待接。</span>
             </div>
 <div class="blueprint-row">
               <b>M3</b>
@@ -1882,6 +1911,12 @@
               <strong>模型调用证据链</strong>
               <span>新增 official-model-evidence status/register API 和 Teams 科研总览证据面板；本地 qwen3.5 invoke 会自动登记 invocation_log，已有 local_model_output 也会只读折算为候选输出证据。</span>
               <span>团队可以看到 source_screening、paper_note、neuro_mechanism、mechanism_mapping、algorithm_hypothesis、review_prefilter 的 Qwen/百炼/本地模型证据覆盖；证据 store 不写正式 Team Knowledge/RAG/official graph。</span>
+            </div>
+<div class="blueprint-row">
+              <b>M6.10</b>
+              <strong>长论文 paper_note 分块计划</strong>
+              <span>新增 paper-note-chunks/status 与 paper-note-chunks/plan；Teams 候选资料页可对已完成 sourceExtraction 的 source_manifest 生成/重建 paperNoteChunkPlan。</span>
+              <span>分块计划只写 CandidateStore metadata，按 pageAnchors 生成 chunk seeds；paper-note-draft 可带 chunkId 逐块草稿化并回写 chunk 进度，不写正式 Team Knowledge/RAG/official graph。</span>
             </div>
       </div>
       <div class="tag-row">
