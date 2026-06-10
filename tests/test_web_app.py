@@ -13242,7 +13242,7 @@ def test_config_workspace_test_llm_image_input_maps_provider_unsupported(monkeyp
     assert payload["message"] == "image input is not supported by this model route"
 
 
-def test_config_workspace_batch_image_capability_persists_model_and_profile(monkeypatch):
+def test_config_workspace_batch_image_capability_persists_model_only(monkeypatch):
     public_config = copy.deepcopy(load_public_config())
     public_config["llm"]["model_library"]["local_vision_probe"] = {
         "provider": {
@@ -13303,7 +13303,10 @@ def test_config_workspace_batch_image_capability_persists_model_and_profile(monk
     assert model["capability_source"] == "runtime_probe"
     assert "capability_checked_at" in model
     assert "capability_error" not in model
-    assert profile["supports_image_input"] is True
+    assert "supports_image_input" not in profile
+    assert "capability_status" not in profile
+    assert "capability_source" not in profile
+    assert "capability_checked_at" not in profile
     assert payload["capabilityResults"][0]["supportsImageInput"] is True
 
 

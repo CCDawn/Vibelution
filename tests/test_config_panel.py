@@ -981,6 +981,7 @@ def test_add_update_and_delete_llm_model_with_inline_provider():
         "model": "gpt-5.3-codex",
         "label": "Custom Codex",
         "api_key_env": "VIBELUTION_LLM_MODEL_CUSTOM_CODEX_API_KEY",
+        "prompt_cache": {"mode": "automatic"},
     }
     assert "custom_codex" not in public_config.get("llm", {}).get("model_library", {})
     build_effective_config(updated)
@@ -1010,6 +1011,7 @@ def test_add_update_and_delete_llm_model_with_inline_provider():
     assert edited["llm"]["model_library"]["custom_codex"]["label"] == "Qwen Local"
     assert edited["llm"]["model_library"]["custom_codex"]["api_key_env"] == "VIBELUTION_LLM_MODEL_CUSTOM_CODEX_API_KEY"
     assert edited["llm"]["model_library"]["custom_codex"]["reasoning_state_field"] == "reasoning_content"
+    assert "prompt_cache" not in edited["llm"]["model_library"]["custom_codex"]
     build_effective_config(edited)
 
     deleted = delete_llm_model(edited, "custom_codex")
