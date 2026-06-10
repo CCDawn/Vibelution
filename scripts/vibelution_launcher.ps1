@@ -1704,6 +1704,13 @@ function Get-LauncherControlSourceSignature {
     $paths = @(
         (Join-Path $projectDir "core\launcher\app.py"),
         (Join-Path $projectDir "core\launcher\service.py"),
+        (Join-Path $projectDir "core\runtime_manager\__init__.py"),
+        (Join-Path $projectDir "core\runtime_manager\constants.py"),
+        (Join-Path $projectDir "core\runtime_manager\evolution_store.py"),
+        (Join-Path $projectDir "core\runtime_manager\scene_logging.py"),
+        (Join-Path $projectDir "core\runtime_manager\state_store.py"),
+        (Join-Path $projectDir "core\runtime_manager\work_run_store.py"),
+        (Join-Path $projectDir "core\runtime_manager\workbench_controller.py"),
         (Join-Path $projectDir "core\web\control.py"),
         (Join-Path $projectDir "core\version.py"),
         (Join-Path $projectDir "web\package.json"),

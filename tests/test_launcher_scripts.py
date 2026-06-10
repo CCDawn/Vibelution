@@ -2687,6 +2687,13 @@ if ($null -eq $signatureAst) {
 }
 $signatureText = $signatureAst.Extent.Text
 foreach ($requiredControlInput in @(
+    "core\\runtime_manager\\__init__.py",
+    "core\\runtime_manager\\constants.py",
+    "core\\runtime_manager\\evolution_store.py",
+    "core\\runtime_manager\\scene_logging.py",
+    "core\\runtime_manager\\state_store.py",
+    "core\\runtime_manager\\work_run_store.py",
+    "core\\runtime_manager\\workbench_controller.py",
     "web\\src\\routes\\LauncherRoute.tsx",
     "web\\src\\routes\\LauncherRoute.module.css",
     "web\\src\\app\\LauncherShell.tsx",
