@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 import time
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qsl, urlparse
@@ -310,10 +310,36 @@ async def _lifespan(_: FastAPI):
         current_loop.default_exception_handler(context)
 
     loop.set_exception_handler(handle_loop_exception)
+    session_list_prewarm_task = asyncio.create_task(_prewarm_session_list_cache_on_startup())
+
+    def consume_session_list_prewarm_result(task: asyncio.Task[None]) -> None:
+        try:
+            task.result()
+        except asyncio.CancelledError:
+            return
+        except Exception as exc:
+            loop.call_exception_handler(
+                {
+                    "message": "Session list cache prewarm failed during startup.",
+                    "exception": exc,
+                }
+            )
+
+    session_list_prewarm_task.add_done_callback(consume_session_list_prewarm_result)
     try:
         yield
     finally:
+        if not session_list_prewarm_task.done():
+            session_list_prewarm_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await session_list_prewarm_task
         loop.set_exception_handler(previous_handler)
+
+
+async def _prewarm_session_list_cache_on_startup() -> None:
+    from .services import session_service
+
+    await asyncio.to_thread(session_service.prewarm_session_list_cache, reason="startup")
 
 
 def create_app() -> FastAPI:

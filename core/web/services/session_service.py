@@ -131,6 +131,8 @@ _SESSION_LIST_CACHE_LOCK = threading.Lock()
 _SESSION_LIST_CACHE_CONDITION = threading.Condition(_SESSION_LIST_CACHE_LOCK)
 _SESSION_LIST_CACHE_TTL_SECONDS = 4.0
 _SESSION_LIST_CACHE: dict[str, Any] = {}
+_SESSION_LIST_PREWARM_LOCK = threading.Lock()
+_SESSION_LIST_PREWARM_INFLIGHT = False
 _UNSET = object()
 _WORK_RUN_STORE = WorkRunStore()
 _NO_VISIBLE_REPLY_ZH = "本轮没有产生可见回复。"
@@ -1798,6 +1800,58 @@ def list_sessions() -> list[dict]:
     except Exception:
         _finish_session_list_cache_build(signature=signature)
         raise
+
+
+def prewarm_session_list_cache(*, reason: str = "startup") -> dict[str, Any]:
+    """Build the lightweight session list cache before the first user query."""
+
+    global _SESSION_LIST_PREWARM_INFLIGHT
+    normalized_reason = trim_lines(reason, max_lines=1) or "startup"
+    started_at = _perf_counter()
+    with _SESSION_LIST_PREWARM_LOCK:
+        if _SESSION_LIST_PREWARM_INFLIGHT:
+            return {
+                "status": "skipped",
+                "reason": normalized_reason,
+                "skipReason": "inflight",
+                "durationMs": _elapsed_ms(started_at),
+            }
+        _SESSION_LIST_PREWARM_INFLIGHT = True
+
+    try:
+        sessions = list_sessions()
+        duration_ms = _elapsed_ms(started_at)
+        result = {
+            "status": "completed",
+            "reason": normalized_reason,
+            "sessionCount": len(sessions),
+            "durationMs": duration_ms,
+        }
+        _record_session_list_prewarm_event(
+            status="completed",
+            reason=normalized_reason,
+            elapsed_ms=duration_ms,
+            session_count=len(sessions),
+        )
+        return result
+    except Exception as exc:
+        duration_ms = _elapsed_ms(started_at)
+        _record_session_list_prewarm_event(
+            status="failed",
+            reason=normalized_reason,
+            elapsed_ms=duration_ms,
+            error_type=type(exc).__name__,
+            error_message=trim_lines(str(exc), max_lines=2),
+        )
+        return {
+            "status": "failed",
+            "reason": normalized_reason,
+            "durationMs": duration_ms,
+            "errorType": type(exc).__name__,
+        }
+    finally:
+        with _SESSION_LIST_PREWARM_LOCK:
+            _SESSION_LIST_PREWARM_INFLIGHT = False
 
 
 _SESSION_QUERY_MAX_LIMIT = 100
@@ -10564,6 +10618,46 @@ def _record_session_list_loaded_event(
                 "cacheExpired": cache_expired,
                 "servedStaleMatchingSignature": cache_expired,
                 "waitedForInflight": bool(waited_for_inflight),
+            },
+            lifecycle=False,
+        )
+    except Exception:
+        return
+
+
+def _record_session_list_prewarm_event(
+    *,
+    status: str,
+    reason: str,
+    elapsed_ms: int,
+    session_count: int = 0,
+    error_type: str = "",
+    error_message: str = "",
+) -> None:
+    normalized_status = str(status or "").strip().lower() or "observed"
+    try:
+        message = (
+            "Session list cache prewarm failed before the first user request."
+            if normalized_status == "failed"
+            else "Session list cache prewarm completed outside the user request path."
+        )
+        record_runtime_scene_event(
+            "conversation",
+            "session_list",
+            "session.list.prewarm",
+            level="warning" if normalized_status == "failed" else "info",
+            outcome=normalized_status,
+            message=message,
+            fields={
+                "status": normalized_status,
+                "reason": trim_lines(reason, max_lines=1) or "startup",
+                "elapsedMs": max(0, int(elapsed_ms)),
+                "sessionCount": max(0, int(session_count)),
+                "readOnly": True,
+                "hydrateAgent": False,
+                "cacheWarmup": True,
+                "errorType": str(error_type or "").strip(),
+                "errorMessage": trim_lines(error_message, max_lines=2),
             },
             lifecycle=False,
         )
