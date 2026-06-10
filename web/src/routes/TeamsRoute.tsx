@@ -65,6 +65,7 @@ const SOURCE_COLLECTION_RUN_PREVIEW_LIMIT = 20;
 const SOURCE_COLLECTION_DEFAULT_ROLES = ["data_discovery", "source_acquisition", "content_extraction", "source_quality"];
 
 const researchStageRoundStatusQueryKey = (id: string) => ["teams", id, "workflow-orchestration", "stage-rounds", "status"] as const;
+const officialModelEvidenceStatusQueryKey = (id: string) => ["teams", id, "workflow-orchestration", "official-model-evidence", "status"] as const;
 
 type ResearchWorkspaceView = "overview" | "source_collection" | "coordination" | "ingestion" | "graph" | "candidates" | "discussion" | "canvas";
 
@@ -205,6 +206,74 @@ type ResearchStageRoundStartPayload = {
   searchPlan?: TeamWorkflowSourceCollectionRunStartPayload["searchPlan"];
   assignments?: TeamWorkflowSourceCollectionRunStartPayload["assignments"];
   boundaries: ResearchStageRoundStatusPayload["boundaries"];
+};
+
+type TeamWorkflowOfficialModelEvidenceCoverage = {
+  taskType: string;
+  workflowNode: string;
+  label: string;
+  status: "covered" | "missing" | string;
+  evidenceCount: number;
+  providers: Record<string, number>;
+  latestEvidenceId: string;
+};
+
+type TeamWorkflowOfficialModelEvidenceStatus = {
+  schemaVersion: number;
+  teamId: string;
+  workflowId: string;
+  workflowKind: string;
+  status: "empty" | "needs_evidence" | "ready" | string;
+  summary: {
+    evidenceCount: number;
+    storedEvidenceCount: number;
+    candidateOutputEvidenceCount: number;
+    requiredNodeCount: number;
+    coveredNodeCount: number;
+    missingNodeCount: number;
+    qwenEvidenceCount: number;
+    bailianEvidenceCount: number;
+    localEvidenceCount: number;
+    linkedCandidateCount: number;
+    linkedStageRoundCount: number;
+    actionItemCount: number;
+  };
+  coverage: TeamWorkflowOfficialModelEvidenceCoverage[];
+  providerCounts: Record<string, number>;
+  evidenceKindCounts: Record<string, number>;
+  recentEvidence: Array<{
+    evidenceId: string;
+    taskType: string;
+    workflowNode: string;
+    candidateId: string;
+    modelProvider: string;
+    modelId: string;
+    evidenceKind: string;
+    status: string;
+    createdAt: string;
+  }>;
+  actionItems: Array<{
+    code: string;
+    severity: string;
+    message: string;
+    nextAction: string;
+    workflowNode: string;
+    taskType: string;
+  }>;
+  officialBoundary: {
+    candidateOnly: boolean;
+    writesFormalKnowledge: boolean;
+    writesRag: boolean;
+    writesOfficialGraph: boolean;
+    requiresStewardApproval: boolean;
+    boundary: string;
+  };
+  storage: {
+    workflowPath: string;
+    candidateStorePath: string;
+    evidenceStorePath: string;
+  };
+  updatedAt: string;
 };
 
 type NodeDragState = {
@@ -933,6 +1002,14 @@ export function TeamsRoute() {
     queryFn: () =>
       fetchJson<TeamWorkflowKnowledgeIngestionStatus>(
         `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/knowledge-ingestion/status`,
+      ),
+    enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && teamWorkflowQuery.data),
+  });
+  const teamWorkflowOfficialModelEvidenceStatusQuery = useQuery({
+    queryKey: officialModelEvidenceStatusQueryKey(effectiveTeamId || "none"),
+    queryFn: () =>
+      fetchJson<TeamWorkflowOfficialModelEvidenceStatus>(
+        `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/official-model-evidence/status`,
       ),
     enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && teamWorkflowQuery.data),
   });
@@ -1803,6 +1880,7 @@ export function TeamsRoute() {
   const teamWorkflowCandidateGraphLayout = teamWorkflowCandidateGraph ? workflowGraphLayout(teamWorkflowCandidateGraph) : null;
   const teamWorkflowCoordinationStatus = teamWorkflowCoordinationStatusQuery.data ?? null;
   const teamWorkflowKnowledgeIngestionStatus = teamWorkflowKnowledgeIngestionStatusQuery.data ?? null;
+  const teamWorkflowOfficialModelEvidenceStatus = teamWorkflowOfficialModelEvidenceStatusQuery.data ?? null;
   const researchStageRoundStatus = researchStageRoundStatusQuery.data ?? null;
   const researchStagePhases = researchStageRoundStatus?.phases ?? [];
   const sourceCollectionAssignments = sourceCollectionAssignmentsQuery.data?.assignments ?? [];
@@ -2293,6 +2371,70 @@ export function TeamsRoute() {
                             <span>{teamWorkflow.workflowKind}</span>
                             <span>{teamWorkflow.ownerAgentId}</span>
                             <span>{teamWorkflow.candidateStore.storagePath}</span>
+                          </div>
+                          <div className={styles.workflowModelEvidencePanel}>
+                            <div className={styles.workflowIngestionHeader}>
+                              <div>
+                                <strong>{lang === "zh" ? "模型调用证据链" : "Model evidence chain"}</strong>
+                                <span>
+                                  {teamWorkflowOfficialModelEvidenceStatus
+                                    ? `${teamWorkflowOfficialModelEvidenceStatus.summary.coveredNodeCount}/${teamWorkflowOfficialModelEvidenceStatus.summary.requiredNodeCount} nodes · ${teamWorkflowOfficialModelEvidenceStatus.summary.evidenceCount} evidence`
+                                    : teamWorkflowOfficialModelEvidenceStatusQuery.isPending
+                                    ? (lang === "zh" ? "读取中" : "loading")
+                                    : (lang === "zh" ? "等待模型证据" : "waiting for model evidence")}
+                                </span>
+                              </div>
+                              <span className={`${styles.workflowTag} ${workflowIngestionTone(teamWorkflowOfficialModelEvidenceStatus?.status || "")}`}>
+                                {teamWorkflowOfficialModelEvidenceStatus
+                                  ? workflowIngestionStatusLabel(teamWorkflowOfficialModelEvidenceStatus.status, lang)
+                                  : (lang === "zh" ? "未读取" : "not loaded")}
+                              </span>
+                            </div>
+                            {teamWorkflowOfficialModelEvidenceStatus ? (
+                              <>
+                                <div className={styles.workflowModelEvidenceStats}>
+                                  <span>Qwen <strong>{teamWorkflowOfficialModelEvidenceStatus.summary.qwenEvidenceCount}</strong></span>
+                                  <span>{lang === "zh" ? "百炼" : "Bailian"} <strong>{teamWorkflowOfficialModelEvidenceStatus.summary.bailianEvidenceCount}</strong></span>
+                                  <span>{lang === "zh" ? "本地" : "local"} <strong>{teamWorkflowOfficialModelEvidenceStatus.summary.localEvidenceCount}</strong></span>
+                                  <span>{lang === "zh" ? "候选关联" : "linked"} <strong>{teamWorkflowOfficialModelEvidenceStatus.summary.linkedCandidateCount}</strong></span>
+                                </div>
+                                <div className={styles.workflowModelEvidenceCoverage}>
+                                  {teamWorkflowOfficialModelEvidenceStatus.coverage.map((item) => (
+                                    <span key={item.taskType} className={`${styles.workflowIngestionStage} ${workflowIngestionTone(item.status === "covered" ? "ready" : "needs_evidence")}`}>
+                                      <strong>{item.label}</strong>
+                                      <small>{item.evidenceCount} · {item.status}</small>
+                                    </span>
+                                  ))}
+                                </div>
+                                {teamWorkflowOfficialModelEvidenceStatus.actionItems.length ? (
+                                  <div className={styles.workflowIngestionActions}>
+                                    {teamWorkflowOfficialModelEvidenceStatus.actionItems.slice(0, 3).map((item) => (
+                                      <span key={`${item.code}-${item.taskType}`} className={workflowIngestionTone(item.severity)}>
+                                        {workflowIngestionStatusLabel(item.severity, lang)} · {item.message}
+                                      </span>
+                                    ))}
+                                  </div>
+                                ) : null}
+                                <div className={styles.workflowIngestionBoundary}>
+                                  <span>{lang === "zh" ? "证据登记，不是正式知识" : "Evidence only, not formal knowledge"}</span>
+                                  <span>
+                                    {teamWorkflowOfficialModelEvidenceStatus.officialBoundary.writesFormalKnowledge
+                                      ? (lang === "zh" ? "会写正式知识" : "writes formal knowledge")
+                                      : (lang === "zh" ? "正式知识写入关闭" : "formal write off")}
+                                  </span>
+                                  <span>{teamWorkflowOfficialModelEvidenceStatus.storage.evidenceStorePath}</span>
+                                </div>
+                              </>
+                            ) : (
+                              <div className={styles.empty}>
+                                {teamWorkflowOfficialModelEvidenceStatusQuery.isPending
+                                  ? (lang === "zh" ? "正在读取 Qwen/百炼/本地模型调用证据覆盖..." : "Loading Qwen/Bailian/local model evidence coverage...")
+                                  : (lang === "zh" ? "暂无模型调用证据。" : "No model evidence yet.")}
+                              </div>
+                            )}
+                            {teamWorkflowOfficialModelEvidenceStatusQuery.error instanceof Error ? (
+                              <div className={styles.messageError}>{teamWorkflowOfficialModelEvidenceStatusQuery.error.message}</div>
+                            ) : null}
                           </div>
                         </>
                       ) : null}

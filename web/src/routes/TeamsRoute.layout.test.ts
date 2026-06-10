@@ -54,12 +54,15 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("fetchJson<TeamWorkflowCandidateListPayload>");
     expect(routeSource).toContain("fetchJson<TeamWorkflowCandidateGraphBuildPayload>");
     expect(routeSource).toContain("fetchJson<TeamWorkflowKnowledgeIngestionStatus>");
+    expect(routeSource).toContain("fetchJson<TeamWorkflowOfficialModelEvidenceStatus>");
     expect(routeSource).toContain("TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT");
     expect(routeSource).toContain("TEAM_WORKFLOW_CANDIDATE_GRAPH_LIMIT");
     expect(routeSource).toContain("isResearchWorkflowTeam(selectedTeam)");
     expect(routeSource).toContain("researchWorkflowTeamSelected");
     expect(routeSource).toContain("teamWorkflowKnowledgeIngestionStatusQuery");
     expect(routeSource).toContain("/workflow-orchestration/knowledge-ingestion/status");
+    expect(routeSource).toContain("teamWorkflowOfficialModelEvidenceStatusQuery");
+    expect(routeSource).toContain("/workflow-orchestration/official-model-evidence/status");
     expect(routeSource).toContain("ResearchStageRoundStatusPayload");
     expect(routeSource).toContain("researchStageRoundStatusQuery");
     expect(routeSource).toContain("/workflow-orchestration/stage-rounds/status");
@@ -147,6 +150,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("teamWorkflowCandidatesQuery");
     expect(routeSource).toContain("teamWorkflowValidationSummary");
     expect(routeSource).toContain("teamWorkflowKnowledgeIngestionStatus");
+    expect(routeSource).toContain("teamWorkflowOfficialModelEvidenceStatus");
     expect(routeSource).toContain("workflowStateLabel");
     expect(routeSource).toContain("workflowQualityTone");
     expect(routeSource).toContain("workflowIngestionStatusLabel");
@@ -196,6 +200,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("showResearchSourceCollection");
     expect(routeSource).toContain("sourceCollectionAgentIdsFromCanvas");
     expect(routeSource).toContain("知识入库状态");
+    expect(routeSource).toContain("模型调用证据链");
+    expect(routeSource).toContain("证据登记，不是正式知识");
     expect(routeSource).toContain("CandidateStore、Team Knowledge 和正式同步边界");
     expect(routeSource).toContain("资料搜集执行");
     expect(routeSource).toContain("启动搜集批次");
@@ -234,6 +240,9 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.workflowIngestionPanel).toBeTypeOf("string");
     expect(routeStyles.workflowIngestionStages).toBeTypeOf("string");
     expect(routeStyles.workflowIngestionBoundary).toBeTypeOf("string");
+    expect(routeStyles.workflowModelEvidencePanel).toBeTypeOf("string");
+    expect(routeStyles.workflowModelEvidenceStats).toBeTypeOf("string");
+    expect(routeStyles.workflowModelEvidenceCoverage).toBeTypeOf("string");
     expect(routeStyles.workflowSourceCollectionPanel).toBeTypeOf("string");
     expect(routeStyles.workflowSourceCollectionForm).toBeTypeOf("string");
     expect(routeStyles.workflowSourceCollectionRuns).toBeTypeOf("string");

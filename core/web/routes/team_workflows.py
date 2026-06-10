@@ -16,6 +16,7 @@ from core.web.services.team_workflow_orchestration_service import (
     decide_transfer_request,
     ensure_team_workflow_orchestration,
     get_knowledge_ingestion_status,
+    get_official_model_evidence_status,
     get_research_stage_round_status,
     get_team_workflow_coordination_status,
     get_team_workflow_orchestration,
@@ -26,6 +27,7 @@ from core.web.services.team_workflow_orchestration_service import (
     invoke_local_research_model,
     list_candidate_store,
     record_local_research_model_output,
+    register_official_model_evidence,
     register_candidate_source,
     review_steward_pack_knowledge_ingestion,
     retry_research_stage_round_coordination,
@@ -152,6 +154,30 @@ class LocalResearchModelOutputPayload(BaseModel):
 class LocalResearchModelInvokePayload(LocalResearchModelTaskPayload):
     title: str = Field("", max_length=240)
     summary: str = Field("", max_length=4000)
+
+
+class OfficialModelEvidencePayload(BaseModel):
+    taskType: str = Field("", max_length=80)
+    workflowNode: str = Field("", max_length=120)
+    candidateId: str = Field("", max_length=128)
+    stageRoundId: str = Field("", max_length=128)
+    sourceRunId: str = Field("", max_length=128)
+    taskId: str = Field("", max_length=128)
+    modelProvider: str = Field("", max_length=120)
+    modelId: str = Field("", max_length=160)
+    modelName: str = Field("", max_length=240)
+    modelProfileId: str = Field("", max_length=160)
+    evidenceKind: str = Field("", max_length=80)
+    artifactPath: str = Field("", max_length=500)
+    screenshotPath: str = Field("", max_length=500)
+    logRef: str = Field("", max_length=500)
+    promptSummary: str = Field("", max_length=1200)
+    outputSummary: str = Field("", max_length=1200)
+    sourceRefs: list[dict[str, Any]] = Field(default_factory=list, max_length=32)
+    evidenceRefs: list[dict[str, Any]] = Field(default_factory=list, max_length=32)
+    status: str = Field("", max_length=80)
+    recordedByAgent: str = Field("", max_length=160)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class CandidateGraphBuildPayload(BaseModel):
@@ -441,6 +467,26 @@ def team_workflow_local_research_model_output_create(team_id: str, payload: Loca
 def team_workflow_local_research_model_invoke(team_id: str, payload: LocalResearchModelInvokePayload) -> dict:
     try:
         return invoke_local_research_model(team_id, payload.model_dump())
+    except TeamNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/teams/{team_id}/workflow-orchestration/official-model-evidence/status")
+def team_workflow_official_model_evidence_status(team_id: str) -> dict:
+    try:
+        return get_official_model_evidence_status(team_id)
+    except TeamNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/teams/{team_id}/workflow-orchestration/official-model-evidence", status_code=status.HTTP_201_CREATED)
+def team_workflow_official_model_evidence_register(team_id: str, payload: OfficialModelEvidencePayload) -> dict:
+    try:
+        return register_official_model_evidence(team_id, payload.model_dump())
     except TeamNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
