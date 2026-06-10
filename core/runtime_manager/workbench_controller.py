@@ -89,9 +89,14 @@ def _health_url_for(url: str) -> str:
     return f"{normalized}/api/health"
 
 
+def _open_backend_health_url(url: str, *, timeout: float):
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    return opener.open(url, timeout=timeout)
+
+
 def _is_backend_healthy(url: str) -> bool:
     try:
-        with urllib.request.urlopen(_health_url_for(url), timeout=2.0) as response:
+        with _open_backend_health_url(_health_url_for(url), timeout=2.0) as response:
             return int(getattr(response, "status", 0) or 0) == 200
     except (urllib.error.URLError, TimeoutError, ValueError, OSError, http.client.HTTPException):
         return False
