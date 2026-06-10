@@ -63,6 +63,12 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("/workflow-orchestration/knowledge-ingestion/status");
     expect(routeSource).toContain("teamWorkflowOfficialModelEvidenceStatusQuery");
     expect(routeSource).toContain("/workflow-orchestration/official-model-evidence/status");
+    expect(routeSource).toContain("TeamWorkflowSourceQualityStatus");
+    expect(routeSource).toContain("teamWorkflowSourceQualityStatusQuery");
+    expect(routeSource).toContain("/workflow-orchestration/source-quality/status");
+    expect(routeSource).toContain("/source-quality/assess");
+    expect(routeSource).toContain("assessSourceQualityMutation");
+    expect(routeSource).toContain("candidateSourceQualityAssessmentSummary");
     expect(routeSource).toContain("TeamWorkflowPaperNoteChunkStatus");
     expect(routeSource).toContain("teamWorkflowPaperNoteChunkStatusQuery");
     expect(routeSource).toContain("/workflow-orchestration/paper-note-chunks/status");
@@ -221,6 +227,10 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("刷新图谱");
     expect(routeSource).toContain("CandidateStore 快照 · 正式知识/RAG/图谱写入关闭");
     expect(routeSource).toContain("paper_note 分块计划");
+    expect(routeSource).toContain("资料质量筛选");
+    expect(routeSource).toContain("通过筛选");
+    expect(routeSource).toContain("退回补资料");
+    expect(routeSource).toContain("Source Quality Assessment Agent");
     expect(routeSource).toContain("生成分块计划");
     expect(routeSource).toContain("重建分块计划");
     expect(routeSource).toContain("后续 paper_note draft 需带 chunkId");
@@ -251,6 +261,9 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.workflowIngestionPanel).toBeTypeOf("string");
     expect(routeStyles.workflowIngestionStages).toBeTypeOf("string");
     expect(routeStyles.workflowIngestionBoundary).toBeTypeOf("string");
+    expect(routeStyles.workflowSourceQualityPanel).toBeTypeOf("string");
+    expect(routeStyles.workflowSourceQualityStats).toBeTypeOf("string");
+    expect(routeStyles.workflowSourceQualityQueue).toBeTypeOf("string");
     expect(routeStyles.workflowPaperNoteChunkPanel).toBeTypeOf("string");
     expect(routeStyles.workflowPaperNoteChunkStats).toBeTypeOf("string");
     expect(routeStyles.workflowPaperNoteChunkPlans).toBeTypeOf("string");

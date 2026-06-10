@@ -12,6 +12,7 @@ from core.web.services.team_workflow_orchestration_service import (
     DEFAULT_OWNER_AGENT_ID,
     WORKFLOW_KIND_CHALLENGE_CUP_RESEARCH,
     TeamWorkflowOrchestrationError,
+    assess_source_candidate_quality,
     build_candidate_graph,
     decide_transfer_request,
     ensure_team_workflow_orchestration,
@@ -19,6 +20,7 @@ from core.web.services.team_workflow_orchestration_service import (
     get_official_model_evidence_status,
     get_paper_note_chunk_status,
     get_research_stage_round_status,
+    get_source_quality_status,
     get_team_workflow_coordination_status,
     get_team_workflow_orchestration,
     build_local_research_model_task,
@@ -208,6 +210,19 @@ class PaperNoteChunkPlanPayload(BaseModel):
     createdByAgent: str = Field("", max_length=160)
     maxPagesPerChunk: int = Field(4, ge=1, le=12)
     maxCharsPerChunk: int = Field(12000, ge=2000, le=24000)
+
+
+class SourceQualityAssessmentPayload(BaseModel):
+    assessedByAgent: str = Field("", max_length=160)
+    decision: str = Field("", max_length=80)
+    relevanceScore: int | None = Field(None, ge=0, le=100)
+    reliabilityScore: int | None = Field(None, ge=0, le=100)
+    accessibilityScore: int | None = Field(None, ge=0, le=100)
+    extractionReadinessScore: int | None = Field(None, ge=0, le=100)
+    notes: str = Field("", max_length=4000)
+    requiredFixes: list[str] = Field(default_factory=list, max_length=12)
+    riskFlags: list[str] = Field(default_factory=list, max_length=12)
+    evidenceRefs: list[dict[str, Any]] = Field(default_factory=list, max_length=24)
 
 
 class StewardPackKnowledgeIngestionPayload(BaseModel):
@@ -405,6 +420,26 @@ def team_workflow_candidate_paper_note_autodraft(team_id: str, candidate_id: str
 def team_workflow_paper_note_chunk_status(team_id: str) -> dict:
     try:
         return get_paper_note_chunk_status(team_id)
+    except TeamNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/teams/{team_id}/workflow-orchestration/source-quality/status")
+def team_workflow_source_quality_status(team_id: str) -> dict:
+    try:
+        return get_source_quality_status(team_id)
+    except TeamNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/teams/{team_id}/workflow-orchestration/candidates/{candidate_id}/source-quality/assess", status_code=status.HTTP_201_CREATED)
+def team_workflow_candidate_source_quality_assess(team_id: str, candidate_id: str, payload: SourceQualityAssessmentPayload) -> dict:
+    try:
+        return assess_source_candidate_quality(team_id, candidate_id, payload.model_dump())
     except TeamNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:

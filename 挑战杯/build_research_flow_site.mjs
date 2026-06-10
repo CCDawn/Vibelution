@@ -412,6 +412,7 @@ const knowledgeRunbook = {
   },
   roles: [
     ["Source Intake Agent", "登记资料，不做正式入库。"],
+    ["Source Quality Assessment Agent", "筛选 source_manifest 的可靠性、可访问性、相关性和抽取风险，只写 CandidateStore。"],
     ["Paper Note Extraction Agent", "生成 paper_note，保留页码、引用和不确定性。"],
     ["Neuro Mechanism Extraction Agent", "提取神经机制，标注证据和不确定性。"],
     ["Mechanism Mapping Agent", "把机制转成计算抽象，明确类比风险。"],
@@ -429,6 +430,7 @@ const knowledgeRunbook = {
     ["知识治理工作台", "knowledge_governance_tasks_tool、knowledge_steward_workbench_tool、recommendations", "已有能力"],
     ["入库状态总览", "knowledge-ingestion/status 聚合 CandidateStore、校验报告、候选图摘要、pending proposals、formal KnowledgeItem 和 officialBoundary；Teams 科研流程面板已可视化展示状态漏斗/actionItems/officialBoundary", "已接入前端/API"],
     ["团队协调队列", "coordination/status 聚合 pendingTransfers、needsRework、stewardship、blocked、active 队列，并输出 communicationBrief；Teams 科研流程面板已显示协调状态、目标 Agent、建议通道与只读策略边界", "已接入前端/API"],
+    ["资料质量筛选", "source-quality/status 与 source-quality/assess 聚合/写回 source_manifest 质量评估；Teams 候选资料页可通过筛选或退回补资料", "已接入前端/API"],
     ["paper_note 分块计划", "paper-note-chunks/status 与 paper-note-chunks/plan 聚合/生成长论文 chunk seeds；Teams 候选资料页可生成或重建分块计划", "已接入前端/API"],
     ["评级建议", "knowledge_rating_suggestion_tool 只提交 reviewable rating suggestion", "已有能力"],
     ["候选图谱预览", "CandidateStore candidate_graph payload、断链报告、候选/正式边界显示；Teams 工作台已接入首版 SVG 读取面，现有 Memory Graph 只承接正式知识结构视图", "已接入首版"],
@@ -500,6 +502,7 @@ const implementationBlueprint = {
     ["M6.8", "阶段启动自动团队协调", "stage-rounds/start 会尝试基于 linkedChatRoom 启动轻量后台团队协调 round，并把 roomId/roundId 写回 ResearchStageRound。", "如果群聊缺失、忙碌或没有可发言成员，不回滚阶段轮次，状态进入 needs_attention，并保留 coordination_round_not_started warning；可通过 coordination/retry 重试。"],
     ["M6.9", "模型调用证据链", "新增 official-model-evidence status/register API 和 Teams 科研总览证据面板；本地 qwen3.5 invoke 会自动登记 invocation_log，已有 local_model_output 也会只读折算为候选输出证据。", "团队可以看到 source_screening、paper_note、neuro_mechanism、mechanism_mapping、algorithm_hypothesis、review_prefilter 的 Qwen/百炼/本地模型证据覆盖；证据 store 不写正式 Team Knowledge/RAG/official graph。"],
     ["M6.10", "长论文 paper_note 分块计划", "新增 paper-note-chunks/status 与 paper-note-chunks/plan；Teams 候选资料页可对已完成 sourceExtraction 的 source_manifest 生成/重建 paperNoteChunkPlan。", "分块计划只写 CandidateStore metadata，按 pageAnchors 生成 chunk seeds；paper-note-draft 可带 chunkId 逐块草稿化并回写 chunk 进度，不写正式 Team Knowledge/RAG/official graph。"],
+    ["M6.11", "资料质量筛选执行台", "新增 source-quality/status 与 source-quality/assess；Teams 候选资料页可由 Source Quality Assessment Agent 对 source_manifest 标记通过筛选或退回补资料。", "评估结果写入 CandidateStore metadata.sourceQualityAssessment/sourceQualityAssessments，并更新 source_quality_approved/source_quality_needs_revision/source_quality_rejected；不写正式 Team Knowledge/RAG/official graph。"],
   ],
   schemas: [
     "DataProcessingRun",
@@ -518,17 +521,19 @@ const implementationBlueprint = {
     "steward_ingestion_pack",
     "official_sync_record",
     "official_model_evidence",
+    "source_quality_assessment",
   ],
   services: [
     ["data_processing_service", "已落地首切：通用 profile/run/record/collection assignment/output/status，数据落到 workspace/data_processing/runs/<runId>；只做通用资料处理，不直接写正式知识。"],
     ["data_processing API", "已落地：/api/data-processing/profiles、runs 创建/列表/详情、records、collection-assignments、outputs、status；供数据搜集类 Agent 领取任务和回写结果。"],
-    ["team_workflow_orchestration_service", "已落地：Team 级 workflowOrchestration、ResearchStageRound、CandidateStore、transfer request/decision、source-collection run 启动、DataSearchPlan/query seed 契约、DataRecord -> source_manifest 幂等导入桥、paper_note chunk planning，以及 official_model_evidence 证据登记/status。"],
-    ["team_workflows API", "已落地：/api/teams/{team_id}/workflow-orchestration、stage-rounds/status、stage-rounds/start、stage-rounds/{stageRoundId}/coordination/retry、stage-rounds/{stageRoundId}/memory-record/retry、source-collection-runs（含 searchPlan/querySeeds/assignedQueries/resultWritebackContract）、candidates/source、data-processing/runs/{runId}/records/{recordId}/source-candidate、candidates/{candidate_id}/source-extraction、paper-note-chunks/status、candidates/{candidate_id}/paper-note-chunks/plan、candidates/{candidate_id}/paper-note-draft（支持 chunkId）、candidates、candidates/validation、candidate-graph、transfers、decide、knowledge-ingestion/status、coordination/status、official-model-evidence/status、official-model-evidence；coordination/status 返回 communicationBrief。"],
+    ["team_workflow_orchestration_service", "已落地：Team 级 workflowOrchestration、ResearchStageRound、CandidateStore、transfer request/decision、source-collection run 启动、DataSearchPlan/query seed 契约、DataRecord -> source_manifest 幂等导入桥、source_quality assessment、paper_note chunk planning，以及 official_model_evidence 证据登记/status。"],
+    ["team_workflows API", "已落地：/api/teams/{team_id}/workflow-orchestration、stage-rounds/status、stage-rounds/start、stage-rounds/{stageRoundId}/coordination/retry、stage-rounds/{stageRoundId}/memory-record/retry、source-collection-runs（含 searchPlan/querySeeds/assignedQueries/resultWritebackContract）、candidates/source、data-processing/runs/{runId}/records/{recordId}/source-candidate、candidates/{candidate_id}/source-extraction、source-quality/status、candidates/{candidate_id}/source-quality/assess、paper-note-chunks/status、candidates/{candidate_id}/paper-note-chunks/plan、candidates/{candidate_id}/paper-note-draft（支持 chunkId）、candidates、candidates/validation、candidate-graph、transfers、decide、knowledge-ingestion/status、coordination/status、official-model-evidence/status、official-model-evidence；coordination/status 返回 communicationBrief。"],
     ["TeamsRoute workflow workspace", "已落地入口：research-team 页面顶部显示科研流程二级索引条；当前节点内容区优先展示科研三阶段启动台，并按索引展示 workflow 当前阶段、candidateStore 摘要、模型调用证据链、coordination queue、communicationBrief、knowledge ingestion status、validationSummary、候选图谱、最近候选和团队沟通；组织画布仅在点击索引后作为附属视图显示。"],
     ["local_research_worker_model", "已落地任务包构建、32k 上下文预算、统一 LLMClient invoke、JSON 提取/校验和 CandidateStore 草稿记录；解析失败不入库。"],
     ["team_communication_binding", "复用 Research Organization 通信边、Team linkedChatRoom、round_robin/opportunistic 群聊轮次。"],
     ["candidate_store", "已落地 Team 级 index、候选列表查询、按类型/状态过滤、validationSummary，并接入 source_manifest、paper_note、neuro_mechanism、mechanism_mapping、algorithm_hypothesis、candidate_graph 最小校验；rejected 候选保留在 CandidateStore metadata.rejectionArchive，但不进入候选图谱推进节点。"],
     ["source_parser", "已接入后端/API：本地 PDF source_manifest 可计算 sha256、抽取 pageAnchors/excerpt 并回写 CandidateStore；缺文件、非 PDF、解析器不可用或无文本时记录 failed extraction。"],
+    ["source_quality_assessment", "已接入后端/API/Teams 候选资料页：对 source_manifest 记录 relevance/reliability/accessibility/extractionReadiness/overall 分数和 approved/needs_revision/rejected 决策。"],
     ["paper_note_chunk_planner", "已接入后端/API/Teams 候选资料页：对已完成 sourceExtraction 的 source_manifest 生成 paperNoteChunkPlan，并支持按 chunkId 调用 paper-note-draft。"],
     ["candidate_validator", "已落地 source_manifest/PDF 字段校验、sourceExtraction 失败校验、paper_note citation anchor 校验、neuro_mechanism 证据/术语风险校验、mechanism_mapping fact/inference/overAnalogyRisk 校验、algorithm_hypothesis experimentPlan 校验、candidate_graph 边界校验和 CandidateStore 校验报告。"],
     ["candidate_graph_builder", "已落地后端/API：生成 candidate_graph 候选快照、断链报告、未审节点清单、archivedCandidateCount 和 candidate_only officialBoundary；Teams 工作台已接入首版候选图谱读取、刷新和 SVG 预览。"],
@@ -664,10 +669,12 @@ const implementationBlueprint = {
     ["DataRecord 导入桥", "/api/teams/{teamId}/workflow-orchestration/data-processing/runs/{runId}/records/{recordId}/source-candidate", "把通用 DataRecord 幂等导入为 source_manifest 候选，保留 run/record/quality/collection trace；不写正式知识。"],
     ["模型调用证据链", "/api/teams/{teamId}/workflow-orchestration/official-model-evidence/status", "只读聚合 Qwen/百炼/本地模型调用证据覆盖；本地模型 invoke 自动登记 invocation_log，已有 local_model_output 可折算为候选输出证据；不写正式知识/RAG/图谱。"],
     ["模型证据登记", "/api/teams/{teamId}/workflow-orchestration/official-model-evidence", "允许登记 invocation_log、sample_output、screenshot、config 或 manual_attestation，要求绑定 taskType/workflowNode/candidateId 之一，用于审计而非自动入库。"],
+    ["资料质量筛选状态", "/api/teams/{teamId}/workflow-orchestration/source-quality/status", "只读聚合 source_manifest 的 assessed/approved/needs_revision/rejected/unassessed、actionItems、screeningContract 和 officialBoundary。"],
+    ["资料质量筛选写回", "/api/teams/{teamId}/workflow-orchestration/candidates/{candidateId}/source-quality/assess", "Source Quality Assessment Agent 对 source_manifest 写入 metadata.sourceQualityAssessment，并更新 source_quality_approved/source_quality_needs_revision/source_quality_rejected；不写正式知识/RAG/图谱。"],
     ["paper_note 分块状态", "/api/teams/{teamId}/workflow-orchestration/paper-note-chunks/status", "只读聚合 sourceExtraction 就绪来源、paperNoteChunkPlan、chunk draft 进度、缺计划来源和 actionItems；不写正式知识/RAG/图谱。"],
     ["paper_note 分块计划", "/api/teams/{teamId}/workflow-orchestration/candidates/{candidateId}/paper-note-chunks/plan", "对已完成 sourceExtraction 的 source_manifest 生成或重建 page_anchor_window chunk seeds，写回 CandidateStore metadata.paperNoteChunkPlan。"],
-    ["服务文件", "core/web/services/team_workflow_orchestration_service.py", "Team 编排、资料搜集批次启动、候选登记、DataRecord 导入、paper_note 分块计划、模型证据登记、转移请求、协调 Agent 裁决和轻量运行事件日志。"],
-    ["路由文件", "core/web/routes/team_workflows.py", "提供工作流查询/确保、资料搜集批次启动、候选资料登记、DataRecord 导入、paper_note 分块状态/计划、模型证据状态/登记、转移提交、转移裁决 API。"],
+    ["服务文件", "core/web/services/team_workflow_orchestration_service.py", "Team 编排、资料搜集批次启动、候选登记、DataRecord 导入、资料质量筛选、paper_note 分块计划、模型证据登记、转移请求、协调 Agent 裁决和轻量运行事件日志。"],
+    ["路由文件", "core/web/routes/team_workflows.py", "提供工作流查询/确保、资料搜集批次启动、候选资料登记、DataRecord 导入、资料质量筛选状态/写回、paper_note 分块状态/计划、模型证据状态/登记、转移提交、转移裁决 API。"],
     ["路由注册", "core/web/app.py", "新增 team_workflows_router，挂载到 /api。"],
     ["存储位置", "workspace/teams/<teamId>/workflow_orchestration.json", "保存 Team 编排结构与 activeWorkflowItems。"],
     ["阶段轮次索引", "workspace/teams/<teamId>/research_stage_rounds/index.json", "保存 ResearchStageRound、sourceRunIds、upstreamRoundIds、teamMemoryRecord、coordinationContract、coordinationRoomId/coordinationRoundId 和 needs_attention warning。"],
@@ -690,7 +697,7 @@ const implementationBlueprint = {
     ["steward_pack 审批门禁", "/api/teams/{teamId}/workflow-orchestration/steward-packs/{candidateId}/knowledge-ingestion/review", "只审批 steward_pending_knowledge_review；approved 创建正式 KnowledgeItem、迁移 proposal 级评分建议为 KnowledgeItem 级 pending 评级并进入 official_synced，rejected 退回 steward_needs_revision。"],
     ["知识入库状态总览", "/api/teams/{teamId}/workflow-orchestration/knowledge-ingestion/status", "只读聚合 source_collection、candidate_screening、steward_pack、knowledge_review、official_sync 状态；Teams 工作台已展示漏斗、actionItems 与 officialBoundary；不写正式知识、不写 RAG、不生成候选图快照。"],
     ["candidate_graph 预览", "CandidateStore candidate_graph snapshot", "POST candidate-graph 会从当前未归档候选重建 candidate_only 图谱，输出 nodes/edges/missingLinks/unreviewedNodes/archivedCandidateCount/officialBoundary；断链时 qualityStatus=broken_links。"],
-    ["验证", "tests/test_data_processing_service.py + tests/test_data_processing_routes.py + tests/test_team_workflow_orchestration_service.py + tests/test_team_workflow_routes.py + TeamsRoute.layout.test.ts", "覆盖通用数据处理首切、ResearchStageRound 三阶段启动/续做/新一轮、source-collection run 启动、DataSearchPlan/query seed 契约、DataRecord 导入 source_manifest、Teams 资料搜集执行台契约、主路径、非 ownerAgent 不能写最终状态、本地模型任务包、输出校验、知识入库状态总览、模型证据链和 paper_note 分块计划前端契约。"],
+    ["验证", "tests/test_data_processing_service.py + tests/test_data_processing_routes.py + tests/test_team_workflow_orchestration_service.py + tests/test_team_workflow_routes.py + TeamsRoute.layout.test.ts", "覆盖通用数据处理首切、ResearchStageRound 三阶段启动/续做/新一轮、source-collection run 启动、DataSearchPlan/query seed 契约、DataRecord 导入 source_manifest、Teams 资料搜集执行台契约、主路径、非 ownerAgent 不能写最终状态、本地模型任务包、输出校验、知识入库状态总览、模型证据链、资料质量筛选和 paper_note 分块计划前端契约。"],
   ],
 };
 
@@ -704,7 +711,7 @@ const currentResearchRun = {
   flowState: [
     ["DataProcessingRun", "4 个 assignment 完成", "data_discovery、source_acquisition、content_extraction、source_quality 均已提交输出。"],
     ["DataRecord", "10 条 collected", "全部带 sourceRef、summary、qualitySignals、collectionTrace。"],
-    ["source_manifest", "10 个 source_registered", "全部为 candidate-only，qualityStatus=pending_screening。"],
+    ["source_manifest", "10 个 source_registered / source_quality_*", "全部为 candidate-only；可由 Source Quality Assessment Agent 写回 sourceQualityAssessment。"],
     ["mechanism_mapping", "1 个 mechanism_mapping_candidate", "服务层校验通过，qualityStatus=prefiltered。"],
     ["algorithm_hypothesis", "1 个 hypothesis_candidate", "PER-NN v0 草稿，含 baseline、成本、实验计划。"],
     ["candidate_graph", "1 个 candidate_graph_visible", "12 nodes / 1 edge / 6 missing links，qualityStatus=broken_links。"],
@@ -736,8 +743,8 @@ const currentResearchRun = {
     "graphStatus=candidate_graph_preview_only",
   ],
   nextActions: [
-    "资料质量评估 Agent 对 10 条 source_manifest 做可靠性、可访问性、相关性筛选。",
-    "内容抽取 Agent 为通过筛选的来源补 page/citation anchors；Paper Note Extraction Agent 先生成 paperNoteChunkPlan，再按 chunkId 生成 paper_note 草稿。",
+    "Source Quality Assessment Agent 对 source_manifest 做可靠性、可访问性、相关性和抽取风险筛选。",
+    "内容抽取 Agent 为 source_quality_approved 来源补 page/citation anchors；Paper Note Extraction Agent 先生成 paperNoteChunkPlan，再按 chunkId 生成 paper_note 草稿。",
     "候选图谱需要修复 missing links；当前 status actionItems 指向 repair_candidate_graph_links 与 run_review_prefilter。",
     "知识治理 Agent 只能在 review/steward pack 完成后生成待审入库包，不能直接正式入库。",
   ],
@@ -747,15 +754,15 @@ const knowledgeNodeRunbook = {
   "01": {
     state: "source_registered",
     agent: "Source Intake Agent",
-    agentStatus: "可复用通用 data-processing assignment / source-extraction 后端已接入；Teams 资料搜集执行台和三阶段启动台已接入",
-    features: ["ResearchStageRound 建立", "三阶段启动台一键进入知识搜集", "自动启动团队协调 round", "DataProcessingRun 建立", "DataSearchPlan/querySeeds 搜索计划", "CollectionAssignment 资料搜集任务", "assignedQueries 角色分配", "Teams 启动搜集批次", "Teams 查看 run/assignment/query 状态", "手工 CollectionOutput 回写", "DataRecord 通用记录", "DataRecord 自动导入 source_manifest", "本地资料登记", "source_manifest 写入", "文件路径/页码/来源可信度记录", "本地 PDF sha256/pageAnchors/excerpt 抽取", "可选 research_knowledge_query_tool 查重"],
+    agentStatus: "可复用通用 data-processing assignment / source-extraction / source-quality 后端已接入；Teams 资料搜集执行台、候选资料筛选台和三阶段启动台已接入",
+    features: ["ResearchStageRound 建立", "三阶段启动台一键进入知识搜集", "自动启动团队协调 round", "DataProcessingRun 建立", "DataSearchPlan/querySeeds 搜索计划", "CollectionAssignment 资料搜集任务", "assignedQueries 角色分配", "Teams 启动搜集批次", "Teams 查看 run/assignment/query 状态", "手工 CollectionOutput 回写", "DataRecord 通用记录", "DataRecord 自动导入 source_manifest", "本地资料登记", "source_manifest 写入", "文件路径/页码/来源可信度记录", "本地 PDF sha256/pageAnchors/excerpt 抽取", "sourceQualityAssessment 筛选", "可选 research_knowledge_query_tool 查重"],
     tools: ["/api/teams/{teamId}/workflow-orchestration/stage-rounds/status", "/api/teams/{teamId}/workflow-orchestration/stage-rounds/start", "/api/teams/{teamId}/workflow-orchestration/stage-rounds/{stageRoundId}/coordination/retry", "/api/teams/{teamId}/workflow-orchestration/stage-rounds/{stageRoundId}/memory-record/retry", "/api/teams/{teamId}/workflow-orchestration/source-collection-runs", "/api/data-processing/runs", "/api/data-processing/runs/{runId}/collection-assignments", "/api/data-processing/runs/{runId}/collection-assignments/{assignmentId}/outputs", "/api/teams/{teamId}/workflow-orchestration/data-processing/runs/{runId}/records/{recordId}/source-candidate", "/api/teams/{teamId}/workflow-orchestration/official-model-evidence/status", "research_knowledge_query_tool", "/api/teams/{teamId}/workflow-orchestration/candidates/{candidateId}/source-extraction"],
     localModelUse: "本地 9B 模型适合做标题/摘要/片段初筛，输出 relevanceScore、topicTags、excludeReason；调用证据进入 official_model_evidence 状态面板，不直接决定正式纳入。",
     humanGate: "确认资料允许分析、来源可信度和是否纳入本轮。",
-    gap: "科研三阶段启动台、资料搜集阶段轮次、资料搜集批次启动、DataSearchPlan/query seed 契约、通用资料搜集 assignment/output、Teams 执行台和 DataRecord 到 source_manifest 导入桥已接入；真实外部搜索执行器、长 PDF 自动分批、章节识别和非 PDF 资料解析仍待补。",
+    gap: "科研三阶段启动台、资料搜集阶段轮次、资料搜集批次启动、DataSearchPlan/query seed 契约、通用资料搜集 assignment/output、Teams 执行台、DataRecord 到 source_manifest 导入桥和 source-quality 筛选台已接入；真实外部搜索执行器、长 PDF 自动分批、章节识别和非 PDF 资料解析仍待补。",
     entry: "用户提供 PDF、论文、赛题或补充资料；文件可在挑战杯工作区定位。",
-    operation: "用户在 ai科学研究团队右侧顶部点击“启动知识搜集”或“开启新一轮”，stage-rounds/start 创建或续用 ResearchStageRound，并复用 source-collection run 建立 DataProcessingRun；随后尝试基于 linkedChatRoom 启动轻量团队协调 round。系统基于 topic/goal/scope/querySeeds 生成 searchPlan、queries、roleAssignmentInputs 和 resultWritebackContract，让 data_discovery/source_acquisition/content_extraction/source_quality 等功能 Agent 领取带 assignedQueries 的 CollectionAssignment、提交 CollectionOutput。执行台支持手工回写一条 CollectionOutput，随后自动通过 Team workflow 导入桥把新 DataRecord 幂等转成 source_manifest 候选。对本地 PDF 运行 source-extraction，计算 sha256、生成 pageAnchors/excerpt，不改写原文，不自动混入联网资料。",
-    exit: "每个知识搜集轮次有 stageRoundId、roundNumber、teamMemoryRecord、coordinationContract.startResult、coordinationRoomId/coordinationRoundId、sourceRunIds、dataSearchPlanRef、planned queries、assignedQueries 和 resultWritebackContract；每个资料项先有 DataRecord/sourceRef/rawLocation/title/qualitySignals/collectionTrace，再有 source_manifest 的 id、path、type、allowedForAnalysis、sha256、pageScope 和 sourceExtraction.pageAnchors。",
+    operation: "用户在 ai科学研究团队右侧顶部点击“启动知识搜集”或“开启新一轮”，stage-rounds/start 创建或续用 ResearchStageRound，并复用 source-collection run 建立 DataProcessingRun；随后尝试基于 linkedChatRoom 启动轻量团队协调 round。系统基于 topic/goal/scope/querySeeds 生成 searchPlan、queries、roleAssignmentInputs 和 resultWritebackContract，让 data_discovery/source_acquisition/content_extraction/source_quality 等功能 Agent 领取带 assignedQueries 的 CollectionAssignment、提交 CollectionOutput。执行台支持手工回写一条 CollectionOutput，随后自动通过 Team workflow 导入桥把新 DataRecord 幂等转成 source_manifest 候选；候选资料页可调用 source-quality/assess 写入 sourceQualityAssessment 并标记通过筛选或退回补资料。对本地 PDF 运行 source-extraction，计算 sha256、生成 pageAnchors/excerpt，不改写原文，不自动混入联网资料。",
+    exit: "每个知识搜集轮次有 stageRoundId、roundNumber、teamMemoryRecord、coordinationContract.startResult、coordinationRoomId/coordinationRoundId、sourceRunIds、dataSearchPlanRef、planned queries、assignedQueries 和 resultWritebackContract；每个资料项先有 DataRecord/sourceRef/rawLocation/title/qualitySignals/collectionTrace，再有 source_manifest 的 id、path、type、allowedForAnalysis、sha256、pageScope、sourceExtraction.pageAnchors 和 sourceQualityAssessment。",
     fallback: "资料不足、路径缺失、来源不明、权限不清、抽取失败或解析器不可用时，assignment 标记 returned/partial，挑战杯候选停在 source_needs_confirmation；群聊缺失、忙碌或没有可发言成员时阶段轮次保留为 needs_attention，并通过 coordination/retry 重新启动团队协调。",
   },
   "02": {
@@ -2758,7 +2765,7 @@ function indexHtml() {
         <aside class="dashboard-panel">
           <h2>审核摘要</h2>
           <div class="kpi-grid">
-            <div class="kpi"><b>当前阶段</b><strong>M6.10</strong><span>资料搜集执行台、模型证据链和 paper_note 分块计划已接入。</span></div>
+            <div class="kpi"><b>当前阶段</b><strong>M6.11</strong><span>资料搜集执行台、资料质量筛选、模型证据链和 paper_note 分块计划已接入。</span></div>
             <div class="kpi"><b>流程节点</b><strong>${nodes.length}</strong><span>1-9 为知识入库主线，10-13 保留占位与维护节点。</span></div>
             <div class="kpi"><b>候选资料</b><strong>${currentResearchRun.sources.length}</strong><span>第一轮 source_manifest 已进入 candidate-only 工作区。</span></div>
             <div class="kpi"><b>正式写入</b><strong>0</strong><span>未写正式 Team Knowledge、RAG 或 official graph。</span></div>
@@ -2766,7 +2773,7 @@ function indexHtml() {
           <div class="focus-list">
             <div class="focus-item"><b>优先看</b><span>资料搜集、候选图谱和知识入库边界是否能支撑下一轮科研提炼。</span></div>
             <div class="focus-item"><b>不能做</b><span>本页面不触发真实搜索、不审批入库、不把候选图谱当作正式事实。</span></div>
-            <div class="focus-item"><b>下一步</b><span>补资料质量评估、按 chunkId 执行 paper_note 提炼，以及多 chunk 草稿合并策略。</span></div>
+            <div class="focus-item"><b>下一步</b><span>按 chunkId 执行 paper_note 提炼，补多 chunk 草稿合并策略和机制提炼执行台。</span></div>
           </div>
         </aside>
       </section>
