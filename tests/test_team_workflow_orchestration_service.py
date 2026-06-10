@@ -330,13 +330,15 @@ def test_start_research_stage_round_creates_knowledge_collection_round(tmp_path,
 
     assert response["created"] is True
     assert stage_round["stageType"] == "knowledge_collection"
-    assert stage_round["status"] == "running"
+    assert stage_round["status"] == "needs_attention"
     assert stage_round["roundNumber"] == 1
     assert stage_round["sourceRunIds"] == [response["run"]["runId"]]
     assert stage_round["dataSearchPlanRef"]["planId"] == response["searchPlan"]["planId"]
     assert stage_round["teamMemoryRecord"]["recordKind"] == "team_workflow_stage_record"
     assert stage_round["teamMemoryRecord"]["boundary"] == "runtime_stage_record_only_not_formal_team_knowledge"
-    assert stage_round["coordinationContract"]["autoStarted"] is False
+    assert stage_round["coordinationContract"]["autoStarted"] is True
+    assert stage_round["coordinationContract"]["startResult"]["started"] is False
+    assert "coordination_round_not_started" in {item["code"] for item in stage_round["warnings"]}
     assert response["boundaries"]["writesFormalKnowledge"] is False
     assert response["searchPlan"]["boundaries"]["externalSearchTriggered"] is False
     assert status_payload["phases"][0]["activeRoundId"] == stage_round["stageRoundId"]
@@ -359,6 +361,50 @@ def test_start_research_stage_round_reuses_active_knowledge_collection_round(tmp
     assert duplicate["created"] is False
     assert duplicate["stageRound"]["stageRoundId"] == first["stageRound"]["stageRoundId"]
     assert team_workflow_orchestration_service.get_research_stage_round_status(team["teamId"])["roundCount"] == 1
+
+
+def test_start_research_stage_round_auto_starts_team_coordination_round(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = agent_directory_service.create_agent_instance(display_name="Coordinator", direct_session_id="session-coordinator")
+    team = team_service.create_team(name="ai科学研究团队", members=[{"agentId": agent["agentId"], "role": "research_coordination"}])
+
+    response = team_workflow_orchestration_service.start_research_stage_round(
+        team["teamId"],
+        {
+            "stageType": "knowledge_collection",
+            "topic": "predictive coding",
+            "agentRoles": ["data_discovery"],
+            "agentIds": {"data_discovery": agent["agentId"]},
+        },
+    )
+    room = chat_room_service.get_chat_room_detail(team["linkedChatRoomId"])
+
+    assert response["stageRound"]["status"] == "running"
+    assert response["stageRound"]["coordinationRoundId"]
+    assert response["stageRound"]["coordinationContract"]["startResult"]["started"] is True
+    assert response["stageRound"]["coordinationContract"]["startResult"]["roundId"] == response["stageRound"]["coordinationRoundId"]
+    assert room["activeRoundId"] == response["stageRound"]["coordinationRoundId"]
+
+
+def test_retry_research_stage_round_coordination_starts_room_and_clears_warning(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="ai科学研究团队")
+    start = team_workflow_orchestration_service.start_research_stage_round(
+        team["teamId"],
+        {"stageType": "knowledge_collection", "topic": "predictive coding"},
+    )
+    agent = agent_directory_service.create_agent_instance(display_name="Coordinator", direct_session_id="session-coordinator")
+    team_service.update_team(team["teamId"], members=[{"agentId": agent["agentId"], "role": "research_coordination"}])
+
+    retry = team_workflow_orchestration_service.retry_research_stage_round_coordination(
+        team["teamId"],
+        start["stageRound"]["stageRoundId"],
+    )
+
+    assert retry["stageRound"]["status"] == "running"
+    assert retry["stageRound"]["coordinationContract"]["startResult"]["started"] is True
+    assert retry["stageRound"]["coordinationRoundId"]
+    assert "coordination_round_not_started" not in {item["code"] for item in retry["stageRound"]["warnings"]}
 
 
 def test_start_research_stage_round_new_round_inherits_previous_topic_and_links_upstream(tmp_path, monkeypatch):
@@ -389,7 +435,27 @@ def test_start_research_stage_round_new_round_inherits_previous_topic_and_links_
 
 def test_start_research_stage_round_creates_experiment_planning_placeholder(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
-    team = team_service.create_team(name="ai科学研究团队")
+    agent = agent_directory_service.create_agent_instance(display_name="Coordinator", direct_session_id="session-coordinator")
+    team = team_service.create_team(name="ai科学研究团队", members=[{"agentId": agent["agentId"], "role": "research_coordination"}])
+
+    experiment = team_workflow_orchestration_service.start_research_stage_round(
+        team["teamId"],
+        {"stageType": "experiment", "topic": "plasticity experiment plan"},
+    )
+
+    assert experiment["stageRound"]["stageType"] == "experiment"
+    assert experiment["stageRound"]["status"] == "planning"
+    assert experiment["stageRound"]["sourceRunIds"] == []
+    assert experiment["stageRound"]["upstreamRoundIds"] == []
+    assert experiment["stageRound"]["planningContract"]["autoExecution"] is False
+    assert experiment["stageRound"]["planningContract"]["requiresUserDecision"] is True
+    assert experiment["boundaries"]["autoTransitionsNextStage"] is False
+
+
+def test_start_research_stage_round_keeps_experiment_plan_when_coordination_busy(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = agent_directory_service.create_agent_instance(display_name="Coordinator", direct_session_id="session-coordinator")
+    team = team_service.create_team(name="ai科学研究团队", members=[{"agentId": agent["agentId"], "role": "research_coordination"}])
     knowledge = team_workflow_orchestration_service.start_research_stage_round(
         team["teamId"],
         {"stageType": "knowledge_collection", "topic": "synaptic plasticity"},
@@ -401,12 +467,11 @@ def test_start_research_stage_round_creates_experiment_planning_placeholder(tmp_
     )
 
     assert experiment["stageRound"]["stageType"] == "experiment"
-    assert experiment["stageRound"]["status"] == "planning"
-    assert experiment["stageRound"]["sourceRunIds"] == []
+    assert experiment["stageRound"]["status"] == "needs_attention"
     assert experiment["stageRound"]["upstreamRoundIds"] == [knowledge["stageRound"]["stageRoundId"]]
-    assert experiment["stageRound"]["planningContract"]["autoExecution"] is False
     assert experiment["stageRound"]["planningContract"]["requiresUserDecision"] is True
-    assert experiment["boundaries"]["autoTransitionsNextStage"] is False
+    assert experiment["stageRound"]["coordinationContract"]["startResult"]["started"] is False
+    assert "coordination_round_not_started" in {item["code"] for item in experiment["stageRound"]["warnings"]}
 
 
 def test_transfer_decision_rejects_non_owner_agent(tmp_path, monkeypatch):

@@ -659,7 +659,7 @@
         <b>01</b>
         <strong>Source Intake Agent</strong>
         <span>可复用通用 data-processing assignment / source-extraction 后端已接入；Teams 资料搜集执行台和三阶段启动台已接入</span>
-        <span>ResearchStageRound 建立 / 三阶段启动台一键进入知识搜集 / DataProcessingRun 建立 / DataSearchPlan/querySeeds 搜索计划 / CollectionAssignment 资料搜集任务 / assignedQueries 角色分配 / Teams 启动搜集批次 / Teams 查看 run/assignment/query 状态 / 手工 CollectionOutput 回写 / DataRecord 通用记录 / DataRecord 自动导入 source_manifest / 本地资料登记 / source_manifest 写入 / 文件路径/页码/来源可信度记录 / 本地 PDF sha256/pageAnchors/excerpt 抽取 / 可选 research_knowledge_query_tool 查重</span>
+        <span>ResearchStageRound 建立 / 三阶段启动台一键进入知识搜集 / 自动启动团队协调 round / DataProcessingRun 建立 / DataSearchPlan/querySeeds 搜索计划 / CollectionAssignment 资料搜集任务 / assignedQueries 角色分配 / Teams 启动搜集批次 / Teams 查看 run/assignment/query 状态 / 手工 CollectionOutput 回写 / DataRecord 通用记录 / DataRecord 自动导入 source_manifest / 本地资料登记 / source_manifest 写入 / 文件路径/页码/来源可信度记录 / 本地 PDF sha256/pageAnchors/excerpt 抽取 / 可选 research_knowledge_query_tool 查重</span>
         <span>确认资料允许分析、来源可信度和是否纳入本轮。</span>
       </div>
 <div class="agent-row">
@@ -1298,7 +1298,7 @@
                 </div>
 <div class="service-row">
                   <b>team_workflows API</b>
-                  <span>已落地：/api/teams/{team_id}/workflow-orchestration、stage-rounds/status、stage-rounds/start、source-collection-runs（含 searchPlan/querySeeds/assignedQueries/resultWritebackContract）、candidates/source、data-processing/runs/{runId}/records/{recordId}/source-candidate、candidates/{candidate_id}/source-extraction、candidates/{candidate_id}/paper-note-draft、candidates、candidates/validation、candidate-graph、transfers、decide、knowledge-ingestion/status、coordination/status；coordination/status 返回 communicationBrief 但不发送消息。</span>
+                  <span>已落地：/api/teams/{team_id}/workflow-orchestration、stage-rounds/status、stage-rounds/start、stage-rounds/{stageRoundId}/coordination/retry、stage-rounds/{stageRoundId}/memory-record/retry、source-collection-runs（含 searchPlan/querySeeds/assignedQueries/resultWritebackContract）、candidates/source、data-processing/runs/{runId}/records/{recordId}/source-candidate、candidates/{candidate_id}/source-extraction、candidates/{candidate_id}/paper-note-draft、candidates、candidates/validation、candidate-graph、transfers、decide、knowledge-ingestion/status、coordination/status；coordination/status 返回 communicationBrief。</span>
                 </div>
 <div class="service-row">
                   <b>TeamsRoute workflow workspace</b>
@@ -1605,12 +1605,17 @@
 <div class="blueprint-row compact">
               <b>科研阶段轮次启动</b>
               <strong>/api/teams/{teamId}/workflow-orchestration/stage-rounds/start</strong>
-              <span>统一启动/续做/开启新一轮知识搜集、实验、迭代；知识搜集复用 source-collection run，实验和迭代先生成 planning 轮次。</span>
+              <span>统一启动/续做/开启新一轮知识搜集、实验、迭代；知识搜集复用 source-collection run，实验和迭代先生成 planning 轮次，并尝试自动启动 linkedChatRoom 轻量团队协调 round。</span>
             </div>
 <div class="blueprint-row compact">
               <b>科研阶段状态</b>
               <strong>/api/teams/{teamId}/workflow-orchestration/stage-rounds/status</strong>
               <span>只读聚合三阶段状态、activeRound、latestRound、readiness、primary/secondary actions 和正式知识/RAG/图谱写入边界。</span>
+            </div>
+<div class="blueprint-row compact">
+              <b>阶段协调重试</b>
+              <strong>/api/teams/{teamId}/workflow-orchestration/stage-rounds/{stageRoundId}/coordination/retry</strong>
+              <span>当群聊缺失、忙碌或没有可发言成员导致阶段进入 needs_attention 时，可重试启动团队协调 round；成功后写回 coordinationRoomId/coordinationRoundId。</span>
             </div>
 <div class="blueprint-row compact">
               <b>数据搜索计划契约</b>
@@ -1645,7 +1650,7 @@
 <div class="blueprint-row compact">
               <b>阶段轮次索引</b>
               <strong>workspace/teams/&lt;teamId&gt;/research_stage_rounds/index.json</strong>
-              <span>保存 ResearchStageRound、sourceRunIds、upstreamRoundIds、teamMemoryRecord 和 coordinationContract。</span>
+              <span>保存 ResearchStageRound、sourceRunIds、upstreamRoundIds、teamMemoryRecord、coordinationContract、coordinationRoomId/coordinationRoundId 和 needs_attention warning。</span>
             </div>
 <div class="blueprint-row compact">
               <b>候选索引</b>
@@ -1845,6 +1850,12 @@
               <strong>科研三阶段启动台</strong>
               <span>research-team / ai科学研究团队右侧顶部新增三阶段启动台，提供知识搜集、实验、迭代三个启动按钮；后端新增 stage-rounds/status 和 stage-rounds/start。</span>
               <span>知识搜集会创建或续用 ResearchStageRound 并复用 source-collection run；实验与迭代先创建 planning 轮次和 coordinationContract，不自动执行实验/迭代；阶段记录写入 Team workflow runtime memory，不创建正式 KnowledgeItem/RAG/official graph。</span>
+            </div>
+<div class="blueprint-row">
+              <b>M6.8</b>
+              <strong>阶段启动自动团队协调</strong>
+              <span>stage-rounds/start 会尝试基于 linkedChatRoom 启动轻量后台团队协调 round，并把 roomId/roundId 写回 ResearchStageRound。</span>
+              <span>如果群聊缺失、忙碌或没有可发言成员，不回滚阶段轮次，状态进入 needs_attention，并保留 coordination_round_not_started warning；可通过 coordination/retry 重试。</span>
             </div>
       </div>
       <div class="tag-row">

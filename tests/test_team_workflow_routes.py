@@ -159,14 +159,40 @@ def test_team_workflow_route_starts_research_stage_round(tmp_path, monkeypatch):
 
     assert response.status_code == 201, response.text
     assert response.json()["created"] is True
-    assert response.json()["stageRound"]["status"] == "running"
+    assert response.json()["stageRound"]["status"] == "needs_attention"
     assert response.json()["stageRound"]["sourceRunIds"] == [response.json()["run"]["runId"]]
     assert response.json()["stageRound"]["teamMemoryRecord"]["recordKind"] == "team_workflow_stage_record"
-    assert response.json()["stageRound"]["coordinationContract"]["autoStarted"] is False
+    assert response.json()["stageRound"]["coordinationContract"]["autoStarted"] is True
+    assert response.json()["stageRound"]["coordinationContract"]["startResult"]["started"] is False
     assert response.json()["searchPlan"]["boundaries"]["externalSearchTriggered"] is False
     assert status_response.status_code == 200, status_response.text
     assert status_response.json()["phases"][0]["activeRoundId"] == response.json()["stageRound"]["stageRoundId"]
     assert status_response.json()["boundaries"]["writesFormalKnowledge"] is False
+
+
+def test_team_workflow_route_retries_research_stage_coordination(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    client = _client()
+    team = client.post("/api/teams", json={"name": "ai科学研究团队"}).json()
+    start_response = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/stage-rounds/start",
+        json={"stageType": "knowledge_collection", "topic": "predictive coding"},
+    )
+    agent = agent_directory_service.create_agent_instance(display_name="Coordinator", direct_session_id="session-coordinator")
+    client.patch(
+        f"/api/teams/{team['teamId']}",
+        json={"members": [{"agentId": agent["agentId"], "role": "research_coordination"}]},
+    )
+
+    retry_response = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/stage-rounds/{start_response.json()['stageRound']['stageRoundId']}/coordination/retry"
+    )
+
+    assert start_response.status_code == 201, start_response.text
+    assert retry_response.status_code == 200, retry_response.text
+    assert retry_response.json()["stageRound"]["status"] == "running"
+    assert retry_response.json()["coordinationContract"]["startResult"]["started"] is True
+    assert retry_response.json()["stageRound"]["coordinationRoundId"]
 
 
 def test_team_workflow_route_blocks_non_owner_transfer_decision(tmp_path, monkeypatch):
