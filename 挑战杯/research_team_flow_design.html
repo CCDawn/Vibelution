@@ -465,7 +465,7 @@
           <div class="plan-summary">
             <div class="service-row"><strong>知识搜集主线</strong><span>只跑通知识搜集、筛选、候选入库、知识治理 Agent 和图谱同步设计；不进入训练实验、算法实现或比赛交付。</span></div>
             <div class="service-row"><strong>实施目标</strong><span>复用 Vibelution 现有 Research、Team Knowledge、RAG、Knowledge Steward 和 Memory Graph 能力，把 01-09 做成可运行 MVP。</span></div>
-            <div class="service-row"><strong>团队入口</strong><span>/teams?team=research-team · 选中 ai科学研究团队后，主工作区顶部显示科研流程二级导航：科研总览、资料搜集、团队协调、知识入库、候选图谱、候选资料、团队沟通。</span></div>
+            <div class="service-row"><strong>团队入口</strong><span>/teams?team=research-team · 选中 ai科学研究团队后，主工作区右侧优先显示科研三阶段启动台：知识搜集、实验、迭代；其下再显示科研流程二级导航。</span></div>
           </div>
           <div class="dashboard-panel">
             <h2>边界提醒</h2>
@@ -659,8 +659,8 @@
         <div class="agent-row">
         <b>01</b>
         <strong>Source Intake Agent</strong>
-        <span>可复用通用 data-processing assignment / source-extraction 后端已接入；Teams 资料搜集执行台已接入</span>
-        <span>DataProcessingRun 建立 / DataSearchPlan/querySeeds 搜索计划 / CollectionAssignment 资料搜集任务 / assignedQueries 角色分配 / Teams 启动搜集批次 / Teams 查看 run/assignment/query 状态 / 手工 CollectionOutput 回写 / DataRecord 通用记录 / DataRecord 自动导入 source_manifest / 本地资料登记 / source_manifest 写入 / 文件路径/页码/来源可信度记录 / 本地 PDF sha256/pageAnchors/excerpt 抽取 / 可选 research_knowledge_query_tool 查重</span>
+        <span>可复用通用 data-processing assignment / source-extraction 后端已接入；Teams 资料搜集执行台和三阶段启动台已接入</span>
+        <span>ResearchStageRound 建立 / 三阶段启动台一键进入知识搜集 / 自动启动团队协调 round / DataProcessingRun 建立 / DataSearchPlan/querySeeds 搜索计划 / CollectionAssignment 资料搜集任务 / assignedQueries 角色分配 / Teams 启动搜集批次 / Teams 查看 run/assignment/query 状态 / 手工 CollectionOutput 回写 / DataRecord 通用记录 / DataRecord 自动导入 source_manifest / 本地资料登记 / source_manifest 写入 / 文件路径/页码/来源可信度记录 / 本地 PDF sha256/pageAnchors/excerpt 抽取 / 可选 research_knowledge_query_tool 查重</span>
         <span>确认资料允许分析、来源可信度和是否纳入本轮。</span>
       </div>
 <div class="agent-row">
@@ -1249,6 +1249,10 @@
                   <span>已新增 TeamWorkflowOrchestration 后端切片，首期启用 challenge_cup_research。</span>
                 </div>
 <div class="service-row">
+                  <strong>科研阶段轮次层</strong>
+                  <span>新增 ResearchStageRound / stage-rounds/status / stage-rounds/start，统一承接知识搜集、实验和迭代三阶段启动、续做、新一轮与上游轮次追踪。</span>
+                </div>
+<div class="service-row">
                   <strong>候选资料工作区</strong>
                   <span>已新增 Team 级 CandidateStore 最小索引，保存正式平台尚不能表达的候选中间态。</span>
                 </div>
@@ -1291,15 +1295,15 @@
                 </div>
 <div class="service-row">
                   <b>team_workflow_orchestration_service</b>
-                  <span>已落地：Team 级 workflowOrchestration、CandidateStore、transfer request/decision、source-collection run 启动、DataSearchPlan/query seed 契约，以及 DataRecord -&gt; source_manifest 幂等导入桥。</span>
+                  <span>已落地：Team 级 workflowOrchestration、ResearchStageRound、CandidateStore、transfer request/decision、source-collection run 启动、DataSearchPlan/query seed 契约，以及 DataRecord -&gt; source_manifest 幂等导入桥。</span>
                 </div>
 <div class="service-row">
                   <b>team_workflows API</b>
-                  <span>已落地：/api/teams/{team_id}/workflow-orchestration、source-collection-runs（含 searchPlan/querySeeds/assignedQueries/resultWritebackContract）、candidates/source、data-processing/runs/{runId}/records/{recordId}/source-candidate、candidates/{candidate_id}/source-extraction、candidates/{candidate_id}/paper-note-draft、candidates、candidates/validation、candidate-graph、transfers、decide、knowledge-ingestion/status、coordination/status；coordination/status 返回 communicationBrief 但不发送消息。</span>
+                  <span>已落地：/api/teams/{team_id}/workflow-orchestration、stage-rounds/status、stage-rounds/start、stage-rounds/{stageRoundId}/coordination/retry、stage-rounds/{stageRoundId}/memory-record/retry、source-collection-runs（含 searchPlan/querySeeds/assignedQueries/resultWritebackContract）、candidates/source、data-processing/runs/{runId}/records/{recordId}/source-candidate、candidates/{candidate_id}/source-extraction、candidates/{candidate_id}/paper-note-draft、candidates、candidates/validation、candidate-graph、transfers、decide、knowledge-ingestion/status、coordination/status；coordination/status 返回 communicationBrief。</span>
                 </div>
 <div class="service-row">
                   <b>TeamsRoute workflow workspace</b>
-                  <span>已落地只读入口：research-team 使用科研流程索引优先布局，主区域展示 workflow 当前阶段、candidateStore 摘要、coordination queue、communicationBrief、knowledge ingestion status、validationSummary、候选图谱、最近候选和团队沟通；组织画布仅在点击索引后作为附属视图显示，不做状态写操作。</span>
+                  <span>已落地入口：research-team 右侧顶部优先展示科研三阶段启动台；其下是科研流程索引和单页工作区，主区域展示 workflow 当前阶段、candidateStore 摘要、coordination queue、communicationBrief、knowledge ingestion status、validationSummary、候选图谱、最近候选和团队沟通；组织画布仅在点击索引后作为附属视图显示。</span>
                 </div>
 <div class="service-row">
                   <b>local_research_worker_model</b>
@@ -1600,6 +1604,21 @@
               <span>Research Coordination Agent 可一次创建 DataProcessingRun、searchPlan 和 data_discovery/source_acquisition/content_extraction 等功能 Agent assignments。</span>
             </div>
 <div class="blueprint-row compact">
+              <b>科研阶段轮次启动</b>
+              <strong>/api/teams/{teamId}/workflow-orchestration/stage-rounds/start</strong>
+              <span>统一启动/续做/开启新一轮知识搜集、实验、迭代；知识搜集复用 source-collection run，实验和迭代先生成 planning 轮次，并尝试自动启动 linkedChatRoom 轻量团队协调 round。</span>
+            </div>
+<div class="blueprint-row compact">
+              <b>科研阶段状态</b>
+              <strong>/api/teams/{teamId}/workflow-orchestration/stage-rounds/status</strong>
+              <span>只读聚合三阶段状态、activeRound、latestRound、readiness、primary/secondary actions 和正式知识/RAG/图谱写入边界。</span>
+            </div>
+<div class="blueprint-row compact">
+              <b>阶段协调重试</b>
+              <strong>/api/teams/{teamId}/workflow-orchestration/stage-rounds/{stageRoundId}/coordination/retry</strong>
+              <span>当群聊缺失、忙碌或没有可发言成员导致阶段进入 needs_attention 时，可重试启动团队协调 round；成功后写回 coordinationRoomId/coordinationRoundId。</span>
+            </div>
+<div class="blueprint-row compact">
               <b>数据搜索计划契约</b>
               <strong>DataSearchPlan / assignedQueries</strong>
               <span>基于 topic/goal/scope/querySeeds 生成 planned 查询、角色分配输入和 resultWritebackContract；只做 contract_only 搜索计划，不触发真实外部搜索。</span>
@@ -1630,6 +1649,11 @@
               <span>保存 Team 编排结构与 activeWorkflowItems。</span>
             </div>
 <div class="blueprint-row compact">
+              <b>阶段轮次索引</b>
+              <strong>workspace/teams/&lt;teamId&gt;/research_stage_rounds/index.json</strong>
+              <span>保存 ResearchStageRound、sourceRunIds、upstreamRoundIds、teamMemoryRecord、coordinationContract、coordinationRoomId/coordinationRoundId 和 needs_attention warning。</span>
+            </div>
+<div class="blueprint-row compact">
               <b>候选索引</b>
               <strong>workspace/teams/&lt;teamId&gt;/candidate_store/index.json</strong>
               <span>保存 source_manifest 等候选对象的最小元数据。</span>
@@ -1647,7 +1671,7 @@
 <div class="blueprint-row compact">
               <b>Team 前端入口</b>
               <strong>/teams?team=research-team</strong>
-              <span>读取 /workflow-orchestration、/candidates?limit=8、/knowledge-ingestion/status 和通用 data-processing run/status/assignment；左侧只做团队选择/创建，research-team 主工作区顶部提供科研流程二级导航，并按当前索引节点单页展示科研总览、资料搜集执行台、候选仓库、校验摘要、知识入库漏斗、actionItems 和 officialBoundary；非科研团队显示占位，不初始化 workflow。</span>
+              <span>读取 /workflow-orchestration、/stage-rounds/status、/candidates?limit=8、/knowledge-ingestion/status 和通用 data-processing run/status/assignment；左侧只做团队选择/创建，research-team 右侧顶部优先展示科研三阶段启动台，其下提供科研流程二级导航，并按当前索引节点单页展示科研总览、资料搜集执行台、候选仓库、校验摘要、知识入库漏斗、actionItems 和 officialBoundary；非科研团队显示占位，不初始化 workflow。</span>
             </div>
 <div class="blueprint-row compact">
               <b>资料搜集执行台</b>
@@ -1722,7 +1746,7 @@
 <div class="blueprint-row compact">
               <b>验证</b>
               <strong>tests/test_data_processing_service.py + tests/test_data_processing_routes.py + tests/test_team_workflow_orchestration_service.py + tests/test_team_workflow_routes.py + TeamsRoute.layout.test.ts</strong>
-              <span>覆盖通用数据处理首切、source-collection run 启动、DataSearchPlan/query seed 契约、DataRecord 导入 source_manifest、Teams 资料搜集执行台契约、主路径、非 ownerAgent 不能写最终状态、本地模型任务包、输出校验和知识入库状态总览。</span>
+              <span>覆盖通用数据处理首切、ResearchStageRound 三阶段启动/续做/新一轮、source-collection run 启动、DataSearchPlan/query seed 契约、DataRecord 导入 source_manifest、Teams 资料搜集执行台契约、主路径、非 ownerAgent 不能写最终状态、本地模型任务包、输出校验和知识入库状态总览。</span>
             </div>
       </div>
       <div class="agent-matrix" style="margin-top: 12px;">
@@ -1821,6 +1845,18 @@
               <strong>Teams 资料搜集执行台</strong>
               <span>research-team 页面新增独立资料搜集索引页，可启动 source collection run、查看最近批次、run status、assignment、assignedQueries，并手工提交 CollectionOutput。</span>
               <span>启动批次会从 Team canvas 读取 data_discovery/source_acquisition/content_extraction/source_quality 等角色绑定的团队 agentId；手工回写会先写入 DataRecord，再通过 Team workflow 导入桥转成 source_manifest 候选；仍不触发真实外部搜索，不写正式 Team Knowledge/RAG/official graph。</span>
+            </div>
+<div class="blueprint-row">
+              <b>M6.7</b>
+              <strong>科研三阶段启动台</strong>
+              <span>research-team / ai科学研究团队右侧顶部新增三阶段启动台，提供知识搜集、实验、迭代三个启动按钮；后端新增 stage-rounds/status 和 stage-rounds/start。</span>
+              <span>知识搜集会创建或续用 ResearchStageRound 并复用 source-collection run；实验与迭代先创建 planning 轮次和 coordinationContract，不自动执行实验/迭代；阶段记录写入 Team workflow runtime memory，不创建正式 KnowledgeItem/RAG/official graph。</span>
+            </div>
+<div class="blueprint-row">
+              <b>M6.8</b>
+              <strong>阶段启动自动团队协调</strong>
+              <span>stage-rounds/start 会尝试基于 linkedChatRoom 启动轻量后台团队协调 round，并把 roomId/roundId 写回 ResearchStageRound。</span>
+              <span>如果群聊缺失、忙碌或没有可发言成员，不回滚阶段轮次，状态进入 needs_attention，并保留 coordination_round_not_started warning；可通过 coordination/retry 重试。</span>
             </div>
       </div>
       <div class="tag-row">
