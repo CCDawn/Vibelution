@@ -28,10 +28,13 @@ from .llm_security import (
 from .models import AppConfig, RetryPolicyConfig
 from .profiles import apply_runtime_profile
 from .settings import (
+    MODEL_LIBRARY_DETAIL_FIELDS,
     PROFILE_REFERENCE_OVERRIDE_FIELDS,
     PUBLIC_INLINE_PROVIDER_FIELDS,
     UNCONFIGURED_MODEL_REF,
     _compact_repeated_token_halves,
+    _coerce_model_library_detail,
+    _default_model_api_key_env,
     denormalize_config_dict,
     normalize_public_config_dict,
 )
@@ -49,31 +52,6 @@ HEADER_LINES = [
     "# 配置优先级：命令行参数(kwargs) > 环境变量 > config.toml > 默认值",
     "# ============================================================",
 ]
-MODEL_LIBRARY_DETAIL_FIELDS = (
-    "api_key_env",
-    "transport",
-    "contract",
-    "protocol",
-    "compat",
-    "reasoning_state_field",
-    "strict_compatibility",
-    "temperature",
-    "max_output_tokens",
-    "timeout",
-    "connect_timeout",
-    "streaming",
-    "tool_calling_mode",
-    "prompt_cache",
-    "discovery_enabled",
-    "thinking_type",
-    "thinking_display",
-    "reasoning_effort",
-    "supports_image_input",
-    "capability_status",
-    "capability_source",
-    "capability_checked_at",
-    "capability_error",
-)
 PUBLIC_PROVIDER_FIELDS = PUBLIC_INLINE_PROVIDER_FIELDS
 PROFILE_OVERRIDE_FIELDS = PROFILE_REFERENCE_OVERRIDE_FIELDS
 LLM_MODEL_PRESETS = {
@@ -852,21 +830,6 @@ def _unique_model_library_id(model_library: dict, model_id: str) -> str:
     return f"{base}_{index}"
 
 
-def _default_model_api_key_env(model_id: str) -> str:
-    raw = str(model_id or "")
-    token = "".join(
-        char if ("A" <= char <= "Z" or "0" <= char <= "9") else "_"
-        for char in raw.upper()
-    ).strip("_")
-    token = _compact_repeated_token_halves(token)
-    if not token and raw:
-        token = f"ID_{hashlib.sha1(raw.encode('utf-8')).hexdigest()[:12].upper()}"
-    if len(token) > 48:
-        digest = hashlib.sha1(raw.encode("utf-8")).hexdigest()[:12].upper()
-        token = f"{token[:35].strip('_')}_{digest}".strip("_")
-    return f"VIBELUTION_LLM_MODEL_{token}_API_KEY" if token else "VIBELUTION_LLM_MODEL_API_KEY"
-
-
 def _canonical_model_api_key_env(model_id: str) -> str:
     return validate_llm_api_key_env(
         _default_model_api_key_env(model_id),
@@ -984,39 +947,6 @@ def _delete_user_env_var(name: str) -> None:
     if os.name != "nt":
         return
     _write_windows_user_env_var(name, None)
-
-
-def _coerce_model_library_detail(key: str, value):
-    if value in ("", None):
-        return None
-    if key == "prompt_cache":
-        return copy.deepcopy(value) if isinstance(value, dict) else {"mode": str(value).strip()}
-    if key == "compat":
-        return copy.deepcopy(value) if isinstance(value, dict) else None
-    if key == "api_key_env":
-        return str(value).strip()
-    if key in {
-        "transport",
-        "contract",
-        "protocol",
-        "reasoning_state_field",
-        "thinking_type",
-        "thinking_display",
-        "capability_status",
-        "capability_source",
-        "capability_checked_at",
-        "capability_error",
-    }:
-        return str(value).strip()
-    if key == "temperature":
-        return float(value)
-    if key in {"max_output_tokens", "timeout", "connect_timeout"}:
-        return int(value)
-    if key in {"streaming", "discovery_enabled", "strict_compatibility", "supports_image_input"}:
-        if isinstance(value, bool):
-            return value
-        return str(value).strip().lower() in {"1", "true", "yes", "on"}
-    return str(value).strip()
 
 
 def _model_library_details(item: dict) -> dict:
@@ -1350,7 +1280,19 @@ def update_llm_model(
         raise ValueError(f"unknown LLM model: {model_id}")
     provider = _resolve_public_provider_input(updated, provider_id, fallback=existing.get("provider"))
     validate_llm_provider_target(provider, context="llm.model_library")
-    merged_details = _with_prompt_cache_default(provider, {**(details or {}), "model": model}, existing=existing)
+    incoming_details = details if isinstance(details, dict) else {}
+    existing_details = existing
+    existing_provider = _owner_provider(existing)
+    route_changed = (
+        str(existing.get("model", "") or "").strip() != str(model or "").strip()
+        or (
+            bool(existing_provider or provider)
+            and _provider_fingerprint(existing_provider) != _provider_fingerprint(provider)
+        )
+    )
+    if route_changed and "prompt_cache" not in incoming_details:
+        existing_details = {key: value for key, value in existing.items() if key != "prompt_cache"}
+    merged_details = _with_prompt_cache_default(provider, {**incoming_details, "model": model}, existing=existing_details)
     entry = _model_library_entry(provider, model, label or model, merged_details)
     entry["api_key_env"] = _canonical_model_api_key_env(model_id)
     model_library[model_id] = entry
