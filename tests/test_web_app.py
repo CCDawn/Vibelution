@@ -2835,6 +2835,7 @@ def _seed_chat_state(project_root, *, task_status="reading", active_task=None, c
             "conversations": seeded_conversations,
         },
     )
+    session_service._invalidate_session_list_cache()
 
 
 def _bind_seeded_session_agent(project_root: Path, agent: dict, *, session_id: str = "session-live") -> None:
@@ -5114,12 +5115,23 @@ def test_submit_session_message_runs_turn_and_persists_reply(tmp_path, monkeypat
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
-    agent_directory_service.ensure_agent_for_session(
+    base_config = session_service.get_config().model_copy(deep=True)
+    primary_profile = base_config.llm.get_profile(role="primary")
+    dialogue_model_id = "session-message-dialogue-test"
+    base_config.llm.model_library[dialogue_model_id] = {
+        "provider_id": primary_profile.provider_id,
+        "model": "gpt-5.5",
+        "label": "Session message dialogue test",
+    }
+    monkeypatch.setattr(session_service, "get_config", lambda: base_config)
+    session_agent = agent_directory_service.ensure_agent_for_session(
         "session-live",
         display_name="真实会话",
-        llm_bindings=session_service.default_session_llm_bindings(),
+        llm_bindings={"dialogue": {"modelId": dialogue_model_id}},
         prompt_template_id="prompt-chat-default",
     )
+    _bind_seeded_session_agent(tmp_path, session_agent)
+    session_service._invalidate_session_list_cache()
     recorded_scene_events: list[tuple[tuple, dict]] = []
     monkeypatch.setattr(
         session_service,
