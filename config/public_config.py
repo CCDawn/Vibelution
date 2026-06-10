@@ -807,7 +807,8 @@ def _canonicalize_public_config(public_config: dict) -> dict:
     denormalized = denormalize_config_dict(copy.deepcopy(public_config))
     repaired = _repair_legacy_model_library_shape(denormalized)
     with_profile_models = _ensure_profile_model_library_entries(repaired)
-    canonicalized = _canonicalize_model_library_api_key_envs(with_profile_models)
+    with_prompt_cache_defaults = _ensure_model_library_prompt_cache_defaults(with_profile_models)
+    canonicalized = _canonicalize_model_library_api_key_envs(with_prompt_cache_defaults)
     return _ensure_llm_profiles_container(canonicalized)
 
 
@@ -1029,6 +1030,76 @@ def _model_library_details(item: dict) -> dict:
     return details
 
 
+def _recommended_prompt_cache_mode(provider: dict[str, Any], details: dict[str, Any] | None = None) -> str:
+    provider = _public_provider_entry(provider)
+    details = details if isinstance(details, dict) else {}
+    provider_kind = str(provider.get("kind", "") or "").strip().lower()
+    provider_api = str(provider.get("api", "") or "").strip().lower().replace("_", "-")
+    compat_mode = str(provider.get("compat_mode", "") or "").strip().lower().replace("-", "_")
+    transport = str(details.get("transport", "") or "").strip().lower()
+    model = str(details.get("model", "") or "").strip().lower()
+    protocol = str(details.get("protocol", "") or "").strip().lower()
+    base_url = str(provider.get("base_url", "") or "").strip()
+    host = base_url.lower()
+
+    if provider_kind in {"local", "ollama", "llamacpp"} or is_llm_local_network_base_url(base_url):
+        return ""
+
+    is_dashscope_qwen = (
+        provider_kind == "aliyun"
+        and ("qwen" in model or protocol.startswith("qwen_") or "dashscope.aliyuncs.com" in host)
+    )
+    if provider_kind == "anthropic" and compat_mode not in {"openai", "openai_compatible"}:
+        return "explicit_cache_control"
+    if is_dashscope_qwen:
+        return "explicit_cache_control"
+    if (
+        provider_kind in {"openai", "relay"}
+        or (provider_kind == "openai_compatible" and compat_mode in {"openai", "openai_compatible"})
+        or (
+            provider_kind in {"openai", "relay", "openai_compatible"}
+            and (provider_api in {"openai-responses", "responses"} or transport == "responses")
+        )
+    ):
+        return "automatic"
+    return ""
+
+
+def _with_prompt_cache_default(
+    provider: dict[str, Any],
+    details: dict[str, Any] | None = None,
+    *,
+    existing: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    merged = _model_library_details(existing or {})
+    merged.update(_model_library_details(details or {}))
+    if "prompt_cache" not in merged:
+        mode = _recommended_prompt_cache_mode(provider, merged)
+        if mode:
+            merged["prompt_cache"] = {"mode": mode}
+    return merged
+
+
+def _ensure_model_library_prompt_cache_defaults(public_config: dict) -> dict:
+    updated = copy.deepcopy(public_config)
+    llm = updated.get("llm", {})
+    if not isinstance(llm, dict):
+        return updated
+    model_library = llm.get("model_library", {})
+    if not isinstance(model_library, dict):
+        return updated
+    for item in model_library.values():
+        if not isinstance(item, dict) or "prompt_cache" in item:
+            continue
+        provider = _owner_provider(item)
+        if not provider:
+            continue
+        mode = _recommended_prompt_cache_mode(provider, item)
+        if mode:
+            item["prompt_cache"] = {"mode": mode}
+    return updated
+
+
 def _provider_kind(provider: dict[str, Any]) -> str:
     return str(provider.get("kind", "")).strip() or "provider"
 
@@ -1061,8 +1132,7 @@ def _model_library_entry(provider: dict[str, Any], model: str, label: str, detai
         "model": model,
         "label": label or model,
     }
-    if details:
-        entry.update(_model_library_details(details))
+    entry.update(_with_prompt_cache_default(provider, {**(details or {}), "model": model}))
     return entry
 
 
@@ -1280,7 +1350,8 @@ def update_llm_model(
         raise ValueError(f"unknown LLM model: {model_id}")
     provider = _resolve_public_provider_input(updated, provider_id, fallback=existing.get("provider"))
     validate_llm_provider_target(provider, context="llm.model_library")
-    entry = _model_library_entry(provider, model, label or model, details)
+    merged_details = _with_prompt_cache_default(provider, {**(details or {}), "model": model}, existing=existing)
+    entry = _model_library_entry(provider, model, label or model, merged_details)
     entry["api_key_env"] = _canonical_model_api_key_env(model_id)
     model_library[model_id] = entry
     build_effective_config(updated)
