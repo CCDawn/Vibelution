@@ -520,6 +520,7 @@ class SelfEvolvingAgent:
         self._active_goal: str = ""
         self._active_turn_messages: Optional[List[Any]] = None
         self._active_turn_goal: str = ""
+        self._pending_static_context_blocks: List[str] = []
         self._pending_runtime_context_blocks: List[str] = []
         self._runtime_context_seeded_by_host: bool = False
         self._single_turn_mode_active: bool = False
@@ -1261,6 +1262,13 @@ class SelfEvolvingAgent:
             return
         self._pending_runtime_context_blocks.append(text)
 
+    def seed_static_runtime_context(self, content: str) -> None:
+        """Add stable non-chat runtime context near the system prompt."""
+        text = str(content or "").strip()
+        if not text:
+            return
+        self._pending_static_context_blocks.append(text)
+
     def mark_runtime_context_seeded_by_host(self) -> None:
         """Mark that the embedding host already injected this turn's runtime context."""
 
@@ -1292,10 +1300,16 @@ class SelfEvolvingAgent:
                 },
             )
             return
-        context_block = str(getattr(packet, "context_block", "") or "").strip()
-        if not context_block:
+        static_context_block = str(getattr(packet, "static_context_block", "") or "").strip()
+        dynamic_context_block = str(getattr(packet, "dynamic_context_block", "") or "").strip()
+        if not static_context_block and not dynamic_context_block:
+            dynamic_context_block = str(getattr(packet, "context_block", "") or "").strip()
+        if not static_context_block and not dynamic_context_block:
             return
-        self.seed_runtime_context(context_block)
+        if static_context_block:
+            self.seed_static_runtime_context(static_context_block)
+        if dynamic_context_block:
+            self.seed_runtime_context(dynamic_context_block)
         _record_agent_scene_event(
             "startup",
             "agent.runtime_context_seeded",
@@ -1309,6 +1323,11 @@ class SelfEvolvingAgent:
                 "promptTemplateId": str(getattr(packet, "prompt_template_id", "") or "").strip(),
                 "roleKey": str(getattr(packet, "role_key", "") or "").strip(),
                 "supervisedRole": runtime_binding.get("supervisedRole", ""),
+                "staticContextChars": len(static_context_block),
+                "dynamicContextChars": len(dynamic_context_block),
+                "staticContextHash": str((getattr(packet, "timings", {}) or {}).get("staticContextHash") or "").strip(),
+                "dynamicContextHash": str((getattr(packet, "timings", {}) or {}).get("dynamicContextHash") or "").strip(),
+                "contextSegmentCount": len(list(getattr(packet, "context_segments", []) or [])),
             },
         )
 
@@ -1614,6 +1633,25 @@ class SelfEvolvingAgent:
             build_external_request_message=runtime_input_builder_for_turn,
             allow_append_user_message=policy.mode == AgentMode.CHAT and policy.keep_multi_turn_context,
         )
+        pending_static_context_blocks = list(getattr(self, "_pending_static_context_blocks", []) or [])
+        self._pending_static_context_blocks = []
+        if pending_static_context_blocks:
+            context_messages = [SystemMessage(content=block) for block in pending_static_context_blocks]
+            messages = TurnOutcomeController.insert_static_context_after_system(
+                messages=messages,
+                context_messages=context_messages,
+            )
+            _record_agent_scene_event(
+                "prompt",
+                "agent.static_runtime_context_inserted_as_system",
+                message="Stable Agent runtime context inserted after the primary system prompt.",
+                fields={
+                    "staticContextBlockCount": len(pending_static_context_blocks),
+                    "staticContextChars": sum(len(str(b or "")) for b in pending_static_context_blocks),
+                    "systemMessageKind": "independent_system_message",
+                    "insertionPolicy": "after_system_before_history",
+                },
+            )
         pending_runtime_context_blocks = list(getattr(self, "_pending_runtime_context_blocks", []) or [])
         self._pending_runtime_context_blocks = []
         if pending_runtime_context_blocks:
