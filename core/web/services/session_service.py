@@ -2369,6 +2369,7 @@ def _bind_conversation_to_agent_instance(
     agent_id = str(agent.get("agentId") or "").strip()
     if not agent_id:
         return
+    _release_other_direct_session_agents(session_id, keep_agent_id=agent_id)
     conversation["agent_id"] = agent_id
     conversation["agentId"] = agent_id
     _repair_conversation_agent_legacy_model_fields(
@@ -2400,6 +2401,32 @@ def _bind_conversation_to_agent_instance(
         prompt_template_id=str(agent.get("promptTemplateId") or "").strip(),
         role_key=str(agent.get("roleKey") or "").strip(),
     )
+
+
+def _release_other_direct_session_agents(session_id: str, *, keep_agent_id: str) -> None:
+    normalized_session_id = str(session_id or "").strip()
+    normalized_keep_agent_id = str(keep_agent_id or "").strip()
+    if not normalized_session_id or not normalized_keep_agent_id:
+        return
+    try:
+        directory_state = agent_directory_service.load_state()
+    except Exception:
+        return
+    for item in directory_state.get("agents") or []:
+        if not isinstance(item, dict):
+            continue
+        agent_id = str(item.get("agentId") or "").strip()
+        if not agent_id or agent_id == normalized_keep_agent_id:
+            continue
+        if str(item.get("status") or "active").strip().lower() == "archived":
+            continue
+        if str(item.get("directSessionId") or "").strip() != normalized_session_id:
+            continue
+        update_agent_instance(
+            agent_id,
+            direct_session_id="",
+            metadata={"previousDirectSessionId": normalized_session_id},
+        )
 
 
 def _delete_chat_session_state(session_id: str, *, activate_replacement: bool = False) -> dict[str, str]:
