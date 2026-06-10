@@ -94,7 +94,7 @@
       </div>
       <div class="plan-grid">
         <article class="plan-card"><h2>本步操作</h2><p class="hint">生成 paper_note，抽取 summary、keyFindings、methods、limitations 和 citation anchors。</p></article>
-        <article class="plan-card"><h2>本地研究模型用法</h2><p class="hint">本地 9B 模型适合按章节或 chunk 生成 paper_note 草稿；32k 内保留 18k-22k 原文证据和输出预留。</p></article>
+        <article class="plan-card"><h2>本地研究模型用法</h2><p class="hint">本地 9B 模型适合按章节或 chunk 生成 paper_note 草稿；32k 内保留 18k-22k 原文证据和输出预留；invoke 会自动登记模型调用证据。</p></article>
         <article class="plan-card"><h2>所需功能</h2><ul><li>PDF/资料摘录</li>
 <li>paper_note 候选 JSON 生成</li>
 <li>citation anchors</li>
@@ -102,6 +102,7 @@
         <article class="plan-card"><h2>工具/平台能力</h2><ul><li>research_knowledge_query_tool</li>
 <li>sourceExtraction.excerpt</li>
 <li>本地研究模型 task/output API</li>
+<li>/api/teams/{teamId}/workflow-orchestration/official-model-evidence/status</li>
 <li>/api/teams/{teamId}/workflow-orchestration/candidates/{candidateId}/paper-note-draft</li></ul></article>
         <article class="plan-card"><h2>功能缺口</h2><p class="hint">paper_note schema 与页码引用校验已接入 CandidateStore；本地 PDF 页码摘录已可由 source-extraction 提供，并已接入自动 paper_note 草稿桥；长文拆分和多草稿合并仍待接。</p></article>
         <article class="plan-card"><h2>失败回退</h2><p class="hint">缺页码、缺来源或摘要过度推断时退回 paper_note_needs_revision。</p></article>
