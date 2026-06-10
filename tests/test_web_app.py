@@ -5269,6 +5269,7 @@ def test_session_worker_seeds_slash_skill_runtime_context(tmp_path, monkeypatch)
     marker_calls: list[str] = []
     seen_prompt: dict[str, str] = {}
     scene_events: list[dict] = []
+    lifecycle_events: list[dict] = []
 
     class DummyAgent:
         def set_mental_model_enabled_override(self, _enabled):
@@ -5277,8 +5278,11 @@ def test_session_worker_seeds_slash_skill_runtime_context(tmp_path, monkeypatch)
         def seed_chat_history(self, _messages):
             pass
 
+        def seed_static_runtime_context(self, content):
+            seen_contexts.append(f"static:{content}")
+
         def seed_runtime_context(self, content):
-            seen_contexts.append(content)
+            seen_contexts.append(f"dynamic:{content}")
 
         def mark_runtime_context_seeded_by_host(self):
             marker_calls.append("marked")
@@ -5292,6 +5296,18 @@ def test_session_worker_seeds_slash_skill_runtime_context(tmp_path, monkeypatch)
     monkeypatch.setattr(session_service, "_SESSION_EXECUTOR", SimpleNamespace(submit=lambda fn, context: fn(context)))
     monkeypatch.setattr(
         session_service,
+        "build_agent_context",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            memory_policy={},
+            static_context_block="## Agent Static Context\nstable",
+            dynamic_context_block="## Agent Runtime Context\nvolatile",
+            context_block="## Agent Static Context\nstable\n\n## Agent Runtime Context\nvolatile",
+            context_segments=[],
+            timings={},
+        ),
+    )
+    monkeypatch.setattr(
+        session_service,
         "parse_skill_slash_command",
         lambda content: parse_skill_slash_command(content, skill_roots=[skill_root]),
     )
@@ -5302,6 +5318,13 @@ def test_session_worker_seeds_slash_skill_runtime_context(tmp_path, monkeypatch)
             {"component": component, "phase": phase, "eventCode": event_code, **kwargs}
         ),
     )
+    monkeypatch.setattr(
+        session_service,
+        "_record_session_turn_lifecycle_event",
+        lambda session_id, phase, **kwargs: lifecycle_events.append(
+            {"sessionId": session_id, "phase": phase, **kwargs}
+        ),
+    )
 
     response = client.post(
         "/api/sessions/session-live/messages",
@@ -5310,11 +5333,21 @@ def test_session_worker_seeds_slash_skill_runtime_context(tmp_path, monkeypatch)
 
     assert response.status_code == 202
     assert seen_prompt["value"] == "/brt 设计斜杠 skill 调用"
+    assert seen_contexts[0] == "static:## Agent Static Context\nstable"
+    assert seen_contexts[1] == "dynamic:## Agent Runtime Context\nvolatile"
     slash_contexts = [context for context in seen_contexts if "## Slash Skill Context" in context]
     assert slash_contexts
     assert marker_calls
     assert "Command: /brt" in slash_contexts[-1]
     assert "Ask one question at a time." in slash_contexts[-1]
+    history_seeded_events = [event for event in lifecycle_events if event["phase"] == "history_seeded"]
+    assert history_seeded_events
+    history_fields = history_seeded_events[-1]["fields"]
+    assert history_fields["staticRuntimeContextIncluded"] is True
+    assert history_fields["dynamicRuntimeContextIncluded"] is True
+    assert history_fields["runtimeContextSegmentCount"] == 0
+    assert history_fields["staticRuntimeContextSeedAvailable"] is True
+    assert history_fields["runtimeContextSeedAvailable"] is True
     assert any(event["eventCode"] == "conversation.skill_command.routed" for event in scene_events)
 
 

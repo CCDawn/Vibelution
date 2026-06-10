@@ -4273,6 +4273,50 @@ class TestRuntimeStateMemoryFlow:
         assert inserted[-1]["role"] == "user"
         assert "第二句" in inserted[-1]["content"]
 
+    def test_static_runtime_context_is_inserted_after_system_before_history(self):
+        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent._pending_static_context_blocks = []
+        agent._pending_runtime_context_blocks = []
+
+        agent.seed_static_runtime_context("## Agent Static Context\nstable")
+        agent.seed_runtime_context("## Agent Runtime Context\nvolatile")
+
+        history = [
+            SystemMessage(content="old system"),
+            build_chat_user_message("第一句"),
+            AIMessage(content="第一轮回复"),
+        ]
+        messages, resumed = TurnOutcomeController.prepare_turn_messages(
+            system_prompt="new system",
+            user_prompt="第二句",
+            effective_goal="第二句",
+            active_turn_messages=history,
+            active_turn_goal="__chat_session__",
+            build_system_message=agent_module.build_system_message,
+            build_external_request_message=build_chat_user_message,
+            allow_append_user_message=True,
+        )
+        static_context = [SystemMessage(content=block) for block in agent._pending_static_context_blocks]
+        dynamic_context = [SystemMessage(content=block) for block in agent._pending_runtime_context_blocks]
+        inserted = TurnOutcomeController.insert_static_context_after_system(
+            messages=messages,
+            context_messages=static_context,
+        )
+        inserted = TurnOutcomeController.insert_volatile_context_before_current_user(
+            messages=inserted,
+            context_messages=dynamic_context,
+        )
+
+        assert resumed is True
+        assert isinstance(inserted[0], dict)
+        assert isinstance(inserted[1], SystemMessage)
+        assert inserted[1].content.startswith("## Agent Static Context")
+        assert inserted[2:4] == history[1:]
+        assert isinstance(inserted[4], SystemMessage)
+        assert inserted[4].content.startswith("## Agent Runtime Context")
+        assert inserted[-1]["role"] == "user"
+        assert "第二句" in inserted[-1]["content"]
+
     def test_finish_turn_message_carryover_keeps_unfinished_context_and_clears_after_close(self):
         messages = [
             SystemMessage(content="system"),
