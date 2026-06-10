@@ -184,10 +184,9 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("启动知识搜集");
     expect(routeSource).toContain("启动实验规划");
     expect(routeSource).toContain("启动迭代");
+    expect(routeSource).toContain("{researchWorkflowTeamSelected ? renderResearchWorkspaceNav() : null}");
     expect(routeSource).toContain("{!researchCanvasVisible ? renderResearchStageLauncher() : null}");
     expect(routeSource).toContain("启动批次与回写结果");
-    expect(routeSource).toContain("{researchCanvasVisible ? renderResearchWorkspaceNav() : null}");
-    expect(routeSource).toContain("{!researchCanvasVisible ? renderResearchWorkspaceNav() : null}");
     expect(routeSource).toContain('id="research-workflow-overview"');
     expect(routeSource).toContain('id="research-workflow-source-collection"');
     expect(routeSource).toContain('id="research-organization-canvas"');
