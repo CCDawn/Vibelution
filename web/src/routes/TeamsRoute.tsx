@@ -1898,6 +1898,8 @@ export function TeamsRoute() {
         <span>{lang === "zh" ? "成员源" : "Member source"} <strong>Agent Center</strong></span>
       </div>
 
+      {researchWorkflowTeamSelected ? renderResearchWorkspaceNav() : null}
+
       <div className={workspaceClassName}>
         <aside className={styles.teamPanel}>
           <form
@@ -2009,7 +2011,6 @@ export function TeamsRoute() {
         </aside>
 
         <main className={canvasPanelClassName} id="research-organization-canvas">
-          {researchCanvasVisible ? renderResearchWorkspaceNav() : null}
           <div className={styles.canvasToolbar}>
             <div>
               <strong>{selectedTeam?.name ?? (lang === "zh" ? "暂无团队" : "No team")}</strong>
@@ -2170,7 +2171,6 @@ export function TeamsRoute() {
             {validation && !validation.valid ? <AlertTriangle size={16} /> : <Link2 size={16} />}
           </div>
           {!researchCanvasVisible ? renderResearchStageLauncher() : null}
-          {!researchCanvasVisible ? renderResearchWorkspaceNav() : null}
           <div className={styles.inspectorBody}>
             {showNodeBindingPanel && !selectedTeam ? (
               <section className={`${styles.nodeBindingSection} ${styles.nodeBindingPlaceholder}`}>
