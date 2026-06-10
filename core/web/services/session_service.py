@@ -3773,7 +3773,7 @@ def edit_and_resubmit_session_message(
     turn_mode: str = "",
     write_intent: bool | None = None,
 ) -> dict:
-    """Replace a historical user message, truncate later turns, and start a new turn."""
+    """Replace the latest user message, truncate later turns, and start a new turn."""
 
     lang = get_web_language()
     conversation_id = str(session_id or "").strip()
@@ -11166,7 +11166,7 @@ def _record_session_message_edit_resubmit_event(
             "conversation.message_edited_resubmitted",
             level="info",
             outcome="accepted",
-            message="Historical user message edited and resubmitted.",
+            message="Latest user message edited and resubmitted.",
             fields={
                 "sessionId": str(session_id or "").strip(),
                 "messageId": str(target_message_id or "").strip(),
