@@ -1257,7 +1257,7 @@
           <div class="service-row"><b>团队群聊</b><span>room-20260529-090009-757107-6a747d62 · research_coordination</span></div>
           <div class="service-row"><b>流程文件</b><span>workspace/teams/research-team/workflow_orchestration.json</span></div>
           <div class="service-row"><b>候选仓库</b><span>workspace/teams/research-team/candidate_store/index.json</span></div>
-          <div class="service-row"><b>策略</b><span>挑战杯科研流程直接绑定当前 Vibelution ai科学研究团队，不另建新团队；团队页面左侧只承担团队选择/创建，research-team 的科研流程索引进入团队主工作区作为二级导航，资料搜集已拆成独立一级工作页，组织画布仅作为附属结构视图。</span></div>
+          <div class="service-row"><b>策略</b><span>挑战杯科研流程直接绑定当前 Vibelution ai科学研究团队，不另建新团队；点击左侧 ai科学研究团队后直接进入团队专属科研工作台，科研流程索引下沉到团队内容区内部作为二级导航，资料搜集已拆成独立一级工作页，组织画布仅作为附属结构视图。</span></div>
         </div>
       </div>
       <div class="runbook-grid">
@@ -1327,7 +1327,7 @@
                 </div>
 <div class="service-row">
                   <b>TeamsRoute workflow workspace</b>
-                  <span>已落地入口：research-team 页面顶部显示科研流程二级索引条；当前节点内容区优先展示科研三阶段启动台，并按索引展示 workflow 当前阶段、candidateStore 摘要、模型调用证据链、coordination queue、communicationBrief、knowledge ingestion status、validationSummary、候选图谱、最近候选和团队沟通；资料搜集已拆到 /teams?team=research-team&amp;researchView=source_collection 独立一级页状态，用对话式过程流展示搜集步骤；组织画布仅在点击索引后作为附属视图显示。</span>
+                  <span>已落地入口：点击左侧 ai科学研究团队后直接进入 research-team 专属科研工作台；科研流程二级索引条下沉到团队内容区内部，当前节点内容区优先展示科研三阶段启动台，并按索引展示 workflow 当前阶段、candidateStore 摘要、模型调用证据链、coordination queue、communicationBrief、knowledge ingestion status、validationSummary、候选图谱、最近候选和团队沟通；资料搜集已拆到 /teams?team=research-team&amp;researchView=source_collection 独立一级页状态，用对话式过程流展示搜集步骤；组织画布仅在点击索引后作为附属视图显示。</span>
                 </div>
 <div class="service-row">
                   <b>local_research_worker_model</b>
@@ -1742,7 +1742,7 @@
 <div class="blueprint-row compact">
               <b>Team 前端入口</b>
               <strong>/teams?team=research-team</strong>
-              <span>读取 /workflow-orchestration、/stage-rounds/status、/official-model-evidence/status、/candidates?limit=8、/knowledge-ingestion/status 和通用 data-processing run/status/assignment；左侧只做团队选择/创建，research-team 页面顶部提供科研流程二级索引条，当前节点内容区优先展示科研三阶段启动台，并按索引节点单页展示科研总览、模型证据链、资料搜集执行台、候选仓库、校验摘要、知识入库漏斗、actionItems 和 officialBoundary；非科研团队显示占位，不初始化 workflow。</span>
+              <span>读取 /workflow-orchestration、/stage-rounds/status、/official-model-evidence/status、/candidates?limit=8、/knowledge-ingestion/status 和通用 data-processing run/status/assignment；左侧只做团队选择/创建，点击 research-team 后直接进入团队专属科研工作台，科研流程二级索引条位于团队内容区内部，当前节点内容区优先展示科研三阶段启动台，并按索引节点单页展示科研总览、模型证据链、资料搜集执行台、候选仓库、校验摘要、知识入库漏斗、actionItems 和 officialBoundary；非科研团队显示占位，不初始化 workflow。</span>
             </div>
 <div class="blueprint-row compact">
               <b>资料搜集执行台</b>

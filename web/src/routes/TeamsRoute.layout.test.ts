@@ -185,6 +185,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("ResearchWorkspaceView");
     expect(routeSource).toContain("researchWorkspaceView");
     expect(routeSource).toContain("selectResearchWorkspaceView");
+    expect(routeSource).toContain("selectTeamRecord");
     expect(routeSource).toContain("renderResearchWorkspaceNav");
     expect(routeSource).toContain("renderResearchStageLauncher");
     expect(routeSource).toContain("researchWorkspaceViewLabel");
@@ -203,8 +204,12 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("启动知识搜集");
     expect(routeSource).toContain("启动实验规划");
     expect(routeSource).toContain("启动迭代");
-    expect(routeSource).toContain("{researchWorkflowTeamSelected ? renderResearchWorkspaceNav() : null}");
-    expect(routeSource).toContain("{!researchCanvasVisible ? renderResearchStageLauncher() : null}");
+    expect(routeSource).not.toContain("{researchWorkflowTeamSelected ? renderResearchWorkspaceNav() : null}");
+    expect(routeSource).toContain("onClick={() => selectTeamRecord(team)}");
+    expect(routeSource).toContain("setResearchWorkspaceView(\"overview\")");
+    expect(routeSource).toContain("{renderResearchWorkspaceNav()}");
+    expect(routeSource).toContain("{renderResearchStageLauncher()}");
+    expect(routeSource).toContain("researchWorkflowTeamSelected && !researchCanvasVisible");
     expect(routeSource).toContain("启动批次与回写结果");
     expect(routeSource).toContain('id="research-workflow-overview"');
     expect(routeSource).toContain('id="research-workflow-source-collection"');
