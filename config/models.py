@@ -1934,7 +1934,7 @@ class AppConfig(BaseModel):
 
         if "CONFIG_AWARENESS" not in self.prompt.default_components:
             warnings.append("prompt.default_components 未包含 CONFIG_AWARENESS")
-            suggested_actions.append("将 CONFIG_AWARENESS 加入默认 prompt 组件，保持配置自感知常驻")
+            suggested_actions.append("将 CONFIG_AWARENESS 注册为默认 prompt 组件，并交由相关性门控按需展开")
 
         if "LANGUAGE_AWARENESS" not in self.prompt.default_components:
             warnings.append("prompt.default_components 未包含 LANGUAGE_AWARENESS")
