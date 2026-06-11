@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -30,11 +31,14 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 LIST_RECORD_LIMIT = 24
 DETAIL_RECORD_LIMIT = 400
 EVOLUTION_WORKSPACE_SNAPSHOT_SLOW_MS = 1000.0
+EVOLUTION_WORKSPACE_DASHBOARD_CACHE_TTL_SECONDS = 4.0
 BLOCKED_DELETE_STATUSES = {"active", "applied"}
 MANUAL_GOVERNANCE_MODE = "manual_review"
 BLOCKED_EDIT_STATUSES = {"applied", "active", "rolled_back", "superseded", "promoted"}
 SELF_EVOLUTION_CANDIDATE_STATUS = "self_candidate_pending"
 EVOLUTION_WORKSPACE_SNAPSHOT_WAS_SLOW = False
+_EVOLUTION_WORKSPACE_DASHBOARD_CACHE_LOCK = threading.Lock()
+_EVOLUTION_WORKSPACE_DASHBOARD_CACHE: dict[str, Any] = {}
 
 
 class EvolutionProposalNotFoundError(Exception):
@@ -172,16 +176,22 @@ def get_evolution_workspace_dashboard() -> dict[str, Any]:
     """Return the dashboard payloads that share one supervised-record scan."""
 
     lang = get_web_language()
+    contract = get_workbench_contract()
+    cache_key = _evolution_workspace_dashboard_cache_key(lang=lang, contract=contract)
+    cached = _get_evolution_workspace_dashboard_cache(cache_key)
+    if cached is not None:
+        return cached
     records = _load_records(PROJECT_ROOT, limit=LIST_RECORD_LIMIT)
     runs = _run_payloads(records)
     library_items = _library_items_from_records(records, lang=lang)
     pending_items = _pending_items_from_records(records, lang=lang)
-    return {
+    payload = {
         "overview": _overview_from_dashboard(
             runs,
             library_items=library_items,
             pending_items=pending_items,
             lang=lang,
+            contract=contract,
         ),
         "runs": runs,
         "library": {
@@ -189,6 +199,61 @@ def get_evolution_workspace_dashboard() -> dict[str, Any]:
             "pending": pending_items,
         },
     }
+    _set_evolution_workspace_dashboard_cache(cache_key, payload)
+    return _clone_evolution_workspace_dashboard_payload(payload)
+
+
+def invalidate_evolution_workspace_dashboard_cache() -> None:
+    with _EVOLUTION_WORKSPACE_DASHBOARD_CACHE_LOCK:
+        _EVOLUTION_WORKSPACE_DASHBOARD_CACHE.clear()
+
+
+def _evolution_workspace_dashboard_cache_key(*, lang: str, contract: dict[str, Any]) -> str:
+    try:
+        contract_signature = json.dumps(contract, ensure_ascii=False, sort_keys=True)
+    except TypeError:
+        contract_signature = str(contract)
+    return "|".join(
+        (
+            str(PROJECT_ROOT.resolve()),
+            str(lang or "").strip(),
+            contract_signature,
+        )
+    )
+
+
+def _get_evolution_workspace_dashboard_cache(cache_key: str) -> dict[str, Any] | None:
+    now = time.monotonic()
+    with _EVOLUTION_WORKSPACE_DASHBOARD_CACHE_LOCK:
+        cached_key = str(_EVOLUTION_WORKSPACE_DASHBOARD_CACHE.get("key") or "")
+        if cached_key != cache_key:
+            return None
+        try:
+            age_seconds = now - float(_EVOLUTION_WORKSPACE_DASHBOARD_CACHE.get("cached_at"))
+        except (TypeError, ValueError):
+            return None
+        if age_seconds < 0 or age_seconds > EVOLUTION_WORKSPACE_DASHBOARD_CACHE_TTL_SECONDS:
+            return None
+        payload = _EVOLUTION_WORKSPACE_DASHBOARD_CACHE.get("payload")
+        if not isinstance(payload, dict):
+            return None
+        return _clone_evolution_workspace_dashboard_payload(payload)
+
+
+def _set_evolution_workspace_dashboard_cache(cache_key: str, payload: dict[str, Any]) -> None:
+    with _EVOLUTION_WORKSPACE_DASHBOARD_CACHE_LOCK:
+        _EVOLUTION_WORKSPACE_DASHBOARD_CACHE.clear()
+        _EVOLUTION_WORKSPACE_DASHBOARD_CACHE.update(
+            {
+                "key": cache_key,
+                "cached_at": time.monotonic(),
+                "payload": _clone_evolution_workspace_dashboard_payload(payload),
+            }
+        )
+
+
+def _clone_evolution_workspace_dashboard_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    return json.loads(json.dumps(payload, ensure_ascii=False))
 
 
 def _overview_from_dashboard(
@@ -197,10 +262,12 @@ def _overview_from_dashboard(
     library_items: list[dict[str, Any]],
     pending_items: list[dict[str, Any]],
     lang: str,
+    contract: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     latest_run = runs[0] if runs else None
     workbench_state = _build_workbench_state()
     current_status = _build_current_status(latest_run, lang)
+    active_contract = contract if isinstance(contract, dict) else get_workbench_contract()
     recent_library = sorted(
         [
             {
@@ -219,7 +286,7 @@ def _overview_from_dashboard(
         item.pop("updatedAt", None)
 
     return {
-        "intakeMode": get_workbench_contract().get("intakeMode", "manual_review"),
+        "intakeMode": active_contract.get("intakeMode", "manual_review"),
         "currentStatus": current_status,
         "recentRuns": runs[:4],
         "recentLibrary": recent_library,
@@ -513,6 +580,7 @@ def delete_proposal(session_id: str, *, project_root: Path | None = None) -> dic
             "proposal_path": proposal_path,
         },
     )
+    invalidate_evolution_workspace_dashboard_cache()
 
     return {
         "sessionId": detail["sessionId"],
@@ -688,6 +756,7 @@ def update_proposal(
         changed_fields=changed_fields,
         message="Manual supervised proposal draft edits saved.",
     )
+    invalidate_evolution_workspace_dashboard_cache()
     refreshed = get_proposal_detail(normalized_session_id, project_root=root)
     return {
         "sessionId": normalized_session_id,
