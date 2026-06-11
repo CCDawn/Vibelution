@@ -22,7 +22,7 @@ from .workbench_contract_service import get_workbench_contract
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
-SELF_EVOLUTION_OVERVIEW_CACHE_TTL_SECONDS = 2.0
+SELF_EVOLUTION_OVERVIEW_CACHE_TTL_SECONDS = 15.0
 SELF_EVOLUTION_OVERVIEW_SLOW_MS = 1000.0
 _OVERVIEW_CACHE_LOCK = threading.Lock()
 _OVERVIEW_CACHE: dict[str, Any] = {}
@@ -49,16 +49,25 @@ def get_self_evolution_overview() -> dict[str, Any]:
             enabled=enabled,
         )
         return cached
+    phase_timings: list[dict[str, Any]] = []
+    phase_started_at = time.perf_counter()
     snapshot = (
         build_self_evolution_snapshot(project_root=PROJECT_ROOT, transaction_limit=6, recent_limit=4)
         if enabled
         else _empty_snapshot()
     )
+    _append_self_overview_phase_timing(phase_timings, "snapshot.build", phase_started_at)
+    phase_started_at = time.perf_counter()
     advisory = snapshot.get("advisory", {})
     worktree = snapshot.get("worktree", {})
     fitness = snapshot.get("fitness", {})
     recent_transactions = snapshot.get("recent_transactions", [])
     readiness = _build_readiness(lang, enabled=enabled, worktree=worktree, recent_transactions=recent_transactions)
+    _append_self_overview_phase_timing(phase_timings, "readiness.build", phase_started_at)
+    phase_started_at = time.perf_counter()
+    audit_tail = _audit_payloads(load_self_evolution_audit_records(PROJECT_ROOT, limit=6))
+    _append_self_overview_phase_timing(phase_timings, "audit_tail.load", phase_started_at, count=len(audit_tail))
+    phase_started_at = time.perf_counter()
 
     payload = {
         "enabled": enabled,
@@ -77,8 +86,9 @@ def get_self_evolution_overview() -> dict[str, Any]:
         "fitness": _fitness_payload(fitness),
         "worktree": _worktree_payload(worktree),
         "recentTransactions": _transaction_payloads(recent_transactions[:4]),
-        "auditTail": _audit_payloads(load_self_evolution_audit_records(PROJECT_ROOT, limit=6)),
+        "auditTail": audit_tail,
     }
+    _append_self_overview_phase_timing(phase_timings, "payload.build", phase_started_at)
     _set_self_overview_cache(cache_key, payload)
     _record_self_overview_perf(
         duration_ms=(time.perf_counter() - started_at) * 1000,
@@ -86,6 +96,7 @@ def get_self_evolution_overview() -> dict[str, Any]:
         enabled=enabled,
         recent_transaction_count=len(recent_transactions),
         dirty_file_count=int((worktree or {}).get("dirty_file_count") or 0),
+        phase_timings=phase_timings,
     )
     return json.loads(json.dumps(payload))
 
@@ -143,6 +154,7 @@ def _record_self_overview_perf(
     enabled: bool,
     recent_transaction_count: int = 0,
     dirty_file_count: int = 0,
+    phase_timings: list[dict[str, Any]] | None = None,
 ) -> None:
     global _SELF_OVERVIEW_WAS_SLOW
     is_slow = duration_ms >= SELF_EVOLUTION_OVERVIEW_SLOW_MS
@@ -167,10 +179,27 @@ def _record_self_overview_perf(
                 "recentTransactionCount": int(recent_transaction_count),
                 "dirtyFileCount": int(dirty_file_count),
                 "cacheTtlMs": int(round(SELF_EVOLUTION_OVERVIEW_CACHE_TTL_SECONDS * 1000)),
+                "phaseTimingsMs": list(phase_timings or []),
             },
         )
     except Exception:
         return
+
+
+def _append_self_overview_phase_timing(
+    timings: list[dict[str, Any]],
+    phase: str,
+    started_at: float,
+    *,
+    count: int | None = None,
+) -> None:
+    timing = {
+        "phase": str(phase or "unknown")[:120],
+        "durationMs": round((time.perf_counter() - started_at) * 1000, 1),
+    }
+    if count is not None:
+        timing["count"] = int(count)
+    timings.append(timing)
 
 
 def get_self_evolution_light_overview() -> dict[str, Any]:
