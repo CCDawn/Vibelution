@@ -53,6 +53,46 @@ class WorkRunLeaseDecision:
     conflicts: list[dict[str, Any]] = field(default_factory=list)
 
 
+def _record_lease_conflict_event(
+    request: WorkRunLeaseRequest,
+    *,
+    reason: str,
+    conflicts: list[dict[str, Any]],
+) -> None:
+    try:
+        from core.web.services.runtime_scene_service import record_runtime_scene_event
+
+        try:
+            requested_kind = request.normalized_kind()
+        except ValueError:
+            requested_kind = str(request.run_kind or "").strip()
+        requested_leases = request.normalized_leases()
+        first_conflict = conflicts[0] if conflicts else {}
+        record_runtime_scene_event(
+            "work_run",
+            "lease",
+            "work_run.lease_conflict.blocked",
+            message=reason,
+            level="info",
+            outcome="blocked",
+            fields={
+                "requestedRunKind": requested_kind,
+                "requestedRunId": str(request.run_id or "").strip(),
+                "requestedLeases": requested_leases,
+                "conflictCount": len(conflicts),
+                "conflicts": conflicts[:8],
+                "firstConflictRunId": str(first_conflict.get("runId") or ""),
+                "firstConflictRunKind": str(first_conflict.get("runKind") or ""),
+                "firstConflictStatus": str(first_conflict.get("status") or ""),
+                "firstConflictLeases": list(first_conflict.get("leases") or []),
+                "policySignal": True,
+            },
+            lifecycle=True,
+        )
+    except Exception:
+        return
+
+
 def normalize_lease(value: Any) -> str:
     return str(value or "").strip().lower().replace("-", "_")
 
@@ -117,9 +157,11 @@ def check_lease_conflicts(
     first = conflicts[0]
     leases = ", ".join(first["leases"])
     run_id = first.get("runId") or "active run"
+    reason = f"Resource lease conflict on {leases} with {run_id}."
+    _record_lease_conflict_event(request, reason=reason, conflicts=conflicts)
     return WorkRunLeaseDecision(
         allowed=False,
-        reason=f"Resource lease conflict on {leases} with {run_id}.",
+        reason=reason,
         conflicts=conflicts,
     )
 
