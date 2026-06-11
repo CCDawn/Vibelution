@@ -375,6 +375,7 @@ export function AppShell() {
   const shutdownLocalCompletionLoggedRef = useRef(false);
   const telemetrySeqRef = useRef(0);
   const pageInstanceIdRef = useRef(getPageInstanceId());
+  const startupWarmupTelemetryStateRef = useRef<"active" | "inactive" | null>(null);
   const apiFailureTelemetrySeenRef = useRef(new Map<string, number>());
   const pagehideAtMsRef = useRef(0);
   const configQuery = useQuery({
@@ -623,6 +624,12 @@ export function AppShell() {
   }, [emitBrowserTelemetry]);
 
   useEffect(() => {
+    const warmupState = shellStartupWarmupActive ? "active" : "inactive";
+    if (startupWarmupTelemetryStateRef.current === warmupState) {
+      return;
+    }
+    const previousWarmupState = startupWarmupTelemetryStateRef.current;
+    startupWarmupTelemetryStateRef.current = warmupState;
     emitBrowserTelemetry({
       phase: "startup",
       eventCode: shellStartupWarmupActive
@@ -634,6 +641,9 @@ export function AppShell() {
       fields: {
         startupDataReady: shellStartupDataReady,
         frontendVisible,
+        warmupState,
+        previousWarmupState: previousWarmupState ?? "",
+        telemetryReason: previousWarmupState === null ? "initial" : "state_changed",
       },
     });
   }, [emitBrowserTelemetry, frontendVisible, shellStartupDataReady, shellStartupWarmupActive]);

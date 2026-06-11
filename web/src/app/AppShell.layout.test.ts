@@ -138,6 +138,9 @@ describe("AppShell layout contract", () => {
     expect(shellSource).toContain("setShellStartupDataReady(true)");
     expect(shellSource).toContain("browser.startup_background_warmup.active");
     expect(shellSource).toContain("browser.startup_background_warmup.inactive");
+    expect(shellSource).toContain("const startupWarmupTelemetryStateRef = useRef<\"active\" | \"inactive\" | null>(null)");
+    expect(shellSource).toContain("if (startupWarmupTelemetryStateRef.current === warmupState)");
+    expect(shellSource).toContain("telemetryReason: previousWarmupState === null ? \"initial\" : \"state_changed\"");
     expect(shellSource).toContain("startupDataReady: shellStartupDataReady");
   });
 
