@@ -39,7 +39,7 @@
         <aside class="dashboard-panel">
           <h2>审核摘要</h2>
           <div class="kpi-grid">
-            <div class="kpi"><b>当前阶段</b><strong>M6.13</strong><span>科研一级索引已统一为知识搜集、实验、迭代；知识搜集页承载原资料搜集对话流。</span></div>
+            <div class="kpi"><b>当前阶段</b><strong>M6.14</strong><span>知识搜集启动前已加入 KV/prompt cache 硬门禁，搜集 run 会携带稳定缓存分区契约。</span></div>
             <div class="kpi"><b>流程节点</b><strong>13</strong><span>1-9 为知识入库主线，10-13 保留占位与维护节点。</span></div>
             <div class="kpi"><b>候选资料</b><strong>10</strong><span>第一轮 source_manifest 已进入 candidate-only 工作区。</span></div>
             <div class="kpi"><b>正式写入</b><strong>0</strong><span>未写正式 Team Knowledge、RAG 或 official graph。</span></div>
@@ -47,7 +47,7 @@
           <div class="focus-list">
             <div class="focus-item"><b>优先看</b><span>三阶段入口是否清晰，知识搜集阶段内的搜集、筛选、候选和入库边界是否能支撑下一轮科研提炼。</span></div>
             <div class="focus-item"><b>不能做</b><span>本页面不触发真实搜索、不审批入库、不把候选图谱当作正式事实。</span></div>
-            <div class="focus-item"><b>下一步</b><span>把真实搜索/下载执行事件接入搜集对话流，并继续按 chunkId 执行 paper_note 提炼。</span></div>
+            <div class="focus-item"><b>下一步</b><span>把真实搜索/下载执行事件接入搜集对话流，并在每步展示 cache hit/miss、网页来源、下载位置和 DataRecord 写入位置。</span></div>
           </div>
         </aside>
       </section>
@@ -1319,7 +1319,7 @@
                 </div>
 <div class="service-row">
                   <b>team_workflow_orchestration_service</b>
-                  <span>已落地：Team 级 workflowOrchestration、ResearchStageRound、CandidateStore、transfer request/decision、source-collection run 启动、DataSearchPlan/query seed 契约、DataRecord -&gt; source_manifest 幂等导入桥、source_quality assessment、paper_note chunk planning，以及 official_model_evidence 证据登记/status。</span>
+                  <span>已落地：Team 级 workflowOrchestration、ResearchStageRound、CandidateStore、transfer request/decision、source-collection run 启动、DataSearchPlan/query seed 契约、prompt cache/KV 启动门禁、DataRecord -&gt; source_manifest 幂等导入桥、source_quality assessment、paper_note chunk planning，以及 official_model_evidence 证据登记/status。</span>
                 </div>
 <div class="service-row">
                   <b>team_workflows API</b>
@@ -1959,6 +1959,12 @@
               <span>Teams research-team 一级索引统一为知识搜集、实验、迭代三阶段；每个阶段点击进入独立页面并提供返回团队页。旧候选图谱、候选资料、团队沟通、知识入库和组织画布转为阶段内部能力或附属视图，不再与阶段同级展示。</span>
               <span>知识搜集阶段复用现有 source collection 对话式链路；实验和迭代阶段先提供规划页、启动按钮、轮次状态、模块边界和正式知识/RAG/official graph 写入边界。</span>
             </div>
+<div class="blueprint-row">
+              <b>M6.14</b>
+              <strong>知识搜集 KV/prompt cache 启动门禁</strong>
+              <span>source-collection-runs 启动前生成 source_collection_prompt_cache_policy，默认要求本地研究模型 prompt_cache.mode 为 automatic 或 explicit_cache_control；不满足时 422 阻断，不创建 DataProcessingRun。</span>
+              <span>run scope/metadata、searchPlan、query execution 和 CollectionAssignment scope 均写入 promptCachePolicyRef/promptCachePartition/conversationTraceRequired，后续对话式搜集 Agent 可复用稳定前缀，避免把全量历史和网页正文反复塞进模型。</span>
+            </div>
       </div>
       <div class="tag-row">
         <span class="tag">DataProcessingRun</span>
@@ -1978,6 +1984,7 @@
 <span class="tag">official_sync_record</span>
 <span class="tag">official_model_evidence</span>
 <span class="tag">source_quality_assessment</span>
+<span class="tag">source_collection_prompt_cache_policy</span>
       </div>
     </section>
   </div>
