@@ -15050,6 +15050,7 @@ def test_evolution_workbench_route_exposes_dataset_choices_and_saved_state(tmp_p
         "supervised_dry_run",
         "terminal_bench_smoke",
         "terminal_bench_core",
+        "terminal_bench_agent_judged",
     }
     dry_run = next(item for item in payload["datasets"] if item["name"] == "supervised_dry_run")
     assert dry_run["effective"] is True
@@ -15068,6 +15069,14 @@ def test_evolution_workbench_route_exposes_dataset_choices_and_saved_state(tmp_p
     assert terminal_core["officialVerifierStatus"] == "harbor_pending"
     assert terminal_core["officialScoreAvailable"] is False
     assert "不是 Terminal-Bench 官方成绩" in terminal_core["usabilityReason"]
+    agent_judged = next(item for item in payload["datasets"] if item["name"] == "terminal_bench_agent_judged")
+    assert agent_judged["effective"] is True
+    assert agent_judged["selectable"] is True
+    assert agent_judged["adapterStatus"] == "agent_harness_ready"
+    assert agent_judged["evaluationMode"] == "agent_judged"
+    assert agent_judged["officialVerifierStatus"] == "not_required"
+    assert agent_judged["officialScoreAvailable"] is False
+    assert "纯 agent" in agent_judged["usabilityReason"]
     assert payload["activeRun"] is None
 
 
@@ -15488,7 +15497,12 @@ def test_workbench_dataset_list_backfills_new_builtin_datasets(tmp_path, monkeyp
     assert response.status_code == 200
     rows = response.json()["datasets"]
     names = {item["name"] for item in rows}
-    assert names == {"supervised_dry_run", "terminal_bench_smoke", "terminal_bench_core"}
+    assert names == {
+        "supervised_dry_run",
+        "terminal_bench_smoke",
+        "terminal_bench_core",
+        "terminal_bench_agent_judged",
+    }
     assert not any(item["name"] == "generated_cases" for item in rows)
     assert not any(item["name"] == "chat_reviewed_multiturn" for item in rows)
     assert any(item["name"] == "terminal_bench_smoke" for item in rows)
@@ -15499,6 +15513,11 @@ def test_workbench_dataset_list_backfills_new_builtin_datasets(tmp_path, monkeyp
     assert core_row["usabilityStatus"] == "custom_harness_ready"
     assert core_row["officialVerifierStatus"] == "harbor_pending"
     assert core_row["officialScoreAvailable"] is False
+    agent_judged_row = next(item for item in rows if item["name"] == "terminal_bench_agent_judged")
+    assert agent_judged_row["usabilityStatus"] == "agent_harness_ready"
+    assert agent_judged_row["evaluationMode"] == "agent_judged"
+    assert agent_judged_row["officialVerifierStatus"] == "not_required"
+    assert agent_judged_row["officialScoreAvailable"] is False
 
 
 def test_start_supervised_run_from_dataset_exposes_active_snapshot_and_sse(tmp_path, monkeypatch):
