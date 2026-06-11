@@ -32,8 +32,6 @@ $activeRuntimeScenePath = Join-Path $launcherDir "active-runtime-scene.json"
 $pythonDepsStampPath = Join-Path $launcherDir "python-deps.stamp"
 $frontendDepsStampPath = Join-Path $launcherDir "frontend-deps.stamp"
 $bindHost = "127.0.0.1"
-$legacyConfigPath = Join-Path $projectDir "config.toml"
-$legacyExampleConfigPath = Join-Path $projectDir "config.example.toml"
 $defaultConfigRoot = if ($env:USERPROFILE) { $env:USERPROFILE } else { [Environment]::GetFolderPath("UserProfile") }
 $defaultConfigHome = Join-Path $defaultConfigRoot "Documents\Vibelution\config"
 $configHome = if ($env:VIBELUTION_CONFIG_HOME) { $env:VIBELUTION_CONFIG_HOME } else { $defaultConfigHome }
@@ -49,20 +47,17 @@ function Initialize-GlobalConfigFile {
         New-Item -ItemType Directory -Path $configDir -Force | Out-Null
     }
     if (-not (Test-Path $configPath)) {
-        if (Test-Path $legacyConfigPath) {
-            Copy-Item -LiteralPath $legacyConfigPath -Destination $configPath -Force
-        } elseif (Test-Path $legacyExampleConfigPath) {
-            Copy-Item -LiteralPath $legacyExampleConfigPath -Destination $configPath -Force
-        } else {
-            Set-Content -LiteralPath $configPath -Value "# Vibelution config" -Encoding UTF8
-        }
+        Set-Content -LiteralPath $configPath -Value @(
+            "# Vibelution operator config",
+            "# Active operator config is stored outside the project repository.",
+            "# Edit this file through the Launcher or Config page so runtime processes reload it safely."
+        ) -Encoding UTF8
     }
     if (-not (Test-Path $exampleConfigPath)) {
-        if (Test-Path $legacyExampleConfigPath) {
-            Copy-Item -LiteralPath $legacyExampleConfigPath -Destination $exampleConfigPath -Force
-        } elseif (Test-Path $legacyConfigPath) {
-            Copy-Item -LiteralPath $legacyConfigPath -Destination $exampleConfigPath -Force
-        }
+        Set-Content -LiteralPath $exampleConfigPath -Value @(
+            "# Vibelution example operator config",
+            "# This example belongs to the external config home, not to the project repository."
+        ) -Encoding UTF8
     }
 }
 

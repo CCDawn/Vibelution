@@ -49,17 +49,9 @@ model = "{model}"
 """.strip()
 
 
-def test_tracked_config_has_no_real_api_key():
-    content = (PROJECT_ROOT / "config.toml").read_text(encoding="utf-8")
-    assert 'api_key = "' not in content
-    assert "sk-cp-" not in content
-
-
-def test_example_config_uses_placeholders_only():
-    content = (PROJECT_ROOT / "config.example.toml").read_text(encoding="utf-8")
-    assert 'api_key = "' not in content
-    assert "your-api-key" not in content
-    assert "sk-cp-" not in content
+def test_project_root_no_longer_tracks_operator_config_files():
+    assert not (PROJECT_ROOT / "config.toml").exists()
+    assert not (PROJECT_ROOT / "config.example.toml").exists()
 
 
 def test_windows_user_env_fallback_does_not_spawn_shells():

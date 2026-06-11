@@ -39,7 +39,7 @@ def test_resolve_config_path_uses_config_home_when_no_path_override(monkeypatch,
     assert resolve_config_path() == config_home / "config.toml"
 
 
-def test_global_config_initialization_migrates_once_without_overwriting(monkeypatch, tmp_path):
+def test_global_config_initialization_creates_external_starter_without_project_migration(monkeypatch, tmp_path):
     project_root = tmp_path / "project"
     project_root.mkdir()
     legacy_config = project_root / "config.toml"
@@ -52,14 +52,16 @@ def test_global_config_initialization_migrates_once_without_overwriting(monkeypa
 
     meta = ensure_global_config_initialized(external_config, project_root=project_root)
 
-    assert external_config.read_text(encoding="utf-8") == legacy_config.read_text(encoding="utf-8")
-    assert external_config.with_name("config.example.toml").read_text(encoding="utf-8") == legacy_example.read_text(
-        encoding="utf-8"
-    )
+    assert "operator config" in external_config.read_text(encoding="utf-8")
+    assert "backend_port = 9101" not in external_config.read_text(encoding="utf-8")
+    assert "example operator config" in external_config.with_name("config.example.toml").read_text(encoding="utf-8")
+    assert "backend_port = 8000" not in external_config.with_name("config.example.toml").read_text(encoding="utf-8")
     assert Path(meta["configPath"]) == external_config
     assert Path(meta["backupDir"]) == external_config.parent / "backups"
     assert Path(meta["lockPath"]) == external_config.parent / "config-edit.lock"
     assert meta["createdConfig"] is True
+    assert meta["configSource"] == "external_starter"
+    assert meta["exampleConfigSource"] == "external_example_starter"
     assert external_config.with_name("config.meta.json").exists()
     assert (external_config.parent / "backups").is_dir()
 
@@ -71,7 +73,7 @@ def test_global_config_initialization_migrates_once_without_overwriting(monkeypa
     assert external_config.read_text(encoding="utf-8") == "[workbench]\nbackend_port = 9201\n"
 
 
-def test_global_config_initialization_upgrades_existing_meta_without_losing_origin(tmp_path):
+def test_global_config_initialization_upgrades_existing_meta_without_overwriting_config_origin(tmp_path):
     project_root = tmp_path / "project"
     project_root.mkdir()
     (project_root / "config.example.toml").write_text("[workbench]\nbackend_port = 8000\n", encoding="utf-8")
@@ -102,7 +104,7 @@ def test_global_config_initialization_upgrades_existing_meta_without_losing_orig
     upgraded = json.loads(meta_path.read_text(encoding="utf-8"))
     assert upgraded["schemaVersion"] == CONFIG_META_SCHEMA_VERSION
     assert upgraded["configSource"] == "project_config"
-    assert upgraded["exampleConfigSource"] == "project_example"
+    assert upgraded["exampleConfigSource"] == "external_example_starter"
     assert upgraded["createdAt"] == "2026-06-11T09:20:00+00:00"
     assert Path(upgraded["backupDir"]) == external_config.parent / "backups"
     assert Path(upgraded["lockPath"]) == external_config.parent / "config-edit.lock"

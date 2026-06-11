@@ -416,6 +416,58 @@ def test_launcher_startup_settings_persist_workbench_window_size(tmp_path, monke
     assert events[-1][1]["fields"]["current"]["windowSize"] == "1600x900"
 
 
+def test_launcher_startup_settings_persist_launcher_control_port(tmp_path, monkeypatch):
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("[launcher]\ncontrol_port = 8765\n[workbench]\nbackend_port = 8000\n", encoding="utf-8")
+    events = []
+    monkeypatch.setattr(launcher_service, "CONFIG_PATH", config_path)
+    monkeypatch.delenv("VIBELUTION_LAUNCHER_PORT", raising=False)
+    monkeypatch.delenv("AGENT_LAUNCHER_CONTROL_PORT", raising=False)
+    monkeypatch.setattr(
+        launcher_service,
+        "append_runtime_manager_file_event",
+        lambda event_code, payload, **kwargs: events.append((event_code, payload)) or "2026-06-06T00:00:00+00:00",
+    )
+
+    response = launcher_service.update_launcher_startup_settings({"launcher": {"controlPort": 8899}})
+
+    text = config_path.read_text(encoding="utf-8")
+    assert response["ok"] is True
+    assert response["setting"]["launcher"]["controlPort"] == 8899
+    assert response["setting"]["launcher"]["effectiveControlPort"] == 8899
+    assert 'control_port = 8899' in text
+    assert events[-1][0] == "launcher.settings.startup.updated"
+    assert events[-1][1]["fields"]["current"]["controlPort"] == 8899
+
+
+def test_launcher_startup_settings_reports_launcher_control_port_env_override(tmp_path, monkeypatch):
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("[launcher]\ncontrol_port = 8765\n[workbench]\nbackend_port = 8000\n", encoding="utf-8")
+    monkeypatch.setattr(launcher_service, "CONFIG_PATH", config_path)
+    monkeypatch.setenv("VIBELUTION_LAUNCHER_PORT", "8899")
+    monkeypatch.delenv("AGENT_LAUNCHER_CONTROL_PORT", raising=False)
+
+    setting = launcher_service.get_launcher_startup_settings()
+
+    assert setting["launcher"]["controlPort"] == 8765
+    assert setting["launcher"]["effectiveControlPort"] == 8899
+    assert setting["launcher"]["controlPortEnvOverride"] == 8899
+
+
+def test_launcher_startup_settings_avoids_launcher_control_port_workbench_collision(tmp_path, monkeypatch):
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("[launcher]\ncontrol_port = 8765\n[workbench]\nbackend_port = 8765\n", encoding="utf-8")
+    monkeypatch.setattr(launcher_service, "CONFIG_PATH", config_path)
+    monkeypatch.delenv("VIBELUTION_LAUNCHER_PORT", raising=False)
+    monkeypatch.delenv("AGENT_LAUNCHER_CONTROL_PORT", raising=False)
+
+    setting = launcher_service.get_launcher_startup_settings()
+
+    assert setting["launcher"]["controlPort"] == 8765
+    assert setting["launcher"]["effectiveControlPort"] != 8765
+    assert setting["launcher"]["effectiveControlPort"] == 8766
+
+
 def test_launcher_startup_settings_reports_workbench_window_size_env_override(tmp_path, monkeypatch):
     config_path = tmp_path / "config.toml"
     config_path.write_text("[workbench]\nwindow_size = \"1600x900\"\n", encoding="utf-8")

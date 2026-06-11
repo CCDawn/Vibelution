@@ -256,8 +256,11 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain('onError: (error) => {\n      setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });\n      void queryClient.invalidateQueries({ queryKey: queryKeys.launcherStatus() });');
     expect(routeSource).toContain("configHash");
     expect(routeSource).toContain("runtimeProfile");
+    expect(routeSource).toContain("launcherControlPort");
     expect(routeSource).toContain("backendPort");
     expect(routeSource).toContain("frontendPort");
+    expect(routeSource).toContain("windowSize");
+    expect(routeSource).toContain("windowSizeOptions");
     expect(routeSource).toContain("interfaceLanguage");
     expect(routeSource).toContain("preflightDoctor");
     expect(routeSource).toContain("requireVenv");
@@ -271,6 +274,8 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("windowModeRestartRequired");
     expect(routeSource).toContain("windowModeEnvOverride");
     expect(routeSource).toContain("queryKeys.configWorkspace()");
+    expect(launcherApiSource).toContain("controlPort: setting.launcher.controlPort");
+    expect(launcherApiSource).toContain("windowSize: setting.workbench.windowSize");
     expect(routeSource).not.toContain("windowModeMutation");
   });
 

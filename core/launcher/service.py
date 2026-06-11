@@ -145,6 +145,7 @@ def get_launcher_startup_settings() -> dict[str, Any]:
 
     public_config = _load_launcher_public_config()
     runtime = _read_config_section(public_config, "runtime")
+    launcher = _read_config_section(public_config, "launcher")
     workbench = _read_config_section(public_config, "workbench")
     ui = _read_config_section(public_config, "ui")
     configured_window_mode = _normalize_workbench_window_mode(workbench.get("window_mode"), default="fullscreen")
@@ -155,7 +156,19 @@ def get_launcher_startup_settings() -> dict[str, Any]:
     configured_frontend_port = _normalize_port(workbench.get("frontend_port"), default=5173)
     backend_port_override = _read_port_env_override(("VIBELUTION_PORT", "AGENT_WORKBENCH_BACKEND_PORT"))
     frontend_port_override = _read_port_env_override(("VIBELUTION_FRONTEND_PORT", "AGENT_WORKBENCH_FRONTEND_PORT"))
+    configured_control_port = _normalize_port(launcher.get("control_port"), default=8765)
+    control_port_override = _read_port_env_override(("VIBELUTION_LAUNCHER_PORT", "AGENT_LAUNCHER_CONTROL_PORT"))
+    effective_backend_port = backend_port_override or configured_backend_port
+    effective_control_port = _resolve_launcher_control_port(
+        control_port_override or configured_control_port,
+        workbench_port=effective_backend_port,
+    )
     return {
+        "launcher": {
+            "controlPort": configured_control_port,
+            "effectiveControlPort": effective_control_port,
+            "controlPortEnvOverride": control_port_override or 0,
+        },
         "runtime": {
             "profile": _normalize_runtime_profile(runtime.get("profile")),
             "preflightDoctor": bool(runtime.get("preflight_doctor", True)),
@@ -165,7 +178,7 @@ def get_launcher_startup_settings() -> dict[str, Any]:
         "workbench": {
             "backendPort": configured_backend_port,
             "frontendPort": configured_frontend_port,
-            "effectiveBackendPort": backend_port_override or configured_backend_port,
+            "effectiveBackendPort": effective_backend_port,
             "effectiveFrontendPort": frontend_port_override or configured_frontend_port,
             "backendPortEnvOverride": backend_port_override or 0,
             "frontendPortEnvOverride": frontend_port_override or 0,
@@ -300,17 +313,26 @@ def update_launcher_startup_settings(payload: dict[str, Any]) -> dict[str, Any]:
     if base_hash and base_hash != current_hash:
         raise LauncherSettingsConflict("启动设置保存前配置已被其他页面或进程改动，请刷新 Launcher 后重试。")
 
+    launcher = _ensure_config_section(public_config, "launcher")
     runtime = _ensure_config_section(public_config, "runtime")
     workbench = _ensure_config_section(public_config, "workbench")
     ui = _ensure_config_section(public_config, "ui")
 
+    launcher_payload = payload.get("launcher", {})
     runtime_payload = payload.get("runtime", {})
     workbench_payload = payload.get("workbench", {})
     interface_payload = payload.get("interface", {})
-    if not isinstance(runtime_payload, dict) or not isinstance(workbench_payload, dict) or not isinstance(interface_payload, dict):
+    if (
+        not isinstance(launcher_payload, dict)
+        or not isinstance(runtime_payload, dict)
+        or not isinstance(workbench_payload, dict)
+        or not isinstance(interface_payload, dict)
+    ):
         raise ValueError("startup settings groups must be objects")
 
     previous = get_launcher_startup_settings()
+    if "controlPort" in launcher_payload:
+        launcher["control_port"] = _parse_port(launcher_payload.get("controlPort"), label="launcher.controlPort")
     if "profile" in runtime_payload:
         runtime["profile"] = _parse_runtime_profile(runtime_payload.get("profile"))
     if "preflightDoctor" in runtime_payload:
@@ -477,6 +499,18 @@ def _parse_port(value: object, *, label: str) -> int:
     return port
 
 
+def _resolve_launcher_control_port(port: int, *, workbench_port: int, default: int = 8765) -> int:
+    resolved = port
+    if resolved == workbench_port:
+        candidate = default
+        if candidate == workbench_port:
+            candidate = workbench_port + 1
+        while candidate < 65536 and candidate == workbench_port:
+            candidate += 1
+        resolved = candidate if 0 < candidate < 65536 else default
+    return resolved
+
+
 def _read_config_section(public_config: dict[str, Any], section: str) -> dict[str, Any]:
     value = public_config.get(section) if isinstance(public_config, dict) else {}
     return value if isinstance(value, dict) else {}
@@ -525,10 +559,13 @@ def _read_workbench_window_size_env_override() -> WorkbenchWindowSize | None:
 
 
 def _startup_settings_event_fields(setting: dict[str, Any]) -> dict[str, Any]:
+    launcher = _read_config_section(setting, "launcher")
     runtime = _read_config_section(setting, "runtime")
     workbench = _read_config_section(setting, "workbench")
     interface = _read_config_section(setting, "interface")
     return {
+        "controlPort": launcher.get("controlPort"),
+        "effectiveControlPort": launcher.get("effectiveControlPort"),
         "runtimeProfile": runtime.get("profile"),
         "preflightDoctor": runtime.get("preflightDoctor"),
         "requireVenv": runtime.get("requireVenv"),

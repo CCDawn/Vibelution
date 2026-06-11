@@ -578,10 +578,8 @@ def _python_module_available(python_executable: Path, module_name: str) -> bool:
 
 
 def create_harness_config(worktree_path: Path) -> Optional[Path]:
-    source = worktree_path / "config.toml"
-    if not source.exists():
-        ensure_global_config_initialized()
-        source = resolve_config_path()
+    ensure_global_config_initialized()
+    source = resolve_config_path()
     if not source.exists():
         return None
 

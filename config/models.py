@@ -4,14 +4,14 @@ Pydantic 数据模型定义
 使用 Pydantic v2 定义所有配置项的数据模型，提供严格的类型校验和验证逻辑。
 
 所有配置支持：
-1. 从 config.toml 加载
+1. 从外部 operator config.toml 加载
 2. 从环境变量覆盖
 3. 从字典创建
 4. 程序化修改
 
 默认值语义：
 - 本文件中的 default / default_factory 仅作为最低优先级兜底
-- 项目主配置面由 config.toml / config.example.toml 显式表达
+- 主配置面由用户级外部 config.toml 显式表达，项目根不再承载运行配置
 """
 
 from __future__ import annotations
@@ -1813,8 +1813,8 @@ class AppConfig(BaseModel):
         # 创建默认配置
         config = AppConfig()
 
-        # 从 TOML 加载
-        config = AppConfig.from_toml("config.toml")
+        # 从 TOML 加载（路径可通过 VIBELUTION_CONFIG_PATH/VIBELUTION_CONFIG_HOME 指定）
+        config = AppConfig.from_toml("path/to/operator/config.toml")
 
         # 访问配置
         config.llm.get_profile(role="primary").model = "gpt-4"

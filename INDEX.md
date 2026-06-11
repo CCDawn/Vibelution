@@ -11,8 +11,7 @@
 ```
 Vibelution/
 ├── agent.py                    # Agent 主入口与主循环编排（当前约 2.5k 行，持续收敛中）
-├── config.toml                 # 本地 TOML 配置（不入库）
-├── config.example.toml         # 配置模板
+├── config/                     # 配置模型库、provider、runtime defaults 与 public config 同步
 ├── core/                       # 核心模块（按功能分类）
 │   ├── chat/                   # Chat session、结果格式、任务状态
 │   ├── chatroom/               # 多 Agent 协作 chat room

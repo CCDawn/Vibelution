@@ -10,13 +10,13 @@ import {
   saveLauncherWorkbenchWindowMode,
   startLauncherBundle,
   stopLauncherBundle,
+  type LauncherStartupSettings,
   updateLauncherStartupSettings,
 } from "../api/launcher";
 import { queryKeys } from "../api/queryKeys";
 import type {
   LauncherComponentState,
   LauncherOperation,
-  LauncherStartupSettings,
   WorkbenchWindowMode,
   WorkbenchWindowModeUpdateRequest,
 } from "../api/types";
@@ -202,8 +202,12 @@ type LauncherCopy = {
   runtimeProfile: string;
   preflightDoctor: string;
   requireVenv: string;
+  launcherControlPort: string;
   backendPort: string;
   frontendPort: string;
+  windowSize: string;
+  windowSizeAuto: string;
+  windowSizeEnvOverride: string;
   interfaceLanguage: string;
   languageZh: string;
   languageEn: string;
@@ -391,6 +395,11 @@ function workbenchWindowModeLabel(mode: string | undefined, copy: LauncherCopy) 
 
 function defaultStartupSettings(windowMode: WorkbenchWindowMode = "fullscreen"): LauncherStartupSettings {
   return {
+    launcher: {
+      controlPort: 8765,
+      effectiveControlPort: 8765,
+      controlPortEnvOverride: 0,
+    },
     runtime: {
       profile: "safe_remote",
       preflightDoctor: true,
@@ -407,6 +416,15 @@ function defaultStartupSettings(windowMode: WorkbenchWindowMode = "fullscreen"):
       windowMode,
       effectiveWindowMode: windowMode,
       windowModeEnvOverride: "",
+      windowSize: "auto",
+      effectiveWindowSize: "auto",
+      windowSizeEnvOverride: "",
+      windowSizeOptions: [
+        {
+          size: "auto",
+          label: { zh: "自动", en: "Auto" },
+        },
+      ],
       windowModeOptions: [],
     },
     interface: {
@@ -444,6 +462,7 @@ function LauncherStartupSettingsPanel({
   configuredWindowMode,
   effectiveWindowMode,
   windowModeDetail,
+  controlPortOverride,
   backendPortOverride,
   frontendPortOverride,
   pending,
@@ -457,6 +476,7 @@ function LauncherStartupSettingsPanel({
   configuredWindowMode: WorkbenchWindowMode;
   effectiveWindowMode: string;
   windowModeDetail: string;
+  controlPortOverride: number;
   backendPortOverride: number;
   frontendPortOverride: number;
   pending: boolean;
@@ -469,6 +489,8 @@ function LauncherStartupSettingsPanel({
   const currentSignature = setting
     ? [
         setting.configHash,
+        setting.launcher.controlPort,
+        setting.launcher.controlPortEnvOverride,
         setting.runtime.profile,
         setting.runtime.preflightDoctor,
         setting.runtime.requireVenv,
@@ -478,16 +500,20 @@ function LauncherStartupSettingsPanel({
         setting.workbench.frontendPortEnvOverride,
         setting.workbench.windowMode,
         setting.workbench.windowModeEnvOverride,
+        setting.workbench.windowSize,
+        setting.workbench.windowSizeEnvOverride,
         setting.interface.language,
       ].join("|")
     : `fallback:${configuredWindowMode}`;
   const [draft, setDraft] = useState<LauncherStartupSettings>(() => current);
+  const [controlPortText, setControlPortText] = useState(() => String(current.launcher.controlPort));
   const [backendPortText, setBackendPortText] = useState(() => String(current.workbench.backendPort));
   const [frontendPortText, setFrontendPortText] = useState(() => String(current.workbench.frontendPort));
   const [validationError, setValidationError] = useState("");
 
   useEffect(() => {
     setDraft(current);
+    setControlPortText(String(current.launcher.controlPort));
     setBackendPortText(String(current.workbench.backendPort));
     setFrontendPortText(String(current.workbench.frontendPort));
     setValidationError("");
@@ -504,15 +530,20 @@ function LauncherStartupSettingsPanel({
   }
 
   function saveDraft() {
+    const controlPort = parsePortDraft(controlPortText);
     const backendPort = parsePortDraft(backendPortText);
     const frontendPort = parsePortDraft(frontendPortText);
-    if (!backendPort || !frontendPort) {
+    if (!controlPort || !backendPort || !frontendPort) {
       setValidationError(copy.invalidPort);
       return;
     }
     setValidationError("");
     onSave({
       ...draft,
+      launcher: {
+        ...draft.launcher,
+        controlPort,
+      },
       workbench: {
         ...draft.workbench,
         backendPort,
@@ -548,6 +579,18 @@ function LauncherStartupSettingsPanel({
             <option key={profile} value={profile}>{runtimeProfileLabel(profile, uiLang)}</option>
           ))}
         </select>
+      </label>
+      <label className={styles.settingField}>
+        <span>{copy.launcherControlPort}</span>
+        <input
+          type="number"
+          min={1}
+          max={65535}
+          value={controlPortText}
+          disabled={controlsDisabled}
+          onChange={(event) => setControlPortText(event.target.value)}
+        />
+        {controlPortOverride ? <small>{copy.portOverride}: {controlPortOverride}</small> : null}
       </label>
       <label className={styles.settingField}>
         <span>{copy.backendPort}</span>
@@ -595,6 +638,19 @@ function LauncherStartupSettingsPanel({
           <span>{copy.windowModeWindowed}</span>
         </button>
       </div>
+      <label className={styles.settingField}>
+        <span>{copy.windowSize}</span>
+        <select
+          value={draft.workbench.windowSize}
+          disabled={controlsDisabled}
+          onChange={(event) => patchDraft({ workbench: { ...draft.workbench, windowSize: event.target.value } })}
+        >
+          {(draft.workbench.windowSizeOptions.length ? draft.workbench.windowSizeOptions : [{ size: "auto", label: { zh: copy.windowSizeAuto, en: copy.windowSizeAuto } }]).map((option) => (
+            <option key={option.size} value={option.size}>{option.label[uiLang] ?? option.size}</option>
+          ))}
+        </select>
+        {draft.workbench.windowSizeEnvOverride ? <small>{copy.windowSizeEnvOverride}: {draft.workbench.effectiveWindowSize}</small> : null}
+      </label>
       <label className={styles.settingField}>
         <span>{copy.interfaceLanguage}</span>
         <select
@@ -1001,8 +1057,12 @@ export function LauncherRoute() {
         runtimeProfile: "运行档位",
         preflightDoctor: "启动前自检",
         requireVenv: "要求 .venv",
+        launcherControlPort: "控制端口",
         backendPort: "后端端口",
         frontendPort: "前端端口",
+        windowSize: "窗口尺寸",
+        windowSizeAuto: "自动",
+        windowSizeEnvOverride: "窗口尺寸被环境变量覆盖",
         interfaceLanguage: "界面语言",
         languageZh: "中文",
         languageEn: "英文",
@@ -1166,8 +1226,12 @@ export function LauncherRoute() {
         runtimeProfile: "Runtime mode",
         preflightDoctor: "Preflight doctor",
         requireVenv: "Require .venv",
+        launcherControlPort: "Control port",
         backendPort: "Backend port",
         frontendPort: "Frontend port",
+        windowSize: "Window size",
+        windowSizeAuto: "Auto",
+        windowSizeEnvOverride: "Window size is overridden by environment",
         interfaceLanguage: "Interface language",
         languageZh: "Chinese",
         languageEn: "English",
@@ -1257,7 +1321,14 @@ export function LauncherRoute() {
     onSuccess: (response) => {
       const workbench = response.setting.workbench;
       setNotice({
-        tone: workbench.windowModeEnvOverride || workbench.backendPortEnvOverride || workbench.frontendPortEnvOverride ? "warning" : "success",
+        tone:
+          response.setting.launcher.controlPortEnvOverride
+          || workbench.windowModeEnvOverride
+          || workbench.windowSizeEnvOverride
+          || workbench.backendPortEnvOverride
+          || workbench.frontendPortEnvOverride
+            ? "warning"
+            : "success",
         text: response.message || copy.startupSettingsSaved,
       });
       void queryClient.invalidateQueries({ queryKey: queryKeys.launcherStatus() });
@@ -1337,6 +1408,7 @@ export function LauncherRoute() {
   const configuredWindowMode = startupSettings?.workbench.windowMode ?? fallbackWindowSetting?.mode ?? "fullscreen";
   const effectiveWindowMode = startupSettings?.workbench.effectiveWindowMode ?? fallbackWindowSetting?.effectiveMode ?? configuredWindowMode;
   const envOverrideMode = startupSettings?.workbench.windowModeEnvOverride ?? fallbackWindowSetting?.envOverride ?? "";
+  const controlPortOverride = startupSettings?.launcher.controlPortEnvOverride || 0;
   const backendPortOverride = startupSettings?.workbench.backendPortEnvOverride || 0;
   const frontendPortOverride = startupSettings?.workbench.frontendPortEnvOverride || 0;
   const windowModeDetail = envOverrideMode
@@ -1620,6 +1692,7 @@ export function LauncherRoute() {
         configuredWindowMode={configuredWindowMode}
         effectiveWindowMode={effectiveWindowMode}
         windowModeDetail={windowModeDetail}
+        controlPortOverride={controlPortOverride}
         backendPortOverride={backendPortOverride}
         frontendPortOverride={frontendPortOverride}
         pending={startupSettingsMutation.isPending || workbenchWindowSaveMutation.isPending}
