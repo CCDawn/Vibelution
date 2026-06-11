@@ -27,6 +27,10 @@ from core.evaluation import (
     run_workbench_session,
     save_workbench_state,
 )
+from core.evaluation.supervised_evolution import (
+    normalize_supervised_mental_model_mode,
+    supervised_mental_model_enabled_for_mode,
+)
 from core.runtime_manager.constants import RESULTS_DIR
 from core.runtime_manager.command_queue import submit_command, wait_for_result
 from core.runtime_manager.evolution_store import (
@@ -51,8 +55,20 @@ from .evolution_service import (
 from .i18n import get_web_language, text_for
 from .runtime_manager_control_service import runtime_manager_live_control_enabled
 from .runtime_scene_service import record_runtime_scene_event
-from .session_service import list_active_session_work_runs
+from .session_service import (
+    create_supervised_agent_session,
+    get_session_detail,
+    list_active_session_work_runs,
+    request_stop_session_turn,
+    submit_session_message,
+)
 from .supervised_agent_service import supervised_agent_bindings
+from scripts.evolution_harness import (
+    HarnessResult,
+    infer_evolution_summary,
+    infer_result_status,
+    materialize_scenario_prompt,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -68,6 +84,7 @@ _RUN_STREAM_QUEUE_SIZE = 16
 _EVENT_TAIL_LIMIT = 12
 _ACTIVE_RUN_STATUSES = {"queued", "running", "paused", "stopping"}
 _MANAGER_CONTROL_KEY = "runtimeManagerControl"
+_CONVERSATION_HARNESS_TRANSCRIPT_LIMIT = 8
 
 
 class SupervisedRunBusyError(RuntimeError):
@@ -175,6 +192,8 @@ def _supervised_snapshot_event_fields(snapshot: dict[str, Any] | None) -> dict[s
         "sessionId": str(payload.get("sessionId") or "").strip(),
         "caseIndex": _optional_int(payload.get("currentCaseIndex")),
         "caseTotal": _optional_int(payload.get("caseTotal")),
+        "mentalModelMode": str(payload.get("mentalModelMode") or "").strip(),
+        "mentalModelEnabled": payload.get("mentalModelEnabled"),
         "decision": str(payload.get("decision") or "").strip(),
         "policyAction": str(payload.get("policyAction") or "").strip(),
         "error": str(payload.get("error") or payload.get("reason") or "").strip(),
@@ -374,6 +393,8 @@ def start_supervised_run(payload: dict[str, Any]) -> dict[str, Any]:
     dataset_name = str(payload.get("datasetName") or "").strip()
     dataset_limit = _coerce_dataset_limit(payload.get("datasetLimit"))
     bundle_name = str(payload.get("bundleName") or "").strip()
+    mental_model_mode = normalize_supervised_mental_model_mode(payload.get("mentalModelMode"))
+    mental_model_enabled = supervised_mental_model_enabled_for_mode(mental_model_mode)
 
     if source_kind not in {"dataset", "bundle"}:
         raise SupervisedRunValidationError(
@@ -443,6 +464,8 @@ def start_supervised_run(payload: dict[str, Any]) -> dict[str, Any]:
         "keepWorktree": keep_worktree,
         "startedAt": _now_timestamp(),
         "agentBindings": agent_bindings,
+        "mentalModelMode": mental_model_mode,
+        "mentalModelEnabled": mental_model_enabled,
     }
     state = _initial_run_state(context)
 
@@ -517,6 +540,8 @@ def _local_retry_supervised_run(run_id: str) -> dict[str, Any]:
 
     _raise_if_supervised_lease_conflict(lang=lang)
     agent_bindings = _validate_supervised_agent_bindings(supervised_agent_bindings(), lang=lang)
+    mental_model_mode = normalize_supervised_mental_model_mode(previous.get("mentalModelMode") or previous.get("mental_model_mode"))
+    mental_model_enabled = supervised_mental_model_enabled_for_mode(mental_model_mode)
     context = {
         "runId": f"web-supervised-{uuid4().hex[:12]}",
         "lang": lang,
@@ -527,6 +552,8 @@ def _local_retry_supervised_run(run_id: str) -> dict[str, Any]:
         "keepWorktree": bool(previous.get("keepWorktree")),
         "startedAt": _now_timestamp(),
         "agentBindings": agent_bindings,
+        "mentalModelMode": mental_model_mode,
+        "mentalModelEnabled": mental_model_enabled,
         "retryOfRunId": normalized,
         "resumeFromDecisionPath": str(resolved_decision_path),
     }
@@ -1296,6 +1323,8 @@ def _run_supervised_session(context: dict[str, Any]) -> None:
                 "phase": "preflight",
                 "bundle_name": context["bundleName"],
                 "agent_bindings": context.get("agentBindings") or {},
+                "mental_model_mode": context.get("mentalModelMode") or "follow",
+                "mental_model_enabled": context.get("mentalModelEnabled"),
             },
         )
         if not _supervised_run_should_execute(run_id):
@@ -1308,6 +1337,8 @@ def _run_supervised_session(context: dict[str, Any]) -> None:
             cancel_checker=lambda: _supervised_run_cancel_reason(run_id),
             project_root=PROJECT_ROOT,
             agent_bindings=context.get("agentBindings") or {},
+            mental_model_mode=str(context.get("mentalModelMode") or "follow"),
+            harness_runner=_run_supervised_conversation_harness,
             resume_from_decision_path=(
                 Path(str(context.get("resumeFromDecisionPath") or ""))
                 if str(context.get("resumeFromDecisionPath") or "").strip()
@@ -1424,6 +1455,411 @@ def _finish_run_cancelled_from_harness(run_id: str, reason: str) -> None:
     _publish_run_snapshot(run_id, terminal=True)
 
 
+def _run_supervised_conversation_harness(
+    *,
+    repo_root: Path,
+    mode: str,
+    prompt: str | None,
+    timeout_seconds: int,
+    expect_restart: bool,
+    post_restart_observe_seconds: int,
+    keep_worktree: bool,
+    scenario: str = "restart",
+    max_steps: int | None = None,
+    agent_binding: dict[str, Any] | None = None,
+    mental_model_mode: str = "follow",
+    mental_model_enabled: bool | None = None,
+    progress_callback: Any = None,
+    cancel_checker: Any = None,
+) -> HarnessResult:
+    del mode, post_restart_observe_seconds, keep_worktree, max_steps
+    started_at = _now_timestamp()
+    binding = dict(agent_binding or {}) if isinstance(agent_binding, dict) else {}
+    agent_id = str(binding.get("agentId") or "").strip()
+    role = str(binding.get("role") or binding.get("supervisedRole") or "").strip()
+    run_id = f"conversation-{uuid4().hex[:12]}"
+    normalized_mental_mode = normalize_supervised_mental_model_mode(mental_model_mode)
+    if mental_model_enabled is None:
+        mental_model_enabled = supervised_mental_model_enabled_for_mode(normalized_mental_mode)
+    if not agent_id:
+        return _conversation_harness_result(
+            run_id=run_id,
+            status="failed",
+            reason="监督 Agent 绑定缺少 agentId，无法创建隐藏对话会话。",
+            started_at=started_at,
+            repo_root=repo_root,
+            timeout_seconds=timeout_seconds,
+            expect_restart=expect_restart,
+            scenario=scenario,
+            agent_binding=binding,
+            session_id="",
+            prompt_text=str(prompt or ""),
+            assistant_text="",
+            evolution_summary={},
+            primary_returncode=1,
+            mental_model_mode=normalized_mental_mode,
+            mental_model_enabled=mental_model_enabled,
+        )
+
+    prompt_text = materialize_scenario_prompt(scenario, prompt, repo_root) or ""
+    session = create_supervised_agent_session(
+        agent_id=agent_id,
+        title=f"监督进化 {role or 'role'} {scenario}",
+        metadata={
+            "runId": run_id,
+            "role": role,
+            "scenario": scenario,
+            "mentalModelMode": normalized_mental_mode,
+            "mentalModelEnabled": mental_model_enabled,
+        },
+    )
+    session_id = str(session.get("id") or "").strip()
+    turn_id = ""
+    if callable(progress_callback):
+        progress_callback(
+            {
+                "phase": "conversation_session_created",
+                "conversation_path": f"session:{session_id}",
+                "latest_input": prompt_text,
+                "latest_output": "",
+                "latest_output_kind": "status",
+                "latest_output_label": "conversation_session_created",
+                "updated_at": _now_timestamp(),
+                "transcript": [
+                    {
+                        "timestamp": _now_timestamp(),
+                        "kind": "input",
+                        "label": "supervised prompt",
+                        "content": prompt_text,
+                        "status": "submitted",
+                    }
+                ],
+                "mental_model_mode": normalized_mental_mode,
+                "mental_model_enabled": mental_model_enabled,
+            }
+        )
+
+    try:
+        accepted = submit_session_message(
+            session_id,
+            prompt_text,
+            mental_model_enabled=mental_model_enabled,
+            message_metadata={
+                "supervisedEvolution": True,
+                "supervisedRunId": run_id,
+                "supervisedRole": role,
+                "scenario": scenario,
+                "mentalModelMode": normalized_mental_mode,
+            },
+            message_source="supervised_evolution",
+            include_started_turn_id=True,
+            lightweight_response=True,
+        )
+        turn_id = str(accepted.get("turnId") or accepted.get("startedTurnId") or "").strip()
+    except Exception as exc:
+        return _conversation_harness_result(
+            run_id=run_id,
+            status="failed",
+            reason=f"隐藏监督会话提交失败：{type(exc).__name__}: {exc}",
+            started_at=started_at,
+            repo_root=repo_root,
+            timeout_seconds=timeout_seconds,
+            expect_restart=expect_restart,
+            scenario=scenario,
+            agent_binding=binding,
+            session_id=session_id,
+            prompt_text=prompt_text,
+            assistant_text="",
+            evolution_summary={},
+            primary_returncode=1,
+            mental_model_mode=normalized_mental_mode,
+            mental_model_enabled=mental_model_enabled,
+        )
+
+    deadline = time.monotonic() + max(1, int(timeout_seconds or 1))
+    cancel_requested = False
+    latest_detail: dict[str, Any] = {}
+    while True:
+        cancel_reason = str(cancel_checker() or "").strip() if callable(cancel_checker) else ""
+        if cancel_reason and not cancel_requested:
+            cancel_requested = True
+            try:
+                request_stop_session_turn(session_id)
+            except Exception:
+                pass
+            if callable(progress_callback):
+                progress_callback(
+                    {
+                        "phase": "conversation_cancel_requested",
+                        "conversation_path": f"session:{session_id}",
+                        "latest_input": prompt_text,
+                        "latest_output": cancel_reason,
+                        "latest_output_kind": "status",
+                        "latest_output_label": "cancel_requested",
+                        "updated_at": _now_timestamp(),
+                        "transcript": _conversation_harness_transcript(latest_detail),
+                    }
+                )
+        latest_detail = get_session_detail(session_id) or {}
+        last_status = str(latest_detail.get("lastTurnStatus") or "").strip().lower()
+        if callable(progress_callback):
+            latest_output = _conversation_harness_latest_assistant(latest_detail)
+            progress_callback(
+                {
+                    "phase": "conversation_turn_running" if last_status in {"queued", "running"} else "conversation_turn_finished",
+                    "conversation_path": f"session:{session_id}",
+                    "latest_input": prompt_text,
+                    "latest_output": latest_output,
+                    "latest_output_kind": "assistant" if latest_output else "status",
+                    "latest_output_label": "hidden conversation",
+                    "updated_at": str(latest_detail.get("updatedAt") or _now_timestamp()),
+                    "transcript": _conversation_harness_transcript(latest_detail),
+                    "turn_id": turn_id,
+                    "last_turn_status": last_status,
+                }
+            )
+        if last_status and last_status not in {"queued", "running"}:
+            break
+        if time.monotonic() >= deadline:
+            try:
+                request_stop_session_turn(session_id)
+            except Exception:
+                pass
+            assistant_text = _conversation_harness_latest_assistant(latest_detail)
+            evolution_summary = _conversation_harness_evolution_summary(
+                latest_detail,
+                assistant_text=assistant_text,
+                restart_expected=expect_restart,
+            )
+            return _conversation_harness_result(
+                run_id=run_id,
+                status="timeout",
+                reason="隐藏监督会话运行超时。",
+                started_at=started_at,
+                repo_root=repo_root,
+                timeout_seconds=timeout_seconds,
+                expect_restart=expect_restart,
+                scenario=scenario,
+                agent_binding=binding,
+                session_id=session_id,
+                prompt_text=prompt_text,
+                assistant_text=assistant_text,
+                evolution_summary=evolution_summary,
+                primary_returncode=None,
+                mental_model_mode=normalized_mental_mode,
+                mental_model_enabled=mental_model_enabled,
+            )
+        time.sleep(0.5)
+
+    assistant_text = _conversation_harness_latest_assistant(latest_detail)
+    evolution_summary = _conversation_harness_evolution_summary(
+        latest_detail,
+        assistant_text=assistant_text,
+        restart_expected=expect_restart,
+    )
+    last_status = str(latest_detail.get("lastTurnStatus") or "").strip().lower()
+    primary_returncode = 0 if last_status in {"ready", "completed", "done", "success", "paused_limit"} else 1
+    inferred_status, inferred_reason = infer_result_status(
+        timed_out=False,
+        restart_expected=expect_restart,
+        restart_reentered=False,
+        primary_returncode=primary_returncode,
+        last_observation={"phase": last_status or "unknown", "turn_stats": {"session_id": session_id}},
+        scenario=scenario,
+        evolution_summary=evolution_summary,
+        stdout_tail=assistant_text.splitlines(),
+    )
+    if cancel_requested:
+        inferred_status = "cancelled"
+        inferred_reason = "监督运行已按请求终止。"
+    elif last_status == "failed":
+        turn_error = latest_detail.get("lastTurnError") if isinstance(latest_detail.get("lastTurnError"), dict) else {}
+        error_message = str(turn_error.get("message") or inferred_reason or "隐藏监督会话执行失败。").strip()
+        inferred_status = "failed"
+        inferred_reason = error_message
+    return _conversation_harness_result(
+        run_id=run_id,
+        status=inferred_status,
+        reason=inferred_reason,
+        started_at=started_at,
+        repo_root=repo_root,
+        timeout_seconds=timeout_seconds,
+        expect_restart=expect_restart,
+        scenario=scenario,
+        agent_binding=binding,
+        session_id=session_id,
+        prompt_text=prompt_text,
+        assistant_text=assistant_text,
+        evolution_summary=evolution_summary,
+        primary_returncode=primary_returncode,
+        mental_model_mode=normalized_mental_mode,
+        mental_model_enabled=mental_model_enabled,
+    )
+
+
+def _conversation_harness_result(
+    *,
+    run_id: str,
+    status: str,
+    reason: str,
+    started_at: str,
+    repo_root: Path,
+    timeout_seconds: int,
+    expect_restart: bool,
+    scenario: str,
+    agent_binding: dict[str, Any],
+    session_id: str,
+    prompt_text: str,
+    assistant_text: str,
+    evolution_summary: dict[str, Any],
+    primary_returncode: int | None,
+    mental_model_mode: str,
+    mental_model_enabled: bool | None,
+) -> HarnessResult:
+    ended_at = _now_timestamp()
+    runtime_env = {
+        "VIBELUTION_TURN_MODE": "supervised_evolution",
+        "VIBELUTION_TURN_RUN_KIND": "supervised_evaluation",
+        "VIBELUTION_TURN_SESSION_ID": session_id,
+        "VIBELUTION_TURN_AGENT_ID": str(agent_binding.get("agentId") or "").strip(),
+        "VIBELUTION_SUPERVISED_ROLE": str(agent_binding.get("role") or "").strip(),
+        "VIBELUTION_SUPERVISED_MENTAL_MODEL_MODE": mental_model_mode,
+    }
+    if mental_model_enabled is not None:
+        runtime_env["VIBELUTION_SUPERVISED_MENTAL_MODEL_ENABLED"] = "true" if mental_model_enabled else "false"
+    return HarnessResult(
+        harness_id=run_id,
+        status=status,
+        reason=reason,
+        started_at=started_at,
+        ended_at=ended_at,
+        repo_root=str(repo_root),
+        worktree_path="",
+        base_head="",
+        checkpoint_commit="",
+        checkpoint_ref=None,
+        tracked_dirty=False,
+        untracked_files=[],
+        command=["session_service.submit_session_message", session_id],
+        returncode=primary_returncode,
+        timeout_seconds=timeout_seconds,
+        restarts_observed=0,
+        normalized_restarts_observed=0,
+        restart_expected=expect_restart,
+        restart_reentered=False,
+        process_history=[],
+        process_summary={
+            "backend": "conversation_chain",
+            "session_id": session_id,
+            "scenario": scenario,
+            "mental_model_mode": mental_model_mode,
+            "mental_model_enabled": mental_model_enabled,
+        },
+        new_conversation_files=[f"session:{session_id}"] if session_id else [],
+        new_debug_files=[],
+        stdout_tail=assistant_text.splitlines()[-40:],
+        stderr_tail=[] if status != "failed" else [reason],
+        agent_realtime_tail=[],
+        last_observation={
+            "phase": status,
+            "session_id": session_id,
+            "assistant_preview": assistant_text[:400],
+        },
+        post_restart_observation={},
+        evolution_summary={
+            **(evolution_summary or {}),
+            "conversation_backend": {
+                "enabled": True,
+                "session_id": session_id,
+                "mental_model_mode": mental_model_mode,
+                "mental_model_enabled": mental_model_enabled,
+            },
+        },
+        agent_binding=agent_binding,
+        primary_returncode=primary_returncode,
+        effective_returncode=primary_returncode,
+        agent_runtime_env=runtime_env,
+    )
+
+
+def _conversation_harness_transcript(detail: dict[str, Any]) -> list[dict[str, Any]]:
+    transcript: list[dict[str, Any]] = []
+    for message in list((detail or {}).get("messages") or [])[-_CONVERSATION_HARNESS_TRANSCRIPT_LIMIT:]:
+        if not isinstance(message, dict):
+            continue
+        role = str(message.get("role") or "").strip()
+        content = str(message.get("content") or "").strip()
+        if not role and not content:
+            continue
+        transcript.append(
+            {
+                "timestamp": str(message.get("timestamp") or "").strip(),
+                "kind": role or "message",
+                "label": role or "message",
+                "content": content,
+                "status": str((message.get("metadata") or {}).get("status") or "").strip(),
+            }
+        )
+    return transcript
+
+
+def _conversation_harness_latest_assistant(detail: dict[str, Any]) -> str:
+    for message in reversed(list((detail or {}).get("messages") or [])):
+        if not isinstance(message, dict):
+            continue
+        if str(message.get("role") or "").strip().lower() != "assistant":
+            continue
+        content = str(message.get("content") or "").strip()
+        if content:
+            return content
+    return ""
+
+
+def _conversation_harness_events(detail: dict[str, Any], *, assistant_text: str) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
+    for message in list((detail or {}).get("messages") or []):
+        if not isinstance(message, dict):
+            continue
+        role = str(message.get("role") or "").strip().lower()
+        content = str(message.get("content") or "").strip()
+        if role == "assistant" and content:
+            events.append({"type": "llm_response", "content": content})
+        for tool in list(message.get("toolCalls") or message.get("tool_calls") or []):
+            if not isinstance(tool, dict):
+                continue
+            events.append(
+                {
+                    "type": "tool_call",
+                    "tool_name": str(tool.get("name") or "").strip(),
+                    "status": str(tool.get("status") or "").strip(),
+                    "tool_args": tool.get("arguments") if isinstance(tool.get("arguments"), dict) else {},
+                    "tool_result": str(tool.get("resultPreview") or tool.get("result") or "").strip(),
+                }
+            )
+    if assistant_text and not any(event.get("type") == "llm_response" for event in events):
+        events.append({"type": "llm_response", "content": assistant_text})
+    return events
+
+
+def _conversation_harness_evolution_summary(
+    detail: dict[str, Any],
+    *,
+    assistant_text: str,
+    restart_expected: bool,
+) -> dict[str, Any]:
+    events = _conversation_harness_events(detail, assistant_text=assistant_text)
+    debug_lines: list[str] = []
+    stdout_lines = assistant_text.splitlines()
+    return infer_evolution_summary(
+        events,
+        debug_lines,
+        stdout_lines,
+        restart_expected=restart_expected,
+        restart_reentered=False,
+        child_first_event_phase="conversation_chain",
+    )
+
+
 def _handle_progress_event(run_id: str, event: dict[str, Any]) -> None:
     lang = get_web_language()
     scene_event: dict[str, Any] | None = None
@@ -1444,6 +1880,10 @@ def _handle_progress_event(run_id: str, event: dict[str, Any]) -> None:
             state["bundleName"] = str(event.get("bundle_name") or state.get("bundleName") or "")
             state["caseTotal"] = max(0, int(event.get("case_total") or 0))
             state["activeAdvisoryCount"] = max(0, int(event.get("active_advisory_count") or 0))
+            if event.get("mental_model_mode") is not None:
+                state["mentalModelMode"] = normalize_supervised_mental_model_mode(event.get("mental_model_mode"))
+            if "mental_model_enabled" in event:
+                state["mentalModelEnabled"] = event.get("mental_model_enabled")
             state["latestMessage"] = _event_summary(event)
             state["runtimeStatus"] = "stopping" if stop_requested else "waiting" if pause_requested else "running"
             if stop_requested:
@@ -1692,6 +2132,8 @@ def _initial_run_state(context: dict[str, Any]) -> dict[str, Any]:
         "datasetName": dataset_name,
         "datasetLimit": context["datasetLimit"],
         "keepWorktree": bool(context["keepWorktree"]),
+        "mentalModelMode": str(context.get("mentalModelMode") or "follow"),
+        "mentalModelEnabled": context.get("mentalModelEnabled"),
         "startedAt": context["startedAt"],
         "updatedAt": context["startedAt"],
         "finishedAt": "",
@@ -1742,6 +2184,8 @@ def _initial_run_state(context: dict[str, Any]) -> dict[str, Any]:
                 "bundleName": context["bundleName"],
                 "keepWorktree": bool(context["keepWorktree"]),
                 "agentBindings": _agent_bindings_snapshot(context.get("agentBindings") or {}),
+                "mentalModelMode": str(context.get("mentalModelMode") or "follow"),
+                "mentalModelEnabled": context.get("mentalModelEnabled"),
             }
         ],
         _MANAGER_CONTROL_KEY: _build_manager_control_payload(),
@@ -2351,6 +2795,8 @@ def _event_tail_entry(event: dict[str, Any], *, timestamp: str) -> dict[str, Any
         "elapsedSeconds": _optional_float(event.get("elapsed_seconds")),
         "resultStatus": str(event.get("status") or ""),
         "agentBinding": _agent_binding_snapshot(event.get("agent_binding")),
+        "mentalModelMode": str(event.get("mental_model_mode") or "").strip(),
+        "mentalModelEnabled": event.get("mental_model_enabled") if "mental_model_enabled" in event else None,
     }
     phase = str(event.get("phase") or "").strip()
     if phase:
@@ -2405,6 +2851,8 @@ def _record_supervised_progress_scene_event(run_id: str, item: dict[str, Any]) -
         "agentProfileId": str(((item.get("agentBinding") or {}).get("profileId")) or ""),
         "phase": phase,
         "environmentContractKind": str(item.get("environmentContractKind") or ""),
+        "mentalModelMode": str(item.get("mentalModelMode") or "").strip(),
+        "mentalModelEnabled": item.get("mentalModelEnabled"),
     }
     if isinstance(item.get("environmentPreflight"), dict):
         fields["environmentPreflightStatus"] = str((item.get("environmentPreflight") or {}).get("status") or "")

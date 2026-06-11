@@ -155,7 +155,42 @@ def test_run_workbench_session_wraps_decision_summary(monkeypatch):
     assert result.decision_summary == "summary:HOLD"
     assert result.result_border_style == "green"
     assert result.lineage_index_path is None
-    assert calls == [{"bundle_name": "demo_bundle", "keep_worktree": True}]
+    assert calls == [{"bundle_name": "demo_bundle", "keep_worktree": True, "mental_model_mode": "follow"}]
+
+
+def test_run_workbench_session_forwards_mental_mode_and_harness_runner(monkeypatch):
+    decision = SimpleNamespace(
+        decision="HOLD",
+        bundle_name="demo_bundle",
+        policy_action={},
+    )
+    calls = []
+    harness_runner = object()
+    monkeypatch.setattr(
+        "core.evaluation.supervised_evolution.run_supervised_evolution_session",
+        lambda **kwargs: calls.append(kwargs) or decision,
+    )
+    monkeypatch.setattr(
+        "core.evaluation.supervised_evolution.format_decision_record_summary",
+        lambda item: f"summary:{item.decision}",
+    )
+
+    result = run_workbench_session(
+        "demo_bundle",
+        keep_worktree=False,
+        mental_model_mode="enabled",
+        harness_runner=harness_runner,
+    )
+
+    assert result.decision is decision
+    assert calls == [
+        {
+            "bundle_name": "demo_bundle",
+            "keep_worktree": False,
+            "mental_model_mode": "enabled",
+            "harness_runner": harness_runner,
+        }
+    ]
 
 
 def test_run_workbench_session_marks_inconclusive_as_warning(monkeypatch):

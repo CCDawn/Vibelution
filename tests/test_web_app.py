@@ -2952,6 +2952,88 @@ def test_session_query_paginates_searches_and_filters(tmp_path, monkeypatch):
     assert {item["id"] for item in filtered_response.json()["items"]} == {"session-alpha", "session-gamma"}
 
 
+def test_supervised_agent_session_is_hidden_and_preserves_prompt_with_mental_override(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, conversations=[])
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    cfg = runtime_service.get_config().model_copy(deep=True)
+    primary_profile = cfg.llm.get_profile(role="primary")
+    cfg.llm.model_library["model-a"] = {
+        "provider_id": primary_profile.provider_id,
+        "model": "model-a",
+        "label": "Supervised test model",
+    }
+    monkeypatch.setattr(session_service, "get_config", lambda: cfg)
+    agent_directory_service.save_state(
+        {
+            "agents": [
+                {
+                    "agentId": "agent-supervised",
+                    "displayName": "Supervised Agent",
+                    "status": "active",
+                    "directSessionId": "",
+                    "llmBindings": {"dialogue": {"modelId": "model-a"}},
+                }
+            ]
+        }
+    )
+    scheduled_contexts: list[dict] = []
+
+    class DummyAgent:
+        def __init__(self):
+            self.override = None
+            self.seeded_history = []
+
+        def set_mental_model_enabled_override(self, enabled):
+            self.override = enabled
+
+        def seed_chat_history(self, messages):
+            self.seeded_history = list(messages)
+
+        def run_single_turn(self, initial_prompt=None):
+            return {
+                "status": "completed",
+                "summary": f"seen: {initial_prompt}",
+                "raw_output": f"seen: {initial_prompt}",
+                "tool_call_count": 0,
+                "tool_trace": [],
+            }
+
+    monkeypatch.setattr(session_service, "create_chat_agent", DummyAgent)
+    monkeypatch.setattr(
+        session_service,
+        "_schedule_session_turn",
+        lambda context: scheduled_contexts.append(dict(context)) or session_service._run_session_turn(context),
+    )
+
+    created = session_service.create_supervised_agent_session(
+        agent_id="agent-supervised",
+        title="hidden supervised case",
+        metadata={"role": "baseline"},
+    )
+    session_id = created["id"]
+    assert created["sessionKind"] == "supervised"
+    assert created["hiddenFromIndex"] is True
+    assert session_id not in {item["id"] for item in session_service.list_sessions()}
+    assert (agent_directory_service.get_agent("agent-supervised") or {}).get("directSessionId") != session_id
+
+    prompt = "继续。这个监督 case 必须逐字保留，不要改写成上一轮任务。"
+    response = session_service.submit_session_message(
+        session_id,
+        prompt,
+        mental_model_enabled=False,
+        message_source="supervised_evolution",
+    )
+
+    assert response["messages"][-1]["content"] == f"seen: {prompt}"
+    assert scheduled_contexts[-1]["user_message"] == prompt
+    assert scheduled_contexts[-1]["user_message_source"] == "supervised_evolution"
+    assert scheduled_contexts[-1]["mental_model_enabled"] is False
+    assert scheduled_contexts[-1]["leases"] == ["readonly_chat"]
+    assert session_id not in {item["id"] for item in session_service.list_sessions()}
+    assert (agent_directory_service.get_agent("agent-supervised") or {}).get("directSessionId") != session_id
+
+
 def test_session_query_keeps_active_session_on_default_first_page(tmp_path, monkeypatch):
     conversations = []
     for index in range(60):
@@ -15162,6 +15244,7 @@ def test_evolution_workbench_route_exposes_dataset_choices_and_saved_state(tmp_p
         "supervised_dry_run",
         "terminal_bench_smoke",
         "terminal_bench_core",
+        "terminal_bench_agent_judged",
     }
     dry_run = next(item for item in payload["datasets"] if item["name"] == "supervised_dry_run")
     assert dry_run["effective"] is True
@@ -15600,7 +15683,12 @@ def test_workbench_dataset_list_backfills_new_builtin_datasets(tmp_path, monkeyp
     assert response.status_code == 200
     rows = response.json()["datasets"]
     names = {item["name"] for item in rows}
-    assert names == {"supervised_dry_run", "terminal_bench_smoke", "terminal_bench_core"}
+    assert names == {
+        "supervised_dry_run",
+        "terminal_bench_smoke",
+        "terminal_bench_core",
+        "terminal_bench_agent_judged",
+    }
     assert not any(item["name"] == "generated_cases" for item in rows)
     assert not any(item["name"] == "chat_reviewed_multiturn" for item in rows)
     assert any(item["name"] == "terminal_bench_smoke" for item in rows)
@@ -15608,6 +15696,9 @@ def test_workbench_dataset_list_backfills_new_builtin_datasets(tmp_path, monkeyp
     assert terminal_row["effective"] is True
     assert terminal_row["selectable"] is True
     core_row = next(item for item in rows if item["name"] == "terminal_bench_core")
+    agent_judged_row = next(item for item in rows if item["name"] == "terminal_bench_agent_judged")
+    assert agent_judged_row["adapterStatus"] == "agent_harness_ready"
+    assert agent_judged_row["selectable"] is True
     assert core_row["usabilityStatus"] == "custom_harness_ready"
     assert core_row["officialVerifierStatus"] == "harbor_pending"
     assert core_row["officialScoreAvailable"] is False
@@ -15640,6 +15731,7 @@ def test_start_supervised_run_from_dataset_exposes_active_snapshot_and_sse(tmp_p
             "datasetName": "custom_prompt_jsonl",
             "datasetLimit": 2,
             "keepWorktree": True,
+            "mentalModelMode": "enabled",
         },
     )
     active_response = client.get("/api/evolution/active-run")
@@ -15648,8 +15740,10 @@ def test_start_supervised_run_from_dataset_exposes_active_snapshot_and_sse(tmp_p
     assert payload["status"] == "queued"
     assert payload["sourceKind"] == "dataset"
     assert payload["datasetName"] == "custom_prompt_jsonl"
-    assert payload["bundleName"] == "custom_prompt_jsonl_v1"
+    assert payload["bundleName"] == "custom_prompt_jsonl_v1_limit_2"
     assert payload["keepWorktree"] is True
+    assert payload["mentalModelMode"] == "enabled"
+    assert payload["mentalModelEnabled"] is True
     assert payload["agentBindings"]["baseline"]["role"] == "baseline"
     assert payload["agentBindings"]["candidate"]["role"] == "candidate"
     assert payload["agentBindings"]["baseline"]["dialogueModelId"]
@@ -15701,7 +15795,7 @@ def test_start_supervised_run_from_dataset_exposes_active_snapshot_and_sse(tmp_p
     assert progress_snapshot["eventTail"][-1]["agentBinding"]["dialogueModelId"] == payload["agentBindings"]["baseline"]["dialogueModelId"]
 
     state_path = tmp_path / "workspace" / "supervised_evolution" / "workbench_state.json"
-    bundle_path = tmp_path / "workspace" / "evaluation" / "bundles" / "custom_prompt_jsonl_v1.json"
+    bundle_path = tmp_path / "workspace" / "evaluation" / "bundles" / "custom_prompt_jsonl_v1_limit_2.json"
     assert state_path.exists()
     assert bundle_path.exists()
 

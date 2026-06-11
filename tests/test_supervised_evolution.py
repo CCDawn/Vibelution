@@ -207,7 +207,16 @@ def test_run_supervised_evolution_session_persists_decision_record(tmp_path: Pat
     seen = []
 
     def fake_runner(**kwargs):
-        seen.append((kwargs["prompt"], kwargs["scenario"], kwargs["mode"], kwargs["max_steps"]))
+        seen.append(
+            (
+                kwargs["prompt"],
+                kwargs["scenario"],
+                kwargs["mode"],
+                kwargs["max_steps"],
+                kwargs["mental_model_mode"],
+                kwargs["mental_model_enabled"],
+            )
+        )
         if kwargs["prompt"] == "baseline":
             return _fake_result("success", "baseline ok", "baseline")
         return _fake_result("success", "candidate ok", "candidate")
@@ -216,13 +225,18 @@ def test_run_supervised_evolution_session_persists_decision_record(tmp_path: Pat
         bundle_name=DEFAULT_BUNDLE_NAME,
         project_root=tmp_path,
         harness_runner=fake_runner,
+        mental_model_mode="disabled",
     )
 
     assert seen == [
-        ("baseline", "transaction", "single_turn", 4),
-        ("candidate", "transaction", "single_turn", 4),
+        ("baseline", "transaction", "single_turn", 4, "disabled", False),
+        ("candidate", "transaction", "single_turn", 4, "disabled", False),
     ]
     assert decision.decision == "HOLD"
+    assert decision.mental_model_mode == "disabled"
+    assert decision.mental_model_enabled is False
+    assert decision.summary["mental_model_mode"] == "disabled"
+    assert decision.summary["mental_model_enabled"] is False
     assert decision.baseline_success_rate == 1.0
     assert decision.candidate_success_rate == 1.0
     assert decision.baseline_summary.validation_passed == 1
@@ -232,6 +246,9 @@ def test_run_supervised_evolution_session_persists_decision_record(tmp_path: Pat
     assert decision.case_summaries[0].decision_signal == "stable_success"
     assert decision.decision_path
     assert Path(decision.decision_path).exists()
+    decision_record = json.loads(Path(decision.decision_path).read_text(encoding="utf-8"))
+    assert decision_record["mental_model_mode"] == "disabled"
+    assert decision_record["mental_model_enabled"] is False
     assert decision.policy_action["action"] == "HOLD"
     history_path = tmp_path / "workspace" / "supervised_evolution" / "history.jsonl"
     assert history_path.exists()
@@ -303,6 +320,7 @@ def test_run_supervised_evolution_session_persists_decision_record(tmp_path: Pat
     audit_path = tmp_path / "workspace" / "evolution" / "audit.jsonl"
     assert audit_path.exists()
     rendered = format_decision_record_summary(decision)
+    assert "mental_model: disabled" in rendered
     assert "advisory context:" in rendered
     assert "gates:" in rendered
     assert "cases:" in rendered
