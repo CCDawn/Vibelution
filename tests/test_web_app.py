@@ -15178,6 +15178,7 @@ def test_evolution_workbench_route_exposes_dataset_choices_and_saved_state(tmp_p
         "supervised_dry_run",
         "terminal_bench_smoke",
         "terminal_bench_core",
+        "terminal_bench_agent_judged",
     }
     dry_run = next(item for item in payload["datasets"] if item["name"] == "supervised_dry_run")
     assert dry_run["effective"] is True
@@ -15616,7 +15617,12 @@ def test_workbench_dataset_list_backfills_new_builtin_datasets(tmp_path, monkeyp
     assert response.status_code == 200
     rows = response.json()["datasets"]
     names = {item["name"] for item in rows}
-    assert names == {"supervised_dry_run", "terminal_bench_smoke", "terminal_bench_core"}
+    assert names == {
+        "supervised_dry_run",
+        "terminal_bench_smoke",
+        "terminal_bench_core",
+        "terminal_bench_agent_judged",
+    }
     assert not any(item["name"] == "generated_cases" for item in rows)
     assert not any(item["name"] == "chat_reviewed_multiturn" for item in rows)
     assert any(item["name"] == "terminal_bench_smoke" for item in rows)
@@ -15624,6 +15630,9 @@ def test_workbench_dataset_list_backfills_new_builtin_datasets(tmp_path, monkeyp
     assert terminal_row["effective"] is True
     assert terminal_row["selectable"] is True
     core_row = next(item for item in rows if item["name"] == "terminal_bench_core")
+    agent_judged_row = next(item for item in rows if item["name"] == "terminal_bench_agent_judged")
+    assert agent_judged_row["adapterStatus"] == "agent_harness_ready"
+    assert agent_judged_row["selectable"] is True
     assert core_row["usabilityStatus"] == "custom_harness_ready"
     assert core_row["officialVerifierStatus"] == "harbor_pending"
     assert core_row["officialScoreAvailable"] is False
