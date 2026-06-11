@@ -871,6 +871,30 @@ class TestCache:
         assert "CONFIG_AWARENESS" in reasons
         assert reasons["CONFIG_AWARENESS"].startswith("goal:")
 
+    def test_api_diagnosis_goal_does_not_enable_config_awareness_by_bare_api_token(self):
+        pm = PromptManager()
+        with (
+            patch("core.infrastructure.agent_session.get_session_state") as mock_get_session_state,
+            patch("config.get_config") as mock_get_config,
+        ):
+            mock_get_session_state.return_value.get_attention_snapshot.return_value = {
+                "diagnostic_phase": "observe",
+                "feedback_loop_ready": True,
+                "active_delegation": {},
+                "convergence_state": "narrowing",
+            }
+            mock_get_config.return_value.diagnose_config.return_value = {
+                "warnings": ["non-blocking config warning"],
+                "blocking_issues": ["openai provider 缺少可用 API Key"],
+            }
+            sp = pm.build(current_goal="诊断 /api/sessions 响应慢，只读日志")
+
+        result = to_string(sp)
+        summary = pm.get_status()["last_build_summary"]
+        reasons = summary.get("optional_inclusion_reasons") or {}
+        assert "## 配置自感知" not in result
+        assert "CONFIG_AWARENESS" not in reasons
+
 
 class TestLoadFunctions:
     """章节加载函数测试"""

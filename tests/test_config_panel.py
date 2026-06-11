@@ -19,6 +19,7 @@ import pytest
 
 from config.toml_writer import dumps_public_config
 from config.public_config import _probe_llm_runtime
+from config.runtime_capabilities import record_model_image_input_capability
 from scripts.config_panel import (
     ConfigPanelHandler,
     HEADER_LINES,
@@ -1057,6 +1058,73 @@ def test_update_llm_model_persists_manual_image_input_support():
     assert model["capability_status"] == "supported"
     assert model["capability_source"] == "manual"
     build_effective_config(updated)
+
+
+def test_save_public_config_strips_runtime_probe_capability_fields(tmp_path):
+    config_path = tmp_path / "config.toml"
+    base = load_public_config()
+    config_path.write_text(dumps_public_config(base, HEADER_LINES), encoding="utf-8")
+
+    public_config = copy.deepcopy(base)
+    public_config["llm"]["model_library"]["runtime_cached_probe"] = {
+        "provider": _provider(
+            "local",
+            "http://127.0.0.1:11434/v1",
+            "",
+            requires_api_key=False,
+            context_window=65536,
+        ),
+        "model": "local-vision",
+        "label": "Local Vision",
+        "api_key_env": "",
+        "supports_image_input": True,
+        "capability_status": "supported",
+        "capability_source": "runtime_probe",
+        "capability_checked_at": "2026-06-11T03:00:00Z",
+        "capability_error": "stale runtime error",
+    }
+
+    public_config_module.save_public_config(public_config, config_path)
+
+    saved = tomllib.loads(config_path.read_text(encoding="utf-8"))
+    model = saved["llm"]["model_library"]["runtime_cached_probe"]
+    assert "supports_image_input" not in model
+    assert "capability_status" not in model
+    assert "capability_source" not in model
+    assert "capability_checked_at" not in model
+    assert "capability_error" not in model
+
+
+def test_build_effective_config_applies_runtime_capability_cache(monkeypatch, tmp_path):
+    monkeypatch.setenv("VIBELUTION_MODEL_CAPABILITY_CACHE", str(tmp_path / "model-capabilities.json"))
+    public_config = copy.deepcopy(load_public_config())
+    public_config["llm"]["model_library"]["runtime_cached_probe"] = {
+        "provider": _provider(
+            "local",
+            "http://127.0.0.1:11434/v1",
+            "",
+            requires_api_key=False,
+            context_window=65536,
+        ),
+        "model": "local-vision",
+        "label": "Local Vision",
+        "api_key_env": "",
+    }
+    public_config["llm"]["profiles"]["primary"] = {"model_ref": "runtime_cached_probe"}
+
+    record_model_image_input_capability(
+        "runtime_cached_probe",
+        {
+            "supports_image_input": True,
+            "capability_status": "supported",
+            "capability_checked_at": "2026-06-11T03:00:00Z",
+        },
+    )
+
+    effective = build_effective_config(public_config)
+    profile = effective.llm.get_profile(profile_id="primary")
+    assert profile.supports_image_input is True
+    assert "supports_image_input" not in public_config["llm"]["model_library"]["runtime_cached_probe"]
 
 
 def test_delete_generated_profile_model_leaves_matching_profiles_unchanged():
