@@ -4428,6 +4428,18 @@ export type EvolutionRunCommandAccepted = {
   completed?: boolean;
 };
 
+export type EvolutionRunCommandStatus = {
+  commandId: string;
+  accepted: boolean;
+  completed: boolean;
+  ok: boolean | null;
+  status: "pending" | "succeeded" | "failed";
+  message: string;
+  errorType: string;
+  runId?: string;
+  snapshot?: EvolutionActiveRun;
+};
+
 export type EvolutionRunStartResponse = EvolutionActiveRun | EvolutionRunCommandAccepted;
 
 export type EvolutionRunDeleteResponse = {

@@ -1,4 +1,4 @@
-import type { EvolutionActiveRun, EvolutionRunCommandAccepted } from "../api/types";
+import type { EvolutionActiveRun, EvolutionRunCommandAccepted, EvolutionRunCommandStatus } from "../api/types";
 
 export function normalizedSupervisedRunStatus(status: string) {
   return String(status || "").trim().toLowerCase();
@@ -61,6 +61,30 @@ export function isEvolutionRunCommandAccepted(value: unknown): value is Evolutio
       && payload.accepted === true
       && String(payload.commandId || "").trim()
       && String(payload.commandType || "").trim(),
+  );
+}
+
+export function isCompletedEvolutionRunCommandFailure(
+  value: unknown,
+): value is EvolutionRunCommandStatus & { completed: true; ok: false } {
+  const payload = value as Partial<EvolutionRunCommandStatus> | null | undefined;
+  return Boolean(
+    payload
+      && String(payload.commandId || "").trim()
+      && payload.completed === true
+      && payload.ok === false,
+  );
+}
+
+export function isCompletedEvolutionRunCommandSuccess(
+  value: unknown,
+): value is EvolutionRunCommandStatus & { completed: true; ok: true } {
+  const payload = value as Partial<EvolutionRunCommandStatus> | null | undefined;
+  return Boolean(
+    payload
+      && String(payload.commandId || "").trim()
+      && payload.completed === true
+      && payload.ok === true,
   );
 }
 
