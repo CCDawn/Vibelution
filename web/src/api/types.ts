@@ -2947,6 +2947,113 @@ export type AiSearchSourceScope = {
   };
 };
 
+export type AiSearchRunReference = {
+  title: string;
+  url: string;
+};
+
+export type AiSearchRunQuery = {
+  queryId: string;
+  query: string;
+  sourceId: string;
+  sourceName: string;
+  sourceUrl: string;
+  sourceType: string;
+  groupId: string;
+  groupLabel: string;
+  tier: string;
+  evidenceRole: string;
+  enabledByDefault: boolean;
+};
+
+export type AiSearchRunCard = {
+  cardId: string;
+  queryId: string;
+  sourceId: string;
+  sourceName: string;
+  sourceUrl: string;
+  sourceType: string;
+  groupId: string;
+  groupLabel: string;
+  tier: string;
+  evidenceRole: string;
+  query: string;
+  status: "succeeded" | "failed" | string;
+  summary: string;
+  resultText?: string;
+  references: AiSearchRunReference[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AiSearchRunSummary = {
+  runId: string;
+  teamId: string;
+  title: string;
+  topic: string;
+  status: "running" | "completed" | "partial" | "failed" | string;
+  createdAt: string;
+  updatedAt: string;
+  queryCount: number;
+  cardCount: number;
+  succeededCount: number;
+  failedCount: number;
+  referenceCount: number;
+  runPath: string;
+  cards: AiSearchRunCard[];
+};
+
+export type AiSearchRun = {
+  schemaVersion: number;
+  runId: string;
+  teamId: string;
+  title: string;
+  topic: string;
+  status: "running" | "completed" | "partial" | "failed" | string;
+  createdAt: string;
+  updatedAt: string;
+  sourceScope: {
+    scopeId: string;
+    sourceScopePath: string;
+    defaultEnabledTiers: string[];
+    requiresPrimaryEvidenceForConclusion: boolean;
+  };
+  queryPlan: {
+    queryCount: number;
+    sourceLimit: number;
+    maxResultsPerQuery: number;
+    includeSignals: boolean;
+    queries: AiSearchRunQuery[];
+  };
+  cards: AiSearchRunCard[];
+  errors: Array<{ queryId: string; sourceId: string; message: string }>;
+  summary: {
+    cardCount: number;
+    succeededCount: number;
+    failedCount: number;
+    referenceCount: number;
+  };
+  storage: {
+    runPath: string;
+    runsPath: string;
+  };
+};
+
+export type AiSearchRunListPayload = {
+  schemaVersion: number;
+  teamId: string;
+  runs: AiSearchRunSummary[];
+  summary: {
+    runCount: number;
+    visibleRunCount: number;
+  };
+  storage: {
+    runsPath: string;
+    runsRoot: string;
+  };
+  updatedAt: string;
+};
+
 export type Team = {
   teamId: string;
   name: string;

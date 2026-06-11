@@ -365,6 +365,75 @@ def test_ensure_ai_search_system_team_materializes_source_scope_roles(tmp_path, 
     assert sync_events[0]["fields"]["sourceCount"] == team["sourceScope"]["summary"]["sourceCount"]
 
 
+def test_start_ai_search_source_scope_run_writes_cards_and_index(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    searched_queries = []
+
+    def fake_web_search(query, *, max_results):
+        searched_queries.append((query, max_results))
+        return (
+            f"关于「{query}」，搜索到 2 条相关结果：\n\n"
+            "• 发布了新的模型和产品动态。\n\n"
+            "**参考来源：**\n"
+            "1. [Official update](https://example.com/update)\n"
+            "2. [Research note](https://example.com/research)\n"
+        )
+
+    monkeypatch.setattr(team_service, "_run_ai_web_search", fake_web_search)
+    team_service.ensure_ai_search_system_team()
+
+    run = team_service.start_ai_search_source_scope_run(
+        team_service.AI_SEARCH_TEAM_ID,
+        topic="AI agent 最新动态",
+        source_limit=5,
+        max_results_per_query=2,
+    )
+
+    assert run["status"] == "completed"
+    assert run["topic"] == "AI agent 最新动态"
+    assert run["queryPlan"]["queryCount"] == 5
+    assert run["queryPlan"]["sourceLimit"] == 5
+    assert run["summary"]["cardCount"] == 5
+    assert run["summary"]["succeededCount"] == 5
+    assert run["summary"]["failedCount"] == 0
+    assert run["summary"]["referenceCount"] == 10
+    assert len(searched_queries) == 5
+    assert {query["groupId"] for query in run["queryPlan"]["queries"]} >= {"global_official", "cn_official", "trusted_indices"}
+    assert run["cards"][0]["references"][0]["url"] == "https://example.com/update"
+    run_path = tmp_path / "workspace" / "teams" / "ai-search-team" / "search_runs" / f"{run['runId']}.json"
+    index_path = tmp_path / "workspace" / "teams" / "ai-search-team" / "search_runs" / "index.json"
+    assert run_path.exists()
+    assert index_path.exists()
+    index = json.loads(index_path.read_text(encoding="utf-8"))
+    assert index["runs"][0]["runId"] == run["runId"]
+    assert index["runs"][0]["cardCount"] == 5
+
+    payload = team_service.list_ai_search_source_scope_runs(team_service.AI_SEARCH_TEAM_ID)
+    assert payload["runs"][0]["runId"] == run["runId"]
+    assert payload["runs"][0]["cards"][0]["sourceName"]
+
+
+def test_start_ai_search_source_scope_run_records_partial_failures(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    calls = {"count": 0}
+
+    def fake_web_search(query, *, max_results):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            return "[错误] token service unavailable"
+        return "**参考来源：**\n1. [Source](https://example.com)\n"
+
+    monkeypatch.setattr(team_service, "_run_ai_web_search", fake_web_search)
+
+    run = team_service.start_ai_search_source_scope_run(team_service.AI_SEARCH_TEAM_ID, source_limit=2)
+
+    assert run["status"] == "partial"
+    assert run["summary"]["cardCount"] == 2
+    assert run["summary"]["failedCount"] == 1
+    assert run["errors"][0]["sourceId"]
+    assert run["cards"][0]["status"] == "failed"
+
+
 def test_ensure_evolution_system_teams_preserves_existing_team_member_status(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     agent = agent_directory_service.create_agent_instance(display_name="Research Lead", direct_session_id="session-research-lead")

@@ -9,6 +9,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from time import perf_counter
 from typing import Any
+from urllib.parse import urlparse
+from uuid import uuid4
 
 from core.chat.chat_task_types import trim_lines
 
@@ -560,6 +562,149 @@ def ensure_ai_search_system_team() -> dict[str, Any]:
                 },
             )
     return get_team(AI_SEARCH_TEAM_ID)
+
+
+def list_ai_search_source_scope_runs(team_id: str, *, limit: int = 6) -> dict[str, Any]:
+    normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
+    if normalized_team_id != AI_SEARCH_TEAM_ID:
+        raise TeamServiceError("AI search runs are only available for the AI search scope Team.")
+    ensure_ai_search_system_team()
+    index = _load_ai_search_runs_index()
+    runs = [
+        item for item in list(index.get("runs") or [])
+        if isinstance(item, dict)
+    ]
+    runs.sort(key=lambda item: str(item.get("createdAt") or item.get("updatedAt") or ""), reverse=True)
+    limited_runs = runs[: max(1, min(int(limit or 6), 20))]
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "teamId": AI_SEARCH_TEAM_ID,
+        "runs": limited_runs,
+        "summary": {
+            "runCount": len(runs),
+            "visibleRunCount": len(limited_runs),
+        },
+        "storage": {
+            "runsPath": _relative_path(_ai_search_runs_index_path()),
+            "runsRoot": _relative_path(_ai_search_runs_root()),
+        },
+        "updatedAt": str(index.get("updatedAt") or ""),
+    }
+
+
+def start_ai_search_source_scope_run(
+    team_id: str,
+    *,
+    topic: str = "",
+    source_limit: int = 8,
+    max_results_per_query: int = 3,
+    include_signals: bool = False,
+) -> dict[str, Any]:
+    normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
+    if normalized_team_id != AI_SEARCH_TEAM_ID:
+        raise TeamServiceError("AI search runs can only be started from the AI search scope Team.")
+    ensure_ai_search_system_team()
+    scope = _load_ai_search_source_scope()
+    query_topic = trim_lines(topic or "AI 最新动态", max_lines=1).strip() or "AI 最新动态"
+    bounded_source_limit = max(1, min(int(source_limit or 8), 12))
+    bounded_max_results = max(1, min(int(max_results_per_query or 3), 10))
+    selected_sources = _select_ai_search_sources(scope, source_limit=bounded_source_limit, include_signals=include_signals)
+    if not selected_sources:
+        raise TeamServiceError("AI search source scope has no enabled sources to search.")
+    now = utc_now_iso()
+    run_id = _new_ai_search_run_id()
+    queries = [
+        _ai_search_query_for_source(source, topic=query_topic, run_id=run_id, index=index)
+        for index, source in enumerate(selected_sources, start=1)
+    ]
+    run = {
+        "schemaVersion": SCHEMA_VERSION,
+        "runId": run_id,
+        "teamId": AI_SEARCH_TEAM_ID,
+        "title": f"{query_topic} 一键搜索",
+        "topic": query_topic,
+        "status": "running",
+        "createdAt": now,
+        "updatedAt": now,
+        "sourceScope": {
+            "scopeId": str(scope.get("scopeId") or ""),
+            "sourceScopePath": _relative_path(_ai_search_source_scope_path()),
+            "defaultEnabledTiers": list((scope.get("policy") or {}).get("defaultEnabledTiers") or []),
+            "requiresPrimaryEvidenceForConclusion": bool((scope.get("policy") or {}).get("requiresPrimaryEvidenceForConclusion")),
+        },
+        "queryPlan": {
+            "queryCount": len(queries),
+            "sourceLimit": bounded_source_limit,
+            "maxResultsPerQuery": bounded_max_results,
+            "includeSignals": bool(include_signals),
+            "queries": queries,
+        },
+        "cards": [],
+        "errors": [],
+        "summary": {
+            "cardCount": 0,
+            "succeededCount": 0,
+            "failedCount": 0,
+            "referenceCount": 0,
+        },
+        "storage": {
+            "runPath": _relative_path(_ai_search_run_path(run_id)),
+            "runsPath": _relative_path(_ai_search_runs_index_path()),
+        },
+    }
+    _record_team_event(
+        "team.ai_search_run.started",
+        {"teamId": AI_SEARCH_TEAM_ID, "name": AI_SEARCH_TEAM_DISPLAY_NAME, "teamKind": "ai_search", "teamSource": "ai_search"},
+        fields={
+            "runId": run_id,
+            "topic": query_topic,
+            "queryCount": len(queries),
+            "sourceLimit": bounded_source_limit,
+            "includeSignals": bool(include_signals),
+        },
+    )
+    cards: list[dict[str, Any]] = []
+    errors: list[dict[str, Any]] = []
+    for query in queries:
+        card = _execute_ai_search_query_card(query, max_results=bounded_max_results)
+        cards.append(card)
+        if card["status"] == "failed":
+            errors.append({"queryId": query["queryId"], "sourceId": query["sourceId"], "message": card["summary"]})
+    succeeded_count = sum(1 for card in cards if card.get("status") == "succeeded")
+    failed_count = len(cards) - succeeded_count
+    reference_count = sum(len(list(card.get("references") or [])) for card in cards)
+    status = "failed" if failed_count == len(cards) else "partial" if failed_count else "completed"
+    run.update(
+        {
+            "status": status,
+            "updatedAt": utc_now_iso(),
+            "cards": cards,
+            "errors": errors,
+            "summary": {
+                "cardCount": len(cards),
+                "succeededCount": succeeded_count,
+                "failedCount": failed_count,
+                "referenceCount": reference_count,
+            },
+        }
+    )
+    _write_json(_ai_search_run_path(run_id), run)
+    _upsert_ai_search_run_summary(run)
+    _record_team_event(
+        "team.ai_search_run.completed",
+        {"teamId": AI_SEARCH_TEAM_ID, "name": AI_SEARCH_TEAM_DISPLAY_NAME, "teamKind": "ai_search", "teamSource": "ai_search"},
+        fields={
+            "runId": run_id,
+            "topic": query_topic,
+            "status": status,
+            "queryCount": len(queries),
+            "succeededCount": succeeded_count,
+            "failedCount": failed_count,
+            "referenceCount": reference_count,
+            "runPath": _relative_path(_ai_search_run_path(run_id)),
+        },
+    )
+    return run
 
 
 def get_team(team_id: str) -> dict[str, Any]:
@@ -2994,6 +3139,183 @@ def _ai_search_source_scope_api_fields(team: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _select_ai_search_sources(scope: dict[str, Any], *, source_limit: int, include_signals: bool) -> list[dict[str, Any]]:
+    groups = [
+        group for group in list(scope.get("groups") or [])
+        if isinstance(group, dict)
+        and (bool(group.get("enabledByDefault")) or include_signals)
+    ]
+    selected: list[dict[str, Any]] = []
+    group_sources: list[list[dict[str, Any]]] = []
+    for group in groups:
+        sources = [
+            {
+                **source,
+                "groupId": str(group.get("groupId") or "").strip(),
+                "groupLabel": str(group.get("label") or "").strip(),
+                "groupTier": str(group.get("tier") or "").strip(),
+                "groupEvidenceRole": str(group.get("evidenceRole") or "").strip(),
+            }
+            for source in list(group.get("sources") or [])
+            if isinstance(source, dict)
+            and (bool(source.get("enabledByDefault")) or include_signals)
+        ]
+        if sources:
+            group_sources.append(sources)
+    cursor = 0
+    while len(selected) < source_limit and group_sources:
+        next_group_sources: list[list[dict[str, Any]]] = []
+        for sources in group_sources:
+            if cursor < len(sources) and len(selected) < source_limit:
+                selected.append(sources[cursor])
+            if cursor + 1 < len(sources):
+                next_group_sources.append(sources)
+        cursor += 1
+        group_sources = next_group_sources
+    return selected
+
+
+def _ai_search_query_for_source(source: dict[str, Any], *, topic: str, run_id: str, index: int) -> dict[str, Any]:
+    url = str(source.get("url") or "").strip()
+    domain = urlparse(url).netloc or urlparse(f"https://{url}").netloc
+    query_parts = [
+        topic,
+        str(source.get("name") or "").strip(),
+        "latest AI model product research update",
+    ]
+    if domain:
+        query_parts.append(f"site:{domain}")
+    query = " ".join(part for part in query_parts if part).strip()
+    return {
+        "queryId": f"{run_id}-q{index:02d}",
+        "query": query,
+        "sourceId": str(source.get("sourceId") or "").strip(),
+        "sourceName": str(source.get("name") or "").strip(),
+        "sourceUrl": url,
+        "sourceType": str(source.get("sourceType") or "").strip(),
+        "groupId": str(source.get("groupId") or "").strip(),
+        "groupLabel": str(source.get("groupLabel") or "").strip(),
+        "tier": str(source.get("tier") or source.get("groupTier") or "").strip(),
+        "evidenceRole": str(source.get("evidenceRole") or source.get("groupEvidenceRole") or "").strip(),
+        "enabledByDefault": bool(source.get("enabledByDefault")),
+    }
+
+
+def _execute_ai_search_query_card(query: dict[str, Any], *, max_results: int) -> dict[str, Any]:
+    now = utc_now_iso()
+    query_text = str(query.get("query") or "").strip()
+    try:
+        result_text = _run_ai_web_search(query_text, max_results=max_results)
+    except Exception as exc:
+        result_text = f"[错误] 搜索执行异常: {type(exc).__name__}: {exc}"
+    failed = _ai_search_result_is_error(result_text)
+    references = [] if failed else _references_from_web_search_result(result_text)
+    return {
+        "cardId": f"{query.get('queryId')}-card",
+        "queryId": str(query.get("queryId") or "").strip(),
+        "sourceId": str(query.get("sourceId") or "").strip(),
+        "sourceName": str(query.get("sourceName") or "").strip(),
+        "sourceUrl": str(query.get("sourceUrl") or "").strip(),
+        "sourceType": str(query.get("sourceType") or "").strip(),
+        "groupId": str(query.get("groupId") or "").strip(),
+        "groupLabel": str(query.get("groupLabel") or "").strip(),
+        "tier": str(query.get("tier") or "").strip(),
+        "evidenceRole": str(query.get("evidenceRole") or "").strip(),
+        "query": query_text,
+        "status": "failed" if failed else "succeeded",
+        "summary": _web_search_summary_text(result_text),
+        "resultText": result_text,
+        "references": references,
+        "createdAt": now,
+        "updatedAt": now,
+    }
+
+
+def _run_ai_web_search(query: str, *, max_results: int) -> str:
+    from tools.web_search_tool import web_search
+
+    return web_search(query=query, max_results=max_results)
+
+
+def _ai_search_result_is_error(result_text: str) -> bool:
+    normalized = str(result_text or "").strip()
+    return normalized.startswith("[错误]") or "dependency unavailable" in normalized.lower() or "依赖不可用" in normalized
+
+
+def _web_search_summary_text(result_text: str) -> str:
+    text = str(result_text or "").strip()
+    if not text:
+        return ""
+    marker = "\n\n**参考来源：**"
+    summary = text.split(marker, 1)[0].strip()
+    return trim_lines(summary, max_lines=6)[:1200]
+
+
+def _references_from_web_search_result(result_text: str) -> list[dict[str, str]]:
+    references: list[dict[str, str]] = []
+    for match in re.finditer(r"^\s*\d+\.\s+\[([^\]]+)\]\(([^)]+)\)", str(result_text or ""), flags=re.MULTILINE):
+        title = match.group(1).strip()
+        url = match.group(2).strip()
+        if title or url:
+            references.append({"title": title, "url": url})
+    return references[:10]
+
+
+def _new_ai_search_run_id() -> str:
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    return f"ai-search-run-{stamp}-{uuid4().hex[:8]}"
+
+
+def _load_ai_search_runs_index() -> dict[str, Any]:
+    path = _ai_search_runs_index_path()
+    if not path.exists():
+        return {"schemaVersion": SCHEMA_VERSION, "teamId": AI_SEARCH_TEAM_ID, "updatedAt": "", "runs": []}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {"schemaVersion": SCHEMA_VERSION, "teamId": AI_SEARCH_TEAM_ID, "updatedAt": "", "runs": []}
+    if not isinstance(data, dict):
+        return {"schemaVersion": SCHEMA_VERSION, "teamId": AI_SEARCH_TEAM_ID, "updatedAt": "", "runs": []}
+    if not isinstance(data.get("runs"), list):
+        data["runs"] = []
+    return data
+
+
+def _upsert_ai_search_run_summary(run: dict[str, Any]) -> None:
+    index = _load_ai_search_runs_index()
+    run_id = str(run.get("runId") or "").strip()
+    summary = {
+        "runId": run_id,
+        "teamId": AI_SEARCH_TEAM_ID,
+        "title": str(run.get("title") or "").strip(),
+        "topic": str(run.get("topic") or "").strip(),
+        "status": str(run.get("status") or "").strip(),
+        "createdAt": str(run.get("createdAt") or "").strip(),
+        "updatedAt": str(run.get("updatedAt") or "").strip(),
+        "queryCount": int((run.get("queryPlan") or {}).get("queryCount") or 0),
+        "cardCount": int((run.get("summary") or {}).get("cardCount") or 0),
+        "succeededCount": int((run.get("summary") or {}).get("succeededCount") or 0),
+        "failedCount": int((run.get("summary") or {}).get("failedCount") or 0),
+        "referenceCount": int((run.get("summary") or {}).get("referenceCount") or 0),
+        "runPath": _relative_path(_ai_search_run_path(run_id)) if run_id else "",
+        "cards": list(run.get("cards") or [])[:12],
+    }
+    runs = [
+        item for item in list(index.get("runs") or [])
+        if isinstance(item, dict) and str(item.get("runId") or "").strip() != run_id
+    ]
+    runs.insert(0, summary)
+    index.update(
+        {
+            "schemaVersion": SCHEMA_VERSION,
+            "teamId": AI_SEARCH_TEAM_ID,
+            "updatedAt": str(run.get("updatedAt") or utc_now_iso()),
+            "runs": runs[:50],
+        }
+    )
+    _write_json(_ai_search_runs_index_path(), index)
+
+
 def _default_nodes_for_members(members: list[dict[str, Any]]) -> list[dict[str, Any]]:
     nodes: list[dict[str, Any]] = []
     for index, member in enumerate(members):
@@ -3153,6 +3475,18 @@ def _team_canvas_path(team_id: str) -> Path:
 
 def _ai_search_source_scope_path() -> Path:
     return _teams_root() / AI_SEARCH_TEAM_ID / "source_scope.json"
+
+
+def _ai_search_runs_root() -> Path:
+    return _teams_root() / AI_SEARCH_TEAM_ID / "search_runs"
+
+
+def _ai_search_runs_index_path() -> Path:
+    return _ai_search_runs_root() / "index.json"
+
+
+def _ai_search_run_path(run_id: str) -> Path:
+    return _ai_search_runs_root() / f"{_safe_token(run_id, default='run', max_length=96)}.json"
 
 
 def _project_root() -> Path:
