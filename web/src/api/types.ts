@@ -5452,7 +5452,6 @@ export type ResetInventoryItem = {
   sizeBytes: number;
   size: string;
   fileCount: number;
-  scanTruncated: boolean;
   candidateCount: number;
   protectedCount: number;
   missingCount: number;
