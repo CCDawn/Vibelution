@@ -558,6 +558,8 @@ def start_research_stage_round(team_id: str, payload: dict[str, Any] | None = No
         rounds = _stage_rounds(store)
         active_round = _active_stage_round(rounds, stage_type)
         if active_round and start_mode != "new_round":
+            continued_payload = _continued_stage_round_payload(active_round, stage_type)
+            continued_ref = continued_payload.get("continuedSourceRunRef") if isinstance(continued_payload.get("continuedSourceRunRef"), dict) else {}
             _record_workflow_event(
                 "research_stage_round.continued",
                 normalized_team_id,
@@ -567,17 +569,22 @@ def start_research_stage_round(team_id: str, payload: dict[str, Any] | None = No
                     "stageType": stage_type,
                     "status": active_round.get("status", ""),
                     "sourceRunCount": len(list(active_round.get("sourceRunIds") or [])),
+                    "continuedSourceRunId": continued_ref.get("runId", ""),
+                    "continuedRecordCount": continued_ref.get("recordCount", 0),
+                    "continuedOpenAssignmentCount": continued_ref.get("openAssignmentCount", 0),
                 },
             )
             status_payload = _stage_phase_status(normalized_team_id, stage_type, rounds, workflow=workflow, team=team)
             return {
                 "created": False,
+                "continued": True,
                 "stageRound": active_round,
                 "phase": status_payload,
                 "workflow": _workflow_to_api(normalized_team_id, workflow, _load_candidate_store(normalized_team_id)),
                 "status": get_research_stage_round_status(normalized_team_id),
                 "nextActions": _stage_next_actions(stage_type, reused=True),
                 "boundaries": _research_stage_boundaries(),
+                **continued_payload,
             }
         previous_round = _latest_stage_round([item for item in rounds if str(item.get("stageType") or "") == stage_type])
         round_payload = _build_stage_round(
@@ -5658,6 +5665,60 @@ def _latest_stage_round(rounds: list[dict[str, Any]]) -> dict[str, Any] | None:
 
 def _stage_round_number(rounds: list[dict[str, Any]], stage_type: str) -> int:
     return 1 + sum(1 for item in rounds if str(item.get("stageType") or "") == stage_type)
+
+
+def _continued_stage_round_payload(stage_round: dict[str, Any], stage_type: str) -> dict[str, Any]:
+    """Return enough context for the UI to show that an active stage was reused."""
+
+    if stage_type != "knowledge_collection":
+        return {}
+    source_run_ids = [str(item) for item in list(stage_round.get("sourceRunIds") or []) if str(item or "").strip()]
+    source_run_id = source_run_ids[0] if source_run_ids else ""
+    if not source_run_id:
+        return {
+            "continuedSourceRunRef": {
+                "runId": "",
+                "status": "missing",
+                "recordCount": 0,
+                "assignmentCount": 0,
+                "openAssignmentCount": 0,
+                "message": "Active knowledge-collection round has no source run id.",
+            }
+        }
+    try:
+        run = data_processing_service.get_processing_run(source_run_id)
+        assignment_payload = data_processing_service.list_collection_assignments(source_run_id)
+    except data_processing_service.DataProcessingNotFoundError:
+        return {
+            "continuedSourceRunRef": {
+                "runId": source_run_id,
+                "status": "missing",
+                "recordCount": 0,
+                "assignmentCount": 0,
+                "openAssignmentCount": 0,
+                "message": "Active knowledge-collection round points to a missing source run.",
+            }
+        }
+    assignments = [item for item in list(assignment_payload.get("assignments") or []) if isinstance(item, dict)]
+    summary = run.get("summary") if isinstance(run.get("summary"), dict) else {}
+    scope = run.get("scope") if isinstance(run.get("scope"), dict) else {}
+    data_search_plan_ref = scope.get("dataSearchPlanRef") if isinstance(scope.get("dataSearchPlanRef"), dict) else {}
+    return {
+        "run": run,
+        "assignments": assignments,
+        "assignmentCount": len(assignments),
+        "continuedSourceRunRef": {
+            "runId": source_run_id,
+            "status": str(run.get("status") or ""),
+            "recordCount": _normalize_int(summary.get("recordCount"), default=0, minimum=0, maximum=100000),
+            "assignmentCount": _normalize_int(summary.get("assignmentCount"), default=len(assignments), minimum=0, maximum=100000),
+            "openAssignmentCount": _normalize_int(summary.get("openAssignmentCount"), default=0, minimum=0, maximum=100000),
+            "queryCount": _normalize_int(data_search_plan_ref.get("queryCount"), default=0, minimum=0, maximum=SOURCE_COLLECTION_MAX_QUERIES),
+            "planId": _trim_text(data_search_plan_ref.get("planId"), max_length=160),
+            "externalSearchTriggered": bool(data_search_plan_ref.get("externalSearchTriggered")),
+            "message": "Reused the active source-collection run instead of creating a new one.",
+        },
+    }
 
 
 def _build_stage_round(
