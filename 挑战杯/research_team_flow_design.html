@@ -39,7 +39,7 @@
         <aside class="dashboard-panel">
           <h2>审核摘要</h2>
           <div class="kpi-grid">
-            <div class="kpi"><b>当前阶段</b><strong>M6.15</strong><span>知识搜集页已把 KV/prompt cache 门禁和缓存分区放入对话式搜集轨迹，后续真实搜索可复用稳定前缀。</span></div>
+            <div class="kpi"><b>当前阶段</b><strong>M6.16</strong><span>知识搜集启动会明确显示新建或复用的搜集批次，以及当前是否仍在等待功能 Agent 回写。</span></div>
             <div class="kpi"><b>流程节点</b><strong>13</strong><span>1-9 为知识入库主线，10-13 保留占位与维护节点。</span></div>
             <div class="kpi"><b>候选资料</b><strong>10</strong><span>第一轮 source_manifest 已进入 candidate-only 工作区。</span></div>
             <div class="kpi"><b>正式写入</b><strong>0</strong><span>未写正式 Team Knowledge、RAG 或 official graph。</span></div>
@@ -659,8 +659,8 @@
         <div class="agent-row">
         <b>01</b>
         <strong>Source Intake Agent</strong>
-        <span>可复用通用 data-processing assignment / source-extraction / source-quality 后端已接入；Teams 资料搜集执行台、候选资料筛选台、三阶段启动台和 KV 缓存对话轨迹已接入</span>
-        <span>ResearchStageRound 建立 / 三阶段启动台一键进入知识搜集 / 自动启动团队协调 round / DataProcessingRun 建立 / DataSearchPlan/querySeeds 搜索计划 / KV/prompt cache 启动门禁 / 稳定前缀/动态增量契约 / CollectionAssignment 资料搜集任务 / assignedQueries 角色分配 / promptCachePartition 角色分区 / Teams 启动搜集批次 / Teams 查看 run/assignment/query/KV 状态 / 搜集对话流展示搜索计划、缓存门禁、领取任务、回写和入候选仓库 / 手工 CollectionOutput 回写 / DataRecord 通用记录 / DataRecord 自动导入 source_manifest / 本地资料登记 / source_manifest 写入 / 文件路径/页码/来源可信度记录 / 本地 PDF sha256/pageAnchors/excerpt 抽取 / sourceQualityAssessment 筛选 / 可选 research_knowledge_query_tool 查重</span>
+        <span>可复用通用 data-processing assignment / source-extraction / source-quality 后端已接入；Teams 资料搜集执行台、候选资料筛选台、三阶段启动台、KV 缓存对话轨迹和启动复用反馈已接入</span>
+        <span>ResearchStageRound 建立 / 三阶段启动台一键进入知识搜集 / active 知识搜集轮次复用反馈 / 自动启动团队协调 round / DataProcessingRun 建立 / DataSearchPlan/querySeeds 搜索计划 / KV/prompt cache 启动门禁 / 稳定前缀/动态增量契约 / CollectionAssignment 资料搜集任务 / assignedQueries 角色分配 / promptCachePartition 角色分区 / Teams 启动搜集批次 / Teams 查看 run/assignment/query/KV 状态 / 搜集对话流展示搜索计划、缓存门禁、领取任务、回写和入候选仓库 / 无记录/有待办时显示等待功能 Agent 回写提示 / 手工 CollectionOutput 回写 / DataRecord 通用记录 / DataRecord 自动导入 source_manifest / 本地资料登记 / source_manifest 写入 / 文件路径/页码/来源可信度记录 / 本地 PDF sha256/pageAnchors/excerpt 抽取 / sourceQualityAssessment 筛选 / 可选 research_knowledge_query_tool 查重</span>
         <span>确认资料允许分析、来源可信度和是否纳入本轮。</span>
       </div>
 <div class="agent-row">
@@ -1970,6 +1970,12 @@
               <strong>知识搜集缓存命中对话流</strong>
               <span>Teams 知识搜集阶段页把 KV/prompt cache policy/ref 显示为搜集对话流中的独立步骤，并在摘要栏展示 KV 门禁状态。</span>
               <span>页面会说明稳定前缀承载团队规则、schema 和回写边界，动态增量只传当前 query、结果引用和存储位置；每个功能 Agent assignment 同时展示 promptCachePartition，方便后续真实搜索执行器复用对话链路并减少 token 消耗。</span>
+            </div>
+<div class="blueprint-row">
+              <b>M6.16</b>
+              <strong>知识搜集启动反馈修复</strong>
+              <span>stage-rounds/start 复用 active knowledge_collection 时返回 continuedSourceRunRef、run 和 assignments；Teams 知识搜集页显示“已复用已有搜集批次”和“等待功能 Agent 回写，未触发外部搜索”的可见提示。</span>
+              <span>解决点击启动后像没有反应的问题；本轮仍不接真实外部搜索执行器，不写正式 Team Knowledge/RAG/official graph。</span>
             </div>
       </div>
       <div class="tag-row">
