@@ -301,8 +301,8 @@ def build_agent_context(agent_id: str, *, session_id: str = "", run_id: str = ""
             _context_segment(
                 "project_agent_registry",
                 project_agent_registry_context_block,
-                placement="cache_prefix",
-                stability="session_static",
+                placement="volatile_turn",
+                stability="turn_dynamic",
             ),
             _context_segment(
                 "agent_messages",
