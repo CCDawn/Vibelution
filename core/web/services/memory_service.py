@@ -37,6 +37,8 @@ MEMORY_OVERVIEW_SECTION_CACHE: dict[str, Any] = {
     "root": "",
     "sections": {},
 }
+MEMORY_OVERVIEW_PREWARM_LOCK = Lock()
+MEMORY_OVERVIEW_PREWARM_INFLIGHT = False
 MEMORY_USAGE_CONTRACT_CACHE_TTL_SECONDS = 8.0
 MEMORY_USAGE_CONTRACT_CACHE_LOCK = Lock()
 MEMORY_USAGE_CONTRACT_CACHE: dict[str, Any] = {"root": "", "expiresAt": 0.0, "payload": None}
@@ -156,6 +158,63 @@ def get_memory_overview(*, include_content: bool = True) -> dict[str, Any]:
         phase_timings=phase_timings,
     )
     return overview
+
+
+def prewarm_memory_overview_cache(*, reason: str = "startup") -> dict[str, Any]:
+    """Build the memory overview caches before the first Memory page request."""
+
+    global MEMORY_OVERVIEW_PREWARM_INFLIGHT
+    normalized_reason = _clip(str(reason or "startup"), 120) or "startup"
+    started_at = time.perf_counter()
+    with MEMORY_OVERVIEW_PREWARM_LOCK:
+        if MEMORY_OVERVIEW_PREWARM_INFLIGHT:
+            return {
+                "status": "skipped",
+                "reason": normalized_reason,
+                "skipReason": "inflight",
+                "durationMs": round((time.perf_counter() - started_at) * 1000, 1),
+            }
+        MEMORY_OVERVIEW_PREWARM_INFLIGHT = True
+
+    try:
+        overview = get_memory_overview(include_content=False)
+        duration_ms = round((time.perf_counter() - started_at) * 1000, 1)
+        summary = overview.get("summary") if isinstance(overview.get("summary"), dict) else {}
+        section_count = len(overview.get("sections") or [])
+        item_count = int((summary or {}).get("itemCount") or 0)
+        result = {
+            "status": "completed",
+            "reason": normalized_reason,
+            "durationMs": duration_ms,
+            "sectionCount": section_count,
+            "itemCount": item_count,
+        }
+        _record_memory_overview_prewarm_event(
+            status="completed",
+            reason=normalized_reason,
+            elapsed_ms=duration_ms,
+            section_count=section_count,
+            item_count=item_count,
+        )
+        return result
+    except Exception as exc:
+        duration_ms = round((time.perf_counter() - started_at) * 1000, 1)
+        _record_memory_overview_prewarm_event(
+            status="failed",
+            reason=normalized_reason,
+            elapsed_ms=duration_ms,
+            error_type=type(exc).__name__,
+            error_message=_clip(str(exc), 240),
+        )
+        return {
+            "status": "failed",
+            "reason": normalized_reason,
+            "durationMs": duration_ms,
+            "errorType": type(exc).__name__,
+        }
+    finally:
+        with MEMORY_OVERVIEW_PREWARM_LOCK:
+            MEMORY_OVERVIEW_PREWARM_INFLIGHT = False
 
 
 def get_memory_item_detail(section_id: str, item_id: str) -> dict[str, Any] | None:
@@ -2171,6 +2230,48 @@ def _record_memory_overview_perf_event(
                 "sectionTimingsMs": list(section_timings or []),
             },
             lifecycle=True,
+        )
+    except Exception:
+        pass
+
+
+def _record_memory_overview_prewarm_event(
+    *,
+    status: str,
+    reason: str,
+    elapsed_ms: float,
+    section_count: int = 0,
+    item_count: int = 0,
+    error_type: str = "",
+    error_message: str = "",
+) -> None:
+    normalized_status = str(status or "").strip().lower() or "observed"
+    try:
+        from core.web.services.runtime_scene_service import record_runtime_scene_event
+
+        record_runtime_scene_event(
+            "memory_service",
+            "performance",
+            "memory.overview.prewarm",
+            message=(
+                "Memory overview cache prewarm failed before the first Memory page request."
+                if normalized_status == "failed"
+                else "Memory overview cache prewarm completed outside the Memory page request path."
+            ),
+            level="warning" if normalized_status == "failed" else "info",
+            outcome=normalized_status,
+            fields={
+                "status": normalized_status,
+                "reason": _clip(str(reason or "startup"), 120) or "startup",
+                "elapsedMs": round(float(elapsed_ms), 1),
+                "sectionCount": max(0, int(section_count)),
+                "itemCount": max(0, int(item_count)),
+                "includeContent": False,
+                "cacheWarmup": True,
+                "errorType": str(error_type or "").strip(),
+                "errorMessage": _clip(str(error_message or ""), 240),
+            },
+            lifecycle=False,
         )
     except Exception:
         pass
