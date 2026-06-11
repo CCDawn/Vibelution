@@ -30,6 +30,11 @@ TEAM_STATUSES = {"active", "archived"}
 NODE_TYPES = {"role", "agent", "group", "user", "external"}
 EDGE_TYPES = {"reports_to", "communication", "collaborates_with", "delegates_to", "observes", "supports"}
 _TEAM_LOCK = threading.RLock()
+_TEAM_DETAIL_LOG_LOCK = threading.Lock()
+_TEAM_DETAIL_LOG_STATE: dict[str, dict[str, Any]] = {}
+TEAM_DETAIL_LOG_SLOW_THRESHOLD_MS = 250
+TEAM_DETAIL_LOG_ROLLUP_REPEAT_THRESHOLD = 5
+TEAM_DETAIL_LOG_ROLLUP_WINDOW_SECONDS = 5.0
 _SAFE_ID_FRAGMENT = re.compile(r"[^A-Za-z0-9_.-]+")
 EVOLUTION_SYSTEM_TEAM_IDS = {"self-evolution-team", "supervised-evolution-team"}
 EVOLUTION_SYSTEM_TEAM_SPECS = (
@@ -3624,29 +3629,129 @@ def _record_team_event(event_code: str, team: dict[str, Any], *, fields: dict[st
         pass
 
 
+def _team_detail_log_fields(team: dict[str, Any], started_at: float) -> dict[str, Any]:
+    canvas = team.get("canvas") if isinstance(team.get("canvas"), dict) else {}
+    return {
+        "teamId": str(team.get("teamId") or "").strip(),
+        "teamName": str(team.get("name") or "").strip(),
+        "teamKind": str(team.get("teamKind") or "").strip(),
+        "teamCategory": str(team.get("teamCategory") or "").strip(),
+        "teamSource": str(team.get("teamSource") or "").strip(),
+        "teamTemplateId": str(team.get("teamTemplateId") or "").strip(),
+        "linkedChatRoomId": str(team.get("linkedChatRoomId") or "").strip(),
+        "memberCount": len(list(team.get("members") or [])),
+        "canvasNodeCount": len(list(canvas.get("nodes") or [])),
+        "canvasEdgeCount": len(list(canvas.get("edges") or [])),
+        "elapsedMs": _elapsed_ms(started_at),
+    }
+
+
+def _team_detail_log_signature(fields: dict[str, Any]) -> tuple[Any, ...]:
+    return (
+        fields.get("teamKind"),
+        fields.get("teamSource"),
+        fields.get("teamTemplateId"),
+        fields.get("linkedChatRoomId"),
+        fields.get("memberCount"),
+        fields.get("canvasNodeCount"),
+        fields.get("canvasEdgeCount"),
+    )
+
+
+def _emit_team_detail_loaded(fields: dict[str, Any], *, reason: str) -> None:
+    record_runtime_scene_event(
+        "team_service",
+        "team_detail",
+        "team.detail.loaded",
+        message="Team detail loaded.",
+        outcome="observed",
+        fields={**fields, "logReason": reason},
+    )
+
+
+def _emit_team_detail_rollup(team_id: str, state: dict[str, Any], *, now: float) -> None:
+    repeat_count = int(state.get("repeatCount") or 0)
+    if repeat_count <= 0:
+        return
+    fields = dict(state.get("lastFields") or {})
+    record_runtime_scene_event(
+        "team_service",
+        "team_detail",
+        "team.detail.loaded_rollup",
+        message="Repeated team detail loads suppressed.",
+        outcome="observed",
+        fields={
+            "teamId": team_id,
+            "teamName": str(fields.get("teamName") or ""),
+            "teamKind": str(fields.get("teamKind") or ""),
+            "teamSource": str(fields.get("teamSource") or ""),
+            "linkedChatRoomId": str(fields.get("linkedChatRoomId") or ""),
+            "memberCount": fields.get("memberCount", 0),
+            "canvasNodeCount": fields.get("canvasNodeCount", 0),
+            "canvasEdgeCount": fields.get("canvasEdgeCount", 0),
+            "repeatCount": repeat_count,
+            "windowSeconds": round(max(0.0, now - float(state.get("windowStartedAt") or now)), 3),
+            "maxElapsedMs": state.get("maxElapsedMs", 0),
+            "lastElapsedMs": fields.get("elapsedMs", 0),
+            "rollupReason": "same_signature_repeated",
+        },
+    )
+    state["repeatCount"] = 0
+    state["windowStartedAt"] = now
+    state["lastRollupAt"] = now
+
+
 def _record_team_detail_loaded(team: dict[str, Any], started_at: float) -> None:
     try:
-        canvas = team.get("canvas") if isinstance(team.get("canvas"), dict) else {}
-        record_runtime_scene_event(
-            "team_service",
-            "team_detail",
-            "team.detail.loaded",
-            message="Team detail loaded.",
-            outcome="observed",
-            fields={
-                "teamId": str(team.get("teamId") or "").strip(),
-                "teamName": str(team.get("name") or "").strip(),
-                "teamKind": str(team.get("teamKind") or "").strip(),
-                "teamCategory": str(team.get("teamCategory") or "").strip(),
-                "teamSource": str(team.get("teamSource") or "").strip(),
-                "teamTemplateId": str(team.get("teamTemplateId") or "").strip(),
-                "linkedChatRoomId": str(team.get("linkedChatRoomId") or "").strip(),
-                "memberCount": len(list(team.get("members") or [])),
-                "canvasNodeCount": len(list(canvas.get("nodes") or [])),
-                "canvasEdgeCount": len(list(canvas.get("edges") or [])),
-                "elapsedMs": _elapsed_ms(started_at),
-            },
-        )
+        fields = _team_detail_log_fields(team, started_at)
+        team_id = str(fields.get("teamId") or "").strip()
+        if not team_id:
+            return
+        now = _perf_counter()
+        signature = _team_detail_log_signature(fields)
+        elapsed_ms = int(fields.get("elapsedMs") or 0)
+        with _TEAM_DETAIL_LOG_LOCK:
+            state = _TEAM_DETAIL_LOG_STATE.get(team_id)
+            if state is None:
+                _TEAM_DETAIL_LOG_STATE[team_id] = {
+                    "signature": signature,
+                    "repeatCount": 0,
+                    "windowStartedAt": now,
+                    "lastRollupAt": 0.0,
+                    "maxElapsedMs": elapsed_ms,
+                    "lastFields": fields,
+                }
+                _emit_team_detail_loaded(fields, reason="initial")
+                return
+
+            previous_signature = state.get("signature")
+            if previous_signature != signature:
+                _emit_team_detail_rollup(team_id, state, now=now)
+                state.update(
+                    {
+                        "signature": signature,
+                        "repeatCount": 0,
+                        "windowStartedAt": now,
+                        "maxElapsedMs": elapsed_ms,
+                        "lastFields": fields,
+                    }
+                )
+                _emit_team_detail_loaded(fields, reason="changed")
+                return
+
+            state["lastFields"] = fields
+            state["maxElapsedMs"] = max(int(state.get("maxElapsedMs") or 0), elapsed_ms)
+            if elapsed_ms >= TEAM_DETAIL_LOG_SLOW_THRESHOLD_MS:
+                _emit_team_detail_rollup(team_id, state, now=now)
+                state["maxElapsedMs"] = elapsed_ms
+                _emit_team_detail_loaded(fields, reason="slow")
+                return
+
+            state["repeatCount"] = int(state.get("repeatCount") or 0) + 1
+            if (
+                int(state.get("repeatCount") or 0) >= TEAM_DETAIL_LOG_ROLLUP_REPEAT_THRESHOLD
+            ):
+                _emit_team_detail_rollup(team_id, state, now=now)
     except Exception:
         pass
 
