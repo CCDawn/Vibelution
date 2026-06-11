@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.15 - 2026-06-11
+
+- Made Challenge Cup knowledge-collection start/continue visibly reuse active source-collection runs instead of appearing idle.
+- Returned continued source-run context from research stage startup so the Teams page can show run id, records, open assignments, query count, and external-search boundary.
+- Updated the Challenge Cup flow HTML to M6.16 and clarified that the current search stage is still contract/writeback-only until a real external search executor is connected.
+
 ## 1.0.14 - 2026-06-09
 
 - Slimmed ordinary short chat turns by skipping heavy runtime context and tool binding only when the message is clearly low-intent dialogue.
