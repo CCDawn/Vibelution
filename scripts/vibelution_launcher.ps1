@@ -2077,13 +2077,6 @@ function Stop-ProcessesById {
         return
     }
     $useChildProcessMap = $null -ne $ChildProcessMap
-    if (
-        -not $ChildProcessMap -and
-        (Get-Command -Name "Get-ProcessChildPidMap" -CommandType Function -ErrorAction SilentlyContinue)
-    ) {
-        $ChildProcessMap = Get-ProcessChildPidMap
-        $useChildProcessMap = $true
-    }
     $protectedProcessIds = @()
     $protectedProcessVar = Get-Variable -Scope Script -Name "protectedProcessIds" -ErrorAction SilentlyContinue
     if ($protectedProcessVar) {
@@ -3951,14 +3944,16 @@ function Get-ManagedBackendCandidatePids {
         }
     }
 
-    $scanPids = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
-        $_.CommandLine -and (Test-CommandLineLooksLikeManagedBackend -CommandLine ([string]$_.CommandLine)) -and $_.CommandLine -match "--port\s+$port\b"
-    } | ForEach-Object {
-        [int]$_.ProcessId
-    })
+    if ($pids.Count -eq 0) {
+        $scanPids = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+            $_.CommandLine -and (Test-CommandLineLooksLikeManagedBackend -CommandLine ([string]$_.CommandLine)) -and $_.CommandLine -match "--port\s+$port\b"
+        } | ForEach-Object {
+            [int]$_.ProcessId
+        })
 
-    foreach ($candidatePid in $scanPids) {
-        [void]$pids.Add($candidatePid)
+        foreach ($candidatePid in $scanPids) {
+            [void]$pids.Add($candidatePid)
+        }
     }
 
     return @($pids | Sort-Object -Unique)
