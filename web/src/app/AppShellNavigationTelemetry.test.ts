@@ -1,6 +1,7 @@
 import ts from "typescript";
 import { describe, expect, it } from "vitest";
 
+import { routeLocationKey, routerLocationDesyncTarget } from "./AppShell";
 import appShellSource from "./AppShell.tsx?raw";
 import utilityMenuSource from "./AppShellUtilityMenu.tsx?raw";
 
@@ -78,6 +79,28 @@ function collectNavLinksUsingDocumentReload(source: ts.SourceFile, paths: Set<st
 }
 
 describe("AppShell navigation telemetry", () => {
+  it("detects browser/router location desync targets without touching aligned routes", () => {
+    expect(
+      routerLocationDesyncTarget(
+        { pathname: "/teams", search: "", hash: "" },
+        { pathname: "/agents", search: "", hash: "" },
+      ),
+    ).toBe("/teams");
+    expect(
+      routerLocationDesyncTarget(
+        { pathname: "/teams", search: "?agent=agent-1", hash: "#members" },
+        { pathname: "/agents", search: "", hash: "" },
+      ),
+    ).toBe("/teams?agent=agent-1#members");
+    expect(
+      routerLocationDesyncTarget(
+        { pathname: "/agents", search: "", hash: "" },
+        { pathname: "/agents", search: "", hash: "" },
+      ),
+    ).toBeNull();
+    expect(routeLocationKey({ pathname: "", search: "", hash: "" })).toBe("/");
+  });
+
   it("does not monkey-patch router-owned browser history methods", () => {
     const source = ts.createSourceFile("AppShell.tsx", appShellSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 
@@ -93,6 +116,14 @@ describe("AppShell navigation telemetry", () => {
         new Set(["/chat", "/supervised-evolution", "/self-evolution", "/teams", "/memory", "/agents", "/logs", "/git", "/config"]),
       ),
     ).toEqual([]);
+  });
+
+  it("recovers when the browser address changes without the router location following", () => {
+    expect(appShellSource).toContain("routerLocationDesyncTarget(window.location, location)");
+    expect(appShellSource).toContain("browser.router_location_desync.recovered");
+    expect(appShellSource).toContain('navigate(target, { replace: true })');
+    expect(appShellSource).toContain('window.addEventListener("click", handleDocumentClick, true)');
+    expect(appShellSource).toContain('document.addEventListener("visibilitychange", handleVisibilityChange)');
   });
 
   it("keeps group chat out of the top navigation because it lives in the chat page", () => {
