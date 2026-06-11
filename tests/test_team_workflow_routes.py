@@ -162,6 +162,57 @@ def test_team_workflow_route_starts_source_collection_run(tmp_path, monkeypatch)
     assert status_response.json()["boundaries"]["writesFormalKnowledge"] is False
 
 
+def test_team_workflow_route_executes_source_collection_search(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+
+    def fake_search(query, *, max_results, provider):
+        return {
+            "provider": provider,
+            "searchUrl": "https://api.example.test/search",
+            "results": [
+                {
+                    "title": "Predictive coding paper",
+                    "sourceRef": "https://doi.org/10.0000/predictive-coding",
+                    "rawLocation": "https://api.example.test/works/10.0000/predictive-coding",
+                    "summary": "Metadata-only source collection result.",
+                    "sourceType": "paper",
+                    "metadata": {"doi": "10.0000/predictive-coding"},
+                    "qualitySignals": {"providerScore": 95.0},
+                }
+            ][:max_results],
+        }
+
+    monkeypatch.setattr(team_workflow_orchestration_service, "_execute_source_collection_query", fake_search)
+    client = _client()
+    team = client.post("/api/teams", json={"name": "ai科学研究团队"}).json()
+    start_response = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/source-collection-runs",
+        json={
+            "topic": "predictive coding cortical hierarchy",
+            "querySeeds": ["predictive coding cortical hierarchy"],
+            "searchLanguages": ["en"],
+            "sourceTypes": ["paper"],
+            "agentRoles": ["data_discovery"],
+        },
+    )
+
+    response = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/source-collection-runs/{start_response.json()['run']['runId']}/search/execute",
+        json={"maxQueries": 1, "maxResultsPerQuery": 1},
+    )
+
+    assert start_response.status_code == 201, start_response.text
+    assert response.status_code == 201, response.text
+    assert response.json()["executedQueryCount"] == 1
+    assert response.json()["recordCount"] == 1
+    assert response.json()["importedCount"] == 1
+    assert response.json()["boundaries"]["externalSearchTriggered"] is True
+    assert response.json()["boundaries"]["writesFormalKnowledge"] is False
+    assert response.json()["boundaries"]["writesRag"] is False
+    assert response.json()["createdRecords"][0]["metadata"]["sourceCollectionTrace"]["queryId"] == start_response.json()["searchPlan"]["queries"][0]["queryId"]
+    assert {event["eventType"] for event in response.json()["executionEvents"]} >= {"search.executed", "storage.data_record_written"}
+
+
 def test_team_workflow_route_blocks_source_collection_without_prompt_cache(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     monkeypatch.setattr(
