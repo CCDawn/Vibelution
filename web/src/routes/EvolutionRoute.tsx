@@ -34,6 +34,8 @@ import {
   ConfigSummary,
   EvolutionRunActionResponse,
   EvolutionRunStartResponse,
+  EvolutionRunCommandAccepted,
+  EvolutionRunCommandStatus,
   EvolutionRunDeleteResponse,
   EvolutionWorkbench,
   EvolutionProposalBulkDeleteResponse,
@@ -61,6 +63,8 @@ import { useShellStore } from "../store/shellStore";
 import { SupervisedWorkspaceControls } from "./SupervisedWorkspaceControls";
 import { isSelfEvolutionWorktreeRun } from "./supervisedWorktreeReview";
 import {
+  isCompletedEvolutionRunCommandFailure,
+  isCompletedEvolutionRunCommandSuccess,
   isLiveSupervisedRunStatus,
   isEvolutionRunCommandAccepted,
   parseRunStreamSnapshot,
@@ -202,7 +206,7 @@ function isSelfRunLockedStatus(status: string) {
   return ["queued", "running", "stopping", "paused"].includes(String(status || "").trim().toLowerCase());
 }
 
-function isLocalSupervisedStartPlaceholder(run: EvolutionActiveRun | null | undefined) {
+function isLocalSupervisedStartPlaceholder(run: EvolutionActiveRun | null | undefined): run is EvolutionActiveRun {
   return String(run?.runId || "").startsWith(LOCAL_SUPERVISED_RUN_PREFIX);
 }
 
@@ -461,6 +465,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const [bundleNameInput, setBundleNameInput] = useState("");
   const [keepWorktree, setKeepWorktree] = useState(false);
   const [liveActiveRun, setLiveActiveRun] = useState<EvolutionActiveRun | null>(null);
+  const [supervisedStartCommand, setSupervisedStartCommand] = useState<EvolutionRunCommandAccepted | null>(null);
   const [selfGoalInput, setSelfGoalInput] = useState("");
   const [selfGoalInitialized, setSelfGoalInitialized] = useState(false);
   const [liveSelfRun, setLiveSelfRun] = useState<SelfEvolutionActiveRun | null>(null);
@@ -583,6 +588,20 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     refetchIntervalInBackground: false,
     enabled: selfTrackQueriesEnabled || supervisedTrackQueriesEnabled,
   });
+  const supervisedStartCommandId = supervisedStartCommand?.commandId ?? "";
+  const supervisedStartCommandStatusQuery = useQuery({
+    queryKey: queryKeys.evolutionRunCommand(supervisedStartCommandId || "__none__"),
+    queryFn: () =>
+      fetchJson<EvolutionRunCommandStatus>(`/api/evolution/runs/commands/${encodeURIComponent(supervisedStartCommandId)}`),
+    refetchInterval: resolvePollingInterval(pageVisible, 1_500),
+    refetchIntervalInBackground: false,
+    enabled: Boolean(
+      supervisedTrackQueriesEnabled
+        && pageVisible
+        && supervisedStartCommandId
+        && isLocalSupervisedStartPlaceholder(liveActiveRun),
+    ),
+  });
   const selectedDatasetLimit = useMemo(
     () => (
       sourceKind === "dataset" && datasetLimitInput.trim()
@@ -593,6 +612,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   );
   const startRunMutation = useMutation({
     onMutate: () => {
+      setSupervisedStartCommand(null);
       setActionFeedback(lang === "zh" ? "启动请求已提交，正在等待运行记录刷新。" : "Start request submitted; waiting for the run record to refresh.");
       setLiveActiveRun(buildSupervisedStartPlaceholder({
         sourceKind,
@@ -619,16 +639,19 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       }),
     onSuccess: async (payload) => {
       if (isEvolutionRunCommandAccepted(payload)) {
+        setSupervisedStartCommand(payload);
         setActionFeedback(payload.summary || (lang === "zh" ? "启动命令已排队，等待运行记录刷新。" : "Start command queued; waiting for the run record to refresh."));
         await evolutionWorkspaceCache.refreshSupervisedActiveRun();
         return;
       }
       const snapshot = requireEvolutionRunSnapshot(payload, "supervised evolution start");
+      setSupervisedStartCommand(null);
       setActionFeedback("");
       setLiveActiveRun(snapshot);
       await evolutionWorkspaceCache.afterSupervisedWorkspaceChanged();
     },
     onError: () => {
+      setSupervisedStartCommand(null);
       setLiveActiveRun((current) => (isLocalSupervisedStartPlaceholder(current) ? null : current));
       void evolutionWorkspaceCache.refreshSupervisedActiveRun();
     },
@@ -1414,6 +1437,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   useEffect(() => {
     if (activeRunSnapshot) {
       setLiveActiveRun(activeRunSnapshot);
+      setSupervisedStartCommand(null);
       return;
     }
     setLiveActiveRun((current) => {
@@ -1423,6 +1447,74 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       return null;
     });
   }, [activeRunSnapshot]);
+
+  useEffect(() => {
+    const commandStatus = supervisedStartCommandStatusQuery.data;
+    if (!supervisedStartCommand || !commandStatus?.completed) {
+      return;
+    }
+    if (isCompletedEvolutionRunCommandSuccess(commandStatus)) {
+      setSupervisedStartCommand(null);
+      if (commandStatus.snapshot) {
+        setActionFeedback("");
+        setLiveActiveRun(commandStatus.snapshot);
+      }
+      void evolutionWorkspaceCache.afterSupervisedWorkspaceChanged();
+      return;
+    }
+    if (!isCompletedEvolutionRunCommandFailure(commandStatus)) {
+      return;
+    }
+
+    const isZh = lang === "zh";
+    const timestamp = new Date().toISOString();
+    const errorType = commandStatus.errorType || (isZh ? "启动失败" : "Start failed");
+    const message = commandStatus.message || (isZh ? "监督运行启动失败。" : "Supervised run start failed.");
+    setSupervisedStartCommand(null);
+    setActionFeedback(message);
+    setLiveActiveRun((current) => {
+      if (!isLocalSupervisedStartPlaceholder(current)) {
+        return current;
+      }
+      return {
+        ...current,
+        status: "failed",
+        currentPhase: "failed",
+        runtimeStatus: "failed",
+        updatedAt: timestamp,
+        finishedAt: timestamp,
+        currentTask: message,
+        reason: message,
+        latestMessage: message,
+        eventTail: [
+          ...(current.eventTail ?? []),
+          {
+            timestamp,
+            event: "start_failed",
+            title: isZh ? "启动失败" : "Start failed",
+            summary: message,
+            status: "failed",
+            commandId: commandStatus.commandId,
+            errorType,
+          },
+        ].slice(-12),
+        actionStates: {
+          ...current.actionStates,
+          pause: { enabled: false, reason: message },
+          resume: { enabled: false, reason: message },
+          retry: { enabled: false, reason: message },
+          terminate: { enabled: false, reason: message },
+          delete: { enabled: false, reason: isZh ? "本地启动占位没有写入运行记录。" : "This local placeholder was not persisted." },
+        },
+      };
+    });
+    void evolutionWorkspaceCache.refreshSupervisedActiveRun();
+  }, [
+    evolutionWorkspaceCache,
+    lang,
+    supervisedStartCommand,
+    supervisedStartCommandStatusQuery.data,
+  ]);
 
   useEffect(() => {
     if (!forcedTrack || evolutionTrack === forcedTrack) {

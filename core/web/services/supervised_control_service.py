@@ -2793,6 +2793,57 @@ def _load_immediate_runtime_manager_command_result(command_id: str) -> dict[str,
     return payload if isinstance(payload, dict) else None
 
 
+def _normalize_runtime_manager_command_id(command_id: str) -> str:
+    normalized = str(command_id or "").strip()
+    if not normalized:
+        raise SupervisedRunValidationError("Runtime manager command id is required.")
+    if any(not (char.isalnum() or char in {"-", "_"}) for char in normalized):
+        raise SupervisedRunValidationError("Runtime manager command id is invalid.")
+    return normalized
+
+
+def get_supervised_runtime_manager_command_status(command_id: str) -> dict[str, Any]:
+    normalized = _normalize_runtime_manager_command_id(command_id)
+    result = _load_immediate_runtime_manager_command_result(normalized)
+    if result is None:
+        return {
+            "commandId": normalized,
+            "accepted": False,
+            "completed": False,
+            "ok": None,
+            "status": "pending",
+            "message": "",
+            "errorType": "",
+        }
+
+    raw_ok = result.get("ok")
+    ok = raw_ok if isinstance(raw_ok, bool) else None
+    completed = bool(result.get("completed"))
+    if completed and ok is False:
+        command_status = "failed"
+    elif completed and ok is True:
+        command_status = "succeeded"
+    else:
+        command_status = "pending"
+
+    payload: dict[str, Any] = {
+        "commandId": normalized,
+        "accepted": bool(result.get("accepted")),
+        "completed": completed,
+        "ok": ok,
+        "status": command_status,
+        "message": str(result.get("message") or ""),
+        "errorType": str(result.get("errorType") or ""),
+    }
+    run_id = str(result.get("runId") or "").strip()
+    if run_id:
+        payload["runId"] = run_id
+    snapshot = result.get("snapshot") if isinstance(result.get("snapshot"), dict) else None
+    if snapshot is not None:
+        payload["snapshot"] = _decorate_supervised_snapshot(_clone_locked(snapshot))
+    return payload
+
+
 def _submit_supervised_runtime_manager_command_accepted(
     command_type: str,
     *,

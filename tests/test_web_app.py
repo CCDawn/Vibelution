@@ -15792,6 +15792,44 @@ def test_start_supervised_run_live_manager_route_returns_accepted_without_waitin
     assert calls[2] == ("immediate", "cmd-web-start")
 
 
+def test_supervised_run_command_status_surfaces_live_manager_failure(tmp_path, monkeypatch):
+    results_dir = tmp_path / ".runtime" / "runtime-manager" / "results"
+    results_dir.mkdir(parents=True)
+    monkeypatch.setattr(supervised_control_service, "RESULTS_DIR", results_dir)
+    (results_dir / "cmd-web-start.json").write_text(
+        json.dumps(
+            {
+                "commandId": "cmd-web-start",
+                "accepted": True,
+                "completed": True,
+                "ok": False,
+                "message": "Supervised role Agent dialogue model has no configured API key: baseline",
+                "errorType": "SupervisedAgentBindingError",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    response = client.get("/api/evolution/runs/commands/cmd-web-start")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["commandId"] == "cmd-web-start"
+    assert payload["completed"] is True
+    assert payload["ok"] is False
+    assert payload["status"] == "failed"
+    assert payload["errorType"] == "SupervisedAgentBindingError"
+    assert "baseline" in payload["message"]
+
+
+def test_supervised_run_command_status_rejects_invalid_command_id(tmp_path, monkeypatch):
+    monkeypatch.setattr(supervised_control_service, "RESULTS_DIR", tmp_path / "results")
+
+    response = client.get("/api/evolution/runs/commands/cmd.bad")
+
+    assert response.status_code == 422
+
+
 def test_start_supervised_run_from_bundle_uses_launchable_file_stem(tmp_path, monkeypatch):
     bundle_path = tmp_path / "workspace" / "evaluation" / "bundles" / "launchable_bundle.json"
     bundle_path.parent.mkdir(parents=True, exist_ok=True)

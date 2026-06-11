@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import type { EvolutionActiveRun } from "../api/types";
 import {
+  isCompletedEvolutionRunCommandFailure,
+  isCompletedEvolutionRunCommandSuccess,
   isEvolutionRunCommandAccepted,
   parseRunStreamSnapshot,
   requireEvolutionRunSnapshot,
@@ -55,6 +57,31 @@ describe("evolutionLiveRun", () => {
     ).toBe(true);
     expect(isEvolutionRunCommandAccepted(run("run-1", "queued"))).toBe(false);
     expect(isEvolutionRunCommandAccepted({ accepted: true, commandId: "", commandType: "start_supervised_run" })).toBe(false);
+  });
+
+  it("recognizes completed runtime-manager command outcomes", () => {
+    expect(
+      isCompletedEvolutionRunCommandFailure({
+        commandId: "cmd-1",
+        completed: true,
+        ok: false,
+        status: "failed",
+        message: "missing key",
+        errorType: "SupervisedAgentBindingError",
+      }),
+    ).toBe(true);
+    expect(
+      isCompletedEvolutionRunCommandSuccess({
+        commandId: "cmd-2",
+        completed: true,
+        ok: true,
+        status: "succeeded",
+        message: "started",
+        errorType: "",
+      }),
+    ).toBe(true);
+    expect(isCompletedEvolutionRunCommandFailure({ commandId: "cmd-3", completed: false, ok: false })).toBe(false);
+    expect(isCompletedEvolutionRunCommandSuccess({ commandId: "cmd-4", completed: true, ok: false })).toBe(false);
   });
 
   it("uses the action label when rejecting control action payloads", () => {
