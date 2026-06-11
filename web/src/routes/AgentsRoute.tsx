@@ -1152,6 +1152,29 @@ function archivedWorkspaceCache(
   };
 }
 
+function optimisticArchivedAgent(agent: AgentConfigWorkspaceAgent): AgentConfigWorkspaceAgent {
+  const updatedAt = new Date().toISOString();
+  return {
+    ...agent,
+    status: "archived",
+    updatedAt,
+    runtimeStatus: {
+      state: "archived",
+      label: "Archived",
+      reason: "agent_archive_pending",
+      runId: agent.runtimeStatus?.runId || "",
+      runKind: agent.runtimeStatus?.runKind || "",
+      sessionId: agent.runtimeStatus?.sessionId || agent.directSessionId || "",
+      summary: agent.runtimeStatus?.summary || "",
+      updatedAt,
+      staleRuntimeRunCount: agent.runtimeStatus?.staleRuntimeRunCount,
+      latestHistoricalRunId: agent.runtimeStatus?.latestHistoricalRunId,
+      latestHistoricalSessionId: agent.runtimeStatus?.latestHistoricalSessionId,
+      latestHistoricalUpdatedAt: agent.runtimeStatus?.latestHistoricalUpdatedAt,
+    },
+  };
+}
+
 function purgedWorkspaceCache(
   workspace: AgentConfigWorkspace | undefined,
   purgedAgentId: string,
@@ -3586,6 +3609,22 @@ export function AgentsRoute() {
       fetchJson<AgentConfigWorkspaceAgent>(`/api/agents/${encodeURIComponent(payload.agentId)}`, {
         method: "DELETE",
       }),
+    onMutate: async (payload) => {
+      await queryClient.cancelQueries({ queryKey: queryKeys.agentConfigWorkspace() });
+      const previousWorkspace = queryClient.getQueryData<AgentConfigWorkspace>(queryKeys.agentConfigWorkspace());
+      const previousSelectedAgentId = selectedAgentId;
+      const previousActivePane = activePane;
+      const optimisticAgent = previousWorkspace?.agents.find((agent) => agent.agentId === payload.agentId) ?? selectedAgent;
+      if (optimisticAgent) {
+        queryClient.setQueryData<AgentConfigWorkspace | undefined>(
+          queryKeys.agentConfigWorkspace(),
+          (current) => archivedWorkspaceCache(current, optimisticArchivedAgent(optimisticAgent)),
+        );
+      }
+      setSelectedAgentId("");
+      setActivePane("overview");
+      return { previousWorkspace, previousSelectedAgentId, previousActivePane };
+    },
     onSuccess: (agent) => {
       queryClient.setQueryData<AgentConfigWorkspace | undefined>(
         queryKeys.agentConfigWorkspace(),
@@ -3599,8 +3638,14 @@ export function AgentsRoute() {
       });
       void chatWorkspaceCache.afterAgentArchived();
     },
-    onError: (error) => {
+    onError: (error, _variables, context) => {
+      if (context?.previousWorkspace) {
+        queryClient.setQueryData(queryKeys.agentConfigWorkspace(), context.previousWorkspace);
+      }
+      setSelectedAgentId(context?.previousSelectedAgentId ?? "");
+      setActivePane(context?.previousActivePane ?? "overview");
       setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
+      void chatWorkspaceCache.afterAgentArchived();
     },
   });
 
@@ -3610,6 +3655,19 @@ export function AgentsRoute() {
         `/api/agents/${encodeURIComponent(payload.agentId)}/purge`,
         { method: "DELETE" },
       ),
+    onMutate: async (payload) => {
+      await queryClient.cancelQueries({ queryKey: queryKeys.agentConfigWorkspace() });
+      const previousWorkspace = queryClient.getQueryData<AgentConfigWorkspace>(queryKeys.agentConfigWorkspace());
+      const previousSelectedAgentId = selectedAgentId;
+      const previousActivePane = activePane;
+      queryClient.setQueryData<AgentConfigWorkspace | undefined>(
+        queryKeys.agentConfigWorkspace(),
+        (current) => purgedWorkspaceCache(current, payload.agentId),
+      );
+      setSelectedAgentId("");
+      setActivePane("overview");
+      return { previousWorkspace, previousSelectedAgentId, previousActivePane };
+    },
     onSuccess: (result) => {
       queryClient.setQueryData<AgentConfigWorkspace | undefined>(
         queryKeys.agentConfigWorkspace(),
@@ -3623,8 +3681,14 @@ export function AgentsRoute() {
       });
       void chatWorkspaceCache.afterAgentArchived();
     },
-    onError: (error) => {
+    onError: (error, _variables, context) => {
+      if (context?.previousWorkspace) {
+        queryClient.setQueryData(queryKeys.agentConfigWorkspace(), context.previousWorkspace);
+      }
+      setSelectedAgentId(context?.previousSelectedAgentId ?? "");
+      setActivePane(context?.previousActivePane ?? "overview");
       setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
+      void chatWorkspaceCache.afterAgentArchived();
     },
   });
 
