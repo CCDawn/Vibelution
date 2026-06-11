@@ -103,6 +103,13 @@ def _provider(
     }
 
 
+def _ensure_llm_model_preset(public_config: dict, preset_id: str) -> dict:
+    model_library = public_config.setdefault("llm", {}).setdefault("model_library", {})
+    if preset_id in model_library:
+        return public_config
+    return apply_llm_model_preset(public_config, preset_id)
+
+
 def _set_subagent_explorer_deepseek(public_config: dict) -> None:
     public_config["llm"]["profiles"]["subagent_explorer"] = {
         "provider": _provider(
@@ -1037,7 +1044,7 @@ def test_update_llm_model_rejects_unknown_model_id():
 
 
 def test_update_llm_model_persists_manual_image_input_support():
-    public_config = load_public_config()
+    public_config = _ensure_llm_model_preset(load_public_config(), "deepseek_v4_pro")
     target = public_config["llm"]["model_library"]["deepseek_v4_pro"]
 
     updated = update_llm_model(
@@ -1450,7 +1457,8 @@ def test_preserve_secret_blanks_keeps_existing_api_key():
 
 
 def test_toml_writer_round_trip_for_public_config_uses_inline_provider_blocks():
-    public_config = load_public_config()
+    public_config = _ensure_llm_model_preset(load_public_config(), "relay_openai_gpt_5_5")
+    public_config["llm"]["profiles"]["primary"] = {"model_ref": "relay_openai_gpt_5_5"}
     dumped = dumps_public_config(public_config, HEADER_LINES)
     loaded = tomllib.loads(dumped)
 

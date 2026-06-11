@@ -12,6 +12,7 @@ langchain-core>=0.1.0
 langchain-community>=0.0.10
 langchain-openai>=0.0.2
 litellm>=1.51.0
+socksio>=1.0.0             # httpx SOCKS proxy support for LiteLLM when ALL_PROXY is set
 
 # 配置管理 (Pydantic v2)
 pydantic>=2.0.0
