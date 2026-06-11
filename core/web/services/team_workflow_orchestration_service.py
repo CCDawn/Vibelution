@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from config.public_config import build_effective_config, load_public_config
-from core.llm import LLMClient
+from core.llm import LLMClient, LLMInvocationContext, invoke_llm
 from core.web.services import chat_room_service, data_processing_service, team_knowledge_service, team_service
 from core.web.services.runtime_scene_service import record_runtime_scene_event
 
@@ -2432,7 +2432,28 @@ def invoke_local_research_model(team_id: str, payload: dict[str, Any], *, llm_cl
     }
     try:
         client = _local_research_llm_client(model_id, llm_client_factory=llm_client_factory)
-        message = client.invoke(messages, metadata=metadata)
+        message = invoke_llm(
+            client,
+            messages,
+            context=LLMInvocationContext(
+                surface="team_workflow_local_research_model",
+                run_kind="challenge_cup_local_research",
+                run_id=str(task["taskId"]),
+                session_id=normalized_team_id,
+                agent_id="local_research_model",
+                llm_slot="dialogue",
+                model_id=model_id,
+                cache_scope=SOURCE_COLLECTION_PROMPT_CACHE_SCOPE,
+                cache_partition=_source_collection_prompt_cache_partition(
+                    normalized_team_id,
+                    "local_research_model",
+                    model_id=model_id,
+                ),
+                prompt_purpose=str(task["taskType"] or "local_research"),
+                conversation_bound=False,
+            ),
+            metadata=metadata,
+        )
     except Exception as exc:
         _record_workflow_event(
             "local_model.invoke_failed",

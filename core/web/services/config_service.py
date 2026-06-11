@@ -27,6 +27,7 @@ from config.runtime_capabilities import (
     strip_runtime_model_capability_fields,
 )
 from core.chat.chat_task_types import trim_lines
+from core.llm import LLMInvocationContext, invoke_llm
 from core.llm.protocol_resolver import resolve_model_protocol
 from config.public_config import (
     CONFIG_PATH,
@@ -1021,7 +1022,23 @@ def _run_draft_test_llm_image_input(
             from core.llm import LLMClient
 
             client = LLMClient(config=probe_config, profile_id=route_id)
-            client.invoke(messages, tools=[], metadata={"probeCapability": "image_input"})
+            invoke_llm(
+                client,
+                messages,
+                tools=[],
+                context=LLMInvocationContext(
+                    surface="config_image_input_probe",
+                    run_kind="non_conversation_probe",
+                    agent_id="config_service",
+                    llm_slot="vision",
+                    model_id=model_id,
+                    cache_scope="config_probe",
+                    cache_partition=f"config-image-input-probe-{route_id}",
+                    prompt_purpose="image_input_probe",
+                    conversation_bound=False,
+                ),
+                metadata={"probeCapability": "image_input"},
+            )
             result = {
                 "ok": True,
                 "message": "image input is supported",

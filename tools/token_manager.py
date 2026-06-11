@@ -919,10 +919,21 @@ class EnhancedTokenCompressor:
             runtime_input += f"\n\n## 压缩原因\n{reason}"
         
         # 调用 LLM
-        response = self.compression_llm.invoke([
-            build_cacheable_system_message(prompt),
-            build_runtime_notice_message(runtime_input),
-        ])
+        from core.llm import LLMInvocationContext, invoke_llm
+
+        response = invoke_llm(
+            self.compression_llm,
+            [
+                build_cacheable_system_message(prompt),
+                build_runtime_notice_message(runtime_input),
+            ],
+            context=LLMInvocationContext(
+                surface="agent_turn",
+                run_kind="agent_auxiliary",
+                prompt_purpose="compression_summary",
+                conversation_bound=True,
+            ),
+        )
         
         summary = response.content if hasattr(response, 'content') else str(response)
         

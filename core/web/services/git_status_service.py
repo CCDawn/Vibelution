@@ -11,7 +11,7 @@ from typing import Any
 
 from config.public_config import build_effective_config, load_public_config, save_public_config
 from core.infrastructure.git_memory import WorkingTreeSnapshot, get_git_memory_service
-from core.llm.client import get_llm_client
+from core.llm import LLMInvocationContext, get_llm_client, invoke_llm
 from core.web.services.file_service import LANGUAGE_BY_SUFFIX
 from core.web.services.runtime_scene_service import record_runtime_scene_event
 
@@ -470,7 +470,8 @@ def generate_git_commit_message(
     effective_config = build_effective_config(runtime_public_config)
     client = get_llm_client(profile_id=GIT_COMMIT_MESSAGE_PROFILE_ID, config=effective_config)
     try:
-        response = client.invoke(
+        response = invoke_llm(
+            client,
             [
                 {
                     "role": "system",
@@ -478,6 +479,17 @@ def generate_git_commit_message(
                 },
                 {"role": "user", "content": user_prompt},
             ],
+            context=LLMInvocationContext(
+                surface="web_git_commit_message",
+                run_kind="tool_assistant_task",
+                agent_id="git_status_service",
+                llm_slot="summary",
+                model_id=model_id,
+                cache_scope="git_commit_message",
+                cache_partition=f"git-commit-message-{model_id}",
+                prompt_purpose="commit_message",
+                conversation_bound=False,
+            ),
             metadata={"feature": "web_git_commit_message", "selected_paths": selected_paths},
         )
         message = _clean_commit_message(getattr(response, "content", ""))

@@ -1479,6 +1479,7 @@ class LLMClient:
         messages: List[Any],
         *,
         tools: Optional[List[Any]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> Iterator[StreamChunk]:
         """Yield normalized stream events independent of LangChain chunks."""
         payload = self._build_payload(messages, tools=tools, stream=True)
@@ -1497,6 +1498,7 @@ class LLMClient:
         protocol_summary = dict(self._last_payload_protocol_summary or payload_protocol_summary(payload, self.protocol_route))
         capability_source_summary = _safe_capability_source_summary(self._resolved_spec)
         event_metadata = {
+            **(metadata or {}),
             **message_role_summary,
             **message_order_summary,
             **route_summary,
@@ -1774,7 +1776,7 @@ class LLMClient:
                     raise llm_error from exc
 
     def stream(self, messages: List[Any], *, tools: Optional[List[Any]] = None, metadata: Optional[Dict[str, Any]] = None) -> Iterator[AIMessageChunk]:
-        for event in self.stream_events(messages, tools=tools):
+        for event in self.stream_events(messages, tools=tools, metadata=metadata):
             response_metadata = self._response_metadata(metadata)
             if event.type == "done":
                 if event.usage is not None:

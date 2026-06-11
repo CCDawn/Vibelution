@@ -2,6 +2,12 @@
 """统一 LLM 子系统。"""
 
 from .client import LLMClient, get_llm_client, list_profiles
+from .invocation import invoke_llm, stream_llm
+from .invocation_context import (
+    LLMInvocationContext,
+    dialogue_chain_mode_for_protocol,
+    prompt_purpose_cache_partition,
+)
 from .agent_runtime import (
     AGENT_LLM_SLOT_DIALOGUE,
     AGENT_LLM_SLOT_MENTAL_MODEL,
@@ -33,6 +39,7 @@ __all__ = [
     "LLMClient",
     "LLMError",
     "LLMRecoveryDecision",
+    "LLMInvocationContext",
     "ResolvedModelSpec",
     "StreamChunk",
     "ToolCall",
@@ -50,9 +57,13 @@ __all__ = [
     "discover_model",
     "doctor_llm_profile",
     "get_llm_client",
+    "invoke_llm",
     "list_profiles",
     "plan_recovery",
+    "stream_llm",
     "attach_recovery_fallback",
     "select_recovery_profile",
     "resolve_agent_llm",
+    "dialogue_chain_mode_for_protocol",
+    "prompt_purpose_cache_partition",
 ]

@@ -281,7 +281,7 @@ def test_compression_summary_keeps_history_out_of_cacheable_system_prompt():
     captured: list[object] = []
 
     class FakeCompressionLlm:
-        def invoke(self, messages):
+        def invoke(self, messages, tools=None, metadata=None):
             captured.extend(messages)
 
             class Response:
