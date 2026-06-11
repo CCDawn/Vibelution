@@ -39,6 +39,7 @@ from .hot_restart_backup import create_failure_package, create_stable_backup, la
 from .restart_coordinator import claim_next_restart_intent, complete_restart_intent
 from .scene_logging import append_runtime_manager_file_event, record_runtime_manager_scene_event, runtime_manager_event_phase
 from .state_store import clear_pid, default_state, load_pid, load_state, now_iso, save_pid, save_state
+from . import work_run_store
 from .process_inventory import (
     list_repo_runtime_processes,
     residual_process_payload,
@@ -86,18 +87,6 @@ _CLOSE_VERIFICATION_POLL_INTERVAL_SECONDS = 0.4
 _DEFERRED_RESTART_ACTIVE_WORK_POLL_SECONDS = 10.0
 _RESTART_BUILD_PREFLIGHT_TIMEOUT_SECONDS = 120.0
 _ACTIVE_WORK_LIFECYCLE_BLOCKED_MESSAGE = "有进行中的任务，无法重启 Vibelution。请等待任务完成或先停止任务。"
-_ACTIVE_WORK_RUNNING_STATUSES = {
-    "",
-    "active",
-    "queued",
-    "running",
-    "stopping",
-    "started",
-    "in_progress",
-    "pausing",
-    "resuming",
-    "force_stopping",
-}
 
 
 def _start_background_thread(*, name: str, target: Any) -> threading.Thread:
@@ -117,25 +106,6 @@ class ActiveWorkProbeFailed(RuntimeError):
         super().__init__(message)
         self.source = source
         self.error_type = error_type
-
-
-_ACTIVE_WORK_NON_BLOCKING_STATUSES = {
-    "cancelled",
-    "closed",
-    "completed",
-    "done",
-    "failed",
-    "failed_provider",
-    "failed_runtime",
-    "idle",
-    "needs_continue",
-    "paused_limit",
-    "ready",
-    "stopped",
-    "stopped_by_user",
-    "stop_failed",
-    "superseded",
-}
 
 
 def _command_affects_workbench_lifecycle(command_type: str) -> bool:
@@ -161,12 +131,7 @@ def _active_work_run_item(kind: str, payload: dict[str, Any]) -> dict[str, str]:
 
 
 def _active_work_status_blocks_lifecycle(status: str) -> bool:
-    normalized = str(status or "").strip().lower()
-    if normalized in _ACTIVE_WORK_NON_BLOCKING_STATUSES:
-        return False
-    if normalized in _ACTIVE_WORK_RUNNING_STATUSES:
-        return True
-    return bool(normalized)
+    return work_run_store.active_work_status_blocks_lifecycle(status)
 
 
 def _append_active_work_run(
@@ -334,6 +299,10 @@ def _persistent_active_work_run_snapshots() -> list[dict[str, Any]]:
         "supervised_worktree_evolution_run",
     ):
         try:
+            active_run_id = str(store.load_run_index(kind).get("activeRunId") or "").strip()
+        except Exception:
+            active_run_id = ""
+        try:
             payloads = store.list_snapshots(kind)
         except Exception:
             payloads = []
@@ -344,6 +313,8 @@ def _persistent_active_work_run_snapshots() -> list[dict[str, Any]]:
                 continue
             item = _active_work_run_item(kind, payload)
             if not item["kind"] or not _active_work_status_blocks_lifecycle(item["status"]):
+                continue
+            if not work_run_store_module.snapshot_is_current_or_fresh(payload, active_run_id=active_run_id):
                 continue
             key = (item["kind"], item["runId"] or item["sessionId"])
             if key in seen:

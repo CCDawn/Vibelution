@@ -8,7 +8,7 @@ import re
 import tempfile
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -43,13 +43,16 @@ _ACTIVE_WORK_NON_BLOCKING_STATUSES = {
     "failed_runtime",
     "idle",
     "needs_continue",
+    "partial",
     "paused_limit",
     "ready",
+    "routed",
     "stopped",
     "stopped_by_user",
     "stop_failed",
     "superseded",
 }
+STALE_SNAPSHOT_GRACE = timedelta(hours=6)
 
 
 def _now_iso() -> str:
@@ -157,7 +160,16 @@ def _snapshot_lifecycle_signature(
     )
 
 
-def _snapshot_blocks_active_index(payload: dict[str, Any]) -> bool:
+def active_work_status_blocks_lifecycle(status: str) -> bool:
+    normalized = str(status or "").strip().lower()
+    if normalized in _ACTIVE_WORK_NON_BLOCKING_STATUSES:
+        return False
+    if normalized in _ACTIVE_WORK_BLOCKING_STATUSES:
+        return True
+    return bool(normalized)
+
+
+def active_work_payload_blocks_lifecycle(payload: dict[str, Any]) -> bool:
     if str(payload.get("finishedAt") or payload.get("endedAt") or "").strip():
         return False
     status = str(
@@ -167,11 +179,50 @@ def _snapshot_blocks_active_index(payload: dict[str, Any]) -> bool:
         or payload.get("runtimeStatus")
         or ""
     ).strip().lower()
-    if status in _ACTIVE_WORK_NON_BLOCKING_STATUSES:
+    return active_work_status_blocks_lifecycle(status)
+
+
+def snapshot_run_id(payload: dict[str, Any]) -> str:
+    return str(
+        payload.get("runId")
+        or payload.get("roundId")
+        or payload.get("sessionId")
+        or payload.get("id")
+        or ""
+    ).strip()
+
+
+def snapshot_is_stale(payload: dict[str, Any]) -> bool:
+    updated = _parse_datetime(str(payload.get("updatedAt") or payload.get("startedAt") or ""))
+    if updated is None:
         return False
-    if status in _ACTIVE_WORK_BLOCKING_STATUSES:
+    return datetime.now(timezone.utc) - updated > STALE_SNAPSHOT_GRACE
+
+
+def snapshot_is_current_or_fresh(payload: dict[str, Any], *, active_run_id: str = "") -> bool:
+    run_id = snapshot_run_id(payload)
+    if active_run_id and run_id == str(active_run_id or "").strip():
         return True
-    return bool(status)
+    return not snapshot_is_stale(payload)
+
+
+def _snapshot_blocks_active_index(payload: dict[str, Any]) -> bool:
+    return active_work_payload_blocks_lifecycle(payload)
+
+
+def _parse_datetime(value: str) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = f"{text[:-1]}+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
 
 
 def _bounded_recent_run_ids(values: Any, latest_run_id: str = "") -> list[str]:

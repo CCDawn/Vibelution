@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal, TypedDict
 
@@ -37,37 +37,6 @@ WorkbenchWindowSize = str
 
 ACTIVE_WORK_BLOCK_MESSAGE_RESTART = "有进行中的任务，无法重启 Vibelution。请等待任务完成或先停止任务。"
 ACTIVE_WORK_BLOCK_MESSAGE_STOP = "有进行中的任务，无法停止 Vibelution。请等待任务完成或先停止任务。"
-_ACTIVE_WORK_BLOCKING_STATUSES = {
-    "",
-    "active",
-    "queued",
-    "running",
-    "stopping",
-    "started",
-    "in_progress",
-    "pausing",
-    "resuming",
-    "force_stopping",
-}
-_ACTIVE_WORK_NON_BLOCKING_STATUSES = {
-    "cancelled",
-    "closed",
-    "completed",
-    "done",
-    "failed",
-    "failed_provider",
-    "failed_runtime",
-    "idle",
-    "needs_continue",
-    "partial",
-    "paused_limit",
-    "ready",
-    "routed",
-    "stopped",
-    "stopped_by_user",
-    "stop_failed",
-    "superseded",
-}
 _ACTIVE_WORK_KINDS = (
     "chat_turn",
     "chat_room_round",
@@ -75,7 +44,6 @@ _ACTIVE_WORK_KINDS = (
     "supervised_evolution_run",
     "supervised_worktree_evolution_run",
 )
-_STALE_SNAPSHOT_GRACE = timedelta(hours=6)
 _RUNTIME_PROFILES: tuple[RuntimeProfile, ...] = ("safe_local", "safe_remote", "debug", "ci")
 _UI_LANGUAGES: tuple[UiLanguage, ...] = ("zh", "en")
 _WORKBENCH_WINDOW_MODES: tuple[WorkbenchWindowMode, ...] = ("fullscreen", "windowed")
@@ -1394,9 +1362,9 @@ def _append_active_work_run(
     item = _active_work_run_item(kind, payload)
     if not item["kind"]:
         return
-    if not _active_work_payload_blocks_lifecycle(payload):
+    if not work_run_store.active_work_payload_blocks_lifecycle(payload):
         return
-    if not force_current and _snapshot_is_stale(payload):
+    if not force_current and work_run_store.snapshot_is_stale(payload):
         return
     key = (item["kind"], item["runId"] or item["sessionId"])
     if key in seen:
@@ -1424,42 +1392,7 @@ def _active_work_run_item(kind: str, payload: dict[str, Any]) -> dict[str, str]:
 
 
 def _active_work_payload_blocks_lifecycle(payload: dict[str, Any]) -> bool:
-    if str(payload.get("finishedAt") or payload.get("endedAt") or "").strip():
-        return False
-    status = str(
-        payload.get("status")
-        or payload.get("currentPhase")
-        or payload.get("phase")
-        or payload.get("runtimeStatus")
-        or ""
-    ).strip().lower()
-    if status in _ACTIVE_WORK_NON_BLOCKING_STATUSES:
-        return False
-    if status in _ACTIVE_WORK_BLOCKING_STATUSES:
-        return True
-    return bool(status)
-
-
-def _snapshot_is_stale(payload: dict[str, Any]) -> bool:
-    updated = _parse_datetime(str(payload.get("updatedAt") or payload.get("startedAt") or ""))
-    if updated is None:
-        return False
-    return datetime.now(timezone.utc) - updated > _STALE_SNAPSHOT_GRACE
-
-
-def _parse_datetime(value: str) -> datetime | None:
-    text = str(value or "").strip()
-    if not text:
-        return None
-    if text.endswith("Z"):
-        text = f"{text[:-1]}+00:00"
-    try:
-        parsed = datetime.fromisoformat(text)
-    except ValueError:
-        return None
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
+    return work_run_store.active_work_payload_blocks_lifecycle(payload)
 
 
 def _load_json_file(path: Path) -> dict[str, Any]:
