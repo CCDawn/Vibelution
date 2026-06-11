@@ -50,6 +50,7 @@ const CANVAS_VIEWPORT_WIDTH = 1180;
 const CANVAS_VIEWPORT_HEIGHT = 760;
 const TEAM_ORGANIZATION_CANVAS_KIND = "team_organization_canvas";
 const RESEARCH_TEAM_ID = "research-team";
+const AI_SEARCH_TEAM_ID = "ai-search-team";
 const EVOLUTION_SYSTEM_TEAM_IDS = new Set(["self-evolution-team", "supervised-evolution-team"]);
 const LINKED_ROOM_ACTIVE_REFETCH_MS = 5_000;
 const LINKED_ROOM_IDLE_REFETCH_MS = 30_000;
@@ -865,6 +866,43 @@ function isEvolutionSystemTeam(team: Team | null | undefined) {
   );
 }
 
+function isAiSearchScopeTeam(team: Team | null | undefined) {
+  if (!team) {
+    return false;
+  }
+  return team.teamId === AI_SEARCH_TEAM_ID || team.teamKind === "ai_search" || team.teamSource === "ai_search";
+}
+
+function aiSearchSourceRoleLabel(value: string, lang: "zh" | "en") {
+  const normalized = String(value || "").trim();
+  const zh: Record<string, string> = {
+    primary: "一手证据",
+    secondary: "二手索引",
+    signal: "线索信号",
+  };
+  const en: Record<string, string> = {
+    primary: "Primary evidence",
+    secondary: "Secondary index",
+    signal: "Signal only",
+  };
+  return (lang === "zh" ? zh : en)[normalized] ?? normalized;
+}
+
+function aiSearchSourceTierLabel(value: string, lang: "zh" | "en") {
+  const normalized = String(value || "").trim();
+  const zh: Record<string, string> = {
+    tier1: "Tier 1 官方",
+    tier2: "Tier 2 可信索引",
+    tier3: "Tier 3 信号",
+  };
+  const en: Record<string, string> = {
+    tier1: "Tier 1 official",
+    tier2: "Tier 2 trusted",
+    tier3: "Tier 3 signal",
+  };
+  return (lang === "zh" ? zh : en)[normalized] ?? normalized;
+}
+
 function workflowStateLabel(value: string, lang: "zh" | "en") {
   const normalized = String(value || "").trim();
   const zh: Record<string, string> = {
@@ -1298,6 +1336,7 @@ export function TeamsRoute({
   });
   const selectedTeam = teamDetailQuery.data ?? visibleTeams.find((team) => team.teamId === effectiveTeamId) ?? null;
   const researchWorkflowTeamSelected = isResearchWorkflowTeam(selectedTeam);
+  const aiSearchScopeTeamSelected = isAiSearchScopeTeam(selectedTeam);
 
   useEffect(() => {
     if (forcedResearchWorkspaceView) {
@@ -2068,6 +2107,75 @@ export function TeamsRoute({
           ))}
         </div>
       </nav>
+    );
+  }
+
+  function renderAiSearchSourceScopePanel() {
+    const scope = selectedTeam?.sourceScope ?? null;
+    return (
+      <section className={styles.aiSearchScopePanel}>
+        <div className={styles.aiSearchScopeHeader}>
+          <div>
+            <strong>{scope?.title || (lang === "zh" ? "AI 搜索范围白名单" : "AI search source scope")}</strong>
+            <span>
+              {scope
+                ? `${scope.summary.sourceCount} sources / ${scope.summary.enabledByDefaultCount} enabled`
+                : (lang === "zh" ? "等待团队详情载入" : "Waiting for team detail")}
+            </span>
+          </div>
+          <span className={styles.aiSearchScopeBadge}>
+            {scope?.policy.requiresPrimaryEvidenceForConclusion
+              ? (lang === "zh" ? "结论需一手证据" : "Primary proof required")
+              : (lang === "zh" ? "证据规则未启用" : "Proof rule off")}
+          </span>
+        </div>
+        {scope ? (
+          <>
+            <p className={styles.aiSearchScopeDescription}>{scope.description}</p>
+            <div className={styles.aiSearchScopeStats}>
+              <span>{lang === "zh" ? "分组" : "Groups"} <strong>{scope.summary.groupCount}</strong></span>
+              <span>{lang === "zh" ? "默认启用" : "Default on"} <strong>{scope.summary.enabledByDefaultCount}</strong></span>
+              <span>{lang === "zh" ? "仅信号" : "Signals"} <strong>{scope.summary.signalOnlyCount}</strong></span>
+            </div>
+            <div className={styles.aiSearchScopePolicy}>
+              <span>{lang === "zh" ? "默认 Tier" : "Default tiers"}: {scope.policy.defaultEnabledTiers.join(", ")}</span>
+              <span>{lang === "zh" ? "去重" : "Dedupe"}: {scope.policy.dedupeBy.join(" / ")}</span>
+              <span>{scope.storage.path}</span>
+            </div>
+            <div className={styles.aiSearchSourceGroups}>
+              {scope.groups.map((group) => (
+                <article key={group.groupId} className={styles.aiSearchSourceGroup}>
+                  <div className={styles.aiSearchSourceGroupHeader}>
+                    <div>
+                      <strong>{group.label}</strong>
+                      <span>{aiSearchSourceTierLabel(group.tier, lang)} · {aiSearchSourceRoleLabel(group.evidenceRole, lang)}</span>
+                    </div>
+                    <span className={group.enabledByDefault ? styles.aiSearchScopeEnabled : styles.aiSearchScopeSignal}>
+                      {group.enabledByDefault ? (lang === "zh" ? "默认启用" : "enabled") : (lang === "zh" ? "信号" : "signal")}
+                    </span>
+                  </div>
+                  <p>{group.description}</p>
+                  <div className={styles.aiSearchSourceList}>
+                    {group.sources.map((source) => (
+                      <a key={source.sourceId} href={source.url} target="_blank" rel="noreferrer" className={styles.aiSearchSourceItem}>
+                        <strong>{source.name}</strong>
+                        <span>{source.sourceType} · {source.region} · {source.language}</span>
+                        <small>{source.tags.slice(0, 4).join(" / ")}</small>
+                      </a>
+                    ))}
+                  </div>
+                </article>
+              ))}
+            </div>
+          </>
+        ) : (
+          <div className={styles.empty}>
+            {teamDetailQuery.isPending
+              ? (lang === "zh" ? "正在读取 AI 搜索范围名单..." : "Loading AI search source scope...")
+              : (lang === "zh" ? "当前团队详情没有返回 sourceScope。" : "This Team detail did not return sourceScope.")}
+          </div>
+        )}
+      </section>
     );
   }
 
@@ -2950,7 +3058,8 @@ export function TeamsRoute({
     researchWorkflowTeamSelected ? styles.researchInspector : "",
   ].filter(Boolean).join(" ");
   const showNodeBindingPanel = !researchWorkflowTeamSelected || researchCanvasVisible;
-  const showWorkflowPanel = !researchWorkflowTeamSelected || (!researchCanvasVisible && researchWorkspaceView !== "discussion");
+  const showWorkflowPanel = !aiSearchScopeTeamSelected && (!researchWorkflowTeamSelected || (!researchCanvasVisible && researchWorkspaceView !== "discussion"));
+  const showAiSearchScopePanel = aiSearchScopeTeamSelected;
   const showTeamCommunicationPanel = !researchWorkflowTeamSelected || (!researchCanvasVisible && researchWorkspaceView === "discussion");
   const showResearchOverview = researchWorkflowTeamSelected && researchWorkspaceView === "overview";
   const showResearchSourceCollection = researchWorkflowTeamSelected && researchWorkspaceView === "source_collection";
@@ -3413,6 +3522,7 @@ export function TeamsRoute({
                 </div>
               </section>
             ) : null}
+            {showAiSearchScopePanel ? renderAiSearchSourceScopePanel() : null}
             {showWorkflowPanel ? (
               <section className={styles.workflowPanel} id="research-workflow-overview">
                 <div className={styles.sectionTitle}>

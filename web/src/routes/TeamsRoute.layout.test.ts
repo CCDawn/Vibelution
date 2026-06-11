@@ -99,6 +99,14 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("chatWorkspaceCache.afterTeamRoomMembershipChanged(team.teamId, team.linkedChatRoom.roomId)");
     expect(routeSource).toContain("teamConversationStatusLabel");
     expect(routeSource).toContain("selectedTeam?.conversation");
+    expect(routeSource).toContain("isAiSearchScopeTeam(selectedTeam)");
+    expect(routeSource).toContain("showAiSearchScopePanel");
+    expect(routeSource).toContain("renderAiSearchSourceScopePanel");
+    expect(routeSource).toContain("selectedTeam?.sourceScope");
+    expect(routeSource).toContain("AI 搜索范围白名单");
+    expect(routeSource).toContain("结论需一手证据");
+    expect(routeSource).toContain("默认启用");
+    expect(routeSource).toContain("仅信号");
     expect(routeSource).toContain("/api/teams/${encodeURIComponent(nextCanvas.teamId)}/canvas");
     expect(routeSource).toContain("成员源");
     expect(routeSource).toContain("Member source");
@@ -217,6 +225,10 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("styles.researchIndexPanel");
     expect(routeSource).toContain("styles.researchInspector");
     expect(routeSource).toContain("styles.researchCanvasPanelHidden");
+    expect(routeSource).toContain("styles.aiSearchScopePanel");
+    expect(routeSource).toContain("styles.aiSearchSourceGroups");
+    expect(routeSource).toContain("styles.aiSearchSourceItem");
+    expect(routeSource).toContain("!aiSearchScopeTeamSelected && (!researchWorkflowTeamSelected");
     expect(routeSource).toContain("科研三阶段索引");
     expect(routeSource).toContain("团队专属阶段页");
     expect(routeSource).toContain("三阶段");
@@ -357,6 +369,10 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.researchIndexItemActive).toBeTypeOf("string");
     expect(routeStyles.researchInspector).toBeTypeOf("string");
     expect(routeStyles.researchCanvasPanelHidden).toBeTypeOf("string");
+    expect(routeStyles.aiSearchScopePanel).toBeTypeOf("string");
+    expect(routeStyles.aiSearchScopeStats).toBeTypeOf("string");
+    expect(routeStyles.aiSearchSourceGroups).toBeTypeOf("string");
+    expect(routeStyles.aiSearchSourceItem).toBeTypeOf("string");
     expect(routeStyles.workspaceEmpty).toBeTypeOf("string");
     expect(routeStyles.emptyCanvasPanel).toBeTypeOf("string");
     expect(routeStylesSource).toContain("height: 100%");

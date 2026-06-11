@@ -388,6 +388,192 @@
   box-shadow: inset 0 -3px 0 var(--accent-cool);
 }
 
+.aiSearchScopePanel {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 28%, var(--border-soft));
+  border-radius: 8px;
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--accent-cool) 8%, transparent), transparent 58%),
+    color-mix(in srgb, var(--surface-panel-strong) 76%, transparent);
+}
+
+.aiSearchScopeHeader,
+.aiSearchSourceGroupHeader {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.aiSearchScopeHeader div,
+.aiSearchSourceGroupHeader div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.aiSearchScopeHeader strong,
+.aiSearchSourceGroupHeader strong {
+  color: var(--fg-primary);
+  font-size: 0.8rem;
+}
+
+.aiSearchScopeHeader span,
+.aiSearchSourceGroupHeader span {
+  min-width: 0;
+  color: var(--fg-muted);
+  font-size: 0.66rem;
+  font-weight: 740;
+}
+
+.aiSearchScopeBadge,
+.aiSearchScopeEnabled,
+.aiSearchScopeSignal {
+  flex: 0 0 auto;
+  max-width: 132px;
+  padding: 3px 7px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 30%, var(--border-soft));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent-cool) 9%, transparent);
+  color: color-mix(in srgb, var(--accent-cool) 78%, var(--fg-primary));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aiSearchScopeSignal {
+  border-color: color-mix(in srgb, var(--accent-warm) 30%, var(--border-soft));
+  background: color-mix(in srgb, var(--accent-warm) 9%, transparent);
+  color: color-mix(in srgb, var(--accent-warm) 78%, var(--fg-primary));
+}
+
+.aiSearchScopeDescription,
+.aiSearchSourceGroup p {
+  display: -webkit-box;
+  margin: 0;
+  color: var(--fg-secondary);
+  font-size: 0.7rem;
+  line-height: 1.38;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+}
+
+.aiSearchScopeDescription {
+  -webkit-line-clamp: 2;
+}
+
+.aiSearchSourceGroup p {
+  -webkit-line-clamp: 2;
+}
+
+.aiSearchScopeStats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.aiSearchScopeStats span {
+  display: flex;
+  min-width: 0;
+  min-height: 28px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 0 7px;
+  border: 1px solid color-mix(in srgb, var(--border-soft) 78%, transparent);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--surface-card) 64%, transparent);
+  color: var(--fg-muted);
+  font-size: 0.66rem;
+  font-weight: 720;
+}
+
+.aiSearchScopeStats strong {
+  color: var(--fg-primary);
+  font-size: 0.78rem;
+}
+
+.aiSearchScopePolicy {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  min-width: 0;
+}
+
+.aiSearchScopePolicy span {
+  max-width: 100%;
+  padding: 3px 6px;
+  border: 1px solid color-mix(in srgb, var(--border-soft) 70%, transparent);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--surface-card) 52%, transparent);
+  color: var(--fg-muted);
+  font-size: 0.62rem;
+  font-weight: 720;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aiSearchSourceGroups,
+.aiSearchSourceGroup,
+.aiSearchSourceList {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+
+.aiSearchSourceGroup {
+  padding: 8px;
+  border: 1px solid color-mix(in srgb, var(--border-soft) 82%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-card) 58%, transparent);
+}
+
+.aiSearchSourceList {
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 5px;
+}
+
+.aiSearchSourceItem {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 6px 7px;
+  border: 1px solid color-mix(in srgb, var(--border-soft) 76%, transparent);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--surface-panel-strong) 60%, transparent);
+  color: var(--fg-secondary);
+  text-decoration: none;
+}
+
+.aiSearchSourceItem:hover {
+  border-color: color-mix(in srgb, var(--accent-cool) 34%, var(--border-soft));
+  color: var(--fg-primary);
+}
+
+.aiSearchSourceItem strong,
+.aiSearchSourceItem span,
+.aiSearchSourceItem small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aiSearchSourceItem strong {
+  color: var(--fg-primary);
+  font-size: 0.7rem;
+}
+
+.aiSearchSourceItem span,
+.aiSearchSourceItem small {
+  color: var(--fg-muted);
+  font-size: 0.6rem;
+}
+
 .researchStageLauncher {
   display: grid;
   gap: 8px;
