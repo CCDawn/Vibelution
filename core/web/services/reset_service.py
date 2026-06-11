@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import sqlite3
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Iterable
@@ -20,6 +21,7 @@ from .runtime_scene_service import record_runtime_scene_event
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 MAX_PREVIEW_PATHS = 120
 MAX_SUMMARY_SCAN_ITEMS = 80_000
+MAX_SUMMARY_FAST_SCAN_ITEMS = 5_000
 RUNNING_SCENE_STATUSES = {"running", "starting", "queued", "stopping"}
 MEMORY_DB_TABLES = ("LongTermMemory", "TaskLog", "ErrorArchive", "CodebaseKnowledge")
 RESET_CATEGORY_LABELS = {
@@ -101,7 +103,23 @@ def get_reset_summary() -> dict:
     """Return the current reset inventory without executing destructive actions."""
 
     lang = get_web_language()
-    items = [_summarize_item(definition, lang) for definition in _reset_items()]
+    started_at = time.perf_counter()
+    item_timings: list[dict[str, Any]] = []
+    items = []
+    for definition in _reset_items():
+        item_started_at = time.perf_counter()
+        item = _summarize_item(definition, lang)
+        elapsed_ms = round((time.perf_counter() - item_started_at) * 1000, 1)
+        item_timings.append(
+            {
+                "id": definition.id,
+                "elapsedMs": elapsed_ms,
+                "candidateCount": item.get("candidateCount", 0),
+                "fileCount": item.get("fileCount", 0),
+                "scanTruncated": bool(item.get("scanTruncated", False)),
+            }
+        )
+        items.append(item)
     protected = [
         {
             "id": "source-code",
@@ -140,7 +158,7 @@ def get_reset_summary() -> dict:
             "reason": text_for(lang, zh="运行中内容只跳过，不强删。", en="Live runtime state is skipped, not force-deleted."),
         },
     ]
-    return {
+    payload = {
         "warning": text_for(
             lang,
             zh="Reset 现在只允许从后端白名单中自选清理项。Agent 记忆可作为高风险项单独选择；动态提示词、监督进化、自进化、Gym 证据和项目记忆固定保护。",
@@ -152,6 +170,22 @@ def get_reset_summary() -> dict:
         "categories": items,
         "presets": [],
     }
+    total_elapsed_ms = round((time.perf_counter() - started_at) * 1000, 1)
+    slow_items = [item for item in item_timings if float(item.get("elapsedMs") or 0) >= 250.0]
+    _record_reset_scene_event(
+        "summary",
+        "reset.summary.generated",
+        message="Reset summary generated.",
+        outcome="succeeded",
+        fields={
+            "elapsedMs": total_elapsed_ms,
+            "itemCount": len(items),
+            "slowItemCount": len(slow_items),
+            "slowItems": slow_items[:8],
+            "truncatedItemIds": [item["id"] for item in item_timings if item.get("scanTruncated")],
+        },
+    )
+    return payload
 
 
 def preview_reset(item_ids: list[str] | tuple[str, ...]) -> dict:
@@ -565,8 +599,9 @@ def _summarize_item(definition: ResetItemDefinition, lang: str) -> dict:
     deletable = [candidate for candidate in candidates if _candidate_is_deletable(candidate)]
     protected = [candidate for candidate in candidates if candidate.protected]
     missing = [candidate for candidate in candidates if candidate.missing]
-    size_bytes = _sum_existing_size(deletable)
-    file_count = _sum_file_count(deletable)
+    totals = _sum_existing_totals(deletable, max_scan_items=MAX_SUMMARY_FAST_SCAN_ITEMS)
+    size_bytes = totals["sizeBytes"]
+    file_count = totals["fileCount"]
     exists = bool(deletable)
     return {
         "id": definition.id,
@@ -581,6 +616,7 @@ def _summarize_item(definition: ResetItemDefinition, lang: str) -> dict:
         "sizeBytes": size_bytes,
         "size": _format_size(size_bytes) if exists else text_for(lang, zh="无可清理内容", en="nothing to clean"),
         "fileCount": file_count,
+        "scanTruncated": totals["scanTruncated"],
         "candidateCount": len(deletable),
         "protectedCount": len(protected),
         "missingCount": len(missing),
@@ -952,12 +988,7 @@ def _collect_browser_profiles() -> list[ResetCandidate]:
                 note_en="Active launcher browser profile.",
             )
         )
-    for path in _walk_project_paths(runtime_root, skip_roots=[current_profile] if current_profile is not None else []):
-        if not path.is_dir():
-            continue
-        lowered = path.name.lower()
-        if "profile" not in lowered:
-            continue
+    for path in _iter_runtime_profile_dirs(runtime_root):
         if current_profile is not None and (_same_path(path, current_profile) or _is_relative_to(path, current_profile)):
             continue
         candidates.append(_candidate_for_path(path, kind="directory"))
@@ -995,14 +1026,16 @@ def _collect_workspace_service_logs() -> list[ResetCandidate]:
 def _collect_python_test_caches() -> list[ResetCandidate]:
     names = {"__pycache__", ".pytest_cache", ".ruff_cache"}
     candidates: list[ResetCandidate] = []
-    current_profile = _current_browser_profile_dir()
-    skip_roots = [current_profile] if current_profile is not None else []
-    for path in _walk_project_paths(PROJECT_ROOT, skip_roots=skip_roots):
-        if not path.is_dir() or path.name not in names:
+    for name in sorted(names):
+        path = PROJECT_ROOT / name
+        if path.is_dir():
+            candidates.append(_candidate_for_path(path, kind="directory"))
+    for root in _python_cache_search_roots():
+        if not root.exists():
             continue
-        if _has_ignored_part(path):
-            continue
-        candidates.append(_candidate_for_path(path, kind="directory"))
+        for path in _walk_project_paths(root):
+            if path.is_dir() and path.name in names:
+                candidates.append(_candidate_for_path(path, kind="directory"))
     return _collapse_nested_candidates(_dedupe_candidates(candidates))
 
 
@@ -1241,6 +1274,52 @@ def _sum_file_count(candidates: Iterable[ResetCandidate]) -> int:
     return sum(_path_file_count(candidate.path) for candidate in candidates if candidate.path.exists())
 
 
+def _sum_existing_totals(
+    candidates: Iterable[ResetCandidate],
+    *,
+    max_scan_items: int | None = None,
+) -> dict[str, Any]:
+    size_bytes = 0
+    file_count = 0
+    scanned = 0
+    scan_truncated = False
+    for candidate in candidates:
+        path = candidate.path
+        if not path.exists():
+            continue
+        try:
+            if path.is_file():
+                if max_scan_items is not None and scanned >= max_scan_items:
+                    scan_truncated = True
+                    break
+                file_count += 1
+                size_bytes += int(path.stat().st_size)
+                scanned += 1
+                continue
+            if not path.is_dir():
+                continue
+            for child in path.rglob("*"):
+                if max_scan_items is not None and scanned >= max_scan_items:
+                    scan_truncated = True
+                    break
+                scanned += 1
+                try:
+                    if child.is_file():
+                        file_count += 1
+                        size_bytes += int(child.stat().st_size)
+                except OSError:
+                    continue
+            if scan_truncated:
+                break
+        except OSError:
+            continue
+    return {
+        "sizeBytes": size_bytes,
+        "fileCount": file_count,
+        "scanTruncated": scan_truncated,
+    }
+
+
 def _sum_result_file_count(results: Iterable[ResetActionResult]) -> int:
     return sum(1 for _ in results)
 
@@ -1416,6 +1495,33 @@ def _current_browser_profile_dir() -> Path | None:
     if not _is_relative_to(path, runtime_root):
         return None
     return path if path.exists() else None
+
+
+def _iter_runtime_profile_dirs(runtime_root: Path):
+    """Discover browser profiles from bounded .runtime locations without walking profile contents."""
+
+    try:
+        top_level_dirs = [path for path in runtime_root.iterdir() if path.is_dir()]
+    except OSError:
+        return
+    for path in sorted(top_level_dirs, key=lambda item: item.name.lower()):
+        lowered = path.name.lower()
+        if "profile" in lowered:
+            yield path
+        try:
+            child_dirs = [child for child in path.iterdir() if child.is_dir()]
+        except OSError:
+            continue
+        for child in sorted(child_dirs, key=lambda item: item.name.lower()):
+            if "profile" in child.name.lower():
+                yield child
+
+
+def _python_cache_search_roots() -> list[Path]:
+    """Return bounded Python-bearing roots for cache discovery."""
+
+    names = ("config", "core", "scripts", "tests", "tools")
+    return [PROJECT_ROOT / name for name in names]
 
 
 def _walk_project_paths(root: Path, *, skip_roots: list[Path] | None = None):
