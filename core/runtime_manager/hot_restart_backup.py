@@ -30,8 +30,6 @@ BACKUP_TARGETS: tuple[str, ...] = (
     "README.md",
     "VERSION",
     "config",
-    "config.toml",
-    "config.example.toml",
     "core",
     "scripts",
     "tests",

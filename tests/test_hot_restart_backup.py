@@ -54,6 +54,39 @@ def test_restore_stable_backup_preserves_runtime_data(monkeypatch, tmp_path: Pat
     assert runtime_file.read_text(encoding="utf-8") == '{"conversation":"still-current"}'
 
 
+def test_restore_stable_backup_preserves_local_root_config(monkeypatch, tmp_path: Path):
+    project_root = tmp_path
+    runtime_dir = tmp_path / ".runtime" / "runtime-manager"
+    core_file = project_root / "core" / "demo.py"
+    config_file = project_root / "config.toml"
+    example_config_file = project_root / "config.example.toml"
+    core_file.parent.mkdir(parents=True)
+    core_file.write_text("value = 1\n", encoding="utf-8")
+    config_file.write_text("[local]\nmodel = \"before\"\n", encoding="utf-8")
+    example_config_file.write_text("[example]\nmodel = \"before\"\n", encoding="utf-8")
+
+    monkeypatch.setattr(backup, "PROJECT_ROOT", project_root)
+    monkeypatch.setattr(backup, "RUNTIME_MANAGER_DIR", runtime_dir)
+    monkeypatch.setattr(backup, "HOT_RESTART_DIR", runtime_dir / "hot-restart")
+    monkeypatch.setattr(backup, "STABLE_BACKUPS_DIR", runtime_dir / "hot-restart" / "stable-backups")
+    monkeypatch.setattr(backup, "FAILURE_PACKAGES_DIR", runtime_dir / "hot-restart" / "failure-packages")
+    monkeypatch.setattr(backup, "_run_git", lambda *_args, **_kwargs: "")
+
+    stable = backup.create_stable_backup(reason="stable")
+    core_file.write_text("value = 2\n", encoding="utf-8")
+    config_file.write_text("[local]\nmodel = \"current\"\n", encoding="utf-8")
+    example_config_file.write_text("[example]\nmodel = \"current\"\n", encoding="utf-8")
+
+    restored = backup.restore_stable_backup(stable)
+
+    assert restored["backupId"] == stable["backupId"]
+    assert "config.toml" not in stable["targets"]
+    assert "config.example.toml" not in stable["targets"]
+    assert core_file.read_text(encoding="utf-8") == "value = 1\n"
+    assert config_file.read_text(encoding="utf-8") == "[local]\nmodel = \"current\"\n"
+    assert example_config_file.read_text(encoding="utf-8") == "[example]\nmodel = \"current\"\n"
+
+
 def test_failure_package_records_manifest_and_diff(monkeypatch, tmp_path: Path):
     project_root = tmp_path
     runtime_dir = tmp_path / ".runtime" / "runtime-manager"
