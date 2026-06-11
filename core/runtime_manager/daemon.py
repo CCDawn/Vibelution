@@ -456,6 +456,51 @@ def _active_command_is_recent(state: dict[str, Any]) -> bool:
     return age_seconds < _ACTIVE_COMMAND_RESTART_GRACE_SECONDS
 
 
+def _parse_command_datetime(value: Any) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = f"{text[:-1]}+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _elapsed_ms_between(start: Any, end: Any) -> float | None:
+    started = _parse_command_datetime(start)
+    ended = _parse_command_datetime(end)
+    if started is None or ended is None:
+        return None
+    return round(max(0.0, (ended - started).total_seconds() * 1000.0), 1)
+
+
+def _command_runtime_timing_fields(
+    payload: dict[str, Any],
+    *,
+    started_at: str,
+    run_ms: float,
+) -> dict[str, Any]:
+    fields: dict[str, Any] = {
+        "startedAt": started_at,
+        "runMs": round(max(0.0, run_ms), 1),
+    }
+    requested_at = str(payload.get("requestedAt") or "").strip()
+    if requested_at:
+        fields["requestedAt"] = requested_at
+        queued_ms = _elapsed_ms_between(requested_at, started_at)
+        if queued_ms is not None:
+            fields["queuedMs"] = queued_ms
+    claimed_at = str(payload.get("claimedAt") or "").strip()
+    if claimed_at:
+        fields["claimedAt"] = claimed_at
+    return fields
+
+
 def _command_result_is_completed(command_id: str) -> bool:
     normalized = str(command_id or "").strip()
     if not normalized:
@@ -1640,6 +1685,19 @@ class RuntimeManagerDaemon:
         command_type = str(payload.get("type") or "").strip()
         requested_by = str(payload.get("requestedBy") or "unknown").strip() or "unknown"
         args = payload.get("args") if isinstance(payload.get("args"), dict) else {}
+        command_started_at = now_iso()
+        command_started_monotonic = time.monotonic()
+
+        def with_timing(result: dict[str, Any]) -> dict[str, Any]:
+            run_ms = (time.monotonic() - command_started_monotonic) * 1000.0
+            result.update(
+                _command_runtime_timing_fields(
+                    payload,
+                    started_at=command_started_at,
+                    run_ms=run_ms,
+                )
+            )
+            return result
 
         state = load_state()
         command_state = state.setdefault("command", {})
@@ -1648,7 +1706,7 @@ class RuntimeManagerDaemon:
                 "activeCommandId": command_id,
                 "activeType": command_type,
                 "requestedBy": requested_by,
-                "startedAt": now_iso(),
+                "startedAt": command_started_at,
                 "stopManager": command_type == "close_workbench" and bool(args.get("stopManager")),
                 "noBrowser": command_type in {"open_workbench", "restart_workbench"} and bool(args.get("noBrowser")),
             }
@@ -1679,15 +1737,53 @@ class RuntimeManagerDaemon:
                 error_scope="command",
                 failure_message=f"Unsupported command: {command_type}",
             )
-            _append_event("command.failed", {"commandId": command_id, "type": command_type, "message": result["message"]})
+            result = with_timing(result)
+            _append_event(
+                "command.failed",
+                {
+                    "commandId": command_id,
+                    "type": command_type,
+                    "message": result["message"],
+                    "requestedAt": result.get("requestedAt", ""),
+                    "claimedAt": result.get("claimedAt", ""),
+                    "startedAt": result.get("startedAt", ""),
+                    "queuedMs": result.get("queuedMs"),
+                    "runMs": result.get("runMs"),
+                },
+            )
             return result
 
         try:
             result = handler(command_id=command_id, args=args)
+            result = with_timing(result)
             if bool(result.get("deferCommandUntilActiveWorkClear")):
-                _append_event("command.deferred", {"commandId": command_id, "type": command_type, "reason": "active_work"})
+                _append_event(
+                    "command.deferred",
+                    {
+                        "commandId": command_id,
+                        "type": command_type,
+                        "reason": "active_work",
+                        "requestedAt": result.get("requestedAt", ""),
+                        "claimedAt": result.get("claimedAt", ""),
+                        "startedAt": result.get("startedAt", ""),
+                        "queuedMs": result.get("queuedMs"),
+                        "runMs": result.get("runMs"),
+                    },
+                )
             else:
-                _append_event("command.completed", {"commandId": command_id, "type": command_type, "ok": result["ok"]})
+                _append_event(
+                    "command.completed",
+                    {
+                        "commandId": command_id,
+                        "type": command_type,
+                        "ok": result["ok"],
+                        "requestedAt": result.get("requestedAt", ""),
+                        "claimedAt": result.get("claimedAt", ""),
+                        "startedAt": result.get("startedAt", ""),
+                        "queuedMs": result.get("queuedMs"),
+                        "runMs": result.get("runMs"),
+                    },
+                )
             return result
         except Exception as exc:
             result = self._finish_command(
@@ -1698,7 +1794,20 @@ class RuntimeManagerDaemon:
                 failure_message=str(exc),
                 error_type=type(exc).__name__,
             )
-            _append_event("command.failed", {"commandId": command_id, "type": command_type, "message": str(exc)})
+            result = with_timing(result)
+            _append_event(
+                "command.failed",
+                {
+                    "commandId": command_id,
+                    "type": command_type,
+                    "message": str(exc),
+                    "requestedAt": result.get("requestedAt", ""),
+                    "claimedAt": result.get("claimedAt", ""),
+                    "startedAt": result.get("startedAt", ""),
+                    "queuedMs": result.get("queuedMs"),
+                    "runMs": result.get("runMs"),
+                },
+            )
         return result
 
     def _clear_active_command(self) -> None:

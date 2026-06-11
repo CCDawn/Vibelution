@@ -80,6 +80,36 @@ def _parse_datetime(value: str) -> datetime | None:
     return parsed.astimezone(timezone.utc)
 
 
+def _elapsed_ms_since(value: Any, *, now: datetime | None = None) -> float | None:
+    started = _parse_datetime(str(value or ""))
+    if started is None:
+        return None
+    current = now or datetime.now(timezone.utc)
+    return round(max(0.0, (current - started).total_seconds() * 1000.0), 1)
+
+
+def _queue_file_count(path: Path) -> int:
+    try:
+        return sum(1 for _ in path.glob("*.json"))
+    except OSError:
+        return 0
+
+
+def _command_queue_timing_fields(command: dict[str, Any], *, now: datetime | None = None) -> dict[str, Any]:
+    current = now or datetime.now(timezone.utc)
+    fields: dict[str, Any] = {}
+    requested_at = str(command.get("requestedAt") or "").strip()
+    if requested_at:
+        fields["requestedAt"] = requested_at
+        queued_ms = _elapsed_ms_since(requested_at, now=current)
+        if queued_ms is not None:
+            fields["queuedMs"] = queued_ms
+    claimed_at = str(command.get("claimedAt") or "").strip()
+    if claimed_at:
+        fields["claimedAt"] = claimed_at
+    return fields
+
+
 def _command_defer_until(command: dict[str, Any]) -> datetime | None:
     args = command.get("args") if isinstance(command.get("args"), dict) else {}
     return _parse_datetime(str(args.get("deferUntil") or ""))
@@ -140,6 +170,7 @@ def submit_command(
         return command
     _atomic_write_json(INBOX_DIR / f"{command['commandId']}.json", command)
     queued_payload = command_event_payload(command)
+    queued_payload["queueDepthAfterEnqueue"] = _queue_file_count(INBOX_DIR)
     if superseded_commands:
         queued_payload["supersededPendingCommands"] = superseded_commands
     _append_queue_event("command_queue.command_queued", queued_payload)
@@ -197,7 +228,12 @@ def claim_next_command() -> tuple[Path, dict[str, Any]] | None:
         except (OSError, json.JSONDecodeError):
             payload = {}
         if isinstance(payload, dict):
-            _append_queue_event("command_queue.command_claimed", command_event_payload(payload, queue_path=target.name))
+            claimed_at = datetime.now(timezone.utc)
+            payload["claimedAt"] = claimed_at.isoformat()
+            claimed_payload = command_event_payload(payload, queue_path=target.name)
+            claimed_payload.update(_command_queue_timing_fields(payload, now=claimed_at))
+            claimed_payload["queueDepthAfterClaim"] = _queue_file_count(INBOX_DIR)
+            _append_queue_event("command_queue.command_claimed", claimed_payload)
             return target, payload
         try:
             target.unlink(missing_ok=True)
@@ -240,11 +276,14 @@ def defer_processing_command_for_active_work(
             "commandId": command_id,
             "type": str(command.get("type") or ""),
             "requestedBy": str(command.get("requestedBy") or ""),
+            **_command_queue_timing_fields(command, now=now),
             "deferUntil": str(args.get("deferUntil") or ""),
             "activeWorkCount": len(active_work_runs),
             "activeWorkRuns": active_work_runs[:8],
             "attemptCount": attempt_count,
+            "deferDelaySeconds": max(1.0, float(delay_seconds)),
             "queuePath": target.name,
+            "queueDepthAfterDefer": _queue_file_count(INBOX_DIR),
         },
     )
 
@@ -500,22 +539,28 @@ def _workbench_is_already_closed(state: Any) -> bool:
 
 def complete_command(path: Path, result: dict[str, Any]) -> None:
     command_id = str(result.get("commandId") or path.stem).strip() or path.stem
+    completed_at = datetime.now(timezone.utc)
     _atomic_write_json(RESULTS_DIR / f"{command_id}.json", result)
     try:
         path.unlink(missing_ok=True)
     except OSError:
         pass
-    _append_queue_event(
-        "command_queue.command_result_written",
-        {
-            "commandId": command_id,
-            "ok": bool(result.get("ok")),
-            "completed": bool(result.get("completed")),
-            "message": truncate_event_text(str(result.get("message") or "")),
-            "errorType": str(result.get("errorType") or ""),
-            "stopDaemon": bool(result.get("stopDaemon")),
-        },
-    )
+    event_payload = {
+        "commandId": command_id,
+        "ok": bool(result.get("ok")),
+        "completed": bool(result.get("completed")),
+        "message": truncate_event_text(str(result.get("message") or "")),
+        "errorType": str(result.get("errorType") or ""),
+        "stopDaemon": bool(result.get("stopDaemon")),
+        "queueDepthAfterResult": _queue_file_count(INBOX_DIR),
+    }
+    for key in ("requestedAt", "claimedAt", "startedAt", "queuedMs", "runMs"):
+        if key in result:
+            event_payload[key] = result[key]
+    total_ms = _elapsed_ms_since(result.get("requestedAt"), now=completed_at)
+    if total_ms is not None:
+        event_payload["totalMs"] = total_ms
+    _append_queue_event("command_queue.command_result_written", event_payload)
 
 
 def reject_pending_commands_for_shutdown(*, shutdown_state: dict[str, Any] | None = None) -> dict[str, Any]:
