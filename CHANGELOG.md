@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.16 - 2026-06-12
+
+- Added a Challenge Cup source-collection search execution API that runs metadata-only query batches from existing assignments.
+- Wrote automated search results into DataRecords and imported them as source_manifest candidates without formal Team Knowledge, RAG, or official graph writes.
+- Added a Teams knowledge-collection action for executing the next search batch and showing search/writeback/import events in the conversation-style trace.
+- Updated the Challenge Cup flow HTML to M6.17 and documented the metadata-only boundary before full webpage/PDF retrieval is added.
+
 ## 1.0.15 - 2026-06-11
 
 - Made Challenge Cup knowledge-collection start/continue visibly reuse active source-collection runs instead of appearing idle.
