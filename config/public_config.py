@@ -995,6 +995,43 @@ def _model_library_details(item: dict) -> dict:
     return details
 
 
+def _truthy_prompt_cache_capability(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on", "supported", "explicit", "automatic"}
+    return False
+
+
+def _declares_prompt_cache_support(details: dict[str, Any]) -> bool:
+    for key in ("supports_prompt_cache", "supportsPromptCache", "promptCache"):
+        if key in details and _truthy_prompt_cache_capability(details.get(key)):
+            return True
+    capabilities = details.get("capabilities") if isinstance(details.get("capabilities"), dict) else {}
+    for key in ("supports_prompt_cache", "supportsPromptCache", "promptCache"):
+        if key in capabilities and _truthy_prompt_cache_capability(capabilities.get(key)):
+            return True
+    return False
+
+
+def _is_qwen_prompt_cache_route(
+    *,
+    provider_kind: str,
+    provider_api: str,
+    model: str,
+    protocol: str,
+    host: str,
+) -> bool:
+    return (
+        "qwen" in model
+        or protocol.startswith("qwen_")
+        or provider_api in {"qwen", "qwen-openai-compatible"}
+        or (provider_kind == "aliyun" and "dashscope.aliyuncs.com" in host)
+    )
+
+
 def _recommended_prompt_cache_mode(provider: dict[str, Any], details: dict[str, Any] | None = None) -> str:
     provider = _public_provider_entry(provider)
     details = details if isinstance(details, dict) else {}
@@ -1006,17 +1043,23 @@ def _recommended_prompt_cache_mode(provider: dict[str, Any], details: dict[str, 
     protocol = str(details.get("protocol", "") or "").strip().lower()
     base_url = str(provider.get("base_url", "") or "").strip()
     host = base_url.lower()
+    localish = provider_kind in {"local", "ollama", "llamacpp"} or is_llm_local_network_base_url(base_url)
+    is_qwen = _is_qwen_prompt_cache_route(
+        provider_kind=provider_kind,
+        provider_api=provider_api,
+        model=model,
+        protocol=protocol,
+        host=host,
+    )
 
-    if provider_kind in {"local", "ollama", "llamacpp"} or is_llm_local_network_base_url(base_url):
+    if localish:
+        if is_qwen and _declares_prompt_cache_support(details):
+            return "explicit_cache_control"
         return ""
 
-    is_dashscope_qwen = (
-        provider_kind == "aliyun"
-        and ("qwen" in model or protocol.startswith("qwen_") or "dashscope.aliyuncs.com" in host)
-    )
     if provider_kind == "anthropic" and compat_mode not in {"openai", "openai_compatible"}:
         return "explicit_cache_control"
-    if is_dashscope_qwen:
+    if is_qwen and provider_kind == "aliyun":
         return "explicit_cache_control"
     if (
         provider_kind in {"openai", "relay"}
@@ -1039,7 +1082,13 @@ def _with_prompt_cache_default(
     merged = _model_library_details(existing or {})
     merged.update(_model_library_details(details or {}))
     if "prompt_cache" not in merged:
-        mode = _recommended_prompt_cache_mode(provider, merged)
+        recommendation_details = {}
+        if isinstance(existing, dict):
+            recommendation_details.update(existing)
+        if isinstance(details, dict):
+            recommendation_details.update(details)
+        recommendation_details.update(merged)
+        mode = _recommended_prompt_cache_mode(provider, recommendation_details)
         if mode:
             merged["prompt_cache"] = {"mode": mode}
     return merged
