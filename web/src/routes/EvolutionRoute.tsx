@@ -50,6 +50,9 @@ import {
   SelfEvolutionHandoffResponse,
   SelfEvolutionRunStreamEvent,
   EvolutionRun,
+  Team,
+  TeamListPayload,
+  TeamOrganizationCanvas,
 } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
@@ -100,6 +103,21 @@ type EvolutionRouteProps = {
 };
 const SELF_OVERVIEW_REFETCH_INTERVAL_MS = 12_000;
 const SELF_OVERVIEW_STALE_TIME_MS = 10_000;
+const SELF_EVOLUTION_SYSTEM_TEAM_ID = "self-evolution-team";
+const SUPERVISED_EVOLUTION_SYSTEM_TEAM_ID = "supervised-evolution-team";
+
+async function fetchEvolutionSystemTeam(teamId: string) {
+  await fetchJson<TeamListPayload>("/api/teams");
+  return fetchJson<Team>(`/api/teams/${encodeURIComponent(teamId)}`);
+}
+
+function teamOrganizationCanvas(team: Team | null | undefined): TeamOrganizationCanvas | null {
+  if (!team || !team.canvas || !("nodes" in team.canvas)) {
+    return null;
+  }
+  return team.canvas as TeamOrganizationCanvas;
+}
+
 type SupervisedSourceOption =
   | {
       value: string;
@@ -519,6 +537,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   );
   const selfTrackQueriesEnabled = activeTrack === "self";
   const supervisedTrackQueriesEnabled = activeTrack === "supervised";
+  const modeSystemTeamId = activeTrack === "self" ? SELF_EVOLUTION_SYSTEM_TEAM_ID : SUPERVISED_EVOLUTION_SYSTEM_TEAM_ID;
 
   const workspaceSnapshotQuery = useQuery({
     queryKey: queryKeys.evolutionWorkspaceSnapshot(),
@@ -555,6 +574,14 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     refetchInterval: resolvePollingInterval(pageVisible, 8_000),
     refetchIntervalInBackground: false,
     enabled: selfTrackQueriesEnabled,
+  });
+  const modeSystemTeamQuery = useQuery({
+    queryKey: queryKeys.team(modeSystemTeamId),
+    queryFn: () => fetchEvolutionSystemTeam(modeSystemTeamId),
+    staleTime: 20_000,
+    refetchInterval: resolvePollingInterval(pageVisible, 30_000),
+    refetchIntervalInBackground: false,
+    enabled: selfTrackQueriesEnabled || supervisedTrackQueriesEnabled,
   });
   const selectedDatasetLimit = useMemo(
     () => (
@@ -908,6 +935,12 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     activeTrack === "self" ? t("selfEvolutionMode") : t("supervisedEvolutionMode");
   const routeSubtitle =
     activeTrack === "self" ? t("selfEvolutionSubtitle") : t("supervisedEvolutionSubtitle");
+  const modeSystemTeam = modeSystemTeamQuery.data ?? null;
+  const modeTeamCanvas = teamOrganizationCanvas(modeSystemTeam);
+  const modeTeamNodes = modeTeamCanvas?.nodes ?? [];
+  const modeTeamEdges = modeTeamCanvas?.edges ?? [];
+  const modeTeamActiveMemberCount = modeSystemTeam?.members.filter((member) => member.agentStatus === "active").length ?? 0;
+  const modeTeamConversationStatus = modeSystemTeam?.conversation?.status || modeSystemTeam?.linkedChatRoom?.status || "";
   const currentIntakeMode =
     overview?.intakeMode === "auto"
       ? "auto"
@@ -2181,6 +2214,75 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     );
   }
 
+  function renderModeTeamCanvasPanel() {
+    const isSelfTrack = activeTrack === "self";
+    const title = isSelfTrack
+      ? (lang === "zh" ? "自进化系统团队" : "Self-evolution system team")
+      : (lang === "zh" ? "监督进化系统团队" : "Supervised evolution system team");
+    const hint = isSelfTrack
+      ? (lang === "zh" ? "承载自进化执行、审查与总结角色。" : "Owns self-evolution executor, reviewer, and summarizer roles.")
+      : (lang === "zh" ? "承载监督评测、候选、审计与裁决角色。" : "Owns supervised evaluation, candidate, audit, and judge roles.");
+    const loading = modeSystemTeamQuery.isPending && !modeSystemTeam;
+    const error = modeSystemTeamQuery.error instanceof Error ? modeSystemTeamQuery.error.message : "";
+
+    return (
+      <section className={`${styles.surface} ${styles.modeTeamPanel}`}>
+        <div className={styles.modeTeamHeader}>
+          <div>
+            <p className={styles.eyebrow}>{lang === "zh" ? "系统团队画布" : "System team canvas"}</p>
+            <h2 className={styles.sectionTitle}>{title}</h2>
+          </div>
+          <span className={styles.secondaryPill}>
+            {modeSystemTeamQuery.isFetching ? (lang === "zh" ? "同步中" : "Syncing") : (lang === "zh" ? "只读" : "Read only")}
+          </span>
+        </div>
+        <p className={styles.noticeTextCompact}>{hint}</p>
+        <div className={styles.modeTeamStats}>
+          <span>{lang === "zh" ? "节点" : "Nodes"} <strong>{modeTeamNodes.length}</strong></span>
+          <span>{lang === "zh" ? "信息线" : "Edges"} <strong>{modeTeamEdges.length}</strong></span>
+          <span>{lang === "zh" ? "active 成员" : "Active"} <strong>{modeTeamActiveMemberCount}</strong></span>
+          <span>{lang === "zh" ? "群聊" : "Room"} <strong>{modeTeamConversationStatus || "--"}</strong></span>
+        </div>
+        {loading ? (
+          <p className={styles.modeTeamEmpty}>{lang === "zh" ? "正在读取系统团队画布..." : "Loading the system team canvas..."}</p>
+        ) : error ? (
+          <p className={styles.errorTextCompact}>{error}</p>
+        ) : modeTeamCanvas ? (
+          <>
+            <div className={styles.modeTeamCanvasMap}>
+              {modeTeamNodes.map((node) => (
+                <article
+                  key={node.id}
+                  className={
+                    node.status === "stale"
+                      ? `${styles.modeTeamNode} ${styles.modeTeamNodeStale}`
+                      : node.agentId
+                        ? `${styles.modeTeamNode} ${styles.modeTeamNodeBound}`
+                        : styles.modeTeamNode
+                  }
+                >
+                  <strong>{node.label}</strong>
+                  <span>{node.agentName || node.agentCode || (lang === "zh" ? "待绑定" : "Unbound")}</span>
+                  <small>{node.role || node.status}</small>
+                </article>
+              ))}
+            </div>
+            {modeTeamEdges.length > 0 ? (
+              <div className={styles.modeTeamEdges}>
+                {modeTeamEdges.slice(0, 4).map((edge) => (
+                  <span key={edge.id}>{edge.label || edge.type}</span>
+                ))}
+                {modeTeamEdges.length > 4 ? <span>+{modeTeamEdges.length - 4}</span> : null}
+              </div>
+            ) : null}
+          </>
+        ) : (
+          <p className={styles.modeTeamEmpty}>{lang === "zh" ? "系统团队暂未物化。" : "The system team is not materialized yet."}</p>
+        )}
+      </section>
+    );
+  }
+
   function renderSelfEvolutionCandidateDetail(item: EvolutionLibraryEntry) {
     const evidenceRefs = item.evidenceRefs ?? [];
     const allowedUses = item.allowedDownstreamUses ?? [];
@@ -2371,7 +2473,9 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       </section>
 
       {activeTrack === "self" ? (
-        <Suspense fallback={(
+        <div className={styles.selfModeStack}>
+          {renderModeTeamCanvasPanel()}
+          <Suspense fallback={(
           <section className={`${styles.surface} ${styles.structuredEmptyState}`}>
             <LoaderCircle size={18} className={styles.spinIcon} aria-hidden="true" />
             <div>
@@ -2415,7 +2519,8 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
             transactions={selfTransactions}
             loading={selfTrackLoading}
           />
-        </Suspense>
+          </Suspense>
+        </div>
       ) : null}
 
       {activeTrack === "supervised" && evolutionView === "live" ? (
@@ -2628,6 +2733,8 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                 </p>
               ) : null}
             </div>
+
+            {renderModeTeamCanvasPanel()}
 
           </section>
 
