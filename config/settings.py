@@ -44,6 +44,7 @@ NetworkConfig,
     PromptConfig,
 get_provider_api_key_env,)
 from .llm_security import is_llm_local_network_base_url
+from .paths import ensure_global_config_initialized, resolve_config_path
 from .providers import (
     MODEL_PRESETS,
     get_model_preset,
@@ -737,8 +738,8 @@ class ConfigLoader:
 
         查找顺序：
         1. 指定的 config_path
-        2. 项目根目录的 config.toml
-        3. 当前目录的 config.toml
+        2. VIBELUTION_CONFIG_PATH / VIBELUTION_CONFIG_HOME
+        3. 用户 Documents 下的 Vibelution 全局 config.toml
 
         Returns:
             配置文件路径，不存在返回 None
@@ -748,19 +749,11 @@ class ConfigLoader:
             path = Path(self.config_path)
             if path.exists():
                 return path.resolve()
+            return None
 
-        # 2. 项目根目录
-        project_root = Path(__file__).parent.parent
-        default_path = project_root / DEFAULT_CONFIG_PATH
-        if default_path.exists():
-            return default_path.resolve()
-
-        # 3. 当前目录
-        cwd_path = Path.cwd() / DEFAULT_CONFIG_PATH
-        if cwd_path.exists():
-            return cwd_path.resolve()
-
-        return None
+        ensure_global_config_initialized()
+        config_path = resolve_config_path()
+        return config_path if config_path.exists() else None
 
     def _load_from_toml(self) -> Dict[str, Any]:
         """

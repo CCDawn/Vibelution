@@ -55,6 +55,11 @@ from .providers import (
     resolve_model_alias,
     show_model_info,
 )
+from .paths import (
+    ensure_global_config_initialized,
+    resolve_config_home,
+    resolve_config_path,
+)
 from .settings import (
     ConfigLoader,
     Settings,
@@ -115,6 +120,7 @@ __all__ = [
     "WorkbenchConfig",
     "MODEL_PRESETS",
     "denormalize_config_dict",
+    "ensure_global_config_initialized",
     "get_config",
     "get_model_preset",
     "get_settings",
@@ -122,6 +128,8 @@ __all__ = [
     "normalize_public_config_dict",
     "reload_config",
     "resolve_api_key",
+    "resolve_config_home",
+    "resolve_config_path",
     "resolve_model_alias",
     "show_model_info",
 ]

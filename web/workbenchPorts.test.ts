@@ -1,25 +1,51 @@
-import { readFileSync, writeFileSync } from "node:fs";
-import { resolve } from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const originalBackendPort = process.env.VIBELUTION_PORT;
 const originalFrontendPort = process.env.VIBELUTION_FRONTEND_PORT;
 const originalAgentBackendPort = process.env.AGENT_WORKBENCH_BACKEND_PORT;
 const originalAgentFrontendPort = process.env.AGENT_WORKBENCH_FRONTEND_PORT;
-const configPath = resolve(__dirname, "..", "config.toml");
-const originalConfig = readFileSync(configPath, "utf-8");
+const originalConfigPath = process.env.VIBELUTION_CONFIG_PATH;
+const originalConfigHome = process.env.VIBELUTION_CONFIG_HOME;
+const originalConfig = "[workbench]\nbackend_port = 8000\nfrontend_port = 5173\n";
+let tempRoot = "";
+let configPath = "";
+
+function restoreEnv(name: string, value: string | undefined) {
+  if (value === undefined) {
+    delete process.env[name];
+    return;
+  }
+  process.env[name] = value;
+}
 
 async function loadViteConfig() {
   vi.resetModules();
   return (await import("./vite.config.ts")).default;
 }
 
-afterEach(() => {
-  process.env.VIBELUTION_PORT = originalBackendPort;
-  process.env.VIBELUTION_FRONTEND_PORT = originalFrontendPort;
-  process.env.AGENT_WORKBENCH_BACKEND_PORT = originalAgentBackendPort;
-  process.env.AGENT_WORKBENCH_FRONTEND_PORT = originalAgentFrontendPort;
+beforeEach(() => {
+  tempRoot = mkdtempSync(join(tmpdir(), "vibelution-vite-config-"));
+  configPath = join(tempRoot, "config.toml");
   writeFileSync(configPath, originalConfig, "utf-8");
+  process.env.VIBELUTION_CONFIG_PATH = configPath;
+  delete process.env.VIBELUTION_CONFIG_HOME;
+});
+
+afterEach(() => {
+  restoreEnv("VIBELUTION_PORT", originalBackendPort);
+  restoreEnv("VIBELUTION_FRONTEND_PORT", originalFrontendPort);
+  restoreEnv("AGENT_WORKBENCH_BACKEND_PORT", originalAgentBackendPort);
+  restoreEnv("AGENT_WORKBENCH_FRONTEND_PORT", originalAgentFrontendPort);
+  restoreEnv("VIBELUTION_CONFIG_PATH", originalConfigPath);
+  restoreEnv("VIBELUTION_CONFIG_HOME", originalConfigHome);
+  if (tempRoot) {
+    rmSync(tempRoot, { force: true, recursive: true });
+    tempRoot = "";
+    configPath = "";
+  }
 });
 
 describe("vite workbench ports", () => {
