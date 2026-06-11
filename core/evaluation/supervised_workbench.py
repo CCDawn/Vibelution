@@ -154,7 +154,7 @@ def run_workbench_session(
 def list_dataset_choices(project_root: Path) -> list[dict]:
     from .dataset_registry import list_dataset_status
 
-    return list_dataset_status(project_root)
+    return list_dataset_status(project_root, include_environment_preflight=False)
 
 
 def prepare_dataset_run(project_root: Path, dataset_name: str, dataset_limit: int | None) -> DatasetRunPreparation:
