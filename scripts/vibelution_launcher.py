@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import signal
 import socket
 import subprocess
@@ -207,6 +208,46 @@ def _frontend_package_manager() -> str:
     return "bun" if value == "bun" else "npm"
 
 
+def _node_command() -> str:
+    return shutil.which("node") or "node"
+
+
+def _npm_cli_script_for_node(node_command: str) -> str:
+    npm_command = shutil.which("npm")
+    if npm_command:
+        npm_path = Path(npm_command)
+        candidate_roots = [npm_path.parent, npm_path.parent.parent]
+        for root in candidate_roots:
+            candidate = root / "node_modules" / "npm" / "bin" / "npm-cli.js"
+            if candidate.exists():
+                return str(candidate)
+    node_path = Path(node_command)
+    candidate_roots = [node_path.parent, node_path.parent.parent]
+    for root in candidate_roots:
+        candidate = root / "node_modules" / "npm" / "bin" / "npm-cli.js"
+        if candidate.exists():
+            return str(candidate)
+    return "npm"
+
+
+def _npm_install_command() -> tuple[list[str], str]:
+    node_command = _node_command()
+    npm_cli_script = _npm_cli_script_for_node(node_command)
+    if npm_cli_script != "npm":
+        return [node_command, npm_cli_script, "install"], "node npm-cli.js install"
+    return ["npm", "install"], "npm install"
+
+
+def _frontend_build_commands(package_manager: str, web_dir: Path) -> list[tuple[list[str], str]]:
+    if package_manager == "bun":
+        return [(["bun", "run", "bun:build"], "bun run bun:build")]
+    node_command = _node_command()
+    return [
+        ([node_command, str(web_dir / "node_modules" / "typescript" / "bin" / "tsc"), "-b"], "node tsc -b"),
+        ([node_command, str(web_dir / "node_modules" / "vite" / "bin" / "vite.js"), "build"], "node vite build"),
+    ]
+
+
 def _select_no_console_python(executable: str) -> dict[str, object]:
     raw = str(executable or "").strip()
     result: dict[str, object] = {
@@ -259,11 +300,14 @@ def _ensure_frontend_build() -> None:
         }
     )
     if needs_install:
-        install_command = ["bun", "install"] if package_manager == "bun" else ["npm", "install"]
-        _run_checked(install_command, cwd=web_dir, label=" ".join(install_command))
+        if package_manager == "bun":
+            _run_checked(["bun", "install"], cwd=web_dir, label="bun install")
+        else:
+            install_command, install_label = _npm_install_command()
+            _run_checked(install_command, cwd=web_dir, label=install_label)
     if needs_build:
-        build_command = ["bun", "run", "bun:build"] if package_manager == "bun" else ["npm", "run", "build"]
-        _run_checked(build_command, cwd=web_dir, label=" ".join(build_command))
+        for build_command, build_label in _frontend_build_commands(package_manager, web_dir):
+            _run_checked(build_command, cwd=web_dir, label=build_label)
 
 
 def _start_backend(port: int, host: str, *, no_browser: bool) -> dict:

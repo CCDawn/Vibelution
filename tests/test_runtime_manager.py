@@ -431,7 +431,7 @@ def test_python_launcher_main_rejects_unauthorized_internal_stop_before_action(m
     assert "Runtime Manager" in writes[-1]["failureMessage"]
 
 
-def test_python_launcher_frontend_build_defaults_to_npm(monkeypatch, tmp_path):
+def test_python_launcher_frontend_build_defaults_to_direct_node_build(monkeypatch, tmp_path):
     import importlib.util
 
     launcher_path = constants.PROJECT_ROOT / "scripts" / "vibelution_launcher.py"
@@ -449,6 +449,12 @@ def test_python_launcher_frontend_build_defaults_to_npm(monkeypatch, tmp_path):
     monkeypatch.setattr(launcher, "PROJECT_ROOT", project_root)
     monkeypatch.setattr(launcher, "FRONTEND_BUILD_LOG_PATH", log_path)
     monkeypatch.delenv("VIBELUTION_FRONTEND_PM", raising=False)
+    monkeypatch.setattr(launcher, "_node_command", lambda: r"C:\node\node.exe")
+    monkeypatch.setattr(
+        launcher,
+        "_npm_cli_script_for_node",
+        lambda node_command: r"C:\node\node_modules\npm\bin\npm-cli.js",
+    )
     monkeypatch.setattr(
         launcher,
         "_run_checked",
@@ -458,8 +464,9 @@ def test_python_launcher_frontend_build_defaults_to_npm(monkeypatch, tmp_path):
     launcher._ensure_frontend_build()
 
     assert calls == [
-        (["npm", "install"], "npm install"),
-        (["npm", "run", "build"], "npm run build"),
+        ([r"C:\node\node.exe", r"C:\node\node_modules\npm\bin\npm-cli.js", "install"], "node npm-cli.js install"),
+        ([r"C:\node\node.exe", str(web_dir / "node_modules" / "typescript" / "bin" / "tsc"), "-b"], "node tsc -b"),
+        ([r"C:\node\node.exe", str(web_dir / "node_modules" / "vite" / "bin" / "vite.js"), "build"], "node vite build"),
     ]
     event = json.loads(log_path.read_text(encoding="utf-8").splitlines()[-1])
     assert event["event"] == "frontend_build.ensure"
@@ -3530,7 +3537,7 @@ def test_run_launcher_action_passes_configured_port_to_launcher_env(monkeypatch)
     assert completed["durationMs"] >= 0
 
 
-def test_run_launcher_action_hides_powershell_adapter_without_detaching(monkeypatch):
+def test_run_launcher_action_detaches_and_hides_powershell_adapter(monkeypatch):
     captured = {}
 
     class DummyStartupInfo:
@@ -3556,7 +3563,7 @@ def test_run_launcher_action_hides_powershell_adapter_without_detaching(monkeypa
     result = workbench_controller.run_launcher_action("internal-start")
 
     assert result.returncode == 0
-    assert not captured["kwargs"]["creationflags"] & 0x00000008
+    assert captured["kwargs"]["creationflags"] & 0x00000008
     assert captured["kwargs"]["creationflags"] & 0x00000200
     assert captured["kwargs"]["creationflags"] & 0x08000000
     startupinfo = captured["kwargs"]["startupinfo"]

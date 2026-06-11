@@ -5837,30 +5837,30 @@ function Start-SupervisorDetached {
 
         $scriptPathLiteral = ConvertTo-PowerShellSingleQuotedLiteral -Value $PSCommandPath
         $sessionIdLiteral = ConvertTo-PowerShellSingleQuotedLiteral -Value $ManagedSessionId
-        $stdoutLiteral = ConvertTo-PowerShellSingleQuotedLiteral -Value $supervisorStdoutLog
-        $stderrLiteral = ConvertTo-PowerShellSingleQuotedLiteral -Value $supervisorStderrLog
         $supervisorCommand = @"
 `$ErrorActionPreference = 'Stop'
 try {
-    & $scriptPathLiteral -Action supervise -SessionId $sessionIdLiteral 3>&1 4>&1 5>&1 6>&1 1>> $stdoutLiteral 2>> $stderrLiteral
+    & $scriptPathLiteral -Action supervise -SessionId $sessionIdLiteral 3>&1 4>&1 5>&1 6>&1
 } catch {
     `$errorText = (`$_ | Out-String)
     if (`$errorText) {
-        Add-Content -LiteralPath $stderrLiteral -Value `$errorText -Encoding UTF8
+        [Console]::Error.WriteLine(`$errorText)
     }
     exit 1
 }
 "@
         $encodedSupervisorCommand = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($supervisorCommand))
-        $proc = Start-HiddenBackgroundProcess `
-            -FilePath $powershellExe `
+        $proc = Start-RedirectedBackgroundProcess `
+            -CommandPath $powershellExe `
             -ArgumentList @("-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-EncodedCommand", $encodedSupervisorCommand) `
-            -WorkingDirectory $projectDir
+            -WorkingDirectory $projectDir `
+            -StdoutPath $supervisorStdoutLog `
+            -StderrPath $supervisorStderrLog
 
         $fields = @{
             pid = $proc.Id
             managed_session_id = $ManagedSessionId
-            supervisor_launch_api = "hidden_background_powershell"
+            supervisor_launch_api = "hidden_redirected_powershell"
             console_window_suppressed = $true
             startup_wait_skipped = $true
             stdout_path = $supervisorStdoutLog
@@ -5890,7 +5890,7 @@ try {
             -ErrorMessage $errorMessage
         $fields = @{
             managed_session_id = $ManagedSessionId
-            supervisor_launch_api = "hidden_background_powershell"
+            supervisor_launch_api = "hidden_redirected_powershell"
             console_window_suppressed = $true
             stdout_path = $supervisorStdoutLog
             stderr_path = $supervisorStderrLog

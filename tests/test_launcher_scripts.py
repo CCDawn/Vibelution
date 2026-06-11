@@ -6642,25 +6642,30 @@ foreach ($required in @(
 
 $detachedText = Get-LauncherFunctionText -Name "Start-SupervisorDetached"
 foreach ($required in @(
-    "Start-HiddenBackgroundProcess",
+    "Start-RedirectedBackgroundProcess",
     "startup_wait_skipped",
     "launcher.supervisor.attach.started",
     "supervisor.attach.started",
-    "hidden_background_powershell",
-    "console_window_suppressed"
+    "hidden_redirected_powershell",
+    "console_window_suppressed",
+    "StdoutPath",
+    "StderrPath"
 )) {
     if ($detachedText -notmatch [regex]::Escape($required)) {
         throw "Start-SupervisorDetached is missing '$required'."
     }
 }
-if ($detachedText -match "Start-RedirectedBackgroundProcess") {
-    throw "Start-SupervisorDetached should not use the wait-prone redirected starter."
+if ($detachedText -match "Start-HiddenBackgroundProcess") {
+    throw "Start-SupervisorDetached should use the redirected no-window starter."
 }
 if ($detachedText -notmatch "-EncodedCommand") {
     throw "Start-SupervisorDetached should still use an encoded supervisor command."
 }
-if ($detachedText -notmatch "3>&1 4>&1 5>&1 6>&1 1>>") {
-    throw "Start-SupervisorDetached should merge non-error streams before writing supervisor stdout."
+if ($detachedText -notmatch "3>&1 4>&1 5>&1 6>&1") {
+    throw "Start-SupervisorDetached should merge non-error streams before parent stdout redirection."
+}
+if ($detachedText -match "1>>" -or $detachedText -match "2>>") {
+    throw "Start-SupervisorDetached should leave stdout and stderr redirection to the parent starter."
 }
 if ($detachedText -match "3>> `$stdoutLiteral" -or $detachedText -match "4>> `$stdoutLiteral" -or $detachedText -match "5>> `$stdoutLiteral" -or $detachedText -match "6>> `$stdoutLiteral") {
     throw "Start-SupervisorDetached should not open competing redirected writers to supervisor stdout."
@@ -6735,6 +6740,8 @@ $script:rawRefs = @()
 $script:projectDir = [System.IO.Path]::GetTempPath()
 $script:launcherDir = [System.IO.Path]::GetTempPath()
 $script:PSCommandPath = $LauncherPath
+$script:sceneRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("supervisor-attach-test-" + [guid]::NewGuid().ToString("N"))
+New-Item -ItemType Directory -Force -Path (Join-Path $script:sceneRoot "raw") | Out-Null
 
 function Get-RuntimeSceneRelativePaths {
     return [pscustomobject]@{
@@ -6745,7 +6752,7 @@ function Get-RuntimeSceneRelativePaths {
 }
 function Get-CurrentRuntimeSceneFilePath {
     param([string]$RelativePath)
-    return (Join-Path ([System.IO.Path]::GetTempPath()) ("missing-parent-" + [guid]::NewGuid().ToString("N") + "\\" + $RelativePath))
+    return (Join-Path $script:sceneRoot $RelativePath)
 }
 function Write-LauncherControlLog {
     param([string]$Event, [string]$Message, [string]$Level = "info", [hashtable]$Fields = @{})
@@ -6780,6 +6787,16 @@ function Write-RuntimeSceneEvent {
 function New-RuntimeSceneRawRef {
     param([string]$RelativePath, [int]$TailLines)
     return [pscustomobject]@{ relativePath = $RelativePath; tailLines = $TailLines }
+}
+function Start-RedirectedBackgroundProcess {
+    param(
+        [string]$CommandPath,
+        [string[]]$ArgumentList,
+        [string]$WorkingDirectory,
+        [string]$StdoutPath,
+        [string]$StderrPath
+    )
+    throw "simulated redirected supervisor attach failure"
 }
 
 $pidResult = Start-SupervisorDetached -ManagedSessionId "session-1"
