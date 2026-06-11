@@ -1830,6 +1830,15 @@ export function TeamsRoute({
     }
   }
 
+  function selectTeamRecord(team: Team) {
+    setSelectedTeamId(team.teamId);
+    setSelectedNodeId("");
+    if (isResearchWorkflowTeam(team)) {
+      setResearchWorkspaceView("overview");
+    }
+    setSearchParams({ team: team.teamId });
+  }
+
   function launchResearchStage(stageType: ResearchStageType, mode: "continue_or_start" | "new_round" = "continue_or_start") {
     if (!selectedTeam?.teamId || selectedTeamStartResearchStagePending) {
       return;
@@ -2834,9 +2843,6 @@ export function TeamsRoute({
         <span>{lang === "zh" ? "失效引用" : "Stale"} <strong>{teamsQuery.data?.summary.staleMemberCount ?? 0}</strong></span>
         <span>{lang === "zh" ? "成员源" : "Member source"} <strong>Agent Center</strong></span>
       </div>
-
-      {researchWorkflowTeamSelected ? renderResearchWorkspaceNav() : null}
-
       <div className={workspaceClassName}>
         <aside className={styles.teamPanel}>
           <form
@@ -2933,11 +2939,7 @@ export function TeamsRoute({
                 key={team.teamId}
                 type="button"
                 className={team.teamId === selectedTeam?.teamId ? `${styles.teamRow} ${styles.teamRowActive}` : styles.teamRow}
-                onClick={() => {
-                  setSelectedTeamId(team.teamId);
-                  setSearchParams({ team: team.teamId });
-                  setSelectedNodeId("");
-                }}
+                onClick={() => selectTeamRecord(team)}
               >
                 <strong>{team.name}</strong>
                 <span>{team.purpose || team.teamId}</span>
@@ -3107,8 +3109,13 @@ export function TeamsRoute({
             </strong>
             {validation && !validation.valid ? <AlertTriangle size={16} /> : <Link2 size={16} />}
           </div>
-          {!researchCanvasVisible ? renderResearchStageLauncher() : null}
           <div className={styles.inspectorBody}>
+            {researchWorkflowTeamSelected && !researchCanvasVisible ? (
+              <>
+                {renderResearchWorkspaceNav()}
+                {renderResearchStageLauncher()}
+              </>
+            ) : null}
             {showNodeBindingPanel && !selectedTeam ? (
               <section className={`${styles.nodeBindingSection} ${styles.nodeBindingPlaceholder}`}>
                 <div className={styles.empty}>
