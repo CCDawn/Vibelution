@@ -697,6 +697,26 @@ def request_launcher_force_stop() -> LauncherCommandResponse:
             "activeWorkRuns": active_work_runs[:8],
         },
     )
+    if _launcher_workbench_already_closed():
+        _record_launcher_event(
+            "launcher.bundle.force_stop.skipped_already_closed",
+            phase="stop",
+            message="Launcher project bundle force-stop skipped because the workbench is already closed.",
+            outcome="skipped",
+            fields={
+                "mode": "standalone_control_plane",
+                "activeWorkCount": len(active_work_runs),
+            },
+        )
+        return {
+            "accepted": False,
+            "mode": "runtime_manager",
+            "launcherMode": "standalone_control_plane",
+            "operation": "force-stop",
+            "commandId": "",
+            "message": "项目工作台已经关闭，无需再次强制关闭。",
+            "activeWorkRuns": active_work_runs[:8],
+        }
     try:
         ensure_daemon_running()
         command = submit_command(
@@ -736,6 +756,25 @@ def request_launcher_force_stop() -> LauncherCommandResponse:
         "message": "正在强制关闭项目工作台，Launcher 控制面会保持可再次启动。",
         "activeWorkRuns": active_work_runs[:8],
     }
+
+
+def _launcher_workbench_already_closed() -> bool:
+    try:
+        runtime_state = _runtime_manager_state()
+        observed_workbench = _observed_workbench()
+        workbench = _workbench_payload(runtime_state=runtime_state, observed_workbench=observed_workbench)
+    except Exception:
+        return False
+    return (
+        str(workbench.get("desiredState") or "").strip().lower() == "closed"
+        and str(workbench.get("observedState") or "").strip().lower() == "closed"
+        and str(workbench.get("phase") or "").strip().lower() == "steady"
+        and str(workbench.get("lifecycleConsistency") or "").strip().lower() in {"", "consistent"}
+        and not bool(workbench.get("backendAlive"))
+        and not bool(workbench.get("backendPortListening"))
+        and not bool(workbench.get("browserWindowAlive"))
+        and not bool(workbench.get("frontendOrphaned"))
+    )
 
 
 def request_launcher_restart() -> LauncherCommandResponse:

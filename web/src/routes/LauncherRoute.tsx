@@ -185,6 +185,7 @@ type LauncherCopy = {
   startProjectSummary: string;
   forceStop: string;
   forceStopDisabledClosed: string;
+  forceStopDisabledInFlight: string;
   useCheckAction: string;
   useStartAction: string;
   useWaitAction: string;
@@ -817,6 +818,27 @@ function isControlPlaneIdle(evidence: LauncherStatusWithGuardian["controlPlaneEv
   );
 }
 
+function controlPlaneHasCommandType(
+  evidence: LauncherStatusWithGuardian["controlPlaneEvidence"] | undefined,
+  commandTypes: readonly string[],
+): boolean {
+  if (!evidence) {
+    return false;
+  }
+  const wanted = new Set(commandTypes.map((item) => item.trim()).filter(Boolean));
+  if (!wanted.size) {
+    return false;
+  }
+  const activeType = String(evidence.state.activeCommand?.type || "").trim();
+  if (activeType && wanted.has(activeType)) {
+    return true;
+  }
+  return [...(evidence.queue.pending ?? []), ...(evidence.queue.processing ?? [])].some((command) => {
+    const commandType = String(command.type || "").trim();
+    return commandType !== "" && wanted.has(commandType);
+  });
+}
+
 export function LauncherRoute() {
   const { lang } = useShellI18n();
   const queryClient = useQueryClient();
@@ -839,6 +861,7 @@ export function LauncherRoute() {
         startDisabledChanging: "项目正在切换",
         lifecycleActionDisabledActiveWork: "有进行中的任务，无法停止或重启 Vibelution",
         forceStopDisabledClosed: "工作台已经关闭",
+        forceStopDisabledInFlight: "关闭命令已经在处理中",
         projectStatus: "项目状态",
         launcherStatus: "Launcher 维护",
         lifecycleStatus: "生命周期",
@@ -999,6 +1022,7 @@ export function LauncherRoute() {
         startDisabledChanging: "Project lifecycle is changing",
         lifecycleActionDisabledActiveWork: "Active work is running; Vibelution cannot stop or restart",
         forceStopDisabledClosed: "Workbench is already closed",
+        forceStopDisabledInFlight: "A close command is already running",
         projectStatus: "Project Status",
         launcherStatus: "Launcher Care",
         lifecycleStatus: "Lifecycle",
@@ -1303,8 +1327,16 @@ export function LauncherRoute() {
       : copy.restartClear;
   const destructiveActionDisabled = busy || activeWorkCount > 0;
   const destructiveActionDisabledReason = activeWorkCount > 0 ? copy.lifecycleActionDisabledActiveWork : copy.startDisabledBusy;
-  const forceStopDisabled = busy || projectIsClosed;
-  const forceStopDisabledReason = projectIsClosed ? copy.forceStopDisabledClosed : copy.startDisabledBusy;
+  const closeCommandInFlight =
+    trackedCommand?.operation === "stop"
+    || trackedCommand?.operation === "force-stop"
+    || controlPlaneHasCommandType(evidence, ["close_workbench", "force_close_workbench"]);
+  const forceStopDisabled = busy || projectIsClosed || closeCommandInFlight;
+  const forceStopDisabledReason = projectIsClosed
+    ? copy.forceStopDisabledClosed
+    : closeCommandInFlight
+      ? copy.forceStopDisabledInFlight
+      : copy.startDisabledBusy;
   const activeWorkDetail = activeWorkCount > 0
     ? `${copy.activeTasks}: ${activeWorkCount}${activeWorkKinds.length ? ` · ${activeWorkKinds.join(", ")}` : ""}${restartQueue?.statusLine ? ` · ${restartQueue.statusLine}` : ""}`
     : restartQueue?.statusLine

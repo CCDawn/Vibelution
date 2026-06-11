@@ -66,8 +66,10 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("lifecycleActionDisabledActiveWork");
     expect(routeSource).toContain("title={destructiveActionDisabled ? destructiveActionDisabledReason : copy.stop}");
     expect(routeSource).toContain("title={destructiveActionDisabled ? destructiveActionDisabledReason : copy.restart}");
-    expect(routeSource).toContain("const forceStopDisabled = busy || projectIsClosed");
+    expect(routeSource).toContain("controlPlaneHasCommandType(evidence, [\"close_workbench\", \"force_close_workbench\"])");
+    expect(routeSource).toContain("const forceStopDisabled = busy || projectIsClosed || closeCommandInFlight");
     expect(routeSource).toContain("forceStopDisabledReason");
+    expect(routeSource).toContain("forceStopDisabledInFlight");
     expect(routeSource).toContain("title={forceStopDisabled ? forceStopDisabledReason : copy.forceStop}");
   });
 
