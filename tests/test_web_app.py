@@ -12313,7 +12313,7 @@ def test_config_workspace_exposes_unified_config_payload(monkeypatch):
     assert "profileCount" not in payload
 
 
-def test_config_workspace_exposes_full_editor_schema(monkeypatch):
+def test_config_workspace_exposes_editor_schema_without_launcher_owned_startup_settings(monkeypatch):
     public_config = copy.deepcopy(load_public_config())
     monkeypatch.setattr(config_service, "load_public_config", lambda: copy.deepcopy(public_config))
 
@@ -12324,7 +12324,8 @@ def test_config_workspace_exposes_full_editor_schema(monkeypatch):
     editor_sections = {section["id"]: section for section in payload["editorSections"]}
     editor_meta = payload["editorMeta"]
 
-    assert "runtime" in editor_sections
+    assert "runtime" not in editor_sections
+    assert "workbench" not in editor_sections
     assert "tools" not in editor_sections
     assert "context-compression" in editor_sections
     assert "analysis" in editor_sections
@@ -12335,6 +12336,8 @@ def test_config_workspace_exposes_full_editor_schema(monkeypatch):
     assert "memory" not in editor_sections
     assert "strategy" not in editor_sections
     sections_by_id = {section["id"]: section for section in payload["sections"]}
+    assert "runtime" not in sections_by_id
+    assert "workbench" not in sections_by_id
     assert "profiles" not in sections_by_id
     assert sections_by_id["models"]["title"] == "模型库"
     assert "模型资产" in sections_by_id["models"]["summary"]
@@ -12350,28 +12353,17 @@ def test_config_workspace_exposes_full_editor_schema(monkeypatch):
     assert editor_sections["git-commit-prompt"]["path"] == "git.commit_message_prompt"
     assert editor_sections["git-commit-prompt"]["title"] == "Git 提交提示词"
     assert editor_sections["git-commit-prompt"]["fieldCount"] == 1
-    assert editor_sections["runtime"]["path"] == "runtime"
-    assert "workbench" in editor_sections
-    assert editor_sections["workbench"]["path"] == "workbench"
     assert "user-profile" in editor_sections
     assert editor_sections["user-profile"]["path"] == "user_profile"
     assert editor_sections["user-profile"]["title"] == "用户信息"
-    assert payload["publicConfig"]["workbench"]["backend_port"] == 8000
-    assert payload["publicConfig"]["workbench"]["frontend_port"] == 5173
-    assert payload["publicConfig"]["workbench"]["window_mode"] == "fullscreen"
-    assert editor_meta["runtime.profile"]["kind"] == "select"
-    assert editor_meta["runtime.profile"]["badge"] == "选项"
-    assert editor_meta["workbench.backend_port"]["kind"] == "number"
-    assert editor_meta["workbench.backend_port"]["label"] == "后端服务端口"
-    assert editor_meta["workbench.frontend_port"]["kind"] == "number"
-    assert editor_meta["workbench.frontend_port"]["label"] == "前端页面端口"
-    assert editor_meta["workbench.window_mode"]["kind"] == "select"
-    assert editor_meta["workbench.window_mode"]["label"] == "窗口模式"
-    assert editor_meta["workbench.window_mode"]["options"] == [
-        {"value": "windowed", "label": "窗口化"},
-        {"value": "fullscreen", "label": "沉浸全屏"},
-    ]
-    assert "重启工作台" in editor_meta["workbench.window_mode"]["hint"]
+    assert payload["publicConfig"]["runtime"] == public_config["runtime"]
+    assert payload["publicConfig"]["workbench"] == public_config["workbench"]
+    assert "runtime.profile" not in editor_meta
+    assert "runtime.preflight_doctor" not in editor_meta
+    assert "runtime.require_venv" not in editor_meta
+    assert "workbench.backend_port" not in editor_meta
+    assert "workbench.frontend_port" not in editor_meta
+    assert "workbench.window_mode" not in editor_meta
     assert editor_meta["user_profile.display_name"]["kind"] == "text"
     assert editor_meta["user_profile.display_name"]["label"] == "用户显示名"
     assert editor_meta["user_profile.bio"]["kind"] == "multiline"
@@ -13887,7 +13879,7 @@ def test_config_workspace_discovers_custom_openai_compatible_models(monkeypatch)
         "api_base": "https://example.com/v1",
         "api_key": "draft-secret",
         "api_key_source": "手动输入",
-        "timeout": 10,
+        "timeout": config_service._MODEL_DISCOVERY_DEFAULT_TIMEOUT_SECONDS,
     }
 
 
