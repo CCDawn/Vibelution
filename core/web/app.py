@@ -310,9 +310,9 @@ async def _lifespan(_: FastAPI):
         current_loop.default_exception_handler(context)
 
     loop.set_exception_handler(handle_loop_exception)
-    session_list_prewarm_task = asyncio.create_task(_prewarm_session_list_cache_on_startup())
+    startup_cache_prewarm_task = asyncio.create_task(_prewarm_ui_caches_on_startup())
 
-    def consume_session_list_prewarm_result(task: asyncio.Task[None]) -> None:
+    def consume_startup_cache_prewarm_result(task: asyncio.Task[None]) -> None:
         try:
             task.result()
         except asyncio.CancelledError:
@@ -320,26 +320,28 @@ async def _lifespan(_: FastAPI):
         except Exception as exc:
             loop.call_exception_handler(
                 {
-                    "message": "Session list cache prewarm failed during startup.",
+                    "message": "UI cache prewarm failed during startup.",
                     "exception": exc,
                 }
             )
 
-    session_list_prewarm_task.add_done_callback(consume_session_list_prewarm_result)
+    startup_cache_prewarm_task.add_done_callback(consume_startup_cache_prewarm_result)
     try:
         yield
     finally:
-        if not session_list_prewarm_task.done():
-            session_list_prewarm_task.cancel()
+        if not startup_cache_prewarm_task.done():
+            startup_cache_prewarm_task.cancel()
             with suppress(asyncio.CancelledError):
-                await session_list_prewarm_task
+                await startup_cache_prewarm_task
         loop.set_exception_handler(previous_handler)
 
 
-async def _prewarm_session_list_cache_on_startup() -> None:
-    from .services import session_service
+async def _prewarm_ui_caches_on_startup() -> None:
+    from .services import chat_room_service, memory_service, session_service
 
     await asyncio.to_thread(session_service.prewarm_session_list_cache, reason="startup")
+    await asyncio.to_thread(chat_room_service.prewarm_chat_room_participant_indexes, reason="startup")
+    await asyncio.to_thread(memory_service.prewarm_memory_overview_cache, reason="startup")
 
 
 def create_app() -> FastAPI:

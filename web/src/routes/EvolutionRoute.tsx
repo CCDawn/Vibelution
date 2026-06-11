@@ -98,6 +98,8 @@ type EvolutionRouteProps = {
   forcedTrack?: EvolutionRouteTrack;
   forcedView?: SupervisedRouteView;
 };
+const SELF_OVERVIEW_REFETCH_INTERVAL_MS = 12_000;
+const SELF_OVERVIEW_STALE_TIME_MS = 10_000;
 type SupervisedSourceOption =
   | {
       value: string;
@@ -535,7 +537,8 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const selfOverviewQuery = useQuery({
     queryKey: queryKeys.evolutionSelfOverview(),
     queryFn: () => fetchJson<SelfEvolutionOverview>("/api/evolution/self/overview"),
-    refetchInterval: resolvePollingInterval(pageVisible, 4_000),
+    staleTime: SELF_OVERVIEW_STALE_TIME_MS,
+    refetchInterval: resolvePollingInterval(pageVisible, SELF_OVERVIEW_REFETCH_INTERVAL_MS),
     refetchIntervalInBackground: false,
     enabled: selfTrackQueriesEnabled,
   });
