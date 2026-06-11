@@ -5636,6 +5636,163 @@ try {
     return $proc.Id
 }
 
+function Test-SupervisorAttachFileConflictMessage {
+    param([string]$Message)
+
+    if (-not $Message) {
+        return $false
+    }
+    $normalized = $Message.ToLowerInvariant()
+    return [bool](
+        $normalized.Contains("being used by another process") -or
+        $normalized.Contains("cannot access the file") -or
+        $normalized.Contains("access to the path") -or
+        $normalized.Contains("access is denied")
+    )
+}
+
+function Get-SupervisorAttachFileProbe {
+    param([string]$Path)
+
+    $probe = @{
+        path = $Path
+        path_present = -not [string]::IsNullOrWhiteSpace($Path)
+        parent_path = ""
+        parent_exists = $false
+        file_exists = $false
+        length_bytes = $null
+        last_write_utc = ""
+        is_read_only = $null
+        exclusive_open_available = $null
+        exclusive_open_error = ""
+    }
+    if ([string]::IsNullOrWhiteSpace($Path)) {
+        return $probe
+    }
+
+    try {
+        $parent = Split-Path -Parent $Path
+        $probe.parent_path = $parent
+        $probe.parent_exists = [bool](Test-Path -LiteralPath $parent)
+    } catch {
+        $probe.parent_path = ""
+        $probe.parent_exists = $false
+    }
+
+    try {
+        $item = Get-Item -LiteralPath $Path -ErrorAction Stop
+        $probe.file_exists = $true
+        $probe.length_bytes = [int64]$item.Length
+        $probe.last_write_utc = $item.LastWriteTimeUtc.ToString("o")
+        $probe.is_read_only = [bool]$item.IsReadOnly
+    } catch {
+        $probe.file_exists = $false
+        return $probe
+    }
+
+    $stream = $null
+    try {
+        $stream = [System.IO.File]::Open(
+            $Path,
+            [System.IO.FileMode]::Open,
+            [System.IO.FileAccess]::ReadWrite,
+            [System.IO.FileShare]::None
+        )
+        $probe.exclusive_open_available = $true
+    } catch {
+        $probe.exclusive_open_available = $false
+        $probe.exclusive_open_error = $_.Exception.Message
+    } finally {
+        if ($stream) {
+            $stream.Dispose()
+        }
+    }
+    return $probe
+}
+
+function Get-SupervisorAttachProcessCandidates {
+    param(
+        [string]$ManagedSessionId,
+        [string]$StdoutLog,
+        [string]$StderrLog
+    )
+
+    $stdoutComparable = ConvertTo-LauncherComparableText -Value $StdoutLog
+    $stderrComparable = ConvertTo-LauncherComparableText -Value $StderrLog
+    $candidates = New-Object System.Collections.Generic.List[object]
+    try {
+        $processes = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+            $name = [string](Get-LauncherProcessPropertyValue -Process $_ -Name "Name" -Default "")
+            $name -ieq "powershell.exe" -or $name -ieq "pwsh.exe"
+        })
+    } catch {
+        return @()
+    }
+
+    foreach ($process in $processes) {
+        $pidValue = [int](Get-LauncherProcessPropertyValue -Process $process -Name "ProcessId" -Default 0)
+        if ($pidValue -le 0) {
+            continue
+        }
+        $commandLine = [string](Get-LauncherProcessPropertyValue -Process $process -Name "CommandLine" -Default "")
+        $comparableCommandLine = ConvertTo-LauncherComparableText -Value $commandLine
+        $matchesSession = ($ManagedSessionId -and $commandLine.Contains($ManagedSessionId))
+        $matchesStdout = ($stdoutComparable -and $comparableCommandLine.Contains($stdoutComparable))
+        $matchesStderr = ($stderrComparable -and $comparableCommandLine.Contains($stderrComparable))
+        $matchesSupervisorAction = [bool]($comparableCommandLine -match "(^|\s)-action\s+supervise(\s|$)")
+        $usesEncodedCommand = [bool]($comparableCommandLine -match "(^|\s)-encodedcommand(\s|$)")
+        $mentionsProject = Test-TextReferencesProjectPath -Text $commandLine
+        $looksRelevant = [bool](
+            $matchesSession -or
+            $matchesStdout -or
+            $matchesStderr -or
+            $matchesSupervisorAction -or
+            ($usesEncodedCommand -and $mentionsProject)
+        )
+        if (-not $looksRelevant) {
+            continue
+        }
+        [void]$candidates.Add(@{
+            pid = $pidValue
+            parent_pid = [int](Get-LauncherProcessPropertyValue -Process $process -Name "ParentProcessId" -Default 0)
+            name = [string](Get-LauncherProcessPropertyValue -Process $process -Name "Name" -Default "")
+            matches_session_id = [bool]$matchesSession
+            matches_stdout_path = [bool]$matchesStdout
+            matches_stderr_path = [bool]$matchesStderr
+            matches_supervisor_action = [bool]$matchesSupervisorAction
+            uses_encoded_command = [bool]$usesEncodedCommand
+            mentions_project = [bool]$mentionsProject
+            command_line_length = $commandLine.Length
+        })
+        if ($candidates.Count -ge 8) {
+            break
+        }
+    }
+    return @($candidates)
+}
+
+function Get-SupervisorAttachFileDiagnostics {
+    param(
+        [string]$ManagedSessionId,
+        [string]$StdoutLog,
+        [string]$StderrLog,
+        [string]$ErrorMessage
+    )
+
+    $candidateProcesses = @(Get-SupervisorAttachProcessCandidates `
+        -ManagedSessionId $ManagedSessionId `
+        -StdoutLog $StdoutLog `
+        -StderrLog $StderrLog)
+    return @{
+        probed_at = (Get-Date).ToUniversalTime().ToString("o")
+        file_conflict_likely = (Test-SupervisorAttachFileConflictMessage -Message $ErrorMessage)
+        stdout = Get-SupervisorAttachFileProbe -Path $StdoutLog
+        stderr = Get-SupervisorAttachFileProbe -Path $StderrLog
+        candidate_process_count = $candidateProcesses.Count
+        candidate_processes = @($candidateProcesses)
+    }
+}
+
 function Start-SupervisorDetached {
     param([string]$ManagedSessionId)
 
@@ -5725,13 +5882,21 @@ try {
         }
         return $proc.Id
     } catch {
+        $errorMessage = $_.Exception.Message
+        $fileDiagnostics = Get-SupervisorAttachFileDiagnostics `
+            -ManagedSessionId $ManagedSessionId `
+            -StdoutLog $supervisorStdoutLog `
+            -StderrLog $supervisorStderrLog `
+            -ErrorMessage $errorMessage
         $fields = @{
             managed_session_id = $ManagedSessionId
             supervisor_launch_api = "hidden_background_powershell"
             console_window_suppressed = $true
             stdout_path = $supervisorStdoutLog
             stderr_path = $supervisorStderrLog
-            error = $_.Exception.Message
+            error = $errorMessage
+            file_conflict_likely = (Test-SupervisorAttachFileConflictMessage -Message $errorMessage)
+            file_probe = $fileDiagnostics
         }
         Write-LauncherControlLog `
             -Event "launcher.supervisor.attach.failed" `
@@ -5739,7 +5904,7 @@ try {
             -Level "warning" `
             -Fields $fields
         if ($script:currentRuntimeSceneId) {
-            Update-RuntimeSceneManifest @{ supervisor = @{ pid = 0; status = "attach_failed"; failure = $_.Exception.Message } }
+            Update-RuntimeSceneManifest @{ supervisor = @{ pid = 0; status = "attach_failed"; failure = $errorMessage } }
             Write-RuntimeSceneEvent `
                 -Component "supervisor" `
                 -Phase "startup" `
