@@ -2356,6 +2356,7 @@
 .workflowSourceCollectionRuns,
 .workflowSourceCollectionStats,
 .workflowSourceCollectionPlan,
+.workflowSourceCollectionSearchAction,
 .workflowSourceCollectionAssignments,
 .workflowSourceCollectionQueries {
   display: grid;
@@ -2395,6 +2396,57 @@
 .workflowSourceCollectionStats strong {
   color: var(--fg-primary);
   font-size: 0.76rem;
+}
+
+.workflowSourceCollectionSearchAction {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  padding: 8px;
+  border: 1px solid color-mix(in srgb, var(--accent-primary) 30%, var(--border-soft));
+  border-radius: 7px;
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--accent-primary) 9%, transparent), transparent 62%),
+    color-mix(in srgb, var(--surface-panel-strong) 78%, transparent);
+}
+
+.workflowSourceCollectionSearchAction strong,
+.workflowSourceCollectionSearchAction span {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workflowSourceCollectionSearchAction strong {
+  color: var(--fg-primary);
+  font-size: 0.76rem;
+}
+
+.workflowSourceCollectionSearchAction span {
+  color: var(--fg-muted);
+  font-size: 0.66rem;
+  font-weight: 700;
+}
+
+.workflowSourceCollectionSearchAction button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 12px;
+  border: 1px solid color-mix(in srgb, var(--accent-primary) 42%, var(--border-strong));
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--accent-primary) 14%, var(--surface-panel-strong));
+  color: var(--fg-primary);
+  font-size: 0.74rem;
+  font-weight: 780;
+}
+
+.workflowSourceCollectionSearchAction button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .workflowSourceCollectionPlan {

@@ -16,6 +16,7 @@ from core.web.services.team_workflow_orchestration_service import (
     build_candidate_graph,
     decide_transfer_request,
     ensure_team_workflow_orchestration,
+    execute_source_collection_search,
     get_knowledge_ingestion_status,
     get_official_model_evidence_status,
     get_paper_note_chunk_status,
@@ -136,6 +137,15 @@ class SourceCollectionRunStartPayload(BaseModel):
     maxResultsPerQuery: int = Field(10, ge=1, le=100)
     promptCachePolicy: dict[str, Any] = Field(default_factory=dict)
     scope: dict[str, Any] = Field(default_factory=dict)
+
+
+class SourceCollectionSearchExecutePayload(BaseModel):
+    assignmentIds: list[str] = Field(default_factory=list, max_length=16)
+    agentRole: str = Field("", max_length=80)
+    maxQueries: int = Field(4, ge=1, le=12)
+    maxResultsPerQuery: int = Field(2, ge=1, le=5)
+    provider: str = Field("crossref_rest_api", max_length=80)
+    force: bool = False
 
 
 class ResearchStageRoundStartPayload(BaseModel):
@@ -361,6 +371,28 @@ def team_workflow_source_collection_run_start(team_id: str, payload: SourceColle
             exc,
             status_code=422,
             fields={"ownerAgentId": payload.ownerAgentId, "requestedByAgent": payload.requestedByAgent},
+        )
+
+
+@router.post("/teams/{team_id}/workflow-orchestration/source-collection-runs/{run_id}/search/execute", status_code=status.HTTP_201_CREATED)
+def team_workflow_source_collection_search_execute(team_id: str, run_id: str, payload: SourceCollectionSearchExecutePayload) -> dict:
+    try:
+        return execute_source_collection_search(team_id, run_id, payload.model_dump())
+    except TeamNotFoundError as exc:
+        _raise_team_workflow_route_error(
+            "source_collection_search.execute",
+            team_id,
+            exc,
+            status_code=404,
+            fields={"runId": run_id},
+        )
+    except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
+        _raise_team_workflow_route_error(
+            "source_collection_search.execute",
+            team_id,
+            exc,
+            status_code=422,
+            fields={"runId": run_id, "agentRole": payload.agentRole, "provider": payload.provider},
         )
 
 

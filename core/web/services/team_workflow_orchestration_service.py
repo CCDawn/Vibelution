@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import hashlib
+import html
 import json
 import re
 import threading
+import urllib.error
+import urllib.parse
+import urllib.request
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -74,6 +78,11 @@ SOURCE_COLLECTION_DEFAULT_SEARCH_LANGUAGES = ("en", "zh")
 SOURCE_COLLECTION_DEFAULT_SOURCE_TYPES = ("paper", "review", "dataset", "preprint")
 SOURCE_COLLECTION_DEFAULT_MAX_RESULTS_PER_QUERY = 10
 SOURCE_COLLECTION_MAX_QUERIES = 48
+SOURCE_COLLECTION_SEARCH_PROVIDER_CROSSREF = "crossref_rest_api"
+SOURCE_COLLECTION_SEARCH_EXECUTION_DEFAULT_MAX_QUERIES = 4
+SOURCE_COLLECTION_SEARCH_EXECUTION_MAX_QUERIES = 12
+SOURCE_COLLECTION_SEARCH_EXECUTION_DEFAULT_RESULTS_PER_QUERY = 2
+SOURCE_COLLECTION_SEARCH_EXECUTION_MAX_RESULTS_PER_QUERY = 5
 SOURCE_COLLECTION_PROMPT_CACHE_REQUIRED_MODES = {"required", "strict", "hard_required", "required_for_llm_execution"}
 SOURCE_COLLECTION_PROMPT_CACHE_DISABLED_MODES = {"disabled", "off", "none"}
 SOURCE_COLLECTION_SUPPORTED_PROMPT_CACHE_MODES = {"automatic", "explicit_cache_control"}
@@ -508,6 +517,273 @@ def start_source_collection_run(team_id: str, payload: dict[str, Any] | None = N
             "writesRag": False,
             "writesKnowledgeGraph": False,
         },
+    }
+
+
+def execute_source_collection_search(team_id: str, run_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
+    normalized_run_id = _normalize_required_id(run_id, "Data processing run id is required.")
+    team_service.get_team(normalized_team_id)
+    request_payload = payload if isinstance(payload, dict) else {}
+    provider = _trim_text(request_payload.get("provider"), max_length=80) or SOURCE_COLLECTION_SEARCH_PROVIDER_CROSSREF
+    if provider != SOURCE_COLLECTION_SEARCH_PROVIDER_CROSSREF:
+        raise TeamWorkflowOrchestrationError(f"Unsupported source collection search provider: {provider}")
+    max_queries = _normalize_int(
+        request_payload.get("maxQueries"),
+        default=SOURCE_COLLECTION_SEARCH_EXECUTION_DEFAULT_MAX_QUERIES,
+        minimum=1,
+        maximum=SOURCE_COLLECTION_SEARCH_EXECUTION_MAX_QUERIES,
+    )
+    max_results_per_query = _normalize_int(
+        request_payload.get("maxResultsPerQuery"),
+        default=SOURCE_COLLECTION_SEARCH_EXECUTION_DEFAULT_RESULTS_PER_QUERY,
+        minimum=1,
+        maximum=SOURCE_COLLECTION_SEARCH_EXECUTION_MAX_RESULTS_PER_QUERY,
+    )
+    target_assignment_ids = set(_normalize_text_list(request_payload.get("assignmentIds"), max_items=16, max_length=128))
+    target_agent_role = _trim_text(request_payload.get("agentRole"), max_length=80)
+    force = bool(request_payload.get("force"))
+    try:
+        run = data_processing_service.get_processing_run(normalized_run_id)
+        assignments_payload = data_processing_service.list_collection_assignments(normalized_run_id)
+        records_payload = data_processing_service.list_records(normalized_run_id)
+    except data_processing_service.DataProcessingError as exc:
+        raise TeamWorkflowOrchestrationError(str(exc)) from exc
+    run_scope = run.get("scope") if isinstance(run.get("scope"), dict) else {}
+    run_team_id = _trim_text(run_scope.get("teamId"), max_length=128)
+    if run_team_id and run_team_id != normalized_team_id:
+        raise TeamWorkflowOrchestrationError("Data processing run does not belong to this team.")
+    assignments = [item for item in list(assignments_payload.get("assignments") or []) if isinstance(item, dict)]
+    existing_query_ids = _source_collection_existing_query_ids(list(records_payload.get("records") or []))
+    execution_events: list[dict[str, Any]] = []
+    outputs: list[dict[str, Any]] = []
+    created_records: list[dict[str, Any]] = []
+    imported: list[dict[str, Any]] = []
+    executed_query_count = 0
+    skipped_query_count = 0
+    failed_query_count = 0
+    result_count = 0
+
+    for assignment in assignments:
+        if executed_query_count >= max_queries:
+            break
+        assignment_id = _trim_text(assignment.get("assignmentId"), max_length=128)
+        agent_role = _trim_text(assignment.get("agentRole"), max_length=80)
+        if target_assignment_ids and assignment_id not in target_assignment_ids:
+            continue
+        if target_agent_role and agent_role != target_agent_role:
+            continue
+        if not force and str(assignment.get("status") or "") not in {"open", "in_progress", "returned"}:
+            continue
+        assigned_queries = _source_collection_assigned_queries(assignment)
+        if not assigned_queries:
+            execution_events.append(
+                _source_collection_execution_event(
+                    "assignment.no_query",
+                    assignment=assignment,
+                    status="blocked",
+                    title=f"{agent_role or assignment_id} has no assigned query",
+                    summary="This assignment has no query seed in its source collection scope.",
+                    refs=[assignment_id],
+                )
+            )
+            continue
+        assignment_records: list[dict[str, Any]] = []
+        attempted_query_ids: list[str] = []
+        for query in assigned_queries:
+            if executed_query_count >= max_queries:
+                break
+            query_id = _trim_text(query.get("queryId"), max_length=160)
+            query_text = _trim_text(query.get("query"), max_length=1000)
+            if not query_id or not query_text:
+                continue
+            if query_id in existing_query_ids and not force:
+                skipped_query_count += 1
+                continue
+            search_response = _execute_source_collection_query(query, max_results=max_results_per_query, provider=provider)
+            attempted_query_ids.append(query_id)
+            if search_response.get("error"):
+                failed_query_count += 1
+                execution_events.append(
+                    _source_collection_execution_event(
+                        "search.failed",
+                        assignment=assignment,
+                        query=query,
+                        status="blocked",
+                        title=f"Search failed: {query_text}",
+                        summary=_trim_text(search_response.get("error"), max_length=500),
+                        refs=[query_id, provider],
+                    )
+                )
+                continue
+            executed_query_count += 1
+            existing_query_ids.add(query_id)
+            search_results = [item for item in list(search_response.get("results") or []) if isinstance(item, dict)]
+            result_count += len(search_results)
+            execution_events.append(
+                _source_collection_execution_event(
+                    "search.executed",
+                    assignment=assignment,
+                    query=query,
+                    status="completed" if search_results else "returned",
+                    title=f"Searched {provider}: {query_text}",
+                    summary=f"Fetched {len(search_results)} metadata result(s); full text was not downloaded.",
+                    refs=[query_id, _trim_text(search_response.get("searchUrl"), max_length=240)],
+                    raw_location=_trim_text(search_response.get("searchUrl"), max_length=1000),
+                )
+            )
+            for result in search_results:
+                assignment_records.append(
+                    _source_collection_record_from_search_result(
+                        normalized_team_id,
+                        run,
+                        assignment,
+                        query,
+                        result,
+                        provider=provider,
+                        search_url=_trim_text(search_response.get("searchUrl"), max_length=1000),
+                    )
+                )
+        if assignment_records:
+            assignment_query_ids = {
+                _trim_text(item.get("queryId"), max_length=160)
+                for item in assigned_queries
+                if _trim_text(item.get("queryId"), max_length=160)
+            }
+            remaining_query_ids = assignment_query_ids - existing_query_ids
+            output_status = "completed" if not remaining_query_ids else "returned"
+            try:
+                output_response = data_processing_service.record_collection_output(
+                    normalized_run_id,
+                    assignment_id,
+                    {
+                        "status": output_status,
+                        "records": assignment_records,
+                        "notes": "Automated source collection search executed metadata-only queries and wrote DataRecords for review.",
+                        "qualitySignals": {
+                            "searchProvider": provider,
+                            "executedQueryCount": len(attempted_query_ids),
+                            "metadataOnlyDownload": True,
+                            "remainingQueryCount": len(remaining_query_ids),
+                        },
+                    },
+                )
+            except data_processing_service.DataProcessingError as exc:
+                raise TeamWorkflowOrchestrationError(str(exc)) from exc
+            outputs.append(output_response["output"])
+            created_records.extend(output_response["createdRecords"])
+            for index, record in enumerate(output_response["createdRecords"]):
+                original_record = assignment_records[index] if index < len(assignment_records) else {}
+                trace = _source_collection_record_search_trace(original_record)
+                execution_events.append(
+                    _source_collection_execution_event(
+                        "storage.data_record_written",
+                        assignment=assignment,
+                        query=trace,
+                        status="completed",
+                        title=f"Stored DataRecord: {record.get('title') or record.get('recordId')}",
+                        summary="The search result was stored in the generic data processing run before candidate import.",
+                        refs=[record.get("recordId", ""), record.get("sourceRef", "") or record.get("rawLocation", "")],
+                        storage_refs=_source_collection_storage_refs(run),
+                    )
+                )
+                import_response = import_data_record_as_source_candidate(
+                    normalized_team_id,
+                    normalized_run_id,
+                    str(record.get("recordId") or ""),
+                    {
+                        "createdByAgent": _trim_text(assignment.get("agentId"), max_length=160) or agent_role or "source_collection_search_executor",
+                        "tags": ["source_collection", "search_execution", agent_role],
+                        "metadata": {
+                            "sourceCollectionSearchExecution": True,
+                            "searchProvider": provider,
+                            "metadataOnlyDownload": True,
+                            "assignmentId": assignment_id,
+                            "agentRole": agent_role,
+                            "queryId": _trim_text(trace.get("queryId"), max_length=160),
+                            "query": _trim_text(trace.get("query"), max_length=1000),
+                        },
+                    },
+                )
+                imported.append(import_response)
+                execution_events.append(
+                    _source_collection_execution_event(
+                        "storage.source_manifest_imported",
+                        assignment=assignment,
+                        query=trace,
+                        status="completed",
+                        title=f"Imported source_manifest: {import_response['candidate'].get('title')}",
+                        summary="The DataRecord was imported as a source_manifest candidate, still outside formal Team Knowledge/RAG/official graph.",
+                        refs=[import_response["candidate"].get("candidateId", ""), str(record.get("recordId") or "")],
+                        storage_refs=["workspace/teams/{teamId}/candidate_store/index.json".format(teamId=normalized_team_id)],
+                    )
+                )
+        elif attempted_query_ids:
+            try:
+                output_response = data_processing_service.record_collection_output(
+                    normalized_run_id,
+                    assignment_id,
+                    {
+                        "status": "returned",
+                        "records": [],
+                        "notes": "Automated metadata search returned no importable records for this assignment.",
+                        "blockingIssues": ["no_importable_search_result"],
+                        "qualitySignals": {"searchProvider": provider, "metadataOnlyDownload": True},
+                    },
+                )
+            except data_processing_service.DataProcessingError as exc:
+                raise TeamWorkflowOrchestrationError(str(exc)) from exc
+            outputs.append(output_response["output"])
+
+    final_run = data_processing_service.get_processing_run(normalized_run_id)
+    final_assignments = data_processing_service.list_collection_assignments(normalized_run_id)["assignments"]
+    final_status = data_processing_service.get_processing_status(normalized_run_id)
+    _record_workflow_event(
+        "source_collection.search_executed",
+        normalized_team_id,
+        fields={
+            "runId": normalized_run_id,
+            "provider": provider,
+            "executedQueryCount": executed_query_count,
+            "skippedQueryCount": skipped_query_count,
+            "failedQueryCount": failed_query_count,
+            "recordCount": len(created_records),
+            "importedCount": len(imported),
+        },
+    )
+    status_label = "executed" if created_records else ("partial" if executed_query_count or failed_query_count else "no_open_assignment")
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "teamId": normalized_team_id,
+        "runId": normalized_run_id,
+        "status": status_label,
+        "provider": provider,
+        "executedQueryCount": executed_query_count,
+        "skippedQueryCount": skipped_query_count,
+        "failedQueryCount": failed_query_count,
+        "resultCount": result_count,
+        "recordCount": len(created_records),
+        "outputCount": len(outputs),
+        "importedCount": len(imported),
+        "run": final_run,
+        "runStatus": final_status,
+        "assignments": final_assignments,
+        "outputs": outputs,
+        "createdRecords": created_records,
+        "imported": imported,
+        "executionEvents": execution_events,
+        "boundaries": {
+            "externalSearchTriggered": executed_query_count > 0,
+            "metadataOnlyDownload": True,
+            "writesFormalKnowledge": False,
+            "writesRag": False,
+            "writesOfficialGraph": False,
+        },
+        "nextActions": [
+            "Review imported source_manifest candidates before source quality screening.",
+            "Run source quality assessment for accepted candidates.",
+            "Keep formal Team Knowledge/RAG/official graph writes behind the later governance gate.",
+        ],
     }
 
 
@@ -5470,6 +5746,269 @@ def _source_collection_writeback_contract(team_id: str, run_id: str) -> dict[str
         "ragWrites": False,
         "officialGraphWrites": False,
     }
+
+
+def _source_collection_assigned_queries(assignment: dict[str, Any]) -> list[dict[str, Any]]:
+    scope = assignment.get("scope") if isinstance(assignment.get("scope"), dict) else {}
+    return [item for item in list(scope.get("assignedQueries") or []) if isinstance(item, dict)]
+
+
+def _source_collection_existing_query_ids(records: list[dict[str, Any]]) -> set[str]:
+    query_ids: set[str] = set()
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        metadata = record.get("metadata") if isinstance(record.get("metadata"), dict) else {}
+        traces = [
+            record.get("collectionTrace") if isinstance(record.get("collectionTrace"), dict) else {},
+            metadata.get("sourceCollectionTrace") if isinstance(metadata.get("sourceCollectionTrace"), dict) else {},
+        ]
+        for trace in traces:
+            query_id = _trim_text(trace.get("queryId"), max_length=160)
+            if query_id:
+                query_ids.add(query_id)
+    return query_ids
+
+
+def _execute_source_collection_query(query: dict[str, Any], *, max_results: int, provider: str) -> dict[str, Any]:
+    if provider != SOURCE_COLLECTION_SEARCH_PROVIDER_CROSSREF:
+        return {"provider": provider, "results": [], "error": f"Unsupported provider: {provider}"}
+    query_text = _trim_text(query.get("query"), max_length=1000)
+    if not query_text:
+        return {"provider": provider, "results": [], "error": "Search query is empty."}
+    rows = _normalize_int(max_results, default=SOURCE_COLLECTION_SEARCH_EXECUTION_DEFAULT_RESULTS_PER_QUERY, minimum=1, maximum=SOURCE_COLLECTION_SEARCH_EXECUTION_MAX_RESULTS_PER_QUERY)
+    search_url = _crossref_search_url(query_text, rows=rows)
+    try:
+        request = urllib.request.Request(
+            search_url,
+            headers={
+                "Accept": "application/json",
+                "User-Agent": "Vibelution-ChallengeCup/1.0 (metadata-only research source collection)",
+            },
+        )
+        with urllib.request.urlopen(request, timeout=15) as response:
+            payload = json.loads(response.read().decode("utf-8", errors="replace"))
+    except (OSError, urllib.error.URLError, json.JSONDecodeError) as exc:
+        return {"provider": provider, "searchUrl": search_url, "results": [], "error": str(exc)}
+    message = payload.get("message") if isinstance(payload, dict) else {}
+    items = message.get("items") if isinstance(message, dict) else []
+    results = [_source_collection_result_from_crossref_item(item, fallback_source_type=str(query.get("sourceType") or "")) for item in list(items or [])[:rows] if isinstance(item, dict)]
+    return {"provider": provider, "searchUrl": search_url, "results": [item for item in results if item.get("title") or item.get("sourceRef") or item.get("rawLocation")]}
+
+
+def _crossref_search_url(query_text: str, *, rows: int) -> str:
+    params = urllib.parse.urlencode(
+        {
+            "query": query_text,
+            "rows": str(rows),
+            "select": "DOI,title,URL,container-title,published-print,published-online,issued,author,type,abstract,score",
+        }
+    )
+    return f"https://api.crossref.org/works?{params}"
+
+
+def _source_collection_result_from_crossref_item(item: dict[str, Any], *, fallback_source_type: str) -> dict[str, Any]:
+    doi = _trim_text(item.get("DOI"), max_length=500)
+    source_ref = f"https://doi.org/{doi}" if doi else _trim_text(item.get("URL"), max_length=1000)
+    title = _first_crossref_text(item.get("title")) or doi or source_ref
+    container_title = _first_crossref_text(item.get("container-title"))
+    issued = _crossref_date(item.get("published-print")) or _crossref_date(item.get("published-online")) or _crossref_date(item.get("issued"))
+    abstract = _strip_html(_trim_text(item.get("abstract"), max_length=5000))
+    authors = _crossref_authors(item.get("author"))
+    crossref_type = _trim_text(item.get("type"), max_length=80)
+    source_type = _source_collection_data_processing_source_type(fallback_source_type or crossref_type)
+    summary_parts = [
+        f"Container: {container_title}" if container_title else "",
+        f"Published: {issued}" if issued else "",
+        abstract,
+    ]
+    return {
+        "title": title,
+        "sourceRef": source_ref,
+        "rawLocation": _trim_text(item.get("URL"), max_length=1000) or source_ref,
+        "summary": _trim_text(" ".join(part for part in summary_parts if part), max_length=1600),
+        "sourceType": source_type,
+        "providerType": crossref_type,
+        "metadata": {
+            "doi": doi,
+            "containerTitle": container_title,
+            "issued": issued,
+            "authors": authors,
+            "crossrefType": crossref_type,
+        },
+        "qualitySignals": {
+            "providerScore": item.get("score"),
+            "hasDoi": bool(doi),
+            "hasAbstract": bool(abstract),
+        },
+    }
+
+
+def _source_collection_record_from_search_result(
+    team_id: str,
+    run: dict[str, Any],
+    assignment: dict[str, Any],
+    query: dict[str, Any],
+    result: dict[str, Any],
+    *,
+    provider: str,
+    search_url: str,
+) -> dict[str, Any]:
+    agent_role = _trim_text(assignment.get("agentRole"), max_length=80)
+    assignment_id = _trim_text(assignment.get("assignmentId"), max_length=128)
+    query_id = _trim_text(query.get("queryId"), max_length=160)
+    query_text = _trim_text(query.get("query"), max_length=1000)
+    source_ref = _trim_text(result.get("sourceRef"), max_length=1000)
+    raw_location = _trim_text(result.get("rawLocation"), max_length=1000) or search_url
+    trace = {
+        "teamId": team_id,
+        "runId": _trim_text(run.get("runId"), max_length=128),
+        "planId": _trim_text((query.get("queryId") or "").split("-q", 1)[0], max_length=128),
+        "queryId": query_id,
+        "query": query_text,
+        "assignmentId": assignment_id,
+        "agentRole": agent_role,
+        "searchProvider": provider,
+        "searchUrl": search_url,
+        "downloadKind": "metadata",
+        "externalSearchTriggered": True,
+        "metadataOnlyDownload": True,
+        "storageTarget": "data_processing.records",
+        "promptCachePartition": _trim_text((query.get("execution") or {}).get("promptCachePartition") if isinstance(query.get("execution"), dict) else "", max_length=160),
+    }
+    metadata = _normalize_metadata(result.get("metadata"))
+    metadata.update(
+        {
+            "sourceCollectionTrace": trace,
+            "searchProvider": provider,
+            "searchUrl": search_url,
+            "metadataOnlyDownload": True,
+        }
+    )
+    return {
+        "sourceType": _source_collection_data_processing_source_type(result.get("sourceType")),
+        "sourceRef": source_ref,
+        "rawLocation": raw_location,
+        "title": _trim_text(result.get("title"), max_length=260) or source_ref or raw_location,
+        "summary": _trim_text(result.get("summary"), max_length=4000),
+        "status": "collected",
+        "metadata": metadata,
+        "qualitySignals": _normalize_metadata(result.get("qualitySignals")),
+        "collectionTrace": trace,
+    }
+
+
+def _source_collection_record_search_trace(record: dict[str, Any]) -> dict[str, Any]:
+    metadata = record.get("metadata") if isinstance(record.get("metadata"), dict) else {}
+    trace = metadata.get("sourceCollectionTrace") if isinstance(metadata.get("sourceCollectionTrace"), dict) else {}
+    if trace:
+        return trace
+    return record.get("collectionTrace") if isinstance(record.get("collectionTrace"), dict) else {}
+
+
+def _source_collection_execution_event(
+    event_type: str,
+    *,
+    assignment: dict[str, Any],
+    title: str,
+    summary: str,
+    status: str,
+    query: dict[str, Any] | None = None,
+    refs: list[Any] | None = None,
+    raw_location: str = "",
+    storage_refs: list[str] | None = None,
+) -> dict[str, Any]:
+    now = utc_now_iso()
+    normalized_query = query if isinstance(query, dict) else {}
+    return {
+        "eventId": _new_record_id("srcevt"),
+        "eventType": event_type,
+        "status": _trim_text(status, max_length=80) or "completed",
+        "title": _trim_text(title, max_length=260),
+        "summary": _trim_text(summary, max_length=1200),
+        "agentRole": _trim_text(assignment.get("agentRole"), max_length=80),
+        "agentId": _trim_text(assignment.get("agentId"), max_length=160),
+        "assignmentId": _trim_text(assignment.get("assignmentId"), max_length=128),
+        "queryId": _trim_text(normalized_query.get("queryId"), max_length=160),
+        "query": _trim_text(normalized_query.get("query"), max_length=1000),
+        "sourceType": _trim_text(normalized_query.get("sourceType"), max_length=80),
+        "refs": _normalize_text_list(refs or [], max_items=8, max_length=240),
+        "rawLocation": _trim_text(raw_location, max_length=1000),
+        "storageRefs": _normalize_text_list(storage_refs or [], max_items=8, max_length=240),
+        "createdAt": now,
+    }
+
+
+def _source_collection_storage_refs(run: dict[str, Any]) -> list[str]:
+    storage = run.get("storage") if isinstance(run.get("storage"), dict) else {}
+    return [
+        _trim_text(storage.get("recordsPath"), max_length=240),
+        _trim_text(storage.get("collectionOutputsPath"), max_length=240),
+    ]
+
+
+def _source_collection_data_processing_source_type(value: Any) -> str:
+    source_type = _trim_text(value, max_length=80).lower()
+    if source_type in data_processing_service.SOURCE_TYPES:
+        return source_type
+    if source_type in {"review", "preprint", "journal-article", "proceedings-article", "book-chapter"}:
+        return "paper"
+    if source_type in {"posted-content"}:
+        return "paper"
+    if source_type in {"dataset", "data"}:
+        return "dataset"
+    return "url"
+
+
+def _first_crossref_text(value: Any) -> str:
+    if isinstance(value, list):
+        for item in value:
+            text = _trim_text(item, max_length=500)
+            if text:
+                return html.unescape(text)
+        return ""
+    return html.unescape(_trim_text(value, max_length=500))
+
+
+def _crossref_authors(value: Any) -> list[str]:
+    authors: list[str] = []
+    for item in list(value or [])[:8]:
+        if not isinstance(item, dict):
+            continue
+        name = " ".join(
+            part
+            for part in [
+                _trim_text(item.get("given"), max_length=80),
+                _trim_text(item.get("family"), max_length=120),
+            ]
+            if part
+        ).strip()
+        if name:
+            authors.append(name)
+    return authors
+
+
+def _crossref_date(value: Any) -> str:
+    if not isinstance(value, dict):
+        return ""
+    date_parts = value.get("date-parts")
+    if not isinstance(date_parts, list) or not date_parts:
+        return ""
+    first = date_parts[0]
+    if not isinstance(first, list) or not first:
+        return ""
+    parts = [str(part).zfill(2) for part in first[:3] if isinstance(part, int)]
+    if not parts:
+        return ""
+    if parts:
+        parts[0] = parts[0].lstrip("0") or "0"
+    return "-".join(parts)
+
+
+def _strip_html(value: str) -> str:
+    if not value:
+        return ""
+    return html.unescape(re.sub(r"<[^>]+>", " ", value)).strip()
 
 
 def _source_collection_role_assignment_inputs(queries: list[dict[str, Any]], roles: list[str], payload: dict[str, Any]) -> list[dict[str, Any]]:
