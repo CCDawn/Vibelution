@@ -19,6 +19,21 @@ def _client() -> TestClient:
     return TestClient(create_app(), headers={CONTROL_TOKEN_HEADER: get_control_token()})
 
 
+def _fake_local_research_public_config(*, prompt_cache_mode="explicit_cache_control"):
+    return {
+        "llm": {
+            "profiles": {},
+            "model_library": {
+                "houmo_qwen35_9b_agent": {
+                    "model": "qwen3.5-9b",
+                    "provider": "local",
+                    "prompt_cache": {"mode": prompt_cache_mode},
+                }
+            },
+        }
+    }
+
+
 def _use_tmp_project_root(tmp_path, monkeypatch):
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
@@ -28,6 +43,7 @@ def _use_tmp_project_root(tmp_path, monkeypatch):
     monkeypatch.setattr(team_knowledge_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(team_workflow_orchestration_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(team_workflow_orchestration_service, "load_public_config", _fake_local_research_public_config)
 
 
 def test_team_workflow_routes_run_candidate_transfer_slice(tmp_path, monkeypatch):
@@ -133,12 +149,37 @@ def test_team_workflow_route_starts_source_collection_run(tmp_path, monkeypatch)
     assert response.json()["searchPlan"]["querySeeds"] == ["thalamic gating", "neural gating"]
     assert response.json()["searchPlan"]["queryCount"] == 2
     assert response.json()["searchPlan"]["boundaries"]["externalSearchTriggered"] is False
+    assert response.json()["searchPlan"]["boundaries"]["requiresPromptCacheForAgentExecution"] is True
+    assert response.json()["promptCachePolicy"]["gate"]["status"] == "satisfied"
+    assert response.json()["promptCachePolicy"]["promptCacheMode"] == "explicit_cache_control"
+    assert response.json()["run"]["metadata"]["promptCacheGateStatus"] == "satisfied"
     assert response.json()["searchPlan"]["resultWritebackContract"]["ragWrites"] is False
     assert {item["agentRole"] for item in response.json()["assignments"]} == {"data_discovery", "source_acquisition"}
     assert all(item["scope"]["assignedQueries"] for item in response.json()["assignments"])
+    assert all(item["scope"]["promptCachePartition"].startswith("research-team-") for item in response.json()["assignments"])
     assert response.json()["workflow"]["activeWorkflowItems"][0]["candidateId"] == run_id
     assert assignments_response.json()["summary"]["assignmentCount"] == 2
     assert status_response.json()["boundaries"]["writesFormalKnowledge"] is False
+
+
+def test_team_workflow_route_blocks_source_collection_without_prompt_cache(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "load_public_config",
+        lambda: _fake_local_research_public_config(prompt_cache_mode="unsupported"),
+    )
+    client = _client()
+    team = client.post("/api/teams", json={"name": "挑战杯科研团队"}).json()
+
+    response = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/source-collection-runs",
+        json={"topic": "predictive coding"},
+    )
+
+    assert response.status_code == 422
+    assert "requires prompt cache/KV reuse" in response.json()["detail"]
+    assert "automatic or explicit_cache_control" in response.json()["detail"]
 
 
 def test_team_workflow_route_starts_research_stage_round(tmp_path, monkeypatch):
