@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import threading
 import time
 from contextlib import contextmanager
@@ -15,6 +16,7 @@ from urllib.parse import urlparse
 from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage, SystemMessage, ToolMessage
 
 from config import AppConfig, get_config
+from config.llm_security import is_llm_local_network_base_url
 
 from .adapters import get_provider_adapter
 from .discovery import discover_model
@@ -40,6 +42,8 @@ _LLM_CANCEL_CHECKER_CONTEXT: ContextVar[Callable[[], str] | None] = ContextVar(
 _LLM_ROUTE_CONCURRENCY_LIMIT = 2
 _LLM_ROUTE_CONCURRENCY_LOCK = threading.Lock()
 _LLM_ROUTE_CONCURRENCY_GATES: Dict[str, threading.BoundedSemaphore] = {}
+_NO_PROXY_LOCK = threading.Lock()
+_NO_PROXY_ENV_NAMES = ("NO_PROXY", "no_proxy")
 
 
 class LLMCancelledError(Exception):
@@ -779,6 +783,25 @@ def _llm_cancelled_error(reason: str) -> LLMError:
     )
 
 
+def _ensure_no_proxy_for_local_base_url(base_url: Any) -> None:
+    """Ensure local/private-LAN model endpoints bypass process proxy settings."""
+
+    raw_base_url = str(base_url or "").strip()
+    if not raw_base_url or not is_llm_local_network_base_url(raw_base_url):
+        return
+    host = (urlparse(raw_base_url).hostname or "").strip().lower().rstrip(".")
+    if not host:
+        return
+    with _NO_PROXY_LOCK:
+        for env_name in _NO_PROXY_ENV_NAMES:
+            current = os.environ.get(env_name, "")
+            parts = [part.strip() for part in current.split(",") if part.strip()]
+            normalized = {part.lower().rstrip(".") for part in parts}
+            if host in normalized:
+                continue
+            os.environ[env_name] = ",".join([*parts, host]) if parts else host
+
+
 def _default_completion_backend(payload: Dict[str, Any]) -> Any:
     _raise_if_llm_cancelled()
     try:
@@ -789,6 +812,7 @@ def _default_completion_backend(payload: Dict[str, Any]) -> Any:
             "LiteLLM 未安装，无法执行模型调用；请安装 litellm",
             retryable=False,
         ) from exc
+    _ensure_no_proxy_for_local_base_url(payload.get("base_url"))
     return completion(**payload)
 
 

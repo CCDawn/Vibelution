@@ -22,6 +22,7 @@ except ImportError:  # pragma: no cover - Python < 3.11 compatibility
 from core.llm import assert_llm_compatibility
 from .llm_security import (
     coerce_llm_probe_timeout,
+    coerce_llm_runtime_probe_timeout,
     is_llm_local_network_base_url,
     redact_llm_probe_error,
     validate_llm_api_key_env,
@@ -1554,7 +1555,7 @@ def _probe_llm_http(provider, profile, api_key: str | None = None) -> dict:
         method="POST",
     )
     try:
-        timeout = coerce_llm_probe_timeout(profile.connect_timeout, profile.timeout)
+        timeout = coerce_llm_runtime_probe_timeout(provider, profile.connect_timeout, profile.timeout)
         opener = urllib.request.build_opener(_NoRedirectHandler)
         with opener.open(request, timeout=timeout) as response:
             status = getattr(response, "status", 200)
@@ -1584,7 +1585,7 @@ def _probe_llm_runtime(provider, profile, api_key: str | None = None) -> dict:
     except Exception:
         return _probe_llm_http(provider, profile, api_key)
 
-    probe_timeout = coerce_llm_probe_timeout(profile.connect_timeout, profile.timeout)
+    probe_timeout = coerce_llm_runtime_probe_timeout(provider, profile.connect_timeout, profile.timeout)
     try:
         probe_profile = profile.model_copy(
             update={
