@@ -581,7 +581,23 @@ class PromptManager:
             return self._context_has_keywords(focused_context, env_keywords)
 
         if section_name == "CONFIG_AWARENESS":
-            config_keywords = ("config", "配置", "provider", "model", "api", "api key", "api_key", "profile", "key", "llm.local", "本地模型")
+            config_keywords = (
+                "config",
+                "config.toml",
+                "配置",
+                "配置项",
+                "provider 配置",
+                "model config",
+                "model library",
+                "模型配置",
+                "模型库",
+                "api key",
+                "api_key",
+                "profile 配置",
+                "runtime profile",
+                "llm.local",
+                "本地模型",
+            )
             focused_hit = self._context_has_keywords(focused_context, config_keywords)
             if focused_hit:
                 return True
@@ -594,9 +610,9 @@ class PromptManager:
                     issue for issue in blocking_issues
                     if "缺少可用 API Key" not in str(issue)
                 ]
-                # 配置告警只在诊断/定向配置问题时作为辅助面，而不是默认常驻。
-                if prompt_mode in {"diagnose", "verify"} and focused_hit:
-                    return bool(warnings or filtered_blockers)
+                # 配置告警只在定向配置问题时展开；诊断/验证模式仅允许真实阻断问题打断降噪。
+                if prompt_mode in {"diagnose", "verify"}:
+                    return bool(filtered_blockers)
                 return False
             except Exception:
                 return False
@@ -650,13 +666,39 @@ class PromptManager:
             return None
 
         if section_name == "CONFIG_AWARENESS":
-            keywords = ("config", "配置", "provider", "model", "api", "api key", "api_key", "profile", "key", "llm.local", "本地模型")
+            keywords = (
+                "config",
+                "config.toml",
+                "配置",
+                "配置项",
+                "provider 配置",
+                "model config",
+                "model library",
+                "模型配置",
+                "模型库",
+                "api key",
+                "api_key",
+                "profile 配置",
+                "runtime profile",
+                "llm.local",
+                "本地模型",
+            )
             for source_name, text in (("goal", goal), ("core", core_context)):
                 matched = self._matching_keywords(text, keywords)
                 if matched:
                     return f"{source_name}:{'/'.join(matched[:2])}"
             if prompt_mode in {"diagnose", "verify"}:
-                return f"{prompt_mode}:diagnosis"
+                try:
+                    from config import get_config
+                    diagnosis = get_config().diagnose_config()
+                    blockers = [
+                        issue for issue in (diagnosis.get("blocking_issues") or [])
+                        if "缺少可用 API Key" not in str(issue)
+                    ]
+                    if blockers:
+                        return f"{prompt_mode}:blocker"
+                except Exception:
+                    return None
             return None
 
         if section_name in {"GIT_RULES", "SPEC", "CODEBASE_MAP"}:
