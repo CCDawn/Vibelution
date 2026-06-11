@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from core.web.services import supervised_control_service as service
+from core.web.services import supervised_conversation_harness_adapter as conversation_adapter
 
 
 @pytest.fixture(autouse=True)
@@ -527,7 +528,7 @@ def test_conversation_harness_treats_completed_session_turn_as_success(monkeypat
     captured_submit: dict[str, object] = {}
 
     monkeypatch.setattr(
-        service,
+        conversation_adapter,
         "create_supervised_agent_session",
         lambda **kwargs: {"id": "session-hidden", "sessionKind": "supervised", "hiddenFromIndex": True},
     )
@@ -536,9 +537,9 @@ def test_conversation_harness_treats_completed_session_turn_as_success(monkeypat
         captured_submit.update({"session_id": session_id, "prompt": prompt, **kwargs})
         return {"turnId": "turn-1"}
 
-    monkeypatch.setattr(service, "submit_session_message", fake_submit_session_message)
+    monkeypatch.setattr(conversation_adapter, "submit_session_message", fake_submit_session_message)
     monkeypatch.setattr(
-        service,
+        conversation_adapter,
         "get_session_detail",
         lambda session_id: {
             "id": session_id,
@@ -573,6 +574,63 @@ def test_conversation_harness_treats_completed_session_turn_as_success(monkeypat
     assert captured_submit["message_source"] == "supervised_evolution"
     assert captured_submit["mental_model_enabled"] is True
     assert events[-1]["phase"] == "conversation_turn_finished"
+
+
+def test_conversation_harness_returns_cancelled_after_stop_grace(monkeypatch, tmp_path):
+    events: list[dict] = []
+    stopped_sessions: list[str] = []
+    clock = {"now": 0.0}
+
+    monkeypatch.setattr(
+        conversation_adapter,
+        "create_supervised_agent_session",
+        lambda **kwargs: {"id": "session-hidden", "sessionKind": "supervised", "hiddenFromIndex": True},
+    )
+    monkeypatch.setattr(conversation_adapter, "submit_session_message", lambda *args, **kwargs: {"turnId": "turn-1"})
+    monkeypatch.setattr(
+        conversation_adapter,
+        "get_session_detail",
+        lambda session_id: {
+            "id": session_id,
+            "lastTurnStatus": "running",
+            "updatedAt": "2026-06-11T00:00:03Z",
+            "messages": [
+                {"role": "user", "content": "inspect current state", "timestamp": "2026-06-11T00:00:01Z"},
+            ],
+        },
+    )
+    monkeypatch.setattr(conversation_adapter, "request_stop_session_turn", lambda session_id: stopped_sessions.append(session_id))
+    monkeypatch.setattr(conversation_adapter, "CONVERSATION_HARNESS_CANCEL_GRACE_SECONDS", 1.0)
+    monkeypatch.setattr(conversation_adapter.time, "monotonic", lambda: clock["now"])
+
+    def fake_sleep(seconds: float) -> None:
+        clock["now"] += float(seconds)
+
+    monkeypatch.setattr(conversation_adapter.time, "sleep", fake_sleep)
+
+    result = service._run_supervised_conversation_harness(
+        repo_root=tmp_path,
+        mode="single_turn",
+        prompt="inspect current state",
+        timeout_seconds=60,
+        expect_restart=False,
+        post_restart_observe_seconds=0,
+        keep_worktree=False,
+        scenario="strategy",
+        agent_binding={"agentId": "agent-a", "role": "baseline"},
+        mental_model_mode="enabled",
+        mental_model_enabled=True,
+        progress_callback=events.append,
+        cancel_checker=lambda: "operator stop",
+    )
+
+    assert result.status == "cancelled"
+    assert result.reason == "operator stop"
+    assert result.primary_returncode is None
+    assert stopped_sessions == ["session-hidden"]
+    assert events[-1]["phase"] == "conversation_cancelled"
+    assert events[-1]["mental_model_mode"] == "enabled"
+    assert events[-1]["mental_model_enabled"] is True
 
 
 def test_start_supervised_run_blocks_incomplete_agent_model_binding(monkeypatch, tmp_path):

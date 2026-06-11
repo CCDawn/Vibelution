@@ -69,6 +69,13 @@ def supervised_mental_model_enabled_for_mode(mode: Any) -> bool | None:
     return None
 
 
+def _mental_model_progress_fields(mode: str, enabled: bool | None) -> Dict[str, Any]:
+    return {
+        "mental_model_mode": normalize_supervised_mental_model_mode(mode),
+        "mental_model_enabled": enabled,
+    }
+
+
 def _safe_report_file_stem(value: str) -> str:
     raw = str(value or "").strip()
     stem = _SAFE_REPORT_FILE_STEM_RE.sub("-", raw).strip("._-")
@@ -2172,6 +2179,7 @@ def run_supervised_evolution_session(
     normalized_agent_bindings = _normalize_supervised_agent_bindings(agent_bindings)
     normalized_mental_model_mode = normalize_supervised_mental_model_mode(mental_model_mode)
     mental_model_enabled = supervised_mental_model_enabled_for_mode(normalized_mental_model_mode)
+    mental_model_progress_fields = _mental_model_progress_fields(normalized_mental_model_mode, mental_model_enabled)
 
     baseline_runs: List[SupervisedEvolutionRun] = []
     candidate_runs: List[SupervisedEvolutionRun] = []
@@ -2245,6 +2253,7 @@ def run_supervised_evolution_session(
                         "report_path": reusable.report_path or "",
                         "worktree_path": reusable.worktree_path,
                         "agent_binding": reusable.agent_binding or role_agent_binding,
+                        **mental_model_progress_fields,
                     },
                 )
                 _run_checkpoint(
@@ -2291,6 +2300,7 @@ def run_supervised_evolution_session(
                     "max_steps": max_steps,
                     "keep_worktree": keep_worktree,
                     "agent_binding": role_agent_binding,
+                    **mental_model_progress_fields,
                 },
             )
             try:
@@ -2309,6 +2319,7 @@ def run_supervised_evolution_session(
                             "prompt": prompt,
                             "agent_binding": role_agent_binding,
                             **payload,
+                            **mental_model_progress_fields,
                         },
                     )
 
@@ -2370,6 +2381,7 @@ def run_supervised_evolution_session(
                         "error_type": type(exc).__name__,
                         "error": str(exc),
                         "agent_binding": role_agent_binding,
+                        **mental_model_progress_fields,
                     },
                 )
                 raise
@@ -2395,6 +2407,7 @@ def run_supervised_evolution_session(
                     "report_path": str(report_path),
                     "drift_warning": _has_drift_warning(status=result.status, reason=result.reason),
                     "agent_binding": role_agent_binding,
+                    **mental_model_progress_fields,
                 },
             )
             sink.append(
@@ -2425,6 +2438,7 @@ def run_supervised_evolution_session(
                         "reason": reason,
                         "report_path": str(report_path),
                         "agent_binding": role_agent_binding,
+                        **mental_model_progress_fields,
                     },
                 )
                 raise SupervisedEvolutionCancelled(reason, session_id=session_id)
@@ -2464,6 +2478,7 @@ def run_supervised_evolution_session(
                         "worktree_path": reusable.worktree_path,
                         "agent_binding": reusable.agent_binding or role_agent_binding,
                         "evaluation_mode": "agent_judged",
+                        **mental_model_progress_fields,
                     },
                 )
                 _run_checkpoint(
@@ -2510,6 +2525,7 @@ def run_supervised_evolution_session(
                     "role": role,
                     "agent_binding": role_agent_binding,
                     "evaluation_mode": "agent_judged",
+                    **mental_model_progress_fields,
                 },
             )
             _emit_progress(
@@ -2548,6 +2564,7 @@ def run_supervised_evolution_session(
                             "agent_binding": role_agent_binding,
                             "evaluation_mode": "agent_judged",
                             **payload,
+                            **mental_model_progress_fields,
                         },
                     )
 
@@ -2585,6 +2602,7 @@ def run_supervised_evolution_session(
                         "error": str(exc),
                         "agent_binding": role_agent_binding,
                         "evaluation_mode": "agent_judged",
+                        **mental_model_progress_fields,
                     },
                 )
                 raise
@@ -2610,6 +2628,7 @@ def run_supervised_evolution_session(
                     "drift_warning": _has_drift_warning(status=result.status, reason=result.reason),
                     "agent_binding": role_agent_binding,
                     "evaluation_mode": "agent_judged",
+                    **mental_model_progress_fields,
                     "agent_judgment": _normalize_agent_judgment(
                         _agent_judgment_from_summary(result.evolution_summary or {})
                     ),
