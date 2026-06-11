@@ -47,6 +47,7 @@ class DatasetAdapter:
         case_count: Optional[int],
         validation_error: str,
         project_root: Optional[Path] = None,
+        include_environment_preflight: bool = True,
     ) -> Dict[str, Any]:
         return _default_usability(spec, available=available, case_count=case_count, validation_error=validation_error)
 
@@ -79,6 +80,7 @@ class SweBenchJsonlAdapter(DatasetAdapter):
         case_count: Optional[int],
         validation_error: str,
         project_root: Optional[Path] = None,
+        include_environment_preflight: bool = True,
     ) -> Dict[str, Any]:
         if validation_error:
             return _invalid_usability(validation_error)
@@ -113,6 +115,7 @@ class TerminalBenchJsonlAdapter(DatasetAdapter):
         case_count: Optional[int],
         validation_error: str,
         project_root: Optional[Path] = None,
+        include_environment_preflight: bool = True,
     ) -> Dict[str, Any]:
         if validation_error:
             return _invalid_usability(validation_error)
@@ -122,16 +125,18 @@ class TerminalBenchJsonlAdapter(DatasetAdapter):
             return {"usability_status": "empty", "usability_reason": "数据集当前没有可物化 case。"}
         if _is_terminal_bench_official_seed(spec):
             contract = terminal_bench_environment_contract(official_seed=True)
-            preflight = preflight_environment_contract(contract, project_root=project_root)
             reason = "可启动 Vibelution 自定义 harness 多步评测；结果不是 Terminal-Bench 官方成绩，官方 Harbor 判分器尚未接通。"
-            if not preflight["available"]:
-                reason += " 当前任务环境预检未完全通过，运行时应按 environment_unavailable 失败关账。"
-            return {
+            payload = {
                 "usability_status": "custom_harness_ready",
                 "usability_reason": reason,
                 "environment_contract": contract,
-                "environment_preflight": preflight,
             }
+            if include_environment_preflight:
+                preflight = preflight_environment_contract(contract, project_root=project_root)
+                if not preflight["available"]:
+                    payload["usability_reason"] += " 当前任务环境预检未完全通过，运行时应按 environment_unavailable 失败关账。"
+                payload["environment_preflight"] = preflight
+            return payload
         if _is_agent_judged_terminal_bench(spec):
             return {
                 "usability_status": "agent_harness_ready",
@@ -175,6 +180,7 @@ def adapter_usability(
     case_count: Optional[int],
     validation_error: str,
     project_root: Optional[Path] = None,
+    include_environment_preflight: bool = True,
 ) -> Dict[str, Any]:
     return get_dataset_adapter(spec.kind).explain_usability(
         spec,
@@ -182,6 +188,7 @@ def adapter_usability(
         case_count=case_count,
         validation_error=validation_error,
         project_root=project_root,
+        include_environment_preflight=include_environment_preflight,
     )
 
 

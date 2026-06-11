@@ -681,7 +681,11 @@ def resolve_source_path(spec: DatasetSpec, project_root: Path) -> Optional[Path]
     return path.resolve()
 
 
-def list_dataset_status(project_root: Optional[Path] = None) -> List[Dict[str, Any]]:
+def list_dataset_status(
+    project_root: Optional[Path] = None,
+    *,
+    include_environment_preflight: bool = True,
+) -> List[Dict[str, Any]]:
     root = (project_root or get_workspace().project_root).resolve()
     rows = []
     for spec in load_dataset_specs(root):
@@ -711,6 +715,7 @@ def list_dataset_status(project_root: Optional[Path] = None) -> List[Dict[str, A
             case_count=case_count,
             validation_error=validation_error,
             project_root=root,
+            include_environment_preflight=include_environment_preflight,
         )
         usability_status = str(usability.get("usability_status") or "blocked")
         usability_reason = str(usability.get("usability_reason") or spec.adapter_status or "当前适配器阻止运行。")
