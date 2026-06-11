@@ -1117,6 +1117,82 @@ def test_agent_config_workspace_reports_unresolved_model_reference(tmp_path, mon
     assert payload["health"]["counts"]["blocking"] >= 1
 
 
+def test_agent_config_workspace_repairs_legacy_agent_model_ids(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+
+    def fake_config_workspace():
+        return {
+            "modelOptions": [
+                {
+                    "model_id": "relay_openai_gpt_5_5",
+                    "source": "model_library",
+                    "provider": {"id": "relay_openai", "kind": "relay", "compat_mode": "openai"},
+                    "provider_kind": "relay",
+                    "model": "gpt-5.5",
+                    "label": "GPT-5.5 via relay",
+                    "transport": "responses",
+                    "details": {"transport": "responses"},
+                    "api_key_env": "OPENAI_API_KEY",
+                    "api_key_configured": True,
+                    "api_key_state": "configured",
+                },
+                {
+                    "model_id": "xiaomi_mimo_v2_5_pro_token_plan",
+                    "source": "model_library",
+                    "provider": {"id": "xiaomi_mimo_token_plan_cn", "kind": "xiaomi"},
+                    "provider_kind": "xiaomi",
+                    "model": "mimo-v2.5-pro",
+                    "label": "MiMo V2.5 Pro",
+                    "details": {},
+                    "api_key_env": "MIMO_API_KEY",
+                    "api_key_configured": True,
+                    "api_key_state": "configured",
+                },
+            ],
+        }
+
+    fake_llm = SimpleNamespace(
+        model_library={
+            "relay_openai_gpt_5_5": {"model": "gpt-5.5"},
+            "xiaomi_mimo_v2_5_pro_token_plan": {"model": "mimo-v2.5-pro"},
+        },
+    )
+    monkeypatch.setattr(config_service, "get_config_workspace", fake_config_workspace)
+    monkeypatch.setattr("config.settings.get_config", lambda: SimpleNamespace(llm=fake_llm))
+
+    gpt_agent = agent_directory_service.create_agent_instance(
+        display_name="旧 GPT Agent",
+        llm_bindings={"dialogue": {"modelId": "gpt_5_5_gpt_5_5"}},
+        primary_mode="chat",
+    )
+    mimo_agent = agent_directory_service.create_agent_instance(
+        display_name="旧 MiMo Agent",
+        llm_bindings={"dialogue": {"modelId": "mimo_v2_5_pro"}},
+        primary_mode="chat",
+    )
+
+    payload = agent_config_workspace_service.get_agent_config_workspace()
+    by_id = {item["agentId"]: item for item in payload["agents"]}
+
+    assert by_id[gpt_agent["agentId"]]["llmBindings"]["dialogue"]["modelId"] == "relay_openai_gpt_5_5"
+    assert by_id[mimo_agent["agentId"]]["llmBindings"]["dialogue"]["modelId"] == "xiaomi_mimo_v2_5_pro_token_plan"
+    assert not any(
+        item["code"] == "unresolved_model_reference_dialogue"
+        for item in payload["health"]["byAgent"].get(gpt_agent["agentId"], [])
+    )
+    assert not any(
+        item["code"] == "unresolved_model_reference_dialogue"
+        for item in payload["health"]["byAgent"].get(mimo_agent["agentId"], [])
+    )
+
+    stored = json.loads((tmp_path / "workspace" / "agents" / "agents.json").read_text(encoding="utf-8"))
+    stored_by_id = {item["agentId"]: item for item in stored["agents"]}
+    assert stored_by_id[gpt_agent["agentId"]]["llmBindings"]["dialogue"]["modelId"] == "relay_openai_gpt_5_5"
+    assert stored_by_id[mimo_agent["agentId"]]["llmBindings"]["dialogue"]["modelId"] == "xiaomi_mimo_v2_5_pro_token_plan"
+    assert stored_by_id[gpt_agent["agentId"]]["metadata"]["llmBindingModelIdRepairs"][-1]["legacyModelId"] == "gpt_5_5_gpt_5_5"
+    assert stored_by_id[mimo_agent["agentId"]]["metadata"]["llmBindingModelIdRepairs"][-1]["legacyModelId"] == "mimo_v2_5_pro"
+
+
 def test_agent_config_workspace_repairs_stale_chat_room_participant_model_snapshot(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
