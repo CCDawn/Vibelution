@@ -87,7 +87,7 @@
       <div class="status-grid">
         <div class="status-item"><b>状态</b><span>source_registered</span></div>
         <div class="status-item"><b>功能岗位</b><span>Source Intake Agent</span></div>
-        <div class="status-item"><b>Agent 状态</b><span>可复用通用 data-processing assignment / source-extraction / source-quality 后端已接入；Teams 资料搜集执行台、候选资料筛选台和三阶段启动台已接入</span></div>
+        <div class="status-item"><b>Agent 状态</b><span>可复用通用 data-processing assignment / source-extraction / source-quality 后端已接入；Teams 资料搜集执行台、候选资料筛选台、三阶段启动台和 KV 缓存对话轨迹已接入</span></div>
         <div class="status-item"><b>进入条件</b><span>用户提供 PDF、论文、赛题或补充资料；文件可在挑战杯工作区定位。</span></div>
         <div class="status-item"><b>退出条件</b><span>每个知识搜集轮次有 stageRoundId、roundNumber、teamMemoryRecord、coordinationContract.startResult、coordinationRoomId/coordinationRoundId、sourceRunIds、dataSearchPlanRef、planned queries、assignedQueries 和 resultWritebackContract；每个资料项先有 DataRecord/sourceRef/rawLocation/title/qualitySignals/collectionTrace，再有 source_manifest 的 id、path、type、allowedForAnalysis、sha256、pageScope、sourceExtraction.pageAnchors 和 sourceQualityAssessment。</span></div>
         <div class="status-item"><b>审核门禁</b><span>确认资料允许分析、来源可信度和是否纳入本轮。</span></div>
@@ -100,10 +100,14 @@
 <li>自动启动团队协调 round</li>
 <li>DataProcessingRun 建立</li>
 <li>DataSearchPlan/querySeeds 搜索计划</li>
+<li>KV/prompt cache 启动门禁</li>
+<li>稳定前缀/动态增量契约</li>
 <li>CollectionAssignment 资料搜集任务</li>
 <li>assignedQueries 角色分配</li>
+<li>promptCachePartition 角色分区</li>
 <li>Teams 启动搜集批次</li>
-<li>Teams 查看 run/assignment/query 状态</li>
+<li>Teams 查看 run/assignment/query/KV 状态</li>
+<li>搜集对话流展示搜索计划、缓存门禁、领取任务、回写和入候选仓库</li>
 <li>手工 CollectionOutput 回写</li>
 <li>DataRecord 通用记录</li>
 <li>DataRecord 自动导入 source_manifest</li>
@@ -125,7 +129,7 @@
 <li>/api/teams/{teamId}/workflow-orchestration/official-model-evidence/status</li>
 <li>research_knowledge_query_tool</li>
 <li>/api/teams/{teamId}/workflow-orchestration/candidates/{candidateId}/source-extraction</li></ul></article>
-        <article class="plan-card"><h2>功能缺口</h2><p class="hint">科研三阶段启动台、资料搜集阶段轮次、资料搜集批次启动、DataSearchPlan/query seed 契约、通用资料搜集 assignment/output、Teams 执行台、DataRecord 到 source_manifest 导入桥和 source-quality 筛选台已接入；真实外部搜索执行器、长 PDF 自动分批、章节识别和非 PDF 资料解析仍待补。</p></article>
+        <article class="plan-card"><h2>功能缺口</h2><p class="hint">科研三阶段启动台、资料搜集阶段轮次、资料搜集批次启动、DataSearchPlan/query seed 契约、KV/prompt cache 启动门禁、缓存分区对话轨迹、通用资料搜集 assignment/output、Teams 执行台、DataRecord 到 source_manifest 导入桥和 source-quality 筛选台已接入；真实外部搜索执行器、搜索/下载事件的自动回写、长 PDF 自动分批、章节识别和非 PDF 资料解析仍待补。</p></article>
         <article class="plan-card"><h2>失败回退</h2><p class="hint">资料不足、路径缺失、来源不明、权限不清、抽取失败或解析器不可用时，assignment 标记 returned/partial，挑战杯候选停在 source_needs_confirmation；群聊缺失、忙碌或没有可发言成员时阶段轮次保留为 needs_attention，并通过 coordination/retry 重新启动团队协调。</p></article>
       </div>
     </section>
