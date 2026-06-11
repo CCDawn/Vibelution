@@ -39,7 +39,7 @@
         <aside class="dashboard-panel">
           <h2>审核摘要</h2>
           <div class="kpi-grid">
-            <div class="kpi"><b>当前阶段</b><strong>M6.11</strong><span>资料搜集执行台、资料质量筛选、模型证据链和 paper_note 分块计划已接入。</span></div>
+            <div class="kpi"><b>当前阶段</b><strong>M6.12</strong><span>资料搜集独立页、对话式过程流、资料质量筛选、模型证据链和 paper_note 分块计划已接入。</span></div>
             <div class="kpi"><b>流程节点</b><strong>13</strong><span>1-9 为知识入库主线，10-13 保留占位与维护节点。</span></div>
             <div class="kpi"><b>候选资料</b><strong>10</strong><span>第一轮 source_manifest 已进入 candidate-only 工作区。</span></div>
             <div class="kpi"><b>正式写入</b><strong>0</strong><span>未写正式 Team Knowledge、RAG 或 official graph。</span></div>
@@ -47,7 +47,7 @@
           <div class="focus-list">
             <div class="focus-item"><b>优先看</b><span>资料搜集、候选图谱和知识入库边界是否能支撑下一轮科研提炼。</span></div>
             <div class="focus-item"><b>不能做</b><span>本页面不触发真实搜索、不审批入库、不把候选图谱当作正式事实。</span></div>
-            <div class="focus-item"><b>下一步</b><span>按 chunkId 执行 paper_note 提炼，补多 chunk 草稿合并策略和机制提炼执行台。</span></div>
+            <div class="focus-item"><b>下一步</b><span>把真实搜索/下载执行事件接入搜集对话流，并继续按 chunkId 执行 paper_note 提炼。</span></div>
           </div>
         </aside>
       </section>
@@ -465,7 +465,7 @@
           <div class="plan-summary">
             <div class="service-row"><strong>知识搜集主线</strong><span>只跑通知识搜集、筛选、候选入库、知识治理 Agent 和图谱同步设计；不进入训练实验、算法实现或比赛交付。</span></div>
             <div class="service-row"><strong>实施目标</strong><span>复用 Vibelution 现有 Research、Team Knowledge、RAG、Knowledge Steward 和 Memory Graph 能力，把 01-09 做成可运行 MVP。</span></div>
-            <div class="service-row"><strong>团队入口</strong><span>/teams?team=research-team · 选中 ai科学研究团队后，页面顶部显示科研流程二级索引条；当前节点内容区优先展示科研三阶段启动台：知识搜集、实验、迭代。</span></div>
+            <div class="service-row"><strong>团队入口</strong><span>/teams?team=research-team · 选中 ai科学研究团队后，页面顶部显示科研流程二级索引条；当前节点内容区优先展示科研三阶段启动台：知识搜集、实验、迭代；点击资料搜集会进入独立工作页并可返回团队页。</span></div>
           </div>
           <div class="dashboard-panel">
             <h2>边界提醒</h2>
@@ -1257,7 +1257,7 @@
           <div class="service-row"><b>团队群聊</b><span>room-20260529-090009-757107-6a747d62 · research_coordination</span></div>
           <div class="service-row"><b>流程文件</b><span>workspace/teams/research-team/workflow_orchestration.json</span></div>
           <div class="service-row"><b>候选仓库</b><span>workspace/teams/research-team/candidate_store/index.json</span></div>
-          <div class="service-row"><b>策略</b><span>挑战杯科研流程直接绑定当前 Vibelution ai科学研究团队，不另建新团队；团队页面左侧只承担团队选择/创建，research-team 的科研流程索引进入团队主工作区作为二级导航，组织画布仅作为附属结构视图。</span></div>
+          <div class="service-row"><b>策略</b><span>挑战杯科研流程直接绑定当前 Vibelution ai科学研究团队，不另建新团队；团队页面左侧只承担团队选择/创建，research-team 的科研流程索引进入团队主工作区作为二级导航，资料搜集已拆成独立一级工作页，组织画布仅作为附属结构视图。</span></div>
         </div>
       </div>
       <div class="runbook-grid">
@@ -1327,7 +1327,7 @@
                 </div>
 <div class="service-row">
                   <b>TeamsRoute workflow workspace</b>
-                  <span>已落地入口：research-team 页面顶部显示科研流程二级索引条；当前节点内容区优先展示科研三阶段启动台，并按索引展示 workflow 当前阶段、candidateStore 摘要、模型调用证据链、coordination queue、communicationBrief、knowledge ingestion status、validationSummary、候选图谱、最近候选和团队沟通；组织画布仅在点击索引后作为附属视图显示。</span>
+                  <span>已落地入口：research-team 页面顶部显示科研流程二级索引条；当前节点内容区优先展示科研三阶段启动台，并按索引展示 workflow 当前阶段、candidateStore 摘要、模型调用证据链、coordination queue、communicationBrief、knowledge ingestion status、validationSummary、候选图谱、最近候选和团队沟通；资料搜集已拆到 /teams?team=research-team&amp;researchView=source_collection 独立一级页状态，用对话式过程流展示搜集步骤；组织画布仅在点击索引后作为附属视图显示。</span>
                 </div>
 <div class="service-row">
                   <b>local_research_worker_model</b>
@@ -1817,7 +1817,7 @@
 <div class="blueprint-row compact">
               <b>验证</b>
               <strong>tests/test_data_processing_service.py + tests/test_data_processing_routes.py + tests/test_team_workflow_orchestration_service.py + tests/test_team_workflow_routes.py + TeamsRoute.layout.test.ts</strong>
-              <span>覆盖通用数据处理首切、ResearchStageRound 三阶段启动/续做/新一轮、source-collection run 启动、DataSearchPlan/query seed 契约、DataRecord 导入 source_manifest、Teams 资料搜集执行台契约、主路径、非 ownerAgent 不能写最终状态、本地模型任务包、输出校验、知识入库状态总览、模型证据链、资料质量筛选和 paper_note 分块计划前端契约。</span>
+              <span>覆盖通用数据处理首切、ResearchStageRound 三阶段启动/续做/新一轮、source-collection run 启动、DataSearchPlan/query seed 契约、DataRecord 导入 source_manifest、Teams 资料搜集独立页/对话流契约、主路径、非 ownerAgent 不能写最终状态、本地模型任务包、输出校验、知识入库状态总览、模型证据链、资料质量筛选和 paper_note 分块计划前端契约。</span>
             </div>
       </div>
       <div class="agent-matrix" style="margin-top: 12px;">
@@ -1837,7 +1837,7 @@
               <b>M0.2</b>
               <strong>Teams 科研流程二级导航</strong>
               <span>左侧团队栏降级为团队创建、模板和团队列表；科研流程索引不再与团队同级，而是进入 ai科学研究团队主工作区顶部作为二级导航。</span>
-              <span>用户先选团队，再在选中团队内部切换科研总览、资料搜集、团队协调、知识入库、候选图谱、候选资料、团队沟通和组织画布；点击索引只切换当前节点页面，组织画布仍可编辑但属于附属视图。</span>
+              <span>用户先选团队，再在选中团队内部切换科研总览、团队协调、知识入库、候选图谱、候选资料、团队沟通和组织画布；资料搜集从索引跳转到独立一级工作页，组织画布仍可编辑但属于附属视图。</span>
             </div>
 <div class="blueprint-row">
               <b>M0.5</b>
@@ -1914,7 +1914,7 @@
 <div class="blueprint-row">
               <b>M6.6</b>
               <strong>Teams 资料搜集执行台</strong>
-              <span>research-team 页面新增独立资料搜集索引页，可启动 source collection run、查看最近批次、run status、assignment、assignedQueries，并手工提交 CollectionOutput。</span>
+              <span>research-team 页面新增资料搜集索引入口，可启动 source collection run、查看最近批次、run status、assignment、assignedQueries，并手工提交 CollectionOutput。</span>
               <span>启动批次会从 Team canvas 读取 data_discovery/source_acquisition/content_extraction/source_quality 等角色绑定的团队 agentId；手工回写会先写入 DataRecord，再通过 Team workflow 导入桥转成 source_manifest 候选；仍不触发真实外部搜索，不写正式 Team Knowledge/RAG/official graph。</span>
             </div>
 <div class="blueprint-row">
@@ -1946,6 +1946,12 @@
               <strong>资料质量筛选执行台</strong>
               <span>新增 source-quality/status 与 source-quality/assess；Teams 候选资料页可由 Source Quality Assessment Agent 对 source_manifest 标记通过筛选或退回补资料。</span>
               <span>评估结果写入 CandidateStore metadata.sourceQualityAssessment/sourceQualityAssessments，并更新 source_quality_approved/source_quality_needs_revision/source_quality_rejected；不写正式 Team Knowledge/RAG/official graph。</span>
+            </div>
+<div class="blueprint-row">
+              <b>M6.12</b>
+              <strong>资料搜集独立一级页与对话流</strong>
+              <span>新增 /teams?team=research-team&amp;researchView=source_collection 独立工作页状态，主团队页资料搜集索引只作为入口；独立页提供返回团队页面、状态摘要、对话式搜集流和技术控制台。</span>
+              <span>对话流从现有 run/query/assignment/CollectionOutput/DataRecord/source_manifest/source_quality 状态合成，展示谁做了什么、结果是什么、存到哪里；仍不触发真实外部搜索，不写正式 Team Knowledge/RAG/official graph。</span>
             </div>
       </div>
       <div class="tag-row">
