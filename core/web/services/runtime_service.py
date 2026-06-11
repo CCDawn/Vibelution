@@ -16,6 +16,7 @@ from config import get_config
 from core.infrastructure.mental_model import get_mental_model
 from core.mental_model_flags import is_mental_model_enabled
 from core.runtime_manager import ensure_daemon_running, submit_command
+from core.runtime_manager import work_run_store
 from core.runtime_manager.evolution_store import (
     load_active_run_snapshot as load_evolution_active_run_snapshot,
     load_latest_run_snapshot as load_evolution_latest_run_snapshot,
@@ -42,35 +43,6 @@ LAUNCHER_SCRIPT_PATH = PROJECT_ROOT / "scripts" / "vibelution_launcher.ps1"
 LAUNCHER_STATE_PATH = PROJECT_ROOT / ".runtime" / "launcher" / "state.json"
 LAUNCHER_SHUTDOWN_LOG_PATH = PROJECT_ROOT / ".runtime" / "launcher" / "shutdown-request.log"
 RUNNING_SESSION_PHASES = {"running", "stopping"}
-_ACTIVE_WORK_BLOCKING_STATUSES = {
-    "",
-    "active",
-    "queued",
-    "running",
-    "stopping",
-    "started",
-    "in_progress",
-    "pausing",
-    "resuming",
-    "force_stopping",
-}
-_ACTIVE_WORK_NON_BLOCKING_STATUSES = {
-    "cancelled",
-    "closed",
-    "completed",
-    "done",
-    "failed",
-    "failed_provider",
-    "failed_runtime",
-    "idle",
-    "needs_continue",
-    "paused_limit",
-    "ready",
-    "stopped",
-    "stopped_by_user",
-    "stop_failed",
-    "superseded",
-}
 
 
 class RuntimeRestartActiveWorkBlocked(Exception):
@@ -1325,20 +1297,7 @@ def _active_work_run_item(kind: str, payload: dict) -> dict[str, str]:
 
 
 def _active_work_payload_blocks_lifecycle(payload: dict) -> bool:
-    if str(payload.get("finishedAt") or payload.get("endedAt") or "").strip():
-        return False
-    status = str(
-        payload.get("status")
-        or payload.get("currentPhase")
-        or payload.get("phase")
-        or payload.get("runtimeStatus")
-        or ""
-    ).strip().lower()
-    if status in _ACTIVE_WORK_NON_BLOCKING_STATUSES:
-        return False
-    if status in _ACTIVE_WORK_BLOCKING_STATUSES:
-        return True
-    return bool(status)
+    return work_run_store.active_work_payload_blocks_lifecycle(payload)
 
 
 def _active_work_run_detail(lang: str, active_work_runs: list[dict[str, str]]) -> str:

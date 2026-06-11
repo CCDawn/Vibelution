@@ -2,6 +2,7 @@ import json
 import http.client
 import subprocess
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -5280,6 +5281,7 @@ def test_handle_force_close_workbench_marks_work_runs_and_verifies_close(monkeyp
 
 def test_force_close_marks_parallel_persistent_work_runs(tmp_path, monkeypatch):
     work_runs_dir = tmp_path / ".runtime" / "runtime-manager" / "work_runs"
+    stale_at = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
     store = WorkRunStore(root=work_runs_dir)
     store.persist_snapshot(
         "chat_turn",
@@ -5288,6 +5290,7 @@ def test_force_close_marks_parallel_persistent_work_runs(tmp_path, monkeypatch):
             "runKind": "chat_turn",
             "sessionId": "session-alpha",
             "status": "running",
+            "updatedAt": stale_at,
         },
         active_run_id="chat-alpha",
     )
@@ -5298,6 +5301,37 @@ def test_force_close_marks_parallel_persistent_work_runs(tmp_path, monkeypatch):
             "runKind": "chat_turn",
             "sessionId": "session-beta",
             "status": "queued",
+        },
+        active_run_id="chat-alpha",
+    )
+    store.persist_snapshot(
+        "chat_turn",
+        {
+            "runId": "chat-stale",
+            "runKind": "chat_turn",
+            "sessionId": "session-stale",
+            "status": "running",
+            "updatedAt": stale_at,
+        },
+        active_run_id="chat-alpha",
+    )
+    store.persist_snapshot(
+        "chat_turn",
+        {
+            "runId": "chat-routed",
+            "runKind": "chat_turn",
+            "sessionId": "session-routed",
+            "status": "routed",
+        },
+        active_run_id="chat-alpha",
+    )
+    store.persist_snapshot(
+        "chat_turn",
+        {
+            "runId": "chat-partial",
+            "runKind": "chat_turn",
+            "sessionId": "session-partial",
+            "status": "partial",
         },
         active_run_id="chat-alpha",
     )
@@ -5319,11 +5353,17 @@ def test_force_close_marks_parallel_persistent_work_runs(tmp_path, monkeypatch):
     assert {item["runId"] for item in stopped} == {"chat-alpha", "chat-beta"}
     alpha = store.load_snapshot("chat_turn", "chat-alpha")
     beta = store.load_snapshot("chat_turn", "chat-beta")
+    stale = store.load_snapshot("chat_turn", "chat-stale")
+    routed = store.load_snapshot("chat_turn", "chat-routed")
+    partial = store.load_snapshot("chat_turn", "chat-partial")
     done = store.load_snapshot("chat_turn", "chat-done")
     assert alpha and alpha["status"] == "stopped_by_user"
     assert beta and beta["status"] == "stopped_by_user"
     assert alpha["runtimeStatus"] == "force_stopped"
     assert beta["forceStopReason"] == "launcher_force_stop_button"
+    assert stale and stale["status"] == "running"
+    assert routed and routed["status"] == "routed"
+    assert partial and partial["status"] == "partial"
     assert done and done["status"] == "completed"
     assert store.load_run_index("chat_turn")["activeRunId"] == ""
 
