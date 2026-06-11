@@ -2064,6 +2064,98 @@ def test_recover_processing_queue_completes_stale_satisfied_stop_manager_close(t
     assert "command_queue.recovered_stale_close_completed" in [event["type"] for event in events]
 
 
+def test_recover_processing_queue_preserves_completed_result_without_requeue(tmp_path, monkeypatch):
+    inbox_dir = tmp_path / "inbox"
+    processing_dir = tmp_path / "processing"
+    results_dir = tmp_path / "results"
+    events_path = tmp_path / "events.jsonl"
+    for path in (inbox_dir, processing_dir, results_dir):
+        path.mkdir(parents=True)
+
+    command = {
+        "commandId": "cmd-completed-restart",
+        "type": "restart_workbench",
+        "requestedBy": "web_ui",
+        "requestedAt": "2026-06-11T05:20:00+00:00",
+        "args": {"reason": "web_restart_button"},
+    }
+    (processing_dir / "cmd-completed-restart.json").write_text(json.dumps(command), encoding="utf-8")
+    (results_dir / "cmd-completed-restart.json").write_text(
+        json.dumps(
+            {
+                "commandId": "cmd-completed-restart",
+                "accepted": True,
+                "completed": True,
+                "ok": True,
+                "message": "Workbench restarted.",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(command_queue, "INBOX_DIR", inbox_dir)
+    monkeypatch.setattr(command_queue, "PROCESSING_DIR", processing_dir)
+    monkeypatch.setattr(command_queue, "RESULTS_DIR", results_dir)
+    monkeypatch.setattr(command_queue, "EVENTS_PATH", events_path)
+    monkeypatch.setattr(command_queue, "ensure_runtime_manager_dirs", lambda: None)
+    monkeypatch.setattr(command_queue, "record_runtime_manager_scene_event", lambda *args, **kwargs: None)
+
+    command_queue.recover_processing_queue()
+
+    assert list(inbox_dir.glob("*.json")) == []
+    assert not (processing_dir / "cmd-completed-restart.json").exists()
+    assert (results_dir / "cmd-completed-restart.json").exists()
+    events = [json.loads(line) for line in events_path.read_text(encoding="utf-8").splitlines()]
+    assert events[-1]["type"] == "command_queue.recovered_processing_result_preserved"
+    assert events[-1]["payload"]["resultCompleted"] is True
+
+
+def test_recover_processing_queue_does_not_discard_unfinished_result(tmp_path, monkeypatch):
+    inbox_dir = tmp_path / "inbox"
+    processing_dir = tmp_path / "processing"
+    results_dir = tmp_path / "results"
+    events_path = tmp_path / "events.jsonl"
+    for path in (inbox_dir, processing_dir, results_dir):
+        path.mkdir(parents=True)
+
+    command = {
+        "commandId": "cmd-unfinished-restart",
+        "type": "restart_workbench",
+        "requestedBy": "web_ui",
+        "requestedAt": "2026-06-11T05:21:00+00:00",
+        "args": {"reason": "web_restart_button"},
+    }
+    (processing_dir / "cmd-unfinished-restart.json").write_text(json.dumps(command), encoding="utf-8")
+    (results_dir / "cmd-unfinished-restart.json").write_text(
+        json.dumps(
+            {
+                "commandId": "cmd-unfinished-restart",
+                "accepted": True,
+                "completed": False,
+                "ok": False,
+                "message": "Deferred until active work clears.",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(command_queue, "INBOX_DIR", inbox_dir)
+    monkeypatch.setattr(command_queue, "PROCESSING_DIR", processing_dir)
+    monkeypatch.setattr(command_queue, "RESULTS_DIR", results_dir)
+    monkeypatch.setattr(command_queue, "EVENTS_PATH", events_path)
+    monkeypatch.setattr(command_queue, "ensure_runtime_manager_dirs", lambda: None)
+    monkeypatch.setattr(command_queue, "record_runtime_manager_scene_event", lambda *args, **kwargs: None)
+
+    command_queue.recover_processing_queue()
+
+    queued = json.loads((inbox_dir / "cmd-unfinished-restart.json").read_text(encoding="utf-8"))
+    assert queued["commandId"] == "cmd-unfinished-restart"
+    assert not (processing_dir / "cmd-unfinished-restart.json").exists()
+    assert (results_dir / "cmd-unfinished-restart.json").exists()
+    events = [json.loads(line) for line in events_path.read_text(encoding="utf-8").splitlines()]
+    assert events[-1]["type"] == "command_queue.processing_recovered"
+
+
 def test_submit_command_treats_duplicate_stop_manager_close_as_idempotent(tmp_path, monkeypatch):
     inbox_dir = tmp_path / "inbox"
     processing_dir = tmp_path / "processing"

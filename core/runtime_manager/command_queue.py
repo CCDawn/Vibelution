@@ -163,6 +163,8 @@ def recover_processing_queue() -> None:
     ensure_runtime_manager_dirs()
     for path in sorted(PROCESSING_DIR.glob("*.json")):
         command = _load_command_file(path)
+        if _discard_recovered_command_with_existing_result(path, command):
+            continue
         if _complete_recovered_satisfied_stop_manager_close(path, command):
             continue
         target = INBOX_DIR / path.name
@@ -386,6 +388,42 @@ def _load_command_file(path: Path) -> dict[str, Any]:
     except (OSError, json.JSONDecodeError):
         return {}
     return payload if isinstance(payload, dict) else {}
+
+
+def _discard_recovered_command_with_existing_result(path: Path, command: dict[str, Any]) -> bool:
+    command_id = str(command.get("commandId") or path.stem).strip() or path.stem
+    result_path = RESULTS_DIR / f"{command_id}.json"
+    if not result_path.exists():
+        return False
+    try:
+        payload = json.loads(result_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    if not isinstance(payload, dict):
+        return False
+    if payload.get("completed") is not True:
+        return False
+    result_command_id = str(payload.get("commandId") or command_id).strip() or command_id
+    if result_command_id != command_id:
+        return False
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        return False
+    _append_queue_event(
+        "command_queue.recovered_processing_result_preserved",
+        {
+            "commandId": command_id,
+            "type": str(command.get("type") or ""),
+            "requestedBy": str(command.get("requestedBy") or ""),
+            "requestedAt": str(command.get("requestedAt") or ""),
+            "queuePath": path.name,
+            "resultPath": result_path.name,
+            "resultCompleted": bool(payload.get("completed")),
+            "resultOk": bool(payload.get("ok")),
+        },
+    )
+    return True
 
 
 def _lifecycle_cancel_response(

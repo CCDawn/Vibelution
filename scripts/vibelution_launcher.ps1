@@ -2006,12 +2006,52 @@ function Test-ProcessAlive {
     return $null -ne (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue)
 }
 
+function Get-ProcessChildPidMap {
+    $childMap = @{}
+    try {
+        $processes = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue)
+    } catch {
+        Write-LauncherControlLog `
+            -Event "launcher.process.child_map.failed" `
+            -Message "Failed to build a process child map for lifecycle cleanup." `
+            -Level "warning" `
+            -Fields @{ error = $_.Exception.Message }
+        return $childMap
+    }
+
+    foreach ($process in $processes) {
+        $parentPid = [int](Get-ObjectPropertyValue -Object $process -Name "ParentProcessId" -Default 0)
+        $childPid = [int](Get-ObjectPropertyValue -Object $process -Name "ProcessId" -Default 0)
+        if (-not $parentPid -or -not $childPid) {
+            continue
+        }
+        if (-not $childMap.ContainsKey($parentPid)) {
+            $childMap[$parentPid] = New-Object System.Collections.Generic.List[int]
+        }
+        [void]$childMap[$parentPid].Add($childPid)
+    }
+    return $childMap
+}
+
 function Stop-ProcessesById {
     param(
         [int[]]$ProcessIds,
-        [int[]]$ExcludePids = @()
+        [int[]]$ExcludePids = @(),
+        [hashtable]$ChildProcessMap = $null
     )
 
+    $candidateProcessIds = @($ProcessIds | Where-Object { $_ } | Sort-Object -Unique)
+    if ($candidateProcessIds.Count -eq 0) {
+        return
+    }
+    $useChildProcessMap = $null -ne $ChildProcessMap
+    if (
+        -not $ChildProcessMap -and
+        (Get-Command -Name "Get-ProcessChildPidMap" -CommandType Function -ErrorAction SilentlyContinue)
+    ) {
+        $ChildProcessMap = Get-ProcessChildPidMap
+        $useChildProcessMap = $true
+    }
     $protectedProcessIds = @()
     $protectedProcessVar = Get-Variable -Scope Script -Name "protectedProcessIds" -ErrorAction SilentlyContinue
     if ($protectedProcessVar) {
@@ -2023,7 +2063,7 @@ function Stop-ProcessesById {
             $excluded[[int]$excludedPid] = $true
         }
     }
-    foreach ($processId in @($ProcessIds | Sort-Object -Unique)) {
+    foreach ($processId in $candidateProcessIds) {
         if (-not $processId) {
             continue
         }
@@ -2035,11 +2075,16 @@ function Stop-ProcessesById {
                 -Fields @{ pid = [int]$processId }
             continue
         }
-        $childPids = @(Get-CimInstance Win32_Process -Filter "ParentProcessId = $processId" -ErrorAction SilentlyContinue | ForEach-Object {
-            [int]$_.ProcessId
-        })
+        $childPids = @()
+        if ($useChildProcessMap -and $ChildProcessMap.ContainsKey([int]$processId)) {
+            $childPids = @($ChildProcessMap[[int]$processId])
+        } elseif (-not $useChildProcessMap) {
+            $childPids = @(Get-CimInstance Win32_Process -Filter "ParentProcessId = $processId" -ErrorAction SilentlyContinue | ForEach-Object {
+                [int]$_.ProcessId
+            })
+        }
         if ($childPids.Count -gt 0) {
-            Stop-ProcessesById -ProcessIds $childPids -ExcludePids @($excluded.Keys)
+            Stop-ProcessesById -ProcessIds $childPids -ExcludePids @($excluded.Keys) -ChildProcessMap $ChildProcessMap
         }
         Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
     }
@@ -6574,16 +6619,60 @@ function Stop-ManagedBackendProcesses {
 }
 
 function Get-ManagedSessionClosureSnapshot {
-    $snapshot = Get-SessionSnapshot
+    param(
+        [object]$BackendStopped = $null,
+        [object]$BrowserStopped = $null,
+        [object]$BackendStopTrace = $null,
+        [string]$ProfileDir = ""
+    )
+
+    if (-not $ProfileDir) {
+        $ProfileDir = $workbenchBrowserProfileDir
+    }
     $workbench = Get-RuntimeManagerWorkbench
     $desiredState = [string](Get-ObjectPropertyValue -Object $workbench -Name "desiredState" -Default "")
     $observedState = [string](Get-ObjectPropertyValue -Object $workbench -Name "observedState" -Default "")
     $phase = [string](Get-ObjectPropertyValue -Object $workbench -Name "phase" -Default "")
     $failureMessage = [string](Get-ObjectPropertyValue -Object $workbench -Name "failureMessage" -Default "")
-    $portOwnerPid = Get-ListeningPid $port
-    $backendHealthy = [bool](Test-WebHealthy)
-    $backendRunning = ($snapshot.BackendPids.Count -gt 0) -or [bool]$portOwnerPid -or $backendHealthy
-    $browserRunning = ($snapshot.BrowserPids.Count -gt 0) -or ($snapshot.BrowserWindowCount -gt 0)
+    $backendStoppedKnown = $null -ne $BackendStopped
+    $browserStoppedKnown = $null -ne $BrowserStopped
+    $backendPids = @()
+    $browserPids = @()
+    $browserWindowCount = 0
+    $portOwnerPid = $null
+    $backendHealthy = $false
+
+    if ($backendStoppedKnown -and [bool]$BackendStopped) {
+        $backendRunning = $false
+    } else {
+        if ($BackendStopTrace -and $BackendStopTrace.CandidatePids) {
+            $backendPids = @($BackendStopTrace.CandidatePids | ForEach-Object {
+                [int]$_
+            } | Where-Object {
+                Test-ProcessAlive $_
+            } | Sort-Object -Unique)
+        } else {
+            $backendPids = @(Get-ManagedBackendCandidatePids)
+        }
+        $tracePortPid = if ($BackendStopTrace) { $BackendStopTrace.FinalPortPid } else { $null }
+        if ($tracePortPid) {
+            $portOwnerPid = [int]$tracePortPid
+        } else {
+            $portOwnerPid = Get-ListeningPid $port
+        }
+        $backendHealthy = [bool](Test-WebHealthy)
+        $backendRunning = ($backendPids.Count -gt 0) -or [bool]$portOwnerPid -or $backendHealthy
+    }
+
+    if ($browserStoppedKnown -and [bool]$BrowserStopped) {
+        $browserRunning = $false
+    } else {
+        $browserPids = @(Get-ManagedBrowserPids -ProfileDir $ProfileDir -Role "workbench")
+        if ($browserPids.Count -gt 0) {
+            $browserWindowCount = @(Get-ManagedBrowserWindowProcesses -ProfileDir $ProfileDir -Role "workbench").Count
+        }
+        $browserRunning = ($browserPids.Count -gt 0) -or ($browserWindowCount -gt 0)
+    }
     $managerClosed = if ($workbench) {
         $desiredState -eq "closed" -and $observedState -eq "closed" -and $phase -eq "steady"
     } else {
@@ -6594,15 +6683,16 @@ function Get-ManagedSessionClosureSnapshot {
         BackendStopped = -not $backendRunning
         BrowserStopped = -not $browserRunning
         ManagerClosed = [bool]$managerClosed
-        BackendPids = @($snapshot.BackendPids)
+        BackendPids = @($backendPids)
         BackendHealthy = [bool]$backendHealthy
-        BrowserPids = @($snapshot.BrowserPids)
-        BrowserWindowCount = [int]$snapshot.BrowserWindowCount
+        BrowserPids = @($browserPids)
+        BrowserWindowCount = [int]$browserWindowCount
         PortOwnerPid = $portOwnerPid
         DesiredState = $desiredState
         ObservedState = $observedState
         Phase = $phase
         FailureMessage = $failureMessage
+        SnapshotMode = if (($backendStoppedKnown -and [bool]$BackendStopped) -and ($browserStoppedKnown -and [bool]$BrowserStopped)) { "stop_trace_fast_path" } else { "targeted_probe" }
     }
 }
 
@@ -6629,6 +6719,11 @@ function Write-ManagedSessionClosureRecord {
         [hashtable]$Timings = @{}
     )
 
+    $closureSnapshotMode = ""
+    if ($Closure -and $Closure.PSObject.Properties.Match("SnapshotMode").Count -gt 0) {
+        $closureSnapshotMode = [string]$Closure.SnapshotMode
+    }
+
     $fields = @{
         reason = $Reason
         source = $Source
@@ -6644,6 +6739,7 @@ function Write-ManagedSessionClosureRecord {
         observed_state = [string]$Closure.ObservedState
         phase = [string]$Closure.Phase
         failure_message = [string]$Closure.FailureMessage
+        closure_snapshot_mode = $closureSnapshotMode
         control_log_path = $launcherControlLogPath
     }
     if ($Timings -and $Timings.Count -gt 0) {
@@ -6813,7 +6909,11 @@ function Stop-ManagedSession {
     $browserWaitEndedAt = Get-Date
 
     $closureSnapshotStartedAt = Get-Date
-    $closure = Get-ManagedSessionClosureSnapshot
+    $closure = Get-ManagedSessionClosureSnapshot `
+        -BackendStopped $backendStopped `
+        -BrowserStopped $browserStopped `
+        -BackendStopTrace $backendStopTrace `
+        -ProfileDir $workbenchBrowserProfileDir
     $closureSnapshotEndedAt = Get-Date
     $stopEndedAt = Get-Date
     $shutdownTimings = @{
@@ -6843,6 +6943,7 @@ function Stop-ManagedSession {
                 browser_pids = @($closure.BrowserPids)
                 manager_closed = [bool]$closure.ManagerClosed
                 port_owner_pid = $closure.PortOwnerPid
+                closure_snapshot_mode = [string]$closure.SnapshotMode
                 timings_ms = $shutdownTimings
             }
     }
@@ -7465,18 +7566,34 @@ if ($runtimeManagerClientActions -contains $Action) {
     $clientExitCode = 0
     switch ($Action) {
         "toggle" {
+            Write-LauncherControlLog `
+                -Event "launcher.lifecycle.runtime_command.forwarded" `
+                -Message "Launcher action is forwarding a workbench lifecycle command to Runtime Manager." `
+                -Fields @{ action = $Action; command_type = "toggle_workbench"; reason = "launcher_toggle"; launcher_only = $false; no_browser = [bool]$NoBrowser }
             $clientExitCode = Invoke-RuntimeManagerClient -Mode "command" -CommandType "toggle_workbench" -Reason "launcher_toggle" -ForwardNoBrowser:$NoBrowser
         }
         "start" {
+            Write-LauncherControlLog `
+                -Event "launcher.lifecycle.runtime_command.forwarded" `
+                -Message "Launcher action is forwarding a workbench lifecycle command to Runtime Manager." `
+                -Fields @{ action = $Action; command_type = "open_workbench"; reason = "launcher_start"; launcher_only = $false; no_browser = [bool]$NoBrowser }
             $clientExitCode = Invoke-RuntimeManagerClient -Mode "command" -CommandType "open_workbench" -Reason "launcher_start" -ForwardNoBrowser:$NoBrowser
         }
         "stop" {
+            Write-LauncherControlLog `
+                -Event "launcher.lifecycle.runtime_command.forwarded" `
+                -Message "Launcher action is forwarding a workbench lifecycle command to Runtime Manager." `
+                -Fields @{ action = $Action; command_type = "close_workbench"; reason = "launcher_stop"; launcher_only = $false; no_browser = [bool]$NoBrowser }
             $clientExitCode = Invoke-RuntimeManagerClient -Mode "command" -CommandType "close_workbench" -Reason "launcher_stop"
         }
         "restart" {
             if (Test-LauncherRestartActiveWorkBlocked) {
                 exit 11
             }
+            Write-LauncherControlLog `
+                -Event "launcher.lifecycle.runtime_command.forwarded" `
+                -Message "Launcher action is forwarding a workbench lifecycle command to Runtime Manager." `
+                -Fields @{ action = $Action; command_type = "restart_workbench"; reason = "launcher_restart"; launcher_only = $false; no_browser = [bool]$NoBrowser }
             $clientExitCode = Invoke-RuntimeManagerClient -Mode "command" -CommandType "restart_workbench" -Reason "launcher_restart" -ForwardNoBrowser:$NoBrowser
         }
     }
@@ -7491,6 +7608,10 @@ try {
     Sync-LauncherEndpointFromState
     switch ($Action) {
         "launcher" {
+            Write-LauncherControlLog `
+                -Event "launcher.control_surface.open_requested" `
+                -Message "Launcher action is opening only the standalone control surface." `
+                -Fields @{ action = $Action; launcher_only = $true; no_browser = [bool]$NoBrowser }
             Open-LauncherControlSurface
         }
         "toggle" {
