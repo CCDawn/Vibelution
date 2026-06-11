@@ -110,6 +110,87 @@ AI_SEARCH_SYSTEM_ROLES: tuple[dict[str, Any], ...] = (
         "expertise": ["来源质检", "去重", "证据回链"],
     },
 )
+AI_SEARCH_SOURCE_SCOPE_SCHEMA_VERSION = 1
+AI_SEARCH_SOURCE_SCOPE_CURATED_AT = "2026-06-11"
+AI_SEARCH_SOURCE_SCOPE_GROUPS: tuple[dict[str, Any], ...] = (
+    {
+        "groupId": "global_official",
+        "label": "全球官方源",
+        "tier": "tier1",
+        "evidenceRole": "primary",
+        "enabledByDefault": True,
+        "ownerRole": "global_primary_sources",
+        "description": "全球主流 AI 实验室、模型平台和基础设施厂商的一手公告入口。",
+        "sources": (
+            {"sourceId": "openai_news", "name": "OpenAI News", "url": "https://openai.com/news/", "region": "global", "language": "en", "sourceType": "official_news", "tags": ("model", "product", "research", "safety")},
+            {"sourceId": "anthropic_news", "name": "Anthropic News", "url": "https://www.anthropic.com/news", "region": "global", "language": "en", "sourceType": "official_news", "tags": ("model", "product", "safety", "policy")},
+            {"sourceId": "google_deepmind_blog", "name": "Google DeepMind Blog", "url": "https://deepmind.google/blog/", "region": "global", "language": "en", "sourceType": "official_blog", "tags": ("research", "model", "science")},
+            {"sourceId": "google_ai_updates", "name": "Google AI Updates", "url": "https://blog.google/innovation-and-ai/technology/ai/", "region": "global", "language": "en", "sourceType": "official_news", "tags": ("product", "model", "developer")},
+            {"sourceId": "meta_ai_blog", "name": "AI at Meta Blog", "url": "https://ai.meta.com/blog/", "region": "global", "language": "en", "sourceType": "official_blog", "tags": ("llama", "research", "product")},
+            {"sourceId": "microsoft_ai_blog", "name": "Microsoft AI Blog", "url": "https://microsoft.ai/blog/", "region": "global", "language": "en", "sourceType": "official_blog", "tags": ("copilot", "agent", "platform")},
+            {"sourceId": "nvidia_ai_blog", "name": "NVIDIA AI Blog", "url": "https://blogs.nvidia.com/blog/category/generative-ai/", "region": "global", "language": "en", "sourceType": "official_blog", "tags": ("infrastructure", "model", "agent")},
+            {"sourceId": "huggingface_blog", "name": "Hugging Face Blog", "url": "https://huggingface.co/blog", "region": "global", "language": "en", "sourceType": "platform_blog", "tags": ("open_source", "model", "dataset")},
+            {"sourceId": "mistral_news", "name": "Mistral AI News", "url": "https://mistral.ai/news/", "region": "eu", "language": "en", "sourceType": "official_news", "tags": ("model", "product", "enterprise")},
+            {"sourceId": "xai_news", "name": "xAI News", "url": "https://x.ai/news", "region": "global", "language": "en", "sourceType": "official_news", "tags": ("model", "product")},
+            {"sourceId": "cohere_blog", "name": "Cohere Blog", "url": "https://cohere.com/blog", "region": "global", "language": "en", "sourceType": "official_blog", "tags": ("enterprise", "model", "research")},
+            {"sourceId": "stability_news", "name": "Stability AI News", "url": "https://stability.ai/news-updates", "region": "global", "language": "en", "sourceType": "official_news", "tags": ("image", "audio", "open_model")},
+        ),
+    },
+    {
+        "groupId": "cn_official",
+        "label": "中国官方源",
+        "tier": "tier1",
+        "evidenceRole": "primary",
+        "enabledByDefault": True,
+        "ownerRole": "cn_primary_sources",
+        "description": "中国主流大模型厂商、实验室和模型平台的一手公告入口。",
+        "sources": (
+            {"sourceId": "deepseek_api_updates", "name": "DeepSeek API Updates", "url": "https://api-docs.deepseek.com/updates", "region": "cn", "language": "en", "sourceType": "official_changelog", "tags": ("model", "api", "developer")},
+            {"sourceId": "deepseek_home", "name": "DeepSeek", "url": "https://www.deepseek.com/en/", "region": "cn", "language": "en", "sourceType": "official_site", "tags": ("model", "research")},
+            {"sourceId": "qwen_blog", "name": "Qwen Blog", "url": "https://qwen.ai/blog", "region": "cn", "language": "en", "sourceType": "official_blog", "tags": ("model", "open_source", "developer")},
+            {"sourceId": "tongyi_lab", "name": "通义实验室", "url": "https://tongyi.aliyun.com/", "region": "cn", "language": "zh", "sourceType": "official_site", "tags": ("qwen", "model", "product")},
+            {"sourceId": "zhipu_news", "name": "智谱 AI 新闻", "url": "https://www.zhipuai.cn/en/news?tab=2", "region": "cn", "language": "zh", "sourceType": "official_news", "tags": ("glm", "product", "ecosystem")},
+            {"sourceId": "moonshot_blog", "name": "Moonshot AI / Kimi Blog", "url": "https://platform.kimi.ai/blog", "region": "cn", "language": "en", "sourceType": "official_blog", "tags": ("kimi", "model", "api")},
+            {"sourceId": "bytedance_seed_blog", "name": "ByteDance Seed Blog", "url": "https://seed.bytedance.com/zh/blog", "region": "cn", "language": "zh", "sourceType": "official_blog", "tags": ("model", "research", "multimodal")},
+            {"sourceId": "volcengine_doubao", "name": "豆包大模型", "url": "https://www.volcengine.com/product/doubao", "region": "cn", "language": "zh", "sourceType": "official_product", "tags": ("doubao", "model", "platform")},
+            {"sourceId": "tencent_hunyuan", "name": "Tencent Hunyuan Research", "url": "https://hy.tencent.com/", "region": "cn", "language": "zh", "sourceType": "official_site", "tags": ("hunyuan", "model", "research")},
+            {"sourceId": "baidu_wenxin", "name": "文心", "url": "https://wenxin.baidu.com/", "region": "cn", "language": "zh", "sourceType": "official_product", "tags": ("ernie", "product", "model")},
+            {"sourceId": "minimax_news", "name": "MiniMax News", "url": "https://www.minimax.io/news", "region": "cn", "language": "en", "sourceType": "official_news", "tags": ("model", "multimodal", "product")},
+        ),
+    },
+    {
+        "groupId": "trusted_indices",
+        "label": "可信研究与新闻索引",
+        "tier": "tier2",
+        "evidenceRole": "secondary",
+        "enabledByDefault": True,
+        "ownerRole": "signal_quality_gate",
+        "description": "用于补充发现论文、开源模型和产业动态；结论仍需回链 Tier1 或论文原文。",
+        "sources": (
+            {"sourceId": "arxiv_cs_ai_recent", "name": "arXiv cs.AI Recent", "url": "https://arxiv.org/list/cs.AI/recent", "region": "global", "language": "en", "sourceType": "paper_index", "tags": ("paper", "research")},
+            {"sourceId": "arxiv_cs_cl_recent", "name": "arXiv cs.CL Recent", "url": "https://arxiv.org/list/cs.CL/recent", "region": "global", "language": "en", "sourceType": "paper_index", "tags": ("paper", "language_model")},
+            {"sourceId": "huggingface_papers", "name": "Hugging Face Papers", "url": "https://huggingface.co/papers", "region": "global", "language": "en", "sourceType": "paper_index", "tags": ("paper", "model", "community")},
+            {"sourceId": "papers_with_code", "name": "Papers with Code", "url": "https://paperswithcode.com/", "region": "global", "language": "en", "sourceType": "paper_index", "tags": ("paper", "benchmark", "code")},
+            {"sourceId": "mit_tech_review_ai", "name": "MIT Technology Review AI", "url": "https://www.technologyreview.com/topic/artificial-intelligence/", "region": "global", "language": "en", "sourceType": "news", "tags": ("analysis", "policy", "industry")},
+            {"sourceId": "techcrunch_ai", "name": "TechCrunch AI", "url": "https://techcrunch.com/category/artificial-intelligence/", "region": "global", "language": "en", "sourceType": "news", "tags": ("startup", "product", "funding")},
+        ),
+    },
+    {
+        "groupId": "community_signals",
+        "label": "社区信号",
+        "tier": "tier3",
+        "evidenceRole": "signal",
+        "enabledByDefault": False,
+        "ownerRole": "signal_quality_gate",
+        "description": "只用于发现线索和热度异常；任何结论必须回链一手公告、论文或代码仓库。",
+        "sources": (
+            {"sourceId": "hacker_news_ai", "name": "Hacker News AI Search", "url": "https://hn.algolia.com/?q=AI", "region": "global", "language": "en", "sourceType": "community_search", "tags": ("discussion", "startup", "engineering")},
+            {"sourceId": "reddit_localllama", "name": "Reddit LocalLLaMA", "url": "https://www.reddit.com/r/LocalLLaMA/", "region": "global", "language": "en", "sourceType": "community", "tags": ("open_model", "community", "signal")},
+            {"sourceId": "github_trending_python", "name": "GitHub Trending Python", "url": "https://github.com/trending/python?since=daily", "region": "global", "language": "en", "sourceType": "code_signal", "tags": ("open_source", "code", "trend")},
+            {"sourceId": "product_hunt_ai", "name": "Product Hunt AI", "url": "https://www.producthunt.com/topics/artificial-intelligence", "region": "global", "language": "en", "sourceType": "product_signal", "tags": ("product", "startup", "signal")},
+        ),
+    },
+)
 
 
 class TeamServiceError(ValueError):
@@ -378,6 +459,10 @@ def ai_search_system_team_missing() -> bool:
             return True
         if str(team.get("teamKind") or _infer_team_kind(team)).strip() != "ai_search":
             return True
+        if str(team.get("sourceScopePath") or "").strip() != _relative_path(_ai_search_source_scope_path()):
+            return True
+        if _ai_search_source_scope_needs_sync(_ai_search_source_scope_path()):
+            return True
         member_roles = {
             str(member.get("role") or "").strip()
             for member in list(team.get("members") or [])
@@ -409,6 +494,7 @@ def ensure_ai_search_system_team() -> dict[str, Any]:
                 "members": members,
                 "linkedChatRoomId": "",
                 "canvasPath": _relative_path(_team_canvas_path(AI_SEARCH_TEAM_ID)),
+                "sourceScopePath": _relative_path(_ai_search_source_scope_path()),
                 "systemTeamKind": "ai_search",
                 "teamKind": "ai_search",
                 "teamCategory": "AI 搜索系统团队",
@@ -427,6 +513,7 @@ def ensure_ai_search_system_team() -> dict[str, Any]:
                 "status": DEFAULT_TEAM_STATUS,
                 "members": members,
                 "canvasPath": _relative_path(_team_canvas_path(AI_SEARCH_TEAM_ID)),
+                "sourceScopePath": _relative_path(_ai_search_source_scope_path()),
                 "systemTeamKind": "ai_search",
                 "teamKind": "ai_search",
                 "teamCategory": "AI 搜索系统团队",
@@ -445,11 +532,15 @@ def ensure_ai_search_system_team() -> dict[str, Any]:
         if created or _ai_search_canvas_needs_sync(canvas_path, team):
             _write_json(canvas_path, _ai_search_canvas_for_team(team))
             changed = True
+        source_scope_changed = _ensure_ai_search_source_scope_file()
+        if source_scope_changed:
+            changed = True
         if _team_chat_room_needs_sync(team, agent_refs=agent_refs):
             _ensure_team_chat_room_link(team, agent_refs=agent_refs)
             changed = True
         if changed:
             canvas = _ai_search_canvas_for_team(team)
+            source_scope = _load_ai_search_source_scope()
             team["updatedAt"] = str(team.get("updatedAt") or now)
             state["updatedAt"] = team["updatedAt"]
             _save_index(state)
@@ -461,6 +552,10 @@ def ensure_ai_search_system_team() -> dict[str, Any]:
                     "memberCount": len(members),
                     "nodeCount": len(canvas.get("nodes") or []),
                     "edgeCount": len(canvas.get("edges") or []),
+                    "sourceScopePath": _relative_path(_ai_search_source_scope_path()),
+                    "sourceScopeChanged": source_scope_changed,
+                    "sourceGroupCount": len(source_scope.get("groups") or []),
+                    "sourceCount": int((source_scope.get("summary") or {}).get("sourceCount") or 0),
                     "source": "ai_search",
                 },
             )
@@ -2249,6 +2344,7 @@ def _team_to_api(
         **repaired,
         "memberCount": len(repaired.get("members") or []),
         "canvas": canvas_summary,
+        **_ai_search_source_scope_api_fields(repaired),
         "linkedChatRoomId": linked_room_id if linked_room else "",
         "linkedChatRoom": _compact_chat_room(linked_room),
         "conversation": conversation_projection,
@@ -2280,6 +2376,7 @@ def _team_to_compact_reference(
         "teamCategory": str(repaired.get("teamCategory") or "").strip(),
         "teamSource": str(repaired.get("teamSource") or "").strip(),
         "teamTemplateId": str(repaired.get("teamTemplateId") or "").strip(),
+        "sourceScopePath": str(repaired.get("sourceScopePath") or "").strip(),
         "members": members,
         "memberCount": len(members),
         "linkedChatRoomId": linked_room_id if linked_room else "",
@@ -2350,6 +2447,7 @@ def _team_to_api_without_canvas_summary(
         **repaired,
         "memberCount": len(repaired.get("members") or []),
         "canvas": _canvas_path_summary(repaired, team_id=team_id),
+        **_ai_search_source_scope_api_fields(repaired),
         "linkedChatRoomId": linked_room_id if linked_room else "",
         "linkedChatRoom": _compact_chat_room(linked_room),
         "conversation": conversation_projection,
@@ -2584,6 +2682,13 @@ def _repair_team_contract_only(
     if team.get("canvasPath") != expected_path:
         team["canvasPath"] = expected_path
         changed = True
+    if _infer_team_kind(team) == "ai_search":
+        expected_source_scope_path = _relative_path(_ai_search_source_scope_path())
+        if team.get("sourceScopePath") != expected_source_scope_path:
+            team["sourceScopePath"] = expected_source_scope_path
+            changed = True
+        if _ensure_ai_search_source_scope_file():
+            changed = True
     if "linkedChatRoomId" not in team:
         team["linkedChatRoomId"] = ""
         changed = True
@@ -2614,6 +2719,13 @@ def _repair_team(
     if team.get("canvasPath") != expected_path:
         team["canvasPath"] = expected_path
         changed = True
+    if _infer_team_kind(team) == "ai_search":
+        expected_source_scope_path = _relative_path(_ai_search_source_scope_path())
+        if team.get("sourceScopePath") != expected_source_scope_path:
+            team["sourceScopePath"] = expected_source_scope_path
+            changed = True
+        if _ensure_ai_search_source_scope_file():
+            changed = True
     if "linkedChatRoomId" not in team:
         team["linkedChatRoomId"] = ""
         changed = True
@@ -2768,6 +2880,118 @@ def _ai_search_canvas_needs_sync(canvas_path: Path, team: dict[str, Any]) -> boo
         for role_key, expected_agent_id in expected_agent_ids_by_role.items()
     )
     return not expected_roles.issubset(node_roles) or not expected_edges.issubset(edge_ids) or not agents_match
+
+
+def _default_ai_search_source_scope() -> dict[str, Any]:
+    groups = [dict(group) for group in AI_SEARCH_SOURCE_SCOPE_GROUPS]
+    normalized_groups: list[dict[str, Any]] = []
+    for group in groups:
+        sources = []
+        for source in list(group.get("sources") or []):
+            source_payload = dict(source)
+            source_payload["tier"] = str(source_payload.get("tier") or group.get("tier") or "").strip()
+            source_payload["evidenceRole"] = str(source_payload.get("evidenceRole") or group.get("evidenceRole") or "").strip()
+            source_payload["enabledByDefault"] = bool(group.get("enabledByDefault"))
+            source_payload["ownerRole"] = str(group.get("ownerRole") or "").strip()
+            source_payload["tags"] = list(source_payload.get("tags") or [])
+            sources.append(source_payload)
+        normalized_groups.append(
+            {
+                **group,
+                "sources": sources,
+                "sourceCount": len(sources),
+            }
+        )
+    source_count = sum(int(group.get("sourceCount") or 0) for group in normalized_groups)
+    enabled_count = sum(
+        1
+        for group in normalized_groups
+        for source in list(group.get("sources") or [])
+        if bool(source.get("enabledByDefault"))
+    )
+    return {
+        "schemaVersion": AI_SEARCH_SOURCE_SCOPE_SCHEMA_VERSION,
+        "scopeId": "ai-latest-news-source-scope-v1",
+        "teamId": AI_SEARCH_TEAM_ID,
+        "title": "AI 最新动态搜索范围白名单",
+        "description": "一键搜索 AI 最新动态时优先使用的来源范围；Tier3 只作线索，结论必须回链一手证据。",
+        "curatedAt": AI_SEARCH_SOURCE_SCOPE_CURATED_AT,
+        "policy": {
+            "defaultEnabledTiers": ["tier1", "tier2"],
+            "signalTiers": ["tier3"],
+            "requiresPrimaryEvidenceForConclusion": True,
+            "dedupeBy": ["canonicalUrl", "sourceId", "title"],
+            "writesFormalKnowledge": False,
+        },
+        "summary": {
+            "groupCount": len(normalized_groups),
+            "sourceCount": source_count,
+            "enabledByDefaultCount": enabled_count,
+            "signalOnlyCount": source_count - enabled_count,
+        },
+        "groups": normalized_groups,
+        "storage": {
+            "path": _relative_path(_ai_search_source_scope_path()),
+        },
+    }
+
+
+def _ai_search_source_scope_needs_sync(path: Path) -> bool:
+    if not path.exists():
+        return True
+    try:
+        scope = _read_json(path)
+    except Exception:
+        return True
+    if int(scope.get("schemaVersion") or 0) != AI_SEARCH_SOURCE_SCOPE_SCHEMA_VERSION:
+        return True
+    if str(scope.get("teamId") or "").strip() != AI_SEARCH_TEAM_ID:
+        return True
+    groups = scope.get("groups") if isinstance(scope.get("groups"), list) else []
+    if not groups:
+        return True
+    group_ids = {
+        str(group.get("groupId") or "").strip()
+        for group in groups
+        if isinstance(group, dict)
+    }
+    expected_group_ids = {
+        str(group.get("groupId") or "").strip()
+        for group in AI_SEARCH_SOURCE_SCOPE_GROUPS
+    }
+    return not expected_group_ids.issubset(group_ids)
+
+
+def _ensure_ai_search_source_scope_file() -> bool:
+    path = _ai_search_source_scope_path()
+    if not _ai_search_source_scope_needs_sync(path):
+        return False
+    _write_json(path, _default_ai_search_source_scope())
+    return True
+
+
+def _load_ai_search_source_scope() -> dict[str, Any]:
+    path = _ai_search_source_scope_path()
+    if _ai_search_source_scope_needs_sync(path):
+        return _default_ai_search_source_scope()
+    try:
+        scope = _read_json(path)
+    except Exception:
+        return _default_ai_search_source_scope()
+    scope["storage"] = {
+        **dict(scope.get("storage") or {}),
+        "path": _relative_path(path),
+    }
+    return scope
+
+
+def _ai_search_source_scope_api_fields(team: dict[str, Any]) -> dict[str, Any]:
+    if _infer_team_kind(team) != "ai_search":
+        return {}
+    return {
+        "sourceScopePath": _relative_path(_ai_search_source_scope_path()),
+        "sourceScope": _load_ai_search_source_scope(),
+    }
 
 
 def _default_nodes_for_members(members: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -2925,6 +3149,10 @@ def _teams_index_path() -> Path:
 
 def _team_canvas_path(team_id: str) -> Path:
     return _teams_root() / _safe_token(team_id, default="team", max_length=96) / "canvas.json"
+
+
+def _ai_search_source_scope_path() -> Path:
+    return _teams_root() / AI_SEARCH_TEAM_ID / "source_scope.json"
 
 
 def _project_root() -> Path:

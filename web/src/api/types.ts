@@ -2895,16 +2895,70 @@ export type TeamConversationProjection = {
   missingAgentCount: number;
 };
 
+export type AiSearchSourceScopeSource = {
+  sourceId: string;
+  name: string;
+  url: string;
+  region: string;
+  language: string;
+  sourceType: string;
+  tier: string;
+  evidenceRole: string;
+  enabledByDefault: boolean;
+  ownerRole: string;
+  tags: string[];
+};
+
+export type AiSearchSourceScopeGroup = {
+  groupId: string;
+  label: string;
+  tier: string;
+  evidenceRole: string;
+  enabledByDefault: boolean;
+  ownerRole: string;
+  description: string;
+  sourceCount: number;
+  sources: AiSearchSourceScopeSource[];
+};
+
+export type AiSearchSourceScope = {
+  schemaVersion: number;
+  scopeId: string;
+  teamId: string;
+  title: string;
+  description: string;
+  curatedAt: string;
+  policy: {
+    defaultEnabledTiers: string[];
+    signalTiers: string[];
+    requiresPrimaryEvidenceForConclusion: boolean;
+    dedupeBy: string[];
+    writesFormalKnowledge: boolean;
+  };
+  summary: {
+    groupCount: number;
+    sourceCount: number;
+    enabledByDefaultCount: number;
+    signalOnlyCount: number;
+  };
+  groups: AiSearchSourceScopeGroup[];
+  storage: {
+    path: string;
+  };
+};
+
 export type Team = {
   teamId: string;
   name: string;
   description: string;
   purpose: string;
   status: "active" | "archived" | string;
-  teamKind: "custom" | "research" | "self_evolution" | "supervised_evolution" | "template_demo" | string;
+  teamKind: "custom" | "research" | "ai_search" | "self_evolution" | "supervised_evolution" | "template_demo" | string;
   teamCategory: string;
-  teamSource: "manual" | "research_organization" | "self_evolution" | "supervised_evolution" | "team_template" | string;
+  teamSource: "manual" | "research_organization" | "ai_search" | "self_evolution" | "supervised_evolution" | "team_template" | string;
   teamTemplateId?: string;
+  sourceScopePath?: string;
+  sourceScope?: AiSearchSourceScope;
   members: TeamMember[];
   memberCount: number;
   linkedChatRoomId?: string;

@@ -276,6 +276,19 @@ def test_ensure_evolution_system_teams_materializes_mode_roles(tmp_path, monkeyp
 
 def test_ensure_ai_search_system_team_materializes_source_scope_roles(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    events = []
+
+    def record_event(component, surface, event_code, **kwargs):
+        events.append(
+            {
+                "component": component,
+                "surface": surface,
+                "eventCode": event_code,
+                **kwargs,
+            }
+        )
+
+    monkeypatch.setattr(team_service, "record_runtime_scene_event", record_event)
 
     team = team_service.ensure_ai_search_system_team()
 
@@ -295,6 +308,24 @@ def test_ensure_ai_search_system_team_materializes_source_scope_roles(tmp_path, 
     assert [member["role"] for member in team["members"]] == expected_roles
     assert team["linkedChatRoomId"]
     assert team["linkedChatRoom"]["participantCount"] == 4
+    assert team["sourceScopePath"] == "workspace/teams/ai-search-team/source_scope.json"
+    assert team["sourceScope"]["scopeId"] == "ai-latest-news-source-scope-v1"
+    assert team["sourceScope"]["summary"]["groupCount"] == 4
+    assert team["sourceScope"]["summary"]["sourceCount"] >= 30
+    assert team["sourceScope"]["policy"]["defaultEnabledTiers"] == ["tier1", "tier2"]
+    assert team["sourceScope"]["policy"]["requiresPrimaryEvidenceForConclusion"] is True
+    assert [group["groupId"] for group in team["sourceScope"]["groups"]] == [
+        "global_official",
+        "cn_official",
+        "trusted_indices",
+        "community_signals",
+    ]
+    assert team["sourceScope"]["groups"][0]["enabledByDefault"] is True
+    assert team["sourceScope"]["groups"][-1]["enabledByDefault"] is False
+    source_scope_path = tmp_path / "workspace" / "teams" / "ai-search-team" / "source_scope.json"
+    assert source_scope_path.exists()
+    stored_scope = json.loads(source_scope_path.read_text(encoding="utf-8"))
+    assert stored_scope["summary"]["sourceCount"] == team["sourceScope"]["summary"]["sourceCount"]
 
     room = chat_room_service.get_chat_room_detail(team["linkedChatRoomId"])
     assert room["purpose"] == "ai_search"
@@ -326,6 +357,12 @@ def test_ensure_ai_search_system_team_materializes_source_scope_roles(tmp_path, 
 
     second = team_service.ensure_ai_search_system_team()
     assert [member["agentId"] for member in second["members"]] == [member["agentId"] for member in team["members"]]
+    sync_events = [event for event in events if event["eventCode"] == "team.ai_search_system_synced"]
+    assert sync_events
+    assert sync_events[0]["fields"]["sourceScopePath"] == "workspace/teams/ai-search-team/source_scope.json"
+    assert sync_events[0]["fields"]["sourceScopeChanged"] is True
+    assert sync_events[0]["fields"]["sourceGroupCount"] == 4
+    assert sync_events[0]["fields"]["sourceCount"] == team["sourceScope"]["summary"]["sourceCount"]
 
 
 def test_ensure_evolution_system_teams_preserves_existing_team_member_status(tmp_path, monkeypatch):
