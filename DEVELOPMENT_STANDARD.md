@@ -317,6 +317,8 @@ Never use `git add .`. Stage only files belonging to the current task.
 
 Do not revert unrelated user or Agent changes. If unrelated changes exist in files you must touch, read carefully and work with them instead of overwriting.
 
+Treat root `config.toml` and `config.example.toml` as local operator configuration during integration. Do not stash, reset, restore, or roll them back as generic dirty work unless the user explicitly authorizes it. If they must be protected during a merge, preserve them with a named stash and immediately restore them before continuing.
+
 Do not commit:
 
 - local configuration with secrets;
