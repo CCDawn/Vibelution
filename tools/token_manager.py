@@ -32,6 +32,7 @@ from core.infrastructure.runtime_input import (
     build_runtime_notice_message,
     is_external_request_message,
 )
+from core.infrastructure.llm_utils import build_cacheable_system_message
 
 
 # ============================================================================
@@ -904,9 +905,6 @@ class EnhancedTokenCompressor:
         reason: str = "",
     ) -> str:
         """使用 LLM 生成摘要"""
-        from langchain_core.messages import SystemMessage
-        from langchain_core.prompts import ChatPromptTemplate
-        
         # 构建消息历史文本
         history_text = self._format_messages_for_summary(messages)
         
@@ -915,14 +913,15 @@ class EnhancedTokenCompressor:
         
         # 构造提示词
         prompt = prompt_template.format(max_chars=max_chars)
-        full_prompt = f"{prompt}\n\n## 对话历史\n\n{history_text}"
+        runtime_input = f"## 对话历史\n\n{history_text}"
         
         if reason:
-            full_prompt += f"\n\n## 压缩原因\n{reason}"
+            runtime_input += f"\n\n## 压缩原因\n{reason}"
         
         # 调用 LLM
         response = self.compression_llm.invoke([
-            SystemMessage(content=full_prompt)
+            build_cacheable_system_message(prompt),
+            build_runtime_notice_message(runtime_input),
         ])
         
         summary = response.content if hasattr(response, 'content') else str(response)
