@@ -398,7 +398,7 @@ def observe_workbench() -> dict[str, Any]:
 def _creation_flag_names() -> tuple[str, ...]:
     if os.name != "nt":
         return ()
-    return ("DETACHED_PROCESS", "CREATE_NEW_PROCESS_GROUP", "CREATE_NO_WINDOW")
+    return ("CREATE_NEW_PROCESS_GROUP", "CREATE_NO_WINDOW")
 
 
 def _creation_flags() -> int:

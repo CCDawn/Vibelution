@@ -3537,7 +3537,7 @@ def test_run_launcher_action_passes_configured_port_to_launcher_env(monkeypatch)
     assert completed["durationMs"] >= 0
 
 
-def test_run_launcher_action_detaches_and_hides_powershell_adapter(monkeypatch):
+def test_run_launcher_action_hides_powershell_adapter_without_detaching(monkeypatch):
     captured = {}
 
     class DummyStartupInfo:
@@ -3563,7 +3563,7 @@ def test_run_launcher_action_detaches_and_hides_powershell_adapter(monkeypatch):
     result = workbench_controller.run_launcher_action("internal-start")
 
     assert result.returncode == 0
-    assert captured["kwargs"]["creationflags"] & 0x00000008
+    assert not captured["kwargs"]["creationflags"] & 0x00000008
     assert captured["kwargs"]["creationflags"] & 0x00000200
     assert captured["kwargs"]["creationflags"] & 0x08000000
     startupinfo = captured["kwargs"]["startupinfo"]
