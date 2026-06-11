@@ -6,8 +6,11 @@ import copy
 import hashlib
 import json
 import os
+import time
 import urllib.error
 import urllib.request
+import uuid
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +29,12 @@ from .llm_security import (
     validate_llm_public_config,
 )
 from .models import AppConfig, RetryPolicyConfig
+from .paths import (
+    ensure_global_config_initialized,
+    resolve_config_backup_dir,
+    resolve_config_lock_path,
+    resolve_config_path,
+)
 from .profiles import apply_runtime_profile
 from .runtime_capabilities import (
     apply_model_capability_overrides,
@@ -46,7 +55,7 @@ from .toml_writer import dumps_public_config
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-CONFIG_PATH = PROJECT_ROOT / "config.toml"
+CONFIG_PATH = resolve_config_path()
 HEADER_LINES = [
     "# ============================================================",
     "# Self-Evolving Agent 主配置",
@@ -805,8 +814,19 @@ def public_config_hash(public_config: dict) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-def load_public_config(config_path: Path = CONFIG_PATH) -> dict:
-    raw = _load_raw_public_config(config_path)
+def _default_config_path() -> Path:
+    ensure_global_config_initialized(CONFIG_PATH)
+    return Path(CONFIG_PATH).expanduser().resolve()
+
+
+def _resolve_public_config_path(config_path: Path | None = None) -> Path:
+    if config_path is not None:
+        return Path(config_path).expanduser().resolve()
+    return _default_config_path()
+
+
+def load_public_config(config_path: Path | None = None) -> dict:
+    raw = _load_raw_public_config(_resolve_public_config_path(config_path))
     return strip_runtime_model_capability_fields(_canonicalize_public_config(raw))
 
 
@@ -1696,13 +1716,56 @@ def preserve_secret_blanks(new_public: dict, old_public: dict) -> dict:
     return result
 
 
-def save_public_config(public_config: dict, config_path: Path = CONFIG_PATH) -> None:
+def save_public_config(public_config: dict, config_path: Path | None = None) -> None:
+    resolved_config_path = _resolve_public_config_path(config_path)
     cleaned_public_config = strip_runtime_model_capability_fields(_canonicalize_public_config(public_config))
-    config_path.with_suffix(config_path.suffix + ".bak").write_text(
-        config_path.read_text(encoding="utf-8"),
-        encoding="utf-8",
-    )
-    config_path.write_text(dumps_public_config(cleaned_public_config, HEADER_LINES), encoding="utf-8")
+    with _config_edit_lock(resolved_config_path):
+        backup_dir = resolve_config_backup_dir(resolved_config_path)
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        backup_path = backup_dir / f"{resolved_config_path.name}.bak"
+        backup_path.write_text(
+            resolved_config_path.read_text(encoding="utf-8"),
+            encoding="utf-8",
+        )
+        temp_path = resolved_config_path.with_suffix(resolved_config_path.suffix + ".tmp")
+        temp_path.write_text(dumps_public_config(cleaned_public_config, HEADER_LINES), encoding="utf-8")
+        temp_path.replace(resolved_config_path)
+
+
+@contextmanager
+def _config_edit_lock(config_path: Path, *, timeout_seconds: float = 10.0, stale_seconds: float = 300.0):
+    lock_path = resolve_config_lock_path(config_path)
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    token = f"{os.getpid()}:{uuid.uuid4().hex}"
+    deadline = time.monotonic() + timeout_seconds
+    acquired = False
+    while True:
+        try:
+            fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                handle.write(token + "\n")
+            acquired = True
+            break
+        except FileExistsError:
+            try:
+                age = time.time() - lock_path.stat().st_mtime
+                if age > stale_seconds:
+                    lock_path.unlink(missing_ok=True)
+                    continue
+            except OSError:
+                pass
+            if time.monotonic() >= deadline:
+                raise RuntimeError(f"Config edit lock is busy: {lock_path}")
+            time.sleep(0.05)
+    try:
+        yield
+    finally:
+        if acquired:
+            try:
+                if lock_path.read_text(encoding="utf-8").strip() == token:
+                    lock_path.unlink(missing_ok=True)
+            except OSError:
+                pass
 
 
 def _profile_api_key_status(effective: AppConfig) -> tuple[int, int]:

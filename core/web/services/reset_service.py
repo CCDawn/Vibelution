@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
+from config.paths import resolve_config_home, resolve_config_path
 from core.ui.chat_state import build_chat_state, chat_state_path, save_chat_state
 
 from .i18n import get_web_language, text_for
@@ -111,7 +112,7 @@ def get_reset_summary() -> dict:
         {
             "id": "config",
             "label": text_for(lang, zh="配置与模型库", en="Config and model library"),
-            "paths": ["config.toml", "config/"],
+            "paths": [str(resolve_config_path()), str(resolve_config_home())],
             "reason": text_for(lang, zh="配置不是垃圾内容，不提供重置勾选。", en="Config is not cleanup residue."),
         },
         {

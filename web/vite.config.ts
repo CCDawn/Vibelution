@@ -15,9 +15,34 @@ function coercePort(value: string | number | undefined, fallback: number): numbe
   return parsed;
 }
 
+function configPathCandidates(): string[] {
+  const explicitPath = String(process.env.VIBELUTION_CONFIG_PATH ?? "").trim();
+  if (explicitPath) {
+    return [resolve(explicitPath)];
+  }
+
+  const explicitHome = String(process.env.VIBELUTION_CONFIG_HOME ?? "").trim();
+  if (explicitHome) {
+    return [resolve(explicitHome, "config.toml")];
+  }
+
+  const userRoot = String(process.env.USERPROFILE ?? process.env.HOME ?? "").trim();
+  const candidates: string[] = [];
+  if (userRoot) {
+    candidates.push(resolve(userRoot, "Documents", "Vibelution", "config", "config.toml"));
+  }
+  candidates.push(resolve(__dirname, "..", "config.toml"));
+  return candidates;
+}
+
 function readWorkbenchPort(key: "backend_port" | "frontend_port", fallback: number): number {
-  try {
-    const configText = readFileSync(resolve(__dirname, "..", "config.toml"), "utf-8");
+  for (const configPath of configPathCandidates()) {
+    let configText = "";
+    try {
+      configText = readFileSync(configPath, "utf-8");
+    } catch {
+      continue;
+    }
     let inWorkbenchBlock = false;
     for (const line of configText.split(/\r?\n/)) {
       const trimmed = line.trim();
@@ -34,10 +59,8 @@ function readWorkbenchPort(key: "backend_port" | "frontend_port", fallback: numb
         return coercePort(value, fallback);
       }
     }
-    return fallback;
-  } catch {
-    return fallback;
   }
+  return fallback;
 }
 
 function firstEnvPort(names: string[]): string | undefined {

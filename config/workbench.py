@@ -10,11 +10,13 @@ try:
 except ImportError:  # pragma: no cover - Python < 3.11 compatibility
     import toml as tomllib  # type: ignore[no-redef]
 
+from .paths import ensure_global_config_initialized, resolve_config_path
+
 
 DEFAULT_WORKBENCH_HOST = "127.0.0.1"
 DEFAULT_BACKEND_PORT = 8000
 DEFAULT_FRONTEND_PORT = 5173
-CONFIG_PATH = Path(__file__).resolve().parent.parent / "config.toml"
+CONFIG_PATH = resolve_config_path()
 
 
 def coerce_port(value: object, default: int) -> int:
@@ -31,6 +33,7 @@ def parse_port(value: object) -> int | None:
 
 
 def _configured_workbench_port(key: str, default: int) -> int:
+    ensure_global_config_initialized(CONFIG_PATH)
     try:
         payload = tomllib.loads(CONFIG_PATH.read_text(encoding="utf-8"))
     except (OSError, tomllib.TOMLDecodeError):

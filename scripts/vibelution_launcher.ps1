@@ -32,10 +32,41 @@ $activeRuntimeScenePath = Join-Path $launcherDir "active-runtime-scene.json"
 $pythonDepsStampPath = Join-Path $launcherDir "python-deps.stamp"
 $frontendDepsStampPath = Join-Path $launcherDir "frontend-deps.stamp"
 $bindHost = "127.0.0.1"
-$configPath = Join-Path $projectDir "config.toml"
+$legacyConfigPath = Join-Path $projectDir "config.toml"
+$legacyExampleConfigPath = Join-Path $projectDir "config.example.toml"
+$defaultConfigRoot = if ($env:USERPROFILE) { $env:USERPROFILE } else { [Environment]::GetFolderPath("UserProfile") }
+$defaultConfigHome = Join-Path $defaultConfigRoot "Documents\Vibelution\config"
+$configHome = if ($env:VIBELUTION_CONFIG_HOME) { $env:VIBELUTION_CONFIG_HOME } else { $defaultConfigHome }
+$configPath = if ($env:VIBELUTION_CONFIG_PATH) { $env:VIBELUTION_CONFIG_PATH } else { Join-Path $configHome "config.toml" }
+$exampleConfigPath = Join-Path (Split-Path -Parent $configPath) "config.example.toml"
 $managedBackendMarkerArg = "--managed-by-launcher"
 $managedLauncherMarkerArg = "--managed-launcher-control"
 $runtimeManagerInternalLauncherEnv = "VIBELUTION_RUNTIME_MANAGER_INTERNAL_LAUNCHER"
+
+function Initialize-GlobalConfigFile {
+    $configDir = Split-Path -Parent $configPath
+    if (-not (Test-Path $configDir)) {
+        New-Item -ItemType Directory -Path $configDir -Force | Out-Null
+    }
+    if (-not (Test-Path $configPath)) {
+        if (Test-Path $legacyConfigPath) {
+            Copy-Item -LiteralPath $legacyConfigPath -Destination $configPath -Force
+        } elseif (Test-Path $legacyExampleConfigPath) {
+            Copy-Item -LiteralPath $legacyExampleConfigPath -Destination $configPath -Force
+        } else {
+            Set-Content -LiteralPath $configPath -Value "# Vibelution config" -Encoding UTF8
+        }
+    }
+    if (-not (Test-Path $exampleConfigPath)) {
+        if (Test-Path $legacyExampleConfigPath) {
+            Copy-Item -LiteralPath $legacyExampleConfigPath -Destination $exampleConfigPath -Force
+        } elseif (Test-Path $legacyConfigPath) {
+            Copy-Item -LiteralPath $legacyConfigPath -Destination $exampleConfigPath -Force
+        }
+    }
+}
+
+Initialize-GlobalConfigFile
 
 function Resolve-ConfiguredWorkbenchPort {
     param([int]$DefaultPort = 8000)
@@ -1880,7 +1911,8 @@ function Get-BackendInputTimeUtc {
             (Join-Path $projectDir "scripts"),
             (Join-Path $projectDir "config"),
             $requirementsPath,
-            (Join-Path $projectDir "config.toml")
+            $configPath,
+            $exampleConfigPath
         ) `
         -Extensions @(".py", ".ps1", ".psm1", ".json", ".toml", ".txt", ".html", ".css", ".js", ".ts", ".tsx")
 }

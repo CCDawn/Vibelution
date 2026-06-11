@@ -317,7 +317,7 @@ Never use `git add .`. Stage only files belonging to the current task.
 
 Do not revert unrelated user or Agent changes. If unrelated changes exist in files you must touch, read carefully and work with them instead of overwriting.
 
-Treat root `config.toml` and `config.example.toml` as local operator configuration during integration. Do not stash, reset, restore, or roll them back as generic dirty work unless the user explicitly authorizes it. If they must be protected during a merge, preserve them with a named stash and immediately restore them before continuing.
+Treat `C:\Users\17533\Documents\Vibelution\config\config.toml` as the operator config source of truth. Root `config.toml` / `config.example.toml` are legacy/template inputs for first-run migration only and should not be used as the active runtime config surface during integration.
 
 Do not commit:
 
@@ -554,7 +554,7 @@ For task worktree handoff, include:
 
 If a task is not ready to commit, merge, refresh, or close, say so clearly.
 
-Do not over-repeat a pre-existing `config.toml` local overlay unless staging, merging, validation, or config diagnosis depends on it.
+Do not over-repeat legacy root `config.toml` / `config.example.toml` state unless staging, migration, validation, or config diagnosis depends on it. Prefer reporting the resolved global config path instead.
 
 ## 22. Development Round Done Criteria
 

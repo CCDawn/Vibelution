@@ -3,7 +3,6 @@
 配置面板测试
 """
 
-import io
 import json
 import copy
 import os
@@ -46,6 +45,7 @@ from scripts.config_panel import (
     update_llm_model,
 )
 from config.public_config import UNCONFIGURED_MODEL_REF, public_config_hash
+from config.paths import resolve_config_backup_dir, resolve_config_lock_path
 import config.public_config as public_config_module
 
 
@@ -79,7 +79,8 @@ def _post_form(base_url: str, path: str, fields: dict[str, str]):
         headers={"Content-Type": "application/x-www-form-urlencoded"},
         method="POST",
     )
-    return urllib.request.urlopen(request, timeout=10)
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    return opener.open(request, timeout=10)
 
 
 def _provider(
@@ -603,8 +604,10 @@ def test_list_llm_model_options_exposes_inline_provider_and_source():
     assert all(item["source"] in {"model_library", "profile"} for item in options)
 
 
-def test_public_config_canonicalizes_model_key_env_from_model_id(monkeypatch):
+def test_public_config_canonicalizes_model_key_env_from_model_id(tmp_path):
+    config_path = tmp_path / "config.toml"
     public_config = load_public_config()
+    config_path.write_text(dumps_public_config(public_config, HEADER_LINES), encoding="utf-8")
     public_config["llm"]["model_library"]["custom_codex"] = {
         "provider": _provider("openai", "https://api.openai.com/v1", "OPENAI_API_KEY"),
         "model": "gpt-5.3-codex",
@@ -613,11 +616,8 @@ def test_public_config_canonicalizes_model_key_env_from_model_id(monkeypatch):
     }
 
     normalized = build_effective_config(public_config).llm.model_library["custom_codex"]
-    output = io.StringIO()
-    monkeypatch.setattr(public_config_module, "CONFIG_PATH", Path("config.toml"))
-    monkeypatch.setattr(Path, "write_text", lambda self, text, encoding="utf-8": output.write(text))
-    save_public_config(public_config)
-    saved = output.getvalue()
+    save_public_config(public_config, config_path)
+    saved = config_path.read_text(encoding="utf-8")
 
     assert normalized["api_key_env"] == "VIBELUTION_LLM_MODEL_CUSTOM_CODEX_API_KEY"
     assert 'api_key_env = "VIBELUTION_LLM_MODEL_CUSTOM_CODEX_API_KEY"' in saved
@@ -1093,6 +1093,8 @@ def test_save_public_config_strips_runtime_probe_capability_fields(tmp_path):
     assert "capability_source" not in model
     assert "capability_checked_at" not in model
     assert "capability_error" not in model
+    assert (resolve_config_backup_dir(config_path) / "config.toml.bak").exists()
+    assert not resolve_config_lock_path(config_path).exists()
 
 
 def test_build_effective_config_applies_runtime_capability_cache(monkeypatch, tmp_path):
