@@ -6,6 +6,7 @@ import copy
 import ctypes
 import hashlib
 import os
+import queue
 import secrets
 import subprocess
 import threading
@@ -85,6 +86,8 @@ _MODEL_DISCOVERY_DEFAULT_TIMEOUT_SECONDS = 3.0
 _MODEL_DISCOVERY_NEGATIVE_CACHE_TTL_SECONDS = 45.0
 _MODEL_DISCOVERY_NEGATIVE_CACHE: dict[str, tuple[float, str, list[dict[str, Any]]]] = {}
 _MODEL_DISCOVERY_CACHE_LOCK = threading.Lock()
+_LLM_TEST_PROBE_TIMEOUT_GRACE_SECONDS = 0.5
+_LLM_TEST_PROBE_WORKER_SLOTS = threading.BoundedSemaphore(2)
 
 
 def _model_option_protocol_route_summary(option: dict[str, Any], details: dict[str, Any]) -> dict[str, Any]:
@@ -692,6 +695,60 @@ def _apply_image_input_capability_details_to_runtime_view(
         entry.pop("capability_error", None)
 
 
+def _llm_test_probe_timeout_seconds(profile: LLMProfile) -> int:
+    if hasattr(public_config_module, "coerce_llm_probe_timeout"):
+        return int(public_config_module.coerce_llm_probe_timeout(profile.connect_timeout, profile.timeout))
+    try:
+        return max(1, min(int(profile.connect_timeout), int(profile.timeout), 10))
+    except (TypeError, ValueError):
+        return 10
+
+
+def _invoke_llm_runtime_probe(provider: ProviderConfig, profile: LLMProfile, api_key: str | None) -> dict[str, Any]:
+    try:
+        return public_config_module._probe_llm_runtime(provider, profile, api_key)
+    except TypeError:
+        return public_config_module._probe_llm_runtime(provider, profile)
+
+
+def _run_bounded_llm_runtime_probe(provider: ProviderConfig, profile: LLMProfile, api_key: str | None) -> dict[str, Any]:
+    probe_timeout = _llm_test_probe_timeout_seconds(profile)
+    if not _LLM_TEST_PROBE_WORKER_SLOTS.acquire(blocking=False):
+        return {
+            "ok": False,
+            "message": "another LLM connection probe is still running",
+            "status": "busy",
+            "error": "probe_busy",
+            "busy": True,
+        }
+    result_queue: queue.Queue[tuple[str, Any]] = queue.Queue(maxsize=1)
+
+    def run_probe() -> None:
+        try:
+            result_queue.put(("result", _invoke_llm_runtime_probe(provider, profile, api_key)))
+        except Exception as exc:
+            result_queue.put(("error", exc))
+        finally:
+            _LLM_TEST_PROBE_WORKER_SLOTS.release()
+
+    thread = threading.Thread(target=run_probe, name="config-llm-test-probe", daemon=True)
+    thread.start()
+    try:
+        kind, value = result_queue.get(timeout=probe_timeout + _LLM_TEST_PROBE_TIMEOUT_GRACE_SECONDS)
+    except queue.Empty:
+        return {
+            "ok": False,
+            "message": f"probe timed out after {probe_timeout}s",
+            "status": "timeout",
+            "error": "probe_timeout",
+            "timeout": True,
+            "probe_timeout_seconds": probe_timeout,
+        }
+    if kind == "error":
+        raise value
+    return value if isinstance(value, dict) else {"ok": False, "message": str(value)}
+
+
 def _run_draft_test_llm_connection(
     public_config: dict[str, Any],
     *,
@@ -717,10 +774,7 @@ def _run_draft_test_llm_connection(
             draft_meta,
         )
     try:
-        try:
-            result = public_config_module._probe_llm_runtime(provider, profile, api_key)
-        except TypeError:
-            result = public_config_module._probe_llm_runtime(provider, profile)
+        result = _run_bounded_llm_runtime_probe(provider, profile, api_key)
     except Exception as exc:
         _record_config_scene_event(
             "llm_test",
