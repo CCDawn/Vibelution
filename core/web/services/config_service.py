@@ -20,6 +20,11 @@ import httpx
 import config.public_config as public_config_module
 from config import LLMProfile, ProviderConfig
 from config.models import PROVIDER_API_KEY_ENV_ALIASES, _read_env_var, get_provider_api_key_env
+from config.runtime_capabilities import (
+    apply_model_capability_overrides,
+    record_model_image_input_capability,
+    strip_runtime_model_capability_fields,
+)
 from core.chat.chat_task_types import trim_lines
 from core.llm.protocol_resolver import resolve_model_protocol
 from config.public_config import (
@@ -468,7 +473,8 @@ def _api_key_display_state(api_key_env: str, configured: bool, draft_meta: dict 
 
 def _decorate_model_options(public_config: dict[str, Any], draft_meta: dict | None) -> list[dict[str, Any]]:
     options: list[dict[str, Any]] = []
-    for option in list_llm_model_options(public_config):
+    view_config = apply_model_capability_overrides(public_config)
+    for option in list_llm_model_options(view_config):
         decorated = copy.deepcopy(option)
         details = decorated.get("details") if isinstance(decorated.get("details"), dict) else {}
         provider = decorated.get("provider") if isinstance(decorated.get("provider"), dict) else {}
@@ -664,13 +670,12 @@ def _profile_test_target(
     }
 
 
-def _apply_image_input_capability_result_to_config(
+def _apply_image_input_capability_details_to_runtime_view(
     public_config: dict[str, Any],
-    option: dict[str, Any],
-    result: dict[str, Any],
+    model_id: str,
+    details: dict[str, Any],
 ) -> None:
-    model_id = str(option.get("model_id") or "").strip()
-    details = _image_input_capability_result_details(result)
+    model_id = str(model_id or "").strip()
     llm = public_config.setdefault("llm", {})
     model_library = llm.setdefault("model_library", {})
     if not isinstance(model_library, dict) or not isinstance(model_library.get(model_id), dict):
@@ -1086,14 +1091,16 @@ def _build_workspace(
 def _prepare_submitted_public_config(public_config: dict[str, Any] | None, old_public: dict[str, Any]) -> dict[str, Any]:
     old_with_defaults = with_git_config_defaults(old_public)
     submitted = copy.deepcopy(public_config) if isinstance(public_config, dict) else copy.deepcopy(old_with_defaults)
-    return with_git_config_defaults(preserve_secret_blanks(submitted, old_with_defaults))
+    prepared = with_git_config_defaults(preserve_secret_blanks(submitted, old_with_defaults))
+    return strip_runtime_model_capability_fields(prepared)
 
 
 def _normalize_apply_base_config(base_config: dict[str, Any] | None, old_public: dict[str, Any]) -> dict[str, Any] | None:
     if not isinstance(base_config, dict):
         return None
     old_with_defaults = with_git_config_defaults(old_public)
-    return with_git_config_defaults(preserve_secret_blanks(copy.deepcopy(base_config), old_with_defaults))
+    prepared = with_git_config_defaults(preserve_secret_blanks(copy.deepcopy(base_config), old_with_defaults))
+    return strip_runtime_model_capability_fields(prepared)
 
 
 def _config_values_equal(left: Any, right: Any) -> bool:
@@ -1559,6 +1566,7 @@ def draft_check_model_image_input_capabilities(
         raise ValueError(f"unknown LLM model: {', '.join(missing)}")
 
     results: list[dict[str, Any]] = []
+    cache_persisted_count = 0
     for option in options:
         model_id = str(option.get("model_id") or "").strip()
         try:
@@ -1598,7 +1606,24 @@ def draft_check_model_image_input_capabilities(
                 },
                 lifecycle=True,
             )
-        _apply_image_input_capability_result_to_config(current, option, result)
+        details = _image_input_capability_result_details(result)
+        try:
+            record_model_image_input_capability(model_id, details)
+            cache_persisted_count += 1
+        except Exception as exc:
+            _record_config_scene_event(
+                "llm_capability_batch",
+                "config.llm_capability_batch.cache_persist_failed",
+                message="Model image input capability result could not be persisted to the runtime cache.",
+                level="warning",
+                outcome="failed",
+                fields={
+                    "modelId": model_id,
+                    "reason": type(exc).__name__,
+                },
+                lifecycle=True,
+            )
+        _apply_image_input_capability_details_to_runtime_view(current, model_id, details)
         results.append(
             {
                 "modelId": model_id,
@@ -1607,8 +1632,8 @@ def draft_check_model_image_input_capabilities(
                 "providerKind": str(option.get("provider_kind") or "").strip(),
                 "ok": bool(result.get("ok")),
                 "capability": "image_input",
-                "capabilityStatus": str(result.get("capability_status") or "").strip() or "unknown",
-                "supportsImageInput": result.get("supports_image_input"),
+                "capabilityStatus": str(details.get("capability_status") or "").strip() or "unknown",
+                "supportsImageInput": details.get("supports_image_input"),
                 "reason": str(result.get("capability_reason") or "").strip(),
                 "message": str(result.get("message") or "").strip(),
             }
@@ -1628,6 +1653,7 @@ def draft_check_model_image_input_capabilities(
             "supportedCount": supported_count,
             "unsupportedCount": unsupported_count,
             "unknownCount": unknown_count,
+            "runtimeCachePersistedCount": cache_persisted_count,
         },
         lifecycle=True,
     )
@@ -1637,8 +1663,8 @@ def draft_check_model_image_input_capabilities(
         base_hash=str(base_hash or public_config_hash(old_public)).strip(),
         message=text_for(
             _resolve_workspace_language(current),
-            zh=f"已完成 {len(results)} 个模型的图像输入能力检测，保存到 config.toml 后生效。",
-            en=f"Checked image input capability for {len(results)} models. Save to config.toml to persist.",
+            zh=f"已完成 {len(results)} 个模型的图像输入能力检测，结果已写入运行态能力缓存，不会写入 config.toml。",
+            en=f"Checked image input capability for {len(results)} models. Results were stored in the runtime capability cache, not config.toml.",
         ),
     )
     workspace["capabilityResults"] = results

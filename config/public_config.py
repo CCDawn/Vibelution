@@ -27,6 +27,10 @@ from .llm_security import (
 )
 from .models import AppConfig, RetryPolicyConfig
 from .profiles import apply_runtime_profile
+from .runtime_capabilities import (
+    apply_model_capability_overrides,
+    strip_runtime_model_capability_fields,
+)
 from .settings import (
     MODEL_LIBRARY_DETAIL_FIELDS,
     PROFILE_REFERENCE_OVERRIDE_FIELDS,
@@ -791,7 +795,7 @@ def _canonicalize_public_config(public_config: dict) -> dict:
 
 
 def public_config_hash(public_config: dict) -> str:
-    canonical = _canonicalize_public_config(public_config)
+    canonical = strip_runtime_model_capability_fields(_canonicalize_public_config(public_config))
     payload = json.dumps(
         canonical,
         ensure_ascii=False,
@@ -803,11 +807,12 @@ def public_config_hash(public_config: dict) -> str:
 
 def load_public_config(config_path: Path = CONFIG_PATH) -> dict:
     raw = _load_raw_public_config(config_path)
-    return _canonicalize_public_config(raw)
+    return strip_runtime_model_capability_fields(_canonicalize_public_config(raw))
 
 
 def build_effective_config(public_config: dict) -> AppConfig:
-    normalized = normalize_public_config_dict(_canonicalize_public_config(public_config))
+    canonical = strip_runtime_model_capability_fields(_canonicalize_public_config(public_config))
+    normalized = normalize_public_config_dict(apply_model_capability_overrides(canonical))
     config = AppConfig.model_validate(normalized)
     effective = apply_runtime_profile(config)
     assert_llm_compatibility(effective)
@@ -1692,7 +1697,7 @@ def preserve_secret_blanks(new_public: dict, old_public: dict) -> dict:
 
 
 def save_public_config(public_config: dict, config_path: Path = CONFIG_PATH) -> None:
-    cleaned_public_config = _canonicalize_public_config(public_config)
+    cleaned_public_config = strip_runtime_model_capability_fields(_canonicalize_public_config(public_config))
     config_path.with_suffix(config_path.suffix + ".bak").write_text(
         config_path.read_text(encoding="utf-8"),
         encoding="utf-8",
