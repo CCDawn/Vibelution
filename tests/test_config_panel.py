@@ -1023,6 +1023,32 @@ def test_add_update_and_delete_llm_model_with_inline_provider():
     assert "prompt_cache" not in edited["llm"]["model_library"]["custom_codex"]
     build_effective_config(edited)
 
+    edited_supported_qwen = update_llm_model(
+        edited,
+        "custom_codex",
+        local,
+        "qwen-72b-awq",
+        "Qwen Local",
+        {
+            "contract": "reasoning_chat",
+            "reasoning_state_field": "reasoning_content",
+            "strict_compatibility": True,
+            "transport": "chat_completions",
+            "temperature": "0.2",
+            "max_output_tokens": "4096",
+            "timeout": "90",
+            "connect_timeout": "10",
+            "streaming": False,
+            "tool_calling_mode": "disabled",
+            "discovery_enabled": True,
+            "supports_prompt_cache": True,
+        },
+    )
+    assert edited_supported_qwen["llm"]["model_library"]["custom_codex"]["prompt_cache"] == {
+        "mode": "explicit_cache_control"
+    }
+    build_effective_config(edited_supported_qwen)
+
     deleted = delete_llm_model(edited, "custom_codex")
     assert "custom_codex" not in deleted["llm"]["model_library"]
     build_effective_config(deleted)
