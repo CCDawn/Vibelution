@@ -11,6 +11,7 @@ from typing import Any, Callable, Iterable
 from langchain_core.messages import ToolMessage
 
 from core.infrastructure.workspace_manager import get_workspace
+from core.infrastructure.llm_utils import build_cacheable_system_message
 from core.llm import get_llm_client
 from core.llm.agent_runtime import AgentLlmResolutionError, resolve_agent_llm
 from core.llm.payload_builder import prompt_cache_partition_scope
@@ -149,7 +150,7 @@ class LLMResearchAgentRunner(ResearchAgentRunner):
         _append_trace(trace, _trace("plan", "准备搜索种子", " / ".join(suggested_queries[:4])), trace_sink)
         tools = _search_tools()
         messages: list[Any] = [
-            {"role": "system", "content": self._system_prompt(agent_key, _search_output_contract())},
+            build_cacheable_system_message(self._system_prompt(agent_key, _search_output_contract())),
             {
                 "role": "user",
                 "content": json.dumps(
@@ -444,7 +445,7 @@ class LLMResearchAgentRunner(ResearchAgentRunner):
         with prompt_cache_partition_scope(cache_partition):
             response = client.invoke(
                 [
-                    {"role": "system", "content": self._system_prompt(agent_key, contract)},
+                    build_cacheable_system_message(self._system_prompt(agent_key, contract)),
                     {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
                 ],
                 metadata={"researchAgent": agent_key, "promptCachePartition": cache_partition},

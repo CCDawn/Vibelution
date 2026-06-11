@@ -835,11 +835,11 @@ class MentalModel:
 请输出 <state> 块。"""
 
         try:
-            from langchain_core.messages import SystemMessage
+            from core.infrastructure.llm_utils import build_cacheable_system_message
             from core.infrastructure.runtime_input import build_runtime_notice_message
             mental_soul = self._load_mental_soul()
             resp = self._shared_llm.invoke([
-                SystemMessage(content=mental_soul),
+                build_cacheable_system_message(mental_soul),
                 build_runtime_notice_message(prompt),
             ])
             state_block = self._extract_state_block(resp.content)

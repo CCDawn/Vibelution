@@ -109,9 +109,16 @@ def _default_prompt_cache_key(build_input: PayloadBuildInput) -> str:
         suffix_parts.append(agent_name)
     if partition:
         suffix_parts.append(partition)
-    suffix_parts.append(digest)
-    label = _PROMPT_CACHE_KEY_SAFE_RE.sub("-", "vibelution:" + ":".join(suffix_parts)).strip("-")
-    return label[:80] or f"vibelution:{digest}"
+    label_prefix = _PROMPT_CACHE_KEY_SAFE_RE.sub("-", "vibelution:" + ":".join(suffix_parts)).strip("-")
+    digest_suffix = f":{digest}"
+    max_length = 80
+    if len(label_prefix) + len(digest_suffix) <= max_length:
+        return f"{label_prefix}{digest_suffix}" or f"vibelution:{digest}"
+    keep = max_length - len(digest_suffix)
+    truncated_prefix = label_prefix[:keep].rstrip(":-_.")
+    if not truncated_prefix:
+        return f"vibelution:{digest}"
+    return f"{truncated_prefix}{digest_suffix}"
 
 
 def _prompt_cache_provider_strategy(build_input: PayloadBuildInput, prompt_cache_mode: str) -> str:
