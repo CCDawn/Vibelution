@@ -1290,6 +1290,7 @@ def test_run_supervised_evolution_session_emits_progress_events(tmp_path: Path):
         project_root=tmp_path,
         harness_runner=fake_runner,
         progress_callback=events.append,
+        mental_model_mode="enabled",
     )
 
     event_types = [event["event"] for event in events]
@@ -1303,6 +1304,8 @@ def test_run_supervised_evolution_session_emits_progress_events(tmp_path: Path):
     ]
     session_start = events[0]
     assert session_start["active_advisory_count"] == 0
+    assert session_start["mental_model_mode"] == "enabled"
+    assert session_start["mental_model_enabled"] is True
     first_start = events[1]
     assert first_start["case_index"] == 1
     assert first_start["case_total"] == 1
@@ -1312,11 +1315,15 @@ def test_run_supervised_evolution_session_emits_progress_events(tmp_path: Path):
     assert first_start["mode"] == "single_turn"
     assert first_start["timeout_seconds"] == 123
     assert first_start["observational"] is True
+    assert first_start["mental_model_mode"] == "enabled"
+    assert first_start["mental_model_enabled"] is True
     candidate_finish = events[4]
     assert candidate_finish["role"] == "candidate"
     assert candidate_finish["status"] == "failed"
     assert candidate_finish["drift_warning"] is True
     assert "subagent" in candidate_finish["reason"]
+    assert candidate_finish["mental_model_mode"] == "enabled"
+    assert candidate_finish["mental_model_enabled"] is True
     assert candidate_finish["report_path"].endswith("probe_candidate.json")
     assert candidate_finish["worktree_path"].endswith("candidate")
     assert candidate_finish["observational"] is True
@@ -1378,6 +1385,7 @@ def test_run_supervised_evolution_session_forwards_live_case_events(tmp_path: Pa
         project_root=tmp_path,
         harness_runner=fake_runner,
         progress_callback=events.append,
+        mental_model_mode="enabled",
     )
 
     live_events = [event for event in events if event["event"] == "role_live"]
@@ -1387,8 +1395,12 @@ def test_run_supervised_evolution_session_forwards_live_case_events(tmp_path: Pa
     assert live_events[0]["prompt"] == "baseline"
     assert live_events[0]["latest_output"] == "baseline output"
     assert live_events[0]["transcript"][1]["kind"] == "assistant"
+    assert live_events[0]["mental_model_mode"] == "enabled"
+    assert live_events[0]["mental_model_enabled"] is True
     assert live_events[1]["role"] == "candidate"
     assert live_events[1]["latest_input"] == "candidate"
+    assert live_events[1]["mental_model_mode"] == "enabled"
+    assert live_events[1]["mental_model_enabled"] is True
 
 
 def test_run_supervised_evolution_session_fails_environment_preflight_without_starting_runner(tmp_path: Path):
@@ -1598,12 +1610,18 @@ def test_run_supervised_evolution_session_stops_after_cancelled_harness_result(t
             project_root=tmp_path,
             harness_runner=fake_runner,
             progress_callback=events.append,
+            mental_model_mode="disabled",
         )
 
     assert str(exc_info.value) == "operator stop"
     assert calls == ["baseline"]
+    role_finish = [event for event in events if event["event"] == "role_finish"][0]
+    assert role_finish["mental_model_mode"] == "disabled"
+    assert role_finish["mental_model_enabled"] is False
     assert events[-1]["event"] == "session_cancelled"
     assert events[-1]["reason"] == "operator stop"
+    assert events[-1]["mental_model_mode"] == "disabled"
+    assert events[-1]["mental_model_enabled"] is False
     decisions_dir = tmp_path / "workspace" / "supervised_evolution" / "decisions"
     assert not list(decisions_dir.glob("*.json"))
 
