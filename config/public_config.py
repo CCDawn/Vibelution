@@ -919,6 +919,15 @@ def _read_env_var(name: str) -> str:
     return _read_windows_user_env_var(name)
 
 
+def read_persisted_user_env_var(name: str) -> str:
+    """Read a persisted user-level LLM key without requiring process env inheritance."""
+
+    env_name = validate_llm_api_key_env(name, required=False, context="api_key_env")
+    if not env_name:
+        return ""
+    return _read_windows_user_env_var(env_name)
+
+
 def _broadcast_windows_environment_change(timeout_ms: int = 5000) -> None:
     try:
         import ctypes
@@ -1845,6 +1854,7 @@ __all__ = [
     "preserve_secret_blanks",
     "save_public_config",
     "inspect_public_config",
+    "read_persisted_user_env_var",
     "_delete_user_env_var",
     "_set_user_env_var",
     "validate_llm_api_key_env",
