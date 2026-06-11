@@ -451,6 +451,64 @@ function canBulkToggleTool(tool: ToolRegistryItem) {
   return tool.source === "generated" && Boolean(tool.validated) && tool.status === "validated";
 }
 
+function toolRegistryCountsForTools(tools: ToolRegistryItem[], currentCounts: ToolRegistryPayload["counts"]) {
+  return {
+    ...currentCounts,
+    total: tools.length,
+    builtIn: tools.filter((tool) => tool.source === "built_in").length,
+    generated: tools.filter((tool) => tool.source === "generated").length,
+    llmVisible: tools.filter((tool) => tool.llmVisible).length,
+    runtimeActive: tools.filter((tool) => tool.runtimeActive).length,
+    enabledGenerated: tools.filter((tool) => tool.source === "generated" && tool.enabled).length,
+    invalidGenerated: tools.filter((tool) => tool.source === "generated" && tool.status === "invalid").length,
+  };
+}
+
+function toolRegistryPayloadWithTools(payload: ToolRegistryPayload, tools: ToolRegistryItem[]): ToolRegistryPayload {
+  return {
+    ...payload,
+    tools,
+    counts: toolRegistryCountsForTools(tools, payload.counts),
+  };
+}
+
+function updatedToolRegistryPayload(
+  payload: ToolRegistryPayload | undefined,
+  toolId: string,
+  updater: (tool: ToolRegistryItem) => ToolRegistryItem,
+): ToolRegistryPayload | undefined {
+  if (!payload) {
+    return payload;
+  }
+  let updated = false;
+  const tools = payload.tools.map((tool) => {
+    if (tool.id !== toolId) {
+      return tool;
+    }
+    updated = true;
+    return updater(tool);
+  });
+  return updated ? toolRegistryPayloadWithTools(payload, tools) : payload;
+}
+
+function removedToolRegistryPayload(payload: ToolRegistryPayload | undefined, toolId: string): ToolRegistryPayload | undefined {
+  if (!payload) {
+    return payload;
+  }
+  const tools = payload.tools.filter((tool) => tool.id !== toolId);
+  return tools.length === payload.tools.length ? payload : toolRegistryPayloadWithTools(payload, tools);
+}
+
+function optimisticToolEnabled(tool: ToolRegistryItem, enabled: boolean): ToolRegistryItem {
+  return {
+    ...tool,
+    enabled,
+    runtimeActive: enabled ? tool.runtimeActive : false,
+    llmVisible: enabled ? tool.llmVisible : false,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
 export function ToolsRoute() {
   const { lang, t } = useAppI18n();
   const bulkCopy = useMemo(() => toolsBulkCopy(lang), [lang]);
@@ -618,7 +676,24 @@ export function ToolsRoute() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ enabled: payload.enabled }),
       }),
+    onMutate: async (payload) => {
+      await queryClient.cancelQueries({ queryKey: queryKeys.tools() });
+      const previousTools = queryClient.getQueryData<ToolRegistryPayload>(queryKeys.tools());
+      queryClient.setQueryData<ToolRegistryPayload | undefined>(
+        queryKeys.tools(),
+        (current) => updatedToolRegistryPayload(
+          current,
+          payload.toolId,
+          (tool) => optimisticToolEnabled(tool, payload.enabled),
+        ),
+      );
+      return { previousTools };
+    },
     onSuccess: (tool) => {
+      queryClient.setQueryData<ToolRegistryPayload | undefined>(
+        queryKeys.tools(),
+        (current) => updatedToolRegistryPayload(current, tool.id, () => tool),
+      );
       setNotice({
         tone: "success",
         text: tool.enabled
@@ -627,8 +702,12 @@ export function ToolsRoute() {
       });
       refresh();
     },
-    onError: (error) => {
+    onError: (error, _variables, context) => {
+      if (context?.previousTools) {
+        queryClient.setQueryData(queryKeys.tools(), context.previousTools);
+      }
       setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
+      refresh();
     },
   });
 
@@ -637,15 +716,43 @@ export function ToolsRoute() {
       fetchJson<GeneratedToolDeleteResponse>(`/api/tools/${encodeURIComponent(toolId)}`, {
         method: "DELETE",
       }),
-    onSuccess: (payload) => {
-      setNotice({ tone: "success", text: payload.summary });
-      if (deleteMutation.variables === activeToolId) {
+    onMutate: async (toolId) => {
+      await queryClient.cancelQueries({ queryKey: queryKeys.tools() });
+      const previousTools = queryClient.getQueryData<ToolRegistryPayload>(queryKeys.tools());
+      const previousActiveToolId = activeToolId;
+      const previousSelectedToolIds = new Set(selectedToolIds);
+      queryClient.setQueryData<ToolRegistryPayload | undefined>(
+        queryKeys.tools(),
+        (current) => removedToolRegistryPayload(current, toolId),
+      );
+      if (toolId === activeToolId) {
         setActiveToolId(null);
       }
+      setSelectedToolIds((current) => {
+        const next = new Set(current);
+        next.delete(toolId);
+        return next;
+      });
+      return { previousTools, previousActiveToolId, previousSelectedToolIds };
+    },
+    onSuccess: (payload) => {
+      queryClient.setQueryData<ToolRegistryPayload | undefined>(
+        queryKeys.tools(),
+        (current) => removedToolRegistryPayload(current, payload.toolId),
+      );
+      setNotice({ tone: "success", text: payload.summary });
       refresh();
     },
-    onError: (error) => {
+    onError: (error, _toolId, context) => {
+      if (context?.previousTools) {
+        queryClient.setQueryData(queryKeys.tools(), context.previousTools);
+      }
+      if (context) {
+        setActiveToolId(context.previousActiveToolId);
+        setSelectedToolIds(new Set(context.previousSelectedToolIds));
+      }
       setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
+      refresh();
     },
   });
 

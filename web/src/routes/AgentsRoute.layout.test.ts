@@ -624,6 +624,19 @@ describe("AgentsRoute layout contract", () => {
     expect(styles.maintenanceIntro).toBeTruthy();
   });
 
+  it("optimistically removes single-Agent archive and purge actions before backend confirmation", () => {
+    expect(routeSource).toContain("function optimisticArchivedAgent(agent: AgentConfigWorkspaceAgent)");
+    expect(routeSource).toContain("queryClient.cancelQueries({ queryKey: queryKeys.agentConfigWorkspace() })");
+    expect(routeSource).toContain("const previousSelectedAgentId = selectedAgentId");
+    expect(routeSource).toContain("const previousActivePane = activePane");
+    expect(routeSource).toContain("archivedWorkspaceCache(current, optimisticArchivedAgent(optimisticAgent))");
+    expect(routeSource).toContain("purgedWorkspaceCache(current, payload.agentId)");
+    expect(routeSource).toContain("return { previousWorkspace, previousSelectedAgentId, previousActivePane }");
+    expect(routeSource).toContain("queryClient.setQueryData(queryKeys.agentConfigWorkspace(), context.previousWorkspace)");
+    expect(routeSource).toContain("setSelectedAgentId(context?.previousSelectedAgentId ?? \"\")");
+    expect(routeSource).toContain("setActivePane(context?.previousActivePane ?? \"overview\")");
+  });
+
   it("offers a governed per-Agent debug reset without archive or membership cleanup", () => {
     expect(routeSource).toContain("AgentResetOptions");
     expect(routeSource).toContain("resetAgentMutation");
