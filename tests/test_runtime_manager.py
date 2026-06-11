@@ -799,6 +799,74 @@ def test_load_runtime_snapshot_persists_stale_running_state_as_closed(monkeypatc
     assert saved_states[-1]["workbench"]["observedState"] == "closed"
 
 
+def test_load_runtime_snapshot_marks_missing_managed_window_as_partial(monkeypatch):
+    saved_states: list[dict] = []
+
+    monkeypatch.setattr(
+        daemon,
+        "load_state",
+        lambda: {
+            "runtimeState": "running",
+            "managerPid": 9912,
+            "daemonRunning": True,
+            "workbench": {
+                "desiredState": "open",
+                "observedState": "open",
+                "phase": "steady",
+                "backendPid": 3200,
+                "browserWindowPid": 4500,
+                "backendAlive": True,
+                "backendHealthy": True,
+                "backendObserved": True,
+                "backendPortListening": True,
+                "statusLine": "Workbench is open (backend PID=3200, window PID=4500)",
+            },
+            "command": {"activeCommandId": ""},
+        },
+    )
+    monkeypatch.setattr(
+        daemon,
+        "observe_workbench",
+        lambda: {
+            "observedState": "partial",
+            "backendPid": 3200,
+            "browserLaunchPid": 0,
+            "browserWindowPid": 4500,
+            "browserManaged": True,
+            "backendAlive": True,
+            "backendHealthy": True,
+            "backendObserved": True,
+            "backendPort": 8000,
+            "backendPortListening": True,
+            "backendPortOwnerPid": 3200,
+            "backendPortOwnerTrusted": True,
+            "backendPortConflict": False,
+            "browserWindowAlive": False,
+            "sessionId": "managed-session",
+            "url": "http://127.0.0.1:8000",
+            "lifecycleConsistency": "browser_missing",
+        },
+    )
+    monkeypatch.setattr(daemon, "is_daemon_running", lambda: True)
+    monkeypatch.setattr(daemon, "load_pid", lambda: 9912)
+    monkeypatch.setattr(daemon, "residual_process_payload", lambda **kwargs: {"count": 0, "items": []})
+    monkeypatch.setattr(daemon, "save_state", lambda state: saved_states.append(json.loads(json.dumps(state))) or state)
+
+    snapshot = daemon.load_runtime_snapshot()
+
+    workbench = snapshot["workbench"]
+    assert snapshot["runtimeState"] == "running"
+    assert workbench["desiredState"] == "open"
+    assert workbench["observedState"] == "partial"
+    assert workbench["phase"] == "steady"
+    assert workbench["backendAlive"] is True
+    assert workbench["browserWindowAlive"] is False
+    assert workbench["lifecycleConsistency"] == "browser_missing"
+    assert "window is closed" in workbench["statusLine"]
+    assert saved_states
+    assert saved_states[-1]["workbench"]["observedState"] == "partial"
+
+
 def test_load_runtime_snapshot_preserves_failed_close_state(monkeypatch):
     monkeypatch.setattr(
         daemon,
@@ -3476,6 +3544,38 @@ def test_observe_workbench_reports_orphaned_browser(monkeypatch):
     assert observation["backendMissing"] is True
     assert observation["frontendOrphaned"] is True
     assert observation["lifecycleConsistency"] == "orphaned_browser"
+
+
+def test_observe_workbench_reports_managed_browser_missing_as_partial(monkeypatch):
+    monkeypatch.setattr(
+        workbench_controller,
+        "_load_launcher_state",
+        lambda: {
+            "url": "http://127.0.0.1:8000",
+            "backendPid": 25744,
+            "backendLaunchPid": 25744,
+            "browserLaunchPid": 39880,
+            "browserWindowPid": 39880,
+            "browserManaged": True,
+            "sessionId": "managed-browser-missing",
+        },
+    )
+    monkeypatch.setattr(workbench_controller, "_is_process_alive", lambda pid: int(pid) == 25744)
+    monkeypatch.setattr(workbench_controller, "_is_backend_healthy", lambda url: True)
+    monkeypatch.setattr(workbench_controller, "_listening_pid_for_port", lambda port: 25744)
+    monkeypatch.setattr(workbench_controller, "_port_is_listening_socket", lambda port: True)
+    monkeypatch.setattr(workbench_controller, "_repo_workbench_backend_kind", lambda pid: "managed_workbench_backend")
+    monkeypatch.setattr(workbench_controller, "_recover_managed_browser_window_pid", lambda profile_dir: 0)
+
+    observation = workbench_controller.observe_workbench()
+
+    assert observation["observedState"] == "partial"
+    assert observation["backendObserved"] is True
+    assert observation["backendMissing"] is False
+    assert observation["frontendOrphaned"] is False
+    assert observation["browserManaged"] is True
+    assert observation["browserWindowAlive"] is False
+    assert observation["lifecycleConsistency"] == "browser_missing"
 
 
 def test_observe_workbench_reports_backend_launch_pid(monkeypatch):
@@ -6424,7 +6524,7 @@ def test_handle_close_workbench_cleans_residual_processes_when_already_closed_wi
     assert close_calls == []
 
 
-def test_observe_workbench_treats_repo_port_owner_as_open_when_tracked_pid_is_dead(tmp_path, monkeypatch):
+def test_observe_workbench_marks_trusted_backend_partial_when_managed_window_is_missing(tmp_path, monkeypatch):
     launcher_state_path = tmp_path / "state.json"
     launcher_state_path.write_text(
         json.dumps(
@@ -6451,7 +6551,7 @@ def test_observe_workbench_treats_repo_port_owner_as_open_when_tracked_pid_is_de
 
     observation = workbench_controller.observe_workbench()
 
-    assert observation["observedState"] == "open"
+    assert observation["observedState"] == "partial"
     assert observation["backendObserved"] is True
     assert observation["backendPortListening"] is True
     assert observation["backendPortOwnerPid"] == 52396
@@ -6459,6 +6559,42 @@ def test_observe_workbench_treats_repo_port_owner_as_open_when_tracked_pid_is_de
     assert observation["backendPortOwnerTrusted"] is True
     assert observation["backendPortOwnerResidual"] is False
     assert observation["backendPortConflict"] is False
+    assert observation["browserWindowAlive"] is False
+    assert observation["lifecycleConsistency"] == "browser_missing"
+
+
+def test_observe_workbench_treats_trusted_headless_backend_as_open_when_tracked_pid_is_dead(tmp_path, monkeypatch):
+    launcher_state_path = tmp_path / "state.json"
+    launcher_state_path.write_text(
+        json.dumps(
+            {
+                "backendPid": 19964,
+                "browserWindowPid": 0,
+                "browserManaged": False,
+                "url": "http://127.0.0.1:8766",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(workbench_controller, "LAUNCHER_STATE_PATH", launcher_state_path)
+    monkeypatch.setattr(workbench_controller, "_is_process_alive", lambda pid: False)
+    monkeypatch.setattr(workbench_controller, "_is_backend_healthy", lambda url: False)
+    monkeypatch.setattr(workbench_controller, "_listening_pid_for_port", lambda port: 52396)
+    monkeypatch.setattr(workbench_controller, "_port_is_listening_socket", lambda port: False)
+    monkeypatch.setattr(
+        workbench_controller,
+        "_repo_workbench_backend_kind",
+        lambda pid: "managed_workbench_backend" if pid == 52396 else "",
+    )
+
+    observation = workbench_controller.observe_workbench()
+
+    assert observation["observedState"] == "open"
+    assert observation["backendObserved"] is True
+    assert observation["browserManaged"] is False
+    assert observation["browserWindowAlive"] is False
+    assert observation["lifecycleConsistency"] == "consistent"
 
 
 def test_observe_workbench_does_not_treat_external_port_owner_as_open(tmp_path, monkeypatch):

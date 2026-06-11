@@ -11523,6 +11523,72 @@ def test_runtime_summary_exposes_orphaned_browser_status(monkeypatch):
     assert payload["lifecycleProof"]["overallState"] == "failed"
 
 
+def test_runtime_summary_marks_missing_managed_window_as_partial(monkeypatch):
+    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda: {})
+    monkeypatch.setattr(runtime_service, "_load_runtime_state", lambda: {})
+    monkeypatch.setattr(
+        runtime_service,
+        "_work_run_summary",
+        lambda: {
+            "active": {
+                "chat_turn": None,
+                "self_evolution_run": None,
+                "supervised_evolution_run": None,
+            },
+            "latest": {
+                "chat_turn": None,
+                "self_evolution_run": None,
+                "supervised_evolution_run": None,
+            },
+        },
+    )
+    monkeypatch.setattr(
+        runtime_service,
+        "_load_runtime_manager_snapshot",
+        lambda: {
+            "daemonRunning": True,
+            "runtimeState": "running",
+            "managerPid": 9912,
+            "stateVersion": 18,
+            "projectRoot": str(runtime_service.PROJECT_ROOT),
+            "runtimeManager": {"sourceMatches": True},
+            "workbench": {
+                "desiredState": "open",
+                "observedState": "partial",
+                "phase": "steady",
+                "backendPid": 3001,
+                "backendAlive": True,
+                "backendHealthy": True,
+                "backendObserved": True,
+                "backendPort": 8000,
+                "backendPortListening": True,
+                "backendPortOwnerPid": 3001,
+                "backendPortOwnerTrusted": True,
+                "backendPortConflict": False,
+                "browserWindowPid": 4002,
+                "browserWindowAlive": False,
+                "browserManaged": True,
+                "lifecycleConsistency": "browser_missing",
+                "url": "http://127.0.0.1:8000",
+                "lastReason": "start",
+                "failureMessage": "",
+            },
+        },
+    )
+
+    payload = runtime_service.get_runtime_summary()
+
+    assert payload["workbench"]["observedState"] == "partial"
+    assert payload["workbench"]["lifecycleConsistency"] == "browser_missing"
+    assert payload["workbench"]["statusLine"] == "工作台窗口已关闭，后端仍在运行。"
+    proof = payload["lifecycleProof"]
+    assert proof["overallState"] == "partial"
+    backend = next(component for component in proof["components"] if component["id"] == "backend")
+    window = next(component for component in proof["components"] if component["id"] == "workbench_window")
+    assert backend["ok"] is True
+    assert window["state"] == "missing"
+
+
 def test_runtime_lifecycle_proof_marks_ready_when_components_agree(monkeypatch):
     monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda: {})
     monkeypatch.setattr(runtime_service, "_load_runtime_state", lambda: {})

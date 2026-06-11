@@ -339,10 +339,18 @@ def observe_workbench() -> dict[str, Any]:
     )
     backend_observed = (backend_alive and not port_conflict) or port_owner_trusted or trusted_health
     backend_pid = state_backend_pid if backend_alive else port_owner_pid if port_owner_trusted else 0
+    managed_browser_missing = bool(
+        session_role != "launcher_control_surface"
+        and browser_managed
+        and backend_observed
+        and not browser_window_alive
+    )
     if session_role == "launcher_control_surface":
         observed_state = "closed"
     elif not backend_observed and not browser_window_alive:
         observed_state = "closed"
+    elif managed_browser_missing:
+        observed_state = "partial"
     else:
         observed_state = "open"
     frontend_orphaned = bool(session_role != "launcher_control_surface" and browser_managed and browser_window_alive and not backend_observed)
@@ -355,7 +363,7 @@ def observe_workbench() -> dict[str, Any]:
         lifecycle_consistency = "orphaned_browser"
     elif backend_missing:
         lifecycle_consistency = "backend_missing"
-    elif observed_state == "open" and browser_managed and not browser_window_alive:
+    elif managed_browser_missing:
         lifecycle_consistency = "browser_missing"
     else:
         lifecycle_consistency = "consistent"

@@ -171,6 +171,8 @@ type LauncherCopy = {
   lifecycleReadingLimitedDetail: string;
   lifecycleRestarting: string;
   lifecycleRestartingDetail: string;
+  lifecyclePartial: string;
+  lifecyclePartialDetail: string;
   lifecycleRunning: string;
   lifecycleRunningDetail: string;
   lifecycleStarting: string;
@@ -215,6 +217,8 @@ type LauncherCopy = {
   userGuideBlockedDetail: string;
   userGuideClosed: string;
   userGuideClosedDetail: string;
+  userGuidePartial: string;
+  userGuidePartialDetail: string;
   userGuideChanging: string;
   userGuideChangingDetail: string;
   userGuideProblem: string;
@@ -225,7 +229,7 @@ type LauncherCopy = {
 };
 
 type LifecycleDisplay = {
-  state: "running" | "closed" | "starting" | "stopping" | "restarting" | "failed" | "limited" | "unknown";
+  state: "running" | "partial" | "closed" | "starting" | "stopping" | "restarting" | "failed" | "limited" | "unknown";
   label: string;
   detail: string;
   tone: "neutral" | "success" | "warning" | "error";
@@ -273,7 +277,7 @@ function stateTone(state: string, ok = true) {
   if (normalized.includes("run") || normalized.includes("ready") || normalized.includes("ok") || normalized.includes("healthy")) {
     return "success";
   }
-  if (normalized.includes("start") || normalized.includes("stop") || normalized.includes("queue") || normalized.includes("restart")) {
+  if (normalized.includes("start") || normalized.includes("stop") || normalized.includes("queue") || normalized.includes("restart") || normalized.includes("partial")) {
     return "warning";
   }
   return "neutral";
@@ -296,6 +300,7 @@ function humanState(value: string | undefined, lang: "zh" | "en") {
     managed: "已托管",
     open: "已打开",
     processing: "执行中",
+    partial: "部分运行",
     queued: "排队中",
     ready: "就绪",
     running: "运行中",
@@ -312,6 +317,7 @@ function humanState(value: string | undefined, lang: "zh" | "en") {
     managed: "Managed",
     open: "Open",
     processing: "Processing",
+    partial: "Partial",
     queued: "Queued",
     ready: "Ready",
     running: "Running",
@@ -660,6 +666,8 @@ function resolveLifecycleDisplay(
   const observed = String(bundle?.observedState || "").toLowerCase();
   const phase = String(bundle?.phase || status.launcher.phase || "").toLowerCase();
   const overall = String(status.lifecycleProof?.overallState || bundle?.overallState || "").toLowerCase();
+  const lifecycleConsistency = String(bundle?.lifecycleConsistency || "").toLowerCase();
+  const browserMissing = observed === "partial" || lifecycleConsistency === "browser_missing";
   const commandType = String(evidence?.state.activeCommand?.type || "").toLowerCase();
   const recoveryType = String(evidence?.recovery?.commandType || "").toLowerCase();
   const activeLifecycleCommand = commandType || (evidence?.recovery?.active ? recoveryType : "");
@@ -701,6 +709,14 @@ function resolveLifecycleDisplay(
       state: "stopping",
       label: copy.lifecycleStopping,
       detail: bundle?.statusLine || status.lifecycleProof?.summary || copy.lifecycleStoppingDetail,
+      tone: "warning",
+    };
+  }
+  if (browserMissing) {
+    return {
+      state: "partial",
+      label: copy.lifecyclePartial,
+      detail: bundle?.statusLine || status.lifecycleProof?.summary || copy.lifecyclePartialDetail,
       tone: "warning",
     };
   }
@@ -879,6 +895,8 @@ export function LauncherRoute() {
         launcherOffline: "未连接",
         lifecycleRunning: "运行中",
         lifecycleRunningDetail: "后端、前端和工作台窗口已对齐，项目可以继续使用。",
+        lifecyclePartial: "部分运行",
+        lifecyclePartialDetail: "后端仍在运行，但工作台窗口未打开；可以重新打开或停止项目。",
         lifecycleClosed: "已关闭",
         lifecycleClosedDetail: "项目生命周期已停止；需要时从这里重新启动。",
         lifecycleStarting: "启动中",
@@ -998,6 +1016,8 @@ export function LauncherRoute() {
         userGuideBlockedDetail: "有任务正在运行，停止和重启已自动锁定，避免打断当前会话或进化任务。",
         userGuideClosed: "可以启动项目",
         userGuideClosedDetail: "项目当前关闭；点击启动会统一拉起后端、前端资源和工作台窗口。",
+        userGuidePartial: "重新打开工作台",
+        userGuidePartialDetail: "后端仍在运行，但工作台窗口已关闭；点击启动或打开重新拉起窗口。",
         userGuideChanging: "等待操作完成",
         userGuideChangingDetail: "Launcher 正在处理生命周期操作；完成后状态会自动刷新。",
         userGuideProblem: "需要查看诊断",
@@ -1040,6 +1060,8 @@ export function LauncherRoute() {
         launcherOffline: "Disconnected",
         lifecycleRunning: "Running",
         lifecycleRunningDetail: "Backend, frontend, and workbench window line up; the project is usable.",
+        lifecyclePartial: "Partial",
+        lifecyclePartialDetail: "The backend is still running, but the workbench window is not open; reopen or stop the project.",
         lifecycleClosed: "Closed",
         lifecycleClosedDetail: "The project lifecycle is stopped; start it here when needed.",
         lifecycleStarting: "Starting",
@@ -1159,6 +1181,8 @@ export function LauncherRoute() {
         userGuideBlockedDetail: "A task is running, so stop and restart are locked to avoid interrupting chat or evolution work.",
         userGuideClosed: "Start the project",
         userGuideClosedDetail: "The project is closed. Start will bring up backend, frontend assets, and the workbench window together.",
+        userGuidePartial: "Reopen the workbench",
+        userGuidePartialDetail: "The backend is still running, but the workbench window is closed. Start or open will bring the window back.",
         userGuideChanging: "Wait for completion",
         userGuideChangingDetail: "Launcher is processing a lifecycle operation. The state will refresh when it settles.",
         userGuideProblem: "Check diagnostics",
@@ -1285,9 +1309,10 @@ export function LauncherRoute() {
   const launcherControlLimited = statusQuery.isError && isControlTokenError(statusQuery.error);
   const lifecycleDisplay = resolveLifecycleDisplay(status, copy, { disconnected: launcherStatusDisconnected, controlLimited: launcherControlLimited });
   const projectIsOpen = lifecycleDisplay.state === "running";
+  const projectIsPartial = lifecycleDisplay.state === "partial";
   const projectIsClosed = lifecycleDisplay.state === "closed";
   const projectIsChanging = ["starting", "stopping", "restarting"].includes(lifecycleDisplay.state);
-  const lifecycleSettled = projectIsOpen || projectIsClosed;
+  const lifecycleSettled = projectIsOpen || projectIsPartial || projectIsClosed;
   const controlPlaneIdle = isControlPlaneIdle(evidence);
   const controlBusy = controlMutation.isPending && !(controlPlaneIdle && lifecycleSettled);
   const busy = controlBusy || supervisorMutation.isPending;
@@ -1344,6 +1369,8 @@ export function LauncherRoute() {
     : copy.noActiveWorkSummary;
   const nextAction = restartQueueActive
     ? copy.useWaitAction
+    : projectIsPartial
+      ? copy.useOpenAction
     : projectIsOpen
     ? copy.safeToUse
     : projectIsChanging
@@ -1353,6 +1380,8 @@ export function LauncherRoute() {
         : copy.useCheckAction;
   const nextActionDetail = restartQueueActive
     ? restartQueue?.statusLine || lifecycleDisplay.detail
+    : projectIsPartial
+      ? lifecycleDisplay.detail || copy.openWorkbenchSummary
     : projectIsOpen
     ? copy.openWorkbenchSummary
     : projectIsChanging
@@ -1367,6 +1396,8 @@ export function LauncherRoute() {
     ? copy.userGuideBlocked
     : restartQueueActive || projectIsChanging
       ? copy.userGuideChanging
+      : projectIsPartial
+        ? copy.userGuidePartial
       : projectIsOpen
         ? copy.userGuideReady
         : projectIsClosed
@@ -1376,6 +1407,8 @@ export function LauncherRoute() {
     ? copy.userGuideBlockedDetail
     : restartQueueActive || projectIsChanging
       ? restartQueue?.statusLine || copy.userGuideChangingDetail
+      : projectIsPartial
+        ? lifecycleDisplay.detail || copy.userGuidePartialDetail
       : projectIsOpen
         ? copy.userGuideReadyDetail
         : projectIsClosed

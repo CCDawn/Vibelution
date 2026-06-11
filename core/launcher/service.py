@@ -971,6 +971,19 @@ def _workbench_payload(*, runtime_state: dict[str, Any], observed_workbench: dic
     manager_running = bool(runtime_state.get("daemonRunning"))
     runtime_command = runtime_state.get("command") if isinstance(runtime_state.get("command"), dict) else {}
     active_command_id = str(runtime_command.get("activeCommandId") or "").strip()
+    frontend_orphaned = bool(observed_or_state("frontendOrphaned", False))
+    lifecycle_consistency = str(
+        observed_or_state("lifecycleConsistency", "consistent") or "consistent"
+    ).strip() or "consistent"
+    browser_missing = bool(
+        lifecycle_consistency == "browser_missing"
+        or (
+            observed_state == "partial"
+            and bool(observed_or_state("browserManaged", True))
+            and not project_window_alive
+            and bool(observed_or_state("backendObserved", False))
+        )
+    )
     stale_open_state_reconciled = False
     if (
         has_observation
@@ -985,21 +998,21 @@ def _workbench_payload(*, runtime_state: dict[str, Any], observed_workbench: dic
         stale_open_state_reconciled = True
     if observed_state == desired_state and phase != "failed":
         phase = "steady"
+    elif desired_state == "open" and observed_state == "partial" and browser_missing and phase != "failed":
+        phase = "steady"
     elif desired_state == "open" and observed_state != "open" and phase != "failed":
         phase = "opening"
     elif desired_state == "closed" and observed_state != "closed" and phase != "failed":
         phase = "closing"
     failure_message = str(state_workbench.get("failureMessage") or "").strip()
-    frontend_orphaned = bool(observed_or_state("frontendOrphaned", False))
-    lifecycle_consistency = str(
-        observed_or_state("lifecycleConsistency", "consistent") or "consistent"
-    ).strip() or "consistent"
     if frontend_orphaned:
         status_line = failure_message or "前端窗口仍在，但后端服务已经离线。"
     elif phase == "failed":
         status_line = failure_message or "工作台生命周期遇到了错误。"
     elif desired_state == "closed" and observed_state != "closed":
         status_line = "正在关闭工作台。"
+    elif browser_missing:
+        status_line = "工作台窗口已关闭，后端仍在运行。"
     elif desired_state == "open" and observed_state != "open":
         status_line = "正在打开工作台。"
     elif session_role == "launcher_control_surface":
@@ -1061,9 +1074,14 @@ def _lifecycle_proof(
     backend_alive = bool(workbench.get("backendAlive"))
     browser_managed = bool(workbench.get("browserManaged", True))
     browser_alive = bool(workbench.get("browserWindowAlive"))
+    lifecycle_consistency = str(workbench.get("lifecycleConsistency") or "consistent").strip().lower()
     backend_ok = backend_alive and bool(workbench.get("backendHealthy")) and not bool(workbench.get("backendPortConflict"))
     browser_ok = browser_alive or not browser_managed
     active_work_ok = not active_work_runs
+    browser_missing = bool(
+        lifecycle_consistency == "browser_missing"
+        or (observed_state == "partial" and browser_managed and not browser_alive and backend_alive)
+    )
 
     components = [
         _proof_component(
@@ -1117,6 +1135,8 @@ def _lifecycle_proof(
         overall_state = "partial"
     elif desired_state == "open" and observed_state == "open" and backend_ok and browser_ok:
         overall_state = "ready"
+    elif desired_state == "open" and browser_missing:
+        overall_state = "partial"
     elif desired_state == "open" and observed_state != "open":
         overall_state = "starting"
     elif desired_state == "closed" and observed_state != "closed":
@@ -1200,6 +1220,7 @@ def _project_bundle_from_workbench(
         "observedState": str(workbench.get("observedState") or "closed"),
         "phase": str(workbench.get("phase") or "steady"),
         "overallState": str(lifecycle_proof.get("overallState") or ""),
+        "lifecycleConsistency": str(workbench.get("lifecycleConsistency") or "consistent"),
         "statusLine": str(workbench.get("statusLine") or ""),
         "url": str(workbench.get("url") or ""),
         "lastReason": str(workbench.get("lastReason") or ""),

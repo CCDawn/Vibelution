@@ -977,6 +977,77 @@ def test_launcher_status_keeps_project_open_when_launcher_control_surface_stays_
     assert bundle["statusLine"] == "工作台正在运行。"
 
 
+def test_launcher_status_marks_missing_managed_window_as_partial(tmp_path, monkeypatch):
+    launcher_state_path = tmp_path / ".runtime" / "launcher" / "state.json"
+    launcher_state_path.parent.mkdir(parents=True, exist_ok=True)
+    launcher_state_path.write_text(
+        json.dumps(
+            {
+                "sessionRole": "workbench",
+                "url": "http://127.0.0.1:8000",
+                "backendPid": 10952,
+                "browserManaged": True,
+                "browserWindowPid": 4001,
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(launcher_service, "LAUNCHER_STATE_PATH", launcher_state_path)
+    monkeypatch.setattr(launcher_service, "_is_process_alive", lambda pid: int(pid) in {3210, 10952})
+    monkeypatch.setattr(
+        launcher_service,
+        "load_state",
+        lambda: {
+            "runtimeState": "running",
+            "managerPid": 3210,
+            "stateVersion": 10,
+            "daemonRunning": True,
+            "workbench": {
+                "sessionRole": "workbench",
+                "desiredState": "open",
+                "observedState": "open",
+                "phase": "steady",
+                "url": "http://127.0.0.1:8000",
+            },
+        },
+    )
+    monkeypatch.setattr(launcher_service, "load_pid", lambda: 3210)
+    monkeypatch.setattr(
+        launcher_service,
+        "observe_workbench",
+        lambda: {
+            "sessionRole": "workbench",
+            "observedState": "partial",
+            "backendPid": 10952,
+            "backendAlive": True,
+            "backendHealthy": True,
+            "backendObserved": True,
+            "backendPort": 8000,
+            "backendPortListening": True,
+            "backendPortConflict": False,
+            "browserManaged": True,
+            "browserWindowPid": 4001,
+            "browserWindowAlive": False,
+            "lifecycleConsistency": "browser_missing",
+            "url": "http://127.0.0.1:8000",
+        },
+    )
+
+    payload = launcher_service.get_launcher_status()
+
+    bundle = payload["projectBundle"]
+    assert bundle["sessionRole"] == "workbench"
+    assert bundle["desiredState"] == "open"
+    assert bundle["observedState"] == "partial"
+    assert bundle["overallState"] == "partial"
+    assert bundle["backend"]["alive"] is True
+    assert bundle["browser"]["alive"] is False
+    assert bundle["lifecycleConsistency"] == "browser_missing"
+    assert bundle["statusLine"] == "工作台窗口已关闭，后端仍在运行。"
+    assert payload["lifecycleProof"]["overallState"] == "partial"
+    assert payload["lifecycleProof"]["summary"] == bundle["statusLine"]
+
+
 def test_launcher_supervisor_snapshot_reports_recorded_dead_pid(tmp_path, monkeypatch):
     launcher_state_path = tmp_path / ".runtime" / "launcher" / "state.json"
     launcher_state_path.parent.mkdir(parents=True, exist_ok=True)
