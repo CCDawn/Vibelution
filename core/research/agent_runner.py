@@ -12,9 +12,8 @@ from langchain_core.messages import ToolMessage
 
 from core.infrastructure.workspace_manager import get_workspace
 from core.infrastructure.llm_utils import build_cacheable_system_message
-from core.llm import get_llm_client
+from core.llm import LLMInvocationContext, get_llm_client, invoke_llm
 from core.llm.agent_runtime import AgentLlmResolutionError, resolve_agent_llm
-from core.llm.payload_builder import prompt_cache_partition_scope
 from config.settings import get_config
 from core.web.services import agent_directory_service, agent_mode_binding_service, prompt_template_service
 
@@ -172,16 +171,24 @@ class LLMResearchAgentRunner(ResearchAgentRunner):
         tool_call_count = 0
         cache_partition = _research_prompt_cache_partition(session.session_id, agent_key, phase)
         for _turn in range(6):
-            with prompt_cache_partition_scope(cache_partition):
-                response = client.invoke(
-                    messages,
-                    tools=tools,
-                    metadata={
-                        "researchAgent": agent_key,
-                        "phase": phase,
-                        "promptCachePartition": cache_partition,
-                    },
-                )
+            response = invoke_llm(
+                client,
+                messages,
+                tools=tools,
+                context=LLMInvocationContext(
+                    surface="research_agent",
+                    run_kind="research_search",
+                    session_id=session.session_id,
+                    agent_id=agent_key,
+                    llm_slot="dialogue",
+                    cache_scope="research",
+                    cache_partition=cache_partition,
+                    prompt_purpose=phase,
+                    conversation_bound=False,
+                    metadata={"phase": phase},
+                ),
+                metadata={"researchAgent": agent_key},
+            )
             calls = list(getattr(response, "tool_calls", []) or [])
             messages.append(response)
             if calls:
@@ -442,14 +449,25 @@ class LLMResearchAgentRunner(ResearchAgentRunner):
         client = resolved_llm["client"]
         session_id = str(payload.get("sessionId") or "").strip()
         cache_partition = _research_prompt_cache_partition(session_id, agent_key, "json")
-        with prompt_cache_partition_scope(cache_partition):
-            response = client.invoke(
-                [
-                    build_cacheable_system_message(self._system_prompt(agent_key, contract)),
-                    {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
-                ],
-                metadata={"researchAgent": agent_key, "promptCachePartition": cache_partition},
-            )
+        response = invoke_llm(
+            client,
+            [
+                build_cacheable_system_message(self._system_prompt(agent_key, contract)),
+                {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+            ],
+            context=LLMInvocationContext(
+                surface="research_agent",
+                run_kind="research_json",
+                session_id=session_id,
+                agent_id=agent_key,
+                llm_slot="dialogue",
+                cache_scope="research",
+                cache_partition=cache_partition,
+                prompt_purpose="json",
+                conversation_bound=False,
+            ),
+            metadata={"researchAgent": agent_key},
+        )
         result = _extract_json_object(str(getattr(response, "content", "") or ""))
         _append_trace(trace, _trace("agent", "Agent 输出结构化结果", _compact_json(result)), trace_sink)
         return result, trace, {

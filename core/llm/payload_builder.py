@@ -84,6 +84,12 @@ def reset_prompt_cache_partition(token) -> None:
     _prompt_cache_partition.reset(token)
 
 
+def current_prompt_cache_partition() -> str:
+    """Return the current prompt-cache partition bound by the caller context."""
+
+    return str(_prompt_cache_partition.get() or "").strip()
+
+
 @contextlib.contextmanager
 def prompt_cache_partition_scope(value: str) -> Iterator[None]:
     """ContextManager 包装；适合 `with prompt_cache_partition_scope(conversation_id):` 模式。"""
@@ -205,10 +211,11 @@ def _apply_content_shape_policy(
     actions: PayloadPolicyActions,
     *,
     has_image_content: bool,
+    preserve_cache_control: bool,
 ) -> List[Dict[str, Any]]:
     if route.policy.content_shape_policy != "string_only" and not route.compat.requires_string_content:
         return [dict(item) for item in messages]
-    if has_image_content:
+    if has_image_content or preserve_cache_control:
         return [dict(item) for item in messages]
     normalized: List[Dict[str, Any]] = []
     for item in messages:
@@ -268,9 +275,16 @@ def _apply_message_protocol_policy(
     actions: PayloadPolicyActions,
     *,
     has_image_content: bool,
+    preserve_cache_control: bool,
 ) -> List[Dict[str, Any]]:
     normalized = _apply_system_message_policy(messages, route, actions)
-    normalized = _apply_content_shape_policy(normalized, route, actions, has_image_content=has_image_content)
+    normalized = _apply_content_shape_policy(
+        normalized,
+        route,
+        actions,
+        has_image_content=has_image_content,
+        preserve_cache_control=preserve_cache_control,
+    )
     normalized = _apply_reasoning_roundtrip_policy(normalized, route, actions)
     normalized = _apply_final_message_policy(normalized, route, actions)
     return normalized
@@ -489,6 +503,7 @@ def build_llm_payload(
         route,
         policy_actions,
         has_image_content=has_image_content,
+        preserve_cache_control=preserve_cache_control,
     )
     if preserve_cache_control and not has_image_content:
         normalized_messages = _apply_qwen_explicit_prompt_cache_markers(
@@ -541,4 +556,12 @@ def build_llm_payload(
     return BuiltPayload(payload=payload, route=route, summary=summary, warnings=route.warnings)
 
 
-__all__ = ["BuiltPayload", "PayloadBuildInput", "build_llm_payload"]
+__all__ = [
+    "BuiltPayload",
+    "PayloadBuildInput",
+    "build_llm_payload",
+    "current_prompt_cache_partition",
+    "prompt_cache_partition_scope",
+    "reset_prompt_cache_partition",
+    "set_prompt_cache_partition",
+]

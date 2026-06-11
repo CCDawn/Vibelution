@@ -70,7 +70,15 @@ from core.evaluation.chat_segmenter import ChatTurnRecord
 from core.chat.chat_result_contract import build_chat_coding_result_contract
 from core.orchestration.output_boundary import sanitize_assistant_visible_text
 
-from core.llm import get_llm_client, discover_model, doctor_llm_profile
+from core.llm import (
+    LLMError,
+    LLMInvocationContext,
+    discover_model,
+    doctor_llm_profile,
+    get_llm_client,
+    invoke_llm,
+    stream_llm,
+)
 from core.llm.client import llm_cancel_context
 from core.llm.payload_builder import prompt_cache_partition_scope
 from core.llm.agent_runtime import (
@@ -81,7 +89,6 @@ from core.llm.agent_runtime import (
     normalize_agent_llm_bindings,
     resolve_agent_llm,
 )
-from core.llm import LLMError
 
 # 导入工具
 from tools import Key_Tools
@@ -2205,6 +2212,39 @@ class SelfEvolvingAgent:
         except Exception:
             return
 
+    def _build_llm_invocation_context(self, *, prompt_purpose: str = "main_reply") -> LLMInvocationContext:
+        runtime = _turn_runtime_from_env()
+        binding = getattr(self, "runtime_agent_binding", {}) or {}
+        try:
+            policy = self._get_mode_policy()
+            mode_value = str(getattr(policy.mode, "value", policy.mode) or "").strip()
+            orchestrator_kind = str(getattr(policy, "orchestrator_kind", "") or "").strip()
+        except Exception:
+            mode_value = ""
+            orchestrator_kind = ""
+        surface = "chat_turn" if orchestrator_kind == "chat" or mode_value == "chat" else "agent_turn"
+        run_kind = (
+            str(runtime.get("runKind") or "").strip()
+            or ("chat_turn" if surface == "chat_turn" else mode_value or "agent_turn")
+        )
+        return LLMInvocationContext(
+            surface=surface,
+            run_kind=run_kind,
+            run_id=str(runtime.get("runId") or getattr(self, "_pending_supervised_case_id", "") or "").strip(),
+            session_id=str(runtime.get("sessionId") or binding.get("directSessionId") or "").strip(),
+            agent_id=str(runtime.get("agentId") or binding.get("agentId") or "").strip(),
+            llm_slot=str(runtime.get("llmSlot") or binding.get("llmSlot") or "dialogue").strip() or "dialogue",
+            model_id=str(runtime.get("modelId") or os.environ.get("VIBELUTION_AGENT_LLM_MODEL_ID") or "").strip(),
+            cache_scope=str(runtime.get("cacheScope") or "").strip(),
+            cache_partition=str(runtime.get("promptCachePartition") or "").strip(),
+            prompt_purpose=prompt_purpose,
+            conversation_bound=surface == "chat_turn",
+            metadata={
+                "agentMode": mode_value,
+                "orchestratorKind": orchestrator_kind,
+            },
+        )
+
     def _invoke_llm(self, messages: list) -> Optional[Any]:
         """调用 LLM（带错误分类、自动重试）"""
         ui = get_ui()
@@ -2233,6 +2273,7 @@ class SelfEvolvingAgent:
             disable_streaming_for_retry = False
             disable_tools_for_retry = False
             fallback_profile_id_for_retry = None
+            invocation_context = self._build_llm_invocation_context(prompt_purpose="main_reply")
             while attempt < MAX_CONSECUTIVE_FAILURES:
                 try:
                     self._raise_if_turn_stop_requested()
@@ -2269,7 +2310,11 @@ class SelfEvolvingAgent:
                             reasoning_seen_by_source[source_key] = previous + current
                             return current
 
-                        for chunk in llm_for_turn.stream(clean_messages):
+                        for chunk in stream_llm(
+                            llm_for_turn,
+                            clean_messages,
+                            context=invocation_context,
+                        ):
                             self._raise_if_turn_stop_requested()
                             full_chunk = ResponseProcessor.merge_stream_chunk(full_chunk, chunk)
                             chunk_kwargs = getattr(chunk, "additional_kwargs", None) or {}
@@ -2345,7 +2390,11 @@ class SelfEvolvingAgent:
                                 response_metadata=getattr(full_chunk, "response_metadata", None) or {},
                             )
                     self._raise_if_turn_stop_requested()
-                    invoke_response = llm_for_turn.invoke(clean_messages)
+                    invoke_response = invoke_llm(
+                        llm_for_turn,
+                        clean_messages,
+                        context=invocation_context,
+                    )
                     if disable_streaming_for_retry:
                         final_content = ResponseProcessor.coerce_content_text(
                             getattr(invoke_response, "content", "")

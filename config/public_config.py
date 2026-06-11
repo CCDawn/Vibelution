@@ -19,7 +19,7 @@ try:
 except ImportError:  # pragma: no cover - Python < 3.11 compatibility
     import toml as tomllib  # type: ignore[no-redef]
 
-from core.llm import assert_llm_compatibility
+from core.llm import LLMInvocationContext, assert_llm_compatibility, invoke_llm
 from .llm_security import (
     coerce_llm_probe_timeout,
     coerce_llm_runtime_probe_timeout,
@@ -1707,7 +1707,22 @@ def _probe_llm_runtime(provider, profile, api_key: str | None = None) -> dict:
 
     try:
         client = LLMClient(config=_ProbeConfig(), profile_id=profile.profile_id, backend=real_backend)
-        client.invoke([{"role": "user", "content": "ping"}], tools=[])
+        invoke_llm(
+            client,
+            [{"role": "user", "content": "ping"}],
+            tools=[],
+            context=LLMInvocationContext(
+                surface="config_runtime_probe",
+                run_kind="non_conversation_probe",
+                agent_id="public_config",
+                llm_slot="dialogue",
+                model_id=str(getattr(profile, "model_ref", "") or getattr(profile, "model", "")),
+                cache_scope="config_probe",
+                cache_partition=f"config-runtime-probe-{profile.profile_id}",
+                prompt_purpose="provider_ping",
+                conversation_bound=False,
+            ),
+        )
     except Exception as exc:
         return {"ok": False, "message": redact_llm_probe_error(str(exc), api_key=api_key)}
 
