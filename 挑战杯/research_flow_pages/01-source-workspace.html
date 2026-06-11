@@ -87,16 +87,17 @@
       <div class="status-grid">
         <div class="status-item"><b>状态</b><span>source_registered</span></div>
         <div class="status-item"><b>功能岗位</b><span>Source Intake Agent</span></div>
-        <div class="status-item"><b>Agent 状态</b><span>可复用通用 data-processing assignment / source-extraction / source-quality 后端已接入；Teams 资料搜集执行台、候选资料筛选台、三阶段启动台和 KV 缓存对话轨迹已接入</span></div>
+        <div class="status-item"><b>Agent 状态</b><span>可复用通用 data-processing assignment / source-extraction / source-quality 后端已接入；Teams 资料搜集执行台、候选资料筛选台、三阶段启动台、KV 缓存对话轨迹和启动复用反馈已接入</span></div>
         <div class="status-item"><b>进入条件</b><span>用户提供 PDF、论文、赛题或补充资料；文件可在挑战杯工作区定位。</span></div>
         <div class="status-item"><b>退出条件</b><span>每个知识搜集轮次有 stageRoundId、roundNumber、teamMemoryRecord、coordinationContract.startResult、coordinationRoomId/coordinationRoundId、sourceRunIds、dataSearchPlanRef、planned queries、assignedQueries 和 resultWritebackContract；每个资料项先有 DataRecord/sourceRef/rawLocation/title/qualitySignals/collectionTrace，再有 source_manifest 的 id、path、type、allowedForAnalysis、sha256、pageScope、sourceExtraction.pageAnchors 和 sourceQualityAssessment。</span></div>
         <div class="status-item"><b>审核门禁</b><span>确认资料允许分析、来源可信度和是否纳入本轮。</span></div>
       </div>
       <div class="plan-grid">
-        <article class="plan-card"><h2>本步操作</h2><p class="hint">用户在 ai科学研究团队右侧顶部点击“启动知识搜集”或“开启新一轮”，stage-rounds/start 创建或续用 ResearchStageRound，并复用 source-collection run 建立 DataProcessingRun；随后尝试基于 linkedChatRoom 启动轻量团队协调 round。系统基于 topic/goal/scope/querySeeds 生成 searchPlan、queries、roleAssignmentInputs 和 resultWritebackContract，让 data_discovery/source_acquisition/content_extraction/source_quality 等功能 Agent 领取带 assignedQueries 的 CollectionAssignment、提交 CollectionOutput。执行台支持手工回写一条 CollectionOutput，随后自动通过 Team workflow 导入桥把新 DataRecord 幂等转成 source_manifest 候选；候选资料页可调用 source-quality/assess 写入 sourceQualityAssessment 并标记通过筛选或退回补资料。对本地 PDF 运行 source-extraction，计算 sha256、生成 pageAnchors/excerpt，不改写原文，不自动混入联网资料。</p></article>
+        <article class="plan-card"><h2>本步操作</h2><p class="hint">用户在 ai科学研究团队右侧顶部点击“启动知识搜集”或“开启新一轮”，stage-rounds/start 创建或续用 ResearchStageRound，并复用 source-collection run 建立 DataProcessingRun；如果已有 active knowledge_collection，接口返回 continuedSourceRunRef、run 和 assignments，页面直接提示已复用的 runId、记录数、待回写任务数和未触发外部搜索状态。随后尝试基于 linkedChatRoom 启动轻量团队协调 round。系统基于 topic/goal/scope/querySeeds 生成 searchPlan、queries、roleAssignmentInputs 和 resultWritebackContract，让 data_discovery/source_acquisition/content_extraction/source_quality 等功能 Agent 领取带 assignedQueries 的 CollectionAssignment、提交 CollectionOutput。执行台支持手工回写一条 CollectionOutput，随后自动通过 Team workflow 导入桥把新 DataRecord 幂等转成 source_manifest 候选；候选资料页可调用 source-quality/assess 写入 sourceQualityAssessment 并标记通过筛选或退回补资料。对本地 PDF 运行 source-extraction，计算 sha256、生成 pageAnchors/excerpt，不改写原文，不自动混入联网资料。</p></article>
         <article class="plan-card"><h2>本地研究模型用法</h2><p class="hint">本地 9B 模型适合做标题/摘要/片段初筛，输出 relevanceScore、topicTags、excludeReason；调用证据进入 official_model_evidence 状态面板，不直接决定正式纳入。</p></article>
         <article class="plan-card"><h2>所需功能</h2><ul><li>ResearchStageRound 建立</li>
 <li>三阶段启动台一键进入知识搜集</li>
+<li>active 知识搜集轮次复用反馈</li>
 <li>自动启动团队协调 round</li>
 <li>DataProcessingRun 建立</li>
 <li>DataSearchPlan/querySeeds 搜索计划</li>
@@ -108,6 +109,7 @@
 <li>Teams 启动搜集批次</li>
 <li>Teams 查看 run/assignment/query/KV 状态</li>
 <li>搜集对话流展示搜索计划、缓存门禁、领取任务、回写和入候选仓库</li>
+<li>无记录/有待办时显示等待功能 Agent 回写提示</li>
 <li>手工 CollectionOutput 回写</li>
 <li>DataRecord 通用记录</li>
 <li>DataRecord 自动导入 source_manifest</li>
@@ -129,7 +131,7 @@
 <li>/api/teams/{teamId}/workflow-orchestration/official-model-evidence/status</li>
 <li>research_knowledge_query_tool</li>
 <li>/api/teams/{teamId}/workflow-orchestration/candidates/{candidateId}/source-extraction</li></ul></article>
-        <article class="plan-card"><h2>功能缺口</h2><p class="hint">科研三阶段启动台、资料搜集阶段轮次、资料搜集批次启动、DataSearchPlan/query seed 契约、KV/prompt cache 启动门禁、缓存分区对话轨迹、通用资料搜集 assignment/output、Teams 执行台、DataRecord 到 source_manifest 导入桥和 source-quality 筛选台已接入；真实外部搜索执行器、搜索/下载事件的自动回写、长 PDF 自动分批、章节识别和非 PDF 资料解析仍待补。</p></article>
+        <article class="plan-card"><h2>功能缺口</h2><p class="hint">科研三阶段启动台、资料搜集阶段轮次、资料搜集批次启动、active 轮次复用反馈、DataSearchPlan/query seed 契约、KV/prompt cache 启动门禁、缓存分区对话轨迹、通用资料搜集 assignment/output、Teams 执行台、DataRecord 到 source_manifest 导入桥和 source-quality 筛选台已接入；真实外部搜索执行器、搜索/下载事件的自动回写、长 PDF 自动分批、章节识别和非 PDF 资料解析仍待补。</p></article>
         <article class="plan-card"><h2>失败回退</h2><p class="hint">资料不足、路径缺失、来源不明、权限不清、抽取失败或解析器不可用时，assignment 标记 returned/partial，挑战杯候选停在 source_needs_confirmation；群聊缺失、忙碌或没有可发言成员时阶段轮次保留为 needs_attention，并通过 coordination/retry 重新启动团队协调。</p></article>
       </div>
     </section>
