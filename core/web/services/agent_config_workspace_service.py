@@ -71,6 +71,9 @@ AGENT_LLM_SLOT_DEFINITIONS = (
     },
 )
 AGENT_LLM_SLOT_REFS = {item["slot"]: item for item in AGENT_LLM_SLOT_DEFINITIONS}
+HEALTH_LOG_CODE_LIMIT = 12
+HEALTH_LOG_AGENT_LIMIT = 12
+HEALTH_LOG_SAMPLE_LIMIT = 8
 
 
 def get_agent_config_workspace() -> dict[str, Any]:
@@ -191,7 +194,7 @@ def get_agent_config_workspace() -> dict[str, Any]:
     load_modes["chatRooms"] = "compact"
     load_modes["teams"] = "graph_references"
     load_modes["runtimeStatuses"] = "batched"
-    _record_workspace_loaded(summary, timings=timings, load_modes=load_modes)
+    _record_workspace_loaded(summary, timings=timings, load_modes=load_modes, issues=health["issues"])
     _record_model_reference_resolution(health["issues"])
     return payload
 
@@ -1438,7 +1441,9 @@ def _record_workspace_loaded(
     *,
     timings: dict[str, float] | None = None,
     load_modes: dict[str, str] | None = None,
+    issues: list[dict[str, Any]] | None = None,
 ) -> None:
+    health_log_summary = _health_issue_log_summary(issues or [])
     try:
         record_runtime_scene_event(
             "agent_configuration",
@@ -1453,6 +1458,9 @@ def _record_workspace_loaded(
                 "modeCount": summary.get("modeCount", 0),
                 "chatRoomCount": summary.get("chatRoomCount", 0),
                 "healthIssueCount": summary.get("healthIssueCount", 0),
+                "blockingIssueCount": summary.get("blockingIssueCount", 0),
+                "warningIssueCount": summary.get("warningIssueCount", 0),
+                **health_log_summary,
                 "timingsMs": dict(timings or {}),
                 "loadModes": dict(load_modes or {}),
             },
@@ -1460,6 +1468,60 @@ def _record_workspace_loaded(
         )
     except Exception:
         return
+
+
+def _health_issue_log_summary(issues: list[dict[str, Any]]) -> dict[str, Any]:
+    severity_counts: dict[str, int] = {}
+    code_counts: dict[str, int] = {}
+    affected_agent_ids: list[str] = []
+    blocking_agent_ids: list[str] = []
+    warning_agent_ids: list[str] = []
+    samples: list[dict[str, str]] = []
+
+    for issue in issues:
+        if not isinstance(issue, dict):
+            continue
+        severity = str(issue.get("severity") or "unknown").strip() or "unknown"
+        code = str(issue.get("code") or "unknown").strip() or "unknown"
+        agent_id = str(issue.get("agentId") or "").strip()
+        severity_counts[severity] = severity_counts.get(severity, 0) + 1
+        code_counts[code] = code_counts.get(code, 0) + 1
+        if agent_id:
+            _append_unique_limited(affected_agent_ids, agent_id, HEALTH_LOG_AGENT_LIMIT)
+            if severity == "blocking":
+                _append_unique_limited(blocking_agent_ids, agent_id, HEALTH_LOG_AGENT_LIMIT)
+            elif severity == "warning":
+                _append_unique_limited(warning_agent_ids, agent_id, HEALTH_LOG_AGENT_LIMIT)
+        if len(samples) < HEALTH_LOG_SAMPLE_LIMIT:
+            sample = {
+                "severity": severity,
+                "code": code,
+            }
+            if agent_id:
+                sample["agentId"] = agent_id
+            source = str(issue.get("source") or "").strip()
+            if source:
+                sample["source"] = source
+            title = str(issue.get("title") or "").strip()
+            if title:
+                sample["title"] = title
+            samples.append(sample)
+
+    top_codes = sorted(code_counts.items(), key=lambda item: (-item[1], item[0]))[:HEALTH_LOG_CODE_LIMIT]
+    return {
+        "healthIssueSeverityCounts": dict(sorted(severity_counts.items())),
+        "healthIssueTopCodes": [{"code": code, "count": count} for code, count in top_codes],
+        "healthIssueAffectedAgentIds": affected_agent_ids,
+        "healthIssueBlockingAgentIds": blocking_agent_ids,
+        "healthIssueWarningAgentIds": warning_agent_ids,
+        "healthIssueSamples": samples,
+    }
+
+
+def _append_unique_limited(values: list[str], value: str, limit: int) -> None:
+    if len(values) >= limit or value in values:
+        return
+    values.append(value)
 
 
 def _record_model_reference_resolution(issues: list[dict[str, Any]]) -> None:
