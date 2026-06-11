@@ -13130,6 +13130,52 @@ def test_config_workspace_test_llm_allows_private_lan_local_model(monkeypatch):
     assert payload["api_key_source"] == "not-required"
 
 
+def test_config_workspace_test_llm_extends_private_lan_local_probe_timeout():
+    provider = ProviderConfig(
+        provider_id="local_model_server_b",
+        kind="local",
+        api_key_env="VIBELUTION_LLM_MODEL_LOCAL_MODEL_SERVER_B_API_KEY",
+        base_url="http://192.168.20.63:8000/v1",
+        compat_mode="openai",
+        requires_api_key=True,
+        context_window=128000,
+    )
+    profile = LLMProfile(
+        profile_id="__capability_probe_local_model_server_b",
+        provider_id="local_model_server_b",
+        model="Qwen3-32B-AWQ",
+        temperature=0.3,
+        max_output_tokens=4096,
+        timeout=120,
+        connect_timeout=20,
+    )
+
+    assert config_service._llm_test_probe_timeout_seconds(provider, profile) == 30
+
+
+def test_config_workspace_test_llm_keeps_remote_probe_timeout_short():
+    provider = ProviderConfig(
+        provider_id="deepseek",
+        kind="deepseek",
+        api_key_env="DEEPSEEK_API_KEY",
+        base_url="https://api.deepseek.com",
+        compat_mode="native",
+        requires_api_key=True,
+        context_window=65536,
+    )
+    profile = LLMProfile(
+        profile_id="primary",
+        provider_id="deepseek",
+        model="deepseek-v4-pro",
+        temperature=0.3,
+        max_output_tokens=4096,
+        timeout=120,
+        connect_timeout=20,
+    )
+
+    assert config_service._llm_test_probe_timeout_seconds(provider, profile) == 10
+
+
 def test_config_workspace_test_llm_image_input_reports_unsupported(monkeypatch):
     public_config = copy.deepcopy(load_public_config())
     public_config["llm"]["model_library"]["local_image_probe"] = {

@@ -18,6 +18,7 @@ import pytest
 
 from config.toml_writer import dumps_public_config
 from config.public_config import _probe_llm_runtime
+from config.models import LLMProfile, ProviderConfig
 from config.runtime_capabilities import record_model_image_input_capability
 from scripts.config_panel import (
     ConfigPanelHandler,
@@ -1234,6 +1235,44 @@ def test_runtime_llm_probe_uses_real_backend_with_small_payload(monkeypatch):
     assert captured["max_tokens"] == 1
     assert captured["stream"] is False
     assert captured["api_key"] == "relay-secret"
+
+
+def test_runtime_llm_probe_extends_private_lan_local_timeout(monkeypatch):
+    provider = ProviderConfig(
+        provider_id="local_model_server_b",
+        kind="local",
+        api_key_env="VIBELUTION_LLM_MODEL_LOCAL_MODEL_SERVER_B_API_KEY",
+        base_url="http://192.168.20.63:8000/v1",
+        compat_mode="openai",
+        requires_api_key=False,
+        context_window=128000,
+    )
+    profile = LLMProfile(
+        profile_id="primary",
+        provider_id="local_model_server_b",
+        model="Qwen3-32B-AWQ",
+        temperature=0.3,
+        max_output_tokens=4096,
+        timeout=120,
+        connect_timeout=20,
+    )
+    captured = {}
+
+    def fake_backend(payload):
+        captured.update(payload)
+        return {
+            "choices": [{"message": {"role": "assistant", "content": "ok"}}],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        }
+
+    monkeypatch.setattr("core.llm.client._default_completion_backend", fake_backend)
+
+    result = _probe_llm_runtime(provider, profile)
+
+    assert result["ok"] is True
+    assert captured["timeout"] == 30
+    assert captured["max_tokens"] == 1
+    assert captured["stream"] is False
 
 
 def test_legacy_profile_llm_test_endpoint_is_removed(tmp_path, monkeypatch):

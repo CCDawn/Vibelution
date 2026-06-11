@@ -10,6 +10,7 @@ from urllib.parse import urlparse
 
 
 MAX_LLM_PROBE_CONNECT_TIMEOUT_SECONDS = 10
+MAX_LLM_LOCAL_NETWORK_PROBE_TIMEOUT_SECONDS = 30
 
 _API_KEY_ENV_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]{2,80}$")
 _ALLOWED_API_KEY_ENV_PREFIXES = (
@@ -270,18 +271,33 @@ def validate_llm_public_config(public_config: dict[str, Any], *, context: str = 
                 validate_llm_api_key_env(env_name, context=f"{context}.llm.profiles.{profile_id}.api_key_env")
 
 
+def _coerce_probe_timeout_value(value: Any, default: int) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def coerce_llm_probe_timeout(connect_timeout: Any, timeout: Any) -> int:
     """Clamp probe HTTP timeout to a short, bounded connection check."""
 
-    try:
-        connect_seconds = int(connect_timeout)
-    except (TypeError, ValueError):
-        connect_seconds = MAX_LLM_PROBE_CONNECT_TIMEOUT_SECONDS
-    try:
-        timeout_seconds = int(timeout)
-    except (TypeError, ValueError):
-        timeout_seconds = MAX_LLM_PROBE_CONNECT_TIMEOUT_SECONDS
+    connect_seconds = _coerce_probe_timeout_value(connect_timeout, MAX_LLM_PROBE_CONNECT_TIMEOUT_SECONDS)
+    timeout_seconds = _coerce_probe_timeout_value(timeout, MAX_LLM_PROBE_CONNECT_TIMEOUT_SECONDS)
     return max(1, min(connect_seconds, timeout_seconds, MAX_LLM_PROBE_CONNECT_TIMEOUT_SECONDS))
+
+
+def coerce_llm_runtime_probe_timeout(provider: Any, connect_timeout: Any, timeout: Any) -> int:
+    """Return a bounded runtime probe timeout, allowing private-LAN local models a longer check."""
+
+    default_timeout = coerce_llm_probe_timeout(connect_timeout, timeout)
+    kind = str(_read_field(provider, "kind", "") or "").strip().lower()
+    base_url = str(_read_field(provider, "base_url", "") or "").strip()
+    if kind not in _LOCAL_PROVIDER_KINDS or not is_llm_local_network_base_url(base_url):
+        return default_timeout
+
+    timeout_seconds = _coerce_probe_timeout_value(timeout, MAX_LLM_LOCAL_NETWORK_PROBE_TIMEOUT_SECONDS)
+    local_timeout = min(timeout_seconds, MAX_LLM_LOCAL_NETWORK_PROBE_TIMEOUT_SECONDS)
+    return max(default_timeout, local_timeout, 1)
 
 
 def redact_llm_probe_error(message: Any, *, api_key: str | None = None) -> str:
