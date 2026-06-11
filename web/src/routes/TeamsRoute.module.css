@@ -712,7 +712,7 @@
 
 .aiSearchRunStats {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(72px, 1fr));
   gap: 5px;
 }
 
@@ -760,6 +760,25 @@
   background:
     linear-gradient(90deg, color-mix(in srgb, var(--accent-danger) 7%, transparent), transparent 68%),
     color-mix(in srgb, var(--surface-panel-strong) 62%, transparent);
+}
+
+.aiSearchRunCardDegraded {
+  border-color: color-mix(in srgb, var(--accent-cool) 34%, var(--border-soft));
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--accent-cool) 9%, transparent), transparent 70%),
+    color-mix(in srgb, var(--surface-panel-strong) 62%, transparent);
+}
+
+.aiSearchRunFallbackReason {
+  display: -webkit-box;
+  min-width: 0;
+  color: color-mix(in srgb, var(--accent-cool) 72%, var(--fg-secondary));
+  font-size: 0.58rem;
+  font-weight: 720;
+  line-height: 1.35;
+  overflow: hidden;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
 }
 
 .aiSearchRunCard p {
