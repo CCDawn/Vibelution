@@ -100,6 +100,7 @@ PROFILE_REFERENCE_OVERRIDE_FIELDS = (
     "thinking_display",
     "reasoning_effort",
     "supports_image_input",
+    "supports_prompt_cache",
     "capability_status",
     "capability_source",
     "capability_checked_at",
@@ -233,7 +234,13 @@ def _coerce_model_library_detail(key: str, value: Any) -> Any:
         return float(value)
     if key in {"max_output_tokens", "timeout", "connect_timeout"}:
         return int(value)
-    if key in {"streaming", "discovery_enabled", "strict_compatibility", "supports_image_input"}:
+    if key in {
+        "streaming",
+        "discovery_enabled",
+        "strict_compatibility",
+        "supports_image_input",
+        "supports_prompt_cache",
+    }:
         if isinstance(value, bool):
             return value
         return str(value).strip().lower() in {"1", "true", "yes", "on"}
@@ -266,6 +273,43 @@ def _model_library_entry(
     return entry
 
 
+def _truthy_prompt_cache_capability(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on", "supported", "explicit", "automatic"}
+    return False
+
+
+def _declares_prompt_cache_support(details: Dict[str, Any]) -> bool:
+    for key in ("supports_prompt_cache", "supportsPromptCache", "promptCache"):
+        if key in details and _truthy_prompt_cache_capability(details.get(key)):
+            return True
+    capabilities = details.get("capabilities") if isinstance(details.get("capabilities"), dict) else {}
+    for key in ("supports_prompt_cache", "supportsPromptCache", "promptCache"):
+        if key in capabilities and _truthy_prompt_cache_capability(capabilities.get(key)):
+            return True
+    return False
+
+
+def _is_qwen_prompt_cache_route(
+    *,
+    provider_kind: str,
+    provider_api: str,
+    model: str,
+    protocol: str,
+    host: str,
+) -> bool:
+    return (
+        "qwen" in model
+        or protocol.startswith("qwen_")
+        or provider_api in {"qwen", "qwen-openai-compatible"}
+        or (provider_kind == "aliyun" and "dashscope.aliyuncs.com" in host)
+    )
+
+
 def _recommended_prompt_cache_mode(provider: Dict[str, Any], details: Dict[str, Any] | None = None) -> str:
     provider = _public_inline_provider_payload(provider)
     details = details if isinstance(details, dict) else {}
@@ -277,13 +321,22 @@ def _recommended_prompt_cache_mode(provider: Dict[str, Any], details: Dict[str, 
     protocol = str(details.get("protocol", "") or "").strip().lower()
     base_url = str(provider.get("base_url", "") or "").strip()
     host = base_url.lower()
+    is_qwen = _is_qwen_prompt_cache_route(
+        provider_kind=provider_kind,
+        provider_api=provider_api,
+        model=model,
+        protocol=protocol,
+        host=host,
+    )
 
     if provider_kind in {"local", "ollama", "llamacpp"} or is_llm_local_network_base_url(base_url):
+        if is_qwen and _declares_prompt_cache_support(details):
+            return "explicit_cache_control"
         return ""
 
     is_dashscope_qwen = (
         provider_kind == "aliyun"
-        and ("qwen" in model or protocol.startswith("qwen_") or "dashscope.aliyuncs.com" in host)
+        and is_qwen
     )
     if provider_kind == "anthropic" and compat_mode not in {"openai", "openai_compatible"}:
         return "explicit_cache_control"

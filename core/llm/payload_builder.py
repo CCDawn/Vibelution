@@ -156,8 +156,17 @@ def _prompt_cache_provider_strategy(build_input: PayloadBuildInput, prompt_cache
     return mode
 
 
-def _default_prompt_cache_retention(strategy: str) -> str:
+def _requires_extended_prompt_cache_retention(model: str) -> bool:
+    normalized = str(model or "").strip().lower()
+    if "/" in normalized:
+        normalized = normalized.rsplit("/", 1)[-1]
+    return normalized == "gpt-5.5" or normalized.startswith("gpt-5.5-")
+
+
+def _default_prompt_cache_retention(strategy: str, *, model: str = "") -> str:
     normalized = str(strategy or "").strip().lower()
+    if _requires_extended_prompt_cache_retention(model):
+        return "24h"
     if normalized in {
         "openai_automatic_key",
         "openai_compatible_automatic_key",
@@ -531,7 +540,10 @@ def build_llm_payload(
         if not prompt_cache_key:
             prompt_cache_key = _default_prompt_cache_key(build_input)
         if not prompt_cache_retention:
-            prompt_cache_retention = _default_prompt_cache_retention(policy_actions.prompt_cache_provider_strategy)
+            prompt_cache_retention = _default_prompt_cache_retention(
+                policy_actions.prompt_cache_provider_strategy,
+                model=str(getattr(profile, "model", "") or ""),
+            )
         if prompt_cache_key:
             payload["prompt_cache_key"] = prompt_cache_key
         if prompt_cache_retention:

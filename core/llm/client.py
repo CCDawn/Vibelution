@@ -44,6 +44,7 @@ _LLM_ROUTE_CONCURRENCY_LOCK = threading.Lock()
 _LLM_ROUTE_CONCURRENCY_GATES: Dict[str, threading.BoundedSemaphore] = {}
 _NO_PROXY_LOCK = threading.Lock()
 _NO_PROXY_ENV_NAMES = ("NO_PROXY", "no_proxy")
+PROMPT_CACHE_OPPORTUNITY_PREFIX_CHARS = 4096
 
 
 class LLMCancelledError(Exception):
@@ -536,10 +537,25 @@ def _cache_control_text_shape(content: Any) -> Dict[str, Any]:
 def _safe_prompt_cache_design_summary(messages: List[Any], *, prompt_cache_mode: str) -> Dict[str, Any]:
     first_system_content = _first_system_content_from_messages(messages)
     shape = _cache_control_text_shape(first_system_content)
+    mode = str(prompt_cache_mode or "").strip().lower()
+    cacheable_chars = int(shape.get("firstSystemCacheableTextChars") or 0)
+    disabled_mode = mode in {"", "disabled"}
+    cacheable_prefix_without_enabled_mode = (
+        disabled_mode
+        and bool(_messages_have_prompt_cache_control(messages))
+        and cacheable_chars >= PROMPT_CACHE_OPPORTUNITY_PREFIX_CHARS
+    )
     return {
         "promptCacheDesign": {
-            "mode": str(prompt_cache_mode or "").strip().lower(),
+            "mode": mode,
             "hasCacheControl": bool(_messages_have_prompt_cache_control(messages)),
+            "cacheablePrefixWithoutEnabledMode": cacheable_prefix_without_enabled_mode,
+            "cacheablePrefixOpportunityThresholdChars": PROMPT_CACHE_OPPORTUNITY_PREFIX_CHARS,
+            "cacheablePrefixOpportunityReason": (
+                "prompt_cache_mode_disabled"
+                if cacheable_prefix_without_enabled_mode
+                else ""
+            ),
             **shape,
         }
     }
