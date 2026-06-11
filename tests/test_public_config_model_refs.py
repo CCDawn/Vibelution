@@ -189,6 +189,69 @@ def test_deepseek_model_without_prompt_cache_stays_disabled_by_default():
     assert profile.prompt_cache.mode == "disabled"
 
 
+def test_local_qwen_without_prompt_cache_support_stays_disabled_by_default():
+    public_config = load_public_config()
+    public_config["llm"].setdefault("model_library", {})["local_qwen_no_cache_probe"] = {
+        "model": "Qwen3-32B-AWQ",
+        "label": "Local Qwen without cache support",
+        "transport": "chat_completions",
+        "contract": "basic_chat",
+        "protocol": "qwen_thinking_no_prefill",
+        "tool_calling_mode": "disabled",
+        "provider": {
+            "kind": "local",
+            "api": "openai-completions",
+            "api_key_env": "",
+            "base_url": "http://192.168.20.63:8000/v1",
+            "compat_mode": "openai",
+            "requires_api_key": False,
+            "context_window": 128000,
+        },
+    }
+    public_config["llm"]["profiles"]["primary"] = {
+        "model_ref": "local_qwen_no_cache_probe",
+        "overrides": {},
+    }
+
+    effective = build_effective_config(public_config)
+    profile = effective.llm.get_profile("primary")
+
+    assert profile.model == "Qwen3-32B-AWQ"
+    assert profile.prompt_cache.mode == "disabled"
+
+
+def test_local_qwen_with_prompt_cache_support_defaults_to_explicit_cache_control():
+    public_config = load_public_config()
+    public_config["llm"].setdefault("model_library", {})["local_qwen_cache_probe"] = {
+        "model": "Qwen3-32B-AWQ",
+        "label": "Local Qwen with cache support",
+        "transport": "chat_completions",
+        "contract": "basic_chat",
+        "protocol": "qwen_thinking_no_prefill",
+        "tool_calling_mode": "disabled",
+        "supports_prompt_cache": True,
+        "provider": {
+            "kind": "local",
+            "api": "openai-completions",
+            "api_key_env": "",
+            "base_url": "http://192.168.20.63:8000/v1",
+            "compat_mode": "openai",
+            "requires_api_key": False,
+            "context_window": 128000,
+        },
+    }
+    public_config["llm"]["profiles"]["primary"] = {
+        "model_ref": "local_qwen_cache_probe",
+        "overrides": {},
+    }
+
+    effective = build_effective_config(public_config)
+    profile = effective.llm.get_profile("primary")
+
+    assert profile.model == "Qwen3-32B-AWQ"
+    assert profile.prompt_cache.mode == "explicit_cache_control"
+
+
 def test_dashscope_qwen_preset_uses_explicit_cache_control():
     model = LLM_MODEL_PRESETS["dashscope_qwen3_6_plus"]["model"]
 
