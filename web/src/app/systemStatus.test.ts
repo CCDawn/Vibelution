@@ -135,6 +135,32 @@ describe("systemStatus", () => {
         },
         workbench: {
           ...runtimeWorkbenchBase,
+          browserWindowAlive: false,
+          desiredState: "open",
+          observedState: "partial",
+          phase: "steady",
+          backendPid: 222,
+          browserWindowPid: 333,
+          browserManaged: true,
+          lifecycleConsistency: "browser_missing",
+          url: "http://127.0.0.1:8000",
+          lastReason: "",
+          statusLine: "Workbench window is closed; backend is still running.",
+          failureMessage: "",
+        },
+      }),
+    ).toBe("failed");
+
+    expect(
+      deriveRuntimeControllerState({
+        runtimeManager: {
+          running: true,
+          runtimeState: "running",
+          managerPid: 1001,
+          stateVersion: 3,
+        },
+        workbench: {
+          ...runtimeWorkbenchBase,
           desiredState: "closed",
           observedState: "open",
           phase: "closing",
@@ -400,6 +426,51 @@ describe("systemStatus", () => {
     });
 
     expect(steady.active).toBe(false);
+
+    const partial = deriveStartupProgressState({
+      runtimeManager: {
+        running: true,
+        runtimeState: "running",
+        managerPid: 1001,
+        stateVersion: 5,
+      },
+      workbench: {
+        ...runtimeWorkbenchBase,
+        browserWindowAlive: false,
+        desiredState: "open",
+        observedState: "partial",
+        phase: "steady",
+        backendPid: 222,
+        browserWindowPid: 333,
+        browserManaged: true,
+        lifecycleConsistency: "browser_missing",
+        url: "http://127.0.0.1:8000",
+        lastReason: "launcher_start",
+        statusLine: "工作台窗口已关闭，后端仍在运行。",
+        failureMessage: "",
+      },
+      lifecycleProof: {
+        overallState: "partial",
+        overallLabel: "部分运行",
+        summary: "工作台窗口已关闭，后端仍在运行。",
+        verifiedAt: "2026-05-24T13:00:05Z",
+        desiredState: "open",
+        observedState: "partial",
+        phase: "steady",
+        browserManaged: true,
+        projectRootMatches: true,
+        components: [],
+        activeWorkRuns: { count: 0, kinds: [], items: [] },
+        residualProcesses: { count: 0, items: [] },
+      },
+    });
+
+    expect(partial).toMatchObject({
+      active: true,
+      title: "工作台窗口未打开",
+      stage: "部分运行",
+      tone: "caution",
+    });
 
     const advisoryFailureAfterReady = deriveStartupProgressState({
       runtimeManager: {

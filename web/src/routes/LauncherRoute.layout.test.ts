@@ -138,6 +138,8 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("userAction");
     expect(routeSource).toContain("projectRunning");
     expect(routeSource).toContain("lifecycleRunning");
+    expect(routeSource).toContain("lifecyclePartial");
+    expect(routeSource).toContain('observed === "partial"');
     expect(routeSource).toContain("lifecycleStarting");
     expect(routeSource).toContain("lifecycleStopping");
     expect(routeSource).toContain("lifecycleRestarting");

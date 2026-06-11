@@ -1997,6 +1997,7 @@ export type LauncherProjectBundleState = {
   observedState: string;
   phase: string;
   overallState: string;
+  lifecycleConsistency?: string;
   statusLine: string;
   url: string;
   lastReason: string;

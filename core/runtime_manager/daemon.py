@@ -649,6 +649,18 @@ def _workbench_has_orphaned_browser(observation: dict[str, Any]) -> bool:
     )
 
 
+def _workbench_has_missing_managed_browser(observation: dict[str, Any]) -> bool:
+    consistency = str(observation.get("lifecycleConsistency") or "").strip().lower()
+    if consistency == "browser_missing":
+        return True
+    return bool(
+        observation.get("browserManaged", True)
+        and not observation.get("browserWindowAlive")
+        and observation.get("backendObserved")
+        and str(observation.get("observedState") or "closed") == "partial"
+    )
+
+
 def _workbench_consistency_fields(observation: dict[str, Any]) -> dict[str, Any]:
     consistency = str(observation.get("lifecycleConsistency") or "").strip() or "consistent"
     return {
@@ -657,6 +669,7 @@ def _workbench_consistency_fields(observation: dict[str, Any]) -> dict[str, Any]
             and not bool(observation.get("backendObserved"))
         ),
         "frontendOrphaned": _workbench_has_orphaned_browser(observation),
+        "browserMissing": _workbench_has_missing_managed_browser(observation),
         "lifecycleConsistency": consistency,
     }
 
@@ -728,7 +741,7 @@ def _open_should_probe_before_launch(workbench: dict[str, Any], *, no_browser: b
         return True
     observed_state = str(workbench.get("observedState") or "closed").strip()
     desired_state = str(workbench.get("desiredState") or "closed").strip()
-    if observed_state == "open" or desired_state == "open":
+    if observed_state in {"open", "partial"} or desired_state == "open":
         return True
     if bool(workbench.get("backendPortOwnerResidual")) or bool(workbench.get("frontendOrphaned")):
         return True
@@ -876,7 +889,7 @@ def _open_verification_should_retry_stale_session(observation: dict[str, Any], *
         return False
     if not bool(observation.get("launcherStatePresent")):
         return False
-    if str(observation.get("observedState") or "closed") != "open":
+    if str(observation.get("observedState") or "closed") not in {"open", "partial"}:
         return False
     if bool(observation.get("backendPortConflict")):
         return False
@@ -1240,6 +1253,7 @@ def load_runtime_snapshot() -> dict[str, Any]:
     phase = str(workbench.get("phase") or "steady").strip() or "steady"
     consistency_fields = _workbench_consistency_fields(observation)
     orphaned_browser = bool(consistency_fields["frontendOrphaned"])
+    browser_missing = bool(consistency_fields["browserMissing"])
 
     if phase == "failed" and not _workbench_failure_should_stick(state, desired_state=desired_state, observed_state=observed_state):
         phase = "steady"
@@ -1250,8 +1264,10 @@ def load_runtime_snapshot() -> dict[str, Any]:
         workbench["failureMessage"] = _workbench_orphaned_browser_failure_message(observation)
 
     if (not manager_running or not active_command) and phase != "failed":
-        if observed_state == "open" and desired_state != "open":
+        if observed_state in {"open", "partial"} and desired_state != "open":
             desired_state = "open"
+            phase = "steady"
+        elif observed_state == "partial" and desired_state == "open":
             phase = "steady"
         elif observed_state == "closed" and desired_state != "closed":
             desired_state = "closed"
@@ -1262,6 +1278,9 @@ def load_runtime_snapshot() -> dict[str, Any]:
         state["lastError"] = {"scope": "", "message": "", "at": ""}
 
     if observed_state == desired_state and phase != "failed":
+        phase = "steady"
+        workbench["failureMessage"] = ""
+    elif desired_state == "open" and observed_state == "partial" and browser_missing and phase != "failed":
         phase = "steady"
         workbench["failureMessage"] = ""
     elif desired_state == "closed" and observed_state != "closed" and phase != "failed":
@@ -1407,6 +1426,8 @@ def _build_workbench_status_line(
         return "Runtime manager is force-closing the workbench."
     if desired_state == "closed" and observed_state != "closed":
         return "Runtime manager is closing the workbench."
+    if lifecycle_consistency == "browser_missing":
+        return f"Workbench window is closed; backend is still running (backend PID={backend_pid or '-'}, window PID={browser_pid or '-'})"
     if desired_state == "open" and observed_state != "open":
         return "Runtime manager is opening the workbench."
     if observed_state == "open":
@@ -2172,6 +2193,7 @@ class RuntimeManagerDaemon:
         previous_frontend_orphaned = bool(workbench.get("frontendOrphaned"))
         consistency_fields = _workbench_consistency_fields(observation)
         orphaned_browser = bool(consistency_fields["frontendOrphaned"])
+        browser_missing = bool(consistency_fields["browserMissing"])
 
         if phase == "failed" and not _workbench_failure_should_stick(
             state,
@@ -2203,6 +2225,7 @@ class RuntimeManagerDaemon:
                 observed_state = str(observation.get("observedState") or "closed").strip() or "closed"
                 consistency_fields = _workbench_consistency_fields(observation)
                 orphaned_browser = bool(consistency_fields["frontendOrphaned"])
+                browser_missing = bool(consistency_fields["browserMissing"])
                 if not orphaned_browser and observed_state == "closed":
                     phase = "steady"
                     workbench["failureMessage"] = ""
@@ -2232,16 +2255,19 @@ class RuntimeManagerDaemon:
             observation = observe_workbench()
             observed_state = str(observation.get("observedState") or "closed").strip() or "closed"
             consistency_fields = _workbench_consistency_fields(observation)
+            browser_missing = bool(consistency_fields["browserMissing"])
             residual_processes = residual_process_payload(
                 project_root=PROJECT_ROOT,
                 exclude_pids=_snapshot_residual_excluded_pids(observation, self._pid),
             )
 
         if not active_command and phase != "failed":
-            if observed_state == "open" and desired_state != "open":
+            if observed_state in {"open", "partial"} and desired_state != "open":
                 desired_state = "open"
                 phase = "steady"
                 workbench["lastReason"] = "external_open"
+            elif observed_state == "partial" and desired_state == "open":
+                phase = "steady"
             elif observed_state == "closed" and desired_state != "closed":
                 desired_state = "closed"
                 if phase != "failed":
@@ -2253,6 +2279,8 @@ class RuntimeManagerDaemon:
 
         if desired_state == "closed" and observed_state != "closed" and phase not in {"failed", "force_stopping"}:
             phase = "closing"
+        elif desired_state == "open" and observed_state == "partial" and browser_missing and phase != "failed":
+            phase = "steady"
         elif desired_state == "open" and observed_state != "open" and phase != "failed":
             phase = "opening"
 
