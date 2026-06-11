@@ -30,6 +30,8 @@ DEFAULT_BUNDLE_PATH = Path("workspace/evaluation/bundles") / f"{DEFAULT_BUNDLE_N
 DEFAULT_BUNDLE_TEMPLATE_DIR = Path(__file__).resolve().parent / "bundles"
 TRANSACTION_REQUIRED_SCENARIOS = {"transaction", "modify_rollback", "full_evolution"}
 AGENT_JUDGMENT_MARKER = "SUPERVISED_AGENT_JUDGMENT:"
+SUPERVISED_MENTAL_MODEL_DEFAULT = "follow"
+SUPERVISED_MENTAL_MODEL_MODES = {"follow", "enabled", "disabled"}
 ProgressCallback = Callable[[Dict[str, Any]], None]
 CheckpointCallback = Callable[[Dict[str, Any]], None]
 CancelChecker = Callable[[], object]
@@ -51,6 +53,20 @@ class SupervisedEvolutionCancelled(RuntimeError):
         super().__init__(reason)
         self.reason = reason
         self.session_id = session_id
+
+
+def normalize_supervised_mental_model_mode(value: Any) -> str:
+    normalized = str(value or "").strip().lower()
+    return normalized if normalized in SUPERVISED_MENTAL_MODEL_MODES else SUPERVISED_MENTAL_MODEL_DEFAULT
+
+
+def supervised_mental_model_enabled_for_mode(mode: Any) -> bool | None:
+    normalized = normalize_supervised_mental_model_mode(mode)
+    if normalized == "enabled":
+        return True
+    if normalized == "disabled":
+        return False
+    return None
 
 
 def _safe_report_file_stem(value: str) -> str:
@@ -287,6 +303,8 @@ class SupervisedEvolutionDecision:
     judge_runs: List[SupervisedEvolutionRun] = field(default_factory=list)
     advisory_context: Dict[str, Any] = field(default_factory=dict)
     agent_bindings: Dict[str, Any] = field(default_factory=dict)
+    mental_model_mode: str = SUPERVISED_MENTAL_MODEL_DEFAULT
+    mental_model_enabled: Optional[bool] = None
     summary: Dict[str, Any] = field(default_factory=dict)
     decision_path: Optional[str] = None
     policy_action: Dict[str, Any] = field(default_factory=dict)
@@ -2115,6 +2133,7 @@ def format_decision_record_summary(decision: SupervisedEvolutionDecision) -> str
         f"validation: {decision.baseline_summary.validation_passed}/{decision.baseline_summary.validation_failed} -> {decision.candidate_summary.validation_passed}/{decision.candidate_summary.validation_failed}",
         f"guarded tools: {decision.baseline_summary.total_guarded_tools} -> {decision.candidate_summary.total_guarded_tools}",
         f"delta: {decision.score_delta}",
+        f"mental_model: {normalize_supervised_mental_model_mode(getattr(decision, 'mental_model_mode', SUPERVISED_MENTAL_MODEL_DEFAULT))}",
         "advisory context:",
         *(advisory_lines or ["- 当前未记住 active advisory baseline"]),
         "gates:",
@@ -2138,6 +2157,7 @@ def run_supervised_evolution_session(
     checkpoint_callback: Optional[CheckpointCallback] = None,
     cancel_checker: Optional[CancelChecker] = None,
     agent_bindings: Optional[Dict[str, Any]] = None,
+    mental_model_mode: str = SUPERVISED_MENTAL_MODEL_DEFAULT,
     resume_from_decision_path: Optional[Path] = None,
 ) -> SupervisedEvolutionDecision:
     root = (project_root or get_workspace().project_root).resolve()
@@ -2150,6 +2170,8 @@ def run_supervised_evolution_session(
     advisory_context = build_active_advisory_snapshot(project_root=root)
     advisory_lines = summarize_active_advisory_baselines(project_root=root, limit=3)
     normalized_agent_bindings = _normalize_supervised_agent_bindings(agent_bindings)
+    normalized_mental_model_mode = normalize_supervised_mental_model_mode(mental_model_mode)
+    mental_model_enabled = supervised_mental_model_enabled_for_mode(normalized_mental_model_mode)
 
     baseline_runs: List[SupervisedEvolutionRun] = []
     candidate_runs: List[SupervisedEvolutionRun] = []
@@ -2171,6 +2193,8 @@ def run_supervised_evolution_session(
             "active_advisory_count": advisory_context.get("active_count", 0),
             "active_advisory_lines": advisory_lines,
             "agent_bindings": normalized_agent_bindings,
+            "mental_model_mode": normalized_mental_model_mode,
+            "mental_model_enabled": mental_model_enabled,
             **evaluation_metadata,
         },
     )
@@ -2182,6 +2206,8 @@ def run_supervised_evolution_session(
             "bundle_name": str(bundle.get("bundle_name") or bundle_name),
             "case_total": len(cases),
             "agent_bindings": normalized_agent_bindings,
+            "mental_model_mode": normalized_mental_model_mode,
+            "mental_model_enabled": mental_model_enabled,
             **evaluation_metadata,
         },
     )
@@ -2322,6 +2348,8 @@ def run_supervised_evolution_session(
                         post_restart_observe_seconds=post_restart_observe_seconds,
                         keep_worktree=keep_worktree,
                         agent_binding=role_agent_binding,
+                        mental_model_mode=normalized_mental_model_mode,
+                        mental_model_enabled=mental_model_enabled,
                         progress_callback=emit_live_case_progress,
                         cancel_checker=cancel_checker,
                     )
@@ -2534,6 +2562,8 @@ def run_supervised_evolution_session(
                     post_restart_observe_seconds=post_restart_observe_seconds,
                     keep_worktree=keep_worktree,
                     agent_binding=role_agent_binding,
+                    mental_model_mode=normalized_mental_model_mode,
+                    mental_model_enabled=mental_model_enabled,
                     progress_callback=emit_live_judge_progress,
                     cancel_checker=cancel_checker,
                 )
@@ -2661,11 +2691,15 @@ def run_supervised_evolution_session(
         judge_runs=judge_runs,
         advisory_context=advisory_context,
         agent_bindings=normalized_agent_bindings,
+        mental_model_mode=normalized_mental_model_mode,
+        mental_model_enabled=mental_model_enabled,
         summary={
             "case_count": len(cases),
             "baseline_successes": sum(1 for item in baseline_runs if item.status == "success"),
             "candidate_successes": sum(1 for item in candidate_runs if item.status == "success"),
             "resume_from_decision_path": str(resume_from_decision_path or ""),
+            "mental_model_mode": normalized_mental_model_mode,
+            "mental_model_enabled": mental_model_enabled,
             "reused_run_count": len([
                 item
                 for item in baseline_runs + candidate_runs
@@ -2711,6 +2745,8 @@ def run_supervised_evolution_session(
             "decision_path": payload.decision_path,
             "policy_action": payload.policy_action.get("action"),
             "active_advisory_count": advisory_context.get("active_count", 0),
+            "mental_model_mode": normalized_mental_model_mode,
+            "mental_model_enabled": mental_model_enabled,
         },
     )
     return payload
@@ -2750,6 +2786,8 @@ __all__ = [
     "SupervisedEvolutionRun",
     "format_decision_record_summary",
     "load_supervised_bundle",
+    "normalize_supervised_mental_model_mode",
     "resolve_supervised_bundle_path",
     "run_supervised_evolution_session",
+    "supervised_mental_model_enabled_for_mode",
 ]

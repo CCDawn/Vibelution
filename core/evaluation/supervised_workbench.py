@@ -118,6 +118,8 @@ def run_workbench_session(
     cancel_checker: Callable[[], object] | None = None,
     project_root: Path | None = None,
     agent_bindings: dict[str, Any] | None = None,
+    mental_model_mode: str = "follow",
+    harness_runner: Callable[..., Any] | None = None,
     resume_from_decision_path: Path | None = None,
 ) -> SupervisedWorkbenchRunResult:
     from .supervised_evolution import format_decision_record_summary, run_supervised_evolution_session
@@ -136,6 +138,10 @@ def run_workbench_session(
         kwargs["project_root"] = project_root
     if agent_bindings is not None:
         kwargs["agent_bindings"] = agent_bindings
+    if mental_model_mode:
+        kwargs["mental_model_mode"] = mental_model_mode
+    if harness_runner is not None:
+        kwargs["harness_runner"] = harness_runner
     if resume_from_decision_path is not None:
         kwargs["resume_from_decision_path"] = resume_from_decision_path
     decision = run_supervised_evolution_session(**kwargs)

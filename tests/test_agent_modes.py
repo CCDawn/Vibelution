@@ -114,6 +114,22 @@ def test_seed_chat_history_skips_mental_context_when_turn_disables_mental_model(
     assert agent._active_turn_goal == "__chat_session__"
 
 
+def test_supervised_mental_model_env_override_controls_runtime_default(monkeypatch):
+    monkeypatch.delenv("VIBELUTION_SUPERVISED_MENTAL_MODEL_ENABLED", raising=False)
+    monkeypatch.delenv("VIBELUTION_SUPERVISED_MENTAL_MODEL_MODE", raising=False)
+
+    assert agent_module._runtime_mental_model_override_from_env() is None
+
+    monkeypatch.setenv("VIBELUTION_SUPERVISED_MENTAL_MODEL_MODE", "enabled")
+    assert agent_module._runtime_mental_model_override_from_env() is True
+
+    monkeypatch.setenv("VIBELUTION_SUPERVISED_MENTAL_MODEL_ENABLED", "false")
+    assert agent_module._runtime_mental_model_override_from_env() is False
+
+    monkeypatch.setenv("VIBELUTION_SUPERVISED_MENTAL_MODEL_ENABLED", "true")
+    assert agent_module._runtime_mental_model_override_from_env() is True
+
+
 def test_seed_chat_history_drops_internal_tool_protocol_from_assistant():
     agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
     agent.config = _make_config()

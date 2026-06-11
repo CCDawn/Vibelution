@@ -510,11 +510,69 @@ def test_start_supervised_run_allows_custom_terminal_bench_bundle(monkeypatch, t
         {
             "sourceKind": "bundle",
             "bundleName": "terminal_bench_core_v1",
+            "mentalModelMode": "disabled",
         }
     )
 
     assert snapshot["bundleName"] == "terminal_bench_core_v1"
     assert calls and calls[0]["bundle_name"] == "terminal_bench_core_v1"
+    assert snapshot["mentalModelMode"] == "disabled"
+    assert snapshot["mentalModelEnabled"] is False
+    assert calls[0]["mental_model_mode"] == "disabled"
+    assert callable(calls[0]["harness_runner"])
+
+
+def test_conversation_harness_treats_completed_session_turn_as_success(monkeypatch, tmp_path):
+    events: list[dict] = []
+    captured_submit: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        service,
+        "create_supervised_agent_session",
+        lambda **kwargs: {"id": "session-hidden", "sessionKind": "supervised", "hiddenFromIndex": True},
+    )
+
+    def fake_submit_session_message(session_id, prompt, **kwargs):
+        captured_submit.update({"session_id": session_id, "prompt": prompt, **kwargs})
+        return {"turnId": "turn-1"}
+
+    monkeypatch.setattr(service, "submit_session_message", fake_submit_session_message)
+    monkeypatch.setattr(
+        service,
+        "get_session_detail",
+        lambda session_id: {
+            "id": session_id,
+            "lastTurnStatus": "completed",
+            "updatedAt": "2026-06-11T00:00:03Z",
+            "messages": [
+                {"role": "user", "content": "inspect current state", "timestamp": "2026-06-11T00:00:01Z"},
+                {"role": "assistant", "content": "state inspected", "timestamp": "2026-06-11T00:00:03Z"},
+            ],
+        },
+    )
+
+    result = service._run_supervised_conversation_harness(
+        repo_root=tmp_path,
+        mode="single_turn",
+        prompt="inspect current state",
+        timeout_seconds=1,
+        expect_restart=False,
+        post_restart_observe_seconds=0,
+        keep_worktree=False,
+        scenario="strategy",
+        agent_binding={"agentId": "agent-a", "role": "baseline"},
+        mental_model_mode="enabled",
+        mental_model_enabled=True,
+        progress_callback=events.append,
+    )
+
+    assert result.status == "success"
+    assert result.primary_returncode == 0
+    assert result.agent_runtime_env["VIBELUTION_SUPERVISED_MENTAL_MODEL_MODE"] == "enabled"
+    assert result.agent_runtime_env["VIBELUTION_SUPERVISED_MENTAL_MODEL_ENABLED"] == "true"
+    assert captured_submit["message_source"] == "supervised_evolution"
+    assert captured_submit["mental_model_enabled"] is True
+    assert events[-1]["phase"] == "conversation_turn_finished"
 
 
 def test_start_supervised_run_blocks_incomplete_agent_model_binding(monkeypatch, tmp_path):
