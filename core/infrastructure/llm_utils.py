@@ -146,6 +146,31 @@ def build_system_message(sp) -> Any:
     return {"role": "system", "content": content_blocks}
 
 
+def build_cacheable_system_message(static_text: Any, dynamic_text: Any = "") -> Any:
+    """Build a structured system message with an explicit cacheable prefix.
+
+    Use this for call sites that already have a stable plain-text system prompt
+    instead of a SystemPrompt tuple. Dynamic per-turn text can be supplied as an
+    unmarked suffix, but callers should prefer putting large volatile inputs in
+    a later user/runtime message so provider prompt caches can reuse the prefix.
+    """
+
+    static_content = str(static_text or "").strip()
+    dynamic_content = str(dynamic_text or "").strip()
+    if not static_content:
+        return SystemMessage(content=dynamic_content)
+    content_blocks = [
+        {
+            "type": "text",
+            "text": static_content,
+            "cache_control": {"type": "ephemeral"},
+        }
+    ]
+    if dynamic_content:
+        content_blocks.append({"type": "text", "text": dynamic_content})
+    return {"role": "system", "content": content_blocks}
+
+
 def _normalized_static_context_text(static_context_blocks: Any) -> str:
     if isinstance(static_context_blocks, str):
         blocks = [static_context_blocks]
