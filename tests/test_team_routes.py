@@ -58,7 +58,7 @@ def test_team_routes_reject_agent_that_already_belongs_to_active_team(tmp_path, 
     assert "already belongs to Team" in response.json()["detail"]
 
 
-def test_team_list_route_materializes_evolution_system_teams(tmp_path, monkeypatch):
+def test_team_list_route_materializes_system_teams(tmp_path, monkeypatch):
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(project_agent_bus_service, "PROJECT_ROOT", tmp_path)
@@ -70,10 +70,13 @@ def test_team_list_route_materializes_evolution_system_teams(tmp_path, monkeypat
 
     assert response.status_code == 200, response.text
     teams = {team["teamId"]: team for team in response.json()["teams"]}
-    assert {"self-evolution-team", "supervised-evolution-team"}.issubset(teams)
+    assert {"self-evolution-team", "supervised-evolution-team", "ai-search-team"}.issubset(teams)
     assert teams["self-evolution-team"]["linkedChatRoomId"]
     assert teams["supervised-evolution-team"]["linkedChatRoomId"]
-    assert response.json()["summary"]["activeTeamCount"] == 2
+    assert teams["ai-search-team"]["linkedChatRoomId"]
+    assert teams["ai-search-team"]["memberCount"] == 4
+    assert teams["ai-search-team"]["teamKind"] == "ai_search"
+    assert response.json()["summary"]["activeTeamCount"] == 3
 
 
 def test_team_list_route_skips_system_bootstrap_when_teams_exist(tmp_path, monkeypatch):
