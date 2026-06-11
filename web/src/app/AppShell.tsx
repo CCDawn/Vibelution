@@ -1499,7 +1499,7 @@ export function AppShell() {
         return;
       }
       setShutdownOpen(true);
-      setShutdownSettled(false);
+      setShutdownSettled(true);
       setShutdownTitle(shutdownHeading);
       setShutdownDetail(workbench.statusLine || shutdownBody);
     }
