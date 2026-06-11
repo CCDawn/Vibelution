@@ -18,9 +18,11 @@ from core.web.services.team_service import (
     evolution_system_teams_missing,
     get_team,
     get_team_canvas,
+    list_ai_search_source_scope_runs,
     list_teams_compact,
     save_team_canvas,
     send_team_message,
+    start_ai_search_source_scope_run,
     sync_team_chat_room,
     update_team,
 )
@@ -65,6 +67,13 @@ class TeamMessagePayload(BaseModel):
     interruptMode: str = Field("none", max_length=32)
     wakeTarget: bool = True
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class AiSearchRunStartPayload(BaseModel):
+    topic: str = Field("", max_length=240)
+    sourceLimit: int = Field(8, ge=1, le=12)
+    maxResultsPerQuery: int = Field(3, ge=1, le=10)
+    includeSignals: bool = False
 
 
 @router.get("/teams")
@@ -141,6 +150,32 @@ def team_canvas(team_id: str) -> dict:
 def team_canvas_update(team_id: str, payload: TeamCanvasPayload) -> dict:
     try:
         return save_team_canvas(team_id, payload.model_dump())
+    except TeamNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except TeamServiceError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/teams/{team_id}/ai-search-runs")
+def team_ai_search_run_list(team_id: str, limit: int = 6) -> dict:
+    try:
+        return list_ai_search_source_scope_runs(team_id, limit=limit)
+    except TeamNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except TeamServiceError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/teams/{team_id}/ai-search-runs", status_code=status.HTTP_201_CREATED)
+def team_ai_search_run_start(team_id: str, payload: AiSearchRunStartPayload) -> dict:
+    try:
+        return start_ai_search_source_scope_run(
+            team_id,
+            topic=payload.topic,
+            source_limit=payload.sourceLimit,
+            max_results_per_query=payload.maxResultsPerQuery,
+            include_signals=payload.includeSignals,
+        )
     except TeamNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except TeamServiceError as exc:

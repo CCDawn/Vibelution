@@ -32,6 +32,7 @@ export const queryKeys = {
   teamTemplates: () => ["team-templates"] as const,
   team: (id: string) => ["teams", id] as const,
   teamCanvas: (id: string) => ["teams", id, "canvas"] as const,
+  teamAiSearchRuns: (id: string, limit = 6) => ["teams", id, "ai-search-runs", limit] as const,
   teamWorkflow: (id: string) => ["teams", id, "workflow-orchestration"] as const,
   teamWorkflowCandidates: (id: string, limit = 8) => ["teams", id, "workflow-orchestration", "candidates", limit] as const,
   teamWorkflowCandidateGraph: (id: string) => ["teams", id, "workflow-orchestration", "candidate-graph"] as const,

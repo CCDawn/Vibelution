@@ -79,6 +79,57 @@ def test_team_list_route_materializes_system_teams(tmp_path, monkeypatch):
     assert response.json()["summary"]["activeTeamCount"] == 3
 
 
+def test_ai_search_run_routes_start_and_list_runs(tmp_path, monkeypatch):
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(project_agent_bus_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
+
+    def fake_web_search(query, *, max_results):
+        return (
+            f"关于「{query}」，搜索到 1 条相关结果：\n\n"
+            "• 模型厂商发布了新动态。\n\n"
+            "**参考来源：**\n"
+            "1. [Official](https://example.com/official)\n"
+        )
+
+    monkeypatch.setattr(team_service, "_run_ai_web_search", fake_web_search)
+    client = _client()
+    client.get("/api/teams")
+
+    response = client.post(
+        "/api/teams/ai-search-team/ai-search-runs",
+        json={"topic": "AI 模型最新动态", "sourceLimit": 3, "maxResultsPerQuery": 1},
+    )
+
+    assert response.status_code == 201, response.text
+    run = response.json()
+    assert run["teamId"] == "ai-search-team"
+    assert run["status"] == "completed"
+    assert run["summary"]["cardCount"] == 3
+    assert run["cards"][0]["references"][0]["url"] == "https://example.com/official"
+
+    list_response = client.get("/api/teams/ai-search-team/ai-search-runs")
+    assert list_response.status_code == 200, list_response.text
+    assert list_response.json()["runs"][0]["runId"] == run["runId"]
+
+
+def test_ai_search_run_route_rejects_non_ai_search_team(tmp_path, monkeypatch):
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(project_agent_bus_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
+    client = _client()
+    team = client.post("/api/teams", json={"name": "普通团队"}).json()
+
+    response = client.post(f"/api/teams/{team['teamId']}/ai-search-runs", json={})
+
+    assert response.status_code == 422
+    assert "AI search" in response.json()["detail"]
+
+
 def test_team_list_route_skips_system_bootstrap_when_teams_exist(tmp_path, monkeypatch):
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)

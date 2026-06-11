@@ -574,6 +574,240 @@
   font-size: 0.6rem;
 }
 
+.aiSearchRunPanel {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid color-mix(in srgb, var(--accent-success) 26%, var(--border-soft));
+  border-radius: 8px;
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--accent-success) 7%, transparent), transparent 62%),
+    color-mix(in srgb, var(--surface-card) 58%, transparent);
+}
+
+.aiSearchRunHeader,
+.aiSearchRunResultHeader,
+.aiSearchRunSummary,
+.aiSearchRunCardHeader {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.aiSearchRunHeader div,
+.aiSearchRunSummary div,
+.aiSearchRunCardHeader div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.aiSearchRunHeader strong,
+.aiSearchRunResultHeader strong,
+.aiSearchRunSummary strong,
+.aiSearchRunCardHeader strong {
+  min-width: 0;
+  color: var(--fg-primary);
+  font-size: 0.76rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aiSearchRunHeader span,
+.aiSearchRunResultHeader span,
+.aiSearchRunSummary span,
+.aiSearchRunCardHeader span {
+  min-width: 0;
+  color: var(--fg-muted);
+  font-size: 0.62rem;
+  font-weight: 740;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aiSearchRunHeader button {
+  display: inline-flex;
+  flex: 0 0 auto;
+  min-height: 28px;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 0 9px;
+  border: 1px solid color-mix(in srgb, var(--accent-success) 36%, var(--border-soft));
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--accent-success) 13%, var(--surface-panel-strong));
+  color: color-mix(in srgb, var(--accent-success) 78%, var(--fg-primary));
+  font-size: 0.66rem;
+  font-weight: 820;
+  cursor: pointer;
+}
+
+.aiSearchRunHeader button:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.aiSearchRunTopic {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.aiSearchRunTopic span {
+  color: var(--fg-muted);
+  font-size: 0.62rem;
+  font-weight: 760;
+}
+
+.aiSearchRunTopic input {
+  width: 100%;
+  min-height: 30px;
+  padding: 0 8px;
+  border: 1px solid color-mix(in srgb, var(--border-soft) 82%, transparent);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--surface-panel-strong) 72%, transparent);
+  color: var(--fg-primary);
+  font-size: 0.72rem;
+}
+
+.aiSearchRunLatest {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.aiSearchRunStatus {
+  flex: 0 0 auto;
+  max-width: 92px;
+  padding: 3px 7px;
+  border: 1px solid var(--ai-search-run-status-border, var(--border-soft));
+  border-radius: 999px;
+  background: var(--ai-search-run-status-bg, color-mix(in srgb, var(--surface-panel-strong) 70%, transparent));
+  color: var(--ai-search-run-status-fg, var(--fg-secondary));
+}
+
+.aiSearchRunStatusCompleted {
+  --ai-search-run-status-border: color-mix(in srgb, var(--accent-success) 40%, var(--border-soft));
+  --ai-search-run-status-bg: color-mix(in srgb, var(--accent-success) 11%, transparent);
+  --ai-search-run-status-fg: color-mix(in srgb, var(--accent-success) 78%, var(--fg-primary));
+}
+
+.aiSearchRunStatusPartial,
+.aiSearchRunStatusRunning {
+  --ai-search-run-status-border: color-mix(in srgb, var(--accent-warm) 38%, var(--border-soft));
+  --ai-search-run-status-bg: color-mix(in srgb, var(--accent-warm) 11%, transparent);
+  --ai-search-run-status-fg: color-mix(in srgb, var(--accent-warm) 78%, var(--fg-primary));
+}
+
+.aiSearchRunStatusFailed {
+  --ai-search-run-status-border: color-mix(in srgb, var(--accent-danger) 38%, var(--border-soft));
+  --ai-search-run-status-bg: color-mix(in srgb, var(--accent-danger) 9%, transparent);
+  --ai-search-run-status-fg: color-mix(in srgb, var(--accent-danger) 76%, var(--fg-primary));
+}
+
+.aiSearchRunStats {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.aiSearchRunStats span {
+  display: flex;
+  min-width: 0;
+  min-height: 26px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 5px;
+  padding: 0 6px;
+  border: 1px solid color-mix(in srgb, var(--border-soft) 76%, transparent);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--surface-panel-strong) 58%, transparent);
+  color: var(--fg-muted);
+  font-size: 0.61rem;
+  font-weight: 740;
+  overflow: hidden;
+}
+
+.aiSearchRunStats strong {
+  color: var(--fg-primary);
+  font-size: 0.72rem;
+}
+
+.aiSearchRunCards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 7px;
+  min-width: 0;
+}
+
+.aiSearchRunCard {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 7px;
+  border: 1px solid color-mix(in srgb, var(--border-soft) 78%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-panel-strong) 62%, transparent);
+}
+
+.aiSearchRunCardFailed {
+  border-color: color-mix(in srgb, var(--accent-danger) 30%, var(--border-soft));
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--accent-danger) 7%, transparent), transparent 68%),
+    color-mix(in srgb, var(--surface-panel-strong) 62%, transparent);
+}
+
+.aiSearchRunCard p {
+  display: -webkit-box;
+  min-height: 42px;
+  margin: 0;
+  color: var(--fg-secondary);
+  font-size: 0.66rem;
+  line-height: 1.42;
+  overflow: hidden;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+}
+
+.aiSearchRunRefs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-width: 0;
+}
+
+.aiSearchRunRefs a,
+.aiSearchRunRefs span,
+.aiSearchRunStorage span {
+  max-width: 100%;
+  padding: 2px 6px;
+  border: 1px solid color-mix(in srgb, var(--border-soft) 70%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-card) 62%, transparent);
+  color: var(--fg-muted);
+  font-size: 0.58rem;
+  font-weight: 720;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.aiSearchRunRefs a:hover {
+  border-color: color-mix(in srgb, var(--accent-cool) 34%, var(--border-soft));
+  color: color-mix(in srgb, var(--accent-cool) 78%, var(--fg-primary));
+}
+
+.aiSearchRunStorage {
+  display: flex;
+  min-width: 0;
+}
+
 .researchStageLauncher {
   display: grid;
   gap: 8px;

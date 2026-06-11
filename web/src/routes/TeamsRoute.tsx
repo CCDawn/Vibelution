@@ -16,6 +16,9 @@ import {
 import { queryKeys } from "../api/queryKeys";
 import {
   AgentConfigWorkspace,
+  AiSearchRun,
+  AiSearchRunListPayload,
+  AiSearchRunSummary,
   ChatRoomDetail,
   DataProcessingCollectionAssignmentListPayload,
   DataProcessingCollectionOutputPayload,
@@ -56,6 +59,7 @@ const LINKED_ROOM_ACTIVE_REFETCH_MS = 5_000;
 const LINKED_ROOM_IDLE_REFETCH_MS = 30_000;
 const TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT = 8;
 const TEAM_WORKFLOW_CANDIDATE_GRAPH_LIMIT = 20;
+const AI_SEARCH_RUN_PREVIEW_LIMIT = 6;
 const WORKFLOW_GRAPH_WIDTH = 620;
 const WORKFLOW_GRAPH_MIN_HEIGHT = 170;
 const WORKFLOW_GRAPH_NODE_WIDTH = 124;
@@ -903,6 +907,45 @@ function aiSearchSourceTierLabel(value: string, lang: "zh" | "en") {
   return (lang === "zh" ? zh : en)[normalized] ?? normalized;
 }
 
+type AiSearchRunDisplay = AiSearchRun | AiSearchRunSummary;
+
+function aiSearchRunCounts(run: AiSearchRunDisplay) {
+  if ("summary" in run) {
+    return run.summary;
+  }
+  return {
+    cardCount: run.cardCount,
+    succeededCount: run.succeededCount,
+    failedCount: run.failedCount,
+    referenceCount: run.referenceCount,
+  };
+}
+
+function aiSearchRunQueryCount(run: AiSearchRunDisplay) {
+  return "queryPlan" in run ? run.queryPlan.queryCount : run.queryCount;
+}
+
+function aiSearchRunPath(run: AiSearchRunDisplay) {
+  return "storage" in run ? run.storage.runPath : run.runPath;
+}
+
+function aiSearchRunStatusLabel(value: string, lang: "zh" | "en") {
+  const normalized = String(value || "").trim().toLowerCase();
+  const zh: Record<string, string> = {
+    completed: "已完成",
+    partial: "部分完成",
+    failed: "失败",
+    running: "运行中",
+  };
+  const en: Record<string, string> = {
+    completed: "Completed",
+    partial: "Partial",
+    failed: "Failed",
+    running: "Running",
+  };
+  return (lang === "zh" ? zh : en)[normalized] ?? normalized;
+}
+
 function workflowStateLabel(value: string, lang: "zh" | "en") {
   const normalized = String(value || "").trim();
   const zh: Record<string, string> = {
@@ -1246,6 +1289,7 @@ export function TeamsRoute({
     sourceTypes: "paper\nreview\ndataset",
     maxResultsPerQuery: 8,
   });
+  const [aiSearchRunTopic, setAiSearchRunTopic] = useState("AI 最新动态");
   const [selectedSourceCollectionRunId, setSelectedSourceCollectionRunId] = useState("");
   const [sourceCollectionOutputDraft, setSourceCollectionOutputDraft] = useState<SourceCollectionOutputDraft>({
     assignmentId: "",
@@ -1337,6 +1381,14 @@ export function TeamsRoute({
   const selectedTeam = teamDetailQuery.data ?? visibleTeams.find((team) => team.teamId === effectiveTeamId) ?? null;
   const researchWorkflowTeamSelected = isResearchWorkflowTeam(selectedTeam);
   const aiSearchScopeTeamSelected = isAiSearchScopeTeam(selectedTeam);
+  const aiSearchRunsQuery = useQuery({
+    queryKey: queryKeys.teamAiSearchRuns(effectiveTeamId || "none", AI_SEARCH_RUN_PREVIEW_LIMIT),
+    queryFn: () =>
+      fetchJson<AiSearchRunListPayload>(
+        `/api/teams/${encodeURIComponent(effectiveTeamId)}/ai-search-runs?limit=${AI_SEARCH_RUN_PREVIEW_LIMIT}`,
+      ),
+    enabled: Boolean(effectiveTeamId && aiSearchScopeTeamSelected),
+  });
 
   useEffect(() => {
     if (forcedResearchWorkspaceView) {
@@ -1689,6 +1741,23 @@ export function TeamsRoute({
       setTeamTaskTopic("");
       queryClient.setQueryData(queryKeys.chatRoom(room.roomId), room);
       void chatWorkspaceCache.afterTeamRoomMembershipChanged(variables.teamId, room.roomId);
+    },
+  });
+
+  const startAiSearchRunMutation = useMutation({
+    mutationFn: (payload: { teamId: string; topic: string }) =>
+      fetchJson<AiSearchRun>(`/api/teams/${encodeURIComponent(payload.teamId)}/ai-search-runs`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          topic: payload.topic.trim() || "AI 最新动态",
+          sourceLimit: 8,
+          maxResultsPerQuery: 3,
+          includeSignals: false,
+        }),
+      }),
+    onSuccess: (_run, variables) => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.teamAiSearchRuns(variables.teamId, AI_SEARCH_RUN_PREVIEW_LIMIT) });
     },
   });
 
@@ -2112,6 +2181,15 @@ export function TeamsRoute({
 
   function renderAiSearchSourceScopePanel() {
     const scope = selectedTeam?.sourceScope ?? null;
+    const latestRunCounts = latestAiSearchRun ? aiSearchRunCounts(latestAiSearchRun) : null;
+    const latestRunStatusClass =
+      latestAiSearchRun?.status === "failed"
+        ? styles.aiSearchRunStatusFailed
+        : latestAiSearchRun?.status === "partial"
+        ? styles.aiSearchRunStatusPartial
+        : latestAiSearchRun?.status === "running"
+        ? styles.aiSearchRunStatusRunning
+        : styles.aiSearchRunStatusCompleted;
     return (
       <section className={styles.aiSearchScopePanel}>
         <div className={styles.aiSearchScopeHeader}>
@@ -2142,6 +2220,108 @@ export function TeamsRoute({
               <span>{lang === "zh" ? "去重" : "Dedupe"}: {scope.policy.dedupeBy.join(" / ")}</span>
               <span>{scope.storage.path}</span>
             </div>
+            <form
+              className={styles.aiSearchRunPanel}
+              onSubmit={(event) => {
+                event.preventDefault();
+                if (!selectedTeam?.teamId || !aiSearchRunCanStart) {
+                  return;
+                }
+                startAiSearchRunMutation.mutate({
+                  teamId: selectedTeam.teamId,
+                  topic: aiSearchRunTopic,
+                });
+              }}
+            >
+              <div className={styles.aiSearchRunHeader}>
+                <div>
+                  <strong>{lang === "zh" ? "一键搜索执行" : "One-click search run"}</strong>
+                  <span>{lang === "zh" ? "8 个默认白名单源 · Tier3 默认关闭" : "8 default sources · Tier3 off by default"}</span>
+                </div>
+                <button type="submit" disabled={!aiSearchRunCanStart}>
+                  <Search size={13} />
+                  {selectedTeamStartAiSearchPending
+                    ? (lang === "zh" ? "搜索中" : "Searching")
+                    : (lang === "zh" ? "启动一键搜索" : "Start search")}
+                </button>
+              </div>
+              <label className={styles.aiSearchRunTopic}>
+                <span>{lang === "zh" ? "主题" : "Topic"}</span>
+                <input
+                  value={aiSearchRunTopic}
+                  onChange={(event) => setAiSearchRunTopic(event.target.value)}
+                  placeholder={lang === "zh" ? "AI 最新动态" : "Latest AI updates"}
+                />
+              </label>
+              {selectedTeamStartAiSearchError ? (
+                <div className={styles.messageError}>{selectedTeamStartAiSearchError.message}</div>
+              ) : null}
+              <div className={styles.aiSearchRunResultHeader}>
+                <strong>{lang === "zh" ? "最近搜索结果" : "Recent search results"}</strong>
+                <span>
+                  {aiSearchRunsQuery.isFetching
+                    ? (lang === "zh" ? "刷新中" : "refreshing")
+                    : `${aiSearchRunsQuery.data?.summary.visibleRunCount ?? aiSearchRuns.length}/${aiSearchRunsQuery.data?.summary.runCount ?? aiSearchRuns.length}`}
+                </span>
+              </div>
+              {latestAiSearchRun && latestRunCounts ? (
+                <div className={styles.aiSearchRunLatest}>
+                  <div className={styles.aiSearchRunSummary}>
+                    <div>
+                      <strong>{latestAiSearchRun.title}</strong>
+                      <span>{latestAiSearchRun.runId} · {latestAiSearchRun.topic}</span>
+                    </div>
+                    <span className={`${styles.aiSearchRunStatus} ${latestRunStatusClass}`}>
+                      {aiSearchRunStatusLabel(latestAiSearchRun.status, lang)}
+                    </span>
+                  </div>
+                  <div className={styles.aiSearchRunStats}>
+                    <span>queries <strong>{aiSearchRunQueryCount(latestAiSearchRun)}</strong></span>
+                    <span>cards <strong>{latestRunCounts.cardCount}</strong></span>
+                    <span>{lang === "zh" ? "成功" : "success"} <strong>{latestRunCounts.succeededCount}</strong></span>
+                    <span>{lang === "zh" ? "失败" : "failed"} <strong>{latestRunCounts.failedCount}</strong></span>
+                    <span>{lang === "zh" ? "引用" : "refs"} <strong>{latestRunCounts.referenceCount}</strong></span>
+                  </div>
+                  <div className={styles.aiSearchRunCards}>
+                    {latestAiSearchRun.cards.slice(0, 6).map((card) => (
+                      <article
+                        key={card.cardId}
+                        className={card.status === "failed" ? `${styles.aiSearchRunCard} ${styles.aiSearchRunCardFailed}` : styles.aiSearchRunCard}
+                      >
+                        <div className={styles.aiSearchRunCardHeader}>
+                          <div>
+                            <strong>{card.sourceName || card.sourceId}</strong>
+                            <span>{card.groupLabel} · {card.sourceType} · {aiSearchSourceTierLabel(card.tier, lang)}</span>
+                          </div>
+                          <span>{card.status === "failed" ? (lang === "zh" ? "失败" : "failed") : (lang === "zh" ? "完成" : "done")}</span>
+                        </div>
+                        <p>{card.summary || (card.status === "failed" ? (lang === "zh" ? "搜索执行失败，已保留失败卡片。" : "Search failed; the failed card was retained.") : card.query)}</p>
+                        <div className={styles.aiSearchRunRefs}>
+                          {card.references.length ? (
+                            card.references.slice(0, 3).map((reference) => (
+                              <a key={`${card.cardId}-${reference.url}`} href={reference.url} target="_blank" rel="noreferrer">
+                                {reference.title || reference.url}
+                              </a>
+                            ))
+                          ) : (
+                            <span>{lang === "zh" ? "无参考来源" : "No references"}</span>
+                          )}
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                  <div className={styles.aiSearchRunStorage}>
+                    <span>{aiSearchRunPath(latestAiSearchRun)}</span>
+                  </div>
+                </div>
+              ) : (
+                <div className={styles.empty}>
+                  {aiSearchRunsQuery.isPending
+                    ? (lang === "zh" ? "正在读取最近搜索结果..." : "Loading recent search results...")
+                    : (lang === "zh" ? "暂无搜索结果卡片。" : "No search result cards yet.")}
+                </div>
+              )}
+            </form>
             <div className={styles.aiSearchSourceGroups}>
               {scope.groups.map((group) => (
                 <article key={group.groupId} className={styles.aiSearchSourceGroup}>
@@ -2871,6 +3051,17 @@ export function TeamsRoute({
   const sourceCollectionAssignments = sourceCollectionAssignmentsQuery.data?.assignments ?? [];
   const sourceCollectionRunStatus = sourceCollectionRunStatusQuery.data ?? null;
   const sourceCollectionSearchPlanRef = selectedSourceCollectionRun?.scope?.dataSearchPlanRef ?? null;
+  const aiSearchRuns = aiSearchRunsQuery.data?.runs ?? [];
+  const selectedTeamStartAiSearchPending =
+    startAiSearchRunMutation.isPending && startAiSearchRunMutation.variables?.teamId === selectedTeam?.teamId;
+  const selectedTeamStartAiSearchError =
+    startAiSearchRunMutation.variables?.teamId === selectedTeam?.teamId && startAiSearchRunMutation.error instanceof Error
+      ? startAiSearchRunMutation.error
+      : null;
+  const selectedTeamStartAiSearchResult =
+    startAiSearchRunMutation.variables?.teamId === selectedTeam?.teamId ? startAiSearchRunMutation.data : undefined;
+  const latestAiSearchRun = selectedTeamStartAiSearchResult ?? aiSearchRuns[0] ?? null;
+  const aiSearchRunCanStart = Boolean(selectedTeam?.teamId && aiSearchRunTopic.trim() && !selectedTeamStartAiSearchPending);
   const selectedSourceCollectionAssignment =
     sourceCollectionAssignments.find((item) => item.assignmentId === sourceCollectionOutputDraft.assignmentId)
     ?? sourceCollectionAssignments[0]
