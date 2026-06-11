@@ -4096,6 +4096,7 @@ foreach ($name in @(
 
 $script:port = 8000
 $script:healthy = $true
+$script:fullScanCalls = 0
 function Get-State {
     return [pscustomobject]@{
         backendPid = 6544
@@ -4116,6 +4117,10 @@ function Get-ListeningPid {
 }
 function Get-CimInstance {
     param([string]$ClassName, [string]$Filter, [string]$ErrorAction)
+    if (-not $Filter) {
+        $script:fullScanCalls += 1
+        throw "Get-ManagedBackendCandidatePids should not run a full process scan when tracked/listener PIDs are enough."
+    }
     if ($Filter -match "ProcessId = 14916") {
         return [pscustomobject]@{
             ProcessId = 14916
@@ -4135,6 +4140,93 @@ function Test-WebHealthy { return [bool]$script:healthy }
 $pids = @(Get-ManagedBackendCandidatePids)
 if (($pids -join ",") -ne "6544,14916") {
     throw "Expected tracked launch and listener PIDs, got $($pids -join ',')."
+}
+if ($script:fullScanCalls -ne 0) {
+    throw "Expected no full process scan, got $script:fullScanCalls."
+}
+
+Write-Output "ok"
+""",
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip().splitlines()[-1] == "ok"
+
+
+def test_launcher_backend_candidates_fallback_scan_when_no_tracked_or_listener_pid(tmp_path):
+    result = _run_launcher_ast_harness(
+        tmp_path,
+        """
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$LauncherPath
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$source = Get-Content -Raw -LiteralPath $LauncherPath
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors -and $parseErrors.Count -gt 0) {
+    throw "Launcher script parse failed: $($parseErrors[0].Message)"
+}
+
+foreach ($name in @(
+    "ConvertTo-LauncherComparableText",
+    "Test-CommandLineMentionsWorkbenchScript",
+    "Test-CommandLineLooksLikeManagedBackend",
+    "Test-ProcessLooksLikeManagedBackend",
+    "Get-ObjectPropertyValue",
+    "Get-ManagedBackendCandidatePids"
+)) {
+    $functionAst = $ast.Find({
+        param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+            $node.Name -eq $name
+    }, $true)
+    if ($null -eq $functionAst) {
+        throw "$name was not found."
+    }
+    . ([scriptblock]::Create($functionAst.Extent.Text))
+}
+
+$script:port = 8000
+$script:fullScanCalls = 0
+function Get-State {
+    return [pscustomobject]@{
+        backendPid = 0
+        backendLaunchPid = 0
+        port = 8000
+    }
+}
+function Test-ProcessAlive { param([int]$ProcessId) return $false }
+function Get-ListeningPid { param([int]$Port) return $null }
+function Get-CimInstance {
+    param([string]$ClassName, [string]$Filter, [string]$ErrorAction)
+    if (-not $Filter) {
+        $script:fullScanCalls += 1
+        return @(
+            [pscustomobject]@{
+                ProcessId = 2112
+                CommandLine = "`"C:\\Python312\\python.exe`" scripts/web_workbench.py --host 127.0.0.1 --port 8000 --no-browser --managed-by-launcher"
+            },
+            [pscustomobject]@{
+                ProcessId = 9000
+                CommandLine = "`"C:\\Python312\\python.exe`" scripts/web_workbench.py --host 127.0.0.1 --port 9000 --no-browser --managed-by-launcher"
+            }
+        )
+    }
+    return @()
+}
+
+$pids = @(Get-ManagedBackendCandidatePids)
+if (($pids -join ",") -ne "2112") {
+    throw "Expected fallback scan to find only the matching managed backend, got $($pids -join ',')."
+}
+if ($script:fullScanCalls -ne 1) {
+    throw "Expected one fallback full scan, got $script:fullScanCalls."
 }
 
 Write-Output "ok"
@@ -4849,8 +4941,13 @@ $script:selfProcessId = 111
 $script:protectedProcessIds = @(29960, 46992)
 $script:stopped = @()
 $script:controlEvents = @()
+$script:fullChildMapCalls = 0
 function Get-CimInstance {
     param([string]$ClassName, [string]$Filter, [string]$ErrorAction)
+    if (-not $Filter) {
+        $script:fullChildMapCalls += 1
+        throw "Stop-ProcessesById should not build a full process child map for a small targeted stop."
+    }
     if ($Filter -match "ParentProcessId = 8976") {
         return @(
             [pscustomobject]@{ ProcessId = 31096 },
@@ -4876,6 +4973,7 @@ Stop-ProcessesById -ProcessIds @(8976)
 $payload = @{
     stopped = @($script:stopped)
     skipped = @($script:controlEvents | Where-Object { $_.event -eq "launcher.process.stop.skipped_protected" } | ForEach-Object { $_.fields.pid })
+    fullChildMapCalls = $script:fullChildMapCalls
 } | ConvertTo-Json -Depth 8 -Compress
 Write-Output $payload
 """,
@@ -4885,6 +4983,7 @@ Write-Output $payload
     payload = json.loads(result.stdout.strip().splitlines()[-1])
     assert payload["stopped"] == [31096, 8976]
     assert payload["skipped"] == [29960]
+    assert payload["fullChildMapCalls"] == 0
 
 
 def test_launcher_stop_browser_processes_retry_until_profile_processes_exit(tmp_path):
