@@ -56,6 +56,20 @@ describe("ToolsRoute layout contract", () => {
     expect(routeSource).not.toContain("setTestResult(null);\n  }, [activeAgentScopeId, activePolicyAgentId, activeToolId]);");
   });
 
+  it("optimistically updates single-tool enable and delete actions before backend confirmation", () => {
+    expect(routeSource).toContain("function updatedToolRegistryPayload(");
+    expect(routeSource).toContain("function removedToolRegistryPayload(");
+    expect(routeSource).toContain("function optimisticToolEnabled(tool: ToolRegistryItem, enabled: boolean)");
+    expect(routeSource).toContain("queryClient.cancelQueries({ queryKey: queryKeys.tools() })");
+    expect(routeSource).toContain("const previousTools = queryClient.getQueryData<ToolRegistryPayload>(queryKeys.tools())");
+    expect(routeSource).toContain("optimisticToolEnabled(tool, payload.enabled)");
+    expect(routeSource).toContain("removedToolRegistryPayload(current, toolId)");
+    expect(routeSource).toContain("queryClient.setQueryData(queryKeys.tools(), context.previousTools)");
+    expect(routeSource).toContain("const previousActiveToolId = activeToolId");
+    expect(routeSource).toContain("const previousSelectedToolIds = new Set(selectedToolIds)");
+    expect(routeSource).toContain("setSelectedToolIds(new Set(context.previousSelectedToolIds))");
+  });
+
   it("groups the tool browser by tool packages instead of a flat tool list", () => {
     expect(routeSource).toContain("toolsQuery.data?.toolBundles");
     expect(routeSource).toContain("toolBundleGroups");
