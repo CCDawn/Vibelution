@@ -39,7 +39,7 @@
         <aside class="dashboard-panel">
           <h2>审核摘要</h2>
           <div class="kpi-grid">
-            <div class="kpi"><b>当前阶段</b><strong>M6.17</strong><span>知识搜集已具备 metadata-only 搜索执行闭环，可把搜索、回写和候选导入展示为对话流。</span></div>
+            <div class="kpi"><b>当前阶段</b><strong>M6.18</strong><span>知识搜集工作台已降噪为当前轮状态、下一步动作、过程对话流和可展开技术证据。</span></div>
             <div class="kpi"><b>流程节点</b><strong>13</strong><span>1-9 为知识入库主线，10-13 保留占位与维护节点。</span></div>
             <div class="kpi"><b>候选资料</b><strong>10</strong><span>第一轮 source_manifest 已进入 candidate-only 工作区。</span></div>
             <div class="kpi"><b>正式写入</b><strong>0</strong><span>未写正式 Team Knowledge、RAG 或 official graph。</span></div>
@@ -659,8 +659,8 @@
         <div class="agent-row">
         <b>01</b>
         <strong>Source Intake Agent</strong>
-        <span>可复用通用 data-processing assignment / source-extraction / source-quality 后端已接入；Teams 资料搜集执行台、候选资料筛选台、三阶段启动台、KV 缓存对话轨迹、启动复用反馈和 metadata-only 搜索执行闭环已接入</span>
-        <span>ResearchStageRound 建立 / 三阶段启动台一键进入知识搜集 / active 知识搜集轮次复用反馈 / 自动启动团队协调 round / DataProcessingRun 建立 / DataSearchPlan/querySeeds 搜索计划 / KV/prompt cache 启动门禁 / 稳定前缀/动态增量契约 / CollectionAssignment 资料搜集任务 / assignedQueries 角色分配 / promptCachePartition 角色分区 / Teams 启动搜集批次 / Teams 查看 run/assignment/query/KV 状态 / Teams 执行下一批搜索 / Crossref 元数据搜索执行器 / 搜索执行事件进入搜集对话流 / DataRecord 通用记录 / DataRecord 自动导入 source_manifest / metadata-only 下载边界 / 手工 CollectionOutput 回写 / 本地资料登记 / source_manifest 写入 / 文件路径/页码/来源可信度记录 / 本地 PDF sha256/pageAnchors/excerpt 抽取 / sourceQualityAssessment 筛选 / 可选 research_knowledge_query_tool 查重</span>
+        <span>可复用通用 data-processing assignment / source-extraction / source-quality 后端已接入；Teams 资料搜集执行台、候选资料筛选台、三阶段启动台、KV 缓存对话轨迹、启动复用反馈、metadata-only 搜索执行闭环和高价值信息层已接入</span>
+        <span>ResearchStageRound 建立 / 三阶段启动台一键进入知识搜集 / active 知识搜集轮次复用反馈 / 自动启动团队协调 round / DataProcessingRun 建立 / DataSearchPlan/querySeeds 搜索计划 / KV/prompt cache 启动门禁 / 稳定前缀/动态增量契约 / CollectionAssignment 资料搜集任务 / assignedQueries 角色分配 / promptCachePartition 角色分区 / Teams 启动搜集批次 / Teams 查看 run/assignment/query/KV 状态 / Teams 高价值摘要层 / Teams 执行下一批搜索 / Crossref 元数据搜索执行器 / 搜索执行事件进入搜集对话流 / DataRecord 通用记录 / DataRecord 自动导入 source_manifest / metadata-only 下载边界 / 手工 CollectionOutput 回写 / 本地资料登记 / source_manifest 写入 / 文件路径/页码/来源可信度记录 / 本地 PDF sha256/pageAnchors/excerpt 抽取 / sourceQualityAssessment 筛选 / 可选 research_knowledge_query_tool 查重</span>
         <span>确认资料允许分析、来源可信度和是否纳入本轮。</span>
       </div>
 <div class="agent-row">
@@ -1327,7 +1327,7 @@
                 </div>
 <div class="service-row">
                   <b>TeamsRoute workflow workspace</b>
-                  <span>已落地入口：Teams 页左侧隐藏监督进化/自进化系统团队，只保留自定义/科研团队；监督进化/自进化模式页各自读取系统 Team 并展示只读团队画布；点击左侧 ai科学研究团队后直接进入 research-team 专属科研工作台；科研一级索引统一为知识搜集、实验、迭代三阶段。知识搜集页位于 /teams?team=research-team&amp;researchView=knowledge_collection，复用对话式 source collection 过程流，并把 KV/prompt cache 门禁、稳定前缀、动态增量和 assignment 缓存分区显式展示；实验/迭代页先提供规划启动、轮次状态和边界说明；旧 source_collection 参数兼容映射到知识搜集。</span>
+                  <span>已落地入口：Teams 页左侧隐藏监督进化/自进化系统团队，只保留自定义/科研团队；监督进化/自进化模式页各自读取系统 Team 并展示只读团队画布；点击左侧 ai科学研究团队后直接进入 research-team 专属科研工作台；科研一级索引统一为知识搜集、实验、迭代三阶段。知识搜集页位于 /teams?team=research-team&amp;researchView=knowledge_collection，默认展示高价值状态摘要、下一步动作和对话式 source collection 过程流；KV/prompt cache、稳定前缀、动态增量、assignment、query、存储路径和手工回写保留在可展开详情中；实验/迭代页先提供规划启动、轮次状态和边界说明；旧 source_collection 参数兼容映射到知识搜集。</span>
                 </div>
 <div class="service-row">
                   <b>local_research_worker_model</b>
@@ -1982,6 +1982,12 @@
               <strong>知识搜集搜索执行最小闭环</strong>
               <span>新增 source-collection-runs/{runId}/search/execute，知识搜集页提供“执行下一批搜索”按钮；系统可按 assignment/query 调用 Crossref 元数据搜索，生成执行事件、DataRecord，并自动导入 source_manifest 候选。</span>
               <span>这是 metadata-only 最小执行器：只下载来源元数据和引用，不抓取全文网页/PDF；结果仍停在候选资料仓库，不写正式 Team Knowledge、不写 RAG、不写 official graph。</span>
+            </div>
+<div class="blueprint-row">
+              <b>M6.18</b>
+              <strong>知识搜集工作台可视化降噪</strong>
+              <span>Teams 知识搜集页默认只展示当前轮状态、下一步动作、候选/待处理/查询/KV 摘要和对话式搜集过程；assignment、query、存储路径、KV 分区和手工回写收进可展开详情。</span>
+              <span>用户第一眼能判断当前是否在搜、搜到什么、存到哪里和下一步怎么做；技术细节仍保留给维护者追溯，但不再挤占主路径。</span>
             </div>
       </div>
       <div class="tag-row">
