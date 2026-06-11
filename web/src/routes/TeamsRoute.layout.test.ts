@@ -117,6 +117,29 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("setSearchParams({ team: team.teamId })");
   });
 
+  it("keeps evolution system teams out of the custom Team list", () => {
+    expect(routeSource).toContain("EVOLUTION_SYSTEM_TEAM_IDS");
+    expect(routeSource).toContain('"self-evolution-team"');
+    expect(routeSource).toContain('"supervised-evolution-team"');
+    expect(routeSource).toContain("isEvolutionSystemTeam");
+    expect(routeSource).toContain("team.teamKind === \"self_evolution\"");
+    expect(routeSource).toContain("team.teamKind === \"supervised_evolution\"");
+    expect(routeSource).toContain("team.teamSource === \"self_evolution\"");
+    expect(routeSource).toContain("team.teamSource === \"supervised_evolution\"");
+    expect(routeSource).toContain("const visibleTeams = useMemo(() => teams.filter((team) => !isEvolutionSystemTeam(team)), [teams])");
+    expect(routeSource).toContain("const visibleTeamIds = useMemo(() => new Set(visibleTeams.map((team) => team.teamId)), [visibleTeams])");
+    expect(routeSource).toContain("requestedVisibleTeamId");
+    expect(routeSource).toContain("requestedVisibleAgentTeamId");
+    expect(routeSource).toContain("selectedVisibleTeamId");
+    expect(routeSource).toContain("fallbackVisibleTeamId");
+    expect(routeSource).toContain("const hasTeams = visibleTeams.length > 0");
+    expect(routeSource).toContain("visibleTeamSummary.activeTeamCount");
+    expect(routeSource).toContain("{visibleTeams.map((team) => (");
+    expect(routeSource).toContain("visibleTeams.find((team) => team.teamId === effectiveTeamId)");
+    expect(routeSource).not.toContain("{teams.map((team) => (");
+    expect(routeSource).not.toContain("teams[0]?.teamId");
+  });
+
   it("renders a dense list canvas inspector workflow", () => {
     expect(routeSource).toContain("teamList");
     expect(routeSource).toContain("canvasPanel");

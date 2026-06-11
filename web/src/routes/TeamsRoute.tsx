@@ -50,6 +50,7 @@ const CANVAS_VIEWPORT_WIDTH = 1180;
 const CANVAS_VIEWPORT_HEIGHT = 760;
 const TEAM_ORGANIZATION_CANVAS_KIND = "team_organization_canvas";
 const RESEARCH_TEAM_ID = "research-team";
+const EVOLUTION_SYSTEM_TEAM_IDS = new Set(["self-evolution-team", "supervised-evolution-team"]);
 const LINKED_ROOM_ACTIVE_REFETCH_MS = 5_000;
 const LINKED_ROOM_IDLE_REFETCH_MS = 30_000;
 const TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT = 8;
@@ -801,6 +802,19 @@ function isResearchWorkflowTeam(team: Team | null | undefined) {
   return team.teamId === RESEARCH_TEAM_ID || team.teamSource === "research_organization" || team.teamKind === "research";
 }
 
+function isEvolutionSystemTeam(team: Team | null | undefined) {
+  if (!team) {
+    return false;
+  }
+  return (
+    EVOLUTION_SYSTEM_TEAM_IDS.has(team.teamId) ||
+    team.teamKind === "self_evolution" ||
+    team.teamKind === "supervised_evolution" ||
+    team.teamSource === "self_evolution" ||
+    team.teamSource === "supervised_evolution"
+  );
+}
+
 function workflowStateLabel(value: string, lang: "zh" | "en") {
   const normalized = String(value || "").trim();
   const zh: Record<string, string> = {
@@ -1180,7 +1194,22 @@ export function TeamsRoute({
     [workspaceQuery.data],
   );
   const teams = teamsQuery.data?.teams ?? [];
-  const hasTeams = teams.length > 0;
+  const visibleTeams = useMemo(() => teams.filter((team) => !isEvolutionSystemTeam(team)), [teams]);
+  const visibleTeamIds = useMemo(() => new Set(visibleTeams.map((team) => team.teamId)), [visibleTeams]);
+  const visibleTeamSummary = useMemo(() => {
+    return visibleTeams.reduce(
+      (summary, team) => {
+        if (team.status !== "archived") {
+          summary.activeTeamCount += 1;
+        }
+        summary.memberCount += team.memberCount ?? team.members.length;
+        summary.staleMemberCount += team.members.filter((member) => member.agentStatus === "stale").length;
+        return summary;
+      },
+      { activeTeamCount: 0, memberCount: 0, staleMemberCount: 0 },
+    );
+  }, [visibleTeams]);
+  const hasTeams = visibleTeams.length > 0;
   const teamTemplates = useMemo(() => teamTemplatesQuery.data?.templates ?? [], [teamTemplatesQuery.data?.templates]);
   const selectedTemplate = useMemo(
     () => teamTemplates.find((template) => template.templateId === selectedTemplateId) ?? teamTemplates[0] ?? null,
@@ -1203,13 +1232,17 @@ export function TeamsRoute({
   const requestedTeamId = searchParams.get("team") ?? "";
   const requestedAgentId = searchParams.get("agent") ?? "";
   const requestedAgentTeamId = requestedAgentId ? agentTeamMembership.get(requestedAgentId)?.teamId ?? "" : "";
-  const effectiveTeamId = forcedTeamId || selectedTeamId || requestedTeamId || requestedAgentTeamId || teams[0]?.teamId || "";
+  const requestedVisibleTeamId = requestedTeamId && visibleTeamIds.has(requestedTeamId) ? requestedTeamId : "";
+  const requestedVisibleAgentTeamId = requestedAgentTeamId && visibleTeamIds.has(requestedAgentTeamId) ? requestedAgentTeamId : "";
+  const selectedVisibleTeamId = selectedTeamId && visibleTeamIds.has(selectedTeamId) ? selectedTeamId : "";
+  const fallbackVisibleTeamId = visibleTeams[0]?.teamId ?? "";
+  const effectiveTeamId = forcedTeamId || selectedVisibleTeamId || requestedVisibleTeamId || requestedVisibleAgentTeamId || fallbackVisibleTeamId;
   const teamDetailQuery = useQuery({
     queryKey: queryKeys.team(effectiveTeamId),
     queryFn: () => fetchJson<Team>(`/api/teams/${encodeURIComponent(effectiveTeamId)}`),
     enabled: Boolean(effectiveTeamId),
   });
-  const selectedTeam = teamDetailQuery.data ?? teams.find((team) => team.teamId === effectiveTeamId) ?? null;
+  const selectedTeam = teamDetailQuery.data ?? visibleTeams.find((team) => team.teamId === effectiveTeamId) ?? null;
   const researchWorkflowTeamSelected = isResearchWorkflowTeam(selectedTeam);
 
   useEffect(() => {
@@ -1377,18 +1410,22 @@ export function TeamsRoute({
   }, [selectedTemplateId, teamTemplates]);
 
   useEffect(() => {
-    if (requestedTeamId && teams.some((team) => team.teamId === requestedTeamId)) {
-      setSelectedTeamId(requestedTeamId);
+    if (requestedVisibleTeamId) {
+      setSelectedTeamId(requestedVisibleTeamId);
       return;
     }
-    if (requestedAgentTeamId && teams.some((team) => team.teamId === requestedAgentTeamId)) {
-      setSelectedTeamId(requestedAgentTeamId);
+    if (requestedVisibleAgentTeamId) {
+      setSelectedTeamId(requestedVisibleAgentTeamId);
       return;
     }
-    if (!selectedTeamId && teams[0]) {
-      setSelectedTeamId(teams[0].teamId);
+    if (selectedTeamId && !visibleTeamIds.has(selectedTeamId)) {
+      setSelectedTeamId(fallbackVisibleTeamId);
+      return;
     }
-  }, [requestedAgentTeamId, requestedTeamId, selectedTeamId, teams]);
+    if (!selectedTeamId && fallbackVisibleTeamId) {
+      setSelectedTeamId(fallbackVisibleTeamId);
+    }
+  }, [fallbackVisibleTeamId, requestedVisibleAgentTeamId, requestedVisibleTeamId, selectedTeamId, visibleTeamIds]);
 
   useEffect(() => {
     if (selectedNode) {
@@ -2838,9 +2875,9 @@ export function TeamsRoute({
       </header>
 
       <div className={styles.summaryBar}>
-        <span>{lang === "zh" ? "团队" : "Teams"} <strong>{teamsQuery.data?.summary.activeTeamCount ?? 0}</strong></span>
-        <span>{lang === "zh" ? "成员引用" : "Members"} <strong>{teamsQuery.data?.summary.memberCount ?? 0}</strong></span>
-        <span>{lang === "zh" ? "失效引用" : "Stale"} <strong>{teamsQuery.data?.summary.staleMemberCount ?? 0}</strong></span>
+        <span>{lang === "zh" ? "团队" : "Teams"} <strong>{visibleTeamSummary.activeTeamCount}</strong></span>
+        <span>{lang === "zh" ? "成员引用" : "Members"} <strong>{visibleTeamSummary.memberCount}</strong></span>
+        <span>{lang === "zh" ? "失效引用" : "Stale"} <strong>{visibleTeamSummary.staleMemberCount}</strong></span>
         <span>{lang === "zh" ? "成员源" : "Member source"} <strong>Agent Center</strong></span>
       </div>
       <div className={workspaceClassName}>
@@ -2934,7 +2971,7 @@ export function TeamsRoute({
             )}
           </section>
           <div className={styles.teamList}>
-            {teams.map((team) => (
+            {visibleTeams.map((team) => (
               <button
                 key={team.teamId}
                 type="button"
