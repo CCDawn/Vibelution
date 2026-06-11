@@ -231,6 +231,54 @@ type SourceCollectionTraceMessage = {
   storageRefs: string[];
 };
 
+type SourceCollectionSearchExecutionEvent = {
+  eventId: string;
+  eventType: string;
+  status: string;
+  title: string;
+  summary: string;
+  agentRole: string;
+  agentId: string;
+  assignmentId: string;
+  queryId: string;
+  query: string;
+  sourceType: string;
+  refs: string[];
+  rawLocation: string;
+  storageRefs: string[];
+  createdAt: string;
+};
+
+type TeamWorkflowSourceCollectionSearchExecutionPayload = {
+  schemaVersion: number;
+  teamId: string;
+  runId: string;
+  status: string;
+  provider: string;
+  executedQueryCount: number;
+  skippedQueryCount: number;
+  failedQueryCount: number;
+  resultCount: number;
+  recordCount: number;
+  outputCount: number;
+  importedCount: number;
+  run: TeamWorkflowSourceCollectionRunStartPayload["run"];
+  runStatus: DataProcessingStatus;
+  assignments: TeamWorkflowSourceCollectionRunStartPayload["assignments"];
+  outputs: Array<DataProcessingCollectionOutputPayload["output"]>;
+  createdRecords: DataProcessingCollectionOutputPayload["createdRecords"];
+  imported: TeamWorkflowDataRecordSourceCandidateImportPayload[];
+  executionEvents: SourceCollectionSearchExecutionEvent[];
+  boundaries: {
+    externalSearchTriggered: boolean;
+    metadataOnlyDownload: boolean;
+    writesFormalKnowledge: boolean;
+    writesRag: boolean;
+    writesOfficialGraph: boolean;
+  };
+  nextActions: string[];
+};
+
 type ResearchStageType = "knowledge_collection" | "experiment" | "iteration";
 
 type ResearchStageRound = {
@@ -670,6 +718,66 @@ function sourceCollectionPromptCacheStatusLabel(status: string, lang: "zh" | "en
     return "disabled";
   }
   return "pending";
+}
+
+function sourceCollectionExecutionTone(eventType: string, status: string): SourceCollectionTraceMessage["tone"] {
+  const normalizedEvent = String(eventType || "").toLowerCase();
+  const normalizedStatus = String(status || "").toLowerCase();
+  if (normalizedStatus === "blocked" || normalizedStatus === "failed" || normalizedEvent.includes("failed") || normalizedEvent.includes("no_query")) {
+    return "blocked";
+  }
+  if (normalizedEvent.includes("search")) {
+    return "search";
+  }
+  if (normalizedEvent.includes("source_manifest") || normalizedEvent.includes("data_record") || normalizedEvent.includes("storage")) {
+    return "storage";
+  }
+  if (normalizedEvent.includes("quality")) {
+    return "quality";
+  }
+  if (normalizedEvent.includes("extract")) {
+    return "extract";
+  }
+  return "acquire";
+}
+
+function sourceCollectionExecutionTitle(event: SourceCollectionSearchExecutionEvent, lang: "zh" | "en") {
+  if (lang !== "zh") {
+    return event.title || event.eventType;
+  }
+  if (event.eventType === "search.executed") {
+    return "已执行元数据搜索";
+  }
+  if (event.eventType === "search.failed") {
+    return "搜索失败，等待补救";
+  }
+  if (event.eventType === "storage.data_record_written") {
+    return "已写入 DataRecord";
+  }
+  if (event.eventType === "storage.source_manifest_imported") {
+    return "已导入 source_manifest 候选";
+  }
+  if (event.eventType === "assignment.no_query") {
+    return "任务缺少可执行 query";
+  }
+  return event.title || event.eventType;
+}
+
+function sourceCollectionExecutionBody(event: SourceCollectionSearchExecutionEvent, lang: "zh" | "en") {
+  const queryText = event.query ? `query: ${event.query}` : "";
+  if (lang !== "zh") {
+    return [event.summary, queryText].filter(Boolean).join(" · ");
+  }
+  if (event.eventType === "search.executed") {
+    return [event.summary || "已向外部元数据源发起查询，未下载全文。", queryText].filter(Boolean).join(" · ");
+  }
+  if (event.eventType === "storage.data_record_written") {
+    return [event.summary || "搜索结果已先进入通用 DataRecord，等待筛选。", queryText].filter(Boolean).join(" · ");
+  }
+  if (event.eventType === "storage.source_manifest_imported") {
+    return [event.summary || "DataRecord 已进入候选资料仓库，仍未写正式团队知识。", queryText].filter(Boolean).join(" · ");
+  }
+  return [event.summary, queryText].filter(Boolean).join(" · ");
 }
 
 function researchStageStartFeedbackText(payload: ResearchStageRoundStartPayload, lang: "zh" | "en", stageLabel?: string) {
@@ -2061,6 +2169,48 @@ export function TeamsRoute({
     },
   });
 
+  const executeSourceCollectionSearchMutation = useMutation({
+    mutationFn: (payload: { teamId: string; runId: string; assignmentId?: string; maxQueries?: number; maxResultsPerQuery?: number }) =>
+      fetchJson<TeamWorkflowSourceCollectionSearchExecutionPayload>(
+        `/api/teams/${encodeURIComponent(payload.teamId)}/workflow-orchestration/source-collection-runs/${encodeURIComponent(payload.runId)}/search/execute`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            assignmentIds: payload.assignmentId ? [payload.assignmentId] : [],
+            maxQueries: payload.maxQueries ?? 4,
+            maxResultsPerQuery: payload.maxResultsPerQuery ?? 2,
+            provider: "crossref_rest_api",
+          }),
+        },
+      ),
+    onSuccess: (payload, variables) => {
+      setSelectedSourceCollectionRunId(payload.runId);
+      queryClient.setQueryData(queryKeys.dataProcessingRunStatus(payload.runId), payload.runStatus);
+      queryClient.setQueryData(queryKeys.dataProcessingCollectionAssignments(payload.runId), {
+        schemaVersion: payload.schemaVersion,
+        runId: payload.runId,
+        assignments: payload.assignments,
+        summary: {
+          assignmentCount: payload.assignments.length,
+          assignmentStatusCounts: payload.assignments.reduce<Record<string, number>>((counts, assignment) => {
+            counts[assignment.status] = (counts[assignment.status] ?? 0) + 1;
+            return counts;
+          }, {}),
+        },
+      } satisfies DataProcessingCollectionAssignmentListPayload);
+      if (payload.imported[0]?.workflow) {
+        queryClient.setQueryData(queryKeys.teamWorkflow(variables.teamId), payload.imported[0].workflow);
+      }
+      void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowSourceCollectionRuns(variables.teamId, SOURCE_COLLECTION_RUN_PREVIEW_LIMIT) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowCandidates(variables.teamId, TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowKnowledgeIngestionStatus(variables.teamId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowCoordinationStatus(variables.teamId) });
+      void queryClient.invalidateQueries({ queryKey: sourceQualityStatusQueryKey(variables.teamId) });
+      void queryClient.invalidateQueries({ queryKey: paperNoteChunkStatusQueryKey(variables.teamId) });
+    },
+  });
+
   const assessSourceQualityMutation = useMutation({
     mutationFn: (payload: { teamId: string; candidateId: string; decision: "approved" | "needs_revision" }) =>
       fetchJson<TeamWorkflowSourceQualityAssessmentPayload>(
@@ -2674,6 +2824,40 @@ export function TeamsRoute({
               : (lang === "zh" ? "启动搜集批次" : "Start collection")}
           </button>
         </form>
+        <div className={styles.workflowSourceCollectionSearchAction}>
+          <div>
+            <strong>{lang === "zh" ? "对话式执行下一批搜索" : "Run next search batch as trace"}</strong>
+            <span>
+              {lang === "zh"
+                ? `会搜索元数据、写 DataRecord、导入候选，并把步骤插入对话流；剩余 ${sourceCollectionOpenAssignmentCount} 个可执行任务。`
+                : `Searches metadata, writes DataRecords, imports candidates, and appends trace steps; ${sourceCollectionOpenAssignmentCount} runnable assignments remain.`}
+            </span>
+          </div>
+          <button
+            type="button"
+            disabled={!canExecuteSourceCollectionSearch}
+            onClick={() => {
+              if (!selectedTeam?.teamId || !selectedSourceCollectionRunEffectiveId || !canExecuteSourceCollectionSearch) {
+                return;
+              }
+              const selectedAssignmentIsRunnable = selectedSourceCollectionAssignment
+                ? ["open", "in_progress", "returned"].includes(selectedSourceCollectionAssignment.status)
+                : false;
+              executeSourceCollectionSearchMutation.mutate({
+                teamId: selectedTeam.teamId,
+                runId: selectedSourceCollectionRunEffectiveId,
+                assignmentId: selectedAssignmentIsRunnable ? selectedSourceCollectionAssignment?.assignmentId : "",
+                maxQueries: 4,
+                maxResultsPerQuery: Math.max(1, Math.min(5, sourceCollectionDraft.maxResultsPerQuery || 2)),
+              });
+            }}
+          >
+            <Search size={13} />
+            {selectedTeamExecuteSourceCollectionSearchPending
+              ? (lang === "zh" ? "搜索中" : "Searching")
+              : (lang === "zh" ? "执行下一批搜索" : "Run next search")}
+          </button>
+        </div>
         <div className={styles.workflowSourceCollectionRuns}>
           <label>
             <span>{lang === "zh" ? "最近批次" : "Recent runs"}</span>
@@ -2825,6 +3009,17 @@ export function TeamsRoute({
         ) : null}
         {selectedTeamRecordSourceCollectionOutputError ? (
           <div className={styles.messageError}>{selectedTeamRecordSourceCollectionOutputError.message}</div>
+        ) : null}
+        {selectedTeamExecuteSourceCollectionSearchError ? (
+          <div className={styles.messageError}>{selectedTeamExecuteSourceCollectionSearchError.message}</div>
+        ) : null}
+        {selectedTeamExecuteSourceCollectionSearchResult ? (
+          <div className={styles.messageResult}>
+            <strong>{lang === "zh" ? "搜索执行已回写" : "Search execution written"}</strong>
+            <span>
+              {selectedTeamExecuteSourceCollectionSearchResult.executedQueryCount} queries / {selectedTeamExecuteSourceCollectionSearchResult.recordCount} DataRecord / {selectedTeamExecuteSourceCollectionSearchResult.importedCount} candidate
+            </span>
+          </div>
         ) : null}
         {selectedTeamRecordSourceCollectionOutputResult ? (
           <div className={styles.messageResult}>
@@ -3274,6 +3469,17 @@ export function TeamsRoute({
       : null;
   const selectedTeamRecordSourceCollectionOutputResult =
     recordSourceCollectionOutputMutation.variables?.teamId === selectedTeam?.teamId ? recordSourceCollectionOutputMutation.data : undefined;
+  const selectedTeamExecuteSourceCollectionSearchPending =
+    executeSourceCollectionSearchMutation.isPending && executeSourceCollectionSearchMutation.variables?.teamId === selectedTeam?.teamId;
+  const selectedTeamExecuteSourceCollectionSearchError =
+    executeSourceCollectionSearchMutation.variables?.teamId === selectedTeam?.teamId && executeSourceCollectionSearchMutation.error instanceof Error
+      ? executeSourceCollectionSearchMutation.error
+      : null;
+  const selectedTeamExecuteSourceCollectionSearchResult =
+    executeSourceCollectionSearchMutation.variables?.teamId === selectedTeam?.teamId ? executeSourceCollectionSearchMutation.data : undefined;
+  const sourceCollectionOpenAssignmentCount =
+    sourceCollectionRunStatus?.summary.openAssignmentCount
+    ?? sourceCollectionAssignments.filter((assignment) => ["open", "in_progress", "returned"].includes(assignment.status)).length;
   const sourceManifestCandidates = useMemo(
     () => teamWorkflowCandidates.filter((candidate) => candidate.candidateType === "source_manifest"),
     [teamWorkflowCandidates],
@@ -3350,6 +3556,24 @@ export function TeamsRoute({
         ].filter(Boolean),
       });
     }
+    if (selectedTeamExecuteSourceCollectionSearchResult?.executionEvents?.length) {
+      selectedTeamExecuteSourceCollectionSearchResult.executionEvents.slice(0, 12).forEach((event) => {
+        messages.push({
+          id: `search-exec-${event.eventId}`,
+          agentRole: event.agentRole || "Source Collection Agent",
+          title: sourceCollectionExecutionTitle(event, lang),
+          body: sourceCollectionExecutionBody(event, lang),
+          status: event.status,
+          tone: sourceCollectionExecutionTone(event.eventType, event.status),
+          refs: [
+            event.queryId,
+            event.rawLocation,
+            ...(event.refs ?? []),
+          ].filter(Boolean).slice(0, 5),
+          storageRefs: event.storageRefs ?? [],
+        });
+      });
+    }
     sourceCollectionAssignments.slice(0, 4).forEach((assignment) => {
       const assignedQueries = assignment.scope.assignedQueries ?? [];
       messages.push({
@@ -3421,6 +3645,7 @@ export function TeamsRoute({
     lang,
     selectedSourceCollectionRun,
     selectedTeamRecordSourceCollectionOutputResult,
+    selectedTeamExecuteSourceCollectionSearchResult,
     selectedTeamStartResearchStageResult,
     selectedTeamStartSourceCollectionResult,
     sourceCollectionAssignments,
@@ -3441,6 +3666,12 @@ export function TeamsRoute({
     && (sourceCollectionOutputDraft.assignmentId || selectedSourceCollectionAssignment?.assignmentId)
     && sourceCollectionOutputHasRecord
     && !selectedTeamRecordSourceCollectionOutputPending,
+  );
+  const canExecuteSourceCollectionSearch = Boolean(
+    selectedTeam?.teamId
+    && selectedSourceCollectionRunEffectiveId
+    && sourceCollectionOpenAssignmentCount > 0
+    && !selectedTeamExecuteSourceCollectionSearchPending,
   );
   const selectedTeamBuildCandidateGraphPending =
     buildCandidateGraphMutation.isPending && buildCandidateGraphMutation.variables === selectedTeam?.teamId;

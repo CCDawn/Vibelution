@@ -98,6 +98,34 @@ def _steward_pack_output(*, candidate_ids=None, confidence=0.61):
     }
 
 
+def _fake_source_search_response(query, *, max_results, provider):
+    query_text = str(query.get("query") or "neural source")
+    return {
+        "provider": provider,
+        "searchUrl": f"https://api.example.test/search?q={query_text.replace(' ', '+')}",
+        "results": [
+            {
+                "title": "Predictive coding cortical hierarchy",
+                "sourceRef": "https://doi.org/10.0000/predictive-coding",
+                "rawLocation": "https://api.example.test/works/10.0000/predictive-coding",
+                "summary": "Metadata-only result for a predictive coding paper.",
+                "sourceType": "paper",
+                "metadata": {"doi": "10.0000/predictive-coding", "containerTitle": "Journal of Neural Computation"},
+                "qualitySignals": {"providerScore": 98.7, "hasDoi": True},
+            },
+            {
+                "title": "Cortical hierarchy dataset",
+                "sourceRef": "https://doi.org/10.0000/cortical-dataset",
+                "rawLocation": "https://api.example.test/works/10.0000/cortical-dataset",
+                "summary": "Metadata-only result for a related dataset.",
+                "sourceType": "dataset",
+                "metadata": {"doi": "10.0000/cortical-dataset", "containerTitle": "Neural Data Archive"},
+                "qualitySignals": {"providerScore": 87.5, "hasDoi": True},
+            },
+        ][:max_results],
+    }
+
+
 def test_challenge_cup_workflow_registers_candidate_and_decides_transfer(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     team = team_service.create_team(name="挑战杯科研团队")
@@ -357,6 +385,91 @@ def test_start_source_collection_run_accepts_traceable_query_seed_contract(tmp_p
     assert response["assignments"][1]["scope"]["assignedQueries"][0]["assignedAgentRole"] == "source_quality"
     assert response["assignments"][1]["acceptance"]["resultWritebackContract"]["candidateImport"]["targetCandidateType"] == "source_manifest"
     assert response["assignments"][1]["acceptance"]["resultWritebackContract"]["officialGraphWrites"] is False
+
+
+def test_execute_source_collection_search_writes_records_and_imports_candidates(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(team_workflow_orchestration_service, "_execute_source_collection_query", _fake_source_search_response)
+    team = team_service.create_team(name="ai科学研究团队")
+    run_response = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "title": "Neural algorithm source batch",
+            "topic": "predictive coding cortical hierarchy",
+            "querySeeds": ["predictive coding cortical hierarchy"],
+            "searchLanguages": ["en"],
+            "sourceTypes": ["paper"],
+            "maxResultsPerQuery": 2,
+            "agentRoles": ["data_discovery"],
+            "agentIds": {"data_discovery": "Data Discovery Agent"},
+        },
+    )
+
+    execution = team_workflow_orchestration_service.execute_source_collection_search(
+        team["teamId"],
+        run_response["run"]["runId"],
+        {"maxQueries": 1, "maxResultsPerQuery": 2},
+    )
+    records = data_processing_service.list_records(run_response["run"]["runId"])["records"]
+    assignments = data_processing_service.list_collection_assignments(run_response["run"]["runId"])["assignments"]
+    candidates = team_workflow_orchestration_service.list_candidate_store(team["teamId"], candidate_type="source_manifest")
+
+    assert execution["status"] == "executed"
+    assert execution["provider"] == "crossref_rest_api"
+    assert execution["executedQueryCount"] == 1
+    assert execution["recordCount"] == 2
+    assert execution["importedCount"] == 2
+    assert execution["boundaries"]["externalSearchTriggered"] is True
+    assert execution["boundaries"]["metadataOnlyDownload"] is True
+    assert execution["boundaries"]["writesFormalKnowledge"] is False
+    assert execution["boundaries"]["writesRag"] is False
+    assert execution["boundaries"]["writesOfficialGraph"] is False
+    assert assignments[0]["status"] == "completed"
+    assert len(records) == 2
+    assert records[0]["metadata"]["sourceCollectionTrace"]["queryId"] == run_response["searchPlan"]["queries"][0]["queryId"]
+    assert records[0]["metadata"]["sourceCollectionTrace"]["externalSearchTriggered"] is True
+    assert records[0]["metadata"]["sourceCollectionTrace"]["storageTarget"] == "data_processing.records"
+    assert records[0]["metadata"]["metadataOnlyDownload"] is True
+    assert records[0]["collectionTrace"]["assignmentId"] == run_response["assignments"][0]["assignmentId"]
+    assert candidates["candidateCount"] == 2
+    assert all(candidate["metadata"]["sourceCollectionSearchExecution"] is True for candidate in candidates["candidates"])
+    assert all(candidate["metadata"]["importedFromDataRecord"]["runId"] == run_response["run"]["runId"] for candidate in candidates["candidates"])
+    assert {event["eventType"] for event in execution["executionEvents"]} >= {
+        "search.executed",
+        "storage.data_record_written",
+        "storage.source_manifest_imported",
+    }
+
+
+def test_execute_source_collection_search_skips_existing_query_without_force(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    calls = []
+
+    def fake_search(query, *, max_results, provider):
+        calls.append(query["queryId"])
+        return _fake_source_search_response(query, max_results=max_results, provider=provider)
+
+    monkeypatch.setattr(team_workflow_orchestration_service, "_execute_source_collection_query", fake_search)
+    team = team_service.create_team(name="ai科学研究团队")
+    run_response = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "topic": "predictive coding cortical hierarchy",
+            "querySeeds": ["predictive coding cortical hierarchy"],
+            "searchLanguages": ["en"],
+            "sourceTypes": ["paper"],
+            "agentRoles": ["data_discovery"],
+        },
+    )
+    first = team_workflow_orchestration_service.execute_source_collection_search(team["teamId"], run_response["run"]["runId"], {"maxQueries": 1})
+    second = team_workflow_orchestration_service.execute_source_collection_search(team["teamId"], run_response["run"]["runId"], {"maxQueries": 1})
+
+    assert first["executedQueryCount"] == 1
+    assert second["executedQueryCount"] == 0
+    assert second["skippedQueryCount"] == 0
+    assert second["status"] == "no_open_assignment"
+    assert calls == [run_response["searchPlan"]["queries"][0]["queryId"]]
+    assert data_processing_service.list_records(run_response["run"]["runId"])["summary"]["recordCount"] == 2
 
 
 def test_start_research_stage_round_creates_knowledge_collection_round(tmp_path, monkeypatch):
