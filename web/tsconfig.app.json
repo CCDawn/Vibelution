@@ -7,6 +7,8 @@
     "skipLibCheck": true,
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
+    "composite": true,
+    "tsBuildInfoFile": "./tsconfig.app.tsbuildinfo",
     "strict": true,
     "forceConsistentCasingInFileNames": true,
     "module": "ESNext",
