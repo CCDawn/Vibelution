@@ -17,6 +17,9 @@ from core.llm.routing import attach_recovery_fallback, select_recovery_profile
 
 
 def make_config(**kwargs):
+    kwargs.setdefault("llm.profiles.primary.contract", "tool_chat")
+    kwargs.setdefault("llm.profiles.primary.streaming", True)
+    kwargs.setdefault("llm.profiles.primary.tool_calling_mode", "auto")
     kwargs.setdefault("llm.profiles.primary.transport", "chat_completions")
     return Settings(None, **kwargs).config
 
@@ -163,6 +166,9 @@ def test_llm_capabilities_expose_provider_runtime_features():
             "llm.providers.default.base_url": "https://example.test/v1",
             "llm.profiles.primary.provider_id": "default",
             "llm.profiles.primary.model": "gpt-4o",
+            "llm.profiles.primary.contract": "tool_chat",
+            "llm.profiles.primary.streaming": True,
+            "llm.profiles.primary.tool_calling_mode": "auto",
             "llm.profiles.primary.supports_image_input": True,
             "llm.profiles.primary.prompt_cache.mode": "automatic",
         }
