@@ -1275,6 +1275,12 @@
   --workflow-trace-badge: color-mix(in srgb, var(--accent-cool) 16%, transparent);
 }
 
+.sourceCollectionTrace_cache {
+  --workflow-trace-border: color-mix(in srgb, var(--accent-cool) 42%, var(--border-soft));
+  --workflow-trace-bg: color-mix(in srgb, var(--accent-cool) 10%, transparent);
+  --workflow-trace-badge: color-mix(in srgb, var(--accent-cool) 22%, transparent);
+}
+
 .sourceCollectionTrace_search,
 .sourceCollectionTrace_acquire {
   --workflow-trace-border: color-mix(in srgb, var(--accent-success) 30%, var(--border-soft));
