@@ -261,10 +261,54 @@ def observe_workbench() -> dict[str, Any]:
     launcher_browser_launch_pid = int(launcher_state.get("launcherBrowserLaunchPid") or 0)
     launcher_browser_window_pid = int(launcher_state.get("launcherBrowserWindowPid") or 0)
 
+    port = _port_for_url(url)
+    if (
+        session_role == "launcher_control_surface"
+        and state_backend_pid <= 0
+        and backend_launch_pid <= 0
+        and browser_launch_pid <= 0
+        and browser_window_pid <= 0
+        and not _port_is_listening_socket(port)
+    ):
+        launcher_browser_window_alive = _is_process_alive(launcher_browser_window_pid)
+        return {
+            "launcherStatePresent": bool(launcher_state),
+            "sessionId": str(launcher_state.get("sessionId") or "").strip(),
+            "sessionRole": session_role,
+            "backendPid": 0,
+            "backendLaunchPid": 0,
+            "browserLaunchPid": 0,
+            "browserWindowPid": 0,
+            "browserWindowRecoveredPid": 0,
+            "browserWindowRecoverySource": "",
+            "browserProfileDir": browser_profile_dir,
+            "launcherBrowserLaunchPid": launcher_browser_launch_pid,
+            "launcherBrowserWindowPid": launcher_browser_window_pid,
+            "launcherBrowserWindowAlive": launcher_browser_window_alive,
+            "browserManaged": browser_managed,
+            "url": url,
+            "healthUrl": _health_url_for(url),
+            "backendAlive": False,
+            "backendHealthy": False,
+            "backendObserved": False,
+            "backendPort": port,
+            "backendPortListening": False,
+            "backendPortOwnerPid": 0,
+            "backendPortOwnerKind": "",
+            "backendPortOwnerTrusted": False,
+            "backendPortOwnerResidual": False,
+            "backendPortConflict": False,
+            "browserWindowAlive": False,
+            "observedState": "closed",
+            "backendMissing": False,
+            "frontendOrphaned": False,
+            "lifecycleConsistency": "consistent",
+            "observationFastPath": "launcher_control_surface_no_workbench_pids",
+        }
+
     backend_alive = _is_process_alive(state_backend_pid)
     health_probe_url = url if launcher_state else DEFAULT_URL
     healthy = _is_backend_healthy(health_probe_url)
-    port = _port_for_url(url)
     port_owner_pid = _listening_pid_for_port(port)
     port_listening = bool(port_owner_pid) or _port_is_listening_socket(port)
     browser_window_alive = _is_process_alive(browser_window_pid)

@@ -124,6 +124,7 @@ def submit_command(
         command_type = str(command.get("type") or "")
         event_type = {
             "close_workbench": "command_queue.close_joined",
+            "force_close_workbench": "command_queue.force_close_joined",
             "restart_workbench": "command_queue.restart_joined",
         }.get(command_type, "command_queue.open_joined")
         _append_queue_event(
@@ -162,6 +163,8 @@ def recover_processing_queue() -> None:
     ensure_runtime_manager_dirs()
     for path in sorted(PROCESSING_DIR.glob("*.json")):
         command = _load_command_file(path)
+        if _discard_recovered_command_with_existing_result(path, command):
+            continue
         if _complete_recovered_satisfied_stop_manager_close(path, command):
             continue
         target = INBOX_DIR / path.name
@@ -385,6 +388,40 @@ def _load_command_file(path: Path) -> dict[str, Any]:
     except (OSError, json.JSONDecodeError):
         return {}
     return payload if isinstance(payload, dict) else {}
+
+
+def _discard_recovered_command_with_existing_result(path: Path, command: dict[str, Any]) -> bool:
+    command_id = str(command.get("commandId") or path.stem).strip() or path.stem
+    result_path = RESULTS_DIR / f"{command_id}.json"
+    if not result_path.exists():
+        return False
+    try:
+        payload = json.loads(result_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    if not isinstance(payload, dict):
+        return False
+    result_command_id = str(payload.get("commandId") or command_id).strip() or command_id
+    if result_command_id != command_id:
+        return False
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        return False
+    _append_queue_event(
+        "command_queue.recovered_processing_result_preserved",
+        {
+            "commandId": command_id,
+            "type": str(command.get("type") or ""),
+            "requestedBy": str(command.get("requestedBy") or ""),
+            "requestedAt": str(command.get("requestedAt") or ""),
+            "queuePath": path.name,
+            "resultPath": result_path.name,
+            "resultCompleted": bool(payload.get("completed")),
+            "resultOk": bool(payload.get("ok")),
+        },
+    )
+    return True
 
 
 def _lifecycle_cancel_response(
@@ -611,8 +648,8 @@ def _joinable_lifecycle_command_id(command: dict[str, Any]) -> str:
         return _joinable_open_command_id(command)
     if command_type == "restart_workbench":
         return _joinable_restart_command_id(command)
-    if command_type == "close_workbench":
-        return _joinable_close_command_id(command)
+    if command_type in {"close_workbench", "force_close_workbench"}:
+        return _joinable_close_or_force_close_command_id(command)
     return ""
 
 
@@ -694,9 +731,9 @@ def _joinable_restart_command_id(command: dict[str, Any]) -> str:
     return ""
 
 
-def _joinable_close_command_id(command: dict[str, Any]) -> str:
+def _joinable_close_or_force_close_command_id(command: dict[str, Any]) -> str:
     command_type = str(command.get("type") or "").strip()
-    if command_type != "close_workbench":
+    if command_type not in {"close_workbench", "force_close_workbench"}:
         return ""
     manager_pid = load_pid()
     if not _process_is_alive(manager_pid):
@@ -704,9 +741,10 @@ def _joinable_close_command_id(command: dict[str, Any]) -> str:
     state = load_state()
     if not isinstance(state, dict) or not _state_belongs_to_current_manager(state, manager_pid):
         return ""
+    joinable_types = {"close_workbench", "force_close_workbench"}
     active = state.get("command") if isinstance(state.get("command"), dict) else {}
     active_command_id = str(active.get("activeCommandId") or "").strip()
-    if active_command_id and str(active.get("activeType") or "").strip() == "close_workbench":
+    if active_command_id and str(active.get("activeType") or "").strip() in joinable_types:
         return active_command_id
     for path in sorted(INBOX_DIR.glob("*.json")):
         try:
@@ -715,7 +753,7 @@ def _joinable_close_command_id(command: dict[str, Any]) -> str:
             continue
         if not isinstance(payload, dict):
             continue
-        if str(payload.get("type") or "").strip() != "close_workbench":
+        if str(payload.get("type") or "").strip() not in joinable_types:
             continue
         return str(payload.get("commandId") or path.stem).strip() or path.stem
     return ""

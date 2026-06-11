@@ -229,6 +229,9 @@ def _allow_recent_completed_scene(event_type: str) -> bool:
         "command_queue.command_claimed",
         "command_queue.command_rejected_shutdown",
         "command_queue.open_joined",
+        "command_queue.close_joined",
+        "command_queue.force_close_joined",
+        "command_queue.restart_joined",
         "command_queue.stale_shutdown_state_ignored",
     }
 

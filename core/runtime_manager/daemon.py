@@ -2492,6 +2492,9 @@ class RuntimeManagerDaemon:
         state = load_state()
         workbench = state.setdefault("workbench", {})
         initial_observation = observe_workbench()
+        already_satisfied = _close_request_already_satisfied(initial_observation) and not _closed_observation_has_residual_evidence(
+            initial_observation
+        )
         active_work_runs = _persistent_active_work_run_snapshots()
         closed_runs = _close_active_evolution_runs_for_shutdown()
         force_stopped_runs = _mark_persistent_active_work_runs_force_stopped(reason)
@@ -2499,7 +2502,7 @@ class RuntimeManagerDaemon:
         workbench.update(
             {
                 "desiredState": "closed",
-                "phase": "force_stopping",
+                "phase": "steady" if already_satisfied else "force_stopping",
                 "lastReason": reason,
                 "lastSource": source,
                 "lastTransitionAt": now_iso(),
@@ -2517,6 +2520,7 @@ class RuntimeManagerDaemon:
             | {
                 "reason": reason,
                 "source": source,
+                "alreadySatisfied": already_satisfied,
                 "activeWorkCount": len(active_work_runs),
                 "activeWorkRuns": [
                     {
@@ -2530,6 +2534,35 @@ class RuntimeManagerDaemon:
                 ],
             },
         )
+        if already_satisfied:
+            cleanup_result = {
+                "supported": True,
+                "requested": [],
+                "terminated": [],
+                "remaining": [],
+                "skipped": "already_closed_no_residual",
+            }
+            _append_event(
+                "workbench.force_close.already_satisfied",
+                _close_verification_event_payload(
+                    initial_observation,
+                    command_id=command_id,
+                    message="Force close skipped process cleanup because the workbench was already closed.",
+                    cleanup_result=cleanup_result,
+                )
+                | {"attempts": 0},
+            )
+            return self._finish_command(
+                command_id,
+                ok=True,
+                message="Workbench is already closed.",
+                result_data={
+                    "residualCleanup": cleanup_result,
+                    "closedEvolutionRuns": closed_runs,
+                    "forceStoppedWorkRuns": force_stopped_runs,
+                    "alreadySatisfied": True,
+                },
+            )
 
         cleanup_result = self._force_cleanup_workbench_processes(initial_observation)
         closed, verification, verification_attempts = _wait_for_close_verification()
