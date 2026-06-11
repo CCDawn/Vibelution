@@ -464,9 +464,10 @@ const implementationBlueprint = {
     chatRoomPurpose: "research_coordination",
     workflowPath: "workspace/teams/research-team/workflow_orchestration.json",
     candidateStorePath: "workspace/teams/research-team/candidate_store/index.json",
-    note: "挑战杯科研流程直接绑定当前 Vibelution ai科学研究团队，不另建新团队；团队页面左侧只承担团队选择/创建，research-team 的科研流程索引进入团队主工作区作为二级导航，组织画布仅作为附属结构视图。",
+    note: "挑战杯科研流程直接绑定当前 Vibelution ai科学研究团队，不另建新团队；团队页面左侧只承担团队选择/创建，research-team 的科研流程索引进入团队主工作区作为二级导航，资料搜集已拆成独立一级工作页，组织画布仅作为附属结构视图。",
     workspaceEntry: "/teams?team=research-team",
-    defaultView: "选中 ai科学研究团队后，页面顶部显示科研流程二级索引条；当前节点内容区优先展示科研三阶段启动台：知识搜集、实验、迭代。",
+    sourceCollectionEntry: "/teams?team=research-team&researchView=source_collection",
+    defaultView: "选中 ai科学研究团队后，页面顶部显示科研流程二级索引条；当前节点内容区优先展示科研三阶段启动台：知识搜集、实验、迭代；点击资料搜集会进入独立工作页并可返回团队页。",
     canvasView: "组织画布保留可编辑能力，但只有点击主工作区二级导航的“组织画布”后显示；普通团队仍保持画布优先布局。",
   },
   architecture: [
@@ -484,7 +485,7 @@ const implementationBlueprint = {
   milestones: [
     ["M0", "Team 编排后端切片", "已新增 workflow_orchestration.json、candidate_store/index.json、transfer_records.jsonl 和 API。", "能创建 challenge_cup_research 编排、登记资料候选、提交转移请求，并由 Research Coordination Agent 裁决。"],
     ["M0.1", "Team 页面科研流程入口", "已在 Teams 工作台为 research-team / 科研组织团队读取 TeamWorkflowOrchestration、最近 CandidateStore 候选和知识入库状态；当前改为科研流程索引优先，默认只展示当前索引节点的规划内容，流程总览、资料搜集、协调队列、入库漏斗、候选图谱、候选资料和团队沟通互相隔离，组织画布作为附属索引视图。", "只读展示，不触发状态转移、审批、正式 Team Knowledge/RAG/图谱写入；普通非科研团队保持原画布优先布局，不被动初始化挑战杯 workflow。"],
-    ["M0.2", "Teams 科研流程二级导航", "左侧团队栏降级为团队创建、模板和团队列表；科研流程索引不再与团队同级，而是进入 ai科学研究团队主工作区顶部作为二级导航。", "用户先选团队，再在选中团队内部切换科研总览、资料搜集、团队协调、知识入库、候选图谱、候选资料、团队沟通和组织画布；点击索引只切换当前节点页面，组织画布仍可编辑但属于附属视图。"],
+    ["M0.2", "Teams 科研流程二级导航", "左侧团队栏降级为团队创建、模板和团队列表；科研流程索引不再与团队同级，而是进入 ai科学研究团队主工作区顶部作为二级导航。", "用户先选团队，再在选中团队内部切换科研总览、团队协调、知识入库、候选图谱、候选资料、团队沟通和组织画布；资料搜集从索引跳转到独立一级工作页，组织画布仍可编辑但属于附属视图。"],
     ["M0.5", "本地研究工作模型接线", "已新增 Local Research Worker Model 任务包、32k 上下文预算、JSON 输出校验、草稿记录和 invoke API；bossAGI-standard / qwen3.5-9b 通过临时 model_ref profile 调用，解析失败不写 CandidateStore。", "能为资料初筛、paper_note 草稿、neuro_mechanism 候选、algorithm_hypothesis 草稿和 review prefilter 构建任务包，调用本地模型，并把合格 JSON 草稿写入 CandidateStore。"],
     ["M1", "候选数据基座", "已新增 CandidateStore 列表查询、校验报告、source_manifest/PDF 最小字段校验和本地 PDF source-extraction API；PDF 缺路径、sha256、allowedForAnalysis=true 或抽取失败会进入 source_needs_confirmation。", "能登记 PDF source_manifest，按 candidateType/currentState/qualityStatus 查询候选，抽取 sha256/pageAnchors/excerpt，并查看 invalid/error/warning 统计；仍不写正式 Team Knowledge/RAG/知识图谱。"],
     ["M2", "paper_note 与 PDF 锚点", "已新增 paper_note 输出契约与 Citation Anchor 校验，并接入 sourceExtraction -> paper_note_draft 自动草稿桥：本地 PDF pageAnchors/excerpt 会被转为 sourceRefs/evidenceRefs/excerpt 后调用本地模型；paperNoteChunkPlan 可把长文切成可追踪 chunk seeds。", "合格本地模型输出进入 paper_note_draft；缺 citation/page anchor 时进入 paper_note_needs_revision，不能自然推进到 mechanism_candidate；多 chunk 草稿合并仍待接。"],
@@ -497,12 +498,13 @@ const implementationBlueprint = {
     ["M6.3", "DataRecord 导入 source_manifest", "新增 Team workflow 导入桥：/api/teams/{teamId}/workflow-orchestration/data-processing/runs/{runId}/records/{recordId}/source-candidate。", "通用 DataRecord 可被幂等导入 CandidateStore source_manifest，并保留 importedFromDataRecord、dataProcessingQualitySignals、collectionTrace 和 data_record/data_processing_run evidenceRefs；仍不写正式知识/RAG/正式图谱。"],
     ["M6.4", "资料搜集批次启动入口", "新增 /api/teams/{teamId}/workflow-orchestration/source-collection-runs，一次创建 DataProcessingRun 和功能 Agent CollectionAssignment。", "Research Coordination Agent 可以启动可追踪资料搜集批次，默认分配 data_discovery、source_acquisition、content_extraction；功能 Agent 回写 DataRecord 后再导入 source_manifest。"],
     ["M6.5", "数据搜索计划契约", "source-collection-runs 会生成 searchPlan、querySeeds、queries、roleAssignmentInputs 和 resultWritebackContract，并把 assignedQueries 写入各功能 Agent assignment scope。", "Research Coordination Agent 可基于 topic/goal/scope 启动可追踪搜索计划；本轮只生成 contract_only planned 查询，不触发外部搜索，不写正式 Team Knowledge/RAG/official graph。"],
-    ["M6.6", "Teams 资料搜集执行台", "research-team 页面新增独立资料搜集索引页，可启动 source collection run、查看最近批次、run status、assignment、assignedQueries，并手工提交 CollectionOutput。", "启动批次会从 Team canvas 读取 data_discovery/source_acquisition/content_extraction/source_quality 等角色绑定的团队 agentId；手工回写会先写入 DataRecord，再通过 Team workflow 导入桥转成 source_manifest 候选；仍不触发真实外部搜索，不写正式 Team Knowledge/RAG/official graph。"],
+    ["M6.6", "Teams 资料搜集执行台", "research-team 页面新增资料搜集索引入口，可启动 source collection run、查看最近批次、run status、assignment、assignedQueries，并手工提交 CollectionOutput。", "启动批次会从 Team canvas 读取 data_discovery/source_acquisition/content_extraction/source_quality 等角色绑定的团队 agentId；手工回写会先写入 DataRecord，再通过 Team workflow 导入桥转成 source_manifest 候选；仍不触发真实外部搜索，不写正式 Team Knowledge/RAG/official graph。"],
     ["M6.7", "科研三阶段启动台", "research-team / ai科学研究团队右侧顶部新增三阶段启动台，提供知识搜集、实验、迭代三个启动按钮；后端新增 stage-rounds/status 和 stage-rounds/start。", "知识搜集会创建或续用 ResearchStageRound 并复用 source-collection run；实验与迭代先创建 planning 轮次和 coordinationContract，不自动执行实验/迭代；阶段记录写入 Team workflow runtime memory，不创建正式 KnowledgeItem/RAG/official graph。"],
     ["M6.8", "阶段启动自动团队协调", "stage-rounds/start 会尝试基于 linkedChatRoom 启动轻量后台团队协调 round，并把 roomId/roundId 写回 ResearchStageRound。", "如果群聊缺失、忙碌或没有可发言成员，不回滚阶段轮次，状态进入 needs_attention，并保留 coordination_round_not_started warning；可通过 coordination/retry 重试。"],
     ["M6.9", "模型调用证据链", "新增 official-model-evidence status/register API 和 Teams 科研总览证据面板；本地 qwen3.5 invoke 会自动登记 invocation_log，已有 local_model_output 也会只读折算为候选输出证据。", "团队可以看到 source_screening、paper_note、neuro_mechanism、mechanism_mapping、algorithm_hypothesis、review_prefilter 的 Qwen/百炼/本地模型证据覆盖；证据 store 不写正式 Team Knowledge/RAG/official graph。"],
     ["M6.10", "长论文 paper_note 分块计划", "新增 paper-note-chunks/status 与 paper-note-chunks/plan；Teams 候选资料页可对已完成 sourceExtraction 的 source_manifest 生成/重建 paperNoteChunkPlan。", "分块计划只写 CandidateStore metadata，按 pageAnchors 生成 chunk seeds；paper-note-draft 可带 chunkId 逐块草稿化并回写 chunk 进度，不写正式 Team Knowledge/RAG/official graph。"],
     ["M6.11", "资料质量筛选执行台", "新增 source-quality/status 与 source-quality/assess；Teams 候选资料页可由 Source Quality Assessment Agent 对 source_manifest 标记通过筛选或退回补资料。", "评估结果写入 CandidateStore metadata.sourceQualityAssessment/sourceQualityAssessments，并更新 source_quality_approved/source_quality_needs_revision/source_quality_rejected；不写正式 Team Knowledge/RAG/official graph。"],
+    ["M6.12", "资料搜集独立一级页与对话流", "新增 /teams?team=research-team&researchView=source_collection 独立工作页状态，主团队页资料搜集索引只作为入口；独立页提供返回团队页面、状态摘要、对话式搜集流和技术控制台。", "对话流从现有 run/query/assignment/CollectionOutput/DataRecord/source_manifest/source_quality 状态合成，展示谁做了什么、结果是什么、存到哪里；仍不触发真实外部搜索，不写正式 Team Knowledge/RAG/official graph。"],
   ],
   schemas: [
     "DataProcessingRun",
@@ -528,7 +530,7 @@ const implementationBlueprint = {
     ["data_processing API", "已落地：/api/data-processing/profiles、runs 创建/列表/详情、records、collection-assignments、outputs、status；供数据搜集类 Agent 领取任务和回写结果。"],
     ["team_workflow_orchestration_service", "已落地：Team 级 workflowOrchestration、ResearchStageRound、CandidateStore、transfer request/decision、source-collection run 启动、DataSearchPlan/query seed 契约、DataRecord -> source_manifest 幂等导入桥、source_quality assessment、paper_note chunk planning，以及 official_model_evidence 证据登记/status。"],
     ["team_workflows API", "已落地：/api/teams/{team_id}/workflow-orchestration、stage-rounds/status、stage-rounds/start、stage-rounds/{stageRoundId}/coordination/retry、stage-rounds/{stageRoundId}/memory-record/retry、source-collection-runs（含 searchPlan/querySeeds/assignedQueries/resultWritebackContract）、candidates/source、data-processing/runs/{runId}/records/{recordId}/source-candidate、candidates/{candidate_id}/source-extraction、source-quality/status、candidates/{candidate_id}/source-quality/assess、paper-note-chunks/status、candidates/{candidate_id}/paper-note-chunks/plan、candidates/{candidate_id}/paper-note-draft（支持 chunkId）、candidates、candidates/validation、candidate-graph、transfers、decide、knowledge-ingestion/status、coordination/status、official-model-evidence/status、official-model-evidence；coordination/status 返回 communicationBrief。"],
-    ["TeamsRoute workflow workspace", "已落地入口：research-team 页面顶部显示科研流程二级索引条；当前节点内容区优先展示科研三阶段启动台，并按索引展示 workflow 当前阶段、candidateStore 摘要、模型调用证据链、coordination queue、communicationBrief、knowledge ingestion status、validationSummary、候选图谱、最近候选和团队沟通；组织画布仅在点击索引后作为附属视图显示。"],
+    ["TeamsRoute workflow workspace", "已落地入口：research-team 页面顶部显示科研流程二级索引条；当前节点内容区优先展示科研三阶段启动台，并按索引展示 workflow 当前阶段、candidateStore 摘要、模型调用证据链、coordination queue、communicationBrief、knowledge ingestion status、validationSummary、候选图谱、最近候选和团队沟通；资料搜集已拆到 /teams?team=research-team&researchView=source_collection 独立一级页状态，用对话式过程流展示搜集步骤；组织画布仅在点击索引后作为附属视图显示。"],
     ["local_research_worker_model", "已落地任务包构建、32k 上下文预算、统一 LLMClient invoke、JSON 提取/校验和 CandidateStore 草稿记录；解析失败不入库。"],
     ["team_communication_binding", "复用 Research Organization 通信边、Team linkedChatRoom、round_robin/opportunistic 群聊轮次。"],
     ["candidate_store", "已落地 Team 级 index、候选列表查询、按类型/状态过滤、validationSummary，并接入 source_manifest、paper_note、neuro_mechanism、mechanism_mapping、algorithm_hypothesis、candidate_graph 最小校验；rejected 候选保留在 CandidateStore metadata.rejectionArchive，但不进入候选图谱推进节点。"],
@@ -697,7 +699,7 @@ const implementationBlueprint = {
     ["steward_pack 审批门禁", "/api/teams/{teamId}/workflow-orchestration/steward-packs/{candidateId}/knowledge-ingestion/review", "只审批 steward_pending_knowledge_review；approved 创建正式 KnowledgeItem、迁移 proposal 级评分建议为 KnowledgeItem 级 pending 评级并进入 official_synced，rejected 退回 steward_needs_revision。"],
     ["知识入库状态总览", "/api/teams/{teamId}/workflow-orchestration/knowledge-ingestion/status", "只读聚合 source_collection、candidate_screening、steward_pack、knowledge_review、official_sync 状态；Teams 工作台已展示漏斗、actionItems 与 officialBoundary；不写正式知识、不写 RAG、不生成候选图快照。"],
     ["candidate_graph 预览", "CandidateStore candidate_graph snapshot", "POST candidate-graph 会从当前未归档候选重建 candidate_only 图谱，输出 nodes/edges/missingLinks/unreviewedNodes/archivedCandidateCount/officialBoundary；断链时 qualityStatus=broken_links。"],
-    ["验证", "tests/test_data_processing_service.py + tests/test_data_processing_routes.py + tests/test_team_workflow_orchestration_service.py + tests/test_team_workflow_routes.py + TeamsRoute.layout.test.ts", "覆盖通用数据处理首切、ResearchStageRound 三阶段启动/续做/新一轮、source-collection run 启动、DataSearchPlan/query seed 契约、DataRecord 导入 source_manifest、Teams 资料搜集执行台契约、主路径、非 ownerAgent 不能写最终状态、本地模型任务包、输出校验、知识入库状态总览、模型证据链、资料质量筛选和 paper_note 分块计划前端契约。"],
+    ["验证", "tests/test_data_processing_service.py + tests/test_data_processing_routes.py + tests/test_team_workflow_orchestration_service.py + tests/test_team_workflow_routes.py + TeamsRoute.layout.test.ts", "覆盖通用数据处理首切、ResearchStageRound 三阶段启动/续做/新一轮、source-collection run 启动、DataSearchPlan/query seed 契约、DataRecord 导入 source_manifest、Teams 资料搜集独立页/对话流契约、主路径、非 ownerAgent 不能写最终状态、本地模型任务包、输出校验、知识入库状态总览、模型证据链、资料质量筛选和 paper_note 分块计划前端契约。"],
   ],
 };
 
@@ -2765,7 +2767,7 @@ function indexHtml() {
         <aside class="dashboard-panel">
           <h2>审核摘要</h2>
           <div class="kpi-grid">
-            <div class="kpi"><b>当前阶段</b><strong>M6.11</strong><span>资料搜集执行台、资料质量筛选、模型证据链和 paper_note 分块计划已接入。</span></div>
+            <div class="kpi"><b>当前阶段</b><strong>M6.12</strong><span>资料搜集独立页、对话式过程流、资料质量筛选、模型证据链和 paper_note 分块计划已接入。</span></div>
             <div class="kpi"><b>流程节点</b><strong>${nodes.length}</strong><span>1-9 为知识入库主线，10-13 保留占位与维护节点。</span></div>
             <div class="kpi"><b>候选资料</b><strong>${currentResearchRun.sources.length}</strong><span>第一轮 source_manifest 已进入 candidate-only 工作区。</span></div>
             <div class="kpi"><b>正式写入</b><strong>0</strong><span>未写正式 Team Knowledge、RAG 或 official graph。</span></div>
@@ -2773,7 +2775,7 @@ function indexHtml() {
           <div class="focus-list">
             <div class="focus-item"><b>优先看</b><span>资料搜集、候选图谱和知识入库边界是否能支撑下一轮科研提炼。</span></div>
             <div class="focus-item"><b>不能做</b><span>本页面不触发真实搜索、不审批入库、不把候选图谱当作正式事实。</span></div>
-            <div class="focus-item"><b>下一步</b><span>按 chunkId 执行 paper_note 提炼，补多 chunk 草稿合并策略和机制提炼执行台。</span></div>
+            <div class="focus-item"><b>下一步</b><span>把真实搜索/下载执行事件接入搜集对话流，并继续按 chunkId 执行 paper_note 提炼。</span></div>
           </div>
         </aside>
       </section>
