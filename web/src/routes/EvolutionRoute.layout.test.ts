@@ -142,6 +142,31 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("正在加载自进化工作台");
   });
 
+  it("moves evolution system Team canvases into their own mode pages", () => {
+    const canvasPanelCallCount = routeSource.match(/renderModeTeamCanvasPanel\(\)/g)?.length ?? 0;
+    expect(routeSource).toContain("SELF_EVOLUTION_SYSTEM_TEAM_ID");
+    expect(routeSource).toContain("SUPERVISED_EVOLUTION_SYSTEM_TEAM_ID");
+    expect(routeSource).toContain('"self-evolution-team"');
+    expect(routeSource).toContain('"supervised-evolution-team"');
+    expect(routeSource).toContain("fetchEvolutionSystemTeam");
+    expect(routeSource).toContain('fetchJson<TeamListPayload>("/api/teams")');
+    expect(routeSource).toContain("fetchJson<Team>(`/api/teams/${encodeURIComponent(teamId)}`)");
+    expect(routeSource).toContain("modeSystemTeamQuery");
+    expect(routeSource).toContain("teamOrganizationCanvas(modeSystemTeam)");
+    expect(routeSource).toContain("function renderModeTeamCanvasPanel()");
+    expect(canvasPanelCallCount).toBeGreaterThanOrEqual(2);
+    expect(routeSource).toContain("styles.selfModeStack");
+    expect(routeSource).toContain("系统团队画布");
+    expect(routeSource).toContain("自进化系统团队");
+    expect(routeSource).toContain("监督进化系统团队");
+    expect(routeSource).toContain("只读");
+    expect(stylesSource).toContain(".selfModeStack");
+    expect(stylesSource).toContain(".modeTeamPanel");
+    expect(stylesSource).toContain(".modeTeamCanvasMap");
+    expect(stylesSource).toContain(".modeTeamNodeBound");
+    expect(stylesSource).toContain(".modeTeamEdges");
+  });
+
   it("labels supervised retry as rerunning failed items", () => {
     expect(routeSource).toContain("retryRunMutation");
     expect(routeSource).toContain("`/api/evolution/runs/${runId}/retry`");
@@ -235,7 +260,8 @@ describe("EvolutionRoute library user flow contract", () => {
 
     expect(stylesSource).toContain("minmax(300px, var(--evolution-live-launch-width, 348px))");
     expect(stylesSource).toContain("minmax(300px, var(--evolution-live-run-width, 360px))");
-    expect(stylesSource).toContain("grid-template-rows: minmax(0, auto) minmax(0, 1fr)");
+    expect(stylesSource).toContain("grid-template-rows: minmax(0, auto) minmax(0, 0.9fr) minmax(150px, 0.82fr)");
+    expect(stylesSource).toContain("grid-template-rows: minmax(0, auto) minmax(156px, 0.86fr) minmax(150px, 0.74fr)");
     expect(stylesSource).toContain("max-height: min(430px, 60vh)");
     expect(middleBreakpoint).toContain(".liveLaunchStack > .launchSurface > .noticeText");
     expect(middleBreakpoint).toContain(".liveLaunchStack > .launchSurface .formHint");

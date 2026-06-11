@@ -111,6 +111,16 @@
   box-shadow: none;
 }
 
+.selfModeStack {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 8px;
+  min-height: 0;
+  height: 100%;
+  overflow: auto;
+  padding-right: 4px;
+}
+
 .overviewGrid {
   display: grid;
   grid-template-columns:
@@ -151,7 +161,7 @@
 
 .liveLaunchStack {
   display: grid;
-  grid-template-rows: minmax(0, auto) minmax(0, 1fr);
+  grid-template-rows: minmax(0, auto) minmax(0, 0.9fr) minmax(150px, 0.82fr);
   gap: 8px;
   height: 100%;
   min-height: 0;
@@ -252,6 +262,129 @@
   color: var(--fg-tertiary);
   font-family: var(--font-mono);
   font-size: 0.7rem;
+}
+
+.modeTeamPanel {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  min-height: 0;
+  padding: 10px;
+  overflow: hidden;
+}
+
+.modeTeamHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.modeTeamStats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.modeTeamStats span {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+  padding: 5px 6px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 6px;
+  background: var(--surface-card-subtle);
+  color: var(--fg-tertiary);
+  font-size: 0.68rem;
+}
+
+.modeTeamStats strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-primary);
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.modeTeamCanvasMap {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  min-height: 0;
+  overflow: auto;
+}
+
+.modeTeamNode {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 7px 8px;
+  border: 1px solid var(--border-hairline);
+  border-left: 3px solid var(--border-soft);
+  border-radius: 7px;
+  background: var(--surface-card-subtle);
+}
+
+.modeTeamNodeBound {
+  border-left-color: var(--accent-cool);
+}
+
+.modeTeamNodeStale {
+  border-left-color: var(--state-warning);
+  background: color-mix(in srgb, var(--state-warning) 8%, var(--surface-card-subtle));
+}
+
+.modeTeamNode strong,
+.modeTeamNode span,
+.modeTeamNode small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.modeTeamNode strong {
+  font-size: 0.78rem;
+}
+
+.modeTeamNode span {
+  color: var(--fg-secondary);
+  font-size: 0.72rem;
+}
+
+.modeTeamNode small {
+  color: var(--fg-tertiary);
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+}
+
+.modeTeamEdges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  min-width: 0;
+}
+
+.modeTeamEdges span {
+  max-width: 100%;
+  padding: 2px 6px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 999px;
+  background: var(--surface-card-muted);
+  color: var(--fg-secondary);
+  font-size: 0.68rem;
+}
+
+.modeTeamEmpty {
+  margin: 0;
+  padding: 10px;
+  border: 1px dashed var(--border-soft);
+  border-radius: 7px;
+  color: var(--fg-tertiary);
+  font-size: 0.78rem;
 }
 
 .liveResizeHandleLaunch {
@@ -2526,7 +2659,7 @@
   }
 
   .liveLaunchStack {
-    grid-template-rows: minmax(0, auto) minmax(156px, 1fr);
+    grid-template-rows: minmax(0, auto) minmax(156px, 0.86fr) minmax(150px, 0.74fr);
   }
 
   .liveLaunchStack > .launchSurface {
