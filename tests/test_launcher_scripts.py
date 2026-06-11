@@ -4840,20 +4840,23 @@ if ($parseErrors -and $parseErrors.Count -gt 0) {
     throw "Launcher script parse failed: $($parseErrors[0].Message)"
 }
 
-$functionAst = $ast.Find({
-    param($node)
-    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
-        $node.Name -eq "Stop-ManagedBrowserProcesses"
-}, $true)
-if ($null -eq $functionAst) {
-    throw "Stop-ManagedBrowserProcesses was not found."
+foreach ($functionName in @("Wait-ForManagedBrowserPidsGone", "Stop-ManagedBrowserProcesses")) {
+    $functionAst = $ast.Find({
+        param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+            $node.Name -eq $functionName
+    }, $true)
+    if ($null -eq $functionAst) {
+        throw "$functionName was not found."
+    }
+    . ([scriptblock]::Create($functionAst.Extent.Text))
 }
-. ([scriptblock]::Create($functionAst.Extent.Text))
 
 $script:browserPids = @(40736, 36192)
 $script:stopCalls = @()
 $script:closeCalls = 0
 $script:logEvents = @()
+$script:pidProbeCalls = 0
 
 $windowProcess = [pscustomobject]@{
     Id = 40736
@@ -4868,6 +4871,7 @@ function Get-ManagedBrowserWindowProcesses {
     return @($windowProcess)
 }
 function Get-ManagedBrowserPids {
+    $script:pidProbeCalls += 1
     return @($script:browserPids)
 }
 function Stop-ProcessesById {
@@ -4892,6 +4896,7 @@ $payload = @{
     stopCalls = @($script:stopCalls)
     logEvents = @($script:logEvents)
     remaining = @($script:browserPids)
+    pidProbeCalls = $script:pidProbeCalls
 } | ConvertTo-Json -Depth 8 -Compress
 Write-Output $payload
 """,
@@ -4904,6 +4909,7 @@ Write-Output $payload
     assert "launcher.browser.stop.retry" in payload["logEvents"]
     assert "launcher.browser.stop.incomplete" not in payload["logEvents"]
     assert payload["remaining"] == []
+    assert payload["pidProbeCalls"] >= 3
 
 
 def test_launcher_stop_session_closes_browser_when_backend_stop_is_unconfirmed(tmp_path):

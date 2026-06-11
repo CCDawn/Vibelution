@@ -6664,6 +6664,26 @@ function Open-LauncherAndEnsureWorkbench {
     Start-ManagedSession
 }
 
+function Wait-ForManagedBrowserPidsGone {
+    param(
+        [int]$TimeoutMilliseconds = 600,
+        [string]$ProfileDir = "",
+        [string]$Role = "workbench"
+    )
+
+    $deadline = (Get-Date).AddMilliseconds([Math]::Max(0, $TimeoutMilliseconds))
+    while ($true) {
+        if (@(Get-ManagedBrowserPids -ProfileDir $ProfileDir -Role $Role).Count -eq 0) {
+            return $true
+        }
+        $remainingMs = [int][Math]::Ceiling(($deadline - (Get-Date)).TotalMilliseconds)
+        if ($remainingMs -le 0) {
+            return $false
+        }
+        Start-Sleep -Milliseconds ([Math]::Min(100, [Math]::Max(25, $remainingMs)))
+    }
+}
+
 function Stop-ManagedBrowserProcesses {
     param(
         [string]$ProfileDir = "",
@@ -6683,7 +6703,9 @@ function Stop-ManagedBrowserProcesses {
         } catch {
         }
     }
-    Start-Sleep -Milliseconds 600
+    if (Wait-ForManagedBrowserPidsGone -TimeoutMilliseconds 600 -ProfileDir $ProfileDir -Role $Role) {
+        return
+    }
 
     for ($attempt = 1; $attempt -le 4; $attempt++) {
         $browserPids = @(Get-ManagedBrowserPids -ProfileDir $ProfileDir -Role $Role)
@@ -6706,7 +6728,10 @@ function Stop-ManagedBrowserProcesses {
         }
 
         Stop-ProcessesById $browserPids
-        Start-Sleep -Milliseconds $(if ($attempt -eq 1) { 450 } else { 650 })
+        $waitMs = if ($attempt -eq 1) { 450 } else { 650 }
+        if (Wait-ForManagedBrowserPidsGone -TimeoutMilliseconds $waitMs -ProfileDir $ProfileDir -Role $Role) {
+            return
+        }
     }
 
     $remainingPids = @(Get-ManagedBrowserPids -ProfileDir $ProfileDir -Role $Role)
