@@ -80,6 +80,10 @@ DEFAULT_SESSION_AGENT_PREFERRED_TOOLS = (
     "search_memory_tool",
 )
 AGENT_LLM_BINDING_SLOTS = AGENT_LLM_SLOTS
+LEGACY_AGENT_MODEL_ID_ALIASES = {
+    "gpt_5_5_gpt_5_5": "relay_openai_gpt_5_5",
+    "mimo_v2_5_pro": "xiaomi_mimo_v2_5_pro_token_plan",
+}
 KNOWLEDGE_STEWARD_AGENT_ID = "agent-knowledge-steward"
 KNOWLEDGE_STEWARD_TOOL_POLICY_ID = "tool-knowledge-steward"
 KNOWLEDGE_STEWARD_MEMORY_POLICY_ID = "memory-knowledge-steward"
@@ -1202,6 +1206,7 @@ def repair_agent_directory() -> dict[str, Any]:
         avatar_defaulted_agents: list[dict[str, Any]] = []
         territory_repaired_agents: list[dict[str, Any]] = []
         llm_binding_migrated_agents: list[dict[str, Any]] = []
+        model_library_ids = _configured_model_library_ids()
         used_agent_codes: set[str] = set()
         policies = _memory_policies(state)
         for agent in state.get("agents") or []:
@@ -1219,6 +1224,22 @@ def repair_agent_directory() -> dict[str, Any]:
                         "migrated": bool(llm_migration.get("migrated")),
                     }
                 )
+                changed = True
+            model_ref_repair = _repair_agent_llm_binding_model_refs(agent, model_library_ids=model_library_ids)
+            if model_ref_repair.get("changed"):
+                for item in list(model_ref_repair.get("repairs") or []):
+                    llm_binding_migrated_agents.append(
+                        {
+                            "agentId": str(agent.get("agentId") or "").strip(),
+                            "agentCode": _normalize_agent_code(agent.get("agentCode")),
+                            "legacyModelId": str(item.get("legacyModelId") or "").strip(),
+                            "dialogueModelId": str(agent_dialogue_model_id(agent) or "").strip(),
+                            "canonicalModelId": str(item.get("canonicalModelId") or "").strip(),
+                            "slot": str(item.get("slot") or "").strip(),
+                            "migrated": True,
+                            "repairKind": "legacy_model_id_alias",
+                        }
+                    )
                 changed = True
             if _normalize_agent_legacy_metadata_fields(agent):
                 changed = True
@@ -2866,6 +2887,80 @@ def _profile_id_to_model_id(profile_id: str) -> str:
     except Exception:
         return ""
     return ""
+
+
+def _configured_model_library_ids() -> set[str]:
+    try:
+        from config.settings import get_config
+
+        model_library = getattr(get_config().llm, "model_library", {}) or {}
+    except Exception:
+        return set()
+    if not isinstance(model_library, dict):
+        return set()
+    return {str(model_id or "").strip() for model_id in model_library if str(model_id or "").strip()}
+
+
+def _resolve_legacy_agent_model_id(model_id: str, *, model_library_ids: set[str]) -> str:
+    normalized = str(model_id or "").strip()
+    if not normalized or normalized in model_library_ids:
+        return normalized
+    alias_target = LEGACY_AGENT_MODEL_ID_ALIASES.get(normalized, "")
+    if alias_target and alias_target in model_library_ids:
+        return alias_target
+    try:
+        from config.settings import _compact_repeated_token_halves
+
+        compacted = _compact_repeated_token_halves(normalized)
+    except Exception:
+        compacted = normalized
+    if compacted and compacted != normalized and compacted in model_library_ids:
+        return compacted
+    return normalized
+
+
+def _repair_agent_llm_binding_model_refs(agent: dict[str, Any], *, model_library_ids: set[str]) -> dict[str, Any]:
+    if not model_library_ids:
+        return {"changed": False}
+    before = normalize_agent_llm_bindings(agent.get("llmBindings"))
+    after = dict(before)
+    repairs: list[dict[str, str]] = []
+    for slot, binding in before.items():
+        if not isinstance(binding, dict):
+            continue
+        model_id = str(binding.get("modelId") or "").strip()
+        canonical_model_id = _resolve_legacy_agent_model_id(model_id, model_library_ids=model_library_ids)
+        if canonical_model_id and canonical_model_id != model_id:
+            updated_binding = dict(binding)
+            updated_binding["modelId"] = canonical_model_id
+            after[slot] = updated_binding
+            repairs.append(
+                {
+                    "slot": str(slot or "").strip(),
+                    "legacyModelId": model_id,
+                    "canonicalModelId": canonical_model_id,
+                }
+            )
+    if not repairs:
+        return {"changed": False}
+
+    metadata = dict(agent.get("metadata") or {})
+    history = list(metadata.get("llmBindingModelIdRepairs") or [])
+    now = utc_now_iso()
+    for item in repairs:
+        history.append(
+            {
+                "schemaVersion": 1,
+                "source": "agent_registry_repair",
+                "repairedAt": now,
+                **item,
+            }
+        )
+    metadata["llmBindingModelIdRepairs"] = history[-20:]
+    agent["metadata"] = metadata
+    agent["llmBindings"] = after
+    agent["updatedAt"] = now
+    return {"changed": True, "repairs": repairs}
 
 
 def _migrate_agent_llm_bindings_to_new_design(agent: dict[str, Any]) -> dict[str, Any]:
@@ -4961,7 +5056,7 @@ def _record_agent_llm_binding_migration_event(agents: list[dict[str, Any]]) -> N
             "agent_directory",
             "agent_llm_bindings",
             "agent.llm_bindings_migrated",
-            message="Legacy Agent profile/template fields were migrated to llmBindings.",
+            message="Agent llmBindings were migrated or repaired.",
             level="warning" if unresolved else "info",
             outcome="repaired" if not unresolved else "partial",
             fields={
