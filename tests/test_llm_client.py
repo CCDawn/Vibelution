@@ -2,13 +2,14 @@ from langchain_core.messages import AIMessage
 import pytest
 from types import SimpleNamespace
 import json
+import os
 import threading
 from concurrent.futures import ThreadPoolExecutor
 
 from config import Settings
 from core.llm.agent_runtime import config_for_agent_llm_model
 from core.orchestration.response_processor import ResponseProcessor
-from core.llm.client import LLMClient, llm_cancel_context
+from core.llm.client import LLMClient, _ensure_no_proxy_for_local_base_url, llm_cancel_context
 from core.llm.errors import classify_exception
 from core.llm.types import LLMError
 from core.llm.recovery import plan_recovery
@@ -75,6 +76,24 @@ def test_litellm_payload_prefixes_openai_compatible_local_model():
     payload = client._build_payload([{"role": "user", "content": "ping"}])
 
     assert payload["model"] == "openai/qwen-32b-awq"
+
+
+def test_local_lan_base_url_is_added_to_no_proxy(monkeypatch):
+    monkeypatch.setenv("NO_PROXY", "localhost")
+
+    _ensure_no_proxy_for_local_base_url("http://192.168.20.63:8000/v1")
+
+    combined_no_proxy = ",".join(filter(None, [os.environ.get("NO_PROXY", ""), os.environ.get("no_proxy", "")]))
+    assert "192.168.20.63" in combined_no_proxy.split(",")
+
+
+def test_remote_base_url_does_not_change_no_proxy(monkeypatch):
+    monkeypatch.setenv("NO_PROXY", "localhost")
+
+    _ensure_no_proxy_for_local_base_url("https://api.openai.com/v1")
+
+    combined_no_proxy = ",".join(filter(None, [os.environ.get("NO_PROXY", ""), os.environ.get("no_proxy", "")]))
+    assert set(combined_no_proxy.split(",")) == {"localhost"}
 
 
 def test_litellm_payload_prefixes_relay_openai_compatible_model():

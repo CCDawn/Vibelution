@@ -695,7 +695,9 @@ def _apply_image_input_capability_details_to_runtime_view(
         entry.pop("capability_error", None)
 
 
-def _llm_test_probe_timeout_seconds(profile: LLMProfile) -> int:
+def _llm_test_probe_timeout_seconds(provider: ProviderConfig, profile: LLMProfile) -> int:
+    if hasattr(public_config_module, "coerce_llm_runtime_probe_timeout"):
+        return int(public_config_module.coerce_llm_runtime_probe_timeout(provider, profile.connect_timeout, profile.timeout))
     if hasattr(public_config_module, "coerce_llm_probe_timeout"):
         return int(public_config_module.coerce_llm_probe_timeout(profile.connect_timeout, profile.timeout))
     try:
@@ -712,7 +714,7 @@ def _invoke_llm_runtime_probe(provider: ProviderConfig, profile: LLMProfile, api
 
 
 def _run_bounded_llm_runtime_probe(provider: ProviderConfig, profile: LLMProfile, api_key: str | None) -> dict[str, Any]:
-    probe_timeout = _llm_test_probe_timeout_seconds(profile)
+    probe_timeout = _llm_test_probe_timeout_seconds(provider, profile)
     if not _LLM_TEST_PROBE_WORKER_SLOTS.acquire(blocking=False):
         return {
             "ok": False,
