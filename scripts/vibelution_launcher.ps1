@@ -4845,7 +4845,8 @@ namespace VibelutionLauncher {
 function Focus-ManagedBrowserWindow {
     param(
         [string]$ProfileDir = "",
-        [string]$Role = "workbench"
+        [string]$Role = "workbench",
+        [int]$KnownWindowPid = 0
     )
 
     if (-not $ProfileDir) {
@@ -4855,7 +4856,19 @@ function Focus-ManagedBrowserWindow {
         }
     }
 
-    $windowProcess = Get-ManagedBrowserWindowProcess -ProfileDir $ProfileDir -Role $Role
+    $windowProcess = $null
+    if ($KnownWindowPid -gt 0) {
+        try {
+            $knownProcess = Get-Process -Id $KnownWindowPid -ErrorAction SilentlyContinue
+            if ($knownProcess -and $knownProcess.ProcessName -ieq "msedge" -and $knownProcess.MainWindowHandle -ne 0) {
+                $windowProcess = $knownProcess
+            }
+        } catch {
+        }
+    }
+    if (-not $windowProcess) {
+        $windowProcess = Get-ManagedBrowserWindowProcess -ProfileDir $ProfileDir -Role $Role
+    }
     if (-not $windowProcess) {
         $browserPids = @(Get-ManagedBrowserPids -ProfileDir $ProfileDir -Role $Role)
         Write-LauncherControlLog `
@@ -4867,6 +4880,7 @@ function Focus-ManagedBrowserWindow {
                 browser_pids = @($browserPids)
                 profile_dir = $ProfileDir
                 window_purpose = $Role
+                known_window_pid = if ($KnownWindowPid -gt 0) { $KnownWindowPid } else { $null }
             }
         if ($script:currentRuntimeSceneId) {
             Write-RuntimeSceneEvent `
@@ -4881,6 +4895,7 @@ function Focus-ManagedBrowserWindow {
                     browser_pids = @($browserPids)
                     profile_dir = $ProfileDir
                     window_purpose = $Role
+                    known_window_pid = if ($KnownWindowPid -gt 0) { $KnownWindowPid } else { $null }
                 }
         }
         return $false
@@ -4917,6 +4932,7 @@ function Focus-ManagedBrowserWindow {
         app_activate = [bool]$appActivateResult
         profile_dir = $ProfileDir
         window_purpose = $Role
+        known_window_pid = if ($KnownWindowPid -gt 0) { $KnownWindowPid } else { $null }
     }
     if ($focusError) {
         $fields.error = $focusError
@@ -6361,7 +6377,7 @@ function Adopt-Or-FocusSession {
     Write-Note "Vibelution is already running. Focusing the existing app window."
     if ($Snapshot.State -and $Snapshot.State.runtimeSceneId -and $Snapshot.State.runtimeSceneDir) {
         Set-CurrentRuntimeSceneContext -SceneId ([string]$Snapshot.State.runtimeSceneId) -SceneDir ([string]$Snapshot.State.runtimeSceneDir)
-        $focusResult = [bool](Focus-ManagedBrowserWindow -ProfileDir $workbenchBrowserProfileDir -Role "workbench")
+        $focusResult = [bool](Focus-ManagedBrowserWindow -ProfileDir $workbenchBrowserProfileDir -Role "workbench" -KnownWindowPid $Snapshot.BrowserWindowPid)
         Write-RuntimeSceneEvent `
             -Component "launcher" `
             -Phase "session" `
@@ -6370,7 +6386,7 @@ function Adopt-Or-FocusSession {
             -Level $(if ($focusResult) { "info" } else { "warning" }) `
             -Outcome $(if ($focusResult) { "succeeded" } else { "failed" })
     } else {
-        [void](Focus-ManagedBrowserWindow -ProfileDir $workbenchBrowserProfileDir -Role "workbench")
+        [void](Focus-ManagedBrowserWindow -ProfileDir $workbenchBrowserProfileDir -Role "workbench" -KnownWindowPid $Snapshot.BrowserWindowPid)
         return $true
     }
     return $true
@@ -6438,7 +6454,7 @@ function Complete-HeadlessSessionWithBrowser {
         -BrowserManaged $true `
         -SessionRole "workbench"
 
-    $focusResult = [bool](Focus-ManagedBrowserWindow -ProfileDir $workbenchBrowserProfileDir -Role "workbench")
+    $focusResult = [bool](Focus-ManagedBrowserWindow -ProfileDir $workbenchBrowserProfileDir -Role "workbench" -KnownWindowPid $browserInfo.WindowPid)
     Write-RuntimeSceneEvent `
         -Component "launcher" `
         -Phase "session" `
@@ -6687,7 +6703,8 @@ function Wait-ForManagedBrowserPidsGone {
 function Stop-ManagedBrowserProcesses {
     param(
         [string]$ProfileDir = "",
-        [string]$Role = "workbench"
+        [string]$Role = "workbench",
+        [switch]$PassThru
     )
 
     if (-not $ProfileDir) {
@@ -6704,12 +6721,18 @@ function Stop-ManagedBrowserProcesses {
         }
     }
     if (Wait-ForManagedBrowserPidsGone -TimeoutMilliseconds 600 -ProfileDir $ProfileDir -Role $Role) {
+        if ($PassThru) {
+            return $true
+        }
         return
     }
 
     for ($attempt = 1; $attempt -le 4; $attempt++) {
         $browserPids = @(Get-ManagedBrowserPids -ProfileDir $ProfileDir -Role $Role)
         if ($browserPids.Count -eq 0) {
+            if ($PassThru) {
+                return $true
+            }
             return
         }
 
@@ -6730,6 +6753,9 @@ function Stop-ManagedBrowserProcesses {
         Stop-ProcessesById $browserPids
         $waitMs = if ($attempt -eq 1) { 450 } else { 650 }
         if (Wait-ForManagedBrowserPidsGone -TimeoutMilliseconds $waitMs -ProfileDir $ProfileDir -Role $Role) {
+            if ($PassThru) {
+                return $true
+            }
             return
         }
     }
@@ -6746,6 +6772,9 @@ function Stop-ManagedBrowserProcesses {
                 profile_dir = $ProfileDir
                 window_purpose = $Role
             }
+    }
+    if ($PassThru) {
+        return $false
     }
 }
 
@@ -7124,10 +7153,14 @@ function Stop-ManagedSession {
             }
     }
     $browserStopStartedAt = Get-Date
-    Stop-ManagedBrowserProcesses -ProfileDir $workbenchBrowserProfileDir -Role "workbench"
+    $browserStoppedByStopper = [bool](Stop-ManagedBrowserProcesses -ProfileDir $workbenchBrowserProfileDir -Role "workbench" -PassThru)
     $browserStopEndedAt = Get-Date
     $browserWaitStartedAt = Get-Date
-    $browserStopped = Wait-ForBrowserStopped -TimeoutSeconds 20 -ProfileDir $workbenchBrowserProfileDir -Role "workbench"
+    if ($browserStoppedByStopper) {
+        $browserStopped = $true
+    } else {
+        $browserStopped = Wait-ForBrowserStopped -TimeoutSeconds 20 -ProfileDir $workbenchBrowserProfileDir -Role "workbench"
+    }
     $browserWaitEndedAt = Get-Date
 
     $closureSnapshotStartedAt = Get-Date
@@ -7443,7 +7476,7 @@ function Start-ManagedSession {
             -BrowserManaged $true `
             -SessionRole "workbench"
 
-        $focusResult = [bool](Focus-ManagedBrowserWindow -ProfileDir $workbenchBrowserProfileDir -Role "workbench")
+        $focusResult = [bool](Focus-ManagedBrowserWindow -ProfileDir $workbenchBrowserProfileDir -Role "workbench" -KnownWindowPid $browserInfo.WindowPid)
         Write-RuntimeSceneEvent `
             -Component "launcher" `
             -Phase "session" `
