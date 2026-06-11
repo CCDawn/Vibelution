@@ -4501,6 +4501,73 @@ Write-Output "ok"
     assert result.stdout.strip().splitlines()[-1] == "ok"
 
 
+def test_launcher_focus_and_stop_paths_reuse_known_fast_results(tmp_path):
+    result = _run_launcher_ast_harness(
+        tmp_path,
+        r"""
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$LauncherPath
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$source = Get-Content -Raw -LiteralPath $LauncherPath
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors -and $parseErrors.Count -gt 0) {
+    throw "Launcher script parse failed: $($parseErrors[0].Message)"
+}
+
+function Get-FunctionText {
+    param([string]$Name)
+    $functionAst = $ast.Find({
+        param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+            $node.Name -eq $Name
+    }, $true)
+    if ($null -eq $functionAst) {
+        throw "$Name was not found."
+    }
+    return $functionAst.Extent.Text
+}
+
+$focusText = Get-FunctionText -Name "Focus-ManagedBrowserWindow"
+$startText = Get-FunctionText -Name "Start-ManagedSession"
+$headlessText = Get-FunctionText -Name "Complete-HeadlessSessionWithBrowser"
+$adoptText = Get-FunctionText -Name "Adopt-Or-FocusSession"
+$stopBrowserText = Get-FunctionText -Name "Stop-ManagedBrowserProcesses"
+$stopSessionText = Get-FunctionText -Name "Stop-ManagedSession"
+
+if ($focusText -notmatch 'KnownWindowPid' -or $focusText -notmatch 'Get-Process\s+-Id\s+\$KnownWindowPid') {
+    throw "Focus-ManagedBrowserWindow should try the known window PID before scanning the browser profile."
+}
+if ($startText -notmatch '-KnownWindowPid\s+\$browserInfo\.WindowPid') {
+    throw "Start-ManagedSession should focus the newly opened browser by known window PID."
+}
+if ($headlessText -notmatch '-KnownWindowPid\s+\$browserInfo\.WindowPid') {
+    throw "Complete-HeadlessSessionWithBrowser should focus the newly opened browser by known window PID."
+}
+if ($adoptText -notmatch '-KnownWindowPid\s+\$Snapshot\.BrowserWindowPid') {
+    throw "Adopt-Or-FocusSession should focus an existing browser by the snapshot window PID."
+}
+if ($stopBrowserText -notmatch '\[switch\]\$PassThru' -or $stopSessionText -notmatch 'Stop-ManagedBrowserProcesses.+-PassThru') {
+    throw "Stop-ManagedSession should reuse Stop-ManagedBrowserProcesses completion instead of always scanning again."
+}
+if ($stopSessionText -notmatch 'if \(\$browserStoppedByStopper\)') {
+    throw "Stop-ManagedSession should skip the follow-up browser wait when the stopper already confirmed closure."
+}
+
+Write-Output "ok"
+""",
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip().splitlines()[-1] == "ok"
+
+
 def test_launcher_web_health_prefers_root_ready_probe_then_health_fallback(tmp_path):
     result = _run_launcher_ast_harness(
         tmp_path,
@@ -4982,9 +5049,10 @@ function Wait-ForPortClosed {
 }
 function Stop-ProcessesById { param([int[]]$ProcessIds) }
 function Stop-ManagedBrowserProcesses {
-    param([string]$ProfileDir = "", [string]$Role = "workbench")
+    param([string]$ProfileDir = "", [string]$Role = "workbench", [switch]$PassThru)
     $script:browserStopCalls += 1
     $script:browserStopProfiles += ,@{ profileDir = $ProfileDir; role = $Role }
+    if ($PassThru) { return $true }
 }
 function Wait-ForBrowserStopped {
     param([int]$TimeoutSeconds, [string]$ProfileDir = "", [string]$Role = "workbench")
@@ -5050,9 +5118,8 @@ Write-Output $payload
     assert result.returncode == 0, result.stderr or result.stdout
     payload = json.loads(result.stdout.strip().splitlines()[-1])
     assert payload["browserStopCalls"] == 1
-    assert payload["browserWaitCalls"] == 1
+    assert payload["browserWaitCalls"] == 0
     assert payload["browserStopProfiles"][0]["role"] == "workbench"
-    assert payload["browserWaitProfiles"][0]["role"] == "workbench"
     assert payload["browserStopProfiles"][0]["profileDir"].endswith("workbench-app-profile")
     assert payload["removedState"] is False
     assert "backend did not stop" in payload["errorMessage"]
@@ -5148,8 +5215,9 @@ function Stop-ProcessesById {
     Start-Sleep -Milliseconds 2
 }
 function Stop-ManagedBrowserProcesses {
-    param([string]$ProfileDir = "", [string]$Role = "workbench")
+    param([string]$ProfileDir = "", [string]$Role = "workbench", [switch]$PassThru)
     Start-Sleep -Milliseconds 2
+    if ($PassThru) { return $true }
 }
 function Wait-ForBrowserStopped {
     param([int]$TimeoutSeconds, [string]$ProfileDir = "", [string]$Role = "workbench")
