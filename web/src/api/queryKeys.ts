@@ -95,6 +95,7 @@ export const queryKeys = {
   evolutionChatReviewCandidate: (candidateId: string) => ["evolution", "chat-review", candidateId] as const,
   evolutionActiveRun: () => ["evolution", "active-run"] as const,
   evolutionLatestRun: () => ["evolution", "latest-run"] as const,
+  evolutionRunCommand: (commandId: string) => ["evolution", "runs", "commands", commandId] as const,
   evolutionSelfOverview: () => ["evolution", "self", "overview"] as const,
   evolutionSelfActiveRun: () => ["evolution", "self", "active-run"] as const,
   evolutionSelfLatestRun: () => ["evolution", "self", "latest-run"] as const,

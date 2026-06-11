@@ -71,6 +71,7 @@ from core.web.services.supervised_control_service import (
     execute_supervised_action,
     get_active_supervised_run,
     get_latest_supervised_run,
+    get_supervised_runtime_manager_command_status,
     get_supervised_workbench,
     request_pause_supervised_run,
     retry_supervised_run,
@@ -397,6 +398,14 @@ def evolution_active_run_events() -> StreamingResponse:
             "Connection": "keep-alive",
         },
     )
+
+
+@router.get("/evolution/runs/commands/{command_id}")
+def evolution_run_command_status(command_id: str) -> dict:
+    try:
+        return get_supervised_runtime_manager_command_status(command_id)
+    except SupervisedRunValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.get("/evolution/worktree-runs")
