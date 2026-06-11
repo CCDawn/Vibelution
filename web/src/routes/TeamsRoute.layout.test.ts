@@ -83,7 +83,9 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("startResearchStageRoundMutation");
     expect(routeSource).toContain("startSourceCollectionRunMutation");
     expect(routeSource).toContain("recordSourceCollectionOutputMutation");
+    expect(routeSource).toContain("executeSourceCollectionSearchMutation");
     expect(routeSource).toContain("/workflow-orchestration/source-collection-runs");
+    expect(routeSource).toContain("/search/execute");
     expect(routeSource).toContain("/api/data-processing/runs?limit=${SOURCE_COLLECTION_RUN_PREVIEW_LIMIT}");
     expect(routeSource).toContain("/collection-assignments/${encodeURIComponent(payload.draft.assignmentId)}/outputs");
     expect(routeSource).toContain("/source-candidate");
@@ -253,6 +255,9 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("资料搜集");
     expect(routeSource).toContain("科研三阶段启动台");
     expect(routeSource).toContain("启动知识搜集");
+    expect(routeSource).toContain("对话式执行下一批搜索");
+    expect(routeSource).toContain("执行下一批搜索");
+    expect(routeSource).toContain("sourceCollectionExecutionTitle");
     expect(routeSource).toContain("启动实验规划");
     expect(routeSource).toContain("启动迭代");
     expect(routeSource).not.toContain("{researchWorkflowTeamSelected ? renderResearchWorkspaceNav() : null}");
