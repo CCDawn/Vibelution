@@ -154,6 +154,104 @@ def test_cli_command_forwards_run_id(monkeypatch):
     ]
 
 
+def test_supervised_llm_key_env_sync_patches_stale_runtime_manager_env(monkeypatch):
+    model_env = "VIBELUTION_LLM_MODEL_UNIT_SYNC_API_KEY"
+    provider_env = "VIBELUTION_LLM_PROVIDER_UNIT_SYNC_API_KEY"
+    canonical_env = "MIMO_API_KEY"
+    alias_env = "XIAOMI_MIMO_API_KEY"
+    secret = "unit-model-secret"
+    canonical_secret = "unit-provider-secret"
+
+    monkeypatch.delenv(model_env, raising=False)
+    monkeypatch.setenv(provider_env, "already-present")
+    monkeypatch.delenv(canonical_env, raising=False)
+    monkeypatch.delenv(alias_env, raising=False)
+    monkeypatch.setattr(
+        daemon,
+        "load_public_config",
+        lambda: {
+            "llm": {
+                "model_library": {
+                    "unit_model": {
+                        "api_key_env": model_env,
+                    }
+                },
+                "providers": {
+                    "unit_xiaomi": {
+                        "kind": "xiaomi",
+                        "api_key_env": provider_env,
+                    }
+                },
+            }
+        },
+    )
+    monkeypatch.setattr(
+        daemon,
+        "read_persisted_user_env_var",
+        lambda name: {
+            model_env: secret,
+            canonical_env: canonical_secret,
+        }.get(name, ""),
+    )
+
+    payload = daemon._sync_llm_key_env_from_persisted_user_env(command_type="start_supervised_run")
+
+    assert payload["ok"] is True
+    assert payload["envCount"] == 4
+    assert payload["alreadyPresentCount"] == 1
+    assert payload["syncedCount"] == 2
+    assert payload["missingCount"] == 1
+    assert model_env in payload["syncedEnvNames"]
+    assert canonical_env in payload["syncedEnvNames"]
+    assert alias_env in payload["missingEnvNames"]
+    assert daemon.os.environ[model_env] == secret
+    assert daemon.os.environ[canonical_env] == canonical_secret
+    assert secret not in json.dumps(payload)
+    assert canonical_secret not in json.dumps(payload)
+
+
+def test_start_supervised_run_syncs_llm_key_env_before_launch(monkeypatch):
+    calls: list[object] = []
+    monkeypatch.setattr(
+        daemon,
+        "_require_fresh_source_for_supervised_run",
+        lambda: calls.append("fresh") or {"sourceFresh": True},
+    )
+    monkeypatch.setattr(
+        daemon,
+        "_sync_llm_key_env_from_persisted_user_env",
+        lambda *, command_type: calls.append(("sync", command_type)) or {"ok": True, "syncedCount": 1},
+    )
+    monkeypatch.setattr(
+        daemon.supervised_control_service,
+        "_LOCAL_START_SUPERVISED_RUN",
+        lambda payload: calls.append(("start", payload)) or {"runId": "web-supervised-unit"},
+    )
+    monkeypatch.setattr(
+        daemon.RuntimeManagerDaemon,
+        "_finish_command",
+        lambda self, command_id, ok, message, result_data=None, **kwargs: {
+            "commandId": command_id,
+            "ok": ok,
+            "message": message,
+            **(result_data or {}),
+        },
+    )
+
+    result = daemon.RuntimeManagerDaemon()._handle_start_supervised_run(
+        command_id="cmd-unit",
+        args={"payload": {"sourceKind": "bundle", "bundleName": "unit_bundle"}},
+    )
+
+    assert calls == [
+        "fresh",
+        ("sync", "start_supervised_run"),
+        ("start", {"sourceKind": "bundle", "bundleName": "unit_bundle"}),
+    ]
+    assert result["ok"] is True
+    assert result["llmKeyEnvSync"] == {"ok": True, "syncedCount": 1}
+
+
 def test_backend_health_probe_treats_connection_reset_as_unhealthy(monkeypatch):
     def fake_open_backend_health_url(*args, **kwargs):
         raise ConnectionResetError(10054, "An existing connection was forcibly closed")
@@ -851,6 +949,11 @@ def test_handle_start_supervised_run_returns_snapshot(monkeypatch):
         lambda event_type, payload, **kwargs: scene_events.append((event_type, payload)),
     )
     monkeypatch.setattr(
+        daemon,
+        "_sync_llm_key_env_from_persisted_user_env",
+        lambda *, command_type: {"ok": True, "commandType": command_type, "syncedCount": 0},
+    )
+    monkeypatch.setattr(
         daemon.supervised_control_service,
         "_LOCAL_START_SUPERVISED_RUN",
         lambda payload: {"runId": "web-supervised-managed", "status": "queued", "payload": payload},
@@ -865,6 +968,7 @@ def test_handle_start_supervised_run_returns_snapshot(monkeypatch):
     assert result["runId"] == "web-supervised-managed"
     assert result["snapshot"]["status"] == "queued"
     assert result["sourceFreshness"]["sourceFresh"] is True
+    assert result["llmKeyEnvSync"] == {"ok": True, "commandType": "start_supervised_run", "syncedCount": 0}
     assert scene_events == [
         (
             "supervised_run.preflight.source_fresh",
@@ -1029,6 +1133,11 @@ def test_handle_retry_supervised_run_returns_new_snapshot(monkeypatch):
         lambda event_type, payload, **kwargs: scene_events.append((event_type, payload)),
     )
     monkeypatch.setattr(
+        daemon,
+        "_sync_llm_key_env_from_persisted_user_env",
+        lambda *, command_type: {"ok": True, "commandType": command_type, "syncedCount": 0},
+    )
+    monkeypatch.setattr(
         daemon.supervised_control_service,
         "_LOCAL_RETRY_SUPERVISED_RUN",
         lambda run_id: {"runId": "web-supervised-retry", "status": "queued", "retryOfRunId": run_id},
@@ -1043,6 +1152,7 @@ def test_handle_retry_supervised_run_returns_new_snapshot(monkeypatch):
     assert result["runId"] == "web-supervised-retry"
     assert result["snapshot"]["retryOfRunId"] == "web-supervised-old"
     assert result["sourceFreshness"]["sourceFresh"] is True
+    assert result["llmKeyEnvSync"] == {"ok": True, "commandType": "retry_supervised_run", "syncedCount": 0}
     assert [event_type for event_type, _payload in scene_events] == ["supervised_run.preflight.source_fresh"]
 
 

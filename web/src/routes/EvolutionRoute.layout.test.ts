@@ -203,7 +203,8 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("SUPERVISED_MEMBER_ROLES");
     expect(routeSource).toContain('["baseline", "candidate", "reviewer", "auditor", "judge"]');
     expect(routeSource).toContain("supervisedRunMembers");
-    expect(routeSource).toContain("supervisedMembersRun?.agentBindings");
+    expect(routeSource).toContain("hasSupervisedAgentBindings");
+    expect(routeSource).toContain("supervisedMembersBindingRun?.agentBindings");
     expect(routeSource).toContain("supervisedMembersRun?.currentAgentBinding?.agentId");
     expect(routeSource).toContain("styles.supervisedMembersPanel");
     expect(routeSource).toContain("本轮监督成员");
@@ -220,6 +221,9 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("启动请求已提交，正在等待运行记录刷新。");
     expect(routeSource).toContain("启动命令已排队，等待运行记录刷新。");
     expect(routeSource).toContain("setLiveActiveRun(buildSupervisedStartPlaceholder");
+    expect(routeSource).toContain("const placeholderAgentBindings = activeRunSnapshot?.agentBindings");
+    expect(routeSource).toContain("agentBindings: placeholderAgentBindings");
+    expect(routeSource).toContain("latestSupervisedRunSnapshot?.agentBindings ?? {}");
     expect(routeSource).toContain("evolutionWorkspaceCache.refreshSupervisedActiveRun()");
     expect(routeSource).toContain("visibleLiveRunSnapshot");
     expect(routeSource).toContain("const streamLiveRun = isLocalSupervisedStartPlaceholder(liveActiveRun) ? null : liveActiveRun");

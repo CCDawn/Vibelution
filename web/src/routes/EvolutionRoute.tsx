@@ -216,6 +216,7 @@ function buildSupervisedStartPlaceholder(input: {
   datasetLimit: number | null;
   bundleName: string;
   keepWorktree: boolean;
+  agentBindings?: Record<string, EvolutionActiveRunAgentBinding>;
   lang: "zh" | "en";
 }): EvolutionActiveRun {
   const timestamp = new Date().toISOString();
@@ -277,7 +278,7 @@ function buildSupervisedStartPlaceholder(input: {
         keepWorktree: input.keepWorktree,
       },
     ],
-    agentBindings: {},
+    agentBindings: input.agentBindings ?? {},
     actionStates: {
       pause: { enabled: false, reason: isZh ? "等待真实运行记录返回后才能暂停。" : "Pause is available after the real run record is returned." },
       resume: { enabled: false, reason: isZh ? "启动请求尚未进入可恢复状态。" : "The start request is not resumable yet." },
@@ -286,6 +287,10 @@ function buildSupervisedStartPlaceholder(input: {
       delete: { enabled: false, reason: isZh ? "本地启动占位不会写入运行记录。" : "This local placeholder is not persisted as a run record." },
     },
   };
+}
+
+function hasSupervisedAgentBindings(bindings: Record<string, EvolutionActiveRunAgentBinding> | null | undefined) {
+  return Boolean(bindings && Object.keys(bindings).length > 0);
 }
 
 function supervisedMemberModelLabel(binding: EvolutionActiveRunAgentBinding | undefined) {
@@ -612,6 +617,9 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   );
   const startRunMutation = useMutation({
     onMutate: () => {
+      const placeholderAgentBindings = activeRunSnapshot?.agentBindings
+        ?? latestSupervisedRunSnapshot?.agentBindings
+        ?? {};
       setSupervisedStartCommand(null);
       setActionFeedback(lang === "zh" ? "启动请求已提交，正在等待运行记录刷新。" : "Start request submitted; waiting for the run record to refresh.");
       setLiveActiveRun(buildSupervisedStartPlaceholder({
@@ -620,6 +628,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
         datasetLimit: selectedDatasetLimit,
         bundleName: sourceKind === "bundle" ? bundleNameInput : "",
         keepWorktree,
+        agentBindings: placeholderAgentBindings,
         lang,
       }));
     },
@@ -986,6 +995,9 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     ?? visibleLiveRunSnapshot;
   const supervisedMembersRun = monitoredRun
     ?? latestSupervisedRunSnapshot;
+  const supervisedMembersBindingRun = hasSupervisedAgentBindings(supervisedMembersRun?.agentBindings)
+    ? supervisedMembersRun
+    : latestSupervisedRunSnapshot;
   const runningRun = effectiveActiveRunSnapshot ?? (liveActiveRun && isLiveSupervisedRunStatus(liveActiveRun.status)
     ? liveActiveRun
     : null);
@@ -1036,7 +1048,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     ? decisionLabel(monitoredRun.decision)
     : statusLabel(monitoredRun?.status || "");
   const supervisedRunMembers = useMemo<SupervisedRunMember[]>(() => {
-    const bindings = supervisedMembersRun?.agentBindings ?? {};
+    const bindings = supervisedMembersBindingRun?.agentBindings ?? {};
     const currentRole = String(supervisedMembersRun?.currentRole || "").trim().toLowerCase();
     const currentAgentId = String(supervisedMembersRun?.currentAgentBinding?.agentId || "").trim();
     return SUPERVISED_MEMBER_ROLES.map((role) => {
@@ -1056,7 +1068,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
         status: isActive ? "active" : agentId ? "configured" : "missing",
       };
     });
-  }, [lang, supervisedMembersRun?.agentBindings, supervisedMembersRun?.currentAgentBinding?.agentId, supervisedMembersRun?.currentRole]);
+  }, [lang, supervisedMembersBindingRun?.agentBindings, supervisedMembersRun?.currentAgentBinding?.agentId, supervisedMembersRun?.currentRole]);
   const latestRunStatusLabel = latestRun?.decision
     ? decisionLabel(latestRun.decision)
     : statusLabel(latestRun?.status || "");
@@ -1478,6 +1490,9 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       }
       return {
         ...current,
+        agentBindings: hasSupervisedAgentBindings(current.agentBindings)
+          ? current.agentBindings
+          : latestSupervisedRunSnapshot?.agentBindings ?? {},
         status: "failed",
         currentPhase: "failed",
         runtimeStatus: "failed",
@@ -1512,6 +1527,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   }, [
     evolutionWorkspaceCache,
     lang,
+    latestSupervisedRunSnapshot?.agentBindings,
     supervisedStartCommand,
     supervisedStartCommandStatusQuery.data,
   ]);

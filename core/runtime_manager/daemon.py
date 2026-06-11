@@ -15,6 +15,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from config.models import PROVIDER_API_KEY_ENV_ALIASES, get_provider_api_key_env
+from config.public_config import load_public_config, read_persisted_user_env_var
 from core.runtime_manager.evolution_store import build_evolution_summary
 from core.web.services import self_evolution_control_service, supervised_control_service
 
@@ -437,6 +439,88 @@ def _require_fresh_source_for_supervised_run() -> dict[str, Any]:
         phase="supervised_preflight",
     )
     raise RuntimeManagerStaleSourceError("运行管理器源码已过期，请重启后再开始监督进化。")
+
+
+def _configured_llm_key_env_names(public_config: dict[str, Any]) -> set[str]:
+    llm = public_config.get("llm") if isinstance(public_config.get("llm"), dict) else {}
+    model_library = llm.get("model_library") if isinstance(llm.get("model_library"), dict) else {}
+    providers = llm.get("providers") if isinstance(llm.get("providers"), dict) else {}
+    env_names: set[str] = set()
+
+    for item in model_library.values():
+        if isinstance(item, dict):
+            env_name = str(item.get("api_key_env") or "").strip()
+            if env_name:
+                env_names.add(env_name)
+
+    for provider in providers.values():
+        if not isinstance(provider, dict):
+            continue
+        provider_env = str(provider.get("api_key_env") or "").strip()
+        if provider_env:
+            env_names.add(provider_env)
+        provider_kind = str(provider.get("kind") or "").strip().lower()
+        canonical_env = get_provider_api_key_env(provider_kind)
+        if canonical_env:
+            env_names.add(canonical_env)
+        for alias in PROVIDER_API_KEY_ENV_ALIASES.get(provider_kind, []):
+            alias_env = str(alias or "").strip()
+            if alias_env:
+                env_names.add(alias_env)
+
+    return env_names
+
+
+def _sync_llm_key_env_from_persisted_user_env(*, command_type: str) -> dict[str, Any]:
+    """Refresh long-lived Runtime Manager env from saved user-level LLM keys."""
+
+    try:
+        public_config = load_public_config()
+    except Exception as exc:
+        payload = {
+            "commandType": command_type,
+            "ok": False,
+            "errorType": type(exc).__name__,
+            "message": str(exc),
+        }
+        record_runtime_manager_scene_event(
+            "supervised_run.preflight.llm_key_env_sync_failed",
+            payload,
+            phase="supervised_preflight",
+        )
+        return payload
+
+    env_names = sorted(_configured_llm_key_env_names(public_config))
+    synced: list[str] = []
+    already_present = 0
+    missing: list[str] = []
+    for env_name in env_names:
+        if os.environ.get(env_name):
+            already_present += 1
+            continue
+        persisted_value = read_persisted_user_env_var(env_name)
+        if persisted_value:
+            os.environ[env_name] = persisted_value
+            synced.append(env_name)
+        else:
+            missing.append(env_name)
+
+    payload = {
+        "commandType": command_type,
+        "ok": True,
+        "envCount": len(env_names),
+        "alreadyPresentCount": already_present,
+        "syncedCount": len(synced),
+        "syncedEnvNames": synced[:20],
+        "missingCount": len(missing),
+        "missingEnvNames": missing[:20],
+    }
+    record_runtime_manager_scene_event(
+        "supervised_run.preflight.llm_key_env_synced",
+        payload,
+        phase="supervised_preflight",
+    )
+    return payload
 
 
 def _active_command_is_recent(state: dict[str, Any]) -> bool:
@@ -3260,24 +3344,36 @@ class RuntimeManagerDaemon:
 
     def _handle_start_supervised_run(self, *, command_id: str, args: dict[str, Any]) -> dict[str, Any]:
         freshness = _require_fresh_source_for_supervised_run()
+        llm_key_env_sync = _sync_llm_key_env_from_persisted_user_env(command_type="start_supervised_run")
         payload = args.get("payload") if isinstance(args.get("payload"), dict) else {}
         snapshot = supervised_control_service._LOCAL_START_SUPERVISED_RUN(payload)
         return self._finish_command(
             command_id,
             ok=True,
             message="Supervised run started.",
-            result_data={"runId": str(snapshot.get("runId") or ""), "snapshot": snapshot, "sourceFreshness": freshness},
+            result_data={
+                "runId": str(snapshot.get("runId") or ""),
+                "snapshot": snapshot,
+                "sourceFreshness": freshness,
+                "llmKeyEnvSync": llm_key_env_sync,
+            },
         )
 
     def _handle_retry_supervised_run(self, *, command_id: str, args: dict[str, Any]) -> dict[str, Any]:
         freshness = _require_fresh_source_for_supervised_run()
+        llm_key_env_sync = _sync_llm_key_env_from_persisted_user_env(command_type="retry_supervised_run")
         run_id = str(args.get("runId") or "").strip()
         snapshot = supervised_control_service._LOCAL_RETRY_SUPERVISED_RUN(run_id)
         return self._finish_command(
             command_id,
             ok=True,
             message="Supervised run retry started.",
-            result_data={"runId": str(snapshot.get("runId") or ""), "snapshot": snapshot, "sourceFreshness": freshness},
+            result_data={
+                "runId": str(snapshot.get("runId") or ""),
+                "snapshot": snapshot,
+                "sourceFreshness": freshness,
+                "llmKeyEnvSync": llm_key_env_sync,
+            },
         )
 
     def _handle_pause_supervised_run(self, *, command_id: str, args: dict[str, Any]) -> dict[str, Any]:
