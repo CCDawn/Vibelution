@@ -396,6 +396,7 @@ def test_start_ai_search_source_scope_run_writes_cards_and_index(tmp_path, monke
     assert run["summary"]["cardCount"] == 5
     assert run["summary"]["succeededCount"] == 5
     assert run["summary"]["failedCount"] == 0
+    assert run["summary"]["degradedCount"] == 0
     assert run["summary"]["referenceCount"] == 10
     assert len(searched_queries) == 5
     assert {query["groupId"] for query in run["queryPlan"]["queries"]} >= {"global_official", "cn_official", "trusted_indices"}
@@ -424,14 +425,70 @@ def test_start_ai_search_source_scope_run_records_partial_failures(tmp_path, mon
         return "**参考来源：**\n1. [Source](https://example.com)\n"
 
     monkeypatch.setattr(team_service, "_run_ai_web_search", fake_web_search)
+    monkeypatch.setattr(
+        team_service,
+        "_run_ai_source_page_fallback",
+        lambda query, *, max_results, primary_error: "[错误] source page fallback failed",
+    )
 
     run = team_service.start_ai_search_source_scope_run(team_service.AI_SEARCH_TEAM_ID, source_limit=2)
 
     assert run["status"] == "partial"
     assert run["summary"]["cardCount"] == 2
     assert run["summary"]["failedCount"] == 1
+    assert run["summary"]["degradedCount"] == 0
     assert run["errors"][0]["sourceId"]
     assert run["cards"][0]["status"] == "failed"
+
+
+def test_start_ai_search_source_scope_run_falls_back_to_source_page(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+
+    def fake_web_search(query, *, max_results):
+        return "[错误] AutoGLM token service unavailable"
+
+    def fake_fetch_source_page(source_url):
+        return {
+            "url": "https://openai.com/news/",
+            "title": "OpenAI News",
+            "description": "Latest company, model, product, and research announcements.",
+            "links": [
+                {"title": "New model update", "url": "/news/new-model-update"},
+                {"title": "Research release", "url": "https://openai.com/news/research-release"},
+                {"title": "Careers", "url": "https://openai.com/careers"},
+            ],
+        }
+
+    monkeypatch.setattr(team_service, "_run_ai_web_search", fake_web_search)
+    monkeypatch.setattr(team_service, "_fetch_ai_search_source_page", fake_fetch_source_page)
+
+    run = team_service.start_ai_search_source_scope_run(
+        team_service.AI_SEARCH_TEAM_ID,
+        topic="neural predictive coding",
+        source_limit=1,
+        max_results_per_query=2,
+    )
+
+    assert run["status"] == "completed"
+    assert run["summary"]["succeededCount"] == 1
+    assert run["summary"]["failedCount"] == 0
+    assert run["summary"]["degradedCount"] == 1
+    assert run["summary"]["referenceCount"] == 2
+    card = run["cards"][0]
+    assert card["status"] == "succeeded"
+    assert card["searchMode"] == "source_page_fallback"
+    assert card["degraded"] is True
+    assert "AutoGLM token" in card["fallbackReason"]
+    assert card["summary"].startswith("[降级]")
+    assert {reference["url"] for reference in card["references"]} == {
+        "https://openai.com/news/new-model-update",
+        "https://openai.com/news/research-release",
+    }
+
+    index_path = tmp_path / "workspace" / "teams" / "ai-search-team" / "search_runs" / "index.json"
+    index = json.loads(index_path.read_text(encoding="utf-8"))
+    assert index["runs"][0]["degradedCount"] == 1
+    assert index["runs"][0]["cards"][0]["searchMode"] == "source_page_fallback"
 
 
 def test_ensure_evolution_system_teams_preserves_existing_team_member_status(tmp_path, monkeypatch):

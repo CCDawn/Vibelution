@@ -5,12 +5,15 @@ from __future__ import annotations
 import json
 import re
 import threading
+from html.parser import HTMLParser
 from datetime import datetime, timezone
 from pathlib import Path
 from time import perf_counter
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 from uuid import uuid4
+
+import httpx
 
 from core.chat.chat_task_types import trim_lines
 
@@ -36,6 +39,9 @@ TEAM_DETAIL_LOG_SLOW_THRESHOLD_MS = 250
 TEAM_DETAIL_LOG_ROLLUP_REPEAT_THRESHOLD = 5
 TEAM_DETAIL_LOG_ROLLUP_WINDOW_SECONDS = 5.0
 _SAFE_ID_FRAGMENT = re.compile(r"[^A-Za-z0-9_.-]+")
+AI_SEARCH_SOURCE_PAGE_TIMEOUT_SECONDS = 8.0
+AI_SEARCH_SOURCE_PAGE_MAX_BYTES = 400_000
+AI_SEARCH_SOURCE_PAGE_USER_AGENT = "Vibelution-AI-Search/1.0"
 EVOLUTION_SYSTEM_TEAM_IDS = {"self-evolution-team", "supervised-evolution-team"}
 EVOLUTION_SYSTEM_TEAM_SPECS = (
     {
@@ -650,6 +656,7 @@ def start_ai_search_source_scope_run(
             "cardCount": 0,
             "succeededCount": 0,
             "failedCount": 0,
+            "degradedCount": 0,
             "referenceCount": 0,
         },
         "storage": {
@@ -677,6 +684,7 @@ def start_ai_search_source_scope_run(
             errors.append({"queryId": query["queryId"], "sourceId": query["sourceId"], "message": card["summary"]})
     succeeded_count = sum(1 for card in cards if card.get("status") == "succeeded")
     failed_count = len(cards) - succeeded_count
+    degraded_count = sum(1 for card in cards if bool(card.get("degraded")))
     reference_count = sum(len(list(card.get("references") or [])) for card in cards)
     status = "failed" if failed_count == len(cards) else "partial" if failed_count else "completed"
     run.update(
@@ -689,12 +697,25 @@ def start_ai_search_source_scope_run(
                 "cardCount": len(cards),
                 "succeededCount": succeeded_count,
                 "failedCount": failed_count,
+                "degradedCount": degraded_count,
                 "referenceCount": reference_count,
             },
         }
     )
     _write_json(_ai_search_run_path(run_id), run)
     _upsert_ai_search_run_summary(run)
+    if degraded_count:
+        _record_team_event(
+            "team.ai_search_run.fallback_used",
+            {"teamId": AI_SEARCH_TEAM_ID, "name": AI_SEARCH_TEAM_DISPLAY_NAME, "teamKind": "ai_search", "teamSource": "ai_search"},
+            fields={
+                "runId": run_id,
+                "topic": query_topic,
+                "degradedCount": degraded_count,
+                "searchModes": sorted({str(card.get("searchMode") or "").strip() for card in cards if bool(card.get("degraded"))}),
+                "sourceIds": [str(card.get("sourceId") or "").strip() for card in cards if bool(card.get("degraded"))],
+            },
+        )
     _record_team_event(
         "team.ai_search_run.completed",
         {"teamId": AI_SEARCH_TEAM_ID, "name": AI_SEARCH_TEAM_DISPLAY_NAME, "teamKind": "ai_search", "teamSource": "ai_search"},
@@ -705,6 +726,7 @@ def start_ai_search_source_scope_run(
             "queryCount": len(queries),
             "succeededCount": succeeded_count,
             "failedCount": failed_count,
+            "degradedCount": degraded_count,
             "referenceCount": reference_count,
             "runPath": _relative_path(_ai_search_run_path(run_id)),
         },
@@ -3209,11 +3231,25 @@ def _ai_search_query_for_source(source: dict[str, Any], *, topic: str, run_id: s
 def _execute_ai_search_query_card(query: dict[str, Any], *, max_results: int) -> dict[str, Any]:
     now = utc_now_iso()
     query_text = str(query.get("query") or "").strip()
+    search_mode = "web_search"
+    degraded = False
+    fallback_reason = ""
     try:
         result_text = _run_ai_web_search(query_text, max_results=max_results)
     except Exception as exc:
         result_text = f"[错误] 搜索执行异常: {type(exc).__name__}: {exc}"
     failed = _ai_search_result_is_error(result_text)
+    if failed:
+        fallback_reason = _web_search_summary_text(result_text) or str(result_text or "").strip()
+        fallback_text = _run_ai_source_page_fallback(query, max_results=max_results, primary_error=fallback_reason)
+        fallback_failed = _ai_search_result_is_error(fallback_text)
+        if fallback_failed:
+            result_text = f"{result_text}\n\n{fallback_text}".strip()
+        else:
+            result_text = fallback_text
+            failed = False
+            degraded = True
+            search_mode = "source_page_fallback"
     references = [] if failed else _references_from_web_search_result(result_text)
     return {
         "cardId": f"{query.get('queryId')}-card",
@@ -3228,6 +3264,9 @@ def _execute_ai_search_query_card(query: dict[str, Any], *, max_results: int) ->
         "evidenceRole": str(query.get("evidenceRole") or "").strip(),
         "query": query_text,
         "status": "failed" if failed else "succeeded",
+        "searchMode": search_mode,
+        "degraded": degraded,
+        "fallbackReason": fallback_reason,
         "summary": _web_search_summary_text(result_text),
         "resultText": result_text,
         "references": references,
@@ -3240,6 +3279,199 @@ def _run_ai_web_search(query: str, *, max_results: int) -> str:
     from tools.web_search_tool import web_search
 
     return web_search(query=query, max_results=max_results)
+
+
+def _run_ai_source_page_fallback(query: dict[str, Any], *, max_results: int, primary_error: str) -> str:
+    source_url = str(query.get("sourceUrl") or "").strip()
+    if not source_url:
+        return "[错误] 主搜索工具失败，且该来源没有可扫描的官方页面 URL。"
+    source_name = str(query.get("sourceName") or query.get("sourceId") or source_url).strip()
+    try:
+        page = _fetch_ai_search_source_page(source_url)
+    except Exception as exc:
+        return f"[错误] 主搜索工具失败，官方源页面扫描也失败: {type(exc).__name__}: {exc}"
+    final_url = str(page.get("url") or source_url).strip()
+    references = _rank_ai_search_source_page_references(
+        list(page.get("links") or []),
+        topic=str(query.get("query") or ""),
+        source_name=source_name,
+        base_url=final_url,
+        max_results=max_results,
+    )
+    if not references:
+        page_title = _clean_ai_search_source_text(str(page.get("title") or source_name or final_url), max_length=160)
+        references = [{"title": page_title or final_url, "url": final_url}]
+    title = _clean_ai_search_source_text(str(page.get("title") or source_name), max_length=180)
+    description = _clean_ai_search_source_text(str(page.get("description") or ""), max_length=360)
+    summary_lines = [
+        "[降级] 主搜索工具不可用，已改用官方源页面扫描。",
+        f"来源: {source_name}",
+        f"页面: {title or final_url}",
+    ]
+    if description:
+        summary_lines.append(f"摘要: {description}")
+    summary_lines.append(f"主搜索失败原因: {trim_lines(primary_error, max_lines=2)[:260]}")
+    summary_lines.append("候选动态:")
+    for reference in references[:max_results]:
+        summary_lines.append(f"- {reference['title']} ({reference['url']})")
+    reference_lines = ["", "**参考来源：**"]
+    for index, reference in enumerate(references[:max_results], start=1):
+        reference_lines.append(f"{index}. [{reference['title']}]({reference['url']})")
+    return "\n".join(summary_lines + reference_lines)
+
+
+def _fetch_ai_search_source_page(source_url: str) -> dict[str, Any]:
+    normalized_url = str(source_url or "").strip()
+    parsed = urlparse(normalized_url)
+    if parsed.scheme not in {"http", "https"}:
+        raise ValueError("source URL must use http or https")
+    headers = {"User-Agent": AI_SEARCH_SOURCE_PAGE_USER_AGENT}
+    with httpx.Client(follow_redirects=True, timeout=AI_SEARCH_SOURCE_PAGE_TIMEOUT_SECONDS, headers=headers) as client:
+        response = client.get(normalized_url)
+        response.raise_for_status()
+    content = response.content[:AI_SEARCH_SOURCE_PAGE_MAX_BYTES]
+    encoding = response.encoding or "utf-8"
+    html = content.decode(encoding, errors="replace")
+    parsed_page = _parse_ai_search_source_page(html, str(response.url))
+    parsed_page["url"] = str(response.url)
+    return parsed_page
+
+
+def _parse_ai_search_source_page(html: str, base_url: str) -> dict[str, Any]:
+    parser = _AiSearchSourcePageParser(base_url=base_url)
+    parser.feed(str(html or ""))
+    parser.close()
+    return {
+        "title": _clean_ai_search_source_text(parser.title_text(), max_length=180),
+        "description": _clean_ai_search_source_text(parser.description, max_length=360),
+        "links": parser.normalized_links(),
+    }
+
+
+class _AiSearchSourcePageParser(HTMLParser):
+    def __init__(self, *, base_url: str) -> None:
+        super().__init__(convert_charrefs=True)
+        self.base_url = base_url
+        self._in_title = False
+        self._title_parts: list[str] = []
+        self._current_href = ""
+        self._current_anchor_parts: list[str] = []
+        self.description = ""
+        self.links: list[dict[str, str]] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        normalized_tag = tag.lower()
+        attr_map = {str(key).lower(): str(value or "") for key, value in attrs}
+        if normalized_tag == "title":
+            self._in_title = True
+            return
+        if normalized_tag == "meta" and not self.description:
+            name = attr_map.get("name") or attr_map.get("property")
+            if name.lower() in {"description", "og:description", "twitter:description"}:
+                self.description = attr_map.get("content", "")
+            return
+        if normalized_tag == "a":
+            self._current_href = attr_map.get("href", "").strip()
+            self._current_anchor_parts = []
+
+    def handle_endtag(self, tag: str) -> None:
+        normalized_tag = tag.lower()
+        if normalized_tag == "title":
+            self._in_title = False
+            return
+        if normalized_tag == "a" and self._current_href:
+            title = _clean_ai_search_source_text(" ".join(self._current_anchor_parts), max_length=180)
+            self.links.append({"title": title or self._current_href, "url": urljoin(self.base_url, self._current_href)})
+            self._current_href = ""
+            self._current_anchor_parts = []
+
+    def handle_data(self, data: str) -> None:
+        if self._in_title:
+            self._title_parts.append(data)
+        if self._current_href:
+            self._current_anchor_parts.append(data)
+
+    def title_text(self) -> str:
+        return " ".join(self._title_parts)
+
+    def normalized_links(self) -> list[dict[str, str]]:
+        seen: set[str] = set()
+        links: list[dict[str, str]] = []
+        for link in self.links:
+            url = str(link.get("url") or "").strip()
+            if not url or url in seen:
+                continue
+            seen.add(url)
+            links.append({"title": str(link.get("title") or url).strip(), "url": url})
+        return links
+
+
+def _rank_ai_search_source_page_references(
+    links: list[dict[str, str]],
+    *,
+    topic: str,
+    source_name: str,
+    base_url: str,
+    max_results: int,
+) -> list[dict[str, str]]:
+    topic_terms = _ai_search_source_page_keywords(f"{topic} {source_name}")
+    positive_terms = {
+        "ai", "agent", "agents", "model", "models", "research", "release", "releases", "news", "blog",
+        "product", "developer", "paper", "benchmark", "eval", "safety", "open-source", "open_source",
+        "新闻", "动态", "发布", "模型", "研究", "论文", "产品", "开发者", "开源", "安全", "评测",
+    }
+    skip_terms = {
+        "privacy", "terms", "cookie", "login", "signin", "signup", "sign-up", "careers", "jobs",
+        "contact", "about", "subscribe", "rss", "twitter", "linkedin", "facebook", "instagram",
+        "隐私", "条款", "登录", "注册", "招聘", "联系",
+    }
+    ranked: list[tuple[int, int, dict[str, str]]] = []
+    for index, raw_link in enumerate(links):
+        url = urljoin(base_url, str(raw_link.get("url") or "").strip())
+        parsed = urlparse(url)
+        if parsed.scheme not in {"http", "https"}:
+            continue
+        title = _clean_ai_search_source_text(str(raw_link.get("title") or url), max_length=180)
+        combined = f"{title} {parsed.netloc} {parsed.path} {parsed.query}".lower()
+        if any(term in combined for term in skip_terms):
+            continue
+        score = 0
+        for term in topic_terms:
+            if term and term in combined:
+                score += 4
+        for term in positive_terms:
+            if term in combined:
+                score += 3
+        if parsed.netloc == urlparse(base_url).netloc:
+            score += 1
+        if score <= 0:
+            continue
+        ranked.append((score, -index, {"title": title or url, "url": url}))
+    ranked.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    references: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for _score, _index, reference in ranked:
+        url = reference["url"]
+        if url in seen:
+            continue
+        seen.add(url)
+        references.append(reference)
+        if len(references) >= max_results:
+            break
+    return references
+
+
+def _ai_search_source_page_keywords(text: str) -> list[str]:
+    tokens: list[str] = []
+    for token in re.findall(r"[A-Za-z0-9_-]{2,}|[\u4e00-\u9fff]{2,}", str(text or "").lower()):
+        if token not in tokens:
+            tokens.append(token)
+    return tokens[:16]
+
+
+def _clean_ai_search_source_text(text: str, *, max_length: int) -> str:
+    cleaned = re.sub(r"\s+", " ", str(text or "")).strip()
+    return cleaned[:max_length]
 
 
 def _ai_search_result_is_error(result_text: str) -> bool:
@@ -3301,6 +3533,7 @@ def _upsert_ai_search_run_summary(run: dict[str, Any]) -> None:
         "cardCount": int((run.get("summary") or {}).get("cardCount") or 0),
         "succeededCount": int((run.get("summary") or {}).get("succeededCount") or 0),
         "failedCount": int((run.get("summary") or {}).get("failedCount") or 0),
+        "degradedCount": int((run.get("summary") or {}).get("degradedCount") or 0),
         "referenceCount": int((run.get("summary") or {}).get("referenceCount") or 0),
         "runPath": _relative_path(_ai_search_run_path(run_id)) if run_id else "",
         "cards": list(run.get("cards") or [])[:12],

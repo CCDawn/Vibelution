@@ -17,6 +17,7 @@ import { queryKeys } from "../api/queryKeys";
 import {
   AgentConfigWorkspace,
   AiSearchRun,
+  AiSearchRunCard,
   AiSearchRunListPayload,
   AiSearchRunSummary,
   ChatRoomDetail,
@@ -1066,8 +1067,20 @@ function aiSearchRunCounts(run: AiSearchRunDisplay) {
     cardCount: run.cardCount,
     succeededCount: run.succeededCount,
     failedCount: run.failedCount,
+    degradedCount: run.degradedCount ?? 0,
     referenceCount: run.referenceCount,
   };
+}
+
+function aiSearchRunCardModeLabel(card: AiSearchRunCard, lang: "zh" | "en") {
+  const mode = String(card.searchMode || "").trim();
+  if (card.degraded || mode === "source_page_fallback") {
+    return lang === "zh" ? "源页扫描" : "Source page scan";
+  }
+  if (mode === "web_search") {
+    return lang === "zh" ? "搜索 API" : "Search API";
+  }
+  return mode || (lang === "zh" ? "搜索" : "Search");
 }
 
 function aiSearchRunQueryCount(run: AiSearchRunDisplay) {
@@ -2521,21 +2534,33 @@ export function TeamsRoute({
                     <span>cards <strong>{latestRunCounts.cardCount}</strong></span>
                     <span>{lang === "zh" ? "成功" : "success"} <strong>{latestRunCounts.succeededCount}</strong></span>
                     <span>{lang === "zh" ? "失败" : "failed"} <strong>{latestRunCounts.failedCount}</strong></span>
+                    {latestRunCounts.degradedCount ? (
+                      <span>{lang === "zh" ? "降级" : "fallback"} <strong>{latestRunCounts.degradedCount}</strong></span>
+                    ) : null}
                     <span>{lang === "zh" ? "引用" : "refs"} <strong>{latestRunCounts.referenceCount}</strong></span>
                   </div>
                   <div className={styles.aiSearchRunCards}>
                     {latestAiSearchRun.cards.slice(0, 6).map((card) => (
                       <article
                         key={card.cardId}
-                        className={card.status === "failed" ? `${styles.aiSearchRunCard} ${styles.aiSearchRunCardFailed}` : styles.aiSearchRunCard}
+                        className={[
+                          styles.aiSearchRunCard,
+                          card.status === "failed" ? styles.aiSearchRunCardFailed : "",
+                          card.degraded ? styles.aiSearchRunCardDegraded : "",
+                        ].filter(Boolean).join(" ")}
                       >
                         <div className={styles.aiSearchRunCardHeader}>
                           <div>
                             <strong>{card.sourceName || card.sourceId}</strong>
-                            <span>{card.groupLabel} · {card.sourceType} · {aiSearchSourceTierLabel(card.tier, lang)}</span>
+                            <span>{card.groupLabel} · {card.sourceType} · {aiSearchSourceTierLabel(card.tier, lang)} · {aiSearchRunCardModeLabel(card, lang)}</span>
                           </div>
                           <span>{card.status === "failed" ? (lang === "zh" ? "失败" : "failed") : (lang === "zh" ? "完成" : "done")}</span>
                         </div>
+                        {card.degraded && card.fallbackReason ? (
+                          <small className={styles.aiSearchRunFallbackReason}>
+                            {lang === "zh" ? "主搜索降级" : "Primary search fallback"}: {card.fallbackReason}
+                          </small>
+                        ) : null}
                         <p>{card.summary || (card.status === "failed" ? (lang === "zh" ? "搜索执行失败，已保留失败卡片。" : "Search failed; the failed card was retained.") : card.query)}</p>
                         <div className={styles.aiSearchRunRefs}>
                           {card.references.length ? (
@@ -2687,16 +2712,22 @@ export function TeamsRoute({
             ? `${sourceCollectionRunLabel(selectedSourceCollectionRun.runId)} 已规划 ${queryCount} 条 query，当前 ${openAssignmentCount} 个任务仍未完成；现阶段执行 metadata-only 搜索，会记录搜索词、来源元数据、DataRecord 和候选导入，不下载全文网页/PDF，也不写正式知识。`
             : `${sourceCollectionRunLabel(selectedSourceCollectionRun.runId)} has ${queryCount} planned queries and ${openAssignmentCount} open tasks. The current executor is metadata-only: it records queries, source metadata, DataRecords, and candidate imports without downloading full webpages/PDFs or writing formal knowledge.`}
         </span>
+        <small>
+          {lang === "zh"
+            ? "真实搜索执行器接入后会在这里记录搜索、下载、提炼和落库轨迹"
+            : "After the real search executor is connected, this area records search, download, extraction, and ingestion traces."}
+        </small>
         <em>
           {externalSearchTriggered
             ? (lang === "zh" ? "已进入 metadata 搜索执行" : "metadata search executed")
-            : (lang === "zh" ? "当前仍在计划/回写等待阶段" : "planning/writeback stage")}
+            : (lang === "zh" ? "当前仍是计划/回写阶段，未触发外部搜索" : "planning/writeback stage, no external search triggered")}
         </em>
       </div>
     );
   }
 
   function renderSourceCollectionControlsPanel() {
+    const sourceCollectionExecutionTitle = lang === "zh" ? "对话式执行下一批搜索" : "Run next search batch as trace";
     return (
       <section className={styles.sourceCollectionControlPanel} aria-label={lang === "zh" ? "资料搜集控制台" : "Source collection controls"}>
         <div className={styles.workflowIngestionHeader}>
@@ -2815,7 +2846,7 @@ export function TeamsRoute({
         {selectedSourceCollectionRun ? (
         <div className={styles.workflowSourceCollectionSearchAction}>
           <div>
-            <strong>{lang === "zh" ? "对话式执行下一批搜索" : "Run next search batch as trace"}</strong>
+            <strong>{sourceCollectionExecutionTitle}</strong>
             <span>
               {lang === "zh"
                 ? `会搜索来源元数据、写 DataRecord、导入候选，并把过程写入左侧搜集过程；剩余 ${sourceCollectionOpenAssignmentCount} 个可执行任务。`

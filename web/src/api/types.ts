@@ -2980,6 +2980,9 @@ export type AiSearchRunCard = {
   evidenceRole: string;
   query: string;
   status: "succeeded" | "failed" | string;
+  searchMode?: "web_search" | "source_page_fallback" | string;
+  degraded?: boolean;
+  fallbackReason?: string;
   summary: string;
   resultText?: string;
   references: AiSearchRunReference[];
@@ -2999,6 +3002,7 @@ export type AiSearchRunSummary = {
   cardCount: number;
   succeededCount: number;
   failedCount: number;
+  degradedCount?: number;
   referenceCount: number;
   runPath: string;
   cards: AiSearchRunCard[];
@@ -3032,6 +3036,7 @@ export type AiSearchRun = {
     cardCount: number;
     succeededCount: number;
     failedCount: number;
+    degradedCount?: number;
     referenceCount: number;
   };
   storage: {
