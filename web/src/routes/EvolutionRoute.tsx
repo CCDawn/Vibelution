@@ -194,6 +194,8 @@ type ProposalEditDraft = {
   editNote: string;
 };
 
+type SupervisedMentalModelMode = "follow" | "enabled" | "disabled";
+
 function clampScore(value: number) {
   return Math.max(0, Math.min(100, Math.round(value)));
 }
@@ -216,6 +218,7 @@ function buildSupervisedStartPlaceholder(input: {
   datasetLimit: number | null;
   bundleName: string;
   keepWorktree: boolean;
+  mentalModelMode: SupervisedMentalModelMode;
   agentBindings?: Record<string, EvolutionActiveRunAgentBinding>;
   lang: "zh" | "en";
 }): EvolutionActiveRun {
@@ -238,6 +241,8 @@ function buildSupervisedStartPlaceholder(input: {
     datasetName: sourceKind === "dataset" ? input.datasetName : "",
     datasetLimit: input.datasetLimit,
     keepWorktree: input.keepWorktree,
+    mentalModelMode: input.mentalModelMode,
+    mentalModelEnabled: input.mentalModelMode === "enabled" ? true : input.mentalModelMode === "disabled" ? false : null,
     startedAt: timestamp,
     updatedAt: timestamp,
     finishedAt: "",
@@ -276,6 +281,8 @@ function buildSupervisedStartPlaceholder(input: {
         datasetLimit: input.datasetLimit,
         bundleName: sourceKind === "bundle" ? input.bundleName : "",
         keepWorktree: input.keepWorktree,
+        mentalModelMode: input.mentalModelMode,
+        mentalModelEnabled: input.mentalModelMode === "enabled" ? true : input.mentalModelMode === "disabled" ? false : null,
       },
     ],
     agentBindings: input.agentBindings ?? {},
@@ -469,6 +476,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const [datasetLimitInput, setDatasetLimitInput] = useState("");
   const [bundleNameInput, setBundleNameInput] = useState("");
   const [keepWorktree, setKeepWorktree] = useState(false);
+  const [supervisedMentalModelMode, setSupervisedMentalModelMode] = useState<SupervisedMentalModelMode>("follow");
   const [liveActiveRun, setLiveActiveRun] = useState<EvolutionActiveRun | null>(null);
   const [supervisedStartCommand, setSupervisedStartCommand] = useState<EvolutionRunCommandAccepted | null>(null);
   const [selfGoalInput, setSelfGoalInput] = useState("");
@@ -628,6 +636,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
         datasetLimit: selectedDatasetLimit,
         bundleName: sourceKind === "bundle" ? bundleNameInput : "",
         keepWorktree,
+        mentalModelMode: supervisedMentalModelMode,
         agentBindings: placeholderAgentBindings,
         lang,
       }));
@@ -644,6 +653,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
           datasetLimit: selectedDatasetLimit,
           bundleName: sourceKind === "bundle" ? bundleNameInput : "",
           keepWorktree,
+          mentalModelMode: supervisedMentalModelMode,
         }),
       }),
     onSuccess: async (payload) => {
@@ -2751,6 +2761,20 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                   />
                   <span className={styles.checkboxLabel}>{t("keepWorktreeLabel")}</span>
                 </label>
+                <div className={styles.formField}>
+                  <label htmlFor="supervised-mental-mode">{t("supervisedMentalMode")}</label>
+                  <select
+                    id="supervised-mental-mode"
+                    className={styles.selectInput}
+                    value={supervisedMentalModelMode}
+                    onChange={(event) => setSupervisedMentalModelMode(event.target.value as SupervisedMentalModelMode)}
+                  >
+                    <option value="follow">{t("supervisedMentalModeFollow")}</option>
+                    <option value="enabled">{t("supervisedMentalModeEnabled")}</option>
+                    <option value="disabled">{t("supervisedMentalModeDisabled")}</option>
+                  </select>
+                  <span className={styles.formHint}>{t("supervisedMentalModeHint")}</span>
+                </div>
               </div>
 
               <div className={styles.controlFooter}>

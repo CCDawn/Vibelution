@@ -1412,6 +1412,10 @@ def _resolve_active_agent_for_turn(
 
 
 def _session_agent_visible_in_indexes(summary: dict[str, Any]) -> bool:
+    if bool(summary.get("hiddenFromIndex") or summary.get("hidden_from_index")):
+        return False
+    if str(summary.get("sessionKind") or "").strip().lower() == "supervised":
+        return False
     if str(summary.get("agentStatusCode") or "").strip() == "deleted_agent":
         return True
     if bool(summary.get("agentMissing")):
@@ -2128,6 +2132,64 @@ def create_chat_session(
         conversations.append(conversation)
         payload["version"] = int(payload.get("version") or CHAT_STATE_VERSION)
         payload["active_conversation_id"] = session_id
+        payload["updated_at"] = now
+        payload["conversations"] = conversations
+        save_chat_state(PROJECT_ROOT, payload)
+    _invalidate_session_list_cache()
+    return get_session_detail(session_id) or {}
+
+
+def create_supervised_agent_session(
+    *,
+    agent_id: str,
+    title: str = "",
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Create a hidden supervised-evolution session bound to an existing Agent."""
+
+    lang = get_web_language()
+    normalized_agent_id = str(agent_id or "").strip()
+    if not normalized_agent_id:
+        raise SessionValidationError(
+            text_for(lang, zh="监督会话缺少 Agent 绑定。", en="Supervised session is missing an Agent binding.")
+        )
+    agent = get_agent(normalized_agent_id, include_archived=False)
+    if not agent:
+        raise SessionValidationError(_session_agent_unavailable_message("missing_agent", lang=lang))
+    with _CHAT_STATE_LOCK:
+        payload = load_chat_state(PROJECT_ROOT)
+        conversations = payload.get("conversations")
+        if not isinstance(conversations, list):
+            conversations = []
+            payload["conversations"] = conversations
+        existing_ids = {
+            str(item.get("conversation_id") or "").strip()
+            for item in conversations
+            if isinstance(item, dict)
+        }
+        now = _now_timestamp()
+        session_id = _new_conversation_id(existing_ids)
+        display_title = (
+            trim_lines(title or "", max_lines=1).strip()
+            or text_for(lang, zh="监督进化隐藏会话", en="Hidden supervised evolution session")
+        )
+        conversation = _make_empty_conversation(session_id, title=display_title, timestamp=now)
+        conversation.update(
+            {
+                "agent_id": normalized_agent_id,
+                "agentId": normalized_agent_id,
+                "session_kind": "supervised",
+                "sessionKind": "supervised",
+                "hidden_from_index": True,
+                "hiddenFromIndex": True,
+                "task_title": display_title,
+                "taskTitle": display_title,
+                "supervised_context": dict(metadata or {}) if isinstance(metadata, dict) else {},
+            }
+        )
+        _ensure_conversation_workspace_metadata(conversation)
+        conversations.append(conversation)
+        payload["version"] = int(payload.get("version") or CHAT_STATE_VERSION)
         payload["updated_at"] = now
         payload["conversations"] = conversations
         save_chat_state(PROJECT_ROOT, payload)
@@ -3290,14 +3352,17 @@ def submit_session_message(
                 )
             )
 
-        requested_leases = infer_chat_turn_leases(
-            {
-                "content": message,
-                "mode": turn_mode,
-                "writeIntent": write_intent,
-                "activeTask": active_task,
-            }
-        )
+        if str(message_source or "").strip() == "supervised_evolution":
+            requested_leases = ["readonly_chat"]
+        else:
+            requested_leases = infer_chat_turn_leases(
+                {
+                    "content": message,
+                    "mode": turn_mode,
+                    "writeIntent": write_intent,
+                    "activeTask": active_task,
+                }
+            )
         lease_decision = _check_chat_turn_lease_decision(requested_leases)
         if not lease_decision.allowed:
             raise SessionBusyError(_localize_lease_conflict(lease_decision.reason, lang=lang))
@@ -3575,6 +3640,8 @@ def submit_session_message(
             en="Please inspect the image attachment(s) from this turn and respond.",
         )
         user_message_source = "raw_with_attachments" if message else "attachments_only"
+    elif normalized_message_source == "supervised_evolution":
+        effective_user_message, user_message_source = message, normalized_message_source
     else:
         effective_user_message, user_message_source = _resolve_session_user_prompt(
             conversation_id,
@@ -3630,6 +3697,7 @@ def submit_session_message(
         "mental_model_enabled": mental_model_enabled,
         "active_task": active_task,
         "agent_id": agent_id,
+        "leases": requested_leases,
         "skill_invocation": skill_invocation,
         "llm_slot": SESSION_LLM_SLOT_VISION if attachments else SESSION_LLM_SLOT_DIALOGUE,
         "submit_timing_fields": dict(submit_timing_fields),
@@ -4980,6 +5048,7 @@ def _normalize_conversation(
         "lastContextComposition": last_context_composition,
         "lastCacheComposition": last_cache_composition,
         "sessionKind": session_kind,
+        "hiddenFromIndex": bool(raw.get("hidden_from_index") or raw.get("hiddenFromIndex")),
         "parentSessionId": parent_session_id,
         "rootSessionId": root_session_id,
         "childSessionIds": child_session_ids,
@@ -5085,7 +5154,9 @@ def _normalize_latest_preview_messages(conversation_id: str, items: Any, *, scan
 
 def _normalize_session_kind(value: Any) -> str:
     normalized = str(value or "").strip().lower()
-    return "child" if normalized == "child" else "main"
+    if normalized in {"child", "supervised"}:
+        return normalized
+    return "main"
 
 
 def _normalize_string_list(value: Any) -> list[str]:
@@ -5758,6 +5829,7 @@ def _build_session_summary(conversation: dict[str, Any], *, hydrate_agent: bool 
         "updatedAt": updated_at,
         "currentPhase": status,
         "sessionKind": session_kind,
+        "hiddenFromIndex": bool(conversation.get("hiddenFromIndex") or conversation.get("hidden_from_index")),
         "parentSessionId": str(conversation.get("parentSessionId") or "").strip(),
         "rootSessionId": str(conversation.get("rootSessionId") or conversation["id"]).strip() or conversation["id"],
         "childSessionIds": list(conversation.get("childSessionIds") or []),

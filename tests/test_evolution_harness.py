@@ -630,6 +630,8 @@ def test_run_harness_returns_cancelled_when_cancel_checker_requests_stop(monkeyp
             "dialogueModelId": "model-a",
             "llmBindings": {"dialogue": {"modelId": "model-a"}},
         },
+        mental_model_mode="disabled",
+        mental_model_enabled=False,
         cancel_checker=lambda: "operator stop",
     )
 
@@ -652,13 +654,19 @@ def test_run_harness_returns_cancelled_when_cancel_checker_requests_stop(monkeyp
     assert env["VIBELUTION_TURN_MODEL_ID"] == "model-a"
     assert env["VIBELUTION_TURN_CACHE_SCOPE"] == "baseline"
     assert env["VIBELUTION_TURN_PROMPT_CACHE_PARTITION"].endswith("|scope:baseline")
+    assert env["VIBELUTION_SUPERVISED_MENTAL_MODEL_MODE"] == "disabled"
+    assert env["VIBELUTION_SUPERVISED_MENTAL_MODEL_ENABLED"] == "false"
     assert result.agent_runtime_env["VIBELUTION_AGENT_LLM_MODEL_ID"] == "model-a"
+    assert result.agent_runtime_env["VIBELUTION_SUPERVISED_MENTAL_MODEL_MODE"] == "disabled"
+    assert result.agent_runtime_env["VIBELUTION_SUPERVISED_MENTAL_MODEL_ENABLED"] == "false"
     assert result.preserved_evidence_path
     evidence_dir = Path(result.preserved_evidence_path)
     assert (evidence_dir / "log_info" / "conversation_case.jsonl").exists()
     assert (evidence_dir / "log_info" / "debug_case.log").exists()
     runtime_env = json.loads((evidence_dir / "agent_runtime_env.json").read_text(encoding="utf-8"))
     assert runtime_env["VIBELUTION_AGENT_LLM_MODEL_ID"] == "model-a"
+    assert runtime_env["VIBELUTION_SUPERVISED_MENTAL_MODEL_MODE"] == "disabled"
+    assert runtime_env["VIBELUTION_SUPERVISED_MENTAL_MODEL_ENABLED"] == "false"
     assert "log_info/conversation_case.jsonl" in result.preserved_evidence_files
 
 

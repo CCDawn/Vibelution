@@ -104,6 +104,7 @@ class SupervisedRunStartPayload(BaseModel):
     datasetLimit: int | None = None
     bundleName: str = ""
     keepWorktree: bool = False
+    mentalModelMode: str = "follow"
 
 
 class SupervisedRunActionPayload(BaseModel):
