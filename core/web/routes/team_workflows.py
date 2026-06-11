@@ -134,6 +134,7 @@ class SourceCollectionRunStartPayload(BaseModel):
     searchLanguages: list[str] = Field(default_factory=list, max_length=8)
     sourceTypes: list[str] = Field(default_factory=list, max_length=16)
     maxResultsPerQuery: int = Field(10, ge=1, le=100)
+    promptCachePolicy: dict[str, Any] = Field(default_factory=dict)
     scope: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -153,6 +154,7 @@ class ResearchStageRoundStartPayload(BaseModel):
     searchLanguages: list[str] = Field(default_factory=list, max_length=8)
     sourceTypes: list[str] = Field(default_factory=list, max_length=16)
     maxResultsPerQuery: int = Field(10, ge=1, le=100)
+    promptCachePolicy: dict[str, Any] = Field(default_factory=dict)
     scope: dict[str, Any] = Field(default_factory=dict)
 
 

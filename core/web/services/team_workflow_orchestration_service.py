@@ -74,6 +74,10 @@ SOURCE_COLLECTION_DEFAULT_SEARCH_LANGUAGES = ("en", "zh")
 SOURCE_COLLECTION_DEFAULT_SOURCE_TYPES = ("paper", "review", "dataset", "preprint")
 SOURCE_COLLECTION_DEFAULT_MAX_RESULTS_PER_QUERY = 10
 SOURCE_COLLECTION_MAX_QUERIES = 48
+SOURCE_COLLECTION_PROMPT_CACHE_REQUIRED_MODES = {"required", "strict", "hard_required", "required_for_llm_execution"}
+SOURCE_COLLECTION_PROMPT_CACHE_DISABLED_MODES = {"disabled", "off", "none"}
+SOURCE_COLLECTION_SUPPORTED_PROMPT_CACHE_MODES = {"automatic", "explicit_cache_control"}
+SOURCE_COLLECTION_PROMPT_CACHE_SCOPE = "research_team_knowledge_collection"
 RESEARCH_STAGE_TYPES = ("knowledge_collection", "experiment", "iteration")
 RESEARCH_STAGE_ACTIVE_STATUSES = {"running", "planning", "needs_attention"}
 RESEARCH_STAGE_DEFAULTS = {
@@ -387,6 +391,7 @@ def start_source_collection_run(team_id: str, payload: dict[str, Any] | None = N
     default_owner_agent_id = _source_collection_owner_agent_id(team, request_payload)
     owner_agent_id = _trim_text(request_payload.get("ownerAgentId"), max_length=160) or default_owner_agent_id
     requested_by_agent = _trim_text(request_payload.get("requestedByAgent"), max_length=160) or owner_agent_id
+    prompt_cache_policy = _source_collection_prompt_cache_policy(normalized_team_id, request_payload, roles)
     scope = _normalize_metadata(request_payload.get("scope"))
     if goal:
         scope["goal"] = goal
@@ -394,6 +399,7 @@ def start_source_collection_run(team_id: str, payload: dict[str, Any] | None = N
         scope["topic"] = topic
     scope["teamId"] = normalized_team_id
     scope["workflowKind"] = WORKFLOW_KIND_CHALLENGE_CUP_RESEARCH
+    scope["promptCachePolicyRef"] = _source_collection_prompt_cache_policy_ref(prompt_cache_policy)
     preliminary_search_plan = _build_source_collection_search_plan(
         team_id=normalized_team_id,
         run_id="",
@@ -401,6 +407,7 @@ def start_source_collection_run(team_id: str, payload: dict[str, Any] | None = N
         scope=scope,
         input_refs=input_refs,
         roles=roles,
+        prompt_cache_policy=prompt_cache_policy,
     )
     scope["dataSearchPlanRef"] = _source_collection_search_plan_ref(preliminary_search_plan)
     run = data_processing_service.create_processing_run(
@@ -415,6 +422,11 @@ def start_source_collection_run(team_id: str, payload: dict[str, Any] | None = N
             "searchPlanId": preliminary_search_plan["planId"],
             "queryCount": preliminary_search_plan["queryCount"],
             "querySeedCount": len(preliminary_search_plan["querySeeds"]),
+            "promptCachePolicyId": prompt_cache_policy["policyId"],
+            "promptCacheRequirement": prompt_cache_policy["requirement"],
+            "promptCacheModelId": prompt_cache_policy["modelId"],
+            "promptCacheMode": prompt_cache_policy["promptCacheMode"],
+            "promptCacheGateStatus": prompt_cache_policy["gate"]["status"],
         },
     )
     search_plan = _build_source_collection_search_plan(
@@ -425,6 +437,7 @@ def start_source_collection_run(team_id: str, payload: dict[str, Any] | None = N
         input_refs=input_refs,
         roles=roles,
         plan_id=preliminary_search_plan["planId"],
+        prompt_cache_policy=prompt_cache_policy,
     )
     assignments = [
         data_processing_service.create_collection_assignment(
@@ -472,12 +485,16 @@ def start_source_collection_run(team_id: str, payload: dict[str, Any] | None = N
             "searchPlanId": search_plan["planId"],
             "queryCount": search_plan["queryCount"],
             "querySeedCount": len(search_plan["querySeeds"]),
+            "promptCacheRequirement": prompt_cache_policy["requirement"],
+            "promptCacheMode": prompt_cache_policy["promptCacheMode"],
+            "promptCacheGateStatus": prompt_cache_policy["gate"]["status"],
             "teamAgentBindingCount": sum(1 for item in assignments if str(item.get("agentId") or "") != str(item.get("agentRole") or "")),
         },
     )
     return {
         "run": data_processing_service.get_processing_run(run["runId"]),
         "searchPlan": search_plan,
+        "promptCachePolicy": prompt_cache_policy,
         "assignments": assignments,
         "assignmentCount": len(assignments),
         "workflow": _workflow_to_api(normalized_team_id, workflow, candidate_store),
@@ -581,9 +598,11 @@ def start_research_stage_round(team_id: str, payload: dict[str, Any] | None = No
             result_payload["sourceCollectionRun"] = source_result
             result_payload["run"] = source_result["run"]
             result_payload["searchPlan"] = source_result["searchPlan"]
+            result_payload["promptCachePolicy"] = source_result.get("promptCachePolicy", {})
             result_payload["assignments"] = source_result["assignments"]
             round_payload["sourceRunIds"] = [source_result["run"]["runId"]]
             round_payload["dataSearchPlanRef"] = _source_collection_search_plan_ref(source_result["searchPlan"])
+            round_payload["promptCachePolicy"] = source_result.get("promptCachePolicy", {})
             round_payload["assignmentIds"] = [str(item.get("assignmentId") or "") for item in source_result["assignments"] if item.get("assignmentId")]
             round_payload["agentRoleAssignments"] = [
                 {
@@ -5120,6 +5139,172 @@ def _source_collection_agent_id(role: str, payload: dict[str, Any]) -> str:
     return explicit or role
 
 
+def _source_collection_prompt_cache_policy(team_id: str, payload: dict[str, Any], roles: list[str]) -> dict[str, Any]:
+    raw_policy = payload.get("promptCachePolicy") if isinstance(payload.get("promptCachePolicy"), dict) else {}
+    requirement = _normalize_source_collection_prompt_cache_requirement(raw_policy, payload)
+    model_id = (
+        _trim_text(raw_policy.get("modelId"), max_length=160)
+        or _trim_text(payload.get("modelId"), max_length=160)
+        or LOCAL_RESEARCH_MODEL_ID
+    )
+    model_entry = _source_collection_model_library_entry(model_id)
+    prompt_cache = model_entry.get("prompt_cache") if isinstance(model_entry.get("prompt_cache"), dict) else {}
+    prompt_cache_mode = _trim_text(prompt_cache.get("mode"), max_length=80).lower() or "disabled"
+    model_name = _trim_text(model_entry.get("model") or model_entry.get("label"), max_length=240) or model_id
+    provider_id = _trim_text(model_entry.get("provider_id") or model_entry.get("provider"), max_length=160)
+    hard_block = requirement in SOURCE_COLLECTION_PROMPT_CACHE_REQUIRED_MODES
+    gate_status = "disabled" if requirement in SOURCE_COLLECTION_PROMPT_CACHE_DISABLED_MODES else "satisfied"
+    gate_reason = ""
+    if requirement not in SOURCE_COLLECTION_PROMPT_CACHE_DISABLED_MODES and not model_entry:
+        gate_status = "blocked" if hard_block else "warning"
+        gate_reason = f"Prompt cache model is not configured: {model_id}"
+    elif hard_block and prompt_cache_mode not in SOURCE_COLLECTION_SUPPORTED_PROMPT_CACHE_MODES:
+        gate_status = "blocked"
+        gate_reason = (
+            "Knowledge collection requires prompt cache/KV reuse, but "
+            f"model `{model_id}` has prompt_cache.mode `{prompt_cache_mode}`."
+        )
+    elif requirement not in SOURCE_COLLECTION_PROMPT_CACHE_DISABLED_MODES and prompt_cache_mode not in SOURCE_COLLECTION_SUPPORTED_PROMPT_CACHE_MODES:
+        gate_status = "warning"
+        gate_reason = f"Prompt cache is not guaranteed for model `{model_id}`."
+    role_partitions = [
+        {
+            "agentRole": role,
+            "agentId": _source_collection_agent_id(role, payload),
+            "promptCachePartition": _source_collection_prompt_cache_partition(team_id, role, model_id=model_id),
+        }
+        for role in roles
+    ]
+    policy = {
+        "schemaVersion": SCHEMA_VERSION,
+        "policyId": _new_record_id("cachepolicy"),
+        "policyKind": "source_collection_prompt_cache_policy",
+        "scope": SOURCE_COLLECTION_PROMPT_CACHE_SCOPE,
+        "requirement": requirement,
+        "modelId": model_id,
+        "modelName": model_name,
+        "providerId": provider_id,
+        "promptCacheMode": prompt_cache_mode,
+        "supportedPromptCacheModes": sorted(SOURCE_COLLECTION_SUPPORTED_PROMPT_CACHE_MODES),
+        "partitionTemplate": "research-team:{teamId}:knowledge_collection:{agentRole}:{modelId}",
+        "rolePartitions": role_partitions,
+        "stablePrefixContract": _source_collection_stable_prefix_contract(),
+        "dynamicDeltaContract": _source_collection_dynamic_delta_contract(),
+        "gate": {
+            "status": gate_status,
+            "passed": gate_status in {"satisfied", "disabled", "warning"},
+            "hardBlock": hard_block,
+            "reason": gate_reason,
+            "checkedAt": utc_now_iso(),
+        },
+    }
+    if gate_status == "blocked":
+        _record_workflow_event(
+            "source_collection.prompt_cache_blocked",
+            team_id,
+            fields={
+                "policyId": policy["policyId"],
+                "requirement": requirement,
+                "modelId": model_id,
+                "promptCacheMode": prompt_cache_mode,
+                "outcome": "blocked",
+                "reason": gate_reason,
+            },
+        )
+        raise TeamWorkflowOrchestrationError(
+            f"{gate_reason} Set prompt_cache.mode to automatic or explicit_cache_control before starting knowledge collection."
+        )
+    return policy
+
+
+def _normalize_source_collection_prompt_cache_requirement(raw_policy: dict[str, Any], payload: dict[str, Any]) -> str:
+    raw = (
+        _trim_text(raw_policy.get("requirement"), max_length=80)
+        or _trim_text(raw_policy.get("mode"), max_length=80)
+        or _trim_text(payload.get("promptCacheRequirement"), max_length=80)
+        or "required_for_llm_execution"
+    ).lower()
+    if raw in SOURCE_COLLECTION_PROMPT_CACHE_DISABLED_MODES:
+        return "disabled"
+    if raw in {"advisory", "optional", "warn", "warning"}:
+        return "advisory"
+    return "required_for_llm_execution"
+
+
+def _source_collection_model_library_entry(model_id: str) -> dict[str, Any]:
+    try:
+        public_config = load_public_config()
+    except Exception:
+        public_config = {}
+    llm = public_config.get("llm") if isinstance(public_config, dict) else {}
+    model_library = llm.get("model_library") if isinstance(llm, dict) else {}
+    entry = model_library.get(model_id) if isinstance(model_library, dict) else {}
+    return dict(entry) if isinstance(entry, dict) else {}
+
+
+def _source_collection_prompt_cache_partition(team_id: str, role: str, *, model_id: str) -> str:
+    normalized_role = _SAFE_ID_FRAGMENT.sub("-", str(role or "agent").strip().lower()).strip("-") or "agent"
+    raw = "|".join(
+        [
+            SOURCE_COLLECTION_PROMPT_CACHE_SCOPE,
+            str(team_id or "").strip(),
+            str(role or "").strip(),
+            str(model_id or "").strip(),
+        ]
+    )
+    digest = hashlib.sha256(raw.encode("utf-8", errors="replace")).hexdigest()[:12]
+    return f"research-team-{normalized_role}-{digest}"
+
+
+def _source_collection_prompt_cache_policy_ref(policy: dict[str, Any]) -> dict[str, Any]:
+    gate = policy.get("gate") if isinstance(policy.get("gate"), dict) else {}
+    return {
+        "policyId": _trim_text(policy.get("policyId"), max_length=160),
+        "scope": _trim_text(policy.get("scope"), max_length=120),
+        "requirement": _trim_text(policy.get("requirement"), max_length=80),
+        "modelId": _trim_text(policy.get("modelId"), max_length=160),
+        "promptCacheMode": _trim_text(policy.get("promptCacheMode"), max_length=80),
+        "gateStatus": _trim_text(gate.get("status"), max_length=80),
+    }
+
+
+def _source_collection_stable_prefix_contract() -> dict[str, Any]:
+    return {
+        "cacheableBlocks": [
+            "ai科学研究团队身份与知识搜集阶段规则",
+            "source collection assignment/output/DataRecord/source_manifest schema",
+            "禁止直接写正式 Team Knowledge/RAG/official graph 的边界",
+            "功能 Agent 职责、回写合同和质量审查规则",
+        ],
+        "forbiddenDynamicFields": [
+            "currentQuery",
+            "currentUrl",
+            "downloadedText",
+            "rawPageContent",
+            "latestToolResult",
+            "fullConversationHistory",
+        ],
+        "expectedUsage": "Stable prefix is cacheable; each step sends only the current query/result refs as dynamic delta.",
+    }
+
+
+def _source_collection_dynamic_delta_contract() -> dict[str, Any]:
+    return {
+        "allowedFields": [
+            "queryId",
+            "query",
+            "sourceRef",
+            "rawLocation",
+            "resultSummary",
+            "recordId",
+            "collectionTrace",
+            "cacheObservation",
+        ],
+        "maxRawContentPolicy": "Do not replay full pages; store artifacts as DataRecord/source refs and pass excerpts or summaries only.",
+        "conversationTraceRequired": True,
+    }
+
+
 def _source_collection_assignment_scope(role: str, base_scope: dict[str, Any], *, search_plan: dict[str, Any] | None = None) -> dict[str, Any]:
     role_purposes = {
         "data_intake_coordinator": "Coordinate source collection and handoff to source_manifest import.",
@@ -5137,10 +5322,18 @@ def _source_collection_assignment_scope(role: str, base_scope: dict[str, Any], *
     }
     if isinstance(search_plan, dict):
         assigned_queries = _source_collection_queries_for_role(search_plan, role)
+        prompt_cache_policy = search_plan.get("promptCachePolicy") if isinstance(search_plan.get("promptCachePolicy"), dict) else {}
         scope["dataSearchPlanRef"] = _source_collection_search_plan_ref(search_plan)
         scope["assignedQueries"] = assigned_queries
         scope["queryCount"] = len(assigned_queries)
         scope["resultWritebackContract"] = search_plan.get("resultWritebackContract", {})
+        scope["promptCachePolicyRef"] = _source_collection_prompt_cache_policy_ref(prompt_cache_policy)
+        scope["promptCachePartition"] = _source_collection_prompt_cache_partition(
+            str(base_scope.get("teamId") or search_plan.get("teamId") or ""),
+            role,
+            model_id=str(prompt_cache_policy.get("modelId") or ""),
+        )
+        scope["conversationTraceRequired"] = bool((prompt_cache_policy.get("dynamicDeltaContract") or {}).get("conversationTraceRequired", True))
     return scope
 
 
@@ -5152,6 +5345,7 @@ def _build_source_collection_search_plan(
     scope: dict[str, Any],
     input_refs: list[str],
     roles: list[str],
+    prompt_cache_policy: dict[str, Any],
     plan_id: str = "",
 ) -> dict[str, Any]:
     normalized_plan_id = _trim_text(plan_id, max_length=128) or _new_record_id("searchplan")
@@ -5188,6 +5382,13 @@ def _build_source_collection_search_plan(
                         "execution": {
                             "mode": "contract_only",
                             "externalSearchTriggered": False,
+                            "conversationTraceRequired": True,
+                            "promptCacheRequired": prompt_cache_policy.get("requirement") in SOURCE_COLLECTION_PROMPT_CACHE_REQUIRED_MODES,
+                            "promptCachePartition": _source_collection_prompt_cache_partition(
+                                team_id,
+                                assigned_role,
+                                model_id=str(prompt_cache_policy.get("modelId") or ""),
+                            ),
                         },
                         "writeback": {
                             "target": "CollectionOutput.records",
@@ -5216,6 +5417,7 @@ def _build_source_collection_search_plan(
         "searchLanguages": languages,
         "maxResultsPerQuery": max_results,
         "queries": queries,
+        "promptCachePolicy": prompt_cache_policy,
         "roleAssignmentInputs": _source_collection_role_assignment_inputs(queries, roles, payload),
         "resultWritebackContract": writeback_contract,
         "boundaries": {
@@ -5223,17 +5425,22 @@ def _build_source_collection_search_plan(
             "writesFormalKnowledge": False,
             "writesRag": False,
             "writesKnowledgeGraph": False,
+            "requiresPromptCacheForAgentExecution": prompt_cache_policy.get("requirement") in SOURCE_COLLECTION_PROMPT_CACHE_REQUIRED_MODES,
         },
     }
 
 
 def _source_collection_search_plan_ref(search_plan: dict[str, Any]) -> dict[str, Any]:
+    prompt_cache_policy = search_plan.get("promptCachePolicy") if isinstance(search_plan.get("promptCachePolicy"), dict) else {}
     return {
         "planId": _trim_text(search_plan.get("planId"), max_length=128),
         "planKind": _trim_text(search_plan.get("planKind"), max_length=120) or "source_collection_data_search",
         "status": _trim_text(search_plan.get("status"), max_length=80) or "planned",
         "queryCount": _normalize_int(search_plan.get("queryCount"), default=0, minimum=0, maximum=SOURCE_COLLECTION_MAX_QUERIES),
         "externalSearchTriggered": False,
+        "promptCachePolicyId": _trim_text(prompt_cache_policy.get("policyId"), max_length=160),
+        "promptCacheRequirement": _trim_text(prompt_cache_policy.get("requirement"), max_length=80),
+        "promptCacheGateStatus": _trim_text((prompt_cache_policy.get("gate") or {}).get("status") if isinstance(prompt_cache_policy.get("gate"), dict) else "", max_length=80),
     }
 
 
@@ -5262,12 +5469,20 @@ def _source_collection_role_assignment_inputs(queries: list[dict[str, Any]], rol
     assignments: list[dict[str, Any]] = []
     for role in roles:
         role_queries = _source_collection_queries_for_role({"queries": queries}, role)
+        prompt_cache_partition = ""
+        for query in role_queries:
+            execution = query.get("execution") if isinstance(query.get("execution"), dict) else {}
+            prompt_cache_partition = _trim_text(execution.get("promptCachePartition"), max_length=160)
+            if prompt_cache_partition:
+                break
         assignments.append(
             {
                 "agentRole": role,
                 "agentId": _source_collection_agent_id(role, payload),
                 "queryIds": [item["queryId"] for item in role_queries],
                 "queryCount": len(role_queries),
+                "promptCachePartition": prompt_cache_partition,
+                "conversationTraceRequired": True,
                 "expectedAction": _source_collection_expected_action(role),
             }
         )
@@ -5531,6 +5746,7 @@ def _stage_source_collection_payload(stage_round: dict[str, Any], payload: dict[
         "searchLanguages": list(stage_round.get("searchLanguages") or []),
         "sourceTypes": list(stage_round.get("sourceTypes") or []),
         "maxResultsPerQuery": int(stage_round.get("maxResultsPerQuery") or SOURCE_COLLECTION_DEFAULT_MAX_RESULTS_PER_QUERY),
+        "promptCachePolicy": payload.get("promptCachePolicy") if isinstance(payload.get("promptCachePolicy"), dict) else {},
         "scope": scope,
     }
 
@@ -5615,6 +5831,7 @@ def _stage_memory_record(stage_round: dict[str, Any], workflow: dict[str, Any]) 
         "goal": stage_round.get("goal", ""),
         "sourceRunIds": list(stage_round.get("sourceRunIds") or []),
         "upstreamRoundIds": list(stage_round.get("upstreamRoundIds") or []),
+        "promptCachePolicyRef": _source_collection_prompt_cache_policy_ref(stage_round.get("promptCachePolicy") if isinstance(stage_round.get("promptCachePolicy"), dict) else {}),
         "boundary": "runtime_stage_record_only_not_formal_team_knowledge",
         "createdAt": utc_now_iso(),
     }
