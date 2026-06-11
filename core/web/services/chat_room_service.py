@@ -105,6 +105,8 @@ _CHAT_ROOM_ROUND_CONTROLS_LOCK = threading.Lock()
 _CHAT_ROOM_ROUND_CONTROLS: dict[str, dict[str, str]] = {}
 _CHAT_ROOM_PARTICIPANT_INDEX_CACHE_LOCK = threading.Lock()
 _CHAT_ROOM_PARTICIPANT_INDEX_CACHE: dict[str, Any] = {}
+_CHAT_ROOM_PARTICIPANT_INDEX_PREWARM_LOCK = threading.Lock()
+_CHAT_ROOM_PARTICIPANT_INDEX_PREWARM_INFLIGHT = False
 _MISSING_SESSION_STATUS_MESSAGE = "缺少有效 Agent：当前会话引用的 Agent 已不存在或不可用。"
 
 
@@ -189,8 +191,13 @@ def get_chat_room_compact(room_id: str) -> dict[str, Any] | None:
 
 def get_chat_room_detail(room_id: str) -> dict[str, Any] | None:
     started_at = _perf_counter()
+    phase_timings: list[dict[str, Any]] = []
+    stage_started_at = _perf_counter()
     state = _store().load()
+    _append_chat_room_detail_timing(phase_timings, "state.load", stage_started_at)
+    stage_started_at = _perf_counter()
     room = _find_room(state, room_id)
+    _append_chat_room_detail_timing(phase_timings, "room.find", stage_started_at)
     if not room:
         _record_chat_room_detail_loaded(
             "",
@@ -198,25 +205,41 @@ def get_chat_room_detail(room_id: str) -> dict[str, Any] | None:
             repaired=False,
             found=False,
             participant_index_cache_hit=False,
+            phase_timings=phase_timings,
         )
         return None
-    participant_indexes, participant_index_cache_hit = _participant_refresh_indexes()
+    stage_started_at = _perf_counter()
+    participant_indexes, participant_index_cache_hit, participant_index_timings = _participant_refresh_indexes()
+    _append_chat_room_detail_timing(
+        phase_timings,
+        "participant_index.refresh",
+        stage_started_at,
+        cache_hit=participant_index_cache_hit,
+    )
+    phase_timings.extend(participant_index_timings)
+    stage_started_at = _perf_counter()
     repaired = _repair_room_participants(
         room,
         session_summaries=participant_indexes["session_summaries"],
         active_agents_by_id=participant_indexes["active_agents_by_id"],
         active_agents_by_session_id=participant_indexes["active_agents_by_session_id"],
     )
+    _append_chat_room_detail_timing(phase_timings, "participant_repair", stage_started_at)
     if repaired:
         _clear_participant_refresh_index_cache()
+        stage_started_at = _perf_counter()
         _store().save(state)
+        _append_chat_room_detail_timing(phase_timings, "state.save_repair", stage_started_at)
+    stage_started_at = _perf_counter()
     detail = _room_to_api(room)
+    _append_chat_room_detail_timing(phase_timings, "payload.build", stage_started_at)
     _record_chat_room_detail_loaded(
         str(detail.get("roomId") or room_id),
         started_at,
         repaired=repaired,
         found=True,
         participant_index_cache_hit=participant_index_cache_hit,
+        phase_timings=phase_timings,
     )
     return detail
 
@@ -2627,21 +2650,108 @@ def _active_agent_participant_indexes() -> dict[str, dict[str, dict[str, Any]]]:
     return {"by_id": by_id, "by_session_id": by_session_id}
 
 
-def _participant_refresh_indexes() -> tuple[dict[str, dict[str, dict[str, Any]]], bool]:
+def prewarm_chat_room_participant_indexes(*, reason: str = "startup") -> dict[str, Any]:
+    """Build the participant refresh index before the first room detail request."""
+
+    global _CHAT_ROOM_PARTICIPANT_INDEX_PREWARM_INFLIGHT
+    normalized_reason = trim_lines(reason, max_lines=1) or "startup"
+    started_at = _perf_counter()
+    with _CHAT_ROOM_PARTICIPANT_INDEX_PREWARM_LOCK:
+        if _CHAT_ROOM_PARTICIPANT_INDEX_PREWARM_INFLIGHT:
+            return {
+                "status": "skipped",
+                "reason": normalized_reason,
+                "skipReason": "inflight",
+                "durationMs": _elapsed_ms(started_at),
+            }
+        _CHAT_ROOM_PARTICIPANT_INDEX_PREWARM_INFLIGHT = True
+
+    try:
+        indexes, cache_hit, timings = _participant_refresh_indexes()
+        duration_ms = _elapsed_ms(started_at)
+        session_count = len(indexes.get("session_summaries") or {})
+        active_agent_count = len(indexes.get("active_agents_by_id") or {})
+        result = {
+            "status": "completed",
+            "reason": normalized_reason,
+            "cacheHit": bool(cache_hit),
+            "durationMs": duration_ms,
+            "sessionCount": session_count,
+            "activeAgentCount": active_agent_count,
+        }
+        _record_chat_room_participant_index_prewarm(
+            status="completed",
+            reason=normalized_reason,
+            elapsed_ms=duration_ms,
+            cache_hit=cache_hit,
+            session_count=session_count,
+            active_agent_count=active_agent_count,
+            phase_timings=timings,
+        )
+        return result
+    except Exception as exc:
+        duration_ms = _elapsed_ms(started_at)
+        _record_chat_room_participant_index_prewarm(
+            status="failed",
+            reason=normalized_reason,
+            elapsed_ms=duration_ms,
+            error_type=type(exc).__name__,
+            error_message=trim_lines(str(exc), max_lines=2),
+        )
+        return {
+            "status": "failed",
+            "reason": normalized_reason,
+            "durationMs": duration_ms,
+            "errorType": type(exc).__name__,
+        }
+    finally:
+        with _CHAT_ROOM_PARTICIPANT_INDEX_PREWARM_LOCK:
+            _CHAT_ROOM_PARTICIPANT_INDEX_PREWARM_INFLIGHT = False
+
+
+def _participant_refresh_indexes() -> tuple[dict[str, dict[str, dict[str, Any]]], bool, list[dict[str, Any]]]:
+    timings: list[dict[str, Any]] = []
+    stage_started_at = _perf_counter()
     signature = _participant_refresh_index_signature()
+    _append_chat_room_detail_timing(timings, "participant_index.signature", stage_started_at)
+    stage_started_at = _perf_counter()
     with _CHAT_ROOM_PARTICIPANT_INDEX_CACHE_LOCK:
         if _CHAT_ROOM_PARTICIPANT_INDEX_CACHE.get("signature") == signature:
             cached = _CHAT_ROOM_PARTICIPANT_INDEX_CACHE.get("indexes")
             if isinstance(cached, dict):
-                return _copy_participant_refresh_indexes(cached), True
+                indexes = _copy_participant_refresh_indexes(cached)
+                _append_chat_room_detail_timing(
+                    timings,
+                    "participant_index.cache_copy",
+                    stage_started_at,
+                    count=len(indexes.get("session_summaries") or {}),
+                    cache_hit=True,
+                )
+                return indexes, True, timings
+    stage_started_at = _perf_counter()
+    session_summaries = _session_summary_index()
+    _append_chat_room_detail_timing(
+        timings,
+        "participant_index.session_summary",
+        stage_started_at,
+        count=len(session_summaries),
+    )
     indexes = {
-        "session_summaries": _session_summary_index(),
+        "session_summaries": session_summaries,
         "active_agents_by_id": {},
         "active_agents_by_session_id": {},
     }
+    stage_started_at = _perf_counter()
     active_agent_indexes = _active_agent_participant_indexes()
+    _append_chat_room_detail_timing(
+        timings,
+        "participant_index.active_agents",
+        stage_started_at,
+        count=len(active_agent_indexes.get("by_id") or {}),
+    )
     indexes["active_agents_by_id"] = active_agent_indexes["by_id"]
     indexes["active_agents_by_session_id"] = active_agent_indexes["by_session_id"]
+    stage_started_at = _perf_counter()
     with _CHAT_ROOM_PARTICIPANT_INDEX_CACHE_LOCK:
         _CHAT_ROOM_PARTICIPANT_INDEX_CACHE.clear()
         _CHAT_ROOM_PARTICIPANT_INDEX_CACHE.update(
@@ -2650,7 +2760,17 @@ def _participant_refresh_indexes() -> tuple[dict[str, dict[str, dict[str, Any]]]
                 "indexes": _copy_participant_refresh_indexes(indexes),
             }
         )
-    return _copy_participant_refresh_indexes(indexes), False
+    _append_chat_room_detail_timing(timings, "participant_index.cache_store", stage_started_at, cache_hit=False)
+    stage_started_at = _perf_counter()
+    copied = _copy_participant_refresh_indexes(indexes)
+    _append_chat_room_detail_timing(
+        timings,
+        "participant_index.result_copy",
+        stage_started_at,
+        count=len(copied.get("session_summaries") or {}),
+        cache_hit=False,
+    )
+    return copied, False, timings
 
 
 def _clear_participant_refresh_index_cache() -> None:
@@ -3168,6 +3288,7 @@ def _record_chat_room_detail_loaded(
     repaired: bool,
     found: bool,
     participant_index_cache_hit: bool,
+    phase_timings: list[dict[str, Any]] | None = None,
 ) -> None:
     try:
         record_runtime_scene_event(
@@ -3182,7 +3303,69 @@ def _record_chat_room_detail_loaded(
                 "participantRepair": bool(repaired),
                 "found": bool(found),
                 "participantIndexCacheHit": bool(participant_index_cache_hit),
+                "phaseTimingsMs": list(phase_timings or []),
             },
+        )
+    except Exception:
+        return
+
+
+def _append_chat_room_detail_timing(
+    timings: list[dict[str, Any]],
+    phase: str,
+    started_at: float,
+    *,
+    count: int | None = None,
+    cache_hit: bool | None = None,
+) -> None:
+    timing: dict[str, Any] = {
+        "phase": trim_lines(str(phase or "unknown"), max_lines=1)[:120],
+        "durationMs": _elapsed_ms(started_at),
+    }
+    if count is not None:
+        timing["count"] = int(count)
+    if cache_hit is not None:
+        timing["cacheHit"] = bool(cache_hit)
+    timings.append(timing)
+
+
+def _record_chat_room_participant_index_prewarm(
+    *,
+    status: str,
+    reason: str,
+    elapsed_ms: int,
+    cache_hit: bool = False,
+    session_count: int = 0,
+    active_agent_count: int = 0,
+    phase_timings: list[dict[str, Any]] | None = None,
+    error_type: str = "",
+    error_message: str = "",
+) -> None:
+    normalized_status = str(status or "").strip().lower() or "observed"
+    try:
+        record_runtime_scene_event(
+            "chat_room",
+            "participant_index",
+            "chat_room.participant_index.prewarm",
+            message=(
+                "Chat room participant index prewarm failed before the first room detail request."
+                if normalized_status == "failed"
+                else "Chat room participant index prewarm completed outside the room detail request path."
+            ),
+            level="warning" if normalized_status == "failed" else "info",
+            outcome=normalized_status,
+            fields={
+                "status": normalized_status,
+                "reason": trim_lines(reason, max_lines=1) or "startup",
+                "elapsedMs": max(0, int(elapsed_ms)),
+                "cacheHit": bool(cache_hit),
+                "sessionCount": max(0, int(session_count)),
+                "activeAgentCount": max(0, int(active_agent_count)),
+                "phaseTimingsMs": list(phase_timings or []),
+                "errorType": str(error_type or "").strip(),
+                "errorMessage": trim_lines(error_message, max_lines=2),
+            },
+            lifecycle=False,
         )
     except Exception:
         return
