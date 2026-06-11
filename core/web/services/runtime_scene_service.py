@@ -110,6 +110,18 @@ ISSUE_RESOLUTION_OUTCOMES = {
     "success",
     "succeeded",
 }
+OPERATION_TIMING_START_OUTCOME = "started"
+OPERATION_TIMING_TERMINAL_OUTCOMES = {
+    "blocked",
+    "cancelled",
+    "completed",
+    "failed",
+    "skipped",
+    "succeeded",
+}
+OPERATION_TIMING_RECENT_LIMIT = 12
+OPERATION_TIMING_SLOWEST_LIMIT = 8
+OPERATION_TIMING_OPEN_LIMIT = 8
 ISSUE_IDENTITY_FIELD_KEYS = (
     "activeRunId",
     "commandId",
@@ -1428,6 +1440,7 @@ def _runtime_scene_summary_payload(
     package_index: dict[str, Any],
 ) -> dict[str, Any]:
     diagnosis = _runtime_scene_package_diagnosis_for_scene(scene_dir, manifest, package_index["packageId"])
+    timeline = _read_scene_timeline(scene_dir)
     return {
         "schema_version": 2,
         "package_id": package_index["packageId"],
@@ -1445,6 +1458,7 @@ def _runtime_scene_summary_payload(
         "duration_seconds": package_index["durationSeconds"],
         "event_counts": _runtime_scene_summary_counts(scene_dir),
         "snapshot_metadata": _runtime_scene_snapshot_metadata(scene_dir),
+        "operation_timings": _runtime_scene_operation_timing_summary(timeline),
         "agent_brief": _runtime_scene_agent_brief(diagnosis),
         "diagnosis": diagnosis,
         "primary_files": {
@@ -2670,6 +2684,7 @@ def _runtime_scene_package_summary(
         "researchLogCount": len(research_logs),
         "errorCount": severity_summary["errorCount"],
         "warningCount": severity_summary["warningCount"],
+        "operationTimings": _runtime_scene_operation_timing_summary(timeline),
     }
 
 
@@ -4815,6 +4830,86 @@ def _scene_child_exists(scene_dir: Path, relative_path: str) -> bool:
         return _resolve_scene_child(scene_dir, relative_path).exists()
     except ValueError:
         return False
+
+
+def _runtime_scene_operation_timing_summary(events: list[dict]) -> dict[str, Any]:
+    pending: dict[tuple[str, str, str], dict[str, Any]] = {}
+    completed: list[dict[str, Any]] = []
+
+    for event in sorted(events, key=lambda item: str(item.get("timestamp") or item.get("ts") or "")):
+        operation = _runtime_scene_operation_timing_key(event)
+        if operation is None:
+            continue
+        key, operation_code, outcome = operation
+        if outcome == OPERATION_TIMING_START_OUTCOME:
+            pending[key] = event
+            continue
+        started = pending.pop(key, None)
+        if started is None:
+            continue
+        started_at = _runtime_scene_event_datetime(started)
+        ended_at = _runtime_scene_event_datetime(event)
+        if started_at is None or ended_at is None:
+            continue
+        elapsed_ms = max(0.0, round((ended_at - started_at).total_seconds() * 1000, 1))
+        completed.append(
+            {
+                "operationCode": operation_code,
+                "component": str(event.get("component") or started.get("component") or ""),
+                "phase": str(event.get("phase") or started.get("phase") or ""),
+                "outcome": outcome,
+                "startedAt": str(started.get("timestamp") or ""),
+                "endedAt": str(event.get("timestamp") or ""),
+                "elapsedMs": elapsed_ms,
+                "startEventCode": str(started.get("eventCode") or ""),
+                "endEventCode": str(event.get("eventCode") or ""),
+            }
+        )
+
+    open_operations = [
+        _runtime_scene_open_operation_payload(event, operation_code)
+        for (_component, _phase, operation_code), event in pending.items()
+    ]
+    open_operations.sort(key=lambda item: str(item.get("startedAt") or ""), reverse=True)
+    completed_recent = sorted(completed, key=lambda item: str(item.get("endedAt") or ""), reverse=True)
+    completed_slowest = sorted(completed, key=lambda item: float(item.get("elapsedMs") or 0.0), reverse=True)
+    return {
+        "completedCount": len(completed),
+        "openCount": len(open_operations),
+        "recentCompleted": completed_recent[:OPERATION_TIMING_RECENT_LIMIT],
+        "slowestCompleted": completed_slowest[:OPERATION_TIMING_SLOWEST_LIMIT],
+        "openOperations": open_operations[:OPERATION_TIMING_OPEN_LIMIT],
+    }
+
+
+def _runtime_scene_operation_timing_key(event: dict[str, Any]) -> tuple[tuple[str, str, str], str, str] | None:
+    event_code = str(event.get("eventCode") or event.get("event_code") or "").strip()
+    parts = [part for part in event_code.split(".") if part]
+    if len(parts) < 2:
+        return None
+    outcome = parts[-1]
+    if outcome != OPERATION_TIMING_START_OUTCOME and outcome not in OPERATION_TIMING_TERMINAL_OUTCOMES:
+        return None
+    operation_code = ".".join(parts[:-1])
+    if not operation_code:
+        return None
+    component = str(event.get("component") or "").strip()
+    phase = str(event.get("phase") or "").strip()
+    return (component, phase, operation_code), operation_code, outcome
+
+
+def _runtime_scene_open_operation_payload(event: dict[str, Any], operation_code: str) -> dict[str, str]:
+    return {
+        "operationCode": operation_code,
+        "component": str(event.get("component") or ""),
+        "phase": str(event.get("phase") or ""),
+        "startedAt": str(event.get("timestamp") or ""),
+        "startEventCode": str(event.get("eventCode") or ""),
+    }
+
+
+def _runtime_scene_event_datetime(event: dict[str, Any]) -> datetime | None:
+    return _parse_datetime(str(event.get("timestamp") or event.get("ts") or ""))
 
 
 def _runtime_scene_severity_summary(events: list[dict]) -> dict[str, int]:
