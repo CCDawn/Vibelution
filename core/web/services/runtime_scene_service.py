@@ -594,7 +594,7 @@ def record_browser_telemetry(payload: dict[str, Any]) -> dict[str, Any]:
                 )
             else:
                 _update_browser_manifest(scene_dir, manifest, timestamp, event_code, level, message, fields, indexed=indexed)
-        _update_runtime_scene_package_manifest(scene_dir, manifest)
+        _update_runtime_scene_package_manifest_lightweight(scene_dir, manifest)
 
     return {
         "accepted": True,
@@ -5272,6 +5272,22 @@ def _update_runtime_scene_package_manifest(scene_dir: Path, manifest: dict[str, 
     _save_runtime_scene_package_index(scene_dir, package_index)
     _save_runtime_scene_summary(scene_dir, manifest, package_index)
     _save_scene_manifest(scene_dir, manifest)
+
+
+def _update_runtime_scene_package_manifest_lightweight(scene_dir: Path, manifest: dict[str, Any]) -> None:
+    package = manifest.get("package")
+    if not isinstance(package, dict):
+        package = {}
+    scene_id = _scene_id(scene_dir, manifest)
+    package_index = _runtime_scene_lightweight_package_index(scene_dir, manifest, scene_id)
+    package.update({"schema_version": 2, **_runtime_scene_manifest_package_index_values(package_index)})
+    package["updated_at"] = _now_utc()
+    manifest["package"] = package
+    _save_scene_manifest(scene_dir, manifest)
+    try:
+        _save_runtime_scene_lightweight_package_index(scene_dir, package_index)
+    except OSError:
+        return
 
 
 def _next_scene_event_seq(scene_dir: Path, component: str) -> int:
