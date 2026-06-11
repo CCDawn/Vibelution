@@ -115,10 +115,13 @@ export function deriveRuntimeControllerState(runtime: RuntimeSnapshot | null | u
   const phase = String(runtime?.workbench?.phase ?? "").trim().toLowerCase();
   const failureMessage = String(runtime?.workbench?.failureMessage ?? "").trim();
   const browserManaged = Boolean(runtime?.workbench?.browserManaged);
+  const browserWindowAlive = Boolean(runtime?.workbench?.browserWindowAlive);
   const lifecycleConsistency = String(runtime?.workbench?.lifecycleConsistency ?? "").trim().toLowerCase();
   const frontendOrphaned = Boolean(runtime?.workbench?.frontendOrphaned) || lifecycleConsistency === "orphaned_browser";
+  const browserMissing = lifecycleConsistency === "browser_missing"
+    || (browserManaged && observedState === "partial" && !browserWindowAlive);
 
-  if (frontendOrphaned || phase === "failed" || failureMessage) {
+  if (frontendOrphaned || browserMissing || phase === "failed" || failureMessage) {
     return "failed";
   }
   if (desiredState === "closed" && observedState === "closed") {
@@ -143,6 +146,7 @@ export function deriveStartupProgressState(
   const observedState = String(workbench?.observedState ?? "").trim().toLowerCase();
   const phase = String(workbench?.phase ?? "").trim().toLowerCase();
   const lifecycleState = String(lifecycleProof?.overallState ?? "").trim().toLowerCase();
+  const lifecycleConsistency = String(workbench?.lifecycleConsistency ?? "").trim().toLowerCase();
   const rawFailureMessage = String(workbench?.failureMessage ?? "").trim();
   const failureMessage = textValue(rawFailureMessage);
   const statusLine = textValue(workbench?.statusLine);
@@ -161,6 +165,18 @@ export function deriveStartupProgressState(
       detail: failureSummary.detail,
       stage: failureSummary.stage,
       tone: "failed",
+    };
+  }
+
+  const browserMissing = lifecycleConsistency === "browser_missing"
+    || observedState === "partial";
+  if (desiredState === "open" && browserMissing && !workbenchReady) {
+    return {
+      active: true,
+      title: lang === "en" ? "Workbench window is not open" : "工作台窗口未打开",
+      detail: statusLine || summary || (lang === "en" ? "The backend is still running, but the workbench window is missing." : "后端仍在运行，但工作台窗口缺失。"),
+      stage: lang === "en" ? "Partial" : "部分运行",
+      tone: "caution",
     };
   }
 

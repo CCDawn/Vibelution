@@ -956,6 +956,15 @@ def _workbench_payload(lang: str, runtime_manager: dict) -> dict[str, object]:
     failure_message = str(workbench.get("failureMessage") or "").strip()
     lifecycle_consistency = str(workbench.get("lifecycleConsistency") or "consistent").strip() or "consistent"
     frontend_orphaned = bool(workbench.get("frontendOrphaned")) or lifecycle_consistency == "orphaned_browser"
+    browser_missing = bool(
+        lifecycle_consistency == "browser_missing"
+        or (
+            observed_state == "partial"
+            and bool(workbench.get("browserManaged", True))
+            and not bool(workbench.get("browserWindowAlive"))
+            and bool(workbench.get("backendObserved"))
+        )
+    )
 
     if frontend_orphaned:
         status_line = failure_message or text_for(
@@ -974,6 +983,12 @@ def _workbench_payload(lang: str, runtime_manager: dict) -> dict[str, object]:
             lang,
             zh="正在关闭工作台。",
             en="The runtime manager is closing the workbench.",
+        )
+    elif browser_missing:
+        status_line = text_for(
+            lang,
+            zh="工作台窗口已关闭，后端仍在运行。",
+            en="The workbench window is closed, but the backend is still running.",
         )
     elif desired_state == "open" and observed_state != "open":
         status_line = text_for(
@@ -1059,15 +1074,19 @@ def _runtime_lifecycle_proof(lang: str, runtime_manager: dict, workbench: dict, 
         or (backend_alive and not backend_port_conflict)
         or (backend_healthy and not backend_port_conflict)
         or backend_port_owner_trusted
-        or (observed_state == "open" and backend_pid > 0)
+        or (observed_state in {"open", "partial"} and backend_pid > 0)
     )
     browser_pid = int(workbench.get("browserWindowPid") or 0)
     browser_managed = bool(workbench.get("browserManaged", True))
     browser_window_alive = bool(workbench.get("browserWindowAlive")) or (
         observed_state == "open" and browser_pid > 0
     )
+    browser_missing = bool(
+        str(workbench.get("lifecycleConsistency") or "").strip().lower() == "browser_missing"
+        or (observed_state == "partial" and browser_managed and not browser_window_alive and backend_observed)
+    )
     active_work_runs = _active_work_runs(work_runs)
-    backend_verified = observed_state == "open" and backend_observed
+    backend_verified = observed_state in {"open", "partial"} and backend_observed
     backend_closed = desired_state == "closed" and observed_state == "closed" and not backend_observed
     window_verified = observed_state == "open" and (not browser_managed or browser_window_alive)
     window_closed = desired_state == "closed" and observed_state == "closed" and not browser_window_alive
@@ -1195,6 +1214,8 @@ def _runtime_lifecycle_proof(lang: str, runtime_manager: dict, workbench: dict, 
     )
     if failed:
         overall_state = "failed"
+    elif desired_state == "open" and browser_missing:
+        overall_state = "partial"
     elif desired_state == "open" and observed_state == "open":
         open_components_ok = manager_running and backend_verified and project_root_matches
         overall_state = "ready" if open_components_ok else "partial"
