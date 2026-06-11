@@ -1047,7 +1047,12 @@ def test_add_update_and_delete_llm_model_with_inline_provider():
     assert edited_supported_qwen["llm"]["model_library"]["custom_codex"]["prompt_cache"] == {
         "mode": "explicit_cache_control"
     }
-    build_effective_config(edited_supported_qwen)
+    assert edited_supported_qwen["llm"]["model_library"]["custom_codex"]["supports_prompt_cache"] is True
+    effective_supported_qwen = build_effective_config(edited_supported_qwen)
+    assert effective_supported_qwen.llm.model_library["custom_codex"]["supports_prompt_cache"] is True
+    assert effective_supported_qwen.llm.model_library["custom_codex"]["prompt_cache"] == {
+        "mode": "explicit_cache_control"
+    }
 
     deleted = delete_llm_model(edited, "custom_codex")
     assert "custom_codex" not in deleted["llm"]["model_library"]

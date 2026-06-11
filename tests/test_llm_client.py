@@ -1887,6 +1887,28 @@ def test_openai_automatic_prompt_cache_defaults_to_in_memory_retention_when_unse
     assert client._last_payload_protocol_summary["promptCacheProviderStrategy"] == "openai_automatic_key"
 
 
+def test_openai_gpt_5_5_automatic_prompt_cache_defaults_to_24h_retention():
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "relay",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://ai-pixel.online",
+            "llm.providers.default.compat_mode": "openai",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "gpt-5.5",
+            "llm.profiles.primary.transport": "responses",
+            "llm.profiles.primary.prompt_cache.mode": "automatic",
+        }
+    )
+
+    client = LLMClient(config=config, backend=lambda payload: payload)
+    payload = client._build_payload([{"role": "system", "content": "stable"}])
+
+    assert payload["prompt_cache_key"].startswith("vibelution:relay:primary:")
+    assert payload["prompt_cache_retention"] == "24h"
+    assert client._last_payload_protocol_summary["promptCacheProviderStrategy"] == "openai_automatic_key"
+
+
 def test_automatic_prompt_cache_uses_stable_default_cache_key_when_not_configured():
     config = make_config(
         **{
@@ -2127,6 +2149,49 @@ def test_automatic_prompt_cache_logs_design_even_when_payload_strips_cache_contr
     assert fields["promptCacheDesign"]["firstSystemCacheControlBlockCount"] == 1
     assert fields["promptCacheDesign"]["firstSystemCacheableTextChars"] == len("stable-prefix")
     assert fields["cachedInputTokens"] == 40
+
+
+def test_invoke_logs_prompt_cache_opportunity_when_cacheable_prefix_is_disabled(monkeypatch):
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "xiaomi",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://token-plan-cn.xiaomimimo.com/v1",
+            "llm.providers.default.compat_mode": "openai",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "mimo-v2.5-pro",
+            "llm.profiles.primary.prompt_cache.mode": "disabled",
+        }
+    )
+    recorded = []
+
+    def backend(_payload):
+        return {
+            "choices": [{"message": {"role": "assistant", "content": "ok"}}],
+            "usage": {"input_tokens": 100, "output_tokens": 5},
+        }
+
+    monkeypatch.setattr("core.llm.client._record_llm_scene_event", lambda *args, **kwargs: recorded.append((args, kwargs)))
+
+    cacheable_text = "stable-prefix " * 400
+    client = LLMClient(config=config, backend=backend)
+    client.invoke(
+        [
+            {
+                "role": "system",
+                "content": [
+                    {"type": "text", "text": cacheable_text, "cache_control": {"type": "ephemeral"}},
+                    {"type": "text", "text": "dynamic-suffix"},
+                ],
+            }
+        ]
+    )
+
+    fields = next(item for item in recorded if item[0][1] == "llm.invoke.succeeded")[1]["fields"]
+    design = fields["promptCacheDesign"]
+    assert design["mode"] == "disabled"
+    assert design["cacheablePrefixWithoutEnabledMode"] is True
+    assert design["cacheablePrefixOpportunityReason"] == "prompt_cache_mode_disabled"
 
 
 def test_invoke_logs_prompt_cache_order_with_history_before_volatile_context(monkeypatch):
