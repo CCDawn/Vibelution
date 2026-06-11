@@ -124,6 +124,7 @@ def submit_command(
         command_type = str(command.get("type") or "")
         event_type = {
             "close_workbench": "command_queue.close_joined",
+            "force_close_workbench": "command_queue.force_close_joined",
             "restart_workbench": "command_queue.restart_joined",
         }.get(command_type, "command_queue.open_joined")
         _append_queue_event(
@@ -613,6 +614,8 @@ def _joinable_lifecycle_command_id(command: dict[str, Any]) -> str:
         return _joinable_restart_command_id(command)
     if command_type == "close_workbench":
         return _joinable_close_command_id(command)
+    if command_type == "force_close_workbench":
+        return _joinable_force_close_command_id(command)
     return ""
 
 
@@ -716,6 +719,34 @@ def _joinable_close_command_id(command: dict[str, Any]) -> str:
         if not isinstance(payload, dict):
             continue
         if str(payload.get("type") or "").strip() != "close_workbench":
+            continue
+        return str(payload.get("commandId") or path.stem).strip() or path.stem
+    return ""
+
+
+def _joinable_force_close_command_id(command: dict[str, Any]) -> str:
+    command_type = str(command.get("type") or "").strip()
+    if command_type != "force_close_workbench":
+        return ""
+    manager_pid = load_pid()
+    if not _process_is_alive(manager_pid):
+        return ""
+    state = load_state()
+    if not isinstance(state, dict) or not _state_belongs_to_current_manager(state, manager_pid):
+        return ""
+    active = state.get("command") if isinstance(state.get("command"), dict) else {}
+    active_command_id = str(active.get("activeCommandId") or "").strip()
+    active_type = str(active.get("activeType") or "").strip()
+    if active_command_id and active_type in {"close_workbench", "force_close_workbench"}:
+        return active_command_id
+    for path in sorted(INBOX_DIR.glob("*.json")):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+        if str(payload.get("type") or "").strip() != "force_close_workbench":
             continue
         return str(payload.get("commandId") or path.stem).strip() or path.stem
     return ""

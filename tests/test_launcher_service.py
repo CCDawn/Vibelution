@@ -502,6 +502,7 @@ def test_launcher_force_stop_queues_command_with_active_work_details(tmp_path, m
     events = []
     commands = []
     monkeypatch.setattr(work_run_store, "WORK_RUNS_DIR", work_runs_dir)
+    monkeypatch.setattr(launcher_service, "_launcher_workbench_already_closed", lambda: False)
     monkeypatch.setattr(launcher_service, "ensure_daemon_running", lambda: None)
     monkeypatch.setattr(
         launcher_service,
@@ -543,6 +544,31 @@ def test_launcher_force_stop_queues_command_with_active_work_details(tmp_path, m
     accepted_event = next(event for event in events if event[0] == "launcher.bundle.force_stop.accepted")
     assert requested_event[1]["fields"]["activeWorkCount"] == 1
     assert accepted_event[1]["fields"]["commandId"] == "cmd-force-close"
+
+
+def test_launcher_force_stop_skips_when_workbench_already_closed(monkeypatch):
+    events = []
+    monkeypatch.setattr(launcher_service, "launcher_active_work_runs", lambda: [])
+    monkeypatch.setattr(launcher_service, "_launcher_workbench_already_closed", lambda: True)
+    monkeypatch.setattr(launcher_service, "ensure_daemon_running", lambda: (_ for _ in ()).throw(AssertionError("must not queue")))
+    monkeypatch.setattr(
+        launcher_service,
+        "submit_command",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("must not queue")),
+    )
+    monkeypatch.setattr(
+        launcher_service,
+        "append_runtime_manager_file_event",
+        lambda event_code, payload, **kwargs: events.append((event_code, payload)) or "2026-06-06T00:00:00+00:00",
+    )
+
+    response = launcher_service.request_launcher_force_stop()
+
+    assert response["accepted"] is False
+    assert response["operation"] == "force-stop"
+    assert response["commandId"] == ""
+    assert "已经关闭" in response["message"]
+    assert "launcher.bundle.force_stop.skipped_already_closed" in [event[0] for event in events]
 
 
 def test_launcher_active_work_guard_scans_parallel_chat_turn_snapshots(tmp_path, monkeypatch):
