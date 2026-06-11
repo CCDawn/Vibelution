@@ -21,6 +21,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 SCHEMA_VERSION = 1
 CANVAS_KIND = "team_organization_canvas"
 RESEARCH_TEAM_DISPLAY_NAME = "ai科学研究团队"
+AI_SEARCH_TEAM_ID = "ai-search-team"
+AI_SEARCH_TEAM_DISPLAY_NAME = "AI 搜索范围团队"
 DEFAULT_TEAM_STATUS = "active"
 TEAM_STATUSES = {"active", "archived"}
 NODE_TYPES = {"role", "agent", "group", "user", "external"}
@@ -55,6 +57,7 @@ EVOLUTION_SYSTEM_TEAM_SPECS = (
 TEAM_KIND_DEFAULTS = {
     "custom": {"teamCategory": "自定义团队", "teamSource": "manual", "chatRoomPurpose": "discussion"},
     "research": {"teamCategory": "科研组织团队", "teamSource": "research_organization", "chatRoomPurpose": "research_coordination"},
+    "ai_search": {"teamCategory": "AI 搜索系统团队", "teamSource": "ai_search", "chatRoomPurpose": "ai_search"},
     "self_evolution": {"teamCategory": "自进化系统团队", "teamSource": "self_evolution", "chatRoomPurpose": "self_evolution"},
     "supervised_evolution": {"teamCategory": "监督进化系统团队", "teamSource": "supervised_evolution", "chatRoomPurpose": "supervised_evolution"},
     "template_demo": {"teamCategory": "演示业务团队", "teamSource": "team_template", "chatRoomPurpose": "meeting"},
@@ -62,12 +65,14 @@ TEAM_KIND_DEFAULTS = {
 TEAM_SOURCE_TO_KIND = {
     "manual": "custom",
     "research_organization": "research",
+    "ai_search": "ai_search",
     "self_evolution": "self_evolution",
     "supervised_evolution": "supervised_evolution",
     "team_template": "template_demo",
 }
 TEAM_ID_TO_KIND = {
     "research-team": "research",
+    AI_SEARCH_TEAM_ID: "ai_search",
     "self-evolution-team": "self_evolution",
     "supervised-evolution-team": "supervised_evolution",
 }
@@ -75,6 +80,36 @@ TEMPLATE_MEMBER_PREFIX_TO_TEMPLATE_ID = {
     "medical-demo": "medical-consultation-demo",
     "heletech-demo": "heletech-maternal-digital-health-demo",
 }
+AI_SEARCH_SYSTEM_ROLES: tuple[dict[str, Any], ...] = (
+    {
+        "role": "ai_search_scope_lead",
+        "label": "搜索范围负责人",
+        "purpose": "维护搜索边界、可信度分层和默认启用规则。",
+        "responsibilities": ["维护白名单边界", "定义 Tier 规则", "决定默认启用范围"],
+        "expertise": ["搜索范围治理", "可信来源分层", "一键搜索策略"],
+    },
+    {
+        "role": "global_primary_sources",
+        "label": "全球官方源维护",
+        "purpose": "维护 OpenAI、Anthropic、Google DeepMind、Meta、Microsoft、NVIDIA 等全球一手源。",
+        "responsibilities": ["维护全球官方入口", "识别模型与产品更新", "保留一手证据链接"],
+        "expertise": ["全球 AI 实验室", "官方博客", "研究公告"],
+    },
+    {
+        "role": "cn_primary_sources",
+        "label": "中国 AI 源维护",
+        "purpose": "维护 DeepSeek、通义、智谱、Kimi、文心、豆包、腾讯混元等中国主流 AI 源。",
+        "responsibilities": ["维护中文官方入口", "跟踪国产模型更新", "标注语言与地区覆盖"],
+        "expertise": ["中国 AI 生态", "中文官方源", "模型平台动态"],
+    },
+    {
+        "role": "signal_quality_gate",
+        "label": "信号源质检",
+        "purpose": "管理新闻、社区和社交信号，要求所有信号回链到一手证据后再进入结论。",
+        "responsibilities": ["社区信号去噪", "新闻源可信度标注", "要求一手源回链"],
+        "expertise": ["来源质检", "去重", "证据回链"],
+    },
+)
 
 
 class TeamServiceError(ValueError):
@@ -330,6 +365,108 @@ def ensure_evolution_system_teams() -> dict[str, Any]:
     }
 
 
+def ai_search_system_team_missing() -> bool:
+    """Return whether the AI search scope Team should be materialized for the list surface."""
+
+    expected_roles = {str(role.get("role") or "").strip() for role in AI_SEARCH_SYSTEM_ROLES}
+    with _TEAM_LOCK:
+        state = _load_index()
+        if _repair_index_shape(state):
+            _save_index(state)
+        team = _find_team(state, AI_SEARCH_TEAM_ID)
+        if not team or str(team.get("status") or DEFAULT_TEAM_STATUS).strip() == "archived":
+            return True
+        if str(team.get("teamKind") or _infer_team_kind(team)).strip() != "ai_search":
+            return True
+        member_roles = {
+            str(member.get("role") or "").strip()
+            for member in list(team.get("members") or [])
+            if isinstance(member, dict) and str(member.get("agentId") or "").strip()
+        }
+        return not expected_roles.issubset(member_roles)
+
+
+def ensure_ai_search_system_team() -> dict[str, Any]:
+    """Ensure the AI search source-scope team is visible in the Team workspace."""
+
+    ensured_agents = _ensure_ai_search_system_agents()
+    agent_refs = _merged_agent_reference_maps(_load_lightweight_agent_references(), ensured_agents)
+    members = _ai_search_members_from_agents(ensured_agents)
+    now = utc_now_iso()
+    with _TEAM_LOCK:
+        state = _load_index()
+        changed = _repair_index_state(state, agent_refs=agent_refs)
+        members = _members_without_cross_team_conflicts(members, state, AI_SEARCH_TEAM_ID, source="ai_search")
+        team = _find_team(state, AI_SEARCH_TEAM_ID)
+        created = team is None
+        if team is None:
+            team = {
+                "teamId": AI_SEARCH_TEAM_ID,
+                "name": AI_SEARCH_TEAM_DISPLAY_NAME,
+                "description": "由 AI 最新动态搜索范围白名单自动同步的系统团队。",
+                "purpose": "维护 AI 最新动态一键搜索的来源范围、可信度分层、默认启用策略与信号源质检。",
+                "status": DEFAULT_TEAM_STATUS,
+                "members": members,
+                "linkedChatRoomId": "",
+                "canvasPath": _relative_path(_team_canvas_path(AI_SEARCH_TEAM_ID)),
+                "systemTeamKind": "ai_search",
+                "teamKind": "ai_search",
+                "teamCategory": "AI 搜索系统团队",
+                "teamSource": "ai_search",
+                "teamTemplateId": "",
+                "createdAt": now,
+                "updatedAt": now,
+            }
+            state.setdefault("teams", []).append(team)
+            changed = True
+        else:
+            expected = {
+                "name": AI_SEARCH_TEAM_DISPLAY_NAME,
+                "description": "由 AI 最新动态搜索范围白名单自动同步的系统团队。",
+                "purpose": "维护 AI 最新动态一键搜索的来源范围、可信度分层、默认启用策略与信号源质检。",
+                "status": DEFAULT_TEAM_STATUS,
+                "members": members,
+                "canvasPath": _relative_path(_team_canvas_path(AI_SEARCH_TEAM_ID)),
+                "systemTeamKind": "ai_search",
+                "teamKind": "ai_search",
+                "teamCategory": "AI 搜索系统团队",
+                "teamSource": "ai_search",
+                "teamTemplateId": "",
+            }
+            for key, value in expected.items():
+                if team.get(key) != value:
+                    team[key] = value
+                    changed = True
+            if changed:
+                team["updatedAt"] = now
+        if _apply_team_contract(team, team_kind="ai_search", team_source="ai_search"):
+            changed = True
+        canvas_path = _team_canvas_path(AI_SEARCH_TEAM_ID)
+        if created or _ai_search_canvas_needs_sync(canvas_path, team):
+            _write_json(canvas_path, _ai_search_canvas_for_team(team))
+            changed = True
+        if _team_chat_room_needs_sync(team, agent_refs=agent_refs):
+            _ensure_team_chat_room_link(team, agent_refs=agent_refs)
+            changed = True
+        if changed:
+            canvas = _ai_search_canvas_for_team(team)
+            team["updatedAt"] = str(team.get("updatedAt") or now)
+            state["updatedAt"] = team["updatedAt"]
+            _save_index(state)
+            _record_team_event(
+                "team.ai_search_system_synced",
+                team,
+                fields={
+                    "created": created,
+                    "memberCount": len(members),
+                    "nodeCount": len(canvas.get("nodes") or []),
+                    "edgeCount": len(canvas.get("edges") or []),
+                    "source": "ai_search",
+                },
+            )
+    return get_team(AI_SEARCH_TEAM_ID)
+
+
 def get_team(team_id: str) -> dict[str, Any]:
     started_at = _perf_counter()
     normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
@@ -548,7 +685,7 @@ def archive_team(team_id: str) -> dict[str, Any]:
 def _archive_team_in_state(state: dict[str, Any], team: dict[str, Any]) -> dict[str, Any]:
     team_id = str(team.get("teamId") or "").strip()
     team_kind = str(team.get("teamKind") or _infer_team_kind(team)).strip() or "custom"
-    if team_kind in {"research", "self_evolution", "supervised_evolution"}:
+    if team_kind in {"research", "ai_search", "self_evolution", "supervised_evolution"}:
         _record_team_archive_rejected(team, reason="system_team")
         raise TeamServiceError("System Team cannot be archived with cascade Agent deletion.")
     if team_kind not in {"custom", "template_demo"}:
@@ -964,6 +1101,145 @@ def _ensure_evolution_system_agents() -> dict[str, list[dict[str, Any]]]:
     except Exception as exc:
         _record_system_team_sync_failed("supervised_evolution", exc)
     return ensured
+
+
+def _ensure_ai_search_system_agents() -> list[dict[str, Any]]:
+    project_root = Path(PROJECT_ROOT).resolve()
+    ensured: list[dict[str, Any]] = []
+    try:
+        from . import session_service
+
+        previous_root = session_service.PROJECT_ROOT
+        session_service.PROJECT_ROOT = project_root
+        try:
+            for role in AI_SEARCH_SYSTEM_ROLES:
+                agent = _ensure_ai_search_role_agent(role, session_service=session_service)
+                if agent:
+                    ensured.append(agent)
+        finally:
+            session_service.PROJECT_ROOT = previous_root
+    except Exception as exc:
+        _record_system_team_sync_failed("ai_search", exc)
+    return ensured
+
+
+def _ensure_ai_search_role_agent(role: dict[str, Any], *, session_service: Any) -> dict[str, Any] | None:
+    role_key = str(role.get("role") or "").strip()
+    label = str(role.get("label") or role_key).strip() or role_key
+    if not role_key:
+        return None
+    existing = _find_agent_by_ai_search_role(role_key)
+    if not existing:
+        session_detail = session_service.create_chat_session(
+            title=label,
+            llm_bindings=session_service.default_session_llm_bindings(),
+            created_by="ai_search_team",
+        )
+        agent_id = str(session_detail.get("agentId") or "").strip()
+        existing = agent_directory_service.get_agent(agent_id) if agent_id else None
+        if not existing:
+            raise RuntimeError(f"AI search role Agent was not created for role: {role_key}")
+    if str(existing.get("status") or "active").strip() == "archived":
+        existing = agent_directory_service.reactivate_agent_instance(
+            str(existing.get("agentId") or ""),
+            reason="ai_search_team_required",
+            metadata={"protected": True, "fixedRole": True},
+        )
+    metadata = dict(existing.get("metadata") or {})
+    expected_metadata = _ai_search_role_metadata(role)
+    needs_update = (
+        str(existing.get("displayName") or "").strip() != label
+        or str(existing.get("primaryMode") or "").strip() != "research"
+        or str(existing.get("roleKey") or "").strip() != role_key
+        or str(existing.get("promptTemplateId") or "").strip() != "prompt-chat-default"
+        or any(metadata.get(key) != value for key, value in expected_metadata.items())
+    )
+    if needs_update:
+        existing = agent_directory_service.update_agent_instance(
+            str(existing.get("agentId") or ""),
+            display_name=label,
+            primary_mode="research",
+            role_key=role_key,
+            prompt_template_id="prompt-chat-default",
+            metadata=expected_metadata,
+            status="active",
+        )
+    return existing
+
+
+def _find_agent_by_ai_search_role(role_key: str) -> dict[str, Any] | None:
+    normalized = str(role_key or "").strip()
+    if not normalized:
+        return None
+    for agent in agent_directory_service.list_agents(include_archived=True, detail="summary"):
+        metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+        if str(metadata.get("aiSearchRole") or "").strip() == normalized:
+            return agent
+    return None
+
+
+def _ai_search_role_metadata(role: dict[str, Any]) -> dict[str, Any]:
+    role_key = str(role.get("role") or "").strip()
+    label = str(role.get("label") or role_key).strip() or role_key
+    purpose = str(role.get("purpose") or "").strip()
+    responsibilities = [str(item or "").strip() for item in list(role.get("responsibilities") or []) if str(item or "").strip()]
+    expertise = [str(item or "").strip() for item in list(role.get("expertise") or []) if str(item or "").strip()]
+    return {
+        "agentMode": "ai_search",
+        "configSurface": "team",
+        "fixedRole": True,
+        "protected": True,
+        "aiSearchRole": role_key,
+        "aiSearchRoleLabel": label,
+        "functionalDisplayName": label,
+        "managedDomain": "ai_latest_news_source_scope",
+        "personaProfile": {
+            "personality": "证据优先、克制、偏好一手来源和可复盘边界。",
+            "communicationStyle": "先说明来源可信度，再给纳入、默认启用或仅作信号的判断。",
+            "background": "维护 AI 最新动态一键搜索的来源范围名单，避免搜索结果被噪声和非一手信息污染。",
+            "expertise": expertise,
+        },
+        "taskProfile": {
+            "mission": purpose,
+            "responsibilities": "；".join(responsibilities) or purpose,
+            "preferredTasks": "维护 AI 动态搜索源白名单、标注地区/语言/Tier/evidenceRole/enabledByDefault，并发现缺源或噪声源。",
+            "avoidTasks": "不要把新闻、社区或社交信号直接当结论；不要自动发布、删除来源或写入正式知识库。",
+            "successCriteria": "每个来源都有稳定 id、入口 URL、可信度层级、证据角色、默认启用状态和人工说明。",
+            "deliverables": "搜索范围名单更新建议、缺源清单、信号源质检结论和一手证据回链要求。",
+            "constraints": "本团队只维护搜索范围和来源质量，不执行真实发布、远程写入或知识库审批。",
+        },
+    }
+
+
+def _ai_search_members_from_agents(agents: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    agents_by_role: dict[str, dict[str, Any]] = {}
+    for agent in agents:
+        if not isinstance(agent, dict):
+            continue
+        metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+        role_key = str(metadata.get("aiSearchRole") or agent.get("roleKey") or "").strip()
+        if role_key:
+            agents_by_role[role_key] = agent
+    members: list[dict[str, Any]] = []
+    for index, role in enumerate(AI_SEARCH_SYSTEM_ROLES, start=1):
+        role_key = str(role.get("role") or "").strip()
+        agent = agents_by_role.get(role_key)
+        agent_id = str((agent or {}).get("agentId") or "").strip()
+        if not agent_id:
+            continue
+        members.append(
+            {
+                "memberId": f"ai-search-{index}",
+                "agentId": agent_id,
+                "agentCode": str((agent or {}).get("agentCode") or "").strip(),
+                "agentName": str((agent or {}).get("displayName") or role.get("label") or "").strip(),
+                "role": role_key,
+                "purpose": str(role.get("label") or "").strip(),
+                "responsibilities": list(role.get("responsibilities") or []),
+                "agentStatus": "active",
+            }
+        )
+    return members
 
 
 def _ensure_evolution_system_team_in_state(
@@ -2403,6 +2679,97 @@ def _default_canvas_for_team(team: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _ai_search_canvas_for_team(team: dict[str, Any]) -> dict[str, Any]:
+    members_by_role = {
+        str(member.get("role") or "").strip(): member
+        for member in list(team.get("members") or [])
+        if isinstance(member, dict) and str(member.get("role") or "").strip()
+    }
+    positions = {
+        "ai_search_scope_lead": (120, 210),
+        "global_primary_sources": (420, 80),
+        "cn_primary_sources": (420, 340),
+        "signal_quality_gate": (720, 210),
+    }
+    nodes: list[dict[str, Any]] = []
+    for index, role in enumerate(AI_SEARCH_SYSTEM_ROLES, start=1):
+        role_key = str(role.get("role") or "").strip()
+        member = members_by_role.get(role_key) or {}
+        x, y = positions.get(role_key, (120 + index * 220, 210))
+        nodes.append(
+            {
+                "id": f"ai-search-{index}",
+                "label": str(member.get("agentName") or role.get("label") or role_key).strip(),
+                "type": "agent" if str(member.get("agentId") or "").strip() else "role",
+                "status": str(member.get("agentStatus") or ("bound" if member.get("agentId") else "unbound")).strip(),
+                "x": x,
+                "y": y,
+                "agentId": str(member.get("agentId") or "").strip(),
+                "agentCode": str(member.get("agentCode") or "").strip(),
+                "agentName": str(member.get("agentName") or "").strip(),
+                "role": role_key,
+                "purpose": str(role.get("label") or "").strip(),
+                "responsibilities": list(role.get("responsibilities") or []),
+            }
+        )
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "canvasKind": CANVAS_KIND,
+        "teamId": AI_SEARCH_TEAM_ID,
+        "updatedAt": str(team.get("updatedAt") or utc_now_iso()),
+        "path": _relative_path(_team_canvas_path(AI_SEARCH_TEAM_ID)),
+        "viewport": {"x": 0, "y": 0, "zoom": 1},
+        "nodes": nodes,
+        "edges": _ai_search_canvas_edges(),
+    }
+
+
+def _ai_search_canvas_edges() -> list[dict[str, Any]]:
+    return [
+        {"id": "ai-search-scope-global", "source": "ai-search-1", "target": "ai-search-2", "type": "communication", "label": "全球源边界"},
+        {"id": "ai-search-scope-cn", "source": "ai-search-1", "target": "ai-search-3", "type": "communication", "label": "中国源边界"},
+        {"id": "ai-search-global-quality", "source": "ai-search-2", "target": "ai-search-4", "type": "supports", "label": "一手源回链"},
+        {"id": "ai-search-cn-quality", "source": "ai-search-3", "target": "ai-search-4", "type": "supports", "label": "一手源回链"},
+        {"id": "ai-search-quality-scope", "source": "ai-search-4", "target": "ai-search-1", "type": "supports", "label": "启用规则回写"},
+    ]
+
+
+def _ai_search_canvas_needs_sync(canvas_path: Path, team: dict[str, Any]) -> bool:
+    if not canvas_path.exists():
+        return True
+    try:
+        canvas = _read_json(canvas_path)
+    except Exception:
+        return True
+    expected_roles = {str(role.get("role") or "").strip() for role in AI_SEARCH_SYSTEM_ROLES}
+    node_roles = {
+        str(node.get("role") or "").strip()
+        for node in list(canvas.get("nodes") or [])
+        if isinstance(node, dict)
+    }
+    expected_agent_ids_by_role = {
+        str(member.get("role") or "").strip(): str(member.get("agentId") or "").strip()
+        for member in list(team.get("members") or [])
+        if isinstance(member, dict) and str(member.get("role") or "").strip()
+    }
+    canvas_agent_ids_by_role = {
+        str(node.get("role") or "").strip(): str(node.get("agentId") or "").strip()
+        for node in list(canvas.get("nodes") or [])
+        if isinstance(node, dict) and str(node.get("role") or "").strip()
+    }
+    expected_edges = {str(edge.get("id") or "").strip() for edge in _ai_search_canvas_edges()}
+    edge_ids = {
+        str(edge.get("id") or "").strip()
+        for edge in list(canvas.get("edges") or [])
+        if isinstance(edge, dict)
+    }
+    agents_match = all(
+        not expected_agent_id or canvas_agent_ids_by_role.get(role_key) == expected_agent_id
+        for role_key, expected_agent_id in expected_agent_ids_by_role.items()
+    )
+    return not expected_roles.issubset(node_roles) or not expected_edges.issubset(edge_ids) or not agents_match
+
+
 def _default_nodes_for_members(members: list[dict[str, Any]]) -> list[dict[str, Any]]:
     nodes: list[dict[str, Any]] = []
     for index, member in enumerate(members):
@@ -2471,6 +2838,17 @@ def _default_edges_for_team(team: dict[str, Any], nodes: list[dict[str, Any]]) -
                 ("auditor", "judge", "审计进入裁决"),
             ],
         )
+    if _infer_team_kind(team) == "ai_search":
+        return _edges_from_role_chain(
+            nodes_by_role,
+            [
+                ("ai_search_scope_lead", "global_primary_sources", "全球源边界"),
+                ("ai_search_scope_lead", "cn_primary_sources", "中国源边界"),
+                ("global_primary_sources", "signal_quality_gate", "一手源回链"),
+                ("cn_primary_sources", "signal_quality_gate", "一手源回链"),
+                ("signal_quality_gate", "ai_search_scope_lead", "启用规则回写"),
+            ],
+        )
     return []
 
 
@@ -2501,7 +2879,7 @@ def _edges_from_role_chain(
 
 
 def _default_canvas_edges_missing_for_team(team: dict[str, Any], canvas_path: Path) -> bool:
-    if _infer_team_kind(team) not in {"self_evolution", "supervised_evolution"}:
+    if _infer_team_kind(team) not in {"self_evolution", "supervised_evolution", "ai_search"}:
         return False
     if not canvas_path.exists():
         return True
@@ -2836,15 +3214,18 @@ def _record_system_team_membership_conflict(team_id: str, agent_id: str, conflic
 
 def _record_system_team_sync_failed(source: str, exc: Exception) -> None:
     try:
+        normalized_source = str(source or "").strip()
+        event_code = "team.ai_search_system_sync_failed" if normalized_source == "ai_search" else "team.system_evolution_sync_failed"
+        message = "AI search system Team sync failed" if normalized_source == "ai_search" else "System evolution Team sync failed"
         record_runtime_scene_event(
             "team_service",
             "team",
-            "team.system_evolution_sync_failed",
-            message="System evolution Team sync failed",
+            event_code,
+            message=message,
             level="warning",
             outcome="failed",
             fields={
-                "source": str(source or "").strip(),
+                "source": normalized_source,
                 "errorType": type(exc).__name__,
                 "message": str(exc),
             },

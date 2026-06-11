@@ -10,8 +10,10 @@ from pydantic import BaseModel, Field
 from core.web.services.team_service import (
     TeamNotFoundError,
     TeamServiceError,
+    ai_search_system_team_missing,
     archive_team,
     create_team,
+    ensure_ai_search_system_team,
     ensure_evolution_system_teams,
     evolution_system_teams_missing,
     get_team,
@@ -69,6 +71,8 @@ class TeamMessagePayload(BaseModel):
 def team_list(includeArchived: bool = False) -> dict:
     if evolution_system_teams_missing():
         ensure_evolution_system_teams()
+    if ai_search_system_team_missing():
+        ensure_ai_search_system_team()
     return list_teams_compact(include_archived=includeArchived)
 
 

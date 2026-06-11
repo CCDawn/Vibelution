@@ -274,6 +274,60 @@ def test_ensure_evolution_system_teams_materializes_mode_roles(tmp_path, monkeyp
     ]
 
 
+def test_ensure_ai_search_system_team_materializes_source_scope_roles(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+
+    team = team_service.ensure_ai_search_system_team()
+
+    expected_roles = [
+        "ai_search_scope_lead",
+        "global_primary_sources",
+        "cn_primary_sources",
+        "signal_quality_gate",
+    ]
+    assert team["teamId"] == team_service.AI_SEARCH_TEAM_ID
+    assert team["name"] == "AI 搜索范围团队"
+    assert team["systemTeamKind"] == "ai_search"
+    assert team["teamKind"] == "ai_search"
+    assert team["teamCategory"] == "AI 搜索系统团队"
+    assert team["teamSource"] == "ai_search"
+    assert team["memberCount"] == 4
+    assert [member["role"] for member in team["members"]] == expected_roles
+    assert team["linkedChatRoomId"]
+    assert team["linkedChatRoom"]["participantCount"] == 4
+
+    room = chat_room_service.get_chat_room_detail(team["linkedChatRoomId"])
+    assert room["purpose"] == "ai_search"
+    assert room["config"]["teamKind"] == "ai_search"
+    assert room["config"]["teamSource"] == "ai_search"
+    assert len(room["participants"]) == 4
+
+    canvas = team_service.get_team_canvas(team_service.AI_SEARCH_TEAM_ID)
+    assert canvas["canvasKind"] == team_service.CANVAS_KIND
+    assert [node["role"] for node in canvas["nodes"]] == expected_roles
+    assert {edge["id"] for edge in canvas["edges"]} == {
+        "ai-search-scope-global",
+        "ai-search-scope-cn",
+        "ai-search-global-quality",
+        "ai-search-cn-quality",
+        "ai-search-quality-scope",
+    }
+
+    agents = agent_directory_service.list_agents(include_archived=True, detail="summary")
+    agents_by_role = {
+        agent["metadata"].get("aiSearchRole"): agent
+        for agent in agents
+        if isinstance(agent.get("metadata"), dict) and agent["metadata"].get("aiSearchRole")
+    }
+    assert set(agents_by_role) == set(expected_roles)
+    assert all(agent["primaryMode"] == "research" for agent in agents_by_role.values())
+    assert all(agent["metadata"]["fixedRole"] is True for agent in agents_by_role.values())
+    assert all(agent["metadata"]["protected"] is True for agent in agents_by_role.values())
+
+    second = team_service.ensure_ai_search_system_team()
+    assert [member["agentId"] for member in second["members"]] == [member["agentId"] for member in team["members"]]
+
+
 def test_ensure_evolution_system_teams_preserves_existing_team_member_status(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     agent = agent_directory_service.create_agent_instance(display_name="Research Lead", direct_session_id="session-research-lead")

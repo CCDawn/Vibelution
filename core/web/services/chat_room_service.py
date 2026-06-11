@@ -73,6 +73,11 @@ CHAT_ROOM_PURPOSES = [
         "description": "Research organization coordination with role-aware reporting, evidence, and task routing.",
     },
     {
+        "id": "ai_search",
+        "label": "AI search",
+        "description": "AI source-scope curation, source tiering, default enablement, and signal quality checks.",
+    },
+    {
         "id": "self_evolution",
         "label": "Self evolution",
         "description": "Self-evolution role coordination across execution, review, and summary responsibilities.",
