@@ -3123,7 +3123,11 @@ export type DataProcessingRun = {
       status?: string;
       queryCount?: number;
       externalSearchTriggered?: boolean;
+      promptCachePolicyId?: string;
+      promptCacheRequirement?: string;
+      promptCacheGateStatus?: string;
     };
+    promptCachePolicyRef?: TeamWorkflowSourceCollectionPromptCachePolicyRef;
   };
   metadata: Record<string, unknown> & {
     startedFrom?: string;
@@ -3133,6 +3137,11 @@ export type DataProcessingRun = {
     searchPlanId?: string;
     queryCount?: number;
     querySeedCount?: number;
+    promptCachePolicyId?: string;
+    promptCacheRequirement?: string;
+    promptCacheModelId?: string;
+    promptCacheMode?: string;
+    promptCacheGateStatus?: string;
   };
   summary?: DataProcessingStatus["summary"];
   storage: {
@@ -3194,6 +3203,9 @@ export type DataProcessingCollectionAssignment = {
     queryCount?: number;
     dataSearchPlanRef?: DataProcessingRun["scope"]["dataSearchPlanRef"];
     resultWritebackContract?: TeamWorkflowSourceCollectionWritebackContract;
+    promptCachePolicyRef?: TeamWorkflowSourceCollectionPromptCachePolicyRef;
+    promptCachePartition?: string;
+    conversationTraceRequired?: boolean;
   };
   inputRefs: string[];
   expectedRecordTypes: string[];
@@ -3233,6 +3245,51 @@ export type DataProcessingCollectionOutputPayload = {
   createdRecords: DataProcessingRecord[];
 };
 
+export type TeamWorkflowSourceCollectionPromptCachePolicyRef = {
+  policyId?: string;
+  scope?: string;
+  requirement?: string;
+  modelId?: string;
+  promptCacheMode?: string;
+  gateStatus?: string;
+};
+
+export type TeamWorkflowSourceCollectionPromptCachePolicy = {
+  schemaVersion: number;
+  policyId: string;
+  policyKind: string;
+  scope: string;
+  requirement: string;
+  modelId: string;
+  modelName: string;
+  providerId: string;
+  promptCacheMode: string;
+  supportedPromptCacheModes: string[];
+  partitionTemplate: string;
+  rolePartitions: Array<{
+    agentRole: string;
+    agentId: string;
+    promptCachePartition: string;
+  }>;
+  stablePrefixContract: {
+    cacheableBlocks: string[];
+    forbiddenDynamicFields: string[];
+    expectedUsage: string;
+  };
+  dynamicDeltaContract: {
+    allowedFields: string[];
+    maxRawContentPolicy: string;
+    conversationTraceRequired: boolean;
+  };
+  gate: {
+    status: string;
+    passed: boolean;
+    hardBlock: boolean;
+    reason: string;
+    checkedAt: string;
+  };
+};
+
 export type TeamWorkflowSourceCollectionQuery = {
   queryId: string;
   query: string;
@@ -3245,6 +3302,9 @@ export type TeamWorkflowSourceCollectionQuery = {
   execution: {
     mode: string;
     externalSearchTriggered: boolean;
+    conversationTraceRequired?: boolean;
+    promptCacheRequired?: boolean;
+    promptCachePartition?: string;
   };
   writeback: {
     target: string;
@@ -3291,14 +3351,18 @@ export type TeamWorkflowSourceCollectionSearchPlan = {
     agentId: string;
     queryIds: string[];
     queryCount: number;
+    promptCachePartition?: string;
+    conversationTraceRequired?: boolean;
     expectedAction: string;
   }>;
+  promptCachePolicy: TeamWorkflowSourceCollectionPromptCachePolicy;
   resultWritebackContract: TeamWorkflowSourceCollectionWritebackContract;
   boundaries: {
     externalSearchTriggered: boolean;
     writesFormalKnowledge: boolean;
     writesRag: boolean;
     writesKnowledgeGraph: boolean;
+    requiresPromptCacheForAgentExecution?: boolean;
   };
 };
 
@@ -3307,6 +3371,7 @@ export type TeamWorkflowSourceCollectionRunStartPayload = {
   searchPlan: TeamWorkflowSourceCollectionSearchPlan;
   assignments: DataProcessingCollectionAssignment[];
   assignmentCount: number;
+  promptCachePolicy: TeamWorkflowSourceCollectionPromptCachePolicy;
   workflow: TeamWorkflowOrchestration;
   nextActions: string[];
 };

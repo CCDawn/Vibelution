@@ -273,6 +273,10 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("renderSourceCollectionControlsPanel");
     expect(routeSource).toContain("知识搜集工作台");
     expect(routeSource).toContain("搜集对话流");
+    expect(routeSource).toContain("KV 缓存门禁已写入本轮搜集");
+    expect(routeSource).toContain("promptCachePolicy: SOURCE_COLLECTION_PROMPT_CACHE_POLICY");
+    expect(routeSource).toContain("promptCachePartition");
+    expect(routeSource).toContain("dynamic delta: query/result refs only");
     expect(routeSource).toContain("返回团队页面");
     expect(routeSource).toContain("实验规划工作台");
     expect(routeSource).toContain("迭代优化工作台");
@@ -346,6 +350,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.sourceCollectionPageGrid).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionConversationPanel).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionTraceMessage).toBeTypeOf("string");
+    expect(routeStyles.sourceCollectionTrace_cache).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionTraceStorage).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionControlPanel).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionStageModules).toBeTypeOf("string");

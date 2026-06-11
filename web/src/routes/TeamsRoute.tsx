@@ -31,6 +31,8 @@ import {
   TeamWorkflowCandidateGraphNode,
   TeamWorkflowCoordinationStatus,
   TeamWorkflowKnowledgeIngestionStatus,
+  TeamWorkflowSourceCollectionPromptCachePolicy,
+  TeamWorkflowSourceCollectionPromptCachePolicyRef,
   TeamWorkflowSourceCollectionRunStartPayload,
   TeamTemplateInstantiatePayload,
   TeamTemplateListPayload,
@@ -65,6 +67,10 @@ const WORKFLOW_GRAPH_MARGIN_X = 22;
 const WORKFLOW_GRAPH_MARGIN_Y = 28;
 const SOURCE_COLLECTION_RUN_PREVIEW_LIMIT = 20;
 const SOURCE_COLLECTION_DEFAULT_ROLES = ["data_discovery", "source_acquisition", "content_extraction", "source_quality"];
+const SOURCE_COLLECTION_PROMPT_CACHE_POLICY = {
+  requirement: "required_for_llm_execution",
+  modelId: "houmo_qwen35_9b_agent",
+};
 
 const researchStageRoundStatusQueryKey = (id: string) => ["teams", id, "workflow-orchestration", "stage-rounds", "status"] as const;
 const officialModelEvidenceStatusQueryKey = (id: string) => ["teams", id, "workflow-orchestration", "official-model-evidence", "status"] as const;
@@ -216,7 +222,7 @@ type SourceCollectionTraceMessage = {
   title: string;
   body: string;
   status: string;
-  tone: "plan" | "search" | "acquire" | "extract" | "quality" | "storage" | "blocked";
+  tone: "plan" | "cache" | "search" | "acquire" | "extract" | "quality" | "storage" | "blocked";
   refs: string[];
   storageRefs: string[];
 };
@@ -232,6 +238,7 @@ type ResearchStageRound = {
   goal: string;
   sourceRunIds?: string[];
   querySeeds?: string[];
+  promptCachePolicy?: TeamWorkflowSourceCollectionRunStartPayload["promptCachePolicy"];
   teamMemoryRecordId?: string;
   coordinationContract?: {
     linkedChatRoomId?: string;
@@ -285,9 +292,11 @@ type ResearchStageRoundStartPayload = {
   phase: ResearchStagePhaseStatus;
   status: ResearchStageRoundStatusPayload;
   workflow: TeamWorkflowOrchestration;
+  sourceCollectionRun?: TeamWorkflowSourceCollectionRunStartPayload;
   run?: TeamWorkflowSourceCollectionRunStartPayload["run"];
   searchPlan?: TeamWorkflowSourceCollectionRunStartPayload["searchPlan"];
   assignments?: TeamWorkflowSourceCollectionRunStartPayload["assignments"];
+  promptCachePolicy?: TeamWorkflowSourceCollectionRunStartPayload["promptCachePolicy"];
   boundaries: ResearchStageRoundStatusPayload["boundaries"];
 };
 
@@ -605,6 +614,44 @@ function sourceCollectionRunsForTeam(payload: DataProcessingRunListPayload | und
 
 function sourceCollectionRunLabel(runId: string) {
   return runId ? `${runId.slice(0, 10)}...` : "-";
+}
+
+function hasSourceCollectionPromptCachePolicy(
+  policy: TeamWorkflowSourceCollectionPromptCachePolicy | undefined | null,
+): policy is TeamWorkflowSourceCollectionPromptCachePolicy {
+  return Boolean(policy?.policyId || policy?.requirement || policy?.promptCacheMode);
+}
+
+function sourceCollectionPromptCacheStatusLabel(status: string, lang: "zh" | "en") {
+  const normalized = String(status || "").toLowerCase();
+  if (lang === "zh") {
+    if (normalized === "satisfied") {
+      return "已通过";
+    }
+    if (normalized === "warning") {
+      return "警告";
+    }
+    if (normalized === "blocked") {
+      return "已阻断";
+    }
+    if (normalized === "disabled") {
+      return "已关闭";
+    }
+    return "待检查";
+  }
+  if (normalized === "satisfied") {
+    return "satisfied";
+  }
+  if (normalized === "warning") {
+    return "warning";
+  }
+  if (normalized === "blocked") {
+    return "blocked";
+  }
+  if (normalized === "disabled") {
+    return "disabled";
+  }
+  return "pending";
 }
 
 function canvasFromTeam(team: Team | null): TeamOrganizationCanvas | null {
@@ -1713,6 +1760,7 @@ export function TeamsRoute({
             searchLanguages: splitDraftList(payload.draft.searchLanguages, 8),
             sourceTypes: splitDraftList(payload.draft.sourceTypes, 12),
             maxResultsPerQuery: payload.draft.maxResultsPerQuery,
+            promptCachePolicy: SOURCE_COLLECTION_PROMPT_CACHE_POLICY,
             scope: {
               domain: "neuroscience-inspired algorithm discovery",
               workflowStage: "knowledge_collection",
@@ -1762,6 +1810,7 @@ export function TeamsRoute({
             searchLanguages: splitDraftList(payload.draft.searchLanguages, 8),
             sourceTypes: splitDraftList(payload.draft.sourceTypes, 12),
             maxResultsPerQuery: payload.draft.maxResultsPerQuery,
+            promptCachePolicy: SOURCE_COLLECTION_PROMPT_CACHE_POLICY,
             scope: {
               domain: "neuroscience-inspired algorithm discovery",
               workflowStage: payload.stageType,
@@ -2182,6 +2231,7 @@ export function TeamsRoute({
   function renderSourceCollectionConversation() {
     const toneClass: Record<SourceCollectionTraceMessage["tone"], string> = {
       plan: styles.sourceCollectionTrace_plan,
+      cache: styles.sourceCollectionTrace_cache,
       search: styles.sourceCollectionTrace_search,
       acquire: styles.sourceCollectionTrace_acquire,
       extract: styles.sourceCollectionTrace_extract,
@@ -2196,8 +2246,8 @@ export function TeamsRoute({
             <strong>{lang === "zh" ? "搜集对话流" : "Collection conversation"}</strong>
             <span>
               {lang === "zh"
-                ? "按计划、搜索、获取、提取、入库和质检展示完成过程。"
-                : "Shows planning, search, acquisition, extraction, storage, and quality steps."}
+                ? "按计划、KV 缓存、搜索、获取、提取、入库和质检展示完成过程。"
+                : "Shows planning, KV cache, search, acquisition, extraction, storage, and quality steps."}
             </span>
           </div>
           <small>{sourceCollectionTraceMessages.length} steps</small>
@@ -2363,6 +2413,7 @@ export function TeamsRoute({
             <span>{lang === "zh" ? "任务" : "assignments"} <strong>{sourceCollectionRunStatus?.summary.assignmentCount ?? sourceCollectionAssignments.length}</strong></span>
             <span>{lang === "zh" ? "未完成" : "open"} <strong>{sourceCollectionRunStatus?.summary.openAssignmentCount ?? 0}</strong></span>
             <span>queries <strong>{sourceCollectionSearchPlanRef?.queryCount ?? selectedTeamStartSourceCollectionResult?.searchPlan.queryCount ?? 0}</strong></span>
+            <span>KV <strong>{sourceCollectionPromptCacheStatusLabel(sourceCollectionPromptCacheStatus, lang)}{sourceCollectionPromptCacheMode ? ` · ${sourceCollectionPromptCacheMode}` : ""}</strong></span>
           </div>
         </div>
         {sourceCollectionAssignments.length ? (
@@ -2894,6 +2945,31 @@ export function TeamsRoute({
       : null;
   const selectedTeamStartSourceCollectionResult =
     startSourceCollectionRunMutation.variables?.teamId === selectedTeam?.teamId ? startSourceCollectionRunMutation.data : undefined;
+  const sourceCollectionPromptCachePolicy =
+    [
+      selectedTeamStartSourceCollectionResult?.promptCachePolicy,
+      selectedTeamStartSourceCollectionResult?.searchPlan.promptCachePolicy,
+      selectedTeamStartResearchStageResult?.promptCachePolicy,
+      selectedTeamStartResearchStageResult?.sourceCollectionRun?.promptCachePolicy,
+      selectedTeamStartResearchStageResult?.searchPlan?.promptCachePolicy,
+      selectedTeamStartResearchStageResult?.stageRound.promptCachePolicy,
+    ].find(hasSourceCollectionPromptCachePolicy) ?? null;
+  const sourceCollectionPromptCachePolicyRef: TeamWorkflowSourceCollectionPromptCachePolicyRef | null =
+    selectedSourceCollectionRun?.scope.promptCachePolicyRef
+    ?? selectedSourceCollectionAssignment?.scope.promptCachePolicyRef
+    ?? (sourceCollectionSearchPlanRef?.promptCachePolicyId
+      ? {
+          policyId: sourceCollectionSearchPlanRef.promptCachePolicyId,
+          requirement: sourceCollectionSearchPlanRef.promptCacheRequirement,
+          gateStatus: sourceCollectionSearchPlanRef.promptCacheGateStatus,
+        }
+      : null);
+  const sourceCollectionPromptCacheStatus =
+    sourceCollectionPromptCachePolicy?.gate?.status || sourceCollectionPromptCachePolicyRef?.gateStatus || "";
+  const sourceCollectionPromptCacheMode =
+    sourceCollectionPromptCachePolicy?.promptCacheMode || sourceCollectionPromptCachePolicyRef?.promptCacheMode || "";
+  const sourceCollectionPromptCacheRequirement =
+    sourceCollectionPromptCachePolicy?.requirement || sourceCollectionPromptCachePolicyRef?.requirement || SOURCE_COLLECTION_PROMPT_CACHE_POLICY.requirement;
   const sourceCollectionOutputHasRecord =
     Boolean(sourceCollectionOutputDraft.title.trim() || sourceCollectionOutputDraft.sourceRef.trim() || sourceCollectionOutputDraft.rawLocation.trim());
   const selectedTeamRecordSourceCollectionOutputPending =
@@ -2926,18 +3002,58 @@ export function TeamsRoute({
       storageRefs: runStorage ? [runStorage.runPath, runStorage.recordsPath] : [],
     });
     const plannedQueries = sourceCollectionAssignments.flatMap((assignment) => assignment.scope.assignedQueries ?? []);
+    const promptCacheGateStatus = sourceCollectionPromptCachePolicy?.gate?.status || sourceCollectionPromptCachePolicyRef?.gateStatus || "";
+    const promptCacheMode = sourceCollectionPromptCachePolicy?.promptCacheMode || sourceCollectionPromptCachePolicyRef?.promptCacheMode || "";
+    const promptCacheRolePartitions = sourceCollectionPromptCachePolicy?.rolePartitions?.length
+      ? sourceCollectionPromptCachePolicy.rolePartitions
+      : sourceCollectionAssignments
+          .map((assignment) => ({
+            agentRole: assignment.agentRole,
+            agentId: assignment.agentId,
+            promptCachePartition: String(assignment.scope.promptCachePartition || ""),
+          }))
+          .filter((item) => item.promptCachePartition);
+    if (selectedSourceCollectionRun || sourceCollectionPromptCachePolicy || sourceCollectionPromptCachePolicyRef) {
+      messages.push({
+        id: "prompt-cache-gate",
+        agentRole: "Research Coordination Agent",
+        title: lang === "zh" ? "KV 缓存门禁已写入本轮搜集" : "KV cache gate attached to this run",
+        body: lang === "zh"
+          ? `本轮使用 ${sourceCollectionPromptCachePolicy?.modelName || sourceCollectionPromptCachePolicyRef?.modelId || SOURCE_COLLECTION_PROMPT_CACHE_POLICY.modelId}，稳定前缀只放团队规则、schema 和回写边界；每次搜索只传当前 query、结果引用和存储位置，避免反复重放网页全文。`
+          : `This run uses ${sourceCollectionPromptCachePolicy?.modelName || sourceCollectionPromptCachePolicyRef?.modelId || SOURCE_COLLECTION_PROMPT_CACHE_POLICY.modelId}. The stable prefix keeps team rules, schemas, and writeback boundaries; each search sends only the current query, result refs, and storage location.`,
+        status: sourceCollectionPromptCacheStatusLabel(promptCacheGateStatus, lang),
+        tone: promptCacheGateStatus === "blocked" ? "blocked" : "cache",
+        refs: [
+          `requirement: ${sourceCollectionPromptCacheRequirement}`,
+          promptCacheMode ? `mode: ${promptCacheMode}` : "",
+          "stable prefix: team rules + schema + boundary",
+          "dynamic delta: query/result refs only",
+        ].filter(Boolean),
+        storageRefs: promptCacheRolePartitions.slice(0, 4).map((item) => `${item.agentRole}: ${item.promptCachePartition}`),
+      });
+    }
     if (plannedQueries.length || sourceCollectionSearchPlanRef || selectedTeamStartSourceCollectionResult?.searchPlan) {
+      const plannedQueryCacheRefs = Array.from(
+        new Set(
+          plannedQueries
+            .map((query) => query.execution?.promptCachePartition)
+            .filter((value): value is string => Boolean(value)),
+        ),
+      );
       messages.push({
         id: "query-plan",
         agentRole: "Data Discovery Agent",
         title: lang === "zh" ? "已拆成可执行搜索问题" : "Split into executable search queries",
         body: lang === "zh"
-          ? `当前可见 ${plannedQueries.length || sourceCollectionSearchPlanRef?.queryCount || selectedTeamStartSourceCollectionResult?.searchPlan.queryCount || 0} 条 query，按资料类型和语言分配给功能 Agent。`
-          : `${plannedQueries.length || sourceCollectionSearchPlanRef?.queryCount || selectedTeamStartSourceCollectionResult?.searchPlan.queryCount || 0} visible queries are assigned by source type and language.`,
+          ? `当前可见 ${plannedQueries.length || sourceCollectionSearchPlanRef?.queryCount || selectedTeamStartSourceCollectionResult?.searchPlan.queryCount || 0} 条 query，按资料类型和语言分配给功能 Agent；query 是动态增量，不会挤进稳定缓存前缀。`
+          : `${plannedQueries.length || sourceCollectionSearchPlanRef?.queryCount || selectedTeamStartSourceCollectionResult?.searchPlan.queryCount || 0} visible queries are assigned by source type and language; queries are dynamic deltas outside the stable cached prefix.`,
         status: "planned",
         tone: "search",
         refs: plannedQueries.slice(0, 5).map((query) => `${query.query} · ${query.sourceType}/${query.language}`),
-        storageRefs: selectedSourceCollectionRun?.scope?.dataSearchPlanRef?.planId ? [String(selectedSourceCollectionRun.scope.dataSearchPlanRef.planId)] : [],
+        storageRefs: [
+          selectedSourceCollectionRun?.scope?.dataSearchPlanRef?.planId ? String(selectedSourceCollectionRun.scope.dataSearchPlanRef.planId) : "",
+          ...plannedQueryCacheRefs.slice(0, 3).map((partition) => `KV ${partition}`),
+        ].filter(Boolean),
       });
     }
     sourceCollectionAssignments.slice(0, 4).forEach((assignment) => {
@@ -2947,12 +3063,15 @@ export function TeamsRoute({
         agentRole: assignment.agentRole,
         title: lang === "zh" ? "已领取搜集任务" : "Accepted collection assignment",
         body: lang === "zh"
-          ? `${assignment.agentId || "团队功能 Agent"} 负责 ${assignedQueries.length || assignment.scope.queryCount || 0} 条 query，完成后通过 CollectionOutput 回写。`
-          : `${assignment.agentId || "Team functional agent"} handles ${assignedQueries.length || assignment.scope.queryCount || 0} queries and writes results through CollectionOutput.`,
+          ? `${assignment.agentId || "团队功能 Agent"} 负责 ${assignedQueries.length || assignment.scope.queryCount || 0} 条 query；执行轨迹要像对话一样记录搜索词、打开/下载的来源、提炼结果和回写位置。`
+          : `${assignment.agentId || "Team functional agent"} handles ${assignedQueries.length || assignment.scope.queryCount || 0} queries; the trace must record searched terms, opened/downloaded sources, extracted results, and writeback location like a conversation.`,
         status: assignment.status,
         tone: assignment.agentRole === "content_extraction" ? "extract" : assignment.agentRole === "source_quality" ? "quality" : "acquire",
         refs: assignedQueries.slice(0, 3).map((query) => query.query),
-        storageRefs: [assignment.assignmentId],
+        storageRefs: [
+          assignment.assignmentId,
+          assignment.scope.promptCachePartition ? `KV ${assignment.scope.promptCachePartition}` : "",
+        ].filter(Boolean),
       });
     });
     if (selectedTeamRecordSourceCollectionOutputResult) {
@@ -3008,10 +3127,15 @@ export function TeamsRoute({
     lang,
     selectedSourceCollectionRun,
     selectedTeamRecordSourceCollectionOutputResult,
+    selectedTeamStartResearchStageResult,
     selectedTeamStartSourceCollectionResult,
     sourceCollectionAssignments,
     sourceCollectionDraft.goal,
     sourceCollectionDraft.topic,
+    sourceCollectionPromptCachePolicy,
+    sourceCollectionPromptCachePolicyRef,
+    sourceCollectionPromptCacheRequirement,
+    sourceCollectionPromptCacheStatus,
     sourceCollectionSearchPlanRef,
     sourceManifestCandidates,
     teamWorkflow?.candidateStore.storagePath,
@@ -3103,6 +3227,7 @@ export function TeamsRoute({
                 <span>{lang === "zh" ? "任务" : "assignments"} <strong>{sourceCollectionAssignments.length}</strong></span>
                 <span>{lang === "zh" ? "候选" : "candidates"} <strong>{sourceManifestCandidates.length}</strong></span>
                 <span>{lang === "zh" ? "质检通过" : "approved"} <strong>{teamWorkflowSourceQualityStatus?.summary.approvedSourceCandidateCount ?? 0}</strong></span>
+                <span>KV <strong>{sourceCollectionPromptCacheStatusLabel(sourceCollectionPromptCacheStatus, lang)}{sourceCollectionPromptCacheMode ? ` · ${sourceCollectionPromptCacheMode}` : ""}</strong></span>
               </div>
             </section>
             <section className={styles.sourceCollectionStageModules} aria-label={lang === "zh" ? "知识搜集内部模块" : "Knowledge collection modules"}>
@@ -3754,6 +3879,7 @@ export function TeamsRoute({
                             <span>{lang === "zh" ? "任务" : "assignments"} <strong>{sourceCollectionRunStatus?.summary.assignmentCount ?? sourceCollectionAssignments.length}</strong></span>
                             <span>{lang === "zh" ? "未完成" : "open"} <strong>{sourceCollectionRunStatus?.summary.openAssignmentCount ?? 0}</strong></span>
                             <span>{lang === "zh" ? "queries" : "queries"} <strong>{sourceCollectionSearchPlanRef?.queryCount ?? selectedTeamStartSourceCollectionResult?.searchPlan.queryCount ?? 0}</strong></span>
+                            <span>KV <strong>{sourceCollectionPromptCacheStatusLabel(sourceCollectionPromptCacheStatus, lang)}{sourceCollectionPromptCacheMode ? ` · ${sourceCollectionPromptCacheMode}` : ""}</strong></span>
                           </div>
                         </div>
                         {selectedTeamStartSourceCollectionResult ? (
@@ -3765,6 +3891,14 @@ export function TeamsRoute({
                             <div>
                               <span>{lang === "zh" ? "seeds" : "seeds"}</span>
                               <strong>{selectedTeamStartSourceCollectionResult.searchPlan.querySeeds.join(" / ")}</strong>
+                            </div>
+                            <div>
+                              <span>KV</span>
+                              <strong>
+                                {sourceCollectionPromptCacheStatusLabel(selectedTeamStartSourceCollectionResult.promptCachePolicy.gate.status, lang)}
+                                {" · "}
+                                {selectedTeamStartSourceCollectionResult.promptCachePolicy.promptCacheMode}
+                              </strong>
                             </div>
                             <div>
                               <span>{lang === "zh" ? "边界" : "boundary"}</span>
