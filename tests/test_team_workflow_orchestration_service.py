@@ -29,6 +29,21 @@ class _FakeLocalResearchClient:
         return type(self).response
 
 
+def _fake_local_research_public_config(*, prompt_cache_mode="explicit_cache_control"):
+    return {
+        "llm": {
+            "profiles": {},
+            "model_library": {
+                "houmo_qwen35_9b_agent": {
+                    "model": "qwen3.5-9b",
+                    "provider": "local",
+                    "prompt_cache": {"mode": prompt_cache_mode},
+                }
+            },
+        }
+    }
+
+
 def _use_tmp_project_root(tmp_path, monkeypatch):
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
@@ -38,6 +53,7 @@ def _use_tmp_project_root(tmp_path, monkeypatch):
     monkeypatch.setattr(team_knowledge_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(team_workflow_orchestration_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(team_workflow_orchestration_service, "load_public_config", _fake_local_research_public_config)
 
 
 def _use_fake_local_research_config(monkeypatch):
@@ -51,6 +67,7 @@ def _use_fake_local_research_config(monkeypatch):
                     "houmo_qwen35_9b_agent": {
                         "model": "qwen3.5-9b",
                         "provider": "local",
+                        "prompt_cache": {"mode": "explicit_cache_control"},
                     }
                 },
             }
@@ -215,17 +232,49 @@ def test_start_source_collection_run_creates_generic_run_and_assignments(tmp_pat
     assert response["searchPlan"]["querySeeds"] == ["neural gating"]
     assert response["searchPlan"]["queryCount"] > 0
     assert response["searchPlan"]["boundaries"]["externalSearchTriggered"] is False
+    assert response["searchPlan"]["boundaries"]["requiresPromptCacheForAgentExecution"] is True
+    assert response["searchPlan"]["promptCachePolicy"]["gate"]["status"] == "satisfied"
+    assert response["searchPlan"]["promptCachePolicy"]["promptCacheMode"] == "explicit_cache_control"
+    assert response["promptCachePolicy"]["requirement"] == "required_for_llm_execution"
+    assert response["run"]["scope"]["promptCachePolicyRef"]["gateStatus"] == "satisfied"
+    assert response["run"]["metadata"]["promptCacheMode"] == "explicit_cache_control"
     assert response["searchPlan"]["resultWritebackContract"]["formalKnowledgeWrites"] is False
     assert response["assignmentCount"] == 3
     assert {item["agentRole"] for item in response["assignments"]} == {"data_discovery", "source_acquisition", "content_extraction"}
     assert all(item["inputRefs"] == ["seed-query:neural gating"] for item in response["assignments"])
     assert all(item["scope"]["dataSearchPlanRef"]["planId"] == response["searchPlan"]["planId"] for item in response["assignments"])
     assert all(item["scope"]["assignedQueries"] for item in response["assignments"])
+    assert all(item["scope"]["promptCachePolicyRef"]["gateStatus"] == "satisfied" for item in response["assignments"])
+    assert all(item["scope"]["promptCachePartition"].startswith("research-team-") for item in response["assignments"])
+    assert all(item["execution"]["promptCacheRequired"] is True for item in response["searchPlan"]["queries"])
+    assert all(item["execution"]["promptCachePartition"].startswith("research-team-") for item in response["searchPlan"]["queries"])
     assert all(item["scope"]["resultWritebackContract"]["ragWrites"] is False for item in response["assignments"])
     assert assignments["summary"]["assignmentCount"] == 3
     assert run_status["boundaries"]["writesFormalKnowledge"] is False
     assert response["workflow"]["activeWorkflowItems"][0]["candidateId"] == response["run"]["runId"]
     assert response["workflow"]["activeWorkflowItems"][0]["status"] == "source_collection_started"
+
+
+def test_start_source_collection_run_blocks_without_required_prompt_cache(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "load_public_config",
+        lambda: _fake_local_research_public_config(prompt_cache_mode="unsupported"),
+    )
+    team = team_service.create_team(name="挑战杯科研团队")
+
+    try:
+        team_workflow_orchestration_service.start_source_collection_run(
+            team["teamId"],
+            {"topic": "predictive coding"},
+        )
+    except team_workflow_orchestration_service.TeamWorkflowOrchestrationError as exc:
+        assert "requires prompt cache/KV reuse" in str(exc)
+        assert "prompt_cache.mode" in str(exc)
+        assert "automatic or explicit_cache_control" in str(exc)
+    else:
+        raise AssertionError("source collection should block when required prompt cache is unsupported")
 
 
 def test_start_source_collection_run_ignores_invalid_collection_roles(tmp_path, monkeypatch):
@@ -334,6 +383,8 @@ def test_start_research_stage_round_creates_knowledge_collection_round(tmp_path,
     assert stage_round["roundNumber"] == 1
     assert stage_round["sourceRunIds"] == [response["run"]["runId"]]
     assert stage_round["dataSearchPlanRef"]["planId"] == response["searchPlan"]["planId"]
+    assert stage_round["promptCachePolicy"]["gate"]["status"] == "satisfied"
+    assert stage_round["teamMemoryRecord"]["promptCachePolicyRef"]["gateStatus"] == "satisfied"
     assert stage_round["teamMemoryRecord"]["recordKind"] == "team_workflow_stage_record"
     assert stage_round["teamMemoryRecord"]["boundary"] == "runtime_stage_record_only_not_formal_team_knowledge"
     assert stage_round["coordinationContract"]["autoStarted"] is True
@@ -341,6 +392,7 @@ def test_start_research_stage_round_creates_knowledge_collection_round(tmp_path,
     assert "coordination_round_not_started" in {item["code"] for item in stage_round["warnings"]}
     assert response["boundaries"]["writesFormalKnowledge"] is False
     assert response["searchPlan"]["boundaries"]["externalSearchTriggered"] is False
+    assert response["searchPlan"]["promptCachePolicy"]["requirement"] == "required_for_llm_execution"
     assert status_payload["phases"][0]["activeRoundId"] == stage_round["stageRoundId"]
     assert status_payload["phases"][0]["roundCount"] == 1
 
