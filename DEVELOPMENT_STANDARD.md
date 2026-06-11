@@ -575,3 +575,217 @@ A development round is not done until:
 - final report states remaining risk and next action.
 
 Docs-only/rule-only rounds may skip Launcher refresh and version bump when no runtime behavior or release package changes.
+
+## 23. Functional Development Constraints
+
+Functional development constraints are domain-triggered guardrails. They apply when a task touches the named product or architecture domain; they are not blanket rituals for every session.
+
+Use this section to prevent high-cost drift in recurring Vibelution work. When a task triggers one of these constraints, follow the project's existing path first, and only introduce a new path when the old path is demonstrably unable to support the required behavior.
+
+For each triggered constraint, a development round should be able to answer:
+
+- which domain was triggered;
+- which existing service, route, cache, registry, config, or lifecycle path was reused;
+- why any bypass or new path is necessary;
+- what validation proves the behavior still converges through the intended project mechanism.
+
+### 23.1 LLM Invocation Chain
+
+Trigger this constraint when adding or changing any model call, model routing, prompt execution, judge, summary, research step, evolution step, tool-planning step, or provider/model selection behavior.
+
+Default rule: reuse the unified LLM invocation chain and its context objects before introducing direct provider calls.
+
+Prefer:
+
+- existing `core/llm` entrypoints and adapters;
+- `LLMInvocationContext` or the current equivalent context carrier;
+- the configured model library and operator config as the source of model/provider truth;
+- the normal session, agent, role, runtime-scene, and audit context attached to the call;
+- existing test doubles and provider probes.
+
+Avoid:
+
+- new ad hoc OpenAI-compatible clients inside feature services;
+- hard-coded model names, base URLs, API keys, timeouts, or provider priority;
+- prompt/model calls that cannot be tied back to a session, agent, runtime scene, or config source;
+- duplicating retry, fallback, timeout, redaction, or logging behavior already owned by the LLM layer.
+
+Allowed exception: bounded provider health checks, model discovery, config validation, or migration probes may call a provider-specific path when they are isolated, redacted, logged, and not used as the normal feature execution path.
+
+Validation anchor: trace the call path from the feature entrypoint to the shared LLM layer, and add or update focused tests around routing, context propagation, fallback, and failure logging when behavior changes.
+
+### 23.2 Agent, Session, Team, And ChatRoom Lifecycle
+
+Trigger this constraint when creating, deleting, archiving, restoring, listing, routing, binding, or displaying Agents, Teams, Sessions, Conversations, or ChatRooms.
+
+Default rule: lifecycle changes must converge through the owning service path, and related indexes must be repaired in the same behavior round.
+
+Prefer:
+
+- `agent_directory_service` for Agent identity, status, archive, purge, mode binding, and display metadata;
+- `session_service` for chat session creation, ownership, and conversation state;
+- `chat_room_service` for room membership, participant repair, room sessions, and room run behavior;
+- `team_service` for Team membership, linked room behavior, and Team-to-Agent cascade semantics;
+- existing conversation and workspace projections instead of parallel UI-only state.
+
+Avoid:
+
+- orphan Agents with no Team/category path when product semantics require a binding;
+- archived Agents left in active rooms, participants, mode bindings, or UI indexes;
+- Team deletion or archive paths that update only the Team record but skip member Agent and linked room cleanup;
+- frontend-only removal that is not reconciled with backend lifecycle state;
+- direct JSON/file edits to lifecycle state unless they are part of an approved migration or repair tool.
+
+Validation anchor: lifecycle work should include focused service or route tests for the state transition, plus cache invalidation or optimistic rollback coverage when the UI changes.
+
+### 23.3 Runtime Scene Evidence Chain
+
+Trigger this constraint when changing runtime execution, workbench activity, task orchestration, tool execution, error handling, repair flows, Launcher integration, or any path where future debugging depends on evidence.
+
+Default rule: behavior that can fail, stall, branch, retry, or repair must leave a bounded runtime-scene evidence trail at the real decision point.
+
+Prefer:
+
+- existing runtime-scene services and package structure under `logs/runtime_scenes/`;
+- structured fields for state transitions, identifiers, duration, result status, and failure class;
+- redacted summaries instead of raw prompts, secrets, large outputs, or unbounded diffs;
+- focused logging at the cause site rather than broad wrapper logs.
+
+Avoid:
+
+- silent fallback branches;
+- success-only logs for behavior that can fail;
+- logs that cannot be correlated to Agent, Team, Session, worktree, task, claim, or runtime lifecycle;
+- dumping prompts, secrets, provider payloads, or full tool output into logs.
+
+Validation anchor: when changing runtime behavior, inspect or create the smallest relevant runtime-scene evidence and confirm a future Agent can reconstruct the branch, failure, or repair without guessing.
+
+### 23.4 Launcher And Runtime Manager Lifecycle
+
+Trigger this constraint when changing startup, shutdown, restart, refresh, health checks, backend/frontend process control, browser launch, environment loading, or runtime-manager behavior.
+
+Default rule: runtime lifecycle operations should go through Launcher or Runtime Manager paths, not one-off shell process control.
+
+Prefer:
+
+- `scripts/vibelution_launcher.ps1` or `scripts/vibelution_launcher.py` for local runtime restart decisions;
+- runtime-manager APIs and existing process registry behavior for UI-controlled lifecycle actions;
+- explicit refresh decisions in final reports: `not needed`, `recommended before user testing`, or `required before release/runtime verification`;
+- active-work guards before restarting when work is running.
+
+Avoid:
+
+- raw `uvicorn`, `npm`, process-kill, or port-kill flows as the normal refresh mechanism;
+- restarting Vibelution while Launcher active-work guards report an active task;
+- hiding skipped refresh decisions in final reports.
+
+Validation anchor: lifecycle changes require a launcher/runtime-manager test, smoke check, or explicit reason why runtime verification is deferred.
+
+### 23.5 Memory, Knowledge, And RAG Boundaries
+
+Trigger this constraint when changing project memory, Team knowledge, candidate knowledge, RAG retrieval, vector/index writes, formal memory promotion, or generated memory views.
+
+Default rule: transient, candidate, formal, and project-governance memory must stay in their owned layers.
+
+Prefer:
+
+- project-memory guard and sync scripts for `.docs/project-memory/**`;
+- `memory_service`, `team_knowledge_service`, and existing knowledge promotion paths for runtime knowledge;
+- candidate knowledge or proposal records before formal memory when confidence, ownership, or source quality is uncertain;
+- generated views rebuilt by their owning scripts instead of hand-edited HTML snapshots.
+
+Avoid:
+
+- direct writes to formal memory, RAG indexes, or generated memory views from feature code;
+- mixing Challenge Cup research memory, runtime Agent memory, and project governance memory without an explicit boundary;
+- treating another Agent's final report as primary evidence without checking files, logs, commits, registry state, or tests.
+
+Validation anchor: memory work should show the source, target layer, promotion condition, and sync/render result or exact handoff proposal.
+
+### 23.6 Frontend State, Optimistic UX, And Cache Coherence
+
+Trigger this constraint when changing visible UI state, optimistic actions, list/detail caches, React Query keys, workspace projections, or frontend/backend DTO contracts.
+
+Default rule: the UI may respond optimistically, but it must reconcile through backend source-of-truth state and project cache helpers.
+
+Prefer:
+
+- existing query keys, cache helpers, and route-level workspace cache utilities;
+- optimistic removal or patching for obvious slow operations, with rollback or invalidation on failure;
+- narrow cache updates for known entities, followed by invalidation of related indexes when relationships change;
+- TypeScript DTO updates that match backend route/service contracts.
+
+Avoid:
+
+- UI-only deletion/archive states that survive backend failure;
+- updating a list cache while leaving detail, conversation, room, Agent, or Team indexes stale;
+- broad cache clears when a targeted helper already exists;
+- adding new DTO shapes without route tests, type checks, or generated/static type alignment.
+
+Validation anchor: frontend behavior changes need the narrowest relevant unit tests plus `npm --prefix web run build` unless the task is docs-only or the user explicitly accepts deferred validation.
+
+### 23.7 Tool Invocation And Permission Governance
+
+Trigger this constraint when adding or changing tools, agent tool routing, command execution, permission checks, tool descriptions, capability discovery, or tool-result handling.
+
+Default rule: tool behavior should go through the Tool Registry, policy checks, and existing executor/result contracts.
+
+Prefer:
+
+- registered tool descriptors with clear input, side effect, permission, and failure semantics;
+- explicit routing rules for automatic command recognition;
+- bounded outputs and redaction for tool results;
+- tests that cover both allowed and denied paths.
+
+Avoid:
+
+- feature-specific direct shell/network/file operations that bypass the tool registry when the behavior is a user-facing tool capability;
+- vague tool descriptions that make routing depend on guessing;
+- tools that cannot explain their side effects, permission requirement, timeout, or rollback behavior;
+- logging raw secrets, prompts, credentials, or unbounded command output.
+
+Validation anchor: tool changes should include descriptor review, routing/permission tests where practical, and a manual or automated smoke result for the main path.
+
+### 23.8 Config And Model Source Of Truth
+
+Trigger this constraint when changing config loading, model/provider selection, defaults, credentials, feature flags, environment resolution, or operator-facing settings.
+
+Default rule: use the configured source of truth and preserve local-first operator control.
+
+Prefer:
+
+- `C:\Users\17533\Documents\Vibelution\config\config.toml` as the active operator config source during integration;
+- root `config.toml` and `config.example.toml` only as legacy/template surfaces unless an approved migration says otherwise;
+- existing public config APIs and model library services for frontend-visible config;
+- redacted diagnostics for missing, invalid, or partial config.
+
+Avoid:
+
+- hard-coded runtime defaults that compete with operator config;
+- exposing secrets or provider credentials through UI, logs, runtime scenes, or test fixtures;
+- treating root template config as active integration state;
+- introducing a second source of model/provider truth.
+
+Validation anchor: config changes should test precedence, missing/invalid values, redaction, and the UI/backend contract for any setting exposed to users.
+
+### 23.9 Delete, Archive, Reset, And Data Retention
+
+Trigger this constraint when changing destructive, reversible, archival, reset, purge, repair, or cleanup behavior.
+
+Default rule: destructive semantics must be explicit, cascades must be intentional, and user-visible state must not leave unclassified or unreachable entities.
+
+Prefer:
+
+- archive before purge unless the product behavior explicitly requires irreversible deletion;
+- service-level cascade helpers that repair related indexes, rooms, bindings, sessions, caches, and projections;
+- clear distinction between `delete`, `archive`, `purge`, `reset`, `detach`, and `hide`;
+- tests for partial failure and already-archived/already-deleted inputs.
+
+Avoid:
+
+- deleting a parent while leaving children active and unclassifiable;
+- frontend disappearance without backend convergence or failure rollback;
+- cleanup scripts as the only enforcement of a lifecycle invariant;
+- irreversible operations without explicit product intent and validation.
+
+Validation anchor: every lifecycle removal should prove the parent, child records, indexes, UI caches, and user-visible lists converge to the same semantic state.
