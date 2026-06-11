@@ -678,6 +678,44 @@ def test_agent_config_workspace_batches_agent_api_hydration(tmp_path, monkeypatc
     assert not any("tool_governance_requests.jsonl" in path for path in full_read_paths)
 
 
+def test_agent_directory_full_list_reuses_hydration_until_event_signature_changes(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = agent_directory_service.create_agent_instance(display_name="Cached Hydration Agent", primary_mode="chat")
+    agent_directory_service.write_agent_inbox_message(
+        agent["agentId"],
+        content="首条待办。",
+        created_by="test",
+    )
+    read_recent_calls = 0
+    original_read_recent = agent_directory_service._read_recent_jsonl
+
+    def counting_read_recent(*args, **kwargs):
+        nonlocal read_recent_calls
+        read_recent_calls += 1
+        return original_read_recent(*args, **kwargs)
+
+    monkeypatch.setattr(agent_directory_service, "_read_recent_jsonl", counting_read_recent)
+
+    first = agent_directory_service.list_agents(include_archived=True)
+    first_call_count = read_recent_calls
+    second = agent_directory_service.list_agents(include_archived=True)
+
+    assert first_call_count > 0
+    assert read_recent_calls == first_call_count
+    assert first == second
+
+    agent_directory_service.write_agent_inbox_message(
+        agent["agentId"],
+        content="第二条待办。",
+        created_by="test",
+    )
+    updated = agent_directory_service.list_agents(include_archived=True)
+
+    assert read_recent_calls > first_call_count
+    updated_agent = next(item for item in updated if item["agentId"] == agent["agentId"])
+    assert updated_agent["agentInboxPendingCount"] == 2
+
+
 def test_agent_config_workspace_recent_jsonl_preserves_older_pending_messages(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
