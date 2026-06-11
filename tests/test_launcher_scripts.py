@@ -2772,7 +2772,7 @@ if ($scriptText -notmatch '"status"\\s*\\{\\s*Show-Status\\s*\\}') {
 if ($scriptText -notmatch '"repair-deps"\\s*\\{\\s*Repair-ProjectPythonDependencies\\s*\\}') {
     throw "repair-deps action must invoke explicit Python dependency repair."
 }
-if ($scriptText -notmatch '"launcher"\\s*\\{\\s*Open-LauncherControlSurface\\s*\\}') {
+if ($scriptText -notmatch '"launcher"\\s*\\{[\\s\\S]*?Open-LauncherControlSurface[\\s\\S]*?\\}\\s*"toggle"') {
     throw "launcher action does not open only the Launcher control surface."
 }
 
@@ -6696,6 +6696,7 @@ if ($parseErrors -and $parseErrors.Count -gt 0) {
 
 foreach ($functionName in @(
     "ConvertTo-PowerShellSingleQuotedLiteral",
+    "Test-SupervisorAttachFileConflictMessage",
     "Start-SupervisorDetached"
 )) {
     $functionAst = $ast.Find({
@@ -6707,6 +6708,24 @@ foreach ($functionName in @(
         throw "$functionName was not found."
     }
     . ([scriptblock]::Create($functionAst.Extent.Text))
+}
+
+function Get-SupervisorAttachFileDiagnostics {
+    param(
+        [string]$ManagedSessionId,
+        [string]$StdoutLog,
+        [string]$StderrLog,
+        [string]$ErrorMessage
+    )
+
+    return @{
+        probed_at = "2026-06-11T00:00:00Z"
+        file_conflict_likely = (Test-SupervisorAttachFileConflictMessage -Message $ErrorMessage)
+        stdout = @{ path = $StdoutLog }
+        stderr = @{ path = $StderrLog }
+        candidate_process_count = 0
+        candidate_processes = @()
+    }
 }
 
 $script:currentRuntimeSceneId = "scene-1"
@@ -6779,6 +6798,7 @@ Write-Output $payload
     assert payload["pid"] == 0
     assert payload["events"][0]["event"] == "launcher.supervisor.attach.failed"
     assert payload["events"][0]["level"] == "warning"
+    assert "file_probe" in payload["events"][0]["fields"]
     assert payload["events"][1]["eventCode"] == "supervisor.attach.failed"
     assert payload["events"][1]["outcome"] == "failed"
     assert payload["manifestUpdates"][0]["supervisor"]["status"] == "attach_failed"

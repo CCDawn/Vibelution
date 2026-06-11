@@ -7080,6 +7080,10 @@ function Stop-ManagedSession {
         -BackendStopTrace $backendStopTrace `
         -ProfileDir $workbenchBrowserProfileDir
     $closureSnapshotEndedAt = Get-Date
+    $closureSnapshotMode = ""
+    if ($closure -and $closure.PSObject.Properties.Match("SnapshotMode").Count -gt 0) {
+        $closureSnapshotMode = [string]$closure.SnapshotMode
+    }
     $stopEndedAt = Get-Date
     $shutdownTimings = @{
         total_ms = & $elapsedMs $stopStartedAt $stopEndedAt
@@ -7108,7 +7112,7 @@ function Stop-ManagedSession {
                 browser_pids = @($closure.BrowserPids)
                 manager_closed = [bool]$closure.ManagerClosed
                 port_owner_pid = $closure.PortOwnerPid
-                closure_snapshot_mode = [string]$closure.SnapshotMode
+                closure_snapshot_mode = $closureSnapshotMode
                 timings_ms = $shutdownTimings
             }
     }
