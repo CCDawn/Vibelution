@@ -105,7 +105,7 @@ def _looks_like_vibelution_project_root(project_root: Path) -> bool:
         return (
             (root / "core" / "prompt_manager" / "sections.py").exists()
             and (root / "core" / "core_prompt" / "SPEC.md").exists()
-            and (root / "config.example.toml").exists()
+            and (root / "config" / "models.py").exists()
         )
     except Exception:
         return False

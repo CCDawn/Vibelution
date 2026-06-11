@@ -183,10 +183,12 @@
   display: grid;
   grid-template-columns:
     minmax(148px, 1.2fr)
+    minmax(96px, 0.7fr)
     minmax(112px, 0.9fr)
     minmax(96px, 0.7fr)
     minmax(96px, 0.7fr)
     max-content
+    minmax(104px, 0.75fr)
     minmax(112px, 0.8fr)
     max-content
     max-content

@@ -9,6 +9,8 @@ const originalAgentBackendPort = process.env.AGENT_WORKBENCH_BACKEND_PORT;
 const originalAgentFrontendPort = process.env.AGENT_WORKBENCH_FRONTEND_PORT;
 const originalConfigPath = process.env.VIBELUTION_CONFIG_PATH;
 const originalConfigHome = process.env.VIBELUTION_CONFIG_HOME;
+const originalUserProfile = process.env.USERPROFILE;
+const originalHome = process.env.HOME;
 const originalConfig = "[workbench]\nbackend_port = 8000\nfrontend_port = 5173\n";
 let tempRoot = "";
 let configPath = "";
@@ -41,6 +43,8 @@ afterEach(() => {
   restoreEnv("AGENT_WORKBENCH_FRONTEND_PORT", originalAgentFrontendPort);
   restoreEnv("VIBELUTION_CONFIG_PATH", originalConfigPath);
   restoreEnv("VIBELUTION_CONFIG_HOME", originalConfigHome);
+  restoreEnv("USERPROFILE", originalUserProfile);
+  restoreEnv("HOME", originalHome);
   if (tempRoot) {
     rmSync(tempRoot, { force: true, recursive: true });
     tempRoot = "";
@@ -98,5 +102,19 @@ describe("vite workbench ports", () => {
 
     expect(config.server?.port).toBe(6200);
     expect(config.server?.proxy?.["/api"]).toBe("http://127.0.0.1:9101");
+  });
+
+  it("falls back to built-in defaults instead of reading a project-root config", async () => {
+    delete process.env.VIBELUTION_PORT;
+    delete process.env.VIBELUTION_FRONTEND_PORT;
+    delete process.env.VIBELUTION_CONFIG_PATH;
+    delete process.env.VIBELUTION_CONFIG_HOME;
+    process.env.USERPROFILE = tempRoot;
+    process.env.HOME = tempRoot;
+
+    const config = await loadViteConfig();
+
+    expect(config.server?.port).toBe(5173);
+    expect(config.server?.proxy?.["/api"]).toBe("http://127.0.0.1:8000");
   });
 });

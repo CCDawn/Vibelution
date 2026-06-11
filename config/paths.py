@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -16,7 +15,14 @@ CONFIG_HOME_ENV = "VIBELUTION_CONFIG_HOME"
 CONFIG_FILENAME = "config.toml"
 EXAMPLE_CONFIG_FILENAME = "config.example.toml"
 CONFIG_META_FILENAME = "config.meta.json"
-CONFIG_META_SCHEMA_VERSION = 2
+CONFIG_META_SCHEMA_VERSION = 3
+CONFIG_STARTER_TEXT = """# Vibelution operator config
+# Active operator config is stored outside the project repository.
+# Edit this file through the Launcher or Config page so runtime processes reload it safely.
+"""
+EXAMPLE_CONFIG_STARTER_TEXT = """# Vibelution example operator config
+# This example belongs to the external config home, not to the project repository.
+"""
 
 
 def default_config_home() -> Path:
@@ -60,21 +66,14 @@ def resolve_config_lock_path(config_path: str | os.PathLike[str] | None = None) 
     return config.parent / "config-edit.lock"
 
 
-def legacy_project_config_path() -> Path:
-    return PROJECT_ROOT / CONFIG_FILENAME
-
-
-def project_example_config_path() -> Path:
-    return PROJECT_ROOT / EXAMPLE_CONFIG_FILENAME
-
-
 def ensure_global_config_initialized(
     config_path: str | os.PathLike[str] | None = None,
     *,
     project_root: Path = PROJECT_ROOT,
 ) -> dict[str, Any]:
-    """Create the external config once, migrating from the project copy when needed."""
+    """Create the external operator config once without reading project-local config."""
 
+    _ = project_root  # Kept for older callers; project-local config is no longer a migration source.
     target = resolve_config_path(config_path)
     example_target = target.with_name(EXAMPLE_CONFIG_FILENAME)
     backup_dir = target.parent / "backups"
@@ -82,23 +81,15 @@ def ensure_global_config_initialized(
     target.parent.mkdir(parents=True, exist_ok=True)
     backup_dir.mkdir(parents=True, exist_ok=True)
 
-    legacy_config = project_root / CONFIG_FILENAME
-    legacy_example = project_root / EXAMPLE_CONFIG_FILENAME
-    created_config = _copy_first_existing(
+    created_config = _write_if_missing(
         target,
-        (
-            ("project_config", legacy_config),
-            ("project_example", legacy_example),
-        ),
-        fallback_text="# Vibelution config\n",
+        fallback_text=CONFIG_STARTER_TEXT,
+        source_type="external_starter",
     )
-    created_example = _copy_first_existing(
+    created_example = _write_if_missing(
         example_target,
-        (
-            ("project_example", legacy_example),
-            ("project_config", legacy_config),
-        ),
-        fallback_text="# Vibelution example config\n",
+        fallback_text=EXAMPLE_CONFIG_STARTER_TEXT,
+        source_type="external_example_starter",
     )
     meta_path = target.with_name(CONFIG_META_FILENAME)
     existing_meta = _read_existing_meta(meta_path)
@@ -132,21 +123,16 @@ def ensure_global_config_initialized(
     return meta
 
 
-def _copy_first_existing(
+def _write_if_missing(
     target: Path,
-    candidates: tuple[tuple[str, Path], ...],
     *,
     fallback_text: str,
+    source_type: str,
 ) -> dict[str, Any]:
     if target.exists():
         return {"created": False, "sourceType": "existing", "sourcePath": str(target)}
-    for source_type, source in candidates:
-        if source.exists():
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(source, target)
-            return {"created": True, "sourceType": source_type, "sourcePath": str(source)}
     target.write_text(fallback_text, encoding="utf-8")
-    return {"created": True, "sourceType": "fallback", "sourcePath": ""}
+    return {"created": True, "sourceType": source_type, "sourcePath": ""}
 
 
 def _read_existing_meta(meta_path: Path) -> dict[str, Any]:
@@ -179,8 +165,6 @@ __all__ = [
     "PROJECT_ROOT",
     "default_config_home",
     "ensure_global_config_initialized",
-    "legacy_project_config_path",
-    "project_example_config_path",
     "resolve_config_backup_dir",
     "resolve_config_home",
     "resolve_config_lock_path",

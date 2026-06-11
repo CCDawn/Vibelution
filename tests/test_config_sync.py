@@ -8,17 +8,76 @@ from pathlib import Path
 
 import pytest
 
-from config import AppConfig, ConfigLoader, Settings, denormalize_config_dict, normalize_public_config_dict, reload_config
+from config import AppConfig, ConfigLoader, Settings, normalize_public_config_dict, reload_config
 from config import workbench as workbench_config
 
 
-PROJECT_ROOT = Path(__file__).parent.parent
-MAIN_CONFIG = PROJECT_ROOT / "config.toml"
-EXAMPLE_CONFIG = PROJECT_ROOT / "config.example.toml"
+SAMPLE_PUBLIC_CONFIG = """
+[runtime]
+profile = "safe_remote"
+
+[workbench]
+backend_port = 8000
+frontend_port = 5173
+window_mode = "fullscreen"
+window_size = "auto"
+
+[llm.discovery]
+timeout = 12
+
+[llm.model_library.relay_openai_gpt_5_5]
+model = "gpt-5.5"
+label = "Relay GPT 5.5"
+transport = "chat_completions"
+contract = "tool_chat"
+temperature = 0.7
+max_output_tokens = 128000
+timeout = 120
+connect_timeout = 20
+streaming = true
+tool_calling_mode = "auto"
+discovery_enabled = true
+
+[llm.model_library.relay_openai_gpt_5_5.provider]
+kind = "openai"
+api_key_env = "OPENAI_API_KEY"
+base_url = "https://api.openai.com/v1"
+compat_mode = "openai"
+requires_api_key = true
+context_window = 1050000
+
+[llm.profiles.primary]
+model_ref = "relay_openai_gpt_5_5"
+
+[llm.profiles.primary.overrides]
+temperature = 0.2
+
+[prompt]
+default_components = ["CONFIG_AWARENESS", "LANGUAGE_AWARENESS", "MEMORY", "RUNTIME_LOG_INDEX"]
+
+[[prompt.sections]]
+id = "unit"
+path = "workspace/prompts/UNIT.md"
+enabled = true
+
+[[prompt.sections]]
+id = "spec"
+path = "workspace/prompts/SPEC.md"
+enabled = true
+
+[pet.gene]
+inherit_from_model = true
+""".strip()
 
 
 def _load_toml(path: Path) -> dict:
     return tomllib.loads(path.read_text(encoding="utf-8"))
+
+
+def _write_sample_public_config(tmp_path: Path, filename: str = "config.toml") -> Path:
+    config_file = tmp_path / filename
+    config_file.write_text(SAMPLE_PUBLIC_CONFIG + "\n", encoding="utf-8")
+    return config_file
 
 
 def _assert_same_shape(left, right, path="root"):
@@ -60,15 +119,17 @@ def _assert_model_shape_is_exposed(expected, actual, path="root"):
         return
 
 
-def test_config_files_have_same_public_shape():
-    main = _load_toml(MAIN_CONFIG)
-    example = _load_toml(EXAMPLE_CONFIG)
+def test_external_config_samples_have_same_public_shape(tmp_path):
+    main_config = _write_sample_public_config(tmp_path, "config.toml")
+    example_config = _write_sample_public_config(tmp_path, "config.example.toml")
+    main = _load_toml(main_config)
+    example = _load_toml(example_config)
 
     _assert_same_shape(main, example)
 
 
-def test_main_config_exposes_all_public_model_blocks():
-    raw = _load_toml(MAIN_CONFIG)
+def test_sample_config_exposes_all_public_model_blocks(tmp_path):
+    raw = _load_toml(_write_sample_public_config(tmp_path))
     assert "providers" not in raw["llm"]
     assert "profiles" in raw["llm"]
     assert "discovery" in raw["llm"]
@@ -82,8 +143,9 @@ def test_main_config_exposes_all_public_model_blocks():
     assert "provider" in raw["llm"]["model_library"]["relay_openai_gpt_5_5"]
 
 
-def test_config_loader_normalizes_nested_public_blocks():
-    raw = _load_toml(MAIN_CONFIG)
+def test_config_loader_normalizes_nested_public_blocks(tmp_path):
+    config_file = _write_sample_public_config(tmp_path)
+    raw = _load_toml(config_file)
     normalized = normalize_public_config_dict(raw)
     config = AppConfig.model_validate(normalized)
 
@@ -98,6 +160,7 @@ def test_config_loader_normalizes_nested_public_blocks():
     assert config.workbench.backend_port == raw["workbench"]["backend_port"]
     assert config.workbench.frontend_port == raw["workbench"]["frontend_port"]
     assert config.workbench.window_mode == raw["workbench"]["window_mode"]
+    assert config.workbench.window_size == raw["workbench"]["window_size"]
 
 
 def test_config_loader_canonicalizes_inline_profile_model_env(tmp_path, monkeypatch):
@@ -225,10 +288,11 @@ def test_workbench_port_helpers_ignore_invalid_agent_alias_overrides(monkeypatch
     assert workbench_config.configured_frontend_port() == 6200
 
 
-def test_workbench_frontend_port_can_be_overridden_from_environment(monkeypatch):
+def test_workbench_frontend_port_can_be_overridden_from_environment(monkeypatch, tmp_path):
+    config_file = _write_sample_public_config(tmp_path)
     monkeypatch.setenv("VIBELUTION_FRONTEND_PORT", "6400")
 
-    config = ConfigLoader(str(MAIN_CONFIG)).load()
+    config = ConfigLoader(str(config_file)).load()
 
     assert config.workbench.frontend_port == 6400
 
@@ -249,7 +313,7 @@ def test_reload_config_refreshes_cached_settings_config(tmp_path):
         assert reload_config(str(first_config)).llm.get_profile("primary").model == "first-model"
         assert reload_config(str(second_config)).llm.get_profile("primary").model == "second-model"
     finally:
-        reload_config(str(MAIN_CONFIG))
+        reload_config(str(first_config))
 
 
 def test_config_loader_accepts_agent_workbench_port_aliases(monkeypatch, tmp_path):
@@ -300,10 +364,12 @@ def test_config_loader_ignores_invalid_agent_workbench_port_aliases(monkeypatch,
     assert config.workbench.frontend_port == 6200
 
 
-def test_main_and_example_configs_load_through_entrypoints():
-    main_loader = ConfigLoader(str(MAIN_CONFIG)).load()
-    example_loader = ConfigLoader(str(EXAMPLE_CONFIG)).load()
-    settings_config = Settings(config_path=str(MAIN_CONFIG)).config
+def test_external_sample_configs_load_through_entrypoints(tmp_path):
+    main_config = _write_sample_public_config(tmp_path, "config.toml")
+    example_config = _write_sample_public_config(tmp_path, "config.example.toml")
+    main_loader = ConfigLoader(str(main_config)).load()
+    example_loader = ConfigLoader(str(example_config)).load()
+    settings_config = Settings(config_path=str(main_config)).config
     main_primary_provider_kind = main_loader.llm.get_provider(main_loader.llm.get_profile("primary").provider_id).kind
     settings_primary_provider_kind = settings_config.llm.get_provider(
         settings_config.llm.get_profile("primary").provider_id
@@ -319,5 +385,6 @@ def test_main_and_example_configs_load_through_entrypoints():
     assert example_loader.workbench.backend_port == 8000
     assert example_loader.workbench.frontend_port == 5173
     assert example_loader.workbench.window_mode == "fullscreen"
+    assert example_loader.workbench.window_size == "auto"
     assert main_loader.pet_heart.enabled is True
     assert settings_primary_provider_kind == main_primary_provider_kind

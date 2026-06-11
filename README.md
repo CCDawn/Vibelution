@@ -107,7 +107,7 @@ bun run bun:build
 
 ### 4. 配置 LLM
 
-新环境建议从 [config.example.toml](config.example.toml) 开始，复制为本地 `config.toml` 后再按需调整。
+运行配置统一存放在用户级外部路径（默认：`%USERPROFILE%\\Documents\\Vibelution\\config\\config.toml`）。新环境通过 Launcher 首次启动时会自动创建该目录和 starter 文件；也可以设置 `VIBELUTION_CONFIG_HOME` 或 `VIBELUTION_CONFIG_PATH` 指向其他外部配置位置。
 
 ```toml
 [runtime]
@@ -142,7 +142,7 @@ $env:DEEPSEEK_API_KEY="your-api-key"
 $env:MINIMAX_API_KEY="your-api-key"
 ```
 
-`config.toml` 是本地文件，不应提交真实密钥。README 中的示例只使用环境变量名，不包含密钥值。
+外部 `config.toml` 不属于项目仓库，不应提交真实密钥。README 中的示例只使用环境变量名，不包含密钥值。
 
 ## 启动方式
 
@@ -285,7 +285,7 @@ CI 通常覆盖：
 
 - Web workbench 默认面向本地使用，写接口带本地 control token 与来源校验。
 - README 截图使用脱敏演示数据，不是当前机器的真实工作区状态。
-- 不要提交 `config.toml` 中的真实密钥、provider 私有地址或本地路径。
+- 不要把外部 `config.toml` 中的真实密钥、provider 私有地址或本地路径提交进仓库。
 - Git 页面提交时只提交用户选择的文件；如果存在未选择的 staged 文件，后端会拒绝提交，避免误带 unrelated changes。
 - Reset 页面使用后端白名单和保护区，不接受任意路径清理。
 - Runtime scene 日志用于诊断，应避免把包含敏感信息的原始运行包公开发布。

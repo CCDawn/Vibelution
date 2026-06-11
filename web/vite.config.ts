@@ -31,7 +31,6 @@ function configPathCandidates(): string[] {
   if (userRoot) {
     candidates.push(resolve(userRoot, "Documents", "Vibelution", "config", "config.toml"));
   }
-  candidates.push(resolve(__dirname, "..", "config.toml"));
   return candidates;
 }
 

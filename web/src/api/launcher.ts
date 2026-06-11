@@ -1,17 +1,52 @@
 import { fetchJson } from "./client";
 import type {
   LauncherControlResponse,
-  LauncherStartupSettings,
-  LauncherStartupSettingsUpdateResponse,
-  LauncherStatus,
+  LauncherStartupSettings as BaseLauncherStartupSettings,
+  LauncherStatus as BaseLauncherStatus,
   RuntimeLifecycleCancelRequest,
   RuntimeLifecycleCancelResponse,
+  WorkbenchWindowModeSetting,
   WorkbenchWindowModeUpdateRequest,
   WorkbenchWindowModeUpdateResponse,
 } from "./types";
 
 export const LAUNCHER_ENDPOINT = "/api/launcher";
 export const DEFAULT_LAUNCHER_CONTROL_PORT = 8765;
+
+type WorkbenchWindowSizeOption = {
+  size: string;
+  label: {
+    zh: string;
+    en: string;
+  };
+};
+
+export type LauncherStartupSettings = Omit<BaseLauncherStartupSettings, "workbench"> & {
+  launcher: {
+    controlPort: number;
+    effectiveControlPort: number;
+    controlPortEnvOverride: number;
+  };
+  workbench: BaseLauncherStartupSettings["workbench"] & {
+    windowSize: string;
+    effectiveWindowSize: string;
+    windowSizeEnvOverride: string;
+    windowSizeOptions: WorkbenchWindowSizeOption[];
+  };
+};
+
+export type LauncherStatus = Omit<BaseLauncherStatus, "settings"> & {
+  settings?: {
+    startup?: LauncherStartupSettings;
+    workbenchWindow?: WorkbenchWindowModeSetting;
+  };
+};
+
+export type LauncherStartupSettingsUpdateResponse = {
+  ok: boolean;
+  setting: LauncherStartupSettings;
+  message: string;
+};
 
 let cachedLauncherControlOrigin = "";
 
@@ -160,10 +195,14 @@ export function updateLauncherStartupSettings(setting: LauncherStartupSettings) 
         preflightDoctor: setting.runtime.preflightDoctor,
         requireVenv: setting.runtime.requireVenv,
       },
+      launcher: {
+        controlPort: setting.launcher.controlPort,
+      },
       workbench: {
         backendPort: setting.workbench.backendPort,
         frontendPort: setting.workbench.frontendPort,
         windowMode: setting.workbench.windowMode,
+        windowSize: setting.workbench.windowSize,
       },
       interface: {
         language: setting.interface.language,

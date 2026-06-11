@@ -636,6 +636,23 @@ def normalize_public_config_dict(config: Dict[str, Any]) -> Dict[str, Any]:
             if sub_key in pet_section:
                 result[f"pet_{sub_key}"] = pet_section.pop(sub_key)
 
+    if "prompt" in result and isinstance(result["prompt"], dict):
+        prompt_section = result["prompt"]
+        sections = prompt_section.get("sections")
+        if isinstance(sections, list):
+            for raw_section in sections:
+                if not isinstance(raw_section, dict):
+                    continue
+                name = str(raw_section.get("name") or "").strip()
+                if name:
+                    continue
+                fallback_name = str(raw_section.get("id") or "").strip()
+                if not fallback_name and isinstance(raw_section.get("path"), str):
+                    fallback_name = Path(raw_section.get("path")).name
+                    if "." in fallback_name:
+                        fallback_name = fallback_name.rsplit(".", 1)[0]
+                raw_section["name"] = fallback_name.upper() if fallback_name else ""
+
     return result
 
 

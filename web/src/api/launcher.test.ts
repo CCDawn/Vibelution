@@ -12,6 +12,7 @@ import {
   restartLauncherBundle,
   saveLauncherWorkbenchWindowMode,
   startLauncherBundle,
+  updateLauncherStartupSettings,
 } from "./launcher";
 
 describe("launcher api helpers", () => {
@@ -303,6 +304,99 @@ describe("launcher api helpers", () => {
     expect((requestInit.headers as Headers).get("Content-Type")).toBe("application/json");
     expect((requestInit.headers as Headers).get("X-Vibelution-Control-Token")).toBe("test-token");
     expect(JSON.parse(String(requestInit.body))).toEqual({ mode: "windowed", baseHash: "hash-current" });
+  });
+
+  it("saves startup settings with launcher port and workbench window size", async () => {
+    vi.stubGlobal("window", {
+      location: {
+        href: "http://127.0.0.1:8765/launcher",
+        origin: "http://127.0.0.1:8765",
+      },
+    });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          header: "X-Vibelution-Control-Token",
+          controlToken: "test-token",
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          ok: true,
+          setting: {},
+          message: "saved",
+        }),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const payload = await updateLauncherStartupSettings({
+      launcher: {
+        controlPort: 8899,
+        effectiveControlPort: 8899,
+        controlPortEnvOverride: 0,
+      },
+      runtime: {
+        profile: "safe_remote",
+        preflightDoctor: true,
+        requireVenv: true,
+        profileOptions: ["safe_remote"],
+      },
+      workbench: {
+        backendPort: 8000,
+        frontendPort: 5173,
+        effectiveBackendPort: 8000,
+        effectiveFrontendPort: 5173,
+        backendPortEnvOverride: 0,
+        frontendPortEnvOverride: 0,
+        windowMode: "windowed",
+        effectiveWindowMode: "windowed",
+        windowModeEnvOverride: "",
+        windowModeOptions: [],
+        windowSize: "1600x900",
+        effectiveWindowSize: "1600x900",
+        windowSizeEnvOverride: "",
+        windowSizeOptions: [{ size: "1600x900", label: { zh: "1600x900", en: "1600x900" } }],
+      },
+      interface: {
+        language: "zh",
+        languageOptions: ["zh", "en"],
+      },
+      configPath: "/path/to/operator/config/config.toml",
+      configHash: "hash-current",
+      restartRequired: true,
+    });
+
+    expect(payload.ok).toBe(true);
+    expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
+      "/api/control-token",
+      "/api/launcher/settings/startup",
+    ]);
+    const requestInit = fetchMock.mock.calls[1][1] as RequestInit;
+    expect(requestInit.method).toBe("PUT");
+    expect((requestInit.headers as Headers).get("Content-Type")).toBe("application/json");
+    expect((requestInit.headers as Headers).get("X-Vibelution-Control-Token")).toBe("test-token");
+    expect(JSON.parse(String(requestInit.body))).toEqual({
+      launcher: {
+        controlPort: 8899,
+      },
+      runtime: {
+        profile: "safe_remote",
+        preflightDoctor: true,
+        requireVenv: true,
+      },
+      workbench: {
+        backendPort: 8000,
+        frontendPort: 5173,
+        windowMode: "windowed",
+        windowSize: "1600x900",
+      },
+      interface: {
+        language: "zh",
+      },
+      baseHash: "hash-current",
+    });
   });
 
   it("cancels pending lifecycle commands through the workbench runtime API", async () => {

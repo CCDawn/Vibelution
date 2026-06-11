@@ -32,6 +32,7 @@ class WorkbenchWindowModePayload(BaseModel):
 
 
 class LauncherStartupSettingsPayload(BaseModel):
+    launcher: dict = Field(default_factory=dict)
     runtime: dict = Field(default_factory=dict)
     workbench: dict = Field(default_factory=dict)
     interface: dict = Field(default_factory=dict)

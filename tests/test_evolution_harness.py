@@ -67,6 +67,39 @@ from scripts.evolution_harness import (
 from core.orchestration.turn_outcome import TurnOutcomeController
 
 
+def _write_external_operator_config(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, text: str) -> Path:
+    config_path = tmp_path / "external-config" / "config.toml"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(text.strip() + "\n", encoding="utf-8")
+    monkeypatch.setenv("VIBELUTION_CONFIG_PATH", str(config_path))
+    return config_path
+
+
+def test_create_harness_config_uses_external_config_not_worktree_legacy(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    (tmp_path / "config.toml").write_text(
+        "[llm.providers.legacy]\nkind = \"legacy\"\n",
+        encoding="utf-8",
+    )
+    _write_external_operator_config(
+        monkeypatch,
+        tmp_path,
+        """
+        [llm.providers.external]
+        kind = "minimax"
+        """,
+    )
+
+    harness_config = create_harness_config(tmp_path)
+
+    assert harness_config is not None
+    text = harness_config.read_text(encoding="utf-8")
+    assert "llm.providers.external" in text
+    assert "llm.providers.legacy" not in text
+
+
 def test_build_agent_command_for_test_mode():
     cmd = build_agent_command("test", None)
     assert "--no-shell" in cmd
@@ -304,9 +337,13 @@ def test_run_harness_returns_failed_result_when_agent_binding_model_is_missing(m
     assert result.preserved_evidence_path
 
 
-def test_create_harness_config_forces_supervised_agent_mode(tmp_path: Path):
-    source_config = tmp_path / "config.toml"
-    source_config.write_text(
+def test_create_harness_config_forces_supervised_agent_mode(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    _write_external_operator_config(
+        monkeypatch,
+        tmp_path,
         """
 [agent]
 default_mode = "self_evolution"
@@ -315,8 +352,7 @@ default_mode = "self_evolution"
 profile = "dev"
 preflight_doctor = true
 require_venv = true
-        """.strip(),
-        encoding="utf-8",
+        """,
     )
 
     harness_config = create_harness_config(tmp_path)
@@ -916,26 +952,26 @@ def test_build_synthetic_venv_installs_missing_harness_packages(monkeypatch, tmp
     assert "ruff" in pip_installs[0]
 
 
-def test_create_harness_config_overrides_runtime_section(tmp_path: Path):
-    config = tmp_path / "config.toml"
-    config.write_text(
-        "\n".join(
-            [
-                "[runtime]",
-                'profile = "safe_local"',
-                "preflight_doctor = true",
-                "require_venv = true",
-                "",
-                "[llm.providers.default]",
-                'kind = "minimax"',
-                "",
-                "[llm.profiles.primary]",
-                'provider_id = "default"',
-                'model = "MiniMax-M2.7"',
-            ]
-        )
-        + "\n",
-        encoding="utf-8",
+def test_create_harness_config_overrides_runtime_section(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    _write_external_operator_config(
+        monkeypatch,
+        tmp_path,
+        """
+        [runtime]
+        profile = "safe_local"
+        preflight_doctor = true
+        require_venv = true
+
+        [llm.providers.default]
+        kind = "minimax"
+
+        [llm.profiles.primary]
+        provider_id = "default"
+        model = "MiniMax-M2.7"
+        """,
     )
 
     target = create_harness_config(tmp_path)
@@ -1332,16 +1368,22 @@ def test_safe_modify_probe_summary_reports_marker_and_dirty_state(tmp_path: Path
     assert summary["cleanup"] == "pending"
 
 
-def test_create_harness_config_injects_safe_modify_probe_allowlist(tmp_path: Path):
-    config_path = tmp_path / "config.toml"
-    config_path.write_text(
-        "[runtime]\n"
-        'profile = "dev"\n'
-        "[evolution]\n"
-        "allowed_target_dirs = [\n"
-        '    "workspace/prompts/",\n'
-        "]\n",
-        encoding="utf-8",
+def test_create_harness_config_injects_safe_modify_probe_allowlist(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    config_path = _write_external_operator_config(
+        monkeypatch,
+        tmp_path,
+        """
+        [runtime]
+        profile = "dev"
+
+        [evolution]
+        allowed_target_dirs = [
+            "workspace/prompts/",
+        ]
+        """,
     )
 
     harness_config = create_harness_config(tmp_path)
