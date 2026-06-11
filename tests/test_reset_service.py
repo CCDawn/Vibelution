@@ -77,6 +77,33 @@ def test_reset_summary_includes_memory_as_optional_item(reset_project: Path):
     assert "配置与模型绑定" not in protected_labels
 
 
+def test_reset_summary_records_timing_event(reset_project: Path, monkeypatch: pytest.MonkeyPatch):
+    events: list[dict] = []
+
+    def capture_reset_event(component: str, phase: str, event_code: str, **kwargs):
+        events.append(
+            {
+                "component": component,
+                "phase": phase,
+                "eventCode": event_code,
+                "fields": kwargs.get("fields") or {},
+            }
+        )
+
+    monkeypatch.setattr(reset_service, "record_runtime_scene_event", capture_reset_event)
+
+    summary = reset_service.get_reset_summary()
+
+    assert summary["items"]
+    event = next(event for event in events if event["eventCode"] == "reset.summary.generated")
+    assert event["component"] == "reset"
+    assert event["phase"] == "summary"
+    assert event["fields"]["itemCount"] == len(summary["items"])
+    assert "elapsedMs" in event["fields"]
+    assert "slowItems" in event["fields"]
+    assert "truncatedItemIds" in event["fields"]
+
+
 def test_preview_and_execute_memory_cleanup(reset_project: Path):
     db_file = reset_project / "workspace" / "agent_brain.db"
     db_file.parent.mkdir(parents=True, exist_ok=True)
@@ -294,6 +321,53 @@ def test_browser_profile_cleanup_protects_current_profile(reset_project: Path):
     assert result["totals"]["deletedCount"] == 1
     assert current.exists()
     assert not old.exists()
+
+
+def test_browser_profile_collection_uses_shallow_runtime_discovery(reset_project: Path):
+    current = reset_project / ".runtime" / "launcher" / "workbench-app-profile"
+    old = reset_project / ".runtime" / "old-test-profile"
+    nested = reset_project / ".runtime" / "frontend-audit" / "edge-profile"
+    deep_nested = reset_project / ".runtime" / "frontend-audit" / "deep" / "nested-profile"
+    _write(current / "Default" / "LOCK", "locked")
+    _write(old / "Default" / "Preferences", "{}")
+    _write(nested / "Default" / "Preferences", "{}")
+    _write(deep_nested / "Default" / "Preferences", "{}")
+    _write(
+        reset_project / ".runtime" / "launcher" / "state.json",
+        json.dumps({"browserProfileDir": str(current)}, ensure_ascii=False),
+    )
+
+    candidates = reset_service._collect_browser_profiles()
+
+    paths = {reset_service._relative_path(candidate.path) for candidate in candidates}
+    protected_paths = {
+        reset_service._relative_path(candidate.path)
+        for candidate in candidates
+        if candidate.protected
+    }
+    assert ".runtime/old-test-profile" in paths
+    assert ".runtime/frontend-audit/edge-profile" in paths
+    assert ".runtime/launcher/workbench-app-profile" in protected_paths
+    assert ".runtime/frontend-audit/deep/nested-profile" not in paths
+
+
+def test_python_cache_collection_uses_bounded_code_roots(reset_project: Path):
+    _write(reset_project / ".pytest_cache" / "README.md", "cache")
+    _write(reset_project / "core" / "feature" / "__pycache__" / "module.pyc", "cache")
+    _write(reset_project / "tests" / ".ruff_cache" / "cache.db", "cache")
+    _write(reset_project / ".runtime" / "old-profile" / "__pycache__" / "ignored.pyc", "cache")
+    _write(reset_project / "logs" / "runtime_scenes" / "old" / "__pycache__" / "ignored.pyc", "cache")
+    _write(reset_project / "workspace" / "sessions" / "session-a" / "__pycache__" / "ignored.pyc", "cache")
+
+    candidates = reset_service._collect_python_test_caches()
+
+    paths = {reset_service._relative_path(candidate.path) for candidate in candidates}
+    assert ".pytest_cache" in paths
+    assert "core/feature/__pycache__" in paths
+    assert "tests/.ruff_cache" in paths
+    assert all(not path.startswith(".runtime/") for path in paths)
+    assert all(not path.startswith("logs/") for path in paths)
+    assert all(not path.startswith("workspace/") for path in paths)
 
 
 def test_workspace_runtime_residue_cleanup(reset_project: Path):
