@@ -319,20 +319,19 @@
 }
 
 .researchIndexList {
-  display: flex;
-  gap: 6px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
   min-width: 0;
-  overflow-x: auto;
   padding-bottom: 1px;
 }
 
 .researchIndexItem {
   display: grid;
-  gap: 2px;
-  flex: 1 0 132px;
-  min-width: 132px;
-  max-width: 190px;
-  padding: 7px 8px;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 3px 8px;
+  min-width: 0;
+  padding: 9px 10px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   background: color-mix(in srgb, var(--surface-card) 56%, transparent);
@@ -342,21 +341,43 @@
 }
 
 .researchIndexItem strong,
-.researchIndexItem span {
+.researchIndexItem span,
+.researchIndexItem em {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.researchIndexItem small {
+  display: inline-flex;
+  width: 24px;
+  height: 22px;
+  align-items: center;
+  justify-content: center;
+  grid-row: 1 / span 3;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--accent-cool) 14%, transparent);
+  color: color-mix(in srgb, var(--accent-cool) 76%, var(--fg-primary));
+  font-size: 0.62rem;
+  font-weight: 840;
+}
+
 .researchIndexItem strong {
   color: var(--fg-primary);
-  font-size: 0.75rem;
+  font-size: 0.78rem;
 }
 
 .researchIndexItem span {
   color: var(--fg-muted);
   font-size: 0.65rem;
+}
+
+.researchIndexItem em {
+  color: var(--fg-tertiary);
+  font-size: 0.61rem;
+  font-style: normal;
+  font-weight: 720;
 }
 
 .researchIndexItemActive {
@@ -564,7 +585,7 @@
 
 .sourceCollectionPageBody {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
   gap: 10px;
   min-height: 0;
   flex: 1 1 0;
@@ -631,6 +652,36 @@
 .sourceCollectionCommandStats strong {
   flex: 0 0 auto;
   font-size: 0.82rem;
+}
+
+.sourceCollectionStageModules {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.sourceCollectionStageModules span {
+  display: inline-flex;
+  min-width: 0;
+  min-height: 30px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--surface-panel-strong) 72%, transparent);
+  color: var(--fg-muted);
+  font-size: 0.68rem;
+  font-weight: 740;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sourceCollectionStageModules strong {
+  flex: 0 0 auto;
+  color: color-mix(in srgb, var(--accent-cool) 74%, var(--fg-primary));
+  font-size: 0.62rem;
 }
 
 .sourceCollectionPageGrid {
@@ -845,6 +896,145 @@
 .sourceCollectionUnavailable span {
   color: var(--fg-muted);
   font-size: 0.76rem;
+}
+
+.researchStagePage {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--accent-cool) 7%, transparent), transparent 18%),
+    var(--bg-canvas);
+}
+
+.researchStagePageHeader {
+  align-items: center;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.researchStagePageBody {
+  display: grid;
+  gap: 10px;
+  min-height: 0;
+  flex: 1 1 0;
+  padding: 10px;
+  overflow: auto;
+}
+
+.researchStageHeroPanel,
+.researchStageActionPanel,
+.researchStageBoundaryPanel {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-panel-strong) 76%, transparent);
+}
+
+.researchStageHeroPanel {
+  grid-template-columns: minmax(320px, 1fr) minmax(420px, 0.9fr);
+  border-color: color-mix(in srgb, var(--accent-cool) 24%, var(--border-soft));
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--accent-cool) 8%, transparent), transparent 55%),
+    color-mix(in srgb, var(--surface-panel-strong) 78%, transparent);
+}
+
+.researchStageHeroPanel strong,
+.researchStageActionPanel strong,
+.researchStageBoundaryPanel strong,
+.researchStageModuleCard strong {
+  color: var(--fg-primary);
+}
+
+.researchStageHeroPanel p,
+.researchStageActionPanel span,
+.researchStageBoundaryPanel span,
+.researchStageModuleCard span {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: 0.74rem;
+  line-height: 1.45;
+}
+
+.researchStageHeroStats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.researchStageHeroStats span {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-card) 68%, transparent);
+  color: var(--fg-muted);
+  font-size: 0.66rem;
+  font-weight: 740;
+}
+
+.researchStageHeroStats strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-primary);
+  font-size: 0.82rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.researchStageActionPanel {
+  grid-template-columns: minmax(260px, 1fr) auto;
+  align-items: center;
+}
+
+.researchStagePageActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.researchStagePageActions button {
+  display: inline-flex;
+  min-height: 30px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 10px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 30%, var(--border-soft));
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--surface-card) 78%, transparent);
+  color: var(--fg-primary);
+  font-size: 0.74rem;
+  font-weight: 760;
+}
+
+.researchStagePageActions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.researchStageModuleGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.researchStageModuleCard {
+  display: grid;
+  gap: 6px;
+  min-height: 92px;
+  align-content: start;
+  padding: 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-panel-strong) 72%, transparent);
+}
+
+.researchStageBoundaryPanel {
+  grid-template-columns: auto repeat(3, minmax(0, 1fr));
+  align-items: center;
 }
 
 .teamRow {
@@ -2580,6 +2770,15 @@
   }
 
   .researchStageGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .researchIndexList,
+  .sourceCollectionStageModules,
+  .researchStageHeroPanel,
+  .researchStageActionPanel,
+  .researchStageModuleGrid,
+  .researchStageBoundaryPanel {
     grid-template-columns: 1fr;
   }
 

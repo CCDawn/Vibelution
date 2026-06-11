@@ -70,7 +70,9 @@ const officialModelEvidenceStatusQueryKey = (id: string) => ["teams", id, "workf
 const paperNoteChunkStatusQueryKey = (id: string) => ["teams", id, "workflow-orchestration", "paper-note-chunks", "status"] as const;
 const sourceQualityStatusQueryKey = (id: string) => ["teams", id, "workflow-orchestration", "source-quality", "status"] as const;
 
-type ResearchWorkspaceView = "overview" | "source_collection" | "coordination" | "ingestion" | "graph" | "candidates" | "discussion" | "canvas";
+type ResearchStageWorkspaceView = "knowledge_collection" | "experiment" | "iteration";
+type ResearchLegacyWorkspaceView = "source_collection" | "coordination" | "ingestion" | "graph" | "candidates" | "discussion" | "canvas";
+type ResearchWorkspaceView = "overview" | ResearchStageWorkspaceView | ResearchLegacyWorkspaceView;
 
 type TeamsRouteProps = {
   forcedTeamId?: string;
@@ -79,25 +81,63 @@ type TeamsRouteProps = {
 };
 
 const RESEARCH_WORKSPACE_NAV_ITEMS: Array<{
-  view: ResearchWorkspaceView;
+  view: ResearchStageWorkspaceView;
   zh: string;
   en: string;
   zhDetail: string;
   enDetail: string;
+  zhModules: string;
+  enModules: string;
 }> = [
-  { view: "overview", zh: "科研总览", en: "Overview", zhDetail: "阶段、候选和流程边界", enDetail: "Stage, candidates, and boundaries" },
-  { view: "source_collection", zh: "资料搜集", en: "Source collection", zhDetail: "启动批次与回写结果", enDetail: "Runs, assignments, and writeback" },
-  { view: "coordination", zh: "团队协调", en: "Coordination", zhDetail: "调转、返工与沟通队列", enDetail: "Transfers, rework, and briefs" },
-  { view: "ingestion", zh: "知识入库", en: "Ingestion", zhDetail: "候选层到共享记忆前置审查", enDetail: "Candidate review before shared memory" },
-  { view: "graph", zh: "候选图谱", en: "Candidate graph", zhDetail: "候选关系、缺边和预览边界", enDetail: "Relations, missing links, and boundary" },
-  { view: "candidates", zh: "候选资料", en: "Candidates", zhDetail: "资料、草稿与机制候选", enDetail: "Sources, drafts, and mechanisms" },
-  { view: "discussion", zh: "团队沟通", en: "Team discussion", zhDetail: "团队任务、广播和群聊记录", enDetail: "Tasks, broadcast, and room history" },
-  { view: "canvas", zh: "组织画布", en: "Canvas", zhDetail: "附属团队结构图", enDetail: "Supporting organization map" },
+  {
+    view: "knowledge_collection",
+    zh: "知识搜集",
+    en: "Knowledge collection",
+    zhDetail: "搜集、筛选、候选与入库边界",
+    enDetail: "Collection, screening, candidates, and boundary",
+    zhModules: "资料搜集 / 资料筛选 / 知识入库 / 候选图谱",
+    enModules: "Source collection / screening / ingestion / graph",
+  },
+  {
+    view: "experiment",
+    zh: "实验",
+    en: "Experiment",
+    zhDetail: "规划、执行、指标与结果对比",
+    enDetail: "Planning, execution, metrics, and comparison",
+    zhModules: "实验规划 / Baseline / 指标 / 结果记录",
+    enModules: "Experiment plan / baseline / metrics / results",
+  },
+  {
+    view: "iteration",
+    zh: "迭代",
+    en: "Iteration",
+    zhDetail: "复盘、版本、优化与交付",
+    enDetail: "Review, versions, optimization, and delivery",
+    zhModules: "复盘 / 版本化 / 改进计划 / 交付门禁",
+    enModules: "Review / versioning / improvements / delivery gate",
+  },
 ];
+
+const RESEARCH_WORKSPACE_LABELS: Record<ResearchWorkspaceView, { zh: string; en: string }> = {
+  overview: { zh: "科研总览", en: "Overview" },
+  knowledge_collection: { zh: "知识搜集", en: "Knowledge collection" },
+  experiment: { zh: "实验", en: "Experiment" },
+  iteration: { zh: "迭代", en: "Iteration" },
+  source_collection: { zh: "资料搜集", en: "Source collection" },
+  coordination: { zh: "团队协调", en: "Coordination" },
+  ingestion: { zh: "知识入库", en: "Ingestion" },
+  graph: { zh: "候选图谱", en: "Candidate graph" },
+  candidates: { zh: "候选资料", en: "Candidates" },
+  discussion: { zh: "团队沟通", en: "Team discussion" },
+  canvas: { zh: "组织画布", en: "Canvas" },
+};
 
 function researchWorkspaceAnchorId(view: ResearchWorkspaceView) {
   const ids: Record<ResearchWorkspaceView, string> = {
     overview: "research-workflow-overview",
+    knowledge_collection: "research-workflow-knowledge-collection",
+    experiment: "research-workflow-experiment",
+    iteration: "research-workflow-iteration",
     source_collection: "research-workflow-source-collection",
     coordination: "research-workflow-coordination",
     ingestion: "research-workflow-ingestion",
@@ -110,16 +150,26 @@ function researchWorkspaceAnchorId(view: ResearchWorkspaceView) {
 }
 
 function researchWorkspaceViewLabel(view: ResearchWorkspaceView, lang: "zh" | "en") {
-  const item = RESEARCH_WORKSPACE_NAV_ITEMS.find((entry) => entry.view === view);
-  return item ? (lang === "zh" ? item.zh : item.en) : view;
+  const item = RESEARCH_WORKSPACE_LABELS[view];
+  return item ? item[lang] : view;
 }
 
 function parseResearchWorkspaceView(value: string | null): ResearchWorkspaceView | null {
-  return RESEARCH_WORKSPACE_NAV_ITEMS.some((item) => item.view === value) ? (value as ResearchWorkspaceView) : null;
+  if (!value) {
+    return null;
+  }
+  if (value === "source_collection") {
+    return "knowledge_collection";
+  }
+  return value in RESEARCH_WORKSPACE_LABELS ? (value as ResearchWorkspaceView) : null;
+}
+
+function researchWorkspaceStageRoute(teamId = RESEARCH_TEAM_ID, view: ResearchStageWorkspaceView = "knowledge_collection") {
+  return `/teams?team=${encodeURIComponent(teamId)}&researchView=${encodeURIComponent(view)}`;
 }
 
 function researchSourceCollectionRoute(teamId = RESEARCH_TEAM_ID) {
-  return `/teams?team=${encodeURIComponent(teamId)}&researchView=source_collection`;
+  return researchWorkspaceStageRoute(teamId, "knowledge_collection");
 }
 
 function teamWorkspaceRoute(teamId = RESEARCH_TEAM_ID) {
@@ -1128,8 +1178,12 @@ export function TeamsRoute({
   const chatWorkspaceCache = useMemo(() => createChatWorkspaceCache(queryClient), [queryClient]);
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+  const requestedResearchViewParam = searchParams.get("researchView");
   const requestedResearchWorkspaceView = parseResearchWorkspaceView(searchParams.get("researchView"));
-  const sourceCollectionStandalone = sourceCollectionStandaloneProp || requestedResearchWorkspaceView === "source_collection";
+  const sourceCollectionStandalone =
+    sourceCollectionStandaloneProp || requestedResearchWorkspaceView === "knowledge_collection" || requestedResearchViewParam === "source_collection";
+  const stageStandaloneView: ResearchStageWorkspaceView | null =
+    requestedResearchWorkspaceView === "experiment" || requestedResearchWorkspaceView === "iteration" ? requestedResearchWorkspaceView : null;
   const pageVisible = usePageVisibility();
   const [selectedTeamId, setSelectedTeamId] = useState("");
   const [selectedNodeId, setSelectedNodeId] = useState("");
@@ -1685,7 +1739,7 @@ export function TeamsRoute({
       if (sourceRunId) {
         setSelectedSourceCollectionRunId(sourceRunId);
         if (sourceCollectionStandalone) {
-          setResearchWorkspaceView("source_collection");
+          setResearchWorkspaceView("knowledge_collection");
         } else {
           navigate(researchSourceCollectionRoute(variables.teamId));
         }
@@ -1694,9 +1748,9 @@ export function TeamsRoute({
         void queryClient.invalidateQueries({ queryKey: queryKeys.dataProcessingCollectionAssignments(sourceRunId) });
         void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowKnowledgeIngestionStatus(variables.teamId) });
       } else if (variables.stageType === "experiment") {
-        setResearchWorkspaceView("coordination");
+        setResearchWorkspaceView("experiment");
       } else if (variables.stageType === "iteration") {
-        setResearchWorkspaceView("overview");
+        setResearchWorkspaceView("iteration");
       }
     },
   });
@@ -1991,44 +2045,27 @@ export function TeamsRoute({
       return null;
     }
     return (
-      <nav className={styles.researchIndexPanel} aria-label={lang === "zh" ? "科研流程索引" : "Research workflow index"}>
+      <nav className={styles.researchIndexPanel} aria-label={lang === "zh" ? "科研三阶段索引" : "Research stage index"}>
         <div className={styles.researchIndexHeader}>
           <div>
-            <strong>{lang === "zh" ? "科研流程索引" : "Research index"}</strong>
-            <span>{lang === "zh" ? "团队内二级导航" : "Team-level workflow navigation"}</span>
+            <strong>{lang === "zh" ? "科研三阶段索引" : "Research stages"}</strong>
+            <span>{lang === "zh" ? "团队专属阶段页" : "Team-specific stage pages"}</span>
           </div>
-          <small>{lang === "zh" ? "流程优先" : "flow first"}</small>
+          <small>{lang === "zh" ? "三阶段" : "3 stages"}</small>
         </div>
         <div className={styles.researchIndexList}>
-          {RESEARCH_WORKSPACE_NAV_ITEMS.map((item) => {
-            const content = (
-              <>
-                <strong>{lang === "zh" ? item.zh : item.en}</strong>
-                <span>{lang === "zh" ? item.zhDetail : item.enDetail}</span>
-              </>
-            );
-            if (item.view === "source_collection" && !sourceCollectionStandalone) {
-              return (
-                <Link
-                  key={item.view}
-                  className={styles.researchIndexItem}
-                  to={researchSourceCollectionRoute(selectedTeam?.teamId || RESEARCH_TEAM_ID)}
-                >
-                  {content}
-                </Link>
-              );
-            }
-            return (
-              <button
-                key={item.view}
-                type="button"
-                className={researchWorkspaceView === item.view ? `${styles.researchIndexItem} ${styles.researchIndexItemActive}` : styles.researchIndexItem}
-                onClick={() => selectResearchWorkspaceView(item.view)}
-              >
-                {content}
-              </button>
-            );
-          })}
+          {RESEARCH_WORKSPACE_NAV_ITEMS.map((item, index) => (
+            <Link
+              key={item.view}
+              className={researchWorkspaceView === item.view ? `${styles.researchIndexItem} ${styles.researchIndexItemActive}` : styles.researchIndexItem}
+              to={researchWorkspaceStageRoute(selectedTeam?.teamId || RESEARCH_TEAM_ID, item.view)}
+            >
+              <small>{String(index + 1).padStart(2, "0")}</small>
+              <strong>{lang === "zh" ? item.zh : item.en}</strong>
+              <span>{lang === "zh" ? item.zhDetail : item.enDetail}</span>
+              <em>{lang === "zh" ? item.zhModules : item.enModules}</em>
+            </Link>
+          ))}
         </div>
       </nav>
     );
@@ -2353,6 +2390,128 @@ export function TeamsRoute({
             </span>
           </div>
         ) : null}
+      </section>
+    );
+  }
+
+  function renderResearchStageStandalonePage(stageView: Exclude<ResearchStageWorkspaceView, "knowledge_collection">) {
+    const stageType: ResearchStageType = stageView;
+    const stagePhase = researchStagePhases.find((phase) => phase.stageType === stageType);
+    const latestRound = stagePhase?.latestRound;
+    const config = {
+      experiment: {
+        eyebrow: lang === "zh" ? "ai科学研究团队 / 实验阶段" : "AI research team / experiment stage",
+        title: lang === "zh" ? "实验规划工作台" : "Experiment planning workspace",
+        description: lang === "zh"
+          ? "把已筛选知识转成可验证实验，先规划 baseline、指标、数据与执行记录；是否真正进入实验由用户触发。"
+          : "Turns screened knowledge into verifiable experiments. Baselines, metrics, data, and run records are planned before execution.",
+        primaryAction: lang === "zh" ? "启动实验规划" : "Start experiment planning",
+        secondaryAction: lang === "zh" ? "重新规划实验" : "Replan experiment",
+        modules: [
+          [lang === "zh" ? "实验问题" : "Experiment question", lang === "zh" ? "从知识搜集结论中抽取可验证假设。" : "Extract verifiable hypotheses from collected knowledge."],
+          [lang === "zh" ? "Baseline 与指标" : "Baseline and metrics", lang === "zh" ? "记录对照模型、评价指标和成功阈值。" : "Record control models, metrics, and success criteria."],
+          [lang === "zh" ? "执行记录" : "Run records", lang === "zh" ? "预留训练、日志、结果和异常回写位置。" : "Reserve writeback slots for runs, logs, results, and exceptions."],
+          [lang === "zh" ? "结果对比" : "Result comparison", lang === "zh" ? "后续承接消融、对照和实验结论。" : "Later receives ablations, comparisons, and conclusions."],
+        ],
+      },
+      iteration: {
+        eyebrow: lang === "zh" ? "ai科学研究团队 / 迭代阶段" : "AI research team / iteration stage",
+        title: lang === "zh" ? "迭代优化工作台" : "Iteration workspace",
+        description: lang === "zh"
+          ? "把实验结论转成下一轮改进计划，记录复盘、版本、风险和交付门禁；每轮迭代由用户重新触发。"
+          : "Turns experiment conclusions into the next improvement plan with review, versions, risks, and delivery gates.",
+        primaryAction: lang === "zh" ? "启动迭代" : "Start iteration",
+        secondaryAction: lang === "zh" ? "开启新一轮迭代" : "Start new iteration",
+        modules: [
+          [lang === "zh" ? "复盘结论" : "Review outcome", lang === "zh" ? "整理实验发现、失败原因和保留假设。" : "Summarize findings, failure causes, and retained hypotheses."],
+          [lang === "zh" ? "版本计划" : "Version plan", lang === "zh" ? "给算法、数据、参数和文档建立版本边界。" : "Define version boundaries for algorithm, data, parameters, and docs."],
+          [lang === "zh" ? "改进任务" : "Improvement tasks", lang === "zh" ? "把下一轮要做的优化拆成可追踪任务。" : "Split next improvements into traceable tasks."],
+          [lang === "zh" ? "交付门禁" : "Delivery gate", lang === "zh" ? "保留挑战杯材料、复现实验和风险清单入口。" : "Reserve entries for deliverables, reproducibility, and risk list."],
+        ],
+      },
+    }[stageView];
+    const disabled = selectedTeamStartResearchStagePending || !selectedTeam?.teamId;
+
+    return (
+      <section className={`${styles.route} ${styles.researchStagePage}`}>
+        <header className={`${styles.header} ${styles.researchStagePageHeader}`}>
+          <div>
+            <p>{config.eyebrow}</p>
+            <h1>{config.title}</h1>
+          </div>
+          <div className={styles.sourceCollectionPageActions}>
+            <Link to={teamWorkspaceRoute(selectedTeam?.teamId || RESEARCH_TEAM_ID)}>
+              <ArrowLeft size={14} />
+              {lang === "zh" ? "返回团队页面" : "Back to team"}
+            </Link>
+            <button type="button" onClick={() => void researchStageRoundStatusQuery.refetch()} disabled={researchStageRoundStatusQuery.isFetching}>
+              <RefreshCw size={14} />
+              {lang === "zh" ? "刷新" : "Refresh"}
+            </button>
+          </div>
+        </header>
+        <main className={styles.researchStagePageBody}>
+          <section className={styles.researchStageHeroPanel}>
+            <div>
+              <strong>{stagePhase?.label || researchWorkspaceViewLabel(stageView, lang)}</strong>
+              <p>{config.description}</p>
+            </div>
+            <div className={styles.researchStageHeroStats}>
+              <span>
+                {lang === "zh" ? "状态" : "Status"}
+                <strong>{stagePhase?.status || (lang === "zh" ? "未启动" : "not started")}</strong>
+              </span>
+              <span>
+                {lang === "zh" ? "轮次" : "Rounds"}
+                <strong>{stagePhase?.roundCount ?? 0}</strong>
+              </span>
+              <span>
+                {lang === "zh" ? "最近" : "Latest"}
+                <strong>{latestRound ? `${latestRound.status} #${latestRound.roundNumber}` : (lang === "zh" ? "无" : "none")}</strong>
+              </span>
+            </div>
+          </section>
+          <section className={styles.researchStageActionPanel}>
+            <div>
+              <strong>{lang === "zh" ? "阶段启动" : "Stage launch"}</strong>
+              <span>
+                {stagePhase?.readiness?.reason || (lang === "zh" ? "本阶段只创建规划轮次，不自动执行实验或迭代。" : "This stage creates planning rounds only.")}
+              </span>
+            </div>
+            <div className={styles.researchStagePageActions}>
+              <button type="button" onClick={() => launchResearchStage(stageType)} disabled={disabled}>
+                <Play size={13} />
+                {stagePhase?.primaryAction || config.primaryAction}
+              </button>
+              <button type="button" onClick={() => launchResearchStage(stageType, "new_round")} disabled={disabled}>
+                <Plus size={13} />
+                {stagePhase?.secondaryAction || config.secondaryAction}
+              </button>
+            </div>
+            {selectedTeamStartResearchStageError ? <div className={styles.workflowError}>{selectedTeamStartResearchStageError.message}</div> : null}
+            {selectedTeamStartResearchStageResult?.stageRound.stageType === stageType ? (
+              <div className={styles.workflowSuccess}>
+                {lang === "zh"
+                  ? `已进入 ${researchWorkspaceViewLabel(stageView, lang)} 第 ${selectedTeamStartResearchStageResult.stageRound.roundNumber} 轮`
+                  : `Entered ${researchWorkspaceViewLabel(stageView, lang)} round ${selectedTeamStartResearchStageResult.stageRound.roundNumber}`}
+              </div>
+            ) : null}
+          </section>
+          <section className={styles.researchStageModuleGrid} aria-label={lang === "zh" ? "阶段模块" : "Stage modules"}>
+            {config.modules.map(([title, body]) => (
+              <article key={title} className={styles.researchStageModuleCard}>
+                <strong>{title}</strong>
+                <span>{body}</span>
+              </article>
+            ))}
+          </section>
+          <section className={styles.researchStageBoundaryPanel}>
+            <strong>{lang === "zh" ? "边界" : "Boundary"}</strong>
+            <span>{lang === "zh" ? "不自动进入下一阶段。" : "Does not auto-transition to the next stage."}</span>
+            <span>{lang === "zh" ? "不写正式 Team Knowledge / RAG / official graph。" : "Does not write formal Team Knowledge / RAG / official graph."}</span>
+            <span>{lang === "zh" ? "规划结果先留在团队 workflow runtime memory。" : "Planning output remains in team workflow runtime memory."}</span>
+          </section>
+        </main>
       </section>
     );
   }
@@ -2805,8 +2964,8 @@ export function TeamsRoute({
       <section className={`${styles.route} ${styles.sourceCollectionPage}`}>
         <header className={`${styles.header} ${styles.sourceCollectionPageHeader}`}>
           <div>
-            <p>{lang === "zh" ? "ai科学研究团队 / 资料搜集工作台" : "AI research team / source collection workspace"}</p>
-            <h1>{lang === "zh" ? "对话式知识搜集" : "Conversational source collection"}</h1>
+            <p>{lang === "zh" ? "ai科学研究团队 / 知识搜集阶段" : "AI research team / knowledge collection stage"}</p>
+            <h1>{lang === "zh" ? "知识搜集工作台" : "Knowledge collection workspace"}</h1>
           </div>
           <div className={styles.sourceCollectionPageActions}>
             <Link to={teamWorkspaceRoute(selectedTeam?.teamId || RESEARCH_TEAM_ID)}>
@@ -2837,6 +2996,17 @@ export function TeamsRoute({
                 <span>{lang === "zh" ? "质检通过" : "approved"} <strong>{teamWorkflowSourceQualityStatus?.summary.approvedSourceCandidateCount ?? 0}</strong></span>
               </div>
             </section>
+            <section className={styles.sourceCollectionStageModules} aria-label={lang === "zh" ? "知识搜集内部模块" : "Knowledge collection modules"}>
+              {(lang === "zh"
+                ? ["资料搜集", "资料筛选", "候选入库", "候选图谱", "团队共享记忆前审"]
+                : ["Source collection", "Source screening", "Candidate ingestion", "Candidate graph", "Shared-memory precheck"]
+              ).map((moduleName, index) => (
+                <span key={moduleName}>
+                  <strong>{String(index + 1).padStart(2, "0")}</strong>
+                  {moduleName}
+                </span>
+              ))}
+            </section>
             <div className={styles.sourceCollectionPageGrid}>
               {renderSourceCollectionConversation()}
               {renderSourceCollectionControlsPanel()}
@@ -2860,6 +3030,10 @@ export function TeamsRoute({
         )}
       </section>
     );
+  }
+
+  if (stageStandaloneView) {
+    return renderResearchStageStandalonePage(stageStandaloneView);
   }
 
   return (
