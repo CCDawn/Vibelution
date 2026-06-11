@@ -104,6 +104,7 @@ PROFILE_REFERENCE_OVERRIDE_FIELDS = (
     "capability_checked_at",
     "capability_error",
 )
+MODEL_LIBRARY_DETAIL_FIELDS = PROFILE_REFERENCE_OVERRIDE_FIELDS
 UNCONFIGURED_MODEL_REF = "__unconfigured__"
 
 
@@ -204,12 +205,49 @@ def _repair_legacy_model_library_shape(public_config: Dict[str, Any]) -> Dict[st
     return repaired
 
 
+def _coerce_model_library_detail(key: str, value: Any) -> Any:
+    if value in ("", None):
+        return None
+    if key == "prompt_cache":
+        return copy.deepcopy(value) if isinstance(value, dict) else {"mode": str(value).strip()}
+    if key == "compat":
+        return copy.deepcopy(value) if isinstance(value, dict) else None
+    if key == "api_key_env":
+        return str(value).strip()
+    if key in {
+        "transport",
+        "contract",
+        "protocol",
+        "reasoning_state_field",
+        "thinking_type",
+        "thinking_display",
+        "reasoning_effort",
+        "capability_status",
+        "capability_source",
+        "capability_checked_at",
+        "capability_error",
+    }:
+        return str(value).strip()
+    if key == "temperature":
+        return float(value)
+    if key in {"max_output_tokens", "timeout", "connect_timeout"}:
+        return int(value)
+    if key in {"streaming", "discovery_enabled", "strict_compatibility", "supports_image_input"}:
+        if isinstance(value, bool):
+            return value
+        return str(value).strip().lower() in {"1", "true", "yes", "on"}
+    return str(value).strip()
+
+
 def _model_library_details(item: Dict[str, Any]) -> Dict[str, Any]:
-    return {
-        key: copy.deepcopy(item[key])
-        for key in PROFILE_REFERENCE_OVERRIDE_FIELDS
-        if key in item
-    }
+    details: Dict[str, Any] = {}
+    for key in MODEL_LIBRARY_DETAIL_FIELDS:
+        if key not in item:
+            continue
+        value = _coerce_model_library_detail(key, item.get(key))
+        if value is not None:
+            details[key] = value
+    return details
 
 
 def _model_library_entry(

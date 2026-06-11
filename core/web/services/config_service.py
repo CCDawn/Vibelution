@@ -685,23 +685,6 @@ def _apply_image_input_capability_result_to_config(
         entry["capability_error"] = details["capability_error"]
     else:
         entry.pop("capability_error", None)
-    profiles = llm.get("profiles", {}) if isinstance(llm, dict) else {}
-    if not isinstance(profiles, dict):
-        return
-    for profile in profiles.values():
-        if not isinstance(profile, dict):
-            continue
-        if str(profile.get("model_ref") or "").strip() != model_id:
-            continue
-        if "supports_image_input" in details:
-            profile["supports_image_input"] = details["supports_image_input"]
-        profile["capability_status"] = details["capability_status"]
-        profile["capability_source"] = details["capability_source"]
-        profile["capability_checked_at"] = details["capability_checked_at"]
-        if details.get("capability_error"):
-            profile["capability_error"] = details["capability_error"]
-        else:
-            profile.pop("capability_error", None)
 
 
 def _run_draft_test_llm_connection(
