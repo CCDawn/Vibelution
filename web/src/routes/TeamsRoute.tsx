@@ -292,6 +292,7 @@ type ResearchStageRoundStatusPayload = {
 
 type ResearchStageRoundStartPayload = {
   created: boolean;
+  continued?: boolean;
   stageRound: ResearchStageRound;
   phase: ResearchStagePhaseStatus;
   status: ResearchStageRoundStatusPayload;
@@ -300,8 +301,21 @@ type ResearchStageRoundStartPayload = {
   run?: TeamWorkflowSourceCollectionRunStartPayload["run"];
   searchPlan?: TeamWorkflowSourceCollectionRunStartPayload["searchPlan"];
   assignments?: TeamWorkflowSourceCollectionRunStartPayload["assignments"];
+  assignmentCount?: number;
   promptCachePolicy?: TeamWorkflowSourceCollectionRunStartPayload["promptCachePolicy"];
+  continuedSourceRunRef?: {
+    runId: string;
+    status: string;
+    recordCount: number;
+    assignmentCount: number;
+    openAssignmentCount: number;
+    queryCount?: number;
+    planId?: string;
+    externalSearchTriggered?: boolean;
+    message?: string;
+  };
   boundaries: ResearchStageRoundStatusPayload["boundaries"];
+  nextActions?: string[];
 };
 
 type TeamWorkflowOfficialModelEvidenceCoverage = {
@@ -656,6 +670,21 @@ function sourceCollectionPromptCacheStatusLabel(status: string, lang: "zh" | "en
     return "disabled";
   }
   return "pending";
+}
+
+function researchStageStartFeedbackText(payload: ResearchStageRoundStartPayload, lang: "zh" | "en", stageLabel?: string) {
+  const label = stageLabel || payload.stageRound.stageType;
+  const sourceRef = payload.continuedSourceRunRef;
+  if (payload.created === false && payload.continued && sourceRef) {
+    if (lang === "zh") {
+      return `已复用正在运行的${label}第 ${payload.stageRound.roundNumber} 轮：${sourceCollectionRunLabel(sourceRef.runId)} · ${sourceRef.recordCount} 条记录 / ${sourceRef.openAssignmentCount} 个待回写任务。要创建全新批次，请点“开启新一轮”。`;
+    }
+    return `Reused active ${label} round ${payload.stageRound.roundNumber}: ${sourceCollectionRunLabel(sourceRef.runId)} · ${sourceRef.recordCount} records / ${sourceRef.openAssignmentCount} open tasks. Use "New round" to create a fresh batch.`;
+  }
+  if (lang === "zh") {
+    return `已进入 ${label} 第 ${payload.stageRound.roundNumber} 轮`;
+  }
+  return `Entered ${label} round ${payload.stageRound.roundNumber}`;
 }
 
 function canvasFromTeam(team: Team | null): TeamOrganizationCanvas | null {
@@ -1895,6 +1924,52 @@ export function TeamsRoute({
       const sourceRunId = payload.run?.runId || payload.stageRound.sourceRunIds?.[0] || "";
       if (sourceRunId) {
         setSelectedSourceCollectionRunId(sourceRunId);
+        const firstAssignmentId = payload.assignments?.[0]?.assignmentId ?? "";
+        if (firstAssignmentId) {
+          setSourceCollectionOutputDraft((current) => ({
+            ...current,
+            assignmentId: firstAssignmentId,
+          }));
+        }
+        if (payload.run) {
+          queryClient.setQueryData(queryKeys.dataProcessingRunStatus(sourceRunId), {
+            schemaVersion: 1,
+            runId: payload.run.runId,
+            profileId: payload.run.profileId,
+            runStatus: payload.run.status,
+            summary: payload.run.summary ?? {
+              recordCount: 0,
+              assignmentCount: payload.assignmentCount ?? payload.assignments?.length ?? 0,
+              openAssignmentCount: payload.continuedSourceRunRef?.openAssignmentCount ?? 0,
+              outputCount: 0,
+              recordStatusCounts: {},
+              sourceTypeCounts: {},
+              assignmentStatusCounts: {},
+            },
+            nextActions: [],
+            boundaries: {
+              generic: true,
+              writesFormalKnowledge: false,
+              writesRag: false,
+              writesKnowledgeGraph: false,
+              requiresDownstreamPublisher: true,
+            },
+          });
+        }
+        if (payload.assignments) {
+          queryClient.setQueryData(queryKeys.dataProcessingCollectionAssignments(sourceRunId), {
+            schemaVersion: 1,
+            runId: sourceRunId,
+            assignments: payload.assignments,
+            summary: {
+              assignmentCount: payload.assignments.length,
+              assignmentStatusCounts: payload.assignments.reduce<Record<string, number>>((counts, assignment) => {
+                counts[assignment.status] = (counts[assignment.status] ?? 0) + 1;
+                return counts;
+              }, {}),
+            },
+          });
+        }
         if (sourceCollectionStandalone) {
           setResearchWorkspaceView("knowledge_collection");
         } else {
@@ -2188,9 +2263,11 @@ export function TeamsRoute({
         ) : null}
         {selectedTeamStartResearchStageResult?.stageRound ? (
           <div className={styles.workflowSuccess}>
-            {lang === "zh"
-              ? `已进入 ${selectedTeamStartResearchStageResult.stageRound.stageType} 第 ${selectedTeamStartResearchStageResult.stageRound.roundNumber} 轮`
-              : `Entered ${selectedTeamStartResearchStageResult.stageRound.stageType} round ${selectedTeamStartResearchStageResult.stageRound.roundNumber}`}
+            {researchStageStartFeedbackText(
+              selectedTeamStartResearchStageResult,
+              lang,
+              researchWorkspaceViewLabel(selectedTeamStartResearchStageResult.stageRound.stageType as ResearchStageWorkspaceView, lang),
+            )}
           </div>
         ) : null}
       </section>
@@ -2462,6 +2539,34 @@ export function TeamsRoute({
           ))}
         </div>
       </section>
+    );
+  }
+
+  function renderSourceCollectionRunNotice() {
+    if (!selectedSourceCollectionRun || !sourceCollectionRunStatus) {
+      return null;
+    }
+    const recordCount = sourceCollectionRunStatus.summary.recordCount ?? 0;
+    const openAssignmentCount = sourceCollectionRunStatus.summary.openAssignmentCount ?? 0;
+    const queryCount = sourceCollectionSearchPlanRef?.queryCount ?? selectedTeamStartSourceCollectionResult?.searchPlan.queryCount ?? 0;
+    const externalSearchTriggered = Boolean(sourceCollectionSearchPlanRef?.externalSearchTriggered);
+    if (recordCount > 0 || openAssignmentCount <= 0) {
+      return null;
+    }
+    return (
+      <div className={styles.workflowNotice}>
+        <strong>{lang === "zh" ? "搜集批次已启动，等待功能 Agent 回写" : "Collection run is active and waiting for Agent writeback"}</strong>
+        <span>
+          {lang === "zh"
+            ? `${sourceCollectionRunLabel(selectedSourceCollectionRun.runId)} 已规划 ${queryCount} 条 query，当前 ${openAssignmentCount} 个任务仍未完成；本按钮不会直接联网抓取网页，真实搜索执行器接入后会在这里记录搜索、下载、提炼和落库轨迹。`
+            : `${sourceCollectionRunLabel(selectedSourceCollectionRun.runId)} has ${queryCount} planned queries and ${openAssignmentCount} open tasks. This button does not directly crawl the web; the real search executor will write search, download, extraction, and storage traces here.`}
+        </span>
+        <em>
+          {externalSearchTriggered
+            ? (lang === "zh" ? "外部搜索已触发" : "external search triggered")
+            : (lang === "zh" ? "当前仍是计划/回写阶段，未触发外部搜索" : "planning/writeback stage only; external search not triggered")}
+        </em>
+      </div>
     );
   }
 
@@ -2830,9 +2935,7 @@ export function TeamsRoute({
             {selectedTeamStartResearchStageError ? <div className={styles.workflowError}>{selectedTeamStartResearchStageError.message}</div> : null}
             {selectedTeamStartResearchStageResult?.stageRound.stageType === stageType ? (
               <div className={styles.workflowSuccess}>
-                {lang === "zh"
-                  ? `已进入 ${researchWorkspaceViewLabel(stageView, lang)} 第 ${selectedTeamStartResearchStageResult.stageRound.roundNumber} 轮`
-                  : `Entered ${researchWorkspaceViewLabel(stageView, lang)} round ${selectedTeamStartResearchStageResult.stageRound.roundNumber}`}
+                {researchStageStartFeedbackText(selectedTeamStartResearchStageResult, lang, researchWorkspaceViewLabel(stageView, lang))}
               </div>
             ) : null}
           </section>
@@ -3421,6 +3524,7 @@ export function TeamsRoute({
                 <span>KV <strong>{sourceCollectionPromptCacheStatusLabel(sourceCollectionPromptCacheStatus, lang)}{sourceCollectionPromptCacheMode ? ` · ${sourceCollectionPromptCacheMode}` : ""}</strong></span>
               </div>
             </section>
+            {renderSourceCollectionRunNotice()}
             <section className={styles.sourceCollectionStageModules} aria-label={lang === "zh" ? "知识搜集内部模块" : "Knowledge collection modules"}>
               {(lang === "zh"
                 ? ["资料搜集", "资料筛选", "候选入库", "候选图谱", "团队共享记忆前审"]
@@ -3958,6 +4062,7 @@ export function TeamsRoute({
                             {sourceCollectionRunStatus?.runStatus || selectedSourceCollectionRun?.status || (lang === "zh" ? "未启动" : "not started")}
                           </span>
                         </div>
+                        {renderSourceCollectionRunNotice()}
                         <form
                           className={styles.workflowSourceCollectionForm}
                           onSubmit={(event) => {

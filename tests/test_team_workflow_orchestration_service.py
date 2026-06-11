@@ -411,7 +411,16 @@ def test_start_research_stage_round_reuses_active_knowledge_collection_round(tmp
     )
 
     assert duplicate["created"] is False
+    assert duplicate["continued"] is True
     assert duplicate["stageRound"]["stageRoundId"] == first["stageRound"]["stageRoundId"]
+    assert duplicate["run"]["runId"] == first["run"]["runId"]
+    assert duplicate["continuedSourceRunRef"]["runId"] == first["run"]["runId"]
+    assert duplicate["continuedSourceRunRef"]["status"] == "collecting"
+    assert duplicate["continuedSourceRunRef"]["assignmentCount"] == len(first["assignments"])
+    assert duplicate["continuedSourceRunRef"]["openAssignmentCount"] == len(first["assignments"])
+    assert duplicate["continuedSourceRunRef"]["externalSearchTriggered"] is False
+    assert len(duplicate["assignments"]) == len(first["assignments"])
+    assert duplicate["nextActions"][0] == "Continue the active stage round instead of creating a duplicate."
     assert team_workflow_orchestration_service.get_research_stage_round_status(team["teamId"])["roundCount"] == 1
 
 

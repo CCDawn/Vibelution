@@ -1005,7 +1005,7 @@
 
 .sourceCollectionPageBody {
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-rows: auto auto auto minmax(0, 1fr);
   gap: 10px;
   min-height: 0;
   flex: 1 1 0;
@@ -1052,7 +1052,7 @@
 
 .sourceCollectionCommandStats {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(108px, 1fr));
   gap: 6px;
 }
 
@@ -1072,6 +1072,58 @@
 .sourceCollectionCommandStats strong {
   flex: 0 0 auto;
   font-size: 0.82rem;
+}
+
+.workflowSuccess,
+.workflowError,
+.workflowNotice {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--workflow-message-border, var(--border-soft));
+  border-radius: 8px;
+  background:
+    linear-gradient(90deg, var(--workflow-message-bg, transparent), transparent 72%),
+    color-mix(in srgb, var(--surface-card) 76%, transparent);
+  color: var(--fg-secondary);
+  font-size: 0.72rem;
+  font-weight: 720;
+  line-height: 1.45;
+}
+
+.workflowSuccess {
+  --workflow-message-border: color-mix(in srgb, var(--accent-success) 36%, var(--border-soft));
+  --workflow-message-bg: color-mix(in srgb, var(--accent-success) 8%, transparent);
+}
+
+.workflowError {
+  --workflow-message-border: color-mix(in srgb, var(--accent-danger) 36%, var(--border-soft));
+  --workflow-message-bg: color-mix(in srgb, var(--accent-danger) 8%, transparent);
+  color: color-mix(in srgb, var(--accent-danger) 74%, var(--fg-primary));
+}
+
+.workflowNotice {
+  --workflow-message-border: color-mix(in srgb, var(--accent-cool) 34%, var(--border-soft));
+  --workflow-message-bg: color-mix(in srgb, var(--accent-cool) 8%, transparent);
+}
+
+.workflowNotice strong,
+.workflowNotice span,
+.workflowNotice em {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.workflowNotice strong {
+  color: var(--fg-primary);
+  font-size: 0.76rem;
+}
+
+.workflowNotice em {
+  color: var(--fg-muted);
+  font-size: 0.66rem;
+  font-style: normal;
 }
 
 .sourceCollectionStageModules {
