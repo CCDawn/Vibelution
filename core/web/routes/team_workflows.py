@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, NoReturn
 
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
@@ -42,9 +42,47 @@ from core.web.services.team_workflow_orchestration_service import (
     submit_steward_pack_to_knowledge_ingestion,
     validate_candidate_store,
 )
+from core.web.services.runtime_scene_service import record_runtime_scene_event
 
 
 router = APIRouter(tags=["team-workflows"])
+
+
+def _truncate_route_field(value: Any, *, limit: int = 240) -> str:
+    return str(value or "").strip()[:limit]
+
+
+def _raise_team_workflow_route_error(
+    action: str,
+    team_id: str,
+    exc: Exception,
+    *,
+    status_code: int,
+    fields: dict[str, Any] | None = None,
+) -> NoReturn:
+    event_fields = {
+        "action": _truncate_route_field(action, limit=120),
+        "teamId": _truncate_route_field(team_id, limit=160),
+        "statusCode": status_code,
+        "errorType": type(exc).__name__,
+        "errorDetail": _truncate_route_field(exc, limit=320),
+    }
+    if fields:
+        event_fields.update({key: _truncate_route_field(value) for key, value in fields.items()})
+    try:
+        record_runtime_scene_event(
+            "team_workflow_orchestration",
+            "route_error",
+            "team_workflow.route_error",
+            message=f"{action} blocked at the Team Workflow API route.",
+            level="warning" if status_code < 500 else "error",
+            outcome="blocked" if status_code in {400, 403, 404, 409, 422} else "failed",
+            fields=event_fields,
+            lifecycle=True,
+        )
+    except Exception:
+        pass
+    raise HTTPException(status_code=status_code, detail=str(exc)) from exc
 
 
 class WorkflowEnsurePayload(BaseModel):
@@ -256,9 +294,15 @@ def team_workflow_ensure(team_id: str, payload: WorkflowEnsurePayload) -> dict:
             owner_agent_id=payload.ownerAgentId,
         )
     except TeamNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        _raise_team_workflow_route_error("workflow.ensure", team_id, exc, status_code=404)
     except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        _raise_team_workflow_route_error(
+            "workflow.ensure",
+            team_id,
+            exc,
+            status_code=422,
+            fields={"workflowKind": payload.workflowKind, "ownerAgentId": payload.ownerAgentId},
+        )
 
 
 @router.post("/teams/{team_id}/workflow-orchestration/candidates/source", status_code=status.HTTP_201_CREATED)
@@ -266,9 +310,15 @@ def team_workflow_candidate_source_create(team_id: str, payload: CandidateSource
     try:
         return register_candidate_source(team_id, payload.model_dump())
     except TeamNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        _raise_team_workflow_route_error("candidate_source.create", team_id, exc, status_code=404)
     except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        _raise_team_workflow_route_error(
+            "candidate_source.create",
+            team_id,
+            exc,
+            status_code=422,
+            fields={"candidateType": payload.candidateType, "sourceKind": payload.sourceKind, "createdByAgent": payload.createdByAgent},
+        )
 
 
 @router.post(
@@ -279,9 +329,21 @@ def team_workflow_import_data_record_source_candidate(team_id: str, run_id: str,
     try:
         return import_data_record_as_source_candidate(team_id, run_id, record_id, payload.model_dump())
     except TeamNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        _raise_team_workflow_route_error(
+            "data_record_source_candidate.import",
+            team_id,
+            exc,
+            status_code=404,
+            fields={"runId": run_id, "recordId": record_id},
+        )
     except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        _raise_team_workflow_route_error(
+            "data_record_source_candidate.import",
+            team_id,
+            exc,
+            status_code=422,
+            fields={"runId": run_id, "recordId": record_id, "sourceKind": payload.sourceKind, "createdByAgent": payload.createdByAgent},
+        )
 
 
 @router.post("/teams/{team_id}/workflow-orchestration/source-collection-runs", status_code=status.HTTP_201_CREATED)
@@ -289,9 +351,15 @@ def team_workflow_source_collection_run_start(team_id: str, payload: SourceColle
     try:
         return start_source_collection_run(team_id, payload.model_dump())
     except TeamNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        _raise_team_workflow_route_error("source_collection_run.start", team_id, exc, status_code=404)
     except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        _raise_team_workflow_route_error(
+            "source_collection_run.start",
+            team_id,
+            exc,
+            status_code=422,
+            fields={"ownerAgentId": payload.ownerAgentId, "requestedByAgent": payload.requestedByAgent},
+        )
 
 
 @router.get("/teams/{team_id}/workflow-orchestration/stage-rounds/status")
@@ -309,9 +377,21 @@ def team_workflow_research_stage_round_start(team_id: str, payload: ResearchStag
     try:
         return start_research_stage_round(team_id, payload.model_dump())
     except TeamNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        _raise_team_workflow_route_error(
+            "research_stage_round.start",
+            team_id,
+            exc,
+            status_code=404,
+            fields={"stageType": payload.stageType, "mode": payload.mode},
+        )
     except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        _raise_team_workflow_route_error(
+            "research_stage_round.start",
+            team_id,
+            exc,
+            status_code=422,
+            fields={"stageType": payload.stageType, "mode": payload.mode, "requestedByAgent": payload.requestedByAgent},
+        )
 
 
 @router.post("/teams/{team_id}/workflow-orchestration/stage-rounds/{stage_round_id}/coordination/retry")
@@ -319,9 +399,21 @@ def team_workflow_research_stage_round_coordination_retry(team_id: str, stage_ro
     try:
         return retry_research_stage_round_coordination(team_id, stage_round_id)
     except TeamNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        _raise_team_workflow_route_error(
+            "research_stage_round.coordination_retry",
+            team_id,
+            exc,
+            status_code=404,
+            fields={"stageRoundId": stage_round_id},
+        )
     except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        _raise_team_workflow_route_error(
+            "research_stage_round.coordination_retry",
+            team_id,
+            exc,
+            status_code=422,
+            fields={"stageRoundId": stage_round_id},
+        )
 
 
 @router.post("/teams/{team_id}/workflow-orchestration/stage-rounds/{stage_round_id}/memory-record/retry")
@@ -329,9 +421,21 @@ def team_workflow_research_stage_round_memory_retry(team_id: str, stage_round_id
     try:
         return retry_research_stage_round_memory_record(team_id, stage_round_id)
     except TeamNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        _raise_team_workflow_route_error(
+            "research_stage_round.memory_retry",
+            team_id,
+            exc,
+            status_code=404,
+            fields={"stageRoundId": stage_round_id},
+        )
     except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        _raise_team_workflow_route_error(
+            "research_stage_round.memory_retry",
+            team_id,
+            exc,
+            status_code=422,
+            fields={"stageRoundId": stage_round_id},
+        )
 
 
 @router.get("/teams/{team_id}/workflow-orchestration/candidates")
@@ -391,9 +495,15 @@ def team_workflow_candidate_graph_build(team_id: str, payload: CandidateGraphBui
     try:
         return build_candidate_graph(team_id, payload.model_dump())
     except TeamNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        _raise_team_workflow_route_error("candidate_graph.build", team_id, exc, status_code=404)
     except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        _raise_team_workflow_route_error(
+            "candidate_graph.build",
+            team_id,
+            exc,
+            status_code=422,
+            fields={"createdByAgent": payload.createdByAgent},
+        )
 
 
 @router.post("/teams/{team_id}/workflow-orchestration/candidates/{candidate_id}/source-extraction")
@@ -401,9 +511,21 @@ def team_workflow_candidate_source_extract(team_id: str, candidate_id: str, payl
     try:
         return extract_candidate_source_pages(team_id, candidate_id, payload.model_dump())
     except TeamNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        _raise_team_workflow_route_error(
+            "candidate_source.extract",
+            team_id,
+            exc,
+            status_code=404,
+            fields={"candidateId": candidate_id},
+        )
     except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        _raise_team_workflow_route_error(
+            "candidate_source.extract",
+            team_id,
+            exc,
+            status_code=422,
+            fields={"candidateId": candidate_id, "createdByAgent": payload.createdByAgent, "pageScope": payload.pageScope},
+        )
 
 
 @router.post("/teams/{team_id}/workflow-orchestration/candidates/{candidate_id}/paper-note-draft", status_code=status.HTTP_201_CREATED)
@@ -411,9 +533,21 @@ def team_workflow_candidate_paper_note_autodraft(team_id: str, candidate_id: str
     try:
         return draft_paper_note_from_source_candidate(team_id, candidate_id, payload.model_dump())
     except TeamNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        _raise_team_workflow_route_error(
+            "candidate.paper_note_draft",
+            team_id,
+            exc,
+            status_code=404,
+            fields={"candidateId": candidate_id},
+        )
     except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        _raise_team_workflow_route_error(
+            "candidate.paper_note_draft",
+            team_id,
+            exc,
+            status_code=422,
+            fields={"candidateId": candidate_id, "createdByAgent": payload.createdByAgent, "modelId": payload.modelId},
+        )
 
 
 @router.get("/teams/{team_id}/workflow-orchestration/paper-note-chunks/status")
@@ -441,9 +575,21 @@ def team_workflow_candidate_source_quality_assess(team_id: str, candidate_id: st
     try:
         return assess_source_candidate_quality(team_id, candidate_id, payload.model_dump())
     except TeamNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        _raise_team_workflow_route_error(
+            "candidate.source_quality_assess",
+            team_id,
+            exc,
+            status_code=404,
+            fields={"candidateId": candidate_id},
+        )
     except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        _raise_team_workflow_route_error(
+            "candidate.source_quality_assess",
+            team_id,
+            exc,
+            status_code=422,
+            fields={"candidateId": candidate_id, "assessedByAgent": payload.assessedByAgent, "decision": payload.decision},
+        )
 
 
 @router.post("/teams/{team_id}/workflow-orchestration/candidates/{candidate_id}/paper-note-chunks/plan", status_code=status.HTTP_201_CREATED)
@@ -451,9 +597,21 @@ def team_workflow_candidate_paper_note_chunks_plan(team_id: str, candidate_id: s
     try:
         return plan_paper_note_chunks_from_source_candidate(team_id, candidate_id, payload.model_dump())
     except TeamNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        _raise_team_workflow_route_error(
+            "candidate.paper_note_chunks_plan",
+            team_id,
+            exc,
+            status_code=404,
+            fields={"candidateId": candidate_id},
+        )
     except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        _raise_team_workflow_route_error(
+            "candidate.paper_note_chunks_plan",
+            team_id,
+            exc,
+            status_code=422,
+            fields={"candidateId": candidate_id, "createdByAgent": payload.createdByAgent},
+        )
 
 
 @router.post(
@@ -468,9 +626,25 @@ def team_workflow_steward_pack_knowledge_ingestion_submit(
     try:
         return submit_steward_pack_to_knowledge_ingestion(team_id, candidate_id, payload.model_dump())
     except TeamNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        _raise_team_workflow_route_error(
+            "steward_pack.knowledge_ingestion_submit",
+            team_id,
+            exc,
+            status_code=404,
+            fields={"candidateId": candidate_id},
+        )
     except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        _raise_team_workflow_route_error(
+            "steward_pack.knowledge_ingestion_submit",
+            team_id,
+            exc,
+            status_code=422,
+            fields={
+                "candidateId": candidate_id,
+                "knowledgeBaseId": payload.knowledgeBaseId,
+                "proposedByAgentId": payload.proposedByAgentId,
+            },
+        )
 
 
 @router.post("/teams/{team_id}/workflow-orchestration/steward-packs/{candidate_id}/knowledge-ingestion/review")
@@ -482,9 +656,26 @@ def team_workflow_steward_pack_knowledge_ingestion_review(
     try:
         return review_steward_pack_knowledge_ingestion(team_id, candidate_id, payload.model_dump())
     except TeamNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        _raise_team_workflow_route_error(
+            "steward_pack.knowledge_ingestion_review",
+            team_id,
+            exc,
+            status_code=404,
+            fields={"candidateId": candidate_id},
+        )
     except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        _raise_team_workflow_route_error(
+            "steward_pack.knowledge_ingestion_review",
+            team_id,
+            exc,
+            status_code=422,
+            fields={
+                "candidateId": candidate_id,
+                "knowledgeBaseId": payload.knowledgeBaseId,
+                "reviewedByAgentId": payload.reviewedByAgentId,
+                "decision": payload.decision,
+            },
+        )
 
 
 @router.post("/teams/{team_id}/workflow-orchestration/transfers", status_code=status.HTTP_201_CREATED)
@@ -492,9 +683,26 @@ def team_workflow_transfer_create(team_id: str, payload: TransferRequestPayload)
     try:
         return submit_transfer_request(team_id, payload.model_dump())
     except TeamNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        _raise_team_workflow_route_error(
+            "transfer.create",
+            team_id,
+            exc,
+            status_code=404,
+            fields={"candidateId": payload.candidateId},
+        )
     except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        _raise_team_workflow_route_error(
+            "transfer.create",
+            team_id,
+            exc,
+            status_code=422,
+            fields={
+                "candidateId": payload.candidateId,
+                "fromNode": payload.fromNode,
+                "toNode": payload.toNode,
+                "requestedByAgent": payload.requestedByAgent,
+            },
+        )
 
 
 @router.post("/teams/{team_id}/workflow-orchestration/transfers/{transfer_id}/decide")
@@ -502,9 +710,21 @@ def team_workflow_transfer_decide(team_id: str, transfer_id: str, payload: Trans
     try:
         return decide_transfer_request(team_id, transfer_id, payload.model_dump())
     except TeamNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        _raise_team_workflow_route_error(
+            "transfer.decide",
+            team_id,
+            exc,
+            status_code=404,
+            fields={"transferId": transfer_id},
+        )
     except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        _raise_team_workflow_route_error(
+            "transfer.decide",
+            team_id,
+            exc,
+            status_code=422,
+            fields={"transferId": transfer_id, "decision": payload.decision, "decidedByAgent": payload.decidedByAgent},
+        )
 
 
 @router.post("/teams/{team_id}/workflow-orchestration/local-research-model/tasks", status_code=status.HTTP_201_CREATED)
@@ -512,9 +732,15 @@ def team_workflow_local_research_model_task_create(team_id: str, payload: LocalR
     try:
         return build_local_research_model_task(team_id, payload.model_dump())
     except TeamNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        _raise_team_workflow_route_error("local_research_model.task_create", team_id, exc, status_code=404)
     except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        _raise_team_workflow_route_error(
+            "local_research_model.task_create",
+            team_id,
+            exc,
+            status_code=422,
+            fields={"taskType": payload.taskType, "modelId": payload.modelId, "createdByAgent": payload.createdByAgent},
+        )
 
 
 @router.post("/teams/{team_id}/workflow-orchestration/local-research-model/outputs", status_code=status.HTTP_201_CREATED)
@@ -522,9 +748,15 @@ def team_workflow_local_research_model_output_create(team_id: str, payload: Loca
     try:
         return record_local_research_model_output(team_id, payload.model_dump())
     except TeamNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        _raise_team_workflow_route_error("local_research_model.output_create", team_id, exc, status_code=404)
     except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        _raise_team_workflow_route_error(
+            "local_research_model.output_create",
+            team_id,
+            exc,
+            status_code=422,
+            fields={"taskType": payload.taskType, "modelId": payload.modelId, "createdByAgent": payload.createdByAgent},
+        )
 
 
 @router.post("/teams/{team_id}/workflow-orchestration/local-research-model/invoke", status_code=status.HTTP_201_CREATED)
@@ -532,9 +764,15 @@ def team_workflow_local_research_model_invoke(team_id: str, payload: LocalResear
     try:
         return invoke_local_research_model(team_id, payload.model_dump())
     except TeamNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        _raise_team_workflow_route_error("local_research_model.invoke", team_id, exc, status_code=404)
     except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        _raise_team_workflow_route_error(
+            "local_research_model.invoke",
+            team_id,
+            exc,
+            status_code=422,
+            fields={"taskType": payload.taskType, "modelId": payload.modelId, "createdByAgent": payload.createdByAgent},
+        )
 
 
 @router.get("/teams/{team_id}/workflow-orchestration/official-model-evidence/status")
@@ -552,6 +790,18 @@ def team_workflow_official_model_evidence_register(team_id: str, payload: Offici
     try:
         return register_official_model_evidence(team_id, payload.model_dump())
     except TeamNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        _raise_team_workflow_route_error("official_model_evidence.register", team_id, exc, status_code=404)
     except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        _raise_team_workflow_route_error(
+            "official_model_evidence.register",
+            team_id,
+            exc,
+            status_code=422,
+            fields={
+                "taskType": payload.taskType,
+                "workflowNode": payload.workflowNode,
+                "candidateId": payload.candidateId,
+                "modelId": payload.modelId,
+                "evidenceKind": payload.evidenceKind,
+            },
+        )
