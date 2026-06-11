@@ -2783,11 +2783,69 @@ def _clear_participant_refresh_index_cache() -> None:
         _CHAT_ROOM_PARTICIPANT_INDEX_CACHE.clear()
 
 
-def _participant_refresh_index_signature() -> tuple[tuple[str, int, int], tuple[str, int, int]]:
+def _participant_refresh_index_signature() -> tuple[Any, ...]:
     return (
-        _file_signature(chat_state_path(PROJECT_ROOT)),
+        _chat_state_participant_index_signature(),
         _file_signature(agent_directory_service.registry_path()),
     )
+
+
+def _chat_state_participant_index_signature() -> tuple[Any, ...]:
+    path = chat_state_path(PROJECT_ROOT)
+    payload = load_chat_state(PROJECT_ROOT)
+    conversations = payload.get("conversations") if isinstance(payload, dict) else None
+    if not isinstance(conversations, list):
+        return ("chat_state_participants_unavailable", _file_signature(path))
+    rows: list[tuple[Any, ...]] = []
+    for raw in conversations:
+        if not isinstance(raw, dict):
+            continue
+        session_id = _signature_text(raw, "conversation_id", "id")
+        if not session_id:
+            continue
+        messages = raw.get("messages")
+        rows.append(
+            (
+                session_id,
+                _signature_text(raw, "title"),
+                _signature_text(raw, "task_title", "taskTitle"),
+                _signature_text(raw, "agent_id", "agentId"),
+                _signature_text(raw, "agent_missing_id", "agentMissingId"),
+                bool(raw.get("agentMissing")),
+                _signature_text(raw, "agentStatusCode"),
+                bool(raw.get("agentDirectSessionMismatch")),
+                _signature_text(raw, "agentPrimaryDirectSessionId"),
+                _signature_text(raw, "workspace_path", "workspacePath"),
+                _signature_text(raw, "session_kind", "sessionKind"),
+                _signature_text(raw, "parent_session_id", "parentSessionId"),
+                _signature_text(raw, "root_session_id", "rootSessionId"),
+                _signature_sequence(raw, "child_session_ids", "childSessionIds"),
+                _signature_text(raw, "active_child_session_id", "activeChildSessionId"),
+                _signature_text(raw, "child_status", "childStatus"),
+                _signature_text(raw, "last_turn_status", "lastTurnStatus"),
+                isinstance(messages, list) and bool(messages),
+            )
+        )
+    return ("chat_state_participants_v1", str(path), tuple(rows))
+
+
+def _signature_text(item: dict[str, Any], *keys: str) -> str:
+    for key in keys:
+        value = item.get(key)
+        if value is None:
+            continue
+        text = str(value).strip()
+        if text:
+            return text
+    return ""
+
+
+def _signature_sequence(item: dict[str, Any], *keys: str) -> tuple[str, ...]:
+    for key in keys:
+        value = item.get(key)
+        if isinstance(value, list):
+            return tuple(str(child).strip() for child in value if str(child).strip())
+    return ()
 
 
 def _file_signature(path: Path) -> tuple[str, int, int]:

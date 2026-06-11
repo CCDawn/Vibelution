@@ -273,6 +273,7 @@ def test_create_chat_room_defaults_to_existing_sessions(tmp_path, monkeypatch):
         "meeting",
         "medical_triage",
         "research_coordination",
+        "ai_search",
         "self_evolution",
         "supervised_evolution",
     ]
@@ -628,6 +629,62 @@ def test_chat_room_list_and_detail_use_lightweight_participant_refresh(tmp_path,
         "session-beta",
     ]
     assert list_session_calls == 2
+
+
+def test_chat_room_participant_index_stays_warm_for_message_only_session_changes(tmp_path, monkeypatch):
+    _seed_chat_sessions(tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    room = chat_room_service.create_chat_room(
+        title="缓存命中群聊",
+        participant_session_ids=["session-alpha", "session-beta"],
+    )
+    chat_room_service.get_chat_room_detail(room["roomId"])
+    chat_room_service._clear_participant_refresh_index_cache()
+    real_summary_index = chat_room_service._session_summary_index
+    summary_index_calls = 0
+
+    def counting_summary_index():
+        nonlocal summary_index_calls
+        summary_index_calls += 1
+        return real_summary_index()
+
+    monkeypatch.setattr(chat_room_service, "_session_summary_index", counting_summary_index)
+
+    first_detail = chat_room_service.get_chat_room_detail(room["roomId"])
+    assert first_detail["participants"][0]["title"] == "Alpha Agent"
+    assert summary_index_calls == 1
+
+    state = load_chat_state(tmp_path)
+    for conversation in state["conversations"]:
+        if conversation["conversation_id"] == "session-alpha":
+            conversation["messages"].append(
+                {
+                    "role": "user",
+                    "content": "追加一条普通消息",
+                    "timestamp": "2026-05-26T10:04:00",
+                }
+            )
+            conversation["updated_at"] = "2026-05-26T10:04:00"
+            break
+    state["updated_at"] = "2026-05-26T10:04:00"
+    save_chat_state(tmp_path, state)
+
+    second_detail = chat_room_service.get_chat_room_detail(room["roomId"])
+    assert second_detail["participants"][0]["title"] == "Alpha Agent"
+    assert summary_index_calls == 1
+
+    state = load_chat_state(tmp_path)
+    for conversation in state["conversations"]:
+        if conversation["conversation_id"] == "session-alpha":
+            conversation["title"] = "Alpha Renamed Agent"
+            break
+    save_chat_state(tmp_path, state)
+
+    third_detail = chat_room_service.get_chat_room_detail(room["roomId"])
+    assert third_detail["participants"][0]["title"] == "Alpha Renamed Agent"
+    assert summary_index_calls == 2
 
 
 def test_chat_room_refresh_rebinds_participant_to_current_agent_direct_session(tmp_path, monkeypatch):
