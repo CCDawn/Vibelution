@@ -17,7 +17,6 @@ import { queryKeys } from "../api/queryKeys";
 import {
   AgentConfigWorkspace,
   AiSearchRun,
-  AiSearchRunCard,
   AiSearchRunListPayload,
   AiSearchRunSummary,
   ChatRoomDetail,
@@ -1072,17 +1071,6 @@ function aiSearchRunCounts(run: AiSearchRunDisplay) {
   };
 }
 
-function aiSearchRunCardModeLabel(card: AiSearchRunCard, lang: "zh" | "en") {
-  const mode = String(card.searchMode || "").trim();
-  if (card.degraded || mode === "source_page_fallback") {
-    return lang === "zh" ? "源页扫描" : "Source page scan";
-  }
-  if (mode === "web_search") {
-    return lang === "zh" ? "搜索 API" : "Search API";
-  }
-  return mode || (lang === "zh" ? "搜索" : "Search");
-}
-
 function aiSearchRunQueryCount(run: AiSearchRunDisplay) {
   return "queryPlan" in run ? run.queryPlan.queryCount : run.queryCount;
 }
@@ -1106,6 +1094,74 @@ function aiSearchRunStatusLabel(value: string, lang: "zh" | "en") {
     running: "Running",
   };
   return (lang === "zh" ? zh : en)[normalized] ?? normalized;
+}
+
+type AiSearchRunCardDisplay = AiSearchRun["cards"][number];
+
+function aiSearchRunCardExtra(card: AiSearchRunCardDisplay, key: string) {
+  return (card as unknown as Record<string, unknown>)[key];
+}
+
+function aiSearchRunCardExtraString(card: AiSearchRunCardDisplay, key: string) {
+  const value = aiSearchRunCardExtra(card, key);
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function aiSearchRunCardSearchMode(card: AiSearchRunCardDisplay) {
+  return aiSearchRunCardExtraString(card, "searchMode").toLowerCase();
+}
+
+function aiSearchRunCardFallbackReason(card: AiSearchRunCardDisplay) {
+  return aiSearchRunCardExtraString(card, "fallbackReason");
+}
+
+function aiSearchRunCardUsesFallback(card: AiSearchRunCardDisplay) {
+  const degraded = aiSearchRunCardExtra(card, "degraded") === true;
+  const searchMode = aiSearchRunCardSearchMode(card);
+  return degraded || Boolean(aiSearchRunCardFallbackReason(card)) || searchMode.includes("fallback") || searchMode.includes("source_page");
+}
+
+function aiSearchRunCardModeLabel(card: AiSearchRunCardDisplay, lang: "zh" | "en") {
+  if (aiSearchRunCardUsesFallback(card)) {
+    return lang === "zh" ? "源页扫描" : "Source page scan";
+  }
+  const searchMode = aiSearchRunCardSearchMode(card);
+  if (searchMode.includes("web") || searchMode.includes("search")) {
+    return lang === "zh" ? "搜索 API" : "Search API";
+  }
+  return searchMode || (lang === "zh" ? "搜索" : "Search");
+}
+
+function aiSearchRunNeedsReviewCount(run: AiSearchRunDisplay) {
+  return run.cards.filter((card) => card.status === "failed" || aiSearchRunCardUsesFallback(card)).length;
+}
+
+function aiSearchRunPrimaryResultText(run: AiSearchRunDisplay, counts: ReturnType<typeof aiSearchRunCounts>, lang: "zh" | "en") {
+  const needsReview = aiSearchRunNeedsReviewCount(run);
+  if (counts.succeededCount > 0) {
+    return lang === "zh"
+      ? `本轮已产出 ${counts.succeededCount} 条可用结果，覆盖 ${counts.referenceCount} 条引用；${needsReview ? `${needsReview} 条需要人工复核。` : "暂无明显失败项。"}`
+      : `This run produced ${counts.succeededCount} usable results with ${counts.referenceCount} references; ${needsReview ? `${needsReview} need review.` : "no obvious failed items."}`;
+  }
+  if (counts.failedCount > 0) {
+    return lang === "zh"
+      ? `本轮没有形成可用结果，${counts.failedCount} 个来源失败，需要调整主题、来源或网络。`
+      : `No usable results were produced; ${counts.failedCount} sources failed and need topic, source, or network review.`;
+  }
+  return lang === "zh"
+    ? "本轮尚未生成结果，先启动搜索或等待执行回写。"
+    : "No results have been generated yet; start a search or wait for writeback.";
+}
+
+function aiSearchRunNextActionText(run: AiSearchRunDisplay, counts: ReturnType<typeof aiSearchRunCounts>, lang: "zh" | "en") {
+  const needsReview = aiSearchRunNeedsReviewCount(run);
+  if (run.status === "failed" || counts.succeededCount === 0) {
+    return lang === "zh" ? "先检查失败来源，再缩小主题或换一组可信来源重搜。" : "Review failed sources first, then narrow the topic or retry with trusted sources.";
+  }
+  if (needsReview > 0) {
+    return lang === "zh" ? "先复核备用扫描和失败项，通过后再进入资料筛选。" : "Review fallback and failed items before moving to source screening.";
+  }
+  return lang === "zh" ? "可进入资料筛选，也可以继续扩大主题做下一轮搜索。" : "Ready for source screening, or expand the topic for another search round.";
 }
 
 function workflowStateLabel(value: string, lang: "zh" | "en") {
@@ -2448,10 +2504,12 @@ export function TeamsRoute({
       <section className={styles.aiSearchScopePanel}>
         <div className={styles.aiSearchScopeHeader}>
           <div>
-            <strong>{scope?.title || (lang === "zh" ? "AI 搜索范围白名单" : "AI search source scope")}</strong>
+            <strong>{lang === "zh" ? "AI 搜索执行台" : "AI search workspace"}</strong>
             <span>
               {scope
-                ? `${scope.summary.sourceCount} sources / ${scope.summary.enabledByDefaultCount} enabled`
+                ? lang === "zh"
+                  ? `按 ${scope.summary.enabledByDefaultCount} 个默认可信源搜索，结果保留证据链接和存放位置`
+                  : `Searches ${scope.summary.enabledByDefaultCount} trusted default sources and keeps evidence links plus storage`
                 : (lang === "zh" ? "等待团队详情载入" : "Waiting for team detail")}
             </span>
           </div>
@@ -2463,16 +2521,20 @@ export function TeamsRoute({
         </div>
         {scope ? (
           <>
-            <p className={styles.aiSearchScopeDescription}>{scope.description}</p>
-            <div className={styles.aiSearchScopeStats}>
-              <span>{lang === "zh" ? "分组" : "Groups"} <strong>{scope.summary.groupCount}</strong></span>
-              <span>{lang === "zh" ? "默认启用" : "Default on"} <strong>{scope.summary.enabledByDefaultCount}</strong></span>
-              <span>{lang === "zh" ? "仅信号" : "Signals"} <strong>{scope.summary.signalOnlyCount}</strong></span>
-            </div>
-            <div className={styles.aiSearchScopePolicy}>
-              <span>{lang === "zh" ? "默认 Tier" : "Default tiers"}: {scope.policy.defaultEnabledTiers.join(", ")}</span>
-              <span>{lang === "zh" ? "去重" : "Dedupe"}: {scope.policy.dedupeBy.join(" / ")}</span>
-              <span>{scope.storage.path}</span>
+            <div className={styles.aiSearchWorkflowSummary}>
+              <div>
+                <strong>{lang === "zh" ? "搜索过程" : "Search process"}</strong>
+                <span>
+                  {lang === "zh"
+                    ? "主题输入后依次生成搜索、读取可信来源、提取摘要与引用、保存运行记录。"
+                    : "A topic becomes queries, trusted sources are scanned, summaries and references are extracted, and the run is stored."}
+                </span>
+              </div>
+              <small>
+                {lang === "zh"
+                  ? "主视图只显示可判断结果；技术细节在下方展开。"
+                  : "Main view shows decision-ready results; technical details stay collapsed below."}
+              </small>
             </div>
             <form
               className={styles.aiSearchRunPanel}
@@ -2489,8 +2551,8 @@ export function TeamsRoute({
             >
               <div className={styles.aiSearchRunHeader}>
                 <div>
-                  <strong>{lang === "zh" ? "一键搜索执行" : "One-click search run"}</strong>
-                  <span>{lang === "zh" ? "8 个默认白名单源 · Tier3 默认关闭" : "8 default sources · Tier3 off by default"}</span>
+                  <strong>{lang === "zh" ? "启动一轮搜索" : "Start a search round"}</strong>
+                  <span>{lang === "zh" ? "主题 -> 可信来源 -> 摘要/引用 -> 运行记录" : "Topic -> trusted sources -> summary/refs -> run record"}</span>
                 </div>
                 <button type="submit" disabled={!aiSearchRunCanStart}>
                   <Search size={13} />
@@ -2529,10 +2591,17 @@ export function TeamsRoute({
                       {aiSearchRunStatusLabel(latestAiSearchRun.status, lang)}
                     </span>
                   </div>
+                  <div className={styles.aiSearchRunInsight}>
+                    <div>
+                      <strong>{lang === "zh" ? "本轮判断" : "Run readout"}</strong>
+                      <span>{aiSearchRunPrimaryResultText(latestAiSearchRun, latestRunCounts, lang)}</span>
+                    </div>
+                    <small>{aiSearchRunNextActionText(latestAiSearchRun, latestRunCounts, lang)}</small>
+                  </div>
                   <div className={styles.aiSearchRunStats}>
-                    <span>queries <strong>{aiSearchRunQueryCount(latestAiSearchRun)}</strong></span>
-                    <span>cards <strong>{latestRunCounts.cardCount}</strong></span>
-                    <span>{lang === "zh" ? "成功" : "success"} <strong>{latestRunCounts.succeededCount}</strong></span>
+                    <span>{lang === "zh" ? "查询" : "queries"} <strong>{aiSearchRunQueryCount(latestAiSearchRun)}</strong></span>
+                    <span>{lang === "zh" ? "可用结果" : "usable"} <strong>{latestRunCounts.succeededCount}</strong></span>
+                    <span>{lang === "zh" ? "需复核" : "review"} <strong>{aiSearchRunNeedsReviewCount(latestAiSearchRun)}</strong></span>
                     <span>{lang === "zh" ? "失败" : "failed"} <strong>{latestRunCounts.failedCount}</strong></span>
                     {latestRunCounts.degradedCount ? (
                       <span>{lang === "zh" ? "降级" : "fallback"} <strong>{latestRunCounts.degradedCount}</strong></span>
@@ -2540,43 +2609,69 @@ export function TeamsRoute({
                     <span>{lang === "zh" ? "引用" : "refs"} <strong>{latestRunCounts.referenceCount}</strong></span>
                   </div>
                   <div className={styles.aiSearchRunCards}>
-                    {latestAiSearchRun.cards.slice(0, 6).map((card) => (
-                      <article
-                        key={card.cardId}
-                        className={[
-                          styles.aiSearchRunCard,
-                          card.status === "failed" ? styles.aiSearchRunCardFailed : "",
-                          card.degraded ? styles.aiSearchRunCardDegraded : "",
-                        ].filter(Boolean).join(" ")}
-                      >
-                        <div className={styles.aiSearchRunCardHeader}>
-                          <div>
-                            <strong>{card.sourceName || card.sourceId}</strong>
-                            <span>{card.groupLabel} · {card.sourceType} · {aiSearchSourceTierLabel(card.tier, lang)} · {aiSearchRunCardModeLabel(card, lang)}</span>
+                    {latestAiSearchRun.cards.slice(0, 6).map((card) => {
+                      const cardNeedsReview = card.status === "failed" || aiSearchRunCardUsesFallback(card);
+                      const cardModeLabel = aiSearchRunCardModeLabel(card, lang);
+                      const fallbackReason = aiSearchRunCardFallbackReason(card);
+                      const cardClasses = [styles.aiSearchRunCard];
+                      if (card.status === "failed") {
+                        cardClasses.push(styles.aiSearchRunCardFailed);
+                      } else if (cardNeedsReview) {
+                        cardClasses.push(styles.aiSearchRunCardReview);
+                      }
+                      if (card.degraded) {
+                        cardClasses.push(styles.aiSearchRunCardDegraded);
+                      }
+                      return (
+                        <article key={card.cardId} className={cardClasses.filter(Boolean).join(" ")}>
+                          <div className={styles.aiSearchRunCardHeader}>
+                            <div>
+                              <strong>{card.sourceName || card.sourceId}</strong>
+                              <span>
+                                {card.groupLabel} · {aiSearchSourceTierLabel(card.tier, lang)} · {card.sourceType}
+                                {cardModeLabel ? ` · ${cardModeLabel}` : ""}
+                              </span>
+                            </div>
+                            <span>
+                              {card.status === "failed" ? (lang === "zh" ? "失败" : "failed") : cardNeedsReview ? (lang === "zh" ? "需复核" : "review") : (lang === "zh" ? "可用" : "usable")}
+                            </span>
                           </div>
-                          <span>{card.status === "failed" ? (lang === "zh" ? "失败" : "failed") : (lang === "zh" ? "完成" : "done")}</span>
-                        </div>
-                        {card.degraded && card.fallbackReason ? (
-                          <small className={styles.aiSearchRunFallbackReason}>
-                            {lang === "zh" ? "主搜索降级" : "Primary search fallback"}: {card.fallbackReason}
-                          </small>
-                        ) : null}
-                        <p>{card.summary || (card.status === "failed" ? (lang === "zh" ? "搜索执行失败，已保留失败卡片。" : "Search failed; the failed card was retained.") : card.query)}</p>
-                        <div className={styles.aiSearchRunRefs}>
-                          {card.references.length ? (
-                            card.references.slice(0, 3).map((reference) => (
-                              <a key={`${card.cardId}-${reference.url}`} href={reference.url} target="_blank" rel="noreferrer">
-                                {reference.title || reference.url}
-                              </a>
-                            ))
-                          ) : (
-                            <span>{lang === "zh" ? "无参考来源" : "No references"}</span>
-                          )}
-                        </div>
-                      </article>
-                    ))}
+                          <div className={styles.aiSearchRunQuery}>
+                            <span>{lang === "zh" ? "搜索词" : "Query"}</span>
+                            <strong>{card.query}</strong>
+                            {cardModeLabel ? <em>{cardModeLabel}</em> : null}
+                          </div>
+                          {card.degraded && fallbackReason ? (
+                            <small className={styles.aiSearchRunFallbackReason}>
+                              {lang === "zh" ? "主搜索降级" : "Primary search fallback"}: {fallbackReason}
+                            </small>
+                          ) : null}
+                          <p>{card.summary || (card.status === "failed" ? (lang === "zh" ? "搜索执行失败，已保留失败卡片。" : "Search failed; the failed card was retained.") : card.query)}</p>
+                          <div className={styles.aiSearchRunRefs}>
+                            <small>{lang === "zh" ? "证据链接" : "Evidence links"}</small>
+                            {card.references.length ? (
+                              card.references.slice(0, 3).map((reference) => (
+                                <a key={`${card.cardId}-${reference.url}`} href={reference.url} target="_blank" rel="noreferrer">
+                                  {reference.title || reference.url}
+                                </a>
+                              ))
+                            ) : (
+                              <span>{lang === "zh" ? "暂无可点开的参考来源" : "No clickable references yet"}</span>
+                            )}
+                          </div>
+                          {fallbackReason || card.resultText ? (
+                            <details className={styles.aiSearchRunCardDetails}>
+                              <summary>{lang === "zh" ? "执行细节" : "Execution detail"}</summary>
+                              {fallbackReason ? <span>{fallbackReason}</span> : null}
+                              {card.resultText ? <p>{card.resultText}</p> : null}
+                            </details>
+                          ) : null}
+                        </article>
+                      );
+                    })}
                   </div>
                   <div className={styles.aiSearchRunStorage}>
+                    <strong>{lang === "zh" ? "存放位置" : "Stored at"}</strong>
                     <span>{aiSearchRunPath(latestAiSearchRun)}</span>
                   </div>
                 </div>
@@ -2584,35 +2679,53 @@ export function TeamsRoute({
                 <div className={styles.empty}>
                   {aiSearchRunsQuery.isPending
                     ? (lang === "zh" ? "正在读取最近搜索结果..." : "Loading recent search results...")
-                    : (lang === "zh" ? "暂无搜索结果卡片。" : "No search result cards yet.")}
+                    : (lang === "zh" ? "还没有搜索记录。输入主题后启动一轮搜索，结果会按“本轮判断、证据链接、存放位置”展示。" : "No search records yet. Enter a topic and start a search round; results will show readout, evidence links, and storage.")}
                 </div>
               )}
             </form>
-            <div className={styles.aiSearchSourceGroups}>
-              {scope.groups.map((group) => (
-                <article key={group.groupId} className={styles.aiSearchSourceGroup}>
-                  <div className={styles.aiSearchSourceGroupHeader}>
-                    <div>
-                      <strong>{group.label}</strong>
-                      <span>{aiSearchSourceTierLabel(group.tier, lang)} · {aiSearchSourceRoleLabel(group.evidenceRole, lang)}</span>
+            <details className={styles.aiSearchScopeDetails}>
+              <summary>
+                <span>{lang === "zh" ? "来源与技术边界" : "Sources and technical boundary"}</span>
+                <small>{lang === "zh" ? "白名单、去重、存储路径" : "Allowlist, dedupe, storage path"}</small>
+              </summary>
+              <p className={styles.aiSearchScopeDescription}>{scope.description}</p>
+              <div className={styles.aiSearchScopeStats}>
+                <span>{lang === "zh" ? "来源分组" : "Groups"} <strong>{scope.summary.groupCount}</strong></span>
+                <span>{lang === "zh" ? "默认启用" : "Default on"} <strong>{scope.summary.enabledByDefaultCount}</strong></span>
+                <span>{lang === "zh" ? "仅线索" : "Signals"} <strong>{scope.summary.signalOnlyCount}</strong></span>
+              </div>
+              <div className={styles.aiSearchScopePolicy}>
+                <span>{lang === "zh" ? "默认 Tier" : "Default tiers"}: {scope.policy.defaultEnabledTiers.join(", ")}</span>
+                <span>{lang === "zh" ? "去重" : "Dedupe"}: {scope.policy.dedupeBy.join(" / ")}</span>
+                <span>{lang === "zh" ? "正式知识写入" : "Formal write"}: {scope.policy.writesFormalKnowledge ? "on" : "off"}</span>
+                <span>{scope.storage.path}</span>
+              </div>
+              <div className={styles.aiSearchSourceGroups}>
+                {scope.groups.map((group) => (
+                  <article key={group.groupId} className={styles.aiSearchSourceGroup}>
+                    <div className={styles.aiSearchSourceGroupHeader}>
+                      <div>
+                        <strong>{group.label}</strong>
+                        <span>{aiSearchSourceTierLabel(group.tier, lang)} · {aiSearchSourceRoleLabel(group.evidenceRole, lang)}</span>
+                      </div>
+                      <span className={group.enabledByDefault ? styles.aiSearchScopeEnabled : styles.aiSearchScopeSignal}>
+                        {group.enabledByDefault ? (lang === "zh" ? "默认启用" : "enabled") : (lang === "zh" ? "线索" : "signal")}
+                      </span>
                     </div>
-                    <span className={group.enabledByDefault ? styles.aiSearchScopeEnabled : styles.aiSearchScopeSignal}>
-                      {group.enabledByDefault ? (lang === "zh" ? "默认启用" : "enabled") : (lang === "zh" ? "信号" : "signal")}
-                    </span>
-                  </div>
-                  <p>{group.description}</p>
-                  <div className={styles.aiSearchSourceList}>
-                    {group.sources.map((source) => (
-                      <a key={source.sourceId} href={source.url} target="_blank" rel="noreferrer" className={styles.aiSearchSourceItem}>
-                        <strong>{source.name}</strong>
-                        <span>{source.sourceType} · {source.region} · {source.language}</span>
-                        <small>{source.tags.slice(0, 4).join(" / ")}</small>
-                      </a>
-                    ))}
-                  </div>
-                </article>
-              ))}
-            </div>
+                    <p>{group.description}</p>
+                    <div className={styles.aiSearchSourceList}>
+                      {group.sources.map((source) => (
+                        <a key={source.sourceId} href={source.url} target="_blank" rel="noreferrer" className={styles.aiSearchSourceItem}>
+                          <strong>{source.name}</strong>
+                          <span>{source.sourceType} · {source.region} · {source.language}</span>
+                          <small>{source.tags.slice(0, 4).join(" / ")}</small>
+                        </a>
+                      ))}
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </details>
           </>
         ) : (
           <div className={styles.empty}>
