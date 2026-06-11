@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { NavLink, Outlet, useLocation, useNavigationType } from "react-router-dom";
+import { NavLink, Outlet, useLocation, useNavigate, useNavigationType } from "react-router-dom";
 import { ChevronDown, LoaderCircle, Moon, Power, RefreshCw, Settings, Sun, Wrench } from "lucide-react";
 
 import { fetchJson, setFetchJsonFailureReporter, type FetchJsonFailureReport } from "../api/client";
@@ -76,11 +76,31 @@ function linkClassName({ isActive }: { isActive: boolean }) {
   return isActive ? `${styles.navLink} ${styles.navLinkActive}` : styles.navLink;
 }
 
+type RouteLocationLike = {
+  pathname: string;
+  search: string;
+  hash: string;
+};
+
+export function routeLocationKey(location: RouteLocationLike): string {
+  return `${location.pathname || "/"}${location.search || ""}${location.hash || ""}`;
+}
+
+export function routerLocationDesyncTarget(
+  browserLocation: RouteLocationLike,
+  routerLocation: RouteLocationLike,
+): string | null {
+  const browserTarget = routeLocationKey(browserLocation);
+  const routerTarget = routeLocationKey(routerLocation);
+  return browserTarget === routerTarget ? null : browserTarget;
+}
+
 const API_FAILURE_TELEMETRY_THROTTLE_MS = 15_000;
 const API_FAILURE_BACKGROUND_METHODS = new Set(["GET", "HEAD"]);
 const APP_VERSION = packageJson.version;
 const BROWSER_MEMORY_SAMPLE_INTERVAL_MS = 30_000;
 const PAGEHIDE_NETWORK_FAILURE_SUPPRESSION_MS = 2_500;
+const ROUTER_LOCATION_DESYNC_RECOVERY_DELAY_MS = 50;
 
 export function shouldSuppressApiFailureTelemetry(
   failure: FetchJsonFailureReport,
@@ -343,6 +363,7 @@ export function AppShell() {
   const { lang, t, statusLabel } = useShellI18n();
   const queryClient = useQueryClient();
   const location = useLocation();
+  const navigate = useNavigate();
   const navigationType = useNavigationType();
   const [shutdownOpen, setShutdownOpen] = useState(false);
   const [shutdownTitle, setShutdownTitle] = useState("");
@@ -375,6 +396,7 @@ export function AppShell() {
   const shutdownLocalCompletionLoggedRef = useRef(false);
   const telemetrySeqRef = useRef(0);
   const pageInstanceIdRef = useRef(getPageInstanceId());
+  const lastRouterLocationDesyncTargetRef = useRef<string | null>(null);
   const startupWarmupTelemetryStateRef = useRef<"active" | "inactive" | null>(null);
   const apiFailureTelemetrySeenRef = useRef(new Map<string, number>());
   const pagehideAtMsRef = useRef(0);
@@ -576,6 +598,35 @@ export function AppShell() {
       options,
     );
   }, []);
+
+  const recoverRouterLocationDesync = useCallback((trigger: string) => {
+    const target = routerLocationDesyncTarget(window.location, location);
+    if (!target) {
+      lastRouterLocationDesyncTargetRef.current = null;
+      return;
+    }
+
+    const duplicateTarget = lastRouterLocationDesyncTargetRef.current === target;
+    lastRouterLocationDesyncTargetRef.current = target;
+    emitBrowserTelemetry({
+      phase: "navigation",
+      eventCode: "browser.router_location_desync.recovered",
+      message: `Recovered browser/router route desync to ${target}`,
+      level: duplicateTarget ? "info" : "warning",
+      fields: {
+        trigger,
+        target,
+        duplicateTarget,
+        browserPathname: window.location.pathname,
+        browserSearch: window.location.search,
+        browserHash: window.location.hash,
+        routerPathname: location.pathname,
+        routerSearch: location.search,
+        routerHash: location.hash,
+      },
+    });
+    navigate(target, { replace: true });
+  }, [emitBrowserTelemetry, location, navigate]);
 
   const cancelSupersededLifecycleCommand = useCallback((commandId: string, action: "shutdown" | "restart") => {
     const normalizedCommandId = commandId.trim();
@@ -1244,6 +1295,47 @@ export function AppShell() {
       window.removeEventListener("offline", handleOffline);
     };
   }, [emitBrowserTelemetry]);
+
+  useEffect(() => {
+    let recoveryTimer: number | null = null;
+    const scheduleRecovery = (trigger: string) => {
+      if (recoveryTimer !== null) {
+        window.clearTimeout(recoveryTimer);
+      }
+      recoveryTimer = window.setTimeout(() => {
+        recoveryTimer = null;
+        recoverRouterLocationDesync(trigger);
+      }, ROUTER_LOCATION_DESYNC_RECOVERY_DELAY_MS);
+    };
+
+    const handleDocumentClick = () => scheduleRecovery("document_click");
+    const handleFocus = () => scheduleRecovery("window_focus");
+    const handlePageShow = () => scheduleRecovery("pageshow");
+    const handlePopState = () => scheduleRecovery("popstate");
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        scheduleRecovery("visibility_visible");
+      }
+    };
+
+    window.addEventListener("click", handleDocumentClick, true);
+    window.addEventListener("focus", handleFocus);
+    window.addEventListener("pageshow", handlePageShow);
+    window.addEventListener("popstate", handlePopState);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    scheduleRecovery("app_shell_mounted");
+
+    return () => {
+      if (recoveryTimer !== null) {
+        window.clearTimeout(recoveryTimer);
+      }
+      window.removeEventListener("click", handleDocumentClick, true);
+      window.removeEventListener("focus", handleFocus);
+      window.removeEventListener("pageshow", handlePageShow);
+      window.removeEventListener("popstate", handlePopState);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [recoverRouterLocationDesync]);
 
   useEffect(() => {
     const snapshotTimer = window.setTimeout(() => {
