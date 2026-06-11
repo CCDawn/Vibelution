@@ -111,6 +111,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("useSearchParams");
     expect(routeSource).toContain('searchParams.get("team")');
     expect(routeSource).toContain('searchParams.get("agent")');
+    expect(routeSource).toContain('searchParams.get("researchView")');
+    expect(routeSource).toContain("parseResearchWorkspaceView");
     expect(routeSource).toContain("requestedAgentTeamId");
     expect(routeSource).toContain("setSearchParams({ team: team.teamId })");
   });
@@ -212,6 +214,15 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("showWorkflowPanel");
     expect(routeSource).toContain("showResearchSourceCollection");
     expect(routeSource).toContain("sourceCollectionAgentIdsFromCanvas");
+    expect(routeSource).toContain("researchSourceCollectionRoute");
+    expect(routeSource).toContain("teamWorkspaceRoute");
+    expect(routeSource).toContain("sourceCollectionTraceMessages");
+    expect(routeSource).toContain("renderSourceCollectionConversation");
+    expect(routeSource).toContain("renderSourceCollectionControlsPanel");
+    expect(routeSource).toContain("对话式知识搜集");
+    expect(routeSource).toContain("搜集对话流");
+    expect(routeSource).toContain("返回团队页面");
+    expect(routeSource).toContain("Source Quality Assessment Agent");
     expect(routeSource).toContain("知识入库状态");
     expect(routeSource).toContain("模型调用证据链");
     expect(routeSource).toContain("证据登记，不是正式知识");
@@ -275,6 +286,12 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.workflowSourceCollectionRuns).toBeTypeOf("string");
     expect(routeStyles.workflowSourceCollectionAssignments).toBeTypeOf("string");
     expect(routeStyles.workflowSourceCollectionOutputForm).toBeTypeOf("string");
+    expect(routeStyles.sourceCollectionPage).toBeTypeOf("string");
+    expect(routeStyles.sourceCollectionPageGrid).toBeTypeOf("string");
+    expect(routeStyles.sourceCollectionConversationPanel).toBeTypeOf("string");
+    expect(routeStyles.sourceCollectionTraceMessage).toBeTypeOf("string");
+    expect(routeStyles.sourceCollectionTraceStorage).toBeTypeOf("string");
+    expect(routeStyles.sourceCollectionControlPanel).toBeTypeOf("string");
     expect(routeStyles.workflowGraphPanel).toBeTypeOf("string");
     expect(routeStyles.workflowGraphFrame).toBeTypeOf("string");
     expect(routeStyles.workflowGraphNode).toBeTypeOf("string");
