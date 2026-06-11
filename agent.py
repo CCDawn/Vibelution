@@ -374,6 +374,20 @@ def _safe_turn_runtime_metadata(runtime: Dict[str, str]) -> Dict[str, Any]:
     return metadata
 
 
+def _runtime_mental_model_override_from_env() -> Optional[bool]:
+    raw = str(os.environ.get("VIBELUTION_SUPERVISED_MENTAL_MODEL_ENABLED") or "").strip().lower()
+    if raw in {"1", "true", "yes", "on", "enabled"}:
+        return True
+    if raw in {"0", "false", "no", "off", "disabled"}:
+        return False
+    mode = str(os.environ.get("VIBELUTION_SUPERVISED_MENTAL_MODEL_MODE") or "").strip().lower()
+    if mode == "enabled":
+        return True
+    if mode == "disabled":
+        return False
+    return None
+
+
 class TurnStopRequested(Exception):
     """Raised when the active single turn received a web stop request."""
 
@@ -527,7 +541,18 @@ class SelfEvolvingAgent:
         self._single_turn_mode_active: bool = False
         self._last_turn_metadata: Dict[str, Any] = {}
         self._turn_interrupt_checker = None
-        self._mental_model_enabled_override: Optional[bool] = None
+        self._mental_model_enabled_override: Optional[bool] = _runtime_mental_model_override_from_env()
+        if self._mental_model_enabled_override is not None:
+            _record_agent_scene_event(
+                "startup",
+                "agent.mental_model.supervised_override_applied",
+                message="监督运行按本轮策略覆盖心智模型开关。",
+                fields={
+                    "enabled": bool(self._mental_model_enabled_override),
+                    "supervisedRole": self.runtime_agent_binding.get("supervisedRole", ""),
+                    "agentId": self.runtime_agent_binding.get("agentId", ""),
+                },
+            )
         self._chat_turn_records: List[ChatTurnRecord] = []
         self._active_supervised_case_id: str = ""
         self._pending_supervised_case_id: Optional[str] = None

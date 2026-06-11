@@ -4503,6 +4503,9 @@ export type EvolutionActiveRunEvent = {
   datasetName?: string;
   datasetLimit?: number | null;
   keepWorktree?: boolean;
+  mentalModelMode?: string;
+  mentalModelEnabled?: boolean | null;
+  agentBinding?: EvolutionActiveRunAgentBinding;
 };
 
 export type EvolutionActiveRunIoEntry = {
@@ -4551,6 +4554,8 @@ export type EvolutionActiveRun = {
   datasetName: string;
   datasetLimit: number | null;
   keepWorktree: boolean;
+  mentalModelMode?: string;
+  mentalModelEnabled?: boolean | null;
   retryOfRunId?: string;
   resumeFromDecisionPath?: string;
   startedAt: string;

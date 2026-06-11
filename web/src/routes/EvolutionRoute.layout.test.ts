@@ -176,6 +176,11 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("sourceMetaSide");
     expect(routeSource).toContain("数据集会先物化，评测包可直接运行。");
     expect(routeSource).toContain("startWorktreeRunMutation");
+    expect(routeSource).toContain("SupervisedMentalModelMode");
+    expect(routeSource).toContain("supervisedMentalModelMode");
+    expect(routeSource).toContain("mentalModelMode: supervisedMentalModelMode");
+    expect(routeSource).toContain('id="supervised-mental-mode"');
+    expect(dictionarySource).toContain('supervisedMentalMode: "心智模式"');
   });
 
   it("uses action-oriented supervised section labels instead of internal system terms", () => {

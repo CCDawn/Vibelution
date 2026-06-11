@@ -2530,6 +2530,8 @@ def run_harness(
     scenario: str = "restart",
     max_steps: Optional[int] = None,
     agent_binding: Optional[Dict[str, Any]] = None,
+    mental_model_mode: str = "follow",
+    mental_model_enabled: Optional[bool] = None,
     progress_callback: Callable[[Dict[str, Any]], None] | None = None,
     cancel_checker: Callable[[], object] | None = None,
 ) -> HarnessResult:
@@ -2538,6 +2540,12 @@ def run_harness(
     normalized_agent_binding = dict(agent_binding) if isinstance(agent_binding, dict) else {}
     try:
         child_agent_env = supervised_agent_binding_env(normalized_agent_binding, run_id=harness_id)
+        normalized_mental_model_mode = str(mental_model_mode or "follow").strip().lower() or "follow"
+        if normalized_mental_model_mode not in {"follow", "enabled", "disabled"}:
+            normalized_mental_model_mode = "follow"
+        child_agent_env["VIBELUTION_SUPERVISED_MENTAL_MODEL_MODE"] = normalized_mental_model_mode
+        if mental_model_enabled is not None:
+            child_agent_env["VIBELUTION_SUPERVISED_MENTAL_MODEL_ENABLED"] = "true" if bool(mental_model_enabled) else "false"
     except SupervisedAgentBindingRuntimeError as exc:
         ended_at = now_iso()
         if progress_callback is not None:
