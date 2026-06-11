@@ -280,6 +280,9 @@ _REPAIRED_STATE_CACHE_SIGNATURE: tuple[str, bool, int, int] | None = None
 _REPAIRED_STATE_CACHE: dict[str, Any] | None = None
 _JSONL_RECENT_CACHE: dict[tuple[str, bool, int, int, int, str, bool], list[dict[str, Any]]] = {}
 _JSONL_COUNT_CACHE: dict[tuple[str, bool, int, int, str], int] = {}
+_AGENT_API_HYDRATION_CACHE_LOCK = threading.RLock()
+_AGENT_API_HYDRATION_CACHE_SIGNATURE: tuple[Any, ...] | None = None
+_AGENT_API_HYDRATION_CACHE: AgentApiHydrationContext | None = None
 _CURRENT_AGENT_RUNTIME: ContextVar[dict[str, Any]] = ContextVar(
     "vibelution_current_agent_runtime",
     default={},
@@ -3755,6 +3758,14 @@ def _build_agent_api_hydration_context(
 ) -> AgentApiHydrationContext:
     timings_ref = timings if timings is not None else {}
     started = time.perf_counter()
+    signature = _agent_api_hydration_signature(agents)
+    cached = _get_agent_api_hydration_cache(signature)
+    timings_ref["cache_lookup"] = round((time.perf_counter() - started) * 1000, 1)
+    if cached is not None:
+        timings_ref["cache_hit"] = 1.0
+        return cached
+    timings_ref["cache_hit"] = 0.0
+    started = time.perf_counter()
     tool_policies = _tool_policies(state)
     timings_ref["tool_policies"] = round((time.perf_counter() - started) * 1000, 1)
     started = time.perf_counter()
@@ -3789,7 +3800,7 @@ def _build_agent_api_hydration_context(
         )
         agent_inbox_pending_count_by_agent[agent_id] = _count_jsonl_matching_status(path, status="pending")
     timings_ref["agent_inbox_messages"] = round((time.perf_counter() - started) * 1000, 1)
-    return AgentApiHydrationContext(
+    context = AgentApiHydrationContext(
         state=state,
         tool_policies=tool_policies,
         memory_policies=memory_policies,
@@ -3798,6 +3809,42 @@ def _build_agent_api_hydration_context(
         agent_inbox_messages_by_agent=agent_inbox_messages_by_agent,
         agent_inbox_pending_count_by_agent=agent_inbox_pending_count_by_agent,
     )
+    _remember_agent_api_hydration_cache(signature, context)
+    return context
+
+
+def _agent_api_hydration_signature(agents: list[dict[str, Any]]) -> tuple[Any, ...]:
+    agent_signatures: list[tuple[Any, ...]] = []
+    for agent in agents:
+        if not isinstance(agent, dict):
+            continue
+        agent_id = str(agent.get("agentId") or "").strip()
+        workspace = str(agent.get("workspacePath") or "").strip()
+        agent_signatures.append(
+            (
+                agent_id,
+                workspace,
+                _jsonl_signature(_agent_workspace_event_path(agent, "tool_governance_requests.jsonl")),
+                _jsonl_signature(_agent_workspace_event_path(agent, "group_context_events.jsonl")),
+                _jsonl_signature(_agent_workspace_event_path(agent, "agent_inbox_messages.jsonl")),
+            )
+        )
+    return (_registry_state_signature(), tuple(agent_signatures))
+
+
+def _get_agent_api_hydration_cache(signature: tuple[Any, ...]) -> AgentApiHydrationContext | None:
+    with _AGENT_API_HYDRATION_CACHE_LOCK:
+        if _AGENT_API_HYDRATION_CACHE_SIGNATURE == signature:
+            return _AGENT_API_HYDRATION_CACHE
+    return None
+
+
+def _remember_agent_api_hydration_cache(signature: tuple[Any, ...], context: AgentApiHydrationContext) -> None:
+    global _AGENT_API_HYDRATION_CACHE_SIGNATURE
+    global _AGENT_API_HYDRATION_CACHE
+    with _AGENT_API_HYDRATION_CACHE_LOCK:
+        _AGENT_API_HYDRATION_CACHE_SIGNATURE = signature
+        _AGENT_API_HYDRATION_CACHE = context
 
 
 def _memory_policy_for_agent(agent: dict[str, Any], *, hydration: AgentApiHydrationContext | None = None) -> dict[str, Any]:
