@@ -331,6 +331,7 @@ def terminate_workbench_processes(
     browser_profile_dir: Path | str = "",
     exclude_pids: Iterable[int] | None = None,
     timeout_seconds: float = 5.0,
+    verify_remaining_with_inventory: bool = True,
 ) -> dict[str, Any]:
     """Terminate repo-owned workbench backend/frontend processes and managed browser profile processes."""
 
@@ -391,30 +392,65 @@ def terminate_workbench_processes(
         psutil.wait_procs(alive, timeout=1.0)
 
     time.sleep(0.05)
-    remaining_repo = [
-        item
-        for item in list_repo_runtime_processes(project_root=project_root)
-        if item.kind in {"managed_workbench_backend", "unmanaged_workbench", "unmanaged_frontend_dev_server"}
-        and item.pid not in excluded
-    ]
-    remaining_browser: list[dict[str, Any]] = []
-    if profile_text:
-        browser_payload = managed_browser_process_payload(profile_dir=profile_text, command_preview_chars=220)
-        remaining_browser = [
+    remaining: list[dict[str, Any]]
+    if verify_remaining_with_inventory:
+        remaining_repo = [
             item
-            for item in list(browser_payload.get("items") or [])
-            if isinstance(item, dict) and int(item.get("pid") or 0) > 0
+            for item in list_repo_runtime_processes(project_root=project_root)
+            if item.kind in {"managed_workbench_backend", "unmanaged_workbench", "unmanaged_frontend_dev_server"}
+            and item.pid not in excluded
         ]
-    remaining_pids = {item.pid for item in remaining_repo}
-    remaining_pids.update(int(item.get("pid") or 0) for item in remaining_browser)
+        remaining_browser: list[dict[str, Any]] = []
+        if profile_text:
+            browser_payload = managed_browser_process_payload(profile_dir=profile_text, command_preview_chars=220)
+            remaining_browser = [
+                item
+                for item in list(browser_payload.get("items") or [])
+                if isinstance(item, dict) and int(item.get("pid") or 0) > 0
+            ]
+        remaining = [item.to_dict() for item in remaining_repo] + remaining_browser
+    else:
+        repo_by_pid = {item.pid: item.to_dict() for item in repo_candidates}
+        browser_by_pid = {
+            int(item.get("pid") or 0): item
+            for item in browser_candidates
+            if isinstance(item, dict) and int(item.get("pid") or 0) > 0
+        }
+        remaining = []
+        seen_remaining: set[int] = set()
+        for proc in _live_processes(target_pids):
+            pid = int(getattr(proc, "pid", 0) or 0)
+            if pid <= 0 or pid in seen_remaining:
+                continue
+            seen_remaining.add(pid)
+            if pid in repo_by_pid:
+                remaining.append(repo_by_pid[pid])
+                continue
+            if pid in browser_by_pid:
+                remaining.append(browser_by_pid[pid])
+                continue
+            try:
+                name = proc.name()
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                name = ""
+            remaining.append(
+                {
+                    "pid": pid,
+                    "name": name,
+                    "kind": "target_process_still_alive",
+                    "source": "target_process_tree",
+                }
+            )
+    remaining_pids = {int(item.get("pid") or 0) for item in remaining if isinstance(item, dict)}
     return {
         "supported": True,
         "requested": sorted(target_pids),
         "terminated": sorted(pid for pid in target_pids if pid not in remaining_pids),
-        "remaining": [item.to_dict() for item in remaining_repo] + remaining_browser,
+        "remaining": remaining,
         "repoCandidates": [item.to_dict() for item in repo_candidates],
         "browserCandidates": browser_candidates,
         "browserProfileDir": profile_text,
+        "remainingCheck": "inventory" if verify_remaining_with_inventory else "target_processes",
     }
 
 

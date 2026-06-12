@@ -3323,6 +3323,7 @@ class RuntimeManagerDaemon:
             browser_profile_dir=str(observed.get("browserProfileDir") or ""),
             exclude_pids={os.getpid(), self._pid},
             timeout_seconds=_FAST_CLOSE_PROCESS_TERMINATE_TIMEOUT_SECONDS,
+            verify_remaining_with_inventory=False,
         )
 
     def _perform_restart_workbench(self, *, command_id: str, args: dict[str, Any]) -> dict[str, Any]:
