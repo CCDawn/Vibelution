@@ -14,6 +14,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import http.client
+from collections.abc import Callable
 from typing import Any
 
 from config.workbench import configured_backend_port
@@ -31,6 +32,7 @@ from .scene_logging import append_runtime_manager_file_event, truncate_event_tex
 
 INTERNAL_LAUNCHER_ENV = "VIBELUTION_RUNTIME_MANAGER_INTERNAL_LAUNCHER"
 INTERNAL_LAUNCHER_VALUE = "1"
+LAUNCHER_ACTION_CANCELLED_RETURN_CODE = 130
 
 
 def _is_process_alive_windows(pid: int) -> bool:
@@ -461,7 +463,12 @@ def _launcher_command_args(action: str, *, no_browser: bool = False) -> list[str
     return args
 
 
-def run_launcher_action(action: str, *, no_browser: bool = False) -> subprocess.CompletedProcess[str]:
+def run_launcher_action(
+    action: str,
+    *,
+    no_browser: bool = False,
+    cancel_check: Callable[[], bool] | None = None,
+) -> subprocess.CompletedProcess[str]:
     args = _launcher_command_args(action, no_browser=no_browser)
     env = os.environ.copy()
     env["VIBELUTION_PORT"] = str(configured_backend_port())
@@ -483,17 +490,52 @@ def run_launcher_action(action: str, *, no_browser: bool = False) -> subprocess.
     try:
         with os.fdopen(stdout_fd, "w+b") as stdout_handle, os.fdopen(stderr_fd, "w+b") as stderr_handle:
             try:
-                result = subprocess.run(
-                    args,
-                    cwd=str(PROJECT_ROOT),
-                    stdin=subprocess.DEVNULL,
-                    stdout=stdout_handle,
-                    stderr=stderr_handle,
-                    creationflags=_creation_flags(),
-                    startupinfo=_hidden_startup_info(),
-                    env=env,
-                    check=False,
-                )
+                if cancel_check is None:
+                    result = subprocess.run(
+                        args,
+                        cwd=str(PROJECT_ROOT),
+                        stdin=subprocess.DEVNULL,
+                        stdout=stdout_handle,
+                        stderr=stderr_handle,
+                        creationflags=_creation_flags(),
+                        startupinfo=_hidden_startup_info(),
+                        env=env,
+                        check=False,
+                    )
+                else:
+                    process = subprocess.Popen(
+                        args,
+                        cwd=str(PROJECT_ROOT),
+                        stdin=subprocess.DEVNULL,
+                        stdout=stdout_handle,
+                        stderr=stderr_handle,
+                        creationflags=_creation_flags(),
+                        startupinfo=_hidden_startup_info(),
+                        env=env,
+                    )
+                    cancelled = False
+                    while process.poll() is None:
+                        if cancel_check():
+                            cancelled = True
+                            _record_launcher_action_event(
+                                "launcher.action.cancel_requested",
+                                action=action,
+                                no_browser=no_browser,
+                                env=env,
+                                duration_ms=(time.monotonic() - started_at) * 1000,
+                            )
+                            try:
+                                process.terminate()
+                                process.wait(timeout=2.0)
+                            except subprocess.TimeoutExpired:
+                                process.kill()
+                                process.wait(timeout=2.0)
+                            break
+                        time.sleep(0.2)
+                    return_code = process.poll()
+                    if cancelled:
+                        return_code = LAUNCHER_ACTION_CANCELLED_RETURN_CODE
+                    result = subprocess.CompletedProcess(args=args, returncode=int(return_code or 0))
             except Exception as exc:
                 _record_launcher_action_event(
                     "launcher.action.failed",
@@ -576,8 +618,12 @@ def _record_launcher_action_event(
         pass
 
 
-def open_workbench(*, no_browser: bool = False) -> subprocess.CompletedProcess[str]:
-    return run_launcher_action("internal-start", no_browser=no_browser)
+def open_workbench(
+    *,
+    no_browser: bool = False,
+    cancel_check: Callable[[], bool] | None = None,
+) -> subprocess.CompletedProcess[str]:
+    return run_launcher_action("internal-start", no_browser=no_browser, cancel_check=cancel_check)
 
 
 def focus_workbench() -> subprocess.CompletedProcess[str]:
@@ -588,6 +634,10 @@ def close_workbench() -> subprocess.CompletedProcess[str]:
     return run_launcher_action("internal-stop")
 
 
-def restart_workbench(*, no_browser: bool = False) -> subprocess.CompletedProcess[str]:
-    result = run_launcher_action("internal-restart", no_browser=no_browser)
+def restart_workbench(
+    *,
+    no_browser: bool = False,
+    cancel_check: Callable[[], bool] | None = None,
+) -> subprocess.CompletedProcess[str]:
+    result = run_launcher_action("internal-restart", no_browser=no_browser, cancel_check=cancel_check)
     return result

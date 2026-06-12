@@ -2104,6 +2104,57 @@ def test_command_queue_records_queued_claimed_and_result_written_events(tmp_path
     assert all(kwargs["occurred_at"] for _, _, kwargs in scene_events)
 
 
+def test_submit_close_interrupts_active_open_command(tmp_path, monkeypatch):
+    inbox_dir = tmp_path / "inbox"
+    processing_dir = tmp_path / "processing"
+    results_dir = tmp_path / "results"
+    interrupts_dir = tmp_path / "interrupts"
+    events_path = tmp_path / "events.jsonl"
+    for path in (inbox_dir, processing_dir, results_dir, interrupts_dir):
+        path.mkdir(parents=True)
+
+    monkeypatch.setattr(command_queue, "INBOX_DIR", inbox_dir)
+    monkeypatch.setattr(command_queue, "PROCESSING_DIR", processing_dir)
+    monkeypatch.setattr(command_queue, "RESULTS_DIR", results_dir)
+    monkeypatch.setattr(command_queue, "INTERRUPTS_DIR", interrupts_dir)
+    monkeypatch.setattr(command_queue, "EVENTS_PATH", events_path)
+    monkeypatch.setattr(command_queue, "ensure_runtime_manager_dirs", lambda: None)
+    monkeypatch.setattr(command_queue, "load_pid", lambda: 4242)
+    monkeypatch.setattr(command_queue, "_process_is_alive", lambda pid: int(pid or 0) == 4242)
+    monkeypatch.setattr(
+        command_queue,
+        "load_state",
+        lambda: {
+            "stateVersion": 17,
+            "managerPid": 4242,
+            "command": {
+                "activeCommandId": "cmd-active-open",
+                "activeType": "open_workbench",
+            },
+        },
+    )
+    monkeypatch.setattr(command_queue, "record_runtime_manager_scene_event", lambda *args, **kwargs: None)
+
+    close_command = command_queue.submit_command(
+        "force_close_workbench",
+        args={"reason": "launcher_force_stop_button"},
+        requested_by="launcher_api",
+    )
+
+    interrupt = json.loads((interrupts_dir / "cmd-active-open.json").read_text(encoding="utf-8"))
+    assert interrupt["interruptedCommandId"] == "cmd-active-open"
+    assert interrupt["interruptedType"] == "open_workbench"
+    assert interrupt["closeCommandId"] == close_command["commandId"]
+    assert interrupt["closeCommandType"] == "force_close_workbench"
+    assert interrupt["operation"] == "force_close"
+    queued = json.loads((inbox_dir / f"{close_command['commandId']}.json").read_text(encoding="utf-8"))
+    assert queued["type"] == "force_close_workbench"
+    events = [json.loads(line) for line in events_path.read_text(encoding="utf-8").splitlines()]
+    assert "command_queue.active_lifecycle_interrupt_requested" in [event["type"] for event in events]
+    queued_event = next(event for event in events if event["type"] == "command_queue.command_queued")
+    assert queued_event["payload"]["activeCommandInterrupt"]["interruptedCommandId"] == "cmd-active-open"
+
+
 def test_claim_next_command_skips_restart_deferred_until_future(tmp_path, monkeypatch):
     inbox_dir = tmp_path / "inbox"
     processing_dir = tmp_path / "processing"
@@ -3858,7 +3909,7 @@ def test_handle_open_workbench_restarts_headless_session(monkeypatch):
     opened = {}
     events = []
 
-    def fake_open_workbench(*, no_browser: bool):
+    def fake_open_workbench(*, no_browser: bool, cancel_check=None):
         opened["no_browser"] = no_browser
         return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
 
@@ -3943,7 +3994,7 @@ def test_handle_open_workbench_fails_when_launcher_exits_before_workbench_is_rea
     monkeypatch.setattr(
         daemon,
         "open_workbench",
-        lambda *, no_browser: subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
+        lambda *, no_browser, cancel_check=None: subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
     )
 
     result = runtime_daemon._handle_command(
@@ -4061,7 +4112,7 @@ def test_handle_open_workbench_skips_initial_observation_when_cached_closed(monk
     monkeypatch.setattr(
         daemon,
         "open_workbench",
-        lambda *, no_browser: subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
+        lambda *, no_browser, cancel_check=None: subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
     )
 
     result = runtime_daemon._handle_open_workbench(command_id="cmd-open", args={})
@@ -4160,7 +4211,7 @@ def test_handle_open_workbench_retries_stale_browser_only_session(monkeypatch):
     monkeypatch.setattr(daemon, "_OPEN_VERIFICATION_TIMEOUT_SECONDS", 0)
     monkeypatch.setattr(daemon, "_start_background_thread", lambda **kwargs: None)
 
-    def fake_open_workbench(*, no_browser: bool):
+    def fake_open_workbench(*, no_browser: bool, cancel_check=None):
         open_calls.append(no_browser)
         return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
 
@@ -4270,7 +4321,7 @@ def test_handle_open_workbench_accepts_trusted_backend_when_health_probe_lags(mo
     monkeypatch.setattr(
         daemon,
         "open_workbench",
-        lambda *, no_browser: subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
+        lambda *, no_browser, cancel_check=None: subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
     )
 
     result = runtime_daemon._handle_open_workbench(command_id="cmd-open", args={})
@@ -4342,7 +4393,7 @@ def test_handle_open_workbench_no_browser_succeeds_when_backend_is_ready(monkeyp
     monkeypatch.setattr(
         daemon,
         "open_workbench",
-        lambda *, no_browser: subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
+        lambda *, no_browser, cancel_check=None: subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
     )
     monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: events.append((event_type, payload)))
 
@@ -4461,7 +4512,7 @@ def test_handle_open_workbench_waits_for_delayed_backend_observation(monkeypatch
     monkeypatch.setattr(
         daemon,
         "open_workbench",
-        lambda *, no_browser: subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
+        lambda *, no_browser, cancel_check=None: subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
     )
     events = []
     monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: events.append((event_type, payload)))
@@ -4536,7 +4587,7 @@ def test_handle_open_workbench_restarts_healthy_headless_session_when_browser_re
     opened = {}
     events = []
 
-    def fake_open_workbench(*, no_browser: bool):
+    def fake_open_workbench(*, no_browser: bool, cancel_check=None):
         opened["no_browser"] = no_browser
         return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
 
@@ -4549,6 +4600,72 @@ def test_handle_open_workbench_restarts_healthy_headless_session_when_browser_re
     assert result["message"] == "Workbench opened."
     assert opened == {"no_browser": False}
     assert _event_payload(events, "workbench.open.verification_succeeded")["commandId"] == "cmd-open"
+
+
+def test_handle_open_workbench_interrupts_launcher_when_close_is_requested(monkeypatch):
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    events: list[tuple[str, dict]] = []
+    state_holder = {
+        "value": {
+            "command": {"activeCommandId": "cmd-open", "activeType": "open_workbench"},
+            "workbench": {"desiredState": "closed", "observedState": "closed", "phase": "steady"},
+        }
+    }
+    interrupt_holder: dict[str, dict] = {"value": {}}
+    interrupt = {
+        "interruptedCommandId": "cmd-open",
+        "interruptedType": "open_workbench",
+        "closeCommandId": "cmd-force",
+        "closeCommandType": "force_close_workbench",
+        "operation": "force_close",
+    }
+
+    monkeypatch.setattr(daemon, "load_state", lambda: json.loads(json.dumps(state_holder["value"])))
+    monkeypatch.setattr(
+        daemon,
+        "save_state",
+        lambda next_state: state_holder.update({"value": json.loads(json.dumps(next_state))}) or next_state,
+    )
+    monkeypatch.setattr(daemon, "now_iso", lambda: "2026-06-12T09:40:00+00:00")
+    monkeypatch.setattr(daemon, "observe_workbench", lambda: {"observedState": "closed"})
+    monkeypatch.setattr(daemon, "build_evolution_summary", lambda: {"self": {}, "supervised": {}})
+    monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: events.append((event_type, payload)))
+    monkeypatch.setattr(
+        daemon,
+        "lifecycle_interrupt_requested",
+        lambda command_id: interrupt_holder["value"] if command_id == "cmd-open" else None,
+    )
+    cleared: list[str] = []
+    monkeypatch.setattr(daemon, "clear_lifecycle_interrupt", lambda command_id: cleared.append(command_id))
+
+    def fake_open_workbench(*, no_browser: bool, cancel_check=None):
+        assert no_browser is False
+        interrupt_holder["value"] = interrupt
+        assert cancel_check is not None and cancel_check()
+        return subprocess.CompletedProcess(
+            args=[],
+            returncode=daemon.LAUNCHER_ACTION_CANCELLED_RETURN_CODE,
+            stdout="",
+            stderr="cancelled",
+        )
+
+    monkeypatch.setattr(daemon, "open_workbench", fake_open_workbench)
+    monkeypatch.setattr(
+        daemon,
+        "_wait_for_open_verification",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("interrupted open must not verify")),
+    )
+
+    result = runtime_daemon._handle_open_workbench(command_id="cmd-open", args={})
+
+    assert result["ok"] is False
+    assert result["errorType"] == "SupersededByForceCloseWorkbench"
+    assert result["interruptedByClose"] is True
+    assert result["supersededByCommandId"] == "cmd-force"
+    assert result["launcher"]["returnCode"] == daemon.LAUNCHER_ACTION_CANCELLED_RETURN_CODE
+    assert cleared == ["cmd-open"]
+    assert "workbench.open.interrupted_by_close" in [event_type for event_type, _ in events]
+    assert state_holder["value"]["workbench"]["phase"] != "failed"
 
 
 def test_handle_open_workbench_refocuses_existing_browser_session(monkeypatch):
@@ -5262,6 +5379,64 @@ def test_hot_restart_blocks_other_active_work(monkeypatch):
     assert events[0][0] == "workbench.hot_restart.blocked_active_work"
 
 
+def test_handle_restart_workbench_stops_after_close_when_close_interrupt_is_pending(monkeypatch):
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    state = {
+        "command": {"activeCommandId": "cmd-restart", "activeType": "restart_workbench"},
+        "workbench": {
+            "desiredState": "open",
+            "observedState": "open",
+            "phase": "steady",
+        },
+    }
+    interrupt = {
+        "interruptedCommandId": "cmd-restart",
+        "interruptedType": "restart_workbench",
+        "closeCommandId": "cmd-close",
+        "closeCommandType": "close_workbench",
+        "operation": "close",
+    }
+    events: list[tuple[str, dict]] = []
+    close_calls: list[str] = []
+    cleared: list[str] = []
+
+    monkeypatch.setattr(daemon, "load_state", lambda: json.loads(json.dumps(state)))
+    monkeypatch.setattr(daemon, "save_state", lambda next_state: next_state)
+    monkeypatch.setattr(daemon, "now_iso", lambda: "2026-06-12T09:45:00+00:00")
+    monkeypatch.setattr(daemon, "build_evolution_summary", lambda: {"self": {}, "supervised": {}})
+    monkeypatch.setattr(daemon, "_restart_should_preflight_frontend_build", lambda workbench, args: False)
+    monkeypatch.setattr(daemon, "observe_workbench", lambda: {"observedState": "closed"})
+    monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: events.append((event_type, payload)))
+    monkeypatch.setattr(daemon, "lifecycle_interrupt_requested", lambda command_id: interrupt if command_id == "cmd-restart" else None)
+    monkeypatch.setattr(daemon, "clear_lifecycle_interrupt", lambda command_id: cleared.append(command_id))
+    monkeypatch.setattr(
+        daemon,
+        "close_workbench",
+        lambda: close_calls.append("close") or subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
+    )
+    monkeypatch.setattr(daemon, "_wait_for_close_verification", lambda: (True, {"observedState": "closed"}, 1))
+    monkeypatch.setattr(daemon.RuntimeManagerDaemon, "_cleanup_residual_workbench_processes", lambda self: {"count": 0, "items": []})
+    monkeypatch.setattr(
+        daemon,
+        "open_workbench",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("interrupted restart must not reopen")),
+    )
+
+    result = runtime_daemon._handle_restart_workbench(
+        command_id="cmd-restart",
+        args={"reason": "launcher_restart", "skipActiveWorkGuard": True},
+    )
+
+    assert result["ok"] is False
+    assert result["errorType"] == "SupersededByCloseWorkbench"
+    assert result["interruptedByClose"] is True
+    assert result["interruptStage"] == "after_close_before_open"
+    assert result["supersededByCommandId"] == "cmd-close"
+    assert close_calls == ["close"]
+    assert cleared == ["cmd-restart"]
+    assert "workbench.restart.interrupted_by_close" in [event_type for event_type, _ in events]
+
+
 def test_handle_restart_workbench_preserves_visible_browser_when_no_browser_was_forwarded(monkeypatch):
     runtime_daemon = daemon.RuntimeManagerDaemon()
     state = {
@@ -5312,12 +5487,12 @@ def test_handle_restart_workbench_preserves_visible_browser_when_no_browser_was_
         lambda: close_calls.append("close") or subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
     )
     monkeypatch.setattr(daemon, "_wait_for_close_verification", lambda: (True, daemon.observe_workbench(), 1))
-    monkeypatch.setattr(daemon, "_wait_for_open_verification", lambda *, no_browser: (True, daemon.observe_workbench(), 1))
+    monkeypatch.setattr(daemon, "_wait_for_open_verification", lambda *, no_browser, cancel_check=None: (True, daemon.observe_workbench(), 1))
     monkeypatch.setattr(daemon.RuntimeManagerDaemon, "_cleanup_residual_workbench_processes", lambda self: {"count": 0, "items": []})
     monkeypatch.setattr(
         daemon,
         "open_workbench",
-        lambda *, no_browser: open_calls.append(no_browser)
+        lambda *, no_browser, cancel_check=None: open_calls.append(no_browser)
         or subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
     )
 
@@ -5380,12 +5555,12 @@ def test_handle_restart_workbench_keeps_headless_restart_headless(monkeypatch):
         lambda: close_calls.append("close") or subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
     )
     monkeypatch.setattr(daemon, "_wait_for_close_verification", lambda: (True, daemon.observe_workbench(), 1))
-    monkeypatch.setattr(daemon, "_wait_for_open_verification", lambda *, no_browser: (True, daemon.observe_workbench(), 1))
+    monkeypatch.setattr(daemon, "_wait_for_open_verification", lambda *, no_browser, cancel_check=None: (True, daemon.observe_workbench(), 1))
     monkeypatch.setattr(daemon.RuntimeManagerDaemon, "_cleanup_residual_workbench_processes", lambda self: {"count": 0, "items": []})
     monkeypatch.setattr(
         daemon,
         "open_workbench",
-        lambda *, no_browser: open_calls.append(no_browser)
+        lambda *, no_browser, cancel_check=None: open_calls.append(no_browser)
         or subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
     )
 
@@ -5473,7 +5648,7 @@ def test_handle_restart_workbench_accepts_trusted_backend_when_health_probe_lags
     monkeypatch.setattr(
         daemon,
         "open_workbench",
-        lambda *, no_browser: subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
+        lambda *, no_browser, cancel_check=None: subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
     )
 
     result = runtime_daemon._handle_restart_workbench(command_id="cmd-restart", args={"reason": "launcher_restart"})

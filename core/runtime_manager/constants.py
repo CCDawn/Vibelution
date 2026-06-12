@@ -12,6 +12,7 @@ RUNTIME_MANAGER_DIR = PROJECT_ROOT / ".runtime" / "runtime-manager"
 INBOX_DIR = RUNTIME_MANAGER_DIR / "inbox"
 PROCESSING_DIR = RUNTIME_MANAGER_DIR / "processing"
 RESULTS_DIR = RUNTIME_MANAGER_DIR / "results"
+INTERRUPTS_DIR = RUNTIME_MANAGER_DIR / "interrupts"
 RESTART_INTENTS_DIR = RUNTIME_MANAGER_DIR / "restart-intents"
 STATE_PATH = RUNTIME_MANAGER_DIR / "state.json"
 PID_PATH = RUNTIME_MANAGER_DIR / "daemon.pid"
@@ -35,5 +36,5 @@ DEFAULT_COMMAND_WAIT_SECONDS = 45.0
 def ensure_runtime_manager_dirs() -> None:
     """Create the runtime-manager directory tree if it is missing."""
 
-    for path in (RUNTIME_MANAGER_DIR, INBOX_DIR, PROCESSING_DIR, RESULTS_DIR, RESTART_INTENTS_DIR):
+    for path in (RUNTIME_MANAGER_DIR, INBOX_DIR, PROCESSING_DIR, RESULTS_DIR, INTERRUPTS_DIR, RESTART_INTENTS_DIR):
         path.mkdir(parents=True, exist_ok=True)
