@@ -95,6 +95,25 @@ export function routerLocationDesyncTarget(
   return browserTarget === routerTarget ? null : browserTarget;
 }
 
+export type RouterLocationDesyncRecoveryPlan = {
+  target: string;
+  restoreTarget: string;
+};
+
+export function routerLocationDesyncRecoveryPlan(
+  browserLocation: RouteLocationLike,
+  routerLocation: RouteLocationLike,
+): RouterLocationDesyncRecoveryPlan | null {
+  const browserTarget = routeLocationKey(browserLocation);
+  const routerTarget = routeLocationKey(routerLocation);
+  return browserTarget === routerTarget
+    ? null
+    : {
+        target: browserTarget,
+        restoreTarget: routerTarget,
+      };
+}
+
 const API_FAILURE_TELEMETRY_THROTTLE_MS = 15_000;
 const API_FAILURE_BACKGROUND_METHODS = new Set(["GET", "HEAD"]);
 const APP_VERSION = packageJson.version;
@@ -600,12 +619,13 @@ export function AppShell() {
   }, []);
 
   const recoverRouterLocationDesync = useCallback((trigger: string) => {
-    const target = routerLocationDesyncTarget(window.location, location);
-    if (!target) {
+    const recovery = routerLocationDesyncRecoveryPlan(window.location, location);
+    if (!recovery) {
       lastRouterLocationDesyncTargetRef.current = null;
       return;
     }
 
+    const { target } = recovery;
     const duplicateTarget = lastRouterLocationDesyncTargetRef.current === target;
     lastRouterLocationDesyncTargetRef.current = target;
     emitBrowserTelemetry({
@@ -623,8 +643,14 @@ export function AppShell() {
         routerPathname: location.pathname,
         routerSearch: location.search,
         routerHash: location.hash,
+        restoreTarget: recovery.restoreTarget,
       },
     });
+    try {
+      window.history.replaceState(window.history.state, "", recovery.restoreTarget);
+    } catch {
+      // Keep the recovery best-effort; navigate still attempts to bring the router to the browser target.
+    }
     navigate(target, { replace: true });
   }, [emitBrowserTelemetry, location, navigate]);
 
