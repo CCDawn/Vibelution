@@ -374,6 +374,87 @@
   border-top: 1px solid color-mix(in srgb, var(--border-soft) 64%, transparent);
 }
 
+.activeSkillStatus {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 6px 7px;
+  border: 1px solid color-mix(in srgb, var(--fg-tertiary) 16%, transparent);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--surface-panel) 74%, transparent);
+}
+
+.activeSkillStatus_active {
+  border-color: color-mix(in srgb, #31b977 34%, var(--border-soft));
+  background: color-mix(in srgb, #31b977 8%, var(--surface-card));
+}
+
+.activeSkillStatus_stale {
+  border-color: color-mix(in srgb, #d19a3f 42%, var(--border-soft));
+  background: color-mix(in srgb, #d19a3f 10%, var(--surface-card));
+}
+
+.activeSkillStatus_missing {
+  border-color: color-mix(in srgb, #d6655a 46%, var(--border-soft));
+  background: color-mix(in srgb, #d6655a 10%, var(--surface-card));
+}
+
+.activeSkillIdentity {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.activeSkillEyebrow {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-tertiary);
+  font-size: 0.6rem;
+  font-weight: 760;
+  letter-spacing: 0;
+  line-height: 1;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.activeSkillIdentity strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-primary);
+  font-size: 0.72rem;
+  font-weight: 760;
+  line-height: 1.1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.activeSkillMeta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
+  min-width: 0;
+  color: var(--fg-tertiary);
+  font-size: 0.62rem;
+  line-height: 1.1;
+  white-space: nowrap;
+}
+
+.activeSkillMeta span {
+  min-width: 0;
+  overflow: hidden;
+  max-width: 84px;
+  text-overflow: ellipsis;
+}
+
+.activeSkillState {
+  color: var(--fg-secondary);
+  font-weight: 760;
+}
+
 .featurePresetBlock {
   display: grid;
   gap: 5px;

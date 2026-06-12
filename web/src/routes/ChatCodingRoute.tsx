@@ -156,6 +156,24 @@ import {
 } from "./chatMentionTokens";
 import styles from "./ChatCodingRoute.module.css";
 
+type ActiveSkillContract = {
+  status?: string;
+  scope?: string;
+  command?: string;
+  args?: string;
+  skillName?: string;
+  skillPath?: string;
+  skillHash?: string;
+  description?: string;
+  keyRules?: string[];
+  activatedAt?: string;
+  staleReason?: string;
+};
+
+type SessionDetailWithActiveSkill = SessionDetail & {
+  activeSkillContract?: ActiveSkillContract | null;
+};
+
 function encodeUtf8Base64(value: string): string {
   const bytes = new TextEncoder().encode(value);
   let binary = "";
@@ -285,6 +303,7 @@ function contextCompositionSegmentClass(key: string) {
     case "guidance":
       return styles.contextCompositionSegmentGuidance;
     case "skill":
+    case "active_skill":
       return styles.contextCompositionSegmentSkill;
     case "attachments":
       return styles.contextCompositionSegmentAttachments;
@@ -2570,6 +2589,36 @@ export function ChatCodingRoute() {
     : "";
   const lastContextComposition = detail?.lastContextComposition ?? null;
   const lastCacheComposition = detail?.lastCacheComposition ?? null;
+  const activeSkillContract = (detail as SessionDetailWithActiveSkill | undefined)?.activeSkillContract ?? null;
+  const activeSkillCommand = String(activeSkillContract?.command ?? "").trim();
+  const activeSkillName = String(activeSkillContract?.skillName ?? activeSkillCommand).trim();
+  const activeSkillStatusValue = String(activeSkillContract?.status ?? "active").trim().toLowerCase();
+  const activeSkillStatus = ["active", "stale", "missing"].includes(activeSkillStatusValue)
+    ? activeSkillStatusValue
+    : "active";
+  const activeSkillStatusLabel = activeSkillStatus === "stale"
+    ? (lang === "zh" ? "已变更" : "stale")
+    : activeSkillStatus === "missing"
+      ? (lang === "zh" ? "缺失" : "missing")
+      : (lang === "zh" ? "生效中" : "active");
+  const activeSkillStatusClass = activeSkillStatus === "stale"
+    ? styles.activeSkillStatus_stale
+    : activeSkillStatus === "missing"
+      ? styles.activeSkillStatus_missing
+      : styles.activeSkillStatus_active;
+  const activeSkillHash = String(activeSkillContract?.skillHash ?? "").trim();
+  const activeSkillShortHash = activeSkillHash ? activeSkillHash.slice(0, 8) : "";
+  const activeSkillRuleCount = Array.isArray(activeSkillContract?.keyRules)
+    ? activeSkillContract.keyRules.length
+    : 0;
+  const activeSkillSummary = activeSkillContract && (activeSkillName || activeSkillCommand)
+    ? [
+      activeSkillCommand ? `/${activeSkillCommand}` : "",
+      activeSkillName,
+      activeSkillStatusLabel,
+      activeSkillShortHash ? `#${activeSkillShortHash}` : "",
+    ].filter(Boolean).join(" · ")
+    : "";
   const projectBusTimeline = projectAgentBusQuery.data;
   const projectBusEvents = projectBusTimeline?.events ?? [];
   const activeGroupRound = latestChatRoomRound(activeGroupRoom);
@@ -2718,6 +2767,20 @@ export function ChatCodingRoute() {
       lastContextComposition.source || "",
     ].filter(Boolean).join(" · ")
     : t("noPreviousContextComposition");
+  const activeSkillTitle = activeSkillContract && (activeSkillName || activeSkillCommand)
+    ? [
+      lang === "zh" ? "当前 Skill Contract" : "Active Skill Contract",
+      activeSkillCommand ? `/${activeSkillCommand}` : "",
+      activeSkillName,
+      activeSkillStatusLabel,
+      activeSkillHash ? `hash ${activeSkillHash}` : "",
+      activeSkillContract.scope ? `scope ${activeSkillContract.scope}` : "",
+      activeSkillContract.activatedAt ? `${lang === "zh" ? "激活于" : "activated"} ${formatTime(activeSkillContract.activatedAt)}` : "",
+      activeSkillRuleCount ? `${numberFormatter.format(activeSkillRuleCount)} ${lang === "zh" ? "条规则" : "rules"}` : "",
+      activeSkillContract.staleReason ? `reason ${activeSkillContract.staleReason}` : "",
+      activeSkillContract.skillPath || "",
+    ].filter(Boolean).join(" · ")
+    : "";
   const cacheCompositionSegments = useMemo(() => {
     const segments = lastCacheComposition?.segments ?? [];
     return segments.filter((segment: SessionCacheCompositionSegment) => (segment.tokens ?? 0) > 0 || segment.key === "missing");
@@ -4374,6 +4437,25 @@ export function ChatCodingRoute() {
               </span>
             </summary>
             <div className={styles.sessionDiagnosticsBody}>
+              {activeSkillSummary ? (
+                <section
+                  className={`${styles.activeSkillStatus} ${activeSkillStatusClass}`}
+                  title={activeSkillTitle}
+                  aria-label={lang === "zh" ? "当前 active skill 状态" : "Current active skill status"}
+                >
+                  <div className={styles.activeSkillIdentity}>
+                    <span className={styles.activeSkillEyebrow}>
+                      {lang === "zh" ? "当前 Skill" : "Active skill"}
+                    </span>
+                    <strong>{activeSkillName || activeSkillCommand}</strong>
+                  </div>
+                  <div className={styles.activeSkillMeta}>
+                    {activeSkillCommand ? <span>/{activeSkillCommand}</span> : null}
+                    <span className={styles.activeSkillState}>{activeSkillStatusLabel}</span>
+                    {activeSkillShortHash ? <span>#{activeSkillShortHash}</span> : null}
+                  </div>
+                </section>
+              ) : null}
               <section className={styles.contextCompositionPanel} aria-label={lang === "zh" ? "状态栏上一轮上下文与缓存事实" : "Status bar previous turn context and cache facts"}>
                 <div className={styles.contextCompositionItem} title={contextCompositionTitle}>
                   <div className={styles.contextCompositionHeader}>
