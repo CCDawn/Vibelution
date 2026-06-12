@@ -331,6 +331,7 @@ def terminate_workbench_processes(
     browser_profile_dir: Path | str = "",
     exclude_pids: Iterable[int] | None = None,
     timeout_seconds: float = 5.0,
+    kill_wait_timeout_seconds: float = 1.0,
     verify_remaining_with_inventory: bool = True,
 ) -> dict[str, Any]:
     """Terminate repo-owned workbench backend/frontend processes and managed browser profile processes."""
@@ -388,8 +389,9 @@ def terminate_workbench_processes(
             proc.kill()
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             continue
+    kill_wait_timeout = max(0.05, float(kill_wait_timeout_seconds))
     if alive:
-        psutil.wait_procs(alive, timeout=1.0)
+        psutil.wait_procs(alive, timeout=kill_wait_timeout)
 
     time.sleep(0.05)
     remaining: list[dict[str, Any]]
@@ -451,6 +453,7 @@ def terminate_workbench_processes(
         "browserCandidates": browser_candidates,
         "browserProfileDir": profile_text,
         "remainingCheck": "inventory" if verify_remaining_with_inventory else "target_processes",
+        "killWaitTimeoutSeconds": kill_wait_timeout,
     }
 
 
