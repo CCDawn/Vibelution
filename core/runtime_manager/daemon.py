@@ -99,7 +99,6 @@ _OPEN_VERIFICATION_POLL_INTERVAL_SECONDS = 0.4
 _CLOSE_VERIFICATION_TIMEOUT_SECONDS = 8.0
 _CLOSE_VERIFICATION_POLL_INTERVAL_SECONDS = 0.4
 _FAST_CLOSE_PROCESS_TERMINATE_TIMEOUT_SECONDS = 1.0
-_FAST_CLOSE_PROCESS_KILL_WAIT_TIMEOUT_SECONDS = 0.2
 _DEFERRED_RESTART_ACTIVE_WORK_POLL_SECONDS = 10.0
 _RESTART_BUILD_PREFLIGHT_TIMEOUT_SECONDS = 120.0
 _ACTIVE_WORK_LIFECYCLE_BLOCKED_MESSAGE = "有进行中的任务，无法重启 Vibelution。请等待任务完成或先停止任务。"
@@ -3324,7 +3323,6 @@ class RuntimeManagerDaemon:
             browser_profile_dir=str(observed.get("browserProfileDir") or ""),
             exclude_pids={os.getpid(), self._pid},
             timeout_seconds=_FAST_CLOSE_PROCESS_TERMINATE_TIMEOUT_SECONDS,
-            kill_wait_timeout_seconds=_FAST_CLOSE_PROCESS_KILL_WAIT_TIMEOUT_SECONDS,
             verify_remaining_with_inventory=False,
         )
 
