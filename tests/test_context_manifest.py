@@ -7,6 +7,11 @@ from core.context.segments import (
     build_context_segment,
     normalize_context_manifest,
 )
+from core.context.skill_contract import (
+    ACTIVE_SKILL_CONTEXT_HEADER,
+    build_active_skill_contract,
+    build_active_skill_runtime_context,
+)
 from core.context.volatility import VOLATILE_CONTEXT_HEADERS, is_volatile_context_text
 from core.infrastructure.llm_utils import is_volatile_system_context_message
 from core.llm import client as llm_client
@@ -24,6 +29,44 @@ def test_shared_volatile_headers_drive_agent_and_llm_classification():
     assert not is_volatile_context_text(stable_text)
     assert not is_volatile_system_context_message(SystemMessage(content=stable_text))
     assert not llm_client._is_volatile_context_content(stable_text)
+
+
+def test_active_skill_contract_is_compact_and_volatile(tmp_path):
+    skill_path = tmp_path / "SKILL.md"
+    skill_path.write_text(
+        "---\nname: brt\ndescription: BRT gate\n---\n\n"
+        "# BRT\n\n"
+        "- Must ask one question at a time.\n"
+        "- Do not treat user words as confirmed requirements.\n"
+        "Full private implementation details stay in the source document only.\n",
+        encoding="utf-8",
+    )
+
+    class Skill:
+        name = "brt"
+        path = skill_path
+        description = "BRT gate"
+        content = skill_path.read_text(encoding="utf-8")
+        content_hash = "hash-a"
+        content_length = len(content)
+
+    contract = build_active_skill_contract(
+        {"command": "brt", "args": "设计上下文", "_skill": Skill()},
+        activated_at="2026-06-12T12:00:00Z",
+        activated_turn_id="turn-a",
+    )
+    context = build_active_skill_runtime_context(contract)
+
+    assert contract is not None
+    assert contract["command"] == "brt"
+    assert contract["skillHash"] == "hash-a"
+    assert "content" not in contract
+    assert "Full private implementation details" not in json.dumps(contract, ensure_ascii=False)
+    assert context.startswith(ACTIVE_SKILL_CONTEXT_HEADER)
+    assert "Must ask one question at a time." in context
+    assert is_volatile_context_text(context)
+    assert is_volatile_system_context_message(SystemMessage(content=context))
+    assert llm_client._is_volatile_context_content(context)
 
 
 def test_context_manifest_marks_cacheable_volatile_and_omitted_segments():

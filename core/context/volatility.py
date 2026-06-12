@@ -14,6 +14,7 @@ VOLATILE_CONTEXT_HEADERS: tuple[str, ...] = (
     SYSTEM_DYNAMIC_CONTEXT_HEADER,
     "## Recent Operator Guidance",
     "## Slash Skill Context",
+    "## Active Skill Context",
 )
 
 

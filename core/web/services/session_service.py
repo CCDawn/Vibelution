@@ -28,6 +28,12 @@ from core.context.segments import (
     build_context_segment,
     normalize_context_manifest,
 )
+from core.context.skill_contract import (
+    build_active_skill_contract,
+    build_active_skill_runtime_context,
+    normalize_active_skill_contract,
+    refresh_active_skill_contract_status,
+)
 from core.chat.chat_result_contract import build_chat_coding_result_contract
 from core.chat.chat_result_formatter import format_chat_reply
 from core.chat.chat_task_types import trim_lines
@@ -3379,6 +3385,11 @@ def submit_session_message(
         skill_command = parse_skill_slash_command(message)
         skill_invocation = _skill_invocation_payload(skill_command) if skill_command is not None else None
         turn_control = _create_session_turn_control(conversation_id)
+        active_skill_contract = (
+            _active_skill_contract_from_invocation(skill_invocation, turn_id=turn_control.turn_id)
+            if skill_invocation
+            else _active_skill_contract_from_conversation(conversation)
+        )
         persisted_message_metadata = dict(message_metadata or {}) if isinstance(message_metadata, dict) else {}
         if persisted_message_metadata:
             persisted_message_metadata.setdefault("turnId", turn_control.turn_id)
@@ -3390,6 +3401,8 @@ def submit_session_message(
                 "skillName": skill_invocation.get("skillName", ""),
                 "skillHash": skill_invocation.get("skillHash", ""),
             }
+            if active_skill_contract is not None:
+                conversation["active_skill_contract"] = active_skill_contract
         user_entry = _make_chat_message(
             "user",
             message,
@@ -3581,6 +3594,7 @@ def submit_session_message(
                 "agent_id": agent_id,
                 "leases": requested_leases,
                 "skill_invocation": skill_invocation,
+                "active_skill_contract": active_skill_contract,
                 "llm_slot": image_route_llm_slot,
                 "submit_timing_fields": dict(submit_timing_fields),
                 "submit_started_at_monotonic": submit_started_at,
@@ -3704,6 +3718,7 @@ def submit_session_message(
         "agent_id": agent_id,
         "leases": requested_leases,
         "skill_invocation": skill_invocation,
+        "active_skill_contract": active_skill_contract,
         "llm_slot": SESSION_LLM_SLOT_VISION if attachments else SESSION_LLM_SLOT_DIALOGUE,
         "submit_timing_fields": dict(submit_timing_fields),
         "submit_started_at_monotonic": submit_started_at,
@@ -3964,6 +3979,17 @@ def edit_and_resubmit_session_message(
         agent_id = str(conversation.get("agent_id") or conversation.get("agentId") or "").strip()
         agent = _resolve_active_agent_for_turn(conversation_id, agent_id, lang=lang)
         original_entry = dict(previous_messages[target_index])
+        original_metadata = original_entry.get("metadata") if isinstance(original_entry.get("metadata"), dict) else {}
+        original_was_slash_skill = isinstance(original_metadata.get("slashSkillCommand"), dict)
+        superseded_turn_id = ""
+        if _is_session_running(conversation_id):
+            superseded_turn_id = _supersede_active_session_turn_for_edit(conversation_id, lang=lang)
+        turn_control = _create_session_turn_control(conversation_id)
+        active_skill_contract = (
+            _active_skill_contract_from_invocation(skill_invocation, turn_id=turn_control.turn_id)
+            if skill_invocation
+            else _active_skill_contract_from_conversation(conversation)
+        )
         user_metadata = {}
         if skill_invocation:
             user_metadata["slashSkillCommand"] = {
@@ -3971,9 +3997,12 @@ def edit_and_resubmit_session_message(
                 "skillName": skill_invocation.get("skillName", ""),
                 "skillHash": skill_invocation.get("skillHash", ""),
             }
-        superseded_turn_id = ""
-        if _is_session_running(conversation_id):
-            superseded_turn_id = _supersede_active_session_turn_for_edit(conversation_id, lang=lang)
+            if active_skill_contract is not None:
+                conversation["active_skill_contract"] = active_skill_contract
+        elif original_was_slash_skill:
+            active_skill_contract = None
+            conversation.pop("active_skill_contract", None)
+            conversation.pop("activeSkillContract", None)
         user_entry = _make_chat_message("user", message, metadata=user_metadata)
         edited_messages = previous_messages[:target_index] + [user_entry]
         conversation["messages"] = edited_messages
@@ -3984,7 +4013,6 @@ def edit_and_resubmit_session_message(
         payload["active_conversation_id"] = conversation_id
         payload["updated_at"] = user_entry["timestamp"]
         save_chat_state(PROJECT_ROOT, payload)
-        turn_control = _create_session_turn_control(conversation_id)
         _set_session_running(conversation_id, True, turn_id=turn_control.turn_id, leases=requested_leases)
         _persist_chat_turn_work_run(
             session_id=conversation_id,
@@ -4070,6 +4098,7 @@ def edit_and_resubmit_session_message(
         "active_task": active_task,
         "agent_id": agent_id,
         "skill_invocation": skill_invocation,
+        "active_skill_contract": active_skill_contract,
         "llm_slot": SESSION_LLM_SLOT_DIALOGUE,
     }
     _record_session_turn_scheduled_event(context)
@@ -5008,6 +5037,9 @@ def _normalize_conversation(
     last_context_composition = _normalize_session_context_composition(
         raw.get("last_context_composition") or raw.get("lastContextComposition")
     )
+    active_skill_contract = normalize_active_skill_contract(
+        raw.get("active_skill_contract") or raw.get("activeSkillContract")
+    )
     last_cache_composition = _normalize_session_cache_composition(
         raw.get("last_cache_composition") or raw.get("lastCacheComposition")
     )
@@ -5051,6 +5083,7 @@ def _normalize_conversation(
         "lastTurnError": last_turn_error,
         "lastLlmUsage": last_llm_usage,
         "lastContextComposition": last_context_composition,
+        "activeSkillContract": active_skill_contract,
         "lastCacheComposition": last_cache_composition,
         "sessionKind": session_kind,
         "hiddenFromIndex": bool(raw.get("hidden_from_index") or raw.get("hiddenFromIndex")),
@@ -5319,6 +5352,8 @@ def _lightweight_chat_payload_decision(
         return False, "session_references"
     if context.get("skill_invocation"):
         return False, "skill_invocation"
+    if normalize_active_skill_contract(context.get("active_skill_contract")):
+        return False, "active_skill_contract"
     user_message_source = str(context.get("user_message_source") or "").strip()
     if user_message_source == "agent_inbox":
         return False, "agent_inbox"
@@ -5909,6 +5944,9 @@ def _build_session_detail_from_summary(
         "cacheUsage": cache_usage,
         "llmUsage": llm_usage,
         "lastContextComposition": last_context_composition,
+        "activeSkillContract": normalize_active_skill_contract(
+            conversation.get("activeSkillContract") or conversation.get("active_skill_contract")
+        ),
         "lastCacheComposition": last_cache_composition,
         "handoffContext": _normalize_child_handoff_context(conversation.get("handoffContext") or conversation.get("handoff_context")),
         "lastTurnError": _session_turn_error_to_api(conversation.get("lastTurnError")),
@@ -6359,6 +6397,8 @@ def _build_last_context_composition(
     guidance_context_included: bool = False,
     skill_runtime_context_block: str = "",
     skill_runtime_context_included: bool = False,
+    active_skill_context_block: str = "",
+    active_skill_context_included: bool = False,
     attachments: list[dict[str, Any]] | None = None,
     prompt_cache_partition: str = "",
 ) -> dict[str, Any]:
@@ -6513,6 +6553,33 @@ def _build_last_context_composition(
                 cache_policy="volatile",
                 retention="current_turn_only",
                 included_in_model_input=skill_included,
+            )
+        )
+    if active_skill_context_block:
+        active_skill_included = bool(active_skill_context_included)
+        segments.append(
+            _context_segment(
+                "active_skill",
+                "active skill",
+                content=active_skill_context_block,
+                chars=len(active_skill_context_block),
+                item_count=1,
+                status="included" if active_skill_included else "omitted",
+                source="active_skill_contract",
+                description=(
+                    "Compact active skill contract seeded into the agent before the current user message."
+                    if active_skill_included
+                    else "Active skill contract was available but could not be seeded into model input."
+                ),
+                kind="active_skill",
+                lifecycle="task",
+                authority=68,
+                volatility=80,
+                relevance=85,
+                placement="before_current_user" if active_skill_included else "omitted",
+                cache_policy="volatile",
+                retention="carryover_summary",
+                included_in_model_input=active_skill_included,
             )
         )
     normalized_attachments = _normalize_message_attachments(attachments)
@@ -8422,12 +8489,20 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                 guidance_context_block = _recent_session_guidance_context_block(session_id)
                 skill_invocation = context.get("skill_invocation")
                 skill_runtime_context_block = _skill_runtime_context_from_invocation(skill_invocation)
+                active_skill_contract = refresh_active_skill_contract_status(context.get("active_skill_contract"))
+                active_skill_context_block = (
+                    ""
+                    if skill_runtime_context_block
+                    else _active_skill_runtime_context_from_contract(active_skill_contract)
+                )
                 skill_runtime_context_included = False
+                active_skill_context_included = False
                 seed_started_at = _perf_counter()
                 history_seed_ms = 0
                 static_runtime_context_seed_ms = 0
                 runtime_context_seed_ms = 0
                 skill_context_seed_ms = 0
+                active_skill_context_seed_ms = 0
                 if callable(restore) and history_messages:
                     stage_started_at = _perf_counter()
                     restore(history_messages)
@@ -8457,6 +8532,12 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                         invocation=skill_invocation,
                         outcome="routed",
                     )
+                if active_skill_context_block:
+                    active_skill_stage_started_at = _perf_counter()
+                    if callable(volatile_runtime_context_seed):
+                        volatile_runtime_context_seed(active_skill_context_block)
+                        active_skill_context_included = True
+                    active_skill_context_seed_ms = _elapsed_ms(active_skill_stage_started_at)
                 if lightweight_chat_payload:
                     _record_session_turn_lifecycle_event(
                         session_id,
@@ -8505,6 +8586,20 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                             if skill_runtime_context_block
                             else ""
                         ),
+                        "activeSkillContractAvailable": bool(active_skill_contract),
+                        "activeSkillContextIncluded": active_skill_context_included,
+                        "activeSkillContextAvailable": bool(active_skill_context_block),
+                        "activeSkillContextOmittedFromModelInput": bool(active_skill_context_block)
+                        and not active_skill_context_included,
+                        "activeSkillContextPlacement": (
+                            "before_current_user"
+                            if active_skill_context_included
+                            else "omitted_no_volatile_context_seed"
+                            if active_skill_context_block
+                            else ""
+                        ),
+                        "activeSkillContractStatus": str((active_skill_contract or {}).get("status") or "").strip(),
+                        "activeSkillContractSkillHash": str((active_skill_contract or {}).get("skillHash") or "").strip(),
                         "lightweightChatPayload": lightweight_chat_payload,
                         "lightweightChatPayloadReason": lightweight_chat_payload_reason,
                         "disableTools": lightweight_chat_payload,
@@ -8516,6 +8611,7 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                         "staticRuntimeContextSeedMs": static_runtime_context_seed_ms,
                         "runtimeContextSeedMs": runtime_context_seed_ms,
                         "skillContextSeedMs": skill_context_seed_ms,
+                        "activeSkillContextSeedMs": active_skill_context_seed_ms,
                         "totalSeedMs": _elapsed_ms(seed_started_at),
                     },
                 )
@@ -8573,6 +8669,8 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                     guidance_context_included=False,
                     skill_runtime_context_block=skill_runtime_context_block,
                     skill_runtime_context_included=skill_runtime_context_included,
+                    active_skill_context_block=active_skill_context_block,
+                    active_skill_context_included=active_skill_context_included,
                     attachments=attachments,
                     prompt_cache_partition=prompt_cache_partition,
                 )
@@ -8730,6 +8828,28 @@ def _skill_invocation_payload(command: SkillSlashCommand | None) -> dict[str, An
     }
 
 
+def _active_skill_contract_from_invocation(
+    invocation: Any,
+    *,
+    turn_id: str = "",
+) -> dict[str, Any] | None:
+    contract = build_active_skill_contract(
+        invocation,
+        activated_at=_now_timestamp(),
+        activated_turn_id=turn_id,
+        scope="task",
+    )
+    return contract
+
+
+def _active_skill_contract_from_conversation(conversation: Any) -> dict[str, Any] | None:
+    if not isinstance(conversation, dict):
+        return None
+    return refresh_active_skill_contract_status(
+        conversation.get("active_skill_contract") or conversation.get("activeSkillContract")
+    )
+
+
 def _skill_runtime_context_from_invocation(invocation: Any) -> str:
     if not isinstance(invocation, dict):
         return ""
@@ -8741,6 +8861,10 @@ def _skill_runtime_context_from_invocation(invocation: Any) -> str:
         command=str(invocation.get("command") or ""),
         args=str(invocation.get("args") or ""),
     )
+
+
+def _active_skill_runtime_context_from_contract(contract: Any) -> str:
+    return build_active_skill_runtime_context(contract)
 
 
 def _record_session_skill_command_event(
