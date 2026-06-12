@@ -261,6 +261,32 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.contextCompositionSegmentUnused).toBeTypeOf("string");
   });
 
+  it("shows the active skill contract inside session diagnostics", () => {
+    expect(routeSource).toContain("type ActiveSkillContract = {");
+    expect(routeSource).toContain("type SessionDetailWithActiveSkill = SessionDetail &");
+    expect(routeSource).toContain("const activeSkillContract = (detail as SessionDetailWithActiveSkill | undefined)?.activeSkillContract ?? null");
+    expect(routeSource).toContain("const activeSkillStatusLabel = activeSkillStatus === \"stale\"");
+    expect(routeSource).toContain("styles.activeSkillStatus_stale");
+    expect(routeSource).toContain("styles.activeSkillStatus_missing");
+    expect(routeSource).toContain("const activeSkillTitle = activeSkillContract");
+    expect(routeSource).toContain("className={`${styles.activeSkillStatus} ${activeSkillStatusClass}`}");
+    expect(routeSource).toContain("styles.activeSkillIdentity");
+    expect(routeSource).toContain("styles.activeSkillMeta");
+    expect(routeSource).toContain("case \"active_skill\":");
+    const renderedActiveSkillIndex = routeSource.indexOf("className={`${styles.activeSkillStatus} ${activeSkillStatusClass}`}");
+    expect(renderedActiveSkillIndex).toBeGreaterThan(routeSource.indexOf("styles.sessionDiagnosticsBody"));
+    expect(renderedActiveSkillIndex).toBeLessThan(routeSource.indexOf("styles.contextCompositionPanel"));
+
+    expect(routeStyles.activeSkillStatus).toBeTypeOf("string");
+    expect(routeStyles.activeSkillStatus_active).toBeTypeOf("string");
+    expect(routeStyles.activeSkillStatus_stale).toBeTypeOf("string");
+    expect(routeStyles.activeSkillStatus_missing).toBeTypeOf("string");
+    expect(routeStyles.activeSkillIdentity).toBeTypeOf("string");
+    expect(routeStyles.activeSkillEyebrow).toBeTypeOf("string");
+    expect(routeStyles.activeSkillMeta).toBeTypeOf("string");
+    expect(routeStyles.activeSkillState).toBeTypeOf("string");
+  });
+
   it("shows provider-observed LLM input separately from session context estimates", () => {
     expect(routeSource).toContain("const sessionLlmUsage = detail?.llmUsage ?? null");
     expect(routeSource).toContain("sessionLlmUsage?.source === \"provider_usage\"");
