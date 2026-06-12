@@ -7790,6 +7790,47 @@ function Invoke-DesktopLifecycleMonitor {
     }
 }
 
+function Test-ExistingLauncherControlSurfaceReadyForRuntimeCommand {
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateSet("toggle", "start", "stop", "restart")]
+        [string]$RequestedAction
+    )
+
+    $state = Get-State
+    if (-not $state) {
+        return $false
+    }
+
+    $launcherBackendPid = [int](Get-ObjectPropertyValue -Object $state -Name "launcherBackendPid" -Default 0)
+    $launcherBrowserWindowPid = [int](Get-ObjectPropertyValue -Object $state -Name "launcherBrowserWindowPid" -Default 0)
+    if ($launcherBackendPid -le 0 -or $launcherBrowserWindowPid -le 0) {
+        return $false
+    }
+    if (-not (Test-ProcessAlive $launcherBackendPid) -or -not (Test-ProcessAlive $launcherBrowserWindowPid)) {
+        return $false
+    }
+    if (-not (Test-LauncherControlHealthy)) {
+        return $false
+    }
+    if (-not (Test-LauncherControlSourceCurrent -BackendPid $launcherBackendPid)) {
+        return $false
+    }
+
+    Write-LauncherControlLog `
+        -Event "launcher.lifecycle.runtime_command.control_surface.fast_forwarded" `
+        -Message "Existing Launcher control surface is healthy; forwarding lifecycle command without reopening it." `
+        -Level "info" `
+        -Fields @{
+            action = $RequestedAction
+            no_browser = [bool]$NoBrowser
+            backend_pid = $launcherBackendPid
+            browser_window_pid = $launcherBrowserWindowPid
+            url = "$launcherControlUrl/launcher"
+        }
+    return $true
+}
+
 function Ensure-LauncherControlSurfaceForRuntimeCommand {
     param(
         [Parameter(Mandatory = $true)]
@@ -7808,6 +7849,9 @@ function Ensure-LauncherControlSurfaceForRuntimeCommand {
                 action = $RequestedAction
                 no_browser = [bool]$NoBrowser
             }
+        if (Test-ExistingLauncherControlSurfaceReadyForRuntimeCommand -RequestedAction $RequestedAction) {
+            return
+        }
         Open-LauncherControlSurface
     } finally {
         Release-LauncherMutex
