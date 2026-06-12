@@ -149,7 +149,20 @@ def default_git_config() -> dict[str, str]:
     }
 
 
-def with_git_config_defaults(public_config: dict[str, Any]) -> dict[str, Any]:
+def validate_git_commit_message_prompt(prompt: str) -> str:
+    """Return a normalized commit prompt template after validating required context slots."""
+
+    normalized_prompt = str(prompt or "").strip()
+    if not normalized_prompt:
+        raise ValueError("Git commit message prompt is required")
+    required_placeholders = ["{summary}", "{files}", "{diff}"]
+    missing = [placeholder for placeholder in required_placeholders if placeholder not in normalized_prompt]
+    if missing:
+        raise ValueError(f"Git commit message prompt must include: {', '.join(missing)}")
+    return normalized_prompt
+
+
+def with_git_config_defaults(public_config: dict[str, Any], *, repair_stale_model_ref: bool = True) -> dict[str, Any]:
     payload = copy.deepcopy(public_config) if isinstance(public_config, dict) else {}
     user_profile = payload.setdefault("user_profile", {})
     if not isinstance(user_profile, dict):
@@ -162,13 +175,26 @@ def with_git_config_defaults(public_config: dict[str, Any]) -> dict[str, Any]:
     for key, value in defaults.items():
         if not str(git_cfg.get(key, "") or "").strip():
             git_cfg[key] = value
-    if not str(git_cfg.get("commit_message_model_ref", "") or "").strip():
+    configured_model_ref = str(git_cfg.get("commit_message_model_ref", "") or "").strip()
+    configured_model_ref_exists = _model_library_has_model_ref(payload, configured_model_ref)
+    if not configured_model_ref or (repair_stale_model_ref and not configured_model_ref_exists):
         legacy_profile_id = str(git_cfg.get("commit_message_profile", "") or DEFAULT_GIT_COMMIT_PROFILE).strip()
         model_ref = _model_ref_for_legacy_profile(payload, legacy_profile_id)
-        if model_ref:
+        if model_ref and _model_library_has_model_ref(payload, model_ref):
             git_cfg["commit_message_model_ref"] = model_ref
+        elif configured_model_ref and repair_stale_model_ref and not configured_model_ref_exists:
+            git_cfg["commit_message_model_ref"] = ""
     git_cfg.pop("commit_message_profile", None)
     return payload
+
+
+def _model_library_has_model_ref(public_config: dict[str, Any], model_ref: str) -> bool:
+    normalized_model_ref = str(model_ref or "").strip()
+    if not normalized_model_ref:
+        return False
+    llm = public_config.get("llm", {}) if isinstance(public_config, dict) else {}
+    model_library = llm.get("model_library", {}) if isinstance(llm, dict) else {}
+    return isinstance(model_library, dict) and normalized_model_ref in model_library
 
 
 def _model_ref_for_legacy_profile(public_config: dict[str, Any], profile_id: str) -> str:
@@ -269,14 +295,7 @@ def update_git_commit_message_model(model_id: str) -> dict[str, Any]:
 def update_git_commit_message_prompt(prompt: str) -> dict[str, Any]:
     """Persist the prompt template used by the Git commit message drafter."""
 
-    normalized_prompt = str(prompt or "").strip()
-    if not normalized_prompt:
-        raise ValueError("Git commit message prompt is required")
-    required_placeholders = ["{summary}", "{files}", "{diff}"]
-    missing = [placeholder for placeholder in required_placeholders if placeholder not in normalized_prompt]
-    if missing:
-        raise ValueError(f"Git commit message prompt must include: {', '.join(missing)}")
-
+    normalized_prompt = validate_git_commit_message_prompt(prompt)
     public_config = with_git_config_defaults(load_public_config())
     updated = copy.deepcopy(public_config)
     git_cfg = updated.setdefault("git", {})

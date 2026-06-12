@@ -244,7 +244,8 @@ def test_generate_git_commit_message_cleans_fenced_ai_output(monkeypatch):
     )
 
     class FakeLlmClient:
-        def invoke(self, messages, metadata=None):
+        def invoke(self, messages, tools=None, metadata=None):
+            assert tools in (None, [])
             assert metadata["selected_paths"] == ["web/src/routes/GitRoute.tsx"]
             assert "commit controls" in messages[-1]["content"]
             return SimpleNamespace(content="```text\nfeat: add git commit controls\n```")
@@ -296,6 +297,29 @@ def test_with_git_config_defaults_does_not_mutate_input_and_recovers_invalid_git
     assert payload["ui"] == {"language": "zh"}
     assert payload["git"]["commit_message_model_ref"] == ""
     assert "{diff}" in payload["git"]["commit_message_prompt"]
+
+
+def test_with_git_config_defaults_repairs_stale_commit_model_ref_to_primary_model():
+    public_config = {
+        "llm": {
+            "profiles": {"primary": {"model_ref": "current_model"}},
+            "model_library": {
+                "current_model": {
+                    "provider": {"kind": "local", "base_url": "http://localhost:11434/v1", "requires_api_key": False},
+                    "model": "current",
+                }
+            },
+        },
+        "git": {
+            "commit_message_model_ref": "deleted_model",
+            "commit_message_prompt": "Summary: {summary}\nFiles: {files}\nDiff: {diff}",
+        },
+    }
+
+    payload = git_status_service.with_git_config_defaults(public_config)
+
+    assert public_config["git"]["commit_message_model_ref"] == "deleted_model"
+    assert payload["git"]["commit_message_model_ref"] == "current_model"
 
 
 def test_git_config_defaults_round_trip_through_public_toml(tmp_path):
