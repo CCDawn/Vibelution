@@ -7,6 +7,7 @@ import json
 import os
 import shutil
 import signal
+import socket
 import subprocess
 import sys
 import threading
@@ -97,6 +98,7 @@ _OPEN_VERIFICATION_TIMEOUT_SECONDS = 60.0
 _OPEN_VERIFICATION_POLL_INTERVAL_SECONDS = 0.4
 _CLOSE_VERIFICATION_TIMEOUT_SECONDS = 8.0
 _CLOSE_VERIFICATION_POLL_INTERVAL_SECONDS = 0.4
+_FAST_CLOSE_PROCESS_TERMINATE_TIMEOUT_SECONDS = 1.0
 _DEFERRED_RESTART_ACTIVE_WORK_POLL_SECONDS = 10.0
 _RESTART_BUILD_PREFLIGHT_TIMEOUT_SECONDS = 120.0
 _ACTIVE_WORK_LIFECYCLE_BLOCKED_MESSAGE = "有进行中的任务，无法重启 Vibelution。请等待任务完成或先停止任务。"
@@ -1008,6 +1010,67 @@ def _close_request_already_satisfied(observation: dict[str, Any]) -> bool:
     )
     live_browser_evidence = bool(observation.get("browserWindowAlive"))
     return not live_backend_evidence and not live_browser_evidence
+
+
+def _backend_port_is_closed_for_fast_close(port: int) -> bool:
+    if int(port or 0) <= 0:
+        return True
+    probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    probe.settimeout(0.2)
+    try:
+        return probe.connect_ex(("127.0.0.1", int(port))) != 0
+    finally:
+        probe.close()
+
+
+def _cleanup_result_confirms_workbench_closed(cleanup_result: dict[str, Any], initial_observation: dict[str, Any]) -> bool:
+    if not bool(cleanup_result.get("supported", True)):
+        return False
+    remaining = cleanup_result.get("remaining")
+    if not isinstance(remaining, list) or remaining:
+        return False
+    requested = cleanup_result.get("requested")
+    terminated = cleanup_result.get("terminated")
+    if not isinstance(requested, list) or not isinstance(terminated, list):
+        return False
+    if not requested and (
+        bool(initial_observation.get("backendAlive"))
+        or bool(initial_observation.get("backendPortListening"))
+        or bool(initial_observation.get("browserWindowAlive"))
+    ):
+        return False
+    return _backend_port_is_closed_for_fast_close(int(initial_observation.get("backendPort") or 0))
+
+
+def _closed_observation_from_cleanup_result(
+    initial_observation: dict[str, Any],
+    cleanup_result: dict[str, Any],
+) -> dict[str, Any]:
+    observation = dict(initial_observation)
+    observation.update(
+        {
+            "backendPid": 0,
+            "backendAlive": False,
+            "backendHealthy": False,
+            "backendObserved": False,
+            "backendPortListening": False,
+            "backendPortOwnerPid": 0,
+            "backendPortOwnerKind": "",
+            "backendPortOwnerTrusted": False,
+            "backendPortOwnerResidual": False,
+            "backendPortConflict": False,
+            "browserWindowAlive": False,
+            "observedState": "closed",
+            "backendMissing": False,
+            "frontendOrphaned": False,
+            "lifecycleConsistency": "consistent",
+            "closeVerificationSource": "cleanup_result",
+        }
+    )
+    if not bool(cleanup_result.get("preserveBrowserWindowPid", False)):
+        observation["browserWindowRecoveredPid"] = 0
+        observation["browserWindowRecoverySource"] = ""
+    return observation
 
 
 def _closed_observation_has_residual_evidence(observation: dict[str, Any]) -> bool:
@@ -2809,8 +2872,15 @@ class RuntimeManagerDaemon:
                 "timingsMs": timings_ms,
             }
 
+        verification_source = "observe_workbench"
         verification_started = time.monotonic()
-        closed, verification, verification_attempts = _wait_for_close_verification()
+        if _cleanup_result_confirms_workbench_closed(cleanup_result, initial_observation):
+            verification = _closed_observation_from_cleanup_result(initial_observation, cleanup_result)
+            closed = True
+            verification_attempts = 0
+            verification_source = "cleanup_result"
+        else:
+            closed, verification, verification_attempts = _wait_for_close_verification()
         timings_ms["close_verification_ms"] = _elapsed_monotonic_ms(verification_started)
         timings_ms["close_verification_attempts"] = verification_attempts
         if not closed:
@@ -2826,6 +2896,7 @@ class RuntimeManagerDaemon:
                     "closeStrategy": "runtime_manager_fast_path",
                     "fallbackReason": "verification_failed",
                     "attempts": verification_attempts,
+                    "verificationSource": verification_source,
                     "timingsMs": timings_ms,
                 },
             )
@@ -2871,6 +2942,7 @@ class RuntimeManagerDaemon:
             | {
                 "closeStrategy": "runtime_manager_fast_path",
                 "attempts": verification_attempts,
+                "verificationSource": verification_source,
                 "stateCleanup": state_cleanup,
                 "timingsMs": timings_ms,
             },
@@ -2881,6 +2953,7 @@ class RuntimeManagerDaemon:
             "cleanupResult": cleanup_result,
             "verification": verification,
             "verificationAttempts": verification_attempts,
+            "verificationSource": verification_source,
             "timingsMs": timings_ms,
             "stateCleanup": state_cleanup,
         }
@@ -3249,6 +3322,7 @@ class RuntimeManagerDaemon:
             project_root=PROJECT_ROOT,
             browser_profile_dir=str(observed.get("browserProfileDir") or ""),
             exclude_pids={os.getpid(), self._pid},
+            timeout_seconds=_FAST_CLOSE_PROCESS_TERMINATE_TIMEOUT_SECONDS,
         )
 
     def _perform_restart_workbench(self, *, command_id: str, args: dict[str, Any]) -> dict[str, Any]:
