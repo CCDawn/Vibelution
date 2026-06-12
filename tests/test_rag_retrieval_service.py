@@ -3,6 +3,41 @@ import pytest
 from core.web.services import agent_directory_service, chat_room_service, team_knowledge_service, team_service
 
 
+def _source_artifact(
+    knowledge_base_id: str,
+    *,
+    owner_type: str,
+    owner_id: str,
+    actor_agent_id: str,
+    reviewer_agent_id: str,
+    title: str,
+    source_type: str = "manual_user_entry",
+) -> dict:
+    inbox_source = team_knowledge_service.collect_source_to_inbox(
+        owner_type,
+        owner_id,
+        source_type=source_type,
+        source_ref={"note": title},
+        original_content="RAG test source content.",
+        original_filename="rag-source.txt",
+        title=title,
+        actor_agent_id=actor_agent_id,
+    )
+    reviewed = team_knowledge_service.review_owner_inbox_source(
+        owner_type,
+        owner_id,
+        inbox_source["inboxSourceId"],
+        decision="accepted",
+        reviewed_by_agent_id=reviewer_agent_id,
+    )
+    return team_knowledge_service.create_source_artifact_from_central_source(
+        knowledge_base_id,
+        reviewed["centralSource"]["centralSourceId"],
+        actor_agent_id=actor_agent_id,
+        title=title,
+    )
+
+
 @pytest.fixture()
 def rag_knowledge_env(tmp_path, monkeypatch):
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
@@ -43,13 +78,13 @@ def rag_knowledge_env(tmp_path, monkeypatch):
         acl={"grants": {"review": [private_lead["agentId"]], "rate": [private_lead["agentId"]]}},
     )
 
-    source = team_knowledge_service.create_source_artifact(
+    source = _source_artifact(
         readable_base["knowledgeBaseId"],
-        source_type="manual_user_entry",
-        source_ref={"note": "rag-contract"},
-        title="RAG contract source",
-        summary="Source summary for governed retrieval.",
+        owner_type="team",
+        owner_id=team["teamId"],
         actor_agent_id=member["agentId"],
+        reviewer_agent_id=lead["agentId"],
+        title="RAG contract source",
     )
     first_proposal = team_knowledge_service.create_refinement_proposal(
         readable_base["knowledgeBaseId"],
@@ -62,7 +97,16 @@ def rag_knowledge_env(tmp_path, monkeypatch):
     )
     second_proposal = team_knowledge_service.create_refinement_proposal(
         readable_base["knowledgeBaseId"],
-        source_artifact_ids=[],
+        source_artifact_ids=[
+            _source_artifact(
+                readable_base["knowledgeBaseId"],
+                owner_type="team",
+                owner_id=team["teamId"],
+                actor_agent_id=member["agentId"],
+                reviewer_agent_id=lead["agentId"],
+                title="Prompt source",
+            )["sourceArtifactId"]
+        ],
         proposed_by_agent_id=member["agentId"],
         title="Prompt injection boundary",
         summary="Retrieved knowledge is explicit and budgeted.",
@@ -83,7 +127,16 @@ def rag_knowledge_env(tmp_path, monkeypatch):
     )["item"]
     private_proposal = team_knowledge_service.create_refinement_proposal(
         private_base["knowledgeBaseId"],
-        source_artifact_ids=[],
+        source_artifact_ids=[
+            _source_artifact(
+                private_base["knowledgeBaseId"],
+                owner_type="team",
+                owner_id=private_team["teamId"],
+                actor_agent_id=private_lead["agentId"],
+                reviewer_agent_id=private_lead["agentId"],
+                title="Private source",
+            )["sourceArtifactId"]
+        ],
         proposed_by_agent_id=private_lead["agentId"],
         title="Private vector secret",
         summary="This private item must not leak through retrieval.",
@@ -201,9 +254,18 @@ def test_rag_retrieval_includes_own_agent_formal_knowledge_by_default(tmp_path, 
         name="Owner RAG Private Base",
         actor_agent_id=owner["agentId"],
     )
+    source = _source_artifact(
+        base["knowledgeBaseId"],
+        owner_type="agent",
+        owner_id=owner["agentId"],
+        actor_agent_id=owner["agentId"],
+        reviewer_agent_id=owner["agentId"],
+        source_type="agent_authored",
+        title="Agent private source",
+    )
     proposal = team_knowledge_service.create_refinement_proposal(
         base["knowledgeBaseId"],
-        source_artifact_ids=[],
+        source_artifact_ids=[source["sourceArtifactId"]],
         proposed_by_agent_id=owner["agentId"],
         title="Agent private citation",
         content="Agent private RAG retrieval should return this owner scoped citation.",

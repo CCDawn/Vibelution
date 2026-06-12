@@ -134,6 +134,7 @@ class IngestionPackageCreatePayload(BaseModel):
     sourceSummary: str = Field("", max_length=4000)
     excerpt: str = Field("", max_length=12000)
     proposedByAgentId: str = Field("", max_length=160)
+    centralSourceId: str = Field("", max_length=160)
     proposalTitle: str = Field("", max_length=240)
     proposalSummary: str = Field("", max_length=4000)
     proposalContent: str = Field("", max_length=40000)
@@ -676,6 +677,7 @@ def knowledge_ingestion_package_create(knowledge_base_id: str, payload: Ingestio
             source_summary=payload.sourceSummary,
             excerpt=payload.excerpt,
             proposed_by_agent_id=payload.proposedByAgentId,
+            central_source_id=payload.centralSourceId,
             proposal_title=payload.proposalTitle,
             proposal_summary=payload.proposalSummary,
             proposal_content=payload.proposalContent,

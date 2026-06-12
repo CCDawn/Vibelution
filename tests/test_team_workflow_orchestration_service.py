@@ -100,6 +100,32 @@ def _steward_pack_output(*, candidate_ids=None, confidence=0.61):
     }
 
 
+def _submit_steward_pack_through_source_review(team_id: str, candidate_id: str, knowledge_base_id: str, steward_agent_id: str) -> dict:
+    source_pending = team_workflow_orchestration_service.submit_steward_pack_to_knowledge_ingestion(
+        team_id,
+        candidate_id,
+        {"knowledgeBaseId": knowledge_base_id, "proposedByAgentId": steward_agent_id},
+    )
+    inbox_source_id = source_pending["candidate"]["metadata"]["knowledgeIngestion"]["inboxSourceId"]
+    reviewed = team_knowledge_service.review_owner_inbox_source(
+        "team",
+        team_id,
+        inbox_source_id,
+        decision="accepted",
+        reviewed_by_agent_id=steward_agent_id,
+    )
+    knowledge_pending = team_workflow_orchestration_service.submit_steward_pack_to_knowledge_ingestion(
+        team_id,
+        candidate_id,
+        {
+            "knowledgeBaseId": knowledge_base_id,
+            "proposedByAgentId": steward_agent_id,
+            "centralSourceId": reviewed["centralSource"]["centralSourceId"],
+        },
+    )
+    return {"sourcePending": source_pending, "reviewedSource": reviewed, "knowledgePending": knowledge_pending}
+
+
 def _fake_source_search_response(query, *, max_results, provider):
     query_text = str(query.get("query") or "neural source")
     return {
@@ -1829,12 +1855,29 @@ def test_steward_pack_submits_pending_knowledge_ingestion_without_official_write
         },
     )["candidate"]
 
+    source_pending = team_workflow_orchestration_service.submit_steward_pack_to_knowledge_ingestion(
+        team["teamId"],
+        candidate["candidateId"],
+        {
+            "knowledgeBaseId": knowledge_base["knowledgeBaseId"],
+            "proposedByAgentId": steward["agentId"],
+        },
+    )
+    inbox_source_id = source_pending["candidate"]["metadata"]["knowledgeIngestion"]["inboxSourceId"]
+    reviewed_source = team_knowledge_service.review_owner_inbox_source(
+        "team",
+        team["teamId"],
+        inbox_source_id,
+        decision="accepted",
+        reviewed_by_agent_id=steward["agentId"],
+    )
     response = team_workflow_orchestration_service.submit_steward_pack_to_knowledge_ingestion(
         team["teamId"],
         candidate["candidateId"],
         {
             "knowledgeBaseId": knowledge_base["knowledgeBaseId"],
             "proposedByAgentId": steward["agentId"],
+            "centralSourceId": reviewed_source["centralSource"]["centralSourceId"],
         },
     )
     knowledge_items = team_knowledge_service.list_knowledge_items(
@@ -1847,6 +1890,8 @@ def test_steward_pack_submits_pending_knowledge_ingestion_without_official_write
         status="pending",
     )
 
+    assert source_pending["candidate"]["currentState"] == "steward_pending_source_review"
+    assert source_pending["knowledgeIngestion"]["status"] == "pending_source_review"
     assert response["candidate"]["currentState"] == "steward_pending_knowledge_review"
     assert response["knowledgeIngestion"]["package"]["proposal"]["status"] == "pending"
     assert response["knowledgeIngestion"]["package"]["proposal"]["sourceArtifactIds"] == [
@@ -1897,11 +1942,12 @@ def test_steward_pack_approval_gate_applies_pending_ingestion_to_formal_knowledg
             },
         },
     )["candidate"]
-    pending = team_workflow_orchestration_service.submit_steward_pack_to_knowledge_ingestion(
+    pending = _submit_steward_pack_through_source_review(
         team["teamId"],
         candidate["candidateId"],
-        {"knowledgeBaseId": knowledge_base["knowledgeBaseId"], "proposedByAgentId": steward["agentId"]},
-    )["candidate"]
+        knowledge_base["knowledgeBaseId"],
+        steward["agentId"],
+    )["knowledgePending"]["candidate"]
 
     response = team_workflow_orchestration_service.review_steward_pack_knowledge_ingestion(
         team["teamId"],
@@ -2142,10 +2188,34 @@ def test_knowledge_ingestion_status_tracks_pending_and_official_sync(tmp_path, m
         },
     )["candidate"]
 
-    pending_candidate = team_workflow_orchestration_service.submit_steward_pack_to_knowledge_ingestion(
+    source_pending = team_workflow_orchestration_service.submit_steward_pack_to_knowledge_ingestion(
         team["teamId"],
         steward_candidate["candidateId"],
         {"knowledgeBaseId": knowledge_base["knowledgeBaseId"], "proposedByAgentId": steward["agentId"]},
+    )
+    source_pending_status = team_workflow_orchestration_service.get_knowledge_ingestion_status(team["teamId"])
+
+    assert source_pending["candidate"]["currentState"] == "steward_pending_source_review"
+    assert source_pending_status["summary"]["pendingKnowledgeReviewCandidateCount"] == 0
+    assert source_pending_status["summary"]["pendingProposalCount"] == 0
+    assert any(item["code"] == "steward_source_pending_review" for item in source_pending_status["actionItems"])
+
+    inbox_source_id = source_pending["candidate"]["metadata"]["knowledgeIngestion"]["inboxSourceId"]
+    reviewed_source = team_knowledge_service.review_owner_inbox_source(
+        "team",
+        team["teamId"],
+        inbox_source_id,
+        decision="accepted",
+        reviewed_by_agent_id=steward["agentId"],
+    )
+    pending_candidate = team_workflow_orchestration_service.submit_steward_pack_to_knowledge_ingestion(
+        team["teamId"],
+        steward_candidate["candidateId"],
+        {
+            "knowledgeBaseId": knowledge_base["knowledgeBaseId"],
+            "proposedByAgentId": steward["agentId"],
+            "centralSourceId": reviewed_source["centralSource"]["centralSourceId"],
+        },
     )["candidate"]
     pending_status = team_workflow_orchestration_service.get_knowledge_ingestion_status(team["teamId"])
 
@@ -2230,11 +2300,12 @@ def test_steward_pack_approval_gate_rejects_pending_ingestion_without_formal_wri
             },
         },
     )["candidate"]
-    pending = team_workflow_orchestration_service.submit_steward_pack_to_knowledge_ingestion(
+    pending = _submit_steward_pack_through_source_review(
         team["teamId"],
         candidate["candidateId"],
-        {"knowledgeBaseId": knowledge_base["knowledgeBaseId"], "proposedByAgentId": steward["agentId"]},
-    )["candidate"]
+        knowledge_base["knowledgeBaseId"],
+        steward["agentId"],
+    )["knowledgePending"]["candidate"]
 
     response = team_workflow_orchestration_service.review_steward_pack_knowledge_ingestion(
         team["teamId"],
@@ -2370,7 +2441,10 @@ def test_steward_pack_submission_rejects_non_steward_pack_candidate(tmp_path, mo
             },
         )
     except team_workflow_orchestration_service.TeamWorkflowOrchestrationError as exc:
-        assert "Only steward_pack_draft candidates" in str(exc)
+        assert (
+            "Only steward_pack_draft or steward_pending_source_review candidates"
+            in str(exc)
+        )
     else:
         raise AssertionError("non steward pack candidate should not be submitted to knowledge ingestion")
 

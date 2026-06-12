@@ -43,6 +43,42 @@ def _seed_team_knowledge(tmp_path, monkeypatch):
     return {"lead": lead, "member": member, "team": team, "base": base}
 
 
+def _promote_central_source(env: dict, *, source_type: str = "manual_user_entry", title: str = "Tool source", source_ref: dict | None = None) -> dict:
+    inbox_source = team_knowledge_service.collect_source_to_inbox(
+        "team",
+        env["team"]["teamId"],
+        source_type=source_type,
+        source_ref=source_ref or {"note": title},
+        original_content="Tool test source content.",
+        original_filename="tool-source.txt",
+        title=title,
+        actor_agent_id=env["member"]["agentId"],
+    )
+    reviewed = team_knowledge_service.review_owner_inbox_source(
+        "team",
+        env["team"]["teamId"],
+        inbox_source["inboxSourceId"],
+        decision="accepted",
+        reviewed_by_agent_id=env["lead"]["agentId"],
+    )
+    return reviewed["centralSource"]
+
+
+def _source_artifact(env: dict, *, title: str = "Tool source") -> dict:
+    central_source = _promote_central_source(env, title=title)
+    return team_knowledge_service.create_source_artifact_from_central_source(
+        env["base"]["knowledgeBaseId"],
+        central_source["centralSourceId"],
+        actor_agent_id=env["member"]["agentId"],
+        title=title,
+    )
+
+
+def _source_ids(env: dict, *, title: str = "Tool source") -> list[str]:
+    source = _source_artifact(env, title=title)
+    return [source["sourceArtifactId"]]
+
+
 def test_team_knowledge_tools_are_llm_facing_but_hidden_without_explicit_allow(tmp_path, monkeypatch):
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     agent = agent_directory_service.create_agent_instance(display_name="Default Agent")
@@ -89,11 +125,13 @@ def test_team_knowledge_tools_are_llm_facing_but_hidden_without_explicit_allow(t
 
 def test_knowledge_proposal_tool_submits_source_and_pending_candidate(tmp_path, monkeypatch):
     env = _seed_team_knowledge(tmp_path, monkeypatch)
+    central_source = _promote_central_source(env, title="Tool submitted source")
 
     with agent_directory_service.active_agent_runtime(env["member"]["agentId"], session_id="session-knowledge"):
         result = json.loads(
             team_knowledge_tools.knowledge_proposal_tool(
                 knowledge_base_id=env["base"]["knowledgeBaseId"],
+                central_source_id=central_source["centralSourceId"],
                 source_type="manual_user_entry",
                 source_ref_json='{"note":"tool source"}',
                 proposal_title="Tool submitted knowledge",
@@ -110,11 +148,18 @@ def test_knowledge_proposal_tool_submits_source_and_pending_candidate(tmp_path, 
 
 def test_knowledge_ingestion_tool_submits_standard_package(tmp_path, monkeypatch):
     env = _seed_team_knowledge(tmp_path, monkeypatch)
+    central_source = _promote_central_source(
+        env,
+        source_type="external_search_refinement",
+        source_ref={"url": "https://example.test", "query": "memory"},
+        title="Tool ingestion source",
+    )
 
     with agent_directory_service.active_agent_runtime(env["member"]["agentId"], session_id="session-knowledge"):
         result = json.loads(
             team_knowledge_tools.knowledge_ingestion_tool(
                 knowledge_base_id=env["base"]["knowledgeBaseId"],
+                central_source_id=central_source["centralSourceId"],
                 source_type="external_search_refinement",
                 source_ref_json='{"url":"https://example.test","query":"memory"}',
                 proposal_title="Tool ingestion package",
@@ -132,7 +177,7 @@ def test_knowledge_governance_tasks_tool_reads_open_queue(tmp_path, monkeypatch)
     env = _seed_team_knowledge(tmp_path, monkeypatch)
     team_knowledge_service.create_refinement_proposal(
         env["base"]["knowledgeBaseId"],
-        source_artifact_ids=[],
+        source_artifact_ids=_source_ids(env, title="Open governance task source"),
         proposed_by_agent_id=env["member"]["agentId"],
         title="Open governance task",
         content="Governance task tool should see pending proposal.",
@@ -150,7 +195,7 @@ def test_knowledge_steward_recommendations_tool_reads_read_only_actions(tmp_path
     env = _seed_team_knowledge(tmp_path, monkeypatch)
     proposal = team_knowledge_service.create_refinement_proposal(
         env["base"]["knowledgeBaseId"],
-        source_artifact_ids=[],
+        source_artifact_ids=_source_ids(env, title="Steward tool source"),
         proposed_by_agent_id=env["member"]["agentId"],
         title="Steward tool proposal",
         content="Steward recommendations should suggest review without applying.",
@@ -168,13 +213,7 @@ def test_knowledge_steward_recommendations_tool_reads_read_only_actions(tmp_path
 
 def test_knowledge_steward_workbench_tool_reads_grouped_workflow(tmp_path, monkeypatch):
     env = _seed_team_knowledge(tmp_path, monkeypatch)
-    source = team_knowledge_service.create_source_artifact(
-        env["base"]["knowledgeBaseId"],
-        source_type="manual_user_entry",
-        source_ref={"note": "tool workbench source"},
-        title="Tool workbench source",
-        actor_agent_id=env["member"]["agentId"],
-    )
+    source = _source_artifact(env, title="Tool workbench source")
 
     with agent_directory_service.active_agent_runtime(env["member"]["agentId"], session_id="session-knowledge"):
         result = json.loads(team_knowledge_tools.knowledge_steward_workbench_tool(limit=4))
@@ -188,13 +227,7 @@ def test_knowledge_steward_workbench_tool_reads_grouped_workflow(tmp_path, monke
 
 def test_knowledge_operations_health_and_plan_tools_are_read_only(tmp_path, monkeypatch):
     env = _seed_team_knowledge(tmp_path, monkeypatch)
-    source = team_knowledge_service.create_source_artifact(
-        env["base"]["knowledgeBaseId"],
-        source_type="manual_user_entry",
-        source_ref={"note": "health tool"},
-        title="Health tool source",
-        actor_agent_id=env["member"]["agentId"],
-    )
+    source = _source_artifact(env, title="Health tool source")
 
     with agent_directory_service.active_agent_runtime(env["member"]["agentId"], session_id="session-knowledge"):
         health = json.loads(team_knowledge_tools.knowledge_operations_health_tool())
@@ -214,7 +247,7 @@ def test_knowledge_query_tool_reads_applied_items_only(tmp_path, monkeypatch):
     env = _seed_team_knowledge(tmp_path, monkeypatch)
     proposal = team_knowledge_service.create_refinement_proposal(
         env["base"]["knowledgeBaseId"],
-        source_artifact_ids=[],
+        source_artifact_ids=_source_ids(env, title="Applied tool source"),
         proposed_by_agent_id=env["member"]["agentId"],
         title="Applied tool knowledge",
         content="Formal team knowledge should be readable by the query tool.",
@@ -315,7 +348,7 @@ def test_knowledge_rag_retrieve_tool_returns_contexts_with_citations(tmp_path, m
     )
     proposal = team_knowledge_service.create_refinement_proposal(
         env["base"]["knowledgeBaseId"],
-        source_artifact_ids=[],
+        source_artifact_ids=_source_ids(env, title="RAG tool source"),
         proposed_by_agent_id=env["member"]["agentId"],
         title="RAG tool knowledge",
         content="RAG tool retrieval should return cited context candidates.",
@@ -379,7 +412,7 @@ def test_knowledge_rating_suggestion_tool_submits_pending_suggestion_only(tmp_pa
     )
     proposal = team_knowledge_service.create_refinement_proposal(
         env["base"]["knowledgeBaseId"],
-        source_artifact_ids=[],
+        source_artifact_ids=_source_ids(env, title="Tool rating source"),
         proposed_by_agent_id=env["member"]["agentId"],
         title="Tool rating target",
         content="Rating suggestion tools must not directly update formal knowledge.",

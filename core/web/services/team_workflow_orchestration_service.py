@@ -2644,6 +2644,7 @@ def submit_steward_pack_to_knowledge_ingestion(team_id: str, candidate_id: str, 
     team_service.get_team(normalized_team_id)
     knowledge_base_id = _normalize_required_id(payload.get("knowledgeBaseId"), "Knowledge base id is required.")
     proposed_by_agent_id = _normalize_required_id(payload.get("proposedByAgentId"), "Proposed by Agent id is required.")
+    central_source_id = _trim_text(payload.get("centralSourceId"), max_length=160)
 
     with _WORKFLOW_LOCK:
         workflow = _load_or_create_workflow(normalized_team_id)
@@ -2654,8 +2655,11 @@ def submit_steward_pack_to_knowledge_ingestion(team_id: str, candidate_id: str, 
         metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {}
         task_type = str(metadata.get("taskType") or "")
         output = metadata.get("output") if isinstance(metadata.get("output"), dict) else {}
-        if task_type != "steward_pack_draft" or str(candidate.get("currentState") or "") != "steward_pack_draft":
-            raise TeamWorkflowOrchestrationError("Only steward_pack_draft candidates can be submitted to knowledge ingestion.")
+        current_state = str(candidate.get("currentState") or "")
+        if task_type != "steward_pack_draft" or current_state not in {"steward_pack_draft", "steward_pending_source_review"}:
+            raise TeamWorkflowOrchestrationError("Only steward_pack_draft or steward_pending_source_review candidates can be submitted to knowledge ingestion.")
+        if current_state == "steward_pending_source_review" and not central_source_id:
+            raise TeamWorkflowOrchestrationError("centralSourceId is required after the steward pack source has entered source review.")
         validation = validate_local_research_model_output("steward_pack_draft", output)
         if not validation["valid"]:
             raise TeamWorkflowOrchestrationError("Steward pack candidate must be valid before knowledge ingestion submission.")
@@ -2666,6 +2670,88 @@ def submit_steward_pack_to_knowledge_ingestion(team_id: str, candidate_id: str, 
         output,
         proposed_by_agent_id=proposed_by_agent_id,
     )
+
+    if not central_source_id:
+        try:
+            inbox_source = team_knowledge_service.collect_source_to_inbox(
+                "team",
+                normalized_team_id,
+                source_type="agent_authored",
+                source_ref=ingestion_payload["sourceRef"],
+                original_content=ingestion_payload["proposalContent"],
+                original_filename=f"steward-pack-{_safe_token(normalized_candidate_id, default='candidate', max_length=72)}.json",
+                source_created_at=str(candidate.get("createdAt") or ""),
+                captured_by=proposed_by_agent_id,
+                evidence_range=ingestion_payload["evidenceRange"],
+                title=ingestion_payload["sourceTitle"],
+                summary=ingestion_payload["sourceSummary"],
+                actor_agent_id=proposed_by_agent_id,
+            )
+        except (team_knowledge_service.TeamKnowledgeError, team_knowledge_service.TeamKnowledgeNotFoundError) as exc:
+            raise TeamWorkflowOrchestrationError(str(exc)) from exc
+
+        now = utc_now_iso()
+        with _WORKFLOW_LOCK:
+            workflow = _load_or_create_workflow(normalized_team_id)
+            candidate_store = _load_candidate_store(normalized_team_id)
+            candidate = _find_candidate(candidate_store, normalized_candidate_id)
+            if candidate is None:
+                raise TeamWorkflowOrchestrationError("Steward pack candidate not found after source inbox submission.")
+            metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {}
+            metadata["knowledgeIngestion"] = {
+                "status": "pending_source_review",
+                "knowledgeBaseId": knowledge_base_id,
+                "inboxSourceId": str(inbox_source.get("inboxSourceId") or ""),
+                "centralSourceId": "",
+                "sourceArtifactId": "",
+                "proposalId": "",
+                "ratingSuggestionId": "",
+                "submittedByAgentId": proposed_by_agent_id,
+                "submittedAt": now,
+                "writesOfficialKnowledge": False,
+                "writesOfficialRag": False,
+                "writesOfficialGraph": False,
+            }
+            candidate["metadata"] = metadata
+            candidate["currentState"] = "steward_pending_source_review"
+            candidate["qualityStatus"] = "pending_source_review"
+            candidate["updatedAt"] = now
+            candidate_store["updatedAt"] = now
+            _write_json(_candidate_store_path(normalized_team_id), candidate_store)
+            workflow["updatedAt"] = now
+            workflow["activeWorkflowItems"] = _upsert_active_item(
+                workflow.get("activeWorkflowItems"),
+                candidate_id=normalized_candidate_id,
+                current_node=str(candidate.get("currentWorkflowNode") or "steward_ingestion"),
+                status=str(candidate.get("currentState") or "steward_pending_source_review"),
+                transfer_id="",
+            )
+            _write_json(_workflow_path(normalized_team_id), workflow)
+
+        _record_workflow_event(
+            "steward_pack.source_inbox_submitted",
+            normalized_team_id,
+            fields={
+                "workflowId": workflow["workflowId"],
+                "candidateId": normalized_candidate_id,
+                "knowledgeBaseId": knowledge_base_id,
+                "inboxSourceId": str(inbox_source.get("inboxSourceId") or ""),
+            },
+        )
+        return {
+            "candidate": candidate,
+            "knowledgeIngestion": {
+                "status": "pending_source_review",
+                "sourceInbox": inbox_source,
+                "officialBoundary": {
+                    "writesOfficialKnowledge": False,
+                    "writesOfficialRag": False,
+                    "writesOfficialGraph": False,
+                },
+            },
+            "workflow": _workflow_to_api(normalized_team_id, workflow, candidate_store),
+        }
+
     try:
         ingestion_package = team_knowledge_service.create_ingestion_package(
             knowledge_base_id,
@@ -2682,6 +2768,7 @@ def submit_steward_pack_to_knowledge_ingestion(team_id: str, candidate_id: str, 
             proposal_summary=ingestion_payload["proposalSummary"],
             proposal_content=ingestion_payload["proposalContent"],
             tags=ingestion_payload["tags"],
+            central_source_id=central_source_id,
         )
     except (team_knowledge_service.TeamKnowledgeError, team_knowledge_service.TeamKnowledgeNotFoundError) as exc:
         raise TeamWorkflowOrchestrationError(str(exc)) from exc
@@ -2702,9 +2789,12 @@ def submit_steward_pack_to_knowledge_ingestion(team_id: str, candidate_id: str, 
         if candidate is None:
             raise TeamWorkflowOrchestrationError("Steward pack candidate not found after ingestion submission.")
         metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {}
+        previous_ingestion = metadata.get("knowledgeIngestion") if isinstance(metadata.get("knowledgeIngestion"), dict) else {}
         metadata["knowledgeIngestion"] = {
             "status": "pending_review",
             "knowledgeBaseId": knowledge_base_id,
+            "inboxSourceId": str(previous_ingestion.get("inboxSourceId") or ""),
+            "centralSourceId": central_source_id,
             "sourceArtifactId": str((ingestion_package.get("sourceArtifact") or {}).get("sourceArtifactId") or ""),
             "proposalId": str((ingestion_package.get("proposal") or {}).get("proposalId") or ""),
             "ratingSuggestionId": str((rating_result or {}).get("suggestionId") or ""),
@@ -2737,6 +2827,7 @@ def submit_steward_pack_to_knowledge_ingestion(team_id: str, candidate_id: str, 
             "workflowId": workflow["workflowId"],
             "candidateId": normalized_candidate_id,
             "knowledgeBaseId": knowledge_base_id,
+            "centralSourceId": central_source_id,
             "proposalId": str((ingestion_package.get("proposal") or {}).get("proposalId") or ""),
             "sourceArtifactId": str((ingestion_package.get("sourceArtifact") or {}).get("sourceArtifactId") or ""),
             "ratingSuggestionCreated": rating_result is not None,
@@ -3428,6 +3519,26 @@ def _knowledge_ingestion_action_items(
         for item in candidates
         if str(item.get("candidateType") or "") != "candidate_graph" and _candidate_knowledge_ingestion_status(item) == "pending_review"
     ]
+    pending_source_candidates = [
+        item
+        for item in candidates
+        if str(item.get("candidateType") or "") != "candidate_graph" and _candidate_knowledge_ingestion_status(item) == "pending_source_review"
+    ]
+    for candidate in pending_source_candidates[:12]:
+        metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {}
+        ingestion = metadata.get("knowledgeIngestion") if isinstance(metadata.get("knowledgeIngestion"), dict) else {}
+        items.append(
+            _knowledge_ingestion_action_item(
+                "steward_source_pending_review",
+                "needs_review",
+                "治理包源文件已经进入团队源收件箱，需先审核并提升为中央源。",
+                "review_owner_source_inbox",
+                "steward_ingestion",
+                candidateId=str(candidate.get("candidateId") or ""),
+                inboxSourceId=str(ingestion.get("inboxSourceId") or ""),
+                knowledgeBaseId=str(ingestion.get("knowledgeBaseId") or ""),
+            )
+        )
     for candidate in pending_candidates[:12]:
         metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {}
         ingestion = metadata.get("knowledgeIngestion") if isinstance(metadata.get("knowledgeIngestion"), dict) else {}

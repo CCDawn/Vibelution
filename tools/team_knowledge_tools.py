@@ -190,6 +190,7 @@ def knowledge_proposal_tool(
     source_ref_json: str,
     proposal_title: str,
     proposal_content: str,
+    central_source_id: str = "",
     source_title: str = "",
     source_summary: str = "",
     proposal_summary: str = "",
@@ -199,10 +200,11 @@ def knowledge_proposal_tool(
     captured_by: str = "",
 ) -> str:
     """
-    Register one source artifact and submit one refinement proposal.
+    Attach a central-curated source artifact and submit one refinement proposal.
 
     This tool cannot create formal knowledge directly. Reviewers must apply the
     proposal through the team knowledge review flow before it becomes an item.
+    Raw sources must be collected through the owner source inbox first.
     """
 
     runtime = _current_runtime()
@@ -235,6 +237,7 @@ def knowledge_proposal_tool(
             title=source_title,
             summary=source_summary,
             actor_agent_id=agent_id,
+            central_source_id=central_source_id,
         )
         proposal = team_knowledge_service.create_refinement_proposal(
             base_id,
@@ -252,6 +255,7 @@ def knowledge_proposal_tool(
             fields={
                 "knowledgeBaseId": base_id,
                 "sourceArtifactId": source.get("sourceArtifactId") or "",
+                "centralSourceId": source.get("centralSourceId") or "",
                 "proposalId": proposal.get("proposalId") or "",
                 "sourceType": source.get("sourceType") or "",
             },
@@ -293,6 +297,7 @@ def knowledge_ingestion_tool(
     proposal_title: str,
     excerpt: str = "",
     proposal_content: str = "",
+    central_source_id: str = "",
     source_title: str = "",
     source_summary: str = "",
     proposal_summary: str = "",
@@ -301,10 +306,11 @@ def knowledge_ingestion_tool(
     source_created_at: str = "",
 ) -> str:
     """
-    Submit a standard semi-automatic ingestion package.
+    Submit a standard semi-automatic ingestion package from a central source.
 
-    The tool only creates SourceArtifact + pending RefinementProposal. It does
-    not parse files, search the web, or create formal KnowledgeItems.
+    The tool only creates a central-curated SourceArtifact + pending
+    RefinementProposal. It does not parse files, search the web, collect raw
+    sources, or create formal KnowledgeItems.
     """
 
     runtime = _current_runtime()
@@ -337,6 +343,7 @@ def knowledge_ingestion_tool(
             source_summary=source_summary,
             excerpt=excerpt,
             proposed_by_agent_id=agent_id,
+            central_source_id=central_source_id,
             proposal_title=proposal_title,
             proposal_summary=proposal_summary,
             proposal_content=proposal_content,
@@ -350,6 +357,7 @@ def knowledge_ingestion_tool(
                 "knowledgeBaseId": base_id,
                 "sourceType": source_type,
                 "sourceArtifactId": (package.get("sourceArtifact") or {}).get("sourceArtifactId") or "",
+                "centralSourceId": (package.get("sourceArtifact") or {}).get("centralSourceId") or "",
                 "proposalId": (package.get("proposal") or {}).get("proposalId") or "",
             },
         )

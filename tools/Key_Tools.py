@@ -1356,6 +1356,7 @@ def create_key_tools() -> List[BaseTool]:
         source_ref_json: str,
         proposal_title: str,
         proposal_content: str,
+        central_source_id: str = "",
         source_title: str = "",
         source_summary: str = "",
         proposal_summary: str = "",
@@ -1365,9 +1366,9 @@ def create_key_tools() -> List[BaseTool]:
         captured_by: str = "",
     ) -> str:
         """
-        【团队知识候选提交】登记来源并提交精炼提案，等待审核后才会落为正式知识。
+        【团队知识候选提交】挂接中央来源并提交精炼提案，等待审核后才会落为正式知识。
 
-        该工具不会直接创建 KnowledgeItem；普通 Agent 只能把群聊、PDF、外部搜索、运行证据或手写内容提交为候选。
+        该工具不会直接创建 KnowledgeItem；原始群聊、PDF、外部搜索、运行证据或手写内容必须先进入 Owner source inbox 并由 Steward 晋升为中央来源。
         只有 Agent 的 ToolPolicy.allowedTools 显式包含 knowledge_proposal_tool，且其团队/MemoryPolicy 允许向目标知识库提交时才可用。
 
         Args:
@@ -1376,6 +1377,7 @@ def create_key_tools() -> List[BaseTool]:
             source_ref_json: 来源引用 JSON 字符串，例如 {"url":"..."} 或 {"roomId":"...","messageRange":{"from":0,"to":3}}
             proposal_title: 精炼提案标题
             proposal_content: 精炼后的候选知识正文
+            central_source_id: 已由 Steward 审核通过的中央来源 ID
             source_title: 可选来源标题
             source_summary: 可选来源摘要
             proposal_summary: 可选候选摘要
@@ -1393,6 +1395,7 @@ def create_key_tools() -> List[BaseTool]:
             source_ref_json=source_ref_json,
             proposal_title=proposal_title,
             proposal_content=proposal_content,
+            central_source_id=central_source_id,
             source_title=source_title,
             source_summary=source_summary,
             proposal_summary=proposal_summary,
@@ -1410,6 +1413,7 @@ def create_key_tools() -> List[BaseTool]:
         proposal_title: str,
         excerpt: str = "",
         proposal_content: str = "",
+        central_source_id: str = "",
         source_title: str = "",
         source_summary: str = "",
         proposal_summary: str = "",
@@ -1418,9 +1422,9 @@ def create_key_tools() -> List[BaseTool]:
         source_created_at: str = "",
     ) -> str:
         """
-        【团队知识半自动摄取】按标准适配器合同提交 SourceArtifact + pending RefinementProposal。
+        【团队知识半自动摄取】基于中央来源提交 SourceArtifact + pending RefinementProposal。
 
-        该工具不联网搜索、不解析 PDF、不直接创建正式知识；parser/searcher 只需把已有来源引用、摘录和候选内容交给本工具。
+        该工具不联网搜索、不解析 PDF、不收集原始来源、不直接创建正式知识；parser/searcher 必须先把原始材料交给 Owner source inbox。
         只有 Agent 的 ToolPolicy.allowedTools 显式包含 knowledge_ingestion_tool，且其团队/MemoryPolicy 允许向目标知识库提交时才可用。
 
         Args:
@@ -1430,6 +1434,7 @@ def create_key_tools() -> List[BaseTool]:
             proposal_title: 待审提案标题
             excerpt: 已提取的来源摘录
             proposal_content: 可选候选知识正文；为空时使用 excerpt/source_summary
+            central_source_id: 已由 Steward 审核通过的中央来源 ID
             source_title: 可选来源标题
             source_summary: 可选来源摘要
             proposal_summary: 可选候选摘要
@@ -1447,6 +1452,7 @@ def create_key_tools() -> List[BaseTool]:
             proposal_title=proposal_title,
             excerpt=excerpt,
             proposal_content=proposal_content,
+            central_source_id=central_source_id,
             source_title=source_title,
             source_summary=source_summary,
             proposal_summary=proposal_summary,

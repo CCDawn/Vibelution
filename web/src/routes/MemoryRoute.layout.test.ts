@@ -240,7 +240,7 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain('recommendationLimit: "6"');
     expect(routeSource).toContain("fetchJson<KnowledgeDashboardSnapshotPayload>(`/api/knowledge/dashboard-snapshot?${params.toString()}`)");
     expect(routeSource).toContain('sourceType: "manual_user_entry"');
-    expect(routeSource).toContain("/source-artifacts");
+    expect(routeSource).not.toContain("/source-artifacts");
     expect(routeSource).toContain("KnowledgeSourceInboxPayload");
     expect(routeSource).toContain("KnowledgeCentralSourceRegistryPayload");
     expect(routeSource).toContain("KnowledgeSourceInboxReviewResponse");
@@ -269,7 +269,7 @@ describe("MemoryRoute layout contract", () => {
     expect(memoryCssSource).toContain(".sourceRecord");
     expect(memoryCssSource).toContain(".sourceRecordMeta");
     expect(routeSource).toContain("/refinement-proposals");
-    expect(routeSource).toContain("/ingestion-packages");
+    expect(routeSource).not.toContain("/ingestion-packages");
     expect(routeSource).toContain("/review");
     expect(routeSource).toContain("/api/knowledge/search");
     expect(routeSource).toContain("queryKeys.knowledgeSearch(");
@@ -316,8 +316,8 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain("selectedRatingSuggestionIds");
     expect(routeSource).toContain("toggleVisibleRatingSuggestions");
     expect(routeSource).toContain("copy.permissionAudit");
-    expect(routeSource).toContain("copy.ingestionPackage");
-    expect(routeSource).toContain("copy.submitIngestionPackage");
+    expect(routeSource).not.toContain("copy.ingestionPackage");
+    expect(routeSource).not.toContain("copy.submitIngestionPackage");
     expect(routeSource).toContain("copy.governanceTasks");
     expect(routeSource).toContain("copy.usageContract");
     expect(routeSource).toContain("copy.memoryDomains");
