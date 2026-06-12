@@ -3806,7 +3806,7 @@ def test_run_launcher_action_passes_configured_port_to_launcher_env(monkeypatch)
     assert completed["durationMs"] >= 0
 
 
-def test_run_launcher_action_hides_powershell_adapter_with_detached_process(monkeypatch):
+def test_run_launcher_action_hides_powershell_adapter_without_detached_process(monkeypatch):
     captured = {}
 
     class DummyStartupInfo:
@@ -3832,7 +3832,59 @@ def test_run_launcher_action_hides_powershell_adapter_with_detached_process(monk
     result = workbench_controller.run_launcher_action("internal-start")
 
     assert result.returncode == 0
-    assert captured["kwargs"]["creationflags"] & 0x00000008
+    assert not (captured["kwargs"]["creationflags"] & 0x00000008)
+    assert captured["kwargs"]["creationflags"] & 0x00000200
+    assert captured["kwargs"]["creationflags"] & 0x08000000
+    startupinfo = captured["kwargs"]["startupinfo"]
+    assert isinstance(startupinfo, DummyStartupInfo)
+    assert startupinfo.dwFlags & 0x00000001
+    assert startupinfo.wShowWindow == 0
+
+
+def test_run_launcher_action_cancelable_path_remains_waitable_on_windows(monkeypatch):
+    captured = {}
+
+    class DummyStartupInfo:
+        def __init__(self):
+            self.dwFlags = 0
+            self.wShowWindow = -1
+
+    class FakeProcess:
+        def __init__(self, *args, **kwargs):
+            captured["args"] = args
+            captured["kwargs"] = kwargs
+            self._poll_count = 0
+            kwargs["stdout"].write(b"ready\n")
+            kwargs["stdout"].flush()
+
+        def poll(self):
+            self._poll_count += 1
+            return None if self._poll_count == 1 else 0
+
+        def terminate(self):
+            raise AssertionError("process should not be terminated")
+
+        def kill(self):
+            raise AssertionError("process should not be killed")
+
+        def wait(self, timeout=None):
+            return 0
+
+    monkeypatch.setattr(workbench_controller.os, "name", "nt", raising=False)
+    monkeypatch.setattr(workbench_controller.subprocess, "DETACHED_PROCESS", 0x00000008, raising=False)
+    monkeypatch.setattr(workbench_controller.subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200, raising=False)
+    monkeypatch.setattr(workbench_controller.subprocess, "CREATE_NO_WINDOW", 0x08000000, raising=False)
+    monkeypatch.setattr(workbench_controller.subprocess, "STARTF_USESHOWWINDOW", 0x00000001, raising=False)
+    monkeypatch.setattr(workbench_controller.subprocess, "SW_HIDE", 0, raising=False)
+    monkeypatch.setattr(workbench_controller.subprocess, "STARTUPINFO", DummyStartupInfo, raising=False)
+    monkeypatch.setattr(workbench_controller.subprocess, "Popen", FakeProcess)
+    monkeypatch.setattr(workbench_controller.time, "sleep", lambda _seconds: None)
+
+    result = workbench_controller.run_launcher_action("internal-start", cancel_check=lambda: False)
+
+    assert result.returncode == 0
+    assert result.stdout == "ready\n"
+    assert not (captured["kwargs"]["creationflags"] & 0x00000008)
     assert captured["kwargs"]["creationflags"] & 0x00000200
     assert captured["kwargs"]["creationflags"] & 0x08000000
     startupinfo = captured["kwargs"]["startupinfo"]
