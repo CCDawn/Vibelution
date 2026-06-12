@@ -116,9 +116,6 @@ def test_run_agent_single_turn_seeds_context_and_exports_carryover():
         def seed_turn_carryover(self, carryover):
             captured["carryover"] = carryover
 
-        def seed_runtime_context(self, context):
-            captured["runtime_context"] = context
-
         def set_turn_interrupt_checker(self, checker):
             captured["interrupt_reason"] = checker()
 
@@ -148,7 +145,6 @@ def test_run_agent_single_turn_seeds_context_and_exports_carryover():
         "workspace_path": "workspace/agent",
         "config": config,
         "carryover": {"previous": "state"},
-        "runtime_context": "Agent Runtime Context",
         "interrupt_reason": "stop_requested",
         "initial_prompt": "probe",
     }
@@ -268,9 +264,6 @@ def test_prepare_agent_turn_seeds_optional_supported_inputs():
         def seed_static_runtime_context(self, context):
             captured["static_runtime_context"] = context
 
-        def seed_runtime_context(self, context):
-            captured.setdefault("runtime_contexts", []).append(context)
-
         def mark_runtime_context_seeded_by_host(self):
             captured["runtime_context_seeded_by_host"] = True
 
@@ -293,7 +286,6 @@ def test_prepare_agent_turn_seeds_optional_supported_inputs():
     assert captured == {
         "carryover": {"previous": "state"},
         "static_runtime_context": "Static Runtime Context",
-        "runtime_contexts": ["Dynamic Runtime Context"],
         "runtime_context_seeded_by_host": True,
         "interrupt_reason": "stop_requested",
         "chat_history": [{"role": "assistant", "content": "hello"}],

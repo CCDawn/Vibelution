@@ -119,12 +119,12 @@ def parse_tool_args(tool_args: Any) -> dict:
 SYSTEM_DYNAMIC_CONTEXT_HEADER = "## Dynamic System Context"
 
 
-def build_system_message(sp, *, include_dynamic_suffix: bool = True) -> Any:
+def build_system_message(sp, *, include_dynamic_suffix: bool = False) -> Any:
     """将 SystemPrompt 元组转为 API 消息格式，静态前缀标记 cache_control。
 
     利用 split_sys_prompt_prefix 分离静态/动态部分：
     - 静态前缀附加 cache_control: {"type": "ephemeral"}，供 API 缓存复用
-    - 动态后缀不标记缓存，每轮重新计算
+    - 动态后缀默认不进入模型输入，避免打断对话历史前缀缓存
     - 无静态前缀时回退为普通 SystemMessage
 
     Args:
@@ -160,16 +160,6 @@ def build_cacheable_system_prefix_message(sp) -> Any:
     return build_system_message(sp, include_dynamic_suffix=False)
 
 
-def build_dynamic_system_context_message(sp) -> Any:
-    """Build the dynamic system suffix as a volatile per-turn context message."""
-
-    _static_parts, dynamic_parts = split_sys_prompt_prefix(sp)
-    dynamic_text = "\n\n".join(str(part or "").strip() for part in dynamic_parts if str(part or "").strip())
-    if not dynamic_text:
-        return None
-    return SystemMessage(content=f"{SYSTEM_DYNAMIC_CONTEXT_HEADER}\n{dynamic_text}")
-
-
 def _text_from_system_context_message(message: Any) -> str:
     content: Any = None
     if isinstance(message, SystemMessage):
@@ -182,12 +172,6 @@ def _text_from_system_context_message(message: Any) -> str:
     else:
         return ""
     return str(content or "").strip()
-
-
-def is_dynamic_system_context_message(message: Any) -> bool:
-    """Return True for the dynamic system suffix carrier."""
-
-    return _text_from_system_context_message(message).startswith(SYSTEM_DYNAMIC_CONTEXT_HEADER)
 
 
 def is_volatile_system_context_message(message: Any) -> bool:

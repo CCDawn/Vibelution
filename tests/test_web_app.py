@@ -5463,18 +5463,18 @@ def test_session_worker_seeds_slash_skill_runtime_context(tmp_path, monkeypatch)
 
     assert response.status_code == 202
     assert seen_prompt["value"] == "/brt 设计斜杠 skill 调用"
-    assert seen_contexts[0] == "static:## Agent Static Context\nstable"
-    assert seen_contexts[1] == "dynamic:## Agent Runtime Context\nvolatile"
-    slash_contexts = [context for context in seen_contexts if "## Slash Skill Context" in context]
-    assert slash_contexts
+    assert seen_contexts == ["static:## Agent Static Context\nstable"]
     assert marker_calls
-    assert "Command: /brt" in slash_contexts[-1]
-    assert "Ask one question at a time." in slash_contexts[-1]
     history_seeded_events = [event for event in lifecycle_events if event["phase"] == "history_seeded"]
     assert history_seeded_events
     history_fields = history_seeded_events[-1]["fields"]
     assert history_fields["staticRuntimeContextIncluded"] is True
-    assert history_fields["dynamicRuntimeContextIncluded"] is True
+    assert history_fields["dynamicRuntimeContextIncluded"] is False
+    assert history_fields["dynamicRuntimeContextAvailable"] is True
+    assert history_fields["dynamicRuntimeContextOmittedFromModelInput"] is True
+    assert history_fields["skillRuntimeContextIncluded"] is False
+    assert history_fields["skillRuntimeContextAvailable"] is True
+    assert history_fields["skillRuntimeContextOmittedFromModelInput"] is True
     assert history_fields["runtimeContextSegmentCount"] == 0
     assert history_fields["staticRuntimeContextSeedAvailable"] is True
     assert history_fields["runtimeContextSeedAvailable"] is True
@@ -16246,6 +16246,7 @@ def test_start_supervised_run_live_manager_route_returns_accepted_without_waitin
                 "datasetLimit": None,
                 "bundleName": "manual_bundle",
                 "keepWorktree": False,
+                "mentalModelMode": "follow",
             }
         },
         "web_ui",

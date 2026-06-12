@@ -8336,19 +8336,9 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                         runtime_context_seed(static_runtime_context_block)
                         host_seeded_agent_context = True
                     static_runtime_context_seed_ms = _elapsed_ms(static_stage_started_at)
-                if callable(runtime_context_seed) and dynamic_runtime_context_block:
-                    stage_started_at = _perf_counter()
-                    runtime_context_seed(dynamic_runtime_context_block)
-                    host_seeded_agent_context = True
-                    runtime_context_seed_ms = _elapsed_ms(stage_started_at)
                 if host_seeded_agent_context and callable(host_context_marker):
                     host_context_marker()
-                if callable(runtime_context_seed) and guidance_context_block:
-                    runtime_context_seed(guidance_context_block)
-                if callable(runtime_context_seed) and skill_runtime_context_block:
-                    stage_started_at = _perf_counter()
-                    runtime_context_seed(skill_runtime_context_block)
-                    skill_context_seed_ms = _elapsed_ms(stage_started_at)
+                if skill_runtime_context_block:
                     _record_session_skill_command_event(
                         session_id,
                         turn_id=turn_id,
@@ -8382,13 +8372,19 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                         "rawHistoryMessageCount": len(list(context.get("history_messages") or [])),
                         "fullSeedableHistoryMessageCount": full_history_message_count,
                         "seededHistoryMessageCount": len(history_messages),
-                        "agentRuntimeContextIncluded": bool(runtime_context_block),
+                        "agentRuntimeContextIncluded": bool(static_runtime_context_block),
                         "staticRuntimeContextIncluded": bool(static_runtime_context_block),
-                        "dynamicRuntimeContextIncluded": bool(dynamic_runtime_context_block),
+                        "dynamicRuntimeContextIncluded": False,
+                        "dynamicRuntimeContextAvailable": bool(dynamic_runtime_context_block),
+                        "dynamicRuntimeContextOmittedFromModelInput": bool(dynamic_runtime_context_block),
                         "runtimeContextSegmentCount": len(runtime_context_segments),
                         "agentRuntimeContextSkipped": bool(lightweight_chat_payload),
-                        "guidanceContextIncluded": bool(guidance_context_block),
-                        "skillRuntimeContextIncluded": bool(skill_runtime_context_block),
+                        "guidanceContextIncluded": False,
+                        "guidanceContextAvailable": bool(guidance_context_block),
+                        "guidanceContextOmittedFromModelInput": bool(guidance_context_block),
+                        "skillRuntimeContextIncluded": False,
+                        "skillRuntimeContextAvailable": bool(skill_runtime_context_block),
+                        "skillRuntimeContextOmittedFromModelInput": bool(skill_runtime_context_block),
                         "lightweightChatPayload": lightweight_chat_payload,
                         "lightweightChatPayloadReason": lightweight_chat_payload_reason,
                         "disableTools": lightweight_chat_payload,
@@ -8450,9 +8446,9 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                     user_message=user_message,
                     history_messages=history_messages,
                     active_task=context.get("active_task"),
-                    runtime_context_block=runtime_context_block,
-                    guidance_context_block=guidance_context_block,
-                    skill_runtime_context_block=skill_runtime_context_block,
+                    runtime_context_block=static_runtime_context_block,
+                    guidance_context_block="",
+                    skill_runtime_context_block="",
                     attachments=attachments,
                 )
                 _record_session_turn_lifecycle_event(
