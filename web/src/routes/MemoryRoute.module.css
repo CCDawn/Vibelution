@@ -2409,6 +2409,130 @@
   grid-column: 1 / -1;
 }
 
+.sourceGovernanceControls {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
+  align-items: end;
+  gap: 6px;
+  min-width: 0;
+}
+
+.sourceGovernanceControls label {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  color: var(--fg-tertiary);
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.sourceGovernanceControls input,
+.sourceGovernanceControls select {
+  width: 100%;
+  min-width: 0;
+  min-height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: var(--surface-panel);
+  color: var(--fg-primary);
+  font: inherit;
+  font-size: 0.76rem;
+}
+
+.sourceGovernanceGrid {
+  display: grid;
+  grid-template-columns: minmax(320px, 0.92fr) minmax(360px, 1.08fr);
+  gap: 7px;
+  min-width: 0;
+}
+
+.sourceGovernanceColumn {
+  display: grid;
+  align-content: start;
+  gap: 7px;
+  min-width: 0;
+  padding: 7px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--surface-panel) 82%, transparent);
+}
+
+.sourceGovernanceColumn h3 {
+  margin: 0;
+  overflow: hidden;
+  color: var(--fg-primary);
+  font-size: 0.92rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sourceRecordList {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  max-height: 420px;
+  overflow: auto;
+}
+
+.sourceRecord {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 7px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: var(--surface-panel);
+}
+
+.sourceRecordHeader {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.sourceRecordHeader strong,
+.sourceRecord p,
+.sourceRecordMeta span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sourceRecordHeader strong {
+  color: var(--fg-primary);
+  font-size: 0.82rem;
+}
+
+.sourceRecord p {
+  margin: 0;
+  color: var(--fg-secondary);
+  font-size: 0.74rem;
+}
+
+.sourceRecordMeta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px 6px;
+  min-width: 0;
+}
+
+.sourceRecordMeta span {
+  color: var(--fg-tertiary);
+  font-size: 0.68rem;
+}
+
+.sourceRecordActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  min-width: 0;
+}
+
 .queueToolbar {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -3443,7 +3567,9 @@
 
   .contractDomainGrid,
   .healthStrip,
-  .permissionRow {
+  .permissionRow,
+  .sourceGovernanceGrid,
+  .sourceGovernanceControls {
     grid-template-columns: 1fr;
   }
 
@@ -3490,6 +3616,9 @@
   .knowledgeRow,
   .ragPolicyStrip,
   .ragContextMeta,
+  .sourceGovernanceGrid,
+  .sourceGovernanceControls,
+  .sourceRecordMeta,
   .stewardGrid,
   .ratingControls {
     grid-template-columns: 1fr;
