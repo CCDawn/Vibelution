@@ -37,8 +37,6 @@ import {
   TeamWorkflowSourceCollectionPromptCachePolicy,
   TeamWorkflowSourceCollectionPromptCachePolicyRef,
   TeamWorkflowSourceCollectionRunStartPayload,
-  TeamTemplateInstantiatePayload,
-  TeamTemplateListPayload,
   TeamWorkflowDataRecordSourceCandidateImportPayload,
   TeamWorkflowCandidateListPayload,
   TeamWorkflowOrchestration,
@@ -56,6 +54,7 @@ const CANVAS_VIEWPORT_HEIGHT = 760;
 const TEAM_ORGANIZATION_CANVAS_KIND = "team_organization_canvas";
 const RESEARCH_TEAM_ID = "research-team";
 const AI_SEARCH_TEAM_ID = "ai-search-team";
+const TEAM_PICKER_TEAM_IDS = [AI_SEARCH_TEAM_ID, RESEARCH_TEAM_ID] as const;
 const EVOLUTION_SYSTEM_TEAM_IDS = new Set(["self-evolution-team", "supervised-evolution-team"]);
 const LINKED_ROOM_ACTIVE_REFETCH_MS = 5_000;
 const LINKED_ROOM_IDLE_REFETCH_MS = 30_000;
@@ -186,11 +185,6 @@ function researchSourceCollectionRoute(teamId = RESEARCH_TEAM_ID) {
 function teamWorkspaceRoute(teamId = RESEARCH_TEAM_ID) {
   return `/teams?team=${encodeURIComponent(teamId)}`;
 }
-
-type TeamDraft = {
-  name: string;
-  purpose: string;
-};
 
 type NodeDraft = {
   label: string;
@@ -1486,9 +1480,6 @@ export function TeamsRoute({
   const pageVisible = usePageVisibility();
   const [selectedTeamId, setSelectedTeamId] = useState("");
   const [selectedNodeId, setSelectedNodeId] = useState("");
-  const [selectedTemplateId, setSelectedTemplateId] = useState("");
-  const [teamDraft, setTeamDraft] = useState<TeamDraft>({ name: "", purpose: "" });
-  const [createTeamError, setCreateTeamError] = useState("");
   const [nodeDraft, setNodeDraft] = useState<NodeDraft>({ label: "", role: "", purpose: "", agentId: "" });
   const [teamMessage, setTeamMessage] = useState("");
   const [teamInterrupt, setTeamInterrupt] = useState(false);
@@ -1522,17 +1513,12 @@ export function TeamsRoute({
   const [canvasFrameSize, setCanvasFrameSize] = useState<CanvasFrameSize>({ width: CANVAS_VIEWPORT_WIDTH, height: CANVAS_VIEWPORT_HEIGHT });
   const [lockedCanvasViewportStyle, setLockedCanvasViewportStyle] = useState<CanvasViewportStyle | null>(null);
   const canvasFrameRef = useRef<HTMLDivElement | null>(null);
-  const teamNameInputRef = useRef<HTMLInputElement | null>(null);
   const dragStateRef = useRef<NodeDragState | null>(null);
   const dragFrameRef = useRef(0);
 
   const teamsQuery = useQuery({
     queryKey: queryKeys.teams(),
     queryFn: () => fetchJson<TeamListPayload>("/api/teams"),
-  });
-  const teamTemplatesQuery = useQuery({
-    queryKey: queryKeys.teamTemplates(),
-    queryFn: () => fetchJson<TeamTemplateListPayload>("/api/team-templates"),
   });
   const workspaceQuery = useQuery({
     queryKey: queryKeys.agentConfigWorkspace(),
@@ -1548,7 +1534,10 @@ export function TeamsRoute({
     [workspaceQuery.data],
   );
   const teams = teamsQuery.data?.teams ?? [];
-  const visibleTeams = useMemo(() => teams.filter((team) => !isEvolutionSystemTeam(team)), [teams]);
+  const visibleTeams = useMemo(() => {
+    const teamsById = new Map(teams.filter((team) => !isEvolutionSystemTeam(team)).map((team) => [team.teamId, team]));
+    return TEAM_PICKER_TEAM_IDS.map((teamId) => teamsById.get(teamId)).filter((team): team is Team => Boolean(team));
+  }, [teams]);
   const visibleTeamIds = useMemo(() => new Set(visibleTeams.map((team) => team.teamId)), [visibleTeams]);
   const visibleTeamSummary = useMemo(() => {
     return visibleTeams.reduce(
@@ -1564,11 +1553,6 @@ export function TeamsRoute({
     );
   }, [visibleTeams]);
   const hasTeams = visibleTeams.length > 0;
-  const teamTemplates = useMemo(() => teamTemplatesQuery.data?.templates ?? [], [teamTemplatesQuery.data?.templates]);
-  const selectedTemplate = useMemo(
-    () => teamTemplates.find((template) => template.templateId === selectedTemplateId) ?? teamTemplates[0] ?? null,
-    [selectedTemplateId, teamTemplates],
-  );
   const agentTeamMembership = useMemo(() => {
     const membership = new Map<string, { teamId: string; teamName: string }>();
     teams.forEach((team) => {
@@ -1761,18 +1745,6 @@ export function TeamsRoute({
   );
 
   useEffect(() => {
-    if (!teamTemplates.length) {
-      if (selectedTemplateId) {
-        setSelectedTemplateId("");
-      }
-      return;
-    }
-    if (!selectedTemplateId || !teamTemplates.some((template) => template.templateId === selectedTemplateId)) {
-      setSelectedTemplateId(teamTemplates[0].templateId);
-    }
-  }, [selectedTemplateId, teamTemplates]);
-
-  useEffect(() => {
     if (requestedVisibleTeamId) {
       setSelectedTeamId(requestedVisibleTeamId);
       return;
@@ -1834,49 +1806,6 @@ export function TeamsRoute({
     observer.observe(element);
     return () => observer.disconnect();
   }, []);
-
-  const createTeamMutation = useMutation({
-    mutationFn: (draft: TeamDraft) =>
-      fetchJson<Team>("/api/teams", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(draft),
-      }),
-    onSuccess: (team) => {
-      setSelectedTeamId(team.teamId);
-      setSearchParams({ team: team.teamId });
-      setTeamDraft({ name: "", purpose: "" });
-      setCreateTeamError("");
-      void chatWorkspaceCache.afterTeamChanged(team.teamId);
-    },
-    onError: (error) => {
-      setCreateTeamError(error instanceof Error ? error.message : String(error));
-    },
-  });
-
-  const instantiateTeamTemplateMutation = useMutation({
-    mutationFn: (templateId: string) =>
-      fetchJson<TeamTemplateInstantiatePayload>(`/api/team-templates/${encodeURIComponent(templateId)}/instantiate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
-      }),
-    onSuccess: (payload) => {
-      const team = payload.team;
-      setSelectedTeamId(team.teamId);
-      setSearchParams({ team: team.teamId });
-      setSelectedNodeId("");
-      setCreateTeamError("");
-      queryClient.setQueryData(queryKeys.team(team.teamId), team);
-      void chatWorkspaceCache.afterTeamChanged(team.teamId);
-      if (team.linkedChatRoom?.roomId) {
-        void chatWorkspaceCache.afterTeamRoomMembershipChanged(team.teamId, team.linkedChatRoom.roomId);
-      }
-    },
-    onError: (error) => {
-      setCreateTeamError(error instanceof Error ? error.message : String(error));
-    },
-  });
 
   const archiveTeamMutation = useMutation({
     mutationFn: (teamId: string) =>
@@ -4033,108 +3962,39 @@ export function TeamsRoute({
       </div>
       <div className={workspaceClassName}>
         <aside className={styles.teamPanel}>
-          <form
-            className={styles.createForm}
-            onSubmit={(event) => {
-              event.preventDefault();
-              const name = teamDraft.name.trim();
-              if (!name) {
-                setCreateTeamError(lang === "zh" ? "先填写团队名称，再创建团队。" : "Enter a team name before creating a Team.");
-                teamNameInputRef.current?.focus();
-                return;
-              }
-              setCreateTeamError("");
-              createTeamMutation.mutate({ ...teamDraft, name });
-            }}
-          >
-            <input
-              ref={teamNameInputRef}
-              value={teamDraft.name}
-              onChange={(event) => {
-                setTeamDraft((current) => ({ ...current, name: event.target.value }));
-                if (createTeamError) {
-                  setCreateTeamError("");
-                }
-              }}
-              placeholder={lang === "zh" ? "新团队名称" : "New team name"}
-              aria-invalid={Boolean(createTeamError && !teamDraft.name.trim())}
-              aria-describedby="team-create-feedback"
-            />
-            <input
-              value={teamDraft.purpose}
-              onChange={(event) => setTeamDraft((current) => ({ ...current, purpose: event.target.value }))}
-              placeholder={lang === "zh" ? "团队目的" : "Team purpose"}
-            />
-            <button type="submit" disabled={createTeamMutation.isPending}>
-              <Plus size={14} />
-              {createTeamMutation.isPending ? (lang === "zh" ? "创建中" : "Creating") : lang === "zh" ? "创建" : "Create"}
-            </button>
-            <p id="team-create-feedback" className={createTeamError ? styles.formError : styles.formHint}>
-              {createTeamError || (lang === "zh" ? "填写团队名称后即可创建；成员可稍后在画布中绑定。" : "Enter a team name to create it; members can be bound later on the canvas.")}
-            </p>
-          </form>
-          <section className={styles.templatePanel}>
-            <div className={styles.templatePanelHeader}>
-              <strong>{lang === "zh" ? "从模板创建" : "Create from template"}</strong>
-              <span>{teamTemplatesQuery.data?.summary.templateCount ?? 0}</span>
-            </div>
-            {teamTemplatesQuery.isPending ? (
-              <div className={styles.templateEmpty}>{lang === "zh" ? "正在读取团队模板..." : "Loading team templates..."}</div>
-            ) : selectedTemplate ? (
-              <div className={styles.templatePicker}>
-                <select
-                  className={styles.templateSelect}
-                  value={selectedTemplate.templateId}
-                  onChange={(event) => setSelectedTemplateId(event.target.value)}
-                  aria-label={lang === "zh" ? "选择团队模板" : "Select team template"}
-                >
-                  {teamTemplates.map((template) => (
-                    <option key={template.templateId} value={template.templateId}>
-                      {template.name} · {template.roleCount} agents
-                    </option>
-                  ))}
-                </select>
-                <div className={styles.templatePreview}>
-                  <div className={styles.templatePreviewHeader}>
-                    <strong>{selectedTemplate.name}</strong>
-                    <span>{selectedTemplate.roleCount} agents</span>
-                  </div>
-                  <p>{selectedTemplate.purpose || selectedTemplate.description}</p>
-                  <div className={styles.templateMeta}>
-                    <span>{selectedTemplate.chatRoom.mode}</span>
-                    <span>{selectedTemplate.chatRoom.purpose}</span>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  className={styles.templateCreateButton}
-                  disabled={instantiateTeamTemplateMutation.isPending}
-                  onClick={() => instantiateTeamTemplateMutation.mutate(selectedTemplate.templateId)}
-                >
-                  <Bot size={14} />
-                  {instantiateTeamTemplateMutation.isPending
-                    ? (lang === "zh" ? "创建中" : "Creating")
-                    : (lang === "zh" ? "创建 Demo 团队" : "Create demo team")}
-                </button>
-              </div>
-            ) : (
-              <div className={styles.templateEmpty}>{lang === "zh" ? "暂无团队模板。" : "No team templates."}</div>
-            )}
-          </section>
-          <div className={styles.teamList}>
-            {visibleTeams.map((team) => (
-              <button
-                key={team.teamId}
-                type="button"
-                className={team.teamId === selectedTeam?.teamId ? `${styles.teamRow} ${styles.teamRowActive}` : styles.teamRow}
-                onClick={() => selectTeamRecord(team)}
+          <section className={styles.teamPickerPanel}>
+            <label className={styles.teamPickerLabel}>
+              <span>{lang === "zh" ? "团队" : "Team"}</span>
+              <select
+                value={selectedTeam?.teamId ?? effectiveTeamId}
+                onChange={(event) => {
+                  const nextTeam = visibleTeams.find((team) => team.teamId === event.target.value);
+                  if (nextTeam) {
+                    selectTeamRecord(nextTeam);
+                  }
+                }}
+                disabled={!visibleTeams.length}
+                aria-label={lang === "zh" ? "选择团队" : "Select team"}
               >
-                <strong>{team.name}</strong>
-                <span>{team.purpose || team.teamId}</span>
-                <small>{team.memberCount} agents · {formatTime(team.updatedAt, lang)}</small>
-              </button>
-            ))}
-          </div>
+                {visibleTeams.length ? (
+                  visibleTeams.map((team) => (
+                    <option key={team.teamId} value={team.teamId}>
+                      {team.name}
+                    </option>
+                  ))
+                ) : (
+                  <option value="">{lang === "zh" ? "正在读取团队" : "Loading teams"}</option>
+                )}
+              </select>
+            </label>
+            <div className={styles.teamPickerSummary}>
+              <strong>{selectedTeam?.name ?? (lang === "zh" ? "等待团队载入" : "Waiting for team")}</strong>
+              <span>{selectedTeam?.purpose || selectedTeam?.teamId || (lang === "zh" ? "仅显示科研与搜索两个团队入口。" : "Only research and search teams are shown.")}</span>
+              {selectedTeam ? (
+                <small>{selectedTeam.memberCount} agents · {formatTime(selectedTeam.updatedAt, lang)}</small>
+              ) : null}
+            </div>
+          </section>
         </aside>
 
         <main className={canvasPanelClassName} id="research-organization-canvas">
@@ -4272,16 +4132,16 @@ export function TeamsRoute({
             <div className={styles.emptyCanvasPanel} ref={canvasFrameRef}>
               <div className={styles.emptyCanvasContent}>
                 <span className={styles.emptyCanvasKicker}>{lang === "zh" ? "团队入口" : "Team entry"}</span>
-                <strong>{lang === "zh" ? "先创建团队，再进入组织画布" : "Create a team before opening the canvas"}</strong>
+                <strong>{lang === "zh" ? "选择团队后进入对应工作区" : "Select a team to open its workspace"}</strong>
                 <p>
                   {lang === "zh"
-                    ? "左侧可直接创建空团队或用模板生成 Demo 团队；创建后这里会切换为节点画布。"
-                    : "Use the left rail to create a blank team or instantiate a demo template; the node canvas appears after creation."}
+                    ? "左上角只保留 AI 搜索范围团队和 ai科学研究团队两个入口；选择后这里会显示对应团队内容。"
+                    : "The top-left selector only exposes the AI search scope team and the AI research team; selecting one opens its workspace."}
                 </p>
                 <div className={styles.emptyCanvasSteps}>
-                  <span>{lang === "zh" ? "1 填团队名称" : "1 Name team"}</span>
-                  <span>{lang === "zh" ? "2 创建或套模板" : "2 Create/template"}</span>
-                  <span>{lang === "zh" ? "3 绑定 Agent" : "3 Bind agents"}</span>
+                  <span>{lang === "zh" ? "1 选择团队" : "1 Select team"}</span>
+                  <span>{lang === "zh" ? "2 打开页面" : "2 Open page"}</span>
+                  <span>{lang === "zh" ? "3 审核流程" : "3 Review workflow"}</span>
                 </div>
               </div>
             </div>
@@ -4308,8 +4168,8 @@ export function TeamsRoute({
               <section className={`${styles.nodeBindingSection} ${styles.nodeBindingPlaceholder}`}>
                 <div className={styles.empty}>
                   {lang === "zh"
-                    ? "暂无团队。请先在左侧创建团队或使用模板。"
-                    : "No team yet. Create one or use a template from the left rail."}
+                    ? "暂无可用团队。请确认 AI 搜索范围团队和 ai科学研究团队已初始化。"
+                    : "No available team. Confirm the AI search scope team and AI research team are initialized."}
                 </div>
               </section>
             ) : showNodeBindingPanel && selectedNode ? (
