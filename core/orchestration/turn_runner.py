@@ -109,12 +109,9 @@ def prepare_agent_turn(
         elif callable(seed_runtime_context):
             seed_runtime_context(static_context_text)
             host_seeded_runtime_context = True
-    if callable(seed_runtime_context) and dynamic_context_text:
-        seed_runtime_context(dynamic_context_text)
-        host_seeded_runtime_context = True
-    if callable(seed_runtime_context) and legacy_context_text and not static_context_text and not dynamic_context_text:
-        seed_runtime_context(legacy_context_text)
-        host_seeded_runtime_context = True
+    # Dynamic and legacy runtime context are intentionally not seeded into the
+    # model message list. They may still be logged or exposed through tools, but
+    # the LLM payload should stay to stable system prefix + dialogue + current user.
     host_context_marker = getattr(agent, "mark_runtime_context_seeded_by_host", None)
     if callable(host_context_marker) and host_seeded_runtime_context:
         host_context_marker()
