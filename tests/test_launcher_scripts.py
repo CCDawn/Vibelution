@@ -2922,6 +2922,127 @@ Write-Output "ok"
     assert result.stdout.strip().splitlines()[-1] == "ok"
 
 
+def test_launcher_start_uses_fast_closed_snapshot_from_launcher_control_state(tmp_path):
+    result = _run_launcher_ast_harness(
+        tmp_path,
+        """
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$LauncherPath
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$source = Get-Content -Raw -LiteralPath $LauncherPath
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors -and $parseErrors.Count -gt 0) {
+    throw "Launcher script parse failed: $($parseErrors[0].Message)"
+}
+
+foreach ($name in @(
+    "Get-ClosedWorkbenchSessionSnapshotFromState",
+    "Get-StartManagedSessionSnapshot"
+)) {
+    $functionAst = $ast.Find({
+        param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+            $node.Name -eq $name
+    }, $true)
+    if ($null -eq $functionAst) {
+        throw "$name was not found."
+    }
+    . ([scriptblock]::Create($functionAst.Extent.Text))
+}
+
+$script:workbenchBrowserProfileDir = "C:\\project\\.runtime\\launcher\\workbench-app-profile"
+$script:fullSnapshotCalls = 0
+$script:alivePids = @{}
+$script:state = [pscustomobject]@{
+    sessionRole = "launcher_control_surface"
+    backendPid = 0
+    backendLaunchPid = 0
+    workbenchBrowserWindowPid = 0
+    workbenchBrowserLaunchPid = 0
+    supervisorPid = 0
+    launcherBackendPid = 111
+    launcherBrowserWindowPid = 222
+}
+$script:events = @()
+
+function Get-State { return $script:state }
+function Get-ObjectPropertyValue {
+    param($Object, [string]$Name, $Default)
+    if ($Object -and $Object.PSObject.Properties[$Name]) {
+        return $Object.PSObject.Properties[$Name].Value
+    }
+    return $Default
+}
+function Test-ProcessAlive {
+    param([int]$ProcessId)
+    return [bool]$script:alivePids[[string]$ProcessId]
+}
+function Get-SessionSnapshot {
+    $script:fullSnapshotCalls += 1
+    return [pscustomobject]@{ SnapshotMode = "full"; SessionRunning = $true }
+}
+function Write-LauncherControlLog {
+    param([string]$Event, [string]$Message, [string]$Level = "info", [hashtable]$Fields = @{})
+    $script:events += [pscustomobject]@{ event = $Event; fields = $Fields }
+}
+
+$snapshot = Get-StartManagedSessionSnapshot
+if ($script:fullSnapshotCalls -ne 0) {
+    throw "Closed launcher-control state should not call full Get-SessionSnapshot."
+}
+if ($snapshot.SnapshotMode -ne "closed_state_fast_path") {
+    throw "Closed launcher-control state did not return the fast snapshot."
+}
+if ($snapshot.SessionRunning -or $snapshot.BrowserWindowCount -ne 0 -or $snapshot.BackendPids.Count -ne 0) {
+    throw "Fast closed snapshot should report a closed workbench."
+}
+if (@($script:events | Where-Object { $_.event -eq "launcher.session.snapshot.fast_closed" }).Count -ne 1) {
+    throw "Fast closed snapshot event was not logged."
+}
+
+$script:state = [pscustomobject]@{
+    sessionRole = "launcher_control_surface"
+    backendPid = 0
+    backendLaunchPid = 0
+    workbenchBrowserWindowPid = 333
+    workbenchBrowserLaunchPid = 0
+    supervisorPid = 0
+}
+$script:alivePids = @{ "333" = $true }
+$fallbackSnapshot = Get-StartManagedSessionSnapshot
+if ($script:fullSnapshotCalls -ne 1 -or $fallbackSnapshot.SnapshotMode -ne "full") {
+    throw "Alive tracked workbench pid should fall back to full snapshot."
+}
+
+$script:state = [pscustomobject]@{
+    sessionRole = "workbench"
+    backendPid = 444
+    backendLaunchPid = 0
+    workbenchBrowserWindowPid = 0
+    workbenchBrowserLaunchPid = 0
+    supervisorPid = 0
+}
+$script:alivePids = @{}
+$fallbackSnapshot = Get-StartManagedSessionSnapshot
+if ($script:fullSnapshotCalls -ne 2 -or $fallbackSnapshot.SnapshotMode -ne "full") {
+    throw "Non launcher-control state should fall back to full snapshot."
+}
+
+Write-Output "ok"
+""",
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip().splitlines()[-1] == "ok"
+
+
 def test_launcher_control_source_signature_rejects_stale_backend(tmp_path):
     result = _run_launcher_ast_harness(
         tmp_path,
