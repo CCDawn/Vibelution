@@ -167,16 +167,18 @@ describe("TeamsRoute layout contract", () => {
 
   it("renders a dense list canvas inspector workflow", () => {
     expect(routeSource).toContain("teamPickerPanel");
+    expect(routeSource).toContain("teamSwitcherBar");
     expect(routeSource).toContain("teamPickerLabel");
     expect(routeSource).toContain("teamPickerSummary");
     expect(routeSource).toContain("aria-label={lang === \"zh\" ? \"选择团队\" : \"Select team\"}");
+    expect(routeSource).not.toContain("className={styles.teamPanel}");
     expect(routeSource).toContain("canvasPanel");
     expect(routeSource).toContain("inspector");
     expect(routeSource).toContain("hasTeams");
     expect(routeSource).toContain("styles.workspaceEmpty");
     expect(routeSource).toContain("styles.emptyCanvasPanel");
     expect(routeSource).toContain("选择团队后进入对应工作区");
-    expect(routeSource).toContain("左上角只保留 AI 搜索范围团队和 ai科学研究团队两个入口");
+    expect(routeSource).toContain("顶部只保留 AI 搜索范围团队和 ai科学研究团队两个入口");
     expect(routeSource).toContain("暂无可用团队。请确认 AI 搜索范围团队和 ai科学研究团队已初始化。");
     expect(routeSource).not.toContain("teamNameInputRef");
     expect(routeSource).not.toContain("从模板创建");
@@ -356,6 +358,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("interrupt_targets");
     expect(routeSource).toContain("edges: canvas.edges.filter((edge) => edge.source !== deletedNodeId && edge.target !== deletedNodeId)");
     expect(routeStyles.teamPickerPanel).toBeTypeOf("string");
+    expect(routeStyles.teamSwitcherBar).toBeTypeOf("string");
     expect(routeStyles.teamPickerLabel).toBeTypeOf("string");
     expect(routeStyles.teamPickerSummary).toBeTypeOf("string");
     expect(routeStyles.nodeBindingSection).toBeTypeOf("string");

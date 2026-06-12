@@ -3960,43 +3960,40 @@ export function TeamsRoute({
         <span>{lang === "zh" ? "失效引用" : "Stale"} <strong>{visibleTeamSummary.staleMemberCount}</strong></span>
         <span>{lang === "zh" ? "成员源" : "Member source"} <strong>Agent Center</strong></span>
       </div>
+      <section className={`${styles.teamPickerPanel} ${styles.teamSwitcherBar}`}>
+        <label className={styles.teamPickerLabel}>
+          <span>{lang === "zh" ? "团队" : "Team"}</span>
+          <select
+            value={selectedTeam?.teamId ?? effectiveTeamId}
+            onChange={(event) => {
+              const nextTeam = visibleTeams.find((team) => team.teamId === event.target.value);
+              if (nextTeam) {
+                selectTeamRecord(nextTeam);
+              }
+            }}
+            disabled={!visibleTeams.length}
+            aria-label={lang === "zh" ? "选择团队" : "Select team"}
+          >
+            {visibleTeams.length ? (
+              visibleTeams.map((team) => (
+                <option key={team.teamId} value={team.teamId}>
+                  {team.name}
+                </option>
+              ))
+            ) : (
+              <option value="">{lang === "zh" ? "正在读取团队" : "Loading teams"}</option>
+            )}
+          </select>
+        </label>
+        <div className={styles.teamPickerSummary}>
+          <strong>{selectedTeam?.name ?? (lang === "zh" ? "等待团队载入" : "Waiting for team")}</strong>
+          <span>{selectedTeam?.purpose || selectedTeam?.teamId || (lang === "zh" ? "仅显示科研与搜索两个团队入口。" : "Only research and search teams are shown.")}</span>
+          {selectedTeam ? (
+            <small>{selectedTeam.memberCount} agents · {formatTime(selectedTeam.updatedAt, lang)}</small>
+          ) : null}
+        </div>
+      </section>
       <div className={workspaceClassName}>
-        <aside className={styles.teamPanel}>
-          <section className={styles.teamPickerPanel}>
-            <label className={styles.teamPickerLabel}>
-              <span>{lang === "zh" ? "团队" : "Team"}</span>
-              <select
-                value={selectedTeam?.teamId ?? effectiveTeamId}
-                onChange={(event) => {
-                  const nextTeam = visibleTeams.find((team) => team.teamId === event.target.value);
-                  if (nextTeam) {
-                    selectTeamRecord(nextTeam);
-                  }
-                }}
-                disabled={!visibleTeams.length}
-                aria-label={lang === "zh" ? "选择团队" : "Select team"}
-              >
-                {visibleTeams.length ? (
-                  visibleTeams.map((team) => (
-                    <option key={team.teamId} value={team.teamId}>
-                      {team.name}
-                    </option>
-                  ))
-                ) : (
-                  <option value="">{lang === "zh" ? "正在读取团队" : "Loading teams"}</option>
-                )}
-              </select>
-            </label>
-            <div className={styles.teamPickerSummary}>
-              <strong>{selectedTeam?.name ?? (lang === "zh" ? "等待团队载入" : "Waiting for team")}</strong>
-              <span>{selectedTeam?.purpose || selectedTeam?.teamId || (lang === "zh" ? "仅显示科研与搜索两个团队入口。" : "Only research and search teams are shown.")}</span>
-              {selectedTeam ? (
-                <small>{selectedTeam.memberCount} agents · {formatTime(selectedTeam.updatedAt, lang)}</small>
-              ) : null}
-            </div>
-          </section>
-        </aside>
-
         <main className={canvasPanelClassName} id="research-organization-canvas">
           <div className={styles.canvasToolbar}>
             <div>
@@ -4135,8 +4132,8 @@ export function TeamsRoute({
                 <strong>{lang === "zh" ? "选择团队后进入对应工作区" : "Select a team to open its workspace"}</strong>
                 <p>
                   {lang === "zh"
-                    ? "左上角只保留 AI 搜索范围团队和 ai科学研究团队两个入口；选择后这里会显示对应团队内容。"
-                    : "The top-left selector only exposes the AI search scope team and the AI research team; selecting one opens its workspace."}
+                    ? "顶部只保留 AI 搜索范围团队和 ai科学研究团队两个入口；选择后这里会显示对应团队内容。"
+                    : "The top selector only exposes the AI search scope team and the AI research team; selecting one opens its workspace."}
                 </p>
                 <div className={styles.emptyCanvasSteps}>
                   <span>{lang === "zh" ? "1 选择团队" : "1 Select team"}</span>
