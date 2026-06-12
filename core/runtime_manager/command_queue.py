@@ -15,6 +15,7 @@ from .constants import (
     DEFAULT_COMMAND_WAIT_SECONDS,
     EVENTS_PATH,
     INBOX_DIR,
+    INTERRUPTS_DIR,
     PROCESSING_DIR,
     RESULTS_DIR,
     ensure_runtime_manager_dirs,
@@ -30,6 +31,7 @@ from .restart_coordinator import create_restart_intent
 
 
 DEFERRED_COMMAND_POLL_SECONDS = 10.0
+ACTIVE_LIFECYCLE_INTERRUPT_TYPES = {"open_workbench", "restart_workbench"}
 LIFECYCLE_CANCEL_TYPES = {
     "restart": {"restart_workbench"},
     "stop": {"close_workbench"},
@@ -148,6 +150,7 @@ def submit_command(
         _complete_rejected_shutdown_command(command, shutdown_state=shutdown_state)
         return command
     superseded_commands = _supersede_pending_open_commands_for_close(command)
+    active_interrupt = request_active_lifecycle_interrupt_for_close(command)
     joined_command_id = _joinable_lifecycle_command_id(command)
     if joined_command_id:
         command["commandId"] = joined_command_id
@@ -173,6 +176,8 @@ def submit_command(
     queued_payload["queueDepthAfterEnqueue"] = _queue_file_count(INBOX_DIR)
     if superseded_commands:
         queued_payload["supersededPendingCommands"] = superseded_commands
+    if active_interrupt:
+        queued_payload["activeCommandInterrupt"] = active_interrupt
     _append_queue_event("command_queue.command_queued", queued_payload)
     return command
 
@@ -228,6 +233,7 @@ def claim_next_command() -> tuple[Path, dict[str, Any]] | None:
         except (OSError, json.JSONDecodeError):
             payload = {}
         if isinstance(payload, dict):
+            clear_lifecycle_interrupt(str(payload.get("commandId") or target.stem).strip() or target.stem)
             claimed_at = datetime.now(timezone.utc)
             payload["claimedAt"] = claimed_at.isoformat()
             claimed_payload = command_event_payload(payload, queue_path=target.name)
@@ -240,6 +246,83 @@ def claim_next_command() -> tuple[Path, dict[str, Any]] | None:
         except OSError:
             pass
     return None
+
+
+def request_active_lifecycle_interrupt_for_close(command: dict[str, Any]) -> dict[str, Any] | None:
+    ensure_runtime_manager_dirs()
+    command_type = str(command.get("type") or "").strip()
+    if command_type not in {"close_workbench", "force_close_workbench"}:
+        return None
+    manager_pid = load_pid()
+    if not _process_is_alive(manager_pid):
+        return None
+    state = load_state()
+    if not isinstance(state, dict) or not _state_belongs_to_current_manager(state, manager_pid):
+        return None
+    active = state.get("command") if isinstance(state.get("command"), dict) else {}
+    active_command_id = str(active.get("activeCommandId") or "").strip()
+    active_type = str(active.get("activeType") or "").strip()
+    if not active_command_id or active_type not in ACTIVE_LIFECYCLE_INTERRUPT_TYPES:
+        return None
+    interrupt = {
+        "interruptedCommandId": active_command_id,
+        "interruptedType": active_type,
+        "closeCommandId": str(command.get("commandId") or "").strip(),
+        "closeCommandType": command_type,
+        "requestedBy": str(command.get("requestedBy") or "unknown").strip() or "unknown",
+        "requestedAt": datetime.now(timezone.utc).isoformat(),
+        "stateVersion": int(state.get("stateVersion") or 0),
+        "operation": "force_close" if command_type == "force_close_workbench" else "close",
+    }
+    try:
+        _atomic_write_json(INTERRUPTS_DIR / f"{active_command_id}.json", interrupt)
+    except OSError as exc:
+        _append_queue_event(
+            "command_queue.active_lifecycle_interrupt_failed",
+            {
+                "commandId": str(command.get("commandId") or ""),
+                "type": command_type,
+                "activeCommandId": active_command_id,
+                "activeType": active_type,
+                "errorType": type(exc).__name__,
+                "message": str(exc),
+            },
+        )
+        return None
+    _append_queue_event(
+        "command_queue.active_lifecycle_interrupt_requested",
+        {
+            "commandId": str(command.get("commandId") or ""),
+            "type": command_type,
+            "activeCommandId": active_command_id,
+            "activeType": active_type,
+            "operation": interrupt["operation"],
+            "stateVersion": interrupt["stateVersion"],
+        },
+    )
+    return interrupt
+
+
+def lifecycle_interrupt_requested(command_id: str) -> dict[str, Any] | None:
+    normalized_id = str(command_id or "").strip()
+    if not _safe_command_id(normalized_id):
+        return None
+    payload = _load_command_file(INTERRUPTS_DIR / f"{normalized_id}.json")
+    if not payload:
+        return None
+    if str(payload.get("interruptedCommandId") or "").strip() != normalized_id:
+        return None
+    return payload
+
+
+def clear_lifecycle_interrupt(command_id: str) -> None:
+    normalized_id = str(command_id or "").strip()
+    if not _safe_command_id(normalized_id):
+        return
+    try:
+        (INTERRUPTS_DIR / f"{normalized_id}.json").unlink(missing_ok=True)
+    except OSError:
+        pass
 
 
 def defer_processing_command_for_active_work(
@@ -541,6 +624,7 @@ def complete_command(path: Path, result: dict[str, Any]) -> None:
     command_id = str(result.get("commandId") or path.stem).strip() or path.stem
     completed_at = datetime.now(timezone.utc)
     _atomic_write_json(RESULTS_DIR / f"{command_id}.json", result)
+    clear_lifecycle_interrupt(command_id)
     try:
         path.unlink(missing_ok=True)
     except OSError:
