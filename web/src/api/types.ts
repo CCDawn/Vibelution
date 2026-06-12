@@ -447,7 +447,10 @@ export type KnowledgeStewardWorkbenchPayload = {
 
 export type KnowledgeSourceArtifact = {
   sourceArtifactId: string;
+  ownerType?: "team" | "agent" | "shared" | string;
+  ownerId?: string;
   teamId: string;
+  agentId?: string;
   knowledgeBaseId: string;
   sourceType: string;
   sourceRef: Record<string, unknown>;
@@ -458,6 +461,9 @@ export type KnowledgeSourceArtifact = {
   evidenceRange: Record<string, unknown>;
   title: string;
   summary: string;
+  centralSourceId?: string;
+  inboxSourceId?: string;
+  curationStatus?: string;
 };
 
 export type KnowledgeRefinementProposal = {
@@ -465,6 +471,7 @@ export type KnowledgeRefinementProposal = {
   teamId: string;
   targetKnowledgeBaseId: string;
   sourceArtifactIds: string[];
+  centralSourceIds?: string[];
   proposedByAgentId: string;
   status: string;
   title: string;
@@ -486,6 +493,7 @@ export type KnowledgeBatch = {
   knowledgeBaseId: string;
   proposalIds: string[];
   sourceArtifactIds: string[];
+  centralSourceIds?: string[];
   reviewedByAgentId: string;
   appliedAt: string;
   status: string;
@@ -497,6 +505,7 @@ export type KnowledgeItem = {
   knowledgeBaseId: string;
   batchId: string;
   sourceArtifactIds: string[];
+  centralSourceIds?: string[];
   title: string;
   summary: string;
   content: string;
@@ -612,6 +621,7 @@ export type KnowledgeSearchResult = KnowledgeItem & {
   matchReason: string;
   sourceSummaries: Array<{
     sourceArtifactId: string;
+    centralSourceId?: string;
     sourceType: string;
     capturedAt: string;
     title: string;
@@ -651,6 +661,7 @@ export type KnowledgeRagContext = {
     knowledgeBaseName: string;
     knowledgeItemId: string;
     sourceArtifactIds: string[];
+    centralSourceIds?: string[];
   };
   metadata: {
     tags: string[];
@@ -674,8 +685,136 @@ export type KnowledgeRagCitation = {
   knowledgeBaseName: string;
   knowledgeItemId: string;
   sourceArtifactIds: string[];
+  centralSourceIds?: string[];
   provider: string;
   retrievalMode: string;
+};
+
+export type KnowledgeSourceOwnerType = "team" | "agent" | string;
+export type KnowledgeSourceInboxStatus = "pending" | "accepted" | "rejected" | "duplicate" | "needs_more_context" | string;
+
+export type KnowledgeOwnerSource = {
+  schemaVersion: number;
+  inboxSourceId: string;
+  ownerType: KnowledgeSourceOwnerType;
+  ownerId: string;
+  teamId: string;
+  agentId: string;
+  sourceType: string;
+  sourceRef: Record<string, unknown>;
+  sourceCreatedAt: string;
+  capturedBy: string;
+  capturedAt: string;
+  sourceHash: string;
+  evidenceRange: Record<string, unknown>;
+  title: string;
+  summary: string;
+  originalFilename: string;
+  originalPath: string;
+  status: KnowledgeSourceInboxStatus;
+  curationStatus: string;
+  centralSourceId: string;
+  dedupeStatus: string;
+  reviewedAt: string;
+  reviewedByAgentId: string;
+  resolutionNote: string;
+  updatedAt: string;
+};
+
+export type KnowledgeSourceInboxPayload = {
+  schemaVersion: number;
+  ownerType: KnowledgeSourceOwnerType;
+  ownerId: string;
+  teamId: string;
+  agentId: string;
+  actorAgentId: string;
+  summary: {
+    sourceCount: number;
+    pendingSourceCount: number;
+    acceptedSourceCount: number;
+    rejectedSourceCount: number;
+    duplicateSourceCount: number;
+    needsMoreContextSourceCount: number;
+    statusCounts: Record<string, number>;
+  };
+  sources: KnowledgeOwnerSource[];
+  updatedAt: string;
+};
+
+export type KnowledgeCentralSource = {
+  schemaVersion: number;
+  centralSourceId: string;
+  status: string;
+  sourceHash: string;
+  sourceType: string;
+  sourceRef: Record<string, unknown>;
+  sourceCreatedAt: string;
+  title: string;
+  summary: string;
+  centralPath: string;
+  originOwnerType: KnowledgeSourceOwnerType;
+  originOwnerId: string;
+  originInboxSourceId: string;
+  originOriginalPath: string;
+  acceptedByAgentId: string;
+  acceptedAt: string;
+  updatedAt: string;
+};
+
+export type KnowledgeCentralSourceOwnerRef = {
+  schemaVersion: number;
+  ownerRefId: string;
+  promotionId: string;
+  centralSourceId: string;
+  ownerType: KnowledgeSourceOwnerType;
+  ownerId: string;
+  teamId: string;
+  agentId: string;
+  inboxSourceId: string;
+  originalPath: string;
+  sourceHash: string;
+  decision: string;
+  dedupeStatus: string;
+  reviewedByAgentId: string;
+  resolutionNote: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type KnowledgeCentralSourceRegistryPayload = {
+  schemaVersion: number;
+  agentId: string;
+  ownerType: KnowledgeSourceOwnerType;
+  ownerId: string;
+  summary: {
+    centralSourceCount: number;
+    ownerRefCount: number;
+  };
+  centralSources: KnowledgeCentralSource[];
+  ownerRefs: KnowledgeCentralSourceOwnerRef[];
+  updatedAt: string;
+};
+
+export type KnowledgeSourceInboxReviewResponse = {
+  schemaVersion: number;
+  ownerType: KnowledgeSourceOwnerType;
+  ownerId: string;
+  source: KnowledgeOwnerSource;
+  centralSource: KnowledgeCentralSource | null;
+  promotion: {
+    schemaVersion?: number;
+    promotionId?: string;
+    ownerRefId?: string;
+    centralSourceId?: string;
+    ownerType?: KnowledgeSourceOwnerType;
+    ownerId?: string;
+    inboxSourceId?: string;
+    decision?: string;
+    dedupeStatus?: string;
+    reviewedByAgentId?: string;
+    createdAt?: string;
+  } | null;
+  updatedAt: string;
 };
 
 export type KnowledgeRagProviderHealth = {
