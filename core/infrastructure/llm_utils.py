@@ -17,6 +17,7 @@ import re
 from typing import Any, Tuple
 from langchain_core.messages import SystemMessage
 
+from core.context.volatility import SYSTEM_DYNAMIC_CONTEXT_HEADER, is_volatile_context_text
 from core.llm.errors import classify_for_legacy
 from core.llm.recovery import LLMRecoveryDecision, plan_recovery
 from core.llm.routing import attach_recovery_fallback
@@ -116,9 +117,6 @@ def parse_tool_args(tool_args: Any) -> dict:
         return {}
 
 
-SYSTEM_DYNAMIC_CONTEXT_HEADER = "## Dynamic System Context"
-
-
 def build_system_message(sp, *, include_dynamic_suffix: bool = False) -> Any:
     """将 SystemPrompt 元组转为 API 消息格式，静态前缀标记 cache_control。
 
@@ -177,14 +175,7 @@ def _text_from_system_context_message(message: Any) -> str:
 def is_volatile_system_context_message(message: Any) -> bool:
     """Return True for per-turn system context that should not be carried over."""
 
-    text = _text_from_system_context_message(message)
-    return text.startswith((
-        SYSTEM_DYNAMIC_CONTEXT_HEADER,
-        "## Agent Runtime Context",
-        "## Runtime Context",
-        "## Recent Operator Guidance",
-        "## Slash Skill Context",
-    ))
+    return is_volatile_context_text(_text_from_system_context_message(message))
 
 
 def build_cacheable_system_message(static_text: Any, dynamic_text: Any = "") -> Any:

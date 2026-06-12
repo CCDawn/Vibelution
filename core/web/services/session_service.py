@@ -23,6 +23,11 @@ from urllib.parse import quote
 
 from config.settings import get_config
 from config.settings import get_web_chat_config
+from core.context.segments import (
+    build_context_manifest,
+    build_context_segment,
+    normalize_context_manifest,
+)
 from core.chat.chat_result_contract import build_chat_coding_result_contract
 from core.chat.chat_result_formatter import format_chat_reply
 from core.chat.chat_task_types import trim_lines
@@ -6046,51 +6051,7 @@ def _normalize_turn_llm_usage(value: Any) -> dict[str, Any] | None:
 
 
 def _normalize_session_context_composition(value: Any) -> dict[str, Any] | None:
-    if not isinstance(value, dict):
-        return None
-    segments = []
-    for item in list(value.get("segments") or []):
-        if not isinstance(item, dict):
-            continue
-        key = str(item.get("key") or "").strip()
-        if not key:
-            continue
-        chars = _coerce_nonnegative_int(item.get("chars") or 0)
-        tokens = _coerce_nonnegative_int(item.get("tokens") or item.get("estimatedTokens") or 0)
-        item_count = _coerce_nonnegative_int(item.get("itemCount") or 0)
-        status = str(item.get("status") or "included").strip() or "included"
-        segments.append(
-            {
-                "key": key,
-                "label": str(item.get("label") or key).strip() or key,
-                "chars": chars,
-                "tokens": tokens,
-                "itemCount": item_count,
-                "status": status,
-                "source": str(item.get("source") or "").strip(),
-                "description": str(item.get("description") or "").strip(),
-            }
-        )
-    if not segments:
-        return None
-    total_chars = _coerce_nonnegative_int(value.get("totalChars") or value.get("total_chars") or 0)
-    total_tokens = _coerce_nonnegative_int(value.get("totalTokens") or value.get("total_tokens") or 0)
-    if not total_chars:
-        total_chars = sum(_coerce_nonnegative_int(item.get("chars") or 0) for item in segments)
-    if not total_tokens:
-        total_tokens = sum(_coerce_nonnegative_int(item.get("tokens") or 0) for item in segments)
-    return {
-        "turnId": str(value.get("turnId") or value.get("turn_id") or "").strip(),
-        "recordedAt": str(value.get("recordedAt") or value.get("recorded_at") or "").strip(),
-        "source": str(value.get("source") or "runtime_assembly").strip() or "runtime_assembly",
-        "totalChars": total_chars,
-        "totalTokens": total_tokens,
-        "limitTokens": _coerce_nonnegative_int(value.get("limitTokens") or value.get("limit_tokens") or 0),
-        "limitSource": str(value.get("limitSource") or value.get("limit_source") or "").strip(),
-        "limitModelId": str(value.get("limitModelId") or value.get("limit_model_id") or "").strip(),
-        "limitAgentId": str(value.get("limitAgentId") or value.get("limit_agent_id") or "").strip(),
-        "segments": segments,
-    }
+    return normalize_context_manifest(value)
 
 
 def _active_chat_turn_work_run_for_session(session_id: str) -> dict[str, Any] | None:
@@ -6342,24 +6303,47 @@ def _context_segment(
     key: str,
     label: str,
     *,
+    content: Any = None,
     chars: int = 0,
+    tokens: int = 0,
     item_count: int = 0,
     status: str = "included",
     source: str = "",
     description: str = "",
+    kind: str = "",
+    lifecycle: str = "",
+    authority: int = 0,
+    volatility: int = 0,
+    relevance: int = 0,
+    placement: str = "",
+    cache_policy: str = "",
+    retention: str = "",
+    included_in_model_input: bool = True,
+    evidence_ref: str = "",
+    stale: bool = False,
 ) -> dict[str, Any]:
-    normalized_chars = _coerce_nonnegative_int(chars)
-    normalized_count = _coerce_nonnegative_int(item_count)
-    return {
-        "key": key,
-        "label": label,
-        "chars": normalized_chars,
-        "tokens": _estimate_context_segment_tokens(normalized_chars, normalized_count),
-        "itemCount": normalized_count,
-        "status": status,
-        "source": source,
-        "description": description,
-    }
+    return build_context_segment(
+        key,
+        label,
+        content=content,
+        chars=chars,
+        tokens=tokens,
+        item_count=item_count,
+        status=status,
+        source=source,
+        description=description,
+        kind=kind,
+        lifecycle=lifecycle,
+        authority=authority,
+        volatility=volatility,
+        relevance=relevance,
+        placement=placement,
+        cache_policy=cache_policy,
+        retention=retention,
+        included_in_model_input=included_in_model_input,
+        evidence_ref=evidence_ref,
+        stale=stale,
+    )
 
 
 def _build_last_context_composition(
@@ -6369,19 +6353,32 @@ def _build_last_context_composition(
     user_message: str,
     history_messages: list[dict[str, Any]],
     active_task: Any,
-    runtime_context_block: str,
-    guidance_context_block: str,
-    skill_runtime_context_block: str,
-    attachments: list[dict[str, Any]],
+    runtime_context_block: str = "",
+    dynamic_runtime_context_block: str = "",
+    guidance_context_block: str = "",
+    guidance_context_included: bool = False,
+    skill_runtime_context_block: str = "",
+    skill_runtime_context_included: bool = False,
+    attachments: list[dict[str, Any]] | None = None,
+    prompt_cache_partition: str = "",
 ) -> dict[str, Any]:
     segments = [
         _context_segment(
             "current_user",
             "current user",
+            content=user_message,
             chars=len(str(user_message or "")),
             item_count=1 if str(user_message or "").strip() else 0,
             source="raw_user_message",
             description="Current user message passed as the turn prompt.",
+            kind="current_user",
+            lifecycle="turn",
+            authority=60,
+            volatility=100,
+            relevance=100,
+            placement="current_user",
+            cache_policy="never_cache",
+            retention="current_turn_only",
         ),
         _context_segment(
             "history",
@@ -6390,6 +6387,14 @@ def _build_last_context_composition(
             item_count=len(list(history_messages or [])),
             source="seed_chat_history",
             description="Filtered prior chat messages seeded into the agent.",
+            kind="history",
+            lifecycle="session",
+            authority=45,
+            volatility=35,
+            relevance=70,
+            placement="history",
+            cache_policy="prefix_candidate",
+            retention="carryover_summary",
         ),
     ]
     active_task_chars = _active_task_context_chars(active_task)
@@ -6400,8 +6405,18 @@ def _build_last_context_composition(
                 "task state",
                 chars=active_task_chars,
                 item_count=1,
+                status="state_only",
                 source="active_task",
-                description="Session task state retained as state/context, not as a replacement user prompt.",
+                description="Session task state retained outside the LLM message list.",
+                kind="session_contract",
+                lifecycle="task",
+                authority=75,
+                volatility=60,
+                relevance=85,
+                placement="session_state",
+                cache_policy="never_cache",
+                retention="carryover_summary",
+                included_in_model_input=False,
             )
         )
     if runtime_context_block:
@@ -6409,32 +6424,95 @@ def _build_last_context_composition(
             _context_segment(
                 "agent_context",
                 "agent context",
+                content=runtime_context_block,
                 chars=len(runtime_context_block),
                 item_count=1,
                 source="context_engine",
-                description="Runtime context packet seeded into the agent.",
+                description="Stable runtime context seeded into the agent system prefix.",
+                kind="agent_static_context",
+                lifecycle="stable",
+                authority=80,
+                volatility=15,
+                relevance=70,
+                placement="system_prefix",
+                cache_policy="cacheable",
+                retention="persist",
+            )
+        )
+    if dynamic_runtime_context_block:
+        segments.append(
+            _context_segment(
+                "dynamic_runtime_context",
+                "dynamic runtime context",
+                content=dynamic_runtime_context_block,
+                chars=len(dynamic_runtime_context_block),
+                item_count=1,
+                status="omitted",
+                source="context_engine",
+                description="Dynamic runtime context was available but omitted from model input.",
+                kind="runtime_observation",
+                lifecycle="turn",
+                authority=50,
+                volatility=90,
+                relevance=55,
+                placement="omitted",
+                cache_policy="never_cache",
+                retention="current_turn_only",
+                included_in_model_input=False,
             )
         )
     if guidance_context_block:
+        guidance_included = bool(guidance_context_included)
         segments.append(
             _context_segment(
                 "guidance",
                 "guidance",
+                content=guidance_context_block,
                 chars=len(guidance_context_block),
                 item_count=1,
+                status="included" if guidance_included else "omitted",
                 source="operator_guidance",
-                description="User guidance submitted while a turn was running.",
+                description=(
+                    "Recent operator guidance inserted into model input."
+                    if guidance_included
+                    else "Recent operator guidance was available but omitted from model input."
+                ),
+                kind="operator_guidance",
+                lifecycle="turn",
+                authority=65,
+                volatility=85,
+                relevance=75,
+                placement="before_current_user" if guidance_included else "omitted",
+                cache_policy="volatile",
+                retention="current_turn_only",
+                included_in_model_input=guidance_included,
             )
         )
     if skill_runtime_context_block:
+        skill_included = bool(skill_runtime_context_included)
         segments.append(
             _context_segment(
                 "skill",
                 "skill",
+                content=skill_runtime_context_block,
                 chars=len(skill_runtime_context_block),
                 item_count=1,
+                status="included" if skill_included else "omitted",
                 source="skill_runtime_context",
-                description="Slash skill runtime context seeded into the agent.",
+                description=(
+                    "Slash skill runtime context seeded into the agent before the current user message."
+                    if skill_included
+                    else "Slash skill runtime context was available but could not be seeded into model input."
+                ),
+                kind="slash_payload",
+                lifecycle="turn",
+                authority=70,
+                volatility=95,
+                relevance=90,
+                placement="before_current_user" if skill_included else "omitted",
+                cache_policy="volatile",
+                retention="current_turn_only",
+                included_in_model_input=skill_included,
             )
         )
     normalized_attachments = _normalize_message_attachments(attachments)
@@ -6447,22 +6525,30 @@ def _build_last_context_composition(
                 item_count=len(normalized_attachments),
                 source="user_attachments",
                 description="User image attachments prepared for this turn.",
+                kind="attachment",
+                lifecycle="turn",
+                authority=55,
+                volatility=95,
+                relevance=90,
+                placement="current_user",
+                cache_policy="never_cache",
+                retention="current_turn_only",
             )
         )
     limit_payload = _session_context_limit_payload(conversation)
-    normalized = _normalize_session_context_composition(
-        {
-            "turnId": turn_id,
-            "recordedAt": _now_timestamp(),
-            "source": "runtime_assembly",
-            "limitTokens": _coerce_nonnegative_int(limit_payload.get("limit") or 0),
-            "limitSource": str(limit_payload.get("source") or "").strip(),
-            "limitModelId": str(limit_payload.get("modelId") or "").strip(),
-            "limitAgentId": str(limit_payload.get("agentId") or "").strip(),
-            "segments": segments,
-        }
+    normalized = build_context_manifest(
+        turn_id=turn_id,
+        recorded_at=_now_timestamp(),
+        source="runtime_assembly",
+        limit_tokens=_coerce_nonnegative_int(limit_payload.get("limit") or 0),
+        limit_source=str(limit_payload.get("source") or "").strip(),
+        limit_model_id=str(limit_payload.get("modelId") or "").strip(),
+        limit_agent_id=str(limit_payload.get("agentId") or "").strip(),
+        prompt_cache_partition=prompt_cache_partition,
+        segments=segments,
     )
     return normalized or {
+        "schemaVersion": 1,
         "turnId": str(turn_id or "").strip(),
         "recordedAt": _now_timestamp(),
         "source": "runtime_assembly",
@@ -6473,6 +6559,25 @@ def _build_last_context_composition(
         "limitModelId": str(limit_payload.get("modelId") or "").strip(),
         "limitAgentId": str(limit_payload.get("agentId") or "").strip(),
         "segments": [],
+        "ordering": [],
+        "modelInputOrdering": [],
+        "budgets": {
+            "usedTokens": 0,
+            "observedTokens": 0,
+            "omittedTokens": 0,
+            "observedChars": 0,
+            "limitTokens": _coerce_nonnegative_int(limit_payload.get("limit") or 0),
+            "droppedTokens": 0,
+            "overLimit": False,
+        },
+        "cache": {
+            "stablePrefixHash": "",
+            "cacheableSegmentCount": 0,
+            "volatileSegmentCount": 0,
+            "firstVolatileSegmentIndex": -1,
+            "promptCachePartitionHash": _short_hash(prompt_cache_partition),
+            "missLikelyReason": "",
+        },
     }
 
 
@@ -8463,11 +8568,18 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                     history_messages=history_messages,
                     active_task=context.get("active_task"),
                     runtime_context_block=static_runtime_context_block,
-                    guidance_context_block="",
-                    skill_runtime_context_block=(
-                        skill_runtime_context_block if skill_runtime_context_included else ""
-                    ),
+                    dynamic_runtime_context_block=dynamic_runtime_context_block,
+                    guidance_context_block=guidance_context_block,
+                    guidance_context_included=False,
+                    skill_runtime_context_block=skill_runtime_context_block,
+                    skill_runtime_context_included=skill_runtime_context_included,
                     attachments=attachments,
+                    prompt_cache_partition=prompt_cache_partition,
+                )
+                context_cache = (
+                    context_composition.get("cache")
+                    if isinstance(context_composition.get("cache"), dict)
+                    else {}
                 )
                 _record_session_turn_lifecycle_event(
                     session_id,
@@ -8482,6 +8594,13 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                         "limitSource": str(context_composition.get("limitSource") or "").strip(),
                         "limitModelId": str(context_composition.get("limitModelId") or "").strip(),
                         "limitAgentId": str(context_composition.get("limitAgentId") or "").strip(),
+                        "schemaVersion": _coerce_nonnegative_int(context_composition.get("schemaVersion") or 0),
+                        "cacheableSegmentCount": _coerce_nonnegative_int(
+                            context_cache.get("cacheableSegmentCount") or 0
+                        ),
+                        "volatileSegmentCount": _coerce_nonnegative_int(
+                            context_cache.get("volatileSegmentCount") or 0
+                        ),
                     },
                 )
                 _set_session_live_context_composition(session_id, context_composition, turn_id=turn_id)
