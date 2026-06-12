@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 import subprocess
 import threading
 import uuid
@@ -18,6 +19,8 @@ from core.logging import debug_logger
 
 _RISKY_EVOLUTION_PATH_PREFIXES = ("core/", "tools/", "config/", "workspace/prompts/")
 _RISKY_EVOLUTION_PATHS = {"agent.py"}
+_DEFAULT_WORKTREE_SNAPSHOT_RETENTION_LIMIT = 50
+_MAX_WORKTREE_SNAPSHOT_RETENTION_LIMIT = 500
 
 
 def _subprocess_no_window_kwargs() -> Dict[str, int]:
@@ -40,6 +43,16 @@ def _short_subject(subject: Optional[str]) -> Optional[str]:
     normalized = subject.replace("\\n", "\n")
     first_line = normalized.splitlines()[0].strip()
     return first_line or subject.strip()
+
+
+def _normalize_worktree_snapshot_retention_limit(value: Optional[int]) -> int:
+    if value is None:
+        return _DEFAULT_WORKTREE_SNAPSHOT_RETENTION_LIMIT
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return _DEFAULT_WORKTREE_SNAPSHOT_RETENTION_LIMIT
+    return max(1, min(parsed, _MAX_WORKTREE_SNAPSHOT_RETENTION_LIMIT))
 
 
 @dataclass
@@ -99,12 +112,15 @@ class GitMemoryState:
 
 
 class GitMemoryService:
-    def __init__(self) -> None:
+    def __init__(self, worktree_snapshot_retention_limit: Optional[int] = None) -> None:
         self._workspace = get_workspace()
         self._project_root = self._workspace.project_root
         self._bus = get_event_bus()
         self._lock = threading.Lock()
         self._last_snapshot: Optional[WorkingTreeSnapshot] = None
+        self._worktree_snapshot_retention_limit = _normalize_worktree_snapshot_retention_limit(
+            worktree_snapshot_retention_limit
+        )
         self._last_state = GitMemoryState(
             available=False,
             head_rev=None,
@@ -512,6 +528,100 @@ class GitMemoryService:
                             now,
                         ),
                     )
+            prune_stats = self._prune_worktree_snapshots_with_cursor(
+                cursor,
+                keep_latest=self._worktree_snapshot_retention_limit,
+            )
+            if prune_stats["snapshots_deleted"]:
+                debug_logger.info(
+                    "[GitMemory] Pruned worktree snapshot history: "
+                    f"{prune_stats['snapshots_deleted']} snapshots, "
+                    f"{prune_stats['file_rows_deleted']} file rows, "
+                    f"{prune_stats['entity_rows_deleted']} entity rows"
+                )
+
+    def _prune_worktree_snapshots_with_cursor(
+        self,
+        cursor: sqlite3.Cursor,
+        keep_latest: Optional[int] = None,
+    ) -> Dict[str, int]:
+        retention_limit = _normalize_worktree_snapshot_retention_limit(keep_latest)
+        cursor.execute(
+            """
+            CREATE TEMP TABLE IF NOT EXISTS git_memory_worktree_prune (
+                snapshot_id TEXT PRIMARY KEY
+            )
+            """
+        )
+        cursor.execute("DELETE FROM git_memory_worktree_prune")
+        cursor.execute(
+            """
+            INSERT OR IGNORE INTO git_memory_worktree_prune(snapshot_id)
+            SELECT snapshot_id
+            FROM GitWorkingTreeSnapshot
+            WHERE snapshot_id LIKE 'wt-%'
+            ORDER BY created_at DESC, snapshot_id DESC
+            LIMIT -1 OFFSET ?
+            """,
+            (retention_limit,),
+        )
+        row = cursor.execute("SELECT COUNT(*) AS count FROM git_memory_worktree_prune").fetchone()
+        snapshots_deleted = int(row["count"] if row else 0)
+        stats = {
+            "snapshots_deleted": snapshots_deleted,
+            "file_rows_deleted": 0,
+            "entity_rows_deleted": 0,
+        }
+        if not snapshots_deleted:
+            return stats
+
+        cursor.execute(
+            """
+            DELETE FROM GitEntityChange
+            WHERE is_worktree = 1
+              AND commit_sha IN (SELECT snapshot_id FROM git_memory_worktree_prune)
+            """
+        )
+        stats["entity_rows_deleted"] = max(0, int(cursor.rowcount or 0))
+        cursor.execute(
+            """
+            DELETE FROM GitFileChange
+            WHERE is_worktree = 1
+              AND commit_sha IN (SELECT snapshot_id FROM git_memory_worktree_prune)
+            """
+        )
+        stats["file_rows_deleted"] = max(0, int(cursor.rowcount or 0))
+        cursor.execute(
+            """
+            DELETE FROM GitWorkingTreeSnapshot
+            WHERE snapshot_id IN (SELECT snapshot_id FROM git_memory_worktree_prune)
+            """
+        )
+        stats["snapshots_deleted"] = max(0, int(cursor.rowcount or 0))
+        return stats
+
+    def prune_worktree_snapshots(
+        self,
+        keep_latest: Optional[int] = None,
+        vacuum: bool = False,
+    ) -> Dict[str, Any]:
+        """Prune append-only worktree snapshots without touching commit history."""
+
+        with self._workspace.get_db_connection() as conn:
+            cursor = conn.cursor()
+            stats: Dict[str, Any] = self._prune_worktree_snapshots_with_cursor(
+                cursor,
+                keep_latest=keep_latest if keep_latest is not None else self._worktree_snapshot_retention_limit,
+            )
+            stats["vacuumed"] = False
+            if vacuum and any(
+                int(stats[key])
+                for key in ("snapshots_deleted", "file_rows_deleted", "entity_rows_deleted")
+            ):
+                conn.commit()
+                cursor.execute("VACUUM")
+                stats["vacuumed"] = True
+            return stats
 
     def _dirty_summary(self, snapshot: WorkingTreeSnapshot) -> str:
         if not snapshot.available:
@@ -784,6 +894,10 @@ def get_git_memory_service() -> GitMemoryService:
 
 def refresh_git_memory(force: bool = False) -> GitMemoryState:
     return get_git_memory_service().refresh_git_memory(force=force)
+
+
+def prune_worktree_snapshots(keep_latest: Optional[int] = None, vacuum: bool = False) -> Dict[str, Any]:
+    return get_git_memory_service().prune_worktree_snapshots(keep_latest=keep_latest, vacuum=vacuum)
 
 
 def get_recent_project_changes(limit: int = 10) -> List[ChangeRecord]:
