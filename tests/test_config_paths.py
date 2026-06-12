@@ -3,12 +3,15 @@ from pathlib import Path
 
 from config.paths import (
     CONFIG_META_SCHEMA_VERSION,
+    CONFIG_HOME_ENV,
+    CONFIG_PATH_ENV,
     ensure_global_config_initialized,
     resolve_config_backup_dir,
     resolve_config_home,
     resolve_config_meta_path,
     resolve_config_path,
 )
+from config.runtime_capabilities import MODEL_CAPABILITY_CACHE_ENV, get_model_capability_cache_path
 
 
 def test_resolve_config_path_defaults_to_user_documents(monkeypatch, tmp_path):
@@ -37,6 +40,22 @@ def test_resolve_config_path_uses_config_home_when_no_path_override(monkeypatch,
     monkeypatch.setenv("VIBELUTION_CONFIG_HOME", str(config_home))
 
     assert resolve_config_path() == config_home / "config.toml"
+
+
+def test_model_capability_cache_defaults_next_to_external_config(monkeypatch, tmp_path):
+    config_path = tmp_path / "operator-config" / "operator.toml"
+    monkeypatch.setenv(CONFIG_PATH_ENV, str(config_path))
+    monkeypatch.setenv(CONFIG_HOME_ENV, str(tmp_path / "ignored-home"))
+    monkeypatch.delenv(MODEL_CAPABILITY_CACHE_ENV, raising=False)
+
+    assert get_model_capability_cache_path() == config_path.parent / "model-capabilities.json"
+
+
+def test_model_capability_cache_env_override_stays_explicit(monkeypatch, tmp_path):
+    cache_path = tmp_path / "runtime-cache" / "custom-model-capabilities.json"
+    monkeypatch.setenv(MODEL_CAPABILITY_CACHE_ENV, str(cache_path))
+
+    assert get_model_capability_cache_path() == cache_path
 
 
 def test_global_config_initialization_creates_external_starter_without_project_migration(monkeypatch, tmp_path):
