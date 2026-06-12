@@ -39,7 +39,7 @@ def knowledge_query_tool(query: str = "", knowledge_base_id: str = "", limit: in
     requested_base_id = str(knowledge_base_id or "").strip()
     memory_policy = runtime.get("memoryPolicy") if isinstance(runtime.get("memoryPolicy"), dict) else {}
     allowed_base_ids = _policy_ids(memory_policy, "readKnowledgeBaseIds")
-    if requested_base_id and allowed_base_ids and requested_base_id not in allowed_base_ids:
+    if requested_base_id and not _policy_allows_knowledge_base(requested_base_id, allowed_base_ids):
         return _json_result(_blocked_result(agent_id, "knowledge_base_not_in_memory_policy"))
 
     try:
@@ -119,7 +119,7 @@ def knowledge_rag_retrieve_tool(
     requested_base_id = str(knowledge_base_id or "").strip()
     memory_policy = runtime.get("memoryPolicy") if isinstance(runtime.get("memoryPolicy"), dict) else {}
     allowed_base_ids = _policy_ids(memory_policy, "readKnowledgeBaseIds")
-    if requested_base_id and allowed_base_ids and requested_base_id not in allowed_base_ids:
+    if requested_base_id and not _policy_allows_knowledge_base(requested_base_id, allowed_base_ids):
         return _json_result(_blocked_result(agent_id, "knowledge_base_not_in_memory_policy"))
 
     try:
@@ -213,7 +213,7 @@ def knowledge_proposal_tool(
     base_id = str(knowledge_base_id or "").strip()
     memory_policy = runtime.get("memoryPolicy") if isinstance(runtime.get("memoryPolicy"), dict) else {}
     allowed_base_ids = _policy_ids(memory_policy, "proposeKnowledgeBaseIds")
-    if base_id and allowed_base_ids and base_id not in allowed_base_ids:
+    if base_id and not _policy_allows_knowledge_base(base_id, allowed_base_ids):
         return _json_result(_blocked_result(agent_id, "knowledge_base_not_in_memory_policy"))
     source_ref = _parse_json_object(source_ref_json, "source_ref_json")
     if isinstance(source_ref, str):
@@ -315,7 +315,7 @@ def knowledge_ingestion_tool(
     base_id = str(knowledge_base_id or "").strip()
     memory_policy = runtime.get("memoryPolicy") if isinstance(runtime.get("memoryPolicy"), dict) else {}
     allowed_base_ids = _policy_ids(memory_policy, "proposeKnowledgeBaseIds")
-    if base_id and allowed_base_ids and base_id not in allowed_base_ids:
+    if base_id and not _policy_allows_knowledge_base(base_id, allowed_base_ids):
         return _json_result(_blocked_result(agent_id, "knowledge_base_not_in_memory_policy"))
     source_ref = _parse_json_object(source_ref_json, "source_ref_json")
     if isinstance(source_ref, str):
@@ -603,7 +603,7 @@ def knowledge_rating_suggestion_tool(
     base_id = str(knowledge_base_id or "").strip()
     memory_policy = runtime.get("memoryPolicy") if isinstance(runtime.get("memoryPolicy"), dict) else {}
     allowed_base_ids = _policy_ids(memory_policy, "rateKnowledgeBaseIds") or _policy_ids(memory_policy, "reviewKnowledgeBaseIds")
-    if base_id and allowed_base_ids and base_id not in allowed_base_ids:
+    if base_id and not _policy_allows_knowledge_base(base_id, allowed_base_ids):
         return _json_result(_blocked_result(agent_id, "knowledge_base_not_in_memory_policy"))
     try:
         from core.web.services import team_knowledge_service
@@ -693,6 +693,17 @@ def _parse_json_object(value: str, field: str) -> dict[str, Any] | str:
 
 def _policy_ids(policy: dict[str, Any], field: str) -> set[str]:
     return {str(item or "").strip() for item in policy.get(field) or [] if str(item or "").strip()}
+
+
+def _policy_allows_knowledge_base(knowledge_base_id: str, allowed_base_ids: set[str]) -> bool:
+    if not allowed_base_ids:
+        return True
+    try:
+        from core.web.services import team_knowledge_service
+
+        return team_knowledge_service.knowledge_base_policy_allows(knowledge_base_id, allowed_base_ids)
+    except Exception:
+        return str(knowledge_base_id or "").strip() in allowed_base_ids
 
 
 def _split_tags(value: str) -> list[str]:

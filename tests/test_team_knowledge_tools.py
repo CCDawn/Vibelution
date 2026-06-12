@@ -259,6 +259,53 @@ def test_knowledge_query_tool_honors_memory_policy_base_ids(tmp_path, monkeypatc
     assert result["error"] == "knowledge_base_not_in_memory_policy"
 
 
+def test_knowledge_query_tool_honors_owner_scoped_memory_policy_ids(tmp_path, monkeypatch):
+    env = _seed_team_knowledge(tmp_path, monkeypatch)
+    second_lead = agent_directory_service.create_agent_instance(display_name="Second Knowledge Lead")
+    second_team = team_service.create_team(
+        name="Second Tool Knowledge Team",
+        members=[{"agentId": second_lead["agentId"], "role": "lead"}],
+    )
+    second_base = team_knowledge_service.create_knowledge_base(
+        second_team["teamId"],
+        name="Tool KB",
+        actor_agent_id=second_lead["agentId"],
+        acl={"grants": {"read": [env["member"]["agentId"]]}},
+    )
+    agent_directory_service.update_agent_instance(
+        env["member"]["agentId"],
+        tool_policy={"allowedTools": ["knowledge_query_tool"]},
+        memory_policy={"readKnowledgeBaseIds": [env["base"]["scopedKnowledgeBaseId"]]},
+    )
+
+    with agent_directory_service.active_agent_runtime(env["member"]["agentId"], session_id="session-knowledge"):
+        allowed = json.loads(
+            team_knowledge_tools.knowledge_query_tool(
+                query="",
+                knowledge_base_id=env["base"]["scopedKnowledgeBaseId"],
+            )
+        )
+        blocked_scoped = json.loads(
+            team_knowledge_tools.knowledge_query_tool(
+                query="",
+                knowledge_base_id=second_base["scopedKnowledgeBaseId"],
+            )
+        )
+        blocked_raw = json.loads(
+            team_knowledge_tools.knowledge_query_tool(
+                query="",
+                knowledge_base_id=env["base"]["knowledgeBaseId"],
+            )
+        )
+
+    assert env["base"]["knowledgeBaseId"] == second_base["knowledgeBaseId"]
+    assert allowed["ok"] is True
+    assert blocked_scoped["ok"] is False
+    assert blocked_scoped["error"] == "knowledge_base_not_in_memory_policy"
+    assert blocked_raw["ok"] is False
+    assert blocked_raw["error"] == "knowledge_base_not_in_memory_policy"
+
+
 def test_knowledge_rag_retrieve_tool_returns_contexts_with_citations(tmp_path, monkeypatch):
     env = _seed_team_knowledge(tmp_path, monkeypatch)
     agent_directory_service.update_agent_instance(

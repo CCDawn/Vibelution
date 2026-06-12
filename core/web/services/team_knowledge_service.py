@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import shutil
 import threading
 import uuid
 from datetime import datetime, timezone
@@ -72,6 +73,9 @@ SCOPES = {"agent", "team", "project", "global"}
 REVIEW_PRIORITIES = {"normal", "elevated", "urgent"}
 SUGGESTION_STATUSES = {"pending", "applied", "rejected"}
 KNOWLEDGE_OWNER_TYPES = {"team", "agent"}
+SOURCE_INBOX_STATUSES = {"pending", "accepted", "rejected", "duplicate", "needs_more_context"}
+SOURCE_REVIEW_DECISIONS = {"accepted", "rejected", "duplicate", "needs_more_context"}
+CENTRAL_SOURCE_STATUSES = {"active", "archived", "superseded"}
 _SAFE_ID_FRAGMENT = re.compile(r"[^A-Za-z0-9_.-]+")
 _SEARCH_TOKEN_PATTERN = re.compile(r"[A-Za-z0-9_.-]+|[\u4e00-\u9fff]")
 _LOCK = threading.RLock()
@@ -384,6 +388,349 @@ def _create_knowledge_base_for_owner(
     }
 
 
+def update_owner_source_governance(
+    owner_type: str,
+    owner_id: str,
+    *,
+    local_steward_agent_ids: list[str] | None = None,
+    actor_agent_id: str = "",
+) -> dict[str, Any]:
+    """Configure owner-local source stewards for the owner inbox."""
+
+    owner = _require_owner_context(owner_type, owner_id)
+    actor_id = str(actor_agent_id or "").strip()
+    if not _can_configure_owner_source_governance(owner, actor_id):
+        raise TeamKnowledgePermissionError("Agent is not allowed to configure this source governance scope.")
+    now = utc_now_iso()
+    payload = {
+        "schemaVersion": SCHEMA_VERSION,
+        "ownerType": owner["ownerType"],
+        "ownerId": owner["ownerId"],
+        "teamId": owner["ownerId"] if owner["ownerType"] == "team" else "",
+        "agentId": owner["ownerId"] if owner["ownerType"] == "agent" else "",
+        "localStewardAgentIds": _unique_strings(local_steward_agent_ids or []),
+        "updatedByAgentId": actor_id,
+        "updatedAt": now,
+    }
+    with _LOCK:
+        _write_json(_owner_source_governance_path(owner), payload)
+        _append_audit(owner, "knowledge.source_governance.updated", payload, actor_agent_id=actor_id)
+    _record_event(
+        "knowledge.source_governance.updated",
+        owner,
+        "",
+        actor_agent_id=actor_id,
+        fields={"localStewardCount": len(payload["localStewardAgentIds"])},
+    )
+    return payload
+
+
+def collect_source_to_inbox(
+    owner_type: str,
+    owner_id: str,
+    *,
+    source_type: str,
+    source_ref: dict[str, Any] | None = None,
+    original_content: str = "",
+    original_filename: str = "",
+    source_created_at: str = "",
+    captured_by: str = "",
+    source_hash: str = "",
+    evidence_range: dict[str, Any] | None = None,
+    title: str = "",
+    summary: str = "",
+    actor_agent_id: str = "",
+) -> dict[str, Any]:
+    """Stage raw source material inside the owning Team/Agent workspace."""
+
+    owner = _require_owner_context(owner_type, owner_id)
+    actor_id = str(actor_agent_id or captured_by or "").strip()
+    if not _can_collect_owner_source(owner, actor_id):
+        raise TeamKnowledgePermissionError("Agent is not allowed to collect sources for this owner.")
+    normalized_type = str(source_type or "").strip()
+    if normalized_type not in SOURCE_TYPES:
+        raise TeamKnowledgeError(f"Unsupported source type: {source_type}")
+    normalized_ref = source_ref if isinstance(source_ref, dict) else {}
+    if normalized_type == "team_chat_refinement":
+        if str(owner.get("ownerType") or "") != "team":
+            raise TeamKnowledgeError("team_chat_refinement sources require a Team owner.")
+        _validate_team_chat_source(owner["team"], normalized_ref)
+    now = utc_now_iso()
+    inbox_source_id = _new_event_id("inboxsrc")
+    safe_title = trim_lines(title or normalized_type, max_lines=1).strip()
+    safe_summary = trim_lines(summary or "", max_lines=16).strip()
+    safe_content = str(original_content or "")
+    normalized_hash = trim_lines(
+        source_hash or _source_hash_with_content(normalized_ref, safe_title, safe_summary, safe_content),
+        max_lines=1,
+    ).strip()
+    original_path = _write_owner_inbox_source_file(
+        owner,
+        inbox_source_id,
+        original_filename=original_filename,
+        original_content=safe_content,
+        source_ref=normalized_ref,
+        title=safe_title,
+        summary=safe_summary,
+    )
+    source = {
+        "schemaVersion": SCHEMA_VERSION,
+        "inboxSourceId": inbox_source_id,
+        "ownerType": owner["ownerType"],
+        "ownerId": owner["ownerId"],
+        "teamId": owner["ownerId"] if owner["ownerType"] == "team" else "",
+        "agentId": owner["ownerId"] if owner["ownerType"] == "agent" else "",
+        "sourceType": normalized_type,
+        "sourceRef": _bounded_dict(normalized_ref),
+        "sourceCreatedAt": trim_lines(source_created_at or "", max_lines=1).strip(),
+        "capturedBy": trim_lines(captured_by or actor_id or "user", max_lines=1).strip(),
+        "capturedAt": now,
+        "sourceHash": normalized_hash,
+        "evidenceRange": _bounded_dict(evidence_range if isinstance(evidence_range, dict) else {}),
+        "title": safe_title,
+        "summary": safe_summary,
+        "originalFilename": _safe_source_filename(original_filename, default=f"{normalized_type}.txt"),
+        "originalPath": _project_relative_path(original_path),
+        "status": "pending",
+        "curationStatus": "owner_inbox",
+        "centralSourceId": "",
+        "dedupeStatus": "",
+        "reviewedAt": "",
+        "reviewedByAgentId": "",
+        "resolutionNote": "",
+        "updatedAt": now,
+    }
+    with _LOCK:
+        sources = _read_jsonl(_owner_source_index_path(owner))
+        sources.append(source)
+        _write_jsonl(_owner_source_index_path(owner), sources)
+        _rewrite_owner_source_review_queue_locked(owner, sources)
+        _append_audit(owner, "knowledge.source_inbox.collected", source, actor_agent_id=actor_id)
+    _record_event(
+        "knowledge.source_inbox.collected",
+        owner,
+        "",
+        actor_agent_id=actor_id,
+        fields={"inboxSourceId": inbox_source_id, "sourceType": normalized_type},
+    )
+    return source
+
+
+def list_owner_source_inbox(
+    owner_type: str,
+    owner_id: str,
+    *,
+    agent_id: str = "",
+    status: str = "",
+) -> dict[str, Any]:
+    owner = _require_owner_context(owner_type, owner_id)
+    actor_id = str(agent_id or "").strip()
+    if not _can_read_owner_source_inbox(owner, actor_id):
+        raise TeamKnowledgePermissionError("Agent is not allowed to read this owner source inbox.")
+    normalized_status = str(status or "").strip().lower()
+    if normalized_status and normalized_status not in SOURCE_INBOX_STATUSES:
+        raise TeamKnowledgeError(f"Unsupported source inbox status: {status}")
+    sources = _read_jsonl(_owner_source_index_path(owner))
+    if normalized_status:
+        sources = [item for item in sources if str(item.get("status") or "") == normalized_status]
+    sources.sort(key=lambda item: str(item.get("updatedAt") or item.get("capturedAt") or ""), reverse=True)
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "ownerType": owner["ownerType"],
+        "ownerId": owner["ownerId"],
+        "teamId": owner["ownerId"] if owner["ownerType"] == "team" else "",
+        "agentId": owner["ownerId"] if owner["ownerType"] == "agent" else "",
+        "actorAgentId": actor_id,
+        "summary": _source_inbox_summary(sources),
+        "sources": sources,
+        "updatedAt": utc_now_iso(),
+    }
+
+
+def review_owner_inbox_source(
+    owner_type: str,
+    owner_id: str,
+    inbox_source_id: str,
+    *,
+    decision: str,
+    reviewed_by_agent_id: str = "",
+    resolution_note: str = "",
+    duplicate_of: str = "",
+) -> dict[str, Any]:
+    """Resolve one owner inbox source and optionally promote it into central source storage."""
+
+    owner = _require_owner_context(owner_type, owner_id)
+    reviewer_id = str(reviewed_by_agent_id or "").strip()
+    if not _can_review_owner_source(owner, reviewer_id):
+        raise TeamKnowledgePermissionError("Agent is not allowed to review this owner source inbox.")
+    normalized_decision = _normalize_source_review_decision(decision)
+    now = utc_now_iso()
+    with _LOCK:
+        sources = _read_jsonl(_owner_source_index_path(owner))
+        source = _find_by_id(sources, "inboxSourceId", inbox_source_id)
+        if not source:
+            raise TeamKnowledgeNotFoundError("Inbox source not found.")
+        current_status = str(source.get("status") or "")
+        if current_status not in {"pending", "needs_more_context"}:
+            raise TeamKnowledgeError("Only pending or needs_more_context inbox sources can be reviewed.")
+        central_source: dict[str, Any] | None = None
+        promotion: dict[str, Any] | None = None
+        if normalized_decision == "accepted":
+            central_source, promotion = _promote_owner_source_to_central_locked(
+                owner,
+                source,
+                reviewer_id=reviewer_id,
+                resolution_note=resolution_note,
+            )
+            source["status"] = "accepted"
+            source["curationStatus"] = "central_curated"
+            source["centralSourceId"] = central_source["centralSourceId"]
+            source["dedupeStatus"] = str(promotion.get("dedupeStatus") or "")
+        elif normalized_decision == "duplicate":
+            central_source = _resolve_duplicate_central_source_locked(source, duplicate_of=duplicate_of)
+            promotion = _append_owner_ref_for_central_source_locked(
+                owner,
+                source,
+                central_source,
+                reviewer_id=reviewer_id,
+                decision="duplicate",
+                resolution_note=resolution_note,
+                dedupe_status="explicit_duplicate",
+            )
+            source["status"] = "duplicate"
+            source["curationStatus"] = "central_curated"
+            source["centralSourceId"] = central_source["centralSourceId"]
+            source["dedupeStatus"] = "explicit_duplicate"
+        elif normalized_decision == "rejected":
+            source["status"] = "rejected"
+            source["curationStatus"] = "owner_rejected"
+            source["dedupeStatus"] = ""
+            _append_jsonl(_owner_source_rejected_path(owner), {**source, "reviewedAt": now, "reviewedByAgentId": reviewer_id})
+        else:
+            source["status"] = "needs_more_context"
+            source["curationStatus"] = "owner_inbox"
+            source["dedupeStatus"] = ""
+        source["reviewedAt"] = now
+        source["reviewedByAgentId"] = reviewer_id
+        source["resolutionNote"] = trim_lines(resolution_note or "", max_lines=6).strip()
+        source["updatedAt"] = now
+        _write_jsonl(_owner_source_index_path(owner), sources)
+        _rewrite_owner_source_review_queue_locked(owner, sources)
+        _append_audit(owner, "knowledge.source_inbox.reviewed", source, actor_agent_id=reviewer_id)
+    _record_event(
+        "knowledge.source_inbox.reviewed",
+        owner,
+        "",
+        actor_agent_id=reviewer_id,
+        fields={
+            "inboxSourceId": str(inbox_source_id or "").strip(),
+            "decision": normalized_decision,
+            "centralSourceId": str((central_source or {}).get("centralSourceId") or ""),
+        },
+    )
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "ownerType": owner["ownerType"],
+        "ownerId": owner["ownerId"],
+        "source": source,
+        "centralSource": central_source,
+        "promotion": promotion,
+        "updatedAt": utc_now_iso(),
+    }
+
+
+def create_source_artifact_from_central_source(
+    knowledge_base_id: str,
+    central_source_id: str,
+    *,
+    actor_agent_id: str = "",
+    evidence_range: dict[str, Any] | None = None,
+    title: str = "",
+    summary: str = "",
+) -> dict[str, Any]:
+    owner, base = _require_base_with_owner(knowledge_base_id)
+    _require_permission(owner, base, actor_agent_id, "propose")
+    central_source, owner_ref = _require_central_source_for_owner(owner, central_source_id, actor_agent_id=actor_agent_id)
+    source_ref = {
+        "centralSourceId": central_source["centralSourceId"],
+        "centralPath": central_source.get("centralPath") or "",
+        "sourceHash": central_source.get("sourceHash") or "",
+        "originalOwnerType": owner_ref.get("ownerType") or central_source.get("originOwnerType") or "",
+        "originalOwnerId": owner_ref.get("ownerId") or central_source.get("originOwnerId") or "",
+        "originalPath": owner_ref.get("originalPath") or central_source.get("originOriginalPath") or "",
+    }
+    return create_source_artifact(
+        knowledge_base_id,
+        source_type=str(central_source.get("sourceType") or "manual_user_entry"),
+        source_ref=source_ref,
+        source_created_at=str(central_source.get("sourceCreatedAt") or ""),
+        captured_by=actor_agent_id,
+        source_hash=str(central_source.get("sourceHash") or ""),
+        evidence_range=evidence_range,
+        title=title or str(central_source.get("title") or ""),
+        summary=summary or str(central_source.get("summary") or ""),
+        actor_agent_id=actor_agent_id,
+        central_source_id=central_source["centralSourceId"],
+        inbox_source_id=str(owner_ref.get("inboxSourceId") or ""),
+    )
+
+
+def list_central_sources(
+    *,
+    agent_id: str = "",
+    owner_type: str = "",
+    owner_id: str = "",
+    internal: bool = False,
+) -> dict[str, Any]:
+    """List accepted central source records visible to the actor."""
+
+    normalized_actor = str(agent_id or "").strip()
+    normalized_owner_type = _normalize_owner_type(owner_type)
+    normalized_owner_id = str(owner_id or "").strip()
+    registry = _read_jsonl(_central_source_registry_path())
+    owner_refs = _read_jsonl(_central_owner_refs_path())
+    visible_owner_refs = [
+        ref
+        for ref in owner_refs
+        if _central_owner_ref_visible(ref, normalized_actor, internal=internal)
+        and (not normalized_owner_type or str(ref.get("ownerType") or "") == normalized_owner_type)
+        and (not normalized_owner_id or str(ref.get("ownerId") or "") == normalized_owner_id)
+    ]
+    visible_source_ids = {str(ref.get("centralSourceId") or "") for ref in visible_owner_refs if str(ref.get("centralSourceId") or "").strip()}
+    if internal or _is_global_knowledge_steward(normalized_actor):
+        visible_source_ids.update(str(source.get("centralSourceId") or "") for source in registry if str(source.get("centralSourceId") or ""))
+    sources = [source for source in registry if str(source.get("centralSourceId") or "") in visible_source_ids]
+    sources.sort(key=lambda item: str(item.get("updatedAt") or item.get("acceptedAt") or ""), reverse=True)
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "agentId": normalized_actor,
+        "ownerType": normalized_owner_type,
+        "ownerId": normalized_owner_id,
+        "summary": {"centralSourceCount": len(sources), "ownerRefCount": len(visible_owner_refs)},
+        "centralSources": sources,
+        "ownerRefs": visible_owner_refs,
+        "updatedAt": utc_now_iso(),
+    }
+
+
+def knowledge_base_policy_allows(knowledge_base_id: str, policy_ids: set[str] | list[str] | tuple[str, ...]) -> bool:
+    """Return whether a tool memoryPolicy allows a raw or owner-scoped knowledge base id."""
+
+    normalized_policy_ids = {str(item or "").strip() for item in list(policy_ids or []) if str(item or "").strip()}
+    if not normalized_policy_ids:
+        return True
+    requested = str(knowledge_base_id or "").strip()
+    if not requested:
+        return False
+    if requested in normalized_policy_ids:
+        return True
+    owner_type, owner_id, base_id = _parse_owner_scoped_knowledge_base_id(requested)
+    has_scoped_policy = any(_parse_owner_scoped_knowledge_base_id(item)[0] for item in normalized_policy_ids)
+    if owner_type and owner_id and base_id and base_id in normalized_policy_ids and not has_scoped_policy:
+        return True
+    return False
+
+
 def create_source_artifact(
     knowledge_base_id: str,
     *,
@@ -396,10 +743,23 @@ def create_source_artifact(
     title: str = "",
     summary: str = "",
     actor_agent_id: str = "",
+    central_source_id: str = "",
+    inbox_source_id: str = "",
 ) -> dict[str, Any]:
     owner, base = _require_base_with_owner(knowledge_base_id)
     _require_permission(owner, base, actor_agent_id, "propose")
+    central_source: dict[str, Any] | None = None
+    owner_ref: dict[str, Any] = {}
+    normalized_central_source_id = str(central_source_id or "").strip()
+    if normalized_central_source_id:
+        central_source, owner_ref = _require_central_source_for_owner(
+            owner,
+            normalized_central_source_id,
+            actor_agent_id=actor_agent_id,
+        )
     normalized_type = str(source_type or "").strip()
+    if not normalized_type and central_source:
+        normalized_type = str(central_source.get("sourceType") or "").strip()
     if normalized_type not in SOURCE_TYPES:
         raise TeamKnowledgeError(f"Unsupported source type: {source_type}")
     normalized_ref = source_ref if isinstance(source_ref, dict) else {}
@@ -420,10 +780,13 @@ def create_source_artifact(
         "capturedAt": now,
         "sourceCreatedAt": trim_lines(source_created_at or "", max_lines=1).strip(),
         "capturedBy": trim_lines(captured_by or actor_agent_id or "user", max_lines=1).strip(),
-        "sourceHash": trim_lines(source_hash or _source_hash(normalized_ref, title, summary), max_lines=1).strip(),
+        "sourceHash": trim_lines(source_hash or str((central_source or {}).get("sourceHash") or "") or _source_hash(normalized_ref, title, summary), max_lines=1).strip(),
         "evidenceRange": _bounded_dict(evidence_range if isinstance(evidence_range, dict) else {}),
         "title": trim_lines(title or normalized_type, max_lines=1).strip(),
         "summary": trim_lines(summary or "", max_lines=8).strip(),
+        "centralSourceId": normalized_central_source_id,
+        "inboxSourceId": trim_lines(inbox_source_id or str(owner_ref.get("inboxSourceId") or ""), max_lines=1).strip(),
+        "curationStatus": "central_curated" if normalized_central_source_id else "source_artifact",
     }
     with _LOCK:
         _append_jsonl(_source_artifacts_path_for_owner(owner), artifact)
@@ -458,11 +821,20 @@ def create_refinement_proposal(
     if not normalized_content:
         raise TeamKnowledgeError("Proposal content is required.")
     artifact_ids = _unique_strings(source_artifact_ids or [])
+    central_source_ids: list[str] = []
     if artifact_ids:
-        known_artifacts = {item["sourceArtifactId"] for item in _source_artifacts_for_base(owner, base["knowledgeBaseId"])}
+        artifacts_by_id = {
+            str(item.get("sourceArtifactId") or ""): item
+            for item in _source_artifacts_for_base(owner, base["knowledgeBaseId"])
+        }
+        known_artifacts = set(artifacts_by_id)
         missing = [item for item in artifact_ids if item not in known_artifacts]
         if missing:
             raise TeamKnowledgeError(f"Unknown source artifact ids: {', '.join(missing[:3])}")
+        central_source_ids = _unique_strings(
+            str((artifacts_by_id.get(item_id) or {}).get("centralSourceId") or "")
+            for item_id in artifact_ids
+        )
     now = utc_now_iso()
     proposal = {
         "proposalId": _new_event_id("kprop"),
@@ -472,6 +844,7 @@ def create_refinement_proposal(
         "agentId": owner["ownerId"] if owner["ownerType"] == "agent" else "",
         "targetKnowledgeBaseId": base["knowledgeBaseId"],
         "sourceArtifactIds": artifact_ids,
+        "centralSourceIds": central_source_ids,
         "proposedByAgentId": actor_agent_id,
         "status": "pending",
         "title": normalized_title,
@@ -2073,6 +2446,18 @@ def _require_agent(agent_id: str) -> dict[str, Any]:
     return agent
 
 
+def _require_owner_context(owner_type: str, owner_id: str) -> dict[str, Any]:
+    normalized_type = _normalize_owner_type(owner_type)
+    normalized_id = str(owner_id or "").strip()
+    if not normalized_id:
+        raise TeamKnowledgeError("Owner id is required.")
+    if normalized_type == "team":
+        return _owner_context("team", normalized_id, team=_require_team(normalized_id))
+    if normalized_type == "agent":
+        return _owner_context("agent", normalized_id, agent=_require_agent(normalized_id))
+    raise TeamKnowledgeError("Owner type is required.")
+
+
 def _knowledge_base_to_api(base: dict[str, Any], owner_value: dict[str, Any]) -> dict[str, Any]:
     owner = _coerce_owner_context(owner_value)
     owner_type = str(base.get("ownerType") or owner.get("ownerType") or "team").strip() or "team"
@@ -2180,6 +2565,64 @@ def _can_access(owner_value: Any, base: dict[str, Any], agent_id: str, action: s
     return False
 
 
+def _can_collect_owner_source(owner_value: Any, agent_id: str) -> bool:
+    owner = _coerce_owner_context(owner_value)
+    normalized_agent_id = str(agent_id or "").strip()
+    if not normalized_agent_id:
+        return False
+    if _is_global_knowledge_steward(normalized_agent_id):
+        return True
+    if str(owner.get("ownerType") or "") == "agent":
+        return str(owner.get("ownerId") or "") == normalized_agent_id
+    return bool(_member_role(owner.get("team") if isinstance(owner.get("team"), dict) else {}, normalized_agent_id))
+
+
+def _can_read_owner_source_inbox(owner_value: Any, agent_id: str) -> bool:
+    return _can_collect_owner_source(owner_value, agent_id) or _can_review_owner_source(owner_value, agent_id)
+
+
+def _can_review_owner_source(owner_value: Any, agent_id: str) -> bool:
+    owner = _coerce_owner_context(owner_value)
+    normalized_agent_id = str(agent_id or "").strip()
+    if not normalized_agent_id:
+        return False
+    if _is_global_knowledge_steward(normalized_agent_id):
+        return True
+    if normalized_agent_id in _source_governance_for_owner(owner).get("localStewardAgentIds", []):
+        return True
+    if str(owner.get("ownerType") or "") == "agent":
+        return str(owner.get("ownerId") or "") == normalized_agent_id
+    role = _member_role(owner.get("team") if isinstance(owner.get("team"), dict) else {}, normalized_agent_id)
+    return role in REVIEW_ROLES
+
+
+def _can_configure_owner_source_governance(owner_value: Any, agent_id: str) -> bool:
+    owner = _coerce_owner_context(owner_value)
+    normalized_agent_id = str(agent_id or "").strip()
+    if not normalized_agent_id:
+        return False
+    if _is_global_knowledge_steward(normalized_agent_id):
+        return True
+    if str(owner.get("ownerType") or "") == "agent":
+        return str(owner.get("ownerId") or "") == normalized_agent_id
+    role = _member_role(owner.get("team") if isinstance(owner.get("team"), dict) else {}, normalized_agent_id)
+    return role in REVIEW_ROLES
+
+
+def _is_global_knowledge_steward(agent_id: str) -> bool:
+    normalized_agent_id = str(agent_id or "").strip()
+    if not normalized_agent_id:
+        return False
+    if normalized_agent_id == getattr(agent_directory_service, "KNOWLEDGE_STEWARD_AGENT_ID", ""):
+        return True
+    try:
+        agent = agent_directory_service.get_agent(normalized_agent_id, include_archived=True)
+    except Exception:
+        agent = {}
+    metadata = agent.get("metadata") if isinstance(agent, dict) and isinstance(agent.get("metadata"), dict) else {}
+    return str(metadata.get("governanceRole") or metadata.get("systemRole") or "").strip() == "knowledge_steward"
+
+
 def _permission_explain(
     team: dict[str, Any],
     base: dict[str, Any],
@@ -2191,7 +2634,7 @@ def _permission_explain(
     owner = _coerce_owner_context(team)
     base_id = str(base.get("knowledgeBaseId") or "")
     team_allowed = _can_access(owner, base, agent_id, action, internal=internal)
-    policy_allowed = not policy_ids or base_id in policy_ids
+    policy_allowed = knowledge_base_policy_allows(_owner_scoped_knowledge_base_id(owner, base_id), policy_ids)
     allowed = team_allowed and policy_allowed
     reason = "allowed"
     if not team_allowed:
@@ -2415,10 +2858,12 @@ def _search_item_view(
         "agentName": str(agent.get("displayName") or agent.get("agentCode") or ""),
         "batchId": str(item.get("batchId") or ""),
         "sourceArtifactIds": [str(value) for value in list(item.get("sourceArtifactIds") or [])[:12] if str(value or "").strip()],
+        "centralSourceIds": [str(value) for value in list(item.get("centralSourceIds") or [])[:12] if str(value or "").strip()],
         "sourceTypes": sorted({str(source.get("sourceType") or "") for source in source_artifacts if str(source.get("sourceType") or "")}),
         "sourceSummaries": [
             {
                 "sourceArtifactId": str(source.get("sourceArtifactId") or ""),
+                "centralSourceId": str(source.get("centralSourceId") or ""),
                 "sourceType": str(source.get("sourceType") or ""),
                 "capturedAt": str(source.get("capturedAt") or ""),
                 "title": trim_lines(str(source.get("title") or ""), max_lines=1),
@@ -2646,6 +3091,7 @@ def _batch_from_proposal(
         "knowledgeBaseId": base["knowledgeBaseId"],
         "proposalIds": [proposal["proposalId"]],
         "sourceArtifactIds": list(proposal.get("sourceArtifactIds") or []),
+        "centralSourceIds": list(proposal.get("centralSourceIds") or []),
         "reviewedByAgentId": reviewer_id,
         "appliedAt": now,
         "status": "applied",
@@ -2670,6 +3116,7 @@ def _item_from_proposal(
         "knowledgeBaseId": base["knowledgeBaseId"],
         "batchId": batch["batchId"],
         "sourceArtifactIds": list(proposal.get("sourceArtifactIds") or []),
+        "centralSourceIds": list(proposal.get("centralSourceIds") or []),
         "title": proposal.get("title") or "",
         "summary": proposal.get("summary") or "",
         "content": proposal.get("content") or "",
@@ -2749,6 +3196,32 @@ def _load_bases_state(team_id: str) -> dict[str, Any]:
     return _load_bases_state_for_owner(_owner_context("team", team_id))
 
 
+def _source_governance_for_owner(owner_value: Any) -> dict[str, Any]:
+    owner = _coerce_owner_context(owner_value)
+    path = _owner_source_governance_path(owner)
+    if not path.exists():
+        return {
+            "schemaVersion": SCHEMA_VERSION,
+            "ownerType": owner["ownerType"],
+            "ownerId": owner["ownerId"],
+            "localStewardAgentIds": [],
+            "updatedAt": "",
+        }
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+    return {
+        "schemaVersion": int(payload.get("schemaVersion") or SCHEMA_VERSION),
+        "ownerType": str(payload.get("ownerType") or owner["ownerType"]),
+        "ownerId": str(payload.get("ownerId") or owner["ownerId"]),
+        "localStewardAgentIds": _unique_strings(payload.get("localStewardAgentIds") or []),
+        "updatedAt": str(payload.get("updatedAt") or ""),
+    }
+
+
 def _save_bases_state_for_owner(owner_value: Any, state: dict[str, Any]) -> None:
     _write_json(_knowledge_bases_path_for_owner(_coerce_owner_context(owner_value)), state)
 
@@ -2773,6 +3246,8 @@ def _append_audit(owner_value: Any, action: str, payload: dict[str, Any], *, act
                 "agentId": payload.get("agentId"),
                 "knowledgeBaseId": payload.get("knowledgeBaseId") or payload.get("targetKnowledgeBaseId"),
                 "sourceArtifactId": payload.get("sourceArtifactId"),
+                "inboxSourceId": payload.get("inboxSourceId"),
+                "centralSourceId": payload.get("centralSourceId"),
                 "proposalId": payload.get("proposalId"),
                 "batchId": payload.get("batchId"),
                 "knowledgeItemId": payload.get("knowledgeItemId"),
@@ -2835,6 +3310,356 @@ def _bounded_dict(payload: dict[str, Any]) -> dict[str, Any]:
 def _source_hash(source_ref: dict[str, Any], title: str, summary: str) -> str:
     text = json.dumps({"sourceRef": source_ref, "title": title, "summary": summary}, ensure_ascii=False, sort_keys=True)
     return hashlib.sha1(text.encode("utf-8")).hexdigest()
+
+
+def _source_hash_with_content(source_ref: dict[str, Any], title: str, summary: str, original_content: str) -> str:
+    payload = {
+        "sourceRef": source_ref,
+        "title": title,
+        "summary": summary,
+        "originalContent": original_content,
+    }
+    text = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _normalize_source_review_decision(decision: str) -> str:
+    normalized = str(decision or "").strip().lower().replace("-", "_")
+    aliases = {
+        "accept": "accepted",
+        "approve": "accepted",
+        "approved": "accepted",
+        "reject": "rejected",
+        "more_context": "needs_more_context",
+        "need_more_context": "needs_more_context",
+        "needs_more": "needs_more_context",
+    }
+    normalized = aliases.get(normalized, normalized)
+    if normalized not in SOURCE_REVIEW_DECISIONS:
+        raise TeamKnowledgeError("Source review decision must be accepted, rejected, duplicate, or needs_more_context.")
+    return normalized
+
+
+def _write_owner_inbox_source_file(
+    owner_value: Any,
+    inbox_source_id: str,
+    *,
+    original_filename: str,
+    original_content: str,
+    source_ref: dict[str, Any],
+    title: str,
+    summary: str,
+) -> Path:
+    owner = _coerce_owner_context(owner_value)
+    default_filename = "source.txt" if str(original_content or "") else "source.json"
+    filename = _safe_source_filename(original_filename, default=default_filename)
+    source_dir = _owner_inbox_source_dir(owner, inbox_source_id)
+    path = source_dir / filename
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if str(original_content or ""):
+        path.write_text(str(original_content), encoding="utf-8")
+    else:
+        path.write_text(
+            json.dumps(
+                {
+                    "schemaVersion": SCHEMA_VERSION,
+                    "sourceRef": _bounded_dict(source_ref),
+                    "title": title,
+                    "summary": summary,
+                    "capturedAt": utc_now_iso(),
+                },
+                ensure_ascii=False,
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+    return path
+
+
+def _promote_owner_source_to_central_locked(
+    owner_value: Any,
+    source: dict[str, Any],
+    *,
+    reviewer_id: str,
+    resolution_note: str,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    owner = _coerce_owner_context(owner_value)
+    source_hash = str(source.get("sourceHash") or "").strip()
+    if not source_hash:
+        raise TeamKnowledgeError("Inbox source requires sourceHash before central promotion.")
+    existing = _find_central_source_by_hash_locked(source_hash)
+    dedupe_status = "reused" if existing else "created"
+    if existing:
+        central_source = existing
+    else:
+        now = utc_now_iso()
+        central_source_id = _new_event_id("csrc")
+        central_path = _copy_or_write_central_source_file(owner, source, central_source_id)
+        central_source = {
+            "schemaVersion": SCHEMA_VERSION,
+            "centralSourceId": central_source_id,
+            "status": "active",
+            "sourceHash": source_hash,
+            "sourceType": str(source.get("sourceType") or ""),
+            "sourceRef": _bounded_dict(source.get("sourceRef") if isinstance(source.get("sourceRef"), dict) else {}),
+            "sourceCreatedAt": str(source.get("sourceCreatedAt") or ""),
+            "title": trim_lines(str(source.get("title") or ""), max_lines=1).strip(),
+            "summary": trim_lines(str(source.get("summary") or ""), max_lines=16).strip(),
+            "centralPath": _project_relative_path(central_path),
+            "originOwnerType": owner["ownerType"],
+            "originOwnerId": owner["ownerId"],
+            "originInboxSourceId": str(source.get("inboxSourceId") or ""),
+            "originOriginalPath": str(source.get("originalPath") or ""),
+            "acceptedByAgentId": reviewer_id,
+            "acceptedAt": now,
+            "updatedAt": now,
+        }
+        registry = _read_jsonl(_central_source_registry_path())
+        registry.append(central_source)
+        _write_jsonl(_central_source_registry_path(), registry)
+    promotion = _append_owner_ref_for_central_source_locked(
+        owner,
+        source,
+        central_source,
+        reviewer_id=reviewer_id,
+        decision="accepted",
+        resolution_note=resolution_note,
+        dedupe_status=dedupe_status,
+    )
+    return central_source, promotion
+
+
+def _resolve_duplicate_central_source_locked(source: dict[str, Any], *, duplicate_of: str) -> dict[str, Any]:
+    normalized_duplicate_of = str(duplicate_of or "").strip()
+    central_source = _find_central_source_by_id_locked(normalized_duplicate_of) if normalized_duplicate_of else {}
+    if not central_source:
+        central_source = _find_central_source_by_hash_locked(str(source.get("sourceHash") or "").strip())
+    if not central_source:
+        raise TeamKnowledgeError("Duplicate source review requires duplicateOf or an existing central source with the same sourceHash.")
+    return central_source
+
+
+def _append_owner_ref_for_central_source_locked(
+    owner_value: Any,
+    source: dict[str, Any],
+    central_source: dict[str, Any],
+    *,
+    reviewer_id: str,
+    decision: str,
+    resolution_note: str,
+    dedupe_status: str,
+) -> dict[str, Any]:
+    owner = _coerce_owner_context(owner_value)
+    central_source_id = str(central_source.get("centralSourceId") or "").strip()
+    inbox_source_id = str(source.get("inboxSourceId") or "").strip()
+    now = utc_now_iso()
+    refs = _read_jsonl(_central_owner_refs_path())
+    for ref in refs:
+        if (
+            str(ref.get("centralSourceId") or "") == central_source_id
+            and str(ref.get("ownerType") or "") == owner["ownerType"]
+            and str(ref.get("ownerId") or "") == owner["ownerId"]
+            and str(ref.get("inboxSourceId") or "") == inbox_source_id
+        ):
+            return {
+                "promotionId": str(ref.get("promotionId") or ""),
+                "ownerRefId": str(ref.get("ownerRefId") or ""),
+                "centralSourceId": central_source_id,
+                "dedupeStatus": "existing_owner_ref",
+                "decision": str(ref.get("decision") or decision),
+            }
+    owner_ref_id = _new_event_id("srcown")
+    promotion_id = _new_event_id("srcprom")
+    ref = {
+        "schemaVersion": SCHEMA_VERSION,
+        "ownerRefId": owner_ref_id,
+        "promotionId": promotion_id,
+        "centralSourceId": central_source_id,
+        "ownerType": owner["ownerType"],
+        "ownerId": owner["ownerId"],
+        "teamId": owner["ownerId"] if owner["ownerType"] == "team" else "",
+        "agentId": owner["ownerId"] if owner["ownerType"] == "agent" else "",
+        "inboxSourceId": inbox_source_id,
+        "originalPath": str(source.get("originalPath") or ""),
+        "sourceHash": str(source.get("sourceHash") or ""),
+        "decision": decision,
+        "dedupeStatus": dedupe_status,
+        "reviewedByAgentId": reviewer_id,
+        "resolutionNote": trim_lines(resolution_note or "", max_lines=6).strip(),
+        "createdAt": now,
+        "updatedAt": now,
+    }
+    refs.append(ref)
+    _write_jsonl(_central_owner_refs_path(), refs)
+    promotion = {
+        "schemaVersion": SCHEMA_VERSION,
+        "promotionId": promotion_id,
+        "ownerRefId": owner_ref_id,
+        "centralSourceId": central_source_id,
+        "ownerType": owner["ownerType"],
+        "ownerId": owner["ownerId"],
+        "inboxSourceId": inbox_source_id,
+        "decision": decision,
+        "dedupeStatus": dedupe_status,
+        "reviewedByAgentId": reviewer_id,
+        "createdAt": now,
+    }
+    _append_jsonl(_central_promotion_log_path(), promotion)
+    return promotion
+
+
+def _copy_or_write_central_source_file(owner_value: Any, source: dict[str, Any], central_source_id: str) -> Path:
+    owner = _coerce_owner_context(owner_value)
+    accepted_at = str(source.get("reviewedAt") or source.get("capturedAt") or utc_now_iso())
+    year = _safe_token(accepted_at[:4], default="undated", max_length=16)
+    source_dir = _central_source_accepted_dir() / year / _safe_token(central_source_id, default="source", max_length=128)
+    source_dir.mkdir(parents=True, exist_ok=True)
+    original_path = _project_path_from_relative(str(source.get("originalPath") or ""))
+    filename = _safe_source_filename(str(source.get("originalFilename") or ""), default="source.txt")
+    target_path = source_dir / filename
+    if original_path and original_path.exists() and original_path.is_file():
+        shutil.copy2(original_path, target_path)
+    else:
+        target_path.write_text(
+            json.dumps(
+                {
+                    "schemaVersion": SCHEMA_VERSION,
+                    "ownerType": owner["ownerType"],
+                    "ownerId": owner["ownerId"],
+                    "inboxSourceId": source.get("inboxSourceId") or "",
+                    "sourceType": source.get("sourceType") or "",
+                    "sourceRef": source.get("sourceRef") or {},
+                    "title": source.get("title") or "",
+                    "summary": source.get("summary") or "",
+                    "sourceHash": source.get("sourceHash") or "",
+                },
+                ensure_ascii=False,
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+    return target_path
+
+
+def _require_central_source_for_owner(
+    owner_value: Any,
+    central_source_id: str,
+    *,
+    actor_agent_id: str = "",
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    owner = _coerce_owner_context(owner_value)
+    central_source = _find_central_source_by_id_locked(central_source_id)
+    if not central_source:
+        raise TeamKnowledgeNotFoundError("Central source not found.")
+    if str(central_source.get("status") or "active") not in CENTRAL_SOURCE_STATUSES:
+        raise TeamKnowledgeError("Central source status is invalid.")
+    if str(central_source.get("status") or "active") != "active":
+        raise TeamKnowledgePermissionError("Central source is not active.")
+    refs = [
+        ref
+        for ref in _read_jsonl(_central_owner_refs_path())
+        if str(ref.get("centralSourceId") or "") == str(central_source.get("centralSourceId") or "")
+        and str(ref.get("ownerType") or "") == owner["ownerType"]
+        and str(ref.get("ownerId") or "") == owner["ownerId"]
+    ]
+    if refs:
+        return central_source, refs[0]
+    if _is_global_knowledge_steward(str(actor_agent_id or "").strip()):
+        return central_source, {}
+    raise TeamKnowledgePermissionError("Central source is not linked to this owner.")
+
+
+def _find_central_source_by_hash_locked(source_hash: str) -> dict[str, Any]:
+    normalized_hash = str(source_hash or "").strip()
+    if not normalized_hash:
+        return {}
+    for source in _read_jsonl(_central_source_registry_path()):
+        if str(source.get("sourceHash") or "").strip() == normalized_hash:
+            return source
+    return {}
+
+
+def _find_central_source_by_id_locked(central_source_id: str) -> dict[str, Any]:
+    normalized_id = str(central_source_id or "").strip()
+    if not normalized_id:
+        return {}
+    for source in _read_jsonl(_central_source_registry_path()):
+        if str(source.get("centralSourceId") or "").strip() == normalized_id:
+            return source
+    return {}
+
+
+def _central_owner_ref_visible(ref: dict[str, Any], agent_id: str, *, internal: bool = False) -> bool:
+    if internal:
+        return True
+    normalized_agent_id = str(agent_id or "").strip()
+    if _is_global_knowledge_steward(normalized_agent_id):
+        return True
+    owner = _owner_context(str(ref.get("ownerType") or ""), str(ref.get("ownerId") or ""))
+    return _can_read_owner_source_inbox(owner, normalized_agent_id)
+
+
+def _rewrite_owner_source_review_queue_locked(owner_value: Any, sources: list[dict[str, Any]]) -> None:
+    pending_sources = [
+        source
+        for source in sources
+        if str(source.get("status") or "") in {"pending", "needs_more_context"}
+    ]
+    _write_jsonl(_owner_source_review_queue_path(owner_value), pending_sources)
+
+
+def _source_inbox_summary(sources: list[dict[str, Any]]) -> dict[str, Any]:
+    status_counts = {status: 0 for status in sorted(SOURCE_INBOX_STATUSES)}
+    for source in sources:
+        status = str(source.get("status") or "")
+        if status in status_counts:
+            status_counts[status] += 1
+    return {
+        "sourceCount": len(sources),
+        "pendingSourceCount": status_counts.get("pending", 0),
+        "acceptedSourceCount": status_counts.get("accepted", 0),
+        "rejectedSourceCount": status_counts.get("rejected", 0),
+        "duplicateSourceCount": status_counts.get("duplicate", 0),
+        "needsMoreContextSourceCount": status_counts.get("needs_more_context", 0),
+        "statusCounts": status_counts,
+    }
+
+
+def _safe_source_filename(value: Any, *, default: str) -> str:
+    raw = Path(str(value or "")).name.strip()
+    if not raw:
+        raw = default
+    safe = _SAFE_ID_FRAGMENT.sub("-", raw).strip(".-_")
+    if not safe:
+        safe = default
+    if "." not in safe and "." in default:
+        safe = f"{safe}{Path(default).suffix}"
+    return safe[:180]
+
+
+def _project_relative_path(path: Path) -> str:
+    try:
+        return path.resolve().relative_to(_project_root().resolve()).as_posix()
+    except (OSError, ValueError):
+        return str(path)
+
+
+def _project_path_from_relative(value: str) -> Path:
+    text = str(value or "").strip()
+    if not text:
+        return Path()
+    candidate = Path(text)
+    if not candidate.is_absolute():
+        candidate = _project_root() / candidate
+    try:
+        candidate.resolve().relative_to(_project_root().resolve())
+    except (OSError, ValueError):
+        return Path()
+    return candidate
 
 
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -2976,6 +3801,31 @@ def _source_artifacts_path(team_id: str) -> Path:
     return _knowledge_root(team_id) / "source_artifacts.jsonl"
 
 
+def _owner_source_governance_path(owner_value: Any) -> Path:
+    return _knowledge_root_for_owner(owner_value) / "source_governance.json"
+
+
+def _owner_inbox_root_for_owner(owner_value: Any) -> Path:
+    return _knowledge_root_for_owner(owner_value) / "inbox"
+
+
+def _owner_inbox_source_dir(owner_value: Any, inbox_source_id: str) -> Path:
+    safe_id = _safe_token(inbox_source_id, default="source", max_length=128)
+    return _owner_inbox_root_for_owner(owner_value) / "sources" / safe_id
+
+
+def _owner_source_index_path(owner_value: Any) -> Path:
+    return _owner_inbox_root_for_owner(owner_value) / "source_index.jsonl"
+
+
+def _owner_source_review_queue_path(owner_value: Any) -> Path:
+    return _owner_inbox_root_for_owner(owner_value) / "review_queue.jsonl"
+
+
+def _owner_source_rejected_path(owner_value: Any) -> Path:
+    return _owner_inbox_root_for_owner(owner_value) / "rejected.jsonl"
+
+
 def _proposals_path_for_owner(owner_value: Any) -> Path:
     return _knowledge_root_for_owner(owner_value) / "refinement_proposals.jsonl"
 
@@ -3014,6 +3864,34 @@ def _rating_suggestions_path_for_owner(owner_value: Any) -> Path:
 
 def _rating_suggestions_path(team_id: str) -> Path:
     return _knowledge_root(team_id) / "rating_suggestions.jsonl"
+
+
+def _central_knowledge_root() -> Path:
+    return _project_root() / "workspace" / "knowledge"
+
+
+def _central_sources_root() -> Path:
+    return _central_knowledge_root() / "sources"
+
+
+def _central_source_accepted_dir() -> Path:
+    return _central_sources_root() / "accepted"
+
+
+def _central_source_registry_root() -> Path:
+    return _central_sources_root() / "registry"
+
+
+def _central_source_registry_path() -> Path:
+    return _central_source_registry_root() / "source_registry.jsonl"
+
+
+def _central_owner_refs_path() -> Path:
+    return _central_source_registry_root() / "owner_refs.jsonl"
+
+
+def _central_promotion_log_path() -> Path:
+    return _central_source_registry_root() / "promotion_log.jsonl"
 
 
 def _project_root() -> Path:
