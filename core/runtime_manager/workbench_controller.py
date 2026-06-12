@@ -128,7 +128,7 @@ def _listening_pid_for_port_windows(port: int) -> int:
     )
     try:
         result = subprocess.run(
-            ["powershell.exe", "-NoProfile", "-Command", command],
+            ["powershell.exe", "-NoProfile", "-WindowStyle", "Hidden", "-Command", command],
             stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
@@ -408,7 +408,7 @@ def observe_workbench() -> dict[str, Any]:
 def _creation_flag_names() -> tuple[str, ...]:
     if os.name != "nt":
         return ()
-    return ("CREATE_NEW_PROCESS_GROUP", "CREATE_NO_WINDOW")
+    return ("DETACHED_PROCESS", "CREATE_NEW_PROCESS_GROUP", "CREATE_NO_WINDOW")
 
 
 def _creation_flags() -> int:
@@ -442,6 +442,8 @@ def _launcher_command_args(action: str, *, no_browser: bool = False) -> list[str
         args = [
             "powershell.exe",
             "-NoProfile",
+            "-WindowStyle",
+            "Hidden",
             "-ExecutionPolicy",
             "Bypass",
             "-File",

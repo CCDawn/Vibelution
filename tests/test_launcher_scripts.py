@@ -2349,6 +2349,9 @@ if ($launcherActionText -notmatch 'CreateNoWindow\\s*=\\s*\\$true') {
 if ($launcherActionText -notmatch 'UseShellExecute\\s*=\\s*\\$false') {
     throw "Desktop entry launcher action does not avoid shell execution."
 }
+if ($launcherActionText -notmatch '"-WindowStyle"\\s*,\\s*"Hidden"') {
+    throw "Desktop entry launcher action does not force hidden PowerShell windows."
+}
 if ($launcherActionText -notmatch "RedirectStandardOutput" -or $launcherActionText -notmatch "RedirectStandardError") {
     throw "Desktop entry launcher action does not capture output."
 }

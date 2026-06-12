@@ -374,6 +374,8 @@ def test_launcher_command_keeps_powershell_adapter_on_windows(monkeypatch, tmp_p
     assert args == [
         "powershell.exe",
         "-NoProfile",
+        "-WindowStyle",
+        "Hidden",
         "-ExecutionPolicy",
         "Bypass",
         "-File",
@@ -3799,7 +3801,7 @@ def test_run_launcher_action_passes_configured_port_to_launcher_env(monkeypatch)
     assert completed["durationMs"] >= 0
 
 
-def test_run_launcher_action_hides_powershell_adapter_without_detaching(monkeypatch):
+def test_run_launcher_action_hides_powershell_adapter_with_detached_process(monkeypatch):
     captured = {}
 
     class DummyStartupInfo:
@@ -3825,13 +3827,37 @@ def test_run_launcher_action_hides_powershell_adapter_without_detaching(monkeypa
     result = workbench_controller.run_launcher_action("internal-start")
 
     assert result.returncode == 0
-    assert not captured["kwargs"]["creationflags"] & 0x00000008
+    assert captured["kwargs"]["creationflags"] & 0x00000008
     assert captured["kwargs"]["creationflags"] & 0x00000200
     assert captured["kwargs"]["creationflags"] & 0x08000000
     startupinfo = captured["kwargs"]["startupinfo"]
     assert isinstance(startupinfo, DummyStartupInfo)
     assert startupinfo.dwFlags & 0x00000001
     assert startupinfo.wShowWindow == 0
+
+
+def test_listening_pid_probe_hides_powershell_adapter_with_detached_process(monkeypatch):
+    captured = {}
+
+    def fake_run(args, **kwargs):
+        captured["args"] = args
+        captured["kwargs"] = kwargs
+        return subprocess.CompletedProcess(args=args, returncode=0, stdout="12345\n", stderr="")
+
+    monkeypatch.setattr(workbench_controller.os, "name", "nt", raising=False)
+    monkeypatch.setattr(workbench_controller.subprocess, "DETACHED_PROCESS", 0x00000008, raising=False)
+    monkeypatch.setattr(workbench_controller.subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200, raising=False)
+    monkeypatch.setattr(workbench_controller.subprocess, "CREATE_NO_WINDOW", 0x08000000, raising=False)
+    monkeypatch.setattr(workbench_controller.subprocess, "run", fake_run)
+
+    pid = workbench_controller._listening_pid_for_port_windows(8000)
+
+    assert pid == 12345
+    assert captured["args"][:5] == ["powershell.exe", "-NoProfile", "-WindowStyle", "Hidden", "-Command"]
+    assert captured["kwargs"]["creationflags"] & 0x00000008
+    assert captured["kwargs"]["creationflags"] & 0x00000200
+    assert captured["kwargs"]["creationflags"] & 0x08000000
+    assert captured["kwargs"]["stdin"] is subprocess.DEVNULL
 
 
 def test_handle_open_workbench_restarts_headless_session(monkeypatch):
