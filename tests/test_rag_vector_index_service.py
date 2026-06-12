@@ -3,6 +3,41 @@ import pytest
 from core.web.services import agent_directory_service, chat_room_service, team_knowledge_service, team_service
 
 
+def _source_artifact(
+    knowledge_base_id: str,
+    *,
+    owner_type: str,
+    owner_id: str,
+    actor_agent_id: str,
+    reviewer_agent_id: str,
+    title: str,
+    source_type: str = "manual_user_entry",
+) -> dict:
+    inbox_source = team_knowledge_service.collect_source_to_inbox(
+        owner_type,
+        owner_id,
+        source_type=source_type,
+        source_ref={"note": title},
+        original_content="Vector test source content.",
+        original_filename="vector-source.txt",
+        title=title,
+        actor_agent_id=actor_agent_id,
+    )
+    reviewed = team_knowledge_service.review_owner_inbox_source(
+        owner_type,
+        owner_id,
+        inbox_source["inboxSourceId"],
+        decision="accepted",
+        reviewed_by_agent_id=reviewer_agent_id,
+    )
+    return team_knowledge_service.create_source_artifact_from_central_source(
+        knowledge_base_id,
+        reviewed["centralSource"]["centralSourceId"],
+        actor_agent_id=actor_agent_id,
+        title=title,
+    )
+
+
 @pytest.fixture()
 def vector_index_env(tmp_path, monkeypatch):
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
@@ -25,13 +60,13 @@ def vector_index_env(tmp_path, monkeypatch):
         actor_agent_id=lead["agentId"],
         acl={"grants": {"review": [lead["agentId"]]}},
     )
-    source = team_knowledge_service.create_source_artifact(
+    source = _source_artifact(
         base["knowledgeBaseId"],
-        source_type="manual_user_entry",
-        source_ref={"note": "vector-source"},
-        title="Vector source",
-        summary="Source evidence for vector indexing.",
+        owner_type="team",
+        owner_id=team["teamId"],
         actor_agent_id=member["agentId"],
+        reviewer_agent_id=lead["agentId"],
+        title="Vector source",
     )
     approved_proposal = team_knowledge_service.create_refinement_proposal(
         base["knowledgeBaseId"],
@@ -50,7 +85,16 @@ def vector_index_env(tmp_path, monkeypatch):
     )["item"]
     pending_proposal = team_knowledge_service.create_refinement_proposal(
         base["knowledgeBaseId"],
-        source_artifact_ids=[],
+        source_artifact_ids=[
+            _source_artifact(
+                base["knowledgeBaseId"],
+                owner_type="team",
+                owner_id=team["teamId"],
+                actor_agent_id=member["agentId"],
+                reviewer_agent_id=lead["agentId"],
+                title="Pending vector source",
+            )["sourceArtifactId"]
+        ],
         proposed_by_agent_id=member["agentId"],
         title="Pending vector proposal",
         summary="This pending proposal must not be indexable yet.",
@@ -149,9 +193,18 @@ def test_vector_index_metadata_includes_agent_owner_partition(tmp_path, monkeypa
         name="Agent Vector Base",
         actor_agent_id=agent["agentId"],
     )
+    source = _source_artifact(
+        base["knowledgeBaseId"],
+        owner_type="agent",
+        owner_id=agent["agentId"],
+        actor_agent_id=agent["agentId"],
+        reviewer_agent_id=agent["agentId"],
+        source_type="agent_authored",
+        title="Agent vector source",
+    )
     proposal = team_knowledge_service.create_refinement_proposal(
         base["knowledgeBaseId"],
-        source_artifact_ids=[],
+        source_artifact_ids=[source["sourceArtifactId"]],
         proposed_by_agent_id=agent["agentId"],
         title="Agent vector partition",
         content="Vector metadata should preserve the Agent owner partition.",
@@ -204,16 +257,34 @@ def test_vector_index_records_are_owner_scoped_for_duplicate_item_ids(tmp_path, 
         name="Collision Vector Base",
         actor_agent_id=second_agent["agentId"],
     )
+    first_source = _source_artifact(
+        first_base["scopedKnowledgeBaseId"],
+        owner_type="agent",
+        owner_id=first_agent["agentId"],
+        actor_agent_id=first_agent["agentId"],
+        reviewer_agent_id=first_agent["agentId"],
+        source_type="agent_authored",
+        title="First vector source",
+    )
+    second_source = _source_artifact(
+        second_base["scopedKnowledgeBaseId"],
+        owner_type="agent",
+        owner_id=second_agent["agentId"],
+        actor_agent_id=second_agent["agentId"],
+        reviewer_agent_id=second_agent["agentId"],
+        source_type="agent_authored",
+        title="Second vector source",
+    )
     first_proposal = team_knowledge_service.create_refinement_proposal(
         first_base["scopedKnowledgeBaseId"],
-        source_artifact_ids=[],
+        source_artifact_ids=[first_source["sourceArtifactId"]],
         proposed_by_agent_id=first_agent["agentId"],
         title="First vector collision",
         content="First owner vector collision content.",
     )
     second_proposal = team_knowledge_service.create_refinement_proposal(
         second_base["scopedKnowledgeBaseId"],
-        source_artifact_ids=[],
+        source_artifact_ids=[second_source["sourceArtifactId"]],
         proposed_by_agent_id=second_agent["agentId"],
         title="Second vector collision",
         content="Second owner vector collision content.",

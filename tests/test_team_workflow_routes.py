@@ -46,6 +46,39 @@ def _use_tmp_project_root(tmp_path, monkeypatch):
     monkeypatch.setattr(team_workflow_orchestration_service, "load_public_config", _fake_local_research_public_config)
 
 
+def _submit_steward_pack_through_source_review_route(
+    client: TestClient,
+    *,
+    team_id: str,
+    candidate_id: str,
+    knowledge_base_id: str,
+    steward_agent_id: str,
+) -> tuple[dict, dict]:
+    source_response = client.post(
+        f"/api/teams/{team_id}/workflow-orchestration/steward-packs/{candidate_id}/knowledge-ingestion",
+        json={"knowledgeBaseId": knowledge_base_id, "proposedByAgentId": steward_agent_id},
+    )
+    assert source_response.status_code == 201, source_response.text
+    source_payload = source_response.json()
+    inbox_source_id = source_payload["candidate"]["metadata"]["knowledgeIngestion"]["inboxSourceId"]
+    review_response = client.patch(
+        f"/api/knowledge/sources/inbox/team/{team_id}/{inbox_source_id}/review",
+        json={"decision": "accepted", "reviewedByAgentId": steward_agent_id},
+    )
+    assert review_response.status_code == 200, review_response.text
+    central_source_id = review_response.json()["centralSource"]["centralSourceId"]
+    knowledge_response = client.post(
+        f"/api/teams/{team_id}/workflow-orchestration/steward-packs/{candidate_id}/knowledge-ingestion",
+        json={
+            "knowledgeBaseId": knowledge_base_id,
+            "proposedByAgentId": steward_agent_id,
+            "centralSourceId": central_source_id,
+        },
+    )
+    assert knowledge_response.status_code == 201, knowledge_response.text
+    return source_payload, knowledge_response.json()
+
+
 def test_team_workflow_routes_run_candidate_transfer_slice(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     client = _client()
@@ -939,20 +972,19 @@ def test_team_workflow_routes_submit_steward_pack_to_knowledge_ingestion(tmp_pat
         },
     ).json()["candidate"]
 
-    response = client.post(
-        f"/api/teams/{team['teamId']}/workflow-orchestration/steward-packs/{candidate['candidateId']}/knowledge-ingestion",
-        json={
-            "knowledgeBaseId": knowledge_base["knowledgeBaseId"],
-            "proposedByAgentId": steward["agentId"],
-        },
+    source_payload, payload = _submit_steward_pack_through_source_review_route(
+        client,
+        team_id=team["teamId"],
+        candidate_id=candidate["candidateId"],
+        knowledge_base_id=knowledge_base["knowledgeBaseId"],
+        steward_agent_id=steward["agentId"],
     )
     items_response = client.get(
         f"/api/knowledge-bases/{knowledge_base['knowledgeBaseId']}/items",
         params={"agentId": steward["agentId"]},
     )
 
-    assert response.status_code == 201, response.text
-    payload = response.json()
+    assert source_payload["candidate"]["currentState"] == "steward_pending_source_review"
     assert payload["candidate"]["currentState"] == "steward_pending_knowledge_review"
     assert payload["knowledgeIngestion"]["package"]["proposal"]["status"] == "pending"
     assert payload["knowledgeIngestion"]["officialBoundary"]["writesOfficialKnowledge"] is False
@@ -1002,13 +1034,14 @@ def test_team_workflow_routes_review_steward_pack_knowledge_ingestion(tmp_path, 
             },
         },
     ).json()["candidate"]
-    pending = client.post(
-        f"/api/teams/{team['teamId']}/workflow-orchestration/steward-packs/{candidate['candidateId']}/knowledge-ingestion",
-        json={
-            "knowledgeBaseId": knowledge_base["knowledgeBaseId"],
-            "proposedByAgentId": steward["agentId"],
-        },
-    ).json()["candidate"]
+    _source_payload, knowledge_payload = _submit_steward_pack_through_source_review_route(
+        client,
+        team_id=team["teamId"],
+        candidate_id=candidate["candidateId"],
+        knowledge_base_id=knowledge_base["knowledgeBaseId"],
+        steward_agent_id=steward["agentId"],
+    )
+    pending = knowledge_payload["candidate"]
 
     response = client.post(
         f"/api/teams/{team['teamId']}/workflow-orchestration/steward-packs/{pending['candidateId']}/knowledge-ingestion/review",

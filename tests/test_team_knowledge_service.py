@@ -28,14 +28,91 @@ def knowledge_env(tmp_path, monkeypatch):
     return {"team": team, "base": base, "lead": lead, "member": member, "outsider": outsider}
 
 
-def test_team_member_can_register_source_and_submit_proposal(knowledge_env):
-    source = team_knowledge_service.create_source_artifact(
+def _promote_central_source(
+    *,
+    owner_type: str,
+    owner_id: str,
+    actor_agent_id: str,
+    reviewer_agent_id: str,
+    source_type: str = "manual_user_entry",
+    source_ref: dict | None = None,
+    title: str = "Test source",
+    summary: str = "Governed test source.",
+    original_content: str = "Governed test source content.",
+) -> dict:
+    inbox_source = team_knowledge_service.collect_source_to_inbox(
+        owner_type,
+        owner_id,
+        source_type=source_type,
+        source_ref=source_ref or {"note": title},
+        original_content=original_content,
+        original_filename="test-source.txt",
+        title=title,
+        summary=summary,
+        actor_agent_id=actor_agent_id,
+    )
+    reviewed = team_knowledge_service.review_owner_inbox_source(
+        owner_type,
+        owner_id,
+        inbox_source["inboxSourceId"],
+        decision="accepted",
+        reviewed_by_agent_id=reviewer_agent_id,
+    )
+    return reviewed["centralSource"]
+
+
+def _create_central_source_artifact(
+    knowledge_base_id: str,
+    *,
+    owner_type: str,
+    owner_id: str,
+    actor_agent_id: str,
+    reviewer_agent_id: str,
+    source_type: str = "manual_user_entry",
+    source_ref: dict | None = None,
+    title: str = "Test source",
+    summary: str = "Governed test source.",
+) -> dict:
+    central_source = _promote_central_source(
+        owner_type=owner_type,
+        owner_id=owner_id,
+        actor_agent_id=actor_agent_id,
+        reviewer_agent_id=reviewer_agent_id,
+        source_type=source_type,
+        source_ref=source_ref,
+        title=title,
+        summary=summary,
+    )
+    return team_knowledge_service.create_source_artifact_from_central_source(
+        knowledge_base_id,
+        central_source["centralSourceId"],
+        actor_agent_id=actor_agent_id,
+        title=title,
+        summary=summary,
+    )
+
+
+def _source_ids_for_env(knowledge_env: dict, *, title: str = "Test source") -> list[str]:
+    source = _create_central_source_artifact(
         knowledge_env["base"]["knowledgeBaseId"],
-        source_type="manual_user_entry",
-        source_ref={"note": "from standup"},
+        owner_type="team",
+        owner_id=knowledge_env["team"]["teamId"],
+        actor_agent_id=knowledge_env["member"]["agentId"],
+        reviewer_agent_id=knowledge_env["lead"]["agentId"],
+        title=title,
+    )
+    return [source["sourceArtifactId"]]
+
+
+def test_team_member_can_register_source_and_submit_proposal(knowledge_env):
+    source = _create_central_source_artifact(
+        knowledge_env["base"]["knowledgeBaseId"],
+        owner_type="team",
+        owner_id=knowledge_env["team"]["teamId"],
+        actor_agent_id=knowledge_env["member"]["agentId"],
+        reviewer_agent_id=knowledge_env["lead"]["agentId"],
         title="Standup source",
         summary="Decision source",
-        actor_agent_id=knowledge_env["member"]["agentId"],
     )
 
     proposal = team_knowledge_service.create_refinement_proposal(
@@ -220,12 +297,15 @@ def test_agent_formal_knowledge_is_private_and_governed(tmp_path, monkeypatch):
         name="Owner Private Formal Knowledge",
         actor_agent_id=owner["agentId"],
     )
-    source = team_knowledge_service.create_source_artifact(
+    source = _create_central_source_artifact(
         base["knowledgeBaseId"],
+        owner_type="agent",
+        owner_id=owner["agentId"],
+        actor_agent_id=owner["agentId"],
+        reviewer_agent_id=owner["agentId"],
         source_type="agent_authored",
         source_ref={"agentId": owner["agentId"], "note": "private formal memory"},
         title="Private source",
-        actor_agent_id=owner["agentId"],
     )
     proposal = team_knowledge_service.create_refinement_proposal(
         base["knowledgeBaseId"],
@@ -301,9 +381,17 @@ def test_duplicate_knowledge_base_ids_require_owner_scope(tmp_path, monkeypatch)
             knowledge_base_id=first_base["knowledgeBaseId"],
         )
 
+    scoped_source = _create_central_source_artifact(
+        first_base["scopedKnowledgeBaseId"],
+        owner_type="team",
+        owner_id=first_team["teamId"],
+        actor_agent_id=first_agent["agentId"],
+        reviewer_agent_id=first_agent["agentId"],
+        title="First scoped source",
+    )
     proposal = team_knowledge_service.create_refinement_proposal(
         first_base["scopedKnowledgeBaseId"],
-        source_artifact_ids=[],
+        source_artifact_ids=[scoped_source["sourceArtifactId"]],
         proposed_by_agent_id=first_agent["agentId"],
         title="First scoped item",
         content="Only the scoped first knowledge base should receive this item.",
@@ -341,12 +429,13 @@ def test_empty_actor_cannot_create_or_read_governed_knowledge_service(knowledge_
             name="Anonymous Agent KB",
         )
 
-    source = team_knowledge_service.create_source_artifact(
+    source = _create_central_source_artifact(
         knowledge_env["base"]["knowledgeBaseId"],
-        source_type="manual_user_entry",
-        source_ref={"note": "empty actor service guard"},
-        title="Empty actor source",
+        owner_type="team",
+        owner_id=knowledge_env["team"]["teamId"],
         actor_agent_id=knowledge_env["member"]["agentId"],
+        reviewer_agent_id=knowledge_env["lead"]["agentId"],
+        title="Empty actor source",
     )
     proposal = team_knowledge_service.create_refinement_proposal(
         knowledge_env["base"]["knowledgeBaseId"],
@@ -401,12 +490,13 @@ def test_team_knowledge_memory_section_summary_uses_lightweight_disk_counts(tmp_
         name="Shared Decisions",
         actor_agent_id=lead["agentId"],
     )
-    source = team_knowledge_service.create_source_artifact(
+    source = _create_central_source_artifact(
         base["knowledgeBaseId"],
-        source_type="manual_user_entry",
-        source_ref={"note": "summary source"},
-        title="Summary source",
+        owner_type="team",
+        owner_id=team["teamId"],
         actor_agent_id=lead["agentId"],
+        reviewer_agent_id=lead["agentId"],
+        title="Summary source",
     )
     proposal = team_knowledge_service.create_refinement_proposal(
         base["knowledgeBaseId"],
@@ -421,9 +511,17 @@ def test_team_knowledge_memory_section_summary_uses_lightweight_disk_counts(tmp_
         status="approved",
         reviewed_by_agent_id=lead["agentId"],
     )
+    pending_source = _create_central_source_artifact(
+        base["knowledgeBaseId"],
+        owner_type="team",
+        owner_id=team["teamId"],
+        actor_agent_id=lead["agentId"],
+        reviewer_agent_id=lead["agentId"],
+        title="Still pending source",
+    )
     team_knowledge_service.create_refinement_proposal(
         base["knowledgeBaseId"],
-        source_artifact_ids=[],
+        source_artifact_ids=[pending_source["sourceArtifactId"]],
         proposed_by_agent_id=lead["agentId"],
         title="Still pending",
         content="This proposal remains pending.",
@@ -439,7 +537,7 @@ def test_team_knowledge_memory_section_summary_uses_lightweight_disk_counts(tmp_
     assert summary["knowledgeBaseCount"] == 1
     assert summary["pendingProposalCount"] == 1
     assert summary["itemCount"] == 1
-    assert summary["sourceArtifactCount"] == 1
+    assert summary["sourceArtifactCount"] == 2
     assert summary["updatedAt"]
 
 
@@ -455,12 +553,15 @@ def test_non_member_cannot_submit_proposal(knowledge_env):
 
 
 def test_review_role_applies_proposal_into_batch_and_item(knowledge_env):
-    source = team_knowledge_service.create_source_artifact(
+    source = _create_central_source_artifact(
         knowledge_env["base"]["knowledgeBaseId"],
+        owner_type="team",
+        owner_id=knowledge_env["team"]["teamId"],
+        actor_agent_id=knowledge_env["member"]["agentId"],
+        reviewer_agent_id=knowledge_env["lead"]["agentId"],
         source_type="agent_authored",
         source_ref={"agentId": knowledge_env["member"]["agentId"]},
         title="Agent note",
-        actor_agent_id=knowledge_env["member"]["agentId"],
     )
     proposal = team_knowledge_service.create_refinement_proposal(
         knowledge_env["base"]["knowledgeBaseId"],
@@ -484,29 +585,41 @@ def test_review_role_applies_proposal_into_batch_and_item(knowledge_env):
     assert reviewed["item"]["sourceArtifactIds"] == [source["sourceArtifactId"]]
 
 
-def test_team_chat_refinement_requires_team_linked_room(knowledge_env):
+def test_team_chat_refinement_source_collection_requires_team_linked_room(knowledge_env):
     with pytest.raises(team_knowledge_service.TeamKnowledgeError, match="linked chat room"):
-        team_knowledge_service.create_source_artifact(
-            knowledge_env["base"]["knowledgeBaseId"],
+        team_knowledge_service.collect_source_to_inbox(
+            "team",
+            knowledge_env["team"]["teamId"],
             source_type="team_chat_refinement",
             source_ref={"roomId": "room-not-linked", "messageRange": {"from": 0, "to": 1}},
             actor_agent_id=knowledge_env["member"]["agentId"],
         )
 
     linked_room_id = knowledge_env["team"]["linkedChatRoomId"]
-    source = team_knowledge_service.create_source_artifact(
+    source = _create_central_source_artifact(
         knowledge_env["base"]["knowledgeBaseId"],
+        owner_type="team",
+        owner_id=knowledge_env["team"]["teamId"],
+        actor_agent_id=knowledge_env["member"]["agentId"],
+        reviewer_agent_id=knowledge_env["lead"]["agentId"],
         source_type="team_chat_refinement",
         source_ref={"roomId": linked_room_id, "messageRange": {"from": 0, "to": 1}},
-        actor_agent_id=knowledge_env["member"]["agentId"],
     )
     assert source["sourceType"] == "team_chat_refinement"
 
 
 def test_rating_update_records_marker_and_audit(knowledge_env, tmp_path):
+    source = _create_central_source_artifact(
+        knowledge_env["base"]["knowledgeBaseId"],
+        owner_type="team",
+        owner_id=knowledge_env["team"]["teamId"],
+        actor_agent_id=knowledge_env["member"]["agentId"],
+        reviewer_agent_id=knowledge_env["lead"]["agentId"],
+        title="Rate knowledge source",
+    )
     proposal = team_knowledge_service.create_refinement_proposal(
         knowledge_env["base"]["knowledgeBaseId"],
-        source_artifact_ids=[],
+        source_artifact_ids=[source["sourceArtifactId"]],
         proposed_by_agent_id=knowledge_env["member"]["agentId"],
         title="Rate knowledge",
         content="Important knowledge can be marked later.",
@@ -540,7 +653,7 @@ def test_rating_update_records_marker_and_audit(knowledge_env, tmp_path):
 def test_rating_suggestion_is_reviewable_before_item_update(knowledge_env):
     proposal = team_knowledge_service.create_refinement_proposal(
         knowledge_env["base"]["knowledgeBaseId"],
-        source_artifact_ids=[],
+        source_artifact_ids=_source_ids_for_env(knowledge_env, title="Suggested rating source"),
         proposed_by_agent_id=knowledge_env["member"]["agentId"],
         title="Suggested rating",
         content="A reviewer should apply rating suggestions before item metadata changes.",
@@ -586,14 +699,14 @@ def test_rating_suggestion_is_reviewable_before_item_update(knowledge_env):
 def test_rating_suggestion_bulk_review_applies_pending_and_skips_closed(knowledge_env, tmp_path):
     proposal_one = team_knowledge_service.create_refinement_proposal(
         knowledge_env["base"]["knowledgeBaseId"],
-        source_artifact_ids=[],
+        source_artifact_ids=_source_ids_for_env(knowledge_env, title="Bulk rating one source"),
         proposed_by_agent_id=knowledge_env["member"]["agentId"],
         title="Bulk rating one",
         content="First item should receive bulk rating.",
     )
     proposal_two = team_knowledge_service.create_refinement_proposal(
         knowledge_env["base"]["knowledgeBaseId"],
-        source_artifact_ids=[],
+        source_artifact_ids=_source_ids_for_env(knowledge_env, title="Bulk rating two source"),
         proposed_by_agent_id=knowledge_env["member"]["agentId"],
         title="Bulk rating two",
         content="Second item should receive bulk rating.",
@@ -669,7 +782,7 @@ def test_rating_suggestion_bulk_review_applies_pending_and_skips_closed(knowledg
 def test_search_filters_only_visible_formal_items(knowledge_env):
     proposal = team_knowledge_service.create_refinement_proposal(
         knowledge_env["base"]["knowledgeBaseId"],
-        source_artifact_ids=[],
+        source_artifact_ids=_source_ids_for_env(knowledge_env, title="Searchable source"),
         proposed_by_agent_id=knowledge_env["member"]["agentId"],
         title="Searchable governance knowledge",
         content="Formal knowledge search should include reviewed items only.",
@@ -722,6 +835,16 @@ def test_permission_audit_explains_tool_memory_and_team_boundaries(knowledge_env
 
 
 def test_ingestion_package_creates_source_and_pending_proposal_only(knowledge_env):
+    central_source = _promote_central_source(
+        owner_type="team",
+        owner_id=knowledge_env["team"]["teamId"],
+        actor_agent_id=knowledge_env["member"]["agentId"],
+        reviewer_agent_id=knowledge_env["lead"]["agentId"],
+        source_type="pdf_refinement",
+        source_ref={"filePath": "workspace/research/report.pdf", "pageRange": "3-5"},
+        title="Report pages 3-5",
+        summary="PDF evidence about memory governance.",
+    )
     package = team_knowledge_service.create_ingestion_package(
         knowledge_env["base"]["knowledgeBaseId"],
         source_type="pdf_refinement",
@@ -732,6 +855,7 @@ def test_ingestion_package_creates_source_and_pending_proposal_only(knowledge_en
         proposed_by_agent_id=knowledge_env["member"]["agentId"],
         proposal_title="Keep PDF page provenance",
         tags=["pdf", "governance"],
+        central_source_id=central_source["centralSourceId"],
     )
     items = team_knowledge_service.list_knowledge_items(
         knowledge_env["base"]["knowledgeBaseId"],
@@ -746,12 +870,13 @@ def test_ingestion_package_creates_source_and_pending_proposal_only(knowledge_en
 
 
 def test_governance_tasks_adapters_and_trace_are_readable(knowledge_env):
-    source = team_knowledge_service.create_source_artifact(
+    source = _create_central_source_artifact(
         knowledge_env["base"]["knowledgeBaseId"],
-        source_type="manual_user_entry",
-        source_ref={"note": "orphan source"},
-        title="Orphan source",
+        owner_type="team",
+        owner_id=knowledge_env["team"]["teamId"],
         actor_agent_id=knowledge_env["member"]["agentId"],
+        reviewer_agent_id=knowledge_env["lead"]["agentId"],
+        title="Orphan source",
     )
     proposal = team_knowledge_service.create_refinement_proposal(
         knowledge_env["base"]["knowledgeBaseId"],
@@ -778,13 +903,16 @@ def test_governance_tasks_adapters_and_trace_are_readable(knowledge_env):
 
 
 def test_memory_knowledge_graph_links_project_agents_team_and_knowledge_without_bodies(knowledge_env):
-    source = team_knowledge_service.create_source_artifact(
+    source = _create_central_source_artifact(
         knowledge_env["base"]["knowledgeBaseId"],
+        owner_type="team",
+        owner_id=knowledge_env["team"]["teamId"],
+        actor_agent_id=knowledge_env["member"]["agentId"],
+        reviewer_agent_id=knowledge_env["lead"]["agentId"],
         source_type="agent_authored",
         source_ref={"agentId": knowledge_env["member"]["agentId"], "excerpt": "do not expose source body"},
         title="Graph source",
         summary="Graph source summary.",
-        actor_agent_id=knowledge_env["member"]["agentId"],
     )
     proposal = team_knowledge_service.create_refinement_proposal(
         knowledge_env["base"]["knowledgeBaseId"],
@@ -829,12 +957,15 @@ def test_memory_knowledge_graph_links_project_agents_team_and_knowledge_without_
 
 
 def test_memory_knowledge_graph_node_detail_returns_acl_scoped_full_content(knowledge_env):
-    source = team_knowledge_service.create_source_artifact(
+    source = _create_central_source_artifact(
         knowledge_env["base"]["knowledgeBaseId"],
+        owner_type="team",
+        owner_id=knowledge_env["team"]["teamId"],
+        actor_agent_id=knowledge_env["member"]["agentId"],
+        reviewer_agent_id=knowledge_env["lead"]["agentId"],
         source_type="agent_authored",
         source_ref={"agentId": knowledge_env["member"]["agentId"]},
         title="Node detail source",
-        actor_agent_id=knowledge_env["member"]["agentId"],
     )
     proposal = team_knowledge_service.create_refinement_proposal(
         knowledge_env["base"]["knowledgeBaseId"],
@@ -879,12 +1010,15 @@ def test_memory_knowledge_graph_node_detail_returns_acl_scoped_full_content(know
 
 
 def test_memory_knowledge_graph_expands_official_research_trace_on_include(knowledge_env):
-    source = team_knowledge_service.create_source_artifact(
+    source = _create_central_source_artifact(
         knowledge_env["base"]["knowledgeBaseId"],
+        owner_type="team",
+        owner_id=knowledge_env["team"]["teamId"],
+        actor_agent_id=knowledge_env["member"]["agentId"],
+        reviewer_agent_id=knowledge_env["lead"]["agentId"],
         source_type="agent_authored",
         source_ref={"agentId": knowledge_env["member"]["agentId"]},
         title="Official graph source",
-        actor_agent_id=knowledge_env["member"]["agentId"],
     )
     proposal = team_knowledge_service.create_refinement_proposal(
         knowledge_env["base"]["knowledgeBaseId"],
@@ -952,7 +1086,7 @@ def test_memory_knowledge_graph_expands_official_research_trace_on_include(knowl
 def test_memory_knowledge_graph_honors_team_knowledge_acl(knowledge_env):
     team_knowledge_service.create_refinement_proposal(
         knowledge_env["base"]["knowledgeBaseId"],
-        source_artifact_ids=[],
+        source_artifact_ids=_source_ids_for_env(knowledge_env, title="ACL source"),
         proposed_by_agent_id=knowledge_env["member"]["agentId"],
         title="Visible only to members",
         content="hidden body",
@@ -986,16 +1120,17 @@ def test_memory_knowledge_graph_uses_lightweight_team_graph_references(knowledge
 
 
 def test_steward_recommendations_are_read_only_actions(knowledge_env):
-    orphan_source = team_knowledge_service.create_source_artifact(
+    orphan_source = _create_central_source_artifact(
         knowledge_env["base"]["knowledgeBaseId"],
-        source_type="manual_user_entry",
-        source_ref={"note": "needs proposal"},
-        title="Source without proposal",
+        owner_type="team",
+        owner_id=knowledge_env["team"]["teamId"],
         actor_agent_id=knowledge_env["member"]["agentId"],
+        reviewer_agent_id=knowledge_env["lead"]["agentId"],
+        title="Source without proposal",
     )
     proposal = team_knowledge_service.create_refinement_proposal(
         knowledge_env["base"]["knowledgeBaseId"],
-        source_artifact_ids=[],
+        source_artifact_ids=_source_ids_for_env(knowledge_env, title="Recommendation proposal source"),
         proposed_by_agent_id=knowledge_env["member"]["agentId"],
         title="Proposal needing review",
         content="Reviewer should inspect this candidate.",
@@ -1031,16 +1166,17 @@ def test_steward_recommendations_are_read_only_actions(knowledge_env):
 
 
 def test_steward_workbench_groups_actions_without_applying_knowledge(knowledge_env):
-    source = team_knowledge_service.create_source_artifact(
+    source = _create_central_source_artifact(
         knowledge_env["base"]["knowledgeBaseId"],
-        source_type="manual_user_entry",
-        source_ref={"note": "workbench source"},
-        title="Workbench source without proposal",
+        owner_type="team",
+        owner_id=knowledge_env["team"]["teamId"],
         actor_agent_id=knowledge_env["member"]["agentId"],
+        reviewer_agent_id=knowledge_env["lead"]["agentId"],
+        title="Workbench source without proposal",
     )
     proposal = team_knowledge_service.create_refinement_proposal(
         knowledge_env["base"]["knowledgeBaseId"],
-        source_artifact_ids=[],
+        source_artifact_ids=_source_ids_for_env(knowledge_env, title="Workbench proposal source"),
         proposed_by_agent_id=knowledge_env["member"]["agentId"],
         title="Workbench proposal",
         content="Workbench should show this proposal without applying it.",
@@ -1062,20 +1198,38 @@ def test_steward_workbench_groups_actions_without_applying_knowledge(knowledge_e
 
 def test_ingestion_package_preserves_team_chat_room_guard(knowledge_env):
     with pytest.raises(team_knowledge_service.TeamKnowledgeError, match="linked chat room"):
+        central_source = _promote_central_source(
+            owner_type="team",
+            owner_id=knowledge_env["team"]["teamId"],
+            actor_agent_id=knowledge_env["member"]["agentId"],
+            reviewer_agent_id=knowledge_env["lead"]["agentId"],
+            title="Unlinked chat source",
+        )
         team_knowledge_service.create_ingestion_package(
             knowledge_env["base"]["knowledgeBaseId"],
             source_type="team_chat_refinement",
             source_ref={"roomId": "room-not-linked", "messageRange": {"from": 1, "to": 4}},
             excerpt="Unlinked chat room must be rejected.",
             proposed_by_agent_id=knowledge_env["member"]["agentId"],
+            central_source_id=central_source["centralSourceId"],
         )
 
+    linked_central_source = _promote_central_source(
+        owner_type="team",
+        owner_id=knowledge_env["team"]["teamId"],
+        actor_agent_id=knowledge_env["member"]["agentId"],
+        reviewer_agent_id=knowledge_env["lead"]["agentId"],
+        source_type="team_chat_refinement",
+        source_ref={"roomId": knowledge_env["team"]["linkedChatRoomId"], "messageRange": {"from": 1, "to": 4}},
+        title="Linked chat source",
+    )
     package = team_knowledge_service.create_ingestion_package(
         knowledge_env["base"]["knowledgeBaseId"],
         source_type="team_chat_refinement",
         source_ref={"roomId": knowledge_env["team"]["linkedChatRoomId"], "messageRange": {"from": 1, "to": 4}},
         excerpt="Linked room decisions can become pending proposals.",
         proposed_by_agent_id=knowledge_env["member"]["agentId"],
+        central_source_id=linked_central_source["centralSourceId"],
     )
 
     assert package["sourceArtifact"]["sourceRef"]["roomId"] == knowledge_env["team"]["linkedChatRoomId"]
@@ -1085,7 +1239,7 @@ def test_ingestion_package_preserves_team_chat_room_guard(knowledge_env):
 def test_semantic_search_matches_token_overlap_without_exact_substring(knowledge_env):
     proposal = team_knowledge_service.create_refinement_proposal(
         knowledge_env["base"]["knowledgeBaseId"],
-        source_artifact_ids=[],
+        source_artifact_ids=_source_ids_for_env(knowledge_env, title="Planner cadence source"),
         proposed_by_agent_id=knowledge_env["member"]["agentId"],
         title="Planner cadence",
         content="Governance planner health signals should be visible before reviewer action.",
@@ -1118,16 +1272,17 @@ def test_semantic_search_matches_token_overlap_without_exact_substring(knowledge
 
 
 def test_operations_health_reports_orphan_pending_and_unrated_items(knowledge_env):
-    source = team_knowledge_service.create_source_artifact(
+    source = _create_central_source_artifact(
         knowledge_env["base"]["knowledgeBaseId"],
-        source_type="manual_user_entry",
-        source_ref={"note": "orphan"},
-        title="Orphan source",
+        owner_type="team",
+        owner_id=knowledge_env["team"]["teamId"],
         actor_agent_id=knowledge_env["member"]["agentId"],
+        reviewer_agent_id=knowledge_env["lead"]["agentId"],
+        title="Orphan source",
     )
     proposal = team_knowledge_service.create_refinement_proposal(
         knowledge_env["base"]["knowledgeBaseId"],
-        source_artifact_ids=[],
+        source_artifact_ids=_source_ids_for_env(knowledge_env, title="Pending health source"),
         proposed_by_agent_id=knowledge_env["member"]["agentId"],
         title="Pending health proposal",
         content="Pending proposal should be reported.",
@@ -1163,7 +1318,7 @@ def test_operations_health_reports_orphan_pending_and_unrated_items(knowledge_en
 def test_governance_plan_is_read_only_and_links_tools(knowledge_env):
     team_knowledge_service.create_refinement_proposal(
         knowledge_env["base"]["knowledgeBaseId"],
-        source_artifact_ids=[],
+        source_artifact_ids=_source_ids_for_env(knowledge_env, title="Plan source"),
         proposed_by_agent_id=knowledge_env["member"]["agentId"],
         title="Plan proposal",
         content="Governance plan should recommend review without applying.",

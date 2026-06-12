@@ -30,7 +30,6 @@ import {
   KnowledgeDashboardSnapshotPayload,
   KnowledgeGovernanceTasksPayload,
   KnowledgeIngestionAdaptersPayload,
-  KnowledgeIngestionPackageResponse,
   KnowledgeOwnerSource,
   KnowledgePermissionAuditPayload,
   KnowledgeRagHealthPayload,
@@ -230,7 +229,6 @@ type Copy = {
   pendingProposals: string;
   sourceArtifacts: string;
   formalKnowledge: string;
-  sourceRegistration: string;
   sourceGovernance: string;
   ownerSourceInbox: string;
   centralSourceRegistry: string;
@@ -323,8 +321,6 @@ type Copy = {
   proposable: string;
   reviewable: string;
   rateable: string;
-  ingestionPackage: string;
-  submitIngestionPackage: string;
   excerpt: string;
   status: string;
   allStatuses: string;
@@ -452,21 +448,6 @@ type ProposalDraft = {
   title: string;
   summary: string;
   content: string;
-  tags: string;
-};
-type IngestionDraft = {
-  sourceType: string;
-  sourceRef: string;
-  sourceCreatedAt: string;
-  capturedBy: string;
-  evidenceRange: string;
-  sourceTitle: string;
-  sourceSummary: string;
-  excerpt: string;
-  proposedByAgentId: string;
-  proposalTitle: string;
-  proposalSummary: string;
-  proposalContent: string;
   tags: string;
 };
 type RatingDraft = {
@@ -655,7 +636,6 @@ const COPY: Record<"zh" | "en", Copy> = {
     pendingProposals: "待审提案",
     sourceArtifacts: "来源登记",
     formalKnowledge: "正式知识",
-    sourceRegistration: "来源登记",
     sourceGovernance: "来源治理",
     ownerSourceInbox: "Owner 来源 inbox",
     centralSourceRegistry: "中央来源注册表",
@@ -748,8 +728,6 @@ const COPY: Record<"zh" | "en", Copy> = {
     proposable: "可提案",
     reviewable: "可审核",
     rateable: "可评级",
-    ingestionPackage: "半自动摄取包",
-    submitIngestionPackage: "提交摄取包",
     excerpt: "摘录",
     status: "状态",
     allStatuses: "全部状态",
@@ -980,7 +958,6 @@ const COPY: Record<"zh" | "en", Copy> = {
     pendingProposals: "Pending proposals",
     sourceArtifacts: "Source artifacts",
     formalKnowledge: "Formal knowledge",
-    sourceRegistration: "Source registration",
     sourceGovernance: "Source governance",
     ownerSourceInbox: "Owner source inbox",
     centralSourceRegistry: "Central source registry",
@@ -1073,8 +1050,6 @@ const COPY: Record<"zh" | "en", Copy> = {
     proposable: "Proposable",
     reviewable: "Reviewable",
     rateable: "Rateable",
-    ingestionPackage: "Semi-automatic ingestion",
-    submitIngestionPackage: "Submit ingestion",
     excerpt: "Excerpt",
     status: "Status",
     allStatuses: "All statuses",
@@ -1572,24 +1547,6 @@ function newProposalDraft(): ProposalDraft {
   };
 }
 
-function newIngestionDraft(): IngestionDraft {
-  return {
-    sourceType: "external_search_refinement",
-    sourceRef: "{\"url\":\"\",\"query\":\"\"}",
-    sourceCreatedAt: "",
-    capturedBy: "",
-    evidenceRange: "{}",
-    sourceTitle: "",
-    sourceSummary: "",
-    excerpt: "",
-    proposedByAgentId: "",
-    proposalTitle: "",
-    proposalSummary: "",
-    proposalContent: "",
-    tags: "",
-  };
-}
-
 function newRatingDraft(): RatingDraft {
   return {
     actorAgentId: "",
@@ -1848,7 +1805,6 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
   });
   const [bulkActionPending, setBulkActionPending] = useState<BulkMemoryAction | null>(null);
   const [activeKnowledgeBaseId, setActiveKnowledgeBaseId] = useState("");
-  const [sourceDraft, setSourceDraft] = useState<SourceDraft>(() => newSourceDraft());
   const [sourceOwnerType, setSourceOwnerType] = useState<SourceOwnerType>("team");
   const [sourceOwnerId, setSourceOwnerId] = useState("");
   const [sourceInboxStatus, setSourceInboxStatus] = useState<SourceInboxStatusFilter>("pending");
@@ -1856,7 +1812,6 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
   const [sourceReviewNote, setSourceReviewNote] = useState("");
   const [duplicateCentralSourceId, setDuplicateCentralSourceId] = useState("");
   const [proposalDraft, setProposalDraft] = useState<ProposalDraft>(() => newProposalDraft());
-  const [ingestionDraft, setIngestionDraft] = useState<IngestionDraft>(() => newIngestionDraft());
   const [ratingDraft, setRatingDraft] = useState<RatingDraft>(() => newRatingDraft());
   const [knowledgeSearchDraft, setKnowledgeSearchDraft] = useState<KnowledgeSearchDraft>(() => newKnowledgeSearchDraft());
   const [ratingSuggestionStatus, setRatingSuggestionStatus] = useState<RatingSuggestionStatusFilter>("pending");
@@ -2005,37 +1960,6 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     },
   });
 
-  const sourceArtifactMutation = useMutation({
-    mutationFn: async ({ knowledgeBaseId, draft }: { knowledgeBaseId: string; draft: SourceDraft }) =>
-      fetchJson<KnowledgeSourceArtifact>(`/api/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}/source-artifacts`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sourceType: draft.sourceType,
-          sourceRef: parseJsonObject(draft.sourceRef),
-          sourceCreatedAt: draft.sourceCreatedAt,
-          capturedBy: draft.capturedBy,
-          evidenceRange: parseJsonObject(draft.evidenceRange),
-          title: draft.title,
-          summary: draft.summary,
-          actorAgentId: activeKnowledgeActorAgentId,
-        }),
-      }),
-    onSuccess: (payload) => {
-      setSourceDraft(newSourceDraft());
-      setProposalDraft((current) => ({
-        ...current,
-        sourceArtifactIds: [...commaList(current.sourceArtifactIds), payload.sourceArtifactId].join(", "),
-      }));
-      setKnowledgeFeedback({ tone: "success", text: copy.mutationDone });
-      invalidateKnowledgeDashboard(queryClient, activeKnowledgeActorAgentId);
-      invalidateMemoryQueries(queryClient);
-    },
-    onError: (error) => {
-      setKnowledgeFeedback({ tone: "error", text: `${copy.mutationFailed}: ${error instanceof Error ? error.message : String(error)}` });
-    },
-  });
-
   const proposalMutation = useMutation({
     mutationFn: async ({ knowledgeBaseId, draft }: { knowledgeBaseId: string; draft: ProposalDraft }) =>
       fetchJson<KnowledgeRefinementProposal>(`/api/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}/refinement-proposals`, {
@@ -2053,38 +1977,6 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     onSuccess: () => {
       setProposalDraft(newProposalDraft());
       setKnowledgeFeedback({ tone: "success", text: copy.mutationDone });
-      invalidateKnowledgeDashboard(queryClient, activeKnowledgeActorAgentId);
-      invalidateMemoryQueries(queryClient);
-    },
-    onError: (error) => {
-      setKnowledgeFeedback({ tone: "error", text: `${copy.mutationFailed}: ${error instanceof Error ? error.message : String(error)}` });
-    },
-  });
-
-  const ingestionMutation = useMutation({
-    mutationFn: async ({ knowledgeBaseId, draft }: { knowledgeBaseId: string; draft: IngestionDraft }) =>
-      fetchJson<KnowledgeIngestionPackageResponse>(`/api/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}/ingestion-packages`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sourceType: draft.sourceType,
-          sourceRef: parseJsonObject(draft.sourceRef),
-          sourceCreatedAt: draft.sourceCreatedAt,
-          capturedBy: draft.capturedBy,
-          evidenceRange: parseJsonObject(draft.evidenceRange),
-          sourceTitle: draft.sourceTitle,
-          sourceSummary: draft.sourceSummary,
-          excerpt: draft.excerpt,
-          proposedByAgentId: draft.proposedByAgentId,
-          proposalTitle: draft.proposalTitle,
-          proposalSummary: draft.proposalSummary,
-          proposalContent: draft.proposalContent,
-          tags: commaList(draft.tags),
-        }),
-      }),
-    onSuccess: (payload) => {
-      setIngestionDraft(newIngestionDraft());
-      setKnowledgeFeedback({ tone: "success", text: `${copy.mutationDone} · ${payload.proposal.title}` });
       invalidateKnowledgeDashboard(queryClient, activeKnowledgeActorAgentId);
       invalidateMemoryQueries(queryClient);
     },
@@ -3014,12 +2906,10 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
   };
   const mutationBusy = memoryMutation.isPending || deleteMemoryMutation.isPending || restoreMemoryMutation.isPending || bulkActionPending !== null;
   const knowledgeBusy =
-    sourceArtifactMutation.isPending
-    || sourceInboxCollectMutation.isPending
+    sourceInboxCollectMutation.isPending
     || sourceInboxReviewMutation.isPending
     || centralSourceAttachMutation.isPending
     || proposalMutation.isPending
-    || ingestionMutation.isPending
     || reviewMutation.isPending
     || ratingMutation.isPending
     || ratingSuggestionReviewMutation.isPending
@@ -3113,13 +3003,6 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     }
     centralSourceAttachMutation.mutate(centralSourceId);
   };
-  const submitSourceArtifact = () => {
-    if (!activeKnowledgeBase || !activeKnowledgeActorAgentId) {
-      setKnowledgeFeedback({ tone: "error", text: `${copy.mutationFailed}: agentId` });
-      return;
-    }
-    sourceArtifactMutation.mutate({ knowledgeBaseId: knowledgeBaseRequestId(activeKnowledgeBase), draft: sourceDraft });
-  };
   const submitRefinementProposal = () => {
     if (!activeKnowledgeBase || !activeKnowledgeActorAgentId || !proposalDraft.title.trim() || !proposalDraft.content.trim()) {
       setKnowledgeFeedback({ tone: "error", text: `${copy.mutationFailed}: ${copy.proposalTitle}` });
@@ -3128,20 +3011,6 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     proposalMutation.mutate({
       knowledgeBaseId: knowledgeBaseRequestId(activeKnowledgeBase),
       draft: { ...proposalDraft, proposedByAgentId: proposalDraft.proposedByAgentId.trim() || activeKnowledgeActorAgentId },
-    });
-  };
-  const submitIngestionPackage = () => {
-    if (!activeKnowledgeBase || !activeKnowledgeActorAgentId || !ingestionDraft.sourceType.trim()) {
-      setKnowledgeFeedback({ tone: "error", text: `${copy.mutationFailed}: ${copy.ingestionPackage}` });
-      return;
-    }
-    ingestionMutation.mutate({
-      knowledgeBaseId: knowledgeBaseRequestId(activeKnowledgeBase),
-      draft: {
-        ...ingestionDraft,
-        capturedBy: ingestionDraft.capturedBy.trim() || activeKnowledgeActorAgentId,
-        proposedByAgentId: ingestionDraft.proposedByAgentId.trim() || activeKnowledgeActorAgentId,
-      },
     });
   };
   const reviewProposal = (proposalId: string, status: "approved" | "rejected") => {
@@ -4838,66 +4707,6 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
           <section className={styles.managementPanel}>
             <div className={styles.managementHeader}>
               <div>
-                <p className={styles.panelEyebrow}>{copy.ingestionPackage}</p>
-                <h2>{copy.sourceArtifacts} + {copy.pendingProposals}</h2>
-              </div>
-              <button
-                type="button"
-                className={styles.primaryActionButton}
-                onClick={submitIngestionPackage}
-                disabled={!activeKnowledgeBase?.permissions.canPropose || knowledgeBusy}
-              >
-                <Link2 size={15} />
-                <span>{copy.submitIngestionPackage}</span>
-              </button>
-            </div>
-            <div className={styles.knowledgeFormGrid}>
-              <label>
-                <span>{copy.sourceType}</span>
-                <select value={ingestionDraft.sourceType} onChange={(event) => setIngestionDraft({ ...ingestionDraft, sourceType: event.target.value })}>
-                  {["external_search_refinement", "pdf_refinement", "team_chat_refinement", "runtime_evidence_refinement", "agent_authored", "manual_user_entry"].map((type) => (
-                    <option key={type} value={type}>{type}</option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                <span>{copy.titleField}</span>
-                <input value={ingestionDraft.sourceTitle} onChange={(event) => setIngestionDraft({ ...ingestionDraft, sourceTitle: event.target.value })} />
-              </label>
-              <label>
-                <span>{copy.capturedBy}</span>
-                <input value={ingestionDraft.proposedByAgentId} onChange={(event) => setIngestionDraft({ ...ingestionDraft, proposedByAgentId: event.target.value })} />
-              </label>
-              <label>
-                <span>{copy.tags}</span>
-                <input value={ingestionDraft.tags} onChange={(event) => setIngestionDraft({ ...ingestionDraft, tags: event.target.value })} />
-              </label>
-              <label className={styles.wideField}>
-                <span>{copy.sourceRef}</span>
-                <textarea rows={2} value={ingestionDraft.sourceRef} onChange={(event) => setIngestionDraft({ ...ingestionDraft, sourceRef: event.target.value })} />
-              </label>
-              <label className={styles.wideField}>
-                <span>{copy.excerpt}</span>
-                <textarea rows={3} value={ingestionDraft.excerpt} onChange={(event) => setIngestionDraft({ ...ingestionDraft, excerpt: event.target.value })} />
-              </label>
-              <label>
-                <span>{copy.proposalTitle}</span>
-                <input value={ingestionDraft.proposalTitle} onChange={(event) => setIngestionDraft({ ...ingestionDraft, proposalTitle: event.target.value })} />
-              </label>
-              <label>
-                <span>{copy.summaryField}</span>
-                <input value={ingestionDraft.proposalSummary} onChange={(event) => setIngestionDraft({ ...ingestionDraft, proposalSummary: event.target.value })} />
-              </label>
-              <label className={styles.wideField}>
-                <span>{copy.proposalContent}</span>
-                <textarea rows={4} value={ingestionDraft.proposalContent} onChange={(event) => setIngestionDraft({ ...ingestionDraft, proposalContent: event.target.value })} />
-              </label>
-            </div>
-          </section>
-
-          <section className={styles.managementPanel}>
-            <div className={styles.managementHeader}>
-              <div>
                 <p className={styles.panelEyebrow}>{copy.ingestionAdapters}</p>
                 <h2>{copy.outputContract}</h2>
               </div>
@@ -4912,58 +4721,6 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
                   <small>{copy.createsKnowledgeItem}: {adapter.outputContract.createsKnowledgeItem ? copy.yes : copy.no}</small>
                 </section>
               ))}
-            </div>
-          </section>
-
-          <section className={styles.managementPanel}>
-            <div className={styles.managementHeader}>
-              <div>
-                <p className={styles.panelEyebrow}>{copy.sourceRegistration}</p>
-                <h2>{activeKnowledgeBase?.name ?? copy.teamKnowledge}</h2>
-              </div>
-              <button
-                type="button"
-                className={styles.primaryActionButton}
-                onClick={submitSourceArtifact}
-                disabled={!activeKnowledgeBase?.permissions.canPropose || knowledgeBusy}
-              >
-                <Link2 size={15} />
-                <span>{copy.submitSource}</span>
-              </button>
-            </div>
-            <div className={styles.knowledgeFormGrid}>
-              <label>
-                <span>{copy.sourceType}</span>
-                <select value={sourceDraft.sourceType} onChange={(event) => setSourceDraft({ ...sourceDraft, sourceType: event.target.value })}>
-                  {["manual_user_entry", "team_chat_refinement", "external_search_refinement", "pdf_refinement", "agent_authored", "runtime_evidence_refinement"].map((type) => (
-                    <option key={type} value={type}>{type}</option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                <span>{copy.titleField}</span>
-                <input value={sourceDraft.title} onChange={(event) => setSourceDraft({ ...sourceDraft, title: event.target.value })} />
-              </label>
-              <label>
-                <span>{copy.sourceCreatedAt}</span>
-                <input value={sourceDraft.sourceCreatedAt} onChange={(event) => setSourceDraft({ ...sourceDraft, sourceCreatedAt: event.target.value })} />
-              </label>
-              <label>
-                <span>{copy.capturedBy}</span>
-                <input value={sourceDraft.capturedBy} onChange={(event) => setSourceDraft({ ...sourceDraft, capturedBy: event.target.value })} />
-              </label>
-              <label className={styles.wideField}>
-                <span>{copy.sourceRef}</span>
-                <textarea rows={3} value={sourceDraft.sourceRef} onChange={(event) => setSourceDraft({ ...sourceDraft, sourceRef: event.target.value })} />
-              </label>
-              <label className={styles.wideField}>
-                <span>{copy.evidenceRange}</span>
-                <textarea rows={2} value={sourceDraft.evidenceRange} onChange={(event) => setSourceDraft({ ...sourceDraft, evidenceRange: event.target.value })} />
-              </label>
-              <label className={styles.wideField}>
-                <span>{copy.summaryField}</span>
-                <textarea rows={2} value={sourceDraft.summary} onChange={(event) => setSourceDraft({ ...sourceDraft, summary: event.target.value })} />
-              </label>
             </div>
           </section>
 
