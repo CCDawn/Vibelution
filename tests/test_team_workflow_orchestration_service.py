@@ -1,3 +1,5 @@
+import json
+
 from core.web.services import (
     agent_directory_service,
     chat_room_service,
@@ -24,7 +26,7 @@ class _FakeLocalResearchClient:
         self.config = config
         self.profile_id = profile_id
 
-    def invoke(self, messages, metadata=None):
+    def invoke(self, messages, tools=None, metadata=None):
         type(self).captured_messages.append({"messages": messages, "metadata": metadata, "profile_id": self.profile_id})
         return type(self).response
 
@@ -439,6 +441,28 @@ def test_execute_source_collection_search_writes_records_and_imports_candidates(
         "storage.data_record_written",
         "storage.source_manifest_imported",
     }
+    storage = execution["storageArtifacts"]
+    assert storage["runDirectory"] == f"workspace/teams/{team['teamId']}/source_collection_runs/{run_response['run']['runId']}"
+    assert storage["searchPlanPath"].endswith("/search_plan.json")
+    assert storage["recordsPath"].endswith("/records.jsonl")
+    assert storage["candidatesPath"].endswith("/candidates.jsonl")
+    search_plan_file = tmp_path / storage["searchPlanPath"]
+    events_file = tmp_path / storage["searchEventsPath"]
+    records_file = tmp_path / storage["recordsPath"]
+    candidates_file = tmp_path / storage["candidatesPath"]
+    assert search_plan_file.exists()
+    assert events_file.exists()
+    assert records_file.exists()
+    assert candidates_file.exists()
+    assert json.loads(search_plan_file.read_text(encoding="utf-8"))["planId"] == run_response["searchPlan"]["planId"]
+    stored_events = [json.loads(line) for line in events_file.read_text(encoding="utf-8").splitlines()]
+    stored_records = [json.loads(line) for line in records_file.read_text(encoding="utf-8").splitlines()]
+    stored_candidates = [json.loads(line) for line in candidates_file.read_text(encoding="utf-8").splitlines()]
+    assert {event["eventType"] for event in stored_events} >= {"search.executed", "storage.data_record_written"}
+    assert [record["recordId"] for record in stored_records] == [record["recordId"] for record in records]
+    assert [candidate["candidateId"] for candidate in stored_candidates] == [
+        candidate["candidateId"] for candidate in candidates["candidates"]
+    ]
 
 
 def test_execute_source_collection_search_skips_existing_query_without_force(tmp_path, monkeypatch):

@@ -269,6 +269,10 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("启动知识搜集");
     expect(routeSource).toContain("对话式执行下一批搜索");
     expect(routeSource).toContain("执行下一批搜索");
+    expect(routeSource).toContain("/storage/open");
+    expect(routeSource).toContain("证据落盘");
+    expect(routeSource).toContain("打开批次目录");
+    expect(routeSource).toContain("sourceCollectionStorageTargetForRef");
     expect(routeSource).toContain("sourceCollectionExecutionTitle");
     expect(routeSource).toContain("启动实验规划");
     expect(routeSource).toContain("启动迭代");
@@ -373,6 +377,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.workflowSourceQualityQueue).toBeTypeOf("string");
     expect(routeStyles.workflowPaperNoteChunkPanel).toBeTypeOf("string");
     expect(routeStyles.workflowPaperNoteChunkStats).toBeTypeOf("string");
+    expect(routeStyles.workflowSourceCollectionStorageActions).toBeTypeOf("string");
+    expect(routeStyles.workflowSourceCollectionStorageButtons).toBeTypeOf("string");
     expect(routeStyles.workflowPaperNoteChunkPlans).toBeTypeOf("string");
     expect(routeStyles.workflowModelEvidencePanel).toBeTypeOf("string");
     expect(routeStyles.workflowModelEvidenceStats).toBeTypeOf("string");

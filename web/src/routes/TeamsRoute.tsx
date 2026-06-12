@@ -225,6 +225,40 @@ type SourceCollectionTraceMessage = {
   storageRefs: string[];
 };
 
+type SourceCollectionStorageOpenTarget =
+  | "run_directory"
+  | "artifacts_directory"
+  | "search_plan"
+  | "search_events"
+  | "records"
+  | "candidates"
+  | "candidate_store"
+  | "data_processing_run"
+  | "data_processing_records";
+
+type SourceCollectionStorageArtifacts = {
+  runDirectory: string;
+  artifactsDirectory: string;
+  searchPlanPath: string;
+  searchEventsPath: string;
+  recordsPath: string;
+  candidatesPath: string;
+  candidateStorePath: string;
+  dataProcessingRunPath: string;
+  dataProcessingRecordsPath: string;
+};
+
+type TeamWorkflowSourceCollectionStorageOpenPayload = {
+  schemaVersion: number;
+  teamId: string;
+  runId: string;
+  target: SourceCollectionStorageOpenTarget;
+  path: string;
+  openedPath: string;
+  targetExists: boolean;
+  storageArtifacts: SourceCollectionStorageArtifacts;
+};
+
 type SourceCollectionSearchExecutionEvent = {
   eventId: string;
   eventType: string;
@@ -258,6 +292,7 @@ type TeamWorkflowSourceCollectionSearchExecutionPayload = {
   importedCount: number;
   run: TeamWorkflowSourceCollectionRunStartPayload["run"];
   runStatus: DataProcessingStatus;
+  storageArtifacts: SourceCollectionStorageArtifacts;
   assignments: TeamWorkflowSourceCollectionRunStartPayload["assignments"];
   outputs: Array<DataProcessingCollectionOutputPayload["output"]>;
   createdRecords: DataProcessingCollectionOutputPayload["createdRecords"];
@@ -674,6 +709,72 @@ function sourceCollectionRunsForTeam(payload: DataProcessingRunListPayload | und
 
 function sourceCollectionRunLabel(runId: string) {
   return runId ? `${runId.slice(0, 10)}...` : "-";
+}
+
+function sourceCollectionStorageArtifactsForRun(teamId: string, runId: string): SourceCollectionStorageArtifacts | null {
+  if (!teamId || !runId) {
+    return null;
+  }
+  const runDirectory = `workspace/teams/${teamId}/source_collection_runs/${runId}`;
+  return {
+    runDirectory,
+    artifactsDirectory: `${runDirectory}/artifacts`,
+    searchPlanPath: `${runDirectory}/search_plan.json`,
+    searchEventsPath: `${runDirectory}/search_events.jsonl`,
+    recordsPath: `${runDirectory}/records.jsonl`,
+    candidatesPath: `${runDirectory}/candidates.jsonl`,
+    candidateStorePath: `workspace/teams/${teamId}/candidate_store/index.json`,
+    dataProcessingRunPath: `workspace/data_processing/runs/${runId}/run.json`,
+    dataProcessingRecordsPath: `workspace/data_processing/runs/${runId}/records.jsonl`,
+  };
+}
+
+function sourceCollectionStorageTargetLabel(target: SourceCollectionStorageOpenTarget, lang: "zh" | "en") {
+  const zh: Record<SourceCollectionStorageOpenTarget, string> = {
+    run_directory: "打开批次目录",
+    artifacts_directory: "打开附件目录",
+    search_plan: "打开搜索计划",
+    search_events: "打开搜索步骤",
+    records: "打开搜集记录",
+    candidates: "打开候选镜像",
+    candidate_store: "打开候选仓库",
+    data_processing_run: "打开通用 run",
+    data_processing_records: "打开 DataRecord",
+  };
+  const en: Record<SourceCollectionStorageOpenTarget, string> = {
+    run_directory: "Open run folder",
+    artifacts_directory: "Open artifacts",
+    search_plan: "Open search plan",
+    search_events: "Open search trace",
+    records: "Open records",
+    candidates: "Open candidates",
+    candidate_store: "Open candidate store",
+    data_processing_run: "Open generic run",
+    data_processing_records: "Open DataRecord",
+  };
+  return lang === "zh" ? zh[target] : en[target];
+}
+
+function sourceCollectionStorageTargetForRef(
+  ref: string,
+  artifacts: SourceCollectionStorageArtifacts | null,
+): SourceCollectionStorageOpenTarget | null {
+  if (!artifacts) {
+    return null;
+  }
+  const normalizedRef = String(ref || "").trim();
+  const mappings: Array<[keyof SourceCollectionStorageArtifacts, SourceCollectionStorageOpenTarget]> = [
+    ["runDirectory", "run_directory"],
+    ["artifactsDirectory", "artifacts_directory"],
+    ["searchPlanPath", "search_plan"],
+    ["searchEventsPath", "search_events"],
+    ["recordsPath", "records"],
+    ["candidatesPath", "candidates"],
+    ["candidateStorePath", "candidate_store"],
+    ["dataProcessingRunPath", "data_processing_run"],
+    ["dataProcessingRecordsPath", "data_processing_records"],
+  ];
+  return mappings.find(([key]) => artifacts[key] === normalizedRef)?.[1] ?? null;
 }
 
 function hasSourceCollectionPromptCachePolicy(
@@ -2174,6 +2275,18 @@ export function TeamsRoute({
     },
   });
 
+  const openSourceCollectionStorageMutation = useMutation({
+    mutationFn: (payload: { teamId: string; runId: string; target: SourceCollectionStorageOpenTarget }) =>
+      fetchJson<TeamWorkflowSourceCollectionStorageOpenPayload>(
+        `/api/teams/${encodeURIComponent(payload.teamId)}/workflow-orchestration/source-collection-runs/${encodeURIComponent(payload.runId)}/storage/open`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ target: payload.target }),
+        },
+      ),
+  });
+
   const assessSourceQualityMutation = useMutation({
     mutationFn: (payload: { teamId: string; candidateId: string; decision: "approved" | "needs_revision" }) =>
       fetchJson<TeamWorkflowSourceQualityAssessmentPayload>(
@@ -2720,9 +2833,23 @@ export function TeamsRoute({
                     ) : null}
                     {message.storageRefs.length ? (
                       <div className={styles.sourceCollectionTraceStorage}>
-                        {message.storageRefs.map((ref) => (
-                          <span key={ref}>{ref}</span>
-                        ))}
+                        {message.storageRefs.map((ref) => {
+                          const target = sourceCollectionStorageTargetForRef(ref, selectedSourceCollectionStorageArtifacts);
+                          return target ? (
+                            <button
+                              key={ref}
+                              type="button"
+                              disabled={selectedSourceCollectionStorageOpenPending}
+                              onClick={() => openSourceCollectionStorageTarget(target)}
+                              title={ref}
+                            >
+                              <Link2 size={12} />
+                              {sourceCollectionStorageTargetLabel(target, lang)}
+                            </button>
+                          ) : (
+                            <span key={ref}>{ref}</span>
+                          );
+                        })}
                       </div>
                     ) : null}
                   </details>
@@ -2765,6 +2892,49 @@ export function TeamsRoute({
             : (lang === "zh" ? "当前仍是计划/回写阶段，未触发外部搜索" : "planning/writeback stage, no external search triggered")}
         </em>
       </div>
+    );
+  }
+
+  function renderSourceCollectionStorageActions() {
+    if (!selectedSourceCollectionStorageArtifacts || !selectedSourceCollectionRunEffectiveId) {
+      return null;
+    }
+    const actions: SourceCollectionStorageOpenTarget[] = [
+      "run_directory",
+      "search_plan",
+      "search_events",
+      "records",
+      "candidates",
+      "candidate_store",
+    ];
+    return (
+      <section className={styles.workflowSourceCollectionStorageActions} aria-label={lang === "zh" ? "搜集证据落盘位置" : "Source collection evidence storage"}>
+        <div>
+          <strong>{lang === "zh" ? "证据落盘" : "Evidence storage"}</strong>
+          <span>{selectedSourceCollectionStorageArtifacts.runDirectory}</span>
+        </div>
+        <div className={styles.workflowSourceCollectionStorageButtons}>
+          {actions.map((target) => (
+            <button
+              key={target}
+              type="button"
+              disabled={selectedSourceCollectionStorageOpenPending}
+              onClick={() => openSourceCollectionStorageTarget(target)}
+            >
+              <Link2 size={12} />
+              {sourceCollectionStorageTargetLabel(target, lang)}
+            </button>
+          ))}
+        </div>
+        {selectedSourceCollectionStorageOpenResult ? (
+          <small>
+            {lang === "zh" ? "已打开" : "Opened"} {selectedSourceCollectionStorageOpenResult.openedPath}
+          </small>
+        ) : null}
+        {selectedSourceCollectionStorageOpenError ? (
+          <small className={styles.workflowSourceCollectionStorageError}>{selectedSourceCollectionStorageOpenError.message}</small>
+        ) : null}
+      </section>
     );
   }
 
@@ -2948,6 +3118,7 @@ export function TeamsRoute({
             <span>{lang === "zh" ? "缓存" : "cache"} <strong>{sourceCollectionPromptCacheStatusLabel(sourceCollectionPromptCacheStatus, lang)}</strong></span>
           </div>
         </div>
+        {renderSourceCollectionStorageActions()}
         <details className={styles.workflowSourceCollectionDetails}>
           <summary>
             <span>{lang === "zh" ? "查询与分工详情" : "Query and assignment details"}</span>
@@ -3556,6 +3727,27 @@ export function TeamsRoute({
       : null;
   const selectedTeamExecuteSourceCollectionSearchResult =
     executeSourceCollectionSearchMutation.variables?.teamId === selectedTeam?.teamId ? executeSourceCollectionSearchMutation.data : undefined;
+  const selectedSourceCollectionStorageArtifacts =
+    selectedTeamExecuteSourceCollectionSearchResult?.storageArtifacts
+    ?? sourceCollectionStorageArtifactsForRun(selectedTeam?.teamId ?? effectiveTeamId, selectedSourceCollectionRunEffectiveId);
+  const selectedSourceCollectionStorageOpenPending =
+    openSourceCollectionStorageMutation.isPending && openSourceCollectionStorageMutation.variables?.teamId === selectedTeam?.teamId;
+  const selectedSourceCollectionStorageOpenResult =
+    openSourceCollectionStorageMutation.variables?.teamId === selectedTeam?.teamId ? openSourceCollectionStorageMutation.data : undefined;
+  const selectedSourceCollectionStorageOpenError =
+    openSourceCollectionStorageMutation.variables?.teamId === selectedTeam?.teamId && openSourceCollectionStorageMutation.error instanceof Error
+      ? openSourceCollectionStorageMutation.error
+      : null;
+  const openSourceCollectionStorageTarget = (target: SourceCollectionStorageOpenTarget) => {
+    if (!selectedTeam?.teamId || !selectedSourceCollectionRunEffectiveId) {
+      return;
+    }
+    openSourceCollectionStorageMutation.mutate({
+      teamId: selectedTeam.teamId,
+      runId: selectedSourceCollectionRunEffectiveId,
+      target,
+    });
+  };
   const sourceCollectionOpenAssignmentCount =
     sourceCollectionRunStatus?.summary.openAssignmentCount
     ?? sourceCollectionAssignments.filter((assignment) => ["open", "in_progress", "returned"].includes(assignment.status)).length;
@@ -3594,7 +3786,6 @@ export function TeamsRoute({
     : (lang === "zh" ? "填好主题和目标后，系统会生成 query、分配团队功能 Agent，并建立回写契约。" : "After topic and goal are set, the system creates queries, assigns functional Agents, and stores the writeback contract.");
   const sourceCollectionTraceMessages = useMemo<SourceCollectionTraceMessage[]>(() => {
     const messages: SourceCollectionTraceMessage[] = [];
-    const runStorage = selectedSourceCollectionRun?.storage;
     messages.push({
       id: "coordination-plan",
       agentRole: "Research Coordination Agent",
@@ -3607,7 +3798,9 @@ export function TeamsRoute({
       status: selectedSourceCollectionRun?.status || (lang === "zh" ? "未启动" : "not started"),
       tone: selectedSourceCollectionRun ? "plan" : "blocked",
       refs: selectedSourceCollectionRun ? [selectedSourceCollectionRun.runId, String(selectedSourceCollectionRun.scope?.topic || sourceCollectionDraft.topic)] : [],
-      storageRefs: runStorage ? [runStorage.runPath, runStorage.recordsPath] : [],
+      storageRefs: selectedSourceCollectionStorageArtifacts
+        ? [selectedSourceCollectionStorageArtifacts.runDirectory, selectedSourceCollectionStorageArtifacts.searchPlanPath]
+        : [],
     });
     const plannedQueries = sourceCollectionAssignments.flatMap((assignment) => assignment.scope.assignedQueries ?? []);
     const promptCacheGateStatus = sourceCollectionPromptCachePolicy?.gate?.status || sourceCollectionPromptCachePolicyRef?.gateStatus || "";
@@ -3659,7 +3852,7 @@ export function TeamsRoute({
         tone: "search",
         refs: plannedQueries.slice(0, 5).map((query) => `${query.query} · ${query.sourceType}/${query.language}`),
         storageRefs: [
-          selectedSourceCollectionRun?.scope?.dataSearchPlanRef?.planId ? String(selectedSourceCollectionRun.scope.dataSearchPlanRef.planId) : "",
+          selectedSourceCollectionStorageArtifacts?.searchPlanPath || "",
           ...plannedQueryCacheRefs.slice(0, 3).map((partition) => `KV ${partition}`),
         ].filter(Boolean),
       });
@@ -3766,6 +3959,7 @@ export function TeamsRoute({
   }, [
     lang,
     selectedSourceCollectionRun,
+    selectedSourceCollectionStorageArtifacts,
     selectedTeamRecordSourceCollectionOutputResult,
     selectedTeamExecuteSourceCollectionSearchResult,
     selectedTeamStartResearchStageResult,
@@ -4483,6 +4677,7 @@ export function TeamsRoute({
                             <span>KV <strong>{sourceCollectionPromptCacheStatusLabel(sourceCollectionPromptCacheStatus, lang)}{sourceCollectionPromptCacheMode ? ` · ${sourceCollectionPromptCacheMode}` : ""}</strong></span>
                           </div>
                         </div>
+                        {renderSourceCollectionStorageActions()}
                         {selectedTeamStartSourceCollectionResult ? (
                           <div className={styles.workflowSourceCollectionPlan}>
                             <div>

@@ -1539,7 +1539,8 @@
 }
 
 .sourceCollectionTraceRefs span,
-.sourceCollectionTraceStorage span {
+.sourceCollectionTraceStorage span,
+.sourceCollectionTraceStorage button {
   max-width: 100%;
   padding: 2px 6px;
   border-radius: 999px;
@@ -1552,9 +1553,22 @@
   white-space: nowrap;
 }
 
-.sourceCollectionTraceStorage span {
+.sourceCollectionTraceStorage span,
+.sourceCollectionTraceStorage button {
   border: 1px solid color-mix(in srgb, var(--accent-cool) 24%, var(--border-soft));
   color: color-mix(in srgb, var(--accent-cool) 72%, var(--fg-secondary));
+}
+
+.sourceCollectionTraceStorage button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+}
+
+.sourceCollectionTraceStorage button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .sourceCollectionTrace_plan {
@@ -2619,6 +2633,7 @@
 .workflowSourceCollectionStats,
 .workflowSourceCollectionPlan,
 .workflowSourceCollectionSearchAction,
+.workflowSourceCollectionStorageActions,
 .workflowSourceCollectionAssignments,
 .workflowSourceCollectionQueries {
   display: grid;
@@ -2706,6 +2721,68 @@
 }
 
 .workflowSourceCollectionSearchAction button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.workflowSourceCollectionStorageActions {
+  padding: 8px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 34%, var(--border-soft));
+  border-radius: 7px;
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--accent-cool) 8%, transparent), transparent 70%),
+    color-mix(in srgb, var(--surface-card) 78%, transparent);
+}
+
+.workflowSourceCollectionStorageActions > div:first-child {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.workflowSourceCollectionStorageActions strong {
+  color: var(--fg-primary);
+  font-size: 0.74rem;
+}
+
+.workflowSourceCollectionStorageActions span,
+.workflowSourceCollectionStorageActions small {
+  min-width: 0;
+  color: var(--fg-muted);
+  font-size: 0.64rem;
+  font-weight: 720;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workflowSourceCollectionStorageError {
+  color: color-mix(in srgb, var(--accent-danger) 78%, var(--fg-primary)) !important;
+}
+
+.workflowSourceCollectionStorageButtons {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
+  gap: 5px;
+}
+
+.workflowSourceCollectionStorageButtons button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-width: 0;
+  min-height: 28px;
+  padding: 0 8px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 32%, var(--border-strong));
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--accent-cool) 10%, var(--surface-panel-strong));
+  color: color-mix(in srgb, var(--accent-cool) 76%, var(--fg-primary));
+  font-size: 0.68rem;
+  font-weight: 780;
+}
+
+.workflowSourceCollectionStorageButtons button:disabled {
   cursor: not-allowed;
   opacity: 0.55;
 }
