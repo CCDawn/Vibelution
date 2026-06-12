@@ -5368,12 +5368,18 @@ def test_session_submit_message_routes_slash_skill_into_scheduled_context(tmp_pa
     assert persisted_skill["skillName"] == "brt"
     assert persisted_skill["skillHash"]
     assert "content" not in persisted_skill
+    assert payload["activeSkillContract"]["command"] == "brt"
+    assert payload["activeSkillContract"]["skillName"] == "brt"
+    assert payload["activeSkillContract"]["skillHash"]
+    assert "content" not in payload["activeSkillContract"]
+    assert "Stop before implementation." not in json.dumps(payload["activeSkillContract"], ensure_ascii=False)
     assert len(scheduled_contexts) == 1
     invocation = scheduled_contexts[0]["skill_invocation"]
     assert invocation["command"] == "brt"
     assert invocation["args"] == "设计斜杠 skill 调用"
     assert invocation["skillName"] == "brt"
     assert invocation["skillHash"]
+    assert scheduled_contexts[0]["active_skill_contract"]["command"] == "brt"
 
 
 def test_session_worker_seeds_slash_skill_runtime_context(tmp_path, monkeypatch):
@@ -5490,6 +5496,109 @@ def test_session_worker_seeds_slash_skill_runtime_context(tmp_path, monkeypatch)
     assert any(event["eventCode"] == "conversation.skill_command.routed" for event in scene_events)
 
 
+def test_session_worker_seeds_active_skill_contract_on_later_turn(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="done")
+    skill_root = tmp_path / "skills"
+    skill_dir = skill_root / "brt"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: brt\ndescription: BRT gate\n---\n\n# BRT\n\n- Ask one question at a time.\n",
+        encoding="utf-8",
+    )
+    command = parse_skill_slash_command("/brt 设计斜杠 skill 调用", skill_roots=[skill_root])
+    invocation = session_service._skill_invocation_payload(command)
+    contract = session_service._active_skill_contract_from_invocation(invocation, turn_id="previous-turn")
+    state = load_chat_state(tmp_path)
+    state["conversations"][0]["active_skill_contract"] = contract
+    save_chat_state(tmp_path, state)
+
+    seen_contexts: list[str] = []
+    seen_prompt: dict[str, str] = {}
+    lifecycle_events: list[dict] = []
+
+    class DummyAgent:
+        def set_mental_model_enabled_override(self, _enabled):
+            pass
+
+        def seed_chat_history(self, _messages):
+            pass
+
+        def seed_static_runtime_context(self, content):
+            seen_contexts.append(f"static:{content}")
+
+        def seed_volatile_runtime_context(self, content):
+            seen_contexts.append(f"volatile:{content}")
+
+        def mark_runtime_context_seeded_by_host(self):
+            pass
+
+        def run_single_turn(self, initial_prompt=None, attachments=None):
+            seen_prompt["value"] = initial_prompt
+            return {"status": "completed", "summary": "ok", "raw_output": "ok", "outcome": "done"}
+
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "create_chat_agent", lambda **_kwargs: DummyAgent())
+    monkeypatch.setattr(
+        session_service,
+        "_resolve_session_agent_llm",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            model_id="test-dialogue-model",
+            config=SimpleNamespace(),
+            log_fields=lambda: {"llmModelId": "test-dialogue-model"},
+        ),
+    )
+    _install_session_turn_scheduler(monkeypatch, max_active_per_agent=1)
+    monkeypatch.setattr(session_service, "_SESSION_EXECUTOR", SimpleNamespace(submit=lambda fn, context: fn(context)))
+    monkeypatch.setattr(
+        session_service,
+        "build_agent_context",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            memory_policy={},
+            static_context_block="## Agent Static Context\nstable",
+            dynamic_context_block="",
+            context_block="## Agent Static Context\nstable",
+            context_segments=[],
+            timings={},
+        ),
+    )
+    monkeypatch.setattr(
+        session_service,
+        "_record_session_turn_lifecycle_event",
+        lambda session_id, phase, **kwargs: lifecycle_events.append(
+            {"sessionId": session_id, "phase": phase, **kwargs}
+        ),
+    )
+
+    response = client.post(
+        "/api/sessions/session-live/messages",
+        json={"content": "继续"},
+    )
+
+    assert response.status_code == 202
+    assert seen_prompt["value"]
+    volatile_contexts = [item for item in seen_contexts if item.startswith("volatile:")]
+    assert len(volatile_contexts) == 1
+    assert volatile_contexts[0].startswith("volatile:## Active Skill Context")
+    assert "Command: /brt" in volatile_contexts[0]
+    assert "Ask one question at a time." in volatile_contexts[0]
+    assert "## Slash Skill Context" not in volatile_contexts[0]
+    assert "SKILL.md:" not in volatile_contexts[0]
+    history_seeded_events = [event for event in lifecycle_events if event["phase"] == "history_seeded"]
+    assert history_seeded_events
+    history_fields = history_seeded_events[-1]["fields"]
+    assert history_fields["activeSkillContractAvailable"] is True
+    assert history_fields["activeSkillContextIncluded"] is True
+    assert history_fields["activeSkillContextPlacement"] == "before_current_user"
+    detail = response.json()
+    assert detail["lastContextComposition"]["cache"]["volatileSegmentCount"] >= 1
+    assert any(
+        item["key"] == "active_skill"
+        and item["includedInModelInput"] is True
+        and item["placement"] == "before_current_user"
+        for item in detail["lastContextComposition"]["segments"]
+    )
+
+
 def test_edit_resubmit_session_message_routes_slash_skill_into_scheduled_context(tmp_path, monkeypatch):
     save_chat_state(
         tmp_path,
@@ -5547,11 +5656,14 @@ def test_edit_resubmit_session_message_routes_slash_skill_into_scheduled_context
     assert persisted_skill["skillName"] == "brt"
     assert persisted_skill["skillHash"]
     assert "content" not in persisted_skill
+    assert payload["activeSkillContract"]["command"] == "brt"
+    assert payload["activeSkillContract"]["skillName"] == "brt"
     assert len(scheduled_contexts) == 1
     invocation = scheduled_contexts[0]["skill_invocation"]
     assert invocation["command"] == "brt"
     assert invocation["args"] == "重新设计斜杠入口"
     assert invocation["skillName"] == "brt"
+    assert scheduled_contexts[0]["active_skill_contract"]["command"] == "brt"
 
     session_service._set_session_running("session-live", False)
     session_service._clear_session_turn_control("session-live")
@@ -6534,6 +6646,23 @@ def test_lightweight_chat_tool_intent_uses_token_aware_english_markers():
         {"raw_user_message": "API ok?", "user_message": "API ok?"}
     )
     assert (enabled, reason) == (False, "tool_intent_marker")
+
+
+def test_lightweight_chat_keeps_active_skill_contract_in_full_payload():
+    enabled, reason = session_service._lightweight_chat_payload_decision(
+        {
+            "raw_user_message": "收到",
+            "user_message": "收到",
+            "active_skill_contract": {
+                "command": "brt",
+                "skillName": "brt",
+                "skillHash": "hash-a",
+                "keyRules": ["Ask one question at a time."],
+            },
+        }
+    )
+
+    assert (enabled, reason) == (False, "active_skill_contract")
 
 
 def test_submit_session_message_continue_preserves_raw_prompt_and_dialogue_history(tmp_path, monkeypatch):
