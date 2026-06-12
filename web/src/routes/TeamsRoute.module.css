@@ -36,7 +36,6 @@
 .iconButton,
 .toolbarActions button,
 .toolbarActions .toolbarLink,
-.createForm button,
 .actionRow button {
   display: inline-flex;
   align-items: center;
@@ -54,7 +53,6 @@
 
 .iconButton:disabled,
 .toolbarActions button:disabled,
-.createForm button:disabled,
 .actionRow button:disabled,
 .teamMessageForm button:disabled,
 .teamTaskForm button:disabled {
@@ -133,14 +131,29 @@
   flex-direction: column;
 }
 
-.createForm {
+.teamPickerPanel {
   display: grid;
-  gap: 5px;
-  padding: 8px;
+  gap: 8px;
+  padding: 10px;
   border-bottom: 1px solid var(--border-soft);
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--accent-cool) 9%, transparent), transparent 64%),
+    color-mix(in srgb, var(--surface-panel-strong) 70%, transparent);
 }
 
-.createForm input,
+.teamPickerLabel {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.teamPickerLabel span {
+  color: var(--fg-muted);
+  font-size: 0.68rem;
+  font-weight: 780;
+}
+
+.teamPickerLabel select,
 .inspectorBody input,
 .inspectorBody select,
 .inspectorBody textarea,
@@ -156,105 +169,50 @@
   font-size: 0.78rem;
 }
 
-.createForm input[aria-invalid="true"] {
-  border-color: color-mix(in srgb, var(--accent-danger) 62%, var(--border-soft));
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-danger) 28%, transparent);
+.teamPickerLabel select {
+  min-height: 34px;
+  font-weight: 780;
 }
 
-.formHint,
-.formError {
-  margin: 0;
-  font-size: 0.71rem;
+.teamPickerLabel select:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.teamPickerSummary {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+  padding: 8px;
+  border: 1px solid color-mix(in srgb, var(--border-soft) 78%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-panel) 68%, transparent);
+}
+
+.teamPickerSummary strong,
+.teamPickerSummary span,
+.teamPickerSummary small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.teamPickerSummary strong {
+  color: var(--fg-primary);
+  font-size: 0.8rem;
+}
+
+.teamPickerSummary span {
+  color: var(--fg-secondary);
+  font-size: 0.72rem;
   line-height: 1.35;
 }
 
-.formHint {
+.teamPickerSummary small {
   color: var(--fg-muted);
-}
-
-.formError {
-  color: color-mix(in srgb, var(--accent-danger) 78%, var(--fg-primary));
+  font-size: 0.68rem;
   font-weight: 720;
-}
-
-.templatePanel {
-  display: grid;
-  gap: 6px;
-  padding: 8px;
-  border-bottom: 1px solid var(--border-soft);
-  background: color-mix(in srgb, var(--surface-panel-strong) 58%, transparent);
-}
-
-.templatePanelHeader,
-.templatePreviewHeader,
-.templateMeta {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.templatePanelHeader strong,
-.templatePreviewHeader strong {
-  color: var(--fg-primary);
-  font-size: 0.78rem;
-}
-
-.templatePanelHeader span,
-.templatePreviewHeader span,
-.templateMeta span,
-.templateEmpty {
-  color: var(--fg-muted);
-  font-size: 0.71rem;
-}
-
-.templatePicker {
-  display: grid;
-  gap: 6px;
-}
-
-.templateSelect {
-  min-height: 30px;
-  width: 100%;
-  border: 1px solid var(--border-soft);
-  border-radius: var(--radius-control);
-  background: var(--surface-panel-strong);
-  color: var(--fg-primary);
-  font: inherit;
-  font-size: 0.76rem;
-  font-weight: 740;
-}
-
-.templatePreview {
-  display: grid;
-  gap: 4px;
-  min-width: 0;
-  padding: 2px 1px;
-}
-
-.templatePreview p {
-  display: -webkit-box;
-  margin: 0;
-  color: var(--fg-secondary);
-  font-size: 0.72rem;
-  line-height: 1.32;
-  overflow: hidden;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-}
-
-.templateCreateButton {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  min-height: 28px;
-  border: 1px solid var(--border-soft);
-  border-radius: var(--radius-control);
-  background: var(--surface-panel-strong);
-  color: var(--fg-primary);
-  font-size: 0.76rem;
-  font-weight: 750;
 }
 
 .inspectorBody textarea {
@@ -266,11 +224,6 @@
 .teamTaskForm textarea {
   min-height: 74px;
   resize: vertical;
-}
-
-.teamList {
-  min-height: 0;
-  overflow: auto;
 }
 
 .researchIndexPanel {
@@ -1790,40 +1743,6 @@
 .researchStageBoundaryPanel {
   grid-template-columns: auto repeat(3, minmax(0, 1fr));
   align-items: center;
-}
-
-.teamRow {
-  display: grid;
-  gap: 2px;
-  width: 100%;
-  padding: 8px;
-  border: 0;
-  border-bottom: 1px solid var(--border-soft);
-  background: transparent;
-  color: var(--fg-secondary);
-  text-align: left;
-}
-
-.teamRow strong {
-  color: var(--fg-primary);
-  font-size: 0.84rem;
-}
-
-.teamRow span,
-.teamRow small {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.teamRow small {
-  color: var(--fg-muted);
-  font-size: 0.72rem;
-}
-
-.teamRowActive {
-  background: color-mix(in srgb, var(--accent-cool) 13%, transparent);
-  box-shadow: inset 3px 0 0 var(--accent-cool);
 }
 
 .canvasPanel {
