@@ -205,8 +205,8 @@ def _config_sections(lang: str, editor_sections: list[dict[str, Any]] | None = N
             "title": text_for(lang, zh="配置源", en="Config Source"),
             "summary": text_for(
                 lang,
-                zh="当前生效网页入口与 config.toml 原始内容都在这里，避免再维护第二套页面。",
-                en="The active web entry and raw config.toml source live here so there is only one surface.",
+                zh="当前生效网页入口与外部 operator config.toml 原始内容都在这里，避免再维护第二套页面。",
+                en="The active web entry and external operator config.toml source live here so there is only one surface.",
             ),
         },
         {
@@ -252,8 +252,8 @@ def _config_sections(lang: str, editor_sections: list[dict[str, Any]] | None = N
                 "title": text_for(lang, zh="高级配置检查", en="Advanced Config Check"),
                 "summary": text_for(
                     lang,
-                    zh="结构化操作之外，还可以检查整份当前配置；保存时仍只写 config.toml。",
-                    en="Beyond structured controls, check the full current config here while saving still writes only config.toml.",
+                    zh="结构化操作之外，还可以检查整份当前配置；保存时仍只写外部 operator config.toml。",
+                    en="Beyond structured controls, check the full current config here while saving still writes only the external operator config.toml.",
                 ),
             },
             {
@@ -1400,8 +1400,8 @@ def preview_config_workspace(public_config: dict[str, Any] | None, draft_meta: d
         base_hash=str(base_hash or public_config_hash(old_public)).strip(),
         message=text_for(
             _resolve_workspace_language(submitted),
-            zh="当前修改已刷新，尚未保存到 config.toml。",
-            en="Current changes refreshed and not yet saved to config.toml.",
+            zh="当前修改已刷新，尚未保存到外部 operator config.toml。",
+            en="Current changes refreshed and not yet saved to external operator config.toml.",
         ),
     )
 
@@ -1508,8 +1508,8 @@ def draft_add_model(
         base_hash=str(base_hash or public_config_hash(old_public)).strip(),
         message=text_for(
             _resolve_workspace_language(updated),
-            zh="模型修改已更新，尚未保存到 config.toml。",
-            en="Model changes updated and not yet saved to config.toml.",
+            zh="模型修改已更新，尚未保存到外部 operator config.toml。",
+            en="Model changes updated and not yet saved to external operator config.toml.",
         ),
     )
 
@@ -1558,8 +1558,8 @@ def draft_update_model(
         base_hash=str(base_hash or public_config_hash(old_public)).strip(),
         message=text_for(
             _resolve_workspace_language(updated),
-            zh="模型修改已更新，尚未保存到 config.toml。",
-            en="Model changes updated and not yet saved to config.toml.",
+            zh="模型修改已更新，尚未保存到外部 operator config.toml。",
+            en="Model changes updated and not yet saved to external operator config.toml.",
         ),
     )
 
@@ -1587,8 +1587,8 @@ def draft_delete_model(
         base_hash=str(base_hash or public_config_hash(old_public)).strip(),
         message=text_for(
             _resolve_workspace_language(updated),
-            zh="模型修改已更新，尚未保存到 config.toml。",
-            en="Model changes updated and not yet saved to config.toml.",
+            zh="模型修改已更新，尚未保存到外部 operator config.toml。",
+            en="Model changes updated and not yet saved to external operator config.toml.",
         ),
     )
 
@@ -1749,8 +1749,8 @@ def draft_check_model_image_input_capabilities(
         base_hash=str(base_hash or public_config_hash(old_public)).strip(),
         message=text_for(
             _resolve_workspace_language(current),
-            zh=f"已完成 {len(results)} 个模型的图像输入能力检测，结果已写入运行态能力缓存，不会写入 config.toml。",
-            en=f"Checked image input capability for {len(results)} models. Results were stored in the runtime capability cache, not config.toml.",
+            zh=f"已完成 {len(results)} 个模型的图像输入能力检测，结果已写入运行态能力缓存，不会写入外部 operator config.toml。",
+            en=f"Checked image input capability for {len(results)} models. Results were stored in the runtime capability cache, not the external operator config.toml.",
         ),
     )
     workspace["capabilityResults"] = results
@@ -2433,8 +2433,8 @@ def apply_config_workspace(
         persisted,
         message=text_for(
             _resolve_workspace_language(persisted),
-            zh="配置已保存到 config.toml。",
-            en="Config saved to config.toml.",
+            zh="配置已保存到外部 operator config.toml。",
+            en="Config saved to external operator config.toml.",
         ),
     )
     base_for_summary = submitted_base or current_public

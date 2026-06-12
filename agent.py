@@ -1789,15 +1789,29 @@ class SelfEvolvingAgent:
                 current_prompt = to_string(current_sp)
                 if current_prompt != self._cached_system_prompt:
                     messages[0] = build_cacheable_system_prefix_message(current_sp)
-                    messages = [
-                        message for message in messages
+                    carried_forward_volatile_messages = [
+                        message
+                        for message in messages
+                        if is_volatile_system_context_message(message)
+                    ]
+                    retained_volatile_messages = [
+                        message
+                        for message in carried_forward_volatile_messages
                         if not is_dynamic_system_context_message(message)
                     ]
+                    messages = [
+                        message for message in messages
+                        if not is_volatile_system_context_message(message)
+                    ]
                     current_dynamic_system_context = build_dynamic_system_context_message(current_sp)
-                    if current_dynamic_system_context is not None:
+                    if current_dynamic_system_context is not None or retained_volatile_messages:
+                        context_messages: list = []
+                        if current_dynamic_system_context is not None:
+                            context_messages.append(current_dynamic_system_context)
+                        context_messages.extend(retained_volatile_messages)
                         messages = TurnOutcomeController.insert_volatile_context_before_current_user(
                             messages=messages,
-                            context_messages=[current_dynamic_system_context],
+                            context_messages=context_messages,
                         )
                     self._cached_system_prompt = current_prompt
                 try:
