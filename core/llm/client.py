@@ -17,6 +17,7 @@ from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage, Syst
 
 from config import AppConfig, get_config
 from config.llm_security import is_llm_local_network_base_url
+from core.context.volatility import is_volatile_context_text
 
 from .adapters import get_provider_adapter
 from .discovery import discover_model
@@ -363,16 +364,7 @@ def _message_role_and_content(message: Any) -> tuple[str, Any]:
 
 
 def _is_volatile_context_content(text: str) -> bool:
-    normalized = str(text or "").strip()
-    return normalized.startswith(
-        (
-            "## Agent Runtime Context",
-            "## Runtime Context",
-            "## Dynamic System Context",
-            "## Recent Operator Guidance",
-            "## Slash Skill Context",
-        )
-    )
+    return is_volatile_context_text(text)
 
 
 def _safe_message_order_cache_summary(messages: List[Any]) -> Dict[str, Any]:
