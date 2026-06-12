@@ -7,10 +7,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .paths import resolve_config_path
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
 MODEL_CAPABILITY_CACHE_ENV = "VIBELUTION_MODEL_CAPABILITY_CACHE"
-DEFAULT_MODEL_CAPABILITY_CACHE_PATH = PROJECT_ROOT / ".runtime" / "config" / "model-capabilities.json"
+MODEL_CAPABILITY_CACHE_FILENAME = "model-capabilities.json"
 RUNTIME_CAPABILITY_SOURCE = "runtime_probe"
 RUNTIME_MODEL_CAPABILITY_FIELDS = (
     "supports_image_input",
@@ -28,8 +28,8 @@ def _utcnow_iso() -> str:
 def get_model_capability_cache_path() -> Path:
     override = os.environ.get(MODEL_CAPABILITY_CACHE_ENV, "").strip()
     if override:
-        return Path(override)
-    return DEFAULT_MODEL_CAPABILITY_CACHE_PATH
+        return Path(override).expanduser().resolve()
+    return resolve_config_path().parent / MODEL_CAPABILITY_CACHE_FILENAME
 
 
 def load_model_capability_cache(cache_path: Path | None = None) -> dict[str, Any]:
@@ -160,4 +160,3 @@ def strip_runtime_model_capability_fields(public_config: dict[str, Any]) -> dict
         entry.pop("capability_checked_at", None)
         entry.pop("capability_error", None)
     return updated
-

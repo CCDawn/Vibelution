@@ -25,6 +25,7 @@ from core.evaluation.self_evolution_candidate_pool import append_candidate_recor
 from config import public_config as public_config_module
 from config.models import LLMProfile, ProviderConfig
 from config.public_config import LLM_MODEL_PRESETS, UNCONFIGURED_MODEL_REF, load_public_config, public_config_hash
+from config.runtime_capabilities import MODEL_CAPABILITY_CACHE_ENV
 from core.gym import run_gym_collection_episode
 from core.gym.promotion import (
     activate_gym_promotion_proposal,
@@ -13396,7 +13397,8 @@ def test_config_workspace_test_llm_keeps_remote_probe_timeout_short():
     assert config_service._llm_test_probe_timeout_seconds(provider, profile) == 10
 
 
-def test_config_workspace_test_llm_image_input_reports_unsupported(monkeypatch):
+def test_config_workspace_test_llm_image_input_reports_unsupported(monkeypatch, tmp_path):
+    monkeypatch.setenv(MODEL_CAPABILITY_CACHE_ENV, str(tmp_path / "model-capabilities.json"))
     public_config = copy.deepcopy(load_public_config())
     public_config["llm"]["model_library"]["local_image_probe"] = {
         "provider": {
@@ -13455,7 +13457,8 @@ def test_config_workspace_test_llm_image_input_reports_unsupported(monkeypatch):
     assert "base64" not in str(fields).lower()
 
 
-def test_config_workspace_test_llm_image_input_maps_provider_unsupported(monkeypatch):
+def test_config_workspace_test_llm_image_input_maps_provider_unsupported(monkeypatch, tmp_path):
+    monkeypatch.setenv(MODEL_CAPABILITY_CACHE_ENV, str(tmp_path / "model-capabilities.json"))
     public_config = copy.deepcopy(load_public_config())
     public_config["llm"]["model_library"]["local_image_probe"] = {
         "provider": {
@@ -13500,7 +13503,8 @@ def test_config_workspace_test_llm_image_input_maps_provider_unsupported(monkeyp
     assert payload["message"] == "image input is not supported by this model route"
 
 
-def test_config_workspace_batch_image_capability_persists_model_only(monkeypatch):
+def test_config_workspace_batch_image_capability_persists_model_only(monkeypatch, tmp_path):
+    monkeypatch.setenv(MODEL_CAPABILITY_CACHE_ENV, str(tmp_path / "model-capabilities.json"))
     public_config = copy.deepcopy(load_public_config())
     public_config["llm"]["model_library"]["local_vision_probe"] = {
         "provider": {
@@ -13537,6 +13541,7 @@ def test_config_workspace_batch_image_capability_persists_model_only(monkeypatch
 
         def invoke(self, messages, tools=None, metadata=None):
             assert metadata["probeCapability"] == "image_input"
+            assert metadata["llmInvocationSurface"] == "config_image_input_probe"
             assert messages[0]["content"][1]["image_url"]["url"].startswith("data:image/png;base64,")
             return {"ok": True}
 
@@ -13568,7 +13573,8 @@ def test_config_workspace_batch_image_capability_persists_model_only(monkeypatch
     assert payload["capabilityResults"][0]["supportsImageInput"] is True
 
 
-def test_config_workspace_batch_image_capability_records_unsupported(monkeypatch):
+def test_config_workspace_batch_image_capability_records_unsupported(monkeypatch, tmp_path):
+    monkeypatch.setenv(MODEL_CAPABILITY_CACHE_ENV, str(tmp_path / "model-capabilities.json"))
     public_config = copy.deepcopy(load_public_config())
     public_config["llm"]["model_library"]["local_text_probe"] = {
         "provider": {
@@ -13647,10 +13653,28 @@ def test_config_workspace_draft_model_ignores_submitted_api_key_env(monkeypatch)
     assert "VIBELUTION_LLM_MODEL_DEEPSEEK_V4_PRO_API_KEY" in payload["draftMeta"]["pending_api_keys"]
 
 
-def test_config_workspace_draft_model_persists_manual_image_input_support(monkeypatch):
+def test_config_workspace_draft_model_persists_manual_image_input_support(monkeypatch, tmp_path):
+    monkeypatch.setenv(MODEL_CAPABILITY_CACHE_ENV, str(tmp_path / "model-capabilities.json"))
     public_config = copy.deepcopy(load_public_config())
-    _ensure_preset_model(public_config, "deepseek_v4_pro")
-    target = public_config["llm"]["model_library"]["deepseek_v4_pro"]
+    public_config["llm"]["model_library"]["local_manual_image_probe"] = {
+        "provider": {
+            "kind": "local",
+            "api_key_env": "",
+            "base_url": "http://127.0.0.1:11434/v1",
+            "compat_mode": "openai",
+            "requires_api_key": False,
+            "context_window": 65536,
+        },
+        "model": "local-vision",
+        "label": "Local Vision",
+        "api_key_env": "",
+        "transport": "chat_completions",
+        "contract": "tool_chat",
+        "streaming": True,
+        "tool_calling_mode": "auto",
+        "supports_image_input": False,
+    }
+    target = public_config["llm"]["model_library"]["local_manual_image_probe"]
 
     monkeypatch.setattr(config_service, "load_public_config", lambda: copy.deepcopy(public_config))
 
@@ -13660,23 +13684,23 @@ def test_config_workspace_draft_model_persists_manual_image_input_support(monkey
             "publicConfig": public_config,
             "draftMeta": {},
             "baseHash": public_config_hash(public_config),
-            "modelId": "deepseek_v4_pro",
+            "modelId": "local_manual_image_probe",
             "provider": target["provider"],
-            "model": "deepseek-v4-pro",
-            "label": "DeepSeek V4 Pro",
+            "model": "local-vision",
+            "label": "Local Vision",
             "details": {
                 **target,
                 "supports_image_input": True,
                 "capability_status": "supported",
                 "capability_source": "manual",
             },
-            "apiKeyEnv": "VIBELUTION_LLM_MODEL_DEEPSEEK_V4_PRO_API_KEY",
+            "apiKeyEnv": "",
             "apiKey": "",
         },
     )
 
     assert response.status_code == 200, response.json()
-    model = response.json()["publicConfig"]["llm"]["model_library"]["deepseek_v4_pro"]
+    model = response.json()["publicConfig"]["llm"]["model_library"]["local_manual_image_probe"]
     assert model["supports_image_input"] is True
     assert model["capability_status"] == "supported"
     assert model["capability_source"] == "manual"
