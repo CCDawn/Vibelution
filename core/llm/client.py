@@ -368,6 +368,7 @@ def _is_volatile_context_content(text: str) -> bool:
         (
             "## Agent Runtime Context",
             "## Runtime Context",
+            "## Dynamic System Context",
             "## Recent Operator Guidance",
             "## Slash Skill Context",
         )
@@ -376,6 +377,7 @@ def _is_volatile_context_content(text: str) -> bool:
 
 def _safe_message_order_cache_summary(messages: List[Any]) -> Dict[str, Any]:
     entries: List[Dict[str, Any]] = []
+    digest_entries: List[Dict[str, Any]] = []
     first_volatile_index = -1
     last_user_index = -1
     stable_history_chars_before_volatile = 0
@@ -405,6 +407,18 @@ def _safe_message_order_cache_summary(messages: List[Any]) -> Dict[str, Any]:
                 "volatileContext": volatile,
             }
         )
+        digest_entries.append({"role": role, "content": content})
+    if first_volatile_index >= 0:
+        stable_prefix_boundary = first_volatile_index
+        stable_prefix_end_reason = "before_volatile_context"
+    elif last_user_index >= 0:
+        stable_prefix_boundary = last_user_index
+        stable_prefix_end_reason = "before_current_user"
+    else:
+        stable_prefix_boundary = len(digest_entries)
+        stable_prefix_end_reason = "end_of_messages"
+    stable_prefix_entries = digest_entries[: max(0, stable_prefix_boundary)]
+    stable_prefix_chars = sum(_text_length(item.get("content")) for item in stable_prefix_entries)
     return {
         "messageOrderProfile": entries[:48],
         "promptCacheOrderDiagnostics": {
@@ -413,6 +427,10 @@ def _safe_message_order_cache_summary(messages: List[Any]) -> Dict[str, Any]:
             "stableHistoryBeforeVolatileChars": stable_history_chars_before_volatile,
             "volatileContextBeforeHistoryChars": volatile_chars_before_history,
             "volatileContextBeforeHistory": bool(volatile_chars_before_history > 0),
+            "stableCachePrefixMessageCount": len(stable_prefix_entries),
+            "stableCachePrefixChars": stable_prefix_chars,
+            "stableCachePrefixHash": _short_hash(stable_prefix_entries),
+            "stableCachePrefixEndReason": stable_prefix_end_reason,
         },
     }
 
@@ -539,12 +557,35 @@ def _safe_prompt_cache_design_summary(messages: List[Any], *, prompt_cache_mode:
     shape = _cache_control_text_shape(first_system_content)
     mode = str(prompt_cache_mode or "").strip().lower()
     cacheable_chars = int(shape.get("firstSystemCacheableTextChars") or 0)
+    first_system_cache_control_blocks = int(shape.get("firstSystemCacheControlBlockCount") or 0)
+    first_system_dynamic_chars = int(shape.get("firstSystemDynamicTextChars") or 0)
     disabled_mode = mode in {"", "disabled"}
     cacheable_prefix_without_enabled_mode = (
         disabled_mode
         and bool(_messages_have_prompt_cache_control(messages))
         and cacheable_chars >= PROMPT_CACHE_OPPORTUNITY_PREFIX_CHARS
     )
+    has_history_after_first_system = False
+    for index, message in enumerate(list(messages or [])):
+        if index <= 0:
+            continue
+        role, content = _message_role_and_content(message)
+        text = extract_text_content(content)
+        if role in {"user", "assistant", "tool"} and not _is_volatile_context_content(text):
+            has_history_after_first_system = True
+            break
+    cacheable_prefix_break_reason = ""
+    cacheable_prefix_ends_at = ""
+    if first_system_cache_control_blocks > 0:
+        if first_system_dynamic_chars > 0:
+            cacheable_prefix_ends_at = "first_system_cache_control_block"
+            cacheable_prefix_break_reason = (
+                "dynamic_system_suffix_before_history"
+                if has_history_after_first_system
+                else "dynamic_system_suffix_in_first_system"
+            )
+        else:
+            cacheable_prefix_ends_at = "first_system_message"
     return {
         "promptCacheDesign": {
             "mode": mode,
@@ -556,6 +597,9 @@ def _safe_prompt_cache_design_summary(messages: List[Any], *, prompt_cache_mode:
                 if cacheable_prefix_without_enabled_mode
                 else ""
             ),
+            "cacheablePrefixBreakReason": cacheable_prefix_break_reason,
+            "cacheablePrefixEndsAt": cacheable_prefix_ends_at,
+            "dynamicSystemSuffixOutsideCachePrefix": bool(first_system_dynamic_chars > 0),
             **shape,
         }
     }
