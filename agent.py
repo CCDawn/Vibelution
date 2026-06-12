@@ -42,10 +42,8 @@ from core.infrastructure.tool_executor import get_tool_executor
 from core.infrastructure.git_memory import get_git_memory_service
 from core.infrastructure.llm_utils import (
     build_cacheable_system_prefix_message,
-    build_dynamic_system_context_message,
     build_system_message,
     extend_system_message_cacheable_prefix,
-    is_dynamic_system_context_message,
     is_volatile_system_context_message,
     MAX_CONSECUTIVE_FAILURES,
     parse_tool_args,
@@ -1345,12 +1343,10 @@ class SelfEvolvingAgent:
             return
         if static_context_block:
             self.seed_static_runtime_context(static_context_block)
-        if dynamic_context_block:
-            self.seed_runtime_context(dynamic_context_block)
         _record_agent_scene_event(
             "startup",
             "agent.runtime_context_seeded",
-            message="运行时 Agent ContextEngine 上下文已注入本轮。",
+            message="Stable Agent ContextEngine context was seeded; dynamic context stays outside the LLM payload.",
             fields={
                 "agentId": agent_id,
                 "agentCode": str(getattr(packet, "agent_code", "") or "").strip(),
@@ -1362,6 +1358,7 @@ class SelfEvolvingAgent:
                 "supervisedRole": runtime_binding.get("supervisedRole", ""),
                 "staticContextChars": len(static_context_block),
                 "dynamicContextChars": len(dynamic_context_block),
+                "dynamicContextOmittedFromModelInput": bool(dynamic_context_block),
                 "staticContextHash": str((getattr(packet, "timings", {}) or {}).get("staticContextHash") or "").strip(),
                 "dynamicContextHash": str((getattr(packet, "timings", {}) or {}).get("dynamicContextHash") or "").strip(),
                 "contextSegmentCount": len(list(getattr(packet, "context_segments", []) or [])),
@@ -1654,7 +1651,6 @@ class SelfEvolvingAgent:
         self._sync_runtime_state_memory()
         sp = self.prompt_manager.build()
         self._cached_system_prompt = to_string(sp)
-        dynamic_system_context_message = build_dynamic_system_context_message(sp)
         runtime_input_builder_for_turn = policy.runtime_input_builder
         if policy.mode == AgentMode.CHAT and attachments:
             runtime_input_builder_for_turn = lambda content: self._build_chat_user_message_for_turn(
@@ -1672,6 +1668,7 @@ class SelfEvolvingAgent:
             allow_append_user_message=policy.mode == AgentMode.CHAT and policy.keep_multi_turn_context,
         )
         pending_static_context_blocks = list(getattr(self, "_pending_static_context_blocks", []) or [])
+        turn_static_context_blocks = list(pending_static_context_blocks)
         self._pending_static_context_blocks = []
         if pending_static_context_blocks:
             cacheable_prefix_merged = False
@@ -1706,40 +1703,18 @@ class SelfEvolvingAgent:
                     "cacheableSystemPrefixMerged": cacheable_prefix_merged,
                 },
             )
-        volatile_context_messages = []
-        if dynamic_system_context_message is not None:
-            volatile_context_messages.append(dynamic_system_context_message)
         pending_runtime_context_blocks = list(getattr(self, "_pending_runtime_context_blocks", []) or [])
         self._pending_runtime_context_blocks = []
         if pending_runtime_context_blocks:
-            volatile_context_messages.extend(SystemMessage(content=block) for block in pending_runtime_context_blocks)
-        if volatile_context_messages:
-            messages = TurnOutcomeController.insert_volatile_context_before_current_user(
-                messages=messages,
-                context_messages=volatile_context_messages,
-            )
-        if dynamic_system_context_message is not None:
             _record_agent_scene_event(
                 "prompt",
-                "agent.dynamic_system_context_inserted_before_current_user",
-                message="Dynamic system suffix inserted after stable history and before the current user message.",
-                fields={
-                    "dynamicSystemContextChars": len(str(dynamic_system_context_message.content or "")),
-                    "systemMessageKind": "independent_system_message",
-                    "insertionPolicy": "after_history_before_current_user",
-                    "cachePrefixPlacement": "outside_stable_prefix",
-                },
-            )
-        if pending_runtime_context_blocks:
-            _record_agent_scene_event(
-                "prompt",
-                "agent.runtime_context_inserted_as_system",
-                message="Agent runtime context inserted before the current user message.",
+                "agent.runtime_context_omitted_from_model_input",
+                message="Dynamic runtime context was omitted from the LLM message list.",
                 fields={
                     "runtimeContextBlockCount": len(pending_runtime_context_blocks),
                     "runtimeContextChars": sum(len(str(b or "")) for b in pending_runtime_context_blocks),
-                    "systemMessageKind": "independent_system_message",
-                    "insertionPolicy": "before_current_user",
+                    "insertionPolicy": "omitted_from_model_input",
+                    "cachePrefixPlacement": "not_in_payload",
                 },
             )
         try:
@@ -1789,30 +1764,17 @@ class SelfEvolvingAgent:
                 current_prompt = to_string(current_sp)
                 if current_prompt != self._cached_system_prompt:
                     messages[0] = build_cacheable_system_prefix_message(current_sp)
-                    carried_forward_volatile_messages = [
-                        message
-                        for message in messages
-                        if is_volatile_system_context_message(message)
-                    ]
-                    retained_volatile_messages = [
-                        message
-                        for message in carried_forward_volatile_messages
-                        if not is_dynamic_system_context_message(message)
-                    ]
+                    if turn_static_context_blocks:
+                        merged_message, cacheable_prefix_merged = extend_system_message_cacheable_prefix(
+                            messages[0],
+                            turn_static_context_blocks,
+                        )
+                        if cacheable_prefix_merged:
+                            messages[0] = merged_message
                     messages = [
                         message for message in messages
                         if not is_volatile_system_context_message(message)
                     ]
-                    current_dynamic_system_context = build_dynamic_system_context_message(current_sp)
-                    if current_dynamic_system_context is not None or retained_volatile_messages:
-                        context_messages: list = []
-                        if current_dynamic_system_context is not None:
-                            context_messages.append(current_dynamic_system_context)
-                        context_messages.extend(retained_volatile_messages)
-                        messages = TurnOutcomeController.insert_volatile_context_before_current_user(
-                            messages=messages,
-                            context_messages=context_messages,
-                        )
                     self._cached_system_prompt = current_prompt
                 try:
                     ui.note_context_window(

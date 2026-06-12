@@ -20,7 +20,6 @@ from agent import (
 from config import Settings
 from core.infrastructure.llm_utils import (
     build_cacheable_system_prefix_message,
-    build_dynamic_system_context_message,
     is_volatile_system_context_message,
     parse_tool_args,
     parse_xml_tool_calls,
@@ -3433,27 +3432,20 @@ class TestLocalProviderBootstrap:
 
         agent._seed_runtime_agent_context_for_turn(run_id="case-1")
         pending = list(agent._pending_runtime_context_blocks)
-        assert pending == ["## Agent Runtime Context\nPromptTemplateId: prompt-supervised-baseline"]
-
-        # 模拟 _run_one_turn 起点：把 pending 作为独立 SystemMessage 插到当前 user 前。
-        agent._pending_runtime_context_blocks = []
-        messages = TurnOutcomeController.insert_volatile_context_before_current_user(
-            messages=messages,
-            context_messages=[SystemMessage(content=block) for block in pending],
-        )
+        assert pending == []
 
         assert resumed is False
         # 关键不变量：cacheable 系统块的文本不得被运行时上下文污染。
         assert isinstance(messages[0], dict)
         assert messages[0]["content"][0]["cache_control"] == {"type": "ephemeral"}
         assert "prompt-supervised-baseline" not in messages[0]["content"][0]["text"]
-        # 运行时上下文以独立 SystemMessage 形式存在于系统块之后。
+        # 动态运行时上下文不再以独立 SystemMessage 进入模型输入。
         runtime_carriers = [
             message for message in messages[1:]
             if isinstance(message, SystemMessage)
             and "prompt-supervised-baseline" in str(message.content)
         ]
-        assert len(runtime_carriers) == 1
+        assert runtime_carriers == []
 
 
 class TestStructuredSystemMessageInvariants:
@@ -3479,7 +3471,7 @@ class TestStructuredSystemMessageInvariants:
         assert msg.content[0]["cache_control"] == {"type": "ephemeral"}
         assert msg.content[1].get("cache_control") is None
 
-    def test_build_system_message_marks_prefix_with_cache_control(self):
+    def test_build_system_message_marks_only_prefix_with_cache_control_by_default(self):
         from core.infrastructure.llm_utils import build_system_message
 
         sp = ("static prefix", "<<<SYSTEM_PROMPT_SPLIT>>>", "dynamic suffix")
@@ -3490,14 +3482,21 @@ class TestStructuredSystemMessageInvariants:
         assert message["content"][0]["type"] == "text"
         assert message["content"][0]["cache_control"] == {"type": "ephemeral"}
         assert message["content"][0]["text"] == "static prefix"
+        assert len(message["content"]) == 1
+
+    def test_build_system_message_can_include_dynamic_suffix_only_when_explicit(self):
+        from core.infrastructure.llm_utils import build_system_message
+
+        sp = ("static prefix", "<<<SYSTEM_PROMPT_SPLIT>>>", "dynamic suffix")
+        message = build_system_message(sp, include_dynamic_suffix=True)
+
         assert message["content"][1]["text"] == "dynamic suffix"
         assert "cache_control" not in message["content"][1]
 
-    def test_dynamic_system_suffix_can_be_carried_as_volatile_context(self):
+    def test_cacheable_system_prefix_omits_dynamic_suffix(self):
         sp = ("static prefix", "<<<SYSTEM_PROMPT_SPLIT>>>", "dynamic suffix")
 
         prefix_message = build_cacheable_system_prefix_message(sp)
-        dynamic_message = build_dynamic_system_context_message(sp)
 
         assert prefix_message["content"] == [
             {
@@ -3506,10 +3505,6 @@ class TestStructuredSystemMessageInvariants:
                 "cache_control": {"type": "ephemeral"},
             }
         ]
-        assert isinstance(dynamic_message, SystemMessage)
-        assert str(dynamic_message.content).startswith("## Dynamic System Context")
-        assert "dynamic suffix" in str(dynamic_message.content)
-        assert is_volatile_system_context_message(dynamic_message) is True
 
     def test_volatile_dynamic_system_context_is_not_carried_to_next_turn(self):
         messages = [
@@ -4288,7 +4283,7 @@ class TestRuntimeStateMemoryFlow:
         assert inserted[4].content == "operator guidance"
         assert inserted[-1] == messages[-1]
 
-    def test_chat_runtime_context_seed_is_deferred_until_current_user_is_known(self):
+    def test_chat_runtime_context_seed_is_omitted_from_model_messages(self):
         agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
         agent.mode_policy = ModePolicy(
             mode=AgentMode.CHAT,
@@ -4329,17 +4324,21 @@ class TestRuntimeStateMemoryFlow:
             build_external_request_message=build_chat_user_message,
             allow_append_user_message=True,
         )
-        inserted = TurnOutcomeController.insert_volatile_context_before_current_user(
-            messages=messages,
-            context_messages=[SystemMessage(content=block) for block in agent._pending_runtime_context_blocks],
-        )
+        omitted_runtime_context = list(agent._pending_runtime_context_blocks)
+        agent._pending_runtime_context_blocks = []
 
         assert resumed is True
-        assert inserted[1:3] == agent._active_turn_messages[1:]
-        assert isinstance(inserted[3], SystemMessage)
-        assert inserted[3].content.startswith("## Agent Runtime Context")
-        assert inserted[-1]["role"] == "user"
-        assert "第二句" in inserted[-1]["content"]
+        assert omitted_runtime_context == ["## Agent Runtime Context\nvolatile"]
+        assert messages[1:3] == agent._active_turn_messages[1:]
+        assert all(
+            not (
+                isinstance(message, SystemMessage)
+                and str(message.content or "").startswith("## Agent Runtime Context")
+            )
+            for message in messages
+        )
+        assert messages[-1]["role"] == "user"
+        assert "第二句" in messages[-1]["content"]
 
     def test_static_runtime_context_is_merged_into_cacheable_system_prefix(self):
         agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
@@ -4370,23 +4369,26 @@ class TestRuntimeStateMemoryFlow:
             messages[0],
             agent._pending_static_context_blocks,
         )
-        dynamic_context = [SystemMessage(content=block) for block in agent._pending_runtime_context_blocks]
-        inserted = TurnOutcomeController.insert_volatile_context_before_current_user(
-            messages=messages,
-            context_messages=dynamic_context,
-        )
+        omitted_runtime_context = list(agent._pending_runtime_context_blocks)
+        agent._pending_runtime_context_blocks = []
 
         assert resumed is True
         assert merged is True
-        assert isinstance(inserted[0], dict)
-        assert inserted[0]["content"][0]["cache_control"] == {"type": "ephemeral"}
-        assert inserted[0]["content"][0]["text"].endswith("## Agent Static Context\nstable")
-        assert inserted[0]["content"][1]["text"] == "new dynamic system"
-        assert inserted[1:3] == history[1:]
-        assert isinstance(inserted[3], SystemMessage)
-        assert inserted[3].content.startswith("## Agent Runtime Context")
-        assert inserted[-1]["role"] == "user"
-        assert "第二句" in inserted[-1]["content"]
+        assert omitted_runtime_context == ["## Agent Runtime Context\nvolatile"]
+        assert isinstance(messages[0], dict)
+        assert messages[0]["content"][0]["cache_control"] == {"type": "ephemeral"}
+        assert messages[0]["content"][0]["text"].endswith("## Agent Static Context\nstable")
+        assert len(messages[0]["content"]) == 1
+        assert messages[1:3] == history[1:]
+        assert all(
+            not (
+                isinstance(message, SystemMessage)
+                and str(message.content or "").startswith("## Agent Runtime Context")
+            )
+            for message in messages
+        )
+        assert messages[-1]["role"] == "user"
+        assert "第二句" in messages[-1]["content"]
 
     def test_finish_turn_message_carryover_keeps_unfinished_context_and_clears_after_close(self):
         messages = [
