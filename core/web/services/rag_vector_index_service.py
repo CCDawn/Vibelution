@@ -60,6 +60,7 @@ def list_indexable_knowledge_items(*, agent_id: str = "", internal: bool = False
             if not knowledge_item_id:
                 continue
             source_artifact_ids = [str(value or "").strip() for value in list(item.get("sourceArtifactIds") or []) if str(value or "").strip()]
+            central_source_ids = [str(value or "").strip() for value in list(item.get("centralSourceIds") or []) if str(value or "").strip()]
             items.append(
                 {
                     "recordId": _owner_scoped_item_record_id(
@@ -77,6 +78,7 @@ def list_indexable_knowledge_items(*, agent_id: str = "", internal: bool = False
                     "agentId": str(item.get("agentId") or base.get("agentId") or "").strip(),
                     "agentName": str(base.get("agentName") or "").strip(),
                     "sourceArtifactIds": source_artifact_ids,
+                    "centralSourceIds": central_source_ids,
                     "title": str(item.get("title") or "").strip(),
                     "summary": str(item.get("summary") or "").strip(),
                     "tags": [str(value or "").strip() for value in list(item.get("tags") or []) if str(value or "").strip()],
@@ -119,6 +121,7 @@ def write_index_record(
         "teamId": str(item.get("teamId") or "").strip(),
         "agentId": str(item.get("agentId") or "").strip(),
         "sourceArtifactIds": [str(value or "").strip() for value in list(item.get("sourceArtifactIds") or []) if str(value or "").strip()],
+        "centralSourceIds": [str(value or "").strip() for value in list(item.get("centralSourceIds") or []) if str(value or "").strip()],
         "contentHash": str(item.get("contentHash") or "").strip(),
         "embeddingProvider": str(embedding_provider or "").strip(),
         "embeddingModel": str(embedding_model or "").strip(),
@@ -186,6 +189,7 @@ def get_vector_index_health(*, agent_id: str = "", internal: bool = False) -> di
                 "ownerId": str(item.get("ownerId") or item.get("teamId") or item.get("agentId") or "").strip(),
                 "teamId": str(item.get("teamId") or "").strip(),
                 "agentId": str(item.get("agentId") or "").strip(),
+                "centralSourceIds": [str(value or "").strip() for value in list(item.get("centralSourceIds") or []) if str(value or "").strip()],
                 "status": status,
                 "contentHash": str(item.get("contentHash") or "").strip(),
                 "indexedContentHash": record_hash,
@@ -223,6 +227,7 @@ def _content_hash(item: dict[str, Any]) -> str:
         "summary": str(item.get("summary") or "").strip(),
         "content": str(item.get("content") or "").strip(),
         "sourceArtifactIds": [str(value or "").strip() for value in list(item.get("sourceArtifactIds") or []) if str(value or "").strip()],
+        "centralSourceIds": [str(value or "").strip() for value in list(item.get("centralSourceIds") or []) if str(value or "").strip()],
     }
     encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return "sha256:" + hashlib.sha256(encoded.encode("utf-8")).hexdigest()
@@ -259,6 +264,7 @@ def _write_index_summary(records: list[dict[str, Any]]) -> None:
                 "ownerId": str(record.get("ownerId") or record.get("teamId") or record.get("agentId") or "").strip(),
                 "teamId": str(record.get("teamId") or "").strip(),
                 "agentId": str(record.get("agentId") or "").strip(),
+                "centralSourceIds": [str(value or "").strip() for value in list(record.get("centralSourceIds") or []) if str(value or "").strip()],
                 "contentHash": str(record.get("contentHash") or "").strip(),
                 "status": str(record.get("status") or "").strip(),
                 "indexedAt": str(record.get("indexedAt") or "").strip(),
@@ -315,7 +321,7 @@ def _items_dir() -> Path:
 
 
 def _index_root() -> Path:
-    return _project_root() / "workspace" / "knowledge" / "vector_index"
+    return _project_root() / "workspace" / "knowledge" / "rag"
 
 
 def _project_root() -> Path:

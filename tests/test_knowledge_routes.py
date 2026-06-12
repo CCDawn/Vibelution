@@ -86,6 +86,62 @@ def test_knowledge_routes_create_source_proposal_review_and_rate(tmp_path, monke
     assert items_response.json()["summary"]["itemCount"] == 1
 
 
+def test_knowledge_source_inbox_routes_promote_and_attach_central_source(tmp_path, monkeypatch):
+    client, team, lead, member, outsider = _setup(tmp_path, monkeypatch)
+    base_response = client.post(
+        f"/api/teams/{team['teamId']}/knowledge-bases",
+        json={"name": "Route Source Inbox KB", "actorAgentId": lead["agentId"]},
+    )
+    assert base_response.status_code == 201
+    base = base_response.json()
+
+    collect_response = client.post(
+        "/api/knowledge/sources/inbox",
+        json={
+            "ownerType": "team",
+            "ownerId": team["teamId"],
+            "sourceType": "external_search_refinement",
+            "sourceRef": {"url": "https://example.test/route-source", "query": "route inbox"},
+            "originalContent": "Route source capture waits for steward review.",
+            "originalFilename": "route-source.txt",
+            "title": "Route inbox source",
+            "actorAgentId": member["agentId"],
+        },
+    )
+    assert collect_response.status_code == 201
+    inbox_source = collect_response.json()
+    assert inbox_source["status"] == "pending"
+    assert (tmp_path / inbox_source["originalPath"]).exists()
+
+    blocked_response = client.get(
+        "/api/knowledge/sources/inbox",
+        params={"ownerType": "team", "ownerId": team["teamId"], "agentId": outsider["agentId"]},
+    )
+    assert blocked_response.status_code == 403
+
+    review_response = client.patch(
+        f"/api/knowledge/sources/inbox/team/{team['teamId']}/{inbox_source['inboxSourceId']}/review",
+        json={"decision": "accepted", "reviewedByAgentId": lead["agentId"]},
+    )
+    assert review_response.status_code == 200
+    central_source = review_response.json()["centralSource"]
+    assert central_source["centralSourceId"]
+
+    registry_response = client.get(
+        "/api/knowledge/sources/registry",
+        params={"agentId": member["agentId"], "ownerType": "team", "ownerId": team["teamId"]},
+    )
+    assert registry_response.status_code == 200
+    assert registry_response.json()["summary"]["centralSourceCount"] == 1
+
+    artifact_response = client.post(
+        f"/api/knowledge-bases/{base['knowledgeBaseId']}/central-source-artifacts",
+        json={"centralSourceId": central_source["centralSourceId"], "actorAgentId": member["agentId"]},
+    )
+    assert artifact_response.status_code == 201
+    assert artifact_response.json()["centralSourceId"] == central_source["centralSourceId"]
+
+
 def test_knowledge_routes_reject_non_member_and_bad_source_type(tmp_path, monkeypatch):
     client, team, lead, _member, outsider = _setup(tmp_path, monkeypatch)
     base = client.post(

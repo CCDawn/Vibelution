@@ -24,12 +24,14 @@ class RagRetrievalError(ValueError):
     """Raised when a RAG retrieval request is invalid."""
 
 
-def get_rag_retrieval_health() -> dict[str, Any]:
+def get_rag_retrieval_health(*, agent_id: str = "", internal: bool = False) -> dict[str, Any]:
     """Return read-only RAG provider readiness for the memory platform."""
 
-    vector_health = rag_vector_index_service.get_vector_index_health(internal=True)
+    normalized_agent_id = str(agent_id or "").strip()
+    vector_health = rag_vector_index_service.get_vector_index_health(agent_id=normalized_agent_id, internal=internal)
     return {
         "schemaVersion": SCHEMA_VERSION,
+        "agentId": normalized_agent_id,
         "provider": "local",
         "status": "ready",
         "providers": [
@@ -157,6 +159,7 @@ def _context_from_search_result(
     max_context_chars: int,
 ) -> dict[str, Any]:
     source_artifact_ids = [str(item or "").strip() for item in list(result.get("sourceArtifactIds") or []) if str(item or "").strip()]
+    central_source_ids = [str(item or "").strip() for item in list(result.get("centralSourceIds") or []) if str(item or "").strip()]
     context_source = {
         "ownerType": str(result.get("ownerType") or "team").strip(),
         "ownerId": str(result.get("ownerId") or result.get("teamId") or result.get("agentId") or "").strip(),
@@ -168,6 +171,7 @@ def _context_from_search_result(
         "knowledgeBaseName": str(result.get("knowledgeBaseName") or "").strip(),
         "knowledgeItemId": str(result.get("knowledgeItemId") or "").strip(),
         "sourceArtifactIds": source_artifact_ids,
+        "centralSourceIds": central_source_ids,
     }
     context_id = _context_id(context_source["knowledgeItemId"], rank)
     return {
@@ -205,6 +209,7 @@ def _citation_from_context(context: dict[str, Any]) -> dict[str, Any]:
         "knowledgeBaseName": str(source.get("knowledgeBaseName") or "").strip(),
         "knowledgeItemId": str(source.get("knowledgeItemId") or "").strip(),
         "sourceArtifactIds": list(source.get("sourceArtifactIds") or []),
+        "centralSourceIds": list(source.get("centralSourceIds") or []),
         "provider": str(context.get("provider") or "").strip(),
         "retrievalMode": str(context.get("retrievalMode") or "").strip(),
     }
