@@ -2196,6 +2196,52 @@ def test_invoke_logs_prompt_cache_opportunity_when_cacheable_prefix_is_disabled(
     assert design["cacheablePrefixOpportunityReason"] == "prompt_cache_mode_disabled"
 
 
+def test_invoke_logs_prompt_cache_break_when_dynamic_system_suffix_precedes_history(monkeypatch):
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "relay",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://ai-pixel.online",
+            "llm.providers.default.compat_mode": "openai",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "gpt-5.5",
+            "llm.profiles.primary.transport": "responses",
+            "llm.profiles.primary.prompt_cache.mode": "automatic",
+        }
+    )
+    recorded = []
+
+    def backend(_payload):
+        return {
+            "choices": [{"message": {"role": "assistant", "content": "ok"}}],
+            "usage": {"input_tokens": 100, "output_tokens": 5},
+        }
+
+    monkeypatch.setattr("core.llm.client._record_llm_scene_event", lambda *args, **kwargs: recorded.append((args, kwargs)))
+
+    client = LLMClient(config=config, backend=backend)
+    client.invoke(
+        [
+            {
+                "role": "system",
+                "content": [
+                    {"type": "text", "text": "stable-prefix", "cache_control": {"type": "ephemeral"}},
+                    {"type": "text", "text": "dynamic-suffix"},
+                ],
+            },
+            {"role": "user", "content": "history-user"},
+            {"role": "assistant", "content": "history-assistant"},
+            {"role": "user", "content": "current-user"},
+        ]
+    )
+
+    fields = next(item for item in recorded if item[0][1] == "llm.invoke.succeeded")[1]["fields"]
+    design = fields["promptCacheDesign"]
+    assert design["cacheablePrefixBreakReason"] == "dynamic_system_suffix_before_history"
+    assert design["cacheablePrefixEndsAt"] == "first_system_cache_control_block"
+    assert design["dynamicSystemSuffixOutsideCachePrefix"] is True
+
+
 def test_invoke_logs_prompt_cache_order_with_history_before_volatile_context(monkeypatch):
     config = make_config(
         **{
@@ -2236,6 +2282,10 @@ def test_invoke_logs_prompt_cache_order_with_history_before_volatile_context(mon
     assert diagnostics["lastUserIndex"] == 4
     assert diagnostics["stableHistoryBeforeVolatileChars"] == len("history-user") + len("history-assistant")
     assert diagnostics["volatileContextBeforeHistory"] is False
+    assert diagnostics["stableCachePrefixMessageCount"] == 3
+    assert diagnostics["stableCachePrefixChars"] == len("stable-system") + len("history-user") + len("history-assistant")
+    assert diagnostics["stableCachePrefixEndReason"] == "before_volatile_context"
+    assert diagnostics["stableCachePrefixHash"]
     assert fields["messageOrderProfile"][3]["role"] == "user"
     assert fields["messageOrderProfile"][3]["volatileContext"] is True
 

@@ -116,7 +116,10 @@ def parse_tool_args(tool_args: Any) -> dict:
         return {}
 
 
-def build_system_message(sp) -> Any:
+SYSTEM_DYNAMIC_CONTEXT_HEADER = "## Dynamic System Context"
+
+
+def build_system_message(sp, *, include_dynamic_suffix: bool = True) -> Any:
     """将 SystemPrompt 元组转为 API 消息格式，静态前缀标记 cache_control。
 
     利用 split_sys_prompt_prefix 分离静态/动态部分：
@@ -138,12 +141,66 @@ def build_system_message(sp) -> Any:
         "text": "\n\n".join(static_parts),
         "cache_control": {"type": "ephemeral"},
     }]
-    if dynamic_parts:
+    if include_dynamic_suffix and dynamic_parts:
         content_blocks.append({
             "type": "text",
             "text": "\n\n".join(dynamic_parts),
         })
     return {"role": "system", "content": content_blocks}
+
+
+def build_cacheable_system_prefix_message(sp) -> Any:
+    """Build only the stable cacheable system prefix for provider prompt cache.
+
+    Dynamic system suffixes should be carried later in the turn, close to the
+    current user message, so completed chat history can stay in the provider's
+    exact prefix between turns.
+    """
+
+    return build_system_message(sp, include_dynamic_suffix=False)
+
+
+def build_dynamic_system_context_message(sp) -> Any:
+    """Build the dynamic system suffix as a volatile per-turn context message."""
+
+    _static_parts, dynamic_parts = split_sys_prompt_prefix(sp)
+    dynamic_text = "\n\n".join(str(part or "").strip() for part in dynamic_parts if str(part or "").strip())
+    if not dynamic_text:
+        return None
+    return SystemMessage(content=f"{SYSTEM_DYNAMIC_CONTEXT_HEADER}\n{dynamic_text}")
+
+
+def _text_from_system_context_message(message: Any) -> str:
+    content: Any = None
+    if isinstance(message, SystemMessage):
+        content = getattr(message, "content", None)
+    elif isinstance(message, dict):
+        role = str(message.get("role") or "").strip().lower()
+        if role not in {"system", "user"}:
+            return ""
+        content = message.get("content")
+    else:
+        return ""
+    return str(content or "").strip()
+
+
+def is_dynamic_system_context_message(message: Any) -> bool:
+    """Return True for the dynamic system suffix carrier."""
+
+    return _text_from_system_context_message(message).startswith(SYSTEM_DYNAMIC_CONTEXT_HEADER)
+
+
+def is_volatile_system_context_message(message: Any) -> bool:
+    """Return True for per-turn system context that should not be carried over."""
+
+    text = _text_from_system_context_message(message)
+    return text.startswith((
+        SYSTEM_DYNAMIC_CONTEXT_HEADER,
+        "## Agent Runtime Context",
+        "## Runtime Context",
+        "## Recent Operator Guidance",
+        "## Slash Skill Context",
+    ))
 
 
 def build_cacheable_system_message(static_text: Any, dynamic_text: Any = "") -> Any:
