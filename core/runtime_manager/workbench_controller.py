@@ -234,7 +234,7 @@ def _listening_pid_for_port_windows(port: int) -> int:
             capture_output=True,
             text=True,
             timeout=2.0,
-            creationflags=_creation_flags(),
+            creationflags=_creation_flags(detach=True),
             startupinfo=_hidden_startup_info(),
             check=False,
         )
@@ -506,15 +506,18 @@ def observe_workbench() -> dict[str, Any]:
     }
 
 
-def _creation_flag_names() -> tuple[str, ...]:
+def _creation_flag_names(*, detach: bool = False) -> tuple[str, ...]:
     if os.name != "nt":
         return ()
-    return ("DETACHED_PROCESS", "CREATE_NEW_PROCESS_GROUP", "CREATE_NO_WINDOW")
+    names = ["CREATE_NEW_PROCESS_GROUP", "CREATE_NO_WINDOW"]
+    if detach:
+        names.insert(0, "DETACHED_PROCESS")
+    return tuple(names)
 
 
-def _creation_flags() -> int:
+def _creation_flags(*, detach: bool = False) -> int:
     flags = 0
-    for name in _creation_flag_names():
+    for name in _creation_flag_names(detach=detach):
         flags |= int(getattr(subprocess, name, 0))
     return flags
 
