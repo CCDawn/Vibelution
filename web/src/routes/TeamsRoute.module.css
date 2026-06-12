@@ -94,7 +94,7 @@
 
 .workspace {
   display: grid;
-  grid-template-columns: minmax(226px, 286px) minmax(0, 1fr) minmax(252px, 318px);
+  grid-template-columns: minmax(520px, 1fr) minmax(252px, 318px);
   gap: 8px;
   min-height: 0;
   flex: 1 1 0;
@@ -103,18 +103,17 @@
 }
 
 .workspaceResearch {
-  grid-template-columns: minmax(250px, 320px) minmax(0, 0) minmax(720px, 1fr);
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .workspaceResearchCanvas {
-  grid-template-columns: minmax(250px, 320px) minmax(520px, 1fr) minmax(300px, 380px);
+  grid-template-columns: minmax(520px, 1fr) minmax(300px, 380px);
 }
 
 .workspaceEmpty {
-  grid-template-columns: minmax(230px, 292px) minmax(0, 0.95fr) minmax(240px, 300px);
+  grid-template-columns: minmax(0, 0.95fr) minmax(240px, 300px);
 }
 
-.teamPanel,
 .canvasPanel,
 .inspector {
   height: 100%;
@@ -125,7 +124,6 @@
   overflow: hidden;
 }
 
-.teamPanel,
 .inspector {
   display: flex;
   flex-direction: column;
@@ -133,12 +131,20 @@
 
 .teamPickerPanel {
   display: grid;
+  grid-template-columns: minmax(220px, 320px) minmax(0, 1fr);
+  align-items: center;
   gap: 8px;
-  padding: 10px;
-  border-bottom: 1px solid var(--border-soft);
+  margin: 8px 10px 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
   background:
     linear-gradient(90deg, color-mix(in srgb, var(--accent-cool) 9%, transparent), transparent 64%),
     color-mix(in srgb, var(--surface-panel-strong) 70%, transparent);
+}
+
+.teamSwitcherBar {
+  flex: 0 0 auto;
 }
 
 .teamPickerLabel {
@@ -1751,6 +1757,7 @@
 }
 
 .researchCanvasPanelHidden {
+  display: none;
   border: 0;
   background: transparent;
   pointer-events: none;
@@ -3540,9 +3547,12 @@
     overflow: auto;
   }
 
-  .teamPanel,
   .inspector {
     min-height: 220px;
+  }
+
+  .teamPickerPanel {
+    grid-template-columns: 1fr;
   }
 
   .canvasPanel {

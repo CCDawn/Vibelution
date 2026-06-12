@@ -39,7 +39,7 @@
         <aside class="dashboard-panel">
           <h2>审核摘要</h2>
           <div class="kpi-grid">
-            <div class="kpi"><b>当前阶段</b><strong>M6.19</strong><span>Teams 左侧入口已收敛为 AI 搜索范围团队 / ai科学研究团队固定下拉，不再展示创建、模板和完整团队列表。</span></div>
+            <div class="kpi"><b>当前阶段</b><strong>M6.20</strong><span>Teams 固定团队入口已移到顶部横向切换条，左侧栏删除，科研主工作区释放空间。</span></div>
             <div class="kpi"><b>流程节点</b><strong>13</strong><span>1-9 为知识入库主线，10-13 保留占位与维护节点。</span></div>
             <div class="kpi"><b>候选资料</b><strong>10</strong><span>第一轮 source_manifest 已进入 candidate-only 工作区。</span></div>
             <div class="kpi"><b>正式写入</b><strong>0</strong><span>未写正式 Team Knowledge、RAG 或 official graph。</span></div>
@@ -1257,7 +1257,7 @@
           <div class="service-row"><b>团队群聊</b><span>room-20260529-090009-757107-6a747d62 · research_coordination</span></div>
           <div class="service-row"><b>流程文件</b><span>workspace/teams/research-team/workflow_orchestration.json</span></div>
           <div class="service-row"><b>候选仓库</b><span>workspace/teams/research-team/candidate_store/index.json</span></div>
-          <div class="service-row"><b>策略</b><span>挑战杯科研流程直接绑定当前 Vibelution ai科学研究团队，不另建新团队；Teams 页左上角只保留 AI 搜索范围团队和 ai科学研究团队两个固定入口，不再展示创建团队、模板创建或完整团队列表；选择 ai科学研究团队后直接进入团队专属科研工作台，团队内容区只露出知识搜集、实验、迭代三阶段入口；资料搜集已折叠进知识搜集阶段页，组织画布仅保留为附属结构视图。</span></div>
+          <div class="service-row"><b>策略</b><span>挑战杯科研流程直接绑定当前 Vibelution ai科学研究团队，不另建新团队；Teams 页顶部只保留 AI 搜索范围团队和 ai科学研究团队两个固定入口，左侧栏删除，不再展示创建团队、模板创建或完整团队列表；选择 ai科学研究团队后直接进入团队专属科研工作台，团队内容区只露出知识搜集、实验、迭代三阶段入口；资料搜集已折叠进知识搜集阶段页，组织画布仅保留为附属结构视图。</span></div>
         </div>
       </div>
       <div class="runbook-grid">
@@ -1286,7 +1286,7 @@
                 </div>
 <div class="service-row">
                   <strong>团队沟通复用层</strong>
-                  <span>复用 Team registry、Team canvas、linkedChatRoom、ChatRoom round 和 research_coordination purpose；Teams 团队页左上角固定切换 AI 搜索范围团队 / ai科学研究团队，research-team 主工作区保留三阶段入口，组织画布作为附属结构视图保留。</span>
+                  <span>复用 Team registry、Team canvas、linkedChatRoom、ChatRoom round 和 research_coordination purpose；Teams 团队页顶部固定切换 AI 搜索范围团队 / ai科学研究团队，左侧栏删除以释放 research-team 主工作区，组织画布作为附属结构视图保留。</span>
                 </div>
 <div class="service-row">
                   <strong>研究编排复用层</strong>
@@ -1327,7 +1327,7 @@
                 </div>
 <div class="service-row">
                   <b>TeamsRoute workflow workspace</b>
-                  <span>已落地入口：Teams 页左上角固定下拉只暴露 AI 搜索范围团队和 ai科学研究团队；监督进化/自进化模式页各自读取系统 Team 并展示只读团队画布；选择 ai科学研究团队后直接进入 research-team 专属科研工作台；科研一级索引统一为知识搜集、实验、迭代三阶段。知识搜集页位于 /teams?team=research-team&amp;researchView=knowledge_collection，默认展示高价值状态摘要、下一步动作和对话式 source collection 过程流；KV/prompt cache、稳定前缀、动态增量、assignment、query、存储路径和手工回写保留在可展开详情中；实验/迭代页先提供规划启动、轮次状态和边界说明；旧 source_collection 参数兼容映射到知识搜集。</span>
+                  <span>已落地入口：Teams 页顶部固定横向切换条只暴露 AI 搜索范围团队和 ai科学研究团队，左侧栏已删除；监督进化/自进化模式页各自读取系统 Team 并展示只读团队画布；选择 ai科学研究团队后直接进入 research-team 专属科研工作台；科研一级索引统一为知识搜集、实验、迭代三阶段。知识搜集页位于 /teams?team=research-team&amp;researchView=knowledge_collection，默认展示高价值状态摘要、下一步动作和对话式 source collection 过程流；KV/prompt cache、稳定前缀、动态增量、assignment、query、存储路径和手工回写保留在可展开详情中；实验/迭代页先提供规划启动、轮次状态和边界说明；旧 source_collection 参数兼容映射到知识搜集。</span>
                 </div>
 <div class="service-row">
                   <b>local_research_worker_model</b>
@@ -1742,7 +1742,7 @@
 <div class="blueprint-row compact">
               <b>Team 前端入口</b>
               <strong>/teams?team=research-team</strong>
-              <span>读取 /workflow-orchestration、/stage-rounds/status、/official-model-evidence/status、/candidates?limit=8、/knowledge-ingestion/status 和通用 data-processing run/status/assignment；左上角只用固定下拉选择 AI 搜索范围团队或 ai科学研究团队，点击 research-team 后直接进入团队专属科研工作台，内容区只展示知识搜集、实验、迭代三阶段入口和三阶段启动台；非这两个团队不在当前入口暴露。</span>
+              <span>读取 /workflow-orchestration、/stage-rounds/status、/official-model-evidence/status、/candidates?limit=8、/knowledge-ingestion/status 和通用 data-processing run/status/assignment；顶部横向切换条只允许选择 AI 搜索范围团队或 ai科学研究团队，点击 research-team 后直接进入团队专属科研工作台，内容区只展示知识搜集、实验、迭代三阶段入口和三阶段启动台；非这两个团队不在当前入口暴露。</span>
             </div>
 <div class="blueprint-row compact">
               <b>知识搜集阶段页</b>
@@ -1992,8 +1992,14 @@
 <div class="blueprint-row">
               <b>M6.19</b>
               <strong>固定团队入口下拉</strong>
-              <span>Teams 左侧团队管理区替换为左上角固定团队下拉，只暴露 AI 搜索范围团队和 ai科学研究团队；选择项会更新 team URL 并进入对应团队页面。</span>
+              <span>Teams 左侧团队管理区替换为固定团队下拉，只暴露 AI 搜索范围团队和 ai科学研究团队；选择项会更新 team URL 并进入对应团队页面。</span>
               <span>当前页面不再显示创建团队表单、模板创建或完整团队列表，避免自定义团队入口挤占科研团队主工作区；后端团队创建和模板 API 不删除，仍可由其它管理面承接。</span>
+            </div>
+<div class="blueprint-row">
+              <b>M6.20</b>
+              <strong>顶部团队切换条</strong>
+              <span>Teams 固定团队入口从左侧栏移到 summary 下方的顶部横向切换条，左侧栏删除，主工作区改为科研内容优先。</span>
+              <span>点击 AI 搜索范围团队或 ai科学研究团队后直接进入对应团队内容；科研三阶段页面获得更多横向空间，不再被团队选择区挤压。</span>
             </div>
       </div>
       <div class="tag-row">
