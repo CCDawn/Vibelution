@@ -39,7 +39,7 @@
         <aside class="dashboard-panel">
           <h2>审核摘要</h2>
           <div class="kpi-grid">
-            <div class="kpi"><b>当前阶段</b><strong>M6.20</strong><span>Teams 固定团队入口已移到顶部横向切换条，左侧栏删除，科研主工作区释放空间。</span></div>
+            <div class="kpi"><b>当前阶段</b><strong>M6.21</strong><span>知识搜集批次已固定落盘到 source_collection_runs，并提供可打开的证据位置按钮。</span></div>
             <div class="kpi"><b>流程节点</b><strong>13</strong><span>1-9 为知识入库主线，10-13 保留占位与维护节点。</span></div>
             <div class="kpi"><b>候选资料</b><strong>10</strong><span>第一轮 source_manifest 已进入 candidate-only 工作区。</span></div>
             <div class="kpi"><b>正式写入</b><strong>0</strong><span>未写正式 Team Knowledge、RAG 或 official graph。</span></div>
@@ -1747,7 +1747,7 @@
 <div class="blueprint-row compact">
               <b>知识搜集阶段页</b>
               <strong>TeamsRoute knowledge collection stage</strong>
-              <span>可在 /teams?team=research-team&amp;researchView=knowledge_collection 独立打开知识搜集页，启动 source collection run、查看 DataSearchPlan/querySeeds/assignment/assignedQueries，并手工提交一条含 rawLocation 的 CollectionOutput；启动时优先使用 Team canvas 中各功能角色绑定的团队 agentId，提交后自动导入 source_manifest 候选；页面会把 KV 门禁状态、promptCacheMode、稳定前缀和 promptCachePartition 放入搜集对话流。</span>
+              <span>可在 /teams?team=research-team&amp;researchView=knowledge_collection 独立打开知识搜集页，启动 source collection run、查看 DataSearchPlan/querySeeds/assignment/assignedQueries，并手工提交一条含 rawLocation 的 CollectionOutput；启动时优先使用 Team canvas 中各功能角色绑定的团队 agentId，提交后自动导入 source_manifest 候选；页面会把 KV 门禁状态、promptCacheMode、稳定前缀、promptCachePartition 和 source_collection_runs/&lt;runId&gt; 证据落盘位置放入搜集对话流，并可通过 storage/open 白名单接口打开对应位置。</span>
             </div>
 <div class="blueprint-row compact">
               <b>转移记录</b>
@@ -2000,6 +2000,12 @@
               <strong>顶部团队切换条</strong>
               <span>Teams 固定团队入口从左侧栏移到 summary 下方的顶部横向切换条，左侧栏删除，主工作区改为科研内容优先。</span>
               <span>点击 AI 搜索范围团队或 ai科学研究团队后直接进入对应团队内容；科研三阶段页面获得更多横向空间，不再被团队选择区挤压。</span>
+            </div>
+<div class="blueprint-row">
+              <b>M6.21</b>
+              <strong>搜集证据落盘与打开位置</strong>
+              <span>source collection run 固定生成 workspace/teams/research-team/source_collection_runs/&lt;runId&gt;/，写入 search_plan.json、search_events.jsonl、records.jsonl、candidates.jsonl 和 artifacts/，Teams 知识搜集页提供打开批次目录、搜索计划、搜索步骤、搜集记录、候选镜像和候选仓库按钮。</span>
+              <span>打开接口只接受白名单 target，不允许前端传任意路径；本轮仍只保存候选搜集证据，不绕过资料筛选、正式 Team Knowledge、RAG 或 official graph 门禁。</span>
             </div>
       </div>
       <div class="tag-row">

@@ -5,7 +5,10 @@ from __future__ import annotations
 import hashlib
 import html
 import json
+import os
 import re
+import subprocess
+import sys
 import threading
 import urllib.error
 import urllib.parse
@@ -83,6 +86,17 @@ SOURCE_COLLECTION_SEARCH_EXECUTION_DEFAULT_MAX_QUERIES = 4
 SOURCE_COLLECTION_SEARCH_EXECUTION_MAX_QUERIES = 12
 SOURCE_COLLECTION_SEARCH_EXECUTION_DEFAULT_RESULTS_PER_QUERY = 2
 SOURCE_COLLECTION_SEARCH_EXECUTION_MAX_RESULTS_PER_QUERY = 5
+SOURCE_COLLECTION_STORAGE_OPEN_TARGETS = {
+    "run_directory",
+    "artifacts_directory",
+    "search_plan",
+    "search_events",
+    "records",
+    "candidates",
+    "candidate_store",
+    "data_processing_run",
+    "data_processing_records",
+}
 SOURCE_COLLECTION_PROMPT_CACHE_REQUIRED_MODES = {"required", "strict", "hard_required", "required_for_llm_execution"}
 SOURCE_COLLECTION_PROMPT_CACHE_DISABLED_MODES = {"disabled", "off", "none"}
 SOURCE_COLLECTION_SUPPORTED_PROMPT_CACHE_MODES = {"automatic", "explicit_cache_control"}
@@ -448,6 +462,10 @@ def start_source_collection_run(team_id: str, payload: dict[str, Any] | None = N
         plan_id=preliminary_search_plan["planId"],
         prompt_cache_policy=prompt_cache_policy,
     )
+    storage_artifacts = _source_collection_storage_artifacts(normalized_team_id, run["runId"])
+    search_plan["storageArtifacts"] = storage_artifacts
+    search_plan["resultWritebackContract"]["evidenceStorage"] = storage_artifacts
+    _write_source_collection_search_plan(normalized_team_id, run["runId"], search_plan)
     assignments = [
         data_processing_service.create_collection_assignment(
             run["runId"],
@@ -498,11 +516,13 @@ def start_source_collection_run(team_id: str, payload: dict[str, Any] | None = N
             "promptCacheMode": prompt_cache_policy["promptCacheMode"],
             "promptCacheGateStatus": prompt_cache_policy["gate"]["status"],
             "teamAgentBindingCount": sum(1 for item in assignments if str(item.get("agentId") or "") != str(item.get("agentRole") or "")),
+            "sourceCollectionRunDirectory": storage_artifacts["runDirectory"],
         },
     )
     return {
         "run": data_processing_service.get_processing_run(run["runId"]),
         "searchPlan": search_plan,
+        "storageArtifacts": storage_artifacts,
         "promptCachePolicy": prompt_cache_policy,
         "assignments": assignments,
         "assignmentCount": len(assignments),
@@ -559,6 +579,7 @@ def execute_source_collection_search(team_id: str, run_id: str, payload: dict[st
     outputs: list[dict[str, Any]] = []
     created_records: list[dict[str, Any]] = []
     imported: list[dict[str, Any]] = []
+    storage_artifacts = _source_collection_storage_artifacts(normalized_team_id, normalized_run_id)
     executed_query_count = 0
     skipped_query_count = 0
     failed_query_count = 0
@@ -684,7 +705,7 @@ def execute_source_collection_search(team_id: str, run_id: str, payload: dict[st
                         title=f"Stored DataRecord: {record.get('title') or record.get('recordId')}",
                         summary="The search result was stored in the generic data processing run before candidate import.",
                         refs=[record.get("recordId", ""), record.get("sourceRef", "") or record.get("rawLocation", "")],
-                        storage_refs=_source_collection_storage_refs(run),
+                        storage_refs=[*_source_collection_storage_refs(run), storage_artifacts["recordsPath"]],
                     )
                 )
                 import_response = import_data_record_as_source_candidate(
@@ -715,7 +736,7 @@ def execute_source_collection_search(team_id: str, run_id: str, payload: dict[st
                         title=f"Imported source_manifest: {import_response['candidate'].get('title')}",
                         summary="The DataRecord was imported as a source_manifest candidate, still outside formal Team Knowledge/RAG/official graph.",
                         refs=[import_response["candidate"].get("candidateId", ""), str(record.get("recordId") or "")],
-                        storage_refs=["workspace/teams/{teamId}/candidate_store/index.json".format(teamId=normalized_team_id)],
+                        storage_refs=[storage_artifacts["candidatesPath"], storage_artifacts["candidateStorePath"]],
                     )
                 )
         elif attempted_query_ids:
@@ -738,6 +759,13 @@ def execute_source_collection_search(team_id: str, run_id: str, payload: dict[st
     final_run = data_processing_service.get_processing_run(normalized_run_id)
     final_assignments = data_processing_service.list_collection_assignments(normalized_run_id)["assignments"]
     final_status = data_processing_service.get_processing_status(normalized_run_id)
+    _append_source_collection_execution_artifacts(
+        normalized_team_id,
+        normalized_run_id,
+        execution_events=execution_events,
+        created_records=created_records,
+        imported=imported,
+    )
     _record_workflow_event(
         "source_collection.search_executed",
         normalized_team_id,
@@ -749,6 +777,7 @@ def execute_source_collection_search(team_id: str, run_id: str, payload: dict[st
             "failedQueryCount": failed_query_count,
             "recordCount": len(created_records),
             "importedCount": len(imported),
+            "sourceCollectionRunDirectory": storage_artifacts["runDirectory"],
         },
     )
     status_label = "executed" if created_records else ("partial" if executed_query_count or failed_query_count else "no_open_assignment")
@@ -767,6 +796,7 @@ def execute_source_collection_search(team_id: str, run_id: str, payload: dict[st
         "importedCount": len(imported),
         "run": final_run,
         "runStatus": final_status,
+        "storageArtifacts": storage_artifacts,
         "assignments": final_assignments,
         "outputs": outputs,
         "createdRecords": created_records,
@@ -784,6 +814,57 @@ def execute_source_collection_search(team_id: str, run_id: str, payload: dict[st
             "Run source quality assessment for accepted candidates.",
             "Keep formal Team Knowledge/RAG/official graph writes behind the later governance gate.",
         ],
+    }
+
+
+def open_source_collection_storage_target(team_id: str, run_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
+    normalized_run_id = _normalize_required_id(run_id, "Data processing run id is required.")
+    team_service.get_team(normalized_team_id)
+    request_payload = payload if isinstance(payload, dict) else {}
+    target = _trim_text(request_payload.get("target"), max_length=80).lower() or "run_directory"
+    if target not in SOURCE_COLLECTION_STORAGE_OPEN_TARGETS:
+        raise TeamWorkflowOrchestrationError(f"Unsupported source collection storage target: {target or '<empty>'}")
+    try:
+        run = data_processing_service.get_processing_run(normalized_run_id)
+    except data_processing_service.DataProcessingError as exc:
+        raise TeamWorkflowOrchestrationError(str(exc)) from exc
+    run_scope = run.get("scope") if isinstance(run.get("scope"), dict) else {}
+    run_team_id = _trim_text(run_scope.get("teamId"), max_length=128)
+    if run_team_id and run_team_id != normalized_team_id:
+        raise TeamWorkflowOrchestrationError("Data processing run does not belong to this team.")
+    target_path = _source_collection_storage_target_path(normalized_team_id, normalized_run_id, target)
+    if target in {"run_directory", "artifacts_directory"}:
+        target_path.mkdir(parents=True, exist_ok=True)
+        opened_path = target_path
+        target_exists = True
+    else:
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        target_exists = target_path.exists()
+        opened_path = target_path if target_exists else target_path.parent
+    _ensure_project_child(opened_path)
+    _open_local_path(opened_path)
+    storage_artifacts = _source_collection_storage_artifacts(normalized_team_id, normalized_run_id)
+    _record_workflow_event(
+        "source_collection.storage_opened",
+        normalized_team_id,
+        fields={
+            "runId": normalized_run_id,
+            "target": target,
+            "path": _relative_path(target_path),
+            "openedPath": _relative_path(opened_path),
+            "targetExists": target_exists,
+        },
+    )
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "teamId": normalized_team_id,
+        "runId": normalized_run_id,
+        "target": target,
+        "path": _relative_path(target_path),
+        "openedPath": _relative_path(opened_path),
+        "targetExists": target_exists,
+        "storageArtifacts": storage_artifacts,
     }
 
 
@@ -5966,6 +6047,108 @@ def _source_collection_storage_refs(run: dict[str, Any]) -> list[str]:
         _trim_text(storage.get("recordsPath"), max_length=240),
         _trim_text(storage.get("collectionOutputsPath"), max_length=240),
     ]
+
+
+def _source_collection_storage_artifact_paths(team_id: str, run_id: str) -> dict[str, Path]:
+    normalized_team_id = _safe_token(team_id, default="team", max_length=96)
+    normalized_run_id = _safe_token(run_id, default="run", max_length=96)
+    run_directory = _team_workflow_root(normalized_team_id) / "source_collection_runs" / normalized_run_id
+    data_processing_directory = _project_root() / "workspace" / "data_processing" / "runs" / normalized_run_id
+    return {
+        "runDirectory": run_directory,
+        "artifactsDirectory": run_directory / "artifacts",
+        "searchPlanPath": run_directory / "search_plan.json",
+        "searchEventsPath": run_directory / "search_events.jsonl",
+        "recordsPath": run_directory / "records.jsonl",
+        "candidatesPath": run_directory / "candidates.jsonl",
+        "candidateStorePath": _candidate_store_path(normalized_team_id),
+        "dataProcessingRunPath": data_processing_directory / "run.json",
+        "dataProcessingRecordsPath": data_processing_directory / "records.jsonl",
+    }
+
+
+def _source_collection_storage_artifacts(team_id: str, run_id: str) -> dict[str, str]:
+    return {
+        key: _relative_path(path)
+        for key, path in _source_collection_storage_artifact_paths(team_id, run_id).items()
+    }
+
+
+def _source_collection_storage_target_path(team_id: str, run_id: str, target: str) -> Path:
+    paths = _source_collection_storage_artifact_paths(team_id, run_id)
+    target_to_path = {
+        "run_directory": paths["runDirectory"],
+        "artifacts_directory": paths["artifactsDirectory"],
+        "search_plan": paths["searchPlanPath"],
+        "search_events": paths["searchEventsPath"],
+        "records": paths["recordsPath"],
+        "candidates": paths["candidatesPath"],
+        "candidate_store": paths["candidateStorePath"],
+        "data_processing_run": paths["dataProcessingRunPath"],
+        "data_processing_records": paths["dataProcessingRecordsPath"],
+    }
+    path = target_to_path.get(target)
+    if path is None:
+        raise TeamWorkflowOrchestrationError(f"Unsupported source collection storage target: {target or '<empty>'}")
+    return _ensure_project_child(path)
+
+
+def _write_source_collection_search_plan(team_id: str, run_id: str, search_plan: dict[str, Any]) -> None:
+    paths = _source_collection_storage_artifact_paths(team_id, run_id)
+    paths["runDirectory"].mkdir(parents=True, exist_ok=True)
+    paths["artifactsDirectory"].mkdir(parents=True, exist_ok=True)
+    _write_json(paths["searchPlanPath"], search_plan)
+    for path_key in ("searchEventsPath", "recordsPath", "candidatesPath"):
+        paths[path_key].touch(exist_ok=True)
+
+
+def _append_source_collection_execution_artifacts(
+    team_id: str,
+    run_id: str,
+    *,
+    execution_events: list[dict[str, Any]],
+    created_records: list[dict[str, Any]],
+    imported: list[dict[str, Any]],
+) -> None:
+    paths = _source_collection_storage_artifact_paths(team_id, run_id)
+    paths["runDirectory"].mkdir(parents=True, exist_ok=True)
+    paths["artifactsDirectory"].mkdir(parents=True, exist_ok=True)
+    if execution_events:
+        _append_jsonl(paths["searchEventsPath"], execution_events)
+    if created_records:
+        _append_jsonl(paths["recordsPath"], created_records)
+    candidate_records = [
+        item.get("candidate")
+        for item in imported
+        if isinstance(item, dict) and isinstance(item.get("candidate"), dict)
+    ]
+    if candidate_records:
+        _append_jsonl(paths["candidatesPath"], candidate_records)
+
+
+def _append_jsonl(path: Path, records: list[dict[str, Any]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        for record in records:
+            handle.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
+
+
+def _ensure_project_child(path: Path) -> Path:
+    resolved = path.resolve()
+    project_root = _project_root().resolve()
+    try:
+        resolved.relative_to(project_root)
+    except ValueError as exc:
+        raise TeamWorkflowOrchestrationError("Source collection storage path must stay inside the Vibelution project.") from exc
+    return resolved
+
+
+def _open_local_path(path: Path) -> None:
+    if sys.platform.startswith("win"):
+        os.startfile(str(path))  # type: ignore[attr-defined]
+        return
+    opener = "open" if sys.platform == "darwin" else "xdg-open"
+    subprocess.Popen([opener, str(path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 def _source_collection_data_processing_source_type(value: Any) -> str:

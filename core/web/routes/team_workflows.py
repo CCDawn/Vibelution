@@ -30,6 +30,7 @@ from core.web.services.team_workflow_orchestration_service import (
     import_data_record_as_source_candidate,
     invoke_local_research_model,
     list_candidate_store,
+    open_source_collection_storage_target,
     plan_paper_note_chunks_from_source_candidate,
     record_local_research_model_output,
     register_official_model_evidence,
@@ -146,6 +147,10 @@ class SourceCollectionSearchExecutePayload(BaseModel):
     maxResultsPerQuery: int = Field(2, ge=1, le=5)
     provider: str = Field("crossref_rest_api", max_length=80)
     force: bool = False
+
+
+class SourceCollectionStorageOpenPayload(BaseModel):
+    target: str = Field("run_directory", max_length=80)
 
 
 class ResearchStageRoundStartPayload(BaseModel):
@@ -393,6 +398,28 @@ def team_workflow_source_collection_search_execute(team_id: str, run_id: str, pa
             exc,
             status_code=422,
             fields={"runId": run_id, "agentRole": payload.agentRole, "provider": payload.provider},
+        )
+
+
+@router.post("/teams/{team_id}/workflow-orchestration/source-collection-runs/{run_id}/storage/open")
+def team_workflow_source_collection_storage_open(team_id: str, run_id: str, payload: SourceCollectionStorageOpenPayload) -> dict:
+    try:
+        return open_source_collection_storage_target(team_id, run_id, payload.model_dump())
+    except TeamNotFoundError as exc:
+        _raise_team_workflow_route_error(
+            "source_collection_storage.open",
+            team_id,
+            exc,
+            status_code=404,
+            fields={"runId": run_id, "target": payload.target},
+        )
+    except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
+        _raise_team_workflow_route_error(
+            "source_collection_storage.open",
+            team_id,
+            exc,
+            status_code=422,
+            fields={"runId": run_id, "target": payload.target},
         )
 
 

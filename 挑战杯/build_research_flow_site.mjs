@@ -513,6 +513,7 @@ const implementationBlueprint = {
     ["M6.18", "知识搜集工作台可视化降噪", "Teams 知识搜集页默认只展示当前轮状态、下一步动作、候选/待处理/查询/KV 摘要和对话式搜集过程；assignment、query、存储路径、KV 分区和手工回写收进可展开详情。", "用户第一眼能判断当前是否在搜、搜到什么、存到哪里和下一步怎么做；技术细节仍保留给维护者追溯，但不再挤占主路径。"],
     ["M6.19", "固定团队入口下拉", "Teams 左侧团队管理区替换为固定团队下拉，只暴露 AI 搜索范围团队和 ai科学研究团队；选择项会更新 team URL 并进入对应团队页面。", "当前页面不再显示创建团队表单、模板创建或完整团队列表，避免自定义团队入口挤占科研团队主工作区；后端团队创建和模板 API 不删除，仍可由其它管理面承接。"],
     ["M6.20", "顶部团队切换条", "Teams 固定团队入口从左侧栏移到 summary 下方的顶部横向切换条，左侧栏删除，主工作区改为科研内容优先。", "点击 AI 搜索范围团队或 ai科学研究团队后直接进入对应团队内容；科研三阶段页面获得更多横向空间，不再被团队选择区挤压。"],
+    ["M6.21", "搜集证据落盘与打开位置", "source collection run 固定生成 workspace/teams/research-team/source_collection_runs/<runId>/，写入 search_plan.json、search_events.jsonl、records.jsonl、candidates.jsonl 和 artifacts/，Teams 知识搜集页提供打开批次目录、搜索计划、搜索步骤、搜集记录、候选镜像和候选仓库按钮。", "打开接口只接受白名单 target，不允许前端传任意路径；本轮仍只保存候选搜集证据，不绕过资料筛选、正式 Team Knowledge、RAG 或 official graph 门禁。"],
   ],
   schemas: [
     "DataProcessingRun",
@@ -694,7 +695,7 @@ const implementationBlueprint = {
     ["候选查询", "/api/teams/{teamId}/workflow-orchestration/candidates", "按 candidateType、currentState、qualityStatus 查询 CandidateStore，并返回 validationSummary。"],
     ["候选校验", "/api/teams/{teamId}/workflow-orchestration/candidates/validation", "统计 CandidateStore valid/invalid/error/warning，并报告每个候选的结构化校验问题。"],
     ["Team 前端入口", "/teams?team=research-team", "读取 /workflow-orchestration、/stage-rounds/status、/official-model-evidence/status、/candidates?limit=8、/knowledge-ingestion/status 和通用 data-processing run/status/assignment；顶部横向切换条只允许选择 AI 搜索范围团队或 ai科学研究团队，点击 research-team 后直接进入团队专属科研工作台，内容区只展示知识搜集、实验、迭代三阶段入口和三阶段启动台；非这两个团队不在当前入口暴露。"],
-    ["知识搜集阶段页", "TeamsRoute knowledge collection stage", "可在 /teams?team=research-team&researchView=knowledge_collection 独立打开知识搜集页，启动 source collection run、查看 DataSearchPlan/querySeeds/assignment/assignedQueries，并手工提交一条含 rawLocation 的 CollectionOutput；启动时优先使用 Team canvas 中各功能角色绑定的团队 agentId，提交后自动导入 source_manifest 候选；页面会把 KV 门禁状态、promptCacheMode、稳定前缀和 promptCachePartition 放入搜集对话流。"],
+    ["知识搜集阶段页", "TeamsRoute knowledge collection stage", "可在 /teams?team=research-team&researchView=knowledge_collection 独立打开知识搜集页，启动 source collection run、查看 DataSearchPlan/querySeeds/assignment/assignedQueries，并手工提交一条含 rawLocation 的 CollectionOutput；启动时优先使用 Team canvas 中各功能角色绑定的团队 agentId，提交后自动导入 source_manifest 候选；页面会把 KV 门禁状态、promptCacheMode、稳定前缀、promptCachePartition 和 source_collection_runs/<runId> 证据落盘位置放入搜集对话流，并可通过 storage/open 白名单接口打开对应位置。"],
     ["转移记录", "workspace/teams/<teamId>/transfer_records.jsonl", "记录 transfer_request 和 decidedByAgent。"],
     ["本地模型 API", "/api/teams/{teamId}/workflow-orchestration/local-research-model/*", "构建任务包、调用 9B 本地模型、校验并记录 JSON 草稿；不直接写正式知识。"],
     ["paper_note 门禁", "CandidateStore paper_note validation", "paper_note_draft 必须含 keyFindings/methods/limitations/citations，关键发现缺 sourceRef/page/citation 时进入 paper_note_needs_revision；可通过 chunkId 限定长文分块草稿范围。"],
@@ -2776,7 +2777,7 @@ function indexHtml() {
         <aside class="dashboard-panel">
           <h2>审核摘要</h2>
           <div class="kpi-grid">
-            <div class="kpi"><b>当前阶段</b><strong>M6.20</strong><span>Teams 固定团队入口已移到顶部横向切换条，左侧栏删除，科研主工作区释放空间。</span></div>
+            <div class="kpi"><b>当前阶段</b><strong>M6.21</strong><span>知识搜集批次已固定落盘到 source_collection_runs，并提供可打开的证据位置按钮。</span></div>
             <div class="kpi"><b>流程节点</b><strong>${nodes.length}</strong><span>1-9 为知识入库主线，10-13 保留占位与维护节点。</span></div>
             <div class="kpi"><b>候选资料</b><strong>${currentResearchRun.sources.length}</strong><span>第一轮 source_manifest 已进入 candidate-only 工作区。</span></div>
             <div class="kpi"><b>正式写入</b><strong>0</strong><span>未写正式 Team Knowledge、RAG 或 official graph。</span></div>

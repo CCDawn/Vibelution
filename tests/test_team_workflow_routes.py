@@ -211,6 +211,26 @@ def test_team_workflow_route_executes_source_collection_search(tmp_path, monkeyp
     assert response.json()["boundaries"]["writesRag"] is False
     assert response.json()["createdRecords"][0]["metadata"]["sourceCollectionTrace"]["queryId"] == start_response.json()["searchPlan"]["queries"][0]["queryId"]
     assert {event["eventType"] for event in response.json()["executionEvents"]} >= {"search.executed", "storage.data_record_written"}
+    assert response.json()["storageArtifacts"]["recordsPath"].endswith("/records.jsonl")
+
+    opened_paths = []
+    monkeypatch.setattr(team_workflow_orchestration_service, "_open_local_path", lambda path: opened_paths.append(str(path)))
+    open_response = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/source-collection-runs/{start_response.json()['run']['runId']}/storage/open",
+        json={"target": "records"},
+    )
+    blocked_response = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/source-collection-runs/{start_response.json()['run']['runId']}/storage/open",
+        json={"target": "../records"},
+    )
+
+    assert open_response.status_code == 200, open_response.text
+    assert open_response.json()["target"] == "records"
+    assert open_response.json()["targetExists"] is True
+    assert open_response.json()["path"].endswith("/records.jsonl")
+    assert opened_paths and opened_paths[0].endswith("records.jsonl")
+    assert blocked_response.status_code == 422
+    assert "Unsupported source collection storage target" in blocked_response.json()["detail"]
 
 
 def test_team_workflow_route_blocks_source_collection_without_prompt_cache(tmp_path, monkeypatch):
