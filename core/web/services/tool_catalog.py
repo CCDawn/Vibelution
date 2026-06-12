@@ -381,13 +381,13 @@ TOOL_CATALOG: dict[str, dict[str, Any]] = {
     },
     "knowledge_proposal_tool": {
         "category": "memory_context",
-        "capabilityTags": ["team_knowledge", "proposal_write", "source_registration"],
+        "capabilityTags": ["team_knowledge", "proposal_write", "central_source_attachment"],
         "riskTags": ["team_knowledge_proposal"],
         "permissionTier": HIGH_PERMISSION_TIER,
     },
     "knowledge_ingestion_tool": {
         "category": "memory_context",
-        "capabilityTags": ["team_knowledge", "ingestion_package", "source_registration"],
+        "capabilityTags": ["team_knowledge", "ingestion_package", "central_source_attachment"],
         "riskTags": ["team_knowledge_proposal"],
         "permissionTier": HIGH_PERMISSION_TIER,
     },

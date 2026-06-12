@@ -283,6 +283,7 @@ class SourceQualityAssessmentPayload(BaseModel):
 class StewardPackKnowledgeIngestionPayload(BaseModel):
     knowledgeBaseId: str = Field("", max_length=128)
     proposedByAgentId: str = Field("", max_length=160)
+    centralSourceId: str = Field("", max_length=160)
 
 
 class StewardPackKnowledgeIngestionReviewPayload(BaseModel):

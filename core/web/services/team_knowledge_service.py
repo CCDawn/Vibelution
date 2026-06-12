@@ -651,14 +651,15 @@ def create_source_artifact_from_central_source(
     owner, base = _require_base_with_owner(knowledge_base_id)
     _require_permission(owner, base, actor_agent_id, "propose")
     central_source, owner_ref = _require_central_source_for_owner(owner, central_source_id, actor_agent_id=actor_agent_id)
-    source_ref = {
+    source_ref = _bounded_dict(central_source.get("sourceRef") if isinstance(central_source.get("sourceRef"), dict) else {})
+    source_ref.update({
         "centralSourceId": central_source["centralSourceId"],
         "centralPath": central_source.get("centralPath") or "",
         "sourceHash": central_source.get("sourceHash") or "",
         "originalOwnerType": owner_ref.get("ownerType") or central_source.get("originOwnerType") or "",
         "originalOwnerId": owner_ref.get("ownerId") or central_source.get("originOwnerId") or "",
         "originalPath": owner_ref.get("originalPath") or central_source.get("originOriginalPath") or "",
-    }
+    })
     return create_source_artifact(
         knowledge_base_id,
         source_type=str(central_source.get("sourceType") or "manual_user_entry"),
@@ -751,6 +752,8 @@ def create_source_artifact(
     central_source: dict[str, Any] | None = None
     owner_ref: dict[str, Any] = {}
     normalized_central_source_id = str(central_source_id or "").strip()
+    if not normalized_central_source_id:
+        raise TeamKnowledgeError("SourceArtifact requires centralSourceId; collect the source to the owner inbox and promote it first.")
     if normalized_central_source_id:
         central_source, owner_ref = _require_central_source_for_owner(
             owner,
@@ -821,20 +824,28 @@ def create_refinement_proposal(
     if not normalized_content:
         raise TeamKnowledgeError("Proposal content is required.")
     artifact_ids = _unique_strings(source_artifact_ids or [])
+    if not artifact_ids:
+        raise TeamKnowledgeError("Formal knowledge proposals require at least one central source artifact.")
     central_source_ids: list[str] = []
-    if artifact_ids:
-        artifacts_by_id = {
-            str(item.get("sourceArtifactId") or ""): item
-            for item in _source_artifacts_for_base(owner, base["knowledgeBaseId"])
-        }
-        known_artifacts = set(artifacts_by_id)
-        missing = [item for item in artifact_ids if item not in known_artifacts]
-        if missing:
-            raise TeamKnowledgeError(f"Unknown source artifact ids: {', '.join(missing[:3])}")
-        central_source_ids = _unique_strings(
-            str((artifacts_by_id.get(item_id) or {}).get("centralSourceId") or "")
-            for item_id in artifact_ids
-        )
+    artifacts_by_id = {
+        str(item.get("sourceArtifactId") or ""): item
+        for item in _source_artifacts_for_base(owner, base["knowledgeBaseId"])
+    }
+    known_artifacts = set(artifacts_by_id)
+    missing = [item for item in artifact_ids if item not in known_artifacts]
+    if missing:
+        raise TeamKnowledgeError(f"Unknown source artifact ids: {', '.join(missing[:3])}")
+    ungoverned = [
+        item_id
+        for item_id in artifact_ids
+        if not str((artifacts_by_id.get(item_id) or {}).get("centralSourceId") or "").strip()
+    ]
+    if ungoverned:
+        raise TeamKnowledgeError("Formal knowledge proposals require central-curated source artifacts.")
+    central_source_ids = _unique_strings(
+        str((artifacts_by_id.get(item_id) or {}).get("centralSourceId") or "")
+        for item_id in artifact_ids
+    )
     now = utc_now_iso()
     proposal = {
         "proposalId": _new_event_id("kprop"),
@@ -884,6 +895,7 @@ def create_ingestion_package(
     source_summary: str = "",
     excerpt: str = "",
     proposed_by_agent_id: str = "",
+    central_source_id: str = "",
     proposal_title: str = "",
     proposal_summary: str = "",
     proposal_content: str = "",
@@ -914,6 +926,7 @@ def create_ingestion_package(
         title=source_title or normalized_proposal_title,
         summary=normalized_source_summary,
         actor_agent_id=actor_agent_id,
+        central_source_id=central_source_id,
     )
     proposal = create_refinement_proposal(
         knowledge_base_id,
