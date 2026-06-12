@@ -18,7 +18,13 @@ from agent import (
     infer_result_from_tool_outputs,
 )
 from config import Settings
-from core.infrastructure.llm_utils import parse_tool_args, parse_xml_tool_calls
+from core.infrastructure.llm_utils import (
+    build_cacheable_system_prefix_message,
+    build_dynamic_system_context_message,
+    is_volatile_system_context_message,
+    parse_tool_args,
+    parse_xml_tool_calls,
+)
 from core.infrastructure.runtime_input import build_chat_user_message, build_external_request_message
 from core.prompt_manager import build_restart_focus_state_memory
 from core.orchestration.agent_modes import AgentMode, ModePolicy
@@ -128,7 +134,7 @@ class TestToolMessageFlow:
                 return None
 
         class DummyLLM:
-            def invoke(self, msgs):
+            def invoke(self, msgs, **_kwargs):
                 captured["messages"] = msgs
                 return SimpleNamespace(content="", tool_calls=[])
 
@@ -167,7 +173,7 @@ class TestToolMessageFlow:
                 return None
 
         class DummyLLM:
-            def invoke(self, msgs):
+            def invoke(self, msgs, **_kwargs):
                 captured["messages"] = msgs
                 return SimpleNamespace(content="", tool_calls=[])
 
@@ -207,7 +213,7 @@ class TestToolMessageFlow:
                 return None
 
         class DummyLLM:
-            def invoke(self, _msgs):
+            def invoke(self, _msgs, **_kwargs):
                 from core.llm import client as llm_client_module
 
                 captured["cancel_reason"] = llm_client_module._current_llm_cancel_reason()
@@ -271,7 +277,7 @@ class TestToolMessageFlow:
                 return None
 
         class ExhaustedLLM:
-            def invoke(self, _msgs):
+            def invoke(self, _msgs, **_kwargs):
                 calls["count"] += 1
                 raise LLMError(
                     "server_error",
@@ -350,7 +356,7 @@ class TestToolMessageFlow:
             def __init__(self):
                 self.profile_id = "primary"
 
-            def invoke(self, _msgs):
+            def invoke(self, _msgs, **_kwargs):
                 calls.append("with_tools")
                 raise LLMError("capability_error", "profile `primary` 不支持 tool calling", retryable=False)
 
@@ -452,7 +458,7 @@ class TestToolMessageFlow:
                 return DummyChunk((self.content or "") + (other.content or ""))
 
         class DummyLLM:
-            def stream(self, msgs):
+            def stream(self, msgs, **_kwargs):
                 captured["messages"] = msgs
                 yield DummyChunk("<think>first")
                 yield DummyChunk(" second</think>")
@@ -509,7 +515,7 @@ class TestToolMessageFlow:
                 )
 
         class DummyLLM:
-            def stream(self, msgs):
+            def stream(self, msgs, **_kwargs):
                 captured["messages"] = msgs
                 yield DummyChunk("O")
                 yield DummyChunk("K", response_metadata={"finish_reason": "stop"})
@@ -566,7 +572,7 @@ class TestToolMessageFlow:
                 )
 
         class DummyLLM:
-            def stream(self, msgs):
+            def stream(self, msgs, **_kwargs):
                 captured["messages"] = msgs
                 yield DummyChunk("", additional_kwargs={"reasoning_content_delta": "先看"})
                 yield DummyChunk("", additional_kwargs={"reasoning_content_delta": "日志"})
@@ -632,7 +638,7 @@ class TestToolMessageFlow:
                 )
 
         class DummyLLM:
-            def stream(self, _msgs):
+            def stream(self, _msgs, **_kwargs):
                 yield DummyChunk("", additional_kwargs={"reasoning": "先看"})
                 yield DummyChunk("", additional_kwargs={"reasoning": "先看日志"})
                 yield DummyChunk("", additional_kwargs={"thinking": "再查 UI"})
@@ -698,7 +704,7 @@ class TestToolMessageFlow:
                 )
 
         class DummyLLM:
-            def stream(self, _msgs):
+            def stream(self, _msgs, **_kwargs):
                 yield DummyChunk("完成")
                 yield DummyChunk(
                     "",
@@ -3486,6 +3492,49 @@ class TestStructuredSystemMessageInvariants:
         assert message["content"][0]["text"] == "static prefix"
         assert message["content"][1]["text"] == "dynamic suffix"
         assert "cache_control" not in message["content"][1]
+
+    def test_dynamic_system_suffix_can_be_carried_as_volatile_context(self):
+        sp = ("static prefix", "<<<SYSTEM_PROMPT_SPLIT>>>", "dynamic suffix")
+
+        prefix_message = build_cacheable_system_prefix_message(sp)
+        dynamic_message = build_dynamic_system_context_message(sp)
+
+        assert prefix_message["content"] == [
+            {
+                "type": "text",
+                "text": "static prefix",
+                "cache_control": {"type": "ephemeral"},
+            }
+        ]
+        assert isinstance(dynamic_message, SystemMessage)
+        assert str(dynamic_message.content).startswith("## Dynamic System Context")
+        assert "dynamic suffix" in str(dynamic_message.content)
+        assert is_volatile_system_context_message(dynamic_message) is True
+
+    def test_volatile_dynamic_system_context_is_not_carried_to_next_turn(self):
+        messages = [
+            {"role": "system", "content": "stable prefix"},
+            {"role": "user", "content": "history user"},
+            SystemMessage(content="## Dynamic System Context\ndynamic suffix"),
+            {"role": "user", "content": "current user"},
+        ]
+
+        carryover_messages = [
+            message for message in messages
+            if not is_volatile_system_context_message(message)
+        ]
+        carryover = TurnOutcomeController.finish_turn_message_carryover(
+            messages=carryover_messages,
+            lifecycle_action=None,
+            active_goal="goal",
+        )
+
+        assert carryover.goal == "goal"
+        assert carryover.messages == [
+            {"role": "system", "content": "stable prefix"},
+            {"role": "user", "content": "history user"},
+            {"role": "user", "content": "current user"},
+        ]
 
     def test_invoke_llm_clean_messages_preserves_dict_system_message(self):
         """_invoke_llm 内部 clean_messages 步骤对 dict 形态 system message 应原样保留，
