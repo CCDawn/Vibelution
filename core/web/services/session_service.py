@@ -8278,6 +8278,7 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                 restore = getattr(runtime_agent, "seed_chat_history", None)
                 static_runtime_context_seed = getattr(runtime_agent, "seed_static_runtime_context", None)
                 runtime_context_seed = getattr(runtime_agent, "seed_runtime_context", None)
+                volatile_runtime_context_seed = getattr(runtime_agent, "seed_volatile_runtime_context", None)
                 stop_configurer = getattr(runtime_agent, "set_turn_interrupt_checker", None)
                 if callable(stop_configurer):
                     stop_configurer(lambda: _get_turn_control_stop_reason(turn_control))
@@ -8316,6 +8317,7 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                 guidance_context_block = _recent_session_guidance_context_block(session_id)
                 skill_invocation = context.get("skill_invocation")
                 skill_runtime_context_block = _skill_runtime_context_from_invocation(skill_invocation)
+                skill_runtime_context_included = False
                 seed_started_at = _perf_counter()
                 history_seed_ms = 0
                 static_runtime_context_seed_ms = 0
@@ -8339,6 +8341,11 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                 if host_seeded_agent_context and callable(host_context_marker):
                     host_context_marker()
                 if skill_runtime_context_block:
+                    skill_stage_started_at = _perf_counter()
+                    if callable(volatile_runtime_context_seed):
+                        volatile_runtime_context_seed(skill_runtime_context_block)
+                        skill_runtime_context_included = True
+                    skill_context_seed_ms = _elapsed_ms(skill_stage_started_at)
                     _record_session_skill_command_event(
                         session_id,
                         turn_id=turn_id,
@@ -8382,15 +8389,24 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                         "guidanceContextIncluded": False,
                         "guidanceContextAvailable": bool(guidance_context_block),
                         "guidanceContextOmittedFromModelInput": bool(guidance_context_block),
-                        "skillRuntimeContextIncluded": False,
+                        "skillRuntimeContextIncluded": skill_runtime_context_included,
                         "skillRuntimeContextAvailable": bool(skill_runtime_context_block),
-                        "skillRuntimeContextOmittedFromModelInput": bool(skill_runtime_context_block),
+                        "skillRuntimeContextOmittedFromModelInput": bool(skill_runtime_context_block)
+                        and not skill_runtime_context_included,
+                        "skillRuntimeContextPlacement": (
+                            "before_current_user"
+                            if skill_runtime_context_included
+                            else "omitted_no_volatile_context_seed"
+                            if skill_runtime_context_block
+                            else ""
+                        ),
                         "lightweightChatPayload": lightweight_chat_payload,
                         "lightweightChatPayloadReason": lightweight_chat_payload_reason,
                         "disableTools": lightweight_chat_payload,
                         "restoreAvailable": callable(restore),
                         "staticRuntimeContextSeedAvailable": callable(static_runtime_context_seed),
                         "runtimeContextSeedAvailable": callable(runtime_context_seed),
+                        "volatileRuntimeContextSeedAvailable": callable(volatile_runtime_context_seed),
                         "historySeedMs": history_seed_ms,
                         "staticRuntimeContextSeedMs": static_runtime_context_seed_ms,
                         "runtimeContextSeedMs": runtime_context_seed_ms,
@@ -8448,7 +8464,9 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                     active_task=context.get("active_task"),
                     runtime_context_block=static_runtime_context_block,
                     guidance_context_block="",
-                    skill_runtime_context_block="",
+                    skill_runtime_context_block=(
+                        skill_runtime_context_block if skill_runtime_context_included else ""
+                    ),
                     attachments=attachments,
                 )
                 _record_session_turn_lifecycle_event(
