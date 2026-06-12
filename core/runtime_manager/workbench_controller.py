@@ -86,6 +86,107 @@ def _load_launcher_state() -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
+def _write_launcher_state(payload: dict[str, Any]) -> None:
+    LAUNCHER_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    fd, temp_path = tempfile.mkstemp(prefix=f".{LAUNCHER_STATE_PATH.name}.", dir=str(LAUNCHER_STATE_PATH.parent))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as handle:
+            json.dump(payload, handle, ensure_ascii=False, indent=2)
+        os.replace(temp_path, LAUNCHER_STATE_PATH)
+    finally:
+        if os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass
+
+
+def _remove_launcher_state() -> None:
+    try:
+        LAUNCHER_STATE_PATH.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def clear_workbench_launcher_state_after_close() -> dict[str, Any]:
+    """Clear stale Workbench PIDs while preserving the separate Launcher control surface."""
+
+    previous_state = _load_launcher_state()
+    if not previous_state:
+        _remove_launcher_state()
+        return {
+            "statePath": str(LAUNCHER_STATE_PATH),
+            "statePresent": False,
+            "preservedLauncherControlState": False,
+            "removedState": True,
+            "reason": "missing_or_unreadable_state",
+        }
+
+    launcher_backend_pid = int(previous_state.get("launcherBackendPid") or 0)
+    launcher_backend_launch_pid = int(previous_state.get("launcherBackendLaunchPid") or 0)
+    launcher_browser_launch_pid = int(previous_state.get("launcherBrowserLaunchPid") or 0)
+    launcher_browser_window_pid = int(previous_state.get("launcherBrowserWindowPid") or 0)
+    launcher_alive = _is_process_alive(launcher_backend_pid) or _is_process_alive(launcher_browser_window_pid)
+    if not launcher_alive:
+        _remove_launcher_state()
+        return {
+            "statePath": str(LAUNCHER_STATE_PATH),
+            "statePresent": True,
+            "preservedLauncherControlState": False,
+            "removedState": True,
+            "reason": "no_launcher_control_process_alive",
+            "launcherBackendPid": launcher_backend_pid,
+            "launcherBrowserWindowPid": launcher_browser_window_pid,
+        }
+
+    payload = dict(previous_state)
+    launcher_browser_profile_dir = str(previous_state.get("launcherBrowserProfileDir") or "").strip()
+    workbench_browser_profile_dir = str(previous_state.get("workbenchBrowserProfileDir") or "").strip()
+    launcher_control_started_at = str(
+        previous_state.get("launcherControlStartedAt")
+        or previous_state.get("startedAt")
+        or ""
+    )
+    payload.update(
+        {
+            "sessionRole": "launcher_control_surface",
+            "backendPid": 0,
+            "backendLaunchPid": 0,
+            "backendStdout": None,
+            "backendStderr": None,
+            "launcherBackendPid": launcher_backend_pid,
+            "launcherBackendLaunchPid": launcher_backend_launch_pid or launcher_backend_pid,
+            "browserManaged": True,
+            "browserProfileDir": launcher_browser_profile_dir,
+            "browserLaunchPid": launcher_browser_launch_pid,
+            "browserWindowPid": launcher_browser_window_pid,
+            "workbenchBrowserLaunchPid": 0,
+            "workbenchBrowserWindowPid": 0,
+            "workbenchBrowserProfileDir": workbench_browser_profile_dir,
+            "launcherBrowserProfileDir": launcher_browser_profile_dir,
+            "launcherBrowserLaunchPid": launcher_browser_launch_pid,
+            "launcherBrowserWindowPid": launcher_browser_window_pid,
+            "supervisorPid": 0,
+            "supervisorStdout": None,
+            "supervisorStderr": None,
+            "runtimeSceneId": None,
+            "runtimeSceneDir": None,
+            "launcherControlStartedAt": launcher_control_started_at,
+            "startedAt": launcher_control_started_at,
+        }
+    )
+    _write_launcher_state(payload)
+    return {
+        "statePath": str(LAUNCHER_STATE_PATH),
+        "statePresent": True,
+        "preservedLauncherControlState": True,
+        "removedState": False,
+        "reason": "launcher_control_process_alive",
+        "launcherBackendPid": launcher_backend_pid,
+        "launcherBrowserWindowPid": launcher_browser_window_pid,
+    }
+
+
 def _health_url_for(url: str) -> str:
     normalized = str(url or DEFAULT_URL).rstrip("/")
     return f"{normalized}/api/health"
