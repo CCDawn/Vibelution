@@ -160,6 +160,7 @@ def test_session_turn_scheduler_reports_dropped_stale_turns_even_without_next_tu
     assert [item["turn_id"] for item in released.dropped_contexts] == ["turn-2"]
 
 
+@pytest.mark.slow
 def test_session_turn_scheduler_releases_external_reservation_after_active_turn():
     runner = FakeTurnRunner()
     external_queued = threading.Event()

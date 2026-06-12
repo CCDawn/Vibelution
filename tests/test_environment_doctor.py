@@ -4,7 +4,9 @@
 """
 
 import json
+import shutil
 import subprocess
+import pytest
 import sys
 from pathlib import Path
 
@@ -14,10 +16,20 @@ DOCTOR_SCRIPT = PROJECT_ROOT / "scripts" / "doctor.ps1"
 EXPECTED_VENV_PYTHON = PROJECT_ROOT / ".venv" / "Scripts" / "python.exe"
 
 
+pytestmark = pytest.mark.slow
+
+
+def _powershell_exe() -> str:
+    exe = shutil.which("powershell") or shutil.which("pwsh")
+    if not exe:
+        pytest.skip("PowerShell is required for doctor script tests")
+    return exe
+
+
 def run_doctor():
     result = subprocess.run(
         [
-            "powershell",
+            _powershell_exe(),
             "-ExecutionPolicy",
             "Bypass",
             "-File",

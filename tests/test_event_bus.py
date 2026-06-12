@@ -282,9 +282,9 @@ class TestWildcardSubscriptions:
         results = []
         bus.subscribe("tool:*", lambda e: results.append(e.name))
         bus.publish("tool:call:extra")
-        # tool:* 转换为 ^tool:.*$，会匹配 tool:call:extra
-        # 记录当前行为（可能是设计如此也可能需要修复）
-        assert len(results) >= 0
+        # 当前实现将 tool:* 映射为 ^tool:.*$，会命中 tool:call:extra
+        # 用于记录该行为；若未来调整匹配规则可同步更新该预期。
+        assert results == ["tool:call:extra"]
 
     def test_multiple_wildcard_patterns(self):
         """多个通配符订阅可共存"""

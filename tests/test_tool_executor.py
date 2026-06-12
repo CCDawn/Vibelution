@@ -591,6 +591,7 @@ class TestToolExecutorTimeout:
         assert str(result) == "ok"
         assert "_internal_delegate" not in captured
 
+    @pytest.mark.slow
     def test_execute_interrupts_running_tool_when_cancel_requested(self, executor):
         cancel_requested = threading.Event()
         tool_started = threading.Event()
@@ -628,6 +629,7 @@ class TestToolExecutorTimeout:
         executor.set_cancel_checker(None, owner=owner_b)
         assert executor._current_cancel_reason() == ""
 
+    @pytest.mark.slow
     def test_parallel_cancel_checkers_are_isolated_per_call_context(self, executor):
         started = {"a": threading.Event(), "b": threading.Event()}
         release_b = threading.Event()

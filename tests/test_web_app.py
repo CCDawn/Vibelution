@@ -64,6 +64,7 @@ from core.web.services import (
 )
 import core.web.services.avatar_image_service as avatar_image_service
 from tests.test_gym_runner import RunnerFakeAdapter
+from tests.helpers.chat_turn_harness import wait_for_matching_event
 
 
 client = TestClient(create_app(), headers={CONTROL_TOKEN_HEADER: get_control_token()})
@@ -90,18 +91,18 @@ def _capture_session_lifecycle_events(monkeypatch):
 
     def wait_for_phase(phase, *, timeout=2.0, fields=None):
         expected_fields = fields or {}
-        deadline = time.monotonic() + timeout
-        with condition:
-            while True:
-                for event in events:
-                    if event["phase"] != phase:
-                        continue
-                    if all(event["fields"].get(key) == value for key, value in expected_fields.items()):
-                        return event
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    return None
-                condition.wait(timeout=remaining)
+        return wait_for_matching_event(
+            events,
+            timeout_s=timeout,
+            predicate=lambda event: (
+                event["phase"] == phase
+                and all(
+                    event["fields"].get(key) == value
+                    for key, value in expected_fields.items()
+                )
+            ),
+            condition=condition,
+        )
 
     monkeypatch.setattr(session_service, "_record_session_turn_lifecycle_event", record_session_turn_lifecycle_event)
     return wait_for_phase, events
@@ -1207,6 +1208,7 @@ def test_runtime_shutdown_blocks_active_chat_turn_before_manager_close(tmp_path,
         session_service._clear_session_live_output("session-live")
 
 
+@pytest.mark.slow
 def test_runtime_shutdown_blocks_active_chat_room_round_before_manager_close(tmp_path, monkeypatch):
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
@@ -7425,6 +7427,7 @@ def test_persist_turn_result_blocks_phantom_image_generation_success(tmp_path, m
     )
 
 
+@pytest.mark.slow
 def test_different_agent_sessions_run_chat_turns_concurrently(tmp_path, monkeypatch):
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
@@ -7473,6 +7476,7 @@ def test_different_agent_sessions_run_chat_turns_concurrently(tmp_path, monkeypa
     assert session_service.get_session_detail(beta["id"])["messages"][-1]["content"] == f"{beta['id']} done"
 
 
+@pytest.mark.slow
 def test_same_agent_different_sessions_run_chat_turns_concurrently(tmp_path, monkeypatch):
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
@@ -7540,6 +7544,7 @@ def test_same_agent_different_sessions_run_chat_turns_concurrently(tmp_path, mon
     assert session_service.get_session_detail(beta["id"])["messages"][-1]["content"] == f"{beta['id']} done"
 
 
+@pytest.mark.slow
 def test_same_agent_sessions_queue_when_agent_concurrency_limit_is_reached(tmp_path, monkeypatch):
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
@@ -7626,6 +7631,7 @@ def test_same_agent_sessions_queue_when_agent_concurrency_limit_is_reached(tmp_p
     assert session_service.get_session_detail(beta["id"])["messages"][-1]["content"] == "beta done"
 
 
+@pytest.mark.slow
 def test_stopping_queued_same_agent_turn_prevents_later_start(tmp_path, monkeypatch):
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
@@ -7715,6 +7721,7 @@ def test_stopping_queued_same_agent_turn_prevents_later_start(tmp_path, monkeypa
     assert beta_detail["runtimeNotices"][-1]["kind"] == "turn_stopped"
 
 
+@pytest.mark.slow
 def test_shutdown_stops_queued_same_agent_turn_before_it_starts(tmp_path, monkeypatch):
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
@@ -7795,6 +7802,7 @@ def test_shutdown_stops_queued_same_agent_turn_before_it_starts(tmp_path, monkey
     assert session_service.get_session_detail(beta["id"])["currentPhase"] == "ready"
 
 
+@pytest.mark.slow
 def test_runtime_summary_exposes_parallel_chat_turn_active_items(tmp_path, monkeypatch):
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
@@ -7847,6 +7855,7 @@ def test_runtime_summary_exposes_parallel_chat_turn_active_items(tmp_path, monke
         executor.shutdown(wait=True, cancel_futures=True)
 
 
+@pytest.mark.slow
 def test_runtime_summary_exposes_queued_chat_turn_active_item(tmp_path, monkeypatch):
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
@@ -8862,6 +8871,7 @@ def test_request_stop_session_turn_reuses_active_work_run_when_controller_is_mis
         session_service._clear_session_live_output("session-live")
 
 
+@pytest.mark.slow
 def test_stop_requested_turn_persists_visible_stop_message(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
@@ -15266,6 +15276,7 @@ def test_evolution_workbench_route_exposes_dataset_choices_and_saved_state(tmp_p
     assert payload["activeRun"] is None
 
 
+@pytest.mark.slow
 def test_supervised_worktree_run_routes_start_and_list_simulation(tmp_path, monkeypatch):
     scene_dir = _seed_runtime_scene_bundle(tmp_path, scene_id="scene-worktree-start", status="running")
     launcher_state_path = tmp_path / ".runtime" / "launcher" / "state.json"

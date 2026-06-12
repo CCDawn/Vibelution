@@ -1,12 +1,12 @@
 import copy
 import threading
-import time
 from pathlib import Path
 
 import pytest
 
 from core.web.services import supervised_control_service as service
 from core.web.services import supervised_conversation_harness_adapter as conversation_adapter
+from tests.helpers.chat_turn_harness import wait_for_condition
 
 
 @pytest.fixture(autouse=True)
@@ -134,15 +134,6 @@ def _valid_agent_bindings() -> dict[str, dict[str, object]]:
     }
 
 
-def _wait_until(predicate, *, timeout: float = 1.0) -> None:
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        if predicate():
-            return
-        time.sleep(0.01)
-    raise AssertionError("Timed out waiting for condition")
-
-
 def test_supervised_checkpoint_pauses_then_resumes():
     run_id = _seed_running_run()
     result = {"error": None}
@@ -158,7 +149,11 @@ def test_supervised_checkpoint_pauses_then_resumes():
     )
     thread.start()
 
-    _wait_until(lambda: service.get_supervised_run_snapshot(run_id)["status"] == "paused")
+    wait_for_condition(
+        "supervised run paused",
+        timeout_s=1.0,
+        predicate=lambda: service.get_supervised_run_snapshot(run_id)["status"] == "paused",
+    )
     paused_snapshot = service.get_supervised_run_snapshot(run_id)
     assert paused_snapshot["currentPhase"] == "paused"
     assert paused_snapshot["runtimeStatus"] == "paused"

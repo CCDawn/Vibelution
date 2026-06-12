@@ -1,8 +1,10 @@
-import time
 import threading
 from concurrent.futures import ThreadPoolExecutor
 
+import pytest
+
 from fastapi.testclient import TestClient
+from tests.helpers.chat_turn_harness import wait_for_chat_room_round_completed
 
 from core.ui.chat_state import save_chat_state
 from core.web.app import create_app
@@ -33,20 +35,6 @@ def test_chat_room_purposes_api_exposes_conversation_purpose_modes():
     assert "natural replies" in purposes["chat"]["description"]
 
 
-def _wait_for_completed_room_round(room_id: str, *, timeout: float = 2.0) -> dict:
-    deadline = time.monotonic() + timeout
-    detail: dict = {}
-    while time.monotonic() < deadline:
-        response = client.get(f"/api/chat-rooms/{room_id}")
-        assert response.status_code == 200
-        detail = response.json()
-        latest_round = detail["rounds"][-1]
-        if latest_round["status"] == "completed":
-            return detail
-        time.sleep(0.02)
-    raise AssertionError(f"chat room round did not complete: {detail}")
-
-
 def _seed_chat_sessions(root):
     save_chat_state(
         root,
@@ -71,6 +59,7 @@ def _seed_chat_sessions(root):
     )
 
 
+@pytest.mark.slow
 def test_chat_room_api_create_and_run_round(tmp_path, monkeypatch):
     _seed_chat_sessions(tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
@@ -111,7 +100,7 @@ def test_chat_room_api_create_and_run_round(tmp_path, monkeypatch):
     assert started["status"] in {"running", "ready"}
     assert started["rounds"][-1]["status"] in {"running", "completed"}
 
-    detail = _wait_for_completed_room_round(room["roomId"], timeout=8.0)
+    detail = wait_for_chat_room_round_completed(client, room["roomId"], timeout_s=8.0)
     latest_round = detail["rounds"][-1]
     assert latest_round["topic"] == "确认第一版群聊行为"
     assert latest_round["purpose"] == "meeting"
@@ -158,7 +147,7 @@ def test_chat_room_round_prefer_async_returns_lightweight_acceptance(tmp_path, m
     assert accepted["speakerOrder"]
     assert "rounds" not in accepted
 
-    detail = _wait_for_completed_room_round(room["roomId"])
+    detail = wait_for_chat_room_round_completed(client, room["roomId"], timeout_s=2.0)
     assert detail["rounds"][-1]["roundId"] == accepted["roundId"]
     assert detail["rounds"][-1]["status"] == "completed"
 
@@ -240,6 +229,7 @@ def test_chat_room_api_updates_and_deletes_room(tmp_path, monkeypatch):
     assert client.get(f"/api/chat-rooms/{room['roomId']}").status_code == 404
 
 
+@pytest.mark.slow
 def test_chat_room_api_resets_room_messages(tmp_path, monkeypatch):
     _seed_chat_sessions(tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
@@ -267,7 +257,7 @@ def test_chat_room_api_resets_room_messages(tmp_path, monkeypatch):
         json={"topic": "先产生旧消息"},
     )
     assert round_response.status_code == 202
-    detail = _wait_for_completed_room_round(room["roomId"], timeout=8.0)
+    detail = wait_for_chat_room_round_completed(client, room["roomId"], timeout_s=8.0)
     assert detail["rounds"]
 
     reset_response = client.post(f"/api/chat-rooms/{room['roomId']}/reset")
@@ -283,6 +273,7 @@ def test_chat_room_api_resets_room_messages(tmp_path, monkeypatch):
     assert reset["activeRoundId"] == ""
 
 
+@pytest.mark.slow
 def test_chat_room_api_stops_active_round(tmp_path, monkeypatch):
     _seed_chat_sessions(tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)

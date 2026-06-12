@@ -346,6 +346,7 @@ def test_session_title_update_uses_lightweight_path(tmp_path, monkeypatch):
     assert next(item for item in sessions if item["id"] == created["id"])["title"] == "After Rename"
 
 
+@pytest.mark.slow
 def test_session_list_shares_concurrent_index_build(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     created = session_service.create_chat_session(title="Concurrent Cached Agent")

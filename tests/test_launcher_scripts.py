@@ -16,6 +16,8 @@ LAUNCHER_SCRIPT = PROJECT_ROOT / "scripts" / "vibelution_launcher.ps1"
 DESKTOP_ENTRY_SCRIPT = PROJECT_ROOT / "scripts" / "vibelution_desktop_entry.ps1"
 DESKTOP_ENTRY_VBS = PROJECT_ROOT / "scripts" / "vibelution_desktop_entry.vbs"
 
+pytestmark = pytest.mark.slow
+
 
 def test_web_workbench_access_log_filter_suppresses_polling_noise_only():
     from scripts.web_workbench import WorkbenchAccessLogFilter
