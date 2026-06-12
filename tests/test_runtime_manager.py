@@ -67,6 +67,11 @@ def _block_real_process_termination(monkeypatch, tmp_path):
         "terminate_unmanaged_workbench_processes",
         lambda *args, **kwargs: {"supported": True, "requested": [], "terminated": [], "remaining": []},
     )
+    monkeypatch.setattr(
+        daemon,
+        "terminate_workbench_processes",
+        lambda *args, **kwargs: {"supported": True, "requested": [], "terminated": [], "remaining": []},
+    )
 
 
 def test_print_status_reports_stale_runtime_manager_source(capsys):
@@ -4926,6 +4931,11 @@ def test_handle_restart_workbench_surfaces_launcher_error(monkeypatch):
     )
     monkeypatch.setattr(daemon, "build_evolution_summary", lambda: {"self": {}, "supervised": {}})
     monkeypatch.setattr(
+        daemon.RuntimeManagerDaemon,
+        "_force_cleanup_workbench_processes",
+        lambda self, observation=None: {"supported": False, "requested": [], "terminated": [], "remaining": []},
+    )
+    monkeypatch.setattr(
         daemon,
         "close_workbench",
         lambda: subprocess.CompletedProcess(args=[], returncode=1, stdout=None, stderr="launcher failed"),
@@ -5458,7 +5468,8 @@ def test_handle_restart_workbench_stops_after_close_when_close_interrupt_is_pend
     assert result["interruptedByClose"] is True
     assert result["interruptStage"] == "after_close_before_open"
     assert result["supersededByCommandId"] == "cmd-close"
-    assert close_calls == ["close"]
+    assert result["closeStrategy"] == "runtime_manager_fast_path"
+    assert close_calls == []
     assert cleared == ["cmd-restart"]
     assert "workbench.restart.interrupted_by_close" in [event_type for event_type, _ in events]
 
@@ -5528,7 +5539,8 @@ def test_handle_restart_workbench_preserves_visible_browser_when_no_browser_was_
     )
 
     assert result["ok"] is True
-    assert close_calls == ["close"]
+    assert result["closeStrategy"] == "runtime_manager_fast_path"
+    assert close_calls == []
     assert open_calls == [False]
     override_payload = next(payload for event_type, payload in events if event_type == "workbench.restart.no_browser_overridden")
     assert override_payload["browserWindowPid"] == 29999
@@ -5596,7 +5608,8 @@ def test_handle_restart_workbench_keeps_headless_restart_headless(monkeypatch):
     )
 
     assert result["ok"] is True
-    assert close_calls == ["close"]
+    assert result["closeStrategy"] == "runtime_manager_fast_path"
+    assert close_calls == []
     assert open_calls == [True]
 
 
@@ -5763,6 +5776,228 @@ def test_handle_close_workbench_records_shutdown_source(monkeypatch):
     assert closed_calls == ["closed"]
     assert saved_states[0]["workbench"]["lastReason"] == "web_close_button"
     assert saved_states[0]["workbench"]["lastSource"] == "web_ui"
+
+
+def test_handle_close_workbench_uses_runtime_manager_fast_path(monkeypatch):
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    state = {
+        "command": {"activeCommandId": "cmd-close"},
+        "workbench": {
+            "desiredState": "open",
+            "observedState": "open",
+            "phase": "steady",
+        },
+    }
+    events: list[tuple[str, dict]] = []
+    cleanup_calls: list[dict] = []
+    state_cleanup_calls: list[str] = []
+    open_observation = {
+        "observedState": "open",
+        "launcherStatePresent": True,
+        "browserManaged": True,
+        "browserWindowAlive": True,
+        "backendPid": 28888,
+        "backendLaunchPid": 28888,
+        "backendAlive": True,
+        "backendHealthy": True,
+        "backendObserved": True,
+        "backendPort": 8000,
+        "backendPortListening": True,
+        "backendPortOwnerPid": 28888,
+        "backendPortOwnerTrusted": True,
+        "backendPortConflict": False,
+        "browserProfileDir": "C:/tmp/vibelution-workbench-profile",
+        "browserLaunchPid": 29999,
+        "browserWindowPid": 29999,
+        "sessionId": "managed-session",
+        "url": "http://127.0.0.1:8000",
+    }
+    closed_observation = {
+        "observedState": "closed",
+        "launcherStatePresent": False,
+        "browserManaged": True,
+        "browserWindowAlive": False,
+        "backendPid": 0,
+        "backendLaunchPid": 0,
+        "backendAlive": False,
+        "backendHealthy": False,
+        "backendObserved": False,
+        "backendPort": 8000,
+        "backendPortListening": False,
+        "backendPortOwnerPid": 0,
+        "backendPortOwnerTrusted": False,
+        "backendPortConflict": False,
+        "browserLaunchPid": 0,
+        "browserWindowPid": 0,
+        "sessionId": "",
+        "url": "http://127.0.0.1:8000",
+    }
+
+    monkeypatch.setattr(daemon, "load_state", lambda: state)
+    monkeypatch.setattr(daemon, "save_state", lambda next_state: next_state)
+    monkeypatch.setattr(daemon, "now_iso", lambda: "2026-06-12T10:40:00+00:00")
+    monkeypatch.setattr(daemon, "observe_workbench", lambda: dict(open_observation))
+    monkeypatch.setattr(daemon, "build_evolution_summary", lambda: {"self": {}, "supervised": {}})
+    monkeypatch.setattr(daemon, "_runtime_manager_active_work_runs", lambda: [])
+    monkeypatch.setattr(daemon, "_close_active_evolution_runs_for_shutdown", lambda: [])
+    monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: events.append((event_type, payload)))
+    monkeypatch.setattr(daemon, "_wait_for_close_verification", lambda: (True, dict(closed_observation), 1))
+    monkeypatch.setattr(
+        daemon,
+        "close_workbench",
+        lambda: (_ for _ in ()).throw(AssertionError("fast path should not invoke PowerShell launcher close")),
+    )
+    monkeypatch.setattr(
+        daemon,
+        "clear_workbench_launcher_state_after_close",
+        lambda: state_cleanup_calls.append("state") or {"preservedLauncherControlState": True, "removedState": False},
+    )
+
+    def fake_cleanup(self, observation=None):
+        cleanup_calls.append(dict(observation or {}))
+        return {"supported": True, "requested": [28888, 29999], "terminated": [28888, 29999], "remaining": []}
+
+    monkeypatch.setattr(daemon.RuntimeManagerDaemon, "_force_cleanup_workbench_processes", fake_cleanup)
+
+    result = runtime_daemon._handle_close_workbench(command_id="cmd-close", args={"reason": "web_close_button"})
+
+    assert result["ok"] is True
+    assert result["closeStrategy"] == "runtime_manager_fast_path"
+    assert result["residualCleanup"]["terminated"] == [28888, 29999]
+    assert "launcher_action_ms" not in result["lifecycleTimingsMs"]
+    assert result["lifecycleTimingsMs"]["fast_cleanup_ms"] >= 0
+    assert cleanup_calls[0]["backendPid"] == 28888
+    assert state_cleanup_calls == ["state"]
+    assert any(event_type == "workbench.close.fast_path_succeeded" for event_type, _payload in events)
+    succeeded = next(payload for event_type, payload in events if event_type == "workbench.close.verification_succeeded")
+    assert succeeded["closeStrategy"] == "runtime_manager_fast_path"
+
+
+def test_handle_close_workbench_falls_back_to_launcher_when_fast_path_is_unavailable(monkeypatch):
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    state = {
+        "command": {"activeCommandId": "cmd-close"},
+        "workbench": {
+            "desiredState": "open",
+            "observedState": "open",
+            "phase": "steady",
+        },
+    }
+    close_calls: list[str] = []
+    open_observation = {
+        "observedState": "open",
+        "launcherStatePresent": True,
+        "browserManaged": True,
+        "browserWindowAlive": True,
+        "backendPid": 28888,
+        "backendAlive": True,
+        "backendHealthy": True,
+        "backendObserved": True,
+        "backendPort": 8000,
+        "backendPortListening": True,
+        "backendPortOwnerPid": 28888,
+        "browserWindowPid": 29999,
+        "sessionId": "managed-session",
+        "url": "http://127.0.0.1:8000",
+    }
+    closed_observation = {
+        "observedState": "closed",
+        "launcherStatePresent": False,
+        "browserManaged": True,
+        "browserWindowAlive": False,
+        "backendPid": 0,
+        "backendAlive": False,
+        "backendHealthy": False,
+        "backendObserved": False,
+        "backendPort": 8000,
+        "backendPortListening": False,
+        "backendPortOwnerPid": 0,
+        "browserWindowPid": 0,
+        "sessionId": "",
+        "url": "http://127.0.0.1:8000",
+    }
+
+    monkeypatch.setattr(daemon, "load_state", lambda: state)
+    monkeypatch.setattr(daemon, "save_state", lambda next_state: next_state)
+    monkeypatch.setattr(daemon, "observe_workbench", lambda: dict(open_observation))
+    monkeypatch.setattr(daemon, "build_evolution_summary", lambda: {"self": {}, "supervised": {}})
+    monkeypatch.setattr(daemon, "_runtime_manager_active_work_runs", lambda: [])
+    monkeypatch.setattr(daemon, "_close_active_evolution_runs_for_shutdown", lambda: [])
+    monkeypatch.setattr(daemon, "_wait_for_close_verification", lambda: (True, dict(closed_observation), 1))
+    monkeypatch.setattr(
+        daemon.RuntimeManagerDaemon,
+        "_force_cleanup_workbench_processes",
+        lambda self, observation=None: {"supported": False, "requested": [], "terminated": [], "remaining": []},
+    )
+    monkeypatch.setattr(
+        daemon,
+        "close_workbench",
+        lambda: close_calls.append("launcher") or subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
+    )
+
+    result = runtime_daemon._handle_close_workbench(command_id="cmd-close", args={})
+
+    assert result["ok"] is True
+    assert result["closeStrategy"] == "launcher_internal_stop"
+    assert result["lifecycleTimingsMs"]["launcher_action_ms"] >= 0
+    assert result["lifecycleTimingsMs"]["fast_close_path_ms"] >= 0
+    assert result["lifecycleTimingsMs"]["close_verification_attempts"] == 1
+    assert close_calls == ["launcher"]
+
+
+def test_clear_workbench_launcher_state_after_fast_close_preserves_launcher_control(tmp_path, monkeypatch):
+    state_path = tmp_path / "state.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "sessionRole": "workbench",
+                "sessionId": "session-workbench",
+                "backendPid": 5000,
+                "backendLaunchPid": 5001,
+                "launcherBackendPid": 4100,
+                "launcherBackendLaunchPid": 4101,
+                "launcherControlPort": 8765,
+                "launcherControlUrl": "http://127.0.0.1:8765/launcher",
+                "browserManaged": True,
+                "browserProfileDir": "workbench-profile",
+                "workbenchBrowserProfileDir": "workbench-profile",
+                "launcherBrowserProfileDir": "launcher-profile",
+                "browserLaunchPid": 5200,
+                "browserWindowPid": 5200,
+                "workbenchBrowserLaunchPid": 5200,
+                "workbenchBrowserWindowPid": 5200,
+                "launcherBrowserLaunchPid": 4200,
+                "launcherBrowserWindowPid": 4200,
+                "supervisorPid": 5300,
+                "runtimeSceneId": "scene-workbench",
+                "runtimeSceneDir": "logs/runtime_scenes/scene-workbench",
+                "launcherControlStartedAt": "2026-06-12T10:30:00+00:00",
+                "startedAt": "2026-06-12T10:31:00+00:00",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(workbench_controller, "LAUNCHER_STATE_PATH", state_path)
+    monkeypatch.setattr(workbench_controller, "_is_process_alive", lambda pid: int(pid) in {4100, 4200})
+
+    result = workbench_controller.clear_workbench_launcher_state_after_close()
+    saved = json.loads(state_path.read_text(encoding="utf-8"))
+
+    assert result["preservedLauncherControlState"] is True
+    assert result["removedState"] is False
+    assert saved["sessionRole"] == "launcher_control_surface"
+    assert saved["backendPid"] == 0
+    assert saved["backendLaunchPid"] == 0
+    assert saved["browserProfileDir"] == "launcher-profile"
+    assert saved["browserLaunchPid"] == 4200
+    assert saved["browserWindowPid"] == 4200
+    assert saved["workbenchBrowserLaunchPid"] == 0
+    assert saved["workbenchBrowserWindowPid"] == 0
+    assert saved["supervisorPid"] == 0
+    assert saved["runtimeSceneId"] is None
+    assert saved["runtimeSceneDir"] is None
+    assert saved["startedAt"] == "2026-06-12T10:30:00+00:00"
 
 
 def test_handle_force_close_workbench_marks_work_runs_and_verifies_close(monkeypatch):
@@ -6322,6 +6557,7 @@ def test_handle_close_workbench_does_not_short_circuit_when_backend_port_is_stil
         },
     }
     close_calls = []
+    cleanup_calls: list[dict] = []
 
     monkeypatch.setattr(daemon, "load_state", lambda: state)
     monkeypatch.setattr(daemon, "save_state", lambda next_state: next_state)
@@ -6375,12 +6611,20 @@ def test_handle_close_workbench_does_not_short_circuit_when_backend_port_is_stil
         return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
 
     monkeypatch.setattr(daemon, "close_workbench", fake_close_workbench)
+    monkeypatch.setattr(
+        daemon.RuntimeManagerDaemon,
+        "_force_cleanup_workbench_processes",
+        lambda self, observation=None: cleanup_calls.append(dict(observation or {}))
+        or {"supported": True, "requested": [52396], "terminated": [52396], "remaining": []},
+    )
 
     result = runtime_daemon._handle_close_workbench(command_id="cmd-close", args={})
 
     assert result["ok"] is True
     assert result["message"] == "Workbench closed."
-    assert close_calls == ["close"]
+    assert result["closeStrategy"] == "runtime_manager_fast_path"
+    assert cleanup_calls[0]["backendPortOwnerPid"] == 52396
+    assert close_calls == []
 
 
 def test_handle_close_workbench_cleans_residual_processes_and_can_stop_daemon(monkeypatch):
@@ -6510,19 +6754,19 @@ def test_handle_close_workbench_includes_active_backend_in_residual_cleanup(monk
         lambda: subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
     )
 
-    def fake_cleanup(**kwargs):
-        cleanup_calls.append(kwargs)
+    def fake_cleanup(self, observation=None):
+        cleanup_calls.append(dict(observation or {}))
         return {"supported": True, "requested": [2748, 33556], "terminated": [2748, 33556], "remaining": []}
 
-    monkeypatch.setattr(daemon, "terminate_unmanaged_workbench_processes", fake_cleanup)
+    monkeypatch.setattr(daemon.RuntimeManagerDaemon, "_force_cleanup_workbench_processes", fake_cleanup)
 
     result = runtime_daemon._handle_close_workbench(command_id="cmd-close", args={})
 
     assert result["ok"] is True
     assert cleanup_calls
-    assert 2748 not in cleanup_calls[0]["exclude_pids"]
-    assert 33556 not in cleanup_calls[0]["exclude_pids"]
-    assert runtime_daemon._pid in cleanup_calls[0]["exclude_pids"]
+    assert cleanup_calls[0]["backendPid"] == 2748
+    assert cleanup_calls[0]["backendPortOwnerPid"] == 33556
+    assert result["closeStrategy"] == "runtime_manager_fast_path"
 
 
 def test_handle_close_workbench_fails_when_post_close_verification_still_sees_browser(monkeypatch):

@@ -54,6 +54,7 @@ from .process_inventory import (
 )
 from .workbench_controller import (
     LAUNCHER_ACTION_CANCELLED_RETURN_CODE,
+    clear_workbench_launcher_state_after_close,
     close_workbench,
     focus_workbench,
     observe_workbench,
@@ -2744,6 +2745,195 @@ class RuntimeManagerDaemon:
             lifecycle_timings_ms=lifecycle_timings_ms,
         )
 
+    def _try_fast_close_workbench(
+        self,
+        *,
+        command_id: str,
+        initial_observation: dict[str, Any],
+    ) -> dict[str, Any]:
+        timings_ms: dict[str, Any] = {}
+        started_at = time.monotonic()
+        _append_event(
+            "workbench.close.fast_path_requested",
+            _close_verification_event_payload(initial_observation, command_id=command_id)
+            | {
+                "closeStrategy": "runtime_manager_fast_path",
+            },
+        )
+        try:
+            cleanup_started = time.monotonic()
+            cleanup_result = self._force_cleanup_workbench_processes(initial_observation)
+            timings_ms["fast_cleanup_ms"] = _elapsed_monotonic_ms(cleanup_started)
+        except Exception as exc:
+            timings_ms["fast_close_path_ms"] = _elapsed_monotonic_ms(started_at)
+            payload = _close_verification_event_payload(initial_observation, command_id=command_id) | {
+                "closeStrategy": "runtime_manager_fast_path",
+                "fallbackReason": "cleanup_exception",
+                "errorType": type(exc).__name__,
+                "message": str(exc),
+                "timingsMs": timings_ms,
+            }
+            _append_event("workbench.close.fast_path_fallback", payload)
+            return {
+                "ok": False,
+                "fallbackReason": "cleanup_exception",
+                "cleanupResult": {},
+                "verification": initial_observation,
+                "verificationAttempts": 0,
+                "timingsMs": timings_ms,
+                "errorType": type(exc).__name__,
+                "message": str(exc),
+            }
+
+        if not bool(cleanup_result.get("supported", True)):
+            timings_ms["fast_close_path_ms"] = _elapsed_monotonic_ms(started_at)
+            _append_event(
+                "workbench.close.fast_path_fallback",
+                _close_verification_event_payload(
+                    initial_observation,
+                    command_id=command_id,
+                    cleanup_result=cleanup_result,
+                )
+                | {
+                    "closeStrategy": "runtime_manager_fast_path",
+                    "fallbackReason": "process_inventory_unavailable",
+                    "timingsMs": timings_ms,
+                },
+            )
+            return {
+                "ok": False,
+                "fallbackReason": "process_inventory_unavailable",
+                "cleanupResult": cleanup_result,
+                "verification": initial_observation,
+                "verificationAttempts": 0,
+                "timingsMs": timings_ms,
+            }
+
+        verification_started = time.monotonic()
+        closed, verification, verification_attempts = _wait_for_close_verification()
+        timings_ms["close_verification_ms"] = _elapsed_monotonic_ms(verification_started)
+        timings_ms["close_verification_attempts"] = verification_attempts
+        if not closed:
+            timings_ms["fast_close_path_ms"] = _elapsed_monotonic_ms(started_at)
+            _append_event(
+                "workbench.close.fast_path_fallback",
+                _close_verification_event_payload(
+                    verification,
+                    command_id=command_id,
+                    cleanup_result=cleanup_result,
+                )
+                | {
+                    "closeStrategy": "runtime_manager_fast_path",
+                    "fallbackReason": "verification_failed",
+                    "attempts": verification_attempts,
+                    "timingsMs": timings_ms,
+                },
+            )
+            return {
+                "ok": False,
+                "fallbackReason": "verification_failed",
+                "cleanupResult": cleanup_result,
+                "verification": verification,
+                "verificationAttempts": verification_attempts,
+                "timingsMs": timings_ms,
+            }
+
+        state_cleanup_started = time.monotonic()
+        try:
+            state_cleanup = clear_workbench_launcher_state_after_close()
+        except Exception as exc:
+            state_cleanup = {
+                "ok": False,
+                "errorType": type(exc).__name__,
+                "message": str(exc),
+            }
+            _append_event(
+                "workbench.close.fast_path_state_cleanup_failed",
+                _close_verification_event_payload(
+                    verification,
+                    command_id=command_id,
+                    cleanup_result=cleanup_result,
+                )
+                | {
+                    "closeStrategy": "runtime_manager_fast_path",
+                    "stateCleanup": state_cleanup,
+                },
+            )
+        timings_ms["launcher_state_cleanup_ms"] = _elapsed_monotonic_ms(state_cleanup_started)
+        timings_ms["fast_close_path_ms"] = _elapsed_monotonic_ms(started_at)
+        _append_event(
+            "workbench.close.fast_path_succeeded",
+            _close_verification_event_payload(
+                verification,
+                command_id=command_id,
+                cleanup_result=cleanup_result,
+            )
+            | {
+                "closeStrategy": "runtime_manager_fast_path",
+                "attempts": verification_attempts,
+                "stateCleanup": state_cleanup,
+                "timingsMs": timings_ms,
+            },
+        )
+        return {
+            "ok": True,
+            "fallbackReason": "",
+            "cleanupResult": cleanup_result,
+            "verification": verification,
+            "verificationAttempts": verification_attempts,
+            "timingsMs": timings_ms,
+            "stateCleanup": state_cleanup,
+        }
+
+    def _close_workbench_with_fast_path(
+        self,
+        *,
+        command_id: str,
+        initial_observation: dict[str, Any],
+        launcher_failure_message: str,
+    ) -> dict[str, Any]:
+        lifecycle_timings_ms: dict[str, Any] = {}
+        fast_close = self._try_fast_close_workbench(
+            command_id=command_id,
+            initial_observation=initial_observation,
+        )
+        lifecycle_timings_ms.update(fast_close.get("timingsMs") if isinstance(fast_close.get("timingsMs"), dict) else {})
+        if bool(fast_close.get("ok")):
+            return {
+                "closeStrategy": "runtime_manager_fast_path",
+                "cleanupResult": fast_close.get("cleanupResult") if isinstance(fast_close.get("cleanupResult"), dict) else {},
+                "verification": fast_close.get("verification") if isinstance(fast_close.get("verification"), dict) else {},
+                "verificationAttempts": int(fast_close.get("verificationAttempts") or 0),
+                "launcherResult": None,
+                "lifecycleTimingsMs": lifecycle_timings_ms,
+                "fastClose": fast_close,
+            }
+
+        fallback_reason = str(fast_close.get("fallbackReason") or "fast_path_failed")
+        launcher_started = time.monotonic()
+        result = close_workbench()
+        lifecycle_timings_ms["launcher_action_ms"] = _elapsed_monotonic_ms(launcher_started)
+        if result.returncode != 0:
+            raise RuntimeError(_launcher_error_detail(result, launcher_failure_message))
+        cleanup_started = time.monotonic()
+        cleanup_result = self._cleanup_residual_workbench_processes()
+        lifecycle_timings_ms["residual_cleanup_ms"] = _elapsed_monotonic_ms(cleanup_started)
+        verification_started = time.monotonic()
+        closed, verification, verification_attempts = _wait_for_close_verification()
+        lifecycle_timings_ms["close_verification_ms"] = _elapsed_monotonic_ms(verification_started)
+        lifecycle_timings_ms["close_verification_attempts"] = verification_attempts
+        return {
+            "closeStrategy": "launcher_internal_stop",
+            "fallbackReason": fallback_reason,
+            "cleanupResult": cleanup_result,
+            "verification": verification,
+            "verificationAttempts": verification_attempts,
+            "launcherResult": result,
+            "lifecycleTimingsMs": lifecycle_timings_ms,
+            "fastClose": fast_close,
+            "closed": closed,
+        }
+
     def _handle_close_workbench(self, *, command_id: str, args: dict[str, Any]) -> dict[str, Any]:
         blocked = self._block_lifecycle_command_if_active_work(
             command_id=command_id,
@@ -2799,19 +2989,18 @@ class RuntimeManagerDaemon:
             }
         )
         save_state(self._reconcile_observation(state))
-        lifecycle_timings_ms: dict[str, Any] = {}
-        launcher_started = time.monotonic()
-        result = close_workbench()
-        lifecycle_timings_ms["launcher_action_ms"] = _elapsed_monotonic_ms(launcher_started)
-        if result.returncode != 0:
-            raise RuntimeError(_launcher_error_detail(result, "Closing the workbench failed."))
-        cleanup_started = time.monotonic()
-        cleanup_result = self._cleanup_residual_workbench_processes()
-        lifecycle_timings_ms["residual_cleanup_ms"] = _elapsed_monotonic_ms(cleanup_started)
-        verification_started = time.monotonic()
-        closed, verification, verification_attempts = _wait_for_close_verification()
-        lifecycle_timings_ms["close_verification_ms"] = _elapsed_monotonic_ms(verification_started)
-        lifecycle_timings_ms["close_verification_attempts"] = verification_attempts
+        close_outcome = self._close_workbench_with_fast_path(
+            command_id=command_id,
+            initial_observation=observation,
+            launcher_failure_message="Closing the workbench failed.",
+        )
+        cleanup_result = close_outcome["cleanupResult"]
+        verification = close_outcome["verification"]
+        verification_attempts = int(close_outcome["verificationAttempts"])
+        lifecycle_timings_ms = close_outcome["lifecycleTimingsMs"]
+        launcher_result = close_outcome.get("launcherResult")
+        close_strategy = str(close_outcome.get("closeStrategy") or "")
+        closed = bool(close_outcome.get("closed", True))
         if not closed:
             message = _close_verification_failure_message(verification)
             _append_event(
@@ -2821,9 +3010,13 @@ class RuntimeManagerDaemon:
                     command_id=command_id,
                     message=message,
                     cleanup_result=cleanup_result,
-                    launcher_result=result,
+                    launcher_result=launcher_result,
                 )
-                | {"attempts": verification_attempts},
+                | {
+                    "attempts": verification_attempts,
+                    "closeStrategy": close_strategy,
+                    "fastClose": close_outcome.get("fastClose") if isinstance(close_outcome.get("fastClose"), dict) else {},
+                },
             )
             raise RuntimeError(message)
         _append_event(
@@ -2832,9 +3025,13 @@ class RuntimeManagerDaemon:
                 verification,
                 command_id=command_id,
                 cleanup_result=cleanup_result,
-                launcher_result=result,
+                launcher_result=launcher_result,
             )
-            | {"attempts": verification_attempts},
+            | {
+                "attempts": verification_attempts,
+                "closeStrategy": close_strategy,
+                "fastClose": close_outcome.get("fastClose") if isinstance(close_outcome.get("fastClose"), dict) else {},
+            },
         )
         reopen_intent = _claim_workbench_reopen_intent() if bool(args.get("stopManager")) else None
         final_result = self._finish_command(
@@ -2848,6 +3045,7 @@ class RuntimeManagerDaemon:
                 "runDeferredWorkbenchOpen": bool(reopen_intent),
                 "restartIntent": reopen_intent or {},
                 "lifecycleTimingsMs": lifecycle_timings_ms,
+                "closeStrategy": close_strategy,
             },
         )
         if bool(args.get("stopManager")):
@@ -3092,18 +3290,20 @@ class RuntimeManagerDaemon:
                     "requestedSource": str(args.get("source") or ""),
                 },
             )
-        close_launcher_started = time.monotonic()
-        close_result = close_workbench()
-        lifecycle_timings_ms["close_launcher_action_ms"] = _elapsed_monotonic_ms(close_launcher_started)
-        if close_result.returncode != 0:
-            raise RuntimeError(_launcher_error_detail(close_result, "Closing the workbench for restart failed."))
-        cleanup_started = time.monotonic()
-        cleanup_result = self._cleanup_residual_workbench_processes()
-        lifecycle_timings_ms["residual_cleanup_ms"] = _elapsed_monotonic_ms(cleanup_started)
-        close_verification_started = time.monotonic()
-        closed, close_verification, close_attempts = _wait_for_close_verification()
-        lifecycle_timings_ms["close_verification_ms"] = _elapsed_monotonic_ms(close_verification_started)
-        lifecycle_timings_ms["close_verification_attempts"] = close_attempts
+        close_outcome = self._close_workbench_with_fast_path(
+            command_id=command_id,
+            initial_observation=observe_workbench(),
+            launcher_failure_message="Closing the workbench for restart failed.",
+        )
+        lifecycle_timings_ms.update(
+            close_outcome.get("lifecycleTimingsMs") if isinstance(close_outcome.get("lifecycleTimingsMs"), dict) else {}
+        )
+        cleanup_result = close_outcome["cleanupResult"]
+        close_verification = close_outcome["verification"]
+        close_attempts = int(close_outcome["verificationAttempts"])
+        close_result = close_outcome.get("launcherResult")
+        close_strategy = str(close_outcome.get("closeStrategy") or "")
+        closed = bool(close_outcome.get("closed", True))
         if not closed:
             message = _close_verification_failure_message(close_verification)
             _append_event(
@@ -3115,7 +3315,11 @@ class RuntimeManagerDaemon:
                     cleanup_result=cleanup_result,
                     launcher_result=close_result,
                 )
-                | {"attempts": close_attempts},
+                | {
+                    "attempts": close_attempts,
+                    "closeStrategy": close_strategy,
+                    "fastClose": close_outcome.get("fastClose") if isinstance(close_outcome.get("fastClose"), dict) else {},
+                },
             )
             raise RuntimeError(message)
         _append_event(
@@ -3126,7 +3330,11 @@ class RuntimeManagerDaemon:
                 cleanup_result=cleanup_result,
                 launcher_result=close_result,
             )
-            | {"attempts": close_attempts},
+            | {
+                "attempts": close_attempts,
+                "closeStrategy": close_strategy,
+                "fastClose": close_outcome.get("fastClose") if isinstance(close_outcome.get("fastClose"), dict) else {},
+            },
         )
         interrupt = _active_lifecycle_interrupt(command_id)
         if interrupt:
@@ -3136,6 +3344,7 @@ class RuntimeManagerDaemon:
                 "effectiveNoBrowser": effective_no_browser,
                 "buildPreflight": build_preflight,
                 "lifecycleTimingsMs": lifecycle_timings_ms,
+                "closeStrategy": close_strategy,
                 "interruptedByClose": True,
                 "interrupt": interrupt,
                 "interruptStage": "after_close_before_open",
@@ -3166,6 +3375,7 @@ class RuntimeManagerDaemon:
                 "effectiveNoBrowser": effective_no_browser,
                 "buildPreflight": build_preflight,
                 "lifecycleTimingsMs": lifecycle_timings_ms,
+                "closeStrategy": close_strategy,
                 "interruptedByClose": True,
                 "interrupt": interrupt,
                 "interruptStage": "restart_open_launcher",
@@ -3185,6 +3395,7 @@ class RuntimeManagerDaemon:
                 "effectiveNoBrowser": effective_no_browser,
                 "buildPreflight": build_preflight,
                 "lifecycleTimingsMs": lifecycle_timings_ms,
+                "closeStrategy": close_strategy,
                 "interruptedByClose": True,
                 "interrupt": interrupt,
                 "interruptStage": "restart_open_verification",
@@ -3220,6 +3431,7 @@ class RuntimeManagerDaemon:
             "effectiveNoBrowser": effective_no_browser,
             "buildPreflight": build_preflight,
             "lifecycleTimingsMs": lifecycle_timings_ms,
+            "closeStrategy": close_strategy,
         }
 
     def _handle_restart_workbench(self, *, command_id: str, args: dict[str, Any]) -> dict[str, Any]:
