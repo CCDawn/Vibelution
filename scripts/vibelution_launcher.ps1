@@ -7114,9 +7114,6 @@ function Stop-ManagedSession {
     $backendStopStartedAt = Get-Date
     $backendStopTrace = Stop-ManagedBackendProcesses
     $backendStopEndedAt = Get-Date
-    $portWaitStartedAt = Get-Date
-    $backendStopped = Wait-ForPortClosed -Port $port
-    $portWaitEndedAt = Get-Date
 
     $supervisorStopStartedAt = $null
     $supervisorStopEndedAt = $null
@@ -7125,6 +7122,21 @@ function Stop-ManagedSession {
         Stop-ProcessesById @($supervisorPid)
         $supervisorStopEndedAt = Get-Date
     }
+
+    $browserStopStartedAt = Get-Date
+    $browserStoppedByStopper = [bool](Stop-ManagedBrowserProcesses -ProfileDir $workbenchBrowserProfileDir -Role "workbench" -PassThru)
+    $browserStopEndedAt = Get-Date
+    $browserWaitStartedAt = Get-Date
+    if ($browserStoppedByStopper) {
+        $browserStopped = $true
+    } else {
+        $browserStopped = Wait-ForBrowserStopped -TimeoutSeconds 20 -ProfileDir $workbenchBrowserProfileDir -Role "workbench"
+    }
+    $browserWaitEndedAt = Get-Date
+
+    $portWaitStartedAt = Get-Date
+    $backendStopped = Wait-ForPortClosed -Port $port
+    $portWaitEndedAt = Get-Date
 
     if (-not $backendStopped) {
         Write-LauncherControlLog `
@@ -7139,19 +7151,11 @@ function Stop-ManagedSession {
                 timings_ms = @{
                     backend_stop_ms = & $elapsedMs $backendStopStartedAt $backendStopEndedAt
                     port_wait_ms = & $elapsedMs $portWaitStartedAt $portWaitEndedAt
+                    browser_stop_ms = & $elapsedMs $browserStopStartedAt $browserStopEndedAt
+                    browser_wait_ms = & $elapsedMs $browserWaitStartedAt $browserWaitEndedAt
                 }
             }
     }
-    $browserStopStartedAt = Get-Date
-    $browserStoppedByStopper = [bool](Stop-ManagedBrowserProcesses -ProfileDir $workbenchBrowserProfileDir -Role "workbench" -PassThru)
-    $browserStopEndedAt = Get-Date
-    $browserWaitStartedAt = Get-Date
-    if ($browserStoppedByStopper) {
-        $browserStopped = $true
-    } else {
-        $browserStopped = Wait-ForBrowserStopped -TimeoutSeconds 20 -ProfileDir $workbenchBrowserProfileDir -Role "workbench"
-    }
-    $browserWaitEndedAt = Get-Date
 
     $closureSnapshotStartedAt = Get-Date
     $closure = Get-ManagedSessionClosureSnapshot `
@@ -7193,6 +7197,7 @@ function Stop-ManagedSession {
                 manager_closed = [bool]$closure.ManagerClosed
                 port_owner_pid = $closure.PortOwnerPid
                 closure_snapshot_mode = $closureSnapshotMode
+                shutdown_strategy = "browser_stop_before_port_wait"
                 timings_ms = $shutdownTimings
             }
     }

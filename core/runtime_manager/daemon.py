@@ -11,6 +11,7 @@ import subprocess
 import sys
 import threading
 import time
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -22,8 +23,10 @@ from core.web.services import self_evolution_control_service, supervised_control
 
 from .command_queue import (
     claim_next_command,
+    clear_lifecycle_interrupt,
     complete_command,
     defer_processing_command_for_active_work,
+    lifecycle_interrupt_requested,
     recover_processing_queue,
     reject_pending_commands_for_shutdown,
 )
@@ -49,7 +52,14 @@ from .process_inventory import (
     terminate_unmanaged_workbench_processes,
     terminate_workbench_processes,
 )
-from .workbench_controller import close_workbench, focus_workbench, observe_workbench, open_workbench, restart_workbench
+from .workbench_controller import (
+    LAUNCHER_ACTION_CANCELLED_RETURN_CODE,
+    close_workbench,
+    focus_workbench,
+    observe_workbench,
+    open_workbench,
+    restart_workbench,
+)
 
 
 _WORKBENCH_LIFECYCLE_COMMANDS = {
@@ -563,6 +573,10 @@ def _elapsed_ms_between(start: Any, end: Any) -> float | None:
     return round(max(0.0, (ended - started).total_seconds() * 1000.0), 1)
 
 
+def _elapsed_monotonic_ms(started_at: float) -> float:
+    return round(max(0.0, (time.monotonic() - started_at) * 1000.0), 1)
+
+
 def _command_runtime_timing_fields(
     payload: dict[str, Any],
     *,
@@ -901,18 +915,65 @@ def _open_verification_should_retry_stale_session(observation: dict[str, Any], *
     return not backend_ready or not browser_ready
 
 
-def _wait_for_open_verification(*, no_browser: bool) -> tuple[bool, dict[str, Any], int]:
+def _wait_for_open_verification(
+    *,
+    no_browser: bool,
+    cancel_check: Callable[[], bool] | None = None,
+) -> tuple[bool, dict[str, Any], int]:
     deadline = time.monotonic() + _OPEN_VERIFICATION_TIMEOUT_SECONDS
     attempts = 0
     latest: dict[str, Any] = {}
     while True:
+        if cancel_check is not None and cancel_check():
+            return False, latest, attempts
         attempts += 1
         latest = observe_workbench()
         if _open_request_ready(latest, no_browser=no_browser, launcher_confirmed=True):
             return True, latest, attempts
+        if cancel_check is not None and cancel_check():
+            return False, latest, attempts
         if time.monotonic() >= deadline:
             return False, latest, attempts
         time.sleep(_OPEN_VERIFICATION_POLL_INTERVAL_SECONDS)
+
+
+def _active_lifecycle_interrupt(command_id: str) -> dict[str, Any]:
+    interrupt = lifecycle_interrupt_requested(command_id)
+    return interrupt if isinstance(interrupt, dict) else {}
+
+
+def _lifecycle_interrupt_cancel_check(command_id: str) -> Callable[[], bool]:
+    def check() -> bool:
+        return bool(_active_lifecycle_interrupt(command_id))
+
+    return check
+
+
+def _lifecycle_interrupt_error_type(interrupt: dict[str, Any]) -> str:
+    close_type = str(interrupt.get("closeCommandType") or "")
+    return "SupersededByForceCloseWorkbench" if close_type == "force_close_workbench" else "SupersededByCloseWorkbench"
+
+
+def _lifecycle_interrupt_result_data(
+    *,
+    interrupt: dict[str, Any],
+    stage: str,
+    launcher_result: Any = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "interruptedByClose": True,
+        "interruptStage": stage,
+        "supersededByCommandId": str(interrupt.get("closeCommandId") or ""),
+        "supersededByCommandType": str(interrupt.get("closeCommandType") or ""),
+        "interruptOperation": str(interrupt.get("operation") or ""),
+    }
+    if launcher_result is not None:
+        payload["launcher"] = {
+            "returnCode": int(getattr(launcher_result, "returncode", 0) or 0),
+            "stdout": str(getattr(launcher_result, "stdout", "") or "").strip()[-800:],
+            "stderr": str(getattr(launcher_result, "stderr", "") or "").strip()[-800:],
+        }
+    return payload
 
 
 def _open_already_satisfied_event_payload(
@@ -1862,33 +1923,37 @@ class RuntimeManagerDaemon:
             result = handler(command_id=command_id, args=args)
             result = with_timing(result)
             if bool(result.get("deferCommandUntilActiveWorkClear")):
-                _append_event(
-                    "command.deferred",
-                    {
-                        "commandId": command_id,
-                        "type": command_type,
-                        "reason": "active_work",
-                        "requestedAt": result.get("requestedAt", ""),
-                        "claimedAt": result.get("claimedAt", ""),
-                        "startedAt": result.get("startedAt", ""),
-                        "queuedMs": result.get("queuedMs"),
-                        "runMs": result.get("runMs"),
-                    },
-                )
+                event_payload = {
+                    "commandId": command_id,
+                    "type": command_type,
+                    "reason": "active_work",
+                    "requestedAt": result.get("requestedAt", ""),
+                    "claimedAt": result.get("claimedAt", ""),
+                    "startedAt": result.get("startedAt", ""),
+                    "queuedMs": result.get("queuedMs"),
+                    "runMs": result.get("runMs"),
+                }
+                if isinstance(result.get("lifecycleTimingsMs"), dict):
+                    event_payload["lifecycleTimingsMs"] = result["lifecycleTimingsMs"]
+                _append_event("command.deferred", event_payload)
             else:
-                _append_event(
-                    "command.completed",
-                    {
-                        "commandId": command_id,
-                        "type": command_type,
-                        "ok": result["ok"],
-                        "requestedAt": result.get("requestedAt", ""),
-                        "claimedAt": result.get("claimedAt", ""),
-                        "startedAt": result.get("startedAt", ""),
-                        "queuedMs": result.get("queuedMs"),
-                        "runMs": result.get("runMs"),
-                    },
-                )
+                event_payload = {
+                    "commandId": command_id,
+                    "type": command_type,
+                    "ok": result["ok"],
+                    "requestedAt": result.get("requestedAt", ""),
+                    "claimedAt": result.get("claimedAt", ""),
+                    "startedAt": result.get("startedAt", ""),
+                    "queuedMs": result.get("queuedMs"),
+                    "runMs": result.get("runMs"),
+                }
+                if isinstance(result.get("lifecycleTimingsMs"), dict):
+                    event_payload["lifecycleTimingsMs"] = result["lifecycleTimingsMs"]
+                if bool(result.get("interruptedByClose")):
+                    event_payload["interruptedByClose"] = True
+                    event_payload["interruptStage"] = str(result.get("interruptStage") or "")
+                    event_payload["supersededByCommandId"] = str(result.get("supersededByCommandId") or "")
+                _append_event("command.completed", event_payload)
             return result
         except Exception as exc:
             result = self._finish_command(
@@ -1990,6 +2055,7 @@ class RuntimeManagerDaemon:
         message: str,
         verification: dict[str, Any],
         stable_backup: dict[str, Any],
+        lifecycle_timings_ms: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         state = load_state()
         workbench = state.setdefault("workbench", {})
@@ -2039,8 +2105,49 @@ class RuntimeManagerDaemon:
             command_id,
             ok=True,
             message=message,
-            result_data={"stableBackup": stable_backup},
+            result_data={
+                "stableBackup": stable_backup,
+                "lifecycleTimingsMs": lifecycle_timings_ms or {},
+            },
             reconcile=False,
+        )
+
+    def _finish_interrupted_lifecycle_command(
+        self,
+        command_id: str,
+        *,
+        command_type: str,
+        interrupt: dict[str, Any],
+        stage: str,
+        launcher_result: Any = None,
+        extra_result_data: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        short_type = command_type.removesuffix("_workbench")
+        error_type = _lifecycle_interrupt_error_type(interrupt)
+        result_data = _lifecycle_interrupt_result_data(
+            interrupt=interrupt,
+            stage=stage,
+            launcher_result=launcher_result,
+        )
+        if isinstance(extra_result_data, dict):
+            result_data.update(extra_result_data)
+        clear_lifecycle_interrupt(command_id)
+        _append_event(
+            f"workbench.{short_type}.interrupted_by_close",
+            {
+                "commandId": command_id,
+                "stage": stage,
+                "errorType": error_type,
+                **result_data,
+            },
+        )
+        return self._finish_command(
+            command_id,
+            ok=False,
+            message=f"{command_type} was superseded by a close request.",
+            error_scope="command_superseded",
+            error_type=error_type,
+            result_data=result_data,
         )
 
     def _block_lifecycle_command_if_active_work(
@@ -2482,8 +2589,11 @@ class RuntimeManagerDaemon:
                 "initialLifecycleConsistency": str(observation.get("lifecycleConsistency") or "consistent"),
             },
         )
+        lifecycle_timings_ms: dict[str, Any] = {}
         if bool(observation.get("backendPortOwnerResidual")):
+            cleanup_started = time.monotonic()
             cleanup_result = self._cleanup_residual_workbench_processes()
+            lifecycle_timings_ms["residual_cleanup_ms"] = _elapsed_monotonic_ms(cleanup_started)
             _append_event(
                 "workbench.open.residual_cleanup",
                 {
@@ -2494,10 +2604,45 @@ class RuntimeManagerDaemon:
                     "cleanup": cleanup_result,
                 },
             )
-        result = open_workbench(no_browser=no_browser)
+        cancel_check = _lifecycle_interrupt_cancel_check(command_id)
+        interrupt = _active_lifecycle_interrupt(command_id)
+        if interrupt:
+            return self._finish_interrupted_lifecycle_command(
+                command_id,
+                command_type="open_workbench",
+                interrupt=interrupt,
+                stage="before_launcher_start",
+                extra_result_data={"lifecycleTimingsMs": lifecycle_timings_ms},
+            )
+        launcher_started = time.monotonic()
+        result = open_workbench(no_browser=no_browser, cancel_check=cancel_check)
+        lifecycle_timings_ms["launcher_action_ms"] = _elapsed_monotonic_ms(launcher_started)
+        interrupt = _active_lifecycle_interrupt(command_id)
+        if interrupt or int(result.returncode or 0) == LAUNCHER_ACTION_CANCELLED_RETURN_CODE:
+            return self._finish_interrupted_lifecycle_command(
+                command_id,
+                command_type="open_workbench",
+                interrupt=interrupt,
+                stage="launcher_action",
+                launcher_result=result,
+                extra_result_data={"lifecycleTimingsMs": lifecycle_timings_ms},
+            )
         if result.returncode != 0:
             raise RuntimeError(_launcher_error_detail(result, "Opening the workbench failed."))
-        ready, verification, verification_attempts = _wait_for_open_verification(no_browser=no_browser)
+        verification_started = time.monotonic()
+        ready, verification, verification_attempts = _wait_for_open_verification(no_browser=no_browser, cancel_check=cancel_check)
+        lifecycle_timings_ms["open_verification_ms"] = _elapsed_monotonic_ms(verification_started)
+        lifecycle_timings_ms["open_verification_attempts"] = verification_attempts
+        interrupt = _active_lifecycle_interrupt(command_id)
+        if interrupt:
+            return self._finish_interrupted_lifecycle_command(
+                command_id,
+                command_type="open_workbench",
+                interrupt=interrupt,
+                stage="open_verification",
+                launcher_result=result,
+                extra_result_data={"lifecycleTimingsMs": lifecycle_timings_ms},
+            )
         if not ready:
             if _open_verification_should_retry_stale_session(verification, no_browser=no_browser):
                 _append_event(
@@ -2511,12 +2656,38 @@ class RuntimeManagerDaemon:
                     )
                     | {"attempts": verification_attempts},
                 )
-                retry_result = open_workbench(no_browser=no_browser)
+                retry_launcher_started = time.monotonic()
+                retry_result = open_workbench(no_browser=no_browser, cancel_check=cancel_check)
+                lifecycle_timings_ms["launcher_retry_ms"] = _elapsed_monotonic_ms(retry_launcher_started)
+                interrupt = _active_lifecycle_interrupt(command_id)
+                if interrupt or int(retry_result.returncode or 0) == LAUNCHER_ACTION_CANCELLED_RETURN_CODE:
+                    return self._finish_interrupted_lifecycle_command(
+                        command_id,
+                        command_type="open_workbench",
+                        interrupt=interrupt,
+                        stage="launcher_retry",
+                        launcher_result=retry_result,
+                        extra_result_data={"lifecycleTimingsMs": lifecycle_timings_ms},
+                    )
                 if retry_result.returncode != 0:
                     raise RuntimeError(_launcher_error_detail(retry_result, "Opening the workbench failed."))
-                ready, verification, retry_attempts = _wait_for_open_verification(no_browser=no_browser)
+                retry_verification_started = time.monotonic()
+                ready, verification, retry_attempts = _wait_for_open_verification(no_browser=no_browser, cancel_check=cancel_check)
+                lifecycle_timings_ms["retry_verification_ms"] = _elapsed_monotonic_ms(retry_verification_started)
+                lifecycle_timings_ms["retry_verification_attempts"] = retry_attempts
                 verification_attempts += retry_attempts
+                lifecycle_timings_ms["open_verification_attempts"] = verification_attempts
                 result = retry_result
+                interrupt = _active_lifecycle_interrupt(command_id)
+                if interrupt:
+                    return self._finish_interrupted_lifecycle_command(
+                        command_id,
+                        command_type="open_workbench",
+                        interrupt=interrupt,
+                        stage="retry_verification",
+                        launcher_result=retry_result,
+                        extra_result_data={"lifecycleTimingsMs": lifecycle_timings_ms},
+                    )
                 if ready:
                     _append_event(
                         "workbench.open.verification_succeeded",
@@ -2537,6 +2708,7 @@ class RuntimeManagerDaemon:
                         message="Workbench opened.",
                         verification=verification,
                         stable_backup=stable_backup,
+                        lifecycle_timings_ms=lifecycle_timings_ms,
                     )
             message = _open_verification_failure_message(verification, no_browser=no_browser)
             _append_event(
@@ -2569,6 +2741,7 @@ class RuntimeManagerDaemon:
             message="Workbench opened.",
             verification=verification,
             stable_backup=stable_backup,
+            lifecycle_timings_ms=lifecycle_timings_ms,
         )
 
     def _handle_close_workbench(self, *, command_id: str, args: dict[str, Any]) -> dict[str, Any]:
@@ -2626,11 +2799,19 @@ class RuntimeManagerDaemon:
             }
         )
         save_state(self._reconcile_observation(state))
+        lifecycle_timings_ms: dict[str, Any] = {}
+        launcher_started = time.monotonic()
         result = close_workbench()
+        lifecycle_timings_ms["launcher_action_ms"] = _elapsed_monotonic_ms(launcher_started)
         if result.returncode != 0:
             raise RuntimeError(_launcher_error_detail(result, "Closing the workbench failed."))
+        cleanup_started = time.monotonic()
         cleanup_result = self._cleanup_residual_workbench_processes()
+        lifecycle_timings_ms["residual_cleanup_ms"] = _elapsed_monotonic_ms(cleanup_started)
+        verification_started = time.monotonic()
         closed, verification, verification_attempts = _wait_for_close_verification()
+        lifecycle_timings_ms["close_verification_ms"] = _elapsed_monotonic_ms(verification_started)
+        lifecycle_timings_ms["close_verification_attempts"] = verification_attempts
         if not closed:
             message = _close_verification_failure_message(verification)
             _append_event(
@@ -2666,6 +2847,7 @@ class RuntimeManagerDaemon:
                 "stopDaemon": bool(args.get("stopManager")) and not bool(reopen_intent),
                 "runDeferredWorkbenchOpen": bool(reopen_intent),
                 "restartIntent": reopen_intent or {},
+                "lifecycleTimingsMs": lifecycle_timings_ms,
             },
         )
         if bool(args.get("stopManager")):
@@ -2889,8 +3071,11 @@ class RuntimeManagerDaemon:
         workbench = state.setdefault("workbench", {})
         effective_no_browser = requested_no_browser
         build_preflight: dict[str, Any] = {}
+        lifecycle_timings_ms: dict[str, Any] = {}
         if _restart_should_preflight_frontend_build(workbench, args=args):
+            build_preflight_started = time.monotonic()
             build_preflight = _preflight_frontend_build_for_restart(command_id)
+            lifecycle_timings_ms["build_preflight_ms"] = _elapsed_monotonic_ms(build_preflight_started)
         if requested_no_browser and _restart_should_preserve_visible_browser(workbench):
             effective_no_browser = False
             _append_event(
@@ -2907,11 +3092,18 @@ class RuntimeManagerDaemon:
                     "requestedSource": str(args.get("source") or ""),
                 },
             )
+        close_launcher_started = time.monotonic()
         close_result = close_workbench()
+        lifecycle_timings_ms["close_launcher_action_ms"] = _elapsed_monotonic_ms(close_launcher_started)
         if close_result.returncode != 0:
             raise RuntimeError(_launcher_error_detail(close_result, "Closing the workbench for restart failed."))
+        cleanup_started = time.monotonic()
         cleanup_result = self._cleanup_residual_workbench_processes()
+        lifecycle_timings_ms["residual_cleanup_ms"] = _elapsed_monotonic_ms(cleanup_started)
+        close_verification_started = time.monotonic()
         closed, close_verification, close_attempts = _wait_for_close_verification()
+        lifecycle_timings_ms["close_verification_ms"] = _elapsed_monotonic_ms(close_verification_started)
+        lifecycle_timings_ms["close_verification_attempts"] = close_attempts
         if not closed:
             message = _close_verification_failure_message(close_verification)
             _append_event(
@@ -2936,6 +3128,18 @@ class RuntimeManagerDaemon:
             )
             | {"attempts": close_attempts},
         )
+        interrupt = _active_lifecycle_interrupt(command_id)
+        if interrupt:
+            return {
+                "residualCleanup": cleanup_result,
+                "requestedNoBrowser": requested_no_browser,
+                "effectiveNoBrowser": effective_no_browser,
+                "buildPreflight": build_preflight,
+                "lifecycleTimingsMs": lifecycle_timings_ms,
+                "interruptedByClose": True,
+                "interrupt": interrupt,
+                "interruptStage": "after_close_before_open",
+            }
 
         state = load_state()
         workbench = state.setdefault("workbench", {})
@@ -2950,10 +3154,42 @@ class RuntimeManagerDaemon:
             }
         )
         save_state(self._reconcile_observation(state))
-        open_result = open_workbench(no_browser=effective_no_browser)
+        cancel_check = _lifecycle_interrupt_cancel_check(command_id)
+        open_launcher_started = time.monotonic()
+        open_result = open_workbench(no_browser=effective_no_browser, cancel_check=cancel_check)
+        lifecycle_timings_ms["open_launcher_action_ms"] = _elapsed_monotonic_ms(open_launcher_started)
+        interrupt = _active_lifecycle_interrupt(command_id)
+        if interrupt or int(open_result.returncode or 0) == LAUNCHER_ACTION_CANCELLED_RETURN_CODE:
+            return {
+                "residualCleanup": cleanup_result,
+                "requestedNoBrowser": requested_no_browser,
+                "effectiveNoBrowser": effective_no_browser,
+                "buildPreflight": build_preflight,
+                "lifecycleTimingsMs": lifecycle_timings_ms,
+                "interruptedByClose": True,
+                "interrupt": interrupt,
+                "interruptStage": "restart_open_launcher",
+                "launcherResult": open_result,
+            }
         if open_result.returncode != 0:
             raise RuntimeError(_launcher_error_detail(open_result, "Opening the workbench for restart failed."))
-        ready, open_verification, open_attempts = _wait_for_open_verification(no_browser=effective_no_browser)
+        open_verification_started = time.monotonic()
+        ready, open_verification, open_attempts = _wait_for_open_verification(no_browser=effective_no_browser, cancel_check=cancel_check)
+        lifecycle_timings_ms["open_verification_ms"] = _elapsed_monotonic_ms(open_verification_started)
+        lifecycle_timings_ms["open_verification_attempts"] = open_attempts
+        interrupt = _active_lifecycle_interrupt(command_id)
+        if interrupt:
+            return {
+                "residualCleanup": cleanup_result,
+                "requestedNoBrowser": requested_no_browser,
+                "effectiveNoBrowser": effective_no_browser,
+                "buildPreflight": build_preflight,
+                "lifecycleTimingsMs": lifecycle_timings_ms,
+                "interruptedByClose": True,
+                "interrupt": interrupt,
+                "interruptStage": "restart_open_verification",
+                "launcherResult": open_result,
+            }
         if not ready:
             message = _open_verification_failure_message(open_verification, no_browser=effective_no_browser)
             _append_event(
@@ -2983,6 +3219,7 @@ class RuntimeManagerDaemon:
             "requestedNoBrowser": requested_no_browser,
             "effectiveNoBrowser": effective_no_browser,
             "buildPreflight": build_preflight,
+            "lifecycleTimingsMs": lifecycle_timings_ms,
         }
 
     def _handle_restart_workbench(self, *, command_id: str, args: dict[str, Any]) -> dict[str, Any]:
@@ -2996,6 +3233,18 @@ class RuntimeManagerDaemon:
                 return blocked
 
         result_data = self._perform_restart_workbench(command_id=command_id, args=args)
+        if bool(result_data.get("interruptedByClose")):
+            interrupt = result_data.pop("interrupt") if isinstance(result_data.get("interrupt"), dict) else {}
+            stage = str(result_data.pop("interruptStage", "") or "restart")
+            launcher_result = result_data.pop("launcherResult", None)
+            return self._finish_interrupted_lifecycle_command(
+                command_id,
+                command_type="restart_workbench",
+                interrupt=interrupt,
+                stage=stage,
+                launcher_result=launcher_result,
+                extra_result_data=result_data,
+            )
         return self._finish_command(
             command_id,
             ok=True,
