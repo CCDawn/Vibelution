@@ -85,6 +85,57 @@ def test_vector_index_lists_only_reviewed_formal_knowledge(vector_index_env):
     assert vector_index_env["pendingProposal"]["proposalId"] not in str(indexable)
 
 
+def test_vector_index_keeps_central_source_ids_and_uses_unified_rag_root(vector_index_env):
+    from core.web.services import rag_vector_index_service
+
+    inbox_source = team_knowledge_service.collect_source_to_inbox(
+        "team",
+        vector_index_env["team"]["teamId"],
+        source_type="manual_user_entry",
+        source_ref={"note": "central vector source"},
+        original_content="Central vector source original file.",
+        title="Central vector source",
+        actor_agent_id=vector_index_env["member"]["agentId"],
+    )
+    reviewed_source = team_knowledge_service.review_owner_inbox_source(
+        "team",
+        vector_index_env["team"]["teamId"],
+        inbox_source["inboxSourceId"],
+        decision="accepted",
+        reviewed_by_agent_id=vector_index_env["lead"]["agentId"],
+    )
+    central_source_id = reviewed_source["centralSource"]["centralSourceId"]
+    source_artifact = team_knowledge_service.create_source_artifact_from_central_source(
+        vector_index_env["base"]["knowledgeBaseId"],
+        central_source_id,
+        actor_agent_id=vector_index_env["member"]["agentId"],
+    )
+    proposal = team_knowledge_service.create_refinement_proposal(
+        vector_index_env["base"]["knowledgeBaseId"],
+        source_artifact_ids=[source_artifact["sourceArtifactId"]],
+        proposed_by_agent_id=vector_index_env["member"]["agentId"],
+        title="Central vector item",
+        content="Central source ids should flow into vector index metadata.",
+    )
+    reviewed_item = team_knowledge_service.review_refinement_proposal(
+        vector_index_env["base"]["knowledgeBaseId"],
+        proposal["proposalId"],
+        status="approved",
+        reviewed_by_agent_id=vector_index_env["lead"]["agentId"],
+    )["item"]
+
+    indexable = [
+        item
+        for item in rag_vector_index_service.list_indexable_knowledge_items(internal=True)
+        if item["knowledgeItemId"] == reviewed_item["knowledgeItemId"]
+    ][0]
+    record = rag_vector_index_service.write_index_record(indexable, embedding_provider="test", embedding_model="central-v1")
+
+    assert indexable["centralSourceIds"] == [central_source_id]
+    assert record["centralSourceIds"] == [central_source_id]
+    assert (vector_index_env["tmpPath"] / "workspace" / "knowledge" / "rag" / "index.json").exists()
+
+
 def test_vector_index_metadata_includes_agent_owner_partition(tmp_path, monkeypatch):
     from core.web.services import rag_vector_index_service
 
