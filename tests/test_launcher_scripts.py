@@ -2816,6 +2816,112 @@ Write-Output "ok"
     assert result.stdout.strip().splitlines()[-1] == "ok"
 
 
+def test_launcher_runtime_command_skips_full_control_surface_when_existing_control_is_healthy(tmp_path):
+    result = _run_launcher_ast_harness(
+        tmp_path,
+        """
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$LauncherPath
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$source = Get-Content -Raw -LiteralPath $LauncherPath
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors -and $parseErrors.Count -gt 0) {
+    throw "Launcher script parse failed: $($parseErrors[0].Message)"
+}
+
+foreach ($name in @(
+    "Test-ExistingLauncherControlSurfaceReadyForRuntimeCommand",
+    "Ensure-LauncherControlSurfaceForRuntimeCommand"
+)) {
+    $functionAst = $ast.Find({
+        param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+            $node.Name -eq $name
+    }, $true)
+    if ($null -eq $functionAst) {
+        throw "$name was not found."
+    }
+    . ([scriptblock]::Create($functionAst.Extent.Text))
+}
+
+$script:NoBrowser = $false
+$script:launcherControlUrl = "http://127.0.0.1:8765"
+$script:openCalls = 0
+$script:releaseCalls = 0
+$script:sourceCurrent = $true
+$script:events = @()
+
+function Acquire-LauncherMutex {}
+function Release-LauncherMutex { $script:releaseCalls += 1 }
+function Sync-LauncherEndpointFromState {}
+function Open-LauncherControlSurface { $script:openCalls += 1 }
+function Get-State {
+    return [pscustomobject]@{
+        launcherBackendPid = 111
+        launcherBrowserWindowPid = 222
+        launcherControlSourceSignature = "current"
+    }
+}
+function Get-ObjectPropertyValue {
+    param($Object, [string]$Name, $Default)
+    if ($Object -and $Object.PSObject.Properties[$Name]) {
+        return $Object.PSObject.Properties[$Name].Value
+    }
+    return $Default
+}
+function Test-ProcessAlive {
+    param([int]$ProcessId)
+    return $ProcessId -in @(111, 222)
+}
+function Test-LauncherControlHealthy { return $true }
+function Test-LauncherControlSourceCurrent {
+    param([int]$BackendPid)
+    return $script:sourceCurrent -and $BackendPid -eq 111
+}
+function Write-LauncherControlLog {
+    param([string]$Event, [string]$Message, [string]$Level = "info", [hashtable]$Fields = @{})
+    $script:events += [pscustomobject]@{ event = $Event; fields = $Fields }
+}
+
+Ensure-LauncherControlSurfaceForRuntimeCommand -RequestedAction "start"
+if ($script:openCalls -ne 0) {
+    throw "Healthy existing control surface should skip full Open-LauncherControlSurface."
+}
+if ($script:releaseCalls -ne 1) {
+    throw "Launcher mutex was not released after fast path."
+}
+$fastForwardEvents = @($script:events | Where-Object { $_.event -eq "launcher.lifecycle.runtime_command.control_surface.fast_forwarded" })
+if ($fastForwardEvents.Count -ne 1) {
+    throw "Fast-forward event was not logged."
+}
+if ($fastForwardEvents[0].fields.backend_pid -ne 111 -or $fastForwardEvents[0].fields.browser_window_pid -ne 222) {
+    throw "Fast-forward event did not include tracked control surface pids."
+}
+
+$script:sourceCurrent = $false
+Ensure-LauncherControlSurfaceForRuntimeCommand -RequestedAction "stop"
+if ($script:openCalls -ne 1) {
+    throw "Stale control source should fall back to full Open-LauncherControlSurface."
+}
+if ($script:releaseCalls -ne 2) {
+    throw "Launcher mutex was not released after fallback path."
+}
+
+Write-Output "ok"
+""",
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip().splitlines()[-1] == "ok"
+
+
 def test_launcher_control_source_signature_rejects_stale_backend(tmp_path):
     result = _run_launcher_ast_harness(
         tmp_path,
