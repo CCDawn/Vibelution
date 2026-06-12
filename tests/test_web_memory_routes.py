@@ -11,6 +11,40 @@ from core.web.services import agent_directory_service, memory_graph_service, mem
 client = TestClient(create_app(), headers={CONTROL_TOKEN_HEADER: get_control_token()})
 
 
+def _source_artifact(
+    knowledge_base_id: str,
+    *,
+    team_id: str,
+    actor_agent_id: str,
+    title: str = "Memory route source",
+    source_type: str = "manual_user_entry",
+    source_ref: dict | None = None,
+) -> dict:
+    inbox_source = team_knowledge_service.collect_source_to_inbox(
+        "team",
+        team_id,
+        source_type=source_type,
+        source_ref=source_ref or {"note": title},
+        original_content="Memory route test source content.",
+        original_filename="memory-route-source.txt",
+        title=title,
+        actor_agent_id=actor_agent_id,
+    )
+    reviewed = team_knowledge_service.review_owner_inbox_source(
+        "team",
+        team_id,
+        inbox_source["inboxSourceId"],
+        decision="accepted",
+        reviewed_by_agent_id=actor_agent_id,
+    )
+    return team_knowledge_service.create_source_artifact_from_central_source(
+        knowledge_base_id,
+        reviewed["centralSource"]["centralSourceId"],
+        actor_agent_id=actor_agent_id,
+        title=title,
+    )
+
+
 def test_memory_overview_endpoint_groups_agent_memory_sources(tmp_path, monkeypatch):
     project_memory = tmp_path / ".docs" / "project-memory"
     lanes_dir = project_memory / "lanes"
@@ -116,9 +150,15 @@ def test_memory_overview_endpoint_groups_agent_memory_sources(tmp_path, monkeypa
         name="Team Knowledge",
         actor_agent_id=agent["agentId"],
     )
+    source = _source_artifact(
+        knowledge_base["knowledgeBaseId"],
+        team_id=team["teamId"],
+        actor_agent_id=agent["agentId"],
+        title="Pending knowledge source",
+    )
     team_knowledge_service.create_refinement_proposal(
         knowledge_base["knowledgeBaseId"],
-        source_artifact_ids=[],
+        source_artifact_ids=[source["sourceArtifactId"]],
         proposed_by_agent_id=agent["agentId"],
         title="Pending knowledge",
         content="This candidate should stay out of memory overview content.",
@@ -272,9 +312,10 @@ def test_memory_knowledge_graph_endpoint_returns_read_only_project_structure(tmp
         name="Graph Knowledge",
         actor_agent_id=agent["agentId"],
     )
+    source = _source_artifact(knowledge_base["knowledgeBaseId"], team_id=team["teamId"], actor_agent_id=agent["agentId"], title="Graph API source")
     proposal = team_knowledge_service.create_refinement_proposal(
         knowledge_base["knowledgeBaseId"],
-        source_artifact_ids=[],
+        source_artifact_ids=[source["sourceArtifactId"]],
         proposed_by_agent_id=agent["agentId"],
         title="Graph API proposal",
         content="GRAPH API BODY MUST STAY OUT",
@@ -319,9 +360,10 @@ def test_memory_knowledge_graph_endpoint_requires_actor_agent(tmp_path, monkeypa
         name="Anonymous Graph Guard Knowledge",
         actor_agent_id=agent["agentId"],
     )
+    source = _source_artifact(base["knowledgeBaseId"], team_id=team["teamId"], actor_agent_id=agent["agentId"], title="Anonymous graph source")
     proposal = team_knowledge_service.create_refinement_proposal(
         base["knowledgeBaseId"],
-        source_artifact_ids=[],
+        source_artifact_ids=[source["sourceArtifactId"]],
         proposed_by_agent_id=agent["agentId"],
         title="Anonymous graph guard proposal",
         content="ANONYMOUS GRAPH BODY MUST STAY OUT",
@@ -383,9 +425,10 @@ def test_memory_knowledge_graph_node_detail_endpoint_returns_selected_node_conte
         name="Graph Detail Knowledge",
         actor_agent_id=agent["agentId"],
     )
+    source = _source_artifact(knowledge_base["knowledgeBaseId"], team_id=team["teamId"], actor_agent_id=agent["agentId"], title="Graph detail source")
     proposal = team_knowledge_service.create_refinement_proposal(
         knowledge_base["knowledgeBaseId"],
-        source_artifact_ids=[],
+        source_artifact_ids=[source["sourceArtifactId"]],
         proposed_by_agent_id=agent["agentId"],
         title="Graph detail proposal",
         content="GRAPH DETAIL API BODY SHOULD LOAD",
@@ -471,16 +514,18 @@ def test_memory_knowledge_graph_uses_owner_scoped_knowledge_node_ids(tmp_path, m
     assert first_scoped_base_id.startswith(f"team:{first_team['teamId']}:")
     assert second_scoped_base_id.startswith(f"team:{second_team['teamId']}:")
 
+    first_source = _source_artifact(first_scoped_base_id, team_id=first_team["teamId"], actor_agent_id=first_agent["agentId"], title="First owner graph source")
+    second_source = _source_artifact(second_scoped_base_id, team_id=second_team["teamId"], actor_agent_id=second_agent["agentId"], title="Second owner graph source")
     first_proposal = team_knowledge_service.create_refinement_proposal(
         first_scoped_base_id,
-        source_artifact_ids=[],
+        source_artifact_ids=[first_source["sourceArtifactId"]],
         proposed_by_agent_id=first_agent["agentId"],
         title="First owner graph item",
         content="FIRST OWNER GRAPH BODY",
     )
     second_proposal = team_knowledge_service.create_refinement_proposal(
         second_scoped_base_id,
-        source_artifact_ids=[],
+        source_artifact_ids=[second_source["sourceArtifactId"]],
         proposed_by_agent_id=second_agent["agentId"],
         title="Second owner graph item",
         content="SECOND OWNER GRAPH BODY",
@@ -625,12 +670,13 @@ def test_memory_usage_contract_aligns_team_agent_and_evolution_boundaries(tmp_pa
     agent = agent_directory_service.create_agent_instance(display_name="Contract Agent")
     team = team_service.create_team(name="Contract Team", members=[{"agentId": agent["agentId"], "role": "lead"}])
     base = team_knowledge_service.create_knowledge_base(team["teamId"], name="Contract KB", actor_agent_id=agent["agentId"])
-    source = team_knowledge_service.create_source_artifact(
+    source = _source_artifact(
         base["knowledgeBaseId"],
+        team_id=team["teamId"],
+        actor_agent_id=agent["agentId"],
         source_type="runtime_evidence_refinement",
         source_ref={"runId": "self-run-1"},
         title="Runtime evidence",
-        actor_agent_id=agent["agentId"],
     )
     team_knowledge_service.create_refinement_proposal(
         base["knowledgeBaseId"],

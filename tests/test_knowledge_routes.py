@@ -23,6 +23,97 @@ def _setup(tmp_path, monkeypatch):
     return TestClient(create_app(), headers={CONTROL_TOKEN_HEADER: get_control_token()}), team, lead, member, outsider
 
 
+def _promote_central_source(
+    client: TestClient,
+    team: dict,
+    lead: dict,
+    member: dict,
+    *,
+    source_type: str = "manual_user_entry",
+    source_ref: dict | None = None,
+    title: str = "Route source",
+) -> dict:
+    collect_response = client.post(
+        "/api/knowledge/sources/inbox",
+        json={
+            "ownerType": "team",
+            "ownerId": team["teamId"],
+            "sourceType": source_type,
+            "sourceRef": source_ref or {"note": title},
+            "originalContent": "Route source content.",
+            "originalFilename": "route-source.txt",
+            "title": title,
+            "actorAgentId": member["agentId"],
+        },
+    )
+    assert collect_response.status_code == 201, collect_response.text
+    inbox_source = collect_response.json()
+    review_response = client.patch(
+        f"/api/knowledge/sources/inbox/team/{team['teamId']}/{inbox_source['inboxSourceId']}/review",
+        json={"decision": "accepted", "reviewedByAgentId": lead["agentId"]},
+    )
+    assert review_response.status_code == 200, review_response.text
+    return review_response.json()["centralSource"]
+
+
+def _source_artifact(
+    client: TestClient,
+    base: dict,
+    team: dict,
+    lead: dict,
+    member: dict,
+    *,
+    title: str = "Route source",
+    source_type: str = "manual_user_entry",
+    source_ref: dict | None = None,
+) -> dict:
+    central_source = _promote_central_source(
+        client,
+        team,
+        lead,
+        member,
+        source_type=source_type,
+        source_ref=source_ref,
+        title=title,
+    )
+    artifact_response = client.post(
+        f"/api/knowledge-bases/{base['knowledgeBaseId']}/central-source-artifacts",
+        json={"centralSourceId": central_source["centralSourceId"], "actorAgentId": member["agentId"], "title": title},
+    )
+    assert artifact_response.status_code == 201, artifact_response.text
+    return artifact_response.json()
+
+
+def _agent_source_artifact(client: TestClient, base: dict, agent: dict, *, title: str = "Agent route source") -> dict:
+    collect_response = client.post(
+        "/api/knowledge/sources/inbox",
+        json={
+            "ownerType": "agent",
+            "ownerId": agent["agentId"],
+            "sourceType": "agent_authored",
+            "sourceRef": {"agentId": agent["agentId"], "note": title},
+            "originalContent": "Agent route source content.",
+            "originalFilename": "agent-route-source.txt",
+            "title": title,
+            "actorAgentId": agent["agentId"],
+        },
+    )
+    assert collect_response.status_code == 201, collect_response.text
+    inbox_source = collect_response.json()
+    review_response = client.patch(
+        f"/api/knowledge/sources/inbox/agent/{agent['agentId']}/{inbox_source['inboxSourceId']}/review",
+        json={"decision": "accepted", "reviewedByAgentId": agent["agentId"]},
+    )
+    assert review_response.status_code == 200, review_response.text
+    central_source = review_response.json()["centralSource"]
+    artifact_response = client.post(
+        f"/api/knowledge-bases/{base['knowledgeBaseId']}/central-source-artifacts",
+        json={"centralSourceId": central_source["centralSourceId"], "actorAgentId": agent["agentId"], "title": title},
+    )
+    assert artifact_response.status_code == 201, artifact_response.text
+    return artifact_response.json()
+
+
 def test_knowledge_routes_create_source_proposal_review_and_rate(tmp_path, monkeypatch):
     client, team, lead, member, _outsider = _setup(tmp_path, monkeypatch)
 
@@ -33,6 +124,15 @@ def test_knowledge_routes_create_source_proposal_review_and_rate(tmp_path, monke
     assert base_response.status_code == 201
     base = base_response.json()
 
+    central_source = _promote_central_source(
+        client,
+        team,
+        lead,
+        member,
+        source_type="external_search_refinement",
+        source_ref={"url": "https://example.test/report", "query": "memory platform"},
+        title="External source",
+    )
     source_response = client.post(
         f"/api/knowledge-bases/{base['knowledgeBaseId']}/source-artifacts",
         json={
@@ -40,6 +140,7 @@ def test_knowledge_routes_create_source_proposal_review_and_rate(tmp_path, monke
             "sourceRef": {"url": "https://example.test/report", "query": "memory platform"},
             "title": "External source",
             "actorAgentId": member["agentId"],
+            "centralSourceId": central_source["centralSourceId"],
         },
     )
     assert source_response.status_code == 201
@@ -155,9 +256,10 @@ def test_knowledge_routes_reject_non_member_and_bad_source_type(tmp_path, monkey
     )
     assert blocked.status_code == 403
 
+    central_source = _promote_central_source(client, team, lead, lead, title="Bad type source")
     bad_source = client.post(
         f"/api/knowledge-bases/{base['knowledgeBaseId']}/source-artifacts",
-        json={"sourceType": "unknown_source", "actorAgentId": lead["agentId"]},
+        json={"sourceType": "unknown_source", "actorAgentId": lead["agentId"], "centralSourceId": central_source["centralSourceId"]},
     )
     assert bad_source.status_code == 422
 
@@ -174,9 +276,11 @@ def test_knowledge_routes_reject_empty_actor_for_governed_content(tmp_path, monk
         f"/api/teams/{team['teamId']}/knowledge-bases",
         json={"name": "Guarded KB", "actorAgentId": lead["agentId"]},
     ).json()
+    source = _source_artifact(client, base, team, lead, member, title="Guarded source")
     proposal = client.post(
         f"/api/knowledge-bases/{base['knowledgeBaseId']}/refinement-proposals",
         json={
+            "sourceArtifactIds": [source["sourceArtifactId"]],
             "proposedByAgentId": member["agentId"],
             "title": "Guarded item",
             "content": "Empty actor must not read this formal body.",
@@ -241,9 +345,11 @@ def test_agent_knowledge_routes_create_private_formal_base_and_rag(tmp_path, mon
     assert base["ownerType"] == "agent"
     assert base["ownerId"] == member["agentId"]
 
+    source = _agent_source_artifact(client, base, member, title="Agent route private source")
     proposal = client.post(
         f"/api/knowledge-bases/{base['knowledgeBaseId']}/refinement-proposals",
         json={
+            "sourceArtifactIds": [source["sourceArtifactId"]],
             "proposedByAgentId": member["agentId"],
             "title": "Agent route private RAG",
             "content": "Agent route private formal knowledge should be retrievable only by the owning Agent.",
@@ -297,9 +403,11 @@ def test_knowledge_search_permission_audit_and_rating_suggestion_routes(tmp_path
         f"/api/teams/{team['teamId']}/knowledge-bases",
         json={"name": "Governance KB", "actorAgentId": lead["agentId"]},
     ).json()
+    source = _source_artifact(client, base, team, lead, member, title="Governed search source")
     proposal = client.post(
         f"/api/knowledge-bases/{base['knowledgeBaseId']}/refinement-proposals",
         json={
+            "sourceArtifactIds": [source["sourceArtifactId"]],
             "proposedByAgentId": member["agentId"],
             "title": "Governed search item",
             "content": "Knowledge search and rating suggestions share governance rules.",
@@ -380,9 +488,11 @@ def test_knowledge_rag_retrieve_route_returns_contexts_and_citations(tmp_path, m
         f"/api/teams/{team['teamId']}/knowledge-bases",
         json={"name": "RAG Route KB", "actorAgentId": lead["agentId"]},
     ).json()
+    source = _source_artifact(client, base, team, lead, member, title="RAG route source")
     proposal = client.post(
         f"/api/knowledge-bases/{base['knowledgeBaseId']}/refinement-proposals",
         json={
+            "sourceArtifactIds": [source["sourceArtifactId"]],
             "proposedByAgentId": member["agentId"],
             "title": "RAG route context",
             "summary": "RAG route should expose compact context candidates.",
@@ -477,6 +587,15 @@ def test_knowledge_ingestion_package_route_creates_pending_candidate_only(tmp_pa
         json={"name": "Ingestion KB", "actorAgentId": lead["agentId"]},
     ).json()
 
+    central_source = _promote_central_source(
+        client,
+        team,
+        lead,
+        member,
+        source_type="external_search_refinement",
+        source_ref={"url": "https://example.test/a", "query": "memory ingestion"},
+        title="Search result",
+    )
     response = client.post(
         f"/api/knowledge-bases/{base['knowledgeBaseId']}/ingestion-packages",
         json={
@@ -486,6 +605,7 @@ def test_knowledge_ingestion_package_route_creates_pending_candidate_only(tmp_pa
             "sourceSummary": "External search evidence.",
             "excerpt": "Search result says ingestion should keep URL and query.",
             "proposedByAgentId": member["agentId"],
+            "centralSourceId": central_source["centralSourceId"],
             "proposalTitle": "Preserve search URL and query",
             "tags": ["search", "ingestion"],
         },
@@ -508,6 +628,7 @@ def test_knowledge_governance_tasks_adapters_and_trace_routes(tmp_path, monkeypa
         f"/api/teams/{team['teamId']}/knowledge-bases",
         json={"name": "Governance Ops KB", "actorAgentId": lead["agentId"]},
     ).json()
+    central_source = _promote_central_source(client, team, lead, member, title="Route trace source")
     package = client.post(
         f"/api/knowledge-bases/{base['knowledgeBaseId']}/ingestion-packages",
         json={
@@ -515,6 +636,7 @@ def test_knowledge_governance_tasks_adapters_and_trace_routes(tmp_path, monkeypa
             "sourceRef": {"note": "route trace"},
             "excerpt": "Route trace evidence.",
             "proposedByAgentId": member["agentId"],
+            "centralSourceId": central_source["centralSourceId"],
             "proposalTitle": "Route trace proposal",
         },
     ).json()
@@ -550,9 +672,11 @@ def test_knowledge_steward_overview_surfaces_agent_boundary_and_queue(tmp_path, 
         f"/api/teams/{team['teamId']}/knowledge-bases",
         json={"name": "Steward KB", "actorAgentId": lead["agentId"]},
     ).json()
+    source = _source_artifact(client, base, team, lead, member, title="Steward overview source")
     proposal = client.post(
         f"/api/knowledge-bases/{base['knowledgeBaseId']}/refinement-proposals",
         json={
+            "sourceArtifactIds": [source["sourceArtifactId"]],
             "proposedByAgentId": member["agentId"],
             "title": "Steward should see governance",
             "content": "Knowledge steward overview should expose queue counts without applying knowledge.",
@@ -585,18 +709,11 @@ def test_knowledge_steward_recommendations_are_read_only(tmp_path, monkeypatch):
         f"/api/teams/{team['teamId']}/knowledge-bases",
         json={"name": "Steward Recommendation KB", "actorAgentId": lead["agentId"]},
     ).json()
-    source = client.post(
-        f"/api/knowledge-bases/{base['knowledgeBaseId']}/source-artifacts",
-        json={
-            "sourceType": "manual_user_entry",
-            "sourceRef": {"note": "needs proposal"},
-            "title": "Source needs steward recommendation",
-            "actorAgentId": member["agentId"],
-        },
-    ).json()
+    source = _source_artifact(client, base, team, lead, member, title="Source needs steward recommendation")
     proposal = client.post(
         f"/api/knowledge-bases/{base['knowledgeBaseId']}/refinement-proposals",
         json={
+            "sourceArtifactIds": [_source_artifact(client, base, team, lead, member, title="Steward recommendation source")["sourceArtifactId"]],
             "proposedByAgentId": member["agentId"],
             "title": "Steward recommendation proposal",
             "content": "Knowledge steward should recommend review without applying it.",
@@ -623,18 +740,11 @@ def test_knowledge_steward_workbench_groups_next_actions(tmp_path, monkeypatch):
         f"/api/teams/{team['teamId']}/knowledge-bases",
         json={"name": "Steward Workbench KB", "actorAgentId": lead["agentId"]},
     ).json()
-    source = client.post(
-        f"/api/knowledge-bases/{base['knowledgeBaseId']}/source-artifacts",
-        json={
-            "sourceType": "manual_user_entry",
-            "sourceRef": {"note": "workbench source"},
-            "title": "Workbench source",
-            "actorAgentId": member["agentId"],
-        },
-    ).json()
+    source = _source_artifact(client, base, team, lead, member, title="Workbench source")
     proposal = client.post(
         f"/api/knowledge-bases/{base['knowledgeBaseId']}/refinement-proposals",
         json={
+            "sourceArtifactIds": [_source_artifact(client, base, team, lead, member, title="Workbench proposal source")["sourceArtifactId"]],
             "proposedByAgentId": member["agentId"],
             "title": "Workbench proposal",
             "content": "Workbench route should show next actions without applying.",
@@ -663,18 +773,11 @@ def test_knowledge_dashboard_snapshot_combines_memory_dashboard_state(tmp_path, 
         f"/api/teams/{team['teamId']}/knowledge-bases",
         json={"name": "Dashboard Snapshot KB", "actorAgentId": lead["agentId"]},
     ).json()
-    source = client.post(
-        f"/api/knowledge-bases/{base['knowledgeBaseId']}/source-artifacts",
-        json={
-            "sourceType": "manual_user_entry",
-            "sourceRef": {"note": "snapshot source"},
-            "title": "Snapshot source",
-            "actorAgentId": member["agentId"],
-        },
-    ).json()
+    source = _source_artifact(client, base, team, lead, member, title="Snapshot source")
     proposal = client.post(
         f"/api/knowledge-bases/{base['knowledgeBaseId']}/refinement-proposals",
         json={
+            "sourceArtifactIds": [_source_artifact(client, base, team, lead, member, title="Snapshot proposal source")["sourceArtifactId"]],
             "proposedByAgentId": member["agentId"],
             "title": "Snapshot proposal",
             "content": "Dashboard snapshot should gather read-only governance state.",
@@ -708,18 +811,11 @@ def test_knowledge_operations_health_and_governance_plan_routes_are_read_only(tm
         f"/api/teams/{team['teamId']}/knowledge-bases",
         json={"name": "Plan KB", "actorAgentId": lead["agentId"]},
     ).json()
-    source = client.post(
-        f"/api/knowledge-bases/{base['knowledgeBaseId']}/source-artifacts",
-        json={
-            "sourceType": "manual_user_entry",
-            "sourceRef": {"note": "plan route source"},
-            "title": "Plan route source",
-            "actorAgentId": member["agentId"],
-        },
-    ).json()
+    source = _source_artifact(client, base, team, lead, member, title="Plan route source")
     client.post(
         f"/api/knowledge-bases/{base['knowledgeBaseId']}/refinement-proposals",
         json={
+            "sourceArtifactIds": [_source_artifact(client, base, team, lead, member, title="Plan proposal source")["sourceArtifactId"]],
             "proposedByAgentId": member["agentId"],
             "title": "Plan route proposal",
             "content": "Governance plan should be read-only.",
