@@ -34,9 +34,11 @@ describe("TeamsRoute layout contract", () => {
 
   it("uses Team APIs and Agent Center as the binding source", () => {
     expect(routeSource).toContain('fetchJson<TeamListPayload>("/api/teams")');
-    expect(routeSource).toContain('fetchJson<TeamTemplateListPayload>("/api/team-templates")');
-    expect(routeSource).toContain("/api/team-templates/${encodeURIComponent(templateId)}/instantiate");
-    expect(routeSource).toContain("instantiateTeamTemplateMutation");
+    expect(routeSource).not.toContain('fetchJson<TeamTemplateListPayload>("/api/team-templates")');
+    expect(routeSource).not.toContain("/api/team-templates/${encodeURIComponent(templateId)}/instantiate");
+    expect(routeSource).not.toContain("instantiateTeamTemplateMutation");
+    expect(routeSource).toContain("TEAM_PICKER_TEAM_IDS");
+    expect(routeSource).toContain("const TEAM_PICKER_TEAM_IDS = [AI_SEARCH_TEAM_ID, RESEARCH_TEAM_ID] as const");
     expect(routeSource).toContain("fetchJson<Team>(`/api/teams/${encodeURIComponent(effectiveTeamId)}`)");
     expect(routeSource).toContain('fetchJson<AgentConfigWorkspace>("/api/agents/config-workspace")');
     expect(routeSource).toContain("fetchJson<Team>(`/api/teams/${encodeURIComponent(teamId)}`");
@@ -111,11 +113,11 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("/api/teams/${encodeURIComponent(payload.teamId)}/ai-search-runs");
     expect(routeSource).toContain("startAiSearchRunMutation");
     expect(routeSource).toContain("aiSearchRunTopic");
-    expect(routeSource).toContain("AI 搜索范围白名单");
+    expect(routeSource).toContain("主题 -> 可信来源 -> 摘要/引用 -> 运行记录");
     expect(routeSource).toContain("结论需一手证据");
     expect(routeSource).toContain("默认启用");
-    expect(routeSource).toContain("仅信号");
-    expect(routeSource).toContain("一键搜索执行");
+    expect(routeSource).toContain("线索");
+    expect(routeSource).toContain("白名单、去重、存储路径");
     expect(routeSource).toContain("启动一键搜索");
     expect(routeSource).toContain("最近搜索结果");
     expect(routeSource).toContain("latestAiSearchRun");
@@ -137,16 +139,18 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("setSearchParams({ team: team.teamId })");
   });
 
-  it("keeps evolution system teams out of the custom Team list", () => {
+  it("keeps only the fixed research and AI search teams in the picker", () => {
     expect(routeSource).toContain("EVOLUTION_SYSTEM_TEAM_IDS");
     expect(routeSource).toContain('"self-evolution-team"');
     expect(routeSource).toContain('"supervised-evolution-team"');
+    expect(routeSource).toContain('const RESEARCH_TEAM_ID = "research-team"');
+    expect(routeSource).toContain('const AI_SEARCH_TEAM_ID = "ai-search-team"');
+    expect(routeSource).toContain("TEAM_PICKER_TEAM_IDS.map((teamId) => teamsById.get(teamId))");
     expect(routeSource).toContain("isEvolutionSystemTeam");
     expect(routeSource).toContain("team.teamKind === \"self_evolution\"");
     expect(routeSource).toContain("team.teamKind === \"supervised_evolution\"");
     expect(routeSource).toContain("team.teamSource === \"self_evolution\"");
     expect(routeSource).toContain("team.teamSource === \"supervised_evolution\"");
-    expect(routeSource).toContain("const visibleTeams = useMemo(() => teams.filter((team) => !isEvolutionSystemTeam(team)), [teams])");
     expect(routeSource).toContain("const visibleTeamIds = useMemo(() => new Set(visibleTeams.map((team) => team.teamId)), [visibleTeams])");
     expect(routeSource).toContain("requestedVisibleTeamId");
     expect(routeSource).toContain("requestedVisibleAgentTeamId");
@@ -154,33 +158,39 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("fallbackVisibleTeamId");
     expect(routeSource).toContain("const hasTeams = visibleTeams.length > 0");
     expect(routeSource).toContain("visibleTeamSummary.activeTeamCount");
-    expect(routeSource).toContain("{visibleTeams.map((team) => (");
+    expect(routeSource).toContain("visibleTeams.map((team) => (");
+    expect(routeSource).toContain("visibleTeams.find((team) => team.teamId === event.target.value)");
     expect(routeSource).toContain("visibleTeams.find((team) => team.teamId === effectiveTeamId)");
     expect(routeSource).not.toContain("{teams.map((team) => (");
     expect(routeSource).not.toContain("teams[0]?.teamId");
   });
 
   it("renders a dense list canvas inspector workflow", () => {
-    expect(routeSource).toContain("teamList");
+    expect(routeSource).toContain("teamPickerPanel");
+    expect(routeSource).toContain("teamPickerLabel");
+    expect(routeSource).toContain("teamPickerSummary");
+    expect(routeSource).toContain("aria-label={lang === \"zh\" ? \"选择团队\" : \"Select team\"}");
     expect(routeSource).toContain("canvasPanel");
     expect(routeSource).toContain("inspector");
     expect(routeSource).toContain("hasTeams");
     expect(routeSource).toContain("styles.workspaceEmpty");
     expect(routeSource).toContain("styles.emptyCanvasPanel");
-    expect(routeSource).toContain("先创建团队，再进入组织画布");
-    expect(routeSource).toContain("teamNameInputRef");
-    expect(routeSource).toContain("从模板创建");
-    expect(routeSource).toContain("创建 Demo 团队");
-    expect(routeSource).toContain("selectedTemplate.chatRoom.mode");
-    expect(routeSource).toContain("styles.templatePanel");
-    expect(routeSource).toContain("styles.templatePicker");
-    expect(routeSource).toContain("styles.templateSelect");
-    expect(routeSource).toContain("styles.templatePreview");
+    expect(routeSource).toContain("选择团队后进入对应工作区");
+    expect(routeSource).toContain("左上角只保留 AI 搜索范围团队和 ai科学研究团队两个入口");
+    expect(routeSource).toContain("暂无可用团队。请确认 AI 搜索范围团队和 ai科学研究团队已初始化。");
+    expect(routeSource).not.toContain("teamNameInputRef");
+    expect(routeSource).not.toContain("从模板创建");
+    expect(routeSource).not.toContain("创建 Demo 团队");
+    expect(routeSource).not.toContain("selectedTemplate.chatRoom.mode");
+    expect(routeSource).not.toContain("styles.templatePanel");
+    expect(routeSource).not.toContain("styles.templatePicker");
+    expect(routeSource).not.toContain("styles.templateSelect");
+    expect(routeSource).not.toContain("styles.templatePreview");
     expect(routeSource).not.toContain("styles.templateCard");
-    expect(routeSource).toContain("先填写团队名称，再创建团队。");
-    expect(routeSource).toContain("styles.formError");
-    expect(routeSource).toContain("styles.formHint");
-    expect(routeSource).toContain("绑定 Agent");
+    expect(routeSource).not.toContain("先填写团队名称，再创建团队。");
+    expect(routeSource).not.toContain("styles.formError");
+    expect(routeSource).not.toContain("styles.formHint");
+    expect(routeSource).toContain("审核流程");
     expect(routeSource).toContain("styles.nodeBindingSection");
     expect(routeSource).toContain("styles.nodeBindingPlaceholder");
     expect(routeSource).toContain("正在读取团队节点");
@@ -261,7 +271,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("启动实验规划");
     expect(routeSource).toContain("启动迭代");
     expect(routeSource).not.toContain("{researchWorkflowTeamSelected ? renderResearchWorkspaceNav() : null}");
-    expect(routeSource).toContain("onClick={() => selectTeamRecord(team)}");
+    expect(routeSource).toContain("onChange={(event) => {");
+    expect(routeSource).toContain("selectTeamRecord(nextTeam)");
     expect(routeSource).toContain("setResearchWorkspaceView(\"overview\")");
     expect(routeSource).toContain("{renderResearchWorkspaceNav()}");
     expect(routeSource).toContain("{renderResearchStageLauncher()}");
@@ -344,10 +355,9 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("styles.teamHistoryPanel");
     expect(routeSource).toContain("interrupt_targets");
     expect(routeSource).toContain("edges: canvas.edges.filter((edge) => edge.source !== deletedNodeId && edge.target !== deletedNodeId)");
-    expect(routeStyles.templatePanel).toBeTypeOf("string");
-    expect(routeStyles.templatePicker).toBeTypeOf("string");
-    expect(routeStyles.templateSelect).toBeTypeOf("string");
-    expect(routeStyles.templatePreview).toBeTypeOf("string");
+    expect(routeStyles.teamPickerPanel).toBeTypeOf("string");
+    expect(routeStyles.teamPickerLabel).toBeTypeOf("string");
+    expect(routeStyles.teamPickerSummary).toBeTypeOf("string");
     expect(routeStyles.nodeBindingSection).toBeTypeOf("string");
     expect(routeStyles.nodeBindingPlaceholder).toBeTypeOf("string");
     expect(routeStyles.workflowPanel).toBeTypeOf("string");
