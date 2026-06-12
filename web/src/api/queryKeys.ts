@@ -68,6 +68,10 @@ export const queryKeys = {
   knowledgeOperationsHealth: (agentId = "") => ["knowledge", "operations-health", agentId] as const,
   knowledgeGovernancePlan: (agentId = "") => ["knowledge", "governance-plan", agentId] as const,
   knowledgeIngestionAdapters: () => ["knowledge", "ingestion-adapters"] as const,
+  knowledgeSourceInbox: (ownerType: string, ownerId: string, agentId: string, status = "") =>
+    ["knowledge", "source-inbox", ownerType, ownerId, agentId, status] as const,
+  knowledgeCentralSources: (agentId: string, ownerType = "", ownerId = "") =>
+    ["knowledge", "central-sources", agentId, ownerType, ownerId] as const,
   knowledgeTrace: (knowledgeBaseId: string, agentId: string, targetId: string) => ["knowledge", "trace", knowledgeBaseId, agentId, targetId] as const,
   researchThemeDiscoverySessions: () => ["research", "theme-discovery", "sessions"] as const,
   researchThemeDiscoverySession: (sessionId: string) => ["research", "theme-discovery", "sessions", sessionId] as const,
