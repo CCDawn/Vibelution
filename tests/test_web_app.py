@@ -24,7 +24,7 @@ from core.evaluation import self_evolution_workbench
 from core.evaluation.self_evolution_candidate_pool import append_candidate_record
 from config import public_config as public_config_module
 from config.models import LLMProfile, ProviderConfig
-from config.public_config import UNCONFIGURED_MODEL_REF, load_public_config, public_config_hash
+from config.public_config import LLM_MODEL_PRESETS, UNCONFIGURED_MODEL_REF, load_public_config, public_config_hash
 from core.gym import run_gym_collection_episode
 from core.gym.promotion import (
     activate_gym_promotion_proposal,
@@ -71,6 +71,16 @@ client = TestClient(create_app(), headers={CONTROL_TOKEN_HEADER: get_control_tok
 
 
 CONTEXT_PREPARE_LIVE_MESSAGE = "正在准备对话上下文...\n正在读取当前会话、绑定 Agent、工具权限和可恢复的上轮现场。"
+
+
+def _ensure_preset_model(public_config: dict, preset_id: str) -> dict:
+    preset = LLM_MODEL_PRESETS[preset_id]
+    model_entry = copy.deepcopy(preset["model"])
+    model_entry["provider"] = copy.deepcopy(preset["provider"])
+    model_entry.setdefault("label", str(preset.get("label") or model_entry.get("model") or preset_id))
+    model_entry.setdefault("api_key_env", f"VIBELUTION_LLM_MODEL_{preset_id.upper()}_API_KEY")
+    public_config.setdefault("llm", {}).setdefault("model_library", {})[preset_id] = model_entry
+    return model_entry
 
 
 def _capture_session_lifecycle_events(monkeypatch):
@@ -12677,14 +12687,20 @@ def test_config_workspace_surfaces_llm_security_diagnostics_without_blocking_rea
     assert any("LLM security guard" in item for item in payload["diagnosis"]["blocking_issues"])
 
 
-def test_config_workspace_draft_delete_model_marks_profiles_unconfigured(monkeypatch):
+def test_config_workspace_draft_delete_model_rejects_primary_profile_model(monkeypatch):
     public_config = copy.deepcopy(load_public_config())
     public_config["llm"]["profiles"]["primary"] = {
         "model_ref": "relay_openai_gpt_5_5",
         "overrides": {},
     }
+    scene_events = []
 
     monkeypatch.setattr(config_service, "load_public_config", lambda: copy.deepcopy(public_config))
+    monkeypatch.setattr(
+        config_service,
+        "_record_config_scene_event",
+        lambda phase, event_code, **kwargs: scene_events.append((phase, event_code, kwargs)),
+    )
 
     response = client.post(
         "/api/config/draft/delete-model",
@@ -12696,14 +12712,43 @@ def test_config_workspace_draft_delete_model_marks_profiles_unconfigured(monkeyp
         },
     )
 
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["publicConfig"]["llm"]["profiles"]["primary"]["model_ref"] == UNCONFIGURED_MODEL_REF
-    assert "profileCards" not in payload
+    assert response.status_code == 422
+    assert "primary" in response.json()["detail"]
+    assert scene_events[-1][1] == "config.llm_model.delete_rejected"
+    assert scene_events[-1][2]["fields"]["reason"] == "primary_profile_ref"
+
+
+def test_config_workspace_draft_delete_model_rejects_git_commit_model(monkeypatch):
+    public_config = copy.deepcopy(load_public_config())
+    public_config.setdefault("git", {})["commit_message_model_ref"] = "relay_openai_gpt_5_5"
+    scene_events = []
+
+    monkeypatch.setattr(config_service, "load_public_config", lambda: copy.deepcopy(public_config))
+    monkeypatch.setattr(
+        config_service,
+        "_record_config_scene_event",
+        lambda phase, event_code, **kwargs: scene_events.append((phase, event_code, kwargs)),
+    )
+
+    response = client.post(
+        "/api/config/draft/delete-model",
+        json={
+            "publicConfig": public_config,
+            "draftMeta": {},
+            "baseHash": public_config_hash(public_config),
+            "modelId": "relay_openai_gpt_5_5",
+        },
+    )
+
+    assert response.status_code == 422
+    assert "Git commit" in response.json()["detail"]
+    assert scene_events[-1][1] == "config.llm_model.delete_rejected"
+    assert scene_events[-1][2]["fields"]["reason"] == "git_commit_model_ref"
 
 
 def test_config_workspace_apply_allows_deleted_non_primary_profile_model(monkeypatch):
     public_config = copy.deepcopy(load_public_config())
+    _ensure_preset_model(public_config, "deepseek_v4_pro")
     public_config["llm"]["profiles"]["primary"] = {
         "model_ref": "deepseek_v4_pro",
         "overrides": {},
@@ -12880,6 +12925,7 @@ def test_config_open_environment_promotes_window_when_foreground_is_blocked(monk
 
 def test_config_workspace_test_llm_uses_pending_draft_key(monkeypatch):
     public_config = copy.deepcopy(load_public_config())
+    _ensure_preset_model(public_config, "deepseek_v4_pro")
     deepseek_env = public_config["llm"]["model_library"]["deepseek_v4_pro"]["api_key_env"]
     public_config["llm"]["profiles"]["subagent_explorer"] = {
         "model_ref": "deepseek_v4_pro",
@@ -12933,15 +12979,17 @@ def test_config_workspace_test_llm_uses_pending_draft_key(monkeypatch):
     assert response.status_code == 200, response.json()
     payload = response.json()
     assert payload["ok"] is True
+    assert payload["model_id"] == "deepseek_v4_pro"
     assert payload["api_key_source"] == f"pending-env:{deepseek_env}"
     assert payload["config_scope"] == "draft"
     assert payload["requires_api_key"] is True
     assert payload["transport"] == "chat_completions"
-    assert payload["contract"] == "tool_chat"
+    assert payload["contract"] == "reasoning_chat"
 
 
 def test_config_workspace_test_llm_can_target_model_library_model(monkeypatch):
     public_config = copy.deepcopy(load_public_config())
+    _ensure_preset_model(public_config, "deepseek_v4_pro")
     deepseek_env = public_config["llm"]["model_library"]["deepseek_v4_pro"]["api_key_env"]
     monkeypatch.delenv("VIBELUTION_LLM_DEEPSEEK_V4_PRO_API_KEY", raising=False)
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
@@ -12976,6 +13024,7 @@ def test_config_workspace_test_llm_can_target_model_library_model(monkeypatch):
 
 def test_config_workspace_test_llm_ignores_forged_pending_draft_key(monkeypatch):
     public_config = copy.deepcopy(load_public_config())
+    _ensure_preset_model(public_config, "deepseek_v4_pro")
     deepseek_env = public_config["llm"]["model_library"]["deepseek_v4_pro"]["api_key_env"]
     config_service._PENDING_API_KEY_SECRETS.clear()
     config_service._PENDING_CLEAR_ENVS.clear()
@@ -13026,6 +13075,7 @@ def test_config_workspace_test_llm_ignores_forged_pending_draft_key(monkeypatch)
     assert response.status_code == 200
     payload = response.json()
     assert payload["ok"] is False
+    assert payload["model_id"] == "deepseek_v4_pro"
     assert payload["api_key_source"] == "missing"
 
 
@@ -13114,10 +13164,22 @@ def test_config_workspace_llm_http_fallback_uses_anthropic_messages(monkeypatch)
 
 
 def test_config_workspace_llm_http_fallback_uses_primary_openai_chat_completion(monkeypatch):
-    public_config = copy.deepcopy(load_public_config())
-    effective = config_service.build_effective_config(public_config)
-    profile = effective.llm.get_profile("primary")
-    provider = effective.llm.get_provider(profile.provider_id)
+    provider = ProviderConfig(
+        provider_id="primary",
+        kind="xiaomi",
+        api_key_env="XIAOMI_API_KEY",
+        base_url="https://token-plan-cn.xiaomimimo.com/v1",
+        compat_mode="openai",
+        requires_api_key=True,
+    )
+    profile = LLMProfile(
+        profile_id="primary",
+        provider_id="primary",
+        model="mimo-v2.5",
+        transport="chat_completions",
+        contract="tool_chat",
+        temperature=0.7,
+    )
     captured: dict[str, object] = {}
 
     class FakeResponse:
@@ -13474,7 +13536,7 @@ def test_config_workspace_batch_image_capability_persists_model_only(monkeypatch
             assert model_entry["supports_image_input"] is True
 
         def invoke(self, messages, tools=None, metadata=None):
-            assert metadata == {"probeCapability": "image_input"}
+            assert metadata["probeCapability"] == "image_input"
             assert messages[0]["content"][1]["image_url"]["url"].startswith("data:image/png;base64,")
             return {"ok": True}
 
@@ -13557,6 +13619,7 @@ def test_config_workspace_batch_image_capability_records_unsupported(monkeypatch
 
 def test_config_workspace_draft_model_ignores_submitted_api_key_env(monkeypatch):
     public_config = copy.deepcopy(load_public_config())
+    _ensure_preset_model(public_config, "deepseek_v4_pro")
 
     monkeypatch.setattr(config_service, "load_public_config", lambda: copy.deepcopy(public_config))
 
@@ -13586,6 +13649,7 @@ def test_config_workspace_draft_model_ignores_submitted_api_key_env(monkeypatch)
 
 def test_config_workspace_draft_model_persists_manual_image_input_support(monkeypatch):
     public_config = copy.deepcopy(load_public_config())
+    _ensure_preset_model(public_config, "deepseek_v4_pro")
     target = public_config["llm"]["model_library"]["deepseek_v4_pro"]
 
     monkeypatch.setattr(config_service, "load_public_config", lambda: copy.deepcopy(public_config))
@@ -14360,6 +14424,7 @@ def test_config_workspace_apply_rejects_stale_base_hash(monkeypatch):
 
 def test_config_workspace_apply_persists_changes_and_pending_env(monkeypatch):
     public_config = copy.deepcopy(load_public_config())
+    _ensure_preset_model(public_config, "deepseek_v4_pro")
     writes = []
     deletes = []
     reloads = []
@@ -14491,6 +14556,68 @@ def test_config_workspace_apply_deletes_removed_model_key(monkeypatch):
     assert writes == []
     assert deletes == ["VIBELUTION_LLM_MODEL_CUSTOM_RELAY_API_KEY"]
     assert "custom_relay" not in public_config["llm"]["model_library"]
+
+
+def test_config_workspace_apply_rejects_missing_git_commit_model(monkeypatch):
+    public_config = copy.deepcopy(load_public_config())
+    _ensure_preset_model(public_config, "deepseek_v4_pro")
+    public_config["llm"]["model_library"]["git_commit_model"] = copy.deepcopy(
+        public_config["llm"]["model_library"]["deepseek_v4_pro"]
+    )
+    public_config.setdefault("git", {})["commit_message_model_ref"] = "git_commit_model"
+    payload = copy.deepcopy(public_config)
+    payload["llm"]["model_library"].pop("git_commit_model", None)
+    scene_events = []
+
+    monkeypatch.setattr(config_service, "load_public_config", lambda: copy.deepcopy(public_config))
+    monkeypatch.setattr(config_service, "save_public_config", lambda updated: pytest.fail("invalid config should not be saved"))
+    monkeypatch.setattr(
+        config_service,
+        "_record_config_scene_event",
+        lambda phase, event_code, **kwargs: scene_events.append((phase, event_code, kwargs)),
+    )
+
+    response = client.put(
+        "/api/config/apply",
+        json={
+            "publicConfig": payload,
+            "draftMeta": {},
+            "baseHash": public_config_hash(public_config),
+        },
+    )
+
+    assert response.status_code == 422
+    assert "unknown Git commit message model" in response.json()["detail"]
+    assert scene_events[-1][1] == "config.git_commit_model_ref.rejected"
+
+
+def test_config_workspace_apply_rejects_invalid_git_commit_prompt(monkeypatch):
+    public_config = copy.deepcopy(load_public_config())
+    payload = copy.deepcopy(public_config)
+    payload.setdefault("git", {})["commit_message_prompt"] = "Summary only: {summary}"
+    scene_events = []
+
+    monkeypatch.setattr(config_service, "load_public_config", lambda: copy.deepcopy(public_config))
+    monkeypatch.setattr(config_service, "save_public_config", lambda updated: pytest.fail("invalid config should not be saved"))
+    monkeypatch.setattr(
+        config_service,
+        "_record_config_scene_event",
+        lambda phase, event_code, **kwargs: scene_events.append((phase, event_code, kwargs)),
+    )
+
+    response = client.put(
+        "/api/config/apply",
+        json={
+            "publicConfig": payload,
+            "draftMeta": {},
+            "baseHash": public_config_hash(public_config),
+        },
+    )
+
+    assert response.status_code == 422
+    assert "{files}" in response.json()["detail"]
+    assert "{diff}" in response.json()["detail"]
+    assert scene_events[-1][1] == "config.git_commit_prompt.rejected"
 
 
 def test_config_workspace_apply_ignores_forged_pending_env(monkeypatch):
