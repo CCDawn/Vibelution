@@ -10,7 +10,7 @@ import pytest
 from core.infrastructure.agent_session import get_session_state, reset_session_state
 from core.infrastructure.event_bus import EventNames
 from core.infrastructure import git_memory
-from core.infrastructure.git_memory import GitMemoryService
+from core.infrastructure.git_memory import GitMemoryService, WorkingTreeFile, WorkingTreeSnapshot
 from tools.git_tools import (
     get_git_status_summary_tool,
     open_evolution_transaction_tool,
@@ -135,6 +135,121 @@ class TestGitMemoryService:
         assert changes
         assert any(change.path == "sample.py" for change in changes)
         assert any(event[0] == EventNames.GIT_INDEX_UPDATED for event in published)
+
+    def test_worktree_snapshot_retention_prunes_old_worktree_rows(self, tmp_path, monkeypatch):
+        repo = _init_git_repo(tmp_path)
+        db_path = tmp_path / "brain.db"
+        fake_workspace = FakeWorkspace(repo, db_path)
+
+        class FakeBus:
+            def publish(self, name, data=None, source=None):
+                return None
+
+            def subscribe(self, name, handler, priority=0):
+                return True
+
+        monkeypatch.setattr("core.infrastructure.git_memory.get_workspace", lambda: fake_workspace)
+        monkeypatch.setattr("core.infrastructure.git_memory.get_event_bus", lambda: FakeBus())
+
+        service = GitMemoryService(worktree_snapshot_retention_limit=2)
+        with fake_workspace.get_db_connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO GitEntityChange(
+                    commit_sha, path, entity_ref, entity_type, change_type, is_worktree, created_at
+                ) VALUES ('commit-a', 'sample.py', 'alpha', 'function', 'modified', 0, '2026-01-01T00:00:00')
+                """
+            )
+
+        for index in range(4):
+            service._store_worktree_snapshot(
+                WorkingTreeSnapshot(
+                    snapshot_id=f"wt-test-{index}",
+                    created_at=f"2026-01-01T00:00:0{index}",
+                    base_rev="abcdef",
+                    has_staged=False,
+                    has_unstaged=True,
+                    has_untracked=False,
+                    files=[
+                        WorkingTreeFile(
+                            path="sample.py",
+                            status=" M",
+                            unstaged=True,
+                        )
+                    ],
+                )
+            )
+
+        with fake_workspace.get_db_connection() as conn:
+            cursor = conn.cursor()
+            snapshot_ids = [
+                row["snapshot_id"]
+                for row in cursor.execute(
+                    "SELECT snapshot_id FROM GitWorkingTreeSnapshot ORDER BY created_at"
+                ).fetchall()
+            ]
+            worktree_file_rows = cursor.execute(
+                "SELECT COUNT(*) AS count FROM GitFileChange WHERE is_worktree = 1"
+            ).fetchone()["count"]
+            worktree_entity_rows = cursor.execute(
+                "SELECT COUNT(*) AS count FROM GitEntityChange WHERE is_worktree = 1"
+            ).fetchone()["count"]
+            commit_entity_rows = cursor.execute(
+                "SELECT COUNT(*) AS count FROM GitEntityChange WHERE is_worktree = 0"
+            ).fetchone()["count"]
+
+        assert snapshot_ids == ["wt-test-2", "wt-test-3"]
+        assert worktree_file_rows == 2
+        assert worktree_entity_rows == 6
+        assert commit_entity_rows == 1
+
+    def test_prune_worktree_snapshots_can_vacuum_after_deleting_rows(self, tmp_path, monkeypatch):
+        repo = _init_git_repo(tmp_path)
+        db_path = tmp_path / "brain.db"
+        fake_workspace = FakeWorkspace(repo, db_path)
+
+        class FakeBus:
+            def publish(self, name, data=None, source=None):
+                return None
+
+            def subscribe(self, name, handler, priority=0):
+                return True
+
+        monkeypatch.setattr("core.infrastructure.git_memory.get_workspace", lambda: fake_workspace)
+        monkeypatch.setattr("core.infrastructure.git_memory.get_event_bus", lambda: FakeBus())
+
+        service = GitMemoryService(worktree_snapshot_retention_limit=10)
+        for index in range(3):
+            service._store_worktree_snapshot(
+                WorkingTreeSnapshot(
+                    snapshot_id=f"wt-vacuum-{index}",
+                    created_at=f"2026-01-01T00:00:0{index}",
+                    base_rev="abcdef",
+                    has_staged=False,
+                    has_unstaged=True,
+                    has_untracked=False,
+                    files=[
+                        WorkingTreeFile(
+                            path="sample.py",
+                            status=" M",
+                            unstaged=True,
+                        )
+                    ],
+                )
+            )
+
+        stats = service.prune_worktree_snapshots(keep_latest=1, vacuum=True)
+
+        with fake_workspace.get_db_connection() as conn:
+            snapshot_count = conn.execute(
+                "SELECT COUNT(*) AS count FROM GitWorkingTreeSnapshot"
+            ).fetchone()["count"]
+
+        assert stats["snapshots_deleted"] == 2
+        assert stats["file_rows_deleted"] == 2
+        assert stats["entity_rows_deleted"] == 6
+        assert stats["vacuumed"] is True
+        assert snapshot_count == 1
 
     def test_note_file_modified_tracks_entities(self, tmp_path, monkeypatch):
         repo = _init_git_repo(tmp_path)
