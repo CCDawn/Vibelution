@@ -282,6 +282,8 @@ function Invoke-HiddenLauncherAction {
     $arguments = @(
         "-NoLogo",
         "-NoProfile",
+        "-WindowStyle",
+        "Hidden",
         "-ExecutionPolicy",
         "Bypass",
         "-File",
