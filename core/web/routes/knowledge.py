@@ -19,6 +19,8 @@ from core.web.services.team_knowledge_service import (
     create_rating_suggestion,
     create_refinement_proposal,
     create_source_artifact,
+    collect_source_to_inbox,
+    create_source_artifact_from_central_source,
     get_knowledge_dashboard_snapshot,
     get_knowledge_governance_plan,
     get_knowledge_operations_health,
@@ -26,18 +28,22 @@ from core.web.services.team_knowledge_service import (
     get_knowledge_steward_overview,
     get_knowledge_steward_workbench,
     knowledge_permission_audit,
+    list_central_sources,
     list_ingestion_adapters,
     list_knowledge_governance_tasks,
     list_knowledge_steward_recommendations,
     list_knowledge_items,
     list_knowledge_overview,
     list_rating_suggestions,
+    list_owner_source_inbox,
     list_team_knowledge_bases,
     list_agent_knowledge_bases,
+    review_owner_inbox_source,
     review_rating_suggestions_bulk,
     review_rating_suggestion,
     review_refinement_proposal,
     search_knowledge_items,
+    update_owner_source_governance,
     update_knowledge_item_rating,
 )
 
@@ -69,6 +75,44 @@ class SourceArtifactCreatePayload(BaseModel):
     title: str = Field("", max_length=240)
     summary: str = Field("", max_length=4000)
     actorAgentId: str = Field("", max_length=160)
+    centralSourceId: str = Field("", max_length=160)
+    inboxSourceId: str = Field("", max_length=160)
+
+
+class SourceInboxCollectPayload(BaseModel):
+    ownerType: str = Field("", max_length=32)
+    ownerId: str = Field("", max_length=160)
+    sourceType: str = Field("", max_length=80)
+    sourceRef: dict[str, Any] = Field(default_factory=dict)
+    originalContent: str = Field("", max_length=200000)
+    originalFilename: str = Field("", max_length=240)
+    sourceCreatedAt: str = Field("", max_length=80)
+    capturedBy: str = Field("", max_length=160)
+    sourceHash: str = Field("", max_length=160)
+    evidenceRange: dict[str, Any] = Field(default_factory=dict)
+    title: str = Field("", max_length=240)
+    summary: str = Field("", max_length=4000)
+    actorAgentId: str = Field("", max_length=160)
+
+
+class SourceInboxReviewPayload(BaseModel):
+    decision: str = Field("", max_length=40)
+    reviewedByAgentId: str = Field("", max_length=160)
+    resolutionNote: str = Field("", max_length=2000)
+    duplicateOf: str = Field("", max_length=160)
+
+
+class SourceGovernanceUpdatePayload(BaseModel):
+    localStewardAgentIds: list[str] = Field(default_factory=list, max_length=80)
+    actorAgentId: str = Field("", max_length=160)
+
+
+class CentralSourceArtifactCreatePayload(BaseModel):
+    centralSourceId: str = Field("", max_length=160)
+    actorAgentId: str = Field("", max_length=160)
+    evidenceRange: dict[str, Any] = Field(default_factory=dict)
+    title: str = Field("", max_length=240)
+    summary: str = Field("", max_length=4000)
 
 
 class RefinementProposalCreatePayload(BaseModel):
@@ -350,8 +394,95 @@ def knowledge_rag_retrieve(
 
 
 @router.get("/knowledge/rag/health")
-def knowledge_rag_health() -> dict:
-    return get_rag_retrieval_health()
+def knowledge_rag_health(agentId: str = "") -> dict:
+    return get_rag_retrieval_health(agent_id=str(agentId or "").strip())
+
+
+@router.post("/knowledge/sources/inbox", status_code=status.HTTP_201_CREATED)
+def knowledge_source_inbox_collect(payload: SourceInboxCollectPayload) -> dict:
+    try:
+        return collect_source_to_inbox(
+            payload.ownerType,
+            payload.ownerId,
+            source_type=payload.sourceType,
+            source_ref=payload.sourceRef,
+            original_content=payload.originalContent,
+            original_filename=payload.originalFilename,
+            source_created_at=payload.sourceCreatedAt,
+            captured_by=payload.capturedBy,
+            source_hash=payload.sourceHash,
+            evidence_range=payload.evidenceRange,
+            title=payload.title,
+            summary=payload.summary,
+            actor_agent_id=payload.actorAgentId,
+        )
+    except TeamKnowledgePermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except TeamKnowledgeNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except TeamKnowledgeError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/knowledge/sources/inbox")
+def knowledge_source_inbox_list(ownerType: str = "", ownerId: str = "", agentId: str = "", status: str = "") -> dict:
+    try:
+        return list_owner_source_inbox(ownerType, ownerId, agent_id=agentId, status=status)
+    except TeamKnowledgePermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except TeamKnowledgeNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except TeamKnowledgeError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.patch("/knowledge/sources/inbox/{owner_type}/{owner_id}/{inbox_source_id}/review")
+def knowledge_source_inbox_review(owner_type: str, owner_id: str, inbox_source_id: str, payload: SourceInboxReviewPayload) -> dict:
+    try:
+        return review_owner_inbox_source(
+            owner_type,
+            owner_id,
+            inbox_source_id,
+            decision=payload.decision,
+            reviewed_by_agent_id=payload.reviewedByAgentId,
+            resolution_note=payload.resolutionNote,
+            duplicate_of=payload.duplicateOf,
+        )
+    except TeamKnowledgePermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except TeamKnowledgeNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except TeamKnowledgeError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.put("/knowledge/sources/governance/{owner_type}/{owner_id}")
+def knowledge_source_governance_update(owner_type: str, owner_id: str, payload: SourceGovernanceUpdatePayload) -> dict:
+    try:
+        return update_owner_source_governance(
+            owner_type,
+            owner_id,
+            local_steward_agent_ids=payload.localStewardAgentIds,
+            actor_agent_id=payload.actorAgentId,
+        )
+    except TeamKnowledgePermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except TeamKnowledgeNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except TeamKnowledgeError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/knowledge/sources/registry")
+def knowledge_central_source_registry(agentId: str = "", ownerType: str = "", ownerId: str = "") -> dict:
+    try:
+        return list_central_sources(agent_id=agentId, owner_type=ownerType, owner_id=ownerId)
+    except TeamKnowledgePermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except TeamKnowledgeNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except TeamKnowledgeError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 def _record_rag_retrieve_event(
@@ -481,6 +612,27 @@ def knowledge_source_artifact_create(knowledge_base_id: str, payload: SourceArti
             title=payload.title,
             summary=payload.summary,
             actor_agent_id=payload.actorAgentId,
+            central_source_id=payload.centralSourceId,
+            inbox_source_id=payload.inboxSourceId,
+        )
+    except TeamKnowledgePermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except TeamKnowledgeNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except TeamKnowledgeError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/knowledge-bases/{knowledge_base_id}/central-source-artifacts", status_code=status.HTTP_201_CREATED)
+def knowledge_central_source_artifact_create(knowledge_base_id: str, payload: CentralSourceArtifactCreatePayload) -> dict:
+    try:
+        return create_source_artifact_from_central_source(
+            knowledge_base_id,
+            payload.centralSourceId,
+            actor_agent_id=payload.actorAgentId,
+            evidence_range=payload.evidenceRange,
+            title=payload.title,
+            summary=payload.summary,
         )
     except TeamKnowledgePermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc

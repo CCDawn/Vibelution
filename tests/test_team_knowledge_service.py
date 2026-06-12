@@ -51,6 +51,162 @@ def test_team_member_can_register_source_and_submit_proposal(knowledge_env):
     assert proposal["sourceArtifactIds"] == [source["sourceArtifactId"]]
 
 
+def test_owner_inbox_promotes_source_to_central_registry_and_formal_artifact(knowledge_env, tmp_path):
+    inbox_source = team_knowledge_service.collect_source_to_inbox(
+        "team",
+        knowledge_env["team"]["teamId"],
+        source_type="external_search_refinement",
+        source_ref={"url": "https://example.test/source", "query": "source governance"},
+        original_content="Original external search capture for governed source storage.",
+        original_filename="search-capture.txt",
+        title="Governed source capture",
+        summary="Captured source waits in the owner inbox before central promotion.",
+        actor_agent_id=knowledge_env["member"]["agentId"],
+    )
+
+    inbox_path = tmp_path / inbox_source["originalPath"]
+    assert inbox_source["status"] == "pending"
+    assert inbox_path.exists()
+    assert "Original external search capture" in inbox_path.read_text(encoding="utf-8")
+    with pytest.raises(team_knowledge_service.TeamKnowledgePermissionError):
+        team_knowledge_service.list_owner_source_inbox(
+            "team",
+            knowledge_env["team"]["teamId"],
+            agent_id=knowledge_env["outsider"]["agentId"],
+        )
+    with pytest.raises(team_knowledge_service.TeamKnowledgePermissionError):
+        team_knowledge_service.review_owner_inbox_source(
+            "team",
+            knowledge_env["team"]["teamId"],
+            inbox_source["inboxSourceId"],
+            decision="accepted",
+            reviewed_by_agent_id=knowledge_env["member"]["agentId"],
+        )
+
+    reviewed = team_knowledge_service.review_owner_inbox_source(
+        "team",
+        knowledge_env["team"]["teamId"],
+        inbox_source["inboxSourceId"],
+        decision="accepted",
+        reviewed_by_agent_id=knowledge_env["lead"]["agentId"],
+        resolution_note="Source is relevant and has preserved capture.",
+    )
+    central_source = reviewed["centralSource"]
+    central_path = tmp_path / central_source["centralPath"]
+    registry = team_knowledge_service.list_central_sources(agent_id=knowledge_env["member"]["agentId"])
+
+    assert reviewed["source"]["status"] == "accepted"
+    assert reviewed["promotion"]["dedupeStatus"] == "created"
+    assert central_source["centralSourceId"]
+    assert central_path.exists()
+    assert registry["summary"]["centralSourceCount"] == 1
+    assert team_knowledge_service.list_central_sources(agent_id=knowledge_env["outsider"]["agentId"])["summary"]["centralSourceCount"] == 0
+
+    source_artifact = team_knowledge_service.create_source_artifact_from_central_source(
+        knowledge_env["base"]["knowledgeBaseId"],
+        central_source["centralSourceId"],
+        actor_agent_id=knowledge_env["member"]["agentId"],
+    )
+    proposal = team_knowledge_service.create_refinement_proposal(
+        knowledge_env["base"]["knowledgeBaseId"],
+        source_artifact_ids=[source_artifact["sourceArtifactId"]],
+        proposed_by_agent_id=knowledge_env["member"]["agentId"],
+        title="Central source references survive review",
+        content="Formal knowledge items should retain central source references for RAG citation provenance.",
+    )
+    applied = team_knowledge_service.review_refinement_proposal(
+        knowledge_env["base"]["knowledgeBaseId"],
+        proposal["proposalId"],
+        status="approved",
+        reviewed_by_agent_id=knowledge_env["lead"]["agentId"],
+    )
+
+    assert source_artifact["centralSourceId"] == central_source["centralSourceId"]
+    assert proposal["centralSourceIds"] == [central_source["centralSourceId"]]
+    assert applied["item"]["centralSourceIds"] == [central_source["centralSourceId"]]
+
+
+def test_agent_inbox_is_private_and_global_steward_can_promote(knowledge_env):
+    inbox_source = team_knowledge_service.collect_source_to_inbox(
+        "agent",
+        knowledge_env["member"]["agentId"],
+        source_type="agent_authored",
+        source_ref={"agentId": knowledge_env["member"]["agentId"], "note": "private source"},
+        original_content="Private Agent source should remain owner-scoped before central review.",
+        title="Private Agent source",
+        actor_agent_id=knowledge_env["member"]["agentId"],
+    )
+
+    with pytest.raises(team_knowledge_service.TeamKnowledgePermissionError):
+        team_knowledge_service.list_owner_source_inbox(
+            "agent",
+            knowledge_env["member"]["agentId"],
+            agent_id=knowledge_env["outsider"]["agentId"],
+        )
+    with pytest.raises(team_knowledge_service.TeamKnowledgePermissionError):
+        team_knowledge_service.review_owner_inbox_source(
+            "agent",
+            knowledge_env["member"]["agentId"],
+            inbox_source["inboxSourceId"],
+            decision="accepted",
+            reviewed_by_agent_id=knowledge_env["outsider"]["agentId"],
+        )
+
+    reviewed = team_knowledge_service.review_owner_inbox_source(
+        "agent",
+        knowledge_env["member"]["agentId"],
+        inbox_source["inboxSourceId"],
+        decision="accepted",
+        reviewed_by_agent_id=agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID,
+    )
+
+    assert reviewed["centralSource"]["centralSourceId"]
+    assert team_knowledge_service.list_central_sources(agent_id=knowledge_env["member"]["agentId"])["summary"]["centralSourceCount"] == 1
+    assert team_knowledge_service.list_central_sources(agent_id=knowledge_env["outsider"]["agentId"])["summary"]["centralSourceCount"] == 0
+
+
+def test_central_source_registry_dedupes_by_source_hash(knowledge_env):
+    first = team_knowledge_service.collect_source_to_inbox(
+        "team",
+        knowledge_env["team"]["teamId"],
+        source_type="manual_user_entry",
+        source_ref={"note": "duplicate source"},
+        original_content="Same source body.",
+        title="Duplicate source",
+        actor_agent_id=knowledge_env["member"]["agentId"],
+    )
+    second = team_knowledge_service.collect_source_to_inbox(
+        "team",
+        knowledge_env["team"]["teamId"],
+        source_type="manual_user_entry",
+        source_ref={"note": "duplicate source"},
+        original_content="Same source body.",
+        title="Duplicate source",
+        actor_agent_id=knowledge_env["member"]["agentId"],
+    )
+
+    first_review = team_knowledge_service.review_owner_inbox_source(
+        "team",
+        knowledge_env["team"]["teamId"],
+        first["inboxSourceId"],
+        decision="accepted",
+        reviewed_by_agent_id=knowledge_env["lead"]["agentId"],
+    )
+    second_review = team_knowledge_service.review_owner_inbox_source(
+        "team",
+        knowledge_env["team"]["teamId"],
+        second["inboxSourceId"],
+        decision="accepted",
+        reviewed_by_agent_id=knowledge_env["lead"]["agentId"],
+    )
+    registry = team_knowledge_service.list_central_sources(agent_id=knowledge_env["lead"]["agentId"])
+
+    assert first_review["centralSource"]["centralSourceId"] == second_review["centralSource"]["centralSourceId"]
+    assert second_review["promotion"]["dedupeStatus"] == "reused"
+    assert registry["summary"]["centralSourceCount"] == 1
+    assert registry["summary"]["ownerRefCount"] == 2
+
+
 def test_agent_formal_knowledge_is_private_and_governed(tmp_path, monkeypatch):
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
