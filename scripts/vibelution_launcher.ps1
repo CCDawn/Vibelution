@@ -6030,7 +6030,79 @@ function Get-SessionSnapshot {
         SessionRunning = [bool]($backendPid) -and (Test-WebHealthy) -and ($browserWindowProcesses.Count -gt 0)
         BrowserRole = $BrowserRole
         BrowserProfileDir = $ProfileDir
+        SnapshotMode = "full"
     }
+}
+
+function Get-ClosedWorkbenchSessionSnapshotFromState {
+    param(
+        [string]$BrowserRole = "workbench",
+        [string]$ProfileDir = ""
+    )
+
+    if ($BrowserRole -ne "workbench") {
+        return $null
+    }
+    if (-not $ProfileDir) {
+        $ProfileDir = $workbenchBrowserProfileDir
+    }
+
+    $state = Get-State
+    if (-not $state) {
+        return $null
+    }
+    $stateRole = [string](Get-ObjectPropertyValue -Object $state -Name "sessionRole" -Default "")
+    if ($stateRole -ne "launcher_control_surface") {
+        return $null
+    }
+
+    $trackedWorkbenchPids = @(
+        [int](Get-ObjectPropertyValue -Object $state -Name "backendPid" -Default 0),
+        [int](Get-ObjectPropertyValue -Object $state -Name "backendLaunchPid" -Default 0),
+        [int](Get-ObjectPropertyValue -Object $state -Name "workbenchBrowserWindowPid" -Default 0),
+        [int](Get-ObjectPropertyValue -Object $state -Name "workbenchBrowserLaunchPid" -Default 0),
+        [int](Get-ObjectPropertyValue -Object $state -Name "supervisorPid" -Default 0)
+    ) | Where-Object { $_ -gt 0 } | Sort-Object -Unique
+    foreach ($trackedPid in $trackedWorkbenchPids) {
+        if (Test-ProcessAlive ([int]$trackedPid)) {
+            return $null
+        }
+    }
+
+    Write-LauncherControlLog `
+        -Event "launcher.session.snapshot.fast_closed" `
+        -Message "Launcher state proves the workbench is closed; skipped full workbench process snapshot." `
+        -Level "info" `
+        -Fields @{
+            state_role = $stateRole
+            browser_role = $BrowserRole
+            profile_dir = $ProfileDir
+            tracked_workbench_pids = @($trackedWorkbenchPids)
+        }
+
+    return [pscustomobject]@{
+        State = $state
+        BackendPid = $null
+        BackendPids = @()
+        BackendHealthy = $false
+        BrowserPids = @()
+        BrowserWindowProcesses = @()
+        BrowserWindowCount = 0
+        BrowserWindowPid = $null
+        SupervisorPid = $null
+        SessionRunning = $false
+        BrowserRole = $BrowserRole
+        BrowserProfileDir = $ProfileDir
+        SnapshotMode = "closed_state_fast_path"
+    }
+}
+
+function Get-StartManagedSessionSnapshot {
+    $snapshot = Get-ClosedWorkbenchSessionSnapshotFromState -BrowserRole "workbench" -ProfileDir $workbenchBrowserProfileDir
+    if ($snapshot) {
+        return $snapshot
+    }
+    return Get-SessionSnapshot
 }
 
 function Save-LauncherControlWindowState {
@@ -7338,7 +7410,7 @@ function Repair-ProjectPythonDependencies {
 function Start-ManagedSession {
     Ensure-Directories
 
-    $snapshot = Get-SessionSnapshot
+    $snapshot = Get-StartManagedSessionSnapshot
     $restartReason = Get-SessionRestartReason -Snapshot $snapshot
     $allowSessionRefresh = Test-ActionAllowsSessionRefresh
 
@@ -7359,6 +7431,7 @@ function Start-ManagedSession {
             state_present = [bool]$snapshot.State
             restart_reason = $restartReason
             allows_session_refresh = [bool]$allowSessionRefresh
+            snapshot_mode = [string](Get-ObjectPropertyValue -Object $snapshot -Name "SnapshotMode" -Default "full")
         }
 
     if ($snapshot.SessionRunning -and (-not $restartReason -or -not $allowSessionRefresh)) {
