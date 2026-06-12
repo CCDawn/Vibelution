@@ -4390,6 +4390,43 @@ class TestRuntimeStateMemoryFlow:
         assert messages[-1]["role"] == "user"
         assert "第二句" in messages[-1]["content"]
 
+    def test_volatile_runtime_context_is_inserted_before_current_user_and_filtered_from_carryover(self):
+        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent._pending_volatile_context_blocks = []
+
+        agent.seed_volatile_runtime_context("## Slash Skill Context\nCommand: /brt\nSKILL.md:\nAsk one question.")
+
+        messages = [
+            {"role": "system", "content": "system"},
+            build_chat_user_message("第一句"),
+            AIMessage(content="第一轮回复"),
+            build_chat_user_message("第二句"),
+        ]
+
+        updated, inserted_blocks = agent._insert_pending_volatile_context_messages(messages)
+
+        assert inserted_blocks == ["## Slash Skill Context\nCommand: /brt\nSKILL.md:\nAsk one question."]
+        assert updated is not messages
+        assert updated[1:3] == messages[1:3]
+        assert isinstance(updated[3], SystemMessage)
+        assert updated[3].content.startswith("## Slash Skill Context")
+        assert updated[-1] == messages[-1]
+        assert agent._pending_volatile_context_blocks == []
+
+        carryover_messages = [
+            message for message in updated
+            if not is_volatile_system_context_message(message)
+        ]
+
+        assert all(
+            not (
+                isinstance(message, SystemMessage)
+                and str(message.content or "").startswith("## Slash Skill Context")
+            )
+            for message in carryover_messages
+        )
+        assert carryover_messages == [messages[0], *messages[1:]]
+
     def test_finish_turn_message_carryover_keeps_unfinished_context_and_clears_after_close(self):
         messages = [
             SystemMessage(content="system"),

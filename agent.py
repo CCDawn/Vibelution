@@ -546,6 +546,7 @@ class SelfEvolvingAgent:
         self._active_turn_goal: str = ""
         self._pending_static_context_blocks: List[str] = []
         self._pending_runtime_context_blocks: List[str] = []
+        self._pending_volatile_context_blocks: List[str] = []
         self._runtime_context_seeded_by_host: bool = False
         self._single_turn_mode_active: bool = False
         self._last_turn_metadata: Dict[str, Any] = {}
@@ -1304,6 +1305,37 @@ class SelfEvolvingAgent:
             return
         self._pending_static_context_blocks.append(text)
 
+    def seed_volatile_runtime_context(self, content: str) -> None:
+        """Add current-turn-only context immediately before the current user message."""
+        text = str(content or "").strip()
+        if not text:
+            return
+        pending = getattr(self, "_pending_volatile_context_blocks", None)
+        if not isinstance(pending, list):
+            pending = []
+            self._pending_volatile_context_blocks = pending
+        pending.append(text)
+
+    def _insert_pending_volatile_context_messages(self, messages: List[Any]) -> tuple[List[Any], List[str]]:
+        pending_volatile_context_blocks = list(getattr(self, "_pending_volatile_context_blocks", []) or [])
+        self._pending_volatile_context_blocks = []
+        if not pending_volatile_context_blocks:
+            return list(messages or []), []
+        context_messages = [
+            SystemMessage(content=block)
+            for block in pending_volatile_context_blocks
+            if str(block or "").strip()
+        ]
+        if not context_messages:
+            return list(messages or []), []
+        return (
+            TurnOutcomeController.insert_volatile_context_before_current_user(
+                messages=list(messages or []),
+                context_messages=context_messages,
+            ),
+            pending_volatile_context_blocks,
+        )
+
     def mark_runtime_context_seeded_by_host(self) -> None:
         """Mark that the embedding host already injected this turn's runtime context."""
 
@@ -1701,6 +1733,20 @@ class SelfEvolvingAgent:
                         else "after_system_before_history"
                     ),
                     "cacheableSystemPrefixMerged": cacheable_prefix_merged,
+                },
+            )
+        messages, inserted_volatile_context_blocks = self._insert_pending_volatile_context_messages(messages)
+        if inserted_volatile_context_blocks:
+            _record_agent_scene_event(
+                "prompt",
+                "agent.volatile_runtime_context_inserted_before_user",
+                message="Volatile runtime context was inserted before the current user message.",
+                fields={
+                    "volatileContextBlockCount": len(inserted_volatile_context_blocks),
+                    "volatileContextChars": sum(len(str(b or "")) for b in inserted_volatile_context_blocks),
+                    "insertionPolicy": "before_current_user",
+                    "cachePrefixPlacement": "after_history_before_current_user",
+                    "carryoverPolicy": "filtered_after_turn",
                 },
             )
         pending_runtime_context_blocks = list(getattr(self, "_pending_runtime_context_blocks", []) or [])

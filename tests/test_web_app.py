@@ -5404,6 +5404,9 @@ def test_session_worker_seeds_slash_skill_runtime_context(tmp_path, monkeypatch)
         def seed_runtime_context(self, content):
             seen_contexts.append(f"dynamic:{content}")
 
+        def seed_volatile_runtime_context(self, content):
+            seen_contexts.append(f"volatile:{content}")
+
         def mark_runtime_context_seeded_by_host(self):
             marker_calls.append("marked")
 
@@ -5463,7 +5466,11 @@ def test_session_worker_seeds_slash_skill_runtime_context(tmp_path, monkeypatch)
 
     assert response.status_code == 202
     assert seen_prompt["value"] == "/brt 设计斜杠 skill 调用"
-    assert seen_contexts == ["static:## Agent Static Context\nstable"]
+    assert len(seen_contexts) == 2
+    assert seen_contexts[0] == "static:## Agent Static Context\nstable"
+    assert seen_contexts[1].startswith("volatile:## Slash Skill Context")
+    assert "Command: /brt" in seen_contexts[1]
+    assert "Ask one question at a time." in seen_contexts[1]
     assert marker_calls
     history_seeded_events = [event for event in lifecycle_events if event["phase"] == "history_seeded"]
     assert history_seeded_events
@@ -5472,12 +5479,14 @@ def test_session_worker_seeds_slash_skill_runtime_context(tmp_path, monkeypatch)
     assert history_fields["dynamicRuntimeContextIncluded"] is False
     assert history_fields["dynamicRuntimeContextAvailable"] is True
     assert history_fields["dynamicRuntimeContextOmittedFromModelInput"] is True
-    assert history_fields["skillRuntimeContextIncluded"] is False
+    assert history_fields["skillRuntimeContextIncluded"] is True
     assert history_fields["skillRuntimeContextAvailable"] is True
-    assert history_fields["skillRuntimeContextOmittedFromModelInput"] is True
+    assert history_fields["skillRuntimeContextOmittedFromModelInput"] is False
+    assert history_fields["skillRuntimeContextPlacement"] == "before_current_user"
     assert history_fields["runtimeContextSegmentCount"] == 0
     assert history_fields["staticRuntimeContextSeedAvailable"] is True
     assert history_fields["runtimeContextSeedAvailable"] is True
+    assert history_fields["volatileRuntimeContextSeedAvailable"] is True
     assert any(event["eventCode"] == "conversation.skill_command.routed" for event in scene_events)
 
 
