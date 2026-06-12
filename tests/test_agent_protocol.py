@@ -2260,6 +2260,7 @@ class TestToolMessageFlow:
         assert payload["findings"]
         assert payload["evidence"]
 
+    @pytest.mark.slow
     def test_spawn_agent_timeout_preserves_partial_process_output(self, monkeypatch):
         scene_events = []
 
@@ -2323,6 +2324,7 @@ class TestToolMessageFlow:
         assert scene_events[-1][3]["fields"]["status"] == "timeout"
         assert scene_events[-1][3]["child_log_payload"]["timeoutSeconds"] == 1
 
+    @pytest.mark.slow
     def test_spawn_agent_cancel_kills_process_and_returns_cancelled(self, monkeypatch):
         scene_events = []
 

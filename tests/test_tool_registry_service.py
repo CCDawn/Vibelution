@@ -379,6 +379,7 @@ def test_tool_test_runs_safe_builtin_inside_selected_agent_runtime(tmp_path, mon
     }
 
 
+@pytest.mark.slow
 def test_builtin_tool_test_times_out_without_waiting_for_slow_tool(tmp_path, monkeypatch):
     monkeypatch.setattr(registry, "GENERATED_TOOLS_PATH", tmp_path / "generated_tools.json")
     monkeypatch.setattr(registry, "TOOL_TEST_TIMEOUT_SECONDS", 0.05)

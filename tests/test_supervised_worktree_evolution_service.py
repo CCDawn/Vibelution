@@ -6,6 +6,8 @@ import pytest
 
 from core.web.services import supervised_worktree_evolution_service as service
 
+pytestmark = pytest.mark.slow
+
 
 def _run_git(repo: Path, *args: str) -> str:
     proc = subprocess.run(

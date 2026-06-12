@@ -3,11 +3,14 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
+import pytest
 
 from core.chatroom import store as chat_room_store
 from core.chatroom.scheduler import get_scheduler_registry
 from core.ui.chat_state import load_chat_state, save_chat_state
 from core.web.services import agent_directory_service, chat_room_service, session_service
+
+from tests.helpers.chat_turn_harness import wait_for_matching_event
 
 
 def _seed_chat_sessions(root):
@@ -58,18 +61,18 @@ def _capture_session_lifecycle_events(monkeypatch):
 
     def wait_for_phase(phase, *, timeout=2.0, fields=None):
         expected_fields = fields or {}
-        deadline = time.monotonic() + timeout
-        with condition:
-            while True:
-                for event in events:
-                    if event["phase"] != phase:
-                        continue
-                    if all(event["fields"].get(key) == value for key, value in expected_fields.items()):
-                        return event
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    return None
-                condition.wait(timeout=remaining)
+        return wait_for_matching_event(
+            events,
+            timeout_s=timeout,
+            predicate=lambda event: (
+                event["phase"] == phase
+                and all(
+                    event["fields"].get(key) == value
+                    for key, value in expected_fields.items()
+                )
+            ),
+            condition=condition,
+        )
 
     monkeypatch.setattr(session_service, "_record_session_turn_lifecycle_event", record_session_turn_lifecycle_event)
     return wait_for_phase, events
@@ -1325,6 +1328,7 @@ def test_update_agent_chat_room_membership_rejects_unknown_room(tmp_path, monkey
         raise AssertionError("expected unknown room validation error")
 
 
+@pytest.mark.slow
 def test_chat_room_participant_waits_for_active_direct_turn_on_same_agent(tmp_path, monkeypatch):
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
@@ -1418,6 +1422,7 @@ def test_chat_room_participant_waits_for_active_direct_turn_on_same_agent(tmp_pa
     assert "群聊也想让 alpha 发言" in prompts[1]
 
 
+@pytest.mark.slow
 def test_chat_room_waiting_speaker_keeps_fifo_before_later_direct_turn(tmp_path, monkeypatch):
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
@@ -1539,6 +1544,7 @@ def test_chat_room_waiting_speaker_keeps_fifo_before_later_direct_turn(tmp_path,
     assert run_order == ["first_direct", "room", "room_finished", "second_direct"]
 
 
+@pytest.mark.slow
 def test_force_stop_chat_room_round_cancels_waiting_agent_slot(tmp_path, monkeypatch):
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
@@ -1632,6 +1638,7 @@ def test_force_stop_chat_room_round_cancels_waiting_agent_slot(tmp_path, monkeyp
     assert chat_room_service.load_chat_room_work_run_summary()["active"] is None
 
 
+@pytest.mark.slow
 def test_stop_chat_room_round_enters_stopping_then_publishes_ready_detail(tmp_path, monkeypatch):
     _seed_chat_sessions(tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)

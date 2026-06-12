@@ -68,7 +68,7 @@ class TestRunner:
         ]
 
         if self.fast:
-            cmd.extend(["-k", "not slow"])
+            cmd.extend(["-m", "not slow"])
 
         return cmd
 

@@ -6,6 +6,7 @@ import subprocess
 from contextlib import contextmanager
 from pathlib import Path
 
+import pytest
 from core.infrastructure.agent_session import get_session_state, reset_session_state
 from core.infrastructure.event_bus import EventNames
 from core.infrastructure import git_memory
@@ -15,6 +16,8 @@ from tools.git_tools import (
     open_evolution_transaction_tool,
     close_evolution_transaction_tool,
 )
+
+pytestmark = pytest.mark.slow
 
 
 class FakeWorkspace:

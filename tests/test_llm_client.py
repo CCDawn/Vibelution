@@ -1527,6 +1527,7 @@ def test_stream_records_safe_message_role_summary(monkeypatch):
         assert fields["messageRoleCounts"] == {"system": 1, "user": 1}
 
 
+@pytest.mark.slow
 def test_stream_limits_concurrent_calls_per_route(monkeypatch):
     config = make_config(
         **{
@@ -1581,6 +1582,7 @@ def test_stream_limits_concurrent_calls_per_route(monkeypatch):
     assert max_entered == 2
 
 
+@pytest.mark.slow
 def test_stream_waiting_for_route_slot_can_be_cancelled(monkeypatch):
     config = make_config(
         **{

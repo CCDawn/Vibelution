@@ -9,6 +9,8 @@ import pytest
 PROJECT_ROOT = Path(__file__).parent.parent
 MONITOR_SCRIPT = PROJECT_ROOT / "tools" / "monitor-local-model.ps1"
 
+pytestmark = pytest.mark.slow
+
 
 def _powershell_exe() -> str:
     exe = shutil.which("powershell") or shutil.which("pwsh")

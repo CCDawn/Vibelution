@@ -3086,6 +3086,7 @@ def test_non_lifecycle_command_failure_does_not_mark_workbench_failed(monkeypatc
     assert saved_states[-1]["workbench"]["failureMessage"] == ""
 
 
+@pytest.mark.slow
 def test_is_process_alive_windows_with_real_process():
     import os
     import sys
