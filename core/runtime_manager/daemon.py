@@ -104,6 +104,15 @@ _RESTART_BUILD_PREFLIGHT_TIMEOUT_SECONDS = 120.0
 _ACTIVE_WORK_LIFECYCLE_BLOCKED_MESSAGE = "有进行中的任务，无法重启 Vibelution。请等待任务完成或先停止任务。"
 
 
+def _observe_workbench_for_close() -> dict[str, Any]:
+    try:
+        return observe_workbench(recover_browser_window_for_backend_observed=False)
+    except TypeError as exc:
+        if "recover_browser_window_for_backend_observed" not in str(exc):
+            raise
+        return observe_workbench()
+
+
 def _start_background_thread(*, name: str, target: Any) -> threading.Thread:
     thread = threading.Thread(target=target, name=name, daemon=True)
     thread.start()
@@ -2072,6 +2081,7 @@ class RuntimeManagerDaemon:
         error_type: str = "",
         result_data: dict[str, Any] | None = None,
         reconcile: bool = True,
+        reconcile_observation: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         state = load_state()
         state.setdefault("command", {}).update(
@@ -2096,7 +2106,7 @@ class RuntimeManagerDaemon:
                 state.setdefault("workbench", {})["phase"] = "failed"
                 state["workbench"]["failureMessage"] = failure_message or message
         if reconcile:
-            state = self._reconcile_observation(state)
+            state = self._reconcile_observation(state, observation=reconcile_observation)
         state = save_state(state)
         result = {
             "commandId": command_id,
@@ -2328,8 +2338,8 @@ class RuntimeManagerDaemon:
             },
         )
 
-    def _reconcile_observation(self, state: dict[str, Any]) -> dict[str, Any]:
-        observation = observe_workbench()
+    def _reconcile_observation(self, state: dict[str, Any], *, observation: dict[str, Any] | None = None) -> dict[str, Any]:
+        observation = observation if isinstance(observation, dict) else observe_workbench()
         residual_processes = residual_process_payload(
             project_root=PROJECT_ROOT,
             exclude_pids=_snapshot_residual_excluded_pids(observation, self._pid),
@@ -3018,13 +3028,13 @@ class RuntimeManagerDaemon:
 
         state = load_state()
         workbench = state.setdefault("workbench", {})
-        observation = observe_workbench()
+        observation = _observe_workbench_for_close()
         if _close_request_already_satisfied(observation) and str(workbench.get("phase") or "") != "failed":
             closed_runs = _close_active_evolution_runs_for_shutdown()
             workbench["desiredState"] = "closed"
             workbench["phase"] = "steady"
             workbench["failureMessage"] = ""
-            save_state(self._reconcile_observation(state))
+            save_state(self._reconcile_observation(state, observation=observation))
             cleanup_result = {"supported": True, "requested": [], "terminated": [], "remaining": [], "skipped": "already_closed_no_residual"}
             if bool(args.get("stopManager")) or _closed_observation_has_residual_evidence(observation):
                 cleanup_result = self._cleanup_residual_workbench_processes()
@@ -3048,6 +3058,7 @@ class RuntimeManagerDaemon:
                     "runDeferredWorkbenchOpen": bool(reopen_intent),
                     "restartIntent": reopen_intent or {},
                 },
+                reconcile_observation=observation,
             )
 
         closed_runs = _close_active_evolution_runs_for_shutdown()
@@ -3061,7 +3072,7 @@ class RuntimeManagerDaemon:
                 "failureMessage": "",
             }
         )
-        save_state(self._reconcile_observation(state))
+        save_state(self._reconcile_observation(state, observation=observation))
         close_outcome = self._close_workbench_with_fast_path(
             command_id=command_id,
             initial_observation=observation,
@@ -3120,6 +3131,7 @@ class RuntimeManagerDaemon:
                 "lifecycleTimingsMs": lifecycle_timings_ms,
                 "closeStrategy": close_strategy,
             },
+            reconcile_observation=verification,
         )
         if bool(args.get("stopManager")):
             if reopen_intent:
@@ -3136,7 +3148,7 @@ class RuntimeManagerDaemon:
         source = str(args.get("source") or "").strip()
         state = load_state()
         workbench = state.setdefault("workbench", {})
-        initial_observation = observe_workbench()
+        initial_observation = _observe_workbench_for_close()
         already_satisfied = _close_request_already_satisfied(initial_observation) and not _closed_observation_has_residual_evidence(
             initial_observation
         )
@@ -3154,7 +3166,7 @@ class RuntimeManagerDaemon:
                 "failureMessage": "",
             }
         )
-        save_state(self._reconcile_observation(state))
+        save_state(self._reconcile_observation(state, observation=initial_observation))
         _append_event(
             "workbench.force_close.requested",
             _close_verification_event_payload(
@@ -3207,6 +3219,7 @@ class RuntimeManagerDaemon:
                     "forceStoppedWorkRuns": force_stopped_runs,
                     "alreadySatisfied": True,
                 },
+                reconcile_observation=initial_observation,
             )
 
         cleanup_result = self._force_cleanup_workbench_processes(initial_observation)
@@ -3264,7 +3277,7 @@ class RuntimeManagerDaemon:
                 "failureMessage": "",
             }
         )
-        save_state(self._reconcile_observation(state))
+        save_state(self._reconcile_observation(state, observation=verification))
         return self._finish_command(
             command_id,
             ok=True,
@@ -3274,6 +3287,7 @@ class RuntimeManagerDaemon:
                 "closedEvolutionRuns": closed_runs,
                 "forceStoppedWorkRuns": force_stopped_runs,
             },
+            reconcile_observation=verification,
         )
 
     def _run_deferred_workbench_open(self, result: dict[str, Any]) -> None:

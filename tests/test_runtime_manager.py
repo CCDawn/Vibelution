@@ -3726,6 +3726,80 @@ def test_observe_workbench_recovers_managed_browser_window_from_profile(monkeypa
     assert observation["lifecycleConsistency"] == "consistent"
 
 
+def test_observe_workbench_can_skip_backend_observed_browser_recovery(monkeypatch, tmp_path):
+    profile_dir = tmp_path / "workbench-app-profile"
+    profile_dir.mkdir()
+    recovery_calls: list[str] = []
+    monkeypatch.setattr(
+        workbench_controller,
+        "_load_launcher_state",
+        lambda: {
+            "url": "http://127.0.0.1:8000",
+            "backendPid": 25744,
+            "backendLaunchPid": 25744,
+            "browserLaunchPid": 39880,
+            "browserWindowPid": 39880,
+            "workbenchBrowserProfileDir": str(profile_dir),
+            "browserManaged": True,
+            "sessionId": "managed-browser-missing",
+        },
+    )
+    monkeypatch.setattr(workbench_controller, "_is_process_alive", lambda pid: int(pid) == 25744)
+    monkeypatch.setattr(workbench_controller, "_is_backend_healthy", lambda url: True)
+    monkeypatch.setattr(workbench_controller, "_listening_pid_for_port", lambda port: 25744)
+    monkeypatch.setattr(workbench_controller, "_port_is_listening_socket", lambda port: True)
+    monkeypatch.setattr(workbench_controller, "_repo_workbench_backend_kind", lambda pid: "managed_workbench_backend")
+
+    def recover_browser_window(profile_dir: str) -> int:
+        recovery_calls.append(profile_dir)
+        return 4600
+
+    monkeypatch.setattr(workbench_controller, "_recover_managed_browser_window_pid", recover_browser_window)
+
+    observation = workbench_controller.observe_workbench(recover_browser_window_for_backend_observed=False)
+
+    assert observation["observedState"] == "partial"
+    assert observation["backendObserved"] is True
+    assert observation["browserWindowAlive"] is False
+    assert observation["browserWindowRecoveredPid"] == 0
+    assert observation["browserWindowRecoverySource"] == ""
+    assert recovery_calls == []
+
+
+def test_observe_workbench_still_recovers_orphaned_browser_in_close_mode(monkeypatch, tmp_path):
+    profile_dir = tmp_path / "workbench-app-profile"
+    profile_dir.mkdir()
+    monkeypatch.setattr(
+        workbench_controller,
+        "_load_launcher_state",
+        lambda: {
+            "url": "http://127.0.0.1:8000",
+            "backendPid": 25744,
+            "backendLaunchPid": 25744,
+            "browserLaunchPid": 4500,
+            "browserWindowPid": 4500,
+            "workbenchBrowserProfileDir": str(profile_dir),
+            "browserManaged": True,
+            "sessionId": "managed-browser-orphaned",
+        },
+    )
+    monkeypatch.setattr(workbench_controller, "_is_process_alive", lambda pid: int(pid) == 4600)
+    monkeypatch.setattr(workbench_controller, "_is_backend_healthy", lambda url: False)
+    monkeypatch.setattr(workbench_controller, "_listening_pid_for_port", lambda port: 0)
+    monkeypatch.setattr(workbench_controller, "_port_is_listening_socket", lambda port: False)
+    monkeypatch.setattr(workbench_controller, "_repo_workbench_backend_kind", lambda pid: "")
+    monkeypatch.setattr(workbench_controller, "_recover_managed_browser_window_pid", lambda profile_dir: 4600)
+
+    observation = workbench_controller.observe_workbench(recover_browser_window_for_backend_observed=False)
+
+    assert observation["observedState"] == "open"
+    assert observation["backendObserved"] is False
+    assert observation["browserWindowAlive"] is True
+    assert observation["browserWindowRecoveredPid"] == 4600
+    assert observation["browserWindowRecoverySource"] == "managed_profile"
+    assert observation["lifecycleConsistency"] == "orphaned_browser"
+
+
 def test_snapshot_residual_excluded_pids_includes_backend_launch_tree_root():
     excluded = daemon._snapshot_residual_excluded_pids(
         {
@@ -5923,6 +5997,77 @@ def test_handle_close_workbench_uses_runtime_manager_fast_path(monkeypatch):
     assert any(event_type == "workbench.close.fast_path_succeeded" for event_type, _payload in events)
     succeeded = next(payload for event_type, payload in events if event_type == "workbench.close.verification_succeeded")
     assert succeeded["closeStrategy"] == "runtime_manager_fast_path"
+
+
+def test_handle_close_workbench_uses_light_observation_and_reuses_it(monkeypatch):
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    state = {
+        "command": {"activeCommandId": "cmd-close"},
+        "workbench": {
+            "desiredState": "open",
+            "observedState": "partial",
+            "phase": "steady",
+        },
+    }
+    open_observation = {
+        "observedState": "partial",
+        "launcherStatePresent": True,
+        "browserManaged": True,
+        "browserWindowAlive": False,
+        "backendPid": 28888,
+        "backendLaunchPid": 28888,
+        "backendAlive": True,
+        "backendHealthy": True,
+        "backendObserved": True,
+        "backendPort": 8000,
+        "backendPortListening": True,
+        "backendPortOwnerPid": 28888,
+        "backendPortOwnerTrusted": True,
+        "backendPortConflict": False,
+        "browserProfileDir": "C:/tmp/vibelution-workbench-profile",
+        "browserLaunchPid": 29999,
+        "browserWindowPid": 29999,
+        "sessionId": "managed-session",
+        "url": "http://127.0.0.1:8000",
+        "lifecycleConsistency": "browser_missing",
+    }
+    observation_calls: list[dict] = []
+
+    def fake_observe_workbench(**kwargs):
+        observation_calls.append(dict(kwargs))
+        return dict(open_observation)
+
+    monkeypatch.setattr(daemon, "load_state", lambda: state)
+    monkeypatch.setattr(daemon, "save_state", lambda next_state: next_state)
+    monkeypatch.setattr(daemon, "now_iso", lambda: "2026-06-12T10:40:00+00:00")
+    monkeypatch.setattr(daemon, "observe_workbench", fake_observe_workbench)
+    monkeypatch.setattr(daemon, "build_evolution_summary", lambda: {"self": {}, "supervised": {}})
+    monkeypatch.setattr(daemon, "_runtime_manager_active_work_runs", lambda: [])
+    monkeypatch.setattr(daemon, "_close_active_evolution_runs_for_shutdown", lambda: [])
+    monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: None)
+    monkeypatch.setattr(daemon, "residual_process_payload", lambda **kwargs: {"count": 0, "items": []})
+    monkeypatch.setattr(daemon, "_backend_port_is_closed_for_fast_close", lambda port: True)
+    monkeypatch.setattr(
+        daemon,
+        "clear_workbench_launcher_state_after_close",
+        lambda: {"preservedLauncherControlState": True, "removedState": False},
+    )
+    monkeypatch.setattr(
+        daemon.RuntimeManagerDaemon,
+        "_force_cleanup_workbench_processes",
+        lambda self, observation=None: {
+            "supported": True,
+            "requested": [28888],
+            "terminated": [28888],
+            "remaining": [],
+        },
+    )
+
+    result = runtime_daemon._handle_close_workbench(command_id="cmd-close", args={"reason": "web_close_button"})
+
+    assert result["ok"] is True
+    assert result["closeStrategy"] == "runtime_manager_fast_path"
+    assert observation_calls == [{"recover_browser_window_for_backend_observed": False}]
 
 
 def test_handle_close_workbench_falls_back_to_launcher_when_fast_path_is_unavailable(monkeypatch):
