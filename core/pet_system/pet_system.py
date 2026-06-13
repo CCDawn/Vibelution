@@ -39,24 +39,57 @@ from .subsystems import (
 from .utils.storage import Storage
 
 
+def _load_current_app_config() -> Any:
+    try:
+        from config.settings import get_config
+    except Exception:
+        return None
+
+    try:
+        return get_config()
+    except Exception:
+        return None
+
+
+def _config_payload(value: Any) -> Dict[str, Any]:
+    if value is None:
+        return {}
+    if isinstance(value, dict):
+        return dict(value)
+    if hasattr(value, "model_dump"):
+        return value.model_dump()
+    return {}
+
+
+def _coerce_config(model_cls: Any, value: Any):
+    if isinstance(value, model_cls):
+        return value
+    payload = _config_payload(value)
+    if not payload:
+        return model_cls()
+    return model_cls.model_validate(payload)
+
+
 class PetSystemConfig:
     """宠物系统配置包装类"""
 
-    def __init__(self, config: Optional[PetConfig] = None):
-        if config is None:
-            config = PetConfig()
-        self._config = config
-        self.pet = config
-        self.gene = GeneConfig()
-        self.heart = HeartConfig()
-        self.dream = DreamConfig()
-        self.personality = PersonalityConfig()
-        self.hunger = HungerConfig()
-        self.diary = DiaryConfig()
-        self.social = SocialConfig()
-        self.health = HealthConfig()
-        self.skin = SkinConfig()
-        self.sound = SoundConfig()
+    def __init__(self, config: Optional[PetConfig] = None, app_config: Any = None):
+        if app_config is None and config is None:
+            app_config = _load_current_app_config()
+
+        pet_config = config if config is not None else getattr(app_config, "pet", None)
+        self.pet = _coerce_config(PetConfig, pet_config)
+        self._config = self.pet
+        self.gene = _coerce_config(GeneConfig, getattr(app_config, "pet_gene", None))
+        self.heart = _coerce_config(HeartConfig, getattr(app_config, "pet_heart", None))
+        self.dream = _coerce_config(DreamConfig, getattr(app_config, "pet_dream", None))
+        self.personality = _coerce_config(PersonalityConfig, getattr(app_config, "pet_personality", None))
+        self.hunger = _coerce_config(HungerConfig, getattr(app_config, "pet_hunger", None))
+        self.diary = _coerce_config(DiaryConfig, getattr(app_config, "pet_diary", None))
+        self.social = _coerce_config(SocialConfig, getattr(app_config, "pet_social", None))
+        self.health = _coerce_config(HealthConfig, getattr(app_config, "pet_health", None))
+        self.skin = _coerce_config(SkinConfig, getattr(app_config, "pet_skin", None))
+        self.sound = _coerce_config(SoundConfig, getattr(app_config, "pet_sound", None))
 
 
 class PetSystem:
@@ -111,6 +144,9 @@ class PetSystem:
 
         # 加载数据
         self.data = self._load_data()
+        configured_name = str(getattr(self.config.pet, "name", "") or "").strip()
+        if configured_name:
+            self.data.attributes.name = configured_name
         if not self.data.attributes.birth_time:
             self.data.attributes.birth_time = datetime.now().isoformat()
 
@@ -434,3 +470,4 @@ def reset_pet_system():
     if _pet_instance:
         _pet_instance.reset()
     _pet_instance = None
+    PetSystem._instance = None

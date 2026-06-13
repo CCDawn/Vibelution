@@ -364,6 +364,45 @@ def test_config_loader_ignores_invalid_agent_workbench_port_aliases(monkeypatch,
     assert config.workbench.frontend_port == 6200
 
 
+def test_pet_system_config_reads_unified_settings(monkeypatch):
+    from core.pet_system.pet_system import PetSystemConfig
+
+    app_config = AppConfig.model_validate(
+        {
+            "pet": {"name": "设置虾", "save_interval": 7},
+            "pet_gene": {"context_window_factor": 0.123},
+            "pet_heart": {"active_rate": 3.5},
+            "pet_dream": {"dream_duration": 9},
+            "pet_sound": {"volume": 0.25},
+        }
+    )
+    monkeypatch.setattr("config.settings.get_config", lambda: app_config)
+
+    config = PetSystemConfig()
+
+    assert config.pet.name == "设置虾"
+    assert config.pet.save_interval == 7
+    assert config.gene.context_window_factor == 0.123
+    assert config.heart.active_rate == 3.5
+    assert config.dream.dream_duration == 9
+    assert config.sound.volume == 0.25
+
+
+def test_pet_system_applies_configured_pet_name(monkeypatch, tmp_path):
+    from core.pet_system import pet_system as pet_system_module
+
+    app_config = AppConfig.model_validate({"pet": {"name": "设置虾"}})
+    monkeypatch.setattr("config.settings.get_config", lambda: app_config)
+    monkeypatch.chdir(tmp_path)
+    pet_system_module.reset_pet_system()
+
+    try:
+        pet = pet_system_module.get_pet_system()
+        assert pet.data.attributes.name == "设置虾"
+    finally:
+        pet_system_module.reset_pet_system()
+
+
 def test_external_sample_configs_load_through_entrypoints(tmp_path):
     main_config = _write_sample_public_config(tmp_path, "config.toml")
     example_config = _write_sample_public_config(tmp_path, "config.example.toml")
