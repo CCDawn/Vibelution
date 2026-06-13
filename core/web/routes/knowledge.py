@@ -18,7 +18,6 @@ from core.web.services.team_knowledge_service import (
     create_ingestion_package,
     create_rating_suggestion,
     create_refinement_proposal,
-    create_source_artifact,
     collect_source_to_inbox,
     create_source_artifact_from_central_source,
     get_knowledge_dashboard_snapshot,
@@ -63,20 +62,6 @@ class KnowledgeBaseCreatePayload(BaseModel):
     description: str = Field("", max_length=1200)
     actorAgentId: str = Field("", max_length=160)
     acl: dict[str, Any] = Field(default_factory=dict)
-
-
-class SourceArtifactCreatePayload(BaseModel):
-    sourceType: str = Field("", max_length=80)
-    sourceRef: dict[str, Any] = Field(default_factory=dict)
-    sourceCreatedAt: str = Field("", max_length=80)
-    capturedBy: str = Field("", max_length=160)
-    sourceHash: str = Field("", max_length=160)
-    evidenceRange: dict[str, Any] = Field(default_factory=dict)
-    title: str = Field("", max_length=240)
-    summary: str = Field("", max_length=4000)
-    actorAgentId: str = Field("", max_length=160)
-    centralSourceId: str = Field("", max_length=160)
-    inboxSourceId: str = Field("", max_length=160)
 
 
 class SourceInboxCollectPayload(BaseModel):
@@ -590,31 +575,6 @@ def agent_knowledge_base_create(agent_id: str, payload: KnowledgeBaseCreatePaylo
             description=payload.description,
             actor_agent_id=payload.actorAgentId,
             acl=payload.acl,
-        )
-    except TeamKnowledgePermissionError as exc:
-        raise HTTPException(status_code=403, detail=str(exc)) from exc
-    except TeamKnowledgeNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except TeamKnowledgeError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-
-
-@router.post("/knowledge-bases/{knowledge_base_id}/source-artifacts", status_code=status.HTTP_201_CREATED)
-def knowledge_source_artifact_create(knowledge_base_id: str, payload: SourceArtifactCreatePayload) -> dict:
-    try:
-        return create_source_artifact(
-            knowledge_base_id,
-            source_type=payload.sourceType,
-            source_ref=payload.sourceRef,
-            source_created_at=payload.sourceCreatedAt,
-            captured_by=payload.capturedBy,
-            source_hash=payload.sourceHash,
-            evidence_range=payload.evidenceRange,
-            title=payload.title,
-            summary=payload.summary,
-            actor_agent_id=payload.actorAgentId,
-            central_source_id=payload.centralSourceId,
-            inbox_source_id=payload.inboxSourceId,
         )
     except TeamKnowledgePermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc

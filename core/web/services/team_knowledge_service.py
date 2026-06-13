@@ -763,13 +763,29 @@ def create_source_artifact(
     normalized_type = str(source_type or "").strip()
     if not normalized_type and central_source:
         normalized_type = str(central_source.get("sourceType") or "").strip()
-    if normalized_type not in SOURCE_TYPES:
-        raise TeamKnowledgeError(f"Unsupported source type: {source_type}")
     normalized_ref = source_ref if isinstance(source_ref, dict) else {}
     if normalized_type == "team_chat_refinement":
         if str(owner.get("ownerType") or "") != "team":
             raise TeamKnowledgeError("team_chat_refinement sources require a Team knowledge base.")
         _validate_team_chat_source(owner["team"], normalized_ref)
+    if central_source:
+        central_source_type = str(central_source.get("sourceType") or "").strip()
+        if normalized_type != central_source_type:
+            raise TeamKnowledgeError("SourceArtifact sourceType must match the central source.")
+        central_ref = _bounded_dict(central_source.get("sourceRef") if isinstance(central_source.get("sourceRef"), dict) else {})
+        central_ref.update({
+            "centralSourceId": central_source["centralSourceId"],
+            "centralPath": central_source.get("centralPath") or "",
+            "sourceHash": central_source.get("sourceHash") or "",
+            "originalOwnerType": owner_ref.get("ownerType") or central_source.get("originOwnerType") or "",
+            "originalOwnerId": owner_ref.get("ownerId") or central_source.get("originOwnerId") or "",
+            "originalPath": owner_ref.get("originalPath") or central_source.get("originOriginalPath") or "",
+        })
+        source_ref = central_ref
+        source_created_at = str(central_source.get("sourceCreatedAt") or source_created_at or "")
+        source_hash = str(central_source.get("sourceHash") or source_hash or "")
+    if normalized_type not in SOURCE_TYPES:
+        raise TeamKnowledgeError(f"Unsupported source type: {source_type}")
     now = utc_now_iso()
     artifact = {
         "sourceArtifactId": _new_event_id("src"),
