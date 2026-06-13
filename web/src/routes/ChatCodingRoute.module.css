@@ -300,6 +300,46 @@
   word-break: normal;
 }
 
+.sessionBindingNotice {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  color: var(--fg-secondary);
+  font-size: 0.72rem;
+  line-height: 1.25;
+}
+
+.sessionBindingNotice > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sessionBindingNotice button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  padding: 3px 6px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 26%, var(--border-soft));
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--accent-cool) 8%, transparent);
+  color: var(--fg-primary);
+  font: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.sessionBindingNotice button:hover,
+.sessionBindingNotice button:focus-visible {
+  border-color: color-mix(in srgb, var(--accent-cool) 48%, var(--border-strong));
+  background: color-mix(in srgb, var(--accent-cool) 14%, transparent);
+  outline: none;
+}
+
 .sessionDiagnosticsDetails {
   display: grid;
   gap: 0;

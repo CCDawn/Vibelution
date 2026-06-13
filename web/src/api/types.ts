@@ -2221,6 +2221,8 @@ export type SessionSummary = {
   agentRoleKey?: string;
   agentPromptTemplateId?: string;
   dialogueModelId?: string;
+  agentPrimaryDirectSessionId?: string;
+  agentDirectSessionMismatch?: boolean;
   workspacePath?: string;
   agentWorkspacePath?: string;
   agentMissingId?: string;
