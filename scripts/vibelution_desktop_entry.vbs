@@ -1,8 +1,8 @@
 Option Explicit
 
 Dim shell, fso, scriptPath, scriptDir, projectDir
-Dim powerShellPath, powerShellEntryPath, runtimeDir, launcherDir, logPath
-Dim action, noBrowser, command, processId, runId, launcherPythonPath
+Dim powerShellPath, powerShellEntryPath, launcherScriptPath, pythonEntryPath, runtimeDir, launcherDir, logPath
+Dim action, noBrowser, command, processId, runId, launcherPythonPath, launcherPythonNoConsolePath
 
 Set shell = CreateObject("WScript.Shell")
 Set fso = CreateObject("Scripting.FileSystemObject")
@@ -11,6 +11,8 @@ scriptPath = WScript.ScriptFullName
 scriptDir = fso.GetParentFolderName(scriptPath)
 projectDir = fso.GetParentFolderName(scriptDir)
 powerShellEntryPath = fso.BuildPath(scriptDir, "vibelution_desktop_entry.ps1")
+launcherScriptPath = fso.BuildPath(scriptDir, "vibelution_launcher.ps1")
+pythonEntryPath = fso.BuildPath(scriptDir, "vibelution_desktop_entry.py")
 runtimeDir = fso.BuildPath(projectDir, ".runtime")
 launcherDir = fso.BuildPath(runtimeDir, "launcher")
 logPath = fso.BuildPath(launcherDir, "desktop-entry-vbs.log")
@@ -28,9 +30,21 @@ If Err.Number <> 0 Then
 End If
 On Error GoTo 0
 
-If Not fso.FileExists(powerShellEntryPath) Then
+If Not IsLauncherOnlyAction(action) And Not fso.FileExists(powerShellEntryPath) Then
     WriteLog "desktop_entry_vbs.failed", "error", "PowerShell desktop entry script not found.", "path=" & powerShellEntryPath
     ShowFailure "Desktop entry script not found:" & vbCrLf & powerShellEntryPath
+    WScript.Quit 1
+End If
+
+If IsLauncherOnlyAction(action) And Not fso.FileExists(launcherScriptPath) Then
+    WriteLog "desktop_entry_vbs.failed", "error", "Launcher script not found.", "path=" & launcherScriptPath
+    ShowFailure "Launcher script not found:" & vbCrLf & launcherScriptPath
+    WScript.Quit 1
+End If
+
+If IsLauncherOnlyAction(action) And Not fso.FileExists(pythonEntryPath) Then
+    WriteLog "desktop_entry_vbs.failed", "error", "Python desktop entry bridge not found.", "path=" & pythonEntryPath
+    ShowFailure "Python desktop entry bridge not found:" & vbCrLf & pythonEntryPath
     WScript.Quit 1
 End If
 
@@ -47,6 +61,24 @@ If Not IsAllowedAction(action) Then
 End If
 
 SetLauncherEnvironment
+
+If IsLauncherOnlyAction(action) Then
+    command = BuildPythonLauncherBridgeCommand()
+    WriteLog "desktop_entry_vbs.started", "info", "Launching hidden Python Launcher control bridge.", "action=" & action & ";no_browser=" & CStr(noBrowser)
+
+    On Error Resume Next
+    processId = StartHiddenProcess(command, projectDir)
+    If Err.Number <> 0 Then
+        WriteLog "desktop_entry_vbs.failed", "error", "Failed to launch hidden Python Launcher control bridge.", "error=" & Err.Description
+        ShowFailure "Failed to launch Vibelution:" & vbCrLf & Err.Description & vbCrLf & vbCrLf & "Log: " & logPath
+        WScript.Quit 1
+    End If
+    On Error GoTo 0
+
+    WriteLog "desktop_entry_vbs.launched", "info", "Hidden Python Launcher control bridge launched.", "action=" & action & ";process_id=" & CStr(processId) & ";launch_api=wmi_python_bridge_hidden_process"
+    ShowLaunchFeedback action
+    WScript.Quit 0
+End If
 
 command = Quote(powerShellPath) _
     & " -NoLogo -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command " _
@@ -118,17 +150,31 @@ Function IsAllowedAction(value)
     End Select
 End Function
 
+Function IsLauncherOnlyAction(value)
+    IsLauncherOnlyAction = (LCase(Trim(value)) = "launcher")
+End Function
+
 Sub SetLauncherEnvironment()
-    Dim env, venvPython
+    Dim env, venvPython, venvPythonNoConsole, bridgePythonOverride
     Set env = shell.Environment("PROCESS")
     env("VIBELUTION_DESKTOP_ENTRY_VBS_RUN_ID") = runId
     launcherPythonPath = ""
+    launcherPythonNoConsolePath = ""
     venvPython = fso.BuildPath(projectDir, ".venv\Scripts\python.exe")
+    venvPythonNoConsole = fso.BuildPath(projectDir, ".venv\Scripts\pythonw.exe")
+    bridgePythonOverride = Trim(env("VIBELUTION_DESKTOP_ENTRY_PYTHON_BRIDGE_EXE"))
 
     If fso.FileExists(venvPython) Then
         launcherPythonPath = venvPython
         env("VIBELUTION_PYTHON_EXE") = venvPython
         WriteLog "desktop_entry_vbs.python_runtime.selected", "info", "Using Python runtime for desktop launch.", "path=" & venvPython
+    End If
+    If Len(bridgePythonOverride) > 0 And fso.FileExists(bridgePythonOverride) Then
+        launcherPythonNoConsolePath = bridgePythonOverride
+    ElseIf fso.FileExists(venvPythonNoConsole) Then
+        launcherPythonNoConsolePath = venvPythonNoConsole
+    ElseIf fso.FileExists(venvPython) Then
+        launcherPythonNoConsolePath = venvPython
     End If
 End Sub
 
@@ -148,6 +194,24 @@ Function BuildPowerShellEntryCommand()
         text = text & " -NoBrowser"
     End If
     BuildPowerShellEntryCommand = text
+End Function
+
+Function BuildPythonLauncherBridgeCommand()
+    Dim text
+    If Len(launcherPythonNoConsolePath) = 0 Then
+        Err.Raise vbObjectError + 1703, "BuildPythonLauncherBridgeCommand", "Python runtime was not found for Launcher bridge."
+    End If
+    text = Quote(launcherPythonNoConsolePath) _
+        & " " & Quote(pythonEntryPath) _
+        & " --action " & Quote(action)
+    If Len(launcherPythonPath) > 0 Then
+        text = text & " --python-exe " & Quote(launcherPythonPath)
+    End If
+    text = text & " --run-id " & Quote(runId)
+    If noBrowser Then
+        text = text & " --no-browser"
+    End If
+    BuildPythonLauncherBridgeCommand = text
 End Function
 
 Sub AppendExistingPowerShellEnvAssignment(ByRef text, name)
@@ -244,6 +308,7 @@ Function StartHiddenProcess(commandLine, workingDirectory)
     End If
     StartHiddenProcess = CLng(createdPid)
 End Function
+
 
 Sub EnsureFolder(path)
     Dim parent

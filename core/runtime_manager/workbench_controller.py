@@ -15,6 +15,7 @@ import urllib.parse
 import urllib.request
 import http.client
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 from config.workbench import configured_backend_port
@@ -543,17 +544,28 @@ def _hidden_startup_info() -> subprocess.STARTUPINFO | None:
 
 
 def _launcher_action_detached_process() -> bool:
-    # Launcher actions must remain waitable so Runtime Manager sees the real
-    # Start-ManagedSession result instead of a short-lived adapter success.
+    # Runtime Manager launcher actions stay waitable; console suppression comes
+    # from the Python no-console adapter instead of DETACHED_PROCESS.
     return False
 
 
 def _launcher_action_launch_api() -> str:
-    if _launcher_action_detached_process():
-        return "detached_waitable_popen"
     if os.name == "nt":
-        return "hidden_waitable_popen"
+        return "python_no_console_waitable_popen"
     return "waitable_popen"
+
+
+def _python_launcher_executable() -> str:
+    raw = str(os.environ.get("VIBELUTION_PYTHON_EXE") or sys.executable or "").strip()
+    if os.name != "nt" or not raw:
+        return raw or sys.executable
+    candidate = Path(raw)
+    if candidate.name.lower() == "pythonw.exe":
+        return str(candidate)
+    sibling = candidate.with_name("pythonw.exe")
+    if sibling.exists():
+        return str(sibling)
+    return raw
 
 
 def _read_capture_file(path: str) -> str:
@@ -567,24 +579,8 @@ def _read_capture_file(path: str) -> str:
 
 
 def _launcher_command_args(action: str, *, no_browser: bool = False) -> list[str]:
-    if os.name == "nt":
-        args = [
-            "powershell.exe",
-            "-NoProfile",
-            "-WindowStyle",
-            "Hidden",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-File",
-            str(LAUNCHER_SCRIPT_PATH),
-            "-Action",
-            str(action),
-        ]
-        if no_browser:
-            args.append("-NoBrowser")
-        return args
     args = [
-        sys.executable,
+        _python_launcher_executable(),
         str(PYTHON_LAUNCHER_SCRIPT_PATH),
         "--action",
         str(action),
@@ -733,7 +729,7 @@ def _record_launcher_action_event(
     internal_action = str(action or "").startswith("internal-")
     payload: dict[str, Any] = {
         "action": str(action or ""),
-        "adapter": "powershell" if os.name == "nt" else "python",
+        "adapter": "python",
         "noBrowser": bool(no_browser),
         "internalAction": internal_action,
         "internalLauncherEnvName": INTERNAL_LAUNCHER_ENV,

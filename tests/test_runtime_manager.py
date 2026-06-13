@@ -372,25 +372,24 @@ def test_launcher_command_uses_python_adapter_on_posix(monkeypatch, tmp_path):
     ]
 
 
-def test_launcher_command_keeps_powershell_adapter_on_windows(monkeypatch, tmp_path):
-    launcher_path = tmp_path / "vibelution_launcher.ps1"
+def test_launcher_command_uses_python_no_console_adapter_on_windows(monkeypatch, tmp_path):
+    launcher_path = tmp_path / "vibelution_launcher.py"
+    python_exe = tmp_path / "python.exe"
+    pythonw_exe = tmp_path / "pythonw.exe"
+    python_exe.write_text("console python", encoding="utf-8")
+    pythonw_exe.write_text("no console python", encoding="utf-8")
     monkeypatch.setattr(workbench_controller.os, "name", "nt", raising=False)
-    monkeypatch.setattr(workbench_controller, "LAUNCHER_SCRIPT_PATH", launcher_path)
+    monkeypatch.setattr(workbench_controller, "PYTHON_LAUNCHER_SCRIPT_PATH", launcher_path)
+    monkeypatch.setattr(workbench_controller.sys, "executable", str(python_exe))
 
     args = workbench_controller._launcher_command_args("internal-stop", no_browser=True)
 
     assert args == [
-        "powershell.exe",
-        "-NoProfile",
-        "-WindowStyle",
-        "Hidden",
-        "-ExecutionPolicy",
-        "Bypass",
-        "-File",
+        str(pythonw_exe),
         str(launcher_path),
-        "-Action",
+        "--action",
         "internal-stop",
-        "-NoBrowser",
+        "--no-browser",
     ]
 
 
@@ -433,6 +432,46 @@ def test_python_launcher_adapter_prefers_pythonw_for_background_services(tmp_pat
     assert selected["noConsolePythonExecutable"] == str(pythonw_exe.resolve())
     assert selected["consoleFallbackReason"] == ""
     assert selected["pythonLaunchPolicy"] == "pythonw_no_console_background_service"
+
+
+def test_python_launcher_managed_edge_args_respect_windowed_config(tmp_path, monkeypatch):
+    import importlib.util
+
+    launcher_path = constants.PROJECT_ROOT / "scripts" / "vibelution_launcher.py"
+    spec = importlib.util.spec_from_file_location("vibelution_launcher_window_config_test", launcher_path)
+    assert spec and spec.loader
+    launcher = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(launcher)
+
+    config_path = tmp_path / "config.toml"
+    config_path.write_text('[workbench]\nwindow_mode = "windowed"\nwindow_size = "1280x720"\n', encoding="utf-8")
+    monkeypatch.setenv("VIBELUTION_CONFIG_PATH", str(config_path))
+
+    args = launcher._managed_edge_args("http://127.0.0.1:8000", tmp_path / "profile")
+
+    assert "--start-fullscreen" not in args
+    assert "--window-size=1280,720" in args
+
+
+def test_python_launcher_preserves_launcher_control_state():
+    import importlib.util
+
+    launcher_path = constants.PROJECT_ROOT / "scripts" / "vibelution_launcher.py"
+    spec = importlib.util.spec_from_file_location("vibelution_launcher_preserve_control_test", launcher_path)
+    assert spec and spec.loader
+    launcher = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(launcher)
+
+    preserved = launcher._preserved_launcher_control_state(
+        {
+            "launcherBackendPid": 101,
+            "launcherBrowserWindowPid": 202,
+            "backendPid": 303,
+            "browserWindowPid": 404,
+        }
+    )
+
+    assert preserved == {"launcherBackendPid": 101, "launcherBrowserWindowPid": 202}
 
 
 def test_python_launcher_allows_lan_hosts_when_binding_wildcard(monkeypatch):
@@ -4026,7 +4065,7 @@ def test_run_launcher_action_passes_configured_port_to_launcher_env(monkeypatch)
     assert completed["durationMs"] >= 0
 
 
-def test_run_launcher_action_hides_powershell_adapter_without_detached_process(monkeypatch):
+def test_run_launcher_action_uses_python_adapter_without_detached_process(monkeypatch):
     captured = {}
 
     class DummyStartupInfo:
@@ -4093,9 +4132,11 @@ def test_run_launcher_action_events_report_hidden_waitable_launch(monkeypatch):
     assert result.returncode == 0
     requested = _event_payload(events, "launcher.action.requested")
     completed = _event_payload(events, "launcher.action.completed")
-    assert requested["launcherLaunchApi"] == "hidden_waitable_popen"
+    assert requested["adapter"] == "python"
+    assert requested["launcherLaunchApi"] == "python_no_console_waitable_popen"
     assert "DETACHED_PROCESS" not in requested["creationFlagNames"]
-    assert completed["launcherLaunchApi"] == "hidden_waitable_popen"
+    assert completed["adapter"] == "python"
+    assert completed["launcherLaunchApi"] == "python_no_console_waitable_popen"
     assert "DETACHED_PROCESS" not in completed["creationFlagNames"]
 
 
@@ -5270,7 +5311,7 @@ def test_run_launcher_action_uses_devnull_stdio(monkeypatch):
     assert result.returncode == 0
     assert result.stdout == "launcher stdout\n"
     assert result.stderr == "launcher stderr\n"
-    assert captured["args"][0][-2:] == ["internal-start", "-NoBrowser"]
+    assert captured["args"][0][-2:] == ["internal-start", "--no-browser"]
     assert captured["kwargs"]["stdin"] is subprocess.DEVNULL
     assert "capture_output" not in captured["kwargs"]
     assert "text" not in captured["kwargs"]
