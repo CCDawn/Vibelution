@@ -208,11 +208,18 @@ describe("AgentsRoute layout contract", () => {
 
   it("creates Agents through tool bundle presets instead of raw tool strings", () => {
     expect(routeSource).toContain("DEFAULT_SESSION_AGENT_ALLOWED_TOOLS");
+    expect(routeSource).toContain("DEFAULT_SESSION_AGENT_PREFERRED_TOOLS");
+    expect(routeSource).toContain("\"apply_patch_tool\"");
+    expect(routeSource).toContain("\"web_fetch_tool\"");
+    expect(routeSource).toContain("\"compress_context_tool\"");
     expect(routeSource).toContain("\"conversation_log_inspect_tool\"");
     expect(routeSource).toContain("\"cli_agent_run_tool\"");
     expect(routeSource).toContain("allowedTools: DEFAULT_SESSION_AGENT_ALLOWED_TOOLS.join(\", \")");
     expect(routeSource).toContain("const sessionDefaultAllowedTools = workSession ? DEFAULT_SESSION_AGENT_ALLOWED_TOOLS : []");
+    expect(routeSource).toContain("const sessionDefaultPreferredTools = workSession ? DEFAULT_SESSION_AGENT_PREFERRED_TOOLS : []");
     expect(routeSource).toContain("const allowedTools = sortedIds([...sessionDefaultAllowedTools, ...selectedAllowedTools])");
+    expect(routeSource).toContain("const selectedPreferredTools = selectedToolPolicy.preferredTools.length");
+    expect(routeSource).toContain("const preferredTools = sortedIds([...sessionDefaultPreferredTools, ...selectedPreferredTools].filter((tool) => allowedTools.includes(tool)))");
     expect(routeSource).toContain("selectedToolBundleIds: string[]");
     expect(routeSource).toContain("function defaultCreateToolBundleIds");
     expect(routeSource).toContain('const preferred = workSession ? ["core", "coding"] : ["core", "research", "collaboration"]');
@@ -412,6 +419,11 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("copy.toolBundlesTitle");
     expect(routeSource).toContain("copy.applyBundle");
     expect(routeSource).toContain("copy.replaceWithBundle");
+    expect(routeSource).toContain("function isSessionToolPolicyAgent");
+    expect(routeSource).toContain("function normalizeToolPolicyDraftForAgent");
+    expect(routeSource).toContain("return normalizeToolPolicyDraftForAgent({");
+    expect(routeSource).toContain("const saveDraft = normalizeToolPolicyDraftForAgent(toolPolicyDraft, selectedAgent)");
+    expect(routeSource).toContain("draft: saveDraft");
     expect(routeSource).toContain("copy.preferredTools");
     expect(routeSource).toContain("styles.toolBundlePanel");
     expect(routeSource).toContain("styles.toolBundleItem");
@@ -428,7 +440,8 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("enabled: toolsWorkspaceNeeded");
     expect(routeSource).toContain("refetchInterval: toolsWorkspaceNeeded ? resolvePollingInterval(pageVisible, 15_000) : false");
     expect(routeSource).toContain("按工具包配置");
-    expect(routeSource).toContain("同一工具只会保存一份授权状态");
+    expect(routeSource).toContain("会话 Agent 会保留会话必备工具");
+    expect(routeSource).toContain("Session Agents keep required session tools");
     expect(routeSource).toContain("copy.capabilityPreviewTitle");
     expect(routeSource).toContain("capabilityPreview.highRiskAllowed");
     expect(routeSource).toContain("styles.capabilityPreviewPanel");
