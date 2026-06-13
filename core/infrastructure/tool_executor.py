@@ -362,6 +362,7 @@ class ToolExecutor:
         "open_evolution_transaction_tool",
         "close_evolution_transaction_tool",
         "cli_tool",
+        "cli_agent_run_tool",
         "task_create_tool",
         "task_update_tool",
         "plan_update_tool",
@@ -393,6 +394,7 @@ class ToolExecutor:
 
         self._timeout_map = {
             "cli_tool": 60,
+            "cli_agent_run_tool": 900,
             "grep_search_tool": 30,
             "web_fetch_tool": 30,
             "web_search_tool": 30,
