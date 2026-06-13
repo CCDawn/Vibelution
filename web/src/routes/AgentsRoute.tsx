@@ -332,6 +332,7 @@ const DEFAULT_SESSION_AGENT_ALLOWED_TOOLS = [
   "grep_search_tool",
   "glob_tool",
   "read_file_tool",
+  "cli_agent_run_tool",
   "conversation_log_inspect_tool",
   "get_core_context_tool",
   "get_current_goal_tool",
@@ -3529,7 +3530,9 @@ export function AgentsRoute() {
       const roleKey = workSession ? "" : draft.roleKey.trim();
       const selectedToolPolicy = toolBundleSelectionToPolicy(draft.selectedToolBundleIds, toolBundles);
       const fallbackAllowedTools = expertiseFromDraft(draft.allowedTools);
-      const allowedTools = selectedToolPolicy.allowedTools.length ? selectedToolPolicy.allowedTools : fallbackAllowedTools;
+      const sessionDefaultAllowedTools = workSession ? DEFAULT_SESSION_AGENT_ALLOWED_TOOLS : [];
+      const selectedAllowedTools = selectedToolPolicy.allowedTools.length ? selectedToolPolicy.allowedTools : fallbackAllowedTools;
+      const allowedTools = sortedIds([...sessionDefaultAllowedTools, ...selectedAllowedTools]);
       const preferredTools = selectedToolPolicy.preferredTools.length
         ? selectedToolPolicy.preferredTools
         : fallbackAllowedTools.includes("agent_message_tool") ? ["agent_message_tool"] : [];

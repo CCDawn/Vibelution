@@ -209,7 +209,10 @@ describe("AgentsRoute layout contract", () => {
   it("creates Agents through tool bundle presets instead of raw tool strings", () => {
     expect(routeSource).toContain("DEFAULT_SESSION_AGENT_ALLOWED_TOOLS");
     expect(routeSource).toContain("\"conversation_log_inspect_tool\"");
+    expect(routeSource).toContain("\"cli_agent_run_tool\"");
     expect(routeSource).toContain("allowedTools: DEFAULT_SESSION_AGENT_ALLOWED_TOOLS.join(\", \")");
+    expect(routeSource).toContain("const sessionDefaultAllowedTools = workSession ? DEFAULT_SESSION_AGENT_ALLOWED_TOOLS : []");
+    expect(routeSource).toContain("const allowedTools = sortedIds([...sessionDefaultAllowedTools, ...selectedAllowedTools])");
     expect(routeSource).toContain("selectedToolBundleIds: string[]");
     expect(routeSource).toContain("function defaultCreateToolBundleIds");
     expect(routeSource).toContain('const preferred = workSession ? ["core", "coding", "memory_context"] : ["core", "research", "collaboration"]');
