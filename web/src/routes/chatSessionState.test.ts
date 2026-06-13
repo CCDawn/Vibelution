@@ -76,6 +76,20 @@ describe("chatSessionState", () => {
     });
   });
 
+  it("preserves direct-session mismatch facts when deriving a sidebar summary", () => {
+    expect(
+      sessionSummaryFromDetail(
+        makeDetail({
+          agentPrimaryDirectSessionId: "session-current",
+          agentDirectSessionMismatch: true,
+        }),
+      ),
+    ).toMatchObject({
+      agentPrimaryDirectSessionId: "session-current",
+      agentDirectSessionMismatch: true,
+    });
+  });
+
   it("preserves child-session fields when deriving a sidebar summary", () => {
     const summary = sessionSummaryFromDetail(
       makeDetail({

@@ -3039,6 +3039,9 @@ export function ChatCodingRoute() {
         ? sessionDetailErrorMessage
         : activeAgentStatusMessage || detail?.taskSummary || directSessionActiveSummary?.taskSummary || (sessionDetailLoadingForActiveSession ? t("loadingSession") : t("preparingShell")));
   const activeTask = detail?.activeTask ?? null;
+  const agentDirectSessionMismatch = Boolean(detail?.agentDirectSessionMismatch);
+  const agentPrimaryDirectSessionId = String(detail?.agentPrimaryDirectSessionId ?? "").trim();
+  const sessionBindingMismatchLine = agentDirectSessionMismatch ? t("sessionBindingMismatchLine") : "";
   const sessionStateValue = String(groupPanelActive ? (projectBusActive ? "ready" : activeGroupRoom?.status ?? "ready") : (runtimeMatchesSelectedSession ? runtime?.sessionState : "") || detail?.currentPhase || directSessionActiveSummary?.currentPhase || directSessionActiveSummary?.status || "idle")
     .trim()
     .toLowerCase();
@@ -3053,11 +3056,15 @@ export function ChatCodingRoute() {
       );
     setTokenSpeedTracker((previous) => updateTokenSpeedTracker(previous, sample));
   }, [activeSessionId, detail?.id, detail?.messages, groupPanelActive, sessionStateValue]);
+  const activeTaskSummary = agentDirectSessionMismatch
+    ? ""
+    : activeTask?.goal
+      || activeTask?.title
+      || activeTask?.nextAction
+      || activeTask?.latestSummary
+      || "";
   const currentTaskSummary =
-    activeTask?.goal
-    || activeTask?.title
-    || activeTask?.nextAction
-    || activeTask?.latestSummary
+    activeTaskSummary
     || detail?.taskSummary
     || directSessionActiveSummary?.taskSummary
     || (runtimeMatchesSelectedSession ? runtime?.taskSummary : "")
@@ -3088,6 +3095,11 @@ export function ChatCodingRoute() {
         value: fileContextValue,
         title: fileContextValue,
       },
+      ...(agentDirectSessionMismatch ? [{
+        label: t("sessionBinding"),
+        value: t("sessionBindingHistorical"),
+        title: `${sessionBindingMismatchLine} ${agentPrimaryDirectSessionId}`,
+      }] : []),
       {
         label: t("currentTask"),
         value: currentTaskSummary,
@@ -4416,6 +4428,19 @@ export function ChatCodingRoute() {
             </span>
           </div>
           <p className={styles.contextLineCompact}>{sessionStateLine}</p>
+          {agentDirectSessionMismatch && agentPrimaryDirectSessionId ? (
+            <div className={styles.sessionBindingNotice} role="status">
+              <span>{sessionBindingMismatchLine}</span>
+              <button
+                type="button"
+                onClick={() => handleOpenDirectSession(agentPrimaryDirectSessionId)}
+                title={`${t("openCurrentDirectSession")} · ${agentPrimaryDirectSessionId}`}
+              >
+                <ArrowUpRight size={13} />
+                <span>{t("openCurrentDirectSession")}</span>
+              </button>
+            </div>
+          ) : null}
           {sessionCompactRows.length > 0 ? (
             <div className={styles.inlineMetaList}>
               {sessionCompactRows.map((row) => (

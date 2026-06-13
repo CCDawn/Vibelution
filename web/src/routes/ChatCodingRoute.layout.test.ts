@@ -345,6 +345,17 @@ describe("ChatCodingRoute layout contract", () => {
     );
   });
 
+  it("shows direct-session mismatch as a status-strip notice with a switch action", () => {
+    expect(routeSource).toContain("agentDirectSessionMismatch");
+    expect(routeSource).toContain("sessionBindingNotice");
+    expect(routeSource).toContain("sessionBindingMismatchLine");
+    expect(routeSource).toContain("handleOpenDirectSession(agentPrimaryDirectSessionId)");
+    expect(routeSource).toContain("label: t(\"sessionBinding\")");
+    expect(routeSource.indexOf("label: t(\"sessionBinding\")")).toBeLessThan(
+      routeSource.indexOf("label: t(\"currentTask\")"),
+    );
+  });
+
   it("records direct chat submit lifecycle telemetry before backend acceptance", () => {
     expect(routeSource).toContain("postSubmitTelemetry");
     expect(routeSource).toContain("browser.chat_submit.requested");
