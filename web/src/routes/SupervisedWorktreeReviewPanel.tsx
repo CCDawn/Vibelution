@@ -171,6 +171,34 @@ export function SupervisedWorktreeReviewPanel({
             </div>
           </div>
         ) : null}
+        {highlightedWorktreeRun ? (
+          <div className={`${styles.worktreeReviewGate} ${styles.worktreeActionGate}`}>
+            <div className={styles.controlActions}>
+              {highlightedWorktreeActions.map((item) => {
+                const Icon = item.icon;
+                const disabled = !item.state?.enabled || pending;
+                const reason = disabledReason(item.state);
+                return (
+                  <button
+                    key={item.action}
+                    type="button"
+                    className={
+                      item.action === "discard" || item.action === "merge"
+                        ? `${styles.inlineAction} ${styles.dangerInlineAction}`
+                        : styles.inlineAction
+                    }
+                    disabled={disabled}
+                    onClick={() => onRunAction(highlightedWorktreeRun, item.action)}
+                    title={reason || t(item.labelKey)}
+                  >
+                    {pending ? <LoaderCircle size={15} className={styles.spin} /> : <Icon size={15} />}
+                    {t(item.labelKey)}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ) : null}
         {highlightedIsSelfOrigin && highlightedWorktreeRun ? (
           <div className={styles.worktreeReviewGate}>
             <div className={styles.worktreeReviewHeader}>
@@ -204,28 +232,6 @@ export function SupervisedWorktreeReviewPanel({
                 {pending ? <LoaderCircle size={15} className={styles.spin} /> : <ShieldCheck size={15} />}
                 {t("approveSelfWorktreeReview")}
               </button>
-              {highlightedWorktreeActions.map((item) => {
-                const Icon = item.icon;
-                const disabled = !item.state?.enabled || pending;
-                const reason = disabledReason(item.state);
-                return (
-                  <button
-                    key={item.action}
-                    type="button"
-                    className={
-                      item.action === "discard" || item.action === "merge"
-                        ? `${styles.inlineAction} ${styles.dangerInlineAction}`
-                        : styles.inlineAction
-                    }
-                    disabled={disabled}
-                    onClick={() => onRunAction(highlightedWorktreeRun, item.action)}
-                    title={reason || t(item.labelKey)}
-                  >
-                    {pending ? <LoaderCircle size={15} className={styles.spin} /> : <Icon size={15} />}
-                    {t(item.labelKey)}
-                  </button>
-                );
-              })}
               {!highlightedApproveReviewAction?.enabled && disabledReason(highlightedApproveReviewAction) ? (
                 <p className={styles.noticeText}>{disabledReason(highlightedApproveReviewAction)}</p>
               ) : null}

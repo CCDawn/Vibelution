@@ -43,16 +43,24 @@ describe("SupervisedReviewRoute layout contract", () => {
   });
 
   it("keeps worktree review actions explicit in the shared panel", () => {
+    const genericActionsIndex = worktreePanelSource.indexOf("styles.worktreeActionGate");
+    const actionMapIndex = worktreePanelSource.indexOf("highlightedWorktreeActions.map");
+    const selfOriginGateIndex = worktreePanelSource.indexOf("highlightedIsSelfOrigin && highlightedWorktreeRun ? (");
+
     expect(worktreePanelSource).toContain("WORKTREE_ACTION_ITEMS");
     expect(worktreePanelSource).toContain('action: "analyze_merge"');
     expect(worktreePanelSource).toContain('action: "preserve"');
     expect(worktreePanelSource).toContain('action: "discard"');
     expect(worktreePanelSource).toContain('action: "merge"');
+    expect(genericActionsIndex).toBeGreaterThan(-1);
+    expect(actionMapIndex).toBeGreaterThan(genericActionsIndex);
+    expect(selfOriginGateIndex).toBeGreaterThan(actionMapIndex);
     expect(worktreePanelSource).toContain("setSelectedWorktreeRunId");
     expect(worktreePanelSource).toContain("runs.slice(0, 4).map");
     expect(worktreePanelSource).toContain("selfWorktreeMergeRequiresReview");
     expect(worktreePanelStyles).toContain(".worktreeReviewSurface");
     expect(worktreePanelStyles).toContain(".worktreeReviewGate .controlActions");
+    expect(worktreePanelStyles).toContain(".worktreeActionGate");
     expect(worktreePanelStyles).toContain("grid-template-columns: repeat(2, minmax(0, 1fr))");
   });
 });
