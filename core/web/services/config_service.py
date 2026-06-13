@@ -41,6 +41,7 @@ from config.public_config import (
     inspect_public_config,
     list_llm_model_options,
     list_llm_model_preset_options,
+    list_llm_provider_preset_options,
     load_public_config,
     preserve_secret_blanks,
     public_config_hash,
@@ -1158,6 +1159,7 @@ def _build_workspace(
         "editorSections": editor_sections,
         "editorMeta": editor_meta,
         "modelPresetOptions": list_llm_model_preset_options(),
+        "providerPresetOptions": list_llm_provider_preset_options(),
         "modelOptions": _decorate_model_options(public_config, normalized_meta),
     }
 

@@ -12885,6 +12885,15 @@ def test_config_workspace_exposes_unified_config_payload(monkeypatch):
     assert preset_options["deepseek_v4_pro"]["model"]["capability_status"] == "unsupported"
     assert preset_options["deepseek_v4_flash"]["model"]["supports_image_input"] is False
     assert preset_options["deepseek_v4_flash"]["model"]["capability_status"] == "unsupported"
+    provider_options = {item["provider_preset_id"]: item for item in payload["providerPresetOptions"]}
+    assert provider_options["openai_main"]["vendor_label"] == "OpenAI"
+    assert provider_options["openai_main"]["label"] == "OpenAI 官方 API"
+    assert provider_options["openai_main"]["provider"]["kind"] == "openai"
+    assert provider_options["xiaomi_mimo_token_plan_cn"]["vendor_label"] == "小米 MiMo"
+    assert provider_options["xiaomi_mimo_token_plan_cn"]["label"] == "MiMo Token Plan CN"
+    assert provider_options["xiaomi_mimo_api_cn"]["label"] == "MiMo 官方 API CN"
+    assert provider_options["relay_openai"]["vendor_label"] == "中转站 / Relay"
+    assert len([item for item in payload["providerPresetOptions"] if item["provider_preset_id"] == "openai_main"]) == 1
     assert "modelOptions" in payload
     assert "profileCards" not in payload
     assert "profileCount" not in payload

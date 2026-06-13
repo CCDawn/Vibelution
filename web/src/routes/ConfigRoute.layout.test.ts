@@ -54,6 +54,15 @@ describe("ConfigRoute layout contract", () => {
     expect(stylesSource).toContain("grid-template-columns: repeat(3, minmax(180px, 1fr))");
   });
 
+  it("splits model creation into vendor templates and concrete model discovery", () => {
+    expect(routeSource).toContain("providerVendorGroups");
+    expect(routeSource).toContain("selectedProviderVendorTemplates");
+    expect(routeSource).toContain("copy.providerVendor");
+    expect(routeSource).toContain("copy.providerTemplate");
+    expect(routeSource).toContain("applyProviderTemplate");
+    expect(routeSource).not.toContain("modelPresetGroups.map");
+  });
+
   it("shows developer mode as launcher-owned read-only state", () => {
     expect(routeSource).toContain("developerModeReadonly");
     expect(routeSource).toContain("developerModeControlled");

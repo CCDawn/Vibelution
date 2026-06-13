@@ -17,6 +17,7 @@ import {
   deriveModelCenterSummary,
   countModelCenterHealthIssues,
   groupModelPresets,
+  groupProviderPresetsByVendor,
   hasPendingSecretChanges,
   listSupervisedAgentInstances,
   modelLibraryIdFromParts,
@@ -33,13 +34,14 @@ import {
   resolveConfigSectionUiStateOnSelect,
   resolveResearchAgentInstance,
   resolveModelEditability,
+  selectModelScenarioProviderPresetId,
   selectModelScenarioPresetId,
   shouldBlockConfigLeave,
   supervisedAgentRole,
   supervisedAgentRoleLabel,
   type PublicConfigShape,
 } from "./configRouteLogic";
-import type { AgentInstance, ConfigModelOption, ConfigModelPresetOption } from "../api/types";
+import type { AgentInstance, ConfigModelOption, ConfigModelPresetOption, ConfigProviderPresetOption } from "../api/types";
 
 const configRouteSource = readFileSync(fileURLToPath(new URL("./ConfigRoute.tsx", import.meta.url)), "utf8");
 
@@ -56,6 +58,26 @@ function preset(
     model_id: presetId,
     provider,
     model: { model: presetId },
+  };
+}
+
+function providerPreset(
+  providerPresetId: string,
+  vendorId: string,
+  vendorLabel: string,
+  provider: Record<string, unknown>,
+  category?: string,
+): ConfigProviderPresetOption {
+  return {
+    provider_preset_id: providerPresetId,
+    label: providerPresetId,
+    vendor_id: vendorId,
+    vendor_label: vendorLabel,
+    category,
+    provider_id: providerPresetId,
+    source_preset_id: providerPresetId,
+    provider,
+    default_model: {},
   };
 }
 
@@ -271,6 +293,19 @@ describe("configRouteLogic", () => {
     expect(groups[0].presets.map((item) => item.preset_id)).toEqual(["relay_model"]);
     expect(groups[1].presets.map((item) => item.preset_id)).toEqual(["compatible_model"]);
     expect(groups[2].presets.map((item) => item.preset_id)).toEqual(["local_model"]);
+  });
+
+  it("groups provider templates under stable vendor headings", () => {
+    const groups = groupProviderPresetsByVendor([
+      providerPreset("openai_main", "openai", "OpenAI", { kind: "openai" }, "official"),
+      providerPreset("openai_image", "openai", "OpenAI", { kind: "openai" }, "official"),
+      providerPreset("relay_openai", "relay", "中转站 / Relay", { kind: "relay" }, "relay"),
+    ]);
+
+    expect(groups.map((group) => group.id)).toEqual(["openai", "relay"]);
+    expect(groups[0].label).toBe("OpenAI");
+    expect(groups[0].templates.map((item) => item.provider_preset_id)).toEqual(["openai_main", "openai_image"]);
+    expect(groups[1].templates.map((item) => item.provider_preset_id)).toEqual(["relay_openai"]);
   });
 
   it("only exposes model discovery for OpenAI-compatible provider routes", () => {
@@ -601,6 +636,21 @@ describe("configRouteLogic", () => {
     expect(selectModelScenarioPresetId("image", presets)).toBe("relay_image2");
     expect(selectModelScenarioPresetId("local", presets)).toBe("local_llama");
     expect(selectModelScenarioPresetId("manual", presets)).toBe("");
+  });
+
+  it("maps model creation scenarios to provider templates before concrete models", () => {
+    const presets = [
+      providerPreset("openai_main", "openai", "OpenAI", { kind: "openai" }, "official"),
+      providerPreset("relay_openai", "relay", "中转站 / Relay", { kind: "relay" }, "relay"),
+      providerPreset("relay_image", "relay", "中转站 / Relay", { kind: "relay" }, "relay"),
+      providerPreset("local_main", "local", "本地模型服务", { kind: "local" }, "local"),
+    ];
+
+    expect(selectModelScenarioProviderPresetId("chat", presets)).toBe("relay_openai");
+    expect(selectModelScenarioProviderPresetId("relay", presets)).toBe("relay_openai");
+    expect(selectModelScenarioProviderPresetId("image", presets)).toBe("relay_image");
+    expect(selectModelScenarioProviderPresetId("local", presets)).toBe("local_main");
+    expect(selectModelScenarioProviderPresetId("manual", presets)).toBe("");
   });
 
   it("treats pending secret writes and clears as unsaved user changes", () => {

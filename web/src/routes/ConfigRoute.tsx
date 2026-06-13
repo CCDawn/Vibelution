@@ -30,7 +30,7 @@ import {
   ConfigLlmTestResult,
   ConfigModelDiscoveryResult,
   ConfigModelOption,
-  ConfigModelPresetOption,
+  ConfigProviderPresetOption,
   ConfigWorkspace,
   HealthDiagnostics,
   HealthFinding,
@@ -51,7 +51,7 @@ import {
   countModelCenterHealthIssues,
   getString,
   clampAvatarCropOffset,
-  groupModelPresets,
+  groupProviderPresetsByVendor,
   hasPendingSecretChanges,
   modelLibraryIdFromParts,
   pickEditableConfigView,
@@ -65,10 +65,9 @@ import {
   resolveConfigSectionUiStateOnSelect,
   resolveImageInputCapabilityStatus,
   shouldBlockConfigLeave,
-  selectModelScenarioPresetId,
+  selectModelScenarioProviderPresetId,
   type ModelScenarioId,
   uniqueModelLibraryId,
-  type ModelPresetGroupLabels,
   type PublicConfigShape,
 } from "./configRouteLogic";
 import { LazyJsonCodeMirror } from "../components/editor/LazyJsonCodeMirror";
@@ -109,6 +108,7 @@ type ModelDetailsDraft = {
 type ModelEditorState = {
   mode: "create" | "edit";
   preset_id: string;
+  provider_template_id: string;
   model_id: string;
   label: string;
   model: string;
@@ -286,7 +286,7 @@ function ConfigWorkspacePlaceholder({
 export const CONFIG_COPY = {
   zh: {
     pageTitle: "统一配置工作台",
-    subtitle: "结构化配置、模型资产与保存状态。",
+    subtitle: "结构化配置、模型资产与保存状态。启动设置在 Launcher 面板维护。",
     subtitleHint: "启动设置在 Launcher 面板维护；结构化编辑、完整配置检查和最终保存仍收口到外部 operator config.toml。",
     loading: "正在加载统一配置工作区...",
     loadFailed: "配置工作区加载失败",
@@ -397,7 +397,10 @@ export const CONFIG_COPY = {
     modelScenarioLocal: "本地模型",
     modelScenarioManual: "高级手填",
     modelScenarioHint: "选择场景会自动套用最接近的模板；服务商、模型名和密钥仍可以在下方调整。",
-    preset: "预设",
+    preset: "厂商",
+    providerVendor: "厂商",
+    providerTemplate: "模板",
+    providerTemplatePlaceholder: "选择模板",
     presetGroupOfficial: "官方供应商",
     presetGroupRelay: "Relay Responses",
     presetGroupOpenAiCompatible: "OpenAI 兼容 API",
@@ -513,7 +516,7 @@ export const CONFIG_COPY = {
   },
   en: {
     pageTitle: "Unified Config Workbench",
-    subtitle: "Structured config, model assets, and save state.",
+    subtitle: "Structured config, model assets, and save state. Startup settings are maintained in Launcher.",
     subtitleHint: "Startup settings are maintained in Launcher; structured editing, full-config checks, and final writes still converge on the external operator config.toml.",
     loading: "Loading unified config workspace...",
     loadFailed: "Failed to load config workspace",
@@ -624,7 +627,10 @@ export const CONFIG_COPY = {
     modelScenarioLocal: "Local model",
     modelScenarioManual: "Advanced manual",
     modelScenarioHint: "The scenario picks the closest template. Provider, model name, and key can still be adjusted below.",
-    preset: "Preset",
+    preset: "Vendor",
+    providerVendor: "Vendor",
+    providerTemplate: "Template",
+    providerTemplatePlaceholder: "Choose a template",
     presetGroupOfficial: "Official providers",
     presetGroupRelay: "Relay Responses",
     presetGroupOpenAiCompatible: "OpenAI-compatible APIs",
@@ -786,6 +792,7 @@ function emptyModelEditorState(): ModelEditorState {
   return {
     mode: "create",
     preset_id: "",
+    provider_template_id: "",
     model_id: "",
     label: "",
     model: "",
@@ -931,6 +938,7 @@ function hydrateModelEditorFromOption(option: ConfigModelOption): ModelEditorSta
   return {
     mode: "edit",
     preset_id: "",
+    provider_template_id: "",
     model_id: option.model_id,
     label: option.label,
     model: option.model,
@@ -2229,6 +2237,7 @@ export function ConfigRoute() {
   const [modelDiscoveryError, setModelDiscoveryError] = useState("");
   const [discoveredModels, setDiscoveredModels] = useState<ConfigDiscoveredModel[]>([]);
   const [selectedDiscoveredModelId, setSelectedDiscoveredModelId] = useState("");
+  const [selectedProviderVendorId, setSelectedProviderVendorId] = useState("");
   const [modelEditorExpanded, setModelEditorExpanded] = useState(false);
   const [sidebarIndexCollapsed, setSidebarIndexCollapsed] = useState(() => readStoredFlag(SIDEBAR_INDEX_COLLAPSED_STORAGE_KEY) ?? false);
   const [activeSectionId, setActiveSectionId] = useState("");
@@ -2350,17 +2359,11 @@ export function ConfigRoute() {
   });
   const modelOptions = workspace?.modelOptions ?? [];
   const modelOptionsById = useMemo(() => new Map(modelOptions.map((option) => [option.model_id, option])), [modelOptions]);
-  const modelPresetGroups = useMemo(
-    () => {
-      const labels: ModelPresetGroupLabels = {
-        official: copy.presetGroupOfficial,
-        relay: copy.presetGroupRelay,
-        openai_compatible: copy.presetGroupOpenAiCompatible,
-        local: copy.presetGroupLocal,
-      };
-      return groupModelPresets(workspace?.modelPresetOptions ?? [], labels);
-    },
-    [copy, workspace?.modelPresetOptions],
+  const providerPresetOptions = workspace?.providerPresetOptions ?? [];
+  const providerVendorGroups = useMemo(() => groupProviderPresetsByVendor(providerPresetOptions), [providerPresetOptions]);
+  const selectedProviderVendorTemplates = useMemo(
+    () => providerVendorGroups.find((group) => group.id === selectedProviderVendorId)?.templates ?? [],
+    [providerVendorGroups, selectedProviderVendorId],
   );
   const modelScenarioOptions = useMemo(
     () =>
@@ -2740,44 +2743,52 @@ export function ConfigRoute() {
     };
   }
 
-  function applyPreset(presetId: string) {
+  function applyProviderTemplate(templateId: string) {
     setModelEditorExpanded(true);
     setModelEditorError("");
     setModelDiscoveryError("");
     setDiscoveredModels([]);
     setSelectedDiscoveredModelId("");
-    const preset = workspace?.modelPresetOptions.find((item) => item.preset_id === presetId);
-    if (!preset) {
-      setModelEditor((current) => ({ ...current, preset_id: presetId }));
+    const template = providerPresetOptions.find((item) => item.provider_preset_id === templateId);
+    if (!template) {
+      setModelEditor((current) => ({ ...current, provider_template_id: templateId }));
       return;
     }
-    const presetModel = asRecord(preset.model);
-    const presetModelId = getString(preset.model_id);
-    const presetModelName = getString(presetModel.model);
+    const templateModel = asRecord(template.default_model);
+    const templateDetails = {
+      ...buildModelDetailsDraft(templateModel),
+      supports_image_input: "unknown" as const,
+    };
+    setSelectedProviderVendorId(template.vendor_id);
     setModelEditor({
       mode: "create",
-      preset_id: presetId,
-      model_id: presetId === "custom_openai_compatible_relay" ? "" : presetModelId,
-      label: getString(presetModel.label) || preset.label,
-      model: presetModelName,
-      api_key_env:
-        getString(presetModel.api_key_env) ||
-        defaultModelApiKeyEnv(
-          presetId === "custom_openai_compatible_relay"
-            ? modelLibraryIdFromParts(getString(presetModel.label) || preset.label, presetModelName)
-            : presetModelId,
-        ),
+      preset_id: "",
+      provider_template_id: templateId,
+      model_id: "",
+      label: "",
+      model: "",
+      api_key_env: "",
       api_key: "",
       clear_api_key: false,
-      provider: buildProviderDraft(asRecord(preset.provider)),
-      details: buildModelDetailsDraft(presetModel),
+      provider: buildProviderDraft(asRecord(template.provider)),
+      details: templateDetails,
     });
   }
 
+  function applyProviderVendor(vendorId: string) {
+    setSelectedProviderVendorId(vendorId);
+    const template = providerVendorGroups.find((group) => group.id === vendorId)?.templates[0];
+    if (template) {
+      applyProviderTemplate(template.provider_preset_id);
+      return;
+    }
+    setModelEditor((current) => ({ ...current, provider_template_id: "" }));
+  }
+
   function applyModelScenario(scenario: ModelScenarioId) {
-    const presetId = selectModelScenarioPresetId(scenario, workspace?.modelPresetOptions ?? []);
-    if (presetId) {
-      applyPreset(presetId);
+    const templateId = selectModelScenarioProviderPresetId(scenario, providerPresetOptions);
+    if (templateId) {
+      applyProviderTemplate(templateId);
       return;
     }
     setModelEditorExpanded(true);
@@ -2785,6 +2796,7 @@ export function ConfigRoute() {
     setModelDiscoveryError("");
     setDiscoveredModels([]);
     setSelectedDiscoveredModelId("");
+    setSelectedProviderVendorId("");
     setModelEditor({
       ...emptyModelEditorState(),
       provider: {
@@ -2884,7 +2896,7 @@ export function ConfigRoute() {
         publicConfig: requireDraft(),
         draftMeta,
         baseHash,
-        presetId: modelEditor.mode === "create" ? modelEditor.preset_id : "",
+        presetId: "",
         modelId: resolvedModelId,
         provider: buildProviderPayload(modelEditor.provider),
         model: modelEditor.model,
@@ -3454,17 +3466,28 @@ export function ConfigRoute() {
                 ) : null}
                 <div className={styles.formGridWide}>
                   <label className={styles.field}>
-                    <span>{copy.preset}</span>
-                    <select value={modelEditor.preset_id} onChange={(event) => applyPreset(event.target.value)}>
+                    <span>{copy.providerVendor}</span>
+                    <select value={selectedProviderVendorId} onChange={(event) => applyProviderVendor(event.target.value)}>
                       <option value="">{copy.customEntry}</option>
-                      {modelPresetGroups.map((group) => (
-                        <optgroup key={group.id} label={group.label}>
-                          {group.presets.map((preset: ConfigModelPresetOption) => (
-                            <option key={preset.preset_id} value={preset.preset_id}>
-                              {preset.label}
-                            </option>
-                          ))}
-                        </optgroup>
+                      {providerVendorGroups.map((group) => (
+                        <option key={group.id} value={group.id}>
+                          {group.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className={styles.field}>
+                    <span>{copy.providerTemplate}</span>
+                    <select
+                      value={modelEditor.provider_template_id}
+                      disabled={!selectedProviderVendorTemplates.length}
+                      onChange={(event) => applyProviderTemplate(event.target.value)}
+                    >
+                      <option value="">{copy.providerTemplatePlaceholder}</option>
+                      {selectedProviderVendorTemplates.map((template: ConfigProviderPresetOption) => (
+                        <option key={template.provider_preset_id} value={template.provider_preset_id}>
+                          {template.label}
+                        </option>
                       ))}
                     </select>
                   </label>

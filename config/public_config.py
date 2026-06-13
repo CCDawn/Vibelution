@@ -598,6 +598,41 @@ LLM_MODEL_PRESETS = {
     },
 }
 
+LLM_PROVIDER_VENDOR_LABELS = {
+    "aliyun": "阿里云 DashScope",
+    "anthropic": "Anthropic",
+    "deepseek": "DeepSeek",
+    "google": "Google Gemini",
+    "local": "本地模型服务",
+    "llamacpp": "本地模型服务",
+    "minimax": "MiniMax",
+    "ollama": "本地模型服务",
+    "openai": "OpenAI",
+    "openai_compatible": "OpenAI 兼容 API",
+    "relay": "中转站 / Relay",
+    "siliconflow": "硅基流动",
+    "xiaomi": "小米 MiMo",
+}
+
+LLM_PROVIDER_TEMPLATE_LABELS = {
+    "anthropic_atpify": "ATPify Claude",
+    "anthropic_main": "Anthropic 官方 API",
+    "custom_openai_compatible_relay": "自定义 OpenAI 兼容 API",
+    "custom_relay_responses": "自定义 Relay Responses",
+    "dashscope_main": "DashScope OpenAI 兼容",
+    "deepseek_main": "DeepSeek 官方 API",
+    "google_main": "Gemini OpenAI 兼容",
+    "local_main": "本地 OpenAI-compatible",
+    "minimax_main": "MiniMax 官方 API",
+    "openai_image": "OpenAI 图片接口",
+    "openai_main": "OpenAI 官方 API",
+    "relay_image": "Image2 中转",
+    "relay_openai": "OpenAI Responses 中转",
+    "siliconflow_main": "硅基流动 API",
+    "xiaomi_mimo_api_cn": "MiMo 官方 API CN",
+    "xiaomi_mimo_token_plan_cn": "MiMo Token Plan CN",
+}
+
 
 class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: D401, ANN001
@@ -1180,6 +1215,60 @@ def list_llm_model_preset_options() -> list[dict[str, object]]:
         }
         for preset_id, preset in LLM_MODEL_PRESETS.items()
     ]
+
+
+def _llm_provider_vendor_id(provider_id: str, provider: dict[str, Any]) -> str:
+    kind = str(provider.get("kind", "") or "").strip().lower()
+    if kind:
+        return kind.replace("-", "_")
+    token = provider_id.split("_", 1)[0].strip().lower()
+    return token or "provider"
+
+
+def _llm_provider_vendor_label(provider_id: str, provider: dict[str, Any]) -> str:
+    vendor_id = _llm_provider_vendor_id(provider_id, provider)
+    if vendor_id in LLM_PROVIDER_VENDOR_LABELS:
+        return LLM_PROVIDER_VENDOR_LABELS[vendor_id]
+    return vendor_id.replace("_", " ").title()
+
+
+def _llm_provider_template_label(provider_id: str, preset: dict[str, Any]) -> str:
+    if provider_id in LLM_PROVIDER_TEMPLATE_LABELS:
+        return LLM_PROVIDER_TEMPLATE_LABELS[provider_id]
+    provider = preset.get("provider", {})
+    provider = provider if isinstance(provider, dict) else {}
+    base_url = str(provider.get("base_url", "") or "").strip()
+    if base_url:
+        return base_url.removeprefix("https://").removeprefix("http://").rstrip("/")
+    return str(preset.get("label") or provider_id or "Provider template")
+
+
+def list_llm_provider_preset_options() -> list[dict[str, object]]:
+    options: list[dict[str, object]] = []
+    seen: set[str] = set()
+    for preset_id, preset in LLM_MODEL_PRESETS.items():
+        provider = copy.deepcopy(preset.get("provider", {}))
+        if not isinstance(provider, dict):
+            continue
+        provider_id = str(preset.get("provider_id") or "").strip() or str(preset_id)
+        if provider_id in seen:
+            continue
+        seen.add(provider_id)
+        vendor_id = _llm_provider_vendor_id(provider_id, provider)
+        options.append(
+            {
+                "provider_preset_id": provider_id,
+                "label": _llm_provider_template_label(provider_id, preset),
+                "vendor_id": vendor_id,
+                "vendor_label": _llm_provider_vendor_label(provider_id, provider),
+                "category": _llm_model_preset_category(preset),
+                "provider_id": provider_id,
+                "source_preset_id": str(preset_id),
+                "provider": provider,
+                "default_model": copy.deepcopy(preset.get("model", {})),
+            }
+        )
+    return options
 
 
 def apply_llm_model_preset(
@@ -1905,6 +1994,7 @@ __all__ = [
     "load_public_config",
     "build_effective_config",
     "list_llm_model_preset_options",
+    "list_llm_provider_preset_options",
     "apply_llm_model_preset",
     "list_llm_model_options",
     "add_llm_model",
