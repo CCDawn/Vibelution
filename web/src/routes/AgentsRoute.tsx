@@ -332,16 +332,37 @@ const DEFAULT_AGENT_RESET_OPTIONS: AgentResetOptions = {
   resetRuntimePolicy: false,
 };
 const DEFAULT_SESSION_AGENT_ALLOWED_TOOLS = [
-  "grep_search_tool",
-  "glob_tool",
-  "read_file_tool",
+  "apply_patch_tool",
+  "apply_diff_edit_tool",
+  "write_file_tool",
+  "cli_tool",
   "cli_agent_run_tool",
+  "python_lint_tool",
+  "run_test_for_tool",
+  "web_search_tool",
+  "web_fetch_tool",
+  "image2_generate_tool",
   "conversation_log_inspect_tool",
+  "create_child_session_tool",
+  "list_child_sessions_tool",
+  "session_reference_query_tool",
+  "agent_message_tool",
   "get_core_context_tool",
   "get_current_goal_tool",
+  "compress_context_tool",
   "task_list_tool",
   "get_git_status_summary_tool",
   "get_recent_changes_tool",
+  "get_entity_history_tool",
+  "explain_current_worktree_tool",
+];
+const DEFAULT_SESSION_AGENT_PREFERRED_TOOLS = [
+  "cli_tool",
+  "create_child_session_tool",
+  "list_child_sessions_tool",
+  "session_reference_query_tool",
+  "conversation_log_inspect_tool",
+  "get_core_context_tool",
 ];
 
 function normalizeText(value: unknown) {
@@ -1607,6 +1628,42 @@ function isWorkSessionCreateDraft(draft: AgentCreateDraft) {
   return primaryMode === "" || primaryMode === "chat";
 }
 
+function isSessionToolPolicyAgent(agent: AgentConfigWorkspaceAgent | null | undefined) {
+  if (!agent) {
+    return false;
+  }
+  const primaryMode = String(agent.primaryMode || "").trim();
+  return isWorkSessionAgent(agent) || primaryMode === "" || primaryMode === "chat";
+}
+
+function normalizeToolPolicyDraftForAgent(
+  draft: AgentToolPolicyDraft,
+  agent: AgentConfigWorkspaceAgent | null | undefined,
+): AgentToolPolicyDraft {
+  const allowed = new Set(sortedIds(draft.allowedTools));
+  const preferred = new Set(sortedIds(draft.preferredTools));
+  const blocked = new Set(sortedIds(draft.blockedTools));
+  if (isSessionToolPolicyAgent(agent)) {
+    for (const tool of DEFAULT_SESSION_AGENT_ALLOWED_TOOLS) {
+      allowed.add(tool);
+      blocked.delete(tool);
+    }
+    for (const tool of DEFAULT_SESSION_AGENT_PREFERRED_TOOLS) {
+      preferred.add(tool);
+    }
+  }
+  const allowedTools = sortedIds(Array.from(allowed));
+  const allowedSet = new Set(allowedTools);
+  return {
+    ...draft,
+    allowedTools,
+    preferredTools: sortedIds(Array.from(preferred).filter((tool) => allowedSet.has(tool))),
+    blockedTools: sortedIds(Array.from(blocked)),
+    readScopes: sortedIds(draft.readScopes),
+    writeScopes: sortedIds(draft.writeScopes),
+  };
+}
+
 function requiresPersonaProfile(agent: AgentConfigWorkspaceAgent | null | undefined) {
   return agent?.agentBoundary?.requiresPersonaProfile === "true";
 }
@@ -1949,13 +2006,13 @@ function defaultToolPolicy(policyId = "default"): ToolPolicy {
 }
 
 function toolPolicyDraftFromAgent(agent: AgentConfigWorkspaceAgent | null | undefined): AgentToolPolicyDraft {
-  return {
+  return normalizeToolPolicyDraftForAgent({
     allowedTools: sortedIds(agent?.toolPolicy?.allowedTools ?? []),
     preferredTools: sortedIds(agent?.toolPolicy?.preferredTools ?? []),
     blockedTools: sortedIds(agent?.toolPolicy?.blockedTools ?? []),
     readScopes: sortedIds(agent?.toolPolicy?.readScopes ?? []),
     writeScopes: sortedIds(agent?.toolPolicy?.writeScopes ?? []),
-  };
+  }, agent);
 }
 
 function toolGovernanceDraftFromAgent(agent: AgentConfigWorkspaceAgent | null | undefined): AgentToolGovernanceDraft {
@@ -2769,7 +2826,7 @@ function agentsRouteCopy(lang: "zh" | "en") {
         saveToolPolicy: "保存工具",
         savingToolPolicy: "保存工具中...",
         toolBundlesTitle: "按工具包配置",
-        toolBundlesHint: "先选适合这个 Agent 的工具包，再在下方微调单个工具；同一工具只会保存一份授权状态。",
+        toolBundlesHint: "先选适合这个 Agent 的工具包，再在下方微调单个工具；会话 Agent 会保留会话必备工具。",
         applyBundle: "叠加",
         replaceWithBundle: "重置为此包",
         preferredTools: "优先",
@@ -3136,7 +3193,7 @@ function agentsRouteCopy(lang: "zh" | "en") {
         saveToolPolicy: "Save permissions",
         savingToolPolicy: "Saving permissions...",
         toolBundlesTitle: "Configure by tool package",
-        toolBundlesHint: "Pick packages for this Agent first, then tune individual tools below. A tool still saves as one permission state.",
+        toolBundlesHint: "Pick packages for this Agent first, then tune individual tools below. Session Agents keep required session tools.",
         applyBundle: "Merge",
         replaceWithBundle: "Reset to package",
         preferredTools: "Preferred",
@@ -3534,11 +3591,13 @@ export function AgentsRoute() {
       const selectedToolPolicy = toolBundleSelectionToPolicy(draft.selectedToolBundleIds, toolBundles);
       const fallbackAllowedTools = expertiseFromDraft(draft.allowedTools);
       const sessionDefaultAllowedTools = workSession ? DEFAULT_SESSION_AGENT_ALLOWED_TOOLS : [];
+      const sessionDefaultPreferredTools = workSession ? DEFAULT_SESSION_AGENT_PREFERRED_TOOLS : [];
       const selectedAllowedTools = selectedToolPolicy.allowedTools.length ? selectedToolPolicy.allowedTools : fallbackAllowedTools;
       const allowedTools = sortedIds([...sessionDefaultAllowedTools, ...selectedAllowedTools]);
-      const preferredTools = selectedToolPolicy.preferredTools.length
+      const selectedPreferredTools = selectedToolPolicy.preferredTools.length
         ? selectedToolPolicy.preferredTools
         : fallbackAllowedTools.includes("agent_message_tool") ? ["agent_message_tool"] : [];
+      const preferredTools = sortedIds([...sessionDefaultPreferredTools, ...selectedPreferredTools].filter((tool) => allowedTools.includes(tool)));
       const personaProfile = workSession
         ? {}
         : {
@@ -4153,12 +4212,12 @@ export function AgentsRoute() {
       if (mode === "blocked") {
         blocked.add(toolName);
       }
-      return {
+      return normalizeToolPolicyDraftForAgent({
         ...current,
         allowedTools: sortedIds(Array.from(allowed)),
         preferredTools: sortedIds(Array.from(preferred)),
         blockedTools: sortedIds(Array.from(blocked)),
-      };
+      }, selectedAgent);
     });
   };
 
@@ -4167,12 +4226,12 @@ export function AgentsRoute() {
       const bundleTools = sortedIds(bundle.toolNames ?? []);
       const bundlePreferred = sortedIds((bundle.preferredToolNames ?? []).filter((tool) => bundleTools.includes(tool)));
       if (mode === "replace") {
-        return {
+        return normalizeToolPolicyDraftForAgent({
           ...current,
           allowedTools: bundleTools,
           preferredTools: bundlePreferred,
           blockedTools: [],
-        };
+        }, selectedAgent);
       }
       const allowed = new Set(current.allowedTools);
       const preferred = new Set(current.preferredTools);
@@ -4184,12 +4243,12 @@ export function AgentsRoute() {
       for (const tool of bundlePreferred) {
         preferred.add(tool);
       }
-      return {
+      return normalizeToolPolicyDraftForAgent({
         ...current,
         allowedTools: sortedIds(Array.from(allowed)),
         preferredTools: sortedIds(Array.from(preferred).filter((tool) => allowed.has(tool))),
         blockedTools: sortedIds(Array.from(blocked)),
-      };
+      }, selectedAgent);
     });
   };
 
@@ -4328,9 +4387,10 @@ export function AgentsRoute() {
     if (!selectedAgent || !canSaveToolPolicy || selectedAgentToolPolicyPending) {
       return;
     }
+    const saveDraft = normalizeToolPolicyDraftForAgent(toolPolicyDraft, selectedAgent);
     updateToolPolicyMutation.mutate({
       agentId: selectedAgent.agentId,
-      draft: toolPolicyDraft,
+      draft: saveDraft,
       basePolicy: selectedAgent.toolPolicy,
     });
   };
