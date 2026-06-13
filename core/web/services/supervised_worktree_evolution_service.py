@@ -18,6 +18,7 @@ from typing import Any, Callable
 from uuid import uuid4
 
 from core.evaluation import load_supervised_bundle, prepare_dataset_run
+from core.infrastructure import git_process
 from core.runtime_manager import work_run_store
 from core.runtime_manager.work_run_leases import (
     EVALUATION_LEASE,
@@ -1447,15 +1448,14 @@ def _is_baseline_untracked_noise(item: dict[str, str], baseline_untracked: set[s
 
 def _git_status_files(repo_root: Path) -> list[dict[str, str]]:
     try:
-        proc = subprocess.run(
-            ["git", "status", "--porcelain"],
+        proc = git_process.run_git(
+            ["status", "--porcelain"],
             cwd=str(repo_root),
             capture_output=True,
             text=True,
             encoding="utf-8",
             errors="replace",
             check=False,
-            **_subprocess_no_window_kwargs(),
         )
     except OSError:
         return []

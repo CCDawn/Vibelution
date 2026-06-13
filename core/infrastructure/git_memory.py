@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import sqlite3
-import subprocess
 import threading
 import uuid
 import ast
@@ -11,6 +10,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from core.infrastructure import git_process
 from core.infrastructure.agent_session import get_session_state
 from core.infrastructure.event_bus import EventNames, get_event_bus
 from core.infrastructure.workspace_manager import get_workspace
@@ -21,11 +21,6 @@ _RISKY_EVOLUTION_PATH_PREFIXES = ("core/", "tools/", "config/", "workspace/promp
 _RISKY_EVOLUTION_PATHS = {"agent.py"}
 _DEFAULT_WORKTREE_SNAPSHOT_RETENTION_LIMIT = 50
 _MAX_WORKTREE_SNAPSHOT_RETENTION_LIMIT = 500
-
-
-def _subprocess_no_window_kwargs() -> Dict[str, int]:
-    flags = int(getattr(subprocess, "CREATE_NO_WINDOW", 0))
-    return {"creationflags": flags} if flags else {}
 
 
 def _is_risky_evolution_path(filepath: str) -> bool:
@@ -232,13 +227,12 @@ class GitMemoryService:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_git_entity_change_ref ON GitEntityChange(entity_ref)")
 
     def _run_git(self, args: List[str]) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(
-            ["git", *args],
+        return git_process.run_git(
+            args,
             cwd=str(self._project_root),
             capture_output=True,
             text=True,
             timeout=20,
-            **_subprocess_no_window_kwargs(),
         )
 
     def is_git_available(self) -> tuple[bool, Optional[str]]:
