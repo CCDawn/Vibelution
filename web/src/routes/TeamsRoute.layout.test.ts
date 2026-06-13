@@ -271,6 +271,12 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("可进入实验");
     expect(routeSource).toContain("正在团队搜索");
     expect(routeSource).toContain("知识搜集操作台");
+    expect(routeSource).toContain("sourceCollectionScreeningButtonText");
+    expect(routeSource).toContain("sourceCollectionScreeningDisabled");
+    expect(routeSource).toContain("openSourceCollectionScreeningPanel");
+    expect(routeSource).toContain("开始资料筛选");
+    expect(routeSource).toContain("暂无候选");
+    expect(routeSource).toContain("researchView=candidates");
     expect(routeSource).toContain("打开候选仓库");
     expect(routeSource).toContain("打开结果目录");
     expect(routeSource).toContain("刷新状态");
@@ -411,11 +417,14 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.sourceCollectionRunBadge).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionCommandActions).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionCommandPrimary).toBeTypeOf("string");
+    expect(routeStyles.sourceCollectionScreeningButton).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionConversationPanel).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionTraceMessage).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionTrace_cache).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionTraceStorage).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionControlPanel).toBeTypeOf("string");
+    expect(routeStyles.workflowSourceCollectionActionButtons).toBeTypeOf("string");
+    expect(routeStyles.workflowSourceCollectionSecondaryButton).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionStageModules).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionStepActive).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionStepDone).toBeTypeOf("string");
