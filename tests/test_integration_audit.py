@@ -94,6 +94,9 @@ def test_ready_claim_with_unique_commit_is_merge_ready(tmp_path: Path) -> None:
     assert item.decision == "merge_ready"
     assert item.suggested_action == "merge_after_final_review"
     assert item.plus_commits == 1
+    assert item.main_ancestor_of_head is True
+    assert item.merge_method == "fast_forward"
+    assert item.risk_level in {"low", "medium"}
     assert len(report.duplicate_ready_groups) == 1
     assert report.duplicate_ready_groups[0].claim_ids == ["claim-a", "claim-b"]
 
@@ -122,6 +125,7 @@ def test_already_merged_clean_worktree_is_cleanup_ready(tmp_path: Path) -> None:
     assert item.decision == "cleanup_ready"
     assert item.plus_commits == 0
     assert item.head_ancestor_of_main is True
+    assert item.merge_method == "not_applicable_cleanup_only"
 
 
 def test_active_claim_blocks_worktree_even_when_dirty(tmp_path: Path) -> None:
@@ -148,6 +152,8 @@ def test_active_claim_blocks_worktree_even_when_dirty(tmp_path: Path) -> None:
     assert item.suggested_action == "do_not_touch"
     assert item.clean is False
     assert "active_claim" in item.reasons
+    assert item.risk_level == "blocked"
+    assert item.merge_method == "blocked_active_claim"
 
 
 def test_config_sensitive_unique_commit_requires_manual_review(tmp_path: Path) -> None:
@@ -162,6 +168,8 @@ def test_config_sensitive_unique_commit_requires_manual_review(tmp_path: Path) -
     assert item.decision == "review_required"
     assert item.touches_config_sensitive is True
     assert "config_sensitive_paths" in item.reasons
+    assert item.risk_level == "high"
+    assert any("config.toml" in command for command in item.recommended_validations)
 
 
 def test_external_operator_config_claim_path_is_config_sensitive(tmp_path: Path) -> None:
@@ -187,6 +195,7 @@ def test_external_operator_config_claim_path_is_config_sensitive(tmp_path: Path)
     assert item.touches_config_sensitive is True
     assert item.decision == "review_required"
     assert item.suggested_action == "manual_config_review"
+    assert item.merge_method == "manual_review"
 
 
 def test_report_uses_main_worktree_registry_when_started_from_task_worktree(tmp_path: Path) -> None:
@@ -221,3 +230,96 @@ def test_report_uses_main_worktree_registry_when_started_from_task_worktree(tmp_
     assert main_item.decision == "main"
     assert task_item.claim_ids == ["claim-task"]
     assert task_item.decision == "merge_ready"
+
+
+def test_ready_branch_recommends_cherry_pick_when_main_advanced(tmp_path: Path) -> None:
+    root = init_repo(tmp_path / "repo")
+    worktree = add_worktree(root, "feature-wt", "codex/feature")
+    commit_file(worktree, "feature.txt", "feature\n", "feature")
+    commit_file(root, "main.txt", "main advanced\n", "advance main")
+    registry = write_registry(
+        root,
+        {
+            "claim-feature": {
+                "status": "ready_for_merge",
+                "branch": "codex/feature",
+                "worktree": str(worktree),
+                "changedFiles": ["feature.txt"],
+            }
+        },
+        ["claim-feature"],
+    )
+
+    report = audit.build_report(root, registry_path=registry)
+    item = item_by_branch(report, "codex/feature")
+
+    assert item.decision == "merge_ready"
+    assert item.main_ancestor_of_head is False
+    assert item.merge_method == "cherry_pick"
+
+
+def test_frontend_route_paths_recommend_targeted_validation(tmp_path: Path) -> None:
+    root = init_repo(tmp_path / "repo")
+    worktree = add_worktree(root, "teams-wt", "codex/teams")
+    commit_file(
+        worktree,
+        "web/src/routes/TeamsRoute.tsx",
+        "export const TeamsRoute = null\n",
+        "teams route",
+    )
+    registry = write_registry(
+        root,
+        {
+            "claim-teams": {
+                "status": "ready_for_merge",
+                "branch": "codex/teams",
+                "worktree": str(worktree),
+                "changedFiles": ["web/src/routes/TeamsRoute.tsx"],
+            }
+        },
+        ["claim-teams"],
+    )
+
+    report = audit.build_report(root, registry_path=registry)
+    item = item_by_branch(report, "codex/teams")
+
+    assert item.decision == "merge_ready"
+    assert "npm --prefix web run test -- TeamsRoute.layout.test.ts" in item.recommended_validations
+    assert "npm --prefix web run build" in item.recommended_validations
+    assert "frontend_surface" in item.risk_reasons
+
+
+def test_merge_plan_is_read_only_and_prioritized(tmp_path: Path) -> None:
+    root = init_repo(tmp_path / "repo")
+    ready_worktree = add_worktree(root, "ready-wt", "codex/ready")
+    commit_file(ready_worktree, "feature.txt", "feature\n", "feature")
+    config_worktree = add_worktree(root, "config-wt", "codex/config")
+    commit_file(config_worktree, "config.toml", "model = 'x'\n", "config")
+    registry = write_registry(
+        root,
+        {
+            "claim-ready": {
+                "status": "ready_for_merge",
+                "branch": "codex/ready",
+                "worktree": str(ready_worktree),
+                "changedFiles": ["feature.txt"],
+            },
+            "claim-config": {
+                "status": "ready_for_merge",
+                "branch": "codex/config",
+                "worktree": str(config_worktree),
+                "changedFiles": ["config.toml"],
+            },
+        },
+        ["claim-ready", "claim-config"],
+    )
+
+    report = audit.build_report(root, registry_path=registry)
+    plan = audit.format_merge_plan(report)
+
+    assert "READ-ONLY merge plan" in plan
+    assert "does not merge, delete, or edit config files" in plan
+    assert "codex/ready" in plan
+    assert "method=fast_forward" in plan
+    assert "codex/config" in plan
+    assert "manual: review config boundary" in plan
