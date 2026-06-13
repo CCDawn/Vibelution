@@ -542,6 +542,16 @@ def _hidden_startup_info() -> subprocess.STARTUPINFO | None:
     return startupinfo
 
 
+def _launcher_action_detaches_console() -> bool:
+    return os.name == "nt"
+
+
+def _launcher_action_launch_api() -> str:
+    if _launcher_action_detaches_console():
+        return "detached_waitable_popen"
+    return "waitable_popen"
+
+
 def _read_capture_file(path: str) -> str:
     try:
         with open(path, "rb") as handle:
@@ -580,6 +590,56 @@ def _launcher_command_args(action: str, *, no_browser: bool = False) -> list[str
     return args
 
 
+def _run_waitable_launcher_process(
+    args: list[str],
+    *,
+    env: dict[str, str],
+    stdout_handle: Any,
+    stderr_handle: Any,
+    action: str,
+    no_browser: bool,
+    started_at: float,
+    cancel_check: Callable[[], bool] | None,
+) -> subprocess.CompletedProcess[str]:
+    process = subprocess.Popen(
+        args,
+        cwd=str(PROJECT_ROOT),
+        stdin=subprocess.DEVNULL,
+        stdout=stdout_handle,
+        stderr=stderr_handle,
+        creationflags=_creation_flags(detach=_launcher_action_detaches_console()),
+        startupinfo=_hidden_startup_info(),
+        env=env,
+    )
+    if cancel_check is None:
+        return_code = process.wait()
+        return subprocess.CompletedProcess(args=args, returncode=int(return_code or 0))
+
+    cancelled = False
+    while process.poll() is None:
+        if cancel_check():
+            cancelled = True
+            _record_launcher_action_event(
+                "launcher.action.cancel_requested",
+                action=action,
+                no_browser=no_browser,
+                env=env,
+                duration_ms=(time.monotonic() - started_at) * 1000,
+            )
+            try:
+                process.terminate()
+                process.wait(timeout=2.0)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=2.0)
+            break
+        time.sleep(0.2)
+    return_code = process.poll()
+    if cancelled:
+        return_code = LAUNCHER_ACTION_CANCELLED_RETURN_CODE
+    return subprocess.CompletedProcess(args=args, returncode=int(return_code or 0))
+
+
 def run_launcher_action(
     action: str,
     *,
@@ -607,52 +667,16 @@ def run_launcher_action(
     try:
         with os.fdopen(stdout_fd, "w+b") as stdout_handle, os.fdopen(stderr_fd, "w+b") as stderr_handle:
             try:
-                if cancel_check is None:
-                    result = subprocess.run(
-                        args,
-                        cwd=str(PROJECT_ROOT),
-                        stdin=subprocess.DEVNULL,
-                        stdout=stdout_handle,
-                        stderr=stderr_handle,
-                        creationflags=_creation_flags(),
-                        startupinfo=_hidden_startup_info(),
-                        env=env,
-                        check=False,
-                    )
-                else:
-                    process = subprocess.Popen(
-                        args,
-                        cwd=str(PROJECT_ROOT),
-                        stdin=subprocess.DEVNULL,
-                        stdout=stdout_handle,
-                        stderr=stderr_handle,
-                        creationflags=_creation_flags(),
-                        startupinfo=_hidden_startup_info(),
-                        env=env,
-                    )
-                    cancelled = False
-                    while process.poll() is None:
-                        if cancel_check():
-                            cancelled = True
-                            _record_launcher_action_event(
-                                "launcher.action.cancel_requested",
-                                action=action,
-                                no_browser=no_browser,
-                                env=env,
-                                duration_ms=(time.monotonic() - started_at) * 1000,
-                            )
-                            try:
-                                process.terminate()
-                                process.wait(timeout=2.0)
-                            except subprocess.TimeoutExpired:
-                                process.kill()
-                                process.wait(timeout=2.0)
-                            break
-                        time.sleep(0.2)
-                    return_code = process.poll()
-                    if cancelled:
-                        return_code = LAUNCHER_ACTION_CANCELLED_RETURN_CODE
-                    result = subprocess.CompletedProcess(args=args, returncode=int(return_code or 0))
+                result = _run_waitable_launcher_process(
+                    args,
+                    env=env,
+                    stdout_handle=stdout_handle,
+                    stderr_handle=stderr_handle,
+                    action=action,
+                    no_browser=no_browser,
+                    started_at=started_at,
+                    cancel_check=cancel_check,
+                )
             except Exception as exc:
                 _record_launcher_action_event(
                     "launcher.action.failed",
@@ -713,7 +737,8 @@ def _record_launcher_action_event(
         "protectedProcessIdsSet": bool(str(env.get("VIBELUTION_PROTECTED_PROCESS_IDS") or "").strip()),
         "portSet": bool(str(env.get("VIBELUTION_PORT") or "").strip()),
         "consoleWindowSuppressed": os.name == "nt",
-        "creationFlagNames": list(_creation_flag_names()),
+        "creationFlagNames": list(_creation_flag_names(detach=_launcher_action_detaches_console())),
+        "launcherLaunchApi": _launcher_action_launch_api(),
         "hiddenStartupInfo": os.name == "nt" and hasattr(subprocess, "STARTUPINFO"),
     }
     if return_code is not None:
