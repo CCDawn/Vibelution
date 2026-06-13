@@ -34,12 +34,16 @@ def normalize_chat_tool_calls(value: Any) -> list[str | dict[str, Any]]:
             name = str(
                 item.get("name")
                 or item.get("tool_name")
+                or item.get("toolName")
                 or function_block.get("name")
                 or ""
             ).strip()
             if name:
                 normalized: dict[str, Any] = {"name": name}
                 for key in (
+                    "id",
+                    "tool_call_id",
+                    "toolCallId",
                     "status",
                     "summary",
                     "arguments",
@@ -47,13 +51,19 @@ def normalize_chat_tool_calls(value: Any) -> list[str | dict[str, Any]]:
                     "argKeys",
                     "result",
                     "resultPreview",
+                    "result_preview",
                     "resultType",
+                    "result_type",
                     "resultLength",
+                    "result_length",
                     "error",
                     "durationMs",
+                    "duration_ms",
                     "durationSeconds",
+                    "duration_seconds",
                     "elapsedSeconds",
                     "timeoutSeconds",
+                    "timeout_seconds",
                     "tracePath",
                     "trace_path",
                 ):
@@ -137,7 +147,7 @@ def normalize_chat_message(item: Any) -> dict[str, Any] | None:
     mental_snapshot = item.get("mental_snapshot")
     if mental_snapshot is None:
         mental_snapshot = item.get("mentalSnapshot")
-    tool_calls = normalize_chat_tool_calls(item.get("tool_calls") or item.get("tools") or [])
+    tool_calls = normalize_chat_tool_calls(item.get("tool_calls") or item.get("toolCalls") or item.get("tools") or [])
     feedback_events = item.get("feedback_events") or item.get("feedbackEvents") or []
     if not isinstance(feedback_events, list):
         feedback_events = []

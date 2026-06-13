@@ -3373,6 +3373,8 @@ def submit_session_message(
             lang=lang,
         )
         active_task = _normalize_session_active_task(conversation.get("active_task") or conversation.get("activeTask"))
+        if not _is_task_tool_backed_active_task(active_task):
+            active_task = None
         explicit_recent_image_reference = _has_recent_image_attachment_reference(message)
         contextual_recent_image_prompt = (
             ""
@@ -4024,6 +4026,8 @@ def edit_and_resubmit_session_message(
             )
 
         active_task = _normalize_session_active_task(conversation.get("active_task") or conversation.get("activeTask"))
+        if not _is_task_tool_backed_active_task(active_task):
+            active_task = None
         requested_leases = infer_chat_turn_leases(
             {
                 "content": message,
@@ -6018,6 +6022,8 @@ def _active_task_to_api(value: dict[str, Any] | None) -> dict[str, Any] | None:
     task = _normalize_session_active_task(value)
     if not task:
         return None
+    if not _is_task_tool_backed_active_task(task):
+        return None
     metadata = dict(task.get("metadata") or {}) if isinstance(task.get("metadata"), dict) else {}
     return {
         "taskId": str(task.get("task_id") or "").strip(),
@@ -6534,6 +6540,8 @@ def _build_session_context_usage(conversation: dict[str, Any], messages: list[di
                     continue
                 character_count += len(str(tool_call.get("name") or ""))
                 character_count += len(str(tool_call.get("summary") or ""))
+                character_count += len(str(tool_call.get("resultPreview") or tool_call.get("result_preview") or ""))
+                character_count += len(str(tool_call.get("error") or ""))
     estimated_tokens = _estimate_session_context_tokens(character_count, tool_call_count)
     limit_payload = _session_context_limit_payload(conversation)
     limit = _coerce_nonnegative_int(limit_payload.get("limit") or 0)
@@ -6574,12 +6582,16 @@ def _message_list_chars(messages: list[dict[str, Any]]) -> int:
             if isinstance(tool_call, dict):
                 total += len(str(tool_call.get("name") or ""))
                 total += len(str(tool_call.get("summary") or ""))
+                total += len(str(tool_call.get("resultPreview") or tool_call.get("result_preview") or ""))
+                total += len(str(tool_call.get("error") or ""))
     return total
 
 
 def _active_task_context_chars(active_task: Any) -> int:
     task = _normalize_session_active_task(active_task)
     if not isinstance(task, dict):
+        return 0
+    if not _is_task_tool_backed_active_task(task):
         return 0
     parts = [
         task.get("title"),
@@ -7125,6 +7137,44 @@ def _normalize_session_active_task(value: Any) -> dict[str, Any] | None:
     ):
         return None
     return normalized
+
+
+_SESSION_TASK_CONTEXT_TOOL_NAMES = {
+    "task_create_tool",
+    "task_start_tool",
+    "plan_update_tool",
+    "task_complete_tool",
+}
+
+
+def _is_task_tool_name(name: Any) -> bool:
+    return str(name or "").strip() in _SESSION_TASK_CONTEXT_TOOL_NAMES
+
+
+def _result_has_task_context_tool(result: Any) -> bool:
+    if not isinstance(result, dict):
+        return False
+    for tool_call in _extract_chat_tool_calls(result):
+        if _is_task_tool_name(_tool_call_name(tool_call)):
+            return True
+    return False
+
+
+def _is_task_tool_backed_active_task(task: dict[str, Any] | None) -> bool:
+    if not isinstance(task, dict):
+        return False
+    metadata = task.get("metadata") if isinstance(task.get("metadata"), dict) else {}
+    source = str(metadata.get("source") or "").strip()
+    return source == "task_tool"
+
+
+def _set_or_clear_session_active_task(conversation: dict[str, Any], task: dict[str, Any] | None) -> None:
+    if task is not None:
+        conversation["active_task"] = task
+        conversation.pop("activeTask", None)
+        return
+    conversation.pop("active_task", None)
+    conversation.pop("activeTask", None)
 
 
 def _latest_assistant_summary(messages: list[dict[str, Any]]) -> str:
@@ -9619,8 +9669,7 @@ def _persist_session_turn_result(
                 existing_task=existing_active_task,
                 user_message_source=user_message_source,
             )
-            if next_active_task is not None:
-                conversation["active_task"] = next_active_task
+            _set_or_clear_session_active_task(conversation, next_active_task)
             conversation["messages"] = new_messages
             if context_composition is not None:
                 conversation["last_context_composition"] = context_composition
@@ -9852,8 +9901,7 @@ def _persist_session_turn_result(
             existing_task=existing_active_task,
             user_message_source=user_message_source,
         )
-        if next_active_task is not None:
-            conversation["active_task"] = next_active_task
+        _set_or_clear_session_active_task(conversation, next_active_task)
         if llm_usage is not None:
             conversation["last_llm_usage"] = llm_usage
         else:
@@ -14149,8 +14197,7 @@ def _persist_session_interrupted_snapshot(
             conversation["messages"],
             existing_task=existing_active_task,
         )
-        if next_active_task is not None:
-            conversation["active_task"] = next_active_task
+        _set_or_clear_session_active_task(conversation, next_active_task)
         conversation["last_turn_status"] = "ready"
         conversation["updated_at"] = assistant_entry["timestamp"]
         payload["updated_at"] = assistant_entry["timestamp"]
@@ -14795,8 +14842,8 @@ def _latest_unfinished_task_goal_with_source(session_id: str) -> tuple[str, str]
             conversation.get("active_task") or conversation.get("activeTask")
         )
         messages = normalize_chat_messages(conversation.get("messages") or [])
-    if not isinstance(active_task, dict):
-        return _build_resume_goal_from_conversation_context(messages, active_task={}), "conversation_context"
+    if not _is_task_tool_backed_active_task(active_task):
+        return "", ""
     status = str(active_task.get("status") or "").strip().lower()
     if status in {"done", "idle"}:
         return "", ""
@@ -15176,7 +15223,12 @@ def _build_session_active_task(
     user_message_source: str = "",
 ) -> dict[str, Any] | None:
     if not isinstance(result, dict):
-        return existing_task
+        return existing_task if _is_task_tool_backed_active_task(existing_task) else None
+
+    task_tool_called = _result_has_task_context_tool(result)
+    existing_task_tool_backed = _is_task_tool_backed_active_task(existing_task)
+    if not task_tool_called and not existing_task_tool_backed:
+        return None
 
     contract = build_chat_coding_result_contract(result)
     read_files = _normalize_project_paths(contract.get("read_files") or [], existing_only=True)
@@ -15269,7 +15321,7 @@ def _build_session_active_task(
     metadata = dict(existing_metadata)
     metadata.update(
         {
-            "source": "web_session",
+            "source": "task_tool",
             "outcome": outcome,
             "default_file_context": default_file_context,
             "active_preview_path": active_preview_path,
@@ -15321,12 +15373,11 @@ def _select_existing_active_task_for_update(
     hint_active_task: dict[str, Any] | None,
     messages: list[dict[str, Any]],
 ) -> dict[str, Any] | None:
-    last_user_message = _latest_user_message(messages)
-    if _is_contextual_confirmation_message(last_user_message) and isinstance(hint_active_task, dict):
-        hint_goal = trim_lines(hint_active_task.get("goal") or hint_active_task.get("title") or "", max_lines=2)
-        if _is_effective_user_message(hint_goal):
-            return hint_active_task
-    return stored_active_task or hint_active_task
+    if _is_task_tool_backed_active_task(stored_active_task):
+        return stored_active_task
+    if _is_task_tool_backed_active_task(hint_active_task):
+        return hint_active_task
+    return None
 
 
 def _task_status_from_result_contract(
