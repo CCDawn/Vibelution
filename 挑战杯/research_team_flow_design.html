@@ -39,7 +39,7 @@
         <aside class="dashboard-panel">
           <h2>审核摘要</h2>
           <div class="kpi-grid">
-            <div class="kpi"><b>当前阶段</b><strong>M6.25</strong><span>知识搜集默认层只保留状态、阶段、数量、主操作和产物入口。</span></div>
+            <div class="kpi"><b>当前阶段</b><strong>M6.27</strong><span>知识搜集首屏控制台展示关键按钮、团队搜索状态和五步客观状态。</span></div>
             <div class="kpi"><b>流程节点</b><strong>13</strong><span>1-9 为知识入库主线，10-13 保留占位与维护节点。</span></div>
             <div class="kpi"><b>候选资料</b><strong>10</strong><span>第一轮 source_manifest 已进入 candidate-only 工作区。</span></div>
             <div class="kpi"><b>正式写入</b><strong>0</strong><span>未写正式 Team Knowledge、RAG 或 official graph。</span></div>
@@ -2017,7 +2017,7 @@
               <b>M6.23</b>
               <strong>控制台状态驱动操作卡</strong>
               <span>知识搜集卡接入 source collection run 状态，显示未开始、待继续搜索、搜索中、待筛选、可进入实验、等待回写，并展示当前批次、待处理、候选和查询数。</span>
-              <span>主按钮不再叫笼统的继续搜集，而是按状态变为开始知识搜集、搜索下一批、进入资料筛选或进入搜集工作台；旁边保留新一轮搜集和阶段详情，方便在总览操控流程、在详情查看内容。</span>
+              <span>主按钮不再叫笼统的继续搜集，而是按状态变为开始知识搜集、搜索下一批、打开候选仓库或进入搜集工作台；旁边保留新一轮搜集和阶段详情，方便在总览操控流程、在详情查看内容。</span>
             </div>
 <div class="blueprint-row">
               <b>M6.24</b>
@@ -2036,6 +2036,12 @@
               <strong>搜索状态收口</strong>
               <span>通用 DataProcessingRun 在所有采集 assignment 关闭且已有记录后进入 reviewing；科研控制台把“搜索中”限定为真实请求执行中，把有待处理 assignment 的状态显示为“待继续搜索”。</span>
               <span>用户能区分后台正在执行、下一批可手动触发、以及已进入资料筛选；这不写正式 Team Knowledge、不写 RAG、不写 official graph。</span>
+            </div>
+<div class="blueprint-row">
+              <b>M6.27</b>
+              <strong>知识搜集控制台客观状态</strong>
+              <span>知识搜集独立页首屏提升为流程控制台：左上角显示正在团队搜索/待继续搜索/待筛选/失败等运行态，关键按钮直接展示搜索下一批、新一轮搜集、打开结果目录和刷新状态。</span>
+              <span>五个步骤按进行中、已完成、失败、未进行、待处理映射为边框/绿色/红色/灰色/提示色；对话流继续承载证据与存放位置，后端搜索、筛选、正式知识/RAG/图谱边界不改变。</span>
             </div>
       </div>
       <div class="tag-row">
