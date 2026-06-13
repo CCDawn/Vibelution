@@ -2,7 +2,7 @@ Option Explicit
 
 Dim shell, fso, scriptPath, scriptDir, projectDir
 Dim powerShellPath, powerShellEntryPath, runtimeDir, launcherDir, logPath
-Dim action, noBrowser, command, exitCode, runId
+Dim action, noBrowser, command, processId, runId, launcherPythonPath
 
 Set shell = CreateObject("WScript.Shell")
 Set fso = CreateObject("Scripting.FileSystemObject")
@@ -49,17 +49,13 @@ End If
 SetLauncherEnvironment
 
 command = Quote(powerShellPath) _
-    & " -NoLogo -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File " _
-    & Quote(powerShellEntryPath) _
-    & " -Action " & Quote(action)
-If noBrowser Then
-    command = command & " -NoBrowser"
-End If
+    & " -NoLogo -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command " _
+    & Quote(BuildPowerShellEntryCommand())
 
 WriteLog "desktop_entry_vbs.started", "info", "Launching hidden PowerShell desktop entry.", "action=" & action & ";no_browser=" & CStr(noBrowser)
 
 On Error Resume Next
-exitCode = shell.Run(command, 0, False)
+processId = StartHiddenProcess(command, projectDir)
 If Err.Number <> 0 Then
     WriteLog "desktop_entry_vbs.failed", "error", "Failed to launch hidden PowerShell desktop entry.", "error=" & Err.Description
     ShowFailure "Failed to launch Vibelution:" & vbCrLf & Err.Description & vbCrLf & vbCrLf & "Log: " & logPath
@@ -67,7 +63,7 @@ If Err.Number <> 0 Then
 End If
 On Error GoTo 0
 
-WriteLog "desktop_entry_vbs.launched", "info", "Hidden PowerShell desktop entry launched.", "action=" & action & ";shell_run_code=" & CStr(exitCode)
+WriteLog "desktop_entry_vbs.launched", "info", "Hidden PowerShell desktop entry launched.", "action=" & action & ";process_id=" & CStr(processId) & ";launch_api=wmi_hidden_process"
 ShowLaunchFeedback action
 WScript.Quit 0
 
@@ -126,13 +122,49 @@ Sub SetLauncherEnvironment()
     Dim env, venvPython
     Set env = shell.Environment("PROCESS")
     env("VIBELUTION_DESKTOP_ENTRY_VBS_RUN_ID") = runId
+    launcherPythonPath = ""
     venvPython = fso.BuildPath(projectDir, ".venv\Scripts\python.exe")
 
     If fso.FileExists(venvPython) Then
+        launcherPythonPath = venvPython
         env("VIBELUTION_PYTHON_EXE") = venvPython
         WriteLog "desktop_entry_vbs.python_runtime.selected", "info", "Using Python runtime for desktop launch.", "path=" & venvPython
     End If
 End Sub
+
+Function BuildPowerShellEntryCommand()
+    Dim text
+    text = ""
+    AppendPowerShellEnvAssignment text, "VIBELUTION_DESKTOP_ENTRY_VBS_RUN_ID", runId
+    If Len(launcherPythonPath) > 0 Then
+        AppendPowerShellEnvAssignment text, "VIBELUTION_PYTHON_EXE", launcherPythonPath
+    End If
+    AppendExistingPowerShellEnvAssignment text, "VIBELUTION_DESKTOP_ENTRY_START_MUTEX_NAME"
+    AppendExistingPowerShellEnvAssignment text, "VIBELUTION_DESKTOP_ENTRY_ACTION_TIMEOUT_SECONDS"
+    AppendExistingPowerShellEnvAssignment text, "VIBELUTION_DESKTOP_ENTRY_SUPPRESS_FEEDBACK"
+    AppendExistingPowerShellEnvAssignment text, "VIBELUTION_DESKTOP_ENTRY_SHOW_FEEDBACK"
+    text = text & "& " & PowerShellSingleQuoted(powerShellEntryPath) & " -Action " & PowerShellSingleQuoted(action)
+    If noBrowser Then
+        text = text & " -NoBrowser"
+    End If
+    BuildPowerShellEntryCommand = text
+End Function
+
+Sub AppendExistingPowerShellEnvAssignment(ByRef text, name)
+    Dim value
+    value = shell.Environment("PROCESS")(name)
+    If Len(value) > 0 Then
+        AppendPowerShellEnvAssignment text, name, value
+    End If
+End Sub
+
+Sub AppendPowerShellEnvAssignment(ByRef text, name, value)
+    text = text & "$env:" & name & " = " & PowerShellSingleQuoted(value) & "; "
+End Sub
+
+Function PowerShellSingleQuoted(value)
+    PowerShellSingleQuoted = "'" & Replace(CStr(value), "'", "''") & "'"
+End Function
 
 Function CreateRunId()
     Dim value
@@ -197,6 +229,21 @@ Sub ShowLaunchFeedback(value)
     End If
     On Error GoTo 0
 End Sub
+
+Function StartHiddenProcess(commandLine, workingDirectory)
+    Dim service, startup, processClass, returnCode, createdPid
+    Set service = GetObject("winmgmts:{impersonationLevel=impersonate}!\\.\root\cimv2")
+    Set startup = service.Get("Win32_ProcessStartup").SpawnInstance_
+    startup.ShowWindow = 0
+    ' CREATE_NO_WINDOW + CREATE_NEW_PROCESS_GROUP. DETACHED_PROCESS makes PowerShell start but skip the command body here.
+    startup.CreateFlags = 134218240
+    Set processClass = service.Get("Win32_Process")
+    returnCode = processClass.Create(commandLine, workingDirectory, startup, createdPid)
+    If returnCode <> 0 Then
+        Err.Raise vbObjectError + 1701, "StartHiddenProcess", "Win32_Process.Create failed with code " & CStr(returnCode)
+    End If
+    StartHiddenProcess = CLng(createdPid)
+End Function
 
 Sub EnsureFolder(path)
     Dim parent
