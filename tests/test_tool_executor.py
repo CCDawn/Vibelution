@@ -72,7 +72,7 @@ class TestToolExecutorInit:
             "apply_patch_tool", "plan_update_tool",
             "trigger_self_restart_tool", "grep_search_tool",
             "task_create_tool", "task_update_tool", "task_list_tool",
-            "cli_tool", "agent_message_tool", "conversation_log_inspect_tool",
+            "cli_tool", "cli_agent_run_tool", "agent_message_tool", "conversation_log_inspect_tool",
         ]
         
         for tool_name in expected_tools:
@@ -110,6 +110,20 @@ class TestToolExecutorInit:
 
         assert "conversation_log_inspect_tool" in canonical_names
         assert "conversation_log_inspect_tool" in llm_names
+
+    def test_cli_agent_run_tool_is_registered_and_policy_gated_by_default(self):
+        from core.web.services.agent_directory_service import compute_effective_tool_visibility, default_tool_policy
+
+        canonical_names = {tool.name for tool in create_key_tools()}
+        llm_names = {tool.name for tool in create_llm_facing_tools()}
+
+        assert "cli_agent_run_tool" in canonical_names
+        assert "cli_agent_run_tool" in llm_names
+
+        visibility = compute_effective_tool_visibility(create_llm_facing_tools(), policy=default_tool_policy())
+
+        assert "cli_agent_run_tool" not in visibility.visible_tools
+        assert "cli_agent_run_tool" in visibility.hidden_restricted_tools
 
     def test_memory_tools_are_llm_facing_but_policy_gated_by_default(self):
         from core.web.services.agent_directory_service import compute_effective_tool_visibility, default_tool_policy
@@ -306,6 +320,7 @@ class TestToolExecutorInit:
         
         # 检查关键工具的超时配置
         assert executor._timeout_map["cli_tool"] == 60
+        assert executor._timeout_map["cli_agent_run_tool"] == 900
         assert executor._timeout_map["python_lint_tool"] == 60
         assert executor._timeout_map["spawn_agent_tool"] == 150
         assert executor._timeout_map["image2_generate_tool"] == IMAGE2_TOOL_TIMEOUT_SECONDS == 300
@@ -686,6 +701,31 @@ class TestToolExecutorTimeout:
         assert action is None
         assert "unified_knowledge_search_tool" in str(result)
         assert "显式授权" in str(result)
+
+    def test_cli_agent_run_tool_requires_explicit_tool_policy_allow(self, executor, monkeypatch):
+        from core.web.services import agent_directory_service
+
+        monkeypatch.setattr(agent_directory_service, "current_agent_runtime", lambda: {
+            "agentId": "agent-policy",
+            "toolPolicy": {
+                "policyId": "tool-agent-policy",
+                "allowedTools": [],
+                "blockedTools": [],
+            },
+        })
+        result, action = executor.execute("cli_agent_run_tool", {"agent_type": "codex_code", "task": "inspect only"})
+
+        assert action is None
+        assert "cli_agent_run_tool" in str(result)
+        assert "显式授权" in str(result)
+
+    def test_cli_agent_run_tool_blocked_in_readonly_subagent_scope(self, monkeypatch):
+        monkeypatch.setenv("VIBELUTION_SUBAGENT_MODE", "readonly")
+
+        block = ToolExecutor._check_readonly_subagent_block("cli_agent_run_tool")
+
+        assert block
+        assert "只读模式" in block
 
     def test_spawn_agent_tool_internal_flag_is_not_forwarded_to_tool(self, executor):
         captured = {}

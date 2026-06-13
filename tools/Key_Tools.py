@@ -86,6 +86,7 @@ from tools.session_child_tools import (
     create_child_session_tool as _create_child_session_impl,
     list_child_sessions_tool as _list_child_sessions_impl,
 )
+from tools.cli_agent_tools import cli_agent_run_tool as _cli_agent_run_impl
 
 _CLI_TOOL_DOCSTRING = """
 【CLI】执行任意 Shell 命令。
@@ -111,6 +112,30 @@ Args:
     timeout: 文件操作 30s, 编译 60s, 测试/网络 120s
     cwd: 工作目录，默认项目根目录
     max_output_chars: 最大返回字符数，默认 12000；超出时保留开头和结尾摘要
+"""
+
+_CLI_AGENT_RUN_TOOL_DOCSTRING = """
+【CLI Agent 调用】受控调用外部非交互式代码 Agent。
+
+只支持内置适配器：
+1. `mimo_code`：调用 `mimo run`
+2. `codex_code`：调用 `codex exec`
+
+默认 `mode=readonly`，会使用只读/低风险参数运行。需要允许外部 Agent 写代码时，
+需要使用 `mode=worktree` 并传入独立 worktree 的 `cwd`；主项目工作区会被拒绝。
+该工具不会执行任意 shell 字符串，所有命令参数由适配器拼装，并会隐藏完整任务文本，
+只在运行记录中保留有界 stdout/stderr 摘要、命令预览和 task hash。
+
+Args:
+    agent_type: `mimo_code` 或 `codex_code`
+    task: 要交给外部 CLI Agent 的任务说明
+    cwd: 运行目录；只读可用项目内目录，可写使用 sibling worktree
+    mode: `readonly` 或 `worktree`
+    timeout: 超时时间，默认 600 秒，最大 1800 秒
+    output_limit: stdout/stderr 摘要最大字符数，默认 12000
+    model: 可选模型名，会映射到对应 CLI 的 `--model`
+    agent: 仅 MiMo Code 使用的可选 agent 名
+    allow_unsafe_permissions: 仅 MiMo worktree 模式允许附加 `--dangerously-skip-permissions`
 """
 
 
@@ -521,6 +546,11 @@ def create_key_tools() -> List[BaseTool]:
         return result
 
     cli_tool = StructuredTool.from_function(_cli_tool_impl, name="cli_tool", description=_CLI_TOOL_DOCSTRING)
+    cli_agent_run_tool = StructuredTool.from_function(
+        _cli_agent_run_impl,
+        name="cli_agent_run_tool",
+        description=_CLI_AGENT_RUN_TOOL_DOCSTRING,
+    )
 
     # ── 文件读写工具 ──────────────────────────────────────────────────────
 
@@ -1450,12 +1480,12 @@ def create_key_tools() -> List[BaseTool]:
         """
         【团队知识候选提交】挂接中央来源并提交精炼提案，等待审核后才会落为正式知识。
 
-        该工具不会直接创建 KnowledgeItem；原始群聊、PDF、外部搜索、运行证据或手写内容必须先进入 Owner source inbox 并由 Steward 晋升为中央来源。
+        该工具不会直接创建 KnowledgeItem；原始群聊、PDF、外部搜索、运行证据或手写内容需要先进入 Owner source inbox 并由 Steward 晋升为中央来源。
         只有 Agent 的 ToolPolicy.allowedTools 显式包含 knowledge_proposal_tool，且其团队/MemoryPolicy 允许向目标知识库提交时才可用。
 
         Args:
             knowledge_base_id: 目标团队知识库 ID
-            source_type: 来源类型，必须与 central_source_id 指向的中央来源一致
+            source_type: 来源类型，需要与 central_source_id 指向的中央来源一致
             source_ref_json: 调用方上下文 JSON；正式 SourceArtifact 溯源以中央来源为准
             proposal_title: 精炼提案标题
             proposal_content: 精炼后的候选知识正文
@@ -1506,13 +1536,13 @@ def create_key_tools() -> List[BaseTool]:
         """
         【团队知识半自动摄取】基于中央来源提交 SourceArtifact + pending RefinementProposal。
 
-        该工具不联网搜索、不解析 PDF、不收集原始来源、不直接创建正式知识；parser/searcher 必须先把原始材料交给 Owner source inbox。
+        该工具不联网搜索、不解析 PDF、不收集原始来源、不直接创建正式知识；parser/searcher 需要先把原始材料交给 Owner source inbox。
         正式 SourceArtifact 溯源以 central_source_id 对应的中央来源为准。
         只有 Agent 的 ToolPolicy.allowedTools 显式包含 knowledge_ingestion_tool，且其团队/MemoryPolicy 允许向目标知识库提交时才可用。
 
         Args:
             knowledge_base_id: 目标团队知识库 ID
-            source_type: 来源类型，必须与 central_source_id 指向的中央来源一致
+            source_type: 来源类型，需要与 central_source_id 指向的中央来源一致
             source_ref_json: 调用方上下文 JSON；正式 SourceArtifact 溯源以中央来源为准
             proposal_title: 待审提案标题
             excerpt: 已提取的来源摘录
@@ -1758,6 +1788,7 @@ def create_key_tools() -> List[BaseTool]:
         conversation_log_inspect_tool,
         # 文件操作
         cli_tool,
+        cli_agent_run_tool,
         read_file_tool,
         write_file_tool,
         glob_tool,

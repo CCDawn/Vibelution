@@ -10,6 +10,7 @@ MEDIUM_PERMISSION_TIER = "medium"
 HIGH_PERMISSION_TIER = "high"
 GENERATED_PERMISSION_TIER = "generated"
 EXPLICIT_ALLOW_TOOLS = {
+    "cli_agent_run_tool",
     "computer_use_session_tool",
     "computer_use_task_tool",
     "research_knowledge_query_tool",
@@ -181,6 +182,12 @@ TOOL_CATALOG: dict[str, dict[str, Any]] = {
         "category": "task_runtime",
         "capabilityTags": ["command", "shell"],
         "riskTags": ["command_execution"],
+        "permissionTier": HIGH_PERMISSION_TIER,
+    },
+    "cli_agent_run_tool": {
+        "category": "agent_collaboration",
+        "capabilityTags": ["external_agent", "cli_agent", "command", "worktree"],
+        "riskTags": ["command_execution", "external_agent", "can_modify_workspace"],
         "permissionTier": HIGH_PERMISSION_TIER,
     },
     "task_create_tool": {
@@ -597,6 +604,7 @@ TOOL_BUNDLE_DEFINITIONS: tuple[dict[str, Any], ...] = (
         "category": "operations",
         "toolNames": [
             "cli_tool",
+            "cli_agent_run_tool",
             "clean_workspace_debris_tool",
             "list_workspace_debris_tool",
             "task_list_tool",

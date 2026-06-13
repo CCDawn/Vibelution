@@ -20,6 +20,12 @@ def test_tools_api_lists_builtin_tools(tmp_path, monkeypatch):
     assert payload["counts"]["builtIn"] > 0
     builtin = next(item for item in payload["tools"] if item["name"] == "grep_search_tool")
     assert builtin["deleteAllowed"] is False
+    cli_agent = next(item for item in payload["tools"] if item["name"] == "cli_agent_run_tool")
+    assert cli_agent["category"] == "agent_collaboration"
+    assert cli_agent["permissionTier"] == "high"
+    assert cli_agent["permissionPolicy"]["requiresExplicitAllow"] is True
+    assert "operations" in cli_agent["bundleIds"]
+    assert cli_agent["testPolicy"]["callable"] is False
 
 
 def test_tools_api_exposes_image2_model_selector(monkeypatch):
@@ -213,6 +219,10 @@ def test_tools_api_lists_agent_scopes(tmp_path, monkeypatch):
     apply_tool = next(item for item in payload["tools"] if item["name"] == "apply_diff_edit_tool")
     assert apply_tool["agentScopes"]["subagent_explorer"]["visible"] is True
     assert apply_tool["agentScopes"]["subagent_explorer"]["callable"] is False
+    cli_agent = next(item for item in payload["tools"] if item["name"] == "cli_agent_run_tool")
+    assert cli_agent["agentScopes"]["subagent_explorer"]["visible"] is True
+    assert cli_agent["agentScopes"]["subagent_explorer"]["callable"] is False
+    assert "只读模式" in cli_agent["agentScopes"]["subagent_explorer"]["blockReason"]
 
 
 def test_tools_api_blocks_builtin_delete(tmp_path, monkeypatch):
