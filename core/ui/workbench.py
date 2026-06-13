@@ -171,7 +171,7 @@ def _close_stale_config_panel_windows() -> None:
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
     except Exception:
-        pass
+        LOGGER.debug("Failed to close stale config panel windows", exc_info=True)
 
 
 def _open_config_panel_page(url: str) -> None:
@@ -194,7 +194,7 @@ def _open_config_panel_page(url: str) -> None:
             )
             return
         except Exception:
-            pass
+            LOGGER.debug("Failed to launch preferred config panel browser", exc_info=True)
     webbrowser.open(url)
 
 
@@ -445,7 +445,7 @@ class AgentWorkbenchShell:
                         break
                     time.sleep(0.2)
             except Exception:
-                pass
+                LOGGER.debug("Config panel readiness loop interrupted for %s", health_url, exc_info=True)
         _open_config_panel_page(url)
         self.ui.console.print(Panel(f"{page_label}：{url}", title=panel_title, border_style=border_style))
         self._recent_status = f"已打开{page_label}：{url}"

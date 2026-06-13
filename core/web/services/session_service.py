@@ -929,29 +929,74 @@ def _has_recent_image_attachment_reference(message: str) -> bool:
     return has_reference and has_image_target
 
 
+def _image_context_request_for_retry(
+    message: str,
+    *,
+    conversation: dict[str, Any] | None,
+) -> dict[str, Any]:
+    if not (_is_continue_request(message) or _is_contextual_confirmation_message(message)):
+        return {}
+    if not isinstance(conversation, dict):
+        return {}
+    for item in reversed(list(conversation.get("messages") or [])[-8:]):
+        if not isinstance(item, dict) or str(item.get("role") or "").strip().lower() != "user":
+            continue
+        request = _image_context_request_from_user_message(item)
+        if request:
+            return request
+    return {}
+
+
+def _image_context_request_from_user_message(message: dict[str, Any]) -> dict[str, Any]:
+    attachments = _normalize_message_attachments(message.get("attachments") or message.get("imageAttachments") or [])
+    artifact_ids = [
+        str(item.get("artifactId") or "").strip()
+        for item in attachments
+        if _is_ready_user_image_attachment(item) and str(item.get("artifactId") or "").strip()
+    ]
+    metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+    resolved_reference = (
+        metadata.get("resolvedRecentImageReference")
+        if isinstance(metadata.get("resolvedRecentImageReference"), dict)
+        else {}
+    )
+    resolved_artifact_ids = [
+        str(item or "").strip()
+        for item in list(resolved_reference.get("artifactIds") or [])
+        if str(item or "").strip()
+    ]
+    if resolved_artifact_ids:
+        artifact_ids = resolved_artifact_ids
+    if not artifact_ids:
+        return {}
+
+    prompts = [
+        trim_lines(resolved_reference.get("prompt") or "", max_lines=4),
+        trim_lines(message.get("content") or "", max_lines=4),
+    ]
+    seen_prompts: set[str] = set()
+    for prompt in prompts:
+        if not prompt or prompt in seen_prompts:
+            continue
+        seen_prompts.add(prompt)
+        if _is_retriable_image_request_prompt(prompt):
+            return {"prompt": prompt, "artifactIds": artifact_ids}
+    return {}
+
+
+def _is_retriable_image_request_prompt(prompt: Any) -> bool:
+    intent = _classify_image_attachment_intent(str(prompt or ""))
+    return intent in {"image2_edit", "vision_analysis"}
+
+
 def _image_context_prompt_for_retry(
     message: str,
     *,
     conversation: dict[str, Any] | None,
-    active_task: dict[str, Any] | None,
+    active_task: dict[str, Any] | None = None,
 ) -> str:
-    if not (_is_continue_request(message) or _is_contextual_confirmation_message(message)):
-        return ""
-    candidates: list[str] = []
-    if isinstance(active_task, dict):
-        candidates.extend(
-            trim_lines(active_task.get(key) or "", max_lines=4)
-            for key in ("goal", "title", "latest_summary", "next_action")
-        )
-    if isinstance(conversation, dict):
-        for item in reversed(list(conversation.get("messages") or [])[-8:]):
-            if not isinstance(item, dict) or str(item.get("role") or "").strip().lower() != "user":
-                continue
-            candidates.append(trim_lines(item.get("content") or "", max_lines=4))
-    for candidate in candidates:
-        if _looks_like_image_retry_context(candidate):
-            return candidate
-    return ""
+    request = _image_context_request_for_retry(message, conversation=conversation)
+    return str(request.get("prompt") or "")
 
 
 def _looks_like_image_retry_context(text: Any) -> bool:
@@ -3376,26 +3421,41 @@ def submit_session_message(
         if not _is_task_tool_backed_active_task(active_task):
             active_task = None
         explicit_recent_image_reference = _has_recent_image_attachment_reference(message)
-        contextual_recent_image_prompt = (
-            ""
+        contextual_recent_image_request = (
+            {}
             if attachments or explicit_recent_image_reference
-            else _image_context_prompt_for_retry(
+            else _image_context_request_for_retry(
                 message,
                 conversation=conversation,
-                active_task=active_task,
             )
         )
+        contextual_recent_image_prompt = str(contextual_recent_image_request.get("prompt") or "").strip()
+        contextual_recent_image_artifact_ids = [
+            str(item or "").strip()
+            for item in list(contextual_recent_image_request.get("artifactIds") or [])
+            if str(item or "").strip()
+        ]
         recent_image_reference_prompt = message if explicit_recent_image_reference else contextual_recent_image_prompt
         recent_image_reference_requested = not attachments and bool(recent_image_reference_prompt)
         recent_image_reference_missing = False
         if recent_image_reference_requested:
-            recent_attachment = _find_recent_user_image_attachment(conversation)
-            if recent_attachment:
+            if contextual_recent_image_artifact_ids:
                 attachments = _resolve_session_image_attachments(
                     conversation_id,
-                    [str(recent_attachment.get("artifactId") or "").strip()],
+                    contextual_recent_image_artifact_ids,
                     conversation=conversation,
                 )
+                recent_image_reference_missing = not bool(attachments)
+            elif explicit_recent_image_reference:
+                recent_attachment = _find_recent_user_image_attachment(conversation)
+                if recent_attachment:
+                    attachments = _resolve_session_image_attachments(
+                        conversation_id,
+                        [str(recent_attachment.get("artifactId") or "").strip()],
+                        conversation=conversation,
+                    )
+                else:
+                    recent_image_reference_missing = True
             else:
                 recent_image_reference_missing = True
         if not message and not attachments and not session_references:
