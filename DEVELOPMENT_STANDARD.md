@@ -220,6 +220,8 @@ For frontend visual work, check the real UI after each meaningful visual change 
 
 Vibelution workbench surfaces should feel like dense operational consoles: compact tables, spec grids, light boundaries, grouped headings, and metadata hierarchy before decorative cards.
 
+Detailed interaction geometry requirements, including button sizing, control choice, loading-state stability, and screenshot validation, live in section 23.10.
+
 ## 10. Bun Usage
 
 Bun may be used only as an auxiliary local frontend runner under `web/`.
@@ -789,3 +791,35 @@ Avoid:
 - irreversible operations without explicit product intent and validation.
 
 Validation anchor: every lifecycle removal should prove the parent, child records, indexes, UI caches, and user-visible lists converge to the same semantic state.
+
+### 23.10 Frontend Interaction Design And Layout Fit
+
+Trigger this constraint when adding or changing visible controls, buttons, action groups, panels, cards, tables, forms, drawers, modals, loading states, empty states, or responsive layouts.
+
+Default rule: UI geometry must match the action's content, intent, scope, and container semantics. A control should not become large merely because its parent layout has available space.
+
+Prefer:
+
+- buttons sized to their label and icon content with consistent padding, stable height, and bounded min/max width;
+- icon-only square buttons for familiar tool actions, with accessible labels and tooltips;
+- full-width buttons only when the whole row or block is intentionally the action target, such as a mobile primary action, a form submit row, or a single CTA inside a constrained panel;
+- segmented controls, tabs, checkboxes, toggles, selects, menus, or dropdowns for modes and option sets instead of long stacks of button-like choices;
+- action groups aligned near the object they affect, with primary, secondary, and destructive actions visually separated;
+- compact operational layouts that prioritize scanning, comparison, and repeated use over marketing-style hero/card composition;
+- reserved dimensions, skeletons, or stable placeholders so loading content does not pop in below the viewport or shift the surrounding layout after data arrives;
+- responsive constraints such as `minmax`, `fit-content`, `max-content`, `max-width`, `aspect-ratio`, and fixed icon-button dimensions for fixed-format controls;
+- designs checked against the longest realistic Chinese and English labels, empty values, loading labels, error text, and permission-disabled states;
+- clear focus, hover, active, disabled, busy, and failure states for every interactive element.
+
+Avoid:
+
+- short-label buttons stretched across a wide container, leaving large empty clickable areas;
+- using `width: 100%` on buttons inside dense panels, toolbars, lists, or cards unless the full row is the intended target;
+- button text that wraps awkwardly, clips, overflows, or visually floats in excessive whitespace;
+- controls whose hover, loading, badge, or label states resize the surrounding layout;
+- nested cards, decorative card walls, or large empty bands on operational pages;
+- using buttons as generic pills for filters, binary settings, mode switches, or multi-choice inputs when a standard control communicates the intent better;
+- loading states where key rows, actions, or bottom content are hidden until the request finishes without a stable placeholder;
+- mobile layouts that require horizontal scrolling for normal controls or let fixed buttons cover content.
+
+Validation anchor: frontend visual work should include a browser screenshot or equivalent visual check at the relevant desktop and mobile widths. Before finishing, confirm that buttons hug their content or have an explicit full-width reason, text fits, controls do not overlap, and loading-to-loaded transitions do not create disruptive layout shifts.
