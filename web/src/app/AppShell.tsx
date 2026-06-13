@@ -1388,6 +1388,7 @@ export function AppShell() {
     const handleFocus = () => scheduleRecovery("window_focus");
     const handlePageShow = () => scheduleRecovery("pageshow");
     const handlePopState = () => scheduleRecovery("popstate");
+    const handleDocumentClick = () => scheduleRecovery("document_click");
     const handleVisibilityChange = () => {
       if (document.visibilityState === "visible") {
         scheduleRecovery("visibility_visible");
@@ -1397,6 +1398,7 @@ export function AppShell() {
     window.addEventListener("focus", handleFocus);
     window.addEventListener("pageshow", handlePageShow);
     window.addEventListener("popstate", handlePopState);
+    window.addEventListener("click", handleDocumentClick, true);
     document.addEventListener("visibilitychange", handleVisibilityChange);
     scheduleRecovery("app_shell_mounted");
 
@@ -1407,6 +1409,7 @@ export function AppShell() {
       window.removeEventListener("focus", handleFocus);
       window.removeEventListener("pageshow", handlePageShow);
       window.removeEventListener("popstate", handlePopState);
+      window.removeEventListener("click", handleDocumentClick, true);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, [recoverRouterLocationDesync]);

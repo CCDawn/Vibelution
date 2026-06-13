@@ -319,6 +319,9 @@ const FALLBACK_AGENT_LLM_SLOTS: AgentLlmSlotDefinition[] = [
     requiresImageInput: true,
   },
 ];
+const EMPTY_TOOL_BUNDLES: ToolBundle[] = [];
+const EMPTY_TOOL_REGISTRY_ITEMS: ToolRegistryItem[] = [];
+const EMPTY_AGENT_CONFIG_GROUPS: AgentConfigWorkspaceGroup[] = [];
 const DEFAULT_AGENT_RESET_OPTIONS: AgentResetOptions = {
   clearRuntimeState: true,
   resetDirectSession: true,
@@ -3294,7 +3297,7 @@ export function AgentsRoute() {
     refetchInterval: toolsWorkspaceNeeded ? resolvePollingInterval(pageVisible, 15_000) : false,
     refetchIntervalInBackground: false,
   });
-  const toolBundles = toolsQuery.data?.toolBundles ?? [];
+  const toolBundles = toolsQuery.data?.toolBundles ?? EMPTY_TOOL_BUNDLES;
 
   const avatarOptionsQuery = useQuery({
     queryKey: ["agent-avatar-options"],
@@ -3304,13 +3307,13 @@ export function AgentsRoute() {
   });
 
   const workspace = workspaceQuery.data;
-  const tools = toolsQuery.data?.tools ?? [];
+  const tools = toolsQuery.data?.tools ?? EMPTY_TOOL_REGISTRY_ITEMS;
   const agentModelChoices = useMemo(
     () => buildAgentModelChoices(workspace?.agentModelChoices ?? []),
     [workspace?.agentModelChoices],
   );
   const llmSlots = useMemo(() => agentLlmSlots(workspace), [workspace?.agentLlmSlots]);
-  const groups = workspace?.groups ?? [];
+  const groups = workspace?.groups ?? EMPTY_AGENT_CONFIG_GROUPS;
   const teamIndexGroups = useMemo(() => workspaceTeamIndexes(workspace), [workspace]);
   const managementFilterGroups = useMemo(
     () => buildManagementFilterGroups(workspace?.agents ?? [], copy),
