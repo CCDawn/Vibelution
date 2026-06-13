@@ -1499,6 +1499,11 @@ function ConfigSectionEditor({
   const editing = uiState.editing;
   const expandedPaths = uiState.expandedPaths;
   const draftValue = editing ? clonePublicConfig(uiState.draftValue ?? value) : clonePublicConfig(value);
+  const sectionClassName = [
+    styles.sectionSurface,
+    styles.configEditorSection,
+    section.id === "llm-discovery" ? styles.configDiscoverySection : "",
+  ].filter(Boolean).join(" ");
   const [uploadingImagePath, setUploadingImagePath] = useState("");
   const [avatarCrop, setAvatarCrop] = useState<AvatarCropDraft | null>(null);
   const [avatarCropError, setAvatarCropError] = useState("");
@@ -2019,7 +2024,7 @@ function ConfigSectionEditor({
   }
 
   return (
-    <section id={`config-${section.id}`} className={styles.sectionSurface}>
+    <section id={`config-${section.id}`} className={sectionClassName}>
       <div className={styles.sectionHeader}>
         <div className={styles.sectionHeaderMain}>
           <p className={styles.eyebrow}>{section.path}</p>
@@ -3221,7 +3226,7 @@ export function ConfigRoute() {
         />
       </aside>
 
-      <section className={styles.content}>
+      <section className={activeSection?.id === "models-profiles" ? `${styles.content} ${styles.contentModels}` : styles.content}>
         {notice.text ? (
           <div
             className={
@@ -3327,7 +3332,7 @@ export function ConfigRoute() {
         ) : null}
 
         {isSectionVisible("models") ? (
-        <section id="config-models" className={styles.sectionSurface}>
+        <section id="config-models" className={`${styles.sectionSurface} ${styles.modelLibrarySection}`}>
           <div className={styles.sectionHeader}>
             <div>
               <p className={styles.eyebrow}>{sectionTitle("models", copy.modelsTitle)}</p>

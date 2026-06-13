@@ -271,6 +271,17 @@
   scrollbar-gutter: stable;
 }
 
+.contentModels {
+  align-content: stretch;
+  grid-template-rows: minmax(0, 1fr) auto;
+  height: 100%;
+  max-height: calc(100dvh - 76px);
+}
+
+.contentModels:has(> .notice) {
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
 .notice {
   padding: 7px 9px;
   border-radius: 8px;
@@ -571,6 +582,22 @@
   margin-top: 7px;
 }
 
+.configEditorSection > .treeGrid,
+.configEditorSection > .treeStack,
+.configEditorSection > .helperText {
+  margin: var(--config-section-y) var(--config-section-x) var(--config-section-x);
+}
+
+.configDiscoverySection {
+  align-self: end;
+  min-height: 0;
+}
+
+.contentModels > .configDiscoverySection:last-child {
+  display: grid;
+  grid-template-rows: auto auto;
+}
+
 .hashGrid {
   grid-template-columns: minmax(280px, 1.4fr) minmax(180px, 0.6fr);
 }
@@ -722,6 +749,30 @@
   min-width: 150px;
 }
 
+.modelLibrarySection {
+  --config-section-y: 6px;
+  grid-template-rows: auto auto auto auto auto minmax(0, 1fr);
+  min-height: 0;
+  overflow: auto;
+}
+
+.modelLibrarySection .sectionHeader {
+  min-height: 34px;
+  padding-block: 6px;
+}
+
+.modelLibrarySection > .sectionText {
+  max-width: none;
+  padding-top: 5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.modelLibrarySection .modelCenterSummaryBar {
+  margin-top: 5px;
+}
+
 .modelLibraryTestBar {
   display: flex;
   align-items: end;
@@ -733,9 +784,126 @@
   background: var(--surface-card-muted);
 }
 
+.modelLibrarySection .modelLibraryTestBar {
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: 7px;
+}
+
 .modelLibraryTestSelect {
   min-width: min(360px, 100%);
   flex: 1 1 280px;
+}
+
+.modelLibrarySection .modelLibraryTestSelect {
+  min-width: min(320px, 100%);
+  flex-basis: 260px;
+}
+
+.modelLibrarySection .formHeader {
+  min-height: 32px;
+  padding: 5px 8px;
+}
+
+.modelLibrarySection .profileTableWrap {
+  height: 100%;
+  max-height: none;
+  min-height: 0;
+  overflow: auto;
+}
+
+.modelLibrarySection .profileTable th,
+.modelLibrarySection .profileTable td {
+  padding: 5px 7px;
+}
+
+.modelLibrarySection .modelInventoryTable {
+  min-width: 1020px;
+  table-layout: fixed;
+}
+
+.modelLibrarySection .modelInventoryTable th:first-child,
+.modelLibrarySection .modelInventoryTable td:first-child {
+  width: 16%;
+  min-width: 178px;
+}
+
+.modelLibrarySection .modelInventoryTable th:nth-child(2),
+.modelLibrarySection .modelInventoryTable td:nth-child(2) {
+  width: 14%;
+  min-width: 150px;
+}
+
+.modelLibrarySection .modelInventoryTable th:nth-child(3),
+.modelLibrarySection .modelInventoryTable td:nth-child(3) {
+  width: 22%;
+  min-width: 220px;
+}
+
+.modelLibrarySection .modelInventoryTable th:nth-child(4),
+.modelLibrarySection .modelInventoryTable td:nth-child(4) {
+  width: 11%;
+  min-width: 116px;
+}
+
+.modelLibrarySection .modelInventoryTable th:nth-child(5),
+.modelLibrarySection .modelInventoryTable td:nth-child(5) {
+  width: 26%;
+  min-width: 230px;
+}
+
+.modelLibrarySection .modelInventoryTable th:nth-child(6),
+.modelLibrarySection .modelInventoryTable td:nth-child(6) {
+  width: 11%;
+  min-width: 120px;
+}
+
+.modelInventoryTable .profileTaskCell strong,
+.modelInventoryTable .profileModelCell strong,
+.modelInventoryTable .profileMetaCell strong,
+.modelInventoryTable .profileTaskCell span,
+.modelInventoryTable .profileModelCell span,
+.modelInventoryTable .profileMetaCell span:not(.inlineBadge) {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  overflow-wrap: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.modelInventoryTable .profileTaskCell strong,
+.modelInventoryTable .profileModelCell strong,
+.modelInventoryTable .profileMetaCell strong {
+  font-size: 0.8rem;
+  line-height: 1.12;
+}
+
+.modelInventoryTable .profileTaskCell span,
+.modelInventoryTable .profileModelCell span,
+.modelInventoryTable .profileMetaCell span:not(.inlineBadge) {
+  margin-bottom: 2px;
+  font-size: 0.7rem;
+  line-height: 1.14;
+}
+
+.modelInventoryTable .profileTableActions {
+  display: grid;
+  gap: 4px;
+  align-items: stretch;
+}
+
+.modelInventoryTable .profileTableActions .compactButton {
+  justify-content: start;
+  min-height: 24px;
+  padding-inline: 6px;
+  font-size: 0.72rem;
+}
+
+.modelInventoryTable .inlineBadge {
+  min-height: 19px;
+  padding-inline: 6px;
+  font-size: 0.66rem;
 }
 
 .profileTable td > input[type="checkbox"] {
@@ -1585,6 +1753,12 @@
   align-items: start;
 }
 
+.configDiscoverySection > .treeGrid {
+  align-content: start;
+  grid-template-columns: repeat(6, minmax(128px, 1fr));
+  gap: 6px;
+}
+
 .treeWide {
   grid-column: 1 / -1;
 }
@@ -1633,6 +1807,12 @@
   gap: 4px 8px;
   min-height: 34px;
   padding: 6px;
+}
+
+.configDiscoverySection .treeFieldCardView {
+  grid-template-columns: minmax(108px, 0.42fr) minmax(0, 1fr);
+  min-height: 38px;
+  padding: 5px 6px;
 }
 
 .treeFieldCardEdit {
@@ -1754,6 +1934,19 @@
   border-radius: 6px;
   background: color-mix(in srgb, var(--surface-code) 58%, var(--surface-card-muted));
   font-family: var(--font-mono);
+}
+
+.configDiscoverySection .treeFieldLabel,
+.configDiscoverySection .treeFieldValue {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 1380px) {
+  .configDiscoverySection > .treeGrid {
+    grid-template-columns: repeat(3, minmax(180px, 1fr));
+  }
 }
 
 .avatarImageCard {
@@ -2153,6 +2346,10 @@
     grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
   }
 
+  .configDiscoverySection > .treeGrid {
+    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  }
+
   .logHelperHeader {
     align-items: stretch;
     flex-direction: column;
@@ -2189,6 +2386,14 @@
 
   .treeFieldCardView {
     grid-template-columns: 1fr;
+  }
+
+  .modelLibrarySection > .sectionText {
+    white-space: normal;
+  }
+
+  .configDiscoverySection {
+    min-height: 0;
   }
 
   .treeFieldCardView .treeFieldValue {
