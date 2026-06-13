@@ -1440,7 +1440,6 @@
   color: var(--fg-muted);
   font-size: 0.62rem;
   font-weight: 780;
-  text-transform: uppercase;
 }
 
 .sourceCollectionTraceBody h3 {
@@ -2472,7 +2471,9 @@
 
 .workflowSourceCollectionActionSummary {
   display: grid;
-  gap: 3px;
+  grid-template-columns: minmax(0, 1fr) max-content;
+  align-items: center;
+  gap: 8px;
   padding: 8px;
 }
 
@@ -2486,6 +2487,29 @@
   font-size: 0.7rem;
   font-weight: 720;
   line-height: 1.45;
+}
+
+.workflowSourceCollectionPrimaryButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 30px;
+  width: fit-content;
+  max-width: 190px;
+  padding: 0 12px;
+  border: 1px solid color-mix(in srgb, var(--accent-primary) 42%, var(--border-strong));
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--accent-primary) 14%, var(--surface-panel-strong));
+  color: var(--fg-primary);
+  font-size: 0.74rem;
+  font-weight: 780;
+  white-space: nowrap;
+}
+
+.workflowSourceCollectionPrimaryButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .workflowSourceCollectionDetails {
@@ -2721,8 +2745,8 @@
 }
 
 .workflowSourceCollectionStorageButtons {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
+  display: flex;
+  flex-wrap: wrap;
   gap: 5px;
 }
 
@@ -2731,7 +2755,6 @@
   align-items: center;
   justify-content: center;
   gap: 5px;
-  min-width: 0;
   min-height: 28px;
   padding: 0 8px;
   border: 1px solid color-mix(in srgb, var(--accent-cool) 32%, var(--border-strong));
@@ -2740,11 +2763,26 @@
   color: color-mix(in srgb, var(--accent-cool) 76%, var(--fg-primary));
   font-size: 0.68rem;
   font-weight: 780;
+  white-space: nowrap;
 }
 
 .workflowSourceCollectionStorageButtons button:disabled {
   cursor: not-allowed;
   opacity: 0.55;
+}
+
+.workflowSourceCollectionStorageDetails {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.workflowSourceCollectionStorageDetails summary {
+  width: fit-content;
+  color: color-mix(in srgb, var(--accent-cool) 76%, var(--fg-secondary));
+  cursor: pointer;
+  font-size: 0.66rem;
+  font-weight: 760;
 }
 
 .workflowSourceCollectionPlan {
@@ -3617,8 +3655,13 @@
   }
 
   .sourceCollectionCommandBar,
-  .sourceCollectionPageGrid {
+  .sourceCollectionPageGrid,
+  .workflowSourceCollectionActionSummary {
     grid-template-columns: 1fr;
+  }
+
+  .workflowSourceCollectionPrimaryButton {
+    justify-self: start;
   }
 
   .sourceCollectionCommandStats {

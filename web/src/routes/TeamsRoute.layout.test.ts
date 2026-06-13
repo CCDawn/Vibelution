@@ -272,13 +272,15 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("阶段详情");
     expect(routeSource).toContain("styles.researchStageCardHead");
     expect(routeSource).toContain("styles.researchStageCardMetrics");
-    expect(routeSource).toContain("对话式执行下一批搜索");
     expect(routeSource).toContain("执行下一批搜索");
     expect(routeSource).toContain("/storage/open");
-    expect(routeSource).toContain("证据落盘");
+    expect(routeSource).toContain("本轮产物");
     expect(routeSource).toContain("打开批次目录");
+    expect(routeSource).toContain("更多证据文件");
     expect(routeSource).toContain("sourceCollectionStorageTargetForRef");
-    expect(routeSource).toContain("sourceCollectionExecutionTitle");
+    expect(routeSource).toContain("sourceCollectionStatusLabel");
+    expect(routeSource).toContain("sourceCollectionAgentRoleLabel");
+    expect(routeSource).toContain("workflowSourceCollectionPrimaryButton");
     expect(routeSource).toContain("启动实验规划");
     expect(routeSource).toContain("启动迭代");
     expect(routeSource).not.toContain("{researchWorkflowTeamSelected ? renderResearchWorkspaceNav() : null}");
@@ -319,7 +321,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("researchStageStartFeedbackText");
     expect(routeSource).toContain("已复用正在运行的");
     expect(routeSource).toContain("搜集批次已启动，等待功能 Agent 回写");
-    expect(routeSource).toContain("真实搜索执行器接入后会在这里记录搜索、下载、提炼和落库轨迹");
+    expect(routeSource).toContain("后续接入全文下载或提炼器时，这里会继续记录下载、提炼和落库轨迹");
     expect(routeSource).toContain("当前仍是计划/回写阶段，未触发外部搜索");
     expect(routeSource).toContain("styles.workflowNotice");
     expect(routeSource).toContain("返回团队页面");
@@ -404,6 +406,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.sourceCollectionTraceStorage).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionControlPanel).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionStageModules).toBeTypeOf("string");
+    expect(routeStyles.workflowSourceCollectionPrimaryButton).toBeTypeOf("string");
+    expect(routeStyles.workflowSourceCollectionStorageDetails).toBeTypeOf("string");
     expect(routeStyles.researchStagePage).toBeTypeOf("string");
     expect(routeStyles.researchStageHeroPanel).toBeTypeOf("string");
     expect(routeStyles.researchStageActionPanel).toBeTypeOf("string");
