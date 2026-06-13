@@ -190,6 +190,10 @@ Do not perform broad formatting, opportunistic cleanup, renaming, or splitting i
 - Chat mode user input must enter the LLM payload as `role=user` or equivalent user-message shape. Do not wrap chat user input in `SystemMessage`.
 - When an LLM call fails unexpectedly, inspect the safe message-role summary first: `system`, `user`, `assistant`, `tool`.
 - On Windows, do not assume `CREATE_NO_WINDOW` on `.venv\Scripts\python.exe` is enough for long-lived services. Verify child process trees and visible windows; prefer service-specific `pythonw.exe` when no console should appear.
+- On Windows, terminal-popup fixes must prove the full process chain, not just the first launcher layer. Inspect parent and child process command lines, visible window titles, launcher state, runtime-manager events, and any short-lived terminal hosts before deciding the root cause.
+- Avoid background runtime commands that depend on PATH wrappers when they can run from a no-console service or frontend polling path. Resolve the real executable, capture output, and apply the shared no-window startup policy instead of relying on a shell, `.cmd`, or wrapper binary.
+- Git commands called by runtime services, UI polling, memory overview, restart backup, or evolution harnesses must use the shared Git process helper. Do not add new `subprocess.run(["git", ...])` runtime paths; Git for Windows may resolve to `cmd\git.exe` and surface visible terminals from background code.
+- When a terminal-popup investigation finds interactive Git editor chains such as `git merge --continue -> sh -> vim .git/COMMIT_EDITMSG`, first verify repository state (`MERGE_HEAD`, `git status`) before killing anything. Treat stale editor processes as residual cleanup only after confirming no active merge or commit operation exists.
 
 ## 9. Frontend Standards
 
@@ -307,6 +311,8 @@ Do not use ad hoc `uvicorn`, `scripts/web_workbench.py`, `npm run dev`, direct b
 
 Docs-only, tests-only, memory-only, and rule-only changes may skip Launcher refresh. State why.
 
+Terminal popup issues during startup are Launcher/runtime lifecycle bugs until proven otherwise. Diagnosis must cover the desktop entry, VBS/PowerShell adapter, Python launcher and child interpreter, Node/npm/cmd wrappers, Git polling endpoints, Runtime Manager commands, and stale external processes. Closure requires live evidence that the original user action no longer creates visible `cmd.exe`, `WindowsTerminal.exe`, `OpenConsole.exe`, or interactive Git editor windows, plus focused tests for the no-console helper or launch policy that was changed.
+
 ## 13. Git Submission
 
 Before staging or committing, inspect:
@@ -316,6 +322,8 @@ git status --short --branch
 ```
 
 Never use `git add .`. Stage only files belonging to the current task.
+
+Run Git commands non-interactively in automation and agent workflows. Do not start `git commit`, `git merge --continue`, or similar commands in a way that can open an editor unless the user explicitly asked for interactive Git. Supply a message, use `--no-edit` when appropriate, or set a bounded non-interactive editor for scripted flows.
 
 Do not revert unrelated user or Agent changes. If unrelated changes exist in files you must touch, read carefully and work with them instead of overwriting.
 
