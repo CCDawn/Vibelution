@@ -1641,12 +1641,21 @@
   background: color-mix(in srgb, var(--accent-cool) 7%, transparent);
 }
 
+.agentSessionTabCli {
+  border-left: 3px solid color-mix(in srgb, var(--state-success) 58%, transparent);
+  background: color-mix(in srgb, var(--state-success) 7%, transparent);
+}
+
 .agentSessionTabRoot.agentSessionTabActive {
   background: color-mix(in srgb, var(--surface-panel-strong) 88%, var(--accent-warm) 12%);
 }
 
 .agentSessionTabChild.agentSessionTabActive {
   background: color-mix(in srgb, var(--surface-panel-strong) 86%, var(--accent-cool) 14%);
+}
+
+.agentSessionTabCli.agentSessionTabActive {
+  background: color-mix(in srgb, var(--surface-panel-strong) 86%, var(--state-success) 14%);
 }
 
 .agentSessionTabRoot .agentSessionTabIcon {
@@ -1657,6 +1666,11 @@
 .agentSessionTabChild .agentSessionTabIcon {
   color: var(--accent-cool-2);
   background: color-mix(in srgb, var(--accent-cool) 16%, transparent);
+}
+
+.agentSessionTabCli .agentSessionTabIcon {
+  color: var(--state-success);
+  background: color-mix(in srgb, var(--state-success) 14%, transparent);
 }
 
 .agentSessionTabEditing {
@@ -1818,6 +1832,172 @@
   height: 100%;
   min-height: 0;
   overflow: hidden;
+}
+
+.cliAgentRunPanel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  padding: 14px;
+  gap: 10px;
+  overflow: hidden;
+  background: var(--surface-panel-strong);
+}
+
+.cliAgentRunHeader {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  min-height: 42px;
+}
+
+.cliAgentRunIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid color-mix(in srgb, var(--state-success) 24%, var(--border-soft));
+  border-radius: 7px;
+  color: var(--state-success);
+  background: color-mix(in srgb, var(--state-success) 10%, transparent);
+}
+
+.cliAgentRunHeading {
+  min-width: 0;
+}
+
+.cliAgentRunHeading p {
+  margin: 0 0 2px;
+  color: var(--fg-tertiary);
+  font-size: 0.68rem;
+  font-weight: 760;
+  text-transform: uppercase;
+}
+
+.cliAgentRunHeading h2 {
+  margin: 0;
+  overflow: hidden;
+  color: var(--fg-primary);
+  font-size: 1rem;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cliAgentRunStatus {
+  justify-self: end;
+  border: 1px solid color-mix(in srgb, var(--state-success) 24%, var(--border-soft));
+  border-radius: 999px;
+  padding: 4px 9px;
+  color: var(--state-success);
+  background: color-mix(in srgb, var(--state-success) 8%, transparent);
+  font-size: 0.72rem;
+  font-weight: 760;
+  white-space: nowrap;
+}
+
+.cliAgentRunCommand {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  border: 1px solid color-mix(in srgb, var(--border-soft) 84%, transparent);
+  border-radius: 7px;
+  padding: 9px 10px;
+  background: color-mix(in srgb, var(--surface-panel) 90%, var(--fg-primary) 4%);
+  color: var(--fg-primary);
+  font-size: 0.78rem;
+}
+
+.cliAgentRunCommand span {
+  color: var(--state-success);
+  font-weight: 800;
+}
+
+.cliAgentRunCommand code {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.cliAgentRunMeta {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(138px, 1fr));
+  gap: 7px;
+  margin: 0;
+}
+
+.cliAgentRunMetaItem {
+  min-width: 0;
+  border: 1px solid color-mix(in srgb, var(--border-soft) 76%, transparent);
+  border-radius: 7px;
+  padding: 7px 8px;
+  background: color-mix(in srgb, var(--surface-panel) 74%, transparent);
+}
+
+.cliAgentRunMetaItem dt {
+  margin: 0 0 3px;
+  color: var(--fg-tertiary);
+  font-size: 0.66rem;
+  font-weight: 760;
+}
+
+.cliAgentRunMetaItem dd {
+  margin: 0;
+  overflow: hidden;
+  color: var(--fg-secondary);
+  font-size: 0.74rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cliAgentRunOutput {
+  display: grid;
+  gap: 9px;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.cliAgentRunOutputSection {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.cliAgentRunOutputSection h3 {
+  margin: 0;
+  color: var(--fg-tertiary);
+  font-size: 0.7rem;
+  font-weight: 800;
+}
+
+.cliAgentRunOutputSection pre {
+  margin: 0;
+  min-height: 44px;
+  max-height: 280px;
+  overflow: auto;
+  border: 1px solid color-mix(in srgb, var(--border-soft) 84%, transparent);
+  border-radius: 7px;
+  padding: 10px;
+  background: color-mix(in srgb, var(--surface-panel) 86%, var(--fg-primary) 5%);
+  color: var(--fg-secondary);
+  font-size: 0.76rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.cliAgentRunEmpty {
+  margin: 0;
+  border: 1px dashed color-mix(in srgb, var(--border-soft) 84%, transparent);
+  border-radius: 7px;
+  padding: 14px;
+  color: var(--fg-tertiary);
+  font-size: 0.8rem;
 }
 
 .inlineNotice {
