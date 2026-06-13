@@ -265,8 +265,13 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("资料搜集");
     expect(routeSource).toContain("科研控制台");
     expect(routeSource).toContain("开始知识搜集");
+    expect(routeSource).toContain("执行下一批搜索");
+    expect(routeSource).toContain("新一轮搜集");
+    expect(routeSource).toContain("待筛选");
+    expect(routeSource).toContain("可进入实验");
     expect(routeSource).toContain("阶段详情");
     expect(routeSource).toContain("styles.researchStageCardHead");
+    expect(routeSource).toContain("styles.researchStageCardMetrics");
     expect(routeSource).toContain("对话式执行下一批搜索");
     expect(routeSource).toContain("执行下一批搜索");
     expect(routeSource).toContain("/storage/open");
@@ -417,6 +422,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.researchStageLauncher).toBeTypeOf("string");
     expect(routeStyles.researchStageCard).toBeTypeOf("string");
     expect(routeStyles.researchStageCardHead).toBeTypeOf("string");
+    expect(routeStyles.researchStageCardMetrics).toBeTypeOf("string");
     expect(routeStyles.researchInspector).toBeTypeOf("string");
     expect(routeStyles.researchCanvasPanelHidden).toBeTypeOf("string");
     expect(routeStyles.aiSearchScopePanel).toBeTypeOf("string");
