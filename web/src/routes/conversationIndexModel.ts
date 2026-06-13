@@ -39,6 +39,24 @@ export const CONVERSATION_GROUP_ORDER: ConversationIndexGroupKey[] = [
   "other",
 ];
 
+const NON_DISCUSSION_TEAM_IDS = new Set(["self-evolution-team", "supervised-evolution-team"]);
+const NON_DISCUSSION_TEAM_KINDS = new Set(["self_evolution", "supervised_evolution"]);
+const NON_DISCUSSION_TEAM_SOURCES = new Set(["self_evolution", "supervised_evolution"]);
+
+export function isDiscussionTeam(team: Team | undefined | null) {
+  if (!team) {
+    return false;
+  }
+  const teamId = String(team.teamId ?? "").trim();
+  const teamKind = String(team.teamKind ?? "").trim();
+  const teamSource = String(team.teamSource ?? "").trim();
+  return !(
+    NON_DISCUSSION_TEAM_IDS.has(teamId)
+    || NON_DISCUSSION_TEAM_KINDS.has(teamKind)
+    || NON_DISCUSSION_TEAM_SOURCES.has(teamSource)
+  );
+}
+
 export function sessionToConversationSummary(session: SessionSummary): ConversationSummary {
   return {
     conversationId: session.id,
@@ -270,8 +288,9 @@ export function buildConversationIndexModel({
         String(value ?? "").toLowerCase().includes(term),
       ),
     );
+  const discussionTeams = teams.filter(isDiscussionTeam);
   const filteredTeams = term
-    ? teams.filter((team) =>
+    ? discussionTeams.filter((team) =>
         [
           team.name,
           team.purpose,
@@ -284,7 +303,7 @@ export function buildConversationIndexModel({
           ...(team.members ?? []).flatMap((member) => [member.agentName, member.agentCode, member.role, member.purpose]),
         ].some((value) => String(value ?? "").toLowerCase().includes(term)),
       )
-    : teams;
+    : discussionTeams;
   const buckets = new Map<ConversationIndexGroupKey, ConversationSummary[]>(
     CONVERSATION_GROUP_ORDER.map((groupKey) => [groupKey, []]),
   );

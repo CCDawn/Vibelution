@@ -2229,8 +2229,6 @@ export type SessionSummary = {
   agentMissing?: boolean;
   agentStatusCode?: string;
   agentStatusMessage?: string;
-  agentDirectSessionMismatch?: boolean;
-  agentPrimaryDirectSessionId?: string;
   status: string;
   taskSummary: string;
   lastActive: string;

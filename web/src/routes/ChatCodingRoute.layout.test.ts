@@ -829,6 +829,9 @@ describe("ChatCodingRoute layout contract", () => {
     expect(groupSessionIndexItemsSource).toContain("team.teamKind");
     expect(conversationIndexModelSource).toContain("team.teamSource");
     expect(conversationIndexModelSource).toContain("team.teamTemplateId");
+    expect(conversationIndexModelSource).toContain("isDiscussionTeam");
+    expect(conversationIndexModelSource).toContain("NON_DISCUSSION_TEAM_IDS");
+    expect(conversationIndexModelSource).toContain("supervised-evolution-team");
     expect(groupSessionIndexItemsSource).toContain("群成员");
     expect(groupSessionIndexItemsSource).toContain("团队分类");
     expect(groupSessionIndexItemsSource).toContain("团队群聊");
@@ -881,9 +884,14 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("useSessionIndexQuery");
     expect(routeSource).toContain("queryText: sessionQueryText");
     expect(routeSource).toContain("sessionIndexHasMore");
+    expect(routeSource).toContain("加载更多会话");
+    expect(routeSource).toContain("已加载全部会话");
+    expect(routeSource).toContain("sessionIndexProgressVisible");
     expect(routeSource).toContain("rawSessionsQuery.loadMore()");
     expect(routeSource).toContain("styles.sessionLoadMoreButton");
+    expect(routeSource).toContain("styles.sessionLoadMoreStatus");
     expect(routeStyles.sessionLoadMoreButton).toBeTypeOf("string");
+    expect(routeStyles.sessionLoadMoreStatus).toBeTypeOf("string");
   });
 
   it("keeps paginated session query caches synchronized with optimistic list mutations", () => {
