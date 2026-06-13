@@ -47,6 +47,18 @@ def _core_agents(org):
     return ceo, advisor, steward
 
 
+def _fake_wake_started(message):
+    return {
+        "wakeRequested": True,
+        "wakeStatus": "started",
+        "messageId": message["messageId"],
+        "targetAgentId": message["targetAgentId"],
+        "targetSessionId": message["targetSessionId"],
+        "turnId": "turn-started",
+        "reason": "",
+    }
+
+
 def test_research_organization_initializes_protected_core_agents_with_explicit_tools(org_workspace):
     org = research_organization_service.get_research_organization()
     ceo, advisor, steward = _core_agents(org)
@@ -531,6 +543,7 @@ def test_advisory_supervision_policy_observes_agent_message_without_blocking(org
     org = research_organization_service.get_research_organization()
     ceo, advisor, _ = _core_agents(org)
     recorded_events = []
+    monkeypatch.setattr(session_service, "wake_agent_for_inbox_message", _fake_wake_started)
     monkeypatch.setattr(
         agent_directory_service,
         "record_runtime_scene_event",
@@ -577,6 +590,7 @@ def test_disabled_supervision_policy_does_not_gate_agent_message(org_workspace, 
     org = research_organization_service.get_research_organization()
     ceo, advisor, _ = _core_agents(org)
     recorded_events = []
+    monkeypatch.setattr(session_service, "wake_agent_for_inbox_message", _fake_wake_started)
     monkeypatch.setattr(
         agent_directory_service,
         "record_runtime_scene_event",

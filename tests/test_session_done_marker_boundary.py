@@ -80,4 +80,4 @@ def test_bare_done_marker_keeps_previous_visible_continuation_reply(tmp_path, mo
     assert assistant["role"] == "assistant"
     assert assistant["content"] == "结果如下：项目审查完成，核心问题集中在回答持久化。"
     assert "outcome=done" not in str(payload)
-    assert payload["activeTask"]["latestSummary"] == "结果如下：项目审查完成，核心问题集中在回答持久化。"
+    assert payload["activeTask"] is None

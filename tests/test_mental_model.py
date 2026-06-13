@@ -446,7 +446,7 @@ class TestMentalModel:
         captured = {}
 
         class DummyLLM:
-            def invoke(self, messages):
+            def invoke(self, messages, *, tools=None, metadata=None):
                 captured["prompt"] = messages[-1].content
                 return MagicMock(content='<state>{"mood":"专注","feeling":"延续中","whisper":"继续"}</state>')
 

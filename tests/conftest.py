@@ -19,6 +19,23 @@ PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 
+def _reset_agent_directory_caches(agent_directory_service):
+    invalidate_repaired = getattr(agent_directory_service, "_invalidate_repaired_state_cache", None)
+    if callable(invalidate_repaired):
+        invalidate_repaired()
+    cache_lock = getattr(agent_directory_service, "_AGENT_API_HYDRATION_CACHE_LOCK", None)
+    if cache_lock is not None:
+        with cache_lock:
+            agent_directory_service._AGENT_API_HYDRATION_CACHE_SIGNATURE = None
+            agent_directory_service._AGENT_API_HYDRATION_CACHE = None
+    recent_cache = getattr(agent_directory_service, "_JSONL_RECENT_CACHE", None)
+    if isinstance(recent_cache, dict):
+        recent_cache.clear()
+    count_cache = getattr(agent_directory_service, "_JSONL_COUNT_CACHE", None)
+    if isinstance(count_cache, dict):
+        count_cache.clear()
+
+
 # ============================================================================
 # 单例重置 — 最关键的熵增防护机制
 # ============================================================================
@@ -39,6 +56,13 @@ def reset_singletons():
     import core.infrastructure.state as _state_mod
     _orig_state = _state_mod._state_manager
     _state_mod._state_manager = None
+
+    # 保存并重置 config.settings 单例
+    import config.settings as _settings_mod
+    _orig_settings = _settings_mod._settings
+    _orig_config_path = _settings_mod._config_path
+    _settings_mod._settings = None
+    _settings_mod._config_path = None
 
     # 保存并重置 agent_session.py 单例
     import core.infrastructure.agent_session as _session_mod
@@ -88,6 +112,8 @@ def reset_singletons():
 
     # 测试后恢复原始单例（或保持 None）
     _state_mod._state_manager = _orig_state
+    _settings_mod._settings = _orig_settings
+    _settings_mod._config_path = _orig_config_path
     _session_mod._agent_session = _orig_session
     _eb_mod._event_bus = _orig_bus
     try:
@@ -120,6 +146,7 @@ def isolate_runtime_manager_evolution_store(tmp_path, monkeypatch):
     from core.web.services import prompt_template_service
     from core.web.services import supervised_agent_service
     from core.web.services import team_service
+    from core.web.services import chat_room_service
     try:
         from core.web.services import session_service
     except Exception:
@@ -141,10 +168,19 @@ def isolate_runtime_manager_evolution_store(tmp_path, monkeypatch):
     monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(runtime_scene_service, "LAUNCHER_STATE_PATH", launcher_state_path)
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _reset_agent_directory_caches(agent_directory_service)
     monkeypatch.setattr(agent_mode_binding_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(prompt_template_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(supervised_agent_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    previous_chat_room_executor = chat_room_service._CHAT_ROOM_EXECUTOR
+    isolated_chat_room_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="pytest-chat-room")
+    monkeypatch.setattr(chat_room_service, "_CHAT_ROOM_EXECUTOR", isolated_chat_room_executor)
+    with chat_room_service._CHAT_ROOM_ROUND_CONTROLS_LOCK:
+        chat_room_service._CHAT_ROOM_ROUND_CONTROLS.clear()
+    with chat_room_service._CHAT_ROOM_STREAM_SUBSCRIBERS_LOCK:
+        chat_room_service._CHAT_ROOM_STREAM_SUBSCRIBERS.clear()
     if session_service is not None:
         previous_executor = session_service._SESSION_EXECUTOR
         isolated_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="pytest-web-chat-turn")
@@ -164,6 +200,12 @@ def isolate_runtime_manager_evolution_store(tmp_path, monkeypatch):
         with session_service._SESSION_TURN_CONTROLS_LOCK:
             session_service._SESSION_TURN_CONTROLS.clear()
         yield
+        with chat_room_service._CHAT_ROOM_ROUND_CONTROLS_LOCK:
+            chat_room_service._CHAT_ROOM_ROUND_CONTROLS.clear()
+        with chat_room_service._CHAT_ROOM_STREAM_SUBSCRIBERS_LOCK:
+            chat_room_service._CHAT_ROOM_STREAM_SUBSCRIBERS.clear()
+        isolated_chat_room_executor.shutdown(wait=True, cancel_futures=True)
+        monkeypatch.setattr(chat_room_service, "_CHAT_ROOM_EXECUTOR", previous_chat_room_executor)
         isolated_executor.shutdown(wait=True, cancel_futures=True)
         monkeypatch.setattr(session_service, "_SESSION_EXECUTOR", previous_executor)
         with session_service._RUNNING_SESSIONS_LOCK:
@@ -178,8 +220,18 @@ def isolate_runtime_manager_evolution_store(tmp_path, monkeypatch):
                 session_service._SESSION_AGENT_QUEUES.clear()
         with session_service._SESSION_TURN_CONTROLS_LOCK:
             session_service._SESSION_TURN_CONTROLS.clear()
+        _reset_agent_directory_caches(agent_directory_service)
     else:
-        yield
+        try:
+            yield
+        finally:
+            with chat_room_service._CHAT_ROOM_ROUND_CONTROLS_LOCK:
+                chat_room_service._CHAT_ROOM_ROUND_CONTROLS.clear()
+            with chat_room_service._CHAT_ROOM_STREAM_SUBSCRIBERS_LOCK:
+                chat_room_service._CHAT_ROOM_STREAM_SUBSCRIBERS.clear()
+            isolated_chat_room_executor.shutdown(wait=True, cancel_futures=True)
+            monkeypatch.setattr(chat_room_service, "_CHAT_ROOM_EXECUTOR", previous_chat_room_executor)
+            _reset_agent_directory_caches(agent_directory_service)
 
 
 # ============================================================================

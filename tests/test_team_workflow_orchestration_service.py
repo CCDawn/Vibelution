@@ -1,4 +1,5 @@
 import json
+from concurrent.futures import Future
 
 from core.runtime_manager.work_run_store import WorkRunStore
 from core.web.services import (
@@ -32,6 +33,17 @@ class _FakeLocalResearchClient:
         return type(self).response
 
 
+class _NoopBackgroundExecutor:
+    def __init__(self):
+        self.submitted = []
+
+    def submit(self, fn, *args, **kwargs):
+        self.submitted.append({"fn": fn, "args": args, "kwargs": kwargs})
+        future = Future()
+        future.set_result(None)
+        return future
+
+
 def _fake_local_research_public_config(*, prompt_cache_mode="explicit_cache_control"):
     return {
         "llm": {
@@ -57,6 +69,7 @@ def _use_tmp_project_root(tmp_path, monkeypatch):
     monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(team_workflow_orchestration_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(team_workflow_orchestration_service, "load_public_config", _fake_local_research_public_config)
+    monkeypatch.setattr(chat_room_service, "_CHAT_ROOM_EXECUTOR", _NoopBackgroundExecutor())
 
 
 def _use_fake_local_research_config(monkeypatch):

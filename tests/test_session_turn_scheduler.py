@@ -1,5 +1,7 @@
 import threading
 
+import pytest
+
 from core.web.services.session_turn_scheduler import SessionTurnScheduler
 from tests.helpers.chat_turn_harness import FakeTurnRunner, wait_for_condition
 

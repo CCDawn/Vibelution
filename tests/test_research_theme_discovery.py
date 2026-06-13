@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi.testclient import TestClient
 
+from core.llm.streaming import extract_text_content
 from core.research.knowledge_base import ResearchKnowledgeBase
 from core.research.models import CandidateTheme, EvidenceRecord, ResearchDiscoverySession, ResearchSource, new_id
 from core.research import providers
@@ -2368,7 +2369,7 @@ def test_llm_research_agent_runner_resolves_model_and_prompt_from_agent_instance
         def invoke(self, messages, tools=None, metadata=None):
             captured["profile_id"] = self.profile_id
             captured["primary_model"] = self.config.llm.get_profile(profile_id=self.profile_id).model
-            captured["system"] = messages[0]["content"]
+            captured["system"] = extract_text_content(messages[0]["content"])
 
             class Response:
                 content = '{"summary":"done"}'
@@ -2481,7 +2482,7 @@ def test_llm_research_agent_runner_prefers_mode_binding_over_legacy_agent_config
         def invoke(self, messages, tools=None, metadata=None):
             captured["profile_id"] = self.profile_id
             captured["primary_model"] = self.config.llm.get_profile(profile_id=self.profile_id).model
-            captured["system"] = messages[0]["content"]
+            captured["system"] = extract_text_content(messages[0]["content"])
 
             class Response:
                 content = '{"summary":"done"}'
