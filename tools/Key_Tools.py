@@ -56,7 +56,10 @@ from tools.research_organization_tools import (
     research_proposal_apply_tool as _research_proposal_apply_impl,
 )
 from tools.image2_tools import image2_generate_tool as _image2_generate_impl
-from tools.computer_use_tools import computer_use_task_tool as _computer_use_task_impl
+from tools.computer_use_tools import (
+    computer_use_session_tool as _computer_use_session_impl,
+    computer_use_task_tool as _computer_use_task_impl,
+)
 from tools.research_knowledge_tools import research_knowledge_query_tool as _research_knowledge_query_impl
 from tools.team_knowledge_tools import (
     knowledge_governance_plan_tool as _knowledge_governance_plan_impl,
@@ -1226,9 +1229,11 @@ def create_key_tools() -> List[BaseTool]:
         task: str,
         target_url: str = "",
         allowed_domains: str = "",
+        actions: str = "",
         max_steps: int = 20,
         require_confirmation: bool = True,
         mode: str = "browser",
+        timeout_seconds: int = 180,
     ) -> str:
         """
         【受控电脑操作】在沙盒浏览器中执行一次受限 Computer Use 任务。
@@ -1241,9 +1246,11 @@ def create_key_tools() -> List[BaseTool]:
             task: 要完成的浏览器操作任务
             target_url: 可选起始 URL，格式为 http:// 或 https://
             allowed_domains: 允许访问的域名，多个域名用逗号分隔；target_url 的 host 会自动加入
+            actions: 可选动作列表 JSON 或简短 DSL；支持 click/type/fill/press/scroll/wait/navigate/screenshot
             max_steps: 最大步骤数，范围 1-30，默认 20
             require_confirmation: 高风险动作是否等待用户确认，默认 True
             mode: 当前只支持 browser
+            timeout_seconds: 超时时间秒数，范围 1-300，默认 180
 
         Returns:
             JSON 格式的任务状态、sessionId、步骤、截图 URL 和确认状态
@@ -1252,9 +1259,41 @@ def create_key_tools() -> List[BaseTool]:
             task=task,
             target_url=target_url,
             allowed_domains=allowed_domains,
+            actions=actions,
             max_steps=max_steps,
             require_confirmation=require_confirmation,
             mode=mode,
+            timeout_seconds=timeout_seconds,
+        )
+
+    @tool
+    def computer_use_session_tool(
+        session_id: str,
+        action: str = "get",
+        confirmation: str = "approved",
+        reason: str = "cancelled_by_agent",
+    ) -> str:
+        """
+        【受控电脑操作会话】读取、确认继续或取消一个 Computer Use 沙盒浏览器会话。
+
+        适合在 computer_use_task_tool 返回 sessionId 后继续闭环：查看最新状态、对 need_confirmation
+        会话确认继续，或取消 running/need_confirmation 会话。该工具仍属于高风险 Computer Use 边界，
+        只有 Agent 的 ToolPolicy.allowedTools 显式包含 computer_use_session_tool 时才可调用。
+
+        Args:
+            session_id: Computer Use 会话 ID
+            action: get / confirm / cancel，默认 get
+            confirmation: action=confirm 时记录的确认说明
+            reason: action=cancel 时记录的取消原因
+
+        Returns:
+            JSON 格式的会话状态、步骤、截图 URL 和确认状态
+        """
+        return _computer_use_session_impl(
+            session_id=session_id,
+            action=action,
+            confirmation=confirmation,
+            reason=reason,
         )
 
     @tool
@@ -1710,6 +1749,7 @@ def create_key_tools() -> List[BaseTool]:
         research_proposal_apply_tool,
         image2_generate_tool,
         computer_use_task_tool,
+        computer_use_session_tool,
         research_knowledge_query_tool,
         knowledge_query_tool,
         knowledge_rag_retrieve_tool,

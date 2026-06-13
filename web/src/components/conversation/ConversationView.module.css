@@ -1330,6 +1330,11 @@
   color: var(--fg-primary);
 }
 
+.computerUseActions button:disabled {
+  cursor: wait;
+  opacity: 0.64;
+}
+
 .auxiliaryPanel {
   display: grid;
   gap: 9px;
