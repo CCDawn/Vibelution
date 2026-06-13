@@ -316,6 +316,89 @@ def test_list_chat_rooms_compact_does_not_hydrate_sessions_or_agents(tmp_path, m
     assert [item["sessionId"] for item in rooms[0]["participants"]] == ["session-alpha", "session-beta"]
 
 
+def test_list_chat_rooms_for_conversation_index_does_not_repair_participants_by_default(tmp_path, monkeypatch):
+    _seed_chat_sessions(tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    room = chat_room_service.create_chat_room(title="conversation-index-light")
+
+    repair_calls = 0
+
+    def fake_repair_room_participants_in_state(state, **kwargs):
+        nonlocal repair_calls
+        repair_calls += 1
+        return True
+
+    session_list_calls = 0
+    real_list_sessions = session_service.list_sessions
+
+    def counting_list_sessions():
+        nonlocal session_list_calls
+        session_list_calls += 1
+        return real_list_sessions()
+
+    monkeypatch.setattr(chat_room_service, "_repair_room_participants_in_state", fake_repair_room_participants_in_state)
+    monkeypatch.setattr(session_service, "list_sessions", counting_list_sessions)
+
+    listed = chat_room_service.list_chat_rooms_for_conversation_index()
+
+    assert [item["roomId"] for item in listed] == [room["roomId"]]
+    assert repair_calls == 0
+    assert session_list_calls == 0
+
+
+def test_list_chat_rooms_for_conversation_index_repair_participants_when_enabled(tmp_path, monkeypatch):
+    _seed_chat_sessions(tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    room = chat_room_service.create_chat_room(title="conversation-index-heavy")
+
+    repair_calls = 0
+
+    def fake_repair_room_participants_in_state(state, **kwargs):
+        nonlocal repair_calls
+        repair_calls += 1
+        return True
+
+    session_list_calls = 0
+    real_list_sessions = session_service.list_sessions
+
+    def counting_list_sessions():
+        nonlocal session_list_calls
+        session_list_calls += 1
+        return real_list_sessions()
+
+    monkeypatch.setattr(chat_room_service, "_repair_room_participants_in_state", fake_repair_room_participants_in_state)
+    monkeypatch.setattr(session_service, "list_sessions", counting_list_sessions)
+
+    listed = chat_room_service.list_chat_rooms_for_conversation_index(repair_room_participants=True)
+
+    assert [item["roomId"] for item in listed] == [room["roomId"]]
+    assert repair_calls == 1
+    assert session_list_calls == 1
+
+
+def test_room_to_conversation_index_reference_uses_latest_round_summary():
+    room = {
+        "roomId": "room-index",
+        "title": "聚焦群聊",
+        "status": "ready",
+        "updatedAt": "2026-06-13T10:00:00",
+        "mode": "round_robin",
+        "rounds": [
+            {"roundId": "round-1", "summary": "第一轮总结"},
+            {"roundId": "round-2", "summary": "第二轮总结"},
+        ],
+        "participants": [{"agentId": "agent-a"}, {"sessionId": "session-alpha"}],
+    }
+
+    payload = chat_room_service._room_to_conversation_index_reference(room)
+
+    assert payload["summary"] == "第二轮总结"
+    assert payload["mode"] == "round_robin"
+    assert payload["participants"] == [{"agentId": "agent-a"}, {"sessionId": "session-alpha"}]
+
+
 def test_medical_consultation_mode_prioritizes_host_risk_and_intake():
     scheduler = get_scheduler_registry().get("medical_consultation_panel")
 
@@ -672,6 +755,7 @@ def test_chat_room_participant_index_stays_warm_for_message_only_session_changes
             conversation["updated_at"] = "2026-05-26T10:04:00"
             break
     state["updated_at"] = "2026-05-26T10:04:00"
+    state["conversations"][0]["last_turn_status"] = "completed"
     save_chat_state(tmp_path, state)
 
     second_detail = chat_room_service.get_chat_room_detail(room["roomId"])

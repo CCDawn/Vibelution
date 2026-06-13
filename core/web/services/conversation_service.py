@@ -42,12 +42,11 @@ def list_conversations() -> list[dict[str, Any]]:
             }
         )
     filtered_archived_team_room_count = 0
-    for room in chat_room_service.list_chat_rooms(session_summaries=session_summaries):
+    for room in chat_room_service.list_chat_rooms_for_conversation_index(session_summaries=session_summaries):
         room_id = str(room.get("roomId") or "").strip()
         if room_id in archived_team_room_ids:
             filtered_archived_team_room_count += 1
             continue
-        latest_round = _latest_round(room)
         items.append(
             {
                 "conversationId": room_id,
@@ -57,7 +56,7 @@ def list_conversations() -> list[dict[str, Any]]:
                 "directSessionId": "",
                 "roomId": room_id,
                 "status": str(room.get("status") or "").strip(),
-                "summary": str((latest_round or {}).get("summary") or "").strip(),
+                "summary": str(room.get("summary") or "").strip(),
                 "updatedAt": str(room.get("updatedAt") or "").strip(),
                 "workspacePath": f"workspace/chat_rooms/{room.get('roomId') or ''}",
                 "participantCount": len(list(room.get("participants") or [])),
@@ -74,22 +73,7 @@ def list_conversations() -> list[dict[str, Any]]:
 
 
 def _archived_team_room_ids() -> set[str]:
-    teams_payload = team_service.list_teams_compact(include_archived=True)
-    room_ids: set[str] = set()
-    for team in list(teams_payload.get("teams") or []):
-        if not isinstance(team, dict):
-            continue
-        if str(team.get("status") or "").strip().lower() != "archived":
-            continue
-        room_id = str(team.get("linkedChatRoomId") or "").strip()
-        if room_id:
-            room_ids.add(room_id)
-    return room_ids
-
-
-def _latest_round(room: dict[str, Any]) -> dict[str, Any] | None:
-    rounds = [item for item in list(room.get("rounds") or []) if isinstance(item, dict)]
-    return rounds[-1] if rounds else None
+    return team_service.list_archived_team_linked_chat_room_ids()
 
 
 def _record_conversation_index_loaded(
