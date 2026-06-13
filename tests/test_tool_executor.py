@@ -111,8 +111,12 @@ class TestToolExecutorInit:
         assert "conversation_log_inspect_tool" in canonical_names
         assert "conversation_log_inspect_tool" in llm_names
 
-    def test_cli_agent_run_tool_is_registered_and_policy_gated_by_default(self):
-        from core.web.services.agent_directory_service import compute_effective_tool_visibility, default_tool_policy
+    def test_cli_agent_run_tool_is_registered_and_allowed_by_session_default(self):
+        from core.web.services.agent_directory_service import (
+            compute_effective_tool_visibility,
+            default_session_agent_tool_policy,
+            default_tool_policy,
+        )
 
         canonical_names = {tool.name for tool in create_key_tools()}
         llm_names = {tool.name for tool in create_llm_facing_tools()}
@@ -120,10 +124,18 @@ class TestToolExecutorInit:
         assert "cli_agent_run_tool" in canonical_names
         assert "cli_agent_run_tool" in llm_names
 
-        visibility = compute_effective_tool_visibility(create_llm_facing_tools(), policy=default_tool_policy())
+        restricted_visibility = compute_effective_tool_visibility(create_llm_facing_tools(), policy=default_tool_policy())
 
-        assert "cli_agent_run_tool" not in visibility.visible_tools
-        assert "cli_agent_run_tool" in visibility.hidden_restricted_tools
+        assert "cli_agent_run_tool" not in restricted_visibility.visible_tools
+        assert "cli_agent_run_tool" in restricted_visibility.hidden_restricted_tools
+
+        session_visibility = compute_effective_tool_visibility(
+            create_llm_facing_tools(),
+            policy=default_session_agent_tool_policy("tool-agent-session"),
+        )
+
+        assert "cli_agent_run_tool" in session_visibility.visible_tools
+        assert "cli_agent_run_tool" not in session_visibility.hidden_restricted_tools
 
     def test_memory_tools_are_llm_facing_but_policy_gated_by_default(self):
         from core.web.services.agent_directory_service import compute_effective_tool_visibility, default_tool_policy
@@ -718,6 +730,24 @@ class TestToolExecutorTimeout:
         assert action is None
         assert "cli_agent_run_tool" in str(result)
         assert "显式授权" in str(result)
+
+    def test_cli_agent_run_tool_runs_with_session_default_tool_policy(self, executor, monkeypatch):
+        from core.web.services import agent_directory_service
+
+        monkeypatch.setattr(agent_directory_service, "current_agent_runtime", lambda: {
+            "agentId": "agent-session",
+            "toolPolicy": agent_directory_service.default_session_agent_tool_policy("tool-agent-session"),
+        })
+        monkeypatch.setitem(
+            executor._tool_map,
+            "cli_agent_run_tool",
+            lambda agent_type="", task="", **_kwargs: f"ran {agent_type}: {task}",
+        )
+
+        result, action = executor.execute("cli_agent_run_tool", {"agent_type": "codex_code", "task": "inspect only"})
+
+        assert action is None
+        assert result == "ran codex_code: inspect only"
 
     def test_cli_agent_run_tool_blocked_in_readonly_subagent_scope(self, monkeypatch):
         monkeypatch.setenv("VIBELUTION_SUBAGENT_MODE", "readonly")

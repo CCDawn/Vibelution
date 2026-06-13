@@ -45,6 +45,7 @@ DEFAULT_SESSION_AGENT_ALLOWED_TOOLS = (
     "apply_diff_edit_tool",
     "write_file_tool",
     "cli_tool",
+    "cli_agent_run_tool",
     "python_lint_tool",
     "run_test_for_tool",
     # External and media capabilities stay available when the user intent needs them.
