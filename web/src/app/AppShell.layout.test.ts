@@ -151,6 +151,12 @@ describe("AppShell layout contract", () => {
     expect(shellSource).not.toContain("shutdownFailed");
   });
 
+  it("routes direct workbench window close attempts through controlled shutdown", () => {
+    expect(shellSource).toContain("markControlledProjectLifecycleOperation(\"stop\")");
+    expect(shellSource).toContain("void beginShutdown()");
+    expect(shellSource).toContain("applyBeforeUnloadProjectCloseGuard(event, workbenchCloseGuardMessage)");
+  });
+
   it("turns the top refresh icon into a frontend refresh and routes lifecycle actions through Launcher", () => {
     expect(shellSource).toContain("RefreshCw");
     expect(shellSource).toContain("refreshFrontendLabel");

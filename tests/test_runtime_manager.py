@@ -740,8 +740,8 @@ def test_observe_workbench_keeps_launcher_control_surface_out_of_project_lifecyc
                 "sessionRole": "launcher_control_surface",
                 "sessionId": "launcher-session",
                 "url": "http://127.0.0.1:8000",
-                "backendPid": 3200,
-                "browserWindowPid": 4500,
+                "backendPid": 0,
+                "browserWindowPid": 0,
                 "launcherBrowserWindowPid": 4500,
                 "browserManaged": True,
             }
@@ -749,20 +749,62 @@ def test_observe_workbench_keeps_launcher_control_surface_out_of_project_lifecyc
         encoding="utf-8",
     )
     monkeypatch.setattr(workbench_controller, "LAUNCHER_STATE_PATH", launcher_state_path)
-    monkeypatch.setattr(workbench_controller, "_is_process_alive", lambda pid: int(pid) in {3200, 4500})
-    monkeypatch.setattr(workbench_controller, "_is_backend_healthy", lambda url: True)
-    monkeypatch.setattr(workbench_controller, "_listening_pid_for_port", lambda port: 3200)
-    monkeypatch.setattr(workbench_controller, "_port_is_listening_socket", lambda port: True)
-    monkeypatch.setattr(workbench_controller, "_repo_workbench_backend_kind", lambda pid: "managed_workbench_backend")
+    monkeypatch.setattr(workbench_controller, "_is_process_alive", lambda pid: int(pid) == 4500)
+    monkeypatch.setattr(workbench_controller, "_is_backend_healthy", lambda url: False)
+    monkeypatch.setattr(workbench_controller, "_listening_pid_for_port", lambda port: 0)
+    monkeypatch.setattr(workbench_controller, "_port_is_listening_socket", lambda port: False)
+    monkeypatch.setattr(workbench_controller, "_repo_workbench_backend_kind", lambda pid: "")
 
     snapshot = workbench_controller.observe_workbench()
 
     assert snapshot["sessionRole"] == "launcher_control_surface"
     assert snapshot["observedState"] == "closed"
-    assert snapshot["backendHealthy"] is True
+    assert snapshot["backendHealthy"] is False
     assert snapshot["browserWindowAlive"] is False
     assert snapshot["launcherBrowserWindowAlive"] is True
     assert snapshot["frontendOrphaned"] is False
+
+
+def test_observe_workbench_reclassifies_launcher_surface_with_managed_backend_as_partial(tmp_path, monkeypatch):
+    launcher_state_path = tmp_path / ".runtime" / "launcher" / "state.json"
+    launcher_state_path.parent.mkdir(parents=True, exist_ok=True)
+    launcher_state_path.write_text(
+        json.dumps(
+            {
+                "sessionRole": "launcher_control_surface",
+                "sessionId": "launcher-session",
+                "url": "http://127.0.0.1:8000",
+                "backendPid": 0,
+                "browserWindowPid": 0,
+                "launcherBrowserWindowPid": 4500,
+                "browserManaged": True,
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(workbench_controller, "LAUNCHER_STATE_PATH", launcher_state_path)
+    monkeypatch.setattr(workbench_controller, "_is_process_alive", lambda pid: int(pid) in {4500, 52396})
+    monkeypatch.setattr(workbench_controller, "_is_backend_healthy", lambda url: True)
+    monkeypatch.setattr(workbench_controller, "_listening_pid_for_port", lambda port: 52396)
+    monkeypatch.setattr(workbench_controller, "_port_is_listening_socket", lambda port: True)
+    monkeypatch.setattr(
+        workbench_controller,
+        "_repo_workbench_backend_kind",
+        lambda pid: "managed_workbench_backend" if int(pid) == 52396 else "",
+    )
+
+    snapshot = workbench_controller.observe_workbench()
+
+    assert snapshot["sourceSessionRole"] == "launcher_control_surface"
+    assert snapshot["sessionRole"] == "workbench"
+    assert snapshot["observedState"] == "partial"
+    assert snapshot["backendPid"] == 52396
+    assert snapshot["backendAlive"] is True
+    assert snapshot["backendObserved"] is True
+    assert snapshot["backendPortOwnerTrusted"] is True
+    assert snapshot["browserWindowAlive"] is False
+    assert snapshot["launcherBrowserWindowAlive"] is True
+    assert snapshot["lifecycleConsistency"] == "browser_missing"
 
 
 def test_load_runtime_snapshot_aligns_legacy_open_session(monkeypatch):
