@@ -687,6 +687,7 @@ def test_chat_room_list_and_detail_use_lightweight_participant_refresh(tmp_path,
     _seed_chat_sessions(tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     room = chat_room_service.create_chat_room(
         title="轻量详情群聊",
         participant_session_ids=["session-alpha", "session-beta"],
@@ -705,6 +706,15 @@ def test_chat_room_list_and_detail_use_lightweight_participant_refresh(tmp_path,
         return real_list_sessions()
 
     monkeypatch.setattr(session_service, "list_sessions", counting_list_sessions)
+    real_list_agents = agent_directory_service.list_agents
+    list_agent_calls = 0
+
+    def counting_list_agents(*args, **kwargs):
+        nonlocal list_agent_calls
+        list_agent_calls += 1
+        return real_list_agents(*args, **kwargs)
+
+    monkeypatch.setattr(agent_directory_service, "list_agents", counting_list_agents)
 
     listed = chat_room_service.list_chat_rooms()
     detail = chat_room_service.get_chat_room_detail(room["roomId"])
@@ -714,7 +724,8 @@ def test_chat_room_list_and_detail_use_lightweight_participant_refresh(tmp_path,
         "session-alpha",
         "session-beta",
     ]
-    assert list_session_calls == 2
+    assert list_session_calls == 1
+    assert list_agent_calls == 1
 
 
 def test_chat_room_participant_index_stays_warm_for_message_only_session_changes(tmp_path, monkeypatch):
@@ -731,10 +742,10 @@ def test_chat_room_participant_index_stays_warm_for_message_only_session_changes
     real_summary_index = chat_room_service._session_summary_index
     summary_index_calls = 0
 
-    def counting_summary_index():
+    def counting_summary_index(*, session_ids=None):
         nonlocal summary_index_calls
         summary_index_calls += 1
-        return real_summary_index()
+        return real_summary_index(session_ids=session_ids)
 
     monkeypatch.setattr(chat_room_service, "_session_summary_index", counting_summary_index)
 

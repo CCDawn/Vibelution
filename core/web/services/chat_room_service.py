@@ -245,7 +245,9 @@ def get_chat_room_detail(room_id: str) -> dict[str, Any] | None:
         )
         return None
     stage_started_at = _perf_counter()
-    participant_indexes, participant_index_cache_hit, participant_index_timings = _participant_refresh_indexes()
+    participant_indexes, participant_index_cache_hit, participant_index_timings = _participant_refresh_indexes(
+        participants=room.get("participants") if isinstance(room.get("participants"), list) else []
+    )
     _append_chat_room_detail_timing(
         phase_timings,
         "participant_index.refresh",
@@ -2671,20 +2673,48 @@ def _active_agent_for_participant(
     return None
 
 
-def _active_agent_participant_indexes() -> dict[str, dict[str, dict[str, Any]]]:
-    try:
-        agents = agent_directory_service.list_agents(include_archived=False, detail="summary")
-    except Exception:
-        agents = []
+def _active_agent_participant_indexes(
+    *,
+    agent_ids: set[str] | None = None,
+    session_ids: set[str] | None = None,
+) -> dict[str, dict[str, dict[str, Any]]]:
+    target_agent_ids = set(agent_ids or set())
+    target_session_ids = set(session_ids or set())
+    if target_agent_ids or target_session_ids:
+        try:
+            state = agent_directory_service.load_state()
+            raw_agents = [
+                item
+                for item in list(state.get("agents") or [])
+                if isinstance(item, dict)
+                and str(item.get("status") or "active").strip().lower() != "archived"
+                and (
+                    str(item.get("agentId") or "").strip() in target_agent_ids
+                    or str(item.get("directSessionId") or "").strip() in target_session_ids
+                )
+            ]
+            agents = [agent_directory_service._agent_to_api_summary(item) for item in raw_agents]
+        except Exception:
+            try:
+                agents = agent_directory_service.list_agents(include_archived=False, detail="summary")
+            except Exception:
+                agents = []
+    else:
+        try:
+            agents = agent_directory_service.list_agents(include_archived=False, detail="summary")
+        except Exception:
+            agents = []
     by_id: dict[str, dict[str, Any]] = {}
     by_session_id: dict[str, dict[str, Any]] = {}
     for agent in agents:
         if not isinstance(agent, dict):
             continue
         agent_id = str(agent.get("agentId") or "").strip()
+        session_id = str(agent.get("directSessionId") or "").strip()
+        if (target_agent_ids or target_session_ids) and agent_id not in target_agent_ids and session_id not in target_session_ids:
+            continue
         if agent_id:
             by_id[agent_id] = dict(agent)
-        session_id = str(agent.get("directSessionId") or "").strip()
         if session_id:
             by_session_id[session_id] = dict(agent)
     return {"by_id": by_id, "by_session_id": by_session_id}
@@ -2749,10 +2779,17 @@ def prewarm_chat_room_participant_indexes(*, reason: str = "startup") -> dict[st
             _CHAT_ROOM_PARTICIPANT_INDEX_PREWARM_INFLIGHT = False
 
 
-def _participant_refresh_indexes() -> tuple[dict[str, dict[str, dict[str, Any]]], bool, list[dict[str, Any]]]:
+def _participant_refresh_indexes(
+    *,
+    participants: list[dict[str, Any]] | None = None,
+) -> tuple[dict[str, dict[str, dict[str, Any]]], bool, list[dict[str, Any]]]:
     timings: list[dict[str, Any]] = []
+    participant_session_ids, participant_agent_ids = _participant_lookup_keys(participants)
     stage_started_at = _perf_counter()
-    signature = _participant_refresh_index_signature()
+    signature = _participant_refresh_index_signature(
+        session_ids=participant_session_ids if participants is not None else None,
+        agent_ids=participant_agent_ids if participants is not None else None,
+    )
     _append_chat_room_detail_timing(timings, "participant_index.signature", stage_started_at)
     stage_started_at = _perf_counter()
     with _CHAT_ROOM_PARTICIPANT_INDEX_CACHE_LOCK:
@@ -2769,7 +2806,26 @@ def _participant_refresh_indexes() -> tuple[dict[str, dict[str, dict[str, Any]]]
                 )
                 return indexes, True, timings
     stage_started_at = _perf_counter()
-    session_summaries = _session_summary_index()
+    active_agent_indexes = _active_agent_participant_indexes(
+        agent_ids=participant_agent_ids if participants is not None else None,
+        session_ids=participant_session_ids if participants is not None else None,
+    )
+    _append_chat_room_detail_timing(
+        timings,
+        "participant_index.active_agents",
+        stage_started_at,
+        count=len(active_agent_indexes.get("by_id") or {}),
+    )
+    effective_session_ids = set(participant_session_ids)
+    for agent in active_agent_indexes.get("by_id", {}).values():
+        if isinstance(agent, dict):
+            direct_session_id = str(agent.get("directSessionId") or "").strip()
+            if direct_session_id:
+                effective_session_ids.add(direct_session_id)
+    stage_started_at = _perf_counter()
+    session_summaries = _session_summary_index(
+        session_ids=effective_session_ids if participants is not None else None
+    )
     _append_chat_room_detail_timing(
         timings,
         "participant_index.session_summary",
@@ -2781,14 +2837,6 @@ def _participant_refresh_indexes() -> tuple[dict[str, dict[str, dict[str, Any]]]
         "active_agents_by_id": {},
         "active_agents_by_session_id": {},
     }
-    stage_started_at = _perf_counter()
-    active_agent_indexes = _active_agent_participant_indexes()
-    _append_chat_room_detail_timing(
-        timings,
-        "participant_index.active_agents",
-        stage_started_at,
-        count=len(active_agent_indexes.get("by_id") or {}),
-    )
     indexes["active_agents_by_id"] = active_agent_indexes["by_id"]
     indexes["active_agents_by_session_id"] = active_agent_indexes["by_session_id"]
     stage_started_at = _perf_counter()
@@ -2818,25 +2866,55 @@ def _clear_participant_refresh_index_cache() -> None:
         _CHAT_ROOM_PARTICIPANT_INDEX_CACHE.clear()
 
 
-def _participant_refresh_index_signature() -> tuple[Any, ...]:
+def _participant_lookup_keys(participants: list[dict[str, Any]] | None) -> tuple[set[str], set[str]]:
+    session_ids: set[str] = set()
+    agent_ids: set[str] = set()
+    if participants is None:
+        return session_ids, agent_ids
+    for participant in participants:
+        if not isinstance(participant, dict):
+            continue
+        for key in ("sessionId", "directSessionId"):
+            session_id = str(participant.get(key) or "").strip()
+            if session_id:
+                session_ids.add(session_id)
+        agent_id = str(participant.get("agentId") or "").strip()
+        if agent_id:
+            agent_ids.add(agent_id)
+    return session_ids, agent_ids
+
+
+def _participant_refresh_index_signature(
+    *,
+    session_ids: set[str] | None = None,
+    agent_ids: set[str] | None = None,
+) -> tuple[Any, ...]:
     return (
-        _chat_state_participant_index_signature(),
+        _chat_state_participant_index_signature(session_ids=session_ids),
         _file_signature(agent_directory_service.registry_path()),
+        (
+            "participant_scope_v1",
+            tuple(sorted(session_ids)) if session_ids is not None else "__all_sessions__",
+            tuple(sorted(agent_ids)) if agent_ids is not None else "__all_agents__",
+        ),
     )
 
 
-def _chat_state_participant_index_signature() -> tuple[Any, ...]:
+def _chat_state_participant_index_signature(*, session_ids: set[str] | None = None) -> tuple[Any, ...]:
     path = chat_state_path(PROJECT_ROOT)
     payload = load_chat_state(PROJECT_ROOT)
     conversations = payload.get("conversations") if isinstance(payload, dict) else None
     if not isinstance(conversations, list):
         return ("chat_state_participants_unavailable", _file_signature(path))
+    target_session_ids = set(session_ids or set()) if session_ids is not None else None
     rows: list[tuple[Any, ...]] = []
     for raw in conversations:
         if not isinstance(raw, dict):
             continue
         session_id = _signature_text(raw, "conversation_id", "id")
         if not session_id:
+            continue
+        if target_session_ids is not None and session_id not in target_session_ids:
             continue
         messages = raw.get("messages")
         rows.append(
@@ -2968,12 +3046,59 @@ def _repair_room_participants_in_state(
     return changed
 
 
-def _session_summary_index() -> dict[str, dict[str, Any]]:
+def _session_summary_index(*, session_ids: set[str] | None = None) -> dict[str, dict[str, Any]]:
+    if session_ids is not None:
+        return _targeted_session_summary_index(session_ids)
     return {
         str(item.get("id") or "").strip(): item
         for item in session_service.list_sessions()
         if isinstance(item, dict) and str(item.get("id") or "").strip()
     }
+
+
+def _targeted_session_summary_index(session_ids: set[str]) -> dict[str, dict[str, Any]]:
+    target_session_ids = {str(item or "").strip() for item in session_ids if str(item or "").strip()}
+    if not target_session_ids:
+        return {}
+    if getattr(session_service, "PROJECT_ROOT", PROJECT_ROOT) != PROJECT_ROOT:
+        session_service.PROJECT_ROOT = PROJECT_ROOT
+    try:
+        payload = load_chat_state(PROJECT_ROOT)
+        conversations = payload.get("conversations") if isinstance(payload, dict) else []
+        agent_by_id = session_service._agent_lookup_for_conversations()
+        summaries: dict[str, dict[str, Any]] = {}
+        for raw in list(conversations or []):
+            if not isinstance(raw, dict):
+                continue
+            session_id = str(raw.get("conversation_id") or raw.get("id") or "").strip()
+            if session_id not in target_session_ids:
+                continue
+            conversation = session_service._normalize_conversation(
+                raw,
+                agent_by_id=agent_by_id,
+                ensure_workspace=False,
+                lightweight=True,
+            )
+            if not isinstance(conversation, dict):
+                continue
+            summary = session_service._build_session_summary(conversation, hydrate_agent=False)
+            if session_service._session_agent_visible_in_indexes(summary):
+                summaries[session_id] = summary
+        missing_session_ids = target_session_ids.difference(summaries)
+        for session_id in missing_session_ids:
+            stub = session_service._agent_directory_session_stub_for_id(session_id, agent_by_id=agent_by_id)
+            if not isinstance(stub, dict):
+                continue
+            summary = session_service._build_session_summary(stub, hydrate_agent=False)
+            if session_service._session_agent_visible_in_indexes(summary):
+                summaries[session_id] = summary
+        return summaries
+    except Exception:
+        return {
+            session_id: item
+            for session_id, item in _session_summary_index().items()
+            if session_id in target_session_ids
+        }
 
 
 def _session_summary(
