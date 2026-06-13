@@ -59,6 +59,9 @@ type LauncherGuardianResponsibility = {
   adapter: string;
   status: string;
   detail: string;
+  blocking?: boolean;
+  impact?: string;
+  userMessage?: string;
 };
 
 type LauncherControlPlaneCommand = {
@@ -148,6 +151,9 @@ type LauncherStatusWithGuardian = Awaited<ReturnType<typeof getLauncherStatus>> 
       pid: number;
       alive: boolean;
       status: string;
+      blocking?: boolean;
+      impact?: string;
+      userMessage?: string;
       stdoutPath: string;
       stderrPath: string;
       runtimeSceneId: string;
@@ -336,6 +342,9 @@ function stateTone(state: string, ok = true) {
   if (normalized.includes("run") || normalized.includes("ready") || normalized.includes("ok") || normalized.includes("healthy")) {
     return "success";
   }
+  if (normalized.includes("non_blocking")) {
+    return "neutral";
+  }
   if (normalized.includes("start") || normalized.includes("stop") || normalized.includes("queue") || normalized.includes("restart") || normalized.includes("partial")) {
     return "warning";
   }
@@ -365,6 +374,7 @@ function humanState(value: string | undefined, lang: "zh" | "en") {
     running: "运行中",
     steady: "稳定",
     stopped: "已停止",
+    non_blocking: "非阻塞",
   };
   const en: Record<string, string> = {
     alive: "Running",
@@ -382,6 +392,7 @@ function humanState(value: string | undefined, lang: "zh" | "en") {
     running: "Running",
     steady: "Stable",
     stopped: "Stopped",
+    non_blocking: "Non-blocking",
   };
   return (lang === "zh" ? zh : en)[normalized] || raw || "-";
 }
@@ -442,6 +453,32 @@ function resultMessage(result: LauncherControlPlaneResult, operation: LauncherOp
       : "The frontend TypeScript toolchain is incomplete; Launcher will try to reinstall dependencies.";
   }
   return raw.length > 180 ? `${raw.slice(0, 177)}...` : raw;
+}
+
+function launcherControlNoticeMessage(
+  response: LauncherControlResponse,
+  operation: LauncherOperation,
+  lang: "zh" | "en",
+  fallback: string,
+) {
+  const base = String(response.message || fallback || "").trim() || fallback;
+  if (operation !== "force-stop") {
+    return base;
+  }
+  const activeWorkRuns = response.activeWorkRuns ?? [];
+  const activeWorkCount = typeof response.activeWorkCount === "number"
+    ? response.activeWorkCount
+    : activeWorkRuns.length;
+  if (activeWorkCount <= 0) {
+    return base;
+  }
+  const kinds = Array.from(new Set(activeWorkRuns.map((item) => String(item.kind || "").trim()).filter(Boolean)));
+  if (lang === "en") {
+    const suffix = kinds.length ? ` (${kinds.join(", ")})` : "";
+    return `${base} Requested interruption for ${activeWorkCount} active task${activeWorkCount === 1 ? "" : "s"}${suffix}.`;
+  }
+  const suffix = kinds.length ? `（${kinds.join("、")}）` : "";
+  return `${base} 已请求中断 ${activeWorkCount} 个活动任务${suffix}。`;
 }
 
 function launcherOperationSettledByStatus(
@@ -1138,6 +1175,9 @@ function responsibilityOwner(owner: string, lang: "zh" | "en") {
 }
 
 function responsibilityDetail(item: LauncherGuardianResponsibility, lang: "zh" | "en") {
+  if (item.userMessage) {
+    return item.userMessage;
+  }
   const zh: Record<string, string> = {
     backend_process: "后端进程纳入项目生命周期维护。",
     browser_window: "工作台窗口纳入项目生命周期维护。",
@@ -1155,6 +1195,20 @@ function responsibilityDetail(item: LauncherGuardianResponsibility, lang: "zh" |
     runtime_scene_logging: "Runtime scene evidence is written continuously.",
   };
   return (lang === "zh" ? zh : en)[item.id] || item.detail || "-";
+}
+
+function responsibilityDisplayState(item: LauncherGuardianResponsibility, lang: "zh" | "en") {
+  if (item.blocking === false && item.impact) {
+    return humanState(item.impact, lang);
+  }
+  return humanState(item.status, lang);
+}
+
+function responsibilityToneState(item: LauncherGuardianResponsibility) {
+  if (item.blocking === false && item.impact) {
+    return item.impact;
+  }
+  return item.status;
 }
 
 function isControlPlaneIdle(evidence: LauncherStatusWithGuardian["controlPlaneEvidence"] | undefined): boolean {
@@ -1662,7 +1716,7 @@ export function LauncherRoute() {
       setTrackedCommand(response.accepted && response.commandId ? { commandId: response.commandId, operation } : null);
       setNotice({
         tone: response.accepted ? "neutral" : "warning",
-        text: response.message || copy.commandDone,
+        text: launcherControlNoticeMessage(response, operation, uiLang, copy.commandDone),
         source: "lifecycle-control",
       });
       void queryClient.invalidateQueries({ queryKey: queryKeys.launcherStatus() });
@@ -2016,9 +2070,13 @@ export function LauncherRoute() {
       {
         id: "supervisor",
         label: componentLabel("supervisor", uiLang),
-        status: humanState(guardian?.supervisor?.status || "-", uiLang),
+        status: guardian?.supervisor?.blocking === false && guardian.supervisor.impact
+          ? humanState(guardian.supervisor.impact, uiLang)
+          : humanState(guardian?.supervisor?.status || "-", uiLang),
         role: copy.notBlocking,
-        detail: guardian?.supervisor?.alive
+        detail: guardian?.supervisor?.userMessage
+          ? guardian.supervisor.userMessage
+          : guardian?.supervisor?.alive
           ? (lang === "zh" ? "后台守护检查仍在运行。" : "Background monitor is running.")
           : (lang === "zh" ? "后台守护检查未运行，不影响当前项目使用。" : "Background monitor is stopped; project use is not blocked."),
         technical: `${copy.pid} ${guardian?.supervisor?.pid || "-"} · ${guardian?.mode || "-"} · ${guardian?.supervisor?.detail || guardian?.statusLine || "-"}`,
@@ -2352,10 +2410,10 @@ export function LauncherRoute() {
                   <span role="columnheader">{copy.detail}</span>
                 </div>
                 {(guardian?.responsibilities ?? []).map((item) => (
-                  <div key={item.id} className={styles.guardianRow} role="row" data-tone={stateTone(item.status)}>
+                  <div key={item.id} className={styles.guardianRow} role="row" data-tone={stateTone(responsibilityToneState(item))}>
                     <span role="cell"><strong>{responsibilityLabel(item.id, uiLang)}</strong></span>
                     <span role="cell">{responsibilityOwner(item.owner, uiLang)}</span>
-                    <span role="cell">{humanState(item.status, uiLang)}</span>
+                    <span role="cell">{responsibilityDisplayState(item, uiLang)}</span>
                     <span role="cell">{responsibilityDetail(item, uiLang)}</span>
                   </div>
                 ))}
@@ -2368,7 +2426,7 @@ export function LauncherRoute() {
             <Spec label="url" value={bundle?.url || "-"} />
             <Spec label={copy.source} value={bundle?.lastOperation.source || "-"} />
             <Spec label={copy.proof} value={status?.lifecycleProof.summary || "-"} />
-            <Spec label={copy.supervisor} value={guardian?.supervisor?.status || "-"} />
+            <Spec label={copy.supervisor} value={guardian?.supervisor?.blocking === false && guardian.supervisor.impact ? humanState(guardian.supervisor.impact, uiLang) : guardian?.supervisor?.status || "-"} />
             <Spec label={copy.internalMigrationDetails} value={[status?.launcher.mode, guardian?.mode, status?.launcher.controlPlane.nextPhase, guardian?.targetMode].filter(Boolean).join(" | ") || "-"} />
             <Spec label={copy.advancedDetails} value={[...keyStatusRows, ...diagnosticStatusRows].map((row) => `${row.label}: ${row.technical}`).join(" | ") || "-"} />
             <Spec label={copy.scene} value={guardian?.supervisor?.runtimeSceneId || "-"} />

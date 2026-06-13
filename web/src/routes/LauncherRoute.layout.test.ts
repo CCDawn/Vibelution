@@ -256,8 +256,10 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("trackedCommand");
     expect(routeSource).toContain("trackedResult");
     expect(routeSource).toContain("resultMessage");
+    expect(routeSource).toContain("launcherControlNoticeMessage");
     expect(routeSource).toContain('operation === "force-stop"');
     expect(routeSource).toContain("force_close_workbench");
+    expect(routeSource).toContain("activeWorkCount");
     expect(routeSource).toContain('tone: response.accepted ? "neutral" : "warning"');
     expect(routeSource).toContain('setNotice({ tone, text: message, source: "lifecycle-control" })');
     expect(routeSource).toContain("Restart preflight failed before closing the workbench");
