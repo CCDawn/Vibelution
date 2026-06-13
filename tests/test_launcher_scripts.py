@@ -114,6 +114,15 @@ def test_web_workbench_accepts_managed_launcher_marker():
     assert args.managed_by_launcher is True
 
 
+def test_launcher_reads_optional_supervisor_pid_with_strict_safe_helper():
+    source = LAUNCHER_SCRIPT.read_text(encoding="utf-8")
+
+    assert '$stateSupervisorPid = [int](Get-ObjectPropertyValue -Object $state -Name "supervisorPid" -Default 0)' in source
+    assert '$snapshotSupervisorPid = [int](Get-ObjectPropertyValue -Object $snapshot.State -Name "supervisorPid" -Default 0)' in source
+    assert "$state.supervisorPid" not in source
+    assert "$snapshot.State.supervisorPid" not in source
+
+
 def test_web_workbench_is_headless_by_default():
     from scripts import web_workbench
 

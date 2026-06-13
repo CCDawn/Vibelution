@@ -6180,8 +6180,9 @@ function Get-SessionSnapshot {
     }
 
     $supervisorPid = $null
-    if ($state -and $state.supervisorPid -and (Test-ProcessAlive ([int]$state.supervisorPid))) {
-        $supervisorPid = [int]$state.supervisorPid
+    $stateSupervisorPid = [int](Get-ObjectPropertyValue -Object $state -Name "supervisorPid" -Default 0)
+    if ($stateSupervisorPid -gt 0 -and (Test-ProcessAlive $stateSupervisorPid)) {
+        $supervisorPid = $stateSupervisorPid
     }
 
     return [pscustomobject]@{
@@ -7325,8 +7326,9 @@ function Stop-ManagedSession {
     }
 
     $supervisorPid = $null
-    if ($snapshot.State -and $snapshot.State.supervisorPid) {
-        $supervisorPid = [int]$snapshot.State.supervisorPid
+    $snapshotSupervisorPid = [int](Get-ObjectPropertyValue -Object $snapshot.State -Name "supervisorPid" -Default 0)
+    if ($snapshotSupervisorPid -gt 0) {
+        $supervisorPid = $snapshotSupervisorPid
     }
 
     Write-Note "Stopping Vibelution session ($Reason)..."
