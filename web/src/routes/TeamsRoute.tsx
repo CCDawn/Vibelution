@@ -297,6 +297,8 @@ type TeamWorkflowSourceCollectionSearchExecutionPayload = {
   teamId: string;
   runId: string;
   status: string;
+  executionMode?: "background" | string;
+  accepted?: boolean;
   provider: string;
   executedQueryCount: number;
   skippedQueryCount: number;
@@ -315,6 +317,7 @@ type TeamWorkflowSourceCollectionSearchExecutionPayload = {
   executionEvents: SourceCollectionSearchExecutionEvent[];
   boundaries: {
     externalSearchTriggered: boolean;
+    externalSearchQueued?: boolean;
     metadataOnlyDownload: boolean;
     writesFormalKnowledge: boolean;
     writesRag: boolean;
@@ -1188,6 +1191,14 @@ export function linkedRoomRefetchInterval(pageVisible: boolean, status: string) 
   );
 }
 
+function sourceCollectionRunRefetchInterval(pageVisible: boolean, status: string) {
+  const normalized = String(status || "").toLowerCase();
+  return resolvePollingInterval(
+    pageVisible,
+    normalized === "collecting" || normalized === "processing" ? 1500 : false,
+  );
+}
+
 function nextNodeId(nodes: TeamCanvasNode[]) {
   const ids = new Set(nodes.map((node) => node.id));
   let index = nodes.length + 1;
@@ -1971,6 +1982,10 @@ export function TeamsRoute({
     queryKey: queryKeys.dataProcessingRunStatus(selectedSourceCollectionRunEffectiveId || "none"),
     queryFn: () => fetchJson<DataProcessingStatus>(`/api/data-processing/runs/${encodeURIComponent(selectedSourceCollectionRunEffectiveId)}/status`),
     enabled: Boolean(researchWorkflowTeamSelected && selectedSourceCollectionRunEffectiveId),
+    refetchInterval: (query) => {
+      const status = query.state.data as DataProcessingStatus | undefined;
+      return sourceCollectionRunRefetchInterval(pageVisible, status?.runStatus || "");
+    },
   });
   const sourceCollectionAssignmentsQuery = useQuery({
     queryKey: queryKeys.dataProcessingCollectionAssignments(selectedSourceCollectionRunEffectiveId || "none"),
@@ -1979,6 +1994,7 @@ export function TeamsRoute({
         `/api/data-processing/runs/${encodeURIComponent(selectedSourceCollectionRunEffectiveId)}/collection-assignments`,
       ),
     enabled: Boolean(researchWorkflowTeamSelected && selectedSourceCollectionRunEffectiveId),
+    refetchInterval: () => sourceCollectionRunRefetchInterval(pageVisible, sourceCollectionRunStatusQuery.data?.runStatus || ""),
   });
   const autoCanvasViewportStyle = useMemo(() => canvasViewStyle(canvasNodes, canvasFrameSize), [canvasFrameSize, canvasNodes]);
   const canvasViewportStyle = lockedCanvasViewportStyle ?? autoCanvasViewportStyle;
@@ -2388,6 +2404,7 @@ export function TeamsRoute({
             maxQueries: payload.maxQueries ?? 4,
             maxResultsPerQuery: payload.maxResultsPerQuery ?? 2,
             provider: "crossref_rest_api",
+            backgroundExecution: true,
           }),
         },
       ),
@@ -3588,10 +3605,18 @@ export function TeamsRoute({
         ) : null}
         {selectedTeamExecuteSourceCollectionSearchResult ? (
           <div className={styles.messageResult}>
-            <strong>{lang === "zh" ? "搜索执行已回写" : "Search execution written"}</strong>
-            <span>
-              {selectedTeamExecuteSourceCollectionSearchResult.executedQueryCount} {lang === "zh" ? "条搜索" : "queries"} / {selectedTeamExecuteSourceCollectionSearchResult.recordCount} {lang === "zh" ? "条资料记录" : "DataRecord"} / {selectedTeamExecuteSourceCollectionSearchResult.importedCount} {lang === "zh" ? "个候选" : "candidate"}
-            </span>
+            <strong>
+              {selectedTeamExecuteSourceCollectionSearchResult.accepted
+                ? (lang === "zh" ? "搜索已转后台" : "Search queued in background")
+                : (lang === "zh" ? "搜索执行已回写" : "Search execution written")}
+            </strong>
+            {selectedTeamExecuteSourceCollectionSearchResult.accepted ? (
+              <span>{lang === "zh" ? "页面可继续操作，结果会自动刷新。" : "You can keep working; results will refresh automatically."}</span>
+            ) : (
+              <span>
+                {selectedTeamExecuteSourceCollectionSearchResult.executedQueryCount} {lang === "zh" ? "条搜索" : "queries"} / {selectedTeamExecuteSourceCollectionSearchResult.recordCount} {lang === "zh" ? "条资料记录" : "DataRecord"} / {selectedTeamExecuteSourceCollectionSearchResult.importedCount} {lang === "zh" ? "个候选" : "candidate"}
+              </span>
+            )}
           </div>
         ) : null}
         {selectedTeamRecordSourceCollectionOutputResult ? (
@@ -4061,6 +4086,26 @@ export function TeamsRoute({
     openSourceCollectionStorageMutation.variables?.teamId === selectedTeam?.teamId && openSourceCollectionStorageMutation.error instanceof Error
       ? openSourceCollectionStorageMutation.error
       : null;
+  useEffect(() => {
+    if (!selectedTeam?.teamId || !selectedSourceCollectionRunEffectiveId || !selectedTeamExecuteSourceCollectionSearchResult?.accepted) {
+      return;
+    }
+    void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowSourceCollectionRuns(selectedTeam.teamId, SOURCE_COLLECTION_RUN_PREVIEW_LIMIT) });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.dataProcessingRunStatus(selectedSourceCollectionRunEffectiveId) });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.dataProcessingCollectionAssignments(selectedSourceCollectionRunEffectiveId) });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowCandidates(selectedTeam.teamId, TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT) });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowKnowledgeIngestionStatus(selectedTeam.teamId) });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowCoordinationStatus(selectedTeam.teamId) });
+    void queryClient.invalidateQueries({ queryKey: sourceQualityStatusQueryKey(selectedTeam.teamId) });
+    void queryClient.invalidateQueries({ queryKey: paperNoteChunkStatusQueryKey(selectedTeam.teamId) });
+  }, [
+    queryClient,
+    selectedSourceCollectionRunEffectiveId,
+    selectedTeam?.teamId,
+    selectedTeamExecuteSourceCollectionSearchResult?.accepted,
+    sourceCollectionRunStatus?.runStatus,
+    sourceCollectionRunStatus?.summary.recordCount,
+  ]);
   const openSourceCollectionStorageTarget = (target: SourceCollectionStorageOpenTarget) => {
     if (!selectedTeam?.teamId || !selectedSourceCollectionRunEffectiveId) {
       return;

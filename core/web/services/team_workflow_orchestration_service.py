@@ -622,6 +622,129 @@ def execute_source_collection_search(team_id: str, run_id: str, payload: dict[st
     return result
 
 
+def start_source_collection_search_background(team_id: str, run_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
+    normalized_run_id = _normalize_required_id(run_id, "Data processing run id is required.")
+    team = team_service.get_team(normalized_team_id)
+    request_payload = dict(payload) if isinstance(payload, dict) else {}
+    provider = _trim_text(request_payload.get("provider"), max_length=80) or SOURCE_COLLECTION_SEARCH_PROVIDER_CROSSREF
+    if provider != SOURCE_COLLECTION_SEARCH_PROVIDER_CROSSREF:
+        raise TeamWorkflowOrchestrationError(f"Unsupported source collection search provider: {provider}")
+    try:
+        run = data_processing_service.get_processing_run(normalized_run_id)
+        assignments_payload = data_processing_service.list_collection_assignments(normalized_run_id)
+        records_payload = data_processing_service.list_records(normalized_run_id)
+        run_status = data_processing_service.get_processing_status(normalized_run_id)
+    except data_processing_service.DataProcessingError as exc:
+        raise TeamWorkflowOrchestrationError(str(exc)) from exc
+    run_scope = run.get("scope") if isinstance(run.get("scope"), dict) else {}
+    run_team_id = _trim_text(run_scope.get("teamId"), max_length=128)
+    if run_team_id and run_team_id != normalized_team_id:
+        raise TeamWorkflowOrchestrationError("Data processing run does not belong to this team.")
+    assignments = [item for item in list(assignments_payload.get("assignments") or []) if isinstance(item, dict)]
+    records = [item for item in list(records_payload.get("records") or []) if isinstance(item, dict)]
+    storage_artifacts = _source_collection_storage_artifacts(normalized_team_id, normalized_run_id)
+    active_snapshot = _persist_source_collection_work_run(
+        normalized_team_id,
+        normalized_run_id,
+        status="running",
+        current_phase="queued",
+        run=run,
+        team=team,
+        assignments=assignments,
+        records=records,
+        summary="资料搜集已进入后台执行，页面可继续操作。",
+        active=True,
+        extra={
+            "executionMode": "background",
+            "provider": provider,
+            "queuedSearchExecution": True,
+        },
+    )
+    worker = threading.Thread(
+        target=_run_source_collection_search_background,
+        args=(normalized_team_id, normalized_run_id, request_payload),
+        name=f"source-collection-search-{normalized_run_id[:24]}",
+        daemon=True,
+    )
+    worker.start()
+    _record_workflow_event(
+        "source_collection.search_background_accepted",
+        normalized_team_id,
+        fields={
+            "runId": normalized_run_id,
+            "provider": provider,
+            "assignmentCount": len(assignments),
+            "recordCount": len(records),
+            "threadName": worker.name,
+        },
+    )
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "teamId": normalized_team_id,
+        "runId": normalized_run_id,
+        "status": "accepted",
+        "executionMode": "background",
+        "accepted": True,
+        "provider": provider,
+        "executedQueryCount": 0,
+        "skippedQueryCount": 0,
+        "failedQueryCount": 0,
+        "resultCount": 0,
+        "recordCount": len(records),
+        "outputCount": 0,
+        "importedCount": 0,
+        "run": run,
+        "runStatus": run_status,
+        "storageArtifacts": storage_artifacts,
+        "assignments": assignments,
+        "outputs": [],
+        "createdRecords": [],
+        "imported": [],
+        "executionEvents": [],
+        "activeWorkRun": active_snapshot,
+        "boundaries": {
+            "externalSearchTriggered": False,
+            "externalSearchQueued": True,
+            "metadataOnlyDownload": True,
+            "writesFormalKnowledge": False,
+            "writesRag": False,
+            "writesOfficialGraph": False,
+        },
+        "nextActions": [
+            "The background source collection worker will write DataRecords and source_manifest candidates.",
+            "Keep this page open or return later; run status and assignments can refresh without blocking the request.",
+        ],
+    }
+
+
+def _run_source_collection_search_background(team_id: str, run_id: str, payload: dict[str, Any]) -> None:
+    try:
+        result = execute_source_collection_search(team_id, run_id, payload)
+    except Exception as exc:
+        _record_workflow_event(
+            "source_collection.search_background_failed",
+            team_id,
+            fields={
+                "runId": run_id,
+                "errorType": type(exc).__name__,
+                "error": _trim_text(exc, max_length=500),
+            },
+        )
+        return
+    _record_workflow_event(
+        "source_collection.search_background_completed",
+        team_id,
+        fields={
+            "runId": run_id,
+            "status": _trim_text(result.get("status"), max_length=80),
+            "executedQueryCount": _source_collection_count(result.get("executedQueryCount")),
+            "recordCount": _source_collection_count(result.get("recordCount")),
+            "importedCount": _source_collection_count(result.get("importedCount")),
+        },
+    )
+
+
 def _execute_source_collection_search_impl(team_id: str, run_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
     normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
     normalized_run_id = _normalize_required_id(run_id, "Data processing run id is required.")

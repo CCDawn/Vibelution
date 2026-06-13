@@ -39,6 +39,7 @@ from core.web.services.team_workflow_orchestration_service import (
     retry_research_stage_round_coordination,
     retry_research_stage_round_memory_record,
     start_research_stage_round,
+    start_source_collection_search_background,
     start_source_collection_run,
     submit_transfer_request,
     submit_steward_pack_to_knowledge_ingestion,
@@ -147,6 +148,7 @@ class SourceCollectionSearchExecutePayload(BaseModel):
     maxResultsPerQuery: int = Field(2, ge=1, le=5)
     provider: str = Field("crossref_rest_api", max_length=80)
     force: bool = False
+    backgroundExecution: bool = False
 
 
 class SourceCollectionStorageOpenPayload(BaseModel):
@@ -383,7 +385,10 @@ def team_workflow_source_collection_run_start(team_id: str, payload: SourceColle
 @router.post("/teams/{team_id}/workflow-orchestration/source-collection-runs/{run_id}/search/execute", status_code=status.HTTP_201_CREATED)
 def team_workflow_source_collection_search_execute(team_id: str, run_id: str, payload: SourceCollectionSearchExecutePayload) -> dict:
     try:
-        return execute_source_collection_search(team_id, run_id, payload.model_dump())
+        payload_dict = payload.model_dump()
+        if payload.backgroundExecution:
+            return start_source_collection_search_background(team_id, run_id, payload_dict)
+        return execute_source_collection_search(team_id, run_id, payload_dict)
     except TeamNotFoundError as exc:
         _raise_team_workflow_route_error(
             "source_collection_search.execute",

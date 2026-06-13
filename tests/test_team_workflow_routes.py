@@ -1,3 +1,6 @@
+import threading
+import time
+
 from fastapi.testclient import TestClient
 
 from core.web.app import create_app
@@ -264,6 +267,71 @@ def test_team_workflow_route_executes_source_collection_search(tmp_path, monkeyp
     assert opened_paths and opened_paths[0].endswith("records.jsonl")
     assert blocked_response.status_code == 422
     assert "Unsupported source collection storage target" in blocked_response.json()["detail"]
+
+
+def test_team_workflow_route_accepts_source_collection_search_background(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    started = threading.Event()
+    release = threading.Event()
+
+    def fake_search(query, *, max_results, provider):
+        started.set()
+        assert release.wait(2.0)
+        return {
+            "provider": provider,
+            "searchUrl": "https://api.example.test/search",
+            "results": [
+                {
+                    "title": "Background predictive coding paper",
+                    "sourceRef": "https://doi.org/10.0000/background-predictive-coding",
+                    "rawLocation": "https://api.example.test/works/10.0000/background-predictive-coding",
+                    "summary": "Metadata-only background source collection result.",
+                    "sourceType": "paper",
+                    "metadata": {"doi": "10.0000/background-predictive-coding"},
+                    "qualitySignals": {"providerScore": 91.0},
+                }
+            ][:max_results],
+        }
+
+    monkeypatch.setattr(team_workflow_orchestration_service, "_execute_source_collection_query", fake_search)
+    client = _client()
+    team = client.post("/api/teams", json={"name": "ai科学研究团队"}).json()
+    start_response = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/source-collection-runs",
+        json={
+            "topic": "predictive coding cortical hierarchy",
+            "querySeeds": ["predictive coding cortical hierarchy"],
+            "searchLanguages": ["en"],
+            "sourceTypes": ["paper"],
+            "agentRoles": ["data_discovery"],
+        },
+    )
+    run_id = start_response.json()["run"]["runId"]
+
+    response = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/source-collection-runs/{run_id}/search/execute",
+        json={"maxQueries": 1, "maxResultsPerQuery": 1, "backgroundExecution": True},
+    )
+    payload = response.json()
+
+    assert response.status_code == 201, response.text
+    assert payload["status"] == "accepted"
+    assert payload["executionMode"] == "background"
+    assert payload["accepted"] is True
+    assert payload["activeWorkRun"]["currentPhase"] == "queued"
+    assert data_processing_service.list_records(run_id)["summary"]["recordCount"] == 0
+    assert started.wait(2.0)
+    assert data_processing_service.list_records(run_id)["summary"]["recordCount"] == 0
+
+    release.set()
+    deadline = time.monotonic() + 3.0
+    while time.monotonic() < deadline:
+        if data_processing_service.list_records(run_id)["summary"]["recordCount"] == 1:
+            break
+        time.sleep(0.05)
+
+    assert data_processing_service.list_records(run_id)["summary"]["recordCount"] == 1
+    assert team_workflow_orchestration_service.load_source_collection_work_run_summary()["latest"]["status"] == "completed"
 
 
 def test_team_workflow_route_blocks_source_collection_without_prompt_cache(tmp_path, monkeypatch):
