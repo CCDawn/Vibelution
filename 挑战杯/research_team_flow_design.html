@@ -39,13 +39,13 @@
         <aside class="dashboard-panel">
           <h2>审核摘要</h2>
           <div class="kpi-grid">
-            <div class="kpi"><b>当前阶段</b><strong>M6.21</strong><span>知识搜集批次已固定落盘到 source_collection_runs，并提供可打开的证据位置按钮。</span></div>
+            <div class="kpi"><b>当前阶段</b><strong>M6.22</strong><span>科研总览已降噪为三阶段控制台，默认只保留一键主操作和阶段详情入口。</span></div>
             <div class="kpi"><b>流程节点</b><strong>13</strong><span>1-9 为知识入库主线，10-13 保留占位与维护节点。</span></div>
             <div class="kpi"><b>候选资料</b><strong>10</strong><span>第一轮 source_manifest 已进入 candidate-only 工作区。</span></div>
             <div class="kpi"><b>正式写入</b><strong>0</strong><span>未写正式 Team Knowledge、RAG 或 official graph。</span></div>
           </div>
           <div class="focus-list">
-            <div class="focus-item"><b>优先看</b><span>三阶段入口是否清晰，知识搜集阶段内的搜集、筛选、候选和入库边界是否能支撑下一轮科研提炼。</span></div>
+            <div class="focus-item"><b>优先看</b><span>总览页是否足够简洁，知识搜集/实验/迭代是否能一眼判断状态、下一步和进入详情。</span></div>
             <div class="focus-item"><b>不能做</b><span>当前执行器只取元数据引用，不抓全文、不审批入库、不把候选图谱当作正式事实。</span></div>
             <div class="focus-item"><b>下一步</b><span>扩展全文下载/网页抽取、批量去重、质量评分和 cache hit/miss 运行证据。</span></div>
           </div>
@@ -465,7 +465,7 @@
           <div class="plan-summary">
             <div class="service-row"><strong>知识搜集主线</strong><span>只跑通知识搜集、筛选、候选入库、知识治理 Agent 和图谱同步设计；不进入训练实验、算法实现或比赛交付。</span></div>
             <div class="service-row"><strong>实施目标</strong><span>复用 Vibelution 现有 Research、Team Knowledge、RAG、Knowledge Steward 和 Memory Graph 能力，把 01-09 做成可运行 MVP。</span></div>
-            <div class="service-row"><strong>团队入口</strong><span>/teams?team=research-team · 选中 ai科学研究团队后，团队内容区显示三阶段索引：知识搜集、实验、迭代；点击任一阶段进入对应独立阶段页，并可返回团队页。</span></div>
+            <div class="service-row"><strong>团队入口</strong><span>/teams?team=research-team · 选中 ai科学研究团队后，团队内容区显示科研控制台：研究主题、当前阶段、知识搜集/实验/迭代三张阶段卡、每卡一个主按钮和一个阶段详情入口；模型证据、候选、路径、校验和内部状态默认移到阶段详情页或高级信息中。</span></div>
           </div>
           <div class="dashboard-panel">
             <h2>边界提醒</h2>
@@ -659,8 +659,8 @@
         <div class="agent-row">
         <b>01</b>
         <strong>Source Intake Agent</strong>
-        <span>可复用通用 data-processing assignment / source-extraction / source-quality 后端已接入；Teams 资料搜集执行台、候选资料筛选台、三阶段启动台、KV 缓存对话轨迹、启动复用反馈、metadata-only 搜索执行闭环和高价值信息层已接入</span>
-        <span>ResearchStageRound 建立 / 三阶段启动台一键进入知识搜集 / active 知识搜集轮次复用反馈 / 自动启动团队协调 round / DataProcessingRun 建立 / DataSearchPlan/querySeeds 搜索计划 / KV/prompt cache 启动门禁 / 稳定前缀/动态增量契约 / CollectionAssignment 资料搜集任务 / assignedQueries 角色分配 / promptCachePartition 角色分区 / Teams 启动搜集批次 / Teams 查看 run/assignment/query/KV 状态 / Teams 高价值摘要层 / Teams 执行下一批搜索 / Crossref 元数据搜索执行器 / 搜索执行事件进入搜集对话流 / DataRecord 通用记录 / DataRecord 自动导入 source_manifest / metadata-only 下载边界 / 手工 CollectionOutput 回写 / 本地资料登记 / source_manifest 写入 / 文件路径/页码/来源可信度记录 / 本地 PDF sha256/pageAnchors/excerpt 抽取 / sourceQualityAssessment 筛选 / 可选 research_knowledge_query_tool 查重</span>
+        <span>可复用通用 data-processing assignment / source-extraction / source-quality 后端已接入；Teams 资料搜集执行台、候选资料筛选台、科研总览控制台、KV 缓存对话轨迹、启动复用反馈、metadata-only 搜索执行闭环和高价值信息层已接入</span>
+        <span>ResearchStageRound 建立 / 科研控制台一键进入知识搜集 / 总览页只显示三阶段主操作 / active 知识搜集轮次复用反馈 / 自动启动团队协调 round / DataProcessingRun 建立 / DataSearchPlan/querySeeds 搜索计划 / KV/prompt cache 启动门禁 / 稳定前缀/动态增量契约 / CollectionAssignment 资料搜集任务 / assignedQueries 角色分配 / promptCachePartition 角色分区 / Teams 启动搜集批次 / Teams 查看 run/assignment/query/KV 状态 / Teams 高价值摘要层 / Teams 执行下一批搜索 / Crossref 元数据搜索执行器 / 搜索执行事件进入搜集对话流 / DataRecord 通用记录 / DataRecord 自动导入 source_manifest / metadata-only 下载边界 / 手工 CollectionOutput 回写 / 本地资料登记 / source_manifest 写入 / 文件路径/页码/来源可信度记录 / 本地 PDF sha256/pageAnchors/excerpt 抽取 / sourceQualityAssessment 筛选 / 可选 research_knowledge_query_tool 查重</span>
         <span>确认资料允许分析、来源可信度和是否纳入本轮。</span>
       </div>
 <div class="agent-row">
@@ -1257,7 +1257,7 @@
           <div class="service-row"><b>团队群聊</b><span>room-20260529-090009-757107-6a747d62 · research_coordination</span></div>
           <div class="service-row"><b>流程文件</b><span>workspace/teams/research-team/workflow_orchestration.json</span></div>
           <div class="service-row"><b>候选仓库</b><span>workspace/teams/research-team/candidate_store/index.json</span></div>
-          <div class="service-row"><b>策略</b><span>挑战杯科研流程直接绑定当前 Vibelution ai科学研究团队，不另建新团队；Teams 页顶部只保留 AI 搜索范围团队和 ai科学研究团队两个固定入口，左侧栏删除，不再展示创建团队、模板创建或完整团队列表；选择 ai科学研究团队后直接进入团队专属科研工作台，团队内容区只露出知识搜集、实验、迭代三阶段入口；资料搜集已折叠进知识搜集阶段页，组织画布仅保留为附属结构视图。</span></div>
+          <div class="service-row"><b>策略</b><span>挑战杯科研流程直接绑定当前 Vibelution ai科学研究团队，不另建新团队；Teams 页顶部只保留 AI 搜索范围团队和 ai科学研究团队两个固定入口，左侧栏删除，不再展示创建团队、模板创建或完整团队列表；选择 ai科学研究团队后直接进入团队专属科研工作台，默认只显示科研控制台：知识搜集、实验、迭代三张阶段卡各保留一个主操作和阶段详情入口；资料搜集已折叠进知识搜集阶段页，组织画布仅保留为附属结构视图。</span></div>
         </div>
       </div>
       <div class="runbook-grid">
@@ -1327,7 +1327,7 @@
                 </div>
 <div class="service-row">
                   <b>TeamsRoute workflow workspace</b>
-                  <span>已落地入口：Teams 页顶部固定横向切换条只暴露 AI 搜索范围团队和 ai科学研究团队，左侧栏已删除；监督进化/自进化模式页各自读取系统 Team 并展示只读团队画布；选择 ai科学研究团队后直接进入 research-team 专属科研工作台；科研一级索引统一为知识搜集、实验、迭代三阶段。知识搜集页位于 /teams?team=research-team&amp;researchView=knowledge_collection，默认展示高价值状态摘要、下一步动作和对话式 source collection 过程流；KV/prompt cache、稳定前缀、动态增量、assignment、query、存储路径和手工回写保留在可展开详情中；实验/迭代页先提供规划启动、轮次状态和边界说明；旧 source_collection 参数兼容映射到知识搜集。</span>
+                  <span>已落地入口：Teams 页顶部固定横向切换条只暴露 AI 搜索范围团队和 ai科学研究团队，左侧栏已删除；监督进化/自进化模式页各自读取系统 Team 并展示只读团队画布；选择 ai科学研究团队后直接进入 research-team 专属科研控制台；总览只显示知识搜集、实验、迭代三张阶段卡，每张卡一个主操作和阶段详情入口。知识搜集页位于 /teams?team=research-team&amp;researchView=knowledge_collection，默认展示高价值状态摘要、下一步动作和对话式 source collection 过程流；KV/prompt cache、稳定前缀、动态增量、assignment、query、存储路径和手工回写保留在可展开详情中；实验/迭代页先提供规划启动、轮次状态和边界说明；旧 source_collection 参数兼容映射到知识搜集。</span>
                 </div>
 <div class="service-row">
                   <b>local_research_worker_model</b>
@@ -1742,7 +1742,7 @@
 <div class="blueprint-row compact">
               <b>Team 前端入口</b>
               <strong>/teams?team=research-team</strong>
-              <span>读取 /workflow-orchestration、/stage-rounds/status、/official-model-evidence/status、/candidates?limit=8、/knowledge-ingestion/status 和通用 data-processing run/status/assignment；顶部横向切换条只允许选择 AI 搜索范围团队或 ai科学研究团队，点击 research-team 后直接进入团队专属科研工作台，内容区只展示知识搜集、实验、迭代三阶段入口和三阶段启动台；非这两个团队不在当前入口暴露。</span>
+              <span>读取 /workflow-orchestration、/stage-rounds/status、/official-model-evidence/status、/candidates?limit=8、/knowledge-ingestion/status 和通用 data-processing run/status/assignment；顶部横向切换条只允许选择 AI 搜索范围团队或 ai科学研究团队，点击 research-team 后直接进入团队专属科研控制台，内容区只展示知识搜集、实验、迭代三张阶段卡和一键主操作；非这两个团队不在当前入口暴露。</span>
             </div>
 <div class="blueprint-row compact">
               <b>知识搜集阶段页</b>
@@ -1836,8 +1836,8 @@
 <div class="blueprint-row">
               <b>M0.2</b>
               <strong>Teams 科研三阶段入口</strong>
-              <span>科研索引不再与团队同级，也不再混放流程模块，进入 ai科学研究团队后只展示知识搜集、实验、迭代三张阶段入口。</span>
-              <span>用户先选团队，再进入阶段独立页；知识搜集页承载原资料搜集对话流和技术控制台，实验/迭代页先提供规划启动、轮次状态、模块边界和返回团队页；监督进化/自进化画布已拆到各自模式页，以只读系统团队画布展示。</span>
+              <span>科研索引不再与团队同级，也不再混放流程模块，进入 ai科学研究团队后默认展示知识搜集、实验、迭代三张阶段控制卡。</span>
+              <span>用户先选团队，首页只做当前阶段判断和一键主操作；知识搜集页承载原资料搜集对话流和技术控制台，实验/迭代页先提供规划启动、轮次状态、模块边界和返回团队页；监督进化/自进化画布已拆到各自模式页，以只读系统团队画布展示。</span>
             </div>
 <div class="blueprint-row">
               <b>M0.5</b>
@@ -2006,6 +2006,12 @@
               <strong>搜集证据落盘与打开位置</strong>
               <span>source collection run 固定生成 workspace/teams/research-team/source_collection_runs/&lt;runId&gt;/，写入 search_plan.json、search_events.jsonl、records.jsonl、candidates.jsonl 和 artifacts/，Teams 知识搜集页提供打开批次目录、搜索计划、搜索步骤、搜集记录、候选镜像和候选仓库按钮。</span>
               <span>打开接口只接受白名单 target，不允许前端传任意路径；本轮仍只保存候选搜集证据，不绕过资料筛选、正式 Team Knowledge、RAG 或 official graph 门禁。</span>
+            </div>
+<div class="blueprint-row">
+              <b>M6.22</b>
+              <strong>科研总览控制台降噪</strong>
+              <span>Teams research-team 总览页移除旧三阶段索引和默认科研流程/模型证据详情，只保留研究主题、当前阶段、三张阶段卡、每阶段一个主操作和一个阶段详情入口。</span>
+              <span>首页用于一键启动/续做和判断下一步；模型调用证据、候选数量、仓库路径、校验、KV 分区、query 和内部执行细节进入知识搜集/实验/迭代阶段页或可展开高级信息，不再默认挤占总览。</span>
             </div>
       </div>
       <div class="tag-row">
