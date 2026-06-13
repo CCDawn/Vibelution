@@ -52,11 +52,14 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).not.toContain("agentCardGrid");
   });
 
-  it("separates Agent filters into status, mode, and reference sections", () => {
+  it("separates Agent filters into work queue, status, identity, mode, and reference sections", () => {
     expect(routeSource).toContain('useState<FilterId>("active")');
     expect(routeSource).toContain("groupedFilters");
     expect(routeSource).toContain("copy.filterSections");
     expect(routeSource).toContain("copy.groupLabels");
+    expect(routeSource).toContain('const sectionOrder = ["status", "boundary", "mode", "reference"] as const;');
+    expect(routeSource).toContain('section === "boundary"');
+    expect(routeSource).toContain("managementSection,");
     expect(routeSource).toContain("styles.groupSection");
     expect(routeSource).toContain("styles.groupSectionTitle");
     expect(routeSource).toContain("groupDisplayLabel(group, copy)");
@@ -188,8 +191,9 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("function agentHasRuntimeSignal(agent: AgentConfigWorkspaceAgent | null | undefined)");
     expect(routeSource).toContain("const runtimeState = String(agent?.runtimeStatus?.state || \"\").trim()");
     expect(routeSource).toContain("runtimeState && runtimeState !== \"idle\"");
-    expect(routeSource).toContain("count((agent) => agent.health.length > 0)");
-    expect(routeSource).toContain("return agent.health.length > 0;");
+    expect(routeSource).toContain("function hasActionableHealthIssue(agent: AgentConfigWorkspaceAgent | null | undefined)");
+    expect(routeSource).toContain('issue.severity === "blocking" || issue.severity === "warning"');
+    expect(routeSource).toContain("count(hasActionableHealthIssue)");
   });
 
   it("creates Agents through tool bundle presets instead of raw tool strings", () => {
@@ -503,10 +507,10 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("Check workspace boundary");
     expect(routeSource).toContain("配置模型与项目指令");
     expect(routeSource).toContain("检查工作区边界");
-    expect(routeSource).toContain("Work-session Agents");
-    expect(routeSource).toContain("Team role Agents");
-    expect(routeSource).toContain("会话工作 Agent");
-    expect(routeSource).toContain("团队角色 Agent");
+    expect(routeSource).toContain("Session entry Agents");
+    expect(routeSource).toContain("Team / research role Agents");
+    expect(routeSource).toContain("会话入口 Agent");
+    expect(routeSource).toContain("团队/科研角色 Agent");
   });
 
   it("keeps persona, task, and membership configuration out of work-session Agents", () => {
