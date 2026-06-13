@@ -711,6 +711,127 @@ function sourceCollectionRunLabel(runId: string) {
   return runId ? `${runId.slice(0, 10)}...` : "-";
 }
 
+function translateResearchPhrase(value: string | undefined | null, lang: "zh" | "en") {
+  const text = String(value || "").trim();
+  if (!text || lang !== "zh") {
+    return text;
+  }
+  const normalized = text.toLowerCase();
+  const zh: Record<string, string> = {
+    "neural algorithm source batch": "神经算法资料搜集批次",
+    "neural predictive coding": "神经预测编码",
+    "predictive coding cortical hierarchy": "预测编码皮层层级",
+    "synaptic plasticity learning rule": "突触可塑性学习规则",
+    "neural gating attention mechanism": "神经门控注意机制",
+    "collect traceable neuroscience sources that can support neural-network algorithm hypotheses.": "搜集可追踪的神经科学资料，用来支撑神经网络算法假设。",
+  };
+  return zh[normalized] ?? text;
+}
+
+function sourceCollectionRunTitleLabel(title: string | undefined | null, lang: "zh" | "en") {
+  return translateResearchPhrase(title, lang) || (lang === "zh" ? "资料搜集批次" : "Source collection run");
+}
+
+function sourceCollectionStatusLabel(value: string | undefined | null, lang: "zh" | "en") {
+  const normalized = String(value || "").trim().toLowerCase();
+  const zh: Record<string, string> = {
+    active: "进行中",
+    blocked: "阻塞",
+    collecting: "搜集中",
+    completed: "已完成",
+    failed: "失败",
+    in_progress: "推进中",
+    needs_attention: "需处理",
+    open: "待执行",
+    pending: "待启动",
+    pending_screening: "待筛选",
+    planned: "已计划",
+    processing: "处理中",
+    ready: "已就绪",
+    ready_for_screening: "可筛选",
+    returned: "已退回",
+    satisfied: "已通过",
+    waiting_for_writeback: "待回写",
+  };
+  const en: Record<string, string> = {
+    active: "active",
+    blocked: "blocked",
+    collecting: "collecting",
+    completed: "completed",
+    failed: "failed",
+    in_progress: "in progress",
+    needs_attention: "needs attention",
+    open: "open",
+    pending: "pending",
+    pending_screening: "pending screening",
+    planned: "planned",
+    processing: "processing",
+    ready: "ready",
+    ready_for_screening: "ready for screening",
+    returned: "returned",
+    satisfied: "satisfied",
+    waiting_for_writeback: "waiting for writeback",
+  };
+  return (lang === "zh" ? zh : en)[normalized] ?? workflowIngestionStatusLabel(normalized, lang);
+}
+
+function sourceCollectionAgentRoleLabel(value: string | undefined | null, lang: "zh" | "en") {
+  const normalized = String(value || "").trim();
+  if (!normalized || lang !== "zh") {
+    return normalized || "-";
+  }
+  const zh: Record<string, string> = {
+    "Research Coordination Agent": "科研协调 Agent",
+    "Data Discovery Agent": "资料发现 Agent",
+    "Source Collection Agent": "资料搜集 Agent",
+    "Source Intake Agent": "资料入候选 Agent",
+    "Source Quality Assessment Agent": "资料质量评估 Agent",
+    data_discovery: "资料发现 Agent",
+    source_acquisition: "来源获取 Agent",
+    content_extraction: "内容提炼 Agent",
+    source_quality: "资料质量评估 Agent",
+  };
+  return zh[normalized] ?? normalized;
+}
+
+function sourceCollectionSourceTypeLabel(value: string | undefined | null, lang: "zh" | "en") {
+  const normalized = String(value || "").trim().toLowerCase();
+  const zh: Record<string, string> = {
+    dataset: "数据集",
+    file: "本地文件",
+    manual: "手工记录",
+    note: "笔记",
+    paper: "论文",
+    review: "综述",
+    url: "网页",
+  };
+  const en: Record<string, string> = {
+    dataset: "dataset",
+    file: "file",
+    manual: "manual",
+    note: "note",
+    paper: "paper",
+    review: "review",
+    url: "url",
+  };
+  return (lang === "zh" ? zh : en)[normalized] ?? (value || "-");
+}
+
+function sourceCollectionLanguageLabel(value: string | undefined | null, lang: "zh" | "en") {
+  const normalized = String(value || "").trim().toLowerCase();
+  const zh: Record<string, string> = {
+    en: "英文",
+    zh: "中文",
+    cn: "中文",
+  };
+  const en: Record<string, string> = {
+    en: "English",
+    zh: "Chinese",
+    cn: "Chinese",
+  };
+  return (lang === "zh" ? zh : en)[normalized] ?? (value || "-");
+}
+
 function sourceCollectionStorageArtifactsForRun(teamId: string, runId: string): SourceCollectionStorageArtifacts | null {
   if (!teamId || !runId) {
     return null;
@@ -738,8 +859,8 @@ function sourceCollectionStorageTargetLabel(target: SourceCollectionStorageOpenT
     records: "打开搜集记录",
     candidates: "打开候选镜像",
     candidate_store: "打开候选仓库",
-    data_processing_run: "打开通用 run",
-    data_processing_records: "打开 DataRecord",
+    data_processing_run: "打开通用运行记录",
+    data_processing_records: "打开资料记录",
   };
   const en: Record<SourceCollectionStorageOpenTarget, string> = {
     run_directory: "Open run folder",
@@ -1592,10 +1713,10 @@ export function TeamsRoute({
     forcedResearchWorkspaceView ?? requestedResearchWorkspaceView ?? "overview",
   );
   const [sourceCollectionDraft, setSourceCollectionDraft] = useState<SourceCollectionDraft>({
-    title: "Neural algorithm source batch",
-    topic: "neural predictive coding",
-    goal: "Collect traceable neuroscience sources that can support neural-network algorithm hypotheses.",
-    querySeeds: "predictive coding cortical hierarchy\nsynaptic plasticity learning rule\nneural gating attention mechanism",
+    title: "神经算法资料搜集批次",
+    topic: "神经预测编码",
+    goal: "搜集可追踪的神经科学资料，用来支撑神经网络算法假设。",
+    querySeeds: "预测编码皮层层级\n突触可塑性学习规则\n神经门控注意机制",
     inputRefs: "",
     searchLanguages: "en\nzh",
     sourceTypes: "paper\nreview\ndataset",
@@ -2515,7 +2636,7 @@ export function TeamsRoute({
           return lang === "zh" ? "生成搜索计划和团队分工，先把资料搜集跑起来。" : "Create the search plan and team assignments.";
         }
         if (selectedTeamExecuteSourceCollectionSearchPending) {
-          return lang === "zh" ? "正在执行搜索，结果会写入 DataRecord 和候选资料仓库。" : "Searching now; results will be written into DataRecords and candidates.";
+          return lang === "zh" ? "正在执行搜索，结果会写入资料记录和候选资料仓库。" : "Searching now; results will be written into DataRecords and candidates.";
         }
         if (sourceCollectionOpenAssignmentCount > 0) {
           return lang === "zh" ? "已有搜集批次，点击主按钮执行下一批搜索。" : "A run is open. Use the primary action to run the next batch.";
@@ -2916,12 +3037,12 @@ export function TeamsRoute({
               <div className={styles.sourceCollectionTraceBody}>
                 <div className={styles.sourceCollectionTraceMeta}>
                   <strong>{sourceCollectionTraceToneLabel(message.tone, lang)}</strong>
-                  <span>{message.status}</span>
+                  <span>{sourceCollectionStatusLabel(message.status, lang)}</span>
                 </div>
                 <h3>{message.title}</h3>
                 <p>{message.body}</p>
                 <div className={styles.sourceCollectionTraceOwner}>
-                  <span>{message.agentRole}</span>
+                  <span>{sourceCollectionAgentRoleLabel(message.agentRole, lang)}</span>
                 </div>
                 {message.refs.length || message.storageRefs.length ? (
                   <details className={styles.sourceCollectionTraceDetails}>
@@ -2980,17 +3101,17 @@ export function TeamsRoute({
         <strong>{lang === "zh" ? "搜集批次已启动，等待功能 Agent 回写" : "Collection run is active and waiting for Agent writeback"}</strong>
         <span>
           {lang === "zh"
-            ? `${sourceCollectionRunLabel(selectedSourceCollectionRun.runId)} 已规划 ${queryCount} 条 query，当前 ${openAssignmentCount} 个任务仍未完成；现阶段执行 metadata-only 搜索，会记录搜索词、来源元数据、DataRecord 和候选导入，不下载全文网页/PDF，也不写正式知识。`
+            ? `${sourceCollectionRunLabel(selectedSourceCollectionRun.runId)} 已规划 ${queryCount} 条搜索问题，当前 ${openAssignmentCount} 个任务仍未完成；现阶段执行元数据搜索，会记录搜索词、来源元数据、资料记录和候选导入，不下载全文网页/PDF，也不写正式知识。`
             : `${sourceCollectionRunLabel(selectedSourceCollectionRun.runId)} has ${queryCount} planned queries and ${openAssignmentCount} open tasks. The current executor is metadata-only: it records queries, source metadata, DataRecords, and candidate imports without downloading full webpages/PDFs or writing formal knowledge.`}
         </span>
         <small>
           {lang === "zh"
-            ? "真实搜索执行器接入后会在这里记录搜索、下载、提炼和落库轨迹"
+            ? "后续接入全文下载或提炼器时，这里会继续记录下载、提炼和落库轨迹"
             : "After the real search executor is connected, this area records search, download, extraction, and ingestion traces."}
         </small>
         <em>
           {externalSearchTriggered
-            ? (lang === "zh" ? "已进入 metadata 搜索执行" : "metadata search executed")
+            ? (lang === "zh" ? "已进入元数据搜索执行" : "metadata search executed")
             : (lang === "zh" ? "当前仍是计划/回写阶段，未触发外部搜索" : "planning/writeback stage, no external search triggered")}
         </em>
       </div>
@@ -3001,8 +3122,7 @@ export function TeamsRoute({
     if (!selectedSourceCollectionStorageArtifacts || !selectedSourceCollectionRunEffectiveId) {
       return null;
     }
-    const actions: SourceCollectionStorageOpenTarget[] = [
-      "run_directory",
+    const detailActions: SourceCollectionStorageOpenTarget[] = [
       "search_plan",
       "search_events",
       "records",
@@ -3012,22 +3132,38 @@ export function TeamsRoute({
     return (
       <section className={styles.workflowSourceCollectionStorageActions} aria-label={lang === "zh" ? "搜集证据落盘位置" : "Source collection evidence storage"}>
         <div>
-          <strong>{lang === "zh" ? "证据落盘" : "Evidence storage"}</strong>
-          <span>{selectedSourceCollectionStorageArtifacts.runDirectory}</span>
+          <strong>{lang === "zh" ? "本轮产物" : "Run artifacts"}</strong>
+          <span>{lang === "zh" ? "搜索计划、步骤记录、资料记录和候选镜像都已落盘。" : "Search plan, trace, records, and candidates are stored on disk."}</span>
         </div>
         <div className={styles.workflowSourceCollectionStorageButtons}>
-          {actions.map((target) => (
-            <button
-              key={target}
-              type="button"
-              disabled={selectedSourceCollectionStorageOpenPending}
-              onClick={() => openSourceCollectionStorageTarget(target)}
-            >
-              <Link2 size={12} />
-              {sourceCollectionStorageTargetLabel(target, lang)}
-            </button>
-          ))}
+          <button
+            type="button"
+            disabled={selectedSourceCollectionStorageOpenPending}
+            onClick={() => openSourceCollectionStorageTarget("run_directory")}
+          >
+            <Link2 size={12} />
+            {sourceCollectionStorageTargetLabel("run_directory", lang)}
+          </button>
         </div>
+        <details className={styles.workflowSourceCollectionStorageDetails}>
+          <summary>{lang === "zh" ? "更多证据文件" : "More evidence files"}</summary>
+          <div className={styles.workflowSourceCollectionStorageButtons}>
+            {detailActions.map((target) => (
+              <button
+                key={target}
+                type="button"
+                disabled={selectedSourceCollectionStorageOpenPending}
+                onClick={() => openSourceCollectionStorageTarget(target)}
+              >
+                <Link2 size={12} />
+                {sourceCollectionStorageTargetLabel(target, lang)}
+              </button>
+            ))}
+          </div>
+          <small title={selectedSourceCollectionStorageArtifacts.runDirectory}>
+            {selectedSourceCollectionStorageArtifacts.runDirectory}
+          </small>
+        </details>
         {selectedSourceCollectionStorageOpenResult ? (
           <small>
             {lang === "zh" ? "已打开" : "Opened"} {selectedSourceCollectionStorageOpenResult.openedPath}
@@ -3041,7 +3177,51 @@ export function TeamsRoute({
   }
 
   function renderSourceCollectionControlsPanel() {
-    const sourceCollectionExecutionTitle = lang === "zh" ? "对话式执行下一批搜索" : "Run next search batch as trace";
+    const sourceCollectionPrimaryDisabled = !selectedSourceCollectionRun
+      ? !sourceCollectionCanStart || selectedTeamStartSourceCollectionPending
+      : sourceCollectionOpenAssignmentCount > 0
+        ? !canExecuteSourceCollectionSearch
+        : false;
+    const runSourceCollectionSearchBatch = () => {
+      if (!selectedTeam?.teamId || !selectedSourceCollectionRunEffectiveId || !canExecuteSourceCollectionSearch) {
+        return;
+      }
+      const selectedAssignmentIsRunnable = selectedSourceCollectionAssignment
+        ? ["open", "in_progress", "returned"].includes(selectedSourceCollectionAssignment.status)
+        : false;
+      executeSourceCollectionSearchMutation.mutate({
+        teamId: selectedTeam.teamId,
+        runId: selectedSourceCollectionRunEffectiveId,
+        assignmentId: selectedAssignmentIsRunnable ? selectedSourceCollectionAssignment?.assignmentId : "",
+        maxQueries: 4,
+        maxResultsPerQuery: Math.max(1, Math.min(5, sourceCollectionDraft.maxResultsPerQuery || 2)),
+      });
+    };
+    const runSourceCollectionPrimaryAction = () => {
+      if (!selectedTeam?.teamId) {
+        return;
+      }
+      if (!selectedSourceCollectionRun) {
+        if (!sourceCollectionCanStart || selectedTeamStartSourceCollectionPending) {
+          return;
+        }
+        startSourceCollectionRunMutation.mutate({
+          teamId: selectedTeam.teamId,
+          draft: sourceCollectionDraft,
+        });
+        return;
+      }
+      if (sourceCollectionOpenAssignmentCount > 0) {
+        runSourceCollectionSearchBatch();
+        return;
+      }
+      navigate(teamWorkspaceRoute(selectedTeam.teamId));
+    };
+    const sourceCollectionPrimaryButtonLabel = !selectedSourceCollectionRun && selectedTeamStartSourceCollectionPending
+      ? (lang === "zh" ? "启动中" : "Starting")
+      : selectedTeamExecuteSourceCollectionSearchPending
+        ? (lang === "zh" ? "搜索中" : "Searching")
+        : sourceCollectionPrimaryActionTitle;
     return (
       <section className={styles.sourceCollectionControlPanel} aria-label={lang === "zh" ? "资料搜集控制台" : "Source collection controls"}>
         <div className={styles.workflowIngestionHeader}>
@@ -3054,7 +3234,7 @@ export function TeamsRoute({
             </span>
           </div>
           <span className={`${styles.workflowTag} ${workflowIngestionTone(sourceCollectionRunStatus?.runStatus || selectedSourceCollectionRun?.status || "")}`}>
-            {sourceCollectionRunStatus?.runStatus || selectedSourceCollectionRun?.status || (lang === "zh" ? "未启动" : "not started")}
+            {sourceCollectionStatusLabel(sourceCollectionRunStatus?.runStatus || selectedSourceCollectionRun?.status || "pending", lang)}
           </span>
         </div>
         <div className={styles.workflowSourceCollectionActionSummary}>
@@ -3062,11 +3242,20 @@ export function TeamsRoute({
             <strong>{sourceCollectionPrimaryActionTitle}</strong>
             <span>{sourceCollectionPrimaryActionBody}</span>
           </div>
+          <button
+            type="button"
+            className={styles.workflowSourceCollectionPrimaryButton}
+            disabled={sourceCollectionPrimaryDisabled}
+            onClick={runSourceCollectionPrimaryAction}
+          >
+            {selectedSourceCollectionRun && sourceCollectionOpenAssignmentCount > 0 ? <Search size={13} /> : <Play size={13} />}
+            {sourceCollectionPrimaryButtonLabel}
+          </button>
         </div>
         <details className={styles.workflowSourceCollectionDetails} open={!selectedSourceCollectionRun}>
           <summary>
-            <span>{lang === "zh" ? "启动设置" : "Launch settings"}</span>
-            <small>{lang === "zh" ? "主题、目标、query seeds" : "Topic, goal, query seeds"}</small>
+            <span>{lang === "zh" ? "本轮配置" : "Run settings"}</span>
+            <small>{lang === "zh" ? "通常无需修改" : "Usually no change needed"}</small>
           </summary>
           <form
             className={styles.workflowSourceCollectionForm}
@@ -3104,7 +3293,7 @@ export function TeamsRoute({
             />
           </label>
           <label>
-            <span>Query seeds</span>
+            <span>{lang === "zh" ? "搜索种子" : "Query seeds"}</span>
             <textarea
               value={sourceCollectionDraft.querySeeds}
               onChange={(event) => setSourceCollectionDraft((current) => ({ ...current, querySeeds: event.target.value }))}
@@ -3157,42 +3346,6 @@ export function TeamsRoute({
           </button>
           </form>
         </details>
-        {selectedSourceCollectionRun ? (
-        <div className={styles.workflowSourceCollectionSearchAction}>
-          <div>
-            <strong>{sourceCollectionExecutionTitle}</strong>
-            <span>
-              {lang === "zh"
-                ? `会搜索来源元数据、写 DataRecord、导入候选，并把过程写入左侧搜集过程；剩余 ${sourceCollectionOpenAssignmentCount} 个可执行任务。`
-                : `Searches source metadata, writes DataRecords, imports candidates, and appends the process trace; ${sourceCollectionOpenAssignmentCount} runnable assignments remain.`}
-            </span>
-          </div>
-          <button
-            type="button"
-            disabled={!canExecuteSourceCollectionSearch}
-            onClick={() => {
-              if (!selectedTeam?.teamId || !selectedSourceCollectionRunEffectiveId || !canExecuteSourceCollectionSearch) {
-                return;
-              }
-              const selectedAssignmentIsRunnable = selectedSourceCollectionAssignment
-                ? ["open", "in_progress", "returned"].includes(selectedSourceCollectionAssignment.status)
-                : false;
-              executeSourceCollectionSearchMutation.mutate({
-                teamId: selectedTeam.teamId,
-                runId: selectedSourceCollectionRunEffectiveId,
-                assignmentId: selectedAssignmentIsRunnable ? selectedSourceCollectionAssignment?.assignmentId : "",
-                maxQueries: 4,
-                maxResultsPerQuery: Math.max(1, Math.min(5, sourceCollectionDraft.maxResultsPerQuery || 2)),
-              });
-            }}
-          >
-            <Search size={13} />
-            {selectedTeamExecuteSourceCollectionSearchPending
-              ? (lang === "zh" ? "搜索中" : "Searching")
-              : (lang === "zh" ? "执行下一批搜索" : "Run next search")}
-          </button>
-        </div>
-        ) : null}
         <div className={styles.workflowSourceCollectionRuns}>
           <label>
             <span>{lang === "zh" ? "最近批次" : "Recent runs"}</span>
@@ -3204,7 +3357,7 @@ export function TeamsRoute({
               {sourceCollectionRuns.length ? (
                 sourceCollectionRuns.map((run) => (
                   <option key={run.runId} value={run.runId}>
-                    {sourceCollectionRunLabel(run.runId)} · {run.title}
+                    {sourceCollectionRunLabel(run.runId)} · {sourceCollectionRunTitleLabel(run.title, lang)}
                   </option>
                 ))
               ) : (
@@ -3212,20 +3365,13 @@ export function TeamsRoute({
               )}
             </select>
           </label>
-          <div className={styles.workflowSourceCollectionStats}>
-            <span>{lang === "zh" ? "记录" : "records"} <strong>{sourceCollectionRecordCount}</strong></span>
-            <span>{lang === "zh" ? "任务" : "assignments"} <strong>{sourceCollectionAssignmentCount}</strong></span>
-            <span>{lang === "zh" ? "未完成" : "open"} <strong>{sourceCollectionOpenAssignmentCount}</strong></span>
-            <span>{lang === "zh" ? "查询" : "queries"} <strong>{sourceCollectionQueryCount}</strong></span>
-            <span>{lang === "zh" ? "缓存" : "cache"} <strong>{sourceCollectionPromptCacheStatusLabel(sourceCollectionPromptCacheStatus, lang)}</strong></span>
-          </div>
         </div>
         {renderSourceCollectionStorageActions()}
         <details className={styles.workflowSourceCollectionDetails}>
           <summary>
             <span>{lang === "zh" ? "查询与分工详情" : "Query and assignment details"}</span>
             <small>
-              {sourceCollectionAssignmentCount} {lang === "zh" ? "个任务" : "assignments"} · {sourceCollectionQueryCount} {lang === "zh" ? "条查询" : "queries"}
+              {sourceCollectionAssignmentCount} {lang === "zh" ? "个任务" : "assignments"} · {sourceCollectionQueryCount} {lang === "zh" ? "条搜索问题" : "queries"}
             </small>
           </summary>
           {sourceCollectionAssignments.length ? (
@@ -3237,8 +3383,10 @@ export function TeamsRoute({
                   className={assignment.assignmentId === selectedSourceCollectionAssignment?.assignmentId ? styles.workflowSourceCollectionAssignmentActive : ""}
                   onClick={() => setSourceCollectionOutputDraft((current) => ({ ...current, assignmentId: assignment.assignmentId }))}
                 >
-                  <strong>{assignment.agentRole}</strong>
-                  <span>{assignment.status} · {assignment.scope.queryCount ?? assignment.scope.assignedQueries?.length ?? 0} queries</span>
+                  <strong>{sourceCollectionAgentRoleLabel(assignment.agentRole, lang)}</strong>
+                  <span>
+                    {sourceCollectionStatusLabel(assignment.status, lang)} · {assignment.scope.queryCount ?? assignment.scope.assignedQueries?.length ?? 0} {lang === "zh" ? "条搜索" : "queries"}
+                  </span>
                 </button>
               ))}
             </div>
@@ -3249,8 +3397,8 @@ export function TeamsRoute({
             <div className={styles.workflowSourceCollectionQueries}>
               {selectedSourceCollectionQueries.slice(0, 6).map((query) => (
                 <span key={query.queryId}>
-                  <strong>{query.query}</strong>
-                  <small>{query.queryId} · {query.sourceType} · {query.language}</small>
+                  <strong>{translateResearchPhrase(query.query, lang)}</strong>
+                  <small>{query.queryId} · {sourceCollectionSourceTypeLabel(query.sourceType, lang)} · {sourceCollectionLanguageLabel(query.language, lang)}</small>
                 </span>
               ))}
             </div>
@@ -3278,10 +3426,10 @@ export function TeamsRoute({
           >
           <div className={styles.workflowSourceCollectionOutputHeader}>
             <strong>{lang === "zh" ? "写入一条资料结果" : "Write one collected source"}</strong>
-            <span>{lang === "zh" ? "生成 DataRecord 后自动导入 source_manifest 候选" : "Creates a DataRecord, then imports a source_manifest candidate"}</span>
+            <span>{lang === "zh" ? "生成资料记录后自动导入候选资料库" : "Creates a DataRecord, then imports a source_manifest candidate"}</span>
           </div>
           <label>
-            <span>Assignment</span>
+            <span>{lang === "zh" ? "分工任务" : "Assignment"}</span>
             <select
               value={sourceCollectionOutputDraft.assignmentId || selectedSourceCollectionAssignment?.assignmentId || ""}
               onChange={(event) => setSourceCollectionOutputDraft((current) => ({ ...current, assignmentId: event.target.value }))}
@@ -3289,7 +3437,7 @@ export function TeamsRoute({
             >
               {sourceCollectionAssignments.map((assignment) => (
                 <option key={assignment.assignmentId} value={assignment.assignmentId}>
-                  {assignment.agentRole} · {assignment.status}
+                  {sourceCollectionAgentRoleLabel(assignment.agentRole, lang)} · {sourceCollectionStatusLabel(assignment.status, lang)}
                 </option>
               ))}
             </select>
@@ -3301,7 +3449,7 @@ export function TeamsRoute({
               onChange={(event) => setSourceCollectionOutputDraft((current) => ({ ...current, sourceType: event.target.value }))}
             >
               {["paper", "url", "dataset", "file", "note", "manual"].map((sourceType) => (
-                <option key={sourceType} value={sourceType}>{sourceType}</option>
+                <option key={sourceType} value={sourceType}>{sourceCollectionSourceTypeLabel(sourceType, lang)}</option>
               ))}
             </select>
           </label>
@@ -3352,7 +3500,7 @@ export function TeamsRoute({
           </form>
         </details>
         <div className={styles.workflowIngestionBoundary}>
-          <span>{lang === "zh" ? "执行器：手动/Agent 均可提交 CollectionOutput" : "Executor: manual or Agent CollectionOutput"}</span>
+          <span>{lang === "zh" ? "执行器：手动/Agent 均可提交搜集结果" : "Executor: manual or Agent CollectionOutput"}</span>
           <span>{lang === "zh" ? "正式知识写入关闭" : "formal knowledge write off"}</span>
           <span>{lang === "zh" ? "进入候选仓库后再筛选" : "screen after candidate import"}</span>
         </div>
@@ -3369,7 +3517,7 @@ export function TeamsRoute({
           <div className={styles.messageResult}>
             <strong>{lang === "zh" ? "搜索执行已回写" : "Search execution written"}</strong>
             <span>
-              {selectedTeamExecuteSourceCollectionSearchResult.executedQueryCount} queries / {selectedTeamExecuteSourceCollectionSearchResult.recordCount} DataRecord / {selectedTeamExecuteSourceCollectionSearchResult.importedCount} candidate
+              {selectedTeamExecuteSourceCollectionSearchResult.executedQueryCount} {lang === "zh" ? "条搜索" : "queries"} / {selectedTeamExecuteSourceCollectionSearchResult.recordCount} {lang === "zh" ? "条资料记录" : "DataRecord"} / {selectedTeamExecuteSourceCollectionSearchResult.importedCount} {lang === "zh" ? "个候选" : "candidate"}
             </span>
           </div>
         ) : null}
@@ -3377,7 +3525,7 @@ export function TeamsRoute({
           <div className={styles.messageResult}>
             <strong>{lang === "zh" ? "已回写" : "Written"}</strong>
             <span>
-              {selectedTeamRecordSourceCollectionOutputResult.output.createdRecords.length} DataRecord / {selectedTeamRecordSourceCollectionOutputResult.imported.length} candidate
+              {selectedTeamRecordSourceCollectionOutputResult.output.createdRecords.length} {lang === "zh" ? "条资料记录" : "DataRecord"} / {selectedTeamRecordSourceCollectionOutputResult.imported.length} {lang === "zh" ? "个候选" : "candidate"}
             </span>
           </div>
         ) : null}
@@ -3857,7 +4005,6 @@ export function TeamsRoute({
     () => teamWorkflowCandidates.filter((candidate) => candidate.candidateType === "source_manifest"),
     [teamWorkflowCandidates],
   );
-  const sourceCollectionRecordCount = sourceCollectionRunStatus?.summary.recordCount ?? 0;
   const sourceCollectionAssignmentCount = sourceCollectionRunStatus?.summary.assignmentCount ?? sourceCollectionAssignments.length;
   const sourceCollectionQueryCount =
     sourceCollectionSearchPlanRef?.queryCount
@@ -3879,13 +4026,19 @@ export function TeamsRoute({
       ? (lang === "zh" ? "继续执行下一批搜索，把来源元数据写入候选资料仓库。" : "Run the next search batch and write source metadata into the candidate store.")
       : sourceManifestCandidates.length > sourceCollectionApprovedCount
         ? (lang === "zh" ? "进入资料筛选，决定哪些候选能支持后续科研提炼。" : "Move to source screening and decide which candidates can support research extraction.")
-        : (lang === "zh" ? "当前轮可沉淀到后续知识治理或开启新一轮补充搜集。" : "This round can move into governance or start another collection round.");
-  const sourceCollectionPrimaryActionTitle = selectedSourceCollectionRun
-    ? (lang === "zh" ? "继续搜集" : "Continue collection")
-    : (lang === "zh" ? "启动本轮资料搜集" : "Start this collection round");
-  const sourceCollectionPrimaryActionBody = selectedSourceCollectionRun
-    ? sourceCollectionNextActionHint
-    : (lang === "zh" ? "填好主题和目标后，系统会生成 query、分配团队功能 Agent，并建立回写契约。" : "After topic and goal are set, the system creates queries, assigns functional Agents, and stores the writeback contract.");
+      : (lang === "zh" ? "当前轮可沉淀到后续知识治理或开启新一轮补充搜集。" : "This round can move into governance or start another collection round.");
+  const sourceCollectionPrimaryActionTitle = !selectedSourceCollectionRun
+    ? (lang === "zh" ? "开始知识搜集" : "Start knowledge collection")
+    : selectedTeamExecuteSourceCollectionSearchPending
+      ? (lang === "zh" ? "正在搜索" : "Searching")
+      : sourceCollectionOpenAssignmentCount > 0
+        ? (lang === "zh" ? "执行下一批搜索" : "Run next search batch")
+        : sourceManifestCandidates.length > sourceCollectionApprovedCount
+          ? (lang === "zh" ? "进入资料筛选" : "Open source screening")
+          : (lang === "zh" ? "查看搜集结果" : "Review collection results");
+  const sourceCollectionPrimaryActionBody = !selectedSourceCollectionRun
+    ? (lang === "zh" ? "一键生成搜索计划、团队分工和候选回写契约；高级配置可在下方展开修改。" : "Create the search plan, team assignments, and writeback contract.")
+    : sourceCollectionNextActionHint;
   const sourceCollectionTraceMessages = useMemo<SourceCollectionTraceMessage[]>(() => {
     const messages: SourceCollectionTraceMessage[] = [];
     messages.push({
@@ -3895,11 +4048,16 @@ export function TeamsRoute({
         ? (lang === "zh" ? "已建立本轮资料搜集批次" : "Created the source collection run")
         : (lang === "zh" ? "等待启动资料搜集批次" : "Waiting for a source collection run"),
       body: selectedSourceCollectionRun
-        ? `${lang === "zh" ? "目标" : "Goal"}: ${String(selectedSourceCollectionRun.scope?.goal || sourceCollectionDraft.goal || "-")}`
+        ? `${lang === "zh" ? "目标" : "Goal"}：${translateResearchPhrase(String(selectedSourceCollectionRun.scope?.goal || sourceCollectionDraft.goal || "-"), lang)}`
         : (lang === "zh" ? "点击启动后会生成查询计划、团队 Agent 分工和回写契约。" : "Starting creates a query plan, team-agent assignments, and a writeback contract."),
-      status: selectedSourceCollectionRun?.status || (lang === "zh" ? "未启动" : "not started"),
+      status: selectedSourceCollectionRun?.status || "pending",
       tone: selectedSourceCollectionRun ? "plan" : "blocked",
-      refs: selectedSourceCollectionRun ? [selectedSourceCollectionRun.runId, String(selectedSourceCollectionRun.scope?.topic || sourceCollectionDraft.topic)] : [],
+      refs: selectedSourceCollectionRun
+        ? [
+            `${lang === "zh" ? "批次" : "run"}: ${sourceCollectionRunLabel(selectedSourceCollectionRun.runId)}`,
+            `${lang === "zh" ? "主题" : "topic"}: ${translateResearchPhrase(String(selectedSourceCollectionRun.scope?.topic || sourceCollectionDraft.topic), lang)}`,
+          ]
+        : [],
       storageRefs: selectedSourceCollectionStorageArtifacts
         ? [selectedSourceCollectionStorageArtifacts.runDirectory, selectedSourceCollectionStorageArtifacts.searchPlanPath]
         : [],
@@ -3922,17 +4080,24 @@ export function TeamsRoute({
         agentRole: "Research Coordination Agent",
         title: lang === "zh" ? "KV 缓存门禁已写入本轮搜集" : "KV cache gate attached to this run",
         body: lang === "zh"
-          ? `本轮使用 ${sourceCollectionPromptCachePolicy?.modelName || sourceCollectionPromptCachePolicyRef?.modelId || SOURCE_COLLECTION_PROMPT_CACHE_POLICY.modelId}，稳定前缀只放团队规则、schema 和回写边界；每次搜索只传当前 query、结果引用和存储位置，避免反复重放网页全文。`
+          ? `本轮使用 ${sourceCollectionPromptCachePolicy?.modelName || sourceCollectionPromptCachePolicyRef?.modelId || SOURCE_COLLECTION_PROMPT_CACHE_POLICY.modelId}，稳定前缀只放团队规则、结构契约和回写边界；每次搜索只传当前搜索词、结果引用和存储位置，避免反复重放网页全文。`
           : `This run uses ${sourceCollectionPromptCachePolicy?.modelName || sourceCollectionPromptCachePolicyRef?.modelId || SOURCE_COLLECTION_PROMPT_CACHE_POLICY.modelId}. The stable prefix keeps team rules, schemas, and writeback boundaries; each search sends only the current query, result refs, and storage location.`,
         status: sourceCollectionPromptCacheStatusLabel(promptCacheGateStatus, lang),
         tone: promptCacheGateStatus === "blocked" ? "blocked" : "cache",
-        refs: [
-          `requirement: ${sourceCollectionPromptCacheRequirement}`,
-          promptCacheMode ? `mode: ${promptCacheMode}` : "",
-          "stable prefix: team rules + schema + boundary",
-          "dynamic delta: query/result refs only",
-        ].filter(Boolean),
-        storageRefs: promptCacheRolePartitions.slice(0, 4).map((item) => `${item.agentRole}: ${item.promptCachePartition}`),
+        refs: (lang === "zh"
+          ? [
+              `缓存要求：${sourceCollectionPromptCacheRequirement}`,
+              promptCacheMode ? `缓存模式：${promptCacheMode}` : "",
+              "稳定前缀：团队规则 / 结构契约 / 回写边界",
+              "动态增量：当前搜索词 / 结果引用",
+            ]
+          : [
+              `requirement: ${sourceCollectionPromptCacheRequirement}`,
+              promptCacheMode ? `mode: ${promptCacheMode}` : "",
+              "stable prefix: team rules + schema + boundary",
+              "dynamic delta: query/result refs only",
+            ]).filter(Boolean),
+        storageRefs: promptCacheRolePartitions.slice(0, 4).map((item) => `${sourceCollectionAgentRoleLabel(item.agentRole, lang)}：${lang === "zh" ? "缓存分区" : "cache"} ${item.promptCachePartition}`),
       });
     }
     if (plannedQueries.length || sourceCollectionSearchPlanRef || selectedTeamStartSourceCollectionResult?.searchPlan) {
@@ -3948,11 +4113,13 @@ export function TeamsRoute({
         agentRole: "Data Discovery Agent",
         title: lang === "zh" ? "已拆成可执行搜索问题" : "Split into executable search queries",
         body: lang === "zh"
-          ? `当前可见 ${plannedQueries.length || sourceCollectionSearchPlanRef?.queryCount || selectedTeamStartSourceCollectionResult?.searchPlan.queryCount || 0} 条 query，按资料类型和语言分配给功能 Agent；query 是动态增量，不会挤进稳定缓存前缀。`
+          ? `当前可见 ${plannedQueries.length || sourceCollectionSearchPlanRef?.queryCount || selectedTeamStartSourceCollectionResult?.searchPlan.queryCount || 0} 条搜索问题，按资料类型和语言分配给功能 Agent；搜索词是动态增量，不会挤进稳定缓存前缀。`
           : `${plannedQueries.length || sourceCollectionSearchPlanRef?.queryCount || selectedTeamStartSourceCollectionResult?.searchPlan.queryCount || 0} visible queries are assigned by source type and language; queries are dynamic deltas outside the stable cached prefix.`,
         status: "planned",
         tone: "search",
-        refs: plannedQueries.slice(0, 5).map((query) => `${query.query} · ${query.sourceType}/${query.language}`),
+        refs: plannedQueries.slice(0, 5).map((query) =>
+          `${translateResearchPhrase(query.query, lang)} · ${sourceCollectionSourceTypeLabel(query.sourceType, lang)} · ${sourceCollectionLanguageLabel(query.language, lang)}`
+        ),
         storageRefs: [
           selectedSourceCollectionStorageArtifacts?.searchPlanPath || "",
           ...plannedQueryCacheRefs.slice(0, 3).map((partition) => `KV ${partition}`),
@@ -3977,7 +4144,7 @@ export function TeamsRoute({
         agentRole: "Source Collection Agent",
         title: lang === "zh" ? "已执行一批搜索并写入候选" : "Ran one search batch and wrote candidates",
         body: lang === "zh"
-          ? `本批执行 ${selectedTeamExecuteSourceCollectionSearchResult.executedQueryCount} 条 query，写入 ${selectedTeamExecuteSourceCollectionSearchResult.recordCount} 条 DataRecord，导入 ${selectedTeamExecuteSourceCollectionSearchResult.importedCount} 个 source_manifest 候选${failedCount ? `，${failedCount} 条需要补救` : ""}。`
+          ? `本批执行 ${selectedTeamExecuteSourceCollectionSearchResult.executedQueryCount} 条搜索，写入 ${selectedTeamExecuteSourceCollectionSearchResult.recordCount} 条资料记录，导入 ${selectedTeamExecuteSourceCollectionSearchResult.importedCount} 个候选资料${failedCount ? `，${failedCount} 条需要补救` : ""}。`
           : `This batch executed ${selectedTeamExecuteSourceCollectionSearchResult.executedQueryCount} queries, wrote ${selectedTeamExecuteSourceCollectionSearchResult.recordCount} DataRecords, and imported ${selectedTeamExecuteSourceCollectionSearchResult.importedCount} source_manifest candidates${failedCount ? `; ${failedCount} need follow-up` : ""}.`,
         status: failedCount ? "needs_attention" : "completed",
         tone: failedCount ? "blocked" : "storage",
@@ -4001,11 +4168,11 @@ export function TeamsRoute({
         status: sourceCollectionOpenAssignmentCount ? "open" : "ready_for_screening",
         tone: sourceCollectionOpenAssignmentCount ? "acquire" : "quality",
         refs: [
-          ...visibleAssignments.map((assignment) => `${assignment.agentRole}: ${assignment.status}`),
-          ...assignedQueries.slice(0, 4).map((query) => query.query),
+          ...visibleAssignments.map((assignment) => `${sourceCollectionAgentRoleLabel(assignment.agentRole, lang)}：${sourceCollectionStatusLabel(assignment.status, lang)}`),
+          ...assignedQueries.slice(0, 4).map((query) => translateResearchPhrase(query.query, lang)),
         ],
         storageRefs: visibleAssignments
-          .map((assignment) => assignment.scope.promptCachePartition ? `${assignment.agentRole}: KV ${assignment.scope.promptCachePartition}` : assignment.assignmentId)
+          .map((assignment) => assignment.scope.promptCachePartition ? `${sourceCollectionAgentRoleLabel(assignment.agentRole, lang)}：KV ${assignment.scope.promptCachePartition}` : assignment.assignmentId)
           .filter(Boolean),
       });
     }
@@ -4015,13 +4182,13 @@ export function TeamsRoute({
       messages.push({
         id: `writeback-${outputRecord.outputId}`,
         agentRole: outputRecord.agentRole || "Source Intake Agent",
-        title: lang === "zh" ? "已把搜集结果写成 DataRecord" : "Wrote collected result as DataRecord",
+        title: lang === "zh" ? "已把搜集结果写成资料记录" : "Wrote collected result as DataRecord",
         body: lang === "zh"
-          ? `本次回写 ${records.length} 条 DataRecord，并导入 ${selectedTeamRecordSourceCollectionOutputResult.imported.length} 个 source_manifest 候选。`
+          ? `本次回写 ${records.length} 条资料记录，并导入 ${selectedTeamRecordSourceCollectionOutputResult.imported.length} 个候选资料。`
           : `This writeback created ${records.length} DataRecords and imported ${selectedTeamRecordSourceCollectionOutputResult.imported.length} source_manifest candidates.`,
         status: outputRecord.status,
         tone: "storage",
-        refs: records.slice(0, 4).map((record) => `${record.title || record.recordId} · ${record.sourceRef || record.rawLocation || record.sourceType}`),
+        refs: records.slice(0, 4).map((record) => `${record.title || record.recordId} · ${record.sourceRef || record.rawLocation || sourceCollectionSourceTypeLabel(record.sourceType, lang)}`),
         storageRefs: [
           outputRecord.outputId,
           ...(selectedSourceCollectionRun?.storage ? [selectedSourceCollectionRun.storage.recordsPath, selectedSourceCollectionRun.storage.collectionOutputsPath] : []),
@@ -4161,10 +4328,10 @@ export function TeamsRoute({
           <main className={styles.sourceCollectionPageBody}>
             <section className={styles.sourceCollectionCommandBar}>
               <div>
-                <strong>{selectedSourceCollectionRun?.title || sourceCollectionDraft.title}</strong>
+                <strong>{sourceCollectionRunTitleLabel(selectedSourceCollectionRun?.title || sourceCollectionDraft.title, lang)}</strong>
                 <span>
                   {selectedSourceCollectionRun
-                    ? `${sourceCollectionRunLabel(selectedSourceCollectionRun.runId)} · ${sourceCollectionRunStatus?.runStatus || selectedSourceCollectionRun.status}`
+                    ? `${sourceCollectionRunLabel(selectedSourceCollectionRun.runId)} · ${sourceCollectionStatusLabel(sourceCollectionRunStatus?.runStatus || selectedSourceCollectionRun.status, lang)}`
                     : (lang === "zh" ? "还没有启动本轮资料搜集。" : "No source collection run has started yet.")}
                 </span>
                 <p className={styles.sourceCollectionCommandInsight}>{sourceCollectionNextActionHint}</p>
@@ -4173,8 +4340,8 @@ export function TeamsRoute({
                 <span>{lang === "zh" ? "当前" : "stage"} <strong>{sourceCollectionStageFocusLabel}</strong></span>
                 <span>{lang === "zh" ? "待处理" : "open"} <strong>{sourceCollectionOpenAssignmentCount}</strong></span>
                 <span>{lang === "zh" ? "候选" : "candidates"} <strong>{sourceManifestCandidates.length}</strong></span>
-                <span>{lang === "zh" ? "查询" : "queries"} <strong>{sourceCollectionQueryCount}</strong></span>
-                <span>{lang === "zh" ? "缓存" : "cache"} <strong>{sourceCollectionPromptCacheStatusLabel(sourceCollectionPromptCacheStatus, lang)}</strong></span>
+                <span>{lang === "zh" ? "搜索问题" : "queries"} <strong>{sourceCollectionQueryCount}</strong></span>
+                <span>{lang === "zh" ? "缓存门禁" : "cache"} <strong>{sourceCollectionPromptCacheStatusLabel(sourceCollectionPromptCacheStatus, lang)}</strong></span>
               </div>
             </section>
             {renderSourceCollectionRunNotice()}

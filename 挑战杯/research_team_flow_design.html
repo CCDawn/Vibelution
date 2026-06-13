@@ -39,13 +39,13 @@
         <aside class="dashboard-panel">
           <h2>审核摘要</h2>
           <div class="kpi-grid">
-            <div class="kpi"><b>当前阶段</b><strong>M6.23</strong><span>控制台知识搜集卡已改为状态驱动，可执行下一批搜索或开启新一轮搜集。</span></div>
+            <div class="kpi"><b>当前阶段</b><strong>M6.24</strong><span>知识搜集工作台已加入中文展示映射和主操作控制台，内部字段默认降级到详情。</span></div>
             <div class="kpi"><b>流程节点</b><strong>13</strong><span>1-9 为知识入库主线，10-13 保留占位与维护节点。</span></div>
             <div class="kpi"><b>候选资料</b><strong>10</strong><span>第一轮 source_manifest 已进入 candidate-only 工作区。</span></div>
             <div class="kpi"><b>正式写入</b><strong>0</strong><span>未写正式 Team Knowledge、RAG 或 official graph。</span></div>
           </div>
           <div class="focus-list">
-            <div class="focus-item"><b>优先看</b><span>知识搜集卡是否能一眼判断是否进行中、下一步是什么，以及如何重新搜集。</span></div>
+            <div class="focus-item"><b>优先看</b><span>知识搜集页是否能一眼判断是否进行中、下一步按钮是什么、结果存在哪里，以及详情里能否追溯原始证据。</span></div>
             <div class="focus-item"><b>不能做</b><span>当前执行器只取元数据引用，不抓全文、不审批入库、不把候选图谱当作正式事实。</span></div>
             <div class="focus-item"><b>下一步</b><span>扩展全文下载/网页抽取、批量去重、质量评分和 cache hit/miss 运行证据。</span></div>
           </div>
@@ -659,8 +659,8 @@
         <div class="agent-row">
         <b>01</b>
         <strong>Source Intake Agent</strong>
-        <span>可复用通用 data-processing assignment / source-extraction / source-quality 后端已接入；Teams 资料搜集执行台、候选资料筛选台、科研总览控制台、KV 缓存对话轨迹、启动复用反馈、metadata-only 搜索执行闭环和高价值信息层已接入</span>
-        <span>ResearchStageRound 建立 / 科研控制台一键进入知识搜集 / 总览页只显示三阶段主操作 / 知识搜集状态驱动按钮 / 新一轮搜集入口 / active 知识搜集轮次复用反馈 / 自动启动团队协调 round / DataProcessingRun 建立 / DataSearchPlan/querySeeds 搜索计划 / KV/prompt cache 启动门禁 / 稳定前缀/动态增量契约 / CollectionAssignment 资料搜集任务 / assignedQueries 角色分配 / promptCachePartition 角色分区 / Teams 启动搜集批次 / Teams 查看 run/assignment/query/KV 状态 / Teams 高价值摘要层 / Teams 执行下一批搜索 / Crossref 元数据搜索执行器 / 搜索执行事件进入搜集对话流 / DataRecord 通用记录 / DataRecord 自动导入 source_manifest / metadata-only 下载边界 / 手工 CollectionOutput 回写 / 本地资料登记 / source_manifest 写入 / 文件路径/页码/来源可信度记录 / 本地 PDF sha256/pageAnchors/excerpt 抽取 / sourceQualityAssessment 筛选 / 可选 research_knowledge_query_tool 查重</span>
+        <span>可复用通用 data-processing assignment / source-extraction / source-quality 后端已接入；Teams 资料搜集执行台、候选资料筛选台、科研总览控制台、KV 缓存对话轨迹、启动复用反馈、metadata-only 搜索执行闭环、高价值信息层和中文控制台已接入</span>
+        <span>ResearchStageRound 建立 / 科研控制台一键进入知识搜集 / 总览页只显示三阶段主操作 / 知识搜集状态驱动按钮 / 知识搜集中文展示映射 / 右侧主操作唯一化 / 新一轮搜集入口 / active 知识搜集轮次复用反馈 / 自动启动团队协调 round / DataProcessingRun 建立 / DataSearchPlan/querySeeds 搜索计划 / KV/prompt cache 启动门禁 / 稳定前缀/动态增量契约 / CollectionAssignment 资料搜集任务 / assignedQueries 角色分配 / promptCachePartition 角色分区 / Teams 启动搜集批次 / Teams 查看 run/assignment/query/KV 状态 / Teams 高价值摘要层 / Teams 执行下一批搜索 / Crossref 元数据搜索执行器 / 搜索执行事件进入搜集对话流 / DataRecord 通用记录 / DataRecord 自动导入 source_manifest / metadata-only 下载边界 / 手工 CollectionOutput 回写 / 本地资料登记 / source_manifest 写入 / 文件路径/页码/来源可信度记录 / 本地 PDF sha256/pageAnchors/excerpt 抽取 / sourceQualityAssessment 筛选 / 可选 research_knowledge_query_tool 查重</span>
         <span>确认资料允许分析、来源可信度和是否纳入本轮。</span>
       </div>
 <div class="agent-row">
@@ -2018,6 +2018,12 @@
               <strong>控制台状态驱动操作卡</strong>
               <span>知识搜集卡接入 source collection run 状态，显示未开始、搜集中、搜索中、待筛选、可进入实验、等待回写，并展示当前批次、待处理、候选和查询数。</span>
               <span>主按钮不再叫笼统的继续搜集，而是按状态变为开始知识搜集、执行下一批搜索、进入资料筛选或进入搜集工作台；旁边保留新一轮搜集和阶段详情，方便在总览操控流程、在详情查看内容。</span>
+            </div>
+<div class="blueprint-row">
+              <b>M6.24</b>
+              <strong>知识搜集中文控制台</strong>
+              <span>知识搜集阶段页新增中文展示映射层，把 processing/open/planned、Agent 英文角色、DataRecord/source_manifest/Query seeds 等内部字段转成中文业务表述。</span>
+              <span>右侧控制台默认只保留一个主操作、本轮配置折叠、最近批次和一个批次目录按钮；更多证据文件、查询分工和手工回写进入详情，减少重复统计和技术噪声。</span>
             </div>
       </div>
       <div class="tag-row">
