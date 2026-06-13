@@ -3217,6 +3217,39 @@ def test_session_detail_uses_targeted_conversation_read(tmp_path, monkeypatch):
     assert payload["messages"][0]["content"] == "目标消息"
 
 
+def test_session_detail_does_not_scan_full_conversation_list_for_known_id(tmp_path, monkeypatch):
+    _seed_chat_state(
+        tmp_path,
+        conversations=[
+            {
+                "conversation_id": "session-older",
+                "title": "旧会话",
+                "updated_at": "2026-05-18T10:00:00",
+                "messages": [{"role": "user", "content": "旧消息", "timestamp": "2026-05-18T10:00:00"}],
+            },
+            {
+                "conversation_id": "session-live",
+                "title": "真实会话",
+                "updated_at": "2026-05-18T12:00:00",
+                "messages": [{"role": "user", "content": "目标消息", "timestamp": "2026-05-18T12:00:00"}],
+            },
+        ],
+    )
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+
+    def fail_list_conversations(*args, **kwargs):
+        raise AssertionError("session detail should not load full conversations list")
+
+    monkeypatch.setattr(session_service, "_load_conversations", fail_list_conversations)
+
+    response = client.get("/api/sessions/session-live")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["id"] == "session-live"
+    assert payload["messages"][0]["content"] == "目标消息"
+
+
 def test_create_child_session_api_persists_root_child_relationship(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
