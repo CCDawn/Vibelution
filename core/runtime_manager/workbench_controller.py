@@ -542,13 +542,17 @@ def _hidden_startup_info() -> subprocess.STARTUPINFO | None:
     return startupinfo
 
 
-def _launcher_action_detaches_console() -> bool:
-    return os.name == "nt"
+def _launcher_action_detached_process() -> bool:
+    # Launcher actions must remain waitable so Runtime Manager sees the real
+    # Start-ManagedSession result instead of a short-lived adapter success.
+    return False
 
 
 def _launcher_action_launch_api() -> str:
-    if _launcher_action_detaches_console():
+    if _launcher_action_detached_process():
         return "detached_waitable_popen"
+    if os.name == "nt":
+        return "hidden_waitable_popen"
     return "waitable_popen"
 
 
@@ -607,7 +611,7 @@ def _run_waitable_launcher_process(
         stdin=subprocess.DEVNULL,
         stdout=stdout_handle,
         stderr=stderr_handle,
-        creationflags=_creation_flags(detach=_launcher_action_detaches_console()),
+        creationflags=_creation_flags(detach=_launcher_action_detached_process()),
         startupinfo=_hidden_startup_info(),
         env=env,
     )
@@ -737,7 +741,7 @@ def _record_launcher_action_event(
         "protectedProcessIdsSet": bool(str(env.get("VIBELUTION_PROTECTED_PROCESS_IDS") or "").strip()),
         "portSet": bool(str(env.get("VIBELUTION_PORT") or "").strip()),
         "consoleWindowSuppressed": os.name == "nt",
-        "creationFlagNames": list(_creation_flag_names(detach=_launcher_action_detaches_console())),
+        "creationFlagNames": list(_creation_flag_names(detach=_launcher_action_detached_process())),
         "launcherLaunchApi": _launcher_action_launch_api(),
         "hiddenStartupInfo": os.name == "nt" and hasattr(subprocess, "STARTUPINFO"),
     }

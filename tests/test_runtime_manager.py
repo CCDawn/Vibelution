@@ -4026,7 +4026,7 @@ def test_run_launcher_action_passes_configured_port_to_launcher_env(monkeypatch)
     assert completed["durationMs"] >= 0
 
 
-def test_run_launcher_action_hides_powershell_adapter_with_detached_waitable_process(monkeypatch):
+def test_run_launcher_action_hides_powershell_adapter_without_detached_process(monkeypatch):
     captured = {}
 
     class DummyStartupInfo:
@@ -4057,7 +4057,7 @@ def test_run_launcher_action_hides_powershell_adapter_with_detached_waitable_pro
 
     assert result.returncode == 0
     assert captured["wait_called"] is True
-    assert captured["kwargs"]["creationflags"] & 0x00000008
+    assert not captured["kwargs"]["creationflags"] & 0x00000008
     assert captured["kwargs"]["creationflags"] & 0x00000200
     assert captured["kwargs"]["creationflags"] & 0x08000000
     startupinfo = captured["kwargs"]["startupinfo"]
@@ -4066,7 +4066,7 @@ def test_run_launcher_action_hides_powershell_adapter_with_detached_waitable_pro
     assert startupinfo.wShowWindow == 0
 
 
-def test_run_launcher_action_events_report_detached_waitable_launch(monkeypatch):
+def test_run_launcher_action_events_report_hidden_waitable_launch(monkeypatch):
     events: list[tuple[str, dict]] = []
 
     class FakeProcess:
@@ -4093,10 +4093,10 @@ def test_run_launcher_action_events_report_detached_waitable_launch(monkeypatch)
     assert result.returncode == 0
     requested = _event_payload(events, "launcher.action.requested")
     completed = _event_payload(events, "launcher.action.completed")
-    assert requested["launcherLaunchApi"] == "detached_waitable_popen"
-    assert "DETACHED_PROCESS" in requested["creationFlagNames"]
-    assert completed["launcherLaunchApi"] == "detached_waitable_popen"
-    assert "DETACHED_PROCESS" in completed["creationFlagNames"]
+    assert requested["launcherLaunchApi"] == "hidden_waitable_popen"
+    assert "DETACHED_PROCESS" not in requested["creationFlagNames"]
+    assert completed["launcherLaunchApi"] == "hidden_waitable_popen"
+    assert "DETACHED_PROCESS" not in completed["creationFlagNames"]
 
 
 def test_run_launcher_action_cancelable_path_remains_waitable_on_windows(monkeypatch):
@@ -4142,7 +4142,7 @@ def test_run_launcher_action_cancelable_path_remains_waitable_on_windows(monkeyp
 
     assert result.returncode == 0
     assert result.stdout == "ready\n"
-    assert captured["kwargs"]["creationflags"] & 0x00000008
+    assert not captured["kwargs"]["creationflags"] & 0x00000008
     assert captured["kwargs"]["creationflags"] & 0x00000200
     assert captured["kwargs"]["creationflags"] & 0x08000000
     startupinfo = captured["kwargs"]["startupinfo"]
