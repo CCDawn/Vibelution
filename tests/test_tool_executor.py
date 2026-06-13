@@ -138,20 +138,30 @@ class TestToolExecutorInit:
         assert "cli_agent_run_tool" not in session_visibility.hidden_restricted_tools
 
     def test_memory_tools_are_llm_facing_but_policy_gated_by_default(self):
-        from core.web.services.agent_directory_service import compute_effective_tool_visibility, default_tool_policy
+        from core.web.services.agent_directory_service import (
+            compute_effective_tool_visibility,
+            default_session_agent_tool_policy,
+            default_tool_policy,
+        )
 
         tools = create_llm_facing_tools()
         llm_names = {tool.name for tool in tools}
+        memory_tool_names = {"record_learning_tool", "search_error_archive_tool", "search_memory_tool"}
 
-        assert "record_learning_tool" in llm_names
-        assert "search_memory_tool" in llm_names
+        assert memory_tool_names.issubset(llm_names)
 
         visibility = compute_effective_tool_visibility(tools, policy=default_tool_policy())
 
-        assert "record_learning_tool" not in visibility.visible_tools
-        assert "search_memory_tool" not in visibility.visible_tools
-        assert "record_learning_tool" in visibility.hidden_restricted_tools
-        assert "search_memory_tool" in visibility.hidden_restricted_tools
+        assert memory_tool_names.isdisjoint(visibility.visible_tools)
+        assert memory_tool_names.issubset(visibility.hidden_restricted_tools)
+
+        session_visibility = compute_effective_tool_visibility(
+            tools,
+            policy=default_session_agent_tool_policy("tool-agent-session"),
+        )
+
+        assert memory_tool_names.isdisjoint(session_visibility.visible_tools)
+        assert memory_tool_names.issubset(session_visibility.hidden_restricted_tools)
 
     def test_tools_package_does_not_reexport_compat_aliases(self):
         """tools 包入口不再把底层 helper 伪装成 agent 工具别名。"""

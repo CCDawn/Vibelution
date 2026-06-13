@@ -2014,7 +2014,7 @@ function toolBundleMeta(bundle: ToolBundle, lang: "zh" | "en") {
 
 function defaultCreateToolBundleIds(workSession: boolean, bundles: ToolBundle[]) {
   const available = new Set(bundles.map((bundle) => bundle.bundleId));
-  const preferred = workSession ? ["core", "coding", "memory_context"] : ["core", "research", "collaboration"];
+  const preferred = workSession ? ["core", "coding"] : ["core", "research", "collaboration"];
   const selected = preferred.filter((bundleId) => available.has(bundleId));
   if (selected.length) {
     return selected;

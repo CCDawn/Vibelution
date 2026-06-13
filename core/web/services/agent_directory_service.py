@@ -52,7 +52,7 @@ DEFAULT_SESSION_AGENT_ALLOWED_TOOLS = (
     "web_search_tool",
     "web_fetch_tool",
     "image2_generate_tool",
-    # Conversation diagnostics and memory are core Agent capabilities.
+    # Conversation diagnostics and bounded context are core Agent capabilities.
     "conversation_log_inspect_tool",
     "create_child_session_tool",
     "list_child_sessions_tool",
@@ -60,9 +60,6 @@ DEFAULT_SESSION_AGENT_ALLOWED_TOOLS = (
     "agent_message_tool",
     "get_core_context_tool",
     "get_current_goal_tool",
-    "search_memory_tool",
-    "search_error_archive_tool",
-    "record_learning_tool",
     "compress_context_tool",
     # Lightweight state and repository evidence.
     "task_list_tool",
@@ -78,7 +75,6 @@ DEFAULT_SESSION_AGENT_PREFERRED_TOOLS = (
     "session_reference_query_tool",
     "conversation_log_inspect_tool",
     "get_core_context_tool",
-    "search_memory_tool",
 )
 AGENT_LLM_BINDING_SLOTS = AGENT_LLM_SLOTS
 LEGACY_AGENT_MODEL_ID_ALIASES = {
