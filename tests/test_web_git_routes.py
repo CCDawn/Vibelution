@@ -235,9 +235,10 @@ def test_git_commit_message_endpoint_generates_ai_draft(monkeypatch):
             raise AssertionError(args)
 
     class FakeLlmClient:
-        def invoke(self, messages, metadata=None):
+        def invoke(self, messages, tools=None, metadata=None):
             assert metadata["selected_paths"] == ["web/src/routes/GitRoute.tsx"]
             assert "commit ui" in messages[-1]["content"]
+            assert tools is None
             return SimpleNamespace(content="feat: add git commit controls")
 
     monkeypatch.setattr(git_status_service, "get_git_memory_service", lambda: FakeGitStatusService())

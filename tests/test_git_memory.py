@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 from core.infrastructure.agent_session import get_session_state, reset_session_state
 from core.infrastructure.event_bus import EventNames
-from core.infrastructure import git_memory
+from core.infrastructure import git_memory, git_process
 from core.infrastructure.git_memory import GitMemoryService, WorkingTreeFile, WorkingTreeSnapshot
 from tools.git_tools import (
     get_git_status_summary_tool,
@@ -46,20 +46,34 @@ def test_run_git_hides_console_windows_on_windows(monkeypatch, tmp_path):
     import subprocess
 
     calls = []
+    install_root = tmp_path / "Git"
+    cmd_git = install_root / "cmd" / "git.exe"
+    direct_git = install_root / "mingw64" / "bin" / "git.exe"
+    cmd_git.parent.mkdir(parents=True)
+    direct_git.parent.mkdir(parents=True)
+    cmd_git.write_text("", encoding="utf-8")
+    direct_git.write_text("", encoding="utf-8")
+
     service = GitMemoryService.__new__(GitMemoryService)
     service._project_root = tmp_path
 
-    monkeypatch.setattr(git_memory.subprocess, "CREATE_NO_WINDOW", 0x08000000, raising=False)
+    monkeypatch.setattr(git_process.os, "name", "nt", raising=False)
+    monkeypatch.setattr(git_process.shutil, "which", lambda name: str(cmd_git) if name == "git" else None)
+    monkeypatch.setattr(git_process.subprocess, "CREATE_NO_WINDOW", 0x08000000, raising=False)
+    git_process.resolve_git_executable.cache_clear()
 
     def fake_run(args, **kwargs):
         calls.append((args, kwargs))
         return subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr="")
 
-    monkeypatch.setattr(git_memory.subprocess, "run", fake_run)
+    monkeypatch.setattr(git_process.subprocess, "run", fake_run)
 
-    service._run_git(["status", "--porcelain=1"])
+    try:
+        service._run_git(["status", "--porcelain=1"])
+    finally:
+        git_process.resolve_git_executable.cache_clear()
 
-    assert calls[0][0] == ["git", "status", "--porcelain=1"]
+    assert calls[0][0] == [str(direct_git), "status", "--porcelain=1"]
     assert calls[0][1]["creationflags"] & 0x08000000
 
 

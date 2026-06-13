@@ -27,6 +27,7 @@ from datetime import datetime
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
+from core.infrastructure import git_process
 from core.orchestration.turn_runtime import (
     AgentTurnRuntimeRequest,
     prepare_agent_turn_runtime,
@@ -345,15 +346,14 @@ def supervised_agent_binding_env(agent_binding: Optional[Dict[str, Any]], *, run
 
 
 def run_git(repo_root: Path, *args: str) -> str:
-    proc = subprocess.run(
-        ["git", *args],
+    proc = git_process.run_git(
+        args,
         cwd=str(repo_root),
         capture_output=True,
         text=True,
         encoding="utf-8",
         errors="replace",
         check=False,
-        **_subprocess_no_window_kwargs(),
     )
     if proc.returncode != 0:
         raise RuntimeError(
@@ -364,13 +364,12 @@ def run_git(repo_root: Path, *args: str) -> str:
 
 
 def run_git_bytes(repo_root: Path, *args: str) -> bytes:
-    proc = subprocess.run(
-        ["git", *args],
+    proc = git_process.run_git(
+        args,
         cwd=str(repo_root),
         capture_output=True,
         text=False,
         check=False,
-        **_subprocess_no_window_kwargs(),
     )
     if proc.returncode != 0:
         stderr = proc.stderr.decode("utf-8", errors="replace").strip()
@@ -792,15 +791,14 @@ def create_worktree(repo_root: Path, snapshot: SnapshotInfo, harness_id: str) ->
 
 
 def remove_worktree(repo_root: Path, worktree_path: Path) -> None:
-    subprocess.run(
-        ["git", "worktree", "remove", "--force", str(worktree_path)],
+    git_process.run_git(
+        ["worktree", "remove", "--force", str(worktree_path)],
         cwd=str(repo_root),
         capture_output=True,
         text=True,
         encoding="utf-8",
         errors="replace",
         check=False,
-        **_subprocess_no_window_kwargs(),
     )
     shutil.rmtree(worktree_path, ignore_errors=True)
 
@@ -808,15 +806,14 @@ def remove_worktree(repo_root: Path, worktree_path: Path) -> None:
 def delete_checkpoint_ref(repo_root: Path, ref_name: Optional[str]) -> None:
     if not ref_name:
         return
-    subprocess.run(
-        ["git", "update-ref", "-d", ref_name],
+    git_process.run_git(
+        ["update-ref", "-d", ref_name],
         cwd=str(repo_root),
         capture_output=True,
         text=True,
         encoding="utf-8",
         errors="replace",
         check=False,
-        **_subprocess_no_window_kwargs(),
     )
 
 

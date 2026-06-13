@@ -1,0 +1,77 @@
+from pathlib import Path
+import subprocess
+
+from core.infrastructure import git_process
+
+
+def test_resolve_git_executable_prefers_direct_windows_git(monkeypatch, tmp_path):
+    install_root = tmp_path / "Git"
+    cmd_git = install_root / "cmd" / "git.exe"
+    direct_git = install_root / "mingw64" / "bin" / "git.exe"
+    cmd_git.parent.mkdir(parents=True)
+    direct_git.parent.mkdir(parents=True)
+    cmd_git.write_text("", encoding="utf-8")
+    direct_git.write_text("", encoding="utf-8")
+
+    monkeypatch.setattr(git_process.os, "name", "nt", raising=False)
+    monkeypatch.setattr(git_process.shutil, "which", lambda name: str(cmd_git) if name == "git" else None)
+    git_process.resolve_git_executable.cache_clear()
+
+    try:
+        assert Path(git_process.resolve_git_executable()) == direct_git
+    finally:
+        git_process.resolve_git_executable.cache_clear()
+
+
+def test_resolve_git_executable_falls_back_to_discovered_git(monkeypatch, tmp_path):
+    cmd_git = tmp_path / "Git" / "cmd" / "git.exe"
+    cmd_git.parent.mkdir(parents=True)
+    cmd_git.write_text("", encoding="utf-8")
+
+    monkeypatch.setattr(git_process.os, "name", "nt", raising=False)
+    monkeypatch.setattr(git_process.shutil, "which", lambda name: str(cmd_git) if name == "git" else None)
+    git_process.resolve_git_executable.cache_clear()
+
+    try:
+        assert Path(git_process.resolve_git_executable()) == cmd_git
+    finally:
+        git_process.resolve_git_executable.cache_clear()
+
+
+def test_no_console_subprocess_kwargs_hides_windows_process(monkeypatch):
+    class DummyStartupInfo:
+        def __init__(self):
+            self.dwFlags = 0
+            self.wShowWindow = -1
+
+    monkeypatch.setattr(git_process.os, "name", "nt", raising=False)
+    monkeypatch.setattr(git_process.subprocess, "CREATE_NO_WINDOW", 0x08000000, raising=False)
+    monkeypatch.setattr(git_process.subprocess, "STARTUPINFO", DummyStartupInfo, raising=False)
+    monkeypatch.setattr(git_process.subprocess, "STARTF_USESHOWWINDOW", 0x00000001, raising=False)
+    monkeypatch.setattr(git_process.subprocess, "SW_HIDE", 0, raising=False)
+
+    kwargs = git_process.no_console_subprocess_kwargs()
+
+    assert kwargs["creationflags"] & 0x08000000
+    assert kwargs["startupinfo"].dwFlags & 0x00000001
+    assert kwargs["startupinfo"].wShowWindow == 0
+
+
+def test_run_git_uses_resolved_executable_and_no_console(monkeypatch, tmp_path):
+    calls = []
+    resolved_git = str(tmp_path / "Git" / "mingw64" / "bin" / "git.exe")
+    monkeypatch.setattr(git_process, "resolve_git_executable", lambda: resolved_git)
+    monkeypatch.setattr(git_process.os, "name", "nt", raising=False)
+    monkeypatch.setattr(git_process.subprocess, "CREATE_NO_WINDOW", 0x08000000, raising=False)
+
+    def fake_run(args, **kwargs):
+        calls.append((args, kwargs))
+        return subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(git_process.subprocess, "run", fake_run)
+
+    git_process.run_git(["status", "--porcelain=1"], cwd=tmp_path, capture_output=True, text=True)
+
+    assert calls[0][0] == [resolved_git, "status", "--porcelain=1"]
+    assert calls[0][1]["cwd"] == str(tmp_path)
+    assert calls[0][1]["creationflags"] & 0x08000000

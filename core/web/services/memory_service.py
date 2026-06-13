@@ -6,7 +6,6 @@ import copy
 import json
 import re
 import sqlite3
-import subprocess
 import time
 import uuid
 from collections.abc import Callable
@@ -15,6 +14,7 @@ from pathlib import Path
 from threading import Lock
 from typing import Any
 
+from core.infrastructure import git_process
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 CONTENT_LIMIT = 8000
@@ -2428,25 +2428,22 @@ def _clear_git_snapshot_cache() -> None:
 
 
 def _load_git_snapshot(root: Path) -> dict[str, Any]:
-    no_window_kwargs = _subprocess_no_window_kwargs()
     try:
-        status = subprocess.run(
-            ["git", "status", "--porcelain=1"],
+        status = git_process.run_git(
+            ["status", "--porcelain=1"],
             cwd=str(root),
             capture_output=True,
             text=True,
             timeout=8,
             check=False,
-            **no_window_kwargs,
         )
-        head = subprocess.run(
-            ["git", "rev-parse", "--short=12", "HEAD"],
+        head = git_process.run_git(
+            ["rev-parse", "--short=12", "HEAD"],
             cwd=str(root),
             capture_output=True,
             text=True,
             timeout=8,
             check=False,
-            **no_window_kwargs,
         )
     except Exception as exc:
         return {"available": False, "summary": f"Git unavailable: {type(exc).__name__}: {exc}", "files": []}
@@ -2470,12 +2467,6 @@ def _load_git_snapshot(root: Path) -> dict[str, Any]:
         "truncated": len(files) > 50,
         "summary": "工作区干净" if not files else f"当前工作区有 {len(files)} 个变化文件",
     }
-
-
-def _subprocess_no_window_kwargs() -> dict[str, int]:
-    flags = int(getattr(subprocess, "CREATE_NO_WINDOW", 0))
-    return {"creationflags": flags} if flags else {}
-
 
 def _session_memory_summary(root: Path, session_root: Path) -> dict[str, Any]:
     sessions: list[dict[str, Any]] = []

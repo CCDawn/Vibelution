@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from core.infrastructure import git_process
 import scripts.evolution_harness as evolution_harness
 from scripts.evolution_harness import (
     build_post_restart_observation,
@@ -110,6 +111,7 @@ def test_build_agent_command_for_test_mode():
 
 def test_run_git_hides_console_windows_on_windows(monkeypatch, tmp_path: Path):
     calls = []
+    resolved_git = str(tmp_path / "Git" / "mingw64" / "bin" / "git.exe")
 
     class Result:
         returncode = 0
@@ -120,11 +122,12 @@ def test_run_git_hides_console_windows_on_windows(monkeypatch, tmp_path: Path):
         calls.append((cmd, kwargs))
         return Result()
 
-    monkeypatch.setattr(evolution_harness.subprocess, "CREATE_NO_WINDOW", 0x08000000, raising=False)
-    monkeypatch.setattr(evolution_harness.subprocess, "run", fake_run)
+    monkeypatch.setattr(git_process, "resolve_git_executable", lambda: resolved_git)
+    monkeypatch.setattr(git_process.subprocess, "CREATE_NO_WINDOW", 0x08000000, raising=False)
+    monkeypatch.setattr(git_process.subprocess, "run", fake_run)
 
     assert evolution_harness.run_git(tmp_path, "rev-parse", "HEAD") == "abc123"
-    assert calls[0][0] == ["git", "rev-parse", "HEAD"]
+    assert calls[0][0] == [resolved_git, "rev-parse", "HEAD"]
     assert calls[0][1]["creationflags"] & 0x08000000
 
 

@@ -13,6 +13,8 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from core.infrastructure import git_process
+
 from .constants import PROJECT_ROOT, RUNTIME_MANAGER_DIR, ensure_runtime_manager_dirs
 from .scene_logging import truncate_event_text
 
@@ -114,8 +116,8 @@ def _iter_backup_files() -> list[tuple[Path, str]]:
 
 def _run_git(args: list[str], *, timeout: float = 8.0) -> str:
     try:
-        result = subprocess.run(
-            ["git", *args],
+        result = git_process.run_git(
+            args,
             cwd=str(PROJECT_ROOT),
             text=True,
             encoding="utf-8",

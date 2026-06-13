@@ -1196,15 +1196,15 @@ def test_git_snapshot_reuses_recent_subprocess_result(tmp_path, monkeypatch):
 
     def fake_run(command, **kwargs):
         calls.append(tuple(command))
-        if command[:3] == ["git", "status", "--porcelain=1"]:
+        if command[:2] == ["status", "--porcelain=1"]:
             return FakeCompletedProcess(0, " M core/example.py\n")
-        if command[:3] == ["git", "rev-parse", "--short=12"]:
+        if command[:3] == ["rev-parse", "--short=12", "HEAD"]:
             return FakeCompletedProcess(0, "abc123def456\n")
         return FakeCompletedProcess(1, stderr="unexpected command")
 
     memory_service._clear_git_snapshot_cache()
     monkeypatch.setattr(memory_service.time, "monotonic", fake_monotonic)
-    monkeypatch.setattr(memory_service.subprocess, "run", fake_run)
+    monkeypatch.setattr(memory_service.git_process, "run_git", fake_run)
     monkeypatch.setattr(memory_service, "GIT_SNAPSHOT_CACHE_TTL_SECONDS", 3.0)
 
     first = memory_service._git_snapshot(tmp_path)
@@ -1214,8 +1214,8 @@ def test_git_snapshot_reuses_recent_subprocess_result(tmp_path, monkeypatch):
     assert first["head"] == "abc123def456"
     assert second["fileCount"] == 1
     assert calls == [
-        ("git", "status", "--porcelain=1"),
-        ("git", "rev-parse", "--short=12", "HEAD"),
+        ("status", "--porcelain=1"),
+        ("rev-parse", "--short=12", "HEAD"),
     ]
 
     now["value"] = 14.0
@@ -1223,10 +1223,10 @@ def test_git_snapshot_reuses_recent_subprocess_result(tmp_path, monkeypatch):
 
     assert third["fileCount"] == 1
     assert calls == [
-        ("git", "status", "--porcelain=1"),
-        ("git", "rev-parse", "--short=12", "HEAD"),
-        ("git", "status", "--porcelain=1"),
-        ("git", "rev-parse", "--short=12", "HEAD"),
+        ("status", "--porcelain=1"),
+        ("rev-parse", "--short=12", "HEAD"),
+        ("status", "--porcelain=1"),
+        ("rev-parse", "--short=12", "HEAD"),
     ]
     memory_service._clear_git_snapshot_cache()
 

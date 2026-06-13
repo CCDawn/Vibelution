@@ -24,6 +24,7 @@ from core.evaluation.self_evolution_experience_repository import (
 from core.evaluation.self_evolution_reflection import (
     record_bounded_self_evolution_reflection,
 )
+from core.infrastructure import git_process
 from core.infrastructure.agent_session import get_session_state
 from core.orchestration.context_engine import build_agent_context, record_agent_turn_result
 from core.orchestration.turn_runner import AgentSingleTurnRequest, run_agent_single_turn
@@ -3401,31 +3402,24 @@ def _path_exists_in_git_revision(path: str, revision: str) -> bool:
     normalized_revision = str(revision or "").strip()
     if not normalized_path or not normalized_revision:
         return False
-    completed = subprocess.run(
-        ["git", "-C", str(PROJECT_ROOT), "cat-file", "-e", f"{normalized_revision}:{normalized_path}"],
+    completed = git_process.run_git(
+        ["-C", str(PROJECT_ROOT), "cat-file", "-e", f"{normalized_revision}:{normalized_path}"],
         check=False,
         capture_output=True,
-        **_subprocess_no_window_kwargs(),
     )
     return completed.returncode == 0
 
 
 def _run_git(args: list[str], *, capture_text: bool = False) -> str:
-    completed = subprocess.run(
-        ["git", "-C", str(PROJECT_ROOT), *args],
+    completed = git_process.run_git(
+        ["-C", str(PROJECT_ROOT), *args],
         check=True,
         capture_output=True,
         text=capture_text,
-        **_subprocess_no_window_kwargs(),
     )
     if capture_text:
         return completed.stdout
     return ""
-
-
-def _subprocess_no_window_kwargs() -> dict[str, int]:
-    flags = int(getattr(subprocess, "CREATE_NO_WINDOW", 0))
-    return {"creationflags": flags} if flags else {}
 
 
 def _backup_file(abs_path: Path, backup_dir: Path) -> str:
