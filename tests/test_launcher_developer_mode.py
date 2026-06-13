@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import ast
+import inspect
 import subprocess
 
 from fastapi import FastAPI
@@ -9,6 +11,33 @@ from core.infrastructure import git_memory
 from core.launcher import developer_mode
 from core.launcher import service as launcher_service
 from core.web.routes import launcher as web_launcher_routes
+
+
+def test_developer_mode_source_forbids_visible_git_subprocess_regression():
+    source = inspect.getsource(developer_mode)
+    tree = ast.parse(source)
+    offenders: list[str] = []
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == "subprocess":
+                    offenders.append(f"import subprocess at line {node.lineno}")
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "subprocess"
+            and node.func.attr == "run"
+        ):
+            offenders.append(f"subprocess.run at line {node.lineno}")
+        if isinstance(node, (ast.List, ast.Tuple)) and node.elts:
+            first = node.elts[0]
+            if isinstance(first, ast.Constant) and first.value == "git":
+                offenders.append(f"literal git command sequence at line {node.lineno}")
+
+    assert offenders == []
+    assert any(isinstance(node, ast.Name) and node.id == "run_git" for node in ast.walk(tree))
 
 
 def test_developer_mode_defaults_off_and_launcher_persists_external_config(tmp_path, monkeypatch):

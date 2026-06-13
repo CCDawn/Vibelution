@@ -616,6 +616,23 @@ def test_desktop_entry_python_bridge_does_not_shell_out_to_powershell():
     assert '"core/launcher/developer_mode.py"' in source
 
 
+def test_desktop_entry_source_signature_changes_when_developer_mode_changes(monkeypatch, tmp_path):
+    bridge = _load_desktop_entry_py()
+    monkeypatch.setattr(bridge, "PROJECT_ROOT", tmp_path)
+
+    for relative_path in bridge.SOURCE_SIGNATURE_PATHS:
+        source_path = tmp_path / relative_path
+        source_path.parent.mkdir(parents=True, exist_ok=True)
+        source_path.write_text(f"initial {relative_path}\n", encoding="utf-8")
+
+    before = bridge._source_signature()
+    developer_mode_source = tmp_path / "core" / "launcher" / "developer_mode.py"
+    developer_mode_source.write_text("changed developer mode source\n", encoding="utf-8")
+    after = bridge._source_signature()
+
+    assert before != after
+
+
 def test_desktop_entry_python_bridge_starts_launcher_natively(monkeypatch, tmp_path):
     bridge = _load_desktop_entry_py()
     calls: list[tuple[str, object]] = []
