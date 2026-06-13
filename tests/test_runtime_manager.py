@@ -325,15 +325,18 @@ def test_launcher_action_passes_runtime_manager_process_protection(monkeypatch, 
         lambda event_type, payload, **kwargs: events.append((event_type, payload)) or "2026-05-19T09:00:00+00:00",
     )
 
-    def fake_run(*args, **kwargs):
-        calls.append({"args": args, "kwargs": kwargs})
-        stdout_handle = kwargs["stdout"]
-        stderr_handle = kwargs["stderr"]
-        stdout_handle.write(b"[Vibelution] ok\n")
-        stderr_handle.write(b"")
-        return subprocess.CompletedProcess(args=args[0], returncode=0)
+    class FakeProcess:
+        def __init__(self, *args, **kwargs):
+            calls.append({"args": args, "kwargs": kwargs})
+            stdout_handle = kwargs["stdout"]
+            stderr_handle = kwargs["stderr"]
+            stdout_handle.write(b"[Vibelution] ok\n")
+            stderr_handle.write(b"")
 
-    monkeypatch.setattr(workbench_controller.subprocess, "run", fake_run)
+        def wait(self, timeout=None):
+            return 0
+
+    monkeypatch.setattr(workbench_controller.subprocess, "Popen", FakeProcess)
 
     result = workbench_controller.run_launcher_action("internal-stop")
 
@@ -3858,14 +3861,17 @@ def test_run_launcher_action_passes_configured_port_to_launcher_env(monkeypatch)
     captured = {}
     events: list[tuple[str, dict]] = []
 
-    def fake_run(*args, **kwargs):
-        captured["kwargs"] = kwargs
-        kwargs["stdout"].write(b"ok\n")
-        kwargs["stdout"].flush()
-        return subprocess.CompletedProcess(args=args[0], returncode=0)
+    class FakeProcess:
+        def __init__(self, *args, **kwargs):
+            captured["kwargs"] = kwargs
+            kwargs["stdout"].write(b"ok\n")
+            kwargs["stdout"].flush()
+
+        def wait(self, timeout=None):
+            return 0
 
     monkeypatch.setattr(workbench_controller, "configured_backend_port", lambda: 9101)
-    monkeypatch.setattr(workbench_controller.subprocess, "run", fake_run)
+    monkeypatch.setattr(workbench_controller.subprocess, "Popen", FakeProcess)
     monkeypatch.setattr(
         workbench_controller,
         "append_runtime_manager_file_event",
@@ -3880,7 +3886,7 @@ def test_run_launcher_action_passes_configured_port_to_launcher_env(monkeypatch)
     assert completed["durationMs"] >= 0
 
 
-def test_run_launcher_action_hides_powershell_adapter_without_detached_process(monkeypatch):
+def test_run_launcher_action_hides_powershell_adapter_with_detached_waitable_process(monkeypatch):
     captured = {}
 
     class DummyStartupInfo:
@@ -3888,11 +3894,15 @@ def test_run_launcher_action_hides_powershell_adapter_without_detached_process(m
             self.dwFlags = 0
             self.wShowWindow = -1
 
-    def fake_run(*args, **kwargs):
-        captured["kwargs"] = kwargs
-        kwargs["stdout"].write(b"ok\n")
-        kwargs["stdout"].flush()
-        return subprocess.CompletedProcess(args=args[0], returncode=0)
+    class FakeProcess:
+        def __init__(self, *args, **kwargs):
+            captured["kwargs"] = kwargs
+            kwargs["stdout"].write(b"ok\n")
+            kwargs["stdout"].flush()
+
+        def wait(self, timeout=None):
+            captured["wait_called"] = True
+            return 0
 
     monkeypatch.setattr(workbench_controller.os, "name", "nt", raising=False)
     monkeypatch.setattr(workbench_controller.subprocess, "DETACHED_PROCESS", 0x00000008, raising=False)
@@ -3901,18 +3911,52 @@ def test_run_launcher_action_hides_powershell_adapter_without_detached_process(m
     monkeypatch.setattr(workbench_controller.subprocess, "STARTF_USESHOWWINDOW", 0x00000001, raising=False)
     monkeypatch.setattr(workbench_controller.subprocess, "SW_HIDE", 0, raising=False)
     monkeypatch.setattr(workbench_controller.subprocess, "STARTUPINFO", DummyStartupInfo, raising=False)
-    monkeypatch.setattr(workbench_controller.subprocess, "run", fake_run)
+    monkeypatch.setattr(workbench_controller.subprocess, "Popen", FakeProcess)
 
     result = workbench_controller.run_launcher_action("internal-start")
 
     assert result.returncode == 0
-    assert not (captured["kwargs"]["creationflags"] & 0x00000008)
+    assert captured["wait_called"] is True
+    assert captured["kwargs"]["creationflags"] & 0x00000008
     assert captured["kwargs"]["creationflags"] & 0x00000200
     assert captured["kwargs"]["creationflags"] & 0x08000000
     startupinfo = captured["kwargs"]["startupinfo"]
     assert isinstance(startupinfo, DummyStartupInfo)
     assert startupinfo.dwFlags & 0x00000001
     assert startupinfo.wShowWindow == 0
+
+
+def test_run_launcher_action_events_report_detached_waitable_launch(monkeypatch):
+    events: list[tuple[str, dict]] = []
+
+    class FakeProcess:
+        def __init__(self, *args, **kwargs):
+            kwargs["stdout"].write(b"ok\n")
+            kwargs["stdout"].flush()
+
+        def wait(self, timeout=None):
+            return 0
+
+    monkeypatch.setattr(workbench_controller.os, "name", "nt", raising=False)
+    monkeypatch.setattr(workbench_controller.subprocess, "DETACHED_PROCESS", 0x00000008, raising=False)
+    monkeypatch.setattr(workbench_controller.subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200, raising=False)
+    monkeypatch.setattr(workbench_controller.subprocess, "CREATE_NO_WINDOW", 0x08000000, raising=False)
+    monkeypatch.setattr(workbench_controller.subprocess, "Popen", FakeProcess)
+    monkeypatch.setattr(
+        workbench_controller,
+        "append_runtime_manager_file_event",
+        lambda event_type, payload, **_kwargs: events.append((event_type, payload)),
+    )
+
+    result = workbench_controller.run_launcher_action("internal-start")
+
+    assert result.returncode == 0
+    requested = _event_payload(events, "launcher.action.requested")
+    completed = _event_payload(events, "launcher.action.completed")
+    assert requested["launcherLaunchApi"] == "detached_waitable_popen"
+    assert "DETACHED_PROCESS" in requested["creationFlagNames"]
+    assert completed["launcherLaunchApi"] == "detached_waitable_popen"
+    assert "DETACHED_PROCESS" in completed["creationFlagNames"]
 
 
 def test_run_launcher_action_cancelable_path_remains_waitable_on_windows(monkeypatch):
@@ -3958,7 +4002,7 @@ def test_run_launcher_action_cancelable_path_remains_waitable_on_windows(monkeyp
 
     assert result.returncode == 0
     assert result.stdout == "ready\n"
-    assert not (captured["kwargs"]["creationflags"] & 0x00000008)
+    assert captured["kwargs"]["creationflags"] & 0x00000008
     assert captured["kwargs"]["creationflags"] & 0x00000200
     assert captured["kwargs"]["creationflags"] & 0x08000000
     startupinfo = captured["kwargs"]["startupinfo"]
@@ -4969,16 +5013,19 @@ def test_run_launcher_action_uses_devnull_stdio(monkeypatch):
     captured = {}
     events: list[tuple[str, dict]] = []
 
-    def fake_run(*args, **kwargs):
-        captured["args"] = args
-        captured["kwargs"] = kwargs
-        kwargs["stdout"].write(b"launcher stdout\n")
-        kwargs["stdout"].flush()
-        kwargs["stderr"].write(b"launcher stderr\n")
-        kwargs["stderr"].flush()
-        return subprocess.CompletedProcess(args=args[0], returncode=0)
+    class FakeProcess:
+        def __init__(self, *args, **kwargs):
+            captured["args"] = args
+            captured["kwargs"] = kwargs
+            kwargs["stdout"].write(b"launcher stdout\n")
+            kwargs["stdout"].flush()
+            kwargs["stderr"].write(b"launcher stderr\n")
+            kwargs["stderr"].flush()
 
-    monkeypatch.setattr(workbench_controller.subprocess, "run", fake_run)
+        def wait(self, timeout=None):
+            return 0
+
+    monkeypatch.setattr(workbench_controller.subprocess, "Popen", FakeProcess)
     monkeypatch.setattr(
         workbench_controller,
         "append_runtime_manager_file_event",

@@ -1217,17 +1217,19 @@ if ($null -eq $hiddenProcessAst) {
     throw "Invoke-HiddenProcessCapture was not found."
 }
 $hiddenProcessText = $hiddenProcessAst.Extent.Text
-if ($hiddenProcessText -notmatch 'CreateNoWindow\\s*=\\s*\\$true') {
-    throw "Invoke-HiddenProcessCapture does not force CreateNoWindow."
+if ($hiddenProcessText -notmatch "RunHiddenRedirected") {
+    throw "Invoke-HiddenProcessCapture does not use the Win32 no-window waitable helper."
 }
-if ($hiddenProcessText -notmatch 'UseShellExecute\\s*=\\s*\\$false') {
-    throw "Invoke-HiddenProcessCapture does not avoid shell execution."
+if ($hiddenProcessText -match "System.Diagnostics.Process" -or $hiddenProcessText -match "ProcessStartInfo") {
+    throw "Invoke-HiddenProcessCapture still uses the .NET process starter."
 }
-if ($hiddenProcessText -notmatch 'ProcessWindowStyle\\]::Hidden') {
-    throw "Invoke-HiddenProcessCapture does not set hidden window style."
+if ($hiddenProcessText -notmatch "ReadAllText") {
+    throw "Invoke-HiddenProcessCapture does not read redirected native output."
 }
-if ($hiddenProcessText -notmatch "RedirectStandardOutput" -or $hiddenProcessText -notmatch "RedirectStandardError") {
-    throw "Invoke-HiddenProcessCapture does not capture native output."
+foreach ($required in @("DETACHED_PROCESS", "CREATE_NO_WINDOW", "STARTF_USESTDHANDLES", "WaitForSingleObject", "GetExitCodeProcess")) {
+    if ($source -notmatch $required) {
+        throw "Launcher hidden process API is missing $required."
+    }
 }
 $nativeCommandText = $nativeCommandAst.Extent.Text
 if ($nativeCommandText -notmatch "Invoke-HiddenProcessCapture") {
@@ -2476,6 +2478,77 @@ if (-not $proc.HasExited) {{
 $stdout = Get-Content -Raw -LiteralPath {json.dumps(str(stdout_path))}
 if ($stdout -notmatch "args-ok:alpha\\|beta value") {{
     throw "Redirected Python arguments were not preserved: $stdout"
+}}
+Write-Output "ok"
+""",
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip().splitlines()[-1] == "ok"
+
+
+def test_launcher_hidden_process_capture_waits_and_preserves_exit_code(tmp_path):
+    python_exe = str(Path(sys.executable))
+    result = _run_launcher_ast_harness(
+        tmp_path,
+        f"""
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$LauncherPath
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$source = Get-Content -Raw -LiteralPath $LauncherPath
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors -and $parseErrors.Count -gt 0) {{
+    throw "Launcher script parse failed: $($parseErrors[0].Message)"
+}}
+
+foreach ($name in @(
+    "ConvertTo-ProcessArgument",
+    "ConvertTo-ProcessArgumentString",
+    "Ensure-HiddenRedirectedProcessApi",
+    "Invoke-HiddenProcessCapture"
+)) {{
+    $functionAst = $ast.Find({{
+        param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+            $node.Name -eq $name
+    }}, $true)
+    if ($null -eq $functionAst) {{
+        throw "$name was not found."
+    }}
+    . ([scriptblock]::Create($functionAst.Extent.Text))
+}}
+
+Set-Variable -Name projectDir -Value {json.dumps(str(tmp_path))} -Scope Script
+Set-Variable -Name launcherDir -Value {json.dumps(str(tmp_path))} -Scope Script
+$result = Invoke-HiddenProcessCapture `
+    -FilePath {json.dumps(python_exe)} `
+    -ArgumentList @(
+        "-c",
+        "import sys; print('capture-stdout'); print('capture-stderr', file=sys.stderr); sys.exit(7)"
+    ) `
+    -WorkingDirectory {json.dumps(str(tmp_path))}
+if ($result.ProcessId -le 0) {{
+    throw "Hidden process capture did not report a process id."
+}}
+if ($result.ExitCode -ne 7) {{
+    throw "Hidden process capture did not preserve the exit code: $($result.ExitCode)"
+}}
+if ($result.Stdout -notmatch "capture-stdout") {{
+    throw "Hidden process capture did not preserve stdout: $($result.Stdout)"
+}}
+if ($result.Stderr -notmatch "capture-stderr") {{
+    throw "Hidden process capture did not preserve stderr: $($result.Stderr)"
+}}
+$leftovers = @(Get-ChildItem -LiteralPath {json.dumps(str(tmp_path))} -Filter "hidden-capture-*.log" -ErrorAction SilentlyContinue)
+if ($leftovers.Count -ne 0) {{
+    throw "Hidden process capture left temporary logs behind."
 }}
 Write-Output "ok"
 """,
