@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import datetime, timezone
 from time import perf_counter
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 
 from core.llm.reasoning_effort import GPT_REASONING_EFFORT_VALUES, model_supports_gpt_reasoning_effort
 from core.orchestration.context_engine import list_agent_runs_for_agents
@@ -162,6 +162,11 @@ def get_agent_config_workspace() -> dict[str, Any]:
         for agent in agents
     ]
     groups = _timed_stage(timings, "derive_groups", lambda: _derive_groups(enriched_agents))
+    team_indexes = _timed_stage(
+        timings,
+        "derive_team_indexes",
+        lambda: _derive_team_indexes(teams, agents=enriched_agents),
+    )
     summary = _timed_stage(timings, "summary", lambda: _summary(enriched_agents, groups, health["issues"], chat_rooms, teams, mode_bindings))
     timings["total"] = round((perf_counter() - total_started) * 1000, 1)
     payload = {
@@ -174,6 +179,7 @@ def get_agent_config_workspace() -> dict[str, Any]:
         },
         "summary": summary,
         "groups": groups,
+        "teamIndexes": team_indexes,
         "agents": enriched_agents,
         "modeBindings": mode_bindings.get("modes") or {},
         "promptTemplates": prompt_workspace.get("templates") or [],
@@ -545,6 +551,142 @@ def _derive_groups(agents: list[dict[str, Any]]) -> list[dict[str, Any]]:
             }
         )
     return groups
+
+
+def _derive_team_indexes(teams: list[dict[str, Any]], *, agents: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    agents_by_id = {
+        str(agent.get("agentId") or "").strip(): agent
+        for agent in agents
+        if isinstance(agent, dict) and str(agent.get("agentId") or "").strip()
+    }
+
+    def visible_member_ids(members: list[dict[str, Any]]) -> list[str]:
+        member_ids = _unique_string_list(member.get("agentId") for member in members)
+        return [
+            agent_id
+            for agent_id in member_ids
+            if agent_id in agents_by_id and str(agents_by_id[agent_id].get("status") or "active").strip() != "archived"
+        ]
+
+    def health_count(agent_ids: list[str]) -> int:
+        return sum(
+            1
+            for agent_id in agent_ids
+            if any(
+                item.get("severity") in {"blocking", "warning"}
+                for item in list(agents_by_id.get(agent_id, {}).get("health") or [])
+            )
+        )
+
+    indexes: list[dict[str, Any]] = []
+    for team in teams:
+        if not isinstance(team, dict):
+            continue
+        team_id = str(team.get("teamId") or "").strip()
+        status = str(team.get("status") or "active").strip()
+        if not team_id or status == "archived":
+            continue
+        members = [member for member in list(team.get("members") or []) if isinstance(member, dict)]
+        agent_ids = visible_member_ids(members)
+        team_name = str(team.get("name") or team_id).strip()
+        team_category = str(team.get("teamCategory") or "").strip()
+        purpose = str(team.get("purpose") or team.get("description") or "").strip()
+        indexes.append(
+            {
+                "id": f"team:{team_id}",
+                "label": team_name,
+                "section": "team_index",
+                "description": _join_nonempty([team_category, purpose], separator=" / "),
+                "agentIds": agent_ids,
+                "count": len(agent_ids),
+                "healthCount": health_count(agent_ids),
+                "teamId": team_id,
+                "teamKind": str(team.get("teamKind") or "").strip(),
+                "teamCategory": team_category,
+                "source": "team",
+            }
+        )
+        indexes.extend(
+            _derive_source_scope_indexes(
+                team,
+                members=members,
+                visible_member_ids=agent_ids,
+                health_count=health_count,
+            )
+        )
+    return indexes
+
+
+def _derive_source_scope_indexes(
+    team: dict[str, Any],
+    *,
+    members: list[dict[str, Any]],
+    visible_member_ids: list[str],
+    health_count: Callable[[list[str]], int],
+) -> list[dict[str, Any]]:
+    scope = _safe_team_source_scope(team)
+    if not isinstance(scope, dict):
+        return []
+    team_id = str(team.get("teamId") or "").strip()
+    team_name = str(team.get("name") or team_id).strip()
+    if not team_id:
+        return []
+    indexes: list[dict[str, Any]] = []
+    for group in list(scope.get("groups") or []):
+        if not isinstance(group, dict):
+            continue
+        group_id = str(group.get("groupId") or "").strip()
+        if not group_id:
+            continue
+        owner_role = str(group.get("ownerRole") or "").strip()
+        owner_agent_ids = _unique_string_list(
+            member.get("agentId")
+            for member in members
+            if owner_role and str(member.get("role") or "").strip() == owner_role
+        )
+        owner_agent_ids = [agent_id for agent_id in owner_agent_ids if agent_id in visible_member_ids]
+        agent_ids = owner_agent_ids or visible_member_ids
+        source_count = _safe_int(group.get("sourceCount"))
+        base_label = str(group.get("label") or group_id).strip()
+        indexes.append(
+            {
+                "id": f"source:{team_id}:{group_id}",
+                "label": f"{base_label} · {source_count} 源" if source_count else base_label,
+                "section": "source_scope",
+                "description": _join_nonempty(
+                    [
+                        team_name,
+                        str(group.get("tier") or "").strip(),
+                        str(group.get("description") or "").strip(),
+                    ],
+                    separator=" / ",
+                ),
+                "agentIds": agent_ids,
+                "count": len(agent_ids),
+                "healthCount": health_count(agent_ids),
+                "teamId": team_id,
+                "sourceScopeGroupId": group_id,
+                "sourceCount": source_count,
+                "enabledByDefault": bool(group.get("enabledByDefault")),
+                "evidenceRole": str(group.get("evidenceRole") or "").strip(),
+                "source": "source_scope",
+            }
+        )
+    return indexes
+
+
+def _safe_team_source_scope(team: dict[str, Any]) -> dict[str, Any] | None:
+    if str(team.get("teamKind") or "").strip() != "ai_search":
+        return None
+    try:
+        from . import team_service
+
+        fields = team_service._ai_search_source_scope_api_fields(team)  # type: ignore[attr-defined]
+        scope = fields.get("sourceScope") if isinstance(fields, dict) else None
+        return scope if isinstance(scope, dict) else None
+    except Exception as exc:
+        _record_workspace_error("agent_config.team_source_scope.load_failed", exc)
+        return None
 
 
 def _agent_in_group(agent: dict[str, Any], group_id: str) -> bool:
@@ -1417,6 +1559,21 @@ def _string_list(values: Any) -> list[str]:
             seen.add(item)
             result.append(item)
     return result
+
+
+def _unique_string_list(values: Iterable[Any]) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        item = str(value or "").strip()
+        if item and item not in seen:
+            seen.add(item)
+            result.append(item)
+    return result
+
+
+def _join_nonempty(values: Iterable[str], *, separator: str) -> str:
+    return separator.join(str(value or "").strip() for value in values if str(value or "").strip())
 
 
 def _safe_int(value: Any) -> int:

@@ -205,6 +205,22 @@ type AgentManagementFilterGroup = {
   description?: string;
   healthCount?: number;
 };
+type AgentTeamIndexGroup = AgentManagementFilterGroup & {
+  section: "team_index" | "source_scope";
+  agentIds: string[];
+  teamId?: string;
+  teamKind?: string;
+  teamCategory?: string;
+  sourceScopeGroupId?: string;
+  sourceCount?: number;
+  enabledByDefault?: boolean;
+  evidenceRole?: string;
+  source?: string;
+};
+type AgentFilterGroup = AgentConfigWorkspaceGroup | AgentTeamIndexGroup;
+type AgentConfigWorkspaceWithTeamIndexes = AgentConfigWorkspace & {
+  teamIndexes?: AgentTeamIndexGroup[];
+};
 type AgentActivityTimelineItem = {
   id: string;
   kind: "run" | "sub_run" | "inbox" | "context";
@@ -1038,6 +1054,21 @@ function findRuntimeFocusEvidence(
   return { match: matches[0] ?? null, reason: matches[0] ? "fallback" : "missing" };
 }
 
+function workspaceTeamIndexes(workspace: AgentConfigWorkspace | undefined): AgentTeamIndexGroup[] {
+  const rawIndexes = (workspace as AgentConfigWorkspaceWithTeamIndexes | undefined)?.teamIndexes;
+  const indexes = Array.isArray(rawIndexes) ? rawIndexes : [];
+  return indexes.filter(
+    (item): item is AgentTeamIndexGroup =>
+      Boolean(
+        item &&
+          (item.section === "team_index" || item.section === "source_scope") &&
+          item.id &&
+          item.label &&
+          Array.isArray(item.agentIds),
+      ),
+  );
+}
+
 function filterAgents(
   workspace: AgentConfigWorkspace | undefined,
   activeFilter: FilterId,
@@ -1047,7 +1078,8 @@ function filterAgents(
   const query = normalizeText(searchText);
   const managementFilter = activeFilter.startsWith("setup:");
   const group = (workspace?.groups ?? []).find((item) => item.id === activeFilter);
-  const groupIds = new Set(group?.agentIds ?? []);
+  const teamIndexGroup = workspaceTeamIndexes(workspace).find((item) => item.id === activeFilter);
+  const groupIds = new Set((group ?? teamIndexGroup)?.agentIds ?? []);
   return agents.filter((agent) => {
     const archived = agent.status === "archived";
     if (activeFilter === "archived") {
@@ -1060,7 +1092,7 @@ function filterAgents(
     if (managementFilter && !managementFilterMatches(agent, activeFilter)) {
       return false;
     }
-    if (!managementFilter && group && !groupIds.has(agent.agentId)) {
+    if (!managementFilter && (group || teamIndexGroup) && !groupIds.has(agent.agentId)) {
       return false;
     }
     return !query || agentSearchText(agent).includes(query);
@@ -1082,6 +1114,24 @@ function selectedAgentFromList(
     fallbackCandidates[0] ??
     null
   );
+}
+
+function teamIndexesWithoutAgentIds(
+  workspace: AgentConfigWorkspace | undefined,
+  removedAgentIds: Set<string>,
+): AgentTeamIndexGroup[] | undefined {
+  const indexes = workspaceTeamIndexes(workspace);
+  if (!indexes.length) {
+    return undefined;
+  }
+  return indexes.map((group) => {
+    const agentIds = group.agentIds.filter((id) => !removedAgentIds.has(id));
+    return {
+      ...group,
+      agentIds,
+      count: agentIds.length,
+    };
+  });
 }
 
 function draftSyncSourceFromAgent(
@@ -1140,10 +1190,12 @@ function archivedWorkspaceCache(
       count: agentIds.length,
     };
   });
+  const nextTeamIndexes = teamIndexesWithoutAgentIds(workspace, new Set([agentId]));
   return {
     ...workspace,
     agents: nextAgents,
     groups: nextGroups,
+    ...(nextTeamIndexes ? { teamIndexes: nextTeamIndexes } : {}),
     summary: {
       ...workspace.summary,
       activeAgentCount: wasActive ? Math.max(0, workspace.summary.activeAgentCount - 1) : workspace.summary.activeAgentCount,
@@ -1196,12 +1248,14 @@ function purgedWorkspaceCache(
       count: agentIds.length,
     };
   });
+  const nextTeamIndexes = teamIndexesWithoutAgentIds(workspace, new Set([agentId]));
   const wasActive = cachedAgent ? cachedAgent.status !== "archived" : false;
   const wasArchived = cachedAgent ? cachedAgent.status === "archived" : false;
   return {
     ...workspace,
     agents: nextAgents,
     groups: nextGroups,
+    ...(nextTeamIndexes ? { teamIndexes: nextTeamIndexes } : {}),
     summary: {
       ...workspace.summary,
       activeAgentCount: wasActive ? Math.max(0, workspace.summary.activeAgentCount - 1) : workspace.summary.activeAgentCount,
@@ -1236,10 +1290,12 @@ function bulkPurgeWorkspaceCache(
       count: agentIds.length,
     };
   });
+  const nextTeamIndexes = teamIndexesWithoutAgentIds(workspace, purgedAgentIds);
   return {
     ...workspace,
     agents: workspace.agents.filter((agent) => !purgedAgentIds.has(agent.agentId)),
     groups: nextGroups,
+    ...(nextTeamIndexes ? { teamIndexes: nextTeamIndexes } : {}),
     summary: {
       ...workspace.summary,
       activeAgentCount: Math.max(0, workspace.summary.activeAgentCount - removedActiveCount),
@@ -1292,9 +1348,15 @@ function groupDisplayLabel(group: { id: string; label?: string } | undefined, co
   return copy.groupLabels[group.id] ?? group.label;
 }
 
-function groupSectionId(group: AgentConfigWorkspaceGroup) {
+function groupSectionId(group: AgentFilterGroup) {
   const section = String(group.section || "").trim();
-  return section === "boundary" || section === "mode" || section === "reference" ? section : "status";
+  return section === "boundary" ||
+    section === "mode" ||
+    section === "reference" ||
+    section === "team_index" ||
+    section === "source_scope"
+    ? section
+    : "status";
 }
 
 function groupDescription(group: { id: string; description?: string }, copy: ReturnType<typeof agentsRouteCopy>) {
@@ -2461,6 +2523,8 @@ function agentsRouteCopy(lang: "zh" | "en") {
         filterSections: {
           status: "状态",
           boundary: "Agent 身份",
+          team_index: "团队索引",
+          source_scope: "来源范围",
           mode: "运行模式",
           reference: "引用关系",
           management: "工作队列",
@@ -2826,6 +2890,8 @@ function agentsRouteCopy(lang: "zh" | "en") {
         filterSections: {
           status: "Status",
           boundary: "Agent identity",
+          team_index: "Team indexes",
+          source_scope: "Source scope",
           mode: "Runtime mode",
           reference: "References",
           management: "Work queue",
@@ -3214,7 +3280,7 @@ export function AgentsRoute() {
 
   const workspaceQuery = useQuery({
     queryKey: queryKeys.agentConfigWorkspace(),
-    queryFn: () => fetchJson<AgentConfigWorkspace>("/api/agents/config-workspace"),
+    queryFn: () => fetchJson<AgentConfigWorkspaceWithTeamIndexes>("/api/agents/config-workspace"),
     refetchInterval: resolvePollingInterval(pageVisible, 12_000),
     refetchIntervalInBackground: false,
   });
@@ -3244,17 +3310,19 @@ export function AgentsRoute() {
   );
   const llmSlots = useMemo(() => agentLlmSlots(workspace), [workspace?.agentLlmSlots]);
   const groups = workspace?.groups ?? [];
+  const teamIndexGroups = useMemo(() => workspaceTeamIndexes(workspace), [workspace]);
   const managementFilterGroups = useMemo(
     () => buildManagementFilterGroups(workspace?.agents ?? [], copy),
     [copy, workspace?.agents],
   );
   const groupedFilters = useMemo(() => {
-    const sectionOrder = ["status", "boundary", "mode", "reference"] as const;
+    const sectionOrder = ["status", "boundary", "team_index", "source_scope", "mode", "reference"] as const;
+    const indexedGroups = [...groups, ...teamIndexGroups];
     const defaultSections = sectionOrder
       .map((section) => ({
         id: section,
         label: copy.filterSections[section],
-        groups: groups.filter((group) => groupSectionId(group) === section),
+        groups: indexedGroups.filter((group) => groupSectionId(group) === section),
       }))
       .filter((section) => section.groups.length > 0);
     const managementSection = {
@@ -3266,10 +3334,11 @@ export function AgentsRoute() {
       managementSection,
       ...defaultSections,
     ].filter((section) => section.groups.length > 0);
-  }, [copy, groups, managementFilterGroups]);
+  }, [copy, groups, managementFilterGroups, teamIndexGroups]);
   const activeGroup = groups.find((group) => group.id === activeFilter);
+  const activeTeamIndexGroup = teamIndexGroups.find((group) => group.id === activeFilter);
   const activeManagementGroup = managementFilterGroups.find((group) => group.id === activeFilter);
-  const activeGroupLabel = activeManagementGroup?.label ?? groupDisplayLabel(activeGroup, copy);
+  const activeGroupLabel = activeManagementGroup?.label ?? activeTeamIndexGroup?.label ?? groupDisplayLabel(activeGroup, copy);
   const visibleAgents = useMemo(
     () => filterAgents(workspace, activeFilter, searchText),
     [activeFilter, searchText, workspace],
@@ -4723,7 +4792,7 @@ export function AgentsRoute() {
                         title={description}
                       >
                         <span>
-                          {section.id === "management" ? <CheckCircle2 size={15} /> : section.id === "boundary" ? <UserRound size={15} /> : section.id === "reference" ? <Users size={15} /> : section.id === "mode" ? <Layers3 size={15} /> : group.id === "needs_review" ? <AlertTriangle size={15} /> : <Bot size={15} />}
+                          {section.id === "management" ? <CheckCircle2 size={15} /> : section.id === "boundary" ? <UserRound size={15} /> : section.id === "team_index" ? <Users size={15} /> : section.id === "source_scope" ? <Database size={15} /> : section.id === "reference" ? <Users size={15} /> : section.id === "mode" ? <Layers3 size={15} /> : group.id === "needs_review" ? <AlertTriangle size={15} /> : <Bot size={15} />}
                           {displayLabel}
                         </span>
                         <strong>{group.count}</strong>
