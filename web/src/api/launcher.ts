@@ -1,5 +1,13 @@
 import { fetchJson } from "./client";
 import type {
+  LauncherDeveloperCleanupAction,
+  LauncherDeveloperCleanupApplyRequest,
+  LauncherDeveloperCleanupApplyResponse,
+  LauncherDeveloperCleanupPreviewResponse,
+  LauncherDeveloperModeSetting,
+  LauncherDeveloperModeUpdateRequest,
+  LauncherDeveloperModeUpdateResponse,
+  LauncherDeveloperNoiseOverview,
   LauncherControlResponse,
   LauncherStartupSettings as BaseLauncherStartupSettings,
   LauncherStatus as BaseLauncherStatus,
@@ -39,6 +47,7 @@ export type LauncherStatus = Omit<BaseLauncherStatus, "settings"> & {
   settings?: {
     startup?: LauncherStartupSettings;
     workbenchWindow?: WorkbenchWindowModeSetting;
+    developerMode?: LauncherDeveloperModeSetting;
   };
 };
 
@@ -209,6 +218,34 @@ export function updateLauncherStartupSettings(setting: LauncherStartupSettings) 
       },
       baseHash: setting.configHash,
     }),
+  });
+}
+
+export function updateLauncherDeveloperMode(request: LauncherDeveloperModeUpdateRequest) {
+  return fetchLauncherJson<LauncherDeveloperModeUpdateResponse>("developer-mode", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+  });
+}
+
+export function getLauncherDeveloperNoiseOverview() {
+  return fetchLauncherJson<LauncherDeveloperNoiseOverview>("developer-mode/noise-overview");
+}
+
+export function previewLauncherDeveloperCleanup(action: LauncherDeveloperCleanupAction) {
+  return fetchLauncherJson<LauncherDeveloperCleanupPreviewResponse>("developer-mode/cleanup/preview", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action }),
+  });
+}
+
+export function applyLauncherDeveloperCleanup(request: LauncherDeveloperCleanupApplyRequest) {
+  return fetchLauncherJson<LauncherDeveloperCleanupApplyResponse>("developer-mode/cleanup/apply", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
   });
 }
 

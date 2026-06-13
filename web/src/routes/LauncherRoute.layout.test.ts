@@ -230,8 +230,20 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain('operation === "force-stop"');
     expect(routeSource).toContain("force_close_workbench");
     expect(routeSource).toContain('tone: response.accepted ? "neutral" : "warning"');
-    expect(routeSource).toContain('setNotice({ tone, text: message })');
+    expect(routeSource).toContain("setNotice({ tone, text: message })");
     expect(routeSource).toContain("Restart preflight failed before closing the workbench");
+  });
+
+  it("records launcher lifecycle requests and clears stale lifecycle errors from source-of-truth status", () => {
+    expect(routeSource).toContain("setTrackedCommand(response.accepted && response.commandId ? { commandId: response.commandId, operation } : null)");
+    expect(routeSource).toContain("clearControlledProjectLifecycleOperation()");
+    expect(routeSource).toContain("trackedCommand?.operation === \"stop\"");
+    expect(routeSource).toContain("trackedCommand?.operation === \"force-stop\"");
+    expect(routeSource).toContain("trackedCommand?.operation === \"restart\"");
+    expect(routeSource).toContain("if (!trackedCommand || !trackedResult) {");
+    expect(routeSource).toContain("setNotice({ tone, text: message })");
+    expect(routeSource).toContain("setTrackedCommand(null)");
+    expect(routeSource).toContain("setLastControlOperation(null)");
   });
 
   it("keeps lifecycle actions icon-backed and compact", () => {

@@ -3445,6 +3445,94 @@ def test_ensure_daemon_running_restarts_stale_source_signature(monkeypatch, tmp_
     assert popen_calls == [["python-test", "-m", "core.runtime_manager.cli", "daemon"]]
 
 
+def test_rotate_daemon_log_file_rotates_when_exceeding_max_bytes(monkeypatch, tmp_path):
+    log_path = tmp_path / "daemon.out.log"
+    log_path.write_text("seed", encoding="utf-8")
+
+    result = daemon._rotate_daemon_log_file(log_path, max_bytes=3, backup_count=2)
+    assert result["rotated"] is True
+    assert result["action"] == "rotated"
+    assert result["sizeBytes"] == 4
+    assert result["backupPath"] == str(log_path.with_name("daemon.out.log.1"))
+    assert log_path.exists()
+    assert log_path.stat().st_size == 0
+    assert log_path.with_name("daemon.out.log.1").read_text(encoding="utf-8") == "seed"
+    assert not log_path.with_name("daemon.out.log.2").exists()
+
+
+def test_rotate_daemon_log_file_truncates_when_backup_disabled(monkeypatch, tmp_path):
+    log_path = tmp_path / "daemon.err.log"
+    log_path.write_text("very-long-content", encoding="utf-8")
+
+    result = daemon._rotate_daemon_log_file(log_path, max_bytes=3, backup_count=0)
+    assert result["rotated"] is True
+    assert result["action"] == "truncated"
+    assert log_path.exists()
+    assert log_path.stat().st_size == 0
+
+
+def test_rotate_daemon_logs_before_launch_emits_events(monkeypatch, tmp_path):
+    stdout = tmp_path / "daemon.out.log"
+    stderr = tmp_path / "daemon.err.log"
+    stdout.write_text("seed", encoding="utf-8")
+    stderr.write_text("seed", encoding="utf-8")
+    monkeypatch.setattr(daemon, "DAEMON_STDOUT_PATH", stdout)
+    monkeypatch.setattr(daemon, "DAEMON_STDERR_PATH", stderr)
+    monkeypatch.setattr(daemon, "DAEMON_LOG_MAX_BYTES", 3)
+
+    events: list[tuple[str, dict]] = []
+    monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: events.append((event_type, payload)))
+
+    daemon._rotate_daemon_logs_before_launch()
+
+    assert events
+    assert all(event_type == "daemon.log_rotation.completed" for event_type, _ in events)
+    assert {payload["path"] for _, payload in events} == {str(stdout), str(stderr)}
+
+
+def test_ensure_daemon_running_rotates_large_daemon_logs_before_launch(monkeypatch, tmp_path):
+    events: list[tuple[str, dict]] = []
+    popen_calls: list[list[str]] = []
+    running_checks = iter([False, True])
+    stdout_path = tmp_path / "daemon.out.log"
+    stderr_path = tmp_path / "daemon.err.log"
+    stdout_path.write_text("x" * 32, encoding="utf-8")
+    stderr_path.write_text("y" * 28, encoding="utf-8")
+    (tmp_path / "daemon.out.log.1").write_text("older stdout", encoding="utf-8")
+
+    monkeypatch.setattr(daemon, "load_pid", lambda: 0)
+    monkeypatch.setattr(daemon, "_is_process_alive", lambda pid: False)
+    monkeypatch.setattr(daemon, "ensure_runtime_manager_dirs", lambda: None)
+    monkeypatch.setattr(daemon, "is_daemon_running", lambda: next(running_checks))
+    monkeypatch.setattr(daemon, "DAEMON_STDOUT_PATH", stdout_path)
+    monkeypatch.setattr(daemon, "DAEMON_STDERR_PATH", stderr_path)
+    monkeypatch.setattr(daemon, "DAEMON_LOG_MAX_BYTES", 10)
+    monkeypatch.setattr(daemon, "DAEMON_LOG_BACKUP_COUNT", 2)
+    monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: events.append((event_type, payload)))
+    monkeypatch.setattr(
+        daemon.subprocess,
+        "Popen",
+        lambda args, **kwargs: popen_calls.append(args) or type("Proc", (), {"pid": 24680})(),
+    )
+
+    assert daemon.ensure_daemon_running(python_executable="python-test") is True
+
+    assert stdout_path.read_text(encoding="utf-8") == ""
+    assert stderr_path.read_text(encoding="utf-8") == ""
+    assert (tmp_path / "daemon.out.log.1").read_text(encoding="utf-8") == "x" * 32
+    assert (tmp_path / "daemon.out.log.2").read_text(encoding="utf-8") == "older stdout"
+    assert (tmp_path / "daemon.err.log.1").read_text(encoding="utf-8") == "y" * 28
+    assert [event_type for event_type, _ in events] == [
+        "daemon.log_rotation.completed",
+        "daemon.log_rotation.completed",
+        "daemon.start_requested",
+    ]
+    assert events[0][1]["path"] == str(stdout_path)
+    assert events[0][1]["sizeBytes"] == 32
+    assert events[0][1]["backupPath"] == str(tmp_path / "daemon.out.log.1")
+    assert popen_calls == [["python-test", "-m", "core.runtime_manager.cli", "daemon"]]
+
+
 def test_ensure_daemon_running_keeps_current_source_signature(monkeypatch):
     monkeypatch.setattr(daemon, "load_pid", lambda: 12345)
     monkeypatch.setattr(daemon, "_is_process_alive", lambda pid: True)

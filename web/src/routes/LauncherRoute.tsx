@@ -1,20 +1,28 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ExternalLink, LoaderCircle, Maximize2, Minimize2, Play, Power, RefreshCw, Square } from "lucide-react";
+import { Database, ExternalLink, HardDrive, LoaderCircle, Maximize2, Minimize2, Play, Power, RefreshCw, ShieldCheck, Square, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import {
   getLauncherStatus,
+  getLauncherDeveloperNoiseOverview,
   forceStopLauncherBundle,
+  applyLauncherDeveloperCleanup,
+  previewLauncherDeveloperCleanup,
   reattachLauncherSupervisor,
   restartLauncherBundle,
   saveLauncherWorkbenchWindowMode,
   startLauncherBundle,
   stopLauncherBundle,
   type LauncherStartupSettings,
+  updateLauncherDeveloperMode,
   updateLauncherStartupSettings,
 } from "../api/launcher";
 import { queryKeys } from "../api/queryKeys";
 import type {
+  LauncherDeveloperCleanupAction,
+  LauncherDeveloperCleanupPlan,
+  LauncherDeveloperModeSetting,
+  LauncherDeveloperNoiseOverview,
   LauncherComponentState,
   LauncherOperation,
   WorkbenchWindowMode,
@@ -158,6 +166,12 @@ type StatusRow = {
   ok: boolean;
 };
 
+type DeveloperCleanupActionOption = {
+  action: LauncherDeveloperCleanupAction;
+  label: string;
+  detail: string;
+};
+
 type LauncherCopy = {
   controlLimited: string;
   controlLimitedDetail: string;
@@ -234,6 +248,35 @@ type LauncherCopy = {
   actionsAvailable: string;
   actionsStartOnly: string;
   diagnosticsCollapsedHint: string;
+  developerModeTitle: string;
+  developerModeHint: string;
+  developerModeOn: string;
+  developerModeOff: string;
+  developerModeEnable: string;
+  developerModeDisable: string;
+  developerModeControlled: string;
+  developerModeSettingsReadonly: string;
+  developerModeUpdated: string;
+  developerModeNoiseOverview: string;
+  developerModeNoiseLoading: string;
+  developerModeRefreshNoise: string;
+  developerModeAction: string;
+  cleanupQuickClean: string;
+  cleanupQuickCleanDetail: string;
+  cleanupDbCompact: string;
+  cleanupDbCompactDetail: string;
+  cleanupWorktreeCleanup: string;
+  cleanupWorktreeCleanupDetail: string;
+  cleanupPreview: string;
+  cleanupApply: string;
+  cleanupPlanReady: string;
+  cleanupPlanEmpty: string;
+  cleanupTargets: string;
+  cleanupEstimated: string;
+  cleanupSkipped: string;
+  cleanupRequiresConfirm: string;
+  cleanupDisabledOff: string;
+  cleanupApplied: string;
 };
 
 type LifecycleDisplay = {
@@ -693,6 +736,154 @@ function LauncherStartupSettingsPanel({
   );
 }
 
+function formatBytes(size: number) {
+  const value = Number.isFinite(size) ? Math.max(0, size) : 0;
+  if (value < 1024) {
+    return `${value} B`;
+  }
+  const units = ["KB", "MB", "GB", "TB"];
+  let scaled = value / 1024;
+  let unitIndex = 0;
+  while (scaled >= 1024 && unitIndex < units.length - 1) {
+    scaled /= 1024;
+    unitIndex += 1;
+  }
+  return `${scaled >= 10 ? scaled.toFixed(1) : scaled.toFixed(2)} ${units[unitIndex]}`;
+}
+
+function DeveloperModePanel({
+  copy,
+  setting,
+  noiseOverview,
+  selectedAction,
+  plan,
+  pending,
+  noiseLoading,
+  previewPending,
+  applyPending,
+  onToggle,
+  onRefreshNoise,
+  onSelectAction,
+  onPreview,
+  onApply,
+}: {
+  copy: LauncherCopy;
+  setting?: LauncherDeveloperModeSetting;
+  noiseOverview?: LauncherDeveloperNoiseOverview;
+  selectedAction: LauncherDeveloperCleanupAction;
+  plan: LauncherDeveloperCleanupPlan | null;
+  pending: boolean;
+  noiseLoading: boolean;
+  previewPending: boolean;
+  applyPending: boolean;
+  onToggle: (enabled: boolean, baseHash: string) => void;
+  onRefreshNoise: () => void;
+  onSelectAction: (action: LauncherDeveloperCleanupAction) => void;
+  onPreview: () => void;
+  onApply: () => void;
+}) {
+  const enabled = Boolean(setting?.enabled);
+  const controlsDisabled = pending || !setting;
+  const actionOptions: DeveloperCleanupActionOption[] = [
+    { action: "quick_clean", label: copy.cleanupQuickClean, detail: copy.cleanupQuickCleanDetail },
+    { action: "db_compact", label: copy.cleanupDbCompact, detail: copy.cleanupDbCompactDetail },
+    { action: "worktree_cleanup", label: copy.cleanupWorktreeCleanup, detail: copy.cleanupWorktreeCleanupDetail },
+  ];
+  const selectedOption = actionOptions.find((option) => option.action === selectedAction) ?? actionOptions[0];
+  const matchingOverview = noiseOverview?.items.find((item) => item.action === selectedAction);
+  const targetRows = plan?.targets.slice(0, 4) ?? [];
+  const canPreview = enabled && !controlsDisabled && !previewPending && !applyPending;
+  const canApply = enabled && Boolean(plan) && plan?.action === selectedAction && !controlsDisabled && !previewPending && !applyPending;
+
+  return (
+    <section className={styles.developerPanel} data-enabled={enabled}>
+      <div className={styles.developerPanelHeader}>
+        <div>
+          <p className={styles.panelEyebrow}>{copy.developerModeControlled}</p>
+          <strong>{copy.developerModeTitle}</strong>
+          <small>{copy.developerModeHint}</small>
+        </div>
+        <button
+          type="button"
+          className={enabled ? `${styles.iconButton} ${styles.dangerButton}` : styles.primaryButton}
+          disabled={controlsDisabled}
+          onClick={() => onToggle(!enabled, setting?.configHash ?? "")}
+          title={enabled ? copy.developerModeDisable : copy.developerModeEnable}
+        >
+          {pending ? <LoaderCircle size={15} className={styles.spin} /> : <ShieldCheck size={15} />}
+          <span>{enabled ? copy.developerModeDisable : copy.developerModeEnable}</span>
+        </button>
+      </div>
+      <div className={styles.developerGrid}>
+        <div className={styles.developerStatus} data-tone={enabled ? "warning" : "neutral"}>
+          <span>{enabled ? copy.developerModeOn : copy.developerModeOff}</span>
+          <strong>{setting?.updatedAt ? compactDate(setting.updatedAt, "zh-CN") : copy.developerModeSettingsReadonly}</strong>
+          <small>{copy.developerModeSettingsReadonly}</small>
+        </div>
+        <div className={styles.developerNoise}>
+          <div className={styles.developerNoiseHeader}>
+            <span>{copy.developerModeNoiseOverview}</span>
+            <button type="button" className={styles.compactButton} onClick={onRefreshNoise} disabled={noiseLoading}>
+              {noiseLoading ? <LoaderCircle size={13} className={styles.spin} /> : <RefreshCw size={13} />}
+              <span>{copy.developerModeRefreshNoise}</span>
+            </button>
+          </div>
+          {noiseLoading && !noiseOverview ? <small>{copy.developerModeNoiseLoading}</small> : null}
+          <div className={styles.noiseItemGrid}>
+            {(noiseOverview?.items ?? []).slice(0, 4).map((item) => (
+              <div key={item.id} className={styles.noiseItem} data-protected={item.protected}>
+                <span>{item.label}</span>
+                <strong>{formatBytes(item.sizeBytes)}</strong>
+                <small>{item.targetCount} {copy.cleanupTargets}{item.skippedCount ? ` · ${item.skippedCount} ${copy.cleanupSkipped}` : ""}</small>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className={styles.cleanupConsole}>
+          <label className={styles.settingField}>
+            <span>{copy.developerModeAction}</span>
+            <select value={selectedAction} disabled={previewPending || applyPending} onChange={(event) => onSelectAction(event.target.value as LauncherDeveloperCleanupAction)}>
+              {actionOptions.map((option) => (
+                <option key={option.action} value={option.action}>{option.label}</option>
+              ))}
+            </select>
+            <small>{selectedOption.detail}</small>
+          </label>
+          <div className={styles.cleanupMetrics}>
+            <span>{copy.cleanupEstimated}: <strong>{formatBytes(matchingOverview?.sizeBytes ?? plan?.estimatedBytes ?? 0)}</strong></span>
+            <span>{copy.cleanupTargets}: <strong>{matchingOverview?.targetCount ?? plan?.targetCount ?? 0}</strong></span>
+          </div>
+          <div className={styles.cleanupActions}>
+            <button type="button" className={styles.iconButton} disabled={!canPreview} onClick={onPreview} title={!enabled ? copy.cleanupDisabledOff : copy.cleanupPreview}>
+              {previewPending ? <LoaderCircle size={14} className={styles.spin} /> : <Trash2 size={14} />}
+              <span>{copy.cleanupPreview}</span>
+            </button>
+            <button type="button" className={styles.primaryButton} disabled={!canApply} onClick={onApply} title={!enabled ? copy.cleanupDisabledOff : copy.cleanupApply}>
+              {applyPending ? <LoaderCircle size={14} className={styles.spin} /> : selectedAction === "db_compact" ? <Database size={14} /> : <HardDrive size={14} />}
+              <span>{copy.cleanupApply}</span>
+            </button>
+          </div>
+          {plan ? (
+            <div className={styles.cleanupPlan}>
+              <strong>{copy.cleanupPlanReady}</strong>
+              <small>{plan.planId} · {copy.cleanupEstimated}: {formatBytes(plan.estimatedBytes)}</small>
+              {targetRows.length ? (
+                <ul>
+                  {targetRows.map((target) => (
+                    <li key={target.path}>{target.relativePath || target.path}</li>
+                  ))}
+                </ul>
+              ) : (
+                <small>{copy.cleanupPlanEmpty}</small>
+              )}
+            </div>
+          ) : null}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function includesAny(value: string, needles: string[]) {
   return needles.some((needle) => value.includes(needle));
 }
@@ -1093,6 +1284,35 @@ export function LauncherRoute() {
         actionsAvailable: "停止/重启可用",
         actionsStartOnly: "项目已关闭，仅启动可用",
         diagnosticsCollapsedHint: "排查时展开",
+        developerModeTitle: "开发者模式",
+        developerModeHint: "Launcher 控制开发期清理能力；关闭时只显示噪声概览，不生成或执行清理计划。",
+        developerModeOn: "已开启",
+        developerModeOff: "已关闭",
+        developerModeEnable: "开启开发者模式",
+        developerModeDisable: "关闭开发者模式",
+        developerModeControlled: "Launcher 控制",
+        developerModeSettingsReadonly: "设置页只读展示，不能在工作台设置里改动",
+        developerModeUpdated: "开发者模式已更新",
+        developerModeNoiseOverview: "噪声概览",
+        developerModeNoiseLoading: "正在扫描噪声来源",
+        developerModeRefreshNoise: "刷新概览",
+        developerModeAction: "清理动作",
+        cleanupQuickClean: "快速白名单清理",
+        cleanupQuickCleanDetail: "仅删除缓存、构建产物和 __pycache__。",
+        cleanupDbCompact: "压缩 Git 记忆 DB",
+        cleanupDbCompactDetail: "只清理旧 wt-* 快照并 VACUUM，不删除提交历史。",
+        cleanupWorktreeCleanup: "清理已合并 worktree",
+        cleanupWorktreeCleanupDetail: "只处理干净且已并入 main 的外部 worktree。",
+        cleanupPreview: "生成预览",
+        cleanupApply: "确认执行",
+        cleanupPlanReady: "预览计划已就绪",
+        cleanupPlanEmpty: "当前计划没有可执行目标。",
+        cleanupTargets: "目标",
+        cleanupEstimated: "预计释放",
+        cleanupSkipped: "跳过",
+        cleanupRequiresConfirm: "确认执行当前开发者清理计划？执行前会再次校验 planId、planHash、目标白名单和开发者模式状态。",
+        cleanupDisabledOff: "开发者模式关闭时不能生成或执行清理计划",
+        cleanupApplied: "清理计划已执行",
       }
     : {
         eyebrow: "Launcher",
@@ -1266,16 +1486,53 @@ export function LauncherRoute() {
         actionsAvailable: "Stop/restart available",
         actionsStartOnly: "Project is closed; Start is the only lifecycle action",
         diagnosticsCollapsedHint: "Open when troubleshooting",
+        developerModeTitle: "Developer Mode",
+        developerModeHint: "Launcher owns development cleanup. When off, this shows noise only and cannot create or apply cleanup plans.",
+        developerModeOn: "Enabled",
+        developerModeOff: "Disabled",
+        developerModeEnable: "Enable developer mode",
+        developerModeDisable: "Disable developer mode",
+        developerModeControlled: "Launcher controlled",
+        developerModeSettingsReadonly: "Settings shows this read-only and cannot change it",
+        developerModeUpdated: "Developer mode updated",
+        developerModeNoiseOverview: "Noise overview",
+        developerModeNoiseLoading: "Scanning noise sources",
+        developerModeRefreshNoise: "Refresh overview",
+        developerModeAction: "Cleanup action",
+        cleanupQuickClean: "Quick whitelist clean",
+        cleanupQuickCleanDetail: "Deletes only caches, build artifacts, and __pycache__.",
+        cleanupDbCompact: "Compact Git memory DB",
+        cleanupDbCompactDetail: "Prunes old wt-* snapshots and VACUUMs without deleting commit history.",
+        cleanupWorktreeCleanup: "Clean merged worktrees",
+        cleanupWorktreeCleanupDetail: "Only clean external worktrees already merged into main.",
+        cleanupPreview: "Preview",
+        cleanupApply: "Apply",
+        cleanupPlanReady: "Preview plan ready",
+        cleanupPlanEmpty: "This plan has no executable targets.",
+        cleanupTargets: "targets",
+        cleanupEstimated: "Estimated",
+        cleanupSkipped: "skipped",
+        cleanupRequiresConfirm: "Apply this developer cleanup plan? Vibelution will re-check planId, planHash, whitelist targets, and developer mode before executing.",
+        cleanupDisabledOff: "Developer mode must be enabled before preview or apply",
+        cleanupApplied: "Cleanup plan applied",
       };
 
   const [notice, setNotice] = useState<LauncherNotice>({ tone: "neutral", text: "" });
   const [lastControlOperation, setLastControlOperation] = useState<LauncherOperation | null>(null);
   const [trackedCommand, setTrackedCommand] = useState<LauncherTrackedCommand | null>(null);
+  const [selectedCleanupAction, setSelectedCleanupAction] = useState<LauncherDeveloperCleanupAction>("quick_clean");
+  const [cleanupPlan, setCleanupPlan] = useState<LauncherDeveloperCleanupPlan | null>(null);
   const statusQuery = useQuery({
     queryKey: queryKeys.launcherStatus(),
     queryFn: getLauncherStatus,
     refetchInterval: resolvePollingInterval(pageVisible, 4_000, { backgroundMs: 4_000 }),
     refetchIntervalInBackground: true,
+  });
+  const developerNoiseQuery = useQuery({
+    queryKey: queryKeys.launcherDeveloperNoiseOverview(),
+    queryFn: getLauncherDeveloperNoiseOverview,
+    enabled: Boolean(statusQuery.data && !statusQuery.isError),
+    refetchInterval: false,
   });
   const controlMutation = useMutation({
     mutationFn: async (operation: LauncherOperation) => {
@@ -1376,6 +1633,45 @@ export function LauncherRoute() {
       setPendingWindowMode("");
     },
   });
+  const developerModeMutation = useMutation({
+    mutationFn: updateLauncherDeveloperMode,
+    onSuccess: (response) => {
+      setCleanupPlan(null);
+      setNotice({ tone: response.setting.enabled ? "warning" : "success", text: response.message || copy.developerModeUpdated });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.launcherStatus() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.launcherDeveloperNoiseOverview() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.configPublic() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.configWorkspace() });
+    },
+    onError: (error) => {
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
+    },
+  });
+  const cleanupPreviewMutation = useMutation({
+    mutationFn: previewLauncherDeveloperCleanup,
+    onSuccess: (response) => {
+      setCleanupPlan(response.plan);
+      setNotice({ tone: response.plan.targetCount > 0 ? "warning" : "neutral", text: response.message || copy.cleanupPlanReady });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.launcherDeveloperNoiseOverview() });
+    },
+    onError: (error) => {
+      setCleanupPlan(null);
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
+    },
+  });
+  const cleanupApplyMutation = useMutation({
+    mutationFn: applyLauncherDeveloperCleanup,
+    onSuccess: (response) => {
+      setCleanupPlan(null);
+      setNotice({ tone: "success", text: response.message || copy.cleanupApplied });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.launcherDeveloperNoiseOverview() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.launcherStatus() });
+    },
+    onError: (error) => {
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.launcherDeveloperNoiseOverview() });
+    },
+  });
 
   const status = statusQuery.data as LauncherStatusWithGuardian | undefined;
   const bundle = status?.projectBundle;
@@ -1416,6 +1712,7 @@ export function LauncherRoute() {
   const activeWorkCount = status?.lifecycleProof.activeWorkRuns.count ?? 0;
   const activeWorkKinds = status?.lifecycleProof.activeWorkRuns.kinds ?? [];
   const startupSettings = status?.settings?.startup;
+  const developerModeSetting = status?.settings?.developerMode;
   const fallbackWindowSetting = status?.settings?.workbenchWindow;
   const configuredWindowMode = startupSettings?.workbench.windowMode ?? fallbackWindowSetting?.mode ?? "fullscreen";
   const effectiveWindowMode = startupSettings?.workbench.effectiveWindowMode ?? fallbackWindowSetting?.effectiveMode ?? configuredWindowMode;
@@ -1514,6 +1811,28 @@ export function LauncherRoute() {
           : lifecycleDisplay.detail || copy.userGuideProblemDetail;
   const actionLockLabel = projectIsClosed ? copy.actionsStartOnly : destructiveActionDisabled ? copy.actionsLocked : copy.actionsAvailable;
   const guardianProgress = `${guardian?.ownedCount ?? 0}/${guardian?.adapterCount ?? 0}`;
+  const toggleDeveloperMode = (enabled: boolean, baseHash: string) => {
+    developerModeMutation.mutate({ enabled, baseHash });
+  };
+  const previewDeveloperCleanup = () => {
+    setCleanupPlan(null);
+    cleanupPreviewMutation.mutate(selectedCleanupAction);
+  };
+  const applyDeveloperCleanup = () => {
+    if (!cleanupPlan) {
+      return;
+    }
+    const confirmed = window.confirm(copy.cleanupRequiresConfirm);
+    if (!confirmed) {
+      return;
+    }
+    cleanupApplyMutation.mutate({
+      action: cleanupPlan.action,
+      planId: cleanupPlan.planId,
+      planHash: cleanupPlan.planHash,
+      confirm: true,
+    });
+  };
   const statusRows = useMemo<StatusRow[]>(() => {
     const componentById = new Map(componentRows.map((component) => [component.id, component]));
     const backend = componentById.get("backend");
@@ -1725,6 +2044,26 @@ export function LauncherRoute() {
         pendingWindowMode={pendingWindowMode}
         onSave={(nextSetting) => startupSettingsMutation.mutate(nextSetting)}
         onWindowModeChange={(request) => workbenchWindowSaveMutation.mutate(request)}
+      />
+
+      <DeveloperModePanel
+        copy={copy}
+        setting={developerModeSetting}
+        noiseOverview={developerNoiseQuery.data}
+        selectedAction={selectedCleanupAction}
+        plan={cleanupPlan}
+        pending={developerModeMutation.isPending}
+        noiseLoading={developerNoiseQuery.isFetching}
+        previewPending={cleanupPreviewMutation.isPending}
+        applyPending={cleanupApplyMutation.isPending}
+        onToggle={toggleDeveloperMode}
+        onRefreshNoise={() => void developerNoiseQuery.refetch()}
+        onSelectAction={(action) => {
+          setSelectedCleanupAction(action);
+          setCleanupPlan(null);
+        }}
+        onPreview={previewDeveloperCleanup}
+        onApply={applyDeveloperCleanup}
       />
 
       {statusQuery.isError ? (

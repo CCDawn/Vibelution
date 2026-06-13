@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   apiFailureTelemetryEventCode,
   apiFailureTelemetryLevel,
+  buildLifecycleControlResponseTelemetry,
   buildRestartRequestUnconfirmedTelemetry,
   buildRestartRequestedTelemetry,
   buildShutdownLocallyCompleteTelemetry,
@@ -236,6 +237,47 @@ describe("api failure telemetry", () => {
         action: "restart",
         source: "app_shell",
         errorMessage: "Failed to fetch",
+      },
+    });
+  });
+
+  it("records launcher lifecycle control acceptance and rejection", () => {
+    expect(
+      buildLifecycleControlResponseTelemetry("shutdown", {
+        accepted: true,
+        completed: false,
+        commandId: "cmd-close",
+        operation: "stop",
+        message: "Queued",
+      }),
+    ).toMatchObject({
+      phase: "shutdown",
+      eventCode: "browser.user_action.shutdown_request_accepted",
+      level: "info",
+      fields: {
+        action: "shutdown",
+        source: "app_shell",
+        accepted: true,
+        completed: false,
+        commandId: "cmd-close",
+        operation: "stop",
+        responseMessage: "Queued",
+      },
+    });
+    expect(
+      buildLifecycleControlResponseTelemetry("force_shutdown", {
+        accepted: false,
+        message: "Blocked",
+      }),
+    ).toMatchObject({
+      phase: "shutdown",
+      eventCode: "browser.user_action.force_shutdown_request_rejected",
+      level: "warning",
+      fields: {
+        action: "force_shutdown",
+        source: "app_shell",
+        accepted: false,
+        responseMessage: "Blocked",
       },
     });
   });

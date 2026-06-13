@@ -2091,6 +2091,121 @@ export type WorkbenchWindowModeUpdateRequest = {
   baseHash: string;
 };
 
+export type LauncherDeveloperModeSetting = {
+  schemaVersion: number;
+  enabled: boolean;
+  defaulted: boolean;
+  updatedAt: string;
+  updatedBy: string;
+  controller: "launcher" | string;
+  configPath: string;
+  configHash: string;
+  policy: {
+    settingsPageMutable: boolean;
+    requiresLauncher: boolean;
+    requiresPreview: boolean;
+    requiresPlanHash: boolean;
+    requiresConfirm: boolean;
+    defaultWhenMissing: boolean;
+  };
+};
+
+export type LauncherDeveloperModeUpdateRequest = {
+  enabled: boolean;
+  baseHash: string;
+};
+
+export type LauncherDeveloperModeUpdateResponse = {
+  ok: boolean;
+  setting: LauncherDeveloperModeSetting;
+  message: string;
+};
+
+export type LauncherDeveloperCleanupAction = "quick_clean" | "db_compact" | "worktree_cleanup";
+
+export type LauncherDeveloperNoiseItem = {
+  id: string;
+  label: string;
+  path: string;
+  exists: boolean;
+  sizeBytes: number;
+  targetCount: number;
+  skippedCount?: number;
+  action: LauncherDeveloperCleanupAction | "manual_review" | string;
+  protected: boolean;
+  reason: string;
+};
+
+export type LauncherDeveloperNoiseOverview = {
+  schemaVersion: number;
+  developerMode: LauncherDeveloperModeSetting;
+  projectRoot: string;
+  items: LauncherDeveloperNoiseItem[];
+  updatedAt: string;
+};
+
+export type LauncherDeveloperCleanupTarget = {
+  path: string;
+  relativePath: string;
+  kind: "file" | "directory" | "missing" | string;
+  operation: string;
+  sizeBytes: number;
+  mtimeNs: number;
+  branch?: string;
+  head?: string;
+  dbStats?: Record<string, unknown>;
+  beforeSizeBytes?: number;
+  afterSizeBytes?: number;
+};
+
+export type LauncherDeveloperCleanupPlan = {
+  schemaVersion: number;
+  planId: string;
+  planHash: string;
+  action: LauncherDeveloperCleanupAction;
+  createdAt: string;
+  expiresAt: string;
+  projectRoot: string;
+  targetCount: number;
+  estimatedBytes: number;
+  targets: LauncherDeveloperCleanupTarget[];
+  skipped: Array<Record<string, string>>;
+  requiresConfirm: boolean;
+  applyContract: {
+    requiresDeveloperMode: boolean;
+    requiresPlanId: boolean;
+    requiresPlanHash: boolean;
+    requiresConfirm: boolean;
+  };
+};
+
+export type LauncherDeveloperCleanupPreviewResponse = {
+  ok: boolean;
+  mode: "preview" | string;
+  developerMode: LauncherDeveloperModeSetting;
+  plan: LauncherDeveloperCleanupPlan;
+  message: string;
+};
+
+export type LauncherDeveloperCleanupApplyRequest = {
+  action: LauncherDeveloperCleanupAction;
+  planId: string;
+  planHash: string;
+  confirm: boolean;
+};
+
+export type LauncherDeveloperCleanupApplyResponse = {
+  ok: boolean;
+  mode: "apply" | string;
+  developerMode: LauncherDeveloperModeSetting;
+  planId: string;
+  planHash: string;
+  action: LauncherDeveloperCleanupAction;
+  applied: LauncherDeveloperCleanupTarget[];
+  reclaimedBytes: number;
+  message: string;
+};
+
 export type LauncherStartupSettings = {
   runtime: {
     profile: string;
@@ -2188,6 +2303,7 @@ export type LauncherStatus = {
   settings?: {
     startup?: LauncherStartupSettings;
     workbenchWindow?: WorkbenchWindowModeSetting;
+    developerMode?: LauncherDeveloperModeSetting;
   };
 };
 

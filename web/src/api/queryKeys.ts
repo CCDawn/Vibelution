@@ -1,6 +1,7 @@
 export const queryKeys = {
   runtimeSummary: () => ["runtime", "summary"] as const,
   launcherStatus: () => ["launcher", "status"] as const,
+  launcherDeveloperNoiseOverview: () => ["launcher", "developer-mode", "noise-overview"] as const,
   backendHealth: () => ["runtime", "backend-health"] as const,
   gitStatus: () => ["git", "status"] as const,
   tools: () => ["tools"] as const,
