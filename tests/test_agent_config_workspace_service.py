@@ -802,7 +802,7 @@ def test_agent_config_workspace_uses_compact_room_and_team_indexes(tmp_path, mon
         title="配置中心群聊",
         participant_agent_ids=[alpha["agentId"], beta["agentId"]],
     )
-    team_service.create_team(
+    team = team_service.create_team(
         name="配置中心团队",
         members=[{"agentId": alpha["agentId"], "role": "lead"}],
     )
@@ -820,6 +820,84 @@ def test_agent_config_workspace_uses_compact_room_and_team_indexes(tmp_path, mon
     alpha_refs = payload["references"][alpha["agentId"]]
     assert any(item["kind"] == "chat_room" and item["sourceLabel"] == "配置中心群聊" for item in alpha_refs)
     assert any(item["kind"] == "team" and item["sourceLabel"] == "配置中心团队" for item in alpha_refs)
+    team_indexes = payload["teamIndexes"]
+    assert any(
+        item["section"] == "team_index"
+        and item["label"] == "配置中心团队"
+        and item["agentIds"] == [alpha["agentId"]]
+        and item["count"] == 1
+        for item in team_indexes
+    )
+
+
+def test_agent_config_workspace_exposes_ai_search_source_scope_indexes(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
+    owner = agent_directory_service.create_agent_instance(display_name="Scope Owner")
+    fallback = agent_directory_service.create_agent_instance(display_name="Scope Fallback")
+    team = team_service.create_team(
+        name="AI Search Index",
+        purpose="track source scope",
+        members=[
+            {"agentId": owner["agentId"], "role": "scope_owner"},
+            {"agentId": fallback["agentId"], "role": "fallback"},
+        ],
+        team_kind="ai_search",
+        team_category="AI 搜索",
+        team_source="ai_search",
+    )
+    monkeypatch.setattr(
+        agent_config_workspace_service,
+        "_safe_team_source_scope",
+        lambda item: {
+            "groups": [
+                {
+                    "groupId": "global_primary",
+                    "label": "全球主源",
+                    "ownerRole": "scope_owner",
+                    "tier": "tier1",
+                    "description": "primary global sources",
+                    "sourceCount": 3,
+                    "enabledByDefault": True,
+                    "evidenceRole": "primary",
+                }
+            ]
+        }
+        if item.get("teamId") == team["teamId"]
+        else None,
+    )
+
+    payload = agent_config_workspace_service.get_agent_config_workspace()
+    indexes = {item["id"]: item for item in payload["teamIndexes"]}
+
+    team_index = indexes[f"team:{team['teamId']}"]
+    assert team_index["section"] == "team_index"
+    assert team_index["teamKind"] == "ai_search"
+    assert team_index["agentIds"] == [owner["agentId"], fallback["agentId"]]
+    source_index = indexes[f"source:{team['teamId']}:global_primary"]
+    assert source_index["section"] == "source_scope"
+    assert source_index["agentIds"] == [owner["agentId"]]
+    assert source_index["sourceCount"] == 3
+    assert source_index["enabledByDefault"] is True
+    assert source_index["evidenceRole"] == "primary"
+
+
+def test_agent_config_workspace_expands_ai_search_source_scope_indexes(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
+    team = team_service.ensure_ai_search_system_team()
+
+    payload = agent_config_workspace_service.get_agent_config_workspace()
+
+    indexes = {item["id"]: item for item in payload["teamIndexes"]}
+    assert indexes["team:ai-search-team"]["label"] == "AI 搜索范围团队"
+    assert indexes["team:ai-search-team"]["section"] == "team_index"
+    assert indexes["team:ai-search-team"]["count"] == 4
+    assert indexes["source:ai-search-team:global_official"]["section"] == "source_scope"
+    assert indexes["source:ai-search-team:global_official"]["sourceCount"] >= 10
+    assert indexes["source:ai-search-team:global_official"]["agentIds"] == [team["members"][1]["agentId"]]
+    assert indexes["source:ai-search-team:global_official"]["count"] == 1
+    assert indexes["source:ai-search-team:community_signals"]["enabledByDefault"] is False
 
 
 def test_agent_config_workspace_batches_runtime_history_reads(tmp_path, monkeypatch):

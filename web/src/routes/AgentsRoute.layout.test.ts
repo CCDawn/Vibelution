@@ -12,7 +12,7 @@ const stylesSource = readFileSync(new URL("./AgentsRoute.module.css", import.met
 
 describe("AgentsRoute layout contract", () => {
   it("loads the read-only Agent config workspace endpoint", () => {
-    expect(routeSource).toContain("fetchJson<AgentConfigWorkspace>(\"/api/agents/config-workspace\")");
+    expect(routeSource).toContain("fetchJson<AgentConfigWorkspaceWithTeamIndexes>(\"/api/agents/config-workspace\")");
     expect(routeSource).toContain("queryKeys.agentConfigWorkspace()");
   });
 
@@ -52,12 +52,22 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).not.toContain("agentCardGrid");
   });
 
-  it("separates Agent filters into work queue, status, identity, mode, and reference sections", () => {
+  it("separates Agent filters into work queue, status, identity, team, source, mode, and reference sections", () => {
     expect(routeSource).toContain('useState<FilterId>("active")');
     expect(routeSource).toContain("groupedFilters");
+    expect(routeSource).toContain("teamIndexes");
     expect(routeSource).toContain("copy.filterSections");
     expect(routeSource).toContain("copy.groupLabels");
-    expect(routeSource).toContain('const sectionOrder = ["status", "boundary", "mode", "reference"] as const;');
+    expect(routeSource).toContain('const sectionOrder = ["status", "boundary", "team_index", "source_scope", "mode", "reference"] as const;');
+    expect(routeSource).toContain("workspaceTeamIndexes(workspace)");
+    expect(routeSource).toContain('section === "team_index"');
+    expect(routeSource).toContain('section === "source_scope"');
+    expect(routeSource).toContain('team_index: "团队索引"');
+    expect(routeSource).toContain('source_scope: "来源范围"');
+    expect(routeSource).toContain('team_index: "Team indexes"');
+    expect(routeSource).toContain('source_scope: "Source scope"');
+    expect(routeSource).toContain("sourceScopeGroupId");
+    expect(routeSource).toContain("teamIndexesWithoutAgentIds");
     expect(routeSource).toContain('section === "boundary"');
     expect(routeSource).toContain("managementSection,");
     expect(routeSource).toContain("styles.groupSection");
@@ -498,7 +508,7 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("function isWorkSessionCreateDraft");
     expect(routeSource).toContain("const createDraftIsWorkSession = isWorkSessionCreateDraft(createDraft)");
     expect(routeSource).toContain("const workSession = isWorkSessionCreateDraft(draft)");
-    expect(routeSource).toContain("const sectionOrder = [\"status\", \"boundary\", \"mode\", \"reference\"] as const");
+    expect(routeSource).toContain("const sectionOrder = [\"status\", \"boundary\", \"team_index\", \"source_scope\", \"mode\", \"reference\"] as const");
     expect(routeSource).toContain("copy.managementModelPrompt");
     expect(routeSource).toContain("copy.managementWorkspace");
     expect(routeSource).toContain("copy.nextSetupModelPrompt");
