@@ -232,121 +232,6 @@
   resize: vertical;
 }
 
-.researchIndexPanel {
-  display: grid;
-  gap: 8px;
-  margin: 8px 10px 0;
-  padding: 8px 10px;
-  border: 1px solid var(--border-soft);
-  border-radius: 8px;
-  background:
-    linear-gradient(90deg, color-mix(in srgb, var(--accent-cool) 9%, transparent), transparent 58%),
-    color-mix(in srgb, var(--surface-panel-strong) 70%, transparent);
-}
-
-.researchInspector .researchIndexPanel {
-  margin: 0;
-}
-
-.researchIndexHeader {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.researchIndexHeader div {
-  display: grid;
-  gap: 2px;
-  min-width: 0;
-}
-
-.researchIndexHeader strong {
-  color: var(--fg-primary);
-  font-size: 0.78rem;
-}
-
-.researchIndexHeader span,
-.researchIndexHeader small {
-  color: var(--fg-muted);
-  font-size: 0.66rem;
-  font-weight: 740;
-}
-
-.researchIndexHeader small {
-  flex: 0 0 auto;
-}
-
-.researchIndexList {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
-  min-width: 0;
-  padding-bottom: 1px;
-}
-
-.researchIndexItem {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 3px 8px;
-  min-width: 0;
-  padding: 9px 10px;
-  border: 1px solid var(--border-soft);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--surface-card) 56%, transparent);
-  color: var(--fg-secondary);
-  text-align: left;
-  text-decoration: none;
-}
-
-.researchIndexItem strong,
-.researchIndexItem span,
-.researchIndexItem em {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.researchIndexItem small {
-  display: inline-flex;
-  width: 24px;
-  height: 22px;
-  align-items: center;
-  justify-content: center;
-  grid-row: 1 / span 3;
-  border-radius: 6px;
-  background: color-mix(in srgb, var(--accent-cool) 14%, transparent);
-  color: color-mix(in srgb, var(--accent-cool) 76%, var(--fg-primary));
-  font-size: 0.62rem;
-  font-weight: 840;
-}
-
-.researchIndexItem strong {
-  color: var(--fg-primary);
-  font-size: 0.78rem;
-}
-
-.researchIndexItem span {
-  color: var(--fg-muted);
-  font-size: 0.65rem;
-}
-
-.researchIndexItem em {
-  color: var(--fg-tertiary);
-  font-size: 0.61rem;
-  font-style: normal;
-  font-weight: 720;
-}
-
-.researchIndexItemActive {
-  border-color: color-mix(in srgb, var(--accent-cool) 48%, var(--border-soft));
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--accent-cool) 14%, transparent), transparent 68%),
-    color-mix(in srgb, var(--surface-panel-strong) 76%, transparent);
-  box-shadow: inset 0 -3px 0 var(--accent-cool);
-}
-
 .aiSearchScopePanel {
   display: grid;
   gap: 8px;
@@ -966,17 +851,18 @@
 
 .researchStageLauncher {
   display: grid;
-  gap: 8px;
-  padding: 10px;
-  border-bottom: 1px solid var(--border-soft);
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
   background:
-    linear-gradient(90deg, color-mix(in srgb, var(--accent-success) 9%, transparent), transparent 62%),
-    color-mix(in srgb, var(--surface-panel-strong) 78%, transparent);
+    linear-gradient(120deg, color-mix(in srgb, var(--accent-success) 12%, transparent), transparent 44%),
+    linear-gradient(180deg, color-mix(in srgb, var(--surface-panel-strong) 90%, transparent), var(--surface-panel));
+  box-shadow: 0 12px 34px color-mix(in srgb, black 10%, transparent);
 }
 
 .researchInspector .researchStageLauncher {
-  border: 1px solid var(--border-soft);
-  border-radius: 8px;
+  border-color: color-mix(in srgb, var(--accent-success) 24%, var(--border-soft));
 }
 
 .researchStageLauncherHeader {
@@ -994,12 +880,12 @@
 
 .researchStageLauncherHeader strong {
   color: var(--fg-primary);
-  font-size: 0.82rem;
+  font-size: 0.98rem;
 }
 
 .researchStageLauncherHeader span {
   color: var(--fg-muted);
-  font-size: 0.66rem;
+  font-size: 0.72rem;
   font-weight: 740;
 }
 
@@ -1028,29 +914,32 @@
 
 .researchStageTopicInput input {
   min-width: 0;
-  min-height: 30px;
+  min-height: 38px;
+  padding: 0 10px;
   border: 1px solid var(--border-soft);
-  border-radius: var(--radius-control);
+  border-radius: 8px;
   background: var(--surface-panel-strong);
   color: var(--fg-primary);
-  font-size: 0.75rem;
+  font-size: 0.82rem;
   font-weight: 700;
 }
 
 .researchStageGrid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 7px;
+  gap: 10px;
 }
 
 .researchStageCard {
   display: grid;
-  gap: 7px;
+  grid-template-rows: auto 1fr auto auto;
+  gap: 10px;
   min-width: 0;
-  padding: 8px;
+  min-height: 178px;
+  padding: 12px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
-  background: color-mix(in srgb, var(--surface-card) 78%, transparent);
+  background: color-mix(in srgb, var(--surface-card) 90%, transparent);
 }
 
 .researchStageCardActive {
@@ -1058,15 +947,38 @@
   box-shadow: inset 3px 0 0 var(--accent-success);
 }
 
-.researchStageCard > div:first-child {
+.researchStageCardHead {
   display: grid;
-  gap: 2px;
+  grid-template-columns: auto 1fr;
+  gap: 10px;
+  align-items: start;
+  min-width: 0;
+}
+
+.researchStageCardHead > small {
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--accent-success) 18%, var(--surface-panel-strong));
+  color: color-mix(in srgb, var(--accent-success) 76%, var(--fg-primary));
+  font-size: 0.68rem;
+  font-weight: 880;
+  line-height: 1;
+}
+
+.researchStageCardHead > div {
+  display: grid;
+  gap: 3px;
   min-width: 0;
 }
 
 .researchStageCard strong,
 .researchStageCard span,
-.researchStageCard small {
+.researchStageCard p,
+.researchStageCard em {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1074,43 +986,69 @@
 
 .researchStageCard strong {
   color: var(--fg-primary);
-  font-size: 0.76rem;
+  font-size: 0.9rem;
   white-space: nowrap;
 }
 
-.researchStageCard span,
-.researchStageCard small {
+.researchStageCard span {
   color: var(--fg-muted);
-  font-size: 0.64rem;
+  font-size: 0.68rem;
   font-weight: 720;
 }
 
-.researchStageCard small {
+.researchStageCard p {
   display: -webkit-box;
-  min-height: 28px;
-  -webkit-line-clamp: 2;
+  min-height: 44px;
+  margin: 0;
+  color: var(--fg-secondary);
+  font-size: 0.76rem;
+  font-weight: 720;
+  line-height: 1.45;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+}
+
+.researchStageCard em {
+  display: block;
+  color: var(--fg-muted);
+  font-size: 0.66rem;
+  font-style: normal;
+  font-weight: 720;
+  white-space: nowrap;
+}
+
+.researchStageCard p,
+.researchStageCard em {
   -webkit-box-orient: vertical;
 }
 
 .researchStageActions {
   display: grid;
-  grid-template-columns: 1fr;
-  gap: 5px;
+  grid-template-columns: minmax(0, 1.3fr) minmax(92px, 0.7fr);
+  gap: 7px;
 }
 
-.researchStageActions button {
+.researchStageActions button,
+.researchStageActions a {
   display: inline-flex;
   min-width: 0;
-  min-height: 28px;
+  min-height: 32px;
   align-items: center;
   justify-content: center;
   gap: 5px;
   border: 1px solid color-mix(in srgb, var(--accent-cool) 35%, var(--border-soft));
-  border-radius: var(--radius-control);
+  border-radius: 8px;
   background: color-mix(in srgb, var(--surface-panel-strong) 82%, transparent);
   color: var(--fg-primary);
-  font-size: 0.68rem;
+  font-size: 0.72rem;
   font-weight: 820;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.researchStageActions button:first-child {
+  border-color: color-mix(in srgb, var(--accent-success) 38%, var(--border-soft));
+  background: color-mix(in srgb, var(--accent-success) 12%, var(--surface-panel-strong));
 }
 
 .researchStageActions button:disabled {
@@ -3644,7 +3582,6 @@
     grid-template-columns: 1fr;
   }
 
-  .researchIndexList,
   .sourceCollectionStageModules,
   .researchStageHeroPanel,
   .researchStageActionPanel,

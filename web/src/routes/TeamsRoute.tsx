@@ -2410,34 +2410,62 @@ export function TeamsRoute({
       return null;
     }
     const phaseOrder: ResearchStageType[] = ["knowledge_collection", "experiment", "iteration"];
-    const phaseFallback: Record<ResearchStageType, { label: string; primaryAction: string; secondaryAction: string }> = {
+    const phaseFallback: Record<ResearchStageType, { label: string; primaryAction: string }> = {
       knowledge_collection: {
         label: lang === "zh" ? "知识搜集" : "Knowledge",
-        primaryAction: lang === "zh" ? "启动知识搜集" : "Start knowledge",
-        secondaryAction: lang === "zh" ? "开启新一轮" : "New round",
+        primaryAction: lang === "zh" ? "开始知识搜集" : "Start knowledge",
       },
       experiment: {
         label: lang === "zh" ? "实验" : "Experiment",
         primaryAction: lang === "zh" ? "启动实验规划" : "Plan experiment",
-        secondaryAction: lang === "zh" ? "重新规划" : "Replan",
       },
       iteration: {
         label: lang === "zh" ? "迭代" : "Iteration",
         primaryAction: lang === "zh" ? "启动迭代" : "Start iteration",
-        secondaryAction: lang === "zh" ? "新一轮迭代" : "New iteration",
       },
     };
+    const stageHint = (stageType: ResearchStageType, active: boolean, latestRound: ResearchStagePhaseStatus["latestRound"] | null | undefined) => {
+      if (stageType === "knowledge_collection") {
+        if (!selectedSourceCollectionRun) {
+          return lang === "zh" ? "生成搜索计划和团队分工，先把资料搜集跑起来。" : "Create the search plan and team assignments.";
+        }
+        if (sourceCollectionOpenAssignmentCount > 0) {
+          return lang === "zh" ? "已有搜集批次，进入工作台执行下一批搜索。" : "A run is open. Enter the workspace and run the next search batch.";
+        }
+        if (sourceManifestCandidates.length > sourceCollectionApprovedCount) {
+          return lang === "zh" ? "已有候选资料，下一步进入筛选。" : "Candidate sources are ready for screening.";
+        }
+        return lang === "zh" ? "本轮可补充搜集，或由用户决定进入实验。" : "Add another collection round or move to experiments.";
+      }
+      if (stageType === "experiment") {
+        if (active) {
+          return lang === "zh" ? "实验规划已启动，补齐 baseline、指标和记录。" : "Planning is active. Fill baselines, metrics, and records.";
+        }
+        return latestRound
+          ? (lang === "zh" ? "可重新规划实验，或查看上一轮计划。" : "Replan or review the latest plan.")
+          : (lang === "zh" ? "知识搜集后，由用户决定启动实验规划。" : "Start experiment planning after collection.");
+      }
+      if (active) {
+        return lang === "zh" ? "迭代已启动，围绕结果复盘和版本化推进。" : "Iteration is active for review and versioning.";
+      }
+      return latestRound
+        ? (lang === "zh" ? "可开启新一轮优化，沉淀交付计划。" : "Start another optimization round and prepare delivery.")
+        : (lang === "zh" ? "实验完成后再进入迭代优化。" : "Enter iteration after experiments are complete.");
+    };
+    const currentStageLabel = researchStageRoundStatus?.currentStage
+      ? researchWorkspaceViewLabel(researchStageRoundStatus.currentStage as ResearchStageWorkspaceView, lang)
+      : lang === "zh" ? "待启动" : "not started";
     return (
-      <section className={styles.researchStageLauncher} aria-label={lang === "zh" ? "科研三阶段启动台" : "Research stage launcher"}>
+      <section className={styles.researchStageLauncher} aria-label={lang === "zh" ? "科研控制台" : "Research console"}>
         <div className={styles.researchStageLauncherHeader}>
           <div>
-            <strong>{lang === "zh" ? "科研三阶段启动台" : "Research stage launcher"}</strong>
+            <strong>{lang === "zh" ? "科研控制台（三阶段）" : "Research console (3 stages)"}</strong>
             <span>
               {researchStageRoundStatus
-                ? `${lang === "zh" ? "当前" : "Current"} ${researchStageRoundStatus.currentStage || "knowledge_collection"}`
+                ? `${lang === "zh" ? "当前阶段" : "Current"} · ${currentStageLabel}`
                 : researchStageRoundStatusQuery.isPending
                 ? (lang === "zh" ? "读取阶段状态中" : "Loading stage status")
-                : (lang === "zh" ? "等待阶段启动" : "Waiting for stage start")}
+                : (lang === "zh" ? "选择一个阶段开始" : "Choose a stage to start")}
             </span>
           </div>
           <button type="button" onClick={() => void researchStageRoundStatusQuery.refetch()} disabled={researchStageRoundStatusQuery.isFetching}>
@@ -2459,28 +2487,33 @@ export function TeamsRoute({
             const latestRound = phase?.latestRound;
             const active = Boolean(phase?.activeRoundId);
             const disabled = selectedTeamStartResearchStagePending || (stageType === "knowledge_collection" && !researchStageCanLaunch);
+            const navItem = RESEARCH_WORKSPACE_NAV_ITEMS.find((item) => item.view === stageType);
             return (
               <article key={stageType} className={active ? `${styles.researchStageCard} ${styles.researchStageCardActive}` : styles.researchStageCard}>
-                <div>
-                  <strong>{phase?.label || fallback.label}</strong>
-                  <span>
-                    {active
-                      ? (lang === "zh" ? "运行中" : "running")
-                      : latestRound
-                      ? `${lang === "zh" ? "最近" : "latest"} ${latestRound.status}`
-                      : (lang === "zh" ? "未启动" : "not started")}
-                  </span>
+                <div className={styles.researchStageCardHead}>
+                  <small>{String(phaseOrder.indexOf(stageType) + 1).padStart(2, "0")}</small>
+                  <div>
+                    <strong>{phase?.label || fallback.label}</strong>
+                    <span>
+                      {active
+                        ? (lang === "zh" ? "运行中" : "running")
+                        : latestRound
+                        ? (lang === "zh" ? "已有轮次" : "has round")
+                        : (lang === "zh" ? "未启动" : "not started")}
+                    </span>
+                  </div>
                 </div>
-                <small>{phase?.readiness?.reason || (lang === "zh" ? "由用户决定是否进入本阶段。" : "User decides when to enter this stage.")}</small>
+                <p>{stageHint(stageType, active, latestRound)}</p>
+                <em>{navItem ? (lang === "zh" ? navItem.zhModules : navItem.enModules) : ""}</em>
                 <div className={styles.researchStageActions}>
                   <button type="button" onClick={() => launchResearchStage(stageType)} disabled={disabled}>
                     <Play size={13} />
                     {phase?.primaryAction || fallback.primaryAction}
                   </button>
-                  <button type="button" onClick={() => launchResearchStage(stageType, "new_round")} disabled={disabled}>
-                    <Plus size={13} />
-                    {phase?.secondaryAction || fallback.secondaryAction}
-                  </button>
+                  <Link to={researchWorkspaceStageRoute(selectedTeam?.teamId || RESEARCH_TEAM_ID, stageType)}>
+                    <Link2 size={13} />
+                    {lang === "zh" ? "阶段详情" : "Details"}
+                  </Link>
                 </div>
               </article>
             );
@@ -2499,37 +2532,6 @@ export function TeamsRoute({
           </div>
         ) : null}
       </section>
-    );
-  }
-
-  function renderResearchWorkspaceNav() {
-    if (!researchWorkflowTeamSelected) {
-      return null;
-    }
-    return (
-      <nav className={styles.researchIndexPanel} aria-label={lang === "zh" ? "科研三阶段索引" : "Research stage index"}>
-        <div className={styles.researchIndexHeader}>
-          <div>
-            <strong>{lang === "zh" ? "科研三阶段索引" : "Research stages"}</strong>
-            <span>{lang === "zh" ? "团队专属阶段页" : "Team-specific stage pages"}</span>
-          </div>
-          <small>{lang === "zh" ? "三阶段" : "3 stages"}</small>
-        </div>
-        <div className={styles.researchIndexList}>
-          {RESEARCH_WORKSPACE_NAV_ITEMS.map((item, index) => (
-            <Link
-              key={item.view}
-              className={researchWorkspaceView === item.view ? `${styles.researchIndexItem} ${styles.researchIndexItemActive}` : styles.researchIndexItem}
-              to={researchWorkspaceStageRoute(selectedTeam?.teamId || RESEARCH_TEAM_ID, item.view)}
-            >
-              <small>{String(index + 1).padStart(2, "0")}</small>
-              <strong>{lang === "zh" ? item.zh : item.en}</strong>
-              <span>{lang === "zh" ? item.zhDetail : item.enDetail}</span>
-              <em>{lang === "zh" ? item.zhModules : item.enModules}</em>
-            </Link>
-          ))}
-        </div>
-      </nav>
     );
   }
 
@@ -4026,7 +4028,9 @@ export function TeamsRoute({
     researchWorkflowTeamSelected ? styles.researchInspector : "",
   ].filter(Boolean).join(" ");
   const showNodeBindingPanel = !researchWorkflowTeamSelected || researchCanvasVisible;
-  const showWorkflowPanel = !aiSearchScopeTeamSelected && (!researchWorkflowTeamSelected || (!researchCanvasVisible && researchWorkspaceView !== "discussion"));
+  const showWorkflowPanel =
+    !aiSearchScopeTeamSelected
+    && (!researchWorkflowTeamSelected || (!researchCanvasVisible && researchWorkspaceView !== "discussion" && researchWorkspaceView !== "overview"));
   const showAiSearchScopePanel = aiSearchScopeTeamSelected;
   const showTeamCommunicationPanel = !researchWorkflowTeamSelected || (!researchCanvasVisible && researchWorkspaceView === "discussion");
   const showResearchOverview = researchWorkflowTeamSelected && researchWorkspaceView === "overview";
@@ -4353,7 +4357,6 @@ export function TeamsRoute({
           <div className={styles.inspectorBody}>
             {researchWorkflowTeamSelected && !researchCanvasVisible ? (
               <>
-                {renderResearchWorkspaceNav()}
                 {renderResearchStageLauncher()}
               </>
             ) : null}
