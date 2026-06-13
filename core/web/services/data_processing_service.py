@@ -235,7 +235,17 @@ def record_collection_output(run_id: str, assignment_id: str, payload: dict[str,
             _append_jsonl(_records_path(run["runId"]), record)
         _append_jsonl(_outputs_path(run["runId"]), output)
         _replace_assignment(run["runId"], assignment_id, {"status": next_assignment_status, "updatedAt": now})
-        _touch_run(run["runId"], status=_advance_run_status(run, preferred="processing" if created_records else "collecting"))
+        next_assignments = _read_jsonl(_assignments_path(run["runId"]))
+        next_record_count = len(_read_jsonl(_records_path(run["runId"])))
+        _touch_run(
+            run["runId"],
+            status=_advance_run_status_after_collection_output(
+                run,
+                assignments=next_assignments,
+                record_count=next_record_count,
+                preferred="processing" if created_records else "collecting",
+            ),
+        )
         _append_jsonl(
             _events_path(run["runId"]),
             _run_event(
@@ -395,6 +405,26 @@ def _advance_run_status(run: dict[str, Any], *, preferred: str) -> str:
     if current in {"completed", "cancelled"}:
         return current
     return _normalize_choice(preferred, RUN_STATUSES, default=current)
+
+
+def _advance_run_status_after_collection_output(
+    run: dict[str, Any],
+    *,
+    assignments: list[dict[str, Any]],
+    record_count: int,
+    preferred: str,
+) -> str:
+    current = str(run.get("status") or "draft")
+    if current in {"completed", "cancelled"}:
+        return current
+    if not assignments:
+        return _normalize_choice(preferred, RUN_STATUSES, default=current)
+    open_assignments = [item for item in assignments if item.get("status") in {"open", "in_progress", "returned"}]
+    if open_assignments:
+        return _normalize_choice(preferred, RUN_STATUSES, default=current)
+    if record_count > 0:
+        return "reviewing"
+    return "completed"
 
 
 def _status_next_actions(run: dict[str, Any], records: list[dict[str, Any]], assignments: list[dict[str, Any]], outputs: list[dict[str, Any]]) -> list[dict[str, str]]:

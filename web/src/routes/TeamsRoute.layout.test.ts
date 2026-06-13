@@ -265,14 +265,14 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("资料搜集");
     expect(routeSource).toContain("科研控制台");
     expect(routeSource).toContain("开始知识搜集");
-    expect(routeSource).toContain("执行下一批搜索");
+    expect(routeSource).toContain("搜索下一批");
     expect(routeSource).toContain("新一轮搜集");
     expect(routeSource).toContain("待筛选");
     expect(routeSource).toContain("可进入实验");
     expect(routeSource).toContain("阶段详情");
     expect(routeSource).toContain("styles.researchStageCardHead");
     expect(routeSource).toContain("styles.researchStageCardMetrics");
-    expect(routeSource).toContain("执行下一批搜索");
+    expect(routeSource).toContain("待继续搜索");
     expect(routeSource).toContain("/storage/open");
     expect(routeSource).toContain("本轮产物");
     expect(routeSource).toContain("打开批次目录");

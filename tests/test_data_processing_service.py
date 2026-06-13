@@ -98,12 +98,61 @@ def test_collection_assignment_records_agent_output_without_publishing(tmp_path,
     assert result["createdRecords"][0]["collectionTrace"]["assignmentId"] == assignment["assignmentId"]
     assert assignments["assignments"][0]["status"] == "completed"
     assert status["summary"]["recordCount"] == 1
+    assert status["runStatus"] == "reviewing"
     assert status["boundaries"]["writesRag"] is False
     assert [event["eventCode"] for event in events] == [
         "data_processing.run.created",
         "data_processing.collection_assignment.created",
         "data_processing.collection_output.recorded",
     ]
+
+
+def test_processing_run_stays_active_until_all_collection_assignments_close(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    run = data_processing_service.create_processing_run(title="Multi-agent collection")
+    first = data_processing_service.create_collection_assignment(
+        run["runId"],
+        {
+            "agentRole": "data_discovery",
+            "agentId": "agent-data-discovery",
+        },
+    )
+    second = data_processing_service.create_collection_assignment(
+        run["runId"],
+        {
+            "agentRole": "source_quality",
+            "agentId": "agent-source-quality",
+        },
+    )
+
+    data_processing_service.record_collection_output(
+        run["runId"],
+        first["assignmentId"],
+        {
+            "status": "completed",
+            "records": [{"sourceType": "paper", "sourceRef": "https://doi.org/10.1/demo", "title": "Demo paper"}],
+        },
+    )
+
+    active_status = data_processing_service.get_processing_status(run["runId"])
+    assert active_status["runStatus"] == "processing"
+    assert active_status["summary"]["openAssignmentCount"] == 1
+
+    data_processing_service.record_collection_output(
+        run["runId"],
+        second["assignmentId"],
+        {
+            "status": "completed",
+            "records": [{"sourceType": "paper", "sourceRef": "https://doi.org/10.2/demo", "title": "Second paper"}],
+        },
+    )
+
+    ready_status = data_processing_service.get_processing_status(run["runId"])
+    assignments = data_processing_service.list_collection_assignments(run["runId"])
+    assert ready_status["runStatus"] == "reviewing"
+    assert ready_status["summary"]["recordCount"] == 2
+    assert ready_status["summary"]["openAssignmentCount"] == 0
+    assert {item["status"] for item in assignments["assignments"]} == {"completed"}
 
 
 def test_collection_assignment_rejects_unknown_agent_role(tmp_path, monkeypatch):
