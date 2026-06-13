@@ -143,11 +143,10 @@ _IMAGE_INPUT_UNSUPPORTED_PATTERNS = (
     "doesn't support image input",
     "unsupported image",
     "unsupported content type",
-    "input_image",
-    "image_url",
-    "vision",
+    "vision is not supported",
+    "image input is not supported",
+    "does not support vision",
 )
-
 
 def _record_config_scene_event(
     phase: str,
@@ -2335,6 +2334,7 @@ def open_system_environment_settings() -> dict[str, object]:
     if os.name != "nt":
         raise ValueError("系统环境变量窗口目前只支持 Windows。")
     focused = False
+    cleanup_error: str | None = None
     try:
         _run_schtasks(["schtasks.exe", "/Delete", "/TN", _OPEN_ENVIRONMENT_TASK_NAME, "/F"])
         create_result = _run_schtasks(
@@ -2361,10 +2361,19 @@ def open_system_environment_settings() -> dict[str, object]:
         raise ValueError(f"无法打开系统环境变量窗口：{exc}") from exc
     finally:
         try:
-            _run_schtasks(["schtasks.exe", "/Delete", "/TN", _OPEN_ENVIRONMENT_TASK_NAME, "/F"])
-        except Exception:
-            pass
-    return {"opened": True, "focused": focused, "method": "interactive-scheduled-task"}
+            cleanup_result = _run_schtasks(["schtasks.exe", "/Delete", "/TN", _OPEN_ENVIRONMENT_TASK_NAME, "/F"])
+            if cleanup_result.returncode != 0:
+                cleanup_error_detail = (cleanup_result.stderr or cleanup_result.stdout or "").strip()
+                cleanup_error = cleanup_error_detail or f"returncode={cleanup_result.returncode}"
+        except Exception as exc:
+            cleanup_error = f"{type(exc).__name__}: {exc}"
+    return {
+        "opened": True,
+        "focused": focused,
+        "method": "interactive-scheduled-task",
+        "cleanup_ok": cleanup_error is None,
+        "cleanup_error": cleanup_error,
+    }
 
 
 def apply_config_workspace(

@@ -13227,6 +13227,8 @@ def test_config_open_environment_opens_system_ui_without_returning_keys(monkeypa
     assert payload["opened"] is True
     assert payload["method"] == "interactive-scheduled-task"
     assert payload["focused"] is True
+    assert payload["cleanup_ok"] is True
+    assert payload["cleanup_error"] is None
     assert launched_commands
     assert focused_windows == ["focused"]
     assert [command[0][1] for command in launched_commands] == ["/Delete", "/Create", "/Run", "/Delete"]
@@ -13235,6 +13237,28 @@ def test_config_open_environment_opens_system_ui_without_returning_keys(monkeypa
     assert "rundll32.exe sysdm.cpl,EditEnvironmentVariables" in create_command
     assert "should-not-leak" not in response.text
     assert "VIBELUTION_SECRET_TEST_KEY" not in response.text
+
+
+def test_config_open_environment_reports_cleanup_failure(monkeypatch):
+    launched_commands = []
+
+    def fake_run(command, **kwargs):
+        launched_commands.append(command)
+        if command[1] == "/Delete" and len(launched_commands) == 4:
+            return SimpleNamespace(returncode=1, stdout="", stderr="delete denied")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(config_service.os, "name", "nt")
+    monkeypatch.setattr(config_service.subprocess, "run", fake_run)
+    monkeypatch.setattr(config_service, "_focus_environment_variables_window", lambda: True)
+
+    response = client.post("/api/config/open-environment", json={})
+
+    assert response.status_code == 200, response.json()
+    payload = response.json()
+    assert payload["opened"] is True
+    assert payload["cleanup_ok"] is False
+    assert payload["cleanup_error"] == "delete denied"
 
 
 def test_config_open_environment_reports_unsupported_platform(monkeypatch):
@@ -13803,6 +13827,12 @@ def test_config_workspace_test_llm_keeps_remote_probe_timeout_short():
     )
 
     assert config_service._llm_test_probe_timeout_seconds(provider, profile) == 10
+
+
+def test_config_image_input_probe_status_avoids_generic_vision_overmatch():
+    assert config_service._image_input_probe_status("vision") == (None, "unknown")
+    assert config_service._image_input_probe_status("vision is not supported by this route") == (False, "unsupported")
+    assert config_service._image_input_probe_status("model does not support vision") == (False, "unsupported")
 
 
 def test_config_workspace_test_llm_image_input_reports_unsupported(monkeypatch, tmp_path):

@@ -896,6 +896,7 @@ class ToolExecutor:
         return str(getattr(decision, "message", "") or "[工具策略提示] 当前工具调用被该 Agent 的 ToolPolicy 拦截。")
 
     def _unknown_tool_message_for_current_context(self) -> str:
+        fallback_context_warning = ""
         try:
             from core.web.services.agent_directory_service import (
                 current_agent_runtime,
@@ -921,8 +922,8 @@ class ToolExecutor:
                     "[错误] 未知工具：该工具未暴露给当前 Agent。"
                     "当前 Agent 没有可见工具。请让用户调整该 Agent 的 ToolPolicy。"
                 )
-        except Exception:
-            pass
+        except Exception as exc:
+            fallback_context_warning = f" 当前 Agent 上下文不可用（{type(exc).__name__}）。"
 
         available_tool_names = sorted(self._tool_map)
         preview_tool_names = available_tool_names[:24]
@@ -932,6 +933,7 @@ class ToolExecutor:
         available_tools = ", ".join(preview_tool_names)
         return (
             "[错误] 未知工具：该工具名不在当前工具目录中。"
+            f"{fallback_context_warning} 已回退到通用工具预览。"
             f"当前可用工具包括：{available_tools}。"
             "请选择功能匹配的工具名，并按该工具的参数 schema 重试。"
         )

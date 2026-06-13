@@ -388,6 +388,22 @@ class TestToolExecutorExecute:
         assert "read_file_tool" not in str(result)
         assert "grep_search_tool" not in str(result)
 
+    def test_unknown_tool_reports_agent_context_fallback(self, executor, monkeypatch):
+        from core.web.services import agent_directory_service
+
+        def fail_current_agent_runtime():
+            raise RuntimeError("runtime unavailable")
+
+        monkeypatch.setattr(agent_directory_service, "current_agent_runtime", fail_current_agent_runtime)
+
+        result, action = executor.execute("missing_runtime_tool", {})
+
+        assert action is None
+        assert "[错误] 未知工具" in str(result)
+        assert "当前 Agent 上下文不可用（RuntimeError）" in str(result)
+        assert "已回退到通用工具预览" in str(result)
+        assert "当前可用工具包括" in str(result)
+
     def test_execute_read_file(self, executor):
         """测试读取文件工具"""
         # 创建一个测试文件
