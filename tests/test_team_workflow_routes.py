@@ -334,6 +334,38 @@ def test_team_workflow_route_accepts_source_collection_search_background(tmp_pat
     assert team_workflow_orchestration_service.load_source_collection_work_run_summary()["latest"]["status"] == "completed"
 
 
+def test_team_workflow_route_assesses_source_quality_batch(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    client = _client()
+    team = client.post("/api/teams", json={"name": "ai科学研究团队"}).json()
+    candidate = team_workflow_orchestration_service.register_candidate_source(
+        team["teamId"],
+        {
+            "title": "Predictive coding cortical hierarchy neural network paper",
+            "sourceUrl": "https://doi.org/10.0000/predictive-coding",
+            "sourceKind": "paper",
+            "summary": "Neural predictive coding evidence for network learning and attention mechanisms.",
+            "tags": ["neuro", "algorithm"],
+            "allowedForAnalysis": True,
+            "createdByAgent": "Data Discovery Agent",
+        },
+    )["candidate"]
+
+    response = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/source-quality/assess-batch",
+        json={"assessedByAgent": "Source Quality Agent"},
+    )
+
+    assert response.status_code == 201, response.text
+    assert response.json()["executionMode"] == "source_quality_agent_batch"
+    assert response.json()["summary"]["assessedCandidateCount"] == 1
+    assert response.json()["assessments"][0]["candidateId"] == candidate["candidateId"]
+    assert response.json()["sourceQualityStatus"]["summary"]["approvedSourceCandidateCount"] == 1
+    assert response.json()["officialBoundary"]["writesFormalKnowledge"] is False
+    assert response.json()["officialBoundary"]["writesRag"] is False
+    assert response.json()["officialBoundary"]["writesOfficialGraph"] is False
+
+
 def test_team_workflow_route_blocks_source_collection_without_prompt_cache(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     monkeypatch.setattr(

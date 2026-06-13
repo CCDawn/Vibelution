@@ -639,6 +639,49 @@ type TeamWorkflowSourceQualityAssessmentPayload = {
   nextActions: string[];
 };
 
+type TeamWorkflowSourceQualityBatchAssessmentPayload = {
+  schemaVersion: number;
+  teamId: string;
+  workflowId: string;
+  batchRunId: string;
+  executionMode: string;
+  status: string;
+  assessedByAgent: string;
+  summary: {
+    targetCandidateCount: number;
+    assessedCandidateCount: number;
+    approvedCandidateCount: number;
+    needsRevisionCandidateCount: number;
+    rejectedCandidateCount: number;
+    failedCandidateCount: number;
+    skippedCandidateCount: number;
+  };
+  assessments: Array<{
+    candidateId: string;
+    title: string;
+    assessmentId: string;
+    decision: string;
+    overallScore: number;
+    requiredFixes: string[];
+    riskFlags: string[];
+    currentState: string;
+    qualityStatus: string;
+    assessedAt: string;
+  }>;
+  skippedCandidates: Array<{ candidateId: string; title?: string; reason: string }>;
+  failedCandidates: Array<{ candidateId: string; error: string }>;
+  sourceQualityStatus: TeamWorkflowSourceQualityStatus;
+  workflow: TeamWorkflowOrchestration;
+  officialBoundary: {
+    writesFormalKnowledge: boolean;
+    writesRag: boolean;
+    writesOfficialGraph: boolean;
+    candidateOnly: boolean;
+  };
+  nextActions: string[];
+  updatedAt: string;
+};
+
 type NodeDragState = {
   nodeId: string;
   startClientX: number;
@@ -1975,6 +2018,7 @@ export function TeamsRoute({
   );
   const sourceCollectionAgentIds = useMemo(() => sourceCollectionAgentIdsFromCanvas(canvas), [canvas]);
   const sourceCollectionOwnerAgentId = useMemo(() => sourceCollectionOwnerAgentIdFromCanvas(canvas), [canvas]);
+  const sourceCollectionQualityAgentId = sourceCollectionAgentIds.source_quality || sourceCollectionOwnerAgentId || "Source Quality Assessment Agent";
   const selectedSourceCollectionRun =
     sourceCollectionRuns.find((run) => run.runId === selectedSourceCollectionRunId) ?? sourceCollectionRuns[0] ?? null;
   const selectedSourceCollectionRunEffectiveId = selectedSourceCollectionRun?.runId ?? "";
@@ -2455,7 +2499,7 @@ export function TeamsRoute({
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            assessedByAgent: sourceCollectionOwnerAgentId,
+            assessedByAgent: sourceCollectionQualityAgentId,
             decision: payload.decision,
             notes: payload.decision === "approved"
               ? "Source Quality Assessment Agent approved this source for downstream paper_note extraction."
@@ -2473,6 +2517,30 @@ export function TeamsRoute({
       void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowKnowledgeIngestionStatus(variables.teamId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowCoordinationStatus(variables.teamId) });
       void queryClient.invalidateQueries({ queryKey: paperNoteChunkStatusQueryKey(variables.teamId) });
+    },
+  });
+
+  const assessSourceQualityBatchMutation = useMutation({
+    mutationFn: (payload: { teamId: string; assessedByAgent: string; maxCandidates?: number }) =>
+      fetchJson<TeamWorkflowSourceQualityBatchAssessmentPayload>(
+        `/api/teams/${encodeURIComponent(payload.teamId)}/workflow-orchestration/source-quality/assess-batch`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            assessedByAgent: payload.assessedByAgent,
+            maxCandidates: payload.maxCandidates ?? 100,
+          }),
+        },
+      ),
+    onSuccess: (payload, variables) => {
+      queryClient.setQueryData(queryKeys.teamWorkflow(variables.teamId), payload.workflow);
+      queryClient.setQueryData(sourceQualityStatusQueryKey(variables.teamId), payload.sourceQualityStatus);
+      void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowCandidates(variables.teamId, TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowKnowledgeIngestionStatus(variables.teamId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowCoordinationStatus(variables.teamId) });
+      void queryClient.invalidateQueries({ queryKey: paperNoteChunkStatusQueryKey(variables.teamId) });
+      scrollSourceCollectionPanelIntoView("source-collection-screening-panel");
     },
   });
 
@@ -3243,7 +3311,7 @@ export function TeamsRoute({
                     <button
                       type="button"
                       onClick={() => {
-                        if (!selectedTeam?.teamId || assessSourceQualityMutation.isPending) {
+                        if (!selectedTeam?.teamId || selectedTeamSourceQualityPending) {
                           return;
                         }
                         assessSourceQualityMutation.mutate({
@@ -3252,7 +3320,7 @@ export function TeamsRoute({
                           decision: "approved",
                         });
                       }}
-                      disabled={!selectedTeam?.teamId || assessSourceQualityMutation.isPending}
+                      disabled={!selectedTeam?.teamId || selectedTeamSourceQualityPending}
                     >
                       <CheckCircle2 size={13} />
                       {candidateQualityPending && assessSourceQualityMutation.variables?.decision === "approved"
@@ -3262,7 +3330,7 @@ export function TeamsRoute({
                     <button
                       type="button"
                       onClick={() => {
-                        if (!selectedTeam?.teamId || assessSourceQualityMutation.isPending) {
+                        if (!selectedTeam?.teamId || selectedTeamSourceQualityPending) {
                           return;
                         }
                         assessSourceQualityMutation.mutate({
@@ -3271,7 +3339,7 @@ export function TeamsRoute({
                           decision: "needs_revision",
                         });
                       }}
-                      disabled={!selectedTeam?.teamId || assessSourceQualityMutation.isPending}
+                      disabled={!selectedTeam?.teamId || selectedTeamSourceQualityPending}
                     >
                       <AlertTriangle size={13} />
                       {candidateQualityPending && assessSourceQualityMutation.variables?.decision === "needs_revision"
@@ -3318,8 +3386,8 @@ export function TeamsRoute({
         {teamWorkflowSourceQualityStatusQuery.error instanceof Error ? (
           <div className={styles.messageError}>{teamWorkflowSourceQualityStatusQuery.error.message}</div>
         ) : null}
-        {selectedTeamAssessSourceQualityError ? (
-          <div className={styles.messageError}>{selectedTeamAssessSourceQualityError.message}</div>
+        {selectedTeamSourceQualityError ? (
+          <div className={styles.messageError}>{selectedTeamSourceQualityError.message}</div>
         ) : null}
       </details>
     );
@@ -4376,6 +4444,14 @@ export function TeamsRoute({
     assessSourceQualityMutation.variables?.teamId === selectedTeam?.teamId && assessSourceQualityMutation.error instanceof Error
       ? assessSourceQualityMutation.error
       : null;
+  const selectedTeamAssessSourceQualityBatchPending =
+    assessSourceQualityBatchMutation.isPending && assessSourceQualityBatchMutation.variables?.teamId === selectedTeam?.teamId;
+  const selectedTeamAssessSourceQualityBatchError =
+    assessSourceQualityBatchMutation.variables?.teamId === selectedTeam?.teamId && assessSourceQualityBatchMutation.error instanceof Error
+      ? assessSourceQualityBatchMutation.error
+      : null;
+  const selectedTeamSourceQualityPending = selectedTeamAssessSourceQualityPending || selectedTeamAssessSourceQualityBatchPending;
+  const selectedTeamSourceQualityError = selectedTeamAssessSourceQualityError || selectedTeamAssessSourceQualityBatchError;
   const sourceCollectionRunStatusValue = String(sourceCollectionRunStatus?.runStatus || selectedSourceCollectionRun?.status || "").toLowerCase();
   const sourceCollectionRecordCount = sourceCollectionRunStatus?.summary.recordCount ?? 0;
   const sourceCollectionOperationActive = Boolean(
@@ -4383,7 +4459,7 @@ export function TeamsRoute({
     || selectedTeamStartSourceCollectionPending
     || selectedTeamExecuteSourceCollectionSearchPending
     || selectedTeamRecordSourceCollectionOutputPending
-    || selectedTeamAssessSourceQualityPending
+    || selectedTeamSourceQualityPending
     || selectedTeamBuildCandidateGraphPending,
   );
   const sourceCollectionOperationFailed = Boolean(
@@ -4392,7 +4468,7 @@ export function TeamsRoute({
     || selectedTeamStartSourceCollectionError
     || selectedTeamExecuteSourceCollectionSearchError
     || selectedTeamRecordSourceCollectionOutputError
-    || selectedTeamAssessSourceQualityError
+    || selectedTeamSourceQualityError
     || selectedTeamBuildCandidateGraphError,
   );
   const sourceQualityAssessedCount = teamWorkflowSourceQualityStatus?.summary.assessedSourceCandidateCount ?? 0;
@@ -4405,14 +4481,14 @@ export function TeamsRoute({
   const knowledgePendingReviewCount = teamWorkflowKnowledgeIngestionStatus?.summary.pendingKnowledgeReviewCandidateCount ?? 0;
   const formalKnowledgeItemCount = teamWorkflowKnowledgeIngestionStatus?.summary.formalKnowledgeItemCount ?? 0;
   const sourceCollectionScreeningDisabled = !selectedTeam?.teamId || sourceQualityCandidateCount <= 0;
-  const sourceCollectionScreeningButtonText = selectedTeamAssessSourceQualityPending
-    ? (lang === "zh" ? "筛选中" : "Screening")
+  const sourceCollectionScreeningButtonText = selectedTeamSourceQualityPending
+    ? (lang === "zh" ? "Agent 筛选中" : "Agent screening")
     : sourceQualityUnassessedCount > 0
-      ? (lang === "zh" ? "打开资料筛选" : "Open screening")
+      ? (lang === "zh" ? "执行资料筛选" : "Run screening")
       : sourceQualityCandidateCount > 0
         ? (lang === "zh" ? "查看筛选结果" : "View screening")
         : (lang === "zh" ? "资料筛选" : "Screening");
-  const sourceCollectionScreeningStatusText = selectedTeamAssessSourceQualityPending
+  const sourceCollectionScreeningStatusText = selectedTeamSourceQualityPending
     ? (lang === "zh" ? "进行中" : "running")
     : sourceQualityUnassessedCount > 0
       ? `${sourceQualityUnassessedCount} ${lang === "zh" ? "待筛" : "pending"}`
@@ -4461,6 +4537,20 @@ export function TeamsRoute({
       return;
     }
     scrollSourceCollectionPanelIntoView("source-collection-screening-panel");
+  };
+  const runSourceCollectionScreeningAction = () => {
+    if (!selectedTeam?.teamId || sourceCollectionScreeningDisabled || selectedTeamSourceQualityPending) {
+      return;
+    }
+    if (sourceQualityUnassessedCount <= 0) {
+      openSourceCollectionScreeningPanel();
+      return;
+    }
+    assessSourceQualityBatchMutation.mutate({
+      teamId: selectedTeam.teamId,
+      assessedByAgent: sourceCollectionQualityAgentId,
+      maxCandidates: Math.max(1, Math.min(100, sourceQualityUnassessedCount)),
+    });
   };
   const openSourceCollectionCandidateStore = () => {
     if (!selectedTeam?.teamId || !selectedSourceCollectionStorageArtifacts || selectedSourceCollectionStorageOpenPending) {
@@ -4528,7 +4618,7 @@ export function TeamsRoute({
       ? (lang === "zh" ? "正在启动搜集" : "Starting collection")
       : selectedTeamRecordSourceCollectionOutputPending
         ? (lang === "zh" ? "正在写入候选" : "Writing candidates")
-        : selectedTeamAssessSourceQualityPending
+        : selectedTeamSourceQualityPending
           ? (lang === "zh" ? "正在筛选资料" : "Screening sources")
           : selectedTeamBuildCandidateGraphPending
             ? (lang === "zh" ? "正在刷新图谱" : "Refreshing graph")
@@ -4579,9 +4669,9 @@ export function TeamsRoute({
           : sourceCollectionRecordCount || sourceManifestCandidates.length
             ? "done"
             : "pending";
-  const sourceCollectionScreeningStepState: SourceCollectionStepState = selectedTeamAssessSourceQualityError
+  const sourceCollectionScreeningStepState: SourceCollectionStepState = selectedTeamSourceQualityError
     ? "failed"
-    : selectedTeamAssessSourceQualityPending
+    : selectedTeamSourceQualityPending
       ? "active"
       : sourceQualityAssessedCount > 0
         ? "done"
@@ -4647,10 +4737,10 @@ export function TeamsRoute({
       state: sourceCollectionScreeningStepState,
       status: sourceCollectionStepStatusText(sourceCollectionScreeningStepState),
       actionLabel: sourceCollectionScreeningButtonText,
-      actionDisabled: sourceCollectionScreeningDisabled,
+      actionDisabled: sourceCollectionScreeningDisabled || selectedTeamSourceQualityPending,
       actionTone: "primary",
       actionIcon: "check",
-      onAction: openSourceCollectionScreeningPanel,
+      onAction: runSourceCollectionScreeningAction,
     },
     {
       id: "candidate",
@@ -5918,8 +6008,8 @@ export function TeamsRoute({
                         {teamWorkflowSourceQualityStatusQuery.error instanceof Error ? (
                           <div className={styles.messageError}>{teamWorkflowSourceQualityStatusQuery.error.message}</div>
                         ) : null}
-                        {selectedTeamAssessSourceQualityError ? (
-                          <div className={styles.messageError}>{selectedTeamAssessSourceQualityError.message}</div>
+                        {selectedTeamSourceQualityError ? (
+                          <div className={styles.messageError}>{selectedTeamSourceQualityError.message}</div>
                         ) : null}
                       </div>
                       <div className={styles.workflowPaperNoteChunkPanel}>
@@ -6036,7 +6126,7 @@ export function TeamsRoute({
                                     <button
                                       type="button"
                                       onClick={() => {
-                                        if (!selectedTeam?.teamId || assessSourceQualityMutation.isPending) {
+                                        if (!selectedTeam?.teamId || selectedTeamSourceQualityPending) {
                                           return;
                                         }
                                         assessSourceQualityMutation.mutate({
@@ -6045,7 +6135,7 @@ export function TeamsRoute({
                                           decision: "approved",
                                         });
                                       }}
-                                      disabled={!selectedTeam?.teamId || assessSourceQualityMutation.isPending}
+                                      disabled={!selectedTeam?.teamId || selectedTeamSourceQualityPending}
                                       title={lang === "zh" ? "由 Source Quality Assessment Agent 标记为通过筛选" : "Mark this source as approved by Source Quality Assessment Agent"}
                                     >
                                       <CheckCircle2 size={13} />
@@ -6056,7 +6146,7 @@ export function TeamsRoute({
                                     <button
                                       type="button"
                                       onClick={() => {
-                                        if (!selectedTeam?.teamId || assessSourceQualityMutation.isPending) {
+                                        if (!selectedTeam?.teamId || selectedTeamSourceQualityPending) {
                                           return;
                                         }
                                         assessSourceQualityMutation.mutate({
@@ -6065,7 +6155,7 @@ export function TeamsRoute({
                                           decision: "needs_revision",
                                         });
                                       }}
-                                      disabled={!selectedTeam?.teamId || assessSourceQualityMutation.isPending}
+                                      disabled={!selectedTeam?.teamId || selectedTeamSourceQualityPending}
                                       title={lang === "zh" ? "退回 Source Intake / Acquisition Agent 补资料" : "Return this source for quality repair"}
                                     >
                                       <AlertTriangle size={13} />

@@ -13,6 +13,7 @@ from core.web.services.team_workflow_orchestration_service import (
     WORKFLOW_KIND_CHALLENGE_CUP_RESEARCH,
     TeamWorkflowOrchestrationError,
     assess_source_candidate_quality,
+    assess_source_quality_batch,
     build_candidate_graph,
     decide_transfer_request,
     ensure_team_workflow_orchestration,
@@ -279,6 +280,15 @@ class SourceQualityAssessmentPayload(BaseModel):
     notes: str = Field("", max_length=4000)
     requiredFixes: list[str] = Field(default_factory=list, max_length=12)
     riskFlags: list[str] = Field(default_factory=list, max_length=12)
+    evidenceRefs: list[dict[str, Any]] = Field(default_factory=list, max_length=24)
+
+
+class SourceQualityBatchAssessmentPayload(BaseModel):
+    assessedByAgent: str = Field("", max_length=160)
+    candidateIds: list[str] = Field(default_factory=list, max_length=200)
+    maxCandidates: int = Field(100, ge=1, le=200)
+    force: bool = False
+    notes: str = Field("", max_length=4000)
     evidenceRefs: list[dict[str, Any]] = Field(default_factory=list, max_length=24)
 
 
@@ -635,6 +645,28 @@ def team_workflow_source_quality_status(team_id: str) -> dict:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/teams/{team_id}/workflow-orchestration/source-quality/assess-batch", status_code=status.HTTP_201_CREATED)
+def team_workflow_source_quality_assess_batch(team_id: str, payload: SourceQualityBatchAssessmentPayload) -> dict:
+    try:
+        return assess_source_quality_batch(team_id, payload.model_dump())
+    except TeamNotFoundError as exc:
+        _raise_team_workflow_route_error(
+            "source_quality.assess_batch",
+            team_id,
+            exc,
+            status_code=404,
+            fields={"assessedByAgent": payload.assessedByAgent},
+        )
+    except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
+        _raise_team_workflow_route_error(
+            "source_quality.assess_batch",
+            team_id,
+            exc,
+            status_code=422,
+            fields={"assessedByAgent": payload.assessedByAgent, "maxCandidates": payload.maxCandidates},
+        )
 
 
 @router.post("/teams/{team_id}/workflow-orchestration/candidates/{candidate_id}/source-quality/assess", status_code=status.HTTP_201_CREATED)

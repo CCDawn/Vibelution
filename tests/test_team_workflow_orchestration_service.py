@@ -1105,6 +1105,80 @@ def test_source_extraction_updates_pdf_manifest_with_page_anchors(tmp_path, monk
     assert response["workflow"]["candidateStore"]["candidateCount"] == 1
 
 
+def test_assess_source_quality_batch_processes_pending_sources_by_agent(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="ai科学研究团队")
+    approved_source = team_workflow_orchestration_service.register_candidate_source(
+        team["teamId"],
+        {
+            "title": "Predictive coding cortical hierarchy neural network paper",
+            "sourceUrl": "https://doi.org/10.0000/predictive-coding",
+            "sourceKind": "paper",
+            "summary": "Neural predictive coding evidence for network learning and attention mechanisms.",
+            "tags": ["neuro", "algorithm"],
+            "allowedForAnalysis": True,
+            "createdByAgent": "Data Discovery Agent",
+        },
+    )["candidate"]
+    revision_source = team_workflow_orchestration_service.register_candidate_source(
+        team["teamId"],
+        {
+            "title": "Unlocated source",
+            "sourceKind": "paper",
+            "summary": "Potentially relevant but missing a source location.",
+            "createdByAgent": "Data Discovery Agent",
+        },
+    )["candidate"]
+
+    response = team_workflow_orchestration_service.assess_source_quality_batch(
+        team["teamId"],
+        {"assessedByAgent": "Source Quality Agent"},
+    )
+    status_payload = team_workflow_orchestration_service.get_source_quality_status(team["teamId"])
+    decisions = {item["candidateId"]: item["decision"] for item in response["assessments"]}
+
+    assert response["status"] == "completed"
+    assert response["executionMode"] == "source_quality_agent_batch"
+    assert response["assessedByAgent"] == "Source Quality Agent"
+    assert response["summary"]["assessedCandidateCount"] == 2
+    assert response["summary"]["approvedCandidateCount"] == 1
+    assert response["summary"]["needsRevisionCandidateCount"] == 1
+    assert decisions[approved_source["candidateId"]] == "approved"
+    assert decisions[revision_source["candidateId"]] == "needs_revision"
+    assert response["officialBoundary"]["writesFormalKnowledge"] is False
+    assert response["officialBoundary"]["writesRag"] is False
+    assert response["officialBoundary"]["writesOfficialGraph"] is False
+    assert status_payload["summary"]["unassessedSourceCandidateCount"] == 0
+    assert status_payload["summary"]["approvedSourceCandidateCount"] == 1
+    assert status_payload["summary"]["needsRevisionSourceCandidateCount"] == 1
+
+
+def test_assess_source_quality_batch_reports_no_pending_candidates(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="ai科学研究团队")
+    candidate = team_workflow_orchestration_service.register_candidate_source(
+        team["teamId"],
+        {
+            "title": "Predictive coding neural paper",
+            "sourceUrl": "https://doi.org/10.0000/predictive-coding",
+            "sourceKind": "paper",
+            "summary": "Neural network predictive coding.",
+            "tags": ["neuro", "network"],
+            "allowedForAnalysis": True,
+            "createdByAgent": "Data Discovery Agent",
+        },
+    )["candidate"]
+
+    first = team_workflow_orchestration_service.assess_source_quality_batch(team["teamId"], {})
+    second = team_workflow_orchestration_service.assess_source_quality_batch(team["teamId"], {})
+
+    assert first["summary"]["assessedCandidateCount"] == 1
+    assert first["assessments"][0]["candidateId"] == candidate["candidateId"]
+    assert second["status"] == "no_pending_candidates"
+    assert second["summary"]["assessedCandidateCount"] == 0
+    assert second["summary"]["skippedCandidateCount"] == 1
+
+
 def test_source_extraction_failure_keeps_manifest_needing_confirmation(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     team = team_service.create_team(name="挑战杯科研团队")

@@ -1896,6 +1896,142 @@ def assess_source_candidate_quality(team_id: str, candidate_id: str, payload: di
     }
 
 
+def assess_source_quality_batch(team_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
+    team_service.get_team(normalized_team_id)
+    payload = payload if isinstance(payload, dict) else {}
+    batch_run_id = _new_record_id("source-quality-batch")
+    assessed_by_agent = _trim_text(payload.get("assessedByAgent"), max_length=160) or "Source Quality Assessment Agent"
+    max_candidates = _normalize_int(payload.get("maxCandidates"), default=100, minimum=1, maximum=200)
+    force = bool(payload.get("force"))
+    requested_candidate_ids = _normalize_text_list(payload.get("candidateIds"), max_items=200, max_length=128)
+    notes = _trim_text(payload.get("notes"), max_length=4000) or "Source Quality Assessment Agent completed one-click batch screening."
+    evidence_refs = _normalize_ref_list(payload.get("evidenceRefs"), max_items=24)
+    evidence_refs = [
+        *evidence_refs,
+        {"type": "source_quality_batch", "id": batch_run_id, "label": "Source quality batch assessment"},
+    ][:24]
+    with _WORKFLOW_LOCK:
+        candidate_store = _load_candidate_store(normalized_team_id)
+        source_candidates = [
+            item
+            for item in list(candidate_store.get("candidates") or [])
+            if isinstance(item, dict) and str(item.get("candidateType") or "") == "source_manifest"
+        ]
+        source_by_id = {str(item.get("candidateId") or ""): item for item in source_candidates if str(item.get("candidateId") or "")}
+        if requested_candidate_ids:
+            selection = [source_by_id[item] for item in requested_candidate_ids if item in source_by_id]
+            skipped_candidates = [
+                {"candidateId": item, "reason": "not_found_or_not_source_manifest"}
+                for item in requested_candidate_ids
+                if item not in source_by_id
+            ]
+        else:
+            selection = source_candidates
+            skipped_candidates = []
+        target_candidates = [
+            item
+            for item in selection
+            if force or _candidate_source_quality_assessment(item) is None
+        ][:max_candidates]
+        skipped_candidates.extend(
+            {
+                "candidateId": str(item.get("candidateId") or ""),
+                "title": str(item.get("title") or _source_manifest_label(item)),
+                "reason": "already_assessed",
+            }
+            for item in selection
+            if item not in target_candidates and _candidate_source_quality_assessment(item) is not None
+        )
+        target_candidate_ids = [str(item.get("candidateId") or "") for item in target_candidates if str(item.get("candidateId") or "")]
+    assessments: list[dict[str, Any]] = []
+    failed_candidates: list[dict[str, str]] = []
+    for candidate_id in target_candidate_ids:
+        try:
+            assessment_response = assess_source_candidate_quality(
+                normalized_team_id,
+                candidate_id,
+                {
+                    "assessedByAgent": assessed_by_agent,
+                    "notes": notes,
+                    "evidenceRefs": evidence_refs,
+                },
+            )
+        except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
+            failed_candidates.append({"candidateId": candidate_id, "error": str(exc)})
+            continue
+        assessments.append(
+            _source_quality_batch_assessment_summary(
+                assessment_response.get("candidate", {}),
+                assessment_response.get("assessment", {}),
+            )
+        )
+    decision_counts = {
+        "approved": sum(1 for item in assessments if item.get("decision") == "approved"),
+        "needsRevision": sum(1 for item in assessments if item.get("decision") == "needs_revision"),
+        "rejected": sum(1 for item in assessments if item.get("decision") == "rejected"),
+    }
+    source_quality_status = get_source_quality_status(normalized_team_id)
+    with _WORKFLOW_LOCK:
+        workflow = _load_or_create_workflow(normalized_team_id)
+        candidate_store = _load_candidate_store(normalized_team_id)
+    if failed_candidates and not assessments:
+        run_status = "failed"
+    elif not source_candidates:
+        run_status = "no_candidates"
+    elif not target_candidate_ids:
+        run_status = "no_pending_candidates"
+    else:
+        run_status = "completed"
+    summary = {
+        "targetCandidateCount": len(target_candidate_ids),
+        "assessedCandidateCount": len(assessments),
+        "approvedCandidateCount": decision_counts["approved"],
+        "needsRevisionCandidateCount": decision_counts["needsRevision"],
+        "rejectedCandidateCount": decision_counts["rejected"],
+        "failedCandidateCount": len(failed_candidates),
+        "skippedCandidateCount": len(skipped_candidates),
+    }
+    _record_workflow_event(
+        "source_quality.batch_assessed",
+        normalized_team_id,
+        fields={
+            "workflowId": workflow["workflowId"],
+            "batchRunId": batch_run_id,
+            "status": run_status,
+            "assessedByAgent": assessed_by_agent,
+            **summary,
+            "assessedCandidateIds": _workflow_log_sample_values(assessments, "candidateId"),
+        },
+    )
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "teamId": normalized_team_id,
+        "workflowId": workflow["workflowId"],
+        "batchRunId": batch_run_id,
+        "executionMode": "source_quality_agent_batch",
+        "status": run_status,
+        "assessedByAgent": assessed_by_agent,
+        "summary": summary,
+        "assessments": assessments,
+        "skippedCandidates": skipped_candidates[:24],
+        "failedCandidates": failed_candidates[:24],
+        "sourceQualityStatus": source_quality_status,
+        "workflow": _workflow_to_api(normalized_team_id, workflow, candidate_store),
+        "officialBoundary": {
+            "writesFormalKnowledge": False,
+            "writesRag": False,
+            "writesOfficialGraph": False,
+            "candidateOnly": True,
+        },
+        "nextActions": [
+            "Review failed or needs_revision candidates before downstream paper_note extraction.",
+            "Approved candidates may proceed to candidate-only paper_note planning.",
+        ],
+        "updatedAt": utc_now_iso(),
+    }
+
+
 def get_source_quality_status(team_id: str) -> dict[str, Any]:
     normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
     team_service.get_team(normalized_team_id)
@@ -4631,6 +4767,22 @@ def _source_quality_candidate_summary(candidate: dict[str, Any]) -> dict[str, An
         "requiredFixes": _normalize_text_list(assessment.get("requiredFixes"), max_items=12, max_length=240),
         "riskFlags": _normalize_text_list(assessment.get("riskFlags"), max_items=12, max_length=120),
         "updatedAt": str(candidate.get("updatedAt") or candidate.get("createdAt") or ""),
+        "assessedAt": str(assessment.get("assessedAt") or ""),
+    }
+
+
+def _source_quality_batch_assessment_summary(candidate: dict[str, Any], assessment: dict[str, Any]) -> dict[str, Any]:
+    scores = assessment.get("scores") if isinstance(assessment.get("scores"), dict) else {}
+    return {
+        "candidateId": str(candidate.get("candidateId") or assessment.get("candidateId") or ""),
+        "title": str(candidate.get("title") or assessment.get("sourceLabel") or ""),
+        "assessmentId": str(assessment.get("assessmentId") or ""),
+        "decision": str(assessment.get("decision") or ""),
+        "overallScore": int(scores.get("overall") or 0),
+        "requiredFixes": _normalize_text_list(assessment.get("requiredFixes"), max_items=12, max_length=240),
+        "riskFlags": _normalize_text_list(assessment.get("riskFlags"), max_items=12, max_length=120),
+        "currentState": str(candidate.get("currentState") or ""),
+        "qualityStatus": str(candidate.get("qualityStatus") or ""),
         "assessedAt": str(assessment.get("assessedAt") or ""),
     }
 

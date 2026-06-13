@@ -274,7 +274,12 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("sourceCollectionScreeningButtonText");
     expect(routeSource).toContain("sourceCollectionScreeningDisabled");
     expect(routeSource).toContain("openSourceCollectionScreeningPanel");
-    expect(routeSource).toContain("打开资料筛选");
+    expect(routeSource).toContain("runSourceCollectionScreeningAction");
+    expect(routeSource).toContain("assessSourceQualityBatchMutation");
+    expect(routeSource).toContain("sourceCollectionQualityAgentId");
+    expect(routeSource).toContain("source-quality/assess-batch");
+    expect(routeSource).toContain("执行资料筛选");
+    expect(routeSource).toContain("Agent 筛选中");
     expect(routeSource).toContain("sourceCollectionExpandedPanelId");
     expect(routeSource).toContain("sourceCollectionFocusedPanelId");
     expect(routeSource).toContain("sourceCollectionControlPanelRef");
