@@ -409,6 +409,32 @@ def test_focus_workbench_uses_non_destructive_internal_focus(monkeypatch):
     assert calls == [{"action": "internal-focus", "no_browser": False}]
 
 
+def test_python_launcher_adapter_prefers_pythonw_for_background_services(tmp_path, monkeypatch):
+    import importlib.util
+
+    launcher_path = constants.PROJECT_ROOT / "scripts" / "vibelution_launcher.py"
+    spec = importlib.util.spec_from_file_location("vibelution_launcher_background_test", launcher_path)
+    assert spec and spec.loader
+    launcher = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(launcher)
+
+    scripts_dir = tmp_path / "Scripts"
+    python_exe = scripts_dir / "python.exe"
+    pythonw_exe = scripts_dir / "pythonw.exe"
+    scripts_dir.mkdir()
+    python_exe.write_text("", encoding="utf-8")
+    pythonw_exe.write_text("", encoding="utf-8")
+    monkeypatch.setattr(launcher.os, "name", "nt", raising=False)
+
+    selected = launcher._select_background_python(str(python_exe))
+
+    assert selected["pythonExecutable"] == str(pythonw_exe.resolve())
+    assert selected["sourcePythonExecutable"] == str(python_exe)
+    assert selected["noConsolePythonExecutable"] == str(pythonw_exe.resolve())
+    assert selected["consoleFallbackReason"] == ""
+    assert selected["pythonLaunchPolicy"] == "pythonw_no_console_background_service"
+
+
 def test_python_launcher_allows_lan_hosts_when_binding_wildcard(monkeypatch):
     import importlib.util
 
@@ -3554,7 +3580,7 @@ def test_ensure_daemon_running_keeps_current_source_signature(monkeypatch):
     assert daemon.ensure_daemon_running() is False
 
 
-def test_ensure_daemon_running_prefers_python_exe_with_hidden_creation_flags(tmp_path, monkeypatch):
+def test_ensure_daemon_running_prefers_pythonw_for_no_console_background_service(tmp_path, monkeypatch):
     python_exe = tmp_path / "Scripts" / "python.exe"
     pythonw_exe = tmp_path / "Scripts" / "pythonw.exe"
     python_exe.parent.mkdir()
@@ -3582,9 +3608,11 @@ def test_ensure_daemon_running_prefers_python_exe_with_hidden_creation_flags(tmp
 
     assert popen_calls == [[expected_runtime["pythonExecutable"], "-m", "core.runtime_manager.cli", "daemon"]]
     if daemon.os.name == "nt":
-        assert expected_runtime["pythonExecutable"] == str(python_exe.resolve())
+        assert expected_runtime["pythonExecutable"] == str(pythonw_exe.resolve())
+        assert expected_runtime["sourcePythonExecutable"] == str(python_exe)
         assert expected_runtime["noConsolePythonExecutable"] == str(pythonw_exe.resolve())
-        assert expected_runtime["pythonLaunchPolicy"] == "source_python_with_hidden_creation_flags"
+        assert expected_runtime["consoleFallbackReason"] == ""
+        assert expected_runtime["pythonLaunchPolicy"] == "pythonw_no_console_background_service"
     assert events == [
         (
             "daemon.start_requested",
@@ -3631,7 +3659,8 @@ def test_ensure_daemon_running_uses_python_exe_even_when_pythonw_missing(tmp_pat
     if daemon.os.name == "nt":
         assert expected_runtime["pythonExecutable"] == str(python_exe.resolve())
         assert expected_runtime["noConsolePythonExecutable"] == ""
-        assert expected_runtime["consoleFallbackReason"] == ""
+        assert expected_runtime["consoleFallbackReason"] == "pythonw_missing"
+        assert expected_runtime["pythonLaunchPolicy"] == "source_python_hidden_creation_flags_fallback"
     assert events == [
         (
             "daemon.start_requested",
