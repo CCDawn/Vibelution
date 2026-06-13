@@ -103,6 +103,25 @@ def test_web_search_reports_empty_token_without_calling_search_api(monkeypatch):
     assert calls == [("GET", web_search_tool._TOKEN_URL)]
 
 
+def test_web_search_reports_malformed_result_shape(monkeypatch):
+    def fake_request(method, url, **kwargs):
+        request = httpx.Request(method, url)
+        if method == "GET":
+            return httpx.Response(200, request=request, text="token-123")
+        return httpx.Response(
+            200,
+            request=request,
+            json={"code": 0, "msg": "SUCCESS", "data": {"results": [None]}},
+        )
+
+    install_fake_client(monkeypatch, fake_request)
+
+    result = web_search_tool.web_search("AI Agent", max_results=3)
+
+    assert result.startswith("[错误] 搜索响应解析失败")
+    assert "搜索响应结构异常：AttributeError" in result
+
+
 def test_check_autoglm_token_service_returns_structured_status(monkeypatch):
     def fake_get(method, url, **kwargs):
         request = httpx.Request("GET", web_search_tool._TOKEN_URL)

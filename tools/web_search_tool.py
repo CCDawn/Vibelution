@@ -212,8 +212,8 @@ def _parse_response(data: Dict[str, Any]) -> List[Dict[str, str]]:
                     "url": item.get("url", ""),
                     "snippet": item.get("snippet", ""),
                 })
-    except (KeyError, TypeError):
-        pass
+    except (KeyError, TypeError, AttributeError) as exc:
+        raise ValueError(f"搜索响应结构异常：{type(exc).__name__}") from exc
 
     return results
 
@@ -266,7 +266,10 @@ def web_search(query: str, max_results: int = 10) -> str:
         return f"[错误] API 返回错误: code={code}, msg={msg}"
 
     # 5. 解析结果
-    results = _parse_response(data)
+    try:
+        results = _parse_response(data)
+    except ValueError as exc:
+        return f"[错误] 搜索响应解析失败: {exc}"
 
     if not results:
         return f"[搜索] 未找到与「{query}」相关的结果"
