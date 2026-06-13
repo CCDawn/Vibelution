@@ -571,7 +571,6 @@ export function ConversationView({
   composerReferences = [],
   composerAttachmentInputDisabled,
   turnError,
-  nextStateSignals = [],
   submitLabel,
   submitPendingLabel,
   stopLabel,
@@ -738,15 +737,6 @@ export function ConversationView({
     { label: t("lastUpdated"), value: lastMessageTimestamp ? formatTimestamp(lastMessageTimestamp) : "--" },
   ];
   const resolvedStats = stats ?? [];
-  const visibleNextStateSignals = useMemo(
-    () =>
-      nextStateSignals
-        .filter((signal) => shouldShowNextStateSignalInConversation(signal, phase))
-        .slice(-5)
-        .reverse(),
-    [nextStateSignals, phase],
-  );
-  const [nextStateSignalsExpanded, setNextStateSignalsExpanded] = useState(false);
   const displayMessages = useMemo(
     () => {
       const visibleMessages = messages.filter((message) => !isRuntimeNoticeMessage(message));
@@ -2686,43 +2676,6 @@ export function ConversationView({
           </div>
           {turnError.errorType ? <span className={styles.turnErrorType}>{turnError.errorType}</span> : null}
         </div>
-      ) : null}
-
-      {visibleNextStateSignals.length > 0 ? (
-        <section className={styles.nextStateSignals} aria-label={t("nextStateSignalsLabel")}>
-          <button
-            type="button"
-            className={styles.nextStateSignalsToggle}
-            aria-expanded={nextStateSignalsExpanded}
-            onClick={() => setNextStateSignalsExpanded((current) => !current)}
-            title={nextStateSignalsExpanded ? t("nextStateSignalsVisible") : t("nextStateSignalsHidden")}
-          >
-            {nextStateSignalsExpanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
-            <span>{t("nextStateSignalsLabel")}</span>
-            <span className={styles.nextStateSignalsCount}>{visibleNextStateSignals.length}</span>
-            {!nextStateSignalsExpanded ? (
-              <span className={styles.nextStateSignalsSummary}>{visibleNextStateSignals[0].summary}</span>
-            ) : null}
-          </button>
-          {nextStateSignalsExpanded ? (
-            <div className={styles.nextStateSignalList}>
-              {visibleNextStateSignals.map((signal) => (
-                <div key={signal.signalId || `${signal.turnId}-${signal.kind}`} className={styles.nextStateSignalItem}>
-                  <div className={styles.nextStateSignalMeta}>
-                    <span className={styles.nextStateSignalKind}>{signal.kind}</span>
-                    <span>{signal.source}</span>
-                    {signal.createdAt ? <span>{formatTimestamp(signal.createdAt)}</span> : null}
-                    {signal.turnId ? <span>{signal.turnId}</span> : null}
-                  </div>
-                  <p className={styles.nextStateSignalText}>{signal.summary}</p>
-                  {signal.relatedEventCode ? (
-                    <span className={styles.nextStateSignalEvent}>{signal.relatedEventCode}</span>
-                  ) : null}
-                </div>
-              ))}
-            </div>
-          ) : null}
-        </section>
       ) : null}
 
       <div className={styles.composer}>

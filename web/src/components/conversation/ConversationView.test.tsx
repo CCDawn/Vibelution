@@ -1002,7 +1002,7 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).not.toContain("发送选项");
   });
 
-  it("renders next-state signals outside the message body when available", () => {
+  it("does not render next-state control signals inside the conversation body", () => {
     const html = renderConversation(
       [
         {
@@ -1030,12 +1030,9 @@ describe("ConversationView edit resend affordance", () => {
       },
     );
 
-    expect(html).toContain("最近控制信号");
-    expect(html).toContain("Provider failed after one ReAct pass.");
+    expect(html).not.toContain("最近控制信号");
+    expect(html).not.toContain("Provider failed after one ReAct pass.");
     expect(html).toContain("Visible assistant answer");
-    expect(html.indexOf("Provider failed after one ReAct pass.")).toBeGreaterThan(
-      html.indexOf("Visible assistant answer"),
-    );
   });
 
   it("renders turn errors as timeline notices instead of assistant replies", () => {

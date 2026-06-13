@@ -58,6 +58,7 @@ import {
   SessionChatReviewCandidateResponse,
   SessionCacheCompositionSegment,
   SessionContextCompositionSegment,
+  ChatNextStateSignalSummary,
   SessionDeleteResponse,
   SessionGuidanceMode,
   ConversationSummary,
@@ -72,7 +73,10 @@ import {
   ConversationMessage,
   ConversationAttachment,
 } from "../api/types";
-import type { TurnAvatarResolution } from "../components/conversation/ConversationView";
+import {
+  shouldShowNextStateSignalInConversation,
+  type TurnAvatarResolution,
+} from "../components/conversation/ConversationView";
 import { COMPOSER_SESSION_REFERENCE_MIME } from "../components/conversation/conversationConstants";
 import { LazyConversationView } from "../components/conversation/LazyConversationView";
 import { isAgentInboxMessage, isTurnErrorMessage } from "../components/conversation/messageSections";
@@ -2842,6 +2846,31 @@ export function ChatCodingRoute() {
       .filter((notice) => String(notice.message ?? "").trim())
       .slice(-1);
   }, [detail?.runtimeNotices]);
+  const activeControlSignals = useMemo<ChatNextStateSignalSummary[]>(() => {
+    const phase = detail?.currentPhase || directSessionActiveSummary?.currentPhase || directSessionActiveSummary?.status || "";
+    return (detail?.nextStateSignals ?? [])
+      .filter((signal) => shouldShowNextStateSignalInConversation(signal, phase))
+      .slice(-3)
+      .reverse();
+  }, [detail?.currentPhase, detail?.nextStateSignals, directSessionActiveSummary?.currentPhase, directSessionActiveSummary?.status]);
+  const latestControlSignal = activeControlSignals[0] ?? null;
+  const latestControlSignalLine = latestControlSignal
+    ? [
+      activeControlSignals.length > 1 ? numberFormatter.format(activeControlSignals.length) : "",
+      latestControlSignal.summary,
+    ].filter(Boolean).join(" · ")
+    : "";
+  const latestControlSignalTitle = latestControlSignal
+    ? [
+      t("nextStateSignalsLabel"),
+      latestControlSignal.kind,
+      latestControlSignal.source,
+      latestControlSignal.relatedEventCode,
+      latestControlSignal.turnId,
+      latestControlSignal.createdAt ? formatTime(latestControlSignal.createdAt) : "",
+      latestControlSignal.summary,
+    ].filter(Boolean).join(" · ")
+    : "";
   const latestUserMessageId = useMemo(() => deriveLatestUserMessageId(detail?.messages), [detail?.messages]);
   const resolvedEditTarget = resolveLatestEditTarget(activeEditTarget, latestUserMessageId);
   const activeDraftEffective = resolveComposerDraftValue(activeDraft, activeEditTarget, resolvedEditTarget);
@@ -3111,6 +3140,11 @@ export function ChatCodingRoute() {
         label: t("sessionBinding"),
         value: t("sessionBindingHistorical"),
         title: `${sessionBindingMismatchLine} ${agentPrimaryDirectSessionId}`,
+      }] : []),
+      ...(latestControlSignal ? [{
+        label: t("nextStateSignalsLabel"),
+        value: latestControlSignalLine,
+        title: latestControlSignalTitle,
       }] : []),
       {
         label: t("currentTask"),
@@ -5367,7 +5401,6 @@ export function ChatCodingRoute() {
                   composerModeNotice={resolvedEditTarget ? t("editMessageModeNotice") : ""}
                   cancelComposerModeLabel={t("cancelEditMessage")}
                   turnError={detail.lastTurnError}
-                  nextStateSignals={detail.nextStateSignals ?? []}
                   stopLabel={t("stop")}
                   stopPendingLabel={t("stopPending")}
                   safeGuidanceLabel={t("safeGuidance")}

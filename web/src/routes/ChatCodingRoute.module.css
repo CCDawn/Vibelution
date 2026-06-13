@@ -296,8 +296,9 @@
   color: var(--fg-primary);
   font-weight: 650;
   line-height: 1.18;
-  overflow-wrap: break-word;
-  word-break: normal;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .sessionBindingNotice {
