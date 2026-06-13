@@ -1,6 +1,6 @@
 .route {
   display: grid;
-  grid-template-rows: auto auto auto auto minmax(0, 1fr);
+  grid-template-rows: auto auto auto auto auto minmax(0, 1fr);
   height: 100%;
   min-height: 0;
   background: color-mix(in srgb, var(--surface-page) 95%, var(--bg-canvas));
@@ -202,6 +202,231 @@
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   background: color-mix(in srgb, var(--surface-panel) 78%, transparent);
+}
+
+.developerPanel {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  margin: 8px 12px 0;
+  padding: 8px 9px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-panel) 78%, transparent);
+}
+
+.developerPanel[data-enabled="true"] {
+  border-color: color-mix(in srgb, var(--state-warning) 42%, var(--border-soft));
+}
+
+.developerPanelHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.developerPanelHeader > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.developerPanelHeader strong {
+  color: var(--fg-primary);
+  font-size: 0.82rem;
+}
+
+.developerPanelHeader small {
+  min-width: 0;
+  color: var(--fg-secondary);
+  font-size: 0.74rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.developerGrid {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.55fr) minmax(260px, 1fr) minmax(280px, 0.95fr);
+  gap: 8px;
+  min-width: 0;
+}
+
+.developerStatus,
+.developerNoise,
+.cleanupConsole {
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-card) 76%, transparent);
+}
+
+.developerStatus {
+  display: grid;
+  align-content: start;
+  gap: 4px;
+}
+
+.developerStatus span,
+.developerNoiseHeader span,
+.cleanupMetrics span {
+  color: var(--fg-tertiary);
+  font-size: 0.66rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.developerStatus strong,
+.developerStatus small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.developerStatus strong {
+  color: var(--fg-primary);
+  font-size: 0.82rem;
+}
+
+.developerStatus small {
+  color: var(--fg-secondary);
+  font-size: 0.74rem;
+}
+
+.developerStatus[data-tone="warning"] {
+  border-color: color-mix(in srgb, var(--state-warning) 42%, var(--border-soft));
+}
+
+.developerNoise {
+  display: grid;
+  gap: 7px;
+}
+
+.developerNoiseHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.compactButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 26px;
+  padding: 3px 7px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  color: var(--fg-secondary);
+  background: color-mix(in srgb, var(--surface-card) 82%, transparent);
+  font-size: 0.74rem;
+}
+
+.compactButton:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.noiseItemGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  min-width: 0;
+}
+
+.noiseItem {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 6px 7px;
+  border: 1px solid color-mix(in srgb, var(--border-soft) 72%, transparent);
+  border-radius: 6px;
+}
+
+.noiseItem[data-protected="true"] {
+  opacity: 0.78;
+}
+
+.noiseItem span,
+.noiseItem strong,
+.noiseItem small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.noiseItem span,
+.noiseItem small {
+  color: var(--fg-secondary);
+  font-size: 0.72rem;
+}
+
+.noiseItem strong {
+  color: var(--fg-primary);
+  font-size: 0.8rem;
+}
+
+.cleanupConsole {
+  display: grid;
+  gap: 7px;
+}
+
+.cleanupMetrics,
+.cleanupActions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.cleanupMetrics strong {
+  color: var(--fg-primary);
+}
+
+.cleanupPlan {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 7px;
+  border: 1px solid color-mix(in srgb, var(--state-warning) 34%, var(--border-soft));
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--state-warning) 8%, transparent);
+}
+
+.cleanupPlan strong,
+.cleanupPlan small,
+.cleanupPlan li {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cleanupPlan strong {
+  color: var(--fg-primary);
+  font-size: 0.78rem;
+}
+
+.cleanupPlan small,
+.cleanupPlan li {
+  color: var(--fg-secondary);
+  font-size: 0.72rem;
+}
+
+.cleanupPlan ul {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  margin: 0;
+  padding-left: 16px;
 }
 
 .settingsHeader,
@@ -815,6 +1040,14 @@
     grid-column: 1 / -1;
   }
 
+  .developerGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .developerPanelHeader small {
+    white-space: normal;
+  }
+
   .workspace {
     display: flex;
     flex-direction: column;
@@ -837,6 +1070,15 @@
   }
 
   .settingsStrip {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .developerPanelHeader {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .noiseItemGrid {
     grid-template-columns: minmax(0, 1fr);
   }
 
@@ -909,7 +1151,9 @@
   .commandLine,
   .userGuide,
   .guardStrip,
-  .diagnosticsBody {
+  .diagnosticsBody,
+  .cleanupMetrics,
+  .cleanupActions {
     grid-template-columns: minmax(0, 1fr);
   }
 

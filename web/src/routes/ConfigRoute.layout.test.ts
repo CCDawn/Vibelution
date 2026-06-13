@@ -42,4 +42,14 @@ describe("ConfigRoute layout contract", () => {
     expect(stylesSource).toContain("@media (max-width: 1380px)");
     expect(stylesSource).toContain("grid-template-columns: repeat(3, minmax(180px, 1fr))");
   });
+
+  it("shows developer mode as launcher-owned read-only state", () => {
+    expect(routeSource).toContain("developerModeReadonly");
+    expect(routeSource).toContain("developerModeControlled");
+    expect(routeSource).toContain("developerModeConfig.enabled");
+    expect(routeSource).toContain("aria-label={copy.developerModeReadonly}");
+    expect(routeSource).toContain("Launcher 控制");
+    expect(routeSource).not.toContain("updateLauncherDeveloperMode");
+    expect(routeSource).not.toContain("developer-mode/cleanup");
+  });
 });

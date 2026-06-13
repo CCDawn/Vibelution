@@ -635,6 +635,19 @@ def _validate_targets_still_safe(plan: dict[str, Any], root: Path) -> None:
             raise DeveloperCleanupPlanError("target_not_whitelisted", "清理目标不在 quick clean 白名单内。", detail={"path": str(path)})
         if action == "worktree_cleanup" and not _is_relative_to(path, _worktrees_root(root).resolve()):
             raise DeveloperCleanupPlanError("target_outside_worktrees", "worktree 清理目标不在外部 worktree 目录内。", detail={"path": str(path)})
+        if action == "worktree_cleanup":
+            reason = _worktree_skip_reason(
+                path,
+                str(target.get("branch") or ""),
+                str(target.get("head") or ""),
+                root,
+            )
+            if reason:
+                raise DeveloperCleanupPlanError(
+                    "target_changed",
+                    "worktree 状态已变化，请重新预览。",
+                    detail={"path": str(path), "reason": reason},
+                )
         if action != "db_compact" and not path.exists():
             raise DeveloperCleanupPlanError("target_changed", "清理目标已变化，请重新预览。", detail={"path": str(path)})
         if path.exists():

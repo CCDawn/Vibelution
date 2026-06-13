@@ -210,6 +210,12 @@
   font-size: 0.86rem;
 }
 
+.metricCard small {
+  color: var(--fg-secondary);
+  font-size: 0.7rem;
+  line-height: 1.2;
+}
+
 .statusBadge,
 .inlineBadge {
   display: inline-flex;
