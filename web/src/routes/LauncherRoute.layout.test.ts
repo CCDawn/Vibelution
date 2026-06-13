@@ -46,9 +46,13 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("forceStopLauncherBundle");
     expect(routeSource).toContain("restartLauncherBundle()");
     expect(routeSource).toContain("updateLauncherStartupSettings");
+    expect(routeSource).toContain("updateLauncherDeveloperMode");
+    expect(routeSource).toContain("previewLauncherDeveloperCleanup");
+    expect(routeSource).toContain("applyLauncherDeveloperCleanup");
     expect(routeSource).not.toContain("updateWorkbenchWindowMode");
     expect(routeSource).toContain("reattachLauncherSupervisor");
     expect(routeSource).toContain("queryKeys.launcherStatus()");
+    expect(routeSource).toContain("queryKeys.launcherDeveloperNoiseOverview()");
     expect(routeSource).toContain("queryKeys.runtimeSummary()");
   });
 
@@ -108,6 +112,9 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("settingToggle");
     expect(routeSource).toContain("settingsSaveButton");
     expect(routeSource).toContain("segmentedControl");
+    expect(routeSource).toContain("DeveloperModePanel");
+    expect(routeSource).toContain("developerPanel");
+    expect(routeSource).toContain("cleanupPlan");
     expect(routeSource).toContain("guardian?.supervisor?.stdoutPath");
     expect(routeSource).toContain("guardian?.supervisor?.stderrPath");
     expect(routeSource).not.toContain("hero");
@@ -121,6 +128,10 @@ describe("LauncherRoute layout contract", () => {
     expect(styles.settingsSaveButton).toBeTypeOf("string");
     expect(styles.settingError).toBeTypeOf("string");
     expect(styles.segmentedControl).toBeTypeOf("string");
+    expect(styles.developerPanel).toBeTypeOf("string");
+    expect(styles.developerGrid).toBeTypeOf("string");
+    expect(styles.cleanupConsole).toBeTypeOf("string");
+    expect(styles.cleanupPlan).toBeTypeOf("string");
     expect(styles.guardStrip).toBeTypeOf("string");
     expect(styles.statusTable).toBeTypeOf("string");
     expect(styles.matrixPanel).toBeTypeOf("string");
@@ -296,6 +307,25 @@ describe("LauncherRoute layout contract", () => {
     expect(launcherApiSource).toContain("controlPort: setting.launcher.controlPort");
     expect(launcherApiSource).toContain("windowSize: setting.workbench.windowSize");
     expect(routeSource).not.toContain("windowModeMutation");
+  });
+
+  it("keeps developer mode launcher-owned with preview and plan-hash cleanup guards", () => {
+    expect(routeSource).toContain("developerModeSetting = status?.settings?.developerMode");
+    expect(routeSource).toContain("developerModeMutation");
+    expect(routeSource).toContain("mutationFn: updateLauncherDeveloperMode");
+    expect(routeSource).toContain("cleanupPreviewMutation");
+    expect(routeSource).toContain("cleanupApplyMutation");
+    expect(routeSource).toContain("getLauncherDeveloperNoiseOverview");
+    expect(routeSource).toContain("previewLauncherDeveloperCleanup");
+    expect(routeSource).toContain("applyLauncherDeveloperCleanup");
+    expect(routeSource).toContain("planId: cleanupPlan.planId");
+    expect(routeSource).toContain("planHash: cleanupPlan.planHash");
+    expect(routeSource).toContain("confirm: true");
+    expect(routeSource).toContain("window.confirm(copy.cleanupRequiresConfirm)");
+    expect(routeSource).toContain("开发者模式");
+    expect(routeSource).toContain("设置页只读展示，不能在工作台设置里改动");
+    expect(launcherApiSource).toContain("developer-mode/cleanup/preview");
+    expect(launcherApiSource).toContain("developer-mode/cleanup/apply");
   });
 
   it("treats status disconnect after stop as an expected closed state", () => {

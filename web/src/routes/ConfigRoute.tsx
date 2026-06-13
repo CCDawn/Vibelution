@@ -371,6 +371,10 @@ export const CONFIG_COPY = {
     settingsNeedsCheck: "先检查高级配置",
     settingsSynced: "已同步",
     settingsSections: "分区",
+    developerModeReadonly: "开发者模式",
+    developerModeControlled: "Launcher 控制",
+    developerModeEnabled: "已开启",
+    developerModeDisabled: "已关闭",
     runtimeProfile: "运行档位",
     defaultMode: "默认模式",
     defaultRoute: "默认入口",
@@ -591,6 +595,10 @@ export const CONFIG_COPY = {
     settingsNeedsCheck: "Check advanced config first",
     settingsSynced: "Synced",
     settingsSections: "Sections",
+    developerModeReadonly: "Developer mode",
+    developerModeControlled: "Launcher controlled",
+    developerModeEnabled: "Enabled",
+    developerModeDisabled: "Disabled",
     runtimeProfile: "Runtime mode",
     defaultMode: "Default mode",
     defaultRoute: "Default route",
@@ -2441,6 +2449,9 @@ export function ConfigRoute() {
   const leaveGuardOpen = leaveBlocker.state === "blocked";
   const leaveGuardSaveLabel = busyAction === copy.leaveGuardSaving ? copy.leaveGuardSaving : copy.leaveGuardSave;
   const sidebarNextStepLabel = hasEditorChanges ? copy.settingsNeedsCheck : hasPendingApply ? copy.settingsCanSave : copy.settingsSynced;
+  const launcherConfig = asRecord(draftConfig?.launcher);
+  const developerModeConfig = asRecord(launcherConfig.developer_mode);
+  const developerModeReadonlyLabel = developerModeConfig.enabled ? copy.developerModeEnabled : copy.developerModeDisabled;
 
   function updateSectionUiState(sectionId: string, nextState: ConfigSectionUiState) {
     setSectionUiState((current) => ({ ...current, [sectionId]: nextState }));
@@ -3201,6 +3212,11 @@ export function ConfigRoute() {
           <article className={styles.metricCard}>
             <span>{copy.intakeMode}</span>
             <strong>{intakeLabel(asRecord(draftConfig.evolution).intake_mode as string)}</strong>
+          </article>
+          <article className={styles.metricCard} aria-label={copy.developerModeReadonly}>
+            <span>{copy.developerModeReadonly}</span>
+            <strong>{developerModeReadonlyLabel}</strong>
+            <small>{copy.developerModeControlled}</small>
           </article>
         </div>
         <div
