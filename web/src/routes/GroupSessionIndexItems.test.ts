@@ -36,7 +36,7 @@ describe("GroupSessionIndexItems helpers", () => {
     expect(teamStatusLabel("paused", "zh", fallback)).toBe("status:paused");
   });
 
-  it("prefers named member previews before compact member counts", () => {
+  it("keeps Team member previews compact instead of listing Agent names or codes", () => {
     expect(teamMemberPreview(team({
       memberCount: 4,
       members: [
@@ -45,7 +45,7 @@ describe("GroupSessionIndexItems helpers", () => {
         { memberId: "3", agentId: "a3", agentCode: "A003", agentName: "证据审查", role: "evidence", purpose: "", agentStatus: "active" },
         { memberId: "4", agentId: "a4", agentCode: "A004", agentName: "未展示", role: "extra", purpose: "", agentStatus: "active" },
       ],
-    }), "zh")).toBe("广撒网, A002, 证据审查");
+    }), "zh")).toBe("4人");
     expect(teamMemberPreview(team({ memberCount: 2 }), "en")).toBe("2");
     expect(teamMemberPreview(team({ memberCount: 0 }), "zh")).toBe("待绑定");
   });

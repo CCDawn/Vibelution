@@ -6,9 +6,11 @@ import {
   buildDirectSessionIndexViewModel,
   isAgentRootSession,
   isChildSession,
+  sessionModelTooltip,
   sessionAgentMetaLabel,
   sessionListTitle,
   showSessionFunctionLabel,
+  showSessionSummaryInline,
 } from "./DirectSessionIndexItem";
 
 function makeSession(overrides: Partial<SessionSummary>): SessionSummary {
@@ -50,15 +52,29 @@ describe("DirectSessionIndexItem helpers", () => {
     }))).toBe("结果卡标题");
   });
 
-  it("formats compact Agent metadata without exposing generated display names", () => {
-    expect(sessionAgentMetaLabel(makeSession({ agentCode: " A030 ", agentId: "generated-xiaomi-mimo" }))).toBe("Agent A030");
-    expect(sessionAgentMetaLabel(makeSession({ agentCode: "", agentId: "agent-A017" }))).toBe("Agent A017");
+  it("keeps internal Agent identifiers out of the compact session card", () => {
+    expect(sessionAgentMetaLabel(makeSession({ agentCode: " A030 ", agentId: "generated-xiaomi-mimo" }))).toBe("");
+    expect(sessionAgentMetaLabel(makeSession({ agentCode: "", agentId: "agent-A017" }))).toBe("");
   });
 
-  it("hides generic chat entry labels while keeping meaningful role labels", () => {
+  it("hides generic or English function labels while keeping meaningful Chinese role labels", () => {
     expect(showSessionFunctionLabel(display({ tone: "chat", functionLabel: "会话入口" }))).toBe(false);
     expect(showSessionFunctionLabel(display({ tone: "chat", functionLabel: "Chat entry" }))).toBe(false);
+    expect(showSessionFunctionLabel(display({ tone: "chat", functionLabel: "agent-center-review-session" }))).toBe(false);
     expect(showSessionFunctionLabel(display({ tone: "memory", functionLabel: "知识管理员" }))).toBe(true);
+  });
+
+  it("uses model icons without surfacing English model identifiers in the Chinese card tooltip", () => {
+    expect(sessionModelTooltip("小米 MiMo V2.5 Pro", "zh")).toBe("模型已绑定");
+    expect(sessionModelTooltip("小米模型", "zh")).toBe("模型：小米模型");
+    expect(sessionModelTooltip("gpt-5", "en")).toBe("Model: gpt-5");
+  });
+
+  it("keeps root session summaries out of the compact card and only allows concise Chinese child summaries", () => {
+    expect(showSessionSummaryInline("我按照前面写一份报告", "zh", false)).toBe(false);
+    expect(showSessionSummaryInline("暂无摘要", "zh", true)).toBe(false);
+    expect(showSessionSummaryInline("Report summary", "zh", true)).toBe(false);
+    expect(showSessionSummaryInline("已完成资料整理", "zh", true)).toBe(true);
   });
 
   it("classifies child sessions and root Agent sessions independently", () => {
@@ -89,7 +105,7 @@ describe("DirectSessionIndexItem helpers", () => {
 
     expect(view.sessionTitle).toBe("小米2.5pro");
     expect(view.sessionSummary).toBe("暂无摘要");
-    expect(view.sessionAgentMeta).toBe("Agent A030");
+    expect(view.sessionAgentMeta).toBe("");
     expect(view.itemMessage).toBe("");
     expect(view.itemIsNotice).toBe(false);
     expect(view.missingAgentMessage).toBe("");

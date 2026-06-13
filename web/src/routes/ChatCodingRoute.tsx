@@ -2704,7 +2704,7 @@ export function ChatCodingRoute() {
   const activeSurfaceTitle = groupPanelActive
     ? (
       projectBusActive
-        ? (lang === "zh" ? "Agent 通知流" : "Agent notice stream")
+        ? (lang === "zh" ? "助手通知流" : "Agent notice stream")
         : activeGroupRoom?.title ?? (lang === "zh" ? "群聊加载中" : "Loading group")
     )
     : detail?.agentDisplayName ?? detail?.title ?? directSessionActiveSummary?.agentDisplayName ?? directSessionActiveSummary?.title ?? t("loadingSession");
@@ -2721,7 +2721,9 @@ export function ChatCodingRoute() {
         ? `${projectBusTimeline?.activeAgentCount ?? 0} ${lang === "zh" ? "位 active Agent · 全局广播/私信投递记录" : "active agents · broadcast/private delivery log"}`
         : (
           activeGroupRound?.summary
-          || `${availableGroupParticipantCount} ${lang === "zh" ? "位可用 Agent" : "available agents"} · ${activeGroupRoom?.mode ?? "round_robin"} · ${activeGroupRoom?.purpose ?? "discussion"}`
+          || (lang === "zh"
+            ? `${availableGroupParticipantCount} 位可用助手`
+            : `${availableGroupParticipantCount} available agents · ${activeGroupRoom?.mode ?? "round_robin"} · ${activeGroupRoom?.purpose ?? "discussion"}`)
         )
     )
     : "";
@@ -4924,7 +4926,7 @@ export function ChatCodingRoute() {
                     {" · "}
                     {activeGroupRoom?.purpose ?? "discussion"}
                   </p>
-                  <h2>{lang === "zh" ? "Agent 通知流" : "Agent notice stream"}</h2>
+                  <h2>{lang === "zh" ? "助手通知流" : "Agent notice stream"}</h2>
                   <span>
                     {projectBusTimeline?.activeAgentCount ?? availableGroupParticipantCount} {lang === "zh" ? "位 active Agent" : "active agents"}
                     {" · "}
@@ -5098,7 +5100,7 @@ export function ChatCodingRoute() {
                 ) : (
                   <div className={styles.groupEmptyState}>
                     <BellRing size={28} />
-                    <p>{lang === "zh" ? "Agent 通知流会显示用户引导、Agent 私聊和广播投递结果；它不是团队群聊。" : "The Agent notice stream shows guidance, private messages, broadcasts, and delivery results. It is not a team room."}</p>
+                    <p>{lang === "zh" ? "助手通知流会显示用户引导、助手私信和广播投递结果；它不是团队群聊。" : "The Agent notice stream shows guidance, private messages, broadcasts, and delivery results. It is not a team room."}</p>
                   </div>
                 )}
               </div>
@@ -5121,7 +5123,7 @@ export function ChatCodingRoute() {
                     checked={projectBusInterruptTargets}
                     onChange={(event) => setProjectBusInterruptTargets(event.target.checked)}
                   />
-                  <span>{lang === "zh" ? "打断目标 Agent" : "Interrupt targets"}</span>
+                  <span>{lang === "zh" ? "打断目标助手" : "Interrupt targets"}</span>
                 </label>
                 <button
                   type="button"
@@ -5151,7 +5153,7 @@ export function ChatCodingRoute() {
                   </p>
                   <h2>{activeGroupRoom?.title ?? (lang === "zh" ? "群聊加载中" : "Loading group")}</h2>
                   <span>
-                    {availableGroupParticipantCount} {lang === "zh" ? "位可用 Agent" : "available agents"}
+                    {availableGroupParticipantCount} {lang === "zh" ? "位可用助手" : "available agents"}
                     {" · "}
                     {statusLabel(activeGroupRoom?.status ?? "ready")}
                   </span>
@@ -5492,7 +5494,7 @@ export function ChatCodingRoute() {
           <div className={styles.memberIndexSummary}>
             <UsersRound size={15} />
             <span>
-              {availableGroupParticipantCount} {lang === "zh" ? "位可用 Agent" : "available agents"}
+              {availableGroupParticipantCount} {lang === "zh" ? "位可用助手" : "available agents"}
             </span>
             <strong>{statusLabel(activeGroupRoom?.status ?? "ready")}</strong>
           </div>
@@ -5540,7 +5542,7 @@ export function ChatCodingRoute() {
                     || (lang === "zh" ? "未记录" : "No snapshot");
                   const memberMentalSummary = memberMental?.feeling?.trim()
                     || memberMental?.summary?.trim()
-                    || (lang === "zh" ? "该 Agent 尚未形成可展示的心智快照。" : "This agent has no visible mental snapshot yet.");
+                    || (lang === "zh" ? "该助手尚未形成可展示的心智快照。" : "This agent has no visible mental snapshot yet.");
                   const participantDisplay = groupParticipantIdentity(participant);
                   const participantAgent = participant.agentId ? agentsById.get(participant.agentId) : undefined;
                   const participantAvatarImageUrl = avatarImageUrlFrom(participantAgent, participant);
@@ -5573,7 +5575,7 @@ export function ChatCodingRoute() {
                           className={styles.agentIndexOpenButton}
                           onClick={() => handleOpenDirectSession(participant.sessionId)}
                           aria-label={lang === "zh" ? `打开 ${participantDisplay.name} 单聊` : `Open direct chat with ${participantDisplay.name}`}
-                          title={lang === "zh" ? "打开该 Agent 的单聊" : "Open this Agent direct chat"}
+                          title={lang === "zh" ? "打开该助手的单聊" : "Open this Agent direct chat"}
                         >
                           {renderAgentAvatar(
                             styles.agentIndexAvatar,
@@ -5636,7 +5638,7 @@ export function ChatCodingRoute() {
                               </div>
                               <p className={styles.featurePresetNote}>
                                 {lang === "zh"
-                                  ? "群聊成员由群聊调度驱动；需要单独调整下一轮功能时，请打开该 Agent 的单聊。"
+                                  ? "群聊成员由群聊调度驱动；需要单独调整下一轮功能时，请打开该助手的单聊。"
                                   : "Group members are driven by group scheduling. Open the direct chat to tune next-turn features."}
                               </p>
                             </>
@@ -5701,7 +5703,7 @@ export function ChatCodingRoute() {
                 </span>
                 <span className={styles.systemEntryCopy}>
                   <span className={styles.systemEntryTitleRow}>
-                    <span className={styles.systemEntryTitle}>{lang === "zh" ? "Agent 通知流" : "Agent notice stream"}</span>
+                    <span className={styles.systemEntryTitle}>{lang === "zh" ? "助手通知流" : "Agent notice stream"}</span>
                     {projectBusActive ? <span className={styles.sessionCurrentBadge}>{t("currentSession")}</span> : null}
                   </span>
                   <span className={styles.systemEntryMeta}>
@@ -5751,9 +5753,9 @@ export function ChatCodingRoute() {
                     ))}
                   </select>
                 </label>
-                <div className={styles.groupAgentPicker} aria-label={lang === "zh" ? "选择参与 Agent" : "Choose agents"}>
+                <div className={styles.groupAgentPicker} aria-label={lang === "zh" ? "选择参与助手" : "Choose agents"}>
                   {agentsQuery.isPending ? (
-                    <p className={styles.groupComposerEmpty}>{lang === "zh" ? "正在读取 Agent..." : "Loading agents..."}</p>
+                    <p className={styles.groupComposerEmpty}>{lang === "zh" ? "正在读取助手..." : "Loading agents..."}</p>
                   ) : groupCandidateAgents.length ? (
                     groupCandidateAgents.map((agent) => {
                       const selected = groupSelectedAgentIds.includes(agent.agentId);
@@ -5788,7 +5790,7 @@ export function ChatCodingRoute() {
                       );
                     })
                   ) : (
-                    <p className={styles.groupComposerEmpty}>{lang === "zh" ? "暂无可加入群聊的持久 Agent。" : "No persistent agents are available."}</p>
+                    <p className={styles.groupComposerEmpty}>{lang === "zh" ? "暂无可加入群聊的持久助手。" : "No persistent agents are available."}</p>
                   )}
                 </div>
                 <button

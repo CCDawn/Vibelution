@@ -1,5 +1,4 @@
-import { MessageCircleHeart, UsersRound } from "lucide-react";
-import { Link } from "react-router-dom";
+import { CircleDot, Clock3, MessageCircleHeart, UsersRound } from "lucide-react";
 
 import type { ConversationSummary, Team } from "../api/types";
 import styles from "./ChatCodingRoute.module.css";
@@ -16,11 +15,11 @@ export function teamStatusLabel(status: string | undefined, lang: "zh" | "en", f
 }
 
 export function teamMemberPreview(team: Pick<Team, "members" | "memberCount">, lang: "zh" | "en") {
-  return (team.members ?? [])
-    .slice(0, 3)
-    .map((member) => member.agentName || member.agentCode || member.agentId)
-    .filter(Boolean)
-    .join(", ") || (team.memberCount ? String(team.memberCount) : (lang === "zh" ? "待绑定" : "empty"));
+  const memberCount = team.memberCount || team.members?.length || 0;
+  if (!memberCount) {
+    return lang === "zh" ? "待绑定" : "empty";
+  }
+  return lang === "zh" ? `${memberCount}人` : String(memberCount);
 }
 
 export function teamCategoryLabel(team: Pick<Team, "teamCategory" | "teamKind">, lang: "zh" | "en") {
@@ -50,9 +49,12 @@ export function GroupConversationIndexItem({
   formatTime,
   onOpen,
 }: GroupConversationIndexItemProps) {
+  void fallbackSummary;
   const itemClassName = active
     ? `${styles.sessionItem} ${styles.groupSessionItem} ${styles.sessionItemActive}`
     : `${styles.sessionItem} ${styles.groupSessionItem}`;
+  const groupStatus = statusLabel(conversation.status);
+  const memberLabel = lang === "zh" ? `成员：${conversation.participantCount ?? 0}` : `Members: ${conversation.participantCount ?? 0}`;
 
   return (
     <div
@@ -70,16 +72,19 @@ export function GroupConversationIndexItem({
         <span className={styles.conversationCopy}>
           <span className={styles.conversationTitleRow}>
             <span className={styles.sessionItemTitle}>{conversation.title}</span>
-            <span className={styles.sessionState}>{statusLabel(conversation.status)}</span>
-          </span>
-          <span className={styles.sessionItemSummary} title={conversation.summary}>
-            {conversation.summary || fallbackSummary}
+            <span className={styles.sessionState} title={groupStatus} aria-label={groupStatus}>
+              <CircleDot size={10} aria-hidden="true" />
+            </span>
           </span>
           <span className={styles.conversationMetaRow}>
-            <span className={`${styles.conversationKindBadge} ${styles.conversationKindBadgeGroup}`}>
-              {kindLabel}
+            <span className={`${styles.conversationKindBadge} ${styles.conversationKindBadgeGroup}`} title={kindLabel} aria-label={kindLabel}>
+              <MessageCircleHeart size={10} aria-hidden="true" />
             </span>
-            <span>{lang === "zh" ? "成员" : "Members"} · {conversation.participantCount ?? 0}</span>
+            <span title={memberLabel} aria-label={memberLabel}>
+              <UsersRound size={10} aria-hidden="true" />
+              {conversation.participantCount ?? 0}
+            </span>
+            <Clock3 size={10} aria-hidden="true" />
             <time>{formatTime(conversation.updatedAt)}</time>
           </span>
         </span>
@@ -107,10 +112,13 @@ export function TeamConversationIndexItem({
   statusLabel,
   onOpen,
 }: TeamConversationIndexItemProps) {
+  void teamRoute;
   const itemClassName = active
     ? `${styles.sessionItem} ${styles.teamTreeItem} ${styles.sessionItemActive}`
     : `${styles.sessionItem} ${styles.teamTreeItem}`;
-  const roomLabel = team.linkedChatRoom?.title || (roomId ? roomId : (lang === "zh" ? "未同步" : "not linked"));
+  const teamStatus = teamStatusLabel(team.status, lang, statusLabel);
+  const roomTitle = roomId ? (lang === "zh" ? "团队群聊已同步" : "Team room linked") : (lang === "zh" ? "团队群聊待同步" : "Team room pending");
+  const memberTitle = lang === "zh" ? `成员：${teamMemberPreview(team, lang)}` : `Members: ${teamMemberPreview(team, lang)}`;
 
   return (
     <div
@@ -129,42 +137,24 @@ export function TeamConversationIndexItem({
         <span className={styles.conversationCopy}>
           <span className={styles.conversationTitleRow}>
             <span className={styles.sessionItemTitle}>{team.name}</span>
-            <span className={styles.sessionState}>{teamStatusLabel(team.status, lang, statusLabel)}</span>
-          </span>
-          <span className={styles.sessionItemSummary} title={team.purpose || team.linkedChatRoom?.title || team.teamId}>
-            {team.purpose || team.linkedChatRoom?.title || (lang === "zh" ? "团队通讯与成员协作" : "Team communication and members")}
+            <span className={styles.sessionState} title={teamStatus} aria-label={teamStatus}>
+              <CircleDot size={10} aria-hidden="true" />
+            </span>
           </span>
           <span className={styles.conversationMetaRow}>
-            <span className={`${styles.conversationKindBadge} ${styles.conversationKindBadgeGroup}`}>
-              {lang === "zh" ? "团队" : "Team"}
+            <span className={`${styles.conversationKindBadge} ${styles.conversationKindBadgeGroup}`} title={lang === "zh" ? "团队" : "Team"} aria-label={lang === "zh" ? "团队" : "Team"}>
+              <UsersRound size={10} aria-hidden="true" />
             </span>
-            <span>{lang === "zh" ? "群" : "Room"} · {roomLabel}</span>
-            <span>{lang === "zh" ? "成员" : "Members"} · {team.memberCount}</span>
+            <span title={memberTitle} aria-label={memberTitle}>
+              <UsersRound size={10} aria-hidden="true" />
+              {teamMemberPreview(team, lang)}
+            </span>
+            <span title={roomTitle} aria-label={roomTitle}>
+              <MessageCircleHeart size={10} aria-hidden="true" />
+            </span>
           </span>
         </span>
       </button>
-      <div className={styles.teamTreeLabelRow}>
-        <span>{lang === "zh" ? "团队分类" : "Team category"}</span>
-        <strong>{teamCategoryLabel(team, lang)}</strong>
-        <Link to={teamRoute}>{lang === "zh" ? "打开团队" : "Open team"}</Link>
-      </div>
-      <div className={styles.teamTreeChildren}>
-        <button
-          type="button"
-          className={styles.teamTreeChild}
-          disabled={!roomId}
-          onClick={() => onOpen(roomId)}
-        >
-          <MessageCircleHeart size={13} />
-          <span>{lang === "zh" ? "团队群聊" : "Team room"}</span>
-          <strong>{team.linkedChatRoom?.status || (roomId ? "ready" : (lang === "zh" ? "待同步" : "sync"))}</strong>
-        </button>
-        <Link className={styles.teamTreeChild} to={teamRoute}>
-          <UsersRound size={13} />
-          <span>{lang === "zh" ? "群成员" : "Members"}</span>
-          <strong>{teamMemberPreview(team, lang)}</strong>
-        </Link>
-      </div>
     </div>
   );
 }
