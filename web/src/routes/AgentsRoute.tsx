@@ -1294,7 +1294,7 @@ function groupDisplayLabel(group: { id: string; label?: string } | undefined, co
 
 function groupSectionId(group: AgentConfigWorkspaceGroup) {
   const section = String(group.section || "").trim();
-  return section === "mode" || section === "reference" ? section : "status";
+  return section === "boundary" || section === "mode" || section === "reference" ? section : "status";
 }
 
 function groupDescription(group: { id: string; description?: string }, copy: ReturnType<typeof agentsRouteCopy>) {
@@ -1570,6 +1570,10 @@ function agentHasRuntimeSignal(agent: AgentConfigWorkspaceAgent | null | undefin
   return Boolean(runtimeState && runtimeState !== "idle") || (agent?.agentInboxPendingCount ?? 0) > 0;
 }
 
+function hasActionableHealthIssue(agent: AgentConfigWorkspaceAgent | null | undefined) {
+  return Boolean(agent?.health?.some((issue) => issue.severity === "blocking" || issue.severity === "warning"));
+}
+
 function buildAgentManagementBrief(
   agent: AgentConfigWorkspaceAgent | null | undefined,
   copy: ReturnType<typeof agentsRouteCopy>,
@@ -1672,8 +1676,9 @@ function buildManagementFilterGroups(
     {
       id: "setup:maintenance",
       label: copy.managementFilterMaintenance,
-      count: count((agent) => agent.health.length > 0),
+      count: count(hasActionableHealthIssue),
       description: copy.managementFilterMaintenanceHint,
+      healthCount: count(hasActionableHealthIssue),
     },
   ];
 }
@@ -1691,7 +1696,7 @@ function managementFilterMatches(agent: AgentConfigWorkspaceAgent, activeFilter:
     case "setup:inbox":
       return (agent.agentInboxPendingCount ?? 0) > 0;
     case "setup:maintenance":
-      return agent.health.length > 0;
+      return hasActionableHealthIssue(agent);
     default:
       return true;
   }
@@ -2433,7 +2438,7 @@ function agentsRouteCopy(lang: "zh" | "en") {
         search: "搜索 Agent、模型、提示词、模式或引用",
         agentFilters: "Agent 筛选",
         allAgents: "全部 Agent",
-        activeAgents: "活跃 Agent",
+        activeAgents: "可用 Agent",
         bulkSelected: "已选",
         bulkSelectVisible: "选择当前列表",
         bulkClear: "清空",
@@ -2455,19 +2460,19 @@ function agentsRouteCopy(lang: "zh" | "en") {
         bulkPromptResult: "批量提示词更新完成",
         filterSections: {
           status: "状态",
-          boundary: "Agent 类型",
+          boundary: "Agent 身份",
           mode: "运行模式",
           reference: "引用关系",
-          management: "管理任务",
+          management: "工作队列",
         },
         groupLabels: {
-          active: "活跃 Agent",
+          active: "可用 Agent",
           needs_review: "需要处理",
           archived: "已归档",
-          work_session: "会话工作 Agent",
-          team_role: "团队角色 Agent",
-          system_role: "系统角色 Agent",
-          service_role: "服务维护 Agent",
+          work_session: "会话入口 Agent",
+          team_role: "团队/科研角色 Agent",
+          system_role: "系统进化 Agent",
+          service_role: "平台服务 Agent",
           chat: "会话模式",
           research: "科研模式",
           supervised_evolution: "监督进化模式",
@@ -2477,12 +2482,12 @@ function agentsRouteCopy(lang: "zh" | "en") {
         } as Record<string, string>,
         groupDescriptions: {
           active: "当前可被业务页面引用或调度的 Agent。",
-          needs_review: "存在阻塞或警告健康项的活跃 Agent。",
+          needs_review: "存在阻塞或警告健康项的可用 Agent。",
           archived: "只保留历史数据、不再进入可用池的 Agent。",
-          work_session: "用于项目开发、调试、实现和审计的 Codex-like 会话执行体。",
+          work_session: "用于项目开发、调试、实现和审计的 Codex-like 会话入口。",
           team_role: "拥有人物/任务档案，并进入团队或科研组织结构的 Agent。",
           system_role: "由自进化、监督进化等系统流程固定管理的 Agent。",
-          service_role: "负责知识、工具、记忆或平台维护的非人物团队成员 Agent。",
+          service_role: "负责知识、工具、记忆或平台治理的平台服务 Agent。",
           group_chat: "被一个或多个群聊引用的 Agent。",
           team: "被一个或多个团队画布引用的 Agent。",
         } as Record<string, string>,
@@ -2490,17 +2495,17 @@ function agentsRouteCopy(lang: "zh" | "en") {
         managementFilterMissingPersonaHint: "缺少性别、年龄、沟通风格、背景或专长等人物档案。",
         managementFilterMissingTask: "未配置任务",
         managementFilterMissingTaskHint: "缺少使命、职责、适合任务、完成标准或交接说明。",
-        managementFilterMissingTools: "工具能力未配置",
-        managementFilterMissingToolsHint: "缺少工具能力包、允许/优先/禁用工具或默认保存位置。",
+        managementFilterMissingTools: "工具使用待确认",
+        managementFilterMissingToolsHint: "未显式配置可用、优先或禁用工具，建议确认它是否应使用默认工具策略。",
         managementFilterNoTeam: "无团队归属",
         managementFilterNoTeamHint: "尚未被任何团队画布引用，适合继续分配组织位置。",
         managementFilterPendingInbox: "有待处理消息",
         managementFilterPendingInboxHint: "Agent inbox 仍有待处理消息，需要进入运行页处理。",
-        managementFilterMaintenance: "维护/健康处理",
-        managementFilterMaintenanceHint: "存在健康问题或归档状态，需要进入维护区处理。",
+        managementFilterMaintenance: "健康问题待处理",
+        managementFilterMaintenanceHint: "存在阻塞或警告级健康问题，需要进入维护区处理。",
         createAgent: "新增 Agent",
         createAgentTitle: "新增 Agent",
-        createAgentHint: "会话工作 Agent 用于项目开发和调试，按 Codex-like 配置创建；团队/科研 Agent 才需要人物摘要、任务使命和团队归属。",
+        createAgentHint: "会话入口 Agent 用于项目开发和调试，按 Codex-like 配置创建；团队/科研 Agent 才需要人物摘要、任务使命和团队归属。",
         createAgentName: "功能名",
         createAgentNamePlaceholder: "例如：科研复核 Agent",
         createAgentRole: "角色键",
@@ -2594,7 +2599,7 @@ function agentsRouteCopy(lang: "zh" | "en") {
         noIssues: "当前没有明显健康问题。",
         routeHint: "这张卡片是 Agent 的唯一配置点；业务页面只引用这里的 Agent。",
         managementBriefTitle: "管理完整度",
-        managementBriefHint: "按当前 Agent 类型检查必要配置；会话工作 Agent 不要求人物档案和团队归属。",
+        managementBriefHint: "按当前 Agent 身份检查必要配置；会话入口 Agent 不要求人物档案和团队归属。",
         managementIdentity: "人物",
         managementTask: "任务",
         managementModelPrompt: "模型/指令",
@@ -2605,7 +2610,7 @@ function agentsRouteCopy(lang: "zh" | "en") {
         nextActionsTitle: "下一步建议",
         nextAllReady: "关键配置已齐，可以直接在团队或会话中使用。",
         nextSetupModelPrompt: "配置模型与项目指令",
-        nextSetupModelPromptHint: "会话工作 Agent 需要先确定 LLM 和提示词/项目指令入口。",
+        nextSetupModelPromptHint: "会话入口 Agent 需要先确定 LLM 和提示词/项目指令入口。",
         nextSetupIdentity: "补齐人物档案",
         nextSetupIdentityHint: "让顾问和用户知道这个 Agent 的性格、背景、专长与协作方式。",
         nextSetupTask: "补齐任务档案",
@@ -2798,7 +2803,7 @@ function agentsRouteCopy(lang: "zh" | "en") {
         search: "Search agents, models, prompts, modes, or references",
         agentFilters: "Agent filters",
         allAgents: "All Agents",
-        activeAgents: "Active Agents",
+        activeAgents: "Available Agents",
         bulkSelected: "Selected",
         bulkSelectVisible: "Select visible",
         bulkClear: "Clear",
@@ -2820,19 +2825,19 @@ function agentsRouteCopy(lang: "zh" | "en") {
         bulkPromptResult: "Bulk prompt update finished",
         filterSections: {
           status: "Status",
-          boundary: "Agent type",
+          boundary: "Agent identity",
           mode: "Runtime mode",
           reference: "References",
-          management: "Management tasks",
+          management: "Work queue",
         },
         groupLabels: {
-          active: "Active Agents",
+          active: "Available Agents",
           needs_review: "Needs Review",
           archived: "Archived",
-          work_session: "Work-session Agents",
-          team_role: "Team role Agents",
-          system_role: "System role Agents",
-          service_role: "Service Agents",
+          work_session: "Session entry Agents",
+          team_role: "Team / research role Agents",
+          system_role: "System evolution Agents",
+          service_role: "Platform service Agents",
           chat: "Chat mode",
           research: "Research mode",
           supervised_evolution: "Supervised evolution mode",
@@ -2842,12 +2847,12 @@ function agentsRouteCopy(lang: "zh" | "en") {
         } as Record<string, string>,
         groupDescriptions: {
           active: "Agents currently available for business pages and routing.",
-          needs_review: "Active Agents with blocking or warning health issues.",
+          needs_review: "Available Agents with blocking or warning health issues.",
           archived: "Historical records that no longer enter the available pool.",
-          work_session: "Codex-like execution Agents for project development, debugging, implementation, and audit sessions.",
+          work_session: "Codex-like session entry Agents for project development, debugging, implementation, and audit work.",
           team_role: "Agents with persona and task profiles that belong to team, research, or business organization structures.",
           system_role: "Agents owned by fixed system flows such as self-evolution or supervised evolution.",
-          service_role: "Non-persona maintenance Agents for knowledge, tools, memory, or platform upkeep.",
+          service_role: "Platform service Agents for knowledge, tools, memory, or governance upkeep.",
           group_chat: "Agents referenced by one or more group chats.",
           team: "Agents referenced by one or more team canvases.",
         } as Record<string, string>,
@@ -2855,17 +2860,17 @@ function agentsRouteCopy(lang: "zh" | "en") {
         managementFilterMissingPersonaHint: "Missing gender, age, communication style, background, expertise, or identity notes.",
         managementFilterMissingTask: "Missing task profile",
         managementFilterMissingTaskHint: "Missing mission, responsibilities, task fit, success criteria, deliverables, or handoff notes.",
-        managementFilterMissingTools: "Empty tool permissions",
-        managementFilterMissingToolsHint: "Missing tool policy, allow/prefer/block choices, or write boundary.",
+        managementFilterMissingTools: "Tool permissions need review",
+        managementFilterMissingToolsHint: "No explicit allow, prefer, or block tools are configured. Confirm whether the default tool policy is intended.",
         managementFilterNoTeam: "No team",
         managementFilterNoTeamHint: "Not referenced by any team canvas yet.",
         managementFilterPendingInbox: "Pending messages",
         managementFilterPendingInboxHint: "Agent inbox has pending messages to handle in Activity.",
-        managementFilterMaintenance: "Maintenance",
-        managementFilterMaintenanceHint: "Has health issues or archived state that needs maintenance.",
+        managementFilterMaintenance: "Health issues to handle",
+        managementFilterMaintenanceHint: "Has blocking or warning health issues that should be handled in Maintenance.",
         createAgent: "New Agent",
         createAgentTitle: "Create persistent Agent",
-        createAgentHint: "Work-session Agents are created like Codex-style project executors. Team and research Agents still need persona, task mission, and organization placement.",
+        createAgentHint: "Session entry Agents are created like Codex-style project executors. Team and research Agents still need persona, task mission, and organization placement.",
         createAgentName: "Functional name",
         createAgentNamePlaceholder: "e.g. Research review Agent",
         createAgentRole: "Role key",
@@ -2959,7 +2964,7 @@ function agentsRouteCopy(lang: "zh" | "en") {
         noIssues: "No obvious health issues.",
         routeHint: "This card is the single Agent config point. Product pages should only reference Agents from here.",
         managementBriefTitle: "Management readiness",
-        managementBriefHint: "Checks only the fields required by the current Agent type. Work-session Agents do not require persona profiles or team membership.",
+        managementBriefHint: "Checks only the fields required by the current Agent identity. Session entry Agents do not require persona profiles or team membership.",
         managementIdentity: "Persona",
         managementTask: "Task",
         managementModelPrompt: "Model / instructions",
@@ -2970,7 +2975,7 @@ function agentsRouteCopy(lang: "zh" | "en") {
         nextActionsTitle: "Next actions",
         nextAllReady: "Core configuration is ready for teams or chat.",
         nextSetupModelPrompt: "Configure model and project instructions",
-        nextSetupModelPromptHint: "Work-session Agents need a model slot and prompt/project instruction entry before use.",
+        nextSetupModelPromptHint: "Session entry Agents need a model slot and prompt/project instruction entry before use.",
         nextSetupIdentity: "Complete persona",
         nextSetupIdentityHint: "Give users and advisors a clear identity, background, expertise, and collaboration style.",
         nextSetupTask: "Complete task profile",
@@ -3252,13 +3257,14 @@ export function AgentsRoute() {
         groups: groups.filter((group) => groupSectionId(group) === section),
       }))
       .filter((section) => section.groups.length > 0);
+    const managementSection = {
+      id: "management",
+      label: copy.filterSections.management,
+      groups: managementFilterGroups.filter((group) => group.count > 0),
+    };
     return [
+      managementSection,
       ...defaultSections,
-      {
-        id: "management",
-        label: copy.filterSections.management,
-        groups: managementFilterGroups.filter((group) => group.count > 0),
-      },
     ].filter((section) => section.groups.length > 0);
   }, [copy, groups, managementFilterGroups]);
   const activeGroup = groups.find((group) => group.id === activeFilter);
@@ -4717,7 +4723,7 @@ export function AgentsRoute() {
                         title={description}
                       >
                         <span>
-                          {section.id === "management" ? <CheckCircle2 size={15} /> : section.id === "reference" ? <Users size={15} /> : section.id === "mode" ? <Layers3 size={15} /> : group.id === "needs_review" ? <AlertTriangle size={15} /> : <Bot size={15} />}
+                          {section.id === "management" ? <CheckCircle2 size={15} /> : section.id === "boundary" ? <UserRound size={15} /> : section.id === "reference" ? <Users size={15} /> : section.id === "mode" ? <Layers3 size={15} /> : group.id === "needs_review" ? <AlertTriangle size={15} /> : <Bot size={15} />}
                           {displayLabel}
                         </span>
                         <strong>{group.count}</strong>

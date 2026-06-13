@@ -462,7 +462,7 @@ def _derive_health(
                         "code": "stale_chat_room_participant",
                         "agentId": agent_id,
                         "title": "群聊成员引用了不可用 Agent",
-                        "detail": f"{room.get('title') or room.get('roomId') or '-'} 中的成员 agentId={agent_id} 不在活跃 Agent 列表中。",
+                        "detail": f"{room.get('title') or room.get('roomId') or '-'} 中的成员 agentId={agent_id} 不在可用 Agent 列表中。",
                         "source": "chat_room",
                         "action": "在群聊管理中替换或移除该成员。",
                     }
@@ -489,7 +489,7 @@ def _derive_health(
                         "code": "stale_team_member",
                         "agentId": agent_id,
                         "title": "团队成员引用了不可用 Agent",
-                        "detail": f"{team.get('name') or team.get('teamId') or '-'} 中的成员 agentId={agent_id} 不在活跃 Agent 列表中。",
+                        "detail": f"{team.get('name') or team.get('teamId') or '-'} 中的成员 agentId={agent_id} 不在可用 Agent 列表中。",
                         "source": "team",
                         "action": "在团队画布中替换或解绑该成员。",
                     }
@@ -511,13 +511,13 @@ def _derive_health(
 
 def _derive_groups(agents: list[dict[str, Any]]) -> list[dict[str, Any]]:
     group_ids = [
-        ("active", "活跃 Agent", "status", "当前可被业务页面引用或调度的 Agent。"),
-        ("needs_review", "需要处理", "status", "存在阻塞或警告健康项的活跃 Agent。"),
+        ("active", "可用 Agent", "status", "当前可被业务页面引用或调度的 Agent。"),
+        ("needs_review", "需要处理", "status", "存在阻塞或警告健康项的可用 Agent。"),
         ("archived", "已归档", "status", "只保留历史数据、不再进入可用池的 Agent。"),
-        ("work_session", "会话工作 Agent", "boundary", "面向项目开发、调试和实现任务的 Codex-like 会话执行体。"),
-        ("team_role", "团队角色 Agent", "boundary", "拥有人物/任务档案并进入团队、科研或业务组织结构的 Agent。"),
-        ("system_role", "系统角色 Agent", "boundary", "由自进化、监督进化等系统流程固定管理的 Agent。"),
-        ("service_role", "服务维护 Agent", "boundary", "负责知识、工具、记忆或平台维护的非人物团队成员 Agent。"),
+        ("work_session", "会话入口 Agent", "boundary", "面向项目开发、调试和实现任务的 Codex-like 会话执行体。"),
+        ("team_role", "团队/科研角色 Agent", "boundary", "拥有人物/任务档案并进入团队、科研或业务组织结构的 Agent。"),
+        ("system_role", "系统进化 Agent", "boundary", "由自进化、监督进化等系统流程固定管理的 Agent。"),
+        ("service_role", "平台服务 Agent", "boundary", "负责知识、工具、记忆或平台维护的非人物团队成员 Agent。"),
         ("chat", "会话模式", "mode", "属于 Chat 运行模式或会话可用池的 Agent。"),
         ("research", "科研模式", "mode", "属于 Research 运行模式或科研池的 Agent。"),
         ("supervised_evolution", "监督进化模式", "mode", "占用监督进化模式引用的 Agent。"),
@@ -605,7 +605,7 @@ def _derive_agent_boundary(agent: dict[str, Any], *, references: list[dict[str, 
     if system_markers:
         return {
             "type": "system_role",
-            "label": "系统角色 Agent",
+            "label": "系统进化 Agent",
             "ownership": "system",
             "directSessionRole": "recovery_channel",
             "reason": primary_mode if primary_mode in {"self_evolution", "supervised_evolution"} else "system_mode_reference",
@@ -624,7 +624,7 @@ def _derive_agent_boundary(agent: dict[str, Any], *, references: list[dict[str, 
     if service_markers:
         return {
             "type": "service_role",
-            "label": "服务维护 Agent",
+            "label": "平台服务 Agent",
             "ownership": "service",
             "directSessionRole": "recovery_channel" if str(agent.get("directSessionId") or "").strip() else "none",
             "reason": role_key or "service_metadata",
@@ -639,7 +639,7 @@ def _derive_agent_boundary(agent: dict[str, Any], *, references: list[dict[str, 
     if has_team_ref or research_markers:
         return {
             "type": "team_role",
-            "label": "团队角色 Agent",
+            "label": "团队/科研角色 Agent",
             "ownership": "team",
             "directSessionRole": "recovery_channel",
             "reason": "team_reference" if has_team_ref else "research_mode",
@@ -660,7 +660,7 @@ def _derive_agent_boundary(agent: dict[str, Any], *, references: list[dict[str, 
     if chat_available and not has_team_ref:
         return {
             "type": "work_session",
-            "label": "会话工作 Agent",
+            "label": "会话入口 Agent",
             "ownership": "user",
             "directSessionRole": "primary_entry" if chat_default or created_by_session else "recovery_channel",
             "reason": "chat_default" if chat_default else "chat_mode_without_team",
@@ -672,7 +672,7 @@ def _derive_agent_boundary(agent: dict[str, Any], *, references: list[dict[str, 
 
     return {
         "type": "service_role",
-        "label": "服务维护 Agent",
+        "label": "平台服务 Agent",
         "ownership": "service",
         "directSessionRole": "recovery_channel" if str(agent.get("directSessionId") or "").strip() else "none",
         "reason": "unassigned_active_agent",
@@ -692,6 +692,7 @@ def _summary(
     mode_bindings: dict[str, Any],
 ) -> dict[str, Any]:
     active_agents = [item for item in agents if str(item.get("status") or "active").strip() != "archived"]
+    actionable_issues = [item for item in issues if item.get("severity") in {"blocking", "warning"}]
     return {
         "agentCount": len(agents),
         "activeAgentCount": len(active_agents),
@@ -710,7 +711,7 @@ def _summary(
         "chatRoomCount": len(chat_rooms),
         "teamCount": len([item for item in teams if str(item.get("status") or "active") != "archived"]),
         "groupCount": len(groups),
-        "healthIssueCount": len(issues),
+        "healthIssueCount": len(actionable_issues),
         "blockingIssueCount": sum(1 for item in issues if item.get("severity") == "blocking"),
         "warningIssueCount": sum(1 for item in issues if item.get("severity") == "warning"),
         "inboxPendingCount": sum(_safe_int(item.get("agentInboxPendingCount")) for item in agents),

@@ -236,16 +236,19 @@ def test_agent_config_workspace_lists_agents_once_and_derives_references(tmp_pat
     groups = {item["id"]: item for item in payload["groups"]}
     assert "all" not in groups
     assert groups["active"]["section"] == "status"
-    assert groups["active"]["label"] == "活跃 Agent"
+    assert groups["active"]["label"] == "可用 Agent"
     assert groups["active"]["count"] == 3
     assert agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID in groups["active"]["agentIds"]
     assert archived_agent["agentId"] not in groups["active"]["agentIds"]
     assert groups["work_session"]["section"] == "boundary"
+    assert groups["work_session"]["label"] == "会话入口 Agent"
     assert chat_agent["agentId"] in groups["work_session"]["agentIds"]
     assert research_agent["agentId"] not in groups["work_session"]["agentIds"]
     assert groups["team_role"]["section"] == "boundary"
+    assert groups["team_role"]["label"] == "团队/科研角色 Agent"
     assert research_agent["agentId"] in groups["team_role"]["agentIds"]
     assert groups["service_role"]["section"] == "boundary"
+    assert groups["service_role"]["label"] == "平台服务 Agent"
     assert agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID in groups["service_role"]["agentIds"]
     assert groups["needs_review"]["section"] == "status"
     assert groups["archived"]["section"] == "status"
@@ -257,6 +260,29 @@ def test_agent_config_workspace_lists_agents_once_and_derives_references(tmp_pat
     assert groups["team"]["section"] == "reference"
     assert research_agent["agentId"] in groups["research"]["agentIds"]
     assert research_agent["agentId"] in groups["group_chat"]["agentIds"]
+
+
+def test_agent_config_workspace_summary_counts_only_actionable_health_issues():
+    summary = agent_config_workspace_service._summary(
+        [
+            {"status": "active", "runtimeStatus": {}, "agentInboxPendingCount": 2},
+            {"status": "archived", "runtimeStatus": {}, "agentInboxPendingCount": 1},
+        ],
+        [],
+        [
+            {"severity": "info", "code": "pending_inbox_messages"},
+            {"severity": "warning", "code": "missing_prompt_template"},
+            {"severity": "blocking", "code": "unresolved_model_reference_dialogue"},
+        ],
+        [],
+        [],
+        {"modes": {"chat": {}}},
+    )
+
+    assert summary["healthIssueCount"] == 2
+    assert summary["warningIssueCount"] == 1
+    assert summary["blockingIssueCount"] == 1
+    assert summary["inboxPendingCount"] == 3
 
 
 def test_agent_directory_reuses_repaired_snapshot_for_repeated_reads(tmp_path, monkeypatch):
