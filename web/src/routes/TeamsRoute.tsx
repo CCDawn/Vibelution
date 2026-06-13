@@ -1750,9 +1750,12 @@ export function TeamsRoute({
     summary: "",
     notes: "",
   });
+  const [sourceCollectionExpandedPanelId, setSourceCollectionExpandedPanelId] = useState("");
+  const [sourceCollectionFocusedPanelId, setSourceCollectionFocusedPanelId] = useState("");
   const [nodePositionDrafts, setNodePositionDrafts] = useState<Record<string, { x: number; y: number }>>({});
   const [canvasFrameSize, setCanvasFrameSize] = useState<CanvasFrameSize>({ width: CANVAS_VIEWPORT_WIDTH, height: CANVAS_VIEWPORT_HEIGHT });
   const [lockedCanvasViewportStyle, setLockedCanvasViewportStyle] = useState<CanvasViewportStyle | null>(null);
+  const sourceCollectionControlPanelRef = useRef<HTMLElement | null>(null);
   const canvasFrameRef = useRef<HTMLDivElement | null>(null);
   const dragStateRef = useRef<NodeDragState | null>(null);
   const dragFrameRef = useRef(0);
@@ -3159,8 +3162,18 @@ export function TeamsRoute({
     return (
       <details
         id="source-collection-screening-panel"
-        className={styles.workflowSourceCollectionDetails}
-        open={sourceCollectionScreeningStepState === "active" || sourceCollectionScreeningStepState === "pending"}
+        className={sourceCollectionPanelClassName("source-collection-screening-panel")}
+        open={
+          sourceCollectionExpandedPanelId === "source-collection-screening-panel"
+          || sourceCollectionScreeningStepState === "active"
+          || sourceCollectionScreeningStepState === "pending"
+        }
+        onToggle={(event) => {
+          if (!event.currentTarget.open && sourceCollectionExpandedPanelId === "source-collection-screening-panel") {
+            setSourceCollectionExpandedPanelId("");
+          }
+        }}
+        tabIndex={-1}
       >
         <summary>
           <span>{lang === "zh" ? "资料筛选" : "Source screening"}</span>
@@ -3297,7 +3310,12 @@ export function TeamsRoute({
 
   function renderSourceCollectionControlsPanel() {
     return (
-      <section id="source-collection-actions" className={styles.sourceCollectionControlPanel} aria-label={lang === "zh" ? "资料搜集控制台" : "Source collection controls"}>
+      <section
+        id="source-collection-actions"
+        ref={sourceCollectionControlPanelRef}
+        className={styles.sourceCollectionControlPanel}
+        aria-label={lang === "zh" ? "资料搜集控制台" : "Source collection controls"}
+      >
         <div className={styles.workflowIngestionHeader}>
           <div>
             <strong>{lang === "zh" ? "阶段详情" : "Stage details"}</strong>
@@ -4345,7 +4363,7 @@ export function TeamsRoute({
   const sourceCollectionScreeningButtonText = selectedTeamAssessSourceQualityPending
     ? (lang === "zh" ? "筛选中" : "Screening")
     : sourceQualityUnassessedCount > 0
-      ? (lang === "zh" ? "开始资料筛选" : "Start screening")
+      ? (lang === "zh" ? "打开资料筛选" : "Open screening")
       : sourceQualityCandidateCount > 0
         ? (lang === "zh" ? "查看筛选结果" : "View screening")
         : (lang === "zh" ? "资料筛选" : "Screening");
@@ -4356,12 +4374,41 @@ export function TeamsRoute({
       : sourceQualityCandidateCount > 0
         ? (lang === "zh" ? "已筛选" : "done")
         : (lang === "zh" ? "暂无候选" : "no candidates");
+  const sourceCollectionPanelClassName = (panelId: string) => [
+    styles.workflowSourceCollectionDetails,
+    sourceCollectionFocusedPanelId === panelId ? styles.sourceCollectionFocusedPanel : "",
+  ].filter(Boolean).join(" ");
   const scrollSourceCollectionPanelIntoView = (panelId: string) => {
+    setSourceCollectionExpandedPanelId(panelId);
+    setSourceCollectionFocusedPanelId(panelId);
+    window.setTimeout(() => {
+      setSourceCollectionFocusedPanelId((current) => (current === panelId ? "" : current));
+    }, 2200);
     window.requestAnimationFrame(() => {
-      document.getElementById(panelId)?.scrollIntoView({
+      const target = document.getElementById(panelId);
+      if (!target) {
+        return;
+      }
+      if (target instanceof HTMLDetailsElement) {
+        target.open = true;
+      }
+      const container = sourceCollectionControlPanelRef.current;
+      if (container && container.contains(target)) {
+        const containerTop = container.getBoundingClientRect().top;
+        const targetTop = target.getBoundingClientRect().top;
+        const nextTop = Math.max(0, container.scrollTop + targetTop - containerTop - 10);
+        container.scrollTo({
+          top: nextTop,
+          behavior: "smooth",
+        });
+        target.focus({ preventScroll: true });
+        return;
+      }
+      target.scrollIntoView({
         behavior: "smooth",
         block: "start",
       });
+      target.focus({ preventScroll: true });
     });
   };
   const openSourceCollectionScreeningPanel = () => {

@@ -274,7 +274,13 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("sourceCollectionScreeningButtonText");
     expect(routeSource).toContain("sourceCollectionScreeningDisabled");
     expect(routeSource).toContain("openSourceCollectionScreeningPanel");
-    expect(routeSource).toContain("开始资料筛选");
+    expect(routeSource).toContain("打开资料筛选");
+    expect(routeSource).toContain("sourceCollectionExpandedPanelId");
+    expect(routeSource).toContain("sourceCollectionFocusedPanelId");
+    expect(routeSource).toContain("sourceCollectionControlPanelRef");
+    expect(routeSource).toContain("sourceCollectionPanelClassName");
+    expect(routeSource).toContain("container.scrollTo");
+    expect(routeSource).toContain("HTMLDetailsElement");
     expect(routeSource).toContain("暂无候选");
     expect(routeSource).toContain("source-collection-screening-panel");
     expect(routeSource).toContain("source-collection-candidates-panel");
@@ -429,6 +435,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.sourceCollectionStageCardHead).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionStagePrimaryAction).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionStageSecondaryAction).toBeTypeOf("string");
+    expect(routeStyles.sourceCollectionFocusedPanel).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionStepActive).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionStepDone).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionStepFailed).toBeTypeOf("string");
