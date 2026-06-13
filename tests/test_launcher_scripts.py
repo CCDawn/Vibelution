@@ -1,3 +1,5 @@
+import contextlib
+import importlib.util
 import json
 import logging
 import os
@@ -18,6 +20,16 @@ DESKTOP_ENTRY_VBS = PROJECT_ROOT / "scripts" / "vibelution_desktop_entry.vbs"
 DESKTOP_ENTRY_PY = PROJECT_ROOT / "scripts" / "vibelution_desktop_entry.py"
 
 pytestmark = pytest.mark.slow
+
+
+def _load_desktop_entry_py():
+    module_name = f"vibelution_desktop_entry_under_test_{time.time_ns()}"
+    spec = importlib.util.spec_from_file_location(module_name, DESKTOP_ENTRY_PY)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def test_web_workbench_access_log_filter_suppresses_polling_noise_only():
@@ -545,23 +557,26 @@ Add-Content -LiteralPath (Join-Path $logDir "fake-vbs-entry-calls.jsonl") -Value
     assert result.returncode == 0, result.stderr or result.stdout
 
     calls_path = project_dir / ".runtime" / "launcher" / "fake-vbs-entry-calls.jsonl"
-    deadline = time.time() + 5
-    while time.time() < deadline and not calls_path.exists():
-        time.sleep(0.05)
-    assert calls_path.exists()
-    calls_text = ""
-    last_permission_error: PermissionError | None = None
-    deadline = time.time() + 5
-    while time.time() < deadline:
-        try:
-            calls_text = calls_path.read_text(encoding="utf-8-sig")
-            last_permission_error = None
-            break
-        except PermissionError as exc:
-            last_permission_error = exc
+    expect_powershell_entry_call = not _vbs_args_target_launcher(args)
+    if expect_powershell_entry_call:
+        deadline = time.time() + 5
+        while time.time() < deadline and not calls_path.exists():
             time.sleep(0.05)
-    if last_permission_error is not None:
-        raise last_permission_error
+        assert calls_path.exists()
+    calls_text = ""
+    if calls_path.exists():
+        last_permission_error: PermissionError | None = None
+        deadline = time.time() + 5
+        while time.time() < deadline:
+            try:
+                calls_text = calls_path.read_text(encoding="utf-8-sig")
+                last_permission_error = None
+                break
+            except PermissionError as exc:
+                last_permission_error = exc
+                time.sleep(0.05)
+        if last_permission_error is not None:
+            raise last_permission_error
     calls = [json.loads(line) for line in calls_text.splitlines() if line.strip()]
     log_path = project_dir / ".runtime" / "launcher" / "desktop-entry-vbs.log"
     events = [
@@ -570,6 +585,164 @@ Add-Content -LiteralPath (Join-Path $logDir "fake-vbs-entry-calls.jsonl") -Value
         if line.strip()
     ]
     return calls, events
+
+
+def _vbs_args_target_launcher(args: list[str]) -> bool:
+    candidate = "launcher"
+    index = 0
+    while index < len(args):
+        value = str(args[index]).strip()
+        lowered = value.lower()
+        if lowered in {"-action", "--action"} and index + 1 < len(args):
+            candidate = str(args[index + 1]).strip().lower()
+            break
+        if lowered.startswith("-action:") or lowered.startswith("-action="):
+            candidate = value[8:].strip().lower()
+            break
+        if lowered.startswith("--action:") or lowered.startswith("--action="):
+            candidate = value[9:].strip().lower()
+            break
+        if not value.startswith("-") and candidate == "launcher":
+            candidate = value.lower()
+        index += 1
+    return candidate == "launcher"
+
+
+def test_desktop_entry_python_bridge_does_not_shell_out_to_powershell():
+    source = DESKTOP_ENTRY_PY.read_text(encoding="utf-8").lower()
+
+    assert "powershell.exe" not in source
+    assert "vibelution_launcher.ps1" not in source
+
+
+def test_desktop_entry_python_bridge_starts_launcher_natively(monkeypatch, tmp_path):
+    bridge = _load_desktop_entry_py()
+    calls: list[tuple[str, object]] = []
+    saved_states: list[dict[str, object]] = []
+
+    @contextlib.contextmanager
+    def fake_lock():
+        yield True
+
+    monkeypatch.setattr(bridge, "_append_log", lambda *args, **kwargs: None)
+    monkeypatch.setattr(bridge, "_single_launcher_open_lock", fake_lock)
+    monkeypatch.setattr(bridge, "_read_state", lambda: {})
+    monkeypatch.setattr(bridge, "_write_state", lambda state: saved_states.append(dict(state)))
+    monkeypatch.setattr(bridge, "_source_signature", lambda: "source-sig")
+    monkeypatch.setattr(bridge, "_launcher_control_port", lambda: 8765)
+    monkeypatch.setattr(bridge, "_launcher_control_healthy", lambda port: False)
+    monkeypatch.setattr(bridge, "_start_launcher_backend", lambda python_exe, port: calls.append(("backend", (python_exe, port))) or 111)
+    monkeypatch.setattr(bridge, "_open_launcher_window", lambda url: calls.append(("browser", url)) or 222)
+    monkeypatch.setattr(bridge, "_pid_alive", lambda pid: False)
+
+    result = bridge.main(["--action", "launcher", "--python-exe", str(tmp_path / "python.exe")])
+
+    assert result == 0
+    assert calls == [
+        ("backend", (str(tmp_path / "python.exe"), 8765)),
+        ("browser", "http://127.0.0.1:8765/launcher"),
+    ]
+    assert saved_states[-1]["launcherBackendPid"] == 111
+    assert saved_states[-1]["launcherBrowserWindowPid"] == 222
+    assert saved_states[-1]["launcherControlSourceSignature"] == "source-sig"
+
+
+def test_desktop_entry_python_bridge_reuses_current_launcher(monkeypatch):
+    bridge = _load_desktop_entry_py()
+    state = {
+        "sessionRole": "launcher_control_surface",
+        "launcherBackendPid": 111,
+        "launcherBackendLaunchPid": 111,
+        "launcherBrowserWindowPid": 222,
+        "launcherControlSourceSignature": "source-sig",
+    }
+    calls: list[str] = []
+    saved_states: list[dict[str, object]] = []
+
+    @contextlib.contextmanager
+    def fake_lock():
+        yield True
+
+    monkeypatch.setattr(bridge, "_append_log", lambda *args, **kwargs: None)
+    monkeypatch.setattr(bridge, "_single_launcher_open_lock", fake_lock)
+    monkeypatch.setattr(bridge, "_read_state", lambda: dict(state))
+    monkeypatch.setattr(bridge, "_write_state", lambda next_state: saved_states.append(dict(next_state)))
+    monkeypatch.setattr(bridge, "_source_signature", lambda: "source-sig")
+    monkeypatch.setattr(bridge, "_launcher_control_port", lambda: 8765)
+    monkeypatch.setattr(bridge, "_launcher_control_healthy", lambda port: True)
+    monkeypatch.setattr(bridge, "_start_launcher_backend", lambda python_exe, port: calls.append("backend") or 333)
+    monkeypatch.setattr(bridge, "_open_launcher_window", lambda url: calls.append("browser") or 444)
+    monkeypatch.setattr(bridge, "_pid_alive", lambda pid: pid in {111, 222})
+
+    result = bridge.main(["--action", "launcher"])
+
+    assert result == 0
+    assert calls == []
+    assert saved_states[-1]["launcherBackendPid"] == 111
+    assert saved_states[-1]["launcherBrowserWindowPid"] == 222
+
+
+def test_desktop_entry_python_bridge_does_not_start_when_port_is_already_healthy_without_state(monkeypatch):
+    bridge = _load_desktop_entry_py()
+    calls: list[str] = []
+    saved_states: list[dict[str, object]] = []
+
+    @contextlib.contextmanager
+    def fake_lock():
+        yield True
+
+    monkeypatch.setattr(bridge, "_append_log", lambda *args, **kwargs: None)
+    monkeypatch.setattr(bridge, "_single_launcher_open_lock", fake_lock)
+    monkeypatch.setattr(bridge, "_read_state", lambda: {})
+    monkeypatch.setattr(bridge, "_write_state", lambda next_state: saved_states.append(dict(next_state)))
+    monkeypatch.setattr(bridge, "_source_signature", lambda: "source-sig")
+    monkeypatch.setattr(bridge, "_launcher_control_port", lambda: 8765)
+    monkeypatch.setattr(bridge, "_launcher_control_healthy", lambda port: True)
+    monkeypatch.setattr(bridge, "_start_launcher_backend", lambda python_exe, port: calls.append("backend") or 333)
+    monkeypatch.setattr(bridge, "_open_launcher_window", lambda url: calls.append("browser") or 444)
+    monkeypatch.setattr(bridge, "_pid_alive", lambda pid: False)
+
+    result = bridge.main(["--action", "launcher"])
+
+    assert result == 0
+    assert calls == ["browser"]
+    assert saved_states[-1]["launcherBackendPid"] == 0
+    assert saved_states[-1]["launcherBrowserWindowPid"] == 444
+
+
+def test_desktop_entry_python_bridge_replaces_stale_launcher(monkeypatch):
+    bridge = _load_desktop_entry_py()
+    state = {
+        "sessionRole": "launcher_control_surface",
+        "launcherBackendPid": 111,
+        "launcherBackendLaunchPid": 112,
+        "launcherBrowserWindowPid": 222,
+        "launcherControlSourceSignature": "old-source-sig",
+    }
+    terminated: list[int] = []
+
+    @contextlib.contextmanager
+    def fake_lock():
+        yield True
+
+    monkeypatch.setattr(bridge, "_append_log", lambda *args, **kwargs: None)
+    monkeypatch.setattr(bridge, "_single_launcher_open_lock", fake_lock)
+    monkeypatch.setattr(bridge, "_read_state", lambda: dict(state))
+    monkeypatch.setattr(bridge, "_write_state", lambda next_state: None)
+    monkeypatch.setattr(bridge, "_source_signature", lambda: "new-source-sig")
+    monkeypatch.setattr(bridge, "_launcher_control_port", lambda: 8765)
+    health_results = iter([True, False, False])
+    monkeypatch.setattr(bridge, "_launcher_control_healthy", lambda port: next(health_results))
+    monkeypatch.setattr(bridge, "_wait_for_launcher_control_stopped", lambda port: True)
+    monkeypatch.setattr(bridge, "_terminate_pid", lambda pid: terminated.append(pid))
+    monkeypatch.setattr(bridge, "_start_launcher_backend", lambda python_exe, port: 333)
+    monkeypatch.setattr(bridge, "_open_launcher_window", lambda url: 444)
+    monkeypatch.setattr(bridge, "_pid_alive", lambda pid: False)
+
+    result = bridge.main(["--action", "launcher"])
+
+    assert result == 0
+    assert terminated == [111, 112, 222]
 
 
 def _run_launcher_ast_harness(tmp_path: Path, harness_source: str) -> subprocess.CompletedProcess[str]:
@@ -7594,14 +7767,7 @@ def test_desktop_entry_forwards_no_browser_and_skips_monitor(tmp_path):
 def test_vbs_desktop_entry_defaults_to_launcher_action(tmp_path):
     calls, events = _run_vbs_desktop_entry_with_fake_powershell_entry(tmp_path, [])
 
-    assert calls == [
-        {
-            "action": "launcher",
-            "argv": [],
-            "noBrowser": False,
-            "pythonExe": str(tmp_path / "project" / ".venv" / "Scripts" / "python.exe"),
-        }
-    ]
+    assert calls == []
     assert events[-2]["event"] == "desktop_entry_vbs.launched"
     assert "wmi_python_bridge_hidden_process" in events[-2]["details"]
 
