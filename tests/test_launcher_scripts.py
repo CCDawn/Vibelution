@@ -2622,6 +2622,19 @@ Write-Output "ok"
     assert result.stdout.strip().splitlines()[-1] == "ok"
 
 
+def test_vbs_desktop_entry_uses_wmi_hidden_process_creation():
+    source = DESKTOP_ENTRY_VBS.read_text(encoding="utf-8")
+
+    assert "Win32_ProcessStartup" in source
+    assert "startup.ShowWindow = 0" in source
+    assert "startup.CreateFlags = 134218240" in source
+    assert "BuildPowerShellEntryCommand()" in source
+    assert "VIBELUTION_DESKTOP_ENTRY_VBS_RUN_ID" in source
+    assert "VIBELUTION_PYTHON_EXE" in source
+    assert "processClass.Create(commandLine, workingDirectory, startup, createdPid)" in source
+    assert "shell.Run(command, 0, False)" not in source
+
+
 def test_launcher_runtime_manager_client_forwards_expected_command_flags(tmp_path):
     result = _run_launcher_ast_harness(
         tmp_path,
