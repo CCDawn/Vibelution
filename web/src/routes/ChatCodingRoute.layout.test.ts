@@ -832,6 +832,27 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.conversationKindBadgeChild).toBeTypeOf("string");
   });
 
+  it("renders cli agent tool calls as command tabs beside child sessions", () => {
+    expect(routeSource).toContain('const CLI_AGENT_TOOL_NAME = "cli_agent_run_tool"');
+    expect(routeSource).toContain('const CLI_AGENT_RUN_TAB_PREFIX = "cli-agent-run:"');
+    expect(routeSource).toContain("function cliAgentRunTabId");
+    expect(routeSource).toContain("function cliAgentRunIdFromTabId");
+    expect(routeSource).toContain("function buildCliAgentRunViews");
+    expect(routeSource).toContain("toolCall.name !== CLI_AGENT_TOOL_NAME");
+    expect(routeSource).toContain('const activeFilePath = workspace.activeTab !== "agent" && !activeCliAgentRunId ? workspace.activeTab : null;');
+    expect(routeSource).toContain("cliAgentRuns={cliAgentRunTabs}");
+    expect(routeSource).toContain("onOpenCliAgentRun={(runId) =>");
+    expect(routeSource).toContain("setActiveTab(activeSessionId, cliAgentRunTabId(runId));");
+    expect(routeSource).toContain("<CliAgentRunCommandPanel");
+    expect(routeSource).toContain(") : activeCliAgentRun ? (");
+    expect(routeSource).not.toContain("const [activeCliAgentRunId, setActiveCliAgentRunId] = useState");
+    expect(routeCssSource).toContain(".cliAgentRunPanel");
+    expect(routeCssSource).toContain(".agentSessionTabCli");
+    expect(agentSessionTabStripSource).toContain("export type CliAgentRunTab");
+    expect(agentSessionTabStripSource).toContain("cliAgentRuns.map");
+    expect(agentSessionTabStripSource).toContain("SquareTerminal");
+  });
+
   it("renders a compact QQ-style tree with direct sessions separate from Team-owned rooms", () => {
     expect(routeSource).toContain("fetchJson<TeamListPayload>(\"/api/teams\")");
     expect(routeSource).toContain("queryKeys.teams()");

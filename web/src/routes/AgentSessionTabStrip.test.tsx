@@ -88,6 +88,7 @@ function renderStrip(overrides: Partial<ComponentProps<typeof AgentSessionTabStr
     onContextMenu: () => undefined,
     onDragReference: () => undefined,
     onOpenDirectSession: () => undefined,
+    onOpenCliAgentRun: () => undefined,
     onRenameTitleChange: () => undefined,
     onSetActiveTab: () => undefined,
     onSubmitRename: () => undefined,
@@ -121,6 +122,30 @@ describe("AgentSessionTabStrip", () => {
     expect(markup).toContain("新的子任务名");
     expect(markup).toContain("agentSessionTabTitleInput");
     expect(markup).toContain("disabled=\"\"");
+  });
+
+  it("renders CLI agent tool runs as top-level command tabs", () => {
+    const markup = renderStrip({
+      activeSessionId: "session-root",
+      activeCliAgentRunId: "run-1",
+      sessions: [session()],
+      cliAgentRuns: [
+        {
+          id: "run-1",
+          title: "Codex Code",
+          summary: "Inspect repository",
+          status: "ok",
+          agentType: "codex_code",
+          mode: "readonly",
+        },
+      ],
+    });
+
+    expect(markup).toContain("CLI Agent");
+    expect(markup).toContain("Codex Code");
+    expect(markup).toContain("readonly");
+    expect(markup).toContain("aria-current=\"true\"");
+    expect(markup).toContain("agentSessionTabCli");
   });
 
   it("renders nothing when there is only one session", () => {

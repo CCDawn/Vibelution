@@ -12,6 +12,7 @@ import {
   Search,
   Sparkles,
   Square,
+  SquareTerminal,
   Trash2,
   UsersRound,
   RotateCcw,
@@ -72,6 +73,7 @@ import {
   TeamListPayload,
   ConversationMessage,
   ConversationAttachment,
+  ToolCall,
 } from "../api/types";
 import {
   shouldShowNextStateSignalInConversation,
@@ -136,7 +138,7 @@ import {
   participantAgentDisplayInfo,
   sessionAgentDisplayInfo,
 } from "./agentDisplay";
-import { AgentSessionTabStrip } from "./AgentSessionTabStrip";
+import { AgentSessionTabStrip, type CliAgentRunTab } from "./AgentSessionTabStrip";
 import { ConversationIndexTree } from "./ConversationIndexTree";
 import {
   DEFAULT_COLLAPSED_CONVERSATION_GROUPS,
@@ -178,6 +180,224 @@ type ActiveSkillContract = {
 type SessionDetailWithActiveSkill = SessionDetail & {
   activeSkillContract?: ActiveSkillContract | null;
 };
+
+const CLI_AGENT_TOOL_NAME = "cli_agent_run_tool";
+const CLI_AGENT_RUN_TAB_PREFIX = "cli-agent-run:";
+
+function cliAgentRunTabId(runId: string) {
+  return `${CLI_AGENT_RUN_TAB_PREFIX}${runId}`;
+}
+
+function cliAgentRunIdFromTabId(tabId: string) {
+  return tabId.startsWith(CLI_AGENT_RUN_TAB_PREFIX)
+    ? tabId.slice(CLI_AGENT_RUN_TAB_PREFIX.length)
+    : "";
+}
+
+type CliAgentRunResult = {
+  status?: string;
+  code?: string;
+  runId?: string;
+  agentType?: string;
+  label?: string;
+  mode?: string;
+  cwd?: string;
+  commandPreview?: string[];
+  exitCode?: number | null;
+  durationMs?: number;
+  timedOut?: boolean;
+  timeoutSeconds?: number;
+  stdoutPreview?: string;
+  stderrPreview?: string;
+  logPath?: string;
+};
+
+type CliAgentRunView = CliAgentRunTab & {
+  messageId: string;
+  toolCall: ToolCall;
+  result: CliAgentRunResult | null;
+  task: string;
+  cwd: string;
+  commandLine: string;
+  resultPreview: string;
+  error: string;
+  tracePath: string;
+  durationMs?: number;
+};
+
+function textArg(args: Record<string, unknown> | undefined, key: string) {
+  const value = args?.[key];
+  if (typeof value === "string") {
+    return value.trim();
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value).trim();
+  }
+  return "";
+}
+
+function parseCliAgentResult(toolCall: ToolCall): CliAgentRunResult | null {
+  const raw = String(toolCall.resultPreview ?? "").trim();
+  if (!raw || !raw.startsWith("{")) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as CliAgentRunResult : null;
+  } catch {
+    return null;
+  }
+}
+
+function cliAgentTitle(agentType: string, result: CliAgentRunResult | null) {
+  const resultLabel = String(result?.label ?? "").trim();
+  if (resultLabel) {
+    return resultLabel;
+  }
+  if (agentType === "mimo_code") {
+    return "MiMo Code";
+  }
+  if (agentType === "codex_code") {
+    return "Codex Code";
+  }
+  return agentType || "CLI Agent";
+}
+
+function compactCliCommand(run: Pick<CliAgentRunView, "agentType" | "mode" | "cwd" | "task" | "result">) {
+  const resultCommand = Array.isArray(run.result?.commandPreview) ? run.result?.commandPreview.join(" ") : "";
+  if (resultCommand) {
+    return resultCommand;
+  }
+  return [
+    "cli_agent_run_tool",
+    run.agentType ? `agent_type=${run.agentType}` : "",
+    run.mode ? `mode=${run.mode}` : "",
+    run.cwd ? `cwd=${run.cwd}` : "",
+    run.task ? "task=<prompt>" : "",
+  ].filter(Boolean).join(" ");
+}
+
+function buildCliAgentRunViews(messages: ConversationMessage[]): CliAgentRunView[] {
+  const runs: CliAgentRunView[] = [];
+  for (const message of messages) {
+    for (const [index, toolCall] of (message.toolCalls ?? []).entries()) {
+      if (toolCall.name !== CLI_AGENT_TOOL_NAME) {
+        continue;
+      }
+      const result = parseCliAgentResult(toolCall);
+      const args = toolCall.arguments;
+      const agentType = textArg(args, "agent_type") || textArg(args, "agentType") || String(result?.agentType ?? "").trim();
+      const mode = textArg(args, "mode") || String(result?.mode ?? "").trim();
+      const cwd = textArg(args, "cwd") || String(result?.cwd ?? "").trim();
+      const task = textArg(args, "task");
+      const status = String(result?.status || toolCall.status || "running").trim();
+      const title = cliAgentTitle(agentType, result);
+      const summary = String(result?.code || toolCall.summary || task || cwd || "").trim();
+      const run: CliAgentRunView = {
+        id: `${message.id}-${CLI_AGENT_TOOL_NAME}-${index}`,
+        messageId: message.id,
+        toolCall,
+        result,
+        title,
+        summary,
+        status,
+        agentType,
+        mode,
+        cwd,
+        task,
+        commandLine: "",
+        resultPreview: String(toolCall.resultPreview ?? "").trim(),
+        error: String(result?.stderrPreview || toolCall.error || "").trim(),
+        tracePath: String(result?.logPath || toolCall.tracePath || "").trim(),
+        durationMs: result?.durationMs ?? toolCall.durationMs,
+      };
+      run.commandLine = compactCliCommand(run);
+      runs.push(run);
+    }
+  }
+  return runs;
+}
+
+function formatDurationMs(durationMs: number | undefined) {
+  if (!Number.isFinite(durationMs)) {
+    return "";
+  }
+  const value = Number(durationMs);
+  return value >= 1000 ? `${(value / 1000).toFixed(1)}s` : `${Math.round(value)}ms`;
+}
+
+function CliAgentRunCommandPanel({
+  run,
+  lang,
+  statusLabel,
+}: {
+  run: CliAgentRunView;
+  lang: "zh" | "en";
+  statusLabel: (status: string) => string;
+}) {
+  const result = run.result;
+  const stdout = String(result?.stdoutPreview ?? "").trim();
+  const stderr = String(result?.stderrPreview ?? run.error ?? "").trim();
+  const rawResult = !stdout && !stderr ? run.resultPreview : "";
+  const metaRows = [
+    { label: lang === "zh" ? "适配器" : "Adapter", value: run.agentType || run.title },
+    { label: lang === "zh" ? "模式" : "Mode", value: run.mode },
+    { label: "cwd", value: run.cwd },
+    {
+      label: lang === "zh" ? "退出码" : "Exit",
+      value: result?.exitCode === undefined || result?.exitCode === null ? "" : String(result.exitCode),
+    },
+    { label: lang === "zh" ? "耗时" : "Duration", value: formatDurationMs(run.durationMs) },
+    { label: lang === "zh" ? "记录" : "Log", value: run.tracePath },
+  ].filter((row) => row.value);
+  const sections = [
+    { id: "task", label: lang === "zh" ? "任务" : "Task", value: run.task },
+    { id: "stdout", label: "stdout", value: stdout },
+    { id: "stderr", label: "stderr", value: stderr },
+    { id: "result", label: lang === "zh" ? "原始结果" : "Raw result", value: rawResult },
+  ].filter((section) => section.value);
+
+  return (
+    <section className={styles.cliAgentRunPanel} aria-label={lang === "zh" ? "CLI Agent 工具运行" : "CLI Agent tool run"}>
+      <header className={styles.cliAgentRunHeader}>
+        <span className={styles.cliAgentRunIcon} aria-hidden="true">
+          <SquareTerminal size={18} />
+        </span>
+        <div className={styles.cliAgentRunHeading}>
+          <p>{lang === "zh" ? "工具命令行" : "Tool command line"}</p>
+          <h2>{run.title}</h2>
+        </div>
+        <span className={styles.cliAgentRunStatus}>{statusLabel(run.status)}</span>
+      </header>
+      <div className={styles.cliAgentRunCommand}>
+        <span aria-hidden="true">$</span>
+        <code>{run.commandLine}</code>
+      </div>
+      {metaRows.length > 0 ? (
+        <dl className={styles.cliAgentRunMeta}>
+          {metaRows.map((row) => (
+            <div key={row.label} className={styles.cliAgentRunMetaItem}>
+              <dt>{row.label}</dt>
+              <dd title={row.value}>{row.value}</dd>
+            </div>
+          ))}
+        </dl>
+      ) : null}
+      <div className={styles.cliAgentRunOutput}>
+        {sections.length > 0 ? sections.map((section) => (
+          <section key={section.id} className={styles.cliAgentRunOutputSection}>
+            <h3>{section.label}</h3>
+            <pre>{section.value}</pre>
+          </section>
+        )) : (
+          <p className={styles.cliAgentRunEmpty}>
+            {lang === "zh" ? "工具还没有返回可显示的输出。" : "No tool output is available yet."}
+          </p>
+        )}
+      </div>
+    </section>
+  );
+}
 
 function encodeUtf8Base64(value: string): string {
   const bytes = new TextEncoder().encode(value);
@@ -2424,7 +2644,8 @@ export function ChatCodingRoute() {
       }
     : { openTabs: [], activeTab: "agent" };
 
-  const activeFilePath = workspace.activeTab !== "agent" ? workspace.activeTab : null;
+  const activeCliAgentRunId = cliAgentRunIdFromTabId(workspace.activeTab);
+  const activeFilePath = workspace.activeTab !== "agent" && !activeCliAgentRunId ? workspace.activeTab : null;
   const fileContentQuery = useQuery({
     queryKey: queryKeys.fileContent(activeFilePath ?? ""),
     enabled: Boolean(activeFilePath),
@@ -2565,6 +2786,22 @@ export function ChatCodingRoute() {
   const selectedSessionDetail =
     rawSessionDetail && rawSessionDetail.id === activeSessionId ? rawSessionDetail : undefined;
   const detail = selectedSessionDetail;
+  const cliAgentRunTabs = useMemo(
+    () => buildCliAgentRunViews(detail?.messages ?? []),
+    [detail?.messages],
+  );
+  const activeCliAgentRun = useMemo(
+    () => activeCliAgentRunId ? cliAgentRunTabs.find((run) => run.id === activeCliAgentRunId) : undefined,
+    [activeCliAgentRunId, cliAgentRunTabs],
+  );
+  useEffect(() => {
+    if (!activeSessionId || !activeCliAgentRunId) {
+      return;
+    }
+    if (!cliAgentRunTabs.some((run) => run.id === activeCliAgentRunId)) {
+      setActiveTab(activeSessionId, "agent");
+    }
+  }, [activeCliAgentRunId, activeSessionId, cliAgentRunTabs, setActiveTab]);
   const sessionDetailLoadingForActiveSession = Boolean(
     activeSessionId
     && (!rawSessionDetail || rawSessionDetail.id !== activeSessionId)
@@ -4853,11 +5090,13 @@ export function ChatCodingRoute() {
             >
               {projectBusActive ? (lang === "zh" ? "通知流" : "Notice stream") : (lang === "zh" ? "群聊" : "Group")}
             </button>
-          ) : agentSessionTabs.length > 1 ? (
+          ) : agentSessionTabs.length > 1 || cliAgentRunTabs.length > 0 ? (
             <AgentSessionTabStrip
               activeSessionId={activeSessionId}
+              activeCliAgentRunId={activeCliAgentRunId}
               agentsById={agentsById}
               buildSessionReferencePayload={buildSessionReferencePayload}
+              cliAgentRuns={cliAgentRunTabs}
               editingSessionId={editingSessionId}
               editingSessionTitle={editingSessionTitle}
               lang={lang}
@@ -4871,6 +5110,11 @@ export function ChatCodingRoute() {
               onCancelRename={cancelRenameSession}
               onContextMenu={openSessionContextMenu}
               onDragReference={startSessionReferenceDrag}
+              onOpenCliAgentRun={(runId) => {
+                if (activeSessionId) {
+                  setActiveTab(activeSessionId, cliAgentRunTabId(runId));
+                }
+              }}
               onOpenDirectSession={handleOpenDirectSession}
               onRenameTitleChange={setEditingSessionTitle}
               onSetActiveTab={setActiveTab}
@@ -4899,7 +5143,9 @@ export function ChatCodingRoute() {
               <button
                 type="button"
                 className={styles.fileTabButton}
-                onClick={() => activeSessionId && setActiveTab(activeSessionId, tabPath)}
+                onClick={() => {
+                  activeSessionId && setActiveTab(activeSessionId, tabPath);
+                }}
               >
                 {tabPath.split("/").at(-1)}
               </button>
@@ -5429,6 +5675,16 @@ export function ChatCodingRoute() {
             ) : (
               <div className={styles.emptySurface}>{t("loadingSession")}</div>
             )
+          ) : activeCliAgentRun ? (
+            <CliAgentRunCommandPanel
+              run={activeCliAgentRun}
+              lang={lang}
+              statusLabel={statusLabel}
+            />
+          ) : activeCliAgentRunId ? (
+            <div className={styles.emptySurface}>
+              {lang === "zh" ? "这个 CLI 工具页还没有可显示的运行记录。" : "This CLI tool page has no run to display."}
+            </div>
           ) : fileContentQuery.isError ? (
             <div className={styles.emptySurface}>
               {describeError(fileContentQuery.error, t("loadFailed"))}

@@ -1,4 +1,4 @@
-import { Bot, Check, MessageCircleHeart, X } from "lucide-react";
+import { Bot, Check, MessageCircleHeart, SquareTerminal, X } from "lucide-react";
 import type { DragEvent, MouseEvent as ReactMouseEvent } from "react";
 
 import type { AgentInstance, SessionReferenceAttachment, SessionSummary } from "../api/types";
@@ -7,8 +7,18 @@ import { sessionAgentDisplayInfo } from "./agentDisplay";
 import { isChildSession } from "./DirectSessionIndexItem";
 import styles from "./ChatCodingRoute.module.css";
 
+export type CliAgentRunTab = {
+  id: string;
+  title: string;
+  summary: string;
+  status: string;
+  agentType: string;
+  mode: string;
+};
+
 export type AgentSessionTabStripProps = {
   activeSessionId: string | null;
+  activeCliAgentRunId?: string;
   agentsById: Map<string, AgentInstance>;
   buildSessionReferencePayload: (
     session: SessionSummary,
@@ -21,6 +31,7 @@ export type AgentSessionTabStripProps = {
   renamePending: boolean;
   renameSessionId: string;
   resolveModelLabel: (modelId: string) => string | undefined;
+  cliAgentRuns?: CliAgentRunTab[];
   sessions: SessionSummary[];
   statusLabel: (status: string) => string;
   t: (key: TranslationKey) => string;
@@ -29,6 +40,7 @@ export type AgentSessionTabStripProps = {
   onContextMenu: (event: ReactMouseEvent<HTMLElement>, session: SessionSummary) => void;
   onDragReference: (event: DragEvent<HTMLElement>, reference: SessionReferenceAttachment) => void;
   onOpenDirectSession: (sessionId: string) => void;
+  onOpenCliAgentRun?: (runId: string) => void;
   onRenameTitleChange: (title: string) => void;
   onSetActiveTab: (sessionId: string, tab: "agent") => void;
   onSubmitRename: (session: SessionSummary) => void;
@@ -36,6 +48,7 @@ export type AgentSessionTabStripProps = {
 
 export function AgentSessionTabStrip({
   activeSessionId,
+  activeCliAgentRunId = "",
   agentsById,
   buildSessionReferencePayload,
   editingSessionId,
@@ -44,6 +57,7 @@ export function AgentSessionTabStrip({
   renamePending,
   renameSessionId,
   resolveModelLabel,
+  cliAgentRuns = [],
   sessions,
   statusLabel,
   t,
@@ -52,11 +66,12 @@ export function AgentSessionTabStrip({
   onContextMenu,
   onDragReference,
   onOpenDirectSession,
+  onOpenCliAgentRun,
   onRenameTitleChange,
   onSetActiveTab,
   onSubmitRename,
 }: AgentSessionTabStripProps) {
-  if (sessions.length <= 1) {
+  if (sessions.length <= 1 && cliAgentRuns.length === 0) {
     return null;
   }
 
@@ -75,7 +90,7 @@ export function AgentSessionTabStrip({
           (sessionIsChild ? (session.resultCard?.summary || session.taskSummary) : session.taskSummary)
           || sessionDisplay.modelLabel
           || "";
-        const tabActive = activeSessionId === session.id && workspaceActiveTab === "agent";
+        const tabActive = activeSessionId === session.id && workspaceActiveTab === "agent" && !activeCliAgentRunId;
         const tabEditing = editingSessionId === session.id;
         const tabClassName = [
           styles.agentSessionTab,
@@ -178,6 +193,39 @@ export function AgentSessionTabStrip({
             <span className={styles.agentSessionTabMeta}>
               {statusLabel(sessionStatus)}
               {sessionDisplay.modelLabel ? ` · ${sessionDisplay.modelLabel}` : ""}
+            </span>
+          </button>
+        );
+      })}
+      {cliAgentRuns.map((run) => {
+        const tabActive = activeCliAgentRunId === run.id;
+        const title = [run.title, run.summary].filter(Boolean).join(" · ");
+        const tabClassName = [
+          styles.agentSessionTab,
+          styles.agentSessionTabCli,
+          tabActive ? styles.agentSessionTabActive : "",
+        ].filter(Boolean).join(" ");
+        return (
+          <button
+            key={run.id}
+            type="button"
+            className={tabClassName}
+            aria-current={tabActive ? "true" : undefined}
+            onClick={() => onOpenCliAgentRun?.(run.id)}
+            title={title}
+          >
+            <span className={styles.agentSessionTabIcon} aria-hidden="true">
+              <SquareTerminal size={14} />
+            </span>
+            <span className={styles.agentSessionTabCopy}>
+              <span className={styles.agentSessionTabKicker}>
+                {lang === "zh" ? "CLI Agent" : "CLI Agent"}
+              </span>
+              <span className={styles.agentSessionTabTitle}>{run.title}</span>
+            </span>
+            <span className={styles.agentSessionTabMeta}>
+              {statusLabel(run.status)}
+              {run.mode ? ` · ${run.mode}` : ""}
             </span>
           </button>
         );
