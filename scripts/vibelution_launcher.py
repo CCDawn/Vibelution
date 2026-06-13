@@ -109,11 +109,17 @@ def _wait_for_health(port: int, host: str, timeout_seconds: float = 45.0) -> boo
     return False
 
 
+def _windows_creation_flag_names() -> tuple[str, ...]:
+    if os.name != "nt":
+        return ()
+    return ("DETACHED_PROCESS", "CREATE_NEW_PROCESS_GROUP", "CREATE_NO_WINDOW")
+
+
 def _windows_creation_flags() -> int:
     if os.name != "nt":
         return 0
     flags = 0
-    for name in ("DETACHED_PROCESS", "CREATE_NEW_PROCESS_GROUP", "CREATE_NO_WINDOW"):
+    for name in _windows_creation_flag_names():
         flags |= int(getattr(subprocess, name, 0))
     return flags
 
@@ -248,37 +254,54 @@ def _frontend_build_commands(package_manager: str, web_dir: Path) -> list[tuple[
     ]
 
 
-def _select_no_console_python(executable: str) -> dict[str, object]:
+def _select_background_python(executable: str) -> dict[str, object]:
     raw = str(executable or "").strip()
+    creation_flag_names = list(_windows_creation_flag_names())
     result: dict[str, object] = {
         "pythonExecutable": raw,
         "sourcePythonExecutable": raw,
-        "consoleWindowSuppressed": False,
+        "noConsolePythonExecutable": "",
+        "consoleWindowSuppressed": bool(creation_flag_names),
+        "consoleSuppressionMode": "creation_flags" if creation_flag_names else "native",
         "consoleFallbackReason": "empty_python_executable",
+        "pythonLaunchPolicy": "source_python_with_hidden_creation_flags",
+        "creationFlagNames": creation_flag_names,
     }
     if not raw:
+        result["consoleWindowSuppressed"] = False
+        result["consoleSuppressionMode"] = "none"
+        result["pythonLaunchPolicy"] = "missing_python_executable"
         return result
     if os.name != "nt":
         result["consoleFallbackReason"] = "non_windows"
+        result["pythonLaunchPolicy"] = "source_python_native_process"
         return result
 
     candidate = Path(raw)
     if candidate.name.lower() == "pythonw.exe":
+        sibling = candidate.with_name("python.exe")
+        if sibling.exists():
+            result["pythonExecutable"] = str(sibling.resolve())
+            result["noConsolePythonExecutable"] = str(candidate.resolve()) if candidate.exists() else raw
+            result["consoleFallbackReason"] = ""
+            result["pythonLaunchPolicy"] = "pythonw_source_replaced_with_python_exe"
+            return result
         result["pythonExecutable"] = str(candidate.resolve()) if candidate.exists() else raw
-        result["consoleWindowSuppressed"] = True
-        result["consoleFallbackReason"] = ""
+        result["noConsolePythonExecutable"] = str(candidate.resolve()) if candidate.exists() else raw
+        result["consoleFallbackReason"] = "python_exe_sibling_missing_for_pythonw_source"
+        result["pythonLaunchPolicy"] = "pythonw_fallback_when_python_exe_missing"
         return result
 
     sibling = candidate.with_name("pythonw.exe")
     if sibling.exists():
-        result["pythonExecutable"] = str(sibling.resolve())
-        result["consoleWindowSuppressed"] = True
-        result["consoleFallbackReason"] = ""
-        return result
+        result["noConsolePythonExecutable"] = str(sibling.resolve())
 
     if candidate.exists():
         result["pythonExecutable"] = str(candidate.resolve())
-    result["consoleFallbackReason"] = "pythonw_sibling_missing"
+        result["consoleFallbackReason"] = ""
+    else:
+        result["consoleFallbackReason"] = "python_executable_missing"
+        result["pythonLaunchPolicy"] = "missing_python_executable"
     return result
 
 
@@ -315,7 +338,7 @@ def _start_backend(port: int, host: str, *, no_browser: bool) -> dict:
     _ensure_frontend_build()
     stdout = BACKEND_STDOUT_PATH.open("ab")
     stderr = BACKEND_STDERR_PATH.open("ab")
-    python_runtime = _select_no_console_python(sys.executable)
+    python_runtime = _select_background_python(sys.executable)
     python_command = str(python_runtime["pythonExecutable"])
     args = [
         python_command,
@@ -366,8 +389,12 @@ def _start_backend(port: int, host: str, *, no_browser: bool) -> dict:
         "lastSource": "python_launcher",
         "pythonExecutable": python_command,
         "sourcePythonExecutable": str(python_runtime["sourcePythonExecutable"]),
+        "noConsolePythonExecutable": str(python_runtime["noConsolePythonExecutable"]),
         "consoleWindowSuppressed": bool(python_runtime["consoleWindowSuppressed"]),
+        "consoleSuppressionMode": str(python_runtime["consoleSuppressionMode"]),
         "consoleFallbackReason": str(python_runtime["consoleFallbackReason"]),
+        "pythonLaunchPolicy": str(python_runtime["pythonLaunchPolicy"]),
+        "creationFlagNames": list(python_runtime["creationFlagNames"]),
         "updatedAt": _now_iso(),
     }
     _write_state(state)

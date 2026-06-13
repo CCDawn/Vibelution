@@ -3426,6 +3426,7 @@ def test_ensure_daemon_running_restarts_stale_source_signature(monkeypatch, tmp_
         "Popen",
         lambda args, **kwargs: popen_calls.append(args) or type("Proc", (), {"pid": 24680})(),
     )
+    expected_runtime = daemon._select_daemon_python_runtime("python-test")
 
     assert daemon.ensure_daemon_running(python_executable="python-test") is True
     assert terminated == [12345]
@@ -3435,10 +3436,14 @@ def test_ensure_daemon_running_restarts_stale_source_signature(monkeypatch, tmp_
             "daemon.start_requested",
             {
                 "launchPid": 24680,
-                "pythonExecutable": "python-test",
-                "sourcePythonExecutable": "python-test",
-                "consoleWindowSuppressed": False,
-                "consoleFallbackReason": "python_executable_missing",
+                "pythonExecutable": expected_runtime["pythonExecutable"],
+                "sourcePythonExecutable": expected_runtime["sourcePythonExecutable"],
+                "noConsolePythonExecutable": expected_runtime["noConsolePythonExecutable"],
+                "consoleWindowSuppressed": expected_runtime["consoleWindowSuppressed"],
+                "consoleSuppressionMode": expected_runtime["consoleSuppressionMode"],
+                "consoleFallbackReason": expected_runtime["consoleFallbackReason"],
+                "pythonLaunchPolicy": expected_runtime["pythonLaunchPolicy"],
+                "creationFlagNames": expected_runtime["creationFlagNames"],
             },
         ),
     ]
@@ -3549,7 +3554,7 @@ def test_ensure_daemon_running_keeps_current_source_signature(monkeypatch):
     assert daemon.ensure_daemon_running() is False
 
 
-def test_ensure_daemon_running_prefers_pythonw_for_background_daemon(tmp_path, monkeypatch):
+def test_ensure_daemon_running_prefers_python_exe_with_hidden_creation_flags(tmp_path, monkeypatch):
     python_exe = tmp_path / "Scripts" / "python.exe"
     pythonw_exe = tmp_path / "Scripts" / "pythonw.exe"
     python_exe.parent.mkdir()
@@ -3571,25 +3576,34 @@ def test_ensure_daemon_running_prefers_pythonw_for_background_daemon(tmp_path, m
         "Popen",
         lambda args, **kwargs: popen_calls.append(args) or type("Proc", (), {"pid": 13579})(),
     )
+    expected_runtime = daemon._select_daemon_python_runtime(str(python_exe))
 
     assert daemon.ensure_daemon_running(python_executable=str(python_exe)) is True
 
-    assert popen_calls == [[str(pythonw_exe.resolve()), "-m", "core.runtime_manager.cli", "daemon"]]
+    assert popen_calls == [[expected_runtime["pythonExecutable"], "-m", "core.runtime_manager.cli", "daemon"]]
+    if daemon.os.name == "nt":
+        assert expected_runtime["pythonExecutable"] == str(python_exe.resolve())
+        assert expected_runtime["noConsolePythonExecutable"] == str(pythonw_exe.resolve())
+        assert expected_runtime["pythonLaunchPolicy"] == "source_python_with_hidden_creation_flags"
     assert events == [
         (
             "daemon.start_requested",
             {
                 "launchPid": 13579,
-                "pythonExecutable": str(pythonw_exe.resolve()),
-                "sourcePythonExecutable": str(python_exe),
-                "consoleWindowSuppressed": True,
-                "consoleFallbackReason": "",
+                "pythonExecutable": expected_runtime["pythonExecutable"],
+                "sourcePythonExecutable": expected_runtime["sourcePythonExecutable"],
+                "noConsolePythonExecutable": expected_runtime["noConsolePythonExecutable"],
+                "consoleWindowSuppressed": expected_runtime["consoleWindowSuppressed"],
+                "consoleSuppressionMode": expected_runtime["consoleSuppressionMode"],
+                "consoleFallbackReason": expected_runtime["consoleFallbackReason"],
+                "pythonLaunchPolicy": expected_runtime["pythonLaunchPolicy"],
+                "creationFlagNames": expected_runtime["creationFlagNames"],
             },
         )
     ]
 
 
-def test_ensure_daemon_running_logs_console_fallback_when_pythonw_missing(tmp_path, monkeypatch):
+def test_ensure_daemon_running_uses_python_exe_even_when_pythonw_missing(tmp_path, monkeypatch):
     python_exe = tmp_path / "Scripts" / "python.exe"
     python_exe.parent.mkdir()
     python_exe.write_text("", encoding="utf-8")
@@ -3609,19 +3623,28 @@ def test_ensure_daemon_running_logs_console_fallback_when_pythonw_missing(tmp_pa
         "Popen",
         lambda args, **kwargs: popen_calls.append(args) or type("Proc", (), {"pid": 13579})(),
     )
+    expected_runtime = daemon._select_daemon_python_runtime(str(python_exe))
 
     assert daemon.ensure_daemon_running(python_executable=str(python_exe)) is True
 
-    assert popen_calls == [[str(python_exe.resolve()), "-m", "core.runtime_manager.cli", "daemon"]]
+    assert popen_calls == [[expected_runtime["pythonExecutable"], "-m", "core.runtime_manager.cli", "daemon"]]
+    if daemon.os.name == "nt":
+        assert expected_runtime["pythonExecutable"] == str(python_exe.resolve())
+        assert expected_runtime["noConsolePythonExecutable"] == ""
+        assert expected_runtime["consoleFallbackReason"] == ""
     assert events == [
         (
             "daemon.start_requested",
             {
                 "launchPid": 13579,
-                "pythonExecutable": str(python_exe.resolve()),
-                "sourcePythonExecutable": str(python_exe),
-                "consoleWindowSuppressed": False,
-                "consoleFallbackReason": "pythonw_sibling_missing",
+                "pythonExecutable": expected_runtime["pythonExecutable"],
+                "sourcePythonExecutable": expected_runtime["sourcePythonExecutable"],
+                "noConsolePythonExecutable": expected_runtime["noConsolePythonExecutable"],
+                "consoleWindowSuppressed": expected_runtime["consoleWindowSuppressed"],
+                "consoleSuppressionMode": expected_runtime["consoleSuppressionMode"],
+                "consoleFallbackReason": expected_runtime["consoleFallbackReason"],
+                "pythonLaunchPolicy": expected_runtime["pythonLaunchPolicy"],
+                "creationFlagNames": expected_runtime["creationFlagNames"],
             },
         )
     ]
@@ -4528,6 +4551,99 @@ def test_handle_open_workbench_retries_stale_browser_only_session(monkeypatch):
     assert backup_event["commandId"] == "cmd-open"
     assert backup_event["reason"] == "launcher_open_retry_success"
     assert result["stableBackup"]["status"] == "queued"
+
+
+def test_handle_open_workbench_restarts_browser_missing_session(monkeypatch):
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    state = {
+        "command": {},
+        "workbench": {
+            "desiredState": "closed",
+            "observedState": "closed",
+            "phase": "steady",
+        },
+    }
+    events: list[tuple[str, dict]] = []
+    open_calls: list[bool] = []
+    restart_calls: list[bool] = []
+    observations = _repeat_last(
+        [
+            {
+                "observedState": "partial",
+                "launcherStatePresent": True,
+                "browserManaged": True,
+                "browserWindowAlive": False,
+                "backendPid": 28888,
+                "browserLaunchPid": 5168,
+                "browserWindowPid": 5168,
+                "backendHealthy": True,
+                "backendObserved": True,
+                "backendPort": 8000,
+                "backendPortListening": True,
+                "backendPortOwnerPid": 28888,
+                "backendPortOwnerTrusted": True,
+                "backendPortConflict": False,
+                "lifecycleConsistency": "browser_missing",
+                "sessionId": "browser-missing-session",
+                "url": "http://127.0.0.1:8000",
+                "healthUrl": "http://127.0.0.1:8000/api/health",
+            },
+            {
+                "observedState": "open",
+                "launcherStatePresent": True,
+                "browserManaged": True,
+                "browserWindowAlive": True,
+                "backendPid": 28888,
+                "browserLaunchPid": 4500,
+                "browserWindowPid": 4500,
+                "backendHealthy": True,
+                "backendObserved": True,
+                "backendPort": 8000,
+                "backendPortListening": True,
+                "backendPortOwnerPid": 28888,
+                "backendPortOwnerTrusted": True,
+                "backendPortConflict": False,
+                "lifecycleConsistency": "consistent",
+                "sessionId": "fresh-browser-session",
+                "url": "http://127.0.0.1:8000",
+                "healthUrl": "http://127.0.0.1:8000/api/health",
+            },
+        ]
+    )
+
+    monkeypatch.setattr(daemon, "load_state", lambda: state)
+    monkeypatch.setattr(daemon, "save_state", lambda next_state: next_state)
+    monkeypatch.setattr(daemon, "observe_workbench", observations)
+    monkeypatch.setattr(daemon, "build_evolution_summary", lambda: {"self": {}, "supervised": {}})
+    monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: events.append((event_type, payload)))
+    monkeypatch.setattr(daemon, "_OPEN_VERIFICATION_TIMEOUT_SECONDS", 0)
+    monkeypatch.setattr(daemon, "_start_background_thread", lambda **kwargs: None)
+
+    def fake_open_workbench(*, no_browser: bool, cancel_check=None):
+        open_calls.append(no_browser)
+        return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+
+    def fake_restart_workbench(*, no_browser: bool, cancel_check=None):
+        restart_calls.append(no_browser)
+        return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(daemon, "open_workbench", fake_open_workbench)
+    monkeypatch.setattr(daemon, "restart_workbench", fake_restart_workbench)
+
+    result = runtime_daemon._handle_open_workbench(command_id="cmd-open", args={})
+
+    assert result["ok"] is True
+    assert result["message"] == "Workbench opened."
+    assert open_calls == [False]
+    assert restart_calls == [False]
+    restart_payload = _event_payload(events, "workbench.open.browser_missing_restart")
+    assert restart_payload["commandId"] == "cmd-open"
+    assert restart_payload["backendHealthy"] is True
+    assert restart_payload["browserWindowAlive"] is False
+    assert restart_payload["lifecycleConsistency"] == "browser_missing"
+    success_payload = _event_payload(events, "workbench.open.verification_succeeded")
+    assert success_payload["browserWindowPid"] == 4500
+    assert success_payload["retry"] == "browser_missing_restart"
 
 
 def test_handle_open_workbench_accepts_trusted_backend_when_health_probe_lags(monkeypatch):

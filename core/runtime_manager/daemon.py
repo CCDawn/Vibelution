@@ -929,6 +929,16 @@ def _open_verification_should_retry_stale_session(observation: dict[str, Any], *
     return not backend_ready or not browser_ready
 
 
+def _open_verification_should_restart_missing_browser(observation: dict[str, Any], *, no_browser: bool) -> bool:
+    if no_browser:
+        return False
+    if _open_request_ready(observation, no_browser=no_browser, launcher_confirmed=True):
+        return False
+    if bool(observation.get("backendPortConflict")):
+        return False
+    return _workbench_has_missing_managed_browser(observation)
+
+
 def _wait_for_open_verification(
     *,
     no_browser: bool,
@@ -1261,9 +1271,15 @@ def _workbench_reopen_intent_event_payload(intent: dict[str, Any], *, command_id
     }
 
 
+def _creation_flag_names() -> tuple[str, ...]:
+    if os.name != "nt":
+        return ()
+    return ("DETACHED_PROCESS", "CREATE_NEW_PROCESS_GROUP", "CREATE_NO_WINDOW")
+
+
 def _creation_flags() -> int:
     flags = 0
-    for name in ("DETACHED_PROCESS", "CREATE_NEW_PROCESS_GROUP", "CREATE_NO_WINDOW"):
+    for name in _creation_flag_names():
         flags |= int(getattr(subprocess, name, 0))
     return flags
 
@@ -1344,43 +1360,59 @@ def _select_daemon_python_runtime(python_executable: str) -> dict[str, Any]:
     """Select the Python runtime used for the long-lived daemon process."""
 
     raw = str(python_executable or "").strip()
+    creation_flag_names = list(_creation_flag_names()) if os.name == "nt" else []
     result = {
         "pythonExecutable": raw,
         "sourcePythonExecutable": raw,
-        "consoleWindowSuppressed": False,
+        "noConsolePythonExecutable": "",
+        "consoleWindowSuppressed": bool(creation_flag_names),
+        "consoleSuppressionMode": "creation_flags" if creation_flag_names else "native",
         "consoleFallbackReason": "empty_python_executable",
+        "pythonLaunchPolicy": "source_python_with_hidden_creation_flags",
+        "creationFlagNames": creation_flag_names,
     }
     if not raw:
+        result["consoleWindowSuppressed"] = False
+        result["consoleSuppressionMode"] = "none"
+        result["pythonLaunchPolicy"] = "missing_python_executable"
         return result
     candidate = Path(raw)
     if os.name != "nt":
         result["consoleFallbackReason"] = "non_windows"
+        result["pythonLaunchPolicy"] = "source_python_native_process"
         return result
     if candidate.name.lower() == "pythonw.exe":
+        sibling = candidate.with_name("python.exe")
+        if sibling.exists():
+            result["pythonExecutable"] = str(sibling.resolve())
+            result["noConsolePythonExecutable"] = str(candidate.resolve()) if candidate.exists() else raw
+            result["consoleFallbackReason"] = ""
+            result["pythonLaunchPolicy"] = "pythonw_source_replaced_with_python_exe"
+            return result
         result["pythonExecutable"] = str(candidate.resolve()) if candidate.exists() else raw
-        result["consoleWindowSuppressed"] = True
-        result["consoleFallbackReason"] = ""
+        result["noConsolePythonExecutable"] = str(candidate.resolve()) if candidate.exists() else raw
+        result["consoleFallbackReason"] = "python_exe_sibling_missing_for_pythonw_source"
+        result["pythonLaunchPolicy"] = "pythonw_fallback_when_python_exe_missing"
         return result
     sibling = candidate.with_name("pythonw.exe")
     if sibling.exists():
-        result["pythonExecutable"] = str(sibling.resolve())
-        result["consoleWindowSuppressed"] = True
-        result["consoleFallbackReason"] = ""
-        return result
+        result["noConsolePythonExecutable"] = str(sibling.resolve())
     if candidate.name.lower() == "python.exe":
         result["pythonExecutable"] = str(candidate.resolve()) if candidate.exists() else raw
-        result["consoleFallbackReason"] = "pythonw_sibling_missing"
+        result["consoleFallbackReason"] = "" if candidate.exists() else "python_executable_missing"
         return result
     sibling = candidate.with_name("python.exe")
     if sibling.exists():
         result["pythonExecutable"] = str(sibling.resolve())
-        result["consoleFallbackReason"] = "pythonw_sibling_missing"
+        result["consoleFallbackReason"] = ""
+        result["pythonLaunchPolicy"] = "sibling_python_exe_with_hidden_creation_flags"
         return result
     if candidate.exists():
         result["pythonExecutable"] = str(candidate.resolve())
-        result["consoleFallbackReason"] = "pythonw_sibling_missing"
+        result["consoleFallbackReason"] = ""
         return result
     result["consoleFallbackReason"] = "python_executable_missing"
+    result["pythonLaunchPolicy"] = "missing_python_executable"
     return result
 
 
@@ -1419,8 +1451,12 @@ def ensure_daemon_running(*, python_executable: str | None = None) -> bool:
             "launchPid": int(getattr(process, "pid", 0) or 0),
             "pythonExecutable": python_cmd,
             "sourcePythonExecutable": str(python_runtime["sourcePythonExecutable"]),
+            "noConsolePythonExecutable": str(python_runtime["noConsolePythonExecutable"]),
             "consoleWindowSuppressed": bool(python_runtime["consoleWindowSuppressed"]),
+            "consoleSuppressionMode": str(python_runtime["consoleSuppressionMode"]),
             "consoleFallbackReason": str(python_runtime["consoleFallbackReason"]),
+            "pythonLaunchPolicy": str(python_runtime["pythonLaunchPolicy"]),
+            "creationFlagNames": list(python_runtime["creationFlagNames"]),
         },
     )
 
@@ -2784,6 +2820,72 @@ class RuntimeManagerDaemon:
                 extra_result_data={"lifecycleTimingsMs": lifecycle_timings_ms},
             )
         if not ready:
+            if _open_verification_should_restart_missing_browser(verification, no_browser=no_browser):
+                _append_event(
+                    "workbench.open.browser_missing_restart",
+                    _open_verification_event_payload(
+                        verification,
+                        no_browser=no_browser,
+                        message="Open verification found a managed backend without its browser window; restarting once to rebuild the session.",
+                        command_id=command_id,
+                        launcher_result=result,
+                    )
+                    | {"attempts": verification_attempts},
+                )
+                browser_restart_started = time.monotonic()
+                restart_result = restart_workbench(no_browser=no_browser, cancel_check=cancel_check)
+                lifecycle_timings_ms["browser_missing_restart_ms"] = _elapsed_monotonic_ms(browser_restart_started)
+                interrupt = _active_lifecycle_interrupt(command_id)
+                if interrupt or int(restart_result.returncode or 0) == LAUNCHER_ACTION_CANCELLED_RETURN_CODE:
+                    return self._finish_interrupted_lifecycle_command(
+                        command_id,
+                        command_type="open_workbench",
+                        interrupt=interrupt,
+                        stage="browser_missing_restart",
+                        launcher_result=restart_result,
+                        extra_result_data={"lifecycleTimingsMs": lifecycle_timings_ms},
+                    )
+                if restart_result.returncode != 0:
+                    raise RuntimeError(_launcher_error_detail(restart_result, "Opening the workbench failed."))
+                restart_verification_started = time.monotonic()
+                ready, verification, restart_attempts = _wait_for_open_verification(no_browser=no_browser, cancel_check=cancel_check)
+                lifecycle_timings_ms["browser_missing_verification_ms"] = _elapsed_monotonic_ms(restart_verification_started)
+                lifecycle_timings_ms["browser_missing_verification_attempts"] = restart_attempts
+                verification_attempts += restart_attempts
+                lifecycle_timings_ms["open_verification_attempts"] = verification_attempts
+                result = restart_result
+                interrupt = _active_lifecycle_interrupt(command_id)
+                if interrupt:
+                    return self._finish_interrupted_lifecycle_command(
+                        command_id,
+                        command_type="open_workbench",
+                        interrupt=interrupt,
+                        stage="browser_missing_verification",
+                        launcher_result=restart_result,
+                        extra_result_data={"lifecycleTimingsMs": lifecycle_timings_ms},
+                    )
+                if ready:
+                    _append_event(
+                        "workbench.open.verification_succeeded",
+                        _open_verification_event_payload(
+                            verification,
+                            no_browser=no_browser,
+                            command_id=command_id,
+                            launcher_result=restart_result,
+                        )
+                        | {"attempts": verification_attempts, "retry": "browser_missing_restart"},
+                    )
+                    stable_backup = self._queue_stable_backup_after_successful_open(
+                        command_id=command_id,
+                        reason="launcher_open_browser_missing_restart_success",
+                    )
+                    return self._finish_successful_open_command(
+                        command_id,
+                        message="Workbench opened.",
+                        verification=verification,
+                        stable_backup=stable_backup,
+                        lifecycle_timings_ms=lifecycle_timings_ms,
+                    )
             if _open_verification_should_retry_stale_session(verification, no_browser=no_browser):
                 _append_event(
                     "workbench.open.stale_session_retry",
