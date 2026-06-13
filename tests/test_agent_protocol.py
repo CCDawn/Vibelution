@@ -3493,18 +3493,23 @@ class TestStructuredSystemMessageInvariants:
         assert message["content"][1]["text"] == "dynamic suffix"
         assert "cache_control" not in message["content"][1]
 
-    def test_cacheable_system_prefix_omits_dynamic_suffix(self):
+    def test_build_cacheable_system_prefix_omits_dynamic_suffix(self):
+        from core.infrastructure.llm_utils import (
+            build_cacheable_system_prefix_message,
+            build_dynamic_system_context_message,
+        )
+
         sp = ("static prefix", "<<<SYSTEM_PROMPT_SPLIT>>>", "dynamic suffix")
+        message = build_cacheable_system_prefix_message(sp)
+        dynamic_message = build_dynamic_system_context_message(sp)
 
-        prefix_message = build_cacheable_system_prefix_message(sp)
-
-        assert prefix_message["content"] == [
-            {
-                "type": "text",
-                "text": "static prefix",
-                "cache_control": {"type": "ephemeral"},
-            }
-        ]
+        assert isinstance(message, dict)
+        assert message["content"][0]["text"] == "static prefix"
+        assert message["content"][0]["cache_control"] == {"type": "ephemeral"}
+        assert len(message["content"]) == 1
+        assert isinstance(dynamic_message, SystemMessage)
+        assert dynamic_message.content.startswith("## Dynamic System Context")
+        assert "dynamic suffix" in dynamic_message.content
 
     def test_volatile_dynamic_system_context_is_not_carried_to_next_turn(self):
         messages = [
@@ -4258,6 +4263,57 @@ class TestRuntimeStateMemoryFlow:
         assert messages[1:] == previous[1:] + [build_chat_user_message("第二句")]
         assert messages[-1]["role"] == "user"
         assert "对话用户输入" in messages[-1]["content"]
+
+    def test_dynamic_system_context_is_after_history_and_not_carried_over(self):
+        from core.infrastructure.llm_utils import (
+            build_cacheable_system_prefix_message,
+            build_dynamic_system_context_message,
+            is_volatile_system_context_message,
+        )
+
+        history = [
+            SystemMessage(content="old system"),
+            build_chat_user_message("第一句"),
+            AIMessage(content="第一轮回复"),
+        ]
+        system_prompt = (
+            "new static system",
+            "<<<SYSTEM_PROMPT_SPLIT>>>",
+            "new dynamic system",
+        )
+        messages, resumed = TurnOutcomeController.prepare_turn_messages(
+            system_prompt=system_prompt,
+            user_prompt="第二句",
+            effective_goal="第二句",
+            active_turn_messages=history,
+            active_turn_goal="__chat_session__",
+            build_system_message=build_cacheable_system_prefix_message,
+            build_external_request_message=build_chat_user_message,
+            allow_append_user_message=True,
+        )
+        dynamic_message = build_dynamic_system_context_message(system_prompt)
+        inserted = TurnOutcomeController.insert_volatile_context_before_current_user(
+            messages=messages,
+            context_messages=[dynamic_message],
+        )
+
+        assert resumed is True
+        assert isinstance(inserted[0], dict)
+        assert inserted[0]["content"][0]["cache_control"] == {"type": "ephemeral"}
+        assert inserted[0]["content"][0]["text"] == "new static system"
+        assert len(inserted[0]["content"]) == 1
+        assert inserted[1:3] == history[1:]
+        assert isinstance(inserted[3], SystemMessage)
+        assert inserted[3].content.startswith("## Dynamic System Context")
+        assert "new dynamic system" in inserted[3].content
+        assert inserted[-1]["role"] == "user"
+
+        carryover = [
+            message for message in inserted
+            if not is_volatile_system_context_message(message)
+        ]
+
+        assert carryover == [inserted[0], history[1], history[2], inserted[-1]]
 
     def test_insert_volatile_context_keeps_history_before_current_user(self):
         messages = [
