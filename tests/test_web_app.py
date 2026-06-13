@@ -13842,8 +13842,6 @@ def test_config_workspace_draft_model_persists_manual_image_input_support(monkey
     assert model["supports_image_input"] is True
     assert model["capability_status"] == "supported"
     assert model["capability_source"] == "manual"
-
-
 def test_config_workspace_draft_model_allows_custom_public_relay_host(monkeypatch):
     public_config = copy.deepcopy(load_public_config())
     target = public_config["llm"]["model_library"]["relay_openai_gpt_5_5"]
@@ -14400,6 +14398,51 @@ def test_config_workspace_discovers_custom_public_relay_models(monkeypatch):
         "api_key": "draft-secret",
         "api_key_source": "手动输入",
         "timeout": config_service._MODEL_DISCOVERY_DEFAULT_TIMEOUT_SECONDS,
+    }
+
+
+def test_config_workspace_discovers_custom_public_relay_models(monkeypatch):
+    public_config = copy.deepcopy(load_public_config())
+    seen = {}
+
+    monkeypatch.setattr(config_service, "load_public_config", lambda: copy.deepcopy(public_config))
+    _mock_model_discovery_public_dns(monkeypatch)
+
+    def fake_discover_model_list(api_base, *, api_key="", timeout=10, api_key_source=""):
+        seen["api_base"] = api_base
+        seen["api_key"] = api_key
+        seen["api_key_source"] = api_key_source
+        seen["timeout"] = timeout
+        return [{"id": "gpt-5.5", "label": "GPT-5.5", "context_window": 1000000}]
+
+    monkeypatch.setattr(config_service, "_discover_openai_compatible_model_list", fake_discover_model_list)
+
+    response = client.post(
+        "/api/config/discover-models",
+        json={
+            "publicConfig": public_config,
+            "draftMeta": {},
+            "provider": {
+                "kind": "relay",
+                "api_key_env": "OPENAI_API_KEY",
+                "base_url": "https://relay.example.com/v1",
+                "compat_mode": "openai",
+                "requires_api_key": True,
+                "context_window": 1000000,
+            },
+            "apiKey": "draft-secret",
+        },
+    )
+
+    assert response.status_code == 200, response.json()
+    assert response.json()["providerKind"] == "relay"
+    assert response.json()["baseUrl"] == "https://relay.example.com/v1"
+    assert response.json()["models"][0]["id"] == "gpt-5.5"
+    assert seen == {
+        "api_base": "https://relay.example.com/v1",
+        "api_key": "draft-secret",
+        "api_key_source": "手动输入",
+        "timeout": 10,
     }
 
 
