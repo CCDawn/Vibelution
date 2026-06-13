@@ -158,6 +158,120 @@ _INTERNAL_TOOL_PROTOCOL_MARKERS = (
 _TOOL_POLICY_FAILURE_RE = re.compile(
     r"\[工具策略提示\]\s*`[^`]+`\s*不在该 Agent 的可见工具策略中。?",
 )
+_NUMBERED_CONFIRMATION_RE = re.compile(
+    r"(?:^|[,\n;；])\s*\d+\s*[,，、.．:：]\s*([^,\n;；]+)"
+)
+_CONFIRMATION_KEYWORDS = (
+    "确认",
+    "同意",
+    "可以",
+    "允许",
+    "就用",
+    "采用",
+    "使用",
+    "要求",
+    "先不",
+    "不考虑",
+)
+_ASSISTANT_GOAL_CONTEXT_KEYWORDS = (
+    "需求",
+    "目标",
+    "方案",
+    "确认",
+    "问题",
+    "规划",
+    "实现",
+)
+
+
+def _normalize_goal_from_chat_history(
+    user_prompt: str,
+    goal_override: Optional[str],
+    active_turn_messages: Optional[List[Any]],
+) -> str:
+    """Keep the requirement context when the user only sends numbered confirmations."""
+
+    override = str(goal_override or "").strip()
+    if override:
+        return override
+    prompt = str(user_prompt or "").strip()
+    if not _looks_like_numbered_confirmation(prompt):
+        return prompt
+    context = _latest_assistant_goal_context(active_turn_messages)
+    if not context:
+        return prompt
+    return f"{context}\n用户确认：{_compact_one_line(prompt, 180)}"
+
+
+def _looks_like_numbered_confirmation(text: str) -> bool:
+    prompt = str(text or "").strip()
+    if not prompt or len(prompt) > 280:
+        return False
+    parts = [part.strip() for part in _NUMBERED_CONFIRMATION_RE.findall(prompt) if part.strip()]
+    if len(parts) < 2:
+        return False
+    short_answers = sum(1 for part in parts if len(part) <= 24)
+    if short_answers < max(2, len(parts) - 1):
+        return False
+    return any(keyword in prompt for keyword in _CONFIRMATION_KEYWORDS)
+
+
+def _latest_assistant_goal_context(messages: Optional[List[Any]]) -> str:
+    for message in reversed(list(messages or [])):
+        role = _message_role(message)
+        if role not in {"assistant", "ai"}:
+            continue
+        content = _message_content(message)
+        if not content:
+            continue
+        return _compact_goal_context(content)
+    return ""
+
+
+def _message_role(message: Any) -> str:
+    if isinstance(message, AIMessage):
+        return "assistant"
+    if isinstance(message, dict):
+        return str(message.get("role") or message.get("kind") or "").strip().lower()
+    return str(getattr(message, "type", "") or "").strip().lower()
+
+
+def _message_content(message: Any) -> str:
+    if isinstance(message, dict):
+        content = message.get("content", "")
+    else:
+        content = getattr(message, "content", "")
+    if isinstance(content, list):
+        parts = []
+        for item in content:
+            if isinstance(item, dict):
+                parts.append(str(item.get("text") or item.get("content") or ""))
+            else:
+                parts.append(str(item or ""))
+        return "\n".join(part for part in parts if part.strip())
+    return str(content or "").strip()
+
+
+def _compact_goal_context(text: str, limit: int = 240) -> str:
+    lines = []
+    for raw_line in str(text or "").splitlines():
+        line = raw_line.strip(" \t-•*")
+        if line:
+            lines.append(line)
+    preferred = [
+        line
+        for line in lines
+        if any(keyword in line for keyword in _ASSISTANT_GOAL_CONTEXT_KEYWORDS)
+    ]
+    source = " ".join((preferred or lines)[:4])
+    return _compact_one_line(source, limit)
+
+
+def _compact_one_line(text: str, limit: int) -> str:
+    compact = re.sub(r"\s+", " ", str(text or "")).strip()
+    if len(compact) <= limit:
+        return compact
+    return compact[: max(0, limit - 3)].rstrip() + "..."
 _TOOL_SURFACE_GROUPS: Dict[str, str] = {
     "grep_search_tool": "locate",
     "glob_tool": "locate",
@@ -1709,7 +1823,14 @@ class SelfEvolvingAgent:
         policy = self._get_mode_policy()
         if user_prompt is None:
             user_prompt = "开始自主进化"
-        effective_goal = (goal_override or user_prompt or "").strip() or user_prompt
+        effective_goal = (
+            _normalize_goal_from_chat_history(
+                user_prompt,
+                goal_override,
+                getattr(self, "_active_turn_messages", None),
+            )
+            or user_prompt
+        )
         self._active_goal = effective_goal
         self._last_turn_metadata = {}
         self._last_llm_failure_attempts = 0
@@ -2878,6 +2999,11 @@ class SelfEvolvingAgent:
             if hasattr(llm_config, "get_profile")
             else getattr(llm_config, "model_name", "unknown")
         )
+        conversation_topic = _normalize_goal_from_chat_history(
+            initial_prompt or "",
+            goal_override,
+            getattr(self, "_active_turn_messages", None),
+        )
         logger.start_session(metadata={
             "mode": "single_turn",
             "agent_mode": policy.mode.value,
@@ -2886,7 +3012,7 @@ class SelfEvolvingAgent:
             "tools_count": len(self.key_tools),
             "max_iterations": self.config.agent.max_iterations,
             "awake_interval": self.config.agent.awake_interval,
-            "conversation_topic": str(initial_prompt or goal_override or case_id or "single_turn").strip()[:160],
+            "conversation_topic": str(conversation_topic or case_id or "single_turn").strip()[:160],
         })
         self._last_visible_response_text = ""
         self._last_response_tool_calls = 0

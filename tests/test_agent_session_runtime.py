@@ -6,6 +6,7 @@ from core.infrastructure.agent_session import (
     reset_session_state,
     is_probable_language_drift,
 )
+from core.infrastructure.tool_recommender import decide_next_tools
 
 
 def test_runtime_constraints_render_and_reset():
@@ -160,6 +161,30 @@ def test_tool_decision_and_deviation_render():
     assert "下一步意图：精读实体" in summary
     assert "代码图谱 -> 读局部片段" in summary
     assert "命令兜底" in summary
+
+
+def test_duplicate_read_sufficiency_drives_synthesis_decision():
+    session = reset_session_state()
+    session.set_reading_strategy("analyze", "grep_search_tool -> read_file_tool")
+    session.record_search_query("Demo", "core")
+    session.record_read_range("core/demo.py", 10, 30)
+    session.record_blocker(
+        "duplicate_read_soft_redirect",
+        "core/demo.py 第 10-30 行与已读范围重叠。",
+        "优先使用已有证据综合结论。",
+        severity="hint",
+    )
+
+    sufficiency = session.evaluate_reading_sufficiency()
+    session.set_reading_sufficiency(sufficiency)
+    decision = decide_next_tools(session.get_attention_snapshot())
+    session.set_tool_decision(decision.next_intent, decision.recommended_tools, decision.avoid_tools)
+    summary = session.render_runtime_constraints()
+
+    assert "没有新增证据" in sufficiency
+    assert "下一步意图：综合结论" in summary
+    assert "推荐工具：读局部片段" not in summary
+    assert "避免工具：读局部片段" in summary
 
 
 def test_delegation_state_is_rendered_and_deduplicated():

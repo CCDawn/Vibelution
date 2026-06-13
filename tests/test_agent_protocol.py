@@ -39,6 +39,38 @@ from tools.agent_tools import spawn_agent as spawn_agent_impl, set_subagent_stre
 from tools.Key_Tools import create_key_tools, create_llm_facing_tools
 
 
+def test_numbered_confirmation_goal_preserves_previous_assistant_context():
+    history = [
+        SystemMessage(content=""),
+        AIMessage(
+            content=(
+                "需求对齐：为 Git 管理 Agent 增加入口，先确认 5 个选项。"
+                "请回复：1 采用哪个方案，2 是否使用信息工具，3 是否允许写入。"
+            )
+        ),
+    ]
+    answer = "1,就用这个,2,使用信息工具,3,允许,4,要求,5,这个先不考虑"
+
+    goal = agent_module._normalize_goal_from_chat_history(answer, None, history)
+
+    assert "Git 管理 Agent" in goal
+    assert "用户确认" in goal
+    assert answer in goal
+    assert goal != answer
+
+
+def test_numbered_task_list_without_confirmation_keeps_user_goal():
+    prompt = "1,修复缓存链路,2,补测试,3,运行验证"
+
+    goal = agent_module._normalize_goal_from_chat_history(
+        prompt,
+        None,
+        [AIMessage(content="上一轮只是普通回复。")],
+    )
+
+    assert goal == prompt
+
+
 class TestToolMessageFlow:
     """工具消息协议测试"""
 
@@ -1667,6 +1699,55 @@ class TestToolMessageFlow:
         assert ("think", "probe") in events
         assert not any(item[0] == "debug_turn_end" for item in events)
         assert any(item[0] == "conv_end" and item[1]["mode"] == "single_turn" for item in events)
+
+    def test_run_single_turn_topic_preserves_numbered_confirmation_context(self, monkeypatch):
+        events = []
+        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent.name = "tester"
+        agent.config = SimpleNamespace(
+            llm=SimpleNamespace(model_name="demo"),
+            agent=SimpleNamespace(max_iterations=3, awake_interval=1),
+        )
+        agent._effective_max_token_limit = 1024
+        agent.key_tools = []
+        agent._last_turn_failed = False
+        agent._active_turn_messages = [
+            SystemMessage(content=""),
+            AIMessage(content="需求对齐：为 Git 管理 Agent 增加入口，确认信息工具和写入边界。"),
+        ]
+
+        def fake_think_and_act(user_prompt=None, goal_override=None, attachments=None, **kwargs):
+            agent._last_visible_response_text = "完成"
+            agent._last_response_tool_calls = 0
+            return True
+
+        agent.think_and_act = fake_think_and_act
+
+        monkeypatch.setattr(agent_module._debug_logger, "start_session", lambda session_id: None)
+        monkeypatch.setattr(agent_module._debug_logger, "system", lambda *args, **kwargs: None)
+        monkeypatch.setattr(agent_module._debug_logger, "turn_end", lambda *args, **kwargs: None)
+        monkeypatch.setattr(agent_module._debug_logger, "info", lambda *args, **kwargs: None)
+        monkeypatch.setattr(agent_module._debug_logger, "end_session", lambda: None)
+        monkeypatch.setattr(
+            agent_module.logger,
+            "start_session",
+            lambda metadata=None, **kwargs: events.append(("conv_start", metadata, kwargs)),
+        )
+        monkeypatch.setattr(agent_module.logger, "end_session", lambda summary=None: None)
+        monkeypatch.setattr(
+            agent_module,
+            "get_session_state",
+            lambda: SimpleNamespace(get_attention_snapshot=lambda: {}),
+        )
+
+        result = agent.run_single_turn(
+            initial_prompt="1,就用这个,2,使用信息工具,3,允许,4,要求,5,这个先不考虑"
+        )
+
+        metadata = next(item[1] for item in events if item[0] == "conv_start")
+        assert result["status"] == "completed"
+        assert "Git 管理 Agent" in metadata["conversation_topic"]
+        assert "用户确认" in metadata["conversation_topic"]
 
     def test_run_single_turn_wraps_env_prompt_cache_partition_and_returns_runtime_metadata(self, monkeypatch):
         events = []

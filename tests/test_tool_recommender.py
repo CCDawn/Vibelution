@@ -73,9 +73,44 @@ def test_pending_continuation_guides_target_selection_without_forcing_range_read
     assert decision.next_intent == "choose_read_target"
     assert "grep_search_tool" in decision.recommended_tools
     assert "code_symbol_tool" in decision.recommended_tools
-    assert "read_file_tool" in decision.recommended_tools
+    assert "read_file_tool" not in decision.recommended_tools
+    assert "read_file_tool" in decision.avoid_tools
     assert "cli_tool" in decision.avoid_tools
     assert "core/demo.py" in decision.reason
+
+
+def test_locate_synthesizes_after_search_and_detail():
+    decision = decide_next_tools({
+        "reading_task": "locate",
+        "reading_sufficiency": "定位证据已初步足够，可综合判断、转入修改或明确缺口。",
+        "read_ranges": {"core/demo.py": [{"start_line": 10, "end_line": 40}]},
+        "read_entities": {},
+        "read_searches": [{"query": "Demo", "scope": "core"}],
+        "recent_blockers": [],
+        "recent_validation_results": [],
+        "pending_continuations": [],
+    })
+
+    assert decision.next_intent == "synthesize_answer"
+    assert decision.recommended_tools == []
+    assert "read_file_tool" in decision.avoid_tools
+
+
+def test_duplicate_read_redirects_to_synthesis():
+    decision = decide_next_tools({
+        "reading_task": "analyze",
+        "reading_sufficiency": "读取没有新增证据；现有证据可形成结论或明确缺口，不要继续顺序读取。",
+        "read_ranges": {"core/demo.py": [{"start_line": 10, "end_line": 40}]},
+        "read_entities": {},
+        "read_searches": [{"query": "Demo", "scope": "core"}],
+        "recent_blockers": [{"kind": "duplicate_read_soft_redirect", "summary": "重复读取"}],
+        "recent_validation_results": [],
+        "pending_continuations": [],
+    })
+
+    assert decision.next_intent == "synthesize_answer"
+    assert decision.recommended_tools == []
+    assert "read_file_tool" in decision.avoid_tools
 
 
 def test_modify_switches_to_edit_when_sufficient():
@@ -92,3 +127,4 @@ def test_modify_switches_to_edit_when_sufficient():
 
     assert decision.next_intent == "edit_target"
     assert "apply_diff_edit_tool" in decision.recommended_tools
+    assert "read_file_tool" in decision.avoid_tools

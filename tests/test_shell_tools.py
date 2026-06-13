@@ -142,7 +142,9 @@ class TestReadFile:
         assert "read_file_tool(" not in result
         assert "grep_search_tool" not in result
         assert "code_symbol_tool" not in result
-        assert "offset=3" in result
+        assert "offset=3" not in result
+        assert "max_lines=" not in result
+        assert "这不是续读指令" in result
 
     def test_read_file_adapts_page_size_for_large_file(self, temp_test_dir):
         file_path = os.path.join(temp_test_dir, "large.txt")
@@ -156,7 +158,8 @@ class TestReadFile:
         assert "read_file_tool(" not in result
         assert "grep_search_tool" not in result
         assert "code_symbol_tool" not in result
-        assert "max_lines=80" in result
+        assert "max_lines=80" not in result
+        assert "这不是续读指令" in result
 
 
 # ============================================================================

@@ -984,9 +984,6 @@ class ToolExecutor:
     def _check_codex_style_reading_governance(self, tool_name: str, tool_args: dict) -> Optional[str]:
         """Return a compact redirect for avoidable rereads on structured read tools."""
         args = tool_args or {}
-        force_value = args.get("force")
-        if force_value is True or str(force_value or "").strip().lower() in {"1", "true", "yes", "on"}:
-            return None
         if tool_name == "read_file_tool":
             return self._govern_read_file_call(args)
         return None
@@ -1009,14 +1006,13 @@ class ToolExecutor:
             session.record_blocker(
                 "read_file_full_file_redirect",
                 f"{file_path} 请求全文件读取。",
-                "先定位再精读；确需全读时传 force=true。",
+                "先定位再精读；不要把大文件整段塞入上下文。",
                 severity="hint",
             )
             return (
                 "[阅读治理] 本次没有直接全文件读取，避免把大文件整段塞入上下文。\n"
                 f"[目标] {file_path}\n"
-                "[建议] 先用有界 CLI/已授权定位工具收窄，或改为 read_file_tool(offset=0, max_lines=80)。\n"
-                "[覆盖] 如果用户主动要求全读或需要重新核对完整文件，可带 force=true。"
+                "[建议] 先定位目标符号、调用点或文本命中，再读取必要的局部片段。"
             )
         start_line = max(1, offset + 1)
         end_line = max(start_line, offset + max_lines)
@@ -1030,14 +1026,14 @@ class ToolExecutor:
         session.record_blocker(
             "duplicate_read_soft_redirect",
             f"{file_path} 第 {start_line}-{end_line} 行与已读范围重叠。",
-            "优先使用已有证据、改读邻近未读窗口，或用有界 CLI/已授权定位工具精确定位；主动复核可传 force=true。",
+            "优先使用已有证据综合结论；若确有缺口，先说明缺口再定位新片段。",
             severity="hint",
         )
         return (
             "[阅读治理] 该范围本轮已读过，未重复返回正文。\n"
             f"[目标] {file_path} 第 {start_line}-{end_line} 行\n"
             f"[已读重叠] {overlap_text}\n"
-            "[建议] 直接使用已有证据，或读取相邻未读窗口；需要重新核对时传 force=true。"
+            "[建议] 直接使用已有证据综合结论；若仍缺证据，先说明具体缺口并重新定位未读目标。"
         )
 
     @staticmethod

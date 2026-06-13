@@ -52,6 +52,11 @@ TOOL_INTENTS = {
         recommended_tools=["python_lint_tool", "run_test_for_tool", "cli_tool"],
         description="按 lint / test / compile 闭环验证修改。",
     ),
+    "synthesize_answer": ToolIntent(
+        name="synthesize_answer",
+        recommended_tools=[],
+        description="基于已有证据给出结论、修改计划或明确缺口，避免继续机械读取。",
+    ),
     "inspect_history": ToolIntent(
         name="inspect_history",
         recommended_tools=[
@@ -90,6 +95,7 @@ def humanize_tool_intent(intent: str) -> str:
         "verify_change": "验证改动",
         "inspect_history": "查看历史",
         "edit_target": "开始修改",
+        "synthesize_answer": "综合结论",
     }
     return mapping.get((intent or "").lower(), intent or "")
 
