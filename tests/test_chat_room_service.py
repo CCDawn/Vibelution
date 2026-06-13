@@ -1010,6 +1010,10 @@ def test_start_chat_room_round_runs_participants_in_round_robin_and_persists_wor
     assert prompts[0][0] == "session-beta"
     assert "讨论群聊 MVP 怎么切第一版" in prompts[0][1]
     assert prompts[0][2] == "round_robin"
+    assert "- 你是本轮第一位发言者。" in prompts[0][1]
+    assert prompts[1][0] == "session-alpha"
+    assert "Beta Agent 对 讨论群聊 MVP 怎么切第一版 的发言" in prompts[1][1]
+    assert "- 你是本轮第一位发言者。" not in prompts[1][1]
 
     work_run_summary = chat_room_service.load_chat_room_work_run_summary()
     assert work_run_summary["active"] is None
@@ -1041,6 +1045,57 @@ def test_start_chat_room_round_runs_participants_in_round_robin_and_persists_wor
     assert speaker_fields["speakerRunMs"] >= 0
     assert speaker_fields["runnerMs"] >= 0
     assert speaker_fields["totalSpeakerMs"] >= 0
+
+
+def test_start_chat_room_round_dedupes_duplicate_participants_before_prompt_chain(tmp_path, monkeypatch):
+    _seed_chat_sessions(tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    recorded_events = []
+    monkeypatch.setattr(
+        chat_room_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: recorded_events.append((args, kwargs)) or {"accepted": True},
+    )
+    prompts = []
+
+    def fake_runner(participant, prompt, context):
+        prompts.append((participant["sessionId"], prompt))
+        return {
+            "status": "completed",
+            "raw_output": f"{participant['title']} 发言 {context['speakerIndex']}",
+            "summary": "ok",
+        }
+
+    room = chat_room_service.create_chat_room(
+        title="重复成员群聊",
+        participant_session_ids=["session-alpha", "session-beta"],
+    )
+    state = chat_room_service._store().load()
+    stored_room = next(item for item in state["rooms"] if item["roomId"] == room["roomId"])
+    duplicate_alpha = dict(stored_room["participants"][0])
+    duplicate_alpha["participantId"] = "duplicate-alpha"
+    stored_room["participants"].append(duplicate_alpha)
+    chat_room_service._store().save(state)
+
+    detail = chat_room_service.start_chat_room_round(
+        room["roomId"],
+        "重复成员不能重复发言",
+        agent_runner=fake_runner,
+    )
+
+    latest_round = detail["rounds"][-1]
+    assert [message["sessionId"] for message in latest_round["messages"]] == ["session-alpha", "session-beta"]
+    assert latest_round["speakerOrder"] == ["session-session-alpha", "session-session-beta"]
+    assert [participant["sessionId"] for participant in detail["participants"]] == ["session-alpha", "session-beta"]
+    assert "Alpha Agent 发言 0" in prompts[1][1]
+    assert "- 你是本轮第一位发言者。" not in prompts[1][1]
+    started_event = next(
+        event
+        for event in recorded_events
+        if event[0][:3] == ("chat_room", "round", "chat_room.round.started")
+    )
+    assert started_event[1]["fields"]["participantDedupeRemoved"] == 1
 
 
 def test_reset_chat_room_clears_history_and_group_context_pollution(tmp_path, monkeypatch):
