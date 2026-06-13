@@ -1203,6 +1203,8 @@ def test_ingestion_package_preserves_team_chat_room_guard(knowledge_env):
             owner_id=knowledge_env["team"]["teamId"],
             actor_agent_id=knowledge_env["member"]["agentId"],
             reviewer_agent_id=knowledge_env["lead"]["agentId"],
+            source_type="team_chat_refinement",
+            source_ref={"roomId": "room-not-linked", "messageRange": {"from": 1, "to": 4}},
             title="Unlinked chat source",
         )
         team_knowledge_service.create_ingestion_package(
