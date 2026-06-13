@@ -705,21 +705,16 @@ def test_public_config_does_not_force_preset_id_for_different_provider_route():
 
     assert "xiaomi_mimo_v2_5_multimodal" not in normalized["llm"]["model_library"]
     generated = [
-        item
-        for item in normalized["llm"]["model_library"].values()
-        if isinstance(item, dict)
-        and item.get("model") == "mimo-v2.5"
-        and item.get("provider", {}).get("base_url") == "https://token-plan-cn.xiaomimimo.com/v1"
-    ]
-    assert len(generated) == 1
-    assert generated[0]["api_key_env"].startswith("VIBELUTION_LLM_MODEL_GENERATED_")
-    generated_id = next(
-        model_id
+        (model_id, item)
         for model_id, item in normalized["llm"]["model_library"].items()
         if isinstance(item, dict)
         and item.get("model") == "mimo-v2.5"
         and item.get("provider", {}).get("base_url") == "https://token-plan-cn.xiaomimimo.com/v1"
-    )
+        and str(item.get("api_key_env") or "").startswith("VIBELUTION_LLM_MODEL_GENERATED_")
+    ]
+    assert len(generated) == 1
+    generated_id, generated_model = generated[0]
+    assert generated_model["api_key_env"].startswith("VIBELUTION_LLM_MODEL_GENERATED_")
     assert normalized["llm"]["profiles"]["primary"] == {"model_ref": generated_id, "overrides": {}}
 
 

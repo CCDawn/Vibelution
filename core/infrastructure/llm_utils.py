@@ -17,6 +17,7 @@ import re
 from typing import Any, Tuple
 from langchain_core.messages import SystemMessage
 
+from core.context.volatility import is_volatile_context_text
 from core.llm.errors import classify_for_legacy
 from core.llm.recovery import LLMRecoveryDecision, plan_recovery
 from core.llm.routing import attach_recovery_fallback
@@ -190,13 +191,7 @@ def is_volatile_system_context_message(message: Any) -> bool:
     """Return True for per-turn system context that should not be carried over."""
 
     text = _text_from_system_context_message(message)
-    return text.startswith((
-        SYSTEM_DYNAMIC_CONTEXT_HEADER,
-        "## Agent Runtime Context",
-        "## Runtime Context",
-        "## Recent Operator Guidance",
-        "## Slash Skill Context",
-    ))
+    return is_volatile_context_text(text)
 
 
 

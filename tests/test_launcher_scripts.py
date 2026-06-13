@@ -848,7 +848,7 @@ def _normalize_ast_harness_source(harness_source: str) -> str:
     # Windows PowerShell 5.1 defaults Get-Content to the local ANSI code page.
     # The launcher scripts contain UTF-8 display labels, so AST harnesses must
     # read them explicitly as UTF-8 before feeding them to Parser.ParseInput.
-    return (
+    normalized = (
         source.replace(
             "Get-Content -Raw -LiteralPath $LauncherPath",
             "Get-Content -Raw -Encoding UTF8 -LiteralPath $LauncherPath",
@@ -858,6 +858,19 @@ def _normalize_ast_harness_source(harness_source: str) -> str:
             "Get-Content -Raw -Encoding UTF8 -LiteralPath $DesktopEntryPath",
         )
     )
+    if "$LauncherPath" in normalized and "function Get-ObjectPropertyValue" not in normalized:
+        helper = """
+function Get-ObjectPropertyValue {
+    param([object]$Object, [string]$Name, $Default = $null)
+    if ($null -eq $Object) { return $Default }
+    $prop = $Object.PSObject.Properties[$Name]
+    if ($null -eq $prop) { return $Default }
+    if ($null -eq $prop.Value) { return $Default }
+    return $prop.Value
+}
+"""
+        normalized = normalized.replace("Set-StrictMode -Version Latest", f"Set-StrictMode -Version Latest\n{helper}", 1)
+    return normalized
 
 
 def test_launcher_internal_action_rejection_logs_env_diagnostics(tmp_path):
@@ -5904,6 +5917,14 @@ $script:removedState = $false
 $script:notes = @()
 $script:controlEvents = @()
 
+function Get-ObjectPropertyValue {
+    param([object]$Object, [string]$Name, $Default = $null)
+    if ($null -eq $Object) { return $Default }
+    $prop = $Object.PSObject.Properties[$Name]
+    if ($null -eq $prop) { return $Default }
+    if ($null -eq $prop.Value) { return $Default }
+    return $prop.Value
+}
 function Get-SessionSnapshot {
     return [pscustomobject]@{
         BackendPids = @(6544)

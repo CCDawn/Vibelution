@@ -964,7 +964,7 @@ def test_workbench_supervised_evolution_dataset_selection_blocks_nonrunnable(mon
     monkeypatch.setattr("core.ui.workbench.Prompt.ask", fake_prompt)
     monkeypatch.setattr(
         "core.evaluation.dataset_registry.list_dataset_status",
-        lambda project_root: [
+        lambda project_root, *args, **kwargs: [
             {
                 "name": "swe_bench_lite",
                 "available": False,
@@ -1037,7 +1037,7 @@ def test_workbench_supervised_evolution_dataset_run_persists_state(monkeypatch, 
     monkeypatch.setattr("core.ui.workbench.Prompt.ask", lambda *args, **kwargs: next(prompts))
     monkeypatch.setattr(
         "core.evaluation.dataset_registry.list_dataset_status",
-        lambda project_root: [
+        lambda project_root, *args, **kwargs: [
             {
                 "name": "custom_prompt_jsonl",
                 "available": True,
@@ -1145,7 +1145,7 @@ def test_workbench_supervised_evolution_dataset_flow_uses_saved_defaults(monkeyp
     monkeypatch.setattr("core.ui.workbench.Prompt.ask", fake_prompt)
     monkeypatch.setattr(
         "core.evaluation.dataset_registry.list_dataset_status",
-        lambda project_root: [
+        lambda project_root, *args, **kwargs: [
             {
                 "name": "saved_dataset",
                 "available": True,
