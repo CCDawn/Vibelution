@@ -2754,31 +2754,49 @@ function Invoke-HiddenProcessCapture {
         [string]$WorkingDirectory = $projectDir
     )
 
-    $process = New-Object System.Diagnostics.Process
-    $process.StartInfo.FileName = $FilePath
-    $process.StartInfo.Arguments = ConvertTo-ProcessArgumentString -ArgumentList $ArgumentList
-    $process.StartInfo.WorkingDirectory = $WorkingDirectory
-    $process.StartInfo.UseShellExecute = $false
-    $process.StartInfo.CreateNoWindow = $true
-    $process.StartInfo.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden
-    $process.StartInfo.RedirectStandardOutput = $true
-    $process.StartInfo.RedirectStandardError = $true
-
-    if (-not $process.Start()) {
-        throw "Failed to start hidden process: $FilePath"
+    $launcherDirVariable = Get-Variable -Name launcherDir -Scope Script -ErrorAction SilentlyContinue
+    $captureDir = ""
+    if ($launcherDirVariable -and $launcherDirVariable.Value) {
+        $captureDir = [string]$launcherDirVariable.Value
+    }
+    if (-not $captureDir) {
+        $captureDir = [System.IO.Path]::GetTempPath()
+    }
+    if (-not (Test-Path -LiteralPath $captureDir)) {
+        New-Item -ItemType Directory -Path $captureDir -Force | Out-Null
     }
 
-    $stdoutTask = $process.StandardOutput.ReadToEndAsync()
-    $stderrTask = $process.StandardError.ReadToEndAsync()
-    $process.WaitForExit()
-    $stdoutTask.Wait()
-    $stderrTask.Wait()
+    $token = [guid]::NewGuid().ToString("N")
+    $stdoutPath = Join-Path $captureDir "hidden-capture-$token.out.log"
+    $stderrPath = Join-Path $captureDir "hidden-capture-$token.err.log"
 
-    return [pscustomobject]@{
-        ProcessId = [int]$process.Id
-        ExitCode = [int]$process.ExitCode
-        Stdout = [string]$stdoutTask.Result
-        Stderr = [string]$stderrTask.Result
+    try {
+        Ensure-HiddenRedirectedProcessApi
+        $commandLine = ConvertTo-ProcessArgumentString -ArgumentList @(@($FilePath) + @($ArgumentList))
+        $result = [VibelutionLauncher.HiddenRedirectedProcess]::RunHiddenRedirected(
+            $FilePath,
+            $commandLine,
+            $WorkingDirectory,
+            $stdoutPath,
+            $stderrPath
+        )
+        $stdout = ""
+        $stderr = ""
+        if (Test-Path -LiteralPath $stdoutPath) {
+            $stdout = [System.IO.File]::ReadAllText($stdoutPath)
+        }
+        if (Test-Path -LiteralPath $stderrPath) {
+            $stderr = [System.IO.File]::ReadAllText($stderrPath)
+        }
+
+        return [pscustomobject]@{
+            ProcessId = [int]$result.ProcessId
+            ExitCode = [int]$result.ExitCode
+            Stdout = [string]$stdout
+            Stderr = [string]$stderr
+        }
+    } finally {
+        Remove-Item -LiteralPath $stdoutPath, $stderrPath -Force -ErrorAction SilentlyContinue
     }
 }
 
@@ -2840,6 +2858,11 @@ using System.IO;
 using System.Runtime.InteropServices;
 
 namespace VibelutionLauncher {
+    public sealed class HiddenRedirectedProcessResult {
+        public int ProcessId { get; set; }
+        public int ExitCode { get; set; }
+    }
+
     public static class HiddenRedirectedProcess {
         private const uint GENERIC_WRITE = 0x40000000;
         private const uint FILE_SHARE_READ = 0x00000001;
@@ -2852,6 +2875,8 @@ namespace VibelutionLauncher {
         private const uint DETACHED_PROCESS = 0x00000008;
         private const uint CREATE_NEW_PROCESS_GROUP = 0x00000200;
         private const uint CREATE_NO_WINDOW = 0x08000000;
+        private const uint INFINITE = 0xFFFFFFFF;
+        private const uint WAIT_FAILED = 0xFFFFFFFF;
 
         [StructLayout(LayoutKind.Sequential)]
         private struct SECURITY_ATTRIBUTES {
@@ -2917,6 +2942,13 @@ namespace VibelutionLauncher {
         [DllImport("kernel32.dll", SetLastError = true)]
         private static extern bool CloseHandle(IntPtr hObject);
 
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern uint WaitForSingleObject(IntPtr hHandle, uint dwMilliseconds);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool GetExitCodeProcess(IntPtr hProcess, out uint lpExitCode);
+
         private static IntPtr OpenInheritableWriteHandle(string path) {
             SECURITY_ATTRIBUTES attributes = new SECURITY_ATTRIBUTES();
             attributes.nLength = Marshal.SizeOf(typeof(SECURITY_ATTRIBUTES));
@@ -2936,9 +2968,31 @@ namespace VibelutionLauncher {
             return handle;
         }
 
-        public static int StartHiddenRedirected(string applicationName, string commandLine, string workingDirectory, string stdoutPath, string stderrPath) {
-            IntPtr stdoutHandle = IntPtr.Zero;
-            IntPtr stderrHandle = IntPtr.Zero;
+        private static void CloseProcessHandles(PROCESS_INFORMATION processInformation, IntPtr stdoutHandle, IntPtr stderrHandle) {
+            if (processInformation.hThread != IntPtr.Zero) {
+                CloseHandle(processInformation.hThread);
+            }
+            if (processInformation.hProcess != IntPtr.Zero) {
+                CloseHandle(processInformation.hProcess);
+            }
+            if (stdoutHandle != IntPtr.Zero) {
+                CloseHandle(stdoutHandle);
+            }
+            if (stderrHandle != IntPtr.Zero && stderrHandle != stdoutHandle) {
+                CloseHandle(stderrHandle);
+            }
+        }
+
+        private static PROCESS_INFORMATION CreateHiddenRedirectedProcess(
+            string applicationName,
+            string commandLine,
+            string workingDirectory,
+            string stdoutPath,
+            string stderrPath,
+            out IntPtr stdoutHandle,
+            out IntPtr stderrHandle) {
+            stdoutHandle = IntPtr.Zero;
+            stderrHandle = IntPtr.Zero;
             PROCESS_INFORMATION processInformation = new PROCESS_INFORMATION();
             try {
                 stdoutHandle = OpenInheritableWriteHandle(stdoutPath);
@@ -2966,20 +3020,59 @@ namespace VibelutionLauncher {
                 if (!started) {
                     throw new Win32Exception(Marshal.GetLastWin32Error(), "Failed to start hidden redirected process: " + applicationName);
                 }
+                return processInformation;
+            } catch {
+                CloseProcessHandles(processInformation, stdoutHandle, stderrHandle);
+                throw;
+            }
+        }
+
+        public static int StartHiddenRedirected(string applicationName, string commandLine, string workingDirectory, string stdoutPath, string stderrPath) {
+            IntPtr stdoutHandle = IntPtr.Zero;
+            IntPtr stderrHandle = IntPtr.Zero;
+            PROCESS_INFORMATION processInformation = new PROCESS_INFORMATION();
+            try {
+                processInformation = CreateHiddenRedirectedProcess(
+                    applicationName,
+                    commandLine,
+                    workingDirectory,
+                    stdoutPath,
+                    stderrPath,
+                    out stdoutHandle,
+                    out stderrHandle);
                 return processInformation.dwProcessId;
             } finally {
-                if (processInformation.hThread != IntPtr.Zero) {
-                    CloseHandle(processInformation.hThread);
+                CloseProcessHandles(processInformation, stdoutHandle, stderrHandle);
+            }
+        }
+
+        public static HiddenRedirectedProcessResult RunHiddenRedirected(string applicationName, string commandLine, string workingDirectory, string stdoutPath, string stderrPath) {
+            IntPtr stdoutHandle = IntPtr.Zero;
+            IntPtr stderrHandle = IntPtr.Zero;
+            PROCESS_INFORMATION processInformation = new PROCESS_INFORMATION();
+            try {
+                processInformation = CreateHiddenRedirectedProcess(
+                    applicationName,
+                    commandLine,
+                    workingDirectory,
+                    stdoutPath,
+                    stderrPath,
+                    out stdoutHandle,
+                    out stderrHandle);
+                uint waitResult = WaitForSingleObject(processInformation.hProcess, INFINITE);
+                if (waitResult == WAIT_FAILED) {
+                    throw new Win32Exception(Marshal.GetLastWin32Error(), "Failed waiting for hidden redirected process: " + applicationName);
                 }
-                if (processInformation.hProcess != IntPtr.Zero) {
-                    CloseHandle(processInformation.hProcess);
+                uint exitCode;
+                if (!GetExitCodeProcess(processInformation.hProcess, out exitCode)) {
+                    throw new Win32Exception(Marshal.GetLastWin32Error(), "Failed reading hidden redirected process exit code: " + applicationName);
                 }
-                if (stdoutHandle != IntPtr.Zero) {
-                    CloseHandle(stdoutHandle);
-                }
-                if (stderrHandle != IntPtr.Zero && stderrHandle != stdoutHandle) {
-                    CloseHandle(stderrHandle);
-                }
+                return new HiddenRedirectedProcessResult {
+                    ProcessId = processInformation.dwProcessId,
+                    ExitCode = unchecked((int)exitCode)
+                };
+            } finally {
+                CloseProcessHandles(processInformation, stdoutHandle, stderrHandle);
             }
         }
     }
