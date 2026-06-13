@@ -39,6 +39,7 @@ DEFAULT_LAUNCHER_CONTROL_PORT = 8765
 MANAGED_LAUNCHER_MARKER = "--managed-launcher-control"
 SOURCE_SIGNATURE_PATHS = (
     "core/launcher/app.py",
+    "core/launcher/developer_mode.py",
     "core/launcher/service.py",
     "core/runtime_manager/__init__.py",
     "core/runtime_manager/constants.py",
