@@ -241,7 +241,7 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain('operation === "force-stop"');
     expect(routeSource).toContain("force_close_workbench");
     expect(routeSource).toContain('tone: response.accepted ? "neutral" : "warning"');
-    expect(routeSource).toContain("setNotice({ tone, text: message })");
+    expect(routeSource).toContain('setNotice({ tone, text: message, source: "lifecycle-control" })');
     expect(routeSource).toContain("Restart preflight failed before closing the workbench");
   });
 
@@ -252,9 +252,19 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("trackedCommand?.operation === \"force-stop\"");
     expect(routeSource).toContain("trackedCommand?.operation === \"restart\"");
     expect(routeSource).toContain("if (!trackedCommand || !trackedResult) {");
-    expect(routeSource).toContain("setNotice({ tone, text: message })");
+    expect(routeSource).toContain('setNotice({ tone, text: message, source: "lifecycle-control" })');
     expect(routeSource).toContain("setTrackedCommand(null)");
     expect(routeSource).toContain("setLastControlOperation(null)");
+    expect(routeSource).toContain("postLauncherLifecycleControlTelemetry(operation, \"requested\")");
+    expect(routeSource).toContain("launcher.lifecycle_control.${status}");
+    expect(routeSource).toContain('status: "requested" | "accepted" | "rejected" | "request_failed"');
+    expect(routeSource).toContain('response.accepted ? "accepted" : "rejected"');
+    expect(routeSource).toContain('postLauncherLifecycleControlTelemetry(operation, "request_failed"');
+    expect(routeSource).toContain('source: "lifecycle-control"');
+    expect(routeSource).toContain("launcherOperationSettledByStatus");
+    expect(routeSource).toContain("trackedCommandSettledByStatus");
+    expect(routeSource).toContain("shouldClearStaleLifecycleNotice");
+    expect(routeSource).toContain('setNotice({ tone: "neutral", text: "" })');
   });
 
   it("keeps lifecycle actions icon-backed and compact", () => {
@@ -283,7 +293,7 @@ describe("LauncherRoute layout contract", () => {
     expect(launcherApiSource).toContain("baseHash: setting.configHash");
     expect(launcherApiSource).toContain("WorkbenchWindowModeUpdateRequest");
     expect(routeSource).toContain("onWindowModeChange({ mode, baseHash: current.configHash })");
-    expect(routeSource).toContain('onError: (error) => {\n      setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });\n      void queryClient.invalidateQueries({ queryKey: queryKeys.launcherStatus() });');
+    expect(routeSource).toContain('onError: (error) => {\n      setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error), source: "window-mode" });\n      void queryClient.invalidateQueries({ queryKey: queryKeys.launcherStatus() });');
     expect(routeSource).toContain("configHash");
     expect(routeSource).toContain("runtimeProfile");
     expect(routeSource).toContain("launcherControlPort");
