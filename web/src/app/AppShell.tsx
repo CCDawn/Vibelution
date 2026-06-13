@@ -664,30 +664,38 @@ export function AppShell() {
     const { target } = recovery;
     const duplicateTarget = lastRouterLocationDesyncTargetRef.current === target;
     lastRouterLocationDesyncTargetRef.current = target;
-    emitBrowserTelemetry({
-      phase: "navigation",
-      eventCode: "browser.router_location_desync.recovered",
-      message: `Recovered browser/router route desync to ${target}`,
-      level: duplicateTarget ? "info" : "warning",
-      fields: {
-        trigger,
-        target,
-        duplicateTarget,
-        browserPathname: window.location.pathname,
-        browserSearch: window.location.search,
-        browserHash: window.location.hash,
-        routerPathname: location.pathname,
-        routerSearch: location.search,
-        routerHash: location.hash,
-        restoreTarget: recovery.restoreTarget,
-      },
-    });
+    const recoveryFields = {
+      trigger,
+      target,
+      duplicateTarget,
+      browserPathnameBefore: window.location.pathname,
+      browserSearchBefore: window.location.search,
+      browserHashBefore: window.location.hash,
+      routerPathnameBefore: location.pathname,
+      routerSearchBefore: location.search,
+      routerHashBefore: location.hash,
+      restoreTarget: recovery.restoreTarget,
+    };
     try {
       window.history.replaceState(window.history.state, "", recovery.restoreTarget);
     } catch {
       // Keep the recovery best-effort; navigate still attempts to bring the router to the browser target.
     }
     navigate(target, { replace: true });
+    const emitRecoveredTelemetry = () => {
+      emitBrowserTelemetry({
+        phase: "navigation",
+        eventCode: "browser.router_location_desync.recovered",
+        message: `Recovered browser/router route desync to ${target}`,
+        level: duplicateTarget ? "info" : "warning",
+        fields: recoveryFields,
+      });
+    };
+    if (typeof window.requestAnimationFrame === "function") {
+      window.requestAnimationFrame(() => window.setTimeout(emitRecoveredTelemetry, 0));
+    } else {
+      window.setTimeout(emitRecoveredTelemetry, 0);
+    }
   }, [emitBrowserTelemetry, location, navigate]);
 
   const cancelSupersededLifecycleCommand = useCallback((commandId: string, action: "shutdown" | "restart") => {
@@ -1373,7 +1381,6 @@ export function AppShell() {
       }, ROUTER_LOCATION_DESYNC_RECOVERY_DELAY_MS);
     };
 
-    const handleDocumentClick = () => scheduleRecovery("document_click");
     const handleFocus = () => scheduleRecovery("window_focus");
     const handlePageShow = () => scheduleRecovery("pageshow");
     const handlePopState = () => scheduleRecovery("popstate");
@@ -1383,7 +1390,6 @@ export function AppShell() {
       }
     };
 
-    window.addEventListener("click", handleDocumentClick, true);
     window.addEventListener("focus", handleFocus);
     window.addEventListener("pageshow", handlePageShow);
     window.addEventListener("popstate", handlePopState);
@@ -1394,7 +1400,6 @@ export function AppShell() {
       if (recoveryTimer !== null) {
         window.clearTimeout(recoveryTimer);
       }
-      window.removeEventListener("click", handleDocumentClick, true);
       window.removeEventListener("focus", handleFocus);
       window.removeEventListener("pageshow", handlePageShow);
       window.removeEventListener("popstate", handlePopState);

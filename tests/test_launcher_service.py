@@ -577,6 +577,7 @@ def test_launcher_force_stop_queues_command_with_active_work_details(tmp_path, m
 
     assert response["operation"] == "force-stop"
     assert response["commandId"] == "cmd-force-close"
+    assert response["activeWorkCount"] == 1
     assert response["activeWorkRuns"] == [
         {
             "kind": "chat_turn",
@@ -619,6 +620,7 @@ def test_launcher_force_stop_skips_when_workbench_already_closed(monkeypatch):
     assert response["accepted"] is False
     assert response["operation"] == "force-stop"
     assert response["commandId"] == ""
+    assert response["activeWorkCount"] == 0
     assert "已经关闭" in response["message"]
     assert "launcher.bundle.force_stop.skipped_already_closed" in [event[0] for event in events]
 
@@ -756,6 +758,8 @@ def test_launcher_status_exposes_guardian_adapter_migration_contract(tmp_path, m
     assert guardian["supervisor"]["pid"] == 4444
     assert guardian["supervisor"]["alive"] is True
     assert guardian["supervisor"]["status"] == "running"
+    assert guardian["supervisor"]["blocking"] is False
+    assert guardian["supervisor"]["impact"] == "non_blocking"
     assert guardian["supervisor"]["stdoutPath"].endswith("raw/supervisor.log")
     assert guardian["supervisor"]["stderrPath"].endswith("raw/supervisor.stderr.log")
     assert guardian["supervisor"]["runtimeSceneId"] == "scene-a"
@@ -764,6 +768,8 @@ def test_launcher_status_exposes_guardian_adapter_migration_contract(tmp_path, m
     assert responsibilities["runtime_manager_daemon"]["status"] == "running"
     assert responsibilities["desktop_supervisor"]["adapter"] == "vibelution_launcher"
     assert responsibilities["desktop_supervisor"]["status"] == "running"
+    assert responsibilities["desktop_supervisor"]["blocking"] is False
+    assert responsibilities["desktop_supervisor"]["impact"] == "non_blocking"
     assert responsibilities["backend_process"]["status"] == "running"
     assert responsibilities["browser_window"]["status"] == "managed"
     assert responsibilities["runtime_scene_logging"]["owner"] == "runtime_manager_events"
@@ -1112,6 +1118,9 @@ def test_launcher_supervisor_snapshot_reports_recorded_dead_pid(tmp_path, monkey
     assert supervisor["pid"] == 5555
     assert supervisor["alive"] is False
     assert supervisor["status"] == "stopped"
+    assert supervisor["blocking"] is False
+    assert supervisor["impact"] == "non_blocking"
+    assert "不影响当前项目使用" in supervisor["userMessage"]
     assert "no longer alive" in supervisor["detail"]
 
 

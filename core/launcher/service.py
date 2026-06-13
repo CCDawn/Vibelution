@@ -805,6 +805,7 @@ def request_launcher_force_stop() -> LauncherCommandResponse:
             "operation": "force-stop",
             "commandId": "",
             "message": "项目工作台已经关闭，无需再次强制关闭。",
+            "activeWorkCount": len(active_work_runs),
             "activeWorkRuns": active_work_runs[:8],
         }
     try:
@@ -844,6 +845,7 @@ def request_launcher_force_stop() -> LauncherCommandResponse:
         "operation": "force-stop",
         "commandId": command_id,
         "message": "正在强制关闭项目工作台，Launcher 控制面会保持可再次启动。",
+        "activeWorkCount": len(active_work_runs),
         "activeWorkRuns": active_work_runs[:8],
     }
 
@@ -1369,6 +1371,9 @@ def _guardian_adapter_from_workbench(*, runtime_manager: dict[str, Any], workben
             adapter="vibelution_launcher",
             status=str(supervisor.get("status") or "unknown"),
             detail=str(supervisor.get("detail") or ""),
+            blocking=False,
+            impact=str(supervisor.get("impact") or "non_blocking"),
+            user_message=str(supervisor.get("userMessage") or ""),
         ),
         _guardian_responsibility(
             "backend_process",
@@ -1415,16 +1420,23 @@ def _launcher_supervisor_snapshot() -> dict[str, Any]:
     status = "running" if alive else "stopped" if supervisor_pid > 0 else "not_started"
     if not state:
         detail = "Launcher state is unavailable; supervisor health cannot be observed yet."
+        user_message = "后台守护检查状态暂不可用；不影响 Launcher 读取当前项目状态。"
     elif alive:
         detail = f"Supervisor process is alive pid={supervisor_pid}."
+        user_message = "后台守护检查正在运行。"
     elif supervisor_pid > 0:
         detail = f"Supervisor pid={supervisor_pid} is recorded but no longer alive."
+        user_message = "后台守护检查未运行，不影响当前项目使用；需要时可重新接管。"
     else:
         detail = "Supervisor process has not been recorded in launcher state."
+        user_message = "后台守护检查尚未记录，不影响当前项目使用。"
     return {
         "pid": supervisor_pid,
         "alive": alive,
         "status": status,
+        "blocking": False,
+        "impact": "non_blocking",
+        "userMessage": user_message,
         "stdoutPath": stdout_path,
         "stderrPath": stderr_path,
         "runtimeSceneId": runtime_scene_id,
@@ -1765,14 +1777,24 @@ def _guardian_responsibility(
     adapter: str,
     status: str,
     detail: str,
+    blocking: bool | None = None,
+    impact: str = "",
+    user_message: str = "",
 ) -> dict[str, object]:
-    return {
+    payload: dict[str, object] = {
         "id": responsibility_id,
         "owner": owner,
         "adapter": adapter,
         "status": status,
         "detail": detail,
     }
+    if blocking is not None:
+        payload["blocking"] = bool(blocking)
+    if impact:
+        payload["impact"] = impact
+    if user_message:
+        payload["userMessage"] = user_message
+    return payload
 
 
 def _component_state(
