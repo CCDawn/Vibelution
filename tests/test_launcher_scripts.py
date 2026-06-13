@@ -613,6 +613,7 @@ def test_desktop_entry_python_bridge_does_not_shell_out_to_powershell():
 
     assert "powershell.exe" not in source
     assert "vibelution_launcher.ps1" not in source
+    assert '"core/launcher/developer_mode.py"' in source
 
 
 def test_desktop_entry_python_bridge_starts_launcher_natively(monkeypatch, tmp_path):
@@ -3177,6 +3178,7 @@ if ($null -eq $signatureAst) {
 }
 $signatureText = $signatureAst.Extent.Text
 foreach ($requiredControlInput in @(
+    "core\\launcher\\developer_mode.py",
     "core\\runtime_manager\\__init__.py",
     "core\\runtime_manager\\constants.py",
     "core\\runtime_manager\\evolution_store.py",

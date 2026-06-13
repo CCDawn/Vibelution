@@ -1761,6 +1761,7 @@ function Get-FileFingerprint {
 function Get-LauncherControlSourceSignature {
     $paths = @(
         (Join-Path $projectDir "core\launcher\app.py"),
+        (Join-Path $projectDir "core\launcher\developer_mode.py"),
         (Join-Path $projectDir "core\launcher\service.py"),
         (Join-Path $projectDir "core\runtime_manager\__init__.py"),
         (Join-Path $projectDir "core\runtime_manager\constants.py"),
