@@ -2564,6 +2564,28 @@
   padding: 7px;
 }
 
+.sourceCollectionFocusedPanel {
+  border-color: color-mix(in srgb, var(--accent-cool) 64%, var(--border-strong));
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--accent-cool) 18%, transparent),
+    0 12px 28px color-mix(in srgb, var(--accent-cool) 10%, transparent);
+  animation: sourceCollectionPanelPulse 1.6s ease-out;
+}
+
+@keyframes sourceCollectionPanelPulse {
+  0% {
+    transform: translateY(-2px);
+  }
+
+  45% {
+    transform: translateY(0);
+  }
+
+  100% {
+    transform: none;
+  }
+}
+
 .workflowSourceCollectionDetails summary {
   display: flex;
   min-height: 28px;

@@ -39,7 +39,7 @@
         <aside class="dashboard-panel">
           <h2>审核摘要</h2>
           <div class="kpi-grid">
-            <div class="kpi"><b>当前阶段</b><strong>M6.30</strong><span>知识搜集页五张步骤卡承载主操作；资料筛选在页内详情完成，不再跳回通用候选页。</span></div>
+            <div class="kpi"><b>当前阶段</b><strong>M6.31</strong><span>资料筛选步骤卡会展开、滚动并高亮本页筛选详情，避免点击后无反馈。</span></div>
             <div class="kpi"><b>流程节点</b><strong>13</strong><span>1-9 为知识入库主线，10-13 保留占位与维护节点。</span></div>
             <div class="kpi"><b>候选资料</b><strong>10</strong><span>第一轮 source_manifest 已进入 candidate-only 工作区。</span></div>
             <div class="kpi"><b>正式写入</b><strong>0</strong><span>未写正式 Team Knowledge、RAG 或 official graph。</span></div>
@@ -465,7 +465,7 @@
           <div class="plan-summary">
             <div class="service-row"><strong>知识搜集主线</strong><span>只跑通知识搜集、筛选、候选入库、知识治理 Agent 和图谱同步设计；不进入训练实验、算法实现或比赛交付。</span></div>
             <div class="service-row"><strong>实施目标</strong><span>复用 Vibelution 现有 Research、Team Knowledge、RAG、Knowledge Steward 和 Memory Graph 能力，把 01-09 做成可运行 MVP。</span></div>
-            <div class="service-row"><strong>团队入口</strong><span>/teams?team=research-team · 选中 ai科学研究团队后，团队内容区显示科研控制台：研究主题、当前阶段、知识搜集/实验/迭代三张阶段卡、每卡一个主按钮和一个阶段详情入口；知识搜集卡会按未开始、待继续搜索、搜索中、待筛选、可进入实验、等待回写显示状态，并提供“新一轮搜集”；知识搜集独立页的资料搜集、资料筛选、候选入库、候选图谱、共享记忆前审五张步骤卡各自承载开始/查看/刷新按钮，资料筛选留在页内详情区，不再跳回通用候选页；模型证据、候选、路径、校验和内部状态默认移到阶段详情页或高级信息中。</span></div>
+            <div class="service-row"><strong>团队入口</strong><span>/teams?team=research-team · 选中 ai科学研究团队后，团队内容区显示科研控制台：研究主题、当前阶段、知识搜集/实验/迭代三张阶段卡、每卡一个主按钮和一个阶段详情入口；知识搜集卡会按未开始、待继续搜索、搜索中、待筛选、可进入实验、等待回写显示状态，并提供“新一轮搜集”；知识搜集独立页的资料搜集、资料筛选、候选入库、候选图谱、共享记忆前审五张步骤卡各自承载开始/查看/刷新按钮，资料筛选留在页内详情区，点击后会展开、滚动并高亮右侧筛选详情，不再跳回通用候选页；模型证据、候选、路径、校验和内部状态默认移到阶段详情页或高级信息中。</span></div>
           </div>
           <div class="dashboard-panel">
             <h2>边界提醒</h2>
@@ -659,8 +659,8 @@
         <div class="agent-row">
         <b>01</b>
         <strong>Source Intake Agent</strong>
-        <span>可复用通用 data-processing assignment / source-extraction / source-quality 后端已接入；Teams 资料搜集执行台、候选资料筛选台、科研总览控制台、KV 缓存对话轨迹、启动复用反馈、metadata-only 搜索执行闭环、高价值信息层、中文控制台、默认层去说明化和步骤卡主操作入口已接入</span>
-        <span>ResearchStageRound 建立 / 科研控制台一键进入知识搜集 / 总览页只显示三阶段主操作 / 知识搜集状态驱动按钮 / 知识搜集中文展示映射 / 默认层去说明化 / 右侧主操作唯一化 / 资料筛选入口常驻 / 步骤卡主操作入口 / 资料筛选页内详情 / 新一轮搜集入口 / active 知识搜集轮次复用反馈 / 自动启动团队协调 round / DataProcessingRun 建立 / DataProcessingRun reviewing 收口 / DataSearchPlan/querySeeds 搜索计划 / KV/prompt cache 启动门禁 / 稳定前缀/动态增量契约 / CollectionAssignment 资料搜集任务 / assignedQueries 角色分配 / promptCachePartition 角色分区 / Teams 启动搜集批次 / Teams 查看 run/assignment/query/KV 状态 / Teams 高价值摘要层 / Teams 搜索下一批 / Crossref 元数据搜索执行器 / 搜索执行事件进入搜集对话流 / DataRecord 通用记录 / DataRecord 自动导入 source_manifest / metadata-only 下载边界 / 手工 CollectionOutput 回写 / 本地资料登记 / source_manifest 写入 / 文件路径/页码/来源可信度记录 / 本地 PDF sha256/pageAnchors/excerpt 抽取 / sourceQualityAssessment 筛选 / 可选 research_knowledge_query_tool 查重</span>
+        <span>可复用通用 data-processing assignment / source-extraction / source-quality 后端已接入；Teams 资料搜集执行台、候选资料筛选台、科研总览控制台、KV 缓存对话轨迹、启动复用反馈、metadata-only 搜索执行闭环、高价值信息层、中文控制台、默认层去说明化、步骤卡主操作入口和资料筛选页内反馈已接入</span>
+        <span>ResearchStageRound 建立 / 科研控制台一键进入知识搜集 / 总览页只显示三阶段主操作 / 知识搜集状态驱动按钮 / 知识搜集中文展示映射 / 默认层去说明化 / 右侧主操作唯一化 / 资料筛选入口常驻 / 步骤卡主操作入口 / 资料筛选页内详情 / 资料筛选展开高亮反馈 / 新一轮搜集入口 / active 知识搜集轮次复用反馈 / 自动启动团队协调 round / DataProcessingRun 建立 / DataProcessingRun reviewing 收口 / DataSearchPlan/querySeeds 搜索计划 / KV/prompt cache 启动门禁 / 稳定前缀/动态增量契约 / CollectionAssignment 资料搜集任务 / assignedQueries 角色分配 / promptCachePartition 角色分区 / Teams 启动搜集批次 / Teams 查看 run/assignment/query/KV 状态 / Teams 高价值摘要层 / Teams 搜索下一批 / Crossref 元数据搜索执行器 / 搜索执行事件进入搜集对话流 / DataRecord 通用记录 / DataRecord 自动导入 source_manifest / metadata-only 下载边界 / 手工 CollectionOutput 回写 / 本地资料登记 / source_manifest 写入 / 文件路径/页码/来源可信度记录 / 本地 PDF sha256/pageAnchors/excerpt 抽取 / sourceQualityAssessment 筛选 / 可选 research_knowledge_query_tool 查重</span>
         <span>确认资料允许分析、来源可信度和是否纳入本轮。</span>
       </div>
 <div class="agent-row">
@@ -1327,7 +1327,7 @@
                 </div>
 <div class="service-row">
                   <b>TeamsRoute workflow workspace</b>
-                  <span>已落地入口：Teams 页顶部固定横向切换条只暴露 AI 搜索范围团队和 ai科学研究团队，左侧栏已删除；监督进化/自进化模式页各自读取系统 Team 并展示只读团队画布；选择 ai科学研究团队后直接进入 research-team 专属科研控制台；总览只显示知识搜集、实验、迭代三张阶段卡，每张卡一个主操作和阶段详情入口。知识搜集卡会显示当前批次、待处理、候选和查询数，主按钮按状态执行开始、下一批搜索、筛选入口或打开工作台，另有新一轮搜集入口。知识搜集页位于 /teams?team=research-team&amp;researchView=knowledge_collection，默认展示高价值状态摘要、状态驱动主操作和对话式 source collection 过程流；执行 source collection 搜索时会写入 source_collection_run 运行快照，让 AppShell 顶部“正在进行”显示知识搜集；资料搜集、资料筛选、候选入库、候选图谱、共享记忆前审五张步骤卡各自带主按钮，资料筛选在页内详情区完成，不再跳回通用候选页；KV/prompt cache、稳定前缀、动态增量、assignment、query、存储路径和手工回写保留在可展开详情中；默认层移除解释性小字；实验/迭代页先提供规划启动、轮次状态和边界说明；旧 source_collection 参数兼容映射到知识搜集。</span>
+                  <span>已落地入口：Teams 页顶部固定横向切换条只暴露 AI 搜索范围团队和 ai科学研究团队，左侧栏已删除；监督进化/自进化模式页各自读取系统 Team 并展示只读团队画布；选择 ai科学研究团队后直接进入 research-team 专属科研控制台；总览只显示知识搜集、实验、迭代三张阶段卡，每张卡一个主操作和阶段详情入口。知识搜集卡会显示当前批次、待处理、候选和查询数，主按钮按状态执行开始、下一批搜索、筛选入口或打开工作台，另有新一轮搜集入口。知识搜集页位于 /teams?team=research-team&amp;researchView=knowledge_collection，默认展示高价值状态摘要、状态驱动主操作和对话式 source collection 过程流；执行 source collection 搜索时会写入 source_collection_run 运行快照，让 AppShell 顶部“正在进行”显示知识搜集；资料搜集、资料筛选、候选入库、候选图谱、共享记忆前审五张步骤卡各自带主按钮，资料筛选在页内详情区完成，点击会展开、滚动并高亮目标，不再跳回通用候选页；KV/prompt cache、稳定前缀、动态增量、assignment、query、存储路径和手工回写保留在可展开详情中；默认层移除解释性小字；实验/迭代页先提供规划启动、轮次状态和边界说明；旧 source_collection 参数兼容映射到知识搜集。</span>
                 </div>
 <div class="service-row">
                   <b>local_research_worker_model</b>
@@ -2060,6 +2060,12 @@
               <strong>步骤卡主操作入口</strong>
               <span>知识搜集独立页移除顶部操作条和右侧下一步面板的重复按钮，把资料搜集、资料筛选、候选入库、候选图谱、共享记忆前审五个步骤卡改成主操作入口。</span>
               <span>点击资料筛选不再跳回通用候选页，而是在知识搜集工作台内打开页内筛选详情；每个步骤继续按进行中、已完成、失败、未进行、待处理显示客观状态，正式知识/RAG/official graph 写入边界不变。</span>
+            </div>
+<div class="blueprint-row">
+              <b>M6.31</b>
+              <strong>资料筛选页内反馈修复</strong>
+              <span>资料筛选步骤卡点击后会展开本页筛选详情、滚动右侧控制台并短暂高亮目标区域；按钮文案从开始资料筛选改为打开资料筛选，避免误解为后台批量筛选。</span>
+              <span>本轮只修复前端可见反馈和页内导航，不新增自动筛选执行器；通过筛选、退回补资料和生成分块仍复用已有 source-quality/assess 与 paper-note-chunks/plan 链路。</span>
             </div>
       </div>
       <div class="tag-row">
