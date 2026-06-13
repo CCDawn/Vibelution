@@ -215,7 +215,7 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("const allowedTools = sortedIds([...sessionDefaultAllowedTools, ...selectedAllowedTools])");
     expect(routeSource).toContain("selectedToolBundleIds: string[]");
     expect(routeSource).toContain("function defaultCreateToolBundleIds");
-    expect(routeSource).toContain('const preferred = workSession ? ["core", "coding", "memory_context"] : ["core", "research", "collaboration"]');
+    expect(routeSource).toContain('const preferred = workSession ? ["core", "coding"] : ["core", "research", "collaboration"]');
     expect(routeSource).toContain("function toolBundleIdsForModeChange");
     expect(routeSource).toContain("const hasCustomSelection = draft.selectedToolBundleIds.length > 0 && !sameStringSet(draft.selectedToolBundleIds, currentDefaults)");
     expect(routeSource).toContain("selectedToolBundleIds: toolBundleIdsForModeChange(createDraft, primaryMode, toolBundles)");
