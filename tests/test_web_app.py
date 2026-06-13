@@ -9748,6 +9748,50 @@ def test_session_detail_shows_current_runtime_notice_until_real_message_arrives(
     assert settled["runtimeNotices"] == []
 
 
+def test_submit_session_message_persists_lease_conflict_notice_without_llm_call(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="idle")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    events: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        session_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: events.append({"args": args, "kwargs": kwargs}) or {"accepted": True},
+    )
+    monkeypatch.setattr(
+        session_service,
+        "load_evolution_active_run_snapshot",
+        lambda kind: {
+            "runId": "web-supervised-busy",
+            "runKind": "supervised_worktree_evolution_run",
+            "status": "running",
+            "leases": ["evaluation", "worktree_write"],
+        } if kind == "supervised" else None,
+    )
+
+    response = client.post(
+        "/api/sessions/session-live/messages",
+        json={"content": "修复这个前端显示问题"},
+    )
+
+    assert response.status_code == 409
+    assert "worktree_write" in response.json()["detail"]
+    detail = client.get("/api/sessions/session-live").json()
+    assert detail["messages"][-1]["content"] != "修复这个前端显示问题"
+    assert detail["runtimeNotices"][-1]["kind"] == "turn_rejected"
+    assert "HTTP 409" in detail["runtimeNotices"][-1]["message"]
+    assert "web-supervised-busy" in detail["runtimeNotices"][-1]["message"]
+    assert detail["llmUsage"]["source"] == "not_called"
+    assert detail["cacheUsage"]["source"] == "not_called"
+    assert detail["lastCacheComposition"]["source"] == "not_called"
+    assert detail["lastTurnError"]["httpStatus"] == 409
+    assert any(
+        event["args"][:3] == ("conversation", "turn_rejected", "conversation.turn.rejected_before_llm")
+        and event["kwargs"]["fields"]["llmCalled"] is False
+        and event["kwargs"]["fields"]["conflictRunId"] == "web-supervised-busy"
+        for event in events
+    )
+
+
 def test_session_detail_recovers_stale_running_state(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="reading")
     state = load_chat_state(tmp_path)
