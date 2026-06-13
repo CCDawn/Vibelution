@@ -70,6 +70,26 @@ function sourceLabel(run: Pick<EvolutionRun, "bundleName" | "summary">, lang: Ru
   return lang === "zh" ? "评测来源未知" : "unknown source";
 }
 
+export function supervisedDecisionLabel(decision: string, lang: RunRecordLanguage, fallback: (decision: string) => string): string {
+  const normalizedDecision = clean(decision).toUpperCase();
+  if (normalizedDecision === "PROMOTE") {
+    return lang === "zh" ? "建议晋升" : "promote";
+  }
+  if (normalizedDecision === "HOLD") {
+    return lang === "zh" ? "继续观察" : "observe";
+  }
+  if (normalizedDecision === "REJECT") {
+    return lang === "zh" ? "候选未采纳" : "not adopted";
+  }
+  if (normalizedDecision === "ROLLBACK") {
+    return lang === "zh" ? "建议回滚" : "rollback";
+  }
+  if (normalizedDecision === "INCONCLUSIVE") {
+    return lang === "zh" ? "评测无结论" : "inconclusive";
+  }
+  return fallback(decision);
+}
+
 export function buildSupervisedRunRecordDisplay(
   run: Pick<EvolutionRun, "id" | "endedAt" | "bundleName" | "summary" | "decision" | "status" | "baselineScore" | "candidateScore">,
   lang: RunRecordLanguage,
@@ -82,7 +102,7 @@ export function buildSupervisedRunRecordDisplay(
   const source = sourceLabel(run, lang);
   const decision = clean(run.decision);
   const status = clean(run.status);
-  const decisionText = decision ? labels.decisionLabel(decision) : labels.statusLabel(status);
+  const decisionText = decision ? supervisedDecisionLabel(decision, lang, labels.decisionLabel) : labels.statusLabel(status);
   const scoreText = `baseline ${run.baselineScore} / candidate ${run.candidateScore}`;
   return {
     title: `${timeLabel} · ${source}`,

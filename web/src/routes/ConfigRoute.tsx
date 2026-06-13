@@ -286,19 +286,22 @@ function ConfigWorkspacePlaceholder({
 export const CONFIG_COPY = {
   zh: {
     pageTitle: "统一配置工作台",
-    subtitle: "这里是高级配置网页入口。启动设置在 Launcher 面板维护；结构化编辑、完整配置检查和最终保存仍收口到外部 operator config.toml。",
+    subtitle: "结构化配置、模型资产与保存状态。",
+    subtitleHint: "启动设置在 Launcher 面板维护；结构化编辑、完整配置检查和最终保存仍收口到外部 operator config.toml。",
     loading: "正在加载统一配置工作区...",
     loadFailed: "配置工作区加载失败",
     sourceTitle: "保存与生效",
     sourceBody: "这里显示当前修改是否已经保存，以及哪些系统级设置需要重启后才会生效。",
+    sourceBodyShort: "保存状态、配置路径和外部环境入口。",
     runtimeTitle: "运行时与界面",
-    runtimeBody: "启动设置在 Launcher 面板维护；这里保留非启动类界面、治理和高级配置。",
+    runtimeBody: "非启动类界面、治理和高级配置。",
     modelsTitle: "模型库",
     modelsBody: "这里只管理模型资产：服务商、模型名、密钥状态、能力检测和连通性测试。每个 Agent 的具体模型选择请到 Agent 管理中维护。",
+    modelsBodyShort: "模型资产、密钥状态、能力检测和连通性。",
     draftTitle: "高级配置检查",
-    draftBody: "如果结构化面板不够用，可以直接检查整份当前配置；保存时只写外部 operator config.toml。",
+    draftBody: "检查整份当前配置；保存只写外部 operator config.toml。",
     diagnosticsTitle: "诊断与保存",
-    diagnosticsBody: "保存前会显示阻塞问题、警告和可能需要处理的动作。",
+    diagnosticsBody: "阻塞问题、警告和保存动作。",
     configPath: "配置路径",
     configStatus: "当前状态",
     rawToml: "当前外部 config.toml",
@@ -510,19 +513,22 @@ export const CONFIG_COPY = {
   },
   en: {
     pageTitle: "Unified Config Workbench",
-    subtitle: "This is the advanced config web entry. Startup settings are maintained in Launcher; structured editing, full-config checks, and final writes still converge on the external operator config.toml.",
+    subtitle: "Structured config, model assets, and save state.",
+    subtitleHint: "Startup settings are maintained in Launcher; structured editing, full-config checks, and final writes still converge on the external operator config.toml.",
     loading: "Loading unified config workspace...",
     loadFailed: "Failed to load config workspace",
     sourceTitle: "Save and Apply",
     sourceBody: "Shows whether current changes are saved and which system-level settings take effect after restart.",
+    sourceBodyShort: "Save state, config path, and environment entry.",
     runtimeTitle: "Runtime and Interface",
-    runtimeBody: "Startup settings are maintained in Launcher. This page keeps non-startup interface, governance, and advanced config.",
+    runtimeBody: "Non-startup interface, governance, and advanced config.",
     modelsTitle: "Model Library",
     modelsBody: "This section manages model assets only: provider routes, model names, key state, capability checks, and connection tests. Edit each Agent's model choices in Agent management.",
+    modelsBodyShort: "Model assets, key state, capability checks, and connectivity.",
     draftTitle: "Advanced Config Check",
-    draftBody: "When the structured panel is not enough, check the full current config here. Saving writes only the external operator config.toml.",
+    draftBody: "Inspect the full current config. Saves write only external operator config.toml.",
     diagnosticsTitle: "Diagnostics and Save",
-    diagnosticsBody: "Blocking issues, warnings, and suggested actions stay visible before saving.",
+    diagnosticsBody: "Blocking issues, warnings, and save actions.",
     configPath: "Config path",
     configStatus: "Current status",
     rawToml: "Current external config.toml",
@@ -3115,7 +3121,7 @@ export function ConfigRoute() {
         <div className={styles.sidebarIntro}>
           <p className={styles.eyebrow}>Config</p>
           <h1 className={styles.title}>{copy.pageTitle}</h1>
-          <p className={styles.subtitle}>{copy.subtitle}</p>
+          <p className={styles.subtitle} title={copy.subtitleHint}>{copy.subtitle}</p>
         </div>
 
         <div className={styles.sidebarStatus}>
@@ -3266,7 +3272,7 @@ export function ConfigRoute() {
             </div>
             <Database size={16} className={styles.sectionIcon} />
           </div>
-          <p className={styles.sectionText}>{copy.sourceBody}</p>
+          <p className={styles.sectionText} title={copy.sourceBody}>{copy.sourceBodyShort}</p>
           <div className={styles.hashGrid}>
             <article className={styles.detailCard}>
               <span>{copy.configPath}</span>
@@ -3282,7 +3288,13 @@ export function ConfigRoute() {
               <RefreshCw size={14} />
               {copy.refresh}
             </button>
-            <button type="button" className={styles.actionButton} disabled={Boolean(busyAction)} onClick={handleOpenEnvironment}>
+            <button
+              type="button"
+              className={styles.actionButton}
+              disabled={Boolean(busyAction)}
+              title={copy.openEnvironmentHint}
+              onClick={handleOpenEnvironment}
+            >
               <ExternalLink size={14} />
               {busyAction === copy.openEnvironmentPending ? copy.openEnvironmentPending : copy.openEnvironment}
             </button>
@@ -3296,7 +3308,6 @@ export function ConfigRoute() {
               <RotateCcw size={14} />
               {copy.resetDraft}
             </button>
-            <span className={styles.helperText}>{copy.openEnvironmentHint}</span>
           </div>
           <details className={styles.rawConfigPanel}>
             <summary>{copy.rawToml}</summary>
@@ -3356,7 +3367,7 @@ export function ConfigRoute() {
             </div>
             <Blocks size={16} className={styles.sectionIcon} />
           </div>
-          <p className={styles.sectionText}>{copy.modelsBody}</p>
+          <p className={styles.sectionText} title={copy.modelsBody}>{copy.modelsBodyShort}</p>
           <div className={styles.modelCenterSummaryBar}>
             <span><strong>{modelCenterRows.length}</strong> {copy.modelCenterModels}</span>
             <span><strong>{modelCenterSummary.accounts.length}</strong> {copy.modelCenterAccounts}</span>

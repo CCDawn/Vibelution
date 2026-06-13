@@ -101,4 +101,19 @@ describe("buildSupervisedRunRecordDisplay", () => {
     expect(display.title).toContain("时间未知");
     expect(display.idLabel).toBe("supervised_latest");
   });
+
+  it("renders REJECT as a governance non-adoption label instead of a failure label", () => {
+    const display = buildSupervisedRunRecordDisplay(
+      run({
+        decision: "REJECT",
+        baselineScore: 100,
+        candidateScore: 100,
+      }),
+      "zh",
+      labels,
+    );
+
+    expect(display.subtitle).toBe("候选未采纳 · baseline 100 / candidate 100");
+    expect(display.subtitle).not.toContain("失败");
+  });
 });

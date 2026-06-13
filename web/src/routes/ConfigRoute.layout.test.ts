@@ -22,6 +22,17 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).toContain("styles.loadingSpecGrid");
   });
 
+  it("moves supplemental config explanation into hover text instead of permanent helper copy", () => {
+    expect(routeSource).toContain("subtitleHint");
+    expect(routeSource).toContain('title={copy.subtitleHint}');
+    expect(routeSource).toContain("sourceBodyShort");
+    expect(routeSource).toContain("modelsBodyShort");
+    expect(routeSource).toContain('title={copy.sourceBody}');
+    expect(routeSource).toContain('title={copy.modelsBody}');
+    expect(routeSource).toContain('title={copy.openEnvironmentHint}');
+    expect(routeSource).not.toContain('<span className={styles.helperText}>{copy.openEnvironmentHint}</span>');
+  });
+
   it("keeps the model settings group dense enough to use the bottom viewport", () => {
     expect(routeSource).toContain('activeSection?.id === "models-profiles"');
     expect(routeSource).toContain("styles.contentModels");

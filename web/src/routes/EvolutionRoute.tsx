@@ -73,7 +73,7 @@ import {
   selectSupervisedRunStreamTarget,
   shouldIgnoreActiveRunSnapshot,
 } from "./evolutionLiveRun";
-import { buildSupervisedRunRecordDisplay } from "./supervisedRunRecordLabel";
+import { buildSupervisedRunRecordDisplay, supervisedDecisionLabel } from "./supervisedRunRecordLabel";
 import { buildSupervisedRunControlSummary } from "./supervisedRunSummary";
 import { buildSupervisedCaseTraceItems, type SupervisedCaseTraceItem } from "./supervisedCaseTrace";
 import { createEvolutionWorkspaceCache } from "./evolutionWorkspaceCache";
@@ -429,6 +429,62 @@ function canOpenProposalSourceRun(item: EvolutionLibraryEntry | null | undefined
   return Boolean(item?.sourceRun) && !isSelfEvolutionCandidateItem(item);
 }
 
+function supervisedRunBucketLabel(status: string, lang: "zh" | "en", statusLabel: (status: string) => string) {
+  const normalized = String(status || "").trim().toLowerCase();
+  if (normalized === "failed") {
+    return lang === "zh" ? "异常收口" : "closed with issues";
+  }
+  return statusLabel(status);
+}
+
+function supervisedProposalStatusLabel(status: string, fallback: string, lang: "zh" | "en") {
+  const raw = String(status || fallback || "").trim();
+  const normalized = raw.toLowerCase();
+  if (normalized === "rejected" || normalized === "reject") {
+    return lang === "zh" ? "未入库" : "not stored";
+  }
+  if (normalized === "missing") {
+    return lang === "zh" ? "无提案" : "no proposal";
+  }
+  return fallback || raw || "--";
+}
+
+function displaySupervisedRunStatus(run: EvolutionRun, lang: "zh" | "en", statusLabel: (status: string) => string) {
+  return run.runSemantics?.runStatusLabel || supervisedRunBucketLabel(run.status, lang, statusLabel);
+}
+
+function displaySupervisedTechnicalText(
+  value: string,
+  decision: string,
+  lang: "zh" | "en",
+  decisionLabel: (decision: string) => string,
+) {
+  const text = String(value || "").trim();
+  if (!text) {
+    return "";
+  }
+  const decisionText = supervisedDecisionLabel(decision, lang, decisionLabel);
+  const rejectedText = lang === "zh" ? "未入库" : "not stored";
+  const riskGateText = lang === "zh" ? "风险 gate" : "risk gate";
+  const judgmentNoteText = lang === "zh" ? "判定说明:" : "judgment note:";
+  return text
+    .replace(/\bdecision\s*=\s*REJECT\b/gi, lang === "zh" ? `治理结论=${decisionText}` : `governance=${decisionText}`)
+    .replace(/\bagent_judgment\s+fail:?/gi, judgmentNoteText)
+    .replace(/\bREJECT\b/g, decisionText)
+    .replace(/\brejected\b/g, rejectedText)
+    .replace(/失败\s*gate/g, riskGateText)
+    .replace(/失败项/g, lang === "zh" ? "问题项" : "issue items")
+    .replace(/监督结论/g, lang === "zh" ? "治理结论" : "governance result");
+}
+
+function displaySupervisedRunSummary(
+  run: EvolutionRun,
+  lang: "zh" | "en",
+  decisionLabel: (decision: string) => string,
+) {
+  return displaySupervisedTechnicalText(run.summary, run.decision, lang, decisionLabel);
+}
+
 function compactCaseObject(value: Record<string, unknown> | undefined) {
   if (!value || Object.keys(value).length === 0) {
     return "";
@@ -450,6 +506,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     proposalActionLabel,
     sourceKindLabel,
   } = useAppI18n();
+  const displayDecisionLabel = (decision: string) => supervisedDecisionLabel(decision, lang, decisionLabel);
   const location = useLocation();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -1055,7 +1112,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     : "--";
   const monitoredTaskLabel = monitoredRun?.currentTask || monitoredRun?.latestMessage || "--";
   const monitoredStatusLabel = monitoredRun?.decision === "INCONCLUSIVE"
-    ? decisionLabel(monitoredRun.decision)
+    ? displayDecisionLabel(monitoredRun.decision)
     : statusLabel(monitoredRun?.status || "");
   const supervisedRunMembers = useMemo<SupervisedRunMember[]>(() => {
     const bindings = supervisedMembersBindingRun?.agentBindings ?? {};
@@ -1080,10 +1137,10 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     });
   }, [lang, supervisedMembersBindingRun?.agentBindings, supervisedMembersRun?.currentAgentBinding?.agentId, supervisedMembersRun?.currentRole]);
   const latestRunStatusLabel = latestRun?.decision
-    ? decisionLabel(latestRun.decision)
+    ? displayDecisionLabel(latestRun.decision)
     : statusLabel(latestRun?.status || "");
   const supervisedMembersRunStatusLabel = supervisedMembersRun?.decision === "INCONCLUSIVE"
-    ? decisionLabel(supervisedMembersRun.decision)
+    ? displayDecisionLabel(supervisedMembersRun.decision)
     : statusLabel(supervisedMembersRun?.status || "");
   const monitoredControlSummary = monitoredRun
     ? buildSupervisedRunControlSummary(monitoredRun, lang, {
@@ -1962,10 +2019,10 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     }
 
     if (eventType === "session_finish" || eventType === "run_completed") {
-      const decisionText = event.decision ? decisionLabel(event.decision) : "--";
+      const decisionText = event.decision ? displayDecisionLabel(event.decision) : "--";
       return lang === "zh"
-        ? `监督结论为 ${decisionText}${reasonText ? `，原因：${reasonText}` : ""}。`
-        : `The supervised decision is ${decisionText}${reasonText ? `, reason: ${reasonText}` : ""}.`;
+        ? `治理结论为 ${decisionText}${reasonText ? `，原因：${reasonText}` : ""}。`
+        : `The governance result is ${decisionText}${reasonText ? `, reason: ${reasonText}` : ""}.`;
     }
 
     if (eventType === "run_failed") {
@@ -2418,7 +2475,9 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
         <div className={styles.detailSection}>
           <h3>{t("reviewHeadline")}</h3>
           <p className={styles.reviewLead}>{item.headline || item.summary}</p>
-          <p>{item.reason || item.outcomeSemantics.runtimeExplanation}</p>
+          <p title={item.reason || item.outcomeSemantics.runtimeExplanation}>
+            {displaySupervisedTechnicalText(item.reason || item.outcomeSemantics.runtimeExplanation, item.decision, lang, decisionLabel)}
+          </p>
         </div>
 
         <div className={styles.detailSection}>
@@ -2453,7 +2512,9 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
               <span>{formatAvailableActions(item.availableActions)}</span>
             </article>
           </div>
-          <p className={styles.noticeText}>{item.outcomeSemantics.runtimeExplanation}</p>
+          <p className={styles.noticeText} title={item.outcomeSemantics.runtimeExplanation}>
+            {displaySupervisedTechnicalText(item.outcomeSemantics.runtimeExplanation, item.decision, lang, decisionLabel)}
+          </p>
         </div>
 
         <div className={styles.detailSection}>
@@ -3068,7 +3129,14 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                         </span>
                         <strong className={styles.truncateText} title={latestRun.id}>{latestRun.id}</strong>
                       </div>
-                      <p>{latestRun.diagnosis || latestRun.summary || latestRun.nextAction}</p>
+                      <p title={latestRun.diagnosis || latestRun.summary || latestRun.nextAction}>
+                        {displaySupervisedTechnicalText(
+                          latestRun.diagnosis || latestRun.summary || latestRun.nextAction,
+                          latestRun.decision,
+                          lang,
+                          decisionLabel,
+                        )}
+                      </p>
                       <div className={styles.latestSupervisedResultMeta}>
                         <span>baseline {latestRun.baselineScore}</span>
                         <span>candidate {latestRun.candidateScore}</span>
@@ -3265,7 +3333,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                     }
                     onClick={() => setRunFilter(filter)}
                   >
-                    {filter === "all" ? t("allRuns") : statusLabel(filter)}
+                    {filter === "all" ? t("allRuns") : supervisedRunBucketLabel(filter, lang, statusLabel)}
                   </button>
                 ))}
               </div>
@@ -3277,11 +3345,11 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                 <strong>{hasRuns ? `${filteredRuns.length} / ${runs.length}` : "0 / 0"}</strong>
               </article>
               <article className={styles.compactFact}>
-                <span>{statusLabel("success")}</span>
+                <span>{supervisedRunBucketLabel("success", lang, statusLabel)}</span>
                 <strong>{runSuccessCount}</strong>
               </article>
               <article className={styles.compactFact}>
-                <span>{statusLabel("failed")}</span>
+                <span>{supervisedRunBucketLabel("failed", lang, statusLabel)}</span>
                 <strong>{runFailedCount}</strong>
               </article>
               <article className={styles.compactFact}>
@@ -3391,7 +3459,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                   {filteredRuns.map((run) => {
                     const runDisplay = buildSupervisedRunRecordDisplay(run, lang, {
                       statusLabel,
-                      decisionLabel,
+                      decisionLabel: displayDecisionLabel,
                     });
                     return (
                     <article
@@ -3426,20 +3494,22 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                             <strong>{runDisplay.title}</strong>
                             <span>{runDisplay.idLabel}</span>
                           </div>
-                          <span className={styles.secondaryPill}>{decisionLabel(run.decision)}</span>
+                          <span className={styles.secondaryPill}>{displayDecisionLabel(run.decision)}</span>
                         </div>
                         <div className={styles.metaRow}>
-                          <span>{statusLabel(run.status)}</span>
-                          <span>{run.outcomeSemantics.proposalStatusLabel}</span>
+                          <span>{displaySupervisedRunStatus(run, lang, statusLabel)}</span>
+                          <span>{supervisedProposalStatusLabel(run.outcomeSemantics.proposalStatus, run.outcomeSemantics.proposalStatusLabel, lang)}</span>
                         </div>
                         <div className={styles.scoreRow}>
                           <span>{runDisplay.subtitle}</span>
                           <strong>{run.candidateScore}</strong>
                         </div>
-                        <p>{run.summary}</p>
+                        <p>{displaySupervisedRunSummary(run, lang, decisionLabel)}</p>
                         <div className={styles.cardFooter}>
                           <span>{riskLabel(run.riskLevel)}</span>
-                          <span>{run.nextAction || "--"}</span>
+                          <span title={run.nextAction || ""}>
+                            {displaySupervisedTechnicalText(run.nextAction, run.decision, lang, decisionLabel) || "--"}
+                          </span>
                         </div>
                       </button>
                       {!run.canDelete && run.deleteBlockReason ? (
@@ -3471,13 +3541,19 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                     <div>
                       <p className={styles.eyebrow}>{t("runDetail")}</p>
                       <h2 className={styles.detailTitle}>
-                        {buildSupervisedRunRecordDisplay(selectedRun, lang, { statusLabel, decisionLabel }).title}
+                        {buildSupervisedRunRecordDisplay(selectedRun, lang, { statusLabel, decisionLabel: displayDecisionLabel }).title}
                       </h2>
                       <p className={styles.detailSubtleId}>{selectedRun.id}</p>
                     </div>
                     <div className={styles.detailHeaderActions}>
-                      <span className={styles.statusPill}>{decisionLabel(selectedRun.decision)}</span>
-                      <span className={styles.secondaryPill}>{selectedRun.outcomeSemantics.proposalStatusLabel}</span>
+                      <span className={styles.secondaryPill}>{displayDecisionLabel(selectedRun.decision)}</span>
+                      <span className={styles.secondaryPill}>
+                        {supervisedProposalStatusLabel(
+                          selectedRun.outcomeSemantics.proposalStatus,
+                          selectedRun.outcomeSemantics.proposalStatusLabel,
+                          lang,
+                        )}
+                      </span>
                     </div>
                   </div>
 
@@ -3485,7 +3561,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                     <div className={styles.runScorePanel}>
                       <span>{t("candidateScore")}</span>
                       <p className={styles.detailLead}>{selectedRun.candidateScore}</p>
-                      <p>{selectedRun.summary}</p>
+                      <p>{displaySupervisedRunSummary(selectedRun, lang, decisionLabel)}</p>
                       <div className={styles.runScoreDiagnosis}>
                         <span>{t("diagnosis")}</span>
                         <p>{selectedRun.diagnosis}</p>
@@ -3510,15 +3586,21 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                       <div className={styles.runSignalGrid}>
                         <article className={styles.compactFact}>
                           <span>{t("runLayer")}</span>
-                          <strong>{selectedRun.runSemantics.runStatusLabel}</strong>
+                          <strong>{displaySupervisedRunStatus(selectedRun, lang, statusLabel)}</strong>
                         </article>
                         <article className={styles.compactFact}>
                           <span>{t("decision")}</span>
-                          <strong>{selectedRun.outcomeSemantics.decisionLabel}</strong>
+                          <strong>{displayDecisionLabel(selectedRun.outcomeSemantics.decision || selectedRun.decision)}</strong>
                         </article>
                         <article className={styles.compactFact}>
                           <span>{t("proposalLayer")}</span>
-                          <strong>{selectedRun.outcomeSemantics.proposalStatusLabel}</strong>
+                          <strong>
+                            {supervisedProposalStatusLabel(
+                              selectedRun.outcomeSemantics.proposalStatus,
+                              selectedRun.outcomeSemantics.proposalStatusLabel,
+                              lang,
+                            )}
+                          </strong>
                         </article>
                         <article className={styles.compactFact}>
                           <span>{t("runtimeLayer")}</span>
@@ -3526,7 +3608,9 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                         </article>
                         <article className={styles.compactFact}>
                           <span>{t("nextRecommendedAction")}</span>
-                          <strong>{selectedRun.runSemantics.nextAction || "--"}</strong>
+                          <strong title={selectedRun.runSemantics.nextAction || ""}>
+                            {displaySupervisedTechnicalText(selectedRun.runSemantics.nextAction, selectedRun.decision, lang, decisionLabel) || "--"}
+                          </strong>
                         </article>
                         <article className={styles.compactFact}>
                           <span>{t("riskLevel")}</span>
@@ -3538,9 +3622,13 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
 
                   <div className={`${styles.detailSection} ${styles.detailSectionCompact}`}>
                     <div className={styles.runRuntimeNote}>
-                      <p>{selectedRun.outcomeSemantics.runtimeExplanation}</p>
+                      <p title={selectedRun.outcomeSemantics.runtimeExplanation}>
+                        {displaySupervisedTechnicalText(selectedRun.outcomeSemantics.runtimeExplanation, selectedRun.decision, lang, decisionLabel)}
+                      </p>
                       {selectedRun.riskReasons.length > 0 ? (
-                        <p>{selectedRun.riskReasons.join(" / ")}</p>
+                        <p title={selectedRun.riskReasons.join(" / ")}>
+                          {displaySupervisedTechnicalText(selectedRun.riskReasons.join(" / "), selectedRun.decision, lang, decisionLabel)}
+                        </p>
                       ) : null}
                     </div>
                     {selectedRun.availableActions.length > 0 ? (
@@ -3994,7 +4082,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                             <span className={styles.secondaryPill}>{item.outcomeSemantics.proposalStatusLabel}</span>
                           </div>
                           <div className={styles.metaRow}>
-                            <span>{decisionLabel(item.decision)}</span>
+                            <span>{displayDecisionLabel(item.decision)}</span>
                             <span>{proposalDisplaySourceRun(item)}</span>
                           </div>
                           <p className={styles.cardHeadline}>{item.changeSummary || item.headline}</p>
@@ -4043,7 +4131,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                             <span className={styles.secondaryPill}>{item.outcomeSemantics.proposalStatusLabel}</span>
                           </div>
                           <div className={styles.metaRow}>
-                            <span>{decisionLabel(item.decision)}</span>
+                            <span>{displayDecisionLabel(item.decision)}</span>
                             <span>{proposalDisplaySourceRun(item)}</span>
                           </div>
                           <p className={styles.cardHeadline}>{item.changeSummary || item.headline}</p>
@@ -4248,7 +4336,11 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                         </article>
                         <article className={styles.relatedRow}>
                           <strong>{t("decision")}</strong>
-                          <span>{proposalDetailQuery.data.outcomeSemantics.decisionLabel}</span>
+                          <span>
+                            {displayDecisionLabel(
+                              proposalDetailQuery.data.outcomeSemantics.decision || proposalDetailQuery.data.decision,
+                            )}
+                          </span>
                         </article>
                         <article className={styles.relatedRow}>
                           <strong>{t("proposalLayer")}</strong>
@@ -4283,10 +4375,31 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                           <span>{riskLabel(proposalDetailQuery.data.supervised.riskLevel)}</span>
                         </article>
                       </div>
-                      <p className={styles.noticeText}>{proposalDetailQuery.data.outcomeSemantics.runtimeExplanation}</p>
-                      <p>{proposalDetailQuery.data.supervised.decisionReason}</p>
+                      <p className={styles.noticeText} title={proposalDetailQuery.data.outcomeSemantics.runtimeExplanation}>
+                        {displaySupervisedTechnicalText(
+                          proposalDetailQuery.data.outcomeSemantics.runtimeExplanation,
+                          proposalDetailQuery.data.decision,
+                          lang,
+                          decisionLabel,
+                        )}
+                      </p>
+                      <p title={proposalDetailQuery.data.supervised.decisionReason}>
+                        {displaySupervisedTechnicalText(
+                          proposalDetailQuery.data.supervised.decisionReason,
+                          proposalDetailQuery.data.decision,
+                          lang,
+                          decisionLabel,
+                        )}
+                      </p>
                       {proposalDetailQuery.data.supervised.riskReasons.length > 0 ? (
-                        <p>{proposalDetailQuery.data.supervised.riskReasons.join(" / ")}</p>
+                        <p title={proposalDetailQuery.data.supervised.riskReasons.join(" / ")}>
+                          {displaySupervisedTechnicalText(
+                            proposalDetailQuery.data.supervised.riskReasons.join(" / "),
+                            proposalDetailQuery.data.decision,
+                            lang,
+                            decisionLabel,
+                          )}
+                        </p>
                       ) : null}
                       {proposalDetailQuery.data.supervised.caseDiagnostics.length > 0 ? (
                         <div className={styles.relatedList}>

@@ -67,6 +67,26 @@ function countRoleFinishes(run: EvolutionActiveRun, statuses: string[]) {
   )).length;
 }
 
+function supervisedDecisionText(decision: string, lang: SummaryLanguage) {
+  const normalizedDecision = clean(decision).toUpperCase();
+  if (normalizedDecision === "PROMOTE") {
+    return sentenceFor(lang, "建议晋升", "promote");
+  }
+  if (normalizedDecision === "HOLD") {
+    return sentenceFor(lang, "继续观察", "observe");
+  }
+  if (normalizedDecision === "REJECT") {
+    return sentenceFor(lang, "候选未采纳", "not adopted");
+  }
+  if (normalizedDecision === "ROLLBACK") {
+    return sentenceFor(lang, "建议回滚", "rollback");
+  }
+  if (normalizedDecision === "INCONCLUSIVE") {
+    return sentenceFor(lang, "评测无结论", "inconclusive");
+  }
+  return clean(decision);
+}
+
 function activeStage(run: EvolutionActiveRun, lang: SummaryLanguage, labels: SupervisedRunSummaryLabels) {
   const caseText = run.currentCaseId
     ? sentenceFor(
@@ -108,7 +128,7 @@ export function buildSupervisedRunControlSummary(
       tone: "warning",
       headline,
       reason,
-      nextAction: sentenceFor(lang, "确认取消原因后，可以重跑失败项、打开历史记录或清理记录。", "Review the cancellation reason, then rerun failed items, open history, or clear the record."),
+      nextAction: sentenceFor(lang, "确认取消原因后，可以重跑问题项、打开历史记录或清理记录。", "Review the cancellation reason, then rerun issue items, open history, or clear the record."),
       stageLabel,
       resultLabel: statusText,
       decisiveEvent: sessionCancelled || cancelledRole || failedRole,
@@ -117,6 +137,7 @@ export function buildSupervisedRunControlSummary(
 
   if (status === "done" || sessionFinish) {
     const decision = clean(run.decision);
+    const decisionText = supervisedDecisionText(decision, lang);
     const failedCaseCount = countRoleFinishes(run, ["failed", "timeout"]);
     if (failedCaseCount > 0) {
       return {
@@ -124,8 +145,8 @@ export function buildSupervisedRunControlSummary(
         headline: decision
           ? sentenceFor(
             lang,
-            `本轮评测已完成，监督结论为 ${decision}；包含 ${failedCaseCount} 个失败或超时样例。`,
-            `Run complete with supervised decision ${decision}; ${failedCaseCount} case role(s) failed or timed out.`,
+            `本轮评测已完成，治理结论为 ${decisionText}；包含 ${failedCaseCount} 个失败或超时样例。`,
+            `Run complete with governance result ${decisionText}; ${failedCaseCount} case role(s) failed or timed out.`,
           )
           : sentenceFor(
             lang,
@@ -135,8 +156,8 @@ export function buildSupervisedRunControlSummary(
         reason,
         nextAction: sentenceFor(
           lang,
-          "这不是中断；失败样例已计入本轮结果。查看样例轨迹后，可以重跑失败项或调整评测环境。",
-          "This was not interrupted; failed cases are counted in the completed run. Inspect the traces, then rerun failed items or adjust the evaluation environment.",
+          "这不是中断；风险样例已计入本轮结果。查看样例轨迹后，可以重跑问题项或调整评测环境。",
+          "This was not interrupted; issue cases are counted in the completed run. Inspect the traces, then rerun issue items or adjust the evaluation environment.",
         ),
         stageLabel,
         resultLabel: statusText,
@@ -146,7 +167,7 @@ export function buildSupervisedRunControlSummary(
     return {
       tone: "success",
       headline: decision
-        ? sentenceFor(lang, `本轮已完成，监督结论为 ${decision}。`, `Run complete with supervised decision ${decision}.`)
+        ? sentenceFor(lang, `本轮已完成，治理结论为 ${decisionText}。`, `Run complete with governance result ${decisionText}.`)
         : sentenceFor(lang, "本轮监督任务已完成。", "This supervised run is complete."),
       reason,
       nextAction: sentenceFor(lang, "查看结论详情；如有提案，进入提案库或评审区继续处理。", "Review the decision; if a proposal exists, continue in the library or review workspace."),
@@ -162,7 +183,7 @@ export function buildSupervisedRunControlSummary(
       tone: "danger",
       headline: sentenceFor(lang, `本轮失败：${failedText || "监督任务异常结束"}。`, `Run failed: ${failedText || "the supervised run ended with an error"}.`),
       reason,
-      nextAction: sentenceFor(lang, "优先查看失败原因，再重跑失败项；如果是后端连接异常，先恢复服务。", "Inspect the failure reason first, then rerun failed items; if the backend is unreachable, restore the service first."),
+      nextAction: sentenceFor(lang, "优先查看异常原因，再重跑问题项；如果是后端连接异常，先恢复服务。", "Inspect the issue reason first, then rerun issue items; if the backend is unreachable, restore the service first."),
       stageLabel,
       resultLabel: statusText,
       decisiveEvent: sessionError || failedRole,

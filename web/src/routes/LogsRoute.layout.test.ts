@@ -31,4 +31,11 @@ describe("LogsRoute layout contract", () => {
     expect(routeSource).toContain("styles.previewStateFlow");
     expect(routeSource).not.toContain('<div className={styles.emptySurface}>{t("loadingLogs")}</div>');
   });
+
+  it("keeps log root guidance in hover text instead of a permanent card row", () => {
+    expect(routeSource).toContain("logsCompactSubtitle");
+    expect(routeSource).toContain('title={t("logsSubtitle")}');
+    expect(routeSource).toContain("title={root.summary.userGuide || root.path}");
+    expect(routeSource).not.toContain("rootButtonGuide");
+  });
 });

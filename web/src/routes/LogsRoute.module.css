@@ -80,12 +80,12 @@
 
 .rootButton {
   display: grid;
-  grid-template-rows: auto auto auto auto auto;
-  gap: 5px;
+  grid-template-rows: auto auto auto auto;
+  gap: 4px;
   width: 100%;
   min-width: 0;
   min-height: 0;
-  padding: 8px 9px;
+  padding: 7px 9px;
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-panel);
   background: var(--surface-panel);
@@ -127,20 +127,10 @@
   text-overflow: ellipsis;
 }
 
-.rootButtonGuide,
 .rootButtonStats {
   color: var(--fg-secondary);
   font-size: 0.76rem;
   line-height: 1.35;
-}
-
-.rootButtonGuide {
-  display: -webkit-box;
-  min-width: 0;
-  max-height: calc(1.35em * 2);
-  overflow: hidden;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
 }
 
 .rootButtonStats {

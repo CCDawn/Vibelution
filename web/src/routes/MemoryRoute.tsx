@@ -630,7 +630,7 @@ const COPY: Record<"zh" | "en", Copy> = {
     reviewQueue: "优先检查队列",
     reviewQueueHint: "按风险和运行影响排序，先看会改变 agent 行为或证据不完整的记忆。",
     projectMemoryQueue: "项目记忆合并队列",
-    projectMemoryQueueHint: "并行 Agent 只提交提案；coordinator 在这里串行标记处理结果，避免直接改写共享项目记忆。",
+    projectMemoryQueueHint: "并行会话只提交提案；这里记录人工确认后的处理结果，避免直接改写共享项目记忆。",
     projectMemoryQueuePendingOnly: "仅待处理",
     projectMemoryQueueAll: "全部记录",
     projectMemoryQueueAgent: "Agent",
@@ -968,7 +968,7 @@ const COPY: Record<"zh" | "en", Copy> = {
     reviewQueue: "Priority review queue",
     reviewQueueHint: "Sorted by risk and runtime impact so behavior-changing or incomplete evidence appears first.",
     projectMemoryQueue: "Project memory merge queue",
-    projectMemoryQueueHint: "Parallel agents submit proposals only; the coordinator serially marks outcomes here so shared project memory is not overwritten directly.",
+    projectMemoryQueueHint: "Parallel sessions submit proposals only; this queue records human-confirmed outcomes so shared project memory is not overwritten directly.",
     projectMemoryQueuePendingOnly: "Pending only",
     projectMemoryQueueAll: "All records",
     projectMemoryQueueAgent: "Agent",
@@ -1639,6 +1639,20 @@ function projectMemoryProposalAgentLabel(proposal: AgentProjectMemoryUpdatePropo
   return [proposal.agentName, proposal.agentCode, proposal.agentId].map((value) => String(value || "").trim()).find(Boolean) ?? "-";
 }
 
+function projectMemoryProposalResolverLabel(resolvedBy: string | undefined, lang: "zh" | "en") {
+  const value = String(resolvedBy || "").trim();
+  if (!value) {
+    return "-";
+  }
+  if (value.toLowerCase() === "coordinator") {
+    return lang === "zh" ? "旧治理记录" : "legacy governance record";
+  }
+  if (value.toLowerCase() === "user") {
+    return lang === "zh" ? "操作者" : "operator";
+  }
+  return value;
+}
+
 function projectMemoryProposalResolutionFallback(copy: Copy, status: MemoryProposalResolveStatus) {
   if (status === "applied") {
     return copy.projectMemoryQueueApply;
@@ -2063,7 +2077,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           status,
-          resolvedBy: "coordinator",
+          resolvedBy: "user",
           resolutionNote,
         }),
       }),
@@ -3488,7 +3502,10 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
                       }
                     />
                   ) : (
-                    <span>{proposal.resolutionNote || `${copy.projectMemoryQueueResolved}: ${proposal.resolvedBy || "-"}`}</span>
+                    <span>
+                      {proposal.resolutionNote
+                        || `${copy.projectMemoryQueueResolved}: ${projectMemoryProposalResolverLabel(proposal.resolvedBy, lang)}`}
+                    </span>
                   )}
                 </div>
                 <div className={styles.projectMemoryProposalActions}>
