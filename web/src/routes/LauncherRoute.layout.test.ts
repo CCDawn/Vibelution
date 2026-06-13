@@ -214,6 +214,19 @@ describe("LauncherRoute layout contract", () => {
     expect(routeStylesSource).toContain("grid-column: auto");
   });
 
+  it("keeps the complete launcher surface reachable when the window is short", () => {
+    expect(routeStylesSource).toContain("grid-template-rows: auto");
+    expect(routeStylesSource).toContain("align-content: start");
+    expect(routeStylesSource).toContain("overflow-y: auto");
+    expect(routeStylesSource).toContain("overflow-x: hidden");
+    expect(routeStylesSource).toContain("overscroll-behavior: contain");
+    expect(routeStylesSource).toContain("scrollbar-gutter: stable");
+    expect(routeStylesSource).toContain("padding-bottom: max(12px, env(safe-area-inset-bottom))");
+    expect(routeStylesSource).toContain("padding: 8px 12px max(16px, env(safe-area-inset-bottom))");
+    expect(routeStylesSource).toContain("overflow: visible");
+    expect(routeStylesSource).not.toContain("grid-template-rows: auto auto auto auto auto minmax(0, 1fr)");
+  });
+
   it("keeps internal lifecycle fields out of the first-read labels", () => {
     expect(routeSource).toContain('matrix: "项目组成"');
     expect(routeSource).toContain('keyStatus: "关键状态"');
