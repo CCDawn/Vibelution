@@ -165,7 +165,38 @@ def list_chat_rooms(
     summaries = session_summaries if session_summaries is not None else _session_summary_index()
     if _repair_room_participants_in_state(state, session_summaries=summaries):
         _store().save(state)
-    rooms = [_room_to_api(item) for item in state.get("rooms") or [] if isinstance(item, dict)]
+    available_modes = list_chat_room_modes()
+    available_purposes = list_chat_room_purposes()
+    rooms = [
+        _room_to_api(
+            item,
+            available_modes=available_modes,
+            available_purposes=available_purposes,
+        )
+        for item in state.get("rooms") or []
+        if isinstance(item, dict)
+    ]
+    rooms.sort(key=lambda item: str(item.get("updatedAt") or ""), reverse=True)
+    return rooms
+
+
+def list_chat_rooms_for_conversation_index(
+    *,
+    session_summaries: dict[str, dict[str, Any]] | None = None,
+    repair_room_participants: bool = False,
+) -> list[dict[str, Any]]:
+    """Return compact room references suitable for `/conversations` payload."""
+
+    state = _store().load()
+    if repair_room_participants:
+        summaries = session_summaries if session_summaries is not None else _session_summary_index()
+        if _repair_room_participants_in_state(state, session_summaries=summaries):
+            _store().save(state)
+    rooms = [
+        _room_to_conversation_index_reference(item)
+        for item in list(state.get("rooms") or [])
+        if isinstance(item, dict)
+    ]
     rooms.sort(key=lambda item: str(item.get("updatedAt") or ""), reverse=True)
     return rooms
 
@@ -236,7 +267,11 @@ def get_chat_room_detail(room_id: str) -> dict[str, Any] | None:
         _store().save(state)
         _append_chat_room_detail_timing(phase_timings, "state.save_repair", stage_started_at)
     stage_started_at = _perf_counter()
-    detail = _room_to_api(room)
+    detail = _room_to_api(
+        room,
+        available_modes=list_chat_room_modes(),
+        available_purposes=list_chat_room_purposes(),
+    )
     _append_chat_room_detail_timing(phase_timings, "payload.build", stage_started_at)
     _record_chat_room_detail_loaded(
         str(detail.get("roomId") or room_id),
@@ -2808,7 +2843,6 @@ def _chat_state_participant_index_signature() -> tuple[Any, ...]:
             (
                 session_id,
                 _signature_text(raw, "title"),
-                _signature_text(raw, "task_title", "taskTitle"),
                 _signature_text(raw, "agent_id", "agentId"),
                 _signature_text(raw, "agent_missing_id", "agentMissingId"),
                 bool(raw.get("agentMissing")),
@@ -2816,14 +2850,7 @@ def _chat_state_participant_index_signature() -> tuple[Any, ...]:
                 bool(raw.get("agentDirectSessionMismatch")),
                 _signature_text(raw, "agentPrimaryDirectSessionId"),
                 _signature_text(raw, "workspace_path", "workspacePath"),
-                _signature_text(raw, "session_kind", "sessionKind"),
-                _signature_text(raw, "parent_session_id", "parentSessionId"),
-                _signature_text(raw, "root_session_id", "rootSessionId"),
-                _signature_sequence(raw, "child_session_ids", "childSessionIds"),
-                _signature_text(raw, "active_child_session_id", "activeChildSessionId"),
-                _signature_text(raw, "child_status", "childStatus"),
-                _signature_text(raw, "last_turn_status", "lastTurnStatus"),
-                isinstance(messages, list) and bool(messages),
+                bool(messages),
             )
         )
     return ("chat_state_participants_v1", str(path), tuple(rows))
@@ -3008,15 +3035,38 @@ def _safe_config(config: Any) -> dict[str, Any]:
     return dict(config) if isinstance(config, dict) else {}
 
 
-def _room_to_api(room: dict[str, Any]) -> dict[str, Any]:
+def _room_to_api(
+    room: dict[str, Any],
+    *,
+    available_modes: list[dict[str, str]] | None = None,
+    available_purposes: list[dict[str, str]] | None = None,
+) -> dict[str, Any]:
     payload = dict(room)
     payload["mode"] = str(payload.get("mode") or DEFAULT_MODE).strip() or DEFAULT_MODE
     payload["purpose"] = _normalize_purpose(payload.get("purpose") or DEFAULT_PURPOSE)
     payload["participants"] = [dict(item) for item in list(room.get("participants") or []) if isinstance(item, dict)]
     payload["rounds"] = [_round_to_api(item, payload) for item in list(room.get("rounds") or []) if isinstance(item, dict)]
-    payload["availableModes"] = list_chat_room_modes()
-    payload["availablePurposes"] = list_chat_room_purposes()
+    payload["availableModes"] = available_modes if available_modes is not None else list_chat_room_modes()
+    payload["availablePurposes"] = available_purposes if available_purposes is not None else list_chat_room_purposes()
     return payload
+
+
+def _room_to_conversation_index_reference(room: dict[str, Any]) -> dict[str, Any]:
+    rounds = [item for item in list(room.get("rounds") or []) if isinstance(item, dict)]
+    latest_round = rounds[-1] if rounds else {}
+    return {
+        "roomId": str(room.get("roomId") or "").strip(),
+        "title": str(room.get("title") or room.get("roomId") or "").strip(),
+        "status": str(room.get("status") or "").strip(),
+        "summary": str(latest_round.get("summary") or "").strip(),
+        "updatedAt": str(room.get("updatedAt") or "").strip(),
+        "mode": str(room.get("mode") or "").strip(),
+        "participants": [
+            dict(item)
+            for item in list(room.get("participants") or [])
+            if isinstance(item, dict)
+        ],
+    }
 
 
 def _round_to_api(round_payload: dict[str, Any], room_payload: dict[str, Any]) -> dict[str, Any]:

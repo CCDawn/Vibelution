@@ -278,6 +278,20 @@ def list_teams_compact(*, include_archived: bool = False) -> dict[str, Any]:
     }
 
 
+def list_archived_team_linked_chat_room_ids() -> set[str]:
+    """Return room IDs linked to archived teams without loading chat-room catalog data."""
+
+    with _TEAM_LOCK:
+        state = _load_index()
+        return {
+            str(item.get("linkedChatRoomId") or "").strip()
+            for item in list(state.get("teams") or [])
+            if isinstance(item, dict)
+            and str(item.get("status") or DEFAULT_TEAM_STATUS).strip().lower() == "archived"
+            and str(item.get("linkedChatRoomId") or "").strip()
+        }
+
+
 def list_team_graph_references(*, include_archived: bool = False) -> dict[str, Any]:
     """Return lightweight Team references for read-only graph surfaces."""
 

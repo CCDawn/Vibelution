@@ -2965,6 +2965,49 @@ def test_session_query_paginates_searches_and_filters(tmp_path, monkeypatch):
     assert {item["id"] for item in filtered_response.json()["items"]} == {"session-alpha", "session-gamma"}
 
 
+def test_session_query_default_page_skips_per_item_filtering(tmp_path, monkeypatch):
+    conversations = [
+        {
+            "conversation_id": "session-alpha",
+            "title": "Alpha",
+            "agent_id": "agent-a",
+            "updated_at": "2026-05-18T12:00:00",
+            "messages": [{"role": "user", "content": "alpha", "timestamp": "2026-05-18T12:00:00"}],
+        },
+        {
+            "conversation_id": "session-beta",
+            "title": "Beta",
+            "agent_id": "agent-b",
+            "updated_at": "2026-05-18T11:00:00",
+            "messages": [{"role": "user", "content": "beta", "timestamp": "2026-05-18T11:00:00"}],
+        },
+    ]
+    _seed_chat_state(tmp_path, conversations=conversations)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    agent_directory_service.save_state(
+        {
+            "agents": [
+                {"agentId": "agent-a", "displayName": "Agent Alpha", "status": "active", "directSessionId": "session-alpha"},
+                {"agentId": "agent-b", "displayName": "Agent Beta", "status": "active", "directSessionId": "session-beta"},
+            ]
+        }
+    )
+
+    def fail_match(*args, **kwargs):
+        raise AssertionError("default session query should slice the existing sorted index")
+
+    monkeypatch.setattr(session_service, "_session_query_matches", fail_match)
+
+    response = client.get("/api/sessions/query?limit=1")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert [item["id"] for item in payload["items"]] == ["session-alpha"]
+    assert payload["nextCursor"] == "1"
+    assert payload["totalEstimate"] == 2
+
+
 def test_supervised_agent_session_is_hidden_and_preserves_prompt_with_mental_override(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, conversations=[])
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
@@ -3208,6 +3251,39 @@ def test_session_detail_uses_targeted_conversation_read(tmp_path, monkeypatch):
         "_append_agent_directory_conversations",
         fail_append_agent_directory_conversations,
     )
+
+    response = client.get("/api/sessions/session-live")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["id"] == "session-live"
+    assert payload["messages"][0]["content"] == "目标消息"
+
+
+def test_session_detail_does_not_scan_full_conversation_list_for_known_id(tmp_path, monkeypatch):
+    _seed_chat_state(
+        tmp_path,
+        conversations=[
+            {
+                "conversation_id": "session-older",
+                "title": "旧会话",
+                "updated_at": "2026-05-18T10:00:00",
+                "messages": [{"role": "user", "content": "旧消息", "timestamp": "2026-05-18T10:00:00"}],
+            },
+            {
+                "conversation_id": "session-live",
+                "title": "真实会话",
+                "updated_at": "2026-05-18T12:00:00",
+                "messages": [{"role": "user", "content": "目标消息", "timestamp": "2026-05-18T12:00:00"}],
+            },
+        ],
+    )
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+
+    def fail_list_conversations(*args, **kwargs):
+        raise AssertionError("session detail should not load full conversations list")
+
+    monkeypatch.setattr(session_service, "_load_conversations", fail_list_conversations)
 
     response = client.get("/api/sessions/session-live")
 
