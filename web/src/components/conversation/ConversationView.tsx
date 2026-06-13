@@ -612,6 +612,8 @@ export function ConversationView({
   const [previewImage, setPreviewImage] = useState<PreviewImageState | null>(null);
   const [composerDragActive, setComposerDragActive] = useState(false);
   const [allMessagesVisible, setAllMessagesVisible] = useState(false);
+  const [computerUseSessionResults, setComputerUseSessionResults] = useState<Record<string, ComputerUseResult>>({});
+  const [computerUseSessionPending, setComputerUseSessionPending] = useState<Record<string, "confirm" | "cancel" | undefined>>({});
   const previousStreamingRef = useRef<Record<string, boolean>>({});
   const resolvedActionMode = composerActionMode ?? "send";
   const hasComposerAttachments = composerAttachments.length > 0;
@@ -1347,7 +1349,7 @@ export function ConversationView({
       if (!sessionId) {
         return null;
       }
-      return {
+      const parsedResult = {
         status: String(payload.status ?? ""),
         sessionId,
         summary: String(payload.summary ?? ""),
@@ -1356,6 +1358,7 @@ export function ConversationView({
         needsConfirmation: Boolean(payload.needsConfirmation),
         error: String(payload.error ?? ""),
       };
+      return computerUseSessionResults[sessionId] ?? parsedResult;
     } catch {
       return null;
     }
@@ -1369,18 +1372,53 @@ export function ConversationView({
     const previewLabel = lang === "zh" ? "预览沙盒截图" : "Preview sandbox screenshot";
     const confirmLabel = lang === "zh" ? "确认继续" : "Confirm";
     const cancelLabel = lang === "zh" ? "停止任务" : "Stop";
+    const pendingAction = computerUseSessionPending[result.sessionId];
     const imageAlt = result.summary || (lang === "zh" ? "Computer Use 沙盒截图" : "Computer Use sandbox screenshot");
     const confirmSession = () => {
-      void fetchJson(`/api/computer-use/sessions/${encodeURIComponent(result.sessionId)}/confirm`, {
+      setComputerUseSessionPending((current) => ({ ...current, [result.sessionId]: "confirm" }));
+      void fetchJson<ComputerUseResult>(`/api/computer-use/sessions/${encodeURIComponent(result.sessionId)}/confirm`, {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ confirmation: "approved_from_chat" }),
-      });
+      })
+        .then((payload) => {
+          setComputerUseSessionResults((current) => ({ ...current, [result.sessionId]: payload }));
+        })
+        .catch((error) => {
+          setComputerUseSessionResults((current) => ({
+            ...current,
+            [result.sessionId]: {
+              ...result,
+              error: error instanceof Error ? error.message : String(error),
+            },
+          }));
+        })
+        .finally(() => {
+          setComputerUseSessionPending((current) => ({ ...current, [result.sessionId]: undefined }));
+        });
     };
     const cancelSession = () => {
-      void fetchJson(`/api/computer-use/sessions/${encodeURIComponent(result.sessionId)}/cancel`, {
+      setComputerUseSessionPending((current) => ({ ...current, [result.sessionId]: "cancel" }));
+      void fetchJson<ComputerUseResult>(`/api/computer-use/sessions/${encodeURIComponent(result.sessionId)}/cancel`, {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ reason: "cancelled_from_chat" }),
-      });
+      })
+        .then((payload) => {
+          setComputerUseSessionResults((current) => ({ ...current, [result.sessionId]: payload }));
+        })
+        .catch((error) => {
+          setComputerUseSessionResults((current) => ({
+            ...current,
+            [result.sessionId]: {
+              ...result,
+              error: error instanceof Error ? error.message : String(error),
+            },
+          }));
+        })
+        .finally(() => {
+          setComputerUseSessionPending((current) => ({ ...current, [result.sessionId]: undefined }));
+        });
     };
     return (
       <section className={styles.computerUsePanel}>
@@ -1421,9 +1459,13 @@ export function ConversationView({
         {result.needsConfirmation || result.status === "running" ? (
           <div className={styles.computerUseActions}>
             {result.needsConfirmation ? (
-              <button type="button" onClick={confirmSession}>{confirmLabel}</button>
+              <button type="button" onClick={confirmSession} disabled={Boolean(pendingAction)}>
+                {pendingAction === "confirm" ? (lang === "zh" ? "确认中" : "Confirming") : confirmLabel}
+              </button>
             ) : null}
-            <button type="button" onClick={cancelSession}>{cancelLabel}</button>
+            <button type="button" onClick={cancelSession} disabled={Boolean(pendingAction)}>
+              {pendingAction === "cancel" ? (lang === "zh" ? "停止中" : "Stopping") : cancelLabel}
+            </button>
           </div>
         ) : null}
       </section>

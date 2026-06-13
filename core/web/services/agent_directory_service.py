@@ -195,6 +195,7 @@ AGENT_TERRITORY_WRITE_SCOPES = ("private",)
 AGENT_TERRITORY_READ_SCOPES = ("private", "shared")
 TOOL_POLICY_WORKSPACE_SCOPES = ("private", "shared")
 EXPLICIT_TOOL_POLICY_REQUIRED_TOOLS = {
+    "computer_use_session_tool",
     "computer_use_task_tool",
     "knowledge_governance_tasks_tool",
     "knowledge_ingestion_tool",

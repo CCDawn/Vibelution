@@ -342,6 +342,7 @@ class ToolExecutor:
         "agent_message_tool",
         "agent_tool_permission_request_tool",
         "image2_generate_tool",
+        "computer_use_session_tool",
         "computer_use_task_tool",
         "update_diagnosis_rules_tool",
         "update_self_model_tool",
@@ -371,6 +372,7 @@ class ToolExecutor:
             "python_lint_tool": 60,
             "spawn_agent_tool": 150,
             "image2_generate_tool": IMAGE2_TOOL_TIMEOUT_SECONDS,
+            "computer_use_session_tool": 180,
             "computer_use_task_tool": 180,
         }
         self._retryable_tools = {"grep_search_tool"}
