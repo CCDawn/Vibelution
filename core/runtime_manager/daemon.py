@@ -1368,7 +1368,7 @@ def _select_daemon_python_runtime(python_executable: str) -> dict[str, Any]:
         "consoleWindowSuppressed": bool(creation_flag_names),
         "consoleSuppressionMode": "creation_flags" if creation_flag_names else "native",
         "consoleFallbackReason": "empty_python_executable",
-        "pythonLaunchPolicy": "source_python_with_hidden_creation_flags",
+        "pythonLaunchPolicy": "pythonw_no_console_background_service",
         "creationFlagNames": creation_flag_names,
     }
     if not raw:
@@ -1382,34 +1382,32 @@ def _select_daemon_python_runtime(python_executable: str) -> dict[str, Any]:
         result["pythonLaunchPolicy"] = "source_python_native_process"
         return result
     if candidate.name.lower() == "pythonw.exe":
-        sibling = candidate.with_name("python.exe")
-        if sibling.exists():
-            result["pythonExecutable"] = str(sibling.resolve())
-            result["noConsolePythonExecutable"] = str(candidate.resolve()) if candidate.exists() else raw
-            result["consoleFallbackReason"] = ""
-            result["pythonLaunchPolicy"] = "pythonw_source_replaced_with_python_exe"
-            return result
         result["pythonExecutable"] = str(candidate.resolve()) if candidate.exists() else raw
         result["noConsolePythonExecutable"] = str(candidate.resolve()) if candidate.exists() else raw
-        result["consoleFallbackReason"] = "python_exe_sibling_missing_for_pythonw_source"
-        result["pythonLaunchPolicy"] = "pythonw_fallback_when_python_exe_missing"
+        result["consoleFallbackReason"] = "" if candidate.exists() else "pythonw_executable_missing"
         return result
     sibling = candidate.with_name("pythonw.exe")
     if sibling.exists():
-        result["noConsolePythonExecutable"] = str(sibling.resolve())
+        resolved_sibling = str(sibling.resolve())
+        result["pythonExecutable"] = resolved_sibling
+        result["noConsolePythonExecutable"] = resolved_sibling
+        result["consoleFallbackReason"] = ""
+        return result
     if candidate.name.lower() == "python.exe":
         result["pythonExecutable"] = str(candidate.resolve()) if candidate.exists() else raw
-        result["consoleFallbackReason"] = "" if candidate.exists() else "python_executable_missing"
+        result["consoleFallbackReason"] = "pythonw_missing" if candidate.exists() else "python_executable_missing"
+        result["pythonLaunchPolicy"] = "source_python_hidden_creation_flags_fallback"
         return result
     sibling = candidate.with_name("python.exe")
     if sibling.exists():
         result["pythonExecutable"] = str(sibling.resolve())
-        result["consoleFallbackReason"] = ""
-        result["pythonLaunchPolicy"] = "sibling_python_exe_with_hidden_creation_flags"
+        result["consoleFallbackReason"] = "pythonw_missing"
+        result["pythonLaunchPolicy"] = "sibling_python_exe_hidden_creation_flags_fallback"
         return result
     if candidate.exists():
         result["pythonExecutable"] = str(candidate.resolve())
-        result["consoleFallbackReason"] = ""
+        result["consoleFallbackReason"] = "pythonw_missing"
+        result["pythonLaunchPolicy"] = "source_python_hidden_creation_flags_fallback"
         return result
     result["consoleFallbackReason"] = "python_executable_missing"
     result["pythonLaunchPolicy"] = "missing_python_executable"

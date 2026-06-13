@@ -451,14 +451,14 @@ function Resolve-PythonBackgroundLaunchCommand {
 
     $sourcePythonPath = [string](Get-ObjectPropertyValue -Object $PythonRuntime -Name "FilePath" -Default "")
     $noConsolePythonPath = [string](Get-ObjectPropertyValue -Object $PythonRuntime -Name "NoConsoleFilePath" -Default "")
-    $commandPath = $sourcePythonPath
-    $launchPolicy = "source_python_with_hidden_process_flags"
+    $commandPath = $noConsolePythonPath
+    $launchPolicy = "pythonw_no_console_background_service"
     $fallbackReason = ""
 
-    if (-not $commandPath -and $noConsolePythonPath) {
-        $commandPath = $noConsolePythonPath
-        $launchPolicy = "pythonw_fallback_when_source_python_missing"
-        $fallbackReason = "source_python_missing"
+    if (-not $commandPath -and $sourcePythonPath) {
+        $commandPath = $sourcePythonPath
+        $launchPolicy = "source_python_hidden_process_fallback"
+        $fallbackReason = "pythonw_missing"
     }
     if (-not $commandPath) {
         throw "Python runtime does not include a usable executable path."

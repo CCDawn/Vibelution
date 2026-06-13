@@ -2706,6 +2706,15 @@ function Invoke-HiddenNativeCommand {
 }
 function Set-LauncherWindowTitle {}
 
+$noConsoleLaunch = Resolve-PythonBackgroundLaunchCommand -PythonRuntime ([pscustomobject]@{ FilePath = "python-test"; NoConsoleFilePath = "pythonw-test"; PrefixArgs = @() })
+if ($noConsoleLaunch.CommandPath -ne "pythonw-test") { throw "Background launch command did not prefer pythonw." }
+if ($noConsoleLaunch.LaunchPolicy -ne "pythonw_no_console_background_service") { throw "Background launch policy did not record pythonw no-console usage." }
+if ($noConsoleLaunch.FallbackReason -ne "") { throw "Background launch reported a fallback despite pythonw availability." }
+$fallbackLaunch = Resolve-PythonBackgroundLaunchCommand -PythonRuntime ([pscustomobject]@{ FilePath = "python-test"; NoConsoleFilePath = ""; PrefixArgs = @() })
+if ($fallbackLaunch.CommandPath -ne "python-test") { throw "Background launch fallback did not use source python." }
+if ($fallbackLaunch.LaunchPolicy -ne "source_python_hidden_process_fallback") { throw "Background launch fallback policy was not recorded." }
+if ($fallbackLaunch.FallbackReason -ne "pythonw_missing") { throw "Background launch fallback reason did not identify missing pythonw." }
+
 Invoke-RuntimeManagerClient -Mode "command" -CommandType "open_workbench" -Reason "launcher_start" -ForwardNoBrowser
 Invoke-RuntimeManagerClient -Mode "command" -CommandType "close_workbench" -Reason "launcher_stop"
 Invoke-RuntimeManagerClient -Mode "command" -CommandType "restart_workbench" -Reason "launcher_restart"
@@ -2716,10 +2725,10 @@ $closeArgs = @($script:calls[1].argumentList)
 $restartArgs = @($script:calls[2].argumentList)
 $statusArgs = @($script:calls[3].argumentList)
 
-if ($script:calls[0].commandPath -ne "python-test") { throw "open_workbench did not use the source Python runtime." }
-if ($script:calls[1].commandPath -ne "python-test") { throw "close_workbench did not use the source Python runtime." }
-if ($script:calls[2].commandPath -ne "python-test") { throw "restart_workbench did not use the source Python runtime." }
-if ($script:calls[3].commandPath -ne "python-status") { throw "status did not use the read-only source Python runtime." }
+if ($script:calls[0].commandPath -ne "pythonw-test") { throw "open_workbench did not use the no-console Python runtime." }
+if ($script:calls[1].commandPath -ne "pythonw-test") { throw "close_workbench did not use the no-console Python runtime." }
+if ($script:calls[2].commandPath -ne "pythonw-test") { throw "restart_workbench did not use the no-console Python runtime." }
+if ($script:calls[3].commandPath -ne "pythonw-status") { throw "status did not use the read-only no-console Python runtime." }
 if ($openArgs -notcontains "--no-browser") { throw "open_workbench did not forward --no-browser." }
 if ($openArgs -contains "--stop-manager") { throw "open_workbench forwarded --stop-manager unexpectedly." }
 if ($closeArgs -contains "--stop-manager") { throw "close_workbench should stop the workbench without stopping the Launcher control manager." }
