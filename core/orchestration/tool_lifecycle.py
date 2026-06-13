@@ -51,6 +51,10 @@ class ToolLifecycleBridge:
         "code_analysis_tool",
         "codebase_analyzer_tool",
         "conversation_log_inspect_tool",
+        "history_search_tool",
+        "history_fetch_tool",
+        "history_timeline_tool",
+        "history_checkpoint_tool",
         "search_memory_tool",
         "key_info_extractor_tool",
     }

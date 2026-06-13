@@ -54,6 +54,10 @@ DEFAULT_SESSION_AGENT_ALLOWED_TOOLS = (
     "image2_generate_tool",
     # Conversation diagnostics and bounded context are core Agent capabilities.
     "conversation_log_inspect_tool",
+    "history_search_tool",
+    "history_fetch_tool",
+    "history_timeline_tool",
+    "history_checkpoint_tool",
     "create_child_session_tool",
     "list_child_sessions_tool",
     "session_reference_query_tool",
@@ -74,6 +78,8 @@ DEFAULT_SESSION_AGENT_PREFERRED_TOOLS = (
     "list_child_sessions_tool",
     "session_reference_query_tool",
     "conversation_log_inspect_tool",
+    "history_search_tool",
+    "history_fetch_tool",
     "get_core_context_tool",
 )
 AGENT_LLM_BINDING_SLOTS = AGENT_LLM_SLOTS
