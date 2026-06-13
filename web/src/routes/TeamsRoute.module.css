@@ -1262,6 +1262,22 @@
     color-mix(in srgb, var(--surface-panel-strong) 88%, transparent) !important;
 }
 
+.sourceCollectionScreeningButton {
+  border-color: color-mix(in srgb, var(--accent-cool) 42%, var(--border-strong)) !important;
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--accent-cool) 14%, transparent), transparent 82%),
+    color-mix(in srgb, var(--surface-panel-strong) 88%, transparent) !important;
+}
+
+.sourceCollectionCommandActions .sourceCollectionScreeningButton strong {
+  flex: 0 0 auto;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent-cool) 12%, var(--surface-panel-strong));
+  color: color-mix(in srgb, var(--accent-cool) 72%, var(--fg-primary));
+  font-size: 0.66rem;
+}
+
 .workflowSuccess,
 .workflowError {
   display: grid;
@@ -2556,6 +2572,12 @@
   padding: 8px;
 }
 
+.workflowSourceCollectionActionSummary > div:first-child {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
 .workflowSourceCollectionActionSummary strong {
   color: var(--fg-primary);
   font-size: 0.78rem;
@@ -2568,25 +2590,43 @@
   line-height: 1.45;
 }
 
-.workflowSourceCollectionPrimaryButton {
+.workflowSourceCollectionActionButtons {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  min-width: 0;
+}
+
+.workflowSourceCollectionPrimaryButton,
+.workflowSourceCollectionSecondaryButton {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
   min-height: 30px;
   width: fit-content;
-  max-width: 190px;
+  max-width: 210px;
   padding: 0 12px;
-  border: 1px solid color-mix(in srgb, var(--accent-primary) 42%, var(--border-strong));
   border-radius: var(--radius-control);
-  background: color-mix(in srgb, var(--accent-primary) 14%, var(--surface-panel-strong));
   color: var(--fg-primary);
   font-size: 0.74rem;
   font-weight: 780;
   white-space: nowrap;
 }
 
-.workflowSourceCollectionPrimaryButton:disabled {
+.workflowSourceCollectionPrimaryButton {
+  border: 1px solid color-mix(in srgb, var(--accent-primary) 42%, var(--border-strong));
+  background: color-mix(in srgb, var(--accent-primary) 14%, var(--surface-panel-strong));
+}
+
+.workflowSourceCollectionSecondaryButton {
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 42%, var(--border-strong));
+  background: color-mix(in srgb, var(--accent-cool) 12%, var(--surface-panel-strong));
+}
+
+.workflowSourceCollectionPrimaryButton:disabled,
+.workflowSourceCollectionSecondaryButton:disabled {
   cursor: not-allowed;
   opacity: 0.55;
 }
@@ -3739,8 +3779,10 @@
     grid-template-columns: 1fr;
   }
 
+  .workflowSourceCollectionActionButtons,
   .workflowSourceCollectionPrimaryButton {
     justify-self: start;
+    justify-content: flex-start;
   }
 
   .sourceCollectionCommandStats {

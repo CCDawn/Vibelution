@@ -3189,7 +3189,7 @@ export function TeamsRoute({
         return;
       }
       if (sourceManifestCandidates.length > sourceCollectionApprovedCount) {
-        openSourceCollectionStorageTarget("candidate_store");
+        openSourceCollectionScreeningPanel();
         return;
       }
       openSourceCollectionStorageTarget("run_directory");
@@ -3217,16 +3217,29 @@ export function TeamsRoute({
         <div className={styles.workflowSourceCollectionActionSummary}>
           <div>
             <strong>{sourceCollectionPrimaryActionTitle}</strong>
+            <span>{sourceCollectionScreeningStatusText}</span>
           </div>
-          <button
-            type="button"
-            className={styles.workflowSourceCollectionPrimaryButton}
-            disabled={sourceCollectionPrimaryDisabled}
-            onClick={runSourceCollectionPrimaryAction}
-          >
-            {selectedSourceCollectionRun && sourceCollectionOpenAssignmentCount > 0 ? <Search size={13} /> : <Play size={13} />}
-            {sourceCollectionPrimaryButtonLabel}
-          </button>
+          <div className={styles.workflowSourceCollectionActionButtons}>
+            <button
+              type="button"
+              className={styles.workflowSourceCollectionPrimaryButton}
+              disabled={sourceCollectionPrimaryDisabled}
+              onClick={runSourceCollectionPrimaryAction}
+            >
+              {selectedSourceCollectionRun && sourceCollectionOpenAssignmentCount > 0 ? <Search size={13} /> : <Play size={13} />}
+              {sourceCollectionPrimaryButtonLabel}
+            </button>
+            <button
+              type="button"
+              className={styles.workflowSourceCollectionSecondaryButton}
+              disabled={sourceCollectionScreeningDisabled}
+              onClick={openSourceCollectionScreeningPanel}
+              title={sourceCollectionScreeningStatusText}
+            >
+              <CheckCircle2 size={13} />
+              {sourceCollectionScreeningButtonText}
+            </button>
+          </div>
         </div>
         <details className={styles.workflowSourceCollectionDetails} open={!selectedSourceCollectionRun}>
           <summary>
@@ -3998,7 +4011,7 @@ export function TeamsRoute({
       : sourceCollectionOpenAssignmentCount > 0
         ? (lang === "zh" ? "搜索下一批" : "Search next batch")
         : sourceManifestCandidates.length > sourceCollectionApprovedCount
-          ? (lang === "zh" ? "打开候选仓库" : "Open candidate store")
+          ? (lang === "zh" ? "开始资料筛选" : "Start screening")
           : (lang === "zh" ? "查看搜集结果" : "Review collection results");
   const sourceCollectionTraceMessages = useMemo<SourceCollectionTraceMessage[]>(() => {
     const messages: SourceCollectionTraceMessage[] = [];
@@ -4259,10 +4272,35 @@ export function TeamsRoute({
   );
   const sourceQualityAssessedCount = teamWorkflowSourceQualityStatus?.summary.assessedSourceCandidateCount ?? 0;
   const sourceQualityCandidateCount = teamWorkflowSourceQualityStatus?.summary.sourceCandidateCount ?? sourceManifestCandidates.length;
+  const sourceQualityUnassessedCount =
+    teamWorkflowSourceQualityStatus?.summary.unassessedSourceCandidateCount
+    ?? Math.max(0, sourceQualityCandidateCount - sourceQualityAssessedCount);
   const candidateGraphNodeCount = teamWorkflowCandidateGraph?.summary.nodeCount ?? 0;
   const candidateGraphEdgeCount = teamWorkflowCandidateGraph?.summary.edgeCount ?? 0;
   const knowledgePendingReviewCount = teamWorkflowKnowledgeIngestionStatus?.summary.pendingKnowledgeReviewCandidateCount ?? 0;
   const formalKnowledgeItemCount = teamWorkflowKnowledgeIngestionStatus?.summary.formalKnowledgeItemCount ?? 0;
+  const sourceCollectionScreeningDisabled = !selectedTeam?.teamId || sourceQualityCandidateCount <= 0;
+  const sourceCollectionScreeningButtonText = selectedTeamAssessSourceQualityPending
+    ? (lang === "zh" ? "筛选中" : "Screening")
+    : sourceQualityUnassessedCount > 0
+      ? (lang === "zh" ? "开始资料筛选" : "Start screening")
+      : sourceQualityCandidateCount > 0
+        ? (lang === "zh" ? "查看筛选结果" : "View screening")
+        : (lang === "zh" ? "资料筛选" : "Screening");
+  const sourceCollectionScreeningStatusText = selectedTeamAssessSourceQualityPending
+    ? (lang === "zh" ? "进行中" : "running")
+    : sourceQualityUnassessedCount > 0
+      ? `${sourceQualityUnassessedCount} ${lang === "zh" ? "待筛" : "pending"}`
+      : sourceQualityCandidateCount > 0
+        ? (lang === "zh" ? "已筛选" : "done")
+        : (lang === "zh" ? "暂无候选" : "no candidates");
+  const openSourceCollectionScreeningPanel = () => {
+    if (!selectedTeam?.teamId || sourceCollectionScreeningDisabled) {
+      return;
+    }
+    setResearchWorkspaceView("candidates");
+    navigate(`/teams?team=${encodeURIComponent(selectedTeam.teamId)}&researchView=candidates`);
+  };
   const sourceCollectionConsoleState: SourceCollectionStepState = sourceCollectionOperationFailed
     ? "failed"
     : sourceCollectionOperationActive
@@ -4432,7 +4470,7 @@ export function TeamsRoute({
       return;
     }
     if (sourceManifestCandidates.length > sourceCollectionApprovedCount) {
-      openSourceCollectionStorageTarget("candidate_store");
+      openSourceCollectionScreeningPanel();
       return;
     }
     openSourceCollectionStorageTarget("run_directory");
@@ -4444,7 +4482,7 @@ export function TeamsRoute({
       : sourceCollectionOpenAssignmentCount > 0
         ? (lang === "zh" ? "搜索下一批" : "Search next batch")
         : sourceManifestCandidates.length > sourceCollectionApprovedCount
-          ? (lang === "zh" ? "打开候选仓库" : "Open candidates")
+          ? sourceCollectionScreeningButtonText
           : (lang === "zh" ? "打开结果目录" : "Open results");
   const sourceCollectionHeaderPrimaryDisabled = !selectedSourceCollectionRun
     ? selectedTeamStartResearchStagePending || !researchStageCanLaunch
@@ -4530,6 +4568,17 @@ export function TeamsRoute({
                 >
                   {selectedSourceCollectionRun && sourceCollectionOpenAssignmentCount > 0 ? <Search size={14} /> : <Play size={14} />}
                   {sourceCollectionHeaderPrimaryLabel}
+                </button>
+                <button
+                  type="button"
+                  className={styles.sourceCollectionScreeningButton}
+                  disabled={sourceCollectionScreeningDisabled}
+                  onClick={openSourceCollectionScreeningPanel}
+                  title={sourceCollectionScreeningStatusText}
+                >
+                  <CheckCircle2 size={14} />
+                  <span>{sourceCollectionScreeningButtonText}</span>
+                  <strong>{sourceCollectionScreeningStatusText}</strong>
                 </button>
                 <button
                   type="button"
