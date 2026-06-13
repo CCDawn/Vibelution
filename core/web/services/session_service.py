@@ -285,7 +285,25 @@ def _session_list_source_signature() -> tuple[tuple[str, int, int], tuple[str, i
 
 
 def _copy_session_list_snapshot(sessions: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [copy.deepcopy(item) for item in sessions if isinstance(item, dict)]
+    return [_copy_session_summary_snapshot(item) for item in sessions if isinstance(item, dict)]
+
+
+def _copy_session_summary_snapshot(item: dict[str, Any]) -> dict[str, Any]:
+    snapshot = dict(item)
+    child_session_ids = snapshot.get("childSessionIds")
+    if isinstance(child_session_ids, list):
+        snapshot["childSessionIds"] = list(child_session_ids)
+    result_card = snapshot.get("resultCard")
+    if isinstance(result_card, dict):
+        copied_card = dict(result_card)
+        changed_files = copied_card.get("changedFiles")
+        if isinstance(changed_files, list):
+            copied_card["changedFiles"] = list(changed_files)
+        validations = copied_card.get("validations")
+        if isinstance(validations, list):
+            copied_card["validations"] = list(validations)
+        snapshot["resultCard"] = copied_card
+    return snapshot
 
 
 def _get_session_list_cache(
@@ -1911,17 +1929,21 @@ def query_sessions(
     normalized_state = str(state or "").strip().lower()
     normalized_sort = _normalize_session_query_sort(sort)
 
-    filtered = [
-        item
-        for item in sessions
-        if _session_query_matches(
-            item,
-            query=normalized_query,
-            agent_id=normalized_agent_id,
-            session_kind=normalized_session_kind,
-            state=normalized_state,
-        )
-    ]
+    has_filters = bool(normalized_query or normalized_agent_id or normalized_session_kind or normalized_state)
+    if not has_filters and normalized_sort == "updatedAt_desc":
+        filtered = sessions
+    else:
+        filtered = [
+            item
+            for item in sessions
+            if _session_query_matches(
+                item,
+                query=normalized_query,
+                agent_id=normalized_agent_id,
+                session_kind=normalized_session_kind,
+                state=normalized_state,
+            )
+        ]
     if normalized_sort != "updatedAt_desc":
         filtered.sort(
             key=_session_query_sort_key(normalized_sort),
@@ -2024,15 +2046,24 @@ def _session_query_matches(
 def get_session_detail(session_id: str) -> dict | None:
     """Return a session detail payload by persisted conversation id."""
 
-    _ensure_agent_directory_conversation_materialized(session_id, source="get_session_detail")
-    target = _load_conversation_detail_target(session_id)
+    normalized_session_id = str(session_id or "").strip()
+    if not normalized_session_id:
+        return None
+
+    _ensure_agent_directory_conversation_materialized(normalized_session_id, source="get_session_detail")
+    agent_by_id = _agent_lookup_for_conversations()
+    payload = load_chat_state(PROJECT_ROOT)
+    target = _load_conversation_detail_target(
+        normalized_session_id,
+        payload=payload,
+        repair=True,
+        agent_by_id=agent_by_id,
+    )
     if target is not None:
         return _build_session_detail(target)
-    _, conversations = _load_conversations()
-    conversations = _append_agent_directory_conversations(conversations)
-    for item in conversations:
-        if item["id"] == session_id:
-            return _build_session_detail(item)
+    fallback = _agent_directory_session_stub_for_id(normalized_session_id, agent_by_id=agent_by_id)
+    if fallback is not None:
+        return _build_session_detail(fallback)
     return None
 
 
@@ -4258,15 +4289,14 @@ def _load_conversations(
 def _load_conversation_detail_target(
     session_id: str,
     *,
+    payload: dict[str, Any] | None = None,
     repair: bool = True,
     agent_by_id: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any] | None:
     normalized_session_id = str(session_id or "").strip()
     if not normalized_session_id:
         return None
-    payload = load_chat_state(PROJECT_ROOT)
-    if repair:
-        payload = _repair_stale_running_conversations(payload)
+    payload = payload if isinstance(payload, dict) else load_chat_state(PROJECT_ROOT)
     conversations = payload.get("conversations")
     if not isinstance(conversations, list):
         return None
@@ -4279,6 +4309,7 @@ def _load_conversation_detail_target(
         if raw_session_id != normalized_session_id:
             continue
         if repair:
+            changed = _repair_stale_running_conversation(raw) or changed
             changed = _ensure_conversation_workspace_metadata(raw) or changed
             changed = _ensure_conversation_agent_metadata(raw, agent_by_id=agent_by_id) or changed
         conversation = _normalize_conversation(raw, agent_by_id=agent_by_id, ensure_workspace=repair)
@@ -4486,6 +4517,26 @@ def _append_agent_directory_conversations(
         by_session_id[session_id] = conversation
         _record_agent_directory_conversation_index_event(agent, session_id=session_id)
     return result
+
+
+def _agent_directory_session_stub_for_id(
+    session_id: str,
+    *,
+    agent_by_id: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, Any] | None:
+    normalized_session_id = str(session_id or "").strip()
+    if not normalized_session_id:
+        return None
+    agents = list((agent_by_id if agent_by_id is not None else _agent_lookup_for_conversations()).values())
+    for agent in agents:
+        if not isinstance(agent, dict):
+            continue
+        if str(agent.get("status") or "active").strip().lower() == "archived":
+            continue
+        if str(agent.get("directSessionId") or "").strip() != normalized_session_id:
+            continue
+        return _agent_directory_conversation_record(agent, session_id=normalized_session_id)
+    return None
 
 
 def _ensure_agent_directory_conversation_materialized(session_id: str, *, source: str) -> bool:
@@ -4815,49 +4866,50 @@ def _repair_stale_running_conversations(payload: dict[str, Any]) -> dict[str, An
         return payload
 
     changed = False
-    now = ""
     for conversation in conversations:
         if not isinstance(conversation, dict):
             continue
-        conversation_id = str(conversation.get("conversation_id") or "").strip()
-        persisted_status = str(conversation.get("last_turn_status") or "").strip().lower()
-        if persisted_status not in {"queued", "running", "stopping"}:
-            continue
-        if conversation_id and _is_session_running(conversation_id):
-            continue
-        if not now:
-            now = _now_timestamp()
-        recovered_at = now or _now_timestamp()
-        summary = text_for(
-            get_web_language(),
-            zh="上一轮运行已被中断，当前会话已恢复为可继续状态。",
-            en="The previous turn was interrupted. This session is ready to continue.",
-        )
-        conversation["messages"] = normalize_chat_messages(conversation.get("messages") or [])
-        conversation["runtime_notices"] = _append_session_runtime_notice(
-            conversation.get("runtime_notices") or conversation.get("runtimeNotices") or [],
-            {
-                "kind": "turn_recovered",
-                "level": "warning",
-                "message": summary,
-                "timestamp": recovered_at,
-                "source": "conversation.turn_recovered",
-                "turnId": _active_chat_turn_work_run_id_for_session(conversation_id),
-                "previousStatus": persisted_status,
-            },
-        )
-        conversation["last_turn_status"] = "ready"
-        conversation["updated_at"] = recovered_at
-        _release_stale_chat_turn_work_run(
-            session_id=conversation_id,
-            finished_at=recovered_at,
-            summary=summary,
-        )
-        changed = True
+        changed |= _repair_stale_running_conversation(conversation)
     if changed:
-        payload["updated_at"] = now or _now_timestamp()
+        payload["updated_at"] = _now_timestamp()
         save_chat_state(PROJECT_ROOT, payload)
     return payload
+
+
+def _repair_stale_running_conversation(conversation: dict[str, Any]) -> bool:
+    conversation_id = str(conversation.get("conversation_id") or "").strip()
+    persisted_status = str(conversation.get("last_turn_status") or "").strip().lower()
+    if persisted_status not in {"queued", "running", "stopping"}:
+        return False
+    if conversation_id and _is_session_running(conversation_id):
+        return False
+    recovered_at = _now_timestamp()
+    summary = text_for(
+        get_web_language(),
+        zh="上一轮运行已被中断，当前会话已恢复为可继续状态。",
+        en="The previous turn was interrupted. This session is ready to continue.",
+    )
+    conversation["messages"] = normalize_chat_messages(conversation.get("messages") or [])
+    conversation["runtime_notices"] = _append_session_runtime_notice(
+        conversation.get("runtime_notices") or conversation.get("runtimeNotices") or [],
+        {
+            "kind": "turn_recovered",
+            "level": "warning",
+            "message": summary,
+            "timestamp": recovered_at,
+            "source": "conversation.turn_recovered",
+            "turnId": _active_chat_turn_work_run_id_for_session(conversation_id),
+            "previousStatus": persisted_status,
+        },
+    )
+    conversation["last_turn_status"] = "ready"
+    conversation["updated_at"] = recovered_at
+    _release_stale_chat_turn_work_run(
+        session_id=conversation_id,
+        finished_at=recovered_at,
+        summary=summary,
+    )
+    return True
 
 
 def _active_chat_turn_work_run_id_for_session(session_id: str) -> str:
@@ -8700,6 +8752,7 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                 )
                 skill_runtime_context_included = False
                 active_skill_context_included = False
+                dynamic_runtime_context_included = False
                 seed_started_at = _perf_counter()
                 history_seed_ms = 0
                 static_runtime_context_seed_ms = 0
@@ -8718,11 +8771,24 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                         static_runtime_context_seed(static_runtime_context_block)
                         host_seeded_agent_context = True
                     elif callable(runtime_context_seed):
-                        runtime_context_seed(static_runtime_context_block)
+                        legacy_context_block = (
+                            runtime_context_block
+                            if dynamic_runtime_context_block and not callable(volatile_runtime_context_seed)
+                            else static_runtime_context_block
+                        )
+                        runtime_context_seed(legacy_context_block)
                         host_seeded_agent_context = True
+                        dynamic_runtime_context_included = legacy_context_block == runtime_context_block and bool(
+                            dynamic_runtime_context_block
+                        )
                     static_runtime_context_seed_ms = _elapsed_ms(static_stage_started_at)
                 if host_seeded_agent_context and callable(host_context_marker):
                     host_context_marker()
+                if dynamic_runtime_context_block and callable(volatile_runtime_context_seed):
+                    runtime_stage_started_at = _perf_counter()
+                    volatile_runtime_context_seed(dynamic_runtime_context_block)
+                    dynamic_runtime_context_included = True
+                    runtime_context_seed_ms = _elapsed_ms(runtime_stage_started_at)
                 if skill_runtime_context_block:
                     skill_stage_started_at = _perf_counter()
                     if callable(volatile_runtime_context_seed):
@@ -8770,9 +8836,10 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                         "seededHistoryMessageCount": len(history_messages),
                         "agentRuntimeContextIncluded": bool(static_runtime_context_block),
                         "staticRuntimeContextIncluded": bool(static_runtime_context_block),
-                        "dynamicRuntimeContextIncluded": False,
+                        "dynamicRuntimeContextIncluded": dynamic_runtime_context_included,
                         "dynamicRuntimeContextAvailable": bool(dynamic_runtime_context_block),
-                        "dynamicRuntimeContextOmittedFromModelInput": bool(dynamic_runtime_context_block),
+                        "dynamicRuntimeContextOmittedFromModelInput": bool(dynamic_runtime_context_block)
+                        and not dynamic_runtime_context_included,
                         "runtimeContextSegmentCount": len(runtime_context_segments),
                         "agentRuntimeContextSkipped": bool(lightweight_chat_payload),
                         "guidanceContextIncluded": False,

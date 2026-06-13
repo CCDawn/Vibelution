@@ -18,6 +18,7 @@ from core.web.services import (
     conversation_service,
     prompt_template_service,
     research_organization_service,
+    team_service,
     self_evolution_control_service,
     session_service,
     supervised_agent_service,
@@ -330,6 +331,42 @@ def test_session_list_uses_short_snapshot_cache_and_invalidates_on_update(tmp_pa
     assert [item for item in events if item[0][2] == "session.list.loaded"][-1][1]["fields"]["cacheHit"] is False
 
 
+def test_session_list_cache_returns_isolated_summary_snapshots(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    created = session_service.create_chat_session(title="Cached Parent")
+    state = load_chat_state(tmp_path)
+    conversation = next(item for item in state["conversations"] if item["conversation_id"] == created["id"])
+    conversation["child_session_ids"] = ["session-child-a"]
+    conversation["result_card"] = {
+        "status": "completed",
+        "title": "Child result",
+        "summary": "Result summary",
+        "changedFiles": ["core/a.py"],
+        "validations": ["pytest ok"],
+        "updatedAt": "2026-05-18T12:00:00",
+    }
+    save_chat_state(tmp_path, state)
+    session_service._invalidate_session_list_cache()
+
+    first = session_service.list_sessions()
+    first_item = next(item for item in first if item["id"] == created["id"])
+    first_item["childSessionIds"].append("polluted-child")
+    first_item["resultCard"]["changedFiles"].append("polluted-file.py")
+    first_item["resultCard"]["validations"].append("polluted validation")
+
+    second = session_service.list_sessions()
+    second_item = next(item for item in second if item["id"] == created["id"])
+    second_item["childSessionIds"].append("second-pollution")
+    second_item["resultCard"]["changedFiles"].append("second-pollution.py")
+
+    third = session_service.list_sessions()
+    third_item = next(item for item in third if item["id"] == created["id"])
+
+    assert third_item["childSessionIds"] == ["session-child-a"]
+    assert third_item["resultCard"]["changedFiles"] == ["core/a.py"]
+    assert third_item["resultCard"]["validations"] == ["pytest ok"]
+
+
 def test_session_title_update_uses_lightweight_path(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     created = session_service.create_chat_session(title="Before Rename")
@@ -445,6 +482,32 @@ def test_conversation_index_returns_direct_agents_and_group_rooms(tmp_path, monk
     assert group["roomId"] == room["roomId"]
     assert group["participantCount"] == 2
     assert list_session_calls == 1
+
+
+def test_conversation_index_filters_archived_team_linked_rooms(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _seed_chat_sessions(tmp_path)
+    room_keep = chat_room_service.create_chat_room(
+        title="保留群聊",
+        participant_session_ids=["session-alpha", "session-beta"],
+    )
+    room_drop = chat_room_service.create_chat_room(
+        title="归档群聊",
+        participant_session_ids=["session-alpha", "session-beta"],
+    )
+
+    monkeypatch.setattr(
+        team_service,
+        "list_archived_team_linked_chat_room_ids",
+        lambda: {room_drop["roomId"]},
+    )
+
+    conversations = conversation_service.list_conversations()
+    group_rooms = [item for item in conversations if item["type"] == "group_room"]
+    room_ids = {item["roomId"] for item in group_rooms}
+
+    assert room_keep["roomId"] in room_ids
+    assert room_drop["roomId"] not in room_ids
 
 
 def test_create_chat_room_from_existing_agent_ids_enters_conversation_index(tmp_path, monkeypatch):
