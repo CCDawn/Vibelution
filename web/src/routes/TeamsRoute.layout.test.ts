@@ -310,7 +310,6 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("sourceCollectionTraceMessages");
     expect(routeSource).toContain("renderSourceCollectionConversation");
     expect(routeSource).toContain("renderSourceCollectionControlsPanel");
-    expect(routeSource).toContain("renderSourceCollectionRunNotice");
     expect(routeSource).toContain("知识搜集工作台");
     expect(routeSource).toContain("搜集对话流");
     expect(routeSource).toContain("KV 缓存门禁已写入本轮搜集");
@@ -320,10 +319,12 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("continuedSourceRunRef");
     expect(routeSource).toContain("researchStageStartFeedbackText");
     expect(routeSource).toContain("已复用正在运行的");
-    expect(routeSource).toContain("搜集批次已启动，等待功能 Agent 回写");
-    expect(routeSource).toContain("后续接入全文下载或提炼器时，这里会继续记录下载、提炼和落库轨迹");
-    expect(routeSource).toContain("当前仍是计划/回写阶段，未触发外部搜索");
-    expect(routeSource).toContain("styles.workflowNotice");
+    expect(routeSource).not.toContain("像对话一样记录：搜索了什么");
+    expect(routeSource).not.toContain("搜集批次已启动，等待功能 Agent 回写");
+    expect(routeSource).not.toContain("后续接入全文下载或提炼器时");
+    expect(routeSource).not.toContain("通常无需修改");
+    expect(routeSource).not.toContain("一键生成搜索计划、团队分工");
+    expect(routeSource).not.toContain("搜索计划、步骤记录、资料记录和候选镜像都已落盘");
     expect(routeSource).toContain("返回团队页面");
     expect(routeSource).toContain("实验规划工作台");
     expect(routeSource).toContain("迭代优化工作台");
@@ -397,7 +398,6 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.workflowSourceCollectionOutputForm).toBeTypeOf("string");
     expect(routeStyles.workflowSuccess).toBeTypeOf("string");
     expect(routeStyles.workflowError).toBeTypeOf("string");
-    expect(routeStyles.workflowNotice).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionPage).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionPageGrid).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionConversationPanel).toBeTypeOf("string");

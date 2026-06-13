@@ -1148,8 +1148,7 @@
 }
 
 .sourceCollectionCommandBar strong,
-.sourceCollectionCommandBar span,
-.sourceCollectionCommandInsight {
+.sourceCollectionCommandBar span {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1164,13 +1163,6 @@
 .sourceCollectionCommandBar span {
   color: var(--fg-muted);
   font-size: 0.68rem;
-  font-weight: 720;
-}
-
-.sourceCollectionCommandInsight {
-  margin: 2px 0 0;
-  color: var(--fg-secondary);
-  font-size: 0.72rem;
   font-weight: 720;
 }
 
@@ -1199,8 +1191,7 @@
 }
 
 .workflowSuccess,
-.workflowError,
-.workflowNotice {
+.workflowError {
   display: grid;
   gap: 4px;
   min-width: 0;
@@ -1225,29 +1216,6 @@
   --workflow-message-border: color-mix(in srgb, var(--accent-danger) 36%, var(--border-soft));
   --workflow-message-bg: color-mix(in srgb, var(--accent-danger) 8%, transparent);
   color: color-mix(in srgb, var(--accent-danger) 74%, var(--fg-primary));
-}
-
-.workflowNotice {
-  --workflow-message-border: color-mix(in srgb, var(--accent-cool) 34%, var(--border-soft));
-  --workflow-message-bg: color-mix(in srgb, var(--accent-cool) 8%, transparent);
-}
-
-.workflowNotice strong,
-.workflowNotice span,
-.workflowNotice em {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-.workflowNotice strong {
-  color: var(--fg-primary);
-  font-size: 0.76rem;
-}
-
-.workflowNotice em {
-  color: var(--fg-muted);
-  font-size: 0.66rem;
-  font-style: normal;
 }
 
 .sourceCollectionStageModules {
