@@ -134,17 +134,19 @@ def test_knowledge_routes_create_source_proposal_review_and_rate(tmp_path, monke
         title="External source",
     )
     source_response = client.post(
-        f"/api/knowledge-bases/{base['knowledgeBaseId']}/source-artifacts",
+        f"/api/knowledge-bases/{base['knowledgeBaseId']}/central-source-artifacts",
         json={
-            "sourceType": "external_search_refinement",
-            "sourceRef": {"url": "https://example.test/report", "query": "memory platform"},
+            "centralSourceId": central_source["centralSourceId"],
             "title": "External source",
             "actorAgentId": member["agentId"],
-            "centralSourceId": central_source["centralSourceId"],
         },
     )
     assert source_response.status_code == 201
     source = source_response.json()
+    assert source["centralSourceId"] == central_source["centralSourceId"]
+    assert source["sourceType"] == "external_search_refinement"
+    assert source["sourceRef"]["url"] == "https://example.test/report"
+    assert source["sourceRef"]["centralSourceId"] == central_source["centralSourceId"]
 
     proposal_response = client.post(
         f"/api/knowledge-bases/{base['knowledgeBaseId']}/refinement-proposals",
@@ -243,7 +245,7 @@ def test_knowledge_source_inbox_routes_promote_and_attach_central_source(tmp_pat
     assert artifact_response.json()["centralSourceId"] == central_source["centralSourceId"]
 
 
-def test_knowledge_routes_reject_non_member_and_bad_source_type(tmp_path, monkeypatch):
+def test_knowledge_routes_reject_non_member_and_legacy_source_artifact_route(tmp_path, monkeypatch):
     client, team, lead, _member, outsider = _setup(tmp_path, monkeypatch)
     base = client.post(
         f"/api/teams/{team['teamId']}/knowledge-bases",
@@ -256,12 +258,11 @@ def test_knowledge_routes_reject_non_member_and_bad_source_type(tmp_path, monkey
     )
     assert blocked.status_code == 403
 
-    central_source = _promote_central_source(client, team, lead, lead, title="Bad type source")
-    bad_source = client.post(
+    legacy_source = client.post(
         f"/api/knowledge-bases/{base['knowledgeBaseId']}/source-artifacts",
-        json={"sourceType": "unknown_source", "actorAgentId": lead["agentId"], "centralSourceId": central_source["centralSourceId"]},
+        json={"actorAgentId": lead["agentId"]},
     )
-    assert bad_source.status_code == 422
+    assert legacy_source.status_code == 405
 
 
 def test_knowledge_routes_reject_empty_actor_for_governed_content(tmp_path, monkeypatch):

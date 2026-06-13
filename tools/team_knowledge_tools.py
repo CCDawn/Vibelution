@@ -200,11 +200,14 @@ def knowledge_proposal_tool(
     captured_by: str = "",
 ) -> str:
     """
-    Attach a central-curated source artifact and submit one refinement proposal.
+    Attach one central-curated source artifact and submit one refinement proposal.
 
     This tool cannot create formal knowledge directly. Reviewers must apply the
     proposal through the team knowledge review flow before it becomes an item.
-    Raw sources must be collected through the owner source inbox first.
+    Raw sources must be collected through the owner source inbox first. The
+    central source is the source of truth for SourceArtifact provenance; caller
+    source_type must match that source, and caller source_ref does not become
+    formal provenance.
     """
 
     runtime = _current_runtime()
@@ -310,7 +313,8 @@ def knowledge_ingestion_tool(
 
     The tool only creates a central-curated SourceArtifact + pending
     RefinementProposal. It does not parse files, search the web, collect raw
-    sources, or create formal KnowledgeItems.
+    sources, or create formal KnowledgeItems. The central source is the source
+    of truth for SourceArtifact provenance.
     """
 
     runtime = _current_runtime()
