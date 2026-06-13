@@ -12,10 +12,16 @@ import socket
 import subprocess
 import sys
 import time
+import uuid
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - Python < 3.11 fallback for developer shells.
+    tomllib = None  # type: ignore[assignment]
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -24,6 +30,7 @@ STATE_PATH = RUNTIME_DIR / "state.json"
 BACKEND_STDOUT_PATH = RUNTIME_DIR / "backend.stdout.log"
 BACKEND_STDERR_PATH = RUNTIME_DIR / "backend.stderr.log"
 FRONTEND_BUILD_LOG_PATH = RUNTIME_DIR / "frontend-build.log"
+WORKBENCH_BROWSER_PROFILE_DIR = RUNTIME_DIR / "workbench-app-profile"
 DEFAULT_HOST = "127.0.0.1"
 TRUSTED_WEB_HOSTS_ENV = "VIBELUTION_TRUSTED_WEB_HOSTS"
 FRONTEND_PACKAGE_MANAGER_ENV = "VIBELUTION_FRONTEND_PM"
@@ -254,6 +261,150 @@ def _frontend_build_commands(package_manager: str, web_dir: Path) -> list[tuple[
     ]
 
 
+def _operator_config_path() -> Path:
+    raw = os.environ.get("VIBELUTION_CONFIG_PATH", "").strip()
+    if raw:
+        return Path(raw)
+    config_home = os.environ.get("VIBELUTION_CONFIG_HOME", "").strip()
+    if not config_home:
+        user_home = os.environ.get("USERPROFILE", str(Path.home()))
+        config_home = str(Path(user_home) / "Documents" / "Vibelution" / "config")
+    return Path(config_home) / "config.toml"
+
+
+def _load_operator_config() -> dict:
+    if tomllib is None:
+        return {}
+    config_path = _operator_config_path()
+    try:
+        with config_path.open("rb") as handle:
+            payload = tomllib.load(handle)
+    except OSError:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _workbench_config() -> dict:
+    payload = _load_operator_config()
+    workbench = payload.get("workbench") if isinstance(payload, dict) else {}
+    return workbench if isinstance(workbench, dict) else {}
+
+
+def _configured_window_mode() -> str:
+    env_value = os.environ.get("VIBELUTION_WORKBENCH_WINDOW_MODE") or os.environ.get("AGENT_WORKBENCH_WINDOW_MODE")
+    raw = str(env_value or _workbench_config().get("window_mode") or "fullscreen").strip().lower()
+    return raw if raw in {"fullscreen", "windowed"} else "fullscreen"
+
+
+def _configured_window_size() -> str:
+    env_value = os.environ.get("VIBELUTION_WORKBENCH_WINDOW_SIZE") or os.environ.get("AGENT_WORKBENCH_WINDOW_SIZE")
+    raw = str(env_value or _workbench_config().get("window_size") or "auto").strip().lower()
+    if raw == "auto":
+        return raw
+    parts = raw.split("x", 1)
+    if len(parts) == 2 and all(part.isdigit() for part in parts):
+        width = int(parts[0])
+        height = int(parts[1])
+        if 320 <= width <= 7680 and 240 <= height <= 4320:
+            return raw
+    return "auto"
+
+
+def _edge_window_size_argument(value: str) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized == "auto" or "x" not in normalized:
+        return ""
+    return normalized.replace("x", ",")
+
+
+def _edge_executable() -> str:
+    env_value = os.environ.get("VIBELUTION_EDGE_EXE", "").strip()
+    candidates: list[Path] = []
+    if env_value:
+        candidates.append(Path(env_value))
+    for env_name in ("ProgramFiles(x86)", "ProgramFiles", "LOCALAPPDATA"):
+        root = os.environ.get(env_name, "").strip()
+        if root:
+            candidates.append(Path(root) / "Microsoft" / "Edge" / "Application" / "msedge.exe")
+    resolved = shutil.which("msedge")
+    if resolved:
+        candidates.append(Path(resolved))
+    for candidate in candidates:
+        if candidate.exists():
+            return str(candidate)
+    raise RuntimeError("Microsoft Edge was not found.")
+
+
+def _managed_edge_args(url: str, profile_dir: Path) -> list[str]:
+    window_mode = _configured_window_mode()
+    window_size = _configured_window_size()
+    args = [
+        f"--user-data-dir={profile_dir}",
+        f"--app={url}",
+        "--force-dark-mode",
+        "--no-first-run",
+        "--no-default-browser-check",
+        "--disable-session-crashed-bubble",
+        "--disable-background-timer-throttling",
+        "--disable-renderer-backgrounding",
+        "--disable-component-update",
+        "--disable-extensions",
+        "--disable-features=CalculateNativeWinOcclusion,IntensiveWakeUpThrottling,msEdgeWallet,msEdgeShoppingAssistant,EdgeSearchIndexer,OptimizationGuideModelDownloading,OptimizationHintsFetching",
+        "--disable-sync",
+        "--metrics-recording-only",
+        "--no-service-autorun",
+    ]
+    if window_mode == "fullscreen":
+        args.append("--start-fullscreen")
+    else:
+        size_arg = _edge_window_size_argument(window_size)
+        if size_arg:
+            args.append(f"--window-size={size_arg}")
+    return args
+
+
+def _start_managed_browser(url: str) -> dict[str, object]:
+    if os.name != "nt":
+        return {
+            "browserManaged": False,
+            "browserExecutable": "",
+            "browserLaunchPid": 0,
+            "browserWindowPid": 0,
+            "browserProfileDir": "",
+        }
+    executable = _edge_executable()
+    WORKBENCH_BROWSER_PROFILE_DIR.mkdir(parents=True, exist_ok=True)
+    process = subprocess.Popen(
+        [executable, *_managed_edge_args(url, WORKBENCH_BROWSER_PROFILE_DIR)],
+        cwd=str(PROJECT_ROOT),
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        creationflags=_windows_creation_flags(),
+        startupinfo=_hidden_startup_info(),
+    )
+    return {
+        "browserManaged": True,
+        "browserExecutable": executable,
+        "browserLaunchPid": int(process.pid),
+        "browserWindowPid": int(process.pid),
+        "browserProfileDir": str(WORKBENCH_BROWSER_PROFILE_DIR),
+    }
+
+
+def _preserved_launcher_control_state(state: dict) -> dict[str, object]:
+    keys = (
+        "launcherBackendPid",
+        "launcherBackendLaunchPid",
+        "launcherBrowserLaunchPid",
+        "launcherBrowserWindowPid",
+        "launcherBrowserProfileDir",
+        "launcherControlPort",
+        "launcherControlUrl",
+    )
+    return {key: state[key] for key in keys if key in state}
+
+
 def _select_background_python(executable: str) -> dict[str, object]:
     raw = str(executable or "").strip()
     creation_flag_names = list(_windows_creation_flag_names())
@@ -332,6 +483,7 @@ def _ensure_frontend_build() -> None:
 
 def _start_backend(port: int, host: str, *, no_browser: bool) -> dict:
     RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
+    previous_state = _read_state()
     _ensure_frontend_build()
     stdout = BACKEND_STDOUT_PATH.open("ab")
     stderr = BACKEND_STDERR_PATH.open("ab")
@@ -344,12 +496,9 @@ def _start_backend(port: int, host: str, *, no_browser: bool) -> dict:
         host,
         "--port",
         str(port),
+        "--no-browser",
         "--managed-by-launcher",
     ]
-    if no_browser:
-        args.append("--no-browser")
-    else:
-        args.append("--open-browser")
     process = subprocess.Popen(
         args,
         cwd=str(PROJECT_ROOT),
@@ -366,20 +515,43 @@ def _start_backend(port: int, host: str, *, no_browser: bool) -> dict:
     if not _wait_for_health(port, host):
         _terminate_pid(process.pid)
         raise RuntimeError(f"Backend did not become healthy at {_health_url(port, host)}.")
+    url = f"http://{host}:{int(port)}"
+    browser_info: dict[str, object] = {
+        "browserManaged": False,
+        "browserExecutable": "",
+        "browserLaunchPid": 0,
+        "browserWindowPid": 0,
+        "browserProfileDir": "",
+    }
+    if not no_browser:
+        try:
+            browser_info = _start_managed_browser(url)
+        except Exception:
+            _terminate_pid(process.pid)
+            raise
     state = {
+        **_preserved_launcher_control_state(previous_state),
         "schemaVersion": 1,
         "launcherAdapter": "python_headless",
         "desiredState": "open",
         "observedState": "open",
         "phase": "steady",
         "sessionRole": "workbench",
+        "sessionId": str(uuid.uuid4()),
         "backendPid": int(process.pid),
         "backendLaunchPid": int(process.pid),
-        "browserLaunchPid": 0,
-        "browserWindowPid": 0,
-        "browserManaged": False,
-        "url": f"http://{host}:{int(port)}",
+        "browserLaunchPid": int(browser_info["browserLaunchPid"]),
+        "browserWindowPid": int(browser_info["browserWindowPid"]),
+        "workbenchBrowserLaunchPid": int(browser_info["browserLaunchPid"]),
+        "workbenchBrowserWindowPid": int(browser_info["browserWindowPid"]),
+        "browserManaged": bool(browser_info["browserManaged"]),
+        "browserExecutable": str(browser_info["browserExecutable"]),
+        "browserProfileDir": str(browser_info["browserProfileDir"]),
+        "workbenchBrowserProfileDir": str(browser_info["browserProfileDir"]),
+        "url": url,
+        "host": host,
         "backendPort": int(port),
+        "port": int(port),
         "statusLine": "Workbench is running.",
         "failureMessage": "",
         "lastReason": "python_launcher_start",
@@ -419,7 +591,9 @@ def _terminate_pid(pid: int) -> None:
 def _stop_backend() -> dict:
     state = _read_state()
     pid = int(state.get("backendPid") or 0)
+    browser_pid = int(state.get("browserWindowPid") or state.get("browserLaunchPid") or 0)
     _terminate_pid(pid)
+    _terminate_pid(browser_pid)
     next_state = {
         **state,
         "desiredState": "closed",

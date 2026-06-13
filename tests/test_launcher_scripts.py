@@ -15,6 +15,7 @@ PROJECT_ROOT = Path(__file__).parent.parent
 LAUNCHER_SCRIPT = PROJECT_ROOT / "scripts" / "vibelution_launcher.ps1"
 DESKTOP_ENTRY_SCRIPT = PROJECT_ROOT / "scripts" / "vibelution_desktop_entry.ps1"
 DESKTOP_ENTRY_VBS = PROJECT_ROOT / "scripts" / "vibelution_desktop_entry.vbs"
+DESKTOP_ENTRY_PY = PROJECT_ROOT / "scripts" / "vibelution_desktop_entry.py"
 
 pytestmark = pytest.mark.slow
 
@@ -487,7 +488,31 @@ def _run_vbs_desktop_entry_with_fake_powershell_entry(
     (venv_scripts_dir / "python.exe").write_text("console python", encoding="utf-8")
     (venv_scripts_dir / "python.exe").write_text("console python", encoding="utf-8")
     shutil.copyfile(DESKTOP_ENTRY_VBS, scripts_dir / "vibelution_desktop_entry.vbs")
+    shutil.copyfile(DESKTOP_ENTRY_PY, scripts_dir / "vibelution_desktop_entry.py")
     (scripts_dir / "vibelution_desktop_entry.ps1").write_text(
+        """
+param(
+    [string]$Action = "",
+    [switch]$NoBrowser
+)
+
+$ErrorActionPreference = "Stop"
+$projectDir = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+$logDir = Join-Path $projectDir ".runtime\\launcher"
+if (-not (Test-Path $logDir)) {
+    New-Item -ItemType Directory -Path $logDir -Force | Out-Null
+}
+$payload = @{
+    action = $Action
+    noBrowser = [bool]$NoBrowser
+    argv = @($args)
+    pythonExe = $env:VIBELUTION_PYTHON_EXE
+} | ConvertTo-Json -Depth 8 -Compress
+Add-Content -LiteralPath (Join-Path $logDir "fake-vbs-entry-calls.jsonl") -Value $payload -Encoding utf8
+""".strip(),
+        encoding="utf-8",
+    )
+    (scripts_dir / "vibelution_launcher.ps1").write_text(
         """
 param(
     [string]$Action = "",
@@ -515,6 +540,7 @@ Add-Content -LiteralPath (Join-Path $logDir "fake-vbs-entry-calls.jsonl") -Value
     env = os.environ.copy()
     env["VIBELUTION_DESKTOP_ENTRY_SUPPRESS_FEEDBACK"] = "1"
     env["VIBELUTION_DESKTOP_ENTRY_START_MUTEX_NAME"] = f"Local\\Vibelution.Tests.{tmp_path.name}.failure.{time.time_ns()}"
+    env["VIBELUTION_DESKTOP_ENTRY_PYTHON_BRIDGE_EXE"] = sys.executable
     result = subprocess.run(command, capture_output=True, text=True, cwd=project_dir, env=env, check=False, timeout=30)
     assert result.returncode == 0, result.stderr or result.stdout
 
@@ -2629,6 +2655,8 @@ def test_vbs_desktop_entry_uses_wmi_hidden_process_creation():
     assert "startup.ShowWindow = 0" in source
     assert "startup.CreateFlags = 134218240" in source
     assert "BuildPowerShellEntryCommand()" in source
+    assert "BuildPythonLauncherBridgeCommand()" in source
+    assert "IsLauncherOnlyAction(action)" in source
     assert "VIBELUTION_DESKTOP_ENTRY_VBS_RUN_ID" in source
     assert "VIBELUTION_PYTHON_EXE" in source
     assert "processClass.Create(commandLine, workingDirectory, startup, createdPid)" in source
@@ -7564,7 +7592,7 @@ def test_desktop_entry_forwards_no_browser_and_skips_monitor(tmp_path):
 
 
 def test_vbs_desktop_entry_defaults_to_launcher_action(tmp_path):
-    calls, _events = _run_vbs_desktop_entry_with_fake_powershell_entry(tmp_path, [])
+    calls, events = _run_vbs_desktop_entry_with_fake_powershell_entry(tmp_path, [])
 
     assert calls == [
         {
@@ -7574,6 +7602,8 @@ def test_vbs_desktop_entry_defaults_to_launcher_action(tmp_path):
             "pythonExe": str(tmp_path / "project" / ".venv" / "Scripts" / "python.exe"),
         }
     ]
+    assert events[-2]["event"] == "desktop_entry_vbs.launched"
+    assert "wmi_python_bridge_hidden_process" in events[-2]["details"]
 
 
 def test_vbs_desktop_entry_accepts_named_action_arguments(tmp_path):
