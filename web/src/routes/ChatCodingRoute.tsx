@@ -2793,6 +2793,8 @@ export function ChatCodingRoute() {
   const cacheCompositionSummary = lastCacheComposition
     ? lastCacheComposition.source === "provider_usage"
       ? `${numberFormatter.format(lastCacheComposition.cachedInputTokens)} / ${numberFormatter.format(lastCacheComposition.inputTokens)} · ${cacheCompositionPercent}%`
+      : lastCacheComposition.source === "not_called"
+        ? t("cacheHitNotCalled")
       : t("cacheHitMissing")
     : t("cacheObservationPending");
   const cacheCompositionTitle = lastCacheComposition
@@ -2802,6 +2804,8 @@ export function ChatCodingRoute() {
         `write ${numberFormatter.format(lastCacheComposition.cacheCreationInputTokens ?? 0)}`,
         `uncached ${numberFormatter.format(lastCacheComposition.uncachedInputTokens ?? 0)}`,
       ].join(" · ")
+      : lastCacheComposition.source === "not_called"
+        ? t("cacheHitNotCalled")
       : t("cacheHitMissing")
     : t("cacheObservationPending");
   const activeDraft = activeSessionId ? sessionDrafts[activeSessionId] ?? "" : "";
@@ -2945,12 +2949,17 @@ export function ChatCodingRoute() {
   const sessionLlmUsage = detail?.llmUsage ?? null;
   const hasProviderLlmUsage = sessionLlmUsage?.source === "provider_usage";
   const hasProviderCacheUsage = sessionCacheUsage?.source === "provider_usage";
+  const llmUsageNotCalled = sessionLlmUsage?.source === "not_called" || sessionCacheUsage?.source === "not_called";
   const cacheHitRatePercent = Math.round(Math.max(0, Math.min(1, sessionCacheUsage?.turnCacheHitRate ?? 0)) * 100);
   const cacheHitLine = hasProviderCacheUsage && sessionCacheUsage
     ? `${numberFormatter.format(sessionCacheUsage.turnCachedInputTokens)} / ${numberFormatter.format(sessionCacheUsage.turnInputTokens)} · ${cacheHitRatePercent}%`
+    : llmUsageNotCalled
+      ? t("cacheHitNotCalled")
     : t("cacheHitMissing");
   const llmUsageLine = hasProviderLlmUsage
     ? `${numberFormatter.format(sessionLlmUsage.inputTokens)} tokens · ${numberFormatter.format(sessionLlmUsage.cachedInputTokens)} cached`
+    : llmUsageNotCalled
+      ? t("llmUsageNotCalled")
     : t("llmUsageMissing");
   const llmUsageTitle = hasProviderLlmUsage
     ? [
@@ -2960,6 +2969,8 @@ export function ChatCodingRoute() {
       `${numberFormatter.format(sessionLlmUsage.cacheCreationInputTokens ?? 0)} write`,
       `${numberFormatter.format(sessionLlmUsage.uncachedInputTokens ?? 0)} uncached`,
     ].join(" · ")
+    : llmUsageNotCalled
+      ? t("llmUsageNotCalled")
     : t("llmUsageMissing");
   const compression = runtimeMatchesSelectedSession ? runtime?.contextCompression : undefined;
   const compressionCurrentPercent = compression
