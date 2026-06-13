@@ -279,6 +279,12 @@ type LauncherCopy = {
   cleanupRequiresConfirm: string;
   cleanupDisabledOff: string;
   cleanupApplied: string;
+  technicalDetailAvailable: string;
+  workbenchNotReadySummary: string;
+  workbenchWindowClosedSummary: string;
+  backendUnavailableSummary: string;
+  backendPortUnavailableSummary: string;
+  lifecycleEvidenceIncomplete: string;
 };
 
 type LifecycleDisplay = {
@@ -940,6 +946,33 @@ function includesAny(value: string, needles: string[]) {
   return needles.some((needle) => value.includes(needle));
 }
 
+function summarizeLauncherMessage(value: string | undefined, copy: LauncherCopy, lang: "zh" | "en") {
+  const text = String(value || "").trim();
+  if (!text) {
+    return "";
+  }
+  const lower = text.toLowerCase();
+  const hasWorkbenchNotReady = lower.includes("workbench is not ready");
+  const observedClosed = /observedstate=closed/i.test(text);
+  const backendUnhealthy = /backendhealthy=false/i.test(text) || /backendobserved=false/i.test(text);
+  const backendPortClosed = /backendportlistening=false/i.test(text);
+  if (hasWorkbenchNotReady && backendUnhealthy) {
+    return backendPortClosed ? copy.backendPortUnavailableSummary : copy.backendUnavailableSummary;
+  }
+  if (hasWorkbenchNotReady && observedClosed) {
+    return copy.workbenchWindowClosedSummary;
+  }
+  if (hasWorkbenchNotReady) {
+    return copy.workbenchNotReadySummary;
+  }
+  if (/observedstate=|backendhealthy=|backendobserved=|backendportlistening=/i.test(text)) {
+    return copy.lifecycleEvidenceIncomplete;
+  }
+  const firstSentence = text.match(/^[^.!?。！？]+[.!?。！？]?/)?.[0]?.trim() || text;
+  const limit = lang === "zh" ? 56 : 88;
+  return firstSentence.length > limit ? `${firstSentence.slice(0, limit - 1)}...` : firstSentence;
+}
+
 function resolveLifecycleDisplay(
   status: LauncherStatusWithGuardian | undefined,
   copy: LauncherCopy,
@@ -1365,6 +1398,12 @@ export function LauncherRoute() {
         cleanupRequiresConfirm: "确认执行当前开发者清理计划？执行前会再次校验 planId、planHash、目标白名单和开发者模式状态。",
         cleanupDisabledOff: "开发者模式关闭时不能生成或执行清理计划",
         cleanupApplied: "清理计划已执行",
+        technicalDetailAvailable: "技术详情已保留在悬停提示和高级诊断里。",
+        workbenchNotReadySummary: "工作台尚未就绪，建议查看关键状态。",
+        workbenchWindowClosedSummary: "工作台窗口未打开，后端状态需复查。",
+        backendUnavailableSummary: "后端未确认可用，先查看诊断或重新启动。",
+        backendPortUnavailableSummary: "后端端口未监听，启动流程未完成。",
+        lifecycleEvidenceIncomplete: "生命周期证据不完整，展开诊断查看原始状态。",
       }
     : {
         eyebrow: "Launcher",
@@ -1567,6 +1606,12 @@ export function LauncherRoute() {
         cleanupRequiresConfirm: "Apply this developer cleanup plan? Vibelution will re-check planId, planHash, whitelist targets, and developer mode before executing.",
         cleanupDisabledOff: "Developer mode must be enabled before preview or apply",
         cleanupApplied: "Cleanup plan applied",
+        technicalDetailAvailable: "Technical detail is kept in hover titles and advanced diagnostics.",
+        workbenchNotReadySummary: "Workbench is not ready; check key status.",
+        workbenchWindowClosedSummary: "Workbench window is closed; backend status needs review.",
+        backendUnavailableSummary: "Backend is not confirmed ready; check diagnostics or start again.",
+        backendPortUnavailableSummary: "Backend port is not listening; startup has not completed.",
+        lifecycleEvidenceIncomplete: "Lifecycle evidence is incomplete; expand diagnostics for raw state.",
       };
 
   const [notice, setNotice] = useState<LauncherNotice>({ tone: "neutral", text: "" });
@@ -1849,6 +1894,9 @@ export function LauncherRoute() {
       : projectIsClosed
         ? copy.startProjectSummary
         : lifecycleDisplay.detail || copy.checkDiagnosticsSummary;
+  const lifecycleDetailShort = summarizeLauncherMessage(lifecycleDisplay.detail, copy, uiLang) || lifecycleDisplay.detail;
+  const activeWorkDetailShort = summarizeLauncherMessage(activeWorkDetail, copy, uiLang) || activeWorkDetail;
+  const nextActionDetailShort = summarizeLauncherMessage(nextActionDetail, copy, uiLang) || nextActionDetail;
   const userGuideTone = activeWorkCount > 0 || restartQueuePending
     ? "warning"
     : lifecycleDisplay.tone;
@@ -1874,6 +1922,8 @@ export function LauncherRoute() {
         : projectIsClosed
           ? copy.userGuideClosedDetail
           : lifecycleDisplay.detail || copy.userGuideProblemDetail;
+  const userGuideDetailShort = summarizeLauncherMessage(userGuideDetail, copy, uiLang) || userGuideDetail;
+  const noticeTextShort = summarizeLauncherMessage(notice.text, copy, uiLang) || notice.text;
   const actionLockLabel = projectIsClosed ? copy.actionsStartOnly : destructiveActionDisabled ? copy.actionsLocked : copy.actionsAvailable;
   const guardianProgress = `${guardian?.ownedCount ?? 0}/${guardian?.adapterCount ?? 0}`;
   const toggleDeveloperMode = (enabled: boolean, baseHash: string) => {
@@ -1909,7 +1959,7 @@ export function LauncherRoute() {
         label: componentLabel("project", uiLang),
         status: projectSummary,
         role: lang === "zh" ? "整体可用性" : "Overall availability",
-        detail: launcherStatusDisconnected ? copy.stoppedProjectDetail : lifecycleDisplay.detail || bundle?.statusLine || status?.launcher.message || "-",
+        detail: launcherStatusDisconnected ? copy.stoppedProjectDetail : summarizeLauncherMessage(lifecycleDisplay.detail || bundle?.statusLine || status?.launcher.message, copy, uiLang) || "-",
         technical: `${copy.desired}: ${humanState(bundle?.desiredState, uiLang)} · ${copy.observed}: ${humanState(bundle?.observedState, uiLang)} · mode ${bundle?.mode || "-"}`,
         ok: Boolean(launcherStatusDisconnected || (bundle && bundle?.overallState !== "failed")),
       },
@@ -1975,7 +2025,7 @@ export function LauncherRoute() {
         ok: true,
       },
     ];
-  }, [bundle, componentRows, copy, evidence?.state.updatedAt, guardian, lang, launcherStatusDisconnected, locale, projectSummary, status, uiLang]);
+  }, [bundle, componentRows, copy, evidence?.state.updatedAt, guardian, lang, launcherStatusDisconnected, locale, projectSummary, status, uiLang, lifecycleDisplay.detail]);
 
   const keyStatusRows = statusRows.filter((row) => ["project", "backend", "frontend", "browser"].includes(row.id));
   const diagnosticStatusRows = statusRows.filter((row) => !["project", "backend", "frontend", "browser"].includes(row.id));
@@ -2081,7 +2131,7 @@ export function LauncherRoute() {
         <div>
           <p className={styles.eyebrow}>{copy.eyebrow}</p>
           <h1 className={styles.title}>{copy.title}</h1>
-          <p className={styles.subtitle}>{lifecycleDisplay.detail || copy.subtitle}</p>
+          <p className={styles.subtitle} title={lifecycleDisplay.detail || copy.subtitle}>{lifecycleDetailShort || copy.subtitle}</p>
         </div>
         <div className={styles.actions}>
           <button type="button" className={styles.iconButton} onClick={() => void statusQuery.refetch()} disabled={statusQuery.isFetching} title={copy.refresh}>
@@ -2114,13 +2164,14 @@ export function LauncherRoute() {
       </header>
 
       <div className={styles.summaryStrip} data-tone={launcherStatusDisconnected ? "neutral" : headerTone}>
-        <Metric label={copy.lifecycleStatus} value={projectSummary} helper={lifecycleDisplay.detail} tone={lifecycleDisplay.tone} />
-        <Metric label={copy.activeWork} value={activeWorkSummary} helper={activeWorkDetail} tone={restartQueuePending || activeWorkCount > 0 ? "warning" : "success"} />
+        <Metric label={copy.lifecycleStatus} value={projectSummary} helper={lifecycleDetailShort} helperTitle={lifecycleDisplay.detail} tone={lifecycleDisplay.tone} />
+        <Metric label={copy.activeWork} value={activeWorkSummary} helper={activeWorkDetailShort} helperTitle={activeWorkDetail} tone={restartQueuePending || activeWorkCount > 0 ? "warning" : "success"} />
         <Metric label={copy.launcherStatus} value={controlSummary} helper={controlDetail} tone={launcherControlLimited ? "warning" : status ? "success" : "neutral"} />
         <Metric
           label={copy.userAction}
           value={recovery?.active ? copy.recovery : nextAction}
-          helper={recovery?.active ? recovery.statusLine || humanCommandType(recovery.commandType, uiLang) : nextActionDetail}
+          helper={recovery?.active ? summarizeLauncherMessage(recovery.statusLine || humanCommandType(recovery.commandType, uiLang), copy, uiLang) : nextActionDetailShort}
+          helperTitle={recovery?.active ? recovery.statusLine || humanCommandType(recovery.commandType, uiLang) : nextActionDetail}
           tone={recovery?.active ? (recovery.resultOk === false ? "warning" : "success") : projectIsOpen ? "success" : projectIsChanging ? "warning" : "neutral"}
         />
       </div>
@@ -2128,7 +2179,7 @@ export function LauncherRoute() {
       <div className={styles.userGuide} data-tone={userGuideTone}>
         <span>{copy.userGuide}</span>
         <strong>{userGuideTitle}</strong>
-        <small>{userGuideDetail}</small>
+        <small title={userGuideDetail}>{userGuideDetailShort}</small>
         <em>{actionLockLabel}</em>
       </div>
 
@@ -2173,7 +2224,12 @@ export function LauncherRoute() {
           {expectedStopDisconnect ? copy.stoppedStatusUnavailable : launcherControlLimited ? copy.controlLimitedDetail : copy.loadFailed}
         </p>
       ) : null}
-      {notice.text ? <p className={styles.notice} data-tone={notice.tone}>{notice.text}</p> : null}
+      {notice.text ? (
+        <p className={styles.notice} data-tone={notice.tone} title={notice.text}>
+          {noticeTextShort}
+          {notice.text !== noticeTextShort ? <span>{copy.technicalDetailAvailable}</span> : null}
+        </p>
+      ) : null}
       {statusQuery.isPending && !status ? <p className={styles.notice} data-tone="neutral">{copy.loading}</p> : null}
 
       <div className={styles.workspace}>
@@ -2203,7 +2259,7 @@ export function LauncherRoute() {
                 <span role="cell"><strong>{row.label}</strong></span>
                 <span role="cell">{row.status}</span>
                 <span role="cell">{row.role}</span>
-                <span role="cell">{row.detail}</span>
+                <span role="cell" title={row.technical}>{row.detail}</span>
               </div>
             ))}
           </div>
@@ -2325,12 +2381,24 @@ export function LauncherRoute() {
   );
 }
 
-function Metric({ label, value, helper, tone }: { label: string; value: string; helper?: string; tone?: "neutral" | "success" | "warning" | "error" }) {
+function Metric({
+  label,
+  value,
+  helper,
+  helperTitle,
+  tone,
+}: {
+  label: string;
+  value: string;
+  helper?: string;
+  helperTitle?: string;
+  tone?: "neutral" | "success" | "warning" | "error";
+}) {
   return (
     <div className={styles.metric} data-tone={tone || "neutral"}>
       <span>{label}</span>
       <strong>{value}</strong>
-      {helper ? <small>{helper}</small> : null}
+      {helper ? <small title={helperTitle || helper}>{helper}</small> : null}
     </div>
   );
 }

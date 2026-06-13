@@ -188,6 +188,24 @@ describe("LauncherRoute layout contract", () => {
     expect(styles.metric).toBeTypeOf("string");
   });
 
+  it("summarizes raw lifecycle errors before they reach the first-read Launcher UI", () => {
+    expect(routeSource).toContain("function summarizeLauncherMessage");
+    expect(routeSource).toContain("workbench is not ready");
+    expect(routeSource).toContain("backendportlistening=false");
+    expect(routeSource).toContain("backendPortUnavailableSummary");
+    expect(routeSource).toContain("technicalDetailAvailable");
+    expect(routeSource).toContain("lifecycleDetailShort");
+    expect(routeSource).toContain("userGuideDetailShort");
+    expect(routeSource).toContain("noticeTextShort");
+    expect(routeSource).toContain("helperTitle={lifecycleDisplay.detail}");
+    expect(routeSource).toContain("title={lifecycleDisplay.detail || copy.subtitle}");
+    expect(routeSource).toContain("title={notice.text}");
+    expect(routeSource).toContain("title={row.technical}");
+    expect(routeSource).not.toContain("<p className={styles.subtitle}>{lifecycleDisplay.detail || copy.subtitle}</p>");
+    expect(routeSource).not.toContain("<small>{userGuideDetail}</small>");
+    expect(routeStylesSource).toContain(".notice span");
+  });
+
   it("keeps the current guidance strip readable on narrow screens", () => {
     expect(routeStylesSource).toContain(".userGuide small");
     expect(routeStylesSource).toContain(".userGuide em");
