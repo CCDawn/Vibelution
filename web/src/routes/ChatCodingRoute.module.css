@@ -2579,7 +2579,8 @@
   gap: 1px;
 }
 
-.sessionLoadMoreButton {
+.sessionLoadMoreButton,
+.sessionLoadMoreStatus {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -2596,7 +2597,12 @@
   cursor: pointer;
 }
 
-.sessionLoadMoreButton strong {
+.sessionLoadMoreStatus {
+  cursor: default;
+}
+
+.sessionLoadMoreButton strong,
+.sessionLoadMoreStatus strong {
   color: var(--fg-tertiary);
   font-size: 0.68rem;
   font-weight: 740;

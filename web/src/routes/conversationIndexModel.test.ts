@@ -6,6 +6,7 @@ import {
   classifyConversation,
   conversationGroupLabel,
   hasInvalidChildSessionLink,
+  isDiscussionTeam,
   mergeVisibleSessionsIntoConversations,
   rootSessionIdFor,
   sessionToConversationSummary,
@@ -122,13 +123,38 @@ describe("conversationIndexModel", () => {
       rightIndexSessions: [visibleSession],
       sessionFilter: "知识",
       sessionsById: new Map([[visibleSession.id, visibleSession], [childSession.id, childSession]]),
-      teams: [team({ purpose: "知识治理" }), team({ teamId: "team-2", name: "普通团队", purpose: "闲聊" })],
+      teams: [
+        team({ purpose: "知识治理" }),
+        team({ teamId: "team-2", name: "普通团队", purpose: "闲聊" }),
+        team({
+          teamId: "self-evolution-team",
+          name: "自进化团队",
+          purpose: "自进化不需要讨论",
+          teamKind: "self_evolution",
+          teamSource: "self_evolution",
+        }),
+        team({
+          teamId: "supervised-evolution-team",
+          name: "监督进化团队",
+          purpose: "监督进化不需要讨论",
+          teamKind: "supervised_evolution",
+          teamSource: "supervised_evolution",
+        }),
+      ],
     });
 
     expect(model.filteredConversations.map((item) => item.conversationId)).toEqual(["session-visible"]);
     expect(model.groupedConversations.map((group) => group.groupKey)).toEqual(["user"]);
     expect(model.filteredStandaloneGroupConversations).toEqual([]);
     expect(model.filteredTeams.map((item) => item.teamId)).toEqual(["team-1"]);
+  });
+
+  it("keeps non-discussion evolution system Teams out of the chat index", () => {
+    expect(isDiscussionTeam(team({ teamId: "self-evolution-team" }))).toBe(false);
+    expect(isDiscussionTeam(team({ teamKind: "supervised_evolution" }))).toBe(false);
+    expect(isDiscussionTeam(team({ teamSource: "self_evolution" }))).toBe(false);
+    expect(isDiscussionTeam(team({ teamKind: "research", teamSource: "research_organization" }))).toBe(true);
+    expect(isDiscussionTeam(team({ teamKind: "ai_search", teamSource: "ai_search" }))).toBe(true);
   });
 
   it("tracks child-session root links for tab ownership", () => {
