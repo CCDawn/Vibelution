@@ -26,6 +26,7 @@ from core.runtime_manager.state_store import load_pid, load_state
 from core.runtime_manager import work_run_store
 from core.runtime_manager.work_run_store import WorkRunStore
 from core.runtime_manager.workbench_controller import _is_process_alive, observe_workbench
+from . import developer_mode as launcher_developer_mode
 
 
 LauncherOperation = Literal["start", "stop", "restart", "force-stop"]
@@ -77,6 +78,10 @@ class LauncherActiveWorkBlocked(Exception):
 
 class LauncherSettingsConflict(ValueError):
     """Raised when Launcher startup settings are saved from a stale config snapshot."""
+
+
+DeveloperModeDisabled = launcher_developer_mode.DeveloperModeDisabled
+DeveloperCleanupPlanError = launcher_developer_mode.DeveloperCleanupPlanError
 
 
 class LauncherCommandResponse(TypedDict, total=False):
@@ -136,8 +141,56 @@ def get_launcher_status() -> dict[str, Any]:
         "settings": {
             "startup": get_launcher_startup_settings(),
             "workbenchWindow": get_workbench_window_mode_setting(),
+            "developerMode": get_launcher_developer_mode_setting(),
         },
     }
+
+
+def get_launcher_developer_mode_setting() -> dict[str, Any]:
+    """Return Launcher-owned developer mode state."""
+
+    return launcher_developer_mode.get_developer_mode_setting(config_path=CONFIG_PATH)
+
+
+def update_launcher_developer_mode(enabled: object, *, base_hash: str = "") -> dict[str, Any]:
+    """Persist Launcher-owned developer mode state."""
+
+    return launcher_developer_mode.update_developer_mode_setting(
+        enabled,
+        base_hash=base_hash,
+        config_path=CONFIG_PATH,
+    )
+
+
+def get_launcher_developer_noise_overview() -> dict[str, Any]:
+    """Return a read-only developer noise overview."""
+
+    return launcher_developer_mode.get_noise_overview(config_path=CONFIG_PATH, project_root=PROJECT_ROOT)
+
+
+def preview_launcher_developer_cleanup(action: str) -> dict[str, Any]:
+    """Preview a guarded developer cleanup plan."""
+
+    return launcher_developer_mode.preview_cleanup_plan(
+        action,
+        config_path=CONFIG_PATH,
+        project_root=PROJECT_ROOT,
+    )
+
+
+def apply_launcher_developer_cleanup(payload: dict[str, Any]) -> dict[str, Any]:
+    """Apply a previously previewed developer cleanup plan."""
+
+    if not isinstance(payload, dict):
+        raise ValueError("cleanup apply payload must be an object")
+    return launcher_developer_mode.apply_cleanup_plan(
+        str(payload.get("action") or ""),
+        plan_id=str(payload.get("planId") or ""),
+        plan_hash=str(payload.get("planHash") or ""),
+        confirm=bool(payload.get("confirm", False)),
+        config_path=CONFIG_PATH,
+        project_root=PROJECT_ROOT,
+    )
 
 
 def get_launcher_startup_settings() -> dict[str, Any]:

@@ -259,6 +259,42 @@ export function buildRestartRequestUnconfirmedTelemetry(errorMessage: string): B
   };
 }
 
+type LifecycleControlAction = "shutdown" | "force_shutdown" | "restart";
+
+type LifecycleControlResponseLike = {
+  accepted?: boolean;
+  completed?: boolean;
+  commandId?: string;
+  message?: string;
+  operation?: string;
+};
+
+export function buildLifecycleControlResponseTelemetry(
+  action: LifecycleControlAction,
+  response: LifecycleControlResponseLike,
+): BrowserTelemetryEventInput {
+  const accepted = response.accepted !== false;
+  const phase = action === "restart" ? "restart" : "shutdown";
+  const suffix = accepted ? "accepted" : "rejected";
+  return {
+    phase,
+    eventCode: `browser.user_action.${action}_request_${suffix}`,
+    message: accepted
+      ? "Launcher accepted the lifecycle control request."
+      : "Launcher rejected the lifecycle control request.",
+    level: accepted ? "info" : "warning",
+    fields: {
+      action,
+      source: "app_shell",
+      accepted,
+      completed: Boolean(response.completed),
+      commandId: String(response.commandId || ""),
+      operation: String(response.operation || ""),
+      responseMessage: String(response.message || ""),
+    },
+  };
+}
+
 export function shutdownRequestUnconfirmedBody(lang: string): string {
   return lang === "en"
     ? "The close flow has started, but this window did not receive a final confirmation yet. The workbench is still checking the runtime state."
@@ -756,6 +792,7 @@ export function AppShell() {
         }
         return;
       }
+      emitBrowserTelemetry(buildLifecycleControlResponseTelemetry("shutdown", payload), { preferBeacon: true });
       if (payload.commandId) {
         setLifecycleCommandId(payload.commandId);
       }
@@ -863,6 +900,7 @@ export function AppShell() {
       if (requestSeq !== lifecycleRequestSeqRef.current) {
         return;
       }
+      emitBrowserTelemetry(buildLifecycleControlResponseTelemetry("force_shutdown", payload), { preferBeacon: true });
       if (payload.commandId) {
         setLifecycleCommandId(payload.commandId);
       }
@@ -942,6 +980,7 @@ export function AppShell() {
         }
         return;
       }
+      emitBrowserTelemetry(buildLifecycleControlResponseTelemetry("restart", payload), { preferBeacon: true });
       if (payload.commandId) {
         setLifecycleCommandId(payload.commandId);
       }

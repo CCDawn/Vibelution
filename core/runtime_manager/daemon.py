@@ -32,6 +32,8 @@ from .command_queue import (
     reject_pending_commands_for_shutdown,
 )
 from .constants import (
+    DAEMON_LOG_BACKUP_COUNT,
+    DAEMON_LOG_MAX_BYTES,
     DAEMON_LOOP_INTERVAL_SECONDS,
     DAEMON_STDERR_PATH,
     DAEMON_STDOUT_PATH,
@@ -1275,6 +1277,69 @@ def _hidden_startup_info() -> subprocess.STARTUPINFO | None:
     return startupinfo
 
 
+def _rotated_log_path(path: Path, index: int) -> Path:
+    return path.with_name(f"{path.name}.{index}")
+
+
+def _rotate_daemon_log_file(
+    path: Path,
+    *,
+    max_bytes: int | None = None,
+    backup_count: int | None = None,
+) -> dict[str, Any]:
+    effective_max_bytes = DAEMON_LOG_MAX_BYTES if max_bytes is None else max_bytes
+    effective_backup_count = DAEMON_LOG_BACKUP_COUNT if backup_count is None else backup_count
+    payload: dict[str, Any] = {
+        "path": str(path),
+        "maxBytes": int(effective_max_bytes),
+        "backupCount": int(effective_backup_count),
+        "sizeBytes": 0,
+        "rotated": False,
+        "backupPath": "",
+        "action": "none",
+        "errorType": "",
+        "errorMessage": "",
+    }
+    try:
+        if int(effective_max_bytes) <= 0 or not path.exists():
+            return payload
+        size_bytes = int(path.stat().st_size)
+        payload["sizeBytes"] = size_bytes
+        if size_bytes <= int(effective_max_bytes):
+            return payload
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if int(effective_backup_count) <= 0:
+            path.write_text("", encoding="utf-8")
+            payload.update({"rotated": True, "action": "truncated"})
+            return payload
+        for index in range(int(effective_backup_count), 0, -1):
+            source = _rotated_log_path(path, index)
+            if index == int(effective_backup_count):
+                if source.exists():
+                    source.unlink()
+                continue
+            target = _rotated_log_path(path, index + 1)
+            if source.exists():
+                source.replace(target)
+        backup_path = _rotated_log_path(path, 1)
+        path.replace(backup_path)
+        path.touch()
+        payload.update({"rotated": True, "backupPath": str(backup_path), "action": "rotated"})
+    except Exception as exc:  # pragma: no cover - platform-specific filesystem race
+        payload.update({"errorType": type(exc).__name__, "errorMessage": str(exc)})
+    return payload
+
+
+def _rotate_daemon_logs_before_launch() -> None:
+    for result in (
+        _rotate_daemon_log_file(DAEMON_STDOUT_PATH),
+        _rotate_daemon_log_file(DAEMON_STDERR_PATH),
+    ):
+        if result.get("rotated") or result.get("errorType"):
+            event_type = "daemon.log_rotation.failed" if result.get("errorType") else "daemon.log_rotation.completed"
+            _append_event(event_type, result)
+
+
 def _select_daemon_python_runtime(python_executable: str) -> dict[str, Any]:
     """Select the Python runtime used for the long-lived daemon process."""
 
@@ -1333,6 +1398,7 @@ def ensure_daemon_running(*, python_executable: str | None = None) -> bool:
         _terminate_daemon_process(current_pid)
 
     ensure_runtime_manager_dirs()
+    _rotate_daemon_logs_before_launch()
     python_runtime = _select_daemon_python_runtime(python_executable or sys.executable)
     python_cmd = str(python_runtime["pythonExecutable"])
     with DAEMON_STDOUT_PATH.open("a", encoding="utf-8") as stdout_handle, DAEMON_STDERR_PATH.open(

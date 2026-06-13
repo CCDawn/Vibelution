@@ -39,6 +39,22 @@ class LauncherStartupSettingsPayload(BaseModel):
     baseHash: str = ""
 
 
+class DeveloperModePayload(BaseModel):
+    enabled: bool
+    baseHash: str = ""
+
+
+class DeveloperCleanupPreviewPayload(BaseModel):
+    action: str
+
+
+class DeveloperCleanupApplyPayload(BaseModel):
+    action: str
+    planId: str
+    planHash: str
+    confirm: bool = False
+
+
 @router.get("/api/health")
 def launcher_health() -> dict:
     return {"status": "ok", "service": "launcher"}
@@ -83,6 +99,48 @@ def update_workbench_window_setting(payload: WorkbenchWindowModePayload) -> dict
         raise HTTPException(status_code=409, detail={"code": "launcher_workbench_window_mode_conflict", "message": str(exc)}) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail={"code": "invalid_workbench_window_mode", "message": str(exc)}) from exc
+
+
+@router.get("/api/launcher/developer-mode")
+def developer_mode_setting() -> dict:
+    return launcher_service.get_launcher_developer_mode_setting()
+
+
+@router.put("/api/launcher/developer-mode")
+def update_developer_mode(payload: DeveloperModePayload) -> dict:
+    try:
+        return launcher_service.update_launcher_developer_mode(payload.enabled, base_hash=payload.baseHash)
+    except launcher_service.DeveloperCleanupPlanError as exc:
+        raise HTTPException(status_code=409, detail={"code": exc.code, "message": exc.message, **exc.detail}) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail={"code": "invalid_developer_mode", "message": str(exc)}) from exc
+
+
+@router.get("/api/launcher/developer-mode/noise-overview")
+def developer_mode_noise_overview() -> dict:
+    return launcher_service.get_launcher_developer_noise_overview()
+
+
+@router.post("/api/launcher/developer-mode/cleanup/preview")
+def preview_developer_cleanup(payload: DeveloperCleanupPreviewPayload) -> dict:
+    try:
+        return launcher_service.preview_launcher_developer_cleanup(payload.action)
+    except launcher_service.DeveloperModeDisabled as exc:
+        raise HTTPException(status_code=409, detail={"code": "mode_disabled", "message": str(exc)}) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail={"code": "invalid_developer_cleanup_action", "message": str(exc)}) from exc
+
+
+@router.post("/api/launcher/developer-mode/cleanup/apply")
+def apply_developer_cleanup(payload: DeveloperCleanupApplyPayload) -> dict:
+    try:
+        return launcher_service.apply_launcher_developer_cleanup(payload.model_dump())
+    except launcher_service.DeveloperModeDisabled as exc:
+        raise HTTPException(status_code=409, detail={"code": "mode_disabled", "message": str(exc)}) from exc
+    except launcher_service.DeveloperCleanupPlanError as exc:
+        raise HTTPException(status_code=409, detail={"code": exc.code, "message": exc.message, **exc.detail}) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail={"code": "invalid_developer_cleanup_apply", "message": str(exc)}) from exc
 
 
 @router.post("/api/launcher/start", status_code=202)
