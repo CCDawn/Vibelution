@@ -737,7 +737,7 @@ function sourceCollectionStatusLabel(value: string | undefined | null, lang: "zh
   const zh: Record<string, string> = {
     active: "进行中",
     blocked: "阻塞",
-    collecting: "搜集中",
+    collecting: "待继续搜集",
     completed: "已完成",
     failed: "失败",
     in_progress: "推进中",
@@ -746,7 +746,8 @@ function sourceCollectionStatusLabel(value: string | undefined | null, lang: "zh
     pending: "待启动",
     pending_screening: "待筛选",
     planned: "已计划",
-    processing: "处理中",
+    processing: "已搜索待筛选",
+    reviewing: "待筛选",
     ready: "已就绪",
     ready_for_screening: "可筛选",
     returned: "已退回",
@@ -756,7 +757,7 @@ function sourceCollectionStatusLabel(value: string | undefined | null, lang: "zh
   const en: Record<string, string> = {
     active: "active",
     blocked: "blocked",
-    collecting: "collecting",
+    collecting: "ready to continue",
     completed: "completed",
     failed: "failed",
     in_progress: "in progress",
@@ -765,7 +766,8 @@ function sourceCollectionStatusLabel(value: string | undefined | null, lang: "zh
     pending: "pending",
     pending_screening: "pending screening",
     planned: "planned",
-    processing: "processing",
+    processing: "ready for screening",
+    reviewing: "ready for screening",
     ready: "ready",
     ready_for_screening: "ready for screening",
     returned: "returned",
@@ -2550,7 +2552,7 @@ export function TeamsRoute({
       : selectedTeamExecuteSourceCollectionSearchPending
         ? (lang === "zh" ? "搜索中" : "searching")
         : sourceCollectionOpenAssignmentCount > 0
-          ? (lang === "zh" ? "搜集中" : "collecting")
+          ? (lang === "zh" ? "待继续搜索" : "ready to search")
           : sourceManifestCandidates.length > sourceCollectionApprovedCount
             ? (lang === "zh" ? "待筛选" : "needs screening")
             : sourceManifestCandidates.length > 0
@@ -2561,7 +2563,7 @@ export function TeamsRoute({
       : sourceCollectionOpenAssignmentCount > 0
         ? (selectedTeamExecuteSourceCollectionSearchPending
           ? (lang === "zh" ? "搜索中" : "Searching")
-          : (lang === "zh" ? "执行下一批搜索" : "Run next search"))
+          : (lang === "zh" ? "搜索下一批" : "Search next batch"))
         : sourceManifestCandidates.length > sourceCollectionApprovedCount
           ? (lang === "zh" ? "进入资料筛选" : "Open screening")
           : (lang === "zh" ? "进入搜集工作台" : "Open collection workspace");
@@ -2639,7 +2641,7 @@ export function TeamsRoute({
           return lang === "zh" ? "正在执行搜索，结果会写入资料记录和候选资料仓库。" : "Searching now; results will be written into DataRecords and candidates.";
         }
         if (sourceCollectionOpenAssignmentCount > 0) {
-          return lang === "zh" ? "已有搜集批次，点击主按钮执行下一批搜索。" : "A run is open. Use the primary action to run the next batch.";
+          return lang === "zh" ? "待处理任务可继续搜索。" : "Open tasks are ready for another search batch.";
         }
         if (sourceManifestCandidates.length > sourceCollectionApprovedCount) {
           return lang === "zh" ? "已有候选资料，下一步进入筛选。" : "Candidate sources are ready for screening.";
@@ -3969,7 +3971,7 @@ export function TeamsRoute({
   const sourceCollectionStageFocusLabel = !selectedSourceCollectionRun
     ? (lang === "zh" ? "待启动" : "not started")
     : sourceCollectionOpenAssignmentCount > 0
-      ? (lang === "zh" ? "搜集中" : "collecting")
+      ? (lang === "zh" ? "待继续搜索" : "ready to search")
       : sourceManifestCandidates.length > sourceCollectionApprovedCount
         ? (lang === "zh" ? "待筛选" : "screening needed")
         : sourceManifestCandidates.length > 0
@@ -3980,7 +3982,7 @@ export function TeamsRoute({
     : selectedTeamExecuteSourceCollectionSearchPending
       ? (lang === "zh" ? "正在搜索" : "Searching")
       : sourceCollectionOpenAssignmentCount > 0
-        ? (lang === "zh" ? "执行下一批搜索" : "Run next search batch")
+        ? (lang === "zh" ? "搜索下一批" : "Search next batch")
         : sourceManifestCandidates.length > sourceCollectionApprovedCount
           ? (lang === "zh" ? "进入资料筛选" : "Open source screening")
           : (lang === "zh" ? "查看搜集结果" : "Review collection results");
