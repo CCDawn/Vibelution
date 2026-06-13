@@ -7,13 +7,13 @@ import json
 import os
 import shutil
 import sqlite3
-import subprocess
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Literal
 
 from config.public_config import CONFIG_PATH, load_public_config, public_config_hash, save_public_config
+from core.infrastructure.git_process import run_git
 from core.runtime_manager.constants import PROJECT_ROOT
 from core.runtime_manager.scene_logging import append_runtime_manager_file_event
 
@@ -464,8 +464,8 @@ def _worktree_cleanup_candidates(root: Path) -> tuple[list[dict[str, Any]], list
 
 def _git_worktrees(root: Path) -> list[dict[str, str]]:
     try:
-        result = subprocess.run(
-            ["git", "-C", str(root), "worktree", "list", "--porcelain"],
+        result = run_git(
+            ["-C", str(root), "worktree", "list", "--porcelain"],
             check=False,
             capture_output=True,
             text=True,
@@ -514,8 +514,8 @@ def _worktree_skip_reason(path: Path, branch_ref: str, head: str, root: Path) ->
 
 def _git_status_dirty(path: Path) -> bool:
     try:
-        result = subprocess.run(
-            ["git", "-C", str(path), "status", "--porcelain"],
+        result = run_git(
+            ["-C", str(path), "status", "--porcelain"],
             check=False,
             capture_output=True,
             text=True,
@@ -528,8 +528,8 @@ def _git_status_dirty(path: Path) -> bool:
 
 def _git_head_merged_to_main(root: Path, head: str) -> bool:
     try:
-        result = subprocess.run(
-            ["git", "-C", str(root), "merge-base", "--is-ancestor", head, "main"],
+        result = run_git(
+            ["-C", str(root), "merge-base", "--is-ancestor", head, "main"],
             check=False,
             capture_output=True,
             text=True,
@@ -672,8 +672,8 @@ def _apply_targets(plan: dict[str, Any], root: Path) -> list[dict[str, Any]]:
             elif path.is_file():
                 path.unlink()
         elif action == "worktree_cleanup":
-            result = subprocess.run(
-                ["git", "-C", str(root), "worktree", "remove", str(path)],
+            result = run_git(
+                ["-C", str(root), "worktree", "remove", str(path)],
                 check=False,
                 capture_output=True,
                 text=True,

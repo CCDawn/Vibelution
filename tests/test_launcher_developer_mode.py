@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import subprocess
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -154,6 +156,80 @@ def test_developer_db_compact_uses_git_memory_prune_entrypoint(tmp_path, monkeyp
     assert result["ok"] is True
     assert calls == [(developer_mode.WORKTREE_SNAPSHOT_KEEP_LATEST, True)]
     assert result["applied"][0]["dbStats"] == {"deletedSnapshots": 3}
+
+
+def test_developer_noise_overview_uses_no_console_git_helper(tmp_path, monkeypatch):
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("[launcher]\n", encoding="utf-8")
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    worktree = tmp_path / "Vibelution-worktrees" / "merged-clean"
+    worktree.mkdir(parents=True)
+    (worktree / ".git").write_text("gitdir: ../.git/worktrees/merged-clean", encoding="utf-8")
+    calls = []
+
+    def fake_run_git(args, **kwargs):
+        calls.append((list(args), kwargs))
+        if args == ["-C", str(project_root), "worktree", "list", "--porcelain"]:
+            stdout = f"worktree {worktree}\nHEAD abc123\nbranch refs/heads/codex/merged-clean\n\n"
+        else:
+            stdout = ""
+        return subprocess.CompletedProcess(args=args, returncode=0, stdout=stdout, stderr="")
+
+    monkeypatch.setattr(developer_mode, "run_git", fake_run_git)
+
+    overview = developer_mode.get_noise_overview(config_path=config_path, project_root=project_root)
+
+    assert overview["items"][-1]["targetCount"] == 1
+    assert [call[0] for call in calls] == [
+        ["-C", str(project_root), "worktree", "list", "--porcelain"],
+        ["-C", str(worktree), "status", "--porcelain"],
+        ["-C", str(project_root), "merge-base", "--is-ancestor", "abc123", "main"],
+    ]
+    assert all("git" not in args for args, _kwargs in calls)
+
+
+def test_developer_worktree_cleanup_apply_uses_no_console_git_helper(tmp_path, monkeypatch):
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("[launcher]\n[launcher.developer_mode]\nenabled = true\n", encoding="utf-8")
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    worktree = tmp_path / "Vibelution-worktrees" / "merged-clean"
+    worktree.mkdir(parents=True)
+    (worktree / ".git").write_text("gitdir: ../.git/worktrees/merged-clean", encoding="utf-8")
+    plan_dir = tmp_path / "plans"
+    calls = []
+
+    def fake_run_git(args, **kwargs):
+        calls.append((list(args), kwargs))
+        if args == ["-C", str(project_root), "worktree", "list", "--porcelain"]:
+            stdout = f"worktree {worktree}\nHEAD abc123\nbranch refs/heads/codex/merged-clean\n\n"
+        else:
+            stdout = ""
+        return subprocess.CompletedProcess(args=args, returncode=0, stdout=stdout, stderr="")
+
+    monkeypatch.setattr(developer_mode, "run_git", fake_run_git)
+
+    preview = developer_mode.preview_cleanup_plan(
+        "worktree_cleanup",
+        config_path=config_path,
+        project_root=project_root,
+        plan_dir=plan_dir,
+    )
+    plan = preview["plan"]
+    result = developer_mode.apply_cleanup_plan(
+        "worktree_cleanup",
+        plan_id=plan["planId"],
+        plan_hash=plan["planHash"],
+        confirm=True,
+        config_path=config_path,
+        project_root=project_root,
+        plan_dir=plan_dir,
+    )
+
+    assert result["ok"] is True
+    assert ["-C", str(project_root), "worktree", "remove", str(worktree)] in [call[0] for call in calls]
+    assert all("git" not in args for args, _kwargs in calls)
 
 
 def test_developer_mode_status_is_readable_from_launcher_status(tmp_path, monkeypatch):
