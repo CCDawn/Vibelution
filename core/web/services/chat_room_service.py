@@ -790,6 +790,9 @@ def start_chat_room_round(
             include_recent_messages=True,
             session_summaries=_session_summary_index(),
         )
+        refreshed_participant_count = len(participants)
+        participants = _dedupe_chat_room_participants(participants)
+        submit_timings["participantDedupeRemoved"] = max(0, refreshed_participant_count - len(participants))
         submit_timings["participantRefreshMs"] = _elapsed_ms(stage_started_at)
         stage_started_at = _perf_counter()
         speakers = scheduler.select_speakers(
@@ -811,6 +814,7 @@ def start_chat_room_round(
             participants=participants,
             case_state=case_state,
         )
+        speakers = _dedupe_chat_room_participants(speakers)
         submit_timings["speakerSelectMs"] = _elapsed_ms(stage_started_at)
         if not speakers:
             raise ChatRoomValidationError(
@@ -2358,6 +2362,35 @@ def _dedupe_requested_session_ids(requested: list[str], by_id: dict[str, dict[st
             raise ChatRoomValidationError(f"Unknown chat session: {session_id}")
         normalized.append(session_id)
     return normalized
+
+
+def _dedupe_chat_room_participants(participants: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    deduped: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for participant in list(participants or []):
+        if not isinstance(participant, dict):
+            continue
+        keys = _chat_room_participant_identity_keys(participant)
+        if keys and any(key in seen for key in keys):
+            continue
+        deduped.append(participant)
+        seen.update(keys)
+    return deduped
+
+
+def _chat_room_participant_identity_keys(participant: dict[str, Any]) -> list[str]:
+    keys: list[str] = []
+    agent_id = str(participant.get("agentId") or "").strip()
+    if agent_id:
+        keys.append(f"agent:{agent_id}")
+    for field in ("directSessionId", "sessionId"):
+        session_id = str(participant.get(field) or "").strip()
+        if session_id:
+            keys.append(f"session:{session_id}")
+    participant_id = str(participant.get("participantId") or "").strip()
+    if participant_id:
+        keys.append(f"participant:{participant_id}")
+    return keys
 
 
 def _apply_participant_contexts(
