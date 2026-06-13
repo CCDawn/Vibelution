@@ -20,6 +20,7 @@ from typing import Any
 
 from config.public_config import build_effective_config, load_public_config
 from core.llm import LLMClient, LLMInvocationContext, invoke_llm
+from core.runtime_manager import work_run_store
 from core.web.services import chat_room_service, data_processing_service, team_knowledge_service, team_service
 from core.web.services.runtime_scene_service import record_runtime_scene_event
 
@@ -102,6 +103,7 @@ SOURCE_COLLECTION_PROMPT_CACHE_REQUIRED_MODES = {"required", "strict", "hard_req
 SOURCE_COLLECTION_PROMPT_CACHE_DISABLED_MODES = {"disabled", "off", "none"}
 SOURCE_COLLECTION_SUPPORTED_PROMPT_CACHE_MODES = {"automatic", "explicit_cache_control"}
 SOURCE_COLLECTION_PROMPT_CACHE_SCOPE = "research_team_knowledge_collection"
+SOURCE_COLLECTION_WORK_RUN_KIND = "source_collection_run"
 RESEARCH_STAGE_TYPES = ("knowledge_collection", "experiment", "iteration")
 RESEARCH_STAGE_ACTIVE_STATUSES = {"running", "planning", "needs_attention"}
 RESEARCH_STAGE_DEFAULTS = {
@@ -544,6 +546,85 @@ def start_source_collection_run(team_id: str, payload: dict[str, Any] | None = N
 def execute_source_collection_search(team_id: str, run_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
     normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
     normalized_run_id = _normalize_required_id(run_id, "Data processing run id is required.")
+    team = team_service.get_team(normalized_team_id)
+    try:
+        run = data_processing_service.get_processing_run(normalized_run_id)
+    except data_processing_service.DataProcessingError as exc:
+        raise TeamWorkflowOrchestrationError(str(exc)) from exc
+    run_scope = run.get("scope") if isinstance(run.get("scope"), dict) else {}
+    run_team_id = _trim_text(run_scope.get("teamId"), max_length=128)
+    if run_team_id and run_team_id != normalized_team_id:
+        raise TeamWorkflowOrchestrationError("Data processing run does not belong to this team.")
+
+    try:
+        assignments_payload = data_processing_service.list_collection_assignments(normalized_run_id)
+        records_payload = data_processing_service.list_records(normalized_run_id)
+    except data_processing_service.DataProcessingError as exc:
+        raise TeamWorkflowOrchestrationError(str(exc)) from exc
+    assignments = [item for item in list(assignments_payload.get("assignments") or []) if isinstance(item, dict)]
+    records = [item for item in list(records_payload.get("records") or []) if isinstance(item, dict)]
+    _persist_source_collection_work_run(
+        normalized_team_id,
+        normalized_run_id,
+        status="running",
+        current_phase="searching",
+        run=run,
+        team=team,
+        assignments=assignments,
+        records=records,
+        summary="正在执行资料搜集，搜索来源元数据并写入候选资料库。",
+        active=True,
+    )
+    try:
+        result = _execute_source_collection_search_impl(normalized_team_id, normalized_run_id, payload)
+    except Exception as exc:
+        _persist_source_collection_work_run(
+            normalized_team_id,
+            normalized_run_id,
+            status="failed",
+            current_phase="failed",
+            run=run,
+            team=team,
+            assignments=assignments,
+            records=records,
+            summary="资料搜集执行失败。",
+            active=False,
+            error=str(exc),
+            error_type=type(exc).__name__,
+        )
+        raise
+
+    final_run = result.get("run") if isinstance(result.get("run"), dict) else run
+    final_assignments = [item for item in list(result.get("assignments") or []) if isinstance(item, dict)]
+    try:
+        final_records = data_processing_service.list_records(normalized_run_id).get("records") if normalized_run_id else []
+    except data_processing_service.DataProcessingError:
+        final_records = []
+    _persist_source_collection_work_run(
+        normalized_team_id,
+        normalized_run_id,
+        status=_source_collection_work_run_terminal_status(result),
+        current_phase=_source_collection_work_run_terminal_phase(result),
+        run=final_run,
+        team=team,
+        assignments=final_assignments,
+        records=[item for item in list(final_records or []) if isinstance(item, dict)],
+        summary=_source_collection_work_run_terminal_summary(result),
+        active=False,
+        extra={
+            "executedQueryCount": _source_collection_count(result.get("executedQueryCount")),
+            "failedQueryCount": _source_collection_count(result.get("failedQueryCount")),
+            "recordCount": _source_collection_count(result.get("recordCount")),
+            "importedCount": _source_collection_count(result.get("importedCount")),
+            "resultCount": _source_collection_count(result.get("resultCount")),
+        },
+    )
+    return result
+
+
+def _execute_source_collection_search_impl(team_id: str, run_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
+    normalized_run_id = _normalize_required_id(run_id, "Data processing run id is required.")
     team_service.get_team(normalized_team_id)
     request_payload = payload if isinstance(payload, dict) else {}
     provider = _trim_text(request_payload.get("provider"), max_length=80) or SOURCE_COLLECTION_SEARCH_PROVIDER_CROSSREF
@@ -866,6 +947,16 @@ def open_source_collection_storage_target(team_id: str, run_id: str, payload: di
         "openedPath": _relative_path(opened_path),
         "targetExists": target_exists,
         "storageArtifacts": storage_artifacts,
+    }
+
+
+def load_source_collection_work_run_summary() -> dict[str, Any]:
+    store = _source_collection_work_run_store()
+    active = store.load_active_snapshot(SOURCE_COLLECTION_WORK_RUN_KIND)
+    return {
+        "active": active,
+        "latest": store.load_latest_snapshot(SOURCE_COLLECTION_WORK_RUN_KIND),
+        "activeItems": [active] if isinstance(active, dict) else [],
     }
 
 
@@ -6229,6 +6320,121 @@ def _source_collection_storage_artifacts(team_id: str, run_id: str) -> dict[str,
         key: _relative_path(path)
         for key, path in _source_collection_storage_artifact_paths(team_id, run_id).items()
     }
+
+
+def _source_collection_work_run_store() -> work_run_store.WorkRunStore:
+    return work_run_store.WorkRunStore(root=work_run_store.WORK_RUNS_DIR)
+
+
+def _persist_source_collection_work_run(
+    team_id: str,
+    run_id: str,
+    *,
+    status: str,
+    current_phase: str,
+    run: dict[str, Any],
+    team: dict[str, Any],
+    assignments: list[dict[str, Any]],
+    records: list[dict[str, Any]],
+    summary: str,
+    active: bool,
+    error: str = "",
+    error_type: str = "",
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    now = utc_now_iso()
+    run_scope = run.get("scope") if isinstance(run.get("scope"), dict) else {}
+    run_metadata = run.get("metadata") if isinstance(run.get("metadata"), dict) else {}
+    open_assignments = [
+        item for item in assignments
+        if str(item.get("status") or "").strip().lower() in {"open", "in_progress", "returned"}
+    ]
+    search_plan_ref = run_scope.get("dataSearchPlanRef") if isinstance(run_scope.get("dataSearchPlanRef"), dict) else {}
+    query_count = _normalize_int(
+        run_metadata.get("queryCount") or search_plan_ref.get("queryCount"),
+        default=0,
+        minimum=0,
+        maximum=SOURCE_COLLECTION_MAX_QUERIES * 4,
+    )
+    snapshot: dict[str, Any] = {
+        "runId": run_id,
+        "runKind": SOURCE_COLLECTION_WORK_RUN_KIND,
+        "kind": SOURCE_COLLECTION_WORK_RUN_KIND,
+        "status": status,
+        "currentPhase": current_phase,
+        "stageType": "knowledge_collection",
+        "teamId": team_id,
+        "teamName": _trim_text(team.get("name"), max_length=160) or team_id,
+        "title": _trim_text(run.get("title"), max_length=180) or "知识搜集批次",
+        "topic": _trim_text(run_scope.get("topic"), max_length=500),
+        "summary": _trim_text(summary, max_length=500),
+        "currentTask": _trim_text(summary, max_length=500),
+        "assignmentCount": len(assignments),
+        "openAssignmentCount": len(open_assignments),
+        "recordCount": len(records),
+        "queryCount": query_count,
+        "storagePath": _source_collection_storage_artifacts(team_id, run_id)["runDirectory"],
+        "updatedAt": now,
+        "sourceCollection": {
+            "teamId": team_id,
+            "stageType": "knowledge_collection",
+            "openAssignmentCount": len(open_assignments),
+            "recordCount": len(records),
+            "queryCount": query_count,
+        },
+    }
+    started_at = _trim_text(run.get("createdAt"), max_length=80) or _trim_text(run.get("startedAt"), max_length=80)
+    if started_at:
+        snapshot["startedAt"] = started_at
+    if not active:
+        snapshot["finishedAt"] = now
+    if error:
+        snapshot["error"] = _trim_text(error, max_length=500)
+    if error_type:
+        snapshot["errorType"] = _trim_text(error_type, max_length=120)
+    if extra:
+        snapshot.update(extra)
+        source_collection = snapshot.get("sourceCollection") if isinstance(snapshot.get("sourceCollection"), dict) else {}
+        source_collection.update({key: value for key, value in extra.items() if key.endswith("Count")})
+        snapshot["sourceCollection"] = source_collection
+    return _source_collection_work_run_store().persist_snapshot(
+        SOURCE_COLLECTION_WORK_RUN_KIND,
+        snapshot,
+        active_run_id=run_id if active else "",
+    )
+
+
+def _source_collection_work_run_terminal_status(result: dict[str, Any]) -> str:
+    if _source_collection_count(result.get("failedQueryCount")) and not _source_collection_count(result.get("executedQueryCount")):
+        return "failed"
+    run_status = result.get("runStatus") if isinstance(result.get("runStatus"), dict) else {}
+    summary = run_status.get("summary") if isinstance(run_status.get("summary"), dict) else {}
+    if _source_collection_count(summary.get("openAssignmentCount")):
+        return "needs_continue"
+    return "completed"
+
+
+def _source_collection_work_run_terminal_phase(result: dict[str, Any]) -> str:
+    status = _source_collection_work_run_terminal_status(result)
+    if status == "failed":
+        return "failed"
+    if status == "needs_continue":
+        return "waiting_for_next_batch"
+    return "completed"
+
+
+def _source_collection_work_run_terminal_summary(result: dict[str, Any]) -> str:
+    if _source_collection_work_run_terminal_status(result) == "failed":
+        return "资料搜集执行失败，等待检查搜索错误。"
+    record_count = _source_collection_count(result.get("recordCount"))
+    imported_count = _source_collection_count(result.get("importedCount"))
+    if _source_collection_work_run_terminal_status(result) == "needs_continue":
+        return f"本轮已写入 {record_count} 条资料、导入 {imported_count} 个候选，仍有任务可继续。"
+    return f"本轮资料搜集完成，写入 {record_count} 条资料、导入 {imported_count} 个候选。"
+
+
+def _source_collection_count(value: Any) -> int:
+    return _normalize_int(value, default=0, minimum=0, maximum=100_000)
 
 
 def _source_collection_storage_target_path(team_id: str, run_id: str, target: str) -> Path:

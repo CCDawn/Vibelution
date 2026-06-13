@@ -5,7 +5,7 @@ export type SystemStatusTone = "idle" | "running" | "failed" | "caution";
 export type FrontendSystemState = "connected" | "background" | "offline";
 export type BackendSystemState = "checking" | "healthy" | "offline" | "unhealthy";
 export type RuntimeControllerState = "managed" | "closing" | "unmanaged" | "failed";
-export type ActiveWorkKind = "supervised" | "self" | "chat" | "chat_room";
+export type ActiveWorkKind = "supervised" | "self" | "source_collection" | "chat" | "chat_room";
 
 export type ActiveWorkIndicatorItem = {
   kind: ActiveWorkKind;
@@ -55,6 +55,7 @@ type RuntimeWorkSnapshot = {
       self_evolution_run?: ActiveWorkRunSnapshot | null;
       supervised_evolution_run?: ActiveWorkRunSnapshot | null;
       supervised_worktree_evolution_run?: ActiveWorkRunSnapshot | null;
+      source_collection_run?: ActiveWorkRunSnapshot | null;
     } | null;
     activeItems?: {
       chat_turn?: ActiveWorkRunSnapshot[] | null;
@@ -62,6 +63,7 @@ type RuntimeWorkSnapshot = {
       self_evolution_run?: ActiveWorkRunSnapshot[] | null;
       supervised_evolution_run?: ActiveWorkRunSnapshot[] | null;
       supervised_worktree_evolution_run?: ActiveWorkRunSnapshot[] | null;
+      source_collection_run?: ActiveWorkRunSnapshot[] | null;
     } | null;
   } | null;
   taskSummary?: string | null;
@@ -383,6 +385,7 @@ export function deriveActiveWorkIndicator(
     buildActiveWorkCandidate("supervised", active.supervised_evolution_run, runtime, lang),
     buildActiveWorkCandidate("self", active.self_evolution_run, runtime, lang),
     ...activeWorkCandidatesFromItems("chat_room", activeItems?.chat_room_round, runtime, lang, active.chat_room_round),
+    ...activeWorkCandidatesFromItems("source_collection", activeItems?.source_collection_run, runtime, lang, active.source_collection_run),
     ...activeWorkCandidatesFromItems("chat", activeItems?.chat_turn, runtime, lang, active.chat_turn),
   ].filter((item): item is ActiveWorkIndicatorItem => Boolean(item));
 
@@ -515,6 +518,7 @@ function activeWorkKindLabel(kind: ActiveWorkKind, lang: "zh" | "en"): string {
     return {
       supervised: "Supervised evolution",
       self: "Self evolution",
+      source_collection: "Knowledge collection",
       chat_room: "Agent room",
       chat: "Chat",
     }[kind];
@@ -522,6 +526,7 @@ function activeWorkKindLabel(kind: ActiveWorkKind, lang: "zh" | "en"): string {
   return {
     supervised: "监督进化",
     self: "自进化",
+    source_collection: "知识搜集",
     chat_room: "Agent 群聊",
     chat: "对话",
   }[kind];
@@ -558,6 +563,15 @@ function activeWorkSummary(
   if (kind === "chat_room") {
     return firstTextValue(run, ["topic", "summary", "currentTask"])
       || (lang === "en" ? "Agent room round is active" : "Agent 群聊正在讨论");
+  }
+
+  if (kind === "source_collection") {
+    const topic = firstTextValue(run, ["topic", "title"]);
+    const summary = firstTextValue(run, ["summary", "currentTask"]);
+    if (topic && summary) {
+      return lang === "en" ? `${topic}: ${summary}` : `${topic}：${summary}`;
+    }
+    return summary || topic || (lang === "en" ? "Research team is collecting sources" : "AI 科研团队正在搜集资料");
   }
 
   return firstTextValue(run, ["userMessage", "summary", "currentTask"])
