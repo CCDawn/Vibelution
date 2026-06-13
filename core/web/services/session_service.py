@@ -37,6 +37,7 @@ from core.context.skill_contract import (
 from core.chat.chat_result_contract import build_chat_coding_result_contract
 from core.chat.chat_result_formatter import format_chat_reply
 from core.chat.chat_task_types import trim_lines
+from core.chat.context_assembler import assemble_conversation_context
 from core.chat.skill_registry import build_skill_runtime_context, skill_descriptor_for_log
 from core.chat.slash_commands import SkillSlashCommand, parse_skill_slash_command
 from core.infrastructure.event_bus import EventNames, get_event_bus
@@ -5269,6 +5270,13 @@ def _normalize_messages(conversation_id: str, items: Any) -> list[dict[str, Any]
         role = str(raw.get("role") or "").strip().lower()
         if role not in {"user", "assistant"}:
             continue
+        raw_metadata = raw.get("metadata")
+        if (
+            role == "assistant"
+            and isinstance(raw_metadata, dict)
+            and str(raw_metadata.get("kind") or "").strip() == "checkpoint"
+        ):
+            continue
         content = _sanitize_message_content(role, raw.get("content") or "")
         thought = _normalize_message_thought(raw, role=role)
         mental_snapshot = _normalize_mental_snapshot(raw.get("mental_snapshot") or raw.get("mentalSnapshot"))
@@ -5296,7 +5304,7 @@ def _normalize_messages(conversation_id: str, items: Any) -> list[dict[str, Any]
             entry["attachments"] = attachments
         if references:
             entry["references"] = references
-        metadata = raw.get("metadata")
+        metadata = raw_metadata
         if isinstance(metadata, dict) and metadata:
             entry["metadata"] = dict(metadata)
             if role == "assistant" and str(metadata.get("kind") or "").strip() == "turn_error":
@@ -8640,8 +8648,13 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                 if callable(stop_configurer):
                     stop_configurer(lambda: _get_turn_control_stop_reason(turn_control))
                 raw_history_messages = list(context.get("history_messages") or [])
-                history_messages = _history_messages_for_agent_seed(raw_history_messages)
-                full_history_message_count = len(history_messages)
+                seedable_history_messages = _history_messages_for_agent_seed(raw_history_messages)
+                context_assembly = assemble_conversation_context(
+                    seedable_history_messages,
+                    session_id=session_id,
+                )
+                history_messages = context_assembly.history_messages
+                full_history_message_count = len(seedable_history_messages)
                 static_runtime_context_block = (
                     str(getattr(agent_context_packet, "static_context_block", "") or "").strip()
                     if agent_context_packet is not None
@@ -8744,6 +8757,10 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                         "rawHistoryMessageCount": len(list(context.get("history_messages") or [])),
                         "fullSeedableHistoryMessageCount": full_history_message_count,
                         "seededHistoryMessageCount": len(history_messages),
+                        "historyLedgerEventCount": len(context_assembly.events),
+                        "historyIncludedEventCount": len(context_assembly.included_event_ids),
+                        "historyOmittedEventCount": context_assembly.omitted_event_count,
+                        "historyCheckpointEventId": context_assembly.checkpoint_event_id,
                         "agentRuntimeContextIncluded": bool(static_runtime_context_block),
                         "staticRuntimeContextIncluded": bool(static_runtime_context_block),
                         "dynamicRuntimeContextIncluded": dynamic_runtime_context_included,
@@ -8854,6 +8871,7 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                     attachments=attachments,
                     prompt_cache_partition=prompt_cache_partition,
                 )
+                context_composition["contextAssembly"] = context_assembly.to_composition_patch()
                 context_cache = (
                     context_composition.get("cache")
                     if isinstance(context_composition.get("cache"), dict)
