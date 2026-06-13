@@ -25,6 +25,53 @@ CONFIG_SENSITIVE_FRAGMENTS = {
     "web\\src\\routes\\config",
 }
 
+FRONTEND_TEST_RECOMMENDATIONS = (
+    ("web/src/routes/agentsroute", "npm --prefix web run test -- AgentsRoute.layout.test.ts"),
+    (
+        "web/src/routes/configroute",
+        "npm --prefix web run test -- ConfigRoute.layout.test.ts configRouteLogic.test.ts",
+    ),
+    (
+        "web/src/routes/configroutelogic",
+        "npm --prefix web run test -- ConfigRoute.layout.test.ts configRouteLogic.test.ts",
+    ),
+    ("web/src/routes/teamsroute", "npm --prefix web run test -- TeamsRoute.layout.test.ts"),
+    (
+        "web/src/routes/launcherroute",
+        "npm --prefix web run test -- AppShellNavigationTelemetry.test.ts LauncherRoute.layout.test.ts",
+    ),
+    (
+        "web/src/app/appshell",
+        "npm --prefix web run test -- AppShellNavigationTelemetry.test.ts LauncherRoute.layout.test.ts",
+    ),
+)
+
+PYTEST_RECOMMENDATIONS = (
+    (
+        "tests/test_agent_config_workspace_service.py",
+        "python -m pytest tests/test_agent_config_workspace_service.py -q",
+    ),
+    (
+        "tests/test_launcher_scripts.py",
+        "python -m pytest tests/test_launcher_scripts.py tests/test_runtime_manager.py tests/test_launcher_service.py -q",
+    ),
+    (
+        "tests/test_runtime_manager.py",
+        "python -m pytest tests/test_launcher_scripts.py tests/test_runtime_manager.py tests/test_launcher_service.py -q",
+    ),
+    ("tests/test_launcher_service.py", "python -m pytest tests/test_launcher_service.py -q"),
+    ("tests/test_integration_audit.py", "python -m pytest tests/test_integration_audit.py -q"),
+)
+
+LAUNCHER_RUNTIME_FRAGMENTS = (
+    "core/launcher/",
+    "core/runtime_manager/",
+    "scripts/vibelution_launcher",
+    "scripts/vibelution_desktop_entry",
+)
+
+CHALLENGE_CUP_FRAGMENT = "\u6311\u6218\u676f/"
+
 ACTIVE_STATUSES = {
     "active",
     "claimed",
@@ -78,10 +125,16 @@ class WorktreeAuditItem:
     plus_commits: int
     minus_commits: int
     head_ancestor_of_main: bool
+    main_ancestor_of_head: bool
     touches_config_sensitive: bool
     decision: str
     suggested_action: str
     reasons: list[str]
+    risk_level: str
+    risk_score: int
+    risk_reasons: list[str]
+    merge_method: str
+    recommended_validations: list[str]
 
 
 @dataclass
@@ -233,6 +286,155 @@ def path_is_config_sensitive(path: str, operator_config: Path) -> bool:
     return any(fragment.casefold() in normalized for fragment in CONFIG_SENSITIVE_FRAGMENTS)
 
 
+def normalize_repo_path(path: str) -> str:
+    return path.replace("\\", "/").casefold()
+
+
+def any_path_matches(paths: Iterable[str], fragments: Iterable[str]) -> bool:
+    normalized = [normalize_repo_path(path) for path in paths]
+    return any(fragment.casefold() in path for path in normalized for fragment in fragments)
+
+
+def unique_ordered(values: Iterable[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        if value and value not in seen:
+            result.append(value)
+            seen.add(value)
+    return result
+
+
+def recommend_validations(
+    *,
+    touched_paths: list[str],
+    decision: str,
+    touches_config_sensitive: bool,
+) -> list[str]:
+    commands: list[str] = []
+    normalized = [normalize_repo_path(path) for path in touched_paths]
+    if decision == "cleanup_ready":
+        if touches_config_sensitive:
+            commands.append(
+                "manual: confirm cleanup only; do not edit or restore operator config"
+            )
+        commands.append(
+            "manual: confirm worktree has no unique commits and no active claim before cleanup"
+        )
+        return unique_ordered(commands)
+    if touches_config_sensitive:
+        commands.append(
+            "manual: review config boundary and preserve "
+            "C:\\Users\\17533\\Documents\\Vibelution\\config\\config.toml"
+        )
+        commands.append("python -m pytest tests/test_web_app.py -q -k config_workspace")
+        commands.append(
+            "npm --prefix web run test -- ConfigRoute.layout.test.ts configRouteLogic.test.ts"
+        )
+    for fragment, command in FRONTEND_TEST_RECOMMENDATIONS:
+        if any(fragment in path for path in normalized):
+            commands.append(command)
+    if any(path.startswith("web/") for path in normalized):
+        commands.append("npm --prefix web run build")
+    for fragment, command in PYTEST_RECOMMENDATIONS:
+        if any(fragment in path for path in normalized):
+            commands.append(command)
+    if any_path_matches(touched_paths, LAUNCHER_RUNTIME_FRAGMENTS):
+        commands.append(
+            "python -m pytest tests/test_launcher_scripts.py tests/test_runtime_manager.py tests/test_launcher_service.py -q"
+        )
+    if any(CHALLENGE_CUP_FRAGMENT in path for path in normalized):
+        commands.append("node \u6311\u6218\u676f/build_research_flow_site.mjs")
+    py_paths = [
+        path.replace("\\", "/")
+        for path in touched_paths
+        if normalize_repo_path(path).endswith(".py")
+    ]
+    if any(
+        path in {"scripts/integration_audit.py", "tests/test_integration_audit.py"}
+        for path in py_paths
+    ):
+        commands.append("python -m py_compile scripts/integration_audit.py tests/test_integration_audit.py")
+    elif py_paths:
+        commands.append(f"python -m py_compile {' '.join(py_paths[:10])}")
+    if decision in {"merge_ready", "review_required"}:
+        commands.append("git diff --check")
+    return unique_ordered(commands)
+
+
+def score_risk(
+    *,
+    decision: str,
+    clean: bool,
+    plus_commits: int,
+    touches_config_sensitive: bool,
+    touched_paths: list[str],
+    reasons: list[str],
+) -> tuple[str, int, list[str]]:
+    if decision == "main":
+        return "info", 0, []
+    risk_reasons: list[str] = list(reasons)
+    score = 10
+    if decision == "blocked_active":
+        score = 100
+    elif decision == "review_required":
+        score += 30
+    elif decision == "merge_ready":
+        score += 15
+    elif decision == "cleanup_ready":
+        score += 5
+    if not clean:
+        score += 35
+        risk_reasons.append("dirty_worktree")
+    if touches_config_sensitive:
+        score += 15 if decision == "cleanup_ready" else 35
+        risk_reasons.append("config_sensitive_paths")
+    if plus_commits > 1:
+        score += min(20, plus_commits * 4)
+        risk_reasons.append("multi_commit_branch")
+    if any_path_matches(touched_paths, LAUNCHER_RUNTIME_FRAGMENTS):
+        score += 20
+        risk_reasons.append("launcher_runtime_surface")
+    if any(normalize_repo_path(path).startswith("web/") for path in touched_paths):
+        score += 10
+        risk_reasons.append("frontend_surface")
+    if any(CHALLENGE_CUP_FRAGMENT in normalize_repo_path(path) for path in touched_paths):
+        score += 8
+        risk_reasons.append("generated_research_site_surface")
+    score = min(score, 100)
+    if score >= 90:
+        level = "blocked" if decision == "blocked_active" else "high"
+    elif score >= 60:
+        level = "high"
+    elif score >= 30:
+        level = "medium"
+    else:
+        level = "low"
+    return level, score, unique_ordered(risk_reasons)
+
+
+def choose_merge_method(
+    *,
+    decision: str,
+    clean: bool,
+    plus_commits: int,
+    main_ancestor_of_head: bool,
+) -> str:
+    if decision == "main":
+        return "not_applicable"
+    if decision == "cleanup_ready":
+        return "not_applicable_cleanup_only"
+    if decision == "blocked_active":
+        return "blocked_active_claim"
+    if decision != "merge_ready" or not clean:
+        return "manual_review"
+    if main_ancestor_of_head:
+        return "fast_forward"
+    if plus_commits == 1:
+        return "cherry_pick"
+    return "merge_commit_or_rebase_then_ff"
+
+
 def claim_maps(claims: dict[str, ClaimRef]) -> tuple[dict[str, list[ClaimRef]], dict[str, list[ClaimRef]]]:
     by_worktree: dict[str, list[ClaimRef]] = {}
     by_branch: dict[str, list[ClaimRef]] = {}
@@ -352,8 +554,10 @@ def build_report(
             path_is_config_sensitive(path, operator_config) for path in touched_paths
         )
         head_ancestor_of_main = False
+        main_ancestor_of_head = False
         if not is_main_worktree and head:
             head_ancestor_of_main = is_ancestor(root, head, main_branch)
+            main_ancestor_of_head = is_ancestor(root, main_branch, head)
         reasons = list(cherry_reasons)
         decision, suggested_action, reasons = classify_item(
             is_main_worktree=is_main_worktree,
@@ -365,6 +569,25 @@ def build_report(
             head_ancestor_of_main=head_ancestor_of_main,
             touches_config_sensitive=touches_config_sensitive,
             reasons=reasons,
+        )
+        risk_level, risk_score, risk_reasons = score_risk(
+            decision=decision,
+            clean=clean,
+            plus_commits=plus_commits,
+            touches_config_sensitive=touches_config_sensitive,
+            touched_paths=touched_paths,
+            reasons=reasons,
+        )
+        merge_method = choose_merge_method(
+            decision=decision,
+            clean=clean,
+            plus_commits=plus_commits,
+            main_ancestor_of_head=main_ancestor_of_head,
+        )
+        recommended_validations = recommend_validations(
+            touched_paths=touched_paths,
+            decision=decision,
+            touches_config_sensitive=touches_config_sensitive,
         )
         items.append(
             WorktreeAuditItem(
@@ -383,10 +606,16 @@ def build_report(
                 plus_commits=plus_commits,
                 minus_commits=minus_commits,
                 head_ancestor_of_main=head_ancestor_of_main,
+                main_ancestor_of_head=main_ancestor_of_head,
                 touches_config_sensitive=touches_config_sensitive,
                 decision=decision,
                 suggested_action=suggested_action,
                 reasons=reasons,
+                risk_level=risk_level,
+                risk_score=risk_score,
+                risk_reasons=risk_reasons,
+                merge_method=merge_method,
+                recommended_validations=recommended_validations,
             )
         )
 
@@ -465,6 +694,84 @@ def format_report(report: IntegrationAuditReport) -> str:
             lines.append(f"    worktree: {item.worktree}")
             lines.append(f"    claims: {claims}")
             lines.append(f"    action: {item.suggested_action}; reasons: {reasons}")
+            lines.append(
+                f"    risk: {item.risk_level} score={item.risk_score}; "
+                f"merge_method: {item.merge_method}"
+            )
+            if item.recommended_validations:
+                lines.append(
+                    f"    validations: {' | '.join(item.recommended_validations)}"
+                )
+    return "\n".join(lines)
+
+
+def format_merge_plan(report: IntegrationAuditReport) -> str:
+    lines = [
+        "READ-ONLY merge plan",
+        f"root: {report.root}",
+        f"main: {report.main_branch} @ {report.main_head[:12]}",
+        f"operator config source of truth: {report.operator_config}",
+        "",
+        "This plan does not merge, delete, or edit config files.",
+    ]
+    if report.duplicate_ready_groups:
+        lines.append("")
+        lines.append("Duplicate ready claims:")
+        for group in report.duplicate_ready_groups:
+            lines.append(
+                f"  {group.branch} @ {group.head[:12]} claims={','.join(group.claim_ids)}"
+            )
+    merge_ready = sorted(
+        [item for item in report.items if item.decision == "merge_ready"],
+        key=lambda item: (item.risk_score, item.branch, item.worktree),
+    )
+    lines.append("")
+    lines.append("Merge candidates:")
+    if not merge_ready:
+        lines.append("  none")
+    for index, item in enumerate(merge_ready, start=1):
+        claims = ",".join(item.claim_ids) if item.claim_ids else "-"
+        reasons = ",".join(item.risk_reasons or item.reasons) if (item.risk_reasons or item.reasons) else "-"
+        validations = item.recommended_validations or ["git diff --check"]
+        lines.append(
+            f"  {index}. {item.branch} @ {item.head[:12]} "
+            f"risk={item.risk_level}/{item.risk_score} method={item.merge_method}"
+        )
+        lines.append(f"     worktree: {item.worktree}")
+        lines.append(f"     claims: {claims}")
+        lines.append(f"     reasons: {reasons}")
+        lines.append(f"     validations: {' | '.join(validations)}")
+    review_required = sorted(
+        [item for item in report.items if item.decision == "review_required"],
+        key=lambda item: (-item.risk_score, item.branch, item.worktree),
+    )
+    lines.append("")
+    lines.append("Manual review queue:")
+    if not review_required:
+        lines.append("  none")
+    for item in review_required:
+        claims = ",".join(item.claim_ids) if item.claim_ids else "-"
+        reasons = ",".join(item.risk_reasons or item.reasons) if (item.risk_reasons or item.reasons) else "-"
+        lines.append(
+            f"  {item.branch} @ {item.head[:12]} "
+            f"risk={item.risk_level}/{item.risk_score} action={item.suggested_action}"
+        )
+        lines.append(f"     claims: {claims}; reasons: {reasons}")
+        if item.recommended_validations:
+            lines.append(f"     validations: {' | '.join(item.recommended_validations)}")
+    blocked = [item for item in report.items if item.decision == "blocked_active"]
+    cleanup_ready = [item for item in report.items if item.decision == "cleanup_ready"]
+    lines.append("")
+    lines.append(f"Blocked active worktrees: {len(blocked)}")
+    for item in sorted(blocked, key=lambda item: (item.branch, item.worktree)):
+        claims = ",".join(item.claim_ids) if item.claim_ids else "-"
+        lines.append(f"  {item.branch} @ {item.head[:12]} claims={claims}")
+    lines.append("")
+    lines.append(f"Cleanup-ready worktrees: {len(cleanup_ready)}")
+    for item in sorted(cleanup_ready, key=lambda item: (item.branch, item.worktree))[:10]:
+        lines.append(f"  {item.branch} @ {item.head[:12]} method={item.merge_method}")
+    if len(cleanup_ready) > 10:
+        lines.append(f"  ... {len(cleanup_ready) - 10} more")
     return "\n".join(lines)
 
 
@@ -481,6 +788,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         default=Path.home() / "Documents" / "Vibelution" / "config" / "config.toml",
     )
     parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON.")
+    parser.add_argument(
+        "--merge-plan",
+        action="store_true",
+        help="Emit a read-only prioritized merge plan.",
+    )
     return parser.parse_args(argv)
 
 
@@ -492,7 +804,12 @@ def main(argv: list[str] | None = None) -> int:
         main_branch=args.main_branch,
         operator_config=args.operator_config,
     )
-    output = report_to_json(report) if args.json else format_report(report)
+    if args.json:
+        output = report_to_json(report)
+    elif args.merge_plan:
+        output = format_merge_plan(report)
+    else:
+        output = format_report(report)
     print(output)
     return 0
 
