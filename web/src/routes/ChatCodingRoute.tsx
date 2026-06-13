@@ -106,6 +106,7 @@ import {
   shouldAcceptSessionStreamEvent,
 } from "./chatSessionState";
 import {
+  SESSION_INDEX_PAGE_SIZE,
   captureSessionIndexCacheSnapshots,
   restoreSessionIndexCacheSnapshots,
   updateSessionSummaryCaches,
@@ -3334,11 +3335,13 @@ export function ChatCodingRoute() {
   const sessionIndexHasMore = rawSessionsQuery.hasMore;
   const sessionIndexLoadMoreLabel = rawSessionsQuery.isLoadingMore
     ? (lang === "zh" ? "加载中" : "Loading")
-    : (lang === "zh" ? "加载更多" : "Load more");
+    : (lang === "zh" ? "加载更多会话" : "Load more chats");
+  const sessionIndexFullyLoadedLabel = lang === "zh" ? "已加载全部会话" : "All chats loaded";
   const sessionIndexProgressLabel =
     sessionIndexTotalEstimate > sessionIndexLoadedCount
       ? `${numberFormatter.format(sessionIndexLoadedCount)} / ${numberFormatter.format(sessionIndexTotalEstimate)}`
       : numberFormatter.format(sessionIndexLoadedCount);
+  const sessionIndexProgressVisible = sessionIndexHasMore || sessionIndexTotalEstimate > SESSION_INDEX_PAGE_SIZE;
 
   function formatTime(value: string) {
     if (!value) {
@@ -5820,6 +5823,11 @@ export function ChatCodingRoute() {
                   <span>{sessionIndexLoadMoreLabel}</span>
                   <strong>{sessionIndexProgressLabel}</strong>
                 </button>
+              ) : sessionIndexProgressVisible ? (
+                <div className={styles.sessionLoadMoreStatus} role="status">
+                  <span>{sessionIndexFullyLoadedLabel}</span>
+                  <strong>{sessionIndexProgressLabel}</strong>
+                </div>
               ) : null}
               {sessionContextMenu && contextMenuSession ? (
                 <SessionContextMenu
