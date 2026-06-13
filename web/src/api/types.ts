@@ -5608,6 +5608,18 @@ export type ConfigModelPresetOption = {
   model: Record<string, unknown>;
 };
 
+export type ConfigProviderPresetOption = {
+  provider_preset_id: string;
+  label: string;
+  vendor_id: string;
+  vendor_label: string;
+  category?: "official" | "relay" | "openai_compatible" | "local" | string;
+  provider_id: string;
+  source_preset_id: string;
+  provider: Record<string, unknown>;
+  default_model: Record<string, unknown>;
+};
+
 export type ConfigModelOption = {
   model_id: string;
   source: string;
@@ -5646,6 +5658,7 @@ export type ConfigWorkspace = ConfigSummary & {
   editorSections: ConfigEditorSection[];
   editorMeta: Record<string, ConfigEditorMeta>;
   modelPresetOptions: ConfigModelPresetOption[];
+  providerPresetOptions: ConfigProviderPresetOption[];
   modelOptions: ConfigModelOption[];
 };
 

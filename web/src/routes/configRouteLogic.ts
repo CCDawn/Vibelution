@@ -1,4 +1,11 @@
-import type { AgentInstance, ConfigDraftMeta, ConfigModelOption, ConfigModelPresetOption, ResearchAgentConfig } from "../api/types";
+import type {
+  AgentInstance,
+  ConfigDraftMeta,
+  ConfigModelOption,
+  ConfigModelPresetOption,
+  ConfigProviderPresetOption,
+  ResearchAgentConfig,
+} from "../api/types";
 
 export type PublicConfigShape = Record<string, unknown>;
 
@@ -8,6 +15,12 @@ export type ModelPresetGroup = {
   id: ModelPresetGroupId;
   label: string;
   presets: ConfigModelPresetOption[];
+};
+
+export type ProviderVendorGroup = {
+  id: string;
+  label: string;
+  templates: ConfigProviderPresetOption[];
 };
 
 export type ModelPresetGroupLabels = Record<ModelPresetGroupId, string>;
@@ -442,6 +455,55 @@ export function groupModelPresets(
     groupById.get(presetCategory(preset))?.presets.push(preset);
   }
   return groups.filter((group) => group.presets.length);
+}
+
+export function providerPresetCategory(preset: ConfigProviderPresetOption): ModelPresetGroupId {
+  return presetCategory({
+    category: preset.category,
+    label: preset.label,
+    model: preset.default_model,
+    model_id: preset.source_preset_id,
+    preset_id: preset.source_preset_id,
+    provider: preset.provider,
+    provider_id: preset.provider_id,
+  });
+}
+
+export function groupProviderPresetsByVendor(presets: ConfigProviderPresetOption[]): ProviderVendorGroup[] {
+  const groups: ProviderVendorGroup[] = [];
+  const groupById = new Map<string, ProviderVendorGroup>();
+  for (const preset of presets) {
+    const vendorId = getString(preset.vendor_id) || providerPresetCategory(preset);
+    const vendorLabel = getString(preset.vendor_label) || vendorId;
+    let group = groupById.get(vendorId);
+    if (!group) {
+      group = { id: vendorId, label: vendorLabel, templates: [] };
+      groupById.set(vendorId, group);
+      groups.push(group);
+    }
+    group.templates.push(preset);
+  }
+  return groups.filter((group) => group.templates.length);
+}
+
+export function selectModelScenarioProviderPresetId(
+  scenario: ModelScenarioId,
+  presets: ConfigProviderPresetOption[],
+): string {
+  if (scenario === "manual") {
+    return "";
+  }
+  const byId = (presetId: string) => presets.find((preset) => preset.provider_preset_id === presetId)?.provider_preset_id ?? "";
+  if (scenario === "image") {
+    return byId("relay_image") || byId("openai_image") || presets.find((preset) => preset.label.toLowerCase().includes("image"))?.provider_preset_id || "";
+  }
+  if (scenario === "relay") {
+    return byId("relay_openai") || byId("custom_relay_responses") || presets.find((preset) => providerPresetCategory(preset) === "relay")?.provider_preset_id || "";
+  }
+  if (scenario === "local") {
+    return byId("local_main") || presets.find((preset) => providerPresetCategory(preset) === "local")?.provider_preset_id || "";
+  }
+  return byId("relay_openai") || byId("openai_main") || presets[0]?.provider_preset_id || "";
 }
 
 export function selectModelScenarioPresetId(
