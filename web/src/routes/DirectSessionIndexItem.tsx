@@ -1,4 +1,4 @@
-import { Check, X } from "lucide-react";
+import { Bot, Check, CircleDot, Clock3, Cpu, MessageCircle, X } from "lucide-react";
 import type { DragEvent, KeyboardEvent, MouseEvent } from "react";
 
 import type { AgentInstance, SessionSummary } from "../api/types";
@@ -31,34 +31,58 @@ export function sessionListTitle(
   ).trim();
 }
 
-function compactAgentIdentifier(value: unknown) {
-  const raw = String(value ?? "").trim();
-  if (!raw) {
-    return "";
-  }
-  const withoutPrefix = raw.replace(/^agent[-_]/i, "");
-  if (withoutPrefix.length <= 18) {
-    return withoutPrefix;
-  }
-  return withoutPrefix.slice(-12);
+function hasAsciiLetter(value: string) {
+  return /[A-Za-z]/.test(value);
+}
+
+function hasCjkText(value: string) {
+  return /[\u3400-\u9fff]/.test(value);
 }
 
 export function sessionAgentMetaLabel(session: Pick<SessionSummary, "agentCode" | "agentId">) {
-  const code = String(session.agentCode ?? "").trim();
-  if (code) {
-    return `Agent ${code}`;
-  }
-  const compactId = compactAgentIdentifier(session.agentId);
-  return compactId ? `Agent ${compactId}` : "";
+  void session;
+  return "";
 }
 
-export function showSessionFunctionLabel(display: AgentDisplayInfo) {
+export function showSessionFunctionLabel(display: AgentDisplayInfo, lang: "zh" | "en" = "zh") {
   const label = String(display.functionLabel ?? "").trim();
   if (!label) {
     return false;
   }
   const normalized = label.toLowerCase();
+  if (lang === "zh" && (hasAsciiLetter(label) || !hasCjkText(label))) {
+    return false;
+  }
   return !(display.tone === "chat" && (label === "会话入口" || normalized === "chat entry"));
+}
+
+export function sessionModelTooltip(modelLabel: string | undefined, lang: "zh" | "en") {
+  const label = String(modelLabel ?? "").trim();
+  if (!label) {
+    return "";
+  }
+  if (lang === "zh") {
+    return hasAsciiLetter(label) ? "模型已绑定" : `模型：${label}`;
+  }
+  return `Model: ${label}`;
+}
+
+export function showSessionSummaryInline(summary: string | undefined, lang: "zh" | "en", sessionIsChild: boolean) {
+  const text = String(summary ?? "").trim();
+  if (!text) {
+    return false;
+  }
+  const fallbackSummaries = new Set([
+    lang === "zh" ? "暂无摘要" : "No summary yet",
+    lang === "zh" ? "子对话独立工作中" : "Independent child session",
+  ]);
+  if (fallbackSummaries.has(text)) {
+    return false;
+  }
+  if (lang === "zh" && hasAsciiLetter(text)) {
+    return false;
+  }
+  return sessionIsChild;
 }
 
 export function isChildSession(session: SessionSummary | undefined | null) {
@@ -195,7 +219,9 @@ export function DirectSessionIndexItem({
   const sessionIsChild = isChildSession(session);
   const sessionStatus = sessionIsChild ? (session.childStatus || session.currentPhase || session.status) : session.status;
   const sessionAgentMeta = sessionAgentMetaLabel(session);
-  const sessionFunctionVisible = showSessionFunctionLabel(sessionDisplay);
+  const sessionFunctionVisible = showSessionFunctionLabel(sessionDisplay, lang);
+  const sessionModelTitle = sessionModelTooltip(sessionDisplay.modelLabel, lang);
+  const sessionSummaryVisible = showSessionSummaryInline(sessionSummary, lang, sessionIsChild);
   const sessionItemClassName = active
     ? `${styles.sessionItem} ${styles.directSessionItem} ${sessionIsChild ? styles.childTopLevelSessionItem : ""} ${styles.sessionItemActive}`
     : `${styles.sessionItem} ${styles.directSessionItem} ${sessionIsChild ? styles.childTopLevelSessionItem : ""}`;
@@ -203,6 +229,8 @@ export function DirectSessionIndexItem({
   const renameLabel = t(sessionIsChild ? "renameTask" : isAgentRootSession(session) ? "renameAgent" : "renameSession");
   const saveLabel = t(sessionIsChild ? "saveTaskName" : isAgentRootSession(session) ? "saveAgentName" : "saveSessionName");
   const kindLabel = sessionIsChild ? (lang === "zh" ? "子对话" : "Child") : (lang === "zh" ? "会话" : "Chat");
+  const statusText = statusLabel(sessionStatus);
+  const statusTitle = lang === "zh" && hasAsciiLetter(statusText) ? "状态" : `${lang === "zh" ? "状态：" : ""}${statusText}`;
 
   function handleTitleKeyDown(event: KeyboardEvent<HTMLInputElement>) {
     if (event.key === "Enter") {
@@ -236,26 +264,32 @@ export function DirectSessionIndexItem({
                 aria-label={renameLabel}
               />
               {active ? <span className={styles.sessionCurrentBadge}>{t("currentSession")}</span> : null}
-              <span className={styles.sessionState}>{statusLabel(sessionStatus)}</span>
+              <span className={styles.sessionState} title={statusTitle} aria-label={statusTitle}>
+                <CircleDot size={10} aria-hidden="true" />
+              </span>
             </span>
-            <span className={styles.sessionItemSummary} title={sessionSummary}>
-              {sessionSummary}
-            </span>
+            {sessionSummaryVisible ? (
+              <span className={styles.sessionItemSummary} title={sessionSummary}>
+                {sessionSummary}
+              </span>
+            ) : null}
             <span className={styles.conversationMetaRow}>
-              <span className={`${styles.conversationKindBadge} ${sessionIsChild ? styles.conversationKindBadgeChild : styles.conversationKindBadgeDirect}`}>
-                {kindLabel}
+              <span className={`${styles.conversationKindBadge} ${sessionIsChild ? styles.conversationKindBadgeChild : styles.conversationKindBadgeDirect}`} title={kindLabel} aria-label={kindLabel}>
+                <MessageCircle size={10} aria-hidden="true" />
               </span>
               {sessionAgentMeta ? <span>{sessionAgentMeta}</span> : null}
               {sessionFunctionVisible ? (
-                <span className={`${styles.agentRoleTag} ${styles[agentRoleClass(sessionDisplay.tone)]}`}>
+                <span className={`${styles.agentRoleTag} ${styles[agentRoleClass(sessionDisplay.tone)]}`} title={sessionDisplay.functionLabel}>
+                  <Bot size={10} aria-hidden="true" />
                   {sessionDisplay.functionLabel}
                 </span>
               ) : null}
-              {sessionDisplay.modelLabel ? (
-                <span className={styles.agentModelTag} title={sessionDisplay.modelLabel}>
-                  {sessionDisplay.modelLabel}
+              {sessionModelTitle ? (
+                <span className={styles.agentModelTag} title={sessionModelTitle} aria-label={sessionModelTitle}>
+                  <Cpu size={10} aria-hidden="true" />
                 </span>
               ) : null}
+              <Clock3 size={10} aria-hidden="true" />
               <time>{formatTime(session.updatedAt || session.lastActive)}</time>
             </span>
             {missingAgentMessage ? <span className={styles.agentMissingLine}>{missingAgentMessage}</span> : null}
@@ -275,26 +309,32 @@ export function DirectSessionIndexItem({
             <span className={styles.conversationTitleRow}>
               <span className={styles.sessionItemTitle}>{sessionTitle}</span>
               {active ? <span className={styles.sessionCurrentBadge}>{t("currentSession")}</span> : null}
-              <span className={styles.sessionState}>{statusLabel(sessionStatus)}</span>
+              <span className={styles.sessionState} title={statusTitle} aria-label={statusTitle}>
+                <CircleDot size={10} aria-hidden="true" />
+              </span>
             </span>
-            <span className={styles.sessionItemSummary} title={sessionSummary}>
-              {sessionSummary}
-            </span>
+            {sessionSummaryVisible ? (
+              <span className={styles.sessionItemSummary} title={sessionSummary}>
+                {sessionSummary}
+              </span>
+            ) : null}
             <span className={styles.conversationMetaRow}>
-              <span className={`${styles.conversationKindBadge} ${sessionIsChild ? styles.conversationKindBadgeChild : styles.conversationKindBadgeDirect}`}>
-                {kindLabel}
+              <span className={`${styles.conversationKindBadge} ${sessionIsChild ? styles.conversationKindBadgeChild : styles.conversationKindBadgeDirect}`} title={kindLabel} aria-label={kindLabel}>
+                <MessageCircle size={10} aria-hidden="true" />
               </span>
               {sessionAgentMeta ? <span>{sessionAgentMeta}</span> : null}
               {sessionFunctionVisible ? (
-                <span className={`${styles.agentRoleTag} ${styles[agentRoleClass(sessionDisplay.tone)]}`}>
+                <span className={`${styles.agentRoleTag} ${styles[agentRoleClass(sessionDisplay.tone)]}`} title={sessionDisplay.functionLabel}>
+                  <Bot size={10} aria-hidden="true" />
                   {sessionDisplay.functionLabel}
                 </span>
               ) : null}
-              {sessionDisplay.modelLabel ? (
-                <span className={styles.agentModelTag} title={sessionDisplay.modelLabel}>
-                  {sessionDisplay.modelLabel}
+              {sessionModelTitle ? (
+                <span className={styles.agentModelTag} title={sessionModelTitle} aria-label={sessionModelTitle}>
+                  <Cpu size={10} aria-hidden="true" />
                 </span>
               ) : null}
+              <Clock3 size={10} aria-hidden="true" />
               <time>{formatTime(session.updatedAt || session.lastActive)}</time>
             </span>
             {missingAgentMessage ? <span className={styles.agentMissingLine}>{missingAgentMessage}</span> : null}

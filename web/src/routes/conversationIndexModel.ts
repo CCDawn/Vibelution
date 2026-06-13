@@ -193,12 +193,12 @@ export function conversationGroupLabel(groupKey: ConversationIndexGroupKey, lang
   const labels: Record<ConversationIndexGroupKey, { zh: string; en: string }> = {
     user: { zh: "用户会话", en: "User chats" },
     group: { zh: "群聊", en: "Group chats" },
-    research: { zh: "科研 Agent", en: "Research agents" },
-    selfEvolution: { zh: "自进化 Agent", en: "Self-evolution agents" },
-    supervisedEvolution: { zh: "监督进化 Agent", en: "Supervised agents" },
+    research: { zh: "科研助手", en: "Research agents" },
+    selfEvolution: { zh: "自进化助手", en: "Self-evolution agents" },
+    supervisedEvolution: { zh: "监督进化助手", en: "Supervised agents" },
     teams: { zh: "团队", en: "Teams" },
     standaloneGroups: { zh: "未归属群聊", en: "Standalone groups" },
-    other: { zh: "其他 Agent", en: "Other agents" },
+    other: { zh: "其他助手", en: "Other agents" },
   };
   return labels[groupKey][lang];
 }

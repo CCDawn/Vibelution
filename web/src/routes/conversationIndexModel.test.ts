@@ -103,6 +103,10 @@ describe("conversationIndexModel", () => {
   it("classifies and labels conversation groups", () => {
     expect(classifyConversation(conversation({ agentPrimaryMode: "research" }))).toBe("research");
     expect(classifyConversation(conversation({ title: "自进化 Agent" }))).toBe("selfEvolution");
+    expect(conversationGroupLabel("research", "zh")).toBe("科研助手");
+    expect(conversationGroupLabel("selfEvolution", "zh")).toBe("自进化助手");
+    expect(conversationGroupLabel("supervisedEvolution", "zh")).toBe("监督进化助手");
+    expect(conversationGroupLabel("other", "zh")).toBe("其他助手");
     expect(conversationGroupLabel("standaloneGroups", "zh")).toBe("未归属群聊");
   });
 

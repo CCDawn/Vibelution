@@ -558,11 +558,11 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("isProjectAgentBusEventRevoked(event)");
     expect(routeSource).toContain("handleRevokeProjectBusMessage(event.eventId)");
     expect(routeSource).toContain("projectBusInterruptTargets");
-    expect(routeSource).toContain("Agent 通知流");
+    expect(routeSource).toContain("助手通知流");
     expect(routeSource).toContain("它不是团队群聊");
     expect(routeSource).toContain("全局广播/私信投递记录");
     expect(routeSource).toContain("不带 @ 默认投递全体");
-    expect(routeSource).toContain("打断目标 Agent");
+    expect(routeSource).toContain("打断目标助手");
     expect(routeSource).toContain("buildChatMentionTargets(agentsQuery.data ?? [])");
     expect(routeSource).toContain("tokenizeChatMentions(text, chatMentionTargets)");
     expect(routeSource).toContain("handleOpenMentionTarget(segment.target)");
@@ -832,7 +832,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.conversationKindBadgeChild).toBeTypeOf("string");
   });
 
-  it("renders a QQ-style tree with direct sessions separate from Team-owned rooms", () => {
+  it("renders a compact QQ-style tree with direct sessions separate from Team-owned rooms", () => {
     expect(routeSource).toContain("fetchJson<TeamListPayload>(\"/api/teams\")");
     expect(routeSource).toContain("queryKeys.teams()");
     expect(routeSource).toContain("linkedTeamRoomIds");
@@ -842,8 +842,11 @@ describe("ChatCodingRoute layout contract", () => {
     expect(conversationIndexTreeSource).toContain("GroupConversationIndexItem");
     expect(groupSessionIndexItemsSource).toContain("export function teamStatusLabel");
     expect(groupSessionIndexItemsSource).toContain("teamStatusLabel(team.status, lang, statusLabel)");
-    expect(groupSessionIndexItemsSource).toContain("team.linkedChatRoom?.title");
-    expect(groupSessionIndexItemsSource).toContain("team.members ?? []");
+    expect(groupSessionIndexItemsSource).toContain("CircleDot");
+    expect(groupSessionIndexItemsSource).toContain("Clock3");
+    expect(groupSessionIndexItemsSource).toContain("teamMemberPreview(team, lang)");
+    expect(groupSessionIndexItemsSource).not.toContain("team.linkedChatRoom?.title");
+    expect(groupSessionIndexItemsSource).not.toContain("team.members ?? []");
     expect(groupSessionIndexItemsSource).toContain("team.teamCategory");
     expect(groupSessionIndexItemsSource).toContain("team.teamKind");
     expect(conversationIndexModelSource).toContain("team.teamSource");
@@ -851,11 +854,12 @@ describe("ChatCodingRoute layout contract", () => {
     expect(conversationIndexModelSource).toContain("isDiscussionTeam");
     expect(conversationIndexModelSource).toContain("NON_DISCUSSION_TEAM_IDS");
     expect(conversationIndexModelSource).toContain("supervised-evolution-team");
-    expect(groupSessionIndexItemsSource).toContain("群成员");
-    expect(groupSessionIndexItemsSource).toContain("团队分类");
+    expect(groupSessionIndexItemsSource).toContain("成员：");
+    expect(groupSessionIndexItemsSource).not.toContain("群成员");
+    expect(groupSessionIndexItemsSource).not.toContain("团队分类");
     expect(groupSessionIndexItemsSource).toContain("团队群聊");
     expect(groupSessionIndexItemsSource).toContain("待绑定");
-    expect(groupSessionIndexItemsSource).toContain("styles.teamTreeLabelRow");
+    expect(groupSessionIndexItemsSource).not.toContain("styles.teamTreeLabelRow");
     expect(conversationIndexTreeSource).toContain("`/teams?team=${encodeURIComponent(team.teamId)}`");
     expect(conversationIndexTreeSource).toContain("未绑定团队的群聊");
     expect(conversationIndexTreeSource).toContain("onToggleConversationGroup(\"teams\")");
@@ -865,8 +869,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(conversationIndexTreeSource).toContain("conversationGroupLabel(\"teams\"");
     expect(conversationIndexTreeSource).toContain("conversationGroupLabel(\"standaloneGroups\"");
     expect(conversationIndexTreeSource).toContain("className={styles.teamTreeGroup}");
-    expect(groupSessionIndexItemsSource).toContain("styles.teamTreeChildren");
-    expect(groupSessionIndexItemsSource).toContain("styles.teamTreeChild");
+    expect(groupSessionIndexItemsSource).not.toContain("styles.teamTreeChildren");
+    expect(groupSessionIndexItemsSource).not.toContain("styles.teamTreeChild");
 
     expect(routeStyles.conversationGroupHeader).toBeTypeOf("string");
     expect(routeStyles.teamTreeGroup).toBeTypeOf("string");
@@ -989,8 +993,10 @@ describe("ChatCodingRoute layout contract", () => {
     expect(directSessionIndexListSource).toContain("sessionComposerErrors[session.id]");
     expect(directSessionIndexItemSource).toContain("const sessionAgentMeta = sessionAgentMetaLabel(session)");
     expect(directSessionIndexItemSource).toContain("export function sessionAgentMetaLabel");
-    expect(directSessionIndexItemSource).toContain("return `Agent ${code}`;");
+    expect(directSessionIndexItemSource).toContain("return \"\";");
     expect(directSessionIndexItemSource).toContain("export function showSessionFunctionLabel");
+    expect(directSessionIndexItemSource).toContain("sessionModelTooltip");
+    expect(directSessionIndexItemSource).toContain("showSessionSummaryInline");
     expect(directSessionIndexItemSource).toContain('label === "会话入口"');
     expect(directSessionIndexItemSource).toContain("const sessionTitle = sessionListTitle(session) || sessionDisplay.name");
     expect(routeSource).toContain("agentDisplayName: title");
