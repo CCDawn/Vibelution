@@ -198,6 +198,40 @@ Do not perform broad formatting, opportunistic cleanup, renaming, or splitting i
 - Terminal-popup regressions need automated locks, not only documented lessons: add source or AST tests that forbid naked runtime Git subprocess paths, and add behavior tests for the no-console helper or source-signature freshness path that closed the bug.
 - When a terminal-popup investigation finds interactive Git editor chains such as `git merge --continue -> sh -> vim .git/COMMIT_EDITMSG`, first verify repository state (`MERGE_HEAD`, `git status`) before killing anything. Treat stale editor processes as residual cleanup only after confirming no active merge or commit operation exists.
 
+### 8.1 Rust Accelerator Boundary
+
+Python remains the primary runtime for Vibelution business logic, Agent orchestration, web APIs, tests, and evolution workflows. Rust is allowed only as a bounded accelerator layer, not as a replacement for product semantics or the main Agent runtime.
+
+Rust may be introduced only when all of these conditions are true:
+
+- the task is deterministic and side-effect bounded;
+- the interface is stable and callable through JSON, CLI, WASM, or a narrow FFI adapter;
+- a Python fallback or compatibility path exists unless a separate architecture decision explicitly removes it;
+- focused parity tests compare Rust output against Python expectations or stored fixtures;
+- runtime logs, benchmarks, or SQLite/file forensics show a real bottleneck;
+- the expected gain is at least 3x on representative local data, or the Rust helper removes a Windows lifecycle failure mode that Python/PowerShell cannot reliably close;
+- the module does not own product semantics, Agent policy, LLM routing, persistence authority, or evolution selection decisions.
+
+Recommended Rust areas:
+
+- runtime-scene and JSONL indexing, filtering, timeline aggregation, and slow-event summaries;
+- large file and directory scanning for reset summaries, memory overview inputs, workspace snapshots, and runtime package metadata;
+- Git memory maintenance helpers, including worktree snapshot pruning plans, SQLite integrity checks, compact/vacuum preflight, and large-table statistics;
+- Windows process-tree and port-owner probes for Launcher and Runtime Manager diagnostics;
+- high-frequency text parsing, prompt segmentation, bounded diff scanning, and log redaction when the format is stable;
+- WASM computation helpers for heavy visualization layout, graph math, or particle simulation data preparation;
+- security-oriented path normalization, command classification, archive/media probing, and allowlist/denylist matching helpers.
+
+Avoid Rust for:
+
+- Agent Turn orchestration, Tool Registry ownership, Tool Policy decisions, or permission governance;
+- LLM invocation, prompt-cache policy, model routing, provider fallback, or message-shape adaptation;
+- FastAPI route/service ownership, Pydantic DTOs, frontend API contracts, or React application logic;
+- Self-Evolution, Supervised Evolution, Selection Policy, or any module whose product semantics are still actively changing;
+- Launcher or Runtime Manager top-level lifecycle ownership unless a separate migration plan proves parity, fallback, logging, and rollback behavior.
+
+Any Rust accelerator must report its integration path, fallback behavior, validation command, runtime refresh impact, packaging impact, and version-impact judgment before merge.
+
 ## 9. Frontend Standards
 
 Frontend changes under `web/` should be TypeScript by default:
