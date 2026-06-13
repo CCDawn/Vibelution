@@ -223,6 +223,10 @@
   gap: 7px;
 }
 
+.worktreeActionGate {
+  padding-block: 7px;
+}
+
 .worktreeReviewGate .inlineAction {
   min-width: 0;
   min-height: 34px;
