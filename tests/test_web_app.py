@@ -15968,6 +15968,14 @@ def test_evolution_workbench_route_exposes_dataset_choices_and_saved_state(tmp_p
     assert terminal_core["officialVerifierStatus"] == "harbor_pending"
     assert terminal_core["officialScoreAvailable"] is False
     assert "不是 Terminal-Bench 官方成绩" in terminal_core["usabilityReason"]
+    agent_judged = next(item for item in payload["datasets"] if item["name"] == "terminal_bench_agent_judged")
+    assert agent_judged["effective"] is True
+    assert agent_judged["selectable"] is True
+    assert agent_judged["adapterStatus"] == "agent_harness_ready"
+    assert agent_judged["evaluationMode"] == "agent_judged"
+    assert agent_judged["officialVerifierStatus"] == "not_required"
+    assert agent_judged["officialScoreAvailable"] is False
+    assert "纯 agent" in agent_judged["usabilityReason"]
     assert payload["activeRun"] is None
 
 
@@ -16405,6 +16413,10 @@ def test_workbench_dataset_list_backfills_new_builtin_datasets(tmp_path, monkeyp
     agent_judged_row = next(item for item in rows if item["name"] == "terminal_bench_agent_judged")
     assert agent_judged_row["adapterStatus"] == "agent_harness_ready"
     assert agent_judged_row["selectable"] is True
+    assert agent_judged_row["usabilityStatus"] == "agent_harness_ready"
+    assert agent_judged_row["evaluationMode"] == "agent_judged"
+    assert agent_judged_row["officialVerifierStatus"] == "not_required"
+    assert agent_judged_row["officialScoreAvailable"] is False
     assert core_row["usabilityStatus"] == "custom_harness_ready"
     assert core_row["officialVerifierStatus"] == "harbor_pending"
     assert core_row["officialScoreAvailable"] is False
