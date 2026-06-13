@@ -2857,6 +2857,7 @@ def test_repair_agent_directory_creates_protected_knowledge_steward_agent(tmp_pa
     tool_policy = steward["toolPolicy"]
     assert tool_policy["allowedTools"] == [
         "agent_message_tool",
+        "unified_knowledge_search_tool",
         "knowledge_query_tool",
         "knowledge_proposal_tool",
         "knowledge_ingestion_tool",
@@ -2873,6 +2874,7 @@ def test_repair_agent_directory_creates_protected_knowledge_steward_agent(tmp_pa
         "knowledge_governance_plan_tool",
         "knowledge_steward_workbench_tool",
         "knowledge_steward_recommendations_tool",
+        "unified_knowledge_search_tool",
         "knowledge_query_tool",
         "knowledge_rating_suggestion_tool",
     ]

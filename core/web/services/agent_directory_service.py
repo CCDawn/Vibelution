@@ -203,6 +203,7 @@ EXPLICIT_TOOL_POLICY_REQUIRED_TOOLS = {
     "knowledge_governance_plan_tool",
     "knowledge_query_tool",
     "knowledge_rag_retrieve_tool",
+    "unified_knowledge_search_tool",
     "knowledge_operations_health_tool",
     "knowledge_rating_suggestion_tool",
     "knowledge_steward_recommendations_tool",
@@ -3454,6 +3455,7 @@ def _knowledge_steward_tool_policy() -> dict[str, Any]:
             **default_tool_policy(KNOWLEDGE_STEWARD_TOOL_POLICY_ID),
             "allowedTools": [
                 "agent_message_tool",
+                "unified_knowledge_search_tool",
                 "knowledge_query_tool",
                 "knowledge_proposal_tool",
                 "knowledge_ingestion_tool",
@@ -3470,6 +3472,7 @@ def _knowledge_steward_tool_policy() -> dict[str, Any]:
                 "knowledge_governance_plan_tool",
                 "knowledge_steward_workbench_tool",
                 "knowledge_steward_recommendations_tool",
+                "unified_knowledge_search_tool",
                 "knowledge_query_tool",
                 "knowledge_rating_suggestion_tool",
             ],

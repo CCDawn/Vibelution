@@ -101,6 +101,8 @@ class TestToolExecutorInit:
         assert "research_knowledge_query_tool" in llm_names
         assert "knowledge_rag_retrieve_tool" in canonical_names
         assert "knowledge_rag_retrieve_tool" in llm_names
+        assert "unified_knowledge_search_tool" in canonical_names
+        assert "unified_knowledge_search_tool" in llm_names
 
     def test_conversation_log_inspect_tool_is_registered_and_llm_facing(self):
         canonical_names = {tool.name for tool in create_key_tools()}
@@ -571,6 +573,23 @@ class TestToolExecutorTimeout:
 
         assert action is None
         assert "knowledge_rag_retrieve_tool" in str(result)
+        assert "显式授权" in str(result)
+
+    def test_unified_knowledge_search_tool_requires_explicit_tool_policy_allow(self, executor, monkeypatch):
+        from core.web.services import agent_directory_service
+
+        monkeypatch.setattr(agent_directory_service, "current_agent_runtime", lambda: {
+            "agentId": "agent-policy",
+            "toolPolicy": {
+                "policyId": "tool-agent-policy",
+                "allowedTools": [],
+                "blockedTools": [],
+            },
+        })
+        result, action = executor.execute("unified_knowledge_search_tool", {"query": "governed context"})
+
+        assert action is None
+        assert "unified_knowledge_search_tool" in str(result)
         assert "显式授权" in str(result)
 
     def test_spawn_agent_tool_internal_flag_is_not_forwarded_to_tool(self, executor):
