@@ -185,6 +185,9 @@ type LauncherCopy = {
   openWorkbenchSummary: string;
   safeToUse: string;
   startProjectSummary: string;
+  stopDisabledClosed: string;
+  stopDisabledInFlight: string;
+  restartDisabledClosed: string;
   forceStop: string;
   forceStopDisabledClosed: string;
   forceStopDisabledInFlight: string;
@@ -229,6 +232,7 @@ type LauncherCopy = {
   userGuideProblemDetail: string;
   actionsLocked: string;
   actionsAvailable: string;
+  actionsStartOnly: string;
   diagnosticsCollapsedHint: string;
 };
 
@@ -932,6 +936,9 @@ export function LauncherRoute() {
         startDisabledRunning: "项目已在运行",
         startDisabledChanging: "项目正在切换",
         lifecycleActionDisabledActiveWork: "有进行中的任务，无法停止或重启 Vibelution",
+        stopDisabledClosed: "项目已经关闭",
+        stopDisabledInFlight: "关闭命令已经在处理中",
+        restartDisabledClosed: "项目已经关闭；请使用启动",
         forceStopDisabledClosed: "工作台已经关闭",
         forceStopDisabledInFlight: "关闭命令已经在处理中",
         projectStatus: "项目状态",
@@ -1084,6 +1091,7 @@ export function LauncherRoute() {
         userGuideProblemDetail: "当前状态证据不完整或异常；展开高级诊断查看最近命令和现场日志。",
         actionsLocked: "停止/重启已保护",
         actionsAvailable: "停止/重启可用",
+        actionsStartOnly: "项目已关闭，仅启动可用",
         diagnosticsCollapsedHint: "排查时展开",
       }
     : {
@@ -1101,6 +1109,9 @@ export function LauncherRoute() {
         startDisabledRunning: "Project is already running",
         startDisabledChanging: "Project lifecycle is changing",
         lifecycleActionDisabledActiveWork: "Active work is running; Vibelution cannot stop or restart",
+        stopDisabledClosed: "Project is already closed",
+        stopDisabledInFlight: "A close command is already running",
+        restartDisabledClosed: "Project is already closed; use Start",
         forceStopDisabledClosed: "Workbench is already closed",
         forceStopDisabledInFlight: "A close command is already running",
         projectStatus: "Project Status",
@@ -1253,6 +1264,7 @@ export function LauncherRoute() {
         userGuideProblemDetail: "The current evidence is incomplete or abnormal. Expand diagnostics for recent commands and scene logs.",
         actionsLocked: "Stop/restart protected",
         actionsAvailable: "Stop/restart available",
+        actionsStartOnly: "Project is closed; Start is the only lifecycle action",
         diagnosticsCollapsedHint: "Open when troubleshooting",
       };
 
@@ -1421,13 +1433,27 @@ export function LauncherRoute() {
     ? copy.lifecycleRestarting
     : activeWorkCount > 0
       ? copy.restartProtected
+      : projectIsClosed
+        ? copy.noActiveWork
       : copy.restartClear;
-  const destructiveActionDisabled = busy || activeWorkCount > 0;
-  const destructiveActionDisabledReason = activeWorkCount > 0 ? copy.lifecycleActionDisabledActiveWork : copy.startDisabledBusy;
   const closeCommandInFlight =
     trackedCommand?.operation === "stop"
     || trackedCommand?.operation === "force-stop"
     || controlPlaneHasCommandType(evidence, ["close_workbench", "force_close_workbench"]);
+  const destructiveActionDisabled = busy || !controlPlaneIdle || activeWorkCount > 0 || projectIsChanging || projectIsClosed;
+  const destructiveActionDisabledReason = activeWorkCount > 0
+    ? copy.lifecycleActionDisabledActiveWork
+    : projectIsClosed
+      ? copy.restartDisabledClosed
+      : projectIsChanging
+        ? copy.startDisabledChanging
+        : copy.startDisabledBusy;
+  const stopDisabled = destructiveActionDisabled || closeCommandInFlight;
+  const stopDisabledReason = projectIsClosed
+    ? copy.stopDisabledClosed
+    : closeCommandInFlight
+      ? copy.stopDisabledInFlight
+      : destructiveActionDisabledReason;
   const forceStopDisabled = busy || projectIsClosed || closeCommandInFlight;
   const forceStopDisabledReason = projectIsClosed
     ? copy.forceStopDisabledClosed
@@ -1486,7 +1512,7 @@ export function LauncherRoute() {
         : projectIsClosed
           ? copy.userGuideClosedDetail
           : lifecycleDisplay.detail || copy.userGuideProblemDetail;
-  const actionLockLabel = destructiveActionDisabled ? copy.actionsLocked : copy.actionsAvailable;
+  const actionLockLabel = projectIsClosed ? copy.actionsStartOnly : destructiveActionDisabled ? copy.actionsLocked : copy.actionsAvailable;
   const guardianProgress = `${guardian?.ownedCount ?? 0}/${guardian?.adapterCount ?? 0}`;
   const statusRows = useMemo<StatusRow[]>(() => {
     const componentById = new Map(componentRows.map((component) => [component.id, component]));
@@ -1645,7 +1671,7 @@ export function LauncherRoute() {
             <Play size={15} />
             <span>{copy.start}</span>
           </button>
-          <button type="button" className={styles.iconButton} onClick={() => controlMutation.mutate("stop")} disabled={destructiveActionDisabled} title={destructiveActionDisabled ? destructiveActionDisabledReason : copy.stop}>
+          <button type="button" className={styles.iconButton} onClick={() => controlMutation.mutate("stop")} disabled={stopDisabled} title={stopDisabled ? stopDisabledReason : copy.stop}>
             <Square size={15} />
             <span>{copy.stop}</span>
           </button>
