@@ -1053,11 +1053,34 @@ def _workbench_payload(*, runtime_state: dict[str, Any], observed_workbench: dic
     phase = str(state_workbench.get("phase") or "steady").strip() or "steady"
     raw_session_role = str(observed_or_state("sessionRole", "workbench") or "workbench").strip() or "workbench"
     project_window_alive = bool(observed_or_state("browserWindowAlive", False))
-    session_role = "workbench" if raw_session_role == "launcher_control_surface" and project_window_alive else raw_session_role
+    backend_observed = bool(observed_or_state("backendObserved", False))
+    backend_healthy = bool(observed_or_state("backendHealthy", False))
+    backend_port_listening = bool(observed_or_state("backendPortListening", False))
+    backend_port_conflict = bool(observed_or_state("backendPortConflict", False))
+    backend_alive = bool(
+        observed_or_state("backendAlive", False)
+        or (backend_healthy and backend_port_listening and not backend_port_conflict)
+    )
+    browser_managed = bool(observed_or_state("browserManaged", True))
+    project_backend_present = bool(
+        backend_observed
+        or backend_alive
+        or (backend_healthy and backend_port_listening)
+    )
+    session_role = (
+        "workbench"
+        if raw_session_role == "launcher_control_surface" and (project_window_alive or project_backend_present)
+        else raw_session_role
+    )
     if raw_session_role == "launcher_control_surface":
         if project_window_alive:
             observed_state = "open"
             desired_state = "open"
+        elif project_backend_present:
+            if observed_state == "closed":
+                observed_state = "partial" if browser_managed else "open"
+            if desired_state == "closed" and phase not in {"closing", "failed"}:
+                desired_state = "open"
         elif desired_state == "open" and phase not in {"opening", "failed"}:
             desired_state = "closed"
     manager_running = bool(runtime_state.get("daemonRunning"))
@@ -1071,9 +1094,9 @@ def _workbench_payload(*, runtime_state: dict[str, Any], observed_workbench: dic
         lifecycle_consistency == "browser_missing"
         or (
             observed_state == "partial"
-            and bool(observed_or_state("browserManaged", True))
+            and browser_managed
             and not project_window_alive
-            and bool(observed_or_state("backendObserved", False))
+            and project_backend_present
         )
     )
     stale_open_state_reconciled = False
@@ -1121,15 +1144,15 @@ def _workbench_payload(*, runtime_state: dict[str, Any], observed_workbench: dic
         "phase": phase,
         "backendPid": int(observed_or_state("backendPid", 0) or 0),
         "browserWindowPid": int(observed_or_state("browserWindowPid", 0) or 0),
-        "backendAlive": bool(observed_or_state("backendAlive", False)),
-        "backendHealthy": bool(observed_or_state("backendHealthy", False)),
-        "backendObserved": bool(observed_or_state("backendObserved", False)),
+        "backendAlive": backend_alive,
+        "backendHealthy": backend_healthy,
+        "backendObserved": backend_observed,
         "backendPort": int(observed_or_state("backendPort", 0) or 0),
-        "backendPortListening": bool(observed_or_state("backendPortListening", False)),
+        "backendPortListening": backend_port_listening,
         "backendPortOwnerPid": int(observed_or_state("backendPortOwnerPid", 0) or 0),
-        "backendPortConflict": bool(observed_or_state("backendPortConflict", False)),
+        "backendPortConflict": backend_port_conflict,
         "browserWindowAlive": bool(observed_or_state("browserWindowAlive", False)),
-        "browserManaged": bool(observed_or_state("browserManaged", True)),
+        "browserManaged": browser_managed,
         "backendMissing": bool(observed_or_state("backendMissing", False)),
         "frontendOrphaned": frontend_orphaned,
         "lifecycleConsistency": lifecycle_consistency,

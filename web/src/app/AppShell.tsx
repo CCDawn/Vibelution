@@ -43,6 +43,7 @@ import {
   applyBeforeUnloadProjectCloseGuard,
   buildProjectWindowCloseBlockedTelemetry,
   hasRecentControlledProjectLifecycleOperation,
+  markControlledProjectLifecycleOperation,
   projectWindowCloseGuardMessage,
   shouldBlockWorkbenchWindowClose,
 } from "./projectCloseGuard";
@@ -1201,12 +1202,15 @@ export function AppShell() {
         }),
         { preferBeacon: true },
       );
+      markControlledProjectLifecycleOperation("stop");
+      void beginShutdown();
       applyBeforeUnloadProjectCloseGuard(event, workbenchCloseGuardMessage);
     }
 
     window.addEventListener("beforeunload", handleBeforeUnload);
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
   }, [
+    beginShutdown,
     emitBrowserTelemetry,
     frontendRefreshRequested,
     restartRequested,

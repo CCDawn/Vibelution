@@ -414,7 +414,7 @@ def observe_workbench(
             "observationFastPath": "launcher_control_surface_no_workbench_pids",
         }
 
-    backend_alive = _is_process_alive(state_backend_pid)
+    state_backend_alive = _is_process_alive(state_backend_pid)
     health_probe_url = url if launcher_state else DEFAULT_URL
     healthy = _is_backend_healthy(health_probe_url)
     port_owner_pid = _listening_pid_for_port(port)
@@ -423,6 +423,7 @@ def observe_workbench(
     recovered_browser_window_pid = 0
     browser_window_recovery_source = ""
     port_owner_kind = _repo_workbench_backend_kind(port_owner_pid) if port_owner_pid > 0 else ""
+    port_owner_alive = _is_process_alive(port_owner_pid) if port_owner_pid > 0 else False
     port_owner_trusted = bool(
         port_owner_pid > 0
         and (
@@ -430,6 +431,7 @@ def observe_workbench(
             or port_owner_kind == "managed_workbench_backend"
         )
     )
+    backend_alive = bool(state_backend_alive or (port_owner_trusted and port_owner_alive))
     port_owner_residual = bool(port_owner_pid > 0 and not port_owner_trusted and port_owner_kind == "unmanaged_workbench")
     port_conflict = bool(port_owner_pid > 0 and not port_owner_trusted and not port_owner_residual)
     trusted_health = (
@@ -439,12 +441,17 @@ def observe_workbench(
         and (backend_alive or port_owner_trusted or port_owner_pid <= 0)
     )
     backend_observed = (backend_alive and not port_conflict) or port_owner_trusted or trusted_health
-    backend_pid = state_backend_pid if backend_alive else port_owner_pid if port_owner_trusted else 0
+    backend_pid = state_backend_pid if state_backend_alive else port_owner_pid if port_owner_trusted else 0
+    observed_session_role = (
+        "workbench"
+        if session_role == "launcher_control_surface" and (backend_observed or browser_window_alive)
+        else session_role
+    )
     should_recover_browser_window = bool(
         recover_browser_window
         and not browser_window_alive
         and browser_managed
-        and session_role != "launcher_control_surface"
+        and observed_session_role != "launcher_control_surface"
         and (recover_browser_window_for_backend_observed or not backend_observed)
     )
     if should_recover_browser_window:
@@ -455,12 +462,12 @@ def observe_workbench(
             browser_window_recovery_source = "managed_profile"
     launcher_browser_window_alive = _is_process_alive(launcher_browser_window_pid)
     managed_browser_missing = bool(
-        session_role != "launcher_control_surface"
+        observed_session_role != "launcher_control_surface"
         and browser_managed
         and backend_observed
         and not browser_window_alive
     )
-    if session_role == "launcher_control_surface":
+    if observed_session_role == "launcher_control_surface":
         observed_state = "closed"
     elif not backend_observed and not browser_window_alive:
         observed_state = "closed"
@@ -468,7 +475,7 @@ def observe_workbench(
         observed_state = "partial"
     else:
         observed_state = "open"
-    frontend_orphaned = bool(session_role != "launcher_control_surface" and browser_managed and browser_window_alive and not backend_observed)
+    frontend_orphaned = bool(observed_session_role != "launcher_control_surface" and browser_managed and browser_window_alive and not backend_observed)
     backend_missing = bool(observed_state == "open" and not backend_observed)
     if port_owner_residual:
         lifecycle_consistency = "residual_backend"
@@ -486,7 +493,8 @@ def observe_workbench(
     return {
         "launcherStatePresent": bool(launcher_state),
         "sessionId": str(launcher_state.get("sessionId") or "").strip(),
-        "sessionRole": session_role,
+        "sessionRole": observed_session_role,
+        "sourceSessionRole": session_role,
         "backendPid": backend_pid,
         "backendLaunchPid": backend_launch_pid,
         "browserLaunchPid": browser_launch_pid,
