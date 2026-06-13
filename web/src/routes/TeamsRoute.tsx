@@ -2424,13 +2424,101 @@ export function TeamsRoute({
         primaryAction: lang === "zh" ? "启动迭代" : "Start iteration",
       },
     };
+    const knowledgeCollectionStatusLabel = !selectedSourceCollectionRun
+      ? (lang === "zh" ? "未开始" : "not started")
+      : selectedTeamExecuteSourceCollectionSearchPending
+        ? (lang === "zh" ? "搜索中" : "searching")
+        : sourceCollectionOpenAssignmentCount > 0
+          ? (lang === "zh" ? "搜集中" : "collecting")
+          : sourceManifestCandidates.length > sourceCollectionApprovedCount
+            ? (lang === "zh" ? "待筛选" : "needs screening")
+            : sourceManifestCandidates.length > 0
+              ? (lang === "zh" ? "可进入实验" : "ready for experiment")
+              : (lang === "zh" ? "等待回写" : "waiting for writeback");
+    const knowledgeCollectionPrimaryActionLabel = !selectedSourceCollectionRun
+      ? (lang === "zh" ? "开始知识搜集" : "Start knowledge")
+      : sourceCollectionOpenAssignmentCount > 0
+        ? (selectedTeamExecuteSourceCollectionSearchPending
+          ? (lang === "zh" ? "搜索中" : "Searching")
+          : (lang === "zh" ? "执行下一批搜索" : "Run next search"))
+        : sourceManifestCandidates.length > sourceCollectionApprovedCount
+          ? (lang === "zh" ? "进入资料筛选" : "Open screening")
+          : (lang === "zh" ? "进入搜集工作台" : "Open collection workspace");
+    const knowledgeCollectionPrimaryDisabled = !selectedSourceCollectionRun
+      ? selectedTeamStartResearchStagePending || !researchStageCanLaunch
+      : sourceCollectionOpenAssignmentCount > 0
+        ? !canExecuteSourceCollectionSearch
+        : false;
+    const runSourceCollectionSearchFromConsole = () => {
+      if (!selectedTeam?.teamId || !selectedSourceCollectionRunEffectiveId || !canExecuteSourceCollectionSearch) {
+        return;
+      }
+      const selectedAssignmentIsRunnable = selectedSourceCollectionAssignment
+        ? ["open", "in_progress", "returned"].includes(selectedSourceCollectionAssignment.status)
+        : false;
+      executeSourceCollectionSearchMutation.mutate({
+        teamId: selectedTeam.teamId,
+        runId: selectedSourceCollectionRunEffectiveId,
+        assignmentId: selectedAssignmentIsRunnable ? selectedSourceCollectionAssignment?.assignmentId : "",
+        maxQueries: 4,
+        maxResultsPerQuery: Math.max(1, Math.min(5, sourceCollectionDraft.maxResultsPerQuery || 2)),
+      });
+    };
+    const runKnowledgeCollectionPrimaryAction = () => {
+      if (!selectedTeam?.teamId) {
+        return;
+      }
+      if (!selectedSourceCollectionRun) {
+        launchResearchStage("knowledge_collection");
+        return;
+      }
+      if (sourceCollectionOpenAssignmentCount > 0) {
+        runSourceCollectionSearchFromConsole();
+        return;
+      }
+      navigate(researchSourceCollectionRoute(selectedTeam.teamId));
+    };
+    const stagePrimaryLabel = (stageType: ResearchStageType, fallback: string) => {
+      if (stageType === "knowledge_collection") {
+        return knowledgeCollectionPrimaryActionLabel;
+      }
+      return fallback;
+    };
+    const stageStatusLabel = (stageType: ResearchStageType, active: boolean, latestRound: ResearchStagePhaseStatus["latestRound"] | null | undefined) => {
+      if (stageType === "knowledge_collection") {
+        return knowledgeCollectionStatusLabel;
+      }
+      if (active) {
+        return lang === "zh" ? "运行中" : "running";
+      }
+      if (latestRound) {
+        return lang === "zh" ? "已有轮次" : "has round";
+      }
+      return lang === "zh" ? "未启动" : "not started";
+    };
+    const stagePrimaryDisabled = (stageType: ResearchStageType) => {
+      if (stageType === "knowledge_collection") {
+        return knowledgeCollectionPrimaryDisabled;
+      }
+      return selectedTeamStartResearchStagePending;
+    };
+    const runStagePrimaryAction = (stageType: ResearchStageType) => {
+      if (stageType === "knowledge_collection") {
+        runKnowledgeCollectionPrimaryAction();
+        return;
+      }
+      launchResearchStage(stageType);
+    };
     const stageHint = (stageType: ResearchStageType, active: boolean, latestRound: ResearchStagePhaseStatus["latestRound"] | null | undefined) => {
       if (stageType === "knowledge_collection") {
         if (!selectedSourceCollectionRun) {
           return lang === "zh" ? "生成搜索计划和团队分工，先把资料搜集跑起来。" : "Create the search plan and team assignments.";
         }
+        if (selectedTeamExecuteSourceCollectionSearchPending) {
+          return lang === "zh" ? "正在执行搜索，结果会写入 DataRecord 和候选资料仓库。" : "Searching now; results will be written into DataRecords and candidates.";
+        }
         if (sourceCollectionOpenAssignmentCount > 0) {
-          return lang === "zh" ? "已有搜集批次，进入工作台执行下一批搜索。" : "A run is open. Enter the workspace and run the next search batch.";
+          return lang === "zh" ? "已有搜集批次，点击主按钮执行下一批搜索。" : "A run is open. Use the primary action to run the next batch.";
         }
         if (sourceManifestCandidates.length > sourceCollectionApprovedCount) {
           return lang === "zh" ? "已有候选资料，下一步进入筛选。" : "Candidate sources are ready for screening.";
@@ -2486,30 +2574,40 @@ export function TeamsRoute({
             const fallback = phaseFallback[stageType];
             const latestRound = phase?.latestRound;
             const active = Boolean(phase?.activeRoundId);
-            const disabled = selectedTeamStartResearchStagePending || (stageType === "knowledge_collection" && !researchStageCanLaunch);
+            const disabled = stagePrimaryDisabled(stageType);
             const navItem = RESEARCH_WORKSPACE_NAV_ITEMS.find((item) => item.view === stageType);
+            const primaryLabel = stagePrimaryLabel(stageType, phase?.primaryAction || fallback.primaryAction);
             return (
               <article key={stageType} className={active ? `${styles.researchStageCard} ${styles.researchStageCardActive}` : styles.researchStageCard}>
                 <div className={styles.researchStageCardHead}>
                   <small>{String(phaseOrder.indexOf(stageType) + 1).padStart(2, "0")}</small>
                   <div>
                     <strong>{phase?.label || fallback.label}</strong>
-                    <span>
-                      {active
-                        ? (lang === "zh" ? "运行中" : "running")
-                        : latestRound
-                        ? (lang === "zh" ? "已有轮次" : "has round")
-                        : (lang === "zh" ? "未启动" : "not started")}
-                    </span>
+                    <span>{stageStatusLabel(stageType, active, latestRound)}</span>
                   </div>
                 </div>
                 <p>{stageHint(stageType, active, latestRound)}</p>
-                <em>{navItem ? (lang === "zh" ? navItem.zhModules : navItem.enModules) : ""}</em>
+                {stageType === "knowledge_collection" && selectedSourceCollectionRun ? (
+                  <div className={styles.researchStageCardMetrics}>
+                    <span>{sourceCollectionRunLabel(selectedSourceCollectionRun.runId)}</span>
+                    <span>{lang === "zh" ? `待处理 ${sourceCollectionOpenAssignmentCount}` : `open ${sourceCollectionOpenAssignmentCount}`}</span>
+                    <span>{lang === "zh" ? `候选 ${sourceManifestCandidates.length}` : `candidates ${sourceManifestCandidates.length}`}</span>
+                    <span>{lang === "zh" ? `查询 ${sourceCollectionQueryCount}` : `queries ${sourceCollectionQueryCount}`}</span>
+                  </div>
+                ) : (
+                  <em>{navItem ? (lang === "zh" ? navItem.zhModules : navItem.enModules) : ""}</em>
+                )}
                 <div className={styles.researchStageActions}>
-                  <button type="button" onClick={() => launchResearchStage(stageType)} disabled={disabled}>
-                    <Play size={13} />
-                    {phase?.primaryAction || fallback.primaryAction}
+                  <button type="button" onClick={() => runStagePrimaryAction(stageType)} disabled={disabled}>
+                    {stageType === "knowledge_collection" && selectedSourceCollectionRun && sourceCollectionOpenAssignmentCount > 0 ? <Search size={13} /> : <Play size={13} />}
+                    {primaryLabel}
                   </button>
+                  {stageType === "knowledge_collection" ? (
+                    <button type="button" onClick={() => launchResearchStage(stageType, "new_round")} disabled={selectedTeamStartResearchStagePending || !researchStageCanLaunch}>
+                      <Plus size={13} />
+                      {lang === "zh" ? "新一轮搜集" : "New round"}
+                    </button>
+                  ) : null}
                   <Link to={researchWorkspaceStageRoute(selectedTeam?.teamId || RESEARCH_TEAM_ID, stageType)}>
                     <Link2 size={13} />
                     {lang === "zh" ? "阶段详情" : "Details"}
