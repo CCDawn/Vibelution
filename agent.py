@@ -1251,7 +1251,7 @@ class SelfEvolvingAgent:
             if callable(mental_clear):
                 mental_clear()
         restored: List[Any] = [SystemMessage(content="")]
-        for item in list(messages or []):
+        for item_index, item in enumerate(list(messages or [])):
             if not isinstance(item, dict):
                 continue
             role = str(item.get("role") or "").strip().lower()
@@ -1259,7 +1259,13 @@ class SelfEvolvingAgent:
             content = raw_content if isinstance(raw_content, list) else str(raw_content or "").strip()
             if isinstance(content, str):
                 content = self._sanitize_seeded_chat_content(role, content)
-            if not content:
+            restored_tool_messages: List[Any] = []
+            if role == "assistant":
+                restored_tool_messages = self._restore_seeded_history_tool_messages(
+                    item,
+                    item_index=item_index,
+                )
+            if not content and not restored_tool_messages:
                 continue
             if role in {"runtime_context", "runtime", "system"}:
                 restored.append(SystemMessage(content=str(content)))
@@ -1269,13 +1275,88 @@ class SelfEvolvingAgent:
                 else:
                     restored.append(build_chat_user_message(content))
             elif role == "assistant":
-                restored.append(AIMessage(content=str(content)))
+                restored.extend(restored_tool_messages)
+                if content:
+                    restored.append(AIMessage(content=str(content)))
         if len(restored) <= 1:
             self._active_turn_messages = None
             self._active_turn_goal = ""
             return
         self._active_turn_messages = restored
         self._active_turn_goal = "__chat_session__"
+
+    @classmethod
+    def _restore_seeded_history_tool_messages(
+        cls,
+        message: Dict[str, Any],
+        *,
+        item_index: int,
+    ) -> List[Any]:
+        tool_entries = (
+            message.get("toolCalls")
+            or message.get("tool_calls")
+            or message.get("tools")
+            or []
+        )
+        tool_calls: List[Dict[str, Any]] = []
+        tool_messages: List[ToolMessage] = []
+        for tool_index, entry in enumerate(list(tool_entries or []), start=1):
+            if not isinstance(entry, dict):
+                continue
+            name = cls._seeded_history_tool_name(entry)
+            if not name:
+                continue
+            tool_call_id = str(
+                entry.get("id")
+                or entry.get("tool_call_id")
+                or entry.get("toolCallId")
+                or f"history_tool_{item_index}_{tool_index}"
+            ).strip()
+            arguments = entry.get("arguments") if isinstance(entry.get("arguments"), dict) else entry.get("args")
+            if not isinstance(arguments, dict):
+                arguments = {}
+            tool_calls.append({"name": name, "args": dict(arguments), "id": tool_call_id})
+            tool_messages.append(
+                ToolMessage(
+                    content=cls._seeded_history_tool_result_content(name, entry),
+                    tool_call_id=tool_call_id,
+                )
+            )
+        if not tool_calls:
+            return []
+        return [AIMessage(content="", tool_calls=tool_calls), *tool_messages]
+
+    @staticmethod
+    def _seeded_history_tool_name(entry: Dict[str, Any]) -> str:
+        function_block = entry.get("function") if isinstance(entry.get("function"), dict) else {}
+        return str(
+            entry.get("name")
+            or entry.get("tool_name")
+            or entry.get("toolName")
+            or function_block.get("name")
+            or ""
+        ).strip()
+
+    @staticmethod
+    def _seeded_history_tool_result_content(name: str, entry: Dict[str, Any]) -> str:
+        status = str(entry.get("status") or "").strip()
+        result = (
+            entry.get("resultPreview")
+            or entry.get("result_preview")
+            or entry.get("result")
+            or entry.get("summary")
+            or entry.get("error")
+            or ""
+        )
+        result_text = compact_tool_output_for_diagnosis(str(result or ""), max_chars=1600)
+        lines = [f"历史工具调用: {name}"]
+        if status:
+            lines.append(f"状态: {status}")
+        if result_text:
+            lines.extend(["结果:", result_text])
+        else:
+            lines.append("结果: （无可用摘要）")
+        return "\n".join(lines)
 
     @staticmethod
     def _sanitize_seeded_chat_content(role: str, content: str) -> str:

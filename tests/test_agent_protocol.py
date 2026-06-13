@@ -115,6 +115,78 @@ class TestToolMessageFlow:
         assert "阅读导航" in messages[0].content or "建议" in messages[0].content
         assert "offset=120" in messages[0].content
 
+    def test_seed_chat_history_restores_persisted_tool_results(self):
+        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent.mode_policy = ModePolicy(
+            mode=AgentMode.CHAT,
+            orchestrator_kind="chat",
+            keep_multi_turn_context=True,
+            allow_auto_loop=False,
+            capture_chat_dataset_candidates=True,
+            reset_context_before_turn=False,
+            reset_context_between_cases=False,
+            allow_direct_supervised_payload=False,
+            finish_after_direct_response=False,
+            runtime_input_builder=build_chat_user_message,
+        )
+        agent._mental_model_enabled_override = False
+        agent.mental_model = None
+
+        agent.seed_chat_history(
+            [
+                {"role": "user", "content": "开始修改"},
+                {
+                    "role": "assistant",
+                    "content": "运行相关测试验证修改：",
+                    "toolCalls": [
+                        {
+                            "name": "cli_tool",
+                            "arguments": {"command": "python -m pytest"},
+                            "status": "failed",
+                            "resultPreview": "Windows detected Unix shell fragment.",
+                        }
+                    ],
+                },
+            ]
+        )
+
+        restored = list(agent._active_turn_messages or [])
+        ai_tool_messages = [
+            message
+            for message in restored
+            if isinstance(message, AIMessage) and list(getattr(message, "tool_calls", []) or [])
+        ]
+        tool_messages = [message for message in restored if isinstance(message, ToolMessage)]
+
+        assert ai_tool_messages
+        assert ai_tool_messages[0].tool_calls[0]["name"] == "cli_tool"
+        assert tool_messages
+        assert "Windows detected Unix shell fragment" in tool_messages[0].content
+        assert any(isinstance(message, AIMessage) and message.content == "运行相关测试验证修改：" for message in restored)
+
+    def test_chat_state_normalization_preserves_camel_case_tool_calls(self):
+        from core.ui.chat_state import normalize_chat_messages
+
+        normalized = normalize_chat_messages(
+            [
+                {
+                    "role": "assistant",
+                    "content": "运行相关测试验证修改：",
+                    "toolCalls": [
+                        {
+                            "toolName": "cli_tool",
+                            "toolCallId": "call_1",
+                            "resultPreview": "Windows detected Unix shell fragment.",
+                        }
+                    ],
+                }
+            ]
+        )
+
+        assert normalized[0]["tool_calls"][0]["name"] == "cli_tool"
+        assert normalized[0]["tool_calls"][0]["toolCallId"] == "call_1"
+        assert "Windows detected" in normalized[0]["tool_calls"][0]["resultPreview"]
+
     def test_invoke_llm_preserves_tool_messages(self, monkeypatch):
         captured = {}
 
@@ -4145,6 +4217,59 @@ class TestRuntimeStateMemoryFlow:
             visible_text="OK",
             active_evolution_txn_id="txn_1",
         ) is False
+
+    def test_single_turn_direct_response_does_not_finish_action_promise(self):
+        assert TurnOutcomeController.should_finish_single_turn_after_direct_response(
+            single_turn_mode_active=True,
+            tool_calls=[],
+            visible_text="第一步：读取当前代码确认状态。",
+        ) is False
+
+    def test_web_session_active_task_requires_task_tool_call(self):
+        from core.web.services import session_service
+
+        messages = [{"role": "user", "content": "请修复这个问题"}]
+        ordinary_tool_result = {
+            "status": "completed",
+            "summary": "我读取了相关文件。",
+            "raw_output": "我读取了相关文件。",
+            "tool_trace": [
+                {
+                    "name": "read_file_tool",
+                    "status": "done",
+                    "result_preview": "agent.py: seed_chat_history",
+                }
+            ],
+        }
+
+        assert session_service._build_session_active_task(
+            "session-test",
+            ordinary_tool_result,
+            messages,
+        ) is None
+
+        task_tool_result = {
+            **ordinary_tool_result,
+            "tool_trace": [
+                {
+                    "name": "task_create_tool",
+                    "status": "done",
+                    "result_preview": "created task",
+                }
+            ],
+        }
+
+        active_task = session_service._build_session_active_task(
+            "session-test",
+            task_tool_result,
+            messages,
+        )
+
+        assert active_task is not None
+        assert active_task["metadata"]["source"] == "task_tool"
+        assert session_service._active_task_to_api(active_task) is not None
+        stale_auto_task = {**active_task, "metadata": {"source": "web_session"}}
+        assert session_service._active_task_to_api(stale_auto_task) is None
 
     def test_full_evolution_goal_detects_successful_close_without_restart(self):
         active_goal = (

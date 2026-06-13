@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Optional
 
@@ -214,7 +215,25 @@ class TurnOutcomeController:
         )
         if any(marker in normalized_goal for marker in required_tool_markers):
             return False
+        if TurnOutcomeController._visible_text_promises_future_action(visible_text):
+            return False
         return bool((visible_text or "").strip())
+
+    @staticmethod
+    def _visible_text_promises_future_action(visible_text: str) -> bool:
+        text = re.sub(r"\s+", " ", str(visible_text or "").strip())
+        if not text:
+            return False
+        if re.search(r"(结论|已完成|已经完成|验证通过|测试通过|修复完成|done|completed)", text, re.IGNORECASE):
+            return False
+        return bool(
+            re.search(
+                r"(第一步|下一步|接下来|现在开始|我会|我将|让我|先|继续).{0,40}"
+                r"(读取|查看|检查|搜索|运行|执行|调用|修改|修复|实现|验证|测试)",
+                text,
+                re.IGNORECASE,
+            )
+        )
 
     @staticmethod
     def can_resume_turn_messages(
