@@ -19,6 +19,84 @@ KNOWLEDGE_STEWARD_RECOMMENDATIONS_TOOL_NAME = "knowledge_steward_recommendations
 KNOWLEDGE_STEWARD_WORKBENCH_TOOL_NAME = "knowledge_steward_workbench_tool"
 KNOWLEDGE_RATING_SUGGESTION_TOOL_NAME = "knowledge_rating_suggestion_tool"
 KNOWLEDGE_RAG_RETRIEVE_TOOL_NAME = "knowledge_rag_retrieve_tool"
+UNIFIED_KNOWLEDGE_SEARCH_TOOL_NAME = "unified_knowledge_search_tool"
+
+
+def unified_knowledge_search_tool(
+    query: str = "",
+    query_mode: str = "auto",
+    knowledge_base_id: str = "",
+    owner_type: str = "",
+    owner_id: str = "",
+    tags: str = "",
+    limit: int = 8,
+    max_context_chars: int = 1200,
+) -> str:
+    """
+    Search governed formal knowledge through one read-only Agent-facing tool.
+
+    The Agent chooses query_mode and query text; the platform routes the search
+    to the current local knowledge, metadata, regex, or RAG backend and returns
+    a stable result schema with citations/source ids.
+    """
+
+    runtime = _current_runtime()
+    agent_id = str(runtime.get("agentId") or "").strip()
+    blocked = _tool_policy_blocked(runtime, UNIFIED_KNOWLEDGE_SEARCH_TOOL_NAME)
+    if blocked:
+        return _json_result(blocked)
+    requested_base_id = str(knowledge_base_id or "").strip()
+    memory_policy = runtime.get("memoryPolicy") if isinstance(runtime.get("memoryPolicy"), dict) else {}
+    allowed_base_ids = _policy_ids(memory_policy, "readKnowledgeBaseIds")
+    if requested_base_id and not _policy_allows_knowledge_base(requested_base_id, allowed_base_ids):
+        return _json_result(_blocked_result(agent_id, "knowledge_base_not_in_memory_policy"))
+
+    try:
+        from core.web.services import unified_knowledge_search_service
+
+        payload = unified_knowledge_search_service.search_unified_knowledge(
+            agent_id=agent_id,
+            query=trim_lines(str(query or ""), max_lines=4).strip(),
+            query_mode=query_mode,
+            owner_type=str(owner_type or "").strip(),
+            owner_id=str(owner_id or "").strip(),
+            knowledge_base_id=requested_base_id,
+            tags=_split_tags(tags),
+            allowed_knowledge_base_ids=allowed_base_ids,
+            limit=limit,
+            max_context_chars=max_context_chars,
+        )
+        _record_event(
+            "knowledge.tool.unified_search.succeeded",
+            runtime=runtime,
+            outcome="succeeded",
+            fields={
+                "knowledgeBaseId": requested_base_id,
+                "queryLength": int((payload.get("request") or {}).get("queryLength") or 0),
+                "queryMode": str((payload.get("request") or {}).get("effectiveQueryMode") or query_mode),
+                "backend": str((payload.get("request") or {}).get("backend") or ""),
+                "resultCount": int((payload.get("summary") or {}).get("resultCount") or 0),
+            },
+        )
+        return _json_result({"ok": True, "status": "succeeded", **payload})
+    except Exception as exc:
+        _record_event(
+            "knowledge.tool.unified_search.failed",
+            runtime=runtime,
+            level="error",
+            outcome="failed",
+            fields={"knowledgeBaseId": requested_base_id, "errorType": type(exc).__name__},
+        )
+        return _json_result(
+            {
+                "ok": False,
+                "status": "failed",
+                "error": type(exc).__name__,
+                "message": trim_lines(str(exc), max_lines=2),
+                "agentId": agent_id,
+                "knowledgeBaseId": requested_base_id,
+            }
+        )
 
 
 def knowledge_query_tool(query: str = "", knowledge_base_id: str = "", limit: int = 8) -> str:

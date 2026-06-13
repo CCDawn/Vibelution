@@ -53,6 +53,7 @@ def test_tool_registry_lists_builtins_as_protected(tmp_path, monkeypatch):
     assert {"core", "research", "coding", "collaboration"}.issubset(bundles)
     assert "grep_search_tool" in bundles["core"]["toolNames"]
     assert "research_knowledge_query_tool" in bundles["research"]["toolNames"]
+    assert "unified_knowledge_search_tool" in bundles["research"]["toolNames"]
     assert "research_agent_creation_proposal_tool" in bundles["collaboration"]["toolNames"]
     assert "research_communication_edge_proposal_tool" in bundles["collaboration"]["toolNames"]
     assert "research_proposal_apply_tool" in bundles["collaboration"]["toolNames"]
@@ -106,6 +107,13 @@ def test_tool_registry_marks_research_knowledge_tool_as_explicit_allow(tmp_path,
     assert rag_tool["category"] == "memory_context"
     assert rag_tool["permissionPolicy"]["requiresExplicitAllow"] is True
     assert "ToolPolicy.allowedTools" in rag_tool["permissionPolicy"]["reason"]
+    unified_tool = next(item for item in payload["tools"] if item["name"] == "unified_knowledge_search_tool")
+    assert unified_tool["source"] == "built_in"
+    assert unified_tool["llmVisible"] is True
+    assert unified_tool["category"] == "memory_context"
+    assert "unified_search" in unified_tool["capabilityTags"]
+    assert unified_tool["permissionPolicy"]["requiresExplicitAllow"] is True
+    assert "ToolPolicy.allowedTools" in unified_tool["permissionPolicy"]["reason"]
 
 
 def test_tool_registry_exposes_agent_scoped_tool_views(tmp_path, monkeypatch):

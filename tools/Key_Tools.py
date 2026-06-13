@@ -72,6 +72,7 @@ from tools.team_knowledge_tools import (
     knowledge_rating_suggestion_tool as _knowledge_rating_suggestion_impl,
     knowledge_steward_recommendations_tool as _knowledge_steward_recommendations_impl,
     knowledge_steward_workbench_tool as _knowledge_steward_workbench_impl,
+    unified_knowledge_search_tool as _unified_knowledge_search_impl,
 )
 from tools.token_manager import compress_context_tool as _compress_context_impl
 from tools.python_intelligence_tools import (
@@ -1389,6 +1390,48 @@ def create_key_tools() -> List[BaseTool]:
         )
 
     @tool
+    def unified_knowledge_search_tool(
+        query: str = "",
+        query_mode: str = "auto",
+        knowledge_base_id: str = "",
+        owner_type: str = "",
+        owner_id: str = "",
+        tags: str = "",
+        limit: int = 8,
+        max_context_chars: int = 1200,
+    ) -> str:
+        """
+        【统一正式知识搜索】只读检索已审核 Team/Agent 正式知识。
+
+        Agent 只需要指定 query_mode 和 query；平台会路由到 local exact / token overlap / metadata / regex / RAG backend，
+        并统一返回 results、citations、source ids 和 searchBackend。该工具不读取 pending proposal，不写入知识库，也不会默认注入 prompt。
+        只有 Agent 的 ToolPolicy.allowedTools 显式包含 unified_knowledge_search_tool，且其 Owner ACL/MemoryPolicy 允许读取目标知识库时才可用。
+
+        Args:
+            query: 查询内容；metadata 模式可为空
+            query_mode: auto / literal / semantic / hybrid / metadata / regex / rg / grep / rag
+            knowledge_base_id: 可选知识库 ID；为空时检索当前 Agent 可访问的知识库
+            owner_type: 可选 owner 类型，支持 team / agent
+            owner_id: 可选 owner id，teamId 或 agentId
+            tags: 逗号分隔标签过滤
+            limit: 最多返回结果数，范围 1-25
+            max_context_chars: rag 模式单条上下文最大字符数
+
+        Returns:
+            JSON 格式的统一正式知识搜索结果
+        """
+        return _unified_knowledge_search_impl(
+            query=query,
+            query_mode=query_mode,
+            knowledge_base_id=knowledge_base_id,
+            owner_type=owner_type,
+            owner_id=owner_id,
+            tags=tags,
+            limit=limit,
+            max_context_chars=max_context_chars,
+        )
+
+    @tool
     def knowledge_proposal_tool(
         knowledge_base_id: str,
         source_type: str,
@@ -1752,6 +1795,7 @@ def create_key_tools() -> List[BaseTool]:
         computer_use_task_tool,
         computer_use_session_tool,
         research_knowledge_query_tool,
+        unified_knowledge_search_tool,
         knowledge_query_tool,
         knowledge_rag_retrieve_tool,
         knowledge_proposal_tool,
