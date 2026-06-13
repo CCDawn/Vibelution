@@ -27,6 +27,7 @@ pypdf>=5.0.0              # 本地 PDF 文本抽取（Challenge Cup source-extra
 # 开发/测试依赖
 pytest>=7.0.0            # 单元测试框架
 pytest-asyncio>=0.21.0   # 异步测试支持
+pytest-xdist>=3.6.1      # pytest 进程级并行执行（可选启用）
 coverage>=7.0.0          # 测试覆盖率门禁
 jedi>=0.19.0             # Python 符号分析（定义 / 引用 / 悬浮）
 ruff>=0.6.0              # Python lint 诊断

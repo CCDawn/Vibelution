@@ -9,6 +9,7 @@
     python tests/test_runner.py              # 运行所有测试
     python tests/test_runner.py --verbose   # 详细输出
     python tests/test_runner.py --fast      # 跳过慢速测试
+    python tests/test_runner.py --parallel  # 使用 pytest-xdist 进程级并行
 
 返回：
     0 = 所有测试通过，可以安全重启
@@ -19,12 +20,45 @@ import sys
 import os
 import subprocess
 import argparse
+import importlib.util
+import re
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 # 项目根目录
 PROJECT_ROOT = Path(__file__).parent.parent
+DEFAULT_MAX_PARALLEL_WORKERS = 4
+
+
+def _default_parallel_workers() -> int:
+    cpu_count = os.cpu_count() or 2
+    return max(2, min(cpu_count, DEFAULT_MAX_PARALLEL_WORKERS))
+
+
+def _parse_pytest_counts(output: str, returncode: int) -> Tuple[int, int, int]:
+    """从 pytest 摘要里提取 passed/failed/skipped 计数。"""
+    counts = {"passed": 0, "failed": 0, "skipped": 0}
+    matched = False
+    for match in re.finditer(
+        r"(\d+)\s+"
+        r"(passed|failed|error|errors|skipped|xfailed|xpassed)",
+        output,
+    ):
+        matched = True
+        count = int(match.group(1))
+        kind = match.group(2)
+        if kind == "passed":
+            counts["passed"] += count
+        elif kind in {"failed", "error", "errors", "xpassed"}:
+            counts["failed"] += count
+        elif kind in {"skipped", "xfailed"}:
+            counts["skipped"] += count
+
+    if matched:
+        return counts["passed"], counts["failed"], counts["skipped"]
+
+    return (1, 0, 0) if returncode == 0 else (0, 1, 0)
 
 
 class TestRunner:
@@ -49,10 +83,19 @@ class TestRunner:
             for f in test_files
         ]
 
-    def __init__(self, verbose: bool = False, fast: bool = False, environment_smoke: bool = False):
+    def __init__(
+        self,
+        verbose: bool = False,
+        fast: bool = False,
+        environment_smoke: bool = False,
+        parallel: bool = False,
+        workers: Optional[int] = None,
+    ):
         self.verbose = verbose
         self.fast = fast
         self.environment_smoke = environment_smoke
+        self.parallel = parallel
+        self.workers = max(1, workers or _default_parallel_workers())
         self.results: List[Dict] = []
         self.start_time = datetime.now()
 
@@ -67,10 +110,23 @@ class TestRunner:
             "-p", "no:warnings",
         ]
 
+        marker_parts = []
         if self.fast:
-            cmd.extend(["-m", "not slow"])
+            marker_parts.append("not slow")
+        if self.parallel:
+            cmd.extend(["-n", str(self.workers), "--dist", "loadfile"])
+            marker_parts.append("not serial")
+        if marker_parts:
+            cmd.extend(["-m", " and ".join(marker_parts)])
 
         return cmd
+
+    def _parallel_prerequisite_error(self) -> Optional[str]:
+        if not self.parallel:
+            return None
+        if importlib.util.find_spec("xdist") is None:
+            return "pytest-xdist 未安装；请先安装 requirements.txt 中的 pytest-xdist。"
+        return None
 
     def run_module_tests(self, test_file: str, description: str) -> Tuple[bool, Dict]:
         """运行单个测试模块"""
@@ -102,21 +158,7 @@ class TestRunner:
 
             output = result.stdout + result.stderr
 
-            # 解析结果 — 从 pytest 标准摘要行提取计数
-            import re
-            summary_match = re.search(
-                r'(\d+)\s+passed,\s*(\d+)\s+failed(?:,\s*(\d+)\s+skipped)?',
-                output
-            )
-            if summary_match:
-                passed = int(summary_match.group(1))
-                failed = int(summary_match.group(2))
-                skipped = int(summary_match.group(3) or 0)
-            else:
-                # Fallback: use return code
-                passed = 0 if result.returncode != 0 else 1
-                failed = 1 if result.returncode != 0 else 0
-                skipped = 0
+            passed, failed, skipped = _parse_pytest_counts(output, result.returncode)
             total = passed + failed + skipped
 
             success = result.returncode == 0
@@ -149,6 +191,79 @@ class TestRunner:
                 "message": str(e),
             }
 
+    def run_parallel_tests(self, modules: List[Tuple[str, str]]) -> Tuple[bool, Dict]:
+        """使用 pytest-xdist 在一个 pytest 进程组里运行测试模块。"""
+        print(f"\n{'='*60}")
+        print(f"⚙️ 进程级并行测试: {self.workers} workers")
+        print(f"{'='*60}")
+
+        prerequisite_error = self._parallel_prerequisite_error()
+        if prerequisite_error:
+            return False, {
+                "module": "parallel-suite",
+                "description": "Parallel pytest suite",
+                "status": "ERROR",
+                "message": prerequisite_error,
+            }
+
+        missing = []
+        targets = []
+        for test_file, _description in modules:
+            test_path = PROJECT_ROOT / "tests" / test_file
+            if test_path.exists():
+                targets.append(str(test_path))
+            else:
+                missing.append(str(test_path))
+        if missing:
+            return False, {
+                "module": "parallel-suite",
+                "description": "Parallel pytest suite",
+                "status": "ERROR",
+                "message": "测试文件不存在: " + ", ".join(missing),
+            }
+
+        cmd = self.build_pytest_command(*targets)
+
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                cwd=str(PROJECT_ROOT),
+                timeout=max(300, 60 * max(1, len(modules))),
+            )
+            output = result.stdout + result.stderr
+            passed, failed, skipped = _parse_pytest_counts(output, result.returncode)
+            total = passed + failed + skipped
+            success = result.returncode == 0
+
+            print(output)
+
+            return success, {
+                "module": "parallel-suite",
+                "description": f"Parallel pytest suite ({self.workers} workers)",
+                "status": "PASS" if success else "FAIL",
+                "passed": passed,
+                "failed": failed,
+                "skipped": skipped,
+                "total": total,
+                "output": output if self.verbose else "",
+            }
+        except subprocess.TimeoutExpired:
+            return False, {
+                "module": "parallel-suite",
+                "description": f"Parallel pytest suite ({self.workers} workers)",
+                "status": "TIMEOUT",
+                "message": "并行测试超时",
+            }
+        except Exception as e:
+            return False, {
+                "module": "parallel-suite",
+                "description": f"Parallel pytest suite ({self.workers} workers)",
+                "status": "ERROR",
+                "message": str(e),
+            }
+
     def run_all_tests(self) -> bool:
         """运行所有测试"""
         print("="*60)
@@ -156,11 +271,21 @@ class TestRunner:
         print("="*60)
         print(f"项目目录: {PROJECT_ROOT}")
         print(f"开始时间: {self.start_time.strftime('%Y-%m-%d %H:%M:%S')}")
-        print(f"模式: {'详细' if self.verbose else '简洁'}{' (快速)' if self.fast else ''}")
+        mode_parts = ["详细" if self.verbose else "简洁"]
+        if self.fast:
+            mode_parts.append("快速")
+        if self.parallel:
+            mode_parts.append(f"进程并行 {self.workers} workers")
+        print(f"模式: {' / '.join(mode_parts)}")
 
         modules = self.TEST_MODULES or (
             self.ENVIRONMENT_SMOKE_MODULES if self.environment_smoke else self._discover_test_modules()
         )
+        if self.parallel:
+            success, result = self.run_parallel_tests(modules)
+            self.results.append(result)
+            return success
+
         all_passed = True
 
         for test_file, description in modules:
@@ -193,11 +318,11 @@ class TestRunner:
                 "ERROR": "💥",
             }.get(result["status"], "❓")
 
-            if result["status"] == "PASS":
+            if result["status"] in {"PASS", "FAIL"}:
                 total_passed += result.get("passed", 0)
                 total_failed += result.get("failed", 0)
                 total_tests += result.get("total", 0)
-            elif result["status"] == "FAIL":
+            elif result["status"] in {"SKIP", "TIMEOUT", "ERROR"}:
                 total_failed += 1
                 total_tests += 1
 
@@ -286,6 +411,23 @@ def test_runner_builds_pytest_module_command():
     assert "tests/test_environment_smoke.py" in cmd
 
 
+def test_runner_builds_parallel_pytest_command():
+    runner = TestRunner(verbose=False, fast=True, environment_smoke=True, parallel=True, workers=2)
+    cmd = runner.build_pytest_command("tests/test_environment_smoke.py", "tests/test_environment_doctor.py")
+
+    assert "-n" in cmd
+    assert cmd[cmd.index("-n") + 1] == "2"
+    assert "--dist" in cmd
+    assert cmd[cmd.index("--dist") + 1] == "loadfile"
+    marker_index = cmd.index("-m", 3)
+    assert cmd[marker_index + 1] == "not slow and not serial"
+
+
+def test_runner_parses_pytest_summary_without_failed_count():
+    assert _parse_pytest_counts("13 passed in 1.66s", 0) == (13, 0, 0)
+    assert _parse_pytest_counts("1 failed, 97 passed, 2 skipped in 4.33s", 1) == (97, 1, 2)
+
+
 def test_runner_environment_smoke_targets_are_stable():
     runner = TestRunner(environment_smoke=True)
 
@@ -300,12 +442,16 @@ if __name__ == "__main__":
     parser.add_argument("-v", "--verbose", action="store_true", help="详细输出")
     parser.add_argument("--fast", action="store_true", help="跳过慢速测试")
     parser.add_argument("--environment-smoke", action="store_true", help="只运行稳定环境 smoke 套件")
+    parser.add_argument("--parallel", action="store_true", help="使用 pytest-xdist 进程级并行执行")
+    parser.add_argument("--workers", type=int, default=None, help="进程级并行 worker 数，默认最多 4 个")
     args = parser.parse_args()
 
     runner = TestRunner(
         verbose=args.verbose,
         fast=args.fast,
         environment_smoke=args.environment_smoke,
+        parallel=args.parallel,
+        workers=args.workers,
     )
 
     # 运行所有测试
