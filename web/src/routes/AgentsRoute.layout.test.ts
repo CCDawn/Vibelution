@@ -237,6 +237,18 @@ describe("AgentsRoute layout contract", () => {
     expect(styles.agentPanelCreating).toBeTruthy();
   });
 
+  it("keeps disabled tool-query fallbacks referentially stable so Agent navigation can settle", () => {
+    expect(routeSource).toContain("const EMPTY_TOOL_BUNDLES: ToolBundle[] = []");
+    expect(routeSource).toContain("const EMPTY_TOOL_REGISTRY_ITEMS: ToolRegistryItem[] = []");
+    expect(routeSource).toContain("const EMPTY_AGENT_CONFIG_GROUPS: AgentConfigWorkspaceGroup[] = []");
+    expect(routeSource).toContain("const toolBundles = toolsQuery.data?.toolBundles ?? EMPTY_TOOL_BUNDLES");
+    expect(routeSource).toContain("const tools = toolsQuery.data?.tools ?? EMPTY_TOOL_REGISTRY_ITEMS");
+    expect(routeSource).toContain("const groups = workspace?.groups ?? EMPTY_AGENT_CONFIG_GROUPS");
+    expect(routeSource).not.toContain("const toolBundles = toolsQuery.data?.toolBundles ?? []");
+    expect(routeSource).not.toContain("const tools = toolsQuery.data?.tools ?? []");
+    expect(routeSource).not.toContain("const groups = workspace?.groups ?? []");
+  });
+
   it("uses user-facing Chinese labels instead of internal workspace terms", () => {
     expect(routeSource).toContain("系统编号");
     expect(routeSource).toContain("工具能力");
@@ -394,7 +406,7 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("preferredTools: sortedIds(payload.draft.preferredTools)");
     expect(routeSource).toContain("blockedTools: sortedIds(payload.draft.blockedTools)");
     expect(routeSource).toContain("writeScopes: sortedIds(payload.draft.writeScopes)");
-    expect(routeSource).toContain("const toolBundles = toolsQuery.data?.toolBundles ?? []");
+    expect(routeSource).toContain("const toolBundles = toolsQuery.data?.toolBundles ?? EMPTY_TOOL_BUNDLES");
     expect(routeSource).toContain("applyToolBundle(bundle, \"merge\")");
     expect(routeSource).toContain("applyToolBundle(bundle, \"replace\")");
     expect(routeSource).toContain("copy.toolBundlesTitle");

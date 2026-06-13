@@ -150,7 +150,8 @@ describe("AppShell navigation telemetry", () => {
     expect(appShellSource).toContain("browser.router_location_desync.recovered");
     expect(appShellSource).toContain('window.history.replaceState(window.history.state, "", recovery.restoreTarget)');
     expect(appShellSource).toContain('navigate(target, { replace: true })');
-    expect(appShellSource).not.toContain('window.addEventListener("click", handleDocumentClick, true)');
+    expect(appShellSource).toContain('window.addEventListener("click", handleDocumentClick, true)');
+    expect(appShellSource).toContain('window.removeEventListener("click", handleDocumentClick, true)');
     expect(appShellSource).toContain('document.addEventListener("visibilitychange", handleVisibilityChange)');
     expect(appShellSource).toContain("browserPathnameBefore");
   });
