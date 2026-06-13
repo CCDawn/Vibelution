@@ -24,6 +24,7 @@ import type {
   LauncherDeveloperModeSetting,
   LauncherDeveloperNoiseOverview,
   LauncherComponentState,
+  LauncherControlResponse,
   LauncherOperation,
   WorkbenchWindowMode,
   WorkbenchWindowModeUpdateRequest,
@@ -44,6 +45,7 @@ import styles from "./LauncherRoute.module.css";
 type LauncherNotice = {
   tone: "neutral" | "success" | "warning" | "error";
   text: string;
+  source?: "lifecycle-control" | "supervisor" | "startup-settings" | "window-mode";
 };
 
 type LauncherTrackedCommand = {
@@ -434,6 +436,56 @@ function resultMessage(result: LauncherControlPlaneResult, operation: LauncherOp
       : "The frontend TypeScript toolchain is incomplete; Launcher will try to reinstall dependencies.";
   }
   return raw.length > 180 ? `${raw.slice(0, 177)}...` : raw;
+}
+
+function launcherOperationSettledByStatus(
+  operation: LauncherOperation,
+  state: { projectIsOpen: boolean; projectIsPartial: boolean; projectIsClosed: boolean },
+) {
+  if (operation === "stop" || operation === "force-stop") {
+    return state.projectIsClosed;
+  }
+  if (operation === "start" || operation === "restart") {
+    return state.projectIsOpen || state.projectIsPartial;
+  }
+  return false;
+}
+
+function postLauncherLifecycleControlTelemetry(
+  operation: LauncherOperation,
+  status: "requested" | "accepted" | "rejected" | "request_failed",
+  fields: Record<string, unknown> = {},
+) {
+  const failed = status === "request_failed";
+  const rejected = status === "rejected";
+  postBrowserTelemetry(
+    {
+      phase: "launcher_lifecycle_control",
+      eventCode: `launcher.lifecycle_control.${status}`,
+      message: `Launcher lifecycle control ${status}.`,
+      level: failed ? "error" : rejected ? "warning" : "info",
+      fields: {
+        ...collectBrowserPageSnapshot(),
+        source: "launcher_route",
+        operation,
+        status,
+        ...fields,
+      },
+    },
+    { preferBeacon: true },
+  );
+}
+
+function launcherLifecycleResponseTelemetryFields(response: LauncherControlResponse): Record<string, unknown> {
+  const responseWithCompletion = response as LauncherControlResponse & { completed?: boolean };
+  return {
+    accepted: Boolean(response.accepted),
+    completed: Boolean(responseWithCompletion.completed),
+    commandId: String(response.commandId || ""),
+    launcherMode: String(response.launcherMode || ""),
+    responseOperation: String(response.operation || ""),
+    responseMessage: String(response.message || ""),
+  };
 }
 
 function workbenchWindowModeLabel(mode: string | undefined, copy: LauncherCopy) {
@@ -1550,8 +1602,14 @@ export function LauncherRoute() {
     onMutate: (operation) => {
       setLastControlOperation(operation);
       markControlledProjectLifecycleOperation(operation);
+      postLauncherLifecycleControlTelemetry(operation, "requested");
     },
     onSuccess: (response, operation) => {
+      postLauncherLifecycleControlTelemetry(
+        operation,
+        response.accepted ? "accepted" : "rejected",
+        launcherLifecycleResponseTelemetryFields(response),
+      );
       if (!response.accepted) {
         clearControlledProjectLifecycleOperation();
       }
@@ -1560,15 +1618,19 @@ export function LauncherRoute() {
       setNotice({
         tone: response.accepted ? "neutral" : "warning",
         text: response.message || copy.commandDone,
+        source: "lifecycle-control",
       });
       void queryClient.invalidateQueries({ queryKey: queryKeys.launcherStatus() });
       void queryClient.invalidateQueries({ queryKey: queryKeys.runtimeSummary() });
     },
-    onError: (error) => {
+    onError: (error, operation) => {
+      postLauncherLifecycleControlTelemetry(operation, "request_failed", {
+        errorMessage: error instanceof Error ? error.message : String(error),
+      });
       clearControlledProjectLifecycleOperation();
       setLastControlOperation(null);
       setTrackedCommand(null);
-      setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error), source: "lifecycle-control" });
     },
   });
   const supervisorMutation = useMutation({
@@ -1577,12 +1639,13 @@ export function LauncherRoute() {
       setNotice({
         tone: response.accepted ? "success" : "warning",
         text: response.message || copy.commandDone,
+        source: "supervisor",
       });
       void queryClient.invalidateQueries({ queryKey: queryKeys.launcherStatus() });
       void queryClient.invalidateQueries({ queryKey: queryKeys.runtimeSummary() });
     },
     onError: (error) => {
-      setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error), source: "supervisor" });
     },
   });
   const startupSettingsMutation = useMutation({
@@ -1599,6 +1662,7 @@ export function LauncherRoute() {
             ? "warning"
             : "success",
         text: response.message || copy.startupSettingsSaved,
+        source: "startup-settings",
       });
       void queryClient.invalidateQueries({ queryKey: queryKeys.launcherStatus() });
       void queryClient.invalidateQueries({ queryKey: queryKeys.configPublic() });
@@ -1606,7 +1670,7 @@ export function LauncherRoute() {
       void queryClient.invalidateQueries({ queryKey: queryKeys.runtimeSummary() });
     },
     onError: (error) => {
-      setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error), source: "startup-settings" });
     },
   });
   const [pendingWindowMode, setPendingWindowMode] = useState<WorkbenchWindowMode | "">("");
@@ -1619,6 +1683,7 @@ export function LauncherRoute() {
       setNotice({
         tone: response.setting.envOverride ? "warning" : "success",
         text: response.message || copy.windowModeSaved,
+        source: "window-mode",
       });
       void queryClient.invalidateQueries({ queryKey: queryKeys.launcherStatus() });
       void queryClient.invalidateQueries({ queryKey: queryKeys.configPublic() });
@@ -1626,7 +1691,7 @@ export function LauncherRoute() {
       void queryClient.invalidateQueries({ queryKey: queryKeys.runtimeSummary() });
     },
     onError: (error) => {
-      setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error), source: "window-mode" });
       void queryClient.invalidateQueries({ queryKey: queryKeys.launcherStatus() });
     },
     onSettled: () => {
@@ -1922,6 +1987,27 @@ export function LauncherRoute() {
   const trackedResult = trackedCommand
     ? (evidence?.results.recent ?? []).find((item) => item.commandId === trackedCommand.commandId)
     : undefined;
+  const trackedCommandSettledByStatus = Boolean(
+    trackedCommand
+    && !trackedResult
+    && controlPlaneIdle
+    && lifecycleSettled
+    && !activeCommand?.commandId
+    && launcherOperationSettledByStatus(trackedCommand.operation, { projectIsOpen, projectIsPartial, projectIsClosed }),
+  );
+  const shouldClearStaleLifecycleNotice = Boolean(
+    notice.source === "lifecycle-control"
+    && notice.tone === "error"
+    && status
+    && !statusQuery.isError
+    && !controlMutation.isPending
+    && !activeCommand?.commandId
+    && !trackedResult
+    && controlPlaneIdle
+    && lifecycleSettled
+    && !bundle?.failureMessage
+    && (!trackedCommand || trackedCommandSettledByStatus),
+  );
   const launcherCloseGuardMessage = projectWindowCloseGuardMessage(lang, "launcher");
   const controlledCloseOperationInFlight =
     (controlMutation.isPending && (lastControlOperation === "stop" || lastControlOperation === "force-stop" || lastControlOperation === "restart"))
@@ -1939,12 +2025,28 @@ export function LauncherRoute() {
     const message = resultMessage(trackedResult, trackedCommand.operation, uiLang);
     const tone = trackedResult.ok ? "success" : "error";
     if (notice.text !== message || notice.tone !== tone) {
-      setNotice({ tone, text: message });
+      setNotice({ tone, text: message, source: "lifecycle-control" });
     }
     setTrackedCommand(null);
     setLastControlOperation(null);
     clearControlledProjectLifecycleOperation();
   }, [notice.text, notice.tone, trackedCommand, trackedResult, uiLang]);
+
+  useEffect(() => {
+    if (!trackedCommandSettledByStatus) {
+      return;
+    }
+    setTrackedCommand(null);
+    setLastControlOperation(null);
+    clearControlledProjectLifecycleOperation();
+  }, [trackedCommandSettledByStatus]);
+
+  useEffect(() => {
+    if (!shouldClearStaleLifecycleNotice) {
+      return;
+    }
+    setNotice({ tone: "neutral", text: "" });
+  }, [shouldClearStaleLifecycleNotice]);
 
   useEffect(() => {
     if (!launcherCloseBlocked) {
