@@ -97,6 +97,21 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(stylesSource).toContain(".sourceWarningStrip");
   });
 
+  it("keeps supervised rejection and runtime notes in governance wording instead of raw status codes", () => {
+    expect(routeSource).toContain("function displaySupervisedTechnicalText");
+    expect(routeSource).toContain("decision\\s*=\\s*REJECT");
+    expect(routeSource).toContain("agent_judgment\\s+fail");
+    expect(routeSource).toContain("风险 gate");
+    expect(routeSource).toContain('title={run.nextAction || ""}');
+    expect(routeSource).toContain('title={selectedRun.outcomeSemantics.runtimeExplanation}');
+    expect(routeSource).toContain('title={selectedRun.riskReasons.join(" / ")}');
+    expect(routeSource).toContain("proposalDetailQuery.data.supervised.riskReasons.join");
+    expect(dictionarySource).toContain('supervisedFlowRunsHint: "回看分数、结论和风险项"');
+    expect(dictionarySource).toContain('decision: "治理结论"');
+    expect(dictionarySource).toContain('diagnosis: "治理结论说明"');
+    expect(dictionarySource).not.toContain('retrySupervisedRun: "重跑失败项"');
+  });
+
   it("keeps the latest finished supervised run in the idle result instead of the live monitor", () => {
     expect(routeSource).toContain("queryKeys.evolutionWorkspaceSnapshot()");
     expect(routeSource).toContain('"/api/evolution/workspace-snapshot"');

@@ -1035,6 +1035,7 @@ export function LogsRoute() {
   const packageIndexLabel = lang === "zh" ? "日志包索引" : "Log Package Index";
   const packageFilesLabel = lang === "zh" ? "包内日志" : "Package Logs";
   const rootPathLabel = lang === "zh" ? "根目录" : "Root";
+  const logsCompactSubtitle = lang === "zh" ? "运行现场、日志包和原文预览。" : "Runtime scenes, log bundles, and raw preview.";
   const selectPackageFileLabel = lang === "zh" ? "选择文件" : "Select file";
   const deselectPackageFileLabel = lang === "zh" ? "取消选择文件" : "Deselect file";
   const severityFilterControl = (
@@ -1082,7 +1083,7 @@ export function LogsRoute() {
         <div>
           <p className={styles.eyebrow}>{t("navLogs")}</p>
           <h1 className={styles.title}>{t("logsTitle")}</h1>
-          <p className={styles.subtitle}>{t("logsSubtitle")}</p>
+          <p className={styles.subtitle} title={t("logsSubtitle")}>{logsCompactSubtitle}</p>
         </div>
         <div className={styles.headerMeta}>
           <span className={styles.metaPill}>{t("readonlyPreview")}</span>
@@ -1424,7 +1425,7 @@ export function LogsRoute() {
           <div className={styles.railHeader}>
             <p className={styles.sidebarEyebrow}>{t("logsRootNavigation")}</p>
             <h2 className={styles.railTitle}>{t("navLogs")}</h2>
-            <p className={styles.railText}>{t("logsSubtitle")}</p>
+            <p className={styles.railText} title={t("logsSubtitle")}>{logsCompactSubtitle}</p>
           </div>
 
           <nav className={styles.rootNav} aria-label={t("logsRootNavigation")}>
@@ -1446,6 +1447,7 @@ export function LogsRoute() {
                   className={isActive ? `${styles.rootButton} ${styles.rootButtonActive}` : styles.rootButton}
                   onClick={() => setActiveRootId(root.id)}
                   aria-pressed={isActive}
+                  title={root.summary.userGuide || root.path}
                 >
                   <span className={styles.rootButtonHeader}>
                     <span className={styles.rootButtonLabel}>{rootLabel}</span>
@@ -1455,9 +1457,6 @@ export function LogsRoute() {
                   </span>
                   <span className={styles.rootButtonPath} title={root.path}>
                     {root.path}
-                  </span>
-                  <span className={styles.rootButtonGuide} title={root.summary.userGuide}>
-                    {root.summary.userGuide}
                   </span>
                   <span className={styles.rootButtonFooter}>
                     <span className={styles.rootButtonStats}>

@@ -114,7 +114,7 @@ describe("buildSupervisedRunControlSummary", () => {
     expect(summary.headline).toContain("本轮已取消");
     expect(summary.headline).toContain("baseline 失败：事务探针状态未知");
     expect(summary.headline).toContain("candidate 已取消：操作者请求终止这一轮监督任务。");
-    expect(summary.nextAction).toContain("重跑失败项");
+    expect(summary.nextAction).toContain("重跑问题项");
   });
 
   it("keeps running runs focused on the active case and next observation", () => {
@@ -151,7 +151,7 @@ describe("buildSupervisedRunControlSummary", () => {
     expect(summary.tone).toBe("danger");
     expect(summary.headline).toContain("本轮失败");
     expect(summary.headline).toContain("baseline 失败：事务探针状态未知");
-    expect(summary.nextAction).toContain("查看失败原因");
+    expect(summary.nextAction).toContain("查看异常原因");
   });
 
   it("treats failed or timed-out case roles as completed evaluation evidence when the session finished", () => {
@@ -200,8 +200,37 @@ describe("buildSupervisedRunControlSummary", () => {
 
     expect(summary.tone).toBe("warning");
     expect(summary.headline).toContain("本轮评测已完成");
-    expect(summary.headline).toContain("INCONCLUSIVE");
+    expect(summary.headline).toContain("治理结论为 评测无结论");
     expect(summary.headline).toContain("2 个失败或超时样例");
     expect(summary.nextAction).toContain("这不是中断");
+  });
+
+  it("describes rejected finished runs as not adopted instead of failed", () => {
+    const summary = buildSupervisedRunControlSummary(
+      activeRun({
+        status: "done",
+        currentPhase: "done",
+        runtimeStatus: "idle",
+        decision: "REJECT",
+        reason: "候选未超过基线。",
+        eventTail: [
+          {
+            timestamp: "2026-06-01T12:17:20",
+            event: "session_finish",
+            title: "监督任务结束",
+            summary: "decision=REJECT",
+            status: "done",
+            decision: "REJECT",
+            reason: "候选未超过基线。",
+          },
+        ],
+      }),
+      "zh",
+      labels,
+    );
+
+    expect(summary.tone).toBe("success");
+    expect(summary.headline).toContain("治理结论为 候选未采纳");
+    expect(summary.headline).not.toContain("失败");
   });
 });
