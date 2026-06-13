@@ -2113,6 +2113,41 @@ function Stop-ProcessesById {
 function Get-ListeningPid {
     param([int]$Port)
 
+    if ($Port -le 0) {
+        return $null
+    }
+
+    try {
+        $portSuffixPattern = ":{0}$" -f [regex]::Escape([string]$Port)
+        $netstatLines = @(netstat -ano -p tcp 2>$null)
+        $netstatSucceeded = $?
+        foreach ($line in $netstatLines) {
+            $trimmed = ([string]$line).Trim()
+            if (-not $trimmed) {
+                continue
+            }
+            $parts = @($trimmed -split "\s+")
+            if ($parts.Count -lt 5) {
+                continue
+            }
+            if ([string]$parts[-2] -ne "LISTENING") {
+                continue
+            }
+            $localAddress = [string]$parts[1]
+            if ($localAddress -notmatch $portSuffixPattern) {
+                continue
+            }
+            $pidValue = 0
+            if ([int]::TryParse([string]$parts[-1], [ref]$pidValue) -and $pidValue -gt 0) {
+                return $pidValue
+            }
+        }
+        if ($netstatSucceeded) {
+            return $null
+        }
+    } catch {
+    }
+
     $listener = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue |
         Select-Object -First 1
     if ($listener) {

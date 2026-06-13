@@ -1006,6 +1006,180 @@ Write-Output "ok"
     assert result.stdout.strip().splitlines()[-1] == "ok"
 
 
+def test_launcher_get_listening_pid_prefers_fast_netstat_exact_port(tmp_path):
+    result = _run_launcher_ast_harness(
+        tmp_path,
+        """
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$LauncherPath
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$source = Get-Content -Raw -LiteralPath $LauncherPath
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors -and $parseErrors.Count -gt 0) {
+    throw "Launcher script parse failed: $($parseErrors[0].Message)"
+}
+
+$functionAst = $ast.Find({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -eq "Get-ListeningPid"
+}, $true)
+if ($null -eq $functionAst) {
+    throw "Get-ListeningPid was not found."
+}
+. ([scriptblock]::Create($functionAst.Extent.Text))
+
+$script:fallbackCalled = $false
+function netstat {
+    param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Arguments)
+    return @(
+        "  TCP    127.0.0.1:18000      0.0.0.0:0              LISTENING       9999",
+        "  TCP    127.0.0.1:8000       0.0.0.0:0              LISTENING       4321",
+        "  TCP    [::]:8000            [::]:0                 LISTENING       5432"
+    )
+}
+function Get-NetTCPConnection {
+    $script:fallbackCalled = $true
+    throw "Get-NetTCPConnection should not be used when netstat has an exact match."
+}
+
+$listenerPid = Get-ListeningPid -Port 8000
+if ($listenerPid -ne 4321) {
+    throw "Expected PID 4321 from the first exact netstat match, got $listenerPid."
+}
+if ($script:fallbackCalled) {
+    throw "Expected netstat fast path to avoid Get-NetTCPConnection."
+}
+
+Write-Output "ok"
+""",
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip().splitlines()[-1] == "ok"
+
+
+def test_launcher_get_listening_pid_falls_back_to_get_nettcpconnection(tmp_path):
+    result = _run_launcher_ast_harness(
+        tmp_path,
+        """
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$LauncherPath
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$source = Get-Content -Raw -LiteralPath $LauncherPath
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors -and $parseErrors.Count -gt 0) {
+    throw "Launcher script parse failed: $($parseErrors[0].Message)"
+}
+
+$functionAst = $ast.Find({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -eq "Get-ListeningPid"
+}, $true)
+if ($null -eq $functionAst) {
+    throw "Get-ListeningPid was not found."
+}
+. ([scriptblock]::Create($functionAst.Extent.Text))
+
+function netstat {
+    param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Arguments)
+    throw "netstat unavailable"
+}
+function Get-NetTCPConnection {
+    param([int]$LocalPort, [string]$State, [string]$ErrorAction)
+    if ($LocalPort -ne 8000 -or $State -ne "Listen") {
+        throw "Unexpected fallback query: LocalPort=$LocalPort State=$State"
+    }
+    return [pscustomobject]@{ OwningProcess = 9876 }
+}
+
+$listenerPid = Get-ListeningPid -Port 8000
+if ($listenerPid -ne 9876) {
+    throw "Expected fallback PID 9876, got $listenerPid."
+}
+
+Write-Output "ok"
+""",
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip().splitlines()[-1] == "ok"
+
+
+def test_launcher_get_listening_pid_returns_null_from_netstat_without_slow_fallback(tmp_path):
+    result = _run_launcher_ast_harness(
+        tmp_path,
+        """
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$LauncherPath
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$source = Get-Content -Raw -LiteralPath $LauncherPath
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors -and $parseErrors.Count -gt 0) {
+    throw "Launcher script parse failed: $($parseErrors[0].Message)"
+}
+
+$functionAst = $ast.Find({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -eq "Get-ListeningPid"
+}, $true)
+if ($null -eq $functionAst) {
+    throw "Get-ListeningPid was not found."
+}
+. ([scriptblock]::Create($functionAst.Extent.Text))
+
+$script:fallbackCalled = $false
+function netstat {
+    param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Arguments)
+    return @(
+        "  TCP    127.0.0.1:18000      0.0.0.0:0              LISTENING       9999",
+        "  TCP    127.0.0.1:8000       127.0.0.1:54000        ESTABLISHED     2222"
+    )
+}
+function Get-NetTCPConnection {
+    $script:fallbackCalled = $true
+    throw "Get-NetTCPConnection should not be used when netstat succeeds without a listener."
+}
+
+$listenerPid = Get-ListeningPid -Port 8000
+if ($null -ne $listenerPid) {
+    throw "Expected no listener PID, got $listenerPid."
+}
+if ($script:fallbackCalled) {
+    throw "Expected successful netstat no-match to avoid Get-NetTCPConnection."
+}
+
+Write-Output "ok"
+""",
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip().splitlines()[-1] == "ok"
+
+
 def test_launcher_native_commands_are_hidden_and_python_checks_use_helper(tmp_path):
     result = _run_launcher_ast_harness(
         tmp_path,

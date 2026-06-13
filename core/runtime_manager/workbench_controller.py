@@ -343,7 +343,11 @@ def _recover_managed_browser_window_pid(profile_dir: str) -> int:
     return 0
 
 
-def observe_workbench() -> dict[str, Any]:
+def observe_workbench(
+    *,
+    recover_browser_window: bool = True,
+    recover_browser_window_for_backend_observed: bool = True,
+) -> dict[str, Any]:
     launcher_state = _load_launcher_state()
     url = str(launcher_state.get("url") or DEFAULT_URL).strip() or DEFAULT_URL
     state_backend_pid = int(launcher_state.get("backendPid") or 0)
@@ -417,13 +421,6 @@ def observe_workbench() -> dict[str, Any]:
     browser_window_alive = _is_process_alive(browser_window_pid)
     recovered_browser_window_pid = 0
     browser_window_recovery_source = ""
-    if not browser_window_alive and browser_managed and session_role != "launcher_control_surface":
-        recovered_browser_window_pid = _recover_managed_browser_window_pid(browser_profile_dir)
-        if recovered_browser_window_pid > 0:
-            browser_window_pid = recovered_browser_window_pid
-            browser_window_alive = True
-            browser_window_recovery_source = "managed_profile"
-    launcher_browser_window_alive = _is_process_alive(launcher_browser_window_pid)
     port_owner_kind = _repo_workbench_backend_kind(port_owner_pid) if port_owner_pid > 0 else ""
     port_owner_trusted = bool(
         port_owner_pid > 0
@@ -442,6 +439,20 @@ def observe_workbench() -> dict[str, Any]:
     )
     backend_observed = (backend_alive and not port_conflict) or port_owner_trusted or trusted_health
     backend_pid = state_backend_pid if backend_alive else port_owner_pid if port_owner_trusted else 0
+    should_recover_browser_window = bool(
+        recover_browser_window
+        and not browser_window_alive
+        and browser_managed
+        and session_role != "launcher_control_surface"
+        and (recover_browser_window_for_backend_observed or not backend_observed)
+    )
+    if should_recover_browser_window:
+        recovered_browser_window_pid = _recover_managed_browser_window_pid(browser_profile_dir)
+        if recovered_browser_window_pid > 0:
+            browser_window_pid = recovered_browser_window_pid
+            browser_window_alive = True
+            browser_window_recovery_source = "managed_profile"
+    launcher_browser_window_alive = _is_process_alive(launcher_browser_window_pid)
     managed_browser_missing = bool(
         session_role != "launcher_control_surface"
         and browser_managed
