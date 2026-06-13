@@ -22,7 +22,18 @@ from typing import Dict, Any, Optional, List
 # 默认截断阈值
 DEFAULT_MAX_CHARS = 4000
 
-BUSINESS_FAILURE_STATUSES = {"fail", "failed", "failure", "error", "errored"}
+BUSINESS_FAILURE_STATUSES = {
+    "fail",
+    "failed",
+    "failure",
+    "error",
+    "errored",
+    "cancelled",
+    "no_result",
+    "submitted",
+    "in_progress",
+    "timed_out",
+}
 
 
 @dataclass

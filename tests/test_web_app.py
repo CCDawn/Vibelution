@@ -4278,6 +4278,22 @@ def test_normalize_persisted_tool_calls_preserves_safe_details():
     ]
 
 
+def test_normalize_persisted_tool_calls_preserves_error_like_statuses():
+    tool_calls = session_service._normalize_persisted_tool_calls(
+        [
+            {"name": "grep_search_tool", "status": "no_result", "summary": "No match found."},
+            {"name": "read_file_tool", "status": "cancelled", "summary": "User cancelled read."},
+            {"name": "python_lint_tool", "status": "submitted", "summary": "lint submission accepted."},
+            {"name": "task_update_tool", "status": "in_progress", "summary": "task update job running."},
+        ]
+    )
+
+    assert tool_calls[0]["status"] == "no_result"
+    assert tool_calls[1]["status"] == "cancelled"
+    assert tool_calls[2]["status"] == "submitted"
+    assert tool_calls[3]["status"] == "in_progress"
+
+
 def test_chat_turn_records_keep_tool_names_when_persisted_calls_have_details():
     records = session_service._build_chat_turn_records_from_messages(
         [

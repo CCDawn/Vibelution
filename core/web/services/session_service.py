@@ -12078,6 +12078,10 @@ def _normalize_tool_call_status(value: Any, *, default: str = "done") -> str:
         "failed",
         "error",
         "blocked",
+        "cancelled",
+        "no_result",
+        "submitted",
+        "in_progress",
         "timeout",
         "timed_out",
     }:

@@ -221,6 +221,85 @@ class TestToolExecutorInit:
         assert events[-1][1]["fields"]["semanticStatus"] == "blocked"
         assert events[-1][1]["fields"]["toolResultError"] == "target_not_found"
 
+    def test_tool_json_cancelled_result_is_recorded_as_cancelled_scene_event(self, monkeypatch):
+        """Tools returning cancelled JSON should record a cancelled scene event."""
+        from core.infrastructure import tool_executor as tool_executor_module
+
+        events = []
+        monkeypatch.setattr(
+            tool_executor_module,
+            "_record_tool_scene_event",
+            lambda *args, **kwargs: events.append((args, kwargs)),
+        )
+
+        executor = ToolExecutor()
+        executor.register_tool(
+            "fake_cancelled_tool",
+            lambda: json.dumps({"status": "cancelled", "error": "operator stop"}),
+            timeout=5,
+        )
+
+        result, action = executor.execute("fake_cancelled_tool", {})
+
+        assert action is None
+        assert json.loads(result)["status"] == "cancelled"
+        assert events[-1][0][1] == "tool.execute.cancelled"
+        assert events[-1][1]["outcome"] == "cancelled"
+        assert events[-1][1]["fields"]["semanticStatus"] == "cancelled"
+        assert events[-1][1]["fields"]["toolResultStatus"] == "cancelled"
+
+    def test_tool_json_timed_out_result_is_recorded_as_timeout_scene_event(self, monkeypatch):
+        """Tools returning timed_out JSON should be mapped to timeout scene event."""
+        from core.infrastructure import tool_executor as tool_executor_module
+
+        events = []
+        monkeypatch.setattr(
+            tool_executor_module,
+            "_record_tool_scene_event",
+            lambda *args, **kwargs: events.append((args, kwargs)),
+        )
+
+        executor = ToolExecutor()
+        executor.register_tool(
+            "fake_timeout_tool",
+            lambda: json.dumps({"status": "timed_out", "error": "request hit timeout"}),
+            timeout=5,
+        )
+
+        result, action = executor.execute("fake_timeout_tool", {})
+
+        assert action is None
+        assert json.loads(result)["status"] == "timed_out"
+        assert events[-1][0][1] == "tool.execute.timeout"
+        assert events[-1][1]["outcome"] == "timeout"
+        assert events[-1][1]["fields"]["semanticStatus"] == "timeout"
+
+    def test_tool_json_no_result_is_recorded_as_failed_scene_event(self, monkeypatch):
+        """Tools returning no_result JSON should not be marked as succeeded."""
+        from core.infrastructure import tool_executor as tool_executor_module
+
+        events = []
+        monkeypatch.setattr(
+            tool_executor_module,
+            "_record_tool_scene_event",
+            lambda *args, **kwargs: events.append((args, kwargs)),
+        )
+
+        executor = ToolExecutor()
+        executor.register_tool(
+            "fake_no_result_tool",
+            lambda: json.dumps({"status": "no_result", "message": "no result"}),
+            timeout=5,
+        )
+
+        result, action = executor.execute("fake_no_result_tool", {})
+
+        assert action is None
+        assert json.loads(result)["status"] == "no_result"
+        assert events[-1][0][1] == "tool.execute.failed"
+        assert events[-1][1]["outcome"] == "failed"
+        assert events[-1][1]["fields"]["semanticStatus"] == "failed"
+
     def test_default_timeouts_configured(self):
         """测试默认超时配置"""
         executor = ToolExecutor()
