@@ -19,6 +19,7 @@ RUNTIME_MODEL_CAPABILITY_FIELDS = (
     "capability_checked_at",
     "capability_error",
 )
+OPERATOR_CAPABILITY_SOURCES = {"manual", "manual_config", "operator", "operator_config"}
 
 
 def _utcnow_iso() -> str:
@@ -115,6 +116,15 @@ def get_model_image_input_capability(model_id: str, *, cache_path: Path | None =
     return copy.deepcopy(details) if isinstance(details, dict) else {}
 
 
+def _has_operator_image_input_capability(entry: dict[str, Any]) -> bool:
+    if "supports_image_input" not in entry:
+        return False
+    source = str(entry.get("capability_source") or "").strip().lower()
+    if not source:
+        return True
+    return source in OPERATOR_CAPABILITY_SOURCES
+
+
 def apply_model_capability_overrides(
     public_config: dict[str, Any],
     *,
@@ -131,6 +141,8 @@ def apply_model_capability_overrides(
         return updated
     for model_id, entry in model_library.items():
         if not isinstance(entry, dict):
+            continue
+        if _has_operator_image_input_capability(entry):
             continue
         model_payload = models.get(str(model_id), {})
         capabilities = model_payload.get("capabilities", {}) if isinstance(model_payload, dict) else {}
