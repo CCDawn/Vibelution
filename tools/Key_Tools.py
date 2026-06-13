@@ -1412,8 +1412,8 @@ def create_key_tools() -> List[BaseTool]:
 
         Args:
             knowledge_base_id: 目标团队知识库 ID
-            source_type: 来源类型，如 team_chat_refinement / pdf_refinement / external_search_refinement / agent_authored / runtime_evidence_refinement / manual_user_entry
-            source_ref_json: 来源引用 JSON 字符串，例如 {"url":"..."} 或 {"roomId":"...","messageRange":{"from":0,"to":3}}
+            source_type: 来源类型，必须与 central_source_id 指向的中央来源一致
+            source_ref_json: 调用方上下文 JSON；正式 SourceArtifact 溯源以中央来源为准
             proposal_title: 精炼提案标题
             proposal_content: 精炼后的候选知识正文
             central_source_id: 已由 Steward 审核通过的中央来源 ID
@@ -1464,12 +1464,13 @@ def create_key_tools() -> List[BaseTool]:
         【团队知识半自动摄取】基于中央来源提交 SourceArtifact + pending RefinementProposal。
 
         该工具不联网搜索、不解析 PDF、不收集原始来源、不直接创建正式知识；parser/searcher 必须先把原始材料交给 Owner source inbox。
+        正式 SourceArtifact 溯源以 central_source_id 对应的中央来源为准。
         只有 Agent 的 ToolPolicy.allowedTools 显式包含 knowledge_ingestion_tool，且其团队/MemoryPolicy 允许向目标知识库提交时才可用。
 
         Args:
             knowledge_base_id: 目标团队知识库 ID
-            source_type: 来源类型，如 pdf_refinement / external_search_refinement / team_chat_refinement
-            source_ref_json: 来源引用 JSON 字符串
+            source_type: 来源类型，必须与 central_source_id 指向的中央来源一致
+            source_ref_json: 调用方上下文 JSON；正式 SourceArtifact 溯源以中央来源为准
             proposal_title: 待审提案标题
             excerpt: 已提取的来源摘录
             proposal_content: 可选候选知识正文；为空时使用 excerpt/source_summary
