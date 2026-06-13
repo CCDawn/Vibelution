@@ -6467,6 +6467,71 @@ def test_session_contextual_retry_restores_recent_image_attachment(tmp_path, mon
     assert latest_user["metadata"]["resolvedRecentImageReference"]["source"] == "contextual_retry"
 
 
+def test_session_contextual_retry_ignores_active_task_image_clarification(tmp_path, monkeypatch):
+    _seed_chat_state(
+        tmp_path,
+        task_status="done",
+        active_task={
+            "task_id": "session-live-coding-task",
+            "kind": "coding",
+            "status": "editing",
+            "title": "打开 mimo_cli",
+            "goal": "打开 mimo_cli",
+            "latest_summary": "我看到你发送了图片。你想让我分析这张图片，还是基于它生成/调整图片？请补一句你的目标。",
+            "metadata": {"source": "task_tool"},
+        },
+    )
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    scheduled_contexts: list[dict] = []
+    monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: scheduled_contexts.append(dict(context)))
+    monkeypatch.setattr(
+        session_service,
+        "_schedule_image2_attachment_turn",
+        lambda context: pytest.fail("plain continue must not be routed to image2"),
+    )
+
+    upload_response = client.post(
+        "/api/sessions/session-live/attachments",
+        content=(
+            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01"
+            b"\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4"
+            b"\x89\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05"
+            b"\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+        ),
+        headers={"Content-Type": "image/png", "X-Vibelution-Filename": "state.png"},
+    )
+    assert upload_response.status_code == 201
+    artifact = upload_response.json()
+    state = load_chat_state(tmp_path)
+    conversation = state["conversations"][0]
+    conversation["messages"].extend(
+        [
+            {
+                "role": "user",
+                "content": "我刚才点击了测试,还是显示不支持图像为什么",
+                "timestamp": "2026-05-18T11:58:00",
+                "attachments": [artifact],
+            },
+            {
+                "role": "assistant",
+                "content": "我看到你发送了图片。你想让我分析这张图片，还是基于它生成/调整图片？请补一句你的目标。",
+                "timestamp": "2026-05-18T11:59:00",
+            },
+        ]
+    )
+    save_chat_state(tmp_path, state)
+
+    response = client.post("/api/sessions/session-live/messages", json={"content": "继续"})
+
+    assert response.status_code == 202
+    assert len(scheduled_contexts) == 1
+    assert scheduled_contexts[0]["user_message"] == "继续"
+    assert scheduled_contexts[0].get("attachments") in (None, [])
+    latest_user = [message for message in response.json()["messages"] if message["role"] == "user"][-1]
+    assert "resolvedRecentImageReference" not in (latest_user.get("metadata") or {})
+
+
 def test_session_recent_image_reference_without_history_asks_for_image(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)

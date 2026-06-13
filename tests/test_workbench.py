@@ -2,6 +2,7 @@
 """工作台模式入口测试"""
 
 import json
+import py_compile
 import re
 from pathlib import Path
 from types import SimpleNamespace
@@ -14,6 +15,10 @@ from core.evaluation.chat_review_queue import get_review_item
 from core.evaluation.chat_segmenter import ChatTurnRecord
 from core.ui.chat_state import build_chat_state, load_chat_state, save_chat_state
 from core.ui.workbench import AgentWorkbenchShell
+
+
+def test_workbench_module_py_compiles():
+    py_compile.compile(str(Path("core/ui/workbench.py")), doraise=True)
 
 
 @pytest.fixture(autouse=True)
