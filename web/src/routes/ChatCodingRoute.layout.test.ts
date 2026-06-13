@@ -340,6 +340,19 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).not.toContain("detail?.defaultFileContext ?? runtime?.defaultRoute");
   });
 
+  it("moves recent control signals into the current session status bar", () => {
+    expect(routeSource).toContain("const activeControlSignals = useMemo<ChatNextStateSignalSummary[]>");
+    expect(routeSource).toContain("shouldShowNextStateSignalInConversation(signal, phase)");
+    expect(routeSource).toContain("const latestControlSignalLine = latestControlSignal");
+    expect(routeSource).toContain("label: t(\"nextStateSignalsLabel\")");
+    expect(routeSource).toContain("value: latestControlSignalLine");
+    expect(routeSource).toContain("title: latestControlSignalTitle");
+    expect(routeSource).not.toContain("nextStateSignals={detail.nextStateSignals ?? []}");
+    expect(routeCssSource).toContain(".inlineMetaPill strong");
+    expect(routeCssSource).toContain("text-overflow: ellipsis");
+    expect(routeCssSource).toContain("white-space: nowrap");
+  });
+
   it("keeps live token speed visible in the current session status strip", () => {
     expect(routeSource).toContain("tokenSpeedSampleFromMessages");
     expect(routeSource).toContain("updateTokenSpeedTracker");
