@@ -415,10 +415,23 @@ class AgentSessionState:
             total_searches = len(self.read_searches)
             task = self.reading_task
             last_validation = self.last_validation_summary or ""
+            blockers = list(self.recent_blockers)
+
+        duplicate_read_seen = any(
+            item.get("kind") == "duplicate_read_soft_redirect"
+            for item in blockers
+        )
+        has_any_evidence = total_ranges >= 1 or total_entities >= 1 or total_searches >= 1
+        if duplicate_read_seen and has_any_evidence:
+            if task == "modify" and (total_ranges >= 1 or total_entities >= 1):
+                return "读取没有新增证据；已有目标上下文时可开始动手，缺口必须先明确，不能继续顺序读取。"
+            if task == "verify" and (last_validation or has_any_evidence):
+                return "读取没有新增证据；验证证据已可用于修复、复测或给出停机结论。"
+            return "读取没有新增证据；现有证据可形成结论或明确缺口，不要继续顺序读取。"
 
         if task == "locate":
             if total_searches >= 1 and (total_ranges >= 1 or total_entities >= 1):
-                return "定位证据已初步足够，可转入实体精读或修改。"
+                return "定位证据已初步足够，可综合判断、转入修改或明确缺口。"
             if total_searches >= 1:
                 return "已完成首轮定位，下一步应精读目标文件或实体。"
             return "定位证据不足，先执行一次搜索或符号查询。"

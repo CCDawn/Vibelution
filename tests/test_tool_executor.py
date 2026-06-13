@@ -1156,7 +1156,7 @@ class TestToolExecutorErrorHandling:
         assert "第     1 行" not in str(second)
         assert any(item["kind"] == "duplicate_read_soft_redirect" for item in snapshot["recent_blockers"])
 
-    def test_duplicate_read_force_allows_reread(self, executor, tmp_path):
+    def test_duplicate_read_force_does_not_bypass_governance(self, executor, tmp_path):
         reset_session_state()
         file_path = tmp_path / "demo_repeat_force.txt"
         file_path.write_text("a\nb\nc\nd\ne\n", encoding="utf-8")
@@ -1164,8 +1164,10 @@ class TestToolExecutorErrorHandling:
         executor.execute("read_file_tool", {"file_path": str(file_path), "offset": 0, "max_lines": 2})
         second, _ = executor.execute("read_file_tool", {"file_path": str(file_path), "offset": 0, "max_lines": 2, "force": True})
 
-        assert "[阅读治理]" not in str(second)
-        assert "第     1 行" in str(second)
+        assert "[阅读治理]" in str(second)
+        assert "未重复返回正文" in str(second)
+        assert "第     1 行" not in str(second)
+        assert "force=true" not in str(second)
 
     def test_full_file_read_requires_force(self, executor, tmp_path):
         reset_session_state()
@@ -1177,6 +1179,7 @@ class TestToolExecutorErrorHandling:
         assert action is None
         assert "[阅读治理]" in str(result)
         assert "全文件读取" in str(result)
+        assert "force=true" not in str(result)
         snapshot = get_session_state().get_attention_snapshot()
         assert any(item["kind"] == "read_file_full_file_redirect" for item in snapshot["recent_blockers"])
 
