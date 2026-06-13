@@ -176,6 +176,34 @@ class TestFormatToolMessage:
 class TestInferToolBusinessSuccess:
     """业务层工具结果成功性推断。"""
 
+    @pytest.mark.parametrize(
+        "result",
+        [
+            {"status": "failed", "message": "send failed"},
+            {"status": "cancelled", "message": "interrupted"},
+            {"status": "no_result", "message": "empty payload"},
+            {"status": "submitted", "message": "async accepted"},
+            {"status": "in_progress", "message": "still running"},
+            {"status": "timed_out", "message": "request timed out"},
+        ],
+    )
+    def test_non_success_status_is_business_failure_dict(self, result):
+        assert infer_tool_business_success(result) is False
+
+    @pytest.mark.parametrize(
+        "result",
+        [
+            '{"error":"RuntimeError","status":"failed"}',
+            '{"status":"cancelled","error":"User stop requested"}',
+            '{"status":"no_result"}',
+            '{"status":"submitted"}',
+            '{"status":"in_progress"}',
+            '{"status":"timed_out"}',
+        ],
+    )
+    def test_non_success_status_is_business_failure_json(self, result):
+        assert infer_tool_business_success(result) is False
+
     def test_ok_false_json_string_is_business_failure(self):
         result = '{"error":"RuntimeError","message":"cannot schedule new futures after shutdown","ok":false,"status":"failed"}'
         assert infer_tool_business_success(result) is False

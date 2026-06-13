@@ -208,21 +208,50 @@ def _classify_tool_semantic_result(tool_name: str, result: Any) -> dict[str, Any
     fields: dict[str, Any] = {"semanticStatus": "succeeded"}
     payload = _parse_json_object(text)
     payload_status = str(payload.get("status") or "").strip().lower()
+    business_failure_statuses = {
+        "blocked",
+        "failed",
+        "error",
+        "invalid_args",
+        "policy_blocked",
+        "timeout",
+        "timed_out",
+        "cancelled",
+        "no_result",
+        "submitted",
+        "in_progress",
+    }
     if payload and (
         payload.get("ok") is False
-        or payload_status in {"blocked", "failed", "error", "timeout", "invalid_args", "policy_blocked"}
+        or payload.get("success") is False
+        or payload_status in business_failure_statuses
     ):
-        outcome = "blocked" if payload_status in {"blocked", "policy_blocked"} else "failed"
-        level = "warning" if outcome == "blocked" else "error"
+        outcome = "failed"
+        event_code = "tool.execute.failed"
+        level = "error"
+        result_status = payload_status if payload_status else "failed"
+        if result_status in {"blocked", "policy_blocked"}:
+            outcome = "blocked"
+            event_code = "tool.execute.blocked"
+            level = "warning"
+        elif result_status in {"cancelled"}:
+            outcome = "cancelled"
+            event_code = "tool.execute.cancelled"
+            level = "warning"
+        elif result_status in {"timeout", "timed_out"}:
+            outcome = "timeout"
+            event_code = "tool.execute.timeout"
+            level = "error"
+
         return {
-            "eventCode": f"tool.execute.{outcome}",
+            "eventCode": event_code,
             "level": level,
             "outcome": outcome,
             "lifecycle": True,
             "fields": {
                 **fields,
                 "semanticStatus": outcome,
-                "toolResultStatus": payload_status,
+                "toolResultStatus": result_status,
                 "toolResultError": str(payload.get("error") or "").strip()[:120],
             },
         }

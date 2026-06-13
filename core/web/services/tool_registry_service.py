@@ -978,8 +978,39 @@ def _value_matches_schema_type(value: Any, expected: str) -> bool:
     return True
 
 
-def _is_tool_failure_result(result_text: str) -> bool:
-    return result_text.startswith("[错误]") or result_text.startswith("[超时]") or result_text.startswith("[短路]")
+def _is_tool_failure_result(result_text: Any) -> bool:
+    if isinstance(result_text, dict):
+        payload = result_text
+    elif isinstance(result_text, str):
+        if result_text.startswith("[错误]") or result_text.startswith("[超时]") or result_text.startswith("[短路]"):
+            return True
+        stripped = str(result_text).strip()
+        if not stripped.startswith("{"):
+            return False
+        try:
+            parsed = json.loads(stripped)
+        except Exception:
+            return False
+        if not isinstance(parsed, dict):
+            return False
+        payload = parsed
+    else:
+        return False
+
+    status = str(payload.get("status") or "").strip().lower()
+    if status in {
+        "failed",
+        "error",
+        "blocked",
+        "cancelled",
+        "no_result",
+        "submitted",
+        "in_progress",
+        "timeout",
+        "timed_out",
+    }:
+        return True
+    return payload.get("ok") is False or payload.get("success") is False
 
 
 def _builtin_tool_items() -> list[dict[str, Any]]:
