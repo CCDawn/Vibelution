@@ -464,10 +464,10 @@ const implementationBlueprint = {
     chatRoomPurpose: "research_coordination",
     workflowPath: "workspace/teams/research-team/workflow_orchestration.json",
     candidateStorePath: "workspace/teams/research-team/candidate_store/index.json",
-    note: "挑战杯科研流程直接绑定当前 Vibelution ai科学研究团队，不另建新团队；Teams 页顶部只保留 AI 搜索范围团队和 ai科学研究团队两个固定入口，左侧栏删除，不再展示创建团队、模板创建或完整团队列表；选择 ai科学研究团队后直接进入团队专属科研工作台，团队内容区只露出知识搜集、实验、迭代三阶段入口；资料搜集已折叠进知识搜集阶段页，组织画布仅保留为附属结构视图。",
+    note: "挑战杯科研流程直接绑定当前 Vibelution ai科学研究团队，不另建新团队；Teams 页顶部只保留 AI 搜索范围团队和 ai科学研究团队两个固定入口，左侧栏删除，不再展示创建团队、模板创建或完整团队列表；选择 ai科学研究团队后直接进入团队专属科研工作台，默认只显示科研控制台：知识搜集、实验、迭代三张阶段卡各保留一个主操作和阶段详情入口；资料搜集已折叠进知识搜集阶段页，组织画布仅保留为附属结构视图。",
     workspaceEntry: "/teams?team=research-team",
     sourceCollectionEntry: "/teams?team=research-team&researchView=knowledge_collection",
-    defaultView: "选中 ai科学研究团队后，团队内容区显示三阶段索引：知识搜集、实验、迭代；点击任一阶段进入对应独立阶段页，并可返回团队页。",
+    defaultView: "选中 ai科学研究团队后，团队内容区显示科研控制台：研究主题、当前阶段、知识搜集/实验/迭代三张阶段卡、每卡一个主按钮和一个阶段详情入口；模型证据、候选、路径、校验和内部状态默认移到阶段详情页或高级信息中。",
     canvasView: "组织画布保留可编辑能力，但不再出现在科研三阶段一级索引中；普通团队仍保持画布优先布局。",
   },
   architecture: [
@@ -485,7 +485,7 @@ const implementationBlueprint = {
   milestones: [
     ["M0", "Team 编排后端切片", "已新增 workflow_orchestration.json、candidate_store/index.json、transfer_records.jsonl 和 API。", "能创建 challenge_cup_research 编排、登记资料候选、提交转移请求，并由 Research Coordination Agent 裁决。"],
     ["M0.1", "Team 页面科研流程入口", "已在 Teams 工作台为 research-team / 科研组织团队读取 TeamWorkflowOrchestration、最近 CandidateStore 候选和知识入库状态；当前入口统一为知识搜集、实验、迭代三阶段，旧的协调、入库、候选图谱、候选资料、团队沟通和组织画布不再作为一级索引。", "只读展示，不触发状态转移、审批、正式 Team Knowledge/RAG/图谱写入；普通非科研团队保持原画布优先布局，不被动初始化挑战杯 workflow。"],
-    ["M0.2", "Teams 科研三阶段入口", "科研索引不再与团队同级，也不再混放流程模块，进入 ai科学研究团队后只展示知识搜集、实验、迭代三张阶段入口。", "用户先选团队，再进入阶段独立页；知识搜集页承载原资料搜集对话流和技术控制台，实验/迭代页先提供规划启动、轮次状态、模块边界和返回团队页；监督进化/自进化画布已拆到各自模式页，以只读系统团队画布展示。"],
+    ["M0.2", "Teams 科研三阶段入口", "科研索引不再与团队同级，也不再混放流程模块，进入 ai科学研究团队后默认展示知识搜集、实验、迭代三张阶段控制卡。", "用户先选团队，首页只做当前阶段判断和一键主操作；知识搜集页承载原资料搜集对话流和技术控制台，实验/迭代页先提供规划启动、轮次状态、模块边界和返回团队页；监督进化/自进化画布已拆到各自模式页，以只读系统团队画布展示。"],
     ["M0.5", "本地研究工作模型接线", "已新增 Local Research Worker Model 任务包、32k 上下文预算、JSON 输出校验、草稿记录和 invoke API；bossAGI-standard / qwen3.5-9b 通过临时 model_ref profile 调用，解析失败不写 CandidateStore。", "能为资料初筛、paper_note 草稿、neuro_mechanism 候选、algorithm_hypothesis 草稿和 review prefilter 构建任务包，调用本地模型，并把合格 JSON 草稿写入 CandidateStore。"],
     ["M1", "候选数据基座", "已新增 CandidateStore 列表查询、校验报告、source_manifest/PDF 最小字段校验和本地 PDF source-extraction API；PDF 缺路径、sha256、allowedForAnalysis=true 或抽取失败会进入 source_needs_confirmation。", "能登记 PDF source_manifest，按 candidateType/currentState/qualityStatus 查询候选，抽取 sha256/pageAnchors/excerpt，并查看 invalid/error/warning 统计；仍不写正式 Team Knowledge/RAG/知识图谱。"],
     ["M2", "paper_note 与 PDF 锚点", "已新增 paper_note 输出契约与 Citation Anchor 校验，并接入 sourceExtraction -> paper_note_draft 自动草稿桥：本地 PDF pageAnchors/excerpt 会被转为 sourceRefs/evidenceRefs/excerpt 后调用本地模型；paperNoteChunkPlan 可把长文切成可追踪 chunk seeds。", "合格本地模型输出进入 paper_note_draft；缺 citation/page anchor 时进入 paper_note_needs_revision，不能自然推进到 mechanism_candidate；多 chunk 草稿合并仍待接。"],
@@ -514,6 +514,7 @@ const implementationBlueprint = {
     ["M6.19", "固定团队入口下拉", "Teams 左侧团队管理区替换为固定团队下拉，只暴露 AI 搜索范围团队和 ai科学研究团队；选择项会更新 team URL 并进入对应团队页面。", "当前页面不再显示创建团队表单、模板创建或完整团队列表，避免自定义团队入口挤占科研团队主工作区；后端团队创建和模板 API 不删除，仍可由其它管理面承接。"],
     ["M6.20", "顶部团队切换条", "Teams 固定团队入口从左侧栏移到 summary 下方的顶部横向切换条，左侧栏删除，主工作区改为科研内容优先。", "点击 AI 搜索范围团队或 ai科学研究团队后直接进入对应团队内容；科研三阶段页面获得更多横向空间，不再被团队选择区挤压。"],
     ["M6.21", "搜集证据落盘与打开位置", "source collection run 固定生成 workspace/teams/research-team/source_collection_runs/<runId>/，写入 search_plan.json、search_events.jsonl、records.jsonl、candidates.jsonl 和 artifacts/，Teams 知识搜集页提供打开批次目录、搜索计划、搜索步骤、搜集记录、候选镜像和候选仓库按钮。", "打开接口只接受白名单 target，不允许前端传任意路径；本轮仍只保存候选搜集证据，不绕过资料筛选、正式 Team Knowledge、RAG 或 official graph 门禁。"],
+    ["M6.22", "科研总览控制台降噪", "Teams research-team 总览页移除旧三阶段索引和默认科研流程/模型证据详情，只保留研究主题、当前阶段、三张阶段卡、每阶段一个主操作和一个阶段详情入口。", "首页用于一键启动/续做和判断下一步；模型调用证据、候选数量、仓库路径、校验、KV 分区、query 和内部执行细节进入知识搜集/实验/迭代阶段页或可展开高级信息，不再默认挤占总览。"],
   ],
   schemas: [
     "DataProcessingRun",
