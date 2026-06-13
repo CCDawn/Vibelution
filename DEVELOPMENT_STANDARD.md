@@ -802,10 +802,13 @@ Prefer:
 
 - buttons sized to their label and icon content with consistent padding, stable height, and bounded min/max width;
 - icon-only square buttons for familiar tool actions, with accessible labels and tooltips;
+- short visible labels for actions, fields, badges, and status rows; keep supplemental explanation in hover and keyboard-focus tooltips instead of inline prose;
+- terse visible page copy that preserves the current object, state, value, and next action; move meaning, source, formula, scope, or rationale into a tooltip, details disclosure, drawer, or help surface;
 - full-width buttons only when the whole row or block is intentionally the action target, such as a mobile primary action, a form submit row, or a single CTA inside a constrained panel;
 - segmented controls, tabs, checkboxes, toggles, selects, menus, or dropdowns for modes and option sets instead of long stacks of button-like choices;
 - action groups aligned near the object they affect, with primary, secondary, and destructive actions visually separated;
 - compact operational layouts that prioritize scanning, comparison, and repeated use over marketing-style hero/card composition;
+- tooltips that are concise, accessible by hover and focus, and limited to local explanation; longer guidance belongs in an expandable detail panel rather than a tooltip;
 - reserved dimensions, skeletons, or stable placeholders so loading content does not pop in below the viewport or shift the surrounding layout after data arrives;
 - responsive constraints such as `minmax`, `fit-content`, `max-content`, `max-width`, `aspect-ratio`, and fixed icon-button dimensions for fixed-format controls;
 - designs checked against the longest realistic Chinese and English labels, empty values, loading labels, error text, and permission-disabled states;
@@ -817,9 +820,11 @@ Avoid:
 - using `width: 100%` on buttons inside dense panels, toolbars, lists, or cards unless the full row is the intended target;
 - button text that wraps awkwardly, clips, overflows, or visually floats in excessive whitespace;
 - controls whose hover, loading, badge, or label states resize the surrounding layout;
+- explanatory sentences that permanently occupy dense operational surfaces when the same meaning can live in a tooltip, title, focus hint, details disclosure, or contextual help icon;
+- hiding complete errors, destructive consequences, permission blockers, secret-handling warnings, or irreversible-operation risks behind a tooltip; critical blocking information must remain directly visible;
 - nested cards, decorative card walls, or large empty bands on operational pages;
 - using buttons as generic pills for filters, binary settings, mode switches, or multi-choice inputs when a standard control communicates the intent better;
 - loading states where key rows, actions, or bottom content are hidden until the request finishes without a stable placeholder;
 - mobile layouts that require horizontal scrolling for normal controls or let fixed buttons cover content.
 
-Validation anchor: frontend visual work should include a browser screenshot or equivalent visual check at the relevant desktop and mobile widths. Before finishing, confirm that buttons hug their content or have an explicit full-width reason, text fits, controls do not overlap, and loading-to-loaded transitions do not create disruptive layout shifts.
+Validation anchor: frontend visual work should include a browser screenshot or equivalent visual check at the relevant desktop and mobile widths. Before finishing, confirm that buttons hug their content or have an explicit full-width reason, text fits, controls do not overlap, non-critical explanatory copy is not permanently consuming primary UI space, tooltip/focus explanations are reachable, and loading-to-loaded transitions do not create disruptive layout shifts.
