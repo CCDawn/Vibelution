@@ -1636,6 +1636,10 @@ function isSessionToolPolicyAgent(agent: AgentConfigWorkspaceAgent | null | unde
   return isWorkSessionAgent(agent) || primaryMode === "" || primaryMode === "chat";
 }
 
+function isSessionRequiredTool(toolName: string, agent: AgentConfigWorkspaceAgent | null | undefined) {
+  return isSessionToolPolicyAgent(agent) && DEFAULT_SESSION_AGENT_ALLOWED_TOOLS.includes(toolName);
+}
+
 function normalizeToolPolicyDraftForAgent(
   draft: AgentToolPolicyDraft,
   agent: AgentConfigWorkspaceAgent | null | undefined,
@@ -1934,7 +1938,8 @@ function normalizeCreateDraftForWorkspace(draft: AgentCreateDraft, workspace: Ag
 function createDraftReady(draft: AgentCreateDraft, bundles: ToolBundle[] = []) {
   const workSession = isWorkSessionCreateDraft(draft);
   const selectedPolicy = toolBundleSelectionToPolicy(draft.selectedToolBundleIds, bundles);
-  const configuredToolCount = selectedPolicy.allowedTools.length || expertiseFromDraft(draft.allowedTools).length;
+  const fallbackAllowedTools = bundles.length ? [] : expertiseFromDraft(draft.allowedTools);
+  const configuredToolCount = selectedPolicy.allowedTools.length || (workSession ? DEFAULT_SESSION_AGENT_ALLOWED_TOOLS.length : 0) || fallbackAllowedTools.length;
   return Boolean(
     draft.displayName.trim()
     && agentLlmSlotModelId(draft.llmBindings, FALLBACK_AGENT_LLM_SLOTS[0])
@@ -2074,12 +2079,12 @@ function toolBundleMeta(bundle: ToolBundle, lang: "zh" | "en") {
 
 function defaultCreateToolBundleIds(workSession: boolean, bundles: ToolBundle[]) {
   const available = new Set(bundles.map((bundle) => bundle.bundleId));
-  const preferred = workSession ? ["core", "coding"] : ["core", "research", "collaboration"];
+  const preferred = workSession ? [] : ["core", "research", "collaboration"];
   const selected = preferred.filter((bundleId) => available.has(bundleId));
   if (selected.length) {
     return selected;
   }
-  return bundles[0]?.bundleId ? [bundles[0].bundleId] : [];
+  return workSession ? [] : bundles[0]?.bundleId ? [bundles[0].bundleId] : [];
 }
 
 function toolBundleIdsForModeChange(draft: AgentCreateDraft, nextPrimaryMode: string, bundles: ToolBundle[]) {
@@ -2114,22 +2119,33 @@ function toolBundleSelectionToPolicy(bundleIds: string[], bundles: ToolBundle[])
   };
 }
 
-function createToolBundleSummary(bundleIds: string[], bundles: ToolBundle[], lang: "zh" | "en") {
+function createToolBundleSummary(
+  bundleIds: string[],
+  bundles: ToolBundle[],
+  lang: "zh" | "en",
+  requiredAllowedTools: string[] = [],
+  requiredPreferredTools: string[] = [],
+) {
   const policy = toolBundleSelectionToPolicy(bundleIds, bundles);
+  const allowedTools = sortedIds([...requiredAllowedTools, ...policy.allowedTools]);
+  const preferredTools = sortedIds([...requiredPreferredTools, ...policy.preferredTools].filter((tool) => allowedTools.includes(tool)));
   const highRiskCount = policy.selectedBundles.reduce((total, bundle) => total + Math.max(0, bundle.highRiskToolCount || 0), 0);
   const explicitAllowCount = policy.selectedBundles.reduce((total, bundle) => total + Math.max(0, bundle.explicitAllowToolCount || 0), 0);
   const bundleLabels = policy.selectedBundles.map((bundle) => bundle.label);
+  const label = bundleLabels.length
+    ? bundleLabels.join(" / ")
+    : requiredAllowedTools.length ? (lang === "zh" ? "会话必备工具" : "Required session tools") : (lang === "zh" ? "未选择工具包" : "No package selected");
   return {
     ...policy,
+    allowedTools,
+    preferredTools,
     bundleLabels,
     highRiskCount,
     explicitAllowCount,
-    label: bundleLabels.length
-      ? bundleLabels.join(" / ")
-      : (lang === "zh" ? "未选择工具包" : "No package selected"),
+    label,
     meta: [
-      lang === "zh" ? `${policy.allowedTools.length} 个允许工具` : `${policy.allowedTools.length} allowed tools`,
-      lang === "zh" ? `${policy.preferredTools.length} 个优先工具` : `${policy.preferredTools.length} preferred tools`,
+      lang === "zh" ? `${allowedTools.length} 个允许工具` : `${allowedTools.length} allowed tools`,
+      lang === "zh" ? `${preferredTools.length} 个优先工具` : `${preferredTools.length} preferred tools`,
       highRiskCount ? (lang === "zh" ? `${highRiskCount} 个高风险` : `${highRiskCount} high risk`) : "",
       explicitAllowCount ? (lang === "zh" ? `${explicitAllowCount} 个需显式授权` : `${explicitAllowCount} explicit allow`) : "",
     ].filter(Boolean).join(" · "),
@@ -3570,8 +3586,14 @@ export function AgentsRoute() {
   const canSaveMemoryPolicy = Boolean(selectedAgent?.agentId && memoryPolicyDirty);
   const canSaveRuntimePolicy = Boolean(selectedAgent?.agentId && runtimePolicyDirty);
   const createToolBundleSummaryValue = useMemo(
-    () => createToolBundleSummary(createDraft.selectedToolBundleIds, toolBundles, lang),
-    [createDraft.selectedToolBundleIds, lang, toolBundles],
+    () => createToolBundleSummary(
+      createDraft.selectedToolBundleIds,
+      toolBundles,
+      lang,
+      isWorkSessionCreateDraft(createDraft) ? DEFAULT_SESSION_AGENT_ALLOWED_TOOLS : [],
+      isWorkSessionCreateDraft(createDraft) ? DEFAULT_SESSION_AGENT_PREFERRED_TOOLS : [],
+    ),
+    [createDraft, lang, toolBundles],
   );
   const canCreateAgent = createDraftReady(createDraft, toolBundles);
   const createDraftIsWorkSession = isWorkSessionCreateDraft(createDraft);
@@ -3589,7 +3611,7 @@ export function AgentsRoute() {
       const workSession = isWorkSessionCreateDraft(draft);
       const roleKey = workSession ? "" : draft.roleKey.trim();
       const selectedToolPolicy = toolBundleSelectionToPolicy(draft.selectedToolBundleIds, toolBundles);
-      const fallbackAllowedTools = expertiseFromDraft(draft.allowedTools);
+      const fallbackAllowedTools = toolBundles.length ? [] : expertiseFromDraft(draft.allowedTools);
       const sessionDefaultAllowedTools = workSession ? DEFAULT_SESSION_AGENT_ALLOWED_TOOLS : [];
       const sessionDefaultPreferredTools = workSession ? DEFAULT_SESSION_AGENT_PREFERRED_TOOLS : [];
       const selectedAllowedTools = selectedToolPolicy.allowedTools.length ? selectedToolPolicy.allowedTools : fallbackAllowedTools;
@@ -6199,6 +6221,7 @@ export function AgentsRoute() {
                         <div className={styles.toolPermissionGroupList}>
                           {group.tools.map((tool) => {
                             const mode = toolPolicyMode(toolPolicyDraft, tool.name);
+                            const sessionRequiredTool = isSessionRequiredTool(tool.name, selectedAgent);
                             const tags = [...(tool.capabilityTags ?? []), ...(tool.riskTags ?? [])].slice(0, 4);
                             return (
                               <div key={`${tool.source}:${tool.id}`} className={styles.toolPermissionRow}>
@@ -6208,6 +6231,7 @@ export function AgentsRoute() {
                                   <span className={styles.toolPermissionMeta}>
                                     <em>{toolTierLabel(tool.permissionTier, lang)}</em>
                                     <small>{toolCategoryLabel(tool.category, tool.categoryLabel, lang)}</small>
+                                    {sessionRequiredTool ? <small>{lang === "zh" ? "会话必备，不可移除" : "Required for sessions"}</small> : null}
                                     {tags.length ? <small>{copy.toolTags}: {tags.join(" / ")}</small> : null}
                                   </span>
                                 </span>
@@ -6215,6 +6239,7 @@ export function AgentsRoute() {
                                   <button
                                     type="button"
                                     className={mode === "inherited" || mode === "excluded" ? styles.segmentActive : styles.segmentButton}
+                                    disabled={sessionRequiredTool}
                                     onClick={() => updateToolPolicyMode(tool.name, "inherited")}
                                   >
                                     {toolPolicyModeLabel(mode === "excluded" ? "excluded" : "inherited", lang)}
@@ -6229,6 +6254,7 @@ export function AgentsRoute() {
                                   <button
                                     type="button"
                                     className={mode === "blocked" ? styles.segmentActiveDanger : styles.segmentButton}
+                                    disabled={sessionRequiredTool}
                                     onClick={() => updateToolPolicyMode(tool.name, "blocked")}
                                   >
                                     {toolPolicyModeLabel("blocked", lang)}

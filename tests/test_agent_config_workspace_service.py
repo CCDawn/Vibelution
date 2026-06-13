@@ -2426,6 +2426,36 @@ def test_normalize_tool_policy_dedupes_tool_lists_preserving_order():
     assert policy["blockedTools"] == ["danger"]
 
 
+def test_session_agent_policy_id_patch_forks_required_tools_without_mutating_shared_policy(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = agent_directory_service.create_agent_instance(
+        display_name="会话工具 Agent",
+        primary_mode="chat",
+        prompt_template_id="prompt-chat-default",
+    )
+    state = agent_directory_service.load_state()
+    state["toolPolicies"]["tool-shared-minimal"] = {
+        **agent_directory_service.default_tool_policy("tool-shared-minimal"),
+        "allowedTools": ["agent_message_tool"],
+        "preferredTools": ["agent_message_tool"],
+    }
+    agent_directory_service.save_state(state)
+
+    response = client.patch(
+        f"/api/agents/{agent['agentId']}",
+        json={"toolPolicyId": "tool-shared-minimal"},
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["toolPolicyId"] == f"tool-{agent['agentId']}"
+    assert "agent_message_tool" in payload["toolPolicy"]["allowedTools"]
+    assert "cli_agent_run_tool" in payload["toolPolicy"]["allowedTools"]
+    assert "conversation_log_inspect_tool" in payload["toolPolicy"]["preferredTools"]
+    persisted = agent_directory_service.load_state()
+    assert persisted["toolPolicies"]["tool-shared-minimal"]["allowedTools"] == ["agent_message_tool"]
+
+
 def test_agent_api_rejects_legacy_profile_and_template_fields(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
 
