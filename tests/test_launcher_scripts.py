@@ -491,7 +491,7 @@ Add-Content -LiteralPath (Join-Path $logDir "fake-launcher-calls.jsonl") -Value 
 def _run_vbs_desktop_entry_with_fake_powershell_entry(
     tmp_path: Path,
     args: list[str],
-) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+) -> tuple[list[dict[str, object]], list[dict[str, object]], list[dict[str, object]]]:
     project_dir = tmp_path / "project"
     scripts_dir = project_dir / "scripts"
     scripts_dir.mkdir(parents=True)
@@ -500,7 +500,31 @@ def _run_vbs_desktop_entry_with_fake_powershell_entry(
     (venv_scripts_dir / "python.exe").write_text("console python", encoding="utf-8")
     (venv_scripts_dir / "python.exe").write_text("console python", encoding="utf-8")
     shutil.copyfile(DESKTOP_ENTRY_VBS, scripts_dir / "vibelution_desktop_entry.vbs")
-    shutil.copyfile(DESKTOP_ENTRY_PY, scripts_dir / "vibelution_desktop_entry.py")
+    # This helper verifies VBS routing only; the native Python bridge is tested
+    # separately, so it must not start the real Launcher backend or Edge window.
+    (scripts_dir / "vibelution_desktop_entry.py").write_text(
+        """
+from __future__ import annotations
+
+import json
+import os
+import sys
+from pathlib import Path
+
+project_dir = Path(__file__).resolve().parent.parent
+log_dir = project_dir / ".runtime" / "launcher"
+log_dir.mkdir(parents=True, exist_ok=True)
+payload = {
+    "argv": sys.argv[1:],
+    "cwd": os.getcwd(),
+    "pythonExe": sys.executable,
+    "runId": os.environ.get("VIBELUTION_DESKTOP_ENTRY_VBS_RUN_ID", ""),
+}
+with (log_dir / "fake-python-bridge-calls.jsonl").open("a", encoding="utf-8") as handle:
+    handle.write(json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\\n")
+""".lstrip(),
+        encoding="utf-8",
+    )
     (scripts_dir / "vibelution_desktop_entry.ps1").write_text(
         """
 param(
@@ -557,12 +581,19 @@ Add-Content -LiteralPath (Join-Path $logDir "fake-vbs-entry-calls.jsonl") -Value
     assert result.returncode == 0, result.stderr or result.stdout
 
     calls_path = project_dir / ".runtime" / "launcher" / "fake-vbs-entry-calls.jsonl"
+    python_bridge_calls_path = project_dir / ".runtime" / "launcher" / "fake-python-bridge-calls.jsonl"
     expect_powershell_entry_call = not _vbs_args_target_launcher(args)
+    expect_python_bridge_call = _vbs_args_target_launcher(args)
     if expect_powershell_entry_call:
         deadline = time.time() + 5
         while time.time() < deadline and not calls_path.exists():
             time.sleep(0.05)
         assert calls_path.exists()
+    if expect_python_bridge_call:
+        deadline = time.time() + 5
+        while time.time() < deadline and not python_bridge_calls_path.exists():
+            time.sleep(0.05)
+        assert python_bridge_calls_path.exists()
     calls_text = ""
     if calls_path.exists():
         last_permission_error: PermissionError | None = None
@@ -578,13 +609,21 @@ Add-Content -LiteralPath (Join-Path $logDir "fake-vbs-entry-calls.jsonl") -Value
         if last_permission_error is not None:
             raise last_permission_error
     calls = [json.loads(line) for line in calls_text.splitlines() if line.strip()]
+    python_bridge_calls_text = ""
+    if python_bridge_calls_path.exists():
+        python_bridge_calls_text = python_bridge_calls_path.read_text(encoding="utf-8-sig")
+    python_bridge_calls = [
+        json.loads(line)
+        for line in python_bridge_calls_text.splitlines()
+        if line.strip()
+    ]
     log_path = project_dir / ".runtime" / "launcher" / "desktop-entry-vbs.log"
     events = [
         _loads_json_line_allowing_control_chars(line)
         for line in log_path.read_text(encoding="utf-8-sig").splitlines()
         if line.strip()
     ]
-    return calls, events
+    return calls, events, python_bridge_calls
 
 
 def _vbs_args_target_launcher(args: list[str]) -> bool:
@@ -7784,15 +7823,26 @@ def test_desktop_entry_forwards_no_browser_and_skips_monitor(tmp_path):
 
 
 def test_vbs_desktop_entry_defaults_to_launcher_action(tmp_path):
-    calls, events = _run_vbs_desktop_entry_with_fake_powershell_entry(tmp_path, [])
+    calls, events, python_bridge_calls = _run_vbs_desktop_entry_with_fake_powershell_entry(tmp_path, [])
 
     assert calls == []
+    assert len(python_bridge_calls) == 1
+    assert python_bridge_calls[0]["argv"][0:2] == ["--action", "launcher"]
+    assert "--python-exe" in python_bridge_calls[0]["argv"]
+    assert "--run-id" in python_bridge_calls[0]["argv"]
+    python_exe_index = python_bridge_calls[0]["argv"].index("--python-exe")
+    expected_python_exe = str(tmp_path / "project" / ".venv" / "Scripts" / "python.exe")
+    assert python_bridge_calls[0]["argv"][python_exe_index + 1] == expected_python_exe
+    assert python_bridge_calls[0]["cwd"] == str(tmp_path / "project")
     assert events[-2]["event"] == "desktop_entry_vbs.launched"
     assert "wmi_python_bridge_hidden_process" in events[-2]["details"]
+    launcher_dir = tmp_path / "project" / ".runtime" / "launcher"
+    assert not (launcher_dir / "launcher-control-profile").exists()
+    assert not (launcher_dir / "launcher-backend.stdout.log").exists()
 
 
 def test_vbs_desktop_entry_accepts_named_action_arguments(tmp_path):
-    calls, _events = _run_vbs_desktop_entry_with_fake_powershell_entry(tmp_path, ["-Action", "close"])
+    calls, _events, python_bridge_calls = _run_vbs_desktop_entry_with_fake_powershell_entry(tmp_path, ["-Action", "close"])
 
     assert calls == [
         {
@@ -7802,10 +7852,11 @@ def test_vbs_desktop_entry_accepts_named_action_arguments(tmp_path):
             "pythonExe": str(tmp_path / "project" / ".venv" / "Scripts" / "python.exe"),
         }
     ]
+    assert python_bridge_calls == []
 
 
 def test_vbs_desktop_entry_accepts_powershell_style_no_browser_switch(tmp_path):
-    calls, events = _run_vbs_desktop_entry_with_fake_powershell_entry(tmp_path, ["open", "-NoBrowser"])
+    calls, events, python_bridge_calls = _run_vbs_desktop_entry_with_fake_powershell_entry(tmp_path, ["open", "-NoBrowser"])
 
     assert calls == [
         {
@@ -7815,11 +7866,12 @@ def test_vbs_desktop_entry_accepts_powershell_style_no_browser_switch(tmp_path):
             "pythonExe": str(tmp_path / "project" / ".venv" / "Scripts" / "python.exe"),
         }
     ]
+    assert python_bridge_calls == []
     assert events[-1]["event"] == "desktop_entry_vbs.feedback.suppressed"
 
 
 def test_vbs_desktop_entry_accepts_colon_action_argument(tmp_path):
-    calls, _events = _run_vbs_desktop_entry_with_fake_powershell_entry(tmp_path, ["-Action:status"])
+    calls, _events, python_bridge_calls = _run_vbs_desktop_entry_with_fake_powershell_entry(tmp_path, ["-Action:status"])
 
     assert calls == [
         {
@@ -7829,10 +7881,11 @@ def test_vbs_desktop_entry_accepts_colon_action_argument(tmp_path):
             "pythonExe": str(tmp_path / "project" / ".venv" / "Scripts" / "python.exe"),
         }
     ]
+    assert python_bridge_calls == []
 
 
 def test_vbs_desktop_entry_accepts_equals_action_argument(tmp_path):
-    calls, _events = _run_vbs_desktop_entry_with_fake_powershell_entry(tmp_path, ["--action=restart", "--no-browser"])
+    calls, _events, python_bridge_calls = _run_vbs_desktop_entry_with_fake_powershell_entry(tmp_path, ["--action=restart", "--no-browser"])
 
     assert calls == [
         {
@@ -7842,3 +7895,4 @@ def test_vbs_desktop_entry_accepts_equals_action_argument(tmp_path):
             "pythonExe": str(tmp_path / "project" / ".venv" / "Scripts" / "python.exe"),
         }
     ]
+    assert python_bridge_calls == []
