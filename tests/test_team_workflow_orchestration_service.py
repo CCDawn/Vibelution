@@ -1,5 +1,6 @@
 import json
 
+from core.runtime_manager.work_run_store import WorkRunStore
 from core.web.services import (
     agent_directory_service,
     chat_room_service,
@@ -489,6 +490,55 @@ def test_execute_source_collection_search_writes_records_and_imports_candidates(
     assert [candidate["candidateId"] for candidate in stored_candidates] == [
         candidate["candidateId"] for candidate in candidates["candidates"]
     ]
+
+
+def test_execute_source_collection_search_publishes_runtime_work_run(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    source_work_runs = WorkRunStore(root=tmp_path / ".runtime" / "work_runs")
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "_source_collection_work_run_store",
+        lambda: source_work_runs,
+    )
+    observed_active = []
+
+    def fake_search(query, *, max_results, provider):
+        observed_active.append(team_workflow_orchestration_service.load_source_collection_work_run_summary()["active"])
+        return _fake_source_search_response(query, max_results=max_results, provider=provider)
+
+    monkeypatch.setattr(team_workflow_orchestration_service, "_execute_source_collection_query", fake_search)
+    team = team_service.create_team(name="ai科学研究团队")
+    run_response = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "title": "Neural algorithm source batch",
+            "topic": "neural predictive coding",
+            "querySeeds": ["neural predictive coding"],
+            "searchLanguages": ["en"],
+            "sourceTypes": ["paper"],
+            "agentRoles": ["data_discovery"],
+        },
+    )
+
+    execution = team_workflow_orchestration_service.execute_source_collection_search(
+        team["teamId"],
+        run_response["run"]["runId"],
+        {"maxQueries": 1, "maxResultsPerQuery": 1},
+    )
+    summary = team_workflow_orchestration_service.load_source_collection_work_run_summary()
+
+    assert execution["executedQueryCount"] == 1
+    assert observed_active
+    assert observed_active[0]["runKind"] == "source_collection_run"
+    assert observed_active[0]["status"] == "running"
+    assert observed_active[0]["currentPhase"] == "searching"
+    assert observed_active[0]["teamName"] == "ai科学研究团队"
+    assert observed_active[0]["topic"] == "neural predictive coding"
+    assert summary["active"] is None
+    assert summary["latest"]["runId"] == run_response["run"]["runId"]
+    assert summary["latest"]["status"] == "completed"
+    assert summary["latest"]["recordCount"] == 1
+    assert summary["latest"]["importedCount"] == 1
 
 
 def test_execute_source_collection_search_skips_existing_query_without_force(tmp_path, monkeypatch):

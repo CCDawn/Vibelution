@@ -39,7 +39,7 @@
         <aside class="dashboard-panel">
           <h2>审核摘要</h2>
           <div class="kpi-grid">
-            <div class="kpi"><b>当前阶段</b><strong>M6.27</strong><span>知识搜集首屏控制台展示关键按钮、团队搜索状态和五步客观状态。</span></div>
+            <div class="kpi"><b>当前阶段</b><strong>M6.28</strong><span>知识搜集运行状态进入顶部全局正在进行提示。</span></div>
             <div class="kpi"><b>流程节点</b><strong>13</strong><span>1-9 为知识入库主线，10-13 保留占位与维护节点。</span></div>
             <div class="kpi"><b>候选资料</b><strong>10</strong><span>第一轮 source_manifest 已进入 candidate-only 工作区。</span></div>
             <div class="kpi"><b>正式写入</b><strong>0</strong><span>未写正式 Team Knowledge、RAG 或 official graph。</span></div>
@@ -1327,7 +1327,7 @@
                 </div>
 <div class="service-row">
                   <b>TeamsRoute workflow workspace</b>
-                  <span>已落地入口：Teams 页顶部固定横向切换条只暴露 AI 搜索范围团队和 ai科学研究团队，左侧栏已删除；监督进化/自进化模式页各自读取系统 Team 并展示只读团队画布；选择 ai科学研究团队后直接进入 research-team 专属科研控制台；总览只显示知识搜集、实验、迭代三张阶段卡，每张卡一个主操作和阶段详情入口。知识搜集卡会显示当前批次、待处理、候选和查询数，主按钮按状态执行开始、下一批搜索、筛选入口或打开工作台，另有新一轮搜集入口。知识搜集页位于 /teams?team=research-team&amp;researchView=knowledge_collection，默认展示高价值状态摘要、状态驱动主操作和对话式 source collection 过程流；KV/prompt cache、稳定前缀、动态增量、assignment、query、存储路径和手工回写保留在可展开详情中；默认层移除解释性小字；实验/迭代页先提供规划启动、轮次状态和边界说明；旧 source_collection 参数兼容映射到知识搜集。</span>
+                  <span>已落地入口：Teams 页顶部固定横向切换条只暴露 AI 搜索范围团队和 ai科学研究团队，左侧栏已删除；监督进化/自进化模式页各自读取系统 Team 并展示只读团队画布；选择 ai科学研究团队后直接进入 research-team 专属科研控制台；总览只显示知识搜集、实验、迭代三张阶段卡，每张卡一个主操作和阶段详情入口。知识搜集卡会显示当前批次、待处理、候选和查询数，主按钮按状态执行开始、下一批搜索、筛选入口或打开工作台，另有新一轮搜集入口。知识搜集页位于 /teams?team=research-team&amp;researchView=knowledge_collection，默认展示高价值状态摘要、状态驱动主操作和对话式 source collection 过程流；执行 source collection 搜索时会写入 source_collection_run 运行快照，让 AppShell 顶部“正在进行”显示知识搜集；KV/prompt cache、稳定前缀、动态增量、assignment、query、存储路径和手工回写保留在可展开详情中；默认层移除解释性小字；实验/迭代页先提供规划启动、轮次状态和边界说明；旧 source_collection 参数兼容映射到知识搜集。</span>
                 </div>
 <div class="service-row">
                   <b>local_research_worker_model</b>
@@ -2042,6 +2042,12 @@
               <strong>知识搜集控制台客观状态</strong>
               <span>知识搜集独立页首屏提升为流程控制台：左上角显示正在团队搜索/待继续搜索/待筛选/失败等运行态，关键按钮直接展示搜索下一批、新一轮搜集、打开结果目录和刷新状态。</span>
               <span>五个步骤按进行中、已完成、失败、未进行、待处理映射为边框/绿色/红色/灰色/提示色；对话流继续承载证据与存放位置，后端搜索、筛选、正式知识/RAG/图谱边界不改变。</span>
+            </div>
+<div class="blueprint-row">
+              <b>M6.28</b>
+              <strong>全局运行状态接入</strong>
+              <span>source collection 搜索执行前写入 source_collection_run active work-run，结束或失败时写入终态；/api/runtime/status 会把它纳入 workRuns.active/activeItems，AppShell 顶部“正在进行”弹层显示“知识搜集”。</span>
+              <span>用户不在知识搜集详情页时，也能从顶部状态栏看到 AI 科研团队正在搜集资料；完成后自动退出全局运行态，历史结果仍回到知识搜集阶段页查看。</span>
             </div>
       </div>
       <div class="tag-row">

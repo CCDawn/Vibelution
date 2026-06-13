@@ -36,6 +36,7 @@ function runtimeWithActiveWork(active: {
   self_evolution_run?: Record<string, unknown> | null;
   supervised_evolution_run?: Record<string, unknown> | null;
   supervised_worktree_evolution_run?: Record<string, unknown> | null;
+  source_collection_run?: Record<string, unknown> | null;
 }, extras: Record<string, unknown> = {}) {
   const { activeItems, ...runtimeExtras } = extras;
   return {
@@ -44,6 +45,7 @@ function runtimeWithActiveWork(active: {
         chat_turn: null,
         self_evolution_run: null,
         supervised_evolution_run: null,
+        source_collection_run: null,
         ...active,
       },
       ...(activeItems && typeof activeItems === "object" ? { activeItems } : {}),
@@ -692,6 +694,38 @@ describe("systemStatus", () => {
       status: "queued",
       tone: "caution",
     });
+  });
+
+  it("shows research source collection before ordinary chat work", () => {
+    const indicator = deriveActiveWorkIndicator(
+      runtimeWithActiveWork({
+        source_collection_run: {
+          runId: "dprun-20260613-source",
+          runKind: "source_collection_run",
+          status: "running",
+          topic: "neural predictive coding",
+          summary: "正在执行资料搜集，搜索来源元数据并写入候选资料库。",
+        },
+        chat_turn: {
+          runId: "chat-2",
+          runKind: "chat_turn",
+          status: "answering",
+          userMessage: "继续",
+        },
+      }),
+    );
+
+    expect(indicator).toMatchObject({
+      kind: "source_collection",
+      label: "知识搜集",
+      status: "running",
+      runId: "dprun-20260613-source",
+      count: 2,
+      overflowCount: 1,
+    });
+    expect(indicator?.summary).toContain("neural predictive coding");
+    expect(indicator?.summary).toContain("正在执行资料搜集");
+    expect(indicator?.items[1]).toMatchObject({ kind: "chat", summary: "继续" });
   });
 
   it("falls back to the runtime task summary for chat work", () => {

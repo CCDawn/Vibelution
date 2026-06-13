@@ -21,9 +21,10 @@ const nodes = [
       "登记文件路径、资料类型、页码范围和来源可信度。",
       "对本地 PDF source_manifest 运行 source-extraction，计算 sha256 并生成 pageAnchors 与 excerpt。",
       "区分允许分析、暂不分析、需要用户确认的资料。",
+      "执行 source collection 搜索时写入 source_collection_run work-run 快照，让顶部全局运行状态栏显示知识搜集正在运行。",
       "保留原始文件，不在资料入口阶段改写内容。",
     ],
-    outputs: ["资料清单", "sourceFiles 引用", "sourceExtraction.pageAnchors", "Paper 原始来源节点"],
+    outputs: ["资料清单", "sourceFiles 引用", "sourceExtraction.pageAnchors", "source_collection_run 运行快照", "Paper 原始来源节点"],
     memory: "不进入正式记忆库；只作为后续 paper_note 的 sourceFiles。",
     graph: "可作为候选图谱的 Paper source 节点，不进入正式知识图谱。",
     risks: ["资料来源不明", "PDF 抽取失败", "联网搜索结果混入第一版"],
@@ -520,6 +521,7 @@ const implementationBlueprint = {
     ["M6.25", "知识搜集默认层去说明化", "知识搜集阶段页默认可见层移除解释性小字，只保留批次状态、阶段名称、关键数量、主操作、搜集过程和产物入口。", "本轮配置、查询分工、证据文件、路径和兜底回写继续保留在折叠详情；默认层不再依靠提示句解释页面怎么用。"],
     ["M6.26", "搜索状态收口", "通用 DataProcessingRun 在所有采集 assignment 关闭且已有记录后进入 reviewing；科研控制台把“搜索中”限定为真实请求执行中，把有待处理 assignment 的状态显示为“待继续搜索”。", "用户能区分后台正在执行、下一批可手动触发、以及已进入资料筛选；这不写正式 Team Knowledge、不写 RAG、不写 official graph。"],
     ["M6.27", "知识搜集控制台客观状态", "知识搜集独立页首屏提升为流程控制台：左上角显示正在团队搜索/待继续搜索/待筛选/失败等运行态，关键按钮直接展示搜索下一批、新一轮搜集、打开结果目录和刷新状态。", "五个步骤按进行中、已完成、失败、未进行、待处理映射为边框/绿色/红色/灰色/提示色；对话流继续承载证据与存放位置，后端搜索、筛选、正式知识/RAG/图谱边界不改变。"],
+    ["M6.28", "全局运行状态接入", "source collection 搜索执行前写入 source_collection_run active work-run，结束或失败时写入终态；/api/runtime/status 会把它纳入 workRuns.active/activeItems，AppShell 顶部“正在进行”弹层显示“知识搜集”。", "用户不在知识搜集详情页时，也能从顶部状态栏看到 AI 科研团队正在搜集资料；完成后自动退出全局运行态，历史结果仍回到知识搜集阶段页查看。"],
   ],
   schemas: [
     "DataProcessingRun",
@@ -546,7 +548,7 @@ const implementationBlueprint = {
     ["data_processing API", "已落地：/api/data-processing/profiles、runs 创建/列表/详情、records、collection-assignments、outputs、status；供数据搜集类 Agent 领取任务和回写结果。"],
     ["team_workflow_orchestration_service", "已落地：Team 级 workflowOrchestration、ResearchStageRound、CandidateStore、transfer request/decision、source-collection run 启动、DataSearchPlan/query seed 契约、prompt cache/KV 启动门禁、DataRecord -> source_manifest 幂等导入桥、source_quality assessment、paper_note chunk planning，以及 official_model_evidence 证据登记/status。"],
     ["team_workflows API", "已落地：/api/teams/{team_id}/workflow-orchestration、stage-rounds/status、stage-rounds/start、stage-rounds/{stageRoundId}/coordination/retry、stage-rounds/{stageRoundId}/memory-record/retry、source-collection-runs（含 searchPlan/querySeeds/assignedQueries/resultWritebackContract）、candidates/source、data-processing/runs/{runId}/records/{recordId}/source-candidate、candidates/{candidate_id}/source-extraction、source-quality/status、candidates/{candidate_id}/source-quality/assess、paper-note-chunks/status、candidates/{candidate_id}/paper-note-chunks/plan、candidates/{candidate_id}/paper-note-draft（支持 chunkId）、candidates、candidates/validation、candidate-graph、transfers、decide、knowledge-ingestion/status、coordination/status、official-model-evidence/status、official-model-evidence；coordination/status 返回 communicationBrief。"],
-    ["TeamsRoute workflow workspace", "已落地入口：Teams 页顶部固定横向切换条只暴露 AI 搜索范围团队和 ai科学研究团队，左侧栏已删除；监督进化/自进化模式页各自读取系统 Team 并展示只读团队画布；选择 ai科学研究团队后直接进入 research-team 专属科研控制台；总览只显示知识搜集、实验、迭代三张阶段卡，每张卡一个主操作和阶段详情入口。知识搜集卡会显示当前批次、待处理、候选和查询数，主按钮按状态执行开始、下一批搜索、筛选入口或打开工作台，另有新一轮搜集入口。知识搜集页位于 /teams?team=research-team&researchView=knowledge_collection，默认展示高价值状态摘要、状态驱动主操作和对话式 source collection 过程流；KV/prompt cache、稳定前缀、动态增量、assignment、query、存储路径和手工回写保留在可展开详情中；默认层移除解释性小字；实验/迭代页先提供规划启动、轮次状态和边界说明；旧 source_collection 参数兼容映射到知识搜集。"],
+    ["TeamsRoute workflow workspace", "已落地入口：Teams 页顶部固定横向切换条只暴露 AI 搜索范围团队和 ai科学研究团队，左侧栏已删除；监督进化/自进化模式页各自读取系统 Team 并展示只读团队画布；选择 ai科学研究团队后直接进入 research-team 专属科研控制台；总览只显示知识搜集、实验、迭代三张阶段卡，每张卡一个主操作和阶段详情入口。知识搜集卡会显示当前批次、待处理、候选和查询数，主按钮按状态执行开始、下一批搜索、筛选入口或打开工作台，另有新一轮搜集入口。知识搜集页位于 /teams?team=research-team&researchView=knowledge_collection，默认展示高价值状态摘要、状态驱动主操作和对话式 source collection 过程流；执行 source collection 搜索时会写入 source_collection_run 运行快照，让 AppShell 顶部“正在进行”显示知识搜集；KV/prompt cache、稳定前缀、动态增量、assignment、query、存储路径和手工回写保留在可展开详情中；默认层移除解释性小字；实验/迭代页先提供规划启动、轮次状态和边界说明；旧 source_collection 参数兼容映射到知识搜集。"],
     ["local_research_worker_model", "已落地任务包构建、32k 上下文预算、统一 LLMClient invoke、JSON 提取/校验和 CandidateStore 草稿记录；解析失败不入库。"],
     ["team_communication_binding", "复用 Research Organization 通信边、Team linkedChatRoom、round_robin/opportunistic 群聊轮次。"],
     ["candidate_store", "已落地 Team 级 index、候选列表查询、按类型/状态过滤、validationSummary，并接入 source_manifest、paper_note、neuro_mechanism、mechanism_mapping、algorithm_hypothesis、candidate_graph 最小校验；rejected 候选保留在 CandidateStore metadata.rejectionArchive，但不进入候选图谱推进节点。"],
@@ -2783,7 +2785,7 @@ function indexHtml() {
         <aside class="dashboard-panel">
           <h2>审核摘要</h2>
           <div class="kpi-grid">
-            <div class="kpi"><b>当前阶段</b><strong>M6.27</strong><span>知识搜集首屏控制台展示关键按钮、团队搜索状态和五步客观状态。</span></div>
+            <div class="kpi"><b>当前阶段</b><strong>M6.28</strong><span>知识搜集运行状态进入顶部全局正在进行提示。</span></div>
             <div class="kpi"><b>流程节点</b><strong>${nodes.length}</strong><span>1-9 为知识入库主线，10-13 保留占位与维护节点。</span></div>
             <div class="kpi"><b>候选资料</b><strong>${currentResearchRun.sources.length}</strong><span>第一轮 source_manifest 已进入 candidate-only 工作区。</span></div>
             <div class="kpi"><b>正式写入</b><strong>0</strong><span>未写正式 Team Knowledge、RAG 或 official graph。</span></div>

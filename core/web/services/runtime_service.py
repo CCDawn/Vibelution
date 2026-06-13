@@ -842,6 +842,7 @@ def _force_cancel_supervised_worktree_evolution_for_shutdown(reason: str) -> lis
 def _work_run_summary() -> dict[str, dict[str, dict | None]]:
     chat = load_chat_turn_work_run_summary()
     chat_room = _safe_load_chat_room_work_run_summary()
+    source_collection = _safe_load_source_collection_work_run_summary()
     self_active = _safe_load_evolution_work_run("self", active=True)
     self_latest = _safe_load_evolution_work_run("self", active=False)
     supervised_active = _safe_load_evolution_work_run("supervised", active=True)
@@ -855,6 +856,7 @@ def _work_run_summary() -> dict[str, dict[str, dict | None]]:
             "self_evolution_run": self_active,
             "supervised_evolution_run": supervised_active,
             "supervised_worktree_evolution_run": supervised_worktree_active,
+            "source_collection_run": source_collection.get("active"),
         },
         "latest": {
             "chat_turn": chat.get("latest"),
@@ -862,6 +864,7 @@ def _work_run_summary() -> dict[str, dict[str, dict | None]]:
             "self_evolution_run": self_latest,
             "supervised_evolution_run": supervised_latest,
             "supervised_worktree_evolution_run": supervised_worktree_latest,
+            "source_collection_run": source_collection.get("latest"),
         },
         "activeItems": {
             "chat_turn": [
@@ -870,6 +873,10 @@ def _work_run_summary() -> dict[str, dict[str, dict | None]]:
             ],
             "chat_room_round": [
                 item for item in (chat_room.get("activeItems") or [])
+                if isinstance(item, dict)
+            ],
+            "source_collection_run": [
+                item for item in (source_collection.get("activeItems") or [])
                 if isinstance(item, dict)
             ],
         },
@@ -888,6 +895,25 @@ def _safe_load_chat_room_work_run_summary() -> dict[str, dict | None]:
     return {
         "active": payload.get("active") if isinstance(payload.get("active"), dict) else None,
         "latest": payload.get("latest") if isinstance(payload.get("latest"), dict) else None,
+    }
+
+
+def _safe_load_source_collection_work_run_summary() -> dict[str, object]:
+    try:
+        from . import team_workflow_orchestration_service
+
+        payload = team_workflow_orchestration_service.load_source_collection_work_run_summary()
+    except Exception:
+        return {"active": None, "latest": None, "activeItems": []}
+    if not isinstance(payload, dict):
+        return {"active": None, "latest": None, "activeItems": []}
+    return {
+        "active": payload.get("active") if isinstance(payload.get("active"), dict) else None,
+        "latest": payload.get("latest") if isinstance(payload.get("latest"), dict) else None,
+        "activeItems": [
+            item for item in list(payload.get("activeItems") or [])
+            if isinstance(item, dict)
+        ],
     }
 
 
