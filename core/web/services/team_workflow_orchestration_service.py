@@ -26,6 +26,7 @@ from core.web.services.runtime_scene_service import record_runtime_scene_event
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 SCHEMA_VERSION = 1
+WORKFLOW_LOG_SAMPLE_LIMIT = 8
 WORKFLOW_KIND_CHALLENGE_CUP_RESEARCH = "challenge_cup_research"
 DEFAULT_OWNER_AGENT_ID = "Research Coordination Agent"
 DEFAULT_WORKFLOW_ID = "challenge-cup-research-flow"
@@ -1565,6 +1566,9 @@ def get_paper_note_chunk_status(team_id: str) -> dict[str, Any]:
             "chunkCount": chunk_count,
             "openChunkCount": open_count,
             "missingPlanSourceCandidateCount": len(missing_plan_sources),
+            "plannedSourceCandidateIds": _workflow_log_sample_values(plans, "sourceCandidateId"),
+            "missingPlanSourceCandidateIds": _workflow_log_sample_values(missing_plan_sources, "candidateId"),
+            "actionItemCodes": _workflow_log_sample_values(action_items, "code"),
         },
     )
     return payload
@@ -1747,7 +1751,16 @@ def get_source_quality_status(team_id: str) -> dict[str, Any]:
             "status": status,
             "sourceCandidateCount": len(source_candidates),
             "approvedSourceCandidateCount": len(approved),
+            "needsRevisionSourceCandidateCount": len(needs_revision),
+            "rejectedSourceCandidateCount": len(rejected),
             "unassessedSourceCandidateCount": len(unassessed),
+            "extractionReadySourceCandidateCount": len(extraction_ready),
+            "approvedSourceCandidateIds": _workflow_log_sample_values(approved, "candidateId"),
+            "needsRevisionSourceCandidateIds": _workflow_log_sample_values(needs_revision, "candidateId"),
+            "rejectedSourceCandidateIds": _workflow_log_sample_values(rejected, "candidateId"),
+            "unassessedSourceCandidateIds": _workflow_log_sample_values(unassessed, "candidateId"),
+            "extractionReadySourceCandidateIds": _workflow_log_sample_values(extraction_ready, "candidateId"),
+            "actionItemCodes": _workflow_log_sample_values(action_items, "code"),
         },
     )
     return payload
@@ -1815,6 +1828,7 @@ def validate_candidate_store(team_id: str) -> dict[str, Any]:
     error_count = sum(1 for item in candidate_reports for issue in item["validation"]["issues"] if issue["severity"] == "error")
     warning_count = sum(1 for item in candidate_reports for issue in item["validation"]["issues"] if issue["severity"] == "warning")
     invalid_count = sum(1 for item in candidate_reports if not item["validation"]["valid"])
+    invalid_reports = [item for item in candidate_reports if not item["validation"]["valid"]]
     summary = {
         "candidateCount": len(candidate_reports),
         "validCandidateCount": len(candidate_reports) - invalid_count,
@@ -1828,6 +1842,7 @@ def validate_candidate_store(team_id: str) -> dict[str, Any]:
         fields={
             "workflowId": workflow["workflowId"],
             **summary,
+            "invalidCandidateIds": _workflow_log_sample_values(invalid_reports, "candidateId"),
         },
     )
     return {
@@ -1883,6 +1898,20 @@ def get_knowledge_ingestion_status(team_id: str) -> dict[str, Any]:
     stages = _knowledge_ingestion_stages(candidate_summary, knowledge_summary)
     action_items = _knowledge_ingestion_action_items(candidates, candidate_reports, candidate_graph, candidate_summary, knowledge_summary)
     overall_status = _knowledge_ingestion_overall_status(stages, action_items, candidate_summary, knowledge_summary)
+    non_graph_candidates = [item for item in candidates if str(item.get("candidateType") or "") != "candidate_graph"]
+    pending_source_review_candidates = [
+        item for item in non_graph_candidates if _candidate_knowledge_ingestion_status(item) == "pending_source_review"
+    ]
+    pending_knowledge_review_candidates = [
+        item for item in non_graph_candidates if _candidate_knowledge_ingestion_status(item) == "pending_review"
+    ]
+    steward_candidates = [
+        item
+        for item in non_graph_candidates
+        if str(item.get("currentWorkflowNode") or "") == "steward_ingestion"
+        or str((item.get("metadata") if isinstance(item.get("metadata"), dict) else {}).get("taskType") or "") == "steward_pack_draft"
+    ]
+    invalid_candidate_reports = [item for item in candidate_reports if not bool((item.get("validation") or {}).get("valid"))]
     summary = {
         **candidate_summary,
         **knowledge_summary,
@@ -1932,6 +1961,12 @@ def get_knowledge_ingestion_status(team_id: str) -> dict[str, Any]:
             "pendingProposalCount": summary["pendingProposalCount"],
             "formalKnowledgeItemCount": summary["formalKnowledgeItemCount"],
             "actionItemCount": summary["actionItemCount"],
+            "candidateBreakdown": _candidate_breakdown(candidates),
+            "pendingSourceReviewCandidateIds": _workflow_log_sample_values(pending_source_review_candidates, "candidateId"),
+            "pendingKnowledgeReviewCandidateIds": _workflow_log_sample_values(pending_knowledge_review_candidates, "candidateId"),
+            "stewardCandidateIds": _workflow_log_sample_values(steward_candidates, "candidateId"),
+            "invalidCandidateIds": _workflow_log_sample_values(invalid_candidate_reports, "candidateId"),
+            "actionItemCodes": _workflow_log_sample_values(action_items, "code"),
         },
     )
     return payload
@@ -2002,6 +2037,11 @@ def get_official_model_evidence_status(team_id: str) -> dict[str, Any]:
             "coveredNodeCount": summary["coveredNodeCount"],
             "missingNodeCount": summary["missingNodeCount"],
             "actionItemCount": len(action_items),
+            "missingWorkflowNodes": _workflow_log_sample_values(missing_nodes, "workflowNode"),
+            "missingTaskTypes": _workflow_log_sample_values(missing_nodes, "taskType"),
+            "modelProviderCounts": _workflow_log_count_sample(provider_counts),
+            "evidenceKindCounts": _workflow_log_count_sample(evidence_kind_counts),
+            "actionItemCodes": _workflow_log_sample_values(action_items, "code"),
         },
     )
     return payload
@@ -2103,6 +2143,12 @@ def get_team_workflow_coordination_status(team_id: str) -> dict[str, Any]:
             "blockedCandidateCount": summary["blockedCandidateCount"],
             "actionItemCount": summary["actionItemCount"],
             "communicationBriefCount": summary["communicationBriefCount"],
+            "pendingTransferCandidateIds": _workflow_log_queue_candidate_ids(queues, "pendingTransfers"),
+            "reworkCandidateIds": _workflow_log_queue_candidate_ids(queues, "needsRework"),
+            "stewardshipCandidateIds": _workflow_log_queue_candidate_ids(queues, "stewardship"),
+            "blockedCandidateIds": _workflow_log_queue_candidate_ids(queues, "blocked"),
+            "activeCandidateIds": _workflow_log_queue_candidate_ids(queues, "active"),
+            "actionItemCodes": _workflow_log_sample_values(action_items, "code"),
         },
     )
     return payload
@@ -7365,6 +7411,62 @@ def _normalize_text_list(value: Any, *, max_items: int, max_length: int) -> list
         if text and text not in normalized:
             normalized.append(text)
     return normalized
+
+
+def _workflow_log_sample_values(
+    items: list[dict[str, Any]],
+    key: str,
+    *,
+    limit: int = WORKFLOW_LOG_SAMPLE_LIMIT,
+    max_length: int = 160,
+) -> list[str]:
+    values: list[str] = []
+    for item in items:
+        if len(values) >= limit:
+            break
+        if not isinstance(item, dict):
+            continue
+        text = _trim_text(item.get(key), max_length=max_length)
+        if text and text not in values:
+            values.append(text)
+    return values
+
+
+def _workflow_log_count_sample(
+    counts: dict[str, int],
+    *,
+    limit: int = WORKFLOW_LOG_SAMPLE_LIMIT,
+    max_key_length: int = 80,
+) -> dict[str, int]:
+    sampled: list[tuple[str, int]] = []
+    if not isinstance(counts, dict):
+        return {}
+    for key, value in counts.items():
+        label = _trim_text(key, max_length=max_key_length)
+        if not label:
+            continue
+        try:
+            count = int(value or 0)
+        except (TypeError, ValueError):
+            continue
+        if count > 0:
+            sampled.append((label, count))
+    return {
+        label: count
+        for label, count in sorted(sampled, key=lambda item: (-item[1], item[0]))[:limit]
+    }
+
+
+def _workflow_log_queue_candidate_ids(
+    queues: dict[str, list[dict[str, Any]]],
+    queue_name: str,
+    *,
+    limit: int = WORKFLOW_LOG_SAMPLE_LIMIT,
+) -> list[str]:
+    queue_items = queues.get(queue_name)
+    if not isinstance(queue_items, list):
+        return []
+    return _workflow_log_sample_values(queue_items, "candidateId", limit=limit)
 
 
 def _normalize_metadata(value: Any) -> dict[str, Any]:
