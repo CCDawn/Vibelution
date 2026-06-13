@@ -1500,11 +1500,17 @@ if ($managedBackendText -notmatch '--managed-by-launcher') {
 if ($managedBackendText -notmatch 'managed_marker') {
     throw "Start-ManagedBackend does not log the managed backend marker."
 }
-if ($managedBackendText -notmatch 'NoConsoleFilePath' -or $managedBackendText -notmatch 'python_no_console_command') {
-    throw "Start-ManagedBackend does not use and log the no-console Python runtime."
+if ($managedBackendText -notmatch 'Resolve-PythonBackgroundLaunchCommand' -or $managedBackendText -notmatch 'python_no_console_command') {
+    throw "Start-ManagedBackend does not resolve and log the hidden Python launch command."
+}
+if ($managedBackendText -notmatch 'python_launch_command' -or $managedBackendText -notmatch 'python_launch_policy') {
+    throw "Start-ManagedBackend does not log the actual Python launch policy."
 }
 if ($managedBackendText -notmatch 'console_window_suppressed') {
     throw "Start-ManagedBackend does not log whether console windows are suppressed."
+}
+if ($managedBackendText -notmatch 'console_suppression_mode') {
+    throw "Start-ManagedBackend does not log the console suppression mode."
 }
 
 $browserAst = $ast.Find({
@@ -2644,7 +2650,16 @@ $functionAst = $ast.Find({
 if ($null -eq $functionAst) {
     throw "Invoke-RuntimeManagerClient was not found."
 }
+$launchCommandAst = $ast.Find({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -eq "Resolve-PythonBackgroundLaunchCommand"
+}, $true)
+if ($null -eq $launchCommandAst) {
+    throw "Resolve-PythonBackgroundLaunchCommand was not found."
+}
 
+. ([scriptblock]::Create($launchCommandAst.Extent.Text))
 . ([scriptblock]::Create($functionAst.Extent.Text))
 
 $script:calls = @()
@@ -2688,10 +2703,10 @@ $closeArgs = @($script:calls[1].argumentList)
 $restartArgs = @($script:calls[2].argumentList)
 $statusArgs = @($script:calls[3].argumentList)
 
-if ($script:calls[0].commandPath -ne "pythonw-test") { throw "open_workbench did not use the no-console runtime." }
-if ($script:calls[1].commandPath -ne "pythonw-test") { throw "close_workbench did not use the no-console runtime." }
-if ($script:calls[2].commandPath -ne "pythonw-test") { throw "restart_workbench did not use the no-console runtime." }
-if ($script:calls[3].commandPath -ne "pythonw-status") { throw "status did not use the read-only no-console runtime." }
+if ($script:calls[0].commandPath -ne "python-test") { throw "open_workbench did not use the source Python runtime." }
+if ($script:calls[1].commandPath -ne "python-test") { throw "close_workbench did not use the source Python runtime." }
+if ($script:calls[2].commandPath -ne "python-test") { throw "restart_workbench did not use the source Python runtime." }
+if ($script:calls[3].commandPath -ne "python-status") { throw "status did not use the read-only source Python runtime." }
 if ($openArgs -notcontains "--no-browser") { throw "open_workbench did not forward --no-browser." }
 if ($openArgs -contains "--stop-manager") { throw "open_workbench forwarded --stop-manager unexpectedly." }
 if ($closeArgs -contains "--stop-manager") { throw "close_workbench should stop the workbench without stopping the Launcher control manager." }

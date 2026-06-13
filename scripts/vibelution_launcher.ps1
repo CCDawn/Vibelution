@@ -443,6 +443,38 @@ function Get-ObjectPropertyValue {
     return $property.Value
 }
 
+function Resolve-PythonBackgroundLaunchCommand {
+    param(
+        [pscustomobject]$PythonRuntime,
+        [string]$SuppressionMode = "hidden_redirected_process_api"
+    )
+
+    $sourcePythonPath = [string](Get-ObjectPropertyValue -Object $PythonRuntime -Name "FilePath" -Default "")
+    $noConsolePythonPath = [string](Get-ObjectPropertyValue -Object $PythonRuntime -Name "NoConsoleFilePath" -Default "")
+    $commandPath = $sourcePythonPath
+    $launchPolicy = "source_python_with_hidden_process_flags"
+    $fallbackReason = ""
+
+    if (-not $commandPath -and $noConsolePythonPath) {
+        $commandPath = $noConsolePythonPath
+        $launchPolicy = "pythonw_fallback_when_source_python_missing"
+        $fallbackReason = "source_python_missing"
+    }
+    if (-not $commandPath) {
+        throw "Python runtime does not include a usable executable path."
+    }
+
+    return [pscustomobject]@{
+        CommandPath = $commandPath
+        SourcePythonPath = $sourcePythonPath
+        NoConsolePythonPath = $noConsolePythonPath
+        LaunchPolicy = $launchPolicy
+        ConsoleWindowSuppressed = $true
+        ConsoleSuppressionMode = $SuppressionMode
+        FallbackReason = $fallbackReason
+    }
+}
+
 function Write-LauncherControlLog {
     param(
         [string]$Event,
@@ -520,8 +552,8 @@ function Invoke-RuntimeManagerClient {
             return 0
         }
 
-        $runtimeNoConsolePath = Get-ObjectPropertyValue -Object $pythonRuntime -Name "NoConsoleFilePath" -Default ""
-        $runtimeCommandPath = if ($runtimeNoConsolePath) { [string]$runtimeNoConsolePath } else { [string]$pythonRuntime.FilePath }
+        $runtimeLaunch = Resolve-PythonBackgroundLaunchCommand -PythonRuntime $pythonRuntime -SuppressionMode "hidden_capture_process_api"
+        $runtimeCommandPath = [string]$runtimeLaunch.CommandPath
         $pythonArgs = @()
         if ($pythonRuntime.PrefixArgs) {
             $pythonArgs += $pythonRuntime.PrefixArgs
@@ -537,8 +569,8 @@ function Invoke-RuntimeManagerClient {
 
     Ensure-ProjectPythonDependencies
     $pythonRuntime = Resolve-PythonRuntime
-    $runtimeNoConsolePath = Get-ObjectPropertyValue -Object $pythonRuntime -Name "NoConsoleFilePath" -Default ""
-    $runtimeCommandPath = if ($runtimeNoConsolePath) { [string]$runtimeNoConsolePath } else { [string]$pythonRuntime.FilePath }
+    $runtimeLaunch = Resolve-PythonBackgroundLaunchCommand -PythonRuntime $pythonRuntime -SuppressionMode "hidden_capture_process_api"
+    $runtimeCommandPath = [string]$runtimeLaunch.CommandPath
     $pythonArgs = @()
     if ($pythonRuntime.PrefixArgs) {
         $pythonArgs += $pythonRuntime.PrefixArgs
@@ -5179,8 +5211,8 @@ function Start-ManagedBackend {
 
     Write-Note "Starting bundled web service at $url ..."
     Write-Note "Python runtime: $($PythonRuntime.Label) -> $($PythonRuntime.FilePath)"
-    $backendNoConsolePath = Get-ObjectPropertyValue -Object $PythonRuntime -Name "NoConsoleFilePath" -Default ""
-    $backendCommandPath = if ($backendNoConsolePath) { [string]$backendNoConsolePath } else { [string]$PythonRuntime.FilePath }
+    $backendLaunch = Resolve-PythonBackgroundLaunchCommand -PythonRuntime $PythonRuntime -SuppressionMode "hidden_redirected_process_api"
+    $backendCommandPath = [string]$backendLaunch.CommandPath
     if ($script:currentRuntimeSceneId) {
         Update-RuntimeSceneManifest @{
             backend = @{
@@ -5188,7 +5220,10 @@ function Start-ManagedBackend {
                 health_status = "starting"
                 python_label = $PythonRuntime.Label
                 python_command = $PythonRuntime.FilePath
-                python_no_console_command = $backendCommandPath
+                python_no_console_command = $backendLaunch.NoConsolePythonPath
+                python_launch_command = $backendCommandPath
+                python_launch_policy = $backendLaunch.LaunchPolicy
+                console_suppression_mode = $backendLaunch.ConsoleSuppressionMode
                 managed_marker = $managedBackendMarkerArg
             }
         }
@@ -5198,7 +5233,7 @@ function Start-ManagedBackend {
             -EventCode "backend.start.requested" `
             -Message "Starting bundled backend service." `
             -Outcome "started" `
-            -Fields @{ host = $bindHost; port = $port; python_label = $PythonRuntime.Label; python_command = $PythonRuntime.FilePath; python_no_console_command = $backendCommandPath; console_window_suppressed = [bool]$backendNoConsolePath; managed_marker = $managedBackendMarkerArg }
+            -Fields @{ host = $bindHost; port = $port; python_label = $PythonRuntime.Label; python_command = $PythonRuntime.FilePath; python_no_console_command = $backendLaunch.NoConsolePythonPath; python_launch_command = $backendCommandPath; python_launch_policy = $backendLaunch.LaunchPolicy; console_window_suppressed = [bool]$backendLaunch.ConsoleWindowSuppressed; console_suppression_mode = $backendLaunch.ConsoleSuppressionMode; python_fallback_reason = $backendLaunch.FallbackReason; managed_marker = $managedBackendMarkerArg }
     }
     $proc = Start-RedirectedBackgroundProcess `
         -CommandPath $backendCommandPath `
@@ -5275,8 +5310,8 @@ function Start-LauncherControlBackend {
 
     Write-Note "Starting Launcher control service at $launcherControlUrl ..."
     Write-Note "Python runtime: $($PythonRuntime.Label) -> $($PythonRuntime.FilePath)"
-    $backendNoConsolePath = Get-ObjectPropertyValue -Object $PythonRuntime -Name "NoConsoleFilePath" -Default ""
-    $backendCommandPath = if ($backendNoConsolePath) { [string]$backendNoConsolePath } else { [string]$PythonRuntime.FilePath }
+    $backendLaunch = Resolve-PythonBackgroundLaunchCommand -PythonRuntime $PythonRuntime -SuppressionMode "hidden_redirected_process_api"
+    $backendCommandPath = [string]$backendLaunch.CommandPath
     if ($script:currentRuntimeSceneId) {
         Update-RuntimeSceneManifest @{
             launcherBackend = @{
@@ -5284,7 +5319,10 @@ function Start-LauncherControlBackend {
                 health_status = "starting"
                 python_label = $PythonRuntime.Label
                 python_command = $PythonRuntime.FilePath
-                python_no_console_command = $backendCommandPath
+                python_no_console_command = $backendLaunch.NoConsolePythonPath
+                python_launch_command = $backendCommandPath
+                python_launch_policy = $backendLaunch.LaunchPolicy
+                console_suppression_mode = $backendLaunch.ConsoleSuppressionMode
                 managed_marker = $managedLauncherMarkerArg
                 port = $launcherControlPort
                 url = $launcherControlUrl
@@ -5296,7 +5334,7 @@ function Start-LauncherControlBackend {
             -EventCode "launcher.control_backend.start.requested" `
             -Message "Starting standalone Launcher control backend." `
             -Outcome "started" `
-            -Fields @{ host = $bindHost; port = $launcherControlPort; url = $launcherControlUrl; python_label = $PythonRuntime.Label; python_command = $PythonRuntime.FilePath; python_no_console_command = $backendCommandPath; console_window_suppressed = [bool]$backendNoConsolePath; managed_marker = $managedLauncherMarkerArg }
+            -Fields @{ host = $bindHost; port = $launcherControlPort; url = $launcherControlUrl; python_label = $PythonRuntime.Label; python_command = $PythonRuntime.FilePath; python_no_console_command = $backendLaunch.NoConsolePythonPath; python_launch_command = $backendCommandPath; python_launch_policy = $backendLaunch.LaunchPolicy; console_window_suppressed = [bool]$backendLaunch.ConsoleWindowSuppressed; console_suppression_mode = $backendLaunch.ConsoleSuppressionMode; python_fallback_reason = $backendLaunch.FallbackReason; managed_marker = $managedLauncherMarkerArg }
     }
 
     $proc = Start-RedirectedBackgroundProcess `
