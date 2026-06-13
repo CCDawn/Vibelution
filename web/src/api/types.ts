@@ -2327,6 +2327,29 @@ export type AgentToolGovernanceRequest = {
   after?: Record<string, unknown>;
 };
 
+export type AgentProjectMemoryUpdateStatus = "pending" | "applied" | "rejected" | "conflict" | "superseded" | string;
+
+export type AgentProjectMemoryUpdateProposal = {
+  eventId: string;
+  proposalId: string;
+  kind: string;
+  status: AgentProjectMemoryUpdateStatus;
+  agentId: string;
+  agentCode: string;
+  agentName: string;
+  sessionId: string;
+  turnId: string;
+  laneId: string;
+  focus: string;
+  update: string;
+  details: string;
+  relatedFiles: string[];
+  createdAt: string;
+  resolvedAt: string;
+  resolvedBy: string;
+  resolutionNote: string;
+};
+
 export type MemoryPolicy = {
   policyId: string;
   privateMemoryRoot: string;

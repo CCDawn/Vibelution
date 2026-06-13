@@ -40,6 +40,20 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain("copy.deleteMemory");
   });
 
+  it("surfaces the project-memory proposal queue for coordinator review", () => {
+    expect(routeSource).toContain("AgentProjectMemoryUpdateProposal");
+    expect(routeSource).toContain("queryKeys.agentProjectMemoryUpdates");
+    expect(routeSource).toContain("/api/agents/project-memory-updates?");
+    expect(routeSource).toContain("/project-memory-updates/");
+    expect(routeSource).toContain('resolvedBy: "coordinator"');
+    expect(routeSource).toContain("copy.projectMemoryQueue");
+    expect(routeSource).toContain("copy.projectMemoryQueueApply");
+    expect(routeSource).toContain("copy.projectMemoryQueueConflict");
+    expect(routeSource).toContain("renderProjectMemoryQueue()");
+    expect(memoryCssSource).toContain(".projectMemoryQueuePanel");
+    expect(memoryCssSource).toContain(".projectMemoryProposalRow");
+  });
+
   it("keeps source, item, and detail panels available in the source audit view", () => {
     const sourceAndItemRendererIndex = routeSource.indexOf("const renderSourceAndItemPanels");
     const sourcePanelIndex = routeSource.indexOf("styles.sourcePanel", sourceAndItemRendererIndex);
