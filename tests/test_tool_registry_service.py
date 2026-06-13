@@ -62,6 +62,7 @@ def test_tool_registry_lists_builtins_as_protected(tmp_path, monkeypatch):
     assert "list_child_sessions_tool" in bundles["collaboration"]["toolNames"]
     assert bundles["research"]["explicitAllowToolCount"] >= 1
     assert bundles["collaboration"]["explicitAllowToolCount"] >= 1
+    assert bundles["memory_context"]["explicitAllowToolCount"] >= 3
     assert bundles["coding"]["highRiskToolCount"] >= 1
     assert bundles["core"]["label"] == "会话 Agent 基础包"
     assert "conversation_log_inspect_tool" in bundles["core"]["toolNames"]

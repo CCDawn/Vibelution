@@ -819,6 +819,11 @@ def update_agent_instance(
                 updated_task_profile = normalize_task_profile(task_profile)
                 metadata_payload["taskProfile"] = updated_task_profile
             agent["metadata"] = metadata_payload
+        if (tool_policy_id is not None or primary_mode is not None) and _ensure_session_agent_tool_policy(state, agent):
+            policy_id = str(agent.get("toolPolicyId") or DEFAULT_TOOL_POLICY_ID).strip() or DEFAULT_TOOL_POLICY_ID
+            policies = _tool_policies(state)
+            updated_tool_policy = normalize_tool_policy(policies.get(policy_id) or default_tool_policy(policy_id), policy_id)
+            state["toolPolicies"] = policies
         _refresh_agent_onboarding_metadata(state, agent)
         _ensure_agent_default_avatar(agent)
         agent["updatedAt"] = utc_now_iso()
@@ -2560,7 +2565,8 @@ def _ensure_session_agent_tool_policy(state: dict[str, Any], agent: dict[str, An
     if not needs_session_defaults:
         return False
 
-    policy_id = current_policy_id if current_policy_id != DEFAULT_TOOL_POLICY_ID else f"tool-{agent_id}"
+    private_policy_id = f"tool-{agent_id}"
+    policy_id = current_policy_id if current_policy_id == private_policy_id else private_policy_id
     merged_allowed = [
         *list(current_policy.get("allowedTools") or []),
         *list(DEFAULT_SESSION_AGENT_ALLOWED_TOOLS),

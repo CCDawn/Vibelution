@@ -30,6 +30,17 @@ EXPLICIT_ALLOW_TOOLS = {
     "knowledge_rating_suggestion_tool",
 }
 
+
+def explicit_allow_tool_names() -> set[str]:
+    """Return the runtime ToolPolicy explicit-allow set without duplicating policy authority."""
+
+    try:
+        from core.web.services.agent_directory_service import EXPLICIT_TOOL_POLICY_REQUIRED_TOOLS
+
+        return set(EXPLICIT_TOOL_POLICY_REQUIRED_TOOLS)
+    except Exception:
+        return set(EXPLICIT_ALLOW_TOOLS)
+
 CATEGORY_LABELS = {
     "workspace_read": "Workspace read",
     "workspace_write": "Workspace write",
@@ -652,6 +663,7 @@ def list_tool_bundles(*, available_tool_names: set[str] | None = None) -> list[d
 
     available = set(available_tool_names or TOOL_CATALOG.keys())
     bundles: list[dict[str, Any]] = []
+    explicit_allow_tools = explicit_allow_tool_names()
     for definition in TOOL_BUNDLE_DEFINITIONS:
         tool_names = _unique_existing_tool_names(definition.get("toolNames"), available)
         preferred_tool_names = [
@@ -660,7 +672,7 @@ def list_tool_bundles(*, available_tool_names: set[str] | None = None) -> list[d
         risk_tags = sorted({tag for tool_name in tool_names for tag in risk_tags_for_tool(tool_name)})
         permission_tiers = [permission_tier_for_tool(tool_name) for tool_name in tool_names]
         high_risk_count = sum(1 for tier in permission_tiers if tier == HIGH_PERMISSION_TIER)
-        explicit_allow_count = sum(1 for tool_name in tool_names if tool_name in EXPLICIT_ALLOW_TOOLS)
+        explicit_allow_count = sum(1 for tool_name in tool_names if tool_name in explicit_allow_tools)
         bundles.append(
             {
                 "bundleId": str(definition.get("bundleId") or "").strip(),
