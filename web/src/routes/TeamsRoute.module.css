@@ -1163,7 +1163,7 @@
 
 .sourceCollectionCommandBar {
   display: grid;
-  grid-template-columns: minmax(240px, 0.8fr) minmax(420px, 1.1fr) minmax(420px, 1fr);
+  grid-template-columns: minmax(260px, 0.72fr) minmax(520px, 1.28fr);
   align-items: center;
   gap: 10px;
   padding: 10px;
@@ -1223,61 +1223,6 @@
   font-size: 0.82rem;
 }
 
-.sourceCollectionCommandActions {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 6px;
-  min-width: 0;
-}
-
-.sourceCollectionCommandActions button {
-  display: inline-flex;
-  min-width: 0;
-  min-height: 34px;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding: 0 10px;
-  border: 1px solid var(--border-soft);
-  border-radius: var(--radius-control);
-  background: color-mix(in srgb, var(--surface-panel-strong) 80%, transparent);
-  color: var(--fg-primary);
-  cursor: pointer;
-  font-size: 0.74rem;
-  font-weight: 820;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.sourceCollectionCommandActions button:disabled {
-  cursor: not-allowed;
-  opacity: 0.52;
-}
-
-.sourceCollectionCommandPrimary {
-  border-color: color-mix(in srgb, var(--accent-success) 46%, var(--border-strong)) !important;
-  background:
-    linear-gradient(90deg, color-mix(in srgb, var(--accent-success) 16%, transparent), transparent 82%),
-    color-mix(in srgb, var(--surface-panel-strong) 88%, transparent) !important;
-}
-
-.sourceCollectionScreeningButton {
-  border-color: color-mix(in srgb, var(--accent-cool) 42%, var(--border-strong)) !important;
-  background:
-    linear-gradient(90deg, color-mix(in srgb, var(--accent-cool) 14%, transparent), transparent 82%),
-    color-mix(in srgb, var(--surface-panel-strong) 88%, transparent) !important;
-}
-
-.sourceCollectionCommandActions .sourceCollectionScreeningButton strong {
-  flex: 0 0 auto;
-  padding: 2px 6px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--accent-cool) 12%, var(--surface-panel-strong));
-  color: color-mix(in srgb, var(--accent-cool) 72%, var(--fg-primary));
-  font-size: 0.66rem;
-}
-
 .workflowSuccess,
 .workflowError {
   display: grid;
@@ -1312,14 +1257,13 @@
   gap: 6px;
 }
 
-.sourceCollectionStageModules > span {
+.sourceCollectionStageCard {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-rows: auto minmax(34px, 1fr) auto;
   min-width: 0;
-  min-height: 58px;
-  align-items: center;
-  gap: 6px;
-  padding: 7px 8px;
+  min-height: 118px;
+  gap: 8px;
+  padding: 9px;
   border: 1px solid var(--source-step-border, var(--border-soft));
   border-radius: 7px;
   background:
@@ -1329,23 +1273,40 @@
   font-size: 0.68rem;
   font-weight: 740;
   overflow: hidden;
-  text-overflow: ellipsis;
 }
 
-.sourceCollectionStageModules > span strong {
+.sourceCollectionStageCardHead {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.sourceCollectionStageCardHead strong {
   flex: 0 0 auto;
   color: color-mix(in srgb, var(--accent-cool) 74%, var(--fg-primary));
   font-size: 0.62rem;
 }
 
+.sourceCollectionStageCardHead span {
+  min-width: 0;
+  color: var(--source-step-fg, var(--fg-muted));
+  font-size: 0.58rem;
+  font-weight: 820;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .sourceCollectionStageModuleText {
   display: grid;
-  gap: 1px;
+  align-content: start;
+  gap: 3px;
   min-width: 0;
 }
 
 .sourceCollectionStageModuleText b,
-.sourceCollectionStageModuleText small,
 .sourceCollectionStageModuleText em {
   min-width: 0;
   overflow: hidden;
@@ -1355,19 +1316,53 @@
 
 .sourceCollectionStageModuleText b {
   color: var(--fg-primary);
-  font-size: 0.7rem;
-}
-
-.sourceCollectionStageModuleText small {
-  color: var(--source-step-fg, var(--fg-muted));
-  font-size: 0.6rem;
+  font-size: 0.76rem;
 }
 
 .sourceCollectionStageModuleText em {
   color: var(--fg-muted);
-  font-size: 0.58rem;
+  font-size: 0.62rem;
   font-style: normal;
   font-weight: 760;
+}
+
+.sourceCollectionStagePrimaryAction,
+.sourceCollectionStageSecondaryAction {
+  display: inline-flex;
+  min-width: 0;
+  min-height: 30px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 8px;
+  border: 1px solid var(--source-step-action-border, var(--source-step-border, var(--border-soft)));
+  border-radius: var(--radius-control);
+  background: var(--source-step-action-bg, color-mix(in srgb, var(--surface-panel-strong) 82%, transparent));
+  color: var(--fg-primary);
+  cursor: pointer;
+  font-size: 0.68rem;
+  font-weight: 840;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sourceCollectionStagePrimaryAction {
+  --source-step-action-border: color-mix(in srgb, var(--accent-success) 46%, var(--border-strong));
+  --source-step-action-bg:
+    linear-gradient(90deg, color-mix(in srgb, var(--accent-success) 16%, transparent), transparent 82%),
+    color-mix(in srgb, var(--surface-panel-strong) 90%, transparent);
+}
+
+.sourceCollectionStageSecondaryAction {
+  --source-step-action-border: color-mix(in srgb, var(--accent-cool) 36%, var(--border-soft));
+  --source-step-action-bg: color-mix(in srgb, var(--surface-card) 76%, transparent);
+}
+
+.sourceCollectionStagePrimaryAction:disabled,
+.sourceCollectionStageSecondaryAction:disabled {
+  cursor: not-allowed;
+  opacity: 0.52;
 }
 
 .sourceCollectionStepActive {
@@ -2556,79 +2551,11 @@
     color-mix(in srgb, var(--surface-panel-strong) 70%, transparent);
 }
 
-.workflowSourceCollectionActionSummary,
 .workflowSourceCollectionDetails {
   min-width: 0;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   background: color-mix(in srgb, var(--surface-card) 68%, transparent);
-}
-
-.workflowSourceCollectionActionSummary {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) max-content;
-  align-items: center;
-  gap: 8px;
-  padding: 8px;
-}
-
-.workflowSourceCollectionActionSummary > div:first-child {
-  display: grid;
-  gap: 3px;
-  min-width: 0;
-}
-
-.workflowSourceCollectionActionSummary strong {
-  color: var(--fg-primary);
-  font-size: 0.78rem;
-}
-
-.workflowSourceCollectionActionSummary span {
-  color: var(--fg-secondary);
-  font-size: 0.7rem;
-  font-weight: 720;
-  line-height: 1.45;
-}
-
-.workflowSourceCollectionActionButtons {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 6px;
-  min-width: 0;
-}
-
-.workflowSourceCollectionPrimaryButton,
-.workflowSourceCollectionSecondaryButton {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  min-height: 30px;
-  width: fit-content;
-  max-width: 210px;
-  padding: 0 12px;
-  border-radius: var(--radius-control);
-  color: var(--fg-primary);
-  font-size: 0.74rem;
-  font-weight: 780;
-  white-space: nowrap;
-}
-
-.workflowSourceCollectionPrimaryButton {
-  border: 1px solid color-mix(in srgb, var(--accent-primary) 42%, var(--border-strong));
-  background: color-mix(in srgb, var(--accent-primary) 14%, var(--surface-panel-strong));
-}
-
-.workflowSourceCollectionSecondaryButton {
-  border: 1px solid color-mix(in srgb, var(--accent-cool) 42%, var(--border-strong));
-  background: color-mix(in srgb, var(--accent-cool) 12%, var(--surface-panel-strong));
-}
-
-.workflowSourceCollectionPrimaryButton:disabled,
-.workflowSourceCollectionSecondaryButton:disabled {
-  cursor: not-allowed;
-  opacity: 0.55;
 }
 
 .workflowSourceCollectionDetails {
@@ -3774,15 +3701,8 @@
   }
 
   .sourceCollectionCommandBar,
-  .sourceCollectionPageGrid,
-  .workflowSourceCollectionActionSummary {
+  .sourceCollectionPageGrid {
     grid-template-columns: 1fr;
-  }
-
-  .workflowSourceCollectionActionButtons,
-  .workflowSourceCollectionPrimaryButton {
-    justify-self: start;
-    justify-content: flex-start;
   }
 
   .sourceCollectionCommandStats {

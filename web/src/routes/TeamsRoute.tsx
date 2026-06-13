@@ -233,6 +233,11 @@ type SourceCollectionStageModule = {
   metric: string;
   state: SourceCollectionStepState;
   status: string;
+  actionLabel: string;
+  actionDisabled: boolean;
+  actionTone: "primary" | "secondary";
+  actionIcon: "play" | "search" | "check" | "archive" | "refresh";
+  onAction: () => void;
 };
 
 type SourceCollectionStorageOpenTarget =
@@ -3149,61 +3154,153 @@ export function TeamsRoute({
     );
   }
 
+  function renderSourceCollectionScreeningPanel() {
+    const screeningCandidates = sourceManifestCandidates.slice(0, 6);
+    return (
+      <details
+        id="source-collection-screening-panel"
+        className={styles.workflowSourceCollectionDetails}
+        open={sourceCollectionScreeningStepState === "active" || sourceCollectionScreeningStepState === "pending"}
+      >
+        <summary>
+          <span>{lang === "zh" ? "资料筛选" : "Source screening"}</span>
+          <small>{sourceQualityAssessedCount}/{sourceQualityCandidateCount}</small>
+        </summary>
+        <div id="source-collection-candidates-panel" className={styles.workflowSourceQualityStats}>
+          <span>{lang === "zh" ? "候选" : "sources"} <strong>{sourceQualityCandidateCount}</strong></span>
+          <span>{lang === "zh" ? "已筛" : "assessed"} <strong>{sourceQualityAssessedCount}</strong></span>
+          <span>{lang === "zh" ? "通过" : "approved"} <strong>{sourceCollectionApprovedCount}</strong></span>
+          <span>{lang === "zh" ? "待筛" : "pending"} <strong>{sourceQualityUnassessedCount}</strong></span>
+        </div>
+        {screeningCandidates.length ? (
+          <div className={styles.workflowCandidateList}>
+            {screeningCandidates.map((candidate) => {
+              const chunkPlanSummary = candidatePaperNoteChunkPlanSummary(candidate);
+              const sourceQualitySummary = candidateSourceQualityAssessmentSummary(candidate);
+              const canPlanPaperNoteChunks = sourceCandidateHasCompletedExtraction(candidate);
+              const candidateQualityPending =
+                selectedTeamAssessSourceQualityPending
+                && assessSourceQualityMutation.variables?.candidateId === candidate.candidateId;
+              const candidatePlanPending =
+                selectedTeamPlanPaperNoteChunksPending
+                && planPaperNoteChunksMutation.variables?.candidateId === candidate.candidateId;
+              return (
+                <article key={candidate.candidateId} className={styles.workflowCandidateItem}>
+                  <div className={styles.workflowCandidateHeader}>
+                    <strong>{candidate.title || candidate.candidateId}</strong>
+                    <span className={`${styles.workflowTag} ${workflowQualityTone(candidate.qualityStatus)}`}>
+                      {sourceQualitySummary
+                        ? workflowIngestionStatusLabel(sourceQualitySummary.decision, lang)
+                        : (lang === "zh" ? "待筛选" : "pending")}
+                    </span>
+                  </div>
+                  <p>{candidate.summary || candidate.candidateType}</p>
+                  <div className={styles.workflowCandidateMeta}>
+                    <span>{lang === "zh" ? "资料候选" : sourceCollectionSourceTypeLabel(candidate.candidateType, lang)}</span>
+                    <span>{formatTime(candidate.updatedAt, lang)}</span>
+                    {sourceQualitySummary ? (
+                      <span>{lang === "zh" ? "评分" : "score"} {sourceQualitySummary.overallScore}/100</span>
+                    ) : null}
+                    {chunkPlanSummary ? (
+                      <span>
+                        paper_note {chunkPlanSummary.completedChunkCount}/{chunkPlanSummary.chunkCount}
+                      </span>
+                    ) : canPlanPaperNoteChunks ? (
+                      <span>{lang === "zh" ? "可分块" : "chunk ready"}</span>
+                    ) : null}
+                  </div>
+                  <div className={styles.workflowCandidateActions}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!selectedTeam?.teamId || assessSourceQualityMutation.isPending) {
+                          return;
+                        }
+                        assessSourceQualityMutation.mutate({
+                          teamId: selectedTeam.teamId,
+                          candidateId: candidate.candidateId,
+                          decision: "approved",
+                        });
+                      }}
+                      disabled={!selectedTeam?.teamId || assessSourceQualityMutation.isPending}
+                    >
+                      <CheckCircle2 size={13} />
+                      {candidateQualityPending && assessSourceQualityMutation.variables?.decision === "approved"
+                        ? (lang === "zh" ? "筛选中" : "Assessing")
+                        : (lang === "zh" ? "通过筛选" : "Approve")}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!selectedTeam?.teamId || assessSourceQualityMutation.isPending) {
+                          return;
+                        }
+                        assessSourceQualityMutation.mutate({
+                          teamId: selectedTeam.teamId,
+                          candidateId: candidate.candidateId,
+                          decision: "needs_revision",
+                        });
+                      }}
+                      disabled={!selectedTeam?.teamId || assessSourceQualityMutation.isPending}
+                    >
+                      <AlertTriangle size={13} />
+                      {candidateQualityPending && assessSourceQualityMutation.variables?.decision === "needs_revision"
+                        ? (lang === "zh" ? "退回中" : "Returning")
+                        : (lang === "zh" ? "退回补资料" : "Repair")}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!selectedTeam?.teamId || !canPlanPaperNoteChunks || planPaperNoteChunksMutation.isPending) {
+                          return;
+                        }
+                        planPaperNoteChunksMutation.mutate({
+                          teamId: selectedTeam.teamId,
+                          candidateId: candidate.candidateId,
+                        });
+                      }}
+                      disabled={!selectedTeam?.teamId || !canPlanPaperNoteChunks || planPaperNoteChunksMutation.isPending}
+                    >
+                      {chunkPlanSummary ? <RefreshCw size={13} /> : <Plus size={13} />}
+                      {candidatePlanPending
+                        ? (lang === "zh" ? "规划中" : "Planning")
+                        : chunkPlanSummary
+                          ? (lang === "zh" ? "重建分块" : "Rebuild chunks")
+                          : (lang === "zh" ? "生成分块" : "Plan chunks")}
+                    </button>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        ) : (
+          <div className={styles.empty}>{lang === "zh" ? "暂无候选资料。先在资料搜集卡点击开始搜集或搜索下一批。" : "No source candidates yet."}</div>
+        )}
+        {teamWorkflowSourceQualityStatus?.actionItems.length ? (
+          <div className={styles.workflowIngestionActions}>
+            {teamWorkflowSourceQualityStatus.actionItems.slice(0, 3).map((item) => (
+              <span key={`${item.code}-${item.candidateId}`} className={workflowIngestionTone(item.severity)}>
+                {workflowIngestionStatusLabel(item.severity, lang)} · {item.message}
+              </span>
+            ))}
+          </div>
+        ) : null}
+        {teamWorkflowSourceQualityStatusQuery.error instanceof Error ? (
+          <div className={styles.messageError}>{teamWorkflowSourceQualityStatusQuery.error.message}</div>
+        ) : null}
+        {selectedTeamAssessSourceQualityError ? (
+          <div className={styles.messageError}>{selectedTeamAssessSourceQualityError.message}</div>
+        ) : null}
+      </details>
+    );
+  }
+
   function renderSourceCollectionControlsPanel() {
-    const sourceCollectionPrimaryDisabled = !selectedSourceCollectionRun
-      ? !sourceCollectionCanStart || selectedTeamStartSourceCollectionPending
-      : sourceCollectionOpenAssignmentCount > 0
-        ? !canExecuteSourceCollectionSearch
-        : false;
-    const runSourceCollectionSearchBatch = () => {
-      if (!selectedTeam?.teamId || !selectedSourceCollectionRunEffectiveId || !canExecuteSourceCollectionSearch) {
-        return;
-      }
-      const selectedAssignmentIsRunnable = selectedSourceCollectionAssignment
-        ? ["open", "in_progress", "returned"].includes(selectedSourceCollectionAssignment.status)
-        : false;
-      executeSourceCollectionSearchMutation.mutate({
-        teamId: selectedTeam.teamId,
-        runId: selectedSourceCollectionRunEffectiveId,
-        assignmentId: selectedAssignmentIsRunnable ? selectedSourceCollectionAssignment?.assignmentId : "",
-        maxQueries: 4,
-        maxResultsPerQuery: Math.max(1, Math.min(5, sourceCollectionDraft.maxResultsPerQuery || 2)),
-      });
-    };
-    const runSourceCollectionPrimaryAction = () => {
-      if (!selectedTeam?.teamId) {
-        return;
-      }
-      if (!selectedSourceCollectionRun) {
-        if (!sourceCollectionCanStart || selectedTeamStartSourceCollectionPending) {
-          return;
-        }
-        startSourceCollectionRunMutation.mutate({
-          teamId: selectedTeam.teamId,
-          draft: sourceCollectionDraft,
-        });
-        return;
-      }
-      if (sourceCollectionOpenAssignmentCount > 0) {
-        runSourceCollectionSearchBatch();
-        return;
-      }
-      if (sourceManifestCandidates.length > sourceCollectionApprovedCount) {
-        openSourceCollectionScreeningPanel();
-        return;
-      }
-      openSourceCollectionStorageTarget("run_directory");
-    };
-    const sourceCollectionPrimaryButtonLabel = !selectedSourceCollectionRun && selectedTeamStartSourceCollectionPending
-      ? (lang === "zh" ? "启动中" : "Starting")
-      : selectedTeamExecuteSourceCollectionSearchPending
-        ? (lang === "zh" ? "搜索中" : "Searching")
-        : sourceCollectionPrimaryActionTitle;
     return (
       <section id="source-collection-actions" className={styles.sourceCollectionControlPanel} aria-label={lang === "zh" ? "资料搜集控制台" : "Source collection controls"}>
         <div className={styles.workflowIngestionHeader}>
           <div>
-            <strong>{lang === "zh" ? "下一步操作" : "Next action"}</strong>
+            <strong>{lang === "zh" ? "阶段详情" : "Stage details"}</strong>
             <span>
               {selectedSourceCollectionRun
                 ? `${sourceCollectionRunLabel(selectedSourceCollectionRun.runId)} · ${sourceCollectionStageFocusLabel}`
@@ -3213,33 +3310,6 @@ export function TeamsRoute({
           <span className={`${styles.workflowTag} ${workflowIngestionTone(sourceCollectionRunStatus?.runStatus || selectedSourceCollectionRun?.status || "")}`}>
             {sourceCollectionStatusLabel(sourceCollectionRunStatus?.runStatus || selectedSourceCollectionRun?.status || "pending", lang)}
           </span>
-        </div>
-        <div className={styles.workflowSourceCollectionActionSummary}>
-          <div>
-            <strong>{sourceCollectionPrimaryActionTitle}</strong>
-            <span>{sourceCollectionScreeningStatusText}</span>
-          </div>
-          <div className={styles.workflowSourceCollectionActionButtons}>
-            <button
-              type="button"
-              className={styles.workflowSourceCollectionPrimaryButton}
-              disabled={sourceCollectionPrimaryDisabled}
-              onClick={runSourceCollectionPrimaryAction}
-            >
-              {selectedSourceCollectionRun && sourceCollectionOpenAssignmentCount > 0 ? <Search size={13} /> : <Play size={13} />}
-              {sourceCollectionPrimaryButtonLabel}
-            </button>
-            <button
-              type="button"
-              className={styles.workflowSourceCollectionSecondaryButton}
-              disabled={sourceCollectionScreeningDisabled}
-              onClick={openSourceCollectionScreeningPanel}
-              title={sourceCollectionScreeningStatusText}
-            >
-              <CheckCircle2 size={13} />
-              {sourceCollectionScreeningButtonText}
-            </button>
-          </div>
         </div>
         <details className={styles.workflowSourceCollectionDetails} open={!selectedSourceCollectionRun}>
           <summary>
@@ -3355,6 +3425,7 @@ export function TeamsRoute({
           </label>
         </div>
         {renderSourceCollectionStorageActions()}
+        {renderSourceCollectionScreeningPanel()}
         <details className={styles.workflowSourceCollectionDetails}>
           <summary>
             <span>{lang === "zh" ? "查询与分工详情" : "Query and assignment details"}</span>
@@ -3483,7 +3554,7 @@ export function TeamsRoute({
           </button>
           </form>
         </details>
-        <div className={styles.workflowIngestionBoundary}>
+        <div id="source-collection-memory-panel" className={styles.workflowIngestionBoundary}>
           <span>{lang === "zh" ? "执行器：手动/Agent 均可提交搜集结果" : "Executor: manual or Agent CollectionOutput"}</span>
           <span>{lang === "zh" ? "正式知识写入关闭" : "formal knowledge write off"}</span>
           <span>{lang === "zh" ? "进入候选仓库后再筛选" : "screen after candidate import"}</span>
@@ -4004,15 +4075,6 @@ export function TeamsRoute({
         : sourceManifestCandidates.length > 0
           ? (lang === "zh" ? "可进入治理" : "ready for governance")
           : (lang === "zh" ? "待回写" : "waiting for writeback");
-  const sourceCollectionPrimaryActionTitle = !selectedSourceCollectionRun
-    ? (lang === "zh" ? "开始知识搜集" : "Start knowledge collection")
-    : selectedTeamExecuteSourceCollectionSearchPending
-      ? (lang === "zh" ? "正在搜索" : "Searching")
-      : sourceCollectionOpenAssignmentCount > 0
-        ? (lang === "zh" ? "搜索下一批" : "Search next batch")
-        : sourceManifestCandidates.length > sourceCollectionApprovedCount
-          ? (lang === "zh" ? "开始资料筛选" : "Start screening")
-          : (lang === "zh" ? "查看搜集结果" : "Review collection results");
   const sourceCollectionTraceMessages = useMemo<SourceCollectionTraceMessage[]>(() => {
     const messages: SourceCollectionTraceMessage[] = [];
     messages.push({
@@ -4294,12 +4356,68 @@ export function TeamsRoute({
       : sourceQualityCandidateCount > 0
         ? (lang === "zh" ? "已筛选" : "done")
         : (lang === "zh" ? "暂无候选" : "no candidates");
+  const scrollSourceCollectionPanelIntoView = (panelId: string) => {
+    window.requestAnimationFrame(() => {
+      document.getElementById(panelId)?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    });
+  };
   const openSourceCollectionScreeningPanel = () => {
     if (!selectedTeam?.teamId || sourceCollectionScreeningDisabled) {
       return;
     }
-    setResearchWorkspaceView("candidates");
-    navigate(`/teams?team=${encodeURIComponent(selectedTeam.teamId)}&researchView=candidates`);
+    scrollSourceCollectionPanelIntoView("source-collection-screening-panel");
+  };
+  const openSourceCollectionCandidateStore = () => {
+    if (!selectedTeam?.teamId || !selectedSourceCollectionStorageArtifacts || selectedSourceCollectionStorageOpenPending) {
+      return;
+    }
+    openSourceCollectionStorageTarget("candidate_store");
+    scrollSourceCollectionPanelIntoView("source-collection-candidates-panel");
+  };
+  const refreshSourceCollectionGraph = () => {
+    if (!selectedTeam?.teamId || sourceManifestCandidates.length <= 0 || selectedTeamBuildCandidateGraphPending) {
+      return;
+    }
+    buildCandidateGraphMutation.mutate(selectedTeam.teamId);
+  };
+  const refreshSourceCollectionMemoryPrecheck = () => {
+    if (!selectedTeam?.teamId || teamWorkflowKnowledgeIngestionStatusQuery.isFetching) {
+      return;
+    }
+    void teamWorkflowKnowledgeIngestionStatusQuery.refetch();
+    scrollSourceCollectionPanelIntoView("source-collection-memory-panel");
+  };
+  const runSourceCollectionSearchFromHeader = () => {
+    if (!selectedTeam?.teamId || !selectedSourceCollectionRunEffectiveId || !canExecuteSourceCollectionSearch) {
+      return;
+    }
+    const selectedAssignmentIsRunnable = selectedSourceCollectionAssignment
+      ? ["open", "in_progress", "returned"].includes(selectedSourceCollectionAssignment.status)
+      : false;
+    executeSourceCollectionSearchMutation.mutate({
+      teamId: selectedTeam.teamId,
+      runId: selectedSourceCollectionRunEffectiveId,
+      assignmentId: selectedAssignmentIsRunnable ? selectedSourceCollectionAssignment?.assignmentId : "",
+      maxQueries: 4,
+      maxResultsPerQuery: Math.max(1, Math.min(5, sourceCollectionDraft.maxResultsPerQuery || 2)),
+    });
+  };
+  const runSourceCollectionCollectionAction = () => {
+    if (!selectedTeam?.teamId) {
+      return;
+    }
+    if (!selectedSourceCollectionRun) {
+      launchResearchStage("knowledge_collection");
+      return;
+    }
+    if (sourceCollectionOpenAssignmentCount > 0) {
+      runSourceCollectionSearchFromHeader();
+      return;
+    }
+    launchResearchStage("knowledge_collection", "new_round");
   };
   const sourceCollectionConsoleState: SourceCollectionStepState = sourceCollectionOperationFailed
     ? "failed"
@@ -4405,6 +4523,18 @@ export function TeamsRoute({
         : knowledgePendingReviewCount > 0 || sourceCollectionApprovedCount > 0
           ? "pending"
           : "idle";
+  const sourceCollectionCollectionActionLabel = !selectedSourceCollectionRun
+    ? (lang === "zh" ? "开始搜集" : "Start")
+    : selectedTeamExecuteSourceCollectionSearchPending
+      ? (lang === "zh" ? "搜索中" : "Searching")
+      : sourceCollectionOpenAssignmentCount > 0
+        ? (lang === "zh" ? "搜索下一批" : "Search next")
+        : (lang === "zh" ? "新一轮搜集" : "New round");
+  const sourceCollectionCollectionActionDisabled = !selectedSourceCollectionRun
+    ? selectedTeamStartResearchStagePending || !researchStageCanLaunch
+    : sourceCollectionOpenAssignmentCount > 0
+      ? !canExecuteSourceCollectionSearch
+      : selectedTeamStartResearchStagePending || !researchStageCanLaunch;
   const sourceCollectionStageModules: SourceCollectionStageModule[] = [
     {
       id: "collection",
@@ -4412,6 +4542,11 @@ export function TeamsRoute({
       metric: `${sourceCollectionRecordCount || sourceManifestCandidates.length} ${lang === "zh" ? "记录" : "records"} / ${sourceCollectionQueryCount} ${lang === "zh" ? "查询" : "queries"}`,
       state: sourceCollectionSearchStepState,
       status: sourceCollectionStepStatusText(sourceCollectionSearchStepState),
+      actionLabel: sourceCollectionCollectionActionLabel,
+      actionDisabled: sourceCollectionCollectionActionDisabled,
+      actionTone: "primary",
+      actionIcon: selectedSourceCollectionRun && sourceCollectionOpenAssignmentCount > 0 ? "search" : "play",
+      onAction: runSourceCollectionCollectionAction,
     },
     {
       id: "screening",
@@ -4419,6 +4554,11 @@ export function TeamsRoute({
       metric: `${sourceQualityAssessedCount}/${sourceQualityCandidateCount}`,
       state: sourceCollectionScreeningStepState,
       status: sourceCollectionStepStatusText(sourceCollectionScreeningStepState),
+      actionLabel: sourceCollectionScreeningButtonText,
+      actionDisabled: sourceCollectionScreeningDisabled,
+      actionTone: "primary",
+      actionIcon: "check",
+      onAction: openSourceCollectionScreeningPanel,
     },
     {
       id: "candidate",
@@ -4426,6 +4566,11 @@ export function TeamsRoute({
       metric: `${sourceManifestCandidates.length} ${lang === "zh" ? "候选" : "candidates"}`,
       state: sourceCollectionCandidateStepState,
       status: sourceCollectionStepStatusText(sourceCollectionCandidateStepState),
+      actionLabel: selectedSourceCollectionStorageOpenPending ? (lang === "zh" ? "打开中" : "Opening") : (lang === "zh" ? "打开候选库" : "Open store"),
+      actionDisabled: !selectedSourceCollectionStorageArtifacts || selectedSourceCollectionStorageOpenPending,
+      actionTone: "secondary",
+      actionIcon: "archive",
+      onAction: openSourceCollectionCandidateStore,
     },
     {
       id: "graph",
@@ -4433,6 +4578,11 @@ export function TeamsRoute({
       metric: `${candidateGraphNodeCount} ${lang === "zh" ? "节点" : "nodes"} / ${candidateGraphEdgeCount} ${lang === "zh" ? "边" : "edges"}`,
       state: sourceCollectionGraphStepState,
       status: sourceCollectionStepStatusText(sourceCollectionGraphStepState),
+      actionLabel: selectedTeamBuildCandidateGraphPending ? (lang === "zh" ? "生成中" : "Building") : (lang === "zh" ? "刷新图谱" : "Refresh"),
+      actionDisabled: !selectedTeam?.teamId || sourceManifestCandidates.length <= 0 || selectedTeamBuildCandidateGraphPending,
+      actionTone: "secondary",
+      actionIcon: "refresh",
+      onAction: refreshSourceCollectionGraph,
     },
     {
       id: "memory",
@@ -4440,55 +4590,28 @@ export function TeamsRoute({
       metric: `${knowledgePendingReviewCount} ${lang === "zh" ? "待审" : "review"} / ${formalKnowledgeItemCount} ${lang === "zh" ? "正式" : "formal"}`,
       state: sourceCollectionMemoryStepState,
       status: sourceCollectionStepStatusText(sourceCollectionMemoryStepState),
+      actionLabel: teamWorkflowKnowledgeIngestionStatusQuery.isFetching ? (lang === "zh" ? "刷新中" : "Refreshing") : (lang === "zh" ? "刷新前审" : "Refresh"),
+      actionDisabled: !selectedTeam?.teamId || teamWorkflowKnowledgeIngestionStatusQuery.isFetching,
+      actionTone: "secondary",
+      actionIcon: "refresh",
+      onAction: refreshSourceCollectionMemoryPrecheck,
     },
   ];
-  const runSourceCollectionSearchFromHeader = () => {
-    if (!selectedTeam?.teamId || !selectedSourceCollectionRunEffectiveId || !canExecuteSourceCollectionSearch) {
-      return;
+  const renderSourceCollectionStageActionIcon = (icon: SourceCollectionStageModule["actionIcon"]) => {
+    if (icon === "search") {
+      return <Search size={13} />;
     }
-    const selectedAssignmentIsRunnable = selectedSourceCollectionAssignment
-      ? ["open", "in_progress", "returned"].includes(selectedSourceCollectionAssignment.status)
-      : false;
-    executeSourceCollectionSearchMutation.mutate({
-      teamId: selectedTeam.teamId,
-      runId: selectedSourceCollectionRunEffectiveId,
-      assignmentId: selectedAssignmentIsRunnable ? selectedSourceCollectionAssignment?.assignmentId : "",
-      maxQueries: 4,
-      maxResultsPerQuery: Math.max(1, Math.min(5, sourceCollectionDraft.maxResultsPerQuery || 2)),
-    });
+    if (icon === "check") {
+      return <CheckCircle2 size={13} />;
+    }
+    if (icon === "archive") {
+      return <Archive size={13} />;
+    }
+    if (icon === "refresh") {
+      return <RefreshCw size={13} />;
+    }
+    return <Play size={13} />;
   };
-  const runSourceCollectionHeaderPrimaryAction = () => {
-    if (!selectedTeam?.teamId) {
-      return;
-    }
-    if (!selectedSourceCollectionRun) {
-      launchResearchStage("knowledge_collection");
-      return;
-    }
-    if (sourceCollectionOpenAssignmentCount > 0) {
-      runSourceCollectionSearchFromHeader();
-      return;
-    }
-    if (sourceManifestCandidates.length > sourceCollectionApprovedCount) {
-      openSourceCollectionScreeningPanel();
-      return;
-    }
-    openSourceCollectionStorageTarget("run_directory");
-  };
-  const sourceCollectionHeaderPrimaryLabel = !selectedSourceCollectionRun
-    ? (lang === "zh" ? "开始知识搜集" : "Start collection")
-    : selectedTeamExecuteSourceCollectionSearchPending
-      ? (lang === "zh" ? "搜索中" : "Searching")
-      : sourceCollectionOpenAssignmentCount > 0
-        ? (lang === "zh" ? "搜索下一批" : "Search next batch")
-        : sourceManifestCandidates.length > sourceCollectionApprovedCount
-          ? sourceCollectionScreeningButtonText
-          : (lang === "zh" ? "打开结果目录" : "Open results");
-  const sourceCollectionHeaderPrimaryDisabled = !selectedSourceCollectionRun
-    ? selectedTeamStartResearchStagePending || !researchStageCanLaunch
-    : sourceCollectionOpenAssignmentCount > 0
-      ? !canExecuteSourceCollectionSearch
-      : !selectedSourceCollectionStorageArtifacts || selectedSourceCollectionStorageOpenPending;
   const activeWorkflowItemCount = teamWorkflow?.activeWorkflowItems.length ?? 0;
   const researchCanvasVisible = researchWorkflowTeamSelected && researchWorkspaceView === "canvas";
   const workspaceClassName = [
@@ -4559,68 +4682,28 @@ export function TeamsRoute({
                 <span>{lang === "zh" ? "搜索问题" : "queries"} <strong>{sourceCollectionQueryCount}</strong></span>
                 <span>{lang === "zh" ? "缓存门禁" : "cache"} <strong>{sourceCollectionPromptCacheStatusLabel(sourceCollectionPromptCacheStatus, lang)}</strong></span>
               </div>
-              <div className={styles.sourceCollectionCommandActions}>
-                <button
-                  type="button"
-                  className={styles.sourceCollectionCommandPrimary}
-                  disabled={sourceCollectionHeaderPrimaryDisabled}
-                  onClick={runSourceCollectionHeaderPrimaryAction}
-                >
-                  {selectedSourceCollectionRun && sourceCollectionOpenAssignmentCount > 0 ? <Search size={14} /> : <Play size={14} />}
-                  {sourceCollectionHeaderPrimaryLabel}
-                </button>
-                <button
-                  type="button"
-                  className={styles.sourceCollectionScreeningButton}
-                  disabled={sourceCollectionScreeningDisabled}
-                  onClick={openSourceCollectionScreeningPanel}
-                  title={sourceCollectionScreeningStatusText}
-                >
-                  <CheckCircle2 size={14} />
-                  <span>{sourceCollectionScreeningButtonText}</span>
-                  <strong>{sourceCollectionScreeningStatusText}</strong>
-                </button>
-                <button
-                  type="button"
-                  disabled={selectedTeamStartResearchStagePending || !researchStageCanLaunch}
-                  onClick={() => launchResearchStage("knowledge_collection", "new_round")}
-                >
-                  <Plus size={14} />
-                  {lang === "zh" ? "新一轮搜集" : "New round"}
-                </button>
-                <button
-                  type="button"
-                  disabled={!selectedSourceCollectionStorageArtifacts || selectedSourceCollectionStorageOpenPending}
-                  onClick={() => openSourceCollectionStorageTarget("run_directory")}
-                >
-                  <Link2 size={14} />
-                  {lang === "zh" ? "打开结果目录" : "Open results"}
-                </button>
-                <button
-                  type="button"
-                  disabled={sourceCollectionRunsQuery.isFetching || sourceCollectionRunStatusQuery.isFetching || sourceCollectionAssignmentsQuery.isFetching}
-                  onClick={() => {
-                    void sourceCollectionRunsQuery.refetch();
-                    void sourceCollectionRunStatusQuery.refetch();
-                    void sourceCollectionAssignmentsQuery.refetch();
-                    void teamWorkflowCandidatesQuery.refetch();
-                  }}
-                >
-                  <RefreshCw size={14} />
-                  {lang === "zh" ? "刷新状态" : "Refresh status"}
-                </button>
-              </div>
             </section>
             <section id="source-collection-stage-status" className={styles.sourceCollectionStageModules} aria-label={lang === "zh" ? "知识搜集内部模块" : "Knowledge collection modules"}>
               {sourceCollectionStageModules.map((module, index) => (
-                <span key={module.id} className={sourceCollectionStepClassName(module.state)}>
-                  <strong>{String(index + 1).padStart(2, "0")}</strong>
+                <article key={module.id} className={`${styles.sourceCollectionStageCard} ${sourceCollectionStepClassName(module.state)}`}>
+                  <div className={styles.sourceCollectionStageCardHead}>
+                    <strong>{String(index + 1).padStart(2, "0")}</strong>
+                    <span>{module.status}</span>
+                  </div>
                   <span className={styles.sourceCollectionStageModuleText}>
                     <b>{module.label}</b>
-                    <small>{module.status}</small>
                     <em>{module.metric}</em>
                   </span>
-                </span>
+                  <button
+                    type="button"
+                    className={module.actionTone === "primary" ? styles.sourceCollectionStagePrimaryAction : styles.sourceCollectionStageSecondaryAction}
+                    disabled={module.actionDisabled}
+                    onClick={module.onAction}
+                  >
+                    {renderSourceCollectionStageActionIcon(module.actionIcon)}
+                    {module.actionLabel}
+                  </button>
+                </article>
               ))}
             </section>
             <div className={styles.sourceCollectionPageGrid}>
