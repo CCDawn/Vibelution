@@ -123,6 +123,21 @@ def test_launcher_reads_optional_supervisor_pid_with_strict_safe_helper():
     assert "$snapshot.State.supervisorPid" not in source
 
 
+def test_launcher_reads_optional_runtime_scene_status_fields_with_strict_safe_helper():
+    source = LAUNCHER_SCRIPT.read_text(encoding="utf-8")
+
+    assert "function Set-RuntimeSceneContextFromStateObject" in source
+    assert '$sceneId = [string](Get-ObjectPropertyValue -Object $snapshot.State -Name "runtimeSceneId" -Default "")' in source
+    assert '$backendStdout = [string](Get-ObjectPropertyValue -Object $snapshot.State -Name "backendStdout" -Default "")' in source
+    assert '$backendStderr = [string](Get-ObjectPropertyValue -Object $snapshot.State -Name "backendStderr" -Default "")' in source
+    assert "$state.runtimeSceneId" not in source
+    assert "$payload.runtimeSceneId" not in source
+    assert "$snapshot.State.runtimeSceneId" not in source
+    assert "$Snapshot.State.runtimeSceneId" not in source
+    assert "$snapshot.State.backendStdout" not in source
+    assert "$snapshot.State.backendStderr" not in source
+
+
 def test_web_workbench_is_headless_by_default():
     from scripts import web_workbench
 
@@ -3121,6 +3136,75 @@ Write-Output "ok"
     assert result.stdout.strip().splitlines()[-1] == "ok"
 
 
+def test_launcher_status_tolerates_state_missing_runtime_scene_fields(tmp_path):
+    result = _run_launcher_ast_harness(
+        tmp_path,
+        """
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$LauncherPath
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$source = Get-Content -Raw -LiteralPath $LauncherPath
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors -and $parseErrors.Count -gt 0) {
+    throw "Launcher script parse failed: $($parseErrors[0].Message)"
+}
+
+$functionAst = $ast.Find({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -eq "Show-Status"
+}, $true)
+if ($null -eq $functionAst) {
+    throw "Show-Status was not found."
+}
+. ([scriptblock]::Create($functionAst.Extent.Text))
+
+$mode = "single_service_bundled_edge_app"
+$projectDir = "C:\\Users\\17533\\Desktop\\Vibelution"
+$url = "http://127.0.0.1:8000"
+$statePath = "C:\\Users\\17533\\Desktop\\Vibelution\\.runtime\\launcher\\state.json"
+
+function Get-PythonDependencyStatusReadOnly {
+    return [pscustomobject]@{ Status = "ready"; Reason = "backend runtime imports are available" }
+}
+function Write-StatusDependencyObservation { param($DependencyStatus) }
+function Get-WebBuildReason { return "" }
+function Get-SessionRestartReason { param($Snapshot) return "" }
+function Get-SessionSnapshot {
+    return [pscustomobject]@{
+        BackendPid = 34700
+        BackendHealthy = $true
+        BrowserWindowCount = 0
+        BrowserWindowPid = 0
+        BrowserPids = @()
+        SupervisorPid = 0
+        SessionRunning = $false
+        BackendPids = @(34700)
+        State = [pscustomobject]@{
+            sessionId = "old-state"
+        }
+    }
+}
+
+Show-Status
+
+Write-Output "ok"
+""",
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip().splitlines()[-1] == "ok"
+    assert "Backend   : running" in result.stdout
+    assert "State     :" in result.stdout
+
+
 def test_launcher_python_dependency_install_honors_pip_overrides(tmp_path):
     result = _run_launcher_ast_harness(
         tmp_path,
@@ -5895,15 +5979,20 @@ if ($parseErrors -and $parseErrors.Count -gt 0) {
     throw "Launcher script parse failed: $($parseErrors[0].Message)"
 }
 
-$functionAst = $ast.Find({
-    param($node)
-    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
-        $node.Name -eq "Stop-ManagedSession"
-}, $true)
-if ($null -eq $functionAst) {
-    throw "Stop-ManagedSession was not found."
+foreach ($functionName in @(
+    "Set-RuntimeSceneContextFromStateObject",
+    "Stop-ManagedSession"
+)) {
+    $functionAst = $ast.Find({
+        param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+            $node.Name -eq $functionName
+    }, $true)
+    if ($null -eq $functionAst) {
+        throw "$functionName was not found."
+    }
+    . ([scriptblock]::Create($functionAst.Extent.Text))
 }
-. ([scriptblock]::Create($functionAst.Extent.Text))
 
 $script:port = 8000
 $script:selfProcessId = 123
@@ -6052,15 +6141,20 @@ if ($parseErrors -and $parseErrors.Count -gt 0) {
     throw "Launcher script parse failed: $($parseErrors[0].Message)"
 }
 
-$functionAst = $ast.Find({
-    param($node)
-    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
-        $node.Name -eq "Stop-ManagedSession"
-}, $true)
-if ($null -eq $functionAst) {
-    throw "Stop-ManagedSession was not found."
+foreach ($functionName in @(
+    "Set-RuntimeSceneContextFromStateObject",
+    "Stop-ManagedSession"
+)) {
+    $functionAst = $ast.Find({
+        param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+            $node.Name -eq $functionName
+    }, $true)
+    if ($null -eq $functionAst) {
+        throw "$functionName was not found."
+    }
+    . ([scriptblock]::Create($functionAst.Extent.Text))
 }
-. ([scriptblock]::Create($functionAst.Extent.Text))
 
 $script:port = 8000
 $script:selfProcessId = 123
