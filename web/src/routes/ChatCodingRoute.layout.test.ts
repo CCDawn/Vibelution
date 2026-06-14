@@ -919,6 +919,10 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("terminal.write(");
     expect(routeSource).not.toContain("terminalTextForDisplay");
     expect(routeSource).not.toContain("<pre ref={outputRef}");
+    expect(routeSource).not.toContain("sendTerminalInput");
+    expect(routeSource).not.toContain("terminalInput");
+    expect(routeSource).not.toContain("输入命令或回复");
+    expect(routeSource).not.toContain("Type input");
     expect(routeSource).toContain("/input`");
     expect(routeSource).toContain("/stop`");
     expect(routeSource).not.toContain("const [activeCliAgentRunId, setActiveCliAgentRunId] = useState");
@@ -928,7 +932,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeCssSource).toContain(":global(.xterm)");
     expect(routeCssSource).toContain("background: #06100d");
     expect(routeCssSource).toContain(".cliAgentTerminalStatus");
-    expect(routeCssSource).toContain(".cliAgentTerminalInputRow");
+    expect(routeCssSource).not.toContain(".cliAgentTerminalInputRow");
     expect(routeCssSource).toContain(".agentSessionTabCli");
     expect(routeCssSource).toContain(".agentSessionTabCloseButton");
     expect(routeCssSource).not.toContain(".cliAgentRunIconButton");
