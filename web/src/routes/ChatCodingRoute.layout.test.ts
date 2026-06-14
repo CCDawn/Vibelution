@@ -914,6 +914,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("function isCliAgentRunActiveForClose");
     expect(routeSource).toContain("const [closedCliAgentRunTokensBySession");
     expect(routeSource).toContain("const [cliAgentTerminalSessions");
+    expect(routeSource).toContain("const [mountedCliAgentRunIdsBySession");
+    expect(routeSource).toContain("const mountedCliAgentRuns = useMemo");
     expect(routeSource).toContain('const activeFilePath = workspace.activeTab !== "agent" && !activeCliAgentRunId ? workspace.activeTab : null;');
     expect(routeSource).toContain("cliAgentRuns={cliAgentRunTabs}");
     expect(routeSource).toContain("onOpenCliAgentRun={(runId) =>");
@@ -921,8 +923,12 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("setActiveTab(activeSessionId, cliAgentRunTabId(runId));");
     expect(routeSource).toContain("window.confirm(");
     expect(routeSource).toContain("<CliAgentRunTerminalPanel");
+    expect(routeSource).toContain("mountedCliAgentRuns.map((run) =>");
+    expect(routeSource).toContain("active={!groupPanelActive && activeCliAgentRunId === run.id}");
+    expect(routeSource).toContain("aria-hidden={!active}");
+    expect(routeSource).toContain("data-cli-agent-run-id={run.id}");
     expect(routeSource).toContain("onTerminalSessionChange={handleCliAgentTerminalSessionChange}");
-    expect(routeSource).toContain(") : activeCliAgentRun ? (");
+    expect(routeSource).not.toContain(") : activeCliAgentRun ? (");
     expect(routeSource).toContain('"/api/cli-agents/terminal-sessions/ensure"');
     expect(routeSource).toContain("sourceRunId: run.sourceRunId");
     expect(routeSource).toContain("void sessionDetailQuery.refetch()");
@@ -940,6 +946,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("/stop`");
     expect(routeSource).not.toContain("const [activeCliAgentRunId, setActiveCliAgentRunId] = useState");
     expect(routeCssSource).toContain(".cliAgentRunPanel");
+    expect(routeCssSource).toContain(".cliAgentRunPanelHidden");
+    expect(routeCssSource).toContain("display: none;");
     expect(routeCssSource).toContain(".cliAgentTerminalFrame");
     expect(routeCssSource).toContain(".cliAgentTerminalOutputShell");
     expect(routeCssSource).toContain(":global(.xterm)");
