@@ -201,10 +201,15 @@ function cliAgentRunIdFromTabId(tabId: string) {
     : "";
 }
 
+function cliAgentRunCloseToken(run: Pick<CliAgentRunView, "id" | "sourceRunId">) {
+  return `${run.id}::${run.sourceRunId}`;
+}
+
 type CliAgentRunResult = {
   status?: string;
   code?: string;
   runId?: string;
+  cliRunId?: string;
   agentType?: string;
   label?: string;
   mode?: string;
@@ -222,6 +227,7 @@ type CliAgentRunResult = {
 
 type CliAgentRunView = CliAgentRunTab & {
   messageId: string;
+  sourceRunId: string;
   toolCall: ToolCall;
   result: CliAgentRunResult | null;
   task: string;
@@ -235,11 +241,15 @@ type CliAgentRunView = CliAgentRunTab & {
 
 type CliAgentTerminalSession = {
   terminalSessionId?: string;
+  cliRunId?: string;
+  lockKey?: string;
   adapterId?: string;
   label?: string;
   sourceSessionId?: string;
   sourceMessageId?: string;
   sourceRunId?: string;
+  linkedSourceMessageIds?: string[];
+  linkedSourceRunIds?: string[];
   cwd?: string;
   mode?: string;
   taskHash?: string;
@@ -316,9 +326,68 @@ function compactCliCommand(run: Pick<CliAgentRunView, "agentType" | "mode" | "cw
   ].filter(Boolean).join(" ");
 }
 
-function buildCliAgentRunViews(messages: ConversationMessage[]): CliAgentRunView[] {
-  const runs: CliAgentRunView[] = [];
+function stableCliHash(value: string) {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash.toString(16).padStart(8, "0");
+}
+
+function cliAgentRunIdForSource({
+  sourceSessionId,
+  agentType,
+  cwd,
+  sourceMessageId,
+  sourceRunId,
+  task,
+}: {
+  sourceSessionId: string;
+  agentType: string;
+  cwd: string;
+  sourceMessageId: string;
+  sourceRunId: string;
+  task: string;
+}) {
+  const sourceScope = sourceSessionId.trim()
+    || `standalone:${sourceMessageId.trim() || sourceRunId.trim() || stableCliHash(task.trim())}`;
+  const normalizedCwd = cwd.trim().replace(/\\/g, "/").toLowerCase();
+  return `cli-run-${stableCliHash(["cli-run-v1", agentType.trim(), sourceScope, normalizedCwd].join("\n"))}`;
+}
+
+function cliAgentLifecycleText(message: ConversationMessage, key: string) {
+  const value = message.metadata?.[key];
+  if (typeof value === "string") {
+    return value.trim();
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value).trim();
+  }
+  return "";
+}
+
+function closedCliAgentRunIdFromMessage(message: ConversationMessage) {
+  if (cliAgentLifecycleText(message, "kind") !== "cli_agent_lifecycle") {
+    return "";
+  }
+  const event = cliAgentLifecycleText(message, "event") || cliAgentLifecycleText(message, "status");
+  if (event !== "closed") {
+    return "";
+  }
+  return cliAgentLifecycleText(message, "cliRunId") || cliAgentLifecycleText(message, "sourceRunId");
+}
+
+function buildCliAgentRunViews(messages: ConversationMessage[], sourceSessionId = ""): CliAgentRunView[] {
+  const runsById = new Map<string, CliAgentRunView>();
+  const closedRunIds = new Set<string>();
   for (const message of messages) {
+    const closedRunId = closedCliAgentRunIdFromMessage(message);
+    if (closedRunId) {
+      closedRunIds.add(closedRunId);
+      runsById.delete(closedRunId);
+      continue;
+    }
     for (const [index, toolCall] of (message.toolCalls ?? []).entries()) {
       if (toolCall.name !== CLI_AGENT_TOOL_NAME) {
         continue;
@@ -332,9 +401,20 @@ function buildCliAgentRunViews(messages: ConversationMessage[]): CliAgentRunView
       const status = String(result?.status || toolCall.status || "running").trim();
       const title = cliAgentTitle(agentType, result);
       const summary = String(result?.code || toolCall.summary || task || cwd || "").trim();
+      const sourceRunId = `${message.id}-${CLI_AGENT_TOOL_NAME}-${index}`;
+      const cliRunId = String(result?.cliRunId || "").trim() || cliAgentRunIdForSource({
+        sourceSessionId,
+        agentType,
+        cwd,
+        sourceMessageId: message.id,
+        sourceRunId,
+        task,
+      });
+      closedRunIds.delete(cliRunId);
       const run: CliAgentRunView = {
-        id: `${message.id}-${CLI_AGENT_TOOL_NAME}-${index}`,
+        id: cliRunId,
         messageId: message.id,
+        sourceRunId,
         toolCall,
         result,
         title,
@@ -351,10 +431,10 @@ function buildCliAgentRunViews(messages: ConversationMessage[]): CliAgentRunView
         durationMs: result?.durationMs ?? toolCall.durationMs,
       };
       run.commandLine = compactCliCommand(run);
-      runs.push(run);
+      runsById.set(cliRunId, run);
     }
   }
-  return runs;
+  return Array.from(runsById.values()).filter((run) => !closedRunIds.has(run.id));
 }
 
 function terminalStatusText(session: CliAgentTerminalSession | null, connecting: boolean, lang: "zh" | "en") {
@@ -593,7 +673,7 @@ function CliAgentRunTerminalPanel({
         mode: run.mode || "readonly",
         sourceSessionId,
         sourceMessageId: run.messageId,
-        sourceRunId: run.id,
+        sourceRunId: run.sourceRunId,
         cliSessionId: String(run.result?.cliSessionId || ""),
         rows: 28,
         cols: 100,
@@ -622,7 +702,7 @@ function CliAgentRunTerminalPanel({
       disposed = true;
       controller.abort();
     };
-  }, [run.agentType, run.cwd, run.id, run.messageId, run.mode, run.result, run.task, sourceSessionId, writeTerminalChunk]);
+  }, [run.agentType, run.cwd, run.messageId, run.mode, run.result, run.sourceRunId, run.task, sourceSessionId, writeTerminalChunk]);
 
   useEffect(() => {
     if (terminalSession) {
@@ -1728,7 +1808,7 @@ export function ChatCodingRoute() {
   const [groupManageSessionIds, setGroupManageSessionIds] = useState<string[]>([]);
   const [groupManageModeDraft, setGroupManageModeDraft] = useState("round_robin");
   const [groupManagePurposeDraft, setGroupManagePurposeDraft] = useState("discussion");
-  const [closedCliAgentRunIdsBySession, setClosedCliAgentRunIdsBySession] = useState<Record<string, string[]>>({});
+  const [closedCliAgentRunTokensBySession, setClosedCliAgentRunTokensBySession] = useState<Record<string, string[]>>({});
   const [cliAgentTerminalSessions, setCliAgentTerminalSessions] = useState<Record<string, CliAgentTerminalSession>>({});
   const layoutRef = useRef<HTMLDivElement | null>(null);
   const sessionStreamErrorLoggedRef = useRef<Record<string, boolean>>({});
@@ -3336,11 +3416,11 @@ export function ChatCodingRoute() {
   const selectedSessionDetail =
     rawSessionDetail && rawSessionDetail.id === activeSessionId ? rawSessionDetail : undefined;
   const detail = selectedSessionDetail;
-  const closedCliAgentRunIds = activeSessionId ? (closedCliAgentRunIdsBySession[activeSessionId] ?? []) : [];
-  const closedCliAgentRunIdSet = useMemo(() => new Set(closedCliAgentRunIds), [closedCliAgentRunIds]);
+  const closedCliAgentRunTokens = activeSessionId ? (closedCliAgentRunTokensBySession[activeSessionId] ?? []) : [];
+  const closedCliAgentRunTokenSet = useMemo(() => new Set(closedCliAgentRunTokens), [closedCliAgentRunTokens]);
   const cliAgentRunTabs = useMemo(
-    () => buildCliAgentRunViews(detail?.messages ?? []).filter((run) => !closedCliAgentRunIdSet.has(run.id)),
-    [closedCliAgentRunIdSet, detail?.messages],
+    () => buildCliAgentRunViews(detail?.messages ?? [], activeSessionId ?? "").filter((run) => !closedCliAgentRunTokenSet.has(cliAgentRunCloseToken(run))),
+    [activeSessionId, closedCliAgentRunTokenSet, detail?.messages],
   );
   const activeCliAgentRun = useMemo(
     () => activeCliAgentRunId ? cliAgentRunTabs.find((run) => run.id === activeCliAgentRunId) : undefined,
@@ -3393,6 +3473,7 @@ export function ChatCodingRoute() {
           `/api/cli-agents/terminal-sessions/${encodeURIComponent(terminalSession.terminalSessionId)}/stop`,
           { method: "POST" },
         );
+        void sessionDetailQuery.refetch();
       } catch (error) {
         if (typeof window !== "undefined") {
           window.alert(
@@ -3404,14 +3485,15 @@ export function ChatCodingRoute() {
         return;
       }
     }
-    setClosedCliAgentRunIdsBySession((current) => {
+    setClosedCliAgentRunTokensBySession((current) => {
       const existing = current[activeSessionId] ?? [];
-      if (existing.includes(run.id)) {
+      const closeToken = cliAgentRunCloseToken(run);
+      if (existing.includes(closeToken)) {
         return current;
       }
       return {
         ...current,
-        [activeSessionId]: [...existing, run.id],
+        [activeSessionId]: [...existing, closeToken],
       };
     });
     setCliAgentTerminalSessions((current) => {
@@ -3421,7 +3503,7 @@ export function ChatCodingRoute() {
     if (activeCliAgentRunId === run.id) {
       setActiveTab(activeSessionId, "agent");
     }
-  }, [activeCliAgentRunId, activeSessionId, cliAgentTerminalSessions, lang, setActiveTab]);
+  }, [activeCliAgentRunId, activeSessionId, cliAgentTerminalSessions, lang, sessionDetailQuery, setActiveTab]);
   const sessionDetailLoadingForActiveSession = Boolean(
     activeSessionId
     && (!rawSessionDetail || rawSessionDetail.id !== activeSessionId)

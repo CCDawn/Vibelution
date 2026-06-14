@@ -17,6 +17,7 @@ from core.web.services.cli_agent_terminal_service import (
     stream_cli_agent_terminal_events,
     write_cli_agent_terminal_input,
 )
+from core.web.services.session_service import append_cli_agent_lifecycle_event
 
 
 router = APIRouter(tags=["cli-agents"])
@@ -119,6 +120,16 @@ def cli_agent_terminal_resize(terminal_session_id: str, payload: CliAgentTermina
 @router.post("/cli-agents/terminal-sessions/{terminal_session_id}/stop")
 def cli_agent_terminal_stop(terminal_session_id: str) -> dict[str, Any]:
     try:
-        return stop_cli_agent_terminal_session(terminal_session_id)
+        session = stop_cli_agent_terminal_session(terminal_session_id)
+        source_session_id = str(session.get("sourceSessionId") or "").strip()
+        if source_session_id:
+            lifecycle_event = append_cli_agent_lifecycle_event(
+                source_session_id,
+                event="closed",
+                terminal_session=session,
+            )
+            if lifecycle_event is not None:
+                session["lifecycleEvent"] = lifecycle_event
+        return session
     except CliAgentTerminalError as exc:
         _raise_terminal_error(exc)

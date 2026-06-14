@@ -1,7 +1,9 @@
 import subprocess
 
+from core.ui.chat_state import build_chat_state, load_chat_state, save_chat_state
 from core.web.services import cli_agent_service as service
 from core.web.services import cli_agent_terminal_service as terminal_service
+from core.web.services import session_service
 
 
 def _configure_roots(monkeypatch, tmp_path):
@@ -262,6 +264,101 @@ def test_cli_agent_terminal_ensure_writes_runtime_state_without_project_config(m
     assert session["transcriptPath"].startswith(".runtime/cli_agents/transcripts/")
     assert (terminal_service.SESSION_STATE_DIR / f"{session['terminalSessionId']}.json").exists()
     assert not (project_root / "workspace" / "cli_agents" / "cli_agents.json").exists()
+
+
+def test_cli_agent_terminal_reuses_active_lock_for_same_session_adapter_and_cwd(monkeypatch, tmp_path):
+    project_root = _configure_roots(monkeypatch, tmp_path)
+    monkeypatch.setattr(service.shutil, "which", lambda candidate: r"C:\tools\mimo.cmd" if candidate == "mimo.cmd" else "")
+    spawned = []
+
+    class FakeProcess:
+        def isalive(self):
+            return True
+
+    def fake_spawn(*args, **kwargs):
+        spawned.append((args, kwargs))
+        return FakeProcess(), "conpty"
+
+    monkeypatch.setattr(terminal_service, "_spawn_terminal_process", fake_spawn)
+    monkeypatch.setattr(terminal_service._TerminalRuntime, "start", lambda self: None)
+    monkeypatch.setattr(terminal_service, "_send_initial_task", lambda *args, **kwargs: None)
+
+    first = terminal_service.ensure_cli_agent_terminal_session(
+        agent_type="mimo_code",
+        task="第一次调用",
+        cwd=str(project_root),
+        mode="readonly",
+        source_session_id="session-1",
+        source_message_id="message-1",
+        source_run_id="run-1",
+    )
+    second = terminal_service.ensure_cli_agent_terminal_session(
+        agent_type="mimo_code",
+        task="第二次调用",
+        cwd=str(project_root),
+        mode="readonly",
+        source_session_id="session-1",
+        source_message_id="message-2",
+        source_run_id="run-2",
+    )
+
+    assert len(spawned) == 1
+    assert second["terminalSessionId"] == first["terminalSessionId"]
+    assert second["cliRunId"] == first["cliRunId"]
+    assert second["lockKey"] == first["lockKey"]
+    assert second["reusedActiveLock"] is True
+    assert second["linkedSourceRunIds"] == ["run-1", "run-2"]
+
+
+def test_cli_agent_lifecycle_close_event_persists_once(monkeypatch, tmp_path):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "_publish_session_detail_snapshot", lambda *args, **kwargs: None)
+    monkeypatch.setattr(session_service, "_record_session_cycle_message", lambda *args, **kwargs: None)
+    monkeypatch.setattr(session_service, "record_runtime_scene_event", lambda *args, **kwargs: {"accepted": True})
+    save_chat_state(
+        tmp_path,
+        build_chat_state(
+            [{"role": "user", "content": "打开 MiMo Code", "timestamp": "2026-06-14T10:00:00"}],
+            conversation_id="session-1",
+            title="CLI 会话",
+        ),
+    )
+    terminal_session = {
+        "terminalSessionId": "term-1",
+        "cliRunId": "cli-run-1",
+        "adapterId": "mimo_code",
+        "label": "MiMo Code",
+        "sourceMessageId": "message-1",
+        "sourceRunId": "run-1",
+        "linkedSourceRunIds": ["run-1", "run-2"],
+        "cwd": str(tmp_path),
+        "cliSessionId": "MIMO-1",
+    }
+
+    first = session_service.append_cli_agent_lifecycle_event(
+        "session-1",
+        event="closed",
+        terminal_session=terminal_session,
+    )
+    second = session_service.append_cli_agent_lifecycle_event(
+        "session-1",
+        event="closed",
+        terminal_session=terminal_session,
+    )
+
+    state = load_chat_state(tmp_path)
+    messages = state["conversations"][0]["messages"]
+    lifecycle_messages = [
+        item for item in messages
+        if (item.get("metadata") or {}).get("kind") == "cli_agent_lifecycle"
+    ]
+    assert first is not None
+    assert second is not None
+    assert first["metadata"]["lifecycleKey"] == second["metadata"]["lifecycleKey"]
+    assert len(lifecycle_messages) == 1
+    assert lifecycle_messages[0]["content"] == "MiMo Code 已关闭。"
+    assert lifecycle_messages[0]["metadata"]["cliRunId"] == "cli-run-1"
+    assert lifecycle_messages[0]["metadata"]["linkedSourceRunIds"] == ["run-1", "run-2"]
 
 
 def test_cli_agent_terminal_reads_only_bounded_transcript_tail(tmp_path):
