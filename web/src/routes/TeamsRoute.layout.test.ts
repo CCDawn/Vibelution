@@ -325,6 +325,9 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("researchStageAgentBindingsByStage");
     expect(routeSource).toContain("renderResearchStageAgentSummary(stageType)");
     expect(routeSource).toContain("renderResearchStageAgentPanel(stageType)");
+    expect(routeSource).toContain("SOURCE_COLLECTION_STAGE_AGENT_KEYS");
+    expect(routeSource).toContain("renderSourceCollectionStageAgents(activeModule.id)");
+    expect(routeSource).toContain("sourceCollectionStageAgentPanel");
     expect(routeSource).toContain("researchStageAgentManagementRoute(binding.agentId)");
     expect(routeSource).toContain("Agent 管理");
     expect(routeSource).toContain("还需补充资料");
@@ -516,6 +519,10 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.researchStageAgentCard_warning).toBeTypeOf("string");
     expect(routeStyles.researchStageAgentCard_blocked).toBeTypeOf("string");
     expect(routeStyles.researchStageAgentCard_missing).toBeTypeOf("string");
+    expect(routeStyles.sourceCollectionStageAgentPanel).toBeTypeOf("string");
+    expect(routeStyles.sourceCollectionStageAgentHeader).toBeTypeOf("string");
+    expect(routeStyles.sourceCollectionStageAgentList).toBeTypeOf("string");
+    expect(routeStyles.sourceCollectionStageAgentCard).toBeTypeOf("string");
     expect(routeStyles.researchInspector).toBeTypeOf("string");
     expect(routeStyles.researchCanvasPanelHidden).toBeTypeOf("string");
     expect(routeStyles.aiSearchScopePanel).toBeTypeOf("string");

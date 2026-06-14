@@ -89,14 +89,28 @@ def create_processing_run(profile_id: str = DEFAULT_PROFILE_ID, *, title: str = 
     return run
 
 
-def list_processing_runs(*, limit: int = 50) -> dict[str, Any]:
+def list_processing_runs(
+    *,
+    limit: int = 50,
+    profile_id: str = "",
+    metadata_filters: dict[str, Any] | None = None,
+    scope_filters: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     normalized_limit = min(200, max(1, int(limit or 50)))
+    normalized_profile_id = _trim_text(profile_id, max_length=120)
+    normalized_metadata_filters = _normalize_filter_map(metadata_filters)
+    normalized_scope_filters = _normalize_filter_map(scope_filters)
     runs: list[dict[str, Any]] = []
     runs_root = _project_root() / "workspace" / "data_processing" / "runs"
     if runs_root.exists():
         for run_path in runs_root.glob("*/run.json"):
             run = _read_json(run_path)
-            if run:
+            if run and _processing_run_matches_filters(
+                run,
+                profile_id=normalized_profile_id,
+                metadata_filters=normalized_metadata_filters,
+                scope_filters=normalized_scope_filters,
+            ):
                 runs.append({**run, "summary": get_processing_status(str(run.get("runId") or ""))["summary"]})
     runs.sort(key=lambda item: str(item.get("updatedAt") or item.get("createdAt") or ""), reverse=True)
     return {
@@ -105,8 +119,41 @@ def list_processing_runs(*, limit: int = 50) -> dict[str, Any]:
         "summary": {
             "runCount": len(runs),
             "returnedCount": min(len(runs), normalized_limit),
+            "filtered": bool(normalized_profile_id or normalized_metadata_filters or normalized_scope_filters),
         },
     }
+
+
+def _normalize_filter_map(value: dict[str, Any] | None) -> dict[str, str]:
+    if not isinstance(value, dict):
+        return {}
+    normalized: dict[str, str] = {}
+    for raw_key, raw_value in value.items():
+        key = _trim_text(raw_key, max_length=120)
+        item = _trim_text(raw_value, max_length=300)
+        if key and item:
+            normalized[key] = item
+    return normalized
+
+
+def _processing_run_matches_filters(
+    run: dict[str, Any],
+    *,
+    profile_id: str,
+    metadata_filters: dict[str, str],
+    scope_filters: dict[str, str],
+) -> bool:
+    if profile_id and _trim_text(run.get("profileId"), max_length=120) != profile_id:
+        return False
+    metadata = run.get("metadata") if isinstance(run.get("metadata"), dict) else {}
+    scope = run.get("scope") if isinstance(run.get("scope"), dict) else {}
+    for key, expected in metadata_filters.items():
+        if _trim_text(metadata.get(key), max_length=300) != expected:
+            return False
+    for key, expected in scope_filters.items():
+        if _trim_text(scope.get(key), max_length=300) != expected:
+            return False
+    return True
 
 
 def get_processing_run(run_id: str) -> dict[str, Any]:
