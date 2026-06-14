@@ -119,6 +119,21 @@ def test_resolve_agent_llm_inherits_prompt_cache_config_from_model_library():
     assert prompt_cache.retention == "24h"
 
 
+def test_resolve_agent_llm_resets_prompt_cache_when_model_has_no_cache_config():
+    config = _config_with_agent_models()
+    config.llm.profiles["primary"].prompt_cache.mode = "automatic"
+    config.llm.profiles["primary"].prompt_cache.key = "stale-primary-cache"
+    config.llm.profiles["primary"].prompt_cache.retention = "in_memory"
+    agent = {"agentId": "agent-a", "llmBindings": {"vision": {"modelId": "vision-model"}}}
+
+    resolved = resolve_agent_llm(agent, "vision", config=config, fallback_to_dialogue=False)
+
+    prompt_cache = resolved.config.llm.profiles["primary"].prompt_cache
+    assert prompt_cache.mode == "disabled"
+    assert prompt_cache.key == ""
+    assert prompt_cache.retention == ""
+
+
 def test_resolve_agent_llm_applies_reasoning_effort_for_supported_gpt_slot():
     config = _config_with_agent_models()
     config.llm.providers["default"].kind = "relay"
