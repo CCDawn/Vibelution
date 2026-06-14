@@ -705,10 +705,9 @@ function LauncherStartupSettingsPanel({
 
   return (
     <div className={styles.settingsStrip} aria-label={copy.startupSettings}>
-      <div className={styles.settingsHeader}>
+      <div className={styles.settingsHeader} title={windowModeDetail}>
         <span>{copy.startupSettings}</span>
         <strong>{workbenchWindowModeLabel(effectiveWindowMode, copy)}</strong>
-        <small>{windowModeDetail}</small>
       </div>
       <label className={styles.settingField}>
         <span>{copy.runtimeProfile}</span>
@@ -893,10 +892,9 @@ function DeveloperModePanel({
   return (
     <section className={styles.developerPanel} data-enabled={enabled}>
       <div className={styles.developerPanelHeader}>
-        <div>
+        <div title={copy.developerModeHint}>
           <p className={styles.panelEyebrow}>{copy.developerModeControlled}</p>
           <strong>{copy.developerModeTitle}</strong>
-          <small>{copy.developerModeHint}</small>
         </div>
         <button
           type="button"
@@ -913,7 +911,6 @@ function DeveloperModePanel({
         <div className={styles.developerStatus} data-tone={enabled ? "warning" : "neutral"}>
           <span>{enabled ? copy.developerModeOn : copy.developerModeOff}</span>
           <strong>{setting?.updatedAt ? compactDate(setting.updatedAt, "zh-CN") : copy.developerModeSettingsReadonly}</strong>
-          <small>{copy.developerModeSettingsReadonly}</small>
         </div>
         <div className={styles.developerNoise}>
           <div className={styles.developerNoiseHeader}>
@@ -935,14 +932,13 @@ function DeveloperModePanel({
           </div>
         </div>
         <div className={styles.cleanupConsole}>
-          <label className={styles.settingField}>
+          <label className={styles.settingField} title={selectedOption.detail}>
             <span>{copy.developerModeAction}</span>
             <select value={selectedAction} disabled={previewPending || applyPending} onChange={(event) => onSelectAction(event.target.value as LauncherDeveloperCleanupAction)}>
               {actionOptions.map((option) => (
                 <option key={option.action} value={option.action}>{option.label}</option>
               ))}
             </select>
-            <small>{selectedOption.detail}</small>
           </label>
           <div className={styles.cleanupMetrics}>
             <span>{copy.cleanupEstimated}: <strong>{formatBytes(matchingOverview?.sizeBytes ?? plan?.estimatedBytes ?? 0)}</strong></span>
@@ -2234,10 +2230,9 @@ export function LauncherRoute() {
         />
       </div>
 
-      <div className={styles.userGuide} data-tone={userGuideTone}>
+      <div className={styles.userGuide} data-tone={userGuideTone} title={userGuideDetail}>
         <span>{copy.userGuide}</span>
         <strong>{userGuideTitle}</strong>
-        <small title={userGuideDetail}>{userGuideDetailShort}</small>
         <em>{actionLockLabel}</em>
       </div>
 
@@ -2285,7 +2280,6 @@ export function LauncherRoute() {
       {notice.text ? (
         <p className={styles.notice} data-tone={notice.tone} title={notice.text}>
           {noticeTextShort}
-          {notice.text !== noticeTextShort ? <span>{copy.technicalDetailAvailable}</span> : null}
         </p>
       ) : null}
       {statusQuery.isPending && !status ? <p className={styles.notice} data-tone="neutral">{copy.loading}</p> : null}
