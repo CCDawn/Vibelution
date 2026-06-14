@@ -1939,18 +1939,57 @@
   white-space: nowrap;
 }
 
-.cliAgentTerminalOutput {
-  margin: 0;
+.cliAgentTerminalOutputShell {
+  position: relative;
   min-height: 0;
-  overflow: auto;
+  overflow: hidden;
+  background: #06100d;
+}
+
+.cliAgentTerminalOutput {
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
   padding: 12px;
   color: #d7f7e8;
   background: #06100d;
   font-family: "Cascadia Mono", "Consolas", monospace;
   font-size: 0.82rem;
-  line-height: 1.5;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
+}
+
+.cliAgentTerminalOutput :global(.xterm) {
+  height: 100%;
+  padding: 0;
+}
+
+.cliAgentTerminalOutput :global(.xterm-screen),
+.cliAgentTerminalOutput :global(.xterm-viewport) {
+  background: #06100d;
+}
+
+.cliAgentTerminalOutput :global(.xterm-viewport) {
+  scrollbar-color: rgba(122, 202, 169, 0.34) transparent;
+}
+
+.cliAgentTerminalOverlay {
+  position: absolute;
+  left: 14px;
+  bottom: 12px;
+  max-width: min(420px, calc(100% - 28px));
+  border: 1px solid rgba(122, 202, 169, 0.2);
+  border-radius: 6px;
+  padding: 7px 9px;
+  color: #bdf6dc;
+  background: rgba(7, 23, 19, 0.9);
+  font-size: 0.78rem;
+  font-weight: 650;
+  pointer-events: none;
+}
+
+.cliAgentTerminalOverlay[data-tone="error"] {
+  border-color: color-mix(in srgb, var(--state-error) 34%, rgba(122, 202, 169, 0.2));
+  color: #ffd6d6;
+  background: rgba(38, 10, 12, 0.92);
 }
 
 .cliAgentTerminalInputRow {

@@ -892,11 +892,17 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain('"/api/cli-agents/terminal-sessions/ensure"');
     expect(routeSource).toContain("new EventSource(`/api/cli-agents/terminal-sessions/${encodeURIComponent(terminalSessionId)}/events`)");
     expect(routeSource).toContain("terminal_output");
+    expect(routeSource).toContain('import { Terminal } from "@xterm/xterm"');
+    expect(routeSource).toContain("terminal.write(");
+    expect(routeSource).not.toContain("terminalTextForDisplay");
+    expect(routeSource).not.toContain("<pre ref={outputRef}");
     expect(routeSource).toContain("/input`");
     expect(routeSource).toContain("/stop`");
     expect(routeSource).not.toContain("const [activeCliAgentRunId, setActiveCliAgentRunId] = useState");
     expect(routeCssSource).toContain(".cliAgentRunPanel");
     expect(routeCssSource).toContain(".cliAgentTerminalFrame");
+    expect(routeCssSource).toContain(".cliAgentTerminalOutputShell");
+    expect(routeCssSource).toContain(":global(.xterm)");
     expect(routeCssSource).toContain("background: #06100d");
     expect(routeCssSource).toContain(".cliAgentTerminalStatus");
     expect(routeCssSource).toContain(".cliAgentTerminalInputRow");
