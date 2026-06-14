@@ -6104,15 +6104,25 @@ def _build_session_detail_from_summary(
     detail_messages = _messages_with_live_output(conversation["id"], conversation.get("messages") or [])
     context_usage = _build_session_context_usage(conversation, detail_messages)
     llm_usage = _session_last_llm_usage(conversation, detail_messages)
-    cache_usage = _build_session_cache_usage(llm_usage)
+    cache_usage = _build_session_cache_usage(llm_usage, detail_messages)
     live_context_composition = _current_session_live_context_composition(conversation["id"])
     last_context_composition = live_context_composition or _normalize_session_context_composition(
         conversation.get("lastContextComposition") or conversation.get("last_context_composition")
     )
     last_cache_composition = (
-        _build_session_cache_composition(str(live_context_composition.get("turnId") or "").strip(), llm_usage)
+        _build_session_cache_composition(
+            str(live_context_composition.get("turnId") or "").strip(),
+            llm_usage,
+            context_composition=last_context_composition,
+            average_cache=cache_usage,
+        )
         if live_context_composition is not None
-        else _session_last_cache_composition(conversation, llm_usage=llm_usage)
+        else _session_last_cache_composition(
+            conversation,
+            llm_usage=llm_usage,
+            context_composition=last_context_composition,
+            average_cache=cache_usage,
+        )
     )
     agent_available = _session_agent_is_available(summary)
     available_agent_id = summary.get("agentId") or "" if agent_available else ""
@@ -6160,7 +6170,10 @@ def _build_session_detail_from_summary(
     return detail
 
 
-def _build_session_cache_usage(llm_usage: dict[str, Any] | None) -> dict[str, Any]:
+def _build_session_cache_usage(
+    llm_usage: dict[str, Any] | None,
+    messages: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     usage = _normalize_turn_llm_usage(llm_usage)
     usage_source = str((usage or {}).get("source") or "").strip()
     observed = usage is not None and usage_source == "provider_usage"
@@ -6184,10 +6197,20 @@ def _build_session_cache_usage(llm_usage: dict[str, Any] | None) -> dict[str, An
     turn_cached_input_tokens = last_cached_input_tokens
     turn_cache_creation_input_tokens = last_cache_creation_input_tokens
     turn_uncached_input_tokens = last_uncached_input_tokens
-    total_input_tokens = last_input_tokens
-    total_cached_input_tokens = last_cached_input_tokens
-    total_cache_creation_input_tokens = last_cache_creation_input_tokens
-    total_uncached_input_tokens = last_uncached_input_tokens
+    aggregate = _aggregate_session_provider_cache_usage(messages or [], fallback_usage=usage)
+    aggregate_turn_count = _coerce_nonnegative_int(aggregate.get("turnCount") or 0)
+    if aggregate_turn_count:
+        total_input_tokens = _coerce_nonnegative_int(aggregate.get("inputTokens") or 0)
+        total_cached_input_tokens = _coerce_nonnegative_int(aggregate.get("cachedInputTokens") or 0)
+        total_cache_creation_input_tokens = _coerce_nonnegative_int(aggregate.get("cacheCreationInputTokens") or 0)
+        total_uncached_input_tokens = _coerce_nonnegative_int(aggregate.get("uncachedInputTokens") or 0)
+    else:
+        total_input_tokens = last_input_tokens
+        total_cached_input_tokens = last_cached_input_tokens
+        total_cache_creation_input_tokens = last_cache_creation_input_tokens
+        total_uncached_input_tokens = last_uncached_input_tokens
+    if total_input_tokens and not total_uncached_input_tokens:
+        total_uncached_input_tokens = max(0, total_input_tokens - total_cached_input_tokens)
     return {
         "lastInputTokens": last_input_tokens,
         "lastCachedInputTokens": last_cached_input_tokens,
@@ -6206,6 +6229,7 @@ def _build_session_cache_usage(llm_usage: dict[str, Any] | None) -> dict[str, An
         "totalCacheCreationInputTokens": total_cache_creation_input_tokens,
         "totalUncachedInputTokens": total_uncached_input_tokens,
         "totalCacheHitRate": (total_cached_input_tokens / total_input_tokens) if total_input_tokens > 0 else 0.0,
+        "totalObservedTurnCount": aggregate_turn_count or (1 if observed else 0),
         "updatedAt": str((usage or {}).get("recordedAt") or "").strip(),
         "source": "provider_usage" if observed else "not_called" if usage_source == "not_called" else "missing",
     }
@@ -6226,6 +6250,61 @@ def _session_last_llm_usage(conversation: dict[str, Any], messages: list[dict[st
         if normalized is not None:
             return normalized
     return None
+
+
+def _aggregate_session_provider_cache_usage(
+    messages: list[dict[str, Any]],
+    *,
+    fallback_usage: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    usages: list[dict[str, Any]] = []
+    seen: set[tuple[str, int, int, int]] = set()
+    for message in list(messages or []):
+        if str((message or {}).get("role") or "").strip().lower() != "assistant":
+            continue
+        metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+        usage = _normalize_turn_llm_usage(metadata.get("llmUsage") or metadata.get("llm_usage"))
+        if usage is None or usage.get("source") != "provider_usage":
+            continue
+        input_tokens = _coerce_nonnegative_int(usage.get("inputTokens") or 0)
+        if not input_tokens:
+            continue
+        key = (
+            str(usage.get("recordedAt") or "").strip(),
+            input_tokens,
+            _coerce_nonnegative_int(usage.get("cachedInputTokens") or 0),
+            _coerce_nonnegative_int(usage.get("outputTokens") or 0),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        usages.append(usage)
+    fallback = _normalize_turn_llm_usage(fallback_usage)
+    if fallback is not None and fallback.get("source") == "provider_usage":
+        fallback_input = _coerce_nonnegative_int(fallback.get("inputTokens") or 0)
+        fallback_key = (
+            str(fallback.get("recordedAt") or "").strip(),
+            fallback_input,
+            _coerce_nonnegative_int(fallback.get("cachedInputTokens") or 0),
+            _coerce_nonnegative_int(fallback.get("outputTokens") or 0),
+        )
+        if fallback_input and fallback_key not in seen:
+            usages.append(fallback)
+    total_input = sum(_coerce_nonnegative_int(item.get("inputTokens") or 0) for item in usages)
+    total_cached = sum(_coerce_nonnegative_int(item.get("cachedInputTokens") or 0) for item in usages)
+    total_creation = sum(_coerce_nonnegative_int(item.get("cacheCreationInputTokens") or 0) for item in usages)
+    total_uncached = sum(_coerce_nonnegative_int(item.get("uncachedInputTokens") or 0) for item in usages)
+    if total_input and not total_uncached:
+        total_uncached = max(0, total_input - total_cached)
+    return {
+        "inputTokens": total_input,
+        "cachedInputTokens": min(total_cached, total_input) if total_input else 0,
+        "cacheReadInputTokens": min(total_cached, total_input) if total_input else 0,
+        "cacheCreationInputTokens": min(total_creation, total_input) if total_input else 0,
+        "uncachedInputTokens": min(total_uncached, total_input) if total_input else 0,
+        "cacheHitRate": (min(total_cached, total_input) / total_input) if total_input else 0.0,
+        "turnCount": len(usages),
+    }
 
 
 def _normalize_turn_llm_usage(value: Any) -> dict[str, Any] | None:
@@ -6381,6 +6460,10 @@ def _normalize_session_cache_composition(value: Any) -> dict[str, Any] | None:
                 "label": str(item.get("label") or key).strip() or key,
                 "tokens": _coerce_nonnegative_int(item.get("tokens") or 0),
                 "status": str(item.get("status") or "observed").strip() or "observed",
+                "source": str(item.get("source") or "").strip(),
+                "description": str(item.get("description") or "").strip(),
+                "cachePolicy": str(item.get("cachePolicy") or item.get("cache_policy") or "").strip(),
+                "order": _coerce_nonnegative_int(item.get("order") or 0),
             }
         )
     if not segments:
@@ -6392,6 +6475,61 @@ def _normalize_session_cache_composition(value: Any) -> dict[str, Any] | None:
             ]
         elif source in {"missing", "not_called"}:
             segments = [{"key": "missing", "label": "missing", "tokens": 1, "status": "missing"}]
+    computed_segments = []
+    for item in list(value.get("computedSegments") or value.get("computed_segments") or []):
+        if not isinstance(item, dict):
+            continue
+        key = str(item.get("key") or "").strip()
+        if not key:
+            continue
+        computed_segments.append(
+            {
+                "key": key,
+                "label": str(item.get("label") or key).strip() or key,
+                "tokens": _coerce_nonnegative_int(item.get("tokens") or 0),
+                "status": str(item.get("status") or "computed_unknown").strip() or "computed_unknown",
+                "source": str(item.get("source") or "").strip(),
+                "description": str(item.get("description") or "").strip(),
+                "cachePolicy": str(item.get("cachePolicy") or item.get("cache_policy") or "").strip(),
+                "order": _coerce_nonnegative_int(item.get("order") or 0),
+            }
+        )
+    computed_input_tokens = _coerce_nonnegative_int(
+        value.get("computedInputTokens") or value.get("computed_input_tokens") or input_tokens
+    )
+    computed_cached_tokens = min(
+        _coerce_nonnegative_int(
+            value.get("computedCachedInputTokens")
+            or value.get("computed_cached_input_tokens")
+            or 0
+        ),
+        computed_input_tokens,
+    ) if computed_input_tokens else 0
+    computed_uncached_tokens = _coerce_nonnegative_int(
+        value.get("computedUncachedInputTokens")
+        or value.get("computed_uncached_input_tokens")
+        or 0
+    )
+    if computed_input_tokens and not computed_uncached_tokens:
+        computed_uncached_tokens = max(0, computed_input_tokens - computed_cached_tokens)
+    average_input_tokens = _coerce_nonnegative_int(
+        value.get("averageInputTokens") or value.get("average_input_tokens") or 0
+    )
+    average_cached_tokens = min(
+        _coerce_nonnegative_int(
+            value.get("averageCachedInputTokens")
+            or value.get("average_cached_input_tokens")
+            or 0
+        ),
+        average_input_tokens,
+    ) if average_input_tokens else 0
+    average_turn_count = _coerce_nonnegative_int(
+        value.get("averageObservedTurnCount")
+        or value.get("average_observed_turn_count")
+        or value.get("averageTurnCount")
+        or value.get("average_turn_count")
+        or 0
+    )
     return {
         "turnId": str(value.get("turnId") or value.get("turn_id") or "").strip(),
         "recordedAt": str(value.get("recordedAt") or value.get("recorded_at") or "").strip(),
@@ -6403,40 +6541,238 @@ def _normalize_session_cache_composition(value: Any) -> dict[str, Any] | None:
         "uncachedInputTokens": uncached_tokens,
         "cacheHitRate": (cached_tokens / input_tokens) if input_tokens > 0 else 0.0,
         "segments": segments,
+        "computedInputTokens": computed_input_tokens,
+        "computedCachedInputTokens": computed_cached_tokens,
+        "computedUncachedInputTokens": computed_uncached_tokens,
+        "computedCacheHitRate": (computed_cached_tokens / computed_input_tokens) if computed_input_tokens > 0 else 0.0,
+        "computedSegments": computed_segments,
+        "averageInputTokens": average_input_tokens,
+        "averageCachedInputTokens": average_cached_tokens,
+        "averageCacheHitRate": (average_cached_tokens / average_input_tokens) if average_input_tokens > 0 else 0.0,
+        "averageObservedTurnCount": average_turn_count,
     }
+
+
+def _ordered_model_input_context_segments(context_composition: dict[str, Any] | None) -> list[dict[str, Any]]:
+    if not isinstance(context_composition, dict):
+        return []
+    segments = [
+        dict(item)
+        for item in list(context_composition.get("segments") or [])
+        if isinstance(item, dict) and bool(item.get("includedInModelInput"))
+    ]
+    if not segments:
+        return []
+    by_key: dict[str, list[dict[str, Any]]] = {}
+    for item in segments:
+        key = str(item.get("key") or "").strip()
+        if key:
+            by_key.setdefault(key, []).append(item)
+    ordered: list[dict[str, Any]] = []
+    for key in list(context_composition.get("modelInputOrdering") or []):
+        normalized_key = str(key or "").strip()
+        if not normalized_key:
+            continue
+        bucket = by_key.get(normalized_key) or []
+        if bucket:
+            ordered.append(bucket.pop(0))
+    used_ids = {id(item) for item in ordered}
+    for item in segments:
+        if id(item) not in used_ids:
+            ordered.append(item)
+    return ordered
+
+
+def _build_computed_cache_segments(
+    *,
+    input_tokens: int,
+    context_composition: dict[str, Any] | None,
+) -> tuple[list[dict[str, Any]], int, int]:
+    ordered_context_segments = _ordered_model_input_context_segments(context_composition)
+    context_tokens = sum(_coerce_nonnegative_int(item.get("tokens") or 0) for item in ordered_context_segments)
+    total_input_tokens = max(_coerce_nonnegative_int(input_tokens), context_tokens)
+    if total_input_tokens <= 0:
+        return (
+            [
+                {
+                    "key": "computed_missing",
+                    "label": "computed missing",
+                    "tokens": 1,
+                    "status": "computed_unknown",
+                    "source": "no_provider_input",
+                    "description": "No provider input tokens were available for computed cache diagnostics.",
+                    "cachePolicy": "unknown",
+                    "order": 0,
+                }
+            ],
+            0,
+            0,
+        )
+    segments: list[dict[str, Any]] = []
+    computed_cached_tokens = 0
+    prefix_open = True
+    unexplained_tokens = max(0, total_input_tokens - context_tokens)
+    if unexplained_tokens:
+        segments.append(
+            {
+                "key": "system_prompt_overhead",
+                "label": "system prompt / tool schema",
+                "tokens": unexplained_tokens,
+                "status": "computed_hit",
+                "source": "provider_input_remainder",
+                "description": (
+                    "Input tokens not covered by the session context manifest; "
+                    "treated as stable prompt/tool-schema prefix for computed cache comparison."
+                ),
+                "cachePolicy": "assumed_stable_prefix",
+                "order": 0,
+            }
+        )
+        computed_cached_tokens += unexplained_tokens
+    stable_policies = {"cacheable", "prefix_candidate", "assumed_stable_prefix"}
+    volatile_policies = {"volatile", "never_cache", "dynamic"}
+    for index, item in enumerate(ordered_context_segments, start=1 if unexplained_tokens else 0):
+        tokens = _coerce_nonnegative_int(item.get("tokens") or 0)
+        if tokens <= 0:
+            continue
+        cache_policy = str(item.get("cachePolicy") or item.get("cache_policy") or "").strip()
+        key = str(item.get("key") or "").strip() or f"segment_{index}"
+        if prefix_open and cache_policy in stable_policies:
+            status = "computed_hit"
+            computed_cached_tokens += tokens
+        elif cache_policy in stable_policies:
+            status = "computed_write"
+        else:
+            status = "computed_miss"
+            if cache_policy in volatile_policies or cache_policy:
+                prefix_open = False
+        if cache_policy not in stable_policies:
+            prefix_open = False
+        segments.append(
+            {
+                "key": key,
+                "label": str(item.get("label") or key).strip() or key,
+                "tokens": tokens,
+                "status": status,
+                "source": str(item.get("source") or "").strip(),
+                "description": str(item.get("description") or "").strip(),
+                "cachePolicy": cache_policy,
+                "order": index,
+            }
+        )
+    computed_cached_tokens = min(computed_cached_tokens, total_input_tokens)
+    return segments, computed_cached_tokens, max(0, total_input_tokens - computed_cached_tokens)
+
+
+def _cache_average_from_usage(cache_usage: dict[str, Any] | None) -> dict[str, int]:
+    if not isinstance(cache_usage, dict):
+        return {
+            "inputTokens": 0,
+            "cachedInputTokens": 0,
+            "observedTurnCount": 0,
+        }
+    input_tokens = _coerce_nonnegative_int(
+        cache_usage.get("totalInputTokens")
+        or cache_usage.get("averageInputTokens")
+        or 0
+    )
+    cached_tokens = min(
+        _coerce_nonnegative_int(
+            cache_usage.get("totalCachedInputTokens")
+            or cache_usage.get("averageCachedInputTokens")
+            or 0
+        ),
+        input_tokens,
+    ) if input_tokens else 0
+    return {
+        "inputTokens": input_tokens,
+        "cachedInputTokens": cached_tokens,
+        "observedTurnCount": _coerce_nonnegative_int(
+            cache_usage.get("totalObservedTurnCount")
+            or cache_usage.get("averageObservedTurnCount")
+            or 0
+        ),
+    }
+
+
+def _enrich_session_cache_composition(
+    composition: dict[str, Any] | None,
+    *,
+    context_composition: dict[str, Any] | None,
+    average_cache: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    normalized = _normalize_session_cache_composition(composition)
+    if normalized is None:
+        return None
+    input_tokens = _coerce_nonnegative_int(normalized.get("inputTokens") or 0)
+    computed_segments, computed_cached, computed_uncached = _build_computed_cache_segments(
+        input_tokens=input_tokens,
+        context_composition=context_composition,
+    )
+    average = _cache_average_from_usage(average_cache)
+    enriched = {
+        **normalized,
+        "computedInputTokens": max(input_tokens, sum(_coerce_nonnegative_int(item.get("tokens") or 0) for item in computed_segments)),
+        "computedCachedInputTokens": computed_cached,
+        "computedUncachedInputTokens": computed_uncached,
+        "computedSegments": computed_segments,
+        "averageInputTokens": average["inputTokens"],
+        "averageCachedInputTokens": average["cachedInputTokens"],
+        "averageObservedTurnCount": average["observedTurnCount"],
+    }
+    return _normalize_session_cache_composition(enriched)
 
 
 def _session_last_cache_composition(
     conversation: dict[str, Any],
     *,
     llm_usage: dict[str, Any] | None,
+    context_composition: dict[str, Any] | None = None,
+    average_cache: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     existing = _normalize_session_cache_composition(
         conversation.get("lastCacheComposition") or conversation.get("last_cache_composition")
     )
     if existing is not None:
-        return existing
+        return _enrich_session_cache_composition(
+            existing,
+            context_composition=context_composition,
+            average_cache=average_cache,
+        )
     usage = _normalize_turn_llm_usage(llm_usage)
     if usage is None:
         return None
-    return _build_session_cache_composition("", usage)
+    return _build_session_cache_composition(
+        "",
+        usage,
+        context_composition=context_composition,
+        average_cache=average_cache,
+    )
 
 
-def _build_session_cache_composition(turn_id: str, llm_usage: dict[str, Any] | None) -> dict[str, Any]:
+def _build_session_cache_composition(
+    turn_id: str,
+    llm_usage: dict[str, Any] | None,
+    *,
+    context_composition: dict[str, Any] | None = None,
+    average_cache: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     usage = _normalize_turn_llm_usage(llm_usage)
     if usage is None or usage.get("source") != "provider_usage":
-        return _normalize_session_cache_composition(
+        return _enrich_session_cache_composition(
             {
                 "turnId": turn_id,
                 "recordedAt": _now_timestamp(),
                 "source": "missing",
-            }
+            },
+            context_composition=context_composition,
+            average_cache=average_cache,
         ) or {}
     input_tokens = _coerce_nonnegative_int(usage.get("inputTokens") or 0)
     cached_tokens = min(_coerce_nonnegative_int(usage.get("cachedInputTokens") or 0), input_tokens) if input_tokens else 0
     cache_creation_tokens = min(_coerce_nonnegative_int(usage.get("cacheCreationInputTokens") or 0), input_tokens) if input_tokens else 0
     uncached_tokens = max(0, input_tokens - cached_tokens)
-    return _normalize_session_cache_composition(
+    return _enrich_session_cache_composition(
         {
             "turnId": turn_id,
             "recordedAt": usage.get("recordedAt") or _now_timestamp(),
@@ -6450,7 +6786,9 @@ def _build_session_cache_composition(turn_id: str, llm_usage: dict[str, Any] | N
                 {"key": "cache_write", "label": "cache write", "tokens": cache_creation_tokens, "status": "write"},
                 {"key": "uncached", "label": "uncached", "tokens": uncached_tokens, "status": "miss"},
             ],
-        }
+        },
+        context_composition=context_composition,
+        average_cache=average_cache,
     ) or {}
 
 

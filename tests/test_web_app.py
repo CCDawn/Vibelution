@@ -3955,6 +3955,25 @@ def test_persist_turn_result_records_provider_llm_usage(tmp_path, monkeypatch):
 def test_persist_turn_result_exposes_previous_context_and_cache_composition(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    state = load_chat_state(tmp_path)
+    state["conversations"][0]["messages"].append(
+        {
+            "role": "assistant",
+            "content": "上一轮回答",
+            "timestamp": "2026-05-18T12:05:00",
+            "metadata": {
+                "llmUsage": {
+                    "source": "provider_usage",
+                    "inputTokens": 500,
+                    "outputTokens": 40,
+                    "cachedInputTokens": 100,
+                    "cacheCreationInputTokens": 0,
+                    "recordedAt": "2026-05-18T12:05:00",
+                }
+            },
+        }
+    )
+    save_chat_state(tmp_path, state)
     session_service._set_session_running("session-live", True, turn_id="turn-context-composition")
 
     session_service._persist_session_turn_result(
@@ -3970,6 +3989,7 @@ def test_persist_turn_result_exposes_previous_context_and_cache_composition(tmp_
                 "turnId": "turn-context-composition",
                 "recordedAt": "2026-05-18T12:06:00",
                 "source": "runtime_assembly",
+                "modelInputOrdering": ["history", "current_user"],
                 "segments": [
                     {
                         "key": "current_user",
@@ -3979,6 +3999,8 @@ def test_persist_turn_result_exposes_previous_context_and_cache_composition(tmp_
                         "itemCount": 1,
                         "source": "raw_user_message",
                         "description": "safe summary",
+                        "cachePolicy": "never_cache",
+                        "includedInModelInput": True,
                     },
                     {
                         "key": "history",
@@ -3988,6 +4010,8 @@ def test_persist_turn_result_exposes_previous_context_and_cache_composition(tmp_
                         "itemCount": 2,
                         "source": "seed_chat_history",
                         "description": "safe summary",
+                        "cachePolicy": "prefix_candidate",
+                        "includedInModelInput": True,
                     },
                 ],
             },
@@ -4013,6 +4037,25 @@ def test_persist_turn_result_exposes_previous_context_and_cache_composition(tmp_
     assert detail["lastCacheComposition"]["cacheCreationInputTokens"] == 125
     assert detail["lastCacheComposition"]["uncachedInputTokens"] == 750
     assert [item["key"] for item in detail["lastCacheComposition"]["segments"]] == ["cached", "cache_write", "uncached"]
+    assert detail["cacheUsage"]["totalInputTokens"] == 1500
+    assert detail["cacheUsage"]["totalCachedInputTokens"] == 350
+    assert detail["cacheUsage"]["totalObservedTurnCount"] == 2
+    assert detail["cacheUsage"]["totalCacheHitRate"] == pytest.approx(350 / 1500)
+    assert detail["lastCacheComposition"]["computedInputTokens"] == 1000
+    assert detail["lastCacheComposition"]["computedCachedInputTokens"] == 996
+    assert detail["lastCacheComposition"]["computedUncachedInputTokens"] == 4
+    assert detail["lastCacheComposition"]["computedCacheHitRate"] == pytest.approx(0.996)
+    assert detail["lastCacheComposition"]["averageInputTokens"] == 1500
+    assert detail["lastCacheComposition"]["averageCachedInputTokens"] == 350
+    assert detail["lastCacheComposition"]["averageObservedTurnCount"] == 2
+    assert detail["lastCacheComposition"]["averageCacheHitRate"] == pytest.approx(350 / 1500)
+    computed_segments = detail["lastCacheComposition"]["computedSegments"]
+    assert [item["key"] for item in computed_segments] == ["system_prompt_overhead", "history", "current_user"]
+    assert computed_segments[0]["tokens"] == 946
+    assert computed_segments[0]["status"] == "computed_hit"
+    assert computed_segments[0]["source"] == "provider_input_remainder"
+    assert computed_segments[1]["status"] == "computed_hit"
+    assert computed_segments[2]["status"] == "computed_miss"
 
 
 def test_session_detail_live_context_uses_current_missing_cache_composition(tmp_path, monkeypatch):

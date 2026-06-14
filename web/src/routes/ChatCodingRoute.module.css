@@ -2399,6 +2399,146 @@
   border-radius: 999px;
 }
 
+.cacheDonutPanel {
+  display: grid;
+  grid-template-columns: 86px minmax(0, 1fr);
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+
+.cacheDonutShell {
+  position: relative;
+  width: 86px;
+  height: 86px;
+  min-width: 86px;
+}
+
+.cacheDonutSvg {
+  display: block;
+  width: 86px;
+  height: 86px;
+  overflow: visible;
+  transform: rotate(-90deg);
+}
+
+.cacheDonutTrack {
+  fill: none;
+  stroke: color-mix(in srgb, var(--surface-panel) 78%, var(--fg-tertiary));
+  stroke-linecap: butt;
+}
+
+.cacheDonutOuterTrack {
+  stroke-width: 10;
+}
+
+.cacheDonutInnerTrack {
+  stroke-width: 8;
+}
+
+.cacheDonutSegment {
+  fill: none;
+  stroke-linecap: butt;
+  transition: stroke-width 0.15s ease, filter 0.15s ease;
+}
+
+.cacheDonutSegment:hover {
+  filter: brightness(1.08);
+}
+
+.cacheDonutOuterSegment {
+  stroke-width: 10;
+}
+
+.cacheDonutOuterSegment:hover {
+  stroke-width: 12;
+}
+
+.cacheDonutInnerSegment {
+  stroke-width: 8;
+}
+
+.cacheDonutInnerSegment:hover {
+  stroke-width: 10;
+}
+
+.cacheDonutCenter {
+  position: absolute;
+  inset: 23px;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 1px;
+  min-width: 0;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-card) 82%, transparent);
+  color: var(--fg-tertiary);
+  line-height: 1;
+  text-align: center;
+  pointer-events: none;
+}
+
+.cacheDonutCenter strong {
+  color: var(--fg-primary);
+  font-size: 0.86rem;
+  font-weight: 820;
+}
+
+.cacheDonutCenter span,
+.cacheDonutCenter small {
+  max-width: 42px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.52rem;
+}
+
+.cacheDonutStats {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  color: var(--fg-tertiary);
+  font-size: 0.64rem;
+  line-height: 1.15;
+}
+
+.cacheDonutStats span {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cacheDonutStats b {
+  color: var(--fg-secondary);
+  font-size: 0.58rem;
+  font-weight: 760;
+}
+
+.cacheDonutSegmentCached {
+  stroke: #31b977;
+}
+
+.cacheDonutSegmentCacheWrite {
+  stroke: #4f8cff;
+}
+
+.cacheDonutSegmentUncached {
+  stroke: #8c96a6;
+}
+
+.cacheDonutSegmentMissing {
+  stroke: color-mix(in srgb, var(--fg-tertiary) 46%, transparent);
+}
+
+.cacheDonutSegmentOther {
+  stroke: #6f7dd9;
+}
+
 .contextCompositionSegmentUser {
   background: #4f8cff;
 }
