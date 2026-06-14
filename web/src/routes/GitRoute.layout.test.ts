@@ -67,8 +67,24 @@ describe("GitRoute layout contract", () => {
     expect(routeSource).toContain("styles.gitOverviewPanel");
     expect(routeSource).toContain("styles.cleanStateStrip");
     expect(routeSource).toContain("styles.gitSituationGrid");
+    expect(routeSource).toContain("styles.objectDetailPanel");
     expect(routeSource).toContain("pendingWorktreePreview");
-    expect(routeSource).toContain("localCommitPreview.map(renderCommitItem)");
+    expect(routeSource).toContain("localCommitPreview.map((commit) => renderCommitItem(commit, gitCommitSourceLabel))");
+  });
+
+  it("lets clean Git summaries open commit branch and worktree detail previews", () => {
+    expect(routeSource).toContain("type GitObjectSelection");
+    expect(routeSource).toContain("setActiveObject(selection)");
+    expect(routeSource).toContain("/api/git/object-detail?");
+    expect(routeSource).toContain("selectCurrentBranch");
+    expect(routeSource).toContain("selectWorktree");
+    expect(routeSource).toContain("worktreeDetailTarget");
+    expect(routeSource).toContain('kind: "worktree"');
+    expect(routeSource).toContain('kind: "commit"');
+    expect(routeSource).toContain("objectDetailQuery");
+    expect(stylesSource).toContain("grid-template-columns: minmax(340px, 0.9fr) minmax(500px, 1.18fr) minmax(270px, 0.62fr)");
+    expect(stylesSource).toContain(".objectDetailPanel");
+    expect(stylesSource).toContain(".objectItemActive");
   });
 
   it("keeps the clean Git overview history panel single-column at narrow desktop widths", () => {
