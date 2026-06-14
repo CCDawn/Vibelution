@@ -132,6 +132,46 @@ def run_cli_agent(
             supportedModes=list(SUPPORTED_MODES),
         )
 
+    cwd_result = _resolve_run_cwd(cwd, mode=normalized_mode)
+    if cwd_result.get("ok"):
+        active_terminal = _find_reusable_terminal_session(
+            agent_type=normalized_type,
+            cwd=str(cwd_result.get("cwd") or cwd or ""),
+        )
+        if active_terminal:
+            run_id = _new_run_id()
+            duration_ms = round((time.perf_counter() - started_at) * 1000, 3)
+            label = str(adapter.get("label") or normalized_type)
+            result = {
+                "status": "ok",
+                "code": "CLI_AGENT_TERMINAL_ACTIVE",
+                "runId": run_id,
+                "agentType": normalized_type,
+                "label": label,
+                "mode": normalized_mode,
+                "cwd": str(cwd_result.get("cwd") or cwd or ""),
+                "durationMs": duration_ms,
+                "terminalSessionId": str(active_terminal.get("terminalSessionId") or ""),
+                "cliRunId": str(active_terminal.get("cliRunId") or ""),
+                "lockKey": str(active_terminal.get("lockKey") or ""),
+                "cliSessionId": str(active_terminal.get("cliSessionId") or ""),
+                "terminalStatus": str(active_terminal.get("status") or ""),
+                "terminalAlive": bool(active_terminal.get("alive")),
+                "stdoutPreview": f"已检测到同一目录已有运行中的 {label} 终端会话，请复用该 CLI Agent 继续交互。",
+                "stderrPreview": "",
+                "exitCode": 0,
+                "timedOut": False,
+                "terminalReuse": True,
+                "logPath": "",
+            }
+            result["logPath"] = _write_run_record(result)
+            _record_event(
+                "cli_agent.run.reused_terminal",
+                outcome="succeeded",
+                fields=_event_fields(result, task_hash=_task_hash(task_text)),
+            )
+            return result
+
     executable = _resolve_executable(adapter)
     if not executable:
         return _error_result(
@@ -141,7 +181,6 @@ def run_cli_agent(
             executableCandidates=list(adapter.get("executableCandidates") or []),
         )
 
-    cwd_result = _resolve_run_cwd(cwd, mode=normalized_mode)
     if not cwd_result.get("ok"):
         return _error_result(
             str(cwd_result.get("code") or "INVALID_CWD"),
@@ -526,6 +565,9 @@ def _event_fields(result: dict[str, Any], *, task_hash: str) -> dict[str, Any]:
         "cwd": str(result.get("cwd") or ""),
         "status": str(result.get("status") or ""),
         "code": str(result.get("code") or ""),
+        "terminalSessionId": str(result.get("terminalSessionId") or ""),
+        "cliRunId": str(result.get("cliRunId") or ""),
+        "terminalReuse": bool(result.get("terminalReuse")),
         "exitCode": result.get("exitCode"),
         "durationMs": result.get("durationMs"),
         "timedOut": bool(result.get("timedOut")),
@@ -560,6 +602,62 @@ def _clip(value: str, limit: int) -> str:
     head = max(500, limit // 2)
     tail = max(500, limit - head)
     return f"{text[:head]}\n\n[output truncated: original {len(text)} chars]\n\n{text[-tail:]}"
+
+
+def _find_reusable_terminal_session(*, agent_type: str, cwd: str) -> dict[str, Any]:
+    state_dir = Path(PROJECT_ROOT) / ".runtime" / "cli_agents" / "sessions"
+    if not state_dir.exists():
+        return {}
+    normalized_agent_type = _normalize_id(agent_type)
+    normalized_cwd = _normalize_path_for_match(cwd)
+    candidates: list[dict[str, Any]] = []
+    for path in state_dir.glob("*.json"):
+        try:
+            state = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if not isinstance(state, dict):
+            continue
+        if bool(state.get("userClosed")):
+            continue
+        status = str(state.get("status") or "").strip().lower()
+        if status in {"closed", "stopping", "stopped", "exited"}:
+            continue
+        state_agent_type = _normalize_id(state.get("adapterId") or state.get("agentType"))
+        if state_agent_type != normalized_agent_type:
+            continue
+        if _normalize_path_for_match(str(state.get("cwd") or "")) != normalized_cwd:
+            continue
+        if not bool(state.get("alive")) and status not in {"running", "starting"}:
+            continue
+        candidates.append(state)
+    if not candidates:
+        return {}
+    candidates.sort(
+        key=lambda item: _timestamp_sort_key(str(item.get("updatedAt") or item.get("createdAt") or "")),
+        reverse=True,
+    )
+    return dict(candidates[0])
+
+
+def _normalize_path_for_match(value: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    try:
+        return str(Path(text).resolve()).replace("\\", "/").lower()
+    except Exception:
+        return text.replace("\\", "/").lower()
+
+
+def _timestamp_sort_key(value: str) -> float:
+    text = str(value or "").strip()
+    if not text:
+        return 0.0
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return 0.0
 
 
 def _decode_timeout_output(value: Any) -> str:

@@ -201,7 +201,7 @@ function cliAgentRunIdFromTabId(tabId: string) {
 }
 
 function cliAgentRunCloseToken(run: Pick<CliAgentRunView, "id" | "sourceRunId">) {
-  return `${run.id}::${run.sourceRunId}`;
+  return run.id || run.sourceRunId;
 }
 
 type CliAgentRunResult = {
@@ -485,7 +485,6 @@ function buildCliAgentRunViews(messages: ConversationMessage[], sourceSessionId 
         task,
       });
       const lifecyclePatchForRun = lifecycleByRunId.get(cliRunId) ?? lifecycleByRunId.get(sourceRunId);
-      closedRunIds.delete(cliRunId);
       const run: CliAgentRunView = {
         id: cliRunId,
         messageId: message.id,

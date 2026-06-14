@@ -240,24 +240,55 @@ def ensure_cli_agent_terminal_session(
     normalized_source_session_id = str(source_session_id or "").strip()
     normalized_source_message_id = str(source_message_id or "").strip()
     normalized_source_run_id = str(source_run_id or "").strip()
+    scope_cwd = _scope_cwd(cwd, mode=mode)
     terminal_session_id = _stable_terminal_session_id(
         adapter_id=normalized_type,
         source_session_id=normalized_source_session_id,
         source_message_id=normalized_source_message_id,
         source_run_id=normalized_source_run_id,
-        cwd=cwd,
+        cwd=scope_cwd or cwd,
         mode=mode,
+        task=task,
+    )
+    lock_key = _stable_cli_lock_key(
+        adapter_id=normalized_type,
+        source_session_id=normalized_source_session_id,
+        source_message_id=normalized_source_message_id,
+        source_run_id=normalized_source_run_id,
+        cwd=scope_cwd or cwd,
+        task=task,
+    )
+    cli_run_id = _stable_cli_run_id(
+        adapter_id=normalized_type,
+        source_session_id=normalized_source_session_id,
+        source_message_id=normalized_source_message_id,
+        source_run_id=normalized_source_run_id,
+        cwd=scope_cwd or cwd,
         task=task,
     )
 
     with _RUNTIMES_LOCK:
         runtime = _RUNTIMES.get(terminal_session_id)
         if runtime and runtime.is_alive():
+            _link_runtime_source(
+                runtime,
+                source_message_id=normalized_source_message_id,
+                source_run_id=normalized_source_run_id,
+            )
             snapshot = runtime.snapshot()
-            _touch_state(terminal_session_id, status="running", alive=True)
+            snapshot["reusedActiveLock"] = True
             return snapshot
 
         existing_state = _read_state(terminal_session_id)
+        if not existing_state:
+            existing_state = _find_related_terminal_state(
+                cli_run_id=cli_run_id,
+                lock_key=lock_key,
+                adapter_id=normalized_type,
+                source_session_id=normalized_source_session_id,
+                cwd=scope_cwd or cwd,
+                exclude_terminal_session_id=terminal_session_id,
+            )
         normalized_source_session_id = normalized_source_session_id or str(existing_state.get("sourceSessionId") or "").strip()
         normalized_source_message_id = normalized_source_message_id or str(existing_state.get("sourceMessageId") or "").strip()
         normalized_source_run_id = normalized_source_run_id or str(existing_state.get("sourceRunId") or "").strip()
@@ -429,16 +460,43 @@ def resize_cli_agent_terminal_session(terminal_session_id: str, rows: int, cols:
 
 
 def stop_cli_agent_terminal_session(terminal_session_id: str) -> dict[str, Any]:
-    runtime = _require_runtime(terminal_session_id)
-    runtime.stop()
-    with runtime.lock:
-        runtime.state["status"] = "stopping"
-        runtime.state["alive"] = False
-        runtime.state["userClosed"] = True
-        runtime.state["closedAt"] = _now_iso()
-        runtime.state["updatedAt"] = _now_iso()
-        _write_state(runtime.state)
-    return runtime.snapshot()
+    session_id = _normalize_terminal_session_id(terminal_session_id)
+    with _RUNTIMES_LOCK:
+        runtime = _RUNTIMES.get(session_id)
+        runtime_state = dict(runtime.state) if runtime is not None else {}
+    state = runtime_state or _read_state(session_id)
+    if not state:
+        raise CliAgentTerminalError("TERMINAL_SESSION_NOT_FOUND", "Terminal session not found.")
+
+    related_ids = _related_terminal_session_ids(state)
+    if session_id not in related_ids:
+        related_ids.insert(0, session_id)
+    closed_ids: list[str] = []
+    now = _now_iso()
+    with _RUNTIMES_LOCK:
+        for related_id in related_ids:
+            related_runtime = _RUNTIMES.get(related_id)
+            if related_runtime is not None and related_runtime.is_alive():
+                related_runtime.stop()
+            related_state = dict(related_runtime.state) if related_runtime is not None else _read_state(related_id)
+            if not related_state:
+                continue
+            _mark_terminal_state_closed(related_state, closed_at=now, closed_ids=related_ids)
+            if related_runtime is not None:
+                with related_runtime.lock:
+                    related_runtime.state.update(related_state)
+                    _write_state(related_runtime.state)
+            else:
+                _write_state(related_state)
+            closed_ids.append(related_id)
+    final_state = _read_state(session_id) or state
+    final_state["closedTerminalSessionIds"] = closed_ids
+    return _public_state(
+        {
+            **final_state,
+            "transcriptTail": _read_transcript_tail(_transcript_path(session_id)),
+        }
+    )
 
 
 def shutdown_cli_agent_terminal_sessions() -> None:
@@ -689,6 +747,122 @@ def _find_active_locked_runtime(lock_key: str, *, exclude_terminal_session_id: s
         if runtime_lock_key == normalized_lock_key:
             return runtime
     return None
+
+
+def _find_related_terminal_state(
+    *,
+    cli_run_id: str,
+    lock_key: str,
+    adapter_id: str,
+    source_session_id: str,
+    cwd: str,
+    exclude_terminal_session_id: str = "",
+) -> dict[str, Any]:
+    candidates: list[dict[str, Any]] = []
+    excluded = str(exclude_terminal_session_id or "").strip()
+    for state in _iter_terminal_states():
+        terminal_session_id = str(state.get("terminalSessionId") or "").strip()
+        if excluded and terminal_session_id == excluded:
+            continue
+        if not _terminal_state_matches_scope(
+            state,
+            cli_run_id=cli_run_id,
+            lock_key=lock_key,
+            adapter_id=adapter_id,
+            source_session_id=source_session_id,
+            cwd=cwd,
+        ):
+            continue
+        candidates.append(state)
+    if not candidates:
+        return {}
+    candidates.sort(
+        key=lambda item: (
+            bool(str(item.get("cliSessionId") or "").strip()),
+            not bool(item.get("userClosed")),
+            _timestamp_sort_key(str(item.get("updatedAt") or item.get("createdAt") or "")),
+        ),
+        reverse=True,
+    )
+    return dict(candidates[0])
+
+
+def _related_terminal_session_ids(state: dict[str, Any]) -> list[str]:
+    cli_run_id = str(state.get("cliRunId") or "").strip()
+    lock_key = str(state.get("lockKey") or "").strip()
+    adapter_id = str(state.get("adapterId") or state.get("agentType") or "").strip()
+    source_session_id = str(state.get("sourceSessionId") or "").strip()
+    cwd = str(state.get("cwd") or "").strip()
+    result: list[str] = []
+    for candidate in _iter_terminal_states():
+        terminal_session_id = str(candidate.get("terminalSessionId") or "").strip()
+        if not terminal_session_id:
+            continue
+        if _terminal_state_matches_scope(
+            candidate,
+            cli_run_id=cli_run_id,
+            lock_key=lock_key,
+            adapter_id=adapter_id,
+            source_session_id=source_session_id,
+            cwd=cwd,
+        ):
+            result = _append_unique(result, terminal_session_id)
+    return result
+
+
+def _terminal_state_matches_scope(
+    state: dict[str, Any],
+    *,
+    cli_run_id: str,
+    lock_key: str,
+    adapter_id: str,
+    source_session_id: str,
+    cwd: str,
+) -> bool:
+    if cli_run_id and str(state.get("cliRunId") or "").strip() == cli_run_id:
+        return True
+    if lock_key and str(state.get("lockKey") or "").strip() == lock_key:
+        return True
+    state_adapter = str(state.get("adapterId") or state.get("agentType") or "").strip()
+    state_source_session_id = str(state.get("sourceSessionId") or "").strip()
+    if not adapter_id or state_adapter != adapter_id:
+        return False
+    if source_session_id and state_source_session_id != source_session_id:
+        return False
+    return _normalize_path_for_match(str(state.get("cwd") or "")) == _normalize_path_for_match(cwd)
+
+
+def _iter_terminal_states() -> list[dict[str, Any]]:
+    if not SESSION_STATE_DIR.exists():
+        return []
+    result: list[dict[str, Any]] = []
+    for path in SESSION_STATE_DIR.glob("*.json"):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if isinstance(payload, dict):
+            result.append(payload)
+    return result
+
+
+def _mark_terminal_state_closed(state: dict[str, Any], *, closed_at: str, closed_ids: list[str]) -> None:
+    state["status"] = "closed"
+    state["alive"] = False
+    state["userClosed"] = True
+    state["closedAt"] = closed_at
+    state["updatedAt"] = closed_at
+    state["closedTerminalSessionIds"] = list(closed_ids)
+
+
+def _timestamp_sort_key(value: str) -> float:
+    text = str(value or "").strip()
+    if not text:
+        return 0.0
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return 0.0
 
 
 def _link_runtime_source(runtime: _TerminalRuntime, *, source_message_id: str, source_run_id: str) -> None:
@@ -1014,18 +1188,26 @@ def _stable_terminal_session_id(
     mode: str,
     task: str,
 ) -> str:
-    basis = "\n".join(
-        [
-            adapter_id,
-            str(source_session_id or ""),
-            str(source_message_id or ""),
-            str(source_run_id or ""),
-            str(cwd or ""),
-            str(mode or ""),
-            cli_agent_service._task_hash(str(task or "")),
-        ]
+    basis = _cli_scope_basis(
+        adapter_id=adapter_id,
+        source_session_id=source_session_id,
+        source_message_id=source_message_id,
+        source_run_id=source_run_id,
+        cwd=cwd,
+        task=task,
     )
     return f"cli-term-{hashlib.sha256(basis.encode('utf-8', errors='replace')).hexdigest()[:16]}"
+
+
+def _scope_cwd(cwd: str, *, mode: str) -> str:
+    normalized_mode = str(mode or "readonly").strip().lower()
+    if normalized_mode not in cli_agent_service.SUPPORTED_MODES:
+        normalized_mode = "readonly"
+    try:
+        result = cli_agent_service._resolve_run_cwd(cwd, mode=normalized_mode)
+    except Exception:
+        return str(cwd or "").strip()
+    return str(result.get("cwd") or cwd or "").strip()
 
 
 def _read_state(terminal_session_id: str) -> dict[str, Any]:
@@ -1174,6 +1356,7 @@ def _public_state(state: dict[str, Any]) -> dict[str, Any]:
         "processStartedAtMs",
         "userClosed",
         "closedAt",
+        "closedTerminalSessionIds",
         "createdAt",
         "updatedAt",
     }
