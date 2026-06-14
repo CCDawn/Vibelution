@@ -6,6 +6,7 @@ import { fetchJson } from "../api/client";
 import { queryKeys } from "../api/queryKeys";
 import {
   ConfigWorkspace,
+  GitCommitSummary,
   GitCommitMessageResponse,
   GitCommitResponse,
   GitCommitsResponse,
@@ -39,6 +40,8 @@ import styles from "./GitRoute.module.css";
 const GIT_CHANGE_PANEL_WIDTH_KEY = "vibelution.git.change-panel-width";
 const GIT_CHANGE_PANEL_BOUNDS = { min: 260, max: 520 };
 const GIT_CHANGE_PANEL_DEFAULT_WIDTH = 340;
+
+type GitWorktreeItem = GitStatusSummary["worktrees"]["items"][number];
 
 export function GitRoute() {
   const { lang, t } = useGitRouteI18n();
@@ -251,6 +254,11 @@ export function GitRoute() {
   const localCommitCount = status?.localCommits?.total ?? upstream?.ahead ?? 0;
   const worktreeBranchCount = status?.worktrees?.withCommits ?? 0;
   const worktreeTotalCount = status?.worktrees?.total ?? 0;
+  const noChangedFiles = Boolean(status && status.available && !statusQuery.isPending && files.length === 0);
+  const localCommitPreview = (status?.localCommits?.commits ?? []).slice(0, 6);
+  const pendingWorktrees = (status?.worktrees?.items ?? []).filter((item) => !item.isMain && item.hasCommits);
+  const pendingWorktreePreview = pendingWorktrees.slice(0, 8);
+  const recentCommits = commitsQuery.data?.commits ?? [];
   const commitBlockReason = getGitCommitBlockReason(
     selectedCount,
     commitMessage,
@@ -337,6 +345,27 @@ export function GitRoute() {
     setChangePanelWidth(nextWidth);
   }
 
+  function worktreeDisplayName(item: GitWorktreeItem) {
+    const normalizedPath = displayGitPath(item.path);
+    return item.branch || normalizedPath.split("/").filter(Boolean).pop() || item.headRevShort || "-";
+  }
+
+  function renderCommitItem(commit: GitCommitSummary) {
+    return (
+      <article key={commit.sha} className={styles.commitItem}>
+        <div className={styles.commitHeader}>
+          <code>{commit.shortSha}</code>
+          <span>
+            <Clock3 size={13} />
+            {formatGitDateTime(commit.authoredAt, locale)}
+          </span>
+        </div>
+        <strong>{commit.subject}</strong>
+        <p>{t("gitCommitBy")}: {commit.author}</p>
+      </article>
+    );
+  }
+
   return (
     <section className={styles.route}>
       <header className={styles.header}>
@@ -382,112 +411,181 @@ export function GitRoute() {
         <p className={styles.notice}>{status.error || t("gitStatusUnavailable")}</p>
       ) : null}
 
-      <div className={styles.workspace} style={workspaceStyle}>
-        <aside className={changePanelCollapsed ? `${styles.changePanel} ${styles.paneCollapsed}` : styles.changePanel} aria-hidden={changePanelCollapsed}>
-          <div className={styles.panelHeader}>
-            <div>
-              <p className={styles.panelEyebrow}>{t("gitChangedScope")}</p>
-              <h2>{t("gitAllChanges")}</h2>
-            </div>
-            <span className={styles.countPill}>{filteredFiles.length}</span>
-          </div>
-          <div className={styles.filterRow}>
-            {GIT_FILTERS.map((filter) => (
-              <button
-                key={filter}
-                type="button"
-                className={filter === activeFilter ? styles.filterButtonActive : styles.filterButton}
-                onClick={() => setActiveFilter(filter)}
-              >
-                {t(GIT_FILTER_LABEL_KEYS[filter])}
-              </button>
-            ))}
-          </div>
-          <div className={styles.selectionRow}>
-            <button type="button" className={styles.selectionButton} onClick={selectVisible} disabled={!filteredFiles.length}>
-              {t("gitSelectVisible")}
-            </button>
-            <button type="button" className={styles.selectionButton} onClick={clearSelection} disabled={!selectedCount}>
-              {t("gitClearSelection")}
-            </button>
-          </div>
-          <div className={styles.fileList}>
-            {filteredFiles.map((file) => {
-              const isActive = file.path === activePath;
-              const isSelected = selectedSet.has(file.path);
-              const fileCardClassName = [
-                isActive ? styles.fileButtonActive : styles.fileButton,
-                isSelected ? styles.fileButtonSelected : "",
-              ]
-                .filter(Boolean)
-                .join(" ");
-              return (
-              <article
-                key={`${file.status}-${file.path}`}
-                className={fileCardClassName}
-              >
-                <button
-                  type="button"
-                  className={styles.fileCheckButton}
-                  aria-label={isSelected ? t("gitUnselectFile") : t("gitSelectFileForCommit")}
-                  aria-pressed={isSelected}
-                  onClick={() => toggleSelectedPath(file.path)}
-                >
-                  {isSelected ? <CheckSquare size={16} /> : <Square size={16} />}
+      <div className={noChangedFiles ? `${styles.workspace} ${styles.workspaceOverview}` : styles.workspace} style={workspaceStyle}>
+        {noChangedFiles ? (
+          <>
+            <main className={styles.gitOverviewPanel}>
+              <section className={styles.cleanStateStrip}>
+                <div>
+                  <p className={styles.panelEyebrow}>{lang === "zh" ? "状态" : "Status"}</p>
+                  <h2>{lang === "zh" ? "工作区干净" : "Clean worktree"}</h2>
+                </div>
+                <span>{status?.summary || (lang === "zh" ? "没有文件变更。" : "No changed files.")}</span>
+              </section>
+              <div className={styles.gitSituationGrid}>
+                <section className={styles.gitSituationCard}>
+                  <div className={styles.panelHeader}>
+                    <div>
+                      <p className={styles.panelEyebrow}>{t("gitUpstream")}</p>
+                      <h2>{t("gitLocalCommits")}</h2>
+                    </div>
+                    <span className={styles.countPill}>{localCommitCount}</span>
+                  </div>
+                  <div className={styles.situationList}>
+                    {localCommitPreview.map(renderCommitItem)}
+                    {!localCommitPreview.length ? (
+                      <p className={styles.emptyState}>{lang === "zh" ? "没有本地提交待同步。" : "No local commits ahead of upstream."}</p>
+                    ) : null}
+                  </div>
+                </section>
+                <section className={styles.gitSituationCard}>
+                  <div className={styles.panelHeader}>
+                    <div>
+                      <p className={styles.panelEyebrow}>WORKTREE</p>
+                      <h2>{t("gitWorktreeBranches")}</h2>
+                    </div>
+                    <span className={styles.countPill}>{worktreeBranchCount} / {worktreeTotalCount}</span>
+                  </div>
+                  <div className={styles.worktreeList}>
+                    {pendingWorktreePreview.map((item) => (
+                      <article key={`${item.path}-${item.branch}`} className={styles.worktreeItem}>
+                        <div>
+                          <strong>{worktreeDisplayName(item)}</strong>
+                          <span>{displayGitPath(item.path)}</span>
+                        </div>
+                        <code>+{item.aheadMain} / -{item.behindMain}</code>
+                      </article>
+                    ))}
+                    {!pendingWorktreePreview.length ? (
+                      <p className={styles.emptyState}>{lang === "zh" ? "没有待合入 worktree 分支。" : "No worktree branches with pending commits."}</p>
+                    ) : null}
+                  </div>
+                </section>
+              </div>
+            </main>
+            <aside className={`${styles.commitPanel} ${styles.historyPanel}`}>
+              <div className={styles.panelHeader}>
+                <div>
+                  <p className={styles.panelEyebrow}>{t("gitHead")}</p>
+                  <h2>{t("gitRecentCommits")}</h2>
+                </div>
+                <GitCommitHorizontal size={18} />
+              </div>
+              <div className={styles.commitList}>
+                {recentCommits.map(renderCommitItem)}
+                {!commitsQuery.isPending && !recentCommits.length ? (
+                  <p className={styles.emptyState}>{commitsQuery.data?.error || t("gitNoCommits")}</p>
+                ) : null}
+              </div>
+            </aside>
+          </>
+        ) : (
+          <>
+            <aside className={changePanelCollapsed ? `${styles.changePanel} ${styles.paneCollapsed}` : styles.changePanel} aria-hidden={changePanelCollapsed}>
+              <div className={styles.panelHeader}>
+                <div>
+                  <p className={styles.panelEyebrow}>{t("gitChangedScope")}</p>
+                  <h2>{t("gitAllChanges")}</h2>
+                </div>
+                <span className={styles.countPill}>{filteredFiles.length}</span>
+              </div>
+              <div className={styles.filterRow}>
+                {GIT_FILTERS.map((filter) => (
+                  <button
+                    key={filter}
+                    type="button"
+                    className={filter === activeFilter ? styles.filterButtonActive : styles.filterButton}
+                    onClick={() => setActiveFilter(filter)}
+                  >
+                    {t(GIT_FILTER_LABEL_KEYS[filter])}
+                  </button>
+                ))}
+              </div>
+              <div className={styles.selectionRow}>
+                <button type="button" className={styles.selectionButton} onClick={selectVisible} disabled={!filteredFiles.length}>
+                  {t("gitSelectVisible")}
                 </button>
-                <span className={styles.fileStatus}>{file.status}</span>
-                <button type="button" className={styles.fileCopyButton} onClick={() => setActivePath(file.path)}>
-                  <strong>{gitFileName(file.path)}</strong>
-                  <span className={styles.filePathText}>{displayGitPath(file.path)}</span>
-                  <span className={styles.fileBadgeRow}>
-                    {isActive ? <span className={styles.fileBadgeActive}>{t("gitPreviewing")}</span> : null}
-                    {isSelected ? <span className={styles.fileBadgeSelected}>{t("gitSelectedForCommit")}</span> : null}
-                  </span>
+                <button type="button" className={styles.selectionButton} onClick={clearSelection} disabled={!selectedCount}>
+                  {t("gitClearSelection")}
                 </button>
-              </article>
-              );
-            })}
-            {!filteredFiles.length ? <p className={styles.emptyState}>{t("gitNoMatchingChanges")}</p> : null}
-          </div>
-        </aside>
+              </div>
+              <div className={styles.fileList}>
+                {filteredFiles.map((file) => {
+                  const isActive = file.path === activePath;
+                  const isSelected = selectedSet.has(file.path);
+                  const fileCardClassName = [
+                    isActive ? styles.fileButtonActive : styles.fileButton,
+                    isSelected ? styles.fileButtonSelected : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" ");
+                  return (
+                    <article
+                      key={`${file.status}-${file.path}`}
+                      className={fileCardClassName}
+                    >
+                      <button
+                        type="button"
+                        className={styles.fileCheckButton}
+                        aria-label={isSelected ? t("gitUnselectFile") : t("gitSelectFileForCommit")}
+                        aria-pressed={isSelected}
+                        onClick={() => toggleSelectedPath(file.path)}
+                      >
+                        {isSelected ? <CheckSquare size={16} /> : <Square size={16} />}
+                      </button>
+                      <span className={styles.fileStatus}>{file.status}</span>
+                      <button type="button" className={styles.fileCopyButton} onClick={() => setActivePath(file.path)}>
+                        <strong>{gitFileName(file.path)}</strong>
+                        <span className={styles.filePathText}>{displayGitPath(file.path)}</span>
+                        <span className={styles.fileBadgeRow}>
+                          {isActive ? <span className={styles.fileBadgeActive}>{t("gitPreviewing")}</span> : null}
+                          {isSelected ? <span className={styles.fileBadgeSelected}>{t("gitSelectedForCommit")}</span> : null}
+                        </span>
+                      </button>
+                    </article>
+                  );
+                })}
+                {!filteredFiles.length ? <p className={styles.emptyState}>{t("gitNoMatchingChanges")}</p> : null}
+              </div>
+            </aside>
 
-        <PaneCollapseHandle
-          side="left"
-          collapsed={changePanelCollapsed}
-          separatorLabel={resizeChangePanelLabel}
-          collapseLabel={lang === "zh" ? "收起变更列表" : "Collapse changed files"}
-          expandLabel={lang === "zh" ? "展开变更列表" : "Expand changed files"}
-          className={styles.resizeHandle}
-          onToggle={() => setChangePanelCollapsed((current) => !current)}
-          onPointerDown={handleChangePanelResizeStart}
-          onKeyDown={handleChangePanelResizeKeyDown}
-        />
-
-        <main className={styles.diffPanel}>
-          {activePath ? (
-            <GitDiffView
-              path={activePath}
-              diff={diffQuery.data}
-              loading={diffQuery.isPending}
-              changed={Boolean(activeFile)}
-              sourceLabel={activeFile?.statusLabel || t("gitFileDiff")}
-              headerActions={
-                <span className={styles.inlineMeta}>
-                  <FileText size={14} />
-                  {activeFile?.status || "-"}
-                </span>
-              }
+            <PaneCollapseHandle
+              side="left"
+              collapsed={changePanelCollapsed}
+              separatorLabel={resizeChangePanelLabel}
+              collapseLabel={lang === "zh" ? "收起变更列表" : "Collapse changed files"}
+              expandLabel={lang === "zh" ? "展开变更列表" : "Expand changed files"}
+              className={styles.resizeHandle}
+              onToggle={() => setChangePanelCollapsed((current) => !current)}
+              onPointerDown={handleChangePanelResizeStart}
+              onKeyDown={handleChangePanelResizeKeyDown}
             />
-          ) : (
-            <div className={styles.emptyPreview}>
-              <GitBranch size={24} />
-              <strong>{t("gitFileDiff")}</strong>
-              <p>{statusQuery.isPending ? t("loading") : t("gitSelectFile")}</p>
-            </div>
-          )}
-        </main>
 
-        <aside className={styles.commitPanel}>
+            <main className={styles.diffPanel}>
+              {activePath ? (
+                <GitDiffView
+                  path={activePath}
+                  diff={diffQuery.data}
+                  loading={diffQuery.isPending}
+                  changed={Boolean(activeFile)}
+                  sourceLabel={activeFile?.statusLabel || t("gitFileDiff")}
+                  headerActions={
+                    <span className={styles.inlineMeta}>
+                      <FileText size={14} />
+                      {activeFile?.status || "-"}
+                    </span>
+                  }
+                />
+              ) : (
+                <div className={styles.emptyPreview}>
+                  <GitBranch size={24} />
+                  <strong>{t("gitFileDiff")}</strong>
+                  <p>{statusQuery.isPending ? t("loading") : t("gitSelectFile")}</p>
+                </div>
+              )}
+            </main>
+
+            <aside className={styles.commitPanel}>
           <section className={styles.manualCommitPanel}>
             <div className={styles.panelHeader}>
               <div>
@@ -628,24 +726,14 @@ export function GitRoute() {
             <GitCommitHorizontal size={18} />
           </div>
           <div className={styles.commitList}>
-            {(commitsQuery.data?.commits ?? []).map((commit) => (
-              <article key={commit.sha} className={styles.commitItem}>
-                <div className={styles.commitHeader}>
-                  <code>{commit.shortSha}</code>
-                  <span>
-                    <Clock3 size={13} />
-                    {formatGitDateTime(commit.authoredAt, locale)}
-                  </span>
-                </div>
-                <strong>{commit.subject}</strong>
-                <p>{t("gitCommitBy")}: {commit.author}</p>
-              </article>
-            ))}
-            {!commitsQuery.isPending && !(commitsQuery.data?.commits ?? []).length ? (
+            {recentCommits.map(renderCommitItem)}
+            {!commitsQuery.isPending && !recentCommits.length ? (
               <p className={styles.emptyState}>{commitsQuery.data?.error || t("gitNoCommits")}</p>
             ) : null}
           </div>
-        </aside>
+            </aside>
+          </>
+        )}
       </div>
     </section>
   );
