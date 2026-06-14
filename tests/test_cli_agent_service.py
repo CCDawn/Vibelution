@@ -1,4 +1,5 @@
 import subprocess
+import sqlite3
 
 from core.ui.chat_state import build_chat_state, load_chat_state, save_chat_state
 from core.web.services import cli_agent_service as service
@@ -50,6 +51,54 @@ endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & "%_prog%"  "%dp0%\\node
         encoding="utf-8",
     )
     return cmd_path, cli_script
+
+
+def _write_mimocode_session_db(path, *, cwd, session_id="ses_test", created=10_000, updated=10_000):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    connection = sqlite3.connect(path)
+    try:
+        connection.execute(
+            "create table session ("
+            "id text primary key, "
+            "project_id text, "
+            "directory text not null, "
+            "title text not null, "
+            "time_created integer not null, "
+            "time_updated integer not null"
+            ")",
+        )
+        connection.execute(
+            "insert into session (id, project_id, directory, title, time_created, time_updated) "
+            "values (?, ?, ?, ?, ?, ?)",
+            (session_id, "project-1", str(cwd), "CLI resume", created, updated),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+
+def _write_cli_agent_config_with_mimo_db(path, db_path):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        """
+{
+  "adapters": {
+    "mimo_code": {
+      "terminal": {
+        "sessionDiscovery": {
+          "source": "mimocode_sqlite",
+          "databasePath": "__DB__",
+          "createdGraceMs": 5000,
+          "pollAttempts": 1,
+          "pollIntervalSeconds": 0.1
+        }
+      }
+    }
+  }
+}
+""".strip().replace("__DB__", db_path.as_posix()),
+        encoding="utf-8",
+    )
 
 
 def test_codex_readonly_uses_exec_with_readonly_sandbox(monkeypatch, tmp_path):
@@ -289,6 +338,89 @@ def test_cli_agent_terminal_resume_uses_user_level_protocol(monkeypatch, tmp_pat
     assert command["sessionIdRegex"] == "会话:([A-Z0-9]+)"
 
 
+def test_mimo_cli_terminal_discovers_session_id_from_user_level_sqlite(monkeypatch, tmp_path):
+    project_root = _configure_roots(monkeypatch, tmp_path)
+    db_path = tmp_path / "mimocode" / "mimocode.db"
+    _write_mimocode_session_db(db_path, cwd=project_root, session_id="ses_current", created=10_500, updated=11_000)
+    _write_cli_agent_config_with_mimo_db(service.CLI_AGENT_REGISTRY_PATH, db_path)
+
+    spec = service._load_adapter_definitions()["mimo_code"]["terminal"]["sessionDiscovery"]
+
+    discovered = terminal_service._discover_cli_session_id_for_state(
+        {"cwd": str(project_root), "processStartedAtMs": 10_000},
+        spec,
+        existing=False,
+    )
+
+    assert discovered == "ses_current"
+
+
+def test_cli_agent_terminal_ensure_resumes_discovered_existing_session_after_restart(monkeypatch, tmp_path):
+    project_root = _configure_roots(monkeypatch, tmp_path)
+    db_path = tmp_path / "mimocode" / "mimocode.db"
+    _write_mimocode_session_db(db_path, cwd=project_root, session_id="ses_restart", created=10_500, updated=11_000)
+    _write_cli_agent_config_with_mimo_db(service.CLI_AGENT_REGISTRY_PATH, db_path)
+    monkeypatch.setattr(service.shutil, "which", lambda candidate: r"C:\tools\mimo.cmd" if candidate == "mimo.cmd" else "")
+
+    task = "继续审查 CLI 会话恢复"
+    terminal_session_id = terminal_service._stable_terminal_session_id(
+        adapter_id="mimo_code",
+        source_session_id="session-1",
+        source_message_id="message-1",
+        source_run_id="run-1",
+        cwd=str(project_root),
+        mode="readonly",
+        task=task,
+    )
+    terminal_service._write_state(
+        {
+            "terminalSessionId": terminal_session_id,
+            "adapterId": "mimo_code",
+            "agentType": "mimo_code",
+            "label": "MiMo Code",
+            "sourceSessionId": "session-1",
+            "sourceMessageId": "message-1",
+            "sourceRunId": "run-1",
+            "cwd": str(project_root),
+            "mode": "readonly",
+            "task": task,
+            "processStartedAtMs": 10_000,
+            "status": "exited",
+            "alive": False,
+            "cliSessionId": "",
+        },
+    )
+    spawned = []
+
+    class FakeProcess:
+        def isalive(self):
+            return True
+
+    def fake_spawn(args, **kwargs):
+        spawned.append(args)
+        return FakeProcess(), "conpty"
+
+    monkeypatch.setattr(terminal_service, "_spawn_terminal_process", fake_spawn)
+    monkeypatch.setattr(terminal_service._TerminalRuntime, "start", lambda self: None)
+    monkeypatch.setattr(terminal_service, "_send_initial_task", lambda *args, **kwargs: None)
+    monkeypatch.setattr(terminal_service, "_schedule_session_id_discovery", lambda *args, **kwargs: None)
+
+    session = terminal_service.ensure_cli_agent_terminal_session(
+        agent_type="mimo_code",
+        task=task,
+        cwd=str(project_root),
+        mode="readonly",
+        source_session_id="session-1",
+        source_message_id="message-1",
+        source_run_id="run-1",
+    )
+
+    assert session["cliSessionId"] == "ses_restart"
+    assert session["cliSessionIdSource"] == "session_discovery_existing"
+    assert session["resumed"] is True
+    assert spawned == [[r"C:\tools\mimo.cmd", str(project_root), "--session", "ses_restart"]]
+
+
 def test_cli_agent_terminal_ensure_writes_runtime_state_without_project_config(monkeypatch, tmp_path):
     project_root = _configure_roots(monkeypatch, tmp_path)
     monkeypatch.setattr(service.shutil, "which", lambda candidate: r"C:\tools\mimo.cmd" if candidate == "mimo.cmd" else "")
@@ -411,6 +543,48 @@ def test_cli_agent_lifecycle_close_event_persists_once(monkeypatch, tmp_path):
     assert lifecycle_messages[0]["content"] == "MiMo Code 已关闭。"
     assert lifecycle_messages[0]["metadata"]["cliRunId"] == "cli-run-1"
     assert lifecycle_messages[0]["metadata"]["linkedSourceRunIds"] == ["run-1", "run-2"]
+
+
+def test_cli_agent_lifecycle_link_event_persists_cli_session_id(monkeypatch, tmp_path):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "_publish_session_detail_snapshot", lambda *args, **kwargs: None)
+    monkeypatch.setattr(session_service, "_record_session_cycle_message", lambda *args, **kwargs: None)
+    monkeypatch.setattr(session_service, "record_runtime_scene_event", lambda *args, **kwargs: {"accepted": True})
+    save_chat_state(
+        tmp_path,
+        build_chat_state(
+            [{"role": "user", "content": "打开 MiMo Code", "timestamp": "2026-06-14T10:00:00"}],
+            conversation_id="session-1",
+            title="CLI 会话",
+        ),
+    )
+
+    event = session_service.append_cli_agent_lifecycle_event(
+        "session-1",
+        event="linked",
+        terminal_session={
+            "terminalSessionId": "term-1",
+            "cliRunId": "cli-run-1",
+            "adapterId": "mimo_code",
+            "label": "MiMo Code",
+            "sourceRunId": "run-1",
+            "cwd": str(tmp_path),
+            "cliSessionId": "ses_linked",
+            "cliSessionIdSource": "session_discovery",
+        },
+    )
+
+    state = load_chat_state(tmp_path)
+    lifecycle_message = [
+        item for item in state["conversations"][0]["messages"]
+        if (item.get("metadata") or {}).get("kind") == "cli_agent_lifecycle"
+    ][0]
+    assert event is not None
+    assert lifecycle_message["content"] == "MiMo Code 已连接 CLI 会话。"
+    assert lifecycle_message["metadata"]["event"] == "linked"
+    assert lifecycle_message["metadata"]["cliSessionId"] == "ses_linked"
+    assert lifecycle_message["metadata"]["cliSessionIdSource"] == "session_discovery"
+    assert lifecycle_message["metadata"]["folded"] is True
 
 
 def test_cli_agent_terminal_reads_only_bounded_transcript_tail(tmp_path):

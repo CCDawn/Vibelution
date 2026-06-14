@@ -907,9 +907,13 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("function buildCliAgentRunViews");
     expect(routeSource).toContain("function cliAgentRunIdForSource");
     expect(routeSource).toContain("closedCliAgentRunIdFromMessage");
+    expect(routeSource).toContain("cliAgentLifecyclePatchFromMessage");
+    expect(routeSource).toContain("applyCliAgentLifecyclePatchToRuns");
     expect(routeSource).toContain("function cliAgentRunCloseToken");
     expect(routeSource).toContain("const runsById = new Map<string, CliAgentRunView>()");
+    expect(routeSource).toContain("const lifecycleByRunId = new Map<string, CliAgentLifecyclePatch>()");
     expect(routeSource).toContain("closedRunIds.add(closedRunId)");
+    expect(routeSource).toContain("!closedRunIds.has(run.id) && !closedRunIds.has(run.sourceRunId)");
     expect(routeSource).toContain("toolCall.name !== CLI_AGENT_TOOL_NAME");
     expect(routeSource).toContain("function isCliAgentRunActiveForClose");
     expect(routeSource).toContain("const [closedCliAgentRunTokensBySession");
@@ -931,6 +935,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).not.toContain(") : activeCliAgentRun ? (");
     expect(routeSource).toContain('"/api/cli-agents/terminal-sessions/ensure"');
     expect(routeSource).toContain("sourceRunId: run.sourceRunId");
+    expect(routeSource).toContain("cliSessionId: String(run.cliSessionId || run.result?.cliSessionId || \"\")");
     expect(routeSource).toContain("void sessionDetailQuery.refetch()");
     expect(routeSource).toContain("new EventSource(`/api/cli-agents/terminal-sessions/${encodeURIComponent(terminalSessionId)}/events`)");
     expect(routeSource).toContain("terminal_output");
