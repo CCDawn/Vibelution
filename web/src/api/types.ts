@@ -1596,6 +1596,12 @@ export type GitFileDiff = {
   binary: boolean;
 };
 
+export type GitObjectDetail = GitFileDiff & {
+  kind: "commit" | "branch" | "worktree" | string;
+  ref: string;
+  meta: Record<string, unknown>;
+};
+
 export type GitCommitMessageResponse = {
   message: string;
   modelId: string;
