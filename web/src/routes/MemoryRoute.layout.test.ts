@@ -73,6 +73,17 @@ describe("MemoryRoute layout contract", () => {
     expect(detailPanelIndex).toBeGreaterThan(sourcesPanelsIndex);
   });
 
+  it("keeps the source audit filter stable instead of deriving focus from the first item", () => {
+    expect(routeSource).toContain("const activePair =\n    activeItemId\n      ? flatVisibleItems.find(({ item }) => item.id === activeItemId) ?? null\n      : null;");
+    expect(routeSource).toContain('const activePairKey = activePair ? pairSelectionKey(activePair.section.id, activePair.item.id) : "";');
+    expect(routeSource).toContain("const active = itemKey === activePairKey;");
+    expect(routeSource).toContain("setActiveItemId(\"\");\n            setActiveSectionId(\"\");");
+    expect(routeSource).toContain("setActiveItemId(\"\");\n                  setActiveSectionId(section.id);");
+    expect(routeSource).toContain("<h2>{selectedSection?.title ?? title}</h2>");
+    expect(routeSource).not.toContain("flatVisibleItems.find(({ item }) => item.id === activeItemId) ?? flatVisibleItems[0]");
+    expect(routeSource).not.toContain("setActiveItemId(flatVisibleItems[0]?.item.id ?? \"\")");
+  });
+
   it("splits memory into overview, effective scope, management, source audit, team knowledge, and graph views", () => {
     expect(routeSource).toContain(
       'export type MemoryRouteView = "overview" | "effective" | "manage" | "sources" | "knowledge" | "graph"',

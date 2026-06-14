@@ -2854,7 +2854,10 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     [activeDisplaySections],
   );
   const activePair =
-    flatVisibleItems.find(({ item }) => item.id === activeItemId) ?? flatVisibleItems[0] ?? null;
+    activeItemId
+      ? flatVisibleItems.find(({ item }) => item.id === activeItemId) ?? null
+      : null;
+  const activePairKey = activePair ? pairSelectionKey(activePair.section.id, activePair.item.id) : "";
   const activeItem = activePair?.item ?? null;
   const activeSection = activePair?.section ?? null;
   const activeItemDetailQuery = useQuery({
@@ -2988,7 +2991,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     if (!activeItemId || flatVisibleItems.some(({ item }) => item.id === activeItemId)) {
       return;
     }
-    setActiveItemId(flatVisibleItems[0]?.item.id ?? "");
+    setActiveItemId("");
   }, [activeItemId, flatVisibleItems]);
 
   useEffect(() => {
@@ -3357,7 +3360,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
       <div className={compact ? styles.compactMemoryList : styles.itemList}>
         {pairs.map(({ section, item }) => {
           const itemKey = pairSelectionKey(section.id, item.id);
-          const active = item.id === activeItem?.id;
+          const active = itemKey === activePairKey;
           const compactItemBody = (
             <>
               <span className={styles.compactItemPrimary}>
@@ -4224,7 +4227,10 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
         <button
           type="button"
           className={!activeSectionId ? `${styles.sourceButton} ${styles.sourceButtonActive}` : styles.sourceButton}
-          onClick={() => setActiveSectionId("")}
+          onClick={() => {
+            setActiveItemId("");
+            setActiveSectionId("");
+          }}
         >
           <span className={styles.sourceIcon}>
             <Database size={15} />
@@ -4247,7 +4253,10 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
                 key={section.id}
                 type="button"
                 className={active ? `${styles.sourceButton} ${styles.sourceButtonActive}` : styles.sourceButton}
-                onClick={() => setActiveSectionId(section.id)}
+                onClick={() => {
+                  setActiveItemId("");
+                  setActiveSectionId(section.id);
+                }}
                 aria-pressed={active}
               >
                 <span className={styles.sourceIcon}>
@@ -4271,7 +4280,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
         <div className={styles.panelHeader}>
           <div>
             <p className={styles.panelEyebrow}>{copy.items}</p>
-            <h2>{activeSection?.title ?? title}</h2>
+            <h2>{selectedSection?.title ?? title}</h2>
           </div>
           <span className={styles.countPill}>{flatVisibleItems.length}</span>
         </div>
