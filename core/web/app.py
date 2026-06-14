@@ -311,6 +311,9 @@ async def _lifespan(_: FastAPI):
         current_loop.default_exception_handler(context)
 
     loop.set_exception_handler(handle_loop_exception)
+    from .services.cli_agent_terminal_service import reconcile_cli_agent_terminal_states_on_startup
+
+    await asyncio.to_thread(reconcile_cli_agent_terminal_states_on_startup, reason="backend_startup")
     startup_cache_prewarm_task = asyncio.create_task(_prewarm_ui_caches_on_startup())
 
     def consume_startup_cache_prewarm_result(task: asyncio.Task[None]) -> None:
