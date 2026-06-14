@@ -1,6 +1,8 @@
 import json
 from concurrent.futures import Future
 
+import pytest
+
 from core.runtime_manager.work_run_store import WorkRunStore
 from core.web.services import (
     agent_directory_service,
@@ -12,6 +14,8 @@ from core.web.services import (
     team_service,
     team_workflow_orchestration_service,
 )
+
+pytestmark = pytest.mark.serial
 
 
 class _FakeLocalResearchMessage:

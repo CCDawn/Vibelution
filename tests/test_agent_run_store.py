@@ -1,4 +1,8 @@
+import pytest
+
 from core.runtime_manager import agent_run_store, work_run_store
+
+pytestmark = pytest.mark.serial
 
 
 def test_agent_run_store_persists_public_agent_and_subagent_snapshots(tmp_path, monkeypatch):

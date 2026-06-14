@@ -26,6 +26,10 @@ from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
+import pytest
+
+pytestmark = pytest.mark.serial
+
 # 项目根目录
 PROJECT_ROOT = Path(__file__).parent.parent
 DEFAULT_MAX_PARALLEL_WORKERS = 4

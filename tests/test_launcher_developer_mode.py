@@ -4,6 +4,7 @@ import ast
 import inspect
 import subprocess
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -11,6 +12,8 @@ from core.infrastructure import git_memory
 from core.launcher import developer_mode
 from core.launcher import service as launcher_service
 from core.web.routes import launcher as web_launcher_routes
+
+pytestmark = pytest.mark.serial
 
 
 def test_developer_mode_source_forbids_visible_git_subprocess_regression():

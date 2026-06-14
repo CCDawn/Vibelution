@@ -15,6 +15,7 @@ import urllib.parse
 import urllib.request
 import http.client
 from collections.abc import Callable
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -186,6 +187,95 @@ def clear_workbench_launcher_state_after_close() -> dict[str, Any]:
         "launcherBackendPid": launcher_backend_pid,
         "launcherBrowserWindowPid": launcher_browser_window_pid,
     }
+
+
+def persist_workbench_launcher_state_after_open(
+    observation: dict[str, Any],
+    *,
+    last_reason: str = "",
+    last_source: str = "runtime_manager",
+) -> dict[str, Any]:
+    previous_state = _load_launcher_state()
+    observed = observation if isinstance(observation, dict) else {}
+    backend_pid = int(observed.get("backendPid") or 0)
+    browser_window_pid = int(observed.get("browserWindowPid") or 0)
+    if backend_pid <= 0 and browser_window_pid <= 0:
+        return {
+            "updatedState": False,
+            "reason": "missing_workbench_process",
+            "statePath": str(LAUNCHER_STATE_PATH),
+        }
+
+    browser_launch_pid = int(observed.get("browserLaunchPid") or browser_window_pid or 0)
+    backend_launch_pid = int(observed.get("backendLaunchPid") or backend_pid or 0)
+    backend_port = int(observed.get("backendPort") or configured_backend_port())
+    workbench_profile_dir = str(
+        observed.get("browserProfileDir")
+        or previous_state.get("workbenchBrowserProfileDir")
+        or ""
+    ).strip()
+    launcher_profile_dir = str(previous_state.get("launcherBrowserProfileDir") or "").strip()
+    payload = dict(previous_state)
+    payload.update(
+        {
+            "schemaVersion": int(previous_state.get("schemaVersion") or 1),
+            "sessionRole": "workbench",
+            "sessionId": str(observed.get("sessionId") or previous_state.get("sessionId") or "").strip(),
+            "desiredState": "open",
+            "observedState": "open",
+            "phase": "steady",
+            "backendPid": backend_pid,
+            "backendLaunchPid": backend_launch_pid,
+            "browserManaged": bool(observed.get("browserManaged", previous_state.get("browserManaged", True))),
+            "browserExecutable": str(observed.get("browserExecutable") or previous_state.get("browserExecutable") or ""),
+            "browserProfileDir": workbench_profile_dir,
+            "workbenchBrowserProfileDir": workbench_profile_dir,
+            "launcherBrowserProfileDir": launcher_profile_dir,
+            "browserLaunchPid": browser_launch_pid,
+            "browserWindowPid": browser_window_pid,
+            "workbenchBrowserLaunchPid": browser_launch_pid,
+            "workbenchBrowserWindowPid": browser_window_pid,
+            "url": str(observed.get("url") or previous_state.get("url") or DEFAULT_URL).strip() or DEFAULT_URL,
+            "backendPort": backend_port,
+            "port": backend_port,
+            "statusLine": "Workbench is running.",
+            "failureMessage": "",
+            "lastReason": str(last_reason or previous_state.get("lastReason") or "runtime_manager_open").strip(),
+            "lastSource": str(last_source or previous_state.get("lastSource") or "runtime_manager").strip(),
+            "updatedAt": datetime.now(timezone.utc).isoformat(),
+        }
+    )
+    try:
+        _write_launcher_state(payload)
+    except Exception as exc:
+        result = {
+            "updatedState": False,
+            "reason": "write_failed",
+            "statePath": str(LAUNCHER_STATE_PATH),
+            "errorType": type(exc).__name__,
+            "message": str(exc),
+        }
+        append_runtime_manager_file_event(
+            "launcher.state.workbench_open_persist_failed",
+            result,
+            suppress_io_errors=True,
+        )
+        return result
+
+    result = {
+        "updatedState": True,
+        "reason": "workbench_open",
+        "statePath": str(LAUNCHER_STATE_PATH),
+        "backendPid": backend_pid,
+        "browserWindowPid": browser_window_pid,
+        "launcherBrowserWindowPid": int(payload.get("launcherBrowserWindowPid") or 0),
+    }
+    append_runtime_manager_file_event(
+        "launcher.state.workbench_open_persisted",
+        result,
+        suppress_io_errors=True,
+    )
+    return result
 
 
 def _health_url_for(url: str) -> str:

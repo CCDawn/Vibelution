@@ -1,6 +1,10 @@
 from pathlib import Path
 
+import pytest
+
 from core.web.services import runtime_manager_control_service as service
+
+pytestmark = pytest.mark.serial
 
 
 def test_runtime_manager_live_control_uses_short_ttl_cache(monkeypatch, tmp_path):

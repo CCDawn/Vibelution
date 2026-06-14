@@ -68,6 +68,8 @@ import core.web.services.avatar_image_service as avatar_image_service
 from tests.test_gym_runner import RunnerFakeAdapter
 from tests.helpers.chat_turn_harness import wait_for_matching_event
 
+pytestmark = pytest.mark.serial
+
 
 client = TestClient(create_app(), headers={CONTROL_TOKEN_HEADER: get_control_token()})
 

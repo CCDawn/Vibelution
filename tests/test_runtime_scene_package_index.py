@@ -1,7 +1,11 @@
 ﻿import json
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from core.web.services import runtime_scene_service
+
+pytestmark = pytest.mark.serial
 
 
 def _local_index_key_prefix(iso_value: str) -> str:

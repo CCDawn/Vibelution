@@ -67,6 +67,8 @@ from scripts.evolution_harness import (
 )
 from core.orchestration.turn_outcome import TurnOutcomeController
 
+pytestmark = pytest.mark.serial
+
 
 def _write_external_operator_config(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, text: str) -> Path:
     config_path = tmp_path / "external-config" / "config.toml"
