@@ -428,6 +428,8 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain("reasonInPrompt");
     expect(routeSource).toContain("reasonAgentVisible");
     expect(routeSource).toContain("reasonUserManaged");
+    expect(routeSource).toContain('title={copy.reviewQueueHint}');
+    expect(routeSource).not.toContain("<p className={styles.panelLead}>{copy.reviewQueueHint}</p>");
   });
 
   it("makes memory management bulk selection and edit preview visible", () => {
@@ -441,8 +443,9 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain("renderMemoryList(flatVisibleItems, copy.noMatches, false, true)");
     expect(routeSource.indexOf("styles.manageListPanel")).toBeLessThan(routeSource.indexOf("styles.manageFormPanel"));
     expect(routeSource).toContain("copy.manageConfigPanel");
-    expect(routeSource).toContain("copy.manageConfigHint");
     expect(routeSource).toContain("copy.manageListHint");
+    expect(routeSource).toContain("title={copy.manageListHint}");
+    expect(routeSource).not.toContain("<p>{copy.manageConfigHint}</p>");
     expect(routeSource).toContain("type ManageFilterMode");
     expect(routeSource).toContain('next.set("manage", activeManageFilter)');
     expect(routeSource).toContain("normalizeManageFilterMode");
@@ -465,6 +468,29 @@ describe("MemoryRoute layout contract", () => {
     expect(memoryCssSource).toContain(".manageListPanel .itemContentButtonDense");
     expect(memoryCssSource).toContain("grid-template-rows: 16px 14px 18px");
     expect(memoryCssSource).toContain(".manageListPanel .manageItemBadges > span");
+    expect(memoryCssSource).toContain("grid-template-columns: repeat(auto-fit, minmax(82px, 1fr))");
+    expect(memoryCssSource).toContain("max-height: 74px");
+  });
+
+  it("keeps explanatory Memory platform copy out of persistent paragraphs", () => {
+    expect(routeSource).toContain("title={memoryViewSubtitle(copy, forcedView)}");
+    expect(routeSource).toContain('title={copy.projectMemoryQueueHint}');
+    expect(routeSource).toContain('title={copy.reviewQueueHint}');
+    expect(routeSource).toContain('title={copy.knowledgeSubtitle}');
+    expect(routeSource).toContain('title={copy.knowledgeHint}');
+    expect(routeSource).toContain('title={copy.ragRetrievalHint}');
+    expect(routeSource).toContain('title={copy.cleanupNoBackup}');
+    expect(routeSource).toContain('title={copy.cleanupCentralSourceBoundary}');
+    expect(routeSource).toContain('title={copy.graphInteractionHint}');
+
+    expect(routeSource).not.toContain("className={styles.subtitle}>{memoryViewSubtitle");
+    expect(routeSource).not.toContain("<p className={styles.panelLead}>{copy.projectMemoryQueueHint}</p>");
+    expect(routeSource).not.toContain("<p className={styles.panelLead}>{copy.knowledgeHint}</p>");
+    expect(routeSource).not.toContain("<p>{copy.managementHint}</p>");
+    expect(routeSource).not.toContain("<p>{copy.ragRetrievalHint}</p>");
+    expect(routeSource).not.toContain("<span>{copy.cleanupNoBackup}</span>");
+    expect(memoryCssSource).toContain(".subtitle {\n  display: none;");
+    expect(memoryCssSource).toContain(".panelLead,\n.manageFormPanel > p {\n  display: none;");
   });
 
   it("surfaces agent visibility, prompt injection, and raw content in the detail pane", () => {
@@ -668,11 +694,15 @@ describe("MemoryRoute layout contract", () => {
     expect(memoryCssSource).toContain("flex: 1 1 auto");
     expect(memoryCssSource).toContain(".knowledgeMain > .managementPanel {\n  align-content: start;");
     expect(memoryCssSource).toContain(".knowledgeViewStack > .knowledgeGovernanceDeck {\n  display: none;");
-    expect(memoryCssSource).toContain("grid-template-columns: minmax(150px, 0.22fr) minmax(0, 1fr)");
+    expect(memoryCssSource).toContain("grid-template-columns: minmax(116px, 0.18fr) minmax(0, 1fr)");
     expect(memoryCssSource).toContain("grid-template-columns: minmax(0, 0.94fr) minmax(0, 1.06fr)");
     expect(memoryCssSource).toContain(".knowledgeModeTabs");
     expect(memoryCssSource).toContain("grid-template-columns: repeat(5, minmax(0, 1fr))");
     expect(memoryCssSource).toContain(".knowledgeModeTabActive");
+    expect(memoryCssSource).toContain("grid-template-columns: minmax(170px, 205px) minmax(0, 1.24fr) minmax(260px, 0.62fr)");
+    expect(memoryCssSource).toContain("grid-template-columns: minmax(82px, 0.36fr) minmax(96px, 1fr) minmax(124px, 0.62fr) auto");
+    expect(memoryCssSource).toContain("grid-template-columns: minmax(240px, 0.92fr) minmax(250px, 1.08fr)");
+    expect(memoryCssSource).toContain(".sourceGovernanceColumn .sourceGovernanceControls");
     expect(memoryCssSource).toContain(".collapsedFormButton");
     expect(memoryCssSource).toContain("max-height: 92px");
     expect(memoryCssSource).toContain(".contractStateGrid {\n  display: none;");

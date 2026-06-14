@@ -564,11 +564,11 @@ const COPY: Record<"zh" | "en", Copy> = {
     usedBy: "作用位置",
     summary: "摘要",
     rawContent: "原文",
-    noContent: "没有可展示的原文。",
+    noContent: "无原文",
     sourceOrigin: "来源",
     searchPlaceholder: "搜索来源、路径、摘要或作用位置",
     allSections: "全部来源",
-    noMatches: "没有匹配当前搜索的记忆。",
+    noMatches: "无匹配记忆",
     yes: "是",
     no: "否",
     inPrompt: "进 prompt",
@@ -654,8 +654,8 @@ const COPY: Record<"zh" | "en", Copy> = {
     healthOverview: "记忆健康概览",
     affectedRuntimeMemory: "会影响运行的记忆",
     needsReview: "需要检查",
-    noIssues: "当前没有需要优先检查的记忆。",
-    noRuntimeMemory: "当前没有进入 prompt 或 agent 可感知的记忆。",
+    noIssues: "无待检查",
+    noRuntimeMemory: "无运行记忆",
     managedMemory: "用户管理状态",
     disabledOrOverridden: "已禁用/覆盖",
     effectiveByChannel: "按作用位置查看",
@@ -678,8 +678,8 @@ const COPY: Record<"zh" | "en", Copy> = {
     projectMemoryQueueCreated: "提交",
     projectMemoryQueueResolved: "处理",
     projectMemoryQueueResolutionNote: "处理说明",
-    projectMemoryQueueEmptyPending: "当前没有待合并的项目记忆提案。",
-    projectMemoryQueueEmptyAll: "当前没有项目记忆提案记录。",
+    projectMemoryQueueEmptyPending: "无待处理提案",
+    projectMemoryQueueEmptyAll: "无提案记录",
     projectMemoryQueueApply: "标记已合入",
     projectMemoryQueueReject: "拒绝",
     projectMemoryQueueConflict: "标记冲突",
@@ -741,8 +741,8 @@ const COPY: Record<"zh" | "en", Copy> = {
     reviewedBy: "审核人",
     reviewedAt: "审核时间",
     sourceReviewNote: "审核说明",
-    noInboxSources: "当前 owner inbox 没有匹配来源。",
-    noCentralSources: "当前没有可见中央来源。",
+    noInboxSources: "无来源",
+    noCentralSources: "无中央来源",
     useActiveKnowledgeOwner: "使用当前知识库 owner",
     refinementProposal: "精炼提案",
     rating: "等级标记",
@@ -764,7 +764,7 @@ const COPY: Record<"zh" | "en", Copy> = {
     stability: "稳定性",
     reviewPriority: "评审优先级",
     markingReason: "标记原因",
-    noKnowledgeBases: "当前没有可访问的团队知识库。",
+    noKnowledgeBases: "无团队知识库",
     knowledgeHint: "来源、提案、审核、正式知识分层治理。",
     platformPipeline: "记忆平台流水线",
     pipelineSource: "来源登记",
@@ -790,7 +790,7 @@ const COPY: Record<"zh" | "en", Copy> = {
     ragContextBudget: "单条预算",
     ragNoPromptInjection: "不默认注入",
     ragCitations: "引用",
-    ragNoContexts: "当前没有可用上下文候选。",
+    ragNoContexts: "无上下文",
     searchQuery: "检索词",
     ratingSuggestions: "评级建议",
     submitRatingSuggestion: "提交评级建议",
@@ -898,17 +898,17 @@ const COPY: Record<"zh" | "en", Copy> = {
     graphRelations: "关联关系",
     graphIncoming: "入边",
     graphOutgoing: "出边",
-    graphNoRelations: "当前节点没有可见关联。",
+    graphNoRelations: "无关联",
     graphNoSelection: "选择一个节点查看摘要、时间戳、权限和关联信息。",
     graphInteractionHint: "左键移动视角 · 中键拖动图谱 · 滚轮缩放",
     graphCanvasFallback: "3D 画布正在接入；当前先展示可过滤的只读图谱结构。",
     graphResponsibilityQuestion: "职责问题",
     graphDirectChildren: "直接子成员",
-    graphNoChildren: "当前节点没有直接子成员。",
+    graphNoChildren: "无子成员",
     graphNodeKnowledge: "节点知识",
     graphKnowledgeLoading: "正在读取节点知识正文...",
     graphKnowledgeTruncated: "正文已截断",
-    graphNoKnowledge: "当前节点没有可见知识条目。",
+    graphNoKnowledge: "无知识条目",
   },
   en: {
     eyebrow: "Memory Library",
@@ -929,11 +929,11 @@ const COPY: Record<"zh" | "en", Copy> = {
     usedBy: "Used by",
     summary: "Summary",
     rawContent: "Raw content",
-    noContent: "No raw content to show.",
+    noContent: "No content",
     sourceOrigin: "Source",
     searchPlaceholder: "Search source, path, summary, or usage",
     allSections: "All sources",
-    noMatches: "No memory matched the current search.",
+    noMatches: "No matches",
     yes: "Yes",
     no: "No",
     inPrompt: "In prompt",
@@ -1019,8 +1019,8 @@ const COPY: Record<"zh" | "en", Copy> = {
     healthOverview: "Memory health",
     affectedRuntimeMemory: "Runtime-affecting memory",
     needsReview: "Needs review",
-    noIssues: "No memory needs priority review right now.",
-    noRuntimeMemory: "No memory is currently injected or agent-visible.",
+    noIssues: "No review items",
+    noRuntimeMemory: "No runtime memory",
     managedMemory: "User-managed state",
     disabledOrOverridden: "Disabled/overridden",
     effectiveByChannel: "By effective scope",
@@ -1043,8 +1043,8 @@ const COPY: Record<"zh" | "en", Copy> = {
     projectMemoryQueueCreated: "Created",
     projectMemoryQueueResolved: "Resolved",
     projectMemoryQueueResolutionNote: "Resolution note",
-    projectMemoryQueueEmptyPending: "No pending project-memory proposals.",
-    projectMemoryQueueEmptyAll: "No project-memory proposal records yet.",
+    projectMemoryQueueEmptyPending: "No pending proposals",
+    projectMemoryQueueEmptyAll: "No proposal records",
     projectMemoryQueueApply: "Mark applied",
     projectMemoryQueueReject: "Reject",
     projectMemoryQueueConflict: "Mark conflict",
@@ -1106,8 +1106,8 @@ const COPY: Record<"zh" | "en", Copy> = {
     reviewedBy: "Reviewed by",
     reviewedAt: "Reviewed at",
     sourceReviewNote: "Review note",
-    noInboxSources: "No matching owner inbox sources.",
-    noCentralSources: "No visible central sources.",
+    noInboxSources: "No sources",
+    noCentralSources: "No central sources",
     useActiveKnowledgeOwner: "Use current KB owner",
     refinementProposal: "Refinement proposal",
     rating: "Rating",
@@ -1129,7 +1129,7 @@ const COPY: Record<"zh" | "en", Copy> = {
     stability: "Stability",
     reviewPriority: "Review priority",
     markingReason: "Marking reason",
-    noKnowledgeBases: "No accessible team knowledge bases yet.",
+    noKnowledgeBases: "No knowledge bases",
     knowledgeHint: "Sources, proposals, review, and formal knowledge stay separated.",
     platformPipeline: "Memory platform pipeline",
     pipelineSource: "Source registration",
@@ -1155,7 +1155,7 @@ const COPY: Record<"zh" | "en", Copy> = {
     ragContextBudget: "Context budget",
     ragNoPromptInjection: "Not injected",
     ragCitations: "Citations",
-    ragNoContexts: "No context candidates available.",
+    ragNoContexts: "No contexts",
     searchQuery: "Search query",
     ratingSuggestions: "Rating suggestions",
     submitRatingSuggestion: "Submit suggestion",
@@ -1263,17 +1263,17 @@ const COPY: Record<"zh" | "en", Copy> = {
     graphRelations: "Relations",
     graphIncoming: "Incoming",
     graphOutgoing: "Outgoing",
-    graphNoRelations: "This node has no visible relations.",
+    graphNoRelations: "No relations",
     graphNoSelection: "Select a node to inspect summary, timestamps, permissions, and links.",
     graphInteractionHint: "Left drag view · Middle drag graph · Wheel zoom",
     graphCanvasFallback: "The 3D canvas is being connected; this view shows the filterable read-only graph structure first.",
     graphResponsibilityQuestion: "Responsibility question",
     graphDirectChildren: "Direct children",
-    graphNoChildren: "This node has no direct children.",
+    graphNoChildren: "No children",
     graphNodeKnowledge: "Node knowledge",
     graphKnowledgeLoading: "Loading node knowledge content...",
     graphKnowledgeTruncated: "Content truncated",
-    graphNoKnowledge: "This node has no visible knowledge items.",
+    graphNoKnowledge: "No knowledge items",
   },
 };
 
@@ -3830,8 +3830,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
             </button>
           </div>
         </div>
-        <p className={styles.panelLead}>{copy.projectMemoryQueueHint}</p>
-        <div className={styles.projectMemoryQueueStats}>
+        <div className={styles.projectMemoryQueueStats} title={copy.projectMemoryQueueHint}>
           <span>
             <strong>{pendingProjectMemoryProposalCount}</strong>
             {copy.pendingProposals}
@@ -4092,7 +4091,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
 
   const renderManagementEditor = () =>
     editDraft ? (
-      <section className={styles.managementPanel} aria-label={copy.management}>
+      <section className={styles.managementPanel} aria-label={copy.management} title={copy.managementHint}>
         <div className={styles.managementHeader}>
           <div>
             <p className={styles.panelEyebrow}>{copy.management}</p>
@@ -4103,7 +4102,6 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
             <span>{copy.cancelEdit}</span>
           </button>
         </div>
-        <p>{copy.managementHint}</p>
         <label className={styles.fieldStack}>
           <span>{copy.titleField}</span>
           <input
@@ -4180,7 +4178,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
 
   const renderSelectedMemoryConfig = () =>
     resolvedActiveItem && activeSection && !editDraft ? (
-      <section className={styles.managementPanel} aria-label={copy.management}>
+      <section className={styles.managementPanel} aria-label={copy.management} title={resolvedActiveItem.managedState?.actionHint || copy.managementHint}>
         <div className={styles.managementHeader}>
           <div>
             <p className={styles.panelEyebrow}>{activeSection.title}</p>
@@ -4196,7 +4194,6 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
                   : copy.canUse}
           </span>
         </div>
-        <p>{resolvedActiveItem.managedState?.actionHint || copy.managementHint}</p>
         <div className={styles.selectedConfigSummary}>
           <strong>{resolvedActiveItem.title}</strong>
           <p>{resolvedActiveItem.summary || resolvedActiveItem.content || copy.noContent}</p>
@@ -4426,8 +4423,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
           </div>
           <span className={styles.countPill}>{priorityReviewPairs.length}</span>
         </div>
-        <p className={styles.panelLead}>{copy.reviewQueueHint}</p>
-        {renderReviewQueue()}
+        <div title={copy.reviewQueueHint}>{renderReviewQueue()}</div>
       </section>
 
       {renderProjectMemoryQueue()}
@@ -4474,7 +4470,6 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
                 </div>
                 <span className={styles.countPill}>{pairs.length}</span>
               </div>
-              <p className={styles.panelLead}>{card.hint}</p>
               {renderMemoryList(pairs, copy.noMatches, true)}
             </section>
           );
@@ -4596,8 +4591,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
           <div className={styles.panelHeader}>
             <div>
               <p className={styles.panelEyebrow}>{copy.management}</p>
-              <h2>{copy.manageAllMemory}</h2>
-              <span>{copy.manageListHint}</span>
+              <h2 title={copy.manageListHint}>{copy.manageAllMemory}</h2>
             </div>
             <span className={styles.countPill}>{manageablePairs.length}</span>
           </div>
@@ -4708,7 +4702,6 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
               <span>{copy.addMemory}</span>
             </button>
           </div>
-          <p>{copy.manageConfigHint}</p>
           {renderManagementEditor()}
           {renderSelectedMemoryConfig()}
           {!editDraft && !activeItem ? (
@@ -4756,7 +4749,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
           <strong>{knowledgeOverview?.summary.sourceArtifactCount ?? 0}</strong>
         </section>
       </div>
-      <section className={styles.pipelinePanel} aria-label={copy.platformPipeline}>
+      <section className={styles.pipelinePanel} aria-label={copy.platformPipeline} title={copy.knowledgeSubtitle}>
         <div className={styles.pipelineHeader}>
           <div>
             <p className={styles.panelEyebrow}>{copy.platformPipeline}</p>
@@ -4995,8 +4988,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
             </div>
             <span className={styles.countPill}>{knowledgeBases.length}</span>
           </div>
-          <p className={styles.panelLead}>{copy.knowledgeHint}</p>
-          <section className={styles.governanceMiniPanel} aria-label={copy.toolVisibility}>
+          <section className={styles.governanceMiniPanel} aria-label={copy.toolVisibility} title={copy.knowledgeHint}>
             <strong>{copy.toolVisibility}</strong>
             {(() => {
               const tools = Object.values(permissionAudit?.tools ?? {});
@@ -5408,7 +5400,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
                 </section>
               ) : null}
             </div>
-            <section className={styles.ragPreviewPanel} aria-label={copy.ragRetrieval}>
+            <section className={styles.ragPreviewPanel} aria-label={copy.ragRetrieval} title={copy.ragRetrievalHint}>
               <div className={styles.ragPreviewHeader}>
                 <div>
                   <p className={styles.panelEyebrow}>{copy.ragRetrieval}</p>
@@ -5416,7 +5408,6 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
                 </div>
                 <span className={styles.countPill}>{knowledgeRagRetrieveQuery.data?.summary.contextCount ?? 0}</span>
               </div>
-              <p>{copy.ragRetrievalHint}</p>
               <div className={styles.ragHealthStrip} aria-label={copy.ragHealth}>
                 <span>{copy.ragProvider}: {localRagProviderHealth?.provider ?? knowledgeRagHealth?.provider ?? "local"} · {localRagProviderHealth?.status ?? knowledgeRagHealth?.status ?? copy.loading}</span>
                 <span>{copy.ragVector}: {localRagProviderHealth?.vectorEnabled ? copy.yes : copy.no}</span>
@@ -5899,18 +5890,16 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
           </section>
         </div>
 
-        <section className={styles.cleanupWarning}>
+        <section className={styles.cleanupWarning} title={copy.cleanupNoBackup}>
           <TriangleAlert size={16} />
           <strong>{copy.cleanupHardDelete}</strong>
-          <span>{copy.cleanupNoBackup}</span>
         </section>
 
         <div className={styles.cleanupWorkspace}>
           <section className={styles.cleanupTargetPanel}>
             <div className={styles.panelHeader}>
               <div>
-                <h2>{copy.cleanupTargets}</h2>
-                <p>{copy.cleanupSelectTargets}</p>
+                <h2 title={copy.cleanupSelectTargets}>{copy.cleanupTargets}</h2>
               </div>
               <span className={styles.countPill}>{selectedCleanupTargets.length}</span>
             </div>
@@ -5942,8 +5931,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
           <section className={styles.cleanupPreviewPanel}>
             <div className={styles.panelHeader}>
               <div>
-                <h2>{copy.cleanupPreview}</h2>
-                <p>{copy.cleanupCentralSourceBoundary}</p>
+                <h2 title={copy.cleanupCentralSourceBoundary}>{copy.cleanupPreview}</h2>
               </div>
               <button
                 type="button"
@@ -6128,8 +6116,8 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
               <p className={styles.panelEyebrow}>{copy.knowledgeGraph}</p>
               <strong>Three.js / WebGL / Worker</strong>
             </div>
-            <span className={styles.graphInteractionHint}>
-              {copy.graphReadOnly} · {copy.graphAcl} · {copy.graphInteractionHint}
+            <span className={styles.graphInteractionHint} title={copy.graphInteractionHint}>
+              {copy.graphReadOnly} · {copy.graphAcl}
             </span>
           </div>
           <Suspense fallback={<div className={styles.graphCanvasFallback}><strong>{copy.loading}</strong></div>}>
@@ -6305,8 +6293,9 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
       <header className={styles.header}>
         <div>
           <p className={styles.eyebrow}>{copy.eyebrow}</p>
-          <h1 className={styles.title}>{memoryViewLabel(copy, forcedView)}</h1>
-          <p className={styles.subtitle}>{memoryViewSubtitle(copy, forcedView)}</p>
+          <h1 className={styles.title} title={memoryViewSubtitle(copy, forcedView)}>
+            {memoryViewLabel(copy, forcedView)}
+          </h1>
         </div>
         <button type="button" className={styles.refreshButton} onClick={refresh}>
           <RefreshCw size={16} />
