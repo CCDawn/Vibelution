@@ -5931,7 +5931,7 @@ export function ChatCodingRoute() {
             >
               {projectBusActive ? (lang === "zh" ? "通知流" : "Notice stream") : (lang === "zh" ? "群聊" : "Group")}
             </button>
-          ) : agentSessionTabs.length > 1 || cliAgentRunTabs.length > 0 ? (
+          ) : agentSessionTabs.length > 0 || cliAgentRunTabs.length > 0 ? (
             <AgentSessionTabStrip
               activeSessionId={activeSessionId}
               activeCliAgentRunId={activeCliAgentRunId}
