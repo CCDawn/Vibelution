@@ -288,7 +288,7 @@
 
 .brandCopy {
   display: inline-flex;
-  align-items: center;
+  align-items: baseline;
   gap: 8px;
   min-width: 0;
 }
@@ -317,21 +317,6 @@
   color: var(--fg-tertiary);
   font-size: 0.78rem;
   white-space: nowrap;
-}
-
-.brandGate {
-  flex: 0 1 260px;
-  align-items: flex-start;
-  min-width: 0;
-}
-
-.brandGate .statusSummaryChip {
-  max-width: min(260px, 32vw);
-}
-
-.brandGate .statusGuidePanel {
-  right: auto;
-  left: 0;
 }
 
 .topClock {
@@ -870,22 +855,41 @@
 
 .gitMiniPanel {
   display: grid;
-  gap: 10px;
-  padding-top: 2px;
+  gap: 11px;
+  padding: 11px;
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--shell-card) 76%, transparent);
 }
 
 .gitMiniHeader {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: minmax(116px, auto) minmax(0, 1fr);
   gap: 10px;
   align-items: center;
 }
 
-.gitMiniHeader > span {
+.gitHeadline {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.gitHeadline strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-primary);
+  font-size: 0.86rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gitHeadline span {
   min-width: 0;
   overflow: hidden;
   color: var(--fg-secondary);
-  font-size: 0.78rem;
+  font-size: 0.74rem;
+  line-height: 1.35;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -894,7 +898,7 @@
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  max-width: 190px;
+  max-width: 100%;
   min-height: 32px;
   padding: 6px 9px;
   border: 1px solid var(--border-soft);
@@ -919,6 +923,30 @@
 .gitCount {
   color: var(--accent-warm-2);
   font-size: 0.8rem;
+}
+
+.gitSignalGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.gitSignalGrid span {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  min-height: 54px;
+  padding: 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--shell-card) 86%, transparent);
+  color: var(--fg-tertiary);
+  font-size: 0.7rem;
+}
+
+.gitSignalGrid strong {
+  color: var(--accent-warm-2);
+  font-size: 1rem;
 }
 
 .gitMetaGrid {
@@ -971,8 +999,37 @@
 .gitFileList {
   display: grid;
   gap: 7px;
-  max-height: 180px;
+  max-height: 138px;
   overflow: auto;
+}
+
+.gitSection {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+
+.gitSectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.gitSectionHeader strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-primary);
+  font-size: 0.78rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gitSectionHeader span {
+  color: var(--fg-tertiary);
+  font-size: 0.7rem;
+  white-space: nowrap;
 }
 
 .gitCommitList,
@@ -1018,7 +1075,8 @@
 }
 
 .gitCommitItem span,
-.gitWorktreeItem strong {
+.gitWorktreeItem strong,
+.gitWorktreeItem small {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1033,6 +1091,22 @@
   color: var(--accent-warm-2);
   font-size: 0.7rem;
   white-space: nowrap;
+}
+
+.gitWorktreeItem small {
+  grid-column: 1 / -1;
+  color: var(--fg-tertiary);
+  font-size: 0.68rem;
+}
+
+.gitQuietState {
+  margin: 0;
+  padding: 8px;
+  border: 1px dashed var(--border-soft);
+  border-radius: 8px;
+  color: var(--fg-tertiary);
+  font-size: 0.74rem;
+  line-height: 1.35;
 }
 
 .gitFileItem code {
@@ -1711,5 +1785,14 @@
   .statusGuidePanel {
     right: -10px;
     width: calc(100vw - 20px);
+  }
+
+  .gitMiniHeader {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .gitSignalGrid,
+  .gitCountGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

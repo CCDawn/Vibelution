@@ -17,10 +17,9 @@ const shellStyles = readFileSync(fileURLToPath(new URL("./AppShell.module.css", 
 describe("AppShell layout contract", () => {
   it("renders one compact status summary chip while keeping the detailed guide panel", () => {
     expect(shellSource).toContain("statusSummaryChip");
-    expect(shellSource).toContain("gateStatusValue");
-    expect(shellSource).toContain("<span className={styles.statusBadgeLabel}>Gate</span>");
-    expect(shellSource).toContain("className={`${styles.statusCluster} ${styles.brandGate}`}");
-    expect(shellSource).not.toContain('t("brandSubtle")');
+    expect(shellSource).toContain('t("brandSubtle")');
+    expect(shellSource).not.toContain("<span className={styles.statusBadgeLabel}>Gate</span>");
+    expect(shellSource).not.toContain("className={`${styles.statusCluster} ${styles.brandGate}`}");
     expect(shellSource).toContain("LazyAppShellStatusGuidePanel");
     expect(shellSource).toContain("statusGuideOpen ? (");
     expect(shellSource).not.toContain("statusGuidePanel");
@@ -32,11 +31,9 @@ describe("AppShell layout contract", () => {
   });
 
   it("keeps the global shell top bar compact", () => {
-    expect(styles.brandGate).toBeTypeOf("string");
     expect(styles.statusSummaryChip).toBeTypeOf("string");
     expect(styles.statusSummaryCount).toBeTypeOf("string");
     expect(shellStyles).toContain("flex-wrap: nowrap");
-    expect(shellStyles).toContain(".brandGate .statusGuidePanel");
     expect(shellStyles).toContain("@media (max-width: 1180px)");
     expect(shellStyles).toContain(".topClock span:last-child");
     expect(shellStyles).toContain("@media (max-width: 980px)");
@@ -112,13 +109,18 @@ describe("AppShell layout contract", () => {
     expect(utilityMenuSource).toContain('href="/launcher"');
     expect(utilityMenuSource).toContain('target="_blank"');
     expect(utilityMenuSource).toContain("requiresAttention");
+    expect(utilityMenuSource).toContain("gitStatusLevel");
+    expect(utilityMenuSource).toContain("gitSignalGrid");
+    expect(utilityMenuSource.indexOf("className={styles.gitMiniPanel}")).toBeLessThan(utilityMenuSource.indexOf('id="utility-file-navigator"'));
     expect(utilityMenuSource).toContain("gitStatus.localCommits.commits");
-    expect(utilityMenuSource).toContain("gitStatus.worktrees.items");
+    expect(utilityMenuSource).toContain("gitPendingWorktrees");
     expect(shellSource).toContain('data-browser-role="workbench"');
     expect(styles.utilityTrigger).toBeTypeOf("string");
     expect(styles.utilityPanel).toBeTypeOf("string");
     expect(styles.utilityClusterOpen).toBeTypeOf("string");
     expect(styles.utilityButtonGrid).toBeTypeOf("string");
+    expect(styles.gitSignalGrid).toBeTypeOf("string");
+    expect(styles.gitSectionHeader).toBeTypeOf("string");
     expect(styles.gitCommitList).toBeTypeOf("string");
     expect(styles.gitWorktreeList).toBeTypeOf("string");
   });
